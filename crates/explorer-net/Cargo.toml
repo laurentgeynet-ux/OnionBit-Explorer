@@ -8,3 +8,8 @@ description = "URL, DNS, HTTP/1.1, TLS, decodage, cookies, cache — seul crate 
 
 [lints]
 workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+idna.workspace = true

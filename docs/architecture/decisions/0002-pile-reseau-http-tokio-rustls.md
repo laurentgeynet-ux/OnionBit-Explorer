@@ -26,8 +26,8 @@ sur les en-têtes), corps `Content-Length` + `chunked`, décodage
   mandataire futur (proxy d'entreprise, Tor…) sans réécriture.
 - Trait `HttpTransport` injectable : tests in-process, transport
   proxy futur sans réécriture.
-- URL : normalisation WHATWG, **IDNA/punycode** (crate pur Rust à
-  arbitrer — les domaines internationaux réels en dépendent),
+- URL : normalisation WHATWG, **IDNA/punycode** — arbitré en faveur
+  de la crate `idna` (pur Rust, UTS-46, étape 3),
   schémas `data:` et `about:` minimaux en plus de `http(s)`.
 - Politique document : store **HSTS** mémoire borné,
   `X-Content-Type-Options` honoré, charset résolu par sniffing

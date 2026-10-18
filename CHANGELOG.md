@@ -9,6 +9,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+### Added
+
+- **Étape 3 — `explorer-net` : URL WHATWG** (`url.rs`) : parseur
+  hiérarchique (`http`/`https`/`file`) + opaque (`data:`/`about:`),
+  hôtes IDNA UTS-46 via la crate `idna` (arbitrage consigné
+  ADR-0002), IPv4 aux formes WHATWG (octal/hex/réduites `127.1`),
+  IPv6 `[…]`, userinfo, ports par défaut élidés, segments `.`/`..`
+  normalisés, percent-encoding des jeux path/query/fragment/
+  userinfo, résolution relative RFC 3986 §5.2, `Origin` tuple/
+  opaque pour la politique same-origin, `path_query` (origin-form).
+  27 tests de conformité sous-ensemble WHATWG.
 - **Étape 2 — squelette Flutter `app/`** : `flutter create` Windows,
   clean architecture `core/` (`api/` client REST + SSE `dart:io`
   zéro-dépendance avec reconnexion, `design/` tokens + thème dérivé,

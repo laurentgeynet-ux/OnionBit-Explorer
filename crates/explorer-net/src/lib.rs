@@ -11,3 +11,5 @@
 //! tests tournent in-process.
 
 #![forbid(unsafe_code)]
+
+pub mod url;

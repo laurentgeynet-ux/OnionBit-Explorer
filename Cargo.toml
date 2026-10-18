@@ -48,6 +48,9 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 # Moteur regex de dillo-js (pur Rust) — lookahead/backrefs non
 # supportés, dégradation SyntaxError documentée (ADR-0007).
 regex = "1.11"
+# IDNA/punycode UTS-46 pour explorer-net::url (ADR-0002, étape 3) —
+# pur Rust, pas de *-sys.
+idna = "1.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -42,7 +42,7 @@ pixel, et c'est le premier vrai test bout-en-bout net+dom+html.
 
 Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
 
-- [ ] **Étape 3. URL.** Résolution relative/absolue, normalisation
+- [x] **Étape 3. URL.** Résolution relative/absolue, normalisation
   WHATWG, **IDNA/punycode** (crate pur Rust à arbitrer), origine
   (schéma/hôte/port) pour la future politique same-origin, schémas
   `data:`/`about:` minimaux.
