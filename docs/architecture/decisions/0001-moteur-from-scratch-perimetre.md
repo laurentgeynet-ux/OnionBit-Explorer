@@ -4,9 +4,9 @@ Statut : Acceptée (2026-10-18).
 
 ## Contexte
 
-OnionBit-Explorer se donne pour mission un navigateur dont le moteur
+Explorer se donne pour mission un navigateur dont le moteur
 est entièrement écrit dans ce dépôt — lisibilité, maîtrise totale du
-pipeline, cohérence avec l'écosystème OnionBit. La question posée :
+pipeline. La question posée :
 où tracer la frontière entre « moteur écrit ici » et « réutilisation
 légitime de crates » ?
 
@@ -18,9 +18,10 @@ légitime de crates » ?
   projet lui-même.
 - **Réutilisés** (infrastructure pur Rust) : runtime (`tokio`), TLS
   (`rustls`/`webpki-roots`), parsing wire-format borné (`httparse`),
-  décodage transfert (`flate2`/équivalent), rasterisation
-  (`tiny-skia`, ADR-0005), fontes (crate pur Rust à arbitrer en
-  phase 4), décodeurs d'images (phase 9), framework API (`axum`).
+  décodage transfert (`flate2` backend `miniz_oxide`), rasterisation
+  (`tiny-skia` — présente décision), fontes (crates pur Rust
+  arbitrées par ADR-0009), décodeurs d'images (phase 9), framework
+  API (`axum`).
 - **Exclus** : tout moteur ou sous-système de navigateur existant
   (`html5ever`, `servo`/`stylo`, `kuchiki`, `reqwest` côté moteur…).
   Un crate qui lie du C (`*-sys` sans feature pure Rust) est interdit
@@ -41,11 +42,16 @@ légitime de crates » ?
 - La pile réseau démarre modeste : HTTP/1.1 (ADR-0002) puis HTTP/2
   et QUIC rejoignent la roadmap — le web réel en dépend de plus en
   plus.
-- **Le cap est la compatibilité avec le web moderne** : le but d'un
-  navigateur est d'accéder à tous les sites. HTML5, CSS complet
-  (flexbox, grid…), ES6+ (ADR-0007) sont des objectifs de roadmap,
-  pas des exclusions. Tolérance et dégradation gracieuse restent la
-  spec de comportement sur contenu malformé, jamais un verdict sur
-  la couverture.
+- **Le cap est la compatibilité avec le web moderne — comme
+  direction, pas comme livrable.** HTML5, CSS complet (flexbox,
+  grid…), ES6+ (ADR-0007) restent des objectifs de roadmap, pas des
+  exclusions ; mais « tous les sites » est une cible asymptotique —
+  aucun navigateur hors des trois grands moteurs n'y parvient
+  (Servo, Ladybird inclus, avec des équipes dédiées). La
+  progression est donc pilotée par les paliers de la roadmap,
+  rendus **mesurables** par les corpus de conformité (ADR-0010).
+  Tolérance et dégradation gracieuse restent la spec de
+  comportement sur contenu malformé, jamais un verdict sur la
+  couverture.
 - Chaque dépendance nouvelle exige justification ADR ou commit
   (AGENTS.md §4.2).

@@ -1,0 +1,13 @@
+[package]
+name = "explorer-cli"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Binaire de dev/debug : fetch, dump DOM, wireframe layout, shot PNG"
+
+[lints]
+workspace = true
+
+[dependencies]
+explorer-core.workspace = true

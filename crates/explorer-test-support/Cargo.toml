@@ -1,0 +1,13 @@
+[package]
+name = "explorer-test-support"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Transports simules, fixtures, fonte embarquee pour tests headless"
+
+[lints]
+workspace = true
+
+[dependencies]
+explorer-net.workspace = true

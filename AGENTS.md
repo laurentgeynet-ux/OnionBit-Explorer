@@ -1,9 +1,9 @@
 # AGENTS.md — Guide pour agents de codage et contributeurs
 
-OnionBit-Explorer est un **navigateur web écrit from scratch** :
+Explorer est un **navigateur web écrit from scratch** :
 moteur 100 % Rust (URL, HTTP, TLS, HTML, CSS, layout, rendu, JS) et
 interface **Flutter** desktop, reliées par une API de contrôle locale
-**REST + SSE** (ADR-0003 — même modèle que l'écosystème OnionBit).
+**REST + SSE** (ADR-0003).
 Ce fichier est le contrat de travail : le lire en entier avant de
 toucher quoi que ce soit.
 
@@ -17,9 +17,11 @@ toucher quoi que ce soit.
 - **Backend d'abord** : le moteur est prioritaire. L'app Flutter
   (`app/`) est un squelette qui évolue avec l'avancement — elle ne
   consomme que l'API, jamais le core (ADR-0003).
-- **JS par couture** : le moteur JavaScript `dillo-js` (projet
-  DilloRust, en cours de codage) sera intégré en phase 8 derrière le
-  trait `JsEngine` (ADR-0007). Rien d'autre ne lui est couplé.
+- **JS par couture** : le moteur JavaScript `dillo-js` vit dans ce
+  workspace (`crates/dillo-js`) — chantier de l'équipe JS dédiée. Il
+  sera intégré en phase 8 derrière le trait `JsEngine` (ADR-0007) ;
+  son heap exposera les primitives du modèle mémoire ADR-0008.
+  Rien d'autre ne lui est couplé.
 - **Tolérant, jamais crash** : page malformée, réponse HTTP
   biscornue, CSS cassé → dégradation gracieuse, pas de panic.
 
@@ -30,10 +32,12 @@ crates/
   explorer-common    types/utilitaires partagés, erreurs racines
   explorer-net       URL, DNS, HTTP/1.1, TLS (rustls), cache,
                      cookies, MIME — seul crate qui ouvre des sockets
-  explorer-dom       arbre DOM : arène + NodeId
+  explorer-dom       arène DOM + NodeId générationnels (ADR-0008)
   explorer-html      tokenizer + tree-builder HTML → explorer-dom
   explorer-css       tokenizer, parser, sélecteurs, cascade
-  explorer-js        trait JsEngine + bindings DOM (couture dillo-js)
+  explorer-js        trait JsEngine + bindings DOM (couture moteur)
+  dillo-js           moteur JavaScript autonome — équipe JS dédiée,
+                     adapté derrière JsEngine en phase 8 (ADR-0007)
   explorer-layout    arbre de boîtes, block/inline, dimensionnement
   explorer-render    display list → framebuffer RGBA → PNG
   explorer-core      session : onglets, navigation, pipeline, events
@@ -51,9 +55,11 @@ scripts/             verify_all.ps1 + utilitaires
 
 Sens de dépendance strictement descendant :
 `common ← net|dom ← html|css ← layout ← render ← core ← api ← daemon`,
-`common ← dom ← js ← core`, `net ← core`. Jamais de dépendance
-montante ni latérale ; le code partagé descend d'une couche (ou
-ADR). `explorer-net` est le seul crate autorisé à ouvrir des sockets.
+`common ← dom ← js ← core`, `dillo-js ← js`, `net ← core`. Jamais
+de dépendance montante ni latérale ; le code partagé descend d'une
+couche (ou ADR). `dillo-js` est autonome (aucune dépendance interne,
+son mini-DOM est un harnais de test). `explorer-net` est le seul
+crate autorisé à ouvrir des sockets.
 
 ## 3. Commandes (avant chaque commit)
 
@@ -83,7 +89,9 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
 3. **Pas de `unwrap()`/`expect()`/`panic!`/`todo!()` dans le code
    livré.** Toléré en tests et dans les binaires. Les bibliothèques
    renvoient `Result`/`Option` — un navigateur est un logiciel
-   tolérant : dégrader, jamais planter.
+   tolérant : dégrader, jamais planter. `debug_assert!` est permis
+   sur les invariants internes purs (jamais sur du contenu externe
+   ou hostile : là, on dégrade).
 4. **`CHANGELOG.md` à jour** (Keep a Changelog) à chaque changement
    visible, dans le même commit.
 5. **`ROADMAP.md` coché dans le même commit** que l'étape terminée.
@@ -103,7 +111,7 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
 10. **Sockets uniquement dans `explorer-net`**. Cache, cookies, DNS,
     TLS sont injectables pour que les tests tournent in-process.
 11. **En-tête de licence sur chaque fichier source** (RS/Dart/PS1) :
-    `This file is part of OnionBit-Explorer.` + `Copyright (C) 2026
+    `This file is part of Explorer.` + `Copyright (C) 2026
     Laurent Geynet` + `SPDX-License-Identifier: MIT OR Apache-2.0`.
 12. **Code et docs en français** pour les documents internes ; les
     identifiants et le code restent en anglais.
@@ -120,7 +128,10 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
    le code non trivial).
 3. **Tester** : tests unitaires + tests d'intégration in-process ;
    fixtures dans `crates/<crate>/tests/data/`. Golden tests de rendu
-   via framebuffer headless (PNG attendu vs produit).
+   via framebuffer headless (PNG attendu vs produit). Corpus de
+   conformité publics (html5lib-tests, WPT, test262) extraits par
+   script vers `tests/conformance/`, jamais édités à la main —
+   skip list versionnée, % tracké dans CHANGELOG (ADR-0010).
 4. **Documenter** : `ROADMAP.md` checkbox, `CHANGELOG.md`, ADR si
    décision d'architecture — même commit.
 5. **Commit** : `feat(<crate>): <sujet>` / `fix(<crate>): …` /
@@ -166,15 +177,27 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
   de layout en cours de mutation.
 - **Budgets** : scripts, parseurs et layout reçoivent des bornes
   (temps, mémoire, profondeur) — le contenu hostile est la norme.
+- **Texte = iceberg** : shaping, bidi, line-breaking structurent
+  l'inline — porter des runs itemisés, jamais des chaînes plates
+  (ADR-0009).
+- **DOM ↔ GC** : chaque mutation de l'arène documente les
+  générations invalidées ; un handle JS obsolète = erreur typée,
+  jamais d'accès invalide (ADR-0008).
+- **Corpus > intuition** : la compat se mesure en % sur les suites
+  publiques trackées (ADR-0010), pas sur « ça a l'air de marcher ».
 
 ## 9. Ce qui n'est PAS ce projet
 
-- Pas un port de Dillo — le projet DilloRust voisin
-  (`D:\Projet\dillorust-OnionBit-TorBrowser`) est un chantier
-  distinct ; seule la couture `dillo-js` nous relie (ADR-0007).
-- Pas un navigateur Tor : la politique réseau (proxy, `.onion`)
-  relève de la suite OnionBit, pas de ce dépôt — garder les coutures
-  (`HttpTransport` injectable, profil déplaçable) ouvertes.
+- Pas un port de Dillo — `dillo-js` a une histoire dans un chantier
+  de port voisin mais aucune architecture n'en est importée :
+  l'adaptation passe par le trait `JsEngine` (ADR-0007).
+- Pas un navigateur Tor ni proxy : la politique réseau (mandataire,
+  filtrage, `.onion`) est déléguée à l'application qui embarque le
+  moteur — garder les coutures ouvertes (`HttpTransport` injectable,
+  `http_proxy`/`no_proxy` honorés, profil déplaçable).
 - Pas de moteur tiers (ADR-0001) — le cap est la compatibilité avec
   le web moderne : toutes les couches de la roadmap convergent vers
-  la navigation réelle de tous les sites.
+  la navigation réelle. Cap exprimé en **direction asymptotique** :
+  « tous les sites » est un horizon (aucun moteur hors des trois
+  grands n'y parvient), piloté par paliers mesurés sur corpus
+  (ADR-0010), pas une promesse.

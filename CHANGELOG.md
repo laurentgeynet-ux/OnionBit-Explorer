@@ -9,6 +9,62 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 1 — workspace cargo** : 13 crates `explorer-*` squelettes
+  (lib/binaire, `#![forbid(unsafe_code)]`, lint clippy pedantic,
+  rustdoc), `[workspace]` Cargo.toml, `scripts/verify_all.ps1`
+  (fmt/clippy/test/doc + flutter conditionnel).
+- **`dillo-js` dans le workspace** : le moteur JavaScript est devenu
+  `crates/dillo-js` — **version canonique et unique**, licence
+  `MIT OR Apache-2.0`, chantier de l'équipe JS dédiée (ADR-0007
+  révisé). Le crate a été **retiré du workspace du port voisin** —
+  son `dillo-browser` consomme désormais le crate d'ici via la dep
+  `path` `../OnionBit-Explorer/crates/dillo-js` (jonction locale
+  `D:\Projet\OnionBit-Explorer` → `C:\OnionBit-Explorer`), en
+  attendant la bascule `git`+`rev` à la publication d'Explorer.
+- **ADR-0012** — pipeline incrémental : scheduler de
+  sous-ressources dans `core`, entrée tokenizer par chunks, modèle
+  d'invalidation style/layout/paint en trois niveaux.
+- **Jalons J0–J5** dans `ROADMAP.md` : repères de motivation, dont
+  J2 (`explorer-cli dump` — premier artefact visible dès la fin de
+  phase 2, avant tout pixel).
+- **Chantier `dillo-js`** (piste parallèle équipe JS, ROADMAP
+  phase 8) : JS-A alignement heap → ADR-0008 + GC mark-sweep
+  (prérequis de l'étape 34), JS-B harness test262, JS-C couverture
+  (modules ES, `Proxy`, `Intl`), JS-D médias.
+
+### Changed
+
+- **Rebranding** : le projet s'appelle désormais « Explorer » (nom
+  de travail — le répertoire physique sera renommé à la fermeture
+  de l'IDE). Tous les documents ont été débarrassés des références
+  à l'ancien écosystème ; les coutures (proxy, profil déplaçable,
+  transport injectable) restent ouvertes sous justification
+  propre.
+- **Roadmap durcie** : politique cookies complète (`SameSite`,
+  `__Host-`, Public Suffix List) en étape 7 ; `Referer`/`Origin`/
+  mixed-content en étape 8 ; entrée tokenizer incrémentale (étape
+  10) ; `position`/`z-index`/`overflow`/stacking/`list-item`/
+  `white-space` + pseudo-classes dynamiques (étapes 16/21) ;
+  `FontProvider` comme port injecté (étape 18, ADR-0009) ; spike
+  ADR-0008 à faux handles + alignement heap `dillo-js` comme
+  prérequis de l'étape 34 ; `<svg>` statique en étape 45 ;
+  dégradation flexbox du palier 1 assumée et mesurée ; exclusions :
+  SVG animé (SMIL) ajouté.
+- **ADR corrigés** : référence `tiny-skia` (ADR-0001 : 0005 →
+  présente décision) ; ADR-0003 réécrite (justifications propres,
+  compromis `?key=` documenté) ; ADR-0004 (glue FFI côté Flutter
+  pour la mémoire partagée) ; ADR-0006 (justification licence sans
+  lien amont) ; ADR-0007 (moteur en workspace, échappatoire
+  `boa_engine` nommée) ; ADR-0008 (contrat imposé à `dillo-js`) ;
+  ADR-0009 (frontière I/O `fontdb`/`FontProvider`) ; ADR-0011
+  (profils cloisonnés génériques).
+- **Règle §4.3 assouplie** : `debug_assert!` permis sur invariants
+  internes purs (jamais sur contenu externe).
+- `.gitignore` : `app/pubspec.lock` n'est plus ignoré — une
+  application Dart commit son lockfile (builds reproductibles).
+
+### Added (fondations, étape 0)
+
 - Fondations documentaires du dépôt (étape 0) : `AGENTS.md`
   (contrat de travail), `ROADMAP.md` (11 phases, étapes 0–48),
   `CHANGELOG.md`, `docs/architecture.md`.
@@ -17,15 +73,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     d'infrastructure pur Rust autorisées, moteurs existants exclus ;
   - ADR-0002 — pile réseau : HTTP/1.1 maison sur tokio + rustls,
     `httparse` pour les en-têtes ;
-  - ADR-0003 — couture UI : API de contrôle REST + SSE sur loopback
-    (modèle OnionBit), l'app Flutter ne touche jamais le core ;
+  - ADR-0003 — couture UI : API de contrôle REST + SSE sur loopback,
+    l'app Flutter ne touche jamais le core ;
   - ADR-0004 — transport des frames : PNG tiré sur invalidation SSE
     (MVP), WebSocket/texture FFI en voies d'upgrade ;
   - ADR-0005 — design tokens : `app/assets/design/tokens.json`
     source de vérité unique du design system ;
   - ADR-0006 — double licence MIT OR Apache-2.0 ;
-  - ADR-0007 — couture JavaScript : trait `JsEngine`, intégration
-    prévue de `dillo-js` (projet DilloRust) en phase 8.
+  - ADR-0007 — couture JavaScript : trait `JsEngine`, moteur
+    `dillo-js` intégré en phase 8 ;
+  - ADR-0008 — modèle mémoire DOM ↔ GC figé avant la phase 2 :
+    `NodeId` générationnels, rooting explicite, cycles par table de
+    callbacks, invalidation de génération documentée ;
+  - ADR-0009 — stack texte/fontes : primitives pur Rust (`fontdb`,
+    `ttf-parser`, `rustybuzz`, `unicode-bidi`, `unicode-linebreak`),
+    runs itemisés, fonte fixture embarquée ;
+  - ADR-0010 — corpus de conformité publics (html5lib-tests, WPT,
+    test262, Acid2/Acid3), % tracké par phase ;
+  - ADR-0011 — modèle de menace : budgets + cloisonnement de session
+    actifs, isolation processus différée, réévaluation obligatoire
+    en phase 8.
 
 ### Changed
 
@@ -52,4 +119,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     attendre le pipeline de rendu complet.
   - **Paliers de compatibilité web** : découpage formalisé en 3
     paliers structurants (Documentaire → Web 2.0/SSR → Applications riches SPA).
+- Optimisation documentaire suite à revue critique (ADR-0001,
+  0002, 0003, 0004, 0007, `ROADMAP.md`, `architecture.md`,
+  `AGENTS.md`, `README.md`) :
+  - **Cap reformulé** : « tous les sites » devient une direction
+    asymptotique pilotée par paliers mesurés sur corpus (ADR-0001,
+    ADR-0010).
+  - **Réseau** : IDNA/punycode, schémas `data:`/`about:`, HSTS,
+    `X-Content-Type-Options`, transcodage charset + sniffing WHATWG
+    — `windows-1252` avancé aux phases 1–2 (défaut réel de la spec
+    HTML), plus phase 10 (ADR-0002).
+  - **Entrées** : coalescing des événements mouvement documenté
+    (ADR-0003) ; tension texture GPU ↔ isolation de processus
+    explicitée pour l'étape 47 (ADR-0004).
+  - **JS** : modèle mémoire DOM ↔ GC délégué à ADR-0008, mesure
+    test262, échappatoire ES6+ formalisée (ADR-0007).
+  - **Roadmap** : étapes 3, 6, 8–10, 12, 16, 18, 20, 23, 26, 34,
+    48 enrichies ; référence tiny-skia corrigée (ADR-0001, pas
+    ADR-0005) ; section « Hors périmètre assumé » ajoutée.
 

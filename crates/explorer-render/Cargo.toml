@@ -1,0 +1,13 @@
+[package]
+name = "explorer-render"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Display list → framebuffer RGBA → PNG / buffer brut"
+
+[lints]
+workspace = true
+
+[dependencies]
+explorer-layout.workspace = true

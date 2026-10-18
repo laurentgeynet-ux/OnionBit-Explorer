@@ -1,0 +1,22 @@
+# dillo-js — moteur JavaScript écrit from scratch en Rust pur.
+#
+# Livrable de l'équipe JS dédiée. **La version canonique vit dans ce
+# workspace** : le développement se fait ici, sous le contrat
+# `explorer-js::JsEngine` + le modèle mémoire ADR-0008. La copie
+# présente dans le chantier de port voisin est figée — elle disparaît
+# quand la dépendance bascule sur ce dépôt (cf. ADR-0007).
+[package]
+name = "dillo-js"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Moteur JavaScript from scratch (tree-walk, arène ObjId) — livrable de l'équipe JS dédiée"
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+regex.workspace = true

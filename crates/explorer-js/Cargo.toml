@@ -1,0 +1,13 @@
+[package]
+name = "explorer-js"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Trait JsEngine + bindings DOM — couture vers le moteur dillo-js (ADR-0007/0008)"
+
+[lints]
+workspace = true
+
+[dependencies]
+explorer-dom.workspace = true

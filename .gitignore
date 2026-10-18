@@ -8,7 +8,6 @@ app/.packages
 app/build/
 app/.flutter-plugins
 app/.flutter-plugins-dependencies
-app/pubspec.lock
 *.iml
 
 # IDE / OS

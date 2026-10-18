@@ -1,0 +1,19 @@
+[package]
+name = "explorer-core"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Session : onglets, navigation, pipeline fetch→parse→style→layout→render, evenements"
+
+[lints]
+workspace = true
+
+[dependencies]
+explorer-css.workspace = true
+explorer-dom.workspace = true
+explorer-html.workspace = true
+explorer-js.workspace = true
+explorer-layout.workspace = true
+explorer-net.workspace = true
+explorer-render.workspace = true

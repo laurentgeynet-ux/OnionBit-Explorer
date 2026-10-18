@@ -1,0 +1,10 @@
+[package]
+name = "explorer-common"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Types partages, erreurs racines, configuration — socle du workspace Explorer"
+
+[lints]
+workspace = true

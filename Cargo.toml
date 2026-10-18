@@ -1,0 +1,64 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/explorer-common",
+    "crates/explorer-net",
+    "crates/explorer-dom",
+    "crates/explorer-html",
+    "crates/explorer-css",
+    "crates/explorer-js",
+    "crates/explorer-layout",
+    "crates/explorer-render",
+    "crates/explorer-core",
+    "crates/explorer-api",
+    "crates/explorer-cli",
+    "crates/explorer-daemon",
+    "crates/explorer-test-support",
+    # Moteur JavaScript de l'équipe dédiée (ADR-0007) — nom de produit
+    # propre, adapté derrière `explorer-js::JsEngine` en phase 8.
+    "crates/dillo-js",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.86"
+license = "MIT OR Apache-2.0"
+authors = ["Laurent Geynet"]
+
+[workspace.dependencies]
+# Crates internes — sens des dépendances : voir AGENTS.md §2.
+explorer-common = { path = "crates/explorer-common" }
+explorer-net = { path = "crates/explorer-net" }
+explorer-dom = { path = "crates/explorer-dom" }
+explorer-html = { path = "crates/explorer-html" }
+explorer-css = { path = "crates/explorer-css" }
+explorer-js = { path = "crates/explorer-js" }
+explorer-layout = { path = "crates/explorer-layout" }
+explorer-render = { path = "crates/explorer-render" }
+explorer-core = { path = "crates/explorer-core" }
+explorer-api = { path = "crates/explorer-api" }
+explorer-test-support = { path = "crates/explorer-test-support" }
+dillo-js = { path = "crates/dillo-js" }
+
+# Crates externes — pur Rust uniquement (AGENTS.md §4.2),
+# pin mineur, ≥ 7 jours depuis publication.
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
+# Moteur regex de dillo-js (pur Rust) — lookahead/backrefs non
+# supportés, dégradation SyntaxError documentée (ADR-0007).
+regex = "1.11"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

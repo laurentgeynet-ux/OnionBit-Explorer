@@ -1,0 +1,10 @@
+[package]
+name = "explorer-dom"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Arene DOM + NodeId generationnels (ADR-0008), mutations typees"
+
+[lints]
+workspace = true

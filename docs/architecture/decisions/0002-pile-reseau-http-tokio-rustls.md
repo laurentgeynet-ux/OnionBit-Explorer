@@ -15,14 +15,29 @@ Client HTTP/1.1 **maison** dans `explorer-net` : connexions `tokio`,
 TLS `rustls` + `webpki-roots`, parsing de statut/en-têtes via
 `httparse` (crate borné, zéro-allocation — jamais de parseur maison
 sur les en-têtes), corps `Content-Length` + `chunked`, décodage
-`gzip`/`deflate`/`br` par crates pur Rust.
+`gzip`/`deflate`/`br` par crates pur Rust (`flate2` backend
+`miniz_oxide` — pas de `zlib-sys`).
 
 - HTTP/2, HTTP/3, WebSocket : pas dans l'implémentation initiale —
   étapes de la phase 10 « compatibilité web moderne » (ROADMAP.md),
   chacune avec son ADR.
-- `http_proxy`/`no_proxy` honorés — couture suite OnionBit.
+- `http_proxy`/`no_proxy` honorés — fonctionnalité standard des
+  navigateurs ; la couture reste ouverte à tout transport
+  mandataire futur (proxy d'entreprise, Tor…) sans réécriture.
 - Trait `HttpTransport` injectable : tests in-process, transport
   proxy futur sans réécriture.
+- URL : normalisation WHATWG, **IDNA/punycode** (crate pur Rust à
+  arbitrer — les domaines internationaux réels en dépendent),
+  schémas `data:` et `about:` minimaux en plus de `http(s)`.
+- Politique document : store **HSTS** mémoire borné,
+  `X-Content-Type-Options` honoré, charset résolu par sniffing
+  WHATWG (BOM → `<meta>` → défaut `windows-1252`), transcodage par
+  crate pur Rust type `encoding_rs` ou tables maison — à arbitrer
+  en phase 1.
+- Politique cookies dès le jar initial : `Secure`/`HttpOnly`/
+  `SameSite`, préfixes `__Host-`/`__Secure-`, et domaines validés
+  par **Public Suffix List** — sans PSL, un jar naïf accepte des
+  supercookies sur `.co.uk` (ROADMAP étape 7).
 
 ## Justification
 
@@ -41,3 +56,6 @@ sur les en-têtes), corps `Content-Length` + `chunked`, décodage
   en CI.
 - Une page nécessitant HTTP/2-only échouera proprement (erreur
   typée remontée à l'UI), pas de contournement silencieux.
+- `windows-1252` arrive dès la phase 1/2 : c'est le défaut de la
+  spec HTML pour la plupart des locales — le palier 1
+  « documentaire » en dépend, pas la phase 10.

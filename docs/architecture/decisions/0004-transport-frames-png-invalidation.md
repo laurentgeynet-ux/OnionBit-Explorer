@@ -50,5 +50,18 @@ partagée FFI, ou reparenting (écarté par ADR-0003).
 - Réduction drastique de la charge CPU lors du passage en mémoire
   partagée : aucun encodage PNG nécessaire pour l'affichage interactif.
 - `EventSource` sans en-têtes custom → la clé d'API accepte `?key=`
-  (déjà tranché en ADR-0003).
+  (déjà tranché en ADR-0003, compromis y documenté).
+- **Mémoire partagée côté Flutter** : Dart ne peut pas mapper le
+  segment d'un processus tiers sans glue native — la voie phase 6/7
+  exige un mini-plugin FFI (ou `package:win32`/`mmap`) qui copie le
+  segment vers une `Texture`. Ce plugin ne fait que transférer des
+  pixels : ce n'est pas du code moteur, la frontière ADR-0003 tient.
+- **Tension documentée avec l'étape 47** : une `ExternalTexture`
+  GPU performante peut exiger que le moteur vive dans le processus
+  UI — en conflit frontal avec l'isolation d'ADR-0003. Options à
+  trancher par l'ADR de phase 10 : mémoire partagée + copie unique
+  (compromis par défaut), mode in-process optionnel dégradant
+  l'isolation, ou surfaces GPU partagées si l'écosystème le permet.
+  Le zéro-copie cross-process n'est pas promis tant que l'ADR n'est
+  pas tranché.
 

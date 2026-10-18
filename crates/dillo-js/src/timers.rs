@@ -1,0 +1,223 @@
+// This file is part of Explorer.
+// Copyright (C) 2026 Laurent Geynet
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! Host-side timers — `setTimeout`/`setInterval`/`clearTimeout`/
+//! `clearInterval` (JS-3).
+//!
+//! The engine owns the *queue*; the embedder owns the clock: the
+//! browser's event loop (tokio, ADR-0003) calls
+//! [`Engine::next_timer_deadline`] to sleep, then
+//! [`Engine::run_due_timers`] to fire. Timers never run inside the
+//! interpreter — a `while(1){}` in a callback still dies on
+//! `op_limit`, and nothing preempts a running script.
+//!
+//! Deliberate subset: callback must be a function value, or — the
+//! legacy `setTimeout('code()')` form — a string, which the pump
+//! re-parses via [`Engine::eval_source`] at fire time (global
+//! scope, like a real indirect eval).
+
+use crate::heap::JsResult;
+use crate::value::Value;
+use crate::Engine;
+use std::collections::HashSet;
+use std::time::{Duration, Instant};
+
+/// One scheduled timer.
+#[derive(Debug)]
+struct Timer {
+    id: u64,
+    /// Next fire time.
+    at: Instant,
+    /// `Some(ms)` for `setInterval`, `None` for one-shot.
+    interval_ms: Option<u64>,
+    /// Callback function value (`Str` = legacy eval-at-fire).
+    cb: Value,
+    /// Extra args forwarded to the callback (`setTimeout(f,ms,a,b)`).
+    cb_args: Vec<Value>,
+}
+
+/// Pending timers for one engine (page).
+#[derive(Debug, Default)]
+pub(crate) struct TimerQueue {
+    next_id: u64,
+    timers: Vec<Timer>,
+    /// Ids annulés — un timer *déjà extrait* dans la pompe courante
+    /// n'est plus dans `timers` quand son callback (ou un callback
+    /// antérieur) l'annule : `cancel` le marque ici, la pompe le
+    /// saute/ne le réarme pas.
+    cancelled: HashSet<u64>,
+}
+
+impl TimerQueue {
+    fn schedule(&mut self, cb: Value, delay_ms: u64, interval: bool, cb_args: Vec<Value>) -> u64 {
+        self.next_id += 1;
+        let id = self.next_id;
+        self.timers.push(Timer {
+            id,
+            at: Instant::now() + Duration::from_millis(delay_ms),
+            interval_ms: interval.then_some(delay_ms),
+            cb,
+            cb_args,
+        });
+        id
+    }
+
+    fn cancel(&mut self, id: u64) {
+        self.timers.retain(|t| t.id != id);
+        self.cancelled.insert(id);
+    }
+}
+
+impl Engine {
+    /// Install `setTimeout`/`setInterval`/`clearTimeout`/
+    /// `clearInterval` on the global object.
+    pub fn install_timers(&mut self) {
+        let g = self.global;
+        for (name, f) in [
+            ("setTimeout", timer_set_timeout as crate::heap::NativeFn),
+            ("setInterval", timer_set_interval),
+            ("clearTimeout", timer_clear),
+            ("clearInterval", timer_clear),
+            ("requestAnimationFrame", timer_raf),
+            ("cancelAnimationFrame", timer_raf_cancel),
+        ] {
+            let v = self.native_fn(name, f);
+            self.set_own(g, name, v, false);
+        }
+    }
+
+    /// Run every due timer (earliest first); returns how many fired.
+    /// Reschedules intervals. Errors from a callback propagate —
+    /// remaining due timers still run on the next pump.
+    ///
+    /// # Errors
+    /// Propagates the first uncaught script exception from a callback.
+    pub fn run_due_timers(&mut self) -> JsResult<usize> {
+        // Snapshot the due timers first: an interval rescheduled to
+        // `now` would otherwise be picked up again in this same pump
+        // and loop forever. One pump = each due timer fires at most
+        // once (browsers behave the same way per task turn).
+        let now = Instant::now();
+        let mut due: Vec<Timer> = Vec::new();
+        let mut kept = Vec::with_capacity(self.timers.timers.len());
+        for t in self.timers.timers.drain(..) {
+            if t.at <= now {
+                due.push(t);
+            } else {
+                kept.push(t);
+            }
+        }
+        self.timers.timers = kept;
+        due.sort_by_key(|t| t.at);
+        let mut ran = 0usize;
+        for t in due {
+            // Annulé par un callback *plus tôt dans cette même pompe*
+            // (le timer était déjà extrait quand `clearTimeout` a
+            // tourné → `retain` ne l'a pas vu).
+            if self.timers.cancelled.remove(&t.id) {
+                continue;
+            }
+            // Each callback gets a fresh op budget.
+            self.ops_left = self.op_limit;
+            if self.is_callable(t.cb) {
+                let args = t.cb_args.clone();
+                self.call_value(t.cb, Value::Obj(self.global), &args)?;
+            } else if let Value::Str(sid) = t.cb {
+                // Legacy string form — parsed & run in global scope
+                // at fire time, not at schedule time.
+                let src = self.heap.string(sid).unwrap_or_default();
+                self.eval_source(&src)?;
+            }
+            // `clearInterval` dans son propre callback — le pattern
+            // canonique — empêche le réarmement (sinon boucle
+            // infinie : l'entrée `due` est déjà hors de `timers`).
+            if let Some(ms) = t.interval_ms {
+                if !self.timers.cancelled.remove(&t.id) {
+                    self.timers.timers.push(Timer {
+                        at: Instant::now() + Duration::from_millis(ms),
+                        ..t
+                    });
+                }
+            }
+            ran += 1;
+        }
+        // Microtask checkpoint at the task boundary: callbacks queued
+        // by a timer (`Promise` reactions…) run before we report done.
+        self.run_microtasks()?;
+        Ok(ran)
+    }
+
+    /// Earliest pending fire time — the embedder sleeps until then
+    /// (or on its next UI event, whichever first).
+    #[must_use]
+    pub fn next_timer_deadline(&self) -> Option<Instant> {
+        self.timers.timers.iter().map(|t| t.at).min()
+    }
+
+    /// Pending timer count (tests/diagnostics).
+    #[must_use]
+    pub fn pending_timers(&self) -> usize {
+        self.timers.timers.len()
+    }
+}
+
+/// `setTimeout(fn, ms)` → timer id.
+fn timer_set_timeout(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    let ms = delay_ms(e, args.get(1).copied())?;
+    let cb_args = args.get(2..).unwrap_or(&[]).to_vec();
+    let id = e.timers.schedule(cb, ms, false, cb_args);
+    Ok(Value::Num(id as f64))
+}
+
+/// `setInterval(fn, ms, ...args)` → timer id.
+fn timer_set_interval(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    let ms = delay_ms(e, args.get(1).copied())?;
+    let cb_args = args.get(2..).unwrap_or(&[]).to_vec();
+    let id = e.timers.schedule(cb, ms, true, cb_args);
+    Ok(Value::Num(id as f64))
+}
+
+/// `requestAnimationFrame(cb)` ≙ `setTimeout(cb, 16)` — no real vsync
+/// source in the host loop, so ~60fps by timer is the best we can do
+/// (documented deviation; the callback still gets a timestamp arg).
+fn timer_raf(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    let ts = Value::Num(e.t0.elapsed().as_secs_f64() * 1000.0);
+    let id = e.timers.schedule(cb, 16, false, vec![ts]);
+    Ok(Value::Num(id as f64))
+}
+
+/// `cancelAnimationFrame(id)` ≙ `clearTimeout`.
+fn timer_raf_cancel(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    timer_clear(e, t, args)
+}
+
+/// `clearTimeout(id)` / `clearInterval(id)`.
+fn timer_clear(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Num(n) = arg(args, 0) {
+        e.timers.cancel(n as u64);
+    }
+    Ok(Value::Undefined)
+}
+
+fn arg(args: &[Value], i: usize) -> Value {
+    args.get(i).copied().unwrap_or(Value::Undefined)
+}
+
+/// Delay arg → ms (default 0, negative clamps — browsers clamp at
+/// 0/4ms; we clamp at 0, nested-clamping is a fingerprint anyway).
+fn delay_ms(e: &mut Engine, v: Option<Value>) -> JsResult<u64> {
+    let n = match v {
+        Some(Value::Num(n)) => n,
+        Some(other) => e.to_number(other)?,
+        None => 0.0,
+    };
+    Ok(if n.is_finite() && n > 0.0 {
+        n as u64
+    } else {
+        0
+    })
+}

@@ -6,8 +6,7 @@ Statut : Acceptée (2026-10-18).
 
 L'utilisateur exige « utilisation fichier token » : un fichier de
 design tokens pilote l'UI Flutter (couleurs, espacements, rayons,
-typographie). Options : constantes Dart en dur (modèle du projet
-OnionBit : `lib/core/design/tokens/*.dart`), fichier JSON chargé au
+typographie). Options : constantes Dart en dur, fichier JSON chargé au
 runtime, ou codegen depuis un fichier source.
 
 ## Décision
@@ -30,7 +29,7 @@ runtime, ou codegen depuis un fichier source.
 - Un fichier éditable sans recompiler Dart : itérations visuelles
   rapides, diff de design reviewable en PR.
 - Le même fichier pourra alimenter d'autres consommateurs (site,
-  docs, thème du shell OnionBit) — le JSON est portable, pas le
+  docs, applications sibling) — le JSON est portable, pas le
   code Dart.
 - Distinction claire design (fichier) / implémentation (widgets) :
   cohérent avec la clean architecture de `app/`.

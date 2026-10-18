@@ -25,18 +25,16 @@ Double licence permissive `MIT OR Apache-2.0` :
   crates consommées et réutilisabilité du code.
 - Apache-2.0 apporte la clause brevet que MIT n'a pas ; MIT garde la
   simplicité maximale — la disjonctive couvre les deux publics.
-- Contrairement au daemon OnionBit (GPL-3.0, fidélité copyleft
-  Tribler), ce navigateur n'hérite d'aucune obligation de licence
-  amont : il est écrit ici, from scratch.
+- Aucune obligation de licence amont : le code est écrit ici,
+  from scratch, sur des primitives pur Rust toutes compatibles.
 
 ## Conséquences
 
 - Code potentiellement réutilisable dans des contextes propriétaires
   — assumé par le choix permissif.
-- La couture `dillo-js` (ADR-0007) : l'auteur unique du moteur étant
-  Laurent Geynet, une double licence `MIT OR Apache-2.0` est
-  explicitement accordée au crate `dillo-js` pour ce projet,
-  éliminant tout risque de contamination GPL-3.0 dans `explorer-js`.
+- `dillo-js` (ADR-0007) vit dans ce workspace sous la même double
+  licence : l'auteur unique (Laurent Geynet) l'a relicenciée à la
+  migration — aucune contamination copyleft possible.
 - Les dépendances choisies doivent rester compatibles MIT/Apache-2.0
   (c'est le cas de tout l'écosystème Rust courant).
 

@@ -1,0 +1,916 @@
+// This file is part of Explorer.
+// Copyright (C) 2026 Laurent Geynet
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! Tests for the standalone mini-DOM façade (JS-2): `document`,
+//! elements, `innerHTML`, style/classList, events, `document.write`.
+
+use dillo_js::{Dom, Engine};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+const PAGE: &str = r#"
+<html><head><title>Test page</title></head><body>
+<div id="main" class="box"><p>Hello <b>world</b></p></div>
+<input id="inp" type="text" value="init">
+<input id="cb" type="checkbox" checked>
+<ul id="list"><li>a</li><li>b</li></ul>
+</body></html>
+"#;
+
+fn engine_with(html: &str) -> Engine {
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(html))));
+    e
+}
+
+/// Eval `src` in a fresh engine seeded with `html`, return the
+/// completion value described as a string.
+fn ev(src: &str) -> String {
+    ev_in(PAGE, src)
+}
+
+fn ev_in(html: &str, src: &str) -> String {
+    let mut e = engine_with(html);
+    match e.eval(src) {
+        Ok(v) => e.describe(v),
+        Err(err) => panic!("{src} -> {err}"),
+    }
+}
+
+// -- document ---------------------------------------------------------
+
+#[test]
+fn get_element_by_id() {
+    assert_eq!(ev("document.getElementById('main').tagName"), "DIV");
+    assert_eq!(ev("document.getElementById('main').id"), "main");
+    assert_eq!(ev("document.getElementById('nope')"), "null");
+}
+
+#[test]
+fn node_identity_is_stable() {
+    assert_eq!(
+        ev("document.getElementById('main') === document.getElementById('main')"),
+        "true"
+    );
+}
+
+#[test]
+fn document_structure_accessors() {
+    assert_eq!(ev("document.title"), "Test page");
+    assert_eq!(ev("document.body.tagName"), "BODY");
+    assert_eq!(ev("document.documentElement.tagName"), "HTML");
+    assert_eq!(ev("document.getElementsByTagName('li').length"), "2");
+    assert_eq!(ev("document.getElementsByClassName('box').length"), "1");
+}
+
+#[test]
+fn document_write_appends_to_body() {
+    assert_eq!(
+        ev("document.write('<div id=\"w\">added</div>'); document.getElementById('w').innerHTML"),
+        "added"
+    );
+}
+
+#[test]
+fn navigator_is_fixed_and_poor() {
+    assert_eq!(ev("navigator.userAgent"), "Explorer/0.1 (dillo-js)");
+    // Deliberately absent: plugins, geolocation, hardware APIs…
+    assert_eq!(ev("navigator.plugins === undefined"), "true");
+    assert_eq!(ev("navigator.geolocation === undefined"), "true");
+}
+
+// -- elements ---------------------------------------------------------
+
+#[test]
+fn inner_html_get_set() {
+    assert_eq!(
+        ev("document.getElementById('main').innerHTML"),
+        "<p>Hello <b>world</b></p>"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.innerHTML = '<span>x</span>';\
+            el.innerHTML"),
+        "<span>x</span>"
+    );
+}
+
+#[test]
+fn text_content() {
+    assert_eq!(
+        ev("document.getElementById('main').textContent"),
+        "Hello world"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.textContent = 'plain';\
+            el.innerHTML"),
+        "plain"
+    );
+}
+
+#[test]
+fn class_name_and_class_list() {
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.className = 'a b';\
+            el.className"),
+        "a b"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.classList.add('on');\
+            el.classList.contains('on') + ':' + el.getAttribute('class')"),
+        "true:box on"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.classList.toggle('box');\
+            el.className"),
+        ""
+    );
+}
+
+#[test]
+fn style_property() {
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.style.backgroundColor = 'red';\
+            el.getAttribute('style')"),
+        "background-color: red"
+    );
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.style.backgroundColor = 'red';\
+            el.style.backgroundColor"),
+        "red"
+    );
+}
+
+#[test]
+fn form_like_properties() {
+    assert_eq!(ev("document.getElementById('inp').value"), "init");
+    assert_eq!(
+        ev("var i = document.getElementById('inp');\
+            i.value = 'typed';\
+            i.getAttribute('value')"),
+        "typed"
+    );
+    // Boolean attribute → bool prop, both ways.
+    assert_eq!(ev("document.getElementById('cb').checked"), "true");
+    assert_eq!(
+        ev("var c = document.getElementById('cb');\
+            c.checked = false;\
+            c.checked + ':' + c.hasAttribute('checked')"),
+        "false:false"
+    );
+}
+
+#[test]
+fn tree_navigation() {
+    assert_eq!(
+        ev("var p = document.getElementsByTagName('p')[0];\
+            p.parentNode.id"),
+        "main"
+    );
+    assert_eq!(ev("document.getElementById('main').children.length"), "1");
+    assert_eq!(
+        ev("document.getElementById('list').children[1].textContent"),
+        "b"
+    );
+    assert_eq!(
+        ev("document.getElementById('main').firstChild.tagName"),
+        "P"
+    );
+}
+
+#[test]
+fn query_selector_subset() {
+    assert_eq!(ev("document.querySelector('#main').id"), "main");
+    assert_eq!(ev("document.querySelector('.box').id"), "main");
+    assert_eq!(ev("document.querySelector('p').tagName"), "P");
+    assert_eq!(ev("document.querySelectorAll('li').length"), "2");
+    // Complex selectors out of subset → null, not an error.
+    assert_eq!(ev("document.querySelector('div > p')"), "null");
+}
+
+#[test]
+fn create_and_attach() {
+    assert_eq!(
+        ev("var d = document.createElement('div');\
+            d.appendChild(document.createTextNode('hi'));\
+            document.getElementById('main').appendChild(d);\
+            document.getElementById('main').children.length"),
+        "2"
+    );
+    assert_eq!(
+        ev("var d = document.createElement('div');\
+            document.getElementById('main').appendChild(d);\
+            document.getElementById('main').removeChild(d);\
+            document.getElementById('main').children.length"),
+        "1"
+    );
+}
+
+// -- host semantics -----------------------------------------------------
+
+#[test]
+fn in_operator_sees_host_props() {
+    assert_eq!(ev("'id' in document.getElementById('main')"), "true");
+    assert_eq!(ev("'innerHTML' in document.body"), "true");
+    assert_eq!(ev("'tortexplode' in document.body"), "false");
+}
+
+#[test]
+fn script_expandos_work_on_host_objects() {
+    // Host.set returning false → ordinary own property fallback.
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.myFlag = 42;\
+            el.myFlag"),
+        "42"
+    );
+}
+
+#[test]
+fn for_in_over_expandos() {
+    assert_eq!(
+        ev("var el = document.getElementById('main');\
+            el.a = 1; el.b = 2;\
+            var seen = '';\
+            for (var k in el) { if (k === 'a' || k === 'b') seen += k; }\
+            seen"),
+        "ab"
+    );
+}
+
+#[test]
+fn typeof_and_class_tag() {
+    assert_eq!(ev("typeof document"), "object");
+    assert_eq!(
+        ev("Object.prototype.toString.call(document.getElementById('main'))"),
+        "[object HTMLElement]"
+    );
+    assert_eq!(
+        ev("Object.prototype.toString.call(document)"),
+        "[object HTMLDocument]"
+    );
+}
+
+// -- events -------------------------------------------------------------
+
+#[test]
+fn add_event_listener_and_click() {
+    assert_eq!(
+        ev("var b = document.getElementById('main');\
+            var hit = '';\
+            b.addEventListener('click', function (ev) { hit = ev.type; });\
+            b.click();\
+            hit"),
+        "click"
+    );
+}
+
+#[test]
+fn onclick_property_and_event_target() {
+    assert_eq!(
+        ev("var b = document.getElementById('main');\
+            var same = false;\
+            b.onclick = function (ev) { same = (ev.target === b); };\
+            b.click();\
+            same"),
+        "true"
+    );
+}
+
+#[test]
+fn remove_event_listener() {
+    assert_eq!(
+        ev("var b = document.getElementById('main');\
+            var n = 0;\
+            var f = function () { n += 1; };\
+            b.addEventListener('click', f);\
+            b.click();\
+            b.removeEventListener('click', f);\
+            b.click();\
+            n"),
+        "1"
+    );
+}
+
+// -- events: propagation (JS-3) ----------------------------------------------
+
+#[test]
+fn event_bubbles_to_parent() {
+    // li (inside ul#list) → #list → body: bubbling walks ancestors.
+    assert_eq!(
+        ev("var li = document.getElementsByTagName('li')[0];\
+            var order = '';\
+            document.getElementById('list').addEventListener('click', function () { order += 'L'; });\
+            document.body.addEventListener('click', function () { order += 'B'; });\
+            li.click();\
+            order"),
+        "LB"
+    );
+}
+
+#[test]
+fn event_capture_runs_before_bubble() {
+    assert_eq!(
+        ev("var li = document.getElementsByTagName('li')[0];\
+            var list = document.getElementById('list');\
+            var order = '';\
+            li.addEventListener('click', function () { order += 'b'; });\
+            list.addEventListener('click', function () { order += 'c'; }, true);\
+            list.addEventListener('click', function () { order += 'B'; });\
+            li.click();\
+            order"),
+        "cbB"
+    );
+}
+
+#[test]
+fn current_target_and_target() {
+    assert_eq!(
+        ev("var li = document.getElementsByTagName('li')[0];\
+            var seen = '';\
+            document.getElementById('list').addEventListener('click', function (ev) {\
+                seen = ev.target.tagName + '/' + ev.currentTarget.id; });\
+            li.click();\
+            seen"),
+        "LI/list"
+    );
+}
+
+#[test]
+fn stop_propagation_halts_bubble() {
+    assert_eq!(
+        ev("var li = document.getElementsByTagName('li')[0];\
+            var order = '';\
+            li.addEventListener('click', function (ev) {\
+                order += 'L'; ev.stopPropagation(); });\
+            document.getElementById('list').addEventListener('click', function () { order += 'P'; });\
+            li.click();\
+            order"),
+        "L"
+    );
+}
+
+#[test]
+fn dispatch_event_with_literal() {
+    assert_eq!(
+        ev("var b = document.getElementById('main');\
+            var got = '';\
+            b.addEventListener('ping', function (ev) { got = ev.type; });\
+            b.dispatchEvent({ type: 'ping', bubbles: false });\
+            got"),
+        "ping"
+    );
+}
+
+#[test]
+fn dispatch_event_with_create_event() {
+    assert_eq!(
+        ev("var b = document.getElementById('main');\
+            var got = '';\
+            b.addEventListener('custom', function (ev) { got = ev.type + ':' + ev.bubbles; });\
+            var ev = document.createEvent('HTMLEvents');\
+            ev.initEvent('custom', true, true);\
+            b.dispatchEvent(ev);\
+            got"),
+        "custom:true"
+    );
+}
+
+#[test]
+fn prevent_default_returned_by_dispatch() {
+    assert_eq!(
+        ev("var b = document.getElementById('main');\
+            b.addEventListener('x', function (ev) { ev.preventDefault(); });\
+            var ev = document.createEvent('HTMLEvents');\
+            ev.initEvent('x', false, true);\
+            b.dispatchEvent(ev) + ':' + ev.defaultPrevented"),
+        "false:true"
+    );
+}
+
+// -- timers (JS-3) -----------------------------------------------------------
+
+#[test]
+fn set_timeout_runs_on_pump() {
+    let mut e = engine_with("");
+    e.install_timers();
+    e.eval("var done = ''; setTimeout(function () { done = 'fired'; }, 0);")
+        .expect("eval");
+    // Not yet: timers don't run synchronously.
+    assert_eq!(
+        e.eval("done").map(|v| e.describe(v)).unwrap_or_default(),
+        ""
+    );
+    assert_eq!(e.run_due_timers().unwrap_or(0), 1);
+    assert_eq!(
+        e.eval("done").map(|v| e.describe(v)).unwrap_or_default(),
+        "fired"
+    );
+}
+
+#[test]
+fn set_interval_reschedules_and_clears() {
+    let mut e = engine_with("");
+    e.install_timers();
+    e.eval(
+        "var n = 0;\
+            var id = setInterval(function () { n += 1; }, 0);",
+    )
+    .expect("eval");
+    e.run_due_timers().unwrap_or(0);
+    e.run_due_timers().unwrap_or(0);
+    e.eval("clearInterval(id);").expect("eval");
+    e.run_due_timers().unwrap_or(0);
+    assert_eq!(e.eval("n").map(|v| e.describe(v)).unwrap_or_default(), "2");
+}
+
+#[test]
+fn clear_timeout_cancels() {
+    let mut e = engine_with("");
+    e.install_timers();
+    e.eval(
+        "var ran = false;\
+            var id = setTimeout(function () { ran = true; }, 0);\
+            clearTimeout(id);",
+    )
+    .expect("eval");
+    e.run_due_timers().unwrap_or(0);
+    assert_eq!(
+        e.eval("ran").map(|v| e.describe(v)).unwrap_or_default(),
+        "false"
+    );
+}
+
+#[test]
+fn string_callback_runs_in_global_scope() {
+    // `setTimeout('code')` — legacy string form evaluated at fire
+    // time in global scope (indirect-eval semantics).
+    let mut e = engine_with("");
+    e.install_timers();
+    e.eval("var hit = 0; setTimeout('hit = 42', 0);")
+        .expect("eval");
+    assert_eq!(e.run_due_timers().unwrap_or(0), 1);
+    assert_eq!(
+        e.eval("hit").map(|v| e.describe(v)).unwrap_or_default(),
+        "42"
+    );
+}
+
+// -- tolerance ------------------------------------------------------------
+
+#[test]
+fn malformed_markup_degrades() {
+    // Unclosed tags, stray '<', stray '</x>' — must not panic.
+    assert_eq!(
+        ev_in(
+            "<div id=a><b>bold<p>para",
+            "document.getElementById('a').innerHTML"
+        ),
+        "<b>bold<p>para</p></b>"
+    );
+}
+
+#[test]
+fn attribute_entities_and_case() {
+    assert_eq!(
+        ev_in(
+            "<DIV ID=X data-k='a&amp;b'>t</DIV>",
+            "document.getElementById('X').getAttribute('data-k')"
+        ),
+        "a&b"
+    );
+}
+
+// -- browser surface (JS-7e): cookie, storage, location, history -------
+
+/// In-memory `CookieJar` — `set` keeps raw `k=v` pairs (attrs ignored).
+struct TestJar {
+    inner: RefCell<Vec<String>>,
+}
+
+impl dillo_js::CookieJar for TestJar {
+    fn get(&self, _url: &str) -> String {
+        self.inner.borrow().join("; ")
+    }
+    fn set(&self, _url: &str, cookie: &str) {
+        // Keep only `k=v` before the first ';' like a real jar's
+        // `document.cookie` read-back.
+        let kv = cookie.split(';').next().unwrap_or("").trim().to_string();
+        self.inner.borrow_mut().push(kv);
+    }
+}
+
+fn engine_full(html: &str) -> (Engine, Rc<TestJar>, Rc<RefCell<Vec<String>>>) {
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(html))));
+    // Per-page localStorage map — an embedder shares it by origin.
+    e.install_storage(&Rc::new(RefCell::new(std::collections::BTreeMap::new())));
+    let jar = Rc::new(TestJar {
+        inner: RefCell::new(Vec::new()),
+    });
+    let navs: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    let navs2 = navs.clone();
+    let navs3 = navs.clone();
+    e.set_page_url("http://ex.org:8080/a/b?q=1#frag");
+    e.set_cookie_jar(jar.clone());
+    e.set_nav_hooks(
+        Rc::new(move |u: &str| navs2.borrow_mut().push(u.to_string())),
+        Rc::new(move |n: i32| navs3.borrow_mut().push(format!("go:{n}"))),
+        3,
+    );
+    (e, jar, navs)
+}
+
+fn evf(e: &mut Engine, src: &str) -> String {
+    match e.eval(src) {
+        Ok(v) => e.describe(v),
+        Err(err) => panic!("{src} -> {err}"),
+    }
+}
+
+#[test]
+fn document_cookie_roundtrip() {
+    let (mut e, _jar, _n) = engine_full(PAGE);
+    evf(
+        &mut e,
+        "document.cookie = 'sess=abc'; document.cookie = 'pref=dark; path=/'",
+    );
+    assert_eq!(evf(&mut e, "document.cookie"), "sess=abc; pref=dark");
+}
+
+#[test]
+fn storage_set_get_remove() {
+    let (mut e, _jar, _n) = engine_full(PAGE);
+    evf(
+        &mut e,
+        "localStorage.setItem('k', 'v'); localStorage.alt = 'x';",
+    );
+    assert_eq!(
+        evf(
+            &mut e,
+            "localStorage.getItem('k') + '|' + localStorage['alt'] + '|' + localStorage.length"
+        ),
+        "v|x|2"
+    );
+    // Named-property assignment also stores.
+    assert_eq!(
+        evf(&mut e, "localStorage.key(0) + ',' + localStorage.key(1)"),
+        "alt,k"
+    );
+    evf(&mut e, "localStorage.removeItem('k');");
+    assert_eq!(evf(&mut e, "localStorage.getItem('k')"), "null");
+    assert_eq!(evf(&mut e, "localStorage.length"), "1");
+    evf(&mut e, "localStorage.clear();");
+    assert_eq!(evf(&mut e, "localStorage.length"), "0");
+    // sessionStorage is a separate, page-local map.
+    evf(&mut e, "sessionStorage.setItem('s', '1');");
+    assert_eq!(evf(&mut e, "sessionStorage.getItem('s')"), "1");
+    assert_eq!(evf(&mut e, "localStorage.getItem('s')"), "null");
+}
+
+#[test]
+fn window_location_getters() {
+    let (mut e, _jar, _n) = engine_full(PAGE);
+    assert_eq!(
+        evf(&mut e, "location.href"),
+        "http://ex.org:8080/a/b?q=1#frag"
+    );
+    assert_eq!(evf(&mut e, "location.protocol"), "http:");
+    assert_eq!(evf(&mut e, "location.host"), "ex.org:8080");
+    assert_eq!(evf(&mut e, "location.hostname"), "ex.org");
+    assert_eq!(evf(&mut e, "location.port"), "8080");
+    assert_eq!(evf(&mut e, "location.pathname"), "/a/b");
+    assert_eq!(evf(&mut e, "location.search"), "?q=1");
+    assert_eq!(evf(&mut e, "location.hash"), "#frag");
+    assert_eq!(evf(&mut e, "location.origin"), "http://ex.org:8080");
+    // window aliases + same object.
+    assert_eq!(evf(&mut e, "window.location === location"), "true");
+    assert_eq!(
+        evf(&mut e, "window === self && self === globalThis"),
+        "true"
+    );
+}
+
+#[test]
+fn window_location_navigation() {
+    let (mut e, _jar, navs) = engine_full(PAGE);
+    evf(
+        &mut e,
+        "location.href = '/next'; location.assign('/a2'); location.replace('/r');",
+    );
+    // reload navigates to the current URL.
+    evf(&mut e, "location.reload();");
+    assert_eq!(
+        navs.borrow().as_slice(),
+        ["/next", "/a2", "/r", "http://ex.org:8080/a/b?q=1#frag"]
+    );
+}
+
+#[test]
+fn window_history() {
+    let (mut e, _jar, navs) = engine_full(PAGE);
+    assert_eq!(evf(&mut e, "history.length"), "3");
+    evf(
+        &mut e,
+        "history.back(); history.forward(); history.go(-2); history.go(0);",
+    );
+    // go(0) = reload — not a relative move, ignored by the hook.
+    assert_eq!(navs.borrow().as_slice(), ["go:-1", "go:1", "go:-2"]);
+}
+
+// -- JS-7f window surface ------------------------------------------------
+
+#[test]
+fn console_hook_receives_lines() {
+    let lines = Rc::new(RefCell::new(Vec::<String>::new()));
+    let sink = lines.clone();
+    let mut e = Engine::new();
+    e.set_console_hook(Rc::new(move |line: String| sink.borrow_mut().push(line)));
+    e.eval("console.log('a', 1, 'b'); console.warn('w');")
+        .expect("eval");
+    assert_eq!(lines.borrow().as_slice(), ["a 1 b", "w"]);
+}
+
+#[test]
+fn console_absent_hook_is_noop() {
+    // No hook installed — `console.log` still parses and runs.
+    let mut e = engine_with("");
+    e.eval("console.log('x'); 'ok'").expect("eval");
+}
+
+#[test]
+fn dialogs_route_to_hooks() {
+    use std::cell::Cell;
+    let mut e = engine_with("");
+    let seen = Rc::new(RefCell::new(Vec::<String>::new()));
+    let seen2 = seen.clone();
+    let answered = Rc::new(Cell::new(true));
+    let answered2 = answered.clone();
+    e.set_dialog_hooks(
+        Rc::new(move |m: String| seen2.borrow_mut().push(m)),
+        Rc::new(move |_m: String| answered2.get()),
+        Rc::new(move |m: String, d: String| Some(format!("{m}:{d}"))),
+    );
+    e.eval("alert('hi');").expect("alert");
+    assert_eq!(seen.borrow().as_slice(), ["hi"]);
+    assert_eq!(
+        e.eval("confirm('q?')")
+            .map(|v| e.describe(v))
+            .unwrap_or_default(),
+        "true"
+    );
+    assert_eq!(
+        e.eval("prompt('name', 'def')")
+            .map(|v| e.describe(v))
+            .unwrap_or_default(),
+        "name:def"
+    );
+}
+
+#[test]
+fn dialogs_absent_degrade() {
+    // No hooks → alert no-op, confirm false, prompt null.
+    assert_eq!(ev("confirm('x')"), "false");
+    assert_eq!(ev("prompt('x')"), "null");
+    assert_eq!(ev("alert('x'); 'ran'"), "ran");
+}
+
+#[test]
+fn window_open_and_screen() {
+    use std::cell::RefCell as RC;
+    let opened = Rc::new(RC::new(Vec::<String>::new()));
+    let o = opened.clone();
+    let mut e = Engine::new();
+    e.set_viewport(1280, 800);
+    e.install_dom(&Rc::new(RC::new(Dom::from_html(""))));
+    e.set_open_hook(Rc::new(move |u: String| o.borrow_mut().push(u)));
+    e.eval("window.open('http://x/');").expect("open");
+    assert_eq!(opened.borrow().as_slice(), ["http://x/"]);
+    assert_eq!(
+        e.eval("innerWidth")
+            .map(|v| e.describe(v))
+            .unwrap_or_default(),
+        "1280"
+    );
+    assert_eq!(
+        e.eval("screen.height")
+            .map(|v| e.describe(v))
+            .unwrap_or_default(),
+        "800"
+    );
+    assert_eq!(
+        e.eval("screen.colorDepth")
+            .map(|v| e.describe(v))
+            .unwrap_or_default(),
+        "24"
+    );
+    assert_eq!(
+        e.eval("devicePixelRatio")
+            .map(|v| e.describe(v))
+            .unwrap_or_default(),
+        "1"
+    );
+}
+
+// ---------------------------------------------------------------
+// JS-7g — DOM traversal, selectors, mutation, collections
+// ---------------------------------------------------------------
+
+#[test]
+fn traversal_props() {
+    assert_eq!(
+        ev("document.getElementById('list').firstChild.tagName"),
+        "LI"
+    );
+    assert_eq!(
+        ev("document.getElementById('list').lastChild.textContent"),
+        "b"
+    );
+    assert_eq!(ev("document.getElementById('list').children.length"), "2");
+    assert_eq!(ev("document.getElementById('list').childNodes.length"), "2");
+    assert_eq!(
+        ev("document.getElementById('list').children[0].nextSibling.textContent"),
+        "b"
+    );
+    assert_eq!(
+        ev("document.getElementById('list').children[1].previousSibling.textContent"),
+        "a"
+    );
+    assert_eq!(
+        ev("document.getElementById('main').children[0].parentNode.id"),
+        "main"
+    );
+    // Text nodes are skipped by `children` but counted by childNodes.
+    assert_eq!(
+        ev_in(
+            "<div id='x'>t<b>y</b></div>",
+            "document.getElementById('x').childNodes.length"
+        ),
+        "2"
+    );
+    assert_eq!(
+        ev_in(
+            "<div id='x'>t<b>y</b></div>",
+            "document.getElementById('x').children.length"
+        ),
+        "1"
+    );
+}
+
+#[test]
+fn matches_closest_query() {
+    assert_eq!(ev("document.getElementById('main').matches('div')"), "true");
+    assert_eq!(
+        ev("document.getElementById('main').matches('.box')"),
+        "true"
+    );
+    assert_eq!(
+        ev("document.getElementById('main').matches('#main')"),
+        "true"
+    );
+    assert_eq!(
+        ev("document.getElementById('main').matches('span')"),
+        "false"
+    );
+    assert_eq!(ev("document.querySelector('#list li').tagName"), "LI");
+    assert_eq!(ev("document.querySelectorAll('li').length"), "2");
+    assert_eq!(
+        ev("document.querySelectorAll('#list li')[1].textContent"),
+        "b"
+    );
+    // closest walks ancestors.
+    assert_eq!(
+        ev("document.getElementById('list').children[0].closest('ul').id"),
+        "list"
+    );
+    assert_eq!(
+        ev("document.getElementById('list').children[0].closest('div.nope')"),
+        "null"
+    );
+    // Element-scoped query.
+    assert_eq!(
+        ev("document.getElementById('main').querySelectorAll('b').length"),
+        "1"
+    );
+}
+
+#[test]
+fn mutation_methods() {
+    assert_eq!(
+        ev("var l = document.getElementById('list'); var li = document.createElement('li'); li.textContent = 'c'; l.appendChild(li); l.children.length"),
+        "3"
+    );
+    assert_eq!(
+        ev("var l = document.getElementById('list'); var li = document.createElement('li'); l.prepend(li); l.children[0] === li"),
+        "true"
+    );
+    assert_eq!(
+        ev("var l = document.getElementById('list'); var n = document.createElement('li'); l.children[0].before(n); l.children[0] === n"),
+        "true"
+    );
+    assert_eq!(
+        ev("var l = document.getElementById('list'); var n = document.createElement('li'); l.children[0].after(n); l.children[1] === n"),
+        "true"
+    );
+    assert_eq!(
+        ev("var l = document.getElementById('list'); var n = document.createElement('li'); l.children[0].replaceWith(n); l.children[0] === n"),
+        "true"
+    );
+    assert_eq!(
+        ev("var l = document.getElementById('list'); var c = l.children[0]; l.removeChild(c); l.children.length"),
+        "1"
+    );
+    assert_eq!(
+        ev("var l = document.getElementById('list'); var n = document.createElement('li'); l.replaceChild(n, l.children[1]); l.children[1] === n"),
+        "true"
+    );
+    assert_eq!(
+        ev("var l = document.getElementById('list'); l.children[0].remove(); l.children.length"),
+        "1"
+    );
+    // insertBefore with ref + at end.
+    assert_eq!(
+        ev("var l = document.getElementById('list'); var n = document.createElement('li'); l.insertBefore(n, l.children[1]); l.children[1] === n"),
+        "true"
+    );
+    // cloneNode shallow vs deep.
+    assert_eq!(
+        ev("var c = document.getElementById('list').cloneNode(false); c.children.length"),
+        "0"
+    );
+    assert_eq!(
+        ev("var c = document.getElementById('list').cloneNode(true); c.children.length"),
+        "2"
+    );
+    // insertAdjacentHTML positions.
+    assert_eq!(
+        ev("var l = document.getElementById('list'); l.insertAdjacentHTML('beforeend', '<li>z</li>'); l.children[2].textContent"),
+        "z"
+    );
+    assert_eq!(
+        ev("var l = document.getElementById('list'); l.insertAdjacentHTML('afterbegin', '<li>z</li>'); l.children[0].textContent"),
+        "z"
+    );
+    assert_eq!(
+        ev("var m = document.getElementById('main'); m.insertAdjacentText('beforeend', 'tail'); m.textContent.indexOf('tail') >= 0"),
+        "true"
+    );
+}
+
+#[test]
+fn collections_and_document_props() {
+    assert_eq!(
+        ev_in(
+            "<a href='x'>1</a><a href='y'>2</a><img src='i'><form id='f'></form>",
+            "document.links.length + '/' + document.images.length + '/' + document.forms.length"
+        ),
+        "2/1/1"
+    );
+    assert_eq!(
+        ev_in(
+            "<a href='x'>1</a><a href='y'>2</a>",
+            "document.links[0].tagName"
+        ),
+        "A"
+    );
+    assert_eq!(ev("document.readyState"), "complete");
+    assert_eq!(ev("document.head.tagName"), "HEAD");
+    assert_eq!(ev("document.body.tagName"), "BODY");
+}
+
+#[test]
+fn outer_html_and_dataset() {
+    assert_eq!(
+        ev("document.getElementById('list').outerHTML.indexOf('<ul')"),
+        "0"
+    );
+    assert_eq!(
+        ev_in(
+            "<div id='d' data-user-id='42' data-foo='bar'></div>",
+            "var d = document.getElementById('d'); d.dataset.userId + '/' + d.dataset.foo"
+        ),
+        "42/bar"
+    );
+    assert_eq!(
+        ev_in(
+            "<div id='d'></div>",
+            "var d = document.getElementById('d'); d.dataset.newKey = 'v'; d.getAttribute('data-new-key')"
+        ),
+        "v"
+    );
+    assert_eq!(
+        ev("document.body.contains(document.getElementById('list'))"),
+        "true"
+    );
+    assert_eq!(
+        ev("document.getElementById('list').contains(document.body)"),
+        "false"
+    );
+}

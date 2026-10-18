@@ -1,0 +1,13 @@
+[package]
+name = "explorer-css"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Tokenizer, parser, selecteurs, cascade, computed style"
+
+[lints]
+workspace = true
+
+[dependencies]
+explorer-dom.workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "explorer-api"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "API REST + SSE (axum) sur loopback — couture unique vers l'UI (ADR-0003)"
+
+[lints]
+workspace = true
+
+[dependencies]
+explorer-core.workspace = true
