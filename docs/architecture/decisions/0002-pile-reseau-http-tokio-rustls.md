@@ -17,8 +17,9 @@ TLS `rustls` + `webpki-roots`, parsing de statut/en-têtes via
 sur les en-têtes), corps `Content-Length` + `chunked`, décodage
 `gzip`/`deflate`/`br` par crates pur Rust.
 
-- HTTP/2, HTTP/3, WebSocket : hors scope initial (ADR de phase si
-  besoin réel).
+- HTTP/2, HTTP/3, WebSocket : pas dans l'implémentation initiale —
+  étapes de la phase 10 « compatibilité web moderne » (ROADMAP.md),
+  chacune avec son ADR.
 - `http_proxy`/`no_proxy` honorés — couture suite OnionBit.
 - Trait `HttpTransport` injectable : tests in-process, transport
   proxy futur sans réécriture.

@@ -92,7 +92,8 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
    Rustdoc sur les items publics ; invariants non triviaux documentés.
 7. **Erreurs** : enums `thiserror` par crate, alias `Result<T>`.
    Jamais `Box<dyn Error>` dans les API publiques des bibliothèques.
-8. **Async / modèle d'événements** (ADR-0003) : tout I/O sur tokio.
+8. **Async / modèle d'événements** : tout I/O sur tokio (runtime
+   unique du workspace — ADR-0002 pour la pile réseau).
    Le layout et le DOM vivent sur un flux unique (single-writer) —
    jamais d'`Arc<Mutex>` sur l'arbre de widgets/DOM. Réseau et
    décodeurs tournent en tâches tokio et livrent des chunks bornés
@@ -174,5 +175,6 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
 - Pas un navigateur Tor : la politique réseau (proxy, `.onion`)
   relève de la suite OnionBit, pas de ce dépôt — garder les coutures
   (`HttpTransport` injectable, profil déplaçable) ouvertes.
-- Pas de WebExtension, pas de moteur tiers — l'ambition est un
-  moteur lisible et maîtrisé, pas la compat totale du web moderne.
+- Pas de moteur tiers (ADR-0001) — le cap est la compatibilité avec
+  le web moderne : toutes les couches de la roadmap convergent vers
+  la navigation réelle de tous les sites.

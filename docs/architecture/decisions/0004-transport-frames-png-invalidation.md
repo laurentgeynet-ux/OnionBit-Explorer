@@ -21,27 +21,34 @@ partagée FFI, ou reparenting (écarté par ADR-0003).
 - Entrées : `POST /api/tabs/{id}/input` (JSON : type, coords,
   touches) → hit-test dans `explorer-layout`.
 
-**Voies d'upgrade (non arbitrées)** : WebSocket binaire pour les
-frames (moins de latence), texture FFI si le pull devient le
-goulot, diff-tiles (envoyer les rects modifiés). Toute extension de
-canal passe par un ADR — AGENTS.md §7.
+**Voies d'upgrade planifiées** :
+- **Phase 6/7 (Consolidation UI/API)** : canal direct de pixels bruts
+  RGBA/BGRA décompressés via **mémoire partagée** (`CreateFileMapping` /
+  `mmap` anonyme) ou **Named Pipe local** (`\\.\pipe\...` sous Windows),
+  notifié par l'événement SSE avec les rectangles invalidés (*dirty rects*).
+  Cette étape élimine la double surcharge CPU encode/decode PNG tout en
+  préservant l'isolation stricte des processus.
+- **Phase 10 (Rendu temps réel)** : texture externe Flutter via FFI
+  (`ExternalTexture` / `flutter_rust_bridge`) si le framerate élevé (60 FPS,
+  canvas/vidéos) exige un pipeline GPU zéro-copie. Toute extension de canal
+  est adossée à un ADR dédié (AGENTS.md §7).
 
 ## Justification
 
-- Simplicité radicale : pas de stream binaire, pas de codec vidéo,
-  pas de shared memory — le contrat REST existant suffit.
-- Le navigateur cible est documentaire : pages essentiellement
-  statiques ; 1 frame PNG par invalidation est largement
-  suffisante.
-- Le PNG est décodable par Flutter out-of-the-box, debuggable
-  (téléchargeable), testable (golden images) — un format opaque
-  n'apporterait rien au MVP.
+- Simplicité radicale au MVP : pas de stream binaire complexe, le contrat
+  REST existant suffit pour afficher les premières pages.
+- Le PNG est décodable par Flutter out-of-the-box, téléchargeable,
+  inspectable et testable (golden images).
+- L'anticipation d'un transport en mémoire partagée / pixels bruts en
+  phase 6/7 garantit que le scrolling et les interactions (hover, frappe)
+  ne resteront pas pénalisés par la compression d'image.
 
 ## Conséquences
 
-- Scrolling/animations dans la page seront saccadés tant qu'on reste
-  en pull-full-frame : connu, assumé, réversible par ADR d'upgrade.
-- Coût encode PNG à chaque invalidation : mitigable par dirty-rects
-  dans `explorer-render` sans changer le contrat.
+- MVP assumé : scrolling/animations initialement bridés en pull PNG,
+  remplacés dès la phase 6/7 par le buffer brut partagé.
+- Réduction drastique de la charge CPU lors du passage en mémoire
+  partagée : aucun encodage PNG nécessaire pour l'affichage interactif.
 - `EventSource` sans en-têtes custom → la clé d'API accepte `?key=`
   (déjà tranché en ADR-0003).
+

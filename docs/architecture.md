@@ -49,15 +49,15 @@ pas dans `core` ; le DOM ne connaît pas axum.
 |---|---|---|
 | `explorer-common` | types partagés, erreurs racines, version | 0 |
 | `explorer-net` | URL, DNS, HTTP/1.1, TLS, décodage, cookies, cache | 1 |
-| `explorer-dom` | arène DOM + `NodeId`, mutations | 2 |
+| `explorer-dom` | arène DOM + `NodeId` générationnels (slotmap), mutations | 2 |
 | `explorer-html` | tokenizer + tree-builder WHATWG | 2 |
 | `explorer-css` | tokenizer, sélecteurs, cascade, computed style | 3 |
 | `explorer-layout` | arbre de boîtes, block/inline, tables, floats | 4 |
-| `explorer-render` | display list → framebuffer RGBA → PNG | 5 |
-| `explorer-js` | trait `JsEngine` + bindings DOM | 8 |
+| `explorer-render` | display list → framebuffer RGBA → PNG / buffer brut | 5 |
+| `explorer-js` | trait `JsEngine` + bindings DOM (`dillo-js` MIT/Apache) | 8 |
 | `explorer-core` | session : onglets, pipeline, bus d'événements | 0→ |
 | `explorer-api` | REST + SSE axum, auth par clé | 6 |
-| `explorer-cli` | binaire dev (fetch, dump DOM, shot) | 0→ |
+| `explorer-cli` | binaire dev (fetch, dump DOM, shot, debug layout) | 0→ |
 | `explorer-daemon` | binaire hôte API loopback | 6 |
 | `explorer-test-support` | transports simulés, fixtures | 0→ |
 
@@ -66,9 +66,13 @@ pas dans `core` ; le DOM ne connaît pas axum.
 - `GET  /api/status` — état du moteur (diagnostic).
 - `GET/POST /api/tabs`, `DELETE /api/tabs/{id}` — cycle de vie.
 - `POST /api/tabs/{id}/navigate|reload|back|forward` — navigation.
-- `GET  /api/tabs/{id}/frame` — PNG du framebuffer (pull).
-- `POST /api/tabs/{id}/input` — souris/clavier/scroll.
-- `GET  /api/events` — SSE : `tab_state`, `frame_invalidated`,
+- `GET  /api/tabs/{id}/frame` — PNG du framebuffer (pull MVP).
+- Trajectoire d'upgrade : canal direct de pixels bruts décompressés
+  (mémoire partagée ou Named Pipe sous Windows) dès la phase 6/7 pour
+  éliminer la surcharge CPU d'encodage/décodage PNG.
+- `POST /api/tabs/{id}/viewport` — taille du viewport (resize UI).
+- `POST /api/tabs/{id}/input` — souris/clavier/scroll (hit-test layout).
+- `GET  /api/events` — SSE : `tab_state`, `frame_invalidated` (+ dirty rects),
   `title_changed`, `events_lost`.
 - Erreurs : `{"error": {"handled": true, "message": "…"}}`.
 - Bind `127.0.0.1` ; clé d'API optionnelle (`x-api-key` ou `?key=`).
@@ -78,6 +82,9 @@ pas dans `core` ; le DOM ne connaît pas axum.
 - `HttpTransport` injectable → un futur transport proxy Tor est une
   implémentation, pas une réécriture.
 - `http_proxy`/`no_proxy` honorés par l'environnement.
+- `dillo-js` (développé par Laurent Geynet) accordé sous double licence
+  `MIT OR Apache-2.0` pour intégration transparente sans conflit copyleft.
 - Répertoire de profil déplaçable (cookies, historique, bookmarks).
 - Ces coutures sont un contexte, pas un ordre de travail — cf. la
   note équivalente côté DilloRust (`docs/onionbit-suite.md`).
+

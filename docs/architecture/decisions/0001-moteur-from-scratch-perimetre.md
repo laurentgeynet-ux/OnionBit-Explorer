@@ -38,10 +38,14 @@ légitime de crates » ?
 
 ## Conséquences
 
-- La pile réseau reste modeste au début : HTTP/1.1 (ADR-0002), HTTP/2
-  et QUIC sont explicitement hors scope initial.
-- Le web « moderne complet » n'est pas la cible : HTML5/CSS2.1+,
-  ES3-subset via dillo-js (ADR-0007) — les pages app le web resteront
-  partiellement rendues ; tolérance et dégradation sont la spec.
+- La pile réseau démarre modeste : HTTP/1.1 (ADR-0002) puis HTTP/2
+  et QUIC rejoignent la roadmap — le web réel en dépend de plus en
+  plus.
+- **Le cap est la compatibilité avec le web moderne** : le but d'un
+  navigateur est d'accéder à tous les sites. HTML5, CSS complet
+  (flexbox, grid…), ES6+ (ADR-0007) sont des objectifs de roadmap,
+  pas des exclusions. Tolérance et dégradation gracieuse restent la
+  spec de comportement sur contenu malformé, jamais un verdict sur
+  la couverture.
 - Chaque dépendance nouvelle exige justification ADR ou commit
   (AGENTS.md §4.2).

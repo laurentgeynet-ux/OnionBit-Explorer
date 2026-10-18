@@ -33,9 +33,10 @@ Double licence permissive `MIT OR Apache-2.0` :
 
 - Code potentiellement réutilisable dans des contextes propriétaires
   — assumé par le choix permissif.
-- La couture `dillo-js` (ADR-0007) : vérifier la licence de ce
-  sous-projet à l'intégration — si GPL, l'adapter en dépendance
-  optionnelle ou processus séparé pour ne pas contaminer ce dépôt.
-  **Point ouvert à ré-arbitrer en phase 8.**
+- La couture `dillo-js` (ADR-0007) : l'auteur unique du moteur étant
+  Laurent Geynet, une double licence `MIT OR Apache-2.0` est
+  explicitement accordée au crate `dillo-js` pour ce projet,
+  éliminant tout risque de contamination GPL-3.0 dans `explorer-js`.
 - Les dépendances choisies doivent rester compatibles MIT/Apache-2.0
   (c'est le cas de tout l'écosystème Rust courant).
+
