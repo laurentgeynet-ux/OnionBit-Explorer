@@ -9,6 +9,14 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 2 — squelette Flutter `app/`** : `flutter create` Windows,
+  clean architecture `core/` (`api/` client REST + SSE `dart:io`
+  zéro-dépendance avec reconnexion, `design/` tokens + thème dérivé,
+  `config/` `AppConfig`, `di/` providers Riverpod) + `features/
+  browser/` (entité `BrowserTab`, `BrowserRepository` sur le contrat
+  REST ADR-0003, `BrowserPage` coquille omnibox). `assets/design/
+  tokens.json` chargé au démarrage avec repli embarqué (ADR-0005) ;
+  `ExplorerApp` attend les tokens puis dérive `ThemeData`.
 - **Étape 1 — workspace cargo** : 13 crates `explorer-*` squelettes
   (lib/binaire, `#![forbid(unsafe_code)]`, lint clippy pedantic,
   rustdoc), `[workspace]` Cargo.toml, `scripts/verify_all.ps1`

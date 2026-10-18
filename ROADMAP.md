@@ -34,7 +34,7 @@ pixel, et c'est le premier vrai test bout-en-bout net+dom+html.
   passent), `scripts/verify_all.ps1`, CI locale documentée.
   *Bonus : `crates/dillo-js` migre dans le workspace — version
   canonique, licence MIT OR Apache-2.0, équipe JS dédiée.*
-- [ ] **Étape 2. Squelette Flutter.** `flutter create` desktop dans
+- [x] **Étape 2. Squelette Flutter.** `flutter create` desktop dans
   `app/` (Windows d'abord), clean architecture `core`/`features`,
   client API minimal, fichier `assets/design/tokens.json` chargé.
 
