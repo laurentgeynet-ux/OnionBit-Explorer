@@ -9,8 +9,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
-### Added
-
+- **Étape 9 — `explorer-dom` : arène DOM** : `NodeId`
+  générationnels (index+génération, handles périmés →
+  `DomError::StaleHandle`), nœuds `Document`/`Doctype`/`Element`/
+  `Text`/`Comment`, attributs ordonnés, navigation complète,
+  `append_child`/`insert_before`/`remove` avec gardes de
+  hiérarchie (cycles, parent sans capacité), `remove` détache sans
+  détruire, table de **rooting** explicite (`add_root`/`remove_root`,
+  cycles DOM↔JS par table — ADR-0008), `collect` mark-sweep réclamant
+  les sous-arbres non rootés, `normalize()` fusionnant les `Text`
+  adjacents (les nœuds rootés bloquent la fusion), newlines
+  `\r\n`→`\n`, `text_content`, budget `max_nodes` borné (ADR-0011).
+  13 tests verts.
 - **Étape 3 — `explorer-net` : URL WHATWG** (`url.rs`) : parseur
   hiérarchique (`http`/`https`/`file`) + opaque (`data:`/`about:`),
   hôtes IDNA UTS-46 via la crate `idna` (arbitrage consigné

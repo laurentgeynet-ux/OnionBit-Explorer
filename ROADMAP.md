@@ -73,12 +73,16 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
 
 ## Phase 2 — DOM et HTML (`explorer-dom`, `explorer-html`)
 
-- [ ] **Étape 9. DOM complet.** Arène + `NodeId` générationnels
+- [x] **Étape 9. DOM complet.** Arène + `NodeId` générationnels
   (pattern `slotmap` index+génération — modèle mémoire figé par
-  **ADR-0008** : rooting explicite, cycles DOM↔JS par table de
-  callbacks, invalidation de génération documentée sur chaque
-  mutation), attributs, navigation parent/enfant/siblings,
-  `Document`/`Doctype`/`Comment`, texte normalisé.
+  **ADR-0008** : rooting explicite `add_root`/`remove_root`, cycles
+  DOM↔JS par table de callbacks, invalidation de génération
+  documentée sur chaque mutation), attributs ordonnés, navigation
+  parent/enfant/siblings, `Document`/`Doctype`/`Comment`, texte
+  normalisé (`\r\n`→`\n`, `normalize()` fusionne les `Text`
+  adjacents), `remove` détache sans détruire, `collect` réclame
+  les sous-arbres non rootés, budget `max_nodes` (ADR-0011).
+  `text_content`, `insert_before`, garde anti-cycles. 13 tests.
 - [ ] **Étape 10. Tokenizer HTML5.** États de la spec WHATWG,
   entités nommées/numériques, DOCTYPE/quirks mode — entrée
   **incrémentale** (chunks bornés, ADR-0012) pré-décodée avec

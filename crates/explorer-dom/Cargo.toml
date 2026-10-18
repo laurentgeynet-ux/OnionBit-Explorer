@@ -8,3 +8,6 @@ description = "Arene DOM + NodeId generationnels (ADR-0008), mutations typees"
 
 [lints]
 workspace = true
+
+[dependencies]
+thiserror.workspace = true
