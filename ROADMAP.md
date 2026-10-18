@@ -1,0 +1,142 @@
+# Roadmap — OnionBit-Explorer
+
+Source de vérité de l'avancement. Une étape est cochée quand :
+implémentée + testée + documentée (CHANGELOG, ADR si décision) +
+commitée (AGENTS.md §5).
+
+Légende : `[ ]` à faire · `[~]` en cours · `[x]` terminée.
+
+Contrainte structurante : **moteur d'abord**. L'app Flutter démarre
+en squelette (phase 0) et n'est alimentée que via l'API — chaque
+phase backend débloque les évolutions UI correspondantes.
+
+## Phase 0 — Cadrage du dépôt
+
+- [x] **Étape 0. Fondations documentaires.** `AGENTS.md`, `ROADMAP.md`,
+  `CHANGELOG.md`, licences MIT/Apache-2.0, ADR initiaux
+  (`docs/architecture/decisions/`), `docs/architecture.md`.
+- [ ] **Étape 1. Workspace cargo.** 13 crates `explorer-*`
+  squelettes (compilent, `clippy -D warnings`/`fmt --check`/`test`
+  passent), `scripts/verify_all.ps1`, CI locale documentée.
+- [ ] **Étape 2. Squelette Flutter.** `flutter create` desktop dans
+  `app/` (Windows d'abord), clean architecture `core`/`features`,
+  client API minimal, fichier `assets/design/tokens.json` chargé.
+
+## Phase 1 — Réseau (`explorer-net`)
+
+Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
+
+- [ ] **Étape 3. URL.** Résolution relative/absolue, normalisation,
+  origine (schéma/hôte/port) pour la future politique same-origin.
+- [ ] **Étape 4. HTTP/1.1 client.** Connexions tokio, keep-alive,
+  requêtes pipelinables non — séquentielles d'abord ; parsing
+  statut/en-têtes via `httparse`, corps `Content-Length` +
+  `chunked`. Timeouts bornés.
+- [ ] **Étape 5. TLS.** `rustls` + `webpki-roots` ; erreurs
+  certificat remontées typées (l'UI affichera une page d'erreur,
+  pas un crash).
+- [ ] **Étape 6. Décodage.** `gzip`/`deflate`/`br` (crates pur
+  Rust), content-length vs chunked résolus, charset déclaré exposé.
+- [ ] **Étape 7. Cookies + cache.** Jar mémoire (domaine/path/
+  secure), cache mémoire borné (ETag/Last-Modified) — disque
+  optionnel en phase ultérieure.
+- [ ] **Étape 8. Redirections & politique.** Suivi 3xx borné,
+  `http_proxy`/`no_proxy` honorés (couture suite OnionBit — le
+  navigateur ne sait pas ce qu'est Tor, il obéit au proxy).
+
+## Phase 2 — DOM et HTML (`explorer-dom`, `explorer-html`)
+
+- [ ] **Étape 9. DOM complet.** Arène + `NodeId`, attributs,
+  navigation parent/enfant/siblings, `Document`/`Doctype`/`Comment`,
+  texte normalisé.
+- [ ] **Étape 10. Tokenizer HTML5.** États de la spec WHATWG,
+  entités nommées/numériques, DOCTYPE/quirks mode.
+- [ ] **Étape 11. Tree-builder.** Insertion modes, fermetures
+  implicites, `<table>`/foster parenting, éléments `html/head/body`
+  synthétisés — dégradation tag-soup tolérante.
+- [ ] **Étape 12. Golden tests.** Corpus de pages de test
+  (`tests/data/`), arbres attendus vs produits ; fuzzing du
+  tokenizer (`fuzz/`).
+
+## Phase 3 — CSS (`explorer-css`)
+
+- [ ] **Étape 13. Tokenizer/parser.** Règles, déclarations,
+  at-rules (`@media` minimal), tolérance aux erreurs de la spec.
+- [ ] **Étape 14. Sélecteurs.** Tag/classe/id/descendant/enfant/
+  attribut — matching sur le DOM.
+- [ ] **Étape 15. Cascade + héritage.** Spécificité, `!important`,
+  valeurs initiales/héritées, `computed style` par nœud.
+- [ ] **Étape 16. Propriétés essentielles.** `display`, `margin`,
+  `padding`, `border`, `width/height`, `color`, `background`,
+  `font-*`, `text-align` — liste tenue dans l'ADR de phase.
+
+## Phase 4 — Layout (`explorer-layout`)
+
+- [ ] **Étape 17. Arbre de boîtes.** Block/inline/anonymous,
+  lien nœud DOM ↔ boîte.
+- [ ] **Étape 18. Fontes.** Stack de fontes pur Rust (mesure,
+  line-height) — la hauteur placeholder de l'étape 0 disparaît.
+- [ ] **Étape 19. Block layout.** Flux normal, marges collapsées,
+  dimensions auto/spécifiées.
+- [ ] **Étape 20. Inline layout.** Line boxes, word wrap,
+  `text-align`, inline-block minimal.
+- [ ] **Étape 21. Tables + flottants.** Dimensionnement de tables,
+  `float`, `clear` — algorithmes bornés.
+
+## Phase 5 — Rendu (`explorer-render`)
+
+- [ ] **Étape 22. Display list.** L'arbre de layout produit une
+  liste de primitives (rects, texte, images placeholders).
+- [ ] **Étape 23. Rasterisation.** `tiny-skia` (ADR-0005) :
+  couleurs, bordures, texte ; framebuffer RGBA.
+- [ ] **Étape 24. Frame PNG servie.** `GET /api/tabs/{id}/frame`
+  (ADR-0004) + événement `frame_invalidated` SSE — l'UI affiche
+  sa première vraie page.
+
+## Phase 6 — API et daemon (`explorer-api`, `explorer-daemon`)
+
+- [ ] **Étape 25. Contrat REST.** `/status`, `/tabs` CRUD,
+  `navigate`, `reload`, `back`/`forward`, `/events` SSE — erreurs
+  `{"error":{handled,message}}`.
+- [ ] **Étape 26. Entrées.** `POST /api/tabs/{id}/input` :
+  clics/souris/clavier/scroll traduits en hit-test sur le layout.
+- [ ] **Étape 27. Daemon.** `explorer-daemon` : bind loopback,
+  clé d'API optionnelle, arrêt propre, logs `tracing`.
+- [ ] **Étape 28. Historique + bookmarks.** Persistance fichier
+  (répertoire de profil déplaçable — couture suite).
+
+## Phase 7 — Interface Flutter (`app/`)
+
+L'UI évolue **au fil des phases backend** ; cette phase consolide.
+
+- [ ] **Étape 29. Chrome navigateur.** Omnibox, onglets,
+  boutons back/forward/reload, états de chargement via SSE.
+- [ ] **Étape 30. Viewport.** Affichage du frame PNG, scroll,
+  invalidation temps réel, redimensionnement → viewport moteur.
+- [ ] **Étape 31. Interactions.** Hit-test via API : clic lien →
+  navigation, hover → curseur, saisie champs.
+- [ ] **Étape 32. Design system.** Thème complet depuis
+  `tokens.json`, dark/light, polish visuel.
+- [ ] **Étape 33. Pages d'erreur.** Échec réseau/TLS rendu en
+  page stylée côté UI (pas de frame moteur).
+
+## Phase 8 — JavaScript (`explorer-js`)
+
+- [ ] **Étape 34. Intégration dillo-js.** Adapter le moteur ES3
+  du projet DilloRust derrière `JsEngine` (ADR-0007) :
+  `eval`, contexte par onglet, budget d'exécution.
+- [ ] **Étape 35. Bindings DOM.** `document`, lecture/écriture
+  d'attributs, `getElementById` & co — invalidation layout.
+- [ ] **Étape 36. Boucle d'événements.** `onclick`, timers
+  bornés, `setTimeout` minimal — jamais de blocage du pipeline.
+
+## Phase 9 — Consolidation
+
+- [ ] **Étape 37. Images.** Décodeurs pur Rust (png/jpeg/gif/webp)
+  derrière l'abstraction d'image, décodage progressif.
+- [ ] **Étape 38. Formes.** `<form>`, GET/POST, champs natifs
+  rendus moteur ou délégués UI (ADR de phase).
+- [ ] **Étape 39. Perf + fuzz.** Benchs pipeline, bornes
+  mémoire/temps, corpus fuzz tokenizer/parser.
+- [ ] **Étape 40. Release 0.1.** Packaging Windows
+  (daemon + app), smoke test bout en bout, documentation.
