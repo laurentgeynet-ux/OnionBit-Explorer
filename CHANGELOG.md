@@ -656,6 +656,51 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`new_target_binding`, `set_composition_es2025`,
     `string_well_formed_and_regexp_escape`,
     `arraybuffer_resize_transfer`).
+- **JS-C17 — Float16, base64/hex, Annex B, `Iterator`,
+  `crypto`, `DisposableStack`** (`dillo-js`) :
+  - `Float16Array` : `TaKind::F16` bout en bout (ctor,
+    indexation, `BYTES_PER_ELEMENT=2`, `@@toStringTag`) —
+    codec IEEE-754 binary16 natif `f64_to_f16`/`f16_to_f64`
+    (round-to-nearest-even, subnormaux, ±0/±∞/NaN) ;
+    `Math.f16round` ; `DataView.prototype.getFloat16`/
+    `setFloat16` endian-aware ;
+  - `Uint8Array` ES2025 : statiques `fromBase64` (alphabets
+    standard + urlsafe, whitespace ignoré) / `fromHex`
+    (`SyntaxError` — longueur impaire ou caractère
+    invalide) ; proto `toBase64`/`toHex`/
+    `setFromBase64`/`setFromHex` → `{read, written}`
+    (`TypeError` si débordement) ;
+  - `Array.prototype.copyWithin` — sémantique memmove :
+    snapshot de la plage source avant la pose (indices
+    relatifs, clamp spec) ;
+  - Annex B `Object.prototype` : accesseur `__proto__`
+    (get/set sur objets ; get sur primitives via
+    `read_prop` — les getters hérités sont désormais
+    invoqués avec `this` = la primitive), `__defineGetter__`/
+    `__defineSetter__`/`__lookupGetter__`/`__lookupSetter__`
+    (énumérable+configurable, recherche dans la chaîne),
+    `propertyIsEnumerable` ;
+  - global `Iterator` : ctor abstrait (`new` → TypeError),
+    `Iterator.prototype` = proto des itérateurs existants,
+    `Iterator.from` (itérateur passé tel quel, itérable via
+    `@@iterator`, `next` callable suffit) ;
+  - `crypto` (WHATWG subset) : `getRandomValues` (quota
+    65 536 octets) et `randomUUID` (v4 RFC 4122) — sur le
+    PRNG xorshift64 du moteur, **pas cryptographique**
+    (déviation documentée) ;
+  - `DisposableStack` (ES2026) : `ObjKind::DispStack` —
+    pile LIFO de disposeurs `(fn, this, arg)` ; `use`
+    enregistre `v[@@dispose]` (invoqué `this = v`),
+    `adopt`/`defer`, `dispose` (première erreur propagée,
+    les suivantes enroulées en `SuppressedError`), `move`,
+    accesseur `disposed`, `@@dispose`, `@@toStringTag` ;
+    `SuppressedError` ctor (`error`/`suppressed`/`message`) ;
+  - reportés : syntaxe `using`, `AsyncDisposableStack`,
+    `Intl`, `Temporal`, `Atomics`/`SharedArrayBuffer` ;
+  - test262 : 859/859 conservé ; 7 tests de régression
+    (`c17_float16`, `c17_u8_base64_hex`, `c17_copy_within`,
+    `c17_annex_b`, `c17_iterator_global`, `c17_crypto`,
+    `c17_disposable_stack`).
 - **JS-C16 — locale-fallbacks, `URL`, `URLSearchParams`**
   (`dillo-js`) :
   - `Array.prototype.reduceRight` ;

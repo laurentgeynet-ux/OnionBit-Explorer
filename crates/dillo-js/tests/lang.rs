@@ -4273,3 +4273,277 @@ fn c16_url_search_params() {
         assert_eq!(ev_str(src), want, "{src}");
     }
 }
+
+// ------------------------------------------------------------------
+// JS-C17 — ES2024-2026 : Float16Array/f16round, Uint8Array b64/hex,
+// copyWithin, Annex B (`__proto__`…), Iterator global, crypto,
+// DisposableStack/SuppressedError
+// ------------------------------------------------------------------
+
+#[test]
+fn c17_float16() {
+    for (src, want) in [
+        ("typeof Float16Array", "function"),
+        ("Float16Array.BYTES_PER_ELEMENT", "2"),
+        ("new Float16Array(3).length", "3"),
+        (
+            "var f=new Float16Array(2); f[0]=1.5; f[1]=1/3; f[0]+'/'+f[1].toFixed(4)",
+            "1.5/0.3333",
+        ),
+        // Dépassement max (65504) → Infinity ; -0 préservé en -0.
+        ("new Float16Array([70000])[0]", "Infinity"),
+        ("1/new Float16Array([-0])[0]", "-Infinity"),
+        // Subnormal f16 min (2^-24) exact.
+        ("new Float16Array([Math.pow(2,-24)])[0]", "5.960464477539063e-8"),
+        (
+            "Object.prototype.toString.call(new Float16Array())",
+            "[object Float16Array]",
+        ),
+        ("typeof Math.f16round", "function"),
+        ("Math.f16round(1.337)", "1.3369140625"),
+        ("Math.f16round(65520)", "Infinity"),
+        ("Math.f16round(Math.pow(2,-24))", "5.960464477539063e-8"),
+        ("Object.is(Math.f16round(-0), -0)", "true"),
+        ("Math.f16round(NaN) !== Math.f16round(NaN)", "true"),
+        // DataView getFloat16/setFloat16, little et big endian.
+        (
+            "var d=new DataView(new ArrayBuffer(4)); d.setFloat16(0,1.5,true); d.getFloat16(0,true)",
+            "1.5",
+        ),
+        (
+            "var d=new DataView(new ArrayBuffer(4)); d.setFloat16(0,1.5,false); d.getFloat16(0,false)",
+            "1.5",
+        ),
+        // f16 1.5 = 0x3E00 big-endian → bytes [0x3e,0x00].
+        (
+            "var d=new DataView(new ArrayBuffer(4)); d.setFloat16(0,1.5); d.getUint8(0)*256+d.getUint8(1)",
+            "15872",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c17_u8_base64_hex() {
+    for (src, want) in [
+        (
+            "Array.from(Uint8Array.fromBase64('aGVsbG8='))",
+            "104,101,108,108,111",
+        ),
+        (
+            "new Uint8Array([104,101,108,108,111]).toBase64()",
+            "aGVsbG8=",
+        ),
+        ("new Uint8Array([255]).toBase64()", "/w=="),
+        ("new Uint8Array([]).toBase64()", ""),
+        (
+            "new Uint8Array([255]).toBase64() === Uint8Array.fromBase64('/w==').toBase64()",
+            "true",
+        ),
+        ("Array.from(Uint8Array.fromBase64('-w'))", "251"),
+        ("Uint8Array.fromBase64('a GVsbG8=').length", "5"),
+        (
+            "Array.from(Uint8Array.fromHex('deadbeef'))",
+            "222,173,190,239",
+        ),
+        ("new Uint8Array([222,173,190,239]).toHex()", "deadbeef"),
+        (
+            "var u=new Uint8Array(5); var r=u.setFromBase64('aGVs'); r.read+'/'+r.written+'/'+u[0]",
+            "3/3/104",
+        ),
+        (
+            "var u=new Uint8Array(4); u.setFromHex('ff00'); u.toHex()",
+            "ff000000",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    assert!(Engine::new().eval("Uint8Array.fromHex('abc')").is_err());
+    assert!(Engine::new().eval("Uint8Array.fromHex('zz')").is_err());
+    assert!(Engine::new().eval("Uint8Array.fromBase64('!!!')").is_err());
+    assert!(Engine::new()
+        .eval("new Uint8Array(2).setFromHex('aabbcc')")
+        .is_err());
+}
+
+#[test]
+fn c17_copy_within() {
+    for (src, want) in [
+        ("[1,2,3,4,5].copyWithin(0,3).join()", "4,5,3,4,5"),
+        ("[1,2,3,4,5].copyWithin(-2).join()", "1,2,3,1,2"),
+        ("[1,2,3,4,5].copyWithin(1,-2,-1).join()", "1,4,3,4,5"),
+        ("[1,2,3].copyWithin(0,1).join()", "2,3,3"),
+        // Chevauchement copie vers la droite (spec : séquentiel).
+        ("[1,2,3,4].copyWithin(1,0).join()", "1,1,2,3"),
+        ("var a=[1,2]; a.copyWithin(0,1)===a", "true"),
+        // Existe aussi sur typed arrays depuis C6 — vérif régression.
+        ("new Uint8Array([1,2,3]).copyWithin(0,1)[0]", "2"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c17_annex_b() {
+    for (src, want) in [
+        ("({a:1}).propertyIsEnumerable('a')", "true"),
+        ("({a:1}).propertyIsEnumerable('b')", "false"),
+        // `toString` hérité → pas own.
+        ("({}).propertyIsEnumerable('toString')", "false"),
+        ("'ab'.propertyIsEnumerable(0)", "true"),
+        ("'ab'.propertyIsEnumerable(5)", "false"),
+        ("Object.propertyIsEnumerable('prototype')", "false"),
+        (
+            "var o={};o.__defineGetter__('x',function(){return 42});o.x",
+            "42",
+        ),
+        (
+            "var o={};o.__defineSetter__('y',function(v){this.s=v*2});o.y=21;o.s",
+            "42",
+        ),
+        (
+            "var g=function(){return 7};var h={};h.__defineGetter__('x',g);h.__lookupGetter__('x')===g",
+            "true",
+        ),
+        ("({}).__lookupGetter__('x')", "undefined"),
+        // `__proto__` get/set (Annex B) — objet seulement.
+        ("({}).__proto__===Object.prototype", "true"),
+        ("var p={z:9};var q={};q.__proto__=p;q.z", "9"),
+        ("var q={};q.__proto__=null;Object.getPrototypeOf(q)", "null"),
+        // primitive → proto du wrapper.
+        ("(1).__proto__===Number.prototype", "true"),
+        ("'x'.__proto__===String.prototype", "true"),
+        // valeur non-objet ignorée (spec : écriture silencieuse).
+        ("var q={};q.__proto__=5;q.__proto__===Object.prototype", "true"),
+        (
+            "typeof Object.getOwnPropertyDescriptor(Object.prototype,'__proto__').get",
+            "function",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c17_iterator_global() {
+    for (src, want) in [
+        ("typeof Iterator", "function"),
+        (
+            "Iterator.prototype===Object.getPrototypeOf([].values())",
+            "true",
+        ),
+        (
+            "var it=Iterator.from([10,20]);it.next().value+'/'+it.next().value+'/'+it.next().done",
+            "10/20/true",
+        ),
+        // Un itérateur (objet avec `next`) passe tel quel.
+        (
+            "var g=function*(){yield 1};Iterator.from(g()).next().value",
+            "1",
+        ),
+        ("Iterator.from('ab').next().value", "a"),
+        // helpers hérités du proto itérateur (C8).
+        (
+            "Iterator.from([1,2,3]).map(x=>x*2).take(2).toArray().join()",
+            "2,4",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    assert!(Engine::new().eval("Iterator.from(5)").is_err());
+    assert!(Engine::new().eval("new Iterator()").is_err());
+}
+
+#[test]
+fn c17_crypto() {
+    for (src, want) in [
+        ("typeof crypto", "object"),
+        ("typeof crypto.getRandomValues", "function"),
+        ("var c=new Uint8Array(16);crypto.getRandomValues(c)===c", "true"),
+        (
+            "/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(crypto.randomUUID())",
+            "true",
+        ),
+        ("crypto.randomUUID().length", "36"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    // quota spec : > 65 536 octets → TypeError (QuotaExceededError).
+    assert!(Engine::new()
+        .eval("crypto.getRandomValues(new Uint8Array(70000))")
+        .is_err());
+    assert!(Engine::new().eval("crypto.getRandomValues(5)").is_err());
+}
+
+#[test]
+fn c17_disposable_stack() {
+    for (src, want) in [
+        ("typeof DisposableStack", "function"),
+        ("new DisposableStack().disposed", "false"),
+        // LIFO.
+        (
+            "var l=[];var d=new DisposableStack();d.defer(function(){l.push(1)});d.defer(function(){l.push(2)});d.dispose();l.join()",
+            "2,1",
+        ),
+        ("var d=new DisposableStack();d.dispose();d.disposed", "true"),
+        // déjà déposé → ReferenceError.
+        (
+            "try{var d=new DisposableStack();d.dispose();d.dispose()}catch(x){x.name}",
+            "ReferenceError",
+        ),
+        // `use` enregistre `v[@@dispose]` appelé avec `this = v`.
+        (
+            "var l=[];var r={n:'r'};r[Symbol.dispose]=function(){l.push(this.n)};var d=new DisposableStack();d.use(r);d.dispose();l.join()",
+            "r",
+        ),
+        // `use` retourne la valeur ; null/undefined passent.
+        (
+            "var r={};r[Symbol.dispose]=function(){};var d=new DisposableStack();d.use(r)===r&&d.use(null)===null",
+            "true",
+        ),
+        // `adopt` : disposeur arbitraire.
+        (
+            "var l=[];var d=new DisposableStack();d.adopt(7,function(v){l.push(v)});d.dispose();l.join()",
+            "7",
+        ),
+        // `move` : transfert, source vidée.
+        (
+            "var l=[];var d=new DisposableStack();d.defer(function(){l.push(1)});var m=d.move();var t=d.disposed+'/'+m.disposed;m.dispose();t+'/'+l.join()",
+            "true/false/1",
+        ),
+        // `dispose` accessible via @@dispose (spec).
+        (
+            "var l=[];var d=new DisposableStack();d.defer(function(){l.push(1)});d[Symbol.dispose]();l.join()",
+            "1",
+        ),
+        (
+            "Object.prototype.toString.call(new DisposableStack())",
+            "[object DisposableStack]",
+        ),
+        ("typeof SuppressedError", "function"),
+        (
+            "var se=new SuppressedError('e','s','m');se.name+'/'+se.message+'/'+se.error+'/'+se.suppressed",
+            "SuppressedError/m/e/s",
+        ),
+        // Erreurs empilées → SuppressedError (erreur récente en
+        // `error`, précédente en `suppressed` — ordre spec).
+        (
+            "try{var d=new DisposableStack();d.defer(function(){throw 'a'});d.defer(function(){throw 'b'});d.dispose()}catch(x){x.name+'/'+x.error+'/'+x.suppressed}",
+            "SuppressedError/a/b",
+        ),
+        (
+            "try{var d=new DisposableStack();d.defer(function(){throw 'a'});d.dispose()}catch(x){x}",
+            "a",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    assert!(Engine::new().eval("new DisposableStack().use({})").is_err());
+    assert!(Engine::new()
+        .eval("new DisposableStack().adopt(1, 5)")
+        .is_err());
+    assert!(Engine::new()
+        .eval("var d=new DisposableStack();d.dispose();d.defer(function(){})")
+        .is_err());
+}

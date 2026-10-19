@@ -81,6 +81,14 @@ pub(crate) const SYM_TO_STRING_TAG: &str = "\u{f130}Symbol.toStringTag";
 /// `Symbol.unscopables` — noms exclus de la liaison `with`.
 pub(crate) const SYM_UNSCOPABLES: &str = "\u{f130}Symbol.unscopables";
 
+/// `Symbol.dispose` — protocole `using`/`DisposableStack` (ES2026).
+#[allow(dead_code)] // protocole `using` en cours d'implémentation
+pub(crate) const SYM_DISPOSE: &str = "\u{f130}Symbol.dispose";
+
+/// `Symbol.asyncDispose` — variante async (`await using`).
+#[allow(dead_code)] // protocole `using` en cours d'implémentation
+pub(crate) const SYM_ASYNC_DISPOSE: &str = "\u{f130}Symbol.asyncDispose";
+
 // Clés de dispatch @@symbols — consommées par le chantier
 // regexp/symbol en cours (équipe JS) ; `allow` le temps que
 // les dispatches soient branchés.
@@ -2182,19 +2190,23 @@ impl Engine {
                     });
                 }
                 let proto = self.protos.string;
-                Ok(self.get_prop(proto, key).unwrap_or(Value::Undefined))
+                self.read_prop(Value::Obj(proto), base, key)
             }
+            // `read_prop` plutôt que `get_prop` : les accesseurs
+            // hérités (`__proto__`, getters de proto) doivent être
+            // invoqués avec `this` = la primitive (spec `[[Get]]`
+            // sur wrapper éphémère).
             Value::Num(_) => {
                 let proto = self.protos.number;
-                Ok(self.get_prop(proto, key).unwrap_or(Value::Undefined))
+                self.read_prop(Value::Obj(proto), base, key)
             }
             Value::Bool(_) => {
                 let proto = self.protos.boolean;
-                Ok(self.get_prop(proto, key).unwrap_or(Value::Undefined))
+                self.read_prop(Value::Obj(proto), base, key)
             }
             Value::Big(_) => {
                 let proto = self.protos.bigint;
-                Ok(self.get_prop(proto, key).unwrap_or(Value::Undefined))
+                self.read_prop(Value::Obj(proto), base, key)
             }
         }
     }

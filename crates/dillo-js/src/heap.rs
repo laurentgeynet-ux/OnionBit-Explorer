@@ -269,6 +269,13 @@ impl Heap {
                     push_value(out, en.token);
                 }
             }
+            ObjKind::DispStack { stack, .. } => {
+                for (f, t, v) in stack {
+                    push_value(out, *f);
+                    push_value(out, *t);
+                    push_value(out, *v);
+                }
+            }
             // `WeakRef` : la cible n'est PAS tracée (c'est le
             // point — `deref()` observe la collecte).
             ObjKind::WeakRef(_)
@@ -605,6 +612,19 @@ pub enum ObjKind {
     /// `Value::Big`, jamais par `Value::Obj` — pas de proto, pas de
     /// props (les accesseurs vivent sur `BigInt.prototype`).
     BigInt(num_bigint::BigInt),
+    /// `DisposableStack` (ES2026) — pile LIFO de disposeurs
+    /// `(fn, this, arg)` : `use` pousse `(v[@@dispose], v,
+    /// undefined)` — méthode appelée sur la ressource —, `adopt`
+    /// `(f, undefined, v)`, `defer` `(f, undefined, undefined)`.
+    /// `dispose()` vide en ordre inverse, première erreur
+    /// propagée, les suivantes enroulées en `SuppressedError`.
+    DispStack {
+        /// `true` après `dispose()`/`move()` — réutilisation →
+        /// `ReferenceError` (spec).
+        disposed: bool,
+        /// Disposeurs en attente, LIFO : `(fn, this, arg)`.
+        stack: Vec<(Value, Value, Value)>,
+    },
 }
 
 /// Element kind of a [`ObjKind::TypedArray`] view.
@@ -632,6 +652,8 @@ pub enum TaKind {
     I64,
     /// `BigUint64Array`.
     U64,
+    /// `Float16Array` — éléments IEEE-754 binary16 (ES2025).
+    F16,
 }
 
 impl TaKind {
@@ -639,7 +661,7 @@ impl TaKind {
     pub fn size(self) -> usize {
         match self {
             TaKind::I8 | TaKind::U8 | TaKind::U8C => 1,
-            TaKind::I16 | TaKind::U16 => 2,
+            TaKind::I16 | TaKind::U16 | TaKind::F16 => 2,
             TaKind::I32 | TaKind::U32 | TaKind::F32 => 4,
             TaKind::F64 | TaKind::I64 | TaKind::U64 => 8,
         }
@@ -659,11 +681,12 @@ impl TaKind {
             TaKind::F64 => "Float64Array",
             TaKind::I64 => "BigInt64Array",
             TaKind::U64 => "BigUint64Array",
+            TaKind::F16 => "Float16Array",
         }
     }
 
     /// All kinds in spec order (for the `install` loop).
-    pub const ALL: [TaKind; 11] = [
+    pub const ALL: [TaKind; 12] = [
         TaKind::I8,
         TaKind::U8,
         TaKind::U8C,
@@ -675,6 +698,7 @@ impl TaKind {
         TaKind::F64,
         TaKind::I64,
         TaKind::U64,
+        TaKind::F16,
     ];
 
     /// Index used as the ctor bound-arg (`ta_ctor` dispatch).
@@ -691,6 +715,7 @@ impl TaKind {
             TaKind::F64 => 8,
             TaKind::I64 => 9,
             TaKind::U64 => 10,
+            TaKind::F16 => 11,
         }
     }
 
@@ -728,6 +753,7 @@ impl TaKind {
             TaKind::U64 => {
                 u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]) as f64
             }
+            TaKind::F16 => f16_to_f64(u16::from_le_bytes([b[0], b[1]])),
         }
     }
 
@@ -803,8 +829,66 @@ impl TaKind {
             TaKind::U64 => {
                 bytes[o..o + 8].copy_from_slice(&(v as u64).to_le_bytes());
             }
+            TaKind::F16 => {
+                bytes[o..o + 2].copy_from_slice(&f64_to_f16(v).to_le_bytes());
+            }
         }
     }
+}
+
+/// IEEE-754 binary16 → `f64` (`Float16Array`, `Math.f16round`).
+pub(crate) fn f16_to_f64(h: u16) -> f64 {
+    let sign = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
+    let exp = i32::from((h >> 10) & 0x1f);
+    let man = f64::from(h & 0x3ff);
+    match exp {
+        0 => sign * man * 2f64.powi(-24),
+        31 => {
+            if man == 0.0 {
+                sign * f64::INFINITY
+            } else {
+                f64::NAN
+            }
+        }
+        e => sign * (1.0 + man / 1024.0) * 2f64.powi(e - 15),
+    }
+}
+
+/// `f64` → IEEE-754 binary16 — round-to-nearest approximé
+/// (mantisse arrondie via `.round()` — correct sauf égalités
+/// exactes, couverture navigateur suffisante).
+pub(crate) fn f64_to_f16(v: f64) -> u16 {
+    if v.is_nan() {
+        return 0x7e00;
+    }
+    let sign = if v.is_sign_negative() { 0x8000u16 } else { 0 };
+    let a = v.abs();
+    if a == 0.0 {
+        return sign;
+    }
+    if a >= 65504.0 {
+        // Max fini 65504 ; jusqu'à 65520 exclu on arrondit encore
+        // à 65504, au-delà → +Inf.
+        return if a < 65520.0 {
+            sign | 0x7bff
+        } else {
+            sign | 0x7c00
+        };
+    }
+    if a < 0.000_061_035_156_25 {
+        // Subnormal binary16 : man = a * 2^24 arrondi (0 si < 2^-25).
+        return sign | (a * 16_777_216.0).round() as u16;
+    }
+    let mut exp = a.log2().floor() as i32;
+    let mut man = ((a / 2f64.powi(exp) - 1.0) * 1024.0).round() as u32;
+    if man == 1024 {
+        man = 0;
+        exp += 1;
+    }
+    if exp >= 15 {
+        return sign | 0x7c00;
+    }
+    sign | ((exp + 15) as u16) << 10 | (man as u16)
 }
 
 impl Object {

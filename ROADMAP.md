@@ -517,8 +517,34 @@ d'intégration, pas par la couverture :
   `entries`/`@@iterator`, encodage
   `application/x-www-form-urlencoded`, init string/record/
   itérable/copie). test262 : 859/859 ; 3 tests de régression.
-- [ ] **JS-C. Couverture par besoin** : `Intl` —
-  ordre piloté par les pages réelles.
+- [x] **JS-C17. ES2024-2026 — Float16, base64/hex,
+  Annex B, `Iterator`, `crypto`, `DisposableStack`** :
+  `Float16Array` (`TaKind::F16` — codec IEEE-754 binary16
+  natif : round-to-nearest-even, subnormaux, ±0/±∞),
+  `Math.f16round`, `DataView` `getFloat16`/`setFloat16`
+  (endianness), `Uint8Array` `fromBase64`/`toBase64`/
+  `fromHex`/`toHex`/`setFromBase64`/`setFromHex` (alphabet
+  standard+urlsafe, `SyntaxError` strict sur hex,
+  `{read,written}`), `Array.prototype.copyWithin`
+  (sémantique memmove — snapshot de la plage source),
+  Annex B : `__proto__` accesseur (objets + primitives via
+  `read_prop` — getters hérités invoqués avec `this` =
+  primitive), `__defineGetter__`/`__defineSetter__`/
+  `__lookupGetter__`/`__lookupSetter__`,
+  `propertyIsEnumerable` (own + flag ; indices de string
+  énumérables), global `Iterator` (ctor abstrait,
+  `Iterator.from` — `GetIteratorFlattenable`),
+  `crypto.getRandomValues`/`randomUUID` (PRNG xorshift64 —
+  PAS cryptographique, déviation documentée, quota 65 536
+  octets), `DisposableStack` complet (`use`/`adopt`/`defer`/
+  `dispose`/`move`/`disposed`/`@@dispose`/`@@toStringTag` —
+  LIFO, erreurs enroulées `SuppressedError`) +
+  `SuppressedError`. `using`/`AsyncDisposableStack`/`Intl`/
+  `Temporal` reportés. test262 : 859/859 ; 7 tests de
+  régression.
+- [ ] **JS-C. Couverture par besoin** : `Intl`,
+  `AsyncDisposableStack`, `Temporal` — ordre piloté par les
+  pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
   `Video` — phase 10, dépend du pipeline rendu.
 

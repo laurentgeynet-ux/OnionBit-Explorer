@@ -135,6 +135,62 @@ pub(crate) fn install(e: &mut Engine) {
     let usp = ctor(e, "URLSearchParams", usp_ctor, e.protos.url_params);
     e.set_own(g, "URL", url, false);
     e.set_own(g, "URLSearchParams", usp, false);
+    // `Iterator` — ctor abstrait (spec : `new Iterator()` lève) ;
+    // `Iterator.prototype` = protos.iterator, `Iterator.from`.
+    {
+        let iter = e.native_fn("Iterator", iterator_ctor);
+        if let Value::Obj(iid) = iter {
+            e.set_own(iid, "prototype", Value::Obj(e.protos.iterator), false);
+            e.add_method(iid, "from", iterator_from);
+        }
+        e.set_own(e.protos.iterator, "constructor", iter, false);
+        e.set_own(g, "Iterator", iter, false);
+    }
+
+    // `crypto` (WHATWG subset) — `getRandomValues`/`randomUUID`
+    // sur le PRNG moteur (xorshift64 — pas cryptographique,
+    // déviation documentée).
+    {
+        let crypto = e.new_object();
+        e.add_method(crypto, "getRandomValues", crypto_get_random_values);
+        e.add_method(crypto, "randomUUID", crypto_random_uuid);
+        let tag = e.str_val("Crypto");
+        e.set_own(crypto, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        e.set_own(g, "crypto", Value::Obj(crypto), false);
+    }
+
+    // `SuppressedError` (ES2026) — `error`/`suppressed`/`message`.
+    {
+        let se_p = e
+            .heap
+            .alloc_obj(crate::heap::Object::ordinary(Value::Obj(e.protos.error)));
+        let se = ctor(e, "SuppressedError", suppressed_error_ctor, se_p);
+        e.set_own(g, "SuppressedError", se, false);
+    }
+
+    // `DisposableStack` (ES2026) — gestion explicite de ressources
+    // (`using` syntaxe non implémentée ; l'API impérative est
+    // complète : `use`/`adopt`/`defer`/`dispose`/`move`/`disposed`
+    // + `@@dispose`/`@@toStringTag`). `AsyncDisposableStack` —
+    // reportée (nécessite le runtime async).
+    {
+        let ds_p = e.new_object();
+        let ds = ctor(e, "DisposableStack", disposable_stack_ctor, ds_p);
+        let dg = e.native_fn("get disposed", ds_disposed_get);
+        if let Some(o) = e.heap.obj_mut(ds_p) {
+            o.set_accessor("disposed", dg, Value::Undefined, false);
+        }
+        e.add_method(ds_p, "use", ds_use);
+        e.add_method(ds_p, "adopt", ds_adopt);
+        e.add_method(ds_p, "defer", ds_defer);
+        e.add_method(ds_p, "dispose", ds_dispose);
+        e.add_method(ds_p, "move", ds_move);
+        e.add_method(ds_p, crate::interp::SYM_DISPOSE, ds_dispose);
+        let tag = e.str_val("DisposableStack");
+        e.set_own(ds_p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        e.set_own(g, "DisposableStack", ds, false);
+    }
+
     {
         let up = e.protos.url;
         e.add_method(up, "toString", url_href_get);
@@ -405,6 +461,28 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(op, "hasOwnProperty", has_own_property);
     e.add_method(op, "valueOf", object_value_of);
     e.add_method(op, "isPrototypeOf", object_is_prototype_of);
+    e.add_method(op, "propertyIsEnumerable", object_property_is_enumerable);
+    // Annex B — `__proto__` accesseur + `__defineGetter__`…
+    e.add_method(op, "__defineGetter__", object_define_getter);
+    e.add_method(op, "__defineSetter__", object_define_setter);
+    e.add_method(op, "__lookupGetter__", object_lookup_getter);
+    e.add_method(op, "__lookupSetter__", object_lookup_setter);
+    {
+        let pg = e.native_fn("get __proto__", proto_getter);
+        let ps = e.native_fn("set __proto__", proto_setter);
+        if let Some(o) = e.heap.obj_mut(op) {
+            o.define_accessor(
+                "__proto__",
+                pg,
+                ps,
+                crate::heap::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+    }
 
     // Function.prototype.
     let fp = e.protos.function;
@@ -436,6 +514,7 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(ap, "filter", array_filter);
     e.add_method(ap, "reduce", array_reduce);
     e.add_method(ap, "reduceRight", array_reduce_right);
+    e.add_method(ap, "copyWithin", array_copy_within);
     // Spec : joint `,` via `toLocaleString` des éléments — ici
     // `join` suffit (pas de locale, déviation documentée).
     e.add_method(ap, "toLocaleString", array_join);
@@ -661,6 +740,7 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(math, "hypot", math_hypot);
     e.add_method(math, "imul", math_imul);
     e.add_method(math, "clz32", math_clz32);
+    e.add_method(math, "f16round", math_f16round);
     let tag = e.str_val("Math");
     e.set_own(math, crate::interp::SYM_TO_STRING_TAG, tag, false);
     e.set_own(g, "Math", Value::Obj(math), false);
@@ -5590,4 +5670,499 @@ fn usp_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         })
         .collect();
     Ok(crate::collections::iter_obj(e, vals))
+}
+
+// ------------------------------------------------------------------
+// JS-C17 — Float16/copyWithin/crypto/Iterator/Annex-B/SuppressedError
+// ------------------------------------------------------------------
+
+/// `Array.prototype.copyWithin(target, start?, end?)` — copie
+/// interne relative (indices négatifs = depuis la fin, spec).
+fn array_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = this_array(e, this)?;
+    let mut elems = take_elems(e, id);
+    let len = elems.len() as i64;
+    let rel = |v: Value, e: &mut Engine| -> JsResult<i64> { Ok(e.to_number(v)? as i64) };
+    let target = match rel(arg(args, 0), e)? {
+        i if i < 0 => (len + i).max(0),
+        i => i.min(len),
+    };
+    let start = match arg(args, 1) {
+        Value::Undefined => 0,
+        v => match rel(v, e)? {
+            i if i < 0 => (len + i).max(0),
+            i => i.min(len),
+        },
+    };
+    let end = match arg(args, 2) {
+        Value::Undefined => len,
+        v => match rel(v, e)? {
+            i if i < 0 => (len + i).max(0),
+            i => i.min(len),
+        },
+    };
+    // Snapshot de la plage source — `copyWithin` a une sémantique
+    // memmove : les chevauchements copient les valeurs d'origine,
+    // pas les valeurs déjà réécrites (spec `Array.prototype.
+    // copyWithin` — copie d'abord, puis pose).
+    let count = (end - start).max(0).min(len - target);
+    if count > 0 {
+        let chunk: Vec<Value> = elems[start as usize..(start + count) as usize].to_vec();
+        for (k, v) in chunk.into_iter().enumerate() {
+            elems[(target as usize) + k] = v;
+        }
+    }
+    put_elems(e, id, elems);
+    Ok(this)
+}
+
+/// `Math.f16round(v)` — arrondi IEEE-754 binary16 (ES2025).
+fn math_f16round(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let v = e.to_number(arg(args, 0))?;
+    Ok(Value::Num(crate::heap::f16_to_f64(
+        crate::heap::f64_to_f16(v),
+    )))
+}
+
+/// PRNG partagé `Math.random`/`crypto` — xorshift64 (même schéma
+/// que `math_random` ; PAS cryptographique — déviation).
+fn next_rand(e: &mut Engine) -> u64 {
+    e.rng ^= e.rng >> 12;
+    e.rng ^= e.rng << 25;
+    e.rng ^= e.rng >> 27;
+    e.rng.wrapping_mul(0x2545_f491_4f6c_dd1d)
+}
+
+/// `crypto.getRandomValues(ta)` — remplit la vue d'octets
+/// pseudo-aléatoires (`TypeError` sur non-TypedArray, spec).
+fn crypto_get_random_values(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let v = arg(args, 0);
+    let Value::Obj(id) = v else {
+        return Err(e.type_error("getRandomValues needs a TypedArray"));
+    };
+    let Some((ta, bid, offset, len)) = e.heap.obj(id).and_then(|o| match &o.kind {
+        ObjKind::TypedArray {
+            ta,
+            buffer: Value::Obj(bid),
+            offset,
+            len,
+        } => Some((*ta, *bid, *offset, *len)),
+        _ => None,
+    }) else {
+        return Err(e.type_error("getRandomValues needs a TypedArray"));
+    };
+    // Quota spec : 65 536 octets max.
+    if len.saturating_mul(ta.size()) > 65_536 {
+        return Err(e.type_error("getRandomValues: quota exceeded"));
+    }
+    let n = len * ta.size();
+    // Tirage hors emprunt du heap (le PRNG vit dans `e`) —
+    // borné par le quota ci-dessus (≤ 64 Ko).
+    let mut buf = vec![0u8; n];
+    for chunk in buf.chunks_mut(8) {
+        let r = next_rand(e);
+        chunk.copy_from_slice(&r.to_le_bytes()[..chunk.len()]);
+    }
+    let Some(b) = e.heap.obj_mut(bid) else {
+        return Err(e.type_error("detached typed array"));
+    };
+    let ObjKind::ByteBuf(bytes) = &mut b.kind else {
+        return Err(e.type_error("detached typed array"));
+    };
+    let end = (offset + n).min(bytes.len());
+    bytes[offset..end].copy_from_slice(&buf[..end - offset]);
+    Ok(v)
+}
+
+/// `crypto.randomUUID()` — v4 via le PRNG moteur (déviation :
+/// pas cryptographique).
+fn crypto_random_uuid(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let mut b = [0u8; 16];
+    for chunk in b.chunks_mut(8) {
+        let r = next_rand(e);
+        chunk.copy_from_slice(&r.to_le_bytes()[..chunk.len()]);
+    }
+    b[6] = (b[6] & 0x0f) | 0x40; // version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // variant RFC 4122
+    let hex = |v: u8| format!("{v:02x}");
+    let s: String = b.iter().map(|&v| hex(v)).collect();
+    Ok(e.str_val(format!(
+        "{}-{}-{}-{}-{}",
+        &s[0..8],
+        &s[8..12],
+        &s[12..16],
+        &s[16..20],
+        &s[20..32]
+    )))
+}
+
+/// `new Iterator()` — constructeur abstrait (spec `TypeError`).
+fn iterator_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Err(e.type_error("The Iterator constructor is abstract"))
+}
+
+/// `Iterator.from(v)` — un itérateur passe tel quel (spec :
+/// `GetIteratorFlattenable`), un itérable passe par `@@iterator`.
+fn iterator_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let v = arg(args, 0);
+    if let Value::Obj(id) = v {
+        if e.get_prop(id, "next").is_some_and(|n| e.is_callable(n)) {
+            return Ok(v);
+        }
+        if let Some(m) = e.get_prop(id, crate::interp::SYM_ITERATOR) {
+            if e.is_callable(m) {
+                return e.call_value(m, v, &[]);
+            }
+        }
+        return Err(e.type_error("Iterator.from on non-iterable"));
+    }
+    if let Value::Str(_) = v {
+        let items = e.iter_values(v)?;
+        return Ok(crate::collections::iter_obj(e, items));
+    }
+    Err(e.type_error("Iterator.from on non-iterable"))
+}
+
+/// `SuppressedError(error, suppressed, message?)` — ES2026.
+fn suppressed_error_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let msg = match arg(args, 2) {
+        Value::Undefined => String::new(),
+        v => e.to_js_string(v)?,
+    };
+    let se_p = e
+        .get_prop(e.global, "SuppressedError")
+        .and_then(|c| {
+            e.get_prop(
+                match c {
+                    Value::Obj(id) => id,
+                    _ => e.protos.error,
+                },
+                "prototype",
+            )
+        })
+        .unwrap_or(Value::Obj(e.protos.error));
+    let err = e.error_value(
+        match se_p {
+            Value::Obj(id) => id,
+            _ => e.protos.error,
+        },
+        "SuppressedError",
+        &msg,
+    );
+    if let Value::Obj(id) = err {
+        e.set_own(id, "error", arg(args, 0), true);
+        e.set_own(id, "suppressed", arg(args, 1), true);
+    }
+    Ok(err)
+}
+
+/// `Object.prototype.propertyIsEnumerable(k)` — own + flag
+/// énumérable (spec ; indices de string wrappers = énumérables).
+fn object_property_is_enumerable(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let key = e.prop_key(arg(args, 0))?;
+    match this {
+        Value::Obj(id) => {
+            let Some(p) = e.get_own_prop(id, &key)? else {
+                return Ok(Value::Bool(false));
+            };
+            Ok(Value::Bool(p.enumerable()))
+        }
+        Value::Str(sid) => {
+            let s = e.heap.string(sid).unwrap_or_default();
+            let ok = crate::interp::array_index(&key).is_some_and(|i| i < s.chars().count());
+            Ok(Value::Bool(ok))
+        }
+        _ => Ok(Value::Bool(false)),
+    }
+}
+
+/// `__defineGetter__(k, f)` — accesseur `{get: f}` énumérable +
+/// configurable (Annex B).
+fn object_define_getter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    define_accessor_annex(e, this, arg(args, 0), arg(args, 1), true)
+}
+
+fn object_define_setter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    define_accessor_annex(e, this, arg(args, 0), arg(args, 1), false)
+}
+
+fn define_accessor_annex(
+    e: &mut Engine,
+    this: Value,
+    key_v: Value,
+    f: Value,
+    is_get: bool,
+) -> JsResult<Value> {
+    if !e.is_callable(f) {
+        return Err(e.type_error("__defineGetter__/__defineSetter__ needs a function"));
+    }
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("can't define accessor on a primitive"));
+    };
+    let key = e.prop_key(key_v)?;
+    let (get, set) = if is_get {
+        (f, Value::Undefined)
+    } else {
+        (Value::Undefined, f)
+    };
+    if let Some(o) = e.heap.obj_mut(id) {
+        o.define_accessor(
+            &key,
+            get,
+            set,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: true,
+                configurable: true,
+            },
+        );
+    }
+    Ok(Value::Undefined)
+}
+
+/// `__lookupGetter__(k)` — premier `get` trouvé en remontant la
+/// chaîne de prototypes (Annex B).
+fn object_lookup_getter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    lookup_accessor_annex(e, this, arg(args, 0), true)
+}
+
+fn object_lookup_setter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    lookup_accessor_annex(e, this, arg(args, 0), false)
+}
+
+fn lookup_accessor_annex(
+    e: &mut Engine,
+    this: Value,
+    key_v: Value,
+    is_get: bool,
+) -> JsResult<Value> {
+    let key = e.prop_key(key_v)?;
+    let Value::Obj(mut id) = this else {
+        return Ok(Value::Undefined);
+    };
+    let mut hops = 0;
+    loop {
+        hops += 1;
+        if hops > 64 {
+            return Ok(Value::Undefined);
+        }
+        let Some(o) = e.heap.obj(id) else {
+            return Ok(Value::Undefined);
+        };
+        if let Some(crate::heap::Prop::Acc { get, set, .. }) = o.find(&key) {
+            return Ok(if is_get { get } else { set });
+        }
+        match o.proto {
+            Value::Obj(next) => id = next,
+            _ => return Ok(Value::Undefined),
+        }
+    }
+}
+
+/// `get __proto__` (Annex B) — `[[Prototype]]` du receiver ;
+/// primitives → proto de leur wrapper (`(1).__proto__` =
+/// `Number.prototype`).
+fn proto_getter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    match this {
+        Value::Obj(id) => Ok(e.heap.obj(id).map_or(Value::Null, |o| o.proto)),
+        Value::Str(_) => Ok(Value::Obj(e.protos.string)),
+        Value::Num(_) => Ok(Value::Obj(e.protos.number)),
+        Value::Bool(_) => Ok(Value::Obj(e.protos.boolean)),
+        Value::Big(_) => Ok(Value::Obj(e.protos.bigint)),
+        _ => Ok(Value::Null),
+    }
+}
+
+/// `set __proto__` (Annex B) — `o.proto = v` si `v` est objet ou
+/// `null` ; autres valeurs ignorées (spec).
+fn proto_setter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = this {
+        if let v @ (Value::Obj(_) | Value::Null) = arg(args, 0) {
+            if let Some(o) = e.heap.obj_mut(id) {
+                o.proto = v;
+            }
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+// ------------------------------------------------------------------
+// JS-C17 — `DisposableStack` (ES2026)
+// ------------------------------------------------------------------
+
+/// Extrait la pile interne (vérifie `ObjKind::DispStack`).
+fn ds_state(e: &mut Engine, this: Value) -> JsResult<ObjId> {
+    match this {
+        Value::Obj(id) => match e.heap.obj(id).map(|o| &o.kind) {
+            Some(ObjKind::DispStack { .. }) => Ok(id),
+            _ => Err(e.type_error("not a DisposableStack")),
+        },
+        _ => Err(e.type_error("not a DisposableStack")),
+    }
+}
+
+/// `ReferenceError` sur pile déjà déposée (spec `dispose`/`use`).
+fn ds_live(e: &mut Engine, id: ObjId) -> JsResult<()> {
+    let disposed = match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::DispStack { disposed, .. }) => *disposed,
+        _ => true,
+    };
+    if disposed {
+        Err(e.ref_error("DisposableStack is already disposed"))
+    } else {
+        Ok(())
+    }
+}
+
+fn ds_push(e: &mut Engine, id: ObjId, f: Value, t: Value, v: Value) {
+    if let Some(o) = e.heap.obj_mut(id) {
+        if let ObjKind::DispStack { stack, .. } = &mut o.kind {
+            stack.push((f, t, v));
+        }
+    }
+}
+
+fn disposable_stack_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let proto = e
+        .get_prop(e.global, "DisposableStack")
+        .and_then(|c| match c {
+            Value::Obj(cid) => e.get_prop(cid, "prototype"),
+            _ => None,
+        })
+        .unwrap_or(Value::Obj(e.protos.object));
+    let mut o = crate::heap::Object::ordinary(proto);
+    o.kind = ObjKind::DispStack {
+        disposed: false,
+        stack: Vec::new(),
+    };
+    Ok(Value::Obj(e.heap.alloc_obj(o)))
+}
+
+/// `get disposed` — `true` après `dispose()`/`move()`.
+fn ds_disposed_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = ds_state(e, this)?;
+    Ok(Value::Bool(ds_live(e, id).is_err()))
+}
+
+/// `use(v)` — enregistre `v[@@dispose]` ; `null`/`undefined`
+/// passent sans enregistrement (spec).
+fn ds_use(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = ds_state(e, this)?;
+    ds_live(e, id)?;
+    let v = arg(args, 0);
+    if matches!(v, Value::Null | Value::Undefined) {
+        return Ok(v);
+    }
+    let m = match v {
+        Value::Obj(vid) => e.get_prop(vid, crate::interp::SYM_DISPOSE),
+        _ => None,
+    };
+    match m {
+        Some(f) if e.is_callable(f) => {
+            // `v[@@dispose]()` — `this` = la ressource, pas d'arg.
+            ds_push(e, id, f, v, Value::Undefined);
+            Ok(v)
+        }
+        _ => Err(e.type_error("value has no [Symbol.dispose] method")),
+    }
+}
+
+/// `adopt(v, f)` — disposeur arbitraire `f(v)`.
+fn ds_adopt(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = ds_state(e, this)?;
+    ds_live(e, id)?;
+    let f = arg(args, 1);
+    if !e.is_callable(f) {
+        return Err(e.type_error("adopt onDispose is not callable"));
+    }
+    ds_push(e, id, f, Value::Undefined, arg(args, 0));
+    Ok(arg(args, 0))
+}
+
+/// `defer(f)` — disposeur sans argument.
+fn ds_defer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = ds_state(e, this)?;
+    ds_live(e, id)?;
+    let f = arg(args, 0);
+    if !e.is_callable(f) {
+        return Err(e.type_error("defer callback is not callable"));
+    }
+    ds_push(e, id, f, Value::Undefined, Value::Undefined);
+    Ok(Value::Undefined)
+}
+
+/// `dispose()` — LIFO ; première erreur propagée, les erreurs
+/// suivantes enroulées en `SuppressedError(err, prev)` (spec).
+fn ds_dispose(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = ds_state(e, this)?;
+    ds_live(e, id)?;
+    if let Some(o) = e.heap.obj_mut(id) {
+        if let ObjKind::DispStack { disposed, .. } = &mut o.kind {
+            *disposed = true;
+        }
+    }
+    let mut pending: Option<Value> = None;
+    loop {
+        let next = match e.heap.obj_mut(id).map(|o| &mut o.kind) {
+            Some(ObjKind::DispStack { stack, .. }) => stack.pop(),
+            _ => None,
+        };
+        let Some((f, t, v)) = next else {
+            break;
+        };
+        if let Err(Thrown(err)) = e.call_value(f, t, &[v]) {
+            pending = Some(match pending {
+                None => err,
+                Some(prev) => make_suppressed(e, err, prev),
+            });
+        }
+    }
+    match pending {
+        None => Ok(Value::Undefined),
+        Some(err) => Err(Thrown(err)),
+    }
+}
+
+/// `move()` — transfère la pile dans une nouvelle instance ;
+/// l'originale est marquée déposée (vide).
+fn ds_move(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = ds_state(e, this)?;
+    ds_live(e, id)?;
+    let fresh = disposable_stack_ctor(e, Value::Undefined, &[])?;
+    let mut moved = Vec::new();
+    if let Some(o) = e.heap.obj_mut(id) {
+        if let ObjKind::DispStack { disposed, stack } = &mut o.kind {
+            *disposed = true;
+            moved = std::mem::take(stack);
+        }
+    }
+    if let Value::Obj(nid) = fresh {
+        if let Some(o) = e.heap.obj_mut(nid) {
+            if let ObjKind::DispStack { stack, .. } = &mut o.kind {
+                *stack = moved;
+            }
+        }
+    }
+    Ok(fresh)
+}
+
+/// Construit un `SuppressedError` (partagé `dispose` + ctor).
+fn make_suppressed(e: &mut Engine, err: Value, prev: Value) -> Value {
+    let proto = e
+        .get_prop(e.global, "SuppressedError")
+        .and_then(|c| match c {
+            Value::Obj(cid) => e.get_prop(cid, "prototype"),
+            _ => None,
+        })
+        .unwrap_or(Value::Obj(e.protos.error));
+    let pid = match proto {
+        Value::Obj(p) => p,
+        _ => e.protos.error,
+    };
+    let v = e.error_value(pid, "SuppressedError", "");
+    if let Value::Obj(id) = v {
+        e.set_own(id, "error", err, true);
+        e.set_own(id, "suppressed", prev, true);
+    }
+    v
 }

@@ -360,6 +360,7 @@ pub(crate) fn install(e: &mut Engine) {
         (TaKind::F64, "getFloat64", "setFloat64"),
         (TaKind::I64, "getBigInt64", "setBigInt64"),
         (TaKind::U64, "getBigUint64", "setBigUint64"),
+        (TaKind::F16, "getFloat16", "setFloat16"),
     ] {
         let gv = e.bound_native(gname, dv_get, vec![Value::Num(kind.index() as f64)]);
         e.set_own(dvp, gname, gv, false);
@@ -420,6 +421,18 @@ pub(crate) fn install(e: &mut Engine) {
         let of = e.bound_native("of", ta_of, vec![Value::Num(ta.index() as f64)]);
         e.set_own(cid, "of", of, false);
         e.set_own(g, ta.name(), ctor, false);
+        // ES2025 `Uint8Array` — `fromBase64`/`fromHex` statiques et
+        // `toBase64`/`toHex`/`setFromBase64`/`setFromHex` proto.
+        if matches!(ta, TaKind::U8) {
+            let fb = e.native_fn("fromBase64", u8_from_base64);
+            e.set_own(cid, "fromBase64", fb, false);
+            let fh = e.native_fn("fromHex", u8_from_hex);
+            e.set_own(cid, "fromHex", fh, false);
+            e.add_method(proto, "toBase64", u8_to_base64);
+            e.add_method(proto, "toHex", u8_to_hex);
+            e.add_method(proto, "setFromBase64", u8_set_from_base64);
+            e.add_method(proto, "setFromHex", u8_set_from_hex);
+        }
     }
 }
 
@@ -643,6 +656,14 @@ fn dv_num(kind: TaKind, bytes: &[u8], off: usize, le: bool) -> Option<f64> {
                 f64::from_be_bytes(a)
             }
         }
+        TaKind::F16 => {
+            let a = [b[0], b[1]];
+            crate::heap::f16_to_f64(if le {
+                u16::from_le_bytes(a)
+            } else {
+                u16::from_be_bytes(a)
+            })
+        }
         // Les accesseurs `getBigInt64`/`getBigUint64` ne passent pas
         // par `dv_num` — voir `dv_get` (retour `Value::Big`).
         TaKind::I64 => {
@@ -789,6 +810,11 @@ fn dv_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
                 }
                 TaKind::F32 => {
                     let a = v as f32;
+                    let b = if le { a.to_le_bytes() } else { a.to_be_bytes() };
+                    bytes[o..n].copy_from_slice(&b);
+                }
+                TaKind::F16 => {
+                    let a = crate::heap::f64_to_f16(v);
                     let b = if le { a.to_le_bytes() } else { a.to_be_bytes() };
                     bytes[o..n].copy_from_slice(&b);
                 }
@@ -1337,4 +1363,184 @@ fn ta_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         items.push(e.new_array(vec![Value::Num(i as f64), *v]));
     }
     Ok(crate::collections::iter_obj(e, items))
+}
+
+// ------------------------------------------------------------------
+// JS-C17 — `Uint8Array` base64/hex (ES2025)
+// ------------------------------------------------------------------
+
+const B64: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn b64_val(c: u8) -> Option<u8> {
+    match c {
+        b'A'..=b'Z' => Some(c - b'A'),
+        b'a'..=b'z' => Some(c - b'a' + 26),
+        b'0'..=b'9' => Some(c - b'0' + 52),
+        b'+' | b'-' => Some(62),
+        b'/' | b'_' => Some(63),
+        _ => None,
+    }
+}
+
+/// `Uint8Array.fromBase64(str)` — alphabet standard + urlsafe
+/// (acceptés ensemble, tolérance navigateur), whitespace ignoré.
+fn u8_from_base64(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_js_string(arg(args, 0))?;
+    match b64_decode(&s) {
+        Some(bytes) => Ok(new_u8_array(e, bytes)),
+        None => Err(e.syntax_error("invalid base64")),
+    }
+}
+
+/// `Uint8Array.fromHex(str)` — paires hex strictes, `SyntaxError`
+/// sur caractère invalide ou longueur impaire (spec).
+fn u8_from_hex(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_js_string(arg(args, 0))?;
+    match hex_decode(&s) {
+        Some(bytes) => Ok(new_u8_array(e, bytes)),
+        None => Err(e.syntax_error("invalid hex string")),
+    }
+}
+
+fn u8_to_base64(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let bytes = u8_bytes(e, this)?;
+    Ok(e.str_val(b64_encode(&bytes)))
+}
+
+fn u8_to_hex(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let bytes = u8_bytes(e, this)?;
+    Ok(e.str_val(hex_encode(&bytes)))
+}
+
+/// `setFromBase64(str)` → `{read, written}` ; `SyntaxError` si
+/// invalide, `TypeError` si ça déborde la vue.
+fn u8_set_from_base64(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_js_string(arg(args, 0))?;
+    let Some(src) = b64_decode(&s) else {
+        return Err(e.syntax_error("invalid base64"));
+    };
+    u8_set_from(e, this, &src)
+}
+
+fn u8_set_from_hex(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_js_string(arg(args, 0))?;
+    let Some(src) = hex_decode(&s) else {
+        return Err(e.syntax_error("invalid hex string"));
+    };
+    u8_set_from(e, this, &src)
+}
+
+/// Octets de la vue `this` (région `offset..offset+len` — `Uint8`
+/// élément = 1 octet).
+fn u8_bytes(e: &mut Engine, this: Value) -> JsResult<Vec<u8>> {
+    let (ta, bid, off, len) = ta_view(e, this)?;
+    if !matches!(ta, TaKind::U8 | TaKind::U8C) {
+        return Err(e.type_error("method needs a Uint8Array"));
+    }
+    match e.heap.obj(bid).map(|b| &b.kind) {
+        Some(ObjKind::ByteBuf(b)) => Ok(b[off..off + len].to_vec()),
+        _ => Err(e.type_error("detached typed array")),
+    }
+}
+
+fn u8_set_from(e: &mut Engine, this: Value, src: &[u8]) -> JsResult<Value> {
+    let (ta, bid, off, len) = ta_view(e, this)?;
+    if !matches!(ta, TaKind::U8 | TaKind::U8C) {
+        return Err(e.type_error("method needs a Uint8Array"));
+    }
+    if src.len() > len {
+        return Err(e.type_error("source too large for target view"));
+    }
+    let read = src.len();
+    match e.heap.obj_mut(bid) {
+        Some(b) => {
+            if let ObjKind::ByteBuf(bytes) = &mut b.kind {
+                bytes[off..off + src.len()].copy_from_slice(src);
+            }
+        }
+        None => return Err(e.type_error("detached typed array")),
+    }
+    let o = e.new_object();
+    e.set_own(o, "read", Value::Num(read as f64), true);
+    e.set_own(o, "written", Value::Num(read as f64), true);
+    Ok(Value::Obj(o))
+}
+
+fn b64_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let (b0, b1, b2) = (
+            c[0],
+            c.get(1).copied().unwrap_or(0),
+            c.get(2).copied().unwrap_or(0),
+        );
+        out.push(B64[(b0 >> 2) as usize] as char);
+        out.push(B64[((b0 & 3) << 4 | b1 >> 4) as usize] as char);
+        out.push(if c.len() > 1 {
+            B64[((b1 & 0xf) << 2 | b2 >> 6) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if c.len() > 2 {
+            B64[(b2 & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    let mut bits = 0u32;
+    let mut nbits = 0u32;
+    let mut out = Vec::new();
+    let mut pad = false;
+    for &c in s.as_bytes() {
+        match c {
+            b' ' | b'\t' | b'\n' | b'\r' => {}
+            b'=' => pad = true,
+            _ => {
+                if pad {
+                    return None; // données après `=`
+                }
+                let v = b64_val(c)?;
+                bits = (bits << 6) | u32::from(v);
+                nbits += 6;
+                if nbits >= 8 {
+                    nbits -= 8;
+                    out.push((bits >> nbits) as u8);
+                    bits &= (1 << nbits) - 1;
+                }
+            }
+        }
+    }
+    // Bits résiduels non-nuls = troncature invalide.
+    if nbits > 0 && bits != 0 {
+        return None;
+    }
+    Some(out)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
+}
+
+fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    let b = s.as_bytes();
+    if b.len() % 2 != 0 {
+        return None;
+    }
+    let dig = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
+    let mut out = Vec::with_capacity(b.len() / 2);
+    for c in b.chunks_exact(2) {
+        match (dig(c[0]), dig(c[1])) {
+            (Some(h), Some(l)) => out.push(h * 16 + l),
+            _ => return None,
+        }
+    }
+    Some(out)
 }
