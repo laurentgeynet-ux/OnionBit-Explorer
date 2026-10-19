@@ -44,25 +44,6 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   implicites, foster parenting, rawtext/RCDATA/script, quirks,
   tag-soup sans panic, découpage incrémental équivalent au
   one-shot.
-- **Étape 11 — `explorer-html` : tree-builder** (`tree.rs`,
-  ~2 000 lignes) : modes d'insertion de la spec WHATWG
-  (Initial → AfterAfterBody dont InTable/InTableBody/InRow/InCell/
-  InCaption/InColumnGroup/InSelect/Text), `html`/`head`/`body`
-  synthétisés, scopes par défaut/bouton/liste/table, liste des
-  éléments de format actifs (AFE) avec reconstruction et adoption
-  agency simplifiée, foster parenting (texte et éléments
-  redirigés avant `<table>`), `<tbody>`/`<tr>` implicites,
-  pilotage du tokenizer (RCDATA `title`/`textarea`, rawtext
-  `style`/raw, `ScriptData`, PLAINTEXT), fermetures implicites
-  (`<p>`/`<li>`/`<dd>`), `<option>` chaînée, quirks/
-  limited-quirks par DOCTYPE (liste WHATWG, règle « 4.01 sans
-  system id → quirks »), `
-` initial sauté après `<pre>`/
-  `<textarea>`, contenu post-`</body>`/`</html>` retraité en
-  InBody, `</html>` après body → AfterAfterBody. Parse incrémental
-  (`feed`/`next_token`/`drive`) — `set_content_state` actif entre
-  tokens. 26 tests dont dumps style html5lib et parité
-  incrémental/one-shot.
 - **Étape 10 — `explorer-html` : encodage, entités et tokenizer
   incrémental** (`encoding.rs`, `entities.rs`, `token.rs`,
   `tokenizer.rs`) : sniffing WHATWG — BOM UTF-8/UTF-16LE/BE,
