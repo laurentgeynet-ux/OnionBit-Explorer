@@ -1,0 +1,246 @@
+// This file is part of Explorer.
+// Copyright (C) 2026 Laurent Geynet
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! Tests de la cascade : origines, spécificité, `!important`,
+//! héritage, mots-clés, media queries, feuille UA.
+
+use explorer_css::{ComputedStyle, Origin, StyleEngine, StyleEnv};
+use explorer_dom::{Dom, NodeId};
+
+/// DOM minimal : `body > div#a > p.b "texte"`.
+struct Fixture {
+    dom: Dom,
+    #[allow(dead_code)]
+    body: NodeId,
+    div: NodeId,
+    p: NodeId,
+}
+
+fn fixture() -> Fixture {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let body = dom.create_element("body").unwrap();
+    dom.append_child(doc, body).unwrap();
+    let div = dom.create_element("div").unwrap();
+    dom.set_attribute(div, "id", "a").unwrap();
+    dom.append_child(body, div).unwrap();
+    let p = dom.create_element("p").unwrap();
+    dom.set_attribute(p, "class", "b").unwrap();
+    dom.append_child(div, p).unwrap();
+    let t = dom.create_text("texte").unwrap();
+    dom.append_child(p, t).unwrap();
+    Fixture { dom, body, div, p }
+}
+
+fn env() -> StyleEnv {
+    StyleEnv::default()
+}
+
+// ── origines et ordre ─────────────────────────────────────────
+
+#[test]
+fn feuille_ua_par_defaut() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let s = e.compute(&f.dom, f.div, &env());
+    // div est `display: block` via la feuille UA.
+    assert_eq!(s.get("display"), Some("block"));
+    // p aussi.
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("display"), Some("block"));
+}
+
+#[test]
+fn auteur_bat_ua() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("div { display: inline }", Origin::Author);
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("display"),
+        Some("inline")
+    );
+}
+
+#[test]
+fn specificite_bat_ordre() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    // La règle la moins spécifique arrive APRÈS — doit perdre.
+    e.add_css(
+        "#a { display: none } div { display: block }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("display"),
+        Some("none")
+    );
+}
+
+#[test]
+fn ordre_departage_a_specificite_egale() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("#a { display: block } #a { display: none }", Origin::Author);
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("display"),
+        Some("none")
+    );
+}
+
+#[test]
+fn important_bat_normal() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "#a { display: none } div { display: block !important }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("display"),
+        Some("block")
+    );
+}
+
+#[test]
+fn important_ua_bat_auteur() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("div { display: table !important }", Origin::UserAgent);
+    e.add_css("#a { display: none !important }", Origin::Author);
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("display"),
+        Some("table")
+    );
+}
+
+// ── héritage et mots-clés ─────────────────────────────────────
+
+#[test]
+fn heritage_propriete_heritee() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("div { color: red }", Origin::Author);
+    // p n'a pas de règle → hérite de color (héritée).
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("color"), Some("red"));
+}
+
+#[test]
+fn pas_d_heritage_propriete_non_heritee() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("div { margin-left: 9px }", Origin::Author);
+    // margin-left n'hérite pas et la feuille UA ne le fixe
+    // pas sur p → absent.
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("margin-left"), None);
+}
+
+#[test]
+fn heritage_explicite_mot_cle() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { margin-top: 9px } p.b { margin-top: inherit }",
+        Origin::Author,
+    );
+    // `inherit` force même une propriété non héritée.
+    assert_eq!(
+        e.compute(&f.dom, f.p, &env()).get("margin-top"),
+        Some("9px")
+    );
+}
+
+#[test]
+fn unset_herite_si_heritee_sinon_initiale() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { color: green; margin-top: 7px } \
+         p.b { color: unset; margin-top: unset }",
+        Origin::Author,
+    );
+    let s = e.compute(&f.dom, f.p, &env());
+    assert_eq!(s.get("color"), Some("green")); // héritée → parent
+    assert_eq!(s.get("margin-top"), Some("0")); // non héritée → initiale
+}
+
+#[test]
+fn initial_force_valeur_initiale() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("div { color: red } p.b { color: initial }", Origin::Author);
+    assert_eq!(
+        e.compute(&f.dom, f.p, &env()).get("color"),
+        Some("black") // valeur initiale de la table
+    );
+}
+
+#[test]
+fn propriete_custom_heritee() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("div { --x: 42px }", Origin::Author);
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("--x"), Some("42px"));
+}
+
+// ── media queries ─────────────────────────────────────────────
+
+#[test]
+fn media_query_filtrage() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@media (min-width: 600px) { div { display: none } }",
+        Origin::Author,
+    );
+    // env par défaut : 1024px → la règle s'applique.
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("display"),
+        Some("none")
+    );
+    // Petit viewport → ignorée.
+    let small = StyleEnv {
+        width_px: 400,
+        ..env()
+    };
+    assert_eq!(
+        e.compute(&f.dom, f.div, &small).get("display"),
+        Some("block") // retombe sur la feuille UA
+    );
+}
+
+#[test]
+fn media_negation_et_type() {
+    let f = fixture();
+    let mut eng = StyleEngine::new();
+    eng.add_css(
+        "@media not print { div { display: none } } \
+         @media print { div { margin-top: 9px } }",
+        Origin::Author,
+    );
+    let s = eng.compute(&f.dom, f.div, &env()); // env = screen
+    assert_eq!(s.get("display"), Some("none"));
+    assert_eq!(s.get("margin-top"), None);
+}
+
+// ── compute_tree ──────────────────────────────────────────────
+
+#[test]
+fn compute_tree_propague_l_heritage() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("body { color: teal }", Origin::Author);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(map.get(f.div).and_then(|s| s.get("color")), Some("teal"));
+    assert_eq!(map.get(f.p).and_then(|s| s.get("color")), Some("teal"));
+    assert_eq!(map.get(f.p).and_then(|s| s.get("display")), Some("block"));
+}
+
+#[test]
+fn compute_sur_handle_obsolete_ne_panique_pas() {
+    let mut f = fixture();
+    f.dom.remove(f.div).unwrap();
+    let _ = f.dom.collect();
+    let e = StyleEngine::new();
+    let s: ComputedStyle = e.compute(&f.dom, f.div, &env());
+    assert_eq!(s.get("display"), None); // vide, pas de panic
+}

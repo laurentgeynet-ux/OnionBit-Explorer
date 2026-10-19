@@ -125,7 +125,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   at-rules (`@media` minimal), tolérance aux erreurs de la spec.
 - [x] **Étape 14. Sélecteurs.** Tag/classe/id/descendant/enfant/
   attribut — matching sur le DOM.
-- [ ] **Étape 15. Cascade + héritage.** Spécificité, `!important`,
+- [x] **Étape 15. Cascade + héritage.** Spécificité, `!important`,
   valeurs initiales/héritées, `computed style` par nœud.
 - [ ] **Étape 16. Propriétés essentielles.** `display` (dont
   `list-item`, `none`), `margin`, `padding`, `border`,

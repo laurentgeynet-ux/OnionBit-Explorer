@@ -13,13 +13,24 @@
 //! structurelles, spécificité. Le matching interroge
 //! [`explorer_dom::Dom`] par ses accesseurs `Result` — un handle
 //! obsolète dégrade en non-match.
+//!
+//! Étape 15 : [`StyleEngine`] — cascade (UA < auteur <
+//! `!important`), ordre source, héritage, mots-clés
+//! `inherit`/`initial`/`unset`, media queries évaluées sur
+//! [`StyleEnv`], feuille UA intégrée.
 
 #![forbid(unsafe_code)]
 
+mod cascade;
 mod parser;
 mod selector;
 mod token;
 mod tokenizer;
+
+pub use cascade::{
+    initial_value, is_inherited, media_matches, ComputedStyle, Origin, StyleEngine, StyleEnv,
+    StyleMap,
+};
 
 pub use parser::{
     parse_stylesheet, AtKind, AtRule, Declaration, ImportRule, MediaQuery, QualifiedRule, Rule,

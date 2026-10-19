@@ -29,6 +29,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - 13 tests `tests/gc.rs` : cycles, fermetures, timers,
     promesses, cache DOM, racines explicites, idempotence.
 
+- **Étape 15 — `explorer-css` : cascade + héritage +
+  computed style** (`cascade.rs`, ~500 lignes) : ordre de la
+  cascade **UA normal < auteur normal < auteur `!important` <
+  UA `!important`**, à rang égal spécificité puis ordre source ;
+  `StyleEngine` accumule les feuilles (`add_css`/`add_stylesheet`,
+  origine typée) avec sélecteurs pré-parsés. Mots-clés CSS-wide
+  `inherit`/`initial`/`unset`/`revert` ; table des propriétés
+  héritées (custom `--*` incluses) + table `initial_value`
+  couvrant les propriétés de l'étape 16. Media queries
+  évaluées sur `StyleEnv` (type, `min/max-width`, `-height`,
+  `orientation`, négation, imbrication AND) — une règle sous
+  `@media` non vérifié est sautée. **Feuille UA intégrée**
+  (`UA_CSS`, défauts HTML Rendering) écrite en CSS et parsée
+  par notre propre pipeline (dogfooding) ; `compute` (nœud
+  seul) et `compute_tree` (mémoïsation parent→enfant, O(n)).
+  16 tests : origines, `!important`, héritage explicite,
+  `unset`, media queries, handles obsolètes.
+
 - **Étape 14 — `explorer-css` : sélecteurs + matching DOM**
   (`selector.rs`, ~700 lignes) : parsing depuis le flux de
   tokens — type, `*`, `.classe`, `#id`, `[a]`/`[a=v]`/`~=`/
