@@ -996,6 +996,17 @@ fn is_ident_part(c: char) -> bool {
         )
 }
 
+/// Wrappers `pub(crate)` pour `regexp.rs` — les noms de groupes
+/// capturants sont des `IdentifierName` (mêmes tables UAX #31).
+pub(crate) fn is_ident_start_pub(c: char) -> bool {
+    is_ident_start(c)
+}
+
+/// Voir [`is_ident_start_pub`].
+pub(crate) fn is_ident_part_pub(c: char) -> bool {
+    is_ident_part(c)
+}
+
 /// Terminateur de ligne ECMAScript : LF, CR, LS, PS — pilote
 /// l'ASI (`newline_before`) et le comptage de lignes. CRLF ne
 /// compte qu'une fois (géré par le consommateur).

@@ -2,24 +2,24 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `RegExp` semantics for `dillo-js`, built on the pure-Rust `regex`
-//! crate.
+//! `RegExp` semantics for `dillo-js`, built on the pure-Rust
+//! `fancy-regex` backtracker.
 //!
 //! Coverage: literals, `g i m s u y` flags, `exec`/`test` with
 //! `lastIndex`, `String.match`/`replace`/`split`/`search`.
 //!
-//! Deliberate limitation: the `regex` crate has no look-around or
-//! backreferences — JS patterns using `(?=)`, `(?!`, `(?<=`,
-//! `(?<!` or `\1` fail to compile and surface as `SyntaxError`
-//! (script-visible, catchable). Everything the jQuery era commonly
-//! uses — classes, quantifiers, anchors, alternation, captures,
-//! `(?:…)` — works.
+//! Engine: `fancy-regex` (hybrid backtracker, pure Rust) —
+//! look-around and backreferences (`(?=)`, `(?!`, `(?<=`, `(?<!`,
+//! `\1`, `\k<name>`) compile natively. A `BACKTRACK_LIMIT` bound
+//! caps hostile exponential patterns; an exhausted budget degrades
+//! to "no match" rather than hanging (documented deviation — real
+//! engines run on a watchdog, not a static bound).
 
 /// A compiled JS regular expression plus its per-object flags.
 #[allow(clippy::struct_excessive_bools)] // flags are flags.
 pub struct JsRegExp {
     /// Compiled pattern (JS `i`/`m`/`s` folded into inline flags).
-    re: regex::Regex,
+    re: fancy_regex::Regex,
     /// Pattern source as written (for `.source`/`toString`).
     pub source: String,
     /// `g` — global matching; drives `lastIndex` on exec/test.
@@ -78,7 +78,11 @@ impl JsRegExp {
             }
         }
         let mut pat = String::new();
-        if ignore_case {
+        // `i` : le backend fait du folding Unicode complet — exact
+        // en mode `u`, trop large en non-`u` où JS canonise par
+        // `ToUppercase` simple (`/\u{212a}/i` ne doit pas matcher
+        // 'k'). Non-`u` → folding manuel dans `translate_pattern`.
+        if ignore_case && unicode {
             pat.push_str("(?i)");
         }
         if multiline {
@@ -87,8 +91,14 @@ impl JsRegExp {
         if dot_all {
             pat.push_str("(?s)");
         }
-        pat.push_str(&translate_pattern(source, unicode)?);
-        let re = regex::Regex::new(&pat)
+        pat.push_str(&translate_pattern(
+            source,
+            unicode,
+            ignore_case && !unicode,
+        )?);
+        let re = fancy_regex::RegexBuilder::new(&pat)
+            .backtrack_limit(BACKTRACK_LIMIT)
+            .build()
             .map_err(|e| format!("invalid regex /{source}/: {}", short_regex_error(&e)))?;
         Ok(JsRegExp {
             re,
@@ -130,7 +140,7 @@ impl JsRegExp {
     /// the match must begin exactly at `start`.
     pub fn exec(&self, hay: &str, start: usize) -> Option<ExecMatch> {
         let byte_start = char_to_byte(hay, start);
-        let caps = self.re.captures_at(hay, byte_start)?;
+        let caps = self.re.captures_from_pos(hay, byte_start).ok()??;
         let m = caps.get(0)?;
         if self.sticky && byte_to_char(hay, m.start()) != start {
             return None;
@@ -173,7 +183,7 @@ impl JsRegExp {
         let hay_len = hay.len();
         let mut pos = 0usize; // byte offset
         while pos <= hay_len {
-            match self.re.captures_at(hay, pos) {
+            match self.re.captures_from_pos(hay, pos).ok().flatten() {
                 None => break,
                 Some(caps) => {
                     let Some(m) = caps.get(0) else { break };
@@ -199,7 +209,7 @@ impl JsRegExp {
         out
     }
 
-    fn build_match(&self, hay: &str, caps: &regex::Captures) -> ExecMatch {
+    fn build_match(&self, hay: &str, caps: &fancy_regex::Captures) -> ExecMatch {
         let m = caps.get(0);
         let (index, end, start_b, end_b, text) = match m {
             Some(m) => (
@@ -235,147 +245,808 @@ impl JsRegExp {
 }
 
 /// `(?<name>…)` → `(?P<name>…)`; everything else passes through
-/// (regex-crate syntax is a superset of what we need).
-fn translate_pattern(src: &str, unicode: bool) -> Result<String, String> {
-    let mut out = String::with_capacity(src.len() + 4);
+/// JS source → `fancy-regex` pattern, with JS-side validation the
+/// backtracker doesn't do (it is *more* permissive than ECMA-262):
+///
+/// - `(?<name>…)` → `(?P<name>…)`, names validated as
+///   `IdentifierName` and checked for duplicates;
+/// - inline modifiers `(?ims:…)`/`(?ims-ims:…)` validated per
+///   ES2025 (`ims` only, no dup, disjoint sides, `:` mandatory) —
+///   `(?u:…)`, duplicates or a missing colon are `SyntaxError`;
+/// - `{n}`/`{n,}`/`{n,m}` quantifiers need a preceding atom and
+///   `n ≤ m`; bare `{`/`}`/`]` are `SyntaxError` in `u` mode
+///   (extended pattern chars), literals in sloppy Annex B;
+/// - `\u{hex}` normalised to `\x{hex}` (leading zeros stripped,
+///   `≤ 0x10FFFF`);
+/// - class ranges: `lo > hi` → `SyntaxError` (both modes); in `u`
+///   a bound may not be a class escape (`[\d-z]`/`[a-\d]`/`[--\d]`
+///   → `SyntaxError`) — sloppy keeps the `-` literal (`\-`);
+/// - `(?P…`/`(?#` rejected (non-JS forms the crate accepts);
+/// - `\0` → `\x{0}`, `\cX` → control char, surrogate pairs fused
+///   in `u` mode, identity escapes Annex B sloppy (strict in `u`);
+/// - `\k<name>`/`\1`–`\9` backrefs pass through natively —
+///   `\k<name>` before its group declaration is rewritten to an
+///   empty match (spec 21.2.2.9); out-of-range `\N` falls back to
+///   Annex B (valid prefix, legacy octal, `\8`/`\9` identity);
+/// - `fold` (`i` without `u`): case folding emitted by hand —
+///   `[cCU]` classes from `ToUppercase`/`ToLowercase` simple
+///   (canonicalisation guard: `upper(v) == upper(c)`), because the
+///   backend's `i` is full Unicode folding — `/\u{212a}/i` must
+///   not match 'k' (KELVIN has no JS-canonical case partner).
+fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, String> {
     let cs: Vec<char> = src.chars().collect();
+    let (all_names, n_groups) = prescan(&cs);
+    let mut t = Trans {
+        unicode,
+        fold,
+        n_groups,
+        names: std::collections::BTreeSet::new(),
+        all_names,
+    };
+    let mut out = String::with_capacity(src.len() + 8);
     let mut i = 0;
     let mut in_class = false;
+    // Un atome précède-t-il la position courante — requis pour un
+    // quantificateur `{n}` (`/{2}/` est toujours une erreur).
+    let mut last_atom = false;
+    // Atome de classe précédent — validation des ranges.
+    let mut class_prev: Option<ClassAtom> = None;
+    // `-` de range émis : le prochain atome en est la borne haute.
+    let mut class_dash = false;
+    // L'atome précédent était une borne de range — un `-` qui suit
+    // est littéral, jamais le début d'une autre range (`[a-b-c]`).
+    let mut class_prev_bound = false;
     while i < cs.len() {
-        match cs[i] {
-            '\\' => {
-                if let Some(&c) = cs.get(i + 1) {
-                    if c == '0' && !cs.get(i + 2).is_some_and(char::is_ascii_digit) {
-                        // JS `\0` (NUL) — le crate `regex` attend
-                        // `\x{0}` ; `\01`… reste un backref (rejeté
-                        // comme les autres `\N`).
-                        out.push_str("\\x{0}");
-                    } else if c == 'u' && cs.get(i + 2) == Some(&'{') {
-                        // `\u{XXXX}` (légal dans les deux modes) →
-                        // `\x{XXXX}` natif du crate.
-                        let mut j = i + 3;
-                        while j < cs.len() && cs[j] != '}' {
-                            j += 1;
+        let c = cs[i];
+        if c == '\\' {
+            let (frag, next) = t.escape(&cs, i, src)?;
+            if in_class {
+                out.push_str(&frag);
+                // Fold individuel — jamais sur une borne de range
+                // (le `-` émet le fold de la range en un bloc).
+                if t.fold {
+                    let is_bound = class_dash
+                        || (cs.get(next) == Some(&'-')
+                            && !matches!(class_atom_of(&cs, next + 1), ClassAtom::End));
+                    if !is_bound {
+                        if let ClassAtom::Char(cp) = class_atom_of(&cs, i) {
+                            emit_fold_variants(&mut out, cp);
                         }
-                        if j < cs.len() {
-                            out.push_str("\\x{");
-                            for &ch in &cs[i + 3..j] {
-                                out.push(ch);
-                            }
-                            out.push('}');
-                            i = j + 1;
-                            continue;
-                        }
-                        out.push_str("\\u");
-                    } else if c == 'u' && unicode {
-                        // Mode `u` : `\uD8xx\uDCxx` = un seul point
-                        // de code — le crate rejette les surrogates
-                        // seuls, on fusionne la paire.
-                        if let Some((cp, next)) = surrogate_pair(&cs, i) {
-                            out.push_str(&format!("\\x{{{:x}}}", u32::from(cp)));
-                            i = next;
-                            continue;
-                        }
-                        out.push_str("\\u");
-                    } else if c == 'c' && cs.get(i + 2).is_some_and(char::is_ascii_alphabetic) {
-                        // `\cX` → char de contrôle (le crate ne
-                        // connaît pas `\c`).
-                        let l = cs[i + 2];
-                        let v = u32::from(l) % 32;
-                        out.push_str(&format!("\\x{{{v:x}}}"));
-                        i += 3;
-                        continue;
-                    } else if unicode
-                        && c.is_ascii_alphanumeric()
-                        && !matches!(
-                            c,
-                            'd' | 'D'
-                                | 's'
-                                | 'S'
-                                | 'w'
-                                | 'W'
-                                | 'b'
-                                | 'B'
-                                | 'f'
-                                | 'n'
-                                | 'r'
-                                | 't'
-                                | 'v'
-                                | 'x'
-                                | 'u'
-                                | 'k'
-                                | 'p'
-                                | 'P'
-                                | '1'..='9'
-                        )
-                    {
-                        // Mode `u` : pas d'identity escape — erreur
-                        // de syntaxe stricte (spec `AtomEscape` ; le
-                        // crate `regex` accepterait `\a`/`\\e`).
-                        return Err(format!("invalid escape `\\{c}` in `u` regex /{src}/"));
-                    } else if !unicode
-                        && c.is_ascii_alphanumeric()
-                        && !matches!(
-                            c,
-                            'd' | 'D'
-                                | 's'
-                                | 'S'
-                                | 'w'
-                                | 'W'
-                                | 'b'
-                                | 'B'
-                                | 'f'
-                                | 'n'
-                                | 'r'
-                                | 't'
-                                | 'v'
-                                | 'x'
-                                | 'u'
-                                | 'k'
-                                | 'p'
-                                | 'P'
-                                | '1'..='9'
-                        )
-                    {
-                        // Annex B (sloppy) : `\` + alphanumérique
-                        // non reconnu = identity escape littéral
-                        // (`\y` → 'y'). En mode `u` c'est une
-                        // erreur → bras précédent.
-                        out.push(c);
-                    } else if !unicode && !c.is_ascii() {
-                        // Idem pour les non-ASCII (`\€` → '€').
-                        out.push(c);
-                    } else {
-                        out.push('\\');
-                        out.push(c);
                     }
-                    i += 2;
-                } else {
-                    out.push('\\');
+                }
+                class_prev = Some(class_atom_of(&cs, i));
+                class_prev_bound = class_dash;
+                class_dash = false;
+            } else {
+                emit_escape(&mut out, &frag, t.fold);
+                last_atom = true;
+            }
+            i = next;
+            continue;
+        }
+        match c {
+            '[' if !in_class => {
+                in_class = true;
+                class_prev = None;
+                class_dash = false;
+                class_prev_bound = false;
+                out.push('[');
+                // `[^` — la négation n'est pas un atome.
+                if cs.get(i + 1) == Some(&'^') {
+                    out.push('^');
                     i += 1;
                 }
+            }
+            ']' if in_class => {
+                in_class = false;
+                last_atom = true;
+                out.push(']');
+            }
+            ']' if unicode => {
+                // `]` nu : littéral sloppy (Annex B), erreur en `u`.
+                return Err(format!("unmatched `]` in `u` regex /{src}/"));
+            }
+            ']' => {
+                last_atom = true;
+                push_folded(&mut out, ']', t.fold);
+            }
+            '-' if in_class => {
+                let next = class_atom_of(&cs, i + 1);
+                let is_range =
+                    class_prev.is_some() && !class_prev_bound && !matches!(next, ClassAtom::End);
+                let escapes = matches!(class_prev, Some(ClassAtom::Escape))
+                    || matches!(next, ClassAtom::Escape);
+                if is_range && escapes {
+                    if unicode {
+                        return Err(format!("invalid class range in `u` regex /{src}/"));
+                    }
+                    // Sloppy : `-` littéral devant une class-escape.
+                    out.push_str("\\-");
+                    class_prev = Some(ClassAtom::Char(u32::from('-')));
+                    class_prev_bound = false;
+                } else if is_range {
+                    if let (Some(ClassAtom::Char(lo)), ClassAtom::Char(hi)) = (class_prev, next) {
+                        if lo > hi {
+                            return Err(format!("empty class range in /{src}/"));
+                        }
+                        if t.fold {
+                            // La range est émise en un bloc — un fold
+                            // individuel des bornes produirait des
+                            // ranges invalides (`a-z` → `aA-zA-Z`).
+                            let (hfrag, hnext) = if cs[i + 1] == '\\' {
+                                t.escape(&cs, i + 1, src)?
+                            } else {
+                                (cs[i + 1].to_string(), i + 2)
+                            };
+                            out.push('-');
+                            out.push_str(&hfrag);
+                            for map in [simple_upper, simple_lower] {
+                                if let (Some(flo), Some(fhi)) = (map(lo), map(hi)) {
+                                    // La variante de la borne doit
+                                    // se canoniser comme la borne.
+                                    if flo <= fhi
+                                        && simple_upper(flo).unwrap_or(flo)
+                                            == simple_upper(lo).unwrap_or(lo)
+                                        && simple_upper(fhi).unwrap_or(fhi)
+                                            == simple_upper(hi).unwrap_or(hi)
+                                    {
+                                        class_char(&mut out, flo);
+                                        out.push('-');
+                                        class_char(&mut out, fhi);
+                                    }
+                                }
+                            }
+                            class_prev = Some(ClassAtom::Char(hi));
+                            class_prev_bound = true;
+                            class_dash = false;
+                            i = hnext;
+                            continue;
+                        }
+                    }
+                    out.push('-');
+                    class_dash = true;
+                } else {
+                    out.push_str("\\-");
+                    class_prev = Some(ClassAtom::Char(u32::from('-')));
+                    class_prev_bound = false;
+                }
+            }
+            '(' if !in_class && cs.get(i + 1) == Some(&'?') => {
+                i = translate_group(&mut t, &cs, i, &mut out, src)?;
+                last_atom = false;
                 continue;
             }
-            '[' => in_class = true,
-            ']' => in_class = false,
-            '(' if !in_class
-                && cs.get(i + 1) == Some(&'?')
-                && cs.get(i + 2) == Some(&'<')
-                && !matches!(cs.get(i + 3), Some('=' | '!')) =>
-            {
-                out.push_str("(?P<");
-                i += 3;
-                continue;
+            '(' if !in_class => {
+                last_atom = false;
+                out.push('(');
             }
-            _ => {}
+            ')' if !in_class => {
+                last_atom = true;
+                out.push(')');
+            }
+            '{' | '}' if !in_class => {
+                // `{n,m}` quantifier → atome précédent requis ; la
+                // forme non-quantificateur est un littéral sloppy,
+                // une erreur `u` (extended pattern chars — `}`
+                // orphelin idem).
+                if let Some((lo, hi, next)) = parse_quantifier(&cs, i) {
+                    if !last_atom {
+                        return Err(format!("quantifier without atom in /{src}/"));
+                    }
+                    if let Some(hi) = hi {
+                        if lo > hi {
+                            return Err(format!("invalid quantifier range in /{src}/"));
+                        }
+                    }
+                    out.push_str(&cs[i..next].iter().collect::<String>());
+                    last_atom = false;
+                    i = next;
+                    continue;
+                }
+                if unicode {
+                    return Err(format!("lone `{c}` in `u` regex /{src}/"));
+                }
+                last_atom = true;
+                push_folded(&mut out, c, t.fold);
+            }
+            '|' if !in_class => {
+                last_atom = false;
+                out.push('|');
+            }
+            '^' | '$' if !in_class => {
+                // Annex B sloppy : les assertions sont
+                // « quantifiables » (`^*` toléré) — `u` exige un
+                // vrai atome.
+                last_atom = !unicode;
+                out.push(c);
+            }
+            '*' | '+' | '?' if !in_class => {
+                if !last_atom {
+                    return Err(format!("quantifier without atom in /{src}/"));
+                }
+                last_atom = false;
+                out.push(c);
+            }
+            '.' if !in_class => {
+                last_atom = true;
+                out.push('.');
+            }
+            _ => {
+                if in_class {
+                    out.push(c);
+                    if t.fold {
+                        let is_bound = class_dash
+                            || (cs.get(i + 1) == Some(&'-')
+                                && !matches!(class_atom_of(&cs, i + 2), ClassAtom::End));
+                        if !is_bound {
+                            emit_fold_variants(&mut out, u32::from(c));
+                        }
+                    }
+                    class_prev = Some(ClassAtom::Char(u32::from(c)));
+                    class_prev_bound = class_dash;
+                    class_dash = false;
+                } else {
+                    push_folded(&mut out, c, t.fold);
+                    last_atom = true;
+                }
+            }
         }
-        out.push(cs[i]);
         i += 1;
+    }
+    if in_class {
+        return Err(format!("unterminated class in /{src}/"));
     }
     Ok(out)
 }
 
-/// `\uD8xx\uDCxx` à `cs[i]` → (point de code fusionné, index
+/// État partagé du traducteur : flags, tables de groupes.
+struct Trans {
+    unicode: bool,
+    /// `i` en mode non-`u` : folding `ToUppercase` simple émis à la
+    /// main (le `i` du backend est un folding Unicode complet).
+    fold: bool,
+    /// Nombre de groupes capturants du pattern (validation `\N`).
+    n_groups: usize,
+    /// Noms déclarés *avant* la position courante.
+    names: std::collections::BTreeSet<String>,
+    /// Tous les noms du pattern (backref avant déclaration).
+    all_names: std::collections::BTreeSet<String>,
+}
+
+/// Premier passage : tous les noms de groupes capturants + leur
+/// nombre (les `\k<name>`/`\N` sont validés contre cette table —
+/// une backref nommée peut précéder sa déclaration en JS).
+fn prescan(cs: &[char]) -> (std::collections::BTreeSet<String>, usize) {
+    let mut all = std::collections::BTreeSet::new();
+    let mut n = 0usize;
+    let mut in_class = false;
+    let mut i = 0;
+    while i < cs.len() {
+        match cs[i] {
+            '\\' => i += 1,
+            '[' if !in_class => in_class = true,
+            ']' if in_class => in_class = false,
+            '(' if !in_class => {
+                if cs.get(i + 1) == Some(&'?') {
+                    if cs.get(i + 2) == Some(&'<') && !matches!(cs.get(i + 3), Some('=' | '!')) {
+                        let mut j = i + 3;
+                        let mut name = String::new();
+                        while let Some(&d) = cs.get(j) {
+                            if d == '>' {
+                                break;
+                            }
+                            name.push(d);
+                            j += 1;
+                        }
+                        if cs.get(j) == Some(&'>') && valid_group_name(&name) {
+                            all.insert(name);
+                            n += 1;
+                        }
+                    }
+                } else {
+                    n += 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    (all, n)
+}
+
+/// Fragment d'échappement hors classe en mode fold : littéral →
+/// `[cC]`, backref → `(?i:…)` (la comparaison reste insensible).
+fn emit_escape(out: &mut String, frag: &str, fold: bool) {
+    if !fold {
+        out.push_str(frag);
+    } else if let Some(c) = frag_char(frag) {
+        push_folded(out, c, true);
+    } else if frag.starts_with("\\k<") || frag.as_bytes().get(1).is_some_and(u8::is_ascii_digit) {
+        out.push_str("(?i:");
+        out.push_str(frag);
+        out.push(')');
+    } else {
+        out.push_str(frag);
+    }
+}
+
+/// Char littéral hors classe : `[cCU]` quand le char a une
+/// variante de casse (sémantique `i` non-`u` : `Canonicalize`
+/// compare les `ToUppercase`, donc 'A' matche aussi 'a').
+fn push_folded(out: &mut String, c: char, fold: bool) {
+    if fold {
+        let variants: Vec<u32> = fold_variants(u32::from(c)).collect();
+        if !variants.is_empty() {
+            out.push('[');
+            class_char(out, u32::from(c));
+            for v in variants {
+                class_char(out, v);
+            }
+            out.push(']');
+            return;
+        }
+    }
+    out.push(c);
+}
+
+/// Variantes de casse d'un char pour le fold non-`u` : uppercase
+/// et lowercase simples *dont la canonisation égale celle de `cp`*
+/// (multi-chars ignorés). La garde exclut `lower(KELVIN)='k'` :
+/// `upper('k')='K' ≠ KELVIN` → `/\u{212a}/i` ne matche pas 'k'.
+fn fold_variants(cp: u32) -> impl Iterator<Item = u32> {
+    let canon = simple_upper(cp).unwrap_or(cp);
+    [simple_upper(cp), simple_lower(cp)]
+        .into_iter()
+        .flatten()
+        .filter(move |&v| simple_upper(v).unwrap_or(v) == canon)
+}
+
+/// Émet les variantes de casse de `cp` comme items de classe.
+fn emit_fold_variants(out: &mut String, cp: u32) {
+    for v in fold_variants(cp) {
+        class_char(out, v);
+    }
+}
+
+/// `Canonicalize` JS non-`u` : `ToUppercase` retenu seulement s'il
+/// produit un char unique différent (ß → `SS` est ignoré).
+fn simple_upper(cp: u32) -> Option<u32> {
+    let c = char::from_u32(cp)?;
+    let mut it = c.to_uppercase();
+    let u = it.next()?;
+    (it.next().is_none() && u != c).then_some(u32::from(u))
+}
+
+/// Miroir de [`simple_upper`] pour `ToLowercase`.
+fn simple_lower(cp: u32) -> Option<u32> {
+    let c = char::from_u32(cp)?;
+    let mut it = c.to_lowercase();
+    let u = it.next()?;
+    (it.next().is_none() && u != c).then_some(u32::from(u))
+}
+
+/// Char sûr à injecter dans une classe `[…]` backend.
+fn class_char(out: &mut String, cp: u32) {
+    match char::from_u32(cp) {
+        Some(c) if c.is_ascii_alphanumeric() => out.push(c),
+        _ => out.push_str(&format!("\\x{{{cp:x}}}")),
+    }
+}
+
+/// Le fragment émis par `escape` est-il un char littéral unique ?
+fn frag_char(frag: &str) -> Option<char> {
+    let mut cs = frag.chars();
+    if let (Some(c), None) = (cs.next(), cs.next()) {
+        return Some(c);
+    }
+    let hex = frag.strip_prefix("\\x{")?.strip_suffix('}')?;
+    char::from_u32(u32::from_str_radix(hex, 16).ok()?)
+}
+
+/// Atome de classe vu par le validateur de ranges.
+#[derive(Clone, Copy)]
+enum ClassAtom {
+    /// Literal char (escape ou brut).
+    Char(u32),
+    /// `\d`/`\s`/`\w` et négations — ne peut borner une range `u`.
+    Escape,
+    /// Fin de classe / EOF — `-` devient littéral.
+    End,
+}
+
+/// Classifie l'atome de classe à `cs[i]` (sans l'émettre).
+fn class_atom_of(cs: &[char], i: usize) -> ClassAtom {
+    match cs.get(i) {
+        None | Some(']') => ClassAtom::End,
+        Some('\\') => match cs.get(i + 1) {
+            Some('d' | 'D' | 's' | 'S' | 'w' | 'W') => ClassAtom::Escape,
+            Some('b') => ClassAtom::Char(8), // `\b` in class = backspace
+            Some('n') => ClassAtom::Char(10),
+            Some('r') => ClassAtom::Char(13),
+            Some('t') => ClassAtom::Char(9),
+            Some('f') => ClassAtom::Char(12),
+            Some('v') => ClassAtom::Char(11),
+            Some(&c) => ClassAtom::Char(u32::from(c)),
+            None => ClassAtom::End,
+        },
+        Some(&c) => ClassAtom::Char(u32::from(c)),
+    }
+}
+
+/// `{n}` / `{n,}` / `{n,m}` à `cs[i]` → `(lo, hi, next)`.
+fn parse_quantifier(cs: &[char], i: usize) -> Option<(u32, Option<u32>, usize)> {
+    if cs.get(i) != Some(&'{') {
+        return None;
+    }
+    let mut j = i + 1;
+    let mut lo = 0u32;
+    let mut digits = 0;
+    while let Some(&d) = cs.get(j) {
+        if let Some(v) = d.to_digit(10) {
+            lo = lo.checked_mul(10)?.checked_add(v)?;
+            digits += 1;
+            j += 1;
+        } else {
+            break;
+        }
+    }
+    if digits == 0 {
+        return None;
+    }
+    match cs.get(j) {
+        Some('}') => Some((lo, Some(lo), j + 1)),
+        Some(',') => {
+            j += 1;
+            let mut hi = 0u32;
+            let mut hdigits = 0;
+            while let Some(&d) = cs.get(j) {
+                if let Some(v) = d.to_digit(10) {
+                    hi = hi.checked_mul(10)?.checked_add(v)?;
+                    hdigits += 1;
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            if cs.get(j) != Some(&'}') {
+                return None;
+            }
+            Some((lo, (hdigits > 0).then_some(hi), j + 1))
+        }
+        _ => None,
+    }
+}
+
+/// `(?…)` à `cs[i]` — validation JS + traduction. Retourne le
+/// prochain index (juste après la tête de groupe).
+fn translate_group(
+    t: &mut Trans,
+    cs: &[char],
+    i: usize,
+    out: &mut String,
+    src: &str,
+) -> Result<usize, String> {
+    let err = || format!("invalid group in /{src}/");
+    match cs.get(i + 2) {
+        Some(':' | '=' | '!') => {
+            out.push_str("(?");
+            out.push(cs[i + 2]);
+            Ok(i + 3)
+        }
+        Some('<') if matches!(cs.get(i + 3), Some('=' | '!')) => {
+            out.push_str("(?<");
+            out.push(cs[i + 3]);
+            Ok(i + 4)
+        }
+        Some('<') => {
+            // Groupe nommé : `name` = IdentifierName, unique.
+            let mut j = i + 3;
+            let mut name = String::new();
+            while let Some(&c) = cs.get(j) {
+                if c == '>' {
+                    break;
+                }
+                name.push(c);
+                j += 1;
+            }
+            if cs.get(j) != Some(&'>') {
+                return Err(err());
+            }
+            if !valid_group_name(&name) {
+                return Err(err());
+            }
+            if !t.names.insert(name.clone()) {
+                return Err(format!("duplicate group name `{name}` in /{src}/"));
+            }
+            out.push_str("(?P<");
+            out.push_str(&name);
+            out.push('>');
+            Ok(j + 1)
+        }
+        Some('P' | '#') => Err(err()),
+        _ => {
+            // Modificateurs inline ES2025 : `(?ims:…)` ou
+            // `(?ims-ims:…)` — `ims` seuls, pas de doublon, les
+            // deux côtés disjoints, `:` obligatoire.
+            let mut j = i + 2;
+            let mut add = Vec::new();
+            while let Some(&f) = cs.get(j) {
+                if matches!(f, 'i' | 'm' | 's') && !add.contains(&f) {
+                    add.push(f);
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            let mut sub = Vec::new();
+            let mut saw_dash = false;
+            if cs.get(j) == Some(&'-') {
+                saw_dash = true;
+                j += 1;
+                while let Some(&f) = cs.get(j) {
+                    if matches!(f, 'i' | 'm' | 's') && !sub.contains(&f) {
+                        sub.push(f);
+                        j += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if cs.get(j) != Some(&':')
+                || (add.is_empty() && !saw_dash)
+                || add.iter().any(|f| sub.contains(f))
+            {
+                return Err(err());
+            }
+            // Fragment validé → émis tel quel (fancy le comprend).
+            out.push_str(&cs[i..=j].iter().collect::<String>());
+            Ok(j + 1)
+        }
+    }
+}
+
+/// `name` est un `IdentifierName` (tables UAX #31 de
+/// `unicode-ident` + `Other_ID_*`, `$`/`_`/ZWNJ/ZWJ — les mêmes
+/// règles que le lexer).
+fn valid_group_name(name: &str) -> bool {
+    let mut cs = name.chars();
+    match cs.next() {
+        Some(c) if crate::lexer::is_ident_start_pub(c) => {}
+        _ => return false,
+    }
+    cs.all(crate::lexer::is_ident_part_pub)
+}
+
+impl Trans {
+    /// Un échappement `\…` à `cs[i]` → fragment natif + validation.
+    /// Retourne `(fragment, next_index)` ou une erreur `SyntaxError`.
+    /// Le fragment est toujours *entier* (`\xNN`, `\uHHHH`…
+    /// consommés) pour que le folding `i` non-`u` puisse décider.
+    fn escape(&self, cs: &[char], i: usize, src: &str) -> Result<(String, usize), String> {
+        let Some(&c) = cs.get(i + 1) else {
+            return Ok(("\\".into(), i + 1));
+        };
+        // `\u{hex}` — les deux modes ; valeur ≤ 0x10FFFF, zéros de
+        // tête normalisés (`\u{000000003f}` = '?').
+        if c == 'u' && cs.get(i + 2) == Some(&'{') {
+            let mut j = i + 3;
+            let mut v = 0u64;
+            let mut digits = 0;
+            while let Some(&d) = cs.get(j) {
+                if let Some(h) = d.to_digit(16) {
+                    v = v.saturating_mul(16).saturating_add(u64::from(h));
+                    digits += 1;
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            if cs.get(j) == Some(&'}') && digits > 0 {
+                if v > 0x10_FFFF {
+                    return Err(format!("\\u{{…}} out of range in /{src}/"));
+                }
+                return Ok((format!("\\x{{{v:x}}}"), j + 1));
+            }
+            if self.unicode {
+                return Err(format!("malformed \\u{{…}} in `u` regex /{src}/"));
+            }
+            // Sloppy : `\u{` malformé retombe sur l'identité `u`.
+            return Ok(("u".into(), i + 2));
+        }
+        if c == 'u' {
+            // Mode `u` : paire de surrogates fusionnée en un point.
+            if self.unicode {
+                if let Some((cp, next)) = surrogate_pair(cs, i) {
+                    return Ok((format!("\\x{{{:x}}}", u32::from(cp)), next));
+                }
+            }
+            if let Some(v) = hex4(cs, i + 2) {
+                return Ok((format!("\\x{{{v:x}}}"), i + 6));
+            }
+            if self.unicode {
+                return Err(format!("malformed \\u in `u` regex /{src}/"));
+            }
+            return Ok(("u".into(), i + 2));
+        }
+        if c == 'x' {
+            if let (Some(a), Some(b)) = (
+                cs.get(i + 2).and_then(|d| d.to_digit(16)),
+                cs.get(i + 3).and_then(|d| d.to_digit(16)),
+            ) {
+                return Ok((format!("\\x{{{:x}}}", a * 16 + b), i + 4));
+            }
+            if self.unicode {
+                return Err(format!("malformed \\x in `u` regex /{src}/"));
+            }
+            return Ok(("x".into(), i + 2));
+        }
+        if c == 'k' {
+            // `\k` n'est une identity escape Annex B qu'en sloppy
+            // SANS aucun groupe nommé dans le pattern ; sinon la
+            // forme `\k<name>` est exigée (malformée → SyntaxError).
+            let strict_k = self.unicode || !self.all_names.is_empty();
+            if cs.get(i + 2) == Some(&'<') {
+                let mut j = i + 3;
+                let mut name = String::new();
+                while let Some(&d) = cs.get(j) {
+                    if d == '>' {
+                        break;
+                    }
+                    name.push(d);
+                    j += 1;
+                }
+                if cs.get(j) == Some(&'>') && valid_group_name(&name) {
+                    if self.names.contains(&name) {
+                        return Ok((format!("\\k<{name}>"), j + 1));
+                    }
+                    if self.all_names.contains(&name) {
+                        // Référence avant déclaration : le groupe ne
+                        // peut pas avoir capturé ici → la backref
+                        // matche la chaîne vide (spec 21.2.2.9).
+                        return Ok(("(?:)".into(), j + 1));
+                    }
+                    if strict_k {
+                        return Err(format!("unknown group `{name}` in /{src}/"));
+                    }
+                    // Aucun groupe nommé dans le pattern : Annex B
+                    // retombe sur l'identité `\k` + `<name>` brut.
+                    return Ok(("k".into(), i + 2));
+                }
+                if strict_k {
+                    return Err(format!("malformed \\k<…> in regex /{src}/"));
+                }
+                return Ok(("k".into(), i + 2));
+            }
+            if strict_k {
+                return Err(format!("invalid escape `\\k` in regex /{src}/"));
+            }
+            return Ok(("k".into(), i + 2));
+        }
+        if c == '0' {
+            if !cs.get(i + 2).is_some_and(char::is_ascii_digit) {
+                return Ok(("\\x{0}".into(), i + 2));
+            }
+            if self.unicode {
+                return Err(format!("\\0 followed by digit in `u` regex /{src}/"));
+            }
+            // `\0` + chiffre : octale legacy Annex B (`\07`,
+            // `\077`) — ou NUL + '8'/'9' littéral.
+            let mut v = 0u32;
+            let mut j = i + 2;
+            let mut nd = 0;
+            while nd < 2 {
+                match cs.get(j).and_then(|d| d.to_digit(8)) {
+                    Some(o) => {
+                        v = v * 8 + o;
+                        j += 1;
+                        nd += 1;
+                    }
+                    None => break,
+                }
+            }
+            return Ok((format!("\\x{{{v:x}}}"), j));
+        }
+        if c.is_ascii_digit() {
+            return self.decimal_escape(cs, i, src);
+        }
+        if c == 'c' && cs.get(i + 2).is_some_and(char::is_ascii_alphabetic) {
+            let v = u32::from(cs[i + 2]) % 32;
+            return Ok((format!("\\x{{{v:x}}}"), i + 3));
+        }
+        if c.is_ascii_alphanumeric() {
+            let known = matches!(
+                c,
+                'd' | 'D'
+                    | 's'
+                    | 'S'
+                    | 'w'
+                    | 'W'
+                    | 'b'
+                    | 'B'
+                    | 'f'
+                    | 'n'
+                    | 'r'
+                    | 't'
+                    | 'v'
+                    | 'p'
+                    | 'P'
+            );
+            if self.unicode && !known {
+                return Err(format!("invalid escape `\\{c}` in `u` regex /{src}/"));
+            }
+            if !known {
+                // Annex B sloppy : identity escape littéral —
+                // `\c` non suivi d'une lettre garde son backslash.
+                if c == 'c' {
+                    return Ok(("\\\\c".into(), i + 2));
+                }
+                return Ok((c.to_string(), i + 2));
+            }
+            return Ok((format!("\\{c}"), i + 2));
+        }
+        if !self.unicode && !c.is_ascii() {
+            return Ok((c.to_string(), i + 2));
+        }
+        Ok((format!("\\{c}"), i + 2))
+    }
+
+    /// `\N…` : backref décimale, avec les retombées Annex B quand
+    /// le numéro excède les groupes du pattern (préfixe valide,
+    /// octale legacy `\1`–`\7`, identité `\8`/`\9`).
+    fn decimal_escape(&self, cs: &[char], i: usize, src: &str) -> Result<(String, usize), String> {
+        let mut j = i + 1;
+        let mut n = 0usize;
+        while let Some(v) = cs.get(j).and_then(|d| d.to_digit(10)) {
+            n = n.saturating_mul(10).saturating_add(v as usize);
+            j += 1;
+        }
+        if n >= 1 && n <= self.n_groups {
+            return Ok((format!("\\{n}"), j));
+        }
+        if self.unicode {
+            return Err(format!("invalid backref \\{n} in /{src}/"));
+        }
+        // Annex B : plus long préfixe désignant un groupe (`\12`
+        // avec 3 groupes → `\1` + '2'), sinon octale/identité.
+        let mut k = i + 1;
+        let mut v = 0usize;
+        let mut best = None;
+        while k < j {
+            v = v * 10 + (u32::from(cs[k]) - u32::from('0')) as usize;
+            k += 1;
+            if (1..=self.n_groups).contains(&v) {
+                best = Some(k);
+            }
+        }
+        if let Some(k) = best {
+            let prefix: String = cs[i + 1..k].iter().collect();
+            let rest: String = cs[k..j].iter().collect();
+            // `(?:rest)` après la backref : `\1` + `23` écrit `\123`
+            // serait relu comme la backref 123.
+            return Ok((format!("\\{prefix}(?:{rest})"), j));
+        }
+        let d0 = cs[i + 1];
+        if matches!(d0, '8' | '9') {
+            return Ok((d0.to_string(), i + 2));
+        }
+        let mut v = 0u32;
+        let mut k = i + 1;
+        let mut nd = 0;
+        while nd < 3 {
+            match cs.get(k).and_then(|d| d.to_digit(8)) {
+                Some(o) => {
+                    v = v * 8 + o;
+                    k += 1;
+                    nd += 1;
+                }
+                None => break,
+            }
+        }
+        Ok((format!("\\x{{{v:x}}}"), k))
+    }
+}
+
+/// `\uD8xx\uDCxx` à `cs[i]` → point de code fusionné (mode `u`
 /// suivant) — paire de surrogates complète uniquement.
 fn surrogate_pair(cs: &[char], i: usize) -> Option<(char, usize)> {
     // cs[i] == '\\', cs[i + 1] == 'u'
@@ -403,8 +1074,12 @@ fn hex4(cs: &[char], at: usize) -> Option<u32> {
     Some(v)
 }
 
-/// Trim the `regex` crate's multi-line error down to its first line.
-fn short_regex_error(e: &regex::Error) -> String {
+/// Backtrack step bound — a hostile pattern must not freeze the
+/// engine (the web is hostile by default).
+const BACKTRACK_LIMIT: usize = 100_000;
+
+/// Trim the regex engine's multi-line error down to its first line.
+fn short_regex_error(e: &fancy_regex::Error) -> String {
     e.to_string()
         .lines()
         .next()

@@ -486,7 +486,63 @@ fn regex_replace_split() {
     assert_eq!(ev_str("'a,b,c'.split(',', 2).join('|')"), "a|b");
     // Invalid regex → SyntaxError (catchable).
     assert_eq!(
-        ev_str("try { new RegExp('(?!x)'); 'no' } catch (e) { e.name }"),
+        ev_str("try { new RegExp('['); 'no' } catch (e) { e.name }"),
+        "SyntaxError"
+    );
+    // Lookahead/backrefs : compilés depuis fancy-regex (JS-C3).
+    assert_eq!(ev_str("/x(?=y)/.test('xy')"), "true");
+    assert_eq!(ev_str("/x(?!y)/.test('xz')"), "true");
+    assert_eq!(ev_str("/(?<=a)b/.test('ab')"), "true");
+    assert_eq!(ev_str("/(\\d)\\1/.test('44')"), "true");
+    assert_eq!(ev_str("/(?<n>ab)cd\\k<n>/.test('abcdab')"), "true");
+}
+
+#[test]
+fn regexp_js_c3_semantics() {
+    // Backref nommée avant sa déclaration → match vide (21.2.2.9).
+    assert_eq!(ev_str("/\\k<a>(?<a>x)/.test('x')"), "true");
+    // `\k` identity escape seulement en sloppy sans groupe nommé.
+    assert_eq!(ev_str("/\\k/.test('k')"), "true");
+    assert_eq!(
+        ev_str("try { eval('/(?<a>.)\\\\k/'); 'no' } catch (e) { e.name }"),
+        "SyntaxError"
+    );
+    assert_eq!(
+        ev_str("try { eval('/\\\\k<>/u'); 'no' } catch (e) { e.name }"),
+        "SyntaxError"
+    );
+    // Folding `i` non-`u` = ToUppercase simple : KELVIN U+212A ne
+    // matche ni 'k' ni 'K', mais 'k' et 'K' se matchent entre eux.
+    assert_eq!(ev_str("/\\u212a/i.test('k')"), "false");
+    assert_eq!(ev_str("/\\u212a/i.test('K')"), "false");
+    assert_eq!(ev_str("/\\u212a/i.test('\\u212a')"), "true");
+    assert_eq!(ev_str("/k/i.test('K')"), "true");
+    assert_eq!(ev_str("/K/i.test('k')"), "true");
+    assert_eq!(ev_str("/[a-z]+/i.test('ABC')"), "true");
+    // Quantificateur sans atome → SyntaxError.
+    assert_eq!(
+        ev_str("try { eval('/{2}/'); 'no' } catch (e) { e.name }"),
+        "SyntaxError"
+    );
+    // Groupes nommés : doublon et nom invalide → SyntaxError.
+    assert_eq!(
+        ev_str("try { eval('/(?<a>x)(?<a>y)/'); 'no' } catch (e) { e.name }"),
+        "SyntaxError"
+    );
+    assert_eq!(
+        ev_str("try { eval('/(?<1a>x)/'); 'no' } catch (e) { e.name }"),
+        "SyntaxError"
+    );
+    // Modificateurs inline ES2025 : forme valide acceptée, `(?u:` rejeté.
+    assert_eq!(ev_str("/(?i:a)b/.test('Ab')"), "true");
+    assert_eq!(
+        ev_str("try { eval('/(?u:a)/'); 'no' } catch (e) { e.name }"),
+        "SyntaxError"
+    );
+    // Backref numérique hors bornes → Annex B octale/identité.
+    assert_eq!(ev_str("/\\8/.test('8')"), "true");
+    assert_eq!(
+        ev_str("try { eval('/\\\\8/u'); 'no' } catch (e) { e.name }"),
         "SyntaxError"
     );
 }

@@ -291,9 +291,26 @@ d'intégration, pas par la couverture :
   **Score : 851/859 (99 %)** — résidu : backrefs/lookahead
   regexp (limite du crate `regex`), modificateurs ES2025,
   validations `u` profondes.
+- [x] **JS-C3. RegExp complètes — `fancy-regex` + validateur
+  ECMA-262** : backend `regex` → `fancy-regex` (backtracker pur
+  Rust, `BACKTRACK_LIMIT` borné) — lookahead/lookbehind,
+  backrefs `\1`/`\k<nom>` natives. `translate_pattern` devient
+  un validateur/traducteur complet (fancy est *plus* permissif
+  que la spec) : identifiants de groupes via les tables UAX #31
+  du lexer, doublons rejetés, `\k<nom>` avant déclaration →
+  match vide (21.2.2.9), `\k` identity seulement en sloppy sans
+  groupe nommé, décimales Annex B (préfixe/octale/`\8`/`\9`),
+  modificateurs `(?ims:…)` ES2025, quantificateurs `{n,m}` sans
+  atome et `n>m` rejetés, `]`/`{`/`}` étendus stricts en `u`,
+  ranges de classes `u` validées, `\xNN`/`\uHHHH`/`\u{…}`/
+  surrogates fusionnées, `\0`+chiffre octale legacy. Fold `i`
+  non-`u` émis à la main (`ToUppercase` simple — KELVIN ne
+  matche plus 'k').
+  **Score : 859/859 (100 %)** — corpus extrait entièrement
+  vert.
 - [ ] **JS-C. Couverture par besoin** : modules ES
-  (`import`/`export` + graphe de chargeur), `Proxy`, `Intl`,
-  regex lookahead/backrefs — ordre piloté par les pages réelles.
+  (`import`/`export` + graphe de chargeur), `Proxy`, `Intl` —
+  ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
   `Video` — phase 10, dépend du pipeline rendu.
 

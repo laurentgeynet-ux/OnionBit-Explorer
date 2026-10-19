@@ -348,6 +348,40 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     du crate `regex` documentées.
   3 tests de régression `tests/lang.rs` (descripteurs,
   freeze/seal, strict runtime).
+- **JS-C3 — RegExp complètes : `fancy-regex` + validateur
+  ECMA-262** (`dillo-js`) : **859/859 (100 %)** — progression
+  851 → 859.
+  - backend `regex` → `fancy-regex` (backtracker hybride pur
+    Rust, `BACKTRACK_LIMIT = 100_000` contre les patterns
+    hostiles) — lookahead/lookbehind `(?= (?! (?<= (?<!` et
+    backrefs `\1`–`\9`/`\k<nom>` compilés nativement ;
+  - `translate_pattern` réécrit en validateur ECMA-262 (le
+    backend est plus permissif que la spec) : noms de groupes
+    validés par les tables UAX #31 du lexer (wrappers
+    `is_ident_*_pub`), doublons rejetés, `\k<nom>` référençant
+    un groupe déclaré plus loin → `(?:)` (match vide, spec
+    21.2.2.9), `\k` malformé/nu → `SyntaxError` dès qu'un
+    groupe nommé existe ou en `u` (identity Annex B sinon),
+    `\N` hors bornes → préfixe valide/octale legacy/identité
+    `\8`/`\9`, `\0`+chiffre → octale `\07` (erreur en `u`) ;
+  - syntaxe : modificateurs inline `(?ims:`/`(?ims-ims:` ES2025
+    validés (flags `ims`, disjoints, `:` obligatoire — `(?u:`,
+    `(?P`, `(?#` rejetés), quantificateurs `{n,m}` sans atome
+    ou `n>m` rejetés, `]`/`{`/`}` orphelins erreurs en `u`,
+    ranges de classes avec borne class-escape (`[--\d]`)
+    erreur en `u` et `-` littéral sloppy, ranges vides
+    `[z-a]` toujours rejetées ;
+  - échappements : `\xNN`/`\uHHHH` consommés entièrement,
+    `\u{…}` → `\x{…}` normalisé (≤ U+10FFFF), paires de
+    surrogates fusionnées en `u`, `\cX` contrôle, `\c` seul →
+    `\\c` sloppy, identités Annex B sloppy vs strict `u` ;
+  - fold `i` non-`u` manuel : `Canonicalize` = `ToUppercase`
+    simple — `[cCU]` explicites au lieu du folding Unicode du
+    backend, donc `/\u{212a}/i` ne matche ni 'k' ni 'K'
+    (KELVIN) ; ranges foldées par paires de bornes gardées
+    (`upper(v) == upper(borne)`) ; backrefs wrappées `(?i:…)`.
+  16 assertions de régression `tests/lang.rs`
+  (`regexp_js_c3_semantics`).
 - **JS-B — harness test262 (ADR-0010)** : extrait versionné de
   la suite ECMAScript officielle @ `d53ebc8` (1077 fichiers,
   sous-ensembles `test/language/{types,literals,comments,
