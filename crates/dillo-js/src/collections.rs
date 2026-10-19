@@ -222,6 +222,44 @@ fn map_delete(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Bool(true))
 }
 
+/// `getOrInsert(k, v)` (ES2026) — `get(k)` si présent, sinon
+/// `set(k, v)` et rend `v`. Un seul lookup (spec).
+fn map_get_or_insert(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("Map.getOrInsert on non-Map"));
+    };
+    let (k, v) = (arg(args, 0), arg(args, 1));
+    if let Some((_, ev)) = map_entries(e, id)
+        .into_iter()
+        .find(|(ek, _)| svz(&e.heap, *ek, k))
+    {
+        return Ok(ev);
+    }
+    map_set_entry(e, id, k, v);
+    Ok(v)
+}
+
+/// `getOrInsertComputed(k, cb)` (ES2026) — `cb(k)` n'est appelée
+/// qu'en cas d'absence ; le résultat est inséré puis rendu.
+fn map_get_or_insert_computed(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("Map.getOrInsertComputed on non-Map"));
+    };
+    let (k, cb) = (arg(args, 0), arg(args, 1));
+    if !e.is_callable(cb) {
+        return Err(e.type_error("Map.getOrInsertComputed: callback is not callable"));
+    }
+    if let Some((_, ev)) = map_entries(e, id)
+        .into_iter()
+        .find(|(ek, _)| svz(&e.heap, *ek, k))
+    {
+        return Ok(ev);
+    }
+    let v = e.call_value(cb, Value::Undefined, &[k])?;
+    map_set_entry(e, id, k, v);
+    Ok(v)
+}
+
 fn map_clear(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     if let Value::Obj(id) = this {
         if let Some(o) = e.heap.obj_mut(id) {
@@ -529,6 +567,9 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(map_proto, "keys", map_keys);
     e.add_method(map_proto, "values", map_values);
     e.add_method(map_proto, "entries", map_iter_entries);
+    // ES2026 upsert — hérité par WeakMap via la chaîne proto.
+    e.add_method(map_proto, "getOrInsert", map_get_or_insert);
+    e.add_method(map_proto, "getOrInsertComputed", map_get_or_insert_computed);
     {
         let entries_fn = e.native_fn("entries", map_iter_entries);
         e.set_own(map_proto, SYM_ITERATOR, entries_fn, false);

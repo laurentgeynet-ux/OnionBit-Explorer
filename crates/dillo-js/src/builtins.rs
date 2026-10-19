@@ -15,19 +15,19 @@ use crate::value::{num_to_js_string, to_int32, to_uint32, ObjId, Value};
 use crate::Engine;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-fn arg(args: &[Value], i: usize) -> Value {
+pub(crate) fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).copied().unwrap_or(Value::Undefined)
 }
 
 /// Wire `Ctor.prototype = proto` and `proto.constructor = Ctor`.
-fn ctor(e: &mut Engine, name: &'static str, f: NativeFn, proto: ObjId) -> Value {
+pub(crate) fn ctor(e: &mut Engine, name: &'static str, f: NativeFn, proto: ObjId) -> Value {
     let c = e.native_fn(name, f);
     e.set_own(c_id(c), "prototype", Value::Obj(proto), false);
     e.set_own(proto, "constructor", c, false);
     c
 }
 
-fn c_id(v: Value) -> ObjId {
+pub(crate) fn c_id(v: Value) -> ObjId {
     match v {
         Value::Obj(id) => id,
         _ => 0,
@@ -199,6 +199,31 @@ pub(crate) fn install(e: &mut Engine) {
         let tag = e.str_val("DisposableStack");
         e.set_own(ds_p, crate::interp::SYM_TO_STRING_TAG, tag, false);
         e.set_own(g, "DisposableStack", ds, false);
+    }
+
+    // `AsyncDisposableStack` (ES2026) — disposeurs awaités au
+    // dépile (eager await, déviation documentée).
+    {
+        let ads_p = e.new_object();
+        let ads = ctor(
+            e,
+            "AsyncDisposableStack",
+            async_disposable_stack_ctor,
+            ads_p,
+        );
+        let dg = e.native_fn("get disposed", ds_disposed_get);
+        if let Some(o) = e.heap.obj_mut(ads_p) {
+            o.set_accessor("disposed", dg, Value::Undefined, false);
+        }
+        e.add_method(ads_p, "use", ads_use);
+        e.add_method(ads_p, "adopt", ads_adopt);
+        e.add_method(ads_p, "defer", ads_defer);
+        e.add_method(ads_p, "disposeAsync", ads_dispose_async);
+        e.add_method(ads_p, "move", ads_move);
+        e.add_method(ads_p, crate::interp::SYM_ASYNC_DISPOSE, ads_dispose_async);
+        let tag = e.str_val("AsyncDisposableStack");
+        e.set_own(ads_p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        e.set_own(g, "AsyncDisposableStack", ads, false);
     }
 
     {
@@ -1435,12 +1460,26 @@ fn object_get_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
                 let trap = e.proxy_trap(handler, "getPrototypeOf")?;
                 if matches!(trap, Value::Obj(_)) {
                     let r = e.call_value(trap, handler, &[target])?;
-                    return match r {
-                        Value::Obj(_) | Value::Null => Ok(r),
-                        _ => Err(
-                            e.type_error("proxy getPrototypeOf trap must return an object or null")
-                        ),
-                    };
+                    match r {
+                        Value::Obj(_) | Value::Null => {
+                            // Spec : cible non-extensible → le trap
+                            // doit rendre le proto de la cible.
+                            if !e.target_extensible(tid) {
+                                let tp = e.heap.obj(tid).map_or(Value::Null, |o| o.proto);
+                                if !e.strict_eq(r, tp) {
+                                    return Err(e.type_error(
+                                        "proxy getPrototypeOf trap must return the target's prototype",
+                                    ));
+                                }
+                            }
+                            return Ok(r);
+                        }
+                        _ => {
+                            return Err(e.type_error(
+                                "proxy getPrototypeOf trap must return an object or null",
+                            ));
+                        }
+                    }
                 }
                 return Ok(e.heap.obj(tid).map_or(Value::Null, |o| o.proto));
             }
@@ -1467,11 +1506,20 @@ fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
         let trap = e.proxy_trap(handler, "setPrototypeOf")?;
         if matches!(trap, Value::Obj(_)) {
             let ok = e.call_value(trap, handler, &[tv, proto])?;
-            return if e.to_boolean(ok) {
-                Ok(target)
-            } else {
-                Err(e.type_error("proxy setPrototypeOf trap returned false"))
-            };
+            if !e.to_boolean(ok) {
+                return Err(e.type_error("proxy setPrototypeOf trap returned false"));
+            }
+            // Spec : cible non-extensible → le proto demandé doit
+            // être identique à celui de la cible.
+            if !e.target_extensible(tid) {
+                let tp = e.heap.obj(tid).map_or(Value::Null, |o| o.proto);
+                if !e.strict_eq(proto, tp) {
+                    return Err(e.type_error(
+                        "proxy setPrototypeOf trap returned true without changing the prototype",
+                    ));
+                }
+            }
+            return Ok(target);
         }
         return object_set_proto(e, Value::Undefined, &[Value::Obj(tid), proto]);
     }
@@ -3454,17 +3502,45 @@ fn array_is_array(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
 /// `Array.from(iterable|arrayLike)` — iterator protocol, then a
 /// `length`-indexed fallback; strings iterate by char.
 fn array_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let v = arg(args, 0);
-    let items = match v {
-        Value::Str(id) => {
-            let s = e.heap.string(id).unwrap_or_default();
-            s.chars()
-                .map(|c| e.str_val(c.to_string()))
-                .collect::<Vec<_>>()
+    let src = arg(args, 0);
+    let mapfn = arg(args, 1);
+    let has_map = !matches!(mapfn, Value::Undefined);
+    if has_map && !e.is_callable(mapfn) {
+        return Err(e.type_error("Array.from mapfn is not callable"));
+    }
+    let t = arg(args, 2);
+    let mut items = if let Ok(v) = e.iter_values(src) {
+        v
+    } else {
+        // Spec : pas de @@iterator → array-like `length`-driven.
+        // `iter_values` jette aussi sur itérateur défaillant —
+        // distinction impossible ici (deviation : le repli
+        // array-like est tenté dans les deux cas).
+        {
+            let n = match e.get_prop_value(src, "length") {
+                Ok(l) => {
+                    let n = e.to_number(l)?;
+                    if n.is_finite() && n > 0.0 {
+                        n.min(4_294_967_295.0) as usize
+                    } else {
+                        0
+                    }
+                }
+                Err(_) => 0,
+            };
+            let mut out = Vec::with_capacity(n.min(1_000_000));
+            for i in 0..n {
+                e.tick()?;
+                out.push(e.get_prop_value(src, &i.to_string())?);
+            }
+            out
         }
-        Value::Obj(_) => e.iter_values(v).unwrap_or_default(),
-        _ => Vec::new(),
     };
+    if has_map {
+        for (i, v) in items.iter_mut().enumerate() {
+            *v = e.call_value(mapfn, t, &[*v, Value::Num(i as f64)])?;
+        }
+    }
     Ok(e.new_array(items))
 }
 
@@ -3702,6 +3778,11 @@ fn object_prevent_extensions(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
                 if !e.to_boolean(ok) {
                     return Err(e.type_error("proxy preventExtensions trap returned false"));
                 }
+                if e.target_extensible(tid) {
+                    return Err(e.type_error(
+                        "proxy preventExtensions trap returned true on an extensible target",
+                    ));
+                }
                 return Ok(arg(args, 0));
             }
             return object_prevent_extensions(e, Value::Undefined, &[Value::Obj(tid)]);
@@ -3719,7 +3800,13 @@ fn object_is_extensible(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
             let trap = e.proxy_trap(handler, "isExtensible")?;
             if matches!(trap, Value::Obj(_)) {
                 let r = e.call_value(trap, handler, &[target])?;
-                return Ok(Value::Bool(e.to_boolean(r)));
+                let rb = e.to_boolean(r);
+                if rb != e.target_extensible(tid) {
+                    return Err(e.type_error(
+                        "proxy isExtensible trap must report the target's extensibility",
+                    ));
+                }
+                return Ok(Value::Bool(rb));
             }
             return object_is_extensible(e, Value::Undefined, &[Value::Obj(tid)]);
         }
@@ -4338,7 +4425,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 /// `ms` since epoch → `(y, mo, d, weekday, h, mi, s, ms)`.
-fn ms_to_parts(ms: f64) -> (i64, u32, u32, u32, u32, u32, u32, u32) {
+pub(crate) fn ms_to_parts(ms: f64) -> (i64, u32, u32, u32, u32, u32, u32, u32) {
     if !ms.is_finite() {
         return (0, 0, 0, 0, 0, 0, 0, 0);
     }
@@ -6541,6 +6628,140 @@ fn ds_move(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let id = ds_state(e, this)?;
     ds_live(e, id)?;
     let fresh = disposable_stack_ctor(e, Value::Undefined, &[])?;
+    let mut moved = Vec::new();
+    if let Some(o) = e.heap.obj_mut(id) {
+        if let ObjKind::DispStack { disposed, stack } = &mut o.kind {
+            *disposed = true;
+            moved = std::mem::take(stack);
+        }
+    }
+    if let Value::Obj(nid) = fresh {
+        if let Some(o) = e.heap.obj_mut(nid) {
+            if let ObjKind::DispStack { stack, .. } = &mut o.kind {
+                *stack = moved;
+            }
+        }
+    }
+    Ok(fresh)
+}
+
+// JS-C20 — `AsyncDisposableStack` (ES2026)
+// ------------------------------------------------------------------
+
+fn async_disposable_stack_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let proto = e
+        .get_prop(e.global, "AsyncDisposableStack")
+        .and_then(|c| match c {
+            Value::Obj(cid) => e.get_prop(cid, "prototype"),
+            _ => None,
+        })
+        .unwrap_or(Value::Obj(e.protos.object));
+    let mut o = crate::heap::Object::ordinary(proto);
+    o.kind = ObjKind::DispStack {
+        disposed: false,
+        stack: Vec::new(),
+    };
+    Ok(Value::Obj(e.heap.alloc_obj(o)))
+}
+
+/// `use(v)` — enregistre `v[@@asyncDispose] ?? v[@@dispose]`
+/// (spec `GetDisposeMethod(async)`).
+fn ads_use(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = ds_state(e, this)?;
+    ds_live(e, id)?;
+    let v = arg(args, 0);
+    if matches!(v, Value::Null | Value::Undefined) {
+        return Ok(v);
+    }
+    let m = match v {
+        Value::Obj(vid) => e
+            .get_prop(vid, crate::interp::SYM_ASYNC_DISPOSE)
+            .or_else(|| e.get_prop(vid, crate::interp::SYM_DISPOSE)),
+        _ => None,
+    };
+    match m {
+        Some(f) if e.is_callable(f) => {
+            ds_push(e, id, f, v, Value::Undefined);
+            Ok(v)
+        }
+        _ => Err(e.type_error("value has no [Symbol.asyncDispose] method")),
+    }
+}
+
+/// `adopt(v, onDisposeAsync)` — disposeur `f(v)` awaité au dépile.
+fn ads_adopt(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = ds_state(e, this)?;
+    ds_live(e, id)?;
+    let f = arg(args, 1);
+    if !e.is_callable(f) {
+        return Err(e.type_error("adopt onDisposeAsync is not callable"));
+    }
+    ds_push(e, id, f, Value::Undefined, arg(args, 0));
+    Ok(arg(args, 0))
+}
+
+/// `defer(onDisposeAsync)` — disposeur sans argument.
+fn ads_defer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = ds_state(e, this)?;
+    ds_live(e, id)?;
+    let f = arg(args, 0);
+    if !e.is_callable(f) {
+        return Err(e.type_error("defer callback is not callable"));
+    }
+    ds_push(e, id, f, Value::Undefined, Value::Undefined);
+    Ok(Value::Undefined)
+}
+
+/// `disposeAsync()` — dépile LIFO en awaitant chaque retour
+/// (`await` eager — une promesse pending jette, déviation
+/// documentée). Résultat : promesse résolue `undefined` ou
+/// rejetée (`SuppressedError` enroulé, spec).
+fn ads_dispose_async(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = ds_state(e, this)?;
+    let pid = e.new_promise();
+    let run = (|| -> JsResult<()> {
+        ds_live(e, id)?;
+        if let Some(o) = e.heap.obj_mut(id) {
+            if let ObjKind::DispStack { disposed, .. } = &mut o.kind {
+                *disposed = true;
+            }
+        }
+        let mut pending: Option<Value> = None;
+        loop {
+            let next = match e.heap.obj_mut(id).map(|o| &mut o.kind) {
+                Some(ObjKind::DispStack { stack, .. }) => stack.pop(),
+                _ => None,
+            };
+            let Some((f, t, v)) = next else {
+                break;
+            };
+            let r = e
+                .call_value(f, t, &[v])
+                .and_then(|out| e.await_value(out).map(|_| ()));
+            if let Err(Thrown(err)) = r {
+                pending = Some(match pending {
+                    None => err,
+                    Some(prev) => make_suppressed(e, err, prev),
+                });
+            }
+        }
+        match pending {
+            None => Ok(()),
+            Some(err) => Err(Thrown(err)),
+        }
+    })();
+    match run {
+        Ok(()) => e.resolve_promise(pid, Value::Undefined),
+        Err(Thrown(err)) => e.reject_promise(pid, err),
+    }
+    Ok(Value::Obj(pid))
+}
+
+/// `move()` — nouvelle `AsyncDisposableStack` recevant la pile.
+fn ads_move(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = ds_state(e, this)?;
+    ds_live(e, id)?;
+    let fresh = async_disposable_stack_ctor(e, Value::Undefined, &[])?;
     let mut moved = Vec::new();
     if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::DispStack { disposed, stack } = &mut o.kind {

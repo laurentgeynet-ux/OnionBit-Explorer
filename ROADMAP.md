@@ -607,8 +607,39 @@ d'intégration, pas par la couverture :
   non-extensible), `defineProperty` (ajout sur
   non-extensible) → `TypeError`. test262 : 859/859 ;
   10 tests de régression.
-- [ ] **JS-C. Couverture par besoin** : `Intl`,
-  `AsyncDisposableStack`, `Temporal`, `using` — ordre
+- [x] **JS-C20. `Intl` minimal, `Array.from` complet,
+  invariants Proxy proto, `getOrInsert`,
+  `AsyncDisposableStack`** : `Array.from` est spec
+  (`@@iterator` → itérateur, sinon array-like `length`
+  — `{length:2}` ne rend plus `[]` —, `mapFn` + `thisArg`
+  honorés, `TypeError` sur mapFn non-callable). Invariants
+  Proxy des traps proto (spec §9.5) : `getPrototypeOf`
+  (résultat = proto cible si non-extensible),
+  `setPrototypeOf` (proto demandé identique si cible
+  scellée), `isExtensible` (booléen conforme à la cible),
+  `preventExtensions` (true exige cible non-extensible) →
+  `TypeError`. `Intl` (en-US/UTC fixe, pas de données CLDR
+  — déviation documentée) : `getCanonicalLocales`/
+  `supportedLocalesOf` (canonicalisation BCP-47), les 8
+  constructeurs `DateTimeFormat` (dateStyle/timeStyle/
+  composants, formatToParts, resolvedOptions, `format`
+  bound spec), `NumberFormat` (currency/percent/unit,
+  grouping, signDisplay, notation compact/scientific,
+  formatToParts), `Collator` (numeric, sensitivity),
+  `PluralRules` (cardinal/ordinal en), `ListFormat`
+  (conjunction/disjunction/unit), `RelativeTimeFormat`
+  (numeric auto → tomorrow/yesterday/now), `Locale`
+  (accesseurs + overrides options, maximize/minimize
+  retournent des Locale), `DisplayNames` (tables régions/
+  langues/scripts/devises + repli code). `Map`/`WeakMap`
+  `.getOrInsert`/`.getOrInsertComputed` (ES2026, hérités
+  WeakMap via chaîne proto). `AsyncDisposableStack`
+  complet (`use` → `@@asyncDispose` ?? `@@dispose`,
+  `adopt`/`defer`/`move`/`disposed`, `disposeAsync`
+  awaité eager → promesse, `SuppressedError` enroulé).
+  test262 : 859/859 ; 8 tests de régression.
+- [ ] **JS-C. Couverture par besoin** : `Temporal`,
+  `using`/`await using`, `Intl` multi-locales — ordre
   piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
   `Video` — phase 10, dépend du pipeline rendu.

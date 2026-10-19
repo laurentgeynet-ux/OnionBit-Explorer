@@ -697,6 +697,67 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`new_target_binding`, `set_composition_es2025`,
     `string_well_formed_and_regexp_escape`,
     `arraybuffer_resize_transfer`).
+- **JS-C20 — `Intl` minimal, `Array.from` complet,
+  invariants Proxy proto, `getOrInsert`,
+  `AsyncDisposableStack`** (`dillo-js`) :
+  - `Array.from(src, mapFn?, thisArg?)` conforme spec :
+    `@@iterator` → itérateur, sinon lecture array-like
+    `length`-driven (`{length:2}` ne rend plus `[]` —
+    bug corrigé), `mapFn(v, i)` appelée avec `thisArg`,
+    `TypeError` si `mapFn` non-callable ;
+  - invariants Proxy des traps de niveau proto (spec
+    §9.5) : `getPrototypeOf` (résultat `===` proto cible
+    si non-extensible), `setPrototypeOf` (proto demandé
+    identique à celui de la cible scellée),
+    `isExtensible` (booléen exact de la cible),
+    `preventExtensions` (`true` exige une cible déjà
+    non-extensible) — violation → `TypeError` ;
+  - `Intl` — sous-ensemble `en-US`/UTC fixe sans données
+    CLDR (déviation documentée) : `getCanonicalLocales`/
+    `supportedLocalesOf` (canonicalisation BCP-47 :
+    `en-us` → `en-US`, `sr-cyrl-rs` → `sr-Cyrl-RS`,
+    `RangeError` sur tag invalide) ; `Intl.DateTimeFormat`
+    (`dateStyle`/`timeStyle`/composants — mois numérique
+    → `MM/DD/YYYY`, nommé → `Month D, YYYY`, `timeStyle`
+    seul sans date, minute/second paddées —,
+    `formatToParts`, `resolvedOptions`, `formatRange`
+    approximé, `format` bound à l'instance comme spec) ;
+    `Intl.NumberFormat` (styles decimal/currency/percent/
+    unit, `minimumFractionDigits`/`maximumFractionDigits`/
+    `minimumIntegerDigits`, `useGrouping` dont `min2`,
+    `signDisplay`, `notation` compact/scientific,
+    `formatToParts` segmenté integer/group/fraction/
+    currency/percentSign/exponent, NaN/`∞`) ; `Intl.
+    Collator` (`numeric` collation chiffres,
+    `sensitivity` base → fold case, `ignorePunctuation`,
+    `compare` bound) ; `Intl.PluralRules` (cardinal
+    `one`/`other` + ordinal `en` st/nd/rd/th,
+    `selectRange` → `other`) ; `Intl.ListFormat`
+    (conjunction `a, b, and c`, disjunction `or`, unit,
+    `formatToParts` element/literal) ; `Intl.
+    RelativeTimeFormat` (`in N units`/`N units ago`,
+    `numeric: auto` → `yesterday`/`today`/`tomorrow`/
+    `last|this|next unit`/`now`) ; `Intl.Locale`
+    (accesseurs `baseName`/`language`/`script`/`region`/
+    `calendar`/`numberingSystem`, options qui
+    surchargent le tag, `maximize`/`minimize` →
+    nouvelles `Locale`) ; `Intl.DisplayNames` (tables
+    `en` régions/langues/scripts/devises + repli sur le
+    code, spec `fallback: 'code'`) ; `@@toStringTag
+    "Intl"` ; `supportedLocalesOf` statique sur chaque
+    constructeur (spec) ;
+  - `Map.prototype.getOrInsert`/`getOrInsertComputed`
+    (ES2026 — `cb` appelée seulement en absence ;
+    héritées par `WeakMap` via la chaîne proto) ;
+  - `AsyncDisposableStack` (ES2026) : `use` prend
+    `v[@@asyncDispose] ?? v[@@dispose]`, `adopt`/`defer`/
+    `move`/`disposed`, `disposeAsync()` dépile LIFO en
+    awaitant chaque retour (await eager — déviation
+    documentée) et rend une promesse, erreurs
+    enroulées en `SuppressedError` (spec),
+    `@@asyncDispose` aliasé, `@@toStringTag` ;
+  - test262 : 859/859 ; 8 tests de régression.
+
 - **JS-C19 — Date complet, `eval` direct, Annex B
   RegExp, JSON, invariants Proxy** (`dillo-js`) :
   - `Date` : les 15 setters (`setFullYear`…`setTime` +

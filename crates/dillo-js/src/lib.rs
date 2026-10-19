@@ -49,6 +49,7 @@ mod dom_host;
 mod error;
 mod heap;
 mod interp;
+mod intl;
 mod json;
 mod lexer;
 mod module;

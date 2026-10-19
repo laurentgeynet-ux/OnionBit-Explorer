@@ -466,6 +466,7 @@ impl Engine {
         };
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
+        crate::intl::install(&mut e);
         crate::json::install(&mut e);
         crate::typed_array::install(&mut e);
         e

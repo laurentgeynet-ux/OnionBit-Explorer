@@ -2114,9 +2114,15 @@ fn proxy_traps() {
         ev_str("var m = {}; var p = new Proxy({}, {getPrototypeOf: function() { return m; }}); Object.getPrototypeOf(p) === m"),
         "true"
     );
+    // isExtensible : le trap doit refléter la cible (invariant
+    // spec —  sur cible extensible → TypeError).
     assert_eq!(
-        ev_str("var p = new Proxy({}, {isExtensible: function() { return false; }}); Object.isExtensible(p)"),
-        "false"
+        ev_str("var p = new Proxy({}, {isExtensible: function() { return true; }}); Object.isExtensible(p)"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("try { Object.isExtensible(new Proxy({}, {isExtensible: function() { return false; }})); 'no' } catch (e) { e.name }"),
+        "TypeError"
     );
     // Revocable : revoke() puis TypeError sur toute opération.
     assert_eq!(
@@ -5110,4 +5116,338 @@ fn c19_proxy_invariants() {
     ] {
         assert!(Engine::new().eval(src).is_err(), "{src}");
     }
+}
+
+// ------------------------------------------------------------------
+// JS-C20 — Array.from complet, invariants Proxy proto, Intl minimal,
+// Map.getOrInsert*, AsyncDisposableStack
+// ------------------------------------------------------------------
+
+#[test]
+fn c20_array_from_array_like() {
+    assert_eq!(ev_str("Array.from({length:2},(_,i)=>i).join(',')"), "0,1");
+    assert_eq!(ev_str("Array.from({length:3}).length"), "3");
+    assert_eq!(
+        ev_str("Array.from('abc',x=>x.toUpperCase()).join('')"),
+        "ABC"
+    );
+    assert_eq!(ev_str("Array.from(new Set([1,2]),x=>x+1).join(',')"), "2,3");
+    // thisArg du mapFn.
+    assert_eq!(
+        ev_str("Array.from([1,2],function(){return this.b}, {b:9}).join(',')",),
+        "9,9"
+    );
+    // mapFn non-callable → TypeError.
+    assert!(ev_str("try{Array.from([],1)}catch(e){e.name}").contains("TypeError"));
+    // array-like : `length` chaîne.
+    assert_eq!(ev_str("Array.from({length:'2'}).length"), "2");
+}
+
+#[test]
+fn c20_proxy_proto_invariants() {
+    // getPrototypeOf : cible non-extensible → résultat = proto cible.
+    assert_eq!(
+        ev_str(
+            "var t=Object.preventExtensions({});try{Object.getPrototypeOf(new Proxy(t,{getPrototypeOf:()=>null}))}catch(e){e.name}",
+        ),
+        "TypeError"
+    );
+    // isExtensible : mensonge → TypeError.
+    assert_eq!(
+        ev_str(
+            "var t={};try{Object.isExtensible(new Proxy(t,{isExtensible:()=>false}))}catch(e){e.name}",
+        ),
+        "TypeError"
+    );
+    // preventExtensions : trap true sur cible extensible → TypeError.
+    assert_eq!(
+        ev_str(
+            "var t={};try{Object.preventExtensions(new Proxy(t,{preventExtensions:()=>true}))}catch(e){e.name}",
+        ),
+        "TypeError"
+    );
+    // setPrototypeOf : trap true + cible scellée + proto différent.
+    assert_eq!(
+        ev_str(
+            "var t={};var p=new Proxy(t,{setPrototypeOf:()=>true});try{Object.preventExtensions(t);Object.setPrototypeOf(p,Array.prototype)}catch(e){e.name}",
+        ),
+        "TypeError"
+    );
+    // Cas légitimes : tout passe.
+    assert_eq!(
+        ev_str("var t={};Object.isExtensible(new Proxy(t,{isExtensible:()=>true}))",),
+        "true"
+    );
+    assert_eq!(
+        ev_str("var t={};Object.getPrototypeOf(new Proxy(t,{getPrototypeOf:()=>null}))===null",),
+        "true"
+    );
+}
+
+#[test]
+fn c20_intl_locales() {
+    assert_eq!(
+        ev_str("Intl.getCanonicalLocales(['en-us','FR-fr','sr-cyrl-rs']).join(',')"),
+        "en-US,fr-FR,sr-Cyrl-RS"
+    );
+    assert_eq!(ev_str("Intl.getCanonicalLocales('de-de')[0]"), "de-DE");
+    assert_eq!(ev_str("Intl.supportedLocalesOf(['xx-YY'])[0]"), "xx-YY");
+    assert!(ev_str("try{Intl.getCanonicalLocales(['!!'])}catch(e){e.name}").contains("RangeError"));
+    assert_eq!(
+        ev_str("Object.prototype.toString.call(Intl)"),
+        "[object Intl]"
+    );
+    // Locale : accesseurs + overrides options.
+    assert_eq!(ev_str("new Intl.Locale('fr-FR').language"), "fr");
+    assert_eq!(ev_str("new Intl.Locale('sr-Cyrl-RS').script"), "Cyrl");
+    assert_eq!(ev_str("new Intl.Locale('en-US').region"), "US");
+    assert_eq!(ev_str("new Intl.Locale('de').region===undefined"), "true");
+    assert_eq!(
+        ev_str("new Intl.Locale('de',{region:'AT'}).baseName"),
+        "de-AT"
+    );
+    assert_eq!(ev_str("new Intl.Locale('en-US').minimize().baseName"), "en");
+    assert_eq!(
+        ev_str("new Intl.Locale('en-US').maximize() instanceof Intl.Locale",),
+        "true"
+    );
+}
+
+#[test]
+fn c20_intl_date_time_format() {
+    assert_eq!(
+        ev_str("new Intl.DateTimeFormat().format(new Date(Date.UTC(2000,0,15)))",),
+        "1/15/2000"
+    );
+    assert_eq!(
+        ev_str(
+            "new Intl.DateTimeFormat('en',{dateStyle:'long'}).format(new Date(Date.UTC(2000,0,15)))",
+        ),
+        "January 15, 2000"
+    );
+    assert_eq!(
+        ev_str(
+            "new Intl.DateTimeFormat('en',{dateStyle:'full'}).format(new Date(Date.UTC(2000,0,15)))",
+        ),
+        "Saturday, January 15, 2000"
+    );
+    assert_eq!(
+        ev_str(
+            "new Intl.DateTimeFormat('en',{dateStyle:'short'}).format(new Date(Date.UTC(2000,0,15)))",
+        ),
+        "1/15/00"
+    );
+    // timeStyle seul → pas de date ; heure non paddée.
+    assert_eq!(
+        ev_str(
+            "new Intl.DateTimeFormat('en',{timeStyle:'short'}).format(new Date(Date.UTC(2000,0,15,13,30)))",
+        ),
+        "1:30 PM"
+    );
+    assert_eq!(
+        ev_str(
+            "new Intl.DateTimeFormat('en',{dateStyle:'long',timeStyle:'short'}).format(new Date(Date.UTC(2000,0,15,13,30)))",
+        ),
+        "January 15, 2000 at 1:30 PM"
+    );
+    // Composants : mois numérique → slashes ; minutes paddées.
+    assert_eq!(
+        ev_str(
+            "new Intl.DateTimeFormat('en',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(Date.UTC(2000,0,15)))",
+        ),
+        "01/15/2000"
+    );
+    assert_eq!(
+        ev_str(
+            "new Intl.DateTimeFormat('en',{hour:'numeric',minute:'numeric'}).format(new Date(Date.UTC(2000,0,15,9,5)))",
+        ),
+        "9:05 AM"
+    );
+    // `format` bound : destructurable (spec).
+    assert_eq!(
+        ev_str("var f=new Intl.DateTimeFormat().format;f(new Date(0))",),
+        "1/1/1970"
+    );
+    // resolvedOptions + instanceof + formatToParts.
+    assert_eq!(
+        ev_str("new Intl.DateTimeFormat().resolvedOptions().timeZone"),
+        "UTC"
+    );
+    assert_eq!(
+        ev_str("new Intl.DateTimeFormat() instanceof Intl.DateTimeFormat",),
+        "true"
+    );
+    assert_eq!(
+        ev_str(
+            "new Intl.DateTimeFormat('en',{dateStyle:'long'}).formatToParts(new Date(Date.UTC(2000,0,15)))[0].type",
+        ),
+        "month"
+    );
+}
+
+#[test]
+fn c20_intl_number_format() {
+    assert_eq!(
+        ev_str("new Intl.NumberFormat().format(1234567.891)"),
+        "1,234,567.891"
+    );
+    assert_eq!(
+        ev_str("new Intl.NumberFormat('en',{minimumFractionDigits:2}).format(3.1)",),
+        "3.10"
+    );
+    assert_eq!(
+        ev_str("new Intl.NumberFormat('en',{style:'currency',currency:'USD'}).format(5)",),
+        "$5.00"
+    );
+    assert_eq!(
+        ev_str("new Intl.NumberFormat('en',{style:'percent'}).format(0.75)",),
+        "75%"
+    );
+    assert_eq!(
+        ev_str("new Intl.NumberFormat('en',{useGrouping:false}).format(1234567)",),
+        "1234567"
+    );
+    assert_eq!(
+        ev_str("new Intl.NumberFormat('en',{signDisplay:'always'}).format(5)",),
+        "+5"
+    );
+    assert_eq!(
+        ev_str("new Intl.NumberFormat('en',{notation:'compact'}).format(12000000)",),
+        "12M"
+    );
+    assert_eq!(
+        ev_str("new Intl.NumberFormat().format(-Infinity)"),
+        "-\u{221e}"
+    );
+    // formatToParts : segments entier/groupé.
+    assert_eq!(
+        ev_str(
+            "new Intl.NumberFormat('en',{style:'currency',currency:'USD'}).formatToParts(1234.5).map(p=>p.type).join(',')",
+        ),
+        "currency,integer,group,integer,decimal,fraction"
+    );
+}
+
+#[test]
+fn c20_intl_collator_plural_list_relative() {
+    // Collator : ordre + numeric + sensitivity + compare bound.
+    assert_eq!(ev_str("new Intl.Collator().compare('a','b')"), "-1");
+    assert_eq!(
+        ev_str("new Intl.Collator('en',{numeric:true}).compare('a2','a10')",),
+        "-1"
+    );
+    assert_eq!(
+        ev_str("new Intl.Collator('en',{sensitivity:'base'}).compare('A','a')",),
+        "0"
+    );
+    assert_eq!(ev_str("var c=new Intl.Collator().compare;c('x','y')"), "-1");
+    // PluralRules : cardinal + ordinal `en`.
+    assert_eq!(ev_str("new Intl.PluralRules().select(1)"), "one");
+    assert_eq!(ev_str("new Intl.PluralRules().select(2)"), "other");
+    assert_eq!(
+        ev_str("new Intl.PluralRules('en',{type:'ordinal'}).select(3)",),
+        "few"
+    );
+    // ListFormat : conjonction/disjonction Oxford.
+    assert_eq!(
+        ev_str("new Intl.ListFormat().format(['a','b','c'])"),
+        "a, b, and c"
+    );
+    assert_eq!(
+        ev_str("new Intl.ListFormat('en',{type:'disjunction'}).format(['a','b'])",),
+        "a or b"
+    );
+    // RelativeTimeFormat : numérique + auto idiomatique.
+    assert_eq!(
+        ev_str("new Intl.RelativeTimeFormat().format(3,'day')"),
+        "in 3 days"
+    );
+    assert_eq!(
+        ev_str("new Intl.RelativeTimeFormat().format(-3,'day')"),
+        "3 days ago"
+    );
+    assert_eq!(
+        ev_str("new Intl.RelativeTimeFormat('en',{numeric:'auto'}).format(1,'day')",),
+        "tomorrow"
+    );
+    assert_eq!(
+        ev_str("new Intl.RelativeTimeFormat('en',{numeric:'auto'}).format(0,'second')",),
+        "now"
+    );
+    // DisplayNames : tables + repli code.
+    assert_eq!(
+        ev_str("new Intl.DisplayNames('en',{type:'region'}).of('FR')",),
+        "France"
+    );
+    assert_eq!(
+        ev_str("new Intl.DisplayNames('en',{type:'region'}).of('XX')",),
+        "XX"
+    );
+}
+
+#[test]
+fn c20_map_get_or_insert() {
+    // getOrInsert : absent → insère+rend ; présent → rend l'existant.
+    assert_eq!(
+        ev_str("var m=new Map();m.getOrInsert('a',5);m.get('a')",),
+        "5"
+    );
+    assert_eq!(
+        ev_str("var m=new Map();m.set('a',5);m.getOrInsert('a',9)",),
+        "5"
+    );
+    // Computed : cb appelée seulement en absence.
+    assert_eq!(
+        ev_str("var m=new Map();m.getOrInsertComputed('a',k=>k+'!')",),
+        "a!"
+    );
+    assert_eq!(
+        ev_str("var m=new Map();var c=0;m.set('a',1);m.getOrInsertComputed('a',()=>c++);c",),
+        "0"
+    );
+    // WeakMap hérite via la chaîne proto.
+    assert_eq!(
+        ev_str("var w=new WeakMap();var k={};w.getOrInsert(k,3);w.get(k)",),
+        "3"
+    );
+    assert!(
+        ev_str("try{new Map().getOrInsertComputed('a',1)}catch(e){e.name}").contains("TypeError")
+    );
+}
+
+#[test]
+fn c20_async_disposable_stack() {
+    // disposeAsync : LIFO, asyncDispose préféré à dispose.
+    assert_eq!(
+        ev_str(
+            "var log=[];var s=new AsyncDisposableStack();s.defer(()=>log.push('d'));s.use({[Symbol.asyncDispose](){log.push('ad')}});s.use({[Symbol.dispose](){log.push('sd')}});s.disposeAsync();log.join(',')",
+        ),
+        "sd,ad,d"
+    );
+    // disposeAsync rend une promesse résolue (callback drainée
+    // en fin d'eval — observable via le moteur conservé).
+    let mut eng = Engine::new();
+    eng.eval("var r='';var s=new AsyncDisposableStack();s.disposeAsync().then(()=>r='ok')")
+        .unwrap_or_else(|err| panic!("disposeAsync then -> {err}"));
+    let v = eng.eval("r").unwrap_or_else(|err| panic!("r -> {err}"));
+    assert_eq!(eng.describe(v), "ok");
+    // use sans méthode → TypeError ; defer sur pile déposée → err.
+    assert!(
+        ev_str("try{new AsyncDisposableStack().use({})}catch(e){e.name}").contains("TypeError")
+    );
+    assert!(ev_str(
+        "var s=new AsyncDisposableStack();s.disposeAsync();try{s.defer(()=>{})}catch(e){e.name}"
+    )
+    .contains("Error"));
+    // move transfère la pile.
+    assert_eq!(
+        ev_str(
+            "var s=new AsyncDisposableStack();s.adopt(9,v=>v);s.move() instanceof AsyncDisposableStack",
+        ),
+        "true"
+    );
+    assert_eq!(
+        ev_str("Object.prototype.toString.call(new AsyncDisposableStack())",),
+        "[object AsyncDisposableStack]"
+    );
 }
