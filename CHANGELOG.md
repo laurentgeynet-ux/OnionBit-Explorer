@@ -9,6 +9,13 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 27 — daemon durci** : clé d'API optionnelle
+  (`EXPLORER_API_KEY` → middleware `auth` sur `router_with_key` —
+  `x-api-key` prioritaire, `?key=` en repli pour `EventSource`,
+  401 au format du contrat sinon), arrêt propre
+  `with_graceful_shutdown` (SIGINT, + SIGTERM unix) sans couper
+  les requêtes en vol, logs `tracing` (démarrage, fontes,
+  bind, clé). Feature tokio `signal` ajoutée.
 - **Étape 26 — entrées et scroll** : `InputEvent`
   (`Click`, `MouseMove`, `Scroll`, `Key` — ignorée au MVP
   sans champs focalisables) et `InputOutcome` (`Ignored`,

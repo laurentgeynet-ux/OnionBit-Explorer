@@ -43,6 +43,8 @@ struct DaemonConfig {
     max_body: usize,
     /// Redirections max suivies.
     max_redirects: usize,
+    /// Clé d'API optionnelle (`EXPLORER_API_KEY` — ADR-0003).
+    api_key: Option<String>,
 }
 
 impl DaemonConfig {
@@ -64,6 +66,9 @@ impl DaemonConfig {
             fonts_dir,
             max_body,
             max_redirects: 8,
+            api_key: std::env::var("EXPLORER_API_KEY")
+                .ok()
+                .filter(|k| !k.is_empty()),
         }
     }
 }
@@ -107,7 +112,10 @@ async fn main() {
         http_stack(&cfg),
         Arc::new(fonts),
     )));
-    let app = explorer_api::router(session);
+    let app = explorer_api::router_with_key(session, cfg.api_key.clone());
+    if cfg.api_key.is_some() {
+        tracing::info!("clé d'API requise (x-api-key / ?key=)");
+    }
 
     let listener = match tokio::net::TcpListener::bind(cfg.bind).await {
         Ok(l) => l,
@@ -117,8 +125,30 @@ async fn main() {
         }
     };
     tracing::info!(addr = %cfg.bind, "explorer-daemon prêt");
-    if let Err(e) = axum::serve(listener, app).await {
+    let r = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await;
+    if let Err(e) = r {
         tracing::error!(error = %e, "serveur arrêté");
         std::process::exit(1);
     }
+    tracing::info!("arrêt propre");
+}
+
+/// Ctrl-C (SIGINT) ou SIGTERM unix → fin du `serve` sans
+/// couper les requêtes en vol.
+async fn shutdown_signal() {
+    let ctrl_c = tokio::signal::ctrl_c();
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        if let Ok(mut term) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                () = async { let _ = ctrl_c.await; } => {}
+                () = async { let _ = term.recv().await; } => {}
+            }
+            return;
+        }
+    }
+    let _ = ctrl_c.await;
 }

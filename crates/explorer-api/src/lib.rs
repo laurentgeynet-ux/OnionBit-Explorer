@@ -49,7 +49,15 @@ pub struct ApiState {
 /// Construit le routeur de l'API. `session` est injectée par
 /// le daemon — l'API ne crée jamais de moteur.
 pub fn router(session: Arc<tokio::sync::Mutex<Session>>) -> Router {
-    Router::new()
+    router_with_key(session, None)
+}
+
+/// Routeur avec clé d'API optionnelle (ADR-0003) : si `key`
+/// est `Some`, chaque requête doit présenter `x-api-key: key`
+/// **ou** `?key=key` (SSE `EventSource` ne pose pas d'en-têtes
+/// — compromis documenté).
+pub fn router_with_key(session: Arc<tokio::sync::Mutex<Session>>, key: Option<String>) -> Router {
+    let r = Router::new()
         .route("/api/status", get(status))
         .route("/api/tabs", get(list_tabs).post(open_tab))
         .route("/api/tabs/{id}", delete(close_tab))
@@ -61,7 +69,38 @@ pub fn router(session: Arc<tokio::sync::Mutex<Session>>) -> Router {
         .route("/api/tabs/{id}/viewport", post(viewport))
         .route("/api/tabs/{id}/input", post(input))
         .route("/api/events", get(events))
-        .with_state(ApiState { session })
+        .with_state(ApiState { session });
+    match key {
+        Some(k) if !k.is_empty() => r.layer(axum::middleware::from_fn(move |req, next| {
+            auth(k.clone(), req, next)
+        })),
+        _ => r,
+    }
+}
+
+/// Middleware de clé : `x-api-key` prioritaire, `?key=` en
+/// repli — 401 JSON sinon (contrat d'erreur ADR-0003).
+async fn auth(want: String, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let ok = req
+        .headers()
+        .get("x-api-key")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == want)
+        || req
+            .uri()
+            .query()
+            .is_some_and(|q| q.split('&').any(|p| p == format!("key={want}")));
+    if ok {
+        next.run(req).await
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "error": { "handled": true, "message": "clé d'API invalide ou absente" }
+            })),
+        )
+            .into_response()
+    }
 }
 
 /// Corps d'erreur du contrat : `{"error":{handled,message}}`.

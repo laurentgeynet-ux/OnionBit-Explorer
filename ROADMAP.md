@@ -195,7 +195,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   clics/souris/clavier/scroll traduits en hit-test sur le layout ;
   **coalescing** des événements mouvement pour limiter les
   round-trips (ADR-0003).
-- [ ] **Étape 27. Daemon.** `explorer-daemon` : bind loopback,
+- [x] **Étape 27. Daemon.** `explorer-daemon` : bind loopback,
   clé d'API optionnelle, arrêt propre, logs `tracing`.
 - [ ] **Étape 28. Historique + bookmarks.** Persistance fichier
   (répertoire de profil déplaçable — couture suite).

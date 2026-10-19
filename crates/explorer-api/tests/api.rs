@@ -350,3 +350,55 @@ async fn input_click_link_navigates() {
     assert_eq!(v["result"], "scrolled");
     assert!(v["scroll_y"].is_number());
 }
+
+#[tokio::test]
+async fn api_key_gates_routes() {
+    let t: Arc<dyn HttpTransport> = Arc::new(FakeTransport { body: "x" });
+    let session = Arc::new(tokio::sync::Mutex::new(Session::new(
+        t,
+        Arc::new(FixtureFont),
+    )));
+    let app = explorer_api::router_with_key(session, Some("s3cret".to_string()));
+
+    // Sans clé → 401 au format du contrat.
+    let r = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+    let bytes = axum::body::to_bytes(r.into_body(), 1024).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["error"]["handled"], true);
+
+    // En-tête x-api-key → OK.
+    let r = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/status")
+                .header("x-api-key", "s3cret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+
+    // ?key= en repli (EventSource).
+    let r = app
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/status?key=s3cret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+}
