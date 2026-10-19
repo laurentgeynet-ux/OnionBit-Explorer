@@ -73,9 +73,13 @@ class BrowserRepository {
   }
 
   /// Événement d'entrée (`POST …/input`) — `click`,
-  /// `mousemove`, `scroll`, `key` (étape 26).
-  Future<void> sendInput(String tabId, Map<String, dynamic> ev) =>
-      _api.postJson('/api/tabs/$tabId/input', body: ev);
+  /// `mousemove`, `scroll`, `key` (étape 26). Retourne le
+  /// résultat (`{"result":"hover","url":…,"editable":…}`…).
+  Future<Map<String, dynamic>> sendInput(
+      String tabId, Map<String, dynamic> ev) async {
+    final res = await _api.postJson('/api/tabs/$tabId/input', body: ev);
+    return res is Map<String, dynamic> ? res : const {};
+  }
 
   /// Viewport moteur (`POST …/viewport`) — envoyé au resize.
   Future<void> setViewport(String tabId, double w, double h, double scale) =>

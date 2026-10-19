@@ -59,8 +59,10 @@ class FakeRepo implements BrowserRepository {
   Future<List<int>?> fetchFrame(String tabId) async => [1, 2, 3];
 
   @override
-  Future<void> sendInput(String tabId, Map<String, dynamic> ev) async {
+  Future<Map<String, dynamic>> sendInput(
+      String tabId, Map<String, dynamic> ev) async {
     actions.add('input:${ev['type']}');
+    return {'result': ev['type'] == 'click' ? 'focused' : 'ignored'};
   }
 
   @override

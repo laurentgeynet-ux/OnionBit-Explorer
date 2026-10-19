@@ -240,7 +240,13 @@ fn child_boxes(
     let mut out = Vec::new();
     for child in children {
         if dom.element(child).is_ok() {
-            if let Some(b) = build_box_tree(dom, child, styles) {
+            if let Some(mut b) = build_box_tree(dom, child, styles) {
+                // `<br>` : saut de ligne forcé — on lui donne
+                // un texte "\n" que l'itemisation UAX #14
+                // coupe durement (`ends_hard_break`).
+                if dom.tag_name(child).is_ok_and(|t| t == "br") && b.text.is_none() {
+                    b.text = Some("\n".to_string());
+                }
                 out.push(b);
             }
             // `display: none` ou absent de la map → sauté.

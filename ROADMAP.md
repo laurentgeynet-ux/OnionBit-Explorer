@@ -212,8 +212,10 @@ L'UI évolue **au fil des phases backend** ; cette phase consolide.
   debouncé, survol/clic relayés. Le canal direct mémoire
   partagée / texture externe (ADR-0004, dirty-rects) reste
   planifié à l'étape 47 quand les frames l'exigeront.
-- [ ] **Étape 31. Interactions.** Hit-test via API : clic lien →
-  navigation, hover → curseur, saisie champs.
+- [x] **Étape 31. Interactions.** Hit-test via API : clic lien →
+  navigation, hover → curseur (lien/champ), saisie champs
+  `input`/`textarea` (focus au clic, `key` édite `value`,
+  `<br>` = saut de ligne forcé).
 - [ ] **Étape 32. Design system.** Thème complet depuis
   `tokens.json`, dark/light, polish visuel.
 - [ ] **Étape 33. Pages d'erreur.** Échec réseau/TLS rendu en

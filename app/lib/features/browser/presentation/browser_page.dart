@@ -3,10 +3,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/design/design_tokens.dart';
@@ -309,10 +309,12 @@ class _FrameView extends ConsumerStatefulWidget {
 class _FrameViewState extends ConsumerState<_FrameView> {
   Timer? _resizeDebounce;
   Size? _lastSent;
+  final FocusNode _keys = FocusNode();
 
   @override
   void dispose() {
     _resizeDebounce?.cancel();
+    _keys.dispose();
     super.dispose();
   }
 
@@ -353,23 +355,45 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                 WidgetsBinding.instance.addPostFrameCallback(
                   (_) => _onResize(size, dpr),
                 );
-                return Listener(
-                  onPointerSignal: (ev) {
-                    if (ev is PointerScrollEvent) {
-                      widget.ctrl.scroll(ev.scrollDelta.dy);
-                    }
-                  },
-                  onPointerHover: (ev) => widget.ctrl
-                      .hover(ev.localPosition.dx, ev.localPosition.dy),
-                  child: GestureDetector(
-                    onTapUp: (d) => widget.ctrl
-                        .click(d.localPosition.dx, d.localPosition.dy),
-                    child: Align(
-                      alignment: Alignment.topLeft,
-                      child: Image.memory(
-                        Uint8List.fromList(bytes),
-                        gaplessPlayback: true, // pas de flash entre frames
-                        fit: BoxFit.none, // 1 px CSS = 1 pixel logique
+                final st = widget.state;
+                return MouseRegion(
+                  cursor: st.hoverEditable
+                      ? SystemMouseCursors.text
+                      : st.hoverUrl != null
+                          ? SystemMouseCursors.click
+                          : SystemMouseCursors.basic,
+                  child: Listener(
+                    onPointerSignal: (ev) {
+                      if (ev is PointerScrollEvent) {
+                        widget.ctrl.scroll(ev.scrollDelta.dy);
+                      }
+                    },
+                    onPointerHover: (ev) => widget.ctrl
+                        .hover(ev.localPosition.dx, ev.localPosition.dy),
+                    child: GestureDetector(
+                      onTapUp: (d) => widget.ctrl
+                          .click(d.localPosition.dx, d.localPosition.dy),
+                      child: KeyboardListener(
+                        focusNode: _keys,
+                        autofocus: true,
+                        onKeyEvent: (e) {
+                          if (e is! KeyDownEvent || !st.fieldFocused) {
+                            return;
+                          }
+                          // keyLabel couvre lettres et touches
+                          // nommées (« Backspace », « Enter »).
+                          widget.ctrl.key(e.logicalKey.keyLabel);
+                        },
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: Image.memory(
+                            Uint8List.fromList(bytes),
+                            gaplessPlayback:
+                                true, // pas de flash entre frames
+                            fit: BoxFit
+                                .none, // 1 px CSS = 1 pixel logique
+                          ),
+                        ),
                       ),
                     ),
                   ),

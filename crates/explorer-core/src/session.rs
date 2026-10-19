@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use explorer_css::{Origin, StyleEngine, StyleEnv};
-use explorer_dom::{Dom, NodeId};
+use explorer_dom::{Dom, DomError, NodeId};
 use explorer_html::encoding::decode_sniffed;
 use explorer_html::TreeBuilder;
 use explorer_layout::font::FontSource;
@@ -97,8 +97,7 @@ pub enum InputEvent {
         /// Delta (positif = vers le bas).
         dy: f32,
     },
-    /// Touche clavier — ignorée au MVP (pas de champ
-    /// focalisable avant les formulaires).
+    /// Touche clavier — éditée si un champ est focalisé.
     Key {
         /// Identifiant de touche (`"a"`, `"Enter"`…).
         key: String,
@@ -122,7 +121,14 @@ pub enum InputOutcome {
     Hover {
         /// `href` résolu, ou `None` hors lien.
         url: Option<String>,
+        /// `true` si le point est dans un champ éditable
+        /// (curseur texte côté client).
+        editable: bool,
     },
+    /// Champ de formulaire focalisé (`input`/`textarea`).
+    Focused,
+    /// Le champ focalisé a été édité (frame re-peinte).
+    Edited,
 }
 
 /// Vue publique d'un onglet pour l'API (DTO de sortie —
@@ -198,6 +204,9 @@ pub enum CoreError {
     /// Onglet inconnu.
     #[error("onglet inconnu : {0}")]
     UnknownTab(TabId),
+    /// Mutation DOM refusée (nœud mort, arène pleine…).
+    #[error("dom : {0}")]
+    Dom(#[from] explorer_dom::DomError),
 }
 
 /// État d'un onglet : pipeline complet gardé — le re-render
@@ -227,6 +236,9 @@ struct Tab {
     frame: Option<Frame>,
     /// PNG encodé prêt à servir.
     png: Option<Vec<u8>>,
+    /// Champ de formulaire focalisé (`input`/`textarea`) —
+    /// `NodeId` dans `dom`, invalidé à la navigation.
+    focused: Option<NodeId>,
 }
 
 /// Configuration de session — seuils et viewport initiaux
@@ -353,6 +365,7 @@ impl Session {
                 list: None,
                 frame: None,
                 png: None,
+                focused: None,
             },
         );
         let _ = self.events.send(CoreEvent::TabOpened { tab: id });
@@ -570,6 +583,7 @@ impl Session {
             entry.url = Some(url);
             entry.title.clone_from(&title);
             entry.scroll_y = 0.0;
+            entry.focused = None;
             entry.dom = Some(dom);
         }
         self.relayout(tab)?;
@@ -683,13 +697,7 @@ impl Session {
             return Err(CoreError::UnknownTab(tab));
         }
         match ev {
-            InputEvent::Key { key } => {
-                // Pas de champ focalisable avant les
-                // formulaires — la touche est acceptée et
-                // tracée, rien d'autre.
-                tracing::trace!(tab, key, "touche ignorée (MVP)");
-                Ok(InputOutcome::Ignored)
-            }
+            InputEvent::Key { key } => self.handle_key(tab, &key),
             InputEvent::Scroll { dy } => {
                 self.scroll_by(tab, dy)?;
                 Ok(InputOutcome::Scrolled {
@@ -698,15 +706,74 @@ impl Session {
             }
             InputEvent::MouseMove { x, y } => Ok(InputOutcome::Hover {
                 url: self.link_at(tab, x, y),
+                editable: self.field_at(tab, x, y).is_some(),
             }),
-            InputEvent::Click { x, y } => match self.link_at(tab, x, y) {
-                Some(url) => {
-                    self.navigate(tab, &url).await?;
-                    Ok(InputOutcome::Navigated)
+            InputEvent::Click { x, y } => {
+                if let Some(field) = self.field_at(tab, x, y) {
+                    if let Some(entry) = self.tabs.get_mut(&tab) {
+                        entry.focused = Some(field);
+                    }
+                    return Ok(InputOutcome::Focused);
                 }
-                None => Ok(InputOutcome::Ignored),
-            },
+                self.blur(tab);
+                match self.link_at(tab, x, y) {
+                    Some(url) => {
+                        self.navigate(tab, &url).await?;
+                        Ok(InputOutcome::Navigated)
+                    }
+                    None => Ok(InputOutcome::Ignored),
+                }
+            }
         }
+    }
+
+    /// `input`/`textarea` éditable sous `(x, y)` — hit-test +
+    /// remontée d'ancêtres (le texte du champ porte le
+    /// `NodeId` du texte, pas du champ).
+    fn field_at(&self, tab: TabId, x: f32, y: f32) -> Option<NodeId> {
+        let entry = self.tabs.get(&tab)?;
+        let tree = entry.tree.as_ref()?;
+        let dom = entry.dom.as_ref()?;
+        let node = hit_test(tree, x, y + entry.scroll_y)?;
+        editable_field(dom, node)
+    }
+
+    /// Perd le focus (clic hors champ).
+    fn blur(&mut self, tab: TabId) {
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.focused = None;
+        }
+    }
+
+    /// Édition du champ focalisé : `Backspace` efface,
+    /// `Enter`/`Escape` sortent du champ, un caractère
+    /// imprimable s'insère — puis restyle + repaint.
+    fn handle_key(&mut self, tab: TabId, key: &str) -> Result<InputOutcome, CoreError> {
+        let focused = self.tabs.get(&tab).and_then(|t| t.focused).filter(|&n| {
+            self.tabs
+                .get(&tab)
+                .and_then(|t| t.dom.as_ref())
+                .is_some_and(|d| d.is_alive(n))
+        });
+        let Some(field) = focused else {
+            tracing::trace!(tab, key, "touche sans champ focalisé");
+            return Ok(InputOutcome::Ignored);
+        };
+        match key {
+            "Enter" | "Escape" => {
+                self.blur(tab);
+                return Ok(InputOutcome::Ignored);
+            }
+            _ => {}
+        }
+        {
+            let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
+            edit_field(dom, field, key)?;
+        }
+        self.relayout(tab)?;
+        let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+        Ok(InputOutcome::Edited)
     }
 
     /// `href` résolu du lien `<a>` sous `(x, y)` viewport —
@@ -758,6 +825,94 @@ fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
         }
     }
     bx.node
+}
+
+/// Champ éditable le plus proche du nœud (lui-même compris) :
+/// `<input>` à type texte ou `<textarea>`. `None` sinon.
+fn editable_field(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
+    /// Types `input` acceptant du texte libre (absence de
+    /// `type` incluse — valeur par défaut HTML).
+    const TEXT_TYPES: &[&str] = &[
+        "", "text", "search", "url", "password", "email", "number", "tel",
+    ];
+    loop {
+        match dom.tag_name(node) {
+            Ok("input") => {
+                let ty = dom
+                    .attribute(node, "type")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                return TEXT_TYPES.contains(&ty.as_str()).then_some(node);
+            }
+            Ok("textarea") => return Some(node),
+            _ => {}
+        }
+        node = match dom.parent(node) {
+            Ok(Some(p)) => p,
+            _ => return None,
+        };
+    }
+}
+
+/// Valeur textuelle du champ : attribut `value` pour
+/// `<input>`, contenu texte pour `<textarea>`.
+fn field_value(dom: &Dom, field: NodeId) -> String {
+    if dom.tag_name(field).is_ok_and(|t| t == "textarea") {
+        dom.text_content(field).unwrap_or_default()
+    } else {
+        dom.attribute(field, "value")
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+}
+
+/// Applique la touche au contenu courant : `Backspace` retire
+/// le dernier caractère (frontière UTF-8), un `key` à un seul
+/// `char` s'insère à la fin (pas de curseur interne au MVP) ;
+/// le reste (Shift, Ctrl…) laisse le texte tel quel.
+fn apply_key(cur: &str, key: &str) -> String {
+    if key == "Backspace" {
+        let mut s = cur.to_string();
+        s.pop();
+        return s;
+    }
+    let mut chars = key.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) => {
+            let mut s = cur.to_string();
+            s.push(c);
+            s
+        }
+        _ => cur.to_string(),
+    }
+}
+
+/// Édite le champ : `input` → attribut `value`, `textarea` →
+/// texte enfant unique (les enfants texte surnuméraires —
+/// cas pathologique — sont vidés).
+fn edit_field(dom: &mut Dom, field: NodeId, key: &str) -> Result<(), DomError> {
+    let next = apply_key(&field_value(dom, field), key);
+    if dom.tag_name(field).is_ok_and(|t| t == "textarea") {
+        let texts: Vec<NodeId> = dom
+            .children(field)?
+            .into_iter()
+            .filter(|&c| dom.text(c).is_ok())
+            .collect();
+        if let Some((&first, rest)) = texts.split_first() {
+            dom.set_text(first, &next)?;
+            for &n in rest {
+                dom.set_text(n, "")?;
+            }
+        } else {
+            let t = dom.create_text(&next)?;
+            dom.append_child(field, t)?;
+        }
+    } else {
+        dom.set_attribute(field, "value", &next)?;
+    }
+    Ok(())
 }
 
 /// `href` du plus proche ancêtre `<a>` (le nœud lui-même

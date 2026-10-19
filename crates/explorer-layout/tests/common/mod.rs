@@ -6,6 +6,5 @@
 //! `explorer-test-support::font_fixture` (même constructeur,
 //! métriques identiques).
 
-
 #[allow(unused_imports)]
 pub use explorer_test_support::fixture_ttf;

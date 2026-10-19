@@ -319,8 +319,10 @@ async fn input(
             serde_json::json!({ "result": "scrolled", "scroll_y": scroll_y })
         }
         InputOutcome::Navigated => serde_json::json!({ "result": "navigated" }),
-        InputOutcome::Hover { url } => {
-            serde_json::json!({ "result": "hover", "url": url })
+        InputOutcome::Focused => serde_json::json!({ "result": "focused" }),
+        InputOutcome::Edited => serde_json::json!({ "result": "edited" }),
+        InputOutcome::Hover { url, editable } => {
+            serde_json::json!({ "result": "hover", "url": url, "editable": editable })
         }
     })
     .into_response()

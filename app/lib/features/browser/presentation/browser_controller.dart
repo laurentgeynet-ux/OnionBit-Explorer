@@ -22,6 +22,9 @@ class BrowserState {
     this.daemonOnline = false,
     this.lastError,
     this.frameTick = 0,
+    this.hoverUrl,
+    this.hoverEditable = false,
+    this.fieldFocused = false,
   });
 
   final List<BrowserTab> tabs;
@@ -44,6 +47,17 @@ class BrowserState {
   /// PNG (ici il rend simplement le rebuild observable).
   final int frameTick;
 
+  /// `href` sous le curseur (résultat `hover` du moteur) —
+  /// pilote le curseur lien + la barre de statut.
+  final String? hoverUrl;
+
+  /// Le point survolé est un champ éditable → curseur texte.
+  final bool hoverEditable;
+
+  /// Un champ de formulaire est focalisé côté moteur — les
+  /// frappes clavier sont relayées en `input key`.
+  final bool fieldFocused;
+
   /// Onglet actif, ou `null`.
   BrowserTab? get active {
     for (final t in tabs) {
@@ -59,6 +73,9 @@ class BrowserState {
     bool? daemonOnline,
     String? Function()? lastError,
     int? frameTick,
+    String? Function()? hoverUrl,
+    bool? hoverEditable,
+    bool? fieldFocused,
   }) =>
       BrowserState(
         tabs: tabs ?? this.tabs,
@@ -67,6 +84,9 @@ class BrowserState {
         daemonOnline: daemonOnline ?? this.daemonOnline,
         lastError: lastError != null ? lastError() : this.lastError,
         frameTick: frameTick ?? this.frameTick,
+        hoverUrl: hoverUrl != null ? hoverUrl() : this.hoverUrl,
+        hoverEditable: hoverEditable ?? this.hoverEditable,
+        fieldFocused: fieldFocused ?? this.fieldFocused,
       );
 }
 
@@ -210,22 +230,46 @@ class BrowserController extends Notifier<BrowserState> {
   /// borne et repeint, `frame_invalidated` suit.
   Future<void> scroll(double dy) => _sendInput({'type': 'scroll', 'dy': dy});
 
-  /// Survol → `mousemove` (coalescé : dernier état suffit).
-  Future<void> hover(double x, double y) =>
-      _sendInput({'type': 'mousemove', 'x': x, 'y': y});
+  /// Survol → `mousemove` (coalescé : dernier état suffit) —
+  /// le résultat `hover` pilote le curseur + la barre de
+  /// statut (`url`, `editable`).
+  Future<void> hover(double x, double y) async {
+    final res = await _sendInput({'type': 'mousemove', 'x': x, 'y': y});
+    if (res == null || !ref.mounted) return;
+    final url = res['url'];
+    state = state.copyWith(
+      hoverUrl: () => url is String ? url : null,
+      hoverEditable: res['editable'] == true,
+    );
+  }
 
-  /// Clic → `input click` — le moteur hit-teste et navigue
-  /// si c'est un lien (étape 31 côté UI : curseur).
-  Future<void> click(double x, double y) =>
-      _sendInput({'type': 'click', 'x': x, 'y': y});
+  /// Clic → `input click` — le moteur hit-teste : lien →
+  /// navigation (SSE), champ → `focused` (les frappes sont
+  /// ensuite relayées en `input key`).
+  Future<void> click(double x, double y) async {
+    final res = await _sendInput({'type': 'click', 'x': x, 'y': y});
+    if (res == null || !ref.mounted) return;
+    state = state.copyWith(
+      fieldFocused: res['result'] == 'focused',
+    );
+  }
 
-  Future<void> _sendInput(Map<String, dynamic> ev) async {
+  /// Frappe clavier → `input key` — n'a de sens que si un
+  /// champ est focalisé (`fieldFocused`).
+  Future<void> key(String key) =>
+      _sendInput({'type': 'key', 'key': key});
+
+  /// Envoie un événement d'entrée ; retourne le JSON de
+  /// résultat (`null` en cas d'erreur — déjà en `lastError`).
+  Future<Map<String, dynamic>?> _sendInput(
+      Map<String, dynamic> ev) async {
     final id = state.activeId;
-    if (id == null) return;
+    if (id == null) return null;
     try {
-      await _repo.sendInput(id, ev);
+      return await _repo.sendInput(id, ev);
     } on ApiException catch (e) {
       state = state.copyWith(lastError: () => e.message);
+      return null;
     }
   }
 

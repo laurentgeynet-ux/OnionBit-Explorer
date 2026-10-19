@@ -361,7 +361,8 @@ async fn mousemove_reports_link_href() {
     assert_eq!(
         out,
         InputOutcome::Hover {
-            url: Some("http://h.test/b".to_string())
+            url: Some("http://h.test/b".to_string()),
+            editable: false
         }
     );
 }
@@ -496,4 +497,122 @@ async fn visits_are_recorded_and_bookmarks_persisted() {
     assert!(s.remove_bookmark("http://h.test/"));
     assert!(!s.remove_bookmark("http://h.test/"));
     assert_eq!(s.bookmarks().len(), 0);
+}
+
+/// Page avec un formulaire : `input` en haut à gauche,
+/// `textarea` en dessous.
+const PAGE_FORM: &str = "<!doctype html><html><body><form>\
+     <input name=\"q\"><br><textarea>ab</textarea></form></body></html>";
+
+#[tokio::test]
+async fn click_input_focuses_then_keys_edit() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FORM);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    // Touche sans focus → ignorée.
+    let out = s
+        .handle_input(id, InputEvent::Key { key: "a".into() })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+
+    // Clic dans l'input (en haut à gauche, ~10em × 1.2em).
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Focused);
+
+    // Caractères → édités ; Backspace idem.
+    for key in ["a", "b"] {
+        let out = s
+            .handle_input(id, InputEvent::Key { key: key.into() })
+            .await
+            .unwrap();
+        assert_eq!(out, InputOutcome::Edited);
+    }
+    let out = s
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "Backspace".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+
+    // Enter → blur ; les touches suivantes sont ignorées.
+    let out = s
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "Enter".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+    let out = s
+        .handle_input(id, InputEvent::Key { key: "z".into() })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+}
+
+#[tokio::test]
+async fn click_outside_blurs_and_mousemove_reports_editable() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FORM);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    // Survol de l'input → éditable, pas de lien.
+    let out = s
+        .handle_input(id, InputEvent::MouseMove { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(
+        out,
+        InputOutcome::Hover {
+            url: None,
+            editable: true
+        }
+    );
+
+    // Focus puis clic loin en bas → blur (la touche est
+    // ignorée ensuite).
+    let _ = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await;
+    let _ = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 500.0 })
+        .await;
+    let out = s
+        .handle_input(id, InputEvent::Key { key: "x".into() })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+}
+
+#[tokio::test]
+async fn textarea_is_editable() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FORM);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    // La textarea suit l'input + <br> : ~y 30..90.
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 50.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Focused);
+    let out = s
+        .handle_input(id, InputEvent::Key { key: "c".into() })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
 }

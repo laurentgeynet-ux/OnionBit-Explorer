@@ -9,6 +9,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 31 — interactions** (`explorer-core`, `explorer-api`,
+  `explorer-layout`, `explorer-css`, `app/`) : champs de
+  formulaire focalisables — clic sur `input`/`textarea` →
+  `Focused`, `input key` édite `value` (caractère, Backspace,
+  Enter/Escape sort du champ) puis restyle + repaint +
+  `frame_invalidated` ; clic hors champ → blur ; navigation
+  invalide le focus. `InputOutcome::Hover` expose `editable`
+  (curseur texte) en plus de `url`. Feuille UA : `input`,
+  `textarea`, `select`, `button` en `inline-block` avec
+  bordure/taille. `<br>` devient une boîte texte `\n` →
+  saut de ligne forcé réel. Flutter : curseur dynamique
+  (lien/texte/flèche), `KeyboardListener` qui relaie les
+  frappes quand `fieldFocused`, `sendInput` retourne le
+  résultat JSON.
+
 - **Étape 30 — viewport moteur** (`app/`) : `BrowserState.frames`
   (PNG par onglet) alimenté en pull sur `frame_invalidated` et
   après navigation ; `Image.memory(gaplessPlayback)` sans flash.
