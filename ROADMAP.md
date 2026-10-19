@@ -869,11 +869,21 @@ progresse en trois paliers structurants :
   + spans + auto-placement, transforms 2D au raster,
   sticky `top` par translation de paint. Écarts documentés
   en tête de modules (`flex-wrap`, areas, max-content…).*
-- [ ] **Étape 43. JS vers ES6+.** Étendre `dillo-js` dans ce
-  workspace (modules `import`/`export`, `Proxy`, `Intl`, GC
-  complet ADR-0008…) — échappatoire documentée : `boa_engine`
-  derrière le même trait si le moteur maison ne suit pas
-  (ADR-0007).
+- [x] **Étape 43. JS vers ES6+.** Les 4 livrables nommés sont
+  livrés dans `dillo-js` : modules `import`/`export` + `import()`
+  dynamique + live bindings (JS-C5), `Proxy` complet avec
+  invariants (JS-C4 + C19/C20), `Intl` (JS-C20 — subset
+  `en-US`/UTC fixes, pas de CLDR : déviation documentée rangée
+  sous « JS-C couverture par besoin »), GC mark-sweep + rooting
+  ADR-0008 (JS-A). Couverture effective bien au-delà du périmètre
+  nommé : JS-C1→JS-C24 (UTF-16, arguments mappé, Temporal
+  subset, `using`, TypedArrays, Annex B…), 214 tests langage,
+  test262 859/859 sur le sous-ensemble extrait — échappatoire
+  `boa_engine` non requise. *Restes structurels documentés
+  (hors scope, pilotés par les pages réelles) : générateurs
+  lazy/`await` sur pending, décorateurs, `Intl` multi-locales,
+  `Temporal` complet, branchement `explorer-dom` générationnel
+  ↔ miroir JS.*
 - [ ] **Étape 44. Web APIs.** `fetch`/`XHR`, `localStorage`/
   `sessionStorage`, History API, `MutationObserver`, workers
   (bornés). *En cours — côté moteur livré : `location.*` et

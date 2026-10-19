@@ -883,6 +883,14 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     absents, déviation vs le `null` legacy de V8) ;
   - test262 : 859/859 ; 6 tests de régression.
 
+- **Étape 43 cochée — JS vers ES6+** : les 4 livrables nommés
+  sont livrés dans `dillo-js` (modules JS-C5, `Proxy` JS-C4+,
+  `Intl` minimal JS-C20, GC ADR-0008 JS-A) ; couverture effective
+  JS-C1→JS-C24, test262 859/859. Caveats documentés dans
+  `ROADMAP.md` (générateurs lazy, `Intl` CLDR, `Temporal`
+  complet, pont générationnel `explorer-dom` ↔ miroir) —
+  échappatoire `boa_engine` non requise.
+
 - **JS-C24 — `arguments` mappé, `bind` props,
   protos Weak*, `fn.toString`** (`dillo-js`) :
   - objet `arguments` mappé (spec
