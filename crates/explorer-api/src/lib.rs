@@ -35,7 +35,12 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use explorer_core::{CoreError, CoreEvent, InputEvent, InputOutcome, Session, TabId};
+use explorer_core::{
+    drain_navs_shared, history_move_shared, navigate_shared, CoreError, CoreEvent, InputEvent,
+    InputOutcome, Session, TabId,
+};
+use explorer_net::http::Request;
+use explorer_net::url::Url;
 use futures_util::Stream;
 
 /// État partagé : la session moteur, sérialisée.
@@ -202,38 +207,85 @@ async fn navigate(
             &CoreError::Url("champ « url » manquant".to_string()),
         );
     };
-    // La garde vit pendant tout l'await : single-writer strict
-    // — une navigation en cours sérialise les autres actions.
-    let mut session = st.session.lock().await;
-    match session.navigate(id, &url).await {
-        Ok(()) => tab_json(&session, id),
+    // Ordre des erreurs préservé : onglet inconnu avant URL
+    // invalide (comme `Session::navigate`).
+    {
+        let session = st.session.lock().await;
+        if session.tab_info(id).is_none() {
+            return err(StatusCode::NOT_FOUND, &CoreError::UnknownTab(id));
+        }
+    }
+    let url = match Url::parse(&url) {
+        Ok(u) => u,
+        Err(e) => return err(StatusCode::BAD_REQUEST, &CoreError::Url(e.to_string())),
+    };
+    // Étape 53d — la navigation est conduite en phases hors
+    // verrou (`navigate_shared`) : le `Mutex<Session>` n'est
+    // plus tenu pendant le téléchargement, `status`, `tabs`,
+    // `frame` et les autres onglets restent serviables.
+    match navigate_shared(&st.session, id, Request::get(url), true).await {
+        Ok(()) => {
+            drain_navs_shared(&st.session, id).await;
+            let session = st.session.lock().await;
+            tab_json(&session, id)
+        }
         Err(e) => err(err_status(&e), &e),
     }
 }
 
 /// `POST …/reload` — re-fetch de l'URL courante.
 async fn reload(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
-    let mut session = st.session.lock().await;
-    match session.reload(id).await {
-        Ok(()) => tab_json(&session, id),
+    let url = {
+        let session = st.session.lock().await;
+        match session.tab_info(id) {
+            Some(t) => t.url,
+            None => {
+                return err(StatusCode::NOT_FOUND, &CoreError::UnknownTab(id));
+            }
+        }
+    };
+    let Some(url) = url else {
+        // Onglet jamais navigué — même code que le chemin
+        // `&mut self` (`EmptyDocument` → 502 via `err_status`).
+        return err(
+            err_status(&CoreError::EmptyDocument),
+            &CoreError::EmptyDocument,
+        );
+    };
+    let url = match Url::parse(&url) {
+        Ok(u) => u,
+        Err(e) => return err(StatusCode::BAD_REQUEST, &CoreError::Url(e.to_string())),
+    };
+    match navigate_shared(&st.session, id, Request::get(url), false).await {
+        Ok(()) => {
+            drain_navs_shared(&st.session, id).await;
+            let session = st.session.lock().await;
+            tab_json(&session, id)
+        }
         Err(e) => err(err_status(&e), &e),
     }
 }
 
 /// `POST …/back` — historique −1.
 async fn back(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
-    let mut session = st.session.lock().await;
-    match session.go_back(id).await {
-        Ok(()) => tab_json(&session, id),
+    match history_move_shared(&st.session, id, -1).await {
+        Ok(()) => {
+            drain_navs_shared(&st.session, id).await;
+            let session = st.session.lock().await;
+            tab_json(&session, id)
+        }
         Err(e) => err(err_status(&e), &e),
     }
 }
 
 /// `POST …/forward` — historique +1.
 async fn forward(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
-    let mut session = st.session.lock().await;
-    match session.go_forward(id).await {
-        Ok(()) => tab_json(&session, id),
+    match history_move_shared(&st.session, id, 1).await {
+        Ok(()) => {
+            drain_navs_shared(&st.session, id).await;
+            let session = st.session.lock().await;
+            tab_json(&session, id)
+        }
         Err(e) => err(err_status(&e), &e),
     }
 }
@@ -318,13 +370,17 @@ async fn input(
             );
         }
     };
+    // `handle_input_now` pose les intentions (étape 53d) ;
+    // `drain_navs_shared` les conduit hors verrou — un clic
+    // de lien ne gèle plus l'API pendant la navigation.
     let outcome = {
         let mut session = st.session.lock().await;
-        match session.handle_input(id, ev).await {
+        match session.handle_input_now(id, ev) {
             Ok(o) => o,
             Err(e) => return err(err_status(&e), &e),
         }
     };
+    drain_navs_shared(&st.session, id).await;
     Json(match outcome {
         InputOutcome::Ignored => serde_json::json!({ "result": "ignored" }),
         InputOutcome::Scrolled { scroll_y } => {

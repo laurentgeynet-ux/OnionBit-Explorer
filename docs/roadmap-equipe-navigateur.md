@@ -178,13 +178,27 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
      **vivant** (les scripts tournent avant l'émission — le
      titre extrait au parse était ré-émis et écrasait la
      mutation).
-- [ ] **Étape 53d. API réactive pendant la navigation** (QA
-  daemon @ `cfa0514`) : le mutex session unique gèle toute
+- [x] **Étape 53d. API réactive pendant la navigation** (QA
+  daemon @ `cfa0514`) : le mutex session unique gelait toute
   l'API pendant `navigate` — nav France > 8 min ⇒ `status`,
-  `tabs`, `frame` timeoutent tous ; l'app Flutter serait
-  morte pendant la charge. La nav devient une tâche à lock
-  court + progression par événements (déjà le protocole SSE).
-  **Bloquant produit** — à faire avant ou avec l'étape 54.
+  `tabs`, `frame` timeoutaient tous. La navigation est
+  désormais éclatée en phases : `nav_begin`/`nav_apply`/
+  `sub_commit` sous verrou court, `NavJob::run` (fetch +
+  parse incrémental) et `SubJob::run` (vague
+  CSS/scripts/images, `@font-face`, prefetch des graphes
+  modules) hors verrou sur clones `Arc`. Les drivers
+  `navigate_shared`/`drain_navs_shared`/`history_move_shared`
+  conduisent une `Mutex<Session>` sans await réseau sous
+  verrou ; les intentions input/script convergent dans
+  `pending_nav` (`handle_input_now` ne fetch plus) ; l'epoch
+  par onglet invalide les navigations supplantées ; la
+  peinture progressive passe par `try_lock` (un tick manqué
+  est repeint au suivant). Régression couverte :
+  `shared_session_stays_responsive_during_navigation`
+  (lock < 500 ms pendant un corps en vol). API :
+  `navigate`/`reload`/`back`/`forward`/`input` + pompe
+  daemon basculés ; `navigate`/`handle_input`/`drain_script_nav`
+  compat `&mut self` conservés (CLI, FFI, tests).
 - [x] **Étape 53c. Tolérance TLS `close_notify` absent**
   (bug terrain, repro : craigslist.org — `TLS unexpected-eof`)
   : un pair qui ferme TCP sans `close_notify` doit terminer

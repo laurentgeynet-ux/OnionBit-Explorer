@@ -2357,11 +2357,19 @@ async fn timers_fire_via_pump_without_input() {
     let b = s.open_tab();
     s.navigate(b, "http://h.test/stat").await.unwrap();
 
-    // Timers armés → échéance exposée ; pompe 1 : 'T'+'I'
-    // (rAF ≙ 16 ms pas encore dû) ; pompe 2 : 'R'.
-    assert!(s.next_timer_deadline().is_some());
-    assert!(s.pump_timers(a) > 0);
-    std::thread::sleep(std::time::Duration::from_millis(20));
+    // Les callbacks à délai 0 tirent dès le `run_pending` de
+    // fin de navigation ; sous charge parallèle le rAF
+    // (~16 ms) peut aussi être échu. L'assertion porte sur
+    // l'état final — pomper sans input jusqu'à épuisement
+    // des timers (borne : un timer lent n'est pas un bug).
+    for _ in 0..10 {
+        s.pump_timers(a);
+        if s.next_timer_deadline().is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // Une dernière pompe synchronise le miroir → le rendu.
     s.pump_timers(a);
     assert_eq!(s.frame_png(a), s.frame_png(b));
     // Timeout consommé, intervalle auto-annulé, rAF tiré.
@@ -3116,4 +3124,116 @@ async fn delayed_timer_pumps_and_emits_events() {
     }
     assert_eq!(got_title.as_deref(), Some("C"));
     assert!(got_frame, "FrameInvalidated après timer");
+}
+
+/// Transport à goulot (étape 53d) : le premier morceau du
+/// document part, puis le corps attend `released` — la
+/// navigation reste « en vol » le temps de prouver que la
+/// session partagée répond aux autres appels.
+struct GatedTransport {
+    /// Libère le dernier morceau du corps.
+    released: Arc<tokio::sync::Notify>,
+    /// Documents émis — le test attend le départ de la nav.
+    calls: std::sync::atomic::AtomicU32,
+}
+
+#[async_trait]
+impl HttpTransport for GatedTransport {
+    async fn fetch(&self, _req: &Request) -> NetResult<Response> {
+        // Sous-ressources : absentes — 404 rapide (la vague
+        // finit vite, le test vise le gel du document).
+        Ok(Response {
+            status: 404,
+            reason: "gated".to_string(),
+            headers: vec![],
+            body: b"missing".to_vec(),
+            reused_connection: false,
+        })
+    }
+
+    async fn fetch_stream(
+        &self,
+        _req: &Request,
+    ) -> NetResult<explorer_net::http::StreamedResponse> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let (tx, rx) = tokio::sync::mpsc::channel(2);
+        let released = self.released.clone();
+        tokio::spawn(async move {
+            let _ = tx.send(Ok(b"<html><title>slow".to_vec())).await;
+            released.notified().await;
+            let _ = tx
+                .send(Ok(b"</title><body>fin</body></html>".to_vec()))
+                .await;
+        });
+        Ok(explorer_net::http::StreamedResponse {
+            status: 200,
+            reason: "gated".to_string(),
+            headers: vec![],
+            reused_connection: false,
+            body: rx,
+        })
+    }
+}
+
+/// Étape 53d — le défaut produit : `Mutex<Session>` tenu
+/// pendant toute la navigation gelait `/status`, `/tabs`,
+/// `/frame` et l'input pendant la charge (nav > 8 min sur
+/// terrain). Une session partagée doit rester serviable
+/// pendant le téléchargement : le verrou s'acquiert en
+/// quelques millisecondes puis la nav aboutit au signal.
+#[tokio::test]
+async fn shared_session_stays_responsive_during_navigation() {
+    use explorer_net::url::Url;
+
+    let released = Arc::new(tokio::sync::Notify::new());
+    let t = Arc::new(GatedTransport {
+        released: released.clone(),
+        calls: std::sync::atomic::AtomicU32::new(0),
+    });
+    let sess = Arc::new(tokio::sync::Mutex::new(Session::with_config(
+        t.clone(),
+        Arc::new(FixtureFont),
+        SessionConfig::default(),
+    )));
+    let tab = sess.lock().await.open_tab();
+    let s2 = sess.clone();
+    let nav = tokio::spawn(async move {
+        explorer_core::navigate_shared(
+            &s2,
+            tab,
+            Request::get(Url::parse("https://a/b").unwrap()),
+            true,
+        )
+        .await
+    });
+    // Attends que le fetch soit réellement parti.
+    for _ in 0..100 {
+        if t.calls.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        t.calls.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "la navigation n'a jamais démarré"
+    );
+    // Le cœur de la régression : le verrou doit être libre
+    // PENDANT que le corps est en vol — avant, toute la
+    // durée du fetch bloquait les autres opérations.
+    let guard = tokio::time::timeout(std::time::Duration::from_millis(500), sess.lock()).await;
+    let Ok(guard) = guard else {
+        panic!("session gelée pendant le téléchargement (53d)");
+    };
+    // `tabs`/`tab_info`/`frame` serviables sous le même lock.
+    assert_eq!(guard.tabs(), vec![tab]);
+    drop(guard);
+    // Libère le corps → la navigation aboutit et commit.
+    released.notify_waiters();
+    let out = nav.await.unwrap_or_else(|e| panic!("jointure nav : {e}"));
+    assert!(out.is_ok(), "nav en échec : {out:?}");
+    let s = sess.lock().await;
+    assert_eq!(
+        s.tab_info(tab).and_then(|i| i.title),
+        Some("slow".to_string())
+    );
 }

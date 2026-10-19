@@ -299,6 +299,20 @@ struct Tab {
     /// Transitions en vol (`elem` ordinal + `prop` →
     /// horaire) — bornées par `MAX_TRANSITIONS`.
     transitions: Vec<ActiveTransition>,
+    /// Horloge de navigation (étape 53d) — incrémentée à
+    /// chaque `nav_begin` ; les phases éclatées vérifient
+    /// l'epoch avant chaque écriture, ce qui invalide
+    /// automatiquement une navigation abandonnée au profit
+    /// d'une plus récente (double-clic, script redirect).
+    nav_epoch: u64,
+    /// Intentions de navigation en attente (étape 53d) —
+    /// input (`Req`) et script (`collect_script_navs` y
+    /// déverse `location`/`history`/`form.submit()`) :
+    /// `handle_input` ne télécharge plus sous `&mut self`,
+    /// il enfile ; l'hôte conduit via `drain_script_nav`
+    /// (compat) ou `drain_navs_shared` (session partagée).
+    /// Bornée — un flot d'input n'accumule pas.
+    pending_nav: std::collections::VecDeque<DrainAct>,
 }
 
 /// Popup `<select>` moteur (étape 54) — l'état vit hors DOM :
@@ -642,6 +656,10 @@ pub struct Session {
     image_max_px: u32,
     /// Bornes sous-ressources (`max_sheets` feuilles liées).
     max_sheets: usize,
+    /// Budget `@font-face` par document — recopié de
+    /// `cfg.max_fonts` pour les phases détachées (53d, le
+    /// registre `WebFontSource` borne aussi à l'inscription).
+    max_fonts: usize,
     /// Bornes scheduler (étape 50) : `<script src>` par
     /// document, modules transitifs par graphe, fetches
     /// simultanés par onglet.
@@ -718,6 +736,7 @@ impl Session {
             max_images: cfg.max_images,
             image_max_px: cfg.image_max_px,
             max_sheets: cfg.max_sheets,
+            max_fonts: cfg.max_fonts,
             max_scripts: cfg.max_scripts,
             max_modules: cfg.max_modules,
             max_inflight: cfg.max_inflight,
@@ -810,6 +829,8 @@ impl Session {
                 linked_css: String::new(),
                 prev_styles: HashMap::new(),
                 transitions: Vec::new(),
+                nav_epoch: 0,
+                pending_nav: std::collections::VecDeque::new(),
             },
         );
         let _ = self.events.send(CoreEvent::TabOpened { tab: id });
@@ -1129,55 +1150,94 @@ impl Session {
     /// (corps urlencodé) ; GET passe par le wrapper.
     /// `push` = l'URL rejoint l'historique après le rendu
     /// (navigate, soumission) ; `false` = déplacement/reload.
+    ///
+    /// Chemin compat `&mut self` (étape 53d) : les phases
+    /// [`nav_begin`](Self::nav_begin) → [`NavJob::run`] →
+    /// [`nav_apply`](Self::nav_apply) → [`SubJob::run`] →
+    /// [`sub_commit`](Self::sub_commit) sont exactement celles
+    /// que [`navigate_shared`] conduit sur une session
+    /// partagée — ici `self` reste emprunté pendant tout le
+    /// parcours (CLI, FFI, tests).
     async fn navigate_request(
         &mut self,
         tab: TabId,
         req: Request,
         push: bool,
     ) -> Result<Option<String>, CoreError> {
-        let url = req.url.clone();
-        // Titre avant écrasement — pour `emit_navigated`.
-        let prev_title = self.tabs.get(&tab).and_then(|t| t.title.clone());
-        let mut resp = self
-            .transport
-            .fetch_stream(&req)
-            .await
-            .map_err(|e| CoreError::Fetch(e.to_string()))?;
-        if !(200..300).contains(&resp.status) {
-            return Err(CoreError::HttpStatus(resp.status));
+        let mut job = self.nav_begin(tab, req, push)?;
+        let epoch = job.epoch;
+        let (done, tail) = job
+            .run(|dom: &Dom| -> PaintFut<'_> {
+                self.nav_paint(tab, epoch, dom);
+                Box::pin(async {})
+            })
+            .await?;
+        let Some(mut sub) = self.nav_apply(tab, tail, done)? else {
+            return Ok(None);
+        };
+        sub.run().await;
+        self.sub_commit(tab, sub).await
+    }
+
+    /// Phase 1 de la navigation éclatée (étape 53d) :
+    /// valide l'onglet, arme l'epoch (les phases suivantes
+    /// refusent tout commit d'une navigation supplantée) et
+    /// capture le titre courant pour `TitleChanged`. Aucune
+    /// écriture visible — URL, historique et DOM ne bougent
+    /// qu'au commit.
+    fn nav_begin(&mut self, tab: TabId, req: Request, push: bool) -> Result<NavJob, CoreError> {
+        let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        entry.nav_epoch += 1;
+        Ok(NavJob {
+            epoch: entry.nav_epoch,
+            req,
+            push,
+            prev_title: entry.title.clone(),
+            transport: Arc::clone(&self.transport),
+            paint_chunk_bytes: self.paint_chunk_bytes,
+            paint_interval: self.paint_interval,
+        })
+    }
+
+    /// Peinture progressive epoch-gardée (étape 53d) : un
+    /// snapshot émis par [`NavJob::run`] n'est posé que si
+    /// la navigation est encore la plus récente de l'onglet —
+    /// sinon il est silencieusement jeté.
+    fn nav_paint(&mut self, tab: TabId, epoch: u64, dom: &Dom) {
+        let live = self.tabs.get(&tab).is_some_and(|e| e.nav_epoch == epoch);
+        if live && self.relayout_dom(tab, dom).is_ok() {
+            let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
         }
-        // Parse incrémental (étape 53) : chaque morceau de corps
-        // décodé alimente le tree-builder — `TreeBuilder::push`
-        // garantit un arbre cohérent à frontière de token (R-1) —
-        // et la peinture est cadencée (N octets ou N ms) : la
-        // page se peint pendant le téléchargement.
-        let mut tb = TreeBuilder::new();
-        let mut dec = StreamDecoder::new();
-        let mut html = String::new();
-        let mut since_paint = 0usize;
-        let mut last_paint = Instant::now();
-        while let Some(chunk) = resp.body.recv().await {
-            let bytes = chunk.map_err(|e| CoreError::Fetch(e.to_string()))?;
-            let text = dec.feed(&bytes);
-            html.push_str(&text);
-            tb.push(&text);
-            since_paint += bytes.len();
-            if since_paint >= self.paint_chunk_bytes || last_paint.elapsed() >= self.paint_interval
-            {
-                self.paint_progress(tab, &tb);
-                since_paint = 0;
-                last_paint = Instant::now();
+    }
+
+    /// Phase 2 — commit du DOM téléchargé : écrit l'état de
+    /// l'onglet, planifie les sous-ressources, arme le moteur
+    /// JS et emballe le [`SubJob`] détachable. `None` = epoch
+    /// supplantée (navigation abandonnée — rien à commettre).
+    fn nav_apply(
+        &mut self,
+        tab: TabId,
+        tail: NavTail,
+        done: NavDone,
+    ) -> Result<Option<SubJob>, CoreError> {
+        {
+            let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            if entry.nav_epoch != tail.epoch {
+                return Ok(None);
             }
         }
-        let text = dec.finish();
-        html.push_str(&text);
-        tb.push(&text);
-        tb.finish();
-        let dom = tb.into_dom();
-        let title = extract_title(&dom);
+        let NavDone {
+            url,
+            dom,
+            html,
+            title,
+        } = done;
         if let Some(s) = &self.store {
             s.record_visit(&url.to_string(), title.as_deref());
         }
+        let scripting = self.js_factory.is_some();
+        let (sheet_urls, scripts, img_urls) = self.plan_subresources(&dom, &url, scripting);
+        let doc_css = collect_style_css(&dom);
         {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
             entry.url = Some(url.clone());
@@ -1185,6 +1245,7 @@ impl Session {
             entry.scroll_y = 0.0;
             entry.focused = None;
             entry.hovered = None;
+            entry.popup = None;
             entry.js = None;
             entry.images.clear();
             entry.linked_css.clear();
@@ -1193,8 +1254,113 @@ impl Session {
             entry.dom = Some(dom);
         }
         self.webfonts.clear();
-        self.load_subresources(tab, &html).await;
-        self.fetch_webfonts(tab).await;
+        let eng = self.spawn_engine(tab, &html, !scripts.is_empty());
+        Ok(Some(SubJob {
+            tab,
+            epoch: tail.epoch,
+            url: url.clone(),
+            push: tail.push,
+            prev_title: tail.prev_title,
+            title,
+            transport: Arc::clone(&self.transport),
+            events: self.events.clone(),
+            page: url,
+            sheet_urls,
+            scripts,
+            img_urls,
+            doc_css,
+            eng,
+            css_slots: Vec::new(),
+            script_srcs: Vec::new(),
+            img_bodies: HashMap::new(),
+            async_mods: Vec::new(),
+            fonts: Vec::new(),
+            arrival_evals: Vec::new(),
+            post_evals: Vec::new(),
+            max_inflight: self.max_inflight,
+            max_modules: self.max_modules,
+            font_budget: self.max_fonts,
+        }))
+    }
+
+    /// Phase finale — commit des sous-ressources et du rendu
+    /// sous `&mut self` : cascade, moteur JS, files
+    /// d'exécution (les graphes modules sont déjà remplis —
+    /// synchrones), images, fontes, layout, historique et
+    /// `Navigated`. `None` = epoch supplantée, tout est jeté.
+    async fn sub_commit(&mut self, tab: TabId, job: SubJob) -> Result<Option<String>, CoreError> {
+        {
+            let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            if entry.nav_epoch != job.epoch {
+                return Ok(None);
+            }
+        }
+        let SubJob {
+            url,
+            push,
+            prev_title,
+            title,
+            css_slots,
+            scripts,
+            script_srcs,
+            img_bodies,
+            mut eng,
+            fonts,
+            arrival_evals,
+            post_evals,
+            ..
+        } = job;
+        // Feuilles liées dans l'ordre document (slot vide =
+        // feuille en échec → absente de la cascade).
+        let mut css = String::new();
+        for t in css_slots.iter().flatten() {
+            css.push_str(t);
+            css.push('\n');
+        }
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.linked_css = css;
+        }
+        for (family, weight, italic, data) in fonts {
+            self.webfonts.register(&family, weight, italic, data);
+        }
+        if let Some(eng) = eng.as_mut() {
+            for item in scripts.iter().filter(|i| i.exec == ScriptExec::Parse) {
+                let Some(src) = item_source(item, &script_srcs) else {
+                    continue;
+                };
+                self.eval_or_report(tab, eng.as_mut(), src);
+            }
+            for me in arrival_evals {
+                self.eval_module_graph(tab, eng.as_mut(), me);
+            }
+            let mut post_evals = post_evals.into_iter();
+            for item in scripts.iter().filter(|i| i.exec == ScriptExec::Post) {
+                if item.module {
+                    if let Some(me) = post_evals.next() {
+                        self.eval_module_graph(tab, eng.as_mut(), me);
+                    }
+                } else if let Some(src) = item_source(item, &script_srcs) {
+                    self.eval_or_report(tab, eng.as_mut(), src);
+                }
+            }
+            let n = eng.run_pending();
+            tracing::trace!(tab, jobs = n, "jobs js exécutés");
+            // Miroir muté ? → re-parse : le relayout qui suit
+            // rend les modifications (dirty bit consommé côté
+            // moteur).
+            if let Some(mutated) = eng.sync_dom() {
+                self.apply_dom_sync(tab, &mutated, false);
+            }
+        }
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.js = eng;
+        }
+        // Étape 51 : XHR/fetch émis pendant le chargement →
+        // spawned ; une pompe livre les réponses déjà là,
+        // l'hôte pompe périodiquement pour le reste.
+        self.after_script(tab);
+        self.pump_net().await;
+        self.insert_images(tab, &url, &img_bodies);
         self.relayout(tab)?;
         // La page chargée prend sa place dans l'historique
         // AVANT le drain script : un `history.go` en vol la
@@ -1220,6 +1386,103 @@ impl Session {
             self.emit_navigated(tab, &url, live, prev_title.as_deref());
         }
         Ok(title)
+    }
+
+    /// Évalue un `<script type="module">` dont le graphe est
+    /// déjà rempli (prefetch détaché dans [`SubJob::run`]) —
+    /// `eval_module` + `PipelineError` sans faire échouer la
+    /// page.
+    fn eval_module_graph(&mut self, tab: TabId, eng: &mut dyn JsEngine, me: ModEval) {
+        let ModuleGraph { sources, alias } = me.graph;
+        let resolve: UrlResolver = Arc::new(move |spec, referrer| {
+            let b = alias.get(referrer).map_or(referrer, String::as_str);
+            Url::parse(b)
+                .ok()
+                .and_then(|u| Url::resolve(&u, spec).ok())
+                .map(|u| u.as_str())
+        });
+        if let Err(e) = eng.eval_module(&me.name, sources, resolve) {
+            tracing::debug!(tab, error = %e, "module en échec");
+            let _ = self.events.send(CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: e.to_string(),
+            });
+        }
+    }
+
+    /// Dépile la prochaine intention de navigation.
+    fn pop_pending_nav(&mut self, tab: TabId) -> Option<DrainAct> {
+        self.tabs
+            .get_mut(&tab)
+            .and_then(|e| e.pending_nav.pop_front())
+    }
+
+    /// Enfile une intention — `false` si la file est pleine
+    /// (`MAX_PENDING_NAV`) : l'appelant cesse alors de
+    /// vider le moteur (un flot hostile ne fait pas gonfler
+    /// la mémoire, et aucune intention n'est jetée en
+    /// silence — celles encore dans le moteur restent
+    /// drainables au prochain tour).
+    fn enqueue_nav_act(&mut self, tab: TabId, act: DrainAct) -> bool {
+        const MAX_PENDING_NAV: usize = 8;
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            if e.pending_nav.len() < MAX_PENDING_NAV {
+                e.pending_nav.push_back(act);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Déverse les intentions script du moteur dans
+    /// `pending_nav` (étape 53d) — les handlers consultent
+    /// ensuite [`Self::nav_pending`] au lieu de conduire les
+    /// navigations sous `&mut self`. Stoppe quand la file
+    /// est pleine : le reste reste dans le moteur pour le
+    /// prochain drain.
+    fn collect_script_navs(&mut self, tab: TabId) {
+        while let Some(n) = self.next_script_nav(tab) {
+            let act = match n {
+                ScriptNav::To(u) => DrainAct::Req(Box::new(Request::get(u)), true),
+                ScriptNav::Go(d) => DrainAct::Go(d),
+                ScriptNav::Submit(req) => DrainAct::Req(Box::new(req), true),
+            };
+            if !self.enqueue_nav_act(tab, act) {
+                break;
+            }
+        }
+    }
+
+    /// Cible `(index, URL)` d'un déplacement d'historique —
+    /// lecture pure pour les drivers partagés (53d).
+    fn hist_target(&self, tab: TabId, delta: isize) -> Result<(usize, Url), CoreError> {
+        let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        let Some(idx) = entry
+            .hist_idx
+            .checked_add_signed(delta)
+            .filter(|&i| i < entry.hist.len())
+        else {
+            return Err(CoreError::EmptyDocument);
+        };
+        Ok((idx, entry.hist[idx].clone()))
+    }
+
+    /// Fixe l'index courant d'historique (commit côté driver
+    /// partagé, 53d).
+    fn set_hist_idx(&mut self, tab: TabId, idx: usize) {
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            e.hist_idx = idx;
+        }
+    }
+
+    /// La session a-t-elle des intentions de navigation en
+    /// attente pour `tab` (input ou script) — sonde des
+    /// drivers partagés (53d).
+    #[must_use]
+    pub fn nav_pending(&self, tab: TabId) -> bool {
+        self.tabs
+            .get(&tab)
+            .is_some_and(|e| !e.pending_nav.is_empty())
     }
 
     /// Première intention de navigation script exploitable
@@ -1271,48 +1534,46 @@ impl Session {
         None
     }
 
-    /// Draine les intentions de navigation script — après
-    /// chargement, événement DOM ou jobs en attente. Une
-    /// navigation peut en produire d'autres (scripts de la
-    /// page chargée) : boucle bornée par `MAX_NAV_HOPS`,
-    /// jamais de récursion — `navigate_request` reste une
+    /// Drainage des intentions de navigation accumulées —
+    /// input (`pending_nav`, étape 53d) puis script
+    /// (`location`, `history`, `form.submit()`) — appelé
+    /// après tout point de synchro producteur : événements,
+    /// fin de chargement, tick timers (étape 52 — les hôtes
+    /// la relancent après [`Self::pump_timers`]). Publique
+    /// pour les pompes des hôtes `&mut self` (CLI, FFI,
+    /// tests) — les hôtes à session partagée passent par
+    /// [`drain_navs_shared`]. Boucle bornée par
+    /// `MAX_NAV_HOPS`, jamais de récursion — chaque
+    /// navigation est conduite par `navigate_request` en
     /// feuille du graphe d'appels (seul `history_move`,
     /// boxé, boucle pour la taille du future). `true` si au
     /// moins une navigation a été appliquée.
-    /// Drainage des intentions de navigation script
-    /// (`location`, `history`) accumulées — appelé après tout
-    /// point de synchro producteur : événements, fin de
-    /// chargement, tick timers (étape 52 — les hôtes la
-    /// relancent après [`Self::pump_timers`]). Publique pour
-    /// les pompes des hôtes (daemon, CLI) ; bornée à 8 sauts.
     pub async fn drain_script_nav(&mut self, tab: TabId) -> bool {
         const MAX_NAV_HOPS: u8 = 8;
         let mut applied = false;
         for _ in 0..MAX_NAV_HOPS {
-            let Some(act) = self.next_script_nav(tab) else {
+            self.collect_script_navs(tab);
+            let Some(act) = self.pop_pending_nav(tab) else {
                 break;
             };
             match act {
-                ScriptNav::To(url) => {
-                    let _ = self.navigate_request(tab, Request::get(url), true).await;
+                DrainAct::Req(req, push) => {
+                    let _ = self.navigate_request(tab, *req, push).await;
                 }
-                ScriptNav::Go(0) => {
+                DrainAct::Go(0) => {
                     // `history.go(0)` = rechargement de
                     // l'entrée courante (spec HTML).
                     if let Some(u) = self.tabs.get(&tab).and_then(|t| t.url.clone()) {
                         let _ = self.navigate_to(tab, u).await;
                     }
                 }
-                ScriptNav::Go(d) => {
+                DrainAct::Go(d) => {
                     // Box : `history_move` appelle aussi
                     // `drain_script_nav` — récursion mutuelle
                     // cassée ici (taille + inférence `Send`).
                     let mv: std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send + '_>> =
                         Box::pin(self.history_move(tab, d));
                     let _ = mv.await;
-                }
-                ScriptNav::Submit(req) => {
-                    let _ = self.navigate_request(tab, req, true).await;
                 }
             }
             applied = true;
@@ -1581,147 +1842,6 @@ impl Session {
         self.net_tasks.len()
     }
 
-    /// Fetch des sous-ressources + exécution des `<script>`
-    /// (étape 50, ADR-0012 côté session). **Une seule vague
-    /// parallèle bornée** — `max_inflight` requêtes en vol via
-    /// `FuturesUnordered`, émises par priorité
-    /// `CSS > script > img` (le document est déjà servi) ;
-    /// `Referer`/`Origin` sont calculés à l'émission
-    /// (`initiator_headers`), le mixed-content filtré à la
-    /// collecte.
-    ///
-    /// `<script>` — collecte en ordre document, trois files :
-    /// - classiques (inline ou `src` sans `async`/`defer`) :
-    ///   file « parse », évalués en ordre document — le parse
-    ///   one-shot ne bloque pas, chaque externe attend sa
-    ///   source fetchée (approximation « parser-blocking »
-    ///   documentée : un classique voit le document complet) ;
-    /// - `defer` et modules non-`async` : file post-parse,
-    ///   ordre document ;
-    /// - `async` : classiques évalués **en ligne** à réception
-    ///   dans la vague, modules bufferisés puis évalués avant
-    ///   la file post-parse.
-    /// - `type="module"` : graphe statique **préfetché** borné
-    ///   (`max_modules`) via `module_specifiers` puis
-    ///   `eval_module` — le `ModuleLoader` reçoit une map
-    ///   `url → source` (jamais de fetch ré-entrant depuis le
-    ///   thread moteur : deadlock). Modules CORS : le fetch
-    ///   cross-origin n'est pas vérifié au MVP (réévaluation
-    ///   ADR-0019, étape 51).
-    ///
-    /// Tout échec individuel (réseau, statut, borne) saute la
-    /// ressource — la page dégrade, jamais de panic.
-    async fn load_subresources(&mut self, tab: TabId, html: &str) {
-        let (Some(base), Some(dom)) = (
-            self.tabs.get(&tab).and_then(|t| t.url.clone()),
-            self.tabs.get(&tab).and_then(|t| t.dom.as_ref()),
-        ) else {
-            return;
-        };
-        let scripting = self.js_factory.is_some();
-        let (sheet_urls, scripts, img_urls) = self.plan_subresources(dom, &base, scripting);
-
-        // Slots de réception indexés par ordre document ;
-        // `slot_items[slot]` = index de l'item script.
-        let mut css_slots: Vec<Option<String>> = vec![None; sheet_urls.len()];
-        let slot_items: Vec<usize> = scripts
-            .iter()
-            .enumerate()
-            .filter_map(|(i, s)| s.slot.map(|_| i))
-            .collect();
-        let mut script_srcs: Vec<Option<String>> = vec![None; slot_items.len()];
-        let mut img_bodies: HashMap<String, Vec<u8>> = HashMap::new();
-        // Modules `async` arrivés pendant la vague : `(url de
-        // l'entrée, corps)` en ordre d'arrivée.
-        let mut async_mods: Vec<(Url, String)> = Vec::new();
-
-        // Contexte JS avant la vague : un `async` classique est
-        // évalué dès sa complétion — le miroir doit être posé.
-        let mut eng = self.spawn_engine(tab, html, !scripts.is_empty());
-
-        let transport = self.transport.clone();
-        let events = self.events.clone();
-        let eval_arrival = |eng: &mut Option<Box<dyn JsEngine>>, src: &str| {
-            if let Some(e) = eng.as_mut() {
-                if let Err(err) = e.eval(src) {
-                    tracing::debug!(tab, error = %err, "script async en échec");
-                    let _ = events.send(CoreEvent::PipelineError {
-                        tab: Some(tab),
-                        message: err.to_string(),
-                    });
-                }
-            }
-        };
-        // Émission par priorité : CSS → scripts → images.
-        let jobs = sub_jobs(&base, &sheet_urls, &scripts, &img_urls);
-        fetch_wave(&transport, self.max_inflight, jobs, |tag, res| {
-            let Ok(resp) = res else { return };
-            if !(200..300).contains(&resp.status) {
-                return;
-            }
-            match tag {
-                SubTag::Css(i) => {
-                    css_slots[i] = Some(decode_stylesheet(&resp.body, &resp.headers));
-                }
-                SubTag::Script(slot) => {
-                    let item = &scripts[slot_items[slot]];
-                    // Étape 53b : charset déclaré (classique) →
-                    // BOM → UTF-8 — pas le sniffer HTML.
-                    let text = decode_subresource(&resp.body, item.charset.as_deref());
-                    if item.exec == ScriptExec::Arrival {
-                        if item.module {
-                            if let Some(u) = &item.src {
-                                async_mods.push((u.clone(), text));
-                            }
-                        } else {
-                            eval_arrival(&mut eng, &text);
-                        }
-                    } else {
-                        script_srcs[slot] = Some(text);
-                    }
-                }
-                SubTag::Img(u) => {
-                    img_bodies.insert(u.as_str(), resp.body);
-                }
-            }
-        })
-        .await;
-
-        // Feuilles liées dans l'ordre document (slot vide =
-        // feuille en échec → absente de la cascade).
-        let mut css = String::new();
-        for t in css_slots.iter().flatten() {
-            css.push_str(t);
-            css.push('\n');
-        }
-        if let Some(entry) = self.tabs.get_mut(&tab) {
-            entry.linked_css = css;
-        }
-
-        let Some(mut eng) = eng else {
-            self.insert_images(tab, &base, &img_bodies);
-            return;
-        };
-        self.run_script_queues(tab, eng.as_mut(), &scripts, &script_srcs, async_mods, &base)
-            .await;
-        let n = eng.run_pending();
-        tracing::trace!(tab, jobs = n, "jobs js exécutés");
-        // Miroir muté ? → re-parse : le relayout qui suit rend
-        // les modifications (dirty bit consommé côté moteur).
-        if let Some(mutated) = eng.sync_dom() {
-            self.apply_dom_sync(tab, &mutated, false);
-        }
-        if let Some(entry) = self.tabs.get_mut(&tab) {
-            entry.js = Some(eng);
-        }
-        // Étape 51 : XHR/fetch émis pendant le chargement →
-        // spawned ; une pompe livre les réponses déjà là,
-        // l'hôte pompe périodiquement pour le reste.
-        self.after_script(tab);
-        self.pump_net().await;
-        self.insert_images(tab, &base, &img_bodies);
-    }
-
     /// Collecte des sous-ressources du document (étape 50) :
     /// URLs résolues ici (émission propre), mixed-content
     /// filtré, images dédupliquées — `(feuilles, scripts,
@@ -1788,109 +1908,11 @@ impl Session {
         })
     }
 
-    /// Exécute les trois files de scripts dans l'ordre spec :
-    /// classiques « parse » (ordre document) → modules `async`
-    /// arrivés pendant la vague (ordre d'arrivée — le graphe
-    /// est préfetché à la suite, approximation « à
-    /// réception ») → file post-parse (`defer` et modules,
-    /// ordre document).
-    async fn run_script_queues(
-        &mut self,
-        tab: TabId,
-        eng: &mut dyn JsEngine,
-        scripts: &[ScriptItem],
-        script_srcs: &[Option<String>],
-        async_mods: Vec<(Url, String)>,
-        base: &Url,
-    ) {
-        for item in scripts.iter().filter(|i| i.exec == ScriptExec::Parse) {
-            let Some(src) = item_source(item, script_srcs) else {
-                continue;
-            };
-            self.eval_or_report(tab, eng, src);
-        }
-        for (u, src) in async_mods {
-            let name = u.as_str();
-            self.eval_module_src(tab, eng, name, &u, src).await;
-        }
-        for (i, item) in scripts.iter().enumerate() {
-            if item.exec != ScriptExec::Post {
-                continue;
-            }
-            let Some(src) = item_source(item, script_srcs) else {
-                continue;
-            };
-            if item.module {
-                // Entrée inline : nom synthétique unique, aliasé
-                // vers la page pour la résolution des deps.
-                let (name, base_u) = item.src.clone().map_or_else(
-                    || (format!("inline:{i}"), base.clone()),
-                    |u| (u.as_str(), u),
-                );
-                self.eval_module_src(tab, eng, name, &base_u, src.to_string())
-                    .await;
-            } else {
-                self.eval_or_report(tab, eng, src);
-            }
-        }
-    }
-
     /// `eval` avec rapport : un échec émet `PipelineError`
     /// sans faire échouer la page (dégradation, règle 3).
     fn eval_or_report(&mut self, tab: TabId, eng: &mut dyn JsEngine, src: &str) {
         if let Err(e) = eng.eval(src) {
             tracing::debug!(tab, error = %e, "script en échec");
-            let _ = self.events.send(CoreEvent::PipelineError {
-                tab: Some(tab),
-                message: e.to_string(),
-            });
-        }
-    }
-
-    /// Évalue un `<script type="module">` : prefetch BFS borné
-    /// du graphe statique puis `eval_module`. `name` = clé de
-    /// registre du moteur (URL de l'entrée ou nom synthétique
-    /// inline), `base` = URL de résolution des spécificateurs.
-    async fn eval_module_src(
-        &mut self,
-        tab: TabId,
-        eng: &mut dyn JsEngine,
-        name: String,
-        base: &Url,
-        src: String,
-    ) {
-        let mut graph = ModuleGraph {
-            sources: HashMap::from([(name.clone(), src.clone())]),
-            alias: HashMap::from([(name.clone(), base.as_str())]),
-        };
-        let page = self
-            .tabs
-            .get(&tab)
-            .and_then(|t| t.url.clone())
-            .unwrap_or_else(|| base.clone());
-        // `Arc` cloné : la future de fetch n'a pas besoin de
-        // `&Session` (`dyn JsEngine` n'est pas `Sync`).
-        let transport = Arc::clone(&self.transport);
-        Self::fetch_module_sources(
-            &transport,
-            self.max_inflight,
-            self.max_modules,
-            &page,
-            base,
-            &src,
-            &mut graph,
-        )
-        .await;
-        let ModuleGraph { sources, alias } = graph;
-        let resolve: UrlResolver = Arc::new(move |spec, referrer| {
-            let b = alias.get(referrer).map_or(referrer, String::as_str);
-            Url::parse(b)
-                .ok()
-                .and_then(|u| Url::resolve(&u, spec).ok())
-                .map(|u| u.as_str())
-        });
-        if let Err(e) = eng.eval_module(&name, sources, resolve) {
-            tracing::debug!(tab, error = %e, "module en échec");
             let _ = self.events.send(CoreEvent::PipelineError {
                 tab: Some(tab),
                 message: e.to_string(),
@@ -1994,56 +2016,6 @@ impl Session {
         }
     }
 
-    /// Fetch + décode + inscription des `@font-face` du
-    /// document (étape 46). Séquentiel borné : `max_fonts`
-    /// faces au registre, chaque source `url()` essayée dans
-    /// l'ordre (première qui décode gagne), `local()` sans
-    /// fetch (la source locale repli résout par famille). La
-    /// fonte est présente au `relayout` suivant — jamais de
-    /// re-layout partiel (une frame = un état cohérent).
-    async fn fetch_webfonts(&mut self, tab: TabId) {
-        let (Some(base), Some(dom)) = (
-            self.tabs.get(&tab).and_then(|t| t.url.clone()),
-            self.tabs.get(&tab).and_then(|t| t.dom.as_ref()),
-        ) else {
-            return;
-        };
-        let mut eng = StyleEngine::new();
-        eng.add_css(&collect_style_css(dom), Origin::Author);
-        if let Some(entry) = self.tabs.get(&tab) {
-            eng.add_css(&entry.linked_css.clone(), Origin::Author);
-        }
-        let faces = eng.font_faces(&StyleEnv::default());
-        for face in faces {
-            if self.webfonts.is_full() {
-                break;
-            }
-            for src in &face.srcs {
-                let FontSrc::Url(href) = src else {
-                    continue;
-                };
-                let Ok(url) = Url::resolve(&base, href) else {
-                    continue;
-                };
-                let Ok(resp) = self.transport.fetch(&Request::get(url)).await else {
-                    continue;
-                };
-                if !(200..300).contains(&resp.status) {
-                    continue;
-                }
-                let Some(data) = decode_font(&resp.body) else {
-                    continue;
-                };
-                if self
-                    .webfonts
-                    .register(&face.family, face.weight, face.italic, data)
-                {
-                    break;
-                }
-            }
-        }
-    }
-
     /// Resynchronise le document depuis le miroir JS muté :
     /// re-parse du HTML sérialisé, relecture du titre
     /// (`TitleChanged` si changé). `focused`/`hovered` sont
@@ -2142,19 +2114,9 @@ impl Session {
         r
     }
 
-    /// Peinture progressive (étape 53) : relayout + raster sur
-    /// le DOM **en construction** du `TreeBuilder` — cohérent à
-    /// frontière de token (R-1). L'échec est ignoré : un arbre
-    /// trop tôt (pas encore de `<html>`) ne peint rien.
-    fn paint_progress(&mut self, tab: TabId, tb: &TreeBuilder) {
-        if self.relayout_dom(tab, tb.dom()).is_ok() {
-            let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
-        }
-    }
-
     /// Pipeline style → layout → raster sur `dom` (emprunté —
-    /// `relayout` pour le DOM posé, `paint_progress` pour le
-    /// DOM en construction). Écrit `tree`/`doc_h`/frame/png.
+    /// `relayout` pour le DOM posé, `nav_paint` pour le DOM
+    /// en construction). Écrit `tree`/`doc_h`/frame/png.
     fn relayout_dom(&mut self, tab: TabId, dom: &Dom) -> Result<(), CoreError> {
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
 
@@ -2234,11 +2196,34 @@ impl Session {
 
     /// Applique un événement d'entrée à l'onglet : hit-test
     /// sur l'arbre posé, scroll borné, suivi de lien.
+    /// Corps synchrone + drain compat `&mut self` (étape
+    /// 53d) — les hôtes à session partagée appellent
+    /// [`Self::handle_input_now`] puis `drain_navs_shared`.
     ///
     /// # Errors
     /// [`CoreError::UnknownTab`], ou erreur de navigation si
     /// un clic de lien déclenche un fetch qui échoue.
     pub async fn handle_input(
+        &mut self,
+        tab: TabId,
+        ev: InputEvent,
+    ) -> Result<InputOutcome, CoreError> {
+        let out = self.handle_input_now(tab, ev)?;
+        self.drain_script_nav(tab).await;
+        Ok(out)
+    }
+
+    /// Corps synchrone de [`Self::handle_input`] (étape
+    /// 53d) : dispatche l'événement DOM et pose les
+    /// intentions de navigation dans `pending_nav` —
+    /// **jamais de fetch sous `&mut self`**. Les hôtes à
+    /// session partagée enchaînent `drain_navs_shared` ;
+    /// `handle_input` draine en compat.
+    ///
+    /// # Errors
+    /// [`CoreError::UnknownTab`] ou erreur de pipeline
+    /// d'édition/re-layout.
+    pub fn handle_input_now(
         &mut self,
         tab: TabId,
         ev: InputEvent,
@@ -2268,7 +2253,7 @@ impl Session {
                 if key == "Enter" {
                     if let Some((form, sub)) = self.focused_form_default(tab) {
                         self.set_focus(tab, None);
-                        return self.try_submit(tab, form, sub, false).await;
+                        return self.try_submit(tab, form, sub, false);
                     }
                 }
                 self.handle_key(tab, &key)
@@ -2294,8 +2279,8 @@ impl Session {
                     scroll_y: self.tabs.get(&tab).map_or(0.0, |t| t.scroll_y),
                 })
             }
-            InputEvent::MouseMove { x, y } => self.handle_mouse_move(tab, x, y).await,
-            InputEvent::Click { x, y } => self.handle_click(tab, x, y).await,
+            InputEvent::MouseMove { x, y } => self.handle_mouse_move(tab, x, y),
+            InputEvent::Click { x, y } => self.handle_click(tab, x, y),
         }
     }
 
@@ -2306,12 +2291,7 @@ impl Session {
     /// handler peut muter le miroir et re-parser le document —
     /// un `NodeId` capté en début de bras serait mort dès le
     /// premier dispatch.
-    async fn handle_mouse_move(
-        &mut self,
-        tab: TabId,
-        x: f32,
-        y: f32,
-    ) -> Result<InputOutcome, CoreError> {
+    fn handle_mouse_move(&mut self, tab: TabId, x: f32, y: f32) -> Result<InputOutcome, CoreError> {
         // Popup `<select>` ouvert : le curseur pilote le
         // surlignage de ligne — capture chrome, pas
         // d'événements DOM vers le document (étape 54).
@@ -2355,7 +2335,8 @@ impl Session {
         if let Some(p) = &path {
             self.dispatch_path_event(tab, "mousemove", p);
         }
-        if self.drain_script_nav(tab).await {
+        self.collect_script_navs(tab);
+        if self.nav_pending(tab) {
             return Ok(InputOutcome::Navigated);
         }
         Ok(InputOutcome::Hover {
@@ -2368,12 +2349,7 @@ impl Session {
     /// l'action par défaut), bascule des contrôles puis
     /// `input`/`change`, focus sur les champs, `submit` des
     /// formulaires, navigation des liens.
-    async fn handle_click(
-        &mut self,
-        tab: TabId,
-        x: f32,
-        y: f32,
-    ) -> Result<InputOutcome, CoreError> {
+    fn handle_click(&mut self, tab: TabId, x: f32, y: f32) -> Result<InputOutcome, CoreError> {
         // Popup `<select>` ouvert : le clic est consommé par
         // l'overlay chrome — choix d'option ou fermeture,
         // sans `click` DOM sur le document (étape 54).
@@ -2425,7 +2401,8 @@ impl Session {
         }
         // Navigation script (`location`, `history`) : priorité
         // sur l'action par défaut du clic.
-        if self.drain_script_nav(tab).await {
+        self.collect_script_navs(tab);
+        if self.nav_pending(tab) {
             return Ok(InputOutcome::Navigated);
         }
         if let Some(field) = self.field_at(tab, x, y) {
@@ -2448,11 +2425,12 @@ impl Session {
         // séquence est factorisée dans `try_submit` (partagée
         // avec la soumission implicite `Enter`).
         if let Some((form, sub)) = self.submit_at(tab, x, y) {
-            return self.try_submit(tab, form, Some(sub), prevented).await;
+            return self.try_submit(tab, form, Some(sub), prevented);
         }
         match self.link_at(tab, x, y) {
             Some(url) if !prevented => {
-                self.navigate(tab, &url).await?;
+                let u = Url::parse(&url).map_err(|e| CoreError::Url(e.to_string()))?;
+                self.enqueue_nav_act(tab, DrainAct::Req(Box::new(Request::get(u)), true));
                 Ok(InputOutcome::Navigated)
             }
             _ => Ok(InputOutcome::Ignored),
@@ -2666,7 +2644,7 @@ impl Session {
     ///
     /// `novalidate` sur le `<form>` ou `formnovalidate` sur
     /// le `submitter` sautent la validation (HTML).
-    async fn try_submit(
+    fn try_submit(
         &mut self,
         tab: TabId,
         form: NodeId,
@@ -2706,13 +2684,14 @@ impl Session {
         // handler peut re-parser le document (ids morts,
         // chemins survivants).
         if !click_prevented && !self.dispatch_dom_event(tab, "submit", form) {
-            if self.drain_script_nav(tab).await {
+            self.collect_script_navs(tab);
+            if self.nav_pending(tab) {
                 return Ok(InputOutcome::Navigated);
             }
             let f = self.resolve_path(tab, form_path.as_deref());
             let s = self.resolve_path(tab, sub_path.as_deref());
             if let Some(f) = f {
-                self.submit_form(tab, f, s).await?;
+                self.submit_form(tab, f, s)?;
                 return Ok(InputOutcome::Navigated);
             }
         }
@@ -2720,11 +2699,13 @@ impl Session {
     }
 
     /// Soumission de formulaire (étape 38) : contrôles
-    /// successful → `GET` (query) ou `POST` urlencodé, puis le
-    /// pipeline de navigation complet sur la réponse.
+    /// successful → `GET` (query) ou `POST` urlencodé —
+    /// posée en intention `pending_nav` (étape 53d : jamais
+    /// de fetch sous `&mut self`, le drain de l'appelant
+    /// conduit le pipeline complet sur la réponse).
     /// L'historique retient l'URL d'action — un reload/back
     /// refait un `GET` (déviation documentée ADR-0014).
-    async fn submit_form(
+    fn submit_form(
         &mut self,
         tab: TabId,
         form: NodeId,
@@ -2750,13 +2731,8 @@ impl Session {
             form_request(base, &action, &method, &enctype, &pairs)
                 .ok_or_else(|| CoreError::Url("action de formulaire irrésolvable".to_string()))?
         };
-        match self.navigate_request(tab, req, true).await {
-            Ok(_) => {
-                self.drain_script_nav(tab).await;
-                Ok(())
-            }
-            Err(e) => Err(self.emit_error(tab, e)),
-        }
+        self.enqueue_nav_act(tab, DrainAct::Req(Box::new(req), true));
+        Ok(())
     }
 
     /// Édition du champ focalisé : `Backspace` efface,
@@ -3416,6 +3392,355 @@ enum SubTag {
 struct ModuleGraph {
     sources: HashMap<String, String>,
     alias: HashMap<String, String>,
+}
+
+/// Future de peinture progressive (étape 53d) — bornée par
+/// la durée de vie du `&Dom` emprunté au `TreeBuilder`.
+type PaintFut<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>;
+
+/// Phase « fetch + parse » d'une navigation, détachable de
+/// la session (étape 53d) : construite sous `&mut self` par
+/// [`Session::nav_begin`] (epoch armée, `Arc` du transport
+/// cloné), [`NavJob::run`] ne réclame aucun `&Session` —
+/// un hôte à `Mutex<Session>` garde son API réactive
+/// pendant tout le téléchargement. La peinture progressive
+/// est livrée à un rappel injecté : chaque snapshot du DOM
+/// en construction est consommé dans sa propre future
+/// (re-lock court côté appelant partagé, `nav_paint`
+/// direct côté `&mut self`).
+struct NavJob {
+    /// Epoch capturée à `nav_begin` — comparée à
+    /// `Tab::nav_epoch` à chaque reprise du verrou.
+    epoch: u64,
+    /// Requête de navigation (GET/POST).
+    req: Request,
+    /// `push` du commit (historique).
+    push: bool,
+    /// Titre de l'onglet avant navigation — `TitleChanged`.
+    prev_title: Option<String>,
+    /// Transport cloné — fetch hors session.
+    transport: Arc<dyn HttpTransport>,
+    /// Cadence de peinture progressive.
+    paint_chunk_bytes: usize,
+    paint_interval: std::time::Duration,
+}
+
+/// Queue de [`NavJob::run`] — ce que le commit consomme
+/// après le `self` du job (re-publié sans l'emprunt du
+/// rappel de peinture).
+struct NavTail {
+    /// Epoch — garde [`Session::nav_apply`].
+    epoch: u64,
+    /// `push` historique.
+    push: bool,
+    /// Titre avant navigation — `TitleChanged`.
+    prev_title: Option<String>,
+}
+
+/// Sortie de [`NavJob::run`] — document parsé prêt à poser.
+struct NavDone {
+    /// URL effectivement naviguée.
+    url: Url,
+    /// DOM du document complet.
+    dom: Dom,
+    /// HTML décodé (miroir JS à `nav_apply`).
+    html: String,
+    /// Titre extrait.
+    title: Option<String>,
+}
+
+impl NavJob {
+    /// Fetch + parse incrémental hors session : chaque
+    /// morceau décodé alimente le tree-builder —
+    /// `TreeBuilder::push` garantit un arbre cohérent à
+    /// frontière de token (R-1) — et à la cadence
+    /// configurée (N octets ou N ms) le DOM en construction
+    /// est livré à `paint`. Aucun `&mut Session` ne
+    /// traverse l'`await` : le verrou hôte reste libre
+    /// pendant tout le téléchargement (étape 53d).
+    async fn run<F>(&mut self, mut paint: F) -> Result<(NavDone, NavTail), CoreError>
+    where
+        F: for<'a> FnMut(&'a Dom) -> PaintFut<'a>,
+    {
+        let mut resp = self
+            .transport
+            .fetch_stream(&self.req)
+            .await
+            .map_err(|e| CoreError::Fetch(e.to_string()))?;
+        if !(200..300).contains(&resp.status) {
+            return Err(CoreError::HttpStatus(resp.status));
+        }
+        let mut tb = TreeBuilder::new();
+        let mut dec = StreamDecoder::new();
+        let mut html = String::new();
+        let mut since_paint = 0usize;
+        let mut last_paint = Instant::now();
+        while let Some(chunk) = resp.body.recv().await {
+            let bytes = chunk.map_err(|e| CoreError::Fetch(e.to_string()))?;
+            let text = dec.feed(&bytes);
+            html.push_str(&text);
+            tb.push(&text);
+            since_paint += bytes.len();
+            if since_paint >= self.paint_chunk_bytes || last_paint.elapsed() >= self.paint_interval
+            {
+                paint(tb.dom()).await;
+                since_paint = 0;
+                last_paint = Instant::now();
+            }
+        }
+        let text = dec.finish();
+        html.push_str(&text);
+        tb.push(&text);
+        tb.finish();
+        let dom = tb.into_dom();
+        let title = extract_title(&dom);
+        let done = NavDone {
+            url: self.req.url.clone(),
+            dom,
+            html,
+            title,
+        };
+        let tail = NavTail {
+            epoch: self.epoch,
+            push: self.push,
+            prev_title: self.prev_title.take(),
+        };
+        Ok((done, tail))
+    }
+}
+
+/// Évaluation d'un module différée au commit (étape 53d) —
+/// le graphe statique est déjà rempli (prefetch hors
+/// session dans [`SubJob::run`]), le commit ne fait plus
+/// que l'`eval_module` synchrone.
+struct ModEval {
+    /// Clé de registre moteur (URL de l'entrée ou
+    /// `inline:N`).
+    name: String,
+    /// Graphe rempli — `sources` + `alias`.
+    graph: ModuleGraph,
+}
+
+/// Phase « sous-ressources » d'une navigation, détachable
+/// de la session (étape 53d) : possède le plan de collecte,
+/// le moteur JS du document et les tampons de réception —
+/// [`SubJob::run`] télécharge la vague CSS/scripts/images,
+/// les `@font-face` et les graphes de modules sans
+/// `&Session` ; [`Session::sub_commit`] applique.
+struct SubJob {
+    /// Onglet + epoch de la navigation.
+    tab: TabId,
+    epoch: u64,
+    /// URL du document — base des sous-ressources et
+    /// `Referer` de la politique réseau.
+    url: Url,
+    /// `push` historique + titre avant navigation.
+    push: bool,
+    prev_title: Option<String>,
+    /// Titre extrait au parse.
+    title: Option<String>,
+    /// Transport cloné — fetch hors session.
+    transport: Arc<dyn HttpTransport>,
+    /// Bus d'événements — `PipelineError` des évaluations
+    /// « arrival » pendant la vague.
+    events: broadcast::Sender<CoreEvent>,
+    /// URL de la page — politique mixed-content/`Referer`
+    /// du prefetch modules.
+    page: Url,
+    /// Plan de collecte — URLs résolues à `nav_apply`.
+    sheet_urls: Vec<Url>,
+    scripts: Vec<ScriptItem>,
+    img_urls: Vec<Url>,
+    /// CSS inline du document — nourrit la résolution
+    /// `@font-face` (le DOM n'est pas accessible hors
+    /// session).
+    doc_css: String,
+    /// Moteur du document — les `async` classiques sont
+    /// évalués en ligne à réception pendant la vague.
+    eng: Option<Box<dyn JsEngine>>,
+    /// Réceptions de la vague — indexées par ordre document.
+    css_slots: Vec<Option<String>>,
+    script_srcs: Vec<Option<String>>,
+    img_bodies: HashMap<String, Vec<u8>>,
+    /// Corps des modules `async` arrivés (ordre d'arrivée).
+    async_mods: Vec<(Url, String)>,
+    /// Faces `@font-face` téléchargées et décodées —
+    /// `family`, `weight`, `italic`, données brutes.
+    fonts: Vec<(String, u16, bool, Vec<u8>)>,
+    /// Modules à évaluer au commit — arrival puis post.
+    arrival_evals: Vec<ModEval>,
+    post_evals: Vec<ModEval>,
+    /// Bornes recopiées de la config session.
+    max_inflight: usize,
+    max_modules: usize,
+    font_budget: usize,
+}
+
+impl SubJob {
+    /// Vague de sous-ressources + fontes + prefetch des
+    /// graphes de modules — intégralement hors session :
+    /// tous les tampons vivent dans le job, le commit les
+    /// applique (étape 53d). Les scripts `async` classiques
+    /// sont évalués à réception sur le moteur embarqué.
+    async fn run(&mut self) {
+        // Slots de réception indexés par ordre document ;
+        // `slot_items[slot]` = index de l'item script.
+        self.css_slots = vec![None; self.sheet_urls.len()];
+        let slot_items: Vec<usize> = self
+            .scripts
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.slot.map(|_| i))
+            .collect();
+        self.script_srcs = vec![None; slot_items.len()];
+
+        let tab = self.tab;
+        let events = self.events.clone();
+        let eval_arrival = |eng: &mut Option<Box<dyn JsEngine>>, src: &str| {
+            if let Some(e) = eng.as_mut() {
+                if let Err(err) = e.eval(src) {
+                    tracing::debug!(tab, error = %err, "script async en échec");
+                    let _ = events.send(CoreEvent::PipelineError {
+                        tab: Some(tab),
+                        message: err.to_string(),
+                    });
+                }
+            }
+        };
+        // Émission par priorité : CSS → scripts → images.
+        let jobs = sub_jobs(&self.url, &self.sheet_urls, &self.scripts, &self.img_urls);
+        let mut eng = self.eng.take();
+        let mut async_mods = Vec::new();
+        fetch_wave(&self.transport, self.max_inflight, jobs, |tag, res| {
+            let Ok(resp) = res else { return };
+            if !(200..300).contains(&resp.status) {
+                return;
+            }
+            match tag {
+                SubTag::Css(i) => {
+                    self.css_slots[i] = Some(decode_stylesheet(&resp.body, &resp.headers));
+                }
+                SubTag::Script(slot) => {
+                    let item = &self.scripts[slot_items[slot]];
+                    // Étape 53b : charset déclaré
+                    // (classique) → BOM → UTF-8.
+                    let text = decode_subresource(&resp.body, item.charset.as_deref());
+                    if item.exec == ScriptExec::Arrival {
+                        if item.module {
+                            if let Some(u) = &item.src {
+                                async_mods.push((u.clone(), text));
+                            }
+                        } else {
+                            eval_arrival(&mut eng, &text);
+                        }
+                    } else {
+                        self.script_srcs[slot] = Some(text);
+                    }
+                }
+                SubTag::Img(u) => {
+                    self.img_bodies.insert(u.as_str(), resp.body);
+                }
+            }
+        })
+        .await;
+        self.eng = eng;
+        self.async_mods = async_mods;
+        self.fetch_fonts().await;
+        self.prefetch_modules().await;
+    }
+
+    /// Fetch + décode des `@font-face` hors session (étape
+    /// 53d — ex-`fetch_webfonts` déplacé) : faces résolues
+    /// sur `doc_css` + feuilles liées téléchargées, chaque
+    /// source `url()` essayée dans l'ordre (première qui
+    /// décode gagne) ; `register` au commit borne le
+    /// registre. Séquentiel — `font_budget` vus.
+    async fn fetch_fonts(&mut self) {
+        let mut eng = StyleEngine::new();
+        eng.add_css(&self.doc_css.clone(), Origin::Author);
+        let mut linked = String::new();
+        for t in self.css_slots.iter().flatten() {
+            linked.push_str(t);
+            linked.push('\n');
+        }
+        eng.add_css(&linked, Origin::Author);
+        'faces: for face in eng.font_faces(&StyleEnv::default()) {
+            if self.fonts.len() >= self.font_budget {
+                break;
+            }
+            for src in &face.srcs {
+                let FontSrc::Url(href) = src else {
+                    continue;
+                };
+                let Ok(url) = Url::resolve(&self.url, href) else {
+                    continue;
+                };
+                let Ok(resp) = self.transport.fetch(&Request::get(url)).await else {
+                    continue;
+                };
+                if !(200..300).contains(&resp.status) {
+                    continue;
+                }
+                let Some(data) = decode_font(&resp.body) else {
+                    continue;
+                };
+                self.fonts
+                    .push((face.family.clone(), face.weight, face.italic, data));
+                continue 'faces;
+            }
+        }
+    }
+
+    /// Prefetch des graphes de modules hors session (étape
+    /// 53d — ex-`eval_module_src` splitté) : même ordre que
+    /// la file d'exécution du commit — `async` en ordre
+    /// d'arrivée puis post-parse en ordre document.
+    async fn prefetch_modules(&mut self) {
+        let mut entries: Vec<(String, Url, String)> = Vec::new();
+        for (u, src) in std::mem::take(&mut self.async_mods) {
+            entries.push((u.as_str(), u, src));
+        }
+        let async_n = entries.len();
+        for (i, item) in self.scripts.iter().enumerate() {
+            if item.exec != ScriptExec::Post || !item.module {
+                continue;
+            }
+            let Some(src) = item_source(item, &self.script_srcs) else {
+                continue;
+            };
+            // Entrée inline : nom synthétique unique, aliasé
+            // vers la page pour la résolution des deps.
+            let (name, base_u) = item.src.clone().map_or_else(
+                || (format!("inline:{i}"), self.url.clone()),
+                |u| (u.as_str(), u),
+            );
+            entries.push((name, base_u, src.to_string()));
+        }
+        let mut post_evals = Vec::new();
+        for (n, (name, base, src)) in entries.into_iter().enumerate() {
+            let mut graph = ModuleGraph {
+                sources: HashMap::from([(name.clone(), src.clone())]),
+                alias: HashMap::from([(name.clone(), base.as_str())]),
+            };
+            Session::fetch_module_sources(
+                &self.transport,
+                self.max_inflight,
+                self.max_modules,
+                &self.page,
+                &base,
+                &src,
+                &mut graph,
+            )
+            .await;
+            let me = ModEval { name, graph };
+            if n < async_n {
+                self.arrival_evals.push(me);
+            } else {
+                post_evals.push(me);
+            }
+        }
+        self.post_evals = post_evals;
+    }
 }
 
 /// Complétion d'une requête script-initiée (étape 51) —
@@ -4438,6 +4763,173 @@ enum ScriptNav {
     /// `form.submit()`/`requestSubmit()` : requête déjà
     /// construite (méthode + corps + en-têtes — étape 54).
     Submit(Request),
+}
+
+/// Action dépilée par un drain de navigation (étape 53d) —
+/// requête prête (input `pending_nav`, `location`, submit
+/// de formulaire) ou déplacement relatif d'historique.
+enum DrainAct {
+    /// `(requête, push historique)` — conduite par
+    /// `navigate_request`/`navigate_shared`. `Box` :
+    /// `Request` (233 o) domine `Go` (8 o) — la file
+    /// n'embarque pas le pire cas par cellule.
+    Req(Box<Request>, bool),
+    /// `history.go(d)` — résolu via `history_move` (ou son
+    /// équivalent partagé) ; `0` = reload.
+    Go(isize),
+}
+
+// ═══════════════ Étape 53d — drivers partagés ═══════════════
+
+/// Conduit une navigation sur une session partagée
+/// (`Mutex<Session>`) **sans tenir le verrou pendant
+/// l'I/O** (étape 53d — le défaut produit était un gel de
+/// toute l'API pendant `navigate`) : `nav_begin` arme
+/// l'epoch sous verrou court, `NavJob::run` télécharge et
+/// parse hors verrou (chaque snapshot de peinture
+/// progressive est appliqué dans un re-lock minimal),
+/// `nav_apply` puis `sub_commit` n'écrivent qu'en verrou
+/// court. Pendant tout le parcours, `status`, `tabs`,
+/// `frame`, l'input et les autres onglets restent
+/// serviables.
+///
+/// Une navigation supplantée (epoch périmée — double-clic,
+/// redirection script plus récente) est abandonnée
+/// silencieusement : ses fetches ont tourné mais rien
+/// d'obsolète n'est commis.
+///
+/// Ne draine pas les intentions produites : l'appelant
+/// enchaîne [`drain_navs_shared`] — même contrat que
+/// [`Session::navigate`] + [`Session::drain_script_nav`].
+///
+/// # Errors
+/// Mêmes erreurs que [`Session::navigate`]
+/// (`Url`, `Fetch`, `HttpStatus`, `EmptyDocument`,
+/// `NothingToPaint`, `FrameTooBig`, `UnknownTab`) —
+/// `PipelineError` est émis sur le bus pour les erreurs de
+/// pipeline, comme le chemin `&mut self`.
+pub async fn navigate_shared(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    req: Request,
+    push: bool,
+) -> Result<(), CoreError> {
+    let mut job = {
+        let mut s = sess.lock().await;
+        s.nav_begin(tab, req, push)?
+    };
+    let epoch = job.epoch;
+    let (done, tail) = match job
+        .run(|dom: &Dom| -> PaintFut<'_> {
+            // `try_lock` : la peinture progressive ne bloque
+            // jamais le téléchargement — un tick manqué (lock
+            // occupé par un `/frame` ou une autre phase) est
+            // repeint au suivant, le commit final repeint de
+            // toute façon.
+            if let Ok(mut s) = sess.try_lock() {
+                s.nav_paint(tab, epoch, dom);
+            }
+            Box::pin(async {})
+        })
+        .await
+    {
+        Ok(out) => out,
+        Err(e) => {
+            let mut s = sess.lock().await;
+            return Err(s.emit_error(tab, e));
+        }
+    };
+    let sub = {
+        let mut s = sess.lock().await;
+        match s.nav_apply(tab, tail, done) {
+            Ok(sub) => sub,
+            Err(e) => return Err(s.emit_error(tab, e)),
+        }
+    };
+    // Epoch supplantée : la navigation la plus récente a
+    // gagné — celle-ci est jetée proprement (rien à
+    // commettre, aucune erreur n'est observable).
+    let Some(mut sub) = sub else {
+        return Ok(());
+    };
+    sub.run().await;
+    let mut s = sess.lock().await;
+    match s.sub_commit(tab, sub).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(s.emit_error(tab, e)),
+    }
+}
+
+/// `history_move` partagé (étape 53d) : la cible est lue
+/// sous verrou court, la navigation conduite hors verrou,
+/// l'index commis seulement si la navigation a abouti.
+///
+/// # Errors
+/// [`CoreError::UnknownTab`], [`CoreError::EmptyDocument`]
+/// (pas d'entrée dans cette direction) ou erreur de
+/// navigation.
+pub async fn history_move_shared(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    delta: isize,
+) -> Result<(), CoreError> {
+    let (idx, url) = {
+        let s = sess.lock().await;
+        s.hist_target(tab, delta)?
+    };
+    match navigate_shared(sess, tab, Request::get(url), false).await {
+        Ok(()) => {
+            let mut s = sess.lock().await;
+            s.set_hist_idx(tab, idx);
+            Ok(())
+        }
+        Err(e) => {
+            let mut s = sess.lock().await;
+            Err(s.emit_error(tab, e))
+        }
+    }
+}
+
+/// Drain partagé des intentions de navigation (étape 53d) —
+/// même contrat que [`Session::drain_script_nav`] mais
+/// chaque navigation est conduite par [`navigate_shared`]
+/// **hors verrou** : la boucle bornée `MAX_NAV_HOPS`
+/// alterne collecte sous verrou court et conduite libre —
+/// `form.submit()`, `location=` et les clics de liens n'en
+/// gèlent plus l'API non plus. `true` si au moins une
+/// navigation a été appliquée.
+pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -> bool {
+    const MAX_NAV_HOPS: u8 = 8;
+    let mut applied = false;
+    for _ in 0..MAX_NAV_HOPS {
+        let act = {
+            let mut s = sess.lock().await;
+            s.collect_script_navs(tab);
+            s.pop_pending_nav(tab)
+        };
+        match act {
+            None => break,
+            Some(DrainAct::Req(req, push)) => {
+                let _ = navigate_shared(sess, tab, *req, push).await;
+            }
+            Some(DrainAct::Go(0)) => {
+                // `history.go(0)` = rechargement de l'entrée
+                // courante (spec HTML).
+                let url = {
+                    let s = sess.lock().await;
+                    s.tabs.get(&tab).and_then(|t| t.url.clone())
+                };
+                if let Some(u) = url {
+                    let _ = navigate_shared(sess, tab, Request::get(u), false).await;
+                }
+            }
+            Some(DrainAct::Go(d)) => {
+                let _ = history_move_shared(sess, tab, d).await;
+            }
+        }
+        applied = true;
+    }
+    applied
 }
 
 /// Fenêtre de sniffing `<meta charset>` — même borne que
