@@ -45,7 +45,9 @@ panel de 8) : **mesurables** lobste.rs, wikipedia ·
 Écartés : duckduckgo (blanc « par design » —
 `body{display:none}` anti-FOUC honoré, script de déblocage
 non exécuté), old.reddit (shadow DOM/custom elements, hors
-portée).
+portée). **MDN débloqué par la décision FrameTooBig**
+(rend complet 562 Ko) — candidat smoke recevable ;
+lemonde/bbc rendent aussi (lemonde tronqué au cap).
 
 Balayage robustesse (14 sites, même session) : **vitrine
 `text.npr.org` quasi-parfaite**, weather.gov ~75 % (images
@@ -347,6 +349,15 @@ mesures).
   d'appel/récursion bornée par budget → `JsError` typée,
   jamais d'overflow natif. Repro minimal : reproduire la
   pile en extrayant le pattern récursif du bundle.
+- [ ] **JS-C42. `Drop` itératif de l'AST** (résidu mesuré de
+  JS-C41, repro `repros/` : `x=1+1+…`/`a&&a&&…` à ~15 000
+  opérandes via `eval` **et** `module_specifiers`) : le parse
+  est borné (`input too deeply nested` propre) mais la
+  **destruction récursive** de la chaîne `Box<Expr>` déborde
+  — `maybe_grow` ne couvre pas `Drop`. Fix : `Drop` itératif
+  sur les nœuds unaires/binaires chaînés. Coin extrême — le
+  bundle réel github passe — mais du code généré peut
+  produire de telles chaînes.
 
 ## Tâches continues
 
