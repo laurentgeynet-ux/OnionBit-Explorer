@@ -44,6 +44,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - 13 tests `tests/gc.rs` : cycles, fermetures, timers,
     promesses, cache DOM, racines explicites, idempotence.
 
+- **Étape 16 — `explorer-css` : propriétés typées +
+  shorthands + pseudo-classes dynamiques** (`value.rs`,
+  ~560 lignes) : `Length`/`Unit` (px + absolus avec facteur,
+  relatives `em`/`rem`/`ex`/`ch` + viewport `vw`/`vh`/`vmin`/
+  `vmax` différées à la used value), `Color` RGBA (`#rgb`,
+  `#rrggbb[a/a]`, `rgb()/rgba()`, ~50 noms + `transparent`),
+  exposants `2e3` gérés à la découpe nombre/unité. Expansion
+  des shorthands à la cascade : `margin`/`padding` (1-4
+  valeurs), `border`/`border-<side>` (ordre libre
+  width/style/color), `border-width|style|color`, `overflow`,
+  `background` (couleur + image), `font` (style/variant/
+  weight/size[/line-height]/family), `list-style`. Accesseurs
+  typés sur `ComputedStyle` : `length`/`color`/`number`
+  (`currentcolor` résolu via `color`). Pseudo-classes
+  dynamiques (`:hover`, `:focus*`, `:checked`, `:disabled`,
+  `:target`…) : `matches_with_state`/`compute_with_state`/
+  `compute_tree_with_state` pilotées par une fonction d'état
+  externe — couture restyle ADR-0012 ; `:link` structurel sur
+  `a[href]`/`area[href]`, `:visited` toujours faux (pas de
+  tracking, conformité vie privée). 10 tests + corrections
+  d'attentes (`:hover` désormais valide, alpha rgba arrondi).
+  *Mesure WPT selectors/cascade : reste à brancher dans le
+  chantier conformance (ADR-0010).*
+
 - **Étape 15 — `explorer-css` : cascade + héritage +
   computed style** (`cascade.rs`, ~500 lignes) : ordre de la
   cascade **UA normal < auteur normal < auteur `!important` <

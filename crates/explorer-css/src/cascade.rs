@@ -18,7 +18,8 @@
 //! en CSS et parsée par notre propre parser.
 
 use crate::parser::{AtKind, Declaration, MediaQuery, Rule, Stylesheet};
-use crate::selector::{parse_selector_list, ComplexSelector, Specificity};
+use crate::selector::{matches_with_state, parse_selector_list, ComplexSelector, Specificity};
+use crate::value::{expand_shorthand, parse_color, parse_length, Color, Length};
 use explorer_dom::{Dom, NodeId};
 use std::collections::HashMap;
 
@@ -158,6 +159,33 @@ impl ComputedStyle {
     pub fn get_or<'a>(&'a self, name: &str, fallback: &'a str) -> &'a str {
         self.get(name).unwrap_or(fallback)
     }
+
+    /// Valeur typée `Length` (`10px`, `1.5em`, `0`) — `None`
+    /// si absente ou non-longueur (`auto`, `medium`…).
+    #[must_use]
+    pub fn length(&self, name: &str) -> Option<Length> {
+        self.get(name).and_then(parse_length)
+    }
+
+    /// Valeur typée `Color` — `currentcolor` est résolu via la
+    /// couleur de l'élément (`color` elle-même).
+    #[must_use]
+    pub fn color(&self, name: &str) -> Option<Color> {
+        let raw = self.get(name)?;
+        if raw.eq_ignore_ascii_case("currentcolor") {
+            return self
+                .get("color")
+                .and_then(parse_color)
+                .or(Some(Color::BLACK));
+        }
+        parse_color(raw)
+    }
+
+    /// Valeur typée `f64` (`z-index`, `opacity`…).
+    #[must_use]
+    pub fn number(&self, name: &str) -> Option<f64> {
+        self.get(name)?.trim().parse().ok()
+    }
 }
 
 /// Table des styles calculés d'un sous-arbre (mémoïsation
@@ -229,18 +257,45 @@ impl StyleEngine {
 
     /// Computed style d'un nœud (récursion parent sans mémoire —
     /// pour un seul nœud. Préférer `compute_tree` en masse).
+    /// Pseudo-classes dynamiques : fausses.
     #[must_use]
     pub fn compute(&self, dom: &Dom, node: NodeId, env: &StyleEnv) -> ComputedStyle {
-        let parent = parent_computed(self, dom, node, env, &mut HashMap::new());
-        self.compute_with_parent(dom, node, env, parent.as_ref())
+        self.compute_with_state(dom, node, env, &|_| false)
+    }
+
+    /// Variante étatée : `state` arbitre les pseudo-classes
+    /// dynamiques (`"hover"`…) — l'appelant relance le calcul
+    /// quand l'état change (restyle ADR-0012).
+    #[must_use]
+    pub fn compute_with_state(
+        &self,
+        dom: &Dom,
+        node: NodeId,
+        env: &StyleEnv,
+        state: &dyn Fn(&str) -> bool,
+    ) -> ComputedStyle {
+        let parent = parent_computed(self, dom, node, env, state, &mut HashMap::new());
+        self.compute_with_parent(dom, node, env, parent.as_ref(), state)
     }
 
     /// Styles calculés de tout le sous-arbre de `root`
     /// (chaque nœud hérite du parent déjà calculé — O(n)).
     #[must_use]
     pub fn compute_tree(&self, dom: &Dom, root: NodeId, env: &StyleEnv) -> StyleMap {
+        self.compute_tree_with_state(dom, root, env, &|_| false)
+    }
+
+    /// Variante étatée de [`StyleEngine::compute_tree`].
+    #[must_use]
+    pub fn compute_tree_with_state(
+        &self,
+        dom: &Dom,
+        root: NodeId,
+        env: &StyleEnv,
+        state: &dyn Fn(&str) -> bool,
+    ) -> StyleMap {
         let mut map = HashMap::new();
-        self.compute_subtree(dom, root, env, None, &mut map);
+        self.compute_subtree(dom, root, env, None, &mut map, state);
         StyleMap { map }
     }
 
@@ -251,8 +306,9 @@ impl StyleEngine {
         env: &StyleEnv,
         parent: Option<&ComputedStyle>,
         map: &mut HashMap<NodeId, ComputedStyle>,
+        state: &dyn Fn(&str) -> bool,
     ) {
-        let style = self.compute_with_parent(dom, node, env, parent);
+        let style = self.compute_with_parent(dom, node, env, parent, state);
         let Ok(children) = dom.children(node) else {
             map.insert(node, style);
             return;
@@ -261,7 +317,7 @@ impl StyleEngine {
         for child in children {
             if dom.element(child).is_ok() {
                 let parent_style = map.get(&node).cloned();
-                self.compute_subtree(dom, child, env, parent_style.as_ref(), map);
+                self.compute_subtree(dom, child, env, parent_style.as_ref(), map, state);
             }
         }
     }
@@ -273,6 +329,7 @@ impl StyleEngine {
         node: NodeId,
         env: &StyleEnv,
         parent: Option<&ComputedStyle>,
+        state: &dyn Fn(&str) -> bool,
     ) -> ComputedStyle {
         let mut props: HashMap<String, String> = HashMap::new();
         if dom.element(node).is_err() {
@@ -289,7 +346,7 @@ impl StyleEngine {
             let spec = rule
                 .selectors
                 .iter()
-                .filter(|s| crate::selector::matches(dom, node, s))
+                .filter(|s| matches_with_state(dom, node, s, state))
                 .map(ComplexSelector::specificity)
                 .max();
             let Some(spec) = spec else { continue };
@@ -306,7 +363,19 @@ impl StyleEngine {
         // 2. Tri stable croissant → la dernière écriture gagne.
         cand.sort_by_key(|(rank, spec, order, _)| (*rank, *spec, *order));
         for (_, _, _, d) in cand {
-            props.insert(d.name.to_ascii_lowercase(), d.value.clone());
+            let lname = d.name.to_ascii_lowercase();
+            // Shorthand → longhands (spec : `margin: x` fixe les
+            // quatre côtés, chacun à la spécificité de la règle).
+            match expand_shorthand(&lname, &d.value) {
+                Some(expanded) => {
+                    for (long_name, v) in expanded {
+                        props.insert(long_name, v);
+                    }
+                }
+                None => {
+                    props.insert(lname, d.value.clone());
+                }
+            }
         }
         // 3. Héritage : propriétés héritées non déclarées.
         if let Some(p) = parent {
@@ -353,6 +422,7 @@ fn parent_computed(
     dom: &Dom,
     node: NodeId,
     env: &StyleEnv,
+    state: &dyn Fn(&str) -> bool,
     memo: &mut HashMap<NodeId, ComputedStyle>,
 ) -> Option<ComputedStyle> {
     let parent = match dom.parent(node) {
@@ -362,8 +432,8 @@ fn parent_computed(
     if let Some(s) = memo.get(&parent) {
         return Some(s.clone());
     }
-    let grand = parent_computed(engine, dom, parent, env, memo);
-    let s = engine.compute_with_parent(dom, parent, env, grand.as_ref());
+    let grand = parent_computed(engine, dom, parent, env, state, memo);
+    let s = engine.compute_with_parent(dom, parent, env, grand.as_ref(), state);
     memo.insert(parent, s.clone());
     Some(s)
 }

@@ -18,6 +18,11 @@
 //! `!important`), ordre source, héritage, mots-clés
 //! `inherit`/`initial`/`unset`, media queries évaluées sur
 //! [`StyleEnv`], feuille UA intégrée.
+//!
+//! Étape 16 : [`value`] — longueurs/couleurs/nombres typés,
+//! expansion des shorthands (`margin`, `border`, `font`…),
+//! pseudo-classes dynamiques pilotées par un état externe
+//! (`compute_with_state`, restyle ADR-0012).
 
 #![forbid(unsafe_code)]
 
@@ -26,6 +31,7 @@ mod parser;
 mod selector;
 mod token;
 mod tokenizer;
+pub mod value;
 
 pub use cascade::{
     initial_value, is_inherited, media_matches, ComputedStyle, Origin, StyleEngine, StyleEnv,
@@ -37,8 +43,9 @@ pub use parser::{
     Stylesheet,
 };
 pub use selector::{
-    matches, matches_any, parse_selector_list, AttrOp, Combinator, ComplexSelector,
-    CompoundSelector, PseudoClass, SimpleSelector, Specificity,
+    matches, matches_any, matches_any_with_state, matches_with_state, parse_selector_list, AttrOp,
+    Combinator, ComplexSelector, CompoundSelector, DynamicPseudo, PseudoClass, SimpleSelector,
+    Specificity,
 };
 pub use token::Token;
 pub use tokenizer::tokenize;

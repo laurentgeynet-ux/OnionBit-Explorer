@@ -216,7 +216,6 @@ fn selecteurs_invalides_rejetes() {
         "p:",
         "p:unknown",
         "::before",
-        "p:hover",
         "a, b >",
         ".a..",
         "[a~]",

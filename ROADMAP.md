@@ -127,13 +127,14 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   attribut — matching sur le DOM.
 - [x] **Étape 15. Cascade + héritage.** Spécificité, `!important`,
   valeurs initiales/héritées, `computed style` par nœud.
-- [ ] **Étape 16. Propriétés essentielles.** `display` (dont
+- [x] **Étape 16. Propriétés essentielles.** `display` (dont
   `list-item`, `none`), `margin`, `padding`, `border`,
   `width/height`, `color`, `background`, `font-*`, `text-align`,
   `list-style`, `white-space`, `position`, `z-index`, `overflow`,
   pseudo-classes dynamiques (`:hover`, `:focus`…) → restyle via
   l'invalidation ADR-0012 — liste tenue dans l'ADR de phase ;
-  sous-ensembles **WPT** selectors/cascade mesurés (ADR-0010).
+  sous-ensembles **WPT** selectors/cascade mesurés (ADR-0010)
+  *(mesure WPT : voir chantier conformance — à brancher)*.
 
 ## Phase 4 — Layout (`explorer-layout`)
 

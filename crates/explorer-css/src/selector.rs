@@ -180,6 +180,109 @@ pub enum PseudoClass {
     Is(Vec<ComplexSelector>),
     /// `:where(<liste>)` — comme `is` mais spécificité nulle.
     Where(Vec<ComplexSelector>),
+    /// Pseudo-classe dynamique (`:hover`, `:focus`…) — évaluée
+    /// via l'état fourni par l'appelant (`matches_with_state`) ;
+    /// `matches` seul les considère fausses (hors `:link` qui
+    /// est structurel sur `a[href]`/`area[href]`).
+    Dynamic(DynamicPseudo),
+}
+
+/// Pseudo-classes dynamiques reconnues (étape 16) — leur
+/// déclenchement est externe : `:hover` suit le pointeur,
+/// `:checked`/`disabled` l'état de contrôle, `:target` le
+/// fragment d'URL, `:focus*` la navigation clavier. Le restyle
+/// passe par une re-`compute` du sous-arbre (ADR-0012).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DynamicPseudo {
+    /// `:hover` — pointeur sur l'élément.
+    Hover,
+    /// `:active` — activation en cours.
+    Active,
+    /// `:focus` / `:focus-within` / `:focus-visible`.
+    Focus,
+    /// `:focus-within`.
+    FocusWithin,
+    /// `:focus-visible`.
+    FocusVisible,
+    /// `:link` — `a[href]`/`area[href]` non visité.
+    Link,
+    /// `:visited` — historique de navigation (faux ici :
+    /// pas de tracking, conformité vie privée).
+    Visited,
+    /// `:checked` — case/option cochée.
+    Checked,
+    /// `:disabled` / `:enabled` — état de contrôle.
+    Disabled,
+    /// `:enabled`.
+    Enabled,
+    /// `:target` — `id` = fragment de l'URL courante.
+    Target,
+    /// `:required` / `:optional` — contrainte de formulaire.
+    Required,
+    /// `:optional`.
+    Optional,
+    /// `:read-only` / `:read-write`.
+    ReadOnly,
+    /// `:read-write`.
+    ReadWrite,
+    /// `:placeholder-shown`.
+    PlaceholderShown,
+    /// `:valid` / `:invalid` — validation de formulaire.
+    Valid,
+    /// `:invalid`.
+    Invalid,
+}
+
+impl DynamicPseudo {
+    /// Nom CSS de la pseudo-classe.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Hover => "hover",
+            Self::Active => "active",
+            Self::Focus => "focus",
+            Self::FocusWithin => "focus-within",
+            Self::FocusVisible => "focus-visible",
+            Self::Link => "link",
+            Self::Visited => "visited",
+            Self::Checked => "checked",
+            Self::Disabled => "disabled",
+            Self::Enabled => "enabled",
+            Self::Target => "target",
+            Self::Required => "required",
+            Self::Optional => "optional",
+            Self::ReadOnly => "read-only",
+            Self::ReadWrite => "read-write",
+            Self::PlaceholderShown => "placeholder-shown",
+            Self::Valid => "valid",
+            Self::Invalid => "invalid",
+        }
+    }
+
+    /// Depuis le nom CSS.
+    fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "hover" => Self::Hover,
+            "active" => Self::Active,
+            "focus" => Self::Focus,
+            "focus-within" => Self::FocusWithin,
+            "focus-visible" => Self::FocusVisible,
+            "link" => Self::Link,
+            "visited" => Self::Visited,
+            "checked" => Self::Checked,
+            "disabled" => Self::Disabled,
+            "enabled" => Self::Enabled,
+            "target" => Self::Target,
+            "required" => Self::Required,
+            "optional" => Self::Optional,
+            "read-only" => Self::ReadOnly,
+            "read-write" => Self::ReadWrite,
+            "placeholder-shown" => Self::PlaceholderShown,
+            "valid" => Self::Valid,
+            "invalid" => Self::Invalid,
+            _ => return None,
+        })
+    }
 }
 
 impl PseudoClass {
@@ -419,9 +522,12 @@ impl<'t> SelectorParser<'t> {
                     "first-of-type" => PseudoClass::FirstOfType,
                     "last-of-type" => PseudoClass::LastOfType,
                     "only-of-type" => PseudoClass::OnlyOfType,
-                    // Pseudo-classes dynamiques / non supportées →
-                    // sélecteur invalide (règle ignorée).
-                    _ => return None,
+                    other => {
+                        // Dynamiques reconnues → gardées (l'état
+                        // arbitre au matching) ; inconnues →
+                        // sélecteur invalide (règle ignorée).
+                        PseudoClass::Dynamic(DynamicPseudo::from_name(other)?)
+                    }
                 };
                 Some(SimpleSelector::Pseudo(simple))
             }
@@ -528,29 +634,71 @@ fn parse_an_plus_b(text: &str) -> Option<(i32, i32)> {
 
 // ───────────────────────────── matching ─────────────────────────────
 
-/// `true` si le nœud matche l'un des sélecteurs de la liste.
+/// `true` si le nœud matche l'un des sélecteurs de la liste —
+/// les pseudo-classes dynamiques sont considérées fausses.
 #[must_use]
 pub fn matches_any(dom: &Dom, node: NodeId, selectors: &[ComplexSelector]) -> bool {
     selectors.iter().any(|s| matches(dom, node, s))
 }
 
+/// Variante étatée : `state` reçoit le nom d'une pseudo-classe
+/// dynamique (`"hover"`, `"focus"`…) et arbitre son matching.
+/// C'est la couture restyle : l'appelant re-`compute` quand
+/// l'état du pointeur/focus/contrôle change (ADR-0012).
+#[must_use]
+pub fn matches_any_with_state(
+    dom: &Dom,
+    node: NodeId,
+    selectors: &[ComplexSelector],
+    state: &dyn Fn(&str) -> bool,
+) -> bool {
+    selectors
+        .iter()
+        .any(|s| matches_with_state(dom, node, s, state))
+}
+
 /// `true` si le nœud matche ce sélecteur complexe.
 /// Non-élément → `false` (les textes n'ont pas de style propre).
+/// Pseudo-classes dynamiques : fausses (utiliser
+/// [`matches_with_state`] pour les états pointeur/focus…).
 #[must_use]
 pub fn matches(dom: &Dom, node: NodeId, selector: &ComplexSelector) -> bool {
+    matches_with_state(dom, node, selector, &|_| false)
+}
+
+/// Variante étatée de [`crate::matches`].
+#[must_use]
+pub fn matches_with_state(
+    dom: &Dom,
+    node: NodeId,
+    selector: &ComplexSelector,
+    state: &dyn Fn(&str) -> bool,
+) -> bool {
     if dom.element(node).is_err() {
         return false;
     }
-    match_selector_part(dom, node, selector, selector.parts.len().saturating_sub(1))
+    match_selector_part(
+        dom,
+        node,
+        selector,
+        selector.parts.len().saturating_sub(1),
+        state,
+    )
 }
 
 /// Matching récursif droite → gauche : `idx` est l'indice du
 /// composé à matcher sur `node`.
-fn match_selector_part(dom: &Dom, node: NodeId, selector: &ComplexSelector, idx: usize) -> bool {
+fn match_selector_part(
+    dom: &Dom,
+    node: NodeId,
+    selector: &ComplexSelector,
+    idx: usize,
+    state: &dyn Fn(&str) -> bool,
+) -> bool {
     let Some((compound, _)) = selector.parts.get(idx) else {
         return true;
     };
-    if !compound.iter().all(|s| simple_matches(dom, node, s)) {
+    if !compound.iter().all(|s| simple_matches(dom, node, s, state)) {
         return false;
     }
     if idx == 0 {
@@ -561,13 +709,13 @@ fn match_selector_part(dom: &Dom, node: NodeId, selector: &ComplexSelector, idx:
     let combinator = selector.parts[idx - 1].1.unwrap_or(Combinator::Descendant);
     match combinator {
         Combinator::Child => match parent_element(dom, node) {
-            Some(p) => match_selector_part(dom, p, selector, idx - 1),
+            Some(p) => match_selector_part(dom, p, selector, idx - 1, state),
             None => false,
         },
         Combinator::Descendant => {
             let mut cur = parent_element(dom, node);
             while let Some(p) = cur {
-                if match_selector_part(dom, p, selector, idx - 1) {
+                if match_selector_part(dom, p, selector, idx - 1, state) {
                     return true;
                 }
                 cur = parent_element(dom, p);
@@ -575,13 +723,13 @@ fn match_selector_part(dom: &Dom, node: NodeId, selector: &ComplexSelector, idx:
             false
         }
         Combinator::NextSibling => match prev_element_sibling(dom, node) {
-            Some(s) => match_selector_part(dom, s, selector, idx - 1),
+            Some(s) => match_selector_part(dom, s, selector, idx - 1, state),
             None => false,
         },
         Combinator::SubsequentSibling => {
             let mut cur = prev_element_sibling(dom, node);
             while let Some(s) = cur {
-                if match_selector_part(dom, s, selector, idx - 1) {
+                if match_selector_part(dom, s, selector, idx - 1, state) {
                     return true;
                 }
                 cur = prev_element_sibling(dom, s);
@@ -598,7 +746,12 @@ impl CompoundSelector {
 }
 
 /// Un simple contre un nœud élément.
-fn simple_matches(dom: &Dom, node: NodeId, sel: &SimpleSelector) -> bool {
+fn simple_matches(
+    dom: &Dom,
+    node: NodeId,
+    sel: &SimpleSelector,
+    state: &dyn Fn(&str) -> bool,
+) -> bool {
     match sel {
         SimpleSelector::Universal => true,
         SimpleSelector::Type(name) => dom
@@ -620,7 +773,7 @@ fn simple_matches(dom: &Dom, node: NodeId, sel: &SimpleSelector) -> bool {
             Ok(Some(actual)) => attr_matches(&actual, *op, value, *case_insensitive),
             _ => false,
         },
-        SimpleSelector::Pseudo(p) => pseudo_matches(dom, node, p),
+        SimpleSelector::Pseudo(p) => pseudo_matches(dom, node, p, state),
     }
 }
 
@@ -663,7 +816,7 @@ fn attr_matches(actual: &str, op: AttrOp, expected: &str, ci: bool) -> bool {
 }
 
 /// Pseudo-classe contre un nœud.
-fn pseudo_matches(dom: &Dom, node: NodeId, p: &PseudoClass) -> bool {
+fn pseudo_matches(dom: &Dom, node: NodeId, p: &PseudoClass, state: &dyn Fn(&str) -> bool) -> bool {
     match p {
         PseudoClass::Root => {
             matches!(dom.parent(node), Ok(Some(par)) if dom.element(par).is_err())
@@ -683,8 +836,30 @@ fn pseudo_matches(dom: &Dom, node: NodeId, p: &PseudoClass) -> bool {
         }
         PseudoClass::NthOfType(a, b) => nth_hit(*a, *b, type_index(dom, node, false)),
         PseudoClass::NthLastOfType(a, b) => nth_hit(*a, *b, type_index(dom, node, true)),
-        PseudoClass::Not(list) => !matches_any(dom, node, list),
-        PseudoClass::Is(list) | PseudoClass::Where(list) => matches_any(dom, node, list),
+        PseudoClass::Not(list) => !matches_any_with_state(dom, node, list, state),
+        PseudoClass::Is(list) | PseudoClass::Where(list) => {
+            matches_any_with_state(dom, node, list, state)
+        }
+        PseudoClass::Dynamic(d) => dynamic_matches(dom, node, *d, state),
+    }
+}
+
+/// Pseudo dynamique : `:link` est structurel (`a[href]`/
+/// `area[href]`), `:visited` toujours faux (pas de tracking —
+/// conformité vie privée), le reste est délégué à `state`.
+fn dynamic_matches(
+    dom: &Dom,
+    node: NodeId,
+    d: DynamicPseudo,
+    state: &dyn Fn(&str) -> bool,
+) -> bool {
+    match d {
+        DynamicPseudo::Link => {
+            matches!(dom.tag_name(node), Ok("a" | "area"))
+                && matches!(dom.attribute(node, "href"), Ok(Some(_)))
+        }
+        DynamicPseudo::Visited => false,
+        _ => state(d.name()),
     }
 }
 
