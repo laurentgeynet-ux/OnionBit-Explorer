@@ -1,0 +1,4 @@
+# Répertoire de build Cargo déporté sur D: (machine-locale —
+# exclu du dépôt via .git/info/exclude, chaque poste choisit le sien).
+[build]
+target-dir = "D:/cargo-target/OnionBit-Explorer"
