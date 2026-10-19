@@ -883,6 +883,57 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     absents, déviation vs le `null` legacy de V8) ;
   - test262 : 859/859 ; 6 tests de régression.
 
+- **JS-C23 — sémantique UTF-16 + intégrité des
+  éléments de tableau** (`dillo-js`) :
+  - APIs String en code units UTF-16 (spec) :
+    `.length`, indexation `s[i]`, `charAt`/
+    `charCodeAt`/`at`/`codePointAt` (paire
+    surrogate → code point complet, unit isolé →
+    le unit), `indexOf`/`lastIndexOf` avec
+    position `from` (défaut : fin pour
+    `lastIndexOf` — régression corrigée),
+    `slice`/`substring`/`substr`, `split('')`,
+    `includes`/`startsWith`/`endsWith` avec
+    `position`, `padStart`/`padEnd`,
+    `propertyIsEnumerable` sur indice ;
+  - `String.fromCharCode` reconstitue les paires
+    (`(0xD83D,0xDE00)` → `\u{1F600}`) ;
+    `fromCodePoint` inchangé (code points) ;
+  - déviations documentées : surrogate isolé →
+    `U+FFFD` (`String::from_utf16_lossy` — nos
+    strings sont UTF-8), `match.index` et offsets
+    `replace` restés en chars, littéral
+    `\ud800` → `U+FFFD` au lexing ;
+  - bug hostile corrigé : `startsWith(pos)`/
+    `endsWith(pos)`/`includes(pos)` tranchaient
+    `s[pos..]` en octets → panic sur frontière
+    non-`char` — recherche désormais sur la vue
+    `encode_utf16` ;
+  - `Object.seal`/`Object.freeze` sur éléments
+    de tableau — nouveau champ
+    `Object::elem_integrity` (bits `1` sealed,
+    `2` frozen, `4` `length` non-writable) :
+    écritures d'éléments refusées (`TypeError`
+    strict / silence sloppy via `write_refused`),
+    `delete` refusé, descripteurs
+    `getOwnPropertyDescriptor` corrects, ajout
+    hors bornes bloqué, `isSealed`/`isFrozen` ;
+  - mutators conformes `Set`/`Delete` en mode
+    throw — `put_elems_guarded` (longueur) +
+    checks upfront par intention d'écriture :
+    `push`/`pop`/`shift`/`unshift`/`splice`
+    (delete/insert), `sort`/`reverse`/`fill`/
+    `copyWithin` (plages vides → no-op admis) →
+    `TypeError` même en sloppy ;
+  - `seal`/`freeze` sur `TypedArray` non vide →
+    `TypeError` (spec `SetIntegrityLevel`) ;
+  - `Object.defineProperty` sur indice de
+    tableau (valeur posée, descripteur
+    incompatible avec l'intégrité → `TypeError`,
+    accesseur refusé) et sur `length` (resize,
+    verrou `writable:false`) ;
+  - test262 : 859/859 ; 6 tests de régression.
+
 - **JS-C19 — Date complet, `eval` direct, Annex B
   RegExp, JSON, invariants Proxy** (`dillo-js`) :
   - `Date` : les 15 setters (`setFullYear`…`setTime` +

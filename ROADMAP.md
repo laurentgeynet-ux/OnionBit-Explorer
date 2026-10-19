@@ -686,6 +686,34 @@ d'intégration, pas par la couverture :
   (`AddRestrictedFunctionProperties` : accesseurs
   poison `TypeError` sur fonctions strictes/gen/async).
   test262 : 859/859 ; 6 tests de régression.
+- [x] **JS-C23. Sémantique UTF-16 + intégrité des
+  éléments de tableau** : les APIs String comptent
+  désormais en code units UTF-16 (spec) — `.length`,
+  `s[i]`, `charAt`/`charCodeAt`/`at`/`codePointAt`
+  (paire → code point, surrogate isolé → le unit),
+  `indexOf`/`lastIndexOf` et `from`, `slice`/
+  `substring`/`substr`, `split('')`, positions de
+  `includes`/`startsWith`/`endsWith`, `padStart`/
+  `padEnd`, `fromCharCode` (paire reconstituée)/
+  `fromCodePoint`, `propertyIsEnumerable`. Déviations
+  documentées : surrogate isolé → `U+FFFD` (strings
+  UTF-8 natives, `String::from_utf16_lossy`), indices
+  `match.index`/regex restés en chars. Bug hostile
+  corrigé : `startsWith(pos)` tranchait `s[pos..]` sur
+  une frontière non-`char` (panic). Intégrité
+  `Object.seal`/`freeze` sur les éléments
+  (`Object::elem_integrity` bit-flags 1/2/4) : éléments
+  non-configurables (`seal`), non-writable (`freeze`),
+  `length` verrouillée (`freeze` ou
+  `defineProperty(len,{writable:false})`), descripteurs
+  corrects, mutators via `Set`/`Delete` en mode throw
+  (`put_elems_guarded` + checks upfront : `push`/`pop`/
+  `sort`/`splice`/`fill`/`copyWithin`/`reverse`/
+  `unshift` → `TypeError` même en sloppy, `fill`/`sort`
+  no-op admis), `seal`/`freeze` sur vue typée non vide
+  → `TypeError` (spec), `defineProperty` sur indice et
+  sur `length` (resize, verrou). test262 : 859/859 ;
+  6 tests de régression.
 - [ ] **JS-C. Couverture par besoin** : `Temporal`
   (`ZonedDateTime`, calendriers non-iso, `round`),
   `Intl` multi-locales, décorateurs `@dec` — ordre

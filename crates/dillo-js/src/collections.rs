@@ -77,6 +77,7 @@ pub(crate) fn iter_obj(e: &mut Engine, items: Vec<Value>) -> Value {
             ret: Value::Undefined,
         },
         extensible: true,
+        elem_integrity: 0,
     }))
 }
 
@@ -102,6 +103,7 @@ fn map_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsR
         props: Vec::new(),
         kind: ObjKind::Map(Vec::new()),
         extensible: true,
+        elem_integrity: 0,
     });
     let m = Value::Obj(id);
     // `new Map([[k, v], …])` — iterate the source, each entry must
@@ -132,6 +134,7 @@ fn set_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsR
         props: Vec::new(),
         kind: ObjKind::Set(Vec::new()),
         extensible: true,
+        elem_integrity: 0,
     });
     let s = Value::Obj(id);
     if !matches!(arg(args, 0), Value::Undefined | Value::Null) {
@@ -405,6 +408,7 @@ fn new_set_from(e: &mut Engine, items: Vec<Value>) -> Value {
         props: Vec::new(),
         kind: ObjKind::Set(Vec::new()),
         extensible: true,
+        elem_integrity: 0,
     });
     for v in items {
         set_add(e, id, v);
@@ -656,6 +660,7 @@ fn map_group_by(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         props: Vec::new(),
         kind: ObjKind::Map(Vec::new()),
         extensible: true,
+        elem_integrity: 0,
     });
     for (i, v) in items.into_iter().enumerate() {
         let k = e.call_value(f, Value::Undefined, &[v, Value::Num(i as f64)])?;

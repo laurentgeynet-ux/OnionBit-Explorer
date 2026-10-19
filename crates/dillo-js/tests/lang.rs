@@ -5861,3 +5861,204 @@ fn c22_misc_apis() {
         "TE"
     );
 }
+
+// ------------------------------------------------------------------
+// JS-C23 : sémantique UTF-16 + intégrité des éléments de tableau
+// ------------------------------------------------------------------
+
+#[test]
+fn c23_utf16_length_and_index() {
+    // `.length` en code units — astral = 2 (spec).
+    assert_eq!(ev_str("'\u{1F600}'.length"), "2");
+    assert_eq!(ev_str("'a\u{1F600}b'.length"), "4");
+    // `s[i]` indexe les code units — surrogate isolé → U+FFFD
+    // (déviation documentée : strings UTF-8 natives).
+    assert_eq!(ev_str("'ab'[0]"), "a");
+    assert_eq!(ev_str("'\u{1F600}'[0].length"), "1");
+    assert_eq!(ev_str("'a\u{1F600}b'[3]"), "b");
+    // charAt/charCodeAt/codePointAt en units.
+    assert_eq!(ev_str("'\u{1F600}'.charCodeAt(0)"), "55357");
+    assert_eq!(ev_str("'\u{1F600}'.charCodeAt(1)"), "56832");
+    assert_eq!(ev_str("'a\u{1F600}'.charCodeAt(2)"), "56832");
+    assert_eq!(ev_str("'\u{1F600}'.codePointAt(0).toString(16)"), "1f600");
+    assert_eq!(ev_str("'\u{1F600}'.codePointAt(1).toString(16)"), "de00");
+    assert_eq!(ev_str("'\u{1F600}'.charAt(0).length"), "1");
+    assert_eq!(ev_str("'a\u{1F600}b'.at(-1)"), "b");
+    assert_eq!(ev_str("'a\u{1F600}b'.at(1).charCodeAt(0)"), "65533");
+    // BMP pur inchangé.
+    assert_eq!(ev_str("'héllo'.length"), "5");
+    assert_eq!(ev_str("'héllo'.charAt(1)"), "é");
+}
+
+#[test]
+fn c23_utf16_positions_and_slices() {
+    // indexOf/lastIndexOf : positions en code units.
+    assert_eq!(ev_str("'a\u{1F600}bc'.indexOf('b')"), "3");
+    assert_eq!(ev_str("'a\u{1F600}bc'.indexOf('c', 3)"), "4");
+    assert_eq!(ev_str("'ba\u{1F600}bc'.lastIndexOf('b')"), "4");
+    assert_eq!(ev_str("'abc'.indexOf('b')"), "1");
+    // slice/substring/substr en units ; coupe d'une paire → U+FFFD.
+    assert_eq!(ev_str("'a\u{1F600}b'.slice(1,3).length"), "2");
+    assert_eq!(ev_str("'a\u{1F600}b'.slice(1,2).charCodeAt(0)"), "65533");
+    assert_eq!(ev_str("'a\u{1F600}b'.substring(0,3).length"), "3");
+    assert_eq!(ev_str("'a\u{1F600}b'.substr(1,2).length"), "2");
+    // split('') → code units.
+    assert_eq!(ev_str("'a\u{1F600}b'.split('').length"), "4");
+    // positions de startsWith/endsWith/includes en units —
+    // et plus de panic sur frontière non-char (bug corrigé).
+    assert_eq!(ev_str("'\u{1F600}ab'.startsWith('a',2)"), "true");
+    assert_eq!(ev_str("'\u{1F600}ab'.startsWith('a',1)"), "false");
+    assert_eq!(ev_str("'ab\u{1F600}'.endsWith('b',2)"), "true");
+    assert_eq!(ev_str("'\u{1F600}ab'.includes('a',2)"), "true");
+    assert_eq!(ev_str("'\u{1F600}ab'.includes('a',1)"), "true");
+    // padStart/padEnd comptent en units.
+    assert_eq!(ev_str("'\u{1F600}'.padStart(3).length"), "3");
+    assert_eq!(ev_str("'\u{1F600}'.padEnd(4,'x').length"), "4");
+    // propertyIsEnumerable sur indice de code unit.
+    assert_eq!(
+        ev_str("String.prototype.propertyIsEnumerable.call('\u{1F600}','1')"),
+        "true"
+    );
+}
+
+#[test]
+fn c23_from_char_code_pairs() {
+    // Paire surrogate via fromCharCode → astral reconstitué.
+    assert_eq!(ev_str("String.fromCharCode(0xD83D,0xDE00).length"), "2");
+    assert_eq!(
+        ev_str("String.fromCharCode(0xD83D,0xDE00).codePointAt(0).toString(16)"),
+        "1f600"
+    );
+    // Surrogate isolé → U+FFFD (déviation documentée).
+    assert_eq!(
+        ev_str("String.fromCharCode(0xD800).charCodeAt(0).toString(16)"),
+        "fffd"
+    );
+    assert_eq!(ev_str("String.fromCharCode(97,98)"), "ab");
+    // fromCodePoint astral.
+    assert_eq!(ev_str("String.fromCodePoint(0x1F600).length"), "2");
+}
+
+#[test]
+fn c23_frozen_array_elements() {
+    // freeze : éléments non-writable non-configurable.
+    assert_eq!(ev_str("let a=Object.freeze([1,2]);a[0]=9;a[0]"), "1");
+    assert_eq!(
+        ev_str("(function(){'use strict';let a=Object.freeze([1]);try{a[0]=9;return 'x'}catch(x){return x.constructor.name}})()"),
+        "TypeError"
+    );
+    // Descripteurs d'élément et de length sous freeze.
+    assert_eq!(
+        ev_str("let d=Object.getOwnPropertyDescriptor(Object.freeze([7]),'0');d.writable+','+d.configurable"),
+        "false,false"
+    );
+    assert_eq!(
+        ev_str("Object.getOwnPropertyDescriptor(Object.freeze([7]),'length').writable"),
+        "false"
+    );
+    // delete refusé ; length verrouillé.
+    assert_eq!(
+        ev_str("let a=Object.freeze([1,2]);delete a[0];a.join(',')"),
+        "1,2"
+    );
+    assert_eq!(
+        ev_str("let a=Object.freeze([1,2]);a.length=0;a.length"),
+        "2"
+    );
+    // Mutators → TypeError même en sloppy (Set/Delete throw spec).
+    assert_eq!(
+        ev_str("try{Object.freeze([1]).push(2)}catch(x){x.constructor.name}"),
+        "TypeError"
+    );
+    assert_eq!(
+        ev_str("try{Object.freeze([1,2]).pop()}catch(x){'TE'}"),
+        "TE"
+    );
+    assert_eq!(
+        ev_str("try{Object.freeze([1,2]).sort()}catch(x){'TE'}"),
+        "TE"
+    );
+    assert_eq!(ev_str("Object.freeze([]).pop()"), "undefined");
+    assert_eq!(
+        ev_str("Object.isFrozen(Object.freeze([1]))+'|'+Object.isSealed(Object.freeze([1]))"),
+        "true|true"
+    );
+    // Copie non gelée.
+    assert_eq!(ev_str("let b=Object.freeze([1]).slice();b[0]=9;b[0]"), "9");
+    // freeze sur vue typée non vide → TypeError (spec).
+    assert_eq!(
+        ev_str("try{Object.freeze(new Uint8Array(2))}catch(x){x.constructor.name}"),
+        "TypeError"
+    );
+}
+
+#[test]
+fn c23_sealed_array_elements() {
+    // seal : éléments writable mais non-configurables.
+    assert_eq!(ev_str("let a=Object.seal([1,2]);a[0]=9;a[0]"), "9");
+    assert_eq!(ev_str("let a=Object.seal([1,2]);delete a[0];a[0]"), "1");
+    assert_eq!(ev_str("let a=Object.seal([1,2]);a[5]=9;a.length"), "2");
+    // Descripteur : writable:true configurable:false.
+    assert_eq!(
+        ev_str("let d=Object.getOwnPropertyDescriptor(Object.seal([7]),'0');d.writable+','+d.configurable"),
+        "true,false"
+    );
+    // Réduction de length → DeleteOrThrow → TypeError.
+    assert_eq!(
+        ev_str("try{let a=Object.seal([1,2]);a.length=1}catch(x){'TE'}"),
+        "TE"
+    );
+    // Mutators même longueur OK, changement de longueur non.
+    assert_eq!(
+        ev_str("let a=Object.seal([2,1]);a.sort();a.join(',')"),
+        "1,2"
+    );
+    assert_eq!(ev_str("try{Object.seal([1]).pop()}catch(x){'TE'}"), "TE");
+    assert_eq!(
+        ev_str("try{Object.seal([1]).splice(0,1,5)}catch(x){'TE'}"),
+        "TE"
+    );
+    assert_eq!(
+        ev_str("Object.isSealed(Object.seal([1]))+'|'+Object.isFrozen(Object.seal([1]))"),
+        "true|false"
+    );
+}
+
+#[test]
+fn c23_define_property_array() {
+    // defineProperty sur indice : valeur posée, descripteur
+    // incompatible avec l'intégrité → TypeError.
+    assert_eq!(
+        ev_str("let a=[1];Object.defineProperty(a,'0',{value:9});a[0]"),
+        "9"
+    );
+    assert_eq!(
+        ev_str("try{Object.defineProperty(Object.freeze([1]),'0',{value:9})}catch(x){'TE'}"),
+        "TE"
+    );
+    // Même valeur sur élément gelé → no-op admis (spec).
+    assert_eq!(
+        ev_str("let a=Object.freeze([1]);Object.defineProperty(a,'0',{value:1});a[0]"),
+        "1"
+    );
+    // `length` définissable : valeur → resize, writable:false → lock.
+    assert_eq!(
+        ev_str("let a=[1,2,3];Object.defineProperty(a,'length',{value:2});a.join(',')"),
+        "1,2"
+    );
+    // `length` verrouillée → l'ajout d'élément est refusé (spec —
+    // l'écriture d'indice hors bornes met à jour `length`).
+    assert_eq!(
+        ev_str("(function(){'use strict';let a=[1];Object.defineProperty(a,'length',{writable:false});try{a[1]=2;return 'x'}catch(x){return 'TE'}})()"),
+        "TE"
+    );
+    assert_eq!(
+        ev_str("let a=[1];Object.defineProperty(a,'length',{writable:false});a[1]=2;a.length"),
+        "1"
+    );
+    // Indice + accesseur → TypeError (les éléments sont data).
+    assert_eq!(
+        ev_str("try{Object.defineProperty([1],'0',{get(){return 2}})}catch(x){'TE'}"),
+        "TE"
+    );
+}

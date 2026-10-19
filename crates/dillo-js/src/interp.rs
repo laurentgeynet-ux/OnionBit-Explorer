@@ -715,6 +715,7 @@ impl Engine {
             props: Vec::new(),
             kind: ObjKind::BigInt(b),
             extensible: true,
+            elem_integrity: 0,
         }))
     }
 
@@ -899,6 +900,7 @@ impl Engine {
             props: Vec::new(),
             kind: ObjKind::RegExp(Rc::new(re)),
             extensible: true,
+            elem_integrity: 0,
         });
         let src = self.str_val(pattern.to_string());
         let fl = self.str_val(flag_str);
@@ -1810,7 +1812,9 @@ impl Engine {
                 return Some(Prop::Data {
                     value: Value::Num(elems.len() as f64),
                     attrs: crate::heap::PropAttrs {
-                        writable: true,
+                        // `length` reste writable sous `seal`,
+                        // non-writable sous `freeze` (spec).
+                        writable: o.elem_integrity & 4 == 0,
                         enumerable: false,
                         configurable: false,
                     },
@@ -1819,7 +1823,12 @@ impl Engine {
             if let Some(i) = array_index(key) {
                 return elems.get(i).copied().map(|value| Prop::Data {
                     value,
-                    attrs: crate::heap::PropAttrs::FULL,
+                    attrs: crate::heap::PropAttrs {
+                        writable: o.elem_integrity & 2 == 0,
+                        enumerable: true,
+                        // `seal`/`freeze` → éléments non-config.
+                        configurable: o.elem_integrity.trailing_zeros() >= 2,
+                    },
                 });
             }
         }
@@ -2325,6 +2334,7 @@ impl Engine {
             props: Vec::new(),
             kind: ObjKind::Host(host),
             extensible: true,
+            elem_integrity: 0,
         }))
     }
 
@@ -2344,15 +2354,18 @@ impl Engine {
             }
             Value::Str(id) => {
                 if key == "length" {
-                    let n = self.heap.string(id).map_or(0, |s| s.chars().count());
+                    // Code units UTF-16 (spec) — astraux = 2.
+                    let n = self.heap.string(id).map_or(0, |s| s.encode_utf16().count());
                     return Ok(Value::Num(n as f64));
                 }
                 if let Some(i) = array_index(key) {
-                    let c = self
-                        .heap
-                        .string(id)
-                        .and_then(|s| s.chars().nth(i))
-                        .map(|c| c.to_string());
+                    // Indice en code units — surrogate isolé →
+                    // U+FFFD (déviation documentée : UTF-8 natif).
+                    let c = self.heap.string(id).and_then(|s| {
+                        s.encode_utf16()
+                            .nth(i)
+                            .map(|u| String::from_utf16_lossy(&[u]))
+                    });
                     return Ok(match c {
                         Some(c) => self.str_val(c),
                         None => Value::Undefined,
@@ -2458,15 +2471,31 @@ impl Engine {
         };
         if let ObjKind::Array(elems) = &mut o.kind {
             if key == "length" {
+                // `length` verrouillé (`freeze`) → écriture refusée.
+                if o.elem_integrity & 4 != 0 {
+                    return Ok(false);
+                }
                 let n = match v {
                     Value::Num(n) if n >= 0.0 => to_uint32(n) as usize,
                     _ => elems.len(),
                 };
+                // Réduction sous `seal`/`freeze` : la spec supprime
+                // les éléments un à un → élément non-configurable
+                // → `TypeError` abrupt (même en sloppy, `Set` jette).
+                if o.elem_integrity & 3 != 0 && n < elems.len() {
+                    return Err(self.type_error("cannot shrink a sealed array"));
+                }
                 elems.resize(n, Value::Undefined);
                 return Ok(true);
             }
             if let Some(i) = array_index(key) {
-                if !o.extensible && i >= elems.len() {
+                // Élément gelé → écriture refusée (spec [[Set]]).
+                if o.elem_integrity & 2 != 0 && i < elems.len() {
+                    return Ok(false);
+                }
+                // Ajout hors bornes → met à jour `length` — refusé
+                // si cible non-extensible ou `length` verrouillée.
+                if i >= elems.len() && (!o.extensible || o.elem_integrity & 4 != 0) {
                     return Ok(false);
                 }
                 if i >= elems.len() {
@@ -2552,6 +2581,11 @@ impl Engine {
                     return false;
                 }
                 if let Some(i) = array_index(key) {
+                    // `seal`/`freeze` → éléments non-configurables,
+                    // la suppression est refusée (spec).
+                    if o.elem_integrity & 3 != 0 && i < elems.len() {
+                        return false;
+                    }
                     if i < elems.len() {
                         elems[i] = Value::Undefined;
                     }
@@ -3096,6 +3130,7 @@ impl Engine {
                 key: key.clone(),
             },
             extensible: true,
+            elem_integrity: 0,
         });
         self.sym_index.insert(key, id);
         Value::Obj(id)

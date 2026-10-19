@@ -157,6 +157,7 @@ fn mk(e: &mut Engine, name: &str, data: TempData) -> JsResult<Value> {
         props: Vec::new(),
         kind: crate::heap::ObjKind::Temp(data),
         extensible: true,
+        elem_integrity: 0,
     });
     set_pub_props(e, id, &data);
     Ok(Value::Obj(id))

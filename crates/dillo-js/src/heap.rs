@@ -494,6 +494,11 @@ pub struct Object {
     /// le passent à `false` : les nouvelles props sont alors refusées
     /// (silencieux en sloppy, `TypeError` en strict côté moteur).
     pub extensible: bool,
+    /// Intégrité des *éléments* de tableau (spec
+    /// `SetIntegrityLevel`), en bits : `1` = sealed (éléments
+    /// non-configurables), `2` = frozen (non-writable aussi),
+    /// `4` = `length` non-writable. Sans effet hors `ObjKind::Array`.
+    pub elem_integrity: u8,
 }
 
 /// What kind of object this is.
@@ -943,6 +948,7 @@ impl Object {
             props: Vec::new(),
             kind: ObjKind::Ordinary,
             extensible: true,
+            elem_integrity: 0,
         }
     }
 
@@ -953,6 +959,7 @@ impl Object {
             props: Vec::new(),
             kind: ObjKind::Array(elems),
             extensible: true,
+            elem_integrity: 0,
         }
     }
 
@@ -963,6 +970,7 @@ impl Object {
             props: Vec::new(),
             kind: ObjKind::Fun(f),
             extensible: true,
+            elem_integrity: 0,
         }
     }
 

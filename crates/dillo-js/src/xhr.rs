@@ -413,6 +413,7 @@ impl Engine {
                 body: String::from_utf8_lossy(&resp.body).into_owned(),
             },
             extensible: true,
+            elem_integrity: 0,
         });
         let st = self.str_val(resp.status_text);
         let ok = Value::Bool((200..300).contains(&resp.status));

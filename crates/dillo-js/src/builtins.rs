@@ -900,16 +900,54 @@ fn put_elems(e: &mut Engine, id: ObjId, elems: Vec<Value>) {
     }
 }
 
+/// Variante de [`put_elems`] pour les *mutators* (`pop`, `sort`,
+/// `splice`, `fill`…) : la spec les fait passer par `Set`/`Delete`
+/// en mode *throw* — toute violation d'intégrité lève `TypeError`
+/// même en sloppy. `orig` est le snapshot pris avant mutation :
+/// - `frozen` : le moindre changement (valeur *ou* longueur) lève ;
+/// - `sealed` : longueur figée (les éléments restent writable —
+///   `sort`/`fill` passent, `pop`/`push`/`splice` lévent).
+fn put_elems_guarded(e: &mut Engine, id: ObjId, elems: Vec<Value>, orig: &[Value]) -> JsResult<()> {
+    let integ = e.heap.obj(id).map_or(0, |o| o.elem_integrity);
+    if integ & 3 != 0 && orig.len() != elems.len() {
+        return Err(e.type_error("cannot change length of a sealed array"));
+    }
+    put_elems(e, id, elems);
+    Ok(())
+}
+
 fn arr_of(e: &mut Engine, elems: Vec<Value>) -> Value {
     e.new_array(elems)
 }
 
-fn chars_of(s: &str) -> Vec<char> {
-    s.chars().collect()
+/// Longueur en code units UTF-16 (spec `String.length`) — les
+/// astraux comptent pour 2 (surrogate pairs). Nos strings sont
+/// UTF-8 ; cette vue lazy est la base de la sémantique JS.
+fn u16_len(s: &str) -> usize {
+    s.encode_utf16().count()
 }
 
-fn from_chars(e: &mut Engine, cs: &[char]) -> Value {
-    e.str_val(cs.iter().collect::<String>())
+/// Vue code units UTF-16 de `s` (allouée à la demande).
+fn u16_view(s: &str) -> Vec<u16> {
+    s.encode_utf16().collect()
+}
+
+/// `u16s` → `String` : les surrogates orphelins (tranche qui coupe
+/// une paire, `fromCharCode(0xD800)`) deviennent `U+FFFD` —
+/// déviation documentée : nos strings UTF-8 ne peuvent pas porter
+/// de surrogate isolé.
+fn u16_to_string(u: &[u16]) -> String {
+    String::from_utf16_lossy(u)
+}
+
+/// Le code unit à l'indice `i` sous forme de `String` (spec
+/// `s[i]`/`charAt`) — BMP → le caractère ; surrogate → `U+FFFD`.
+fn u16_at(s: &str, i: usize) -> Option<String> {
+    s.encode_utf16().nth(i).map(|u| u16_to_string(&[u]))
+}
+
+fn chars_of(s: &str) -> Vec<char> {
+    s.chars().collect()
 }
 
 fn now_millis() -> f64 {
@@ -1737,6 +1775,102 @@ fn define_one_prop(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) -> JsRe
         }
         _ => (get, set),
     };
+    // Indice de tableau : l'élément vit dans `ObjKind::Array`,
+    // pas dans `props` — route dédiée. Les attributs posés sont
+    // contraints par l'intégrité (seal/freeze) : un descripteur
+    // incompatible est un `TypeError` (spec [[DefineOwnProperty]]).
+    // `defineProperty(arr, 'length', …)` — `length` est synthétisée,
+    // pas dans `props` : route dédiée (valeur → resize, verrou
+    // `writable:false` → bit 4, le reste est fixe).
+    if key == "length" {
+        let is_arr = matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_)));
+        if is_arr {
+            let (integ, len) = e
+                .heap
+                .obj(id)
+                .map(|o| (o.elem_integrity, 0usize))
+                .map_or((0, 0), |(i, _)| {
+                    let l = match e.heap.obj(id).map(|o| &o.kind) {
+                        Some(ObjKind::Array(elems)) => elems.len(),
+                        _ => 0,
+                    };
+                    (i, l)
+                });
+            if has_enumerable && enumerable || has_configurable && configurable {
+                return Err(e.type_error("cannot reconfigure array `length`"));
+            }
+            if integ & 4 != 0 {
+                if has_writable && writable {
+                    return Err(e.type_error("cannot reconfigure array `length`"));
+                }
+                if has_value {
+                    let n = match v {
+                        Value::Num(x) if x >= 0.0 && x.fract() == 0.0 => x as usize,
+                        _ => return Err(e.range_error("invalid array length")),
+                    };
+                    if n != len {
+                        return Err(e.type_error("cannot change locked array `length`"));
+                    }
+                }
+                return Ok(());
+            }
+            if has_value {
+                let n = match v {
+                    Value::Num(x) if x >= 0.0 && x.fract() == 0.0 => x as usize,
+                    _ => return Err(e.range_error("invalid array length")),
+                };
+                if integ & 3 != 0 && n < len {
+                    return Err(e.type_error("cannot shrink a sealed array"));
+                }
+                if let Some(ObjKind::Array(elems)) = e.heap.obj_mut(id).map(|o| &mut o.kind) {
+                    elems.resize(n, Value::Undefined);
+                }
+            }
+            if has_writable && !writable {
+                if let Some(o) = e.heap.obj_mut(id) {
+                    o.elem_integrity |= 4;
+                }
+            }
+            return Ok(());
+        }
+    }
+    if let Some(i) = crate::interp::array_index(key) {
+        let is_arr = matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_)));
+        if is_arr {
+            let (integ, len, cur_v) = e.heap.obj(id).map(|o| {
+                if let ObjKind::Array(elems) = &o.kind {
+                    (o.elem_integrity, elems.len(), elems.get(i).copied())
+                } else {
+                    (0, 0, None)
+                }
+            }).unwrap_or_default();
+            let _ = cur_v;
+            if has_acc {
+                return Err(e.type_error("array index cannot be an accessor"));
+            }
+            // Descripteur demandant `configurable:true` sur élément
+            // sealé/gelé, `writable:true` sur gelé, ou une autre
+            // valeur sur gelé → refus spec.
+            if integ & 3 != 0 && has_configurable && configurable {
+                return Err(e.type_error("cannot reconfigure sealed array element"));
+            }
+            if integ & 2 != 0 && has_writable && writable {
+                return Err(e.type_error("cannot reconfigure frozen array element"));
+            }
+            if integ & 2 != 0 && has_value && !e.strict_eq(v, cur_v.unwrap_or(Value::Undefined)) {
+                return Err(e.type_error("cannot redefine frozen array element"));
+            }
+            // Hors-bornes → ajout interdit (cible non-extensible
+            // sous seal/freeze ; sinon extension normale via set).
+            if i >= len && integ & 3 != 0 {
+                return Err(e.type_error("cannot add element to sealed array"));
+            }
+            if i < len && has_value {
+                e.set_prop(id, &i.to_string(), v)?;
+            }
+            return Ok(());
+        }
+    }
     let ok = e.heap.obj_mut(id).is_some_and(|o| {
         if has_acc {
             o.define_accessor(key, g, s, attrs)
@@ -1899,6 +2033,11 @@ fn function_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Val
 
 fn array_push(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
+    // Ajout d'éléments : impossible sous `seal`/`freeze` — la spec
+    // passe par `Set(throw)` → `TypeError` même en sloppy.
+    if !args.is_empty() && e.heap.obj(id).is_some_and(|o| o.elem_integrity & 3 != 0) {
+        return Err(e.type_error("cannot push onto a sealed array"));
+    }
     let n = if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Array(v) = &mut o.kind {
             v.extend_from_slice(args);
@@ -1915,30 +2054,33 @@ fn array_push(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 fn array_pop(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
     let mut elems = take_elems(e, id);
+    let orig = elems.clone();
     let v = elems.pop().unwrap_or(Value::Undefined);
-    put_elems(e, id, elems);
+    put_elems_guarded(e, id, elems, &orig)?;
     Ok(v)
 }
 
 fn array_shift(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
     let mut elems = take_elems(e, id);
+    let orig = elems.clone();
     let v = if elems.is_empty() {
         Value::Undefined
     } else {
         elems.remove(0)
     };
-    put_elems(e, id, elems);
+    put_elems_guarded(e, id, elems, &orig)?;
     Ok(v)
 }
 
 fn array_unshift(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
     let mut elems = take_elems(e, id);
+    let orig = elems.clone();
     let mut new: Vec<Value> = args.to_vec();
     new.append(&mut elems);
     let n = new.len();
-    put_elems(e, id, new);
+    put_elems_guarded(e, id, new, &orig)?;
     Ok(Value::Num(n as f64))
 }
 
@@ -2070,6 +2212,12 @@ fn array_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
 
 fn array_reverse(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
+    // `reverse` n'écrit que si len > 1 (spec — sinon aucun `Set`).
+    if e.heap.obj(id).is_some_and(|o| {
+        o.elem_integrity & 2 != 0 && matches!(&o.kind, ObjKind::Array(v) if v.len() > 1)
+    }) {
+        return Err(e.type_error("cannot reverse a frozen array"));
+    }
     if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Array(v) = &mut o.kind {
             v.reverse();
@@ -2083,6 +2231,12 @@ fn array_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let cmp = arg(args, 0);
     let use_cmp = e.is_callable(cmp);
     let mut elems = take_elems(e, id);
+    // `sort` écrit chaque élément via `Set(throw)` → tableau gelé
+    // non vide → `TypeError` même si l'ordre ne change pas (spec).
+    if e.heap.obj(id).is_some_and(|o| o.elem_integrity & 2 != 0) && !elems.is_empty() {
+        put_elems(e, id, elems);
+        return Err(e.type_error("cannot sort a frozen array"));
+    }
     // Insertion sort — page scripts sort small arrays, and this keeps
     // the fallible comparator simple.
     for i in 1..elems.len() {
@@ -2201,15 +2355,16 @@ fn string_char_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value
         Value::Undefined => 0.0,
         v => e.to_number(v)?,
     };
-    let c = if i >= 0.0 {
-        chars_of(&s).get(i as usize).copied()
-    } else {
-        None
-    };
-    Ok(match c {
-        Some(c) => e.str_val(c.to_string()),
-        None => e.str_val(""),
-    })
+    Ok(
+        match if i >= 0.0 {
+            u16_at(&s, i as usize)
+        } else {
+            None
+        } {
+            Some(c) => e.str_val(c),
+            None => e.str_val(""),
+        },
+    )
 }
 
 fn string_char_code_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -2218,38 +2373,40 @@ fn string_char_code_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<
         Value::Undefined => 0.0,
         v => e.to_number(v)?,
     };
-    let c = if i >= 0.0 {
-        chars_of(&s).get(i as usize).copied()
-    } else {
-        None
-    };
-    Ok(Value::Num(match c {
-        Some(c) => f64::from(c as u32),
-        None => f64::NAN,
-    }))
+    Ok(Value::Num(
+        if i >= 0.0 {
+            s.encode_utf16().nth(i as usize).map(f64::from)
+        } else {
+            None
+        }
+        .unwrap_or(f64::NAN),
+    ))
 }
 
 fn str_index_of(e: &mut Engine, this: Value, args: &[Value], last: bool) -> JsResult<Value> {
     let s = this_str(e, this)?;
     let needle = e.to_js_string(arg(args, 0))?;
-    let byte_pos = if last {
-        s.rfind(&needle)
-    } else {
-        let from = match arg(args, 1) {
-            Value::Undefined => 0usize,
-            v => (e.to_number(v)?.max(0.0)) as usize,
-        };
-        // `from` is in chars; convert.
-        let cs = chars_of(&s);
-        if from >= cs.len() {
-            None
-        } else {
-            let byte_from = s.char_indices().nth(from).map_or(s.len(), |(i, _)| i);
-            s[byte_from..].find(&needle).map(|p| p + byte_from)
-        }
+    // Recherche sur la vue code units (spec — `from` et le
+    // résultat sont en units).
+    let (h, n) = (u16_view(&s), u16_view(&needle));
+    let from = match arg(args, 1) {
+        // `lastIndexOf` sans position → depuis la fin (spec).
+        Value::Undefined if last => usize::MAX,
+        Value::Undefined => 0usize,
+        v => (e.to_number(v)?.max(0.0)) as usize,
     };
-    let char_pos = byte_pos.map_or(-1.0, |b| s[..b].chars().count() as f64);
-    Ok(Value::Num(char_pos))
+    let pos = if n.len() > h.len() {
+        None
+    } else if last {
+        // `lastIndexOf` : dernière occurrence dont le début est ≤
+        // `from` (spec `StringIndexOf` arrière).
+        let hi = h.len() - n.len();
+        let from = from.min(hi);
+        (0..=from).rev().find(|&i| h[i..i + n.len()] == n[..])
+    } else {
+        (from.min(h.len())..=h.len() - n.len()).find(|&i| h[i..i + n.len()] == n[..])
+    };
+    Ok(Value::Num(pos.map_or(-1.0, |p| p as f64)))
 }
 
 fn string_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -2261,14 +2418,14 @@ fn string_last_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
 }
 
 fn str_slice(e: &mut Engine, s: &str, start: i64, end: Option<i64>) -> Value {
-    let cs = chars_of(s);
-    let len = cs.len() as i64;
+    let u = u16_view(s);
+    let len = u.len() as i64;
     let a = norm_idx(start, len);
-    let b = end.map_or(cs.len(), |e2| norm_idx(e2, len));
+    let b = end.map_or(u.len(), |e2| norm_idx(e2, len));
     if a >= b {
         return e.str_val("");
     }
-    from_chars(e, &cs[a..b])
+    e.str_val(u16_to_string(&u[a..b]))
 }
 
 fn string_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -2286,8 +2443,8 @@ fn string_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
 
 fn string_substring(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this)?;
-    let cs = chars_of(&s);
-    let len = cs.len() as i64;
+    let u = u16_view(&s);
+    let len = u.len() as i64;
     let a = match arg(args, 0) {
         Value::Undefined => 0,
         v => (e.to_number(v)? as i64).clamp(0, len),
@@ -2297,13 +2454,13 @@ fn string_substring(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
         v => (e.to_number(v)? as i64).clamp(0, len),
     };
     let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-    Ok(from_chars(e, &cs[lo as usize..hi as usize]))
+    Ok(e.str_val(u16_to_string(&u[lo as usize..hi as usize])))
 }
 
 fn string_substr(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this)?;
-    let cs = chars_of(&s);
-    let len = cs.len() as i64;
+    let u = u16_view(&s);
+    let len = u.len() as i64;
     let mut start = match arg(args, 0) {
         Value::Undefined => 0,
         v => e.to_number(v)? as i64,
@@ -2319,7 +2476,7 @@ fn string_substr(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
     if start >= end {
         return Ok(e.str_val(""));
     }
-    Ok(from_chars(e, &cs[start as usize..end as usize]))
+    Ok(e.str_val(u16_to_string(&u[start as usize..end as usize])))
 }
 
 fn string_to_lower(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -2368,7 +2525,9 @@ fn string_split(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
             } else {
                 let sep = e.to_js_string(v)?;
                 if sep.is_empty() {
-                    s.chars().map(|c| c.to_string()).collect()
+                    // `split('')` → code units (spec) ; surrogate
+                    // isolé → U+FFFD (déviation documentée).
+                    u16_view(&s).iter().map(|&w| u16_to_string(&[w])).collect()
                 } else {
                     s.split(&sep).map(str::to_string).collect()
                 }
@@ -2812,12 +2971,14 @@ fn string_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
 }
 
 fn string_from_char_code(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let mut out = String::new();
+    // Code units → string : une paire surrogate forme l'astral
+    // (spec), un surrogate isolé devient U+FFFD (déviation
+    // documentée — UTF-8 natif).
+    let mut units = Vec::with_capacity(args.len());
     for a in args {
-        let n = e.to_number(*a)? as u32;
-        out.push(char::from_u32(n).unwrap_or('\u{fffd}'));
+        units.push(e.to_number(*a)? as u16);
     }
-    Ok(e.str_val(out))
+    Ok(e.str_val(u16_to_string(&units)))
 }
 
 // ------------------------------------------------------------------
@@ -3481,6 +3642,7 @@ fn new_proxy(e: &mut Engine, target: Value, handler: Value) -> JsResult<Value> {
             handler: Some(handler),
         },
         extensible: true,
+        elem_integrity: 0,
     })))
 }
 
@@ -3702,7 +3864,14 @@ fn array_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 fn string_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this)?;
     let needle = e.to_js_string(arg(args, 0))?;
-    Ok(Value::Bool(s.contains(&needle)))
+    // `from` en code units (spec) → préfixe units puis recherche.
+    let from = match arg(args, 1) {
+        Value::Undefined => 0usize,
+        v => (e.to_number(v)?.max(0.0)) as usize,
+    };
+    let u = u16_view(&s);
+    let hay = u16_to_string(u.get(from.min(u.len())..).unwrap_or(&[]));
+    Ok(Value::Bool(hay.contains(&needle)))
 }
 
 fn string_starts_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -3710,19 +3879,27 @@ fn string_starts_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
     let needle = e.to_js_string(arg(args, 0))?;
     let start = match arg(args, 1) {
         Value::Undefined => 0usize,
-        v => (e.to_number(v)? as usize).min(s.len()),
+        v => (e.to_number(v)? as usize).min(u16_len(&s)),
     };
-    Ok(Value::Bool(s[start..].starts_with(&needle)))
+    // Recherche directe sur la vue units — plus de tranche `&str`
+    // (un index dans un astral ne panique plus).
+    let (u, n) = (u16_view(&s), u16_view(&needle));
+    Ok(Value::Bool(
+        start + n.len() <= u.len() && u[start..start + n.len()] == n[..],
+    ))
 }
 
 fn string_ends_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this)?;
     let needle = e.to_js_string(arg(args, 0))?;
     let end = match arg(args, 1) {
-        Value::Undefined => s.len(),
-        v => (e.to_number(v)? as usize).min(s.len()),
+        Value::Undefined => u16_len(&s),
+        v => (e.to_number(v)? as usize).min(u16_len(&s)),
     };
-    Ok(Value::Bool(s[..end].ends_with(&needle)))
+    let (u, n) = (u16_view(&s), u16_view(&needle));
+    Ok(Value::Bool(
+        n.len() <= end && u[end - n.len()..end] == n[..],
+    ))
 }
 
 fn string_repeat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -3740,12 +3917,19 @@ fn pad(e: &mut Engine, s: &str, args: &[Value], right: bool) -> JsResult<String>
         Value::Undefined => " ".to_string(),
         v => e.to_js_string(v)?,
     };
-    if s.len() >= target || fill.is_empty() {
+    // `target` et le compte courant sont en code units (spec).
+    let cur = u16_len(s);
+    if cur >= target || fill.is_empty() {
         return Ok(s.to_string());
     }
-    let need = target - s.len();
-    let mut p = fill.repeat(need / fill.len() + 1);
-    p.truncate(need);
+    let need = target - cur;
+    let fill_u = u16_view(&fill);
+    let mut pad_units: Vec<u16> = Vec::with_capacity(need);
+    while pad_units.len() < need {
+        let take = (need - pad_units.len()).min(fill_u.len());
+        pad_units.extend_from_slice(&fill_u[..take]);
+    }
+    let p = u16_to_string(&pad_units);
     Ok(if right {
         format!("{s}{p}")
     } else {
@@ -3913,7 +4097,16 @@ fn object_seal(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             return object_prevent_extensions(e, Value::Undefined, &[arg(args, 0)]);
         }
         if let Some(o) = e.heap.obj_mut(id) {
+            // `seal` sur vue typée non vide → TypeError (spec —
+            // les éléments restent configurable:true).
+            if let ObjKind::TypedArray { len, .. } = &o.kind {
+                if *len > 0 {
+                    let err = e.type_error("cannot seal a typed array");
+                    return Err(err);
+                }
+            }
             o.extensible = false;
+            o.elem_integrity |= 1;
             for (_, p) in &mut o.props {
                 match p {
                     crate::heap::Prop::Data { attrs, .. }
@@ -3929,10 +4122,14 @@ fn object_seal(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 
 fn object_is_sealed(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Bool(match arg(args, 0) {
-        Value::Obj(id) => e
-            .heap
-            .obj(id)
-            .is_some_and(|o| !o.extensible && o.props.iter().all(|(_, p)| !p.configurable())),
+        Value::Obj(id) => e.heap.obj(id).is_some_and(|o| {
+            !o.extensible
+                && o.props.iter().all(|(_, p)| !p.configurable())
+                && match &o.kind {
+                    ObjKind::Array(elems) => elems.is_empty() || o.elem_integrity & 3 != 0,
+                    _ => true,
+                }
+        }),
         _ => true,
     }))
 }
@@ -3946,7 +4143,15 @@ fn object_freeze(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             return object_prevent_extensions(e, Value::Undefined, &[arg(args, 0)]);
         }
         if let Some(o) = e.heap.obj_mut(id) {
+            // `freeze` sur vue typée non vide → TypeError (spec).
+            if let ObjKind::TypedArray { len, .. } = &o.kind {
+                if *len > 0 {
+                    let err = e.type_error("cannot freeze a typed array");
+                    return Err(err);
+                }
+            }
             o.extensible = false;
+            o.elem_integrity |= 6;
             for (_, p) in &mut o.props {
                 match p {
                     crate::heap::Prop::Data { attrs, .. } => {
@@ -3968,6 +4173,10 @@ fn object_is_frozen(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
                 && o.props
                     .iter()
                     .all(|(_, p)| !p.configurable() && !p.writable())
+                && match &o.kind {
+                    ObjKind::Array(elems) => elems.is_empty() || o.elem_integrity & 6 == 6,
+                    _ => true,
+                }
         }),
         _ => true, // primitives are frozen by nature
     }))
@@ -4090,6 +4299,12 @@ fn array_fill(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         Value::Undefined => len,
         v => rel_index(e, v, len)?.unwrap_or(len),
     };
+    // `fill` n'écrit que sur une plage non vide — tableau gelé
+    // avec plage vide → no-op admis (spec `Set(throw)` par slot).
+    if end.min(len) > start && e.heap.obj(id).is_some_and(|o| o.elem_integrity & 2 != 0) {
+        put_elems(e, id, elems);
+        return Err(e.type_error("cannot fill a frozen array"));
+    }
     for slot in &mut elems[start..end.min(len)] {
         *slot = v;
     }
@@ -4256,6 +4471,13 @@ fn array_splice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
     let deleted: Vec<Value> = elems[start..start + del].to_vec();
     out_v.extend_from_slice(ins);
     out_v.extend_from_slice(&elems[start + del..]);
+    // Sous `seal`/`freeze` toute suppression (`DeleteOrThrow`) ou
+    // insertion (ajout interdit) lève `TypeError` — y compris quand
+    // la longueur finale ne changerait pas (spec).
+    if e.heap.obj(id).is_some_and(|o| o.elem_integrity & 3 != 0) && (del > 0 || !ins.is_empty()) {
+        put_elems(e, id, elems);
+        return Err(e.type_error("cannot splice a sealed array"));
+    }
     let darr = e.new_array(deleted);
     put_elems(e, id, out_v);
     Ok(darr)
@@ -4298,20 +4520,34 @@ fn array_to_sorted(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
 
 fn string_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this)?;
-    let chars: Vec<char> = s.chars().collect();
-    match rel_index(e, arg(args, 0), chars.len())? {
-        Some(i) => Ok(e.str_val(chars[i].to_string())),
+    let u = u16_view(&s);
+    match rel_index(e, arg(args, 0), u.len())? {
+        Some(i) => Ok(e.str_val(u16_to_string(&u[i..=i]))),
         None => Ok(Value::Undefined),
     }
 }
 
-/// `codePointAt(i)` — full scalar value (UTF-16 surrogate pairs
-/// collapse through Rust's `char` since our strings are UTF-8).
+/// `codePointAt(i)` — `i` est un indice de code unit (spec) :
+/// lead surrogate suivi d'un trail → le code point complet ;
+/// sinon le code unit lui-même.
 fn string_code_point_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this)?;
     let i = e.to_number(arg(args, 0))?;
-    let v = s.chars().nth(i.max(0.0) as usize).map(|c| c as u32);
-    Ok(v.map_or(Value::Undefined, |c| Value::Num(f64::from(c))))
+    let u = u16_view(&s);
+    let Some(&w) = u.get(i.max(0.0) as usize) else {
+        return Ok(Value::Undefined);
+    };
+    let cp = if (0xD800..0xDC00).contains(&w) {
+        match u.get(i.max(0.0) as usize + 1) {
+            Some(&t) if (0xDC00..0xE000).contains(&t) => {
+                0x10000 + ((u32::from(w) - 0xD800) << 10) + (u32::from(t) - 0xDC00)
+            }
+            _ => u32::from(w),
+        }
+    } else {
+        u32::from(w)
+    };
+    Ok(Value::Num(f64::from(cp)))
 }
 
 /// `matchAll(re)` — requires the `g` flag (spec `TypeError`); yields
@@ -4335,7 +4571,10 @@ fn string_from_code_point(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
         if !(0.0..=1_114_111.0).contains(&n) || n.fract() != 0.0 {
             return Err(e.range_error("fromCodePoint: invalid code point"));
         }
-        s.push(char::from_u32(n as u32).unwrap_or('\u{FFFD}'));
+        match char::from_u32(n as u32) {
+            Some(c) => s.push(c),
+            None => s.push_str(&u16_to_string(&[n as u16])),
+        }
     }
     Ok(e.str_val(s))
 }
@@ -5136,6 +5375,7 @@ fn clone_deep(e: &mut Engine, v: Value, seen: &mut Vec<(ObjId, ObjId)>) -> JsRes
             props: Vec::new(),
             kind: ObjKind::ByteBuf(b),
             extensible: true,
+            elem_integrity: 0,
         }))),
         CloneShape::Dv(bid, offset, len) => {
             let nb = clone_deep(e, Value::Obj(bid), seen)?;
@@ -5148,6 +5388,7 @@ fn clone_deep(e: &mut Engine, v: Value, seen: &mut Vec<(ObjId, ObjId)>) -> JsRes
                     len,
                 },
                 extensible: true,
+                elem_integrity: 0,
             })))
         }
         CloneShape::Ta(ta, bid, offset, len) => {
@@ -5185,6 +5426,7 @@ fn clone_deep(e: &mut Engine, v: Value, seen: &mut Vec<(ObjId, ObjId)>) -> JsRes
                 props: Vec::new(),
                 kind: ObjKind::Map(Vec::new()),
                 extensible: true,
+                elem_integrity: 0,
             });
             seen.push((id, cid));
             let pairs = match e.heap.obj(id).map(|o| &o.kind) {
@@ -5204,6 +5446,7 @@ fn clone_deep(e: &mut Engine, v: Value, seen: &mut Vec<(ObjId, ObjId)>) -> JsRes
                 props: Vec::new(),
                 kind: ObjKind::Set(Vec::new()),
                 extensible: true,
+                elem_integrity: 0,
             });
             seen.push((id, cid));
             let items = match e.heap.obj(id).map(|o| &o.kind) {
@@ -5334,6 +5577,7 @@ fn weakref_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         props: Vec::new(),
         kind: ObjKind::WeakRef(tid),
         extensible: true,
+        elem_integrity: 0,
     })))
 }
 
@@ -5373,6 +5617,7 @@ fn finreg_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             entries: Vec::new(),
         },
         extensible: true,
+        elem_integrity: 0,
     });
     e.finregs.push(id);
     Ok(Value::Obj(id))
@@ -6334,6 +6579,10 @@ fn array_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Va
     // pas les valeurs déjà réécrites (spec `Array.prototype.
     // copyWithin` — copie d'abord, puis pose).
     let count = (end - start).max(0).min(len - target);
+    if count > 0 && e.heap.obj(id).is_some_and(|o| o.elem_integrity & 2 != 0) {
+        put_elems(e, id, elems);
+        return Err(e.type_error("cannot copyWithin a frozen array"));
+    }
     if count > 0 {
         let chunk: Vec<Value> = elems[start as usize..(start + count) as usize].to_vec();
         for (k, v) in chunk.into_iter().enumerate() {
@@ -6508,7 +6757,7 @@ fn object_property_is_enumerable(e: &mut Engine, this: Value, args: &[Value]) ->
         }
         Value::Str(sid) => {
             let s = e.heap.string(sid).unwrap_or_default();
-            let ok = crate::interp::array_index(&key).is_some_and(|i| i < s.chars().count());
+            let ok = crate::interp::array_index(&key).is_some_and(|i| i < s.encode_utf16().count());
             Ok(Value::Bool(ok))
         }
         _ => Ok(Value::Bool(false)),
