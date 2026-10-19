@@ -206,10 +206,12 @@ L'UI évolue **au fil des phases backend** ; cette phase consolide.
 
 - [x] **Étape 29. Chrome navigateur.** Omnibox, onglets,
   boutons back/forward/reload, états de chargement via SSE.
-- [ ] **Étape 30. Viewport & transport direct.** Affichage frame PNG
-  (MVP) puis canal direct mémoire partagée / buffer brut (ADR-0004),
-  scroll, invalidation temps réel avec dirty-rects, redimensionnement →
-  viewport moteur.
+- [x] **Étape 30. Viewport moteur.** Affichage frame PNG (MVP —
+  pull sur `frame_invalidated`), scroll molette →
+  `input scroll`, redimensionnement → `POST viewport`
+  debouncé, survol/clic relayés. Le canal direct mémoire
+  partagée / texture externe (ADR-0004, dirty-rects) reste
+  planifié à l'étape 47 quand les frames l'exigeront.
 - [ ] **Étape 31. Interactions.** Hit-test via API : clic lien →
   navigation, hover → curseur, saisie champs.
 - [ ] **Étape 32. Design system.** Thème complet depuis

@@ -2,10 +2,15 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/design/design_tokens.dart';
+import '../domain/browser_tab.dart';
 import 'browser_controller.dart';
 
 /// Coquille navigateur — étape 29 : barre d'onglets, boutons
@@ -76,7 +81,11 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
                         style: TextStyle(color: muted),
                       ),
                     )
-                  : _PagePlaceholder(tokens: t, state: st),
+                  : _FrameView(
+                      tokens: t,
+                      state: st,
+                      ctrl: ctrl,
+                    ),
             ),
           ],
         ),
@@ -278,40 +287,114 @@ class _NavBar extends StatelessWidget {
 /// Zone de contenu — placeholder en attendant la frame PNG
 /// (étape 30) ; reflète déjà `frameTick` pour observer le
 /// cycle d'invalidation.
-class _PagePlaceholder extends StatelessWidget {
-  const _PagePlaceholder({required this.tokens, required this.state});
+/// Viewport moteur : `Image.memory` du PNG tiré sur
+/// `frame_invalidated` (le SSE ne pousse qu'un signal —
+/// ADR-0004). La molette envoie `scroll`, le resize envoie
+/// `viewport` (debounced — le drag de fenêtre est continu).
+class _FrameView extends ConsumerStatefulWidget {
+  const _FrameView({
+    required this.tokens,
+    required this.state,
+    required this.ctrl,
+  });
 
   final DesignTokens tokens;
   final BrowserState state;
+  final BrowserController ctrl;
+
+  @override
+  ConsumerState<_FrameView> createState() => _FrameViewState();
+}
+
+class _FrameViewState extends ConsumerState<_FrameView> {
+  Timer? _resizeDebounce;
+  Size? _lastSent;
+
+  @override
+  void dispose() {
+    _resizeDebounce?.cancel();
+    super.dispose();
+  }
+
+  void _onResize(Size size, double dpr) {
+    // Identique → rien (le debounce ne déduppe pas les tailles).
+    if (size == _lastSent && _resizeDebounce == null) return;
+    _resizeDebounce?.cancel();
+    _resizeDebounce = Timer(
+      const Duration(milliseconds: 150),
+      () {
+        _resizeDebounce = null;
+        _lastSent = size;
+        widget.ctrl.setViewport(size.width, size.height, dpr);
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final muted = tokens.color('onSurface', 'muted');
-    final active = state.active;
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (active?.loading == true)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 12),
-              child: CircularProgressIndicator(),
-            ),
-          Text(
-            active?.url ?? '',
-            style: TextStyle(color: muted),
-          ),
-          SizedBox(height: tokens.dim('spacing', 'xs', fallback: 4)),
-          Text(
-            'La page s’affichera ici à l’étape 30 (frame PNG).',
-            style: TextStyle(
-              color: muted,
-              fontSize:
-                  tokens.dim2('typography', 'size', 'sm', fallback: 12),
-            ),
-          ),
-        ],
+    final t = widget.tokens;
+    final active = widget.state.active;
+    final bytes = active == null ? null : widget.state.frames[active.id];
+    final muted = t.color('onSurface', 'muted');
+    return Container(
+      margin: EdgeInsets.all(t.dim('spacing', 'lg', fallback: 24)),
+      decoration: BoxDecoration(
+        color: t.color('surface', 'raised'),
+        borderRadius:
+            BorderRadius.circular(t.dim('radius', 'lg', fallback: 14)),
       ),
+      clipBehavior: Clip.hardEdge,
+      child: bytes == null
+          ? _empty(t, active, muted)
+          : LayoutBuilder(
+              builder: (context, c) {
+                final size = Size(c.maxWidth, c.maxHeight);
+                final dpr = MediaQuery.devicePixelRatioOf(context);
+                WidgetsBinding.instance.addPostFrameCallback(
+                  (_) => _onResize(size, dpr),
+                );
+                return Listener(
+                  onPointerSignal: (ev) {
+                    if (ev is PointerScrollEvent) {
+                      widget.ctrl.scroll(ev.scrollDelta.dy);
+                    }
+                  },
+                  onPointerHover: (ev) => widget.ctrl
+                      .hover(ev.localPosition.dx, ev.localPosition.dy),
+                  child: GestureDetector(
+                    onTapUp: (d) => widget.ctrl
+                        .click(d.localPosition.dx, d.localPosition.dy),
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: Image.memory(
+                        Uint8List.fromList(bytes),
+                        gaplessPlayback: true, // pas de flash entre frames
+                        fit: BoxFit.none, // 1 px CSS = 1 pixel logique
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
     );
   }
+
+  Widget _empty(DesignTokens t, BrowserTab? active, Color muted) => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (active?.loading == true)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: CircularProgressIndicator(),
+              ),
+            Text(
+              active?.url.isNotEmpty == true
+                  ? active!.url
+                  : 'Naviguez vers une URL',
+              style: TextStyle(color: muted),
+            ),
+          ],
+        ),
+      );
 }

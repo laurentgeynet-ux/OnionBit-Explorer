@@ -61,7 +61,24 @@ class BrowserRepository {
   /// Ferme l'onglet côté daemon.
   Future<void> closeTab(String tabId) => _api.deleteJson('/api/tabs/$tabId');
 
-  /// Frame PNG courante de l'onglet (`GET …/frame`).
-  Future<List<int>> fetchFrame(String tabId) =>
-      _api.getBytes('/api/tabs/$tabId/frame');
+  /// Frame PNG courante de l'onglet (`GET …/frame`) — `null`
+  /// si l'onglet n'a jamais rendu (204).
+  Future<List<int>?> fetchFrame(String tabId) async {
+    try {
+      final bytes = await _api.getBytes('/api/tabs/$tabId/frame');
+      return bytes.isEmpty ? null : bytes;
+    } on ApiException {
+      return null;
+    }
+  }
+
+  /// Événement d'entrée (`POST …/input`) — `click`,
+  /// `mousemove`, `scroll`, `key` (étape 26).
+  Future<void> sendInput(String tabId, Map<String, dynamic> ev) =>
+      _api.postJson('/api/tabs/$tabId/input', body: ev);
+
+  /// Viewport moteur (`POST …/viewport`) — envoyé au resize.
+  Future<void> setViewport(String tabId, double w, double h, double scale) =>
+      _api.postJson('/api/tabs/$tabId/viewport',
+          body: {'w': w, 'h': h, 'scale': scale});
 }

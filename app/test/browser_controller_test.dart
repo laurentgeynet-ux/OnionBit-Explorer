@@ -56,7 +56,17 @@ class FakeRepo implements BrowserRepository {
   Future<void> closeTab(String tabId) async => actions.add('close:$tabId');
 
   @override
-  Future<List<int>> fetchFrame(String tabId) async => [];
+  Future<List<int>?> fetchFrame(String tabId) async => [1, 2, 3];
+
+  @override
+  Future<void> sendInput(String tabId, Map<String, dynamic> ev) async {
+    actions.add('input:${ev['type']}');
+  }
+
+  @override
+  Future<void> setViewport(
+          String tabId, double w, double h, double scale) async =>
+      actions.add('viewport:${w.toInt()}x${h.toInt()}');
 }
 
 /// Client SSE simulé — événements injectés à la main.

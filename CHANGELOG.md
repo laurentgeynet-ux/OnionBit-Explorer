@@ -9,6 +9,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 30 — viewport moteur** (`app/`) : `BrowserState.frames`
+  (PNG par onglet) alimenté en pull sur `frame_invalidated` et
+  après navigation ; `Image.memory(gaplessPlayback)` sans flash.
+  Molette → `input scroll`, survol → `mousemove`, clic →
+  `input click` (le moteur hit-teste et navigue via SSE).
+  `LayoutBuilder` + debounce 150 ms → `POST …/viewport
+  {w,h,scale}` avec déduplication de taille. `fetchFrame`
+  tolère 204/vide (`null`). Le transport texture externe
+  (ADR-0004) reste à l'étape 47.
+
 - **Étape 29 — chrome navigateur Flutter** (`app/`) :
   `BrowserController` (`NotifierProvider` Riverpod 3) pilote
   le daemon via `BrowserRepository` (CRUD onglets, navigate,

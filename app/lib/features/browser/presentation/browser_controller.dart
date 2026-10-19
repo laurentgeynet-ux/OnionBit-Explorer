@@ -18,6 +18,7 @@ class BrowserState {
   const BrowserState({
     this.tabs = const [],
     this.activeId,
+    this.frames = const {},
     this.daemonOnline = false,
     this.lastError,
     this.frameTick = 0,
@@ -25,6 +26,10 @@ class BrowserState {
 
   final List<BrowserTab> tabs;
   final String? activeId;
+
+  /// Frames PNG par onglet (octets bruts) — tirées sur
+  /// `frame_invalidated` (ADR-0004 : pull, pas push).
+  final Map<String, List<int>> frames;
 
   /// `false` tant que le daemon n'a pas répondu — l'UI affiche
   /// l'état dégradé (omnibox désactivée, bouton réessayer).
@@ -50,6 +55,7 @@ class BrowserState {
   BrowserState copyWith({
     List<BrowserTab>? tabs,
     String? activeId,
+    Map<String, List<int>>? frames,
     bool? daemonOnline,
     String? Function()? lastError,
     int? frameTick,
@@ -57,6 +63,7 @@ class BrowserState {
       BrowserState(
         tabs: tabs ?? this.tabs,
         activeId: activeId ?? this.activeId,
+        frames: frames ?? this.frames,
         daemonOnline: daemonOnline ?? this.daemonOnline,
         lastError: lastError != null ? lastError() : this.lastError,
         frameTick: frameTick ?? this.frameTick,
@@ -131,6 +138,7 @@ class BrowserController extends Notifier<BrowserState> {
         if (tabId == state.activeId) {
           state = state.copyWith(frameTick: state.frameTick + 1);
         }
+        unawaited(_pullFrame(tabId));
       case 'pipeline_error':
         _patch(tabId, (t) => t.copyWith(loading: false));
         state = state.copyWith(
@@ -178,8 +186,60 @@ class BrowserController extends Notifier<BrowserState> {
     }
   }
 
-  /// Sélectionne l'onglet affiché.
-  void selectTab(String id) => state = state.copyWith(activeId: id);
+  /// Sélectionne l'onglet affiché — tire sa frame si absente.
+  void selectTab(String id) {
+    state = state.copyWith(activeId: id);
+    if (!state.frames.containsKey(id)) unawaited(_pullFrame(id));
+  }
+
+  /// Tire le PNG de l'onglet (`GET …/frame`) — le push SSE ne
+  /// fait que signaler, le contenu voyage en pull (ADR-0004).
+  Future<void> _pullFrame(String tabId) async {
+    try {
+      final bytes = await _repo.fetchFrame(tabId);
+      if (bytes == null || !ref.mounted) return;
+      state = state.copyWith(
+        frames: {...state.frames, tabId: bytes},
+      );
+    } on Object {
+      // Daemon coupé → la prochaine invalidation retentera.
+    }
+  }
+
+  /// Scroll molette → `POST …/input {scroll,dy}` — le moteur
+  /// borne et repeint, `frame_invalidated` suit.
+  Future<void> scroll(double dy) => _sendInput({'type': 'scroll', 'dy': dy});
+
+  /// Survol → `mousemove` (coalescé : dernier état suffit).
+  Future<void> hover(double x, double y) =>
+      _sendInput({'type': 'mousemove', 'x': x, 'y': y});
+
+  /// Clic → `input click` — le moteur hit-teste et navigue
+  /// si c'est un lien (étape 31 côté UI : curseur).
+  Future<void> click(double x, double y) =>
+      _sendInput({'type': 'click', 'x': x, 'y': y});
+
+  Future<void> _sendInput(Map<String, dynamic> ev) async {
+    final id = state.activeId;
+    if (id == null) return;
+    try {
+      await _repo.sendInput(id, ev);
+    } on ApiException catch (e) {
+      state = state.copyWith(lastError: () => e.message);
+    }
+  }
+
+  /// `POST …/viewport` au redimensionnement — debounced par
+  /// l'appelant (le widget accumule, on envoie le dernier).
+  Future<void> setViewport(double w, double h, double scale) async {
+    final id = state.activeId;
+    if (id == null) return;
+    try {
+      await _repo.setViewport(id, w, h, scale);
+    } on ApiException catch (e) {
+      state = state.copyWith(lastError: () => e.message);
+    }
+  }
 
   /// Soumission omnibox : complète le schéma si absent puis
   /// `POST …/navigate` — `loading` optimiste jusqu'à
@@ -195,6 +255,7 @@ class BrowserController extends Notifier<BrowserState> {
       final t = await _repo.navigate(id, url);
       if (t != null) _patch(id, (_) => t.copyWith(loading: false));
       state = state.copyWith(daemonOnline: true);
+      unawaited(_pullFrame(id));
     } on ApiException catch (e) {
       _patch(id, (t) => t.copyWith(loading: false));
       state = state.copyWith(lastError: () => e.message);
