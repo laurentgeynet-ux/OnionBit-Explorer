@@ -7,7 +7,7 @@
 # quand la dépendance bascule sur ce dépôt (cf. ADR-0007).
 [package]
 name = "dillo-js"
-version = "0.0.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

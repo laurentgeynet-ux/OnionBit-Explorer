@@ -38,6 +38,19 @@ téléchargements, zoom page, recherche en page, impression,
 extensions, SVG animé (SMIL), isolation multi-processus par site
 (ADR-0011).
 
+## Build & vérification
+
+```powershell
+pwsh -File scripts/verify_all.ps1   # fmt, clippy, tests, doc, flutter
+pwsh -File scripts/smoke.ps1        # test de fumée E2E loopback
+pwsh -File scripts/package.ps1      # bundle release dist/explorer-0.1.0
+cargo bench -p explorer-core        # benchs pipeline (criterion)
+cargo fuzz run tokenizer            # fuzz HTML (aussi : css, url)
+```
+
+Le daemon (`explorer-daemon`) expose l'API REST+SSE sur
+`127.0.0.1:9377` — l'app Flutter s'y connecte (ADR-0003).
+
 ## Licence
 
 Double licence **MIT OR Apache-2.0** (ADR-0006) — `LICENSE-MIT` +

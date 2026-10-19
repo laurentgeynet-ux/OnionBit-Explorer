@@ -517,7 +517,7 @@ d'intégration, pas par la couverture :
   `submit` JS + `preventDefault` honoré.
 - [x] **Étape 39. Perf + fuzz.** Benchs pipeline, bornes
   mémoire/temps, corpus fuzz tokenizer/parser.
-- [ ] **Étape 40. Release 0.1.** Packaging Windows
+- [x] **Étape 40. Release 0.1.** Packaging Windows
   (daemon + app), smoke test bout en bout, documentation.
 
 ## Phase 10 — Compatibilité web moderne (cap long terme)

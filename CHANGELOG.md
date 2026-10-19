@@ -7,7 +7,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-19
+
 ### Added
+
+- **Étape 40 — release 0.1** : version workspace
+  `0.0.0` → `0.1.0` (`version.workspace = true` dans les
+  14 crates) ; `scripts/package.ps1` (bundle
+  `dist/explorer-0.1.0` : daemon + cli release, runner
+  Flutter Windows si disponible, zip) ; `scripts/smoke.ps1`
+  — test de fumée E2E intégralement loopback (serveur
+  `TcpListener` local + daemon + API `/status`, `/tabs`,
+  `navigate`, `/frame` → signature PNG vérifiée) ;
+  `README` complété (build & vérification).
 
 - **Étape 39 — perf + fuzz** (`explorer-html`,
   `explorer-css`, `explorer-core`, `fuzz/`) : bornes de
