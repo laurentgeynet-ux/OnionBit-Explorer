@@ -9,6 +9,60 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 11 — `explorer-html` : tree-builder HTML5**
+  (`tree.rs`, ~2 100 lignes) : pipeline token → `explorer-dom::Dom`
+  avec les modes d'insertion de la spec — Initial, BeforeHtml,
+  BeforeHead, InHead, AfterHead, InBody, Text, InTable,
+  InCaption, InColumnGroup, InTableBody, InRow, InCell, InSelect,
+  AfterBody, AfterAfterBody. `html`/`head`/`body` synthétisés,
+  attributs `<html>`/`<body>` fusionnés aux nœuds existants.
+  Implicites : `<p>` fermé par les blocs (`P_CLOSERS` — `table`,
+  `form`, `hr`, `pre` traités par leurs règles dédiées), `li`,
+  `dt`/`dd`, `h1`–`h6`, `option`/`optgroup`, `rt`/`rp` (scope
+  `ruby`). Scopes : button, list-item, table, formatting (marqueurs
+  `<applet>`/`marquee`/`object`/`template`). **AFE** : règle de Noé
+  (3 entrées identiques max), reconstruction après fermeture de
+  bloc, adoption agency basique (`<b><i>x</b>y</i>` → `y` ré-enrobé
+  dans un `<i>` frère). Tables : `<tbody>`/`<tr>` synthétisés,
+  cellules `td`/`th` fermées en chaîne, **foster parenting** du
+  texte et des éléments mal placés (insérés avant `<table>` dans
+  son parent, repli sous-table). Contenu spécial : `script`/
+  `style`/`noframes`/`xmp`/`iframe` (rawtext/ScriptData),
+  `title`/`textarea` (RCDATA), `plaintext`, `\n` initial sauté
+  après `pre`/`textarea`/`listing`, CDATA autorisé en `<svg>`/
+  `<math>` via `set_cdata_allowed`. DOCTYPE → `quirks`/
+  `limited-quirks` : liste de préfixes WHATWG complète, cas
+  « missing **or empty** » vs « neither missing nor empty »
+  distingués, DTD IBM XHTML reconnu, `strict 4.01` sans system
+  reste `NoQuirks`. Tolérance : contenu post-`</body>`/`</html>`
+  retraité en InBody, `</p>` sans `<p>` → `<p>` vide, `</br>` →
+  `<br>`. **API** : `TreeBuilder::process` token par token,
+  `drive` intercalant `next_token`/`process` (les états de contenu
+  sont réglés *avant* la lecture de la suite — `Tokenizer::run`
+  ne doit pas précéder `process`), `parse` raccourci, accès
+  `dom`/`into_dom`/`quirks_mode`. 26 tests : synthèse, fermetures
+  implicites, foster parenting, rawtext/RCDATA/script, quirks,
+  tag-soup sans panic, découpage incrémental équivalent au
+  one-shot.
+- **Étape 11 — `explorer-html` : tree-builder** (`tree.rs`,
+  ~2 000 lignes) : modes d'insertion de la spec WHATWG
+  (Initial → AfterAfterBody dont InTable/InTableBody/InRow/InCell/
+  InCaption/InColumnGroup/InSelect/Text), `html`/`head`/`body`
+  synthétisés, scopes par défaut/bouton/liste/table, liste des
+  éléments de format actifs (AFE) avec reconstruction et adoption
+  agency simplifiée, foster parenting (texte et éléments
+  redirigés avant `<table>`), `<tbody>`/`<tr>` implicites,
+  pilotage du tokenizer (RCDATA `title`/`textarea`, rawtext
+  `style`/raw, `ScriptData`, PLAINTEXT), fermetures implicites
+  (`<p>`/`<li>`/`<dd>`), `<option>` chaînée, quirks/
+  limited-quirks par DOCTYPE (liste WHATWG, règle « 4.01 sans
+  system id → quirks »), `
+` initial sauté après `<pre>`/
+  `<textarea>`, contenu post-`</body>`/`</html>` retraité en
+  InBody, `</html>` après body → AfterAfterBody. Parse incrémental
+  (`feed`/`next_token`/`drive`) — `set_content_state` actif entre
+  tokens. 26 tests dont dumps style html5lib et parité
+  incrémental/one-shot.
 - **Étape 10 — `explorer-html` : encodage, entités et tokenizer
   incrémental** (`encoding.rs`, `entities.rs`, `token.rs`,
   `tokenizer.rs`) : sniffing WHATWG — BOM UTF-8/UTF-16LE/BE,

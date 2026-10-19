@@ -20,6 +20,8 @@ pub mod encoding;
 pub mod entities;
 mod token;
 mod tokenizer;
+mod tree;
 
 pub use token::{Token, TokenAttribute};
 pub use tokenizer::{ContentKind, Tokenizer};
+pub use tree::{QuirksMode, TreeBuilder};

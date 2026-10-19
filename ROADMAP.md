@@ -96,9 +96,21 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   l'esperluette ambiguë en attribut), remap `&#80..9F;`
   windows-1252, bornes hostile (`MAX_NAME`/`MAX_VALUE`/flush).
   34 tests (25 tokenizer + 9 encodage).
-- [ ] **Étape 11. Tree-builder.** Insertion modes, fermetures
-  implicites, `<table>`/foster parenting, éléments `html/head/body`
-  synthétisés — dégradation tag-soup tolérante.
+- [x] **Étape 11. Tree-builder.** Modes d'insertion de la spec
+  (Initial → AfterAfterBody, dont InTable/InTableBody/InRow/InCell/
+  InCaption/InColumnGroup/InSelect/Text), `html/head/body`
+  synthétisés, scopes (button/list/table/formatting), **AFE** avec
+  règle de Noé (max 3) + reconstruction après fermeture de bloc +
+  adoption agency basique, foster parenting (texte **et** éléments
+  déplacés avant la table), `<tbody>`/`<tr>` implicites, cellules
+  fermées en chaîne, pilotage du tokenizer (rawtext/RCDATA/script/
+  PLAINTEXT, CDATA en `<svg>`/`<math>`), `quirks`/`limited-quirks`
+  par DOCTYPE (liste WHATWG complète, règles « missing **or
+  empty** »/IBM DTD), `\n` initial sauté après `<pre>`/`<textarea>`,
+  contenu post-`</body>`/`</html>` retraité en InBody.
+  `TreeBuilder::drive` intercale `next_token`/`process` — les états
+  de contenu sont réglés avant la lecture de la suite.
+  26 tests (tag-soup, tables, format, quirks, incrémental).
 - [ ] **Étape 12. Golden tests + premier artefact.** Harness
   **html5lib-tests** (tree-construction, ADR-0010) + corpus
   `tests/data/`, arbres attendus vs produits, % de conformité
