@@ -27,7 +27,6 @@ use explorer_css::ComputedStyle;
 
 use crate::boxtree::{BoxKind, LayoutBox, Rect};
 use crate::font::{self, FontRequest, FontSource};
-use crate::text;
 
 /// Contexte de dimensionnement (une passe de layout).
 pub struct BlockCtx<'a> {
@@ -76,7 +75,7 @@ pub fn layout_tree(root: &mut LayoutBox, viewport_w: f32, ctx: &BlockCtx) {
 
 /// Résout `font-size` en px : `em`/`rem` relatifs au parent
 /// (ou à la base), `%` idem, absolus directs.
-fn font_size_px(style: &ComputedStyle, parent_fs: f32, ctx: &BlockCtx) -> f32 {
+pub(crate) fn font_size_px(style: &ComputedStyle, parent_fs: f32, ctx: &BlockCtx) -> f32 {
     match css_px(style, "font-size", parent_fs, parent_fs, ctx) {
         Some(v) if v > 0.0 => v,
         _ => parent_fs.max(1.0),
@@ -87,7 +86,7 @@ fn font_size_px(style: &ComputedStyle, parent_fs: f32, ctx: &BlockCtx) -> f32 {
 /// bloc conteneur ou font-size selon la propriété) ;
 /// `em_basis` = base des unités `em`.
 /// `auto`/`medium`/inconnu → `None`.
-fn css_px(
+pub(crate) fn css_px(
     style: &ComputedStyle,
     prop: &str,
     pct_basis: f32,
@@ -137,7 +136,7 @@ fn margins(style: &ComputedStyle, cb_w: f32, em: f32, ctx: &BlockCtx) -> Margins
 /// Dimensionne `bx` (boîte de niveau bloc) dans le bloc
 /// conteneur de largeur `cb_w`, bord haut à `y`. Pose
 /// `bx.rect` et descend récursivement.
-fn layout_block(
+pub(crate) fn layout_block(
     bx: &mut LayoutBox,
     x: f32,
     y: f32,
@@ -264,8 +263,8 @@ fn layout_block(
     bx.rect.height
 }
 
-/// Hauteur d'un bloc anonyme : empilement de ses lignes
-/// (estimation — les vraies line boxes arrivent à l'étape 20).
+/// Hauteur d'un bloc anonyme : délégué au layout en-ligne
+/// (étape 20 — vraies line boxes dans `bx.lines`).
 fn layout_anon_block(
     bx: &mut LayoutBox,
     x: f32,
@@ -274,52 +273,13 @@ fn layout_anon_block(
     ctx: &BlockCtx,
     parent_fs: f32,
 ) -> f32 {
-    let st = bx.style.clone();
-    let fs = font_size_px(&st, parent_fs, ctx);
-    let lh = line_height(&st, fs, ctx);
-    let measure = measure_fn(&st, fs, ctx);
-    let mut cursor = y;
-    let count = bx.children.len();
-    for i in 0..count {
-        // Texte du fragment (l'en-ligne porte son texte dans
-        // ses propres descendants : on concatène).
-        let txt = collect_text(&bx.children[i]);
-        if txt.trim().is_empty() {
-            continue;
-        }
-        let lines = text::break_lines(&txt, w, &measure).len().max(1);
-        #[allow(clippy::cast_precision_loss)]
-        let h = lines as f32 * lh;
-        let child = &mut bx.children[i];
-        child.rect = Rect {
-            x,
-            y: cursor,
-            width: w,
-            height: h,
-        };
-        cursor += h;
-    }
     bx.rect = Rect {
         x,
         y,
         width: w,
-        height: cursor - y,
+        height: 0.0,
     };
-    cursor - y
-}
-
-/// Texte aplati d'un fragment en-ligne (texte direct ou
-/// descendants des boîtes inline).
-fn collect_text(b: &LayoutBox) -> String {
-    if let Some(t) = &b.text {
-        t.clone()
-    } else {
-        let mut s = String::new();
-        for c in &b.children {
-            s.push_str(&collect_text(c));
-        }
-        s
-    }
+    crate::inline::layout_inline(bx, x, y, w, ctx, parent_fs)
 }
 
 /// `line-height` en px : nombre → ×font-size, longueur →
@@ -341,7 +301,7 @@ fn line_height(style: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> f32 {
 /// Fonction de mesure px d'une chaîne, par la fonte réelle
 /// via `FontSource`, sinon repli `0.55em`/caractère (dev
 /// headless documenté — jamais la production).
-fn measure_fn<'a>(
+pub(crate) fn measure_fn<'a>(
     style: &'a ComputedStyle,
     fs: f32,
     ctx: &'a BlockCtx,

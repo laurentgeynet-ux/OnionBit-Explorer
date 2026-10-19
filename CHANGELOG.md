@@ -9,6 +9,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 20 — `explorer-layout` : inline layout, line
+  boxes** (`inline.rs`) : `LineBox`/`Fragment` produits des
+  items en-ligne — texte découpé sur les opportunités UAX #14
+  de l'itemisation (pièces), mesuré et shapé par la fonte
+  injectée ; wrapping greedy, blancs de tête de ligne
+  supprimés ; la fin de texte (UAX #14 mandatory) distingue
+  les vraies coupures dures (`\n`, NEL, LS/PS). `text-align`
+  left/right/center/justify (étirement inter-fragments).
+  Fragments posés sur la baseline commune de la ligne ;
+  `display: inline-block` coulé comme atome incassable
+  (dimensionné par `layout_block`). Rects des enfants =
+  union de leurs fragments ; clusters octets conservés pour
+  le hit-test. Runs RTL en ordre logique (réordonnancement
+  visuel reporté à la display list — documenté). 6 tests.
+
 - **Étape 19 — `explorer-layout` : block layout, flux
   normal** (`block.rs`) : résolution horizontale §10.3.3 —
   `width` spécifiée/auto, slack aux marges `auto` (centrage),

@@ -77,6 +77,10 @@ pub struct LayoutBox {
     pub text: Option<String>,
     /// Enfants.
     pub children: Vec<LayoutBox>,
+    /// Lignes produites par le layout en-ligne (étape 20) —
+    /// non vide seulement pour les conteneurs en-ligne
+    /// (blocs anonymes).
+    pub lines: Vec<crate::inline::LineBox>,
     /// Géométrie — remplie par les étapes suivantes.
     pub rect: Rect,
 }
@@ -148,6 +152,7 @@ pub fn build_box_tree(dom: &Dom, root: NodeId, styles: &StyleMap) -> Option<Layo
         style: style.clone(),
         text: None,
         children: Vec::new(),
+        lines: Vec::new(),
         rect: Rect::default(),
     };
     let children = child_boxes(dom, root, styles, &style);
@@ -198,6 +203,7 @@ fn child_boxes(
                     style: parent_style.clone(),
                     text: Some(text.to_string()),
                     children: Vec::new(),
+                    lines: Vec::new(),
                     rect: Rect::default(),
                 });
             }
@@ -244,6 +250,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             style: style.clone(),
             text: None,
             children: std::mem::take(run),
+            lines: Vec::new(),
             rect: Rect::default(),
         });
     }

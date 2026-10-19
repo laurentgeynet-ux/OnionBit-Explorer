@@ -152,7 +152,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   `explorer-core` (ADR-0009).
 - [x] **Étape 19. Block layout.** Flux normal, marges collapsées,
   dimensions auto/spécifiées.
-- [ ] **Étape 20. Inline layout.** Line boxes sur runs itemisés,
+- [x] **Étape 20. Inline layout.** Line boxes sur runs itemisés,
   word wrap (opportunités UAX #14), `text-align`, inline-block
   minimal.
 - [ ] **Étape 21. Tables, flottants et positionnement.**
