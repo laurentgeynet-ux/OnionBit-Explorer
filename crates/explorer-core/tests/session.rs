@@ -3027,3 +3027,93 @@ async fn giant_document_clamps_frame_instead_of_error() {
     let png = s.frame_png(id).expect("frame plafonnée");
     assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
 }
+
+/// Repro QA 52b — texte tapé dans un `<input>` : la frame
+/// doit refléter la frappe (le run texte suit la valeur,
+/// pas le layout figé du chargement).
+/// En attente du fix PIPE consigné  :
+/// l'enfant  synthétique du contrôle n'entre jamais en
+///  (atomique inline-block + bras ).
+#[tokio::test]
+#[ignore = "bug PIPE explorer-layout — voir interface-equipes.md"]
+async fn typed_text_repaints_new_value() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FORM);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    let before = s.frame_png(id).unwrap();
+    for key in ["x", "y", "z"] {
+        s.handle_input(id, InputEvent::Key { key: key.into() })
+            .await
+            .unwrap();
+    }
+    let after = s.frame_png(id).unwrap();
+    assert_ne!(before, after, "le texte tapé doit repeindre");
+}
+
+/// Repro QA 52b (chemin daemon) : un `setTimeout` **différé**
+/// (comme la pompe de fond l'appelle sans input) mute le DOM,
+/// émet `FrameInvalidated`, et un `document.title` émis par
+/// script produit `TitleChanged`.
+const PAGE_DELAYED: &str = "<!doctype html><html><head><title>A</title></head><body>\
+    <div id=\"r\">avant</div>\
+    <script>document.title='B';\
+    setTimeout(function(){var d=document.createElement('h2');\
+    d.textContent='TIMER FIRED';document.body.appendChild(d);\
+    document.title='C'},150)</script></body></html>";
+
+const PAGE_DELAYED_AFTER: &str = "<!doctype html><html><head><title>C</title></head><body>\
+    <div id=\"r\">avant</div><h2>TIMER FIRED</h2></body></html>";
+
+#[tokio::test]
+async fn delayed_timer_pumps_and_emits_events() {
+    let (mut s, t) = test_session();
+    t.route("/ev", 200, PAGE_DELAYED);
+    t.route("/stat", 200, PAGE_DELAYED_AFTER);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let mut rx = s.subscribe();
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // `document.title='B'` synchrone → TitleChanged B ; le
+    // `Navigated` final annonce le titre vivant (jamais la
+    // valeur périmée « A » du parse — régression 52b).
+    let titles: Vec<String> = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|e| match e {
+            CoreEvent::TitleChanged { tab, title } if tab == a => Some(title),
+            _ => None,
+        })
+        .collect();
+    assert!(!titles.is_empty(), "title_changed attendu");
+    assert!(
+        titles.iter().all(|t| t == "B"),
+        "titre vivant attendu, jamais « A » : {titles:?}"
+    );
+
+    // La pompe de fond (≙ daemon) — sans aucun input : le
+    // timer différé tire, mute le DOM, émet ses événements.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    for _ in 0..4 {
+        s.pump_timers_all();
+    }
+
+    // Mutation rendue (frame == témoin) + événements émis :
+    // TitleChanged C puis FrameInvalidated.
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+    let mut got_title = None;
+    let mut got_frame = false;
+    while let Ok(e) = rx.try_recv() {
+        match e {
+            CoreEvent::TitleChanged { tab, title } if tab == a => got_title = Some(title),
+            CoreEvent::FrameInvalidated { tab } if tab == a => got_frame = true,
+            _ => {}
+        }
+    }
+    assert_eq!(got_title.as_deref(), Some("C"));
+    assert!(got_frame, "FrameInvalidated après timer");
+}

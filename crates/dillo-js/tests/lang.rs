@@ -6424,7 +6424,7 @@ fn c41_deep_operand_chain_drops_iteratively() {
         // Parse + destruction immédiate — l'ancien crash
         // (drop récursif) vivait ici, sans aucun `eval`.
         let specs = dillo_js::module_specifiers(&src);
-        assert!(specs.is_empty());
+        assert_eq!(specs, Vec::<String>::new());
         // `eval` : la borne `expr_depth` rend une erreur
         // typée — la destruction de l'AST d'erreur ne doit
         // pas déborder non plus.

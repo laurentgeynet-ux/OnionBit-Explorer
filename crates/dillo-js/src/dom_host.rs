@@ -716,6 +716,29 @@ impl Host for DocumentHost {
             }
             return Ok(true);
         }
+        if key == "title" {
+            // Spec : le texte du `<title>` existant est
+            // remplacé ; à défaut un `<title>` est créé et
+            // rattaché à `<head>` (pas de `<head>` → no-op).
+            let s = e.to_js_string(v)?;
+            let mut d = self.dom.borrow_mut();
+            let title = d.by_tag(d.root, "title").first().copied();
+            match title {
+                Some(t) => {
+                    let txt = d.create_text(&s);
+                    d.replace_children(t, &[txt]);
+                }
+                None => {
+                    if let Some(head) = d.by_tag(d.root, "head").first().copied() {
+                        let t = d.create_element("title");
+                        let txt = d.create_text(&s);
+                        d.append(t, txt);
+                        d.append(head, t);
+                    }
+                }
+            }
+            return Ok(true);
+        }
         Ok(false)
     }
 

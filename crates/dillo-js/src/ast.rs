@@ -628,6 +628,7 @@ impl Expr {
             | Expr::Spread(e)
             | Expr::Await(e)
             | Expr::ImportCall(e)
+            | Expr::Yield { arg: Some(e), .. }
             | Expr::SuperIndex(e) => take(e, out),
             Expr::Binary(_, l, r) | Expr::Assign(l, _, r) | Expr::Index(l, r) => {
                 take(l, out);
@@ -665,11 +666,6 @@ impl Expr {
                         ChainStep::Call(args) | ChainStep::OptCall(args) => out.extend(args),
                         ChainStep::Member(_) | ChainStep::OptMember(_) => {}
                     }
-                }
-            }
-            Expr::Yield { arg, .. } => {
-                if let Some(e) = arg {
-                    take(e, out);
                 }
             }
             _ => {}

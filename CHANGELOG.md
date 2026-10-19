@@ -9,6 +9,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-5 — Grid MVP+** (`explorer-layout`) :
+  `grid-template-areas` + `grid-area` (nom → bounding box,
+  ou forme numérique `r/c/r2/c2`), lignes nommées
+  `[start] 100px [mid]` résolues dans `grid-column`/`grid-row`,
+  `grid-auto-flow: column` (colonnes implicites `auto`)
+  et `dense` (backfill depuis l'origine), `minmax(min, max)`
+  à deux bornes — `fr` borné par le min à la distribution.
+  Écarts documentés : `fr` vertical ≈ `auto`, `auto-fill`/
+  `auto-fit`, indices négatifs, spans dans la mesure auto.
+
 - **R-4 — `flex-wrap` multi-lignes** (`explorer-layout`) :
   découpe des items en lignes par taille hypothétique
   (`flex-wrap: wrap`/`wrap-reverse`), facteurs flex,
@@ -96,6 +106,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   multipart, submits JS ×2, helper) + 8 `dillo-js`
   (drapeaux, check/report, custom, `invalid`, radios,
   hooks submit/requestSubmit).
+
+- **Étape 52b — défauts event-loop vus en vrai** (`dillo-js`,
+  `explorer-core`, QA daemon `cfa0514`) : `document.title=`
+  n'était qu'un setter muet (`Ok(false)`) — implémenté (remplace
+  le `<title>` existant, sinon en crée un sous `<head>`) ;
+  `emit_navigated` annonce le titre **vivant** de l'onglet au
+  lieu du titre extrait au parse — les scripts qui le mutent
+  ne se font plus ré-émettre par l'ancienne valeur.
+  `TitleChanged` et `frame_invalidated` suivent désormais un
+  `setTimeout` différé sans aucun input (le silence QA venait
+  de la racine `FrameTooBig`, levée plus haut). Reste : le
+  texte d'un `<input>` n'a jamais peint (bug PIPE
+  `explorer-layout` consigné `interface-equipes.md` — enfant
+  `Text` jamais mis en `lines`). Tests : timer différé +
+  titres/frames émis, frappe `input` (repro en attente PIPE).
 
 - **JS-C41 résidu — destruction itérative de l'AST**
   (`dillo-js`, terrain `gh/landing-pages-*.js`) : les chaînes

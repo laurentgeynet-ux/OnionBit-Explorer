@@ -1209,10 +1209,15 @@ impl Session {
         }
         // `Navigated` seulement si le document final est bien
         // celui demandé : une redirection script a déjà émis
-        // pour sa cible.
+        // pour sa cible. Le titre annoncé = `entry.title` —
+        // les scripts ont pu le muter par `document.title=`
+        // (`apply_dom_sync` le tient à jour) : le titre extrait
+        // au parse serait alors périmé et ré-émettrait
+        // l'ancien (52b).
         let final_url = self.tabs.get(&tab).and_then(|t| t.url.clone());
         if final_url.as_ref() == Some(&url) {
-            self.emit_navigated(tab, &url, title.clone(), prev_title.as_deref());
+            let live = self.tabs.get(&tab).and_then(|t| t.title.clone());
+            self.emit_navigated(tab, &url, live, prev_title.as_deref());
         }
         Ok(title)
     }

@@ -149,19 +149,35 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `@charset`/transport → UTF-8 ; jamais le sniffer HTML hors
   document. Borné — régression vérifiée sur example.com.
 
-- [ ] **Étape 52b. Défauts event-loop vus en vrai** (QA daemon
+- [~] **Étape 52b. Défauts event-loop vus en vrai** (QA daemon
   @ `cfa0514`, repros `D:\explorer-fieldwork\repros\`) :
   1. **timers ne tirent qu'à l'input** — `setTimeout(8s)` n'a
      couru qu'au scroll suivant : la pompe de fond du daemon
      (`main.rs` ~l.144-164) existe mais ne livre pas les
      échus ; `dispatch_path_event` pompe à chaque input
      (`session.rs` ~l.2556). Une page dont le contenu arrive
-     par timer reste figée sans interaction ;
-  2. **texte tapé invisible** — `keydown` → `edited` + repaint,
-     mais le run texte de l'`<input>` est figé au layout :
-     repaint sans re-layout ;
+     par timer reste figée sans interaction.
+     **Fait** : pompe vérifiée saine — le symptôme était la
+     même racine que le silence `FrameTooBig` (`relayout`
+     échouait → `apply_dom_sync` rendait tôt → zéro
+     `frame_invalidated`), levé par `986f01f`. Couvert par
+     test `delayed_timer_pumps_and_emits_events` (timer
+     différé, mutation DOM, événements — sans aucun input) ;
+  2. **texte tapé invisible** — en fait **jamais peint** :
+     l'enfant `Text` synthétique du contrôle n'entre jamais
+     en `lines` (atomique `inline-block` + bras
+     `is_inline_level` de `flow_children`) — bug PIPE
+     `explorer-layout`, consigné `interface-equipes.md` avec
+     diagnostic complet (repro `typed_text_repaints_new_value`,
+     ignoré tant que PIPE n'a pas livré) ;
   3. **`document.title` par JS** → aucun `title_changed` émis
      (le seul reçu portait l'ancienne valeur).
+     **Fait** : `document.title=` posait `Ok(false)` — setter
+     implémenté (remplace le `<title>` existant, sinon en crée
+     un sous `<head>`) + `emit_navigated` annonce le titre
+     **vivant** (les scripts tournent avant l'émission — le
+     titre extrait au parse était ré-émis et écrasait la
+     mutation).
 - [ ] **Étape 53d. API réactive pendant la navigation** (QA
   daemon @ `cfa0514`) : le mutex session unique gèle toute
   l'API pendant `navigate` — nav France > 8 min ⇒ `status`,

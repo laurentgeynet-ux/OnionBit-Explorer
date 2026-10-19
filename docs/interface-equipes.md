@@ -52,6 +52,7 @@ Règles :
 | 2026-10-19 | `dillo-js` (interne NAV) | `MutationObserver` delivery microtask | NAV (étape 52) | proposé → JS-C26 |
 | 2026-10-19 | `explorer-css` sélecteurs | pseudo-classes `:valid` / `:invalid` (`:user-invalid`) appuyées sur l'état de validation formulaires (hôte : `Dom::element` + règles §4.10.21.2) | NAV (étape 54) | proposé |
 | 2026-10-19 | `explorer-render` raster | fenêtre de raster (`rasterize_window(list, y, h)` ou `DisplayList` crop) — aujourd'hui NAV plafonne la hauteur à 16 384/scale px en entrée : les documents plus hauts ne sont jamais rasterisables sous le cap, scroll impossible | NAV (terrain : github/MDN/stallman) | proposé |
+| 2026-10-19 | `explorer-layout` boxtree/layout | **bug** : le texte d'un `<input>`/`<select>` ne peint jamais. Diagnostic (repro NAV `tests/session.rs::typed_text_repaints_new_value`) : `control_paint` synthétise la valeur en enfant `BoxKind::Text` ; mais le contrôle est `inline-block` (UA) → fragment atomique → la boîte est posée par `flow_children`/`layout_block`, où l'enfant `Text` (niveau inline, sans enveloppe `AnonymousBlock`) tombe dans le bras `is_inline_level → cursor += line_h; continue` — jamais mis en `lines`, donc aucun `DisplayItem::Text`. Fix probable : envelopper l'enfant `Text` du contrôle dans un `AnonymousBlock` (boxtree), ou faire que `layout_block` mette en ligne les enfants inline nus. | NAV (QA 52b, repro `repros/form.html`) | proposé |
 
 ## Journal
 
