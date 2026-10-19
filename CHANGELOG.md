@@ -831,6 +831,58 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     `stringify` ;
   - test262 : 859/859 ; 5 tests de régression.
 
+- **JS-C22 — `Temporal` tranche initiale + gaps**
+  (`dillo-js`, nouveau `src/temporal.rs`) :
+  - `Temporal.Instant` — nanosecondes `i128`, ctor
+    `BigInt` requis (spec), `fromEpochMilliseconds`/
+    `fromEpochNanoseconds`, `toString` ISO `Z`,
+    offsets `±HH:MM` appliqués, `since`/`until`
+    (largestUnit temps uniquement — `days` →
+    `RangeError` spec) ;
+  - `PlainDate`/`PlainTime`/`PlainDateTime` — props
+    complètes (`dayOfWeek` lundi=1, `dayOfYear`,
+    `weekOfYear`/`yearOfWeek` ISO-8601, `daysInMonth`/
+    `daysInYear`, `monthsInYear`, `inLeapYear`,
+    `monthCode`, `calendarId`), `from` chaîne ISO ou
+    objet-props (`monthCode` accepté), conversions
+    `toPlainDateTime`/`toPlainDate`/`toPlainTime`/
+    `toPlainYearMonth`/`toPlainMonthDay`, `with`,
+    `equals`, `compare` ;
+  - arithmétique calendaire réelle : `add`/`subtract`
+    avec clamp du jour (`Jan 31 + 1 mois → Feb 29`),
+    `since`/`until` selon `largestUnit`
+    (`days`/`weeks`/`months`/`years` calendaires,
+    temps en nanosecondes `i128`) — `Jan 15 → Mar 20`
+    en mois = `P2M5D` conforme ;
+  - `PlainYearMonth`/`PlainMonthDay` (réf. iso jour 1 /
+    année 1972) ;
+  - `Temporal.Duration` — 10 champs, signe uniforme
+    exigé (`RangeError` sinon), parse/format ISO
+    `P…`, `neg`/`abs`/`add`/`subtract`/`with`,
+    `total(unit)` et `compare` avec `relativeTo`
+    obligatoire pour les unités date (spec) ;
+  - `Temporal.Now` — horloge UTC (`instant`,
+    `plainDateTimeISO`, `plainDateISO`,
+    `plainTimeISO`, `timeZoneId` → `"UTC"`) ;
+  - `valueOf` lève `TypeError` sur tout Temporal
+    (spec — conversion implicite interdite), `toJSON`,
+    `@@toStringTag` `Temporal.X` ;
+  - déviations documentées (tête de module) :
+    calendrier `iso8601` unique, fuseau UTC seul —
+    `ZonedDateTime`/`Now.zonedDateTimeISO` absents,
+    props publiques en data non-énumérables au lieu
+    d'accesseurs de prototype, `PlainDate.add` ignore
+    les champs sub-jour, fraction de durée limitée
+    aux secondes/minutes ;
+  - compléments : `Atomics.pause` (hint spin — no-op
+    observable), `Iterator.concat` (eager, déviation
+    laziness documentée), propriétés restreintes
+    `caller`/`arguments` sur les fonctions
+    strictes/générateurs/async (spec
+    `AddRestrictedFunctionProperties` — sloppy :
+    absents, déviation vs le `null` legacy de V8) ;
+  - test262 : 859/859 ; 6 tests de régression.
+
 - **JS-C19 — Date complet, `eval` direct, Annex B
   RegExp, JSON, invariants Proxy** (`dillo-js`) :
   - `Date` : les 15 setters (`setFullYear`…`setTime` +

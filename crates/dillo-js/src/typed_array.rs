@@ -407,6 +407,7 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(at, "exchange", atomics_exchange);
         e.add_method(at, "compareExchange", atomics_compare_exchange);
         e.add_method(at, "isLockFree", atomics_is_lock_free);
+        e.add_method(at, "pause", atomics_pause);
         e.add_method(at, "wait", atomics_wait);
         e.add_method(at, "notify", atomics_notify);
         e.add_method(at, "waitAsync", atomics_wait_async);
@@ -1921,6 +1922,13 @@ fn atomics_compare_exchange(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
 fn atomics_is_lock_free(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let n = e.to_number(arg(args, 0))?;
     Ok(Value::Bool(matches!(n as u32, 1 | 2 | 4 | 8)))
+}
+
+/// `Atomics.pause([n])` (ES2025) — hint de spin-wait : no-op
+/// observable (`undefined`), le délai suggéré est ignoré.
+fn atomics_pause(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let _ = e;
+    Ok(Value::Undefined)
 }
 
 /// `Atomics.wait` — `TypeError` systématique : mono-thread =

@@ -662,9 +662,34 @@ d'intégration, pas par la couverture :
   `JSON.rawJSON`/`isRawJSON` (objet gelé à proto nul,
   émission brute dans `stringify`). test262 : 859/859 ;
   5 tests de régression.
-- [ ] **JS-C. Couverture par besoin** : `Temporal`,
-  `Intl` multi-locales — ordre piloté par les pages
-  réelles.
+- [x] **JS-C22. `Temporal` tranche initiale + gaps** :
+  `src/temporal.rs` — `Instant` (epoch ns `i128`,
+  `fromEpochMilliseconds`/`fromEpochNanoseconds`,
+  offsets ISO appliqués), `PlainDate`/`PlainTime`/
+  `PlainDateTime` (props complètes : `dayOfWeek`,
+  `dayOfYear`, `weekOfYear`/`yearOfWeek` ISO-8601,
+  `daysInMonth`, `inLeapYear`…), `PlainYearMonth`/
+  `PlainMonthDay`, `Duration` (signe uniforme exigé,
+  `neg`/`abs`/`total`/`compare` avec `relativeTo`),
+  `Temporal.Now` (`instant`/`plainDateTimeISO`/
+  `plainDateISO`/`plainTimeISO`/`timeZoneId` → `UTC`),
+  `from`/`compare`/`with`/`equals`/`add`/`subtract`/
+  `since`/`until` avec `largestUnit`, parse+format ISO
+  (`P…` durées, fraction 3/6/9 chiffres),
+  `valueOf` → `TypeError` (spec). Déviations
+  documentées : calendrier `iso8601` unique, fuseau
+  UTC (pas de `ZonedDateTime`), props en data
+  non-énumérables au lieu d'accesseurs proto, champs
+  sub-jour ignorés par `PlainDate.add`. Compléments :
+  `Atomics.pause` (hint no-op), `Iterator.concat`
+  (eager), propriétés restreintes `caller`/`arguments`
+  (`AddRestrictedFunctionProperties` : accesseurs
+  poison `TypeError` sur fonctions strictes/gen/async).
+  test262 : 859/859 ; 6 tests de régression.
+- [ ] **JS-C. Couverture par besoin** : `Temporal`
+  (`ZonedDateTime`, calendriers non-iso, `round`),
+  `Intl` multi-locales, décorateurs `@dec` — ordre
+  piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
   `Video` — phase 10, dépend du pipeline rendu.
 

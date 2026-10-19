@@ -2013,6 +2013,27 @@ fn freeze_seal_semantics() {
         ),
         "false,false"
     );
+    // `__proto__` sur non-extensible : `TypeError` (spec Annex B),
+    // jamais de mutation — régression test262 `S8.6.2_A8`.
+    for lock in ["preventExtensions", "seal", "freeze"] {
+        assert!(matches!(
+            Engine::new().eval(&format!("var o = Object.{lock}({{}}); o.__proto__ = {{}}")),
+            Err(dillo_js::Error::Uncaught(_))
+        ));
+        assert_eq!(
+            ev_str(&format!(
+                "var o = Object.{lock}({{}}); \
+                 try {{ o.__proto__ = {{z: 1}}; }} catch (e) {{}} \
+                 Object.getPrototypeOf(o) === Object.prototype"
+            )),
+            "true"
+        );
+    }
+    // Cycle via `__proto__` refusé aussi.
+    assert!(matches!(
+        Engine::new().eval("var o = {}; o.__proto__ = o"),
+        Err(dillo_js::Error::Uncaught(_))
+    ));
 }
 
 #[test]
@@ -5592,4 +5613,251 @@ fn c21_es2026_extras() {
     );
     assert_eq!(ev_str("try{JSON.rawJSON('{')}catch(x){'SE'}"), "SE");
     assert_eq!(ev_str("try{JSON.rawJSON('{}')}catch(x){'SE'}"), "SE");
+}
+
+// -- JS-C22 : Temporal, Atomics.pause, Iterator.concat, restricted ----
+
+#[test]
+fn c22_temporal_basics() {
+    // Constructeurs + ISO toString.
+    assert_eq!(
+        ev_str("new Temporal.PlainDate(2024,3,15).toString()"),
+        "2024-03-15"
+    );
+    assert_eq!(
+        ev_str("new Temporal.PlainTime(10,30,45,123).toString()"),
+        "10:30:45.123"
+    );
+    assert_eq!(
+        ev_str("new Temporal.PlainDateTime(2024,3,15,10,30).toString()"),
+        "2024-03-15T10:30:00"
+    );
+    assert_eq!(
+        ev_str("new Temporal.Duration(1,2,0,3,4,5).toString()"),
+        "P1Y2M3DT4H5M"
+    );
+    // Validation des plages + signe des durées.
+    assert_eq!(
+        ev_str("try{new Temporal.PlainDate(2024,2,30)}catch(x){'RE'}"),
+        "RE"
+    );
+    assert_eq!(
+        ev_str("try{new Temporal.Duration(1,-2)}catch(x){'RE'}"),
+        "RE"
+    );
+    // Props publiques + semaine ISO.
+    assert_eq!(
+        ev_str(concat!(
+            "let d=new Temporal.PlainDate(2024,3,15);",
+            "d.year+'/'+d.month+'/'+d.day+'|'+d.dayOfWeek+'|'+d.daysInMonth+'|'+d.calendarId"
+        )),
+        "2024/3/15|5|31|iso8601"
+    );
+    assert_eq!(
+        ev_str("new Temporal.PlainDate(2024,2,29).inLeapYear"),
+        "true"
+    );
+}
+
+#[test]
+fn c22_temporal_from_parse() {
+    assert_eq!(
+        ev_str("Temporal.PlainDate.from('2024-03-15').toString()"),
+        "2024-03-15"
+    );
+    assert_eq!(
+        ev_str("Temporal.PlainDate.from({year:2024,month:3,day:15}).toString()"),
+        "2024-03-15"
+    );
+    assert_eq!(
+        ev_str("Temporal.PlainDate.from({year:2024,monthCode:'M03',day:15}).toString()"),
+        "2024-03-15"
+    );
+    assert_eq!(
+        ev_str("Temporal.PlainTime.from('10:30:45.123456').toString()"),
+        "10:30:45.123456"
+    );
+    assert_eq!(
+        ev_str("Temporal.Duration.from('P1Y2M3DT4H5M6.789S').toString()"),
+        "P1Y2M3DT4H5M6.789S"
+    );
+    // Conversions inter-types via `from`.
+    assert_eq!(
+        ev_str(
+            "Temporal.PlainDate.from(Temporal.PlainDateTime.from('2024-03-15T10:30')).toString()"
+        ),
+        "2024-03-15"
+    );
+}
+
+#[test]
+fn c22_temporal_arithmetic() {
+    // add/subtract avec clamp calendaire.
+    assert_eq!(
+        ev_str("new Temporal.PlainDate(2024,1,31).add({months:1}).toString()"),
+        "2024-02-29"
+    );
+    assert_eq!(
+        ev_str("new Temporal.PlainDate(2024,3,1).subtract('P1D').toString()"),
+        "2024-02-29"
+    );
+    assert_eq!(
+        ev_str("new Temporal.PlainTime(23,30).add({hours:2}).toString()"),
+        "01:30:00"
+    );
+    assert_eq!(
+        ev_str("new Temporal.PlainDateTime(2024,3,15,23,30).add({hours:2}).toString()"),
+        "2024-03-16T01:30:00"
+    );
+    // since/until avec largestUnit.
+    assert_eq!(
+        ev_str("Temporal.PlainDate.from('2024-03-01').since('2024-03-15').days"),
+        "14"
+    );
+    assert_eq!(
+        ev_str(
+            "Temporal.PlainDate.from('2024-01-15').since('2024-03-20',{largestUnit:'months'}).toString()"
+        ),
+        "P2M5D"
+    );
+    assert_eq!(
+        ev_str(
+            "Temporal.PlainDate.from('2020-03-15').since('2024-01-10',{largestUnit:'years'}).toString()"
+        ),
+        "P3Y9M26D"
+    );
+    assert_eq!(
+        ev_str("Temporal.PlainTime.from('09:00').since('17:30').toString()"),
+        "PT8H30M"
+    );
+    assert_eq!(
+        ev_str(
+            "Temporal.PlainDateTime.from('2024-03-15T00:00').since('2024-03-17T12:30').toString()"
+        ),
+        "P2DT12H30M"
+    );
+}
+
+#[test]
+fn c22_temporal_instant_duration() {
+    // Instant — BigInt requis, ISO + offsets.
+    assert_eq!(
+        ev_str("new Temporal.Instant(1700000000000000000n).toString()"),
+        "2023-11-14T22:13:20Z"
+    );
+    assert_eq!(ev_str("try{new Temporal.Instant(123)}catch(x){'TE'}"), "TE");
+    assert_eq!(
+        ev_str("Temporal.Instant.from('2024-03-15T12:30:00+02:00').toString()"),
+        "2024-03-15T10:30:00Z"
+    );
+    assert_eq!(
+        ev_str("Temporal.Instant.fromEpochMilliseconds(1710498600000).toString()"),
+        "2024-03-15T10:30:00Z"
+    );
+    assert_eq!(
+        ev_str("let i=Temporal.Instant.from('2024-03-15T10:30:00Z');i.epochNanoseconds.toString()"),
+        "1710498600000000000"
+    );
+    // Instant : champs date interdits dans la durée (spec).
+    assert_eq!(
+        ev_str("try{Temporal.Instant.from('2024-03-15T00:00Z').add({days:1})}catch(x){'RE'}"),
+        "RE"
+    );
+    assert_eq!(
+        ev_str("Temporal.Instant.from('2024-03-15T00:00Z').since('2024-03-15T02:30Z').toString()"),
+        "PT9000S"
+    );
+    // Duration.
+    assert_eq!(
+        ev_str("new Temporal.Duration(0,0,0,3).neg().toString()"),
+        "-P3D"
+    );
+    assert_eq!(
+        ev_str("new Temporal.Duration(0,0,0,-3).abs().toString()"),
+        "P3D"
+    );
+    assert_eq!(
+        ev_str("new Temporal.Duration(0,0,0,3,12).total({unit:'hours'})"),
+        "84"
+    );
+    assert_eq!(
+        ev_str("try{new Temporal.Duration(0,1).total({unit:'days'})}catch(x){'RE'}"),
+        "RE"
+    );
+    assert_eq!(ev_str("Temporal.Duration.compare('PT1H','PT30M')"), "1");
+    assert_eq!(
+        ev_str(
+            "Temporal.Duration.compare('P1M','P30D',{relativeTo:new Temporal.PlainDate(2024,1,1)})"
+        ),
+        "1"
+    );
+}
+
+#[test]
+fn c22_temporal_misc() {
+    // valueOf → TypeError (spec — pas de conversion implicite).
+    assert_eq!(
+        ev_str("try{new Temporal.PlainDate(2024,1,1)+''}catch(x){'TE'}"),
+        "TE"
+    );
+    // toJSON via stringify.
+    assert_eq!(
+        ev_str("JSON.stringify({d:Temporal.PlainDate.from('2024-03-15')})"),
+        "{\"d\":\"2024-03-15\"}"
+    );
+    // @@toStringTag.
+    assert_eq!(
+        ev_str("Object.prototype.toString.call(new Temporal.PlainDate(2024,1,1))"),
+        "[object Temporal.PlainDate]"
+    );
+    // PlainYearMonth / PlainMonthDay.
+    assert_eq!(
+        ev_str("new Temporal.PlainYearMonth(2024,3).toString()"),
+        "2024-03"
+    );
+    assert_eq!(
+        ev_str("Temporal.PlainYearMonth.from('2023-06').since('2024-03').toString()"),
+        "P9M"
+    );
+    assert_eq!(
+        ev_str("new Temporal.PlainMonthDay(3,15).toPlainDate(2024).toString()"),
+        "2024-03-15"
+    );
+    // Now.
+    assert_eq!(
+        ev_str("Temporal.Now.instant() instanceof Temporal.Instant"),
+        "true"
+    );
+    assert_eq!(ev_str("Temporal.Now.timeZoneId()"), "UTC");
+    assert_eq!(ev_str("Temporal.Now.plainDateISO().year > 2020"), "true");
+}
+
+#[test]
+fn c22_misc_apis() {
+    // Atomics.pause — hint no-op (ES2025).
+    assert_eq!(ev_str("Atomics.pause()"), "undefined");
+    assert_eq!(ev_str("Atomics.pause(10)"), "undefined");
+    // Iterator.concat (ES2025, eager chez nous).
+    assert_eq!(
+        ev_str("[...Iterator.concat([1,2],new Set([3]),'ab')].join('')"),
+        "123ab"
+    );
+    // Propriétés restreintes : strict → TypeError, sloppy → absent.
+    assert_eq!(
+        ev_str("let f=function(){'use strict'};try{f.caller}catch(x){'TE'}"),
+        "TE"
+    );
+    assert_eq!(
+        ev_str("let g=function(){'use strict'};try{g.arguments}catch(x){'TE'}"),
+        "TE"
+    );
+    assert_eq!(ev_str("let h=function(){};typeof h.caller"), "undefined");
+    assert_eq!(
+        ev_str("function* gg(){};try{gg.caller}catch(x){'TE'}"),
+        "TE"
+    );
+    assert_eq!(
+        ev_str("let c=class{m(){}};try{(new c()).m.caller}catch(x){'TE'}"),
+        "TE"
+    );
 }

@@ -471,6 +471,7 @@ impl Engine {
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
         crate::intl::install(&mut e);
+        crate::temporal::install(&mut e);
         crate::json::install(&mut e);
         crate::typed_array::install(&mut e);
         e
@@ -3379,6 +3380,17 @@ impl Engine {
         let p = self.heap.alloc_obj(Object::ordinary(p_obj));
         self.set_own(p, "constructor", Value::Obj(id), false);
         self.set_own(id, "prototype", Value::Obj(p), false);
+        // Spec `AddRestrictedFunctionProperties` : `caller` et
+        // `arguments` sont des accesseurs poison sur les fonctions
+        // strictes, les générateurs et l'async (sloppy : absents —
+        // `f.caller` → `undefined`, déviation vs le `null` de V8).
+        if lit.strict || lit.is_gen || lit.is_async {
+            let thr = self.native_fn("restricted", crate::builtins::restricted_prop);
+            if let Some(o) = self.heap.obj_mut(id) {
+                o.set_accessor("caller", thr, thr, false);
+                o.set_accessor("arguments", thr, thr, false);
+            }
+        }
         Value::Obj(id)
     }
 

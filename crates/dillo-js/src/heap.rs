@@ -279,6 +279,7 @@ impl Heap {
             // `WeakRef` : la cible n'est PAS tracée (c'est le
             // point — `deref()` observe la collecte).
             ObjKind::WeakRef(_)
+            | ObjKind::Temp(_)
             | ObjKind::Ordinary
             | ObjKind::RegExp(_)
             | ObjKind::Symbol { .. }
@@ -507,7 +508,50 @@ pub struct FinRegEntry {
     pub token: Value,
 }
 
+/// Slots internes `Temporal.*` (JS-C22) — aucun `Value` tracé.
+/// `f` pour Duration = `[years, months, weeks, days, hours,
+/// minutes, seconds, milliseconds, microseconds, nanoseconds]`.
+#[derive(Clone, Copy, Debug)]
+pub enum TempData {
+    /// `Temporal.Instant` — nanosecondes depuis l'époque UTC.
+    Instant { ns: i128 },
+    /// `Temporal.PlainDate` (calendrier iso8601).
+    PDate { y: i64, m: u8, d: u8 },
+    /// `Temporal.PlainTime` — `ms`/`us`/`ns` = milli/micro/nano
+    /// du champ secondes (0..999 chacun).
+    PTime {
+        h: u8,
+        mi: u8,
+        s_: u8,
+        ms: u16,
+        us: u16,
+        ns: u16,
+    },
+    /// `Temporal.PlainDateTime`.
+    PDateTime {
+        y: i64,
+        m: u8,
+        d: u8,
+        h: u8,
+        mi: u8,
+        s_: u8,
+        ms: u16,
+        us: u16,
+        ns: u16,
+    },
+    /// `Temporal.PlainYearMonth` (jour de référence iso = 1).
+    PYearMonth { y: i64, m: u8 },
+    /// `Temporal.PlainMonthDay` (année de référence iso = 1972,
+    /// inobservable hors `monthCode`/`day`).
+    PMonthDay { m: u8, d: u8 },
+    /// `Temporal.Duration` — `[y, mo, w, d, h, mi, s, ms, us, ns]`,
+    /// tous de même signe (spec `Duration` : mixte → `RangeError`).
+    Duration { f: [i64; 10] },
+}
+
 pub enum ObjKind {
+    /// `Temporal.*` — slots internes [`TempData`] (JS-C22).
+    Temp(TempData),
     /// Plain `{}`.
     Ordinary,
     /// Dense array elements; `length` and numeric indices are derived.

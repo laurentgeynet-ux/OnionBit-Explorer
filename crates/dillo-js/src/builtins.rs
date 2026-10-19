@@ -153,6 +153,7 @@ pub(crate) fn install(e: &mut Engine) {
         if let Value::Obj(iid) = iter {
             e.set_own(iid, "prototype", Value::Obj(e.protos.iterator), false);
             e.add_method(iid, "from", iterator_from);
+            e.add_method(iid, "concat", iterator_concat);
         }
         e.set_own(e.protos.iterator, "constructor", iter, false);
         e.set_own(g, "Iterator", iter, false);
@@ -3104,6 +3105,12 @@ fn math_sum_precise(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
         hi = t;
     }
     Ok(Value::Num(hi + lo))
+}
+
+/// Accesseur poison `caller`/`arguments` (spec
+/// `AddRestrictedFunctionProperties`) — get/set → `TypeError`.
+pub(crate) fn restricted_prop(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Err(e.type_error("caller/arguments are restricted function properties"))
 }
 
 // -- Symbol ---------------------------------------------------------
@@ -6444,6 +6451,17 @@ fn iterator_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     Err(e.type_error("Iterator.from on non-iterable"))
 }
 
+/// `Iterator.concat(...iterables)` (ES2025) — concatène les items
+/// de chaque itérable (eager : nos itérateurs sont des snapshots —
+/// déviation vs la laziness spec).
+fn iterator_concat(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let mut items = Vec::new();
+    for a in args {
+        items.extend(e.iter_values(*a)?);
+    }
+    Ok(crate::collections::iter_obj(e, items))
+}
+
 /// `SuppressedError(error, suppressed, message?)` — ES2026.
 fn suppressed_error_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let msg = match arg(args, 2) {
@@ -6595,13 +6613,13 @@ fn proto_getter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 }
 
 /// `set __proto__` (Annex B) — `o.proto = v` si `v` est objet ou
-/// `null` ; autres valeurs ignorées (spec).
+/// `null` ; autres valeurs ignorées (spec). Délègue à
+/// `object_set_proto` : non-extensible → `TypeError`, cycle rejeté,
+/// trap proxy honorée.
 fn proto_setter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     if let Value::Obj(id) = this {
         if let v @ (Value::Obj(_) | Value::Null) = arg(args, 0) {
-            if let Some(o) = e.heap.obj_mut(id) {
-                o.proto = v;
-            }
+            object_set_proto(e, Value::Undefined, &[Value::Obj(id), v])?;
         }
     }
     Ok(Value::Undefined)
