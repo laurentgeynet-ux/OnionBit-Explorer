@@ -321,6 +321,23 @@ fn referer_value_origin(u: &Url) -> Option<String> {
     }
 }
 
+/// En-têtes `Referer`/`Origin` d'une sous-requête émise depuis
+/// `initiator` — même politique *strict-origin-when-cross-origin*
+/// que [`RefererTransport`], calculée **à l'émission** par le
+/// scheduler de sous-ressources (étape 50) qui ne passe pas par le
+/// décorateur. `GET` n'émet jamais `Origin` (méthode safe).
+#[must_use]
+pub fn initiator_headers(initiator: &Url, target: &Url, method: Method) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let Some(r) = referer_value(initiator, target) {
+        out.push(("referer".to_string(), r));
+    }
+    if let Some(o) = origin_value(initiator, target, method) {
+        out.push(("origin".to_string(), o));
+    }
+    out
+}
+
 #[async_trait]
 impl HttpTransport for RefererTransport {
     async fn fetch(&self, req: &Request) -> NetResult<Response> {

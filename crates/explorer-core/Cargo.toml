@@ -17,6 +17,9 @@ explorer-js.workspace = true
 explorer-layout.workspace = true
 explorer-net.workspace = true
 explorer-render.workspace = true
+# `FuturesUnordered` du scheduler de sous-ressources (étape 50) —
+# la feature `std` est exigée (le workspace épingle `default-features = false`).
+futures-util = { workspace = true, features = ["std"] }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

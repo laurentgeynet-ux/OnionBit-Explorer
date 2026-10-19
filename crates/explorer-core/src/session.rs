@@ -12,7 +12,7 @@
 //! Single-writer : le DOM et le layout d'un onglet ne vivent
 //! que dans cette structure, jamais partagés entre threads.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -23,15 +23,18 @@ use explorer_css::{
 use explorer_dom::{Dom, DomError, NodeId};
 use explorer_html::encoding::decode_sniffed;
 use explorer_html::TreeBuilder;
-use explorer_js::{JsEngine, JsFactory, NavRequest};
+use explorer_js::{JsEngine, JsFactory, NavRequest, UrlResolver};
 use explorer_layout::font::FontSource;
 use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, LayoutBox};
-use explorer_net::http::{HttpTransport, Method, Request};
+use explorer_net::error::NetResult;
+use explorer_net::http::{HttpTransport, Method, Request, Response};
+use explorer_net::policy::{initiator_headers, is_mixed_content};
 use explorer_net::url::Url;
 use explorer_render::{
-    build_display_list_imaged, decode_font, decode_image, rasterize, DisplayList, Frame,
-    ImageTable, WebFontSource,
+    build_display_list_imaged, decode_font, decode_image, rasterize, DecodedImage, DisplayList,
+    Frame, ImageTable, WebFontSource,
 };
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::broadcast;
 
 /// Identifiant d'onglet (monotone, jamais réutilisé).
@@ -493,6 +496,17 @@ pub struct SessionConfig {
     /// (règle budgets — les faces sont par document, le
     /// registre est purgé à chaque navigation).
     pub max_fonts: usize,
+    /// Nombre max de `<script src>` fetchés par document
+    /// (étape 50 — une page peut en déclarer des centaines).
+    pub max_scripts: usize,
+    /// Nombre max de modules dans le graphe préfetché d'un
+    /// `<script type="module">` (entrée + dépendances
+    /// transitives — borne les chaînes d'import hostiles).
+    pub max_modules: usize,
+    /// Fetches de sous-ressources simultanés par onglet
+    /// (`FuturesUnordered` borné — scheduler étape 50 ; les
+    /// navigateurs plafonnent classiquement à ~6 par hôte).
+    pub max_inflight: usize,
 }
 
 impl Default for SessionConfig {
@@ -506,6 +520,9 @@ impl Default for SessionConfig {
             image_max_px: 16_000_000,
             max_sheets: 8,
             max_fonts: 16,
+            max_scripts: 32,
+            max_modules: 64,
+            max_inflight: 6,
         }
     }
 }
@@ -543,6 +560,12 @@ pub struct Session {
     image_max_px: u32,
     /// Bornes sous-ressources (`max_sheets` feuilles liées).
     max_sheets: usize,
+    /// Bornes scheduler (étape 50) : `<script src>` par
+    /// document, modules transitifs par graphe, fetches
+    /// simultanés par onglet.
+    max_scripts: usize,
+    max_modules: usize,
+    max_inflight: usize,
 }
 
 impl Session {
@@ -581,6 +604,9 @@ impl Session {
             max_images: cfg.max_images,
             image_max_px: cfg.image_max_px,
             max_sheets: cfg.max_sheets,
+            max_scripts: cfg.max_scripts,
+            max_modules: cfg.max_modules,
+            max_inflight: cfg.max_inflight,
         }
     }
 
@@ -928,9 +954,7 @@ impl Session {
             entry.dom = Some(dom);
         }
         self.webfonts.clear();
-        self.run_scripts(tab, &html);
-        self.fetch_stylesheets(tab).await;
-        self.fetch_images(tab).await;
+        self.load_subresources(tab, &html).await;
         self.fetch_webfonts(tab).await;
         self.relayout(tab)?;
         // La page chargée prend sa place dans l'historique
@@ -1030,39 +1054,392 @@ impl Session {
         applied
     }
 
-    /// Fetch des feuilles `<link rel=stylesheet>` — premières
-    /// sous-ressources CSS (étape 46), séquentiel borné par
-    /// `max_sheets`. Le CSS rejoint `linked_css` de l'onglet
-    /// et est ajouté à la cascade en origine auteur par
-    /// `relayout`. Un échec individuel (réseau, résolution,
-    /// statut) laisse la feuille absente — la page dégrade.
-    async fn fetch_stylesheets(&mut self, tab: TabId) {
+    /// Fetch des sous-ressources + exécution des `<script>`
+    /// (étape 50, ADR-0012 côté session). **Une seule vague
+    /// parallèle bornée** — `max_inflight` requêtes en vol via
+    /// `FuturesUnordered`, émises par priorité
+    /// `CSS > script > img` (le document est déjà servi) ;
+    /// `Referer`/`Origin` sont calculés à l'émission
+    /// (`initiator_headers`), le mixed-content filtré à la
+    /// collecte.
+    ///
+    /// `<script>` — collecte en ordre document, trois files :
+    /// - classiques (inline ou `src` sans `async`/`defer`) :
+    ///   file « parse », évalués en ordre document — le parse
+    ///   one-shot ne bloque pas, chaque externe attend sa
+    ///   source fetchée (approximation « parser-blocking »
+    ///   documentée : un classique voit le document complet) ;
+    /// - `defer` et modules non-`async` : file post-parse,
+    ///   ordre document ;
+    /// - `async` : classiques évalués **en ligne** à réception
+    ///   dans la vague, modules bufferisés puis évalués avant
+    ///   la file post-parse.
+    /// - `type="module"` : graphe statique **préfetché** borné
+    ///   (`max_modules`) via `module_specifiers` puis
+    ///   `eval_module` — le `ModuleLoader` reçoit une map
+    ///   `url → source` (jamais de fetch ré-entrant depuis le
+    ///   thread moteur : deadlock). Modules CORS : le fetch
+    ///   cross-origin n'est pas vérifié au MVP (réévaluation
+    ///   ADR-0019, étape 51).
+    ///
+    /// Tout échec individuel (réseau, statut, borne) saute la
+    /// ressource — la page dégrade, jamais de panic.
+    async fn load_subresources(&mut self, tab: TabId, html: &str) {
         let (Some(base), Some(dom)) = (
             self.tabs.get(&tab).and_then(|t| t.url.clone()),
             self.tabs.get(&tab).and_then(|t| t.dom.as_ref()),
         ) else {
             return;
         };
-        let mut css = String::new();
-        for href in collect_stylesheet_links(dom)
-            .into_iter()
-            .take(self.max_sheets)
-        {
-            let Ok(url) = Url::resolve(&base, &href) else {
-                continue;
-            };
-            let Ok(resp) = self.transport.fetch(&Request::get(url)).await else {
-                continue;
-            };
-            if !(200..300).contains(&resp.status) {
-                continue;
+        let scripting = self.js_factory.is_some();
+        let (sheet_urls, scripts, img_urls) = self.plan_subresources(dom, &base, scripting);
+
+        // Slots de réception indexés par ordre document ;
+        // `slot_items[slot]` = index de l'item script.
+        let mut css_slots: Vec<Option<String>> = vec![None; sheet_urls.len()];
+        let slot_items: Vec<usize> = scripts
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.slot.map(|_| i))
+            .collect();
+        let mut script_srcs: Vec<Option<String>> = vec![None; slot_items.len()];
+        let mut img_bodies: HashMap<String, Vec<u8>> = HashMap::new();
+        // Modules `async` arrivés pendant la vague : `(url de
+        // l'entrée, corps)` en ordre d'arrivée.
+        let mut async_mods: Vec<(Url, String)> = Vec::new();
+
+        // Contexte JS avant la vague : un `async` classique est
+        // évalué dès sa complétion — le miroir doit être posé.
+        let mut eng = self.spawn_engine(tab, html, !scripts.is_empty());
+
+        let transport = self.transport.clone();
+        let events = self.events.clone();
+        let eval_arrival = |eng: &mut Option<Box<dyn JsEngine>>, src: &str| {
+            if let Some(e) = eng.as_mut() {
+                if let Err(err) = e.eval(src) {
+                    tracing::debug!(tab, error = %err, "script async en échec");
+                    let _ = events.send(CoreEvent::PipelineError {
+                        tab: Some(tab),
+                        message: err.to_string(),
+                    });
+                }
             }
-            let (text, _enc) = decode_sniffed(&resp.body);
-            css.push_str(&text);
+        };
+        // Émission par priorité : CSS → scripts → images.
+        let jobs = sub_jobs(&base, &sheet_urls, &scripts, &img_urls);
+        fetch_wave(&transport, self.max_inflight, jobs, |tag, res| {
+            let Ok(resp) = res else { return };
+            if !(200..300).contains(&resp.status) {
+                return;
+            }
+            match tag {
+                SubTag::Css(i) => css_slots[i] = Some(decode_sniffed(&resp.body).0),
+                SubTag::Script(slot) => {
+                    let (text, _) = decode_sniffed(&resp.body);
+                    let item = &scripts[slot_items[slot]];
+                    if item.exec == ScriptExec::Arrival {
+                        if item.module {
+                            if let Some(u) = &item.src {
+                                async_mods.push((u.clone(), text));
+                            }
+                        } else {
+                            eval_arrival(&mut eng, &text);
+                        }
+                    } else {
+                        script_srcs[slot] = Some(text);
+                    }
+                }
+                SubTag::Img(u) => {
+                    img_bodies.insert(u.as_str(), resp.body);
+                }
+            }
+        })
+        .await;
+
+        // Feuilles liées dans l'ordre document (slot vide =
+        // feuille en échec → absente de la cascade).
+        let mut css = String::new();
+        for t in css_slots.iter().flatten() {
+            css.push_str(t);
             css.push('\n');
         }
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.linked_css = css;
+        }
+
+        let Some(mut eng) = eng else {
+            self.insert_images(tab, &base, &img_bodies);
+            return;
+        };
+        self.run_script_queues(tab, eng.as_mut(), &scripts, &script_srcs, async_mods, &base)
+            .await;
+        let n = eng.run_pending();
+        tracing::trace!(tab, jobs = n, "jobs js exécutés");
+        // Miroir muté ? → re-parse : le relayout qui suit rend
+        // les modifications (dirty bit consommé côté moteur).
+        if let Some(mutated) = eng.sync_dom() {
+            self.apply_dom_sync(tab, &mutated, false);
+        }
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.js = Some(eng);
+        }
+        self.insert_images(tab, &base, &img_bodies);
+    }
+
+    /// Collecte des sous-ressources du document (étape 50) :
+    /// URLs résolues ici (émission propre), mixed-content
+    /// filtré, images dédupliquées — `(feuilles, scripts,
+    /// images)` bornés par la config.
+    fn plan_subresources(
+        &self,
+        dom: &Dom,
+        base: &Url,
+        scripting: bool,
+    ) -> (Vec<Url>, Vec<ScriptItem>, Vec<Url>) {
+        let sheets: Vec<Url> = collect_stylesheet_links(dom)
+            .into_iter()
+            .take(self.max_sheets)
+            .filter_map(|h| Url::resolve(base, &h).ok())
+            .filter(|u| !is_mixed_content(base, u))
+            .collect();
+        let scripts = collect_scripts(dom, base, scripting, self.max_scripts);
+        let mut seen_img = std::collections::HashSet::new();
+        let imgs: Vec<Url> = collect_images(dom)
+            .into_iter()
+            .filter_map(|(_, src)| Url::resolve(base, &src).ok())
+            .filter(|u| !is_mixed_content(base, u) && seen_img.insert(u.as_str()))
+            .take(self.max_images)
+            .collect();
+        (sheets, scripts, imgs)
+    }
+
+    /// Contexte JS de chargement : moteur neuf + miroir posé —
+    /// `want = false` (aucun script collecté) → `None`, pas de
+    /// moteur créé (règle budgets).
+    fn spawn_engine(&self, tab: TabId, html: &str, want: bool) -> Option<Box<dyn JsEngine>> {
+        if !want {
+            return None;
+        }
+        self.js_factory.clone().map(|f| {
+            let (page_url, hist_len) = self.tabs.get(&tab).map_or_else(
+                || (String::new(), 1),
+                |t| {
+                    (
+                        t.url.as_ref().map_or_else(String::new, Url::to_string),
+                        u32::try_from(t.hist.len()).unwrap_or(u32::MAX),
+                    )
+                },
+            );
+            let mut e = f();
+            e.set_budget(self.js_ops);
+            e.install_dom(html, &page_url, hist_len);
+            e
+        })
+    }
+
+    /// Exécute les trois files de scripts dans l'ordre spec :
+    /// classiques « parse » (ordre document) → modules `async`
+    /// arrivés pendant la vague (ordre d'arrivée — le graphe
+    /// est préfetché à la suite, approximation « à
+    /// réception ») → file post-parse (`defer` et modules,
+    /// ordre document).
+    async fn run_script_queues(
+        &mut self,
+        tab: TabId,
+        eng: &mut dyn JsEngine,
+        scripts: &[ScriptItem],
+        script_srcs: &[Option<String>],
+        async_mods: Vec<(Url, String)>,
+        base: &Url,
+    ) {
+        for item in scripts.iter().filter(|i| i.exec == ScriptExec::Parse) {
+            let Some(src) = item_source(item, script_srcs) else {
+                continue;
+            };
+            self.eval_or_report(tab, eng, src);
+        }
+        for (u, src) in async_mods {
+            let name = u.as_str();
+            self.eval_module_src(tab, eng, name, &u, src).await;
+        }
+        for (i, item) in scripts.iter().enumerate() {
+            if item.exec != ScriptExec::Post {
+                continue;
+            }
+            let Some(src) = item_source(item, script_srcs) else {
+                continue;
+            };
+            if item.module {
+                // Entrée inline : nom synthétique unique, aliasé
+                // vers la page pour la résolution des deps.
+                let (name, base_u) = item.src.clone().map_or_else(
+                    || (format!("inline:{i}"), base.clone()),
+                    |u| (u.as_str(), u),
+                );
+                self.eval_module_src(tab, eng, name, &base_u, src.to_string())
+                    .await;
+            } else {
+                self.eval_or_report(tab, eng, src);
+            }
+        }
+    }
+
+    /// `eval` avec rapport : un échec émet `PipelineError`
+    /// sans faire échouer la page (dégradation, règle 3).
+    fn eval_or_report(&mut self, tab: TabId, eng: &mut dyn JsEngine, src: &str) {
+        if let Err(e) = eng.eval(src) {
+            tracing::debug!(tab, error = %e, "script en échec");
+            let _ = self.events.send(CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: e.to_string(),
+            });
+        }
+    }
+
+    /// Évalue un `<script type="module">` : prefetch BFS borné
+    /// du graphe statique puis `eval_module`. `name` = clé de
+    /// registre du moteur (URL de l'entrée ou nom synthétique
+    /// inline), `base` = URL de résolution des spécificateurs.
+    async fn eval_module_src(
+        &mut self,
+        tab: TabId,
+        eng: &mut dyn JsEngine,
+        name: String,
+        base: &Url,
+        src: String,
+    ) {
+        let mut graph = ModuleGraph {
+            sources: HashMap::from([(name.clone(), src.clone())]),
+            alias: HashMap::from([(name.clone(), base.as_str())]),
+        };
+        let page = self
+            .tabs
+            .get(&tab)
+            .and_then(|t| t.url.clone())
+            .unwrap_or_else(|| base.clone());
+        // `Arc` cloné : la future de fetch n'a pas besoin de
+        // `&Session` (`dyn JsEngine` n'est pas `Sync`).
+        let transport = Arc::clone(&self.transport);
+        Self::fetch_module_sources(
+            &transport,
+            self.max_inflight,
+            self.max_modules,
+            &page,
+            base,
+            &src,
+            &mut graph,
+        )
+        .await;
+        let ModuleGraph { sources, alias } = graph;
+        let resolve: UrlResolver = Arc::new(move |spec, referrer| {
+            let b = alias.get(referrer).map_or(referrer, String::as_str);
+            Url::parse(b)
+                .ok()
+                .and_then(|u| Url::resolve(&u, spec).ok())
+                .map(|u| u.as_str())
+        });
+        if let Err(e) = eng.eval_module(&name, sources, resolve) {
+            tracing::debug!(tab, error = %e, "module en échec");
+            let _ = self.events.send(CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: e.to_string(),
+            });
+        }
+    }
+
+    /// Remplit `graph` en BFS du graphe statique
+    /// d'`entry_src` — vagues parallèles `max_inflight`,
+    /// `sources` plafonné à `max_modules` (l'entrée incluse).
+    /// `page` porte la politique (`Referer`, mixed-content) ;
+    /// `entry_base` sert à résoudre les spécificateurs.
+    /// Associée sans `&self` : `dyn JsEngine` n'est pas
+    /// `Sync`, `&Session` ne peut donc pas traverser un
+    /// `.await` dans une future `Send`.
+    async fn fetch_module_sources(
+        transport: &Arc<dyn HttpTransport>,
+        max_inflight: usize,
+        max_modules: usize,
+        page: &Url,
+        entry_base: &Url,
+        entry_src: &str,
+        graph: &mut ModuleGraph,
+    ) {
+        let mut queued: std::collections::HashSet<String> =
+            std::iter::once(entry_base.as_str()).collect();
+        let mut frontier: Vec<(String, Url)> = Vec::new();
+        for (spec, u) in module_deps(entry_src, entry_base) {
+            graph
+                .alias
+                .entry(spec.clone())
+                .or_insert_with(|| u.as_str());
+            if !is_mixed_content(page, &u) && queued.insert(u.as_str()) {
+                frontier.push((spec, u));
+            }
+        }
+        while !frontier.is_empty() && graph.sources.len() < max_modules {
+            let room = (max_modules - graph.sources.len()).min(frontier.len());
+            let mut jobs = VecDeque::new();
+            for (_, u) in frontier.drain(..room) {
+                jobs.push_back(((u.as_str(), u.clone()), sub_request(page, &u)));
+            }
+            let mut fetched = Vec::new();
+            fetch_wave(transport, max_inflight, jobs, |tag, res| {
+                fetched.push((tag, res));
+            })
+            .await;
+            let mut next = Vec::new();
+            for ((key, u), res) in fetched {
+                let Ok(resp) = res else { continue };
+                if !(200..300).contains(&resp.status) {
+                    continue;
+                }
+                let (text, _) = decode_sniffed(&resp.body);
+                graph.sources.insert(key, text.clone());
+                for (spec2, u2) in module_deps(&text, &u) {
+                    graph
+                        .alias
+                        .entry(spec2.clone())
+                        .or_insert_with(|| u2.as_str());
+                    if !is_mixed_content(page, &u2) && queued.insert(u2.as_str()) {
+                        next.push((spec2, u2));
+                    }
+                }
+            }
+            frontier = next;
+        }
+    }
+
+    /// Décode + insère les corps `<img>` dans la table de
+    /// l'onglet — **après** la resynchro DOM : les `NodeId`
+    /// changent au re-parse, les corps sont re-matchés par
+    /// `src` résolue en ordre document (un fetch = tous les
+    /// `<img>` homonymes, décodage dédupliqué).
+    fn insert_images(&mut self, tab: TabId, base: &Url, bodies: &HashMap<String, Vec<u8>>) {
+        if bodies.is_empty() {
+            return;
+        }
+        let max_px = self.image_max_px;
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        let Some(dom) = entry.dom.as_ref() else {
+            return;
+        };
+        let items = collect_images(dom);
+        let mut decoded: HashMap<String, Option<Arc<DecodedImage>>> = HashMap::new();
+        for (node, src) in items {
+            let Ok(u) = Url::resolve(base, &src) else {
+                continue;
+            };
+            let Some(body) = bodies.get(&u.as_str()) else {
+                continue;
+            };
+            let img = decoded
+                .entry(u.as_str())
+                .or_insert_with(|| decode_image(body, max_px).map(Arc::new));
+            if let Some(img) = img {
+                entry.images.insert(node, img.clone());
+            }
         }
     }
 
@@ -1113,88 +1490,6 @@ impl Session {
                     break;
                 }
             }
-        }
-    }
-
-    /// Fetch + décode des `<img src>` du document — séquentiel
-    /// borné (`max_images` entrées, `image_max_px` par image) ;
-    /// un échec individuel (réseau, format, borne) laisse le
-    /// nœud hors de la table → le boxtree peint son `alt`.
-    async fn fetch_images(&mut self, tab: TabId) {
-        let (Some(base), Some(dom)) = (
-            self.tabs.get(&tab).and_then(|t| t.url.clone()),
-            self.tabs.get(&tab).and_then(|t| t.dom.as_ref()),
-        ) else {
-            return;
-        };
-        let wanted = collect_images(dom);
-        for (node, src) in wanted.into_iter().take(self.max_images) {
-            let Ok(url) = Url::resolve(&base, &src) else {
-                continue;
-            };
-            let Ok(resp) = self.transport.fetch(&Request::get(url)).await else {
-                continue;
-            };
-            if !(200..300).contains(&resp.status) {
-                continue;
-            }
-            let Some(img) = decode_image(&resp.body, self.image_max_px) else {
-                continue;
-            };
-            if let Some(entry) = self.tabs.get_mut(&tab) {
-                entry.images.insert(node, std::sync::Arc::new(img));
-            }
-        }
-    }
-
-    /// Évalue les `<script>` inline du document — contexte neuf
-    /// par document (créé ici, détruit à la prochaine
-    /// navigation) avec le DOM miroir installé (`document`…).
-    /// Un script en échec émet `PipelineError` mais ne fait pas
-    /// échouer la page (dégradation, règle 3). Les mutations
-    /// du miroir sont resynchronisées : re-parse du document
-    /// sérialisé → le `relayout` suivant les rend à l'écran.
-    fn run_scripts(&mut self, tab: TabId, html: &str) {
-        let (Some(f), Some(dom)) = (
-            self.js_factory.clone(),
-            self.tabs.get(&tab).and_then(|t| t.dom.as_ref()),
-        ) else {
-            return;
-        };
-        let scripts = collect_script_texts(dom);
-        if scripts.is_empty() {
-            return;
-        }
-        let (page_url, hist_len) = self.tabs.get(&tab).map_or_else(
-            || (String::new(), 1),
-            |t| {
-                (
-                    t.url.as_ref().map_or_else(String::new, Url::to_string),
-                    u32::try_from(t.hist.len()).unwrap_or(u32::MAX),
-                )
-            },
-        );
-        let mut eng = (f)();
-        eng.set_budget(self.js_ops);
-        eng.install_dom(html, &page_url, hist_len);
-        for src in &scripts {
-            if let Err(e) = eng.eval(src) {
-                tracing::debug!(tab, error = %e, "script en échec");
-                let _ = self.events.send(CoreEvent::PipelineError {
-                    tab: Some(tab),
-                    message: e.to_string(),
-                });
-            }
-        }
-        let n = eng.run_pending();
-        tracing::trace!(tab, jobs = n, "jobs js exécutés");
-        // Miroir muté ? → re-parse : le relayout qui suit rend
-        // les modifications (dirty bit consommé côté moteur).
-        if let Some(mutated) = eng.sync_dom() {
-            self.apply_dom_sync(tab, &mutated, false);
-        }
-        if let Some(entry) = self.tabs.get_mut(&tab) {
-            entry.js = Some(eng);
         }
     }
 
@@ -1938,28 +2233,126 @@ fn image_sizes(dom: &Dom, images: &ImageTable) -> HashMap<NodeId, (f32, f32)> {
         .collect()
 }
 
-/// Textes des `<script>` inline du document, dans l'ordre —
-/// `src=` et `type` non-classique (module, json…) sautés tant
-/// que les sous-ressources/modules n'existent pas.
-fn collect_script_texts(dom: &Dom) -> Vec<String> {
+/// Types `type=` exécutés comme script **classique** (HTML —
+/// sous-ensemble des « JavaScript MIME types » usuels ; le
+/// type absent/vaut `""` par défaut).
+const CLASSIC_SCRIPT_TYPES: &[&str] = &[
+    "",
+    "text/javascript",
+    "application/javascript",
+    "text/ecmascript",
+    "application/ecmascript",
+    "text/jscript",
+];
+
+/// Phase d'exécution d'un `<script>` (étape 50) — l'ordre
+/// document est conservé à l'intérieur de chaque file.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScriptExec {
+    /// Classique (inline ou `src`) : file « parse » — ordre
+    /// document, évalué sitôt sa source disponible (le parse
+    /// one-shot a déjà fini : approximation « parser-blocking »
+    /// documentée — le script voit le document complet).
+    Parse,
+    /// `defer` ou module non-`async` : file post-parse, ordre
+    /// document.
+    Post,
+    /// `async` (classique ou module) : à réception — le
+    /// classique est évalué en ligne dans la vague, le module
+    /// est bufferisé et évalué avant la file post-parse.
+    Arrival,
+}
+
+/// Balise `<script>` exécutable, collectée en ordre document
+/// (étape 50).
+struct ScriptItem {
+    /// `src` résolue — `Some` = script externe.
+    src: Option<Url>,
+    /// Corps inline (classique ou module).
+    inline: Option<String>,
+    /// `type="module"`.
+    module: bool,
+    /// File d'exécution.
+    exec: ScriptExec,
+    /// Slot de réception du corps fetché (index dans
+    /// `script_srcs`) — `None` pour les inline.
+    slot: Option<usize>,
+}
+
+/// `<script>` exécutables du document, ordre document —
+/// `src` résolues, bornés `max_src`, mixed-content filtré.
+/// `scripting = false` (pas de fabrique JS) → vide : scripting
+/// désactivé = aucun fetch de script (spec HTML).
+fn collect_scripts(dom: &Dom, base: &Url, scripting: bool, max_src: usize) -> Vec<ScriptItem> {
     let mut out = Vec::new();
+    if !scripting {
+        return out;
+    }
+    let mut slots = 0usize;
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "script") {
-            let classic = dom.attribute(n, "type").ok().flatten().is_none_or(|t| {
-                t.is_empty()
-                    || t.eq_ignore_ascii_case("text/javascript")
-                    || t.eq_ignore_ascii_case("application/javascript")
-            });
-            let has_src = dom
-                .attribute(n, "src")
+            let ty = dom
+                .attribute(n, "type")
                 .ok()
                 .flatten()
-                .is_some_and(|s| !s.is_empty());
-            if classic && !has_src {
-                if let Ok(t) = dom.text_content(n) {
-                    if !t.trim().is_empty() {
-                        out.push(t);
+                .map_or_else(String::new, |t| t.trim().to_ascii_lowercase());
+            let module = ty == "module";
+            if module || CLASSIC_SCRIPT_TYPES.contains(&ty.as_str()) {
+                // `nomodule` n'a d'effet que sur les classiques.
+                let nomodule = dom.attribute(n, "nomodule").ok().flatten().is_some();
+                if module || !nomodule {
+                    let src_attr = dom
+                        .attribute(n, "src")
+                        .ok()
+                        .flatten()
+                        .filter(|s| !s.trim().is_empty());
+                    if let Some(raw) = src_attr {
+                        // Externe : `async` l'emporte sur `defer`
+                        // (spec — les deux présents = async).
+                        let async_ = dom.attribute(n, "async").ok().flatten().is_some();
+                        let defer = !async_ && dom.attribute(n, "defer").ok().flatten().is_some();
+                        let resolved = Url::resolve(base, raw.trim())
+                            .ok()
+                            .filter(|u| !is_mixed_content(base, u));
+                        if let (Some(u), true) = (resolved, slots < max_src) {
+                            out.push(ScriptItem {
+                                src: Some(u),
+                                inline: None,
+                                module,
+                                exec: if async_ {
+                                    ScriptExec::Arrival
+                                } else if module || defer {
+                                    ScriptExec::Post
+                                } else {
+                                    ScriptExec::Parse
+                                },
+                                slot: {
+                                    let s = slots;
+                                    slots += 1;
+                                    Some(s)
+                                },
+                            });
+                        }
+                        // Hors borne / irrésoluble / bloqué :
+                        // balise inerte, non collectée.
+                    } else {
+                        let text = dom.text_content(n).unwrap_or_default();
+                        if !text.trim().is_empty() {
+                            // Inline : `async`/`defer` sans effet —
+                            // classique = file parse, module = post.
+                            out.push(ScriptItem {
+                                src: None,
+                                inline: Some(text),
+                                module,
+                                exec: if module {
+                                    ScriptExec::Post
+                                } else {
+                                    ScriptExec::Parse
+                                },
+                                slot: None,
+                            });
+                        }
                     }
                 }
             }
@@ -1969,6 +2362,115 @@ fn collect_script_texts(dom: &Dom) -> Vec<String> {
         }
     }
     out
+}
+
+/// Corps d'un `ScriptItem` : inline direct, externe depuis son
+/// slot (`None` = fetch en échec → le script est sauté).
+fn item_source<'a>(item: &'a ScriptItem, srcs: &'a [Option<String>]) -> Option<&'a str> {
+    if let Some(t) = &item.inline {
+        return Some(t);
+    }
+    item.slot
+        .and_then(|s| srcs.get(s).and_then(|o| o.as_deref()))
+}
+
+/// Routage d'une complétion de sous-ressource (étape 50).
+enum SubTag {
+    /// Slot feuille liée (ordre document).
+    Css(usize),
+    /// Slot script externe (ordre document).
+    Script(usize),
+    /// `<img>` — clé `Url::as_str()` : la table images ne
+    /// prend des `NodeId` qu'après la resynchro DOM.
+    Img(Url),
+}
+
+/// Graphe de modules préfetché (étape 50) — `sources` :
+/// `url → corps` ; `alias` : spécificateur brut ou nom
+/// d'entrée (`inline:N`) → URL de résolution des
+/// dépendances (la page pour les entrées inline).
+struct ModuleGraph {
+    sources: HashMap<String, String>,
+    alias: HashMap<String, String>,
+}
+
+/// File de jobs de sous-ressources, émise par priorité
+/// `CSS > script > img` — le scheduler `fetch_wave` les tire
+/// dans cet ordre (étape 50 ; le document est déjà servi).
+fn sub_jobs(
+    base: &Url,
+    sheet_urls: &[Url],
+    scripts: &[ScriptItem],
+    img_urls: &[Url],
+) -> VecDeque<(SubTag, Request)> {
+    let mut jobs = VecDeque::new();
+    for (i, u) in sheet_urls.iter().enumerate() {
+        jobs.push_back((SubTag::Css(i), sub_request(base, u)));
+    }
+    for item in scripts {
+        if let (Some(u), Some(slot)) = (&item.src, item.slot) {
+            jobs.push_back((SubTag::Script(slot), sub_request(base, u)));
+        }
+    }
+    for u in img_urls {
+        jobs.push_back((SubTag::Img(u.clone()), sub_request(base, u)));
+    }
+    jobs
+}
+
+/// Requête GET de sous-ressource : `Referer`/`Origin` calculés
+/// à l'émission (`initiator_headers`, strict-origin-when-
+/// cross-origin) — le mixed-content est filtré en amont.
+fn sub_request(base: &Url, url: &Url) -> Request {
+    let mut req = Request::get(url.clone());
+    for (n, v) in initiator_headers(base, url, Method::Get) {
+        req.headers.push((n, v));
+    }
+    req
+}
+
+/// Vague de fetches parallèle bornée (étape 50, scheduler
+/// ADR-0012) : `jobs` émis dans l'ordre fourni (priorité =
+/// position), `max_inflight` requêtes en vol via
+/// `FuturesUnordered` ; `on_done(tag, résultat)` est appelé
+/// dans l'ordre d'arrivée, en ligne, entre deux émissions.
+async fn fetch_wave<T>(
+    transport: &Arc<dyn HttpTransport>,
+    max_inflight: usize,
+    mut jobs: VecDeque<(T, Request)>,
+    mut on_done: impl FnMut(T, NetResult<Response>),
+) {
+    let cap = max_inflight.max(1);
+    let mut inflight = FuturesUnordered::new();
+    loop {
+        while inflight.len() < cap {
+            let Some((tag, req)) = jobs.pop_front() else {
+                break;
+            };
+            let tr = Arc::clone(transport);
+            inflight.push(async move {
+                let res = tr.fetch(&req).await;
+                (tag, res)
+            });
+        }
+        if inflight.is_empty() {
+            return;
+        }
+        let Some((tag, res)) = inflight.next().await else {
+            return;
+        };
+        on_done(tag, res);
+    }
+}
+
+/// Spécificateurs statiques `(spec brut, url résolue)` d'un
+/// corps de module — `module_specifiers` (dillo-js, JS-C5)
+/// + résolution contre l'URL du module parent.
+fn module_deps(src: &str, referrer: &Url) -> Vec<(String, Url)> {
+    explorer_js::module_specifiers(src)
+        .into_iter()
+        .filter_map(|spec| Url::resolve(referrer, &spec).ok().map(|u| (spec, u)))
+        .collect()
 }
 
 /// `<form>` ancêtre (le nœud lui-même compris) — `None` hors

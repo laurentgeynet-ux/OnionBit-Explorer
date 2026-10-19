@@ -511,6 +511,7 @@ dependencies = [
  "explorer-net",
  "explorer-render",
  "explorer-test-support",
+ "futures-util",
  "image",
  "thiserror",
  "tokio",

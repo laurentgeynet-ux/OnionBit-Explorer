@@ -68,7 +68,7 @@ pub use dom_host::{CookieJar, DomRef};
 pub use error::{Error, Result};
 pub use heap::Host;
 pub use interp::Engine;
-pub use module::ModuleLoader;
+pub use module::{module_specifiers, ModuleLoader};
 pub use storage::Storage;
 pub use value::{ObjId, Value};
 pub use xhr::{XhrRequest, XhrResponse, XhrTransport};

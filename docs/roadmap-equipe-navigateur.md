@@ -39,7 +39,7 @@ Objectif : les blocages du web réel sautent. Sortie de palier :
 `site_smoke.ps1` étendu à 10 sites, **8/10 fonctionnels**
 (navigation + liens + formulaires + scripts de base actifs).
 
-- [ ] **Étape 50. Scripts externes + scheduler de
+- [x] **Étape 50. Scripts externes + scheduler de
   sous-ressources** (ADR-0012 complété côté session).
   `<script src>` fetché via `HttpTransport` : ordre document,
   `defer` (post-parse, ordre garanti), `async` (à réception),

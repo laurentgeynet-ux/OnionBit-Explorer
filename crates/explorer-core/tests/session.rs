@@ -121,6 +121,9 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
             image_max_px: 16_000_000,
             max_sheets: 8,
             max_fonts: 16,
+            max_scripts: 32,
+            max_modules: 64,
+            max_inflight: 6,
         },
     );
     (s, t)
@@ -1368,4 +1371,326 @@ async fn tick_animations_sans_transition_inerte() {
     let id = s.open_tab();
     s.navigate(id, "http://h.test/n").await.unwrap();
     assert!(!s.tick_animations(id).unwrap());
+}
+
+// ---- Étape 50 : `<script src>` + scheduler de sous-ressources ----
+
+/// `<script src>` fetché via `HttpTransport` puis évalué :
+/// la mutation du miroir doit être rendue (étape 50).
+#[tokio::test]
+async fn external_script_fetched_and_executed() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script src=\"/a.js\"></script></body></html>",
+    );
+    t.route(
+        "/a.js",
+        200,
+        "document.getElementById('x').textContent='EXT'",
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">EXT</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // Page + script externe + page statique = 3 fetches.
+    assert_eq!(t.calls(), 3);
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// Deux `<script src>` classiques : ordre document strict —
+/// le second voit l'état laissé par le premier.
+#[tokio::test]
+async fn external_scripts_run_in_document_order() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script src=\"/a.js\"></script><script src=\"/b.js\"></script>\
+         <script>document.getElementById('x').textContent=o</script>\
+         </body></html>",
+    );
+    t.route("/a.js", 200, "var o='A'");
+    t.route("/b.js", 200, "o=o+'B'");
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">AB</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // Ordre inversé (b avant a) : `o` indéfini → erreur →
+    // le texte resterait « avant ».
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// `defer` : exécuté après les scripts synchrones (post-parse)
+/// même déclaré avant, et dans l'ordre document entre eux.
+#[tokio::test]
+async fn defer_scripts_run_after_parse_in_order() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script defer src=\"/d1.js\"></script>\
+         <script src=\"/p.js\"></script>\
+         <script defer src=\"/d2.js\"></script>\
+         </body></html>",
+    );
+    t.route("/p.js", 200, "var o='P'");
+    t.route("/d1.js", 200, "o=o+'-D1'");
+    t.route(
+        "/d2.js",
+        200,
+        "o=o+'-D2';document.getElementById('x').textContent=o",
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">P-D1-D2</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// `async` : évalué à réception, donc avant la file
+/// post-parse (`defer`) même déclaré après dans le document.
+#[tokio::test]
+async fn async_script_runs_before_defer() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script defer src=\"/d.js\"></script>\
+         <script async src=\"/x.js\"></script>\
+         </body></html>",
+    );
+    t.route("/x.js", 200, "var o='X'");
+    t.route(
+        "/d.js",
+        200,
+        "o=o+'D';document.getElementById('x').textContent=o",
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">XD</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // `d` avant `x` : `o` indéfini → erreur → « avant ».
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// `<script type="module">` externe avec import statique :
+/// le graphe est prefetché via le transport puis instancié
+/// par le `ModuleLoader` (JS-C5) — la dépendance s'exécute.
+#[tokio::test]
+async fn module_script_fetches_graph_and_evaluates() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script type=\"module\" src=\"/m.js\"></script></body></html>",
+    );
+    t.route("/m.js", 200, "import './dep.js'");
+    t.route(
+        "/dep.js",
+        200,
+        "document.getElementById('x').textContent='DEP'",
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">DEP</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // Page + module + dépendance + page statique = 4 fetches.
+    assert_eq!(t.calls(), 4);
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// Module inline : nom synthétique, dépendances résolues
+/// contre l'URL de la page.
+#[tokio::test]
+async fn inline_module_resolves_against_page() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script type=\"module\">import './d.js'</script></body></html>",
+    );
+    t.route(
+        "/d.js",
+        200,
+        "document.getElementById('x').textContent='IM'",
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">IM</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    assert_eq!(t.calls(), 3);
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// Un `<script src>` en 404 est sauté : les scripts suivants
+/// s'exécutent, la page charge (dégradation, règle 3).
+#[tokio::test]
+async fn external_script_404_is_skipped() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script src=\"/missing.js\"></script>\
+         <script>document.getElementById('x').textContent='OK'</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    // La page charge et le script inline s'est exécuté.
+    assert_eq!(s.tab_url(a).as_deref(), Some("http://h.test/p"));
+    assert!(s.frame_png(a).is_some());
+}
+
+/// Sans fabrique JS, aucun `<script src>` n'est fetché
+/// (scripting désactivé — spec HTML).
+#[tokio::test]
+async fn no_factory_means_script_src_not_fetched() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div>x</div>\
+         <script src=\"/a.js\"></script></body></html>",
+    );
+    t.route("/a.js", 200, "var o=1");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/p").await.unwrap();
+    assert_eq!(t.calls(), 1);
+}
+
+/// Transport qui mesure le pic de requêtes simultanées —
+/// prouve le parallélisme ET sa borne (`max_inflight`).
+struct ConcurrencyTransport {
+    routes: Mutex<HashMap<String, (u16, Vec<u8>)>>,
+    current: std::sync::atomic::AtomicUsize,
+    peak: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait]
+impl HttpTransport for ConcurrencyTransport {
+    async fn fetch(&self, req: &Request) -> NetResult<Response> {
+        use std::sync::atomic::Ordering;
+        let n = self.current.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(n, Ordering::SeqCst);
+        // Cède le tour : une 2e requête en vol s'observe.
+        tokio::task::yield_now().await;
+        let found = self
+            .routes
+            .lock()
+            .ok()
+            .and_then(|r| r.get(req.url.path()).cloned());
+        self.current.fetch_sub(1, Ordering::SeqCst);
+        match found {
+            Some((status, body)) => Ok(Response {
+                status,
+                reason: "fake".to_string(),
+                headers: vec![],
+                body,
+                reused_connection: false,
+            }),
+            None => Ok(Response {
+                status: 404,
+                reason: "fake".to_string(),
+                headers: vec![],
+                body: b"missing".to_vec(),
+                reused_connection: false,
+            }),
+        }
+    }
+}
+
+/// Scheduler borné : 4 `<img>` sous `max_inflight = 2` →
+/// pic exactement 2 (jamais 1 = séquentiel, jamais 4 = libre).
+#[tokio::test]
+async fn subresource_fetches_bounded_parallel() {
+    let t = Arc::new(ConcurrencyTransport {
+        routes: Mutex::new(HashMap::new()),
+        current: std::sync::atomic::AtomicUsize::new(0),
+        peak: std::sync::atomic::AtomicUsize::new(0),
+    });
+    if let Ok(mut r) = t.routes.lock() {
+        r.insert(
+            "/p".to_string(),
+            (
+                200,
+                b"<!doctype html><html><body>\
+                  <img src=\"/i1\"><img src=\"/i2\">\
+                  <img src=\"/i3\"><img src=\"/i4\">\
+                  </body></html>"
+                    .to_vec(),
+            ),
+        );
+        for p in ["/i1", "/i2", "/i3", "/i4"] {
+            r.insert(p.to_string(), (200, b"img".to_vec()));
+        }
+    }
+    let mut s = Session::with_config(
+        t.clone(),
+        Arc::new(FixtureFont),
+        SessionConfig {
+            max_inflight: 2,
+            ..SessionConfig::default()
+        },
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/p").await.unwrap();
+    assert_eq!(t.peak.load(std::sync::atomic::Ordering::SeqCst), 2);
 }

@@ -90,6 +90,29 @@ pub(crate) enum PendingExport {
 /// Recursion bound on the instantiation graph (deep import chains).
 const MAX_MODULE_DEPTH: u32 = 200;
 
+/// Static `import`/`export … from` specifiers of module `src`, in
+/// source order — lets the host prefetch the dependency graph
+/// (browser step "fetch the descendants") *before* `eval_module`,
+/// which keeps the loader synchronous and deadlock-free.
+/// Parse failure yields an empty list: the real parse error is
+/// then reported by `eval_module` itself.
+#[must_use]
+pub fn module_specifiers(src: &str) -> Vec<String> {
+    let Ok(prog) = parser::parse_module(src) else {
+        return Vec::new();
+    };
+    prog.body
+        .iter()
+        .filter_map(|s| match s {
+            Stmt::Import { source, .. } => Some(source.clone()),
+            Stmt::Export(
+                ExportDecl::Named { from: Some(f), .. } | ExportDecl::Star { from: f, .. },
+            ) => Some(f.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 impl Engine {
     /// Inject the host module loader used by `import`/`export …from`
     /// and dynamic `import()`.

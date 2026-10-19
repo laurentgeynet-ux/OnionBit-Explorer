@@ -18,7 +18,9 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 /// Erreur JavaScript côté hôte — sérialisable, sans handle de tas.
@@ -65,6 +67,12 @@ pub enum NavRequest {
     HistoryGo(i32),
 }
 
+/// Résolveur de spécificateurs de module fourni par l'hôte :
+/// `(specifier, referrer) → url absolue`. La session y injecte
+/// sa politique `Url::resolve` — le moteur ne connaît pas les
+/// URLs (étape 50).
+pub type UrlResolver = Arc<dyn Fn(&str, &str) -> Option<String> + Send + Sync>;
+
 /// Moteur JavaScript vu du navigateur — un contexte par document.
 /// `Send` exigé : la session est partagée derrière l'API.
 pub trait JsEngine: Send {
@@ -103,6 +111,30 @@ pub trait JsEngine: Send {
     /// re-parse alors le document), `None` sinon.
     fn sync_dom(&mut self) -> Option<String> {
         None
+    }
+
+    /// Évalue un module ES (étape 50) : `entry` est le nom
+    /// canonique du module d'entrée (URL résolue — ou nom
+    /// synthétique aliasé pour un module inline), `sources` la
+    /// map `url → source` **préfetchée** par la session (graphe
+    /// statique via `dillo_js::module_specifiers`), `resolve` la
+    /// résolution `(specifier, referrer) → url`. Le chargeur ne
+    /// fait jamais de fetch : un `import` hors map est une erreur
+    /// JS propre — le canal reste à sens unique, jamais de
+    /// ré-entrance réseau depuis le thread moteur.
+    /// Défaut : `Ok("undefined")` (moteur sans modules).
+    ///
+    /// # Errors
+    /// Mêmes variantes que [`Self::eval`] — `Syntax` à l'analyse
+    /// (y compris erreur de liaison), `Uncaught` si un corps de
+    /// module jette, `Dead` si le moteur est inerte.
+    fn eval_module(
+        &mut self,
+        _entry: &str,
+        _sources: HashMap<String, String>,
+        _resolve: UrlResolver,
+    ) -> Result<String, JsError> {
+        Ok("undefined".to_string())
     }
 
     /// Dispatche l'événement `ty` au nœud miroir désigné par
@@ -149,6 +181,8 @@ pub fn null_factory() -> JsFactory {
     std::sync::Arc::new(|| Box::new(NullEngine))
 }
 
+pub use dillo_js::module_specifiers;
+
 /// Commandes vers le thread moteur — valeurs sérialisables, aucun
 /// handle `Rc` ne traverse.
 enum Cmd {
@@ -169,6 +203,12 @@ enum Cmd {
     },
     DomSync {
         tx: Sender<Option<String>>,
+    },
+    EvalModule {
+        entry: String,
+        sources: HashMap<String, String>,
+        resolve: UrlResolver,
+        tx: Sender<Result<String, JsError>>,
     },
     Dispatch {
         ty: String,
@@ -277,6 +317,26 @@ impl DilloEngine {
                         return;
                     }
                 }
+                Cmd::EvalModule {
+                    entry,
+                    sources,
+                    resolve,
+                    tx,
+                } => {
+                    let src = sources.get(&entry).cloned().unwrap_or_default();
+                    let loader = MapLoader {
+                        map: sources,
+                        resolve,
+                    };
+                    eng.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
+                    let out = match eng.eval_module(&src, &entry) {
+                        Ok(v) => Ok(eng.describe(v)),
+                        Err(e) => Err(JsError::from(e)),
+                    };
+                    if tx.send(out).is_err() {
+                        return;
+                    }
+                }
                 Cmd::Dispatch { ty, path, tx } => {
                     let node = jsd.as_ref().and_then(|d| mirror_node(&d.borrow(), &path));
                     let out = match node {
@@ -357,6 +417,28 @@ impl JsEngine for DilloEngine {
         rx.recv().ok().flatten()
     }
 
+    fn eval_module(
+        &mut self,
+        entry: &str,
+        sources: HashMap<String, String>,
+        resolve: UrlResolver,
+    ) -> Result<String, JsError> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::EvalModule {
+                entry: entry.to_string(),
+                sources,
+                resolve,
+                tx,
+            })
+            .is_err()
+        {
+            return Err(JsError::Dead);
+        }
+        rx.recv().map_err(|_| JsError::Dead)?
+    }
+
     fn dispatch_event(&mut self, ty: &str, path: &[(String, u32)]) -> Result<bool, JsError> {
         let (tx, rx) = channel();
         if self
@@ -417,4 +499,29 @@ fn mirror_node(d: &dillo_js::Dom, path: &[(String, u32)]) -> Option<dillo_js::No
         }
     }
     Some(cur)
+}
+
+/// Chargeur de modules préfetchés (étape 50) : le graphe statique
+/// est collecté par la session via `HttpTransport` **avant**
+/// l'évaluation — le `load` reste synchrone et le canal
+/// `DilloEngine` à sens unique (un fetch depuis le thread moteur
+/// bloquerait le hôte qui attend la fin de l'eval : deadlock).
+/// Un spécificateur hors map — `import()` dynamique non préfetché,
+/// borne `max_modules` atteinte — est une erreur JS propre.
+struct MapLoader {
+    /// `url absolue → source` — graphe collecté par la session.
+    map: HashMap<String, String>,
+    /// `(specifier, referrer) → url absolue` (politique hôte).
+    resolve: UrlResolver,
+}
+
+impl dillo_js::ModuleLoader for MapLoader {
+    fn load(&mut self, specifier: &str, referrer: &str) -> Result<String, String> {
+        let key = (self.resolve)(specifier, referrer)
+            .ok_or_else(|| format!("spécificateur irrésolvable : {specifier}"))?;
+        self.map
+            .get(&key)
+            .cloned()
+            .ok_or_else(|| format!("module non chargé : {key}"))
+    }
 }
