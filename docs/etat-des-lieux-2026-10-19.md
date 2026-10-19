@@ -52,7 +52,7 @@ arbre de travail non commité, en attente de validation finale.
 | Tests `cargo test --workspace` | **748 verts, 0 échec** |
 | App Flutter | 12 fichiers Dart, 1 feature (`browser`), 3 tests |
 | Historique git | 80 commits, 1 auteur, 1 branche (`main`) |
-| html5lib tree-construction | baseline ≥ 953 cas (cliquet) |
+| html5lib tree-construction (corpus **complet**) | **953/1592 exécutés (59 %)**, 200 ignorés (fragment/script-on), 639 échecs |
 | test262 (sous-ensemble extrait, 1077 fichiers) | **859/859 testés (100 %)**, 218 skips whitelistés |
 | WPT reftests (`css/CSS2/floats`+`normal-flow`) | **27/40 (67 %)**, cliquet 27 |
 | Acid2 | 29,8 % (informatif, robustesse garantie) |
@@ -61,7 +61,8 @@ arbre de travail non commité, en attente de validation finale.
 
 **Limites des mesures** (à lire avec le tableau) : les scores de
 corpus portent sur des **sous-ensembles extraits**, pas sur les
-suites complètes — test262 : 1 077 fichiers lexicaux sur ~50 000
+suites complètes — html5lib seul est complet (953/1592 = 59 %,
+639 échecs réels) ; test262 : 1 077 fichiers lexicaux sur ~50 000
 (littéraux, commentaires, identifiants, whitespace ; aucun
 `builtins/` ni `statements/` — l'extension est JS-C30) ; WPT :
 40 reftests de deux dossiers (`floats`, `normal-flow`). Le
@@ -76,7 +77,7 @@ moins gonflable est le smoke sites réels.
 |---|---|---|---|
 | `explorer-net` | ✅ mature | URL WHATWG+IDNA, h1, h2 (ALPN), TLS, décodage, cookies PSL, HSTS, proxy env | pas de h3/QUIC (différé assumé), cache mémoire seul (pas de disque) |
 | `explorer-dom` | ✅ mature | arène slotmap, rooting ADR-0008, budgets | stable |
-| `explorer-html` | ✅ mature | tokenizer incrémental `push()`, tree-builder modes complets, html5lib ≥953 | pas de foreign-content (SVG/MathML inline) |
+| `explorer-html` | ✅ bon, avec dette de conformité | tokenizer incrémental `push()`, tree-builder modes complets, html5lib 953/1592 | pas de foreign-content (SVG/MathML inline) ; 639 cas tree-construction en échec (détail : `cargo test -p explorer-html -- --nocapture`) |
 | `explorer-css` | ✅ avancé | cascade complète, `var()`, `calc()`, `@font-face`, transitions | sous-ensemble de propriétés ; `@keyframes` absent |
 | `explorer-layout` | ✅ bon, en progression | block/inline/tables/floats/BFC, flex 1 ligne, grid MVP, sticky top, transforms | `flex-wrap`, `margin:auto`, areas, min/max-content, sticky autres côtés |
 | `explorer-render` | ✅ bon | display list, tiny-skia, PNG, SVG statique, transforms, frontière défensive | pas de canvas, pas de dirty-rects |

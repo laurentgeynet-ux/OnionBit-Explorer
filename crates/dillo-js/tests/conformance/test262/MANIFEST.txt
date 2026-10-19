@@ -9,7 +9,10 @@ Subsets     : test/language/{types,literals,comments,white-space,
               line-terminators,identifiers,hashbang}
 Harness     : harness/*.js copied to _harness/ (same license,
               same commit)
-Case count  : 1077 .js files
+Case count  : 1077 .js files — suite complète test262 ≈ 50 000
+              fichiers : cet extrait ≈ 2 %, catégories
+              LEXICALES uniquement (aucun builtins/, statements/
+              ou expressions/ — extension planifiée JS-C30).
 
 NEVER edit files by hand — re-extract with the same
 sparse-checkout command and bump the commit hash above.

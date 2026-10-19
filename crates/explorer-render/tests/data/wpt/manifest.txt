@@ -3,6 +3,10 @@
 # Une ligne = un test ; les références `rel=match/mismatch`
 # sont résolues et téléchargées par le script.
 # Révision : web-platform-tests/wpt @ master 2026-02.
+# Couverture : 40 reftests extraits de DEUX dossiers
+# (css/CSS2/floats, css/CSS2/normal-flow) — la suite WPT en
+# compte des dizaines de milliers ; tout score rapporté ici
+# s'entend « sur cet extrait », jamais « % du WPT ».
 css/CSS2/floats/floats-placement-001.html
 css/CSS2/floats/floats-placement-002.html
 css/CSS2/floats/floats-placement-003.html
