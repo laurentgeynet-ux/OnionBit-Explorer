@@ -318,6 +318,15 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `sync_dom_path` (`DomSyncPayload`), remap pré-relayout des
   boîtes conservées (ids non stables au re-parse), repli
   sûr sur `NeedsFullLayout`/id irrésolvable.
+- [ ] **Étape 55g. La resynchro reste globale — l'incrémental
+  ne vise que le relayout** (terrain mission 12) : `sync_dom`
+  re-parse + re-cascade + re-boxtree le document **entier**
+  avant que `relayout_subtree` ne vise le sous-arbre — le
+  gain 55f n'atteint pas le goulot réel. Mesuré : mutation
+  par clic sur doc de 3 000 nœuds → **gel > 5 min** puis
+  `/frame` 204 (récidive 56b) ; petit doc = 468 ms + rects
+  localisés corrects. Pistes : synchro partielle du sous-
+  arbre seul, ou diff miroir→DOM sans re-parse global.
 - [x] **Étape 56. Profil persisté complet** (ex-64) : cookies
   (`cookies.json` via `ProfileStore`, session exclus),
   localStorage (cf. 51), **cache disque borné**
@@ -367,13 +376,28 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   reste 0 : jamais de déplacement vers la cible. Fix :
   post-commit, résoudre le fragment (id puis `name`) et
   scroller à sa position — sans re-fetch si même document.
-- [ ] **Étape 56e. `<img src>` jamais fetchée en session**
+- [x] **Étape 56e. `<img src>` jamais fetchée en session**
   (terrain mission 11 — `cache_server` `/page` avec
   `<img src=img.png>` : nav complète, zéro requête serveur
-  pour l'image). Le scheduler de sous-ressources ne
-  déclenche pas le fetch `<img>` — SVG passe (DOM-sérialisé)
-  mais une image bitmap référencée reste jamais réclamée.
-  À câbler comme les autres sous-ressources de 53/53b.
+  pour l'image). **Vérifié — non-défaut moteur** : le
+  scheduler émet `SubTag::Img` et fetch bien (régression
+  `img_src_triggers_subresource_fetch` : document + image =
+  2 hits transport). La panne venait du harness
+  `cache_server.py` : variable `PAGE` morte — `do_GET` ne la
+  servait jamais, la page réelle ne contenait pas d'`<img>`.
+  Harness corrigé (`/page` sert `PAGE`).
+- [ ] **Étape 56f. Images `data:` invisibles en session**
+  (terrain mission 12 — fixtures `img.html`, `b1`-`b4`) :
+  `<img src=data:>`, `<object data=data:>` et
+  `background-image: data:` peignent **0 pixel** — le fetch
+  http `<img>` fonctionne (HIT + pixels mesurés), mais
+  `collect_data_images`/`collect_images` n'est appelé que
+  par les harnais de test, jamais en session
+  (`insert_images` ne traite que les corps fetchés réseau).
+  Câblage à faire : décoder les `data:` inline à
+  `insert_images` (même entrée que les corps fetchés) —
+  débloque d'un coup img `data:`, les yeux Acid2 (avec
+  R-25 côté PIPE) et les backgrounds `data:`.
 - [ ] **Étape 57. UI Flutter v2** (ex-65) : thème clair
   (`tokens.json` variante), settings (moteur REST/FFI, thème,
   profil), UI historique + bookmarks (store core existant),

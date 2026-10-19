@@ -256,6 +256,22 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   déborderait à lui seul). Régression : `tests/deep.rs`
   (pipeline complet sous pile 512 Kio, 4000 niveaux
   demandés).
+- [ ] **R-25. `<object>` résolu inline ne peint pas sa
+  ressource** (terrain mission 12 — fixtures `b2`/`b4`) :
+  la cascade `<object>` descend correctement (repli
+  fonctionnel — texte `ERROR` au bout), mais même dans le
+  harnais acid2 qui appelle `collect_data_images`, les yeux
+  restent absents — suspect : la feuille remplacée sous
+  `display:inline` (`#eyes-a object`) reçoit une taille
+  nulle ou n'est pas atomisée → 0 px vert mesuré malgré
+  l'image décodée. Second maillon après 56e (câblage
+  session) — les deux sont nécessaires pour les yeux.
+- [ ] **R-26. Compteur de diff WPT : underflow `usize`**
+  (terrain mission 12 — triage du corpus) : un échec
+  `justify-content` rapporte `18446744073709551615 px durs`
+  — `b - a` wrappe quand le produit dépasse la référence.
+  Borner/saturer le comptage dans `wpt_reftests.rs` (le
+  chiffre nuit au triage des vrais échecs).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
@@ -416,7 +432,12 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   Reste : `column wrap` multi-colonnes, `margin:auto` vertical
   en column, écarts fins `justify-content`/`align-items`,
   `fr`/`grid` margins — chacun devient une étape si le triage
-  le justifie.
+  le justifie. **Triage mission 12** (18 échecs, tous dans le
+  nouveau corpus — le socle floats tient) : direction d'axe
+  flex (row-reverse/column), wrap horizontal, `column/row-gap`,
+  justify ×4, align-items ×3, grid `fr`/display/marges ×3 —
+  familles candidates : *direction axe flex*, *justify/align
+  fins*, *unité fr grid*, *marges grid*.
 
 ## Tâches continues
 
