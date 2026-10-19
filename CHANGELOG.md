@@ -9,6 +9,56 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-17 — `font-size` : valeur calculée absolue**
+  (`explorer-css`, repro terrain info.cern.ch/wikipedia).
+  La cascade stockait la déclaration brute (« 2em ») et
+  l'héritage la propageait — les styles clonés des boîtes
+  anonymes/texte re-multipliaient le ratio contre le
+  font-size parent déjà résolu (`2em` → 128px au lieu de
+  32, facteur em³). `font-size` est désormais normalisé en
+  px absolus à la compute (spec : héritage de la valeur
+  calculée) : `em`/`ex`/`ch`/`%`/`larger`/`smaller` contre
+  le parent, `rem` et mots-clés absolus contre le nouveau
+  `StyleEnv::font_size_base` (défaut 16). `calc()` reste
+  brut (dégradation documentée). `2em` ≡ `32px` vérifié.
+
+- **Étape 54 — Formulaires v2 côté produit** (`explorer-core`,
+  `explorer-js`, `dillo-js`, ADR-0014 révisée) : le cycle
+  `<select>` MVP devient un **popup natif peint moteur** —
+  overlay chrome en fin de display list (`FillRect`/`Border`/
+  lignes `Placeholder`), options figées à l'ouverture,
+  `<select>` retenu par chemin `(tag,index)` (survit aux
+  re-parses de synchro), `Arrow↑/↓` surlignent, `Enter`
+  choisit, `Escape` referme, clic hors popup = fermeture
+  consommée, `input`+`change` dispatchés au choix et miroir
+  `selected` synchronisé. **Validation de contraintes HTML**
+  avant tout submit (`required`, `minlength`, `maxlength`,
+  `pattern` en correspondance entière, `min`/`max`/`step`
+  numériques, contrôles « barred » exclus) : `invalid`
+  dispatché sur chaque fautif, soumission bloquée,
+  `novalidate`/`formnovalidate` honorés, le bouton par défaut
+  devient `submitter` de la soumission implicite `Enter`.
+  API JS complète côté miroir (`validity`,
+  `validationMessage`, `willValidate`, `checkValidity`,
+  `reportValidity`, `setCustomValidity` — canal miroir→DOM
+  par attribut `data-explorer-cv`) et **`form.submit()` /
+  `requestSubmit()`** qui émettent `NavRequest::FormSubmit`
+  (champs collectés miroir) drainé vers `navigate_request` —
+  `submit()` saute l'événement comme l'exige la spec,
+  `requestSubmit()` valide puis tire `submit`.
+  **`enctype=multipart/form-data`** en `POST` (RFC 7578,
+  frontière pseudo-unique horodatée) et `input[type=file]`
+  successful (fichier vide `filename=` — pas de picker).
+  Déviations documentées : `:valid`/`:invalid` CSS consigné
+  en `interface-equipes.md` (PIPE), `invalid` propage
+  (spec : non-bullant), `reportValidity` = `checkValidity`
+  (pas de bulle UI), types `date`/`email`/`url` sans
+  sémantique dédiée. Tests : 16 session (popup ×4,
+  blocages ×6, Enter, novalidate, customValidity,
+  multipart, submits JS ×2, helper) + 8 `dillo-js`
+  (drapeaux, check/report, custom, `invalid`, radios,
+  hooks submit/requestSubmit).
+
 - **R-16 — Tables réelles et HTML legacy** (`explorer-css`/
   `explorer-layout`, repro terrain news.ycombinator.com) :
   `<center>` et les balises bloc historiques (`dir`, `menu`,

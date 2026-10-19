@@ -240,3 +240,16 @@ fn table_width_pourcent_du_conteneur() {
     let t = find(&bx, by_tag(&dom, "table"));
     assert!(approx(t.rect.width, VIEW * 0.85), "{}", t.rect.width);
 }
+
+#[test]
+fn font_size_em_ne_se_remultiplie_pas() {
+    // R-17 : `font-size` hérite la valeur calculée absolue —
+    // avant, le « 2em » brut du style cloné (anon/texte) se
+    // re-résolvait contre le fs parent déjà résolu (×4/×8
+    // mesurés sur le terrain). `2em` doit égaler `32px`.
+    let (d1, bx1) = laid("<!doctype html><div style=\"font-size:2em\">x</div>", "");
+    let (d2, bx2) = laid("<!doctype html><div style=\"font-size:32px\">x</div>", "");
+    let h1 = find(&bx1, by_tag(&d1, "div")).rect.height;
+    let h2 = find(&bx2, by_tag(&d2, "div")).rect.height;
+    assert!(approx(h1, h2), "2em={h1} vs 32px={h2}");
+}

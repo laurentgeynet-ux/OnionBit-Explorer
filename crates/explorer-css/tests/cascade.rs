@@ -372,7 +372,10 @@ fn ua_hidden_et_dialog_ferme_masques() {
     let closed = el(&mut dom, f.body, "dialog", &[]);
     assert_eq!(e.compute(&dom, closed, &env()).get("display"), Some("none"));
     let opened = el(&mut dom, f.body, "dialog", &[("open", "")]);
-    assert_eq!(e.compute(&dom, opened, &env()).get("display"), Some("block"));
+    assert_eq!(
+        e.compute(&dom, opened, &env()).get("display"),
+        Some("block")
+    );
 }
 
 #[test]
@@ -469,5 +472,75 @@ fn hint_body_text_et_valign() {
     assert_eq!(
         e.compute(&dom, td, &env()).get("vertical-align"),
         Some("middle")
+    );
+}
+
+// ── font-size : valeur calculée absolue (R-17) ────────────
+
+#[test]
+fn font_size_em_resolu_en_px() {
+    // Spec : la valeur calculée de font-size est absolue —
+    // « 2em » sous parent 16px → « 32px » stocké, pas le brut.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("div { font-size: 2em }", Origin::Author);
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("font-size"),
+        Some("32px")
+    );
+}
+
+#[test]
+fn font_size_heritage_valeur_absolue() {
+    // Le fils sans déclaration hérite la valeur CALCULÉE —
+    // sinon le « 2em » hérité se re-multipliait à chaque
+    // niveau de boîte (le bug terrain : texte ×4/×8).
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("div { font-size: 2em }", Origin::Author);
+    assert_eq!(
+        e.compute(&f.dom, f.p, &env()).get("font-size"),
+        Some("32px")
+    );
+}
+
+#[test]
+fn font_size_mots_cles_et_pourcents() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("div { font-size: medium }", Origin::Author);
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("font-size"),
+        Some("16px")
+    );
+
+    let mut dom2 = f.dom;
+    let big = el(&mut dom2, f.body, "p", &[("style", "font-size:200%")]);
+    assert_eq!(e.compute(&dom2, big, &env()).get("font-size"), Some("32px"));
+    let larger = el(&mut dom2, big, "span", &[("style", "font-size:larger")]);
+    // `larger` ≈ parent × 1.2 (convention navigateur).
+    assert_eq!(
+        e.compute(&dom2, larger, &env()).get("font-size"),
+        Some("38.4px")
+    );
+}
+
+#[test]
+fn font_size_rem_et_absolus_inchanges() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { font-size: 2rem } p { font-size: 12pt }",
+        Origin::Author,
+    );
+    // rem → base (16), indépendant du parent.
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("font-size"),
+        Some("32px")
+    );
+    // absolu direct (pt → px).
+    assert_eq!(
+        e.compute(&f.dom, f.p, &env()).get("font-size"),
+        Some("16px")
     );
 }

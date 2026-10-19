@@ -32,6 +32,10 @@ pub struct StyleEnv {
     pub width_px: u32,
     /// Hauteur du viewport en px.
     pub height_px: u32,
+    /// Taille de fonte de base (px) — base des `rem`, de
+    /// `medium` et de la valeur initiale de `font-size` à
+    /// la racine. Convention navigateur : 16.
+    pub font_size_base: f32,
 }
 
 impl Default for StyleEnv {
@@ -40,6 +44,7 @@ impl Default for StyleEnv {
             media_type: "screen".into(),
             width_px: 1024,
             height_px: 768,
+            font_size_base: 16.0,
         }
     }
 }
@@ -495,8 +500,78 @@ impl StyleEngine {
             }
         }
         props.retain(|_, v| v != "\u{0}");
+        // 6. `font-size` → valeur calculée absolue (R-17 —
+        //    détail dans `normalize_font_size`).
+        normalize_font_size(&mut props, parent, env.font_size_base);
         ComputedStyle { props }
     }
+}
+
+/// `font-size` : la valeur calculée est une longueur
+/// ABSOLUE (spec CSS — l'héritage transporte la valeur
+/// calculée). Sans cette normalisation, un `em`/`%` déclaré
+/// serait re-multiplié à chaque niveau de boîte en aval —
+/// le style cloné des blocs anonymes et des boîtes texte
+/// re-résolvait le ratio contre le font-size parent déjà
+/// résolu (« texte em²/em³ », R-17). Les valeurs non
+/// résolubles ici (`calc()`…) restent brutes : le layout
+/// dégrade proprement.
+fn normalize_font_size(
+    props: &mut HashMap<String, String>,
+    parent: Option<&ComputedStyle>,
+    base: f32,
+) {
+    let Some(raw) = props.get("font-size").cloned() else {
+        return;
+    };
+    let parent_fs = parent
+        .and_then(|p| p.get("font-size"))
+        .and_then(|v| v.trim().trim_end_matches("px").trim().parse::<f32>().ok())
+        .unwrap_or(base);
+    if let Some(px) = resolve_font_size(&raw, parent_fs, base) {
+        props.insert("font-size".to_string(), format!("{px}px"));
+    }
+}
+
+/// Résout `font-size` en px absolus : `em`/`ex`/`ch`/`%` et
+/// `larger`/`smaller` contre la taille **calculée** du parent
+/// (`parent_fs`), `rem` et mots-clés absolus contre la base
+/// (`base`). `calc()` et syntaxes inconnues → `None` (la
+/// valeur brute survit pour le layout — dégradation
+/// documentée, jamais de panique).
+fn resolve_font_size(raw: &str, parent_fs: f32, base: f32) -> Option<f32> {
+    let v = raw.trim();
+    // Mots-clés de la spec : échelle absolue ×1.2 autour de
+    // `medium` (CSS Fonts §5.2) ; `smaller`/`larger` sont
+    // relatifs au parent par convention navigateur (≈ ÷/× 1.2).
+    match v {
+        "xx-small" => return Some(base / 1.728),
+        "x-small" => return Some(base / 1.44),
+        "small" => return Some(base / 1.2),
+        "medium" => return Some(base),
+        "large" => return Some(base * 1.2),
+        "x-large" => return Some(base * 1.44),
+        "xx-large" => return Some(base * 1.728),
+        "xxx-large" => return Some(base * 2.0736),
+        "smaller" => return Some(parent_fs / 1.2),
+        "larger" => return Some(parent_fs * 1.2),
+        _ => {}
+    }
+    if let Some(pct) = v.strip_suffix('%') {
+        return pct
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .map(|f| f * parent_fs / 100.0);
+    }
+    let len = parse_length(v)?;
+    #[allow(clippy::cast_possible_truncation)]
+    Some(match len.unit {
+        crate::value::Unit::Em => len.value as f32 * parent_fs,
+        crate::value::Unit::Rem => len.value as f32 * base,
+        crate::value::Unit::Ex | crate::value::Unit::Ch => len.value as f32 * parent_fs * 0.5,
+        u => (len.value * u.px_factor()?) as f32,
+    })
 }
 
 /// Attributs de présentation HTML → propriétés CSS

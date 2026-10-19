@@ -138,14 +138,26 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
     largeur ; `r16-nocenter` à x=0. Tests :
     `cascade.rs` (UA legacy + hints), `block.rs`
     (center/table%).
-- [ ] **R-17. Texte : `em` résolu deux fois** (bug terrain
-  @ `2693959`, repro : info.cern.ch, wikipedia). **Diagnostic
-  fait** (repro `r17b.html`, 1 ligne) : `font-size:2em` →
-  run de 492×153 (×4,0 mesuré), `1.5em` → ×2,25 — facteur =
-  `em`² exactement ; `32px` correct. La taille computed est
-  juste mais les métriques ligne/avance ré-appliquent le
-  facteur. Chercher où `em` est résolu une seconde fois
-  (métrique de ligne ou avance de run).
+- [x] **R-17. Texte : `em` résolu deux fois** (bug terrain
+  @ `2693959`, repro : info.cern.ch, wikipedia). **Diagnostic**
+  (repro `r17b.html`) : `font-size:2em` → run 448px au lieu
+  de 112 (×4 mesuré — em³ en fait : div→32, anon→64, item→128),
+  `1.5em` → ×2,25 ; `32px` correct. **Racine** : le style
+  gardait `font-size` brut (« 2em ») et l'héritage propageait
+  la déclaration relative — le style cloné des boîtes
+  anonymes/texte re-résolvait le ratio contre le font-size
+  parent **déjà résolu**. **Fix** (spec : font-size hérite
+  la valeur calculée) : la cascade normalise `font-size` en
+  px absolus en fin de calcul — `em`/`ex`/`ch`/`%`,
+  `larger`/`smaller` contre la taille calculée du parent,
+  `rem`/mots-clés absolus contre `StyleEnv::font_size_base`
+  (nouveau champ, défaut 16). `calc()` et syntaxes
+  exotiques restent bruts (dégradation documentée). Les
+  `em` des autres propriétés (marges, letter-spacing…)
+  sont inchangés : leur base = le font-size propre, déjà
+  absolu. Mesuré : `2em` ≡ `32px` au fragment près ;
+  `h1`/`h2` UA corrects ; 36/36 suites PIPELINE vertes
+  (WPT reftests inclus).
 - [ ] **R-18. `color` n'atteint pas les runs de texte inline**
   (bug terrain, repro `color.html` — `D:\explorer-fieldwork\
   repros\`) : `div{color:red}` peint ✓, `span`/`a{color}`
