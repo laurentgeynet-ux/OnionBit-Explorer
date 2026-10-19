@@ -182,6 +182,17 @@ couverture).
   coût `serialize_document` instrumenté.
 - [ ] **JS-C38. Fuzz lexer/parser `dillo-js`** : cible
   cargo-fuzz (extension de `fuzz/` — périmètre équipe).
+- [ ] **JS-C39. Sync DOM incrémentale — instrumenter puis
+  drainer les records** (dette ADR-0013 budgétisée tôt) :
+  d'abord **mesurer** le coût réel de la resérialisation
+  `sync_dom` — compteurs ms/octets par synchro dans la
+  session, visibles au profilage (étape 57) ; si le coût le
+  justifie, `JsEngine` gagne un `drain_dom_mutations()`
+  **additif** qui réutilise les `MutationRecord` du miroir
+  (mécanique JS-C26) comme diff d'arbre au lieu du HTML
+  complet. Nouveau point de cohérence → tests croisés
+  miroir ↔ `explorer-dom` exigés (règle de tri « corrige
+  le côté fautif »).
 
 ## Tâches continues
 
