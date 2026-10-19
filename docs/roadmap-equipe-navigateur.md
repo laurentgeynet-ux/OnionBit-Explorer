@@ -500,6 +500,14 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   prod). Les `ReferenceError` `hljs`/`$`/`Event`/`SP`
   observés sont des **conséquences** (scripts amont morts),
   pas des tickets.
+- [ ] **JS-C45. Attributs `on*` jamais compilés**
+  (déclencheur terrain mission 10 — fixture `jsmut.html` :
+  `onclick="…"` mort, seul `addEventListener` tire ;
+  `fire_listeners` ne lit que `listeners` + prop
+  `el.onclick`). Le web réel est couvert de handlers inline
+  (`onclick`, `onload`, `onsubmit`…) — HTML spec : à la
+  construction du miroir, chaque attribut `on*` est compilé
+  en event handler (avec le bon `this`/scope).
 
 ## Tâches continues
 

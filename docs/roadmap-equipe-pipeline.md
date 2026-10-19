@@ -226,6 +226,19 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   n'est jamais reportée dans l'enveloppe à la pose. Fix :
   poser l'enfant anonyme dans le rect du contrôle (padding/
   border UA compris).
+- [ ] **R-24. Profondeur d'arbre bornée — stack overflow**
+  (**préempte** — 2ᵉ violation « jamais crash » après
+  JS-C41 ; terrain mission 10, repro `repros/host-nest.html`
+  : **~300 `<div>` imbriqués tuent le process**,
+  `stack overflow` worker tokio. `dump` DOM seul survit →
+  récursion en aval : `build_box_tree`/`layout_block`/
+  `build_display_list`/`hit_test` sont tous récursifs sur la
+  profondeur DOM). Arbitrer : borne de profondeur avec
+  dégradation documentée (sous-arbre aplati/tronqué à N),
+  ou traversées itératives — le patron `stacker::maybe_grow`
+  de JS-C41 existe déjà comme précédent. Vérifier le seuil
+  réel : 250 passe, ~300 meurt — le réglage dépend de la
+  pile worker tokio, pas d'une limite naturelle du web.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
