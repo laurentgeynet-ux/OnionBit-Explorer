@@ -122,7 +122,10 @@ Objectif : les blocages du web réel sautent. Sortie de palier :
 - [ ] **Étape 58. `<video>`/`<audio>`** (ex-66) : arbitrage
   décodage pur Rust requis (ADR) — sinon stubs propres + affiche.
 - [ ] **Étape 59. Release 0.2** (ex-67) : packaging, smoke E2E
-  étendu, doc.
+  étendu, doc. **Prérequis d'ouverture** : renommage
+  `crates/dillo-js` → `explorer-jscore` (ADR-0020) — commit
+  `chore:` dédié, à un moment où aucune piste ne touche le crate
+  ; le nom de crate est surface publique de release.
 
 ## Piste JS (JS-C26+) — spécialiste `dillo-js`
 
@@ -133,7 +136,7 @@ couverture).
 
 ### J-A — APIs navigateur attendues par la session
 
-- [ ] **JS-C26. `MutationObserver`** : queue de mutations sur le
+- [x] **JS-C26. `MutationObserver`** : queue de mutations sur le
   `Dom` miroir (`childList`/`attributes`/`characterData`,
   `subtree`, `attributeFilter`, `oldValue`), delivery en
   microtask checkpoint, `disconnect`/`takeRecords`. Débloque

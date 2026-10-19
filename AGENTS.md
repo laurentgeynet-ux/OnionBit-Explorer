@@ -209,7 +209,9 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
 
 - Pas un port de Dillo — `dillo-js` a une histoire dans un chantier
   de port voisin mais aucune architecture n'en est importée :
-  l'adaptation passe par le trait `JsEngine` (ADR-0007).
+  l'adaptation passe par le trait `JsEngine` (ADR-0007). Provenance
+  figée dans ADR-0020 ; renommage en `explorer-jscore` décidé,
+  séquencé avant release 0.2.
 - Pas un navigateur Tor ni proxy : la politique réseau (mandataire,
   filtrage, `.onion`) est déléguée à l'application qui embarque le
   moteur — garder les coutures ouvertes (`HttpTransport` injectable,
