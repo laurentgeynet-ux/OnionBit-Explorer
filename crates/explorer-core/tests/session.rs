@@ -33,6 +33,9 @@ impl FontSource for FixtureFont {
 struct FakeTransport {
     routes: Mutex<HashMap<String, (u16, Vec<u8>)>>,
     calls: Mutex<u32>,
+    /// Dernière requête : `(méthode, path?query, corps)` —
+    /// pour vérifier les soumissions de formulaire.
+    last: Mutex<Option<(String, String, Vec<u8>)>>,
 }
 
 impl FakeTransport {
@@ -40,6 +43,7 @@ impl FakeTransport {
         Self {
             routes: Mutex::new(HashMap::new()),
             calls: Mutex::new(0),
+            last: Mutex::new(None),
         }
     }
 
@@ -58,6 +62,11 @@ impl FakeTransport {
     fn calls(&self) -> u32 {
         self.calls.lock().map_or(0, |c| *c)
     }
+
+    /// Dernière requête enregistrée.
+    fn last(&self) -> Option<(String, String, Vec<u8>)> {
+        self.last.lock().ok().and_then(|l| l.clone())
+    }
 }
 
 #[async_trait]
@@ -65,6 +74,13 @@ impl HttpTransport for FakeTransport {
     async fn fetch(&self, req: &Request) -> NetResult<Response> {
         if let Ok(mut c) = self.calls.lock() {
             *c += 1;
+        }
+        if let Ok(mut l) = self.last.lock() {
+            *l = Some((
+                format!("{:?}", req.method),
+                req.url.path_query(),
+                req.body.clone().unwrap_or_default(),
+            ));
         }
         let found = self
             .routes
@@ -557,7 +573,9 @@ async fn click_input_focuses_then_keys_edit() {
         .unwrap();
     assert_eq!(out, InputOutcome::Edited);
 
-    // Enter → blur ; les touches suivantes sont ignorées.
+    // Enter dans un `<form>` = soumission implicite (étape
+    // 38) : GET sans action → re-fetch de la page avec la
+    // query des champs (`q=a` après le Backspace).
     let out = s
         .handle_input(
             id,
@@ -567,7 +585,9 @@ async fn click_input_focuses_then_keys_edit() {
         )
         .await
         .unwrap();
-    assert_eq!(out, InputOutcome::Ignored);
+    assert_eq!(out, InputOutcome::Navigated);
+    let (_, pq, _) = t.last().unwrap();
+    assert_eq!(pq, "/?q=a");
     let out = s
         .handle_input(id, InputEvent::Key { key: "z".into() })
         .await
@@ -905,4 +925,180 @@ async fn img_count_is_bounded() {
     // 1 document + ≤ 32 images (`max_images`) — jamais 41.
     assert!(t.calls() <= 33, "fetches non bornés : {}", t.calls());
     assert!(s.frame_png(id).is_some());
+}
+
+// ------------------------------------------------------------------
+// Étape 38 — formulaires
+// ------------------------------------------------------------------
+
+/// GET : input en div 1, submit en div 2 (y ≈ 24-47).
+const PAGE_GET_FORM: &str = "<html><body><form action=\"/search\" method=\"get\">\
+    <div><input name=\"q\" value=\"hi there\"></div>\
+    <div><input type=\"submit\" value=\"Go\"></div></form></body></html>";
+
+/// POST : chaque contrôle dans son `div` (empilement bloc
+/// déterministe), bouton tout en bas (~y 160+).
+const PAGE_POST_FORM: &str = "<html><body><form method=\"post\" action=\"/doit\">\
+    <div><input name=\"a\" value=\"1\"></div>\
+    <div><input type=\"checkbox\" name=\"c\" checked></div>\
+    <div><input type=\"checkbox\" name=\"d\"></div>\
+    <div><input type=\"radio\" name=\"r\" value=\"x\" checked>\
+    <input type=\"radio\" name=\"r\" value=\"y\"></div>\
+    <div><select name=\"s\"><option value=\"o1\">One</option>\
+    <option value=\"o2\" selected>Two</option></select></div>\
+    <div><textarea name=\"t\">zz</textarea></div>\
+    <div><button name=\"b\" value=\"ok\">Send</button></div></form></body></html>";
+
+/// Checkbox + submit, chacun sur sa ligne.
+const PAGE_CB_FORM: &str = "<html><body><form action=\"/cbgo\">\
+    <div><input type=\"checkbox\" name=\"c\" value=\"1\"></div>\
+    <div><input type=\"submit\" value=\"Go\"></div></form></body></html>";
+
+/// Deux radios homonymes + submit.
+const PAGE_RADIO_FORM: &str = "<html><body><form action=\"/rgo\"><div>\
+    <input type=\"radio\" name=\"r\" value=\"x\" checked>\
+    <input type=\"radio\" name=\"r\" value=\"y\"></div>\
+    <div><input type=\"submit\" value=\"Go\"></div></form></body></html>";
+
+/// Select à deux options + submit.
+const PAGE_SEL_FORM: &str = "<html><body><form action=\"/sgo\"><div>\
+    <select name=\"s\"><option value=\"o1\">One</option>\
+    <option value=\"o2\">Two</option></select></div>\
+    <div><input type=\"submit\" value=\"Go\"></div></form></body></html>";
+
+/// `submit` JS preventDefault → pas de navigation.
+const PAGE_PREVENT_FORM: &str = "<html><body><form action=\"/go\">\
+    <div><input type=\"submit\" value=\"Go\"></div></form>\
+    <script>document.querySelector('form').addEventListener('submit',\
+    function(e){e.preventDefault()});</script></body></html>";
+
+#[tokio::test]
+async fn form_get_submit_sends_query() {
+    let (mut s, t) = test_session();
+    t.route("/f", 200, PAGE_GET_FORM);
+    t.route("/search", 200, "<html><body>results</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 36.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    let (m, pq, _) = t.last().unwrap();
+    assert_eq!(m, "Get");
+    assert_eq!(pq, "/search?q=hi+there");
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/search?q=hi+there")
+    );
+}
+
+#[tokio::test]
+async fn form_post_submit_sends_urlencoded_body() {
+    let (mut s, t) = test_session();
+    t.route("/f", 200, PAGE_POST_FORM);
+    t.route("/doit", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    // Bouton : dernier div (~y 160-185 sous la textarea 4em).
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 170.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    let (m, pq, body) = t.last().unwrap();
+    assert_eq!(m, "Post");
+    assert_eq!(pq, "/doit");
+    assert_eq!(
+        String::from_utf8(body).unwrap(),
+        "a=1&c=on&r=x&s=o2&t=zz&b=ok"
+    );
+}
+
+#[tokio::test]
+async fn checkbox_toggles_then_submits() {
+    let (mut s, t) = test_session();
+    t.route("/cb", 200, PAGE_CB_FORM);
+    t.route("/cbgo", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/cb").await.unwrap();
+    let before = s.frame_png(id);
+    // Coche la case (marque peinte) → Edited.
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 6.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+    assert_ne!(s.frame_png(id), before);
+    // Submit → `c=1` part dans la query.
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 40.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(t.last().unwrap().1, "/cbgo?c=1");
+}
+
+#[tokio::test]
+async fn radio_group_is_exclusive() {
+    let (mut s, t) = test_session();
+    t.route("/r", 200, PAGE_RADIO_FORM);
+    t.route("/rgo", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/r").await.unwrap();
+    // 2e radio (après la 1re de 13px + gap).
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 20.0, y: 6.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 40.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    // `r=y` seul — le `checked` de x a été retiré.
+    assert_eq!(t.last().unwrap().1, "/rgo?r=y");
+}
+
+#[tokio::test]
+async fn select_cycles_options_on_click() {
+    let (mut s, t) = test_session();
+    t.route("/sl", 200, PAGE_SEL_FORM);
+    t.route("/sgo", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/sl").await.unwrap();
+    // Clic sur le select → option suivante.
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 6.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 40.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(t.last().unwrap().1, "/sgo?s=o2");
+}
+
+#[tokio::test]
+async fn submit_preventdefault_skips_navigation() {
+    let (mut s, t) = test_session();
+    t.route("/p", 200, PAGE_PREVENT_FORM);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/p").await.unwrap();
+    let calls = t.calls();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 6.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+    // Aucun fetch supplémentaire, URL inchangée.
+    assert_eq!(t.calls(), calls);
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/p")
+    );
 }

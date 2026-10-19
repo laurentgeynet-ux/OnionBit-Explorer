@@ -570,4 +570,11 @@ input, textarea {
   border: 1px solid #767676; padding: 1px; width: 10em; height: 1.2em
 }
 textarea { height: 4em }
+select { border: 1px solid #767676; padding: 1px 4px }
+button { border: 1px solid #767676; padding: 1px 6px; background-color: #eee }
+input[type=submit], input[type=button], input[type=reset] {
+  width: auto; padding: 1px 6px; background-color: #eee
+}
+input[type=checkbox], input[type=radio] { width: 13px; height: 13px }
+input[type=hidden] { display: none }
 ";

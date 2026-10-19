@@ -22,7 +22,7 @@ use explorer_html::TreeBuilder;
 use explorer_js::{JsEngine, JsFactory};
 use explorer_layout::font::FontSource;
 use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, LayoutBox};
-use explorer_net::http::{HttpTransport, Request};
+use explorer_net::http::{HttpTransport, Method, Request};
 use explorer_net::url::Url;
 use explorer_render::{
     build_display_list_imaged, decode_image, rasterize, DisplayList, Frame, ImageTable,
@@ -611,9 +611,21 @@ impl Session {
     /// Fetch → parse → état de l'onglet → rendu. Ne touche
     /// pas à l'historique. Renvoie le titre de la page.
     async fn navigate_to(&mut self, tab: TabId, url: Url) -> Result<Option<String>, CoreError> {
+        self.navigate_request(tab, Request::get(url)).await
+    }
+
+    /// Variante [`navigate_to`](Self::navigate_to) prenant une
+    /// requête complète — soumission de formulaire POST
+    /// (corps urlencodé) ; GET passe par le wrapper.
+    async fn navigate_request(
+        &mut self,
+        tab: TabId,
+        req: Request,
+    ) -> Result<Option<String>, CoreError> {
+        let url = req.url.clone();
         let resp = self
             .transport
-            .fetch(&Request::get(url.clone()))
+            .fetch(&req)
             .await
             .map_err(|e| CoreError::Fetch(e.to_string()))?;
         if !(200..300).contains(&resp.status) {
@@ -855,7 +867,23 @@ impl Session {
             return Err(CoreError::UnknownTab(tab));
         }
         match ev {
-            InputEvent::Key { key } => self.handle_key(tab, &key),
+            InputEvent::Key { key } => {
+                // Soumission implicite : `Enter` dans un champ
+                // d'un `<form>` soumet comme le bouton par
+                // défaut (événement `submit` d'abord —
+                // `preventDefault` annule).
+                if key == "Enter" {
+                    if let Some(form) = self.focused_form(tab) {
+                        self.blur(tab);
+                        if !self.dispatch_dom_event(tab, "submit", form) {
+                            self.submit_form(tab, form, None).await?;
+                            return Ok(InputOutcome::Navigated);
+                        }
+                        return Ok(InputOutcome::Ignored);
+                    }
+                }
+                self.handle_key(tab, &key)
+            }
             InputEvent::Scroll { dy } => {
                 self.scroll_by(tab, dy)?;
                 Ok(InputOutcome::Scrolled {
@@ -878,6 +906,39 @@ impl Session {
                     return Ok(InputOutcome::Focused);
                 }
                 self.blur(tab);
+                // Contrôle à bascule : checkbox/radio — le
+                // `checked` change → restyle + repaint.
+                if let Some(ctrl) = self.toggle_at(tab, x, y) {
+                    {
+                        let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+                        let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
+                        toggle_checked(dom, ctrl)?;
+                    }
+                    self.relayout(tab)?;
+                    let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+                    return Ok(InputOutcome::Edited);
+                }
+                // `<select>` : cycle d'options — le sélecteur
+                // natif délégué UI est hors scope (ADR-0014).
+                if let Some(sel) = self.select_at(tab, x, y) {
+                    {
+                        let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+                        let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
+                        cycle_select(dom, sel)?;
+                    }
+                    self.relayout(tab)?;
+                    let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+                    return Ok(InputOutcome::Edited);
+                }
+                // Contrôle submit : l'événement `submit` du
+                // formulaire part avant l'action par défaut.
+                if let Some((form, sub)) = self.submit_at(tab, x, y) {
+                    if !prevented && !self.dispatch_dom_event(tab, "submit", form) {
+                        self.submit_form(tab, form, Some(sub)).await?;
+                        return Ok(InputOutcome::Navigated);
+                    }
+                    return Ok(InputOutcome::Ignored);
+                }
                 match self.link_at(tab, x, y) {
                     Some(url) if !prevented => {
                         self.navigate(tab, &url).await?;
@@ -898,6 +959,112 @@ impl Session {
         let dom = entry.dom.as_ref()?;
         let node = hit_test(tree, x, y + entry.scroll_y)?;
         editable_field(dom, node)
+    }
+
+    /// `checkbox`/`radio` sous `(x, y)` — hit-test + ancêtres.
+    fn toggle_at(&self, tab: TabId, x: f32, y: f32) -> Option<NodeId> {
+        let entry = self.tabs.get(&tab)?;
+        let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
+        let node = hit_test(tree, x, y + entry.scroll_y)?;
+        toggle_control(dom, node)
+    }
+
+    /// `<select>` sous `(x, y)` — hit-test + ancêtres.
+    fn select_at(&self, tab: TabId, x: f32, y: f32) -> Option<NodeId> {
+        let entry = self.tabs.get(&tab)?;
+        let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
+        let node = hit_test(tree, x, y + entry.scroll_y)?;
+        select_control(dom, node)
+    }
+
+    /// `(form, submitter)` sous `(x, y)` — un contrôle submit
+    /// dans un `<form>`, `None` sinon.
+    fn submit_at(&self, tab: TabId, x: f32, y: f32) -> Option<(NodeId, NodeId)> {
+        let entry = self.tabs.get(&tab)?;
+        let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
+        let node = hit_test(tree, x, y + entry.scroll_y)?;
+        let ctrl = submit_control(dom, node)?;
+        let form = enclosing_form(dom, ctrl)?;
+        Some((form, ctrl))
+    }
+
+    /// `<form>` englobant le champ focalisé — la soumission
+    /// implicite sur `Enter` ne vaut que pour les `<input>`
+    /// mono-ligne (`<textarea>` garde son saut de ligne).
+    fn focused_form(&self, tab: TabId) -> Option<NodeId> {
+        let entry = self.tabs.get(&tab)?;
+        let dom = entry.dom.as_ref()?;
+        let field = entry.focused?;
+        if !dom.tag_name(field).is_ok_and(|t| t == "input") {
+            return None;
+        }
+        enclosing_form(dom, field)
+    }
+
+    /// Soumission de formulaire (étape 38) : contrôles
+    /// successful → `GET` (query) ou `POST` urlencodé, puis le
+    /// pipeline de navigation complet sur la réponse.
+    /// L'historique retient l'URL d'action — un reload/back
+    /// refait un `GET` (déviation documentée ADR-0014).
+    async fn submit_form(
+        &mut self,
+        tab: TabId,
+        form: NodeId,
+        submitter: Option<NodeId>,
+    ) -> Result<(), CoreError> {
+        let req = {
+            let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            let (Some(dom), Some(base)) = (entry.dom.as_ref(), entry.url.as_ref()) else {
+                return Err(CoreError::EmptyDocument);
+            };
+            let pairs = collect_form_data(dom, form, submitter);
+            let action = dom
+                .attribute(form, "action")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let method = dom
+                .attribute(form, "method")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            if method.eq_ignore_ascii_case("post") {
+                let url = Url::resolve(base, &action).map_err(|e| CoreError::Url(e.to_string()))?;
+                Request {
+                    method: Method::Post,
+                    url,
+                    headers: vec![(
+                        "content-type".to_string(),
+                        "application/x-www-form-urlencoded".to_string(),
+                    )],
+                    body: Some(form_url_encode(&pairs).into_bytes()),
+                }
+            } else {
+                let qs = form_url_encode(&pairs);
+                let target = if qs.is_empty() {
+                    action
+                } else {
+                    let sep = if action.contains('?') { '&' } else { '?' };
+                    format!("{action}{sep}{qs}")
+                };
+                let url = Url::resolve(base, &target).map_err(|e| CoreError::Url(e.to_string()))?;
+                Request::get(url)
+            }
+        };
+        let url = req.url.clone();
+        let prev = self.tabs.get(&tab).and_then(|t| t.title.clone());
+        match self.navigate_request(tab, req).await {
+            Ok(title) => {
+                if let Some(entry) = self.tabs.get_mut(&tab) {
+                    entry.hist.truncate(entry.hist_idx + 1);
+                    entry.hist.push(url.clone());
+                    entry.hist_idx = entry.hist.len() - 1;
+                }
+                self.emit_navigated(tab, &url, title, prev.as_deref());
+                Ok(())
+            }
+            Err(e) => Err(self.emit_error(tab, e)),
+        }
     }
 
     /// Perd le focus (clic hors champ).
@@ -944,10 +1111,21 @@ impl Session {
     /// Retourne `defaultPrevented` — l'appelant supprime alors
     /// l'action par défaut (navigation de lien).
     fn dispatch_click(&mut self, tab: TabId, x: f32, y: f32) -> bool {
-        let path = self.tabs.get(&tab).and_then(|entry| {
-            let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
-            hit_test(tree, x, y + entry.scroll_y).and_then(|n| element_path(dom, n))
+        let node = self.tabs.get(&tab).and_then(|entry| {
+            let (tree, _dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
+            hit_test(tree, x, y + entry.scroll_y)
         });
+        node.is_some_and(|n| self.dispatch_dom_event(tab, "click", n))
+    }
+
+    /// Dispatche l'événement `ty` sur `node` dans le miroir JS
+    /// puis resynchronise les mutations DOM (même traitement
+    /// que `dispatch_click`). Retourne `defaultPrevented`.
+    fn dispatch_dom_event(&mut self, tab: TabId, ty: &str, node: NodeId) -> bool {
+        let path = self
+            .tabs
+            .get(&tab)
+            .and_then(|entry| entry.dom.as_ref().and_then(|d| element_path(d, node)));
         let Some(path) = path else { return false };
         let (prevented, mutated) = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
@@ -956,10 +1134,10 @@ impl Session {
             let Some(eng) = entry.js.as_mut() else {
                 return false;
             };
-            let p = match eng.dispatch_event("click", &path) {
+            let p = match eng.dispatch_event(ty, &path) {
                 Ok(p) => p,
                 Err(e) => {
-                    tracing::debug!(tab, error = %e, "listener click en échec");
+                    tracing::debug!(tab, ty, error = %e, "listener dom en échec");
                     let _ = self.events.send(CoreEvent::PipelineError {
                         tab: Some(tab),
                         message: e.to_string(),
@@ -1271,4 +1449,315 @@ fn collect_script_texts(dom: &Dom) -> Vec<String> {
         }
     }
     out
+}
+
+/// `<form>` ancêtre (le nœud lui-même compris) — `None` hors
+/// formulaire. L'association `form=` hors arbre est hors
+/// scope MVP (ADR-0014).
+fn enclosing_form(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
+    loop {
+        if dom.tag_name(node).is_ok_and(|t| t == "form") {
+            return Some(node);
+        }
+        node = dom.parent(node).ok()??;
+    }
+}
+
+/// Contrôle de soumission le plus proche (soi ou ancêtre) :
+/// `<button>` sans `type="button|reset"` (défaut HTML =
+/// submit) ou `<input type="submit|image">`.
+fn submit_control(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
+    loop {
+        match dom.tag_name(node) {
+            Ok("button") => {
+                let ty = dom
+                    .attribute(node, "type")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                if !matches!(ty.as_str(), "button" | "reset") {
+                    return Some(node);
+                }
+            }
+            Ok("input") => {
+                let ty = dom
+                    .attribute(node, "type")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                if matches!(ty.as_str(), "submit" | "image") {
+                    return Some(node);
+                }
+            }
+            _ => {}
+        }
+        node = dom.parent(node).ok()??;
+    }
+}
+
+/// `input[type=checkbox|radio]` le plus proche (soi ou
+/// ancêtre). Un clic sur un `<label for=id>` résout le
+/// contrôle nommé (délégation HTML standard).
+fn toggle_control(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
+    loop {
+        match dom.tag_name(node) {
+            Ok("input") => {
+                let ty = dom
+                    .attribute(node, "type")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                if matches!(ty.as_str(), "checkbox" | "radio") {
+                    return Some(node);
+                }
+            }
+            Ok("label") => {
+                if let Ok(Some(f)) = dom.attribute(node, "for") {
+                    if let Some(target) = find_by_id(dom, &f) {
+                        if dom.tag_name(target).is_ok_and(|t| t == "input") {
+                            return Some(target);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        node = dom.parent(node).ok()??;
+    }
+}
+
+/// `<select>` le plus proche (soi ou ancêtre), `label for=`
+/// résolu comme `toggle_control`.
+fn select_control(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
+    loop {
+        match dom.tag_name(node) {
+            Ok("select") => return Some(node),
+            Ok("label") => {
+                if let Ok(Some(f)) = dom.attribute(node, "for") {
+                    if let Some(target) = find_by_id(dom, &f) {
+                        if dom.tag_name(target).is_ok_and(|t| t == "select") {
+                            return Some(target);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        node = dom.parent(node).ok()??;
+    }
+}
+
+/// Premier élément portant `id` en ordre document — petit
+/// parcours pour `label[for]` (pas d'index d'id exposé).
+fn find_by_id(dom: &Dom, id: &str) -> Option<NodeId> {
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.element(n).is_ok() {
+            if dom.attribute(n, "id").ok().flatten().as_deref() == Some(id) {
+                return Some(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                queue.extend(ch.iter().rev());
+            }
+        }
+    }
+    None
+}
+
+/// Bascule l'état du contrôle : `checkbox` inverse son
+/// `checked` ; `radio` se coche et décoche ses homonymes
+/// (`name` identique) du même formulaire (ou du document
+/// hors formulaire).
+fn toggle_checked(dom: &mut Dom, ctrl: NodeId) -> Result<(), DomError> {
+    let ty = dom.attribute(ctrl, "type")?.unwrap_or_default();
+    if ty == "radio" {
+        if dom.attribute(ctrl, "checked")?.is_some() {
+            return Ok(()); // un radio coché ne se décoche pas au clic
+        }
+        dom.set_attribute(ctrl, "checked", "")?;
+        let name = dom.attribute(ctrl, "name")?.unwrap_or_default();
+        if !name.is_empty() {
+            let scope = enclosing_form(dom, ctrl).unwrap_or_else(|| dom.document());
+            let mut queue = vec![scope];
+            while let Some(n) = queue.pop() {
+                if n != ctrl && dom.tag_name(n).is_ok_and(|t| t == "input") {
+                    let same = dom.attribute(n, "type")?.unwrap_or_default() == "radio"
+                        && dom.attribute(n, "name")?.unwrap_or_default() == name;
+                    if same {
+                        dom.remove_attribute(n, "checked")?;
+                    }
+                }
+                if let Ok(ch) = dom.children(n) {
+                    queue.extend(ch);
+                }
+            }
+        }
+        return Ok(());
+    }
+    if dom.attribute(ctrl, "checked")?.is_some() {
+        dom.remove_attribute(ctrl, "checked")?;
+    } else {
+        dom.set_attribute(ctrl, "checked", "")?;
+    }
+    Ok(())
+}
+
+/// Cycle `<select>` : `selected` passe à l'option suivante
+/// (retour au début en fin de liste) — sélection native
+/// déléguée UI hors scope MVP (ADR-0014).
+fn cycle_select(dom: &mut Dom, sel: NodeId) -> Result<(), DomError> {
+    let opts = descendant_elements(dom, sel, "option");
+    if opts.is_empty() {
+        return Ok(());
+    }
+    let cur = opts
+        .iter()
+        .position(|&o| dom.attribute(o, "selected").ok().flatten().is_some())
+        .unwrap_or(0);
+    let next = (cur + 1) % opts.len();
+    for (i, &o) in opts.iter().enumerate() {
+        if i == next {
+            dom.set_attribute(o, "selected", "")?;
+        } else {
+            dom.remove_attribute(o, "selected")?;
+        }
+    }
+    Ok(())
+}
+
+/// Éléments descendants portant `tag`, ordre document.
+fn descendant_elements(dom: &Dom, root: NodeId, tag: &str) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let mut queue = vec![root];
+    while let Some(n) = queue.pop() {
+        if n != root && dom.tag_name(n).is_ok_and(|t| t == tag) {
+            out.push(n);
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    out
+}
+
+/// `(name, value)` des contrôles successful du formulaire
+/// (HTML §4.10.21) : nommés, non `disabled`, cases cochées
+/// seulement, boutons uniquement le `submitter`. Déviations
+/// MVP : `form=` externe, `<fieldset disabled>` et
+/// `<object>` non traités.
+fn collect_form_data(dom: &Dom, form: NodeId, submitter: Option<NodeId>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut queue = vec![form];
+    while let Some(n) = queue.pop() {
+        let tag = dom.tag_name(n).unwrap_or("");
+        if n != form
+            && dom.element(n).is_ok()
+            && dom.attribute(n, "disabled").ok().flatten().is_none()
+        {
+            match tag {
+                "input" => {
+                    let ty = dom
+                        .attribute(n, "type")
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default()
+                        .to_lowercase();
+                    let ok = match ty.as_str() {
+                        "checkbox" | "radio" => {
+                            dom.attribute(n, "checked").ok().flatten().is_some()
+                        }
+                        "submit" | "image" | "button" | "reset" => Some(n) == submitter,
+                        _ => true,
+                    };
+                    if ok {
+                        push_named(dom, n, input_value(dom, n, &ty), &mut out);
+                    }
+                }
+                "textarea" => {
+                    push_named(dom, n, dom.text_content(n).unwrap_or_default(), &mut out);
+                }
+                "select" => {
+                    push_named(dom, n, select_value(dom, n), &mut out);
+                }
+                "button" => {
+                    let ty = dom.attribute(n, "type").ok().flatten().unwrap_or_default();
+                    if Some(n) == submitter && !matches!(ty.as_str(), "button" | "reset") {
+                        push_named(
+                            dom,
+                            n,
+                            dom.attribute(n, "value").ok().flatten().unwrap_or_default(),
+                            &mut out,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Un `<form>` ne s'imbrigue pas : on ne descend pas
+        // dans un formulaire enfant éventuel.
+        if n == form || tag != "form" {
+            if let Ok(ch) = dom.children(n) {
+                queue.extend(ch.iter().rev());
+            }
+        }
+    }
+    out
+}
+
+/// Pousse `(name, value)` si le contrôle est nommé.
+fn push_named(dom: &Dom, n: NodeId, value: String, out: &mut Vec<(String, String)>) {
+    if let Ok(Some(name)) = dom.attribute(n, "name") {
+        if !name.is_empty() {
+            out.push((name, value));
+        }
+    }
+}
+
+/// Valeur courante d'un `<input>` : `value` ou `"on"` pour
+/// checkbox/radio sans `value`, vide sinon.
+fn input_value(dom: &Dom, n: NodeId, ty: &str) -> String {
+    dom.attribute(n, "value").ok().flatten().unwrap_or_else(|| {
+        if matches!(ty, "checkbox" | "radio") {
+            "on".to_string()
+        } else {
+            String::new()
+        }
+    })
+}
+
+/// Valeur courante d'un `<select>` : `value` (ou texte) de
+/// l'option `selected`, sinon de la première.
+fn select_value(dom: &Dom, sel: NodeId) -> String {
+    let opts = descendant_elements(dom, sel, "option");
+    let sel_opt = opts
+        .iter()
+        .find(|&&o| dom.attribute(o, "selected").ok().flatten().is_some())
+        .or_else(|| opts.first());
+    sel_opt.map_or_else(String::new, |&o| {
+        dom.attribute(o, "value")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| dom.text_content(o).unwrap_or_default().trim().to_string())
+    })
+}
+
+/// Encodage `application/x-www-form-urlencoded` : espace→`+`,
+/// non-réservés conservés, le reste en `%XX`.
+fn form_url_encode(pairs: &[(String, String)]) -> String {
+    fn enc(s: &str) -> String {
+        s.bytes()
+            .map(|b| match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'*' | b'-' | b'.' | b'_' => {
+                    (b as char).to_string()
+                }
+                b' ' => "+".to_string(),
+                _ => format!("%{b:02X}"),
+            })
+            .collect()
+    }
+    pairs
+        .iter()
+        .map(|(k, v)| format!("{}={}", enc(k), enc(v)))
+        .collect::<Vec<_>>()
+        .join("&")
 }

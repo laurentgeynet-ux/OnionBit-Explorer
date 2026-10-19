@@ -295,6 +295,28 @@ fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32) {
             }
         }
     }
+    // Contrôle coché (`checkbox`/`radio`, étape 38) : marque
+    // pleine centrée — carré à ~55 % du plus petit côté,
+    // couleur = encre de la boîte (approx MVP documentée).
+    if bx.control_checked {
+        let side = (rect.width.min(rect.height) * 0.55).max(0.0);
+        if side > 0.0 {
+            let ink = bx
+                .style
+                .get("color")
+                .and_then(parse_color)
+                .unwrap_or(Color::BLACK);
+            items.push(DisplayItem::FillRect {
+                rect: Rect {
+                    x: rect.x + (rect.width - side) / 2.0,
+                    y: rect.y + (rect.height - side) / 2.0,
+                    width: side,
+                    height: side,
+                },
+                color: ink,
+            });
+        }
+    }
 }
 
 /// `FontRequest` dérivé du style : familles `font-family`

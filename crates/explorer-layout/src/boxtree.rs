@@ -137,6 +137,11 @@ pub struct LayoutBox {
     /// sain, sinon dimensions intrinsèques décodées). Chaque
     /// axe : CSS `width`/`height` > cette valeur.
     pub intrinsic: Option<(f32, f32)>,
+    /// État coché d'un contrôle `checkbox`/`radio` (étape 38) —
+    /// le rendu peint une marque pleine centrée. La valeur des
+    /// champs est portée par un enfant `Text` synthétique, pas
+    /// par ce champ.
+    pub control_checked: bool,
 }
 
 impl LayoutBox {
@@ -240,6 +245,56 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
             overflow: Overflow::Visible,
             z_index: 0,
             intrinsic: sizes.get(&root).copied(),
+            control_checked: false,
+        });
+    }
+    // Contrôles de formulaire (étape 38) : `input`/`select` —
+    // la valeur peinte est synthétisée en enfant `Text` (la
+    // boîte reste atomique ; le texte se pose dedans au
+    // layout), l'état `checked` devient une marque au rendu.
+    if dom
+        .tag_name(root)
+        .is_ok_and(|t| t == "input" || t == "select")
+    {
+        let ty = dom
+            .attribute(root, "type")
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .to_lowercase();
+        let (text, checked) = control_paint(dom, root, &ty);
+        return Some(LayoutBox {
+            kind: box_kind_of(&style),
+            node: Some(root),
+            style: style.clone(),
+            text: None,
+            children: text
+                .map(|t| {
+                    vec![LayoutBox {
+                        kind: BoxKind::Text,
+                        node: Some(root),
+                        style: style.clone(),
+                        text: Some(t),
+                        children: Vec::new(),
+                        lines: Vec::new(),
+                        rect: Rect::default(),
+                        position: Position::Static,
+                        float: Float::None,
+                        overflow: Overflow::Visible,
+                        z_index: 0,
+                        intrinsic: None,
+                        control_checked: false,
+                    }]
+                })
+                .unwrap_or_default(),
+            lines: Vec::new(),
+            rect: Rect::default(),
+            position: Position::Static,
+            float: Float::None,
+            overflow: Overflow::Visible,
+            z_index: 0,
+            intrinsic: None,
+            control_checked: checked,
         });
     }
     let kind = box_kind_of(&style);
@@ -256,6 +311,7 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
         overflow: Overflow::Visible,
         z_index: 0,
         intrinsic: None,
+        control_checked: false,
     };
     let children = child_boxes(dom, root, styles, &style, sizes);
     b.children = if kind.is_inline_level() {
@@ -319,6 +375,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     overflow: Overflow::Visible,
                     z_index: 0,
                     intrinsic: None,
+                    control_checked: false,
                 });
             }
         }
@@ -371,6 +428,55 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             overflow: Overflow::Visible,
             z_index: 0,
             intrinsic: None,
+            control_checked: false,
         });
+    }
+}
+
+/// Texte à peindre + état coché d'un contrôle de formulaire.
+///
+/// - `input` texte/hidden-less : `value` (ou `placeholder`
+///   si vide) ; boutons (`submit`/`button`/`reset`) : `value`
+///   (libellé) ; `checkbox`/`radio` : pas de texte, marque si
+///   `checked` ; `hidden`/`file`/`image` : rien (`hidden`
+///   est déjà `display:none` en feuille UA).
+/// - `select` : texte de l'`<option selected>` (ou de la
+///   première) — ses enfants `<option>` ne sont pas posés.
+fn control_paint(dom: &Dom, node: NodeId, ty: &str) -> (Option<String>, bool) {
+    let attr = |n: NodeId, name: &str| dom.attribute(n, name).ok().flatten();
+    let tag = dom.tag_name(node).unwrap_or("");
+    if tag == "select" {
+        // Options en ordre document ; `selected` gagne, sinon
+        // la première (dégradation classique).
+        let mut opts = Vec::new();
+        let mut queue = vec![node];
+        while let Some(n) = queue.pop() {
+            if n != node && dom.tag_name(n).is_ok_and(|t| t == "option") {
+                opts.push(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                queue.extend(ch.iter().rev());
+            }
+        }
+        let sel = opts
+            .iter()
+            .find(|&&o| attr(o, "selected").is_some())
+            .or_else(|| opts.first());
+        let text = sel.and_then(|&o| {
+            attr(o, "value")
+                .or_else(|| dom.text_content(o).ok().map(|t| t.trim().to_string()))
+                .filter(|t| !t.is_empty())
+        });
+        return (text, false);
+    }
+    match ty {
+        "checkbox" | "radio" => (None, attr(node, "checked").is_some()),
+        "submit" | "button" | "reset" => (attr(node, "value"), false),
+        "hidden" | "file" | "image" => (None, false),
+        // Texte libre : `value`, `placeholder` en repli.
+        _ => {
+            let v = attr(node, "value").filter(|s| !s.is_empty());
+            (v.or_else(|| attr(node, "placeholder")), false)
+        }
     }
 }
