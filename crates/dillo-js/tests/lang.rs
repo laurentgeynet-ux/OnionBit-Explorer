@@ -3468,3 +3468,121 @@ fn reflect_methods() {
     // `Reflect.*` sur primitive → TypeError.
     assert!(Engine::new().eval("Reflect.getPrototypeOf(1)").is_err());
 }
+
+// -- JS-C11b : champs de classe, noms privés ---------------------------
+
+#[test]
+fn class_instance_fields() {
+    // Init à la construction, ordre source, `this` disponible.
+    assert_eq!(
+        ev_str("class C { a = 1; b = this.a + 1; } var c = new C(); c.a + ',' + c.b"),
+        "1,2"
+    );
+    // Init sans valeur -> undefined ; champ énumérable.
+    assert_eq!(
+        ev_str(
+            "class C { x; } var c = new C(); ('x' in c) + ',' + c.x + ',' + Object.keys(c).length"
+        ),
+        "true,undefined,1"
+    );
+    // Chaque instance a SA copie (pas de partage du même objet).
+    assert_eq!(
+        ev_str(
+            "class C { o = {n:0}; } var a = new C(), b = new C();                 a.o.n = 5; b.o.n"
+        ),
+        "0"
+    );
+    // Clé calculée.
+    assert_eq!(
+        ev_str("var k = 'dyn'; class C { [k] = 7; } new C().dyn"),
+        "7"
+    );
+}
+
+#[test]
+fn class_fields_derived_order() {
+    // Champs parent installés avant les champs dérivés ;
+    // `this` du parent visible dans les inits dérivées.
+    assert_eq!(
+        ev_str("class B { x = 10; }                 class D extends B { y = this.x + 1; }                 var d = new D(); d.x + ',' + d.y"),
+        "10,11"
+    );
+    // Les inits tournent APRÈS le corps du parent.
+    assert_eq!(
+        ev_str("var log = [];                 class B { x = 1; constructor() { log.push('B:' + this.x); } }                 class D extends B { y = 2; constructor() { super(); log.push('D:' + this.y); } }                 new D(); log.join(',')"),
+        "B:1,D:2"
+    );
+}
+
+#[test]
+fn class_private_fields() {
+    // #x en lecture/écriture sur `this`.
+    assert_eq!(
+        ev_str("class C { #x = 3; get() { return this.#x; } bump() { this.#x++; return this.#x; } }                 var c = new C(); c.get() + ',' + c.bump()"),
+        "3,4"
+    );
+    // `#x in obj` — true sur instance, false ailleurs.
+    assert_eq!(
+        ev_str("class C { #x = 1; static has(o) { return #x in o; } }                 C.has(new C()) + ',' + C.has({})"),
+        "true,false"
+    );
+    // Invisible de l'extérieur — `c.#x` est du sucre interne ;
+    // la clé n'existe pas en string.
+    assert_eq!(
+        ev_str("class C { #x = 1; } var c = new C(); Object.keys(c).length + ',' + ('#x' in c)"),
+        "0,false"
+    );
+    // Deux classes, même nom — pas de collision.
+    assert_eq!(
+        ev_str("class A { #x = 'a'; get() { return this.#x; } }                 class B { #x = 'b'; get() { return this.#x; } }                 new A().get() + ',' + new B().get()"),
+        "a,b"
+    );
+    // Méthode privée appelable via `this.#m()`.
+    assert_eq!(
+        ev_str("class C { #m() { return 42; } call() { return this.#m(); } } new C().call()"),
+        "42"
+    );
+    // Accesseur privé.
+    assert_eq!(
+        ev_str("class C { #v = 0; get v() { return this.#v; } set v(n) { this.#v = n * 2; } }                 var c = new C(); c.v = 5; c.v"),
+        "10"
+    );
+    // `#x` hors de toute classe -> SyntaxError.
+    assert!(Engine::new().eval("var o = {}; o.#x").is_err());
+    assert!(Engine::new()
+        .eval("class C { m() { return this.#y; } }")
+        .is_err());
+}
+
+#[test]
+fn class_static_fields_and_blocks() {
+    // Champs statiques + blocs, ordre d'exécution, `this` = ctor.
+    assert_eq!(
+        ev_str("var log = [];                 class C { static a = (log.push('a'), 1);                           static { log.push('block:' + this.a); }                           static b = (log.push('b'), 2); }                 log.join(',') + '|' + C.a + '|' + C.b"),
+        "a,block:1,b|1|2"
+    );
+    // `static` seul comme nom de champ.
+    assert_eq!(ev_str("class C { static = 5; } new C().static"), "5");
+    // Champ statique privé.
+    assert_eq!(
+        ev_str("class C { static #n = 9; static get() { return this.#n; } } C.get()"),
+        "9"
+    );
+}
+
+#[test]
+fn class_call_rules() {
+    // `C()` sans new -> TypeError.
+    assert!(Engine::new().eval("class C {} C()").is_err());
+    // `new C()` normal OK.
+    assert_eq!(ev_str("class C {} typeof new C()"), "object");
+    // Double super() -> TypeError.
+    assert!(Engine::new()
+        .eval("class B {} class D extends B { constructor() { super(); super(); } } new D()")
+        .is_err());
+    // super() unique OK.
+    assert_eq!(
+        ev_str("class B {} class D extends B { constructor() { super(); } } typeof new D()"),
+        "object"
+    );
+}

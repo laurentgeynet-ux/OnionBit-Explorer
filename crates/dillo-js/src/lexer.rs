@@ -224,6 +224,8 @@ pub enum Tok {
     Big(String),
     /// String literal (escapes already decoded).
     Str(String),
+    /// Private name `#name` (ES2022 class-private member).
+    Private(String),
     /// Punctuation / operator.
     P(P),
     /// Template literal: literal chunks interleaved with `${…}`
@@ -341,6 +343,7 @@ impl Lexer {
                 Some('.') if self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) => {
                     self.number()?
                 }
+                Some('#') => self.private_name()?,
                 Some('"' | '\'') => Tok::Str(self.string()?),
                 Some('`') => self.template()?,
                 Some('/') if expect_operand => self.regex_lit()?,
@@ -544,6 +547,50 @@ impl Lexer {
         }
     }
 
+    /// `#name` — nom privé de classe. `#` seul ou suivi d'un
+    /// non-identifiant est une erreur de syntaxe.
+    fn private_name(&mut self) -> Result<Tok> {
+        self.bump(); // `#`
+        let mut s = String::new();
+        while let Some(c) = self.peek() {
+            if (s.is_empty() && is_ident_start(c)) || (!s.is_empty() && is_ident_part(c)) {
+                s.push(c);
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        if s.is_empty() {
+            return Err(self.err("`#` must be followed by a private name"));
+        }
+        Ok(Tok::Private(s))
+    }
+
+    /// `true` si `c` est un chiffre décimal ou le séparateur `_`.
+    fn is_num_char(c: char) -> bool {
+        c.is_ascii_digit() || c == '_'
+    }
+
+    /// Valide et retire les `_` d'un segment de littéral —
+    /// ES2021 : le séparateur ne peut figurer qu'**entre deux
+    /// chiffres** du même segment (`1_0` ok ; `1_`, `_1`, `1__0`,
+    /// `1._5` rejetés). `dig` = prédicat du jeu de chiffres.
+    fn clean_num(&self, s: &str, dig: impl Fn(char) -> bool) -> Result<String> {
+        if !s.contains('_') {
+            return Ok(s.to_string());
+        }
+        let cs: Vec<char> = s.chars().collect();
+        for (i, c) in cs.iter().enumerate() {
+            if *c == '_' {
+                let ok = i > 0 && dig(cs[i - 1]) && cs.get(i + 1).is_some_and(|n| dig(*n));
+                if !ok {
+                    return Err(self.err("invalid `_` separator in numeric literal"));
+                }
+            }
+        }
+        Ok(s.replace('_', ""))
+    }
+
     fn number(&mut self) -> Result<Tok> {
         let start = self.pos;
         // `0x`/`0b`/`0o` prefixed literals.
@@ -564,13 +611,14 @@ impl Lexer {
                         8 => matches!(c, '0'..='7'),
                         _ => matches!(c, '0' | '1'),
                     };
-                    while self.peek().is_some_and(dig) {
+                    while self.peek().is_some_and(|c| dig(c) || c == '_') {
                         self.bump();
                     }
-                    let s: String = self.chars[ds..self.pos].iter().collect();
-                    if s.is_empty() {
+                    let raw: String = self.chars[ds..self.pos].iter().collect();
+                    if raw.is_empty() {
                         return Err(self.err("malformed numeric literal"));
                     }
+                    let s = self.clean_num(&raw, dig)?;
                     // Suffixe `n` → BigInt (`0xFn`, `0o17n`, `0b101n`).
                     if self.peek() == Some('n') {
                         self.bump();
@@ -627,16 +675,17 @@ impl Lexer {
                 }
             }
         }
-        while self.peek().is_some_and(|c| c.is_ascii_digit()) {
+        while self.peek().is_some_and(Self::is_num_char) {
             self.bump();
         }
         // Suffixe `n` → BigInt décimal — pas de point ni exposant,
         // et `08n`/`010n` (NonOctalDecimal/octale legacy) rejetés.
         if self.peek() == Some('n') {
-            let lit: String = self.chars[start..self.pos].iter().collect();
-            if lit.len() > 1 && lit.starts_with('0') {
+            let raw: String = self.chars[start..self.pos].iter().collect();
+            if raw.len() > 1 && raw.starts_with('0') {
                 return Err(self.err("legacy octal bigint literal"));
             }
+            let lit = self.clean_num(&raw, |c| c.is_ascii_digit())?;
             self.bump();
             if self
                 .peek()
@@ -651,7 +700,7 @@ impl Lexer {
         }
         if self.peek() == Some('.') {
             self.bump();
-            while self.peek().is_some_and(|c| c.is_ascii_digit()) {
+            while self.peek().is_some_and(Self::is_num_char) {
                 self.bump();
             }
         }
@@ -662,7 +711,7 @@ impl Lexer {
                 self.bump();
             }
             if self.peek().is_some_and(|c| c.is_ascii_digit()) {
-                while self.peek().is_some_and(|c| c.is_ascii_digit()) {
+                while self.peek().is_some_and(Self::is_num_char) {
                     self.bump();
                 }
             } else {
@@ -674,7 +723,8 @@ impl Lexer {
         if self.peek().is_some_and(is_ident_start) {
             return Err(self.err("identifier directly after number"));
         }
-        let s: String = self.chars[start..self.pos].iter().collect();
+        let raw: String = self.chars[start..self.pos].iter().collect();
+        let s = self.clean_num(&raw, |c| c.is_ascii_digit())?;
         s.parse::<f64>()
             .map(Tok::Num)
             .map_err(|_| self.err(format!("malformed number literal `{s}`")))
@@ -997,6 +1047,7 @@ fn ends_operand(t: &Tok) -> bool {
     matches!(
         t,
         Tok::Ident(_)
+            | Tok::Private(_)
             | Tok::Num(_)
             | Tok::Big(_)
             | Tok::Str(_)

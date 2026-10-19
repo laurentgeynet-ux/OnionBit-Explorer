@@ -428,6 +428,24 @@ d'intégration, pas par la couverture :
   `setPrototypeOf`, `isExtensible`, `preventExtensions` rendent
   `false` sur refus — déviation : une trap lancée surface aussi
   `false`). test262 reste 859/859 ; 7 tests de régression.
+- [x] **JS-C11. Syntaxe moderne** : séparateurs numériques
+  (`1_000`, `0xFF_FF`, `1n`, fractions/exposants — validation
+  « entre deux chiffres »), statements labellés `id:` avec
+  `break`/`continue label` (validation early-error : label
+  inconnu, `continue` vers non-boucle ; `Flow::Break(Some)`/
+  `Continue(Some)` propagés via `pending_labels` + `loop_flow`),
+  champs de classe `x = e` / `x` / `[k] = e` (init = thunk clos
+  sur le scope de classe, exécuté par `install_class_fields` :
+  base → tête de `[[Construct]]`, dérivée → juste après
+  `super()` via `FLD_FIELDS_D`, ordre parent→dérivé), champs
+  statiques + `static {}` (exécutés à `eval_class`, `this` =
+  ctor), noms privés `#x` — résolution lexicale au parse vers
+  clés sentinelles `\u{f131}privN.x` (`PrivateNameEnvironment`
+  simulé par pile `priv_scopes`, `#x` inconnu → `SyntaxError`),
+  champs/méthodes/accesseurs privés, `#x in obj`, `C()` sans
+  `new` → `TypeError` (marque `CLASS_CTOR`), double `super()`
+  → `TypeError` (marque `FLD_DONE`). test262 : 859/859 ;
+  5 tests de régression.
 - [ ] **JS-C. Couverture par besoin** : `Intl` —
   ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/

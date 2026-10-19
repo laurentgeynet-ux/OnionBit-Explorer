@@ -544,6 +544,35 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     `preventExtensions` — `false` sur refus plutôt que throw
     (déviation : une trap lancée est aussi rendue `false`) ;
   - test262 : 859/859 conservé ; 7 tests de régression.
+- **JS-C11 — Syntaxe moderne** (`dillo-js`) :
+  - séparateurs numériques `1_000` / `0xFF_FF` / `0b1010_10` /
+    `0o7_7` / `1.5_5` / `1e1_0` / `1_000n` — validés « entre
+    deux chiffres » (`1_`, `_1`, `1__0`, `1._5`, `0x_FF`
+    rejetés) ;
+  - statements labellés `id:` + `break`/`continue label` :
+    `Flow::Break(Option<String>)`/`Continue(..)`, labels
+    empilés via `pending_labels`, early-errors (label
+    inconnu, `continue` vers non-boucle, label hors fonction) ;
+  - champs de classe `x = e` / `x;` / `[k] = e` — l'init
+    devient un thunk clos sur le scope de classe exécuté par
+    `install_class_fields` : classe de base à l'entrée du
+    `[[Construct]]`, dérivée juste après `super()`
+    (`FLD_FIELDS`/`FLD_FIELDS_D` sur le ctor, ordre
+    parent→dérivé respecté, `this` lié à l'instance) ;
+  - champs statiques `static x = e` et blocs `static {}` —
+    exécutés à la définition de classe avec `this` = ctor ;
+  - noms privés `#x` : résolution lexicale au parse vers
+    clés sentinelles `\u{f131}privN.x` (pile `priv_scopes`
+    = `PrivateNameEnvironment` simulée, classes imbriquées
+    voient l'englobante, `#x` non déclaré → `SyntaxError`),
+    champs/méthodes/accesseurs privés, `#x in obj` ;
+  - `C()` sans `new` → `TypeError` (marque `CLASS_CTOR`,
+    `call_value` vs `call_value_ctor`) ; double `super()` →
+    `TypeError` (marque `FLD_DONE` sur `this`) ;
+  - clés internes `\u{f131}…` filtrées de
+    `getOwnPropertyNames`/`getOwnPropertyDescriptors`/
+    `Reflect.ownKeys` ;
+  - test262 : 859/859 conservé ; 5 tests de régression.
 - **JS-C9 — Générateurs eager** (`dillo-js`) : `function*` /
   `yield` / `yield*`, méthodes génératrices `*m(){}` (objet et
   classe), `async function*`. Le corps tourne à l'appel en

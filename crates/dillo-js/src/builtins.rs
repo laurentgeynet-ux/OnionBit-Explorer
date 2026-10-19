@@ -1421,6 +1421,11 @@ fn object_get_own_property_descriptors(
             }
         };
     for k in keys {
+        // Clés internes `\u{f131}…` (privés, métadonnées classe) :
+        // jamais exposées comme descripteurs.
+        if k.starts_with('\u{f131}') {
+            continue;
+        }
         let kv = e.str_val(k.clone());
         let d = object_get_own_property_descriptor(e, Value::Undefined, &[arg(args, 0), kv])?;
         e.set_own(out, &k, d, true);
@@ -2773,7 +2778,12 @@ fn reflect_own_keys(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
         return Ok(e.new_array(Vec::new()));
     };
     let keys = e.own_keys_trapped(id)?;
-    let vals = keys.iter().map(|k| e.str_val(k.clone())).collect();
+    // Clés-symboles `\u{f130}…` rendues ; internes `\u{f131}…` filtrées.
+    let vals = keys
+        .iter()
+        .filter(|k| !k.starts_with('\u{f131}'))
+        .map(|k| e.str_val(k.clone()))
+        .collect();
     Ok(e.new_array(vals))
 }
 
@@ -3211,13 +3221,23 @@ fn object_get_own_property_names(e: &mut Engine, _t: Value, args: &[Value]) -> J
         _ => Vec::new(),
     };
     // Spec : `getOwnPropertyNames` ne rend que les clés string —
-    // les clés-symboles sentinelles sont exclues.
+    // les clés-symboles sentinelles `\u{f130}…` et les internes
+    // `\u{f131}…` (noms privés, métadonnées de classe) sont exclues.
     let vals = keys
         .iter()
-        .filter(|k| !k.starts_with(SYM_PREFIX))
+        .filter(|k| !is_sentinel_key(k))
         .map(|k| e.str_val(k.clone()))
         .collect();
     Ok(e.new_array(vals))
+}
+
+/// `true` pour les clés sentinelles internes `\u{f120}…\u{f13f}`
+/// (symboles, noms privés, métadonnées de classe) — invisibles
+/// aux API d'énumération de noms.
+fn is_sentinel_key(k: &str) -> bool {
+    k.chars()
+        .next()
+        .is_some_and(|c| ('\u{f120}'..='\u{f13f}').contains(&c))
 }
 
 /// `Object.getOwnPropertySymbols` — clés sentinelles `\u{f130}…`

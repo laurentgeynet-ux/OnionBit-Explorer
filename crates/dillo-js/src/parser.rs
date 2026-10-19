@@ -17,6 +17,7 @@ use crate::ast::{
 };
 use crate::error::{Error, Result};
 use crate::lexer::{lex, Kw, Tok, Token, TplPart, P};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 /// Parse a whole script.
@@ -36,6 +37,9 @@ pub(crate) fn parse_in(src: &str, strict: bool) -> Result<Program> {
         strict,
         module: false,
         in_gen: false,
+        labels: Vec::new(),
+        priv_seq: 0,
+        priv_scopes: Vec::new(),
     };
     p.scan_directives();
     let mut body = Vec::new();
@@ -60,6 +64,9 @@ pub fn parse_module(src: &str) -> Result<Program> {
         strict: true,
         module: true,
         in_gen: false,
+        labels: Vec::new(),
+        priv_seq: 0,
+        priv_scopes: Vec::new(),
     };
     p.scan_directives();
     let mut body = Vec::new();
@@ -90,6 +97,20 @@ struct Parser {
     /// l'expression `yield` (contextuelle : identifiant ailleurs,
     /// réservée en strict).
     in_gen: bool,
+    /// Pile des labels actifs `(nom, est_boucle)` — vidée à
+    /// l'entrée de chaque fonction (les labels ne traversent pas
+    /// les fonctions, spec `LabelledItem` scoping).
+    labels: Vec<(String, bool)>,
+    /// Séquence d'identité des classes — chaque corps de classe
+    /// reçoit un numéro ; ses noms privés sont résolus au parse
+    /// vers des clés sentinelle `\u{f131}privN.name` (invisibles à
+    /// l'énumération et distinctes d'une classe à l'autre).
+    priv_seq: u32,
+    /// Portées de noms privés `(identité, déclarations)` — une
+    /// entrée par classe imbriquée ; la résolution `#x` cherche
+    /// le nom de la plus interne à la plus externe (spec : les
+    /// `PrivateNameEnvironments` s'emboîtent).
+    priv_scopes: Vec<(u32, HashSet<String>)>,
 }
 
 impl Parser {
@@ -174,8 +195,60 @@ impl Parser {
                 self.next();
                 Ok(kw_str(kw).to_string())
             }
+            // `o.#x` — accès membre privé, résolu à la portée
+            // de classe englobante.
+            Tok::Private(n) => {
+                self.next();
+                self.resolve_priv(&n)
+            }
             _ => Err(self.err("expected property name")),
         }
+    }
+
+    /// Clé sentinelle d'un nom privé — `\u{f131}privN.name`.
+    /// Le préfixe d'espace privé Unicode garantit qu'aucune clé
+    /// publique ne peut entrer en collision.
+    fn priv_key(seq: u32, name: &str) -> String {
+        format!("\u{f131}priv{seq}.{name}")
+    }
+
+    /// Résout `#name` vers sa clé sentinelle en remontant les
+    /// portées de classe ouvertes — une classe imbriquée voit
+    /// les privés des englobantes ; hors classe → `SyntaxError`
+    /// (early error spec).
+    fn resolve_priv(&self, name: &str) -> Result<String> {
+        for (seq, names) in self.priv_scopes.iter().rev() {
+            if names.contains(name) {
+                return Ok(Self::priv_key(*seq, name));
+            }
+        }
+        Err(self.err(format!("private name `#{name}` is not defined")))
+    }
+
+    /// Déclarations `#…` du corps de classe qui commence juste
+    /// après `self.pos` (le `{` est consommé). Pré-scan à profondeur
+    /// 1 — les corps de méthode sont ignorés mais ne peuvent pas
+    /// déclarer de noms privés ; les `#x` qui y figurent sont des
+    /// *usages* de l'englobante.
+    fn prescan_privates(&self) -> HashSet<String> {
+        let mut out = HashSet::new();
+        let mut depth = 1u32;
+        for t in &self.toks[self.pos..] {
+            match &t.tok {
+                Tok::P(P::LBrace) => depth += 1,
+                Tok::P(P::RBrace) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                Tok::Private(n) if depth == 1 => {
+                    out.insert(n.clone());
+                }
+                _ => {}
+            }
+        }
+        out
     }
 
     /// ASI: `;`, or `}` / `else` / EOF / line break act as terminators.
@@ -195,6 +268,54 @@ impl Parser {
     }
 
     // -- statements ----------------------------------------------------
+
+    /// Label optionnel après `break`/`continue` — ASI : le nom doit
+    /// être sur la même ligne.
+    fn label_arg(&mut self) -> Result<Option<String>> {
+        if self.cur().newline_before {
+            return Ok(None);
+        }
+        match self.peek().clone() {
+            Tok::Ident(n) => {
+                self.next();
+                Ok(Some(n))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// `ident : stmt` — statement étiqueté. `est_boucle` se
+    /// détermine en regardant au-delà des labels chaînés
+    /// (`a: b: for` — `continue a` vise bien la boucle, spec).
+    fn labeled_stmt(&mut self) -> Result<Stmt> {
+        let Tok::Ident(name) = self.peek().clone() else {
+            return Err(self.err("expected label name"));
+        };
+        let mut i = self.pos + 2;
+        let is_loop = loop {
+            match self.toks.get(i).map(|t| &t.tok) {
+                Some(Tok::Kw(Kw::For | Kw::While | Kw::Do)) => break true,
+                Some(Tok::Ident(_))
+                    if self.toks.get(i + 1).map(|t| &t.tok) == Some(&Tok::P(P::Colon)) =>
+                {
+                    i += 2;
+                }
+                _ => break false,
+            }
+        };
+        self.next(); // `ident`
+        self.next(); // `:`
+        if self.labels.iter().any(|(l, _)| l == &name) {
+            return Err(self.err(format!("duplicate label `{name}`")));
+        }
+        self.labels.push((name.clone(), is_loop));
+        let body = self.stmt()?;
+        self.labels.pop();
+        Ok(Stmt::Labeled {
+            name,
+            body: Box::new(body),
+        })
+    }
 
     fn stmt(&mut self) -> Result<Stmt> {
         match self.peek().clone() {
@@ -316,13 +437,30 @@ impl Parser {
             }
             Tok::Kw(Kw::Break) => {
                 self.next();
+                let label = self.label_arg()?;
+                if let Some(n) = &label {
+                    if !self.labels.iter().any(|(l, _)| l == n) {
+                        return Err(self.err(format!("undefined label `{n}`")));
+                    }
+                }
                 self.expect_semi()?;
-                Ok(Stmt::Break)
+                Ok(Stmt::Break(label))
             }
             Tok::Kw(Kw::Continue) => {
                 self.next();
+                let label = self.label_arg()?;
+                if let Some(n) = &label {
+                    // `continue l` exige un label de boucle
+                    // (early error spec).
+                    match self.labels.iter().rev().find(|(l, _)| l == n) {
+                        Some((_, true)) => {}
+                        _ => {
+                            return Err(self.err(format!("`continue` target `{n}` is not a loop")));
+                        }
+                    }
+                }
                 self.expect_semi()?;
-                Ok(Stmt::Continue)
+                Ok(Stmt::Continue(label))
             }
             Tok::Kw(Kw::Try) => self.try_stmt(),
             Tok::Kw(Kw::Switch) => self.switch_stmt(),
@@ -341,6 +479,12 @@ impl Parser {
             Tok::Kw(Kw::Export) if self.module => self.export_stmt(),
             Tok::Kw(Kw::Export) => Err(self.err("`export` outside a module")),
             Tok::Kw(Kw::Unsupported(k)) => Err(self.err(format!("`{k}` is not supported"))),
+            // `ident :` — statement étiqueté (`lbl: for …`).
+            Tok::Ident(_)
+                if self.toks.get(self.pos + 1).map(|t| &t.tok) == Some(&Tok::P(P::Colon)) =>
+            {
+                self.labeled_stmt()
+            }
             // `import` en position statement hors module retombe
             // ici — seuls `import(`/`import.meta` sont des
             // expressions (dispatchées plus haut).
@@ -801,6 +945,10 @@ impl Parser {
             Tok::Kw(kw) => {
                 self.next();
                 kw_str(kw).to_string()
+            }
+            Tok::Private(n) => {
+                self.next();
+                self.resolve_priv(&n)?
             }
             _ => return Err(self.err("expected property name")),
         };
@@ -1602,6 +1750,13 @@ impl Parser {
                 self.next();
                 Ok(Expr::This)
             }
+            // `#x` en position primaire : seule utilisation
+            // spec = `x #x in obj` — on produit la clé sentinelle
+            // comme opérande chaîne ; `in` fait le lookup.
+            Tok::Private(n) => {
+                self.next();
+                Ok(Expr::Str(self.resolve_priv(&n)?))
+            }
             Tok::Kw(Kw::Function) => Ok(Expr::Function(self.function(false, false)?)),
             // Sloppy tolerance: `let` works as an identifier.
             Tok::Kw(Kw::Let) => {
@@ -1833,8 +1988,15 @@ impl Parser {
                         strict: self.strict,
                         module: self.module,
                         in_gen: self.in_gen,
+                        labels: Vec::new(),
+                        // Hérite les portées privées — `#x` dans une
+                        // substitution se résout dans la classe
+                        // englobante ; l'identité reste cohérente.
+                        priv_seq: self.priv_seq,
+                        priv_scopes: self.priv_scopes.clone(),
                     };
                     let e = sub.expr(no_in)?;
+                    self.priv_seq = self.priv_seq.max(sub.priv_seq);
                     if !sub.at_eof() {
                         return Err(self.err("trailing tokens in template substitution"));
                     }
@@ -1895,11 +2057,14 @@ impl Parser {
     fn fn_body(&mut self) -> Result<(Vec<Stmt>, bool)> {
         let outer_strict = self.strict;
         let outer_gen = self.in_gen;
+        // Les labels ne traversent pas la frontière fonction.
+        let outer_labels = std::mem::take(&mut self.labels);
         self.scan_directives();
         let body = self.stmt_list();
         let strict = self.strict;
         self.strict = outer_strict;
         self.in_gen = outer_gen;
+        self.labels = outer_labels;
         body.map(|b| (b, strict))
     }
 
@@ -1944,6 +2109,13 @@ impl Parser {
             None
         };
         self.expect_p(P::LBrace, "`{`")?;
+        // Portée des noms privés : les `#…` déclarés dans ce corps
+        // sont pré-scannés ; toute référence `#x` pendant le parse
+        // se résout vers `\u{f131}privN.x`.
+        self.priv_seq += 1;
+        let seq = self.priv_seq;
+        let decls = self.prescan_privates();
+        self.priv_scopes.push((seq, decls));
         let mut members = Vec::new();
         while !self.at_eof() && !self.check_p(P::RBrace) {
             let mut static_ = false;
@@ -1958,6 +2130,29 @@ impl Parser {
             {
                 self.next();
                 static_ = true;
+            }
+            // `static { … }` — bloc d'initialisation statique.
+            if static_ && self.check_p(P::LBrace) {
+                self.next();
+                let outer_strict = self.strict;
+                self.strict = true;
+                let body = self.stmt_list()?;
+                self.strict = outer_strict;
+                members.push(ClassMember {
+                    key: PropKey::Name(String::new()),
+                    kind: ClassMemberKind::StaticBlock,
+                    static_: true,
+                    fun: Rc::new(FnLit {
+                        name: None,
+                        params: Vec::new(),
+                        body,
+                        is_arrow: false,
+                        is_async: false,
+                        is_gen: false,
+                        strict: true,
+                    }),
+                });
+                continue;
             }
             // `async m()` — same lookahead rule.
             let async_ = matches!(self.peek(), Tok::Ident(s) if s == "async")
@@ -2004,6 +2199,35 @@ impl Parser {
                     }
                 }
             }
+            // `x` / `x = e` / `#x = e` — pas de `(` : champ
+            // d'instance (ou statique). L'init devient un thunk
+            // exécuté par le runtime à la construction.
+            if !self.check_p(P::LParen) {
+                let init = if self.eat_p(P::Assign) {
+                    Some(self.assign(false)?)
+                } else {
+                    None
+                };
+                self.eat_p(P::Semi);
+                let body = init
+                    .map(|e| vec![Stmt::Return(Some(e))])
+                    .unwrap_or_default();
+                members.push(ClassMember {
+                    key,
+                    kind: ClassMemberKind::Field,
+                    static_,
+                    fun: Rc::new(FnLit {
+                        name: None,
+                        params: Vec::new(),
+                        body,
+                        is_arrow: false,
+                        is_async: false,
+                        is_gen: false,
+                        strict: true,
+                    }),
+                });
+                continue;
+            }
             self.expect_p(P::LParen, "`(`")?;
             let params = self.params()?;
             self.expect_p(P::LBrace, "`{`")?;
@@ -2034,6 +2258,7 @@ impl Parser {
             });
         }
         self.expect_p(P::RBrace, "`}`")?;
+        self.priv_scopes.pop();
         Ok(Rc::new(ClassLit {
             name,
             super_,

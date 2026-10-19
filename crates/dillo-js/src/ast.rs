@@ -111,10 +111,19 @@ pub enum Stmt {
         /// Body.
         body: Box<Stmt>,
     },
-    /// `break` (unlabelled only)
-    Break,
-    /// `continue` (unlabelled only)
-    Continue,
+    /// `lbl : stmt` — statement étiqueté (cible de `break lbl` /
+    /// `continue lbl`).
+    Labeled {
+        /// Label name.
+        name: String,
+        /// Labelled statement.
+        body: Box<Stmt>,
+    },
+    /// `break [label]`
+    Break(Option<String>),
+    /// `continue [label]` — `Some` restreint aux labels de boucle
+    /// (early error du parseur).
+    Continue(Option<String>),
     /// `return [e]`
     Return(Option<Expr>),
     /// `throw e`
@@ -350,6 +359,11 @@ pub enum ClassMemberKind {
     Getter,
     /// `set k(v)`.
     Setter,
+    /// `k = init` / `#k = init` — the `fun` body is a synthesized
+    /// `return init` thunk (empty body → `undefined`).
+    Field,
+    /// `static { … }` block — `fun` carries the statements.
+    StaticBlock,
 }
 
 /// Binary operators.

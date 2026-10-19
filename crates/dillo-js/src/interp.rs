@@ -37,6 +37,21 @@ pub(crate) const HOME_BIND: &str = "\u{f120}home";
 /// Parent constructor value for `super(...)`.
 pub(crate) const SUPER_BIND: &str = "\u{f120}super";
 
+/// Préfixe des clés privées `\u{f131}privN.name` — produit par le
+/// parser (résolution lexicale des `#x`), jamais énumérable.
+pub(crate) const PRIV_PREFIX: &str = "\u{f131}priv";
+/// Liste des champs d'instance d'une classe de base —
+/// `[[clé, thunk], …]` installée sur `this` à l'entrée du corps.
+const FLD_FIELDS: &str = "\u{f131}fields";
+/// Idem pour une classe dérivée : installée après le `super()`.
+const FLD_FIELDS_D: &str = "\u{f131}fields.derived";
+/// Marqueur posé sur `this` après installation des champs dérivés
+/// — un second `super()` doit lever `TypeError` (spec).
+const FLD_DONE: &str = "\u{f131}fields.done";
+/// Marqueur « constructeur de classe » — `C()` sans `new` lève
+/// `TypeError` (spec `[[IsClassConstructor]]` implicite).
+const CLASS_CTOR: &str = "\u{f131}ctor";
+
 /// `Symbol.iterator` property key — a private-use sentinel string
 /// (symbols are represented as opaque string keys; `typeof sym`
 /// yields `"string"`, a documented deviation).
@@ -150,6 +165,10 @@ pub struct Engine {
     /// `yield` pousse sur le collecteur du sommet — déviation
     /// documentée, pas de suspension).
     pub(crate) gen_collect: Vec<Vec<Value>>,
+    /// Labels de boucle en attente — posés par `Stmt::Labeled`
+    /// juste avant l'exécution d'une boucle, consommés par cette
+    /// boucle (`a: b: for` empile les deux labels).
+    pending_labels: Vec<String>,
 }
 
 /// Prototype objects captured at engine init.
@@ -223,8 +242,12 @@ impl Protos {
 /// Statement completion — `throw` travels via `Err(Thrown)`.
 pub(crate) enum Flow {
     Normal,
-    Break,
-    Continue,
+    /// `break [label]` — `Some` n'est avalé que par le statement
+    /// étiqueté correspondant, jamais par une boucle interne.
+    Break(Option<String>),
+    /// `continue [label]` — `Some` n'est avalé que par la boucle
+    /// portant ce label (capturé dans `my_labels`).
+    Continue(Option<String>),
     Return(Value),
 }
 
@@ -315,6 +338,7 @@ impl Engine {
             module_loader: None,
             current_module: String::new(),
             gen_collect: Vec::new(),
+            pending_labels: Vec::new(),
         };
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
@@ -1493,23 +1517,45 @@ impl Engine {
 
         // Members — methods/accessors on the prototype (or ctor for
         // `static`), each closing over a scope with `home` bound.
+        // Instance fields are collected (source order) into a
+        // `[[key, thunk], ...]` list; `static` fields/blocks run
+        // here with `this` = the constructor object.
+        let mut fields: Vec<Value> = Vec::new();
         for m in &cl.members {
             if matches!(m.kind, ClassMemberKind::Ctor) {
                 continue;
             }
-            let key = self.eval_prop_key(env, this, &m.key)?;
             let target = if m.static_ { ctor_id } else { proto };
             let menv = Env::local(cenv.clone());
             Self::env_put(&menv, HOME_BIND, Value::Obj(target), false);
             let fv = self.make_function(&m.fun, &menv, this);
             match m.kind {
-                ClassMemberKind::Method => self.set_own(target, &key, fv, false),
+                ClassMemberKind::Field if m.static_ => {
+                    let key = self.eval_prop_key(env, this, &m.key)?;
+                    let v = self.call_value(fv, ctor, &[])?;
+                    self.set_own(ctor_id, &key, v, !key.starts_with(PRIV_PREFIX));
+                }
+                ClassMemberKind::Field => {
+                    let key = self.eval_prop_key(env, this, &m.key)?;
+                    let kv = self.str_val(key);
+                    let pair = self.new_array(vec![kv, fv]);
+                    fields.push(pair);
+                }
+                ClassMemberKind::StaticBlock => {
+                    self.call_value(fv, ctor, &[])?;
+                }
+                ClassMemberKind::Method => {
+                    let key = self.eval_prop_key(env, this, &m.key)?;
+                    self.set_own(target, &key, fv, false);
+                }
                 ClassMemberKind::Getter => {
+                    let key = self.eval_prop_key(env, this, &m.key)?;
                     if let Some(o) = self.heap.obj_mut(target) {
                         o.set_accessor(&key, fv, Value::Undefined, false);
                     }
                 }
                 ClassMemberKind::Setter => {
+                    let key = self.eval_prop_key(env, this, &m.key)?;
                     if let Some(o) = self.heap.obj_mut(target) {
                         o.set_accessor(&key, Value::Undefined, fv, false);
                     }
@@ -1517,7 +1563,47 @@ impl Engine {
                 ClassMemberKind::Ctor => {}
             }
         }
+        if !fields.is_empty() {
+            let arr = self.new_array(fields);
+            let marker = if parent.is_some() {
+                FLD_FIELDS_D
+            } else {
+                FLD_FIELDS
+            };
+            self.set_own(ctor_id, marker, arr, false);
+        }
+        // `C()` without `new` -> TypeError (class constructor).
+        self.set_own(ctor_id, CLASS_CTOR, Value::Bool(true), false);
         Ok(ctor)
+    }
+
+    /// Runs the `[[key, thunk], ...]` list stored under `marker`
+    /// on the constructor and installs each field on `this`.
+    /// Private-name keys stay non-enumerable; thunks close over
+    /// the class scope.
+    fn install_class_fields(&mut self, ctor_id: ObjId, marker: &str, this: Value) -> JsResult<()> {
+        let Some(Prop::Data {
+            value: Value::Obj(arr),
+            ..
+        }) = self.find_own(ctor_id, marker)
+        else {
+            return Ok(());
+        };
+        let pairs = self.iter_values(Value::Obj(arr))?;
+        for p in pairs {
+            let Value::Obj(pid) = p else {
+                continue;
+            };
+            let k = self.get_prop(pid, "0").unwrap_or(Value::Undefined);
+            let f = self.get_prop(pid, "1").unwrap_or(Value::Undefined);
+            let key = self.prop_key(k)?;
+            let v = self.call_value(f, this, &[])?;
+            let Value::Obj(tid) = this else {
+                return Err(self.type_error("field init without instance"));
+            };
+            self.set_own(tid, &key, v, !key.starts_with(PRIV_PREFIX));
+        }
+        Ok(())
     }
 
     // -- property access ------------------------------------------------
@@ -2455,7 +2541,26 @@ impl Engine {
     // -- calls & construction --------------------------------------------
 
     /// `f.apply(this, args)` with full callable semantics.
+    /// Appel ordinaire `f(args)` — vérifie la marque classe :
+    /// `C()` sur un constructeur de classe → `TypeError` (spec, les
+    /// classes refusent l'appel sans `new`). `new`/`super()` passent
+    /// par [`call_value_ctor`].
     pub(crate) fn call_value(&mut self, f: Value, this: Value, args: &[Value]) -> JsResult<Value> {
+        if let Value::Obj(fid) = f {
+            if self.find_own(fid, CLASS_CTOR).is_some() {
+                return Err(self.type_error("class constructor cannot be invoked without `new`"));
+            }
+        }
+        self.call_value_impl(f, this, args)
+    }
+
+    /// Appel en contexte de construction (`new`, `super(...)`) —
+    /// la marque de constructeur de classe y est attendue.
+    fn call_value_ctor(&mut self, f: Value, this: Value, args: &[Value]) -> JsResult<Value> {
+        self.call_value_impl(f, this, args)
+    }
+
+    fn call_value_impl(&mut self, f: Value, this: Value, args: &[Value]) -> JsResult<Value> {
         let Value::Obj(id) = f else {
             return Err(self.type_error("value is not a function"));
         };
@@ -2626,7 +2731,10 @@ impl Engine {
             _ => Value::Obj(self.protos.object),
         };
         let obj = Value::Obj(self.heap.alloc_obj(Object::ordinary(proto)));
-        let r = self.call_value(f, obj, args)?;
+        // Champs d'instance d'une classe de base : installés à
+        // l'entrée du corps (spec `DefineField` en tête de ctor).
+        self.install_class_fields(fid, FLD_FIELDS, obj)?;
+        let r = self.call_value_ctor(f, obj, args)?;
         Ok(if r.is_object() { r } else { obj })
     }
 
@@ -2702,7 +2810,10 @@ impl Engine {
                         self.hoist_vars_only(std::slice::from_ref(&**e), env);
                     }
                 }
-                Stmt::While { body, .. } | Stmt::DoWhile { body, .. } | Stmt::With { body, .. } => {
+                Stmt::While { body, .. }
+                | Stmt::DoWhile { body, .. }
+                | Stmt::With { body, .. }
+                | Stmt::Labeled { body, .. } => {
                     self.hoist_vars_only(std::slice::from_ref(&**body), env);
                 }
                 Stmt::For { init, body, .. } => {
@@ -2779,7 +2890,7 @@ impl Engine {
         let this = Value::Obj(self.global);
         for s in &prog.body {
             match self.exec_stmt(&env, this, s)? {
-                Flow::Normal | Flow::Break | Flow::Continue => {}
+                Flow::Normal | Flow::Break(_) | Flow::Continue(_) => {}
                 Flow::Return(v) => return Ok(v),
             }
         }
@@ -2895,36 +3006,41 @@ impl Engine {
                 let with_env = Env::with(env.clone(), oid);
                 self.exec_stmt(&with_env, this, body)
             }
-            Stmt::While { cond, body } => loop {
-                self.tick()?;
-                let c = self.eval_expr(env, this, cond)?;
-                if !self.to_boolean(c) {
-                    return Ok(Flow::Normal);
+            Stmt::While { cond, body } => {
+                let labels = std::mem::take(&mut self.pending_labels);
+                loop {
+                    self.tick()?;
+                    let c = self.eval_expr(env, this, cond)?;
+                    if !self.to_boolean(c) {
+                        return Ok(Flow::Normal);
+                    }
+                    let f = self.exec_stmt(env, this, body)?;
+                    if let Some(f) = Self::loop_flow(f, &labels) {
+                        return Ok(f);
+                    }
                 }
-                match self.exec_stmt(env, this, body)? {
-                    Flow::Normal | Flow::Continue => {}
-                    Flow::Break => return Ok(Flow::Normal),
-                    f @ Flow::Return(_) => return Ok(f),
+            }
+            Stmt::DoWhile { body, cond } => {
+                let labels = std::mem::take(&mut self.pending_labels);
+                loop {
+                    self.tick()?;
+                    let f = self.exec_stmt(env, this, body)?;
+                    if let Some(f) = Self::loop_flow(f, &labels) {
+                        return Ok(f);
+                    }
+                    let c = self.eval_expr(env, this, cond)?;
+                    if !self.to_boolean(c) {
+                        return Ok(Flow::Normal);
+                    }
                 }
-            },
-            Stmt::DoWhile { body, cond } => loop {
-                self.tick()?;
-                match self.exec_stmt(env, this, body)? {
-                    Flow::Normal | Flow::Continue => {}
-                    Flow::Break => return Ok(Flow::Normal),
-                    f @ Flow::Return(_) => return Ok(f),
-                }
-                let c = self.eval_expr(env, this, cond)?;
-                if !self.to_boolean(c) {
-                    return Ok(Flow::Normal);
-                }
-            },
+            }
             Stmt::For {
                 init,
                 test,
                 update,
                 body,
             } => {
+                let labels = std::mem::take(&mut self.pending_labels);
                 if let Some(init) = init {
                     match init {
                         ForInit::Var(decls) => {
@@ -2963,10 +3079,9 @@ impl Engine {
                             return Ok(Flow::Normal);
                         }
                     }
-                    match self.exec_stmt(env, this, body)? {
-                        Flow::Normal | Flow::Continue => {}
-                        Flow::Break => return Ok(Flow::Normal),
-                        f @ Flow::Return(_) => return Ok(f),
+                    let f = self.exec_stmt(env, this, body)?;
+                    if let Some(f) = Self::loop_flow(f, &labels) {
+                        return Ok(f);
                     }
                     if let Some(u) = update {
                         self.eval_expr(env, this, u)?;
@@ -2979,6 +3094,7 @@ impl Engine {
                 var_init,
                 body,
             } => {
+                let labels = std::mem::take(&mut self.pending_labels);
                 let ov = self.eval_expr(env, this, obj)?;
                 if let Some(init) = var_init {
                     let v = self.eval_expr(env, this, init)?;
@@ -2990,10 +3106,9 @@ impl Engine {
                 for key in self.enum_keys(id)? {
                     let kv = self.str_val(key);
                     self.assign_target(env, this, target, kv)?;
-                    match self.exec_stmt(env, this, body)? {
-                        Flow::Normal | Flow::Continue => {}
-                        Flow::Break => return Ok(Flow::Normal),
-                        f @ Flow::Return(_) => return Ok(f),
+                    let f = self.exec_stmt(env, this, body)?;
+                    if let Some(f) = Self::loop_flow(f, &labels) {
+                        return Ok(f);
                     }
                 }
                 Ok(Flow::Normal)
@@ -3004,6 +3119,7 @@ impl Engine {
                 body,
                 is_await,
             } => {
+                let labels = std::mem::take(&mut self.pending_labels);
                 let v = self.eval_expr(env, this, iter)?;
                 let items = if *is_await {
                     self.iter_values_await(v)?
@@ -3012,16 +3128,40 @@ impl Engine {
                 };
                 for item in items {
                     self.assign_target(env, this, target, item)?;
-                    match self.exec_stmt(env, this, body)? {
-                        Flow::Normal | Flow::Continue => {}
-                        Flow::Break => return Ok(Flow::Normal),
-                        f @ Flow::Return(_) => return Ok(f),
+                    let f = self.exec_stmt(env, this, body)?;
+                    if let Some(f) = Self::loop_flow(f, &labels) {
+                        return Ok(f);
                     }
                 }
                 Ok(Flow::Normal)
             }
-            Stmt::Break => Ok(Flow::Break),
-            Stmt::Continue => Ok(Flow::Continue),
+            // `lbl : stmt` — les labels de boucle sont consommés par
+            // la boucle enfant via `pending_labels` ; `break lbl`
+            // (même sur bloc) est avalé ici, tout le reste remonte.
+            Stmt::Labeled { name, body } => {
+                if matches!(
+                    &**body,
+                    Stmt::While { .. }
+                        | Stmt::DoWhile { .. }
+                        | Stmt::For { .. }
+                        | Stmt::ForIn { .. }
+                        | Stmt::ForOf { .. }
+                ) {
+                    self.pending_labels.push(name.clone());
+                }
+                let r = self.exec_stmt(env, this, body);
+                // Défensif : nettoie le label si la boucle ne l'a
+                // pas consommé (corps non exécuté, erreur précoce).
+                if let Some(pos) = self.pending_labels.iter().rposition(|l| l == name) {
+                    self.pending_labels.remove(pos);
+                }
+                match r? {
+                    Flow::Break(Some(l)) if l == *name => Ok(Flow::Normal),
+                    f => Ok(f),
+                }
+            }
+            Stmt::Break(l) => Ok(Flow::Break(l.clone())),
+            Stmt::Continue(l) => Ok(Flow::Continue(l.clone())),
             Stmt::Return(e) => {
                 let v = match e {
                     Some(e) => self.eval_expr(env, this, e)?,
@@ -3079,12 +3219,34 @@ impl Engine {
                 for c in &cases[start..] {
                     match self.exec_body(env, this, &c.body)? {
                         Flow::Normal => {}
-                        Flow::Break => return Ok(Flow::Normal),
+                        // `break` seul sort du switch ; `break lbl`
+                        // remonte jusqu'au statement étiqueté.
+                        Flow::Break(None) => return Ok(Flow::Normal),
                         f => return Ok(f),
                     }
                 }
                 Ok(Flow::Normal)
             }
+        }
+    }
+
+    /// Consomme le `Flow` produit par un corps de boucle —
+    /// `None` = itération suivante, `Some(f)` = quitter la boucle
+    /// en propageant `f`. `labels` = labels de boucle captés via
+    /// `pending_labels` (`continue lbl` ne les avale que si `lbl`
+    /// y figure ; `break lbl` n'est jamais avalé par une boucle).
+    fn loop_flow(f: Flow, labels: &[String]) -> Option<Flow> {
+        match f {
+            Flow::Normal | Flow::Continue(None) => None,
+            Flow::Continue(Some(l)) => {
+                if labels.contains(&l) {
+                    None
+                } else {
+                    Some(Flow::Continue(Some(l)))
+                }
+            }
+            Flow::Break(None) => Some(Flow::Normal),
+            f => Some(f),
         }
     }
 
@@ -3286,8 +3448,29 @@ impl Engine {
                 if !self.is_callable(parent) {
                     return Err(self.type_error("superclass is not a constructor"));
                 }
+                // Double `super()` → TypeError (spec, `this` déjà lié).
+                let Value::Obj(tid) = this else {
+                    return Err(self.type_error("`super()` requires an object `this`"));
+                };
+                if self.find_own(tid, FLD_DONE).is_some() {
+                    return Err(self.type_error("super() may only be called once"));
+                }
+                // Champs d'instance du parent base : installés à
+                // l'entrée de son corps — `super()` l'appelle comme
+                // fonction ordinaire, on pose la liste avant.
+                if let Value::Obj(pid) = parent {
+                    self.install_class_fields(pid, FLD_FIELDS, this)?;
+                }
                 let args = self.eval_args(env, this, arg_exprs)?;
-                self.call_value(parent, this, &args)?;
+                self.call_value_ctor(parent, this, &args)?;
+                self.set_own(tid, FLD_DONE, Value::Bool(true), false);
+                // Nos champs de classe dérivée : installés juste
+                // après `super()` — le constructeur de *cette*
+                // classe est la fermeture courante (`HOME_BIND`).
+                let own_ctor = self.env_get(env, HOME_BIND);
+                if let Some(Value::Obj(cid)) = own_ctor {
+                    self.install_class_fields(cid, FLD_FIELDS_D, this)?;
+                }
                 Ok(this)
             }
             Expr::SuperMember(name) => {
