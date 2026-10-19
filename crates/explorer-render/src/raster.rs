@@ -255,7 +255,73 @@ fn paint_item(
                 pixmap.fill_rect(r, &paint, dpi, clip);
             }
         }
+        DisplayItem::Image { rect, img } => {
+            paint_image(pixmap, rect, img, scale, clip);
+        }
         DisplayItem::PushClip(_) | DisplayItem::PopClip => {}
+    }
+}
+
+/// Bitmap `img` blittée dans `rect` — nearest-neighbor
+/// (aucun lissage à cette étape), source-over en espace
+/// prémultiplié, pixels hors clip sauté pixel à pixel.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn paint_image(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    img: &crate::DecodedImage,
+    scale: f32,
+    clip: Option<&Mask>,
+) {
+    let (pw, ph) = (
+        i32::try_from(pixmap.width()).unwrap_or(i32::MAX),
+        i32::try_from(pixmap.height()).unwrap_or(i32::MAX),
+    );
+    let (x0, y0) = (
+        (rect.x * scale).round() as i32,
+        (rect.y * scale).round() as i32,
+    );
+    let (x1, y1) = (
+        ((rect.x + rect.width) * scale).round() as i32,
+        ((rect.y + rect.height) * scale).round() as i32,
+    );
+    let (dx0, dy0) = (x0.max(0), y0.max(0));
+    let (dx1, dy1) = (x1.min(pw), y1.min(ph));
+    if dx0 >= dx1 || dy0 >= dy1 || rect.width <= 0.0 || rect.height <= 0.0 {
+        return;
+    }
+    let iw = img.width as usize;
+    let ih = img.height as usize;
+    let clip_data = clip.map(tiny_skia::Mask::data);
+    let dst = pixmap.pixels_mut();
+    let (pw_u, dw, dh) = (pw as usize, x1 - x0, y1 - y0);
+    for dy in dy0..dy1 {
+        let sy = ((dy - y0) as usize * ih) / dh.max(1) as usize;
+        for dx in dx0..dx1 {
+            let i = dy as usize * pw_u + dx as usize;
+            if clip_data.is_some_and(|m| m[i] == 0) {
+                continue;
+            }
+            let sx = ((dx - x0) as usize * iw) / dw.max(1) as usize;
+            let s = (sy.min(ih - 1) * iw + sx.min(iw - 1)) * 4;
+            let (sa, sr, sg, sb) = (
+                u32::from(img.rgba[s + 3]),
+                u32::from(img.rgba[s]),
+                u32::from(img.rgba[s + 1]),
+                u32::from(img.rgba[s + 2]),
+            );
+            // Source-over prémultiplié : src + dst·(1−α).
+            let inv = 255 - sa;
+            let d = dst[i];
+            let blend = |sv: u32, dv: u8| ((sv * sa + u32::from(dv) * inv + 127) / 255) as u8;
+            dst[i] = tiny_skia::PremultipliedColorU8::from_rgba(
+                blend(sr, d.red()),
+                blend(sg, d.green()),
+                blend(sb, d.blue()),
+                (sa + u32::from(d.alpha()) * inv / 255) as u8,
+            )
+            .unwrap_or(tiny_skia::PremultipliedColorU8::TRANSPARENT);
+        }
     }
 }
 

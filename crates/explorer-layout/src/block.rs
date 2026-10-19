@@ -191,7 +191,11 @@ pub(crate) fn layout_block(
     // négatif → débordement) va aux marges `auto` ; tout
     // spécifié → `margin-right` reprend le reste (flux LTR).
     // `auto` hors width → marge 0 (déjà le repli `side_px`).
-    let w_spec = css_px(&st, "width", cb_w, fs, ctx);
+    // Élément remplacé (`img`) : la taille préférée fait
+    // office de `width`/`height` quand le CSS est `auto`
+    // (§10.3.2 — attr/dimensions intrinsèques déjà résolus
+    // en amont, chaque axe indépendamment).
+    let w_spec = css_px(&st, "width", cb_w, fs, ctx).or(bx.intrinsic.map(|i| i.0));
     let auto_left = st.get("margin-left") == Some("auto");
     let auto_right = st.get("margin-right") == Some("auto");
     let fixed = bl + br + pl + pr;
@@ -248,7 +252,7 @@ pub(crate) fn layout_block(
     );
 
     let content_h = cursor - (y + bt + pt);
-    let h_spec = css_px(&st, "height", ctx.base_font_size, fs, ctx);
+    let h_spec = css_px(&st, "height", ctx.base_font_size, fs, ctx).or(bx.intrinsic.map(|i| i.1));
     let mut used_h = h_spec.unwrap_or(content_h);
     if let Some(mn) = css_px(&st, "min-height", cb_w, fs, ctx) {
         used_h = used_h.max(mn);

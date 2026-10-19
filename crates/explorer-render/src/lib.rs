@@ -15,8 +15,12 @@
 
 pub mod display;
 pub mod fonts;
+pub mod image;
 pub mod raster;
 
-pub use display::{build_display_list, BorderStyle, DisplayItem, DisplayList};
+pub use display::{
+    build_display_list, build_display_list_imaged, BorderStyle, DisplayItem, DisplayList,
+};
 pub use fonts::DirFontSource;
+pub use image::{decode_image, DecodedImage, ImageTable};
 pub use raster::{rasterize, Frame};

@@ -31,7 +31,7 @@ impl FontSource for FixtureFont {
 /// Transport simulé : table `chemin → (status, corps)`,
 /// compte les requêtes pour prouver l'absence de re-fetch.
 struct FakeTransport {
-    routes: Mutex<HashMap<String, (u16, &'static str)>>,
+    routes: Mutex<HashMap<String, (u16, Vec<u8>)>>,
     calls: Mutex<u32>,
 }
 
@@ -44,9 +44,19 @@ impl FakeTransport {
     }
 
     fn route(&self, path: &str, status: u16, body: &'static str) {
+        self.route_bin(path, status, body.as_bytes().to_vec());
+    }
+
+    /// Corps binaire (images & co).
+    fn route_bin(&self, path: &str, status: u16, body: Vec<u8>) {
         if let Ok(mut r) = self.routes.lock() {
             r.insert(path.to_string(), (status, body));
         }
+    }
+
+    /// Requêtes servies.
+    fn calls(&self) -> u32 {
+        self.calls.lock().map_or(0, |c| *c)
     }
 }
 
@@ -60,13 +70,13 @@ impl HttpTransport for FakeTransport {
             .routes
             .lock()
             .ok()
-            .and_then(|r| r.get(req.url.path()).copied());
+            .and_then(|r| r.get(req.url.path()).cloned());
         match found {
             Some((status, body)) => Ok(Response {
                 status,
                 reason: "fake".to_string(),
                 headers: vec![],
-                body: body.as_bytes().to_vec(),
+                body,
                 reused_connection: false,
             }),
             None => Ok(Response {
@@ -91,6 +101,8 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
             viewport: (800.0, 600.0),
             scale: 1.0,
             js_ops: 5_000_000,
+            max_images: 32,
+            image_max_px: 16_000_000,
         },
     );
     (s, t)
@@ -803,4 +815,94 @@ async fn timer_zero_fires_and_rerenders() {
     s.navigate(b, "http://h.test/stat").await.unwrap();
 
     assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// PNG 2×2 rouge opaque, encodé à la volée.
+fn red_png() -> Vec<u8> {
+    use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
+    let mut buf = Vec::new();
+    PngEncoder::new(&mut buf)
+        .write_image(&[255, 0, 0, 255].repeat(4), 2, 2, ExtendedColorType::Rgba8)
+        .expect("encode png");
+    buf
+}
+
+#[tokio::test]
+async fn img_renders_decoded_bitmap() {
+    let (mut s, t) = test_session();
+    t.route("/i", 200, "<html><body><img src=\"/i.png\"></body></html>");
+    t.route_bin("/i.png", 200, red_png());
+    // Page équivalente : un bloc 2×2 à fond rouge — la
+    // comparaison PNG prouve le blit bout en bout.
+    t.route(
+        "/s",
+        200,
+        "<html><head><style>#b{background-color:#ff0000;\
+         width:2px;height:2px}</style></head>\
+         <body><div id=\"b\"></div></body></html>",
+    );
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+#[tokio::test]
+#[allow(clippy::many_single_char_names)]
+async fn broken_img_falls_back_to_alt() {
+    let (mut s, t) = test_session();
+    // `/i.png` n'est pas routée → 404 → le `<img>` tombe
+    // sur sa boîte texte `alt`. On prouve que c'est bien
+    // l'alt qui se peint : PNG différent selon le texte
+    // `alt`, identique pour un autre `src` cassé.
+    t.route(
+        "/a",
+        200,
+        "<html><body><img src=\"/i.png\" alt=\"fallback\"></body></html>",
+    );
+    t.route(
+        "/b",
+        200,
+        "<html><body><img src=\"/autre.png\" alt=\"fallback\"></body></html>",
+    );
+    t.route(
+        "/c",
+        200,
+        "<html><body><img src=\"/i.png\" alt=\"changed\"></body></html>",
+    );
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/a").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/b").await.unwrap();
+    let c = s.open_tab();
+    s.navigate(c, "http://h.test/c").await.unwrap();
+
+    // Même `alt`, `src` cassé différent → rendu identique.
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+    // `alt` différent → le texte peint change.
+    assert_ne!(s.frame_png(a), s.frame_png(c));
+}
+
+#[tokio::test]
+async fn img_count_is_bounded() {
+    let (mut s, t) = test_session();
+    // 40 images déclarées, borne `max_images` = 32 par
+    // défaut — les requêtes d'image restent bornées.
+    let mut page = String::from("<html><body>");
+    for i in 0..40 {
+        let _ = std::fmt::Write::write_fmt(&mut page, format_args!("<img src=\"/i.png?id={i}\">"));
+    }
+    page.push_str("</body></html>");
+    // `route` prend &'static — la page fuit volontairement
+    // (test borné).
+    t.route("/", 200, Box::leak(page.into_boxed_str()));
+    t.route_bin("/i.png", 200, red_png());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    // 1 document + ≤ 32 images (`max_images`) — jamais 41.
+    assert!(t.calls() <= 33, "fetches non bornés : {}", t.calls());
+    assert!(s.frame_png(id).is_some());
 }

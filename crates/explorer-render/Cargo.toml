@@ -11,7 +11,9 @@ workspace = true
 
 [dependencies]
 explorer-css.workspace = true
+explorer-dom.workspace = true
 explorer-layout.workspace = true
+image.workspace = true
 tiny-skia.workspace = true
 ttf-parser.workspace = true
 
@@ -19,3 +21,4 @@ ttf-parser.workspace = true
 explorer-dom.workspace = true
 explorer-html.workspace = true
 explorer-test-support.workspace = true
+image.workspace = true

@@ -103,10 +103,13 @@ pub(crate) fn layout_inline(
     let fs = font_size_px(&st, parent_fs, ctx);
 
     // inline-block : dimensionnés comme blocs AVANT le flux
-    // (ils gardent leur contenu, puis coulent en ligne).
+    // (ils gardent leur contenu, puis coulent en ligne). Une
+    // boîte portant `text` (alt d'`<img>` cassée) reste un
+    // item texte — sa valeur `display` ne s'applique qu'au
+    // contenu qu'elle n'a pas.
     let mut atomics: HashMap<usize, Rect> = HashMap::new();
     for (i, child) in bx.children.iter_mut().enumerate() {
-        if child.display() == "inline-block" {
+        if child.display() == "inline-block" && child.text.is_none() {
             layout_block(child, 0.0, 0.0, w, ctx, fs, abs_cb);
             atomics.insert(i, child.rect);
         }
@@ -132,6 +135,14 @@ fn collect_items(bx: &LayoutBox) -> Vec<Item> {
 }
 
 fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>) {
+    // Texte d'abord : une boîte `Text` (dont le repli `alt`
+    // d'un `<img>` cassé) s'itemise même si son style porte
+    // `display: inline-block` — l'atomicité ne vaut que pour
+    // les conteneurs.
+    if let Some(t) = &b.text {
+        items.push(text_item(b, owner, t));
+        return;
+    }
     if b.display() == "inline-block" {
         items.push(Item {
             owner,
@@ -140,10 +151,6 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>) {
             pieces: Vec::new(),
             atomic: true,
         });
-        return;
-    }
-    if let Some(t) = &b.text {
-        items.push(text_item(b, owner, t));
         return;
     }
     // Boîte inline conteneur : descendre — chaque texte

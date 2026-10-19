@@ -155,3 +155,46 @@ fn dump_wireframe_lisible() {
     assert!(dump.contains("\"salut\""), "{dump}");
     assert!(dump.contains("<p>") || dump.contains('p'), "{dump}");
 }
+
+/// `<img>` sans taille connue → boîte `Text` de l'`alt` ;
+/// avec taille → boîte remplacée portant `intrinsic`.
+#[test]
+fn img_alt_or_intrinsic() {
+    use explorer_layout::build_box_tree_sized;
+    fn img_box(sizes: &std::collections::HashMap<NodeId, (f32, f32)>) -> (Dom, LayoutBox) {
+        let dom =
+            TreeBuilder::parse("<html><body><img src=\"x.png\" alt=\"fallback\"></body></html>");
+        let mut eng = StyleEngine::new();
+        eng.add_css(&collect_style_css(&dom), Origin::Author);
+        let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+        let root_el = dom
+            .children(dom.document())
+            .into_iter()
+            .flatten()
+            .find(|&c| dom.element(c).is_ok())
+            .unwrap();
+        let bx = build_box_tree_sized(&dom, root_el, &styles, sizes).unwrap();
+        (dom, bx)
+    }
+    fn find<'a>(b: &'a LayoutBox, dom: &Dom, tag: &str) -> Option<&'a LayoutBox> {
+        if b.node
+            .is_some_and(|n| dom.tag_name(n).is_ok_and(|t| t == tag))
+        {
+            return Some(b);
+        }
+        b.children.iter().find_map(|c| find(c, dom, tag))
+    }
+
+    // Sans taille : repli texte `alt`.
+    let (dom, bx) = img_box(&std::collections::HashMap::new());
+    let img = find(&bx, &dom, "img").expect("boîte img");
+    assert_eq!(img.text.as_deref(), Some("fallback"));
+    assert_eq!(img.intrinsic, None);
+    let img_node = img.node.unwrap();
+
+    // Avec taille : boîte remplacée à `intrinsic`.
+    let (dom2, bx2) = img_box(&std::iter::once((img_node, (40.0, 20.0))).collect());
+    let img2 = find(&bx2, &dom2, "img").expect("boîte img");
+    assert_eq!(img2.intrinsic, Some((40.0, 20.0)));
+    assert!(img2.text.is_none());
+}

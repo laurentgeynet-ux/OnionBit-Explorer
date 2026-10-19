@@ -132,6 +132,11 @@ pub struct LayoutBox {
     /// `z-index` résolu (0 = auto) — contextes d'empilement
     /// pour l'ordre de peinture.
     pub z_index: i32,
+    /// Taille préférée d'un élément remplacé (`img`) en px —
+    /// déjà résolue amont (attribut `width`/`height` s'il est
+    /// sain, sinon dimensions intrinsèques décodées). Chaque
+    /// axe : CSS `width`/`height` > cette valeur.
+    pub intrinsic: Option<(f32, f32)>,
 }
 
 impl LayoutBox {
@@ -188,11 +193,54 @@ impl LayoutBox {
 /// élément du sous-arbre (`StyleEngine::compute_tree`) — les
 /// boîtes texte héritent du style de leur parent. `None` si
 /// `root` est `display: none` ou absent de la `StyleMap`.
+/// Équivaut à [`build_box_tree_sized`] sans tailles d'images.
 #[must_use]
 pub fn build_box_tree(dom: &Dom, root: NodeId, styles: &StyleMap) -> Option<LayoutBox> {
+    build_box_tree_sized(dom, root, styles, &std::collections::HashMap::new())
+}
+
+/// Variante de [`build_box_tree`] avec `sizes` = tailles
+/// préférées des éléments remplacés (`img` décodés, attributs
+/// résolus) ; un `img` absent de la map produit une boîte
+/// texte de son `alt` (dégradation image cassée).
+#[must_use]
+pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
+    dom: &Dom,
+    root: NodeId,
+    styles: &StyleMap,
+    sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
+) -> Option<LayoutBox> {
     let style = styles.get(root)?.clone();
     if style.get("display") == Some("none") {
         return None;
+    }
+    // `<img>` : élément remplacé si l'image est disponible,
+    // texte `alt` sinon (repli du navigateur classique).
+    if dom.tag_name(root).is_ok_and(|t| t == "img") {
+        let alt = dom
+            .attribute(root, "alt")
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .clone();
+        let (kind, text) = match sizes.get(&root) {
+            Some(_) => (box_kind_of(&style), None),
+            None => (BoxKind::Text, (!alt.is_empty()).then_some(alt)),
+        };
+        return Some(LayoutBox {
+            kind,
+            node: Some(root),
+            style: style.clone(),
+            text,
+            children: Vec::new(),
+            lines: Vec::new(),
+            rect: Rect::default(),
+            position: Position::Static,
+            float: Float::None,
+            overflow: Overflow::Visible,
+            z_index: 0,
+            intrinsic: sizes.get(&root).copied(),
+        });
     }
     let kind = box_kind_of(&style);
     let mut b = LayoutBox {
@@ -207,8 +255,9 @@ pub fn build_box_tree(dom: &Dom, root: NodeId, styles: &StyleMap) -> Option<Layo
         float: Float::None,
         overflow: Overflow::Visible,
         z_index: 0,
+        intrinsic: None,
     };
-    let children = child_boxes(dom, root, styles, &style);
+    let children = child_boxes(dom, root, styles, &style, sizes);
     b.children = if kind.is_inline_level() {
         children // en-ligne : pas d'enveloppe anonyme ici
     } else {
@@ -228,11 +277,12 @@ fn box_kind_of(style: &ComputedStyle) -> BoxKind {
 }
 
 /// Boîtes des enfants de `parent` (éléments + texte utile).
-fn child_boxes(
+fn child_boxes<S: ::std::hash::BuildHasher>(
     dom: &Dom,
     parent: NodeId,
     styles: &StyleMap,
     parent_style: &ComputedStyle,
+    sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
 ) -> Vec<LayoutBox> {
     let Ok(children) = dom.children(parent) else {
         return Vec::new();
@@ -240,7 +290,7 @@ fn child_boxes(
     let mut out = Vec::new();
     for child in children {
         if dom.element(child).is_ok() {
-            if let Some(mut b) = build_box_tree(dom, child, styles) {
+            if let Some(mut b) = build_box_tree_sized(dom, child, styles, sizes) {
                 // `<br>` : saut de ligne forcé — on lui donne
                 // un texte "\n" que l'itemisation UAX #14
                 // coupe durement (`ends_hard_break`).
@@ -268,6 +318,7 @@ fn child_boxes(
                     float: Float::None,
                     overflow: Overflow::Visible,
                     z_index: 0,
+                    intrinsic: None,
                 });
             }
         }
@@ -319,6 +370,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             float: Float::None,
             overflow: Overflow::Visible,
             z_index: 0,
+            intrinsic: None,
         });
     }
 }

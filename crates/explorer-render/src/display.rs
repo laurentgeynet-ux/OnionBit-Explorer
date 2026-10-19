@@ -71,6 +71,14 @@ pub enum DisplayItem {
         /// Étiquette (`alt`, tag…).
         label: String,
     },
+    /// Bitmap décodée, blittée dans `rect` (mise à l'échelle
+    /// nearest — aucun lissage à cette étape).
+    Image {
+        /// Zone de destination (border box de l'élément).
+        rect: Rect,
+        /// Pixels décodés.
+        img: std::sync::Arc<crate::image::DecodedImage>,
+    },
     /// Entrée de zone de clipping (`overflow` ≠ `visible`).
     PushClip(Rect),
     /// Sortie de la zone de clipping correspondante.
@@ -128,6 +136,9 @@ impl DisplayList {
                 DisplayItem::Placeholder { rect, label } => {
                     let _ = writeln!(out, "placeholder {label} {rect:?}");
                 }
+                DisplayItem::Image { rect, img } => {
+                    let _ = writeln!(out, "image {}x{} {rect:?}", img.width, img.height);
+                }
                 DisplayItem::PushClip(r) => {
                     let _ = writeln!(out, "push-clip {r:?}");
                 }
@@ -143,6 +154,28 @@ impl DisplayList {
 /// couvre au moins le viewport. `scroll_y` décale tout le
 /// contenu vers le haut, **sauf** les sous-arbres
 /// `position: fixed` qui restent ancrés au viewport.
+/// `images` = pixels décodés par `NodeId` `<img>` — une
+/// boîte remplacée (`intrinsic` posé) peint son bitmap.
+/// [`build_display_list`] équivaut à une map vide.
+#[must_use]
+pub fn build_display_list_imaged(
+    root: &LayoutBox,
+    viewport_w: f32,
+    viewport_h: f32,
+    scroll_y: f32,
+    images: &crate::ImageTable,
+) -> DisplayList {
+    let mut items = Vec::new();
+    paint_box(root, &mut items, -scroll_y, images);
+    DisplayList {
+        items,
+        width: viewport_w,
+        height: root.rect.height.max(viewport_h),
+    }
+}
+
+/// Sans images (tout `<img>` tombe en boîte `alt`) — voir
+/// [`build_display_list_imaged`].
 #[must_use]
 pub fn build_display_list(
     root: &LayoutBox,
@@ -150,13 +183,13 @@ pub fn build_display_list(
     viewport_h: f32,
     scroll_y: f32,
 ) -> DisplayList {
-    let mut items = Vec::new();
-    paint_box(root, &mut items, -scroll_y);
-    DisplayList {
-        items,
-        width: viewport_w,
-        height: root.rect.height.max(viewport_h),
-    }
+    build_display_list_imaged(
+        root,
+        viewport_w,
+        viewport_h,
+        scroll_y,
+        &crate::ImageTable::new(),
+    )
 }
 
 /// `rect` translaté de `dy`.
@@ -292,7 +325,7 @@ fn font_request(st: &explorer_css::ComputedStyle) -> explorer_layout::font::Font
 }
 
 /// Peint une boîte et ses descendants dans l'ordre borné.
-fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32) {
+fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32, images: &crate::ImageTable) {
     // `position: fixed` est ancrée au viewport : son sous-arbre
     // ignore le scroll.
     let off = if bx.position == Position::Fixed {
@@ -301,6 +334,14 @@ fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32) {
         off
     };
     paint_self(bx, items, off);
+    // Élément remplacé : bitmap par-dessus bordure (contenu —
+    // ordre CSS 2.1 App. E : fond → bordure → contenu).
+    if let Some(img) = bx.node.and_then(|n| images.get(&n)).cloned() {
+        items.push(DisplayItem::Image {
+            rect: shifted(bx.rect, off),
+            img,
+        });
+    }
     if bx.children.is_empty() {
         return;
     }
@@ -313,7 +354,7 @@ fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32) {
     // Enfants non positionnés d'abord (ordre de l'arbre).
     for child in &bx.children {
         if child.position == Position::Static {
-            paint_box(child, items, off);
+            paint_box(child, items, off, images);
         }
     }
     // Enfants positionnés ensuite, triés par z-index (stable).
@@ -324,7 +365,7 @@ fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32) {
         .collect();
     positioned.sort_by_key(|c| c.z_index);
     for child in positioned {
-        paint_box(child, items, off);
+        paint_box(child, items, off, images);
     }
     if clipped {
         items.push(DisplayItem::PopClip);

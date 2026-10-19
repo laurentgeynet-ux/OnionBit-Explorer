@@ -21,10 +21,12 @@ use explorer_html::encoding::decode_sniffed;
 use explorer_html::TreeBuilder;
 use explorer_js::{JsEngine, JsFactory};
 use explorer_layout::font::FontSource;
-use explorer_layout::{build_box_tree, layout_tree, BlockCtx, LayoutBox};
+use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, LayoutBox};
 use explorer_net::http::{HttpTransport, Request};
 use explorer_net::url::Url;
-use explorer_render::{build_display_list, rasterize, DisplayList, Frame};
+use explorer_render::{
+    build_display_list_imaged, decode_image, rasterize, DisplayList, Frame, ImageTable,
+};
 use tokio::sync::broadcast;
 
 /// Identifiant d'onglet (monotone, jamais réutilisé).
@@ -244,6 +246,10 @@ struct Tab {
     /// `<script>` et qu'une fabrique est injectée ; meurt à
     /// la navigation (un contexte par document).
     js: Option<Box<dyn JsEngine>>,
+    /// Pixels `<img>` décodés, indexés par `NodeId` — vidée à
+    /// chaque re-parse (les ids changent), les `<img>` hors
+    /// map retombent sur leur texte `alt`.
+    images: ImageTable,
 }
 
 /// Configuration de session — seuils et viewport initiaux
@@ -260,6 +266,12 @@ pub struct SessionConfig {
     /// Budget d'opérations JS par `eval` (`set_op_limit` du
     /// moteur — protection anti-script-infini, règle budgets).
     pub js_ops: u64,
+    /// Nombre max d'`<img>` fetchés par document (règle
+    /// budgets — une page peut déclarer des milliers de src).
+    pub max_images: usize,
+    /// Budget pixels par image décodée (≈ 4 octets/pixel —
+    /// borne l'allocation avant décodage).
+    pub image_max_px: u32,
 }
 
 impl Default for SessionConfig {
@@ -269,6 +281,8 @@ impl Default for SessionConfig {
             viewport: (1024.0, 768.0),
             scale: 1.0,
             js_ops: 5_000_000,
+            max_images: 32,
+            image_max_px: 16_000_000,
         }
     }
 }
@@ -297,6 +311,10 @@ pub struct Session {
     /// Budget d'ops appliqué à chaque contexte (`js_ops` de
     /// config — `set_op_limit` à la création).
     js_ops: u64,
+    /// Bornes images (`SessionConfig` — nombre par document
+    /// et pixels décodés).
+    max_images: usize,
+    image_max_px: u32,
 }
 
 impl Session {
@@ -332,6 +350,8 @@ impl Session {
             bookmarks: Vec::new(),
             js_factory: None,
             js_ops: cfg.js_ops,
+            max_images: cfg.max_images,
+            image_max_px: cfg.image_max_px,
         }
     }
 
@@ -392,6 +412,7 @@ impl Session {
                 png: None,
                 focused: None,
                 js: None,
+                images: ImageTable::new(),
             },
         );
         let _ = self.events.send(CoreEvent::TabOpened { tab: id });
@@ -611,11 +632,44 @@ impl Session {
             entry.scroll_y = 0.0;
             entry.focused = None;
             entry.js = None;
+            entry.images.clear();
             entry.dom = Some(dom);
         }
         self.run_scripts(tab, &html);
+        self.fetch_images(tab).await;
         self.relayout(tab)?;
         Ok(title)
+    }
+
+    /// Fetch + décode des `<img src>` du document — séquentiel
+    /// borné (`max_images` entrées, `image_max_px` par image) ;
+    /// un échec individuel (réseau, format, borne) laisse le
+    /// nœud hors de la table → le boxtree peint son `alt`.
+    async fn fetch_images(&mut self, tab: TabId) {
+        let (Some(base), Some(dom)) = (
+            self.tabs.get(&tab).and_then(|t| t.url.clone()),
+            self.tabs.get(&tab).and_then(|t| t.dom.as_ref()),
+        ) else {
+            return;
+        };
+        let wanted = collect_images(dom);
+        for (node, src) in wanted.into_iter().take(self.max_images) {
+            let Ok(url) = Url::resolve(&base, &src) else {
+                continue;
+            };
+            let Ok(resp) = self.transport.fetch(&Request::get(url)).await else {
+                continue;
+            };
+            if !(200..300).contains(&resp.status) {
+                continue;
+            }
+            let Some(img) = decode_image(&resp.body, self.image_max_px) else {
+                continue;
+            };
+            if let Some(entry) = self.tabs.get_mut(&tab) {
+                entry.images.insert(node, std::sync::Arc::new(img));
+            }
+        }
     }
 
     /// Évalue les `<script>` inline du document — contexte neuf
@@ -672,6 +726,11 @@ impl Session {
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.dom = Some(new_dom);
             entry.focused = None;
+            // Les `NodeId` changent au re-parse → les pixels
+            // indexés par nœud sont obsolètes (les `<img>`
+            // nouveaux retombent sur `alt` jusqu'à la
+            // prochaine navigation — borne documentée).
+            entry.images.clear();
             if entry.title != new_title {
                 entry.title.clone_from(&new_title);
                 if let Some(t) = new_title {
@@ -747,7 +806,8 @@ impl Session {
         else {
             return Err(CoreError::EmptyDocument);
         };
-        let Some(mut bx) = build_box_tree(dom, root_el, &styles) else {
+        let sizes = image_sizes(dom, &entry.images);
+        let Some(mut bx) = build_box_tree_sized(dom, root_el, &styles, &sizes) else {
             return Err(CoreError::NothingToPaint);
         };
         let (vw, _vh) = self.viewport;
@@ -769,7 +829,7 @@ impl Session {
             return Err(CoreError::EmptyDocument);
         };
         let (vw, vh) = self.viewport;
-        let list = build_display_list(bx, vw, vh, entry.scroll_y);
+        let list = build_display_list_imaged(bx, vw, vh, entry.scroll_y, &entry.images);
         let frame = rasterize(&list, self.fonts.as_ref() as &dyn FontSource, self.scale)
             .ok_or(CoreError::FrameTooBig)?;
         let png = frame.encode_png();
@@ -1136,6 +1196,48 @@ fn collect_style_css(dom: &Dom) -> String {
         }
     }
     css
+}
+
+/// `(NodeId, src)` des `<img>` du document dans l'ordre —
+/// `src` absent ou vide est sauté.
+fn collect_images(dom: &Dom) -> Vec<(NodeId, String)> {
+    let mut out = Vec::new();
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "img") {
+            if let Ok(Some(src)) = dom.attribute(n, "src") {
+                if !src.is_empty() {
+                    out.push((n, src));
+                }
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    out
+}
+
+/// Taille préférée `(w, h)` par `<img>` décodé : attribut
+/// `width`/`height` sain s'il existe, sinon dimension
+/// intrinsèque — chaque axe indépendamment (§10.3.2).
+#[allow(clippy::cast_precision_loss)] // pixels u32 → f32 : < 2^24.
+fn image_sizes(dom: &Dom, images: &ImageTable) -> HashMap<NodeId, (f32, f32)> {
+    let px_attr = |n: NodeId, name: &str| {
+        dom.attribute(n, name)
+            .ok()
+            .flatten()
+            .and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok())
+            .filter(|v| *v > 0.0)
+    };
+    images
+        .iter()
+        .map(|(&n, img)| {
+            let w = px_attr(n, "width").unwrap_or(img.width as f32);
+            let h = px_attr(n, "height").unwrap_or(img.height as f32);
+            (n, (w, h))
+        })
+        .collect()
 }
 
 /// Textes des `<script>` inline du document, dans l'ordre —

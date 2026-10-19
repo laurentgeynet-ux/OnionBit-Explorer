@@ -25,7 +25,9 @@ mod tables;
 pub mod text;
 
 pub use block::{layout_tree, BlockCtx};
-pub use boxtree::{build_box_tree, BoxKind, Float, LayoutBox, Overflow, Position, Rect};
+pub use boxtree::{
+    build_box_tree, build_box_tree_sized, BoxKind, Float, LayoutBox, Overflow, Position, Rect,
+};
 pub use font::{FontMetrics, FontRequest, FontSource, Glyph, ShapedRun};
 pub use inline::{Fragment, LineBox};
 pub use text::{Break, Direction, TextRun};

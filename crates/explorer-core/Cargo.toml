@@ -22,5 +22,6 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+image.workspace = true
 async-trait.workspace = true
 explorer-test-support.workspace = true
