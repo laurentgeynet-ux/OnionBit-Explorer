@@ -245,3 +245,18 @@ fn entree_vide_et_bizarres() {
         let _ = tokenize(s); // pas de panic
     }
 }
+
+#[test]
+fn backslash_echappement_en_tete_de_token() {
+    // `\` en tête de token : `\}` est un ident `}` (le `}`
+    // échappé ne ferme pas un bloc) ; `\.a` est un ident `.a`.
+    let t = toks("\\} \\.a");
+    assert_eq!(t, vec![Token::Ident("}".into()), Token::Ident(".a".into())]);
+}
+
+#[test]
+fn backslash_avant_newline_est_delim() {
+    // `\` suivi d'un newline n'est PAS un échappement valide.
+    let t = tokenize("\\\nx");
+    assert!(t.contains(&Token::Delim('\\')));
+}

@@ -657,7 +657,14 @@ fn paint_tiled(
 }
 
 /// Bordure : 4 côtés pleins (pattern dashed/dotted reporté —
-/// documenté en `DisplayItem`).
+/// documenté en `DisplayItem`). Quand les côtés peints ont
+/// des couleurs différentes, chaque côté est le **trapèze**
+/// entre l'arête externe et l'arête de la padding box — le
+/// coin se partage sur la diagonale coin-externe→coin-interne
+/// (comportement CSS des jointures) ; c'est ce qui dessine
+/// les vrais triangles `border-*` à `height:0` (Acid2 nose).
+/// Couleur uniforme → anneau par rectangles pixel-snapés
+/// (arêtes dures, pas de couture AA sur la diagonale).
 fn paint_border(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,
@@ -667,6 +674,20 @@ fn paint_border(
     dpi: Transform,
     clip: Option<&Mask>,
 ) {
+    let painted = |i: usize| styles[i] != BorderStyle::None && widths[i] > 0.0;
+    let uniform = (0..4)
+        .filter(|&i| painted(i))
+        .map(|i| colors[i])
+        .collect::<Vec<_>>()
+        .windows(2)
+        .all(|w| w[0] == w[1]);
+    let (x0, y0) = (rect.x, rect.y);
+    let (x1, y1) = (rect.x + rect.width, rect.y + rect.height);
+    // Coins internes (padding box). `widths` = [t, r, b, l].
+    let itl = (x0 + widths[3], y0 + widths[0]);
+    let itr = (x1 - widths[1], y0 + widths[0]);
+    let ibr = (x1 - widths[1], y1 - widths[2]);
+    let ibl = (x0 + widths[3], y1 - widths[2]);
     for (side, (bw, (c, s))) in widths
         .iter()
         .zip(colors.iter().zip(styles.iter()))
@@ -675,16 +696,44 @@ fn paint_border(
         if *s == BorderStyle::None || *bw <= 0.0 {
             continue;
         }
-        let r = match side {
-            0 => Rect::from_xywh(rect.x, rect.y, rect.width, *bw),
-            1 => Rect::from_xywh(rect.x + rect.width - *bw, rect.y, *bw, rect.height),
-            2 => Rect::from_xywh(rect.x, rect.y + rect.height - *bw, rect.width, *bw),
-            _ => Rect::from_xywh(rect.x, rect.y, *bw, rect.height),
+        let mut paint = Paint::default();
+        paint.set_color(skia_color(*c));
+        if uniform {
+            let r = match side {
+                0 => Rect::from_xywh(rect.x, rect.y, rect.width, *bw),
+                1 => Rect::from_xywh(rect.x + rect.width - *bw, rect.y, *bw, rect.height),
+                2 => Rect::from_xywh(rect.x, rect.y + rect.height - *bw, rect.width, *bw),
+                _ => Rect::from_xywh(rect.x, rect.y, *bw, rect.height),
+            };
+            if let Some(r) = r {
+                fill_guarded(pixmap, &r, &paint, dpi, clip);
+            }
+            continue;
+        }
+        // Trapèze du côté : arête externe + arête interne de
+        // la padding box. Ordre des sommets = sens horaire.
+        let quad: [(f32, f32); 4] = match side {
+            0 => [(x0, y0), (x1, y0), itr, itl],
+            1 => [(x1, y0), (x1, y1), ibr, itr],
+            2 => [(x1, y1), (x0, y1), ibl, ibr],
+            _ => [(x0, y1), (x0, y0), itl, ibl],
         };
-        if let Some(r) = r {
-            let mut paint = Paint::default();
-            paint.set_color(skia_color(*c));
-            fill_guarded(pixmap, &r, &paint, dpi, clip);
+        let mut pb = PathBuilder::new();
+        pb.move_to(quad[0].0, quad[0].1);
+        for p in &quad[1..] {
+            pb.line_to(p.0, p.1);
+        }
+        pb.close();
+        if let Some(path) = pb.finish() {
+            // La boîte englobante du quad ⊆ `rect` → le garde
+            // de domaine device s'y applique tel quel.
+            let domain = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
+            let outer = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height);
+            if let (Some(d), Some(o)) = (domain, outer) {
+                if device_bbox(&o, dpi).is_some_and(|b| d.intersect(&b).is_some()) {
+                    pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
+                }
+            }
         }
     }
 }

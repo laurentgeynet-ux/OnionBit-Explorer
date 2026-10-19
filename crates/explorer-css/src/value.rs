@@ -362,6 +362,77 @@ fn named_color(name: &str) -> Option<Color> {
     Some(Color { r, g, b, a: 255 })
 }
 
+/// Validation par propriété d'une déclaration arrivée au
+/// verbatim — `false` → la valeur est hors grammaire, la
+/// déclaration est ignorée (spec ; ex. `width: 200` sans
+/// unité, `background: red pink`). Les mots-clés CSS-wide
+/// passent toujours (résolus plus tard dans la cascade).
+/// Périmètre : familles de longueurs et raccourcis dont
+/// l'expansion peut refuser une valeur invalide.
+#[must_use]
+pub fn value_is_valid_for(name: &str, value: &str) -> bool {
+    let v = value.trim();
+    // `var()`/`calc()`/`attr()` sont résolus plus tard — la
+    // validation syntaxique ici les laisse passer.
+    if v.contains("var(")
+        || v.contains("calc(")
+        || v.contains("attr(")
+        || matches!(
+            v.to_ascii_lowercase().as_str(),
+            "inherit" | "initial" | "unset" | "revert" | "revert-layer"
+        )
+    {
+        return true;
+    }
+    // Longueur ou pourcentage (`50%` — `parse_length` ne
+    // couvre que les unités dimensionnelles).
+    let len_or_pct = |s: &str| {
+        parse_length(s).is_some()
+            || s.strip_suffix('%')
+                .is_some_and(|n| n.parse::<f64>().is_ok())
+    };
+    match name {
+        "width" | "height" | "min-width" | "min-height" | "max-width" | "max-height" => {
+            matches!(
+                v,
+                "auto" | "none" | "min-content" | "max-content" | "fit-content"
+            ) || len_or_pct(v)
+        }
+        "margin-top" | "margin-right" | "margin-bottom" | "margin-left" | "top" | "right"
+        | "bottom" | "left" => v == "auto" || len_or_pct(v),
+        "padding-top" | "padding-right" | "padding-bottom" | "padding-left" => len_or_pct(v),
+        "border-top-width" | "border-right-width" | "border-bottom-width" | "border-left-width" => {
+            matches!(v, "thin" | "medium" | "thick") || len_or_pct(v)
+        }
+        "font-size" => {
+            matches!(
+                v,
+                "xx-small"
+                    | "x-small"
+                    | "small"
+                    | "medium"
+                    | "large"
+                    | "x-large"
+                    | "xx-large"
+                    | "smaller"
+                    | "larger"
+            ) || len_or_pct(v)
+        }
+        "line-height" => v == "normal" || v.parse::<f64>().is_ok() || len_or_pct(v),
+        "margin" => v.split_whitespace().all(|p| p == "auto" || len_or_pct(p)),
+        "padding" => v.split_whitespace().all(len_or_pct),
+        "border-width" => v
+            .split_whitespace()
+            .all(|p| matches!(p, "thin" | "medium" | "thick") || len_or_pct(p)),
+        // Raccourcis dont l'expansion refuse les valeurs
+        // invalides : arrivés ici sans expansion, c'est qu'elle
+        // a échoué — on revalide pour confirmer le drop.
+        "background" => expand_background(v).is_some(),
+        "font" => expand_font(v).is_some(),
+        _ => true,
+    }
+}
+
 // ─────────────── expansion des shorthands ───────────────
 
 /// Éclate un shorthand en longhands `(nom, valeur)`.
@@ -549,21 +620,33 @@ fn expand_background(value: &str) -> Option<Vec<(String, String)>> {
     let mut position = Vec::new();
     let mut recognized = false;
     for part in value.split_whitespace() {
+        // La grammaire du raccourci exige une seule valeur par
+        // composante ; un doublon ou un token inconnu invalide
+        // la déclaration entière (`background: red pink` → drop).
         if parse_color(part).is_some() {
-            color = Some(part.to_string());
+            if color.replace(part.to_string()).is_some() {
+                return None;
+            }
         } else if part == "none" || part.starts_with("url(") {
-            image = Some(part.to_string());
+            if image.replace(part.to_string()).is_some() {
+                return None;
+            }
         } else if matches!(part, "repeat" | "repeat-x" | "repeat-y" | "no-repeat") {
-            repeat = Some(part.to_string());
+            if repeat.replace(part.to_string()).is_some() {
+                return None;
+            }
         } else if matches!(part, "fixed" | "scroll" | "local") {
-            attachment = Some(part.to_string());
-        } else if matches!(part, "left" | "right" | "top" | "bottom" | "center")
+            if attachment.replace(part.to_string()).is_some() {
+                return None;
+            }
+        } else if (matches!(part, "left" | "right" | "top" | "bottom" | "center")
             || parse_length(part).is_some()
-            || part.ends_with('%')
+            || part.ends_with('%'))
+            && position.len() < 4
         {
             position.push(part.to_string());
         } else {
-            continue;
+            return None;
         }
         recognized = true;
     }

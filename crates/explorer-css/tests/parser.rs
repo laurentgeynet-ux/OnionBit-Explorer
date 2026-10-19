@@ -282,3 +282,28 @@ fn media_depth(r: &explorer_css::Rule) -> usize {
         _ => 1,
     }
 }
+
+#[test]
+fn bang_non_important_invalide_la_declaration() {
+    // `!` non suivi de `important` : déclaration droppée,
+    // le reste du bloc survit (spec).
+    let s = parse_stylesheet("p{border:5em solid red ! error; color:teal}");
+    let d = decls(&s.rules[0]);
+    assert!(!d.iter().any(|x| x.name == "border"), "{d:?}");
+    assert!(d.iter().any(|x| x.name == "color"), "{d:?}");
+}
+
+#[test]
+fn accolade_echappee_ne_ferme_pas_le_bloc() {
+    // `\}` est une valeur (ident `}`), pas un fermant —
+    // `background: yellow` survit derrière (cas Acid2).
+    let s = parse_stylesheet(r"p{error:\}; background:yellow}");
+    let d = decls(&s.rules[0]);
+    assert!(d.iter().any(|x| x.name == "error"), "{d:?}");
+    assert_eq!(
+        d.iter()
+            .find(|x| x.name == "background")
+            .map(|x| x.value.as_str()),
+        Some("yellow")
+    );
+}

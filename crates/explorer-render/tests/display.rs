@@ -753,3 +753,32 @@ fn border_color_sans_couleur_suit_currentcolor() {
     assert_eq!(colors[0].g, 52);
     assert_eq!(colors[0].b, 86, "currentColor attendu : {colors:?}");
 }
+
+#[test]
+fn ordre_appendice_e_bloc_flottant_inline() {
+    // App. E : fonds de blocs en flux → flottants → contenu en
+    // ligne. Un bloc statique passe sous le flottant, un span en
+    // ligne passe au-dessus — indépendamment de l'ordre DOM.
+    let (_d, _b, items) = dl(
+        "<div id=c>\
+         <span id=inl>txt</span>\
+         <div id=flt></div>\
+         <div id=blk></div></div>",
+        "#c{position:relative;width:100px}\
+         #inl{position:static;color:#010203}\
+         #flt{float:left;width:20px;height:20px;background:#040506}\
+         #blk{width:20px;height:20px;background:#070809}",
+    );
+    let pos = |needle: [u8; 3]| -> usize {
+        items
+            .iter()
+            .position(|i| match i {
+                DisplayItem::FillRect { color, .. } => [color.r, color.g, color.b] == needle,
+                _ => false,
+            })
+            .unwrap_or(usize::MAX)
+    };
+    let blk = pos([7, 8, 9]);
+    let flt = pos([4, 5, 6]);
+    assert!(blk < flt, "bloc {blk} avant flottant {flt}");
+}

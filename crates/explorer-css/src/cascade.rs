@@ -19,7 +19,9 @@
 
 use crate::parser::{AtKind, Declaration, MediaQuery, Rule, Stylesheet};
 use crate::selector::{matches_with_state, parse_selector_list, ComplexSelector, Specificity};
-use crate::value::{expand_shorthand, parse_color, parse_length, Color, Length};
+use crate::value::{
+    expand_shorthand, parse_color, parse_length, value_is_valid_for, Color, Length,
+};
 use explorer_dom::{Dom, NodeId};
 use std::collections::HashMap;
 
@@ -506,7 +508,12 @@ impl StyleEngine {
                     }
                 }
                 None => {
-                    props.insert(lname, d.value.clone());
+                    // Verbatim : la validation par propriété
+                    // fait le tri (`width: 200` sans unité,
+                    // raccourci invalide → déclaration ignorée).
+                    if value_is_valid_for(&lname, &d.value) {
+                        props.insert(lname, d.value.clone());
+                    }
                 }
             }
         }

@@ -426,7 +426,7 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   absolu/fixe ou inline/anonyme. Mesuré
   (`benches/relayout.rs`, page 200 blocs) : ~33 ms reflow
   complet → ~1.9 ms relayout feuille (~17×).
-- [ ] **R-13. Acid2 ≥ 60 %** (ex-61) + extension du corpus
+- [x] **R-13. Acid2 ≥ 60 %** (ex-61) + extension du corpus
   WPT reftests : extraction `css/css-flexbox` + `css/css-grid`
   ciblés, baselines mesurées, skip-list versionnée — les écarts
   deviennent des étapes R-xx. **Baseline terrain mission 9**
@@ -468,7 +468,35 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   flex (row-reverse/column), wrap horizontal, `column/row-gap`,
   justify ×4, align-items ×3, grid `fr`/display/marges ×3 —
   familles candidates : *direction axe flex*, *justify/align
-  fins*, *unité fr grid*, *marges grid*.
+  fins*, *unité fr grid*, *marges grid*. **Salve 3 — Acid2
+  22 % → 86,1 %, cap ≥ 60 % atteint** : collapse des marges
+  par chaîne complète §8.3.1 (`MarginRun` — max positif +
+  min négatif à travers les éléments transparents), flottants
+  posés au bord de la **margin box** (le `margin-top:-2em`
+  du nez remonte le bloc), `top`/`bottom` absolus ancrant la
+  margin box + shrink-to-fit incluant padding/bordures,
+  ordre de peinture Appendice E (blocs en flux → flottants →
+  inlines reportés au contexte de pilement, positionnés
+  triés `z-index`), jointures de bordure diagonales (losange
+  du nez via trapèzes), largeurs de bordure `em` résolues à
+  la font-size de la boîte en peinture, images remplacées
+  peintes en content box. Côté CSS : `\x` en tête de token =
+  ident (`\}` ne ferme plus le bloc — `background:yellow`
+  d'Acid2 survit), `!` parasite invalide la déclaration
+  (`border: 5em solid red ! error`), `background: red pink`
+  droppé (une valeur par composante), `width: 200` sans
+  unité droppé via `value_is_valid_for` (validation par
+  propriété, `var(`/`calc(`/`attr(` et CSS-wide exemptés),
+  hash `#000` re-sérialisé sans échappement de digit,
+  idents échappés préservés dans les préludes re-parsés
+  (`[class=second\ two]`). Cliquet WPT 40 → **41/58**
+  (`floats-placement-005`, `grid-margins-no-collapse-001`,
+  `grid-layout-basic` réparés : colonne `auto` plafonnée au
+  free space §12.6, marges d'items grid en margin box).
+  Reste connu : la hairline fixed et `p.bad` restent hors
+  du visage rasterisé (pas de scroll — ancrage viewport par
+  conception), anneaux des yeux et rangées parser/`ul` à
+  l'affûtage pixel près.
 
 ## Tâches continues
 

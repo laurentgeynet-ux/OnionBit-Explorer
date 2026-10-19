@@ -22,9 +22,9 @@
 //! (pas de redistribution), indices négatifs et `repeat(
 //! auto-fill|fit)` ignorés, `subgrid` hors scope.
 
-use crate::block::{css_px, font_size_px, raw_length_px, BlockCtx};
+use crate::block::{css_px, font_size_px, raw_length_px, side_px, BlockCtx};
 use crate::flex::{gap_px, layout_item, translate_subtree};
-use crate::LayoutBox;
+use crate::{BoxKind, LayoutBox};
 
 /// Une piste de `grid-template-*`.
 #[derive(Clone)]
@@ -231,8 +231,14 @@ fn col_widths(
             _ => 0.0,
         })
         .collect();
-    // `auto` (y compris `minmax(…, auto)`) : max des bases
-    // mesurées des items qui s'y posent.
+    // `auto` (y compris `minmax(…, auto)`) : la base mesurée
+    // fait office de growth limit (max-content) — §12.6
+    // Maximize Tracks : l'espace libre est distribué aux
+    // pistes auto jusqu'à leur limite, donc une piste ne
+    // dépasse jamais le conteneur à taille définie (un texte
+    // plus large que le conteneur s'y enroule —
+    // `grid-margins-no-collapse-001`).
+    let mut autos: Vec<(usize, f32)> = Vec::new();
     for &(col, span, base) in items_base {
         if span == 1 && col < w.len() {
             let sized = match &tracks[col] {
@@ -241,7 +247,34 @@ fn col_widths(
                 _ => false,
             };
             if sized {
-                w[col] = w[col].max(base);
+                autos.push((col, base));
+            }
+        }
+    }
+    if !autos.is_empty() {
+        autos.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let fixed_sum: f32 = w
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                if autos.iter().any(|(c, _)| *c == i) {
+                    0.0
+                } else {
+                    *v
+                }
+            })
+            .sum();
+        let mut free_auto = cb - fixed_sum - gap * w.len().saturating_sub(1) as f32;
+        if free_auto > 0.0 {
+            for (n, (col, base)) in autos.iter().enumerate() {
+                let share = free_auto / (autos.len() - n) as f32;
+                let got = base.min(share);
+                w[*col] = got;
+                free_auto -= got;
+            }
+        } else {
+            for (col, base) in &autos {
+                w[*col] = *base;
             }
         }
     }
@@ -494,22 +527,47 @@ pub(crate) fn flow_grid_children(
         acc += w + gap_c;
     }
 
-    // Passe 1 : pose à y=0 pour mesurer la hauteur naturelle.
+    // Passe 1 : pose à `y = margin-top` pour mesurer la
+    // hauteur naturelle — les marges d'un item ne collapsent
+    // JAMAIS (ni avec le conteneur, ni entre items, §3.1) :
+    // sa margin box est posée sur la bordure de la grille
+    // (`grid-margins-no-collapse-001`), donc la border box
+    // démarre à `mt` sous l'origine. Les boîtes anonymes
+    // (style cloné du conteneur) n'ont pas de marges propres.
+    let item_margins: Vec<(f32, f32, f32, f32)> = order_idx
+        .iter()
+        .map(|&i| {
+            let c = &bx.children[i];
+            if matches!(c.kind, BoxKind::AnonymousBlock) {
+                (0.0, 0.0, 0.0, 0.0)
+            } else {
+                let cfs = font_size_px(&c.style, fs, ctx);
+                (
+                    side_px(&c.style, "margin-top", content_w, cfs, ctx, 0.0),
+                    side_px(&c.style, "margin-bottom", content_w, cfs, ctx, 0.0),
+                    side_px(&c.style, "margin-left", content_w, cfs, ctx, 0.0),
+                    side_px(&c.style, "margin-right", content_w, cfs, ctx, 0.0),
+                )
+            }
+        })
+        .collect();
     let mut heights: Vec<f32> = Vec::with_capacity(slots.len());
     for (k, &i) in order_idx.iter().enumerate() {
         let (c, span, _, _) = slots[k];
         let cell_w = widths[c..(c + span).min(widths.len())].iter().sum::<f32>()
             + gap_c * (span.saturating_sub(1)) as f32;
+        let (mt, mb, _, _) = item_margins[k];
         layout_item(
             &mut bx.children[i],
             x_off[c],
-            0.0,
+            mt,
             cell_w.max(0.0),
             ctx,
             fs,
             pos_cb,
         );
-        heights.push(bx.children[i].rect.height);
+        // Piste `auto` dimensionnée sur la margin box.
+        heights.push(mt + bx.children[i].rect.height + mb);
     }
 
     // Hauteurs de lignes : piste fixe → sa valeur ; `fr`/`auto`
@@ -565,14 +623,20 @@ pub(crate) fn flow_grid_children(
             .style
             .get("align-self")
             .map_or(ai.as_str(), |v| v);
+        // La margin box est alignée dans la cellule (§10.1) —
+        // la border box est déjà décalée de `ml`/`mt` par la
+        // passe 1, la translation vise donc la boîte externe.
+        let (mt, mb, ml, mr) = item_margins[k];
+        let outer_w = ml + bx.children[i].rect.width + mr;
+        let outer_h = mt + bx.children[i].rect.height + mb;
         let dx = match jmode {
-            "center" => (cell_w - bx.children[i].rect.width).max(0.0) / 2.0,
-            "end" | "flex-end" => (cell_w - bx.children[i].rect.width).max(0.0),
+            "center" => (cell_w - outer_w).max(0.0) / 2.0,
+            "end" | "flex-end" => (cell_w - outer_w).max(0.0),
             _ => 0.0,
         };
         let dy = match amode {
-            "center" => (cell_h - bx.children[i].rect.height).max(0.0) / 2.0,
-            "end" | "flex-end" => (cell_h - bx.children[i].rect.height).max(0.0),
+            "center" => (cell_h - outer_h).max(0.0) / 2.0,
+            "end" | "flex-end" => (cell_h - outer_h).max(0.0),
             _ => 0.0,
         };
         translate_subtree(&mut bx.children[i], dx, y_off[r] + dy);

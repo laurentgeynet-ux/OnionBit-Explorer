@@ -621,3 +621,43 @@ fn animation_direction_alternate() {
     // Itération 1 (t=1.5) → inversée : frac .5 → phase .5.
     assert!((d.phase(1.5).unwrap() - 0.5).abs() < 1e-9);
 }
+
+// ── validation par propriété (R-13e / Acid2) ──────────────────
+
+#[test]
+fn longueur_sans_unite_dropee() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    // `width: 200` (sans unité, ≠ 0) invalide → la déclaration
+    // antérieure valide survit.
+    e.add_css("p { width: 2em } p { width: 200 }", Origin::Author);
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("width"), Some("2em"));
+}
+
+#[test]
+fn background_invalide_drope_pas_remplace() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    // `background: red pink` (deux couleurs) invalide → drop ;
+    // le `background-color` antérieur survit.
+    e.add_css(
+        "p { background: yellow } p { background: red pink }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.p, &env()).get("background-color"),
+        Some("yellow")
+    );
+}
+
+#[test]
+fn echappement_dans_nom_de_propriete() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    // `m\argin` ≠ `margin` : `\a` est l'échappement hex U+000A —
+    // la propriété résultante est inconnue et ignorée (Acid2).
+    e.add_css(r"p { m\argin: 2em; margin-top: 9px }", Origin::Author);
+    let s = e.compute(&f.dom, f.p, &env());
+    assert_eq!(s.get("margin-top"), Some("9px"));
+    assert_eq!(s.get("margin-left"), None, r"m\argin ≠ margin");
+}

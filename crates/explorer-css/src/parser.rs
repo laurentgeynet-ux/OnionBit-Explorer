@@ -11,6 +11,8 @@
 //! qualifiée reste aussi texte : l'étape 14 y branche
 //! `selector::parse`.
 
+use std::fmt::Write;
+
 use crate::token::Token;
 use crate::tokenizer::tokenize;
 
@@ -211,18 +213,85 @@ impl<'t> Parser<'t> {
 
     /// Sérialise des tokens en texte (préludes, valeurs) — espaces
     /// simples entre tokens, ponctuation collée.
+    /// Sérialise un ident pour reconstruction de prélude
+    /// (CSS Syntax « serialize an identifier ») : tout char
+    /// ne tenant pas littéralement est ré-échappé. Sans ça,
+    /// un ident né d'un échappement (`second\ two` →
+    /// `second two`) ressortirait brut et rendrait le
+    /// sélecteur stocké invalide au re-parse (Acid2
+    /// `[class=second\ two]`). Forme `\c` pour les chars
+    /// sûrs, `\hh ` hexadécimale pour chiffres/contrôles
+    /// (`\1` serait relu comme l'escape U+0001, pas `1`).
+    fn serialize_ident(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        for (i, c) in s.chars().enumerate() {
+            let first_needs_hex = i == 0 && c.is_ascii_digit();
+            let after_dash_needs_hex = i == 1 && s.starts_with('-') && c.is_ascii_digit();
+            let bare_ok = if i == 0 {
+                (c.is_ascii_alphabetic() || c == '_' || !c.is_ascii() || c == '-')
+                    && !(c == '-' && s.chars().count() == 1)
+            } else {
+                c.is_ascii_alphanumeric() || c == '_' || c == '-' || !c.is_ascii()
+            };
+            if c == '\0' {
+                out.push('\u{FFFD}');
+            } else if first_needs_hex || after_dash_needs_hex {
+                let _ = write!(out, "\\{:x} ", c as u32);
+            } else if bare_ok {
+                out.push(c);
+            } else if c.is_ascii_alphanumeric() || (!c.is_ascii_graphic() && c != ' ') {
+                // `\c` serait relu en escape hex (a-f0-9) ou
+                // serait invalide (contrôle) → forme hex.
+                let _ = write!(out, "\\{:x} ", c as u32);
+            } else {
+                out.push('\\');
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    /// Sérialise le contenu d'un `Str` — `"` et `\`
+    /// internes ré-échappés, newline en `\a `.
+    fn serialize_str(s: &str) -> String {
+        let mut out = String::with_capacity(s.len() + 2);
+        out.push('"');
+        for c in s.chars() {
+            match c {
+                '"' | '\\' => {
+                    out.push('\\');
+                    out.push(c);
+                }
+                '\n' | '\r' | '\x0C' => {
+                    let _ = write!(out, "\\{:x} ", c as u32);
+                }
+                _ => out.push(c),
+            }
+        }
+        out.push('"');
+        out
+    }
+
     fn token_text(t: &Token) -> String {
         match t {
-            Token::Ident(s) | Token::AtKeyword(s) => {
-                if matches!(t, Token::AtKeyword(_)) {
-                    format!("@{s}")
+            Token::Ident(s) => Self::serialize_ident(s),
+            Token::AtKeyword(s) => format!("@{}", Self::serialize_ident(s)),
+            Token::Function(s) => format!("{}(", Self::serialize_ident(s)),
+            Token::Hash { value, .. } => {
+                // Un hash n'est pas un ident : les digits en
+                // tête restent nus (`#000`, pas `#\30 00`) ;
+                // échappement seulement si un caractère l'exige.
+                if !value.is_empty()
+                    && value
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || !c.is_ascii())
+                {
+                    format!("#{value}")
                 } else {
-                    s.clone()
+                    format!("#{}", Self::serialize_ident(value))
                 }
             }
-            Token::Function(s) => format!("{s}("),
-            Token::Hash { value, .. } => format!("#{value}"),
-            Token::Str(s) => format!("\"{s}\""),
+            Token::Str(s) => Self::serialize_str(s),
             Token::BadString => String::from("\"\""),
             Token::Url(s) => format!("url({s})"),
             Token::BadUrl => String::from("url()"),
@@ -500,7 +569,7 @@ impl<'t> Parser<'t> {
             self.pos += 1;
         }
         let (value, important) = strip_important(&parts.join(""));
-        if value.is_empty() {
+        if value.is_empty() || has_stray_bang(&value) {
             return None;
         }
         Some(Declaration {
@@ -618,6 +687,30 @@ fn extract_first_string(prelude: &str) -> String {
 
 /// Détecte `!important` en fin de valeur (case-insensitive, avec
 /// ou sans espace avant `!` et autour de `important`).
+/// Un `!` hors chaînes/parenthèses qui n'a pas été absorbé en
+/// suffixe `!important` invalide la déclaration entière
+/// (`border: 5em solid red ! error` → drop, spec).
+fn has_stray_bang(value: &str) -> bool {
+    let mut depth = 0i32;
+    let mut quote = '\0';
+    for c in value.chars() {
+        if quote != '\0' {
+            if c == quote {
+                quote = '\0';
+            }
+            continue;
+        }
+        match c {
+            '"' | '\'' => quote = c,
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            '!' if depth == 0 => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 fn strip_important(raw: &str) -> (String, bool) {
     let trimmed = raw.trim();
     let lower = trimmed.to_ascii_lowercase();

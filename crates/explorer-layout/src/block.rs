@@ -61,12 +61,34 @@ struct Margins {
     bottom: f32,
 }
 
-/// Effondrement de deux marges adjacentes (§8.3.1).
-fn collapse(a: f32, b: f32) -> f32 {
-    match (a >= 0.0, b >= 0.0) {
-        (true, true) => a.max(b),
-        (false, false) => a.min(b),
-        _ => a + b,
+/// Marge fusionnée courante (§8.3.1) — paire
+/// `(positif max, négatif min)` dont la valeur repliée vaut
+/// `pos + neg`. Toutes les marges adjacentes d'une chaîne
+/// fusionnent en UNE — un `collapse` pairwise séquentiel
+/// perdrait les négatifs internes (Acid2 `.empty` :
+/// `[48, 75, 0, −72, 75, 60]` doit valoir 3, pas 60).
+#[derive(Clone, Copy, Default)]
+struct MarginRun {
+    pos: f32,
+    neg: f32,
+}
+
+impl MarginRun {
+    fn add(&mut self, v: f32) {
+        if v >= 0.0 {
+            self.pos = self.pos.max(v);
+        } else {
+            self.neg = self.neg.min(v);
+        }
+    }
+
+    fn fold(&mut self, other: Self) {
+        self.pos = self.pos.max(other.pos);
+        self.neg = self.neg.min(other.neg);
+    }
+
+    fn value(self) -> f32 {
+        self.pos + self.neg
     }
 }
 
@@ -500,23 +522,90 @@ fn margin_transparent(bx: &LayoutBox, cb_w: f32, fs: f32, ctx: &BlockCtx) -> boo
         && !matches!(st.get("clear"), Some("left" | "right" | "both"))
 }
 
-/// Marge basse effective d'un enfant posé : si la boîte est
-/// transparente aux marges, la marge échappée de son dernier
-/// descendant in-flow fusionne avec la sienne — récursif
-/// (Acid2 `.empty` : `6.25em` + enfant `-6em` → ~0).
-fn escaped_bottom_margin(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx) -> f32 {
+/// Candidat « transparent aux marges » avant layout — les
+/// conditions purement stylistiques de [`margin_transparent`]
+/// (pas de bordure/padding vertical, en flux, hors BFC, pas
+/// de `clear`) plus une hauteur qui ne peut pas imposer
+/// `> 0` (un `%` ne compte que si `cb_h` est défini — sinon
+/// il retombe sur `auto`, repli contenu). La confirmation
+/// se fait après layout (`h <= 0`).
+fn transparent_candidate(
+    bx: &LayoutBox,
+    cb_w: f32,
+    cb_h: Option<f32>,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> bool {
+    let st = &bx.style;
+    let h_spec = if st.get("height").is_some_and(|v| v.contains('%')) {
+        cb_h.and_then(|h| css_px(st, "height", h, fs, ctx))
+    } else {
+        css_px(st, "height", 0.0, fs, ctx)
+    };
+    bx.position == Position::Static
+        && bx.float == Float::None
+        && !establishes_bfc(st)
+        && side_px(st, "padding-top", cb_w, fs, ctx, 0.0) <= 0.0
+        && side_px(st, "padding-bottom", cb_w, fs, ctx, 0.0) <= 0.0
+        && border_px(st, "border-top-width", cb_w, fs, ctx) <= 0.0
+        && border_px(st, "border-bottom-width", cb_w, fs, ctx) <= 0.0
+        && !matches!(st.get("clear"), Some("left" | "right" | "both"))
+        && h_spec.is_none_or(|h| h <= 0.0)
+}
+
+/// Marge basse échappée d'un enfant posé, en paire
+/// `(pos, neg)` — identique à [`escaped_bottom_margin`] mais
+/// conserve les deux bornes de la chaîne (§8.3.1). Un
+/// dernier enfant transparent contribue sa chaîne complète.
+fn escaped_bottom_run(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx) -> MarginRun {
     let st = &bx.style;
     let fs = font_size_px(st, parent_fs, ctx);
-    let own = margins(st, cb_w, fs, ctx).bottom;
-    if !margin_transparent(bx, cb_w, fs, ctx) {
-        return own;
+    let mut run = MarginRun::default();
+    run.add(margins(st, cb_w, fs, ctx).bottom);
+    if margin_transparent(bx, cb_w, fs, ctx) {
+        if let Some(c) = bx.children.iter().rev().find(|c| {
+            !matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock)
+                && c.position == Position::Static
+                && c.float == Float::None
+        }) {
+            if margin_transparent(c, cb_w, fs, ctx) {
+                run.fold(margin_chain(c, cb_w, fs, ctx));
+            } else {
+                run.fold(escaped_bottom_run(c, cb_w, fs, ctx));
+            }
+        }
     }
-    let last = bx.children.iter().rev().find(|c| {
-        !matches!(c.kind, BoxKind::Text) && c.position == Position::Static && c.float == Float::None
-    });
-    last.map_or(own, |c| {
-        collapse(own, escaped_bottom_margin(c, cb_w, fs, ctx))
-    })
+    run
+}
+
+/// Chaîne de marges complète traversant une boîte
+/// transparente aux marges (§8.3.1, « margins collapse
+/// through ») : ses marges haute et basse fusionnent avec
+/// les chaînes de ses enfants in-flow dans l'ordre — toute
+/// la chaîne se replie en une marge.
+fn margin_chain(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx) -> MarginRun {
+    let st = &bx.style;
+    let fs = font_size_px(st, parent_fs, ctx);
+    let m = margins(st, cb_w, fs, ctx);
+    let mut run = MarginRun::default();
+    run.add(m.top);
+    for c in &bx.children {
+        if matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock)
+            || c.out_of_flow()
+            || c.float != Float::None
+        {
+            continue;
+        }
+        if margin_transparent(c, cb_w, fs, ctx) {
+            run.fold(margin_chain(c, cb_w, fs, ctx));
+        } else {
+            let cm = margins(&c.style, cb_w, font_size_px(&c.style, fs, ctx), ctx);
+            run.add(cm.top);
+            run.add(cm.bottom);
+        }
+    }
+    run.add(m.bottom);
+    run
 }
 
 /// Dimensionne `bx` (boîte de niveau bloc) dans le bloc
@@ -789,11 +878,13 @@ fn apply_layout_metadata(bx: &mut LayoutBox, st: &ComputedStyle) {
 /// qu'une garde contre la pathologie (contenu hostile).
 const MAX_FLOAT_STEPS: u32 = 64;
 
-/// Pose le flottant `parent.children[i]` : position de flux
-/// = `flow_y` (son « parent anonyme » virtuel, §9.5.1 règle
-/// 4), abaissée par `clear` et par les collisions jusqu'à ce
-/// que la boîte tienne dans la bande (règles 2, 3, 7 — la
-/// bande les encode). Le curseur de flux n'est **pas** avancé.
+/// Pose le flottant `parent.children[i]` : `flow_y` = bord
+/// haut de la **margin box** hypothétique en flux (§9.5.1
+/// règle 4), abaissé par `clear` et par les collisions
+/// jusqu'à ce que la boîte tienne dans la bande (règles 2,
+/// 3, 7 — la bande les encode). La border box est posée à
+/// `flow_y + margin-top` : une marge négative la remonte.
+/// Le curseur de flux n'est **pas** avancé.
 #[allow(clippy::too_many_arguments)]
 fn place_float(
     parent: &mut LayoutBox,
@@ -819,19 +910,23 @@ fn place_float(
 
     // §9.5.1 : le haut du flottant ne peut être plus haut
     // que le haut de tout flottant antérieur (règle 5) ni
-    // violer `clear` (dégagement vers le bas, §9.5.2).
-    let mut fy = fl
+    // violer `clear` (dégagement vers le bas, §9.5.2). Ces
+    // contraintes s'appliquent au bord de la **margin box** —
+    // une marge négative remonte la border box au-dessus de
+    // son point de flux (Acid2 `.nose` : `-2em` le glisse
+    // sous les yeux).
+    let mut my = fl
         .max_top()
         .map_or(flow_y, |t| flow_y.max(t))
         .max(fl.cleared(cst.get("clear"), f32::NEG_INFINITY));
     let mut placed = Rect::default();
     for _ in 0..MAX_FLOAT_STEPS {
-        let (bx0, bw) = fl.band(fy, content_x, content_w);
+        let (bx0, bw) = fl.band(my, content_x, content_w);
         // BFC propre au flottant : registre vierge pour ses
         // propres descendants (§9.4.1).
         let mut inner = FloatCtx::default();
         let child = &mut parent.children[i];
-        layout_block(child, bx0, fy, bw, cb_h, ctx, fs, pos_cb, &mut inner);
+        layout_block(child, bx0, my + mt, bw, cb_h, ctx, fs, pos_cb, &mut inner);
         let r = child.rect;
         if right_side {
             let corrected = bx0 + bw - r.width;
@@ -857,8 +952,8 @@ fn place_float(
             break;
         }
         // Descendre sous le prochain flottant mordant.
-        match fl.next_band_change(fy) {
-            Some(next) if next > fy + 0.01 => fy = next,
+        match fl.next_band_change(my) {
+            Some(next) if next > my + 0.01 => my = next,
             _ => break,
         }
     }
@@ -902,7 +997,7 @@ fn flow_children(
     // que les lignes inline.
     let webkit_center = bx.style.get("text-align") == Some("-webkit-center");
 
-    let mut prev_margin: Option<f32> = None;
+    let mut prev_margin: Option<MarginRun> = None;
     let mut first = true;
     // Haut de la dernière ligne posée par du contenu en-ligne
     // — l'ancre verticale d'un flottant (§9.5.1 : son haut ne
@@ -927,7 +1022,7 @@ fn flow_children(
             let gap = if first && adjoining_top {
                 0.0
             } else {
-                prev_margin.unwrap_or(0.0)
+                prev_margin.map_or(0.0, MarginRun::value)
             };
             cursor += gap;
             let used = layout_anon_block(
@@ -943,7 +1038,7 @@ fn flow_children(
             );
             inline_anchor = bx.children[i].lines.last().map(|l| l.rect.y);
             cursor += used;
-            prev_margin = Some(0.0);
+            prev_margin = Some(MarginRun::default());
             first = false;
             continue;
         }
@@ -977,15 +1072,23 @@ fn flow_children(
         // Ancre = haut de la ligne courante (§9.5.1 : le
         // flottant est « as high as possible » sans dépasser
         // le haut de la ligne où tombe sa position source) —
-        // pas le bas du bloc anonyme qui précède.
+        // pas le bas du bloc anonyme qui précède. Le bord de
+        // sa margin box vaut le border-top qu'aurait la boîte
+        // en flux normal (chaîne de marges repliée dessus,
+        // sans la consommer) moins sa propre marge haute —
+        // une marge négative remonte alors la boîte (Acid2
+        // `.nose` : `-2em` sous les yeux).
         let cfloat = cst.get("float");
         if matches!(cfloat, Some("left" | "right")) {
+            let mut run = prev_margin.unwrap_or_default();
+            run.add(cm.top);
+            let hypo = inline_anchor.unwrap_or(cursor) + run.value() - cm.top;
             place_float(
                 bx,
                 i,
                 &cst,
                 cfloat == Some("right"),
-                inline_anchor.unwrap_or(cursor),
+                hypo,
                 content_x,
                 content_w,
                 ctx,
@@ -997,12 +1100,65 @@ fn flow_children(
             continue;
         }
 
-        // `clear` (contenu in-flow) : le curseur descend sous
-        // les flottants du côté déclaré (dégagement, §9.5.2).
-        if matches!(cst.get("clear"), Some("left" | "right" | "both")) {
-            cursor = fl.cleared(cst.get("clear"), cursor);
+        // Élément « transparent aux marges » (§8.3.1) :
+        // hauteur nulle et rien qui sépare — toute sa chaîne
+        // `[mt … enfants … mb]` rejoint la marge courante au
+        // lieu d'être consommée en deux fois. Posé d'emblée
+        // à `cursor + gap` : si la boîte se révèle non vide,
+        // c'est sa position définitive — ses lignes se sont
+        // déjà cassées dans la bande de CETTE ordonnée (un
+        // flottant qui commence/finit entre `cursor` et
+        // `cursor + gap` change le retrait ligne à ligne ;
+        // `floats-placement-005`). Si `h <= 0`, sa place est
+        // sans objet : la chaîne entière s'échappe.
+        if transparent_candidate(&bx.children[i], content_w, cb_h, cfs, ctx) {
+            let mut run = prev_margin.unwrap_or_default();
+            run.add(cm.top);
+            let gap = if first && adjoining_top {
+                0.0
+            } else {
+                run.value()
+            };
+            let used = layout_block(
+                &mut bx.children[i],
+                content_x,
+                cursor + gap,
+                content_w,
+                cb_h,
+                ctx,
+                fs,
+                pos_cb,
+                fl,
+            );
+            if bx.children[i].rect.height <= 0.0 {
+                let mut run = prev_margin.unwrap_or_default();
+                run.fold(margin_chain(&bx.children[i], content_w, fs, ctx));
+                prev_margin = Some(run);
+                inline_anchor = None;
+                continue;
+            }
+            if webkit_center {
+                let cw = bx.children[i].rect.width;
+                if cw < content_w {
+                    crate::flex::translate_subtree(
+                        &mut bx.children[i],
+                        (content_w - cw) / 2.0,
+                        0.0,
+                    );
+                }
+            }
+            cursor += gap + used;
+            prev_margin = Some(escaped_bottom_run(&bx.children[i], content_w, fs, ctx));
+            first = false;
+            inline_anchor = None;
+            continue;
         }
 
+        // Marge courante + marge haute de l'enfant : la
+        // chaîne entière se replie en une valeur (max des
+        // positifs + min des négatifs — §8.3.1).
+        let mut run = prev_margin.unwrap_or_default();
+        run.add(cm.top);
         // Premier enfant adjoining : sa marge « traverse » le
         // parent (§8.3.1 — pas d'espace interne au-dessus ;
         // c'est le parent qui ajoute la sienne propre, côté
@@ -1010,9 +1166,18 @@ fn flow_children(
         let gap = if first && adjoining_top {
             0.0
         } else {
-            prev_margin.map_or(cm.top, |p| collapse(p, cm.top))
+            run.value()
         };
-        cursor += gap;
+
+        // `clear` (§9.5.1) : le haut de la border box tombe
+        // sous les flottants du côté déclaré — l'écart créé
+        // joue le rôle de dégagement (les marges au-dessus ne
+        // s'ajoutent pas une seconde fois).
+        let mut top = cursor + gap;
+        if matches!(cst.get("clear"), Some("left" | "right" | "both")) {
+            top = fl.cleared(cst.get("clear"), top);
+        }
+        cursor = top;
 
         // BFC : la boîte elle-même se range dans la bande ;
         // non-BFC : pleine largeur — ce sont leurs **lignes**
@@ -1060,7 +1225,7 @@ fn flow_children(
         // Enfant bloc in-flow : la prochaine ligne est
         // nouvelle — l'ancre des flottants repasse au curseur.
         inline_anchor = None;
-        prev_margin = Some(escaped_bottom_margin(&bx.children[i], content_w, fs, ctx));
+        prev_margin = Some(escaped_bottom_run(&bx.children[i], content_w, fs, ctx));
         first = false;
     }
     // Containment : un BFC englobe le bas de ses flottants
@@ -1148,6 +1313,9 @@ struct AbsGeo {
     r: Option<f32>,
     t: Option<f32>,
     b: Option<f32>,
+    ml: f32,
+    mr: f32,
+    mb: f32,
 }
 
 /// §10.3.7 : `width` non-`auto` → contrainte `l`+`r` ;
@@ -1169,47 +1337,63 @@ fn abs_geometry(
     let b = css_px(cst, "bottom", target.height, cfs, ctx);
     let ml = side_px(cst, "margin-left", target.width, cfs, ctx, 0.0);
     let mr = side_px(cst, "margin-right", target.width, cfs, ctx, 0.0);
-    let w_auto = css_px(cst, "width", target.width, cfs, ctx).is_none();
+    let mt = side_px(cst, "margin-top", target.width, cfs, ctx, 0.0);
+    let mb = side_px(cst, "margin-bottom", target.width, cfs, ctx, 0.0);
+    // Shrink-to-fit donne la largeur de CONTENU ; `cb_w`
+    // passé à `layout_block` est la border box → ajouter
+    // padding+bordures (Acid2 `blockquote` : contenu 48 +
+    // 2×24 de bordures = 96 de border box, pas 48).
+    let pl = side_px(cst, "padding-left", target.width, cfs, ctx, 0.0);
+    let pr = side_px(cst, "padding-right", target.width, cfs, ctx, 0.0);
+    let bl = border_px(cst, "border-left-width", target.width, cfs, ctx);
+    let br = border_px(cst, "border-right-width", target.width, cfs, ctx);
+    let extras = pl + pr + bl + br;
+    let w_css = css_px(cst, "width", target.width, cfs, ctx);
     let shrink = |avail: f32| -> f32 {
         let min = crate::intrinsic::min_content_px(child, cfs, ctx);
         let pref = crate::intrinsic::max_content_px(child, cfs, ctx);
-        avail.min(pref).max(min).max(0.0)
+        avail.min(pref).max(min).max(0.0) + extras
     };
     let cw = match (l, r) {
-        (Some(lv), Some(rv)) => (target.width - lv - rv - ml - mr).max(0.0),
-        (Some(lv), None) => {
-            let avail = (target.width - lv - ml - mr).max(0.0);
-            if w_auto {
-                shrink(avail)
-            } else {
-                avail
-            }
-        }
-        (None, Some(rv)) => {
-            let avail = (target.width - rv - ml - mr).max(0.0);
-            if w_auto {
-                shrink(avail)
-            } else {
-                avail
-            }
-        }
-        (None, None) => {
-            let avail = (target.width - ml - mr).max(0.0);
-            if w_auto {
-                shrink(avail)
-            } else {
-                avail
-            }
-        }
+        // `left`+`right`+`width:auto` : border box contrainte
+        // (§10.3.7). `width` non-auto → sur-contraint, `right`
+        // absorbé en LTR : la boîte garde sa largeur à gauche.
+        (Some(lv), Some(rv)) => w_css.map_or_else(
+            || (target.width - lv - rv - ml - mr).max(0.0),
+            |w| w + extras,
+        ),
+        (Some(lv), None) => w_css.map_or_else(
+            || shrink((target.width - lv - ml - mr - extras).max(0.0)),
+            |w| w + extras,
+        ),
+        (None, Some(rv)) => w_css.map_or_else(
+            || shrink((target.width - rv - ml - mr - extras).max(0.0)),
+            |w| w + extras,
+        ),
+        (None, None) => w_css.map_or_else(
+            || shrink((target.width - ml - mr - extras).max(0.0)),
+            |w| w + extras,
+        ),
     };
     AbsGeo {
+        // Horizontalement, `cx` = bord de la margin box —
+        // `layout_block` applique `ml` en interne sur la
+        // border box. Verticalement rien n'ajoute `mt` :
+        // `top` ancre le bord de marge (§10.6.4) → border
+        // top = `top + mt` (Acid2 `blockquote` à `P+36`).
         cx: l.map_or(child.rect.x, |v| target.x + v),
-        cy: t.map_or(child.rect.y, |v| target.y + v),
+        // `top` ancre la margin box → border top = `top+mt`.
+        // `top:auto` → position statique : `rect.y` EST déjà
+        // la border box (la marge fut consommée par le flux).
+        cy: t.map_or(child.rect.y, |v| target.y + v + mt),
         cw,
         l,
         r,
         t,
         b,
+        ml,
+        mr,
+        mb,
     }
 }
 
@@ -1278,27 +1462,33 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
         let child = &mut bx.children[i];
         // Boîte absolue = BFC propre : registre vierge. Le CB
         // absolu est défini (padding box de l'ancêtre posé) —
-        // ses hauteurs % résolvent (§10.5).
+        // ses hauteurs % résolvent (§10.5). `geo.cw` est la
+        // **border box** exacte ; `layout_block` attend la
+        // largeur conteneur en flux (`w:auto` → `cb_w - fixed
+        // - ml - mr`) → on lui rend les marges pour que la
+        // soustraction interne retombe sur `cw`.
         layout_block(
             child,
             geo.cx,
             geo.cy,
-            geo.cw,
+            geo.cw + geo.ml + geo.mr,
             Some(target.height),
             ctx,
             fs,
             target,
             &mut FloatCtx::default(),
         );
-        // right/bottom sans left/top : ancrage au bord opposé.
+        // right/bottom sans left/top : ancrage au bord opposé
+        // — `right`/`bottom` placent le bord de la margin
+        // box, la border box recule de `mr`/`mb` (§10.3.7).
         if geo.l.is_none() {
             if let Some(rv) = geo.r {
-                child.rect.x = target.x + target.width - rv - child.rect.width;
+                child.rect.x = target.x + target.width - rv - geo.mr - child.rect.width;
             }
         }
         if geo.t.is_none() {
             if let Some(bv) = geo.b {
-                child.rect.y = target.y + target.height - bv - child.rect.height;
+                child.rect.y = target.y + target.height - bv - geo.mb - child.rect.height;
             }
         }
     }

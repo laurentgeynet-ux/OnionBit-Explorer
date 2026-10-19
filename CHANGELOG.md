@@ -318,6 +318,52 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Reste connu : `column wrap` multi-colonnes, marges
   `auto` verticales en column, écarts fins justify/align.
 
+- **R-13 — compatibilité Acid2 ≥ 60 % atteinte (86,1 %)**
+  (`explorer-css`, `explorer-layout`, `explorer-render`) :
+  score informatif 22 % → 86,1 %, étape terminée.
+  Livrés dans cette salve :
+  - Layout : collapse des marges par chaîne complète
+    (§8.3.1 — `MarginRun` = max positif + min négatif à
+    travers les éléments transparents, plus de pairwise),
+    flottants posés au bord de la **margin box** au
+    flow-position (le `margin-top:-2em` du nez remonte),
+    `top`/`bottom` absolus ancrant la margin box,
+    shrink-to-fit absolu incluant padding/bordures,
+    colonne grid `auto` plafonnée au free space (§12.6),
+    marges d'items grid appliquées en margin box.
+  - Rendu : ordre de peinture Appendice E (blocs en flux →
+    flottants → inlines reportés au contexte de pilement ;
+    positionnés `z-index` triés) — les yeux Acid2 se
+    superposent dans le bon ordre ; jointures de bordure
+    diagonales (trapèzes — losange du nez) ; largeurs de
+    bordure `em` résolues à la font-size de la boîte ;
+    images remplacées peintes en content box.
+  - CSS : `\c` en tête de token = ident (`\}` ne ferme plus
+    un bloc — `background:yellow` Acid2 survit) ; `!` non
+    suivi d'`important` invalide la déclaration
+    (`! error`) ; `background: red pink` droppé (une valeur
+    par composante) ; validation par propriété
+    `value_is_valid_for` (`width: 200` sans unité droppé ;
+    `var(`/`calc(`/`attr(` et mots-clés CSS-wide exemptés) ;
+    hash `#000` re-sérialisé sans échappement de digit ;
+    identifiants échappés préservés dans les préludes
+    re-parsés (`[class=second\ two]` → `float:right`
+    appliqué à l'adresse jaune).
+  - Corpus WPT : cliquet `WPT_BASELINE` 40 → **41/58**
+    (`floats-placement-005`, `grid-margins-no-collapse-001`,
+    `grid-layout-basic` réparés).
+  Régressions : `ordre_appendice_e_bloc_flottant_inline`,
+  `longueur_sans_unite_dropee`,
+  `background_invalide_drope_pas_remplace`,
+  `echappement_dans_nom_de_propriete`,
+  `bang_non_important_invalide_la_declaration`,
+  `accolade_echappee_ne_ferme_pas_le_bloc`,
+  `backslash_echappement_en_tete_de_token`.
+  Reste connu : hairline/`p.bad` fixed hors du visage
+  rasterisé (ancrage viewport, pas de scroll — par
+  conception du harnais), anneaux des yeux et rangées
+  parser/`ul` à l'affûtage pixel près.
+
 - **Étape 56f — images `data:` peintes en session**
   (`explorer-core`) : le défaut terrain mission 12
   (`img.html`, `b1`-`b4` — `<img src=data:>`,

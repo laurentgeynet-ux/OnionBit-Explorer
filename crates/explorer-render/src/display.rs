@@ -25,7 +25,7 @@
 use explorer_css::value::Color;
 use explorer_css::value::{parse_color, parse_length};
 use explorer_layout::font::ShapedRun;
-use explorer_layout::{BoxKind, Fragment, LayoutBox, Overflow, Position, Rect};
+use explorer_layout::{BoxKind, Float, Fragment, LayoutBox, Overflow, Position, Rect};
 
 /// Une primitive de dessin, dans l'ordre de peinture.
 #[derive(Debug, Clone)]
@@ -488,13 +488,28 @@ pub fn build_display_list_scrolled(
     images: &crate::PaintImages,
 ) -> DisplayList {
     let mut items = Vec::new();
+    // Portée racine du report des inlines (App. E étape 5).
+    let mut defer = Vec::new();
     paint_box(
         root,
         &mut items,
         (-scroll.0, -scroll.1),
         (viewport_w, viewport_h),
         images,
+        &mut defer,
     );
+    let mut i = 0;
+    while i < defer.len() {
+        let c = defer[i];
+        i += 1;
+        paint_scoped(
+            c,
+            &mut items,
+            (-scroll.0, -scroll.1),
+            (viewport_w, viewport_h),
+            images,
+        );
+    }
     DisplayList {
         items,
         width: viewport_w,
@@ -552,8 +567,35 @@ fn prop_px(st: &explorer_css::ComputedStyle, prop: &str, fallback: f32) -> f32 {
         "medium" => 3.0,
         "thick" => 5.0,
         _ => parse_length(raw)
-            .and_then(|l| l.unit.px_factor().map(|f| l.value * f))
+            .map(|l| match l.unit.px_factor() {
+                Some(f) => l.value * f,
+                // Unités font-relatives : la cascade stocke la
+                // `font-size` calculée en px absolu (R-17) —
+                // `1em` de bordure = 12 px sous `.picture`,
+                // pas le repli `medium` (Acid2 — les bordures
+                // 1em peinaient 3 px au lieu de 12).
+                None => l.value * font_size_of(st) * em_factor(l.unit),
+            })
             .map_or(fallback, |v| v as f32),
+    }
+}
+
+/// `font-size` calculée de la boîte en px (16 par défaut).
+fn font_size_of(st: &explorer_css::ComputedStyle) -> f64 {
+    st.get("font-size")
+        .and_then(parse_length)
+        .and_then(|l| l.unit.px_factor().map(|f| l.value * f))
+        .unwrap_or(16.0)
+}
+
+/// Rapport à l'em pour les unités font-relatives (`ex`/`ch`
+/// ≈ 0.5em — approximation usuelle faute de métriques ici) ;
+/// `rem`/`vw`/… retombent sur 1em faute de base racine dans
+/// ce contexte.
+fn em_factor(u: explorer_css::value::Unit) -> f64 {
+    match u {
+        explorer_css::value::Unit::Ex | explorer_css::value::Unit::Ch => 0.5,
+        _ => 1.0,
     }
 }
 
@@ -567,6 +609,22 @@ fn border_color_of(st: &explorer_css::ComputedStyle, side: &str) -> Color {
         .and_then(parse_color)
         .or_else(|| st.get("color").and_then(parse_color))
         .unwrap_or(Color::BLACK)
+}
+
+/// Content box de la boîte = border box − bordures − padding
+/// (les `em` sont résolus via `prop_px`/`font_size_of`).
+fn content_rect(bx: &explorer_layout::LayoutBox) -> Rect {
+    let st = &bx.style;
+    let l = border_side_w(st, "left") + prop_px(st, "padding-left", 0.0);
+    let t = border_side_w(st, "top") + prop_px(st, "padding-top", 0.0);
+    let r = border_side_w(st, "right") + prop_px(st, "padding-right", 0.0);
+    let b = border_side_w(st, "bottom") + prop_px(st, "padding-bottom", 0.0);
+    Rect {
+        x: bx.rect.x + l,
+        y: bx.rect.y + t,
+        width: (bx.rect.width - l - r).max(0.0),
+        height: (bx.rect.height - t - b).max(0.0),
+    }
 }
 
 /// Épaisseur de bordure `side` (`top`/`right`/…) — 0 si le
@@ -1078,12 +1136,57 @@ fn box_transform(bx: &LayoutBox, rect: &Rect) -> Option<tiny_skia::Transform> {
 }
 
 /// Peint une boîte et ses descendants dans l'ordre borné.
-fn paint_box(
+/// La boîte ferme la portée de report des inlines : racine
+/// (gérée à l'entrée), positionnée, flottante ou atome en
+/// ligne (remplacée, `inline-block` à enfants blocs) — leurs
+/// descendants en ligne restent peints à l'intérieur
+/// (App. E : un flottant peint tout son sous-arbre à
+/// l'étape 4, les inlines d'un contexte à l'étape 5).
+fn inline_scope(bx: &LayoutBox) -> bool {
+    bx.position != Position::Static
+        || bx.float != Float::None
+        || bx.intrinsic.is_some()
+        || (bx.kind == BoxKind::Inline && bx.children.iter().any(|c| !c.kind.is_inline_level()))
+}
+
+/// Enfant porteur de contenu en ligne — peint à l'étape 5 de
+/// son contexte de pilement, pas à sa position d'arbre :
+/// blocs anonymes (leurs lignes), boîtes `Inline`, `Text`.
+fn inline_carrier(c: &LayoutBox) -> bool {
+    c.float == Float::None
+        && matches!(
+            c.kind,
+            BoxKind::AnonymousBlock | BoxKind::Inline | BoxKind::Text
+        )
+}
+
+/// Peint `bx` avec sa propre portée de report — utilisé pour
+/// les flottants, les positionnés et les porteurs inline
+/// drainés : leurs descendants en ligne se peignent dedans.
+fn paint_scoped(
     bx: &LayoutBox,
     items: &mut Vec<DisplayItem>,
     off: (f32, f32),
     vp: (f32, f32),
     images: &crate::PaintImages,
+) {
+    let mut defer = Vec::new();
+    paint_box(bx, items, off, vp, images, &mut defer);
+    let mut i = 0;
+    while i < defer.len() {
+        let c = defer[i];
+        i += 1;
+        paint_scoped(c, items, off, vp, images);
+    }
+}
+
+fn paint_box<'a>(
+    bx: &'a LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    vp: (f32, f32),
+    images: &crate::PaintImages,
+    defer: &mut Vec<&'a LayoutBox>,
 ) {
     // `position: fixed` est ancrée au viewport : son sous-arbre
     // ignore le scroll.
@@ -1120,7 +1223,11 @@ fn paint_box(
             })
     }) {
         items.push(DisplayItem::Image {
-            rect: shifted(bx.rect, off),
+            // Le contenu remplacé peint dans la **content
+            // box** — padding et bordures restent autour
+            // (§10.3.2 — Acid2 : l'œil 96×24 étiré à 131
+            // sinon, couvrant padding 11/12 + bordure 12).
+            rect: shifted(content_rect(bx), off),
             img,
         });
     }
@@ -1131,36 +1238,61 @@ fn paint_box(
         if clipped {
             items.push(DisplayItem::PushClip(shifted(bx.rect, off)));
         }
-        // Enfants non positionnés d'abord (ordre de l'arbre) —
-        // `sticky` reste en flux : sa contrainte est une
-        // translation de peinture, pas un re-flow.
+        // Ordre App. E au sein des non positionnés : (a)
+        // blocs en flux, (b) flottants, (c) contenu en ligne
+        // reporté — les porteurs inline remontent au contexte
+        // de pilement englobant (`defer` hérité) sauf si cette
+        // boîte en ferme la portée (`inline_scope`).
+        let mut scoped_defer: Vec<&LayoutBox> = Vec::new();
+        let d: &mut Vec<&LayoutBox> = if inline_scope(bx) {
+            &mut scoped_defer
+        } else {
+            defer
+        };
         let bound = bx.rect;
+        let in_flow = |c: &&LayoutBox| matches!(c.position, Position::Static | Position::Sticky);
+        // (a) blocs en flux — `sticky` garde sa translation de
+        // peinture ; récursion `deep` ∝ profondeur (R-24).
         for child in &bx.children {
-            if matches!(child.position, Position::Static | Position::Sticky) {
-                let stick = sticky_offset(child, off, bound, vp);
-                if stick != (0.0, 0.0) {
-                    items.push(DisplayItem::PushTransform(
-                        tiny_skia::Transform::from_translate(stick.0, stick.1),
-                    ));
-                }
-                // Arêtes `deep` : récursion ∝ profondeur de
-                // l'arbre de boîtes — document hostile sans
-                // débordement de pile (R-24).
-                explorer_common::deep(|| paint_box(child, items, off, vp, images));
-                if stick != (0.0, 0.0) {
-                    items.push(DisplayItem::PopTransform);
-                }
+            if !in_flow(&child) || child.float != Float::None || inline_carrier(child) {
+                continue;
+            }
+            let stick = sticky_offset(child, off, bound, vp);
+            if stick != (0.0, 0.0) {
+                items.push(DisplayItem::PushTransform(
+                    tiny_skia::Transform::from_translate(stick.0, stick.1),
+                ));
+            }
+            explorer_common::deep(|| paint_box(child, items, off, vp, images, d));
+            if stick != (0.0, 0.0) {
+                items.push(DisplayItem::PopTransform);
             }
         }
+        // (b) flottants non positionnés — portée propre.
+        for child in &bx.children {
+            if in_flow(&child) && child.float != Float::None {
+                explorer_common::deep(|| paint_scoped(child, items, off, vp, images));
+            }
+        }
+        // (c) porteurs inline — reportés au contexte englobant.
+        for child in &bx.children {
+            if in_flow(&child) && inline_carrier(child) {
+                d.push(child);
+            }
+        }
+        // Si cette boîte ferme la portée : drainer ses inlines
+        // dans l'ordre de collecte (étape 5).
+        let mut i = 0;
+        while i < scoped_defer.len() {
+            let c = scoped_defer[i];
+            i += 1;
+            paint_scoped(c, items, off, vp, images);
+        }
         // Enfants positionnés ensuite, triés par z-index (stable).
-        let mut positioned: Vec<&LayoutBox> = bx
-            .children
-            .iter()
-            .filter(|c| !matches!(c.position, Position::Static | Position::Sticky))
-            .collect();
+        let mut positioned: Vec<&LayoutBox> = bx.children.iter().filter(|c| !in_flow(c)).collect();
         positioned.sort_by_key(|c| c.z_index);
         for child in positioned {
-            explorer_common::deep(|| paint_box(child, items, off, vp, images));
+            explorer_common::deep(|| paint_scoped(child, items, off, vp, images));
         }
         if clipped {
             items.push(DisplayItem::PopClip);

@@ -427,7 +427,10 @@ impl<'a> Tokenizer<'a> {
                     return Token::Delim(c);
                 }
                 Some('\\') => {
-                    if self.valid_escape(0) {
+                    // Le `\` est déjà consommé : l'échappement
+                    // est valide si le char suivant n'est pas
+                    // un newline ni EOF (`\}` → ident `}`).
+                    if !matches!(self.peek(0), None | Some('\n' | '\r' | '\x0C')) {
                         self.unread('\\');
                         let name = self.consume_name();
                         return Token::Ident(name);
