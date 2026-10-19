@@ -524,7 +524,13 @@ impl Tab {
     /// confirmée ([`Session::nav_apply`]). Sans page réelle
     /// (onglet vierge) → no-op. Borne `cap` : FIFO.
     fn freeze(&mut self, cap: usize) {
-        if self.dom.is_none() && self.frame.is_none() {
+        // Rien à geler tant que la page n'a pas de produit
+        // peint — un DOM commis sans frame (fenêtre
+        // `nav_apply` → `sub_commit`, étape 56b) produirait
+        // un snapshot empoisonné : sa restauration servirait
+        // un `/frame` 204 persistant avec hit-test mort.
+        // Mieux vaut re-fetcher la position plus tard.
+        if self.dom.is_none() || self.png.is_none() {
             return;
         }
         // Une page ne vit qu'une fois par position —
@@ -1574,8 +1580,17 @@ impl Session {
         entry.freeze(self.bfcache_pages);
         entry.restore(snap);
         entry.hist_idx = idx;
+        // Snapshot gelé avant sa première peinture (étape
+        // 56b — fenêtre commit→repaint) ou produit absent :
+        // le DOM restauré suffit à re-peindre plutôt que de
+        // servir un `/frame` 204 persistant avec hit-test
+        // mort et scroll bloqué à 0.
+        let needs_paint = entry.dom.is_some() && entry.png.is_none();
         let url = entry.url.clone();
         let title = entry.title.clone();
+        if needs_paint {
+            let _ = self.relayout(tab);
+        }
         if let Some(u) = url {
             // Mêmes événements qu'une navigation classique :
             // `Navigated` + `TitleChanged` si le titre
@@ -6031,6 +6046,112 @@ fn remap_node(old: &Dom, new: &Dom, id: NodeId) -> Option<NodeId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fonte fixture partagée (TTF synthétique, métriques
+    /// réelles) — les tests internes peignent pour de vrai.
+    struct TestFont;
+
+    impl FontSource for TestFont {
+        fn font_data(&self, _req: &explorer_layout::font::FontRequest) -> Option<Vec<u8>> {
+            Some(explorer_test_support::fixture_ttf())
+        }
+    }
+
+    /// Transport stub — jamais appelé par ces tests
+    /// (restauration bfcache = zéro réseau).
+    struct FailTransport;
+
+    #[async_trait::async_trait]
+    impl HttpTransport for FailTransport {
+        async fn fetch(&self, _req: &Request) -> NetResult<Response> {
+            Err(explorer_net::error::NetError::InvalidResponse(
+                "stub : pas de réseau".to_string(),
+            ))
+        }
+    }
+
+    /// DOM minimal parsé par le vrai tree-builder.
+    fn test_dom(body: &str) -> Dom {
+        let mut tb = TreeBuilder::new();
+        tb.push(&format!("<html><body>{body}</body></html>"));
+        tb.finish();
+        tb.into_dom()
+    }
+
+    /// Étape 56b — un snapshot gelé pendant la fenêtre
+    /// `nav_apply` → `sub_commit` (DOM commis, produit
+    /// jamais peint — `/frame` 204 persistant, hit-test
+    /// mort, scroll bloqué, terrain mission 11) :
+    /// (a) `freeze` refuse désormais une page sans produit
+    /// peint — plus de snapshots empoisonnés ;
+    /// (b) la restauration d'un snapshot sans produit
+    /// **repeint** depuis son DOM plutôt que de servir un
+    /// cadre vide à vie.
+    #[test]
+    fn paintless_snapshot_repairs_on_restore() {
+        let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+        let tab = s.open_tab();
+        let url_a = Url::parse("http://h.test/a").unwrap();
+        let url_b = Url::parse("http://h.test/b").unwrap();
+
+        // (a) Une page commise mais jamais peinte ne gèle pas.
+        {
+            let e = s.tabs.get_mut(&tab).unwrap();
+            e.dom = Some(test_dom("<p>en vol</p>"));
+        }
+        s.tabs.get_mut(&tab).unwrap().freeze(4);
+        assert!(
+            s.tabs.get(&tab).unwrap().bfcache.is_empty(),
+            "une page sans produit peint ne doit pas être gelée (56b)"
+        );
+
+        // Live = A « peinte » (png factice — l'accesseur ne
+        // valide pas le contenu) ; snapshot B gelé sans
+        // produit : le poison du bug terrain.
+        {
+            let e = s.tabs.get_mut(&tab).unwrap();
+            e.url = Some(url_a.clone());
+            e.dom = Some(test_dom("<p>page A</p>"));
+            e.png = Some(b"png-a".to_vec());
+            e.hist = vec![Request::get(url_a), Request::get(url_b.clone())];
+            e.hist_idx = 0;
+            e.bfcache.push_back(PageSnapshot {
+                hist_idx: 1,
+                url: Some(url_b),
+                title: None,
+                scroll_y: 0.0,
+                doc_h: 0.0,
+                dom: Some(test_dom("<p>page B gelée tôt</p>")),
+                tree: None,
+                list: None,
+                frame: None,
+                png: None,
+                focused: None,
+                hovered: None,
+                popup: None,
+                js: None,
+                images: PaintImages::default(),
+                linked_css: String::new(),
+                prev_styles: HashMap::new(),
+                dirty: Vec::new(),
+                emitted: 0,
+                last_req: None,
+            });
+        }
+
+        // (b) Restauration : le snapshot sans produit est
+        // repeint depuis son DOM — fin du 204 persistant.
+        assert!(s.try_bfcache(tab, 1));
+        assert_eq!(s.tab_url(tab).as_deref(), Some("http://h.test/b"));
+        assert!(
+            s.frame_png(tab).is_some(),
+            "un snapshot sans produit doit être repeint à la restauration (56b)"
+        );
+        assert!(
+            s.tabs.get(&tab).unwrap().tree.is_some(),
+            "l'arbre repeint restaure aussi le hit-test et le scroll"
+        );
+    }
 
     /// UTF-8 par défaut — la régression 53b : « ’ » (E2 80 99)
     /// reste « ’ », pas « â€™ » (repli 1252 du sniffer HTML).

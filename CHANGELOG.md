@@ -107,6 +107,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Reste connu : `column wrap` multi-colonnes, marges
   `auto` verticales en column, écarts fins justify/align.
 
+- **Étape 56b — `/frame` 204 persistant résolu : snapshots
+  sans produit peint** (`explorer-core`) : le défaut terrain
+  mission 11 (première nav `World_Wide_Web` — `navigated` +
+  `frame_invalidated` émis mais `/frame` 204, hit-test mort,
+  scroll bloqué à 0, seul un `back` ramenant une frame).
+  Cause : `Tab::freeze` drainait l'état vivant **pendant la
+  fenêtre `nav_apply` → `sub_commit`** — un `try_bfcache`
+  concurrent (verrou libre pendant le fetch des
+  sous-ressources) capturait un snapshot avec DOM commis
+  mais `tree`/`frame`/`png` encore absents ; sa
+  restauration servait alors un cadre vide à vie —
+  `restore` ne repeint jamais par conception. Deux
+  garde-fous : `freeze` refuse une page sans produit peint
+  (`dom` **et** `png` exigés — la position sera re-fletchée
+  plus tard plutôt qu'empoisonnée) ; `try_bfcache` repeint
+  depuis le DOM restauré quand le snapshot ramené n'a pas
+  de produit (répare aussi les éventuels snapshots
+  empoisonnés déjà présents). Régression :
+  `paintless_snapshot_repairs_on_restore`.
+
 - **Étape 56c — état hybride résolu : peinture spéculative
   révertée + `navigate` forward = restauration bfcache**
   (`explorer-core`) : deux mécanismes derrière le repro

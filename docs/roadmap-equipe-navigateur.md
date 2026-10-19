@@ -350,14 +350,17 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   **Vérifié terrain mission 11** : profil complet (cookie +
   localStorage + cache disque) survit à `taskkill /F` ×2 —
   nav post-kill = 0 hit serveur.
-- [ ] **Étape 56b. `/frame` → 204 transitoire après commit**
-  (terrain mission 11) : première nav `World_Wide_Web` —
-  `navigated` émis, `frame_invalidated` avec rects, mais
-  `/frame` répond 204 persistant (scroll bloqué à 0,
-  hit-test mort) jusqu'au `back` qui restaure une frame.
-  Fenêtre commit/repaint : le commit a lieu mais le produit
-  peint n'atterrit pas (ou est écrasé) dans certains
-  timings — renav vers la même URL peint correctement.
+- [x] **Étape 56b. `/frame` → 204 transitoire après commit**
+  (terrain mission 11) : **livré.** Cause : `freeze`
+  drainait l'état vivant pendant la fenêtre
+  `nav_apply`→`sub_commit` — un `try_bfcache` concurrent
+  gelait un snapshot commis-mais-jamais-peint
+  (`png`/`tree` absents), servi en 204 persistant à la
+  restauration. Fix : `freeze` exige `dom` **et** `png`
+  (pas de gel sans produit peint) + `try_bfcache` repeint
+  depuis le DOM restauré si le snapshot n'a pas de produit
+  (répare aussi l'existant). Régression :
+  `paintless_snapshot_repairs_on_restore`.
 - [x] **Étape 56c. État hybride bfcache après back+navigate**
   (terrain mission 11, repro A→B→back→`navigate B`) :
   **livré.** Deux mécanismes corrigés : (1) `spec_paint` +
