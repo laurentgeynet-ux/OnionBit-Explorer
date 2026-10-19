@@ -8,14 +8,25 @@
 //! lives in `Heap.cells` and is referenced by `ObjId` (a `u32`), so
 //! object graphs with cycles (prototype chains, closures capturing
 //! scopes that capture functions) never need `Rc<RefCell>` puzzles.
-//! There is no GC pass in v0.1: an [`crate::Engine`] is per-page, so
-//! the arena simply dies with it — bounded, predictable, no leaks
-//! across navigations.
+//!
+//! **GC mark-sweep** (ADR-0008, chantier JS-A) : les cellules mortes
+//! deviennent des tombstones réutilisées par `alloc` — un `ObjId`
+//! vers un slot réclamé résout en `None` (dégradation tolérante, pas
+//! de dangling). Le point d'entrée [`Heap::collect`] est piloté par
+//! [`crate::Engine::collect`] qui sème les racines (global,
+//! prototypes, env, jobs, timers, table DOM↔JS). Les handles
+//! explicites passent par [`Heap::add_root`]/[`Heap::remove_root`] —
+//! le protocole est le même que celui du spike `explorer-dom`.
+//!
+//! Invariant : `collect()` ne doit pas être invoqué pendant une
+//! évaluation — la pile d'appel n'est pas une racine (les envs
+//! capturés par des fonctions vivantes sont tracés via les
+//! objets `Fun::Script`, pas via la pile).
 
 use crate::ast::FnLit;
 use crate::value::{ObjId, Value};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// A JavaScript exception in flight — carries the thrown `Value`.
@@ -38,25 +49,48 @@ pub enum CellData {
     Obj(Object),
 }
 
-/// One arena slot.
+/// One arena slot's payload.
 pub struct Cell {
     /// Payload.
     pub data: CellData,
 }
 
+/// One arena slot — `None` = tombstone réutilisable.
+type Slot = Option<Cell>;
+
 /// The object arena.
 pub struct Heap {
-    cells: Vec<Cell>,
+    cells: Vec<Slot>,
+    /// Indices de slots libres (sweep remplit, `alloc` consomme).
+    free: Vec<u32>,
+    /// Bits de marque de la passe en cours (`marks.len()` suit
+    /// `cells.len()`).
+    marks: Vec<bool>,
+    /// Racines explicites (handles hôtes) — ref-count par id.
+    roots: HashMap<ObjId, u32>,
+    /// Live-object counter for tests/embedder metrics.
+    pub(crate) allocated: usize,
 }
 
 impl Heap {
     /// Empty heap.
     pub fn new() -> Self {
-        Heap { cells: Vec::new() }
+        Heap {
+            cells: Vec::new(),
+            free: Vec::new(),
+            marks: Vec::new(),
+            roots: HashMap::new(),
+            allocated: 0,
+        }
     }
 
     fn alloc(&mut self, data: CellData) -> ObjId {
-        self.cells.push(Cell { data });
+        if let Some(idx) = self.free.pop() {
+            self.cells[idx as usize] = Some(Cell { data });
+            return idx;
+        }
+        self.cells.push(Some(Cell { data }));
+        self.marks.push(false);
         (self.cells.len() - 1) as ObjId
     }
 
@@ -67,15 +101,16 @@ impl Heap {
 
     /// Allocate an object.
     pub fn alloc_obj(&mut self, o: Object) -> ObjId {
+        self.allocated += 1;
         self.alloc(CellData::Obj(o))
     }
 
     /// Borrow a string's contents (cloned — strings are short here).
     pub fn string(&self, id: ObjId) -> Option<String> {
         match self.cells.get(id as usize) {
-            Some(Cell {
+            Some(Some(Cell {
                 data: CellData::Str(s),
-            }) => Some(s.clone()),
+            })) => Some(s.clone()),
             _ => None,
         }
     }
@@ -83,9 +118,9 @@ impl Heap {
     /// Borrow an object.
     pub fn obj(&self, id: ObjId) -> Option<&Object> {
         match self.cells.get(id as usize) {
-            Some(Cell {
+            Some(Some(Cell {
                 data: CellData::Obj(o),
-            }) => Some(o),
+            })) => Some(o),
             _ => None,
         }
     }
@@ -93,11 +128,218 @@ impl Heap {
     /// Borrow an object mutably.
     pub fn obj_mut(&mut self, id: ObjId) -> Option<&mut Object> {
         match self.cells.get_mut(id as usize) {
-            Some(Cell {
+            Some(Some(Cell {
                 data: CellData::Obj(o),
-            }) => Some(o),
+            })) => Some(o),
             _ => None,
         }
+    }
+
+    /// `true` si `id` pointe une cellule vivante.
+    pub fn is_alive(&self, id: ObjId) -> bool {
+        self.cells.get(id as usize).is_some_and(Option::is_some)
+    }
+
+    /// Nombre de cellules vivantes (objets + chaînes).
+    pub fn live_count(&self) -> usize {
+        self.cells.len() - self.free.len()
+    }
+
+    // -----------------------------------------------------------------
+    // Rooting explicite (ADR-0008)
+    // -----------------------------------------------------------------
+
+    /// Roote `id` — il survit aux `collect` jusqu'au `remove_root`
+    /// correspondant (ref-count : plusieurs racines possibles).
+    pub fn add_root(&mut self, id: ObjId) {
+        *self.roots.entry(id).or_insert(0) += 1;
+    }
+
+    /// Retire une racine posée par [`Heap::add_root`].
+    pub fn remove_root(&mut self, id: ObjId) {
+        if let Some(n) = self.roots.get_mut(&id) {
+            *n -= 1;
+            if *n == 0 {
+                self.roots.remove(&id);
+            }
+        }
+    }
+
+    /// `true` si `id` est actuellement rooté.
+    pub fn is_rooted(&self, id: ObjId) -> bool {
+        self.roots.contains_key(&id)
+    }
+
+    // -----------------------------------------------------------------
+    // Mark-sweep
+    // -----------------------------------------------------------------
+
+    /// Extrait les `ObjId` référencés par la cellule `id` vers
+    /// `out` — proto, props, éléments, charges de `ObjKind`, envs
+    /// capturés (via [`trace_env`]).
+    pub(crate) fn trace_cell(&self, id: ObjId, out: &mut Vec<ObjId>, envs: &mut HashSet<usize>) {
+        let Some(Some(Cell {
+            data: CellData::Obj(o),
+        })) = self.cells.get(id as usize)
+        else {
+            return;
+        };
+        push_value(out, o.proto);
+        for (_, p) in &o.props {
+            match p {
+                Prop::Data { value, .. } => push_value(out, *value),
+                Prop::Acc { get, set, .. } => {
+                    push_value(out, *get);
+                    push_value(out, *set);
+                }
+            }
+        }
+        match &o.kind {
+            ObjKind::Array(elems) => {
+                for &v in elems {
+                    push_value(out, v);
+                }
+            }
+            ObjKind::Fun(fun) => match fun {
+                Fun::Script { env, lex_this, .. } => {
+                    if let Some(t) = lex_this {
+                        push_value(out, *t);
+                    }
+                    trace_env(env, out, envs);
+                }
+                Fun::BoundNative { bound, .. } => {
+                    for &v in bound {
+                        push_value(out, v);
+                    }
+                }
+                Fun::Bound {
+                    target,
+                    this,
+                    bound,
+                } => {
+                    push_value(out, *target);
+                    push_value(out, *this);
+                    for &v in bound {
+                        push_value(out, v);
+                    }
+                }
+                Fun::Native { .. } => {}
+            },
+            ObjKind::Host(h) => h.trace(out),
+            ObjKind::Promise(p) => {
+                push_value(out, p.result);
+                push_value(out, p.resolve_fn);
+                push_value(out, p.reject_fn);
+                for r in &p.reactions {
+                    push_value(out, r.on_fulfilled);
+                    push_value(out, r.on_rejected);
+                    out.push(r.next);
+                }
+            }
+            ObjKind::Map(entries) => {
+                for (k, v) in entries {
+                    push_value(out, *k);
+                    push_value(out, *v);
+                }
+            }
+            ObjKind::Set(items) | ObjKind::Iter { items, .. } => {
+                for &v in items {
+                    push_value(out, v);
+                }
+            }
+            ObjKind::Ordinary
+            | ObjKind::RegExp(_)
+            | ObjKind::Symbol(_)
+            | ObjKind::FetchResponse { .. } => {}
+        }
+    }
+
+    /// Passe mark-sweep. `seed` sème les racines de l'Engine (la
+    /// table `roots` explicite est toujours incluse). Retourne le
+    /// nombre de cellules réclamées ; les host objects balayés
+    /// reçoivent [`Host::finalize`] avant libération.
+    pub fn collect<F>(&mut self, mut seed: F) -> usize
+    where
+        F: FnMut(&mut dyn FnMut(ObjId)),
+    {
+        // -- Mark --
+        let mut worklist: Vec<ObjId> = Vec::new();
+        let mut envs: HashSet<usize> = HashSet::new();
+        let mut discovered: Vec<ObjId> = Vec::new();
+        // Racines explicites (handles hôtes).
+        for &id in self.roots.keys() {
+            if (id as usize) < self.marks.len() && !self.marks[id as usize] {
+                self.marks[id as usize] = true;
+                worklist.push(id);
+            }
+        }
+        // Racines Engine, semées via `seed`.
+        let marks = &mut self.marks;
+        seed(&mut |id| {
+            if (id as usize) < marks.len() && !marks[id as usize] {
+                marks[id as usize] = true;
+                worklist.push(id);
+            }
+        });
+        // Drain itératif — `trace_cell` pousse les référencements
+        // dans `discovered`, on les marque en remettant.
+        while let Some(id) = worklist.pop() {
+            self.trace_cell(id, &mut discovered, &mut envs);
+            for d in discovered.drain(..) {
+                if !self.marks[d as usize] {
+                    self.marks[d as usize] = true;
+                    worklist.push(d);
+                }
+            }
+        }
+        // -- Sweep --
+        let mut swept = 0usize;
+        for (i, slot) in self.cells.iter_mut().enumerate() {
+            if slot.is_some() && !self.marks[i] {
+                if let Some(Cell {
+                    data: CellData::Obj(o),
+                }) = slot.as_ref()
+                {
+                    if let ObjKind::Host(h) = &o.kind {
+                        h.finalize();
+                    }
+                }
+                *slot = None;
+                self.free.push(i as u32);
+                swept += 1;
+            }
+            self.marks[i] = false;
+        }
+        swept
+    }
+}
+
+/// Pousse l'`ObjId` d'un `Value` (no-op pour les scalaires).
+pub(crate) fn push_value(out: &mut Vec<ObjId>, v: Value) {
+    match v {
+        Value::Obj(i) | Value::Str(i) => out.push(i),
+        _ => {}
+    }
+}
+
+/// Trace les valeurs des bindings de `env` et remonte la chaîne
+/// `parent` — visited-set par adresse `Rc` (les envs peuvent boucler
+/// via `env → binding → Fun::Script → env`).
+pub(crate) fn trace_env(env: &EnvRef, out: &mut Vec<ObjId>, visited: &mut HashSet<usize>) {
+    let mut cur = Some(env.clone());
+    while let Some(e) = cur.take() {
+        let key = Rc::as_ptr(&e) as usize;
+        if !visited.insert(key) {
+            return;
+        }
+        let borrowed = e.borrow();
+        let map = match &borrowed.kind {
+            EnvKind::Global(m) | EnvKind::Local(m) => m,
+        };
+        for b in map.values() {
+            push_value(out, b.value);
+        }
+        cur.clone_from(&borrowed.parent);
     }
 }
 
@@ -352,6 +594,19 @@ pub trait Host: std::any::Any {
     fn class_name(&self) -> &'static str {
         "HostObject"
     }
+
+    /// Trace hook for the mark-sweep GC (ADR-0008) : tout `Value`
+    /// retenu par l'objet hôte doit être poussé dans `out`, sinon
+    /// le collecteur le réclamera sous le pied du script. Défaut :
+    /// aucun (la plupart des hosts retiennent des handles hôtes,
+    /// pas des `Value`).
+    fn trace(&self, _out: &mut Vec<ObjId>) {}
+
+    /// Appelé juste avant libération de la cellule par le
+    /// mark-sweep — point de finalisation pour l'hôte (relâcher des
+    /// handles côté `explorer-dom`, fermer des ressources…).
+    /// Défaut : no-op.
+    fn finalize(&self) {}
 
     /// Downcast support for host-side operations (`appendChild`
     /// needs the *node* behind an element value). Implement as

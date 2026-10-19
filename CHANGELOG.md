@@ -9,6 +9,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-A — GC mark-sweep `dillo-js` (ADR-0008)** : l'arène
+  `ObjId` ne « meurt plus avec la page » —
+  - `Heap` : tombstones + freelist (réutilisation de slots),
+    rooting explicite ref-counté (`add_root`/`remove_root`),
+    `is_alive`/`is_rooted`/`live_count` ;
+  - `Engine::collect` : mark itératif depuis toutes les racines
+    (global, prototypes, env global, `Symbol.for`, timers,
+    microtasks, XHR/fetch en vol, cache DOM↔JS + listeners,
+    hooks, complétion) puis sweep + `Host::finalize` ;
+  - trace : proto, props data/accesseurs, éléments de tableau,
+    `Map`/`Set`/itérateurs, promesses + réactions + jobs,
+    envs capturés par `Fun::Script` (visited-set anti-cycle),
+    hooks `Host::trace`/`finalize` pour les objets hôtes ;
+  - contrat : `collect` entre deux jobs — la pile d'appel JS
+    n'est pas une racine ; les handles hôtes stables passent
+    par les racines explicites, un `ObjId` obsolète résout
+    `None` (jamais d'accès dangling) ;
+  - 13 tests `tests/gc.rs` : cycles, fermetures, timers,
+    promesses, cache DOM, racines explicites, idempotence.
+
 - **Étape 12 — golden tests + premier artefact** :
   - Corpus **html5lib-tests tree-construction** (57 fichiers
     `.dat`, ~1 600 cas) extrait @ `9329e64694` vers

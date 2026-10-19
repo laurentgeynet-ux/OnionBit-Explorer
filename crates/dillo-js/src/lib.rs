@@ -65,5 +65,5 @@ pub use error::{Error, Result};
 pub use heap::Host;
 pub use interp::Engine;
 pub use storage::Storage;
-pub use value::Value;
+pub use value::{ObjId, Value};
 pub use xhr::{XhrRequest, XhrResponse, XhrTransport};

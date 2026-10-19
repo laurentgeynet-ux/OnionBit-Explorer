@@ -50,6 +50,15 @@ pub(crate) struct TimerQueue {
 }
 
 impl TimerQueue {
+    /// Toutes les `Value` retenues par les timers en attente —
+    /// racines GC (un callback planifié garde ses captures vivantes).
+    pub(crate) fn roots(&self, out: &mut Vec<Value>) {
+        for t in &self.timers {
+            out.push(t.cb);
+            out.extend(t.cb_args.iter().copied());
+        }
+    }
+
     fn schedule(&mut self, cb: Value, delay_ms: u64, interval: bool, cb_args: Vec<Value>) -> u64 {
         self.next_id += 1;
         let id = self.next_id;

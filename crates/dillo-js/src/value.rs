@@ -4,7 +4,7 @@
 
 //! Core JS value representation and number formatting.
 
-/// Handle into the [`crate::heap::Heap`] arena (ADR-0005-style:
+/// Handle into the `Heap` arena (ADR-0005-style:
 /// objects reference each other by id, never by pointer).
 pub type ObjId = u32;
 

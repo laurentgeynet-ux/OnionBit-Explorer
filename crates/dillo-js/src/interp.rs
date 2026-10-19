@@ -115,6 +115,31 @@ pub(crate) struct Protos {
     pub symbol: ObjId,
 }
 
+impl Protos {
+    /// Tous les prototypes — racines GC permanentes.
+    fn all(&self) -> [ObjId; 17] {
+        [
+            self.object,
+            self.function,
+            self.array,
+            self.string,
+            self.number,
+            self.boolean,
+            self.error,
+            self.type_error,
+            self.reference_error,
+            self.syntax_error,
+            self.date,
+            self.regexp,
+            self.promise,
+            self.iterator,
+            self.map,
+            self.set,
+            self.symbol,
+        ]
+    }
+}
+
 /// Statement completion — `throw` travels via `Err(Thrown)`.
 enum Flow {
     Normal,
@@ -202,6 +227,125 @@ impl Engine {
     /// is killed. Reset by each `eval` call.
     pub fn set_op_limit(&mut self, limit: u64) {
         self.op_limit = limit;
+    }
+
+    /// Roote `id` jusqu'au [`Engine::remove_root`] correspondant —
+    /// handles hôtes (ex. wrapper DOM tenue côté `explorer-dom`
+    /// sans ref JS). Ref-counté : chaque `add_root` appelle un
+    /// `remove_root`.
+    pub fn add_root(&mut self, id: ObjId) {
+        self.heap.add_root(id);
+    }
+
+    /// Retire une racine posée par [`Engine::add_root`].
+    pub fn remove_root(&mut self, id: ObjId) {
+        self.heap.remove_root(id);
+    }
+
+    /// `true` si `id` pointe une cellule vivante (utile pour
+    /// déboguer les handles hôtes).
+    #[must_use]
+    pub fn is_alive(&self, id: ObjId) -> bool {
+        self.heap.is_alive(id)
+    }
+
+    /// `true` si `id` est rooté explicitement.
+    #[must_use]
+    pub fn is_rooted(&self, id: ObjId) -> bool {
+        self.heap.is_rooted(id)
+    }
+
+    /// Nombre de cellules vivantes (objets + chaînes) — métrique
+    /// pour embedders et tests.
+    #[must_use]
+    pub fn live_count(&self) -> usize {
+        self.heap.live_count()
+    }
+
+    /// Passe GC mark-sweep (ADR-0008). À invoquer **entre deux
+    /// jobs** — jamais pendant une évaluation : la pile d'appel
+    /// n'est pas une racine (les envs capturés par des fonctions
+    /// vivantes sont tracés via leurs objets `Fun::Script`).
+    ///
+    /// Racines semées : objet global + prototypes, registre
+    /// `Symbol.for`, env global (bindings `let`/`const`), timers
+    /// en attente, file de microtasks, XHR/`fetch` en vol, table
+    /// DOM↔JS (cache + listeners de nœuds), hooks navigateur,
+    /// valeur de complétion — plus les racines explicites posées
+    /// par [`Engine::add_root`]. Retourne le nombre de cellules
+    /// réclamées ; les host objects balayés reçoivent leur
+    /// hook `Host::finalize` avant libération.
+    pub fn collect(&mut self) -> usize {
+        // 1. Rassemble les `ObjId` tenus par les structures
+        //    annexes (RefCell/NodeCache — leurs borrows doivent
+        //    être relâchés avant la passe).
+        let mut ids: Vec<ObjId> = Vec::new();
+        let mut vs = Vec::new();
+        self.timers.roots(&mut vs);
+        for v in vs {
+            crate::heap::push_value(&mut ids, v);
+        }
+        for (_, wrapper, data) in &self.xhr.live {
+            ids.push(*wrapper);
+            let mut cbs = Vec::new();
+            data.borrow().listener_values(&mut cbs);
+            for cb in cbs {
+                crate::heap::push_value(&mut ids, cb);
+            }
+        }
+        for (_, promise) in &self.xhr.fetches {
+            ids.push(*promise);
+        }
+        for job in &self.microtasks {
+            match job {
+                crate::promise::Job::Reaction { cb, arg, next, .. } => {
+                    crate::heap::push_value(&mut ids, *cb);
+                    crate::heap::push_value(&mut ids, *arg);
+                    ids.push(*next);
+                }
+                crate::promise::Job::Thenable {
+                    then_fn,
+                    this,
+                    resolve,
+                    reject,
+                } => {
+                    crate::heap::push_value(&mut ids, *then_fn);
+                    crate::heap::push_value(&mut ids, *this);
+                    crate::heap::push_value(&mut ids, *resolve);
+                    crate::heap::push_value(&mut ids, *reject);
+                }
+                crate::promise::Job::Plain(v) => crate::heap::push_value(&mut ids, *v),
+            }
+        }
+        if let Some((dom, cache)) = &self.dom_ctx {
+            for &id in cache.borrow().values() {
+                ids.push(id);
+            }
+            for node in &dom.borrow().nodes {
+                for (_, cb, _) in &node.listeners {
+                    crate::heap::push_value(&mut ids, *cb);
+                }
+            }
+        }
+        if let Some(s) = self.hooks.screen_obj {
+            ids.push(s);
+        }
+        ids.push(self.global);
+        ids.extend(self.protos.all());
+        for v in self.symbol_reg.values() {
+            crate::heap::push_value(&mut ids, *v);
+        }
+        crate::heap::push_value(&mut ids, self.completion);
+        // 2. Env global — les bindings `let`/`const` ne vivent pas
+        //    sur l'objet global.
+        let mut visited = HashSet::new();
+        crate::heap::trace_env(&self.global_env, &mut ids, &mut visited);
+        // 3. Mark-sweep.
+        self.heap.collect(|mark| {
+            for &id in &ids {
+                mark(id);
+            }
+        })
     }
 
     /// Parse and run `src`; returns the completion value of the last

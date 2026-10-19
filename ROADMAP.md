@@ -210,12 +210,20 @@ Le moteur (`crates/dillo-js`) avance sur sa propre cadence, en
 parallèle des phases moteur — son ordre est dicté par le contrat
 d'intégration, pas par la couverture :
 
-- [ ] **JS-A. Alignement heap → ADR-0008** : rooting explicite,
-  trace des handles, finalisation sur l'arène `ObjId` ; passe GC
-  mark-sweep réelle (l'arène qui « meurt avec la page » ne tient
-  pas pour une SPA longue durée — palier 3). **Prérequis de
-  l'étape 34** — chaque feature ajoutée avant ce retrofit le rend
-  plus cher.
+- [x] **JS-A. Alignement heap → ADR-0008** : rooting explicite
+  (`Engine::add_root`/`remove_root`, ref-counté), tombstones +
+  freelist, passe GC mark-sweep itérative (`Engine::collect`) —
+  racines semées : global/prototypes, env global (`let`/`const`),
+  `Symbol.for`, timers, microtasks, XHR/fetch en vol, cache
+  DOM↔JS + listeners de nœuds, hooks navigateur, complétion ;
+  trace proto/props/accesseurs/tableaux/Map/Set/itérateurs/
+  promesses/réactions/envs capturés via `Fun::Script` ; hook
+  `Host::trace`/`Host::finalize`. Un `ObjId` réclamé résout
+  `None` — dégradation tolérante, jamais de dangling. La pile
+  d'appel n'est pas une racine : `collect` se pilote entre deux
+  jobs (contrat documenté). 13 tests `tests/gc.rs`.
+  **Prérequis de l'étape 34 levé** pour la partie heap — reste
+  le branchement `explorer-js`/`explorer-dom` générationnel.
 - [ ] **JS-B. Harness test262** : extraction par script vers
   `tests/conformance/`, skip list versionnée, % publié dans
   CHANGELOG (ADR-0010) — la couverture devient un signal objectif.

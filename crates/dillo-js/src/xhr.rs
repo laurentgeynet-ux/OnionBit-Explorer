@@ -96,6 +96,17 @@ pub(crate) struct XhrData {
     listeners: Vec<(String, Value, bool)>,
 }
 
+impl XhrData {
+    /// `Value` retenues par les listeners — racines GC : un XHR
+    /// vivant garde ses callbacks `readystatechange`/`load`/…
+    /// en vie.
+    pub(crate) fn listener_values(&self, out: &mut Vec<Value>) {
+        for (_, cb, _) in &self.listeners {
+            out.push(*cb);
+        }
+    }
+}
+
 /// The `XMLHttpRequest` host object.
 struct XhrHost {
     data: Rc<RefCell<XhrData>>,

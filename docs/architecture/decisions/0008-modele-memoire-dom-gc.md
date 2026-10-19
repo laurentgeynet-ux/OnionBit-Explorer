@@ -61,11 +61,15 @@ refonte du domaine pur.
 - `explorer-js` possède la table de roots et la politique de
   tracing ; `explorer-core` ne manipule que des `NodeId`.
 - **Ce modèle est le contrat imposé à `dillo-js`** (crate de ce
-  workspace, équipe JS dédiée — ADR-0007) : son heap `ObjId` devra
-  exposer rooting/trace/finalization avant le branchement de
-  phase 8. Le spike de l'étape 12 valide le protocole avec de faux
-  handles ; la revue de conformité du heap réel est un prérequis
-  explicite de l'étape 34.
+  workspace, équipe JS dédiée — ADR-0007). Le spike de l'étape 12
+  a validé le protocole avec de faux handles ; le chantier **JS-A**
+  a depuis livré la conformité côté heap réel : tombstones +
+  freelist, rooting explicite (`Engine::add_root`/`remove_root`),
+  mark-sweep itératif (`Engine::collect`), hooks
+  `Host::trace`/`Host::finalize`, handle obsolète → `None`.
+  Reste pour l'étape 34 : le pont `explorer-js` qui traduit les
+  `NodeId` générationnels en racines/wrappers JS — la pièce
+  côté moteur JS est en place.
 - Le nombre de roots est borné (contenu hostile = norme) : une page
   qui roote l'arbre entier dégrade en erreur typée, elle ne déborde
   pas.
