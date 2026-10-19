@@ -247,7 +247,7 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str) -> Item {
 
 /// §16.6.1 : espaces CSS (` ` `\t` `\n` `\r` `\x0B` `\x0C`)
 /// — une suite quelconque devient une seule ` `.
-fn collapse_ws(t: &str) -> String {
+pub(crate) fn collapse_ws(t: &str) -> String {
     let mut out = String::with_capacity(t.len());
     let mut in_ws = false;
     for c in t.chars() {

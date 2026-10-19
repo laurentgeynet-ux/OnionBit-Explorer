@@ -190,10 +190,18 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (images `support/` + `url()`), bordure `medium` 3 px par
   défaut. Skips : `bfc-011` (métrique fonte Ahem seule),
   `block-in-inline-append-001` (`flags: dom` ⇒ JS requis).
-- [ ] **R-3. Tailles intrinsèques réelles** (ex-56).
+- [x] **R-3. Tailles intrinsèques réelles** (ex-56).
   `min-content`/`max-content` mesurés par contenu (plus
   d'approximation), `margin:auto` (block horizontal + axes flex),
   `stretch` cross — fondation requise pour R-4/R-5.
+  Livré : module `intrinsic` (mesure récursive du sous-arbre —
+  mot le plus long pour min-content, ligne insécable pour
+  max-content, `fit-content` borné) branchée sur `width` /
+  `min|max-width` / `flex-basis` ; bases flex `auto` et
+  colonnes grid `auto` mesurées en max-content réel ;
+  `margin:auto` sur items flex (axe principal avant
+  `justify-content`, cross = reliquat) ; `stretch` étire le
+  rect cross quand la taille est `auto`.
 - [ ] **R-4. `flex-wrap` multi-lignes** (ex-57) :
   coupures de lignes flex, `align-content`, `order` cross-line.
 - [ ] **R-5. Grid complet MVP+** (ex-58) :
@@ -210,10 +218,12 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
-- [ ] **R-8. Foreign-content dans `explorer-html`** (ex-60a) :
+- [x] **R-8. Foreign-content dans `explorer-html`** (ex-60a) :
   tokenizer/tree-builder SVG et MathML inline, points de breakout
   de la spec, ajustements d'attributs/casse — prérequis de tout
-  `<svg>` inline réel.
+  `<svg>` inline réel. **Livré par R-15** (sous-chantier 1 :
+  namespaces, points d'intégration, breakout, `CDATA`,
+  ajustements d'attributs étrangers — 1592/1592 html5lib).
 - [ ] **R-9. `<svg>` inline** (ex-60b) : sous-arbre SVG rendu
   (via `usvg` sur le sous-arbre sérialisé, ou display items
   dédiés — arbitrer en début d'étape), `<foreignObject>`

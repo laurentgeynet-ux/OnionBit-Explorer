@@ -16,8 +16,9 @@
 //! Écarts connus : pas de `grid-template-areas` ni de lignes
 //! nommées, pas de placement dense/backfill, `fr` sur l'axe
 //! vertical ≈ `auto` (hauteur de conteneur inconnue au flow),
-//! `auto` colonne = max des bases mesurées (pas max-content
-//! intégral), indices négatifs ignorés.
+//! `auto` colonne = max des bases mesurées (max-content réel
+//! depuis R-3, hors spans multi-pistes), indices négatifs
+//! ignorés.
 
 use crate::block::{css_px, font_size_px, raw_length_px, BlockCtx};
 use crate::flex::{gap_px, layout_item, translate_subtree};
@@ -298,7 +299,7 @@ pub(crate) fn flow_grid_children(
     }
 
     // Base de mesure des items (auto colonne) : `width`
-    // explicite, intrinsèque, texte direct.
+    // explicite, intrinsèque remplacé, max-content réel (R-3).
     let items_base: Vec<(usize, usize, f32)> = slots
         .iter()
         .zip(&order_idx)
@@ -307,8 +308,7 @@ pub(crate) fn flow_grid_children(
             let cfs = font_size_px(&ch.style, fs, ctx);
             let base = css_px(&ch.style, "width", content_w, cfs, ctx)
                 .or_else(|| ch.intrinsic.map(|v| v.0))
-                .or_else(|| crate::flex::text_content_px(ch, cfs, ctx))
-                .unwrap_or(0.0);
+                .unwrap_or_else(|| crate::intrinsic::max_content_px(ch, cfs, ctx));
             (c, span, base)
         })
         .collect();

@@ -9,6 +9,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-3 — Tailles intrinsèques réelles** (`explorer-layout`,
+  nouveau module `intrinsic`) : `min-content`/`max-content`/
+  `fit-content` sont désormais **mesurés sur le contenu
+  réel** — texte pesé par la fonte injectée (mot le plus
+  long vs ligne insécable), sous-arbres récursés, lignes de
+  table sommées — et résolus sur `width`, `min|max-width`
+  et `flex-basis`. Les bases flex `auto` et les colonnes
+  grid `auto` consomment le max-content réel (fin de
+  l'approximation « texte direct »). `margin: auto` arrive
+  sur les items flex : axe principal = part égale du libre
+  **avant** `justify-content` (spec §8.1), cross = reliquat
+  (centrage `margin: auto` vertical/horizontal en column).
+  `align-items: stretch` étire le rect cross quand la
+  taille cross est `auto` (approximation documentée : le
+  contenu interne n'est pas re-flouté). R-8 marquée livrée
+  par R-15 (foreign-content = sous-chantier 1 de
+  html5lib 1592/1592).
+
 - **R-18 — `color` des éléments inline jusqu'aux runs**
   (`explorer-layout`/`explorer-render`, repro terrain
   `color.html`) : `Fragment` porte désormais le

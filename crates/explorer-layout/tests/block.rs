@@ -253,3 +253,151 @@ fn font_size_em_ne_se_remultiplie_pas() {
     let h2 = find(&bx2, by_tag(&d2, "div")).rect.height;
     assert!(approx(h1, h2), "2em={h1} vs 32px={h2}");
 }
+
+#[test]
+fn width_max_content_mesure_le_texte() {
+    // R-3 : `width: max-content` — la boîte se rétracte à sa
+    // plus longue ligne insécable (texte entier effondré : « aaa bbbb » =
+    // 8 caractères × 8.8px en repli métrique headless).
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"width:max-content\">aaa bbbb</div>",
+        "",
+    );
+    let d = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(d.rect.width, 8.0 * 8.8), "{}", d.rect.width);
+}
+
+#[test]
+fn width_min_content_mot_le_plus_long() {
+    // `min-content` = le plus grand morceau insécable : le
+    // mot le plus long (« bbbb », 4 chars → 35.2px), pas le
+    // texte entier ni le conteneur.
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"width:min-content\">aaa bbbb</div>",
+        "",
+    );
+    let d = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(d.rect.width, 4.0 * 8.8), "{}", d.rect.width);
+}
+
+#[test]
+fn width_fit_content_borne_par_disponible() {
+    // `fit-content` = min(max-content, max(min-content,
+    // dispo)) : texte court → max-content ; texte long →
+    // borné à la largeur disponible.
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"width:fit-content\">aaa bbbb</div>",
+        "",
+    );
+    let d = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(d.rect.width, 8.0 * 8.8), "court {}", d.rect.width);
+    // Mots séparés : max-content ~1760 > dispo, min-content
+    // = un mot (35.2) < dispo → borné à 800.
+    let long = "aaaa ".repeat(50);
+    let (dom2, bx2) = laid(
+        &format!("<!doctype html><div style=\"width:fit-content\">{long}</div>"),
+        "",
+    );
+    let d2 = find(&bx2, by_tag(&dom2, "div"));
+    assert!(approx(d2.rect.width, VIEW), "long {}", d2.rect.width);
+}
+
+#[test]
+fn max_content_via_enfant_bloc_a_largeur_fixe() {
+    // Le max-content d'un conteneur inclut ses enfants bloc :
+    // un fils à `width: 120px` impose 120px même si le texte
+    // est plus étroit ou plus court.
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"width:max-content\">\
+           <div style=\"width:120px\">x</div>yy</div>",
+        "",
+    );
+    // `by_tag` visite en ordre document : le premier div est
+    // le conteneur à `max-content` (le fils 120px + « yy »
+    // inline → contribution max = 120).
+    let mcx = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(mcx.rect.width, 120.0), "{}", mcx.rect.width);
+}
+
+#[test]
+fn max_width_max_content_borne() {
+    // `max-width: max-content` borne la boîte à sa ligne
+    // insécable (le texte aurait droit à 800px en `auto`).
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"max-width:max-content\">aaa bbbb</div>",
+        "",
+    );
+    let d = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(d.rect.width, 8.0 * 8.8), "{}", d.rect.width);
+}
+
+#[test]
+fn flex_margin_auto_pousse_a_droite() {
+    // R-3 : `margin-left: auto` sur un item flex absorbe le
+    // libre de l'axe principal — le second item est poussé
+    // contre le bord droit du conteneur.
+    let (dom, bx) = laid(
+        "<!doctype html><div id=\"f\" style=\"display:flex\">\
+           <div style=\"width:100px\">a</div>\
+           <div style=\"width:100px;margin-left:auto\">b</div></div>",
+        "",
+    );
+    let f = find(&bx, by_tag(&dom, "div"));
+    assert_eq!(f.children.len(), 2);
+    let second = &f.children[1];
+    assert!(
+        approx(second.rect.x + second.rect.width, VIEW),
+        "b fin x={}",
+        second.rect.x
+    );
+}
+
+#[test]
+fn flex_margin_auto_des_deux_cotes_centre() {
+    // `margin: 0 auto` sur l'item : les deux marges absorbent
+    // → centrage dans l'axe principal.
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"display:flex\">\
+           <div style=\"width:100px;margin:0 auto\">a</div></div>",
+        "",
+    );
+    let f = find(&bx, by_tag(&dom, "div"));
+    let item = &f.children[0];
+    assert!(
+        approx(item.rect.x, (VIEW - 100.0) / 2.0),
+        "centré x={}",
+        item.rect.x
+    );
+}
+
+#[test]
+fn flex_align_stretch_etire_la_boite() {
+    // `align-items: stretch` (défaut) : l'item sans `height`
+    // s'étire à la hauteur de la ligne (= le plus grand
+    // frère). Avant : traité comme flex-start.
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"display:flex\">\
+           <div style=\"width:100px;height:80px\">a</div>\
+           <div style=\"width:100px\">b</div></div>",
+        "",
+    );
+    let f = find(&bx, by_tag(&dom, "div"));
+    assert!(
+        approx(f.children[1].rect.height, 80.0),
+        "{}",
+        f.children[1].rect.height
+    );
+    // `height` explicite : pas d'étirement (spec).
+    let (dom2, bx2) = laid(
+        "<!doctype html><div style=\"display:flex\">\
+           <div style=\"width:100px;height:80px\">a</div>\
+           <div style=\"width:100px;height:30px\">b</div></div>",
+        "",
+    );
+    let f2 = find(&bx2, by_tag(&dom2, "div"));
+    assert!(
+        approx(f2.children[1].rect.height, 30.0),
+        "{}",
+        f2.children[1].rect.height
+    );
+}

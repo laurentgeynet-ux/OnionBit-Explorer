@@ -23,6 +23,7 @@ mod flex;
 pub mod font;
 mod grid;
 pub mod inline;
+mod intrinsic;
 mod tables;
 pub mod text;
 

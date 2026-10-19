@@ -544,7 +544,12 @@ pub(crate) fn layout_block(
     // office de `width`/`height` quand le CSS est `auto`
     // (§10.3.2 — attr/dimensions intrinsèques déjà résolus
     // en amont, chaque axe indépendamment).
-    let w_spec = css_px(&st, "width", cb_w, fs, ctx).or(bx.intrinsic.map(|i| i.0));
+    // Mots-clés intrinsèques (R-3) : `min|max-content`,
+    // `fit-content` — mesurés sur le contenu réel avant le
+    // repli remplacé.
+    let w_spec = css_px(&st, "width", cb_w, fs, ctx)
+        .or_else(|| crate::intrinsic::intrinsic_size_px(&st, "width", bx, cb_w, fs, ctx))
+        .or(bx.intrinsic.map(|i| i.0));
     let auto_left = st.get("margin-left") == Some("auto");
     let auto_right = st.get("margin-right") == Some("auto");
     let fixed = bl + br + pl + pr;
@@ -629,10 +634,14 @@ pub(crate) fn layout_block(
     }
     let w = {
         let mut w = bl + pl + content_w + pr + br;
-        if let Some(mn) = css_px(&st, "min-width", cb_w, fs, ctx) {
+        let bound_px = |prop: &str| {
+            css_px(&st, prop, cb_w, fs, ctx)
+                .or_else(|| crate::intrinsic::intrinsic_size_px(&st, prop, bx, cb_w, fs, ctx))
+        };
+        if let Some(mn) = bound_px("min-width") {
             w = w.max(mn);
         }
-        if let Some(mx) = css_px(&st, "max-width", cb_w, fs, ctx) {
+        if let Some(mx) = bound_px("max-width") {
             w = w.min(mx);
         }
         w

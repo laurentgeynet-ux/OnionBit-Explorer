@@ -1,0 +1,159 @@
+// This file is part of Explorer.
+// Copyright (C) 2026 Laurent Geynet
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! Tailles intrinsèques (R-3) : `min-content`, `max-content`
+//! et `fit-content` mesurées sur le contenu **réel** — texte
+//! pesé via la fonte injectée (ADR-0009), sous-arbres
+//! récursés. Fini l'approximation « taille du texte direct »
+//! pour la mesure ; le layout `width` les résout en px.
+//!
+//! Convention CSS Sizing : le **max-content** est la plus
+//! grande largeur sans coupure souple ; le **min-content**
+//! le plus grand morceau insécable (mot le plus long,
+//! atome remplacé le plus large). `fit-content` =
+//! `min(max-content, max(min-content, disponible))`.
+//!
+//! Approximations documentées (MVP) :
+//! - les enfants de niveau bloc contribuent leur **max**
+//!   (flux vertical — les largeurs ne s'additionnent pas) ;
+//! - une suite d'enfants en-ligne contribue la **somme** des
+//!   max-content, et le **max** des min-content (les
+//!   coupures souples autorisées entre eux) ;
+//! - `table-row` somme ses cellules (colonnes côte à côte) ;
+//! - marges/paddings des enfants ignorés, sauf le padding
+//!   propre porté par l'appelant (`width` = content box).
+
+use crate::block::{css_px, font_size_px, measure_fn, side_px, BlockCtx};
+use crate::boxtree::{BoxKind, LayoutBox};
+use explorer_css::ComputedStyle;
+
+/// `width`/`min-width`/`max-width`/`flex-basis` mot-clé → px
+/// mesurés, `None` si la valeur n'est pas un mot-clé
+/// intrinsèque.
+pub(crate) fn intrinsic_size_px(
+    st: &ComputedStyle,
+    prop: &str,
+    bx: &LayoutBox,
+    basis: f32,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> Option<f32> {
+    match st.get(prop)?.trim() {
+        "max-content" => Some(max_content_px(bx, fs, ctx)),
+        "min-content" => Some(min_content_px(bx, fs, ctx)),
+        "fit-content" => {
+            let avail = (basis
+                - side_px(st, "margin-left", basis, fs, ctx, 0.0)
+                - side_px(st, "margin-right", basis, fs, ctx, 0.0))
+            .max(0.0);
+            Some(max_content_px(bx, fs, ctx).min(min_content_px(bx, fs, ctx).max(avail)))
+        }
+        _ => None,
+    }
+}
+
+/// Largeur max-content du contenu de `bx` (content box).
+pub(crate) fn max_content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx) -> f32 {
+    content_px(bx, fs, ctx, true)
+}
+
+/// Largeur min-content du contenu de `bx` (content box).
+pub(crate) fn min_content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx) -> f32 {
+    content_px(bx, fs, ctx, false)
+}
+
+/// Mesure mutualisée : `max` = insécable complet, `min` =
+/// plus grand morceau insécable. `fs` = font-size **de bx**
+/// (résolu par l'appelant).
+fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
+    // Remplacé (`img`…) : la taille préférée fait foi.
+    if let Some((w, _)) = bx.intrinsic {
+        return w;
+    }
+    // `width` explicite (hors %) : l'enfant impose sa taille
+    // fixe — un % indéfini retombe sur son contenu (§5.2).
+    if let Some(v) = bx.style.get("width") {
+        if !v.contains('%') {
+            if let Some(w) = css_px(&bx.style, "width", 0.0, fs, ctx) {
+                return w;
+            }
+        }
+    }
+    // Boîte texte : mesure de la fonte réelle.
+    if bx.kind == BoxKind::Text {
+        if let Some(t) = &bx.text {
+            return text_px(&bx.style, t, fs, ctx, max);
+        }
+        return 0.0;
+    }
+    // Ligne de table = somme des cellules (colonnes).
+    if bx.display() == "table-row" {
+        return bx
+            .children
+            .iter()
+            .map(|c| {
+                content_px(c, font_size_px(&c.style, fs, ctx), ctx, max) + own_sides(c, fs, ctx)
+            })
+            .sum();
+    }
+    // Conteneur : enfants en-ligne s'additionnent (max) ou se
+    // maximisent par morceau (min) ; enfants bloc = max.
+    let mut best = 0.0f32;
+    let mut run = 0.0f32;
+    for c in &bx.children {
+        let cfs = font_size_px(&c.style, fs, ctx);
+        if inline_level(c) {
+            let w = content_px(c, cfs, ctx, max);
+            if max {
+                run += w;
+            } else {
+                run = run.max(w);
+            }
+        } else {
+            best = best.max(run);
+            run = 0.0;
+            best = best.max(content_px(c, cfs, ctx, max) + own_sides(c, fs, ctx));
+        }
+    }
+    best.max(run)
+}
+
+/// `true` = enfant qui coule en ligne (texte, inline,
+/// remplacé) — regroupé en « run » pour la mesure.
+fn inline_level(c: &LayoutBox) -> bool {
+    c.kind.is_inline_level() || c.display() == "inline-block" || c.intrinsic.is_some()
+}
+
+/// Mesure `text` : max = chaîne entière (espaces effondrés,
+/// §16.6.1) ; min = le mot le plus long.
+fn text_px(st: &ComputedStyle, text: &str, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
+    let measure = measure_fn(st, fs, ctx);
+    if max {
+        return measure(&crate::inline::collapse_ws(text));
+    }
+    text.split(crate::text::is_css_ws)
+        .filter(|w| !w.is_empty())
+        .map(&measure)
+        .fold(0.0, f32::max)
+}
+
+/// Marges + padding + bordures horizontales propres d'un
+/// enfant — comptées dans l'intrinsèque du parent (la boîte
+/// de marge déborde la content box du conteneur).
+fn own_sides(c: &LayoutBox, fs: f32, ctx: &BlockCtx) -> f32 {
+    let st = &c.style;
+    let cfs = font_size_px(st, fs, ctx);
+    let mut acc = 0.0f32;
+    for prop in [
+        "margin-left",
+        "margin-right",
+        "padding-left",
+        "padding-right",
+        "border-left-width",
+        "border-right-width",
+    ] {
+        acc += side_px(st, prop, 0.0, cfs, ctx, 0.0);
+    }
+    acc
+}
