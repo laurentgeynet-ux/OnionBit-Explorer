@@ -1,0 +1,13 @@
+# wpt_skip.txt — cas WPT exclus du score (un par ligne).
+#
+# Format : <chemin/relatif/du/test> <raison courte>
+# Le chemin est celui de manifest.txt (relatif à ce dossier).
+# Lignes vides et commentaires '#' ignorés.
+#
+# Règle (AGENTS §5 / ADR-0010) : un cas entre ici UNIQUEMENT
+# si la divergence est comprise et documentée — jamais pour
+# faire monter le score. Un échec réel reste un échec
+# compté dans le rapport. Le cliquet est `WPT_BASELINE`
+# dans tests/wpt_reftests.rs.
+#
+# (vide — 2026-02 : les 40 cas extraits tournent tous)

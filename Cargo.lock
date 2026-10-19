@@ -486,8 +486,10 @@ dependencies = [
  "explorer-css",
  "explorer-dom",
  "explorer-html",
+ "explorer-js",
  "explorer-layout",
  "explorer-net",
+ "explorer-render",
  "tokio",
 ]
 

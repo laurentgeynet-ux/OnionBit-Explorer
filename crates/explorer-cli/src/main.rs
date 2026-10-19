@@ -10,6 +10,8 @@
 //! - `fetch <url>` : télécharge et affiche le corps décodé.
 //! - `layout <fichier|url>` : pipeline complet → wireframe de
 //!   l'arbre de boîtes (dump wireframe, étape 17).
+//! - `shot <url> <sortie.png>` : pipeline Session complet
+//!   (réseau réel, JS, images) → PNG — smoke interop étape 48.
 
 #![forbid(unsafe_code)]
 
@@ -31,12 +33,69 @@ fn main() -> ExitCode {
         [_, cmd, arg] if cmd == "dump" => dump(arg),
         [_, cmd, arg] if cmd == "fetch" => fetch(arg),
         [_, cmd, arg] if cmd == "layout" => layout(arg),
+        [_, cmd, url, out] if cmd == "shot" => shot(url, out),
         _ => {
             eprintln!("usage : explorer-cli dump <fichier|url>");
             eprintln!("        explorer-cli fetch <url>");
             eprintln!("        explorer-cli layout <fichier|url>");
+            eprintln!("        explorer-cli shot <url> <sortie.png>");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Pile réseau complète (TLS + ALPN h1/h2 + décodage +
+/// redirections bornées) — partagée par `read_source` et
+/// `shot`.
+fn client_stack() -> Arc<dyn HttpTransport> {
+    let tls = Arc::new(TlsConnector::web_roots());
+    let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
+    let decoded: Arc<dyn HttpTransport> = Arc::new(DecodingTransport::wrap(h1, 16 * 1024 * 1024));
+    Arc::new(RedirectTransport::wrap(decoded, 8))
+}
+
+/// Répertoire de fontes — `EXPLORER_FONT_DIR` puis défaut
+/// plateforme (même logique que `explorer-daemon`/`explorer-ffi`).
+fn default_fonts_dir() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("EXPLORER_FONT_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+    if cfg!(windows) {
+        std::path::PathBuf::from("C:\\Windows\\Fonts")
+    } else if cfg!(target_os = "macos") {
+        std::path::PathBuf::from("/System/Library/Fonts")
+    } else {
+        std::path::PathBuf::from("/usr/share/fonts")
+    }
+}
+
+/// `shot <url> <sortie.png>` : navigation réelle complète
+/// (réseau, JS, images, webfonts) puis PNG du rendu —
+/// mesure interop sur sites réels (étape 48).
+#[tokio::main(flavor = "current_thread")]
+async fn shot(url: &str, out: &str) -> ExitCode {
+    let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
+    let mut session = explorer_core::Session::new(client_stack(), Arc::new(fonts));
+    session.set_js_factory(explorer_js::DilloEngine::factory());
+    let tab = session.open_tab();
+    if let Err(e) = session.navigate(tab, url).await {
+        eprintln!("erreur : {e}");
+        return ExitCode::FAILURE;
+    }
+    if let Some(png) = session.frame_png(tab) {
+        match std::fs::write(out, &png) {
+            Ok(()) => {
+                println!("{out} — {} octets", png.len());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("écriture {out} : {e}");
+                ExitCode::FAILURE
+            }
+        }
+    } else {
+        eprintln!("pas de frame produite");
+        ExitCode::FAILURE
     }
 }
 
@@ -44,13 +103,7 @@ fn main() -> ExitCode {
 /// `http(s)` via la pile `explorer-net` complète.
 async fn read_source(src: &str) -> Result<Vec<u8>, String> {
     if src.starts_with("http://") || src.starts_with("https://") {
-        let client: Arc<dyn HttpTransport> = {
-            let tls = Arc::new(TlsConnector::web_roots());
-            let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
-            let decoded: Arc<dyn HttpTransport> =
-                Arc::new(DecodingTransport::wrap(h1, 16 * 1024 * 1024));
-            Arc::new(RedirectTransport::wrap(decoded, 8))
-        };
+        let client = client_stack();
         let url = Url::parse(src).map_err(|e| format!("url : {e}"))?;
         let resp = client
             .fetch(&Request::get(url))

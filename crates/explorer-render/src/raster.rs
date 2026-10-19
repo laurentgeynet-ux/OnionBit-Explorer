@@ -51,6 +51,83 @@ fn skia_color(c: Color) -> tiny_skia::Color {
     tiny_skia::Color::from_rgba8(c.r, c.g, c.b, c.a)
 }
 
+/// Domaine sûr tiny-skia : le scan convertit en virgule fixe
+/// 24.8 — au-delà d'environ ±32 768 px une coordonnée
+/// déborde et panique dans `hairline_aa` (site réel :
+/// duckduckgo.com, étape 48 — `debug_assert` en build de
+/// debug). Une géométrie aussi lointaine est hors écran de
+/// toute façon : on la clippe au domaine (les fonds qui
+/// couvrent tout restent peints) ou on l'ignore (cas
+/// non-axis-aligned).
+const SAFE_COORD: f32 = 30_000.0;
+
+/// `tf` est-il axis-aligned (translate/scale/mirror sans
+/// rotation ni skew) ?
+fn axis_aligned(tf: Transform) -> bool {
+    tf.kx == 0.0 && tf.ky == 0.0
+}
+
+/// Bbox device des 4 coins de `r` transformés par `tf` —
+/// `None` si un coin n'est pas fini.
+fn device_bbox(r: &Rect, tf: Transform) -> Option<Rect> {
+    let pts = [
+        (r.left(), r.top()),
+        (r.right(), r.top()),
+        (r.left(), r.bottom()),
+        (r.right(), r.bottom()),
+    ];
+    let mut l = f32::MAX;
+    let mut t = f32::MAX;
+    let mut rr = f32::MIN;
+    let mut b = f32::MIN;
+    for (x, y) in pts {
+        let (mx, my) = map(tf, x, y);
+        l = l.min(mx);
+        t = t.min(my);
+        rr = rr.max(mx);
+        b = b.max(my);
+    }
+    // `from_ltrb` exige finitude + l<r — un coin non fini ou
+    // une bbox inversée retourne `None` (hors domaine).
+    Rect::from_ltrb(l, t, rr, b)
+}
+
+/// `fill_rect` gardé : la géométrie est ramenée dans le
+/// domaine fixed-point sûr AVANT d'entrer dans tiny-skia.
+fn fill_guarded(pixmap: &mut Pixmap, r: &Rect, paint: &Paint, tf: Transform, clip: Option<&Mask>) {
+    let domain = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
+    let (Some(domain), Some(b)) = (domain, device_bbox(r, tf)) else {
+        return;
+    };
+    if axis_aligned(tf) {
+        // Clippe en espace device : un fond couvrant tout le
+        // domaine reste peint, un rect lointain disparaît.
+        if let Some(c) = b.intersect(&domain) {
+            // Bug tiny-skia 0.11 (hairline_aa/fill_dot8) : un
+            // rect dont les bords sub-pixel couvrent toute la
+            // largeur (fill_inner ≤ 0 — ex. bordure de 1 px
+            // tombant sur une frontière fractionnaire,
+            // duckduckgo.com, étape 48) déclenche
+            // `debug_assert!(false)` → panic en debug. On
+            // contourne par `fill_path` : le rasteriseur de
+            // chemins gère l'AA correctement sans ce bug.
+            if paint.anti_alias && c.left().ceil() >= c.right().floor() {
+                let path = PathBuilder::from_rect(c);
+                pixmap.fill_path(&path, paint, FillRule::Winding, Transform::default(), clip);
+            } else {
+                pixmap.fill_rect(c, paint, Transform::default(), clip);
+            }
+        }
+    } else if b.left().abs() <= SAFE_COORD
+        && b.top().abs() <= SAFE_COORD
+        && b.right().abs() <= SAFE_COORD
+        && b.bottom().abs() <= SAFE_COORD
+    {
+        pixmap.fill_rect(*r, paint, tf, clip);
+    }
+    // sinon : géométrie hors domaine — ignorée, jamais crash.
+}
+
 /// Point transformé : `tf` applique et retourne `(x, y)`.
 fn map(tf: Transform, x: f32, y: f32) -> (f32, f32) {
     let mut p = Point::from_xy(x, y);
@@ -123,7 +200,9 @@ fn paint_text(
     paint.set_color(color);
     let mut pen = ox;
     for g in &run.glyphs {
-        draw_glyph(pixmap, &face, g, pen, oy, gscale, cur, &paint, clip);
+        draw_glyph(
+            pixmap, &face, g, pen, oy, gscale, size_px, cur, &paint, clip,
+        );
         pen += g.advance;
     }
 }
@@ -139,10 +218,29 @@ fn draw_glyph(
     pen: f32,
     baseline: f32,
     gscale: f32,
+    size_px: f32,
     cur: Transform,
     paint: &Paint,
     clip: Option<&Mask>,
 ) {
+    // La position de plume (espace device) doit rester dans le
+    // domaine fixed-point — marge de débord des contours :
+    // 4× la taille de fonte device couvre tout glyphe plausible.
+    let (px, py) = map(cur, pen + g.offset_x, baseline - g.offset_y);
+    let s = cur
+        .sx
+        .abs()
+        .max(cur.sy.abs())
+        .max(cur.kx.abs())
+        .max(cur.ky.abs())
+        .max(1.0);
+    let extent = 4.0 * size_px * s;
+    if !(px.is_finite() && py.is_finite())
+        || px.abs() + extent > SAFE_COORD
+        || py.abs() + extent > SAFE_COORD
+    {
+        return;
+    }
     let tf = Transform::from_translate(pen + g.offset_x, baseline - g.offset_y)
         .post_concat(Transform::from_scale(gscale, -gscale))
         .post_concat(cur);
@@ -185,8 +283,14 @@ pub fn rasterize(list: &DisplayList, fonts: &dyn FontSource, scale: f32) -> Opti
                     if let Some(phys) = Rect::from_xywh(r.x, r.y, r.width, r.height)
                         .and_then(|rr| rr.transform(cur))
                     {
-                        let path = PathBuilder::from_rect(phys);
-                        mask.fill_path(&path, FillRule::Winding, true, Transform::default());
+                        // Clippe au domaine fixed-point : un clip
+                        // couvrant tout reste plein, un clip
+                        // lointain reste vide — même sémantique.
+                        let dom = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
+                        if let Some(clamped) = dom.and_then(|d| phys.intersect(&d)) {
+                            let path = PathBuilder::from_rect(clamped);
+                            mask.fill_path(&path, FillRule::Winding, true, Transform::default());
+                        }
                     }
                     clips.push(mask);
                 }
@@ -230,7 +334,7 @@ fn paint_item(
             };
             paint.set_color(skia_color(*color));
             if let Some(r) = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height) {
-                pixmap.fill_rect(r, &paint, dpi, clip);
+                fill_guarded(pixmap, &r, &paint, dpi, clip);
             }
         }
         DisplayItem::Border {
@@ -265,7 +369,7 @@ fn paint_item(
             let mut paint = Paint::default();
             paint.set_color(tiny_skia::Color::from_rgba8(0x99, 0x99, 0x99, 0x60));
             if let Some(r) = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height) {
-                pixmap.fill_rect(r, &paint, dpi, clip);
+                fill_guarded(pixmap, &r, &paint, dpi, clip);
             }
         }
         DisplayItem::Image { rect, img } => {
@@ -291,6 +395,21 @@ fn paint_image(
 ) {
     if cur.kx == 0.0 && cur.ky == 0.0 && cur.sx != 0.0 && cur.sy != 0.0 {
         paint_image_axis(pixmap, rect, img, cur, clip);
+        return;
+    }
+    // Affine générale : la bbox device doit rester dans le
+    // domaine fixed-point sûr (draw_pixmap scanne en 24.8).
+    let Some(local) = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height) else {
+        return;
+    };
+    let Some(b) = device_bbox(&local, cur) else {
+        return;
+    };
+    if !(b.left().abs() <= SAFE_COORD
+        && b.top().abs() <= SAFE_COORD
+        && b.right().abs() <= SAFE_COORD
+        && b.bottom().abs() <= SAFE_COORD)
+    {
         return;
     }
     // Affine générale : source prémultipliée → draw_pixmap.
@@ -419,7 +538,7 @@ fn paint_border(
         if let Some(r) = r {
             let mut paint = Paint::default();
             paint.set_color(skia_color(*c));
-            pixmap.fill_rect(r, &paint, dpi, clip);
+            fill_guarded(pixmap, &r, &paint, dpi, clip);
         }
     }
 }

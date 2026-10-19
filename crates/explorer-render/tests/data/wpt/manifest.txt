@@ -1,0 +1,45 @@
+# Manifeste WPT ciblés — étape 48 (ADR-0010).
+# Extraction : `pwsh -File scripts/fetch_wpt.ps1`.
+# Une ligne = un test ; les références `rel=match/mismatch`
+# sont résolues et téléchargées par le script.
+# Révision : web-platform-tests/wpt @ master 2026-02.
+css/CSS2/floats/floats-placement-001.html
+css/CSS2/floats/floats-placement-002.html
+css/CSS2/floats/floats-placement-003.html
+css/CSS2/floats/floats-placement-004.html
+css/CSS2/floats/floats-placement-005.html
+css/CSS2/floats/floats-placement-006.html
+css/CSS2/floats/floats-placement-007.html
+css/CSS2/floats/floats-placement-008.html
+css/CSS2/floats/floats-rule3-outside-left-001.xht
+css/CSS2/floats/floats-rule3-outside-left-002.xht
+css/CSS2/floats/floats-rule3-outside-right-001.xht
+css/CSS2/floats/floats-rule3-outside-right-002.xht
+css/CSS2/floats/floats-rule7-outside-left-001.xht
+css/CSS2/floats/floats-rule7-outside-right-001.xht
+css/CSS2/floats/floats-wrap-top-below-bfc-001l.xht
+css/CSS2/floats/floats-wrap-top-below-bfc-001r.xht
+css/CSS2/floats/floats-wrap-top-below-bfc-002l.xht
+css/CSS2/floats/floats-wrap-top-below-bfc-002r.xht
+css/CSS2/floats/floats-wrap-top-below-bfc-003l.xht
+css/CSS2/floats/floats-wrap-top-below-bfc-003r.xht
+css/CSS2/floats/floats-wrap-top-below-inline-001l.xht
+css/CSS2/floats/floats-wrap-top-below-inline-001r.xht
+css/CSS2/floats/floats-wrap-top-below-inline-002l.xht
+css/CSS2/floats/floats-wrap-top-below-inline-002r.xht
+css/CSS2/floats/floats-wrap-top-below-inline-003l.xht
+css/CSS2/floats/floats-wrap-top-below-inline-003r.xht
+css/CSS2/floats/floats-wrap-bfc-001-left-overflow.xht
+css/CSS2/floats/floats-wrap-bfc-001-right-overflow.xht
+css/CSS2/floats/floats-zero-height-wrap-001.xht
+css/CSS2/floats/float-root.html
+css/CSS2/normal-flow/block-formatting-contexts-001.xht
+css/CSS2/normal-flow/block-formatting-contexts-003.xht
+css/CSS2/normal-flow/block-formatting-contexts-004.xht
+css/CSS2/normal-flow/block-formatting-contexts-005.xht
+css/CSS2/normal-flow/block-formatting-contexts-006.xht
+css/CSS2/normal-flow/block-formatting-contexts-008.xht
+css/CSS2/normal-flow/block-formatting-contexts-011.xht
+css/CSS2/normal-flow/block-formatting-contexts-015.xht
+css/CSS2/normal-flow/block-in-inline-append-001.xht
+css/CSS2/normal-flow/block-in-inline-align-001.html

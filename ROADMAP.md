@@ -833,9 +833,28 @@ progresse en trois paliers structurants :
   processus dégradée en mode FFI (REST reste la référence),
   titre/URL de survol non exportés, pas d'`ExternalTexture`
   GPU (plugin C++ reporté).
-- [ ] **Étape 48. Interop continue.** Corpus **WPT** ciblés +
+- [x] **Étape 48. Interop continue.** Corpus **WPT** ciblés +
   sites réels, jalons Acid2/Acid3 informatifs (ADR-0010) ; les
   écarts constatés deviennent des étapes.
+  Reftests pixel-exacts `tests/wpt_reftests.rs` : 40 cas
+  `css/CSS2/floats` + `normal-flow` extraits par
+  `scripts/fetch_wpt.ps1` (+ fonte Ahem), `rel="match|mismatch"`
+  résolu, tolérance AA documentée (0 px dur, ≤512 px doux),
+  cliquet `WPT_BASELINE` = **17/40 (42 %)** mesuré — échecs
+  réels listés : placement `flow-root`, bands float gauche/
+  droite, `clear`, margin-collapse BFC. Jalon **Acid2**
+  (`tests/acid2.rs` + `scripts/fetch_acid.ps1`) : cliquet
+  robustesse (pas de panic) + alignement informatif
+  **29,8 %** vs `reference.png` officielle. Sites réels :
+  `explorer-cli shot` + `scripts/site_smoke.ps1` →
+  **5/5** (example.com, info.cern.ch, duckduckgo, wikipedia,
+  MDN 211 Ko) — le smoke a révélé puis corrigé un **panic
+  tiny-skia** (`hairline_aa` sur bordure 1 px fractionnaire +
+  géométrie hors domaine 24.8) : frontière défensive
+  `fill_guarded`/`SAFE_COORD` dans `raster.rs`. Acid3 reste
+  informatif côté équipe JS (test262 859/859). Prochaine
+  étape déduite du rapport : `display: flow-root` +
+  affinement des bands float (`float_band`).
 
 ## Hors périmètre assumé (documenté, non planifié)
 

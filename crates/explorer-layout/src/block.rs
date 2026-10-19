@@ -291,6 +291,30 @@ fn side_px(
     css_px(style, prop, cb_w, em, ctx).unwrap_or(fallback)
 }
 
+/// `border-*-width` en px pour le **layout** : les mots-clés
+/// `thin`/`medium`/`thick` valent 1/3/5 px — même table que
+/// le raster (`display.rs`), sinon la bordure est peinte 3 px
+/// mais comptée 0 dans les boîtes (décalage observé sur les
+/// reftests CSS2, étape 48). La largeur ne compte QUE si le
+/// `border-*-style` correspondant n'est pas `none` — sinon la
+/// valeur initiale `medium` donnerait 3 px à chaque boîte.
+fn border_px(style: &ComputedStyle, prop: &str, cb_w: f32, em: f32, ctx: &BlockCtx) -> f32 {
+    let side = prop
+        .strip_prefix("border-")
+        .and_then(|s| s.strip_suffix("-width"))
+        .unwrap_or_default();
+    let style_prop = format!("border-{side}-style");
+    if style.get(&style_prop).is_none_or(|s| s.trim() == "none") {
+        return 0.0;
+    }
+    match style.get(prop).map(str::trim) {
+        Some("thin") => 1.0,
+        Some("thick") => 5.0,
+        Some("medium") | None => 3.0,
+        Some(_) => css_px(style, prop, cb_w, em, ctx).unwrap_or(0.0),
+    }
+}
+
 /// Marges verticales d'une boîte (pour l'effondrement).
 fn margins(style: &ComputedStyle, cb_w: f32, em: f32, ctx: &BlockCtx) -> Margins {
     Margins {
@@ -326,12 +350,12 @@ pub(crate) fn layout_block(
 
     let ml = side_px(&st, "margin-left", cb_w, fs, ctx, 0.0);
     let mr = side_px(&st, "margin-right", cb_w, fs, ctx, 0.0);
-    let bl = side_px(&st, "border-left-width", cb_w, fs, ctx, 0.0);
-    let br = side_px(&st, "border-right-width", cb_w, fs, ctx, 0.0);
+    let bl = border_px(&st, "border-left-width", cb_w, fs, ctx);
+    let br = border_px(&st, "border-right-width", cb_w, fs, ctx);
     let pl = side_px(&st, "padding-left", cb_w, fs, ctx, 0.0);
     let pr = side_px(&st, "padding-right", cb_w, fs, ctx, 0.0);
-    let bt = side_px(&st, "border-top-width", cb_w, fs, ctx, 0.0);
-    let bb = side_px(&st, "border-bottom-width", cb_w, fs, ctx, 0.0);
+    let bt = border_px(&st, "border-top-width", cb_w, fs, ctx);
+    let bb = border_px(&st, "border-bottom-width", cb_w, fs, ctx);
     let pt = side_px(&st, "padding-top", cb_w, fs, ctx, 0.0);
     let pb = side_px(&st, "padding-bottom", cb_w, fs, ctx, 0.0);
 

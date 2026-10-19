@@ -9,6 +9,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 48 — Interop mesurée : reftests WPT, Acid2, sites
+  réels** (`explorer-render`, `explorer-cli`, `scripts/`) :
+  harnais reftest pixel-exact `tests/wpt_reftests.rs` —
+  40 cas `css/CSS2/floats` + `normal-flow` extraits par
+  `scripts/fetch_wpt.ps1` avec fonte Ahem du WPT, références
+  `rel="match|mismatch"` résolues, tolérance AA documentée
+  (0 pixel « dur » Δ>16, ≤512 « doux »), cliquet
+  `WPT_BASELINE` = **17/40 (42 %)**, skip-list versionnée
+  `wpt_skip.txt` (vide : aucun échec masqué). Jalon Acid2 :
+  `tests/acid2.rs` + `scripts/fetch_acid.ps1` — cliquet
+  robustesse + score d'alignement informatif **29,8 %** vs
+  `reference.png` officielle. `explorer-cli shot <url>
+  <png>` + `scripts/site_smoke.ps1` : **5/5 sites réels**
+  rendus (exemple, info.cern.ch, duckduckgo, wikipedia, MDN).
+- **Frontière défensive tiny-skia dans `raster.rs`** (bug
+  amont trouvé par le smoke sites réels — duckduckgo.com) :
+  `fill_guarded` borne la géométrie au domaine fixed-point
+  24.8 (`SAFE_COORD` = 30 000 px — au-delà, `fdot16`
+  déborde → panic `hairline_aa`) et route les « hairlines
+  pures » (bords sub-pixel couvrant toute la largeur,
+  `debug_assert` tiny-skia 0.11) par `fill_path` — AA
+  préservée, jamais de crash. Glyphes bornés à la plume,
+  clips clampés au domaine, `draw_pixmap` affine gardé.
+
 - **Étape 47 — Mode in-process `explorer-ffi` + frames RGBA
   via `dart:ffi`** (`explorer-ffi` nouveau crate `cdylib`,
   `app/`, ADR-0018) : ABI C volontairement étroite — handle

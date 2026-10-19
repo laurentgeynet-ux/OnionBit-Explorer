@@ -94,6 +94,42 @@ fn bordure_peint_les_cotes() {
 }
 
 #[test]
+fn hairline_fractionnaire_ne_panique_pas() {
+    // Régression duckduckgo.com (étape 48) : bordure de 1 px
+    // tombant sur une frontière fractionnaire — les bords
+    // sub-pixel AA couvrent toute la largeur → bug tiny-skia
+    // `hairline_aa/fill_dot8` (`debug_assert`, panic en
+    // debug). Le garde `fill_guarded` doit router par
+    // `fill_path` : rasterise sans panic et peint l'arête.
+    let f = frame(
+        "<div id=d></div>",
+        "#d{border-left:1px solid #00ff00;margin-left:0.4px;\
+         width:40px;height:40px}",
+    );
+    // La bordure verticale ~x=0,4 a laissé des pixels verts
+    // (deux arêtes AA : x=0 couvert ~0,6, x=1 ~0,4).
+    let verts = (0..f.height.min(40)).any(|y| px(&f, 0, y)[1] > 100)
+        && (0..f.height.min(40)).any(|y| px(&f, 1, y)[1] > 60);
+    assert!(verts, "bordure hairline non peinte");
+}
+
+#[test]
+fn coordonnees_astronomiques_ne_paniquent_pas() {
+    // Contenu hostile : géométrie au-delà du domaine
+    // fixed-point 24.8 (±32 768 px) → clippe/ignorée par
+    // `fill_guarded`, jamais panic. Avant le garde, ce cas
+    // panic dans `hairline_aa` en build debug.
+    let f = frame(
+        "<div id=d></div>",
+        "#d{border:1px solid #f00;margin-top:100000px;\
+         width:40px;height:40px}",
+    );
+    // L'assertion est l'absence de panic — la frame est
+    // produite quoi qu'il arrive.
+    assert!(f.width > 0);
+}
+
+#[test]
 fn clip_borne_le_dessin_enfant() {
     // overflow:hidden 20px ; enfant rouge de 60px → les pixels
     // sous 20px restent transparents.
