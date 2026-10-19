@@ -56,7 +56,22 @@ if ($LASTEXITCODE -ne 0) {
     Write-Error 'cargo build -p explorer-cli a échoué'
     exit 1
 }
-$cli = Join-Path $root 'target\debug\explorer-cli.exe'
+# Le binaire vit sous `target_directory` — pas `$root\target`
+# (`.cargo/config.toml` peut rediriger `target-dir`, et
+# `CARGO_TARGET_DIR` prime encore : `cargo metadata` résout le
+# chemin réel — un chemin en dur rendait des faux OK sur des
+# PNG périmés).
+$meta = cargo metadata --no-deps --format-version 1 |
+    ConvertFrom-Json
+$cli = Join-Path $meta.target_directory 'debug\explorer-cli.exe'
+if (-not (Test-Path $cli)) {
+    Write-Error "explorer-cli introuvable : $cli"
+    exit 1
+}
+# Purge des PNG précédents : une frame produite dans un run
+# antérieur ne doit pas valider l'échec courant.
+Get-ChildItem -Path $outDir -Filter '*.png' -ErrorAction SilentlyContinue |
+    Remove-Item -Force
 
 $ok = 0
 $fail = 0
