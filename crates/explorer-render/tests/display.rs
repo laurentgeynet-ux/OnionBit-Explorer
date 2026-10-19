@@ -267,3 +267,36 @@ fn sticky_sans_scroll_ne_decolle_pas() {
         "pas de scroll → pas de translation"
     );
 }
+
+// ── R-18 : color des éléments inline jusqu'aux runs ───────
+
+#[test]
+fn color_inline_atteint_le_run() {
+    // Avant R-18 : l'encre du texte venait de la boîte des
+    // lignes (div) — `span{color}` / `a{color}` peignaient
+    // noir. Le fragment doit porter le style de l'élément
+    // inline le plus proche.
+    let (_dom, _bx, items) = dl(
+        "<div>x<span>b</span><a href=\"#\">l</a></div>",
+        "div{color:#ff0000} span{color:#0000ff}",
+    );
+    // 3 fragments sur une ligne : « x » rouge (div), « b »
+    // bleu (span), « l » bleu lien UA — triés par x.
+    let mut texts: Vec<(f32, explorer_css::value::Color)> = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::Text { origin, color, .. } => Some((origin.0, *color)),
+            _ => None,
+        })
+        .collect();
+    texts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let colors: Vec<_> = texts.iter().map(|t| t.1).collect();
+    assert_eq!(colors.len(), 3, "3 runs attendus : {colors:?}");
+    assert_eq!(colors[0].r, 255, "x hérite le rouge div");
+    assert_eq!((colors[1].r, colors[1].b), (0, 255), "span → bleu");
+    assert_eq!(
+        (colors[2].r, colors[2].g, colors[2].b),
+        (0, 0, 0xee),
+        "a[href] → #00e UA"
+    );
+}

@@ -55,6 +55,11 @@ pub struct Fragment {
     /// dernier de la ligne (§16.6.1 : les espaces de fin de
     /// ligne ne comptent pas dans la largeur ni `text-align`).
     pub trail_w: f32,
+    /// Style de l'item propriétaire — l'élément inline le
+    /// plus proche du texte (héritage fait). Le rendu lit
+    /// `color`/`font-*` ICI, pas sur la boîte des lignes :
+    /// `a{color}`/`span{color}` doit colorer ses runs (R-18).
+    pub style: ComputedStyle,
 }
 
 /// Une ligne de contenu en-ligne posée.
@@ -518,6 +523,7 @@ fn break_into_lines(
                 owner: item.owner,
                 text: String::new(),
                 atomic: true,
+                style: item.style.clone(),
                 rect: Rect {
                     x: px + ml,
                     y: cursor_y + mt,
@@ -568,6 +574,7 @@ fn break_into_lines(
                         owner: item.owner,
                         text: String::new(),
                         atomic: true,
+                        style: item.style.clone(),
                         rect: Rect {
                             x: cursor_x,
                             y: cursor_y,
@@ -605,6 +612,7 @@ fn break_into_lines(
                 owner: item.owner,
                 text: text.to_string(),
                 atomic: false,
+                style: item.style.clone(),
                 rect: Rect {
                     x: cursor_x,
                     y: cursor_y,

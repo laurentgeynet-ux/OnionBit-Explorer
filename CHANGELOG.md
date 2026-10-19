@@ -9,6 +9,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-18 — `color` des éléments inline jusqu'aux runs**
+  (`explorer-layout`/`explorer-render`, repro terrain
+  `color.html`) : `Fragment` porte désormais le
+  `ComputedStyle` de son item (l'élément inline le plus
+  proche du texte, héritage fait) — le raster peint encre,
+  fonte et taille **par fragment** au lieu de la boîte des
+  lignes. `span{color}`/`a[href]` colorent enfin leurs
+  glyphes (symptôme « liens non stylés » résolu).
+
 - **R-17 — `font-size` : valeur calculée absolue**
   (`explorer-css`, repro terrain info.cern.ch/wikipedia).
   La cascade stockait la déclaration brute (« 2em ») et

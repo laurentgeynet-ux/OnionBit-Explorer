@@ -158,14 +158,18 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   absolu. Mesuré : `2em` ≡ `32px` au fragment près ;
   `h1`/`h2` UA corrects ; 36/36 suites PIPELINE vertes
   (WPT reftests inclus).
-- [ ] **R-18. `color` n'atteint pas les runs de texte inline**
-  (bug terrain, repro `color.html` — `D:\explorer-fieldwork\
-  repros\`) : `div{color:red}` peint ✓, `span`/`a{color}`
-  restent noirs — le style des éléments **inline** ne descend
-  pas aux runs de texte. Explique le symptôme global « liens
-  non stylés » (la règle `a[href]` matche, la couleur se
-  perd au passage boîte→run). À chercher dans l'héritage
-  inline → `InlineCtx`/construction des runs.
+- [x] **R-18. `color` n'atteint pas les runs de texte inline**
+  (bug terrain, repro `color.html`) : `div{color:red}` peint
+  ✓, `span`/`a{color}` restaient noirs. **Racine** : le
+  raster lisait `color`/`font`/`font-size` sur la boîte des
+  lignes (`bx.style`), jamais par fragment — le style de
+  l'élément inline propriétaire se perdait au passage
+  boîte→run. **Fix** : `Fragment` porte désormais le
+  `ComputedStyle` de son item (l'élément inline le plus
+  proche — héritage fait) ; `display.rs` peint encre,
+  fonte et taille par fragment. Mesuré : `span` → bleu,
+  `a[href]` → `#00e` UA, texte direct → couleur du bloc —
+  test `color_inline_atteint_le_run`.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

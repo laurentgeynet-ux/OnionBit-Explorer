@@ -364,25 +364,27 @@ fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32, images: &c
     // Texte : fragments non atomiques des lignes produites
     // par le layout en-ligne (les atomes = enfants
     // inline-block, peints à leur place en récursion).
+    // `frag.style` = style de l'élément inline propriétaire
+    // (le plus proche du texte) — `a{color}`/`span{color}`
+    // colorent leurs runs, pas seulement la boîte (R-18).
     if !bx.lines.is_empty() {
-        let ink = bx
-            .style
-            .get("color")
-            .and_then(parse_color)
-            .unwrap_or(Color::BLACK);
-        let size = prop_px(&bx.style, "font-size", 16.0);
         for line in &bx.lines {
             for frag in &line.fragments {
                 if frag.atomic {
                     continue;
                 }
                 if let Some(run) = &frag.shaped {
+                    let ink = frag
+                        .style
+                        .get("color")
+                        .and_then(parse_color)
+                        .unwrap_or(Color::BLACK);
                     items.push(DisplayItem::Text {
                         origin: (frag.rect.x, frag.rect.y + frag.baseline + off),
                         run: run.clone(),
-                        font: font_request(&bx.style),
+                        font: font_request(&frag.style),
                         color: ink,
-                        size_px: size,
+                        size_px: prop_px(&frag.style, "font-size", 16.0),
                     });
                 }
             }
