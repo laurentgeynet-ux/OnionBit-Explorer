@@ -80,7 +80,7 @@ Objectif : les blocages du web réel sautent. Sortie de palier :
     opaque, ACAO, preflight-bloqué, quota, jar, Set-Cookie,
     storage).
 
-- [ ] **Étape 52. Boucle d'événements v2 + tick timers.**
+- [x] **Étape 52. Boucle d'événements v2 + tick timers.**
   `dispatch_event(ty, path)` existe — étendre les types :
   `mouseover`/`mouseout`/`mousemove` (coalesced),
   `keydown`/`keyup`/`input`, `focus`/`blur` (liés au focus champ

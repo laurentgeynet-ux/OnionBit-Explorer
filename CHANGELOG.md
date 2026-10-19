@@ -9,6 +9,40 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 52 — Boucle d'événements v2 + tick timers**
+  (`explorer-core`, `explorer-js`, `dillo-js`,
+  `explorer-daemon`, `explorer-api`, `explorer-cli`,
+  `explorer-ffi`) : la surface événementielle s'étend au-delà
+  du clic — `mouseover`/`mouseout`/`mousemove` (survol suivi
+  par `Tab.hovered`, coalescé naturellement : un événement
+  par `move`), `keydown`/`keyup` (`InputEvent::KeyUp`,
+  `keydown` annulable avant édition/soumission `Enter`),
+  `input` après édition, `focus`/`blur` sur les transitions
+  de champ (ordre navigateur), `wheel` annulable
+  (`preventDefault` supprime le scroll) puis `scroll` niveau
+  document après défilement effectif. Dispatch par
+  **chemin** `(tag, index)` partout où un handler peut
+  re-parser le document — `focused`/`hovered` stockés en
+  chemins survivent aux re-parse (corrigé : `element_path`
+  comptait tous les frères de même tag au lieu des
+  précédents — cible fausse dès N≥2 frères ; `find_by_id`
+  ne descendait jamais sous `#document`). Checkbox/radio :
+  activation **avant** `click` (le handler lit `checked`
+  post-bascule via `sync_mirror_attr` — `value`/`checked`
+  poussés au miroir pour les mutations hors-script),
+  `input` puis `change`, revert sur `preventDefault`.
+  **Tick timers** : `install_timers` câblé au spawn moteur
+  (`setTimeout`/`setInterval`/`requestAnimationFrame` —
+  jamais installés auparavant), `JsEngine::run_pending_bounded`
+  borne les callbacks par pompe (`max_timer_jobs`, défaut
+  128 — ADR-0019), `next_timer_deadline` expose la proche
+  échéance ; le daemon dort `min(échéance, battement)` et
+  pompe net + timers + intentions de navigation, le CLI
+  termine sa grâce sur timers échus, FFI `explorer_tick`
+  pompe timers + drain nav. `MutationObserver` (JS-C26)
+  livré au même microtask checkpoint que les timers. API :
+  `"keyup"` ; FFI : `kind 4` = `KeyUp`. 16 tests session +
+  5 adaptateur.
 - **R-14 — Triage des échecs tree-construction** (`explorer-html`) :
   le harnais html5lib rapporte désormais les échecs complets avec
   comptage par fichier `.dat` (au lieu de 20 tronqués) — code de

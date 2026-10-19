@@ -136,6 +136,35 @@ pub trait JsEngine: Send {
         0
     }
 
+    /// [`Self::run_pending`] borné : au plus `max_timers`
+    /// callbacks de timers déclenchés (ADR-0019 — borne de jobs
+    /// par tick ; le surplus reste en file pour la pompe
+    /// suivante). Défaut : [`Self::run_pending`] (moteur sans
+    /// notion de borne — le quota est alors non exigé).
+    fn run_pending_bounded(&mut self, max_timers: usize) -> usize {
+        let _ = max_timers;
+        self.run_pending()
+    }
+
+    /// Délai jusqu'à la prochaine échéance de timer JS —
+    /// `None` si aucun timer armé. L'hôte s'en sert pour armer
+    /// son battement (étape 52 : les `setTimeout`/`setInterval`/
+    /// `rAF` tirent sans attendre un input). Défaut : `None`.
+    fn next_timer_deadline(&mut self) -> Option<std::time::Duration> {
+        None
+    }
+
+    /// Pousse un attribut du DOM hôte vers le nœud miroir
+    /// désigné par `path` — quand la session mute le document
+    /// **hors JS** (champ édité, case basculée), le miroir
+    /// sinon verrait l'ancienne valeur dans les handlers
+    /// d'événements (`input`, `click`…). `value: None` retire
+    /// l'attribut. Cas particulier `attr == "value"` sur
+    /// `<textarea>` : le contenu texte est remplacé (la
+    /// propriété `value` n'y est pas un attribut). Défaut :
+    /// rien (pas de miroir).
+    fn sync_mirror_attr(&mut self, _path: &[(String, u32)], _attr: &str, _value: Option<&str>) {}
+
     /// Installe le DOM miroir du document (bindings `document`,
     /// `navigator`, `window`…). `html` = source du document tel
     /// que reçu — le miroir le re-parse côté moteur.
@@ -188,6 +217,10 @@ pub trait JsEngine: Send {
     /// étape = `(tag, index parmi les frères éléments de même
     /// tag)`. Retourne `defaultPrevented`. Défaut : `Ok(false)`
     /// (pas de miroir → rien à dispatcher).
+    ///
+    /// **Chemin vide** = événement niveau document (étape 52) :
+    /// la cible est `<body>` — `scroll`, `keydown`/`keyup`
+    /// sans champ focalisé, `wheel` hors survol.
     ///
     /// Le chemin tolère les divergences de parse : les balises
     /// implicitement synthétisées par un tree-builder
@@ -288,7 +321,17 @@ enum Cmd {
         tx: Sender<Result<String, JsError>>,
     },
     RunPending {
+        /// Borne de timers par pompe (ADR-0019).
+        max_timers: usize,
         tx: Sender<usize>,
+    },
+    TimerDeadline {
+        tx: Sender<Option<std::time::Duration>>,
+    },
+    SyncField {
+        path: Vec<(String, u32)>,
+        attr: String,
+        value: Option<String>,
     },
     InstallDom {
         html: String,
@@ -396,11 +439,23 @@ impl DilloEngine {
                         return;
                     }
                 }
-                Cmd::RunPending { tx } => {
-                    let n = eng.run_due_timers().unwrap_or(0) + eng.run_microtasks().unwrap_or(0);
+                Cmd::RunPending { max_timers, tx } => {
+                    let n = eng.run_due_timers_bounded(max_timers).unwrap_or(0)
+                        + eng.run_microtasks().unwrap_or(0);
                     if tx.send(n).is_err() {
                         return;
                     }
+                }
+                Cmd::TimerDeadline { tx } => {
+                    let d = eng
+                        .next_timer_deadline()
+                        .map(|at| at.saturating_duration_since(std::time::Instant::now()));
+                    if tx.send(d).is_err() {
+                        return;
+                    }
+                }
+                Cmd::SyncField { path, attr, value } => {
+                    sync_field(jsd.as_ref(), &path, &attr, value.as_deref());
                 }
                 Cmd::InstallDom {
                     html,
@@ -438,29 +493,13 @@ impl DilloEngine {
                     resolve,
                     tx,
                 } => {
-                    let src = sources.get(&entry).cloned().unwrap_or_default();
-                    let loader = MapLoader {
-                        map: sources,
-                        resolve,
-                    };
-                    eng.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
-                    let out = match eng.eval_module(&src, &entry) {
-                        Ok(v) => Ok(eng.describe(v)),
-                        Err(e) => Err(JsError::from(e)),
-                    };
+                    let out = eval_module(&mut eng, &entry, sources, resolve);
                     if tx.send(out).is_err() {
                         return;
                     }
                 }
                 Cmd::Dispatch { ty, path, tx } => {
-                    let node = jsd.as_ref().and_then(|d| mirror_node(&d.borrow(), &path));
-                    let out = match node {
-                        Some(n) => match eng.dom_event_on(&ty, n) {
-                            Ok(p) => Ok(p),
-                            Err(t) => Err(JsError::Uncaught(eng.describe(t.0))),
-                        },
-                        None => Ok(false),
-                    };
+                    let out = dispatch_event(&mut eng, jsd.as_ref(), &ty, &path);
                     if tx.send(out).is_err() {
                         return;
                     }
@@ -507,11 +546,31 @@ impl JsEngine for DilloEngine {
     }
 
     fn run_pending(&mut self) -> usize {
+        self.run_pending_bounded(usize::MAX)
+    }
+
+    fn run_pending_bounded(&mut self, max_timers: usize) -> usize {
         let (tx, rx) = channel();
-        if self.tx.send(Cmd::RunPending { tx }).is_err() {
+        if self.tx.send(Cmd::RunPending { max_timers, tx }).is_err() {
             return 0;
         }
         rx.recv().unwrap_or(0)
+    }
+
+    fn next_timer_deadline(&mut self) -> Option<std::time::Duration> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::TimerDeadline { tx }).is_err() {
+            return None;
+        }
+        rx.recv().unwrap_or(None)
+    }
+
+    fn sync_mirror_attr(&mut self, path: &[(String, u32)], attr: &str, value: Option<&str>) {
+        let _ = self.tx.send(Cmd::SyncField {
+            path: path.to_vec(),
+            attr: attr.to_string(),
+            value: value.map(str::to_string),
+        });
     }
 
     fn install_dom(&mut self, html: &str, page_url: &str, history_len: u32) {
@@ -633,6 +692,76 @@ impl Drop for DilloEngine {
     }
 }
 
+/// `Cmd::EvalModule` côté worker : le graphe préfetché est
+/// servi au `ModuleLoader` par `MapLoader` (étape 50) —
+/// jamais de fetch ré-entrant depuis le thread moteur.
+fn eval_module(
+    eng: &mut dillo_js::Engine,
+    entry: &str,
+    sources: std::collections::HashMap<String, String>,
+    resolve: UrlResolver,
+) -> Result<String, JsError> {
+    let src = sources.get(entry).cloned().unwrap_or_default();
+    let loader = MapLoader {
+        map: sources,
+        resolve,
+    };
+    eng.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
+    match eng.eval_module(&src, entry) {
+        Ok(v) => Ok(eng.describe(v)),
+        Err(e) => Err(JsError::from(e)),
+    }
+}
+
+/// `Cmd::SyncField` côté worker : l'état hôte d'un champ
+/// (`value`, `checked`, `open`…) est reporté dans le miroir
+/// pour que les handlers JS le lisent. `<textarea>` expose sa
+/// valeur en contenu texte, pas en attribut.
+fn sync_field(
+    jsd: Option<&dillo_js::DomRef>,
+    path: &[(String, u32)],
+    attr: &str,
+    value: Option<&str>,
+) {
+    let node = jsd.and_then(|d| mirror_node(&d.borrow(), path));
+    if let (Some(d), Some(n)) = (jsd, node) {
+        let mut d = d.borrow_mut();
+        let is_area = d.nodes[n as usize].tag == "textarea";
+        if attr == "value" && is_area {
+            let t = d.create_text(value.unwrap_or_default());
+            d.replace_children(n, &[t]);
+        } else if let Some(v) = value {
+            d.set_attr(n, attr, v);
+        } else {
+            d.remove_attr(n, attr);
+        }
+    }
+}
+
+/// `Cmd::Dispatch` côté worker : chemin vide = événement
+/// document (`dom_event` vise `<body>` — étape 52) ; un
+/// chemin non vide non résolu = cible morte → rien
+/// (jamais de repli silencieux sur le document).
+fn dispatch_event(
+    eng: &mut dillo_js::Engine,
+    jsd: Option<&dillo_js::DomRef>,
+    ty: &str,
+    path: &[(String, u32)],
+) -> Result<bool, JsError> {
+    if path.is_empty() {
+        return eng
+            .dom_event(ty)
+            .map_err(|t| JsError::Uncaught(eng.describe(t.0)));
+    }
+    let node = jsd.and_then(|d| mirror_node(&d.borrow(), path));
+    match node {
+        Some(n) => eng
+            .dom_event_on(ty, n)
+            .map_err(|t| JsError::Uncaught(eng.describe(t.0))),
+        None => Ok(false),
+    }
+}
+
 /// Bras JS-C27 du worker : drains et livraisons des surfaces
 /// net/storage/cookie. `false` = canal de réponse fermé → le
 /// worker s'arrête ; tout autre `Cmd` est ignoré (invariant :
@@ -702,6 +831,10 @@ fn install_dom(
     let d = std::rc::Rc::new(std::cell::RefCell::new(dillo_js::Dom::from_html(html)));
     d.borrow().take_dirty();
     eng.install_dom(&d);
+    // Timers hôtes (étape 52) : `setTimeout`/`setInterval`/
+    // `clearTimeout`/`requestAnimationFrame` — les callbacks
+    // tirent via `run_due_timers[_bounded]` à la pompe.
+    eng.install_timers();
     eng.set_page_url(page_url);
     {
         let q = nav_q.clone();

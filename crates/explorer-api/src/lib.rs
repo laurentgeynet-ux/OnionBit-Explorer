@@ -304,6 +304,13 @@ async fn input(
                 .unwrap_or("")
                 .to_string(),
         },
+        Some("keyup") => InputEvent::KeyUp {
+            key: body
+                .get("key")
+                .and_then(|k| k.as_str())
+                .unwrap_or("")
+                .to_string(),
+        },
         _ => {
             return err(
                 StatusCode::BAD_REQUEST,

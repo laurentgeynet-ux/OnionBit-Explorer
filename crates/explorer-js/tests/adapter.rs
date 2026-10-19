@@ -394,3 +394,98 @@ fn cookie_snapshot_and_writes_roundtrip() {
     assert!(eng.eval("document.cookie").unwrap().contains("c=3"));
     assert_eq!(eng.drain_cookie_writes(), Vec::<String>::new());
 }
+
+// ===== Étape 52 — borne timers + deadline + sync champ =====
+
+/// `next_timer_deadline` : délai relatif jusqu'au prochain
+/// timer armé ; `None` sans timer.
+#[test]
+fn next_timer_deadline_reports_delay() {
+    let mut eng = DilloEngine::new();
+    // Les timers sont installés avec le miroir DOM.
+    eng.install_dom("<html><body></body></html>", "http://h.test/p", 1);
+    assert_eq!(eng.next_timer_deadline(), None);
+    eng.eval("setTimeout(function(){}, 5000)").unwrap();
+    let d = eng.next_timer_deadline().expect("timer armé");
+    assert!(d <= std::time::Duration::from_millis(5000));
+}
+
+/// `run_pending_bounded` : borne de callbacks timer par pompe
+/// — le surplus reste en file pour la pompe suivante.
+#[test]
+fn run_pending_bounded_caps_timer_jobs() {
+    let mut eng = DilloEngine::new();
+    eng.install_dom("<html><body></body></html>", "http://h.test/p", 1);
+    eng.eval(
+        "var n=0; setTimeout(function(){n=n+1},0); \
+         setTimeout(function(){n=n+1},0)",
+    )
+    .unwrap();
+    assert_eq!(eng.run_pending_bounded(1), 1);
+    assert_eq!(eng.eval("n").unwrap(), "1");
+    assert!(eng.run_pending() >= 1);
+    assert_eq!(eng.eval("n").unwrap(), "2");
+}
+
+/// Chemin vide = événement niveau document : un listener sur
+/// `document.body` reçoit `scroll`/`keydown` (étape 52).
+#[test]
+fn dispatch_empty_path_targets_document() {
+    let mut eng = DilloEngine::new();
+    eng.install_dom(
+        "<html><body><div id=\"b\">x</div></body></html>",
+        "http://h.test/p",
+        1,
+    );
+    eng.eval(
+        "document.body.addEventListener('scroll',\
+         function(){document.getElementById('b').textContent='S'})",
+    )
+    .unwrap();
+    eng.dispatch_event("scroll", &[]).unwrap();
+    let html = eng.sync_dom().expect("listener a muté le miroir");
+    assert!(html.contains("S</div>"), "got {html}");
+}
+
+/// `sync_mirror_attr` pousse un attribut hôte vers le miroir
+/// — les handlers lisent l'état courant des champs édités
+/// hors script (`value`, `checked`).
+#[test]
+fn sync_mirror_attr_writes_attribute() {
+    let mut eng = DilloEngine::new();
+    eng.install_dom(
+        "<html><body><input id=\"i\"></body></html>",
+        "http://h.test/p",
+        1,
+    );
+    let path = vec![
+        ("html".to_string(), 0),
+        ("body".to_string(), 0),
+        ("input".to_string(), 0),
+    ];
+    eng.sync_mirror_attr(&path, "value", Some("abc"));
+    let v = eng
+        .eval("document.getElementById('i').getAttribute('value')")
+        .unwrap();
+    assert_eq!(v, "abc");
+}
+
+/// `<textarea>` : `value` pousse le contenu texte (pas un
+/// attribut DOM).
+#[test]
+fn sync_mirror_attr_textarea_writes_text() {
+    let mut eng = DilloEngine::new();
+    eng.install_dom(
+        "<html><body><textarea id=\"t\"></textarea></body></html>",
+        "http://h.test/p",
+        1,
+    );
+    let path = vec![
+        ("html".to_string(), 0),
+        ("body".to_string(), 0),
+        ("textarea".to_string(), 0),
+    ];
+    eng.sync_mirror_attr(&path, "value", Some("ligne"));
+    let v = eng.eval("document.getElementById('t').value").unwrap();
+    assert_eq!(v, "ligne");
+}

@@ -165,6 +165,7 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
             max_modules: 64,
             max_inflight: 6,
             max_script_net: 16,
+            max_timer_jobs: 64,
         },
     );
     (s, t)
@@ -2007,4 +2008,369 @@ async fn localstorage_persists_across_documents() {
         s.frame_png(tab_c),
         "localStorage conservé entre documents same-origin"
     );
+}
+
+// ===== Étape 52 — événements v2 + tick timers (ADR-0019) =====
+
+/// Survol suivi : `mouseover`, `mousemove` coalescé,
+/// `mouseout` à la sortie — accumulateur dans le texte.
+const PAGE_MOUSEV: &str = "<!doctype html><html><body>\
+    <div id=\"b\">avant</div>\
+    <script>var d=document.getElementById('b');\
+    d.addEventListener('mouseover',function(){d.textContent=d.textContent+'O'});\
+    d.addEventListener('mousemove',function(){d.textContent=d.textContent+'M'});\
+    d.addEventListener('mouseout',function(){d.textContent=d.textContent+'F'})</script>\
+    </body></html>";
+
+/// Statique équivalente après `over + move + move + out`.
+const PAGE_MOUSEV_AFTER: &str = "<!doctype html><html><body>\
+    <div id=\"b\">avantOMMF</div></body></html>";
+
+#[tokio::test]
+async fn mouse_hover_dispatches_over_move_out() {
+    let (mut s, t) = test_session();
+    t.route("/ev", 200, PAGE_MOUSEV);
+    t.route("/stat", 200, PAGE_MOUSEV_AFTER);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // Entrée : over + move ; second move même nœud : move
+    // seul ; sortie : out — ordre 'OMMF'.
+    s.handle_input(a, InputEvent::MouseMove { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    s.handle_input(a, InputEvent::MouseMove { x: 6.0, y: 5.0 })
+        .await
+        .unwrap();
+    s.handle_input(a, InputEvent::MouseMove { x: 5.0, y: 400.0 })
+        .await
+        .unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// Clavier + focus : `keydown` avant édition, `input` après,
+/// `keyup` au relâchement ; `blur`/`focus` à la transition.
+const PAGE_KEYS: &str = "<!doctype html><html><body>\
+    <input id=\"a\"><br><input id=\"c\"><div id=\"r\">-</div>\
+    <script>var r=document.getElementById('r');r.textContent='';\
+    var a=document.getElementById('a');var c=document.getElementById('c');\
+    a.addEventListener('focus',function(){r.textContent=r.textContent+'F'});\
+    a.addEventListener('blur',function(){r.textContent=r.textContent+'B'});\
+    a.addEventListener('keydown',function(){r.textContent=r.textContent+'D'});\
+    a.addEventListener('input',function(){r.textContent=r.textContent+'I'});\
+    a.addEventListener('keyup',function(){r.textContent=r.textContent+'U'});\
+    c.addEventListener('focus',function(){r.textContent=r.textContent+'G'})</script>\
+    </body></html>";
+
+/// Statique équivalente après `focus + down/input + up +
+/// blur/focus` : 'FDIUBG'.
+const PAGE_KEYS_AFTER: &str = "<!doctype html><html><body>\
+    <input id=\"a\"><br><input id=\"c\"><div id=\"r\">FDIUBG</div>\
+    </body></html>";
+
+#[tokio::test]
+async fn key_and_focus_events_dispatch_in_order() {
+    let (mut s, t) = test_session();
+    t.route("/ev", 200, PAGE_KEYS);
+    t.route("/stat", 200, PAGE_KEYS_AFTER);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // Focus sur `a` → 'F'.
+    let out = s
+        .handle_input(a, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Focused);
+    // 'x' → keydown 'D' puis édition + input 'I'.
+    let out = s
+        .handle_input(a, InputEvent::Key { key: "x".into() })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+    // Relâchement → keyup 'U'.
+    s.handle_input(a, InputEvent::KeyUp { key: "x".into() })
+        .await
+        .unwrap();
+    // Clic sur `c` → blur 'B' sur `a`, focus 'G' sur `c`.
+    let out = s
+        .handle_input(a, InputEvent::Click { x: 5.0, y: 35.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Focused);
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// `wheel` (annulable) cible le survol/document, `scroll`
+/// niveau document suit le défilement effectif.
+const PAGE_SCROLL: &str = "<!doctype html><html><body>\
+    <div style=\"height:500px\"></div><div id=\"r\">avant</div>\
+    <div style=\"height:1500px\"></div>\
+    <script>var r=document.getElementById('r');var b=document.body;\
+    b.addEventListener('wheel',function(){r.textContent=r.textContent+'W'});\
+    b.addEventListener('scroll',function(){r.textContent=r.textContent+'S'})</script>\
+    </body></html>";
+
+/// Équivalente au DOM synchronisé **scrollé** : `scroll_y`
+/// est cuit dans la display list — le frame de `a` montre le
+/// doc décalé de 100px (`#r` à frame-400). Contrôle :
+/// `#r` à doc-400, doc-height identique 2019.
+const PAGE_SCROLL_AFTER: &str = "<html><body>\
+    <div style=\"height:400px\"></div><div id=\"r\">avantWS</div>\
+    <div style=\"height:1600px\"></div></body></html>";
+
+#[tokio::test]
+async fn scroll_dispatches_wheel_then_scroll() {
+    let (mut sess, tr) = test_session();
+    tr.route("/ev", 200, PAGE_SCROLL);
+    tr.route("/stat", 200, PAGE_SCROLL_AFTER);
+    sess.set_js_factory(explorer_js::DilloEngine::factory());
+    let ta = sess.open_tab();
+    sess.navigate(ta, "http://h.test/ev").await.unwrap();
+    let tb = sess.open_tab();
+    sess.navigate(tb, "http://h.test/stat").await.unwrap();
+
+    let out = sess
+        .handle_input(ta, InputEvent::Scroll { dy: 100.0 })
+        .await
+        .unwrap();
+    match out {
+        InputOutcome::Scrolled { scroll_y } => {
+            assert!((scroll_y - 100.0).abs() < 0.01);
+        }
+        o => panic!("inattendu : {o:?}"),
+    }
+    assert_eq!(sess.frame_png(ta), sess.frame_png(tb));
+}
+
+/// `wheel` `preventDefault` : le scroll est supprimé, l'événe-
+/// ment `scroll` n'est pas émis.
+const PAGE_WHEEL_PREV: &str = "<!doctype html><html><body>\
+    <div style=\"height:500px\"></div><div id=\"r\">avant</div>\
+    <div style=\"height:1500px\"></div>\
+    <script>var r=document.getElementById('r');var b=document.body;\
+    b.addEventListener('wheel',function(e){e.preventDefault();\
+    r.textContent=r.textContent+'W'});\
+    b.addEventListener('scroll',function(){r.textContent=r.textContent+'S'})</script>\
+    </body></html>";
+
+/// Équivalente au DOM synchronisé : 'W' émis, page non
+/// scrollée, même doc-height.
+const PAGE_WHEEL_PREV_AFTER: &str = "<html><body>\
+    <div style=\"height:500px\"></div><div id=\"r\">avantW</div>\
+    <div style=\"height:1500px\"></div></body></html>";
+
+#[tokio::test]
+async fn wheel_prevented_suppresses_scroll() {
+    let (mut sess, tr) = test_session();
+    tr.route("/ev", 200, PAGE_WHEEL_PREV);
+    tr.route("/stat", 200, PAGE_WHEEL_PREV_AFTER);
+    sess.set_js_factory(explorer_js::DilloEngine::factory());
+    let ta = sess.open_tab();
+    sess.navigate(ta, "http://h.test/ev").await.unwrap();
+    let tb = sess.open_tab();
+    sess.navigate(tb, "http://h.test/stat").await.unwrap();
+
+    let out = sess
+        .handle_input(ta, InputEvent::Scroll { dy: 100.0 })
+        .await
+        .unwrap();
+    match out {
+        // `preventDefault` a bloqué le scroll — y reste à 0.
+        InputOutcome::Scrolled { scroll_y } => assert!(scroll_y.abs() < 0.01),
+        o => panic!("inattendu : {o:?}"),
+    }
+    assert_eq!(sess.frame_png(ta), sess.frame_png(tb));
+}
+
+/// `setTimeout`/`setInterval`/`requestAnimationFrame` tirent
+/// par la pompe, sans input — l'échéance est exposée à
+/// l'hôte (`next_timer_deadline`).
+const PAGE_PUMP: &str = "<!doctype html><html><body>\
+    <div id=\"r\">avant</div>\
+    <script>var r=document.getElementById('r');\
+    setTimeout(function(){r.textContent=r.textContent+'T'},0);\
+    var i=setInterval(function(){r.textContent=r.textContent+'I';\
+    clearInterval(i)},0);\
+    requestAnimationFrame(function(){r.textContent=r.textContent+'R'})</script>\
+    </body></html>";
+
+/// Statique équivalente après `T + I + R`.
+const PAGE_PUMP_AFTER: &str = "<!doctype html><html><body>\
+    <div id=\"r\">avantTIR</div></body></html>";
+
+#[tokio::test]
+async fn timers_fire_via_pump_without_input() {
+    let (mut s, t) = test_session();
+    t.route("/ev", 200, PAGE_PUMP);
+    t.route("/stat", 200, PAGE_PUMP_AFTER);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // Timers armés → échéance exposée ; pompe 1 : 'T'+'I'
+    // (rAF ≙ 16 ms pas encore dû) ; pompe 2 : 'R'.
+    assert!(s.next_timer_deadline().is_some());
+    assert!(s.pump_timers(a) > 0);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    s.pump_timers(a);
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+    // Timeout consommé, intervalle auto-annulé, rAF tiré.
+    assert_eq!(s.next_timer_deadline(), None);
+}
+
+/// `max_timer_jobs` (ADR-0019) : borne par pompe — les
+/// timers restants attendent la pompe suivante.
+const PAGE_BOUND: &str = "<!doctype html><html><body>\
+    <div id=\"r\">avant</div>\
+    <script>var r=document.getElementById('r');\
+    setTimeout(function(){r.textContent=r.textContent+'A'},0);\
+    setTimeout(function(){r.textContent=r.textContent+'B'},0);\
+    setTimeout(function(){r.textContent=r.textContent+'C'},0)</script>\
+    </body></html>";
+
+/// Statique équivalente après les trois callbacks.
+const PAGE_BOUND_AFTER: &str = "<!doctype html><html><body>\
+    <div id=\"r\">avantABC</div></body></html>";
+
+#[tokio::test]
+async fn timer_jobs_bounded_per_pump() {
+    let t = Arc::new(FakeTransport::new());
+    t.route("/ev", 200, PAGE_BOUND);
+    t.route("/stat", 200, PAGE_BOUND_AFTER);
+    let mut s = Session::with_config(
+        t.clone(),
+        Arc::new(FixtureFont),
+        SessionConfig {
+            max_timer_jobs: 1,
+            ..SessionConfig::default()
+        },
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // Un callback par pompe — borne respectée ; 'ABC' au
+    // bout de trois pompes.
+    for _ in 0..3 {
+        s.pump_timers(a);
+    }
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+    assert_eq!(s.next_timer_deadline(), None);
+}
+
+/// `MutationObserver` (JS-C26) livré au même point de
+/// synchro que les timers : mutation faite par un callback
+/// `setTimeout`, record livré dans la même pompe.
+const PAGE_MUT_OBS: &str = "<!doctype html><html><body>\
+    <div id=\"t\">n0</div><div id=\"r\">avant</div>\
+    <script>var r=document.getElementById('r');\
+    var t=document.getElementById('t');\
+    var o=new MutationObserver(function(recs){\
+    r.textContent='OBS'+recs.length});\
+    o.observe(t,{childList:true});\
+    setTimeout(function(){t.textContent='n1'},0)</script>\
+    </body></html>";
+
+/// Statique équivalente : `t` muté + record livré.
+const PAGE_MUT_OBS_AFTER: &str = "<!doctype html><html><body>\
+    <div id=\"t\">n1</div><div id=\"r\">OBS1</div></body></html>";
+
+#[tokio::test]
+async fn mutation_observer_delivered_at_pump_checkpoint() {
+    let (mut s, t) = test_session();
+    t.route("/ev", 200, PAGE_MUT_OBS);
+    t.route("/stat", 200, PAGE_MUT_OBS_AFTER);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    s.pump_timers(a);
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// Checkbox : activation avant `click` (le handler lit
+/// `checked` post-bascule), puis `input` et `change` dans
+/// l'ordre DOM.
+const PAGE_CHECK: &str = "<!doctype html><html><body>\
+    <input id=\"k\" type=\"checkbox\"><div id=\"r\">avant</div>\
+    <script>var r=document.getElementById('r');\
+    var k=document.getElementById('k');\
+    k.addEventListener('click',function(){\
+    r.textContent=r.textContent+'C'+(k.checked?'1':'0')});\
+    k.addEventListener('input',function(){r.textContent=r.textContent+'I'});\
+    k.addEventListener('change',function(){r.textContent=r.textContent+'N'})</script>\
+    </body></html>";
+
+/// Équivalente au DOM synchronisé : case cochée
+/// (`checked=""` sérialisé par le miroir) + 'C1' 'I' 'N'.
+const PAGE_CHECK_AFTER: &str = "<html><body>\
+    <input id=\"k\" type=\"checkbox\" checked=\"\"><div id=\"r\">avantC1IN</div>\
+    </body></html>";
+
+#[tokio::test]
+async fn checkbox_click_dispatches_input_then_change() {
+    let (mut s, t) = test_session();
+    t.route("/ev", 200, PAGE_CHECK);
+    t.route("/stat", 200, PAGE_CHECK_AFTER);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    let out = s
+        .handle_input(a, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// `preventDefault` sur le `click` d'une case : la bascule
+/// est restaurée, `input`/`change` ne partent pas.
+const PAGE_CHECK_PREV: &str = "<!doctype html><html><body>\
+    <input id=\"k\" type=\"checkbox\"><div id=\"r\">avant</div>\
+    <script>var r=document.getElementById('r');\
+    var k=document.getElementById('k');\
+    k.addEventListener('click',function(e){e.preventDefault();\
+    r.textContent=r.textContent+'C'+(k.checked?'1':'0')});\
+    k.addEventListener('change',function(){r.textContent=r.textContent+'N'})</script>\
+    </body></html>";
+
+/// Équivalente au DOM synchronisé : 'C1' (bascule faite
+/// puis restaurée — case décochée), pas de 'N'.
+const PAGE_CHECK_PREV_AFTER: &str = "<html><body>\
+    <input id=\"k\" type=\"checkbox\"><div id=\"r\">avantC1</div>\
+    </body></html>";
+
+#[tokio::test]
+async fn checkbox_prevented_click_restores_state() {
+    let (mut s, t) = test_session();
+    t.route("/ev", 200, PAGE_CHECK_PREV);
+    t.route("/stat", 200, PAGE_CHECK_PREV_AFTER);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    let out = s
+        .handle_input(a, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+    assert_eq!(s.frame_png(a), s.frame_png(b));
 }

@@ -111,9 +111,15 @@ pub enum InputEvent {
         /// Delta (positif = vers le bas).
         dy: f32,
     },
-    /// Touche clavier — éditée si un champ est focalisé.
+    /// Touche clavier — `keydown` dispatché puis éditée si un
+    /// champ est focalisé.
     Key {
         /// Identifiant de touche (`"a"`, `"Enter"`…).
+        key: String,
+    },
+    /// Relâchement de touche — `keyup` dispatché (étape 52).
+    KeyUp {
+        /// Identifiant de touche.
         key: String,
     },
 }
@@ -259,8 +265,15 @@ struct Tab {
     /// PNG encodé prêt à servir.
     png: Option<Vec<u8>>,
     /// Champ de formulaire focalisé (`input`/`textarea`) —
-    /// `NodeId` dans `dom`, invalidé à la navigation.
-    focused: Option<NodeId>,
+    /// **chemin** `(tag, index)` dans `dom`, pas `NodeId` :
+    /// le re-parse de synchro DOM tue les ids, le chemin se
+    /// re-résout à chaque usage (`dom_path_node`, étape 52).
+    /// Invalidé à la navigation.
+    focused: Option<Vec<(String, u32)>>,
+    /// Nœud sous le curseur au dernier `mousemove` (étape 52)
+    /// — sert de cible à `mouseout`/`mouseover`/`wheel` ;
+    /// chemin `(tag, index)`, même raisonnement que `focused`.
+    hovered: Option<Vec<(String, u32)>>,
     /// Contexte JS du document — créé si la page a des
     /// `<script>` et qu'une fabrique est injectée ; meurt à
     /// la navigation (un contexte par document).
@@ -522,6 +535,11 @@ pub struct SessionConfig {
     /// onglet — quota ADR-0019 : au-delà, la requête échoue
     /// en `status: 0` (événement `error`, page vivante).
     pub max_script_net: usize,
+    /// Callbacks de timers JS déclenchés par tick (étape 52,
+    /// borne ADR-0019 — une page enregistrant des milliers
+    /// de timers échus ne monopolise pas la pompe ; le reste
+    /// attend le tick suivant).
+    pub max_timer_jobs: usize,
 }
 
 impl Default for SessionConfig {
@@ -539,6 +557,7 @@ impl Default for SessionConfig {
             max_modules: 64,
             max_inflight: 6,
             max_script_net: 16,
+            max_timer_jobs: 128,
         }
     }
 }
@@ -603,6 +622,10 @@ pub struct Session {
     /// Quota de requêtes script-initiées simultanées par
     /// onglet (`max_script_net` de config, ADR-0019).
     max_script_net: usize,
+    /// Quota de callbacks de timers déclenchés par tick
+    /// (`max_timer_jobs` de config, étape 52 — borne
+    /// ADR-0019).
+    max_timer_jobs: usize,
 }
 
 impl Session {
@@ -651,6 +674,7 @@ impl Session {
             net_rx,
             net_tasks: HashMap::new(),
             max_script_net: cfg.max_script_net,
+            max_timer_jobs: cfg.max_timer_jobs,
         }
     }
 
@@ -724,6 +748,7 @@ impl Session {
                 frame: None,
                 png: None,
                 focused: None,
+                hovered: None,
                 js: None,
                 images: ImageTable::new(),
                 linked_css: String::new(),
@@ -816,19 +841,82 @@ impl Session {
     /// côté `dillo-js`). `Ok(true)` = une nouvelle frame a
     /// été produite et `FrameInvalidated` émis.
     ///
+    /// Étape 52 : fait d'abord office de **tick JS** —
+    /// [`Self::pump_timers`] vide les timers échus (borné par
+    /// `max_timer_jobs`) ; leurs mutations synchronisées
+    /// invalident la frame elles-mêmes. Les intentions de
+    /// navigation émises restent à drainer par l'hôte
+    /// ([`Self::drain_script_nav`], async — non faisable ici,
+    /// le tick est synchrone).
+    ///
     /// # Errors
     /// [`CoreError::UnknownTab`], ou erreur de rendu.
     pub fn tick_animations(&mut self, tab: TabId) -> Result<bool, CoreError> {
+        let jobs = self.pump_timers(tab);
         let active = self
             .tabs
             .get(&tab)
             .is_some_and(|t| !t.transitions.is_empty());
         if !active {
-            return Ok(false);
+            // Les timers ont pu invalider seuls (synchro DOM)
+            // — pas de relayout gratuit en plus.
+            return Ok(jobs > 0);
         }
         self.relayout(tab)?;
         let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
         Ok(true)
+    }
+
+    /// Pompe les jobs JS dus d'un onglet — timers bornés à
+    /// `max_timer_jobs` (ADR-0019) + microtasks +
+    /// `MutationObserver` (JS-C26, livré au même checkpoint) —
+    /// puis synchronise DOM, storage, cookies et net aux
+    /// mêmes points de synchro que les événements. Renvoie le
+    /// nombre de jobs exécutés.
+    ///
+    /// Synchrone : les intentions de navigation émises par un
+    /// timer sont à drainer ensuite via
+    /// [`Self::drain_script_nav`] (async).
+    pub fn pump_timers(&mut self, tab: TabId) -> usize {
+        let max = self.max_timer_jobs;
+        let (jobs, mutated) = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return 0;
+            };
+            let Some(eng) = entry.js.as_mut() else {
+                return 0;
+            };
+            (eng.run_pending_bounded(max), eng.sync_dom())
+        };
+        if let Some(html) = mutated {
+            self.apply_dom_sync(tab, &html, true);
+        }
+        if jobs > 0 {
+            // Les callbacks ont pu émettre XHR/cookies/storage.
+            self.after_script(tab);
+            self.poll_net();
+        }
+        jobs
+    }
+
+    /// [`Self::pump_timers`] sur tous les onglets — le
+    /// battement de l'hôte (daemon, CLI) itère ici.
+    pub fn pump_timers_all(&mut self) -> usize {
+        let tabs: Vec<TabId> = self.tabs.keys().copied().collect();
+        tabs.into_iter().map(|t| self.pump_timers(t)).sum()
+    }
+
+    /// Plus proche échéance de timer JS tous onglets — délai
+    /// relatif recalculé par chaque moteur (`None` = aucun
+    /// timer armé). L'hôte dort jusqu'à `min(délai,
+    /// battement)`.
+    #[must_use]
+    pub fn next_timer_deadline(&mut self) -> Option<std::time::Duration> {
+        self.tabs
+            .values_mut()
+            .filter_map(|e| e.js.as_mut())
+            .filter_map(|eng| eng.next_timer_deadline())
+            .min()
     }
 
     /// Signets (miroir du store).
@@ -1014,6 +1102,7 @@ impl Session {
             entry.title.clone_from(&title);
             entry.scroll_y = 0.0;
             entry.focused = None;
+            entry.hovered = None;
             entry.js = None;
             entry.images.clear();
             entry.linked_css.clear();
@@ -1090,7 +1179,13 @@ impl Session {
     /// feuille du graphe d'appels (seul `history_move`,
     /// boxé, boucle pour la taille du future). `true` si au
     /// moins une navigation a été appliquée.
-    async fn drain_script_nav(&mut self, tab: TabId) -> bool {
+    /// Drainage des intentions de navigation script
+    /// (`location`, `history`) accumulées — appelé après tout
+    /// point de synchro producteur : événements, fin de
+    /// chargement, tick timers (étape 52 — les hôtes la
+    /// relancent après [`Self::pump_timers`]). Publique pour
+    /// les pompes des hôtes (daemon, CLI) ; bornée à 8 sauts.
+    pub async fn drain_script_nav(&mut self, tab: TabId) -> bool {
         const MAX_NAV_HOPS: u8 = 8;
         let mut applied = false;
         for _ in 0..MAX_NAV_HOPS {
@@ -1844,8 +1939,9 @@ impl Session {
 
     /// Resynchronise le document depuis le miroir JS muté :
     /// re-parse du HTML sérialisé, relecture du titre
-    /// (`TitleChanged` si changé), reset du focus (les
-    /// `NodeId` changent au re-parse). `relayout` contrôle
+    /// (`TitleChanged` si changé). `focused`/`hovered` sont
+    /// conservés — ce sont des chemins, pas des `NodeId`
+    /// (étape 52). `relayout` contrôle
     /// l'invalidation immédiate — vrai depuis les événements,
     /// faux pendant la navigation (qui relayout juste après).
     fn apply_dom_sync(&mut self, tab: TabId, html: &str, relayout: bool) {
@@ -1853,7 +1949,10 @@ impl Session {
         let new_title = extract_title(&new_dom);
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.dom = Some(new_dom);
-            entry.focused = None;
+            // `focused`/`hovered` sont des **chemins** — ils
+            // survivent au re-parse et se re-résolvent à
+            // l'usage (étape 52) ; un nœud supprimé
+            // simplement ne résout plus.
             // Les `NodeId` changent au re-parse → les pixels
             // indexés par nœud sont obsolètes (les `<img>`
             // nouveaux retombent sur `alt` jusqu'à la
@@ -2002,13 +2101,19 @@ impl Session {
         }
         match ev {
             InputEvent::Key { key } => {
+                // `keydown` sur le champ focalisé, sinon niveau
+                // document (étape 52) — `preventDefault`
+                // supprime l'édition et la soumission `Enter`.
+                if self.dispatch_key(tab, "keydown") {
+                    return Ok(InputOutcome::Ignored);
+                }
                 // Soumission implicite : `Enter` dans un champ
                 // d'un `<form>` soumet comme le bouton par
                 // défaut (événement `submit` d'abord —
                 // `preventDefault` annule).
                 if key == "Enter" {
                     if let Some(form) = self.focused_form(tab) {
-                        self.blur(tab);
+                        self.set_focus(tab, None);
                         if !self.dispatch_dom_event(tab, "submit", form) {
                             self.submit_form(tab, form, None).await?;
                             return Ok(InputOutcome::Navigated);
@@ -2018,77 +2123,180 @@ impl Session {
                 }
                 self.handle_key(tab, &key)
             }
+            InputEvent::KeyUp { key: _ } => {
+                self.dispatch_key(tab, "keyup");
+                Ok(InputOutcome::Ignored)
+            }
             InputEvent::Scroll { dy } => {
-                self.scroll_by(tab, dy)?;
+                // `wheel` (annulable) sur le nœud survolé ou le
+                // document — `preventDefault` bloque le scroll.
+                if !self.dispatch_wheel(tab) {
+                    self.scroll_by(tab, dy)?;
+                    // `scroll` niveau document (non annulable).
+                    self.dispatch_doc_event(tab, "scroll");
+                }
                 Ok(InputOutcome::Scrolled {
                     scroll_y: self.tabs.get(&tab).map_or(0.0, |t| t.scroll_y),
                 })
             }
-            InputEvent::MouseMove { x, y } => Ok(InputOutcome::Hover {
-                url: self.link_at(tab, x, y),
-                editable: self.field_at(tab, x, y).is_some(),
-            }),
-            InputEvent::Click { x, y } => {
-                // L'événement DOM précède l'action par défaut :
-                // un handler peut muter la page (resynchronisée
-                // et re-peinte ici) ou `preventDefault`.
-                let prevented = self.dispatch_click(tab, x, y);
-                // Navigation script (`location`, `history`) :
-                // priorité sur l'action par défaut du clic.
+            InputEvent::MouseMove { x, y } => self.handle_mouse_move(tab, x, y).await,
+            InputEvent::Click { x, y } => self.handle_click(tab, x, y).await,
+        }
+    }
+
+    /// Survol suivi (étape 52) : `mouseout` sur l'ancienne
+    /// cible, `mouseover`/`mousemove` sur la nouvelle — déjà
+    /// coalescé côté client (ADR-0003), un événement par
+    /// `move`. Les dispatches se font par **chemin** : chaque
+    /// handler peut muter le miroir et re-parser le document —
+    /// un `NodeId` capté en début de bras serait mort dès le
+    /// premier dispatch.
+    async fn handle_mouse_move(
+        &mut self,
+        tab: TabId,
+        x: f32,
+        y: f32,
+    ) -> Result<InputOutcome, CoreError> {
+        let node = self.node_at(tab, x, y);
+        let path = node.and_then(|n| {
+            self.tabs
+                .get(&tab)
+                .and_then(|e| e.dom.as_ref())
+                .and_then(|d| element_path(d, n))
+        });
+        let prev = self.tabs.get(&tab).and_then(|t| t.hovered.clone());
+        if prev != path {
+            if let Some(o) = prev {
+                self.dispatch_path_event(tab, "mouseout", &o);
+            }
+            if let Some(p) = &path {
+                self.dispatch_path_event(tab, "mouseover", p);
+            }
+            if let Some(entry) = self.tabs.get_mut(&tab) {
+                entry.hovered.clone_from(&path);
+            }
+        }
+        if let Some(p) = &path {
+            self.dispatch_path_event(tab, "mousemove", p);
+        }
+        if self.drain_script_nav(tab).await {
+            return Ok(InputOutcome::Navigated);
+        }
+        Ok(InputOutcome::Hover {
+            url: self.link_at(tab, x, y),
+            editable: self.field_at(tab, x, y).is_some(),
+        })
+    }
+
+    /// Clic : `click` DOM d'abord (`preventDefault` annule
+    /// l'action par défaut), bascule des contrôles puis
+    /// `input`/`change`, focus sur les champs, `submit` des
+    /// formulaires, navigation des liens.
+    async fn handle_click(
+        &mut self,
+        tab: TabId,
+        x: f32,
+        y: f32,
+    ) -> Result<InputOutcome, CoreError> {
+        let node = self.node_at(tab, x, y);
+        // Contrôle à bascule : activation AVANT `click`
+        // (spec DOM — le handler lit `checked` post-bascule
+        // via le miroir synchronisé) ; `preventDefault`
+        // annule et restaure l'état.
+        let toggled = self.toggle_at(tab, x, y);
+        // Chemin du contrôle capté AVANT le `click` : le
+        // handler peut re-parser le document — le `NodeId`
+        // meurt, le chemin survit.
+        let ctrl_path = toggled.and_then(|c| {
+            self.tabs
+                .get(&tab)
+                .and_then(|e| e.dom.as_ref())
+                .and_then(|d| element_path(d, c))
+        });
+        if let Some(ctrl) = toggled {
+            self.flip_checked(tab, ctrl)?;
+        }
+        // L'événement DOM précède l'action par défaut : un
+        // handler peut muter la page (resynchronisée et
+        // re-peinte ici) ou `preventDefault`.
+        let prevented = node.is_some_and(|n| self.dispatch_dom_event(tab, "click", n));
+        if toggled.is_some() {
+            // Re-résolution sur l'arbre courant pour le revert
+            // ou la suite `input`/`change`.
+            let ctrl = self.resolve_path(tab, ctrl_path.as_deref());
+            if prevented {
+                if let Some(c) = ctrl {
+                    self.flip_checked(tab, c)?;
+                }
+            } else if let Some(p) = &ctrl_path {
+                // `input` puis `change` — ordre DOM.
+                self.dispatch_path_event(tab, "input", p);
+                self.dispatch_path_event(tab, "change", p);
+            }
+            self.relayout(tab)?;
+            let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+            return Ok(if prevented {
+                InputOutcome::Ignored
+            } else {
+                InputOutcome::Edited
+            });
+        }
+        // Navigation script (`location`, `history`) : priorité
+        // sur l'action par défaut du clic.
+        if self.drain_script_nav(tab).await {
+            return Ok(InputOutcome::Navigated);
+        }
+        if let Some(field) = self.field_at(tab, x, y) {
+            // `blur` sur l'ancien focus puis `focus` sur le
+            // champ (étape 52).
+            self.set_focus(tab, Some(field));
+            return Ok(InputOutcome::Focused);
+        }
+        self.set_focus(tab, None);
+        // `<select>` : cycle d'options — le sélecteur natif
+        // délégué UI est hors scope (ADR-0014).
+        if let Some(sel) = self.select_at(tab, x, y) {
+            {
+                let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+                let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
+                cycle_select(dom, sel)?;
+            }
+            self.relayout(tab)?;
+            let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+            return Ok(InputOutcome::Edited);
+        }
+        // Contrôle submit : l'événement `submit` du formulaire
+        // part avant l'action par défaut. `form`/`sub` sont
+        // re-résolus après le dispatch — un handler peut
+        // re-parser le document (ids morts, chemins
+        // survivants).
+        if let Some((form, sub)) = self.submit_at(tab, x, y) {
+            let paths = {
+                let dom = self.tabs.get(&tab).and_then(|e| e.dom.as_ref());
+                (
+                    dom.and_then(|d| element_path(d, form)),
+                    dom.and_then(|d| element_path(d, sub)),
+                )
+            };
+            if !prevented && !self.dispatch_dom_event(tab, "submit", form) {
                 if self.drain_script_nav(tab).await {
                     return Ok(InputOutcome::Navigated);
                 }
-                if let Some(field) = self.field_at(tab, x, y) {
-                    if let Some(entry) = self.tabs.get_mut(&tab) {
-                        entry.focused = Some(field);
-                    }
-                    return Ok(InputOutcome::Focused);
-                }
-                self.blur(tab);
-                // Contrôle à bascule : checkbox/radio — le
-                // `checked` change → restyle + repaint.
-                if let Some(ctrl) = self.toggle_at(tab, x, y) {
-                    {
-                        let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
-                        let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
-                        toggle_checked(dom, ctrl)?;
-                    }
-                    self.relayout(tab)?;
-                    let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
-                    return Ok(InputOutcome::Edited);
-                }
-                // `<select>` : cycle d'options — le sélecteur
-                // natif délégué UI est hors scope (ADR-0014).
-                if let Some(sel) = self.select_at(tab, x, y) {
-                    {
-                        let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
-                        let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
-                        cycle_select(dom, sel)?;
-                    }
-                    self.relayout(tab)?;
-                    let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
-                    return Ok(InputOutcome::Edited);
-                }
-                // Contrôle submit : l'événement `submit` du
-                // formulaire part avant l'action par défaut.
-                if let Some((form, sub)) = self.submit_at(tab, x, y) {
-                    if !prevented && !self.dispatch_dom_event(tab, "submit", form) {
-                        if self.drain_script_nav(tab).await {
-                            return Ok(InputOutcome::Navigated);
-                        }
-                        self.submit_form(tab, form, Some(sub)).await?;
-                        return Ok(InputOutcome::Navigated);
-                    }
-                    return Ok(InputOutcome::Ignored);
-                }
-                match self.link_at(tab, x, y) {
-                    Some(url) if !prevented => {
-                        self.navigate(tab, &url).await?;
-                        Ok(InputOutcome::Navigated)
-                    }
-                    _ => Ok(InputOutcome::Ignored),
+                let f = self.resolve_path(tab, paths.0.as_deref());
+                let s = self.resolve_path(tab, paths.1.as_deref());
+                if let (Some(f), Some(s)) = (f, s) {
+                    self.submit_form(tab, f, Some(s)).await?;
+                    return Ok(InputOutcome::Navigated);
                 }
             }
+            return Ok(InputOutcome::Ignored);
+        }
+        match self.link_at(tab, x, y) {
+            Some(url) if !prevented => {
+                self.navigate(tab, &url).await?;
+                Ok(InputOutcome::Navigated)
+            }
+            _ => Ok(InputOutcome::Ignored),
         }
     }
 
@@ -2136,7 +2344,7 @@ impl Session {
     fn focused_form(&self, tab: TabId) -> Option<NodeId> {
         let entry = self.tabs.get(&tab)?;
         let dom = entry.dom.as_ref()?;
-        let field = entry.focused?;
+        let field = entry.focused.as_ref().and_then(|p| dom_path_node(dom, p))?;
         if !dom.tag_name(field).is_ok_and(|t| t == "input") {
             return None;
         }
@@ -2202,66 +2410,61 @@ impl Session {
         }
     }
 
-    /// Perd le focus (clic hors champ).
-    fn blur(&mut self, tab: TabId) {
-        if let Some(entry) = self.tabs.get_mut(&tab) {
-            entry.focused = None;
-        }
-    }
-
     /// Édition du champ focalisé : `Backspace` efface,
     /// `Enter`/`Escape` sortent du champ, un caractère
-    /// imprimable s'insère — puis restyle + repaint.
+    /// imprimable s'insère — puis `input` dispatché (valeur
+    /// synchronisée au miroir d'abord), restyle + repaint.
     fn handle_key(&mut self, tab: TabId, key: &str) -> Result<InputOutcome, CoreError> {
-        let focused = self.tabs.get(&tab).and_then(|t| t.focused).filter(|&n| {
-            self.tabs
-                .get(&tab)
-                .and_then(|t| t.dom.as_ref())
-                .is_some_and(|d| d.is_alive(n))
-        });
-        let Some(field) = focused else {
+        let Some(field) = self.focused_node(tab) else {
             tracing::trace!(tab, key, "touche sans champ focalisé");
             return Ok(InputOutcome::Ignored);
         };
         match key {
             "Enter" | "Escape" => {
-                self.blur(tab);
+                self.set_focus(tab, None);
                 return Ok(InputOutcome::Ignored);
             }
             _ => {}
         }
-        {
+        let value = {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
             let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
             edit_field(dom, field, key)?;
-        }
+            field_value(dom, field)
+        };
+        // Le handler `input` lit `.value` — le miroir est
+        // synchronisé avant le dispatch (édition hors script).
+        self.sync_mirror_attr(tab, field, "value", Some(&value));
+        self.dispatch_dom_event(tab, "input", field);
         self.relayout(tab)?;
         let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
         Ok(InputOutcome::Edited)
     }
 
-    /// Dispatche `click` dans le miroir JS (propagation
-    /// capture→cible→bulle côté moteur, microtasks et timers
-    /// dus drainés), puis resynchronise les mutations DOM.
-    /// Retourne `defaultPrevented` — l'appelant supprime alors
-    /// l'action par défaut (navigation de lien).
-    fn dispatch_click(&mut self, tab: TabId, x: f32, y: f32) -> bool {
-        let node = self.tabs.get(&tab).and_then(|entry| {
-            let (tree, _dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
-            hit_test(tree, x, y + entry.scroll_y)
-        });
-        node.is_some_and(|n| self.dispatch_dom_event(tab, "click", n))
-    }
-
     /// Dispatche l'événement `ty` sur `node` dans le miroir JS
-    /// puis resynchronise les mutations DOM (même traitement
-    /// que `dispatch_click`). Retourne `defaultPrevented`.
+    /// puis resynchronise les mutations DOM. Retourne
+    /// `defaultPrevented`.
     fn dispatch_dom_event(&mut self, tab: TabId, ty: &str, node: NodeId) -> bool {
         let path = self
             .tabs
             .get(&tab)
             .and_then(|entry| entry.dom.as_ref().and_then(|d| element_path(d, node)));
         let Some(path) = path else { return false };
+        self.dispatch_path_event(tab, ty, &path)
+    }
+
+    /// Événement niveau document (étape 52) — cible `<body>`
+    /// côté miroir : `scroll`, `keydown`/`keyup`/`wheel` sans
+    /// nœud porteur.
+    fn dispatch_doc_event(&mut self, tab: TabId, ty: &str) -> bool {
+        self.dispatch_path_event(tab, ty, &[])
+    }
+
+    /// Cœur du dispatch : `path` vers le miroir (vide =
+    /// document), resynchronisation + drains des surfaces
+    /// script (étapes 50-51) — point de synchro partagé par
+    /// les événements utilisateur et le tick timers.
+    fn dispatch_path_event(&mut self, tab: TabId, ty: &str, path: &[(String, u32)]) -> bool {
         let (prevented, mutated) = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return false;
@@ -2269,7 +2472,7 @@ impl Session {
             let Some(eng) = entry.js.as_mut() else {
                 return false;
             };
-            let p = match eng.dispatch_event(ty, &path) {
+            let p = match eng.dispatch_event(ty, path) {
                 Ok(p) => p,
                 Err(e) => {
                     tracing::debug!(tab, ty, error = %e, "listener dom en échec");
@@ -2281,7 +2484,7 @@ impl Session {
                 }
             };
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après click");
+            tracing::trace!(tab, jobs = n, "jobs js après événement");
             (p, eng.sync_dom())
         };
         if let Some(html) = mutated {
@@ -2293,6 +2496,121 @@ impl Session {
         self.after_script(tab);
         self.poll_net();
         prevented
+    }
+
+    /// `keydown`/`keyup` : cible = champ focalisé s'il vit
+    /// encore dans `dom`, document sinon. Retourne
+    /// `defaultPrevented`.
+    fn dispatch_key(&mut self, tab: TabId, ty: &str) -> bool {
+        match self.focused_node(tab) {
+            Some(n) => self.dispatch_dom_event(tab, ty, n),
+            None => self.dispatch_doc_event(tab, ty),
+        }
+    }
+
+    /// `wheel` : cible = nœud survolé s'il vit encore,
+    /// document sinon. Retourne `defaultPrevented` — le
+    /// scroll est alors supprimé.
+    fn dispatch_wheel(&mut self, tab: TabId) -> bool {
+        let path = self
+            .tabs
+            .get(&tab)
+            .and_then(|t| t.hovered.clone())
+            .filter(|p| {
+                self.tabs
+                    .get(&tab)
+                    .and_then(|t| t.dom.as_ref())
+                    .is_some_and(|d| dom_path_node(d, p).is_some())
+            });
+        match path {
+            Some(p) => self.dispatch_path_event(tab, "wheel", &p),
+            None => self.dispatch_doc_event(tab, "wheel"),
+        }
+    }
+
+    /// Résout `path` vers le `NodeId` courant de `dom` —
+    /// re-résolution après re-parse de synchro (étape 52).
+    fn resolve_path(&self, tab: TabId, path: Option<&[(String, u32)]>) -> Option<NodeId> {
+        path.and_then(|p| {
+            self.tabs
+                .get(&tab)
+                .and_then(|e| e.dom.as_ref())
+                .and_then(|d| dom_path_node(d, p))
+        })
+    }
+
+    /// Champ focalisé résolu dans `dom` courant — `None` si
+    /// le chemin stocké ne mène plus à un élément (le nœud a
+    /// été supprimé par un handler ou un re-parse l'a
+    /// déplacé).
+    fn focused_node(&self, tab: TabId) -> Option<NodeId> {
+        self.resolve_path(tab, self.tabs.get(&tab)?.focused.as_deref())
+    }
+
+    /// Focus champ (étape 52) : `blur` sur l'ancien nœud puis
+    /// `focus` sur le nouveau — ordre navigateur. `None` =
+    /// perte de focus seule. Les événements sont dispatchés
+    /// par **chemin** : un handler `blur` qui mute le DOM
+    /// re-parse le document — la cible `focus` est re-résolue
+    /// ensuite sur l'arbre courant.
+    fn set_focus(&mut self, tab: TabId, field: Option<NodeId>) {
+        let entry = self.tabs.get(&tab);
+        let new_path = field.and_then(|f| {
+            entry
+                .and_then(|e| e.dom.as_ref())
+                .and_then(|d| element_path(d, f))
+        });
+        let old_path = entry.and_then(|e| e.focused.clone());
+        if old_path == new_path {
+            return;
+        }
+        if let Some(o) = old_path {
+            self.dispatch_path_event(tab, "blur", &o);
+        }
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.focused.clone_from(&new_path);
+        }
+        if let Some(p) = new_path {
+            self.dispatch_path_event(tab, "focus", &p);
+        }
+    }
+
+    /// Pousse l'état `attr` d'un nœud hôte vers le miroir JS —
+    /// les handlers d'événements lisent l'état courant quand
+    /// la session a muté le document hors script (champ
+    /// édité → `value`, case basculée → `checked`).
+    fn sync_mirror_attr(&mut self, tab: TabId, node: NodeId, attr: &str, value: Option<&str>) {
+        let path = self
+            .tabs
+            .get(&tab)
+            .and_then(|e| e.dom.as_ref())
+            .and_then(|d| element_path(d, node));
+        let Some(path) = path else { return };
+        if let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()) {
+            eng.sync_mirror_attr(&path, attr, value);
+        }
+    }
+
+    /// Bascule `checked` du contrôle dans le DOM hôte puis
+    /// pousse l'attribut au miroir (étape 52 — l'activation
+    /// précède le `click`, le revert suit `preventDefault`).
+    fn flip_checked(&mut self, tab: TabId, ctrl: NodeId) -> Result<(), CoreError> {
+        let checked = {
+            let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
+            toggle_checked(dom, ctrl)?;
+            dom.attribute(ctrl, "checked").ok().flatten().is_some()
+        };
+        self.sync_mirror_attr(tab, ctrl, "checked", checked.then_some(""));
+        Ok(())
+    }
+
+    /// Nœud DOM sous `(x, y)` viewport — hit-test sur l'arbre
+    /// posé, scroll compensé.
+    fn node_at(&self, tab: TabId, x: f32, y: f32) -> Option<NodeId> {
+        let entry = self.tabs.get(&tab)?;
+        let tree = entry.tree.as_ref()?;
+        hit_test(tree, x, y + entry.scroll_y)
     }
 
     /// `href` résolu du lien `<a>` sous `(x, y)` viewport —
@@ -2363,7 +2681,8 @@ fn element_path(dom: &Dom, node: NodeId) -> Option<Vec<(String, u32)>> {
             .children(p)
             .ok()?
             .iter()
-            .filter(|&&c| c != cur && dom.tag_name(c).is_ok_and(|t| t == tag))
+            .take_while(|&&c| c != cur)
+            .filter(|&&c| dom.tag_name(c).is_ok_and(|t| t == tag))
             .count();
         path.push((tag, u32::try_from(k).ok()?));
         cur = p;
@@ -3045,16 +3364,37 @@ fn select_control(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
 
 /// Premier élément portant `id` en ordre document — petit
 /// parcours pour `label[for]` (pas d'index d'id exposé).
+/// Inverse d'[`element_path`] : nœud désigné par `path`
+/// dans `dom` courant — utilisé pour re-résoudre les cibles
+/// stockées après un re-parse de synchro (les `NodeId`
+/// meurent, les chemins survivent).
+fn dom_path_node(dom: &Dom, path: &[(String, u32)]) -> Option<NodeId> {
+    let mut cur = dom.document();
+    for (tag, k) in path {
+        let mut seen = 0u32;
+        let mut next = None;
+        for c in dom.children(cur).ok()? {
+            if dom.tag_name(c).is_ok_and(|t| t == *tag) {
+                if seen == *k {
+                    next = Some(c);
+                    break;
+                }
+                seen += 1;
+            }
+        }
+        cur = next?;
+    }
+    Some(cur)
+}
+
 fn find_by_id(dom: &Dom, id: &str) -> Option<NodeId> {
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
-        if dom.element(n).is_ok() {
-            if dom.attribute(n, "id").ok().flatten().as_deref() == Some(id) {
-                return Some(n);
-            }
-            if let Ok(ch) = dom.children(n) {
-                queue.extend(ch.iter().rev());
-            }
+        if dom.element(n).is_ok() && dom.attribute(n, "id").ok().flatten().as_deref() == Some(id) {
+            return Some(n);
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
         }
     }
     None

@@ -46,7 +46,7 @@ technique :
 |---|---|---|
 | Boucle infinie / DoS CPU | budget ops borné | un script peut allouer avant d'épuiser le budget — borne mémoire heap à instrumenter (JS-C37) |
 | Mutation DOM hostile | confinée au miroir `Rc` | coût de resynchro O(document) par synchro — DoS par churn documenté, point d'extension diff prévu (ADR-0013) |
-| Timers en bombe | drainés aux points de synchro | le tick dédié (étape 52) doit borner le nombre de jobs par tick |
+| Timers en bombe | drainés aux points de synchro + tick dédié | bornés : `max_timer_jobs` = 128 callbacks timer par pompe (étape 52) — le surplus reste en file pour la pompe suivante |
 | XHR/fetch réseau depuis JS | câblé à l'étape 51 derrière la politique minimale ci-dessous | SSRF résiduel : une page hostile peut fetcher des cibles internes — mitigé par CORS minimal (réponse opaque sans ACAO) + quota, pas par un allowlist réseau |
 | Code arbitraire → mémoire | éliminé côté maison par `forbid(unsafe_code)` | reste la surface des dépendances (`regex`, `fancy-regex` borné par `BACKTRACK_LIMIT`, `num-bigint`) |
 | Crash du moteur JS | `JsError::Dead`, onglet dégradé | le thread est joint au `Drop` — un panic worker n'empoisonne pas la session |
@@ -126,3 +126,20 @@ script). Tests : 8 scénarios d'intégration session
 (`xhr_same_origin_fetches_and_renders`, opaque sans ACAO,
 ACAO `*`, en-tête bloqué, quota, jar partagé, `Set-Cookie`
 capturé, `localStorage` inter-documents).
+
+## Amendement 2026-10-24 — tick timers (étape 52)
+
+La ligne « Timers en bombe » est levée : la boucle
+d'événements v2 arme un vrai battement (le daemon dort
+jusqu'à `min(échéance timer, battement net)`, FFI expose le
+tick), et le nombre de callbacks timer exécutés par pompe
+est borné par `SessionConfig::max_timer_jobs` (défaut 128)
+via `JsEngine::run_pending_bounded` — une page qui arme des
+milliers de `setTimeout` échus ne monopolise pas un tick ;
+le surplus reste en file, ordre conservé, pour la pompe
+suivante. Les microtasks et livraisons `MutationObserver`
+restent drainées intégralement au même point de synchro —
+leur volume est borné par la sémantique (un job ne peut en
+créer qu'un nombre fini par checkpoint). `MutationObserver`
+est ainsi drainé aux mêmes sync points que les timers, comme
+exigé par l'étape 52.

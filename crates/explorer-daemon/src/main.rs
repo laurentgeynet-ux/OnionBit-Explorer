@@ -136,16 +136,29 @@ async fn main() {
     let session = Arc::new(tokio::sync::Mutex::new(session));
 
     // Battement des réponses réseau script-initiées (étape
-    // 51) : la session n'a pas d'horloge — un XHR asynchrone
-    // est livré à la prochaine pompe, bornée par
-    // `NET_PUMP_MS`.
+    // 51) + timers JS (étape 52) : la session n'a pas
+    // d'horloge — un XHR asynchrone est livré à la prochaine
+    // pompe, un `setTimeout` tire sans attendre un input.
+    // La sieste est `min(échéance timer, NET_PUMP_MS)` : un
+    // timer à 10 ms n'attend pas le battement complet.
     {
         let s = session.clone();
         tokio::spawn(async move {
-            let mut tick = tokio::time::interval(NET_PUMP_MS);
             loop {
-                tick.tick().await;
-                s.lock().await.pump_net().await;
+                let wait = {
+                    let mut sess = s.lock().await;
+                    sess.pump_net().await;
+                    sess.pump_timers_all();
+                    // Un timer peut émettre `location.href` —
+                    // les intentions sont honorées ici (la
+                    // pompe reste à sens unique).
+                    for tab in sess.tabs() {
+                        sess.drain_script_nav(tab).await;
+                    }
+                    sess.next_timer_deadline()
+                        .map_or(NET_PUMP_MS, |d| d.min(NET_PUMP_MS))
+                };
+                tokio::time::sleep(wait).await;
             }
         });
     }

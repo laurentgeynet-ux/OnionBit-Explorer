@@ -86,16 +86,27 @@ async fn shot(url: &str, out: &str) -> ExitCode {
         eprintln!("erreur : {e}");
         return ExitCode::FAILURE;
     }
-    // Étapes 51 : les XHR/fetch émis au chargement doivent
-    // se résoudre avant le shot — grâce bornée
-    // (`XHR_GRACE_MS`) puis rendu quoi qu'il arrive.
+    // Étapes 51-52 : les XHR/fetch émis au chargement et les
+    // `setTimeout` courts doivent se résoudre avant le shot —
+    // grâce bornée (`XHR_GRACE_MS`) puis rendu quoi qu'il
+    // arrive. La sieste suit la prochaine échéance timer.
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(XHR_GRACE_MS);
     loop {
         session.pump_net().await;
-        if session.net_pending() == 0 || std::time::Instant::now() >= deadline {
+        session.pump_timers(tab);
+        if session.drain_script_nav(tab).await {
+            continue;
+        }
+        let idle = session.net_pending() == 0 && session.next_timer_deadline().is_none();
+        if idle || std::time::Instant::now() >= deadline {
             break;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let nap = session
+            .next_timer_deadline()
+            .map_or(std::time::Duration::from_millis(20), |d| {
+                d.min(std::time::Duration::from_millis(20))
+            });
+        tokio::time::sleep(nap).await;
     }
     if let Some(png) = session.frame_png(tab) {
         match std::fs::write(out, &png) {

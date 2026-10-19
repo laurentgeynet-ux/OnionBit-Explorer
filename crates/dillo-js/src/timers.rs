@@ -103,6 +103,17 @@ impl Engine {
     /// # Errors
     /// Propagates the first uncaught script exception from a callback.
     pub fn run_due_timers(&mut self) -> JsResult<usize> {
+        self.run_due_timers_bounded(usize::MAX)
+    }
+
+    /// Bounded variant (étape 52, ADR-0019) : at most `max` due
+    /// timers fire — the rest stay queued for the next pump (a
+    /// page registering thousands of due timers cannot
+    /// monopolise a tick).
+    ///
+    /// # Errors
+    /// Same as [`Self::run_due_timers`].
+    pub fn run_due_timers_bounded(&mut self, max: usize) -> JsResult<usize> {
         // Snapshot the due timers first: an interval rescheduled to
         // `now` would otherwise be picked up again in this same pump
         // and loop forever. One pump = each due timer fires at most
@@ -119,6 +130,11 @@ impl Engine {
         }
         self.timers.timers = kept;
         due.sort_by_key(|t| t.at);
+        // Borne : les `due` au-delà de `max` sont re-fileés —
+        // ordre conservé au prochain drain (re-tri).
+        if due.len() > max {
+            self.timers.timers.extend(due.split_off(max));
+        }
         let mut ran = 0usize;
         for t in due {
             // Annulé par un callback *plus tôt dans cette même pompe*

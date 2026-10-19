@@ -402,6 +402,10 @@ pub unsafe extern "C" fn explorer_input(
             Some(k) => InputEvent::Key { key: k.to_owned() },
             None => return -1,
         },
+        4 => match unsafe { read_str(key, key_len, MAX_KEY) } {
+            Some(k) => InputEvent::KeyUp { key: k.to_owned() },
+            None => return -1,
+        },
         _ => {
             set_err("kind inconnu");
             return -1;
@@ -430,9 +434,17 @@ pub unsafe extern "C" fn explorer_input(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_tick(h: *mut ExplorerHandle, tab: u64) -> i32 {
     match unsafe { handle(h) } {
+        // `tick_animations` pompe aussi les timers JS (étape
+        // 52) — leurs `location.href` sont drainés ici en
+        // synchrone (l'hôte FFI n'a pas de battement).
         Some(h) => match h.session.tick_animations(tab) {
-            Ok(true) => 1,
-            Ok(false) => 0,
+            Ok(worked) => {
+                if h.rt.block_on(h.session.drain_script_nav(tab)) {
+                    1
+                } else {
+                    i32::from(worked)
+                }
+            }
             Err(e) => {
                 set_err(e);
                 -2
