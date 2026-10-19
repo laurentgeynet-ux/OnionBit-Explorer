@@ -866,8 +866,29 @@ impl Dom {
         if VOID_TAGS.contains(&n.tag.as_str()) {
             return;
         }
+        // Texte brut des éléments rawtext (étape 55c) : la
+        // re-sérialisation canal miroir→Dom doit émettre le
+        // contenu **verbatim** — l'échappement `&`/`<` n'est
+        // pas décodé au re-parse rawtext et corrompt la
+        // source à chaque resynchronisation (`&lt;` →
+        // `&amp;lt;`). Repli échappé si la source contient
+        // son propre `</tag` (sans lui la frontière casse et
+        // le reste fuirait en nœud texte visible).
+        // `title`/`textarea` sont RCDATA — l'échappement
+        // normal est décodé fidèlement au re-parse.
+        let verbatim = RAW_VERBATIM.contains(&n.tag.as_str());
         for &c in &n.children {
-            self.serialize(c, out);
+            let child = &self.nodes[c as usize];
+            if verbatim && child.kind == NodeKind::Text {
+                let marker = format!("</{}", n.tag);
+                if contains_ci(&child.text, &marker) {
+                    out.push_str(&escape_text(&child.text));
+                } else {
+                    out.push_str(&child.text);
+                }
+            } else {
+                self.serialize(c, out);
+            }
         }
         out.push_str("</");
         out.push_str(&n.tag);
@@ -1035,24 +1056,52 @@ impl Dom {
             self.append(top, id);
             if !self_close && !VOID_TAGS.contains(&tag.as_str()) {
                 if RAW_TEXT.contains(&tag.as_str()) {
-                    // script/style/textarea: raw text until `</tag`.
-                    let close = format!("</{tag}");
-                    let rest: String = cs[i..].iter().collect();
-                    let pos = rest.to_lowercase().find(&close);
-                    let (inner, consumed) = match pos {
-                        Some(p) => (&rest[..p], p + close.len()),
-                        None => (&rest[..], rest.len()),
-                    };
-                    if !inner.is_empty() {
-                        let t = self.create_text(inner);
+                    // script/style/textarea: texte brut jusqu'à
+                    // `</tag` — recherche **directement dans `cs`**,
+                    // insensible à la casse. Ne jamais passer par
+                    // `String::to_lowercase` sur le reste : la
+                    // casse d'une rune peut changer sa longueur
+                    // en octets (`ﬀ` → `ff`, `İ` → `i̇`…) et
+                    // l'index ramené désaligne la coupe — le
+                    // `</tag` raté laissait le contenu brut fuir
+                    // hors de l'élément (source `<script>` peinte
+                    // en texte, wikipedia — étape 55c).
+                    let close_len = 2 + tag.chars().count();
+                    let mut pos = None;
+                    let mut j = i;
+                    while j + close_len <= cs.len() {
+                        if cs[j] == '<'
+                            && cs[j + 1] == '/'
+                            && tag
+                                .chars()
+                                .enumerate()
+                                .all(|(k, tc)| cs[j + 2 + k].to_ascii_lowercase() == tc)
+                        {
+                            pos = Some(j);
+                            break;
+                        }
+                        j += 1;
+                    }
+                    let inner_end = pos.unwrap_or(cs.len());
+                    if inner_end > i {
+                        let inner: String = cs[i..inner_end].iter().collect();
+                        // `title`/`textarea` sont RCDATA : leurs
+                        // entités sont décodées comme le ferait
+                        // le tokenizer réel. `script`/`style`
+                        // restent verbatim.
+                        let t = if RCDATA_TAGS.contains(&tag.as_str()) {
+                            self.create_text(&decode_entities(&inner))
+                        } else {
+                            self.create_text(&inner)
+                        };
                         self.append(id, t);
                     }
-                    i += consumed;
+                    i = pos.map_or(cs.len(), |p| p + close_len);
                     // Skip to `>` past the close tag.
                     while i < cs.len() && cs[i] != '>' {
                         i += 1;
                     }
-                    i += 1;
+                    i = (i + 1).min(cs.len());
                     continue; // don't push — already closed
                 }
                 stack.push(id);
@@ -1070,6 +1119,26 @@ const VOID_TAGS: &[&str] = &[
 
 /// Raw-text elements (content is text until matching close tag).
 const RAW_TEXT: &[&str] = &["script", "style", "textarea", "title"];
+
+/// Éléments rawtext émis **verbatim** à la sérialisation
+/// (étape 55c) — le re-parseur ne décode pas d'entités en
+/// rawtext : échapper corromprait la source à chaque
+/// round-trip (`&lt;` → `&amp;lt;`). `title`/`textarea`
+/// sont RCDATA (décodés) et restent échappés normalement ;
+/// le set doit rester **en correspondance** avec les
+/// entrées non-RCDATA de `RAW_TEXT`.
+const RAW_VERBATIM: &[&str] = &["script", "style"];
+
+/// Sous-ensemble RCDATA de `RAW_TEXT` — entités décodées à
+/// la parse comme à la re-parse.
+const RCDATA_TAGS: &[&str] = &["title", "textarea"];
+
+/// `hay` contient-il `needle` (ASCII case-insensitive) —
+/// petit scan sans allocation, pour la détection `</tag`.
+fn contains_ci(hay: &str, needle: &str) -> bool {
+    let (h, n) = (hay.as_bytes(), needle.as_bytes());
+    n.len() <= h.len() && h.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n))
+}
 
 /// Tags that implicitly close a same-tag sibling.
 const IMPLICIT_CLOSE: &[&str] = &["li", "p", "tr", "td", "th", "option", "dt", "dd"];

@@ -9,6 +9,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 55c — Miroir→DOM : la source `<script>` ne fuit
+  plus en texte peint** (`dillo-js`) : la recherche du
+  `</tag` fermant un élément rawtext passait par
+  `rest.to_lowercase().find()` — index en **octets** d'une
+  chaîne dont la casse change la longueur de certaines
+  runes (`ﬀ`→`ff`, `İ`→`i̇`…) ; la coupe désalignée ratait
+  le `</script>` et le reste du document était parsé comme
+  texte **hors** de l'élément (JSON clientpref/RLSTATE
+  peints sur wikipedia — terrain missions 6/7). Le scan est
+  désormais insensible à la casse directement dans le flux
+  de caractères. Fidélité round-trip en bonus : les
+  enfants texte de `script`/`style` sont sérialisés
+  **verbatim** (l'échappement doublait à chaque
+  resynchronisation ; repli échappé si la source contient
+  son propre `</tag`), et `title`/`textarea` décodent leurs
+  entités à la parse (RCDATA, comme le tokenizer réel).
+  Régressions : `rawtext_close_survives_length_shifting_
+  runes`, `rawtext_serialization_is_verbatim`.
+
 - **Étape 56 — Profil persisté complet + bfcache**
   (`explorer-core` + `explorer-net` + `explorer-daemon`) :
   `cookies.json` rejoué au démarrage via

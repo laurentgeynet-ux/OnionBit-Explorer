@@ -1353,3 +1353,71 @@ fn request_submit_fires_event_then_hook() {
     .unwrap_or_else(|err| panic!("requestSubmit3 -> {err}"));
     assert_eq!(calls.borrow().len(), 1);
 }
+
+/// Étape 55c — le `</tag` de fermeture rawtext est cherché
+/// par scan insensible à la casse **directement** dans le
+/// flux de caractères : un `to_lowercase()` sur le reste du
+/// document changeait la longueur en octets des runes
+/// (`ﬀ`→`ff`, `İ`→`i̇`…) et l'index ramené désalignait la
+/// coupe — `</script>` raté, le contenu suivant parsé comme
+/// texte hors de l'élément (JSON `<script>` peints en page,
+/// wikipedia — terrain mission 6/7).
+#[test]
+fn rawtext_close_survives_length_shifting_runes() {
+    // 'ﬀ' (U+FB00) : lowercased → "ff" — 3 octets → 2.
+    let html = "<div><script>var a='ﬀx';</script><p>after</p></div>";
+    let d = Dom::from_html(html);
+    let s = d.serialize_document();
+    assert!(
+        s.contains("<p>after</p>"),
+        "l'élément suivant survit intact : {s}"
+    );
+    // Le texte du script reste **dans** l'élément : rien de
+    // brut ne fuit comme nœud texte sibling.
+    assert!(s.contains("<script>var a='ﬀx';</script>"));
+
+    // Round-trip : la re-parse ne produit aucun texte hors
+    // élément (la source du script ne devient jamais un
+    // `Text` visible dans le DOM resynchronisé).
+    let d2 = Dom::from_html(&s);
+    let s2 = d2.serialize_document();
+    assert!(s2.contains("<p>after</p>"), "structure stable : {s2}");
+
+    // Casse mélangée de la balise fermante — tolérée.
+    let d3 = Dom::from_html("<div><script>var a=1;</ScRiPt><b>z</b></div>");
+    assert!(d3.serialize_document().contains("<b>z</b>"));
+}
+
+/// 55c — fidélité round-trip : le contenu rawtext (`script`,
+/// `style`) est émis **verbatim** (le re-parseur ne décode
+/// pas d'entités en rawtext — échapper double à chaque
+/// resynchronisation). `title`/`textarea` sont RCDATA et
+/// gardent l'échappement décodé au re-parse.
+#[test]
+fn rawtext_serialization_is_verbatim() {
+    let html = "<div><script>var y=1&lt;2&amp;&amp;3</script><title>A&amp;B</title></div>";
+    let d = Dom::from_html(html);
+    let s = d.serialize_document();
+    // La source du script reste brute — pas de `&amp;lt;`.
+    assert!(
+        s.contains("<script>var y=1&lt;2&amp;&amp;3</script>"),
+        "script verbatim : {s}"
+    );
+    // Le titre reste échappé (RCDATA décodé au re-parse).
+    assert!(s.contains("<title>A&amp;B</title>"), "title RCDATA : {s}");
+
+    // Round-trip stable : re-serialiser ne dégrade rien.
+    let s2 = Dom::from_html(&s).serialize_document();
+    assert_eq!(s, s2, "round-trip stable");
+
+    // Source contenant son propre `</script` : repli échappé
+    // — la frontière tient au re-parse, rien ne fuit.
+    let tricky = "<div><script>document.write('</scri'+'pt>')</script><p>x</p></div>";
+    let d3 = Dom::from_html(tricky);
+    let s3 = d3.serialize_document();
+    let d4 = Dom::from_html(&s3);
+    assert!(
+        d4.serialize_document().contains("<p>x</p>"),
+        "aucune fuite hors script : {s3}"
+    );
+}

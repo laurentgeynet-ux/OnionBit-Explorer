@@ -268,15 +268,21 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   + `svg::collect_svg` au repaint → `PaintImages.svgs`.
   `canvases` attendra JS-C28 (enregistrement op-list côté
   `dillo-js`) — même couture déjà figée.
-- [ ] **Étape 55c. Miroir→DOM : source `<script>` injectée
+- [x] **Étape 55c. Miroir→DOM : source `<script>` injectée
   comme texte** (terrain mission 6+7, wikipedia — clientpref/
   RLSTATE JSON toujours peints après R-20) : le filet R-20 vit
   dans `build_box_tree_sized` (tag statique) mais le texte
-  provient de la **resynchro miroir** — `apply_dom_sync` re-
-  sérialise et la source du `<script>` aboutit en nœud texte
-  visible. Le filet doit vivre dans la sérialisation
-  `dom_host`→`Dom`, pas seulement au box-building : jamais de
-  `Text` portant la source de `script|style|template|…`.
+  provient de la **resynchro miroir**. Cause trouvée côté
+  parseur miroir (`parse_fragment_into`) : le `</tag` de
+  fermeture rawtext était cherché via `to_lowercase().find`
+  — index **octet** désaligné par les runes à casse
+  variable (`ﬀ`, `İ`…) → `</script>` raté, suite du
+  document parsée en texte hors élément. Scan insensible
+  à la casse directement dans `cs` + sérialisation
+  **verbatim** des enfants `script`/`style` (repli échappé
+  si la source contient son propre `</tag`) + décodage
+  RCDATA `title`/`textarea`. Jamais de `Text` portant la
+  source hors de son élément au round-trip.
 - [ ] **Étape 55d. `dirty` drainé par événement SSE/REST**
   (défaut 55, terrain mission 8) : `take_dirty` n'est appelé
   que par FFI — côté REST les rects s'accumulent à vie →
