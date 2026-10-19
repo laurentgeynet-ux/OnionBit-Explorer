@@ -3520,3 +3520,66 @@ async fn inline_svg_is_rasterized_into_frame() {
         "le rect SVG rouge doit peindre (pixels rouges : {red})"
     );
 }
+
+/// Étape 55d — les événements rapportent le **delta**, pas
+/// l'historique : deux invalidations successives produisent
+/// deux événements portant chacun leurs régions propres
+/// (avant : chaque émission re-sérialisait l'accumulation à
+/// vie → collapse « plein cadre » au-delà de 32 repaints).
+/// `take_dirty` reste le canal pull indépendant.
+#[tokio::test]
+async fn frame_invalidated_reports_delta_not_history() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/ck",
+        200,
+        "<!doctype html><html><body><form>\
+         <input type=checkbox></form></body></html>",
+    );
+    let a = s.open_tab();
+    let mut rx = s.subscribe();
+    s.navigate(a, "http://h.test/ck").await.unwrap();
+
+    let grab = |rx: &mut tokio::sync::broadcast::Receiver<CoreEvent>| {
+        let mut rects = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            if let CoreEvent::FrameInvalidated { tab, rects: r } = ev {
+                if tab == a {
+                    rects = r;
+                }
+            }
+        }
+        rects
+    };
+
+    // Premier bascule → delta #1 (la nav a déjà émis la sienne).
+    s.handle_input(a, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    let r1 = grab(&mut rx);
+    assert_ne!(r1, [], "delta attendu au premier clic");
+
+    // Second bascule → delta #2 : les régions du #1 ne sont
+    // PAS re-rapportées (un clic à même endroit produit le
+    // même nombre de régions — l'historique cumulé serait
+    // strictement plus grand).
+    s.handle_input(a, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    let r2 = grab(&mut rx);
+    assert_ne!(r2, [], "delta attendu au second clic");
+    assert_eq!(
+        r2.len(),
+        r1.len(),
+        "le second événement re-rapporte l'historique : {r1:?} puis {r2:?}"
+    );
+
+    // Le pull FFI est indépendant : l'accumulation complète
+    // survit aux émissions.
+    let pulled = s.take_dirty(a);
+    assert!(
+        pulled.len() >= r1.len() + r2.len(),
+        "take_dirty doit accumuler indépendamment : {pulled:?}"
+    );
+    assert_eq!(s.take_dirty(a), []);
+}

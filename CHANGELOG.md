@@ -9,6 +9,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 55d — `FrameInvalidated` rapporte le delta, pas
+  l'historique** (`explorer-core`) : `Tab::dirty` garde
+  l'accumulation complète pour le pull FFI (`take_dirty`,
+  inchangé) et un watermark `emitted` borne ce que chaque
+  émission rapporte — le client SSE reçoit les régions
+  changées depuis l'événement précédent au lieu de
+  l'historique à vie (qui collapsait en « plein cadre »
+  au-delà de 32 repaints — `relayout.html` terrain
+  mission 8). Watermark, pas drain : les deux
+  consommateurs sont indépendants (le handle FFI garde un
+  receveur inerte du bus — drainer l'affamerait). Gelé
+  dans le bfcache. Limite connue documentée : après un
+  `scroll` les régions couvrent le document entier — le
+  défilement est cuit dans le raster, un pull partiel de
+  scroll n'a pas de sens. Régression :
+  `frame_invalidated_reports_delta_not_history`.
+
 - **Étape 55b — `<svg>` inline câblé en session**
   (`explorer-core`, adoption R-9) : `Tab::images` devient la
   table `PaintImages` complète — `svg::svg_sizes` fournit

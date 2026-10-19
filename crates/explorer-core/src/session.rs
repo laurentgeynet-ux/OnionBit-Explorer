@@ -435,10 +435,20 @@ struct Tab {
     /// Régions invalides accumulées (étape 55) — px CSS de
     /// document, scroll cuit (contrat `changed_rects`).
     /// Alimentée par `repaint` (diff avec la display list
-    /// précédente) ; instantanée dans chaque
-    /// `FrameInvalidated`, vidée par `take_dirty` ; plafonnée
-    /// — au-delà elle s'effondre en « toute la frame ».
+    /// précédente) ; `dirty[emitted..]` est le delta rapporté
+    /// par chaque `FrameInvalidated` (étape 55d — le client
+    /// SSE reçoit ce qui a changé depuis l'événement
+    /// précédent, pas l'historique à vie), `take_dirty` vide
+    /// tout pour le canal pull FFI et ré-arme `emitted` ;
+    /// plafonnée — au-delà elle s'effondre en « toute la
+    /// frame ».
     dirty: Vec<Rect>,
+    /// Tête déjà rapportée par événement dans `dirty`
+    /// (étape 55d) — watermark, pas drain : les deux
+    /// consommateurs (bus d'événements SSE et pull FFI
+    /// `take_dirty`) sont indépendants, l'émission ne doit
+    /// pas affamer le pull.
+    emitted: usize,
     /// Pages gelées (étape 56, bfcache minimal) — indexées
     /// par position `hist_idx` : un `history_move` vers une
     /// position gelée restaure l'état complet sans réseau.
@@ -490,8 +500,10 @@ struct PageSnapshot {
     linked_css: String,
     /// Styles calculés (transitions — vidées au gel).
     prev_styles: HashMap<usize, ComputedStyle>,
-    /// Régions invalides en vol.
+    /// Régions invalides en vol (+ tête déjà émise).
     dirty: Vec<Rect>,
+    /// Watermark `emitted` gelé avec `dirty`.
+    emitted: usize,
     /// Requête d'origine de la page gelée — restaurée pour
     /// que `reload` réémette la bonne méthode (étape 56).
     last_req: Option<Request>,
@@ -528,10 +540,14 @@ impl Tab {
             linked_css: std::mem::take(&mut self.linked_css),
             prev_styles: std::mem::take(&mut self.prev_styles),
             dirty: std::mem::take(&mut self.dirty),
+            emitted: self.emitted,
             last_req: self.last_req.take(),
         };
         self.scroll_y = 0.0;
         self.doc_h = 0.0;
+        // `dirty` vient d'être gelée → le live repart à
+        // vide, watermark ré-armé.
+        self.emitted = 0;
         self.bfcache.push_back(snap);
         while self.bfcache.len() > cap {
             self.bfcache.pop_front();
@@ -567,6 +583,7 @@ impl Tab {
         self.linked_css = snap.linked_css;
         self.prev_styles = snap.prev_styles;
         self.dirty = snap.dirty;
+        self.emitted = snap.emitted;
         self.last_req = snap.last_req;
         self.transitions.clear();
         self.nav_epoch += 1;
@@ -1140,6 +1157,7 @@ impl Session {
                 nav_epoch: 0,
                 pending_nav: std::collections::VecDeque::new(),
                 dirty: Vec::new(),
+                emitted: 0,
                 bfcache: VecDeque::new(),
             },
         );
@@ -1270,11 +1288,18 @@ impl Session {
     /// client sans abonnement aux événements (FFI) : il
     /// copie ensuite chaque région via [`Self::frame_region`].
     /// Vide = rien à soumettre depuis le dernier appel.
+    /// Indépendant des émissions (étape 55d — chaque
+    /// `FrameInvalidated` n'avance que le watermark
+    /// `emitted`). Limite connue : après un `scroll` les
+    /// régions couvrent le document entier — le défilement
+    /// est cuit dans les coordonnées raster, le pull
+    /// partiel d'un scroll n'a pas de sens.
     pub fn take_dirty(&mut self, tab: TabId) -> Vec<FrameRegion> {
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return Vec::new();
         };
         let s = self.scale.max(f32::EPSILON);
+        entry.emitted = 0;
         entry
             .dirty
             .drain(..)
@@ -1622,19 +1647,23 @@ impl Session {
         })
     }
 
-    /// Émet `FrameInvalidated` avec l'instantané des régions
-    /// invalides accumulées (étape 55) — les rects internes
-    /// sont en px CSS (`changed_rects`), le contrat sort en
-    /// pixels physiques (`× scale`, comme `frame_pixels`).
-    /// Instantané, pas drain : un client FFI sans canal
-    /// d'événements vide via [`Self::take_dirty`].
-    fn emit_invalidated(&self, tab: TabId) {
-        let Some(entry) = self.tabs.get(&tab) else {
+    /// Émet `FrameInvalidated` avec le **delta** des régions
+    /// invalides depuis l'émission précédente (étape 55d) —
+    /// les rects internes sont en px CSS (`changed_rects`),
+    /// le contrat sort en pixels physiques (`× scale`,
+    /// comme `frame_pixels`). Watermark `emitted`, pas drain :
+    /// le canal pull FFI (`take_dirty`) vide sa propre
+    /// accumulation sans être affamé par les événements (le
+    /// handle FFI garde un receveur inerte du bus).
+    fn emit_invalidated(&mut self, tab: TabId) {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
         };
         let s = self.scale.max(f32::EPSILON);
         let rects = entry
             .dirty
+            .get(entry.emitted.min(entry.dirty.len())..)
+            .unwrap_or_default()
             .iter()
             .map(|r| FrameRegion {
                 x: r.x * s,
@@ -1643,6 +1672,7 @@ impl Session {
                 h: r.height * s,
             })
             .collect();
+        entry.emitted = entry.dirty.len();
         let _ = self.events.send(CoreEvent::FrameInvalidated { tab, rects });
     }
 
@@ -2686,6 +2716,10 @@ impl Session {
         );
         entry.dirty.extend(regions);
         if entry.dirty.len() > MAX_DIRTY_RECTS {
+            // Collapse « toute la frame » — le watermark est
+            // ré-armé : le plein cadre sera rapporté à la
+            // prochaine émission.
+            entry.emitted = 0;
             entry.dirty = vec![Rect {
                 x: 0.0,
                 y: 0.0,

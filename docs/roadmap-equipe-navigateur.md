@@ -285,16 +285,16 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   si la source contient son propre `</tag`) + décodage
   RCDATA `title`/`textarea`. Jamais de `Text` portant la
   source hors de son élément au round-trip.
-- [ ] **Étape 55d. `dirty` drainé par événement SSE/REST**
-  (défaut 55, terrain mission 8) : `take_dirty` n'est appelé
-  que par FFI — côté REST les rects s'accumulent à vie →
-  >32 → collapse « plein cadre » (`relayout.html`), et
-  chaque `frame_invalidated` re-rapporte l'historique au
-  lieu du delta. Chaque émission doit drainer : le client
-  SSE reçoit le delta, `take_dirty` reste l'API FFI.
-  Limite connue à documenter : après `scroll` les rects =
-  document entier (le défilement est cuit dans le raster —
-  vrai mais inutilisable pour un pull partiel).
+- [x] **Étape 55d. `dirty` drainé par événement SSE/REST**
+  (défaut 55, terrain mission 8) : watermark `emitted` sur
+  `Tab::dirty` — chaque `FrameInvalidated` rapporte
+  `dirty[emitted..]` (le delta depuis l'émission
+  précédente) puis avance la tête ; l'accumulation reste
+  vivante pour `take_dirty` (pull FFI indépendant — le
+  handle FFI garde un receveur inerte, un vrai drain
+  l'affamerait). Limite documentée : après `scroll` les
+  rects = document entier (défilement cuit dans le raster —
+  inutilisable pour un pull partiel).
 - [ ] **Étape 55e. `@keyframes` cadencés en session**
   (adoption R-10, règle AGENTS §10.5b — confirmé non-câblé
   par `anim.html` : frames identiques à 400 ms) : zéro
