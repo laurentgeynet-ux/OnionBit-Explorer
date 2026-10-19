@@ -103,6 +103,9 @@ psl = "2"
 # référence pur Rust (png/jpeg/gif/webp embarqués, aucun *-sys) ;
 # features réduites aux formats du MVP.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
+# Benchmarks pipeline (étape 39) — référence Rust, pur Rust,
+# dev-dependency uniquement (jamais dans le code livré).
+criterion = "0.5"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

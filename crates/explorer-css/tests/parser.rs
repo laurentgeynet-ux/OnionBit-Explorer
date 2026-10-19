@@ -258,3 +258,27 @@ fn entrees_hostiles_sans_panic() {
         let _ = parse_stylesheet(css); // jamais de panic
     }
 }
+
+#[test]
+fn deep_media_nesting_is_capped() {
+    // 100 `@media` imbriqués dépassent MAX_NESTING (32) : les blocs
+    // excédentaires sont avalés comme inconnus — le parse termine
+    // sans débordement de pile.
+    let css = format!("{}{}", "@media a{".repeat(100), "}".repeat(100));
+    let sheet = parse_stylesheet(&css);
+    assert_eq!(sheet.rules.len(), 1);
+    assert!(media_depth(&sheet.rules[0]) <= 33, "chaîne trop profonde");
+}
+
+/// Profondeur de la chaîne `@media` d'une règle (1 = feuille).
+fn media_depth(r: &explorer_css::Rule) -> usize {
+    match r {
+        explorer_css::Rule::At(at) => match &at.kind {
+            explorer_css::AtKind::Media { rules, .. } => {
+                rules.first().map_or(1, |r| 1 + media_depth(r))
+            }
+            _ => 1,
+        },
+        _ => 1,
+    }
+}

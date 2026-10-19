@@ -515,7 +515,7 @@ d'intégration, pas par la couverture :
   synthétique, marque `checked`, `<select>` cycle au clic,
   soumission urlencodée via `HttpTransport`, événement
   `submit` JS + `preventDefault` honoré.
-- [ ] **Étape 39. Perf + fuzz.** Benchs pipeline, bornes
+- [x] **Étape 39. Perf + fuzz.** Benchs pipeline, bornes
   mémoire/temps, corpus fuzz tokenizer/parser.
 - [ ] **Étape 40. Release 0.1.** Packaging Windows
   (daemon + app), smoke test bout en bout, documentation.

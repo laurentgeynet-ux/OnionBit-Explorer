@@ -465,3 +465,31 @@ fn head_of(d: &Dom) -> NodeId {
         .find(|&n| d.tag_name(n) == Ok("head"))
         .expect("head")
 }
+
+// -- Bornes (étape 39) --------------------------------------------------------
+
+#[test]
+fn deep_nesting_is_capped() {
+    // 600 `<div>` imbriqués dépassent MAX_DEPTH (512) : le
+    // tree-builder ignore les tags excédentaires plutôt que de
+    // produire un arbre qui dépasserait la pile d'appels des
+    // traversées récursives aval (boxtree, display list).
+    let input = "<div>".repeat(600);
+    let d = parse(&input);
+    let mut stack = vec![(d.document(), 0usize)];
+    let mut max_depth = 0;
+    let mut divs = 0usize;
+    while let Some((n, dep)) = stack.pop() {
+        max_depth = max_depth.max(dep);
+        if d.tag_name(n) == Ok("div") {
+            divs += 1;
+        }
+        for c in d.children(n).unwrap_or_default() {
+            stack.push((c, dep + 1));
+        }
+    }
+    // html/body + ~510 divs — marge pour les wrappers synthétisés.
+    assert!(max_depth <= 520, "profondeur {max_depth}");
+    assert!(divs < 600, "{divs} divs insérés");
+    assert!(divs > 400, "{divs} divs insérés");
+}

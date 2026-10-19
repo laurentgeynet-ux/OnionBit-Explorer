@@ -9,6 +9,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 39 — perf + fuzz** (`explorer-html`,
+  `explorer-css`, `explorer-core`, `fuzz/`) : bornes de
+  profondeur contre le contenu hostile — pile d'éléments
+  ouverts du tree-builder plafonnée à `MAX_DEPTH = 512`
+  (les tags excédentaires sont ignorés, contenu inséré dans
+  le parent courant : sans elle, `<div>`×10⁶ dépassait la
+  pile d'appels des traversées récursives aval boxtree/
+  display list) ; imbrication `@media`/`@supports` plafonnée
+  à `MAX_NESTING = 32` (`nested_rules` est récursif — les
+  blocs excédentaires sont avalés comme des at-rules
+  inconnus). Corpus fuzz étendu : cibles `css` (parse +
+  sélecteurs + cascade) et `url` (`parse`/`resolve`) en
+  plus de `tokenizer` ; `fuzz/Cargo.toml` déclare son
+  propre workspace. Benchmarks criterion :
+  `crates/explorer-core/benches/pipeline.rs` — baseline
+  page représentative (~80 éléments, 800×600) :
+  `pipeline_navigate` ≈ 63 ms (fetch→PNG complet),
+  `pipeline_scroll_repaint` ≈ 19 ms. 2 tests de bornes.
+
 - **Étape 38 — formulaires** (`explorer-core`,
   `explorer-layout`, `explorer-render`, `explorer-css`) :
   champs natifs rendus par le moteur (ADR-0014) —

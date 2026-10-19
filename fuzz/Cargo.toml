@@ -7,12 +7,29 @@ edition = "2021"
 [package.metadata]
 cargo-fuzz = true
 
+# Hors workspace parent — cargo-fuzz gère ses propres flags/nightly.
+[workspace]
+
 [dependencies]
 libfuzzer-sys = "0.4"
+explorer-css = { path = "../crates/explorer-css" }
 explorer-html = { path = "../crates/explorer-html" }
+explorer-net = { path = "../crates/explorer-net" }
 
 [[bin]]
 name = "tokenizer"
 path = "fuzz_targets/tokenizer.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "css"
+path = "fuzz_targets/css.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "url"
+path = "fuzz_targets/url.rs"
 test = false
 doc = false

@@ -185,6 +185,14 @@ const FORMATTING: &[&str] = &[
 /// Balises de contenu rawtext (`<style>` & co — texte brut).
 const RAWTEXT: &[&str] = &["iframe", "noembed", "noframes", "noscript", "style", "xmp"];
 
+/// Profondeur maximale de la pile d'éléments ouverts — au-delà,
+/// le tag ouvrant est ignoré (dégradation tolérante). Sans cette
+/// borne, un document hostile (`<div>`×10⁶) produirait un arbre
+/// dont les traversées récursives aval (boxtree, display list)
+/// dépasseraient la pile d'appels. 512 ≈ limites observées dans
+/// les navigateurs réels.
+const MAX_DEPTH: usize = 512;
+
 /// Conteneurs qui ferment un `<p>` ouvert. Les balises ayant une
 /// règle dédiée (`table`, `form`, `hr`, `pre`) sont traitées par
 /// leur propre bras — ne pas les remettre ici, elles y seraient
@@ -372,6 +380,12 @@ impl TreeBuilder {
     /// approprié (foster parenting si actif et contexte de table),
     /// puis le pousse sur la pile.
     fn insert_element(&mut self, name: &str, attrs: &[TokenAttribute]) -> Option<NodeId> {
+        // Borne de profondeur : le token est ignoré — son contenu
+        // reste inséré dans le parent courant (dégradation spec-
+        // like « ignore the token »).
+        if self.stack.len() >= MAX_DEPTH {
+            return None;
+        }
         let el = self.dom.create_element(name).ok()?;
         for a in attrs {
             let _ = self.dom.set_attribute(el, &a.name, &a.value);

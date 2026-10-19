@@ -24,4 +24,9 @@ tracing.workspace = true
 [dev-dependencies]
 image.workspace = true
 async-trait.workspace = true
+criterion.workspace = true
 explorer-test-support.workspace = true
+
+[[bench]]
+name = "pipeline"
+harness = false

@@ -142,11 +142,19 @@ pub fn parse_stylesheet(input: &str) -> Stylesheet {
     Parser::new(&tokens).stylesheet()
 }
 
+/// Imbrication maximale des règles en bloc (`@media`/`@supports`
+/// dans `@media`…) — au-delà, le bloc est avalé comme inconnu.
+/// `nested_rules` est récursif : sans borne, une feuille hostile
+/// (`@media{a`×10⁵) dépasserait la pile d'appels.
+const MAX_NESTING: u32 = 32;
+
 struct Parser<'t> {
     tokens: &'t [Token],
     pos: usize,
     /// Accumulateur texte pour préludes/valeurs.
     buf: String,
+    /// Profondeur courante de [`Parser::nested_rules`].
+    nest_depth: u32,
 }
 
 impl<'t> Parser<'t> {
@@ -155,6 +163,7 @@ impl<'t> Parser<'t> {
             tokens,
             pos: 0,
             buf: String::new(),
+            nest_depth: 0,
         }
     }
 
@@ -278,8 +287,17 @@ impl<'t> Parser<'t> {
                     "media" | "supports" => {
                         // supports garde prelude brut mais même
                         // structure de bloc que media (règles
-                        // imbriquées).
-                        let rules = self.nested_rules();
+                        // imbriquées). Au-delà de MAX_NESTING, le
+                        // bloc est avalé comme un at-rule inconnu.
+                        let rules = if self.nest_depth >= MAX_NESTING {
+                            self.skip_block();
+                            Vec::new()
+                        } else {
+                            self.nest_depth += 1;
+                            let r = self.nested_rules();
+                            self.nest_depth -= 1;
+                            r
+                        };
                         AtKind::Media {
                             queries: if lname == "media" {
                                 parse_media_queries(&prelude)
