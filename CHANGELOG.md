@@ -9,6 +9,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 24 — `explorer-core`/`explorer-api`/`explorer-daemon` :
+  session et frame PNG servie** : `Session` (`session.rs`)
+  orchestre le pipeline complet `fetch → décodage → parse →
+  cascade → boîtes → layout → display list → raster → PNG`
+  par onglet, derrière les ports injectés `HttpTransport` et
+  `FontSource` (`Send + Sync` — session partagée derrière
+  l'API). Onglets `TabId` monotones, viewport + DPI
+  (`SessionConfig` — seuils en config, règle 13), re-render
+  depuis l'état conservé sans re-fetch. Bus `broadcast`
+  `CoreEvent` (`TabOpened`, `Navigated`, `FrameInvalidated`,
+  `PipelineError`) — le pull PNG corrige les événements sauté
+  par un abonné lent. `explorer-api` : routeur axum
+  `POST /api/tabs`, `POST /api/tabs/{id}/navigate`,
+  `POST /api/tabs/{id}/viewport`, `GET /api/tabs/{id}/frame`
+  (`image/png`), `GET /api/events` SSE (JSON par événement,
+  keep-alive 15 s) ; session derrière `tokio::Mutex`
+  (single-writer à travers les `.await`). `explorer-render` :
+  `DirFontSource` — scanne un répertoire `.ttf`/`.otf`,
+  familles lues en table `name`, génériques CSS mappés sur
+  les familles plateforme (`sans-serif` → Segoe UI/Arial…).
+  `explorer-daemon` : assemble transport `TLS → H1 → décodage
+  → redirections` + fontes système + session + routeur, bind
+  **loopback strict** (ADR-0003), config par env
+  (`EXPLORER_PORT`, `EXPLORER_FONT_DIR`, `EXPLORER_MAX_BODY`).
+  12 tests : pipeline bout-en-bout via `FakeTransport`
+  in-process (PNG signé, événements ordonnés, re-render sans
+  re-fetch) + routeur `oneshot` (PNG `200`, `204` avant
+  navigation, SSE `text/event-stream`, `400`).
 - **Étape 23 — `explorer-render` : rasterisation tiny-skia**
   (`raster.rs`, dep `tiny-skia` 0.11 + `ttf-parser`) :
   `rasterize` peint la display list dans un framebuffer

@@ -17,3 +17,10 @@ explorer-js.workspace = true
 explorer-layout.workspace = true
 explorer-net.workspace = true
 explorer-render.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+explorer-test-support.workspace = true

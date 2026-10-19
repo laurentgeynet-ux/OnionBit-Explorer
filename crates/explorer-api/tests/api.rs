@@ -1,0 +1,170 @@
+// This file is part of Explorer.
+// Copyright (C) 2026 Laurent Geynet
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! Tests du routeur (étape 24) — `tower::ServiceExt::oneshot`
+//! in-process, aucune socket : `POST /api/tabs`, `navigate`,
+//! `GET …/frame` (`image/png`), `GET /api/events` (SSE).
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use axum::body::Body;
+use axum::http::{header, Request as HttpRequest, StatusCode};
+use explorer_core::Session;
+use explorer_layout::font::{FontRequest, FontSource};
+use explorer_net::error::NetResult;
+use explorer_net::http::{HttpTransport, Request, Response};
+use explorer_test_support::fixture_ttf;
+use tower::ServiceExt;
+
+struct FixtureFont;
+
+impl FontSource for FixtureFont {
+    fn font_data(&self, _req: &FontRequest) -> Option<Vec<u8>> {
+        Some(fixture_ttf())
+    }
+}
+
+struct FakeTransport {
+    body: &'static str,
+}
+
+#[async_trait]
+impl HttpTransport for FakeTransport {
+    async fn fetch(&self, _req: &Request) -> NetResult<Response> {
+        Ok(Response {
+            status: 200,
+            reason: "fake".to_string(),
+            headers: vec![],
+            body: self.body.as_bytes().to_vec(),
+            reused_connection: false,
+        })
+    }
+}
+
+/// Routeur câblé sur une session de test.
+fn test_app() -> axum::Router {
+    let t: Arc<dyn HttpTransport> = Arc::new(FakeTransport {
+        body: "<!doctype html><html><body><div>api</div></body></html>",
+    });
+    let session = Arc::new(tokio::sync::Mutex::new(Session::new(
+        t,
+        Arc::new(FixtureFont),
+    )));
+    explorer_api::router(session)
+}
+
+fn json_post(uri: &str, body: &str) -> HttpRequest<Body> {
+    HttpRequest::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn open_tab_then_frame_is_png() {
+    let app = test_app();
+    let resp = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let id = v["id"].as_u64().unwrap();
+    assert!(id >= 1);
+
+    // Navigation.
+    let nav = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/navigate"),
+            r#"{"url":"http://h.test/"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(nav.status(), StatusCode::OK);
+
+    // Frame → PNG.
+    let frame = app
+        .oneshot(
+            HttpRequest::builder()
+                .uri(format!("/api/tabs/{id}/frame"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(frame.status(), StatusCode::OK);
+    assert_eq!(
+        frame.headers().get(header::CONTENT_TYPE).unwrap(),
+        "image/png"
+    );
+    let png = axum::body::to_bytes(frame.into_body(), 8 * 1024 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+}
+
+#[tokio::test]
+async fn frame_before_navigate_is_no_content() {
+    let app = test_app();
+    let resp = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let id = v["id"].as_u64().unwrap();
+
+    let frame = app
+        .oneshot(
+            HttpRequest::builder()
+                .uri(format!("/api/tabs/{id}/frame"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(frame.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn events_endpoint_is_sse() {
+    let app = test_app();
+    let resp = app
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/events")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers()
+            .get(header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "text/event-stream"
+    );
+    // Le corps est un stream infini — la tête suffit à
+    // prouver le contrat ; on ne consomme pas la suite.
+}
+
+#[tokio::test]
+async fn navigate_bad_body_is_400() {
+    let app = test_app();
+    let resp = app
+        .oneshot(json_post("/api/tabs/1/navigate", "{}"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}

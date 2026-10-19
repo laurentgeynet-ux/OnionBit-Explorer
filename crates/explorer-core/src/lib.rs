@@ -6,8 +6,14 @@
 //! navigation, orchestration du pipeline (`fetch → parse → style →
 //! layout → render`), bus d'événements.
 //!
-//! Squelette de l'étape 1. Ne connaît que des ports injectables
-//! (`HttpTransport`, `JsEngine`) — jamais les sockets ni axum.
+//! Étape 24 : [`Session`] pilote le pipeline complet derrière les
+//! ports injectés (`HttpTransport`, `FontSource`) et diffuse
+//! `frame_invalidated` pour le pull PNG (ADR-0004).
+//! Ne connaît que des ports — jamais les sockets ni axum.
 //! Single-writer : le DOM et le layout vivent sur un flux unique.
 
 #![forbid(unsafe_code)]
+
+pub mod session;
+
+pub use session::{CoreError, CoreEvent, Session, SessionConfig, TabId};

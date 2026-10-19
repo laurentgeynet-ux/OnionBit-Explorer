@@ -14,7 +14,9 @@
 #![forbid(unsafe_code)]
 
 pub mod display;
+pub mod fonts;
 pub mod raster;
 
 pub use display::{build_display_list, BorderStyle, DisplayItem, DisplayList};
+pub use fonts::DirFontSource;
 pub use raster::{rasterize, Frame};

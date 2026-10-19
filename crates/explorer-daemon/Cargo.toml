@@ -10,5 +10,11 @@ description = "Binaire hote : moteur + API loopback supervisee par l'app Flutter
 workspace = true
 
 [dependencies]
+axum.workspace = true
 explorer-api.workspace = true
 explorer-core.workspace = true
+explorer-net.workspace = true
+explorer-render.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

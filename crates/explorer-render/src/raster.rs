@@ -14,7 +14,7 @@
 //!   baseline.
 //! - `PushClip`/`PopClip` : `Mask` empilées — le `overflow`
 //!   borne réellement le dessin des descendants.
-//! - `scale` : facteur DPI HiDPI — toute la géométrie est
+//! - `scale` : facteur DPI `HiDPI` — toute la géométrie est
 //!   multipliée, le framebuffer sort en pixels physiques.
 
 use explorer_css::value::Color;
