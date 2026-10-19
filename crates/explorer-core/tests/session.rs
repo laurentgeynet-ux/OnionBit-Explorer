@@ -214,6 +214,7 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
             max_timer_jobs: 64,
             paint_chunk_bytes: 32 * 1024,
             paint_interval_ms: 100,
+            bfcache_pages: 4,
         },
     );
     (s, t)
@@ -563,6 +564,8 @@ async fn key_input_is_ignored() {
 struct MemStore {
     visits: Mutex<Vec<(String, Option<String>)>>,
     bookmarks: Mutex<Vec<Bookmark>>,
+    /// Jar persisté (étape 56) — `cookies.json` équivalent.
+    cookies: Mutex<Vec<explorer_core::StoredCookie>>,
 }
 
 impl explorer_core::ProfileStore for MemStore {
@@ -594,6 +597,16 @@ impl explorer_core::ProfileStore for MemStore {
             },
         )
     }
+    fn load_cookies(&self) -> Vec<explorer_core::StoredCookie> {
+        self.cookies
+            .lock()
+            .map_or_else(|_| Vec::new(), |c| c.clone())
+    }
+    fn save_cookies(&self, cookies: &[explorer_core::StoredCookie]) {
+        if let Ok(mut c) = self.cookies.lock() {
+            *c = cookies.to_vec();
+        }
+    }
 }
 
 #[tokio::test]
@@ -603,6 +616,7 @@ async fn visits_are_recorded_and_bookmarks_persisted() {
     let store = Arc::new(MemStore {
         visits: Mutex::new(Vec::new()),
         bookmarks: Mutex::new(Vec::new()),
+        cookies: Mutex::new(Vec::new()),
     });
     s.set_store(store.clone());
     let id = s.open_tab();
@@ -3318,4 +3332,163 @@ async fn dirty_rects_reported_and_region_served() {
     // draine l'accumulation — second appel vide.
     assert_ne!(s.take_dirty(a), []);
     assert_eq!(s.take_dirty(a), []);
+}
+
+// ===== Étape 56 — profil persisté : cookies + bfcache =====
+
+/// Aller-retour dans l'historique : les pages gelées du
+/// bfcache sont restaurées sans aucun re-fetch — le compteur
+/// du transport reste figé et la frame revient telle quelle.
+#[tokio::test]
+async fn bfcache_restores_back_forward_without_refetch() {
+    let (mut s, t) = test_session();
+    t.route("/a", 200, PAGE_T);
+    t.route("/b", 200, PAGE);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/a").await.unwrap();
+    s.navigate(id, "http://h.test/b").await.unwrap();
+    let calls = t.calls();
+
+    // back → /a restaurée depuis le gel : zéro réseau.
+    s.go_back(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/a"));
+    assert_eq!(t.calls(), calls, "hit bfcache — pas de re-fetch");
+    assert!(s.frame_png(id).is_some(), "frame restaurée servie");
+
+    // forward → /b re-gelée au back : zéro réseau aussi.
+    s.go_forward(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/b"));
+    assert_eq!(t.calls(), calls);
+
+    // reload reste un vrai re-fetch (bfcache ≠ rechargement).
+    s.reload(id).await.unwrap();
+    assert_eq!(t.calls(), calls + 1);
+}
+
+/// Le bfcache est borné (`bfcache_pages` = 4) : la page la
+/// plus anciennement gelée est évincée — y revenir dégrade
+/// proprement en fetch normal.
+#[tokio::test]
+async fn bfcache_evicts_oldest_page() {
+    let (mut s, t) = test_session();
+    for i in 0..6 {
+        t.route(&format!("/{i}"), 200, PAGE);
+    }
+    let id = s.open_tab();
+    for i in 0..6 {
+        s.navigate(id, &format!("http://h.test/{i}")).await.unwrap();
+    }
+    let calls = t.calls();
+
+    // Les 4 dernières positions sont gelées : 4 retours sans
+    // réseau.
+    for idx in (1..5).rev() {
+        s.go_back(id).await.unwrap();
+        assert_eq!(
+            s.tab_url(id).as_deref(),
+            Some(format!("http://h.test/{idx}").as_str())
+        );
+    }
+    assert_eq!(t.calls(), calls, "positions bornées restaurées");
+
+    // La position 0 a été évincée (FIFO) → re-fetch normal.
+    s.go_back(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/0"));
+    assert_eq!(t.calls(), calls + 1, "snapshot évincé → fetch");
+}
+
+/// Cookies persistés (étape 56) : `set_store` recharge le
+/// jar depuis le store — redémarrage simulé, le cookie
+/// survit ; la pose d'un cookie persistant atterrit dans le
+/// store ; un cookie de session, jamais.
+#[tokio::test]
+async fn cookies_persist_across_restart() {
+    use explorer_core::StoredCookie;
+    use explorer_net::url::Url;
+
+    // Redémarrage : le store contient déjà un cookie — le
+    // nouveau jar le sert dès la première navigation.
+    let store = Arc::new(MemStore {
+        visits: Mutex::new(Vec::new()),
+        bookmarks: Mutex::new(Vec::new()),
+        cookies: Mutex::new(vec![StoredCookie {
+            name: "p".to_string(),
+            value: "1".to_string(),
+            domain: "h.test".to_string(),
+            host_only: true,
+            path: "/".to_string(),
+            expires_unix: Some(4_000_000_000),
+            secure: false,
+            http_only: false,
+            same_site: "lax".to_string(),
+        }]),
+    });
+    let (mut s, t) = test_session();
+    s.set_store(store.clone());
+    let url = Url::parse("http://h.test/").unwrap();
+    assert_eq!(s.cookie_jar().header_for(&url, true), "p=1");
+
+    // Le serveur pose un cookie persistant + un cookie de
+    // session via le transport (pose directe sur le jar
+    // partagé — rôle de `CookieTransport` en production).
+    s.cookie_jar()
+        .set_from_header(&url, "keep=2;path=/;max-age=3600");
+    s.cookie_jar().set_from_header(&url, "tmp=9;path=/");
+    t.route("/", 200, PAGE);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    // Fin de navigation = point de synchro → `save_cookies`.
+    let saved = store.cookies.lock().unwrap().clone();
+    let names: Vec<&str> = saved.iter().map(|c| c.name.as_str()).collect();
+    assert!(names.contains(&"p"), "cookie seed re-persisté");
+    assert!(names.contains(&"keep"), "cookie persistant sauvé");
+    assert!(!names.contains(&"tmp"), "cookie de session non persisté");
+}
+
+/// Sémantique POST de l'historique (étape 56) : bfcache
+/// désactivé, le déplacement rejoue la requête d'origine —
+/// méthode + corps, pas un GET (limite « reload/back d'un
+/// POST refait GET » levée).
+#[tokio::test]
+async fn post_history_entry_replays_request() {
+    let t = Arc::new(FakeTransport::new());
+    let mut s = Session::with_config(
+        t.clone(),
+        Arc::new(FixtureFont),
+        SessionConfig {
+            bfcache_pages: 0,
+            ..SessionConfig::default()
+        },
+    );
+    t.route("/f", 200, PAGE_POST_FORM);
+    t.route("/doit", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    // Bouton submit → POST /doit (corps urlencodé).
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 170.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    let (m, pq, body) = t.last().unwrap();
+    assert_eq!(m, "Post");
+    assert_eq!(pq, "/doit");
+    assert_ne!(body.len(), 0);
+
+    // back → rejoue le GET /f.
+    s.go_back(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/f"));
+    assert_eq!(t.last().unwrap().0, "Get");
+
+    // forward → rejoue le POST /doit, corps compris.
+    s.go_forward(id).await.unwrap();
+    let (m, pq, body) = t.last().unwrap();
+    assert_eq!(m, "Post", "forward rejoue le POST historié");
+    assert_eq!(pq, "/doit");
+    assert_ne!(body.len(), 0, "corps urlencodé rejoué");
+
+    // reload sur la page servie par POST → re-POST.
+    s.reload(id).await.unwrap();
+    assert_eq!(t.last().unwrap().0, "Post", "reload réémet le POST");
 }

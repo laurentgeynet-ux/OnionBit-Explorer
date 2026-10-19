@@ -9,6 +9,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 56 — Profil persisté complet + bfcache**
+  (`explorer-core` + `explorer-net` + `explorer-daemon`) :
+  `cookies.json` rejoué au démarrage via
+  `ProfileStore::load_cookies`/`save_cookies` (cookies de
+  session exclus — sémantique navigateur ; `CookieJar::
+  export`/`insert_stored` net) ; cache HTTP **disque borné**
+  `cache/<fnv64>.json|.bin` implémentant le nouveau port
+  `CacheStore` de `CachingTransport` (mémoire ou disque
+  interchangeables, éviction FIFO `max_total_bytes`) ;
+  **bfcache minimal** : la page quittée est gelée
+  (`PageSnapshot` : DOM, arbre posé, frame, scroll, moteur
+  JS figé) à sa position d'historique — `go_back`/
+  `go_forward` restaurent sans réseau, borné
+  `SessionConfig::bfcache_pages` (FIFO, défaut 4) ;
+  **sémantique POST** : l'historique stocke la requête
+  complète — un POST historié est rejoué tel quel au
+  déplacement et au `reload` (limite « re-GET » levée).
+  Régressions : `bfcache_restores_back_forward_without_
+  refetch`, `bfcache_evicts_oldest_page`, `cookies_persist_
+  across_restart`, `post_history_entry_replays_request`,
+  `store_cache` (5 tests daemon).
+
 - **Étape 55 — Dirty-rects transportés** (`explorer-core` +
   API/FFI) : `repaint` diffe la nouvelle display list contre
   la précédente (`DisplayList::changed_rects`, R-7) et

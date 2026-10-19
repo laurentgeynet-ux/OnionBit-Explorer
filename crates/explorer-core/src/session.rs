@@ -28,7 +28,7 @@ use explorer_html::TreeBuilder;
 use explorer_js::{JsEngine, JsFactory, NavRequest, NetRequest, NetResponse, UrlResolver};
 use explorer_layout::font::FontSource;
 use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, LayoutBox, Rect};
-use explorer_net::cookies::CookieJar;
+use explorer_net::cookies::{Cookie, CookieJar, SameSite};
 use explorer_net::error::NetResult;
 use explorer_net::http::{HttpTransport, Method, Request, Response};
 use explorer_net::policy::{initiator_headers, is_mixed_content};
@@ -213,6 +213,81 @@ pub struct Visit {
     pub title: Option<String>,
 }
 
+/// Cookie persisté (étape 56) — miroir sérialisable neutre
+/// de `explorer_net::cookies::Cookie` : expiration en
+/// secondes unix (`SystemTime` n'est pas sérialisable tel
+/// quel côté store).
+#[derive(Debug, Clone)]
+pub struct StoredCookie {
+    /// Nom.
+    pub name: String,
+    /// Valeur.
+    pub value: String,
+    /// Domaine de pose.
+    pub domain: String,
+    /// `true` = host-only.
+    pub host_only: bool,
+    /// Chemin.
+    pub path: String,
+    /// Expiration unix secs (`None` = cookie de session).
+    pub expires_unix: Option<u64>,
+    /// `Secure`.
+    pub secure: bool,
+    /// `HttpOnly`.
+    pub http_only: bool,
+    /// `SameSite` — `"strict"`, `"lax"` ou `"none"`
+    /// (inconnu restauré en `lax`).
+    pub same_site: String,
+}
+
+/// `Cookie` filaire → forme persistée (expiration → secs
+/// unix ; les expirés ne sont jamais exportés —
+/// [`CookieJar::export`] purge déjà).
+fn cookie_to_stored(c: &Cookie) -> StoredCookie {
+    StoredCookie {
+        name: c.name.clone(),
+        value: c.value.clone(),
+        domain: c.domain.clone(),
+        host_only: c.host_only,
+        path: c.path.clone(),
+        expires_unix: c.expires.and_then(|t| {
+            t.duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_secs())
+        }),
+        secure: c.secure,
+        http_only: c.http_only,
+        same_site: match c.same_site {
+            SameSite::Strict => "strict",
+            SameSite::Lax => "lax",
+            SameSite::None => "none",
+        }
+        .to_string(),
+    }
+}
+
+/// Forme persistée → `Cookie` filaire (`insert_stored` du
+/// jar revérifie l'expiration).
+fn stored_to_cookie(s: &StoredCookie) -> Cookie {
+    Cookie {
+        name: s.name.clone(),
+        value: s.value.clone(),
+        domain: s.domain.clone(),
+        host_only: s.host_only,
+        path: s.path.clone(),
+        expires: s
+            .expires_unix
+            .map(|secs| std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs)),
+        secure: s.secure,
+        http_only: s.http_only,
+        same_site: match s.same_site.as_str() {
+            "strict" => SameSite::Strict,
+            "none" => SameSite::None,
+            _ => SameSite::Lax,
+        },
+    }
+}
+
 /// Port de persistance du profil — implémenté en couche
 /// infra (`JsonFileStore` du daemon, fichier dans le
 /// répertoire de profil). Injecté, jamais d'I/O ici.
@@ -234,6 +309,14 @@ pub trait ProfileStore: Send + Sync {
     /// Persiste le `localStorage` d'une origine (map complète
     /// — défaut : ignorer, stockage volatil).
     fn save_storage(&self, _origin: &str, _map: &BTreeMap<String, String>) {}
+    /// Charge les cookies persistés (étape 56 — défaut :
+    /// jar vide au démarrage).
+    fn load_cookies(&self) -> Vec<StoredCookie> {
+        Vec::new()
+    }
+    /// Persiste le jar complet (étape 56 — liste bornée par
+    /// `CookieConfig` ; défaut : ignorer, jar volatil).
+    fn save_cookies(&self, _cookies: &[StoredCookie]) {}
 }
 
 /// Erreur de session — typée, jamais de panic.
@@ -272,10 +355,17 @@ struct Tab {
     url: Option<Url>,
     /// Titre de la page (`<title>`).
     title: Option<String>,
-    /// Historique local : URLs visitées + index courant
+    /// Historique local : requêtes visitées + index courant
     /// (`hist[..=hist_idx]`, le futur est tronqué à la
-    /// navigation — modèle navigateur classique).
-    hist: Vec<Url>,
+    /// navigation — modèle navigateur classique). La
+    /// **requête** complète est stockée (étape 56) : un POST
+    /// de formulaire pousse son entrée comme tout autre —
+    /// pas de dédup d'URL — et back/forward la rejouent
+    /// telle quelle si le bfcache l'a évincée.
+    hist: Vec<Request>,
+    /// Requête qui a produit la page courante — `reload`
+    /// réémet la vraie requête (un POST re-POSTe, étape 56).
+    last_req: Option<Request>,
     /// Position dans `hist`.
     hist_idx: usize,
     /// Décalage de scroll (px CSS).
@@ -347,6 +437,139 @@ struct Tab {
     /// `FrameInvalidated`, vidée par `take_dirty` ; plafonnée
     /// — au-delà elle s'effondre en « toute la frame ».
     dirty: Vec<Rect>,
+    /// Pages gelées (étape 56, bfcache minimal) — indexées
+    /// par position `hist_idx` : un `history_move` vers une
+    /// position gelée restaure l'état complet sans réseau.
+    /// Bornée par `SessionConfig::bfcache_pages` (FIFO).
+    bfcache: VecDeque<PageSnapshot>,
+}
+
+/// Page gelée pour le bfcache (étape 56) — tout l'état qui
+/// reconstruit la page **sans réseau** : DOM, arbre posé,
+/// display list, frame/PNG, scroll, focus/hover, popup,
+/// moteur JS figé (ses timers n'avancent pas tant qu'elle
+/// est gelée), images décodées et styles calculés. Les
+/// transitions CSS en vol sont abandonnées au gel
+/// (reprendre au point exact serait faux — mieux rien que
+/// un saut).
+struct PageSnapshot {
+    /// Position dans `Tab::hist` au moment du gel.
+    hist_idx: usize,
+    /// URL de la page (re-émise dans `Navigated`).
+    url: Option<Url>,
+    /// Titre courant.
+    title: Option<String>,
+    /// Décalage de scroll (restauré comme un vrai bfcache).
+    scroll_y: f32,
+    /// Hauteur du document.
+    doc_h: f32,
+    /// DOM parsé.
+    dom: Option<Dom>,
+    /// Arbre de boîtes posé.
+    tree: Option<LayoutBox>,
+    /// Display list (diff des dirty-rects au retour).
+    list: Option<DisplayList>,
+    /// Frame rasterisée (servie dès la restauration).
+    frame: Option<Frame>,
+    /// PNG encodé prêt à servir.
+    png: Option<Vec<u8>>,
+    /// Champ focalisé (chemin `(tag, index)`).
+    focused: Option<Vec<(String, u32)>>,
+    /// Nœud survolé (chemin).
+    hovered: Option<Vec<(String, u32)>>,
+    /// Popup `<select>` ouvert (retrouvé tel quel).
+    popup: Option<SelectPopup>,
+    /// Moteur JS figé — le contexte survit, reprend tel
+    /// quel à la restauration (modèle bfcache).
+    js: Option<Box<dyn JsEngine>>,
+    /// Pixels `<img>` décodés.
+    images: ImageTable,
+    /// Feuilles `<link>` concaténées.
+    linked_css: String,
+    /// Styles calculés (transitions — vidées au gel).
+    prev_styles: HashMap<usize, ComputedStyle>,
+    /// Régions invalides en vol.
+    dirty: Vec<Rect>,
+    /// Requête d'origine de la page gelée — restaurée pour
+    /// que `reload` réémette la bonne méthode (étape 56).
+    last_req: Option<Request>,
+}
+
+impl Tab {
+    /// Gèle la page courante dans le bfcache à sa position
+    /// `hist_idx` (étape 56) — appelé à chaque navigation
+    /// confirmée ([`Session::nav_apply`]). Sans page réelle
+    /// (onglet vierge) → no-op. Borne `cap` : FIFO.
+    fn freeze(&mut self, cap: usize) {
+        if self.dom.is_none() && self.frame.is_none() {
+            return;
+        }
+        // Une page ne vit qu'une fois par position —
+        // une nouvelle visite remplace l'ancienne gelée.
+        self.bfcache.retain(|s| s.hist_idx != self.hist_idx);
+        let snap = PageSnapshot {
+            hist_idx: self.hist_idx,
+            url: self.url.take(),
+            title: self.title.take(),
+            scroll_y: self.scroll_y,
+            doc_h: self.doc_h,
+            dom: self.dom.take(),
+            tree: self.tree.take(),
+            list: self.list.take(),
+            frame: self.frame.take(),
+            png: self.png.take(),
+            focused: self.focused.take(),
+            hovered: self.hovered.take(),
+            popup: self.popup.take(),
+            js: self.js.take(),
+            images: std::mem::take(&mut self.images),
+            linked_css: std::mem::take(&mut self.linked_css),
+            prev_styles: std::mem::take(&mut self.prev_styles),
+            dirty: std::mem::take(&mut self.dirty),
+            last_req: self.last_req.take(),
+        };
+        self.scroll_y = 0.0;
+        self.doc_h = 0.0;
+        self.bfcache.push_back(snap);
+        while self.bfcache.len() > cap {
+            self.bfcache.pop_front();
+        }
+    }
+
+    /// Retire le snapshot gelé à `idx` s'il existe (étape
+    /// 56 — le hit bfcache d'un `history_move`).
+    fn take_snapshot(&mut self, idx: usize) -> Option<PageSnapshot> {
+        let pos = self.bfcache.iter().position(|s| s.hist_idx == idx)?;
+        self.bfcache.remove(pos)
+    }
+
+    /// Restaure un snapshot : tout l'état de page revient
+    /// tel quel — epoch incrémentée (invalide toute nav en
+    /// vol) et intentions de navigation purgées (un script
+    /// de la page gelée ne doit pas tirer des navs périmées).
+    fn restore(&mut self, snap: PageSnapshot) {
+        self.url = snap.url;
+        self.title = snap.title;
+        self.scroll_y = snap.scroll_y;
+        self.doc_h = snap.doc_h;
+        self.dom = snap.dom;
+        self.tree = snap.tree;
+        self.list = snap.list;
+        self.frame = snap.frame;
+        self.png = snap.png;
+        self.focused = snap.focused;
+        self.hovered = snap.hovered;
+        self.popup = snap.popup;
+        self.js = snap.js;
+        self.images = snap.images;
+        self.linked_css = snap.linked_css;
+        self.prev_styles = snap.prev_styles;
+        self.dirty = snap.dirty;
+        self.last_req = snap.last_req;
+        self.transitions.clear();
+        self.nav_epoch += 1;
+        self.pending_nav.clear();
+    }
 }
 
 /// Popup `<select>` moteur (étape 54) — l'état vit hors DOM :
@@ -628,6 +851,13 @@ pub struct SessionConfig {
     /// onglet — quota ADR-0019 : au-delà, la requête échoue
     /// en `status: 0` (événement `error`, page vivante).
     pub max_script_net: usize,
+    /// Pages gelées par onglet dans le bfcache (étape 56) —
+    /// un `history_move` vers une position gelée restaure
+    /// l'état complet sans réseau (DOM, layout, frame, JS
+    /// figé, scroll). `0` = bfcache désactivé. Mémoire :
+    /// chaque page gelée garde DOM + layout + frame — la
+    /// borne est volontairement petite.
+    pub bfcache_pages: usize,
     /// Callbacks de timers JS déclenchés par tick (étape 52,
     /// borne ADR-0019 — une page enregistrant des milliers
     /// de timers échus ne monopolise pas la pompe ; le reste
@@ -661,6 +891,7 @@ impl Default for SessionConfig {
             max_timer_jobs: 128,
             paint_chunk_bytes: 32 * 1024,
             paint_interval_ms: 100,
+            bfcache_pages: 4,
         }
     }
 }
@@ -739,6 +970,9 @@ pub struct Session {
     /// Intervalle minimal entre peintures progressives
     /// (`paint_interval_ms` de config, étape 53).
     paint_interval: std::time::Duration,
+    /// Pages gelées par onglet dans le bfcache
+    /// (`bfcache_pages` de config, étape 56).
+    bfcache_pages: usize,
 }
 
 impl Session {
@@ -791,6 +1025,7 @@ impl Session {
             max_timer_jobs: cfg.max_timer_jobs,
             paint_chunk_bytes: cfg.paint_chunk_bytes,
             paint_interval: std::time::Duration::from_millis(cfg.paint_interval_ms),
+            bfcache_pages: cfg.bfcache_pages,
         }
     }
 
@@ -820,7 +1055,35 @@ impl Session {
     /// enregistre chaque navigation suivante.
     pub fn set_store(&mut self, store: Arc<dyn ProfileStore>) {
         self.bookmarks = store.load_bookmarks();
+        // Profil persisté (étape 56) : le jar partagé repart
+        // des cookies du disque — session cookies exclus
+        // naturellement (ils n'ont jamais d'`expires_unix`).
+        for sc in store.load_cookies() {
+            self.cookies.insert_stored(stored_to_cookie(&sc));
+        }
         self.store = Some(store);
+    }
+
+    /// Persiste le jar à cookies courant via le store
+    /// (étape 56) — appelé aux points de synchro où le jar
+    /// a pu muter : [`Self::after_script`], [`Self::poll_net`]
+    /// et fin de [`Self::sub_commit`]. No-op sans store ; le
+    /// store décide du rythme réel d'écriture (réécriture
+    /// bornée `CookieConfig` côté `JsonFileStore`).
+    fn persist_cookies(&self) {
+        if let Some(s) = &self.store {
+            // Cookies de session exclus : sans date
+            // d'expiration ils meurent avec la session
+            // (sémantique navigateur classique).
+            let stored: Vec<StoredCookie> = self
+                .cookies
+                .export()
+                .iter()
+                .map(cookie_to_stored)
+                .filter(|c| c.expires_unix.is_some())
+                .collect();
+            s.save_cookies(&stored);
+        }
     }
 
     /// Abonnement au bus d'événements (SSE côté API).
@@ -855,6 +1118,7 @@ impl Session {
                 url: None,
                 title: None,
                 hist: Vec::new(),
+                last_req: None,
                 hist_idx: 0,
                 scroll_y: 0.0,
                 doc_h: 0.0,
@@ -874,6 +1138,7 @@ impl Session {
                 nav_epoch: 0,
                 pending_nav: std::collections::VecDeque::new(),
                 dirty: Vec::new(),
+                bfcache: VecDeque::new(),
             },
         );
         let _ = self.events.send(CoreEvent::TabOpened { tab: id });
@@ -1174,21 +1439,28 @@ impl Session {
         }
     }
 
-    /// Recharge l'URL courante (re-fetch complet, historique
-    /// inchangé).
+    /// Recharge la page courante (re-fetch complet,
+    /// historique inchangé) — réémet la requête d'origine
+    /// `last_req` : une page servie par POST est re-POSTée
+    /// (étape 56 — les navigateurs réémettent la requête,
+    /// quitte à confirmer la resoumission côté UI).
     ///
     /// # Errors
     /// [`CoreError::UnknownTab`], [`CoreError::EmptyDocument`]
     /// si l'onglet n'a jamais été navigué, ou erreur de fetch.
     pub async fn reload(&mut self, tab: TabId) -> Result<(), CoreError> {
-        let Some(url) = self.tabs.get(&tab).and_then(|t| t.url.clone()) else {
+        let Some(req) = self.tabs.get(&tab).and_then(|t| {
+            t.last_req
+                .clone()
+                .or_else(|| t.url.clone().map(Request::get))
+        }) else {
             return Err(if self.tabs.contains_key(&tab) {
                 CoreError::EmptyDocument
             } else {
                 CoreError::UnknownTab(tab)
             });
         };
-        match self.navigate_to(tab, url.clone()).await {
+        match self.navigate_request(tab, req, false).await {
             Ok(_) => {
                 self.drain_script_nav(tab).await;
                 Ok(())
@@ -1197,9 +1469,10 @@ impl Session {
         }
     }
 
-    /// Recule dans l'historique local de l'onglet (re-fetch —
-    /// pas de cache de pages, les états intermédiaires ne sont
-    /// pas snapshotés au MVP).
+    /// Recule dans l'historique local de l'onglet — restaure
+    /// le snapshot bfcache s'il existe (instantané, étape 56)
+    /// sinon rejoue la requête d'origine (méthode + corps —
+    /// un POST historié re-POSTe).
     ///
     /// # Errors
     /// [`CoreError::UnknownTab`] ou [`CoreError::EmptyDocument`]
@@ -1210,7 +1483,9 @@ impl Session {
         Ok(())
     }
 
-    /// Avance dans l'historique local de l'onglet.
+    /// Avance dans l'historique local de l'onglet — mêmes
+    /// sémantiques que [`Self::go_back`] (bfcache puis rejeu
+    /// de la requête d'origine).
     ///
     /// # Errors
     /// [`CoreError::UnknownTab`] ou [`CoreError::EmptyDocument`]
@@ -1221,6 +1496,36 @@ impl Session {
         Ok(())
     }
 
+    /// Tentative de restauration bfcache (étape 56) : la
+    /// position `idx` est gelée → tout l'état revient sans
+    /// réseau ; la page quittée est gelée à son tour
+    /// (l'aller-retour ne re-télécharge jamais). `Navigated`,
+    /// `TitleChanged` et `FrameInvalidated` émis comme après
+    /// une navigation classique.
+    ///
+    /// `false` = pas de snapshot → fetch normal.
+    fn try_bfcache(&mut self, tab: TabId, idx: usize) -> bool {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return false;
+        };
+        let prev = entry.title.clone();
+        let Some(snap) = entry.take_snapshot(idx) else {
+            return false;
+        };
+        entry.freeze(self.bfcache_pages);
+        entry.restore(snap);
+        entry.hist_idx = idx;
+        let url = entry.url.clone();
+        let title = entry.title.clone();
+        if let Some(u) = url {
+            // Mêmes événements qu'une navigation classique :
+            // `Navigated` + `TitleChanged` si le titre
+            // restauré diffère + `FrameInvalidated`.
+            self.emit_navigated(tab, &u, title, prev.as_deref());
+        }
+        true
+    }
+
     /// Déplacement dans l'historique — `delta` = ±1.
     async fn history_move(&mut self, tab: TabId, delta: isize) -> Result<(), CoreError> {
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
@@ -1228,11 +1533,18 @@ impl Session {
         let Some(idx) = next.filter(|&i| i < entry.hist.len()) else {
             return Err(CoreError::EmptyDocument);
         };
-        let url = entry.hist[idx].clone();
+        let req = entry.hist[idx].clone();
+        // Hit bfcache (étape 56) : restauration instantanée,
+        // zéro réseau.
+        if self.try_bfcache(tab, idx) {
+            return Ok(());
+        }
+        // Miss → on rejoue la requête d'origine (méthode +
+        // corps — un POST historié re-POSTe, étape 56).
         // `Navigated` est émis par `navigate_request` — sauf
         // redirection script (alors `entry.url` diffère et la
         // cible a émis pour elle-même).
-        match self.navigate_to(tab, url.clone()).await {
+        match self.navigate_request(tab, req, false).await {
             Ok(_) => {
                 if let Some(entry) = self.tabs.get_mut(&tab) {
                     entry.hist_idx = idx;
@@ -1373,6 +1685,11 @@ impl Session {
         let doc_css = collect_style_css(&dom);
         {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            // bfcache (étape 56) : la page quittée est gelée
+            // à sa position d'historique — un retour
+            // arrière la restaurera sans réseau.
+            entry.freeze(self.bfcache_pages);
+            entry.last_req = Some(tail.req.clone());
             entry.url = Some(url.clone());
             entry.title.clone_from(&title);
             entry.scroll_y = 0.0;
@@ -1394,6 +1711,7 @@ impl Session {
             url: url.clone(),
             push: tail.push,
             prev_title: tail.prev_title,
+            req: tail.req,
             title,
             transport: Arc::clone(&self.transport),
             events: self.events.clone(),
@@ -1432,6 +1750,7 @@ impl Session {
             url,
             push,
             prev_title,
+            req,
             title,
             css_slots,
             scripts,
@@ -1502,7 +1821,12 @@ impl Session {
         if push {
             if let Some(entry) = self.tabs.get_mut(&tab) {
                 entry.hist.truncate(entry.hist_idx + 1);
-                entry.hist.push(url.clone());
+                // La **requête** complète est historiée
+                // (étape 56) : un POST de formulaire devient
+                // une position rejouable — pas de dédup
+                // d'URL, le résultat est une page à part
+                // entière comme chez les navigateurs.
+                entry.hist.push(req.clone());
                 entry.hist_idx = entry.hist.len() - 1;
             }
         }
@@ -1518,6 +1842,11 @@ impl Session {
             let live = self.tabs.get(&tab).and_then(|t| t.title.clone());
             self.emit_navigated(tab, &url, live, prev_title.as_deref());
         }
+        // Les `Set-Cookie` du document et des sous-ressources
+        // ont enrichi le jar partagé (CookieTransport agit
+        // hors de la vue session) — checkpoint de
+        // persistance (étape 56).
+        self.persist_cookies();
         Ok(title)
     }
 
@@ -1586,9 +1915,11 @@ impl Session {
         }
     }
 
-    /// Cible `(index, URL)` d'un déplacement d'historique —
-    /// lecture pure pour les drivers partagés (53d).
-    fn hist_target(&self, tab: TabId, delta: isize) -> Result<(usize, Url), CoreError> {
+    /// Cible `(index, requête)` d'un déplacement
+    /// d'historique — lecture pure pour les drivers partagés
+    /// (53d) ; la requête d'origine est rejouée telle quelle
+    /// hors bfcache (étape 56 — POST rejoué).
+    fn hist_target(&self, tab: TabId, delta: isize) -> Result<(usize, Request), CoreError> {
         let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
         let Some(idx) = entry
             .hist_idx
@@ -1898,6 +2229,9 @@ impl Session {
             for w in &writes {
                 self.cookies.set_from_header(&page, &strip_http_only(w));
             }
+            if !writes.is_empty() {
+                self.persist_cookies();
+            }
             let key = page.origin().to_string();
             // Persisté seulement sur changement réel : une
             // map vidée par script est sauvée (effacement),
@@ -1951,6 +2285,11 @@ impl Session {
                 },
             };
             self.deliver_net_response(d.tab, resp);
+        }
+        // Des `Set-Cookie` XHR ont pu enrichir le jar —
+        // persistance au même point de synchro.
+        if n > 0 {
+            self.persist_cookies();
         }
         n
     }
@@ -3591,6 +3930,9 @@ struct NavTail {
     push: bool,
     /// Titre avant navigation — `TitleChanged`.
     prev_title: Option<String>,
+    /// Requête d'origine — rejouée par `reload` et stockée
+    /// dans l'entrée d'historique (étape 56, POST).
+    req: Request,
 }
 
 /// Sortie de [`NavJob::run`] — document parsé prêt à poser.
@@ -3660,6 +4002,7 @@ impl NavJob {
             epoch: self.epoch,
             push: self.push,
             prev_title: self.prev_title.take(),
+            req: self.req.clone(),
         };
         Ok((done, tail))
     }
@@ -3693,6 +4036,9 @@ struct SubJob {
     /// `push` historique + titre avant navigation.
     push: bool,
     prev_title: Option<String>,
+    /// Requête d'origine — `last_req` du commit et entrée
+    /// d'historique poussée (étape 56, rejoue un POST).
+    req: Request,
     /// Titre extrait au parse.
     title: Option<String>,
     /// Transport cloné — fetch hors session.
@@ -5029,11 +5375,19 @@ pub async fn history_move_shared(
     tab: TabId,
     delta: isize,
 ) -> Result<(), CoreError> {
-    let (idx, url) = {
-        let s = sess.lock().await;
-        s.hist_target(tab, delta)?
+    let (idx, req) = {
+        let mut s = sess.lock().await;
+        let t = s.hist_target(tab, delta)?;
+        // Hit bfcache (étape 56) : restauration instantanée
+        // sous verrou court — aucune navigation n'est lancée.
+        if s.try_bfcache(tab, t.0) {
+            return Ok(());
+        }
+        t
     };
-    match navigate_shared(sess, tab, Request::get(url), false).await {
+    // Miss → la requête d'origine est rejouée (POST rejoué
+    // tel quel — étape 56).
+    match navigate_shared(sess, tab, req, false).await {
         Ok(()) => {
             let mut s = sess.lock().await;
             s.set_hist_idx(tab, idx);

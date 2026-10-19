@@ -4,10 +4,11 @@
 
 //! `JsonFileStore` — persistance du profil en fichiers JSON
 //! dans un répertoire déplaçable (`EXPLORER_PROFILE`) :
-//! `history.json` (visites, bornées) et `bookmarks.json`
-//! (signets). Implémente le port `ProfileStore` de
-//! `explorer-core` — l'I/O fichier vit ici, jamais dans le
-//! cœur.
+//! `history.json` (visites, bornées), `bookmarks.json`
+//! (signets), `storage-<slug>.json` (localStorage par
+//! origine) et `cookies.json` (jar à cookies, étape 56).
+//! Implémente le port `ProfileStore` de `explorer-core` —
+//! l'I/O fichier vit ici, jamais dans le cœur.
 //!
 //! Format volontairement simple : un tableau JSON
 //! `[{"url","title"}]` réécrit en entier à chaque mutation
@@ -18,7 +19,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use explorer_core::{Bookmark, ProfileStore, Visit};
+use explorer_core::{Bookmark, ProfileStore, StoredCookie, Visit};
 
 /// Borne du journal de visites (règle 13 : constante de
 /// config, pas de magie dans la boucle).
@@ -178,6 +179,31 @@ impl ProfileStore for JsonFileStore {
             let _ = fs::rename(&tmp, &dst);
         }
     }
+
+    /// Jar à cookies (étape 56) : `cookies.json` = tableau
+    /// de `RawCookie` — fichier cassé → jar vide. Le core
+    /// appelle `save_cookies` à chaque point de synchro où
+    /// le jar a pu muter ; la liste est bornée en amont par
+    /// `CookieConfig`.
+    fn load_cookies(&self) -> Vec<StoredCookie> {
+        read_json(&self.dir.join("cookies.json"))
+            .and_then(|v| serde_json::from_value::<Vec<RawCookie>>(v).ok())
+            .map(|v| v.into_iter().map(RawCookie::into_stored).collect())
+            .unwrap_or_default()
+    }
+
+    fn save_cookies(&self, cookies: &[StoredCookie]) {
+        let entries: Vec<RawCookie> = cookies.iter().map(RawCookie::from).collect();
+        let _guard = self.io.lock().ok();
+        let Some(s) = serde_json::to_string(&entries).ok() else {
+            return;
+        };
+        let dst = self.dir.join("cookies.json");
+        let tmp = self.dir.join("cookies.json.tmp");
+        if fs::write(&tmp, s).is_ok() {
+            let _ = fs::rename(&tmp, &dst);
+        }
+    }
 }
 
 /// Forme sérialisée commune `{"url", "title"}` — visites et
@@ -203,6 +229,62 @@ impl From<&Bookmark> for RawEntry {
         Self {
             url: b.url.clone(),
             title: b.title.clone(),
+        }
+    }
+}
+
+/// Cookie sérialisé (`cookies.json`) — miroir serde de
+/// `StoredCookie` : le type du core reste neutre (pas de
+/// serde dans `explorer-core`), la forme filaire vit ici.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct RawCookie {
+    name: String,
+    value: String,
+    domain: String,
+    #[serde(default)]
+    host_only: bool,
+    path: String,
+    #[serde(default)]
+    expires_unix: Option<u64>,
+    #[serde(default)]
+    secure: bool,
+    #[serde(default)]
+    http_only: bool,
+    #[serde(default)]
+    same_site: String,
+}
+
+impl RawCookie {
+    /// Forme filaire → type du core (pas de validation ici :
+    /// `CookieJar::insert_stored` revérifie l'expiration et
+    /// les invariants au réimport).
+    fn into_stored(self) -> StoredCookie {
+        StoredCookie {
+            name: self.name,
+            value: self.value,
+            domain: self.domain,
+            host_only: self.host_only,
+            path: self.path,
+            expires_unix: self.expires_unix,
+            secure: self.secure,
+            http_only: self.http_only,
+            same_site: self.same_site,
+        }
+    }
+}
+
+impl From<&StoredCookie> for RawCookie {
+    fn from(c: &StoredCookie) -> Self {
+        Self {
+            name: c.name.clone(),
+            value: c.value.clone(),
+            domain: c.domain.clone(),
+            host_only: c.host_only,
+            path: c.path.clone(),
+            expires_unix: c.expires_unix,
+            secure: c.secure,
+            http_only: c.http_only,
+            same_site: c.same_site.clone(),
         }
     }
 }

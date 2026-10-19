@@ -202,9 +202,7 @@ async fn frame(
     let mut session = st.session.lock().await;
     let _ = session.tick_animations(id);
     let png = match (q.x, q.y, q.w, q.h) {
-        (Some(rx), Some(ry), Some(rw), Some(rh)) => {
-            session.frame_png_region(id, rx, ry, rw, rh)
-        }
+        (Some(rx), Some(ry), Some(rw), Some(rh)) => session.frame_png_region(id, rx, ry, rw, rh),
         _ => session.frame_png(id),
     };
     match png {

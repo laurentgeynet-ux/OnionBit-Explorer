@@ -277,6 +277,7 @@ async fn fresh_max_age_served_without_network() {
     let t = CachingTransport::wrap(
         Arc::new(H1Client::new(Arc::new(TcpConnector), HttpConfig::default())),
         MemoryCache::new(),
+        CacheConfig::default(),
     );
     let url = u(&format!("http://localhost:{port}/x"));
     let r1 = t.fetch(&Request::get(url.clone())).await.unwrap();
@@ -298,6 +299,7 @@ async fn stale_revalidates_304() {
     let t = CachingTransport::wrap(
         Arc::new(H1Client::new(Arc::new(TcpConnector), HttpConfig::default())),
         MemoryCache::new(),
+        CacheConfig::default(),
     );
     let url = u(&format!("http://localhost:{port}/x"));
     t.fetch(&Request::get(url.clone())).await.unwrap();
@@ -321,6 +323,7 @@ async fn no_store_not_cached() {
     let t = CachingTransport::wrap(
         Arc::new(H1Client::new(Arc::new(TcpConnector), HttpConfig::default())),
         MemoryCache::new(),
+        CacheConfig::default(),
     );
     let url = u(&format!("http://localhost:{port}/x"));
     t.fetch(&Request::get(url.clone())).await.unwrap();
@@ -346,6 +349,7 @@ async fn cache_eviction_bounded() {
     let t = CachingTransport::wrap(
         Arc::new(H1Client::new(Arc::new(TcpConnector), HttpConfig::default())),
         cache.clone(),
+        CacheConfig::default(),
     );
     t.fetch(&Request::get(u(&format!("http://localhost:{port}/a"))))
         .await

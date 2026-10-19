@@ -35,18 +35,42 @@ fn cacheable_status(status: u16) -> bool {
     )
 }
 
-/// Entrée de cache.
+/// Entrée de cache — publique (contrat [`CacheStore`],
+/// étape 56 : une implémentation disque la sérialise, la
+/// mémoire la clone). `stored_at`/`fresh_until` en
+/// `SystemTime` — l'impl persistante les convertit en
+/// secondes unix.
 #[derive(Debug, Clone)]
-struct Entry {
-    status: u16,
-    reason: String,
-    headers: Vec<(String, String)>,
-    body: Vec<u8>,
-    stored_at: SystemTime,
+pub struct CacheEntry {
+    /// Code de statut (`200`…).
+    pub status: u16,
+    /// Raison (`OK`…).
+    pub reason: String,
+    /// En-têtes — paires `(nom, valeur)`, ordre préservé.
+    pub headers: Vec<(String, String)>,
+    /// Corps déframé.
+    pub body: Vec<u8>,
+    /// Instant de stockage.
+    pub stored_at: SystemTime,
     /// Fraîcheur : `now < fresh_until` → servir sans requête.
-    fresh_until: Option<SystemTime>,
-    etag: Option<String>,
-    last_modified: Option<String>,
+    pub fresh_until: Option<SystemTime>,
+    /// Validateur `ETag` (revalidation `If-None-Match`).
+    pub etag: Option<String>,
+    /// Validateur `Last-Modified` (`If-Modified-Since`).
+    pub last_modified: Option<String>,
+}
+
+/// Port de stockage du cache HTTP (étape 56) — le transport
+/// [`CachingTransport`] ne connaît que `get`/`put` ; les
+/// implémentations : [`MemoryCache`] (volatil) ou un cache
+/// disque borné côté hôte (JsonFileStore-like, daemon).
+pub trait CacheStore: Send + Sync {
+    /// Entrée pour `key` (URL sérialisée) — `None` si absente
+    /// ou illisible (dégradation : on re-télécharge).
+    fn cache_get(&self, key: &str) -> Option<CacheEntry>;
+    /// Stocke `entry` sous `key` — l'impl applique ses
+    /// budgets (taille d'entrée, total, éviction).
+    fn cache_put(&self, key: &str, entry: CacheEntry);
 }
 
 /// Budgets du cache.
@@ -70,7 +94,7 @@ impl Default for CacheConfig {
 /// Cache mémoire partagé (thread-safe — les fetches courent en
 /// parallèle sur tokio ; la `Mutex` n'est jamais tenue sur `.await`).
 pub struct MemoryCache {
-    map: Mutex<HashMap<String, Entry>>,
+    map: Mutex<HashMap<String, CacheEntry>>,
     order: Mutex<VecDeque<String>>,
     total: Mutex<usize>,
     cfg: CacheConfig,
@@ -108,16 +132,19 @@ impl MemoryCache {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+}
 
-    fn get(&self, url: &str) -> Option<Entry> {
+impl CacheStore for MemoryCache {
+    fn cache_get(&self, key: &str) -> Option<CacheEntry> {
         self.map
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(url)
+            .get(key)
             .cloned()
     }
 
-    fn put(&self, url: String, entry: Entry) {
+    fn cache_put(&self, key: &str, entry: CacheEntry) {
+        let url = key.to_string();
         let bytes = entry.body.len();
         let mut map = self
             .map
@@ -147,17 +174,27 @@ impl MemoryCache {
     }
 }
 
-/// Transport décorateur : cache + revalidation.
+/// Transport décorateur : cache + revalidation derrière le
+/// port [`CacheStore`] (étape 56 — mémoire ou disque borné,
+/// l'hôte choisit). Seul `fetch` est caché ; `fetch_stream`
+/// court-circuite (corps en vol non tamponnés — documenté).
 pub struct CachingTransport {
     inner: Arc<dyn HttpTransport>,
-    cache: Arc<MemoryCache>,
+    cache: Arc<dyn CacheStore>,
+    cfg: CacheConfig,
 }
 
 impl CachingTransport {
-    /// Enveloppe `inner` avec le `cache` partagé.
+    /// Enveloppe `inner` avec le `cache` partagé et les
+    /// budgets `cfg` (borne d'entrée à l'écriture — la
+    /// politique d'éviction reste propre au store).
     #[must_use]
-    pub fn wrap(inner: Arc<dyn HttpTransport>, cache: Arc<MemoryCache>) -> Self {
-        Self { inner, cache }
+    pub fn wrap(
+        inner: Arc<dyn HttpTransport>,
+        cache: Arc<dyn CacheStore>,
+        cfg: CacheConfig,
+    ) -> Self {
+        Self { inner, cache, cfg }
     }
 }
 
@@ -178,7 +215,7 @@ impl HttpTransport for CachingTransport {
             return self.inner.fetch(req).await;
         }
         let key = req.url.as_str();
-        let cached = self.cache.get(&key);
+        let cached = self.cache.cache_get(&key);
 
         // Frais → sert sans réseau.
         if let Some(e) = &cached {
@@ -224,7 +261,7 @@ impl HttpTransport for CachingTransport {
                         }
                     }
                     e.fresh_until = freshness(&e.headers, e.stored_at);
-                    self.cache.put(key, e.clone());
+                    self.cache.cache_put(&key, e.clone());
                     return Ok(Response {
                         status: e.status,
                         reason: e.reason.clone(),
@@ -239,13 +276,13 @@ impl HttpTransport for CachingTransport {
 
         // Stocke si cachable.
         if cacheable_status(resp.status)
-            && resp.body.len() <= self.cache.cfg.max_entry_bytes
+            && resp.body.len() <= self.cfg.max_entry_bytes
             && !resp
                 .header("cache-control")
                 .is_some_and(|v| v.to_ascii_lowercase().contains("no-store"))
             && resp.header("vary") != Some("*")
         {
-            let entry = Entry {
+            let entry = CacheEntry {
                 status: resp.status,
                 reason: resp.reason.clone(),
                 headers: resp.headers.clone(),
@@ -255,7 +292,7 @@ impl HttpTransport for CachingTransport {
                 etag: resp.header("etag").map(str::to_string),
                 last_modified: resp.header("last-modified").map(str::to_string),
             };
-            self.cache.put(key, entry);
+            self.cache.cache_put(&key, entry);
         }
         Ok(resp)
     }

@@ -202,6 +202,45 @@ impl CookieJar {
         self.len() == 0
     }
 
+    /// Instantané des cookies vivants — persistance de profil
+    /// (étape 56) : l'hôte sérialise la liste puis la rend via
+    /// [`Self::insert_stored`]. Les expirés sont purgés à
+    /// l'export (un cookie mort ne voyage pas).
+    #[must_use]
+    pub fn export(&self) -> Vec<Cookie> {
+        let now = SystemTime::now();
+        self.map
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .filter(|c| !c.is_expired(now))
+            .cloned()
+            .collect()
+    }
+
+    /// Réinsère un cookie restauré (étape 56) — même traitement
+    /// qu'une pose `Set-Cookie` : expiré ignoré, budgets
+    /// `CookieConfig` honorés. `false` si déjà expiré.
+    pub fn insert_stored(&self, cookie: Cookie) -> bool {
+        let now = SystemTime::now();
+        if cookie.is_expired(now) {
+            return false;
+        }
+        let key = Key {
+            domain: cookie.domain.clone(),
+            path: cookie.path.clone(),
+            name: cookie.name.clone(),
+        };
+        let mut map = self
+            .map
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        map.retain(|_, c| !c.is_expired(now));
+        map.insert(key, cookie);
+        self.evict_over_budget(&mut map);
+        true
+    }
+
     /// Parse `Set-Cookie` → `Cookie` si la politique l'accepte.
     fn parse(url: &Url, header: &str, now: SystemTime) -> Option<Cookie> {
         let mut parts = header.split(';');

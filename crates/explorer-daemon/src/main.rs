@@ -19,10 +19,10 @@
 #![forbid(unsafe_code)]
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-mod store;
+use explorer_daemon::{cache, store};
 
 use explorer_core::Session;
 use explorer_net::cookies::{CookieJar, CookieTransport};
@@ -103,13 +103,25 @@ fn default_fonts_dir() -> PathBuf {
 /// `CookieJar` partagé avec la session (étape 51) est
 /// **sous** la couche redirection : chaque hop re-reçoit
 /// les cookies de sa propre URL.
-fn http_stack(cfg: &DaemonConfig, jar: Arc<CookieJar>) -> Arc<dyn HttpTransport> {
+fn http_stack(cfg: &DaemonConfig, jar: Arc<CookieJar>, profile: &Path) -> Arc<dyn HttpTransport> {
     let tls = Arc::new(TlsConnector::web_roots());
     // ALPN : h2 si le serveur le propose, h1 sinon (etape 41).
     let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
     let decoded: Arc<dyn HttpTransport> = Arc::new(DecodingTransport::wrap(h1, cfg.max_body));
     let with_cookies: Arc<dyn HttpTransport> = Arc::new(CookieTransport::wrap(decoded, jar));
-    Arc::new(RedirectTransport::wrap(with_cookies, cfg.max_redirects))
+    // Cache disque borné par URL (étape 56) — à l'intérieur
+    // de la couche redirection : chaque hop est caché sous
+    // sa propre URL (les 301 sont eux-mêmes cachables).
+    let disk = Arc::new(cache::DiskCache::open(
+        &profile.join("cache"),
+        explorer_net::cache::CacheConfig::default(),
+    ));
+    let cached: Arc<dyn HttpTransport> = Arc::new(explorer_net::cache::CachingTransport::wrap(
+        with_cookies,
+        disk,
+        explorer_net::cache::CacheConfig::default(),
+    ));
+    Arc::new(RedirectTransport::wrap(cached, cfg.max_redirects))
 }
 
 #[tokio::main]
@@ -121,15 +133,14 @@ async fn main() {
     let fonts = DirFontSource::new(&cfg.fonts_dir);
     tracing::info!(dir = %cfg.fonts_dir.display(), "fontes système scannées");
 
-    let store = Arc::new(store::JsonFileStore::open(
-        &store::JsonFileStore::default_dir(),
-    ));
-    tracing::info!(dir = %store::JsonFileStore::default_dir().display(), "profil chargé");
+    let profile_dir = store::JsonFileStore::default_dir();
+    let store = Arc::new(store::JsonFileStore::open(&profile_dir));
+    tracing::info!(dir = %profile_dir.display(), "profil chargé");
     // Jar partagé transport ↔ session (étape 51) :
     // `document.cookie`, les XHR same-origin et les
     // navigations voient le même état.
     let jar = Arc::new(CookieJar::new());
-    let mut session = Session::new(http_stack(&cfg, jar.clone()), Arc::new(fonts));
+    let mut session = Session::new(http_stack(&cfg, jar.clone(), &profile_dir), Arc::new(fonts));
     session.set_cookie_jar(jar);
     session.set_store(store);
     session.set_js_factory(explorer_js::DilloEngine::factory());
