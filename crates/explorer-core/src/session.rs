@@ -1600,6 +1600,84 @@ impl Session {
         true
     }
 
+    /// Navigation **même-document** vers un `#fragment`
+    /// (étape 56d — `href="#id"`, footnotes Wikipedia) :
+    /// l'URL hors fragment identique à la page commise →
+    /// jamais de re-fetch — on pousse l'entrée d'historique,
+    /// on émet `Navigated`, puis on scrolle vers la cible
+    /// (`id` d'abord, `<a name>` ensuite, `#` nu → haut de
+    /// page). URL différente → navigation complète ; le
+    /// fragment est appliqué post-commit dans `sub_commit`.
+    fn try_fragment_nav(&mut self, tab: TabId, req: &Request) -> bool {
+        if req.method != Method::Get || req.body.is_some() {
+            return false;
+        }
+        let Some(frag) = req.url.fragment() else {
+            return false;
+        };
+        let same = self.tabs.get(&tab).is_some_and(|e| {
+            e.url
+                .as_ref()
+                .is_some_and(|u| u.as_str().split('#').next() == req.url.as_str().split('#').next())
+        });
+        if !same {
+            return false;
+        }
+        let prev = self.tabs.get(&tab).and_then(|e| e.title.clone());
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            e.hist.truncate(e.hist_idx + 1);
+            e.hist.push(req.clone());
+            e.hist_idx = e.hist.len() - 1;
+            e.url = Some(req.url.clone());
+        }
+        let title = self.tabs.get(&tab).and_then(|e| e.title.clone());
+        self.emit_navigated(tab, &req.url, title, prev.as_deref());
+        if frag.is_empty() {
+            // `#` nu = haut de page.
+            let _ = self.scroll_to_y(tab, 0.0);
+        } else {
+            self.scroll_to_fragment(tab, &frag.to_string());
+        }
+        true
+    }
+
+    /// Scrolle vers la cible d'un `#fragment` : `id` puis
+    /// `<a name>` (ordre navigateur). Position = le haut de
+    /// la première boîte posée portant le nœud — bornée
+    /// comme `scroll_by`. No-op si la cible est introuvable
+    /// ou non rendue (dégradation, jamais d'erreur).
+    fn scroll_to_fragment(&mut self, tab: TabId, frag: &str) {
+        let Some(entry) = self.tabs.get(&tab) else {
+            return;
+        };
+        let (Some(dom), Some(tree)) = (entry.dom.as_ref(), entry.tree.as_ref()) else {
+            return;
+        };
+        let target = find_by_id(dom, frag).or_else(|| find_named_anchor(dom, frag));
+        let Some(y) = target.and_then(|n| box_y_of_node(tree, n)) else {
+            return;
+        };
+        let _ = self.scroll_to_y(tab, y);
+    }
+
+    /// Scroll absolu borné `[0, doc_h − viewport]` + repaint
+    /// + `FrameInvalidated` — variante absolue de
+    /// `scroll_by` pour la navigation fragment (56d).
+    fn scroll_to_y(&mut self, tab: TabId, y: f32) -> Result<(), CoreError> {
+        {
+            let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            let max = (entry.doc_h - self.viewport.1).max(0.0);
+            let next = y.clamp(0.0, max);
+            if (next - entry.scroll_y).abs() < f32::EPSILON {
+                return Ok(());
+            }
+            entry.scroll_y = next;
+        }
+        self.repaint(tab)?;
+        self.emit_invalidated(tab);
+        Ok(())
+    }
+
     /// `navigate` vers l'URL de l'entrée **forward** (étape
     /// 56c, repro A→B→back→`navigate B`) : restaurer le
     /// snapshot bfcache — un commit complet de l'entrée —
@@ -1688,6 +1766,11 @@ impl Session {
         // `navigate` vers l'entrée forward = restauration
         // bfcache, jamais une peinture non commise (56c).
         if push && self.try_forward_nav(tab, &req) {
+            return Ok(self.tabs.get(&tab).and_then(|e| e.title.clone()));
+        }
+        // `#fragment` même document = scroll + historique,
+        // jamais de re-fetch (56d).
+        if self.try_fragment_nav(tab, &req) {
             return Ok(self.tabs.get(&tab).and_then(|e| e.title.clone()));
         }
         let mut job = self.nav_begin(tab, req, push)?;
@@ -2005,6 +2088,12 @@ impl Session {
         // hors de la vue session) — checkpoint de
         // persistance (étape 56).
         self.persist_cookies();
+        // Fragment cross-document (étape 56d) : la page est
+        // posée — scrolle vers `id`/`name` si l'URL en porte.
+        if let Some(frag) = url.fragment() {
+            let frag = frag.to_string();
+            self.scroll_to_fragment(tab, &frag);
+        }
         Ok(title)
     }
 
@@ -4889,6 +4978,39 @@ fn find_by_id(dom: &Dom, id: &str) -> Option<NodeId> {
     None
 }
 
+/// Repli navigateur pour les fragments (étape 56d) :
+/// `<a name="x">` quand aucun `id="x"` n'existe —
+/// itératif, même parcours que `find_by_id`.
+fn find_named_anchor(dom: &Dom, name: &str) -> Option<NodeId> {
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).ok().is_some_and(|t| t == "a")
+            && dom.attribute(n, "name").ok().flatten().as_deref() == Some(name)
+        {
+            return Some(n);
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    None
+}
+
+/// Hauteur `y` (haut) de la première boîte posée portant
+/// `target` — `min` sur toutes les boîtes du nœud (un
+/// élément peut en couvrir plusieurs — itératif, R-24).
+fn box_y_of_node(root: &LayoutBox, target: NodeId) -> Option<f32> {
+    let mut stack = vec![root];
+    let mut best: Option<f32> = None;
+    while let Some(bx) = stack.pop() {
+        if bx.node == Some(target) {
+            best = Some(best.map_or(bx.rect.y, |acc| acc.min(bx.rect.y)));
+        }
+        stack.extend(bx.children.iter());
+    }
+    best
+}
+
 /// Bascule l'état du contrôle : `checkbox` inverse son
 /// `checked` ; `radio` se coche et décoche ses homonymes
 /// (`name` identique) du même formulaire (ou du document
@@ -5602,6 +5724,11 @@ pub async fn navigate_shared(
         // `navigate` vers l'entrée forward = restauration
         // bfcache (56c) — jamais une peinture non commise.
         if push && s.try_forward_nav(tab, &req) {
+            return Ok(());
+        }
+        // `#fragment` même document = scroll, pas re-fetch
+        // (56d).
+        if s.try_fragment_nav(tab, &req) {
             return Ok(());
         }
         s.nav_begin(tab, req, push)?

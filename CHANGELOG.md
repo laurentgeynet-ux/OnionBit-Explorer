@@ -107,6 +107,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Reste connu : `column wrap` multi-colonnes, marges
   `auto` verticales en column, écarts fins justify/align.
 
+- **Étape 56d — `#fragment` : navigation + scroll vers la
+  cible** (`explorer-core`) : le défaut terrain mission 11
+  (`anchor.html`, footnotes Wikipedia — clic `href="#id"` :
+  `navigated` + entrée d'historique émis mais `scroll_y`
+  restait 0). `try_fragment_nav` traite le cas
+  **même-document** (GET, URL hors fragment identique à la
+  page commise) **sans re-fetch** : push historique,
+  `Navigated` émis, scroll vers la cible — `id` d'abord,
+  `<a name>` ensuite (ordre navigateur), `#` nu → haut de
+  page. Position = haut de la première boîte posée portant
+  le nœud (`box_y_of_node`, `min` itératif R-24), bornée
+  `[0, doc_h − viewport]` via `scroll_to_y`. Les fragments
+  **cross-document** (`url#frag` autre page) sont appliqués
+  post-commit dans `sub_commit`. Bonus : `back`/`forward`
+  vers une entrée historiée avec fragment rescrolle
+  naturellement (la requête porte le fragment). Cible
+  introuvable/non rendue → no-op, jamais d'erreur.
+  Régression : `fragment_nav_scrolls_without_refetch`.
+
 - **Étape 56b — `/frame` 204 persistant résolu : snapshots
   sans produit peint** (`explorer-core`) : le défaut terrain
   mission 11 (première nav `World_Wide_Web` — `navigated` +

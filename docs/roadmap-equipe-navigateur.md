@@ -376,14 +376,17 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   sniffing `StreamDecoder`). Régressions :
   `superseded_nav_reverts_speculative_paint`,
   `navigate_to_forward_url_restores_bfcache_entry`.
-- [ ] **Étape 56d. `#fragment` = navigation complète, sans
+- [x] **Étape 56d. `#fragment` = navigation complète, sans
   scroll** (terrain mission 11 — `anchor.html` + footnote
-  wikipedia) : clic sur `href="#id"` ou `name=` →
-  `navigated` émis, nouvelle entrée d'historique,
-  `frame_invalidated` plein document — mais `scroll_y`
-  reste 0 : jamais de déplacement vers la cible. Fix :
-  post-commit, résoudre le fragment (id puis `name`) et
-  scroller à sa position — sans re-fetch si même document.
+  wikipedia) : **livré.** `try_fragment_nav` traite le
+  même-document **sans re-fetch** (push historique +
+  `Navigated` + scroll vers `id` puis `<a name>`, `#` nu →
+  haut) ; les fragments cross-document sont appliqués
+  post-commit dans `sub_commit` (`scroll_to_fragment` →
+  `box_y_of_node`, borné `scroll_to_y`). Back/forward vers
+  une entrée fragmentée rescrolle — la requête historiée
+  porte le fragment. Régression :
+  `fragment_nav_scrolls_without_refetch`.
 - [x] **Étape 56e. `<img src>` jamais fetchée en session**
   (terrain mission 11 — `cache_server` `/page` avec
   `<img src=img.png>` : nav complète, zéro requête serveur

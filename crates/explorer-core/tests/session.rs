@@ -3882,3 +3882,66 @@ async fn navigate_to_forward_url_restores_bfcache_entry() {
     s.navigate(id, "http://h.test/d").await.unwrap();
     assert_eq!(t.calls(), calls + 1);
 }
+
+/// Étape 56d — `href="#id"` / `url#frag` : navigation
+/// **même-document** = entrée d'historique + scroll vers la
+/// cible (`id` puis `<a name>`), jamais de re-fetch ;
+/// fragment cross-document appliqué après le commit.
+#[tokio::test]
+async fn fragment_nav_scrolls_without_refetch() {
+    let (mut s, t) = test_session();
+    // Cible à ~2000px — déborde le viewport 800×600.
+    let page = "<!doctype html><html><head><style>.sp{height:2000px}</style></head>\
+        <body><div class=\"sp\">haut</div><p id=\"sec\">cible</p>\
+        <a name=\"named\">nommée</a></body></html>";
+    t.route("/a", 200, page);
+    t.route("/b", 200, page);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/a").await.unwrap();
+    let calls = t.calls();
+
+    // Même document : `#sec` → historique + scroll, zéro fetch.
+    s.navigate(id, "http://h.test/a#sec").await.unwrap();
+    assert_eq!(t.calls(), calls, "même document : pas de re-fetch (56d)");
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/a#sec"));
+    let scroll = match s
+        .handle_input(id, InputEvent::Scroll { dy: 0.0 })
+        .await
+        .unwrap()
+    {
+        InputOutcome::Scrolled { scroll_y } => scroll_y,
+        o => panic!("inattendu : {o:?}"),
+    };
+    assert!(
+        scroll > 0.0,
+        "le fragment doit scroller vers la cible (56d)"
+    );
+
+    // Repli `<a name>` : même résultat.
+    s.navigate(id, "http://h.test/a#named").await.unwrap();
+    let scroll = match s
+        .handle_input(id, InputEvent::Scroll { dy: 0.0 })
+        .await
+        .unwrap()
+    {
+        InputOutcome::Scrolled { scroll_y } => scroll_y,
+        o => panic!("inattendu : {o:?}"),
+    };
+    assert!(scroll > 0.0, "`<a name>` est une cible valide (56d)");
+
+    // Cross-document : /b#sec fetch puis scroll post-commit.
+    s.navigate(id, "http://h.test/b#sec").await.unwrap();
+    assert_eq!(t.calls(), calls + 1, "URL différente : fetch normal");
+    let scroll = match s
+        .handle_input(id, InputEvent::Scroll { dy: 0.0 })
+        .await
+        .unwrap()
+    {
+        InputOutcome::Scrolled { scroll_y } => scroll_y,
+        o => panic!("inattendu : {o:?}"),
+    };
+    assert!(
+        scroll > 0.0,
+        "fragment cross-document appliqué post-commit (56d)"
+    );
+}
