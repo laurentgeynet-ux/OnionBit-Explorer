@@ -125,7 +125,7 @@ couverture).
   `subtree`, `attributeFilter`, `oldValue`), delivery en
   microtask checkpoint, `disconnect`/`takeRecords`. Débloque
   l'étape 52.
-- [ ] **JS-C27. Traverse proxy net/storage** : `XhrTransport`,
+- [x] **JS-C27. Traverse proxy net/storage** : `XhrTransport`,
   `install_storage`, `CookieJar` traversent le canal
   `DilloEngine` (`drain_net_requests`/`deliver_net_response`/
   `set_storage`/`set_cookie_jar`) — prérequis interne de

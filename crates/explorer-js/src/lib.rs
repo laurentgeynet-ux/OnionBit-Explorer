@@ -73,6 +73,52 @@ pub enum NavRequest {
 /// URLs (étape 50).
 pub type UrlResolver = Arc<dyn Fn(&str, &str) -> Option<String> + Send + Sync>;
 
+/// Requête réseau émise par un script — `XMLHttpRequest` ou
+/// `fetch()` (JS-C27). Le moteur ne touche jamais le réseau :
+/// la session draine aux points de synchro, exécute via
+/// `HttpTransport` (sa politique : origine, CORS, quotas —
+/// ADR-0019) puis livre par [`JsEngine::deliver_net_response`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum NetRequest {
+    /// À exécuter — `handle` à répercuter dans [`NetResponse`].
+    Fetch {
+        /// Identifiant alloué par le moteur (unique par contexte).
+        handle: u64,
+        /// Méthode HTTP telle qu'écrite.
+        method: String,
+        /// URL telle qu'écrite — résolution à l'URL de page et
+        /// politique = affaire de la session.
+        url: String,
+        /// En-têtes `setRequestHeader`/opts, dans l'ordre.
+        headers: Vec<(String, String)>,
+        /// Corps `send(body)`/`fetch({body})`, si présent.
+        body: Option<String>,
+    },
+    /// `xhr.abort()` — annuler la tâche `handle` si encore en vol.
+    Abort {
+        /// Identifiant de la requête à annuler.
+        handle: u64,
+    },
+}
+
+/// Réponse livrée au moteur pour un `handle` drainé —
+/// `status == 0` = échec réseau (event `error`, rejet de
+/// promesse `fetch`). Miroir sérialisable de
+/// `dillo_js::XhrResponse` (aucun type moteur ne fuit).
+#[derive(Debug, Clone)]
+pub struct NetResponse {
+    /// Identifiant rendu par [`NetRequest::Fetch`].
+    pub handle: u64,
+    /// Statut HTTP (`0` = échec transport).
+    pub status: u16,
+    /// Phrase de raison.
+    pub status_text: String,
+    /// En-têtes de réponse.
+    pub headers: Vec<(String, String)>,
+    /// Corps brut — `responseText`/`text()` le décode en lossy.
+    pub body: Vec<u8>,
+}
+
 /// Moteur JavaScript vu du navigateur — un contexte par document.
 /// `Send` exigé : la session est partagée derrière l'API.
 pub trait JsEngine: Send {
@@ -157,6 +203,57 @@ pub trait JsEngine: Send {
     /// Borne le budget d'opérations de la prochaine évaluation
     /// (protection anti-script-infini — règle « budgets »).
     fn set_budget(&mut self, ops: u64);
+
+    /// Draine les requêtes réseau émises depuis le dernier
+    /// appel — `xhr.send()`, `fetch()`, `abort()` (JS-C27).
+    /// À appeler aux mêmes points de synchro que
+    /// [`Self::drain_nav_requests`] : les handlers livrés par
+    /// [`Self::deliver_net_response`] peuvent en émettre de
+    /// nouvelles. Défaut : rien.
+    fn drain_net_requests(&mut self) -> Vec<NetRequest> {
+        Vec::new()
+    }
+
+    /// Livre la réponse d'une requête drainée : `readyState` →
+    /// `done`, handlers `readystatechange`/`load`/`error` et
+    /// résolution de promesse `fetch()` tirent ici, en
+    /// synchrone moteur (les microtasks sont vidées au retour —
+    /// [`Self::run_pending`] reste le point de pompe).
+    /// Défaut : `Ok(())` (moteur sans réseau).
+    ///
+    /// # Errors
+    /// [`JsError::Uncaught`] si un handler jette,
+    /// [`JsError::Dead`] si le moteur est inerte.
+    fn deliver_net_response(&mut self, _resp: NetResponse) -> Result<(), JsError> {
+        Ok(())
+    }
+
+    /// Installe `localStorage`/`sessionStorage` : `local` est le
+    /// snapshot **par origine** de la session (le moteur y écrit
+    /// en direct — relire via [`Self::drain_storage`]),
+    /// `sessionStorage` est frais par contexte. Défaut : pas de
+    /// storage globals.
+    fn install_storage(&mut self, _local: std::collections::BTreeMap<String, String>) {}
+
+    /// Extrait le contenu `localStorage` courant — la session
+    /// le persiste par origine. Défaut : map vide.
+    fn drain_storage(&mut self) -> std::collections::BTreeMap<String, String> {
+        std::collections::BTreeMap::new()
+    }
+
+    /// Pose le snapshot `document.cookie` : fragment
+    /// `« k=v; k2=v2 »` pré-filtré par la session pour l'origine
+    /// de la page (le vrai jar applique HttpOnly/Secure/SameSite
+    /// — le moteur ne voit que la vue script). Défaut : noop.
+    fn set_cookie_snapshot(&mut self, _header: &str) {}
+
+    /// Draine les écritures `document.cookie =` brutes
+    /// (`« k=v; attrs… »`) — la session les soumet à son jar
+    /// après avoir retiré `HttpOnly` (non posable par script).
+    /// Défaut : rien.
+    fn drain_cookie_writes(&mut self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// Fabrique de contextes — une instance par document chargé.
@@ -218,6 +315,25 @@ enum Cmd {
     SetBudget {
         ops: u64,
     },
+    DrainNet {
+        tx: Sender<Vec<NetRequest>>,
+    },
+    DeliverNet {
+        resp: NetResponse,
+        tx: Sender<Result<(), JsError>>,
+    },
+    InstallStorage {
+        local: std::collections::BTreeMap<String, String>,
+    },
+    DrainStorage {
+        tx: Sender<std::collections::BTreeMap<String, String>>,
+    },
+    CookieSnap {
+        header: String,
+    },
+    DrainCookies {
+        tx: Sender<Vec<String>>,
+    },
     Shutdown,
 }
 
@@ -258,6 +374,17 @@ impl DilloEngine {
         // par `DrainNav` (jamais de navigation re-entrante).
         let nav_q: std::rc::Rc<std::cell::RefCell<Vec<NavRequest>>> =
             std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        // Requêtes XHR/fetch émises par les scripts — `ChanXhr`
+        // (`Rc` thread-local) alimente, `DrainNet` vide.
+        let net_q: std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        // Jar `document.cookie` : snapshot session + miroir des
+        // écritures — drainé pour le vrai jar (politiques dans
+        // `explorer-net`, jamais ici).
+        let jar = std::rc::Rc::new(SnapshotJar::default());
+        // Backing `localStorage` posé par `InstallStorage` — le
+        // moteur y écrit en direct, `DrainStorage` le relit.
+        let mut local_store: Option<dillo_js::Storage> = None;
         while let Ok(cmd) = rx.recv() {
             match cmd {
                 Cmd::Eval { src, tx } => {
@@ -280,27 +407,15 @@ impl DilloEngine {
                     page_url,
                     history_len,
                 } => {
-                    let d =
-                        std::rc::Rc::new(std::cell::RefCell::new(dillo_js::Dom::from_html(&html)));
-                    // Le parse initial lève le dirty bit — la
-                    // construction n'est pas une mutation JS,
-                    // on le consomme pour ne resynchroniser que
-                    // les vraies mutations de script.
-                    d.borrow().take_dirty();
-                    eng.install_dom(&d);
-                    eng.set_page_url(&page_url);
-                    {
-                        let q = nav_q.clone();
-                        let nav: std::rc::Rc<dyn Fn(&str)> = std::rc::Rc::new(move |u| {
-                            q.borrow_mut().push(NavRequest::Navigate(u.to_string()));
-                        });
-                        let q2 = nav_q.clone();
-                        let hist: std::rc::Rc<dyn Fn(i32)> = std::rc::Rc::new(move |n| {
-                            q2.borrow_mut().push(NavRequest::HistoryGo(n));
-                        });
-                        eng.set_nav_hooks(nav, hist, history_len);
-                    }
-                    jsd = Some(d);
+                    jsd = Some(install_dom(
+                        &mut eng,
+                        &nav_q,
+                        &net_q,
+                        &jar,
+                        &html,
+                        &page_url,
+                        history_len,
+                    ));
                 }
                 Cmd::DrainNav { tx } => {
                     let out = std::mem::take(&mut *nav_q.borrow_mut());
@@ -352,6 +467,12 @@ impl DilloEngine {
                 }
                 Cmd::SetBudget { ops } => eng.set_op_limit(ops),
                 Cmd::Shutdown => return,
+                // Surfaces script-initiées (JS-C27) déléguées.
+                net => {
+                    if !serve_net(&mut eng, &net_q, &jar, &mut local_store, net) {
+                        return;
+                    }
+                }
             }
         }
     }
@@ -459,6 +580,48 @@ impl JsEngine for DilloEngine {
         // Feu-et-oublie : le budget s'applique au prochain eval.
         let _ = self.tx.send(Cmd::SetBudget { ops });
     }
+
+    fn drain_net_requests(&mut self) -> Vec<NetRequest> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainNet { tx }).is_err() {
+            return Vec::new();
+        }
+        rx.recv().unwrap_or_default()
+    }
+
+    fn deliver_net_response(&mut self, resp: NetResponse) -> Result<(), JsError> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DeliverNet { resp, tx }).is_err() {
+            return Err(JsError::Dead);
+        }
+        rx.recv().map_err(|_| JsError::Dead)?
+    }
+
+    fn install_storage(&mut self, local: std::collections::BTreeMap<String, String>) {
+        let _ = self.tx.send(Cmd::InstallStorage { local });
+    }
+
+    fn drain_storage(&mut self) -> std::collections::BTreeMap<String, String> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainStorage { tx }).is_err() {
+            return std::collections::BTreeMap::new();
+        }
+        rx.recv().unwrap_or_default()
+    }
+
+    fn set_cookie_snapshot(&mut self, header: &str) {
+        let _ = self.tx.send(Cmd::CookieSnap {
+            header: header.to_string(),
+        });
+    }
+
+    fn drain_cookie_writes(&mut self) -> Vec<String> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainCookies { tx }).is_err() {
+            return Vec::new();
+        }
+        rx.recv().unwrap_or_default()
+    }
 }
 
 impl Drop for DilloEngine {
@@ -468,6 +631,95 @@ impl Drop for DilloEngine {
             let _ = j.join();
         }
     }
+}
+
+/// Bras JS-C27 du worker : drains et livraisons des surfaces
+/// net/storage/cookie. `false` = canal de réponse fermé → le
+/// worker s'arrête ; tout autre `Cmd` est ignoré (invariant :
+/// l'appelant ne délègue que les commandes net).
+fn serve_net(
+    eng: &mut dillo_js::Engine,
+    net_q: &std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    jar: &std::rc::Rc<SnapshotJar>,
+    local_store: &mut Option<dillo_js::Storage>,
+    cmd: Cmd,
+) -> bool {
+    match cmd {
+        Cmd::DrainNet { tx } => {
+            let out = std::mem::take(&mut *net_q.borrow_mut());
+            tx.send(out).is_ok()
+        }
+        Cmd::DeliverNet { resp, tx } => {
+            let out = eng
+                .deliver_xhr_response(dillo_js::XhrResponse {
+                    handle: resp.handle,
+                    status: resp.status,
+                    status_text: resp.status_text,
+                    headers: resp.headers,
+                    body: resp.body,
+                })
+                .map_err(|t| JsError::Uncaught(eng.describe(t.0)));
+            tx.send(out).is_ok()
+        }
+        Cmd::InstallStorage { local } => {
+            let map: dillo_js::Storage = std::rc::Rc::new(std::cell::RefCell::new(local));
+            eng.install_storage(&map);
+            *local_store = Some(map);
+            true
+        }
+        Cmd::DrainStorage { tx } => {
+            let out = local_store
+                .as_ref()
+                .map_or_else(std::collections::BTreeMap::new, |m| m.borrow().clone());
+            tx.send(out).is_ok()
+        }
+        Cmd::CookieSnap { header } => {
+            jar.set_header(&header);
+            true
+        }
+        Cmd::DrainCookies { tx } => {
+            let out = std::mem::take(&mut *jar.writes.borrow_mut());
+            tx.send(out).is_ok()
+        }
+        _ => true,
+    }
+}
+
+/// `Cmd::InstallDom` côté worker : miroir parsé (dirty bit
+/// consommé — la construction n'est pas une mutation JS),
+/// bindings `document`/`location`/`history`, puis surface
+/// script-initiée (JS-C27) : XHR + `fetch` → `net_q`,
+/// `document.cookie` → `jar`. Renvoie le `DomRef` installé.
+fn install_dom(
+    eng: &mut dillo_js::Engine,
+    nav_q: &std::rc::Rc<std::cell::RefCell<Vec<NavRequest>>>,
+    net_q: &std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    jar: &std::rc::Rc<SnapshotJar>,
+    html: &str,
+    page_url: &str,
+    history_len: u32,
+) -> dillo_js::DomRef {
+    let d = std::rc::Rc::new(std::cell::RefCell::new(dillo_js::Dom::from_html(html)));
+    d.borrow().take_dirty();
+    eng.install_dom(&d);
+    eng.set_page_url(page_url);
+    {
+        let q = nav_q.clone();
+        let nav: std::rc::Rc<dyn Fn(&str)> = std::rc::Rc::new(move |u| {
+            q.borrow_mut().push(NavRequest::Navigate(u.to_string()));
+        });
+        let q2 = nav_q.clone();
+        let hist: std::rc::Rc<dyn Fn(i32)> = std::rc::Rc::new(move |n| {
+            q2.borrow_mut().push(NavRequest::HistoryGo(n));
+        });
+        eng.set_nav_hooks(nav, hist, history_len);
+    }
+    eng.install_xhr(std::rc::Rc::new(ChanXhr {
+        q: std::rc::Rc::clone(net_q),
+        next: std::cell::Cell::new(0),
+    }));
+    eng.set_cookie_jar(jar.clone());
+    d
 }
 
 /// Balises que le tree-builder HTML5 synthétise quand la source
@@ -523,5 +775,92 @@ impl dillo_js::ModuleLoader for MapLoader {
             .get(&key)
             .cloned()
             .ok_or_else(|| format!("module non chargé : {key}"))
+    }
+}
+
+/// `XhrTransport` du thread moteur (JS-C27) : `send`/`abort`
+/// n'exécutent rien — ils empilent des [`NetRequest`] drainées
+/// par la session, qui possède `HttpTransport` (modèle
+/// drain-nav généralisé : jamais d'I/O depuis le moteur).
+struct ChanXhr {
+    /// File partagée avec `DrainNet`.
+    q: std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    /// Prochain handle libre (compteur du contexte).
+    next: std::cell::Cell<u64>,
+}
+
+impl dillo_js::XhrTransport for ChanXhr {
+    fn send(&self, req: &dillo_js::XhrRequest) -> u64 {
+        let handle = self.next.get();
+        self.next.set(handle + 1);
+        self.q.borrow_mut().push(NetRequest::Fetch {
+            handle,
+            method: req.method.clone(),
+            url: req.url.clone(),
+            headers: req.headers.clone(),
+            body: req.body.clone(),
+        });
+        handle
+    }
+
+    fn abort(&self, handle: u64) {
+        self.q.borrow_mut().push(NetRequest::Abort { handle });
+    }
+}
+
+/// Jar `document.cookie` thread-local (JS-C27) — le vrai jar
+/// (`explorer-net`, politiques Secure/SameSite/HttpOnly) vit
+/// côté session : le moteur reçoit un snapshot `« k=v »` et
+/// miroire les écritures pour une lecture post-écriture
+/// cohérente ; la session draine les écritures brutes.
+#[derive(Default)]
+struct SnapshotJar {
+    /// Vue `« nom → valeur »` du snapshot + écritures mises
+    /// en miroir (le `set` n'interprète que le premier
+    /// segment `k=v` — les attrs relèvent du vrai jar).
+    map: std::cell::RefCell<std::collections::BTreeMap<String, String>>,
+    /// Écritures brutes `« k=v; attrs… »` — drainées.
+    writes: std::cell::RefCell<Vec<String>>,
+}
+
+impl SnapshotJar {
+    /// Fragment `« k=v; k2=v2 »` pour `document.cookie`.
+    fn header(&self) -> String {
+        self.map
+            .borrow()
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
+    /// Remplace la vue par le snapshot de la session.
+    fn set_header(&self, header: &str) {
+        let mut m = self.map.borrow_mut();
+        m.clear();
+        for pair in header.split(';') {
+            if let Some((k, v)) = pair.trim().split_once('=') {
+                m.insert(k.trim().to_string(), v.trim().to_string());
+            }
+        }
+    }
+}
+
+impl dillo_js::CookieJar for SnapshotJar {
+    fn get(&self, _url: &str) -> String {
+        self.header()
+    }
+
+    fn set(&self, _url: &str, cookie: &str) {
+        self.writes.borrow_mut().push(cookie.to_string());
+        if let Some((k, v)) = cookie
+            .split(';')
+            .next()
+            .and_then(|p| p.trim().split_once('='))
+        {
+            self.map
+                .borrow_mut()
+                .insert(k.trim().to_string(), v.trim().to_string());
+        }
     }
 }

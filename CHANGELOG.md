@@ -9,6 +9,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C27 — Traverse proxy net/storage/cookie** (`explorer-js`) :
+  les surfaces `dillo-js` déjà livrées traversent le canal
+  `DilloEngine` — pattern `drain_nav_requests` généralisé.
+  `JsEngine` : `drain_net_requests()` (`NetRequest::Fetch` /
+  `Abort`, `XhrTransport` côté worker empile, jamais d'I/O
+  depuis le moteur) + `deliver_net_response()` (miroir
+  sérialisable de `XhrResponse` — `readyState`/promesses et
+  handlers tirent en synchrone moteur). `install_storage` /
+  `drain_storage` : `localStorage` partagé par snapshot
+  `BTreeMap` (persistance par origine côté session),
+  `sessionStorage` frais par contexte. `set_cookie_snapshot` /
+  `drain_cookie_writes` : vue `document.cookie` posée par la
+  session (le vrai jar garde les politiques
+  HttpOnly/Secure/SameSite), écritures brutes drainées avec
+  miroir local de lecture. Prérequis interne de l'étape 51.
 - **R-1 — Peinture progressive : le domaine tolère un document
   en construction** (`explorer-dom`, `explorer-html`,
   `explorer-layout`, `explorer-render`) : conduite incrémentale
