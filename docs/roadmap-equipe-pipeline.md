@@ -126,7 +126,7 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
 ## Tâches continues
 
 - **Triage rendu** des échecs `site_smoke.ps1` : les écarts
-  visuels classés « pipeline » par la sync hebdo deviennent des
+  visuels classés « pipeline » au triage deviennent des
   cas de test (`tests/` du crate fautif) puis des R-xx.
 - **Corpus vivant** : tout bug site réel → test minimal avant fix
   (méthode des étapes 48/49 — elle a fait ses preuves).

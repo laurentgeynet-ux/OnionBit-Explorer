@@ -227,7 +227,16 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
 
 Le projet est piloté par **deux équipes à taille comparable**,
 découpées sur l'axe de la clean architecture (§6) — le domaine
-pur d'un côté, la plateforme produit de l'autre :
+pur d'un côté, la plateforme produit de l'autre.
+
+> « Équipe » = une **piste de travail parallèle** (session/agent
+> dédié) travaillant dans le même arbre — pas un groupe de
+> personnes. Les règles ci-dessous gouvernent le *code* : qui
+> touche quoi, dans quel ordre, sous quels contrats — c'est du
+> contrôle de concurrence, pas de l'organisation humaine. Pas de
+> réunion : le journal `docs/interface-equipes.md` et le
+> `CHANGELOG` **sont** la synchronisation, asynchrone ; la revue
+> se fait au rythme de l'opérateur.
 
 - **Équipe PIPELINE** — le domaine pur (zéro I/O, zéro async) :
   `explorer-common`, `explorer-dom`, `explorer-html`,
@@ -306,4 +315,4 @@ Règles de la coexistence :
    fautif (visuel/layout → PIPELINE ; session/réseau/JS/UI →
    NAVIGATEUR ; parse miroir fautif → piste JS).
    Le smoke sites réels (`scripts/site_smoke.ps1`) produit la
-   liste, triée en sync hebdo.
+   liste, triée aux revues de l'opérateur.
