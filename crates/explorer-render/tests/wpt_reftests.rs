@@ -38,7 +38,7 @@ const VIEW_H: f32 = 600.0;
 /// Cliquet : score minimal attendu — mesuré 2026-02 à 17/40
 /// (42 %) sur la première extraction ; à monter à chaque
 /// progrès float/BFC/marges.
-const WPT_BASELINE: usize = 38;
+const WPT_BASELINE: usize = 40;
 
 /// Tolérance AA : pixels dont le delta maximal de canal est
 /// ≤ [`FUZZY_CHANNEL`] comptent « doux » ; au-delà « dur ».
@@ -99,6 +99,76 @@ fn strip_xml_prolog(src: &str) -> &str {
     s.strip_prefix("<?").map_or(s, |rest| {
         rest.find("?>").map_or(s, |i| rest[i + 2..].trim_start())
     })
+}
+
+/// Éléments vides HTML — `/>` y est déjà correct en parsing
+/// HTML, inutile de les toucher.
+const VOID: &[&str] = &[
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
+    "track", "wbr",
+];
+
+/// Normalisation `.xhtml` → HTML : les fixtures XHTML sont
+/// servies en XML par le WPT — `<div …/>` s'y ferme
+/// réellement, alors que le parsing HTML ignore `/>` hors
+/// éléments vides (la balise resterait ouverte et absorberait
+/// tous ses « frères »). On réécrit `<t …/>` en `<t …></t>`
+/// à la lecture — le corpus n'est pas modifié, on reproduit
+/// juste la sémantique du type MIME.
+#[allow(clippy::many_single_char_names)] // scanner d'octets — indices courts
+fn normalize_xhtml(src: &str) -> String {
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 64);
+    let (mut i, mut last) = (0usize, 0usize);
+    while i < bytes.len() {
+        if bytes[i] == b'<' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_alphabetic() {
+            let mut j = i + 1;
+            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'-') {
+                j += 1;
+            }
+            let name = &src[i + 1..j];
+            // Fin de balise : `>` hors guillemets d'attribut.
+            let mut quote = None;
+            let mut k = j;
+            while k < bytes.len() {
+                match (quote, bytes[k]) {
+                    (Some(q), ch) if ch == q => quote = None,
+                    (None, b'"' | b'\'') => quote = Some(bytes[k]),
+                    (None, b'>') => break,
+                    _ => {}
+                }
+                k += 1;
+            }
+            if k < bytes.len() && !VOID.contains(&name) {
+                let tag = src[i..k].trim_end();
+                if let Some(open) = tag.strip_suffix('/') {
+                    out.push_str(&src[last..i]);
+                    out.push_str(open);
+                    out.push_str("></");
+                    out.push_str(name);
+                    out.push('>');
+                    last = k + 1;
+                    i = last;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    out.push_str(&src[last..]);
+    out
+}
+
+/// Lit une fixture : prolog XML retiré, et normalisation
+/// `<t/>`→`<t></t>` pour les fichiers servis en XML (`.xhtml`,
+/// `.xht`).
+fn load_fixture(path: &Path) -> Option<String> {
+    let src = std::fs::read_to_string(path).ok()?;
+    let src = strip_xml_prolog(&src);
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("xhtml" | "xht") => Some(normalize_xhtml(src)),
+        _ => Some(src.to_string()),
+    }
 }
 
 /// CSS des `<style>` de la page (ordre document).
@@ -288,17 +358,17 @@ fn wpt_reftests_pixel() {
         }
         total += 1;
         let test_path = dir.join(rel);
-        let Ok(src) = std::fs::read_to_string(&test_path) else {
+        let Some(src) = load_fixture(&test_path) else {
             failures.push(format!("{name}: illisible"));
             continue;
         };
-        let test_dom = TreeBuilder::parse(strip_xml_prolog(&src));
+        let test_dom = TreeBuilder::parse(&src);
         let Some((kind, href)) = ref_link(&test_dom) else {
             no_ref.push(name);
             continue;
         };
         let ref_path = resolve(&test_path, &href);
-        let Ok(ref_src) = std::fs::read_to_string(&ref_path) else {
+        let Some(ref_src) = load_fixture(&ref_path) else {
             failures.push(format!("{name}: ref {href} absente"));
             continue;
         };
@@ -322,11 +392,9 @@ fn wpt_reftests_pixel() {
         if identical == (kind == "match") {
             passed += 1;
         } else {
-            let diff = hard * 4 + soft;
             failures.push(format!(
                 "{name}: {kind}, {hard} px durs + {soft} px doux divergents"
             ));
-            let _ = diff;
             // PNG de diagnostic sous `target/wpt_fail/` —
             // debug visuel, jamais assertif.
             if let (Some(pa), Some(pb)) = (a.encode_png(), b.encode_png()) {

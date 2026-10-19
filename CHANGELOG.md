@@ -48,6 +48,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `object_resolu_est_remplace_sinon_repli_enfants`,
   `background_position_*`, cellules anonymes.
 
+- **R-13 (en cours) — items flex/grid + corpus WPT
+  étendu** (`explorer-css`, `explorer-layout`,
+  `explorer-render`) :
+  - Conteneurs flex/grid : les enfants directs ne sont
+    plus fusionnés en un bloc anonyme unique — chaque
+    enfant devient un item (blockifié §9.7), seules les
+    séries de texte nu se groupent.
+  - Boîtes en-ligne posées comme conteneurs
+    (`inline-block`, item flex/grid, repli `<object>`) :
+    leur contenu coule désormais via `layout_inline` — le
+    texte d'un `inline-block` item flex recevait un rect
+    0×0 et n'était jamais peint.
+  - Marges des items flex : `margin-top/bottom` sur l'axe
+    principal en `column`, marges cross comptées dans la
+    taille de ligne (§9.4) et appliquées à la pose
+    (`stretch` remplit la margin box).
+  - Shorthands cascade : `flex-flow` →
+    `flex-direction`/`flex-wrap`, `flex` →
+    grow/shrink/basis, `gap` → `row-gap`/`column-gap`.
+  - Corpus WPT : +19 reftests (flexbox + grid), harnais
+    `.xhtml` normalisé (`<t/>` → `<t></t>` — servi en XML
+    par WPT, le parsing HTML ignorerait `/>` hors vides) ;
+    cliquet `WPT_BASELINE` 38 → 40/58.
+  Reste connu : `column wrap` multi-colonnes, marges
+  `auto` verticales en column, écarts fins justify/align.
+
 - **Étape 55d — `FrameInvalidated` rapporte le delta, pas
   l'historique** (`explorer-core`) : `Tab::dirty` garde
   l'accumulation complète pour le pull FFI (`take_dirty`,

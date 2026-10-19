@@ -333,6 +333,9 @@ pub(crate) fn flow_flex_children(
         // finale plus bas) : tailles flex, marges auto,
         // justify — tout se calcule **par ligne** (§9.6/9.7).
         let mut crosses: Vec<f32> = vec![0.0; n];
+        // Marges cross (haut/bas) par item — ajoutées à la
+        // taille de ligne ET à l'offset de pose (passe 2).
+        let mut cross_margins: Vec<(f32, f32)> = vec![(0.0, 0.0); n];
         let mut line_crosses = Vec::with_capacity(lines.len());
         for line in &lines {
             let lgaps = gap * (line.len() as f32 - 1.0).max(0.0);
@@ -412,7 +415,9 @@ pub(crate) fn flow_flex_children(
             if axis.reverse {
                 lead = main_cb - used - lead;
             }
-            // Passe 1 : pose à (lead…, 0) — cross = hauteurs.
+            // Passe 1 : pose à (lead…, 0) — cross = hauteurs
+            // **extérieures** (§9.4 : les marges cross
+            // comptent dans la taille de ligne).
             let mut pen = content_x + lead.max(0.0);
             let mut line_cross = 0.0f32;
             for (lk, &k) in line.iter().enumerate() {
@@ -426,7 +431,12 @@ pub(crate) fn flow_flex_children(
                     fs,
                     pos_cb,
                 );
-                crosses[k] = bx.children[i].rect.height;
+                let c = &bx.children[i];
+                let cfs = font_size_px(&c.style, fs, ctx);
+                let mt = side_px(&c.style, "margin-top", main_cb, cfs, ctx, 0.0);
+                let mb = side_px(&c.style, "margin-bottom", main_cb, cfs, ctx, 0.0);
+                cross_margins[k] = (mt, mb);
+                crosses[k] = c.rect.height + mt + mb;
                 line_cross = line_cross.max(crosses[k]);
                 pen += sizes_l[lk] + line_margins[k].0 + line_margins[k].1 + gap + between;
             }
@@ -501,9 +511,12 @@ pub(crate) fn flow_flex_children(
                     c.style.get("margin-bottom") == Some("auto"),
                 );
                 let line_dy = y_off[li] - start_cursor;
+                let (mt, mb) = cross_margins[k];
                 if mode == "stretch" && !explicit_h {
-                    c.rect.height = line_cross;
-                    translate_subtree(c, 0.0, line_dy);
+                    // La margin box remplit la ligne : la
+                    // border box = ligne − marges cross.
+                    c.rect.height = (line_cross - mt - mb).max(0.0);
+                    translate_subtree(c, 0.0, line_dy + mt);
                     continue;
                 }
                 let inner = if top_auto || bot_auto {
@@ -516,7 +529,7 @@ pub(crate) fn flow_flex_children(
                 } else {
                     align_offset(mode, line_cross, crosses[k])
                 };
-                translate_subtree(c, 0.0, line_dy + inner);
+                translate_subtree(c, 0.0, line_dy + inner + mt);
             }
         }
         start_cursor + total_cross
@@ -536,6 +549,22 @@ pub(crate) fn flow_flex_children(
                 pen_y += gap;
             }
             let c = &mut bx.children[i];
+            let cfs = font_size_px(&c.style, fs, ctx);
+            // Marges de l'axe principal (vertical) : à la
+            // charge du conteneur flex — `layout_block` ne
+            // gère pas sa propre marge haute (rôle du parent
+            // en flux normal).
+            let mt = if c.style.get("margin-top") == Some("auto") {
+                0.0
+            } else {
+                side_px(&c.style, "margin-top", main_cb, cfs, ctx, 0.0)
+            };
+            let mb = if c.style.get("margin-bottom") == Some("auto") {
+                0.0
+            } else {
+                side_px(&c.style, "margin-bottom", main_cb, cfs, ctx, 0.0)
+            };
+            pen_y += mt;
             let mode = item_flex(c, false, main_cb, fs, ctx)
                 .align
                 .unwrap_or_else(|| align.clone());
@@ -545,17 +574,31 @@ pub(crate) fn flow_flex_children(
                 c.style.get("margin-left") == Some("auto"),
                 c.style.get("margin-right") == Some("auto"),
             );
-            let slack = (content_w - c.rect.width).max(0.0);
+            let ml = if l_auto {
+                0.0
+            } else {
+                side_px(&c.style, "margin-left", content_w, cfs, ctx, 0.0)
+            };
+            let mr = if r_auto {
+                0.0
+            } else {
+                side_px(&c.style, "margin-right", content_w, cfs, ctx, 0.0)
+            };
+            // `layout_block` a déjà décalé la border box de
+            // ml — la margin box est donc à content_x ; on
+            // translate du delta d'alignement seulement.
+            let outer_w = c.rect.width + ml + mr;
+            let slack = (content_w - outer_w).max(0.0);
             let dx = match (l_auto, r_auto) {
                 (true, true) => slack / 2.0,
                 (true, false) => slack,
                 (false, true) => 0.0,
-                (false, false) => align_offset(&mode, content_w, c.rect.width),
+                (false, false) => align_offset(&mode, content_w, outer_w),
             };
             if dx > 0.0 {
                 translate_subtree(c, dx, 0.0);
             }
-            pen_y += c.rect.height;
+            pen_y += c.rect.height + mb;
         }
         pen_y
     }

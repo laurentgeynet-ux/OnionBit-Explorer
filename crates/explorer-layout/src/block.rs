@@ -657,6 +657,18 @@ pub(crate) fn layout_block(
         Some("grid" | "inline-grid") => {
             crate::grid::flow_grid_children(bx, content_x, cursor, content_w, ctx, fs, pos_cb)
         }
+        // Boîte en-ligne posée comme conteneur (`inline-block`,
+        // item flex/grid blockifié, repli `<object>`) : son
+        // contenu coule dans son PROPRE contexte en-ligne
+        // (§9.2.4) — sans cette route, les enfants `Text`
+        // d'un inline-block gardaient un rect 0×0 et leur
+        // texte n'était jamais peint.
+        _ if bx.kind == BoxKind::Inline && bx.children.iter().all(|c| c.kind.is_inline_level()) => {
+            let used = crate::inline::layout_inline(
+                bx, content_x, cursor, content_w, ctx, fs, pos_cb, fl, cb_h,
+            );
+            cursor + used
+        }
         _ => flow_children(
             bx,
             content_x,

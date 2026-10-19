@@ -349,11 +349,7 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
         slot: BoxSlot::default(),
     };
     let children = child_boxes(dom, root, styles, &style, sizes);
-    b.children = if kind.is_inline_level() {
-        children // en-ligne : pas d'enveloppe anonyme ici
-    } else {
-        wrap_anonymous(children, &style)
-    };
+    b.children = wrap_children(children, &style, kind);
     Some(b)
 }
 
@@ -519,6 +515,44 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
     }
 }
 
+/// Enfants d'un conteneur **flex/grid** (flexbox §4 / grid
+/// §5.1.1) : chaque enfant in-flow devient un item — on ne
+/// fusionne JAMAIS des éléments dans un bloc anonyme commun.
+/// Seules les suites de **texte nu** sont groupées en item
+/// anonyme propre ; le blanc pur disparaît.
+fn wrap_items(children: Vec<LayoutBox>, parent_style: &ComputedStyle) -> Vec<LayoutBox> {
+    let mut out = Vec::new();
+    let mut run: Vec<LayoutBox> = Vec::new();
+    for b in children {
+        if b.kind == BoxKind::Text {
+            run.push(b);
+        } else {
+            flush_run(&mut out, &mut run, parent_style);
+            out.push(b);
+        }
+    }
+    flush_run(&mut out, &mut run, parent_style);
+    out
+}
+
+/// Post-traitement des enfants selon le conteneur :
+/// flex/grid → items (§9.7 blockification), autre bloc →
+/// anonymisation des suites en-ligne (§9.2.1.1), inline →
+/// enfants directs.
+fn wrap_children(children: Vec<LayoutBox>, style: &ComputedStyle, kind: BoxKind) -> Vec<LayoutBox> {
+    if kind.is_inline_level() {
+        return children;
+    }
+    if matches!(
+        style.get("display"),
+        Some("flex" | "inline-flex" | "grid" | "inline-grid")
+    ) {
+        wrap_items(children, style)
+    } else {
+        wrap_anonymous(children, style)
+    }
+}
+
 /// Enveloppe les suites de niveau en-ligne dans des blocs
 /// anonymes (CSS 2.1 §9.2.1.1). Les boîtes texte blanches
 /// pures en bord de suite sont tronquées ; une suite
@@ -659,11 +693,7 @@ fn object_box(
     // enfants prennent la place de l'objet.
     if b.intrinsic.is_none() {
         let children = child_boxes(dom, root, styles, style, sizes);
-        b.children = if kind.is_inline_level() {
-            children
-        } else {
-            wrap_anonymous(children, style)
-        };
+        b.children = wrap_children(children, style, kind);
     }
     b
 }

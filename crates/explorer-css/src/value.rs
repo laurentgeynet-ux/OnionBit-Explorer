@@ -381,11 +381,83 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
             Some(expand_border_parts(name, value))
         }
         "overflow" => expand_overflow(value),
+        "flex-flow" => Some(expand_flex_flow(value)),
+        "flex" => expand_flex(value),
+        "gap" => expand_gap(value),
         "background" => expand_background(value),
         "font" => expand_font(value),
         "list-style" => expand_list_style(value),
         _ => None,
     }
+}
+
+/// `flex-flow` : `[direction] [wrap]` ordre libre → longhands.
+fn expand_flex_flow(value: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for part in value.split_whitespace() {
+        match part {
+            "row" | "row-reverse" | "column" | "column-reverse" => {
+                out.push(("flex-direction".to_string(), part.to_string()));
+            }
+            "nowrap" | "wrap" | "wrap-reverse" => {
+                out.push(("flex-wrap".to_string(), part.to_string()));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// `flex` : `none | auto | initial | [<grow> [<shrink>] ||
+/// <basis>]` → longhands (le seul `<grow>` implique shrink=1,
+/// basis=0 ; `flex-basis` seul non supporté en position 1).
+fn expand_flex(value: &str) -> Option<Vec<(String, String)>> {
+    let t = value.trim();
+    let (grow, shrink, basis) = match t {
+        "none" => ("0", "0", "auto"),
+        "auto" => ("1", "1", "auto"),
+        "initial" => ("0", "1", "auto"),
+        _ => {
+            let mut grow = "1";
+            let mut shrink = "1";
+            let mut basis = "0%";
+            let mut nums = t.split_whitespace().filter(|s| s.parse::<f32>().is_ok());
+            if let Some(g) = nums.next() {
+                grow = g;
+                if let Some(s) = nums.next() {
+                    shrink = s;
+                }
+                if let Some(b) = t.split_whitespace().find(|s| s.parse::<f32>().is_err()) {
+                    basis = b;
+                }
+            } else {
+                // `flex: <basis>` seul (ex. "30px") → `1 1 <basis>`.
+                let mut it = t.split_whitespace();
+                if let (Some(b), None) = (it.next(), it.next()) {
+                    basis = b;
+                } else {
+                    return None;
+                }
+            }
+            (grow, shrink, basis)
+        }
+    };
+    Some(vec![
+        ("flex-grow".to_string(), grow.to_string()),
+        ("flex-shrink".to_string(), shrink.to_string()),
+        ("flex-basis".to_string(), basis.to_string()),
+    ])
+}
+
+/// `gap` : `<row> [<col>]` → `row-gap`/`column-gap`.
+fn expand_gap(value: &str) -> Option<Vec<(String, String)>> {
+    let mut it = value.split_whitespace();
+    let row = it.next()?;
+    let col = it.next().unwrap_or(row);
+    Some(vec![
+        ("row-gap".to_string(), row.to_string()),
+        ("column-gap".to_string(), col.to_string()),
+    ])
 }
 
 /// `margin`/`padding` : 1..4 valeurs → quatre longhands.
