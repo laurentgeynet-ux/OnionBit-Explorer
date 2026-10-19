@@ -270,6 +270,18 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
             intrinsic,
         ));
     }
+    // `<canvas>` (R-11) : élément remplacé — le contenu bitmap
+    // est rejoué par explorer-render depuis l'op-list JS ;
+    // le layout ne connaît que la taille intrinsèque
+    // (attributs `width`/`height`, défaut spec 300×150).
+    if dom.tag_name(root).is_ok_and(|t| t == "canvas") {
+        return Some(leaf_box(
+            box_kind_of(&style),
+            root,
+            style.clone(),
+            Some(canvas_intrinsic(dom, root)),
+        ));
+    }
     // Contrôles de formulaire (étape 38) : `input`/`select` —
     // la valeur peinte est synthétisée en enfant `Text` (la
     // boîte reste atomique ; le texte se pose dedans au
@@ -572,6 +584,21 @@ fn leaf_box(
         intrinsic,
         control_checked: false,
     }
+}
+
+/// Taille intrinsèque d'un `<canvas>` (R-11) : attributs
+/// `width`/`height` en entiers CSS px (valeur non positive ou
+/// non numérique → repli), défaut spec 300×150.
+fn canvas_intrinsic(dom: &Dom, node: NodeId) -> (f32, f32) {
+    let attr_px = |name: &str, def: f32| {
+        dom.attribute(node, name)
+            .ok()
+            .flatten()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|f| f.is_finite() && *f > 0.0)
+            .unwrap_or(def)
+    };
+    (attr_px("width", 300.0), attr_px("height", 150.0))
 }
 
 /// Bras `input`/`select` : boîte atomique + valeur en enfant

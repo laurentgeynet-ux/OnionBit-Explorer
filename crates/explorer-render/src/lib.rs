@@ -13,6 +13,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod canvas;
 pub mod display;
 pub mod fonts;
 pub mod image;
@@ -20,6 +21,7 @@ pub mod raster;
 pub mod svg;
 pub mod woff;
 
+pub use canvas::{raster_ops, CanvasOp, CanvasTable};
 pub use display::{
     build_display_list, build_display_list_full, build_display_list_imaged,
     build_display_list_scrolled, BorderStyle, DisplayItem, DisplayList,

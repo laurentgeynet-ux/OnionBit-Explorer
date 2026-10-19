@@ -44,6 +44,11 @@ pub struct PaintImages {
     /// `<svg>` inline rasterisés (`NodeId` → bitmap) — R-9,
     /// produits par [`crate::svg::collect_svg`].
     pub svgs: ImageTable,
+    /// `<canvas>` : op-list 2D enregistrée par `dillo-js`
+    /// (`NodeId` → `Vec<CanvasOp>` — R-11, contrat
+    /// [`crate::canvas`]) ; rejouée vers un bitmap au moment
+    /// de la génération de la display list.
+    pub canvases: crate::canvas::CanvasTable,
 }
 
 impl PaintImages {
@@ -54,6 +59,7 @@ impl PaintImages {
             replaced,
             backgrounds: ImageTable::new(),
             svgs: ImageTable::new(),
+            canvases: crate::canvas::CanvasTable::new(),
         }
     }
 }

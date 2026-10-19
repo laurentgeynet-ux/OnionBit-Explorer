@@ -9,6 +9,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 55 — Dirty-rects transportés** (`explorer-core` +
+  API/FFI) : `repaint` diffe la nouvelle display list contre
+  la précédente (`DisplayList::changed_rects`, R-7) et
+  accumule les régions invalides ; `CoreEvent::
+  FrameInvalidated` porte désormais `rects` (px physiques —
+  le `scale` est appliqué côté core ; vide = repeindre tout,
+  conservateur). Pulls partiels : REST `GET
+  /api/tabs/{id}/frame?x=&y=&w=&h=` (PNG de la région),
+  `Session::frame_region`/`frame_png_region`/`take_dirty`,
+  FFI `explorer_frame_copy_region` + `explorer_dirty_rects`
+  (quadruplets `f32`, drain). Accumulation plafonnée à
+  32 régions puis effondrement « pleine frame » — un client
+  qui ne draine jamais retombe sur le comportement antérieur.
+  Arbitrage `ExternalTexture` GPU reporté : à mesurer sur
+  l'app avec de vraies frames avant de réviser ADR-0004/0018.
+
+- **R-11 — Raster `<canvas>` 2D** (`explorer-render` +
+  `explorer-layout`) : `CanvasOp`/`CanvasTable` (couture
+  NAV↔PIPELINE — `dillo-js` JS-C28 enregistrera les appels
+  `getContext("2d")`), playback `raster_ops` vers tiny-skia
+  (rects, chemins avec arc approximé en cubiques, fill/stroke/
+  clip, transforms, `globalAlpha`, `lineWidth`, save/restore),
+  `PaintImages.canvases` → `DisplayItem::Image` ; `<canvas>`
+  remplacé intrinsèque `width`/`height` (défaut 300×150),
+  UA `inline-block`.
+
 - **R-21 — Valeur des contrôles peinte** (`explorer-layout`) :
   le `Text` synthétique d'`<input>`/`<select>` est enveloppé
   dans un `AnonymousBlock` — avant, enfant inline nu d'une

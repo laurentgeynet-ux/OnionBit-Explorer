@@ -319,11 +319,16 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `keyframe_style` interpole via `transition::interpolate`
   (timeline partagée), frames 0 %/100 % implicites depuis le
   style calculé. Cadencement session = adoption NAV.
-- [ ] **R-11. Raster `<canvas>` 2D** (ex-62, moitié rendu) :
+- [x] **R-11. Raster `<canvas>` 2D** (ex-62, moitié rendu) :
   playback de l'**op-list** enregistrée par `dillo-js` (JS-C28 —
   ↔ NAV, surface JS) vers tiny-skia → pixmap de l'élément →
-  `DisplayItem::Image`. Couture op-list figée à deux avant de
-  coder.
+  `DisplayItem::Image`. **Couture figée** (`interface-equipes.md`)
+  : `canvas::CanvasOp`/`CanvasTable` + `PaintImages.canvases` ;
+  playback `raster_ops` (rects, chemins, fill/stroke/clip,
+  transforms, alpha, lineWidth, save/restore — texte/dégradés/
+  drawImage hors MVP, variantes additives) ; `<canvas>` =
+  remplacé intrinsèque `width`/`height` (défaut 300×150),
+  UA `display:inline-block`.
 
 ## Palier R-C — Incrémental interne, mesure, robustesse
 

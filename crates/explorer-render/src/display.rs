@@ -922,11 +922,24 @@ fn paint_box(
     paint_self(bx, items, off, images);
     // Élément remplacé : bitmap par-dessus bordure (contenu —
     // ordre CSS 2.1 App. E : fond → bordure → contenu).
-    if let Some(img) = bx
-        .node
-        .and_then(|n| images.replaced.get(&n).or_else(|| images.svgs.get(&n)))
-        .cloned()
-    {
+    if let Some(img) = bx.node.and_then(|n| {
+        images
+            .replaced
+            .get(&n)
+            .or_else(|| images.svgs.get(&n))
+            .cloned()
+            .or_else(|| {
+                // `<canvas>` : op-list rejouée vers un bitmap à
+                // la taille intrinsèque de l'élément (attributs
+                // width/height — défaut spec 300×150).
+                images.canvases.get(&n).and_then(|ops| {
+                    let (w, h) = bx.intrinsic.unwrap_or((300.0, 150.0));
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    crate::canvas::raster_ops(ops, w.max(0.0) as u32, h.max(0.0) as u32)
+                        .map(std::sync::Arc::new)
+                })
+            })
+    }) {
         items.push(DisplayItem::Image {
             rect: shifted(bx.rect, off),
             img,
