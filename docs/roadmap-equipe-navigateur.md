@@ -206,6 +206,14 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   atteinte) au lieu d'échouer la réponse. Tolérance rustls
   documentée — cas fréquent chez les vieux serveurs/CDN.
 
+- [ ] **Étape 53e. Charset du `<title>` / `title_changed`**
+  (bug terrain mission 6, repro : `news.ycombinator.com/
+  item?id=…` — titre `â€“` = UTF-8 relu en Latin-1/1252) :
+  vérifier d'abord si la page déclare son charset tardivement
+  (prescan trop borné ?) ou pas du tout — dans ce dernier cas
+  le fallback windows-1252 est conforme WHATWG et le défaut
+  est côté extraction/émission du titre.
+
 - [x] **Étape 54. Formulaires v2 — côté produit** (ex-55, moitié
   session) : `multipart/form-data`, états `:valid`/`:invalid`
   exposés aux events, popup `<select>` via widget natif Flutter
@@ -241,7 +249,11 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   déplaçable. + **bfcache minimal** (terrain mission 5 :
   back/forward re-fetche systématiquement — HN retour 40 s) :
   garder la page quittée en mémoire bornée, restauration
-  instantanée.
+  instantanée. + **sémantique historique POST** (terrain
+  mission 6) : un `navigated` POST vers l'URL courante n'est
+  pas poussé (dédup silencieuse) — `back` saute la page de
+  résultats, écart navigateur réel à trancher : pousser
+  l'entrée malgré l'URL identique, ou documenter la dédup.
 - [ ] **Étape 57. UI Flutter v2** (ex-65) : thème clair
   (`tokens.json` variante), settings (moteur REST/FFI, thème,
   profil), UI historique + bookmarks (store core existant),
@@ -396,6 +408,22 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   sur les nœuds unaires/binaires chaînés. Coin extrême — le
   bundle réel github passe — mais du code généré peut
   produire de telles chaînes.
+- [ ] **JS-C43. Parseur regex — motifs courants rejetés**
+  (déclencheur terrain mission 6 : githubstatus.com,
+  github.com — scripts réels morts au parse, erreurs typées,
+  zéro crash) : `(.*?)` lazy → `quantifier without atom` ;
+  `[.*+?^${}()|[\]\\]` → `Invalid character class` ;
+  `[\0-\x1f]` → `empty class range` ; `\uD800` →
+  `Invalid codepoint`. Chaque motif = un cas `corpus.rs`
+  minimal avant fix — l'ordre est celui du site réel.
+- [ ] **JS-C44. Specificateurs « bare » non résolus**
+  (déclencheur terrain mission 6 : `cannot load module
+  'react'`) : `import 'react'` hors import map — arbitrer :
+  import maps minimal vs écart documenté (les bundlers
+  résolvent normalement, mais des sites servent du bare en
+  prod). Les `ReferenceError` `hljs`/`$`/`Event`/`SP`
+  observés sont des **conséquences** (scripts amont morts),
+  pas des tickets.
 
 ## Tâches continues
 

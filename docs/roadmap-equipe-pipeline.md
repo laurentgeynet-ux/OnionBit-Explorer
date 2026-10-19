@@ -210,6 +210,13 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   le texte est posé en ligne et émis en `DisplayItem::Text`
   (test `controle_input_peint_sa_valeur` côté render).
   Réactivation du test NAV = à leur commit (fichier WIP).
+- [ ] **R-22. Décoration de lien peinte par fragment**
+  (bug terrain mission 6, lobste.rs — cosmétique) : titres
+  de stories en « pastilles sombres » + interlignes ~180 px.
+  Suspect : R-18 fait porter à chaque `Fragment` le
+  `ComputedStyle` de son item inline — vérifier qu'une
+  bordure/fond/décoration de l'élément n'est pas repeinte
+  par fragment au lieu d'une fois sur la boîte propriétaire.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
