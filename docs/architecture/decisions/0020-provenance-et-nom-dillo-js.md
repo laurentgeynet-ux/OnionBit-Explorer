@@ -15,15 +15,17 @@ pas la réalité.
 ## Provenance (figée)
 
 - `dillo-js` est un **moteur JavaScript original** écrit par
-  Laurent Geynet dans ce dépôt — ~32 000 lignes sous
-  `crates/dillo-js`, licence `MIT OR Apache-2.0` (ADR-0006,
-  en-têtes de fichiers).
+  Laurent Geynet — **né dans un projet JS-Rust personnel
+  antérieur** (le « chantier voisin » d'AGENTS.md §9), repris
+  dans ce workspace — ~32 000 lignes sous `crates/dillo-js`,
+  licence `MIT OR Apache-2.0` (ADR-0006, en-têtes de
+  fichiers). Cette antériorité explique son avance de phase :
+  capital hérité, pas effort mal placé.
 - **Aucune ligne issue de Dillo** — ni code, ni architecture.
   Le nom est une **ironie de l'auteur** : Dillo est le
   navigateur qui refuse JavaScript par principe — baptiser
-  ainsi un moteur JS était le clin d'œil. La provenance
-  effective est ce workspace, commit initial du crate,
-  développement continu JS-C1 → JS-C25+ traçable dans
+  ainsi le moteur JS de son projet était le clin d'œil.
+  Le développement continu JS-C1 → JS-C25+ est traçable dans
   `CHANGELOG.md`.
 - Le `Dom` interne de `dillo-js` est un **harnais/miroir**
   (ADR-0013), pas un DOM importé ; l'intégration au navigateur
@@ -63,3 +65,8 @@ port de Dillo ? » : non, et ce paragraphe ne sera pas réécrit.
 - Si un meilleur nom qu'`explorer-jscore` émerge d'ici
   l'exécution, l'amender ici par une note — pas de débat au
   moment du renommage.
+- Conséquence structurelle : le moteur a été conçu pour son
+  projet d'origine, **pas autour d'un DOM navigateur réel** —
+  le miroir synchronisé par sérialisation (ADR-0013) est le
+  contournement historique de cette hypothèse d'origine.
+  Toute évolution vers un partage réel part de là (JS-C39).
