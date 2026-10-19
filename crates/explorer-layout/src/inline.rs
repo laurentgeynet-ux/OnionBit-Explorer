@@ -42,8 +42,14 @@ pub struct Fragment {
     pub owner: usize,
     /// Tranche de texte (vide si `atomic`).
     pub text: String,
-    /// `true` = boîte `inline-block` posée en ligne.
+    /// `true` = boîte atomique posée en ligne.
     pub atomic: bool,
+    /// Série de l'atome (numéro de pré-ordre `size_atomics`)
+    /// — permet de retrouver la **boîte** nichée dont ce
+    /// fragment est la projection (`object` sous bloc
+    /// anonyme, R-13c) ; `None` pour le texte et les
+    /// sentinelles de coupure dure.
+    pub aid: Option<usize>,
     /// Position absolue.
     pub rect: Rect,
     /// Distance du haut du fragment à sa baseline.
@@ -81,10 +87,13 @@ struct Item {
     node: Option<explorer_dom::NodeId>,
     /// Style de l'item.
     style: ComputedStyle,
-    /// Pièces entre opportunités — vide si `atomic`.
+    /// Pièces entre opportunités — vide si atomique.
     pieces: Vec<Piece>,
-    /// `true` = `inline-block` (posé hors bande puis coulé).
-    atomic: bool,
+    /// `Some(id)` = atome posé en ligne (inline-block ou
+    /// remplacé `intrinsic` — `<object>`/`<img>`/…, R-13c) ;
+    /// `id` est le numéro de pré-ordre partagé avec
+    /// [`size_atomics`] (table `atomics`).
+    aid: Option<usize>,
 }
 
 /// Pièce coulable entre deux opportunités de coupure.
@@ -117,14 +126,73 @@ pub(crate) fn layout_inline(
     let st = bx.style.clone();
     let fs = font_size_px(&st, parent_fs, ctx);
 
-    // inline-block : dimensionnés comme blocs AVANT le flux
-    // (ils gardent leur contenu, puis coulent en ligne). Une
-    // boîte portant `text` (alt d'`<img>` cassée) reste un
-    // item texte — sa valeur `display` ne s'applique qu'au
-    // contenu qu'elle n'a pas.
+    // Atomes (inline-block, remplacés `intrinsic` — object,
+    // img, svg, canvas) : dimensionnés comme blocs AVANT le
+    // flux, à n'importe quelle profondeur d'inline (un
+    // `<object>` vit souvent sous un bloc anonyme) ; la série
+    // `aid` est l'ordre pré-ordre partagé avec
+    // `collect_child`.
     let mut atomics: HashMap<usize, Rect> = HashMap::new();
-    for (i, child) in bx.children.iter_mut().enumerate() {
-        if child.display() == "inline-block" && child.text.is_none() {
+    size_atomics(bx, w, cb_h, ctx, fs, abs_cb, &mut atomics);
+
+    let items = collect_items(bx);
+    let mut lines = break_into_lines(&items, &atomics, x, y, w, ctx, fs, fl);
+    align_lines(&st, &mut lines, x, w, fl);
+    assign_child_rects(bx, &lines);
+    // Les boîtes atomiques nichées reçoivent leur rect depuis
+    // le fragment (l'union par `owner` n'atteint que les
+    // enfants directs).
+    let mut aid = 0usize;
+    assign_atomic_rects(bx, &lines, &mut aid);
+    // Span réelle `y → bas de la dernière ligne` : la descente
+    // sous les flottants a pu sauter de l'espace vertical.
+    let h = lines.last().map_or(0.0, |l| l.rect.y + l.rect.height - y);
+    bx.lines = lines;
+    bx.rect.height = h;
+    h
+}
+
+/// `true` si la boîte coule en ligne comme un atome :
+/// `inline-block` conteneur, ou élément **remplacé**
+/// (`intrinsic` — `<object>` résolu, `<img>`, `<svg>`,
+/// `<canvas>`) sans texte de repli. Un repli `alt` porte
+/// `text` → il reste un item texte, jamais atomique.
+fn is_atomic(b: &LayoutBox) -> bool {
+    b.text.is_none() && (b.display() == "inline-block" || b.intrinsic.is_some())
+}
+
+/// Dimensionne récursivement chaque boîte atomique du
+/// sous-arbre inline (bloc bloc, puis coulée comme pièce
+/// incassable). La clé `aid` = ordre pré-ordre : le même
+/// parcours que [`collect_child`], qui s'arrête aussi à la
+/// frontière des atomes.
+#[allow(clippy::too_many_arguments)]
+fn size_atomics(
+    b: &mut LayoutBox,
+    w: f32,
+    cb_h: Option<f32>,
+    ctx: &BlockCtx,
+    fs: f32,
+    abs_cb: Rect,
+    atomics: &mut HashMap<usize, Rect>,
+) {
+    let mut aid = 0usize;
+    size_atomics_walk(b, w, cb_h, ctx, fs, abs_cb, atomics, &mut aid);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn size_atomics_walk(
+    b: &mut LayoutBox,
+    w: f32,
+    cb_h: Option<f32>,
+    ctx: &BlockCtx,
+    fs: f32,
+    abs_cb: Rect,
+    atomics: &mut HashMap<usize, Rect>,
+    aid: &mut usize,
+) {
+    for child in &mut b.children {
+        if is_atomic(child) {
             layout_block(
                 child,
                 0.0,
@@ -136,32 +204,25 @@ pub(crate) fn layout_inline(
                 abs_cb,
                 &mut FloatCtx::default(),
             );
-            atomics.insert(i, child.rect);
+            atomics.insert(*aid, child.rect);
+            *aid += 1;
+        } else {
+            size_atomics_walk(child, w, cb_h, ctx, fs, abs_cb, atomics, aid);
         }
     }
-
-    let items = collect_items(bx);
-    let mut lines = break_into_lines(&items, &atomics, x, y, w, ctx, fs, fl);
-    align_lines(&st, &mut lines, x, w, fl);
-    assign_child_rects(bx, &lines);
-    // Span réelle `y → bas de la dernière ligne` : la descente
-    // sous les flottants a pu sauter de l'espace vertical.
-    let h = lines.last().map_or(0.0, |l| l.rect.y + l.rect.height - y);
-    bx.lines = lines;
-    bx.rect.height = h;
-    h
 }
 
 /// Items de flux : chaque enfant → pièces (texte) ou atomique.
 fn collect_items(bx: &LayoutBox) -> Vec<Item> {
     let mut items = Vec::new();
+    let mut aid = 0usize;
     for (owner, child) in bx.children.iter().enumerate() {
-        collect_child(child, owner, &mut items);
+        collect_child(child, owner, &mut items, &mut aid);
     }
     items
 }
 
-fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>) {
+fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut usize) {
     // Texte d'abord : une boîte `Text` (dont le repli `alt`
     // d'un `<img>` cassé) s'itemise même si son style porte
     // `display: inline-block` — l'atomicité ne vaut que pour
@@ -170,20 +231,22 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>) {
         items.push(text_item(b, owner, t));
         return;
     }
-    if b.display() == "inline-block" {
+    if is_atomic(b) {
+        let id = *aid;
+        *aid += 1;
         items.push(Item {
             owner,
             node: b.node,
             style: b.style.clone(),
             pieces: Vec::new(),
-            atomic: true,
+            aid: Some(id),
         });
         return;
     }
     // Boîte inline conteneur : descendre — chaque texte
     // descendant devient un item rattaché au même owner.
     for c in &b.children {
-        collect_child(c, owner, items);
+        collect_child(c, owner, items, aid);
     }
 }
 
@@ -241,7 +304,7 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str) -> Item {
         node: b.node,
         style: b.style.clone(),
         pieces,
-        atomic: false,
+        aid: None,
     }
 }
 
@@ -475,8 +538,8 @@ fn break_into_lines(
         // Ses marges horizontales font partie de sa boîte
         // externe (§8.3) — y compris en tête de ligne après
         // un wrap : `margin-left` s'y applique aussi.
-        if item.atomic {
-            let Some(r) = atomics.get(&item.owner) else {
+        if let Some(aid) = item.aid {
+            let Some(r) = atomics.get(&aid) else {
                 continue;
             };
             let ml = side_px(&item.style, "margin-left", w, fs, ctx, 0.0);
@@ -523,6 +586,7 @@ fn break_into_lines(
                 owner: item.owner,
                 text: String::new(),
                 atomic: true,
+                aid: item.aid,
                 style: item.style.clone(),
                 rect: Rect {
                     x: px + ml,
@@ -574,6 +638,7 @@ fn break_into_lines(
                         owner: item.owner,
                         text: String::new(),
                         atomic: true,
+                        aid: None,
                         style: item.style.clone(),
                         rect: Rect {
                             x: cursor_x,
@@ -612,6 +677,7 @@ fn break_into_lines(
                 owner: item.owner,
                 text: text.to_string(),
                 atomic: false,
+                aid: None,
                 style: item.style.clone(),
                 rect: Rect {
                     x: cursor_x,
@@ -726,6 +792,29 @@ fn assign_child_rects(bx: &mut LayoutBox, lines: &[LineBox]) {
             child.rect = u;
         }
         assign_child_rects(child, lines);
+    }
+}
+
+/// Rects des boîtes atomiques nichées : `owner` n'atteint
+/// que l'enfant direct — chaque atome retrouve son fragment
+/// par sa série `aid` (même ordre pré-ordre que
+/// [`size_atomics`]) et copie son rect posé.
+fn assign_atomic_rects(bx: &mut LayoutBox, lines: &[LineBox], aid: &mut usize) {
+    for child in &mut bx.children {
+        if is_atomic(child) {
+            let id = *aid;
+            *aid += 1;
+            for line in lines {
+                for f in &line.fragments {
+                    if f.aid == Some(id) {
+                        child.rect = f.rect;
+                        break;
+                    }
+                }
+            }
+        } else {
+            assign_atomic_rects(child, lines, aid);
+        }
     }
 }
 

@@ -216,11 +216,25 @@ impl ComputedStyle {
     }
 }
 
+/// Styles d'un pseudo-élément (R-13) — calculés avec l'élément
+/// origine pour parent d'héritage.
+#[derive(Debug, Clone, Default)]
+pub struct PseudoStyles {
+    /// `::before` (présent si la cascade a produit un `content`).
+    pub before: Option<ComputedStyle>,
+    /// `::after`.
+    pub after: Option<ComputedStyle>,
+}
+
 /// Table des styles calculés d'un sous-arbre (mémoïsation
 /// parent → enfant de `compute_tree`).
 #[derive(Debug, Clone, Default)]
 pub struct StyleMap {
     map: HashMap<NodeId, ComputedStyle>,
+    /// `::before`/`::after` par nœud — remplis pendant
+    /// `compute_tree` (R-13). Vide pour les noeuds sans
+    /// pseudo généré.
+    pseudos: HashMap<NodeId, PseudoStyles>,
 }
 
 impl StyleMap {
@@ -229,6 +243,18 @@ impl StyleMap {
     #[must_use]
     pub fn get(&self, node: NodeId) -> Option<&ComputedStyle> {
         self.map.get(&node)
+    }
+
+    /// Style calculé du pseudo-élément `which` de `node` —
+    /// `None` si aucune règle ne le produit (`content` absent
+    /// ou `none`/`normal` gérés par le consommateur).
+    #[must_use]
+    pub fn pseudo(&self, node: NodeId, which: crate::PseudoElement) -> Option<&ComputedStyle> {
+        let p = self.pseudos.get(&node)?;
+        match which {
+            crate::PseudoElement::Before => p.before.as_ref(),
+            crate::PseudoElement::After => p.after.as_ref(),
+        }
     }
 
     /// Style mutable du nœud — surcharge post-cascade
@@ -339,7 +365,7 @@ impl StyleEngine {
         state: &dyn Fn(&str) -> bool,
     ) -> ComputedStyle {
         let parent = parent_computed(self, dom, node, env, state, &mut HashMap::new());
-        self.compute_with_parent(dom, node, env, parent.as_ref(), state)
+        self.compute_with_parent(dom, node, env, parent.as_ref(), None, state)
     }
 
     /// Styles calculés de tout le sous-arbre de `root`
@@ -359,10 +385,12 @@ impl StyleEngine {
         state: &dyn Fn(&str) -> bool,
     ) -> StyleMap {
         let mut map = HashMap::new();
-        self.compute_subtree(dom, root, env, None, &mut map, state);
-        StyleMap { map }
+        let mut pseudos = HashMap::new();
+        self.compute_subtree(dom, root, env, None, &mut map, &mut pseudos, state);
+        StyleMap { map, pseudos }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compute_subtree(
         &self,
         dom: &Dom,
@@ -370,9 +398,37 @@ impl StyleEngine {
         env: &StyleEnv,
         parent: Option<&ComputedStyle>,
         map: &mut HashMap<NodeId, ComputedStyle>,
+        pseudos: &mut HashMap<NodeId, PseudoStyles>,
         state: &dyn Fn(&str) -> bool,
     ) {
-        let style = self.compute_with_parent(dom, node, env, parent, state);
+        let style = self.compute_with_parent(dom, node, env, parent, None, state);
+        // Pseudo-éléments (R-13) : l'élément origine est le
+        // parent d'héritage de ses `::before`/`::after`.
+        if dom.element(node).is_ok() {
+            let before = self.compute_with_parent(
+                dom,
+                node,
+                env,
+                Some(&style),
+                Some(crate::PseudoElement::Before),
+                state,
+            );
+            let after = self.compute_with_parent(
+                dom,
+                node,
+                env,
+                Some(&style),
+                Some(crate::PseudoElement::After),
+                state,
+            );
+            let ps = PseudoStyles {
+                before: (before.get("content").is_some()).then_some(before),
+                after: (after.get("content").is_some()).then_some(after),
+            };
+            if ps.before.is_some() || ps.after.is_some() {
+                pseudos.insert(node, ps);
+            }
+        }
         let Ok(children) = dom.children(node) else {
             map.insert(node, style);
             return;
@@ -381,67 +437,53 @@ impl StyleEngine {
         for child in children {
             if dom.element(child).is_ok() {
                 let parent_style = map.get(&node).cloned();
-                self.compute_subtree(dom, child, env, parent_style.as_ref(), map, state);
+                self.compute_subtree(dom, child, env, parent_style.as_ref(), map, pseudos, state);
             }
         }
     }
 
     /// Calcul d'un nœud connaissant le style de son parent.
+    /// `pseudo` = `Some(pe)` → style du pseudo-élément `pe` du
+    /// nœud (R-13) ; `None` → style de l'élément lui-même.
     fn compute_with_parent(
         &self,
         dom: &Dom,
         node: NodeId,
         env: &StyleEnv,
         parent: Option<&ComputedStyle>,
+        pseudo: Option<crate::PseudoElement>,
         state: &dyn Fn(&str) -> bool,
     ) -> ComputedStyle {
         let mut props: HashMap<String, String> = HashMap::new();
         if dom.element(node).is_err() {
             return ComputedStyle { props };
         }
-        // 1. Collecte (rang, spécificité, ordre, déclaration).
-        let mut cand: Vec<(u8, Specificity, u32, &Declaration)> = Vec::new();
-        // Attribut `style="…"` : déclarations auteur inline —
-        // normal au-dessus de tout sélecteur normal (spécificité
-        // et ordre maximaux à rang égal), `!important` au rang
-        // le plus haut (au-dessus même de l'auteur-`!important`,
-        // rang 3 = UA-`!important` : spec CSS2 §6.4.4).
-        let inline_decls = dom
-            .attribute(node, "style")
-            .ok()
-            .flatten()
-            .map(|s| crate::parser::parse_declarations(&s))
-            .unwrap_or_default();
-        for d in &inline_decls {
-            let rank = if d.important { 4 } else { 1 };
-            cand.push((rank, (u32::MAX, u32::MAX, u32::MAX), u32::MAX, d));
-        }
-        for rule in &self.rules {
-            // Chaque groupe `@media` englobant doit matcher.
-            if !rule.media.is_empty() && !rule.media.iter().all(|qs| media_matches(env, qs)) {
-                continue;
+        // 1-2. Collecte ordonnée (rang, spécificité, ordre) :
+        // règles + attribut `style` (rang auteur inline,
+        // `!important` au-dessus de tout — CSS2 §6.4.4 ;
+        // `style=` ne s'écrit que sur l'élément : rien pour
+        // un pseudo).
+        // `style=` parsé avant `cand` : ses déclarations y
+        // sont empruntées — il doit survivre à la boucle.
+        let inline_decls = if pseudo.is_none() {
+            dom.attribute(node, "style")
+                .ok()
+                .flatten()
+                .map(|s| crate::parser::parse_declarations(&s))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let mut cand = self.collect_candidates(dom, node, env, pseudo, state);
+        if pseudo.is_none() {
+            for d in &inline_decls {
+                let rank = if d.important { 4 } else { 1 };
+                cand.push((rank, (u32::MAX, u32::MAX, u32::MAX), u32::MAX, d));
             }
-            // Spécificité = max des sélecteurs qui matchent.
-            let spec = rule
-                .selectors
-                .iter()
-                .filter(|s| matches_with_state(dom, node, s, state))
-                .map(ComplexSelector::specificity)
-                .max();
-            let Some(spec) = spec else { continue };
-            for d in &rule.declarations {
-                let rank = match (rule.origin, d.important) {
-                    (Origin::UserAgent, false) => 0,
-                    (Origin::Author, false) => 1,
-                    (Origin::Author, true) => 2,
-                    (Origin::UserAgent, true) => 3,
-                };
-                cand.push((rank, spec, rule.order, d));
-            }
+            // Le rang inline s'intercale dans l'ordre global.
+            cand.sort_by_key(|(rank, spec, order, _)| (*rank, *spec, *order));
         }
-        // 2. Tri stable croissant → la dernière écriture gagne.
-        cand.sort_by_key(|(rank, spec, order, _)| (*rank, *spec, *order));
-        for (_, _, _, d) in cand {
+        for (_, _, _, d) in &cand {
             let lname = d.name.to_ascii_lowercase();
             // Shorthand → longhands (spec : `margin: x` fixe les
             // quatre côtés, chacun à la spécificité de la règle).
@@ -461,7 +503,9 @@ impl StyleEngine {
         // déclarations auteur de spécificité nulle, donc
         // appliqués seulement si la propriété n'est pas déjà
         // fixée par une vraie règle ou l'attribut `style`).
-        apply_presentational_hints(dom, node, &mut props);
+        if pseudo.is_none() {
+            apply_presentational_hints(dom, node, &mut props);
+        }
         // 3. Héritage : propriétés héritées non déclarées.
         if let Some(p) = parent {
             for name in INHERITED_PROPS {
@@ -525,6 +569,48 @@ impl StyleEngine {
         //    détail dans `normalize_font_size`).
         normalize_font_size(&mut props, parent, env.font_size_base);
         ComputedStyle { props }
+    }
+
+    /// Candidats de déclaration des **règles** triés (rang,
+    /// spécificité, ordre croissants — la dernière écriture
+    /// gagne) : un sélecteur doit matcher **avec le même
+    /// pseudo-élément** cible. L'attribut `style` est fusionné
+    /// par l'appelant (durée de vie locale).
+    fn collect_candidates<'a>(
+        &'a self,
+        dom: &Dom,
+        node: NodeId,
+        env: &StyleEnv,
+        pseudo: Option<crate::PseudoElement>,
+        state: &dyn Fn(&str) -> bool,
+    ) -> Vec<(u8, Specificity, u32, &'a Declaration)> {
+        let mut rules_cand: Vec<(u8, Specificity, u32, &Declaration)> = Vec::new();
+        for rule in &self.rules {
+            // Chaque groupe `@media` englobant doit matcher.
+            if !rule.media.is_empty() && !rule.media.iter().all(|qs| media_matches(env, qs)) {
+                continue;
+            }
+            // Spécificité = max des sélecteurs qui matchent.
+            let spec = rule
+                .selectors
+                .iter()
+                .filter(|s| crate::selector::selector_pseudo_element(s) == pseudo)
+                .filter(|s| matches_with_state(dom, node, s, state))
+                .map(ComplexSelector::specificity)
+                .max();
+            let Some(spec) = spec else { continue };
+            for d in &rule.declarations {
+                let rank = match (rule.origin, d.important) {
+                    (Origin::UserAgent, false) => 0,
+                    (Origin::Author, false) => 1,
+                    (Origin::Author, true) => 2,
+                    (Origin::UserAgent, true) => 3,
+                };
+                rules_cand.push((rank, spec, rule.order, d));
+            }
+        }
+        rules_cand.sort_by_key(|(rank, spec, order, _)| (*rank, *spec, *order));
+        rules_cand
     }
 }
 
@@ -855,7 +941,7 @@ fn parent_computed(
         return Some(s.clone());
     }
     let grand = parent_computed(engine, dom, parent, env, state, memo);
-    let s = engine.compute_with_parent(dom, parent, env, grand.as_ref(), state);
+    let s = engine.compute_with_parent(dom, parent, env, grand.as_ref(), None, state);
     memo.insert(parent, s.clone());
     Some(s)
 }

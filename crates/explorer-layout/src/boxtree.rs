@@ -21,7 +21,7 @@
 
 use std::fmt::Write as _;
 
-use explorer_css::{ComputedStyle, StyleMap};
+use explorer_css::{ComputedStyle, PseudoElement, StyleMap};
 use explorer_dom::{Dom, NodeId};
 
 /// Rectangle de la boîte — rempli par le dimensionnement
@@ -306,6 +306,11 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
             Some(canvas_intrinsic(dom, root)),
         ));
     }
+    // `<object>` (R-13c) : élément **remplacé** si sa ressource
+    // est résolue, sinon ses **enfants se substituent**.
+    if dom.tag_name(root).is_ok_and(|t| t == "object") {
+        return Some(object_box(dom, root, &style, styles, sizes));
+    }
     // Contrôles de formulaire (étape 38) : `input`/`select` —
     // la valeur peinte est synthétisée en enfant `Text` (la
     // boîte reste atomique ; le texte se pose dedans au
@@ -379,6 +384,10 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
         return Vec::new();
     };
     let mut out = Vec::new();
+    // `::before` généré en tête du contenu (R-13).
+    if let Some(b) = pseudo_box(styles, parent, PseudoElement::Before) {
+        out.push(b);
+    }
     for child in children {
         if dom.element(child).is_ok() {
             if let Some(mut b) = build_box_tree_sized(dom, child, styles, sizes) {
@@ -422,7 +431,92 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
             }
         }
     }
+    // `::after` en fin de contenu.
+    if let Some(b) = pseudo_box(styles, parent, PseudoElement::After) {
+        out.push(b);
+    }
     out
+}
+
+/// Boîte générée par `::before`/`::after` (R-13, CSS2 §12) :
+/// produite si la cascade a un style pseudo avec un `content`
+/// générable — `none`/`normal` ou valeur non gérée (`url()`,
+/// `attr()`, compteurs, guillemets) → aucune boîte. `node` =
+/// `None` (pas de nœud DOM — hit-test et relayout remontent
+/// à l'élément origine).
+fn pseudo_box(
+    styles: &StyleMap,
+    node: NodeId,
+    which: explorer_css::PseudoElement,
+) -> Option<LayoutBox> {
+    let st = styles.pseudo(node, which)?;
+    let text = pseudo_content(st.get("content")?)?;
+    let kind = box_kind_of(st);
+    let mut bx = leaf_box_anon(kind, st.clone());
+    if !text.is_empty() {
+        let t = leaf_box_anon(BoxKind::Text, st.clone());
+        let mut t = t;
+        t.text = Some(text);
+        // Texte nu dans un bloc : enveloppe anonyme (R-21) ;
+        // dans un inline, le flux le collecte directement.
+        bx.children = if kind == BoxKind::Block {
+            wrap_anonymous(vec![t], st)
+        } else {
+            vec![t]
+        };
+    }
+    Some(bx)
+}
+
+/// `content` → texte généré : concatène les chaînes
+/// `'…'`/`"…"` ; `none`/`normal` ou valeurs non couvertes
+/// → `None` (pas de boîte). `""` → boîte vide (ses
+/// bordures/dimensions peignent quand même — Acid2 nose).
+fn pseudo_content(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    if t.eq_ignore_ascii_case("none") || t.eq_ignore_ascii_case("normal") {
+        return None;
+    }
+    let mut out = String::new();
+    let mut rest = t;
+    while let Some(qpos) = rest.find(['\'', '"']) {
+        let q = rest.as_bytes()[qpos];
+        let after = &rest[qpos + 1..];
+        let end = after.find(q as char)?;
+        out.push_str(&after[..end]);
+        rest = &after[end + 1..];
+    }
+    // Reste non-chaîne (counter, attr…) : si rien d'extrait et
+    // qu'une valeur non-rien traîne → pas de boîte.
+    if out.is_empty() && rest.trim().is_empty() {
+        return Some(out);
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+/// Feuille sans `node` (pseudo-éléments) — même gabarit que
+/// [`leaf_box`].
+fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
+    LayoutBox {
+        kind,
+        node: None,
+        style,
+        text: None,
+        children: Vec::new(),
+        lines: Vec::new(),
+        rect: Rect::default(),
+        position: Position::Static,
+        float: Float::None,
+        overflow: Overflow::Visible,
+        z_index: 0,
+        intrinsic: None,
+        control_checked: false,
+        slot: BoxSlot::default(),
+    }
 }
 
 /// Enveloppe les suites de niveau en-ligne dans des blocs
@@ -531,6 +625,49 @@ fn control_paint(dom: &Dom, node: NodeId, ty: &str) -> (Option<String>, bool) {
 /// `width`/`height` (px ou nombre nu — `%` ignoré, pas de
 /// repère à cette étape), puis aspect du `viewBox`, enfin le
 /// défaut CSS des remplacés 300×150.
+/// `<object>` (R-13c) : élément **remplacé** si sa ressource
+/// est résolue (`sizes` la connaît — `<img>`-like), sinon
+/// ses **enfants se substituent** (repli HTML 4.01 §13.3 :
+/// la cascade de `<object>` imbriqués descend jusqu'au
+/// premier rendable — Acid2 en chaîne trois). Le conteneur
+/// de repli est transparent (pas de fond/bordure propre).
+fn object_box(
+    dom: &Dom,
+    root: NodeId,
+    style: &ComputedStyle,
+    styles: &StyleMap,
+    sizes: &std::collections::HashMap<NodeId, (f32, f32), impl ::std::hash::BuildHasher>,
+) -> LayoutBox {
+    let kind = box_kind_of(style);
+    let mut b = LayoutBox {
+        kind,
+        node: Some(root),
+        style: style.clone(),
+        text: None,
+        children: Vec::new(),
+        lines: Vec::new(),
+        rect: Rect::default(),
+        position: Position::Static,
+        float: Float::None,
+        overflow: Overflow::Visible,
+        z_index: 0,
+        intrinsic: sizes.get(&root).copied(),
+        control_checked: false,
+        slot: BoxSlot::default(),
+    };
+    // Ressource résolue → feuille remplacée ; sinon les
+    // enfants prennent la place de l'objet.
+    if b.intrinsic.is_none() {
+        let children = child_boxes(dom, root, styles, style, sizes);
+        b.children = if kind.is_inline_level() {
+            children
+        } else {
+            wrap_anonymous(children, style)
+        };
+    }
+    b
+}
+
 fn svg_intrinsic(dom: &Dom, node: NodeId) -> (f32, f32) {
     let attr_px = |name: &str| {
         dom.attribute(node, name).ok().flatten().and_then(|v| {

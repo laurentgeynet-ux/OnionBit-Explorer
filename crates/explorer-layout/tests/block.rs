@@ -11,7 +11,9 @@ mod common;
 use explorer_css::{Origin, StyleEngine, StyleEnv};
 use explorer_dom::{Dom, NodeId};
 use explorer_html::TreeBuilder;
-use explorer_layout::{build_box_tree, layout_tree, BlockCtx, BoxKind, LayoutBox};
+use explorer_layout::{
+    build_box_tree, build_box_tree_sized, layout_tree, BlockCtx, BoxKind, LayoutBox,
+};
 
 const VIEW: f32 = 800.0;
 
@@ -66,6 +68,14 @@ fn find_opt(b: &LayoutBox, id: NodeId) -> Option<&LayoutBox> {
         return Some(b);
     }
     b.children.iter().find_map(|c| find_opt(c, id))
+}
+
+/// Dernier enfant élément récursif (descente du sous-arbre).
+fn deepest(b: &LayoutBox) -> &LayoutBox {
+    match b.children.last() {
+        Some(c) if c.node.is_some() => deepest(c),
+        _ => b,
+    }
 }
 
 fn approx(a: f32, b: f32) -> bool {
@@ -606,4 +616,91 @@ fn script_ne_produit_pas_de_boite_meme_sans_style() {
         !texts.iter().any(|t| t.contains("var a")),
         "script peint : {texts:?}"
     );
+}
+
+// ── R-13 : pseudo-éléments ::before/::after ──────────────────
+
+#[test]
+fn pseudo_elements_generent_des_boites_bordees() {
+    // Acid2 « nose » : ::before/::after à contenu vide dont les
+    // bordures dessinent — la boîte doit exister même sans texte.
+    let dom =
+        TreeBuilder::parse("<html><body><div id=n><div><div></div></div></div></body></html>");
+    let mut eng = StyleEngine::new();
+    eng.add_css(
+        "#n div div::before { display:block; content:''; border:1em solid; height:0 }
+         #n div div::after { content:' X '; display:inline }
+         #n { content:'non' }",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root = dom.document_element().expect("el");
+    let mut bx = build_box_tree(&dom, root, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    // Le ::before est premier enfant du div le plus profond.
+    let leaf = deepest(&bx);
+    let before = &leaf.children[0];
+    assert_eq!(before.node, None, "pseudo n'a pas de nœud DOM");
+    assert!(
+        before.rect.height >= 32.0,
+        "bordures 2em posées : {:#?}",
+        before.rect
+    );
+    let after = leaf.children.last().expect("after");
+    assert_eq!(after.node, None);
+    // `content:'non'` sur un élément (pas pseudo) : ignoré —
+    // pas de boîte supplémentaire sous bx.
+    assert!(bx.children.iter().all(|c| c.node.is_some()));
+}
+
+// ── R-13c : <object> repli vs remplacé ───────────────────────
+
+#[test]
+fn object_resolu_est_remplace_sinon_repli_enfants() {
+    let dom = TreeBuilder::parse(
+        "<html><body>\
+         <object id=ok><span>NON</span></object>\
+         <object id=ko><span>REPLI</span></object>\
+         </body></html>",
+    );
+    // `id=ok` simule une ressource résolue via `sizes`.
+    let ok = {
+        let mut q = vec![dom.document()];
+        let mut found = None;
+        while let Some(n) = q.pop() {
+            if dom.attribute(n, "id").ok().flatten().as_deref() == Some("ok") {
+                found = Some(n);
+            }
+            if let Ok(c) = dom.children(n) {
+                q.extend(c);
+            }
+        }
+        found.expect("ok")
+    };
+    let mut sizes = std::collections::HashMap::new();
+    sizes.insert(ok, (7.0, 5.0));
+    let styles = StyleEngine::new().compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root = dom.document_element().unwrap();
+    let mut bx = build_box_tree_sized(&dom, root, &styles, &sizes).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let ok_b = find(&bx, ok);
+    assert_eq!(ok_b.intrinsic, Some((7.0, 5.0)));
+    assert!(ok_b.children.is_empty(), "remplacé : pas d'enfants");
+    // Le repli rend le contenu.
+    let ko = {
+        let mut q = vec![dom.document()];
+        let mut found = None;
+        while let Some(n) = q.pop() {
+            if dom.attribute(n, "id").ok().flatten().as_deref() == Some("ko") {
+                found = Some(n);
+            }
+            if let Ok(c) = dom.children(n) {
+                q.extend(c);
+            }
+        }
+        found.unwrap()
+    };
+    let ko_b = find(&bx, ko);
+    assert!(ko_b.intrinsic.is_none(), "repli : pas d'intrinsèque");
+    assert!(!ko_b.children.is_empty(), "repli : enfants rendus");
 }

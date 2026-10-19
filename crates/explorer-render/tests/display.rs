@@ -603,3 +603,77 @@ fn controle_input_peint_sa_valeur() {
         .dump()
     );
 }
+
+// ── R-13d : background-position / attachment ─────────────────
+
+/// div 40×20 avec `css_extra` + un fond image factice 4×2
+/// injecté par `NodeId` — retourne la display list.
+fn bg_div(css_extra: &str) -> explorer_render::DisplayList {
+    let dom = TreeBuilder::parse("<body><div class=x></div></body>");
+    let mut eng = StyleEngine::new();
+    eng.add_css(
+        &format!("body{{margin:0}} .x{{width:40px;height:20px;{css_extra}}}"),
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let mut bx = build_box_tree_sized(
+        &dom,
+        dom.document_element().unwrap(),
+        &styles,
+        &std::collections::HashMap::new(),
+    )
+    .expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let img = std::sync::Arc::new(explorer_render::DecodedImage {
+        width: 4,
+        height: 2,
+        rgba: vec![255; 16],
+    });
+    let div_node = {
+        let mut q = vec![dom.document()];
+        let mut f = None;
+        while let Some(n) = q.pop() {
+            if dom.tag_name(n).is_ok_and(|t| t == "div") {
+                f = Some(n);
+            }
+            if let Ok(c) = dom.children(n) {
+                q.extend(c);
+            }
+        }
+        f.unwrap()
+    };
+    let mut images = explorer_render::PaintImages::default();
+    images.backgrounds.insert(div_node, img);
+    build_display_list_full(&bx, VIEW, 200.0, 0.0, &images)
+}
+
+#[test]
+fn background_position_decale_lorigine() {
+    let list = bg_div("background:url(x) no-repeat;background-position:1px 0");
+    let item = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { origin, rect, .. } => Some((*origin, *rect)),
+            _ => None,
+        })
+        .expect("bg item");
+    assert_eq!(item.0, (1.0, 0.0), "1px 0 → origine décalée");
+}
+
+#[test]
+fn background_fixed_ancre_au_viewport() {
+    // Attachment fixed : la zone de positionnement est le
+    // viewport — à scroll 0, origine = coin écran + position.
+    let list = bg_div("background:url(x) no-repeat;background-attachment:fixed");
+    let origin = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { origin, .. } => Some(*origin),
+            _ => None,
+        })
+        .expect("bg fixed");
+    // Viewport à scroll 0 : origine = (0,0) + position 0.
+    assert_eq!(origin, (0.0, 0.0));
+}

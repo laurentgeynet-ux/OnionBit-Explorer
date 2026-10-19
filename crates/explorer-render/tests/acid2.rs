@@ -31,14 +31,16 @@ use std::sync::LazyLock;
 use explorer_css::{Origin, StyleEngine, StyleEnv};
 use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
-use explorer_layout::{build_box_tree, layout_tree, BlockCtx, FontRequest, FontSource};
-use explorer_render::{build_display_list, rasterize, Frame};
+use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, FontRequest, FontSource};
+use explorer_render::{build_display_list_full, collect_data_images, rasterize, Frame};
 
 /// Viewport haut : `#top { margin: 100em 3em 0 }` pousse le
 /// visage ~1 400 px sous le haut de page ; 2 400 px le couvre
 /// dans une mise en page correcte comme approximative.
 const VIEW_W: f32 = 800.0;
 const VIEW_H: f32 = 2400.0;
+/// Budget pixels des `data:` images (borné — contenu hostile).
+const IMG_MAX_PX: u32 = 1_000_000;
 
 /// Fonte Ahem (métriques 1em×1em) — déterministe.
 struct Ahem;
@@ -55,16 +57,32 @@ fn data_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data")
 }
 
-/// CSS des `<style>` de la page (ordre document).
+/// CSS de la page : `<style>` inline + `<link rel="…stylesheet">`
+/// dont le `href` est une `data:text/css` (R-13b — aucune I/O,
+/// le corps est dans l'URL ; Acid2 l'utilise pour la feuille
+/// « appendix » qui fait `.picture { background: none }`).
 fn collect_css(dom: &Dom) -> String {
     let mut css = String::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
-        if dom.tag_name(n).is_ok_and(|t| t == "style") {
-            if let Ok(t) = dom.text_content(n) {
-                css.push_str(&t);
-                css.push('\n');
+        match dom.tag_name(n) {
+            Ok("style") => {
+                if let Ok(t) = dom.text_content(n) {
+                    css.push_str(&t);
+                    css.push('\n');
+                }
             }
+            Ok("link") => {
+                if let Ok(Some(href)) = dom.attribute(n, "href") {
+                    if href.trim_start().starts_with("data:text/css") {
+                        if let Some(bytes) = explorer_render::data_url_bytes(href.trim()) {
+                            css.push_str(&String::from_utf8_lossy(&bytes));
+                            css.push('\n');
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
         if let Ok(ch) = dom.children(n) {
             queue.extend(ch.iter().rev());
@@ -84,7 +102,16 @@ fn render(src: &str) -> Option<Frame> {
         .into_iter()
         .flatten()
         .find(|&c| dom.element(c).is_ok())?;
-    let mut bx = build_box_tree(&dom, root, &styles)?;
+    // Images `data:` inline (R-13b) — Acid2 n'a pas de
+    // ressource réseau : tout arrive par URL inline.
+    let images = collect_data_images(&dom, &styles, IMG_MAX_PX);
+    #[allow(clippy::cast_precision_loss)]
+    let sizes: std::collections::HashMap<_, (f32, f32)> = images
+        .replaced
+        .iter()
+        .map(|(n, i)| (*n, (i.width as f32, i.height as f32)))
+        .collect();
+    let mut bx = build_box_tree_sized(&dom, root, &styles, &sizes)?;
     layout_tree(
         &mut bx,
         VIEW_W,
@@ -93,7 +120,7 @@ fn render(src: &str) -> Option<Frame> {
             ..BlockCtx::default()
         },
     );
-    let list = build_display_list(&bx, VIEW_W, VIEW_H, 0.0);
+    let list = build_display_list_full(&bx, VIEW_W, VIEW_H, 0.0, &images);
     rasterize(&list, &Ahem, 1.0)
 }
 

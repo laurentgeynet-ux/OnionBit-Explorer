@@ -418,8 +418,13 @@ fn paint_item(
         DisplayItem::Image { rect, img } => {
             paint_image(pixmap, rect, img, dpi, clip);
         }
-        DisplayItem::BackgroundImage { rect, img, repeat } => {
-            paint_tiled(pixmap, rect, img, *repeat, dpi, clip);
+        DisplayItem::BackgroundImage {
+            rect,
+            img,
+            repeat,
+            origin,
+        } => {
+            paint_tiled(pixmap, rect, img, *repeat, *origin, dpi, clip);
         }
         DisplayItem::PushClip(_)
         | DisplayItem::PopClip
@@ -557,16 +562,23 @@ fn paint_image_axis(
 }
 
 /// `background-image` : tuilée à taille naturelle depuis le
-/// coin haut-gauche de `rect` (origin ≈ padding box), selon
-/// `repeat` `(x, y)`. Axis-aligned → boucle directe ; le cas
-/// général tombe sur la boucle avec `cur` appliqué par point
-/// — approximation bornée documentée.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+/// coin `origin` (coords document, inclut `background-position`
+/// et l'ancrage `fixed` = viewport), borné à l'aire `rect`,
+/// selon `repeat` `(x, y)` — les tuiles couvrent l'aire y
+/// compris **avant** l'origine (repeat ±∞). Axis-aligned →
+/// boucle directe ; le cas général tombe sur la boucle avec
+/// `cur` appliqué par point — approximation bornée documentée.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap
+)]
 fn paint_tiled(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,
     img: &crate::DecodedImage,
     repeat: (bool, bool),
+    origin: (f32, f32),
     cur: Transform,
     clip: Option<&Mask>,
 ) {
@@ -579,11 +591,15 @@ fn paint_tiled(
     else {
         return;
     };
-    // L'origine suit la transform — l'échelle n'est pas
-    // supportée sur les tuiles (CSS `background-size` hors
-    // portée) : on garde la taille naturelle.
-    let (ox, oy) = (phys.x().round() as i32, phys.y().round() as i32);
-    let (dx0, dy0) = (ox.max(0), oy.max(0));
+    // Origine transformée par point (axis-aligned OK —
+    // translate/scale/flip pures).
+    let ptx = origin.0 * cur.sx + origin.1 * cur.kx + cur.tx;
+    let pty = origin.0 * cur.ky + origin.1 * cur.sy + cur.ty;
+    let (ox, oy) = (ptx.round() as i32, pty.round() as i32);
+    let (dx0, dy0) = (
+        (phys.x().round() as i32).max(0),
+        (phys.y().round() as i32).max(0),
+    );
     let (dx1, dy1) = (
         ((phys.x() + phys.width()).round() as i32).min(pw),
         ((phys.y() + phys.height()).round() as i32).min(ph),
@@ -591,27 +607,35 @@ fn paint_tiled(
     if dx0 >= dx1 || dy0 >= dy1 {
         return;
     }
-    let iw = img.width as usize;
-    let ih = img.height as usize;
+    let iw = img.width as i32;
+    let ih = img.height as i32;
     let clip_data = clip.map(tiny_skia::Mask::data);
     let dst = pixmap.pixels_mut();
     for dy in dy0..dy1 {
-        let rel_y = (dy - oy) as usize;
-        if !repeat.1 && rel_y >= ih {
-            break;
-        }
-        let sy = if repeat.1 { rel_y % ih } else { rel_y };
-        for dx in dx0..dx1 {
-            let rel_x = (dx - ox) as usize;
-            if !repeat.0 && rel_x >= iw {
-                break;
+        let rel_y = dy - oy;
+        let sy = if repeat.1 {
+            rel_y.rem_euclid(ih)
+        } else {
+            if rel_y < 0 || rel_y >= ih {
+                continue;
             }
+            rel_y
+        };
+        for dx in dx0..dx1 {
+            let rel_x = dx - ox;
+            let sx = if repeat.0 {
+                rel_x.rem_euclid(iw)
+            } else {
+                if rel_x < 0 || rel_x >= iw {
+                    continue;
+                }
+                rel_x
+            };
             let i = dy as usize * pw as usize + dx as usize;
             if clip_data.is_some_and(|m| m[i] == 0) {
                 continue;
             }
-            let sx = if repeat.0 { rel_x % iw } else { rel_x };
-            let s = (sy.min(ih - 1) * iw + sx.min(iw - 1)) * 4;
+            let s = (sy as usize * iw as usize + sx as usize) * 4;
             let (sa, sr, sg, sb) = (
                 u32::from(img.rgba[s + 3]),
                 u32::from(img.rgba[s]),

@@ -483,6 +483,42 @@ fn margins(style: &ComputedStyle, cb_w: f32, em: f32, ctx: &BlockCtx) -> Margins
     }
 }
 
+/// §8.3.1 : une boîte est « transparente aux marges » vers
+/// le bas si sa hauteur est nulle, sans bordure ni padding
+/// vertical, en flux normal, hors BFC — sa marge basse
+/// fusionne alors avec celle de son dernier enfant in-flow.
+fn margin_transparent(bx: &LayoutBox, cb_w: f32, fs: f32, ctx: &BlockCtx) -> bool {
+    let st = &bx.style;
+    bx.rect.height <= 0.0
+        && bx.position == Position::Static
+        && bx.float == Float::None
+        && !establishes_bfc(st)
+        && side_px(st, "padding-top", cb_w, fs, ctx, 0.0) <= 0.0
+        && side_px(st, "padding-bottom", cb_w, fs, ctx, 0.0) <= 0.0
+        && border_px(st, "border-top-width", cb_w, fs, ctx) <= 0.0
+        && border_px(st, "border-bottom-width", cb_w, fs, ctx) <= 0.0
+        && !matches!(st.get("clear"), Some("left" | "right" | "both"))
+}
+
+/// Marge basse effective d'un enfant posé : si la boîte est
+/// transparente aux marges, la marge échappée de son dernier
+/// descendant in-flow fusionne avec la sienne — récursif
+/// (Acid2 `.empty` : `6.25em` + enfant `-6em` → ~0).
+fn escaped_bottom_margin(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx) -> f32 {
+    let st = &bx.style;
+    let fs = font_size_px(st, parent_fs, ctx);
+    let own = margins(st, cb_w, fs, ctx).bottom;
+    if !margin_transparent(bx, cb_w, fs, ctx) {
+        return own;
+    }
+    let last = bx.children.iter().rev().find(|c| {
+        !matches!(c.kind, BoxKind::Text) && c.position == Position::Static && c.float == Float::None
+    });
+    last.map_or(own, |c| {
+        collapse(own, escaped_bottom_margin(c, cb_w, fs, ctx))
+    })
+}
+
 /// Dimensionne `bx` (boîte de niveau bloc) dans le bloc
 /// conteneur de largeur `cb_w`, bord haut à `y`. Pose
 /// `bx.rect` et descend récursivement. `abs_cb` = bloc
@@ -530,9 +566,20 @@ pub(crate) fn layout_block(
     }
     .or(bx.intrinsic.map(|i| i.1));
 
-    // `display: table` → dimensionnement dédié.
+    // `display: table` → dimensionnement dédié. La marge
+    // gauche s'applique à la boîte table (§10.3 : `auto` →
+    // 0 pour le MVP) — `cb_w` est amputé d'autant.
     if st.get("display") == Some("table") {
-        return crate::tables::layout_table(bx, x, y, cb_w, ctx, parent_fs);
+        let ml = side_px(&st, "margin-left", cb_w, fs, ctx, 0.0);
+        let mr = side_px(&st, "margin-right", cb_w, fs, ctx, 0.0);
+        return crate::tables::layout_table(
+            bx,
+            x + ml,
+            y,
+            (cb_w - ml - mr).max(0.0),
+            ctx,
+            parent_fs,
+        );
     }
 
     let ml = side_px(&st, "margin-left", cb_w, fs, ctx, 0.0);
@@ -982,7 +1029,7 @@ fn flow_children(
         // Enfant bloc in-flow : la prochaine ligne est
         // nouvelle — l'ancre des flottants repasse au curseur.
         inline_anchor = None;
-        prev_margin = Some(cm.bottom);
+        prev_margin = Some(escaped_bottom_margin(&bx.children[i], content_w, fs, ctx));
         first = false;
     }
     // Containment : un BFC englobe le bas de ses flottants
@@ -1059,16 +1106,105 @@ fn layout_bfc_child(
 /// bloc conteneur — padding box du plus proche ancêtre
 /// positionné (hauteurs désormais connues), viewport pour
 /// `fixed`. Appelée par `layout_tree` après le flux.
+/// Géométrie résolue d'un enfant `absolute`/`fixed` : point
+/// d'ancrage `(cx, cy)` (static si le côté est `auto`),
+/// largeur de contrainte `cw` et décalages bruts.
+struct AbsGeo {
+    cx: f32,
+    cy: f32,
+    cw: f32,
+    l: Option<f32>,
+    r: Option<f32>,
+    t: Option<f32>,
+    b: Option<f32>,
+}
+
+/// §10.3.7 : `width` non-`auto` → contrainte `l`+`r` ;
+/// `width:auto` avec un seul ancrage (ou aucun) →
+/// **shrink-to-fit** (`clamp(dispo, min-content,
+/// max-content)`) — un conteneur absolu ne remplit jamais
+/// tout le CB si son contenu est étroit (Acid2 `.eyes`).
+/// Les marges horizontales amputent la largeur disponible.
+fn abs_geometry(
+    child: &LayoutBox,
+    cst: &ComputedStyle,
+    target: Rect,
+    cfs: f32,
+    ctx: &BlockCtx,
+) -> AbsGeo {
+    let l = css_px(cst, "left", target.width, cfs, ctx);
+    let r = css_px(cst, "right", target.width, cfs, ctx);
+    let t = css_px(cst, "top", target.height, cfs, ctx);
+    let b = css_px(cst, "bottom", target.height, cfs, ctx);
+    let ml = side_px(cst, "margin-left", target.width, cfs, ctx, 0.0);
+    let mr = side_px(cst, "margin-right", target.width, cfs, ctx, 0.0);
+    let w_auto = css_px(cst, "width", target.width, cfs, ctx).is_none();
+    let shrink = |avail: f32| -> f32 {
+        let min = crate::intrinsic::min_content_px(child, cfs, ctx);
+        let pref = crate::intrinsic::max_content_px(child, cfs, ctx);
+        avail.min(pref).max(min).max(0.0)
+    };
+    let cw = match (l, r) {
+        (Some(lv), Some(rv)) => (target.width - lv - rv - ml - mr).max(0.0),
+        (Some(lv), None) => {
+            let avail = (target.width - lv - ml - mr).max(0.0);
+            if w_auto {
+                shrink(avail)
+            } else {
+                avail
+            }
+        }
+        (None, Some(rv)) => {
+            let avail = (target.width - rv - ml - mr).max(0.0);
+            if w_auto {
+                shrink(avail)
+            } else {
+                avail
+            }
+        }
+        (None, None) => {
+            let avail = (target.width - ml - mr).max(0.0);
+            if w_auto {
+                shrink(avail)
+            } else {
+                avail
+            }
+        }
+    };
+    AbsGeo {
+        cx: l.map_or(child.rect.x, |v| target.x + v),
+        cy: t.map_or(child.rect.y, |v| target.y + v),
+        cw,
+        l,
+        r,
+        t,
+        b,
+    }
+}
+
 pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs: f32) {
-    // Bloc conteneur des enfants absolus de cette boîte.
+    // Fonte PROPRE de la boîte (R-17 : la cascade stocke la
+    // valeur calculée — `font-size:1em` est déjà px absolu)
+    // — les `em` des bordures/décalages se résolvent contre
+    // elle, pas contre la base 16 du premier appel.
+    let own_fs = font_size_px(&bx.style, fs, ctx);
+    // Bloc conteneur des enfants absolus de cette boîte :
+    // **padding box** de l'ancêtre positionné (§10.1) — la
+    // bordure n'en fait pas partie (Acid2 `.picture` a une
+    // bordure d'1em : ancrer à la border box décale tout de
+    // 12 px).
     let own_cb = if bx.position == Position::Static {
         cb
     } else {
+        let bl = border_px(&bx.style, "border-left-width", cb.width, own_fs, ctx);
+        let bt = border_px(&bx.style, "border-top-width", cb.width, own_fs, ctx);
+        let br = border_px(&bx.style, "border-right-width", cb.width, own_fs, ctx);
+        let bb = border_px(&bx.style, "border-bottom-width", cb.width, own_fs, ctx);
         Rect {
-            x: bx.rect.x,
-            y: bx.rect.y,
-            width: bx.rect.width,
-            height: bx.rect.height,
+            x: bx.rect.x + bl,
+            y: bx.rect.y + bt,
+            width: (bx.rect.width - bl - br).max(0.0),
+            height: (bx.rect.height - bt - bb).max(0.0),
         }
     };
     let viewport = Rect {
@@ -1099,28 +1235,16 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
         } else {
             own_cb
         };
-        let static_x = bx.children[i].rect.x;
-        let static_y = bx.children[i].rect.y;
-        let l = css_px(&cst, "left", target.width, cfs, ctx);
-        let r = css_px(&cst, "right", target.width, cfs, ctx);
-        let t = css_px(&cst, "top", target.height, cfs, ctx);
-        let b = css_px(&cst, "bottom", target.height, cfs, ctx);
-        let cw = match (l, r) {
-            (Some(l), Some(r)) => (target.width - l - r).max(0.0),
-            (Some(l), None) => (target.width - l).max(0.0),
-            _ => target.width,
-        };
-        let cx = l.map_or(static_x, |v| target.x + v);
-        let cy = t.map_or(static_y, |v| target.y + v);
+        let geo = abs_geometry(&bx.children[i], &cst, target, cfs, ctx);
         let child = &mut bx.children[i];
         // Boîte absolue = BFC propre : registre vierge. Le CB
         // absolu est défini (padding box de l'ancêtre posé) —
         // ses hauteurs % résolvent (§10.5).
         layout_block(
             child,
-            cx,
-            cy,
-            cw,
+            geo.cx,
+            geo.cy,
+            geo.cw,
             Some(target.height),
             ctx,
             fs,
@@ -1128,20 +1252,21 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
             &mut FloatCtx::default(),
         );
         // right/bottom sans left/top : ancrage au bord opposé.
-        if l.is_none() {
-            if let Some(rv) = r {
+        if geo.l.is_none() {
+            if let Some(rv) = geo.r {
                 child.rect.x = target.x + target.width - rv - child.rect.width;
             }
         }
-        if t.is_none() {
-            if let Some(bv) = b {
+        if geo.t.is_none() {
+            if let Some(bv) = geo.b {
                 child.rect.y = target.y + target.height - bv - child.rect.height;
             }
         }
     }
-    // Descendre dans tous les enfants (cb mis à jour).
+    // Descendre dans tous les enfants (cb mis à jour) avec
+    // leur contexte de fonte — `own_fs` = fonte de `bx`.
     for child in &mut bx.children {
-        resolve_absolutes(child, own_cb, ctx, fs);
+        resolve_absolutes(child, own_cb, ctx, own_fs);
     }
 }
 

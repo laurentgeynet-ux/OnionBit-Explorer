@@ -9,6 +9,45 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-13 (en cours) — compatibilité Acid2, première
+  salve** (`explorer-css`, `explorer-layout`,
+  `explorer-render`) : score informatif 23,3 % → 22,0 %
+  (la géométrie se rapproche mais le comptage de pixels
+  reste sous la cible 60 % — étape non terminée).
+  Livrés dans cette salve :
+  - `::before`/`::after` — sélecteur (`::` moderne et `:`
+    legacy, inconnus rejetés), `StyleMap.pseudos`, boîtes
+    générées dans l'ordre spec (before → enfants → after) ;
+    `content: ''` produit des boîtes visibles (bordures
+    peintes — sourcils du nez Acid2).
+  - URLs `data:` (`dataurl.rs`) — décodage pur borné
+    (`percent-decode` avant base64 — Acid2 écrit `%2F`),
+    `collect_data_images` remplit `PaintImages.replaced`/
+    `backgrounds` depuis `<img>`, `<object>` et
+    `background-image`.
+  - `<object>` repli/remplacé — ressource résolue → feuille
+    remplacée intrinsèque (atomique en ligne, série `aid`
+    pré-ordre dans `inline.rs`) ; sinon les enfants se
+    substituent (cascade imbriquée Acid2).
+  - `background` shorthand réinitialise les longhands non
+    mentionnées (`background: none` efface la couleur —
+    feuille liée `data:text/css` d'Acid2) ;
+    `background-position` (mots-clés/%, longueurs) et
+    `background-attachment: fixed` (origine viewport)
+    propagés jusqu'à `DisplayItem::BackgroundImage`.
+  - Tables : rangs/cellules **anonymes** (§17.2.1 — cellules
+    nues emballées), tables imbriquées isolées, `height` de
+    table vide honoré, hauteur de cellule étirée au rang
+    (§17.5.3), marges de table prises en compte.
+  - Positionnement : CB absolu = **padding box** de
+    l'ancêtre positionné (§10.1), `em` résolus contre la
+    fonte propre de chaque boîte, **shrink-to-fit** pour
+    `width:auto` absolu (§10.3.7).
+  - Marges : collapsing à travers les boîtes vides.
+  Régressions : `pseudo_*` (selector/block), `dataurl`,
+  `object_resolu_est_remplace_sinon_repli_enfants`,
+  `background_position_*`, cellules anonymes.
+
 - **Étape 55d — `FrameInvalidated` rapporte le delta, pas
   l'historique** (`explorer-core`) : `Tab::dirty` garde
   l'accumulation complète pour le pull FFI (`take_dirty`,

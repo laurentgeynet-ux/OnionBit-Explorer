@@ -388,7 +388,7 @@ fn parse_fill(v: &str) -> Fill {
     }
 }
 
-/// Propriétés interpolées à la `phase` ∈ [0,1] sur la table
+/// Propriétés interpolées à la `phase` ∈ \[0,1\] sur la table
 /// de frames (offsets triés) — `timing` appliqué dans chaque
 /// segment (spec : `animation-timing-function` de la frame
 /// entrante — MVP : la déclaration unique de l'item).

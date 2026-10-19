@@ -468,23 +468,62 @@ fn expand_overflow(value: &str) -> Option<Vec<(String, String)>> {
     }
 }
 
-/// `background` minimal : couleur + `none`/`url()` extraits —
-/// le reste (position/size/repeat) est l'affaire des étapes
-/// suivantes.
+/// `background` complet (CSS2 §14.2.1) : le shorthand
+/// **réinitialise** tous les longhands — les non mentionnés
+/// repassent à leur valeur initiale (sinon `background: none`
+/// laisserait une couleur déclarée avant survivre).
 fn expand_background(value: &str) -> Option<Vec<(String, String)>> {
-    let mut out = Vec::new();
+    let (mut color, mut image, mut repeat, mut attachment) = (None, None, None, None);
+    let mut position = Vec::new();
+    let mut recognized = false;
     for part in value.split_whitespace() {
         if parse_color(part).is_some() {
-            out.push(("background-color".to_string(), part.to_string()));
+            color = Some(part.to_string());
         } else if part == "none" || part.starts_with("url(") {
-            out.push(("background-image".to_string(), part.to_string()));
+            image = Some(part.to_string());
+        } else if matches!(part, "repeat" | "repeat-x" | "repeat-y" | "no-repeat") {
+            repeat = Some(part.to_string());
+        } else if matches!(part, "fixed" | "scroll" | "local") {
+            attachment = Some(part.to_string());
+        } else if matches!(part, "left" | "right" | "top" | "bottom" | "center")
+            || parse_length(part).is_some()
+            || part.ends_with('%')
+        {
+            position.push(part.to_string());
+        } else {
+            continue;
         }
+        recognized = true;
     }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
+    if !recognized {
+        return None;
     }
+    Some(vec![
+        (
+            "background-color".to_string(),
+            color.unwrap_or_else(|| "transparent".to_string()),
+        ),
+        (
+            "background-image".to_string(),
+            image.unwrap_or_else(|| "none".to_string()),
+        ),
+        (
+            "background-repeat".to_string(),
+            repeat.unwrap_or_else(|| "repeat".to_string()),
+        ),
+        (
+            "background-attachment".to_string(),
+            attachment.unwrap_or_else(|| "scroll".to_string()),
+        ),
+        (
+            "background-position".to_string(),
+            if position.is_empty() {
+                "0px 0px".to_string()
+            } else {
+                position.join(" ")
+            },
+        ),
+    ])
 }
 
 /// `font: [style]? [variant]? [weight]? size[/line-height] family`.

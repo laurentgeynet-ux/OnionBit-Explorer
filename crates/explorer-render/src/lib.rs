@@ -14,6 +14,7 @@
 #![forbid(unsafe_code)]
 
 pub mod canvas;
+pub mod dataurl;
 pub mod display;
 pub mod fonts;
 pub mod image;
@@ -22,6 +23,7 @@ pub mod svg;
 pub mod woff;
 
 pub use canvas::{raster_ops, CanvasOp, CanvasTable};
+pub use dataurl::{collect_data_images, data_url_bytes, decode_data_url};
 pub use display::{
     build_display_list, build_display_list_full, build_display_list_imaged,
     build_display_list_scrolled, BorderStyle, DisplayItem, DisplayList,

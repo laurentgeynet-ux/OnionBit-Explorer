@@ -111,6 +111,20 @@ pub enum SimpleSelector {
     },
     /// Pseudo-classes supportées (voir doc du module).
     Pseudo(PseudoClass),
+    /// `::before`/`::after` — pseudo-élément (ou syntaxe
+    /// legacy à un seul `:`). Ne peut figurer que dans le
+    /// composé final : le matching élément l'ignore, la
+    /// cascade dirige les déclarations vers le pseudo-style.
+    PseudoElement(PseudoElement),
+}
+
+/// Pseudo-éléments générant des boîtes (R-13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PseudoElement {
+    /// `::before` — contenu généré avant les enfants.
+    Before,
+    /// `::after` — contenu généré après les enfants.
+    After,
 }
 
 impl SimpleSelector {
@@ -121,7 +135,8 @@ impl SimpleSelector {
         match self {
             Self::Id(_) => (1, 0, 0),
             Self::Class(_) | Self::Attribute { .. } => (0, 1, 0),
-            Self::Type(_) => (0, 0, 1),
+            // Pseudo-élément : colonne « type » (CSS2 §6.4.3).
+            Self::Type(_) | Self::PseudoElement(_) => (0, 0, 1),
             Self::Universal => (0, 0, 0),
             Self::Pseudo(p) => p.specificity(),
         }
@@ -392,6 +407,14 @@ impl<'t> SelectorParser<'t> {
                 break;
             }
         }
+        // Un pseudo-élément ne peut figurer que dans le
+        // composé final (§5.2/§12 — `a::before b` est invalide).
+        if parts[..parts.len().saturating_sub(1)]
+            .iter()
+            .any(|(c, _)| c.simples.iter().any(is_pseudo_element))
+        {
+            return None;
+        }
         Some(ComplexSelector { parts })
     }
 
@@ -429,7 +452,14 @@ impl<'t> SelectorParser<'t> {
                 }
                 Token::Colon => {
                     self.pos += 1;
-                    simples.push(self.pseudo()?);
+                    // `::x` = pseudo-élément ; `:before`/`:after`
+                    // hérités CSS2 à un seul `:` valent aussi.
+                    if matches!(self.peek(), Some(Token::Colon)) {
+                        self.pos += 1;
+                        simples.push(self.pseudo_element()?);
+                    } else {
+                        simples.push(self.pseudo()?);
+                    }
                 }
                 _ => break,
             }
@@ -509,11 +539,22 @@ impl<'t> SelectorParser<'t> {
         }
     }
 
-    /// `:name` ou `:fn(...)` — après le `:`.
+    /// `:name` ou `:fn(...)` — après un seul `:`.
+    /// `:before`/`:after` (syntaxe CSS2) → pseudo-éléments ;
+    /// les autres noms d'un seul `:` sont des pseudo-classes.
     fn pseudo(&mut self) -> Option<SimpleSelector> {
         match self.next() {
             Some(Token::Ident(name)) => {
                 let simple = match name.as_str() {
+                    // Pseudo-éléments legacy (un seul `:` toléré,
+                    // CSS 2.1) : only-child & co. restent des
+                    // pseudo-classes.
+                    "before" => {
+                        return Some(SimpleSelector::PseudoElement(PseudoElement::Before));
+                    }
+                    "after" => {
+                        return Some(SimpleSelector::PseudoElement(PseudoElement::After));
+                    }
                     "root" => PseudoClass::Root,
                     "empty" => PseudoClass::Empty,
                     "first-child" => PseudoClass::FirstChild,
@@ -555,6 +596,21 @@ impl<'t> SelectorParser<'t> {
                     };
                     Some(SimpleSelector::Pseudo(simple))
                 }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// `::name` — pseudo-élément : seuls `before`/`after`
+    /// génèrent des boîtes (R-13) ; les autres noms
+    /// (`first-line`, `selection`…) rendent le sélecteur
+    /// invalide → la règle est ignorée, dégradation sûre.
+    fn pseudo_element(&mut self) -> Option<SimpleSelector> {
+        match self.next() {
+            Some(Token::Ident(name)) => match name.as_str() {
+                "before" => Some(SimpleSelector::PseudoElement(PseudoElement::Before)),
+                "after" => Some(SimpleSelector::PseudoElement(PseudoElement::After)),
                 _ => None,
             },
             _ => None,
@@ -753,7 +809,6 @@ fn simple_matches(
     state: &dyn Fn(&str) -> bool,
 ) -> bool {
     match sel {
-        SimpleSelector::Universal => true,
         SimpleSelector::Type(name) => dom
             .tag_name(node)
             .is_ok_and(|t| t.eq_ignore_ascii_case(name)),
@@ -774,6 +829,10 @@ fn simple_matches(
             _ => false,
         },
         SimpleSelector::Pseudo(p) => pseudo_matches(dom, node, p, state),
+        // Le pseudo-élément ne contraint pas l'élément — c'est
+        // la cascade qui dirige les déclarations vers le
+        // pseudo-style (R-13).
+        SimpleSelector::Universal | SimpleSelector::PseudoElement(_) => true,
     }
 }
 
@@ -967,4 +1026,20 @@ fn empty_element(dom: &Dom, node: NodeId) -> bool {
         }
     }
     true
+}
+
+/// `true` si `s` est un pseudo-élément (`::before`/`::after`).
+fn is_pseudo_element(s: &SimpleSelector) -> bool {
+    matches!(s, SimpleSelector::PseudoElement(_))
+}
+
+/// Pseudo-élément du composé final de `sel`, le cas échéant
+/// (le parseur garantit qu'il n'apparaît que là) — la cascade
+/// s'en sert pour diriger les déclarations vers le pseudo-style.
+#[must_use]
+pub fn selector_pseudo_element(sel: &ComplexSelector) -> Option<PseudoElement> {
+    sel.parts.last()?.0.simples.iter().find_map(|s| match s {
+        SimpleSelector::PseudoElement(p) => Some(*p),
+        _ => None,
+    })
 }

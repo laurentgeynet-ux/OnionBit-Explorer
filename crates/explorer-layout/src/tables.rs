@@ -36,12 +36,13 @@ use crate::block::{
 };
 use crate::boxtree::{LayoutBox, Rect};
 
-/// Une cellule repérée : (rangée, colonne, indice dans
-/// `row_box.children`).
+/// Une cellule repérée : colonne + chemin d'indices depuis
+/// la boîte table jusqu'à elle (le chemin traverse un rang
+/// explicite ou désigne un enfant direct = cellule anonyme).
 struct Cell {
     col: usize,
-    /// Indice de l'enfant dans sa boîte ligne.
-    idx: usize,
+    /// Indices `bx → … → table-cell`.
+    path: Vec<usize>,
 }
 
 /// Classe visuelle d'un rang (§17.5 : header, corps, footer
@@ -59,55 +60,120 @@ enum RowClass {
 
 /// Un rang `table-row` repéré : chemin d'indices depuis la
 /// boîte table (les éléments intermédiaires sont les groupes
-/// de rangs) + ses cellules.
+/// de rangs) + ses cellules. `path` **vide** = rang anonyme
+/// (§17.2.1) : les cellules sont des enfants directs, aucune
+/// boîte ligne n'existe (elle ne peint ni fond ni bordure).
 struct Row {
-    /// Indices enfants `bx → … → table-row`.
-    path: Vec<usize>,
+    /// Indices `bx → … → table-row` ; `None` = rang anonyme
+    /// (§17.2.1) — aucune boîte ligne n'existe : rien à poser.
+    path: Option<Vec<usize>>,
     /// Classe visuelle du groupe conteneur.
     class: RowClass,
     cells: Vec<Cell>,
 }
 
-/// Repère les boîtes ligne (`display: table-row`) en
-/// traversant les groupes — renvoyés en **ordre visuel**
-/// (tête, corps en ordre document, pied), tri stable.
+/// `true` pour les boîtes qui ne peuvent pas tenir de cellule
+/// dans une rangée : texte blanc inter-éléments (l'espace
+/// source entre `<li>` n'est PAS du contenu de cellule).
+fn ignorable_in_table(b: &LayoutBox) -> bool {
+    matches!(
+        b.kind,
+        crate::BoxKind::Text | crate::BoxKind::AnonymousBlock
+    ) && b.text.as_deref().is_none_or(|t| t.trim().is_empty())
+        && b.children.iter().all(ignorable_in_table)
+}
+
+/// Repère les rangs (`display: table-row` explicites ou
+/// anonymes) en traversant les groupes — renvoyés en **ordre
+/// visuel** (tête, corps en ordre document, pied), tri stable.
+/// §17.2.1 : les `table-cell` nues et tout autre contenu sont
+/// emballés dans des cellules/rangs anonymes ; une table
+/// **imbriquée** est du contenu (on ne descend pas dedans).
 fn collect_grid(bx: &LayoutBox) -> Vec<Row> {
-    fn walk(b: &LayoutBox, class: RowClass, path: &mut Vec<usize>, rows: &mut Vec<Row>) {
-        if b.display() == "table-row" {
-            let cells = b
-                .children
-                .iter()
-                .enumerate()
-                .filter(|(_, c)| c.display() == "table-cell")
-                .enumerate()
-                .map(|(col, (idx, _))| Cell { col, idx })
-                .collect();
-            rows.push(Row {
-                path: path.clone(),
-                class,
-                cells,
-            });
-            return;
-        }
-        let class = match b.display() {
-            "table-header-group" => RowClass::Header,
-            "table-footer-group" => RowClass::Footer,
-            _ => class,
+    /// Cellules d'un rang explicite (enfants `table-cell`
+    /// directs — le reste est ignoré, rangs réels seuls).
+    fn row_cells(b: &LayoutBox, path: &[usize]) -> Vec<Cell> {
+        b.children
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.display() == "table-cell")
+            .enumerate()
+            .map(|(col, (idx, _))| {
+                let mut p = path.to_vec();
+                p.push(idx);
+                Cell { col, path: p }
+            })
+            .collect()
+    }
+    /// Marche une suite d'enfants (table, ou groupe de rangs) :
+    /// rangs explicites + accumulation des cellules nues en
+    /// rangs anonymes (`path` = préfixe jusqu'au conteneur).
+    fn walk_children(b: &LayoutBox, class: RowClass, prefix: &mut Vec<usize>, rows: &mut Vec<Row>) {
+        let mut pending: Vec<Cell> = Vec::new();
+        let flush = |pending: &mut Vec<Cell>, rows: &mut Vec<Row>| {
+            if !pending.is_empty() {
+                rows.push(Row {
+                    path: None,
+                    class,
+                    cells: std::mem::take(pending),
+                });
+            }
         };
         for (i, c) in b.children.iter().enumerate() {
-            path.push(i);
-            walk(c, class, path, rows);
-            path.pop();
+            match c.display() {
+                "table-row" => {
+                    flush(&mut pending, rows);
+                    prefix.push(i);
+                    let cells = row_cells(c, prefix);
+                    prefix.pop();
+                    rows.push(Row {
+                        path: Some({
+                            let mut p = prefix.clone();
+                            p.push(i);
+                            p
+                        }),
+                        class,
+                        cells,
+                    });
+                }
+                "table-header-group" | "table-row-group" | "table-footer-group" => {
+                    flush(&mut pending, rows);
+                    let g = match c.display() {
+                        "table-header-group" => RowClass::Header,
+                        "table-footer-group" => RowClass::Footer,
+                        _ => RowClass::Body,
+                    };
+                    prefix.push(i);
+                    walk_children(c, g, prefix, rows);
+                    prefix.pop();
+                }
+                _ => {
+                    // Hors rangs/groupes : `table-cell` nue ou
+                    // contenu quelconque → cellule du rang
+                    // anonyme courant (sauf blanc ignorable).
+                    if !ignorable_in_table(c) {
+                        let mut p = prefix.clone();
+                        p.push(i);
+                        pending.push(Cell {
+                            col: pending.len(),
+                            path: p,
+                        });
+                    }
+                }
+            }
         }
+        flush(&mut pending, rows);
     }
     let mut rows: Vec<Row> = Vec::new();
-    walk(bx, RowClass::Body, &mut Vec::new(), &mut rows);
+    walk_children(bx, RowClass::Body, &mut Vec::new(), &mut rows);
     let rank = |c: RowClass| match c {
         RowClass::Header => 0,
         RowClass::Body => 1,
         RowClass::Footer => 2,
     };
     rows.sort_by_key(|r| rank(r.class));
+    // Recolonne : `col` suit l'ordre des cellules dans CHAQUE
+    // rang (déjà en ordre doc — rien à faire).
     rows
 }
 
@@ -128,7 +194,7 @@ fn chain_edge(bx: &LayoutBox, row: &Row, side: &str, cb_w: f32, fs: f32, ctx: &B
     let prop = format!("border-{side}-width");
     let mut w = 0.0_f32;
     let mut cur = bx;
-    for &i in &row.path {
+    for &i in row.path.as_deref().unwrap_or(&[]) {
         let Some(c) = cur.children.get(i) else {
             return w;
         };
@@ -136,9 +202,14 @@ fn chain_edge(bx: &LayoutBox, row: &Row, side: &str, cb_w: f32, fs: f32, ctx: &B
         cur = c;
     }
     for cell in &row.cells {
-        if let Some(c) = cur.children.get(cell.idx) {
-            w = w.max(border_px(&c.style, &prop, cb_w, fs, ctx));
+        let mut cc = bx;
+        for &i in &cell.path {
+            let Some(n) = cc.children.get(i) else {
+                return w;
+            };
+            cc = n;
         }
+        w = w.max(border_px(&cc.style, &prop, cb_w, fs, ctx));
     }
     w
 }
@@ -159,13 +230,17 @@ pub(crate) fn layout_table(
     let rows = collect_grid(bx);
     let ncols = rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
     if ncols == 0 {
+        // Table sans aucune cellule : le `width`/`height`
+        // spécifiés s'appliquent quand même (une table vide
+        // imbriquée garde sa taille — Acid2 `li.second-part`).
+        let h = css_px(&st, "height", 0.0, fs, ctx).unwrap_or(0.0);
         bx.rect = Rect {
             x,
             y,
             width: cb_w.min(css_px(&st, "width", cb_w, fs, ctx).unwrap_or(cb_w)),
-            height: 0.0,
+            height: h,
         };
-        return 0.0;
+        return h;
     }
 
     // Mesures par colonne : min (plus long mot) et pref
@@ -174,7 +249,7 @@ pub(crate) fn layout_table(
     let mut pref_w = vec![1.0_f32; ncols];
     for row in &rows {
         for cell in &row.cells {
-            let (min, pref) = cell_widths(bx, &row.path, cell.idx, ctx, fs);
+            let (min, pref) = cell_widths(bx, &cell.path, ctx, fs);
             min_w[cell.col] = min_w[cell.col].max(min);
             pref_w[cell.col] = pref_w[cell.col].max(pref.max(min));
         }
@@ -265,8 +340,7 @@ pub(crate) fn layout_table(
                 width: cw,
                 height: 0.0,
             };
-            let Some(cell_box) = at_path(bx, &row.path).and_then(|t| t.children.get_mut(cell.idx))
-            else {
+            let Some(cell_box) = at_path(bx, &cell.path) else {
                 continue;
             };
             // Cellule = BFC propre : registre vierge (§9.4.1).
@@ -288,8 +362,9 @@ pub(crate) fn layout_table(
         row_tops.push((cursor_y, row_h));
         cursor_y += row_h + gap[k + 1];
     }
-    // Deuxième passe : uniformiser les hauteurs de cellule
-    // (border-box = hauteur de rangée, si height auto) ;
+    // Deuxième passe : uniformiser les hauteurs de cellule —
+    // §17.5.3 : la `height` d'une cellule est un **minimum**,
+    // la rangée l'étire toujours (même spécifiée) ;
     // géométrie réelle pour le rang et ses groupes (leurs
     // fonds/bordures peignent — sous collapse, l'étendue du
     // groupe rejoint ses arêtes partagées pour que ses
@@ -297,23 +372,21 @@ pub(crate) fn layout_table(
     for (k, row) in rows.iter().enumerate() {
         let (ry, rh) = row_tops[k];
         for cell in &row.cells {
-            let Some(cell_box) = at_path(bx, &row.path).and_then(|t| t.children.get_mut(cell.idx))
-            else {
+            let Some(cell_box) = at_path(bx, &cell.path) else {
                 continue;
             };
-            if css_px(&cell_box.style.clone(), "height", cb_w, fs, ctx).is_none()
-                && cell_box.rect.height < rh
-            {
-                cell_box.rect.height = rh;
-            }
+            cell_box.rect.height = cell_box.rect.height.max(rh);
             cell_box.rect.y = ry;
         }
         let mut cur = &mut *bx;
-        for (d, &i) in row.path.iter().enumerate() {
+        let Some(rpath) = &row.path else {
+            continue;
+        };
+        for (d, &i) in rpath.iter().enumerate() {
             let Some(c) = cur.children.get_mut(i) else {
                 break;
             };
-            if d + 1 == row.path.len() {
+            if d + 1 == rpath.len() {
                 // `table-row` : étendue réelle de la rangée.
                 c.rect = Rect {
                     x: x + il,
@@ -325,8 +398,10 @@ pub(crate) fn layout_table(
                 // Groupe intermédiaire : union des rangs qu'il
                 // contient ± ses arêtes partagées propres
                 // (premier/dernier rang de sa suite).
-                let first = k == 0 || rows[k - 1].path.get(..=d) != row.path.get(..=d);
-                let last = k + 1 == nrows || rows[k + 1].path.get(..=d) != row.path.get(..=d);
+                let first = k == 0
+                    || rows[k - 1].path.as_deref().and_then(|p| p.get(..=d)) != rpath.get(..=d);
+                let last = k + 1 == nrows
+                    || rows[k + 1].path.as_deref().and_then(|p| p.get(..=d)) != rpath.get(..=d);
                 let gtop =
                     first && border_px(&c.style.clone(), "border-top-width", cb_w, fs, ctx) > 0.0;
                 let gbot =
@@ -361,18 +436,23 @@ pub(crate) fn layout_table(
 
 /// Largeurs min/pref d'une cellule : plus long mot /
 /// contenu déroulé + padding/bordure horizontaux.
-fn cell_widths(bx: &LayoutBox, path: &[usize], idx: usize, ctx: &BlockCtx, fs: f32) -> (f32, f32) {
+fn cell_widths(bx: &LayoutBox, cell_path: &[usize], ctx: &BlockCtx, fs: f32) -> (f32, f32) {
     let mut cur = bx;
-    for &i in path {
+    for &i in cell_path {
         let Some(c) = cur.children.get(i) else {
             return (0.0, 0.0);
         };
         cur = c;
     }
-    let Some(cell) = cur.children.get(idx) else {
-        return (0.0, 0.0);
-    };
+    let cell = cur;
     let st = &cell.style;
+    // `width` spécifiée domine la mesure de contenu (CSS2
+    // §17.5.2.2 : une largeur fixe de cellule borne la
+    // colonne — Acid2 pose `width:1em` sur des cellules
+    // vides).
+    if let Some(w) = css_px(st, "width", 0.0, fs, ctx) {
+        return (w, w);
+    }
     let measure = measure_fn(st, font_size_px(st, fs, ctx), ctx);
     let txt = flatten_text(cell);
     // `\u{A0}` n'est PAS un blanc CSS : il porte l'avance du

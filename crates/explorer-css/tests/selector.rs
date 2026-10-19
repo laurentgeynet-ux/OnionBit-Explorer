@@ -215,7 +215,7 @@ fn selecteurs_invalides_rejetes() {
         "[a=",
         "p:",
         "p:unknown",
-        "::before",
+        "::unknown",
         "a, b >",
         ".a..",
         "[a~]",

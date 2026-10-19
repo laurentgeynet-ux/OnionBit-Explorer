@@ -81,15 +81,20 @@ pub enum DisplayItem {
     },
     /// `background-image` décodée, tuilée dans `rect` selon
     /// `background-repeat` — origine padding box, aire border
-    /// box (defaults CSS2 ; `background-position`/`size` hors
-    /// portée — origine au coin, taille naturelle).
+    /// box (`background-size` hors portée — taille naturelle).
     BackgroundImage {
-        /// Border box de la boîte porteuse.
+        /// Aire de peinture (border box de la boîte porteuse) —
+        /// les tuiles n'apparaissent que dedans.
         rect: Rect,
         /// Pixels décodés.
         img: std::sync::Arc<crate::image::DecodedImage>,
         /// Répétition `(x, y)` de `background-repeat`.
         repeat: (bool, bool),
+        /// Coin haut-gauche de la tuile (0,0) en coords document
+        /// — inclut `background-position` résolu ; pour
+        /// `background-attachment: fixed`, la zone de
+        /// positionnement est le viewport (R-13d).
+        origin: (f32, f32),
     },
     /// Entrée de zone de clipping (`overflow` ≠ `visible`).
     PushClip(Rect),
@@ -363,13 +368,15 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 rect: r1,
                 img: i1,
                 repeat: p1,
+                origin: o1,
             },
             D::BackgroundImage {
                 rect: r2,
                 img: i2,
                 repeat: p2,
+                origin: o2,
             },
-        ) => r1 == r2 && p1 == p2 && std::sync::Arc::ptr_eq(i1, i2),
+        ) => r1 == r2 && p1 == p2 && o1 == o2 && std::sync::Arc::ptr_eq(i1, i2),
         (D::PushClip(r1), D::PushClip(r2)) => r1 == r2,
         (D::PushTransform(m1), D::PushTransform(m2)) => {
             (m1.sx, m1.ky, m1.kx, m1.sy, m1.tx, m1.ty) == (m2.sx, m2.ky, m2.kx, m2.sy, m2.tx, m2.ty)
@@ -550,15 +557,62 @@ fn prop_px(st: &explorer_css::ComputedStyle, prop: &str, fallback: f32) -> f32 {
     }
 }
 
+/// `background-position` → décalage (px) de la tuile (0,0)
+/// dans la zone de positionnement `area` (CSS2 §14.2.1 :
+/// `%` mesure `(zone - image)` ; mots-clés = 0/50/100 % ;
+/// une valeur seule → x, l'autre `center` ; `em` hors
+/// portée → 0). Acid2 utilise `1px 0` sur les yeux.
+#[allow(clippy::cast_possible_truncation)]
+fn bg_position(raw: Option<&str>, area: (f32, f32), img: (f32, f32)) -> (f32, f32) {
+    let toks: Vec<&str> = raw.unwrap_or("").split_whitespace().collect();
+    if toks.is_empty() {
+        return (0.0, 0.0);
+    }
+    // Une dimension : longueur/`%` = offset depuis le coin,
+    // mot-clé → fraction de (zone − image).
+    let token = |t: &str, span: f32, dim: f32| -> f32 {
+        match t {
+            "left" | "top" => 0.0,
+            "center" => (span - dim) / 2.0,
+            "right" | "bottom" => span - dim,
+            _ => t
+                .strip_suffix('%')
+                .and_then(|p| p.parse::<f32>().ok())
+                .map_or_else(
+                    || {
+                        parse_length(t)
+                            .and_then(|l| l.unit.px_factor().map(|f| l.value * f))
+                            .map_or(0.0, |v| v as f32)
+                    },
+                    |p| (span - dim) * p / 100.0,
+                ),
+        }
+    };
+    let (x_tok, y_tok) = match toks.as_slice() {
+        [a] => {
+            // Seul un mot-clé vertical indique y.
+            if matches!(*a, "top" | "bottom") {
+                ("center", *a)
+            } else {
+                (*a, "center")
+            }
+        }
+        [a, b, ..] => (*a, *b),
+        _ => ("left", "top"),
+    };
+    (token(x_tok, area.0, img.0), token(y_tok, area.1, img.1))
+}
+
 /// Fond + bordures + texte propre d'une boîte (avant les
 /// enfants — le fond passe TOUJOURS sous son contenu).
 /// `off` = décalage vertical de scroll (`0` dans les
 /// sous-arbres `position: fixed`).
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 fn paint_self(
     bx: &LayoutBox,
     items: &mut Vec<DisplayItem>,
     off: (f32, f32),
+    vp: (f32, f32),
     images: &crate::PaintImages,
 ) {
     let rect = shifted(bx.rect, off);
@@ -591,7 +645,26 @@ fn paint_self(
                     Some("repeat-y") => (false, true),
                     _ => (true, true), // `repeat` = défaut.
                 };
-                items.push(DisplayItem::BackgroundImage { rect, img, repeat });
+                // Zone de positionnement : border box ≈ padding
+                // box pour `scroll`, **viewport** pour `fixed`
+                // (CSS2 §14.2.1 — le fond reste calé à l'écran).
+                let fixed = bx.style.get("background-attachment") == Some("fixed");
+                let (area, base) = if fixed {
+                    ((vp.0, vp.1), (-off.0, -off.1))
+                } else {
+                    ((rect.width, rect.height), (rect.x, rect.y))
+                };
+                let (px, py) = bg_position(
+                    bx.style.get("background-position"),
+                    area,
+                    (img.width as f32, img.height as f32),
+                );
+                items.push(DisplayItem::BackgroundImage {
+                    rect,
+                    img,
+                    repeat,
+                    origin: (base.0 + px, base.1 + py),
+                });
             }
         }
     }
@@ -919,7 +992,7 @@ fn paint_box(
     if let Some(m) = tf {
         items.push(DisplayItem::PushTransform(m));
     }
-    paint_self(bx, items, off, images);
+    paint_self(bx, items, off, vp, images);
     // Élément remplacé : bitmap par-dessus bordure (contenu —
     // ordre CSS 2.1 App. E : fond → bordure → contenu).
     if let Some(img) = bx.node.and_then(|n| {

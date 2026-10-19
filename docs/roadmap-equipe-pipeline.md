@@ -368,12 +368,19 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   deviennent des étapes R-xx. **Baseline terrain mission 9**
   (shot `repros/acid2/` vs page de référence) : ~15 % du
   visage — `.intro` bordée, liens bleus et « Hello World! »
-  peints ; `.picture p` fixed ≈ au bon endroit. **Écart n°1** :
-  le **bloc conteneur positionné** — les boîtes du visage
-  existent mais tombent en flux normal au bas du document
-  (~y 2540) au lieu de se rapporter à `.picture` ; ensuite la
-  chaîne `<object>` → `data:` (yeux blancs), puis les
-  pseudo-éléments/bordures-seules (nez, sourcils).
+  peints ; `.picture p` fixed ≈ au bon endroit. **Écart n°1**
+  résolu : le bloc conteneur positionné rapportait les boîtes
+  du visage à la border box — padding box désormais, et les
+  `em` se résolvent par boîte. **Salve livrée** : pseudo-
+  éléments `::before`/`::after`, `data:` URLs (décodage +
+  collecte), `<object>` repli/remplacé atomique en ligne,
+  `background` reset + position + `fixed`, cellules/rangs de
+  table anonymes + stretch §17.5.3, shrink-to-fit §10.3.7,
+  collapse à travers les vides. Score informatif 23,3 % →
+  22,0 % (géométrie plus juste, comptage pixel encore bas) —
+  la structure du visage tient (front, yeux verts peints via
+  `data:` PNG, nez, sourire, `ul` en cellules 12 px) mais le
+  compactage vertical et les alignements fins restent à moudre.
 
 ## Tâches continues
 
