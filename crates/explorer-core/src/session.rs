@@ -17,6 +17,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use explorer_css::animation::{animation_decls, keyframe_style, AnimationDecl};
 use explorer_css::transition::{interpolate, transition_decls, Timing};
 use explorer_css::value::Color;
 use explorer_css::{
@@ -424,6 +425,10 @@ struct Tab {
     /// Transitions en vol (`elem` ordinal + `prop` →
     /// horaire) — bornées par `MAX_TRANSITIONS`.
     transitions: Vec<ActiveTransition>,
+    /// Animations `@keyframes` enregistrées (`elem` ordinal
+    /// et index de la liste `animation` → déclaration et
+    /// `start`) — étape 55e, même borne.
+    animations: Vec<ActiveAnimation>,
     /// Horloge de navigation (étape 53d) — incrémentée à
     /// chaque `nav_begin` ; les phases éclatées vérifient
     /// l'epoch avant chaque écriture, ce qui invalide
@@ -607,6 +612,10 @@ impl Tab {
         self.spec_paint = false; // snapshot auto-cohérent (56c)
         self.last_req = snap.last_req;
         self.transitions.clear();
+        // Idem animations : la restauration repart sur les
+        // déclarations — lecture réenregistrée au premier
+        // re-style (étape 55e).
+        self.animations.clear();
         self.nav_epoch += 1;
         self.pending_nav.clear();
     }
@@ -704,6 +713,57 @@ impl ActiveTransition {
     }
 }
 
+/// Animation `@keyframes` enregistrée sur `(élément, index
+/// de la liste `animation`)` — étape 55e. `start` persiste
+/// tant que la déclaration est inchangée : un re-style
+/// (tick, mutation) ne redémarre pas la lecture.
+#[derive(Clone)]
+struct ActiveAnimation {
+    /// Ordinal d'élément en ordre document (même convention
+    /// que [`ActiveTransition`]).
+    elem: usize,
+    /// Index dans `animation_decls` — les items s'alignent
+    /// par position (un `none` en tête décale les suivants).
+    idx: usize,
+    /// Déclaration résolue à l'enregistrement.
+    decl: AnimationDecl,
+    start: Instant,
+    /// La dernière passe a écrit des surcharges — tant que
+    /// c'est vrai, une lecture qui vient de se terminer sans
+    /// `fill` doit encore produire **un** reflow pour
+    /// replier le style de base (sinon la frame reste figée
+    /// sur la valeur animée).
+    applied: bool,
+}
+
+impl ActiveAnimation {
+    /// Lecture digne d'un tick à `now` — `true` tant que la
+    /// fenêtre de lecture court (délai inclus : l'animation
+    /// doit démarrer à son terme sans déclencheur externe)
+    /// ou qu'un repli final reste à peindre (`applied` +
+    /// phase désormais `None`). Une animation terminée en
+    /// `forwards` ne retourne pas `true` : sa valeur figée
+    /// est ré-appliquée à chaque passe, sans reflow.
+    fn playing(&self, now: Instant) -> bool {
+        let elapsed = now.saturating_duration_since(self.start).as_secs_f64();
+        elapsed - self.decl.delay < self.decl.iterations * self.decl.duration
+            || (self.applied && self.decl.phase(elapsed).is_none())
+    }
+}
+
+/// Identité de déclaration — un re-style identique ne
+/// redémarre pas l'animation (champ par champ :
+/// `AnimationDecl` ne dérive pas `PartialEq` côté PIPE).
+fn same_decl(a: &AnimationDecl, b: &AnimationDecl) -> bool {
+    a.name == b.name
+        && a.duration.to_bits() == b.duration.to_bits()
+        && a.delay.to_bits() == b.delay.to_bits()
+        && a.timing == b.timing
+        && a.iterations.to_bits() == b.iterations.to_bits()
+        && a.direction == b.direction
+        && a.fill == b.fill
+}
+
 /// Borne anti-hostile : transitions simultanées par onglet
 /// (une page hostile peut déclencher des milliers de diffs).
 const MAX_TRANSITIONS: usize = 256;
@@ -729,16 +789,16 @@ fn element_ordinals(dom: &Dom) -> HashMap<NodeId, usize> {
 
 /// Diff `prev_styles` → `styles` (étape 45) : enregistre les
 /// nouvelles transitions (`transition-*` déclarés, valeur
-/// modifiée), retarget les transitions en vol depuis leur
-/// valeur courante, applique les progressions en surcharge
-/// post-cascade sur `styles`. Renvoie `true` s'il reste des
-/// transitions actives. `prev` DOIT être le map brut de la
-/// passe précédente (sans les surcharges d'animation),
-/// indexé par ordinal d'élément.
+/// modifiée) et retarget les transitions en vol depuis leur
+/// valeur courante. Renvoie `true` s'il reste des
+/// transitions actives. `prev` et `styles` DOIVENT être les
+/// maps bruts (sans les surcharges d'animation — appliquées
+/// plus tard par [`apply_anim_overrides`], étape 55e),
+/// indexés par ordinal d'élément.
 fn update_transitions(
     prev: &HashMap<usize, ComputedStyle>,
     transitions: &mut Vec<ActiveTransition>,
-    styles: &mut StyleMap,
+    styles: &StyleMap,
     ord_of: &HashMap<NodeId, usize>,
     now: Instant,
 ) -> bool {
@@ -835,22 +895,96 @@ fn update_transitions(
     }
     transitions.clone_from(&fresh);
     transitions.truncate(MAX_TRANSITIONS);
-    // Surcharges : la progression l'emporte sur toute
-    // déclaration (post-cascade, spec « current transition »).
-    let mut running = false;
+    // Les surcharges ne sont PAS appliquées ici : les
+    // `@keyframes` passent sous les transitions (couche
+    // « current transition » du spec) — séquencement dans
+    // `apply_anim_overrides` (étape 55e).
+    let running = transitions.iter().any(|t| t.end() > now);
+    transitions.retain(|t| t.end() > now);
+    running
+}
+
+/// Enregistre/renouvelle les animations `@keyframes` de la
+/// passe de styles brute (étape 55e) : identité
+/// `(élément, index)` + déclaration — une déclaration
+/// inchangée conserve son `start` (le tick ne redémarre
+/// pas), changée elle repart de `now`. Les éléments dont la
+/// déclaration disparaît perdent leur animation.
+fn sync_animations(
+    animations: &mut Vec<ActiveAnimation>,
+    styles: &StyleMap,
+    ord_of: &HashMap<NodeId, usize>,
+    eng: &StyleEngine,
+    now: Instant,
+) {
+    let mut fresh = Vec::with_capacity(animations.len());
+    for (node, cs) in styles.iter() {
+        let Some(&ord) = ord_of.get(&node) else {
+            continue;
+        };
+        for (idx, decl) in animation_decls(cs).iter().enumerate() {
+            if decl.name == "none" || eng.keyframes(&decl.name).is_none() {
+                continue;
+            }
+            let same = animations
+                .iter()
+                .find(|a| a.elem == ord && a.idx == idx && same_decl(&a.decl, decl));
+            fresh.push(match same {
+                Some(a) => a.clone(),
+                None => ActiveAnimation {
+                    elem: ord,
+                    idx,
+                    decl: decl.clone(),
+                    start: now,
+                    applied: false,
+                },
+            });
+        }
+    }
+    *animations = fresh;
+    animations.truncate(MAX_TRANSITIONS);
+}
+
+/// Surcharges d'animation sur `styles` (post-cascade —
+/// étape 55e) : les `@keyframes` d'abord (couche
+/// animation), les transitions ensuite (couche « current
+/// transition » du spec — elles l'emportent). Une frame
+/// absente d'une borne part de la valeur calculée via
+/// `keyframe_style` ; une phase `None` (avant délai sans
+/// `backwards`, terminé sans `forwards`) n'écrit rien.
+fn apply_anim_overrides(
+    transitions: &[ActiveTransition],
+    animations: &mut [ActiveAnimation],
+    eng: &StyleEngine,
+    styles: &mut StyleMap,
+    ord_of: &HashMap<NodeId, usize>,
+    now: Instant,
+) {
     let node_of: HashMap<usize, NodeId> = ord_of.iter().map(|(n, o)| (*o, *n)).collect();
-    for t in transitions.iter() {
-        if t.end() > now {
-            running = true;
-            if let Some(v) = t.value_at(now) {
-                if let Some(cs) = node_of.get(&t.elem).and_then(|n| styles.get_mut(*n)) {
-                    cs.set(&t.prop, &v);
-                }
+    for a in animations.iter_mut() {
+        a.applied = false;
+        let Some(frames) = eng.keyframes(&a.decl.name) else {
+            continue;
+        };
+        let elapsed = now.saturating_duration_since(a.start).as_secs_f64();
+        let Some(phase) = a.decl.phase(elapsed) else {
+            continue;
+        };
+        let Some(cs) = node_of.get(&a.elem).and_then(|n| styles.get_mut(*n)) else {
+            continue;
+        };
+        for (k, v) in keyframe_style(frames, phase, a.decl.timing, cs) {
+            cs.set(&k, &v);
+        }
+        a.applied = true;
+    }
+    for t in transitions {
+        if let Some(v) = t.value_at(now) {
+            if let Some(cs) = node_of.get(&t.elem).and_then(|n| styles.get_mut(*n)) {
+                cs.set(&t.prop, &v);
             }
         }
     }
-    transitions.retain(|t| t.end() > now);
-    running
 }
 
 /// Configuration de session — seuils et viewport initiaux
@@ -1194,6 +1328,7 @@ impl Session {
                 linked_css: String::new(),
                 prev_styles: HashMap::new(),
                 transitions: Vec::new(),
+                animations: Vec::new(),
                 nav_epoch: 0,
                 pending_nav: std::collections::VecDeque::new(),
                 dirty: Vec::new(),
@@ -1361,12 +1496,15 @@ impl Session {
             .collect()
     }
 
-    /// Fait avancer les transitions CSS en vol (étape 45) :
-    /// relayout + repaint si des transitions sont actives —
-    /// l'animation est pilotée par le pull de frames de l'UI
-    /// (le moteur n'a pas de boucle vsync propre ; `rAF` vit
-    /// côté `dillo-js`). `Ok(true)` = une nouvelle frame a
-    /// été produite et `FrameInvalidated` émis.
+    /// Fait avancer les transitions CSS en vol (étape 45) et
+    /// les animations `@keyframes` (étape 55e) : relayout +
+    /// repaint si l'une est active — l'animation est pilotée
+    /// par le pull de frames de l'UI **et** le battement
+    /// d'hôte ([`Self::pump_timers_all`], sinon elle resterait
+    /// figée entre deux pulls ; le moteur n'a pas de boucle
+    /// vsync propre, `rAF` vit côté `dillo-js`).
+    /// `Ok(true)` = une nouvelle frame a été produite et
+    /// `FrameInvalidated` émis.
     ///
     /// Étape 52 : fait d'abord office de **tick JS** —
     /// [`Self::pump_timers`] vide les timers échus (borné par
@@ -1380,14 +1518,27 @@ impl Session {
     /// [`CoreError::UnknownTab`], ou erreur de rendu.
     pub fn tick_animations(&mut self, tab: TabId) -> Result<bool, CoreError> {
         let jobs = self.pump_timers(tab);
-        let active = self
-            .tabs
-            .get(&tab)
-            .is_some_and(|t| !t.transitions.is_empty());
-        if !active {
+        if !self.advance_animations(tab)? {
             // Les timers ont pu invalider seuls (synchro DOM)
             // — pas de relayout gratuit en plus.
             return Ok(jobs > 0);
+        }
+        Ok(true)
+    }
+
+    /// Relayout + repaint si l'onglet a une transition ou une
+    /// animation `@keyframes` **en lecture** (`phase` encore
+    /// dans sa fenêtre — les terminées `forwards` ne coûtent
+    /// plus un reflow). Partagé par [`Self::tick_animations`]
+    /// (pull UI) et [`Self::pump_timers_all`] (battement hôte,
+    /// étape 55e). `Ok(true)` = frame produite + émise.
+    fn advance_animations(&mut self, tab: TabId) -> Result<bool, CoreError> {
+        let now = Instant::now();
+        let active = self.tabs.get(&tab).is_some_and(|t| {
+            !t.transitions.is_empty() || t.animations.iter().any(|a| a.playing(now))
+        });
+        if !active {
+            return Ok(false);
         }
         self.relayout(tab)?;
         self.emit_invalidated(tab);
@@ -1427,10 +1578,20 @@ impl Session {
     }
 
     /// [`Self::pump_timers`] sur tous les onglets — le
-    /// battement de l'hôte (daemon, CLI) itère ici.
+    /// battement de l'hôte (daemon, CLI) itère ici. Fait
+    /// aussi avancer les animations en lecture (étape 55e :
+    /// `@keyframes` cadencé par ce battement, pas seulement
+    /// par le pull de `/frame`).
     pub fn pump_timers_all(&mut self) -> usize {
         let tabs: Vec<TabId> = self.tabs.keys().copied().collect();
-        tabs.into_iter().map(|t| self.pump_timers(t)).sum()
+        let mut jobs = 0;
+        for t in tabs {
+            jobs += self.pump_timers(t);
+            // Dégradation silencieuse : un onglet sans arbre
+            // posé ne produit pas d'erreur de pompe.
+            let _ = self.advance_animations(t);
+        }
+        jobs
     }
 
     /// Plus proche échéance de timer JS tous onglets — délai
@@ -2969,12 +3130,20 @@ impl Session {
             .filter_map(|(n, c)| ord_of.get(&n).map(|o| (*o, c.clone())))
             .collect();
         if let Some(e) = self.tabs.get_mut(&tab) {
-            update_transitions(
-                &e.prev_styles,
-                &mut e.transitions,
+            let now = Instant::now();
+            update_transitions(&e.prev_styles, &mut e.transitions, &styles, &ord_of, now);
+            // `@keyframes` (étape 55e) : identité
+            // (élément, index) + déclaration → `start`
+            // conservé, puis surcharges — keyframes sous
+            // transitions (couche spec).
+            sync_animations(&mut e.animations, &styles, &ord_of, &eng, now);
+            apply_anim_overrides(
+                &e.transitions,
+                &mut e.animations,
+                &eng,
                 &mut styles,
                 &ord_of,
-                Instant::now(),
+                now,
             );
             e.prev_styles = raw;
         }

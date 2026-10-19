@@ -299,15 +299,16 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   permanent au-delà de 32 — mais 2 pleins cadres
   sporadiques (~clic 16/32, périodicité à creuser : tick
   timer ou GC déclenchant un full relayout ?).
-- [ ] **Étape 55e. `@keyframes` cadencés en session**
+- [x] **Étape 55e. `@keyframes` cadencés en session**
   (adoption R-10, règle AGENTS §10.5b — confirmé non-câblé
-  par `anim.html` : frames identiques à 400 ms) : zéro
-  référence `keyframe`/`animation` hors `explorer-css` —
-  `ActiveTransition` ne naît que de `transition-*` et
-  `tick_animations` ne tourne qu'au pull de frame. Brancher
-  `animation_decls`+`keyframe_style` au moteur d'animations
-  + tick au pump de timers (sinon l'animation est figée
-  entre deux pulls).
+  par `anim.html` : frames identiques à 400 ms) : **livré** —
+  `ActiveAnimation` par `(ordinal, index)` + `start` conservé
+  tant que la déclaration est identique ; surcharges
+  keyframes sous transitions (`update_transitions` scindé
+  diff/surcharge, couche spec) ; `advance_animations` partagé
+  `tick_animations` (pull `/frame`) + `pump_timers_all`
+  (battement hôte) — plus figée entre deux pulls ; repli
+  style de base en fin de lecture via drapeau `applied`.
 - [x] **Étape 55f. `relayout_subtree` adopté en session**
   (adoption R-12, §10.5b — mesuré : mutation DOM = re-parse
   + relayout global) : `apply_dom_sync`/`repaint` doivent

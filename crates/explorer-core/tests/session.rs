@@ -4008,3 +4008,74 @@ async fn data_url_images_paint_inline() {
     // Aucune sous-ressource `data:` ne part en fetch.
     assert_eq!(tr.calls(), 3, "data: = zéro requête réseau (56f)");
 }
+
+/// Étape 55e — `@keyframes` cadencé en session : le défaut
+/// terrain (`anim.html` — deux frames à 400 ms d'écart
+/// étaient identiques). La lecture doit produire des frames
+/// différentes entre deux pulls, être pilotée aussi par le
+/// battement hôte (`pump_timers_all`), puis se replier sur
+/// le style de base une fois terminée (`fill` absent).
+#[tokio::test]
+async fn keyframes_animation_advances_and_finishes() {
+    let (mut sess, tr) = test_session();
+    tr.route(
+        "/k",
+        200,
+        "<html><head><style>\
+         @keyframes k { from { background-color: #ff0000 }\
+         to { background-color: #0000ff } }\
+         #b { width:2px; height:2px; animation: k 500ms linear }\
+         </style></head><body><div id=\"b\"></div></body></html>",
+    );
+    let tab = sess.open_tab();
+    sess.navigate(tab, "http://h.test/k").await.unwrap();
+    let start = sess.frame_png(tab).unwrap();
+    // Mi-lecture (~40 % du segment) : la couleur interpolée
+    // diffère du `from` rouge — pull UI (tick_animations).
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert!(
+        sess.tick_animations(tab).unwrap(),
+        "une animation en lecture doit produire une frame (55e)"
+    );
+    let mid = sess.frame_png(tab).unwrap();
+    assert_ne!(
+        start, mid,
+        "frames identiques en cours d'animation — le bug anim.html (55e)"
+    );
+    // Identité stable : un tick immédiat conserve la frame
+    // (le start n'est pas réarmé par le re-style).
+    let mid2 = sess.frame_png(tab).unwrap();
+    assert_eq!(mid, mid2, "un re-style immédiat ne doit pas redémarrer");
+    // Fin de lecture via le battement hôte (pump_timers_all)
+    // — `fill` absent → repli sur le style calculé brut.
+    tokio::time::sleep(std::time::Duration::from_millis(450)).await;
+    sess.pump_timers_all();
+    let end = sess.frame_png(tab).unwrap();
+    assert_ne!(
+        mid, end,
+        "l'animation terminée replie sur le style de base (55e)"
+    );
+}
+
+/// Étape 55e — garde : un élément sans `animation` (ou
+/// `animation-name: none`) ne déclenche aucun tick de
+/// relayout — `tick_animations` reste inerte.
+#[tokio::test]
+async fn keyframes_absent_means_no_animation_ticks() {
+    let (mut sess, tr) = test_session();
+    tr.route(
+        "/s",
+        200,
+        "<html><head><style>\
+         #b { width:2px; height:2px; background-color: #ff0000;\
+         animation-name: none }\
+         </style></head><body><div id=\"b\"></div></body></html>",
+    );
+    let tab = sess.open_tab();
+    sess.navigate(tab, "http://h.test/s").await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(
+        !sess.tick_animations(tab).unwrap(),
+        "aucun relayout sans animation en lecture (55e)"
+    );
+}

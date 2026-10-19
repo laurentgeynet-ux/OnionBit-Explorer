@@ -9,6 +9,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 55e — `@keyframes` cadencés en session**
+  (`explorer-core`, adoption R-10) : les animations CSS ne
+  produisaient qu'une frame figée (repro `anim.html` — deux
+  frames à 400 ms identiques). `sync_animations` enregistre
+  les déclarations `animation*` du style calculé brut par
+  identité `(ordinal d'élément, index de la liste)` — une
+  déclaration inchangée conserve son `start` (le re-style
+  ne redémarre pas), changée elle repart.
+  `apply_anim_overrides` intercale la couche keyframes
+  **sous** les transitions (`keyframe_style` + interpolation
+  partagée R-10, `update_transitions` ne mute plus `styles`
+  — le diff reste sur le brut et la surcharge « current
+  transition » gagne toujours). Cadence : `advance_animations`
+  partagé par `tick_animations` (pull `/frame`) **et**
+  `pump_timers_all` (battement hôte ~50 ms — l'animation ne
+  reste plus figée entre deux pulls). Repli : une lecture
+  terminée sans `fill` produit un dernier reflow pour
+  replier le style de base (drapeau `applied`) ; `forwards`
+  fige sans reticker. Régressions :
+  `keyframes_animation_advances_and_finishes`,
+  `keyframes_absent_means_no_animation_ticks`.
+
 - **R-22 — décorations inline par fragment + flux en-ligne
   réel** (`explorer-css`, `explorer-layout`,
   `explorer-render`) : bug terrain lobste.rs — titres en
