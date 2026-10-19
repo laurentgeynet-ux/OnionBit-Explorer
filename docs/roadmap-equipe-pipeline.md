@@ -186,13 +186,16 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   sémantique « plus imbriqué contenant gagne ». Reste ouvert
   (hypothèse connexe) : contenu injecté JS non rafraîchi —
   côté `apply_dom_sync`, périmètre session.
-- [ ] **R-20. `<script>` peint en texte** (bug terrain
+- [x] **R-20. `<script>` peint en texte** (bug terrain
   mission 5, wikipedia — clientpref/RLSTATE JSON visibles
   vers 300 px) : `script{display:none}` existe dans
   `UA_CSS` mais des scripts inline entrent au box tree.
-  Diagnostic à écrire : dump layout wikipedia conservé ;
-  suspect à éliminer en premier : noscript/scripting-flag
-  après R-15, ou élément inséré sans cascade.
+  **Fix** : filet de robustesse dans `build_box_tree_sized` —
+  `script|style|template|head|meta|link|base|title` ne
+  produisent **aucune** boîte, même si la cascade a manqué
+  le nœud (injection DOM post-compute = le cas wikipedia ;
+  le test reproduit l'injection sans style). `noscript`
+  exclus : scripting off ⇒ contenu rendu (UA).
 - [ ] **R-21. Texte synthétique des contrôles hors ligne**
   (bug terrain mission 5, journal `interface-equipes.md`,
   repro : `typed_text_repaints_new_value` ignoré) : la valeur

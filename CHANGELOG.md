@@ -9,6 +9,12 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-20 — Jamais-rendus robustes** (`explorer-layout`) :
+  `script|style|template|head|meta|link|base|title` ne
+  produisent aucune boîte même sans style calculé —
+  injection DOM post-cascade couverte (bug wikipedia :
+  JSON de `<script>` inline peint).
+
 - **R-19 — Hit-test tolérant aux enfants échappés**
   (`explorer-layout`, module `hit`) : `explorer_layout::
   hit_test` remonte le hit-test dans le domaine — élagage

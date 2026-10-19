@@ -574,3 +574,36 @@ fn hit_test_point_hors_document() {
     let (_dom, bx) = laid("<div></div>", "body{margin:0} div{height:20px}");
     assert_eq!(explorer_layout::hit_test(&bx, 5.0, 5000.0), None);
 }
+
+// ── R-20 : jamais-rendus ne produisent aucune boîte ─────────
+
+#[test]
+fn script_ne_produit_pas_de_boite_meme_sans_style() {
+    // Filet R-20 : `<script>` injecté sans cascade (style
+    // absent de la map, ou UA sans la règle) → aucune boîte,
+    // son texte JSON n'apparaît jamais.
+    let mut dom = TreeBuilder::parse("<body><div>x</div></body>");
+    let eng = StyleEngine::new(); // pas de CSS auteur ; UA inclus
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    // Injection post-cascade : le `<script>` n'a AUCUN style
+    // calculé (le cas wikipedia — nœud posé par apply_dom_sync).
+    let body = by_tag(&dom, "body");
+    let script = dom.create_element("script").unwrap();
+    dom.append_child(body, script).unwrap();
+    let text = dom.create_text("var a=1;").unwrap();
+    dom.append_child(script, text).unwrap();
+    let root_el = by_tag(&dom, "html");
+    let bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    let mut texts = Vec::new();
+    let mut stack = vec![&bx];
+    while let Some(b) = stack.pop() {
+        if let Some(t) = &b.text {
+            texts.push(t.clone());
+        }
+        stack.extend(b.children.iter());
+    }
+    assert!(
+        !texts.iter().any(|t| t.contains("var a")),
+        "script peint : {texts:?}"
+    );
+}

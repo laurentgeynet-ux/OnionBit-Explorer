@@ -229,6 +229,21 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
     if style.get("display") == Some("none") {
         return None;
     }
+    // Jamais rendus (R-20, filet de robustesse) : un élément de
+    // cette liste ne produit **aucune** boîte même si la cascade
+    // a manqué le nœud (injection DOM post-compute, feuille sans
+    // la règle UA, contenu étranger…) — `script`/`style` visibles
+    // étaient le bug wikipedia. `noscript` n'y est PAS : scripting
+    // off ⇒ contenu rendu (voir UA_CSS). `template`/`head` et ses
+    // enfants non-rendus sont couverts aussi par display:none.
+    if dom.tag_name(root).is_ok_and(|t| {
+        matches!(
+            t,
+            "script" | "style" | "template" | "head" | "meta" | "link" | "base" | "title"
+        )
+    }) {
+        return None;
+    }
     // `<img>` : élément remplacé si l'image est disponible,
     // texte `alt` sinon (repli du navigateur classique).
     if dom.tag_name(root).is_ok_and(|t| t == "img") {
