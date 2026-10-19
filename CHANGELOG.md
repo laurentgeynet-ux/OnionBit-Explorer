@@ -758,6 +758,55 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     `@@asyncDispose` aliasé, `@@toStringTag` ;
   - test262 : 859/859 ; 8 tests de régression.
 
+- **JS-C21 — `splice`, `using`/`await using`,
+  `@@hasInstance`, ES2026** (`dillo-js`) :
+  - `Array.prototype.splice` enfin implémenté (gap
+    critique — absent depuis toujours) : `start` clampé
+    dans `[0, len]` (négatifs relatifs à la fin),
+    `deleteCount` par défaut = fin du tableau, un seul
+    arg supprime tout, insertion des args restants,
+    retour du tableau des éléments supprimés,
+    `length` mis à jour — l'array n'est réécrit qu'en
+    fin d'opération (un throw de conversion le laisse
+    intact) ;
+  - gestion explicite de ressources (ES2026) :
+    `using x = e` / `await using x = e` — parsing
+    contextuel (`using` reste un identifiant valide :
+    `let using=5` fonctionne, `for (using of y)` =
+    variable), frames de disposeurs empilées par corps
+    (bloc, fonction, programme, itération `for-of`),
+    dépilement **LIFO** à toute sortie — normal,
+    `return`, `throw`, `break` (spec
+    `DisposeResources`) ; `v[@@dispose]()` /
+    `v[@@asyncDispose]()` avec await eager (déviation
+    documentée — pas de suspension) ; `null`/`undefined`
+    passent sans disposeur ; objet sans méthode ou
+    primitive → `TypeError` (spec
+    `AddDisposableResource`) ; double erreur →
+    `SuppressedError` ; `for (using r of it)` dispose la
+    ressource à chaque itération ;
+  - `Function.prototype[Symbol.hasInstance]` exposé —
+    `OrdinaryHasInstance` complet : fonction bound
+    délègue à sa cible via `InstanceofOperator` (spec),
+    `prototype` non-objet → `TypeError` ; refactor
+    `instance_of`/`ordinary_has_instance` partagé entre
+    `instanceof` et le hook ;
+  - `Error.isError` (ES2026) — approximation
+    documentée : chaîne de prototypes atteignant
+    `Error.prototype` (couvre `TypeError`,
+    `AggregateError`, sous-classes) ;
+  - `Math.sumPrecise(iterable)` (ES2026) — somme
+    compensée Neumaier/double-double (`[1e20,1,-1e20]`
+    → `1`, pas `0`) ;
+  - `Symbol.metadata` (well-known ES2026 decorators,
+    posé au démarrage comme spec) ;
+  - `JSON.rawJSON(text)` / `JSON.isRawJSON(v)` (ES2026)
+    — objet gelé à proto nul portant `rawJSON`, texte
+    re-parsé (conteneur ou JSON invalide →
+    `SyntaxError`), émission **brute** dans
+    `stringify` ;
+  - test262 : 859/859 ; 5 tests de régression.
+
 - **JS-C19 — Date complet, `eval` direct, Annex B
   RegExp, JSON, invariants Proxy** (`dillo-js`) :
   - `Date` : les 15 setters (`setFullYear`…`setTime` +

@@ -5451,3 +5451,145 @@ fn c20_async_disposable_stack() {
         "[object AsyncDisposableStack]"
     );
 }
+
+// -- JS-C21 : splice, @@hasInstance, Error.isError, using, ES2026 ----
+
+#[test]
+fn c21_array_splice() {
+    // Suppression + retour des éléments retirés (spec).
+    assert_eq!(
+        ev_str("let a=[1,2,3,4,5];let d=a.splice(1,2);d.join(',')+'|'+a.join(',')"),
+        "2,3|1,4,5"
+    );
+    // Insertion pure.
+    assert_eq!(
+        ev_str("let a=[1,4];a.splice(1,0,2,3);a.join(',')"),
+        "1,2,3,4"
+    );
+    // Indices négatifs et clamps.
+    assert_eq!(ev_str("let a=[1,2,3];a.splice(-1,1);a.join(',')"), "1,2");
+    assert_eq!(ev_str("let a=[1,2];a.splice(99,5);a.join(',')"), "1,2");
+    assert_eq!(ev_str("let a=[1,2,3];a.splice(-99,1);a.join(',')"), "2,3");
+    // Un seul arg → jusqu'à la fin ; zéro arg → no-op.
+    assert_eq!(ev_str("let a=[1,2,3];a.splice(1);a.join(',')"), "1");
+    assert_eq!(ev_str("let a=[1,2,3];a.splice();a.join(',')"), "1,2,3");
+    // deleteCount négatif → 0 ; length à jour.
+    assert_eq!(
+        ev_str("let a=[1,2,3];a.splice(0,-5);a.length+'|'+a.join(',')"),
+        "3|1,2,3"
+    );
+    assert_eq!(
+        ev_str("let a=[1,2,3];a.splice(1,1,'x','y');a.length+'|'+a.join(',')"),
+        "4|1,x,y,3"
+    );
+}
+
+#[test]
+fn c21_function_has_instance() {
+    // `Function.prototype[@@hasInstance]` = `OrdinaryHasInstance`.
+    assert_eq!(
+        ev_str("function F(){};F[Symbol.hasInstance](new F())"),
+        "true"
+    );
+    assert_eq!(ev_str("function F(){};F[Symbol.hasInstance]({})"), "false");
+    // `instanceof` passe par le hook (même résultat).
+    assert_eq!(ev_str("function F(){};new F() instanceof F"), "true");
+    // Hook custom sur un objet ordinaire.
+    assert_eq!(
+        ev_str("let o={[Symbol.hasInstance](v){return v===7}};7 instanceof o"),
+        "true"
+    );
+    // Fonction bound : délègue à la cible (spec `[[HasInstance]]`).
+    assert_eq!(
+        ev_str("function F(){};let B=F.bind(null);new F() instanceof B"),
+        "true"
+    );
+}
+
+#[test]
+fn c21_error_is_error() {
+    assert_eq!(ev_str("Error.isError(new Error())"), "true");
+    assert_eq!(ev_str("Error.isError(new TypeError('x'))"), "true");
+    assert_eq!(ev_str("Error.isError(new AggregateError([]))"), "true");
+    // Sous-classe d'Error (chaîne de prototypes).
+    assert_eq!(
+        ev_str("class E extends Error{};Error.isError(new E())"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("Error.isError({})+','+Error.isError('x')+','+Error.isError(null)"),
+        "false,false,false"
+    );
+}
+
+#[test]
+fn c21_using() {
+    // Dispose en fin de bloc, LIFO.
+    assert_eq!(
+        ev_str("let l='';{using r={[Symbol.dispose](){l+='D'}};l+='B'};l"),
+        "BD"
+    );
+    assert_eq!(
+        ev_str(
+            "let l='';{using a={[Symbol.dispose](){l+='1'}};using b={[Symbol.dispose](){l+='2'}}};l"
+        ),
+        "21"
+    );
+    // `null`/`undefined` passent ; objet sans disposeur → TypeError.
+    assert_eq!(ev_str("{using x=null;using y=undefined;}'ok'"), "ok");
+    assert_eq!(ev_str("try{{using r={}}}catch(x){'TE'}"), "TE");
+    assert_eq!(ev_str("try{{using r=5}}catch(x){'TE'}"), "TE");
+    // Dispose sur return et sur throw (avant propagation).
+    assert_eq!(
+        ev_str("let l='';function f(){{using r={[Symbol.dispose](){l+='D'}};return 'R'}}f()+l"),
+        "RD"
+    );
+    assert_eq!(
+        ev_str("let l='';try{{using r={[Symbol.dispose](){l+='D'}};throw 9}}catch(x){l+'C'+x}"),
+        "DC9"
+    );
+    // `await using` → @@asyncDispose (+ await eager chez nous).
+    assert_eq!(
+        ev_str("let l='';{await using r={[Symbol.asyncDispose](){l+='A'}};l+='B'};l"),
+        "BA"
+    );
+    // `for (using r of it)` : dispose à chaque itération.
+    assert_eq!(
+        ev_str(
+            "let l='';for(using r of [{[Symbol.dispose](){l+='1'}},{[Symbol.dispose](){l+='2'}}]){l+='x'};l"
+        ),
+        "x1x2"
+    );
+    // `using` reste un ident valide hors contexte déclaration.
+    assert_eq!(ev_str("let using=5;using+1"), "6");
+    // Erreur du disposeur + erreur du corps → SuppressedError.
+    assert_eq!(
+        ev_str(concat!(
+            "let m='';try{{using r={[Symbol.dispose](){throw 'se'}};throw 'be'}}",
+            "catch(x){x.constructor.name+'|'+x.error+'|'+x.suppressed}"
+        )),
+        "SuppressedError|se|be"
+    );
+}
+
+#[test]
+fn c21_es2026_extras() {
+    // Math.sumPrecise : somme compensée (1e20+1-1e20 → 1, pas 0).
+    assert_eq!(ev_str("Math.sumPrecise([1,2,3])"), "6");
+    assert_eq!(ev_str("Math.sumPrecise([1e20,1,-1e20])"), "1");
+    assert_eq!(ev_str("Math.sumPrecise([])"), "0");
+    assert_eq!(ev_str("try{Math.sumPrecise(5)}catch(x){'TE'}"), "TE");
+    // Symbol.metadata exposé (decorators ES2026).
+    assert_eq!(ev_str("typeof Symbol.metadata"), "symbol");
+    // JSON.rawJSON / isRawJSON.
+    assert_eq!(
+        ev_str("JSON.stringify({x:JSON.rawJSON('1.5')})"),
+        "{\"x\":1.5}"
+    );
+    assert_eq!(
+        ev_str("let r=JSON.rawJSON('123');JSON.isRawJSON(r)+','+JSON.isRawJSON({})"),
+        "true,false"
+    );
+    assert_eq!(ev_str("try{JSON.rawJSON('{')}catch(x){'SE'}"), "SE");
+    assert_eq!(ev_str("try{JSON.rawJSON('{}')}catch(x){'SE'}"), "SE");
+}

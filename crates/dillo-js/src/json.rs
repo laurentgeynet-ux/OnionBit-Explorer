@@ -373,6 +373,23 @@ fn json_write(
         // Spec `SerializeJSONProperty` : BigInt → TypeError.
         Value::Big(_) => return Err(e.type_error("do not know how to serialize a BigInt")),
         Value::Obj(id) => {
+            // `JSON.rawJSON` : le texte est émis tel quel (spec
+            // `SerializeJSONProperty` reconnaît le slot interne).
+            let raw = e.heap.obj(id).and_then(|o| {
+                if !o.extensible
+                    && matches!(o.proto, Value::Null)
+                    && matches!(o.get_own("rawJSON"), Some(Value::Str(_)))
+                {
+                    o.get_own("rawJSON")
+                } else {
+                    None
+                }
+            });
+            if let Some(Value::Str(rid)) = raw {
+                let s = e.heap.string(rid).unwrap_or_default();
+                out.push_str(&s);
+                return Ok(true);
+            }
             // Functions AND Symbols are not JSON values — elided
             // like undefined.
             if matches!(
@@ -476,6 +493,55 @@ fn json_write(
     Ok(true)
 }
 
+/// `JSON.rawJSON(text)` (ES2026) — objet gelé à proto nul portant
+/// `rawJSON` (le texte émis tel quel par `stringify`). Spec : le
+/// texte doit être un JSON valide qui ne produit pas un
+/// conteneur — on le re-parse ; un JSON invalide ou un
+/// objet/tableau → `SyntaxError`.
+fn json_raw_json(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let text = match arg(args, 0) {
+        Value::Str(id) => e.heap.string(id).unwrap_or_default(),
+        _ => {
+            return Err(e.type_error("JSON.rawJSON expects a string"));
+        }
+    };
+    let tin = e.str_val(text.clone());
+    match json_parse(e, Value::Undefined, &[tin]) {
+        Ok(Value::Obj(_)) => {
+            return Err(e.syntax_error("JSON.rawJSON must not produce an object"));
+        }
+        Ok(_) => {}
+        Err(t) => return Err(t),
+    }
+    let obj = e.new_object();
+    let raw = e.str_val(text);
+    e.set_own(obj, "rawJSON", raw, false);
+    // Spec : `Object.freeze(Object.create(null))`.
+    if let Some(o) = e.heap.obj_mut(obj) {
+        o.proto = Value::Null;
+        o.extensible = false;
+    }
+    Ok(Value::Obj(obj))
+}
+
+/// `JSON.isRawJSON(v)` — objet gelé à proto nul portant une
+/// `rawJSON` string (marqueur posé par `rawJSON` uniquement —
+/// approximation documentée du slot interne `[[RawJSON]]`).
+fn json_is_raw_json(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ok = match arg(args, 0) {
+        Value::Obj(id) => {
+            let marked = e.heap.obj(id).is_some_and(|o| {
+                !o.extensible
+                    && matches!(o.proto, Value::Null)
+                    && matches!(o.get_own("rawJSON"), Some(Value::Str(_)))
+            });
+            marked
+        }
+        _ => false,
+    };
+    Ok(Value::Bool(ok))
+}
+
 fn json_stringify(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let v = arg(args, 0);
     // `replacer` — fonction (spec `Call` par prop) ou tableau de
@@ -565,6 +631,8 @@ pub(crate) fn install(e: &mut Engine) {
     let j = e.new_object();
     e.add_method(j, "parse", json_parse);
     e.add_method(j, "stringify", json_stringify);
+    e.add_method(j, "rawJSON", json_raw_json);
+    e.add_method(j, "isRawJSON", json_is_raw_json);
     let tag = e.str_val("JSON");
     e.set_own(j, crate::interp::SYM_TO_STRING_TAG, tag, false);
     let g = e.global;

@@ -638,9 +638,33 @@ d'intégration, pas par la couverture :
   `adopt`/`defer`/`move`/`disposed`, `disposeAsync`
   awaité eager → promesse, `SuppressedError` enroulé).
   test262 : 859/859 ; 8 tests de régression.
+- [x] **JS-C21. `splice`, `using`/`await using`,
+  `@@hasInstance`, ES2026** : `Array.prototype.splice`
+  mutable (start/deleteCount clampés spec, insertion,
+  retour des supprimés — gap critique corrigé). Gestion
+  explicite de ressources (ES2026) : `using x = e` et
+  `await using x = e` — lexing contextuel (`using` reste
+  un ident valide), frames de disposeurs par corps,
+  dépilement LIFO sur toute sortie (normal, `return`,
+  `throw`, `break`), `@@dispose` / `@@asyncDispose` +
+  await eager, `null`/`undefined` tolérés, objet sans
+  disposeur ou primitive → `TypeError`,
+  `for (using r of it)` dispose à chaque itération,
+  erreurs enroulées en `SuppressedError` (spec
+  `DisposeResources`). `Function.prototype
+  [Symbol.hasInstance]` = `OrdinaryHasInstance` (bound →
+  cible via `InstanceofOperator`, `prototype` non-objet
+  → `TypeError`) — refactor `instance_of`/
+  `ordinary_has_instance` partagé. `Error.isError`
+  (chaîne proto → `Error.prototype`, approximation
+  documentée du slot `[[ErrorData]]`), `Math.sumPrecise`
+  (somme compensée Neumaier), `Symbol.metadata`,
+  `JSON.rawJSON`/`isRawJSON` (objet gelé à proto nul,
+  émission brute dans `stringify`). test262 : 859/859 ;
+  5 tests de régression.
 - [ ] **JS-C. Couverture par besoin** : `Temporal`,
-  `using`/`await using`, `Intl` multi-locales — ordre
-  piloté par les pages réelles.
+  `Intl` multi-locales — ordre piloté par les pages
+  réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
   `Video` — phase 10, dépend du pipeline rendu.
 

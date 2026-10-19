@@ -380,6 +380,44 @@ impl Parser {
                 Ok(Stmt::FunctionDecl(f))
             }
             Tok::Kw(Kw::Class) => Ok(Stmt::ClassDecl(self.class_lit()?)),
+            // `using x = e` (ES2026) — contextuel comme `let` : une
+            // décl seulement devant ident/`[`/`{`.
+            Tok::Ident(s)
+                if s == "using"
+                    && matches!(
+                        self.toks.get(self.pos + 1).map(|t| &t.tok),
+                        Some(Tok::Ident(_) | Tok::P(P::LBracket | P::LBrace))
+                    ) =>
+            {
+                self.next(); // `using`
+                let decls = self.var_decls(false)?;
+                self.expect_semi()?;
+                Ok(Stmt::Using {
+                    decls,
+                    is_await: false,
+                })
+            }
+            // `await using x = e` — `@@asyncDispose`.
+            Tok::Ident(s)
+                if s == "await"
+                    && matches!(
+                        self.toks.get(self.pos + 1).map(|t| &t.tok),
+                        Some(Tok::Ident(u)) if u == "using"
+                    )
+                    && matches!(
+                        self.toks.get(self.pos + 2).map(|t| &t.tok),
+                        Some(Tok::Ident(_) | Tok::P(P::LBracket | P::LBrace))
+                    ) =>
+            {
+                self.next(); // `await`
+                self.next(); // `using`
+                let decls = self.var_decls(false)?;
+                self.expect_semi()?;
+                Ok(Stmt::Using {
+                    decls,
+                    is_await: true,
+                })
+            }
             Tok::Kw(Kw::If) => self.if_stmt(),
             Tok::Kw(Kw::With) => {
                 // `with` est interdit en strict — early error spec.
@@ -1076,6 +1114,22 @@ impl Parser {
                 },
             };
             return self.for_rest(Some(init));
+        }
+        // `for (using x of y)` (ES2026) — `using` est décl seulement
+        // si suivi d'un binding ≠ `of` (`for (using of y)` = ident).
+        let is_using = matches!(self.peek(), Tok::Ident(s) if s == "using")
+            && match self.toks.get(self.pos + 1).map(|t| &t.tok) {
+                Some(Tok::P(P::LBracket | P::LBrace)) => true,
+                Some(Tok::Ident(u)) => u != "of",
+                _ => false,
+            };
+        if is_using {
+            self.next(); // `using`
+            let pat = self.pattern_decl()?;
+            if !matches!(self.peek(), Tok::Ident(s) if s == "of") {
+                return Err(self.err("`using` declarations require a `for-of` loop"));
+            }
+            return self.for_in_of(ForTarget::Using { pat, is_await }, None, is_await);
         }
         let init = self.expr(true)?;
         if matches!(self.peek(), Tok::Ident(s) if s == "of") || self.peek() == &Tok::Kw(Kw::In) {

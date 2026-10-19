@@ -121,6 +121,7 @@ pub(crate) fn install(e: &mut Engine) {
     let error = ctor(e, "Error", error_ctor, p_err);
     if let Value::Obj(eid) = error {
         e.add_method(eid, "captureStackTrace", error_capture_stack);
+        e.add_method(eid, "isError", error_is_error);
     }
     let t_err = ctor(e, "TypeError", type_error_ctor, p_terr);
     let r_err = ctor(e, "ReferenceError", reference_error_ctor, p_rerr);
@@ -372,6 +373,11 @@ pub(crate) fn install(e: &mut Engine) {
             "isConcatSpreadable",
             "dispose",
             "asyncDispose",
+            // `Symbol.metadata` (ES2026 decorators) — clé de
+            // stockage `[Symbol.metadata]` des métadonnées de
+            // décorateurs ; exposée même sans syntaxe `@dec` (la
+            // spec la crée au démarrage).
+            "metadata",
         ] {
             ws(name, e);
         }
@@ -534,6 +540,10 @@ pub(crate) fn install(e: &mut Engine) {
     // ordinaire, le bras synthétique `Fun` ne le couvre pas).
     let empty_name = e.str_val("");
     e.set_own(fp, "name", empty_name, false);
+    // `Function.prototype[Symbol.hasInstance]` — `OrdinaryHasInstance`
+    // (hook `instanceof` par défaut, spec).
+    let hi = e.native_fn("[Symbol.hasInstance]", function_has_instance);
+    e.set_own(fp, crate::interp::SYM_HAS_INSTANCE, hi, false);
 
     // Array.prototype.
     let ap = e.protos.array;
@@ -546,6 +556,7 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(ap, "indexOf", array_index_of);
     e.add_method(ap, "lastIndexOf", array_last_index_of);
     e.add_method(ap, "slice", array_slice);
+    e.add_method(ap, "splice", array_splice);
     e.add_method(ap, "concat", array_concat);
     e.add_method(ap, "reverse", array_reverse);
     e.add_method(ap, "sort", array_sort);
@@ -798,6 +809,7 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_const(math, "LOG2E", Value::Num(std::f64::consts::LOG2_E));
     e.set_const(math, "LOG10E", Value::Num(std::f64::consts::LOG10_E));
     e.add_method(math, "abs", math_abs);
+    e.add_method(math, "sumPrecise", math_sum_precise);
     e.add_method(math, "floor", math_floor);
     e.add_method(math, "ceil", math_ceil);
     e.add_method(math, "round", math_round);
@@ -1297,6 +1309,38 @@ fn aggregate_error_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
         e.set_own(eid, "errors", list, false);
     }
     Ok(err)
+}
+
+/// `Error.isError(v)` (ES2026) — spec : slot interne
+/// `[[ErrorData]]`. Approximation documentée : vrai si la chaîne de
+/// prototypes de `v` atteint `Error.prototype` (couvre `Error`,
+/// `TypeError`, `AggregateError`, sous-classes — un objet
+/// utilisateur avec `proto = Error.prototype` est indistinguable
+/// chez nous).
+fn error_is_error(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let mut cur = match arg(args, 0) {
+        Value::Obj(id) => match e.heap.obj(id).map(|o| o.proto) {
+            Some(Value::Obj(p)) => Some(p),
+            _ => return Ok(Value::Bool(false)),
+        },
+        _ => return Ok(Value::Bool(false)),
+    };
+    let target = e.protos.error;
+    let mut depth = 0;
+    while let Some(id) = cur {
+        if id == target {
+            return Ok(Value::Bool(true));
+        }
+        cur = match e.heap.obj(id).map(|o| o.proto) {
+            Some(Value::Obj(p)) => Some(p),
+            _ => None,
+        };
+        depth += 1;
+        if depth > 1000 {
+            break;
+        }
+    }
+    Ok(Value::Bool(false))
 }
 
 fn error_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
@@ -3025,6 +3069,43 @@ fn function_bind(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
     ))))
 }
 
+/// `Function.prototype[Symbol.hasInstance](v)` —
+/// `OrdinaryHasInstance(this, v)` (bound → cible, `prototype` non
+/// objet → `TypeError`). Partagé avec `instanceof` via l'engine.
+fn function_has_instance(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(e.ordinary_has_instance(this, arg(args, 0))?))
+}
+
+/// `Math.sumPrecise(iterable)` (ES2026) — somme compensée
+/// (Neumaier/double-double) : la spec demande une précision
+/// mathématique infinie arrondie en fin ; la compensation couvre
+/// les cas usuels mieux que la somme naïve gauche→droite.
+/// Non-itérable → `TypeError` (spec `ToNumber` sur chaque item).
+fn math_sum_precise(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let items = match arg(args, 0) {
+        Value::Undefined | Value::Null => {
+            return Err(e.type_error("sumPrecise requires an iterable"));
+        }
+        v => e.iter_values(v)?,
+    };
+    let mut hi = 0.0f64;
+    let mut lo = 0.0f64;
+    for it in items {
+        let x = e.to_number(it)?;
+        if x.is_nan() {
+            return Ok(Value::Num(f64::NAN));
+        }
+        let t = hi + x;
+        if hi.abs() >= x.abs() {
+            lo += (hi - t) + x;
+        } else {
+            lo += (x - t) + hi;
+        }
+        hi = t;
+    }
+    Ok(Value::Num(hi + lo))
+}
+
 // -- Symbol ---------------------------------------------------------
 
 /// `Symbol(desc?)` — unique `ObjKind::Symbol` per call (identity by
@@ -4130,6 +4211,47 @@ fn array_to_reversed(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Va
     put_elems(e, id, elems);
     let _ = args;
     Ok(out)
+}
+
+/// `splice` (mutable) — supprime `dc` éléments à l'indice `s`,
+/// insère les args restants, retourne le tableau des supprimés.
+/// `elems` n'est réécrit qu'à la fin : un throw en cours de
+/// conversion des args laisse l'array intact.
+fn array_splice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = this_array(e, this)?;
+    let elems = take_elems(e, id);
+    let len = elems.len();
+    let start = match arg(args, 0) {
+        Value::Undefined => 0,
+        v => {
+            // Clampe dans [0, len] comme la spec (`rel_index`
+            // renvoie None hors bornes — les deux côtés doivent
+            // clamper différemment, on calcule à la main).
+            let i = e.to_number(v)? as isize;
+            if i < 0 {
+                (len as isize + i).max(0) as usize
+            } else {
+                (i as usize).min(len)
+            }
+        }
+    };
+    let del = if args.is_empty() {
+        0
+    } else if args.len() == 1 {
+        // Un seul arg → supprime jusqu'à la fin (spec).
+        len - start
+    } else {
+        (e.to_number(arg(args, 1))?.max(0.0) as usize).min(len - start)
+    };
+    let ins: &[Value] = args.get(2..).unwrap_or(&[]);
+    let mut out_v = Vec::with_capacity(len - del + ins.len());
+    out_v.extend_from_slice(&elems[..start]);
+    let deleted: Vec<Value> = elems[start..start + del].to_vec();
+    out_v.extend_from_slice(ins);
+    out_v.extend_from_slice(&elems[start + del..]);
+    let darr = e.new_array(deleted);
+    put_elems(e, id, out_v);
+    Ok(darr)
 }
 
 fn array_to_spliced(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -6780,7 +6902,7 @@ fn ads_move(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 }
 
 /// Construit un `SuppressedError` (partagé `dispose` + ctor).
-fn make_suppressed(e: &mut Engine, err: Value, prev: Value) -> Value {
+pub(crate) fn make_suppressed(e: &mut Engine, err: Value, prev: Value) -> Value {
     let proto = e
         .get_prop(e.global, "SuppressedError")
         .and_then(|c| match c {

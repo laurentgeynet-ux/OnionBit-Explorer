@@ -104,6 +104,14 @@ pub enum Stmt {
         /// `for await` — async iterator protocol.
         is_await: bool,
     },
+    /// `using x = e` / `await using x = e` (ES2026) — la ressource
+    /// est dépilée en fin de corps via `@@dispose`/`@@asyncDispose`.
+    Using {
+        /// Déclarations (binding const — immutable post-init).
+        decls: Vec<VarDecl>,
+        /// `await using` — `@@asyncDispose` + await eager.
+        is_await: bool,
+    },
     /// `with (obj) b` — object-as-scope (sloppy only).
     With {
         /// Scope object.
@@ -270,6 +278,13 @@ pub enum ForTarget {
     },
     /// Existing lvalue or assignment pattern (`x`, `o.p`, `[a,b]`).
     Expr(Expr),
+    /// `for (using x of y)` (ES2026) — disposal par itération.
+    Using {
+        /// Binding pattern.
+        pat: Pat,
+        /// `for (await using x of y)` — `@@asyncDispose`.
+        is_await: bool,
+    },
 }
 
 /// One `case`/`default` clause.

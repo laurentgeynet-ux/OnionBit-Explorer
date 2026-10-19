@@ -233,6 +233,9 @@ pub struct Engine {
     /// juste avant l'exécution d'une boucle, consommés par cette
     /// boucle (`a: b: for` empile les deux labels).
     pending_labels: Vec<String>,
+    /// `using` disposal frames — une par corps contenant
+    /// une décl `using` (ES2026) : `(dispose_fn, resource, is_async)`.
+    pub(crate) using_stack: Vec<Vec<(Value, Value, bool)>>,
     /// Le builtin `eval` — identité pour distinguer l'appel direct
     /// `eval(…)` (env appelant) de l'indirect (`(0,eval)`, `e=eval`
     /// → global), spec `PerformEval`.
@@ -460,6 +463,7 @@ impl Engine {
             current_module: String::new(),
             gen_collect: Vec::new(),
             pending_labels: Vec::new(),
+            using_stack: Vec::new(),
             eval_fn: Value::Undefined,
             re_ctor: Value::Undefined,
             re_static: None,
@@ -2936,6 +2940,73 @@ impl Engine {
         Err(self.type_error("cannot convert object to primitive"))
     }
 
+    /// `InstanceofOperator(V, target)` complet : dispatch
+    /// `@@hasInstance` puis `OrdinaryHasInstance` (spec). Partagé
+    /// entre `instanceof` et la délégation des fonctions bound.
+    pub(crate) fn instance_of(&mut self, v: Value, target: Value) -> JsResult<bool> {
+        let Value::Obj(_) = target else {
+            return Err(self.type_error("`instanceof` requires an object"));
+        };
+        // `@@hasInstance` d'abord (spec : le hook prime sur
+        // l'exigence callable).
+        let m = self.get_prop_value(target, SYM_HAS_INSTANCE)?;
+        if self.is_callable(m) {
+            let b = self.call_value(m, target, &[v])?;
+            return Ok(self.to_boolean(b));
+        }
+        if !self.is_callable(target) {
+            return Err(self.type_error("right side of `instanceof` is not callable"));
+        }
+        self.ordinary_has_instance(target, v)
+    }
+
+    /// `OrdinaryHasInstance(C, O)` : chaîne de prototypes de `O`
+    /// contre `C.prototype`. Une fonction bound délègue à sa cible
+    /// via `InstanceofOperator` (spec `BoundFunction`
+    /// `[[HasInstance]]`); `prototype` non-objet → `TypeError`.
+    pub(crate) fn ordinary_has_instance(&mut self, c: Value, v: Value) -> JsResult<bool> {
+        if !self.is_callable(c) {
+            return Ok(false);
+        }
+        if let Value::Obj(id) = c {
+            let bound = match self.heap.obj(id).map(|o| &o.kind) {
+                Some(ObjKind::Fun(Fun::Bound { target, .. })) => Some(*target),
+                _ => None,
+            };
+            if let Some(target) = bound {
+                return self.instance_of(v, target);
+            }
+        }
+        // Lecture via `get_prop_value` : `prototype` peut passer par
+        // une trap `get` de proxy (spec `OrdinaryHasInstance` fait un
+        // `[[Get]]`).
+        let Value::Obj(proto) = self.get_prop_value(c, "prototype")? else {
+            return Err(self.type_error("constructor has no prototype"));
+        };
+        let mut cur = match v {
+            Value::Obj(id) => match self.heap.obj(id).map(|o| o.proto) {
+                Some(Value::Obj(p)) => Some(p),
+                _ => None,
+            },
+            _ => return Ok(false),
+        };
+        let mut depth = 0;
+        while let Some(id) = cur {
+            if id == proto {
+                return Ok(true);
+            }
+            cur = match self.heap.obj(id).map(|o| o.proto) {
+                Some(Value::Obj(p)) => Some(p),
+                _ => None,
+            };
+            depth += 1;
+            if depth > MAX_PROTO_DEPTH {
+                break;
+            }
+        }
+        Ok(false)
+    }
+
     pub(crate) fn is_callable(&self, v: Value) -> bool {
         match v {
             Value::Obj(id) => match self.heap.obj(id).map(|o| &o.kind) {
@@ -3473,23 +3544,114 @@ impl Engine {
     fn exec_program_in(&mut self, env: &EnvRef, this: Value, prog: &Program) -> JsResult<Value> {
         self.hoist(&prog.body, env);
         self.completion = Value::Undefined;
+        // `using` au niveau programme/module : frame racine dépilée
+        // en fin de script (spec).
+        let has_using = prog.body.iter().any(|s| matches!(s, Stmt::Using { .. }));
+        if has_using {
+            self.using_stack.push(Vec::new());
+        }
+        let mut r = Ok(Flow::Normal);
         for s in &prog.body {
-            match self.exec_stmt(env, this, s)? {
-                Flow::Normal | Flow::Break(_) | Flow::Continue(_) => {}
-                Flow::Return(v) => return Ok(v),
+            match self.exec_stmt(env, this, s) {
+                Ok(Flow::Normal | Flow::Break(_) | Flow::Continue(_)) => {}
+                other => {
+                    r = other;
+                    break;
+                }
             }
         }
-        Ok(self.completion)
+        if has_using {
+            r = self.drain_using(r);
+        }
+        match r {
+            Ok(Flow::Return(v)) => Ok(v),
+            Ok(_) => Ok(self.completion),
+            Err(e) => Err(e),
+        }
     }
 
     pub(crate) fn exec_body(&mut self, env: &EnvRef, this: Value, body: &[Stmt]) -> JsResult<Flow> {
+        // `using` (ES2026) : chaque décl pousse un disposeur sur la
+        // frame courante, dépilée LIFO à TOUTE sortie du corps —
+        // normal, break, return et throw (spec `DisposeResources`).
+        let has_using = body.iter().any(|s| matches!(s, Stmt::Using { .. }));
+        if has_using {
+            self.using_stack.push(Vec::new());
+        }
+        let mut r = Ok(Flow::Normal);
         for s in body {
-            let f = self.exec_stmt(env, this, s)?;
-            if !matches!(f, Flow::Normal) {
-                return Ok(f);
+            match self.exec_stmt(env, this, s) {
+                Ok(Flow::Normal) => {}
+                other => {
+                    r = other;
+                    break;
+                }
             }
         }
-        Ok(Flow::Normal)
+        if has_using {
+            r = self.drain_using(r);
+        }
+        r
+    }
+
+    /// Dépile la frame `using` courante, appelant chaque disposeur
+    /// LIFO (`v[@@dispose]()` / `v[@@asyncDispose]()` + await eager).
+    /// Une erreur de disposeur se substitue au résultat courant ;
+    /// une erreur déjà en cours est enroulée en `SuppressedError`
+    /// (spec `DisposeResources` step `AddSuppressedError`).
+    fn drain_using(&mut self, mut r: JsResult<Flow>) -> JsResult<Flow> {
+        let Some(frame) = self.using_stack.pop() else {
+            return r;
+        };
+        for (f, v, is_async) in frame.into_iter().rev() {
+            let res = self.call_value(f, v, &[]).and_then(|out| {
+                if is_async {
+                    self.await_value(out).map(|_| ())
+                } else {
+                    Ok(())
+                }
+            });
+            if let Err(Thrown(err)) = res {
+                r = match r {
+                    Err(Thrown(prev)) => {
+                        Err(Thrown(crate::builtins::make_suppressed(self, err, prev)))
+                    }
+                    _ => Err(Thrown(err)),
+                };
+            }
+        }
+        r
+    }
+
+    /// `using x = v` — enregistre `v[@@dispose]` (ou
+    /// `v[@@asyncDispose] ?? v[@@dispose]` pour `await using`) sur la
+    /// frame courante. `null`/`undefined` passent ; un objet sans
+    /// méthode ou une primitive → `TypeError` (spec
+    /// `AddDisposableResource`).
+    fn register_using(&mut self, v: Value, is_await: bool) -> JsResult<()> {
+        match v {
+            Value::Undefined | Value::Null => Ok(()),
+            Value::Obj(id) => {
+                let m = if is_await {
+                    self.get_prop(id, crate::interp::SYM_ASYNC_DISPOSE)
+                        .or_else(|| self.get_prop(id, crate::interp::SYM_DISPOSE))
+                } else {
+                    self.get_prop(id, crate::interp::SYM_DISPOSE)
+                };
+                match m {
+                    Some(f) if self.is_callable(f) => {
+                        if let Some(frame) = self.using_stack.last_mut() {
+                            frame.push((f, v, is_await));
+                        }
+                        // Hors frame (décl hors corps) : la ressource
+                        // n'est jamais dépilée — déviation vs spec.
+                        Ok(())
+                    }
+                    _ => Err(self.type_error("object is not disposable")),
+                }
+            }
+            _ => Err(self.type_error("using declaration requires an object or null/undefined")),
+        }
     }
 
     pub(crate) fn exec_stmt(&mut self, env: &EnvRef, this: Value, s: &Stmt) -> JsResult<Flow> {
@@ -3570,6 +3732,19 @@ impl Engine {
                 Ok(Flow::Normal)
             }
             Stmt::Block(stmts) => self.exec_body(env, this, stmts),
+            // `using x = e` (ES2026) — binding const + disposeur
+            // enregistré sur la frame du corps courant.
+            Stmt::Using { decls, is_await } => {
+                for d in decls {
+                    let v = match &d.init {
+                        Some(i) => self.eval_expr(env, this, i)?,
+                        None => Value::Undefined,
+                    };
+                    self.bind_pat(env, this, &d.pat, v, BindMode::Lex { mutable: false })?;
+                    self.register_using(v, *is_await)?;
+                }
+                Ok(Flow::Normal)
+            }
             Stmt::If { cond, then, else_ } => {
                 let c = self.eval_expr(env, this, cond)?;
                 if self.to_boolean(c) {
@@ -3711,10 +3886,20 @@ impl Engine {
                 } else {
                     self.iter_values(v)?
                 };
+                // `for (using x of y)` : frame par itération (spec —
+                // la ressource est dépilée à chaque tour).
+                let per_iter = matches!(target, ForTarget::Using { .. });
                 for item in items {
-                    self.assign_target(env, this, target, item)?;
-                    let f = self.exec_stmt(env, this, body)?;
-                    if let Some(f) = Self::loop_flow(f, &labels) {
+                    if per_iter {
+                        self.using_stack.push(Vec::new());
+                    }
+                    let mut r = self
+                        .assign_target(env, this, target, item)
+                        .and_then(|()| self.exec_stmt(env, this, body));
+                    if per_iter {
+                        r = self.drain_using(r);
+                    }
+                    if let Some(f) = Self::loop_flow(r?, &labels) {
                         return Ok(f);
                     }
                 }
@@ -3856,6 +4041,11 @@ impl Engine {
                 } else {
                     self.write_lvalue(env, this, e, v)?;
                 }
+            }
+            // `for (using x of y)` — binding const + disposeur.
+            ForTarget::Using { pat, is_await } => {
+                self.bind_pat(env, this, pat, v, BindMode::Lex { mutable: false })?;
+                self.register_using(v, *is_await)?;
             }
         }
         Ok(())
@@ -4549,51 +4739,7 @@ impl Engine {
                 let k = self.prop_key(l)?;
                 Value::Bool(self.has_prop(id, &k)?)
             }
-            Instanceof => {
-                let Value::Obj(_) = r else {
-                    return Err(self.type_error("`instanceof` requires an object"));
-                };
-                // `@@hasInstance` d'abord (spec `InstanceofOperator` :
-                // le hook prime sur l'exigence callable).
-                let m = self.get_prop_value(r, SYM_HAS_INSTANCE)?;
-                if self.is_callable(m) {
-                    let b = self.call_value(m, r, &[l])?;
-                    return Ok(Value::Bool(self.to_boolean(b)));
-                }
-                if !self.is_callable(r) {
-                    return Err(self.type_error("right side of `instanceof` is not callable"));
-                }
-                // Lecture via `get_prop_value` : `prototype` peut
-                // passer par une trap `get` de proxy (spec
-                // `OrdinaryHasInstance` fait un `[[Get]]`).
-                let Value::Obj(proto) = self.get_prop_value(r, "prototype")? else {
-                    return Err(self.type_error("constructor has no prototype"));
-                };
-                let mut cur = match l {
-                    Value::Obj(id) => match self.heap.obj(id).map(|o| o.proto) {
-                        Some(Value::Obj(p)) => Some(p),
-                        _ => None,
-                    },
-                    _ => return Ok(Value::Bool(false)),
-                };
-                let mut found = false;
-                let mut depth = 0;
-                while let Some(id) = cur {
-                    if id == proto {
-                        found = true;
-                        break;
-                    }
-                    cur = match self.heap.obj(id).map(|o| o.proto) {
-                        Some(Value::Obj(p)) => Some(p),
-                        _ => None,
-                    };
-                    depth += 1;
-                    if depth > MAX_PROTO_DEPTH {
-                        break;
-                    }
-                }
-                Value::Bool(found)
-            }
+            Instanceof => Value::Bool(self.instance_of(l, r)?),
             // `&&`/`||`/`??` short-circuit in eval — never reach here.
             And | Or | BinOp::Nullish => return Err(self.type_error("invalid operator")),
         })
