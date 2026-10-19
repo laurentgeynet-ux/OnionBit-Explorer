@@ -10,4 +10,10 @@ description = "Display list → framebuffer RGBA → PNG / buffer brut"
 workspace = true
 
 [dependencies]
+explorer-css.workspace = true
 explorer-layout.workspace = true
+
+[dev-dependencies]
+explorer-dom.workspace = true
+explorer-html.workspace = true
+explorer-test-support.workspace = true

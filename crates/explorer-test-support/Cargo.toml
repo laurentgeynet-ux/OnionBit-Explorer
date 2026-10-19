@@ -10,4 +10,3 @@ description = "Transports simules, fixtures, fonte embarquee pour tests headless
 workspace = true
 
 [dependencies]
-explorer-net.workspace = true

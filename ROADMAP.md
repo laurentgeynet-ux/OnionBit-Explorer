@@ -169,8 +169,14 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
 
 ## Phase 5 — Rendu (`explorer-render`)
 
-- [ ] **Étape 22. Display list.** L'arbre de layout produit une
-  liste de primitives (rects, texte, images placeholders).
+- [x] **Étape 22. Display list.** L'arbre de layout produit une
+  liste de primitives (rects, texte, images placeholders) :
+  `DisplayItem` (fond, bordure 4 côtés, run de glyphes,
+  clip, placeholder) ordonnés — non-positionnés dans
+  l'ordre de l'arbre puis positionnés triés par `z-index`,
+  `PushClip`/`PopClip` autour des `overflow` ≠ visible.
+  Fixture TTF remontée dans `explorer-test-support`
+  (source unique).
 - [ ] **Étape 23. Rasterisation.** `tiny-skia` (ADR-0001) :
   couleurs, bordures, texte ; framebuffer RGBA, facteur d'échelle
   DPI (HiDPI) appliqué à la rasterisation.
@@ -242,6 +248,17 @@ d'intégration, pas par la couverture :
   wrappers `String/Number/Boolean` sans `[[PrimitiveValue]]` →
   récursion infinie `ToPrimitive`→`toString` (corrigé via prop
   cachée `__prim` + `valueOf`/`toString` stricts).
+- [x] **JS-C1. Lexique/parser conforme** : identifiants
+  Unicode via `unicode-ident` (UAX #31 + `Other_ID_*` +
+  ZWNJ/ZWJ + échappes `\u`), U+FEFF/LS/PS/CR, commentaires
+  HTML Annex B, `\u{…}`/paires de surrogates dans les
+  chaînes, octales legacy + `\8`/`\9` flaggés, regex validée
+  au parse + traduction Annex B/`\u{…}`/surrogates/`\cX`,
+  **mode strict** (directive prologue script + fonction,
+  octales/`delete` nu/liaisons réservées en early error).
+  **Score : 836/859 (97 %)** — résidu : attributs de
+  propriétés, strict runtime (`ReferenceError`), backrefs,
+  modificateurs regexp ES2025.
 - [ ] **JS-C. Couverture par besoin** : modules ES
   (`import`/`export` + graphe de chargeur), `Proxy`, `Intl`,
   regex lookahead/backrefs — ordre piloté par les pages réelles.

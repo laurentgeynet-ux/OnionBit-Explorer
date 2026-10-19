@@ -19,3 +19,4 @@ unicode-linebreak.workspace = true
 
 [dev-dependencies]
 explorer-html.workspace = true
+explorer-test-support.workspace = true

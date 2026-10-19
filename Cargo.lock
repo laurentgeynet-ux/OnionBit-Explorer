@@ -249,6 +249,7 @@ dependencies = [
  "explorer-css",
  "explorer-dom",
  "explorer-html",
+ "explorer-test-support",
  "rustybuzz",
  "ttf-parser",
  "unicode-bidi",
@@ -279,15 +280,16 @@ dependencies = [
 name = "explorer-render"
 version = "0.0.0"
 dependencies = [
+ "explorer-css",
+ "explorer-dom",
+ "explorer-html",
  "explorer-layout",
+ "explorer-test-support",
 ]
 
 [[package]]
 name = "explorer-test-support"
 version = "0.0.0"
-dependencies = [
- "explorer-net",
-]
 
 [[package]]
 name = "find-msvc-tools"

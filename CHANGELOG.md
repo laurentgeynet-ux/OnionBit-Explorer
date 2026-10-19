@@ -9,6 +9,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 22 — `explorer-render` : display list**
+  (`display.rs`) : `build_display_list` aplatit l'arbre de
+  layout en `Vec<DisplayItem>` ordonnés — `FillRect` (fond
+  `background-color` non transparente), `Border` (4 côtés,
+  épaisseurs/couleurs/styles par côté), `Text` (run shapé +
+  origine baseline + `color` hérité), `PushClip`/`PopClip`
+  (padding box, `overflow` ≠ `visible`), `Placeholder`.
+  Ordre de peinture borné (CSS 2.1 App. E simplifié) : self
+  → enfants non positionnés dans l'ordre → positionnés
+  triés stablement par `z-index`. `DisplayList::dump` texte
+  pour golden headless. Fixture TTF déplacée dans
+  `explorer-test-support::font_fixture` (source unique pour
+  layout/render, sans dépendances internes). 6 tests.
 - **Étape 21 — `explorer-layout` : tables, flottants,
   positionnement** (`tables.rs`, `block.rs`, `boxtree.rs`) :
   `LayoutBox` porte les métadonnées usées `position`/`float`/
@@ -95,6 +108,41 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   embarqués collectés — feuilles liées hors périmètre).
   8 tests.
 
+- **JS-C1 — lexique/parser conforme test262** (`dillo-js`) :
+  **836/859 (97 %), 23 échecs résiduels** — progression
+  531 → 836 sur le sous-ensemble JS-B.
+  - identifiants Unicode complets : bascule sur `unicode-ident`
+    (tables UAX #31 compilées) + `Other_ID_Start`/`_Continue`
+    + `$`/`_`/ZWNJ/ZWJ — corrige `char::is_alphabetic` trop
+    permissif (U+2E2F `Lm`∩`Pattern_Syntax`) et trop pauvre ;
+    échappes `\uXXXX`/`\u{…}` en identifiant, mots réservés
+    échappés rejetés ;
+  - trivia : U+FEFF whitespace, LS/PS/CR terminateurs
+    (ASI + comptage de lignes), commentaires HTML Annex B
+    (`<!--` partout, `-->` en début de ligne), commentaire
+    `/*` non terminé = erreur ;
+  - littéraux : `\u{…}` + paires de surrogates `\uD8xx\uDCxx`
+    fusionnées dans les chaînes/templates ; octales legacy
+    `\1`–`\377` sloppy ; terminateur brut dans regex = erreur ;
+    `3in`/exposants tronqués rejetés ; regex validée **au
+    parse** (SyntaxError eager, spec `negative.phase: parse`) ;
+  - traduction `regexp` : `\u{…}`→`\x{…}`, paires de
+    surrogates fusionnées en mode `u`, `\0`→`\x{0}`,
+    `\cX`→contrôle, identity escapes Annex B sloppy
+    (`\y`→'y' — strict en `u`), `\k<nom>`→`(?P=nom)` ;
+  - mode strict : directive prologue `"use strict"` scannée au
+    niveau script et corps de fonction (héritage vers
+    l'intérieur), `Token::legacy_octal` flaggé par le lexer →
+    early errors (octales numériques/`08`/`09`, échappes
+    `\8`/`\9`/octales), `delete` d'identifiant nu, liaisons
+    `eval`/`arguments`/mots réservés strict — le harnais
+    test262 place désormais la directive en tête de script
+    (runner officiel idem) ;
+  - résidu documenté (hors scope C1) : attributs de
+    propriétés (writable/enumerable/configurable),
+    `ReferenceError` strict au runtime, backrefs/lookahead
+    regex, modificateurs ES2025, `eval` héritant le strict.
+  15 tests de régression `tests/lang.rs`.
 - **JS-B — harness test262 (ADR-0010)** : extrait versionné de
   la suite ECMAScript officielle @ `d53ebc8` (1077 fichiers,
   sous-ensembles `test/language/{types,literals,comments,

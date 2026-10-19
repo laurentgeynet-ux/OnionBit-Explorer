@@ -5,8 +5,14 @@
 //! `explorer-render` — display list → framebuffer RGBA → PNG
 //! (`tiny-skia`, ADR-0001/0004).
 //!
-//! Squelette de l'étape 1 — la phase 5 implémente le contenu.
-//! Une frame = un état cohérent : jamais de rasterisation d'un arbre
-//! en cours de mutation.
+//! Étape 22 : [`build_display_list`] aplatit l'arbre de layout
+//! en [`DisplayItem`] ordonnés (fonds, bordures, texte shapé,
+//! clips `overflow`) — la seule entrée du raster. Une frame =
+//! un état cohérent : jamais de rasterisation d'un arbre en
+//! cours de mutation.
 
 #![forbid(unsafe_code)]
+
+pub mod display;
+
+pub use display::{build_display_list, BorderStyle, DisplayItem, DisplayList};
