@@ -9,6 +9,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-10 — `@keyframes`** (`explorer-css`, module
+  `animation`) : collecte `StyleEngine.keyframes` (offsets
+  `from`/`to`/`N%` éclatés et triés, fusion même-offset),
+  `animation_decls` (shorthand `animation:` + longhands par
+  index — duration, delay, timing, `infinite`, direction,
+  fill-mode), `AnimationDecl::phase(elapsed)` → progression
+  [0,1] avec délai/itérations/alternate/fill, et
+  `keyframe_style` — interpolation **via le moteur de
+  transitions** (étape 45), frames 0 %/100 % implicites prises
+  sur le style calculé. Cadenceur inchangé côté session.
+
 - **R-9 — `<svg>` inline** (`explorer-render` +
   `explorer-layout` + `explorer-css`) : le sous-arbre DOM
   étranger est re-sérialisé en source SVG (échappement XML,

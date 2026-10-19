@@ -26,6 +26,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod animation;
 mod cascade;
 mod fontface;
 mod parser;

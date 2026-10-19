@@ -149,6 +149,9 @@ pub struct StyleEngine {
     next_order: u32,
     /// `@font-face` avec leur contexte media (étape 46).
     pub(crate) font_faces: Vec<CollectedFontFace>,
+    /// `@keyframes` par nom — offsets triés, multi-sélecteurs
+    /// éclatés (R-10, module `animation`).
+    pub(crate) keyframes: crate::animation::Keyframes,
 }
 
 /// Computed style d'un nœud : propriété (minuscules) → valeur
@@ -292,10 +295,28 @@ impl StyleEngine {
                                 declarations: declarations.clone(),
                             });
                         }
+                    } else if let AtKind::Keyframes { name, frames } = &at.kind {
+                        // `@media` englobant appliqué ? La table
+                        // des keyframes ne porte pas de media
+                        // (écart documenté — la spec permet
+                        // @keyframes sous @media).
+                        crate::animation::collect_keyframes(
+                            &mut self.keyframes,
+                            name.clone(),
+                            frames,
+                        );
                     }
                 }
             }
         }
+    }
+
+    /// Frames `@keyframes` du nom donné — triées par offset,
+    /// `None` si inconnue (R-10). La session y pioche pour
+    /// `animation-name` via [`crate::animation::keyframe_style`].
+    #[must_use]
+    pub fn keyframes(&self, name: &str) -> Option<&[(f64, Vec<Declaration>)]> {
+        self.keyframes.get(name).map(Vec::as_slice)
     }
 
     /// Computed style d'un nœud (récursion parent sans mémoire —

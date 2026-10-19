@@ -544,3 +544,80 @@ fn font_size_rem_et_absolus_inchanges() {
         Some("16px")
     );
 }
+
+// ── R-10 : @keyframes + animation-* ─────────────────────────
+
+/// `<div id=d>` seul — suffit aux tests animation/keyframes.
+fn styled(css: &str) -> (Dom, NodeId, StyleEngine, explorer_css::StyleMap) {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let div = dom.create_element("div").unwrap();
+    dom.set_attribute(div, "id", "d").unwrap();
+    dom.append_child(doc, div).unwrap();
+    let mut eng = StyleEngine::new();
+    eng.add_css(css, Origin::Author);
+    let styles = eng.compute_tree(&dom, div, &StyleEnv::default());
+    (dom, div, eng, styles)
+}
+
+#[test]
+fn keyframes_collectees_et_triees() {
+    let (_dom, _n, eng, _s) = styled("@keyframes pulse { to { opacity: 1 } 0% { opacity: 0 } }");
+    let frames = eng.keyframes("pulse").expect("keyframes collectées");
+    assert_eq!(frames.len(), 2);
+    assert!(frames[0].0 < frames[1].0, "triées par offset : {frames:?}");
+    assert!(frames[0].0.abs() < 1e-6 && (frames[1].0 - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn keyframes_multi_offset_eclate() {
+    let (_dom, _n, eng, _s) = styled("@keyframes k { 0%, 100% { opacity: 0 } 50% { opacity: 1 } }");
+    let frames = eng.keyframes("k").expect("k");
+    assert_eq!(frames.len(), 3, "0% + 50% + 100% : {frames:?}");
+}
+
+#[test]
+fn animation_shorthand_et_phase() {
+    use explorer_css::animation::{animation_decls, keyframe_style, Fill};
+    let (_dom, node, eng, styles) = styled(
+        "@keyframes slide { from { left: 0px } to { left: 100px } }\
+         #d { animation: slide 2s linear forwards }",
+    );
+    let st = styles.get(node).expect("style");
+    let decls = animation_decls(st);
+    assert_eq!(decls.len(), 1);
+    let d = &decls[0];
+    assert_eq!(d.name, "slide");
+    assert!((d.duration - 2.0).abs() < 1e-9);
+    assert_eq!(d.fill, Fill::Forwards);
+    // phase : t=1s → 0.5 ; après la fin → forwards figé à 1.
+    assert!((d.phase(1.0).unwrap() - 0.5).abs() < 1e-9);
+    assert_eq!(d.phase(3.0), Some(1.0));
+    // interpolation à mi-chemin : left = 50px.
+    let frames = eng.keyframes("slide").unwrap();
+    let props = keyframe_style(frames, 0.5, d.timing, st);
+    let left = props
+        .iter()
+        .find(|(n, _)| n == "left")
+        .map(|(_, v)| v.as_str());
+    assert_eq!(left, Some("50px"), "props={props:?}");
+}
+
+#[test]
+fn animation_fill_backwards_pendant_le_delai() {
+    use explorer_css::animation::animation_decls;
+    let (_dom, node, _eng, styles) = styled("#d { animation: x 1s linear 2s backwards }");
+    let decls = animation_decls(styles.get(node).unwrap());
+    // t=1s : en délai → première frame (phase 0).
+    assert_eq!(decls[0].phase(1.0), Some(0.0));
+}
+
+#[test]
+fn animation_direction_alternate() {
+    use explorer_css::animation::{animation_decls, Direction};
+    let (_dom, node, _eng, styles) = styled("#d { animation: x 1s linear 0s 2 alternate }");
+    let d = &animation_decls(styles.get(node).unwrap())[0];
+    assert_eq!(d.direction, Direction::Alternate);
+    // Itération 1 (t=1.5) → inversée : frac .5 → phase .5.
+    assert!((d.phase(1.5).unwrap() - 0.5).abs() < 1e-9);
+}

@@ -292,10 +292,18 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   UA. Hors scope documenté : `foreignObject` refusé par
   usvg → zone vide ; bitmap à taille naturelle (re-raster
   DPI exact = chantier ultérieur).
-- [ ] **R-10. `@keyframes`** (ex-60c) : parsing dans
+- [x] **R-10. `@keyframes`** (ex-60c) : parsing dans
   `explorer-css`, timeline partagée avec le moteur de
   transitions de l'étape 45 — le cadenceur reste côté session
-  (consommé via `tick_animations` existant).
+  (consommé via `tick_animations` existant). Livré : module
+  `animation` — collecte `StyleEngine.keyframes` (multi-offsets
+  éclatés, same-offset fusionné, trié), `AnimationDecl` +
+  `animation_decls` (shorthand + 7 longhands alignés par index,
+  `infinite`, `direction`, `fill-mode`), `phase(elapsed)` →
+  [0,1] (délai/itérations/alternate/forwards-backwards),
+  `keyframe_style` interpole via `transition::interpolate`
+  (timeline partagée), frames 0 %/100 % implicites depuis le
+  style calculé. Cadencement session = adoption NAV.
 - [ ] **R-11. Raster `<canvas>` 2D** (ex-62, moitié rendu) :
   playback de l'**op-list** enregistrée par `dillo-js` (JS-C28 —
   ↔ NAV, surface JS) vers tiny-skia → pixmap de l'élément →
