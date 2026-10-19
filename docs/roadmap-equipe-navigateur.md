@@ -48,6 +48,15 @@ non exécuté), old.reddit (shadow DOM/custom elements, hors
 portée), MDN (doc > 16 384 px → `FrameTooBig` — attend la
 décision ci-dessous).
 
+Balayage robustesse (14 sites, même session) : **vitrine
+`text.npr.org` quasi-parfaite**, weather.gov ~75 % (images
+NOAA peintes), csszengarden/git-scm/npmjs/go.dev/arstechnica/
+rust-lang rendent — **ajouter les deux premiers au smoke**.
+Écartés en plus : github (crash dillo-js → JS-C41),
+stackoverflow (403 bot-block, honnête), craigslist (TLS
+`close_notify` → étape 53c), lemonde/bbc/lite.ddg (blancs,
+à reclasser après 54).
+
 **Décision en suspens — borne `FrameTooBig`** : `shot` rasterise
 le document entier ; au-delà de 16 384 px de haut le rendu
 échoue sec (MDN). Options : (a) clamper au viewport pour
@@ -114,7 +123,7 @@ encode PNG streamé. À trancher avant l'extension du smoke.
   en construction » côté domaine — tenu en tête de leur file
   pour débloquer cette étape.
 
-- [ ] **Étape 53b. Charset des sous-ressources** (bug terrain
+- [x] **Étape 53b. Charset des sous-ressources** (bug terrain
   @ `2693959`, repro : example.com) : les corps de scripts
   (`session.rs` ~l.1562), modules (~l.1840) et feuilles CSS
   (~l.1560) passent par `decode_sniffed` — le sniffer **HTML**,
@@ -123,6 +132,13 @@ encode PNG streamé. À trancher avant l'extension du smoke.
   Spec : script = `charset` attribut → BOM → UTF-8 ; CSS =
   `@charset`/transport → UTF-8 ; jamais le sniffer HTML hors
   document. Borné — régression vérifiée sur example.com.
+
+- [ ] **Étape 53c. Tolérance TLS `close_notify` absent**
+  (bug terrain, repro : craigslist.org — `TLS unexpected-eof`)
+  : un pair qui ferme TCP sans `close_notify` doit terminer
+  le corps proprement quand la longueur est connue (CL/CD
+  atteinte) au lieu d'échouer la réponse. Tolérance rustls
+  documentée — cas fréquent chez les vieux serveurs/CDN.
 
 - [ ] **Étape 54. Formulaires v2 — côté produit** (ex-55, moitié
   session) : `multipart/form-data`, états `:valid`/`:invalid`
@@ -271,6 +287,15 @@ mesures).
   Nouveau point de cohérence → tests croisés miroir ↔
   `explorer-dom` exigés (règle de tri « corrige le côté
   fautif »).
+- [ ] **JS-C41. Récursion bornée — stack overflow site réel**
+  (bug terrain, repro : github.com) : `dillo-js` fait un
+  stack overflow sur le bundle réel de github (`dump`/`layout`
+  OK, `shot` 💥 ; `EXPLORER_NO_JS=1` → erreur propre →
+  confirme le moteur JS). **Violation de la règle « jamais
+  crash »** — prioritaire dans J-C : profondeur
+  d'appel/récursion bornée par budget → `JsError` typée,
+  jamais d'overflow natif. Repro minimal : reproduire la
+  pile en extrayant le pattern récursif du bundle.
 
 ## Tâches continues
 

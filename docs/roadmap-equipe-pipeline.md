@@ -99,22 +99,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   Cliquet `BASELINE_PASSED` monté au fil des sous-chantiers.
 - [ ] **R-16. Layout : tables réelles** (bug terrain @
   `2693959`, repro : news.ycombinator.com) — DOM complet et
-  correct (158 `.titleline`) mais table **explosée** :
-  `<tr bgcolor=#ff6600>` rend en bande ~450 px, logo
-  agrandi ×10, stories invisibles. Diagnostic à écrire :
-  repro minimal depuis la page sauvegardée (table à colspan
-  + `bgcolor` + `img` sans dimensions ?), puis fix hauteurs
-  de ligne/cellule. Petit, haute valeur — HN est le cas
-  d'école « structure table minimaliste ».
-- [ ] **R-17. Texte : espacement de lettres explosé** (bug
-  terrain @ `2693959`, repro : info.cern.ch, wikipedia) —
-  l'en-tête cern rend « h t t p : / / i n f o . c e r n .
-  c h » ; même artefact en colonnes wikipedia. Suspects :
-  `text-align: justify` appliqué hors contexte, ou
-  `letter-spacing` hérité/résolu en unités fausses dans le
-  passage inline → positions glyphes. Repro : un bloc
-  justifié à une ligne (dernière ligne = ne doit pas
-  s'étirer — règle spec).
+  correct (158 `.titleline`) mais table **explosée**.
+  **Diagnostic fait** (repro `r16-center.html`, 1 ligne) :
+  `<center>` **absent de `UA_CSS`** → rendu `inline` → une
+  table dans un contexte inline perd son containing-block
+  → boîte 0×0 + cellules pleine largeur. Fix probable :
+  `center{display:block;text-align:center}` dans la feuille
+  UA + audit des autres tags bloc absents (`<menu>`, `<dir>`…).
+- [ ] **R-17. Texte : `em` résolu deux fois** (bug terrain
+  @ `2693959`, repro : info.cern.ch, wikipedia). **Diagnostic
+  fait** (repro `r17b.html`, 1 ligne) : `font-size:2em` →
+  run de 492×153 (×4,0 mesuré), `1.5em` → ×2,25 — facteur =
+  `em`² exactement ; `32px` correct. La taille computed est
+  juste mais les métriques ligne/avance ré-appliquent le
+  facteur. Chercher où `em` est résolu une seconde fois
+  (métrique de ligne ou avance de run).
+- [ ] **R-18. `color` n'atteint pas les runs de texte inline**
+  (bug terrain, repro `color.html` — `D:\explorer-fieldwork\
+  repros\`) : `div{color:red}` peint ✓, `span`/`a{color}`
+  restent noirs — le style des éléments **inline** ne descend
+  pas aux runs de texte. Explique le symptôme global « liens
+  non stylés » (la règle `a[href]` matche, la couleur se
+  perd au passage boîte→run). À chercher dans l'héritage
+  inline → `InlineCtx`/construction des runs.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
