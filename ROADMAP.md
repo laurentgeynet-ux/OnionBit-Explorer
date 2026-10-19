@@ -714,6 +714,31 @@ d'intégration, pas par la couverture :
   → `TypeError` (spec), `defineProperty` sur indice et
   sur `length` (resize, verrou). test262 : 859/859 ;
   6 tests de régression.
+- [x] **JS-C24. `arguments` mappé, `bind` props,
+  protos Weak*, `fn.toString`** : objet `arguments`
+  mappé (`Object::args_map` = `(EnvRef, Rc<map>)`,
+  spec `CreateMappedArgumentsObject`) — fonctions
+  sloppy à liste de params simple : lecture/écriture
+  d'indice aliasée sur le slot env du paramètre
+  (`find_own`/`set_prop`/`delete_prop` interceptés,
+  `delete` démappe), noms dupliqués → dernier slot,
+  `eval` traverse, `arguments.length` configurable,
+  GC trace l'env capturé. Déviation documentée : les
+  mutators de tableau (`sort`…) écrivent les
+  éléments sans remonter l'alias. `bind` : `length` =
+  max(0, target.length − nArgs liés) et `name` =
+  `"bound "+target.name` (spec `BoundFunctionCreate`,
+  props `{w:false,c:true}`). `WeakMap`/`WeakSet` :
+  protos reparentés à `Object.prototype` (spec — fin
+  de la fuite `@@iterator`/`keys`/`size` hérités de
+  Map/Set), seuls `get`/`set`/`has`/`delete`/`add` +
+  upserts ES2026 exposés. `Function.prototype
+  .toString` reconstruit les paramètres depuis les
+  patterns (`function f(a, b) { [code] }`,
+  `(x) => { [code] }`, `function*`/`async function`,
+  `[native code]` pour natives/bound — approximation
+  du texte source). test262 : 859/859 ; 4 tests de
+  régression.
 - [ ] **JS-C. Couverture par besoin** : `Temporal`
   (`ZonedDateTime`, calendriers non-iso, `round`),
   `Intl` multi-locales, décorateurs `@dec` — ordre

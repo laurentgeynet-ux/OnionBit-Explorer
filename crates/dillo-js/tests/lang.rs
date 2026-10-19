@@ -6062,3 +6062,148 @@ fn c23_define_property_array() {
         "TE"
     );
 }
+
+// ------------------------------------------------------------------
+// JS-C24 : arguments mappé, bind length/name, protos Weak*, toString
+// ------------------------------------------------------------------
+
+#[test]
+fn c24_mapped_arguments() {
+    // Aliasing param↔arguments (spec CreateMappedArgumentsObject).
+    assert_eq!(ev_str("(function(a){a=9;return arguments[0]})(1)"), "9");
+    assert_eq!(ev_str("(function(a){arguments[0]=9;return a})(1)"), "9");
+    // Bidirectionnel via eval.
+    assert_eq!(
+        ev_str("(function(a){eval('a=42');return arguments[0]})(1)"),
+        "42"
+    );
+    // Indices hors paramètres → non mappés.
+    assert_eq!(
+        ev_str("(function(a,b){b=9;return arguments[1]})(1)"),
+        "undefined"
+    );
+    // Noms dupliqués sloppy : les deux indices → dernier slot.
+    assert_eq!(
+        ev_str("(function(a,a){return arguments[0]+','+arguments[1]})(1,2)"),
+        "2,2"
+    );
+    // `delete` démappe puis supprime.
+    assert_eq!(
+        ev_str("(function(a){delete arguments[0];a=9;return arguments[0]})(1)"),
+        "undefined"
+    );
+    // Strict et listes non simples → non mappé.
+    assert_eq!(
+        ev_str("(function(a){'use strict';a=9;return arguments[0]})(1)"),
+        "1"
+    );
+    assert_eq!(
+        ev_str("(function(a){'use strict';arguments[0]=9;return a})(1)"),
+        "1"
+    );
+    assert_eq!(ev_str("(function(a=1){a=9;return arguments[0]})(5)"), "5");
+    assert_eq!(
+        ev_str("(function(...r){r[0]=9;return arguments[0]})(5)"),
+        "5"
+    );
+    // Réassignation : l'ancien objet reste mappé.
+    assert_eq!(
+        ev_str("(function(a){let o=arguments;arguments=[];a=9;return o[0]})(1)"),
+        "9"
+    );
+    // `arguments.length` configurable (spec).
+    assert_eq!(
+        ev_str("(function(){return Object.getOwnPropertyDescriptor(arguments,'length').configurable})(1)"),
+        "true"
+    );
+    // `arguments.callee` sloppy présent (Annex B).
+    assert_eq!(
+        ev_str("(function f(){return arguments.callee===f})()"),
+        "true"
+    );
+    // `arguments` est un Array exotique (spec `Array.isArray` → true).
+    assert_eq!(
+        ev_str("(function(){return Array.isArray(arguments)})(1)"),
+        "true"
+    );
+}
+
+#[test]
+fn c24_bound_function_props() {
+    // `length` = max(0, target.length − boundArgs) (spec).
+    assert_eq!(ev_str("function f(a,b,c){};f.bind(null).length"), "3");
+    assert_eq!(ev_str("function f(a,b,c){};f.bind(null,1).length"), "2");
+    assert_eq!(ev_str("function f(a){};f.bind(null,1,2).length"), "0");
+    // `name` = "bound " + target.name.
+    assert_eq!(
+        ev_str("let f=function foo(){};f.bind(null).name"),
+        "bound foo"
+    );
+    // Descripteurs {writable:false, configurable:true} (spec).
+    assert_eq!(
+        ev_str("let f=function(){};let d=Object.getOwnPropertyDescriptor(f.bind(null),'length');d.writable+','+d.configurable"),
+        "false,true"
+    );
+    // Bound appelée → target avec args liés prépendus.
+    assert_eq!(
+        ev_str("function f(a,b,c){return [a,b,c].join(',')};f.bind(null,1)(2,3)"),
+        "1,2,3"
+    );
+    // `new` sur une bound → target ctor.
+    assert_eq!(ev_str("function F(){this.x=1};new (F.bind(null))().x"), "1");
+}
+
+#[test]
+fn c24_weak_collection_protos() {
+    // WeakMap/WeakSet héritent d'Object.prototype (spec) — pas
+    // d'itérateur ni d'accès aux entrées.
+    assert_eq!(ev_str("typeof new WeakMap()[Symbol.iterator]"), "undefined");
+    assert_eq!(ev_str("typeof new WeakSet()[Symbol.iterator]"), "undefined");
+    assert_eq!(ev_str("new WeakMap().keys"), "undefined");
+    assert_eq!(ev_str("new WeakMap().size"), "undefined");
+    assert_eq!(ev_str("typeof new WeakMap().get"), "function");
+    assert_eq!(
+        ev_str("let k={};let w=new WeakMap();w.set(k,9);w.get(k)"),
+        "9"
+    );
+    assert_eq!(ev_str("new WeakSet().add({}).has === undefined"), "false");
+    // Map/Set gardent leur @@iterator.
+    assert_eq!(ev_str("typeof new Map()[Symbol.iterator]"), "function");
+    assert_eq!(ev_str("typeof new Set()[Symbol.iterator]"), "function");
+    // Protos corrects.
+    assert_eq!(
+        ev_str("Object.getPrototypeOf(WeakMap.prototype)===Object.prototype"),
+        "true"
+    );
+}
+
+#[test]
+fn c24_function_to_string() {
+    // Paramètres reconstruits (approximation spec du texte source).
+    assert_eq!(
+        ev_str("function foo(a,b){return a};foo.toString()"),
+        "function foo(a, b) { [code] }"
+    );
+    assert_eq!(ev_str("let f=(x)=>x*2;f.toString()"), "(x) => { [code] }");
+    assert_eq!(
+        ev_str("function* g(a){};g.toString().slice(0,10)"),
+        "function* "
+    );
+    assert_eq!(
+        ev_str("async function h(){};h.toString().slice(0,15)"),
+        "async function "
+    );
+    assert_eq!(
+        ev_str("Math.max.toString()"),
+        "function max() { [native code] }"
+    );
+    assert_eq!(
+        ev_str("let f=function(){};f.bind(null).toString()"),
+        "function () { [native code] }"
+    );
+    // Rest/destructuring → forme reconstruite approximative.
+    assert_eq!(
+        ev_str("function r(...a){};r.toString()"),
+        "function r(...a) { [code] }"
+    );
+}

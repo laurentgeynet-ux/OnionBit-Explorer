@@ -99,6 +99,7 @@ impl Engine {
             }),
             extensible: true,
             elem_integrity: 0,
+            args_map: None,
         });
         let resolve = self.bound_native("resolve", promise_resolve, vec![Value::Obj(id)]);
         let reject = self.bound_native("reject", promise_reject, vec![Value::Obj(id)]);

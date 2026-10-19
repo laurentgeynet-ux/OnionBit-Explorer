@@ -883,6 +883,41 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     absents, déviation vs le `null` legacy de V8) ;
   - test262 : 859/859 ; 6 tests de régression.
 
+- **JS-C24 — `arguments` mappé, `bind` props,
+  protos Weak*, `fn.toString`** (`dillo-js`) :
+  - objet `arguments` mappé (spec
+    `CreateMappedArgumentsObject`) — nouveau champ
+    `Object::args_map` `(EnvRef, Rc<Vec<Option<name>>>)` :
+    pour les fonctions **sloppy** à liste de
+    paramètres simple, `arguments[i]` est aliasé sur
+    le slot env du paramètre `i` — lecture et
+    écriture bidirectionnelles (`a=9 → arguments[0]`,
+    `arguments[0]=9 → a`), `eval` traverse, noms
+    dupliqués → dernier slot, `delete` démappe puis
+    supprime, non-mappé en strict / rest / defaults /
+    destructuring ; `arguments.length` configurable
+    (spec) et GC trace l'env capturé. Déviation
+    documentée : les mutators (`sort`, `splice`…)
+    écrivent les éléments sans remonter l'alias ;
+  - `Function.prototype.bind` — props `length`
+    (`max(0, target.length − boundArgs)`) et `name`
+    (`"bound "+target.name`), `{w:false, c:true}`
+    (spec `BoundFunctionCreate`) ;
+  - `WeakMap.prototype`/`WeakSet.prototype`
+    reparentés à `Object.prototype` (spec) — plus
+    d'`@@iterator`/`keys`/`values`/`size` hérités de
+    Map/Set ; méthodes spec seules exposées +
+    `getOrInsert`/`getOrInsertComputed` (ES2026,
+    présents sur WeakMap aussi) ;
+  - `Function.prototype.toString` — paramètres
+    reconstruits depuis les patterns
+    (`function f(a, b) { [code] }`,
+    `(x) => { [code] }`, `function*`/`async function`
+    /`async function*`, `[native code]` pour
+    natives et bound — approximation documentée du
+    texte source ;
+  - test262 : 859/859 ; 4 tests de régression.
+
 - **JS-C23 — sémantique UTF-16 + intégrité des
   éléments de tableau** (`dillo-js`) :
   - APIs String en code units UTF-16 (spec) :

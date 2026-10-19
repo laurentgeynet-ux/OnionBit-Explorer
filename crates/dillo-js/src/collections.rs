@@ -78,6 +78,7 @@ pub(crate) fn iter_obj(e: &mut Engine, items: Vec<Value>) -> Value {
         },
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     }))
 }
 
@@ -104,6 +105,7 @@ fn map_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsR
         kind: ObjKind::Map(Vec::new()),
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     });
     let m = Value::Obj(id);
     // `new Map([[k, v], …])` — iterate the source, each entry must
@@ -135,6 +137,7 @@ fn set_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsR
         kind: ObjKind::Set(Vec::new()),
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     });
     let s = Value::Obj(id);
     if !matches!(arg(args, 0), Value::Undefined | Value::Null) {
@@ -409,6 +412,7 @@ fn new_set_from(e: &mut Engine, items: Vec<Value>) -> Value {
         kind: ObjKind::Set(Vec::new()),
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     });
     for v in items {
         set_add(e, id, v);
@@ -620,13 +624,22 @@ pub(crate) fn install(e: &mut Engine) {
 
     // `WeakMap`/`WeakSet` — ctors + protos dédiés (JS-C19) :
     // `WeakMap !== Map` et `Object.prototype.toString` distingue
-    // "WeakMap" (spec `@@toStringTag`). Les protos héritent les
-    // méthodes Map/Set via la chaîne (installée dans Protos::new).
-    // Pas de refs faibles — déviation ADR-0007.
+    // "WeakMap" (spec `@@toStringTag`). Protos parentés à
+    // `Object.prototype` (spec JS-C24) : seuls `get`/`set`/`has`/
+    // `delete` (et `add` pour WeakSet) sont exposés — pas
+    // d'itérateur, pas d'accès aux entrées. Pas de refs faibles —
+    // déviation ADR-0007.
     {
         let wmp = e.protos.weak_map;
         let tag = e.str_val("WeakMap");
         e.set_own(wmp, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        e.add_method(wmp, "get", map_get);
+        e.add_method(wmp, "set", map_set);
+        e.add_method(wmp, "has", map_has);
+        e.add_method(wmp, "delete", map_delete);
+        // ES2026 upsert — présent sur WeakMap aussi (spec).
+        e.add_method(wmp, "getOrInsert", map_get_or_insert);
+        e.add_method(wmp, "getOrInsertComputed", map_get_or_insert_computed);
         let wm = e.native_fn("WeakMap", weak_map_ctor);
         e.set_own(c_id(wm), "prototype", Value::Obj(wmp), false);
         e.set_own(wmp, "constructor", wm, false);
@@ -636,6 +649,9 @@ pub(crate) fn install(e: &mut Engine) {
         let wsp = e.protos.weak_set;
         let tag = e.str_val("WeakSet");
         e.set_own(wsp, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        e.add_method(wsp, "add", set_add_m);
+        e.add_method(wsp, "has", set_has);
+        e.add_method(wsp, "delete", set_delete);
         let ws = e.native_fn("WeakSet", weak_set_ctor);
         e.set_own(c_id(ws), "prototype", Value::Obj(wsp), false);
         e.set_own(wsp, "constructor", ws, false);
@@ -661,6 +677,7 @@ fn map_group_by(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         kind: ObjKind::Map(Vec::new()),
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     });
     for (i, v) in items.into_iter().enumerate() {
         let k = e.call_value(f, Value::Undefined, &[v, Value::Num(i as f64)])?;

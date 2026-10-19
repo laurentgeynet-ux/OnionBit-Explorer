@@ -84,6 +84,7 @@ fn new_buffer(e: &mut Engine, n: usize) -> ObjId {
         kind: ObjKind::ByteBuf(vec![0; n]),
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     });
     mark_buffer(e, id, false, n);
     id
@@ -135,6 +136,7 @@ pub(crate) fn new_ta(e: &mut Engine, ta: TaKind, bid: ObjId, offset: usize, len:
         },
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     }))
 }
 
@@ -148,6 +150,7 @@ pub(crate) fn new_u8_array(e: &mut Engine, bytes: Vec<u8>) -> Value {
         kind: ObjKind::ByteBuf(bytes),
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     });
     mark_buffer(e, bid, false, len);
     new_ta(e, TaKind::U8, bid, 0, len)
@@ -677,6 +680,7 @@ fn dv_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         },
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     })))
 }
 
@@ -1054,6 +1058,7 @@ fn ta_subarray(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         },
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     })))
 }
 
@@ -1649,6 +1654,7 @@ fn sab_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         kind: ObjKind::ByteBuf(vec![0; n]),
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     });
     e.set_own(id, "growable", Value::Bool(false), false);
     e.set_own(id, "maxByteLength", Value::Num(n as f64), false);

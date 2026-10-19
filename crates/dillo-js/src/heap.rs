@@ -194,6 +194,11 @@ impl Heap {
                 }
             }
         }
+        // L'env capturé par un `arguments` mappé est une racine —
+        // ses slots paramètres alimentent les lectures d'indices.
+        if let Some((env, _)) = &o.args_map {
+            trace_env(env, out, envs);
+        }
         match &o.kind {
             ObjKind::Array(elems) => {
                 for &v in elems {
@@ -499,6 +504,14 @@ pub struct Object {
     /// non-configurables), `2` = frozen (non-writable aussi),
     /// `4` = `length` non-writable. Sans effet hors `ObjKind::Array`.
     pub elem_integrity: u8,
+    /// Objet `arguments` : `Some((env, map))` où `map[i]` est le nom
+    /// du paramètre formel aliasé avec l'élément `i` (spec
+    /// `CreateMappedArgumentsObject` — fonctions sloppy à liste de
+    /// paramètres simple). Map vide = objet `arguments` non mappé
+    /// (strict ou params non simples) — sa présence distingue
+    /// l'objet `arguments` d'un tableau ordinaire
+    /// (`length.configurable`). `None` hors `arguments`.
+    pub args_map: Option<(EnvRef, std::rc::Rc<Vec<Option<String>>>)>,
 }
 
 /// What kind of object this is.
@@ -949,6 +962,7 @@ impl Object {
             kind: ObjKind::Ordinary,
             extensible: true,
             elem_integrity: 0,
+            args_map: None,
         }
     }
 
@@ -960,6 +974,7 @@ impl Object {
             kind: ObjKind::Array(elems),
             extensible: true,
             elem_integrity: 0,
+            args_map: None,
         }
     }
 
@@ -971,6 +986,7 @@ impl Object {
             kind: ObjKind::Fun(f),
             extensible: true,
             elem_integrity: 0,
+            args_map: None,
         }
     }
 

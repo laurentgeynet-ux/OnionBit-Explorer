@@ -414,6 +414,7 @@ impl Engine {
             },
             extensible: true,
             elem_integrity: 0,
+            args_map: None,
         });
         let st = self.str_val(resp.status_text);
         let ok = Value::Bool((200..300).contains(&resp.status));

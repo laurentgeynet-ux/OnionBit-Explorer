@@ -1785,17 +1785,17 @@ fn define_one_prop(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) -> JsRe
     if key == "length" {
         let is_arr = matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_)));
         if is_arr {
-            let (integ, len) = e
-                .heap
-                .obj(id)
-                .map(|o| (o.elem_integrity, 0usize))
-                .map_or((0, 0), |(i, _)| {
-                    let l = match e.heap.obj(id).map(|o| &o.kind) {
-                        Some(ObjKind::Array(elems)) => elems.len(),
-                        _ => 0,
-                    };
-                    (i, l)
-                });
+            let (integ, len) =
+                e.heap
+                    .obj(id)
+                    .map(|o| (o.elem_integrity, 0usize))
+                    .map_or((0, 0), |(i, _)| {
+                        let l = match e.heap.obj(id).map(|o| &o.kind) {
+                            Some(ObjKind::Array(elems)) => elems.len(),
+                            _ => 0,
+                        };
+                        (i, l)
+                    });
             if has_enumerable && enumerable || has_configurable && configurable {
                 return Err(e.type_error("cannot reconfigure array `length`"));
             }
@@ -1837,13 +1837,17 @@ fn define_one_prop(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) -> JsRe
     if let Some(i) = crate::interp::array_index(key) {
         let is_arr = matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_)));
         if is_arr {
-            let (integ, len, cur_v) = e.heap.obj(id).map(|o| {
-                if let ObjKind::Array(elems) = &o.kind {
-                    (o.elem_integrity, elems.len(), elems.get(i).copied())
-                } else {
-                    (0, 0, None)
-                }
-            }).unwrap_or_default();
+            let (integ, len, cur_v) = e
+                .heap
+                .obj(id)
+                .map(|o| {
+                    if let ObjKind::Array(elems) = &o.kind {
+                        (o.elem_integrity, elems.len(), elems.get(i).copied())
+                    } else {
+                        (0, 0, None)
+                    }
+                })
+                .unwrap_or_default();
             let _ = cur_v;
             if has_acc {
                 return Err(e.type_error("array index cannot be an accessor"));
@@ -2012,19 +2016,53 @@ fn function_apply(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value
 }
 
 fn function_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let name = match this {
+    let out = match this {
         Value::Obj(id) => match e.heap.obj(id).map(|o| &o.kind) {
             Some(ObjKind::Fun(crate::heap::Fun::Script { lit, .. })) => {
-                lit.name.clone().unwrap_or_default()
+                let name = lit.name.clone().unwrap_or_default();
+                // Paramètres reconstruits depuis les patterns
+                // (approximation — la spec rend le texte source ;
+                // patterns complexes → `…`).
+                let params: Vec<String> = lit
+                    .params
+                    .iter()
+                    .map(|p| match &p.pat {
+                        crate::ast::Pat::Ident(n) if p.rest => format!("...{n}"),
+                        crate::ast::Pat::Ident(n) => n.clone(),
+                        crate::ast::Pat::Default(b, _) if !p.rest => match b.as_ref() {
+                            crate::ast::Pat::Ident(n) => format!("{n}=…"),
+                            _ => "…".to_string(),
+                        },
+                        _ => "…".to_string(),
+                    })
+                    .collect();
+                if lit.is_arrow {
+                    format!("({}) => {{ [code] }}", params.join(", "))
+                } else {
+                    // Spec : `function*`, `async function` et
+                    // `async function*` gardent leur forme source.
+                    let kw = match (lit.is_async, lit.is_gen) {
+                        (false, false) => "function",
+                        (false, true) => "function*",
+                        (true, false) => "async function",
+                        (true, true) => "async function*",
+                    };
+                    format!("{kw} {name}({}) {{ [code] }}", params.join(", "))
+                }
+            }
+            // Fonctions liées → `function () { [native code] }`
+            // (spec Function.prototype.toString — source absente).
+            Some(ObjKind::Fun(crate::heap::Fun::Bound { .. })) => {
+                "function () { [native code] }".to_string()
             }
             Some(ObjKind::Fun(
                 crate::heap::Fun::Native { name, .. } | crate::heap::Fun::BoundNative { name, .. },
-            )) => (*name).to_string(),
-            _ => String::new(),
+            )) => format!("function {name}() {{ [native code] }}"),
+            _ => "function () { [code] }".to_string(),
         },
-        _ => String::new(),
+        _ => "function () { [code] }".to_string(),
     };
-    Ok(e.str_val(format!("function {name}() {{ [code] }}")))
+    Ok(e.str_val(out))
 }
 
 // ------------------------------------------------------------------
@@ -3221,14 +3259,35 @@ fn function_bind(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
     let bound_this = arg(args, 0);
     let bound = args.get(1..).unwrap_or(&[]).to_vec();
     let proto = Value::Obj(e.protos.function);
-    Ok(Value::Obj(e.heap.alloc_obj(crate::heap::Object::fun(
+    let id = e.heap.alloc_obj(crate::heap::Object::fun(
         crate::heap::Fun::Bound {
             target: this,
             this: bound_this,
-            bound,
+            bound: bound.clone(),
         },
         proto,
-    ))))
+    ));
+    // Spec `BoundFunctionCreate` : `length` =
+    // max(0, target.length − nArgs liés), `name` =
+    // "bound " + target.name — props `{w:false, c:true}`.
+    let tl = match e.get_prop_value(this, "length")? {
+        Value::Num(n) if n.is_finite() => n.max(0.0) as usize,
+        _ => 0,
+    };
+    let len = tl.saturating_sub(bound.len());
+    let tname = match e.get_prop_value(this, "name")? {
+        v @ Value::Str(_) => e.to_js_string(v)?,
+        _ => String::new(),
+    };
+    let nm = e.str_val(format!("bound {tname}"));
+    let attrs = crate::heap::PropAttrs {
+        writable: false,
+        enumerable: false,
+        configurable: true,
+    };
+    e.set_own_attrs(id, "length", Value::Num(len as f64), attrs);
+    e.set_own_attrs(id, "name", nm, attrs);
+    Ok(Value::Obj(id))
 }
 
 /// `Function.prototype[Symbol.hasInstance](v)` —
@@ -3643,6 +3702,7 @@ fn new_proxy(e: &mut Engine, target: Value, handler: Value) -> JsResult<Value> {
         },
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     })))
 }
 
@@ -5376,6 +5436,7 @@ fn clone_deep(e: &mut Engine, v: Value, seen: &mut Vec<(ObjId, ObjId)>) -> JsRes
             kind: ObjKind::ByteBuf(b),
             extensible: true,
             elem_integrity: 0,
+            args_map: None,
         }))),
         CloneShape::Dv(bid, offset, len) => {
             let nb = clone_deep(e, Value::Obj(bid), seen)?;
@@ -5389,6 +5450,7 @@ fn clone_deep(e: &mut Engine, v: Value, seen: &mut Vec<(ObjId, ObjId)>) -> JsRes
                 },
                 extensible: true,
                 elem_integrity: 0,
+                args_map: None,
             })))
         }
         CloneShape::Ta(ta, bid, offset, len) => {
@@ -5427,6 +5489,7 @@ fn clone_deep(e: &mut Engine, v: Value, seen: &mut Vec<(ObjId, ObjId)>) -> JsRes
                 kind: ObjKind::Map(Vec::new()),
                 extensible: true,
                 elem_integrity: 0,
+                args_map: None,
             });
             seen.push((id, cid));
             let pairs = match e.heap.obj(id).map(|o| &o.kind) {
@@ -5447,6 +5510,7 @@ fn clone_deep(e: &mut Engine, v: Value, seen: &mut Vec<(ObjId, ObjId)>) -> JsRes
                 kind: ObjKind::Set(Vec::new()),
                 extensible: true,
                 elem_integrity: 0,
+                args_map: None,
             });
             seen.push((id, cid));
             let items = match e.heap.obj(id).map(|o| &o.kind) {
@@ -5578,6 +5642,7 @@ fn weakref_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         kind: ObjKind::WeakRef(tid),
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     })))
 }
 
@@ -5618,6 +5683,7 @@ fn finreg_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         },
         extensible: true,
         elem_integrity: 0,
+        args_map: None,
     });
     e.finregs.push(id);
     Ok(Value::Obj(id))

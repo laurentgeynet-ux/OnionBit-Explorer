@@ -301,9 +301,9 @@ pub(crate) struct Protos {
     pub url: ObjId,
     /// `URLSearchParams.prototype` — `get`/`set`/`has`/`entries`…
     pub url_params: ObjId,
-    /// `WeakMap.prototype` (chaîne → `Map.prototype`).
+    /// `WeakMap.prototype` (proto `Object.prototype` — spec).
     pub weak_map: ObjId,
-    /// `WeakSet.prototype` (chaîne → `Set.prototype`).
+    /// `WeakSet.prototype` (proto `Object.prototype` — spec).
     pub weak_set: ObjId,
 }
 
@@ -394,8 +394,11 @@ impl Engine {
         let aggregate_error = heap.alloc_obj(Object::ordinary(Value::Obj(error)));
         let url = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let url_params = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
-        let weak_map = heap.alloc_obj(Object::ordinary(Value::Obj(map)));
-        let weak_set = heap.alloc_obj(Object::ordinary(Value::Obj(set)));
+        // Spec : `WeakMap.prototype`/`WeakSet.prototype` héritent de
+        // `Object.prototype`, PAS de `Map`/`Set` (pas d'itérateur ni
+        // d'accès aux entrées sur les weak collections).
+        let weak_map = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
+        let weak_set = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let global = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -716,6 +719,7 @@ impl Engine {
             kind: ObjKind::BigInt(b),
             extensible: true,
             elem_integrity: 0,
+            args_map: None,
         }))
     }
 
@@ -901,6 +905,7 @@ impl Engine {
             kind: ObjKind::RegExp(Rc::new(re)),
             extensible: true,
             elem_integrity: 0,
+            args_map: None,
         });
         let src = self.str_val(pattern.to_string());
         let fl = self.str_val(flag_str);
@@ -1806,6 +1811,22 @@ impl Engine {
     /// Own-property lookup with array/`length` semantics — returns
     /// the raw `Prop` so accessor pairs are visible to the caller.
     pub(crate) fn find_own(&mut self, id: ObjId, key: &str) -> Option<Prop> {
+        // `arguments` mappé : l'indice renvoie au slot env du
+        // paramètre formel (spec `MappedArgumentsObject` [[Get]]).
+        if let Some(i) = array_index(key) {
+            let mapped = self.heap.obj(id).and_then(|o| {
+                o.args_map.as_ref().and_then(|(env, map)| {
+                    map.get(i).and_then(|n| n.clone().map(|n| (env.clone(), n)))
+                })
+            });
+            if let Some((env, name)) = mapped {
+                let v = self.env_get(&env, &name).unwrap_or(Value::Undefined);
+                return Some(Prop::Data {
+                    value: v,
+                    attrs: crate::heap::PropAttrs::FULL,
+                });
+            }
+        }
         let o = self.heap.obj(id)?;
         if let ObjKind::Array(elems) = &o.kind {
             if key == "length" {
@@ -1816,7 +1837,9 @@ impl Engine {
                         // non-writable sous `freeze` (spec).
                         writable: o.elem_integrity & 4 == 0,
                         enumerable: false,
-                        configurable: false,
+                        // `arguments.length` est configurable (spec
+                        // — `args_map` distingue l'objet arguments).
+                        configurable: o.args_map.is_some(),
                     },
                 });
             }
@@ -2335,6 +2358,7 @@ impl Engine {
             kind: ObjKind::Host(host),
             extensible: true,
             elem_integrity: 0,
+            args_map: None,
         }))
     }
 
@@ -2466,6 +2490,19 @@ impl Engine {
             }
             return Ok(true);
         }
+        // `arguments` mappé : l'écriture d'indice va au slot env du
+        // paramètre (spec `MappedArgumentsObject` [[Set]]).
+        if let Some(i) = array_index(key) {
+            let mapped = self.heap.obj(id).and_then(|o| {
+                o.args_map.as_ref().and_then(|(env, map)| {
+                    map.get(i).and_then(|n| n.clone().map(|n| (env.clone(), n)))
+                })
+            });
+            if let Some((env, name)) = mapped {
+                self.env_set(&env, &name, v)?;
+                return Ok(true);
+            }
+        }
         let Some(o) = self.heap.obj_mut(id) else {
             return Ok(false);
         };
@@ -2585,6 +2622,13 @@ impl Engine {
                     // la suppression est refusée (spec).
                     if o.elem_integrity & 3 != 0 && i < elems.len() {
                         return false;
+                    }
+                    // `arguments` mappé : `delete` retire le
+                    // mapping, puis l'élément (spec).
+                    if let Some((_, map)) = o.args_map.as_mut() {
+                        if let Some(m) = std::rc::Rc::get_mut(map).and_then(|m| m.get_mut(i)) {
+                            *m = None;
+                        }
                     }
                     if i < elems.len() {
                         elems[i] = Value::Undefined;
@@ -3131,6 +3175,7 @@ impl Engine {
             },
             extensible: true,
             elem_integrity: 0,
+            args_map: None,
         });
         self.sym_index.insert(key, id);
         Value::Obj(id)
@@ -3248,8 +3293,31 @@ impl Engine {
                 // accessor de la spec, la lecture rend `undefined`).
                 let argv = (!lit.is_arrow).then(|| {
                     let a = self.new_array(args.to_vec());
-                    if !lit.strict {
-                        if let Value::Obj(aid) = a {
+                    if let Value::Obj(aid) = a {
+                        // `arguments` mappé (spec
+                        // `CreateMappedArgumentsObject`) : fonction
+                        // sloppy à liste de paramètres simple —
+                        // `map[i]` nomme le slot env de l'indice `i`.
+                        // Map vide sinon (objet `arguments` non
+                        // mappé, `length.configurable` quand même).
+                        let simple = lit
+                            .params
+                            .iter()
+                            .all(|p| !p.rest && matches!(p.pat, crate::ast::Pat::Ident(_)));
+                        let map: Vec<Option<String>> = if !lit.strict && simple {
+                            (0..args.len().min(lit.params.len()))
+                                .map(|i| match &lit.params[i].pat {
+                                    crate::ast::Pat::Ident(n) => Some(n.clone()),
+                                    _ => None,
+                                })
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
+                        if let Some(o) = self.heap.obj_mut(aid) {
+                            o.args_map = Some((local.clone(), std::rc::Rc::new(map)));
+                        }
+                        if !lit.strict {
                             self.set_own(aid, "callee", f, false);
                         }
                     }
