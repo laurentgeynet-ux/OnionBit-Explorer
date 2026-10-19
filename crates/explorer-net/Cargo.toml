@@ -23,6 +23,10 @@ flate2.workspace = true
 brotli.workspace = true
 encoding_rs.workspace = true
 psl.workspace = true
+h2.workspace = true
+http.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
 
 [dev-dependencies]
 # Certificats de test TLS auto-signés (étape 5) — pur Rust,

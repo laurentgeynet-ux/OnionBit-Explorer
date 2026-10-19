@@ -7,6 +7,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Added
+
+- **Étape 41 — HTTP/2** (`explorer-net`, `explorer-daemon`,
+  `explorer-cli`) : `AutoClient` route le trafic `https` par
+  ALPN (RFC 7301) — `h2` → connexion multiplexée partagée par
+  origine (`SendRequest` cloné par requête, pilote de
+  connexion en tâche, corps requête/réponse bornés par
+  `max_body_bytes` + fenêtres de flow-control respectées),
+  `http/1.1` ou ALPN absent → repli h1 **sur la connexion
+  déjà négociée** (`Connector::connect_negotiated` rapporte
+  l'ALPN, `H1Client::fetch_stream` la réutilise). `http:`
+  clair reste h1 (`h2c` hors périmètre), push server non
+  implémenté (déprécié). `TlsConnector` offre `h2` +
+  `http/1.1`. Framing/multiplexage délégué au crate `h2`
+  (pur Rust, équipe tokio — infrastructure, ADR-0002) +
+  types `http`/`bytes`. `NetError::Http2` pour les erreurs
+  de couche. 4 tests : h2 corps+en-têtes, POST echo, repli
+  h1 sur même connexion, `http:` h1.
+
 ## [0.1.0] - 2026-10-19
 
 ### Added
@@ -544,6 +563,35 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     `preventExtensions` — `false` sur refus plutôt que throw
     (déviation : une trap lancée est aussi rendue `false`) ;
   - test262 : 859/859 conservé ; 7 tests de régression.
+- **JS-C12 — Construction + API ES2025** (`dillo-js`) :
+  - `new.target` (`Expr::NewTarget` → liaison cachée
+    `\u{f120}new.target` posée par `call_value_impl` :
+    ctor cible sous `new`, `undefined` en appel ordinaire,
+    propagée à travers `super()` et `call_value_ctor`,
+    héritée lexicalement par les flèches — pas de binding
+    propre sur `is_arrow`) ;
+  - `Reflect.construct(target, args, newTarget)` — proto de
+    l'instance pris sur `newTarget.prototype` (spec
+    `OrdinaryCreateFromConstructor`) ; la lecture de
+    `prototype` passe par `get_prop_value` (traps `get` de
+    proxy + getters traversés — corrige `new` sur proxy sans
+    trap `construct`) ;
+  - méthodes `Set` ES2025 : `union`, `intersection`,
+    `difference`, `symmetricDifference`, `isSubsetOf`,
+    `isSupersetOf`, `isDisjointFrom` — tout itérable accepté ;
+  - `String.prototype.isWellFormed`/`toWellFormed` (nos
+    `char` sont toujours des scalaires — `isWellFormed` vaut
+    `true`, `toWellFormed` identité) ;
+  - `RegExp.escape` (ES2025) : `SyntaxCharacter`s préfixés,
+    ASCII non sûr en tête → `\xNN`/`\uNNNN` (`a…` → `\x61…`) ;
+  - `ArrayBuffer` redimensionnable : `resize`/`resizable`/
+    `maxByteLength`, `transfer`/`transferToFixedLength`
+    (détachement — les vues sur buffer détaché ou trop court
+    lèvent `TypeError` au lieu de paniquer) ;
+  - test262 : 859/859 conservé ; 4 tests de régression
+    (`new_target_binding`, `set_composition_es2025`,
+    `string_well_formed_and_regexp_escape`,
+    `arraybuffer_resize_transfer`).
 - **JS-C11 — Syntaxe moderne** (`dillo-js`) :
   - séparateurs numériques `1_000` / `0xFF_FF` / `0b1010_10` /
     `0o7_7` / `1.5_5` / `1e1_0` / `1_000n` — validés « entre

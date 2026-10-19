@@ -17,6 +17,7 @@ pub mod cookies;
 pub mod decode;
 pub mod error;
 pub mod h1;
+pub mod h2;
 pub mod http;
 pub mod policy;
 pub mod proxy;

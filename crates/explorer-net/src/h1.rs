@@ -35,12 +35,34 @@ pub trait IoStream: AsyncRead + AsyncWrite + Unpin + Send {}
 
 impl<T> IoStream for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 
+/// Connexion établie + protocole de couche applicative négocié
+/// (ALPN TLS : `b"h2"`, `b"http/1.1"` — RFC 7301). `alpn` est
+/// `None` quand rien n'a été négocié (TCP clair, connecteur
+/// simulé) — la sémantique de repli HTTP/1.1 est alors celle de
+/// la spec : absence d'ALPN ⇒ HTTP/1.1.
+pub struct Conn {
+    /// Flot bidirectionnel prêt à l'emploi.
+    pub stream: Box<dyn IoStream>,
+    /// Protocole ALPN négocié, s'il y a lieu.
+    pub alpn: Option<Vec<u8>>,
+}
+
 /// Ouvre les connexions — injectable pour que les tests tournent
 /// in-process (ADR-0002 §11).
 #[async_trait]
 pub trait Connector: Send + Sync {
     /// Connecte à `(scheme, host, port)`.
     async fn connect(&self, scheme: &str, host: &str, port: u16) -> NetResult<Box<dyn IoStream>>;
+
+    /// Connecte et rapporte le protocole ALPN négocié — repli :
+    /// `alpn: None` (TCP clair, connecteurs non négociants).
+    /// [`TlsConnector`](crate::tls::TlsConnector) le renseigne.
+    async fn connect_negotiated(&self, scheme: &str, host: &str, port: u16) -> NetResult<Conn> {
+        Ok(Conn {
+            stream: self.connect(scheme, host, port).await?,
+            alpn: None,
+        })
+    }
 
     /// `true` si les requêtes `scheme://host` doivent partir en
     /// *absolute-form* (proxy HTTP : `GET http://h/p HTTP/1.1`).
@@ -114,19 +136,19 @@ impl Default for HttpConfig {
 
 /// Clé de pool keep-alive.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct PoolKey {
-    scheme: String,
-    host: String,
-    port: u16,
+pub(crate) struct PoolKey {
+    pub(crate) scheme: String,
+    pub(crate) host: String,
+    pub(crate) port: u16,
 }
 
 /// Connexion réutilisable + tampon résiduel (les octets après la fin
 /// des en-têtes appartiennent déjà au corps).
-struct Pooled {
-    stream: Box<dyn IoStream>,
-    buf: Vec<u8>,
+pub(crate) struct Pooled {
+    pub(crate) stream: Box<dyn IoStream>,
+    pub(crate) buf: Vec<u8>,
     /// Requêtes en *absolute-form* (proxy HTTP).
-    absolute_form: bool,
+    pub(crate) absolute_form: bool,
 }
 
 /// Client HTTP/1.1 — implémente [`HttpTransport`].
@@ -240,19 +262,53 @@ impl H1Client {
     }
 }
 
+/// Clé de pool d'une requête (`scheme`, `host`, port effectif).
+pub(crate) fn pool_key(req: &Request) -> NetResult<PoolKey> {
+    Ok(PoolKey {
+        scheme: req.url.scheme().to_string(),
+        host: req.url.host(),
+        port: req
+            .url
+            .effective_port()
+            .ok_or_else(|| NetError::UnsupportedScheme(req.url.scheme().to_string()))?,
+    })
+}
+
 #[async_trait]
 impl HttpTransport for H1Client {
     async fn fetch(&self, req: &Request) -> NetResult<Response> {
-        let key = PoolKey {
-            scheme: req.url.scheme().to_string(),
-            host: req.url.host(),
-            port: req
-                .url
-                .effective_port()
-                .ok_or_else(|| NetError::UnsupportedScheme(req.url.scheme().to_string()))?,
-        };
+        let key = pool_key(req)?;
+        let (conn, reused) = self.take_conn(&key, req).await?;
+        self.exchange(req, &key, conn, reused).await
+    }
+}
 
-        let (mut conn, reused) = self.take_conn(&key, req).await?;
+impl H1Client {
+    /// Sert `req` sur une connexion déjà établie — chemin de repli
+    /// ALPN `http/1.1` d'[`crate::h2::AutoClient`], qui conserve la
+    /// connexion négociée plutôt que d'en rouvrir une.
+    pub(crate) async fn fetch_stream(
+        &self,
+        key: &PoolKey,
+        stream: Box<dyn IoStream>,
+        req: &Request,
+    ) -> NetResult<Response> {
+        let conn = Pooled {
+            stream,
+            buf: Vec::new(),
+            absolute_form: self.connector.absolute_form(&key.scheme, &key.host),
+        };
+        self.exchange(req, key, conn, false).await
+    }
+
+    /// Un aller-retour + gestion de pool — corps de `fetch`.
+    async fn exchange(
+        &self,
+        req: &Request,
+        key: &PoolKey,
+        mut conn: Pooled,
+        reused: bool,
+    ) -> NetResult<Response> {
         let wire = self.write_request(req, conn.absolute_form);
 
         let res = self.roundtrip(req, &mut conn, &wire).await;
@@ -260,7 +316,7 @@ impl HttpTransport for H1Client {
             Ok(mut resp) => {
                 resp.reused_connection = reused;
                 if is_reusable(&resp, req) {
-                    self.put_back(&key, conn);
+                    self.put_back(key, conn);
                 }
                 Ok(resp)
             }
@@ -280,7 +336,7 @@ impl HttpTransport for H1Client {
                     let mut resp = self.roundtrip(req, &mut fresh, &wire).await?;
                     resp.reused_connection = false;
                     if is_reusable(&resp, req) {
-                        self.put_back(&key, fresh);
+                        self.put_back(key, fresh);
                     }
                     Ok(resp)
                 } else {

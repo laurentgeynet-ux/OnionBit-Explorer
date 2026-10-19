@@ -43,9 +43,13 @@ impl TlsConnector {
     /// `CONNECT`+TLS, un fake en test.
     #[must_use]
     pub fn with_inner(roots: RootCertStore, inner: Arc<dyn Connector>) -> Self {
-        let config = ClientConfig::builder()
+        let mut config = ClientConfig::builder()
             .with_root_certificates(roots)
             .with_no_client_auth();
+        // ALPN (RFC 7301) : on offre h2 puis http/1.1 — le serveur
+        // tranche ; la réponse négociée est rapportée par
+        // `connect_negotiated` et `AutoClient` route le trafic.
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Self {
             tcp: inner,
             tls: RustlsConnector::from(Arc::new(config)),
@@ -73,33 +77,41 @@ impl std::fmt::Debug for TlsConnector {
     }
 }
 
+impl TlsConnector {
+    /// TCP sous-jacent + handshake TLS — partagé entre `connect`
+    /// et `connect_negotiated`.
+    async fn connect_tls(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> NetResult<tokio_rustls::client::TlsStream<Box<dyn IoStream>>> {
+        let target = format!("https://{host}:{port}");
+        // La couche sous-jacente peut être un tunnel
+        // CONNECT (proxy) — `inner` décide.
+        let tcp = self.tcp.connect("https", host, port).await?;
+
+        // SNI : nom DNS ou adresse IP littérale — jamais vide.
+        let name = ServerName::try_from(host.to_string()).map_err(|_| NetError::Tls {
+            target: target.clone(),
+            message: format!("nom de serveur invalide : {host}"),
+        })?;
+
+        self.tls
+            .connect(name, tcp)
+            .await
+            .map_err(|e| NetError::Tls {
+                target,
+                message: tls_message(&e),
+            })
+    }
+}
+
 #[async_trait]
 impl Connector for TlsConnector {
     async fn connect(&self, scheme: &str, host: &str, port: u16) -> NetResult<Box<dyn IoStream>> {
         match scheme {
             "http" => self.tcp.connect(scheme, host, port).await,
-            "https" => {
-                let target = format!("{scheme}://{host}:{port}");
-                // La couche sous-jacente peut être un tunnel
-                // CONNECT (proxy) — `inner` décide.
-                let tcp = self.tcp.connect("https", host, port).await?;
-
-                // SNI : nom DNS ou adresse IP littérale — jamais vide.
-                let name = ServerName::try_from(host.to_string()).map_err(|_| NetError::Tls {
-                    target: target.clone(),
-                    message: format!("nom de serveur invalide : {host}"),
-                })?;
-
-                let tls = self
-                    .tls
-                    .connect(name, tcp)
-                    .await
-                    .map_err(|e| NetError::Tls {
-                        target,
-                        message: tls_message(&e),
-                    })?;
-                Ok(Box::new(tls))
-            }
+            "https" => Ok(Box::new(self.connect_tls(host, port).await?)),
             other => Err(NetError::UnsupportedScheme(other.to_string())),
         }
     }
@@ -107,6 +119,25 @@ impl Connector for TlsConnector {
     /// Délègue à l'inner — le proxy décide de la forme.
     fn absolute_form(&self, scheme: &str, host: &str) -> bool {
         self.tcp.absolute_form(scheme, host)
+    }
+
+    /// Connexion + ALPN négocié (`h2`/`http/1.1` pour `https:`,
+    /// `None` pour `http:` — pas de négociation en clair).
+    async fn connect_negotiated(
+        &self,
+        scheme: &str,
+        host: &str,
+        port: u16,
+    ) -> NetResult<crate::h1::Conn> {
+        if scheme != "https" {
+            return self.tcp.connect_negotiated(scheme, host, port).await;
+        }
+        let tls = self.connect_tls(host, port).await?;
+        let alpn = tls.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
+        Ok(crate::h1::Conn {
+            stream: Box::new(tls),
+            alpn,
+        })
     }
 }
 

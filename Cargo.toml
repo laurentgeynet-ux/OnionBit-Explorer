@@ -104,6 +104,14 @@ psl = "2"
 # référence pur Rust (png/jpeg/gif/webp embarqués, aucun *-sys) ;
 # features réduites aux formats du MVP.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
+# HTTP/2 explorer-net (étape 41) — `h2` est l'implémentation
+# framing/multiplexage pur Rust de référence (équipe tokio/hyper,
+# aucun *-sys) ; `http` fournit les types Request/Response du
+# codec — comme httparse pour HTTP/1.1, la couche session/
+# politique reste écrite ici.
+h2 = "0.4"
+http = "1"
+bytes = "1"
 # Benchmarks pipeline (étape 39) — référence Rust, pur Rust,
 # dev-dependency uniquement (jamais dans le code livré).
 criterion = "0.5"

@@ -85,6 +85,11 @@ pub enum NetError {
     /// `Content-Encoding` non supporté ou flux corrompu.
     #[error("décodage du corps impossible ({0})")]
     ContentDecode(String),
+    /// Erreur de couche HTTP/2 (framing, `RST_STREAM`, `GOAWAY`,
+    /// handshake) — distincte d'`Io` pour que le diagnostic garde
+    /// la couche fautive.
+    #[error("HTTP/2 : {0}")]
+    Http2(String),
     /// Erreur I/O générique pendant le transfert.
     #[error("I/O : {0}")]
     Io(#[from] io::Error),

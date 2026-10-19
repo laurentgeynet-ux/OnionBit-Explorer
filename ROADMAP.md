@@ -446,6 +446,22 @@ d'intégration, pas par la couverture :
   `new` → `TypeError` (marque `CLASS_CTOR`), double `super()`
   → `TypeError` (marque `FLD_DONE`). test262 : 859/859 ;
   5 tests de régression.
+- [x] **JS-C12. Construction + API ES2025** : `new.target`
+  (`Expr::NewTarget`, liaison cachée `\u{f120}new.target`
+  posée par `call_value_impl` — héritée lexicalement par les
+  flèches, propagée aux super-constructeurs, `undefined` en
+  appel ordinaire), proto de `[[Construct]]` via
+  `Get(newTarget, "prototype")` (traps/getters traversés —
+  corrige `new (proxy)`), `Reflect.construct(f, args,
+  newTarget)`, méthodes `Set` ES2025 (`union`, `intersection`,
+  `difference`, `symmetricDifference`, `isSubsetOf`,
+  `isSupersetOf`, `isDisjointFrom` — acceptent tout itérable
+  set-like), `String.prototype.isWellFormed`/`toWellFormed`,
+  `RegExp.escape` (ES2025 — `a…` → `\x61…` en tête),
+  `ArrayBuffer` redimensionnable (`resize`, `resizable`,
+  `maxByteLength`) + `transfer`/`transferToFixedLength`
+  (buffer détaché → accès vue → `TypeError`, plus de panic).
+  test262 : 859/859 ; 4 tests de régression.
 - [ ] **JS-C. Couverture par besoin** : `Intl` —
   ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
@@ -560,8 +576,11 @@ progresse en trois paliers structurants :
 
 Étapes de la phase 10 :
 
-- [ ] **Étape 41. HTTP/2 puis HTTP/3.** Multiplexage h2 sur
+- [x] **Étape 41. HTTP/2 puis HTTP/3.** Multiplexage h2 sur
   `tokio`+`rustls` ; QUIC quand l'écosystème pur Rust le permet.
+  *h2 livré (ALPN, multiplexage, corps bornés) — QUIC/h3
+  reporté : `quinn` pur Rust viable mais h3 nécessite un
+  effort dédié hors proportion du bénéfice à ce stade.*
 - [ ] **Étape 42. Layout moderne.** `flexbox`, `grid`,
   `position: sticky`, transforms, `calc()`, custom properties
   (`--var`).

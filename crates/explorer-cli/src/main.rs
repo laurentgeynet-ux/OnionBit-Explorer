@@ -18,7 +18,8 @@ use std::sync::Arc;
 
 use explorer_html::TreeBuilder;
 use explorer_net::decode::DecodingTransport;
-use explorer_net::h1::{H1Client, HttpConfig};
+use explorer_net::h1::HttpConfig;
+use explorer_net::h2::AutoClient;
 use explorer_net::http::{HttpTransport, Request};
 use explorer_net::policy::RedirectTransport;
 use explorer_net::tls::TlsConnector;
@@ -45,7 +46,7 @@ async fn read_source(src: &str) -> Result<Vec<u8>, String> {
     if src.starts_with("http://") || src.starts_with("https://") {
         let client: Arc<dyn HttpTransport> = {
             let tls = Arc::new(TlsConnector::web_roots());
-            let h1: Arc<dyn HttpTransport> = Arc::new(H1Client::new(tls, HttpConfig::default()));
+            let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
             let decoded: Arc<dyn HttpTransport> =
                 Arc::new(DecodingTransport::wrap(h1, 16 * 1024 * 1024));
             Arc::new(RedirectTransport::wrap(decoded, 8))

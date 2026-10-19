@@ -26,7 +26,8 @@ mod store;
 
 use explorer_core::Session;
 use explorer_net::decode::DecodingTransport;
-use explorer_net::h1::{H1Client, HttpConfig};
+use explorer_net::h1::HttpConfig;
+use explorer_net::h2::AutoClient;
 use explorer_net::http::HttpTransport;
 use explorer_net::policy::RedirectTransport;
 use explorer_net::tls::TlsConnector;
@@ -96,7 +97,8 @@ fn default_fonts_dir() -> PathBuf {
 /// composition que `explorer-cli`.
 fn http_stack(cfg: &DaemonConfig) -> Arc<dyn HttpTransport> {
     let tls = Arc::new(TlsConnector::web_roots());
-    let h1: Arc<dyn HttpTransport> = Arc::new(H1Client::new(tls, HttpConfig::default()));
+    // ALPN : h2 si le serveur le propose, h1 sinon (etape 41).
+    let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
     let decoded: Arc<dyn HttpTransport> = Arc::new(DecodingTransport::wrap(h1, cfg.max_body));
     Arc::new(RedirectTransport::wrap(decoded, cfg.max_redirects))
 }
