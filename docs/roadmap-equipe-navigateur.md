@@ -39,6 +39,21 @@ Objectif : les blocages du web réel sautent. Sortie de palier :
 `site_smoke.ps1` étendu à 10 sites, **8/10 fonctionnels**
 (navigation + liens + formulaires + scripts de base actifs).
 
+Shortlist candidate (reconnaissance terrain @ `2693959`,
+panel de 8) : **mesurables** lobste.rs, wikipedia ·
+**régression** example.com, info.cern.ch · **stress** HN.
+Écartés : duckduckgo (blanc « par design » —
+`body{display:none}` anti-FOUC honoré, script de déblocage
+non exécuté), old.reddit (shadow DOM/custom elements, hors
+portée), MDN (doc > 16 384 px → `FrameTooBig` — attend la
+décision ci-dessous).
+
+**Décision en suspens — borne `FrameTooBig`** : `shot` rasterise
+le document entier ; au-delà de 16 384 px de haut le rendu
+échoue sec (MDN). Options : (a) clamper au viewport pour
+`shot`, (b) tuiler le PNG de sortie, (c) relever le cap via
+encode PNG streamé. À trancher avant l'extension du smoke.
+
 - [x] **Étape 50. Scripts externes + scheduler de
   sous-ressources** (ADR-0012 complété côté session).
   `<script src>` fetché via `HttpTransport` : ordre document,
@@ -91,13 +106,23 @@ Objectif : les blocages du web réel sautent. Sortie de palier :
   (ADR-0019). `MutationObserver` = JS-C26, drainé aux mêmes
   sync points.
 
-- [ ] **Étape 53. Session incrémentale** (moitié orchestration de
+- [x] **Étape 53. Session incrémentale** (moitié orchestration de
   l'ex-53) : la session alimente `push(&str)` du tokenizer par
   chunks pendant le fetch, relayout cadencé (N ms ou N octets),
   `frame_invalidated` intermédiaire → peinture pendant le
   téléchargement. ↔ PIPE **R-1** fournit la tolérance « document
   en construction » côté domaine — tenu en tête de leur file
   pour débloquer cette étape.
+
+- [ ] **Étape 53b. Charset des sous-ressources** (bug terrain
+  @ `2693959`, repro : example.com) : les corps de scripts
+  (`session.rs` ~l.1562), modules (~l.1840) et feuilles CSS
+  (~l.1560) passent par `decode_sniffed` — le sniffer **HTML**,
+  dont le fallback Latin-1 corrompt les littéraux UTF-8
+  (mojibake « Lâ€™usage » injecté par `insertAdjacentHTML`).
+  Spec : script = `charset` attribut → BOM → UTF-8 ; CSS =
+  `@charset`/transport → UTF-8 ; jamais le sniffer HTML hors
+  document. Borné — régression vérifiée sur example.com.
 
 - [ ] **Étape 54. Formulaires v2 — côté produit** (ex-55, moitié
   session) : `multipart/form-data`, états `:valid`/`:invalid`

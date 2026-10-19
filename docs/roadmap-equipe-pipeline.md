@@ -97,6 +97,24 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
      (texte ignoré hors whitespace), button-scope,
      after/after-after-body, catégories spec.
   Cliquet `BASELINE_PASSED` monté au fil des sous-chantiers.
+- [ ] **R-16. Layout : tables réelles** (bug terrain @
+  `2693959`, repro : news.ycombinator.com) — DOM complet et
+  correct (158 `.titleline`) mais table **explosée** :
+  `<tr bgcolor=#ff6600>` rend en bande ~450 px, logo
+  agrandi ×10, stories invisibles. Diagnostic à écrire :
+  repro minimal depuis la page sauvegardée (table à colspan
+  + `bgcolor` + `img` sans dimensions ?), puis fix hauteurs
+  de ligne/cellule. Petit, haute valeur — HN est le cas
+  d'école « structure table minimaliste ».
+- [ ] **R-17. Texte : espacement de lettres explosé** (bug
+  terrain @ `2693959`, repro : info.cern.ch, wikipedia) —
+  l'en-tête cern rend « h t t p : / / i n f o . c e r n .
+  c h » ; même artefact en colonnes wikipedia. Suspects :
+  `text-align: justify` appliqué hors contexte, ou
+  `letter-spacing` hérité/résolu en unités fausses dans le
+  passage inline → positions glyphes. Repro : un bloc
+  justifié à une ligne (dernière ligne = ne doit pas
+  s'étirer — règle spec).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
