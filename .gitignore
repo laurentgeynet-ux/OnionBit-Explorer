@@ -19,3 +19,7 @@ Thumbs.db
 # Secrets / profils locaux
 *.key
 .env
+
+# Corpus local cargo-fuzz (hors workspace — `cargo fuzz`).
+fuzz/corpus/
+fuzz/artifacts/

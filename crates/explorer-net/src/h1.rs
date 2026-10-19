@@ -51,15 +51,17 @@ pub trait Connector: Send + Sync {
     }
 }
 
-/// Connecteur TCP en clair — `http:` et `file:`-sans-hôte refusés
-/// (`file:` n'est pas du HTTP).
+/// Connecteur TCP en clair — ouvre une socket brute pour
+/// `http:` **et** `https:` (la couche TLS est composée au-dessus
+/// par [`TlsConnector`](crate::tls::TlsConnector) — utilisé seul,
+/// il n'est valable que pour `http:`).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TcpConnector;
 
 #[async_trait]
 impl Connector for TcpConnector {
     async fn connect(&self, scheme: &str, host: &str, port: u16) -> NetResult<Box<dyn IoStream>> {
-        if scheme != "http" {
+        if !matches!(scheme, "http" | "https") {
             return Err(NetError::UnsupportedScheme(scheme.to_string()));
         }
         let stream = TcpStream::connect((host, port)).await.map_err(|e| {

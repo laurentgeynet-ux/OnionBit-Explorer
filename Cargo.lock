@@ -159,6 +159,10 @@ name = "explorer-cli"
 version = "0.0.0"
 dependencies = [
  "explorer-core",
+ "explorer-dom",
+ "explorer-html",
+ "explorer-net",
+ "tokio",
 ]
 
 [[package]]

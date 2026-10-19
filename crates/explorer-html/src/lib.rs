@@ -16,6 +16,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod debug;
 pub mod encoding;
 pub mod entities;
 mod token;

@@ -11,3 +11,7 @@ workspace = true
 
 [dependencies]
 explorer-core.workspace = true
+explorer-dom.workspace = true
+explorer-html.workspace = true
+explorer-net.workspace = true
+tokio.workspace = true

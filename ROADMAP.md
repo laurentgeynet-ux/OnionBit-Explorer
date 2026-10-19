@@ -111,7 +111,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   `TreeBuilder::drive` intercale `next_token`/`process` — les états
   de contenu sont réglés avant la lecture de la suite.
   26 tests (tag-soup, tables, format, quirks, incrémental).
-- [ ] **Étape 12. Golden tests + premier artefact.** Harness
+- [x] **Étape 12. Golden tests + premier artefact.** Harness
   **html5lib-tests** (tree-construction, ADR-0010) + corpus
   `tests/data/`, arbres attendus vs produits, % de conformité
   publié dans CHANGELOG ; fuzzing du tokenizer (`fuzz/`) ;

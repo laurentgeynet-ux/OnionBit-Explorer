@@ -9,6 +9,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 12 — golden tests + premier artefact** :
+  - Corpus **html5lib-tests tree-construction** (57 fichiers
+    `.dat`, ~1 600 cas) extrait @ `9329e64694` vers
+    `tests/data/tree-construction/` — harness
+    `tests/tree_construction.rs` avec cliquet
+    `BASELINE_PASSED = 953` (**59 %**, 200 cas fragment/
+    script-on ignorés) ; échecs concentrés sur l'adoption
+    agency complète, conformément aux écarts documentés.
+  - `explorer-cli` : `dump <fichier|url>` (dump DOM format
+    html5lib, sniffing d'encodage, pile `explorer-net`
+    TLS+redirections+décodage) et `fetch <url>` — jalon J2.
+  - `explorer-html::debug::dump` : sérialiseur partagé.
+  - Spike **ADR-0008** (`explorer-dom/tests/rooting_spike.rs`) :
+    faux heap JS validant rooting explicite, réclamation
+    `collect`, `StaleHandle` sur slot réalloué, détachement
+    sans destruction.
+  - `fuzz/` : cible cargo-fuzz du tokenizer + tree-builder
+    (chunks de 7 octets, hors workspace).
+
 - **Étape 11 — `explorer-html` : tree-builder HTML5**
   (`tree.rs`, ~2 100 lignes) : pipeline token → `explorer-dom::Dom`
   avec les modes d'insertion de la spec — Initial, BeforeHtml,
