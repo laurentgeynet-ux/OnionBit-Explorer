@@ -333,6 +333,14 @@ fn esc_str(out: &mut String, s: &str) {
     out.push('"');
 }
 
+/// État de sérialisation — `replacer` (fonction appelée
+/// `(key, value)` avec `holder` en `this`) et `plist`
+/// (`PropertyList` — whitelist de clés, ordre de la liste).
+struct Ctx {
+    replacer: Option<Value>,
+    plist: Option<Vec<String>>,
+}
+
 fn json_write(
     e: &mut Engine,
     out: &mut String,
@@ -340,6 +348,7 @@ fn json_write(
     space: &str,
     indent: u32,
     depth: u32,
+    cx: &Ctx,
 ) -> JsResult<bool> {
     if depth > 200 {
         // Spec: TypeError ("Converting circular structure to JSON").
@@ -364,15 +373,19 @@ fn json_write(
         // Spec `SerializeJSONProperty` : BigInt → TypeError.
         Value::Big(_) => return Err(e.type_error("do not know how to serialize a BigInt")),
         Value::Obj(id) => {
-            // Functions are not JSON values — elided like undefined.
-            if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Fun(_))) {
+            // Functions AND Symbols are not JSON values — elided
+            // like undefined.
+            if matches!(
+                e.heap.obj(id).map(|o| &o.kind),
+                Some(ObjKind::Fun(_) | ObjKind::Symbol { .. })
+            ) {
                 return Ok(false);
             }
             // `toJSON` hook.
             if let Some(f) = e.get_prop(id, "toJSON") {
                 if e.is_callable(f) {
                     let v2 = e.call_value(f, v, &[])?;
-                    return json_write(e, out, v2, space, indent, depth + 1);
+                    return json_write(e, out, v2, space, indent, depth + 1, cx);
                 }
             }
             let kind_is_arr = matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_)));
@@ -391,11 +404,15 @@ fn json_write(
                     }
                     out.push_str(nl);
                     out.push_str(&pad);
-                    let el = e
+                    let mut el = e
                         .find_own(id, &i.to_string())
                         .and_then(|p| p.data_value())
                         .unwrap_or(Value::Undefined);
-                    if !json_write(e, out, el, space, indent + 1, depth + 1)? {
+                    if let Some(rp) = cx.replacer {
+                        let kv = e.str_val(i.to_string());
+                        el = e.call_value(rp, v, &[kv, el])?;
+                    }
+                    if !json_write(e, out, el, space, indent + 1, depth + 1, cx)? {
                         out.push_str("null"); // undefined → null in arrays
                     }
                 }
@@ -406,19 +423,32 @@ fn json_write(
                 out.push(']');
             } else {
                 // Ordinary objects (incl. Map/Set → `{}` — spec).
-                let keys = e.own_enum_keys(id);
+                // `PropertyList` : seules les clés listées, dans
+                // l'ordre de la liste ; sinon toutes les clés propres
+                // énumérables.
+                let keys = match &cx.plist {
+                    Some(pl) => pl.clone(),
+                    None => e.own_enum_keys(id),
+                };
                 out.push('{');
                 let mut first = true;
                 for k in keys {
-                    let Some(val) = e.find_own(id, &k).and_then(|p| p.data_value()) else {
+                    let Some(mut val) = e.find_own(id, &k).and_then(|p| p.data_value()) else {
                         continue;
                     };
-                    // Skip undefined/functions in values (spec).
+                    if let Some(rp) = cx.replacer {
+                        let kv = e.str_val(k.clone());
+                        val = e.call_value(rp, v, &[kv, val])?;
+                    }
+                    // Skip undefined/functions/symbols in values.
                     if matches!(val, Value::Undefined) {
                         continue;
                     }
                     if let Value::Obj(fid) = val {
-                        if matches!(e.heap.obj(fid).map(|o| &o.kind), Some(ObjKind::Fun(_))) {
+                        if matches!(
+                            e.heap.obj(fid).map(|o| &o.kind),
+                            Some(ObjKind::Fun(_) | ObjKind::Symbol { .. })
+                        ) {
                             continue;
                         }
                     }
@@ -433,7 +463,7 @@ fn json_write(
                     if !space.is_empty() {
                         out.push(' ');
                     }
-                    json_write(e, out, val, space, indent + 1, depth + 1)?;
+                    json_write(e, out, val, space, indent + 1, depth + 1, cx)?;
                 }
                 if !first {
                     out.push_str(nl);
@@ -448,8 +478,48 @@ fn json_write(
 
 fn json_stringify(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let v = arg(args, 0);
+    // `replacer` — fonction (spec `Call` par prop) ou tableau de
+    // clés (`PropertyList` : strings/numbers → ToString, dédup).
+    let rep = arg(args, 1);
+    let mut plist: Option<Vec<String>> = None;
+    let replacer = if e.is_callable(rep) {
+        Some(rep)
+    } else {
+        if let Value::Obj(pid) = rep {
+            if matches!(e.heap.obj(pid).map(|o| &o.kind), Some(ObjKind::Array(_))) {
+                let n = e
+                    .get_prop_value(rep, "length")
+                    .ok()
+                    .and_then(|v| match v {
+                        Value::Num(n) => Some(n as usize),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                let mut list: Vec<String> = Vec::new();
+                for i in 0..n {
+                    let ev = e.get_prop_value(rep, &i.to_string())?;
+                    let k = match ev {
+                        Value::Str(sid) => e.heap.string(sid).unwrap_or_default(),
+                        Value::Num(nv) => crate::value::num_to_js_string(nv),
+                        // Wrapper String/Number → ToString.
+                        Value::Obj(_) => match e.to_js_string(ev) {
+                            Ok(s) => s,
+                            Err(_) => continue,
+                        },
+                        _ => continue,
+                    };
+                    if !list.contains(&k) {
+                        list.push(k);
+                    }
+                }
+                plist = Some(list);
+            }
+        }
+        None
+    };
     // `space` — number → that many spaces (cap 10), string → literal
-    // prefix (cap 10 chars).
+    // prefix (cap 10 chars). Wrapper Number/String → ToNumber/
+    // ToString (spec).
     let space = match arg(args, 2) {
         Value::Num(n) => " ".repeat((n as usize).min(10)),
         Value::Str(id) => e
@@ -459,10 +529,32 @@ fn json_stringify(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
             .chars()
             .take(10)
             .collect(),
+        Value::Obj(_) => {
+            let v = arg(args, 2);
+            if let Ok(n) = e.to_number(v) {
+                " ".repeat((n as usize).min(10))
+            } else {
+                e.to_js_string(v)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(10)
+                    .collect()
+            }
+        }
         _ => String::new(),
     };
+    let cx = Ctx { replacer, plist };
+    // Racine : holder `{"": v}` — le replacer y est appelé avec
+    // la clé `""` (spec `SerializeJSONProperty` sur la racine).
+    let mut root = v;
+    if let Some(rp) = cx.replacer {
+        let holder = e.new_object();
+        e.set_own(holder, "", v, true);
+        let kv = e.str_val("");
+        root = e.call_value(rp, Value::Obj(holder), &[kv, v])?;
+    }
     let mut out = String::new();
-    if !json_write(e, &mut out, v, &space, 0, 0)? {
+    if !json_write(e, &mut out, root, &space, 0, 0, &cx)? {
         return Ok(Value::Undefined);
     }
     Ok(e.str_val(out))

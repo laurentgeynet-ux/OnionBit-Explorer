@@ -697,6 +697,69 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`new_target_binding`, `set_composition_es2025`,
     `string_well_formed_and_regexp_escape`,
     `arraybuffer_resize_transfer`).
+- **JS-C19 — Date complet, `eval` direct, Annex B
+  RegExp, JSON, invariants Proxy** (`dillo-js`) :
+  - `Date` : les 15 setters (`setFullYear`…`setTime` +
+    variantes `UTC` — fuseau unique), `toString`/
+    `toDateString`/`toTimeString`/`toLocaleString`/
+    `toLocaleDateString`/`toLocaleTimeString` au format
+    spec (UTC fixe, `en-US` pour les locale*),
+    `toJSON` (dispatch `toISOString`, `null` si NaN) ;
+  - `Date.parse`/`new Date(str)` : formats legacy Annex
+    B (`Jan 15 2000`, `January 15, 2000`, `15 Jan 2000`
+    — ne lit plus « 15 » comme année 1915 —, `MM/DD/YYYY`,
+    `YYYY/M/D`, `h:m[:s[.ms]]`, jours de semaine,
+    ordinaires `1st`, `GMT`/`UTC`, tokens inconnus
+    tolérés) + garde ISO strict ; `days_from_civil`
+    normalise les mois hors 1-12 (`setMonth(13)`, ctor) ;
+  - `arguments` : `callee` sur l'objet sloppy (strict :
+    absent — déviation vs poisoned accessor ; pas
+    d'aliasing param/arguments, documenté) ;
+  - `eval` direct (spec `PerformEval`) : `eval(...)`
+    écrit tel quel s'exécute dans l'env + `this` de
+    l'appelant — `var`/fonctions y persistent, bindings
+    locaux visibles ; `(0,eval)`/`e=eval`/`Function()`
+    restent globaux ; identité vérifiée par valeur (un
+    homonyme local `eval` n'est pas un appel direct) ;
+  - Annex B : `String.prototype.trimLeft`/`trimRight`
+    (alias `trimStart`/`trimEnd`) ; statiques `RegExp`
+    — `$1`…`$9`, `input`/`$_`, `lastMatch`/`$&`,
+    `lastParen`/`$+`, `` $` ``/`$'`/`leftContext`/
+    `rightContext` alimentées par `UpdateRegExpStatics`
+    sur `exec`/`test`/`match`/`search`/`replace`/
+    `matchAll` (échec → statiques vidées, groupe non
+    participé → `""`) ;
+  - `JSON.stringify` : `PropertyList` (whitelist +
+    ordre, dédup), replacer fonction (`holder` en
+    `this`, clé `""` à la racine), `toJSON` dispatché,
+    symboles élidés (racine `undefined`, valeur omise,
+    élément de tableau → `null`), wrappers
+    `Number`/`String` en `space` ;
+  - `Number.prototype.toString(radix)` : partie
+    fractionnaire en base (`(0.5).toString(2)` →
+    `"0.1"`, borne 53 digits mantisse) ;
+  - `@@toStringTag` : protos+ctors `WeakMap`/`WeakSet`
+    dédiés (`WeakMap !== Map`, `[object WeakMap]`),
+    `ArrayBuffer` ; `new ArrayBuffer()`/`new
+    SharedArrayBuffer()` sans arg → buffer vide (spec
+    `ToIndex` court-circuité, était `RangeError`) ;
+  - `Array.prototype` est un tableau exotique (spec) :
+    `Array.isArray(Array.prototype)` → `true` et
+    `length` a son descripteur (`{w:true,e:false,
+    c:false}`, valeur 0) ;
+  - invariants Proxy (spec §9.5) vérifiés sur les traps
+    `get`/`set`/`has`/`deleteProperty`/
+    `getOwnPropertyDescriptor`/`ownKeys`/`defineProperty`
+    — violations sur props non-configurables ou cibles
+    non-extensibles → `TypeError` (ex. `get` ne peut
+    plus mentir sur une prop gelée) ;
+  - test262 : 859/859 conservé ; 10 tests de régression
+    (`c19_date_setters_and_formats`,
+    `c19_date_parse_legacy`, `c19_arguments_callee`,
+    `c19_direct_eval`, `c19_annexb_regexp_statics`,
+    `c19_annexb_string_trim`, `c19_json_stringify`,
+    `c19_number_radix_fraction`,
+    `c19_tags_and_array_proto`, `c19_proxy_invariants`).
 - **JS-C18 — Annex B complet, `SharedArrayBuffer`,
   `Atomics`** (`dillo-js`) :
   - méthodes HTML `String.prototype` (Annex B) :

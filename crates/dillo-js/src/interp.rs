@@ -233,6 +233,30 @@ pub struct Engine {
     /// juste avant l'exécution d'une boucle, consommés par cette
     /// boucle (`a: b: for` empile les deux labels).
     pending_labels: Vec<String>,
+    /// Le builtin `eval` — identité pour distinguer l'appel direct
+    /// `eval(…)` (env appelant) de l'indirect (`(0,eval)`, `e=eval`
+    /// → global), spec `PerformEval`.
+    pub(crate) eval_fn: Value,
+    /// Le ctor `RegExp` — les statiques Annex B (`RegExp.$1…$9`,
+    /// `input`/`$_`, `lastMatch`/`$&`, `lastParen`/`$+`, contextes
+    /// gauche/droit) s'y lisent.
+    pub(crate) re_ctor: Value,
+    /// Dernier match d'expression régulière — statiques Annex B.
+    pub(crate) re_static: Option<ReStatic>,
+}
+
+/// Dernier match `RegExp` — `RegExp.$1…$9`/`input`/`lastMatch`/…
+/// (Annex B, spec `UpdateRegExpStatics`).
+#[derive(Clone)]
+pub(crate) struct ReStatic {
+    /// Chaîne sujet du match.
+    pub input: String,
+    /// Offsets octet du match entier (`groups[0]`).
+    pub start_b: usize,
+    /// Fin octet du match.
+    pub end_b: usize,
+    /// `groups[0]` = match entier ; `None` = groupe non participé.
+    pub groups: Vec<Option<String>>,
 }
 
 /// Prototype objects captured at engine init.
@@ -274,11 +298,15 @@ pub(crate) struct Protos {
     pub url: ObjId,
     /// `URLSearchParams.prototype` — `get`/`set`/`has`/`entries`…
     pub url_params: ObjId,
+    /// `WeakMap.prototype` (chaîne → `Map.prototype`).
+    pub weak_map: ObjId,
+    /// `WeakSet.prototype` (chaîne → `Set.prototype`).
+    pub weak_set: ObjId,
 }
 
 impl Protos {
     /// Tous les prototypes — racines GC permanentes.
-    fn all(&self) -> [ObjId; 25] {
+    fn all(&self) -> [ObjId; 27] {
         [
             self.object,
             self.function,
@@ -305,6 +333,8 @@ impl Protos {
             self.aggregate_error,
             self.url,
             self.url_params,
+            self.weak_map,
+            self.weak_set,
         ]
     }
 }
@@ -334,7 +364,11 @@ impl Engine {
         let mut heap = Heap::new();
         let object = heap.alloc_obj(Object::ordinary(Value::Null));
         let function = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
-        let array = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
+        // `Array.prototype` est elle-même un tableau exotique
+        // (spec : `Array.isArray(Array.prototype)` → `true` —
+        // donne `Array.prototype.length` gratuitement via la
+        // synthèse `find_own`/`length`).
+        let array = heap.alloc_obj(Object::array(Vec::new(), Value::Obj(object)));
         let string = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let number = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let boolean = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
@@ -357,6 +391,8 @@ impl Engine {
         let aggregate_error = heap.alloc_obj(Object::ordinary(Value::Obj(error)));
         let url = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let url_params = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
+        let weak_map = heap.alloc_obj(Object::ordinary(Value::Obj(map)));
+        let weak_set = heap.alloc_obj(Object::ordinary(Value::Obj(set)));
         let global = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -391,6 +427,8 @@ impl Engine {
                 aggregate_error,
                 url,
                 url_params,
+                weak_map,
+                weak_set,
             },
             rng: seed | 1,
             t0: Instant::now(),
@@ -422,6 +460,9 @@ impl Engine {
             current_module: String::new(),
             gen_collect: Vec::new(),
             pending_labels: Vec::new(),
+            eval_fn: Value::Undefined,
+            re_ctor: Value::Undefined,
+            re_static: None,
         };
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
@@ -1813,6 +1854,13 @@ impl Engine {
             ObjKind::TypedArray { ta, .. } => Some(ta.name()),
             _ => None,
         };
+        // Statiques Annex B sur le ctor `RegExp` (`$1…$9`, `input`,
+        // `lastMatch`…) — extraction pure pendant que `o` vit.
+        let re_val = if matches!(self.re_ctor, Value::Obj(rc) if rc == id) {
+            self.re_static_get(key)
+        } else {
+            None
+        };
         // Vues binaires — synthèse des props dérivées
         // (`length`/`byteLength`/`byteOffset`/`buffer`) et des
         // éléments indexés, comme pour `Array`.
@@ -1868,6 +1916,16 @@ impl Engine {
                 value: self.str_val(n),
                 attrs: crate::heap::PropAttrs {
                     writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            });
+        }
+        if let Some(t) = re_val {
+            return Some(Prop::Data {
+                value: self.str_val(t),
+                attrs: crate::heap::PropAttrs {
+                    writable: true,
                     enumerable: false,
                     configurable: true,
                 },
@@ -2027,11 +2085,34 @@ impl Engine {
         let Value::Obj(id) = base else {
             return self.get_prop_value(base, key);
         };
-        if let Some((_, target, handler)) = self.proxy_th(id)? {
+        if let Some((tid, target, handler)) = self.proxy_th(id)? {
             let trap = self.proxy_trap(handler, "get")?;
             if matches!(trap, Value::Obj(_)) {
                 let kv = self.str_val(key);
-                return self.call_value(trap, handler, &[target, kv, recv]);
+                let v = self.call_value(trap, handler, &[target, kv, recv])?;
+                // Invariants spec `[[Get]]` : data non-config
+                // non-writable → valeur imposée ; accesseur
+                // non-config sans getter → `undefined` imposé.
+                match self.find_own(tid, key) {
+                    Some(Prop::Data { value, attrs }) if !attrs.configurable && !attrs.writable => {
+                        if !self.strict_eq(v, value) {
+                            return Err(self.type_error(
+                                "proxy get: result differs from non-configurable non-writable prop",
+                            ));
+                        }
+                    }
+                    Some(Prop::Acc { get, attrs, .. })
+                        if !attrs.configurable
+                            && matches!(get, Value::Undefined)
+                            && !matches!(v, Value::Undefined) =>
+                    {
+                        return Err(self.type_error(
+                            "proxy get: non-configurable accessor without getter must yield undefined",
+                        ));
+                    }
+                    _ => {}
+                }
+                return Ok(v);
             }
             return self.read_prop(target, recv, key);
         }
@@ -2058,6 +2139,29 @@ impl Engine {
                 let kv = self.str_val(key);
                 let ok = self.call_value(trap, handler, &[target, kv, v, recv])?;
                 return if self.to_boolean(ok) {
+                    // Invariants spec `[[Set]]` : data non-config
+                    // non-writable → écrire la *même* valeur seulement ;
+                    // accesseur non-config sans setter → jamais de
+                    // succès.
+                    match self.find_own(tid, key) {
+                        Some(Prop::Data { value, attrs })
+                            if !attrs.configurable && !attrs.writable =>
+                        {
+                            if !self.strict_eq(v, value) {
+                                return Err(self.type_error(
+                                    "proxy set: cannot report success on non-configurable non-writable prop",
+                                ));
+                            }
+                        }
+                        Some(Prop::Acc { set, attrs, .. })
+                            if !attrs.configurable && matches!(set, Value::Undefined) =>
+                        {
+                            return Err(self.type_error(
+                                "proxy set: non-configurable accessor without setter",
+                            ));
+                        }
+                        _ => {}
+                    }
                     Ok(())
                 } else {
                     self.write_refused(key)
@@ -2110,6 +2214,65 @@ impl Engine {
         } else {
             Ok(())
         }
+    }
+
+    /// Annex B — statiques du ctor `RegExp`. `None` si `key` n'est
+    /// pas une statique ; `Some("")` quand la statique est vide
+    /// (aucun match enregistré — V8 rend `""`, pas `undefined`).
+    fn re_static_get(&self, key: &str) -> Option<String> {
+        let st = self.re_static.as_ref();
+        let v = match key {
+            "input" | "$_" => st.map(|r| r.input.clone()),
+            "lastMatch" | "$&" => st.and_then(|r| r.groups.first().cloned().flatten()),
+            "lastParen" | "$+" => st.and_then(|r| {
+                r.groups
+                    .get(1..)
+                    .unwrap_or(&[])
+                    .iter()
+                    .rev()
+                    .find_map(Clone::clone)
+            }),
+            "leftContext" | "$`" => st.map(|r| r.input[..r.start_b.min(r.input.len())].to_string()),
+            "rightContext" | "$'" => st.map(|r| r.input[r.end_b.min(r.input.len())..].to_string()),
+            _ if key.len() == 2
+                && key.starts_with('$')
+                && key.as_bytes()[1].is_ascii_digit()
+                && key.as_bytes()[1] != b'0' =>
+            {
+                st.and_then(|r| {
+                    r.groups
+                        .get((key.as_bytes()[1] - b'0') as usize)
+                        .cloned()
+                        .flatten()
+                })
+            }
+            _ => return None,
+        };
+        Some(v.unwrap_or_default())
+    }
+
+    /// `UpdateRegExpStatics` (Annex B) — mémorise le dernier match
+    /// (`None` sur échec : les statiques se vident, comme V8).
+    pub(crate) fn note_re(&mut self, input: &str, m: Option<&crate::regexp::ExecMatch>) {
+        self.re_static = m.map(|m| ReStatic {
+            input: input.to_string(),
+            start_b: m.start_b,
+            end_b: m.end_b,
+            groups: m.groups.clone(),
+        });
+    }
+
+    /// `key` est-elle une prop propre **non configurable** de `id` ?
+    /// (`None` = prop absente — utilisé par les invariants proxy.)
+    fn non_config_own(&mut self, id: ObjId, key: &str) -> Option<bool> {
+        self.find_own(id, key).map(|p| match &p {
+            Prop::Data { attrs, .. } | Prop::Acc { attrs, .. } => !attrs.configurable,
+        })
+    }
+
+    /// `Object.isExtensible`-niveau interne (invariants proxy).
+    pub(crate) fn target_extensible(&self, id: ObjId) -> bool {
+        self.heap.obj(id).is_some_and(|o| o.extensible)
     }
 
     /// Extract the host delegate of an object, if any.
@@ -2339,6 +2502,24 @@ impl Engine {
             if matches!(trap, Value::Obj(_)) {
                 let kv = self.str_val(key);
                 let r = self.call_value(trap, handler, &[target, kv])?;
+                if !self.to_boolean(r) {
+                    // Invariants spec `[[HasProperty]]` : prop
+                    // non-config ou cible non-extensible → la prop
+                    // ne peut pas être cachée.
+                    match self.non_config_own(tid, key) {
+                        Some(true) => {
+                            return Err(
+                                self.type_error("proxy has: cannot hide non-configurable prop")
+                            );
+                        }
+                        Some(false) if !self.target_extensible(tid) => {
+                            return Err(self.type_error(
+                                "proxy has: cannot hide prop on non-extensible target",
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
                 return Ok(self.to_boolean(r));
             }
             return self.has_prop(tid, key);
@@ -2388,6 +2569,14 @@ impl Engine {
             } else {
                 return self.delete_result(tid, key);
             };
+            if ok {
+                // Invariant spec `[[Delete]]` : une prop non-config
+                // ne peut pas être rapportée supprimée.
+                if matches!(self.non_config_own(tid, key), Some(true)) {
+                    return Err(self
+                        .type_error("proxy deleteProperty: cannot delete non-configurable prop"));
+                }
+            }
             return if ok {
                 Ok(Value::Bool(true))
             } else if self.strict {
@@ -2485,6 +2674,28 @@ impl Engine {
                     }
                     out.push(k);
                 }
+                // Invariants spec `[[OwnPropertyKeys]]` : toutes les
+                // clés non-config de la cible doivent figurer ;
+                // cible non-extensible → la liste doit être exacte.
+                let mut required: Vec<String> = Vec::new();
+                for k in self.own_keys(tid) {
+                    match self.non_config_own(tid, &k) {
+                        Some(true) => {
+                            if !out.contains(&k) {
+                                return Err(
+                                    self.type_error("proxy ownKeys: missing non-configurable key")
+                                );
+                            }
+                        }
+                        _ => required.push(k),
+                    }
+                }
+                if !self.target_extensible(tid)
+                    && (out.len() != required.len() || out.iter().any(|k| !required.contains(k)))
+                {
+                    return Err(self
+                        .type_error("proxy ownKeys: must list all keys of non-extensible target"));
+                }
                 return Ok(out);
             }
             return self.own_keys_trapped(tid);
@@ -2501,8 +2712,45 @@ impl Engine {
                 let kv = self.str_val(key);
                 let r = self.call_value(trap, handler, &[target, kv])?;
                 return match r {
-                    Value::Undefined => Ok(None),
-                    Value::Obj(d) => self.prop_from_desc_obj(d),
+                    // Invariant : prop non-config ne peut pas être
+                    // rapportée absente ; cible non-extensible idem.
+                    Value::Undefined => match self.non_config_own(tid, key) {
+                        Some(true) => Err(self.type_error(
+                            "proxy getOwnPropertyDescriptor: cannot omit non-configurable prop",
+                        )),
+                        Some(false) if !self.target_extensible(tid) => Err(self.type_error(
+                            "proxy getOwnPropertyDescriptor: cannot omit prop on non-extensible target",
+                        )),
+                        _ => Ok(None),
+                    },
+                    Value::Obj(d) => {
+                        let p = self.prop_from_desc_obj(d)?;
+                        let rconf = p.as_ref().map(|p| match p {
+                            Prop::Data { attrs, .. } | Prop::Acc { attrs, .. } => attrs.configurable,
+                        });
+                        match (self.non_config_own(tid, key), rconf) {
+                            // Rapporter non-config une prop absente.
+                            (None, Some(false)) => {
+                                return Err(self.type_error(
+                                    "proxy getOwnPropertyDescriptor: cannot report non-configurable for absent prop",
+                                ));
+                            }
+                            // Rapporter non-config une prop configurable.
+                            (Some(false), Some(false)) => {
+                                return Err(self.type_error(
+                                    "proxy getOwnPropertyDescriptor: cannot report configurable prop as non-configurable",
+                                ));
+                            }
+                            // Nouvelle prop sur cible non-extensible.
+                            (None, _) if !self.target_extensible(tid) => {
+                                return Err(self.type_error(
+                                    "proxy getOwnPropertyDescriptor: cannot add prop on non-extensible target",
+                                ));
+                            }
+                            _ => {}
+                        }
+                        Ok(p)
+                    }
                     _ => Err(self.type_error(
                         "proxy getOwnPropertyDescriptor trap must return object or undefined",
                     )),
@@ -2887,7 +3135,18 @@ impl Engine {
                 }
                 // Arrows have no own `arguments` — lookup falls
                 // through to the enclosing scope, as specced.
-                let argv = (!lit.is_arrow).then(|| self.new_array(args.to_vec()));
+                // Annex B sloppy : `arguments.callee` → la fonction
+                // (strict : absent — déviation vs le poisoned
+                // accessor de la spec, la lecture rend `undefined`).
+                let argv = (!lit.is_arrow).then(|| {
+                    let a = self.new_array(args.to_vec());
+                    if !lit.strict {
+                        if let Value::Obj(aid) = a {
+                            self.set_own(aid, "callee", f, false);
+                        }
+                    }
+                    a
+                });
                 {
                     let mut b = local.borrow_mut();
                     if let (EnvKind::Local(m), Some(argv)) = (&mut b.kind, argv) {
@@ -3181,11 +3440,40 @@ impl Engine {
 
     fn exec_program_inner(&mut self, prog: &Program) -> JsResult<Value> {
         let env = self.global_env.clone();
-        self.hoist(&prog.body, &env);
+        self.exec_program_in(&env, Value::Obj(self.global), prog)
+    }
+
+    /// `eval(src)` **direct** (spec `PerformEval`, chemin local) :
+    /// le programme tourne dans l'env et le `this` de l'appelant —
+    /// les `var`/fonctions y persistent, `x`/`let` de l'appelant y
+    /// sont visibles. Déviation documentée : la spec isole les
+    /// `let`/`const` de l'eval dans un env déclaratif dédié ; notre
+    /// approximation bloc-scope les rend déjà fonction-scope, ils
+    /// vivent donc dans l'env appelant aussi.
+    pub(crate) fn eval_source_in(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        src: &str,
+    ) -> JsResult<Value> {
+        let prog = crate::parser::parse_in(src, self.strict).map_err(|err| {
+            Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
+        })?;
+        let outer_strict = self.strict;
+        self.strict |= prog.strict;
+        let r = self.exec_program_in(env, this, &prog);
+        self.strict = outer_strict;
+        r
+    }
+
+    /// Corps de programme dans un couple env/`this` arbitraires —
+    /// partagé entre `exec_program_inner` (global) et
+    /// `eval_source_in` (direct eval, env appelant).
+    fn exec_program_in(&mut self, env: &EnvRef, this: Value, prog: &Program) -> JsResult<Value> {
+        self.hoist(&prog.body, env);
         self.completion = Value::Undefined;
-        let this = Value::Obj(self.global);
         for s in &prog.body {
-            match self.exec_stmt(&env, this, s)? {
+            match self.exec_stmt(env, this, s)? {
                 Flow::Normal | Flow::Break(_) | Flow::Continue(_) => {}
                 Flow::Return(v) => return Ok(v),
             }
@@ -3851,6 +4139,10 @@ impl Engine {
                     /// lookup, receiver stays `this`.
                     Super(String),
                 }
+                // `eval(…)` écrit tel quel → appel direct (spec
+                // `PerformEval`) : la callee résolue doit être *le*
+                // builtin `eval` global, pas un homonyme local.
+                let direct_eval = matches!(&**callee, Expr::Ident(n) if n == "eval");
                 let callee = match &**callee {
                     Expr::Member(base, name) => {
                         let b = self.eval_expr(env, this, base)?;
@@ -3873,7 +4165,22 @@ impl Engine {
                     // Receiver `undefined` — le callee sloppy le
                     // coercera vers l'objet global, le strict le
                     // garde (spec `OrdinaryCallBindThis`).
-                    Callee::Bare(f) => self.call_value(f, Value::Undefined, &args),
+                    Callee::Bare(f) => {
+                        if direct_eval
+                            && matches!((f, self.eval_fn), (Value::Obj(a), Value::Obj(b)) if a == b)
+                        {
+                            return match args.first() {
+                                Some(Value::Str(sid)) => {
+                                    let src = self.heap.string(*sid).unwrap_or_default();
+                                    self.eval_source_in(env, this, &src)
+                                }
+                                // Non-string → rendu tel quel (spec).
+                                Some(v) => Ok(*v),
+                                None => Ok(Value::Undefined),
+                            };
+                        }
+                        self.call_value(f, Value::Undefined, &args)
+                    }
                     Callee::Member(recv, name) => {
                         // Host method dispatch first: `hostObj.m(…)`
                         // hits the host's `invoke` before prop lookup.

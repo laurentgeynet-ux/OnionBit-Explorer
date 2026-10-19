@@ -4154,10 +4154,11 @@ fn c16_reduce_right_locale() {
     ] {
         assert_eq!(ev_str(src), want, "{src}");
     }
-    // `Date.prototype.toLocaleString` ≡ `toString` (pas de locale).
+    // `Date.prototype.toLocaleString` — approximation `en-US`
+    // fixe `"M/D/YYYY, h:mm:ss AM"` (pas de vraie locale).
     assert_eq!(
         ev_str("new Date(0).toLocaleString()"),
-        ev_str("new Date(0).toString()")
+        "1/1/1970, 12:00:00 AM"
     );
     assert!(Engine::new().eval("[].reduceRight(x=>x)").is_err());
 }
@@ -4799,4 +4800,314 @@ fn c18_atomics() {
     assert!(Engine::new()
         .eval("Atomics.add(new BigInt64Array(new SharedArrayBuffer(8)),0,1)")
         .is_err());
+}
+
+// ------------------------------------------------------------------
+// JS-C19 — Date setters/strings/parse, eval direct, Annex B RegExp,
+// JSON stringify, invariants proxy
+// ------------------------------------------------------------------
+
+#[test]
+fn c19_date_setters_and_formats() {
+    for (src, want) in [
+        (
+            "var d=new Date(0);d.toString()",
+            "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)",
+        ),
+        ("var d=new Date(0);d.toDateString()", "Thu Jan 01 1970"),
+        (
+            "var d=new Date(0);d.toTimeString()",
+            "00:00:00 GMT+0000 (Coordinated Universal Time)",
+        ),
+        ("var d=new Date(0);d.toJSON()", "1970-01-01T00:00:00.000Z"),
+        (
+            "var d=new Date(0);d.toLocaleString()",
+            "1/1/1970, 12:00:00 AM",
+        ),
+        ("var d=new Date(0);d.toLocaleDateString()", "1/1/1970"),
+        ("var d=new Date(0);d.toLocaleTimeString()", "12:00:00 AM"),
+        (
+            "var d=new Date(0);d.setFullYear(2000,5,15);d.toISOString()",
+            "2000-06-15T00:00:00.000Z",
+        ),
+        (
+            "var d=new Date(0);d.setUTCFullYear(1999);d.getUTCFullYear()",
+            "1999",
+        ),
+        // setFullYear(50) pose l'an 50 (pas 1950 — quirk réservé au
+        // ctor, `Date.UTC` et `setYear`).
+        ("var d=new Date(0);d.setFullYear(50);d.getFullYear()", "50"),
+        ("var d=new Date(0);d.setYear(50);d.getFullYear()", "1950"),
+        (
+            "var d=new Date(0);d.setMonth(13);d.getFullYear()+'/'+d.getMonth()",
+            "1971/1",
+        ),
+        (
+            "var d=new Date(0);d.setDate(32);d.getMonth()+'/'+d.getDate()",
+            "1/1",
+        ),
+        (
+            "var d=new Date(0);d.setHours(25,70,70,1500);d.toISOString()",
+            "1970-01-02T02:11:11.500Z",
+        ),
+        (
+            "var d=new Date(0);d.setMinutes(61);d.getHours()+':'+d.getMinutes()",
+            "1:1",
+        ),
+        (
+            "var d=new Date(0);d.setSeconds(61);d.getMinutes()+':'+d.getSeconds()",
+            "1:1",
+        ),
+        (
+            "var d=new Date(0);d.setMilliseconds(1500);d.getTime()",
+            "1500",
+        ),
+        (
+            "var d=new Date(0);d.setTime(86400000);d.toISOString()",
+            "1970-01-02T00:00:00.000Z",
+        ),
+        ("var d=new Date(0);d.setTime(NaN);d.getTime()", "NaN"),
+        // Args non-finis → date invalide.
+        ("var d=new Date(0);d.setFullYear('x');d.getTime()", "NaN"),
+        // Args omis → composantes conservées.
+        ("var d=new Date(0);d.setFullYear(2001);d.getMonth()", "0"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c19_date_parse_legacy() {
+    for (src, want) in [
+        ("Date.parse('Jan 15 2000')", "947894400000"),
+        ("Date.parse('January 15, 2000')", "947894400000"),
+        ("Date.parse('15 Jan 2000')", "947894400000"),
+        ("Date.parse('01/15/2000')", "947894400000"),
+        ("Date.parse('2000/01/15')", "947894400000"),
+        ("Date.parse('Jan 15 2000 12:30:45')", "947939445000"),
+        ("Date.parse('2000-01-15T10:30:00Z')", "947932200000"),
+        ("Date.parse('12/31/99')", "946598400000"),
+        ("Date.parse('bad string')", "NaN"),
+        (
+            "new Date('Jan 15 2000').toISOString()",
+            "2000-01-15T00:00:00.000Z",
+        ),
+        // Round-trip toString → parse (suffixe GMT ignoré).
+        (
+            "var d=new Date(86400000);Date.parse(d.toString())===86400000",
+            "true",
+        ),
+        // '15 Jan 2000' n'est plus lu comme année 1915 (bug C19).
+        ("Date.parse('15 Jan 2000')===Date.UTC(2000,0,15)", "true"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c19_arguments_callee() {
+    for (src, want) in [
+        ("function f(){return arguments.callee===f}f()", "true"),
+        (
+            "function f(){return arguments.callee.name}function g(){return f()}g()",
+            "f",
+        ),
+        // Strict : pas de `callee` (déviation vs poisoned accessor).
+        (
+            "function f(){'use strict';return arguments.callee===undefined}f()",
+            "true",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c19_direct_eval() {
+    for (src, want) in [
+        // Direct eval voit l'env appelant.
+        ("function g(){var x=1;return eval('x+1')}g()", "2"),
+        // `var` de l'eval persiste dans la fonction appelante.
+        ("function g(){eval('var y=42');return y}g()", "42"),
+        // Écriture sur un binding appelant.
+        ("function g(){var x=1;eval('x=5');return x}g()", "5"),
+        // Indirect → global.
+        ("var e=eval;e('var z=7');typeof z", "number"),
+        ("var e=eval;e('var z=7');z", "7"),
+        ("(0,eval)('var w=8');w", "8"),
+        // Non-string → rendu tel quel.
+        ("eval(42)", "42"),
+        ("eval({a:1}).a", "1"),
+        // `this` appelant visible.
+        ("var o={v:9,m:function(){return eval('this.v')}};o.m()", "9"),
+        // `let` de l'eval visible dans l'eval lui-même.
+        ("function g(){return eval('let q=9;q*2')}g()", "18"),
+        // Function() reste indirect (global).
+        (
+            "var f=Function('return typeof q');function g(){var q=1;return f()}g()",
+            "undefined",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    // Un `eval` homonyme local n'est PAS un appel direct.
+    assert_eq!(
+        ev_str("function g(){var eval=function(){return 5};var x=1;return eval()}g()"),
+        "5"
+    );
+}
+
+#[test]
+fn c19_annexb_regexp_statics() {
+    for (src, want) in [
+        ("var r=/(a)(b)/;'ab'.replace(r,'x');RegExp.$1", "a"),
+        ("var r=/(a)(b)/;'ab'.replace(r,'x');RegExp.$2", "b"),
+        ("var r=/(a)(b)/;'ab'.replace(r,'x');RegExp['$&']", "ab"),
+        ("var r=/(a)(b)/;'xab'.search(r);RegExp['$`']", "x"),
+        ("var r=/(a)(b)/;'abx'.search(r);RegExp[\"$'\"]", "x"),
+        ("var r=/(a)(b)/;'ab'.match(r);RegExp.input", "ab"),
+        ("var r=/(a)(b)/;'ab'.match(r);RegExp['$_']", "ab"),
+        ("var r=/(a)(b)/;'ab'.match(r);RegExp.lastMatch", "ab"),
+        ("var r=/(a)(b)/;'ab'.match(r);RegExp.lastParen", "b"),
+        ("var r=/(a)(b)(c)/;'abc'.match(r);RegExp.$3", "c"),
+        ("var r=/(a)(b)/;'ab'.match(r);RegExp.leftContext", ""),
+        ("var r=/(a)(b)/;'abx'.match(r);RegExp.rightContext", "x"),
+        // Match échoué → statiques vidées (V8).
+        ("var r=/(x)/;'z'.match(r);RegExp.$1", ""),
+        // Groupe non participé → "".
+        ("/(a)?(b)/.exec('b');RegExp.$1+'/'+RegExp.$2", "/b"),
+        // exec/matchAll/replace mettent à jour.
+        ("/(a)(b)/.exec('ab');RegExp.$1+','+RegExp.$2", "a,b"),
+        ("'ab'.replace(/(a)/,'x');RegExp.lastParen", "a"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c19_annexb_string_trim() {
+    assert_eq!(ev_str("' a '.trimLeft()"), "a ");
+    assert_eq!(ev_str("' a '.trimRight()"), " a");
+    assert_eq!(ev_str("' a '.trimLeft()===(' a '.trimStart())"), "true");
+}
+
+#[test]
+fn c19_json_stringify() {
+    for (src, want) in [
+        // PropertyList : filtre + ordre de la liste.
+        (
+            "JSON.stringify({a:1,b:2,c:3},['a','c'])",
+            "{\"a\":1,\"c\":3}",
+        ),
+        ("JSON.stringify({a:1,b:2},['b','a'])", "{\"b\":2,\"a\":1}"),
+        // Replacer fonction — holder en this, (key, value).
+        (
+            "JSON.stringify({a:1,b:2},(k,v)=>k==='a'?99:v)",
+            "{\"a\":99,\"b\":2}",
+        ),
+        // Racine : clé '' sur le holder {"":v}.
+        ("JSON.stringify(5,()=>7)", "7"),
+        // Symboles : omis (valeur) et élidé (racine).
+        ("JSON.stringify({s:Symbol('x'),a:1})", "{\"a\":1}"),
+        ("JSON.stringify(Symbol('x'))", "undefined"),
+        ("JSON.stringify([Symbol('x'),1])", "[null,1]"),
+        // toJSON dispatché (Date).
+        (
+            "JSON.stringify({d:new Date(0)})",
+            "{\"d\":\"1970-01-01T00:00:00.000Z\"}",
+        ),
+        (
+            "JSON.stringify(new Date(0))",
+            "\"1970-01-01T00:00:00.000Z\"",
+        ),
+        // toJSON custom.
+        ("JSON.stringify({x:1,toJSON:()=>({y:2})})", "{\"y\":2}"),
+        // Space.
+        ("JSON.stringify([1],null,2)", "[\n  1\n]"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c19_number_radix_fraction() {
+    for (src, want) in [
+        ("(0.5).toString(2)", "0.1"),
+        ("(0.25).toString(2)", "0.01"),
+        ("(-0.5).toString(2)", "-0.1"),
+        ("(0.1).toString(16)", "0.1999999999999a"),
+        ("(255).toString(16)", "ff"),
+        ("(3.14159).toString(2).startsWith('11.001001')", "true"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c19_tags_and_array_proto() {
+    for (src, want) in [
+        (
+            "Object.prototype.toString.call(new WeakMap())",
+            "[object WeakMap]",
+        ),
+        (
+            "Object.prototype.toString.call(new WeakSet())",
+            "[object WeakSet]",
+        ),
+        (
+            "Object.prototype.toString.call(new ArrayBuffer(8))",
+            "[object ArrayBuffer]",
+        ),
+        (
+            "Object.prototype.toString.call(new SharedArrayBuffer(4))",
+            "[object SharedArrayBuffer]",
+        ),
+        ("new ArrayBuffer().byteLength", "0"),
+        ("WeakMap===Map", "false"),
+        ("WeakSet===Set", "false"),
+        ("new WeakMap().set(1,2).get(1)", "2"),
+        // `Array.prototype` est un tableau exotique (spec).
+        ("Array.isArray(Array.prototype)", "true"),
+        ("Array.prototype.length", "0"),
+        (
+            "Object.getOwnPropertyDescriptor(Array.prototype,'length').value",
+            "0",
+        ),
+        (
+            "Object.getOwnPropertyDescriptor(Array.prototype,'length').configurable",
+            "false",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c19_proxy_invariants() {
+    for (src, want) in [
+        // get : data non-config non-writable → valeur imposée.
+        ("var t=Object.freeze({x:1});new Proxy(t,{get:()=>1}).x", "1"),
+        // set : data non-config non-writable → même valeur seulement.
+        (
+            "var t=Object.freeze({x:1});new Proxy(t,{set:()=>true}).x=1",
+            "1",
+        ),
+        // has : prop configurable peut être cachée.
+        ("var t={x:1};'x' in new Proxy(t,{has:()=>false})", "false"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    // Violations → TypeError.
+    for src in [
+        "var t=Object.freeze({x:1});new Proxy(t,{get:()=>2}).x",
+        "var t=Object.freeze({x:1});new Proxy(t,{set:()=>true}).x=2",
+        "var t={};Object.defineProperty(t,'x',{value:1,configurable:false});'x' in new Proxy(t,{has:()=>false})",
+        "var t=Object.preventExtensions({x:1});'x' in new Proxy(t,{has:()=>false})",
+        "var t=Object.freeze({x:1});delete new Proxy(t,{deleteProperty:()=>true}).x",
+        "var t=Object.freeze({x:1});Object.getOwnPropertyDescriptor(new Proxy(t,{getOwnPropertyDescriptor:()=>undefined}),'x')",
+        "var t=Object.freeze({x:1});Object.keys(new Proxy(t,{ownKeys:()=>[]}))",
+        "var t=Object.freeze({});Object.defineProperty(new Proxy(t,{defineProperty:()=>true}),'y',{value:1})",
+    ] {
+        assert!(Engine::new().eval(src).is_err(), "{src}");
+    }
 }

@@ -509,7 +509,13 @@ pub(crate) fn install(e: &mut Engine) {
 /// `new ArrayBuffer(len, {maxByteLength?})` — `len` bytes,
 /// zero-filled. `maxByteLength` ≥ len rend le buffer `resizable`.
 fn ab_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let n = to_index(e, arg(args, 0))?;
+    // Spec : arg absent → `ToIndex(undefined)` = 0 (`new
+    // ArrayBuffer()` est un buffer vide — `to_index` pur lève
+    // RangeError sur NaN, il faut court-circuiter l'absence).
+    let n = match arg(args, 0) {
+        Value::Undefined => 0,
+        v => to_index(e, v)?,
+    };
     let id = new_buffer(e, n);
     if let Value::Obj(opts) = arg(args, 1) {
         if let Some(mv) = e.get_prop(opts, "maxByteLength") {
@@ -1620,7 +1626,10 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
 /// `new SharedArrayBuffer(len, {maxByteLength?})` — `ByteBuf` avec
 /// `growable`/`maxByteLength`/`detached` en props propres.
 fn sab_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let n = to_index(e, arg(args, 0))?;
+    let n = match arg(args, 0) {
+        Value::Undefined => 0,
+        v => to_index(e, v)?,
+    };
     let proto = e
         .get_prop(e.global, "SharedArrayBuffer")
         .and_then(|c| match c {

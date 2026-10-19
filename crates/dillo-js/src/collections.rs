@@ -85,7 +85,18 @@ pub(crate) fn iter_obj(e: &mut Engine, items: Vec<Value>) -> Value {
 // ------------------------------------------------------------------
 
 fn map_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let proto = Value::Obj(e.protos.map);
+    map_new(e, args, e.protos.map)
+}
+
+/// `new WeakMap(...)` — proto dédié (`@@toStringTag` `WeakMap`),
+/// internals `ObjKind::Map` identiques (pas de refs faibles —
+/// déviation documentée, le moteur ne GC pas les clés).
+fn weak_map_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    map_new(e, args, e.protos.weak_map)
+}
+
+fn map_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsResult<Value> {
+    let proto = Value::Obj(proto_id);
     let id = e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
@@ -106,7 +117,16 @@ fn map_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 }
 
 fn set_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let proto = Value::Obj(e.protos.set);
+    set_new(e, args, e.protos.set)
+}
+
+/// `new WeakSet(...)` — voir `weak_map_ctor`.
+fn weak_set_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    set_new(e, args, e.protos.weak_set)
+}
+
+fn set_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsResult<Value> {
+    let proto = Value::Obj(proto_id);
     let id = e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
@@ -553,12 +573,27 @@ pub(crate) fn install(e: &mut Engine) {
     let g = e.global;
     e.set_own(g, "Set", set_ctor_v, false);
 
-    // `WeakMap`/`WeakSet` — alias the Map/Set ctors (no real weak
-    // refs — the engine has no GC; deviation in ADR-0007).
-    if let Some(wm) = e.get_prop(g, "Map") {
+    // `WeakMap`/`WeakSet` — ctors + protos dédiés (JS-C19) :
+    // `WeakMap !== Map` et `Object.prototype.toString` distingue
+    // "WeakMap" (spec `@@toStringTag`). Les protos héritent les
+    // méthodes Map/Set via la chaîne (installée dans Protos::new).
+    // Pas de refs faibles — déviation ADR-0007.
+    {
+        let wmp = e.protos.weak_map;
+        let tag = e.str_val("WeakMap");
+        e.set_own(wmp, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        let wm = e.native_fn("WeakMap", weak_map_ctor);
+        e.set_own(c_id(wm), "prototype", Value::Obj(wmp), false);
+        e.set_own(wmp, "constructor", wm, false);
         e.set_own(g, "WeakMap", wm, false);
     }
-    if let Some(ws) = e.get_prop(g, "Set") {
+    {
+        let wsp = e.protos.weak_set;
+        let tag = e.str_val("WeakSet");
+        e.set_own(wsp, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        let ws = e.native_fn("WeakSet", weak_set_ctor);
+        e.set_own(c_id(ws), "prototype", Value::Obj(wsp), false);
+        e.set_own(wsp, "constructor", ws, false);
         e.set_own(g, "WeakSet", ws, false);
     }
 }

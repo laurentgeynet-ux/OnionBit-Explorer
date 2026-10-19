@@ -562,6 +562,51 @@ d'intégration, pas par la couverture :
   Mono-thread : aucun partage inter-worker — indiscernable
   sauf `wait`/`waitAsync`, déviation documentée.
   test262 : 859/859 ; 6 tests de régression.
+- [x] **JS-C19. Date complet, `eval` direct, Annex B
+  RegExp, JSON, invariants Proxy** : les 15 setters
+  `Date` (`setFullYear`/`setMonth`/`setDate`/`setHours`/
+  `setMinutes`/`setSeconds`/`setMilliseconds`/`setTime` +
+  variantes UTC — fuseau unique), formats spec
+  `toString`/`toDateString`/`toTimeString`/`toLocale*`/
+  `toJSON` (fuseau UTC fixe, `en-US` pour les locale*),
+  `Date.parse` legacy (`Jan 15 2000`, `January 15, 2000`,
+  `15 Jan 2000` — bug année 1915 corrigé —, `MM/DD/YYYY`,
+  `YYYY/M/D`, heures, suffixes `GMT`), `days_from_civil`
+  normalise les mois hors 1-12 (`setMonth(13)` → an+1).
+  `arguments.callee` sloppy (strict : absent, déviation
+  vs poisoned accessor — pas d'aliasing param/arguments).
+  `eval(...)` direct : exécuté dans l'env + `this` de
+  l'appelant (`PerformEval` chemin local — `var`/
+  fonctions persistent dans la fonction, bindings
+  visibles, `this.v` accessible ; indirect `e()`/
+  `(0,eval)`/`Function()` reste global ; déviation :
+  `let`/`const` de l'eval vivent dans l'env appelant,
+  la spec les isole). Annex B : `trimLeft`/`trimRight`,
+  statiques `RegExp` (`$1`-`$9`, `input`/`$_`,
+  `lastMatch`/`$&`, `lastParen`/`$+`, `` $` ``/`$'`/
+  `leftContext`/`rightContext` — `UpdateRegExpStatics`
+  sur exec/match/search/replace/matchAll). `JSON.stringify` :
+  `PropertyList` (filtre + ordre), replacer fonction
+  (holder `this`, clé `""` à la racine), symboles élidés
+  (valeur + racine), `toJSON` dispatché, wrappers
+  `Number`/`String` en `space`. `Number.prototype.
+  toString(radix)` : fraction en base (mantisse 53 bits
+  max) — `(0.5).toString(2)` → `"0.1"`. `@@toStringTag`
+  : `WeakMap`/`WeakSet` protos+ctors dédiés (≠ `Map`/
+  `Set`), `ArrayBuffer` tagé ; `new ArrayBuffer()` 0-arg
+  → buffer vide (spec `ToIndex`), idem `SharedArrayBuffer`.
+  `Array.prototype` est un vrai tableau exotique
+  (`Array.isArray` → `true`, descripteur `length`
+  `{w:true,c:false}`). Invariants Proxy (spec §9.5) :
+  `get`/`set` sur props non-config/non-writable, `has`
+  sur prop non-config ou cible non-extensible,
+  `deleteProperty`, `getOwnPropertyDescriptor`
+  (absent vs non-config, non-config rapporté sur prop
+  absente/configurable, ajout sur non-extensible),
+  `ownKeys` (clés non-config requises, liste exacte sur
+  non-extensible), `defineProperty` (ajout sur
+  non-extensible) → `TypeError`. test262 : 859/859 ;
+  10 tests de régression.
 - [ ] **JS-C. Couverture par besoin** : `Intl`,
   `AsyncDisposableStack`, `Temporal`, `using` — ordre
   piloté par les pages réelles.
