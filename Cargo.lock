@@ -523,6 +523,7 @@ dependencies = [
  "explorer-test-support",
  "futures-util",
  "image",
+ "regex",
  "thiserror",
  "tokio",
  "tracing",

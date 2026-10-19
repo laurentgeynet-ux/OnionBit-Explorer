@@ -65,7 +65,7 @@ mod value;
 mod xhr;
 
 pub use dom::{Dom, NodeId};
-pub use dom_host::{CookieJar, DomRef};
+pub use dom_host::{CookieJar, DomRef, FormSubmit};
 pub use error::{Error, Result};
 pub use heap::Host;
 pub use interp::Engine;

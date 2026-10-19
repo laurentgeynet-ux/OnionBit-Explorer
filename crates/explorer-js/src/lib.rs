@@ -65,6 +65,20 @@ pub enum NavRequest {
     /// `history.go(n)`/`back()`/`forward()` — déplacement
     /// relatif dans l'historique de session.
     HistoryGo(i32),
+    /// `form.submit()`/`requestSubmit()` (étape 54) — champs
+    /// déjà collectés côté miroir ; la session résout
+    /// `action`, choisit le transport (`method`/`enctype`)
+    /// et encode.
+    FormSubmit {
+        /// `method` du `<form>` (`"get"` par défaut).
+        method: String,
+        /// `action` brute — à résoudre à l'URL de page.
+        action: String,
+        /// `enctype` brut (`""` ≙ urlencoded).
+        enctype: String,
+        /// `(name, value)` des contrôles « successful ».
+        fields: Vec<(String, String)>,
+    },
 }
 
 /// Résolveur de spécificateurs de module fourni par l'hôte :
@@ -858,6 +872,17 @@ fn install_dom(
             q2.borrow_mut().push(NavRequest::HistoryGo(n));
         });
         eng.set_nav_hooks(nav, hist, history_len);
+        // `form.submit()`/`requestSubmit()` — champs collectés
+        // côté miroir, encodage + navigation côté session.
+        let q3 = nav_q.clone();
+        eng.set_form_submit_hook(std::rc::Rc::new(move |p: dillo_js::FormSubmit| {
+            q3.borrow_mut().push(NavRequest::FormSubmit {
+                method: p.method,
+                action: p.action,
+                enctype: p.enctype,
+                fields: p.fields,
+            });
+        }));
     }
     eng.install_xhr(std::rc::Rc::new(ChanXhr {
         q: std::rc::Rc::clone(net_q),

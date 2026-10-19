@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use explorer_css::transition::{interpolate, transition_decls, Timing};
+use explorer_css::value::Color;
 use explorer_css::{
     initial_value, ComputedStyle, FontSrc, Origin, StyleEngine, StyleEnv, StyleMap,
 };
@@ -26,15 +27,15 @@ use explorer_html::encoding::{decode, decode_windows1252, sniff_encoding, Encodi
 use explorer_html::TreeBuilder;
 use explorer_js::{JsEngine, JsFactory, NavRequest, NetRequest, NetResponse, UrlResolver};
 use explorer_layout::font::FontSource;
-use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, LayoutBox};
+use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, LayoutBox, Rect};
 use explorer_net::cookies::CookieJar;
 use explorer_net::error::NetResult;
 use explorer_net::http::{HttpTransport, Method, Request, Response};
 use explorer_net::policy::{initiator_headers, is_mixed_content};
 use explorer_net::url::Url;
 use explorer_render::{
-    build_display_list_imaged, decode_font, decode_image, rasterize, DecodedImage, DisplayList,
-    Frame, ImageTable, WebFontSource,
+    build_display_list_imaged, decode_font, decode_image, rasterize, BorderStyle, DecodedImage,
+    DisplayItem, DisplayList, Frame, ImageTable, WebFontSource,
 };
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::broadcast;
@@ -274,6 +275,10 @@ struct Tab {
     /// — sert de cible à `mouseout`/`mouseover`/`wheel` ;
     /// chemin `(tag, index)`, même raisonnement que `focused`.
     hovered: Option<Vec<(String, u32)>>,
+    /// Popup `<select>` ouvert (étape 54) — overlay moteur
+    /// peint en fin de display list ; refermé au clic,
+    /// scroll, frappe ou navigation.
+    popup: Option<SelectPopup>,
     /// Contexte JS du document — créé si la page a des
     /// `<script>` et qu'une fabrique est injectée ; meurt à
     /// la navigation (un contexte par document).
@@ -295,6 +300,28 @@ struct Tab {
     /// horaire) — bornées par `MAX_TRANSITIONS`.
     transitions: Vec<ActiveTransition>,
 }
+
+/// Popup `<select>` moteur (étape 54) — l'état vit hors DOM :
+/// les options sont figées à l'ouverture, le `<select>` est
+/// re-résolu par chemin au moment du choix (le nœud peut
+/// mourir au re-parse de synchro).
+struct SelectPopup {
+    /// Chemin `(tag, index)` du `<select>` dans `dom`.
+    path: Vec<(String, u32)>,
+    /// Boîte du contrôle (coordonnées document).
+    rect: Rect,
+    /// `(étiquette, sélectionnée)` par `<option>` descendant.
+    options: Vec<(String, bool)>,
+    /// Hauteur d'une ligne du popup (px).
+    row_h: f32,
+    /// Ligne survolée au dernier `mousemove` — surlignage
+    /// hover, sans sélection tant que non cliquée.
+    hovered: Option<usize>,
+}
+
+/// Lignes visibles du popup `<select>` — le reste des
+/// options est tronqué (MVP, pas de défilement interne).
+const MAX_POPUP_ROWS: usize = 8;
 
 /// Transition en vol sur `(nœud, propriété)` — étape 45 :
 /// `from`/`to` sont les valeurs calculées textuelles
@@ -767,6 +794,7 @@ impl Session {
                 png: None,
                 focused: None,
                 hovered: None,
+                popup: None,
                 js: None,
                 images: ImageTable::new(),
                 linked_css: String::new(),
@@ -1210,6 +1238,19 @@ impl Session {
                     let delta = isize::try_from(d).unwrap_or(isize::MAX);
                     return Some(ScriptNav::Go(delta));
                 }
+                NavRequest::FormSubmit {
+                    method,
+                    action,
+                    enctype,
+                    fields,
+                } => {
+                    let base = self.tabs.get(&tab).and_then(|t| t.url.as_ref());
+                    if let Some(req) = base
+                        .and_then(|b| script_form_request(b, &method, &action, &enctype, &fields))
+                    {
+                        return Some(ScriptNav::Submit(req));
+                    }
+                }
             }
         }
         None
@@ -1254,6 +1295,9 @@ impl Session {
                     let mv: std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send + '_>> =
                         Box::pin(self.history_move(tab, d));
                     let _ = mv.await;
+                }
+                ScriptNav::Submit(req) => {
+                    let _ = self.navigate_request(tab, req, true).await;
                 }
             }
             applied = true;
@@ -2006,6 +2050,10 @@ impl Session {
             // nouveaux retombent sur `alt` jusqu'à la
             // prochaine navigation — borne documentée).
             entry.images.clear();
+            // Un re-parse de synchro rend obsolètes les
+            // options figées du popup `<select>` — il se
+            // referme (étape 54).
+            entry.popup = None;
             if entry.title != new_title {
                 entry.title.clone_from(&new_title);
                 if let Some(t) = new_title {
@@ -2144,7 +2192,12 @@ impl Session {
             return Err(CoreError::EmptyDocument);
         };
         let (vw, vh) = self.viewport;
-        let list = build_display_list_imaged(bx, vw, vh, entry.scroll_y, &entry.images);
+        let mut list = build_display_list_imaged(bx, vw, vh, entry.scroll_y, &entry.images);
+        // Popup `<select>` ouvert : overlay chrome peint en
+        // dernier — au-dessus de tout contenu (étape 54).
+        if let Some(pop) = &entry.popup {
+            append_select_popup(&mut list, pop, vw, entry.doc_h);
+        }
         let frame = rasterize(&list, &self.webfonts as &dyn FontSource, self.scale)
             .ok_or(CoreError::FrameTooBig)?;
         let png = frame.encode_png();
@@ -2177,18 +2230,21 @@ impl Session {
                 if self.dispatch_key(tab, "keydown") {
                     return Ok(InputOutcome::Ignored);
                 }
+                // Clavier du popup `<select>` ouvert : les
+                // flèches déplacent le surlignage, `Enter`
+                // choisit, `Escape` referme — consommé avant
+                // tout focus d'édition (étape 54).
+                if self.tabs.get(&tab).is_some_and(|e| e.popup.is_some()) {
+                    return self.popup_key(tab, &key);
+                }
                 // Soumission implicite : `Enter` dans un champ
-                // d'un `<form>` soumet comme le bouton par
-                // défaut (événement `submit` d'abord —
-                // `preventDefault` annule).
+                // d'un `<form>` suit la séquence `try_submit`
+                // complète — validation + `submit` + bouton
+                // par défaut comme `submitter` (HTML).
                 if key == "Enter" {
-                    if let Some(form) = self.focused_form(tab) {
+                    if let Some((form, sub)) = self.focused_form_default(tab) {
                         self.set_focus(tab, None);
-                        if !self.dispatch_dom_event(tab, "submit", form) {
-                            self.submit_form(tab, form, None).await?;
-                            return Ok(InputOutcome::Navigated);
-                        }
-                        return Ok(InputOutcome::Ignored);
+                        return self.try_submit(tab, form, sub, false).await;
                     }
                 }
                 self.handle_key(tab, &key)
@@ -2200,6 +2256,11 @@ impl Session {
             InputEvent::Scroll { dy } => {
                 // `wheel` (annulable) sur le nœud survolé ou le
                 // document — `preventDefault` bloque le scroll.
+                // Un popup `<select>` ouvert se referme au
+                // scroll (étape 54 — ancrage document).
+                if let Some(entry) = self.tabs.get_mut(&tab) {
+                    entry.popup = None;
+                }
                 if !self.dispatch_wheel(tab) {
                     self.scroll_by(tab, dy)?;
                     // `scroll` niveau document (non annulable).
@@ -2227,6 +2288,27 @@ impl Session {
         x: f32,
         y: f32,
     ) -> Result<InputOutcome, CoreError> {
+        // Popup `<select>` ouvert : le curseur pilote le
+        // surlignage de ligne — capture chrome, pas
+        // d'événements DOM vers le document (étape 54).
+        let pop_hit = self.tabs.get_mut(&tab).and_then(|entry| {
+            entry.popup.as_mut().map(|pop| {
+                let row = popup_row(pop, x, y + entry.scroll_y, self.viewport.0, entry.doc_h);
+                let changed = pop.hovered != row;
+                pop.hovered = row;
+                changed
+            })
+        });
+        if let Some(changed) = pop_hit {
+            if changed {
+                self.repaint(tab)?;
+                let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+            }
+            return Ok(InputOutcome::Hover {
+                url: None,
+                editable: false,
+            });
+        }
         let node = self.node_at(tab, x, y);
         let path = node.and_then(|n| {
             self.tabs
@@ -2268,6 +2350,12 @@ impl Session {
         x: f32,
         y: f32,
     ) -> Result<InputOutcome, CoreError> {
+        // Popup `<select>` ouvert : le clic est consommé par
+        // l'overlay chrome — choix d'option ou fermeture,
+        // sans `click` DOM sur le document (étape 54).
+        if let Some(out) = self.popup_click(tab, x, y)? {
+            return Ok(out);
+        }
         let node = self.node_at(tab, x, y);
         // Contrôle à bascule : activation AVANT `click`
         // (spec DOM — le handler lit `checked` post-bascule
@@ -2323,43 +2411,20 @@ impl Session {
             return Ok(InputOutcome::Focused);
         }
         self.set_focus(tab, None);
-        // `<select>` : cycle d'options — le sélecteur natif
-        // délégué UI est hors scope (ADR-0014).
+        // `<select>` : ouvre/ferme le popup options moteur
+        // (étape 54 — overlay de la display list, peint
+        // chrome-side, remplace le cycle MVP d'ADR-0014).
         if let Some(sel) = self.select_at(tab, x, y) {
-            {
-                let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
-                let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
-                cycle_select(dom, sel)?;
-            }
-            self.relayout(tab)?;
+            self.toggle_select_popup(tab, sel)?;
             let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
             return Ok(InputOutcome::Edited);
         }
-        // Contrôle submit : l'événement `submit` du formulaire
-        // part avant l'action par défaut. `form`/`sub` sont
-        // re-résolus après le dispatch — un handler peut
-        // re-parser le document (ids morts, chemins
-        // survivants).
+        // Contrôle submit : validation de contraintes puis
+        // événement `submit` puis action par défaut — la
+        // séquence est factorisée dans `try_submit` (partagée
+        // avec la soumission implicite `Enter`).
         if let Some((form, sub)) = self.submit_at(tab, x, y) {
-            let paths = {
-                let dom = self.tabs.get(&tab).and_then(|e| e.dom.as_ref());
-                (
-                    dom.and_then(|d| element_path(d, form)),
-                    dom.and_then(|d| element_path(d, sub)),
-                )
-            };
-            if !prevented && !self.dispatch_dom_event(tab, "submit", form) {
-                if self.drain_script_nav(tab).await {
-                    return Ok(InputOutcome::Navigated);
-                }
-                let f = self.resolve_path(tab, paths.0.as_deref());
-                let s = self.resolve_path(tab, paths.1.as_deref());
-                if let (Some(f), Some(s)) = (f, s) {
-                    self.submit_form(tab, f, Some(s)).await?;
-                    return Ok(InputOutcome::Navigated);
-                }
-            }
-            return Ok(InputOutcome::Ignored);
+            return self.try_submit(tab, form, Some(sub), prevented).await;
         }
         match self.link_at(tab, x, y) {
             Some(url) if !prevented => {
@@ -2397,6 +2462,70 @@ impl Session {
         select_control(dom, node)
     }
 
+    /// Ouvre/ferme le popup `<select>` (étape 54) — options
+    /// et boîte figées à l'ouverture ; le nœud ne survit pas
+    /// forcément, on ne garde que son chemin.
+    fn toggle_select_popup(&mut self, tab: TabId, sel: NodeId) -> Result<(), CoreError> {
+        {
+            let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            if entry.popup.is_some() {
+                entry.popup = None;
+                return self.repaint(tab);
+            }
+        }
+        let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        let (tree, dom) = (entry.tree.as_ref(), entry.dom.as_ref());
+        let (Some(tree), Some(dom)) = (tree, dom) else {
+            return Err(CoreError::EmptyDocument);
+        };
+        let Some(rect) = box_rect(tree, sel) else {
+            return Ok(());
+        };
+        let Some(path) = element_path(dom, sel) else {
+            return Ok(());
+        };
+        let options = descendant_elements(dom, sel, "option")
+            .into_iter()
+            .map(|o| {
+                let label =
+                    dom.attribute(o, "label").ok().flatten().unwrap_or_else(|| {
+                        dom.text_content(o).unwrap_or_default().trim().to_string()
+                    });
+                (label, dom.attribute(o, "selected").ok().flatten().is_some())
+            })
+            .collect();
+        let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        entry.popup = Some(SelectPopup {
+            path,
+            rect,
+            options,
+            row_h: rect.height.clamp(14.0, 32.0),
+            hovered: None,
+        });
+        self.repaint(tab)
+    }
+
+    /// Clic pendant qu'un popup `<select>` est ouvert — la
+    /// ligne choisie applique `selected`, `input`+`change`
+    /// partent, le popup se ferme ; un clic hors popup le
+    /// ferme simplement. `Some` = clic consommé.
+    fn popup_click(
+        &mut self,
+        tab: TabId,
+        x: f32,
+        y: f32,
+    ) -> Result<Option<InputOutcome>, CoreError> {
+        let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        let Some(pop) = &entry.popup else {
+            return Ok(None);
+        };
+        let row = popup_row(pop, x, y + entry.scroll_y, self.viewport.0, entry.doc_h);
+        let path = pop.path.clone();
+        // Consommé dans tous les cas : un clic hors popup le
+        // referme simplement (comportement natif).
+        self.popup_choose(tab, &path, row).map(Some)
+    }
+
     /// `(form, submitter)` sous `(x, y)` — un contrôle submit
     /// dans un `<form>`, `None` sinon.
     fn submit_at(&self, tab: TabId, x: f32, y: f32) -> Option<(NodeId, NodeId)> {
@@ -2408,17 +2537,162 @@ impl Session {
         Some((form, ctrl))
     }
 
-    /// `<form>` englobant le champ focalisé — la soumission
-    /// implicite sur `Enter` ne vaut que pour les `<input>`
-    /// mono-ligne (`<textarea>` garde son saut de ligne).
-    fn focused_form(&self, tab: TabId) -> Option<NodeId> {
+    /// `(form, bouton par défaut)` englobant le champ focalisé
+    /// — la soumission implicite sur `Enter` ne vaut que pour
+    /// les `<input>` mono-ligne (`<textarea>` garde son saut
+    /// de ligne). Le bouton par défaut est le premier contrôle
+    /// submit du formulaire (HTML §4.10.22.2).
+    fn focused_form_default(&self, tab: TabId) -> Option<(NodeId, Option<NodeId>)> {
         let entry = self.tabs.get(&tab)?;
         let dom = entry.dom.as_ref()?;
         let field = entry.focused.as_ref().and_then(|p| dom_path_node(dom, p))?;
         if !dom.tag_name(field).is_ok_and(|t| t == "input") {
             return None;
         }
-        enclosing_form(dom, field)
+        let form = enclosing_form(dom, field)?;
+        Some((form, default_button(dom, form)))
+    }
+
+    /// Touche pendant qu'un popup `<select>` est ouvert :
+    /// `ArrowDown`/`ArrowUp` déplacent le surlignage (borné),
+    /// `Enter` choisit la ligne surlignée, `Escape` referme —
+    /// toutes les autres se ferment sans choix.
+    fn popup_key(&mut self, tab: TabId, key: &str) -> Result<InputOutcome, CoreError> {
+        let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        let Some(pop) = &entry.popup else {
+            return Ok(InputOutcome::Ignored);
+        };
+        let rows = pop.options.len().min(MAX_POPUP_ROWS);
+        let path = pop.path.clone();
+        match key {
+            "ArrowDown" | "ArrowUp" => {
+                let next = match pop.hovered {
+                    Some(h) if key == "ArrowDown" => (h + 1).min(rows.saturating_sub(1)),
+                    Some(h) => h.saturating_sub(1),
+                    None if key == "ArrowDown" => 0,
+                    None => rows.saturating_sub(1),
+                };
+                let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+                if let Some(pop) = entry.popup.as_mut() {
+                    pop.hovered = Some(next);
+                }
+                self.repaint(tab)?;
+                let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+                Ok(InputOutcome::Edited)
+            }
+            "Enter" => {
+                let row = pop
+                    .hovered
+                    .or_else(|| pop.options.iter().position(|&(_, sel)| sel));
+                self.popup_choose(tab, &path, row)
+            }
+            _ => {
+                let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+                entry.popup = None;
+                self.repaint(tab)?;
+                let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+                Ok(InputOutcome::Ignored)
+            }
+        }
+    }
+
+    /// Choix `row` dans le popup `<select>` identifié par
+    /// `path` — ferme le popup, applique `selected`,
+    /// `input`+`change` (queue commune clic/clavier).
+    fn popup_choose(
+        &mut self,
+        tab: TabId,
+        path: &[(String, u32)],
+        row: Option<usize>,
+    ) -> Result<InputOutcome, CoreError> {
+        {
+            let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            entry.popup = None;
+        }
+        let sel = row.and_then(|_| self.resolve_path(tab, Some(path)));
+        if let (Some(sel), Some(idx)) = (sel, row) {
+            let opts = {
+                let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+                let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
+                choose_option(dom, sel, idx);
+                descendant_elements(dom, sel, "option")
+            };
+            // Le miroir JS reflète le nouveau `selected` — un
+            // handler `change` qui lit `option.selected` voit
+            // l'état post-choix (comme `flip_checked`).
+            for (i, &o) in opts.iter().enumerate() {
+                self.sync_mirror_attr(tab, o, "selected", (i == idx).then_some(""));
+            }
+            self.relayout(tab)?;
+            self.dispatch_path_event(tab, "input", path);
+            self.dispatch_path_event(tab, "change", path);
+        } else {
+            self.repaint(tab)?;
+        }
+        let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+        Ok(InputOutcome::Edited)
+    }
+
+    /// Séquence de soumission complète (HTML §4.10.22) —
+    /// validation de contraintes, événement `submit`,
+    /// action par défaut. Partagée entre le clic sur un
+    /// contrôle submit (`click_prevented` = `preventDefault`
+    /// du `click`) et la soumission implicite `Enter`
+    /// (`submitter` = bouton par défaut du formulaire).
+    ///
+    /// `novalidate` sur le `<form>` ou `formnovalidate` sur
+    /// le `submitter` sautent la validation (HTML).
+    async fn try_submit(
+        &mut self,
+        tab: TabId,
+        form: NodeId,
+        submitter: Option<NodeId>,
+        click_prevented: bool,
+    ) -> Result<InputOutcome, CoreError> {
+        let (form_path, sub_path, novalidate) = {
+            let dom = self.tabs.get(&tab).and_then(|e| e.dom.as_ref());
+            let nv = dom.is_some_and(|d| {
+                d.attribute(form, "novalidate").ok().flatten().is_some()
+                    || submitter
+                        .is_some_and(|s| d.attribute(s, "formnovalidate").ok().flatten().is_some())
+            });
+            (
+                dom.and_then(|d| element_path(d, form)),
+                dom.and_then(|d| submitter.and_then(|s| element_path(d, s))),
+                nv,
+            )
+        };
+        // Validation de contraintes (étape 54) : chaque
+        // contrôle candidat invalide reçoit `invalid`
+        // (non-annulable) puis la soumission est bloquée —
+        // `submit` ne part que si tout est valide.
+        if !click_prevented && !novalidate {
+            let invalid = {
+                let dom = self.tabs.get(&tab).and_then(|e| e.dom.as_ref());
+                dom.map(|d| invalid_controls(d, form)).unwrap_or_default()
+            };
+            if !invalid.is_empty() {
+                for &ctrl in &invalid {
+                    self.dispatch_dom_event(tab, "invalid", ctrl);
+                }
+                return Ok(InputOutcome::Ignored);
+            }
+        }
+        // `form`/`sub` sont re-résolus après le dispatch — un
+        // handler peut re-parser le document (ids morts,
+        // chemins survivants).
+        if !click_prevented && !self.dispatch_dom_event(tab, "submit", form) {
+            if self.drain_script_nav(tab).await {
+                return Ok(InputOutcome::Navigated);
+            }
+            let f = self.resolve_path(tab, form_path.as_deref());
+            let s = self.resolve_path(tab, sub_path.as_deref());
+            if let Some(f) = f {
+                self.submit_form(tab, f, s).await?;
+                return Ok(InputOutcome::Navigated);
+            }
+        }
+        Ok(InputOutcome::Ignored)
     }
 
     /// Soumission de formulaire (étape 38) : contrôles
@@ -2448,28 +2722,9 @@ impl Session {
                 .ok()
                 .flatten()
                 .unwrap_or_default();
-            if method.eq_ignore_ascii_case("post") {
-                let url = Url::resolve(base, &action).map_err(|e| CoreError::Url(e.to_string()))?;
-                Request {
-                    method: Method::Post,
-                    url,
-                    headers: vec![(
-                        "content-type".to_string(),
-                        "application/x-www-form-urlencoded".to_string(),
-                    )],
-                    body: Some(form_url_encode(&pairs).into_bytes()),
-                }
-            } else {
-                let qs = form_url_encode(&pairs);
-                let target = if qs.is_empty() {
-                    action
-                } else {
-                    let sep = if action.contains('?') { '&' } else { '?' };
-                    format!("{action}{sep}{qs}")
-                };
-                let url = Url::resolve(base, &target).map_err(|e| CoreError::Url(e.to_string()))?;
-                Request::get(url)
-            }
+            let enctype = attr_lower(dom, form, "enctype");
+            form_request(base, &action, &method, &enctype, &pairs)
+                .ok_or_else(|| CoreError::Url("action de formulaire irrésolvable".to_string()))?
         };
         match self.navigate_request(tab, req, true).await {
             Ok(_) => {
@@ -3358,6 +3613,36 @@ fn enclosing_form(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
     }
 }
 
+/// Bouton par défaut du formulaire (HTML §4.10.22.2) : le
+/// premier contrôle submit en ordre d'arbre —
+/// `input[type=submit|image]` ou `<button>` non `disabled`
+/// (type absent ≙ `submit`).
+fn default_button(dom: &Dom, form: NodeId) -> Option<NodeId> {
+    let mut queue = vec![form];
+    while let Some(n) = queue.pop() {
+        let tag = dom.tag_name(n).unwrap_or("");
+        if n != form
+            && dom.element(n).is_ok()
+            && dom.attribute(n, "disabled").ok().flatten().is_none()
+        {
+            let is_submit = match tag {
+                "input" => matches!(attr_lower(dom, n, "type").as_str(), "submit" | "image"),
+                "button" => !matches!(attr_lower(dom, n, "type").as_str(), "button" | "reset"),
+                _ => false,
+            };
+            if is_submit {
+                return Some(n);
+            }
+        }
+        if n == form || tag != "form" {
+            if let Ok(ch) = dom.children(n) {
+                queue.extend(ch.iter().rev());
+            }
+        }
+    }
+    None
+}
+
 /// Contrôle de soumission le plus proche (soi ou ancêtre) :
 /// `<button>` sans `type="button|reset"` (défaut HTML =
 /// submit) ou `<input type="submit|image">`.
@@ -3518,27 +3803,335 @@ fn toggle_checked(dom: &mut Dom, ctrl: NodeId) -> Result<(), DomError> {
     Ok(())
 }
 
-/// Cycle `<select>` : `selected` passe à l'option suivante
-/// (retour au début en fin de liste) — sélection native
-/// déléguée UI hors scope MVP (ADR-0014).
-fn cycle_select(dom: &mut Dom, sel: NodeId) -> Result<(), DomError> {
-    let opts = descendant_elements(dom, sel, "option");
-    if opts.is_empty() {
-        return Ok(());
+/// Rectangle du popup ouvert (coords document) : sous le
+/// contrôle, basculé au-dessus quand il déborderait la page.
+fn popup_rect(pop: &SelectPopup, vw: f32, doc_h: f32) -> Rect {
+    // ≤ `MAX_POPUP_ROWS` lignes — la conversion est exacte.
+    #[allow(clippy::cast_precision_loss)]
+    let rows = pop.options.len().min(MAX_POPUP_ROWS) as f32;
+    let w = pop.rect.width.max(140.0).min(vw.max(1.0));
+    let x = pop.rect.x.clamp(0.0, (vw - w).max(0.0));
+    let h = pop.row_h * rows;
+    let below = pop.rect.y + pop.rect.height;
+    let y = if below + h <= doc_h {
+        below
+    } else {
+        (pop.rect.y - h).max(0.0)
+    };
+    Rect {
+        x,
+        y,
+        width: w,
+        height: h,
     }
-    let cur = opts
-        .iter()
-        .position(|&o| dom.attribute(o, "selected").ok().flatten().is_some())
-        .unwrap_or(0);
-    let next = (cur + 1) % opts.len();
-    for (i, &o) in opts.iter().enumerate() {
-        if i == next {
-            dom.set_attribute(o, "selected", "")?;
+}
+
+/// Ligne du popup sous `(x, doc_y)` — `None` hors du
+/// rectangle du popup.
+fn popup_row(pop: &SelectPopup, x: f32, doc_y: f32, vw: f32, doc_h: f32) -> Option<usize> {
+    let r = popup_rect(pop, vw, doc_h);
+    if !point_in(&r, x, doc_y) {
+        return None;
+    }
+    // `point_in` garantit `doc_y - r.y ∈ [0, height]` — la
+    // troncature est le numéro de ligne attendu.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let idx = ((doc_y - r.y) / pop.row_h) as usize;
+    (idx < pop.options.len().min(MAX_POPUP_ROWS)).then_some(idx)
+}
+
+/// Point `(x, y)` dans `rect` (bornes incluses).
+fn point_in(r: &Rect, x: f32, y: f32) -> bool {
+    x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height
+}
+
+/// Boîte posée de `node` — descente récursive de l'arbre de
+/// layout (chaque `LayoutBox` garde son `NodeId` source).
+fn box_rect(bx: &LayoutBox, node: NodeId) -> Option<Rect> {
+    if bx.node == Some(node) {
+        return Some(bx.rect);
+    }
+    bx.children.iter().find_map(|c| box_rect(c, node))
+}
+
+/// Options du `<select>` : `selected` sur l'index choisi,
+/// retiré des autres (radio-like).
+fn choose_option(dom: &mut Dom, sel: NodeId, idx: usize) {
+    for (i, o) in descendant_elements(dom, sel, "option")
+        .into_iter()
+        .enumerate()
+    {
+        if i == idx {
+            let _ = dom.set_attribute(o, "selected", "");
         } else {
-            dom.remove_attribute(o, "selected")?;
+            let _ = dom.remove_attribute(o, "selected");
         }
     }
-    Ok(())
+}
+
+/// Overlay du popup `<select>` en fin de display list —
+/// fond opaque + bordure, lignes `Placeholder` (étiquette
+/// rendue), ligne sélectionnée ou survolée teintée.
+fn append_select_popup(list: &mut DisplayList, pop: &SelectPopup, vw: f32, doc_h: f32) {
+    if pop.options.is_empty() {
+        return;
+    }
+    let rect = popup_rect(pop, vw, doc_h);
+    let white = Color {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+    let edge = Color {
+        r: 118,
+        g: 118,
+        b: 118,
+        a: 255,
+    };
+    let sel_bg = Color {
+        r: 30,
+        g: 106,
+        b: 219,
+        a: 255,
+    };
+    let hov_bg = Color {
+        r: 222,
+        g: 235,
+        b: 255,
+        a: 255,
+    };
+    list.items
+        .push(DisplayItem::FillRect { rect, color: white });
+    list.items.push(DisplayItem::Border {
+        rect,
+        widths: [1.0; 4],
+        colors: [edge; 4],
+        styles: [BorderStyle::Solid; 4],
+    });
+    for (i, (label, selected)) in pop.options.iter().take(MAX_POPUP_ROWS).enumerate() {
+        // `i < MAX_POPUP_ROWS` — conversion exacte.
+        #[allow(clippy::cast_precision_loss)]
+        let row = Rect {
+            x: rect.x,
+            y: rect.y + i as f32 * pop.row_h,
+            width: rect.width,
+            height: pop.row_h,
+        };
+        if *selected {
+            list.items.push(DisplayItem::FillRect {
+                rect: row,
+                color: sel_bg,
+            });
+        } else if pop.hovered == Some(i) {
+            list.items.push(DisplayItem::FillRect {
+                rect: row,
+                color: hov_bg,
+            });
+        }
+        list.items.push(DisplayItem::Placeholder {
+            rect: row,
+            label: label.clone(),
+        });
+    }
+}
+
+/// Attribut interne transportant `setCustomValidity()` du
+/// miroir JS vers le DOM réel via la synchro : le miroir le
+/// pose en `data-explorer-cv` (visible dans `outerHTML` —
+/// déviation documentée ADR-0014), le moteur le lit ici.
+const CUSTOM_VALIDITY_ATTR: &str = "data-explorer-cv";
+
+/// Contrôles du formulaire qui échouent la validation de
+/// contraintes (étape 54 — HTML §4.10.21.2) : `required`,
+/// `minlength`, `maxlength`, `pattern`, `min`/`max`/`step`
+/// (types numériques + `date`-like MVP = non validés,
+/// déviation) et la validité custom posée par
+/// `setCustomValidity`. Les non-candidats (`disabled`,
+/// `readonly` sur un champ non textuel, boutons, `type=hidden`)
+/// ne valident jamais.
+fn invalid_controls(dom: &Dom, form: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let mut queue = vec![form];
+    while let Some(n) = queue.pop() {
+        let tag = dom.tag_name(n).unwrap_or("");
+        if n != form
+            && dom.element(n).is_ok()
+            && is_control_candidate(dom, n, tag)
+            && control_invalid_reason(dom, n, tag).is_some()
+        {
+            out.push(n);
+        }
+        if n == form || tag != "form" {
+            if let Ok(ch) = dom.children(n) {
+                queue.extend(ch.iter().rev());
+            }
+        }
+    }
+    out
+}
+
+/// `willValidate` du contrôle : `disabled`, boutons et
+/// `type=hidden`/`submit`-like exclus (HTML §4.10.21.2 —
+/// `barred from constraint validation`).
+fn is_control_candidate(dom: &Dom, n: NodeId, tag: &str) -> bool {
+    if dom.attribute(n, "disabled").ok().flatten().is_some() {
+        return false;
+    }
+    match tag {
+        "input" => {
+            let ty = attr_lower(dom, n, "type");
+            !matches!(
+                ty.as_str(),
+                "hidden" | "submit" | "image" | "reset" | "button" | "file"
+            )
+        }
+        "textarea" | "select" => true,
+        _ => false,
+    }
+}
+
+/// Première raison d'invalidité du contrôle — `None` si
+/// valide. L'ordre suit HTML : custom, required, longueurs,
+/// pattern, bornes numériques, pas (`step`).
+fn control_invalid_reason(dom: &Dom, n: NodeId, tag: &str) -> Option<&'static str> {
+    if dom
+        .attribute(n, CUSTOM_VALIDITY_ATTR)
+        .ok()
+        .flatten()
+        .is_some_and(|m| !m.is_empty())
+    {
+        return Some("customError");
+    }
+    let (value, empty_required) = match tag {
+        "input" => {
+            let ty = attr_lower(dom, n, "type");
+            match ty.as_str() {
+                "checkbox" => (
+                    String::new(),
+                    dom.attribute(n, "checked").ok().flatten().is_none(),
+                ),
+                "radio" => (String::new(), !radio_group_checked(dom, n)),
+                _ => (
+                    input_value(dom, n, &ty),
+                    input_value(dom, n, &ty).is_empty(),
+                ),
+            }
+        }
+        "textarea" => {
+            let v = dom.text_content(n).unwrap_or_default();
+            let e = v.is_empty();
+            (v, e)
+        }
+        "select" => {
+            // Invalide seulement si `required` et que
+            // l'option choisie porte une valeur vide
+            // (placeholder label option).
+            let v = select_value(dom, n);
+            let e = v.is_empty();
+            (v, e)
+        }
+        _ => (String::new(), false),
+    };
+    if dom.attribute(n, "required").ok().flatten().is_some() && empty_required {
+        return Some("valueMissing");
+    }
+    // Longueurs + pattern : champs textuels seulement —
+    // `readonly` excepté pour required (HTML).
+    let textual = tag == "textarea"
+        || matches!(
+            attr_lower(dom, n, "type").as_str(),
+            "" | "text" | "search" | "tel" | "url" | "email" | "password"
+        );
+    if textual {
+        let len = value.chars().count();
+        if let Ok(min) = attr_lower(dom, n, "minlength").parse::<usize>() {
+            if len < min && !value.is_empty() {
+                return Some("tooShort");
+            }
+        }
+        if let Ok(max) = attr_lower(dom, n, "maxlength").parse::<usize>() {
+            if len > max {
+                return Some("tooLong");
+            }
+        }
+        if let Some(pat) = dom.attribute(n, "pattern").ok().flatten() {
+            if !value.is_empty() && !pattern_full_match(&pat, &value) {
+                return Some("patternMismatch");
+            }
+        }
+    }
+    // Bornes + pas numériques : `number`, `range` (toujours
+    // borné), et les types à valeur `f64` parseable.
+    if matches!(attr_lower(dom, n, "type").as_str(), "number" | "range") {
+        if let Ok(v) = value.trim().parse::<f64>() {
+            if let Some(min) = attr_opt(dom, n, "min").and_then(|m| m.parse::<f64>().ok()) {
+                if v < min {
+                    return Some("rangeUnderflow");
+                }
+            }
+            if let Some(max) = attr_opt(dom, n, "max").and_then(|m| m.parse::<f64>().ok()) {
+                if v > max {
+                    return Some("rangeOverflow");
+                }
+            }
+            // `step` : `(v - min) % step == 0`, base = `min`
+            // sinon 0 (défaut `step=1`).
+            let step = attr_opt(dom, n, "step").and_then(|s| s.parse::<f64>().ok());
+            if let Some(step) = step.filter(|s| *s > 0.0) {
+                let base = attr_opt(dom, n, "min")
+                    .and_then(|m| m.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                let rem = ((v - base) / step).fract();
+                if rem.abs() > 1e-9 && (rem.abs() - 1.0).abs() > 1e-9 {
+                    return Some("stepMismatch");
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Un `<input type=radio>` du même groupe (même `name`,
+/// même formulaire) est coché — `required` est satisfait
+/// au niveau du groupe (HTML).
+fn radio_group_checked(dom: &Dom, n: NodeId) -> bool {
+    let Some(name) = attr_opt(dom, n, "name") else {
+        return dom.attribute(n, "checked").ok().flatten().is_some();
+    };
+    // Ancêtre `<form>` le plus proche, sinon la racine du
+    // document (un groupe hors formulaire reste groupé).
+    let mut scope = n;
+    while let Ok(Some(p)) = dom.parent(scope) {
+        if dom.tag_name(p) == Ok("form") {
+            scope = p;
+            break;
+        }
+        scope = p;
+    }
+    descendant_elements(dom, scope, "input").iter().any(|&r| {
+        attr_lower(dom, r, "type") == "radio"
+            && attr_opt(dom, r, "name").as_deref() == Some(name.as_str())
+            && dom.attribute(r, "checked").ok().flatten().is_some()
+    })
+}
+
+/// `pattern` HTML : correspondance **entière** (la spec
+/// enveloppe en `^(?:…)$`). Un pattern qui ne compile pas
+/// ne contraint pas (HTML) — `regex` ne couvre pas tout le
+/// dialecte JS (lookahead…) : déviation documentée.
+fn pattern_full_match(pat: &str, value: &str) -> bool {
+    regex::Regex::new(&format!("^(?:{pat})$")).is_ok_and(|re| re.is_match(value))
+}
+
+/// Attribut en minuscules, `""` si absent.
+fn attr_lower(dom: &Dom, n: NodeId, attr: &str) -> String {
+    attr_opt(dom, n, attr).unwrap_or_default().to_lowercase()
+}
+
+/// Attribut ou `None`.
+fn attr_opt(dom: &Dom, n: NodeId, attr: &str) -> Option<String> {
+    dom.attribute(n, attr).ok().flatten()
 }
 
 /// Éléments descendants portant `tag`, ordre document.
@@ -3557,11 +4150,24 @@ fn descendant_elements(dom: &Dom, root: NodeId, tag: &str) -> Vec<NodeId> {
 }
 
 /// `(name, value)` des contrôles successful du formulaire
-/// (HTML §4.10.21) : nommés, non `disabled`, cases cochées
-/// seulement, boutons uniquement le `submitter`. Déviations
-/// MVP : `form=` externe, `<fieldset disabled>` et
-/// `<object>` non traités.
-fn collect_form_data(dom: &Dom, form: NodeId, submitter: Option<NodeId>) -> Vec<(String, String)> {
+/// Champ sérialisable d'un formulaire (étape 54 —
+/// `multipart/form-data` exige de distinguer les fichiers
+/// des valeurs texte).
+enum FormEntry {
+    /// `(name, value)` — contrôle textuel.
+    Text(String, String),
+    /// `(name, filename, bytes)` — `input[type=file]` : le
+    /// nom de fichier vient de l'attribut `value` (aucun
+    /// sélecteur de fichier réel — déviation ADR-0014), un
+    /// champ non choisi émet un fichier vide (HTML).
+    File(String, String, Vec<u8>),
+}
+
+/// Champs « successful » du formulaire (HTML §4.10.21) :
+/// nommés, non `disabled`, cases cochées seulement, boutons
+/// uniquement le `submitter`. Déviations MVP : `form=`
+/// externe, `<fieldset disabled>` et `<object>` non traités.
+fn collect_form_data(dom: &Dom, form: NodeId, submitter: Option<NodeId>) -> Vec<FormEntry> {
     let mut out = Vec::new();
     let mut queue = vec![form];
     while let Some(n) = queue.pop() {
@@ -3572,21 +4178,25 @@ fn collect_form_data(dom: &Dom, form: NodeId, submitter: Option<NodeId>) -> Vec<
         {
             match tag {
                 "input" => {
-                    let ty = dom
-                        .attribute(n, "type")
-                        .ok()
-                        .flatten()
-                        .unwrap_or_default()
-                        .to_lowercase();
-                    let ok = match ty.as_str() {
+                    let ty = attr_lower(dom, n, "type");
+                    match ty.as_str() {
                         "checkbox" | "radio" => {
-                            dom.attribute(n, "checked").ok().flatten().is_some()
+                            if dom.attribute(n, "checked").ok().flatten().is_some() {
+                                push_named(dom, n, input_value(dom, n, &ty), &mut out);
+                            }
                         }
-                        "submit" | "image" | "button" | "reset" => Some(n) == submitter,
-                        _ => true,
-                    };
-                    if ok {
-                        push_named(dom, n, input_value(dom, n, &ty), &mut out);
+                        "submit" | "image" | "button" | "reset" => {
+                            if Some(n) == submitter {
+                                push_named(dom, n, input_value(dom, n, &ty), &mut out);
+                            }
+                        }
+                        "file" => {
+                            if let Some(name) = attr_opt(dom, n, "name").filter(|s| !s.is_empty()) {
+                                let filename = attr_opt(dom, n, "value").unwrap_or_default();
+                                out.push(FormEntry::File(name, filename, Vec::new()));
+                            }
+                        }
+                        _ => push_named(dom, n, input_value(dom, n, &ty), &mut out),
                     }
                 }
                 "textarea" => {
@@ -3620,12 +4230,10 @@ fn collect_form_data(dom: &Dom, form: NodeId, submitter: Option<NodeId>) -> Vec<
     out
 }
 
-/// Pousse `(name, value)` si le contrôle est nommé.
-fn push_named(dom: &Dom, n: NodeId, value: String, out: &mut Vec<(String, String)>) {
-    if let Ok(Some(name)) = dom.attribute(n, "name") {
-        if !name.is_empty() {
-            out.push((name, value));
-        }
+/// Pousse `Text(name, value)` si le contrôle est nommé.
+fn push_named(dom: &Dom, n: NodeId, value: String, out: &mut Vec<FormEntry>) {
+    if let Some(name) = attr_opt(dom, n, "name").filter(|s| !s.is_empty()) {
+        out.push(FormEntry::Text(name, value));
     }
 }
 
@@ -3659,7 +4267,10 @@ fn select_value(dom: &Dom, sel: NodeId) -> String {
 
 /// Encodage `application/x-www-form-urlencoded` : espace→`+`,
 /// non-réservés conservés, le reste en `%XX`.
-fn form_url_encode(pairs: &[(String, String)]) -> String {
+/// Encodage `application/x-www-form-urlencoded` : espace→`+`,
+/// non-réservés conservés, le reste en `%XX`. Un `File` y
+/// porte son nom de fichier (HTML).
+fn form_url_encode(entries: &[FormEntry]) -> String {
     fn enc(s: &str) -> String {
         s.bytes()
             .map(|b| match b {
@@ -3671,11 +4282,132 @@ fn form_url_encode(pairs: &[(String, String)]) -> String {
             })
             .collect()
     }
-    pairs
+    entries
         .iter()
-        .map(|(k, v)| format!("{}={}", enc(k), enc(v)))
+        .map(|e| {
+            let (k, v) = match e {
+                FormEntry::Text(k, v) => (k, v),
+                FormEntry::File(k, f, _) => (k, f),
+            };
+            format!("{}={}", enc(k), enc(v))
+        })
         .collect::<Vec<_>>()
         .join("&")
+}
+
+/// Corps `multipart/form-data` (RFC 7578 / HTML §4.10.21.6) :
+/// chaque entrée est une partie `Content-Disposition:
+/// form-data`, les fichiers portent `filename=` +
+/// `Content-Type: application/octet-stream` (MIME réelle
+/// indisponible sans picker — déviation documentée).
+fn form_multipart_encode(entries: &[FormEntry], boundary: &str) -> Vec<u8> {
+    fn esc(s: &str) -> String {
+        s.replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace(['\r', '\n'], "")
+    }
+    let mut body = Vec::new();
+    for e in entries {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        match e {
+            FormEntry::Text(name, value) => {
+                body.extend_from_slice(
+                    format!(
+                        "Content-Disposition: form-data; name=\"{}\"\r\n\r\n",
+                        esc(name)
+                    )
+                    .as_bytes(),
+                );
+                body.extend_from_slice(value.as_bytes());
+            }
+            FormEntry::File(name, filename, bytes) => {
+                body.extend_from_slice(
+                    format!(
+                        "Content-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\n\
+                         Content-Type: application/octet-stream\r\n\r\n",
+                        esc(name),
+                        esc(filename)
+                    )
+                    .as_bytes(),
+                );
+                body.extend_from_slice(bytes);
+            }
+        }
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    body
+}
+
+/// Requête de soumission (HTML §4.10.21.7) partagée entre
+/// `submit_form` (DOM réel) et `NavRequest::FormSubmit`
+/// (miroir) : `POST` selon `enctype` (`multipart/form-data`
+/// ou `urlencoded` — `text/plain` retombe sur urlencoded,
+/// déviation ADR-0014), sinon `GET` en query.
+fn form_request(
+    base: &Url,
+    action: &str,
+    method: &str,
+    enctype: &str,
+    entries: &[FormEntry],
+) -> Option<Request> {
+    if method.eq_ignore_ascii_case("post") {
+        let url = Url::resolve(base, action).ok()?;
+        let (content_type, body) = if enctype.eq_ignore_ascii_case("multipart/form-data") {
+            let boundary = multipart_boundary();
+            (
+                format!("multipart/form-data; boundary={boundary}"),
+                form_multipart_encode(entries, &boundary),
+            )
+        } else {
+            (
+                "application/x-www-form-urlencoded".to_string(),
+                form_url_encode(entries).into_bytes(),
+            )
+        };
+        return Some(Request {
+            method: Method::Post,
+            url,
+            headers: vec![("content-type".to_string(), content_type)],
+            body: Some(body),
+        });
+    }
+    let qs = form_url_encode(entries);
+    let target = if qs.is_empty() {
+        action.to_string()
+    } else {
+        let sep = if action.contains('?') { '&' } else { '?' };
+        format!("{action}{sep}{qs}")
+    };
+    Some(Request::get(Url::resolve(base, &target).ok()?))
+}
+
+/// Requête d'un `NavRequest::FormSubmit` — les champs sont
+/// déjà collectés côté miroir en `(name, value)` plats
+/// (les fichiers y portent leur nom de fichier).
+fn script_form_request(
+    base: &Url,
+    method: &str,
+    action: &str,
+    enctype: &str,
+    fields: &[(String, String)],
+) -> Option<Request> {
+    let entries: Vec<FormEntry> = fields
+        .iter()
+        .map(|(n, v)| FormEntry::Text(n.clone(), v.clone()))
+        .collect();
+    form_request(base, action, method, enctype, &entries)
+}
+
+/// Frontière multipart pseudo-unique : 96 bits d'horloge +
+/// compteur de process — suffisant sans dépendance `rand`,
+/// le contenu qui la contiendrait la verrait invalide (RFC
+/// recommande de vérifier, MVP documenté).
+fn multipart_boundary() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    format!("----ExplorerFormBoundary{nanos:032x}")
 }
 
 /// Intention de navigation script résolue — produite par
@@ -3687,6 +4419,9 @@ enum ScriptNav {
     /// `history.go/back/forward` : déplacement relatif
     /// (0 = rechargement de l'entrée courante).
     Go(isize),
+    /// `form.submit()`/`requestSubmit()` : requête déjà
+    /// construite (méthode + corps + en-têtes — étape 54).
+    Submit(Request),
 }
 
 /// Fenêtre de sniffing `<meta charset>` — même borne que

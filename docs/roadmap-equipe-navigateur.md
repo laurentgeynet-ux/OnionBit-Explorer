@@ -170,11 +170,28 @@ incrémental) ou un cadencement temporel seul.
   atteinte) au lieu d'échouer la réponse. Tolérance rustls
   documentée — cas fréquent chez les vieux serveurs/CDN.
 
-- [ ] **Étape 54. Formulaires v2 — côté produit** (ex-55, moitié
+- [x] **Étape 54. Formulaires v2 — côté produit** (ex-55, moitié
   session) : `multipart/form-data`, états `:valid`/`:invalid`
   exposés aux events, popup `<select>` via widget natif Flutter
   (arbitrage : rendu moteur ↔ PIPE ou widget app — décider en
   début d'étape).
+  **Fait** : arbitrage tranché — popup `<select>` **rendu
+  moteur** (overlay chrome peint en fin de display list, aucun
+  contrat Flutter ajouté — ADR-0014 révisée) : options figées
+  à l'ouverture, select retenu par chemin `(tag,index)`,
+  clavier `Arrow↑/↓`/`Enter`/`Escape`, clic hors popup =
+  fermeture consommée. Validation de contraintes HTML
+  (`required`, `min/maxlength`, `pattern`, `min`/`max`/`step`)
+  avant tout submit — `invalid` dispatché, `novalidate`/
+  `formnovalidate` honorés, bouton par défaut = `submitter`
+  de la soumission implicite `Enter`. Côté JS : `validity`,
+  `validationMessage`, `willValidate`, `checkValidity`,
+  `reportValidity`, `setCustomValidity` (canal miroir→DOM par
+  `data-explorer-cv`), `form.submit()`/`requestSubmit()` via
+  `NavRequest::FormSubmit`. `enctype=multipart/form-data` +
+  entrée `File` (fichier vide — pas de picker). `:valid`/
+  `:invalid` CSS → besoin consigné `interface-equipes.md`
+  (PIPE). 20 tests (session + dom).
 
 ### Palier N-B — Produit, profil, release
 

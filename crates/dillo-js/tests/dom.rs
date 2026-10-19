@@ -1116,3 +1116,240 @@ fn mutation_observer_survives_gc() {
         Err(err) => panic!("probe -> {err}"),
     }
 }
+
+// -- constraint validation (étape 54) -----------------------------------
+
+const FORM_PAGE: &str = r#"
+<html><body>
+<form id="f" action="/go">
+<input id="q" name="q" required>
+<input id="n" type="number" name="n" min="1" max="10" value="42">
+<input id="p" name="p" pattern="[0-9]+" value="abc">
+<input id="ok" name="ok" value="fine">
+</form>
+</body></html>
+"#;
+
+#[test]
+fn validity_flags_on_invalid_controls() {
+    assert_eq!(
+        ev_in(
+            FORM_PAGE,
+            "document.getElementById('q').validity.valueMissing"
+        ),
+        "true"
+    );
+    assert_eq!(
+        ev_in(
+            FORM_PAGE,
+            "document.getElementById('n').validity.rangeOverflow"
+        ),
+        "true"
+    );
+    assert_eq!(
+        ev_in(
+            FORM_PAGE,
+            "document.getElementById('p').validity.patternMismatch"
+        ),
+        "true"
+    );
+    assert_eq!(
+        ev_in(FORM_PAGE, "document.getElementById('ok').validity.valid"),
+        "true"
+    );
+}
+
+#[test]
+fn check_validity_and_will_validate() {
+    assert_eq!(
+        ev_in(FORM_PAGE, "document.getElementById('f').checkValidity()"),
+        "false"
+    );
+    assert_eq!(
+        ev_in(FORM_PAGE, "document.getElementById('ok').checkValidity()"),
+        "true"
+    );
+    assert_eq!(
+        ev_in(FORM_PAGE, "document.getElementById('q').willValidate"),
+        "true"
+    );
+    // `disabled` ne valide jamais.
+    assert_eq!(
+        ev_in(
+            FORM_PAGE,
+            "document.getElementById('q').disabled = true;\
+             document.getElementById('q').willValidate"
+        ),
+        "false"
+    );
+}
+
+#[test]
+fn custom_validity_and_message() {
+    assert_eq!(
+        ev_in(
+            FORM_PAGE,
+            "var i = document.getElementById('ok');\
+             i.setCustomValidity('nope');\
+             i.validationMessage"
+        ),
+        "nope"
+    );
+    assert_eq!(
+        ev_in(
+            FORM_PAGE,
+            "var i = document.getElementById('ok');\
+             i.setCustomValidity('nope');\
+             i.validity.customError"
+        ),
+        "true"
+    );
+    assert_eq!(
+        ev_in(
+            FORM_PAGE,
+            "var i = document.getElementById('ok');\
+             i.setCustomValidity('nope'); i.setCustomValidity('');\
+             i.validity.valid"
+        ),
+        "true"
+    );
+    // L'état transite par l'attribut interne (canal miroir→moteur).
+    assert_eq!(
+        ev_in(
+            FORM_PAGE,
+            "var i = document.getElementById('ok');\
+             i.setCustomValidity('nope');\
+             i.getAttribute('data-explorer-cv')"
+        ),
+        "nope"
+    );
+}
+
+#[test]
+fn invalid_event_fires_on_failed_check() {
+    assert_eq!(
+        ev_in(
+            FORM_PAGE,
+            "var hits = 0;\
+             document.getElementById('q').addEventListener('invalid', function(){hits++});\
+             document.getElementById('f').checkValidity();\
+             hits"
+        ),
+        "1"
+    );
+}
+
+#[test]
+fn report_validity_returns_bool() {
+    assert_eq!(
+        ev_in(FORM_PAGE, "document.getElementById('f').reportValidity()"),
+        "false"
+    );
+    assert_eq!(
+        ev_in(FORM_PAGE, "document.getElementById('ok').reportValidity()"),
+        "true"
+    );
+}
+
+#[test]
+fn minlength_maxlength_step_and_radio_group() {
+    const P: &str = r#"<html><body><form id="f">
+    <input id="s" minlength="3" value="xy">
+    <input id="l" maxlength="2" value="abcd">
+    <input id="st" type="number" min="0" step="2" value="3">
+    <input id="r1" type="radio" name="g" required>
+    <input id="r2" type="radio" name="g">
+    </form></body></html>"#;
+    assert_eq!(
+        ev_in(P, "document.getElementById('s').validity.tooShort"),
+        "true"
+    );
+    assert_eq!(
+        ev_in(P, "document.getElementById('l').validity.tooLong"),
+        "true"
+    );
+    assert_eq!(
+        ev_in(P, "document.getElementById('st').validity.stepMismatch"),
+        "true"
+    );
+    // `required` radio : le groupe entier est en échec tant
+    // qu'aucun n'est coché, valide dès que l'un l'est.
+    assert_eq!(
+        ev_in(P, "document.getElementById('r1').validity.valueMissing"),
+        "true"
+    );
+    assert_eq!(
+        ev_in(
+            P,
+            "document.getElementById('r2').checked = true;\
+             document.getElementById('r1').validity.valid"
+        ),
+        "true"
+    );
+}
+
+#[test]
+fn form_submit_calls_hook_without_event() {
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let mut e = engine_with(FORM_PAGE);
+    {
+        let c = calls.clone();
+        e.set_form_submit_hook(Rc::new(move |p: dillo_js::FormSubmit| {
+            c.borrow_mut().push(p);
+        }));
+    }
+    // `submit()` : pas d'événement `submit` (spec), appel
+    // direct du hook avec les champs.
+    e.eval(
+        "var hits = 0;\
+         document.getElementById('f').addEventListener('submit', function(){hits++});\
+         document.getElementById('f').submit();",
+    )
+    .unwrap_or_else(|err| panic!("submit -> {err}"));
+    assert_eq!(calls.borrow().len(), 1);
+    assert_eq!(e.eval("hits").map(|v| e.describe(v)).unwrap(), "0");
+    let p = calls.borrow()[0].clone();
+    assert_eq!(p.action, "/go");
+    assert!(p.fields.iter().any(|(n, _)| n == "q"));
+}
+
+#[test]
+fn request_submit_fires_event_then_hook() {
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let mut e = engine_with(FORM_PAGE);
+    {
+        let c = calls.clone();
+        e.set_form_submit_hook(Rc::new(move |p: dillo_js::FormSubmit| {
+            c.borrow_mut().push(p);
+        }));
+    }
+    // Formulaire invalide (required vide) → `invalid` part,
+    // aucune soumission.
+    e.eval(
+        "var inv = 0;\
+         document.getElementById('q').addEventListener('invalid', function(){inv++});\
+         document.getElementById('f').requestSubmit();",
+    )
+    .unwrap_or_else(|err| panic!("requestSubmit -> {err}"));
+    assert!(calls.borrow().is_empty());
+    assert_eq!(e.eval("inv").map(|v| e.describe(v)).unwrap(), "1");
+    // Formulaire rendu valide + `submit` non annulé → hook.
+    e.eval(
+        "var sub = 0;\
+         document.getElementById('f').addEventListener('submit', function(){sub++});\
+         document.getElementById('q').value = 'x';\
+         document.getElementById('n').value = '5';\
+         document.getElementById('p').value = '42';\
+         document.getElementById('f').requestSubmit();",
+    )
+    .unwrap_or_else(|err| panic!("requestSubmit2 -> {err}"));
+    assert_eq!(e.eval("sub").map(|v| e.describe(v)).unwrap(), "1");
+    assert_eq!(calls.borrow().len(), 1);
+    // `preventDefault` bloque la soumission.
+    e.eval(
+        "document.getElementById('f').addEventListener('submit', function(ev){ev.preventDefault()});\
+         document.getElementById('f').requestSubmit();",
+    )
+    .unwrap_or_else(|err| panic!("requestSubmit3 -> {err}"));
+    assert_eq!(calls.borrow().len(), 1);
+}

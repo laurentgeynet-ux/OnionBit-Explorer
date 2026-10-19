@@ -41,6 +41,25 @@ pub type HistHook = Rc<dyn Fn(i32)>;
 /// `prompt(msg, default)` → user text (`None` = cancel → `null`).
 pub type PromptHook = Rc<dyn Fn(String, String) -> Option<String>>;
 
+/// Soumission de formulaire émise par `form.submit()` /
+/// `requestSubmit()` (étape 54) — l'embedder résout `action`
+/// contre l'URL de page, choisit le transport (`method`,
+/// `enctype`) et encode `fields`.
+#[derive(Debug, Clone)]
+pub struct FormSubmit {
+    /// `method` du `<form>` (`"get"` par défaut).
+    pub method: String,
+    /// `action` brute (à résoudre côté hôte).
+    pub action: String,
+    /// `enctype` brut (`""` ≙ urlencoded).
+    pub enctype: String,
+    /// `(name, value)` des contrôles « successful » en ordre
+    /// d'arbre — collectés côté miroir (mêmes règles que le
+    /// moteur : nommés, non `disabled`, cases cochées,
+    /// submitter seul pour les boutons).
+    pub fields: Vec<(String, String)>,
+}
+
 /// Browser-surface hooks (JS-7e) — everything `window.location`,
 /// `history` and `document.cookie` need, injected by the embedder so
 /// the engine never navigates or touches the cookie store itself.
@@ -68,6 +87,9 @@ pub(crate) struct BrowserHooks {
     /// `window.open(url)` — new context. Absent → same-tab
     /// `navigate` fallback.
     pub open: Option<Rc<dyn Fn(String)>>,
+    /// `form.submit()`/`requestSubmit()` — absent → no-op
+    /// silencieux (le moteur ne navigue jamais seul).
+    pub form_submit: Option<Rc<dyn Fn(FormSubmit)>>,
     /// Viewport size in CSS px — backs `innerWidth`/`innerHeight`
     /// and `screen.width`/`height`.
     pub viewport: (u32, u32),
@@ -118,6 +140,12 @@ impl Engine {
         self.hooks.open = Some(f);
     }
 
+    /// Install the `form.submit()`/`requestSubmit()` sink —
+    /// the embedder turns [`FormSubmit`] into a navigation.
+    pub fn set_form_submit_hook(&mut self, f: Rc<dyn Fn(FormSubmit)>) {
+        self.hooks.form_submit = Some(f);
+    }
+
     /// Set the viewport size backing `inner*`/`screen.*` (CSS px).
     /// Safe to call *after* [`Engine::install_dom`] — the `screen`
     /// object and the global `inner*`/`outer*` props are refreshed
@@ -161,6 +189,52 @@ struct NodeHost {
 }
 
 impl NodeHost {
+    /// `checkValidity` partagé : `invalid` dispatché sur chaque
+    /// contrôle fautif (le `<form>` couvre tous ses candidats)
+    /// — `false` dès qu'un contrôle échoue.
+    fn check_validity_of(&self, e: &mut Engine, node: NodeId) -> JsResult<bool> {
+        let controls = {
+            let d = self.dom.borrow();
+            if d.nodes[node as usize].tag == "form" {
+                let mut v = d.by_tag(node, "input");
+                v.extend(d.by_tag(node, "textarea"));
+                v.extend(d.by_tag(node, "select"));
+                v.retain(|&c| will_validate(&d, c));
+                v
+            } else {
+                vec![node]
+            }
+        };
+        let mut ok = true;
+        for c in controls {
+            let invalid = {
+                let d = self.dom.borrow();
+                will_validate(&d, c) && !constraint_failures(&d, c).is_empty()
+            };
+            if invalid {
+                e.dispatch_simple(&self.dom, &self.cache, c, "invalid")?;
+                ok = false;
+            }
+        }
+        Ok(ok)
+    }
+
+    /// `FormSubmit` du `<form>` `node` (méthode `submit` /
+    /// `requestSubmit`) — `None` si `node` n'est pas un
+    /// `<form>` ou le hook absent (no-op silencieux).
+    fn submit_payload(&self, node: NodeId, submitter: Option<NodeId>) -> Option<FormSubmit> {
+        let d = self.dom.borrow();
+        if d.nodes[node as usize].tag != "form" {
+            return None;
+        }
+        Some(FormSubmit {
+            method: d.attr(node, "method").unwrap_or("get").to_string(),
+            action: d.attr(node, "action").unwrap_or("").to_string(),
+            enctype: d.attr(node, "enctype").unwrap_or("").to_string(),
+            fields: collect_fields(&d, node, submitter),
+        })
+    }
+
     /// `prepend`/`before`/`after`/`replaceWith` args → node ids —
     /// host nodes pass through, strings become text nodes (spec).
     fn norm_children(&self, e: &mut Engine, args: &[Value]) -> JsResult<Vec<NodeId>> {
@@ -988,20 +1062,54 @@ impl Host for NodeHost {
                     NodeKind::Text => 3.0,
                 })));
             }
-            // `textarea.value` ≙ le contenu texte (pas d'attribut
-            // `value` dans le markup — le navigateur lit les enfants).
+            // `textarea.value` ≙ le contenu texte, `select.value`
+            // ≙ la valeur de l'option `selected` (pas d'attribut
+            // `value` dans le markup pour ces deux tags).
             "value" => {
                 let d = self.dom.borrow();
+                let tag = d.nodes[node as usize].tag.as_str();
                 let v = d.attr(node, "value").map(str::to_string).or_else(|| {
-                    d.nodes[node as usize]
-                        .tag
-                        .eq_ignore_ascii_case("textarea")
-                        .then(|| d.text_content(node))
+                    matches!(tag, "textarea" | "select").then(|| control_value(&d, node))
                 });
                 return Ok(Some(match v {
                     Some(v) => e.str_val(v),
                     None => e.str_val(""),
                 }));
+            }
+            // -- Validation de contraintes (étape 54) ------------------
+            "willValidate" => {
+                let d = self.dom.borrow();
+                return Ok(Some(Value::Bool(will_validate(&d, node))));
+            }
+            "validationMessage" => {
+                let d = self.dom.borrow();
+                let msg = constraint_failures(&d, node)
+                    .first()
+                    .map(|f| failure_message(&d, node, f))
+                    .unwrap_or_default();
+                return Ok(Some(e.str_val(msg)));
+            }
+            "validity" => {
+                let d = self.dom.borrow();
+                let flags = constraint_failures(&d, node);
+                let has = |f: &'static str| flags.contains(&f);
+                let obj = e.new_object();
+                for (k, v) in [
+                    ("valueMissing", has("valueMissing")),
+                    ("typeMismatch", false),
+                    ("patternMismatch", has("patternMismatch")),
+                    ("tooLong", has("tooLong")),
+                    ("tooShort", has("tooShort")),
+                    ("rangeUnderflow", has("rangeUnderflow")),
+                    ("rangeOverflow", has("rangeOverflow")),
+                    ("stepMismatch", has("stepMismatch")),
+                    ("badInput", false),
+                    ("customError", has("customError")),
+                    ("valid", flags.is_empty()),
+                ] {
+                    e.set_own(obj, k, Value::Bool(v), true);
+                }
+                return Ok(Some(Value::Obj(obj)));
             }
             _ => {}
         }
@@ -1217,9 +1325,78 @@ impl Host for NodeHost {
             }
             // Event triggers callable from scripts; the same
             // `propagate_event` is the platform-event entry point.
-            "click" | "focus" | "blur" | "submit" => {
+            "click" | "focus" | "blur" => {
                 e.dispatch_simple(&self.dom, &self.cache, node, name)?;
                 Ok(Some(Value::Undefined))
+            }
+            // `form.submit()` : soumission directe — ni
+            // événement `submit` ni validation (spec HTML,
+            // contrairement au clic sur un bouton).
+            "submit" => {
+                if let Some(p) = self.submit_payload(node, None) {
+                    if let Some(h) = &e.hooks.form_submit {
+                        h(p);
+                    }
+                }
+                Ok(Some(Value::Undefined))
+            }
+            // `form.requestSubmit(submitter?)` : validation
+            // (`invalid` sur les fautifs, `novalidate`/
+            // `formnovalidate` exclus) → événement `submit`
+            // → soumission si non annulée.
+            "requestSubmit" => {
+                let submitter = node_for(e, arg(args, 0));
+                let ok = {
+                    let d = self.dom.borrow();
+                    let skip = d.has_attr(node, "novalidate")
+                        || submitter.is_some_and(|s| d.has_attr(s, "formnovalidate"));
+                    skip || {
+                        drop(d);
+                        self.check_validity_of(e, node)?
+                    }
+                };
+                if !ok {
+                    return Ok(Some(Value::Undefined));
+                }
+                let state = Rc::new(EventState {
+                    ty: RefCell::new("submit".to_string()),
+                    target: Cell::new(node),
+                    current: Cell::new(None),
+                    bubbles: Cell::new(true),
+                    stopped: Cell::new(false),
+                    prevented: Cell::new(false),
+                });
+                e.propagate_event(&self.dom, &self.cache, &state)?;
+                if !state.prevented.get() {
+                    if let Some(p) = self.submit_payload(node, submitter) {
+                        if let Some(h) = &e.hooks.form_submit {
+                            h(p);
+                        }
+                    }
+                }
+                Ok(Some(Value::Undefined))
+            }
+            // -- Validation de contraintes (étape 54) ------------------
+            // `setCustomValidity(m)` : l'état vit dans l'attribut
+            // `data-explorer-cv` — il se sérialise avec le miroir
+            // et le moteur bloque la soumission dessus (canal
+            // miroir→DOM réel documenté ADR-0014).
+            "setCustomValidity" => {
+                let msg = e.to_js_string(arg(args, 0))?;
+                let mut d = self.dom.borrow_mut();
+                if msg.is_empty() {
+                    d.remove_attr(node, CUSTOM_VALIDITY_ATTR);
+                } else {
+                    d.set_attr(node, CUSTOM_VALIDITY_ATTR, &msg);
+                }
+                Ok(Some(Value::Undefined))
+            }
+            // `checkValidity`/`reportValidity` : `invalid` (non
+            // annulable) part sur chaque contrôle fautif — sur un
+            // `<form>`, sur tous ses candidats. Pas de bulle UI
+            // native : les deux méthodes sont identiques (MVP).
+            "checkValidity" | "reportValidity" => {
+                Ok(Some(Value::Bool(self.check_validity_of(e, node)?)))
             }
             // -- JS-7g structural ops ------------------------------------
             "insertBefore" => {
@@ -1923,5 +2100,248 @@ impl Host for DatasetHost {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+// ------------------------------------------------------------------
+// Validation de contraintes des formulaires (étape 54)
+// ------------------------------------------------------------------
+
+/// Attribut portant l'état `setCustomValidity` — sérialisé avec le
+/// miroir, il atteint le DOM réel qui bloque la soumission
+/// (canal miroir→moteur, déviation `outerHTML` documentée).
+const CUSTOM_VALIDITY_ATTR: &str = "data-explorer-cv";
+
+/// `willValidate` : `input`/`textarea`/`select` non `disabled`,
+/// types « barrés » exclus (`hidden`, boutons, `file` — HTML
+/// §4.10.21.2).
+fn will_validate(d: &Dom, node: NodeId) -> bool {
+    let n = &d.nodes[node as usize];
+    if n.kind != NodeKind::Element || d.has_attr(node, "disabled") {
+        return false;
+    }
+    match n.tag.as_str() {
+        "input" => !matches!(
+            d.attr(node, "type").unwrap_or("").to_lowercase().as_str(),
+            "hidden" | "submit" | "image" | "reset" | "button" | "file"
+        ),
+        "textarea" | "select" => true,
+        _ => false,
+    }
+}
+
+/// Valeur courante du contrôle : attribut `value` (texte du
+/// `<textarea>` / option `selected` du `<select>` à défaut).
+fn control_value(d: &Dom, node: NodeId) -> String {
+    match d.nodes[node as usize].tag.as_str() {
+        "textarea" => d
+            .attr(node, "value")
+            .map_or_else(|| d.text_content(node), str::to_string),
+        "select" => {
+            let opts = d.by_tag(node, "option");
+            let sel = opts
+                .iter()
+                .find(|&&o| d.has_attr(o, "selected"))
+                .or_else(|| opts.first());
+            sel.map_or_else(String::new, |&o| {
+                d.attr(o, "value")
+                    .map_or_else(|| d.text_content(o).trim().to_string(), str::to_string)
+            })
+        }
+        _ => d.attr(node, "value").unwrap_or("").to_string(),
+    }
+}
+
+/// Drapeaux de `ValidityState` en échec — mêmes règles que le
+/// moteur (`session.rs::control_invalid_reason`) : les deux
+/// implémentations divergent volontairement (le miroir est
+/// autonome), toute différence est une déviation documentée.
+fn constraint_failures(d: &Dom, node: NodeId) -> Vec<&'static str> {
+    if !will_validate(d, node) {
+        return Vec::new();
+    }
+    let mut bad = Vec::new();
+    if d.attr(node, CUSTOM_VALIDITY_ATTR)
+        .is_some_and(|m| !m.is_empty())
+    {
+        bad.push("customError");
+    }
+    let tag = d.nodes[node as usize].tag.as_str();
+    let ty = d.attr(node, "type").unwrap_or("").to_lowercase();
+    let value = control_value(d, node);
+    if d.has_attr(node, "required") {
+        let missing = match (tag, ty.as_str()) {
+            ("input", "checkbox") => !d.has_attr(node, "checked"),
+            ("input", "radio") => !radio_group_checked(d, node),
+            _ => value.is_empty(),
+        };
+        if missing {
+            bad.push("valueMissing");
+        }
+    }
+    let textual = tag == "textarea"
+        || matches!(
+            ty.as_str(),
+            "" | "text" | "search" | "tel" | "url" | "email" | "password"
+        );
+    if textual && !value.is_empty() {
+        let len = value.chars().count();
+        if let Some(min) = d
+            .attr(node, "minlength")
+            .and_then(|m| m.parse::<usize>().ok())
+        {
+            if len < min {
+                bad.push("tooShort");
+            }
+        }
+        if let Some(max) = d
+            .attr(node, "maxlength")
+            .and_then(|m| m.parse::<usize>().ok())
+        {
+            if len > max {
+                bad.push("tooLong");
+            }
+        }
+        if let Some(pat) = d.attr(node, "pattern") {
+            if !pattern_full_match(pat, &value) {
+                bad.push("patternMismatch");
+            }
+        }
+    }
+    if matches!(ty.as_str(), "number" | "range") {
+        if let Ok(v) = value.trim().parse::<f64>() {
+            let num = |k: &str| d.attr(node, k).and_then(|s| s.parse::<f64>().ok());
+            if num("min").is_some_and(|min| v < min) {
+                bad.push("rangeUnderflow");
+            }
+            if num("max").is_some_and(|max| v > max) {
+                bad.push("rangeOverflow");
+            }
+            if let Some(step) = num("step").filter(|s| *s > 0.0) {
+                let base = num("min").unwrap_or(0.0);
+                let rem = ((v - base) / step).fract();
+                if rem.abs() > 1e-9 && (rem.abs() - 1.0).abs() > 1e-9 {
+                    bad.push("stepMismatch");
+                }
+            }
+        }
+    }
+    bad
+}
+
+/// Un radio du même groupe (`name`, même `<form>` ou document)
+/// est coché — `required` se satisfait au niveau du groupe.
+fn radio_group_checked(d: &Dom, node: NodeId) -> bool {
+    let Some(name) = d.attr(node, "name") else {
+        return d.has_attr(node, "checked");
+    };
+    let mut scope = node;
+    while let Some(p) = d.parent(scope) {
+        if d.nodes[p as usize].tag == "form" {
+            scope = p;
+            break;
+        }
+        scope = p;
+    }
+    d.by_tag(scope, "input").iter().any(|&r| {
+        d.attr(r, "type")
+            .unwrap_or("")
+            .eq_ignore_ascii_case("radio")
+            && d.attr(r, "name") == Some(name)
+            && d.has_attr(r, "checked")
+    })
+}
+
+/// `pattern` HTML : correspondance entière via le moteur regexp
+/// interne (`^(?:…)$`) — un pattern non compilable ne contraint
+/// pas (HTML).
+fn pattern_full_match(pat: &str, value: &str) -> bool {
+    crate::regexp::JsRegExp::compile(&format!("^(?:{pat})$"), "")
+        .is_ok_and(|re| re.exec(value, 0).is_some())
+}
+
+/// Texte de `validationMessage` pour le premier drapeau en
+/// échec (messages alignés sur les navigateurs, en-US).
+fn failure_message(d: &Dom, node: NodeId, flag: &str) -> String {
+    let a = |k: &str| d.attr(node, k).unwrap_or("").to_string();
+    match flag {
+        "customError" => d.attr(node, CUSTOM_VALIDITY_ATTR).unwrap_or("").to_string(),
+        "valueMissing" => "Please fill out this field.".to_string(),
+        "tooShort" => format!(
+            "Please lengthen this text to {} characters or more (you are currently using {} characters).",
+            a("minlength"),
+            control_value(d, node).chars().count()
+        ),
+        "tooLong" => format!(
+            "Please shorten this text to {} characters or less (you are currently using {} characters).",
+            a("maxlength"),
+            control_value(d, node).chars().count()
+        ),
+        "patternMismatch" => "Please match the requested format.".to_string(),
+        "rangeUnderflow" => {
+            format!("Value must be greater than or equal to {}.", a("min"))
+        }
+        "rangeOverflow" => format!("Value must be less than or equal to {}.", a("max")),
+        "stepMismatch" => "Please enter a valid value.".to_string(),
+        _ => String::new(),
+    }
+}
+
+/// Champs « successful » du `<form>` miroir (mêmes règles que
+/// `session.rs::collect_form_data` — nommés, non `disabled`,
+/// cases cochées, `submitter` seul pour les boutons). Les
+/// `File` portent leur nom de fichier comme valeur (pas de
+/// picker — l'embedder émettra un fichier vide, déviation
+/// documentée).
+fn collect_fields(d: &Dom, form: NodeId, submitter: Option<NodeId>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut stack = vec![form];
+    while let Some(n) = stack.pop() {
+        let tag = d.nodes[n as usize].tag.as_str();
+        if n != form && d.nodes[n as usize].kind == NodeKind::Element && !d.has_attr(n, "disabled")
+        {
+            match tag {
+                "input" => {
+                    let ty = d.attr(n, "type").unwrap_or("").to_lowercase();
+                    let ok = match ty.as_str() {
+                        "checkbox" | "radio" => d.has_attr(n, "checked"),
+                        "submit" | "image" | "button" | "reset" => Some(n) == submitter,
+                        _ => true,
+                    };
+                    if ok {
+                        push_named_field(d, n, control_value(d, n), &mut out);
+                    }
+                }
+                "textarea" | "select" => {
+                    push_named_field(d, n, control_value(d, n), &mut out);
+                }
+                "button" => {
+                    let ty = d.attr(n, "type").unwrap_or("submit").to_lowercase();
+                    if Some(n) == submitter && !matches!(ty.as_str(), "button" | "reset") {
+                        push_named_field(
+                            d,
+                            n,
+                            d.attr(n, "value").unwrap_or("").to_string(),
+                            &mut out,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+        if n == form || tag != "form" {
+            let kids = d.child_nodes(n);
+            stack.extend(kids.iter().rev());
+        }
+    }
+    out
+}
+
+/// Pousse `(name, value)` si le contrôle est nommé.
+fn push_named_field(d: &Dom, n: NodeId, value: String, out: &mut Vec<(String, String)>) {
+    if let Some(name) = d.attr(n, "name") {
+        if !name.is_empty() {
+            out.push((name.to_string(), value));
+        }
     }
 }

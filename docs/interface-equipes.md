@@ -50,6 +50,7 @@ Règles :
 | 2026-10-19 | `explorer-render` | playback op-list canvas → `DisplayItem::Image` | NAV (JS-C28) | proposé → **R-11** |
 | 2026-10-19 | domaine (boxtree/display list) | tolérance « document en construction » pour peinture progressive | NAV (étape 53) | livré → **R-1** (`TreeBuilder::push`/`finish`, `Dom::document_element`) |
 | 2026-10-19 | `dillo-js` (interne NAV) | `MutationObserver` delivery microtask | NAV (étape 52) | proposé → JS-C26 |
+| 2026-10-19 | `explorer-css` sélecteurs | pseudo-classes `:valid` / `:invalid` (`:user-invalid`) appuyées sur l'état de validation formulaires (hôte : `Dom::element` + règles §4.10.21.2) | NAV (étape 54) | proposé |
 
 ## Journal
 

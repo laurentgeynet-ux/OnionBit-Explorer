@@ -1156,16 +1156,56 @@ async fn radio_group_is_exclusive() {
     assert_eq!(t.last().unwrap().1, "/rgo?r=y");
 }
 
+/// Clic sur le `<select>` → popup moteur ; clic sur la 2e
+/// ligne → `o2` choisie ; submit → `s=o2` (étape 54 — le
+/// popup a remplacé le cycle MVP d'ADR-0014).
 #[tokio::test]
-async fn select_cycles_options_on_click() {
+async fn select_popup_opens_and_chooses_option() {
     let (mut s, t) = test_session();
     t.route("/sl", 200, PAGE_SEL_FORM);
     t.route("/sgo", 200, "<html><body>done</body></html>");
     let id = s.open_tab();
     s.navigate(id, "http://h.test/sl").await.unwrap();
-    // Clic sur le select → option suivante.
+    let closed = s.frame_png(id);
+    // Clic sur le select → le popup s'ouvre (repeint).
     let out = s
         .handle_input(id, InputEvent::Click { x: 10.0, y: 6.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+    assert_ne!(s.frame_png(id), closed);
+    // 2e ligne du popup (sous le contrôle, ~y 36-54).
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 45.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+    // Submit → `s=o2` (l'option cliquée, pas la 1re).
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 40.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(t.last().unwrap().1, "/sgo?s=o2");
+}
+
+/// Clic hors du popup ouvert → il se referme sans choix —
+/// le clic suivant soumet `s=o1` (1re option par défaut).
+#[tokio::test]
+async fn select_popup_dismisses_on_outside_click() {
+    let (mut s, t) = test_session();
+    t.route("/sl", 200, PAGE_SEL_FORM);
+    t.route("/sgo", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/sl").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 6.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+    // Clic en plein vide — consommé pour refermer.
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 300.0, y: 300.0 })
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Edited);
@@ -1174,7 +1214,60 @@ async fn select_cycles_options_on_click() {
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(t.last().unwrap().1, "/sgo?s=o1");
+}
+
+/// Popup ouvert : `ArrowDown` déplace le surlignage,
+/// `Enter` choisit la ligne, `Escape` referme sans choix.
+#[tokio::test]
+async fn select_popup_keyboard_navigates() {
+    let (mut s, t) = test_session();
+    t.route("/sl", 200, PAGE_SEL_FORM);
+    t.route("/sgo", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/sl").await.unwrap();
+    s.handle_input(id, InputEvent::Click { x: 10.0, y: 6.0 })
+        .await
+        .unwrap();
+    // Deux `ArrowDown` → 2e option, `Enter` la choisit.
+    for k in ["ArrowDown", "ArrowDown", "Enter"] {
+        s.handle_input(id, InputEvent::Key { key: k.to_string() })
+            .await
+            .unwrap();
+    }
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 40.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
     assert_eq!(t.last().unwrap().1, "/sgo?s=o2");
+}
+
+/// `Escape` referme sans choix — `s=o1` à la soumission.
+#[tokio::test]
+async fn select_popup_escape_keeps_default() {
+    let (mut s, t) = test_session();
+    t.route("/sl", 200, PAGE_SEL_FORM);
+    t.route("/sgo", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/sl").await.unwrap();
+    s.handle_input(id, InputEvent::Click { x: 10.0, y: 6.0 })
+        .await
+        .unwrap();
+    s.handle_input(
+        id,
+        InputEvent::Key {
+            key: "Escape".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 40.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(t.last().unwrap().1, "/sgo?s=o1");
 }
 
 #[tokio::test]
@@ -2681,4 +2774,237 @@ async fn module_script_utf8_despite_charset_attr() {
     let b = s.open_tab();
     s.navigate(b, "http://h.test/stat").await.unwrap();
     assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+// ------------------------------------------------------------------
+// Étape 54 — validation de contraintes + multipart +
+// `form.submit()` script
+// ------------------------------------------------------------------
+
+/// Champ `required` vide + submit.
+const PAGE_REQUIRED_FORM: &str = "<html><body><form action=\"/vgo\">\
+    <div><input name=\"q\" required></div>\
+    <div><input type=\"submit\" value=\"Go\"></div></form></body></html>";
+
+/// `novalidate` saute la validation.
+const PAGE_NOVALIDATE_FORM: &str = "<html><body><form action=\"/vgo\" novalidate>\
+    <div><input name=\"q\" required></div>\
+    <div><input type=\"submit\" value=\"Go\"></div></form></body></html>";
+
+/// `minlength` non satisfait.
+const PAGE_MINLENGTH_FORM: &str = "<html><body><form action=\"/vgo\">\
+    <div><input name=\"q\" value=\"x\" minlength=\"3\"></div>\
+    <div><input type=\"submit\" value=\"Go\"></div></form></body></html>";
+
+/// `pattern` non satisfait.
+const PAGE_PATTERN_FORM: &str = "<html><body><form action=\"/vgo\">\
+    <div><input name=\"q\" value=\"abc\" pattern=\"[0-9]+\"></div>\
+    <div><input type=\"submit\" value=\"Go\"></div></form></body></html>";
+
+/// `type=number` hors `max`.
+const PAGE_RANGE_FORM: &str = "<html><body><form action=\"/vgo\">\
+    <div><input type=\"number\" name=\"q\" value=\"99\" min=\"1\" max=\"10\"></div>\
+    <div><input type=\"submit\" value=\"Go\"></div></form></body></html>";
+
+/// `step` non respecté.
+const PAGE_STEP_FORM: &str = "<html><body><form action=\"/vgo\">\
+    <div><input type=\"number\" name=\"q\" value=\"3\" min=\"0\" step=\"2\"></div>\
+    <div><input type=\"submit\" value=\"Go\"></div></form></body></html>";
+
+/// `enctype=multipart/form-data` + champ fichier.
+const PAGE_MULTIPART_FORM: &str = "<html><body><form method=\"post\" action=\"/mp\"\
+    enctype=\"multipart/form-data\">\
+    <div><input name=\"a\" value=\"1\"></div>\
+    <div><input type=\"file\" name=\"f\" value=\"x.txt\"></div>\
+    <div><input type=\"submit\" value=\"Go\"></div></form></body></html>";
+
+/// `form.submit()` au chargement — navigation script.
+const PAGE_JS_SUBMIT: &str = "<html><body><form action=\"/jgo\" id=\"f\">\
+    <input name=\"x\" value=\"1\"></form>\
+    <script>document.getElementById('f').submit();</script></body></html>";
+
+/// `setCustomValidity` script → attribut miroir → blocage
+/// moteur à la soumission.
+const PAGE_CUSTOM_VALIDITY: &str = "<html><body><form action=\"/vgo\">\
+    <div><input name=\"q\" value=\"ok\"></div>\
+    <div><input type=\"submit\" value=\"Go\"></div></form>\
+    <script>document.querySelector('input').setCustomValidity('nope');</script>\
+    </body></html>";
+
+/// `requestSubmit()` sur un formulaire valide navigue.
+const PAGE_REQUEST_SUBMIT: &str = "<html><body><form action=\"/jgo\" id=\"f\">\
+    <input name=\"x\" value=\"1\"></form>\
+    <script>document.getElementById('f').requestSubmit();</script></body></html>";
+
+/// Un submit sur `page` doit rester `Ignored` sans requête
+/// réseau supplémentaire (validation bloquée).
+async fn assert_submit_blocked(page: &'static str) {
+    let (mut s, t) = test_session();
+    t.route("/f", 200, page);
+    t.route("/vgo", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    let calls = t.calls();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 40.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+    assert_eq!(t.calls(), calls);
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/f")
+    );
+}
+
+#[tokio::test]
+async fn required_field_blocks_submission() {
+    assert_submit_blocked(PAGE_REQUIRED_FORM).await;
+}
+
+#[tokio::test]
+async fn minlength_violation_blocks_submission() {
+    assert_submit_blocked(PAGE_MINLENGTH_FORM).await;
+}
+
+#[tokio::test]
+async fn pattern_violation_blocks_submission() {
+    assert_submit_blocked(PAGE_PATTERN_FORM).await;
+}
+
+#[tokio::test]
+async fn number_out_of_range_blocks_submission() {
+    assert_submit_blocked(PAGE_RANGE_FORM).await;
+}
+
+#[tokio::test]
+async fn step_violation_blocks_submission() {
+    assert_submit_blocked(PAGE_STEP_FORM).await;
+}
+
+/// `required` rempli → `Enter` soumet (soumission implicite,
+/// validation passée — le bouton par défaut est `submitter`).
+#[tokio::test]
+async fn valid_form_submits_on_enter() {
+    let (mut s, t) = test_session();
+    t.route("/f", 200, PAGE_REQUIRED_FORM);
+    t.route("/vgo", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    // Focus le champ puis tape `hi` — chaque touche = `input`.
+    s.handle_input(id, InputEvent::Click { x: 6.0, y: 6.0 })
+        .await
+        .unwrap();
+    for k in ["h", "i"] {
+        s.handle_input(id, InputEvent::Key { key: k.to_string() })
+            .await
+            .unwrap();
+    }
+    let out = s
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "Enter".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(t.last().unwrap().1, "/vgo?q=hi");
+}
+
+/// `novalidate` : le formulaire `required` vide part quand même.
+#[tokio::test]
+async fn novalidate_form_submits() {
+    let (mut s, t) = test_session();
+    t.route("/f", 200, PAGE_NOVALIDATE_FORM);
+    t.route("/vgo", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 40.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(t.last().unwrap().1, "/vgo?q=");
+}
+
+/// `setCustomValidity` côté script bloque la soumission —
+/// l'attribut `data-explorer-cv` a transité miroir→DOM.
+#[tokio::test]
+async fn custom_validity_blocks_submission() {
+    let (mut s, t) = test_session();
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    t.route("/f", 200, PAGE_CUSTOM_VALIDITY);
+    t.route("/vgo", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    let calls = t.calls();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 40.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+    assert_eq!(t.calls(), calls);
+}
+
+/// `multipart/form-data` : parties `Content-Disposition`,
+/// fichier vide avec `filename`, frontière refermée.
+#[tokio::test]
+async fn multipart_post_sends_parts() {
+    let (mut s, t) = test_session();
+    t.route("/f", 200, PAGE_MULTIPART_FORM);
+    t.route("/mp", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 60.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    let (m, pq, body) = t.last().unwrap();
+    assert_eq!(m, "Post");
+    assert_eq!(pq, "/mp");
+    let ct = t.last_header("content-type").unwrap();
+    assert!(ct.starts_with("multipart/form-data; boundary=----ExplorerFormBoundary"));
+    let text = String::from_utf8(body).unwrap();
+    assert!(text.contains("Content-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n"));
+    assert!(text.contains(
+        "Content-Disposition: form-data; name=\"f\"; filename=\"x.txt\"\r\n\
+         Content-Type: application/octet-stream\r\n\r\n"
+    ));
+    assert!(text.trim_end().ends_with("--"));
+}
+
+/// `form.submit()` au chargement → `NavRequest::FormSubmit`
+/// drainée → navigation GET avec les champs collectés.
+#[tokio::test]
+async fn js_form_submit_navigates() {
+    let (mut s, t) = test_session();
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    t.route("/f", 200, PAGE_JS_SUBMIT);
+    t.route("/jgo", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/jgo?x=1")
+    );
+}
+
+/// `requestSubmit()` sur un formulaire valide soumet aussi.
+#[tokio::test]
+async fn js_request_submit_navigates() {
+    let (mut s, t) = test_session();
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    t.route("/f", 200, PAGE_REQUEST_SUBMIT);
+    t.route("/jgo", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/jgo?x=1")
+    );
 }
