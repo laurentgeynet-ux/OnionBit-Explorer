@@ -111,6 +111,23 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(g, "AggregateError", a_err, false);
     e.set_own(g, "Date", date, false);
 
+    // `WeakRef`/`FinalizationRegistry` (JS-C13) — vraies
+    // références faibles : les cibles ne sont pas tracées par le
+    // GC ; le cleanup part en microtask après collecte.
+    let wrp = e.new_object();
+    e.add_method(wrp, "deref", weakref_deref);
+    let tag = e.str_val("WeakRef");
+    e.set_own(wrp, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    let wr_ctor = ctor(e, "WeakRef", weakref_ctor, wrp);
+    e.set_own(g, "WeakRef", wr_ctor, false);
+    let frp = e.new_object();
+    e.add_method(frp, "register", finreg_register);
+    e.add_method(frp, "unregister", finreg_unregister);
+    let tag = e.str_val("FinalizationRegistry");
+    e.set_own(frp, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    let fr_ctor = ctor(e, "FinalizationRegistry", finreg_ctor, frp);
+    e.set_own(g, "FinalizationRegistry", fr_ctor, false);
+
     // `BigInt` (JS-C7) — ctor fonctionnel (`new` → TypeError),
     // `asIntN`/`asUintN`, proto `toString`/`valueOf`. Le proto est
     // un wrapper de `0n` comme les autres primitives.
@@ -133,28 +150,33 @@ pub(crate) fn install(e: &mut Engine) {
     // `p_obj` écraserait `Object.prototype.constructor`.
     let sym = ctor(e, "Symbol", symbol_ctor, e.protos.symbol);
     if let Value::Obj(sid) = sym {
-        let it = e.str_val(crate::interp::SYM_ITERATOR);
-        e.set_own(sid, "iterator", it, false);
-        let ait = e.str_val(crate::interp::SYM_ASYNC_ITERATOR);
-        e.set_own(sid, "asyncIterator", ait, false);
-        // Well-known symbols exposés (certains honorés par le
-        // moteur : toPrimitive/hasInstance/toStringTag/unscopables ;
-        // les autres sont des clés utilisables par les scripts).
-        for (name, key) in [
-            ("toPrimitive", "\u{f130}Symbol.toPrimitive"),
-            ("hasInstance", "\u{f130}Symbol.hasInstance"),
-            ("toStringTag", "\u{f130}Symbol.toStringTag"),
-            ("unscopables", "\u{f130}Symbol.unscopables"),
-            ("species", "\u{f130}Symbol.species"),
-            ("match", "\u{f130}Symbol.match"),
-            ("matchAll", "\u{f130}Symbol.matchAll"),
-            ("replace", "\u{f130}Symbol.replace"),
-            ("search", "\u{f130}Symbol.search"),
-            ("split", "\u{f130}Symbol.split"),
-            ("isConcatSpreadable", "\u{f130}Symbol.isConcatSpreadable"),
-        ] {
-            let v = e.str_val(key);
+        // Well-known symbols : de vraies `ObjKind::Symbol` dont la
+        // clé-propriété est la sentinelle `Symbol.<name>` — les
+        // props symbolées posées par le moteur restent atteignables
+        // via `o[Symbol.x]` (`typeof Symbol.x` = "symbol", spec).
+        let ws = |name: &str, e: &mut Engine| {
+            let key = format!("\u{f130}Symbol.{name}");
+            let v = e.new_symbol_key(Some(format!("Symbol.{name}")), key);
             e.set_own(sid, name, v, false);
+        };
+        for name in [
+            "iterator",
+            "asyncIterator",
+            "toPrimitive",
+            "hasInstance",
+            "toStringTag",
+            "unscopables",
+            "species",
+            "match",
+            "matchAll",
+            "replace",
+            "search",
+            "split",
+            "isConcatSpreadable",
+            "dispose",
+            "asyncDispose",
+        ] {
+            ws(name, e);
         }
         e.add_method(sid, "for", symbol_for);
         e.add_method(sid, "keyFor", symbol_key_for);
@@ -284,6 +306,10 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(fp, "apply", function_apply);
     e.add_method(fp, "bind", function_bind);
     e.add_method(fp, "toString", function_to_string);
+    // `Function.prototype.name === ""` (spec — le proto est
+    // ordinaire, le bras synthétique `Fun` ne le couvre pas).
+    let empty_name = e.str_val("");
+    e.set_own(fp, "name", empty_name, false);
 
     // Array.prototype.
     let ap = e.protos.array;
@@ -394,6 +420,7 @@ pub(crate) fn install(e: &mut Engine) {
     if let Value::Obj(sid) = string {
         e.add_method(sid, "fromCharCode", string_from_char_code);
         e.add_method(sid, "fromCodePoint", string_from_code_point);
+        e.add_method(sid, "raw", string_raw);
     }
 
     // Number.prototype.
@@ -2613,13 +2640,7 @@ fn symbol_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         Value::Undefined => None,
         v => Some(e.to_js_string(v)?),
     };
-    let proto = Value::Obj(e.protos.symbol);
-    Ok(Value::Obj(e.heap.alloc_obj(crate::heap::Object {
-        proto,
-        props: Vec::new(),
-        kind: ObjKind::Symbol(desc),
-        extensible: true,
-    })))
+    Ok(e.new_symbol(desc))
 }
 
 // ---- BigInt (JS-C7) --------------------------------------------------
@@ -2763,7 +2784,7 @@ fn symbol_key_for(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
 fn sym_desc(e: &Engine, this: Value) -> Option<String> {
     let Value::Obj(id) = this else { return None };
     match e.heap.obj(id).map(|o| &o.kind) {
-        Some(ObjKind::Symbol(d)) => Some(d.clone().unwrap_or_default()),
+        Some(ObjKind::Symbol { desc, .. }) => Some(desc.clone().unwrap_or_default()),
         _ => None,
     }
 }
@@ -3267,8 +3288,6 @@ fn number_is_integer(_e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Val
 
 /// `Object.getOwnPropertyNames` — all own props (enum + non-enum).
 /// Préfixe sentinelle des clés-symboles (`\u{f130}Symbol.*`).
-const SYM_PREFIX: &str = crate::interp::SYM_PREFIX;
-
 fn object_get_own_property_names(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let keys = match arg(args, 0) {
         Value::Obj(id) => e.own_keys_trapped(id)?,
@@ -3294,19 +3313,34 @@ fn is_sentinel_key(k: &str) -> bool {
         .is_some_and(|c| ('\u{f120}'..='\u{f13f}').contains(&c))
 }
 
-/// `Object.getOwnPropertySymbols` — clés sentinelles `\u{f130}…`
-/// (la Value retournée *est* le symbole : `Symbol.iterator ===
-/// sym` tient car même string heap).
+/// `Object.getOwnPropertySymbols` — les `ObjKind::Symbol`
+/// correspondant aux clés sentinelles `\u{f130}…` (reverse-lookup
+/// `sym_index` ; une entrée périmée par GC est ignorée — le slot
+/// ne peut pas être réutilisé par un symbole à même clé).
 fn object_get_own_property_symbols(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let keys = match arg(args, 0) {
         Value::Obj(id) => e.own_keys_trapped(id)?,
         _ => Vec::new(),
     };
-    let vals = keys
-        .iter()
-        .filter(|k| k.starts_with(SYM_PREFIX))
-        .map(|k| e.str_val(k.clone()))
-        .collect();
+    let mut vals = Vec::new();
+    for k in &keys {
+        // Toute clé sentinelle `\u{f130}…` — `Symbol.<name>` des
+        // well-knowns ET `sym{N}`/`sym.for.<k>` des symboles
+        // utilisateurs.
+        if !k.starts_with('\u{f130}') {
+            continue;
+        }
+        let Some(sid) = e.sym_index.get(k).copied() else {
+            continue;
+        };
+        let live = matches!(
+            e.heap.obj(sid).map(|o| &o.kind),
+            Some(ObjKind::Symbol { key, .. }) if key == k
+        );
+        if live {
+            vals.push(Value::Obj(sid));
+        }
+    }
     Ok(e.new_array(vals))
 }
 
@@ -3745,6 +3779,26 @@ fn string_from_code_point(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
         s.push(char::from_u32(n as u32).unwrap_or('\u{FFFD}'));
     }
     Ok(e.str_val(s))
+}
+
+/// `String.raw(strings, …subs)` — join `strings.raw[i]` with the
+/// substitutions (spec `GetTemplateObject` inverse — reads `.raw`
+/// and `.length`, so array-likes work too).
+fn string_raw(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let raw = e.get_prop_value(arg(args, 0), "raw")?;
+    let n = match e.get_prop_value(raw, "length")? {
+        Value::Num(n) => n.max(0.0) as usize,
+        _ => 0,
+    };
+    let mut out = String::new();
+    for i in 0..n {
+        let seg = e.get_prop_value(raw, &i.to_string())?;
+        out.push_str(&e.to_js_string(seg)?);
+        if let Some(v) = args.get(i + 1) {
+            out.push_str(&e.to_js_string(*v)?);
+        }
+    }
+    Ok(e.str_val(out))
 }
 
 // -- TextEncoder / TextDecoder (UTF-8 only) ----------------------------
@@ -4205,7 +4259,7 @@ fn clone_deep(e: &mut Engine, v: Value, seen: &mut Vec<(ObjId, ObjId)>) -> JsRes
         Some(ObjKind::Fun(_)) => CloneShape::Err("function"),
         Some(ObjKind::Promise(_)) => CloneShape::Err("Promise"),
         Some(ObjKind::Host(_)) => CloneShape::Err("host object"),
-        Some(ObjKind::Symbol(_)) => CloneShape::Err("Symbol"),
+        Some(ObjKind::Symbol { .. }) => CloneShape::Err("Symbol"),
         Some(ObjKind::Proxy { .. }) => CloneShape::Err("Proxy"),
         Some(ObjKind::Iter { .. }) => CloneShape::Err("iterator"),
         Some(ObjKind::FetchResponse { .. }) => CloneShape::Err("Response"),
@@ -4394,4 +4448,132 @@ fn array_from_async(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
 /// partagée avec `Expr::Await` (pending → `TypeError`).
 fn await_settled(e: &mut Engine, v: Value) -> JsResult<Value> {
     e.await_value(v)
+}
+
+// -- WeakRef / FinalizationRegistry (JS-C13) --------------------------
+
+/// `new WeakRef(target)` — la cible doit être un objet (spec).
+/// `ObjKind::WeakRef` n'est pas tracé → `deref()` observe la
+/// collecte réelle.
+fn weakref_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(tid) = arg(args, 0) else {
+        return Err(e.type_error("WeakRef target must be an object"));
+    };
+    let proto = match e.get_prop(e.global, "WeakRef") {
+        Some(c) => e
+            .get_prop_value(c, "prototype")
+            .unwrap_or(Value::Obj(e.protos.object)),
+        None => Value::Obj(e.protos.object),
+    };
+    Ok(Value::Obj(e.heap.alloc_obj(Object {
+        proto,
+        props: Vec::new(),
+        kind: ObjKind::WeakRef(tid),
+        extensible: true,
+    })))
+}
+
+/// `wr.deref()` — `undefined` si la cible a été collectée.
+fn weakref_deref(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("WeakRef.prototype.deref on non-WeakRef"));
+    };
+    match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::WeakRef(tid)) => Ok(if e.heap.obj(*tid).is_some() {
+            Value::Obj(*tid)
+        } else {
+            Value::Undefined
+        }),
+        _ => Err(e.type_error("WeakRef.prototype.deref on non-WeakRef")),
+    }
+}
+
+/// `new FinalizationRegistry(cleanup)` — `cleanup` callable
+/// requis (spec `TypeError` sinon).
+fn finreg_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    if !e.is_callable(cb) {
+        return Err(e.type_error("FinalizationRegistry callback must be callable"));
+    }
+    let proto = match e.get_prop(e.global, "FinalizationRegistry") {
+        Some(c) => e
+            .get_prop_value(c, "prototype")
+            .unwrap_or(Value::Obj(e.protos.object)),
+        None => Value::Obj(e.protos.object),
+    };
+    let id = e.heap.alloc_obj(Object {
+        proto,
+        props: Vec::new(),
+        kind: ObjKind::FinReg {
+            cb,
+            entries: Vec::new(),
+        },
+        extensible: true,
+    });
+    e.finregs.push(id);
+    Ok(Value::Obj(id))
+}
+
+/// `fr.register(target, held, unregisterToken?)` — `target` objet
+/// requis, `token !== held` (spec).
+fn finreg_register(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("FinalizationRegistry.register on non-registry"));
+    };
+    let Value::Obj(tid) = arg(args, 0) else {
+        return Err(e.type_error("FinalizationRegistry target must be an object"));
+    };
+    let held = arg(args, 1);
+    let token = arg(args, 2);
+    if e.strict_eq(token, held) {
+        return Err(e.type_error("unregister token must not equal held value"));
+    }
+    match e.heap.obj_mut(id).map(|o| &mut o.kind) {
+        Some(ObjKind::FinReg { entries, .. }) => {
+            entries.push(crate::heap::FinRegEntry {
+                target: tid,
+                held,
+                token,
+            });
+            Ok(Value::Undefined)
+        }
+        _ => Err(e.type_error("FinalizationRegistry.register on non-registry")),
+    }
+}
+
+/// `fr.unregister(token)` — retire les entrées à ce jeton, rend
+/// `true` si au moins une a été trouvée (spec).
+fn finreg_unregister(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("FinalizationRegistry.unregister on non-registry"));
+    };
+    let token = arg(args, 0);
+    let Some(entries) = (match e.heap.obj_mut(id).map(|o| &mut o.kind) {
+        Some(ObjKind::FinReg { entries, .. }) => Some(std::mem::take(entries)),
+        _ => None,
+    }) else {
+        return Err(e.type_error("FinalizationRegistry.unregister on non-registry"));
+    };
+    let before = entries.len();
+    let mut keep = Vec::with_capacity(before);
+    for en in entries {
+        if !e.strict_eq(en.token, token) {
+            keep.push(en);
+        }
+    }
+    let removed = before - keep.len();
+    if let Some(o) = e.heap.obj_mut(id) {
+        if let ObjKind::FinReg { entries: es, .. } = &mut o.kind {
+            *es = keep;
+        }
+    }
+    Ok(Value::Bool(removed > 0))
+}
+
+/// Job microtask d'un cleanup `FinalizationRegistry` — bound =
+/// `[cb, held]`, exécute `cb(held)` (`this` = undefined).
+pub(crate) fn finreg_cleanup(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    let held = arg(args, 1);
+    e.call_value(cb, Value::Undefined, &[held])
 }

@@ -117,6 +117,15 @@ pub struct Engine {
     /// Engine creation time — `performance.now()` baseline.
     pub(crate) t0: Instant,
     /// `Symbol.for`/`Symbol.keyFor` global registry (key → symbol).
+    /// Compteur des clés-symboles anonymes (`\u{f130}sym{N}`).
+    pub(crate) sym_seq: usize,
+    /// Index clé → `ObjId` symbole (reverse-lookup pour
+    /// `Object.getOwnPropertySymbols`) — tracé : les symboles
+    /// restent vivants tant que l'index les référence.
+    pub(crate) sym_index: std::collections::BTreeMap<String, ObjId>,
+    /// Registres `FinalizationRegistry` vivants (liste faible —
+    /// les entrées mortes sont purgées à chaque collecte).
+    pub(crate) finregs: Vec<ObjId>,
     pub(crate) symbol_reg: std::collections::BTreeMap<String, Value>,
     call_depth: u32,
     expr_depth: u32,
@@ -324,6 +333,9 @@ impl Engine {
             rng: seed | 1,
             t0: Instant::now(),
             symbol_reg: std::collections::BTreeMap::new(),
+            sym_seq: 0,
+            sym_index: std::collections::BTreeMap::new(),
+            finregs: Vec::new(),
             call_depth: 0,
             expr_depth: 0,
             ops_left: DEFAULT_OP_LIMIT,
@@ -462,6 +474,9 @@ impl Engine {
         for v in self.symbol_reg.values() {
             crate::heap::push_value(&mut ids, *v);
         }
+        for id in self.sym_index.values() {
+            ids.push(*id);
+        }
         crate::heap::push_value(&mut ids, self.completion);
         // 2. Env global — les bindings `let`/`const` ne vivent pas
         //    sur l'objet global — + envs de modules (leurs exports
@@ -472,11 +487,49 @@ impl Engine {
             crate::heap::trace_env(&m.env, &mut ids, &mut visited);
         }
         // 3. Mark-sweep.
-        self.heap.collect(|mark| {
+        let n = self.heap.collect(|mark| {
             for &id in &ids {
                 mark(id);
             }
-        })
+        });
+        // 4. `FinalizationRegistry` — purge des registres morts,
+        //    puis cleanup en microtask pour les cibles balayées
+        //    (spec `HostEnqueueFinalizationRegistryCleanupJob` :
+        //    jamais synchrone).
+        let heap = &self.heap;
+        self.finregs
+            .retain(|&rid| matches!(heap.obj(rid).map(|o| &o.kind), Some(ObjKind::FinReg { .. })));
+        let mut pending: Vec<(Value, Value)> = Vec::new();
+        for &rid in &self.finregs {
+            let Some((cb, entries)) = self.heap.obj_mut(rid).and_then(|o| match &mut o.kind {
+                ObjKind::FinReg { cb, entries } => Some((*cb, std::mem::take(entries))),
+                _ => None,
+            }) else {
+                continue;
+            };
+            let mut keep = Vec::new();
+            for en in entries {
+                if self.heap.obj(en.target).is_some() {
+                    keep.push(en);
+                } else {
+                    pending.push((cb, en.held));
+                }
+            }
+            if let Some(o) = self.heap.obj_mut(rid) {
+                if let ObjKind::FinReg { entries: es, .. } = &mut o.kind {
+                    *es = keep;
+                }
+            }
+        }
+        for (cb, held) in pending {
+            let f = self.bound_native(
+                "FinalizationRegistry.cleanup",
+                crate::builtins::finreg_cleanup,
+                vec![cb, held],
+            );
+            self.microtasks.push_back(crate::promise::Job::Plain(f));
+        }
+        n
     }
 
     /// Parse and run `src`; returns the completion value of the last
@@ -1657,6 +1710,21 @@ impl Engine {
                 });
             }
         }
+        // `fn.name` — extraction pure pendant que `o` vit ;
+        // matérialisation après le bloc `big` (borrow mort) :
+        // `lit.name`, nom natif, ou `bound <cible>` — une vraie
+        // prop own `name` (`o.find` ci-dessous) prime, spec
+        // configurable:true.
+        let (fname, ftgt) = match &o.kind {
+            ObjKind::Fun(Fun::Script { lit, .. }) => {
+                (Some(lit.name.clone().unwrap_or_default()), None)
+            }
+            ObjKind::Fun(Fun::Native { name, .. } | Fun::BoundNative { name, .. }) => {
+                (Some((*name).to_string()), None)
+            }
+            ObjKind::Fun(Fun::Bound { target, .. }) => (None, Some(*target)),
+            _ => (None, None),
+        };
         // Vues binaires — synthèse des props dérivées
         // (`length`/`byteLength`/`byteOffset`/`buffer`) et des
         // éléments indexés, comme pour `Array`.
@@ -1697,6 +1765,30 @@ impl Engine {
                     writable: true,
                     enumerable: true,
                     configurable: false,
+                },
+            });
+        }
+        // `fn.name` — `o` est mort ici (dernier use : `big`) :
+        // allocs et lectures mutables permises.
+        if key == "name" {
+            let n = match (fname, ftgt) {
+                (Some(n), _) => Some(n),
+                (None, Some(t)) => {
+                    let tn = self
+                        .get_prop_value(t, "name")
+                        .ok()
+                        .and_then(|v| self.to_js_string(v).ok())
+                        .unwrap_or_default();
+                    Some(format!("bound {tn}"))
+                }
+                _ => None,
+            };
+            return n.map(|n| Prop::Data {
+                value: self.str_val(n),
+                attrs: crate::heap::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
                 },
             });
         }
@@ -2515,7 +2607,10 @@ impl Engine {
             Value::Big(_) => return Err(self.type_error("cannot convert a BigInt to number")),
             Value::Obj(id) => {
                 // `ToNumber(Symbol)` throws — spec TypeError.
-                if matches!(self.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Symbol(_))) {
+                if matches!(
+                    self.heap.obj(id).map(|o| &o.kind),
+                    Some(ObjKind::Symbol { .. })
+                ) {
                     return Err(self.type_error("cannot convert a Symbol to number"));
                 }
                 let p = self.to_primitive(v, PrimHint::Number)?;
@@ -2540,11 +2635,42 @@ impl Engine {
         })
     }
 
+    /// `ToPropertyKey` — les symboles rendent leur clé unique
+    /// (deux `Symbol('x')` distincts indexent deux clés
+    /// différentes, spec identité).
     pub(crate) fn prop_key(&mut self, v: Value) -> JsResult<String> {
         match v {
             Value::Num(n) => Ok(num_to_js_string(n)),
+            Value::Obj(id) => match self.heap.obj(id).map(|o| &o.kind) {
+                Some(ObjKind::Symbol { key, .. }) => Ok(key.clone()),
+                _ => self.to_js_string(v),
+            },
             _ => self.to_js_string(v),
         }
+    }
+
+    /// `Symbol(desc)` anonyme — clé `\u{f130}sym{N}` unique.
+    pub(crate) fn new_symbol(&mut self, desc: Option<String>) -> Value {
+        let key = format!("\u{f130}sym{}", self.sym_seq);
+        self.sym_seq += 1;
+        self.new_symbol_key(desc, key)
+    }
+
+    /// Symbole à clé explicite (well-knowns, `Symbol.for`) —
+    /// indexé dans `sym_index` pour `getOwnPropertySymbols`.
+    pub(crate) fn new_symbol_key(&mut self, desc: Option<String>, key: String) -> Value {
+        let proto = Value::Obj(self.protos.symbol);
+        let id = self.heap.alloc_obj(crate::heap::Object {
+            proto,
+            props: Vec::new(),
+            kind: ObjKind::Symbol {
+                desc,
+                key: key.clone(),
+            },
+            extensible: true,
+        });
+        self.sym_index.insert(key, id);
+        Value::Obj(id)
     }
 
     // -- calls & construction --------------------------------------------
@@ -3426,6 +3552,51 @@ impl Engine {
                 }
                 Ok(self.str_val(out))
             }
+            // `` tag`…` `` — même résolution de callee qu'un appel
+            // (`o.m`tpl`` passe `o` en `this`). `strings` porte le
+            // tableau `raw` des chunks bruts (spec : les deux sont
+            // non extensibles — le cache par site n'est pas fait,
+            // déviation bénigne).
+            Expr::TaggedTemplate {
+                tag,
+                parts,
+                raws,
+                exprs,
+            } => {
+                let (f, recv) = match &**tag {
+                    Expr::Member(base, name) => {
+                        let b = self.eval_expr(env, this, base)?;
+                        (self.get_prop_value(b, name)?, b)
+                    }
+                    Expr::Index(base, key) => {
+                        let b = self.eval_expr(env, this, base)?;
+                        let kv = self.eval_expr(env, this, key)?;
+                        let k = self.prop_key(kv)?;
+                        (self.get_prop_value(b, &k)?, b)
+                    }
+                    _ => (self.eval_expr(env, this, tag)?, Value::Undefined),
+                };
+                let raw_vals: Vec<Value> = raws.iter().map(|s| self.str_val(s.clone())).collect();
+                let raw = self.new_array(raw_vals);
+                if let Value::Obj(rid) = raw {
+                    if let Some(o) = self.heap.obj_mut(rid) {
+                        o.extensible = false;
+                    }
+                }
+                let cooked: Vec<Value> = parts.iter().map(|s| self.str_val(s.clone())).collect();
+                let strings = self.new_array(cooked);
+                if let Value::Obj(soid) = strings {
+                    self.set_own(soid, "raw", raw, false);
+                    if let Some(o) = self.heap.obj_mut(soid) {
+                        o.extensible = false;
+                    }
+                }
+                let mut args = vec![strings];
+                for e in exprs {
+                    args.push(self.eval_expr(env, this, e)?);
+                }
+                self.call_value(f, recv, &args)
+            }
             Expr::Chain { head, steps } => self.eval_chain(env, this, head, steps),
             Expr::Regex { pattern, flags } => self.make_regexp(pattern, flags),
             Expr::Class(cl) => self.eval_class(env, this, cl),
@@ -4290,7 +4461,7 @@ fn typeof_str(v: Value, heap: &Heap) -> &'static str {
         Value::Obj(mut id) => loop {
             match heap.obj(id).map(|o| &o.kind) {
                 Some(ObjKind::Fun(_)) => break "function",
-                Some(ObjKind::Symbol(_)) => break "symbol",
+                Some(ObjKind::Symbol { .. }) => break "symbol",
                 // `typeof proxy` = `typeof target` (révoqué → object :
                 // la spec lève TypeError — approximation documentée).
                 Some(ObjKind::Proxy { target, handler }) => match (handler.is_some(), target) {

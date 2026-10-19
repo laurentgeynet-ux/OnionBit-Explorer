@@ -1632,6 +1632,22 @@ impl Parser {
                     Some(s) => s.push(ChainStep::Call(args)),
                     None => e = Expr::Call(Box::new(e), args),
                 }
+            } else if let Tok::Tpl(_) = self.peek() {
+                // `` tag`…` `` — tagged template (MemberExpression,
+                // spec : interdit dans une chaîne optionnelle).
+                if steps.is_some() {
+                    return Err(self.err("template literal in an optional chain"));
+                }
+                let Tok::Tpl(parts) = self.next().tok.clone() else {
+                    return Err(self.err("malformed template literal"));
+                };
+                let (parts, raws, exprs) = self.template_parts(parts, no_in)?;
+                e = Expr::TaggedTemplate {
+                    tag: Box::new(e),
+                    parts,
+                    raws,
+                    exprs,
+                };
             } else {
                 break;
             }
@@ -1985,11 +2001,30 @@ impl Parser {
 
     /// `` `t${e}t` `` — `parts.len() == exprs.len() + 1` enforced.
     fn template(&mut self, parts: Vec<TplPart>, no_in: bool) -> Result<Expr> {
+        let (lit_parts, _raws, exprs) = self.template_parts(parts, no_in)?;
+        Ok(Expr::Template {
+            parts: lit_parts,
+            exprs,
+        })
+    }
+
+    /// Chunks d'un template : `(cooked, raws, exprs)` — partagé
+    /// entre `` `…` `` (`Expr::Template`) et `` tag`…` ``
+    /// (`Expr::TaggedTemplate`, qui consomme aussi les raws).
+    fn template_parts(
+        &mut self,
+        parts: Vec<TplPart>,
+        no_in: bool,
+    ) -> Result<(Vec<String>, Vec<String>, Vec<Expr>)> {
         let mut lit_parts = Vec::new();
+        let mut raws = Vec::new();
         let mut exprs = Vec::new();
         for part in parts {
             match part {
-                TplPart::Str(s) => lit_parts.push(s),
+                TplPart::Str(s, raw) => {
+                    lit_parts.push(s);
+                    raws.push(raw);
+                }
                 TplPart::Expr(toks) => {
                     let mut sub = Parser {
                         toks,
@@ -2017,10 +2052,7 @@ impl Parser {
         if lit_parts.len() != exprs.len() + 1 {
             return Err(self.err("malformed template literal"));
         }
-        Ok(Expr::Template {
-            parts: lit_parts,
-            exprs,
-        })
+        Ok((lit_parts, raws, exprs))
     }
 
     /// `function [name] (params) { body }` — name required iff `decl`.

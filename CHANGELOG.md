@@ -9,6 +9,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 42 — Layout moderne MVP** (`explorer-css`,
+  `explorer-layout`, `explorer-render`, ADR-0015) : custom
+  properties `--*` héritées + `var()` substitué au temps de
+  valeur calculée (fallbacks imbriqués, cycles/IACVT
+  bornés) ; `calc()` `+ − × ÷` + parenthèses/`calc` imbriqué
+  résolu dans `css_px` (toutes les propriétés de longueur) ;
+  flexbox une ligne — `flex-direction` row/column ±reverse,
+  `order`, `flex-grow`/`shrink`/`basis` + shorthand `flex`,
+  `justify-content`, `align-items`/`align-self`, `gap` ;
+  grid — `grid-template-columns/rows` (`px`/`%`/`fr`/`auto`,
+  `repeat`, `minmax`→max), `grid-column`/`grid-row` + `span`,
+  auto-placement row-major, `justify-items`/`align-items` ;
+  `transform` 2D (matrix, translate, scale, rotate, skew) via
+  `PushTransform`/`PopTransform` — composée `dpi · pile` au
+  raster sur rects, bordures, glyphes et images (nearest
+  axis-aligned, `draw_pixmap` affine sinon) ;
+  `transform-origin` px/% ; `position: sticky` (seuil `top`)
+  contraint par translation de paint bornée au parent.
+  Écarts MVP documentés en modules : pas de `flex-wrap`,
+  `margin:auto`, areas grid, max-content intégral,
+  `stretch` cross, `bottom` sticky, clip transformé en bbox.
+  26 tests : var (6), calc (4), flex (4), grid (3),
+  transforms display+raster+sticky (9).
+
 - **Étape 41 — HTTP/2** (`explorer-net`, `explorer-daemon`,
   `explorer-cli`) : `AutoClient` route le trafic `https` par
   ALPN (RFC 7301) — `h2` → connexion multiplexée partagée par
@@ -592,6 +616,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`new_target_binding`, `set_composition_es2025`,
     `string_well_formed_and_regexp_escape`,
     `arraybuffer_resize_transfer`).
+- **JS-C13 — Symboles réels, tagged templates, `WeakRef`**
+  (`dillo-js`) :
+  - clés-symboles uniques : `ObjKind::Symbol{desc,key}` porte
+    sa clé-propriété (`\u{f130}sym{N}` anonyme, sentinelle
+    `Symbol.<name>` pour les well-knowns) — corrige la
+    collision `o[Symbol('x')] === o[Symbol('x')]` (deux
+    symboles distincts = deux clés) ; `Symbol.*` sont de
+    vraies valeurs symbole (`typeof Symbol.iterator` =
+    `"symbol"`), `Symbol.dispose`/`asyncDispose` exposés ;
+    `getOwnPropertySymbols` reverse-lookup `sym_index` avec
+    vérification de vivacité post-GC ;
+  - tagged templates `` tag`c${e}…` `` : le lexer garde les
+    chunks `(cooked, raw)`, appel `tag(strings, …exprs)` avec
+    `strings.raw` figée et `this` lié pour `` o.m`…` `` ;
+    `?.` + template → `SyntaxError` (spec) ; `String.raw`
+    implémenté (lit `.raw`/`length` — array-likes acceptés) ;
+  - `fn.name` synthétique — `lit.name`, nom natif,
+    `bound <cible>` pour `.bind()`, `Function.prototype.name
+    === ""` ; une propre prop `name` (configurable) prime ;
+  - `WeakRef`/`deref` et `FinalizationRegistry` —
+    `register`/`unregister` : les cibles ne sont pas tracées
+    par le GC (vraie faiblesse), `deref()` → `undefined`
+    après collecte, cleanup `cb(held)` enfilé en microtask
+    post-collecte ;
+  - test262 : 859/859 conservé ; 4 tests de régression
+    (`tagged_templates`, `symbol_keys_unique`,
+    `function_names`, `weakref_finreg`).
 - **JS-C11 — Syntaxe moderne** (`dillo-js`) :
   - séparateurs numériques `1_000` / `0xFF_FF` / `0b1010_10` /
     `0o7_7` / `1.5_5` / `1e1_0` / `1_000n` — validés « entre

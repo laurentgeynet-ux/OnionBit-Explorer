@@ -245,8 +245,9 @@ pub enum Tok {
 /// One piece of a template literal.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TplPart {
-    /// Literal text (escapes already decoded).
-    Str(String),
+    /// Literal text — `(cooked, raw)` : escapes decoded + source
+    /// verbatim (`String.raw`/tagged templates).
+    Str(String, String),
     /// Tokens of a `${…}` substitution (terminated by `Tok::Eof`).
     Expr(Vec<Token>),
 }
@@ -793,23 +794,31 @@ impl Lexer {
 
     /// `` `text ${expr} …` `` — literal chunks + `${…}` inner sources,
     /// each re-lexed into its own token slice (positions inside a
-    /// substitution are relative to it — diagnostics only).
+    /// substitution are relative to it — diagnostics only). Chaque
+    /// chunk garde son texte *brut* (source verbatim) pour les
+    /// tagged templates (`String.raw`).
     fn template(&mut self) -> Result<Tok> {
         self.bump(); // opening backquote
         let mut parts = Vec::new();
         let mut cur = String::new();
+        let mut seg_start = self.pos;
         loop {
             match self.bump() {
                 None => return Err(self.err("unterminated template literal")),
                 Some('`') => {
-                    parts.push(TplPart::Str(cur));
+                    let raw: String = self.chars[seg_start..self.pos - 1].iter().collect();
+                    parts.push(TplPart::Str(cur, raw));
                     return Ok(Tok::Tpl(parts));
                 }
                 Some('$') if self.peek() == Some('{') => {
                     self.bump();
-                    parts.push(TplPart::Str(std::mem::take(&mut cur)));
+                    // `$` et `{` consommés — le chunk brut s'arrête
+                    // avant le `$`.
+                    let raw: String = self.chars[seg_start..self.pos - 2].iter().collect();
+                    parts.push(TplPart::Str(std::mem::take(&mut cur), raw));
                     let src = self.template_expr_src()?;
                     parts.push(TplPart::Expr(lex(&src)?));
+                    seg_start = self.pos;
                 }
                 Some('\\') => match self.bump() {
                     None => return Err(self.err("unterminated template escape")),

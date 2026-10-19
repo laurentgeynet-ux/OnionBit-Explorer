@@ -536,6 +536,19 @@ pub enum Expr {
         /// `${…}` substitutions.
         exprs: Vec<Expr>,
     },
+    /// `` tag`t${e}…` `` — tagged template call
+    /// `tag(strings, …exprs)` with `strings.raw` = raw chunks.
+    /// `this` is kept when `tag` is `o.m` (like `o.m(…)`).
+    TaggedTemplate {
+        /// Tag expression.
+        tag: Box<Expr>,
+        /// Cooked chunks — `parts.len() == exprs.len() + 1`.
+        parts: Vec<String>,
+        /// Raw chunks (`strings.raw`), same length as `parts`.
+        raws: Vec<String>,
+        /// `${…}` substitutions.
+        exprs: Vec<Expr>,
+    },
     /// `/pat/flags` — compiled lazily by the interpreter.
     Regex {
         /// Pattern source.

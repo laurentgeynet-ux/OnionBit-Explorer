@@ -462,6 +462,21 @@ d'intégration, pas par la couverture :
   `maxByteLength`) + `transfer`/`transferToFixedLength`
   (buffer détaché → accès vue → `TypeError`, plus de panic).
   test262 : 859/859 ; 4 tests de régression.
+- [x] **JS-C13. Symboles réels + tagged templates + WeakRef** :
+  clés-symboles uniques (`ObjKind::Symbol{desc,key}` — bug de
+  collision par description corrigé, `o[s1] ≠ o[s2]`),
+  `Symbol.*` exposés comme vraies valeurs symbole (`typeof` =
+  `"symbol"`, `Symbol.dispose`/`asyncDispose` ajoutés),
+  `getOwnPropertySymbols` reverse-lookup via `sym_index`,
+  tagged templates `` tag`…` `` (chunks `(cooked, raw)` au
+  lexer, `this` lié pour `o.m`tpl``, `strings.raw`, `?.` +
+  template → `SyntaxError`), `String.raw`, `fn.name`
+  synthétique (`lit.name`, nom natif, `bound <cible>`,
+  `Function.prototype.name === ""`), `WeakRef`/`deref` et
+  `FinalizationRegistry` — références réellement faibles
+  (cibles non tracées par le GC, `deref()` → `undefined`
+  après collecte, cleanup `cb(held)` en microtask). test262 :
+  859/859 ; 4 tests de régression.
 - [ ] **JS-C. Couverture par besoin** : `Intl` —
   ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
@@ -581,9 +596,15 @@ progresse en trois paliers structurants :
   *h2 livré (ALPN, multiplexage, corps bornés) — QUIC/h3
   reporté : `quinn` pur Rust viable mais h3 nécessite un
   effort dédié hors proportion du bénéfice à ce stade.*
-- [ ] **Étape 42. Layout moderne.** `flexbox`, `grid`,
+- [x] **Étape 42. Layout moderne.** `flexbox`, `grid`,
   `position: sticky`, transforms, `calc()`, custom properties
   (`--var`).
+  *Livré en MVP borné (ADR-0015) : `var()`/fallback/IACVT,
+  `calc()` `+−×÷` imbriqué, flex une ligne (order, grow/
+  shrink/basis, justify/align, gap), grid template explicite
+  + spans + auto-placement, transforms 2D au raster,
+  sticky `top` par translation de paint. Écarts documentés
+  en tête de modules (`flex-wrap`, areas, max-content…).*
 - [ ] **Étape 43. JS vers ES6+.** Étendre `dillo-js` dans ce
   workspace (modules `import`/`export`, `Proxy`, `Intl`, GC
   complet ADR-0008…) — échappatoire documentée : `boa_engine`

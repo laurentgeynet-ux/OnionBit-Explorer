@@ -262,9 +262,19 @@ impl Heap {
             ObjKind::DataView { buffer, .. } | ObjKind::TypedArray { buffer, .. } => {
                 push_value(out, *buffer);
             }
-            ObjKind::Ordinary
+            ObjKind::FinReg { cb, entries } => {
+                push_value(out, *cb);
+                for en in entries {
+                    push_value(out, en.held);
+                    push_value(out, en.token);
+                }
+            }
+            // `WeakRef` : la cible n'est PAS tracée (c'est le
+            // point — `deref()` observe la collecte).
+            ObjKind::WeakRef(_)
+            | ObjKind::Ordinary
             | ObjKind::RegExp(_)
-            | ObjKind::Symbol(_)
+            | ObjKind::Symbol { .. }
             | ObjKind::FetchResponse { .. }
             | ObjKind::ByteBuf(_)
             | ObjKind::BigInt(_) => {}
@@ -479,6 +489,17 @@ pub struct Object {
 }
 
 /// What kind of object this is.
+/// Entrée `register(target, held, token)` d'une
+/// [`ObjKind::FinReg`] — la `target` reste une référence faible.
+pub struct FinRegEntry {
+    /// Cible surveillée (non tracée).
+    pub target: ObjId,
+    /// Valeur passée au cleanup callback.
+    pub held: Value,
+    /// Jeton de `unregister` (`Undefined` si omis).
+    pub token: Value,
+}
+
 pub enum ObjKind {
     /// Plain `{}`.
     Ordinary,
@@ -510,10 +531,32 @@ pub enum ObjKind {
         /// (generator `return v`; `Undefined` for plain iterators).
         ret: Value,
     },
-    /// `Symbol(desc)` — unique identity per alloc (`===` by `ObjId`,
-    /// `typeof` → `"symbol"`). Well-known symbols stay string
-    /// sentinels (`SYM_ITERATOR` — prop keys are strings).
-    Symbol(Option<String>),
+    /// `Symbol(desc)` — identité unique par alloc (`===` par
+    /// `ObjId`, `typeof` → `"symbol"`). `key` est la clé-propriété
+    /// unique du symbole : `\u{f130}sym{N}` pour les anonymes,
+    /// sentinelle bien connue (`Symbol.iterator`…) pour les
+    /// well-knowns — `o[sym]` indexe `key`, garantissant que deux
+    /// symboles de même description ne collisionnent jamais.
+    Symbol {
+        /// Description affichée par `toString`/`description`.
+        desc: Option<String>,
+        /// Clé-propriété sentinelle unique.
+        key: String,
+    },
+    /// `new WeakRef(target)` — la cible n'est **pas** tracée par
+    /// le GC (vraie référence faible) ; `deref()` rend `undefined`
+    /// une fois la cible collectée.
+    WeakRef(ObjId),
+    /// `new FinalizationRegistry(cb)` — `cb`, `held` et `token`
+    /// sont tracés, les cibles non. Après chaque collecte, le
+    /// moteur draine les entrées mortes et enfile `cb(held)` en
+    /// microtask (spec : cleanup jamais synchrone).
+    FinReg {
+        /// Cleanup callback.
+        cb: Value,
+        /// `(target, heldValue, unregisterToken)` par `register`.
+        entries: Vec<FinRegEntry>,
+    },
     /// `new Proxy(target, handler)` — `[[ProxyTarget]]` +
     /// `[[ProxyHandler]]` (`None` une fois révoqué → toute
     /// opération lève `TypeError`). Toutes les méthodes internes

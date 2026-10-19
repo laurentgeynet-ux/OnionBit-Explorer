@@ -3093,8 +3093,8 @@ fn array_from_async() {
 
 #[test]
 fn for_await_and_async_iterator() {
-    // `Symbol.asyncIterator` exposé.
-    assert_eq!(ev_str("typeof Symbol.asyncIterator"), "string");
+    // `Symbol.asyncIterator` exposé (vrai symbole depuis JS-C13).
+    assert_eq!(ev_str("typeof Symbol.asyncIterator"), "symbol");
     // `for await` sur itérable sync — les valeurs promise sont awaitées.
     assert_eq!(
         seq_str(
@@ -3729,5 +3729,155 @@ fn string_well_formed_and_regexp_escape() {
     assert_eq!(
         ev_str("new RegExp('^' + RegExp.escape('a.b') + '$').test('a.b')"),
         "true"
+    );
+}
+
+// -- JS-C13 : tagged templates, cles-symboles, fn.name, WeakRef -------
+
+#[test]
+fn tagged_templates() {
+    // Appel taggé : strings cuites + substitutions dans l'ordre,
+    // `this` lié pour `o.m`tpl`` comme pour `o.m(…)`.
+    assert_eq!(
+        ev_str(
+            "function tag(s, ...v) { return s.join('|') + '#' + v.join(','); } \
+                tag`x${1}y${2}z`"
+        ),
+        "x|y|z#1,2"
+    );
+    // `strings.raw` — le chunk brut (source) vs le cooked.
+    assert_eq!(
+        ev_str(
+            "function t(s) { return s[0].length + ',' + s.raw[0].length; } \
+                t`a\\nb`"
+        ),
+        "3,4"
+    );
+    assert_eq!(
+        ev_str(
+            "var o = {n: 7, m: function (s) { return this.n + ',' + s[0]; } }; \
+                o.m`hello`"
+        ),
+        "7,hello"
+    );
+    // `String.raw` — statique spec (lit `.raw`, `length`, indices).
+    assert_eq!(ev_str("String.raw`a${0}b${1}c`"), "a0b1c");
+    assert_eq!(ev_str("String.raw({raw: ['a', 'b', 'c']}, 1, 2)"), "a1b2c");
+    // `?.` + template → SyntaxError (spec — chaîne optionnelle).
+    assert_eq!(
+        ev_str("try { eval('var o = {m(){}}; o?.m`x`'); 'no' } catch (e) { e.name }"),
+        "SyntaxError"
+    );
+}
+
+#[test]
+fn symbol_keys_unique() {
+    // Deux `Symbol('x')` distincts → deux clés distinctes (bug
+    // historique : collision par description `"Symbol(x)"`).
+    assert_eq!(
+        ev_str(
+            "var s1 = Symbol('x'), s2 = Symbol('x'); var o = {}; \
+                o[s1] = 1; o[s2] = 2; o[s1] + ',' + o[s2]"
+        ),
+        "1,2"
+    );
+    // Well-knowns = vraies valeurs symbole.
+    assert_eq!(
+        ev_str("typeof Symbol.iterator + ',' + typeof Symbol('a')"),
+        "symbol,symbol"
+    );
+    assert_eq!(ev_str("String(Symbol.iterator)"), "Symbol(Symbol.iterator)");
+    // `getOwnPropertySymbols` rend les symboles ; `getOwnPropertyNames`
+    // les exclut (spec).
+    assert_eq!(
+        ev_str(
+            "var s = Symbol('s'); var o = {}; o[s] = 1; \
+                Object.getOwnPropertySymbols(o)[0] === s"
+        ),
+        "true"
+    );
+    assert_eq!(
+        ev_str(
+            "var o = {}; o[Symbol('a')] = 1; o.b = 2; \
+                Object.getOwnPropertyNames(o).join(',')"
+        ),
+        "b"
+    );
+    // `Symbol.for` — même symbole via le registry → même clé.
+    assert_eq!(
+        ev_str("var o = {}; o[Symbol.for('k')] = 7; o[Symbol.for('k')]"),
+        "7"
+    );
+    // `Symbol.iterator` comme clé de protocole.
+    assert_eq!(
+        ev_str("var o = {}; o[Symbol.iterator] = function*() { yield 4; }; [...o][0]"),
+        "4"
+    );
+    // `Symbol.dispose`/`asyncDispose` exposés.
+    assert_eq!(
+        ev_str("typeof Symbol.dispose + ',' + typeof Symbol.asyncDispose"),
+        "symbol,symbol"
+    );
+}
+
+#[test]
+fn function_names() {
+    assert_eq!(ev_str("function foo() {} foo.name"), "foo");
+    assert_eq!(ev_str("(function () {}).name === ''"), "true");
+    assert_eq!(ev_str("parseInt.name"), "parseInt");
+    assert_eq!(ev_str("function f() {} f.bind(null).name"), "bound f");
+    assert_eq!(ev_str("Function.prototype.name === ''"), "true");
+    // Propriété configurable : un own `name` prime sur la synthèse.
+    assert_eq!(
+        ev_str(
+            "var f = function () {}; \
+                Object.defineProperty(f, 'name', {value: 'x'}); f.name"
+        ),
+        "x"
+    );
+}
+
+#[test]
+fn weakref_finreg() {
+    assert_eq!(
+        ev_str("var o = {}; var w = new WeakRef(o); w.deref() === o"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("try { new WeakRef(5); 'no' } catch (e) { e.name }"),
+        "TypeError"
+    );
+    assert_eq!(
+        ev_str("try { new FinalizationRegistry(5); 'no' } catch (e) { e.name }"),
+        "TypeError"
+    );
+    assert_eq!(
+        ev_str(
+            "var fr = new FinalizationRegistry(function () {}); \
+                var t = {}; fr.register(t, 'h', 'tok'); fr.unregister('tok')"
+        ),
+        "true"
+    );
+    // Vraie faiblesse : après collecte `deref()` → `undefined`, et
+    // le cleanup `cb(held)` part en microtask.
+    let mut e = Engine::new();
+    e.eval(
+        "globalThis.done = []; \
+         var fr = new FinalizationRegistry(function (h) { done.push(h); }); \
+         (function () { var t = {}; globalThis.wr = new WeakRef(t); \
+                        fr.register(t, 'held-x'); })()",
+    )
+    .unwrap();
+    e.collect();
+    assert_eq!(
+        e.eval("wr.deref() === undefined")
+            .map(|v| e.describe(v))
+            .unwrap(),
+        "true"
+    );
+    e.run_microtasks().unwrap();
+    assert_eq!(
+        e.eval("done.join(',')").map(|v| e.describe(v)).unwrap(),
+        "held-x"
     );
 }
