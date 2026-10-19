@@ -253,10 +253,14 @@ impl Heap {
                     push_value(out, *h);
                 }
             }
+            ObjKind::DataView { buffer, .. } | ObjKind::TypedArray { buffer, .. } => {
+                push_value(out, *buffer);
+            }
             ObjKind::Ordinary
             | ObjKind::RegExp(_)
             | ObjKind::Symbol(_)
-            | ObjKind::FetchResponse { .. } => {}
+            | ObjKind::FetchResponse { .. }
+            | ObjKind::ByteBuf(_) => {}
         }
     }
 
@@ -516,6 +520,166 @@ pub enum ObjKind {
         /// Body text.
         body: String,
     },
+    /// `ArrayBuffer` — fixed byte store shared by views (element
+    /// writes through one view are visible through the others).
+    ByteBuf(Vec<u8>),
+    /// `DataView` — byte window over a `ByteBuf` object.
+    DataView {
+        /// Backing `ObjKind::ByteBuf` object.
+        buffer: Value,
+        /// Byte offset within the buffer.
+        offset: usize,
+        /// Viewed byte length.
+        len: usize,
+    },
+    /// `%TypedArray%` view (`Uint8Array`, `Float64Array`…) over a
+    /// `ByteBuf` — indexed reads/writes convert through [`TaKind`].
+    TypedArray {
+        /// Element kind (width + read/write semantics).
+        ta: TaKind,
+        /// Backing `ObjKind::ByteBuf` object.
+        buffer: Value,
+        /// Byte offset within the buffer.
+        offset: usize,
+        /// Element count.
+        len: usize,
+    },
+}
+
+/// Element kind of a [`ObjKind::TypedArray`] view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaKind {
+    /// `Int8Array`.
+    I8,
+    /// `Uint8Array`.
+    U8,
+    /// `Uint8ClampedArray` — saturating writes.
+    U8C,
+    /// `Int16Array` (little-endian).
+    I16,
+    /// `Uint16Array`.
+    U16,
+    /// `Int32Array`.
+    I32,
+    /// `Uint32Array`.
+    U32,
+    /// `Float32Array`.
+    F32,
+    /// `Float64Array`.
+    F64,
+}
+
+impl TaKind {
+    /// Byte width of one element.
+    pub fn size(self) -> usize {
+        match self {
+            TaKind::I8 | TaKind::U8 | TaKind::U8C => 1,
+            TaKind::I16 | TaKind::U16 => 2,
+            TaKind::I32 | TaKind::U32 | TaKind::F32 => 4,
+            TaKind::F64 => 8,
+        }
+    }
+
+    /// Constructor/global name (`"Uint8Array"`, …).
+    pub fn name(self) -> &'static str {
+        match self {
+            TaKind::I8 => "Int8Array",
+            TaKind::U8 => "Uint8Array",
+            TaKind::U8C => "Uint8ClampedArray",
+            TaKind::I16 => "Int16Array",
+            TaKind::U16 => "Uint16Array",
+            TaKind::I32 => "Int32Array",
+            TaKind::U32 => "Uint32Array",
+            TaKind::F32 => "Float32Array",
+            TaKind::F64 => "Float64Array",
+        }
+    }
+
+    /// All kinds in spec order (for the `install` loop).
+    pub const ALL: [TaKind; 9] = [
+        TaKind::I8,
+        TaKind::U8,
+        TaKind::U8C,
+        TaKind::I16,
+        TaKind::U16,
+        TaKind::I32,
+        TaKind::U32,
+        TaKind::F32,
+        TaKind::F64,
+    ];
+
+    /// Index used as the ctor bound-arg (`ta_ctor` dispatch).
+    pub fn index(self) -> usize {
+        match self {
+            TaKind::I8 => 0,
+            TaKind::U8 => 1,
+            TaKind::U8C => 2,
+            TaKind::I16 => 3,
+            TaKind::U16 => 4,
+            TaKind::I32 => 5,
+            TaKind::U32 => 6,
+            TaKind::F32 => 7,
+            TaKind::F64 => 8,
+        }
+    }
+
+    /// Inverse of [`TaKind::index`].
+    pub fn from_index(i: usize) -> Option<TaKind> {
+        TaKind::ALL.get(i).copied()
+    }
+
+    /// Read element `i` from `bytes` (little-endian, as spec for
+    /// platform-independent typed arrays).
+    pub fn get(self, bytes: &[u8], i: usize) -> f64 {
+        let o = i * self.size();
+        let b = &bytes[o..o + self.size()];
+        match self {
+            TaKind::I8 => b[0] as i8 as f64,
+            TaKind::U8 | TaKind::U8C => f64::from(b[0]),
+            TaKind::I16 => i16::from_le_bytes([b[0], b[1]]) as f64,
+            TaKind::U16 => u16::from_le_bytes([b[0], b[1]]) as f64,
+            TaKind::I32 => i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64,
+            TaKind::U32 => u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64,
+            TaKind::F32 => f32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64,
+            TaKind::F64 => f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]),
+        }
+    }
+
+    /// `SetValueInBuffer` — convert `v` through the kind's
+    /// conversion (modulo wrap for ints, saturating round for
+    /// `Uint8Clamped`, IEEE narrowing for floats) and store it.
+    pub fn set(self, bytes: &mut [u8], i: usize, v: f64) {
+        let o = i * self.size();
+        match self {
+            TaKind::I8 => bytes[o] = (crate::value::to_int32(v) as i8) as u8,
+            TaKind::U8 => bytes[o] = crate::value::to_uint32(v) as u8,
+            TaKind::U8C => {
+                bytes[o] = if v.is_nan() {
+                    0
+                } else {
+                    v.round().clamp(0.0, 255.0) as u8
+                };
+            }
+            TaKind::I16 => {
+                bytes[o..o + 2].copy_from_slice(&(crate::value::to_int32(v) as i16).to_le_bytes());
+            }
+            TaKind::U16 => {
+                bytes[o..o + 2].copy_from_slice(&(crate::value::to_uint32(v) as u16).to_le_bytes());
+            }
+            TaKind::I32 => {
+                bytes[o..o + 4].copy_from_slice(&crate::value::to_int32(v).to_le_bytes());
+            }
+            TaKind::U32 => {
+                bytes[o..o + 4].copy_from_slice(&crate::value::to_uint32(v).to_le_bytes());
+            }
+            TaKind::F32 => {
+                bytes[o..o + 4].copy_from_slice(&(v as f32).to_le_bytes());
+            }
+            TaKind::F64 => {
+                bytes[o..o + 8].copy_from_slice(&v.to_le_bytes());
+            }
+        }
+    }
 }
 
 impl Object {

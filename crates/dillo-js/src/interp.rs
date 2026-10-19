@@ -138,11 +138,18 @@ pub(crate) struct Protos {
     /// `Proxy.prototype` (les instances n'ont pas de proto fixe —
     /// utilisé seulement pour détecter l'appel construct-only).
     pub proxy: ObjId,
+    /// `ArrayBuffer.prototype`.
+    pub array_buffer: ObjId,
+    /// `DataView.prototype`.
+    pub data_view: ObjId,
+    /// `%TypedArray%.prototype` — proto partagé des 9 protos
+    /// `XxxArray.prototype` (`set`, `subarray`, `keys`…).
+    pub typed_array: ObjId,
 }
 
 impl Protos {
     /// Tous les prototypes — racines GC permanentes.
-    fn all(&self) -> [ObjId; 18] {
+    fn all(&self) -> [ObjId; 21] {
         [
             self.object,
             self.function,
@@ -162,6 +169,9 @@ impl Protos {
             self.set,
             self.symbol,
             self.proxy,
+            self.array_buffer,
+            self.data_view,
+            self.typed_array,
         ]
     }
 }
@@ -203,6 +213,9 @@ impl Engine {
         let set = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let symbol = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let proxy = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
+        let array_buffer = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
+        let data_view = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
+        let typed_array = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let global = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -230,6 +243,9 @@ impl Engine {
                 set,
                 symbol,
                 proxy,
+                array_buffer,
+                data_view,
+                typed_array,
             },
             rng: seed | 1,
             t0: Instant::now(),
@@ -254,6 +270,7 @@ impl Engine {
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
         crate::json::install(&mut e);
+        crate::typed_array::install(&mut e);
         e
     }
 
@@ -1027,8 +1044,12 @@ impl Engine {
                     }
                 }
                 if let Some(o) = self.heap.obj(id) {
-                    if let ObjKind::Array(elems) = &o.kind {
-                        return Ok(elems.clone());
+                    match &o.kind {
+                        ObjKind::Array(elems) => return Ok(elems.clone()),
+                        ObjKind::TypedArray { .. } => {
+                            return Ok(self.ta_elements(&o.kind));
+                        }
+                        _ => {}
                     }
                 }
                 Err(self.type_error("object is not iterable"))
@@ -1218,7 +1239,97 @@ impl Engine {
                 });
             }
         }
+        // Vues binaires — synthèse des props dérivées
+        // (`length`/`byteLength`/`byteOffset`/`buffer`) et des
+        // éléments indexés, comme pour `Array`.
+        if let Some(p) = self.ta_prop(&o.kind, key) {
+            return Some(p);
+        }
         o.find(key)
+    }
+
+    /// Propriété synthétisée d'un `ArrayBuffer`/`DataView`/view
+    /// typée — `None` si `kind` n'est pas une vue binaire ou `key`
+    /// n'est pas une prop dérivée/index valide.
+    fn ta_prop(&self, kind: &ObjKind, key: &str) -> Option<Prop> {
+        use crate::heap::PropAttrs;
+        let fixed = |value| Prop::Data {
+            value,
+            attrs: PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: false,
+            },
+        };
+        match kind {
+            ObjKind::ByteBuf(buf) if key == "byteLength" => {
+                Some(fixed(Value::Num(buf.len() as f64)))
+            }
+            ObjKind::DataView {
+                buffer,
+                offset,
+                len,
+            } => match key {
+                "byteLength" => Some(fixed(Value::Num(*len as f64))),
+                "byteOffset" => Some(fixed(Value::Num(*offset as f64))),
+                "buffer" => Some(fixed(*buffer)),
+                _ => None,
+            },
+            ObjKind::TypedArray {
+                ta,
+                buffer,
+                offset,
+                len,
+            } => match key {
+                "length" => Some(fixed(Value::Num(*len as f64))),
+                "byteLength" => Some(fixed(Value::Num((*len * ta.size()) as f64))),
+                "byteOffset" => Some(fixed(Value::Num(*offset as f64))),
+                "buffer" => Some(fixed(*buffer)),
+                _ => {
+                    let i = array_index(key)?;
+                    if i >= *len {
+                        return None;
+                    }
+                    let Value::Obj(bid) = buffer else { return None };
+                    let Some(ObjKind::ByteBuf(bytes)) = self.heap.obj(*bid).map(|b| &b.kind) else {
+                        return None;
+                    };
+                    let region = bytes.get(*offset..*offset + *len * ta.size())?;
+                    let v = ta.get(region, i);
+                    Some(Prop::Data {
+                        value: Value::Num(v),
+                        attrs: PropAttrs {
+                            writable: true,
+                            enumerable: true,
+                            configurable: false,
+                        },
+                    })
+                }
+            },
+            _ => None,
+        }
+    }
+
+    /// Éléments d'une vue typée — `Vec<Value>` de nombres lus dans
+    /// le buffer (partagé avec `iter_values` et les méthodes de
+    /// `typed_array.rs`).
+    pub(crate) fn ta_elements(&self, kind: &ObjKind) -> Vec<Value> {
+        if let ObjKind::TypedArray {
+            ta,
+            buffer: Value::Obj(bid),
+            offset,
+            len,
+        } = kind
+        {
+            if let Some(ObjKind::ByteBuf(bytes)) = self.heap.obj(*bid).map(|b| &b.kind) {
+                let end = (*offset + *len * ta.size()).min(bytes.len());
+                let region = &bytes[(*offset).min(end)..end];
+                return (0..region.len() / ta.size())
+                    .map(|i| Value::Num(ta.get(region, i)))
+                    .collect();
+            }
+        }
+        Vec::new()
     }
 
     /// First `Prop` found on `id`'s prototype chain.
@@ -1462,6 +1573,32 @@ impl Engine {
     /// (non-writable, non-extensible, frozen). Le caller décide
     /// silence sloppy vs `TypeError` strict.
     pub(crate) fn set_prop(&mut self, id: ObjId, key: &str, v: Value) -> bool {
+        // Élément indexé d'une vue typée : la cible est le *buffer*
+        // partagé, pas la vue ; hors-bornes canonique → ignoré
+        // (spec `IntegerIndexedElementSet` retourne `true`).
+        let ta_t = match self.heap.obj(id).map(|o| &o.kind) {
+            Some(ObjKind::TypedArray {
+                ta,
+                buffer,
+                offset,
+                len,
+            }) => array_index(key).map(|i| (*ta, *buffer, *offset, i, i < *len)),
+            _ => None,
+        };
+        if let Some((ta, Value::Obj(bid), off, i, in_range)) = ta_t {
+            if !in_range {
+                return true;
+            }
+            let n = self.to_number(v).unwrap_or(f64::NAN);
+            if let Some(b) = self.heap.obj_mut(bid) {
+                if let ObjKind::ByteBuf(bytes) = &mut b.kind {
+                    if off <= bytes.len() {
+                        ta.set(&mut bytes[off..], i, n);
+                    }
+                }
+            }
+            return true;
+        }
         let Some(o) = self.heap.obj_mut(id) else {
             return false;
         };
@@ -1530,6 +1667,13 @@ impl Engine {
     }
 
     fn delete_prop(&mut self, id: ObjId, key: &str) -> bool {
+        // Élément de vue typée — non configurable dans la plage
+        // (spec : `delete ta[i]` → `false`, hors-bornes → `true`).
+        if let Some(ObjKind::TypedArray { len, .. }) = self.heap.obj(id).map(|o| &o.kind) {
+            if let Some(i) = array_index(key) {
+                return i >= *len;
+            }
+        }
         if let Some(o) = self.heap.obj_mut(id) {
             if let ObjKind::Array(elems) = &mut o.kind {
                 if key == "length" {
@@ -1586,10 +1730,18 @@ impl Engine {
     pub(crate) fn own_keys(&self, id: ObjId) -> Vec<String> {
         let mut out = Vec::new();
         if let Some(o) = self.heap.obj(id) {
-            if let ObjKind::Array(elems) = &o.kind {
-                for i in 0..elems.len() {
-                    out.push(i.to_string());
+            match &o.kind {
+                ObjKind::Array(elems) => {
+                    for i in 0..elems.len() {
+                        out.push(i.to_string());
+                    }
                 }
+                ObjKind::TypedArray { len, .. } => {
+                    for i in 0..*len {
+                        out.push(i.to_string());
+                    }
+                }
+                _ => {}
             }
             for (k, _) in &o.props {
                 out.push(k.clone());
@@ -1602,10 +1754,18 @@ impl Engine {
     pub(crate) fn own_enum_keys(&self, id: ObjId) -> Vec<String> {
         let mut out = Vec::new();
         if let Some(o) = self.heap.obj(id) {
-            if let ObjKind::Array(elems) = &o.kind {
-                for i in 0..elems.len() {
-                    out.push(i.to_string());
+            match &o.kind {
+                ObjKind::Array(elems) => {
+                    for i in 0..elems.len() {
+                        out.push(i.to_string());
+                    }
                 }
+                ObjKind::TypedArray { len, .. } => {
+                    for i in 0..*len {
+                        out.push(i.to_string());
+                    }
+                }
+                _ => {}
             }
             for (k, p) in &o.props {
                 if p.enumerable() {

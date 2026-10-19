@@ -902,6 +902,9 @@ fn object_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value
             Some(ObjKind::Array(_)) => "Array",
             Some(ObjKind::Fun(_)) => "Function",
             Some(ObjKind::RegExp(_)) => "RegExp",
+            Some(ObjKind::ByteBuf(_)) => "ArrayBuffer",
+            Some(ObjKind::DataView { .. }) => "DataView",
+            Some(ObjKind::TypedArray { ta, .. }) => ta.name(),
             Some(ObjKind::Host(h)) => return Ok(e.str_val(format!("[object {}]", h.class_name()))),
             _ => "Object",
         },
@@ -3275,8 +3278,7 @@ fn string_from_code_point(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
 // -- TextEncoder / TextDecoder (UTF-8 only) ----------------------------
 
 /// `new TextEncoder()` — UTF-8 only (labeled encodings are out of
-/// scope for the mirror engine; `encode` yields a plain Array of
-/// bytes — no `Uint8Array` yet, documented deviation).
+/// scope for the mirror engine; `encode` yields a real `Uint8Array`).
 fn text_encoder_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     let id = e.new_object();
     e.add_method(id, "encode", text_encoder_encode);
@@ -3287,8 +3289,7 @@ fn text_encoder_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value>
 
 fn text_encoder_encode(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let s = e.to_js_string(arg(args, 0))?;
-    let bytes: Vec<Value> = s.bytes().map(|b| Value::Num(f64::from(b))).collect();
-    Ok(e.new_array(bytes))
+    Ok(crate::typed_array::new_u8_array(e, s.into_bytes()))
 }
 
 /// `new TextDecoder(label?)` — UTF-8 (labels parsed but ignored;
@@ -3311,14 +3312,19 @@ fn text_decoder_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
 
 fn text_decoder_decode(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let bytes: Vec<u8> = match arg(args, 0) {
-        Value::Obj(id) => e
-            .iter_values(Value::Obj(id))?
-            .iter()
-            .filter_map(|v| match v {
-                Value::Num(n) => Some(*n as u8),
-                _ => None,
-            })
-            .collect(),
+        // Vue typée / `DataView` / `ArrayBuffer` — ses octets bruts.
+        Value::Obj(id) => match crate::typed_array::bytes_of_value(e, Value::Obj(id)) {
+            Some(b) => b,
+            // iterable/array-like de nombres (`decode([72,105])`).
+            None => e
+                .iter_values(Value::Obj(id))?
+                .iter()
+                .filter_map(|v| match v {
+                    Value::Num(n) => Some(*n as u8),
+                    _ => None,
+                })
+                .collect(),
+        },
         _ => Vec::new(),
     };
     Ok(e.str_val(String::from_utf8_lossy(&bytes).into_owned()))

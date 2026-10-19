@@ -330,6 +330,26 @@ d'intégration, pas par la couverture :
   via trait `ModuleLoader` injecté (`set_module_loader`).
   Approximations documentées : pas de TDZ, specifier =
   identité brute, pas d'ambiguïté `*` (premier gagne).
+- [x] **JS-C6. `ArrayBuffer` / `DataView` / vues typées** :
+  `ObjKind::ByteBuf` (octets fixes partagés), `DataView`,
+  `TypedArray` — les vues référencent leur buffer (tracé GC),
+  `TaKind` porte taille/nom/conversion des 9 kinds (wrap
+  modulo entiers, saturation `Uint8Clamped`, IEEE floats).
+  Indices canoniques + `length`/`byteLength`/`byteOffset`/
+  `buffer`/`BYTES_PER_ELEMENT` synthétisés dans `find_own`/
+  `set_prop`/`delete`/énumération/`iter_values` — la région
+  `byteOffset` est respectée partout. Ctors complets
+  (`len`/`buffer,offset,len`/iterable/array-like/view→view),
+  `from`/`of`, `ArrayBuffer.slice`/`isView`, `DataView`
+  get/set 8 types endianness paramétrable, méthodes
+  `%TypedArray%.prototype` (`set`/`subarray`/`fill`/`slice`/
+  `map`/`filter`/`sort` numérique/`copyWithin`/`keys`/`values`/
+  `entries`/`[Symbol.iterator]`/`at`/reduce/find/every…).
+  `TextEncoder.encode` rend un vrai `Uint8Array`,
+  `TextDecoder.decode` lit vues/`DataView`/buffer.
+  Déviations : props synthétiques = data props (spec :
+  accesseurs proto), pas de `BigInt64Array`/`Atomics`/
+  resizable/`SharedArrayBuffer`.
 - [ ] **JS-C. Couverture par besoin** : `Intl` —
   ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/

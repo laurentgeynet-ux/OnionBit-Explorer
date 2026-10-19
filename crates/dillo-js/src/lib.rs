@@ -57,6 +57,7 @@ mod promise;
 mod regexp;
 mod storage;
 mod timers;
+mod typed_array;
 mod value;
 mod xhr;
 

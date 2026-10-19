@@ -2334,3 +2334,355 @@ fn mod_import_meta_url() {
     let mut e = mod_ev("globalThis.__r = import.meta.url;", &[]);
     assert_eq!(global(&mut e, "__r"), "main.js");
 }
+
+// -- TypedArrays / ArrayBuffer / DataView (JS-C6) --------------------
+
+#[test]
+fn ta_construction_and_indexing() {
+    assert_eq!(num(ev("var a = new Uint8Array(4); a.length")), 4.0);
+    assert_eq!(num(ev("var a = new Uint8Array(4); a[2] = 42; a[2]")), 42.0);
+    assert_eq!(
+        num(ev("var a = new Uint16Array(2); a[0] = 65537; a[0]")),
+        1.0
+    );
+    assert_eq!(num(ev("var a = new Int8Array(1); a[0] = 257; a[0]")), 1.0);
+    assert_eq!(
+        num(ev("var a = new Int8Array(1); a[0] = 128; a[0]")),
+        -128.0
+    );
+    // Uint8Clamped : saturation + arrondi.
+    assert_eq!(
+        num(ev("var a = new Uint8ClampedArray(1); a[0] = 300; a[0]")),
+        255.0
+    );
+    assert_eq!(
+        num(ev("var a = new Uint8ClampedArray(1); a[0] = -5; a[0]")),
+        0.0
+    );
+    assert_eq!(
+        num(ev("var a = new Uint8ClampedArray(1); a[0] = 12.7; a[0]")),
+        13.0
+    );
+}
+
+#[test]
+fn ta_from_iterables_and_kinds() {
+    assert_eq!(
+        ev_str("var a = new Float64Array([1, 2, 3]); a.join('|')"),
+        "1|2|3"
+    );
+    assert_eq!(num(ev("var a = Uint8Array.from([1, 2, 3]); a.length")), 3.0);
+    assert_eq!(num(ev("var a = Uint8Array.of(7, 8); a[1]")), 8.0);
+    assert_eq!(
+        num(ev(
+            "var a = Uint8Array.from([1, 2], function (x) { return x * 10; }); a[1]"
+        )),
+        20.0
+    );
+    // `new TA(otherTA)` — conversion kind→kind.
+    assert_eq!(
+        num(ev(
+            "var s = new Int16Array([-1, 256]); var a = new Uint8Array(s); a[0]"
+        )),
+        255.0
+    );
+    assert_eq!(
+        num(ev(
+            "var s = new Int16Array([-1, 256]); var a = new Uint8Array(s); a[1]"
+        )),
+        0.0
+    );
+}
+
+#[test]
+fn ta_buffer_sharing_and_offsets() {
+    // Deux vues sur le même buffer — écriture croisée visible
+    // (0x01020304 little-endian → octets [04, 03, 02, 01]).
+    assert_eq!(
+        num(ev("var b = new ArrayBuffer(4); var u = new Uint8Array(b); var i = new Int32Array(b); i[0] = 16909060; u[2]")),
+        2.0
+    );
+    assert_eq!(
+        num(ev(
+            "var b = new ArrayBuffer(8); var u = new Uint32Array(b, 4); u[0] = 5; u.byteOffset"
+        )),
+        4.0
+    );
+    assert_eq!(
+        num(ev(
+            "var b = new ArrayBuffer(8); var u = new Uint32Array(b, 4); u.byteLength"
+        )),
+        4.0
+    );
+    assert_eq!(
+        num(ev(
+            "var b = new ArrayBuffer(8); var u = new Uint32Array(b); u.length"
+        )),
+        2.0
+    );
+    assert_eq!(
+        ev_str("var b = new ArrayBuffer(4); var u = new Uint8Array(b); u.buffer === b"),
+        "true"
+    );
+}
+
+#[test]
+fn ta_subarray_and_set() {
+    assert_eq!(
+        ev_str("var a = Uint8Array.of(1, 2, 3, 4, 5); a.subarray(1, 3).join(',')"),
+        "2,3"
+    );
+    // subarray partage le buffer : écrire dans la sous-vue touche la source.
+    assert_eq!(
+        num(ev(
+            "var a = Uint8Array.of(1, 2, 3, 4); var s = a.subarray(1); s[0] = 9; a[1]"
+        )),
+        9.0
+    );
+    // `set` convertit dans le buffer cible.
+    assert_eq!(
+        ev_str("var a = new Uint8Array(4); a.set([7, 8], 1); a.join(',')"),
+        "0,7,8,0"
+    );
+    // set depuis une autre vue typée.
+    assert_eq!(
+        ev_str("var a = new Uint8Array(3); a.set(Uint8Array.of(5, 6)); a.join(',')"),
+        "5,6,0"
+    );
+}
+
+#[test]
+fn ta_methods() {
+    assert_eq!(
+        ev_str("var a = Uint8Array.of(3, 1, 2); a.sort(); a.join(',')"),
+        "1,2,3"
+    );
+    assert_eq!(
+        ev_str("var a = Uint8Array.of(1, 2, 3); a.map(function (x) { return x * 2; }).join(',')"),
+        "2,4,6"
+    );
+    assert_eq!(
+        ev_str(
+            "var a = Uint8Array.of(1, 2, 3, 4); a.filter(function (x) { return x % 2; }).join(',')"
+        ),
+        "1,3"
+    );
+    assert_eq!(
+        ev_str("var a = Uint8Array.of(1, 2, 3); a.slice(1).join(',')"),
+        "2,3"
+    );
+    assert_eq!(
+        ev_str("var a = Uint8Array.of(1, 2, 3); a.reverse().join(',')"),
+        "3,2,1"
+    );
+    assert_eq!(
+        ev_str("var a = Uint8Array.of(9, 9, 9); a.fill(4, 1, 2).join(',')"),
+        "9,4,9"
+    );
+    assert_eq!(num(ev("var a = Uint8Array.of(5, 6, 7); a.indexOf(6)")), 1.0);
+    assert_eq!(
+        num(ev("var a = Uint8Array.of(5, 6, 7); a.lastIndexOf(5)")),
+        0.0
+    );
+    assert_eq!(ev_str("var a = Uint8Array.of(5, 6); a.includes(6)"), "true");
+    assert_eq!(
+        ev_str("var a = Uint8Array.of(5, 6); a.includes(9)"),
+        "false"
+    );
+    assert_eq!(num(ev("var a = Uint8Array.of(5, 6, 7); a.at(-1)")), 7.0);
+    assert_eq!(
+        num(ev(
+            "var a = Uint8Array.of(1, 2, 3); a.reduce(function (s, x) { return s + x; })"
+        )),
+        6.0
+    );
+    assert_eq!(
+        ev_str("var a = Uint8Array.of(1, 2, 3, 4); a.copyWithin(0, 2).join(',')"),
+        "3,4,3,4"
+    );
+    assert_eq!(
+        ev_str("var a = Uint8Array.of(1, 2, 3); a.every(function (x) { return x > 0; })"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("var a = Uint8Array.of(1, 2, 3); a.some(function (x) { return x === 2; })"),
+        "true"
+    );
+    assert_eq!(
+        num(ev(
+            "var a = Uint8Array.of(1, 2, 3); a.find(function (x) { return x > 1; })"
+        )),
+        2.0
+    );
+    assert_eq!(
+        num(ev(
+            "var a = Uint8Array.of(1, 2, 3); a.findIndex(function (x) { return x > 1; })"
+        )),
+        1.0
+    );
+}
+
+#[test]
+fn ta_iteration_and_tostring() {
+    assert_eq!(
+        num(ev(
+            "var a = Uint8Array.of(4, 5); var s = 0; for (var x of a) { s += x; } s"
+        )),
+        9.0
+    );
+    assert_eq!(
+        num(ev(
+            "var a = Uint8Array.of(4, 5); var s = 0; a.forEach(function (x) { s += x; }); s"
+        )),
+        9.0
+    );
+    assert_eq!(
+        ev_str("var a = Uint8Array.of(1, 2); var r = []; for (var p of a.entries()) { r.push(p[0] + '=' + p[1]); } r.join(';')"),
+        "0=1;1=2"
+    );
+    assert_eq!(
+        ev_str("var a = Uint8Array.of(1, 2); var r = []; for (var k of a.keys()) { r.push(k); } r.join(',')"),
+        "0,1"
+    );
+    assert_eq!(
+        ev_str("var a = Uint8Array.of(9, 9); Object.prototype.toString.call(a)"),
+        "[object Uint8Array]"
+    );
+    assert_eq!(ev_str("var a = Uint8Array.of(1, 2); a.toString()"), "1,2");
+    assert_eq!(num(ev("Uint8Array.BYTES_PER_ELEMENT")), 1.0);
+    assert_eq!(num(ev("Float64Array.BYTES_PER_ELEMENT")), 8.0);
+}
+
+#[test]
+fn ta_index_semantics() {
+    // Lecture hors bornes → undefined ; écriture hors bornes ignorée.
+    assert_eq!(
+        ev_str("var a = new Uint8Array(2); a[5] === undefined"),
+        "true"
+    );
+    assert_eq!(ev_str("var a = new Uint8Array(2); a[9] = 3; a.length"), "2");
+    // delete sur un index → false (spec).
+    assert_eq!(ev_str("var a = new Uint8Array(2); delete a[0]"), "false");
+    // Indices non canoniques → props ordinaires.
+    assert_eq!(
+        num(ev("var a = new Uint8Array(2); a['1.5'] = 7; a['1.5']")),
+        7.0
+    );
+    // NaN → 0 via conversion ToUint8.
+    assert_eq!(num(ev("var a = new Uint8Array(1); a[0] = 'x'; a[0]")), 0.0);
+    // Object.keys = indices + props.
+    assert_eq!(
+        ev_str("var a = new Uint8Array(2); a.foo = 1; Object.keys(a).join(',')"),
+        "0,1,foo"
+    );
+}
+
+#[test]
+fn arraybuffer_and_isview() {
+    assert_eq!(num(ev("var b = new ArrayBuffer(9); b.byteLength")), 9.0);
+    assert_eq!(
+        num(ev(
+            "var b = new ArrayBuffer(8); var s = b.slice(2, 5); s.byteLength"
+        )),
+        3.0
+    );
+    assert_eq!(
+        ev_str("var b = new ArrayBuffer(4); var u = new Uint8Array(b); u[0] = 7; var s = b.slice(0, 2); new Uint8Array(s)[0]"),
+        "7"
+    );
+    assert_eq!(
+        ev_str("var b = new ArrayBuffer(2); ArrayBuffer.isView(new Uint8Array(b))"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("ArrayBuffer.isView(new DataView(new ArrayBuffer(2)))"),
+        "true"
+    );
+    assert_eq!(ev_str("ArrayBuffer.isView([])"), "false");
+}
+
+#[test]
+fn dataview_endianness() {
+    // Big-endian par défaut, little-endian opt-in.
+    assert_eq!(
+        num(ev("var b = new ArrayBuffer(4); var u = new Uint8Array(b); u[0] = 1; u[1] = 2; var d = new DataView(b); d.getUint16(0)")),
+        258.0
+    );
+    assert_eq!(
+        num(ev("var b = new ArrayBuffer(4); var u = new Uint8Array(b); u[0] = 1; u[1] = 2; var d = new DataView(b); d.getUint16(0, true)")),
+        513.0
+    );
+    // setUint32 LE + lecture octet par octet.
+    assert_eq!(
+        num(ev("var d = new DataView(new ArrayBuffer(8)); d.setUint32(0, 0xDEADBEEF, true); new Uint8Array(d.buffer)[3]")),
+        f64::from(0xDE)
+    );
+    assert_eq!(
+        num(ev(
+            "var d = new DataView(new ArrayBuffer(8)); d.setInt8(0, -5); d.getUint8(0)"
+        )),
+        251.0
+    );
+    assert_eq!(
+        num(ev("var d = new DataView(new ArrayBuffer(8)); d.setFloat64(0, 1.5, true); d.getFloat64(0, true)")),
+        1.5
+    );
+    assert_eq!(
+        num(ev(
+            "var d = new DataView(new ArrayBuffer(8)); d.setInt16(1, -2); d.getInt16(1)"
+        )),
+        -2.0
+    );
+    // props.
+    assert_eq!(
+        num(ev("var b = new ArrayBuffer(8); var d = new DataView(b, 2, 4); d.byteOffset + d.byteLength")),
+        6.0
+    );
+    // hors bornes → RangeError ; arg non-buffer → TypeError.
+    let mut e = Engine::new();
+    let err = e
+        .eval("var d = new DataView(new ArrayBuffer(2)); d.getInt32(0)")
+        .unwrap_err();
+    assert!(err.to_string().contains("RangeError"), "{err}");
+    let mut e = Engine::new();
+    let err = e.eval("new DataView([])").unwrap_err();
+    assert!(err.to_string().contains("TypeError"), "{err}");
+}
+
+#[test]
+fn ta_text_encoder_decoder() {
+    // encode → Uint8Array réel ; decode accepte vues et buffers.
+    assert_eq!(
+        ev_str("var u = new TextEncoder().encode('hé'); u instanceof Uint8Array"),
+        "true"
+    );
+    assert_eq!(
+        num(ev("var u = new TextEncoder().encode('hé'); u.length")),
+        3.0
+    );
+    assert_eq!(
+        ev_str("var u = new TextEncoder().encode('hé'); new TextDecoder().decode(u)"),
+        "hé"
+    );
+    assert_eq!(
+        ev_str("var b = new TextEncoder().encode('abc').buffer; new TextDecoder().decode(new DataView(b, 1))"),
+        "bc"
+    );
+    assert_eq!(
+        ev_str("var b = new TextEncoder().encode('abc').buffer; new TextDecoder().decode(b)"),
+        "abc"
+    );
+}
+
+#[test]
+fn ta_gc_retention() {
+    // La vue retient son buffer (créés dans une autre portée).
+    let mut e = Engine::new();
+    e.eval("globalThis.__u = (function () { var b = new ArrayBuffer(2); var u = new Uint8Array(b); u[0] = 77; return u; })();")
+        .unwrap_or_else(|err| panic!("{err}"));
+    e.collect();
+    assert_eq!(
+        num(e.eval("__u[0]").unwrap_or_else(|err| panic!("{err}"))),
+        77.0
+    );
+}

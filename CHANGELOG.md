@@ -447,6 +447,37 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`upper(v) == upper(borne)`) ; backrefs wrappées `(?i:…)`.
   16 assertions de régression `tests/lang.rs`
   (`regexp_js_c3_semantics`).
+- **JS-C6 — `ArrayBuffer`/`DataView`/vues typées** (`dillo-js`) :
+  `ObjKind::ByteBuf` (buffer d'octets fixe, proto
+  `ArrayBuffer.prototype`), `ObjKind::DataView {buffer, offset,
+  len}`, `ObjKind::TypedArray {ta, buffer, offset, len}` —
+  les vues référencent leur buffer (tracé GC, la vue retient
+  la mémoire). `TaKind` : 9 kinds (`Int8`/`Uint8`/`Uint8Clamped`/
+  `Int16`/`Uint16`/`Int32`/`Uint32`/`Float32`/`Float64`) avec
+  `size`/`name`/`get`/`set` — little-endian vues, wrap modulo
+  entiers (`to_int32`/`to_uint32`), saturation arrondie
+  `Uint8Clamped`, `NaN`→0. Indices canoniques et props
+  `length`/`byteLength`/`byteOffset`/`buffer`/`BYTES_PER_ELEMENT`
+  synthétisés (`find_own`/`set_prop`/`delete`/`own_keys`/
+  `iter_values`), région `byteOffset` honorée dans toutes les
+  lectures/écritures. Ctors : `new TA(len)`, `new TA(buffer,
+  byteOffset?, length?)` (alignement/`RangeError` spec),
+  `new TA(iterable|array-like|view)`, `TA.from(src, mapfn?)`,
+  `TA.of(...)` ; `ArrayBuffer(len)`/`slice`/`isView` ;
+  `DataView(buffer, off?, len?)` + `get/set{Int,Uint,Float}8/16/32/64`
+  endianness paramétrable (BE défaut). Méthodes vues : `set`,
+  `subarray` (partage le buffer), `fill`, `slice`, `map`, `filter`,
+  `forEach`, `join`/`toString`, `indexOf`/`lastIndexOf`/`includes`
+  (SameValueZero), `every`/`some`/`find`/`findIndex`, `at`,
+  `reduce`/`reduceRight`, `reverse`, `sort` (numérique par défaut,
+  comparateur JS optionnel), `copyWithin`, `keys`/`values`/`entries`/
+  `[Symbol.iterator]`. `TextEncoder.encode` → vrai `Uint8Array`,
+  `TextDecoder.decode` lit `Uint8Array`/`DataView`/`ArrayBuffer`.
+  Déviations : props = data props (spec : accesseurs proto),
+  pas de `BigInt64Array`/`BigUint64Array`/`Atomics`/resizable/
+  `SharedArrayBuffer`/`transfer`. 10 tests `tests/lang.rs`
+  (construction, conversions, partage buffer, offsets, endianness,
+  itération, GC, TextEncoder/Decoder). test262 toujours 859/859.
 - **JS-C5 — Modules ES** (`dillo-js`) : `parse_module` (but
   module : `import`/`export` top-level, toujours strict) ;
   **live bindings** via `EnvCell::Alias(EnvRef, name)` —
