@@ -1256,3 +1256,70 @@ async fn webfont_register_bounded() {
     assert!(t.last().is_some_and(|(_, q, _)| q == "/a.ttf"));
     assert_eq!(t.calls(), 2);
 }
+
+// ---- Étape 44 (moteur) : navigation pilotée par script ----
+
+#[tokio::test]
+async fn script_location_href_navigates() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        r#"<!doctype html><html><body><script>
+location.href = "/cible";
+</script></body></html>"#,
+    );
+    t.route("/cible", 200, "<!doctype html><title>CI</title><p>dest</p>");
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/p").await.unwrap();
+    // La navigation script s'applique après le chargement :
+    // l'onglet est arrivé sur /cible, entrée d'historique
+    // poussée par `navigate`.
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/cible")
+    );
+}
+
+#[tokio::test]
+async fn script_history_back_moves() {
+    let (mut s, t) = test_session();
+    t.route("/a", 200, "<!doctype html><title>A</title><p>un</p>");
+    t.route(
+        "/b",
+        200,
+        "<!doctype html><html><body><script>history.back();</script></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/a").await.unwrap();
+    s.navigate(id, "http://h.test/b").await.unwrap();
+    // `history.back()` pendant le chargement de /b → retour /a.
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/a")
+    );
+}
+
+#[tokio::test]
+async fn script_location_invalid_url_ignored() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        r#"<!doctype html><html><body><script>
+location.href = "ht!tp://[::1]bad";
+history.go(99);
+</script></body></html>"#,
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/p").await.unwrap();
+    // URL irrésolvable + borne historique : aucune navigation,
+    // aucune erreur — la page reste en place.
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/p")
+    );
+}

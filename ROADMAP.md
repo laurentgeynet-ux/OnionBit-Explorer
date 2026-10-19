@@ -652,7 +652,11 @@ progresse en trois paliers structurants :
   (ADR-0007).
 - [ ] **Étape 44. Web APIs.** `fetch`/`XHR`, `localStorage`/
   `sessionStorage`, History API, `MutationObserver`, workers
-  (bornés).
+  (bornés). *En cours — côté moteur livré : `location.*` et
+  `history.*` deviennent des intentions `NavRequest`
+  drainées par la session (navigation, historique, `go(0)` =
+  reload, borne 8 sauts) ; `fetch`/`XHR`/storage livrés
+  côté `dillo-js` par l'équipe JS (JS-C16+).*
 - [ ] **Étape 45. Médias et graphiques.** `<canvas>` 2D,
   `<video>`/`<audio>` (décodage à arbitrer), `requestAnimationFrame`,
   animations/transitions CSS, **`<svg>` statique** (sous-ensemble —

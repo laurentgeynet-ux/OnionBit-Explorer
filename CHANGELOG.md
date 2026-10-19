@@ -9,6 +9,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 44 (partie moteur) — `location`/`history` →
+  navigation** (`explorer-js`, `explorer-core`) :
+  `JsEngine::drain_nav_requests` + `NavRequest`
+  (`Navigate(url résolue)` / `HistoryGo(delta)`) —
+  `location.href`/`assign`/`replace`/`reload` et
+  `history.back`/`forward`/`go` de `dillo-js` deviennent des
+  intentions en file, jamais de callback ré-entrant dans le
+  pipeline. `navigate_request` reste feuille du graphe
+  d'appels : l'entrée d'historique est poussée **avant** le
+  drain script (un `history.go` en vol voit l'index réel,
+  une redirection pousse sa propre entrée), `Navigated`
+  n'est émis que si le document final est celui demandé.
+  `drain_script_nav` itératif borné `MAX_NAV_HOPS` = 8 —
+  appliqué après chargement, événement DOM, jobs en attente
+  et soumission de formulaire ; `history.go(0)` =
+  rechargement (spec HTML). 4 tests session
+  (`location.href`, URL invalide ignorée, `history.back`,
+  soumission) + drain/lecture URL adaptateur.
+
 - **Étape 46 — Webfonts + sous-ressources CSS**
   (`explorer-css`, `explorer-render`, `explorer-core`,
   ADR-0016) : `@font-face` conservé par `StyleEngine` avec

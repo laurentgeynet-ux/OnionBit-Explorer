@@ -19,7 +19,7 @@ use explorer_css::{FontSrc, Origin, StyleEngine, StyleEnv};
 use explorer_dom::{Dom, DomError, NodeId};
 use explorer_html::encoding::decode_sniffed;
 use explorer_html::TreeBuilder;
-use explorer_js::{JsEngine, JsFactory};
+use explorer_js::{JsEngine, JsFactory, NavRequest};
 use explorer_layout::font::FontSource;
 use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, LayoutBox};
 use explorer_net::http::{HttpTransport, Method, Request};
@@ -549,16 +549,12 @@ impl Session {
             return Err(CoreError::UnknownTab(tab));
         }
         let url = Url::parse(url).map_err(|e| CoreError::Url(e.to_string()))?;
-        let prev = self.tabs.get(&tab).and_then(|t| t.title.clone());
-        match self.navigate_to(tab, url.clone()).await {
-            Ok(title) => {
-                // Historique : tronque le « futur » puis pousse.
-                if let Some(entry) = self.tabs.get_mut(&tab) {
-                    entry.hist.truncate(entry.hist_idx + 1);
-                    entry.hist.push(url.clone());
-                    entry.hist_idx = entry.hist.len() - 1;
-                }
-                self.emit_navigated(tab, &url, title, prev.as_deref());
+        // `push` = l'entrée rejoint l'historique ; `Navigated`
+        // est émis par `navigate_request` si le document final
+        // est bien celui demandé (redirection script exclue).
+        match self.navigate_request(tab, Request::get(url), true).await {
+            Ok(_) => {
+                self.drain_script_nav(tab).await;
                 Ok(())
             }
             Err(e) => Err(self.emit_error(tab, e)),
@@ -579,10 +575,9 @@ impl Session {
                 CoreError::UnknownTab(tab)
             });
         };
-        let prev = self.tabs.get(&tab).and_then(|t| t.title.clone());
         match self.navigate_to(tab, url.clone()).await {
-            Ok(title) => {
-                self.emit_navigated(tab, &url, title, prev.as_deref());
+            Ok(_) => {
+                self.drain_script_nav(tab).await;
                 Ok(())
             }
             Err(e) => Err(self.emit_error(tab, e)),
@@ -597,7 +592,9 @@ impl Session {
     /// [`CoreError::UnknownTab`] ou [`CoreError::EmptyDocument`]
     /// s'il n'y a pas de page précédente.
     pub async fn go_back(&mut self, tab: TabId) -> Result<(), CoreError> {
-        self.history_move(tab, -1).await
+        self.history_move(tab, -1).await?;
+        self.drain_script_nav(tab).await;
+        Ok(())
     }
 
     /// Avance dans l'historique local de l'onglet.
@@ -606,7 +603,9 @@ impl Session {
     /// [`CoreError::UnknownTab`] ou [`CoreError::EmptyDocument`]
     /// s'il n'y a pas de page suivante.
     pub async fn go_forward(&mut self, tab: TabId) -> Result<(), CoreError> {
-        self.history_move(tab, 1).await
+        self.history_move(tab, 1).await?;
+        self.drain_script_nav(tab).await;
+        Ok(())
     }
 
     /// Déplacement dans l'historique — `delta` = ±1.
@@ -617,13 +616,18 @@ impl Session {
             return Err(CoreError::EmptyDocument);
         };
         let url = entry.hist[idx].clone();
-        let prev = entry.title.clone();
+        // `Navigated` est émis par `navigate_request` — sauf
+        // redirection script (alors `entry.url` diffère et la
+        // cible a émis pour elle-même).
         match self.navigate_to(tab, url.clone()).await {
-            Ok(title) => {
+            Ok(_) => {
                 if let Some(entry) = self.tabs.get_mut(&tab) {
                     entry.hist_idx = idx;
                 }
-                self.emit_navigated(tab, &url, title, prev.as_deref());
+                // Pas de drain ici : les appelants publics
+                // (`go_back/forward`) le font après — sinon
+                // `drain_script_nav` → `history_move` →
+                // `drain_script_nav` bouclerait l'inférence.
                 Ok(())
             }
             Err(e) => Err(self.emit_error(tab, e)),
@@ -631,20 +635,26 @@ impl Session {
     }
 
     /// Fetch → parse → état de l'onglet → rendu. Ne touche
-    /// pas à l'historique. Renvoie le titre de la page.
+    /// pas à l'historique (reload, déplacements). Renvoie le
+    /// titre de la page.
     async fn navigate_to(&mut self, tab: TabId, url: Url) -> Result<Option<String>, CoreError> {
-        self.navigate_request(tab, Request::get(url)).await
+        self.navigate_request(tab, Request::get(url), false).await
     }
 
     /// Variante [`navigate_to`](Self::navigate_to) prenant une
     /// requête complète — soumission de formulaire POST
     /// (corps urlencodé) ; GET passe par le wrapper.
+    /// `push` = l'URL rejoint l'historique après le rendu
+    /// (navigate, soumission) ; `false` = déplacement/reload.
     async fn navigate_request(
         &mut self,
         tab: TabId,
         req: Request,
+        push: bool,
     ) -> Result<Option<String>, CoreError> {
         let url = req.url.clone();
+        // Titre avant écrasement — pour `emit_navigated`.
+        let prev_title = self.tabs.get(&tab).and_then(|t| t.title.clone());
         let resp = self
             .transport
             .fetch(&req)
@@ -661,7 +671,7 @@ impl Session {
         }
         {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
-            entry.url = Some(url);
+            entry.url = Some(url.clone());
             entry.title.clone_from(&title);
             entry.scroll_y = 0.0;
             entry.focused = None;
@@ -676,7 +686,101 @@ impl Session {
         self.fetch_images(tab).await;
         self.fetch_webfonts(tab).await;
         self.relayout(tab)?;
+        // La page chargée prend sa place dans l'historique
+        // AVANT le drain script : un `history.go` en vol la
+        // voit (index réel), une redirection script pousse sa
+        // propre entrée après la sienne.
+        if push {
+            if let Some(entry) = self.tabs.get_mut(&tab) {
+                entry.hist.truncate(entry.hist_idx + 1);
+                entry.hist.push(url.clone());
+                entry.hist_idx = entry.hist.len() - 1;
+            }
+        }
+        // `Navigated` seulement si le document final est bien
+        // celui demandé : une redirection script a déjà émis
+        // pour sa cible.
+        let final_url = self.tabs.get(&tab).and_then(|t| t.url.clone());
+        if final_url.as_ref() == Some(&url) {
+            self.emit_navigated(tab, &url, title.clone(), prev_title.as_deref());
+        }
         Ok(title)
+    }
+
+    /// Première intention de navigation script exploitable
+    /// (`NavRequest` — étape 44, côté moteur) : `Navigate`
+    /// résolu contre l'URL courante, `HistoryGo` en delta.
+    /// Les intentions inapplicables (URL irrésolvable) sont
+    /// consommées et sautées ; le reste de la file sera
+    /// re-lu au tour suivant de [`drain_script_nav`].
+    fn next_script_nav(&mut self, tab: TabId) -> Option<ScriptNav> {
+        let reqs = self
+            .tabs
+            .get_mut(&tab)
+            .and_then(|e| e.js.as_mut())
+            .map_or_else(Vec::new, |e| e.drain_nav_requests());
+        for r in reqs {
+            match r {
+                NavRequest::Navigate(href) => {
+                    let url = self
+                        .tabs
+                        .get(&tab)
+                        .and_then(|t| t.url.as_ref())
+                        .and_then(|b| Url::resolve(b, &href).ok());
+                    if let Some(u) = url {
+                        return Some(ScriptNav::To(u));
+                    }
+                }
+                NavRequest::HistoryGo(d) => {
+                    // i32 → isize : lossless sur toutes les
+                    // cibles réelles ; sinon MAX garantit le
+                    // refus de borne dans `history_move`.
+                    let delta = isize::try_from(d).unwrap_or(isize::MAX);
+                    return Some(ScriptNav::Go(delta));
+                }
+            }
+        }
+        None
+    }
+
+    /// Draine les intentions de navigation script — après
+    /// chargement, événement DOM ou jobs en attente. Une
+    /// navigation peut en produire d'autres (scripts de la
+    /// page chargée) : boucle bornée par `MAX_NAV_HOPS`,
+    /// jamais de récursion — `navigate_request` reste une
+    /// feuille du graphe d'appels (seul `history_move`,
+    /// boxé, boucle pour la taille du future). `true` si au
+    /// moins une navigation a été appliquée.
+    async fn drain_script_nav(&mut self, tab: TabId) -> bool {
+        const MAX_NAV_HOPS: u8 = 8;
+        let mut applied = false;
+        for _ in 0..MAX_NAV_HOPS {
+            let Some(act) = self.next_script_nav(tab) else {
+                break;
+            };
+            match act {
+                ScriptNav::To(url) => {
+                    let _ = self.navigate_request(tab, Request::get(url), true).await;
+                }
+                ScriptNav::Go(0) => {
+                    // `history.go(0)` = rechargement de
+                    // l'entrée courante (spec HTML).
+                    if let Some(u) = self.tabs.get(&tab).and_then(|t| t.url.clone()) {
+                        let _ = self.navigate_to(tab, u).await;
+                    }
+                }
+                ScriptNav::Go(d) => {
+                    // Box : `history_move` appelle aussi
+                    // `drain_script_nav` — récursion mutuelle
+                    // cassée ici (taille + inférence `Send`).
+                    let mv: std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send + '_>> =
+                        Box::pin(self.history_move(tab, d));
+                    let _ = mv.await;
+                }
+            }
+            applied = true;
+        }
+        applied
     }
 
     /// Fetch des feuilles `<link rel=stylesheet>` — premières
@@ -814,9 +918,18 @@ impl Session {
         if scripts.is_empty() {
             return;
         }
+        let (page_url, hist_len) = self.tabs.get(&tab).map_or_else(
+            || (String::new(), 1),
+            |t| {
+                (
+                    t.url.as_ref().map_or_else(String::new, Url::to_string),
+                    u32::try_from(t.hist.len()).unwrap_or(u32::MAX),
+                )
+            },
+        );
         let mut eng = (f)();
         eng.set_budget(self.js_ops);
-        eng.install_dom(html);
+        eng.install_dom(html, &page_url, hist_len);
         for src in &scripts {
             if let Err(e) = eng.eval(src) {
                 tracing::debug!(tab, error = %e, "script en échec");
@@ -1012,6 +1125,11 @@ impl Session {
                 // un handler peut muter la page (resynchronisée
                 // et re-peinte ici) ou `preventDefault`.
                 let prevented = self.dispatch_click(tab, x, y);
+                // Navigation script (`location`, `history`) :
+                // priorité sur l'action par défaut du clic.
+                if self.drain_script_nav(tab).await {
+                    return Ok(InputOutcome::Navigated);
+                }
                 if let Some(field) = self.field_at(tab, x, y) {
                     if let Some(entry) = self.tabs.get_mut(&tab) {
                         entry.focused = Some(field);
@@ -1047,6 +1165,9 @@ impl Session {
                 // formulaire part avant l'action par défaut.
                 if let Some((form, sub)) = self.submit_at(tab, x, y) {
                     if !prevented && !self.dispatch_dom_event(tab, "submit", form) {
+                        if self.drain_script_nav(tab).await {
+                            return Ok(InputOutcome::Navigated);
+                        }
                         self.submit_form(tab, form, Some(sub)).await?;
                         return Ok(InputOutcome::Navigated);
                     }
@@ -1164,16 +1285,9 @@ impl Session {
                 Request::get(url)
             }
         };
-        let url = req.url.clone();
-        let prev = self.tabs.get(&tab).and_then(|t| t.title.clone());
-        match self.navigate_request(tab, req).await {
-            Ok(title) => {
-                if let Some(entry) = self.tabs.get_mut(&tab) {
-                    entry.hist.truncate(entry.hist_idx + 1);
-                    entry.hist.push(url.clone());
-                    entry.hist_idx = entry.hist.len() - 1;
-                }
-                self.emit_navigated(tab, &url, title, prev.as_deref());
+        match self.navigate_request(tab, req, true).await {
+            Ok(_) => {
+                self.drain_script_nav(tab).await;
                 Ok(())
             }
             Err(e) => Err(self.emit_error(tab, e)),
@@ -1902,4 +2016,15 @@ fn form_url_encode(pairs: &[(String, String)]) -> String {
         .map(|(k, v)| format!("{}={}", enc(k), enc(v)))
         .collect::<Vec<_>>()
         .join("&")
+}
+
+/// Intention de navigation script résolue — produite par
+/// [`Session::next_script_nav`], appliquée par
+/// [`Session::drain_script_nav`].
+enum ScriptNav {
+    /// `location.*` : URL absolue déjà résolue.
+    To(Url),
+    /// `history.go/back/forward` : déplacement relatif
+    /// (0 = rechargement de l'entrée courante).
+    Go(isize),
 }

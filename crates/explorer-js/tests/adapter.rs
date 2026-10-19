@@ -74,14 +74,18 @@ fn null_engine_noops() {
     assert_eq!(eng.eval("anything").unwrap(), "undefined");
     eng.set_budget(1);
     assert_eq!(eng.run_pending(), 0);
-    eng.install_dom("<html></html>");
+    eng.install_dom("<html></html>", "http://h.test/p", 1);
     assert_eq!(eng.sync_dom(), None);
 }
 
 #[test]
 fn install_dom_exposes_document_global() {
     let mut eng = DilloEngine::new();
-    eng.install_dom("<html><body><div id=\"x\">old</div></body></html>");
+    eng.install_dom(
+        "<html><body><div id=\"x\">old</div></body></html>",
+        "http://h.test/p",
+        1,
+    );
     // `document` installé → bindings visibles, pas de dirty.
     assert_eq!(eng.eval("typeof document").unwrap(), "object");
     assert_eq!(eng.sync_dom(), None);
@@ -90,7 +94,11 @@ fn install_dom_exposes_document_global() {
 #[test]
 fn dom_mutation_sets_dirty_and_serializes() {
     let mut eng = DilloEngine::new();
-    eng.install_dom("<html><body><div id=\"x\">old</div></body></html>");
+    eng.install_dom(
+        "<html><body><div id=\"x\">old</div></body></html>",
+        "http://h.test/p",
+        1,
+    );
     eng.eval("document.getElementById('x').textContent = 'NEUF'")
         .unwrap();
     let html = eng.sync_dom().expect("mutation attendue : dirty bit levé");
@@ -103,7 +111,11 @@ fn dom_mutation_sets_dirty_and_serializes() {
 #[test]
 fn dom_untouched_stays_clean() {
     let mut eng = DilloEngine::new();
-    eng.install_dom("<html><body><p>stable</p></body></html>");
+    eng.install_dom(
+        "<html><body><p>stable</p></body></html>",
+        "http://h.test/p",
+        1,
+    );
     // Lecture seule (getElementById) → pas de mutation.
     eng.eval("document.getElementById('p')").unwrap();
     assert_eq!(eng.sync_dom(), None);
@@ -118,7 +130,11 @@ fn path_to_div() -> Vec<(String, u32)> {
 #[test]
 fn dispatch_reaches_mirror_listener() {
     let mut eng = DilloEngine::new();
-    eng.install_dom("<html><body><div id=\"b\">x</div></body></html>");
+    eng.install_dom(
+        "<html><body><div id=\"b\">x</div></body></html>",
+        "http://h.test/p",
+        1,
+    );
     eng.eval(
         "document.getElementById('b').addEventListener('click',\
          function(){this.textContent='HIT'})",
@@ -135,7 +151,7 @@ fn dispatch_skips_implicit_wrappers() {
     let mut eng = DilloEngine::new();
     // Source SANS <html>/<body> : le miroir n'a que le div —
     // le chemin core (avec wrappers) doit quand même l'atteindre.
-    eng.install_dom("<div id=\"b\">x</div>");
+    eng.install_dom("<div id=\"b\">x</div>", "http://h.test/p", 1);
     eng.eval(
         "document.getElementById('b').addEventListener('click',\
          function(){this.textContent='HIT'})",
@@ -148,7 +164,11 @@ fn dispatch_skips_implicit_wrappers() {
 #[test]
 fn dispatch_prevent_default_propagates() {
     let mut eng = DilloEngine::new();
-    eng.install_dom("<html><body><div id=\"b\">x</div></body></html>");
+    eng.install_dom(
+        "<html><body><div id=\"b\">x</div></body></html>",
+        "http://h.test/p",
+        1,
+    );
     eng.eval(
         "document.getElementById('b').addEventListener('click',\
          function(e){e.preventDefault()})",
@@ -160,7 +180,11 @@ fn dispatch_prevent_default_propagates() {
 #[test]
 fn dispatch_bad_path_is_noop() {
     let mut eng = DilloEngine::new();
-    eng.install_dom("<html><body><div id=\"b\">x</div></body></html>");
+    eng.install_dom(
+        "<html><body><div id=\"b\">x</div></body></html>",
+        "http://h.test/p",
+        1,
+    );
     let bogus = vec![("html".into(), 0), ("body".into(), 0), ("table".into(), 0)];
     assert!(!eng.dispatch_event("click", &bogus).unwrap());
     assert_eq!(eng.sync_dom(), None);
@@ -170,4 +194,32 @@ fn dispatch_bad_path_is_noop() {
 fn dispatch_without_mirror_is_noop() {
     let mut eng = DilloEngine::new();
     assert!(!eng.dispatch_event("click", &path_to_div()).unwrap());
+}
+
+#[test]
+fn nav_requests_drained() {
+    let mut eng = DilloEngine::new();
+    eng.install_dom("<html></html>", "http://h.test/p", 3);
+    eng.eval("location.href = '/next'; history.back(); history.go(2);")
+        .unwrap();
+    assert_eq!(
+        eng.drain_nav_requests(),
+        vec![
+            explorer_js::NavRequest::Navigate("/next".to_string()),
+            explorer_js::NavRequest::HistoryGo(-1),
+            explorer_js::NavRequest::HistoryGo(2),
+        ]
+    );
+    // File vidée ; un second drain ne re-rend rien.
+    assert_eq!(eng.drain_nav_requests().len(), 0);
+}
+
+#[test]
+fn location_reads_page_url() {
+    let mut eng = DilloEngine::new();
+    eng.install_dom("<html></html>", "http://h.test/dir/p", 1);
+    let out = eng.eval("location.pathname").unwrap();
+    assert!(out.contains("/dir/p"), "got {out}");
+    let out = eng.eval("history.length").unwrap();
+    assert!(out.contains('1'), "got {out}");
 }

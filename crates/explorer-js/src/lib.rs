@@ -51,6 +51,20 @@ impl From<dillo_js::Error> for JsError {
     }
 }
 
+/// Intention de navigation émise par un script
+/// (`location.assign`/`href=`, `history.go`…) — drainée par
+/// le hôte après l'appel JS (jamais de navigation re-entrante
+/// pendant l'évaluation).
+#[derive(Debug, Clone, PartialEq)]
+pub enum NavRequest {
+    /// `location.href =`/`assign` — cible brute à résoudre
+    /// contre l'URL de la page.
+    Navigate(String),
+    /// `history.go(n)`/`back()`/`forward()` — déplacement
+    /// relatif dans l'historique de session.
+    HistoryGo(i32),
+}
+
 /// Moteur JavaScript vu du navigateur — un contexte par document.
 /// `Send` exigé : la session est partagée derrière l'API.
 pub trait JsEngine: Send {
@@ -71,8 +85,18 @@ pub trait JsEngine: Send {
     /// Installe le DOM miroir du document (bindings `document`,
     /// `navigator`, `window`…). `html` = source du document tel
     /// que reçu — le miroir le re-parse côté moteur.
+    /// `page_url` alimente `location`/`document.URL` ;
+    /// `history_len` alimente `history.length`.
     /// Défaut : pas de bindings (moteur nu).
-    fn install_dom(&mut self, _html: &str) {}
+    fn install_dom(&mut self, _html: &str, _page_url: &str, _history_len: u32) {}
+
+    /// Draine les intentions de navigation accumulées depuis
+    /// le dernier appel — `location`/`history` n'agissent
+    /// jamais en plein vol, la session décide après retour.
+    /// Défaut : rien.
+    fn drain_nav_requests(&mut self) -> Vec<NavRequest> {
+        Vec::new()
+    }
 
     /// Synchronise le DOM miroir → `Some(html)` si des mutations
     /// JS ont eu lieu depuis la dernière synchro (le hôte
@@ -137,6 +161,11 @@ enum Cmd {
     },
     InstallDom {
         html: String,
+        page_url: String,
+        history_len: u32,
+    },
+    DrainNav {
+        tx: Sender<Vec<NavRequest>>,
     },
     DomSync {
         tx: Sender<Option<String>>,
@@ -184,6 +213,11 @@ impl DilloEngine {
         // meurt sur ce thread). Le `Dom` y reste mutable par les
         // bindings ; `DomSync` lit le dirty bit et sérialise.
         let mut jsd: Option<dillo_js::DomRef> = None;
+        // Intentions de navigation script (`location`,
+        // `history`) — hooks `Rc` du thread moteur, drainées
+        // par `DrainNav` (jamais de navigation re-entrante).
+        let nav_q: std::rc::Rc<std::cell::RefCell<Vec<NavRequest>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         while let Ok(cmd) = rx.recv() {
             match cmd {
                 Cmd::Eval { src, tx } => {
@@ -201,7 +235,11 @@ impl DilloEngine {
                         return;
                     }
                 }
-                Cmd::InstallDom { html } => {
+                Cmd::InstallDom {
+                    html,
+                    page_url,
+                    history_len,
+                } => {
                     let d =
                         std::rc::Rc::new(std::cell::RefCell::new(dillo_js::Dom::from_html(&html)));
                     // Le parse initial lève le dirty bit — la
@@ -210,7 +248,25 @@ impl DilloEngine {
                     // les vraies mutations de script.
                     d.borrow().take_dirty();
                     eng.install_dom(&d);
+                    eng.set_page_url(&page_url);
+                    {
+                        let q = nav_q.clone();
+                        let nav: std::rc::Rc<dyn Fn(&str)> = std::rc::Rc::new(move |u| {
+                            q.borrow_mut().push(NavRequest::Navigate(u.to_string()));
+                        });
+                        let q2 = nav_q.clone();
+                        let hist: std::rc::Rc<dyn Fn(i32)> = std::rc::Rc::new(move |n| {
+                            q2.borrow_mut().push(NavRequest::HistoryGo(n));
+                        });
+                        eng.set_nav_hooks(nav, hist, history_len);
+                    }
                     jsd = Some(d);
+                }
+                Cmd::DrainNav { tx } => {
+                    let out = std::mem::take(&mut *nav_q.borrow_mut());
+                    if tx.send(out).is_err() {
+                        return;
+                    }
                 }
                 Cmd::DomSync { tx } => {
                     let out = jsd.as_ref().and_then(|d| {
@@ -277,10 +333,20 @@ impl JsEngine for DilloEngine {
         rx.recv().unwrap_or(0)
     }
 
-    fn install_dom(&mut self, html: &str) {
+    fn install_dom(&mut self, html: &str, page_url: &str, history_len: u32) {
         let _ = self.tx.send(Cmd::InstallDom {
             html: html.to_string(),
+            page_url: page_url.to_string(),
+            history_len,
         });
+    }
+
+    fn drain_nav_requests(&mut self) -> Vec<NavRequest> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainNav { tx }).is_err() {
+            return Vec::new();
+        }
+        rx.recv().unwrap_or_default()
     }
 
     fn sync_dom(&mut self) -> Option<String> {
