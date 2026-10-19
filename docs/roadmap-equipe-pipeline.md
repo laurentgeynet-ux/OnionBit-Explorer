@@ -170,7 +170,7 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   fonte et taille par fragment. Mesuré : `span` → bleu,
   `a[href]` → `#00e` UA, texte direct → couleur du bloc —
   test `color_inline_atteint_le_run`.
-- [ ] **R-19. Rects parents non-bondants → hit-test mort**
+- [x] **R-19. Rects parents non-bondants → hit-test mort**
   (**préempte** — une page qui peint mais ne se clique pas
   est le pire mode d'échec ; lite.ddg entier est mort)
   (bug terrain mission 5, journal `interface-equipes.md`,
@@ -178,12 +178,14 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `hit_test` élague le sous-arbre quand le point sort du
   rect parent — or `<center>` pose son `<form>` HORS de son
   propre rect (`[0 256 1024×192]` vs enfant `y=76.8`) → tout
-  le peint devient incliquable. À arbitrer : rect parent =
-  union de ses enfants à la pose, ou hit-test tolérant sans
-  élagage (perf). Hypothèse connexe à vérifier : le contenu
-  **injecté JS** peint mais non hit-testable (example.com,
-  ~800 sondes) — même famille ou `tree` non rafraîchi après
-  `apply_dom_sync`.
+  le peint devient incliquable. **Arbitré** : l'élagage
+  porte sur `paint_bounds` (union des rects du sous-arbre —
+  conservative, inclut les enfants échappés), pas sur le
+  border-box. `hit_test` remonté en `explorer-layout`
+  (contrat déjà listé) ; `session.rs` délègue — même
+  sémantique « plus imbriqué contenant gagne ». Reste ouvert
+  (hypothèse connexe) : contenu injecté JS non rafraîchi —
+  côté `apply_dom_sync`, périmètre session.
 - [ ] **R-20. `<script>` peint en texte** (bug terrain
   mission 5, wikipedia — clientpref/RLSTATE JSON visibles
   vers 300 px) : `script{display:none}` existe dans

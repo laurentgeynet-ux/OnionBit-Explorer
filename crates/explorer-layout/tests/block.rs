@@ -531,3 +531,46 @@ fn flex_wrap_justify_par_ligne() {
     );
     assert!(c.rect.y > 0.0, "c ligne 2");
 }
+
+// ── R-19 : hit-test sur paint_bounds ────────────────────────
+
+#[test]
+fn hit_test_enfant_echappe_du_parent() {
+    // Enfant `position:absolute` POSÉ HORS du border-box du
+    // parent (lite.ddg : `<center>`+`<form>`) — l'élagage sur
+    // le rect propre tuait la zone. `paint_bounds` (union du
+    // sous-arbre) garde la branche testable.
+    let (dom, bx) = laid(
+        "<div id=p style=\"position:relative;height:50px\">\
+         <a id=c style=\"position:absolute;top:80px;left:10px;width:20px;height:20px\"></a>\
+         </div>",
+        "body{margin:0}",
+    );
+    let want = by_tag(&dom, "a");
+    assert_eq!(
+        explorer_layout::hit_test(&bx, 15.0, 90.0),
+        Some(want),
+        "point (15,90) hors du parent mais dans l'enfant → hit"
+    );
+}
+
+#[test]
+fn hit_test_profond_normal_inchange() {
+    // Point dans un enfant en flux : la boîte la plus
+    // imbriquée gagne (contrat inchangé).
+    let (dom, bx) = laid(
+        "<div id=o><p id=i>x</p></div>",
+        "body{margin:0} #o{height:60px} p{height:20px;margin:0}",
+    );
+    // Le nœud gagnant = le texte de `p` (le plus profond) —
+    // son parent DOM est `p` (contrat inchangé).
+    let p = by_tag(&dom, "p");
+    let hit = explorer_layout::hit_test(&bx, 5.0, 5.0).expect("hit");
+    assert_eq!(dom.parent(hit).ok().flatten(), Some(p), "hit {hit:?}");
+}
+
+#[test]
+fn hit_test_point_hors_document() {
+    let (_dom, bx) = laid("<div></div>", "body{margin:0} div{height:20px}");
+    assert_eq!(explorer_layout::hit_test(&bx, 5.0, 5000.0), None);
+}

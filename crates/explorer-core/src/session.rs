@@ -2998,19 +2998,11 @@ impl Session {
 /// (`None` pour les boîtes anonymes → on remonte au parent
 /// peint le plus proche via les ancêtres DOM côté appelant).
 fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
-    if !(bx.rect.x <= x
-        && x <= bx.rect.x + bx.rect.width
-        && bx.rect.y <= y
-        && y <= bx.rect.y + bx.rect.height)
-    {
-        return None;
-    }
-    for child in &bx.children {
-        if let Some(n) = hit_test(child, x, y) {
-            return Some(n);
-        }
-    }
-    bx.node
+    // R-19 : l'élagage sur le border-box tuait les zones dont
+    // un enfant déborde le parent (lite.ddg). Le test vit en
+    // amont : `explorer_layout::hit_test` élague sur l'union
+    // du sous-arbre (paint bounds) — même contrat de retour.
+    explorer_layout::hit_test(bx, x, y)
 }
 
 /// Chemin `(tag, index parmi les frères éléments de même tag)`

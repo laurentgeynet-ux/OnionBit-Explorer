@@ -9,6 +9,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-19 — Hit-test tolérant aux enfants échappés**
+  (`explorer-layout`, module `hit`) : `explorer_layout::
+  hit_test` remonte le hit-test dans le domaine — élagage
+  sur `paint_bounds` (union des rects du sous-arbre) au lieu
+  du border-box : un enfant peint hors du parent
+  (`position:absolute`, marges négatives, overflow visible)
+  reste cliquable — bug terrain lite.ddg (formulaire posé
+  hors de `<center>`). Même contrat « plus imbriqué contenant
+  gagne » ; `explorer-core::session::hit_test` délègue
+  (carve-out consommateur, journalé).
+
 - **R-10 — `@keyframes`** (`explorer-css`, module
   `animation`) : collecte `StyleEngine.keyframes` (offsets
   `from`/`to`/`N%` éclatés et triés, fusion même-offset),

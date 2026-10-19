@@ -22,6 +22,7 @@ mod boxtree;
 mod flex;
 pub mod font;
 mod grid;
+mod hit;
 pub mod inline;
 mod intrinsic;
 mod tables;
@@ -32,5 +33,6 @@ pub use boxtree::{
     build_box_tree, build_box_tree_sized, BoxKind, Float, LayoutBox, Overflow, Position, Rect,
 };
 pub use font::{FontMetrics, FontRequest, FontSource, Glyph, ShapedRun};
+pub use hit::hit_test;
 pub use inline::{Fragment, LineBox};
 pub use text::{Break, Direction, TextRun};
