@@ -4133,3 +4133,143 @@ fn c15_capture_stack_trace() {
     // Non-objet → TypeError.
     assert!(Engine::new().eval("Error.captureStackTrace(5)").is_err());
 }
+
+// ------------------------------------------------------------------
+// JS-C16 — reduceRight, locale-fallbacks, URL/URLSearchParams
+// ------------------------------------------------------------------
+
+#[test]
+fn c16_reduce_right_locale() {
+    for (src, want) in [
+        ("[1,2,3].reduceRight((a,b)=>a+'-'+b,'')", "-3-2-1"),
+        ("['a','b','c'].reduceRight((x,y)=>x+y)", "cba"),
+        ("'a'.localeCompare('b')", "-1"),
+        ("'b'.localeCompare('b')", "0"),
+        ("'b'.localeCompare('a')", "1"),
+        ("'É'.toLocaleLowerCase()", "é"),
+        ("'é'.toLocaleUpperCase()", "É"),
+        ("'abc'.toLocaleString()", "abc"),
+        ("(2).toLocaleString()", "2"),
+        ("[1,'a'].toLocaleString()", "1,a"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    // `Date.prototype.toLocaleString` ≡ `toString` (pas de locale).
+    assert_eq!(
+        ev_str("new Date(0).toLocaleString()"),
+        ev_str("new Date(0).toString()")
+    );
+    assert!(Engine::new().eval("[].reduceRight(x=>x)").is_err());
+}
+
+#[test]
+fn c16_url() {
+    for (src, want) in [
+        (
+            "var u=new URL('https://u:p@ex.com:8080/a/b?x=1&y=2#f'); u.protocol+'|'+u.host+'|'+u.hostname+'|'+u.port+'|'+u.pathname+'|'+u.search+'|'+u.hash",
+            "https:|ex.com:8080|ex.com|8080|/a/b|?x=1&y=2|#f",
+        ),
+        (
+            "new URL('http://ex.com:80/a').host",
+            "ex.com",
+        ),
+        (
+            "new URL('https://ex.com:443/a').port",
+            "",
+        ),
+        ("new URL('https://ex.com').href", "https://ex.com/"),
+        ("new URL('https://ex.com').pathname", "/"),
+        ("new URL('b/c', 'https://ex.com/a/').href", "https://ex.com/a/b/c"),
+        ("new URL('/x', 'https://ex.com/a/b').href", "https://ex.com/x"),
+        (
+            "new URL('?q=1', 'https://ex.com/a?old=1').href",
+            "https://ex.com/a?q=1",
+        ),
+        ("new URL('#f', 'https://ex.com/a').href", "https://ex.com/a#f"),
+        (
+            "new URL('../d', 'https://ex.com/a/b/c').href",
+            "https://ex.com/a/d",
+        ),
+        (
+            "new URL('./d', 'https://ex.com/a/b/').href",
+            "https://ex.com/a/b/d",
+        ),
+        (
+            "new URL('//cdn.com/x', 'https://ex.com/a').href",
+            "https://cdn.com/x",
+        ),
+        (
+            "new URL('https://ex.com/a').toString()",
+            "https://ex.com/a",
+        ),
+        ("typeof URL", "function"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    // username/password/origin sur un seul moteur.
+    let mut e = Engine::new();
+    let v = e
+        .eval("var u=new URL('https://u:p@ex.com:8080/a'); u.username+'|'+u.password+'|'+u.origin")
+        .unwrap();
+    assert_eq!(e.describe(v), "u|p|https://ex.com:8080");
+    // URL invalide → TypeError.
+    assert!(Engine::new().eval("new URL('not a url')").is_err());
+    assert!(Engine::new().eval("new URL('rel', 'not a base')").is_err());
+}
+
+#[test]
+fn c16_url_search_params() {
+    for (src, want) in [
+        ("new URL('https://ex.com/p?a=1&b=2').searchParams.get('a')", "1"),
+        (
+            "var s=new URLSearchParams('a=1&b=2&a=3'); s.getAll('a').join(',')",
+            "1,3",
+        ),
+        ("new URLSearchParams('a=1').get('z')", "null"),
+        ("new URLSearchParams('a=1').has('a')", "true"),
+        (
+            "var s=new URLSearchParams({x:'1 2',y:'3'}); s.toString()",
+            "x=1+2&y=3",
+        ),
+        (
+            "var s=new URLSearchParams(); s.append('k','v'); s.set('k','w'); s.toString()",
+            "k=w",
+        ),
+        (
+            "var s=new URLSearchParams('b=1&a=2'); s.sort(); s.toString()",
+            "a=2&b=1",
+        ),
+        (
+            "var s=new URLSearchParams([['a','1'],['b','2']]); s.has('b')",
+            "true",
+        ),
+        (
+            "var s=new URLSearchParams('a=1&b=2'); s.delete('a'); s.toString()",
+            "b=2",
+        ),
+        ("new URLSearchParams('?a=1').get('a')", "1"),
+        (
+            "var out=[]; new URLSearchParams('a=1&b=2').forEach((v,k)=>out.push(k+'='+v)); out.join('|')",
+            "a=1|b=2",
+        ),
+        (
+            "var r=[]; for (var k of new URLSearchParams('a=1&b=2').keys()) r.push(k); r.join(',')",
+            "a,b",
+        ),
+        (
+            "var r=[]; for (var p of new URLSearchParams('a=1')) r.push(p[0]+'='+p[1]); r.join('|')",
+            "a=1",
+        ),
+        (
+            "var a=new URLSearchParams('x=1'); var b=new URLSearchParams(a); b.get('x')",
+            "1",
+        ),
+        ("typeof URLSearchParams", "function"),
+        (
+            "new URLSearchParams('a=%26&b=%3D').get('a')+new URLSearchParams('a=%26&b=%3D').get('b')",
+            "&=",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}

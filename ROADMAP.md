@@ -505,6 +505,18 @@ d'intégration, pas par la couverture :
   traversés), `Error.captureStackTrace` (own `stack`
   `Name: message` — V8-compat, pas de frames). test262 :
   859/859 ; 4 tests de régression.
+- [x] **JS-C16. Locale-fallbacks + `URL`/`URLSearchParams`** :
+  `reduceRight`, `localeCompare` (ordre point de code — pas de
+  CLDR), `toLocale{Lower,Upper}Case`, `toLocaleString`
+  (Array/Number/Date/String — replis documentés), `URL`
+  WHATWG subset (schéma/authority/path/query/fragment, ports
+  par défaut, `origin`, résolution relative `//h` `/p` `?q`
+  `#f` `./..`, `file:` — pas d'IDNA/punycode),
+  `URLSearchParams` complet (`get`/`getAll`/`has`/`set`/
+  `append`/`delete`/`sort`/`forEach`/`keys`/`values`/
+  `entries`/`@@iterator`, encodage
+  `application/x-www-form-urlencoded`, init string/record/
+  itérable/copie). test262 : 859/859 ; 3 tests de régression.
 - [ ] **JS-C. Couverture par besoin** : `Intl` —
   ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/

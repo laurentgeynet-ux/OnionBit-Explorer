@@ -262,11 +262,15 @@ pub(crate) struct Protos {
     pub bigint: ObjId,
     /// `AggregateError.prototype` (proto `Error.prototype`).
     pub aggregate_error: ObjId,
+    /// `URL.prototype` — `toString`/`toJSON`.
+    pub url: ObjId,
+    /// `URLSearchParams.prototype` — `get`/`set`/`has`/`entries`…
+    pub url_params: ObjId,
 }
 
 impl Protos {
     /// Tous les prototypes — racines GC permanentes.
-    fn all(&self) -> [ObjId; 23] {
+    fn all(&self) -> [ObjId; 25] {
         [
             self.object,
             self.function,
@@ -291,6 +295,8 @@ impl Protos {
             self.typed_array,
             self.bigint,
             self.aggregate_error,
+            self.url,
+            self.url_params,
         ]
     }
 }
@@ -341,6 +347,8 @@ impl Engine {
         let typed_array = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let bigint = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let aggregate_error = heap.alloc_obj(Object::ordinary(Value::Obj(error)));
+        let url = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
+        let url_params = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let global = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -373,6 +381,8 @@ impl Engine {
                 typed_array,
                 bigint,
                 aggregate_error,
+                url,
+                url_params,
             },
             rng: seed | 1,
             t0: Instant::now(),

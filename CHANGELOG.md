@@ -637,6 +637,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`new_target_binding`, `set_composition_es2025`,
     `string_well_formed_and_regexp_escape`,
     `arraybuffer_resize_transfer`).
+- **JS-C16 — locale-fallbacks, `URL`, `URLSearchParams`**
+  (`dillo-js`) :
+  - `Array.prototype.reduceRight` ;
+  - fallbacks locale (déviation documentée — pas de CLDR) :
+    `localeCompare` (ordre point de code),
+    `toLocaleLowerCase`/`toLocaleUpperCase`,
+    `toLocaleString` sur `Array`/`Number`/`Date`/`String`
+    (repli `join`/`toString`) ;
+  - `URL` WHATWG subset : parsing absolu `scheme://authority
+    /path?query#frag`, user/pass, ports par défaut éliminés
+    (http:80, https:443, ws:80, wss:443, ftp:21), `origin`
+    pour les schémas spéciaux, résolution relative
+    (`//host`, `/path`, `?q`, `#f`, relatif dossier avec
+    normalisation `.`/`..`), `file:` avec authority vide —
+    pas d'IDNA ni de validation d'hôte stricte ;
+  - `URLSearchParams` : `get`/`getAll`/`has`/`set`/`append`/
+    `delete`/`sort`/`forEach`/`keys`/`values`/`entries`/
+    `@@iterator`, encodage `x-www-form-urlencoded` (`+`/
+    `%XX`), init string/record/itérable/copie ; `u.
+    searchParams` peuplé depuis la query ;
+  - test262 : 859/859 conservé ; 3 tests de régression
+    (`c16_reduce_right_locale`, `c16_url`,
+    `c16_url_search_params`).
 - **JS-C15 — dispatch `@@*`, `Array.of`, `@@species`,
   `captureStackTrace`** (`dillo-js`) :
   - `str.match/matchAll/replace/replaceAll/search/split`
