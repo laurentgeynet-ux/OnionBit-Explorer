@@ -18,190 +18,16 @@
 //! réussis descend sous `BASELINE_PASSED` — toute régression
 //! est bloquée, toute progression est relevée à l'exécution.
 
-use std::fmt::Write as _;
 use std::path::Path;
 
-use explorer_dom::{Dom, NodeData, NodeId};
 use explorer_html::TreeBuilder;
+
+mod common;
+use common::{dump, normalize_expected, parse_cases};
 
 /// Nombre de cas qui passent aujourd'hui — ne faire QUE monter.
 /// Relevé à chaque avancée du tree-builder (cf. CHANGELOG).
 const BASELINE_PASSED: usize = 953;
-
-/// Un cas de test extrait d'un fichier `.dat`.
-struct Case {
-    input: String,
-    /// Arbre attendu (brut, `#document` normalisé plus bas).
-    expected: String,
-    /// `true` si parsing fragmentaire (hors périmètre).
-    fragment: bool,
-    /// `true` si scripting on (`<noscript>` rawtext — hors périmètre).
-    script_on: bool,
-}
-
-#[derive(PartialEq)]
-enum Section {
-    None,
-    Data,
-    Expected,
-    Skip,
-}
-
-fn parse_cases(file: &str) -> Vec<Case> {
-    let mut cases = Vec::new();
-    let mut input = Vec::new();
-    let mut expected = Vec::new();
-    let mut fragment = false;
-    let mut script_on = false;
-    let mut section = Section::None;
-
-    let flush = |cases: &mut Vec<Case>,
-                 input: &mut Vec<String>,
-                 expected: &mut Vec<String>,
-                 fragment: &mut bool,
-                 script_on: &mut bool| {
-        if !expected.is_empty() {
-            cases.push(Case {
-                input: input.join("\n"),
-                expected: expected.join("\n"),
-                fragment: *fragment,
-                script_on: *script_on,
-            });
-        }
-        input.clear();
-        expected.clear();
-        *fragment = false;
-        *script_on = false;
-    };
-
-    for line in file.lines() {
-        if line.starts_with('#') {
-            match line {
-                "#data" => {
-                    flush(
-                        &mut cases,
-                        &mut input,
-                        &mut expected,
-                        &mut fragment,
-                        &mut script_on,
-                    );
-                    section = Section::Data;
-                }
-                "#document" => section = Section::Expected,
-                "#document-fragment" => {
-                    fragment = true;
-                    section = Section::Skip;
-                }
-                "#script-on" => {
-                    script_on = true;
-                    section = Section::Skip;
-                }
-                _ => section = Section::Skip, // #errors, #new-errors…
-            }
-            continue;
-        }
-        match section {
-            Section::Data => input.push(line.to_string()),
-            Section::Expected => expected.push(line.to_string()),
-            _ => {}
-        }
-    }
-    flush(
-        &mut cases,
-        &mut input,
-        &mut expected,
-        &mut fragment,
-        &mut script_on,
-    );
-    cases
-}
-
-/// Dump de l'arbre produit — même format que `#document`.
-fn dump(dom: &Dom) -> String {
-    let mut out = String::new();
-    dump_children(dom, dom.document(), 1, &mut out);
-    out
-}
-
-fn dump_children(dom: &Dom, parent: NodeId, depth: usize, out: &mut String) {
-    for child in dom.children(parent).unwrap_or_default() {
-        out.push_str("| ");
-        for _ in 1..depth {
-            out.push_str("  ");
-        }
-        match dom.data(child).unwrap_or(&NodeData::Document) {
-            NodeData::Document => out.push_str("#document-nested"),
-            NodeData::Doctype(d) => {
-                let _ = write!(out, "<!DOCTYPE {}>", d.name);
-            }
-            NodeData::Element(e) => {
-                let _ = write!(out, "<{}>", e.tag_name);
-                let mut attrs: Vec<_> = e
-                    .attributes
-                    .iter()
-                    .map(|a| format!("{}=\"{}\"", a.name, a.value))
-                    .collect();
-                attrs.sort();
-                for a in attrs {
-                    out.push('\n');
-                    out.push_str("| ");
-                    for _ in 0..depth {
-                        out.push_str("  ");
-                    }
-                    out.push_str(&a);
-                }
-            }
-            NodeData::Text(t) => {
-                let _ = write!(out, "\"{t}\"");
-            }
-            NodeData::Comment(c) => {
-                let _ = write!(out, "<!-- {c} -->");
-            }
-        }
-        out.push('\n');
-        dump_children(dom, child, depth + 1, out);
-    }
-}
-
-/// Normalise le dump attendu : préfixes de namespace étrangers
-/// (`<svg svg>` → `<svg>`, `xlink href` → `xlink:href`, `xmlns
-/// xlink` → `xmlns:xlink`, `xml lang` → `xml:lang`), et fusion des
-/// nœuds texte adjacents (notre dump n'en produit pas, la spec non
-/// plus — garde-fou).
-fn normalize_expected(expected: &str) -> String {
-    let mut out = String::new();
-    for line in expected.lines() {
-        let indent = line.len() - line.trim_start().len();
-        let content = line.trim_start();
-        let norm = if let Some(rest) = content.strip_prefix('<') {
-            // Élément ou doctype : `<svg svg>` → `<svg>`.
-            if let Some(inner) = rest.strip_suffix('>') {
-                let inner = inner
-                    .strip_prefix("svg ")
-                    .or_else(|| inner.strip_prefix("math "))
-                    .unwrap_or(inner);
-                format!("<{inner}>")
-            } else {
-                format!("<{rest}")
-            }
-        } else if let Some((name, val)) = content.split_once('=') {
-            // Attribut étranger `xlink href` → `xlink:href`.
-            let name = name
-                .replace("xlink ", "xlink:")
-                .replace("xml ", "xml:")
-                .replace("xmlns ", "xmlns:");
-            format!("{name}={val}")
-        } else {
-            content.to_string()
-        };
-        for _ in 0..indent {
-            out.push(' ');
-        }
-        out.push_str(&norm);
-        out.push('\n');
-    }
-    out
-}
 
 #[test]
 fn html5lib_tree_construction() {
@@ -241,8 +67,21 @@ fn html5lib_tree_construction() {
     eprintln!("\n=== html5lib tree-construction ===");
     eprintln!("{passed}/{total} passent ({rate}%), {skipped} ignorés (fragment/script-on)");
     if !failures.is_empty() {
-        eprintln!("échecs : {}", failures.len());
-        for f in failures.iter().take(20) {
+        // Triage (R-14) : comptage par fichier `.dat` —
+        // regrouper les échecs par algorithme fautif.
+        let mut per_file: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        for f in &failures {
+            let file = f.rsplit_once(':').map_or(f.as_str(), |(n, _)| n);
+            *per_file.entry(file.to_string()).or_default() += 1;
+        }
+        let mut sorted: Vec<_> = per_file.into_iter().collect();
+        sorted.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        eprintln!("échecs : {} (par fichier .dat)", failures.len());
+        for (file, n) in &sorted {
+            eprintln!("  {n:4} {file}");
+        }
+        for f in &failures {
             eprintln!("  {f}");
         }
     }

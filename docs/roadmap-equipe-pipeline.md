@@ -58,17 +58,43 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   tête de file pour ça. Livré :
   `TreeBuilder::push`/`finish` + `Dom::document_element` +
   contrat rustdoc DOM partiel, tests `incremental`/`progressive`.
-- [ ] **R-14. Triage des échecs tree-construction** — diagnostic
+- [x] **R-14. Triage des échecs tree-construction** — diagnostic
   avant de poursuivre le layout. Corpus complet html5lib :
-  **953/1592 (59 %)** mesuré à l'état des lieux §2. Regrouper
-  les échecs par fichier `.dat` / mode d'insertion → inventaire
-  nommé des algorithmes fautifs (le harnais n'affiche que 20
-  échecs — l'ouvrir d'abord). **Décision en sortie** : si les
-  échecs se concentrent (adoption agency, foster parenting,
-  modes table/select/template…), le chantier tree-builder
-  devient une étape R-xx qui **préempte R-3/R-4** — un DOM mal
-  construit empoisonne layout, rendu et miroir JS ; des reftests
-  qui passent sur un arbre faux ne valent rien.
+  **953/1592 (59 %)**, 639 échecs inventoriés par algorithme
+  fautif : **foreign content ~330** (namespaces svg/math, mode
+  « in foreign content », ajustements `definitionURL`/`xlink:`,
+  breakout `foreignObject`/`annotation-xml`, CDATA) ·
+  **`<template>` contents 110** (fragment `content` séparé) ·
+  **adoption agency ~65** (`</a>`, `<nobr>`, reconstruction des
+  éléments de formatage) · **`<noscript>` ~45** (mode
+  « in head noscript », corps en éléments scripting-off) ·
+  **tokenizer ~40** (script-data-escaped, `--!>`, `&#xD;`,
+  casse `</S` dans raw-text) · **`<select>` en table ~25**
+  · **doctype ids + quirks ~21** · frameset ~10 · catégories
+  spec (`<search>/<main>/<menuitem>`, `input type=hidden`) ~8 ·
+  after-body ~5 · button-scope ~3. **Décision : le chantier
+  tree-builder préempte R-3/R-4 → R-15** (un DOM mal construit
+  empoisonne layout, rendu et miroir JS).
+  Livré : harnais ouvert (comptage par `.dat` + liste complète),
+  code cas/dump partagé (`tests/common/`).
+- [ ] **R-15. Tree-builder : clusters du triage** — issue de la
+  décision R-14, **préempte R-3/R-4**. Ordre par volume :
+  1. foreign content (namespaces sur les éléments, insertion
+     mode §13.2.6.5, tables d'ajustement attrs/tags, CDATA
+     dans svg/math, points de breakout) — débloque aussi
+     `<svg>` inline réel (R-9) ;
+  2. `<template>` : fragment `content` propre (modèle DOM +
+     règles de réinitialisation des modes) ;
+  3. adoption agency + reconstruction des éléments de
+     formatage actifs + fermeture `<nobr>` ;
+  4. `<noscript>` (in-head-noscript + parsing d'éléments) ;
+  5. tokenizer : script-data-escaped, `--!>`, `&#xD;` → CR,
+     casse des balises de fin raw-text, table de charrefs
+     complétée (`&ImaginaryI;`, `&NotEqualTilde;`…) ;
+  6. modes résiduels : in-select-in-table, frameset
+     (texte ignoré hors whitespace), button-scope,
+     after/after-after-body, catégories spec.
+  Cliquet `BASELINE_PASSED` monté au fil des sous-chantiers.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

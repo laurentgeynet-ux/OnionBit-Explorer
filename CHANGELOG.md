@@ -9,6 +9,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-14 — Triage des échecs tree-construction** (`explorer-html`) :
+  le harnais html5lib rapporte désormais les échecs complets avec
+  comptage par fichier `.dat` (au lieu de 20 tronqués) — code de
+  lecture de cas + dump normalisé extrait en `tests/common/`
+  partagé. Inventaire des **639 échecs** par algorithme fautif :
+  foreign content ~330, `<template>` contents 110, adoption
+  agency ~65, `<noscript>` ~45, tokenizer ~40, `<select>`-en-table
+  ~25, doctype/quirks ~21, frameset ~10, catégories ~8,
+  after-body ~5, button-scope ~3. **Décision : le chantier
+  tree-builder devient R-15 et préempte R-3/R-4** — un DOM mal
+  construit empoisonne tout l'aval (layout, rendu, miroir JS).
 - **JS-C26 — `MutationObserver`** (`dillo-js`) : le `Dom` miroir
   enregistre des observateurs par cible (`MutObsReg`, options
   `childList`/`attributes`/`characterData`, `subtree`,
