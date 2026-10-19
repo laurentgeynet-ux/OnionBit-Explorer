@@ -3008,3 +3008,22 @@ async fn js_request_submit_navigates() {
         Some("http://h.test/jgo?x=1")
     );
 }
+
+/// Document plus haut que le cap raster (16 384 px) : la
+/// navigation réussit et la frame couvre le sommet du
+/// document plutôt que d'échouer en `FrameTooBig`.
+#[tokio::test]
+async fn giant_document_clamps_frame_instead_of_error() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <div style=\"height:20000px\">haut</div>\
+         <div>loin en bas</div></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let png = s.frame_png(id).expect("frame plafonnée");
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+}

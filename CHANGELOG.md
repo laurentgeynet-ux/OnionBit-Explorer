@@ -68,6 +68,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (drapeaux, check/report, custom, `invalid`, radios,
   hooks submit/requestSubmit).
 
+- **Documents géants : `FrameTooBig` devient une frame
+  plafonnée** (`explorer-core`, décision roadmap NAV —
+  terrain github/MDN/stallman) : `Session::repaint` tronque
+  `DisplayList.height` à `16 384/scale` px avant `rasterize`
+  au lieu de propager l'erreur — le PNG couvre le sommet du
+  document et `paint_progress` émet `frame_invalidated`
+  pendant le téléchargement même sur pages > cap (le bug de
+  silence QA est levé). Limite assumée : le bas du document
+  au-delà du cap n'est pas rasterisable — besoin PIPE
+  consigné en `interface-equipes.md` (fenêtre de raster).
+  `FrameTooBig` reste l'erreur des cas vraiment hors bornes
+  (largeur). Smoke 10 sites réels : **10/10**.
+
 - **R-16 — Tables réelles et HTML legacy** (`explorer-css`/
   `explorer-layout`, repro terrain news.ycombinator.com) :
   `<center>` et les balises bloc historiques (`dir`, `menu`,

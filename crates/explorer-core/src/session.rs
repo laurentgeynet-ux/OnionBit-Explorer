@@ -323,6 +323,16 @@ struct SelectPopup {
 /// options est tronqué (MVP, pas de défilement interne).
 const MAX_POPUP_ROWS: usize = 8;
 
+/// Dimension max d'une frame rasterisée — borne anti-hostile
+/// de `rasterize` (`explorer-render`), déclarée ici pour
+/// plafonner la display list avant l'appel : un document
+/// plus grand que le cap produit une frame tronquée au
+/// sommet plutôt qu'une erreur `FrameTooBig` sèche (la
+/// peinture progressive doit émettre pendant le
+/// téléchargement, même sur page géante — borne documentée,
+/// stratégie fenêtre/tuiles consignée `interface-equipes.md`).
+const MAX_FRAME_DIM: f32 = 16_384.0;
+
 /// Transition en vol sur `(nœud, propriété)` — étape 45 :
 /// `from`/`to` sont les valeurs calculées textuelles
 /// (interpolées par `explorer_css::transition`), `start`
@@ -2197,6 +2207,15 @@ impl Session {
         // dernier — au-dessus de tout contenu (étape 54).
         if let Some(pop) = &entry.popup {
             append_select_popup(&mut list, pop, vw, entry.doc_h);
+        }
+        // Document géant : plafonner la hauteur rasterisée
+        // plutôt qu'échouer — le PNG couvre le sommet du
+        // document (dégradation, cf. `MAX_FRAME_DIM`). La
+        // borne du raster mesure des pixels : le cap CSS
+        // se divise par `scale`.
+        let frame_cap = MAX_FRAME_DIM / self.scale.max(f32::EPSILON);
+        if list.height > frame_cap {
+            list.height = frame_cap;
         }
         let frame = rasterize(&list, &self.webfonts as &dyn FontSource, self.scale)
             .ok_or(CoreError::FrameTooBig)?;

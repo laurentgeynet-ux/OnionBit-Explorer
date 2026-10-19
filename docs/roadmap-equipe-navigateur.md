@@ -45,8 +45,7 @@ panel de 8) : **mesurables** lobste.rs, wikipedia ·
 Écartés : duckduckgo (blanc « par design » —
 `body{display:none}` anti-FOUC honoré, script de déblocage
 non exécuté), old.reddit (shadow DOM/custom elements, hors
-portée), MDN (doc > 16 384 px → `FrameTooBig` — attend la
-décision ci-dessous).
+portée).
 
 Balayage robustesse (14 sites, même session) : **vitrine
 `text.npr.org` quasi-parfaite**, weather.gov ~75 % (images
@@ -59,19 +58,24 @@ stackoverflow (403 bot-block, honnête), craigslist (TLS
 le mode `InHeadNoscript`, à re-vérifier sur nouveau build)**,
 lite.ddg (= R-16, `<center>` inline → corrigé en vol).
 
-**Décision en suspens — borne `FrameTooBig`** : `shot` rasterise
-le document entier ; au-delà de 16 384 px de haut le rendu
-échoue sec (MDN). Options : (a) clamper au viewport pour
-`shot`, (b) tuiler le PNG de sortie, (c) relever le cap via
-encode PNG streamé. À trancher avant l'extension du smoke.
-**Nouvelles preuves** (QA `cfa0514`) : `paint_progress` avale
-l'erreur en silence → **zéro `frame_invalidated` pendant le
-téléchargement** sur quasi toutes les pages réelles (> 16 384
-px) — la peinture progressive livrée par 53 est invisible en
-vrai tant que la borne tient. Coût aussi quadratique : chaque
-palier de 32 Ko relance le pipeline complet (dribble 2,4 Mo/
-9 s → 3 min 45 constaté) — la vraie sortie est R-12 (layout
-incrémental) ou un cadencement temporel seul.
+**Décision tranchée — borne `FrameTooBig`** : option (a),
+plafond côté NAV — `Session::repaint` tronque
+`DisplayList.height` à `16 384/scale` px avant `rasterize` :
+un document géant produit une frame du **sommet** plutôt
+qu'une erreur sèche, et `paint_progress` émet enfin
+`frame_invalidated` pendant le téléchargement sur pages
+> 16 384 px (github, MDN — le bug de silence QA `cfa0514`
+est levé). Limite assumée : au-delà du cap le bas du
+document n'est pas rasterisable — le scroll n'y montre rien
+(besoin PIPE consigné `interface-equipes.md` : fenêtre de
+raster). Rejetées : (b) tuiler le PNG — complexité de
+transport pour un usage debug ; (c) relever le cap —
+l'encode streamé déplace la borne sans la supprimer, et le
+cap est aussi anti-hostile (mémoire frame = w×h×4). Smoke
+10 sites : **10/10** (`github` 6,4 Mo, `stallman` 7,5 Mo —
+frames tronquées au sommet, MDN 562 Ko complet). Reste le
+coût quadratique du pipeline complet par palier — vraie
+sortie : R-12 (layout incrémental) ou cadencement temporel.
 
 - [x] **Étape 50. Scripts externes + scheduler de
   sous-ressources** (ADR-0012 complété côté session).
