@@ -25,7 +25,7 @@
 use explorer_css::value::{parse_length, Unit};
 use explorer_css::ComputedStyle;
 
-use crate::boxtree::{BoxKind, LayoutBox, Rect};
+use crate::boxtree::{BoxKind, Float, LayoutBox, Overflow, Position, Rect};
 use crate::font::{self, FontRequest, FontSource};
 
 /// Contexte de dimensionnement (une passe de layout).
@@ -38,6 +38,9 @@ pub struct BlockCtx<'a> {
     pub default_family: &'a str,
     /// Font-size de base (px) pour `rem` et la racine.
     pub base_font_size: f32,
+    /// Hauteur du viewport — bloc conteneur des `fixed` et
+    /// base des `vh` (étape 21).
+    pub viewport_h: f32,
 }
 
 impl Default for BlockCtx<'_> {
@@ -46,6 +49,7 @@ impl Default for BlockCtx<'_> {
             fonts: None,
             default_family: "sans-serif",
             base_font_size: 16.0,
+            viewport_h: 600.0,
         }
     }
 }
@@ -70,7 +74,22 @@ fn collapse(a: f32, b: f32) -> f32 {
 /// `viewport_w` : chaque `rect` est rempli (x, y, border-box
 /// width/height). Le `y` de départ est 0.
 pub fn layout_tree(root: &mut LayoutBox, viewport_w: f32, ctx: &BlockCtx) {
-    layout_block(root, 0.0, 0.0, viewport_w, ctx, ctx.base_font_size);
+    let viewport = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: viewport_w,
+        height: ctx.viewport_h,
+    };
+    layout_block(
+        root,
+        0.0,
+        0.0,
+        viewport_w,
+        ctx,
+        ctx.base_font_size,
+        viewport,
+    );
+    resolve_absolutes(root, viewport, ctx, ctx.base_font_size);
 }
 
 /// Résout `font-size` en px : `em`/`rem` relatifs au parent
@@ -135,7 +154,9 @@ fn margins(style: &ComputedStyle, cb_w: f32, em: f32, ctx: &BlockCtx) -> Margins
 
 /// Dimensionne `bx` (boîte de niveau bloc) dans le bloc
 /// conteneur de largeur `cb_w`, bord haut à `y`. Pose
-/// `bx.rect` et descend récursivement.
+/// `bx.rect` et descend récursivement. `abs_cb` = bloc
+/// conteneur du positionnement absolu (plus proche ancêtre
+/// positionné, ou viewport).
 pub(crate) fn layout_block(
     bx: &mut LayoutBox,
     x: f32,
@@ -143,9 +164,17 @@ pub(crate) fn layout_block(
     cb_w: f32,
     ctx: &BlockCtx,
     parent_fs: f32,
+    abs_cb: Rect,
 ) -> f32 {
     let st = bx.style.clone();
     let fs = font_size_px(&st, parent_fs, ctx);
+
+    apply_layout_metadata(bx, &st);
+
+    // `display: table` → dimensionnement dédié.
+    if st.get("display") == Some("table") {
+        return crate::tables::layout_table(bx, x, y, cb_w, ctx, parent_fs);
+    }
 
     let ml = side_px(&st, "margin-left", cb_w, fs, ctx, 0.0);
     let mr = side_px(&st, "margin-right", cb_w, fs, ctx, 0.0);
@@ -190,54 +219,33 @@ pub(crate) fn layout_block(
         height: 0.0,
     };
     let content_x = rect_x + bl + pl;
-    let mut cursor = y + bt + pt;
+    let cursor = y + bt + pt;
 
-    // Empilement vertical avec marges collapsées.
-    let adjoining_top = pt + bt <= 0.0;
-    let mut prev_margin: Option<f32> = None;
-    let mut first = true;
-    let count = bx.children.len();
-    for i in 0..count {
-        let (kind, cst) = {
-            let c = &bx.children[i];
-            (c.kind, c.style.clone())
-        };
-        if kind.is_inline_level() {
-            // Enfant en-ligne orphelin (modèle assoupli des
-            // boîtes inline contenant du bloc) — hauteur
-            // d'une ligne.
-            cursor += line_height(&st, fs, ctx);
-            continue;
+    // Conteneur des descendants positionnés : padding box de
+    // cette boîte si elle est positionnée, sinon hérité.
+    let pos_cb = if bx.position == Position::Static {
+        abs_cb
+    } else {
+        Rect {
+            x: content_x - pl,
+            y: y + bt,
+            width: pl + content_w + pr,
+            height: 0.0,
         }
-        let cfs = font_size_px(&cst, fs, ctx);
-        let cm = margins(&cst, content_w, cfs, ctx);
-        // Premier enfant adjoining : sa marge « traverse » le
-        // parent (§8.3.1 — pas d'espace interne au-dessus ;
-        // c'est le parent qui ajoute la sienne propre, côté
-        // appelant, via `margins()`).
-        let gap = if first && adjoining_top {
-            0.0
-        } else {
-            prev_margin.map_or(cm.top, |p| collapse(p, cm.top))
-        };
-        cursor += gap;
-        let child = &mut bx.children[i];
-        let used = match kind {
-            BoxKind::AnonymousBlock => {
-                layout_anon_block(child, content_x, cursor, content_w, ctx, fs)
-            }
-            _ => layout_block(child, content_x, cursor, content_w, ctx, fs),
-        };
-        cursor += used;
-        prev_margin = Some(cm.bottom);
-        first = false;
-    }
-    // Dernier enfant adjoining : sa marge traverse aussi —
-    // le contenu s'arrête à cursor ; l'effet complet viendra
-    // avec la propagation des marges en used value (le parent
-    // devra combiner sa marge basse avec celle du dernier
-    // enfant : conservé simple ici, l'écart max est une marge
-    // de bloc — étape 21 affinera floats/clearance).
+    };
+
+    let line_h = line_height(&st, fs, ctx);
+    let cursor = flow_children(
+        bx,
+        content_x,
+        cursor,
+        content_w,
+        pt + bt <= 0.0,
+        line_h,
+        ctx,
+        fs,
+        pos_cb,
+    );
 
     let content_h = cursor - (y + bt + pt);
     let h_spec = css_px(&st, "height", ctx.base_font_size, fs, ctx);
@@ -260,7 +268,259 @@ pub(crate) fn layout_block(
     };
     bx.rect.width = w;
     bx.rect.height = bt + pt + used_h + pb + bb;
+
+    // `position: relative` : décalage après le flux
+    // (top pousse vers le bas, bottom vers le haut).
+    if bx.position == Position::Relative {
+        let off_x = css_px(&st, "left", cb_w, fs, ctx).unwrap_or(0.0)
+            - css_px(&st, "right", cb_w, fs, ctx).unwrap_or(0.0);
+        let off_y = css_px(&st, "top", cb_w, fs, ctx).unwrap_or(0.0)
+            - css_px(&st, "bottom", cb_w, fs, ctx).unwrap_or(0.0);
+        bx.rect.x += off_x;
+        bx.rect.y += off_y;
+    }
     bx.rect.height
+}
+
+/// Métadonnées usées étape 21 : `position`, `float`,
+/// `overflow` (axes x/y combinés — la valeur la plus
+/// restrictive gagne) et `z-index`, lus du style calculé.
+fn apply_layout_metadata(bx: &mut LayoutBox, st: &ComputedStyle) {
+    bx.position = match st.get("position") {
+        Some("relative") => Position::Relative,
+        Some("absolute") => Position::Absolute,
+        Some("fixed") => Position::Fixed,
+        _ => Position::Static,
+    };
+    bx.float = match st.get("float") {
+        Some("left") => Float::Left,
+        Some("right") => Float::Right,
+        _ => Float::None,
+    };
+    let ov = |axis: &str| match st.get(axis) {
+        Some("hidden") => 3,
+        Some("auto") => 2,
+        Some("scroll") => 1,
+        _ => 0,
+    };
+    bx.overflow = match ov("overflow-x").max(ov("overflow-y")) {
+        3 => Overflow::Hidden,
+        2 => Overflow::Auto,
+        1 => Overflow::Scroll,
+        _ => Overflow::Visible,
+    };
+    bx.z_index = st
+        .get("z-index")
+        .and_then(|z| z.trim().parse::<i32>().ok())
+        .unwrap_or(0);
+}
+
+/// Bande libre `cx..cx+cw` rétrécie par les flottants qui
+/// mordent à `top` : retourne `(x, largeur)` effectifs.
+fn float_band(fl: &[Rect], fr: &[Rect], top: f32, cx: f32, cw: f32) -> (f32, f32) {
+    let mut xl = cx;
+    let mut xr = cx + cw;
+    for f in fl {
+        if f.y <= top && f.y + f.height > top {
+            xl = xl.max(f.x + f.width);
+        }
+    }
+    for f in fr {
+        if f.y <= top && f.y + f.height > top {
+            xr = xr.min(f.x);
+        }
+    }
+    (xl, (xr - xl).max(0.0))
+}
+
+/// `clear` : descend `cursor` sous le bas des flottants.
+fn float_clear(floats: &[Rect], cursor: &mut f32) {
+    if let Some(b) = floats.iter().map(|f| f.y + f.height).reduce(f32::max) {
+        *cursor = (*cursor).max(b);
+    }
+}
+
+/// Empilement vertical des enfants de niveau bloc : marges
+/// collapsées, flottants posés au bord (bandes réservées),
+/// `clear`, absolus laissés hors flux (rect statique
+/// placeholder pour `resolve_absolutes`). Retourne le curseur
+/// final (bas du contenu).
+#[allow(clippy::too_many_arguments)]
+fn flow_children(
+    bx: &mut LayoutBox,
+    content_x: f32,
+    start_cursor: f32,
+    content_w: f32,
+    adjoining_top: bool,
+    line_h: f32,
+    ctx: &BlockCtx,
+    fs: f32,
+    pos_cb: Rect,
+) -> f32 {
+    let mut cursor = start_cursor;
+    // Bandes réservées (rect margin-compris) par côté — le
+    // contenu suivant se rétrécit où ils mordent
+    // (approximation : bande prise au bord haut de l'enfant —
+    // affinage ligne par ligne reporté, documenté).
+    let mut floats_l: Vec<Rect> = Vec::new();
+    let mut floats_r: Vec<Rect> = Vec::new();
+
+    let mut prev_margin: Option<f32> = None;
+    let mut first = true;
+    let count = bx.children.len();
+    for i in 0..count {
+        let (kind, cst) = {
+            let c = &bx.children[i];
+            (c.kind, c.style.clone())
+        };
+        if kind.is_inline_level() {
+            cursor += line_h;
+            continue;
+        }
+        let cfs = font_size_px(&cst, fs, ctx);
+        let cm = margins(&cst, content_w, cfs, ctx);
+
+        // `position: absolute|fixed` : hors flux — rect
+        // statique placeholder, résolu en second passage par
+        // `resolve_absolutes` (layout_tree).
+        if matches!(cst.get("position"), Some("absolute" | "fixed")) {
+            bx.children[i].rect = Rect {
+                x: content_x,
+                y: cursor,
+                width: content_w,
+                height: 0.0,
+            };
+            continue;
+        }
+
+        // `clear` : le flux descend sous les flottants du côté.
+        match cst.get("clear") {
+            Some("left") => float_clear(&floats_l, &mut cursor),
+            Some("right") => float_clear(&floats_r, &mut cursor),
+            Some("both") => {
+                float_clear(&floats_l, &mut cursor);
+                float_clear(&floats_r, &mut cursor);
+            }
+            _ => {}
+        }
+
+        // `float` : posé au bord de la bande courante,
+        // enregistré — n'avance pas le curseur.
+        let cfloat = cst.get("float");
+        if kind != BoxKind::AnonymousBlock && matches!(cfloat, Some("left" | "right")) {
+            let (fx0, fw) = float_band(&floats_l, &floats_r, cursor, content_x, content_w);
+            let child = &mut bx.children[i];
+            layout_block(child, fx0, cursor, fw, ctx, fs, pos_cb);
+            let frect = child.rect;
+            if cfloat == Some("right") {
+                child.rect.x = fx0 + fw - frect.width;
+                floats_r.push(frect);
+            } else {
+                floats_l.push(frect);
+            }
+            continue;
+        }
+
+        // Premier enfant adjoining : sa marge « traverse » le
+        // parent (§8.3.1 — pas d'espace interne au-dessus ;
+        // c'est le parent qui ajoute la sienne propre, côté
+        // appelant, via `margins()`).
+        let gap = if first && adjoining_top {
+            0.0
+        } else {
+            prev_margin.map_or(cm.top, |p| collapse(p, cm.top))
+        };
+        cursor += gap;
+        // Bande effective au bord haut de l'enfant.
+        let (ex, ew) = float_band(&floats_l, &floats_r, cursor, content_x, content_w);
+        let child = &mut bx.children[i];
+        let used = match kind {
+            BoxKind::AnonymousBlock => layout_anon_block(child, ex, cursor, ew, ctx, fs, pos_cb),
+            _ => layout_block(child, ex, cursor, ew, ctx, fs, pos_cb),
+        };
+        cursor += used;
+        prev_margin = Some(cm.bottom);
+        first = false;
+    }
+    cursor
+}
+
+/// Second passage (étape 21) : pose les boîtes
+/// `position: absolute|fixed` laissées hors flux, contre leur
+/// bloc conteneur — padding box du plus proche ancêtre
+/// positionné (hauteurs désormais connues), viewport pour
+/// `fixed`. Appelée par `layout_tree` après le flux.
+pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs: f32) {
+    // Bloc conteneur des enfants absolus de cette boîte.
+    let own_cb = if bx.position == Position::Static {
+        cb
+    } else {
+        Rect {
+            x: bx.rect.x,
+            y: bx.rect.y,
+            width: bx.rect.width,
+            height: bx.rect.height,
+        }
+    };
+    let viewport = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: own_cb.width.max(cb.width),
+        height: ctx.viewport_h,
+    };
+    let count = bx.children.len();
+    for i in 0..count {
+        // Lire le STYLE (`c.position` reste `Static` tant que
+        // l'enfant n'a pas été posé — bootstrap du champ).
+        let (pos, cst) = {
+            let c = &bx.children[i];
+            let p = match c.style.get("position") {
+                Some("absolute") => Position::Absolute,
+                Some("fixed") => Position::Fixed,
+                _ => Position::Static,
+            };
+            (p, c.style.clone())
+        };
+        if !matches!(pos, Position::Absolute | Position::Fixed) {
+            continue;
+        }
+        let cfs = font_size_px(&cst, fs, ctx);
+        let target = if pos == Position::Fixed {
+            viewport
+        } else {
+            own_cb
+        };
+        let static_x = bx.children[i].rect.x;
+        let static_y = bx.children[i].rect.y;
+        let l = css_px(&cst, "left", target.width, cfs, ctx);
+        let r = css_px(&cst, "right", target.width, cfs, ctx);
+        let t = css_px(&cst, "top", target.height, cfs, ctx);
+        let b = css_px(&cst, "bottom", target.height, cfs, ctx);
+        let cw = match (l, r) {
+            (Some(l), Some(r)) => (target.width - l - r).max(0.0),
+            (Some(l), None) => (target.width - l).max(0.0),
+            _ => target.width,
+        };
+        let cx = l.map_or(static_x, |v| target.x + v);
+        let cy = t.map_or(static_y, |v| target.y + v);
+        let child = &mut bx.children[i];
+        layout_block(child, cx, cy, cw, ctx, fs, target);
+        // right/bottom sans left/top : ancrage au bord opposé.
+        if l.is_none() {
+            if let Some(rv) = r {
+                child.rect.x = target.x + target.width - rv - child.rect.width;
+            }
+        }
+        if t.is_none() {
+            if let Some(bv) = b {
+                child.rect.y = target.y + target.height - bv - child.rect.height;
+            }
+        }
+    }
+    // Descendre dans tous les enfants (cb mis à jour).
+    for child in &mut bx.children {
+        resolve_absolutes(child, own_cb, ctx, fs);
+    }
 }
 
 /// Hauteur d'un bloc anonyme : délégué au layout en-ligne
@@ -272,6 +532,7 @@ fn layout_anon_block(
     w: f32,
     ctx: &BlockCtx,
     parent_fs: f32,
+    abs_cb: Rect,
 ) -> f32 {
     bx.rect = Rect {
         x,
@@ -279,7 +540,7 @@ fn layout_anon_block(
         width: w,
         height: 0.0,
     };
-    crate::inline::layout_inline(bx, x, y, w, ctx, parent_fs)
+    crate::inline::layout_inline(bx, x, y, w, ctx, parent_fs, abs_cb)
 }
 
 /// `line-height` en px : nombre → ×font-size, longueur →

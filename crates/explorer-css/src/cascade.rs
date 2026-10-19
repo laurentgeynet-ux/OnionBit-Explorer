@@ -535,7 +535,11 @@ const UA_CSS: &str = "
 html, body, div, p, ul, ol, li, dl, dt, dd, blockquote, pre,
 form, fieldset, figure, figcaption, h1, h2, h3, h4, h5, h6,
 hr, address, article, aside, footer, header, nav, section,
-main, table, thead, tbody, tfoot, tr, caption, legend, video { display: block }
+main, legend, video { display: block }
+table { display: table }
+thead, tbody, tfoot { display: table-row-group }
+tr { display: table-row }
+caption { display: block }
 head, script, style, link, meta, title, template, noscript, area,
 base, basefont, datalist, param, source, track { display: none }
 li { display: list-item }

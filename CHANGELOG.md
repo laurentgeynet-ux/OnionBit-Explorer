@@ -9,6 +9,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 21 — `explorer-layout` : tables, flottants,
+  positionnement** (`tables.rs`, `block.rs`, `boxtree.rs`) :
+  `LayoutBox` porte les métadonnées usées `position`/`float`/
+  `overflow`/`z_index`. Tables — auto layout CSS 2.1 borné :
+  grille `table-row`/`table-cell` collectée en traversant les
+  groupes, largeurs de colonnes min (plus long mot mesuré) et
+  pref (contenu mesuré) via la fonte injectée, `width` de
+  cellule en plancher, distribution proportionnelle des
+  surplus, hauteurs de rangée = max des cellules uniformisées
+  en seconde passe ; `display` de la feuille UA corrigés
+  (`table`, `table-row`, `table-row-group`). Flottants —
+  `float: left|right` posés au bord de la bande courante
+  sans avancer le curseur, bandes réservées rétrécissant les
+  frères ; `clear: left|right|both` descend sous leurs bas.
+  Positionnement — `relative` décale post-flux sans sortir du
+  flux ; `absolute`/`fixed` sortis du flux (rect statique
+  placeholder) et résolus par `resolve_absolutes` en second
+  passage contre le padding box du plus proche ancêtre
+  positionné, viewport pour `fixed` ; `top/right/bottom/left`
+  en base du bloc conteneur, ancrage opposé sans offset
+  primaire. `z-index` parsé (i32), `overflow` lu des axes
+  `overflow-x`/`-y` (shorthand étape 16) avec la valeur la
+  plus restrictive. Limites documentées : bandes prises au
+  bord haut de l'enfant (pas ligne par ligne), flottants
+  bornés au contexte du bloc parent, pas de
+  `border-collapse`/`rowspan`/`colspan`. 11 tests
+  (tables, floats/clear, positions, métadonnées).
 - **Étape 20 — `explorer-layout` : inline layout, line
   boxes** (`inline.rs`) : `LineBox`/`Fragment` produits des
   items en-ligne — texte découpé sur les opportunités UAX #14

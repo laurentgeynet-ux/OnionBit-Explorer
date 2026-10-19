@@ -97,6 +97,7 @@ pub(crate) fn layout_inline(
     w: f32,
     ctx: &BlockCtx,
     parent_fs: f32,
+    abs_cb: Rect,
 ) -> f32 {
     let st = bx.style.clone();
     let fs = font_size_px(&st, parent_fs, ctx);
@@ -106,7 +107,7 @@ pub(crate) fn layout_inline(
     let mut atomics: HashMap<usize, Rect> = HashMap::new();
     for (i, child) in bx.children.iter_mut().enumerate() {
         if child.display() == "inline-block" {
-            layout_block(child, 0.0, 0.0, w, ctx, fs);
+            layout_block(child, 0.0, 0.0, w, ctx, fs, abs_cb);
             atomics.insert(i, child.rect);
         }
     }

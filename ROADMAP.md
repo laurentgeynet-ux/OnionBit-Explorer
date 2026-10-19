@@ -155,11 +155,17 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
 - [x] **Étape 20. Inline layout.** Line boxes sur runs itemisés,
   word wrap (opportunités UAX #14), `text-align`, inline-block
   minimal.
-- [ ] **Étape 21. Tables, flottants et positionnement.**
-  Dimensionnement de tables, `float`, `clear` ; `position`
-  (abs/rel/fixed), `z-index` et contextes d'empilement,
-  `overflow` (clipping, scroll interne) — omniprésents même sur
-  les sites documentaires du palier 1 — algorithmes bornés.
+- [x] **Étape 21. Tables, flottants et positionnement.**
+  Tables : auto layout CSS 2.1 simplifié — largeurs
+  min/pref de colonnes par contenu mesuré, distribution
+  proportionnelle, rangées à hauteur max uniformisée.
+  `float` posé au bord avec bandes réservées qui rétrécissent
+  le flux, `clear` descend sous les flottants ; `position`
+  relative (décalage post-flux), absolute/fixed hors flux
+  résolus en second passage contre le padding box du plus
+  proche ancêtre positionné / le viewport ; `z-index` et
+  `overflow` (x/y combinés) en métadonnées usées sur les
+  boîtes pour le rendu. Algorithmes bornés, 11 tests.
 
 ## Phase 5 — Rendu (`explorer-render`)
 

@@ -21,10 +21,11 @@ pub mod block;
 mod boxtree;
 pub mod font;
 pub mod inline;
+mod tables;
 pub mod text;
 
 pub use block::{layout_tree, BlockCtx};
-pub use boxtree::{build_box_tree, BoxKind, LayoutBox, Rect};
+pub use boxtree::{build_box_tree, BoxKind, Float, LayoutBox, Overflow, Position, Rect};
 pub use font::{FontMetrics, FontRequest, FontSource, Glyph, ShapedRun};
 pub use inline::{Fragment, LineBox};
 pub use text::{Break, Direction, TextRun};

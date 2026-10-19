@@ -54,6 +54,46 @@ pub enum BoxKind {
     AnonymousBlock,
 }
 
+/// `position` usée (étape 21).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Position {
+    /// Flux normal.
+    #[default]
+    Static,
+    /// Décalée après flux normal.
+    Relative,
+    /// Hors flux, relative au bloc conteneur positionné.
+    Absolute,
+    /// Hors flux, relative au viewport.
+    Fixed,
+}
+
+/// `float` usé (étape 21).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Float {
+    /// Pas de flottement.
+    #[default]
+    None,
+    /// Flotte à gauche.
+    Left,
+    /// Flotte à droite.
+    Right,
+}
+
+/// `overflow` usé (étape 21) — clipping au rendu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Overflow {
+    /// Déborde librement.
+    #[default]
+    Visible,
+    /// Clippé à la padding box.
+    Hidden,
+    /// Clippé + défilement.
+    Scroll,
+    /// Défilement si déborde.
+    Auto,
+}
+
 impl BoxKind {
     /// Niveau en-ligne (`inline`/`text`) — regroupé par les
     /// enveloppes anonymes.
@@ -83,6 +123,15 @@ pub struct LayoutBox {
     pub lines: Vec<crate::inline::LineBox>,
     /// Géométrie — remplie par les étapes suivantes.
     pub rect: Rect,
+    /// `position` usée (étape 21).
+    pub position: Position,
+    /// `float` usé (étape 21).
+    pub float: Float,
+    /// `overflow` usé — clipping appliqué par le rendu.
+    pub overflow: Overflow,
+    /// `z-index` résolu (0 = auto) — contextes d'empilement
+    /// pour l'ordre de peinture.
+    pub z_index: i32,
 }
 
 impl LayoutBox {
@@ -154,6 +203,10 @@ pub fn build_box_tree(dom: &Dom, root: NodeId, styles: &StyleMap) -> Option<Layo
         children: Vec::new(),
         lines: Vec::new(),
         rect: Rect::default(),
+        position: Position::Static,
+        float: Float::None,
+        overflow: Overflow::Visible,
+        z_index: 0,
     };
     let children = child_boxes(dom, root, styles, &style);
     b.children = if kind.is_inline_level() {
@@ -205,6 +258,10 @@ fn child_boxes(
                     children: Vec::new(),
                     lines: Vec::new(),
                     rect: Rect::default(),
+                    position: Position::Static,
+                    float: Float::None,
+                    overflow: Overflow::Visible,
+                    z_index: 0,
                 });
             }
         }
@@ -252,6 +309,10 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             children: std::mem::take(run),
             lines: Vec::new(),
             rect: Rect::default(),
+            position: Position::Static,
+            float: Float::None,
+            overflow: Overflow::Visible,
+            z_index: 0,
         });
     }
 }
