@@ -9,6 +9,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 49 — CSS2 floats/BFC/whitespace : reftests WPT
+  17/40 → 27/40 (67 %)** (`explorer-css`, `explorer-layout`,
+  `explorer-render`, `explorer-cli`) : attribut `style`
+  inline dans la cascade (priorité auteur maximale,
+  `!important` inline dominant) + tolérance `<![CDATA[`/
+  `]]>` du tokenizer (fixtures XHTML) — la majorité des
+  échecs venait de là. `FloatCtx` partagé : flottants posés
+  à leur position de flux (règle du « parent anonyme »,
+  descente tant que la bande ne les contient pas, règle 5
+  `max_top`), `clear` n'avance plus le flux, `band_over`
+  (intersection des bandes sur toute la hauteur) pour BFC
+  (`layout_bfc_child`) et atomes inline-block, containment
+  §10.6.7, `float` → niveau bloc (§9.7). Inline : marges
+  h/v des atomes dans la ligne, whitespace collapsing +
+  espaces de bord de ligne supprimées (`trail_w`) — fini
+  les carrés `.notdef` Ahem et les décalages de
+  `text-align`. Rendu : boxes synthétiques (anonymous,
+  text) sans fond/bordure clonés ; remplissages pleins
+  pixel-snappés (coutures AA supprimées). Cliquet
+  `WPT_BASELINE` 17 → **27** ; utilitaire `debug_dump`.
 - **Étape 48 — Interop mesurée : reftests WPT, Acid2, sites
   réels** (`explorer-render`, `explorer-cli`, `scripts/`) :
   harnais reftest pixel-exact `tests/wpt_reftests.rs` —
@@ -890,6 +910,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `ROADMAP.md` (générateurs lazy, `Intl` CLDR, `Temporal`
   complet, pont générationnel `explorer-dom` ↔ miroir) —
   échappatoire `boa_engine` non requise.
+
+- **JS-C25 — ordre `[[OwnPropertyKeys]]`, tableaux
+  épars, Symbol `+`, string-box, `\p{…}`**
+  (`dillo-js`) :
+  - `spec_key_order` — indices entiers croissants,
+    puis strings par insertion, puis symboles —
+    pour `Object.keys`/`getOwnPropertyNames`/
+    `for-in`/`JSON.stringify` ;
+  - `Value::Hole` : `Array(n)`/littéral/`delete`/
+    grow produisent de vrais trous ; `in`/
+    `hasOwnProperty`/descripteurs voient l'absence,
+    toute lecture rend `undefined` ; méthodes
+    `HasProperty` sautent (`forEach`/`map`/
+    `filter`/`reduce`/`find*`/`every`/`some`/
+    `indexOf`/`flat*`), `includes` voit
+    `undefined`, `with`/`toReversed`/`toSorted`/
+    `toSpliced` densifient, `slice`/`concat`
+    préservent ;
+  - `ToPrimitive(symbole)` → symbole : `sym+x`,
+    `sym<n`, `` `${sym}` `` → `TypeError` (spec) ;
+    `String(sym)` explicite reste légal ;
+  - string-box : `hasOwnProperty`/`Object.keys`/
+    `getOwnPropertyDescriptor`/`getOwnPropertyNames`
+    fonctionnent sur primitif ; `new String(s)`
+    gagne `length` non-writable ;
+  - `\p{Name}`/`\p{Name=Value}` acceptés en regex
+    `u` (pass-through fancy-regex, erreurs spec) ;
+  - test262 : 859/859 ; 6 tests de régression.
 
 - **JS-C24 — `arguments` mappé, `bind` props,
   protos Weak*, `fn.toString`** (`dillo-js`) :

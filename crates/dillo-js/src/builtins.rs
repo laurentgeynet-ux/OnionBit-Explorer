@@ -1222,7 +1222,9 @@ fn array_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     if args.len() == 1 {
         if let Value::Num(n) = args[0] {
             if n >= 0.0 && n.fract() == 0.0 {
-                return Ok(arr_of(e, vec![Value::Undefined; n as usize]));
+                // `Array(n)` crée un tableau *épars* (n trous —
+                // spec `ArrayCreate`), pas n `undefined`.
+                return Ok(arr_of(e, vec![Value::Hole; n as usize]));
             }
             return Err(e.range_error("invalid array length"));
         }
@@ -1255,6 +1257,23 @@ fn wrap_or_prim(e: &mut Engine, this: Value, proto: ObjId, prim: Value) -> Value
     match constructed_this(e, this, proto) {
         Some(id) => {
             e.set_own(id, PRIM, prim, false);
+            // `new String(s)` a `length` propre non-writable
+            // (spec `StringCreate` — code units UTF-16).
+            if proto == e.protos.string {
+                if let Value::Str(sid) = prim {
+                    let n = e.heap.string(sid).map_or(0, |s| u16_len(&s));
+                    e.set_own_attrs(
+                        id,
+                        "length",
+                        Value::Num(n as f64),
+                        crate::heap::PropAttrs {
+                            writable: false,
+                            enumerable: false,
+                            configurable: false,
+                        },
+                    );
+                }
+            }
             this
         }
         None => prim,
@@ -1268,7 +1287,15 @@ fn string_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
             Ok(wrap_or_prim(e, t, e.protos.string, prim))
         }
         v => {
-            let s = e.to_js_string(v)?;
+            let s = if let Some(d) = sym_desc(e, v) {
+                if d.is_empty() {
+                    "Symbol()".to_string()
+                } else {
+                    format!("Symbol({d})")
+                }
+            } else {
+                e.to_js_string(v)?
+            };
             let prim = e.str_val(s);
             Ok(wrap_or_prim(e, t, e.protos.string, prim))
         }
@@ -1440,7 +1467,7 @@ fn date_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> 
 
 fn object_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let tag = match this {
-        Value::Undefined => "Undefined",
+        Value::Undefined | Value::Hole => "Undefined",
         Value::Null => "Null",
         Value::Num(_) => "Number",
         Value::Bool(_) => "Boolean",
@@ -1485,7 +1512,8 @@ fn has_own_property(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
             Some(o) => match &o.kind {
                 ObjKind::Array(elems) => {
                     key == "length"
-                        || crate::interp::array_index(&key).is_some_and(|i| i < elems.len())
+                        || crate::interp::array_index(&key)
+                            .is_some_and(|i| elems.get(i).is_some_and(|v| !v.is_hole()))
                         || o.get_own(&key).is_some()
                 }
                 ObjKind::Fun(crate::heap::Fun::Script { .. }) => {
@@ -1495,6 +1523,13 @@ fn has_own_property(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
             },
             None => false,
         },
+        // Primitif string : `length` et les indices sont des
+        // props propres du wrapper `ToObject` (spec).
+        Value::Str(sid) => {
+            key == "length"
+                || crate::interp::array_index(&key)
+                    .is_some_and(|i| i < e.heap.string(sid).map_or(0, |s| u16_len(&s)))
+        }
         _ => false,
     };
     Ok(Value::Bool(has))
@@ -1526,6 +1561,13 @@ fn object_is_prototype_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
 }
 
 fn object_keys(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    // `Object.keys('ab')` → `['0','1']` — indices énumérables de
+    // la string-box (spec `ToObject`).
+    if let Value::Str(sid) = arg(args, 0) {
+        let n = e.heap.string(sid).map_or(0, |s| u16_len(&s));
+        let vals: Vec<Value> = (0..n).map(|i| e.str_val(i.to_string())).collect();
+        return Ok(arr_of(e, vals));
+    }
     let Value::Obj(id) = arg(args, 0) else {
         return Ok(arr_of(e, Vec::new()));
     };
@@ -1823,7 +1865,7 @@ fn define_one_prop(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) -> JsRe
                     return Err(e.type_error("cannot shrink a sealed array"));
                 }
                 if let Some(ObjKind::Array(elems)) = e.heap.obj_mut(id).map(|o| &mut o.kind) {
-                    elems.resize(n, Value::Undefined);
+                    elems.resize(n, Value::Hole);
                 }
             }
             if has_writable && !writable {
@@ -1921,12 +1963,42 @@ fn object_get_own_property_descriptor(
     _t: Value,
     args: &[Value],
 ) -> JsResult<Value> {
-    let Value::Obj(id) = arg(args, 0) else {
-        return Ok(Value::Undefined);
-    };
+    let target = arg(args, 0);
     let key = match arg(args, 1) {
         Value::Num(n) => num_to_js_string(n),
         v => e.to_js_string(v)?,
+    };
+    // Descripteurs propres de la string primitive (spec
+    // `ToObject` + `StringGetOwnProperty`).
+    if let Value::Str(sid) = target {
+        let n = e.heap.string(sid).map_or(0, |s| u16_len(&s));
+        let d = e.new_object();
+        if key == "length" {
+            e.set_own(d, "value", Value::Num(n as f64), true);
+            e.set_own(d, "writable", Value::Bool(false), true);
+            e.set_own(d, "enumerable", Value::Bool(false), true);
+            e.set_own(d, "configurable", Value::Bool(false), true);
+            return Ok(Value::Obj(d));
+        }
+        if let Some(i) = crate::interp::array_index(&key) {
+            if i < n {
+                let c = e
+                    .heap
+                    .string(sid)
+                    .and_then(|s| u16_at(&s, i))
+                    .unwrap_or_default();
+                let cv = e.str_val(c);
+                e.set_own(d, "value", cv, true);
+                e.set_own(d, "writable", Value::Bool(false), true);
+                e.set_own(d, "enumerable", Value::Bool(true), true);
+                e.set_own(d, "configurable", Value::Bool(false), true);
+                return Ok(Value::Obj(d));
+            }
+        }
+        return Ok(Value::Undefined);
+    }
+    let Value::Obj(id) = target else {
+        return Ok(Value::Undefined);
     };
     let Some(p) = e.get_own_prop(id, &key)? else {
         return Ok(Value::Undefined);
@@ -2093,7 +2165,7 @@ fn array_pop(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
     let mut elems = take_elems(e, id);
     let orig = elems.clone();
-    let v = elems.pop().unwrap_or(Value::Undefined);
+    let v = elems.pop().unwrap_or(Value::Undefined).unhole();
     put_elems_guarded(e, id, elems, &orig)?;
     Ok(v)
 }
@@ -2106,7 +2178,8 @@ fn array_shift(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         Value::Undefined
     } else {
         elems.remove(0)
-    };
+    }
+    .unhole();
     put_elems_guarded(e, id, elems, &orig)?;
     Ok(v)
 }
@@ -2132,7 +2205,7 @@ fn array_join(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let mut parts = Vec::with_capacity(elems.len());
     for v in &elems {
         parts.push(match v {
-            Value::Undefined | Value::Null => String::new(),
+            Value::Undefined | Value::Null | Value::Hole => String::new(),
             _ => e.to_js_string(*v)?,
         });
     }
@@ -2153,7 +2226,7 @@ fn array_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value
     }
     let mut found = -1i64;
     for (i, v) in elems.iter().enumerate().skip(start as usize) {
-        if e.strict_eq(*v, needle) {
+        if !v.is_hole() && e.strict_eq(*v, needle) {
             found = i as i64;
             break;
         }
@@ -2168,7 +2241,7 @@ fn array_last_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<
     let elems = take_elems(e, id);
     let mut found = -1i64;
     for (i, v) in elems.iter().enumerate().rev() {
-        if e.strict_eq(*v, needle) {
+        if !v.is_hole() && e.strict_eq(*v, needle) {
             found = i as i64;
             break;
         }
@@ -2308,6 +2381,9 @@ fn array_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value
     let this_arg = arg(args, 1);
     let elems = take_elems(e, id);
     for (i, v) in elems.iter().enumerate() {
+        if v.is_hole() {
+            continue; // `forEach` saute les trous (spec).
+        }
         e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?;
     }
     put_elems(e, id, elems);
@@ -2324,7 +2400,13 @@ fn array_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let elems = take_elems(e, id);
     let mut out = Vec::with_capacity(elems.len());
     for (i, v) in elems.iter().enumerate() {
-        out.push(e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?);
+        // `map` préserve les trous (spec — `Array(3).map(f)` reste
+        // épars, la cb n'est pas appelée).
+        out.push(if v.is_hole() {
+            Value::Hole
+        } else {
+            e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?
+        });
     }
     put_elems(e, id, elems);
     let a_v = species_array(e, this, out.len())?;
@@ -2344,6 +2426,9 @@ fn array_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
     let elems = take_elems(e, id);
     let mut out = Vec::new();
     for (i, v) in elems.iter().enumerate() {
+        if v.is_hole() {
+            continue;
+        }
         let keep = e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?;
         if e.to_boolean(keep) {
             out.push(*v);
@@ -2366,13 +2451,21 @@ fn array_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
     let elems = take_elems(e, id);
     let (mut acc, start) = match args.get(1) {
         Some(v) => (*v, 0),
-        None if elems.is_empty() => {
-            put_elems(e, id, elems);
-            return Err(e.type_error("reduce of empty array"));
+        // Sans init, l'acc est le premier élément *présent* —
+        // tout-trous ou vide → TypeError (spec).
+        None => {
+            if let Some(i) = elems.iter().position(|v| !v.is_hole()) {
+                (elems[i], i + 1)
+            } else {
+                put_elems(e, id, elems);
+                return Err(e.type_error("reduce of empty array"));
+            }
         }
-        None => (elems[0], 1),
     };
     for (i, v) in elems.iter().enumerate().skip(start) {
+        if v.is_hole() {
+            continue;
+        }
         acc = e.call_value(cb, Value::Undefined, &[acc, *v, Value::Num(i as f64), this])?;
     }
     put_elems(e, id, elems);
@@ -3872,7 +3965,7 @@ fn array_iter_find(
     e: &mut Engine,
     this: Value,
     args: &[Value],
-) -> JsResult<(Vec<Value>, Vec<bool>, ObjId)> {
+) -> JsResult<(Vec<Value>, Vec<Option<bool>>, ObjId)> {
     let id = this_array(e, this)?;
     let cb = arg(args, 0);
     if !e.is_callable(cb) {
@@ -3881,8 +3974,12 @@ fn array_iter_find(
     let elems = take_elems(e, id);
     let mut hits = Vec::with_capacity(elems.len());
     for (i, &v) in elems.iter().enumerate() {
+        if v.is_hole() {
+            hits.push(None); // trou → cb non appelée (spec `HasProperty`).
+            continue;
+        }
         let r = e.call_value(cb, arg(args, 1), &[v, Value::Num(i as f64), this])?;
-        hits.push(e.to_boolean(r));
+        hits.push(Some(e.to_boolean(r)));
     }
     Ok((elems, hits, id))
 }
@@ -3892,7 +3989,7 @@ fn array_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let out = elems
         .iter()
         .zip(&hits)
-        .find_map(|(&v, &h)| h.then_some(v))
+        .find_map(|(&v, &h)| (h == Some(true)).then_some(v))
         .unwrap_or(Value::Undefined);
     put_elems(e, id, elems);
     Ok(out)
@@ -3900,21 +3997,26 @@ fn array_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 fn array_find_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (elems, hits, id) = array_iter_find(e, this, args)?;
-    let out = hits.iter().position(|&h| h).map_or(-1.0, |i| i as f64);
+    let out = hits
+        .iter()
+        .position(|&h| h == Some(true))
+        .map_or(-1.0, |i| i as f64);
     put_elems(e, id, elems);
     Ok(Value::Num(out))
 }
 
 fn array_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (elems, hits, id) = array_iter_find(e, this, args)?;
-    let out = hits.iter().any(|&h| h);
+    let out = hits.contains(&Some(true));
     put_elems(e, id, elems);
     Ok(Value::Bool(out))
 }
 
 fn array_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (elems, hits, id) = array_iter_find(e, this, args)?;
-    let out = hits.iter().all(|&h| h);
+    // `every` : les trous sont ignorés — `all` porte sur les
+    // éléments présents seulement (spec).
+    let out = hits.iter().flatten().all(|&h| h);
     put_elems(e, id, elems);
     Ok(Value::Bool(out))
 }
@@ -4046,6 +4148,14 @@ fn number_is_integer(_e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Val
 fn object_get_own_property_names(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let keys = match arg(args, 0) {
         Value::Obj(id) => e.own_keys_trapped(id)?,
+        // String-box : indices + `length` (spec `ToObject`).
+        Value::Str(sid) => {
+            let n = e.heap.string(sid).map_or(0, |s| u16_len(&s));
+            (0..n)
+                .map(|i| i.to_string())
+                .chain(["length".to_string()])
+                .collect()
+        }
         _ => Vec::new(),
     };
     // Spec : `getOwnPropertyNames` ne rend que les clés string —
@@ -4344,7 +4454,7 @@ fn array_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
     let elems = take_elems(e, id);
     let i = rel_index(e, arg(args, 0), elems.len())?;
-    let v = i.map_or(Value::Undefined, |i| elems[i]);
+    let v = i.map_or(Value::Undefined, |i| elems[i]).unhole();
     put_elems(e, id, elems);
     Ok(v)
 }
@@ -4374,6 +4484,9 @@ fn array_fill(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// Recursive `flat` — spec depth param, default 1.
 fn flat_into(e: &mut Engine, v: Value, depth: u32, out: &mut Vec<Value>) -> JsResult<()> {
+    if v.is_hole() {
+        return Ok(()); // les trous disparaissent à l'aplatissement.
+    }
     if depth > 0 {
         if let Value::Obj(id) = v {
             if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_))) {
@@ -4412,6 +4525,9 @@ fn array_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value
     let elems = take_elems(e, id);
     let mut out = Vec::new();
     for (i, &v) in elems.iter().enumerate() {
+        if v.is_hole() {
+            continue;
+        }
         let r = e.call_value(cb, arg(args, 1), &[v, Value::Num(i as f64), this])?;
         flat_into(e, r, 1, &mut out)?;
     }
@@ -4425,7 +4541,7 @@ fn array_find_last(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
         .iter()
         .zip(&hits)
         .rev()
-        .find_map(|(&v, &h)| h.then_some(v))
+        .find_map(|(&v, &h)| (h == Some(true)).then_some(v))
         .unwrap_or(Value::Undefined);
     put_elems(e, id, elems);
     Ok(out)
@@ -4433,7 +4549,10 @@ fn array_find_last(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
 
 fn array_find_last_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (elems, hits, id) = array_iter_find(e, this, args)?;
-    let out = hits.iter().rposition(|&h| h).map_or(-1.0, |i| i as f64);
+    let out = hits
+        .iter()
+        .rposition(|&h| h == Some(true))
+        .map_or(-1.0, |i| i as f64);
     put_elems(e, id, elems);
     Ok(Value::Num(out))
 }
@@ -4444,7 +4563,9 @@ fn array_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
     let elems = take_elems(e, id);
     put_elems(e, id, elems.clone());
-    Ok(crate::collections::iter_obj(e, elems))
+    // L'itérateur produit `undefined` pour les trous (spec `Get`).
+    let vals: Vec<Value> = elems.iter().map(|v| v.unhole()).collect();
+    Ok(crate::collections::iter_obj(e, vals))
 }
 
 fn array_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -4461,7 +4582,7 @@ fn array_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let elems = take_elems(e, id);
     let mut items = Vec::with_capacity(elems.len());
     for (i, &v) in elems.iter().enumerate() {
-        items.push(e.new_array(vec![Value::Num(i as f64), v]));
+        items.push(e.new_array(vec![Value::Num(i as f64), v.unhole()]));
     }
     put_elems(e, id, elems);
     Ok(crate::collections::iter_obj(e, items))
@@ -4473,7 +4594,9 @@ fn array_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let elems = take_elems(e, id);
     let len = elems.len();
     if let Some(i) = rel_index(e, arg(args, 0), len)? {
-        let mut out_v = elems.clone();
+        // `with` produit un résultat dense (spec `Get` → trou
+        // relu `undefined`).
+        let mut out_v: Vec<Value> = elems.iter().map(|v| v.unhole()).collect();
         out_v[i] = arg(args, 1);
         let out = e.new_array(out_v);
         put_elems(e, id, elems);
@@ -4487,7 +4610,7 @@ fn array_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 fn array_to_reversed(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
     let elems = take_elems(e, id);
-    let mut out_v = elems.clone();
+    let mut out_v: Vec<Value> = elems.iter().map(|v| v.unhole()).collect();
     out_v.reverse();
     let out = e.new_array(out_v);
     put_elems(e, id, elems);
@@ -4557,9 +4680,10 @@ fn array_to_spliced(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     };
     let ins: Vec<Value> = args.get(2..).unwrap_or(&[]).to_vec();
     let mut out_v = Vec::with_capacity(len - del + ins.len());
-    out_v.extend_from_slice(&elems[..start]);
+    // Résultat dense — `toSpliced` fait `Get` par slot (spec).
+    out_v.extend(elems[..start].iter().map(|v| v.unhole()));
     out_v.extend(ins);
-    out_v.extend_from_slice(&elems[start + del..]);
+    out_v.extend(elems[start + del..].iter().map(|v| v.unhole()));
     let out = e.new_array(out_v);
     put_elems(e, id, elems);
     Ok(out)
@@ -4570,7 +4694,8 @@ fn array_to_sorted(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
     // (`sort` mutates `this`; `toSorted` must not).
     let id = this_array(e, this)?;
     let elems = take_elems(e, id);
-    let copy = e.new_array(elems.clone());
+    // Dense — `toSorted` relit les slots par `Get` (spec).
+    let copy = e.new_array(elems.iter().map(|v| v.unhole()).collect());
     put_elems(e, id, elems);
     array_sort(e, copy, args)?;
     Ok(copy)
@@ -5980,14 +6105,21 @@ fn array_reduce_right(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
     let elems = take_elems(e, id);
     let (mut acc, start) = match args.get(1) {
         Some(v) => (*v, elems.len() as i64 - 1),
-        None if elems.is_empty() => {
-            put_elems(e, id, elems);
-            return Err(e.type_error("reduceRight of empty array"));
+        // Sans init, acc = dernier élément *présent* (spec).
+        None => {
+            if let Some(i) = elems.iter().rposition(|v| !v.is_hole()) {
+                (elems[i], i as i64 - 1)
+            } else {
+                put_elems(e, id, elems);
+                return Err(e.type_error("reduceRight of empty array"));
+            }
         }
-        None => (elems[elems.len() - 1], elems.len() as i64 - 2),
     };
     for i in (0..=start).rev() {
         let v = elems[i as usize];
+        if v.is_hole() {
+            continue;
+        }
         acc = e.call_value(cb, Value::Undefined, &[acc, v, Value::Num(i as f64), this])?;
     }
     put_elems(e, id, elems);

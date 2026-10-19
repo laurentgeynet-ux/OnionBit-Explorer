@@ -27,6 +27,12 @@ pub enum Value {
     Big(ObjId),
     /// Heap-allocated object.
     Obj(ObjId),
+    /// Élément-trou de tableau épars (`Array(3)`, `delete a[i]`,
+    /// `[1,,3]`). Jamais observable directement — `find_own` rend
+    /// `None` (spec `HasProperty`) et les chemins génériques le
+    /// traitent comme `undefined` ; les méthodes qui *sautent*
+    /// les trous (`forEach`/`map`/…) testent `is_hole`.
+    Hole,
 }
 
 impl Value {
@@ -34,6 +40,23 @@ impl Value {
     #[must_use]
     pub fn is_object(self) -> bool {
         matches!(self, Value::Obj(_))
+    }
+
+    /// Trou de tableau épars.
+    #[must_use]
+    pub fn is_hole(self) -> bool {
+        matches!(self, Value::Hole)
+    }
+
+    /// `Hole → Undefined` — lecture d'un trou (itérateurs,
+    /// valeurs retournées par `pop`/`at`/spread…).
+    #[must_use]
+    pub fn unhole(self) -> Value {
+        if self.is_hole() {
+            Value::Undefined
+        } else {
+            self
+        }
     }
 }
 

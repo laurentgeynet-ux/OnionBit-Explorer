@@ -983,6 +983,24 @@ impl Trans {
             let v = u32::from(cs[i + 2]) % 32;
             return Ok((format!("\\x{{{v:x}}}"), i + 3));
         }
+        if (c == 'p' || c == 'P') && self.unicode && cs.get(i + 2) == Some(&'{') {
+            // `\p{Name}` / `\p{Name=Value}` — classe Unicode
+            // passée telle quelle à fancy-regex.
+            let rel_end = cs[i + 2..]
+                .iter()
+                .position(|&ch| ch == '}')
+                .ok_or_else(|| format!("unterminated \\p{{ in `u` regex /{src}/"))?;
+            let end = i + 2 + rel_end;
+            let body: String = cs[i + 3..end].iter().collect();
+            if body.is_empty()
+                || !body
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '=')
+            {
+                return Err(format!("invalid \\p{{ name in `u` regex /{src}/"));
+            }
+            return Ok((cs[i..=end].iter().collect::<String>(), end + 1));
+        }
         if c.is_ascii_alphanumeric() {
             let known = matches!(
                 c,

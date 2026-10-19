@@ -739,6 +739,40 @@ d'intégration, pas par la couverture :
   `[native code]` pour natives/bound — approximation
   du texte source). test262 : 859/859 ; 4 tests de
   régression.
+- [x] **JS-C25. `[[OwnPropertyKeys]]` ordre spec,
+  tableaux épars, Symbol `+`/ToString TypeError,
+  props propres des string-box, `new String`
+  `.length`, `\p{…}` regex `u`** : ordre
+  `[[OwnPropertyKeys]]` (`spec_key_order` —
+  indices entiers croissants, puis strings par
+  insertion, puis symboles) appliqué à
+  `own_keys`/`own_enum_keys`/`enum_keys` (for-in),
+  `Object.keys`/`getOwnPropertyNames`/`JSON.stringify`.
+  `Value::Hole` : `Array(n)` crée des trous (spec
+  `ArrayCreate`), ainsi que littéral `[1,,3]`,
+  `delete a[i]`, grow `length`/`arr[i]` ; `find_own`
+  rend `None` (`in`/`hasOwnProperty`/descripteurs
+  voient l'absence), chemins génériques Hole ≡
+  `undefined` (coercions, `strict_eq`/`loose_eq`,
+  `typeof`, JSON→null, itérateurs/`pop`/`at`→
+  `unhole`). Méthodes `HasProperty` sautées
+  (`forEach`/`filter`/`find*`/`some`/`every`/
+  `indexOf`/`flat*`, `map` préserve le trou,
+  `reduce` acc = premier présent) ; `includes`
+  =undefined (SameValueZero), `join`→"",
+  `slice`/`concat` préservent, `with`/`toReversed`/
+  `toSorted`/`toSpliced` densifient (spec `Get`).
+  `ToPrimitive(symbole)` → le symbole (spec
+  `@@toPrimitive`) — `sym+x`/`sym<n`/template →
+  `TypeError` via `to_number`/`to_js_string`,
+  `String(sym)` explicite reste légal. String-box :
+  `hasOwnProperty`/`Object.keys`/`getOwnPropertyDescriptor`/
+  `getOwnPropertyNames` sur primitif (`length` +
+  indices), `new String(s)` gagne `length` propre
+  non-writable (spec `StringCreate`). `\p{Name}`/
+  `\p{Name=Value}` passent à fancy-regex en mode
+  `u` (validation + erreurs spec). test262 :
+  859/859 ; 6 tests de régression.
 - [ ] **JS-C. Couverture par besoin** : `Temporal`
   (`ZonedDateTime`, calendriers non-iso, `round`),
   `Intl` multi-locales, décorateurs `@dec` — ordre
@@ -943,6 +977,35 @@ progresse en trois paliers structurants :
   informatif côté équipe JS (test262 859/859). Prochaine
   étape déduite du rapport : `display: flow-root` +
   affinement des bands float (`float_band`).
+- [x] **Étape 49. CSS2 floats/BFC/whitespace — WPT 17→27/40.**
+  Étape déduite du rapport de l'étape 48. `explorer-css` :
+  attribut `style` inline dans la cascade (priorité au-dessus
+  de tout sélecteur auteur, `!important` inline > `!important`
+  sélecteur), tolérance `<![CDATA[`/`]]>` dans le tokenizer
+  (fixtures XHTML). `explorer-layout` : `FloatCtx` partagé
+  par `&mut` (registre des flottants du BFC — `band`,
+  `band_over`, `next_band_change`, `first_bottom_within`,
+  `max_top` règle 5, `cleared`) ; les flottants se posent à
+  leur position de flux (règle du « parent anonyme »),
+  descendent tant que la bande ne les contient pas,
+  n'avancent jamais le curseur ; `clear` ne déplace que la
+  boîte concernée ; non-BFC pleine largeur (leurs lignes se
+  rétrécissent dans la bande), BFC posée dans la bande
+  intersectée sur toute sa hauteur (`layout_bfc_child`),
+  containment des flottants §10.6.7 ; boxtree §9.7 — `float`
+  force le niveau bloc. `inline` : bandes par ligne,
+  marges horizontales **et** verticales des atomes
+  (inline-block = BFC posé sur son étendue), whitespace
+  collapsing CSS (newline → espace, `.notdef` Ahem évité,
+  espaces en tête/fin de ligne supprimées — `trail_w`).
+  `explorer-render` : anonymous/text boxes ne peignent plus
+  les fond/bordure clonés (non hérités en CSS), pixel-snap
+  des arêtes de remplissage plein (coutures AA supprimées
+  + hairline fractionnaire saine). Score mesuré :
+  **27/40 (67 %)**, cliquet `WPT_BASELINE` = 27 — reste :
+  placement 004/006/007/008, `wrap-top-below-inline-001r`,
+  bfc-overflow, zero-height, block-formatting 001/003/004/
+  008/015.
 
 ## Hors périmètre assumé (documenté, non planifié)
 

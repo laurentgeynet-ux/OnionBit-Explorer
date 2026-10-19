@@ -356,7 +356,9 @@ fn json_write(
     }
     e.tick()?;
     match v {
-        Value::Undefined => return Ok(false), // elided
+        // Trou d'array épars : traité comme `undefined` → `null`
+        // en position d'élément (spec `SerializeJSONProperty`).
+        Value::Undefined | Value::Hole => return Ok(false), // elided
         Value::Null => out.push_str("null"),
         Value::Bool(b) => out.push_str(if b { "true" } else { "false" }),
         Value::Num(n) => {

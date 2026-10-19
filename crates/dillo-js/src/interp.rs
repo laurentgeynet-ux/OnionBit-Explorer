@@ -1042,7 +1042,7 @@ impl Engine {
             Value::Num(_) => (self.protos.number, None, None),
             Value::Bool(_) => (self.protos.boolean, None, None),
             Value::Big(_) => (self.protos.bigint, None, None),
-            Value::Undefined | Value::Null => return None,
+            Value::Undefined | Value::Null | Value::Hole => return None,
         };
         // Wrapper éphémère — jamais observable par le script hors
         // du bloc `with` (aucune référence ne s'en échappe sauf si
@@ -1844,15 +1844,19 @@ impl Engine {
                 });
             }
             if let Some(i) = array_index(key) {
-                return elems.get(i).copied().map(|value| Prop::Data {
-                    value,
-                    attrs: crate::heap::PropAttrs {
-                        writable: o.elem_integrity & 2 == 0,
-                        enumerable: true,
-                        // `seal`/`freeze` → éléments non-config.
-                        configurable: o.elem_integrity.trailing_zeros() >= 2,
-                    },
-                });
+                return elems
+                    .get(i)
+                    .copied()
+                    .filter(|v| !v.is_hole())
+                    .map(|value| Prop::Data {
+                        value,
+                        attrs: crate::heap::PropAttrs {
+                            writable: o.elem_integrity & 2 == 0,
+                            enumerable: true,
+                            // `seal`/`freeze` → éléments non-config.
+                            configurable: o.elem_integrity.trailing_zeros() >= 2,
+                        },
+                    });
             }
         }
         if let ObjKind::Fun(Fun::Script { lit, .. }) = &o.kind {
@@ -2365,7 +2369,7 @@ impl Engine {
     /// `base[key]` on any value — wraps primitives via their prototype.
     pub(crate) fn get_prop_value(&mut self, base: Value, key: &str) -> JsResult<Value> {
         match base {
-            Value::Undefined | Value::Null => {
+            Value::Undefined | Value::Null | Value::Hole => {
                 Err(self.type_error(format!("cannot read `{key}` of {base:?}")))
             }
             Value::Obj(id) => {
@@ -2522,7 +2526,7 @@ impl Engine {
                 if o.elem_integrity & 3 != 0 && n < elems.len() {
                     return Err(self.type_error("cannot shrink a sealed array"));
                 }
-                elems.resize(n, Value::Undefined);
+                elems.resize(n, Value::Hole);
                 return Ok(true);
             }
             if let Some(i) = array_index(key) {
@@ -2536,7 +2540,7 @@ impl Engine {
                     return Ok(false);
                 }
                 if i >= elems.len() {
-                    elems.resize(i + 1, Value::Undefined);
+                    elems.resize(i + 1, Value::Hole);
                 }
                 elems[i] = v;
                 return Ok(true);
@@ -2631,7 +2635,7 @@ impl Engine {
                         }
                     }
                     if i < elems.len() {
-                        elems[i] = Value::Undefined;
+                        elems[i] = Value::Hole;
                     }
                     return true;
                 }
@@ -2687,11 +2691,14 @@ impl Engine {
     /// array indices + props regardless of enumerability.
     pub(crate) fn own_keys(&self, id: ObjId) -> Vec<String> {
         let mut out = Vec::new();
+        let mut rest = Vec::new();
         if let Some(o) = self.heap.obj(id) {
             match &o.kind {
                 ObjKind::Array(elems) => {
-                    for i in 0..elems.len() {
-                        out.push(i.to_string());
+                    for (i, v) in elems.iter().enumerate() {
+                        if !v.is_hole() {
+                            out.push(i.to_string());
+                        }
                     }
                 }
                 ObjKind::TypedArray { len, .. } => {
@@ -2702,9 +2709,10 @@ impl Engine {
                 _ => {}
             }
             for (k, _) in &o.props {
-                out.push(k.clone());
+                rest.push(k.clone());
             }
         }
+        out.extend(spec_key_order(rest));
         out
     }
 
@@ -2714,8 +2722,10 @@ impl Engine {
         if let Some(o) = self.heap.obj(id) {
             match &o.kind {
                 ObjKind::Array(elems) => {
-                    for i in 0..elems.len() {
-                        out.push(i.to_string());
+                    for (i, v) in elems.iter().enumerate() {
+                        if !v.is_hole() {
+                            out.push(i.to_string());
+                        }
                     }
                 }
                 ObjKind::TypedArray { len, .. } => {
@@ -2725,12 +2735,14 @@ impl Engine {
                 }
                 _ => {}
             }
+            let mut rest = Vec::new();
             for (k, p) in &o.props {
                 // Clés-symboles sentinelles : jamais énumérées.
                 if p.enumerable() && !k.starts_with(SYM_PREFIX) {
-                    out.push(k.clone());
+                    rest.push(k.clone());
                 }
             }
+            out.extend(spec_key_order(rest));
         }
         out
     }
@@ -2935,15 +2947,21 @@ impl Engine {
                 };
             } else if let Some(o) = self.heap.obj(cid) {
                 if let ObjKind::Array(elems) = &o.kind {
-                    for i in 0..elems.len() {
-                        if seen.insert(i.to_string()) {
+                    for (i, v) in elems.iter().enumerate() {
+                        if !v.is_hole() && seen.insert(i.to_string()) {
                             out.push(i.to_string());
                         }
                     }
                 }
-                for (k, p) in &o.props {
-                    if p.enumerable() && seen.insert(k.clone()) {
-                        out.push(k.clone());
+                let pkeys: Vec<String> = o
+                    .props
+                    .iter()
+                    .filter(|(k, p)| p.enumerable() && !k.starts_with(SYM_PREFIX))
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                for k in spec_key_order(pkeys) {
+                    if seen.insert(k.clone()) {
+                        out.push(k);
                     }
                 }
                 cur = match o.proto {
@@ -2966,7 +2984,7 @@ impl Engine {
     /// `ToBoolean` (pure, no user code runs).
     pub(crate) fn to_boolean(&self, v: Value) -> bool {
         match v {
-            Value::Undefined | Value::Null => false,
+            Value::Undefined | Value::Null | Value::Hole => false,
             Value::Bool(b) => b,
             Value::Num(n) => n != 0.0 && !n.is_nan(),
             // `0n` falsy, tout le reste truthy.
@@ -2985,6 +3003,15 @@ impl Engine {
         let Value::Obj(id) = v else {
             return Ok(v);
         };
+        // `ToPrimitive(symbole)` → le symbole lui-même (spec) —
+        // les `valueOf`/`toString` du proto ne s'appliquent pas
+        // à la conversion (c'est `Symbol.prototype[@@toPrimitive]`).
+        if matches!(
+            self.heap.obj(id).map(|o| &o.kind),
+            Some(ObjKind::Symbol { .. })
+        ) {
+            return Ok(v);
+        }
         // `@@toPrimitive(hint)` prend le pas (spec `ToPrimitive`).
         if let Some(f) = self.get_prop(id, SYM_TO_PRIMITIVE) {
             if self.is_callable(f) {
@@ -3103,7 +3130,7 @@ impl Engine {
     /// `ToNumber`.
     pub(crate) fn to_number(&mut self, v: Value) -> JsResult<f64> {
         Ok(match v {
-            Value::Undefined => f64::NAN,
+            Value::Undefined | Value::Hole => f64::NAN,
             Value::Null => 0.0,
             Value::Bool(b) => f64::from(u8::from(b)),
             Value::Num(n) => n,
@@ -3128,13 +3155,20 @@ impl Engine {
     /// `ToString`.
     pub(crate) fn to_js_string(&mut self, v: Value) -> JsResult<String> {
         Ok(match v {
-            Value::Undefined => "undefined".into(),
+            Value::Undefined | Value::Hole => "undefined".into(),
             Value::Null => "null".into(),
             Value::Bool(b) => if b { "true" } else { "false" }.into(),
             Value::Num(n) => num_to_js_string(n),
             Value::Str(id) => self.heap.string(id).unwrap_or_default(),
             Value::Big(_) => self.bigint_of(v).map(|b| b.to_string()).unwrap_or_default(),
-            Value::Obj(_) => {
+            Value::Obj(id) => {
+                // `ToString(symbol)` → TypeError (spec `ToString`).
+                if matches!(
+                    self.heap.obj(id).map(|o| &o.kind),
+                    Some(ObjKind::Symbol { .. })
+                ) {
+                    return Err(self.type_error("cannot convert a Symbol to string"));
+                }
                 let p = self.to_primitive(v, PrimHint::String)?;
                 self.to_js_string(p)?
             }
@@ -4204,7 +4238,7 @@ impl Engine {
                             v.extend(self.iter_values(sv)?);
                         }
                         Some(e) => v.push(self.eval_expr(env, this, e)?),
-                        None => v.push(Value::Undefined),
+                        None => v.push(Value::Hole),
                     }
                 }
                 Ok(self.new_array(v))
@@ -4925,6 +4959,7 @@ impl Engine {
 
     /// `==` per ES5 §11.9.3.
     fn loose_eq(&mut self, l: Value, r: Value) -> JsResult<bool> {
+        let (l, r) = (l.unhole(), r.unhole());
         if strict_eq(l, r, &self.heap) {
             return Ok(true);
         }
@@ -5124,6 +5159,7 @@ fn big_cmp_num(b: &num_bigint::BigInt, n: f64) -> Option<std::cmp::Ordering> {
 
 /// `===` (no user code runs).
 pub(crate) fn strict_eq(l: Value, r: Value, heap: &Heap) -> bool {
+    let (l, r) = (l.unhole(), r.unhole());
     match (l, r) {
         (Value::Num(a), Value::Num(b)) => a == b, // NaN != NaN via f64 ==
         (Value::Str(a), Value::Str(b)) => {
@@ -5147,9 +5183,34 @@ pub(crate) fn strict_eq(l: Value, r: Value, heap: &Heap) -> bool {
     }
 }
 
+/// `[[OwnPropertyKeys]]` order : indices-entiers croissants, puis
+/// strings par ordre d'insertion, puis symboles (clés sentinelle
+/// privée) par insertion. Les `props` du heap gardant l'ordre
+/// d'insertion brut, on partitionne ici.
+fn spec_key_order(keys: Vec<String>) -> Vec<String> {
+    let mut ints: Vec<(usize, String)> = Vec::new();
+    let mut strs = Vec::new();
+    let mut syms = Vec::new();
+    for k in keys {
+        if let Some(i) = array_index(&k) {
+            ints.push((i, k));
+        } else if k.starts_with(SYM_PREFIX) {
+            syms.push(k);
+        } else {
+            strs.push(k);
+        }
+    }
+    ints.sort_by_key(|(i, _)| *i);
+    ints.into_iter()
+        .map(|(_, k)| k)
+        .chain(strs)
+        .chain(syms)
+        .collect()
+}
+
 fn typeof_str(v: Value, heap: &Heap) -> &'static str {
     match v {
-        Value::Undefined => "undefined",
+        Value::Undefined | Value::Hole => "undefined",
         Value::Null => "object",
         Value::Bool(_) => "boolean",
         Value::Num(_) => "number",

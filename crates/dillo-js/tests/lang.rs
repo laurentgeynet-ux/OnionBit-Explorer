@@ -6207,3 +6207,132 @@ fn c24_function_to_string() {
         "function r(...a) { [code] }"
     );
 }
+
+// JS-C25 : ordre `[[OwnPropertyKeys]]`, tableaux épars (`Value::Hole`),
+// Symbol `+`/`ToString` TypeError, props propres des primitives
+// string, `new String().length`, `\p{…}` en regex `u`.
+
+#[test]
+fn c25_ownkeys_order() {
+    // Indices-entiers croissants d'abord, puis strings par insertion.
+    assert_eq!(
+        ev_str("Object.keys({b:1,2:2,a:3,1:4}).join(',')"),
+        "1,2,b,a"
+    );
+    assert_eq!(
+        ev_str("Object.keys({x:1,'10':2,'2':3,y:4}).join(',')"),
+        "2,10,x,y"
+    );
+    assert_eq!(
+        ev_str("Object.getOwnPropertyNames({b:1,2:2,a:3}).join(',')"),
+        "2,b,a"
+    );
+    assert_eq!(ev_str("let s='';for(let k in {b:1,2:2,a:3})s+=k;s"), "2ba");
+    assert_eq!(
+        ev_str("JSON.stringify({b:1,2:2,a:3})"),
+        "{\"2\":2,\"b\":1,\"a\":3}"
+    );
+}
+
+#[test]
+fn c25_sparse_arrays() {
+    // `Array(n)` crée des trous — `in`/hasOwnProperty/enum les voient absents.
+    assert_eq!(ev_str("let a=Array(3);0 in a"), "false");
+    assert_eq!(ev_str("let a=Array(3);a.length"), "3");
+    assert_eq!(ev_str("let a=Array(3);a.hasOwnProperty(0)"), "false");
+    assert_eq!(ev_str("Object.keys([1,,3]).join(',')"), "0,2");
+    assert_eq!(ev_str("let s='';for(let k in [1,,3])s+=k;s"), "02");
+    // Trous produits par littéral, `delete`, grow `length`/`arr[i]`.
+    assert_eq!(ev_str("1 in [1,,3]"), "false");
+    assert_eq!(ev_str("let a=[1,2,3];delete a[1];1 in a"), "false");
+    assert_eq!(ev_str("let a=[1];a.length=3;1 in a"), "false");
+    assert_eq!(ev_str("let a=[1];a[3]=9;2 in a"), "false");
+    // Lecture → `undefined` ; itérateurs/spread idem.
+    assert_eq!(ev_str("[1,,3][1]===undefined"), "true");
+    assert_eq!(ev_str("[...Array(3)].join(',')"), ",,");
+    assert_eq!(ev_str("[1,,3].at(1)===undefined"), "true");
+    assert_eq!(ev_str("let a=[1,,];a.pop()===undefined"), "true");
+    assert_eq!(ev_str("[1,,3].join('|')"), "1||3");
+    // `slice`/`concat` préservent les trous ; `with`/`toReversed` densifient.
+    assert_eq!(ev_str("let a=[1,,3].slice();1 in a"), "false");
+    assert_eq!(ev_str("let a=[1,,3].concat([]);1 in a"), "false");
+    assert_eq!(ev_str("let a=[1,,3].with(0,9);1 in a"), "true");
+}
+
+#[test]
+fn c25_sparse_methods_skip() {
+    // Les méthodes `HasProperty` sautent les trous (cb non appelée).
+    assert_eq!(ev_str("let c=0;[1,,3].forEach(()=>c++);c"), "2");
+    assert_eq!(ev_str("let a=Array(3);a.map(()=>7);0 in a"), "false");
+    assert_eq!(ev_str("[1,,3].filter(()=>true).join(',')"), "1,3");
+    assert_eq!(ev_str("[1,,3].reduce((a,b)=>a+b)"), "4");
+    assert_eq!(
+        ev_str("let c=0;[1,,3].every(x=>{c++;return x>0})+\",\"+c"),
+        "true,2"
+    );
+    assert_eq!(ev_str("[1,,3].some(x=>x===undefined)"), "false");
+    assert_eq!(ev_str("[1,,3].find(x=>x===undefined)"), "undefined");
+    assert_eq!(ev_str("[1,,3].indexOf(undefined)"), "-1");
+    // `includes` traite les trous comme `undefined` (spec SameValueZero).
+    assert_eq!(ev_str("[1,,3].includes(undefined)"), "true");
+    // `flat` élimine les trous.
+    assert_eq!(ev_str("[1,[2,,4],3].flat().join(',')"), "1,2,4,3");
+    assert_eq!(
+        ev_str("try{Array(3).reduce((a,b)=>a+b)}catch(x){x.constructor.name}"),
+        "TypeError"
+    );
+}
+
+#[test]
+fn c25_symbol_coercion() {
+    // `ToPrimitive(symbole)` → symbole ; `ToString/ToNumber` → TypeError.
+    assert_eq!(
+        ev_str("try{Symbol('x')+''}catch(x){x.constructor.name}"),
+        "TypeError"
+    );
+    assert_eq!(
+        ev_str("try{Symbol()<1}catch(x){x.constructor.name}"),
+        "TypeError"
+    );
+    assert_eq!(
+        ev_str("try{`${Symbol()}`}catch(x){x.constructor.name}"),
+        "TypeError"
+    );
+    // `String(sym)` explicite reste légal (spec).
+    assert_eq!(ev_str("String(Symbol('x'))"), "Symbol(x)");
+    assert_eq!(ev_str("String(Symbol())"), "Symbol()");
+}
+
+#[test]
+fn c25_primitive_own_props() {
+    // Props propres de la string-box : `length` + indices.
+    assert_eq!(ev_str("({}).hasOwnProperty.call('a','length')"), "true");
+    assert_eq!(ev_str("({}).hasOwnProperty.call('ab','1')"), "true");
+    assert_eq!(ev_str("Object.keys('ab').join(',')"), "0,1");
+    assert_eq!(
+        ev_str("Object.getOwnPropertyDescriptor('ab','length').value"),
+        "2"
+    );
+    assert_eq!(
+        ev_str("Object.getOwnPropertyDescriptor('ab','0').enumerable"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("Object.getOwnPropertyNames('ab').join(',')"),
+        "0,1,length"
+    );
+    // `new String(s)` a `length` propre non-writable.
+    assert_eq!(ev_str("new String('ab').length"), "2");
+    assert_eq!(ev_str("let s=new String('ab');s.length=9;s.length"), "2");
+}
+
+#[test]
+fn c25_regex_unicode_props() {
+    assert_eq!(ev_str(r"/\p{L}/u.test('é')"), "true");
+    assert_eq!(ev_str(r"/\p{L}/u.test('5')"), "false");
+    assert_eq!(ev_str(r"'a1'.replace(/\p{N}/u,'X')"), "aX");
+    assert_eq!(
+        ev_str("try{new RegExp('\\p{}','u')}catch(x){x.constructor.name}"),
+        "SyntaxError"
+    );
+}
