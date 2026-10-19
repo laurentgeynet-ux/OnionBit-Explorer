@@ -9,6 +9,43 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-1 — Peinture progressive : le domaine tolère un document
+  en construction** (`explorer-dom`, `explorer-html`,
+  `explorer-layout`, `explorer-render`) : conduite incrémentale
+  haut niveau `TreeBuilder::push(&str)`/`finish()` — tokenizer
+  interne possédé par le builder, `dom()` observable entre les
+  chunks à frontière de token (le couple bas niveau
+  `feed`/`process` reste exposé ; `TreeBuilder::parse` réécrit
+  par-dessus, chemin de référence unique). `Dom::document_element()`
+  — `None` tant que le document en construction n'a pas
+  d'élément racine (préambule : doctype, commentaires), pour
+  l'usage du consommateur incrémental. Contrat rustdoc posé :
+  DOM partiel = entrée supportée de `build_box_tree_*` /
+  `build_display_list_*` ; aucun `NodeId` inséré n'est collecté
+  tant que le builder vit (hit-test, images des frames
+  intermédiaires). `Tokenizer::is_finished()`. Tests :
+  `incremental.rs` (convergence à **toute** coupure octet,
+  `NodeId` vivants, flux clos) et `progressive.rs` (frame
+  cohérente à chaque push, contenu progressif, dernière frame
+  pixel-identique au parse complet). Débloque la session
+  incrémentale côté NAVIGATEUR (étape 53).
+- **Étape 50 — Scripts externes + scheduler de sous-ressources
+  parallèle** (`explorer-core`, `explorer-net`, `explorer-js`,
+  `dillo-js`) : `<script src>` fetché via `HttpTransport` —
+  scheduler parallèle par onglet (`FuturesUnordered` borné à
+  `SessionConfig::max_inflight` = 6), émission par priorité
+  `document > CSS > script > img`, ordre document préservé par
+  slots de réception indexés. `defer` = file post-parse,
+  `async` = évalué à réception (classique) ou bufferisé avant
+  la file post-parse (module) ; `type="module"` : graphe
+  statique prefetché en BFS bornée (`max_modules`), instancié
+  par le `ModuleLoader` existant (JS-C5) via
+  `JsEngine::eval_module` + `MapLoader` — `type` non-JS,
+  `nomodule` et fetches en échec ignorés proprement.
+  `Referer`/`Origin` calculés à l'émission
+  (`policy::initiator_headers`, strict-origin-when-cross-origin)
+  et mixed-content filtré ; borne `max_scripts`. Insertion
+  dynamique de scripts : hooks à définir avec JS-C35.
 - **Étape 49 — CSS2 floats/BFC/whitespace : reftests WPT
   17/40 → 27/40 (67 %)** (`explorer-css`, `explorer-layout`,
   `explorer-render`, `explorer-cli`) : attribut `style`

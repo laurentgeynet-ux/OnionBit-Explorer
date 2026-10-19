@@ -167,6 +167,11 @@ impl DisplayList {
 /// `images` = pixels décodés par `NodeId` `<img>` — une
 /// boîte remplacée (`intrinsic` posé) peint son bitmap.
 /// [`build_display_list`] équivaut à une map vide.
+///
+/// L'arbre posé d'un document **en construction** est une entrée
+/// supportée (R-1) : la liste reflète l'instantané `&LayoutBox`
+/// reçu — jamais l'arbre DOM vivant — donc une frame peinte
+/// reste cohérente quand le parse reprend ensuite.
 #[must_use]
 pub fn build_display_list_imaged(
     root: &LayoutBox,

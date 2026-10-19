@@ -48,7 +48,7 @@ Règles :
 |---|---|---|---|---|
 | 2026-10-19 | display list `explorer-render` | dirty rects rapportés par frame | NAV (étape 55) | proposé → **R-7** |
 | 2026-10-19 | `explorer-render` | playback op-list canvas → `DisplayItem::Image` | NAV (JS-C28) | proposé → **R-11** |
-| 2026-10-19 | domaine (boxtree/display list) | tolérance « document en construction » pour peinture progressive | NAV (étape 53) | accepté → **R-1** (tête de file PIPE) |
+| 2026-10-19 | domaine (boxtree/display list) | tolérance « document en construction » pour peinture progressive | NAV (étape 53) | livré → **R-1** (`TreeBuilder::push`/`finish`, `Dom::document_element`) |
 | 2026-10-19 | `dillo-js` (interne NAV) | `MutationObserver` delivery microtask | NAV (étape 52) | proposé → JS-C26 |
 
 ## Journal
@@ -56,3 +56,4 @@ Règles :
 | Date | Contrat | Changement | Commit |
 |---|---|---|---|
 | 2026-10-19 | — | Création du journal (réorg deux équipes — découpage PIPELINE/NAVIGATEUR) | — |
+| 2026-10-19 | entrée incrémentale `explorer-html` + `explorer-dom` | **Additif** : `TreeBuilder::push(&str)`/`finish()` (tokenizer interne), `Dom::document_element()`, `Tokenizer::is_finished()` — aucune casse de signature ; `parse` délègue au nouveau chemin | R-1 |

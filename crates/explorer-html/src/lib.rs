@@ -6,10 +6,14 @@
 //! tree-builder vers `explorer-dom` (étape 11).
 //!
 //! Entrée **incrémentale** (ADR-0012) : le flux arrive par chunks
-//! via [`Tokenizer::feed`], les tokens se tirent par
-//! [`Tokenizer::next_token`]. En amont, [`encoding`] fournit le
-//! sniffing BOM/`<meta>`/`windows-1252` et le transcodage vers
-//! `String` — newlines normalisés par le DOM à l'insertion.
+//! — [`TreeBuilder::push`] + [`TreeBuilder::finish`] est la
+//! conduite de haut niveau (tokenizer interne, DOM observable
+//! entre les chunks via [`TreeBuilder::dom`]) ; le couple bas
+//! niveau [`Tokenizer::feed`]/[`Tokenizer::next_token`] reste
+//! exposé pour une conduite externe via [`TreeBuilder::process`].
+//! En amont, [`encoding`] fournit le sniffing BOM/`<meta>`/
+//! `windows-1252` et le transcodage vers `String` — newlines
+//! normalisés par le DOM à l'insertion.
 //!
 //! Domaine pur : aucun I/O, aucun async. Toute entrée malformée
 //! produit des tokens dégradés, jamais de panic.

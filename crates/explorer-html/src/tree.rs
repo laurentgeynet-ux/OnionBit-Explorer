@@ -230,6 +230,12 @@ const TABLE_CONTEXT: &[&str] = &["table", "tbody", "tfoot", "thead", "tr"];
 /// Tree-builder : consomme des tokens, produit un [`Dom`].
 pub struct TreeBuilder {
     dom: Dom,
+    /// Tokenizer interne de la conduite [`TreeBuilder::push`] /
+    /// [`TreeBuilder::finish`] — sorti par `mem::take` le temps
+    /// de chaque boucle (`process` exige `&mut self` ET
+    /// `&mut Tokenizer`, les deux ne peuvent pas se prêter
+    /// simultanément).
+    tokenizer: Tokenizer,
     /// Pile des éléments ouverts (`html` en bas).
     stack: Vec<NodeId>,
     /// Liste des éléments de format actifs.
@@ -261,6 +267,7 @@ impl TreeBuilder {
     pub fn with_dom(dom: Dom) -> Self {
         Self {
             dom,
+            tokenizer: Tokenizer::new(),
             stack: Vec::new(),
             afe: Vec::new(),
             mode: Mode::Initial,
@@ -293,14 +300,56 @@ impl TreeBuilder {
         self.quirks
     }
 
-    /// Raccourci complet : tokenize + construit — pour tests et
-    /// `cli dump` (l'incrémental passe par [`TreeBuilder::process`]).
+    /// Raccourci complet : `push` + `finish` — pour tests et
+    /// `cli dump` (la conduite bas niveau externe passe par
+    /// [`TreeBuilder::process`]).
     #[must_use]
     pub fn parse(input: &str) -> Dom {
         let mut tb = Self::new();
-        let mut t = Tokenizer::on(input);
-        tb.drive(&mut t);
+        tb.push(input);
+        tb.finish();
         tb.into_dom()
+    }
+
+    /// Alimente le builder par chunk — conduite **incrémentale**
+    /// (ADR-0012) : le tokenizer interne conserve les balises et
+    /// entités coupées entre deux appels, tous les tokens prêts
+    /// sont consommés. Entre deux `push`, [`TreeBuilder::dom`]
+    /// expose un arbre **cohérent à frontière de token** — un
+    /// état peignable, jamais transitoire (peinture progressive,
+    /// R-1 ; la cadence de peinture relève de l'appelant).
+    ///
+    /// Invariant utile à l'aval : tant que le builder vit, aucun
+    /// nœud inséré n'est collecté — les `NodeId` vus dans une
+    /// frame intermédiaire restent résolubles aux frames
+    /// suivantes.
+    ///
+    /// `push` après [`TreeBuilder::finish`] est ignoré : le flux
+    /// est clos. Ne pas mélanger avec [`TreeBuilder::drive`] /
+    /// [`TreeBuilder::process`] — conduite externe à tokenizer
+    /// distinct, les deux états divergeraient.
+    pub fn push(&mut self, chunk: &str) {
+        if self.tokenizer.is_finished() {
+            return;
+        }
+        let mut t = std::mem::take(&mut self.tokenizer);
+        t.feed(chunk);
+        self.drive(&mut t);
+        self.tokenizer = t;
+    }
+
+    /// Clôt le flux (fin de téléchargement) : résout les états
+    /// suspendus du tokenizer (commentaire ouvert, `<` orphelin…)
+    /// puis joue l'`Eof` de la spec — les éléments encore ouverts
+    /// sont réputés clos, le document est complet. Idempotent.
+    ///
+    /// Le DOM final se récupère via [`TreeBuilder::into_dom`] (ou
+    /// reste observable via [`TreeBuilder::dom`]).
+    pub fn finish(&mut self) {
+        let mut t = std::mem::take(&mut self.tokenizer);
+        t.finish();
+        self.drive(&mut t);
+        self.tokenizer = t;
     }
 
     /// Consomme le tokenizer en traitant chaque token à mesure —

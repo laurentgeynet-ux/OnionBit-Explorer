@@ -49,12 +49,14 @@ Objectif : débloquer la session incrémentale NAVIGATEUR, puis
 rendre le flux block/inline/float conforme au web réel.
 Sortie de palier : **WPT reftests ≥ 35/40**.
 
-- [ ] **R-1. Peinture progressive — côté domaine** (ex-53).
+- [x] **R-1. Peinture progressive — côté domaine** (ex-53).
   Le boxtree/display list tolère un document **en cours de
   construction** (tokenizer `push()` alimenté par chunks) —
   une frame = un état cohérent préservé ; la cadence relève de
   la session. **Débloque NAV étape 53** (palier N-A) — tenu en
-  tête de file pour ça.
+  tête de file pour ça. Livré :
+  `TreeBuilder::push`/`finish` + `Dom::document_element` +
+  contrat rustdoc DOM partiel, tests `incremental`/`progressive`.
 - [ ] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

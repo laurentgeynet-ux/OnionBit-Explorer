@@ -202,6 +202,13 @@ impl LayoutBox {
 /// boîtes texte héritent du style de leur parent. `None` si
 /// `root` est `display: none` ou absent de la `StyleMap`.
 /// Équivaut à [`build_box_tree_sized`] sans tailles d'images.
+///
+/// `root` est l'élément racine du document — typiquement
+/// [`Dom::document_element`] : `None` (rien à peindre) tant que
+/// le document en construction n'a produit aucun élément. Un DOM
+/// **partiel** est une entrée supportée (R-1) : l'arbre obtenu
+/// reflète les tokens consommés à cette frontière — une frame =
+/// un état cohérent.
 #[must_use]
 pub fn build_box_tree(dom: &Dom, root: NodeId, styles: &StyleMap) -> Option<LayoutBox> {
     build_box_tree_sized(dom, root, styles, &std::collections::HashMap::new())

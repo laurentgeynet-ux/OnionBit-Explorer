@@ -194,6 +194,13 @@ impl Tokenizer {
         self.finished = true;
     }
 
+    /// `true` après [`Tokenizer::finish`] — le flux est clos :
+    /// un `feed` ultérieur ne produira plus aucun token.
+    #[must_use]
+    pub fn is_finished(&self) -> bool {
+        self.finished
+    }
+
     /// `<![CDATA[` autorisé (le tree-builder le signale en contenu
     /// étranger SVG/MathML).
     pub fn set_cdata_allowed(&mut self, allowed: bool) {

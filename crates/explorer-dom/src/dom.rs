@@ -310,6 +310,26 @@ impl Dom {
         Ok(out)
     }
 
+    /// Premier enfant **élément** du `Document` — l'« élément
+    /// racine » (`<html>` en pratique).
+    ///
+    /// `None` tant que le document **en construction** n'a produit
+    /// que des nœuds non-élément (doctype, commentaires — les
+    /// blancs de préambule n'atteignent jamais l'arbre) : un
+    /// document partiel n'a pas de racine à peindre, ce n'est pas
+    /// une erreur (peinture progressive, R-1).
+    #[must_use]
+    pub fn document_element(&self) -> Option<NodeId> {
+        let mut cursor = self.first_child(self.document()).ok()?;
+        while let Some(id) = cursor {
+            if self.element(id).is_ok() {
+                return Some(id);
+            }
+            cursor = self.next_sibling(id).ok()?;
+        }
+        None
+    }
+
     /// `true` si `ancestor` est un ascendant strict de `id`.
     ///
     /// # Errors
