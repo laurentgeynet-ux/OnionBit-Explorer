@@ -483,6 +483,7 @@ dependencies = [
  "explorer-net",
  "explorer-test-support",
  "futures-util",
+ "serde",
  "serde_json",
  "tokio",
  "tower",

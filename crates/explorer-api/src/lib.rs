@@ -29,7 +29,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -177,14 +177,36 @@ async fn close_tab(State(st): State<ApiState>, Path(id): Path<TabId>) -> Respons
     }
 }
 
+/// Paramètres de `GET /frame` (étape 55) — région en
+/// pixels physiques, comme les `rects` de
+/// `frame_invalidated`. Incomplet (une coordonnée manque) =
+/// frame entière, pour rester tolérant côté client.
+#[derive(serde::Deserialize)]
+struct FrameRegionQuery {
+    x: Option<u32>,
+    y: Option<u32>,
+    w: Option<u32>,
+    h: Option<u32>,
+}
+
 /// `GET /api/tabs/{id}/frame` → `image/png` (pull ADR-0004).
 /// Le pull fait avancer les transitions CSS (étape 45) :
 /// l'UI cadence les frames, le moteur échantillonne le
-/// progrès à chaque appel.
-async fn frame(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
+/// progrès à chaque appel. `?x=&y=&w=&h=` (px physiques,
+/// étape 55) ne sert que la région demandée.
+async fn frame(
+    State(st): State<ApiState>,
+    Path(id): Path<TabId>,
+    Query(q): Query<FrameRegionQuery>,
+) -> Response {
     let mut session = st.session.lock().await;
     let _ = session.tick_animations(id);
-    let png = session.frame_png(id);
+    let png = match (q.x, q.y, q.w, q.h) {
+        (Some(rx), Some(ry), Some(rw), Some(rh)) => {
+            session.frame_png_region(id, rx, ry, rw, rh)
+        }
+        _ => session.frame_png(id),
+    };
     match png {
         Some(bytes) => (
             [(header::CONTENT_TYPE, HeaderValue::from_static("image/png"))],
@@ -512,9 +534,19 @@ fn event_json(ev: &CoreEvent) -> (&'static str, String) {
             "title_changed",
             serde_json::json!({ "tab": tab, "title": title }).to_string(),
         ),
-        CoreEvent::FrameInvalidated { tab } => (
+        CoreEvent::FrameInvalidated { tab, rects } => (
             "frame_invalidated",
-            serde_json::json!({ "tab": tab }).to_string(),
+            serde_json::json!({
+                "tab": tab,
+                // Étape 55 : régions invalides (px physiques)
+                // — le client peut ne re-tirer que
+                // `frame?x=&y=&w=&h=` par région ; vide =
+                // repeindre entièrement.
+                "rects": rects.iter().map(|r| serde_json::json!({
+                    "x": r.x, "y": r.y, "w": r.w, "h": r.h,
+                })).collect::<Vec<_>>(),
+            })
+            .to_string(),
         ),
         CoreEvent::PipelineError { tab, message } => (
             "pipeline_error",

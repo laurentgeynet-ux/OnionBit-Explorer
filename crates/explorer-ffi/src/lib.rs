@@ -521,6 +521,94 @@ pub unsafe extern "C" fn explorer_frame_copy(
     }
 }
 
+/// Copie la région `(x, y, w, h)` — pixels physiques — de
+/// la frame dans `out` (étape 55 : pull partiel piloté par
+/// les dirty-rects de [`explorer_dirty_rects`]). La région
+/// est clippée aux bornes de la frame ; le retour est le
+/// nombre d'octets écrits (`w2*h2*4` après clip), `0` si
+/// pas de frame ou région vide, `-1` erreur.
+/// Lit la taille effective via `explorer_frame_size` puis
+/// borne `x+w ≤ fw`, `y+h ≤ fh` côté appelant.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `out..out+cap`
+/// inscriptible (`cap ≥ w*h*4` de la région demandée).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_frame_copy_region(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    x: u32,
+    y: u32,
+    w: u32,
+    hgt: u32,
+    out: *mut u8,
+    cap: usize,
+) -> isize {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    match h.session.frame_region(tab, x, y, w, hgt) {
+        Some((_, _, px)) => {
+            if px.len() > cap || out.is_null() {
+                set_err("buffer trop petit ou nul");
+                return -1;
+            }
+            // SAFETY : `out..out+px.len()` ⊂ `out..out+cap`
+            // inscriptible par contrat FFI.
+            unsafe { std::ptr::copy_nonoverlapping(px.as_ptr(), out, px.len()) };
+            isize::try_from(px.len()).unwrap_or(isize::MAX)
+        }
+        None => 0,
+    }
+}
+
+/// Vide et écrit les dirty-rects accumulées dans `out` —
+/// quadruplets `(x, y, w, h)` en pixels physiques, `cap`
+/// = nombre de `f32` (`4×` le nombre de régions max).
+/// Retourne le nombre de régions écrites, `-1` erreur.
+/// Étape 55 : le client FFI sans canal d'événements pull
+/// les régions puis copie via
+/// [`explorer_frame_copy_region`].
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `out..out+cap`
+/// inscriptible ; `out` peut être nul si `cap == 0` (sonde
+/// du nombre de régions — non implémenté, retourne `-1`).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_dirty_rects(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    out: *mut f32,
+    cap: usize,
+) -> isize {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    if out.is_null() {
+        set_err("buffer nul");
+        return -1;
+    }
+    let rects = h.session.take_dirty(tab);
+    let need = rects.len() * 4;
+    if need > cap {
+        set_err("buffer trop petit");
+        return -1;
+    }
+    for (i, r) in rects.iter().enumerate() {
+        // SAFETY : `i*4+4 ≤ need ≤ cap` — `out..out+cap`
+        // inscriptible par contrat FFI.
+        unsafe {
+            *out.add(i * 4) = r.x;
+            *out.add(i * 4 + 1) = r.y;
+            *out.add(i * 4 + 2) = r.w;
+            *out.add(i * 4 + 3) = r.h;
+        }
+    }
+    isize::try_from(rects.len()).unwrap_or(isize::MAX)
+}
+
 /// URL courante de l'onglet → `buf` (UTF-8). Retourne la
 /// longueur écrite, `0` si aucune URL, `-1` buffer invalide.
 ///

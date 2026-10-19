@@ -239,10 +239,16 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
 
 ### Palier N-B — Produit, profil, release
 
-- [ ] **Étape 55. Dirty-rects transportés** (ex-63b) : régions
-  produites par PIPE **R-7** → `frame_copy` FFI partiel + SSE
-  `frame_invalidated` enrichi ; arbitrage ExternalTexture GPU si
-  benchs (révision ADR-0004/0018).
+- [x] **Étape 55. Dirty-rects transportés** (ex-63b) : régions
+  produites par PIPE **R-7** (`DisplayList::changed_rects`) →
+  `FrameInvalidated.rects` (px physiques ; vide = plein
+  cadre), pull partiel REST `frame?x=&y=&w=&h=` +
+  `Session::frame_region`/`frame_png_region`/`take_dirty`,
+  FFI `explorer_frame_copy_region` + `explorer_dirty_rects`.
+  Accumulation plafonnée à 32 régions puis « pleine frame ».
+  **ExternalTexture GPU reporté** — à mesurer sur de vraies
+  frames avant révision ADR-0004/0018. Régression :
+  `dirty_rects_reported_and_region_served`.
 - [ ] **Étape 56. Profil persisté complet** (ex-64) : cookies,
   localStorage (cf. 51), cache disque borné, historique —
   namespaces de session cloisonnés (ADR-0011), répertoire

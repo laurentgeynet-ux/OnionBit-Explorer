@@ -268,7 +268,7 @@ async fn navigate_produces_png_and_events() {
     while let Ok(ev) = rx.try_recv() {
         match ev {
             CoreEvent::Navigated { tab, .. } if tab == id => saw_nav = true,
-            CoreEvent::FrameInvalidated { tab } if tab == id => saw_inv = true,
+            CoreEvent::FrameInvalidated { tab, .. } if tab == id => saw_inv = true,
             _ => {}
         }
     }
@@ -341,7 +341,7 @@ async fn rerender_uses_cached_dom() {
     assert_eq!(calls, 1);
     let mut saw_inv = false;
     while let Ok(e) = rx.try_recv() {
-        if matches!(e, CoreEvent::FrameInvalidated { tab } if tab == id) {
+        if matches!(e, CoreEvent::FrameInvalidated { tab, .. } if tab == id) {
             saw_inv = true;
         }
     }
@@ -535,7 +535,7 @@ async fn scroll_is_clamped_and_invalidates() {
     // Les scrolls ont émis des frame_invalidated.
     let mut n = 0;
     while let Ok(e) = rx.try_recv() {
-        if matches!(e, CoreEvent::FrameInvalidated { tab } if tab == id) {
+        if matches!(e, CoreEvent::FrameInvalidated { tab, .. } if tab == id) {
             n += 1;
         }
     }
@@ -2207,10 +2207,11 @@ const PAGE_KEYS: &str = "<!doctype html><html><body>\
     </body></html>";
 
 /// Statique équivalente après `focus + down/input + up +
-/// blur/focus` : 'FDIUBG'.
+/// blur/focus` : 'FDIUBG' + la valeur 'x' tapée (peinte
+/// depuis R-21 — le `value` du contrôle est rendu).
 const PAGE_KEYS_AFTER: &str = "<!doctype html><html><body>\
-    <input id=\"a\"><br><input id=\"c\"><div id=\"r\">FDIUBG</div>\
-    </body></html>";
+    <input id=\"a\" value=\"x\"><br><input id=\"c\">\
+    <div id=\"r\">FDIUBG</div></body></html>";
 
 #[tokio::test]
 async fn key_and_focus_events_dispatch_in_order() {
@@ -3039,11 +3040,10 @@ async fn giant_document_clamps_frame_instead_of_error() {
 /// Repro QA 52b — texte tapé dans un `<input>` : la frame
 /// doit refléter la frappe (le run texte suit la valeur,
 /// pas le layout figé du chargement).
-/// En attente du fix PIPE consigné  :
-/// l'enfant  synthétique du contrôle n'entre jamais en
-///  (atomique inline-block + bras ).
+/// Fix livré côté PIPE en R-21 (`Text` sous
+/// `AnonymousBlock`) — le test reste comme régression du
+/// défaut « texte jamais peint ».
 #[tokio::test]
-#[ignore = "bug PIPE explorer-layout — voir interface-equipes.md"]
 async fn typed_text_repaints_new_value() {
     let (mut s, t) = test_session();
     t.route("/", 200, PAGE_FORM);
@@ -3118,7 +3118,7 @@ async fn delayed_timer_pumps_and_emits_events() {
     while let Ok(e) = rx.try_recv() {
         match e {
             CoreEvent::TitleChanged { tab, title } if tab == a => got_title = Some(title),
-            CoreEvent::FrameInvalidated { tab } if tab == a => got_frame = true,
+            CoreEvent::FrameInvalidated { tab, .. } if tab == a => got_frame = true,
             _ => {}
         }
     }
@@ -3236,4 +3236,86 @@ async fn shared_session_stays_responsive_during_navigation() {
         s.tab_info(tab).and_then(|i| i.title),
         Some("slow".to_string())
     );
+}
+
+/// Dirty-rects transportés (étape 55, contrat R-7
+/// `changed_rects`) : une mutation localisée produit des
+/// régions bornées dans `FrameInvalidated`, servies en
+/// pull partiel (`frame_region`/`frame_png_region`/
+/// `take_dirty`).
+#[tokio::test]
+#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::cast_sign_loss)]
+#[allow(clippy::cast_precision_loss)]
+async fn dirty_rects_reported_and_region_served() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/ck",
+        200,
+        "<!doctype html><html><body><form>         <input type=checkbox></form></body></html>",
+    );
+    let a = s.open_tab();
+    let mut rx = s.subscribe();
+    s.navigate(a, "http://h.test/ck").await.unwrap();
+    while rx.try_recv().is_ok() {}
+    // Remise à zéro : la nav a déjà poussé « pleine frame ».
+    s.take_dirty(a);
+
+    // Clic sur la case → repaint → invalidation bornée.
+    s.handle_input(a, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    let (fw, fh, _) = s.frame_pixels(a).unwrap();
+    let mut rects = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        if let CoreEvent::FrameInvalidated { tab, rects: r } = ev {
+            if tab == a {
+                rects = r;
+            }
+        }
+    }
+    assert_ne!(rects, [], "régions invalides attendues");
+    for r in &rects {
+        assert!(r.x >= 0.0 && r.y >= 0.0, "région {r:?}");
+        assert!(
+            r.x + r.w <= fw as f32 + 1.0 && r.y + r.h <= fh as f32 + 1.0,
+            "région {r:?} hors frame {fw}x{fh}"
+        );
+    }
+    // Une case à cocher ne doit pas salir toute la frame —
+    // au moins une région strictement plus petite.
+    assert!(
+        rects.iter().any(|r| r.w < fw as f32 || r.h < fh as f32),
+        "invalidation plein cadre inattendue : {rects:?}"
+    );
+
+    // Pull partiel : la région est servie en RGBA et en PNG.
+    let r = rects[0];
+    let (rw, rh, px) = s
+        .frame_region(
+            a,
+            r.x as u32,
+            r.y as u32,
+            r.w.ceil() as u32,
+            r.h.ceil() as u32,
+        )
+        .unwrap();
+    assert_eq!(px.len(), (rw * rh * 4) as usize);
+    let png = s
+        .frame_png_region(
+            a,
+            r.x as u32,
+            r.y as u32,
+            r.w.ceil() as u32,
+            r.h.ceil() as u32,
+        )
+        .unwrap();
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    // Hors bornes → clip à vide → None.
+    assert!(s.frame_region(a, fw, fh, 10, 10).is_none());
+
+    // Canal de pull sans événements (FFI) : take_dirty
+    // draine l'accumulation — second appel vide.
+    assert_ne!(s.take_dirty(a), []);
+    assert_eq!(s.take_dirty(a), []);
 }

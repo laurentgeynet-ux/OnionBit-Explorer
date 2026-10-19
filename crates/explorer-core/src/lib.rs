@@ -18,5 +18,6 @@ pub mod session;
 
 pub use session::{
     drain_navs_shared, history_move_shared, navigate_shared, Bookmark, CoreError, CoreEvent,
-    InputEvent, InputOutcome, ProfileStore, Session, SessionConfig, TabId, TabInfo, Visit,
+    FrameRegion, InputEvent, InputOutcome, ProfileStore, Session, SessionConfig, TabId, TabInfo,
+    Visit,
 };

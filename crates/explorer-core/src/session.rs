@@ -74,10 +74,20 @@ pub enum CoreEvent {
         title: String,
     },
     /// La frame de l'onglet a changé — l'UI tire
-    /// `GET /api/tabs/{id}/frame` (ADR-0004).
+    /// `GET /api/tabs/{id}/frame` (ADR-0004). `rects` porte
+    /// les régions invalides (étape 55, contrat R-7
+    /// `DisplayList::changed_rects`) en **pixels physiques**
+    /// du framebuffer ; vide = repeindre entièrement
+    /// (conservateur — première peinture, listes
+    /// incomparables).
     FrameInvalidated {
         /// Onglet dont la frame est périmée.
         tab: TabId,
+        /// Régions invalides accumulées depuis la dernière
+        /// émission — l'UI peut ne re-tirer que ces zones
+        /// (`frame?x=&y=&w=&h=` côté REST,
+        /// `explorer_frame_copy_region` côté FFI).
+        rects: Vec<FrameRegion>,
     },
     /// Erreur de pipeline (fetch, parse, alloc) — dégradation
     /// signalée, la session continue.
@@ -87,6 +97,23 @@ pub enum CoreEvent {
         /// Message d'erreur.
         message: String,
     },
+}
+
+/// Région invalide d'une frame (étape 55) — **pixels
+/// physiques** du framebuffer (le `scale` DPI est déjà
+/// appliqué côté core : les rects rapportés par
+/// `DisplayList::changed_rects` vivent en px CSS de
+/// document, le scroll y est cuit).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrameRegion {
+    /// Abscisse (px physiques).
+    pub x: f32,
+    /// Ordonnée (px physiques).
+    pub y: f32,
+    /// Largeur (px physiques).
+    pub w: f32,
+    /// Hauteur (px physiques).
+    pub h: f32,
 }
 
 /// Événement d'entrée côté UI — coordonnées en px CSS du
@@ -313,6 +340,13 @@ struct Tab {
     /// (compat) ou `drain_navs_shared` (session partagée).
     /// Bornée — un flot d'input n'accumule pas.
     pending_nav: std::collections::VecDeque<DrainAct>,
+    /// Régions invalides accumulées (étape 55) — px CSS de
+    /// document, scroll cuit (contrat `changed_rects`).
+    /// Alimentée par `repaint` (diff avec la display list
+    /// précédente) ; instantanée dans chaque
+    /// `FrameInvalidated`, vidée par `take_dirty` ; plafonnée
+    /// — au-delà elle s'effondre en « toute la frame ».
+    dirty: Vec<Rect>,
 }
 
 /// Popup `<select>` moteur (étape 54) — l'état vit hors DOM :
@@ -336,6 +370,14 @@ struct SelectPopup {
 /// Lignes visibles du popup `<select>` — le reste des
 /// options est tronqué (MVP, pas de défilement interne).
 const MAX_POPUP_ROWS: usize = 8;
+
+/// Plafond de régions invalides accumulées par onglet
+/// (étape 55) — au-delà, l'ensemble s'effondre en « toute
+/// la frame » : un client qui ne draine jamais retombe sur
+/// le comportement plein-format, et une rafale de petites
+/// invalidations ne fait pas grossir la charge utile SSE
+/// sans borne.
+const MAX_DIRTY_RECTS: usize = 32;
 
 /// Dimension max d'une frame rasterisée — borne anti-hostile
 /// de `rasterize` (`explorer-render`), déclarée ici pour
@@ -831,6 +873,7 @@ impl Session {
                 transitions: Vec::new(),
                 nav_epoch: 0,
                 pending_nav: std::collections::VecDeque::new(),
+                dirty: Vec::new(),
             },
         );
         let _ = self.events.send(CoreEvent::TabOpened { tab: id });
@@ -911,6 +954,72 @@ impl Session {
         })
     }
 
+    /// Extrait la région `(x, y, w, h)` — pixels physiques —
+    /// de la frame courante (étape 55 : copie partielle des
+    /// dirty-rects). Clippée aux bornes ; `None` si pas de
+    /// frame ou région vide hors frame.
+    #[must_use]
+    pub fn frame_region(
+        &self,
+        tab: TabId,
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+    ) -> Option<(u32, u32, Vec<u8>)> {
+        let frame = self.tabs.get(&tab)?.frame.as_ref()?;
+        let rw = w.min(frame.width.saturating_sub(x));
+        let rh = h.min(frame.height.saturating_sub(y));
+        if rw == 0 || rh == 0 {
+            return None;
+        }
+        let stride = frame.width as usize * 4;
+        let row_bytes = rw as usize * 4;
+        let mut out = Vec::with_capacity(row_bytes * rh as usize);
+        for row in y..y + rh {
+            let start = row as usize * stride + x as usize * 4;
+            out.extend_from_slice(&frame.pixels[start..start + row_bytes]);
+        }
+        Some((rw, rh, out))
+    }
+
+    /// PNG de la région `(x, y, w, h)` — pixels physiques —
+    /// (étape 55, pull partiel REST `frame?x=&y=&w=&h=`).
+    /// `None` si pas de frame ou région hors bornes.
+    #[must_use]
+    pub fn frame_png_region(&self, tab: TabId, x: u32, y: u32, w: u32, h: u32) -> Option<Vec<u8>> {
+        let (w2, h2, px) = self.frame_region(tab, x, y, w, h)?;
+        Frame {
+            width: w2,
+            height: h2,
+            pixels: px,
+            scale: 1.0,
+        }
+        .encode_png()
+    }
+
+    /// Vide et renvoie les régions invalides accumulées —
+    /// pixels physiques (étape 55). Canal de pull pour un
+    /// client sans abonnement aux événements (FFI) : il
+    /// copie ensuite chaque région via [`Self::frame_region`].
+    /// Vide = rien à soumettre depuis le dernier appel.
+    pub fn take_dirty(&mut self, tab: TabId) -> Vec<FrameRegion> {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return Vec::new();
+        };
+        let s = self.scale.max(f32::EPSILON);
+        entry
+            .dirty
+            .drain(..)
+            .map(|r| FrameRegion {
+                x: r.x * s,
+                y: r.y * s,
+                w: r.width * s,
+                h: r.height * s,
+            })
+            .collect()
+    }
+
     /// Fait avancer les transitions CSS en vol (étape 45) :
     /// relayout + repaint si des transitions sont actives —
     /// l'animation est pilotée par le pull de frames de l'UI
@@ -940,7 +1049,7 @@ impl Session {
             return Ok(jobs > 0);
         }
         self.relayout(tab)?;
-        let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+        self.emit_invalidated(tab);
         Ok(true)
     }
 
@@ -1199,6 +1308,30 @@ impl Session {
         })
     }
 
+    /// Émet `FrameInvalidated` avec l'instantané des régions
+    /// invalides accumulées (étape 55) — les rects internes
+    /// sont en px CSS (`changed_rects`), le contrat sort en
+    /// pixels physiques (`× scale`, comme `frame_pixels`).
+    /// Instantané, pas drain : un client FFI sans canal
+    /// d'événements vide via [`Self::take_dirty`].
+    fn emit_invalidated(&self, tab: TabId) {
+        let Some(entry) = self.tabs.get(&tab) else {
+            return;
+        };
+        let s = self.scale.max(f32::EPSILON);
+        let rects = entry
+            .dirty
+            .iter()
+            .map(|r| FrameRegion {
+                x: r.x * s,
+                y: r.y * s,
+                w: r.width * s,
+                h: r.height * s,
+            })
+            .collect();
+        let _ = self.events.send(CoreEvent::FrameInvalidated { tab, rects });
+    }
+
     /// Peinture progressive epoch-gardée (étape 53d) : un
     /// snapshot émis par [`NavJob::run`] n'est posé que si
     /// la navigation est encore la plus récente de l'onglet —
@@ -1206,7 +1339,7 @@ impl Session {
     fn nav_paint(&mut self, tab: TabId, epoch: u64, dom: &Dom) {
         let live = self.tabs.get(&tab).is_some_and(|e| e.nav_epoch == epoch);
         if live && self.relayout_dom(tab, dom).is_ok() {
-            let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+            self.emit_invalidated(tab);
         }
     }
 
@@ -2053,7 +2186,7 @@ impl Session {
                 tracing::debug!(tab, error = %e, "relayout après mutation js");
                 return;
             }
-            let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+            self.emit_invalidated(tab);
         }
     }
 
@@ -2070,7 +2203,7 @@ impl Session {
         if let Some(t) = title.filter(|t| prev != Some(t.as_str())) {
             let _ = self.events.send(CoreEvent::TitleChanged { tab, title: t });
         }
-        let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+        self.emit_invalidated(tab);
     }
 
     /// Log + `PipelineError` sur le bus, renvoie l'erreur.
@@ -2094,7 +2227,7 @@ impl Session {
             return Err(CoreError::UnknownTab(tab));
         }
         self.relayout(tab)?;
-        let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+        self.emit_invalidated(tab);
         Ok(())
     }
 
@@ -2188,6 +2321,29 @@ impl Session {
             .ok_or(CoreError::FrameTooBig)?;
         let png = frame.encode_png();
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        // Dirty-rects (étape 55) : diff avec la liste
+        // précédente — première peinture ou listes
+        // incomparables → toute la frame (conservateur).
+        let regions = entry.list.as_ref().map_or_else(
+            || {
+                vec![Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: list.width,
+                    height: list.height,
+                }]
+            },
+            |prev| list.changed_rects(prev),
+        );
+        entry.dirty.extend(regions);
+        if entry.dirty.len() > MAX_DIRTY_RECTS {
+            entry.dirty = vec![Rect {
+                x: 0.0,
+                y: 0.0,
+                width: list.width,
+                height: list.height,
+            }];
+        }
         entry.list = Some(list);
         entry.frame = Some(frame);
         entry.png = png;
@@ -2306,7 +2462,7 @@ impl Session {
         if let Some(changed) = pop_hit {
             if changed {
                 self.repaint(tab)?;
-                let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+                self.emit_invalidated(tab);
             }
             return Ok(InputOutcome::Hover {
                 url: None,
@@ -2392,7 +2548,7 @@ impl Session {
                 self.dispatch_path_event(tab, "change", p);
             }
             self.relayout(tab)?;
-            let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+            self.emit_invalidated(tab);
             return Ok(if prevented {
                 InputOutcome::Ignored
             } else {
@@ -2417,7 +2573,7 @@ impl Session {
         // chrome-side, remplace le cycle MVP d'ADR-0014).
         if let Some(sel) = self.select_at(tab, x, y) {
             self.toggle_select_popup(tab, sel)?;
-            let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+            self.emit_invalidated(tab);
             return Ok(InputOutcome::Edited);
         }
         // Contrôle submit : validation de contraintes puis
@@ -2579,7 +2735,7 @@ impl Session {
                     pop.hovered = Some(next);
                 }
                 self.repaint(tab)?;
-                let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+                self.emit_invalidated(tab);
                 Ok(InputOutcome::Edited)
             }
             "Enter" => {
@@ -2592,7 +2748,7 @@ impl Session {
                 let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
                 entry.popup = None;
                 self.repaint(tab)?;
-                let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+                self.emit_invalidated(tab);
                 Ok(InputOutcome::Ignored)
             }
         }
@@ -2631,7 +2787,7 @@ impl Session {
         } else {
             self.repaint(tab)?;
         }
-        let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+        self.emit_invalidated(tab);
         Ok(InputOutcome::Edited)
     }
 
@@ -2762,7 +2918,7 @@ impl Session {
         self.sync_mirror_attr(tab, field, "value", Some(&value));
         self.dispatch_dom_event(tab, "input", field);
         self.relayout(tab)?;
-        let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+        self.emit_invalidated(tab);
         Ok(InputOutcome::Edited)
     }
 
@@ -2964,7 +3120,7 @@ impl Session {
             entry.scroll_y = next;
         }
         self.repaint(tab)?;
-        let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+        self.emit_invalidated(tab);
         Ok(())
     }
 }
