@@ -51,6 +51,12 @@ regex = "1.11"
 # IDNA/punycode UTS-46 pour explorer-net::url (ADR-0002, étape 3) —
 # pur Rust, pas de *-sys.
 idna = "1.0"
+# Pile réseau explorer-net (ADR-0002) — tokio sockets/timers,
+# httparse wire-format HTTP/1.1, async-trait pour les transports
+# injectables (HttpTransport/Connector dyn-compatibles).
+tokio = { version = "1", features = ["net", "io-util", "time", "rt", "rt-multi-thread", "macros", "sync"] }
+httparse = "1.9"
+async-trait = "0.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

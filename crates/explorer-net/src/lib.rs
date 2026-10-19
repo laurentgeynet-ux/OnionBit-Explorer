@@ -12,4 +12,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod error;
+pub mod h1;
+pub mod http;
 pub mod url;

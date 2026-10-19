@@ -46,7 +46,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   WHATWG, **IDNA/punycode** (crate pur Rust à arbitrer), origine
   (schéma/hôte/port) pour la future politique same-origin, schémas
   `data:`/`about:` minimaux.
-- [ ] **Étape 4. HTTP/1.1 client.** Connexions tokio, keep-alive,
+- [x] **Étape 4. HTTP/1.1 client.** Connexions tokio, keep-alive,
   requêtes pipelinables non — séquentielles d'abord ; parsing
   statut/en-têtes via `httparse`, corps `Content-Length` +
   `chunked`. Timeouts bornés.

@@ -13,3 +13,6 @@ workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 idna.workspace = true
+tokio.workspace = true
+httparse.workspace = true
+async-trait.workspace = true

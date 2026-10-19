@@ -47,7 +47,9 @@ sur les en-têtes), corps `Content-Length` + `chunked`, décodage
 - `reqwest`/`hyper` cacheraient exactement les mécaniques que ce
   projet veut posséder (connexions, codages, redirections).
 - `httparse` est du wire-format, pas du moteur : l'utiliser ne
-  diminue pas la mission et élimine une classe de bugs.
+  diminue pas la mission et élimine une classe de bugs. *(Arbitré
+  étape 4 : `tokio` sockets/timers, `httparse`, `async-trait` pour
+  les traits dyn-compatibles `HttpTransport`/`Connector`.)*
 
 ## Conséquences
 

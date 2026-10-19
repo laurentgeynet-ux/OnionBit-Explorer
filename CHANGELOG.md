@@ -9,6 +9,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 4 — `explorer-net` : client HTTP/1.1** (`http.rs`,
+  `h1.rs`, `error.rs`) : `Request`/`Response`/`Method`, trait
+  `HttpTransport` injectable (ADR-0002), `H1Client` sur `Connector`
+  pluggable (`TcpConnector` clair, TLS à l'étape 5 par la même
+  couture `IoStream`), en-têtes via `httparse`, corps
+  `Content-Length`/`chunked` (trailers)/EOF HTTP/1.0, pool
+  keep-alive par origine borné + retry unique sur méthode
+  idempotente, budgets `HttpConfig` (timeouts connect/io, tailles
+  tête/corps, `User-Agent`, cap pool), erreurs `NetError` typées
+  (DNS/connect/timeout/InvalidResponse/TruncatedBody/InvalidChunked/
+  BodyTooLarge/HeadTooLarge/UnsupportedScheme). 14 tests
+  d'intégration sur `TcpListener` loopback (aucun hôte externe).
+  Dépendances consignées ADR-0002 : `tokio`, `httparse`,
+  `async-trait`.
 - **Étape 9 — `explorer-dom` : arène DOM** : `NodeId`
   générationnels (index+génération, handles périmés →
   `DomError::StaleHandle`), nœuds `Document`/`Doctype`/`Element`/
