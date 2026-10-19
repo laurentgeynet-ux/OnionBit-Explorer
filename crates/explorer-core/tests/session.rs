@@ -36,6 +36,12 @@ struct FakeTransport {
     /// Dernière requête : `(méthode, path?query, corps)` —
     /// pour vérifier les soumissions de formulaire.
     last: Mutex<Option<(String, String, Vec<u8>)>>,
+    /// En-têtes de la dernière requête (asserts `Referer`,
+    /// `Origin`, `Cookie` — étape 51).
+    last_headers: Mutex<Vec<(String, String)>>,
+    /// En-têtes par route — `path → en-têtes de réponse`
+    /// (ACAO pour les tests CORS).
+    resp_headers: Mutex<HashMap<String, Vec<(String, String)>>>,
 }
 
 impl FakeTransport {
@@ -44,6 +50,8 @@ impl FakeTransport {
             routes: Mutex::new(HashMap::new()),
             calls: Mutex::new(0),
             last: Mutex::new(None),
+            last_headers: Mutex::new(Vec::new()),
+            resp_headers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -58,6 +66,20 @@ impl FakeTransport {
         }
     }
 
+    /// Route avec en-têtes de réponse (CORS, Set-Cookie).
+    fn route_headers(&self, path: &str, status: u16, body: &'static str, headers: &[(&str, &str)]) {
+        self.route(path, status, body);
+        if let Ok(mut h) = self.resp_headers.lock() {
+            h.insert(
+                path.to_string(),
+                headers
+                    .iter()
+                    .map(|(n, v)| (n.to_string(), v.to_string()))
+                    .collect(),
+            );
+        }
+    }
+
     /// Requêtes servies.
     fn calls(&self) -> u32 {
         self.calls.lock().map_or(0, |c| *c)
@@ -66,6 +88,15 @@ impl FakeTransport {
     /// Dernière requête enregistrée.
     fn last(&self) -> Option<(String, String, Vec<u8>)> {
         self.last.lock().ok().and_then(|l| l.clone())
+    }
+
+    /// Valeur d'un en-tête de la dernière requête.
+    fn last_header(&self, name: &str) -> Option<String> {
+        self.last_headers.lock().ok().and_then(|h| {
+            h.iter()
+                .find(|(n, _)| n.eq_ignore_ascii_case(name))
+                .map(|(_, v)| v.clone())
+        })
     }
 }
 
@@ -82,23 +113,32 @@ impl HttpTransport for FakeTransport {
                 req.body.clone().unwrap_or_default(),
             ));
         }
+        if let Ok(mut h) = self.last_headers.lock() {
+            h.clone_from(&req.headers);
+        }
         let found = self
             .routes
             .lock()
             .ok()
             .and_then(|r| r.get(req.url.path()).cloned());
+        let headers = self
+            .resp_headers
+            .lock()
+            .ok()
+            .and_then(|h| h.get(req.url.path()).cloned())
+            .unwrap_or_default();
         match found {
             Some((status, body)) => Ok(Response {
                 status,
                 reason: "fake".to_string(),
-                headers: vec![],
+                headers,
                 body,
                 reused_connection: false,
             }),
             None => Ok(Response {
                 status: 404,
                 reason: "fake".to_string(),
-                headers: vec![],
+                headers,
                 body: b"missing".to_vec(),
                 reused_connection: false,
             }),
@@ -124,6 +164,7 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
             max_scripts: 32,
             max_modules: 64,
             max_inflight: 6,
+            max_script_net: 16,
         },
     );
     (s, t)
@@ -1693,4 +1734,277 @@ async fn subresource_fetches_bounded_parallel() {
     let id = s.open_tab();
     s.navigate(id, "http://h.test/p").await.unwrap();
     assert_eq!(t.peak.load(std::sync::atomic::Ordering::SeqCst), 2);
+}
+
+// ===== Étape 51 — XHR/fetch/storage/cookie (ADR-0019) =====
+//
+// Vrai `DilloEngine` : les scripts émettent de vrais
+// `NetRequest` drainés par la session ; les observables sont
+// le PNG (mutation rendue) et les en-têtes capturés par le
+// `FakeTransport`.
+
+/// XHR `GET /api` : la réponse remplit le div cible.
+const PAGE_XHR: &str = "<!doctype html><html><body>\
+    <div id=\"x\">vide</div>\
+    <script>var q=new XMLHttpRequest();q.open('GET','/api');\
+    q.onload=function(){document.getElementById('x').textContent=q.responseText};\
+    q.send()</script></body></html>";
+
+/// Équivalent statique après mutation XHR.
+const PAGE_XHR_DATA: &str = "<!doctype html><html><body><div id=\"x\">DATA</div></body></html>";
+
+#[tokio::test]
+async fn xhr_same_origin_fetches_and_renders() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_XHR);
+    t.route("/api", 200, "DATA");
+    t.route("/stat", 200, PAGE_XHR_DATA);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    // `Referer` posé à l'émission de la requête script.
+    let referer = t.last_header("referer");
+    assert!(
+        referer
+            .as_ref()
+            .is_some_and(|r| r.starts_with("http://h.test")),
+        "referer attendu sur la XHR, reçu {referer:?}"
+    );
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+    assert_eq!(
+        s.frame_png(a),
+        s.frame_png(b),
+        "XHR same-origin livrée et rendue"
+    );
+}
+
+/// XHR cross-origin : `onerror` → `ERR`, `onload` → `OK`.
+const PAGE_XHR_CROSS: &str = "<!doctype html><html><body>\
+    <div id=\"x\">?</div>\
+    <script>var q=new XMLHttpRequest();q.open('GET','http://b.test/api');\
+    q.onerror=function(){document.getElementById('x').textContent='ERR'};\
+    q.onload=function(){document.getElementById('x').textContent='OK'};\
+    q.send()</script></body></html>";
+
+#[tokio::test]
+async fn xhr_cross_origin_opaque_without_acao() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_XHR_CROSS);
+    // La route est servie par path (hôte ignoré) — la réponse
+    // arrive SANS `Access-Control-Allow-Origin` → opaque.
+    t.route("/api", 200, "DATA");
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">ERR</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://a.test/").await.unwrap();
+    // Émission OK : `Origin` canonique posé (spec Fetch —
+    // toute requête CORS le porte, même GET).
+    assert_eq!(
+        t.last_header("origin").as_deref(),
+        Some("http://a.test"),
+        "Origin canonique attendu sur la requête CORS"
+    );
+    let b = s.open_tab();
+    s.navigate(b, "http://a.test/stat").await.unwrap();
+    assert_eq!(
+        s.frame_png(a),
+        s.frame_png(b),
+        "réponse sans ACAO = opaque → événement error"
+    );
+}
+
+#[tokio::test]
+async fn xhr_cross_origin_readable_with_acao() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_XHR_CROSS);
+    t.route_headers("/api", 200, "DATA", &[("access-control-allow-origin", "*")]);
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">OK</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://a.test/").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://a.test/stat").await.unwrap();
+    assert_eq!(
+        s.frame_png(a),
+        s.frame_png(b),
+        "ACAO `*` → réponse lisible par le script"
+    );
+}
+
+/// XHR cross-origin avec en-tête non safelisté — preflight
+/// requis → bloquée à l'émission (`error`, jamais émise).
+const PAGE_XHR_PREFLIGHT: &str = "<!doctype html><html><body>\
+    <div id=\"x\">?</div>\
+    <script>var q=new XMLHttpRequest();q.open('GET','http://b.test/api');\
+    q.setRequestHeader('X-Token','t');\
+    q.onerror=function(){document.getElementById('x').textContent='ERR'};\
+    q.send()</script></body></html>";
+
+#[tokio::test]
+async fn xhr_cross_origin_custom_header_blocked() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_XHR_PREFLIGHT);
+    t.route("/api", 200, "DATA");
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">ERR</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://a.test/").await.unwrap();
+    // Un seul fetch : le document — la XHR est bloquée
+    // avant émission (preflight hors MVP).
+    assert_eq!(t.calls(), 1, "requête preflightable non émise");
+    let b = s.open_tab();
+    s.navigate(b, "http://a.test/stat").await.unwrap();
+    assert_eq!(
+        s.frame_png(a),
+        s.frame_png(b),
+        "en-tête non safelisté cross-origin → error"
+    );
+}
+
+/// Deux XHR, quota 1 : la seconde échoue d'office (`error`),
+/// la première complète.
+const PAGE_XHR_QUOTA: &str = "<!doctype html><html><body>\
+    <div id=\"a\">?</div><div id=\"b\">?</div>\
+    <script>\
+    var q=new XMLHttpRequest();q.open('GET','/api');\
+    q.onload=function(){document.getElementById('a').textContent='OK'};\
+    var r=new XMLHttpRequest();r.open('GET','/api');\
+    r.onerror=function(){document.getElementById('b').textContent='KO'};\
+    q.send();r.send()</script></body></html>";
+
+#[tokio::test]
+async fn xhr_quota_exceeded_fails_fast() {
+    let t = Arc::new(FakeTransport::new());
+    t.route("/", 200, PAGE_XHR_QUOTA);
+    t.route("/api", 200, "DATA");
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"a\">OK</div>\
+         <div id=\"b\">KO</div></body></html>",
+    );
+    let mut s = Session::with_config(
+        t.clone(),
+        Arc::new(FixtureFont),
+        SessionConfig {
+            max_script_net: 1,
+            ..SessionConfig::default()
+        },
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+    assert_eq!(
+        s.frame_png(a),
+        s.frame_png(b),
+        "quota atteint → 2e requête en erreur immédiate"
+    );
+}
+
+/// `document.cookie` posé par le script → jar de session,
+/// lu par le document suivant (même origine).
+const PAGE_COOKIE_SET: &str = "<!doctype html><html><body><p>x</p>\
+    <script>document.cookie='k=v;path=/'</script></body></html>";
+
+/// Page écho : `document.cookie` lu → div.
+const PAGE_COOKIE_READ: &str = "<!doctype html><html><body>\
+    <div id=\"x\">?</div>\
+    <script>document.getElementById('x').textContent=document.cookie</script>\
+    </body></html>";
+
+const PAGE_COOKIE_KV: &str = "<!doctype html><html><body><div id=\"x\">k=v</div></body></html>";
+
+#[tokio::test]
+async fn document_cookie_reaches_shared_jar() {
+    use explorer_net::url::Url;
+
+    let (mut s, t) = test_session();
+    t.route("/set", 200, PAGE_COOKIE_SET);
+    t.route("/read", 200, PAGE_COOKIE_READ);
+    t.route("/stat", 200, PAGE_COOKIE_KV);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let tab_a = s.open_tab();
+    s.navigate(tab_a, "http://h.test/set").await.unwrap();
+    // L'écriture script a rejoint le jar partagé.
+    let jar = s.cookie_jar();
+    let page = Url::parse("http://h.test/").unwrap();
+    assert_eq!(jar.header_for(&page, false), "k=v");
+    // Le document suivant le lit via `document.cookie`.
+    let tab_b = s.open_tab();
+    s.navigate(tab_b, "http://h.test/read").await.unwrap();
+    let tab_c = s.open_tab();
+    s.navigate(tab_c, "http://h.test/stat").await.unwrap();
+    assert_eq!(
+        s.frame_png(tab_b),
+        s.frame_png(tab_c),
+        "cookie relu dans le doc suivant"
+    );
+}
+
+/// `Set-Cookie` d'une réponse XHR same-origin → jar partagé.
+#[tokio::test]
+async fn xhr_set_cookie_same_origin_captured() {
+    use explorer_net::url::Url;
+
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_XHR);
+    t.route_headers("/api", 200, "DATA", &[("set-cookie", "s=1;path=/")]);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let jar = s.cookie_jar();
+    let u = Url::parse("http://h.test/").unwrap();
+    assert_eq!(jar.header_for(&u, false), "s=1");
+    // …et l'en-tête Cookie repart sur la XHR same-origin
+    // suivante (cookie injecté à l'émission).
+    let id2 = s.open_tab();
+    s.navigate(id2, "http://h.test/").await.unwrap();
+    assert_eq!(t.last_header("cookie").as_deref(), Some("s=1"));
+}
+
+/// `localStorage` : écrit dans un document, relu dans le
+/// suivant (même origine — map de session drainée/installée).
+const PAGE_LS_SET: &str = "<!doctype html><html><body><p>x</p>\
+    <script>localStorage.setItem('k','LS')</script></body></html>";
+
+const PAGE_LS_READ: &str = "<!doctype html><html><body>\
+    <div id=\"x\">?</div>\
+    <script>document.getElementById('x').textContent=localStorage.getItem('k')</script>\
+    </body></html>";
+
+const PAGE_LS_VAL: &str = "<!doctype html><html><body><div id=\"x\">LS</div></body></html>";
+
+#[tokio::test]
+async fn localstorage_persists_across_documents() {
+    let (mut s, t) = test_session();
+    t.route("/set", 200, PAGE_LS_SET);
+    t.route("/read", 200, PAGE_LS_READ);
+    t.route("/stat", 200, PAGE_LS_VAL);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let tab_a = s.open_tab();
+    s.navigate(tab_a, "http://h.test/set").await.unwrap();
+    let tab_b = s.open_tab();
+    s.navigate(tab_b, "http://h.test/read").await.unwrap();
+    let tab_c = s.open_tab();
+    s.navigate(tab_c, "http://h.test/stat").await.unwrap();
+    assert_eq!(
+        s.frame_png(tab_b),
+        s.frame_png(tab_c),
+        "localStorage conservé entre documents same-origin"
+    );
 }

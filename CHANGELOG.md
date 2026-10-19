@@ -9,6 +9,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 51 — Câblage XHR/fetch/storage/cookie** (`explorer-core`,
+  `explorer-daemon`, `explorer-cli`, `explorer-js`) : les
+  `NetRequest` du moteur sont drainés aux points de synchro et
+  exécutés en tâches tokio (`Session::drain_script_net`) —
+  jamais de callback ré-entrant ; les réponses reviennent par
+  canal et sont livrées par `Session::pump_net` (daemon :
+  battement `NET_PUMP_MS` ; CLI : grâce bornée `net_pending()`
+  ; points internes : `poll_net` synchrone après événements).
+  **Politique ADR-0019 implémentée** : quota
+  `max_script_net` = 16 requêtes en vol par onglet (au-delà :
+  échec `status 0` → `error`), `Origin` canonique posé sur
+  toute requête CORS (`origin_header_value`, port défaut
+  omis), `Referer`/`Origin` via `initiator_headers`,
+  `Cookie` injecté same-origin uniquement, `Set-Cookie`
+  capturé same-origin uniquement. **CORS minimal** :
+  cross-origin limité aux requêtes simples (verbes
+  `GET`/`HEAD`/`POST` + en-têtes safelistés — le preflight
+  `OPTIONS` est hors MVP, requête bloquée) ; réponse lisible
+  seulement si `Access-Control-Allow-Origin` vaut `*` ou
+  l'origine exacte, sinon opaque (`status 0` → `error`).
+  En-têtes interdits au script filtrés (`sec-*`, `proxy-*`,
+  `Cookie`, `Referer`…). `document.cookie` : écritures
+  drainées vers le `CookieJar` partagé (`HttpOnly` filtré —
+  non posable par script), snapshot installé au spawn ;
+  le daemon partage le même jar entre `CookieTransport`
+  (sous `RedirectTransport` — cookies re-calculés par hop)
+  et session. `localStorage` : map par origine drainée aux
+  points de synchro, persistée via `ProfileStore`
+  (`load_storage`/`save_storage` — implémenté par
+  `JsonFileStore` en `storage-<slug>.json` par origine) ;
+  `sessionStorage` frais par contexte. `NetRequest::Abort`
+  tue la tâche corrélée ; la fermeture d'onglet annule les
+  siennes. Clôt l'étape 44 de ROADMAP.md.
 - **JS-C27 — Traverse proxy net/storage/cookie** (`explorer-js`) :
   les surfaces `dillo-js` déjà livrées traversent le canal
   `DilloEngine` — pattern `drain_nav_requests` généralisé.

@@ -12,7 +12,8 @@
 //! Single-writer : le DOM et le layout d'un onglet ne vivent
 //! que dans cette structure, jamais partagés entre threads.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -23,9 +24,10 @@ use explorer_css::{
 use explorer_dom::{Dom, DomError, NodeId};
 use explorer_html::encoding::decode_sniffed;
 use explorer_html::TreeBuilder;
-use explorer_js::{JsEngine, JsFactory, NavRequest, UrlResolver};
+use explorer_js::{JsEngine, JsFactory, NavRequest, NetRequest, NetResponse, UrlResolver};
 use explorer_layout::font::FontSource;
 use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, LayoutBox};
+use explorer_net::cookies::CookieJar;
 use explorer_net::error::NetResult;
 use explorer_net::http::{HttpTransport, Method, Request, Response};
 use explorer_net::policy::{initiator_headers, is_mixed_content};
@@ -36,6 +38,7 @@ use explorer_render::{
 };
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
 
 /// Identifiant d'onglet (monotone, jamais réutilisé).
 pub type TabId = u64;
@@ -189,6 +192,14 @@ pub trait ProfileStore: Send + Sync {
     /// Journal des visites (le plus récent en tête ou en
     /// queue — choix de l'impl).
     fn history(&self) -> Vec<Visit>;
+    /// Charge le `localStorage` persisté d'une origine
+    /// (étape 51 — défaut : rien, l'origine repart vide).
+    fn load_storage(&self, _origin: &str) -> BTreeMap<String, String> {
+        BTreeMap::new()
+    }
+    /// Persiste le `localStorage` d'une origine (map complète
+    /// — défaut : ignorer, stockage volatil).
+    fn save_storage(&self, _origin: &str, _map: &BTreeMap<String, String>) {}
 }
 
 /// Erreur de session — typée, jamais de panic.
@@ -507,6 +518,10 @@ pub struct SessionConfig {
     /// (`FuturesUnordered` borné — scheduler étape 50 ; les
     /// navigateurs plafonnent classiquement à ~6 par hôte).
     pub max_inflight: usize,
+    /// Requêtes script-initiées (XHR/`fetch`) en vol par
+    /// onglet — quota ADR-0019 : au-delà, la requête échoue
+    /// en `status: 0` (événement `error`, page vivante).
+    pub max_script_net: usize,
 }
 
 impl Default for SessionConfig {
@@ -523,6 +538,7 @@ impl Default for SessionConfig {
             max_scripts: 32,
             max_modules: 64,
             max_inflight: 6,
+            max_script_net: 16,
         }
     }
 }
@@ -566,6 +582,27 @@ pub struct Session {
     max_scripts: usize,
     max_modules: usize,
     max_inflight: usize,
+    /// Jar à cookies partagé — le daemon le branche aussi
+    /// sur le `CookieTransport` pour que `document.cookie`
+    /// et les navigations voient le même état (étape 51).
+    cookies: Arc<CookieJar>,
+    /// `localStorage` par origine sérialisée — snapshot
+    /// installé au spawn du contexte, map drainée aux points
+    /// de synchro, persistée via le profil.
+    local_storage: HashMap<String, BTreeMap<String, String>>,
+    /// Canal des réponses de requêtes script-initiées
+    /// (tâches tokio → points de synchro — ADR-0019 exige
+    /// des intentions drainées, jamais de callback
+    /// ré-entrant dans le pipeline).
+    net_tx: Sender<NetDone>,
+    net_rx: Receiver<NetDone>,
+    /// Fetches script-initiés en vol, `(tab, handle)` →
+    /// tâche tokio — `Abort` moteur ou fermeture d'onglet
+    /// tuent la jointure.
+    net_tasks: HashMap<(TabId, u64), JoinHandle<()>>,
+    /// Quota de requêtes script-initiées simultanées par
+    /// onglet (`max_script_net` de config, ADR-0019).
+    max_script_net: usize,
 }
 
 impl Session {
@@ -589,6 +626,7 @@ impl Session {
         cfg: SessionConfig,
     ) -> Self {
         let (events, _) = broadcast::channel(cfg.event_capacity.max(1));
+        let (net_tx, net_rx) = channel();
         Self {
             transport,
             webfonts: WebFontSource::new(fonts, cfg.max_fonts),
@@ -607,6 +645,12 @@ impl Session {
             max_scripts: cfg.max_scripts,
             max_modules: cfg.max_modules,
             max_inflight: cfg.max_inflight,
+            cookies: Arc::new(CookieJar::new()),
+            local_storage: HashMap::new(),
+            net_tx,
+            net_rx,
+            net_tasks: HashMap::new(),
+            max_script_net: cfg.max_script_net,
         }
     }
 
@@ -616,6 +660,20 @@ impl Session {
     /// chaque navigation qui rencontre un `<script>`.
     pub fn set_js_factory(&mut self, f: JsFactory) {
         self.js_factory = Some(f);
+    }
+
+    /// Jar à cookies de la session — l'hôte le partage avec
+    /// son `CookieTransport` pour que `document.cookie`,
+    /// les XHR et les navigations voient le même état.
+    #[must_use]
+    pub fn cookie_jar(&self) -> Arc<CookieJar> {
+        self.cookies.clone()
+    }
+
+    /// Remplace le jar à cookies (restauration de profil
+    /// ou jar pré-peuplé côté hôte).
+    pub fn set_cookie_jar(&mut self, jar: Arc<CookieJar>) {
+        self.cookies = jar;
     }
 
     /// Branche un magasin de profil : charge les signets et
@@ -683,6 +741,16 @@ impl Session {
     /// [`CoreError::UnknownTab`] si l'onglet n'existe pas.
     pub fn close_tab(&mut self, tab: TabId) -> Result<(), CoreError> {
         self.tabs.remove(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        // Requêtes script-initiées en vol : annulées — leurs
+        // réponses éventuelles arriveraient à un onglet mort.
+        self.net_tasks.retain(|(t, _), j| {
+            if *t == tab {
+                j.abort();
+                false
+            } else {
+                true
+            }
+        });
         let _ = self.events.send(CoreEvent::TabClosed { tab });
         Ok(())
     }
@@ -1054,6 +1122,267 @@ impl Session {
         applied
     }
 
+    /// `NetRequest::Fetch` → `Request` émettable (étape 51),
+    /// `None` = bloquée : URL irrésoluble, mixed-content,
+    /// verbe inconnu, cross-origin non-safelistée (ADR-0019).
+    /// `Referer`/`Origin` posés à l'émission — une requête
+    /// CORS porte `Origin` même en verbe safelisté (spec
+    /// Fetch) ; `Cookie` injecté same-origin uniquement
+    /// (`credentials` cross-origin hors MVP).
+    fn script_request(
+        &self,
+        page: &Url,
+        method: &str,
+        raw_url: &str,
+        headers: &[(String, String)],
+        body: Option<&str>,
+    ) -> Option<(Request, bool)> {
+        let url = Url::resolve(page, raw_url.trim()).ok()?;
+        if is_mixed_content(page, &url) {
+            return None;
+        }
+        let m = parse_method(method)?;
+        let cross = page.origin() != url.origin();
+        // CORS minimal : cross-origin limité aux requêtes
+        // simples — en-tête non safelisté = preflight requis,
+        // bloqué au MVP (déviation documentée).
+        if cross
+            && !(cors_simple_method(m) && headers.iter().all(|(n, _)| cors_safelisted_header(n)))
+        {
+            return None;
+        }
+        let mut req = Request {
+            method: m,
+            url: url.clone(),
+            headers: initiator_headers(page, &url, m),
+            body: body.map(|b| b.as_bytes().to_vec()),
+        };
+        if cross
+            && !req
+                .headers
+                .iter()
+                .any(|(n, _)| n.eq_ignore_ascii_case("origin"))
+        {
+            req.headers
+                .push(("origin".to_string(), origin_header_value(page)));
+        }
+        req.headers.extend(
+            headers
+                .iter()
+                .filter(|(n, _)| !forbidden_request_header(n))
+                .cloned(),
+        );
+        if !cross {
+            let c = self.cookies.header_for(&url, true);
+            if !c.is_empty() {
+                req.headers.push(("Cookie".to_string(), c));
+            }
+        }
+        Some((req, cross))
+    }
+
+    /// Draine les `NetRequest` du moteur (étape 51) : chaque
+    /// `Fetch` admis devient une tâche tokio qui livrera sa
+    /// réponse sur le canal (`pump_net` aux points de
+    /// synchro) ; `Abort` tue la tâche corrélée. Quota
+    /// `max_script_net` et requêtes bloquées → livraison
+    /// immédiate d'un échec `status: 0` (`error` côté
+    /// script — la page reste vivante, jamais de panic).
+    fn drain_script_net(&mut self, tab: TabId) {
+        let Some((page, reqs)) = self.tabs.get_mut(&tab).and_then(|e| {
+            e.js.as_mut()
+                .map(|eng| (e.url.clone(), eng.drain_net_requests()))
+        }) else {
+            return;
+        };
+        let Some(page) = page else { return };
+        let mut failed = Vec::new();
+        for r in reqs {
+            match r {
+                NetRequest::Fetch {
+                    handle,
+                    method,
+                    url,
+                    headers,
+                    body,
+                } => {
+                    let inflight = self.net_tasks.keys().filter(|(t, _)| *t == tab).count();
+                    let built = if inflight >= self.max_script_net {
+                        tracing::trace!(tab, handle, "quota requêtes script atteint");
+                        None
+                    } else {
+                        self.script_request(&page, &method, &url, &headers, body.as_deref())
+                    };
+                    let Some((req, cross)) = built else {
+                        failed.push(handle);
+                        continue;
+                    };
+                    let tr = self.transport.clone();
+                    let tx = self.net_tx.clone();
+                    let page_origin = origin_header_value(&page);
+                    let req_url = req.url.clone();
+                    let j = tokio::spawn(async move {
+                        let out = tr.fetch(&req).await;
+                        let _ = tx.send(NetDone {
+                            tab,
+                            handle,
+                            cross,
+                            page_origin,
+                            req_url,
+                            out,
+                        });
+                    });
+                    self.net_tasks.insert((tab, handle), j);
+                }
+                NetRequest::Abort { handle } => {
+                    if let Some(j) = self.net_tasks.remove(&(tab, handle)) {
+                        j.abort();
+                    }
+                }
+            }
+        }
+        // Échecs immédiats (bloquée/quota) : livrés comme un
+        // échec réseau — déclenche `error`, jamais de panic.
+        for handle in failed {
+            self.deliver_net_response(
+                tab,
+                NetResponse {
+                    handle,
+                    status: 0,
+                    status_text: String::new(),
+                    headers: Vec::new(),
+                    body: Vec::new(),
+                },
+            );
+        }
+    }
+
+    /// Livre une `NetResponse` au moteur puis applique le
+    /// tour post-script : microtasks, resynchro DOM +
+    /// relayout, drains (réseau chaîné, cookies, storage).
+    fn deliver_net_response(&mut self, tab: TabId, resp: NetResponse) {
+        let mutated = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            let Some(eng) = entry.js.as_mut() else {
+                return;
+            };
+            if let Err(e) = eng.deliver_net_response(resp) {
+                tracing::debug!(tab, error = %e, "livraison réseau js");
+                let _ = self.events.send(CoreEvent::PipelineError {
+                    tab: Some(tab),
+                    message: e.to_string(),
+                });
+            }
+            let n = eng.run_pending();
+            tracing::trace!(tab, jobs = n, "jobs js après réponse réseau");
+            eng.sync_dom()
+        };
+        if let Some(html) = mutated {
+            self.apply_dom_sync(tab, &html, true);
+        }
+        self.after_script(tab);
+    }
+
+    /// Points de synchro post-script (étape 51) : draine les
+    /// écritures `document.cookie` vers le jar partagé
+    /// (`HttpOnly` filtré — non posable par un script), le
+    /// `localStorage` vers la map d'origine + le profil, et
+    /// les nouvelles requêtes réseau vers le scheduler.
+    fn after_script(&mut self, tab: TabId) {
+        let Some((page, writes, map)) = self.tabs.get_mut(&tab).and_then(|e| {
+            e.js.as_mut().map(|eng| {
+                (
+                    e.url.clone(),
+                    eng.drain_cookie_writes(),
+                    eng.drain_storage(),
+                )
+            })
+        }) else {
+            return;
+        };
+        if let Some(page) = page {
+            for w in &writes {
+                self.cookies.set_from_header(&page, &strip_http_only(w));
+            }
+            let key = page.origin().to_string();
+            // Persisté seulement sur changement réel : une
+            // map vidée par script est sauvée (effacement),
+            // un contexte qui n'a jamais touché storage ne
+            // produit aucune écriture.
+            let changed = match self.local_storage.get(&key) {
+                Some(prev) => *prev != map,
+                None => !map.is_empty(),
+            };
+            if changed {
+                self.local_storage.insert(key.clone(), map.clone());
+                if let Some(s) = &self.store {
+                    s.save_storage(&key, &map);
+                }
+            }
+        }
+        self.drain_script_net(tab);
+    }
+
+    /// Livre les réponses arrivées — synchrone, sans yield :
+    /// appelée aux points de synchro internes (événements).
+    fn poll_net(&mut self) -> usize {
+        let mut done = Vec::new();
+        while let Ok(d) = self.net_rx.try_recv() {
+            done.push(d);
+        }
+        let n = done.len();
+        for d in done {
+            self.net_tasks.remove(&(d.tab, d.handle));
+            if !d.cross {
+                if let Ok(resp) = &d.out {
+                    for v in resp.headers_all("set-cookie") {
+                        self.cookies.set_from_header(&d.req_url, v);
+                    }
+                }
+            }
+            let resp = match &d.out {
+                Ok(resp) if !d.cross || cors_readable(&d.page_origin, resp) => NetResponse {
+                    handle: d.handle,
+                    status: resp.status,
+                    status_text: resp.reason.clone(),
+                    headers: resp.headers.clone(),
+                    body: resp.body.clone(),
+                },
+                _ => NetResponse {
+                    handle: d.handle,
+                    status: 0,
+                    status_text: String::new(),
+                    headers: Vec::new(),
+                    body: Vec::new(),
+                },
+            };
+            self.deliver_net_response(d.tab, resp);
+        }
+        n
+    }
+
+    /// Pompe les réponses des requêtes script-initiées
+    /// (étape 51) — cède d'abord le tour pour laisser les
+    /// tâches produire, puis livre ce qui est arrivé.
+    /// Renvoie le nombre livré. La session n'a pas
+    /// d'horloge propre : l'hôte appelle périodiquement
+    /// (daemon : battement dédié ; CLI/tests : après
+    /// navigation) — jamais de callback ré-entrant.
+    pub async fn pump_net(&mut self) -> usize {
+        tokio::task::yield_now().await;
+        self.poll_net()
+    }
+
+    /// Requêtes script-initiées encore en vol (tous onglets)
+    /// — condition d'arrêt des pompes bornées de l'hôte
+    /// (CLI, tests).
+    #[must_use]
+    pub fn net_pending(&self) -> usize {
+        self.net_tasks.len()
+    }
+
     /// Fetch des sous-ressources + exécution des `<script>`
     /// (étape 50, ADR-0012 côté session). **Une seule vague
     /// parallèle bornée** — `max_inflight` requêtes en vol via
@@ -1183,6 +1512,11 @@ impl Session {
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.js = Some(eng);
         }
+        // Étape 51 : XHR/fetch émis pendant le chargement →
+        // spawned ; une pompe livre les réponses déjà là,
+        // l'hôte pompe périodiquement pour le reste.
+        self.after_script(tab);
+        self.pump_net().await;
         self.insert_images(tab, &base, &img_bodies);
     }
 
@@ -1233,6 +1567,21 @@ impl Session {
             let mut e = f();
             e.set_budget(self.js_ops);
             e.install_dom(html, &page_url, hist_len);
+            // Étape 51 : état d'origine injecté au contexte —
+            // `localStorage` (map session > profil persisté)
+            // et snapshot cookie non-HttpOnly
+            // (`document.cookie` en lecture).
+            if let Ok(u) = Url::parse(&page_url) {
+                let key = u.origin().to_string();
+                let local = self
+                    .local_storage
+                    .get(&key)
+                    .cloned()
+                    .or_else(|| self.store.as_ref().map(|s| s.load_storage(&key)))
+                    .unwrap_or_default();
+                e.install_storage(local);
+                e.set_cookie_snapshot(&self.cookies.header_for(&u, false));
+            }
             e
         })
     }
@@ -1938,6 +2287,11 @@ impl Session {
         if let Some(html) = mutated {
             self.apply_dom_sync(tab, &html, true);
         }
+        // Les listeners ont pu émettre XHR/cookies/storage
+        // (étape 51) — drains + livraison de ce qui est déjà
+        // arrivé, sans yield (point de synchro interne).
+        self.after_script(tab);
+        self.poll_net();
         prevented
     }
 
@@ -2392,6 +2746,126 @@ enum SubTag {
 struct ModuleGraph {
     sources: HashMap<String, String>,
     alias: HashMap<String, String>,
+}
+
+/// Complétion d'une requête script-initiée (étape 51) —
+/// produite par la tâche tokio spawned, consommée par
+/// [`Session::pump_net`] aux points de synchro.
+struct NetDone {
+    /// Onglet émetteur.
+    tab: TabId,
+    /// Corrélation côté moteur (`NetResponse::handle`).
+    handle: u64,
+    /// Requête cross-origin — la lisibilité de la réponse
+    /// est conditionnée à `Access-Control-Allow-Origin`.
+    cross: bool,
+    /// Origine canonique de la page émettrice (check ACAO).
+    page_origin: String,
+    /// URL de la requête — capture `Set-Cookie` (same-origin
+    /// uniquement, `credentials` cross-origin hors MVP).
+    req_url: Url,
+    /// Sortie brute du transport.
+    out: NetResult<Response>,
+}
+
+/// Verbe d'un `NetRequest` → `Method` — un verbe hors
+/// sous-ensemble usuel n'est pas émis (dégradation status 0).
+fn parse_method(s: &str) -> Option<Method> {
+    Some(match s.trim().to_ascii_uppercase().as_str() {
+        "GET" => Method::Get,
+        "HEAD" => Method::Head,
+        "POST" => Method::Post,
+        "PUT" => Method::Put,
+        "DELETE" => Method::Delete,
+        "OPTIONS" => Method::Options,
+        _ => return None,
+    })
+}
+
+/// Verbe « safelisté » CORS — une requête cross-origin avec
+/// un autre verbe exigerait un preflight `OPTIONS` (hors MVP).
+const fn cors_simple_method(m: Method) -> bool {
+    matches!(m, Method::Get | Method::Head | Method::Post)
+}
+
+/// En-tête safelisté CORS — une requête cross-origin portant
+/// un autre en-tête exigerait un preflight : bloquée au MVP.
+fn cors_safelisted_header(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "accept" | "accept-language" | "content-language" | "content-type" | "range"
+    )
+}
+
+/// En-têtes interdits au script (Fetch « forbidden header
+/// names », sous-ensemble) — le navigateur garde le contrôle
+/// de `Referer`/`Origin`/`Cookie`/`Host`…, jamais posés par
+/// la page (filtrés silencieusement à l'émission).
+fn forbidden_request_header(name: &str) -> bool {
+    let n = name.trim().to_ascii_lowercase();
+    n.starts_with("sec-")
+        || n.starts_with("proxy-")
+        || matches!(
+            n.as_str(),
+            "accept-charset"
+                | "accept-encoding"
+                | "access-control-request-headers"
+                | "access-control-request-method"
+                | "connection"
+                | "content-length"
+                | "cookie"
+                | "date"
+                | "expect"
+                | "host"
+                | "keep-alive"
+                | "origin"
+                | "referer"
+                | "te"
+                | "trailer"
+                | "transfer-encoding"
+                | "upgrade"
+                | "via"
+        )
+}
+
+/// Réponse cross-origin lisible par le script ? CORS minimal :
+/// `Access-Control-Allow-Origin: *` ou égal à l'origine
+/// canonique de la page — sinon la réponse est opaque
+/// (`status: 0` → événement `error`, comme un échec réseau).
+fn cors_readable(page_origin: &str, resp: &Response) -> bool {
+    resp.headers_all("access-control-allow-origin").any(|v| {
+        let v = v.trim();
+        v == "*" || v == page_origin
+    })
+}
+
+/// `Origin` canonique d'une page — `scheme://host[:port]`,
+/// port omis s'il est le défaut du schéma ; origine opaque
+/// sérialisée `null` (spec Fetch, valeur `Origin` en-tête).
+fn origin_header_value(u: &Url) -> String {
+    let default = match u.scheme() {
+        "http" => Some(80),
+        "https" => Some(443),
+        _ => None,
+    };
+    match u.effective_port() {
+        Some(p) if Some(p) != default => {
+            format!("{}://{}:{}", u.scheme(), u.host(), p)
+        }
+        Some(_) => format!("{}://{}", u.scheme(), u.host()),
+        None => "null".to_string(),
+    }
+}
+
+/// `document.cookie` ne peut pas poser `HttpOnly` — l'attribut
+/// est ignoré (spec : le cookie est posé, visible côté script).
+fn strip_http_only(raw: &str) -> String {
+    raw.split(';')
+        .enumerate()
+        .filter(|(i, attr)| *i == 0 || !attr.trim().eq_ignore_ascii_case("httponly"))
+        .map(|(_, s)| s.trim())
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// File de jobs de sous-ressources, émise par priorité

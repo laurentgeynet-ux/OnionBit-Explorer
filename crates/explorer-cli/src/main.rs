@@ -72,6 +72,10 @@ fn default_fonts_dir() -> std::path::PathBuf {
 /// `shot <url> <sortie.png>` : navigation réelle complète
 /// (réseau, JS, images, webfonts) puis PNG du rendu —
 /// mesure interop sur sites réels (étape 48).
+/// Grâce post-navigation pour les XHR émis au chargement
+/// (étape 51 — bornée, puis rendu quoi qu'il arrive).
+const XHR_GRACE_MS: u64 = 1_000;
+
 #[tokio::main(flavor = "current_thread")]
 async fn shot(url: &str, out: &str) -> ExitCode {
     let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
@@ -81,6 +85,17 @@ async fn shot(url: &str, out: &str) -> ExitCode {
     if let Err(e) = session.navigate(tab, url).await {
         eprintln!("erreur : {e}");
         return ExitCode::FAILURE;
+    }
+    // Étapes 51 : les XHR/fetch émis au chargement doivent
+    // se résoudre avant le shot — grâce bornée
+    // (`XHR_GRACE_MS`) puis rendu quoi qu'il arrive.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(XHR_GRACE_MS);
+    loop {
+        session.pump_net().await;
+        if session.net_pending() == 0 || std::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     if let Some(png) = session.frame_png(tab) {
         match std::fs::write(out, &png) {

@@ -51,21 +51,34 @@ Objectif : les blocages du web réel sautent. Sortie de palier :
   de scripts : hooks à définir avec JS-C35.
   *Pourquoi en premier : trou le plus bloquant du web réel.*
 
-- [ ] **Étape 51. Câblage Web APIs — clôt l'étape 44 de
+- [x] **Étape 51. Câblage Web APIs — clôt l'étape 44 de
   ROADMAP.md.** Intégralement interne à l'équipe :
   - `JsEngine` : traverse proxy des surfaces déjà livrées dans
     `dillo-js` — `XhrTransport`/`deliver_xhr_response`,
     `install_storage`, `CookieJar` (pattern `drain_nav_requests`
     généralisé : `drain_net_requests()` + `deliver_net_response()`).
+    **Livré par JS-C27** (commit `2b73089`).
   - Session : exécute le fetch en tâche tokio, livre à un point
     de synchro — jamais de callback ré-entrant.
+    `drain_script_net` → spawn tokio → canal → `pump_net`
+    (daemon : battement 50 ms ; CLI : grâce 1 s ; interne :
+    `poll_net` post-événements).
   - `localStorage` : map par origine persistée dans le profil ;
-    `sessionStorage` par onglet (mémoire).
+    `sessionStorage` par onglet (mémoire). `ProfileStore`
+    étendu (`load_storage`/`save_storage`, implémenté par
+    `JsonFileStore` — `storage-<slug>.json` par origine).
   - `document.cookie` : bridge vers le jar `explorer-net`
-    (politiques Secure/SameSite héritées).
-  - **Point de réévaluation ADR-0019 obligatoire** : same-origin
-    sur XHR/fetch + CORS minimal + quota de requêtes
-    script-initiées — l'étape n'est pas cochable sans.
+    (politiques Secure/SameSite héritées) — `CookieTransport`
+    daemon partagé avec la session, `HttpOnly` filtré des
+    écritures script.
+  - **Réévaluation ADR-0019 faite** : same-origin vs CORS
+    minimal (requêtes simples + ACAO `*`|origine exacte,
+    preflight hors MVP), `Origin` sur CORS, quota
+    `max_script_net` = 16/onglet, `Set-Cookie` capturé
+    same-origin seul — déviations documentées dans
+    l'amendement de l'ADR. Tests : 8 scénarios (succès,
+    opaque, ACAO, preflight-bloqué, quota, jar, Set-Cookie,
+    storage).
 
 - [ ] **Étape 52. Boucle d'événements v2 + tick timers.**
   `dispatch_event(ty, path)` existe — étendre les types :

@@ -47,7 +47,7 @@ technique :
 | Boucle infinie / DoS CPU | budget ops borné | un script peut allouer avant d'épuiser le budget — borne mémoire heap à instrumenter (JS-C37) |
 | Mutation DOM hostile | confinée au miroir `Rc` | coût de resynchro O(document) par synchro — DoS par churn documenté, point d'extension diff prévu (ADR-0013) |
 | Timers en bombe | drainés aux points de synchro | le tick dédié (étape 52) doit borner le nombre de jobs par tick |
-| XHR/fetch réseau depuis JS | **non encore câblé** — risque SSRF depuis le daemon loopback au moment du câblage | same-origin + CORS minimal exigés à l'étape 51 ; le transport JS hérite des politiques `HttpTransport` |
+| XHR/fetch réseau depuis JS | câblé à l'étape 51 derrière la politique minimale ci-dessous | SSRF résiduel : une page hostile peut fetcher des cibles internes — mitigé par CORS minimal (réponse opaque sans ACAO) + quota, pas par un allowlist réseau |
 | Code arbitraire → mémoire | éliminé côté maison par `forbid(unsafe_code)` | reste la surface des dépendances (`regex`, `fancy-regex` borné par `BACKTRACK_LIMIT`, `num-bigint`) |
 | Crash du moteur JS | `JsError::Dead`, onglet dégradé | le thread est joint au `Drop` — un panic worker n'empoisonne pas la session |
 | Mode FFI (`explorer-ffi`) | le moteur vit **dans le processus UI** — un crash logique résiduel peut emporter l'app (déviation assumée ADR-0018) | REST reste la référence ; le mode FFI est opt-in via `EXPLORER_ENGINE` |
@@ -82,3 +82,47 @@ technique :
   same-origin/CORS minimale soit implémentée et testée.
 - `docs/etat-des-lieux-2026-10-19.md` §5 consignait cette dette ;
   elle est résolue par la présente ADR.
+
+## Réévaluation à l'étape 51 (soldée)
+
+Point de réévaluation prévu « au câblage XHR/fetch » — fait.
+Politique livrée dans `explorer-core` (`script_request`,
+`poll_net`, `after_script`) :
+
+- **Same-origin** : requêtes libres — `Cookie` injecté à
+  l'émission depuis le `CookieJar` partagé, `Set-Cookie` des
+  réponses capturé dans le même jar (le `CookieTransport` du
+  daemon partage le jar avec la session — navigations, XHR et
+  `document.cookie` voient un état unique).
+- **Cross-origin — CORS minimal** : limité aux *simple
+  requests* (verbes `GET`/`HEAD`/`POST`, en-têtes safelistés
+  `accept`, `accept-language`, `content-language`,
+  `content-type`, `range`) ; `Origin` canonique posé à
+  l'émission. Réponse **opaque** (`status: 0` → événement
+  `error`) sauf `Access-Control-Allow-Origin: *` ou origine
+  exacte. **Déviations MVP documentées** : pas de preflight
+  `OPTIONS` (requête non-simple bloquée à l'émission), pas de
+  `credentials` cross-origin (ni `Cookie` ni `Set-Cookie`), la
+  valeur `content-type` n'est pas restreinte aux MIME
+  safelistés.
+- **Quota** : `SessionConfig::max_script_net` = 16 requêtes
+  script-initiées en vol par onglet — au-delà, échec
+  immédiat `status: 0` (page vivante, règle budgets).
+- **En-têtes interdits au script** filtrés (`sec-*`,
+  `proxy-*`, `Host`, `Cookie`, `Referer`, `Origin`…) — le
+  navigateur garde le contrôle des en-têtes initiatés.
+- **Mixed-content** filtré, `Referer`/`Origin` calculés à
+  l'émission (`initiator_headers`), `Abort` moteur → annulation
+  tokio, fermeture d'onglet → annulation de ses tâches.
+- **Livraison** par intentions drainées + canal → points de
+  synchro (`pump_net`), jamais de callback ré-entrant — la
+  session reste `Send` et le pipeline ne peut pas être
+  suspendu par un script.
+
+Résidu assumé : le fetch cross-origin simple est **émis**
+même si la réponse sera opaque (comportement navigateur
+réel — l'exposition réseau reste ; l'info ne revient pas au
+script). Tests : 8 scénarios d'intégration session
+(`xhr_same_origin_fetches_and_renders`, opaque sans ACAO,
+ACAO `*`, en-tête bloqué, quota, jar partagé, `Set-Cookie`
+capturé, `localStorage` inter-documents).

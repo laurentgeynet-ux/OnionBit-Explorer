@@ -13,6 +13,7 @@
 //! `[{"url","title"}]` réécrit en entier à chaque mutation
 //! (volumes MVP ; l'historique est plafonné).
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -156,6 +157,27 @@ impl ProfileStore for JsonFileStore {
             .lock()
             .map_or_else(|_| Vec::new(), |h| h.clone())
     }
+
+    /// `localStorage` par origine (étape 51) : fichier
+    /// `storage-<slug>.json` = objet `{clé: valeur}` —
+    /// illisible/cassé → origine vide (dégradation).
+    fn load_storage(&self, origin: &str) -> BTreeMap<String, String> {
+        read_json(&self.dir.join(storage_name(origin)))
+            .and_then(|v| serde_json::from_value::<BTreeMap<String, String>>(v).ok())
+            .unwrap_or_default()
+    }
+
+    fn save_storage(&self, origin: &str, map: &BTreeMap<String, String>) {
+        let _guard = self.io.lock().ok();
+        let Some(s) = serde_json::to_string(map).ok() else {
+            return;
+        };
+        let dst = self.dir.join(storage_name(origin));
+        let tmp = self.dir.join(format!("{}.tmp", storage_name(origin)));
+        if fs::write(&tmp, s).is_ok() {
+            let _ = fs::rename(&tmp, &dst);
+        }
+    }
 }
 
 /// Forme sérialisée commune `{"url", "title"}` — visites et
@@ -189,4 +211,22 @@ impl From<&Bookmark> for RawEntry {
 fn read_json(p: &Path) -> Option<serde_json::Value> {
     let bytes = fs::read(p).ok()?;
     serde_json::from_slice(&bytes).ok()
+}
+
+/// Nom de fichier storage d'une origine — caractères sûrs
+/// seulement (`https://a.com` → `storage-https_a_com.json`),
+/// borné à 64 caractères (noms de fichiers raisonnables).
+fn storage_name(origin: &str) -> String {
+    let slug: String = origin
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(64)
+        .collect();
+    format!("storage-{slug}.json")
 }

@@ -25,6 +25,7 @@ use std::sync::Arc;
 mod store;
 
 use explorer_core::Session;
+use explorer_net::cookies::{CookieJar, CookieTransport};
 use explorer_net::decode::DecodingTransport;
 use explorer_net::h1::HttpConfig;
 use explorer_net::h2::AutoClient;
@@ -76,6 +77,10 @@ impl DaemonConfig {
     }
 }
 
+/// Période de la pompe réseau script-initiée (étape 51 —
+/// règle 13 : borne de config, pas de magie).
+const NET_PUMP_MS: std::time::Duration = std::time::Duration::from_millis(50);
+
 /// Répertoire de fontes par défaut selon la plateforme.
 fn default_fonts_dir() -> PathBuf {
     #[cfg(windows)]
@@ -93,14 +98,18 @@ fn default_fonts_dir() -> PathBuf {
 }
 
 /// Pile transport du navigateur : TLS web-roots → HTTP/1.1 →
-/// décodage `gzip`/`chunked` → redirections bornées — la même
-/// composition que `explorer-cli`.
-fn http_stack(cfg: &DaemonConfig) -> Arc<dyn HttpTransport> {
+/// décodage `gzip`/`chunked` → jar à cookies → redirections
+/// bornées — la même composition que `explorer-cli`. Le
+/// `CookieJar` partagé avec la session (étape 51) est
+/// **sous** la couche redirection : chaque hop re-reçoit
+/// les cookies de sa propre URL.
+fn http_stack(cfg: &DaemonConfig, jar: Arc<CookieJar>) -> Arc<dyn HttpTransport> {
     let tls = Arc::new(TlsConnector::web_roots());
     // ALPN : h2 si le serveur le propose, h1 sinon (etape 41).
     let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
     let decoded: Arc<dyn HttpTransport> = Arc::new(DecodingTransport::wrap(h1, cfg.max_body));
-    Arc::new(RedirectTransport::wrap(decoded, cfg.max_redirects))
+    let with_cookies: Arc<dyn HttpTransport> = Arc::new(CookieTransport::wrap(decoded, jar));
+    Arc::new(RedirectTransport::wrap(with_cookies, cfg.max_redirects))
 }
 
 #[tokio::main]
@@ -116,10 +125,30 @@ async fn main() {
         &store::JsonFileStore::default_dir(),
     ));
     tracing::info!(dir = %store::JsonFileStore::default_dir().display(), "profil chargé");
-    let mut session = Session::new(http_stack(&cfg), Arc::new(fonts));
+    // Jar partagé transport ↔ session (étape 51) :
+    // `document.cookie`, les XHR same-origin et les
+    // navigations voient le même état.
+    let jar = Arc::new(CookieJar::new());
+    let mut session = Session::new(http_stack(&cfg, jar.clone()), Arc::new(fonts));
+    session.set_cookie_jar(jar);
     session.set_store(store);
     session.set_js_factory(explorer_js::DilloEngine::factory());
     let session = Arc::new(tokio::sync::Mutex::new(session));
+
+    // Battement des réponses réseau script-initiées (étape
+    // 51) : la session n'a pas d'horloge — un XHR asynchrone
+    // est livré à la prochaine pompe, bornée par
+    // `NET_PUMP_MS`.
+    {
+        let s = session.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(NET_PUMP_MS);
+            loop {
+                tick.tick().await;
+                s.lock().await.pump_net().await;
+            }
+        });
+    }
     let app = explorer_api::router_with_key(session, cfg.api_key.clone());
     if cfg.api_key.is_some() {
         tracing::info!("clé d'API requise (x-api-key / ?key=)");

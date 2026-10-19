@@ -108,6 +108,7 @@ fn bench_session() -> (Session, Arc<FakeTransport>) {
             max_scripts: 32,
             max_modules: 64,
             max_inflight: 6,
+            max_script_net: 16,
         },
     );
     (s, t)
