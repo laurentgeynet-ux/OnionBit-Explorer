@@ -55,6 +55,9 @@ pub enum DisplayItem {
         origin: (f32, f32),
         /// Glyphes + métriques produits par le shaping.
         run: ShapedRun,
+        /// Requête fonte — le raster résout les octets via
+        /// `FontSource` pour les contours de glyphes.
+        font: explorer_layout::font::FontRequest,
         /// `color` hérité du conteneur.
         color: Color,
         /// Taille utilisée (px) — pour le raster de glyphes.
@@ -136,15 +139,17 @@ impl DisplayList {
 }
 
 /// Construit la display list d'un arbre posé — pur,
-/// déterministe, borné par la taille de l'arbre.
+/// déterministe, borné par la taille de l'arbre. `height`
+/// couvre au moins le viewport (le document peut dépasser —
+/// le scroll vient plus tard).
 #[must_use]
-pub fn build_display_list(root: &LayoutBox, viewport_w: f32) -> DisplayList {
+pub fn build_display_list(root: &LayoutBox, viewport_w: f32, viewport_h: f32) -> DisplayList {
     let mut items = Vec::new();
     paint_box(root, &mut items);
     DisplayList {
         items,
         width: viewport_w,
-        height: root.rect.height,
+        height: root.rect.height.max(viewport_h),
     }
 }
 
@@ -238,12 +243,40 @@ fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>) {
                     items.push(DisplayItem::Text {
                         origin: (frag.rect.x, frag.rect.y + frag.baseline),
                         run: run.clone(),
+                        font: font_request(&bx.style),
                         color: ink,
                         size_px: size,
                     });
                 }
             }
         }
+    }
+}
+
+/// `FontRequest` dérivé du style : familles `font-family`
+/// (virgules), `font-weight` (100-900), `font-style`.
+fn font_request(st: &explorer_css::ComputedStyle) -> explorer_layout::font::FontRequest {
+    let families = st.get("font-family").map_or_else(
+        || vec!["sans-serif".to_string()],
+        |v| {
+            v.split(',')
+                .map(|f| f.trim().trim_matches('"').trim_matches('\'').to_string())
+                .filter(|f| !f.is_empty())
+                .collect()
+        },
+    );
+    let weight = st.get("font-weight").map_or(400, |v| match v.trim() {
+        "normal" => 400,
+        "bold" => 700,
+        "bolder" => 800,
+        "lighter" => 300,
+        n => n.parse::<u16>().unwrap_or(400).clamp(1, 1000),
+    });
+    let italic = matches!(st.get("font-style"), Some("italic" | "oblique"));
+    explorer_layout::font::FontRequest {
+        families,
+        weight,
+        italic,
     }
 }
 

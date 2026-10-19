@@ -26,7 +26,7 @@ const NUM_GLYPHS: u16 = 256;
 pub fn fixture_ttf() -> Vec<u8> {
     let tables: Vec<(&'static str, Vec<u8>)> = vec![
         ("cmap", t_cmap()),
-        ("glyf", Vec::new()),
+        ("glyf", t_glyf()),
         ("head", t_head()),
         ("hhea", t_hhea()),
         ("hmtx", t_hmtx()),
@@ -176,9 +176,42 @@ fn t_hmtx() -> Vec<u8> {
     v
 }
 
+/// Table `glyf` : glyphe 0 (`.notdef`) vide ; glyphes 1-255
+/// = un rectangle simple (contour 4 points) — contours réels
+/// pour la rasterisation de l'étape 23.
+fn t_glyf() -> Vec<u8> {
+    let mut v = Vec::new();
+    for _ in 1..NUM_GLYPHS {
+        push_i16(&mut v, 1); // numberOfContours
+        push_i16(&mut v, 50); // xMin
+        push_i16(&mut v, -50); // yMin
+        push_i16(&mut v, 450); // xMax
+        push_i16(&mut v, 700); // yMax
+        push_u16(&mut v, 3); // endPtsOfContours[0]
+        push_u16(&mut v, 0); // instructionLength
+        v.extend_from_slice(&[0x01; 4]); // flags : on-curve, deltas i16
+                                         // Coords = DEUX flux séparés : tous les dx, puis les dy.
+        for dx in [50i16, 400, 0, -400] {
+            push_i16(&mut v, dx);
+        }
+        for dy in [-50i16, 0, 750, 0] {
+            push_i16(&mut v, dy);
+        }
+    }
+    v
+}
+
 fn t_loca() -> Vec<u8> {
-    // Tous les glyphes vides → offsets tous nuls.
-    vec![0u8; (usize::from(NUM_GLYPHS) + 1) * 2]
+    // Format court : offsets ÷ 2 en u16. Glyphe 0 vide
+    // (loca[0] == loca[1]) ; glyphes 1-255, 34 octets chacun.
+    const GLYPH_LEN: usize = 34;
+    let mut v = Vec::new();
+    for i in 0..=NUM_GLYPHS {
+        // loca[i] = offset ÷ 2 ; glyphe 0 vide → loca[0]=loca[1]=0.
+        let off = usize::from(i.saturating_sub(1)) * GLYPH_LEN;
+        push_u16(&mut v, (off / 2) as u16);
+    }
+    v
 }
 
 fn t_cmap() -> Vec<u8> {

@@ -14,5 +14,7 @@
 #![forbid(unsafe_code)]
 
 pub mod display;
+pub mod raster;
 
 pub use display::{build_display_list, BorderStyle, DisplayItem, DisplayList};
+pub use raster::{rasterize, Frame};

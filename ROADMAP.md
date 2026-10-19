@@ -177,9 +177,11 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   `PushClip`/`PopClip` autour des `overflow` ≠ visible.
   Fixture TTF remontée dans `explorer-test-support`
   (source unique).
-- [ ] **Étape 23. Rasterisation.** `tiny-skia` (ADR-0001) :
-  couleurs, bordures, texte ; framebuffer RGBA, facteur d'échelle
-  DPI (HiDPI) appliqué à la rasterisation.
+- [x] **Étape 23. Rasterisation.** `tiny-skia` (ADR-0001) :
+  couleurs, bordures, texte (contours `ttf-parser` → paths) ;
+  framebuffer RGBA, `Mask` de clipping `overflow`, facteur
+  d'échelle DPI (HiDPI) appliqué à la rasterisation, PNG via
+  `Pixmap::encode_png`.
 - [ ] **Étape 24. Frame PNG servie.** `GET /api/tabs/{id}/frame`
   (ADR-0004) + événement `frame_invalidated` SSE — l'UI affiche
   sa première vraie page en pull PNG (MVP).

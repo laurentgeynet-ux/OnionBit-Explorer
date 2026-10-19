@@ -43,7 +43,7 @@ fn dl(html: &str, css: &str) -> (Dom, LayoutBox, Vec<DisplayItem>) {
         .expect("élément racine");
     let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
     layout_tree(&mut bx, VIEW, &ctx());
-    let list = build_display_list(&bx, VIEW);
+    let list = build_display_list(&bx, VIEW, 200.0);
     (dom, bx, list.items)
 }
 

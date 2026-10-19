@@ -9,6 +9,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 23 — `explorer-render` : rasterisation tiny-skia**
+  (`raster.rs`, dep `tiny-skia` 0.11 + `ttf-parser`) :
+  `rasterize` peint la display list dans un framebuffer
+  RGBA prémultiplié — `FillRect`/`Border` en rectangles
+  pleins, `Text` via `FontSource` + `Face::outline_glyph`
+  → path tiny-skia rempli à la baseline (adaptateur
+  `OutlineBuilder`→`PathBuilder`, avances/offsets
+  multipliés par le facteur DPI), `Placeholder` en cadre
+  gris. `PushClip`/`PopClip` → `Mask` empilées (clipping
+  réel du `overflow`). `scale` HiDPI : géométrie × scale,
+  framebuffer en pixels physiques, borne 16384 px (page
+  hostile). `Frame::encode_png` prêt pour l'API (étape 24).
+  Fixture TTF enrichie : glyphes 1-255 = rectangle 4 points
+  (coords TrueType = flux x/y séparés) — la première fonte
+  réellement dessinable. 6 tests (pixels sondés, clip, DPI,
+  signature PNG).
 - **Étape 22 — `explorer-render` : display list**
   (`display.rs`) : `build_display_list` aplatit l'arbre de
   layout en `Vec<DisplayItem>` ordonnés — `FillRect` (fond
