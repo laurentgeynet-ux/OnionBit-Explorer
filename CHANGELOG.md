@@ -9,6 +9,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 34 — intégration `dillo-js`** (`explorer-js`,
+  `explorer-core`, `explorer-daemon`) : trait `JsEngine`
+  (`Send`) — `eval` → complétion décrite, `run_pending`,
+  `set_budget` ; `JsError` typé (`Syntax`/`Uncaught`/`Dead`).
+  `DilloEngine` = **proxy canal → thread dédié par
+  contexte** : le tas `Rc` de `dillo_js::Engine` ne quitte
+  pas son thread, la `Session` reste `Send` derrière
+  l'API, un script ne peut pas suspendre le pipeline ;
+  `Shutdown` + `join` au `Drop`. `NullEngine` par défaut,
+  `Session::set_js_factory` (fabrique injectée),
+  `SessionConfig::js_ops` (budget 5M ops), `Tab.js` :
+  contexte neuf par document — `<script>` inline
+  (`type` classique, sans `src`) évalués dans l'ordre
+  après parse ; un échec émet `pipeline_error` sans
+  bloquer la page. Daemon branche `DilloEngine::factory()`.
+  8 tests adaptateur + 2 tests session ; workspace
+  (dillo-js inclus) clippy-propre.
+
+### Fixed
+
+- `dillo-js/regexp.rs` : 4 lints `unnested_or_patterns` +
+  `single_match` (correction mécanique débloquant le
+  clippy workspace — fichier WIP de l'équipe JS).
+
 - **Étape 33 — pages d'erreur** (`app/`) : `pageErrors` par
   onglet alimenté par `pipeline_error` (SSE) et les échecs
   `navigate` — la zone frame affiche une page d'erreur

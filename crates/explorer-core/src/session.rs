@@ -19,6 +19,7 @@ use explorer_css::{Origin, StyleEngine, StyleEnv};
 use explorer_dom::{Dom, DomError, NodeId};
 use explorer_html::encoding::decode_sniffed;
 use explorer_html::TreeBuilder;
+use explorer_js::{JsEngine, JsFactory};
 use explorer_layout::font::FontSource;
 use explorer_layout::{build_box_tree, layout_tree, BlockCtx, LayoutBox};
 use explorer_net::http::{HttpTransport, Request};
@@ -239,6 +240,10 @@ struct Tab {
     /// Champ de formulaire focalisé (`input`/`textarea`) —
     /// `NodeId` dans `dom`, invalidé à la navigation.
     focused: Option<NodeId>,
+    /// Contexte JS du document — créé si la page a des
+    /// `<script>` et qu'une fabrique est injectée ; meurt à
+    /// la navigation (un contexte par document).
+    js: Option<Box<dyn JsEngine>>,
 }
 
 /// Configuration de session — seuils et viewport initiaux
@@ -252,6 +257,9 @@ pub struct SessionConfig {
     pub viewport: (f32, f32),
     /// Facteur DPI initial.
     pub scale: f32,
+    /// Budget d'opérations JS par `eval` (`set_op_limit` du
+    /// moteur — protection anti-script-infini, règle budgets).
+    pub js_ops: u64,
 }
 
 impl Default for SessionConfig {
@@ -260,6 +268,7 @@ impl Default for SessionConfig {
             event_capacity: 64,
             viewport: (1024.0, 768.0),
             scale: 1.0,
+            js_ops: 5_000_000,
         }
     }
 }
@@ -282,6 +291,12 @@ pub struct Session {
     store: Option<Arc<dyn ProfileStore>>,
     /// Signets en mémoire (miroir du store).
     bookmarks: Vec<Bookmark>,
+    /// Fabrique de contextes JS — `None` = les `<script>` sont
+    /// ignorés (défaut : navigation sans JavaScript).
+    js_factory: Option<JsFactory>,
+    /// Budget d'ops appliqué à chaque contexte (`js_ops` de
+    /// config — `set_op_limit` à la création).
+    js_ops: u64,
 }
 
 impl Session {
@@ -315,7 +330,17 @@ impl Session {
             scale: cfg.scale,
             store: None,
             bookmarks: Vec::new(),
+            js_factory: None,
+            js_ops: cfg.js_ops,
         }
+    }
+
+    /// Branche la fabrique de moteurs JS (`DilloEngine::factory()`
+    /// côté infra, `null_factory()` pour un no-op, `None` par
+    /// défaut = scripts ignorés). Un contexte neuf est créé à
+    /// chaque navigation qui rencontre un `<script>`.
+    pub fn set_js_factory(&mut self, f: JsFactory) {
+        self.js_factory = Some(f);
     }
 
     /// Branche un magasin de profil : charge les signets et
@@ -366,6 +391,7 @@ impl Session {
                 frame: None,
                 png: None,
                 focused: None,
+                js: None,
             },
         );
         let _ = self.events.send(CoreEvent::TabOpened { tab: id });
@@ -584,10 +610,45 @@ impl Session {
             entry.title.clone_from(&title);
             entry.scroll_y = 0.0;
             entry.focused = None;
+            entry.js = None;
             entry.dom = Some(dom);
         }
+        self.run_scripts(tab);
         self.relayout(tab)?;
         Ok(title)
+    }
+
+    /// Évalue les `<script>` inline du document — contexte neuf
+    /// par document (créé ici, détruit à la prochaine
+    /// navigation). Un script en échec émet `PipelineError`
+    /// mais ne fait pas échouer la page (dégradation, règle 3).
+    fn run_scripts(&mut self, tab: TabId) {
+        let (Some(f), Some(dom)) = (
+            self.js_factory.clone(),
+            self.tabs.get(&tab).and_then(|t| t.dom.as_ref()),
+        ) else {
+            return;
+        };
+        let scripts = collect_script_texts(dom);
+        if scripts.is_empty() {
+            return;
+        }
+        let mut eng = (f)();
+        eng.set_budget(self.js_ops);
+        for src in &scripts {
+            if let Err(e) = eng.eval(src) {
+                tracing::debug!(tab, error = %e, "script en échec");
+                let _ = self.events.send(CoreEvent::PipelineError {
+                    tab: Some(tab),
+                    message: e.to_string(),
+                });
+            }
+        }
+        let n = eng.run_pending();
+        tracing::trace!(tab, jobs = n, "jobs js exécutés");
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.js = Some(eng);
+        }
     }
 
     /// `Navigated` + `TitleChanged` (si le titre change) +
@@ -969,4 +1030,37 @@ fn collect_style_css(dom: &Dom) -> String {
         }
     }
     css
+}
+
+/// Textes des `<script>` inline du document, dans l'ordre —
+/// `src=` et `type` non-classique (module, json…) sautés tant
+/// que les sous-ressources/modules n'existent pas.
+fn collect_script_texts(dom: &Dom) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "script") {
+            let classic = dom.attribute(n, "type").ok().flatten().is_none_or(|t| {
+                t.is_empty()
+                    || t.eq_ignore_ascii_case("text/javascript")
+                    || t.eq_ignore_ascii_case("application/javascript")
+            });
+            let has_src = dom
+                .attribute(n, "src")
+                .ok()
+                .flatten()
+                .is_some_and(|s| !s.is_empty());
+            if classic && !has_src {
+                if let Ok(t) = dom.text_content(n) {
+                    if !t.trim().is_empty() {
+                        out.push(t);
+                    }
+                }
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    out
 }

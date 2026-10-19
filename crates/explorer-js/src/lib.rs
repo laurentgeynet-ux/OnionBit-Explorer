@@ -2,13 +2,215 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `explorer-js` — couture JavaScript : trait `JsEngine` (évaluation,
-//! contexte par onglet, budget d'exécution), bindings DOM et table de
-//! roots (ADR-0008).
+//! `explorer-js` — couture JavaScript (ADR-0007) : trait
+//! [`JsEngine`], moteur nul par défaut et adaptateur
+//! [`DilloEngine`] vers `dillo-js`.
 //!
-//! Squelette de l'étape 1 — la phase 8 implémente le contenu.
-//! `dillo-js` (crate de ce workspace, équipe JS dédiée) est adapté
-//! derrière le trait ; `NullEngine` reste le défaut tant que la phase
-//! 8 n'est pas livrée.
+//! `dillo_js::Engine` est `!Send` (`Rc` dans le tas, les envs et les
+//! hooks hôtes) alors que la session vit derrière un `tokio` mutex
+//! exigeant `Send`. [`DilloEngine`] est donc un **proxy canal** : un
+//! thread dédié par contexte possède le moteur (single-writer — le
+//! modèle navigateur : un contexte JS par document, isolé), les
+//! appels (`eval`, jobs dus, budget) voyagent par message. Un script
+//! hostile ne peut pas suspendre le pipeline : le budget d'ops est
+//! borné côté moteur (`set_op_limit`), et la couche appelante peut
+//! borner l'attente si besoin.
 
 #![forbid(unsafe_code)]
+
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread::JoinHandle;
+
+/// Erreur JavaScript côté hôte — sérialisable, sans handle de tas.
+#[derive(Debug, thiserror::Error)]
+pub enum JsError {
+    /// Source impossible à parser.
+    #[error("syntaxe js {line}:{col} : {message}")]
+    Syntax {
+        /// Ligne (1-base).
+        line: usize,
+        /// Colonne (1-base).
+        col: usize,
+        /// Détail du parseur.
+        message: String,
+    },
+    /// Le script a lancé une exception non rattrapée.
+    #[error("exception js : {0}")]
+    Uncaught(String),
+    /// Le thread moteur est mort (panic interne, poison).
+    #[error("moteur js inerte")]
+    Dead,
+}
+
+impl From<dillo_js::Error> for JsError {
+    fn from(e: dillo_js::Error) -> Self {
+        match e {
+            dillo_js::Error::Syntax { line, col, message } => Self::Syntax { line, col, message },
+            dillo_js::Error::Uncaught(m) => Self::Uncaught(m),
+        }
+    }
+}
+
+/// Moteur JavaScript vu du navigateur — un contexte par document.
+/// `Send` exigé : la session est partagée derrière l'API.
+pub trait JsEngine: Send {
+    /// Évalue un script dans le contexte ; retourne la valeur de
+    /// complétion rendue lisible (`describe`).
+    ///
+    /// # Errors
+    /// [`JsError::Syntax`] à l'analyse, [`JsError::Uncaught`] si le
+    /// script jette, [`JsError::Dead`] si le moteur est inerte.
+    fn eval(&mut self, source: &str) -> Result<String, JsError>;
+
+    /// Vide les jobs dus (microtasks, timers échus) — retourne le
+    /// nombre exécuté. Défaut : rien à faire.
+    fn run_pending(&mut self) -> usize {
+        0
+    }
+
+    /// Borne le budget d'opérations de la prochaine évaluation
+    /// (protection anti-script-infini — règle « budgets »).
+    fn set_budget(&mut self, ops: u64);
+}
+
+/// Fabrique de contextes — une instance par document chargé.
+pub type JsFactory = std::sync::Arc<dyn Fn() -> Box<dyn JsEngine> + Send + Sync>;
+
+/// Moteur nul : évalue en succès `"undefined"` — navigation sans
+/// JavaScript (défaut, tests, `dillo-js` indisponible).
+#[derive(Debug, Default)]
+pub struct NullEngine;
+
+impl JsEngine for NullEngine {
+    fn eval(&mut self, _source: &str) -> Result<String, JsError> {
+        Ok("undefined".to_string())
+    }
+
+    fn set_budget(&mut self, _ops: u64) {}
+}
+
+/// Fabrique de [`NullEngine`].
+#[must_use]
+pub fn null_factory() -> JsFactory {
+    std::sync::Arc::new(|| Box::new(NullEngine))
+}
+
+/// Commandes vers le thread moteur — valeurs sérialisables, aucun
+/// handle `Rc` ne traverse.
+enum Cmd {
+    Eval {
+        src: String,
+        tx: Sender<Result<String, JsError>>,
+    },
+    RunPending {
+        tx: Sender<usize>,
+    },
+    SetBudget {
+        ops: u64,
+    },
+    Shutdown,
+}
+
+/// Adaptateur `dillo-js` : un thread par contexte (le `Rc` du tas
+/// ne quitte jamais son thread), le `JsEngine` n'est qu'un canal.
+pub struct DilloEngine {
+    tx: Sender<Cmd>,
+    join: Option<JoinHandle<()>>,
+}
+
+impl DilloEngine {
+    /// Crée un contexte neuf — spawn le thread moteur.
+    #[must_use]
+    pub fn new() -> Self {
+        let (tx, rx) = channel::<Cmd>();
+        let join = std::thread::Builder::new()
+            .name("dillo-js".to_string())
+            .spawn(move || Self::worker(&rx));
+        match join {
+            Ok(j) => Self { tx, join: Some(j) },
+            // Thread impossible (OS saturé) : moteur inerte —
+            // `eval` répondra `Dead`, jamais de panic.
+            Err(_) => Self { tx, join: None },
+        }
+    }
+
+    /// Boucle du thread : possède le `dillo_js::Engine` (`!Send`)
+    /// et sert les commandes jusqu'à `Shutdown` ou fermeture du
+    /// canal (le `Sender` meurt avec le proxy).
+    fn worker(rx: &Receiver<Cmd>) {
+        let mut eng = dillo_js::Engine::new();
+        while let Ok(cmd) = rx.recv() {
+            match cmd {
+                Cmd::Eval { src, tx } => {
+                    let out = match eng.eval(&src) {
+                        Ok(v) => Ok(eng.describe(v)),
+                        Err(e) => Err(JsError::from(e)),
+                    };
+                    if tx.send(out).is_err() {
+                        return;
+                    }
+                }
+                Cmd::RunPending { tx } => {
+                    let n = eng.run_due_timers().unwrap_or(0)
+                        + eng.run_microtasks().unwrap_or(0);
+                    if tx.send(n).is_err() {
+                        return;
+                    }
+                }
+                Cmd::SetBudget { ops } => eng.set_op_limit(ops),
+                Cmd::Shutdown => return,
+            }
+        }
+    }
+
+    /// Fabrique de [`DilloEngine`] — pour `Session::set_js_factory`.
+    #[must_use]
+    pub fn factory() -> JsFactory {
+        std::sync::Arc::new(|| Box::new(DilloEngine::new()))
+    }
+}
+
+impl Default for DilloEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl JsEngine for DilloEngine {
+    fn eval(&mut self, source: &str) -> Result<String, JsError> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::Eval {
+                src: source.to_string(),
+                tx,
+            })
+            .is_err()
+        {
+            return Err(JsError::Dead);
+        }
+        rx.recv().map_err(|_| JsError::Dead)?
+    }
+
+    fn run_pending(&mut self) -> usize {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::RunPending { tx }).is_err() {
+            return 0;
+        }
+        rx.recv().unwrap_or(0)
+    }
+
+    fn set_budget(&mut self, ops: u64) {
+        // Feu-et-oublie : le budget s'applique au prochain eval.
+        let _ = self.tx.send(Cmd::SetBudget { ops });
+    }
+}
+
+impl Drop for DilloEngine {
+    fn drop(&mut self) {
+        let _ = self.tx.send(Cmd::Shutdown);
+        if let Some(j) = self.join.take() {
+            let _ = j.join();
+        }
+    }
+}

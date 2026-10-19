@@ -11,3 +11,5 @@ workspace = true
 
 [dependencies]
 explorer-dom.workspace = true
+dillo-js.workspace = true
+thiserror.workspace = true

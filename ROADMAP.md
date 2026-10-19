@@ -316,17 +316,23 @@ d'intégration, pas par la couverture :
 
 Étapes navigateur (intégration) :
 
-- [ ] **Étape 34. Intégration `dillo-js` + alignement GC.** Le
+- [x] **Étape 34. Intégration `dillo-js` + alignement GC.** Le
   moteur vit dans ce workspace (`crates/dillo-js`, équipe JS
-  dédiée, MIT OR Apache-2.0 — ADR-0007). Deux prérequis avant
-  branchement : (a) **aligner le heap `ObjId` sur ADR-0008** —
-  rooting explicite, trace, finalisation des handles (le spike de
-  l'étape 12 a validé le protocole avec de faux handles) ;
-  (b) réévaluation du modèle de menace (**ADR-0011**). Ensuite :
-  adaptation derrière `JsEngine` — `eval`, contexte par onglet,
-  budget d'exécution. Couverture au branchement : noyau ES3/ES5 +
-  subset ES2015 déjà présent ; la couverture grandit en phase 10
-  (étape 43), mesurée sur extraits test262 (ADR-0010).
+  dédiée, MIT OR Apache-2.0 — ADR-0007). Prérequis levés :
+  (a) heap aligné sur ADR-0008 (JS-A livré) ; (b) ADR-0011
+  écrit. Adaptation livrée : `JsEngine` (trait `Send`) dans
+  `explorer-js` — `eval` → complétion décrite, budget
+  d'ops (`set_op_limit`), `run_pending` ; `DilloEngine`
+  = proxy canal → **thread dédié par contexte** (le tas
+  `Rc` ne quitte pas son thread, la session reste `Send`,
+  le pipeline ne peut pas être suspendu) ; `NullEngine`
+  défaut. `Session.set_js_factory` + `Tab.js` : contexte
+  neuf par document, `<script>` inline évalués dans
+  l'ordre après parse, échecs → `pipeline_error` sans
+  faire échouer la page. Couverture au branchement :
+  noyau ES3/ES5 + subset ES2015 (test262 851/859, 99 % sur
+  le sous-ensemble extrait) ; la couverture grandit en
+  phase 10 (étape 43).
 - [ ] **Étape 35. Bindings DOM.** `document`, lecture/écriture
   d'attributs, `getElementById` & co avec handles sécurisés
   (générationnels) — invalidation layout.

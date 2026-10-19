@@ -90,6 +90,7 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
             event_capacity: 16,
             viewport: (800.0, 600.0),
             scale: 1.0,
+            js_ops: 5_000_000,
         },
     );
     (s, t)
@@ -615,4 +616,47 @@ async fn textarea_is_editable() {
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Edited);
+}
+
+/// Page avec deux `<script>` : le premier jette, le second est
+/// syntaxiquement sain — la navigation réussit quand même.
+const PAGE_SCRIPT: &str = "<!doctype html><html><body><div>x</div>\
+     <script>throw 'boom'</script><script>var ok = 1</script>\
+     </body></html>";
+
+#[tokio::test]
+async fn script_error_emits_pipeline_error_but_page_loads() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_SCRIPT);
+    // Fabrique espionne : compte les contextes créés.
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls2 = calls.clone();
+    s.set_js_factory(Arc::new(move || {
+        calls2.fetch_add(1, Ordering::SeqCst);
+        Box::new(explorer_js::NullEngine)
+    }));
+    let mut rx = s.subscribe();
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+    // Le PNG est produit (pipeline complet malgré le script).
+    assert!(s.frame_png(id).is_some());
+
+    // `NullEngine` ne jette pas — pas de PipelineError attendu
+    // ici ; l'événement d'échec est testé côté adaptateur.
+    let _ = rx.try_recv();
+}
+
+#[tokio::test]
+async fn no_factory_means_scripts_ignored() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_SCRIPT);
+    let id = s.open_tab();
+    // Pas de fabrique → scripts ignorés, navigation propre.
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
 }

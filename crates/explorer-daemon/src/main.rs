@@ -116,6 +116,7 @@ async fn main() {
     tracing::info!(dir = %store::JsonFileStore::default_dir().display(), "profil chargé");
     let mut session = Session::new(http_stack(&cfg), Arc::new(fonts));
     session.set_store(store);
+    session.set_js_factory(explorer_js::DilloEngine::factory());
     let session = Arc::new(tokio::sync::Mutex::new(session));
     let app = explorer_api::router_with_key(session, cfg.api_key.clone());
     if cfg.api_key.is_some() {
