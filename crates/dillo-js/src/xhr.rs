@@ -5,8 +5,9 @@
 //! `XMLHttpRequest` over an injectable transport (JS-4).
 //!
 //! dillo-js **never touches the network itself** (§4.11): the
-//! embedder installs an [`XhrTransport`] (backed by `dillo-net` in
-//! the browser, by an in-process stub in tests). The flow mirrors
+//! embedder installs an [`XhrTransport`] (backed by
+//! `explorer-net`'s `HttpTransport` in the browser, by an
+//! in-process stub in tests). The flow mirrors
 //! the timer pump:
 //!
 //! 1. `xhr.open(method, url)` + `xhr.send()` → the engine calls

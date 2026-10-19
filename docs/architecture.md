@@ -25,7 +25,7 @@ structurantes sont dans `docs/architecture/decisions/` (ADR).
 │ HTTP/TLS/DNS │ trait        │  injectés dans core   │
 │ cache/cookie │ JsEngine     │                       │
 │              │ dillo-js     │  moteur JS autonome — │
-│              │ (workspace)  │  équipe JS dédiée     │
+│              │ (workspace)  │  équipe NAVIGATEUR    │
 ├──────────────┴──────────────┴───────────────────────┤
 │ explorer-dom · explorer-html · explorer-css         │
 │ explorer-layout · explorer-render                   │
@@ -59,7 +59,7 @@ pas dans `core` ; le DOM ne connaît pas axum.
 | `explorer-layout` | arbre de boîtes, block/inline, tables, floats, positionnement ; fontes via port `FontProvider` injecté | 4 |
 | `explorer-render` | display list → framebuffer RGBA → PNG / buffer brut | 5 |
 | `explorer-js` | trait `JsEngine` + bindings DOM + table de roots (ADR-0008) | 8 |
-| `dillo-js` | moteur JS autonome — équipe JS dédiée, version canonique en workspace, licence MIT/Apache | 8 |
+| `dillo-js` | moteur JS autonome — équipe NAVIGATEUR (spécialiste JS), version canonique en workspace, licence MIT/Apache | 8 |
 | `explorer-core` | session : onglets, pipeline, bus d'événements | 0→ |
 | `explorer-api` | REST + SSE axum, auth par clé | 6 |
 | `explorer-cli` | binaire dev (fetch, dump DOM, shot, debug layout) | 0→ |
@@ -90,7 +90,7 @@ pas dans `core` ; le DOM ne connaît pas axum.
 - Modèle mémoire DOM ↔ GC figé avant la phase 2 (ADR-0008) —
   rooting explicite, cycles par table de callbacks ; c'est le
   **contrat imposé à `dillo-js`** (rooting/trace/finalization) —
-  équipe JS dédiée dans le workspace.
+  périmètre équipe NAVIGATEUR dans le workspace.
 - Stack texte/fontes arbitrée avant l'étape 18 (ADR-0009) —
   `fontdb`/`ttf-parser` + `rustybuzz` + `unicode-bidi` +
   `unicode-linebreak`, runs de texte itemisés ; `fontdb` fait de

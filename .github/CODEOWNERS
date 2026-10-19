@@ -1,0 +1,45 @@
+# CODEOWNERS — Explorer, organisation deux équipes (2026-10-19).
+# Sert de référence de périmètre même sans remote GitHub :
+# chaque équipe ne pousse que dans sa zone ; les fichiers
+# partagés suivent les conventions d'AGENTS.md §10.
+# Découpage sur l'axe clean architecture : domaine pur vs
+# plateforme produit.
+
+# Équipe PIPELINE — domaine pur (zéro I/O, zéro async)
+crates/explorer-common/       @equipe-pipeline
+crates/explorer-dom/          @equipe-pipeline
+crates/explorer-html/         @equipe-pipeline
+crates/explorer-css/          @equipe-pipeline
+crates/explorer-layout/       @equipe-pipeline
+crates/explorer-render/       @equipe-pipeline
+
+# Équipe NAVIGATEUR — plateforme produit + surface JS
+crates/explorer-net/          @equipe-navigateur
+crates/explorer-core/         @equipe-navigateur
+crates/explorer-js/           @equipe-navigateur
+crates/dillo-js/              @equipe-navigateur
+crates/explorer-api/          @equipe-navigateur
+crates/explorer-cli/          @equipe-navigateur
+crates/explorer-daemon/       @equipe-navigateur
+crates/explorer-ffi/          @equipe-navigateur
+app/                          @equipe-navigateur
+scripts/                      @equipe-navigateur
+fuzz/                         @equipe-navigateur
+
+# Roadmaps d'équipe — chacun ne touche que la sienne
+docs/roadmap-equipe-pipeline.md    @equipe-pipeline
+docs/roadmap-equipe-navigateur.md  @equipe-navigateur
+
+# Partagé — feuille test consommée par les deux : ajouts
+# additifs libres, changement structurel via journal.
+crates/explorer-test-support/ @equipe-pipeline @equipe-navigateur
+
+# Partagé — autorité lead ; modifications additives seulement
+# pour Cargo.toml (sections propres à chaque crate).
+Cargo.toml                    @lead
+Cargo.lock                    @lead
+AGENTS.md                     @lead
+ROADMAP.md                    @lead
+CHANGELOG.md                  @lead
+docs/architecture/            @lead
+docs/interface-equipes.md     @lead

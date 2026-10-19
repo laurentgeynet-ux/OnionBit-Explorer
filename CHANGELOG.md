@@ -175,6 +175,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   de couche. 4 tests : h2 corps+en-têtes, POST echo, repli
   h1 sur même connexion, `http:` h1.
 
+### Changed
+
+- **Organisation deux équipes** (réorganisation de
+  pilotage, code inchangé) : périmètres disjoints actés sur
+  l'axe clean architecture — équipe **PIPELINE** (domaine
+  pur : `common`, `dom`, `html`, `css`, `layout`, `render`,
+  zéro I/O) et équipe **NAVIGATEUR** (plateforme produit :
+  `net`, `core`, `api`, `daemon`, `cli`, `ffi`,
+  `test-support`, `app/`, `scripts/`, `fuzz/`, **+ toute la
+  surface JS** — `explorer-js` et `dillo-js`). Le trait
+  `JsEngine` devient contrat **interne** à NAVIGATEUR ; la
+  couture inter-équipes = les API publiques des crates
+  PIPELINE, loguées dans `docs/interface-equipes.md`. Le
+  rôle « spécialiste JS » vit au sein de NAVIGATEUR (piste
+  JS-C26+). `ROADMAP.md` devient l'index maître ; le détail
+  vivant migre vers `docs/roadmap-equipe-pipeline.md`
+  (étapes R-1+, activateurs cross-équipe en tête) et
+  `docs/roadmap-equipe-navigateur.md` (étapes 50+ + piste
+  JS). `explorer-test-support` classé crate **partagé**
+  (consommé en dev-deps par les deux). Workflow trunk-based
+  sur `main` (pas de branches longues), `CHANGELOG.md` en
+  `merge=union` (`Cargo.lock` : régénéré, jamais fusionné à
+  la main), `.github/CODEOWNERS` créé, état des lieux mesuré
+  dans `docs/etat-des-lieux-2026-10-19.md` (AGENTS.md §10).
+- **ADR-0019 — réévaluation du modèle de menace JS
+  in-process** : solde l'exigence d'ADR-0011 (« réévaluation
+  obligatoire en phase 8 ») — thread dédié + budget d'ops +
+  miroir DOM + `forbid(unsafe_code)` couvrent les vecteurs
+  actuels ; prochains points fixés au câblage XHR (étape 51),
+  aux workers (JS-C29) et à un éventuel défaut FFI.
+- `app/pubspec.yaml` : description projet remplacée
+  (placeholder Flutter). `examples_dbg/` vide supprimé.
+
 ### Fixed
 
 - **`<br>` et sauts de ligne forcés perdus (régression

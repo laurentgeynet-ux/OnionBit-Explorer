@@ -1,6 +1,18 @@
 # Roadmap — Explorer
 
-Source de vérité de l'avancement. Une étape est cochée quand :
+**Index maître** de l'avancement (jalons, phases, historique des
+étapes livrées). Depuis le 2026-10-19, le projet avance en
+**deux équipes** (AGENTS.md §10) — le détail vivant des travaux
+est dans les roadmaps dédiées :
+
+- **`docs/roadmap-equipe-pipeline.md`** — domaine pur :
+  `dom`, `html`, `css`, `layout`, `render` (étapes R-1+).
+- **`docs/roadmap-equipe-navigateur.md`** — plateforme produit :
+  `net`, `core`, `api`, `ffi`, `app`, + surface JS
+  (piste produit étapes 50+, piste JS JS-C26+).
+
+Ce fichier-ci est tenu par le lead : cases cochées historiques,
+état des phases, jalons. Une étape est cochée quand :
 implémentée + testée + documentée (CHANGELOG, ADR si décision) +
 commitée (AGENTS.md §5).
 
@@ -228,7 +240,12 @@ L'UI évolue **au fil des phases backend** ; cette phase consolide.
 
 ## Phase 8 — JavaScript (`explorer-js`)
 
-### Chantier `dillo-js` — piste parallèle de l'équipe JS dédiée
+### Chantier `dillo-js` — historique de la piste JS
+
+*(Depuis le 2026-10-19, cette piste vit dans l'équipe
+NAVIGATEUR — étapes à venir dans
+`docs/roadmap-equipe-navigateur.md`. Ci-dessous, l'historique
+des étapes livrées JS-A → JS-C25.)*
 
 Le moteur (`crates/dillo-js`) avance sur sa propre cadence, en
 parallèle des phases moteur — son ordre est dicté par le contrat
@@ -773,12 +790,17 @@ d'intégration, pas par la couverture :
   `\p{Name=Value}` passent à fancy-regex en mode
   `u` (validation + erreurs spec). test262 :
   859/859 ; 6 tests de régression.
-- [ ] **JS-C. Couverture par besoin** : `Temporal`
+- [~] **JS-C. Couverture par besoin** : `Temporal`
   (`ZonedDateTime`, calendriers non-iso, `round`),
   `Intl` multi-locales, décorateurs `@dec` — ordre
   piloté par les pages réelles.
-- [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
+  *→ piste JS de `docs/roadmap-equipe-navigateur.md`,
+  palier J-B (JS-C30 à JS-C35) — réactive, pilotée par
+  les sites réels.*
+- [~] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
   `Video` — phase 10, dépend du pipeline rendu.
+  *→ découpé : canvas = JS-C28 (surface, NAV) + R-11 (raster,
+  PIPE) ; A/V = étape 58 (NAV).*
 
 Étapes navigateur (intégration) :
 
@@ -918,13 +940,15 @@ progresse en trois paliers structurants :
   lazy/`await` sur pending, décorateurs, `Intl` multi-locales,
   `Temporal` complet, branchement `explorer-dom` générationnel
   ↔ miroir JS.*
-- [ ] **Étape 44. Web APIs.** `fetch`/`XHR`, `localStorage`/
+- [~] **Étape 44. Web APIs.** `fetch`/`XHR`, `localStorage`/
   `sessionStorage`, History API, `MutationObserver`, workers
   (bornés). *En cours — côté moteur livré : `location.*` et
   `history.*` deviennent des intentions `NavRequest`
   drainées par la session (navigation, historique, `go(0)` =
   reload, borne 8 sauts) ; `fetch`/`XHR`/storage livrés
-  côté `dillo-js` par l'équipe JS (JS-C16+).*
+  côté `dillo-js` (JS-C16+). Reste : câblage réseau/stockage
+  → étape 51 + JS-C27 (traverse proxy), MutationObserver
+  → JS-C26, workers → JS-C29 — tous en piste NAVIGATEUR.*
 - [x] **Étape 45. Médias et graphiques.** *Côté moteur livré
   (ADR-0017) : `<img src=*.svg>` rasterisé via `resvg`/`usvg`
   (sniff + borne `max_px`, SMIL/scripts hors périmètre) ;
@@ -1006,6 +1030,28 @@ progresse en trois paliers structurants :
   placement 004/006/007/008, `wrap-top-below-inline-001r`,
   bfc-overflow, zero-height, block-formatting 001/003/004/
   008/015.
+
+## Travaux actifs — renvoi vers les roadmaps d'équipe
+
+La phase 10 se poursuit désormais sur deux pistes disjointes
+(AGENTS.md §10). Ordre, détail et cases à cocher :
+
+- **Équipe PIPELINE** → `docs/roadmap-equipe-pipeline.md` :
+  palier R-A (peinture progressive **R-1** — activateur de
+  NAV-53, WPT floats R-2, intrinsèques R-3, flex-wrap R-4,
+  grid R-5, sticky R-6, dirty rects **R-7** — activateur de
+  NAV-55), palier R-B (foreign-content R-8, svg inline R-9,
+  keyframes R-10, canvas raster R-11), palier R-C (layout
+  incrémental R-12, Acid2 R-13). La file suit le déblocage :
+  les étapes cross-dépendantes remontent automatiquement.
+- **Équipe NAVIGATEUR** → `docs/roadmap-equipe-navigateur.md` :
+  piste produit — palier N-A (scripts externes 50, Web APIs
+  câblage 51, événements+timers 52, session incrémentale 53,
+  formulaires 54), palier N-B (dirty-rects transport 55, profil
+  56, UI v2 57, médias 58, release 0.2 étape 59) ; piste JS —
+  J-A (MutationObserver C26, traverse net/storage C27, canvas
+  C28, workers C29), J-B (couverture réactive C30–C35),
+  J-C (mesure/perf C36–C38).
 
 ## Hors périmètre assumé (documenté, non planifié)
 

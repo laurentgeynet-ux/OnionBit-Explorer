@@ -18,10 +18,9 @@ toucher quoi que ce soit.
   (`app/`) est un squelette qui évolue avec l'avancement — elle ne
   consomme que l'API, jamais le core (ADR-0003).
 - **JS par couture** : le moteur JavaScript `dillo-js` vit dans ce
-  workspace (`crates/dillo-js`) — chantier de l'équipe JS dédiée. Il
-  sera intégré en phase 8 derrière le trait `JsEngine` (ADR-0007) ;
-  son heap exposera les primitives du modèle mémoire ADR-0008.
-  Rien d'autre ne lui est couplé.
+  workspace (`crates/dillo-js`), intégré derrière le trait
+  `JsEngine` (ADR-0007) — périmètre de l'équipe NAVIGATEUR (§10),
+  rôle « spécialiste JS ». Rien d'autre ne lui est couplé.
 - **Tolérant, jamais crash** : page malformée, réponse HTTP
   biscornue, CSS cassé → dégradation gracieuse, pas de panic.
 
@@ -35,22 +34,27 @@ crates/
   explorer-dom       arène DOM + NodeId générationnels (ADR-0008)
   explorer-html      tokenizer + tree-builder HTML → explorer-dom
   explorer-css       tokenizer, parser, sélecteurs, cascade
-  explorer-js        trait JsEngine + bindings DOM (couture moteur)
-  dillo-js           moteur JavaScript autonome — équipe JS dédiée,
-                     adapté derrière JsEngine en phase 8 (ADR-0007)
+  explorer-js        trait JsEngine + adaptateur DilloEngine +
+                     NullEngine — équipe NAVIGATEUR (§10)
+  dillo-js           moteur JavaScript autonome — équipe
+                     NAVIGATEUR, spécialiste JS (ADR-0007)
   explorer-layout    arbre de boîtes, block/inline, dimensionnement
   explorer-render    display list → framebuffer RGBA → PNG
   explorer-core      session : onglets, navigation, pipeline, events
   explorer-api       REST + SSE (axum) — couture unique vers l'UI
   explorer-cli       binaire de dev/debug (fetch, dump DOM, shot)
   explorer-daemon    binaire hôte : moteur + API loopback
-  explorer-test-support  transports simulés, fixtures
+  explorer-ffi       mode in-process cdylib (ADR-0018)
+  explorer-test-support  transports simulés, fixtures — partagé (§10)
 app/                 app Flutter : lib/core (api, design tokens, di)
                      + lib/features/<feature>/ (clean architecture)
 docs/architecture/   ADR (decisions/) + architecture.md
-docs/                documents de référence
+docs/                documents de référence, roadmaps par équipe
+                     (pipeline / navigateur), interface-equipes.md
+                     (journal des coutures)
 fuzz/                cibles cargo-fuzz (hors workspace)
 scripts/             verify_all.ps1 + utilitaires
+.github/CODEOWNERS   périmètres des deux équipes (§10)
 ```
 
 Sens de dépendance strictement descendant :
@@ -93,9 +97,15 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
    sur les invariants internes purs (jamais sur du contenu externe
    ou hostile : là, on dégrade).
 4. **`CHANGELOG.md` à jour** (Keep a Changelog) à chaque changement
-   visible, dans le même commit.
-5. **`ROADMAP.md` coché dans le même commit** que l'étape terminée.
-   Un commit de code sans sa doc est incomplet.
+   visible, dans le même commit. Chaque entrée porte le numéro
+   d'étape de sa piste (`Étape NN` navigateur, `R-N` pipeline,
+   `JS-CNN` piste JS) — le fichier est union-mergé
+   (`.gitattributes`).
+5. **La roadmap de l'équipe cochée dans le même commit** que
+   l'étape terminée (`docs/roadmap-equipe-pipeline.md` ou
+   `docs/roadmap-equipe-navigateur.md` — §10). `ROADMAP.md` reste
+   l'index maître, tenu par le lead aux jalons. Un commit de code
+   sans sa doc est incomplet.
 6. **Nommage** : `snake_case` modules/fonctions, `CamelCase` types.
    Rustdoc sur les items publics ; invariants non triviaux documentés.
 7. **Erreurs** : enums `thiserror` par crate, alias `Result<T>`.
@@ -123,7 +133,9 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
 
 ## 5. Workflow par étape
 
-1. **Choisir une étape** de `ROADMAP.md` dans l'ordre des phases.
+1. **Choisir une étape** dans la roadmap de son équipe
+   (`docs/roadmap-equipe-pipeline.md` ou
+   `docs/roadmap-equipe-navigateur.md`), dans l'ordre des paliers.
 2. **Implémenter** dans le crate cible (API d'abord, docstring avant
    le code non trivial).
 3. **Tester** : tests unitaires + tests d'intégration in-process ;
@@ -132,10 +144,13 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
    conformité publics (html5lib-tests, WPT, test262) extraits par
    script vers `tests/conformance/`, jamais édités à la main —
    skip list versionnée, % tracké dans CHANGELOG (ADR-0010).
-4. **Documenter** : `ROADMAP.md` checkbox, `CHANGELOG.md`, ADR si
-   décision d'architecture — même commit.
+4. **Documenter** : case cochée dans la roadmap de l'équipe,
+   `CHANGELOG.md`, ADR si décision d'architecture — même commit.
 5. **Commit** : `feat(<crate>): <sujet>` / `fix(<crate>): …` /
    `docs: …` / `chore: …` — une étape = un commit dédié.
+6. **Intégrer** : `verify_all` vert → `git pull --rebase` → push
+   sur `main` (trunk-based, §10). Une étape multi-jours peut
+   vivre en branche courte `pipeline/R-N` ou `nav/etape-NN`.
 
 ## 6. Clean architecture
 
@@ -201,3 +216,88 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
   « tous les sites » est un horizon (aucun moteur hors des trois
   grands n'y parvient), piloté par paliers mesurés sur corpus
   (ADR-0010), pas une promesse.
+
+## 10. Organisation deux équipes (depuis 2026-10-19)
+
+Le projet est piloté par **deux équipes à taille comparable**,
+découpées sur l'axe de la clean architecture (§6) — le domaine
+pur d'un côté, la plateforme produit de l'autre :
+
+- **Équipe PIPELINE** — le domaine pur (zéro I/O, zéro async) :
+  `explorer-common`, `explorer-dom`, `explorer-html`,
+  `explorer-css`, `explorer-layout`, `explorer-render`.
+  Des octets aux pixels : parse, cascade, boîtes, display list,
+  raster. Roadmap : `docs/roadmap-equipe-pipeline.md` — étapes
+  **R-1+**.
+- **Équipe NAVIGATEUR** — la plateforme produit (tout l'I/O et
+  l'orchestration) : `explorer-net`, `explorer-core`,
+  `explorer-api`, `explorer-daemon`, `explorer-cli`,
+  `explorer-ffi`, `app/`, `scripts/`, `fuzz/`, **+ toute la
+  surface JS** (`explorer-js`, `dillo-js`). Roadmap :
+  `docs/roadmap-equipe-navigateur.md` — piste produit
+  **étapes 50+**, piste JS **JS-C26+**.
+- **`explorer-test-support` = partagé** : feuille à zéro
+  dépendance consommée en `dev-dependencies` par les deux
+  équipes (fixtures Ahem/TTF côté PIPELINE, transports simulés
+  côté NAVIGATEUR). Ajouts de fixtures/stubs libres et
+  **additifs** ; changement structurel via le journal.
+- **Spécialiste JS** : rôle nommé au sein de NAVIGATEUR (pas une
+  équipe séparée) — il tient la piste JS-Cxx. La profondeur de
+  `dillo-js` (32 000 lignes) exige un détenteur du contexte ;
+  sa file est ordonnée par les besoins produit, la couverture
+  langue est strictement réactive aux sites réels.
+
+Règles de la coexistence :
+
+1. **Chaque équipe ne modifie que son périmètre** — un besoin
+   dans la zone de l'autre passe par une entrée dans
+   `docs/interface-equipes.md`, pas par un commit direct.
+   Dépendance à sens unique : NAVIGATEUR consomme les API
+   publiques de PIPELINE, jamais l'inverse.
+2. **Contrats** : les API publiques des crates PIPELINE sont le
+   contrat inter-équipes — extensions additives de préférence,
+   toute casse de signature loguée dans
+   `docs/interface-equipes.md` avant code. `JsEngine` est un
+   contrat **interne** à NAVIGATEUR (plus de sign-off croisé).
+3. **Trunk-based sur `main`** : pas de branches longues par
+   équipe. Chacun pousse des commits d'étape verts après
+   `pull --rebase`. Une étape multi-jours peut vivre en
+   branche courte `pipeline/R-N` ou `nav/etape-NN`, fusionnée
+   au vert. En interne d'équipe, liberté totale (branches
+   partagées, worktrees) — les règles ne gouvernent que ce
+   qui atterrit sur `main`.
+   - **Gate entier avant push** : `verify_all` complet, pas
+     seulement son crate — le couplage est asymétrique :
+     PIPELINE (amont) peut casser des tests `explorer-core`
+     en aval par un changement de sortie légitime ; l'inverse
+     à la *compilation* est impossible (l'aval ne compile pas
+     l'amont) — **sauf via `explorer-test-support` partagé**,
+     où un changement NAV peut casser les tests PIPE : même
+     règle, l'équipe causale répare ou revert. La suite
+     downstream fait partie du contrat.
+   - **Carve-out tests** : quand un changement légitime
+     modifie une sortie consommée en aval (ou un stub/fixture
+     partagé), l'équipe causale met à jour les tests
+     downstream **dans le même commit** — exception
+     documentée à « on ne touche que son périmètre », sinon
+     tout se sérialise.
+   - **Protocole main rouge** : celui qui casse `main`
+     répare dans la journée **ou revert** — jamais de main
+     rouge qui traîne.
+   - **`Cargo.lock` en conflit** : jamais de fusion à la
+     main — `cargo check`/`cargo update` régénère un
+     lockfile cohérent.
+4. **Fichiers partagés** : `CHANGELOG.md` est union-mergé ;
+   `Cargo.lock` se régénère (règle §10.3) ;
+   `[workspace.dependencies]` et `AGENTS.md`/ADR relèvent du
+   lead ; `ROADMAP.md` = index maître (jalons, historique), le
+   détail vivant est dans les roadmaps d'équipe.
+5. **Numéros d'étapes immuables et uniques** — référence stable
+   dans commits, bugs et conversations ; jamais réutilisés.
+   Préfixes : `Étape NN` (navigateur), `R-N` (pipeline),
+   `JS-CNN` (piste JS de navigateur).
+6. **Triage transverse** : un bug à cheval se corrige du côté
+   fautif (visuel/layout → PIPELINE ; session/réseau/JS/UI →
+   NAVIGATEUR ; parse miroir fautif → piste JS).
+   Le smoke sites réels (`scripts/site_smoke.ps1`) produit la
+   liste, triée en sync hebdo.

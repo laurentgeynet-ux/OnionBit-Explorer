@@ -2,3 +2,11 @@
 *.ps1 text eol=crlf
 *.dart text eol=lf
 *.arb text eol=lf
+
+# Organisation deux équipes — le CHANGELOG est append-only et
+# fusionne en union pour éviter les conflits artificiels entre
+# équipes (chaque équipe ajoute ses entrées, l'union conserve tout).
+CHANGELOG.md merge=union
+# NB : Cargo.lock reste en merge normal — en cas de conflit, on ne
+# fusionne JAMAIS à la main : `cargo update`/`cargo check`
+# régénère un lockfile cohérent (AGENTS.md §10.3).
