@@ -52,16 +52,26 @@ Balayage robustesse (14 sites, même session) : **vitrine
 `text.npr.org` quasi-parfaite**, weather.gov ~75 % (images
 NOAA peintes), csszengarden/git-scm/npmjs/go.dev/arstechnica/
 rust-lang rendent — **ajouter les deux premiers au smoke**.
-Écartés en plus : github (crash dillo-js → JS-C41),
+Écartés en plus : github (crash dillo-js → JS-C41 livré),
 stackoverflow (403 bot-block, honnête), craigslist (TLS
-`close_notify` → étape 53c), lemonde/bbc/lite.ddg (blancs,
-à reclasser après 54).
+`close_notify` → étape 53c livrée), **lemonde/bbc (classés :
+`<noscript>` dans `<head>` avalait le document — R-15 livre
+le mode `InHeadNoscript`, à re-vérifier sur nouveau build)**,
+lite.ddg (= R-16, `<center>` inline → corrigé en vol).
 
 **Décision en suspens — borne `FrameTooBig`** : `shot` rasterise
 le document entier ; au-delà de 16 384 px de haut le rendu
 échoue sec (MDN). Options : (a) clamper au viewport pour
 `shot`, (b) tuiler le PNG de sortie, (c) relever le cap via
 encode PNG streamé. À trancher avant l'extension du smoke.
+**Nouvelles preuves** (QA `cfa0514`) : `paint_progress` avale
+l'erreur en silence → **zéro `frame_invalidated` pendant le
+téléchargement** sur quasi toutes les pages réelles (> 16 384
+px) — la peinture progressive livrée par 53 est invisible en
+vrai tant que la borne tient. Coût aussi quadratique : chaque
+palier de 32 Ko relance le pipeline complet (dribble 2,4 Mo/
+9 s → 3 min 45 constaté) — la vraie sortie est R-12 (layout
+incrémental) ou un cadencement temporel seul.
 
 - [x] **Étape 50. Scripts externes + scheduler de
   sous-ressources** (ADR-0012 complété côté session).
@@ -133,6 +143,26 @@ encode PNG streamé. À trancher avant l'extension du smoke.
   `@charset`/transport → UTF-8 ; jamais le sniffer HTML hors
   document. Borné — régression vérifiée sur example.com.
 
+- [ ] **Étape 52b. Défauts event-loop vus en vrai** (QA daemon
+  @ `cfa0514`, repros `D:\explorer-fieldwork\repros\`) :
+  1. **timers ne tirent qu'à l'input** — `setTimeout(8s)` n'a
+     couru qu'au scroll suivant : la pompe de fond du daemon
+     (`main.rs` ~l.144-164) existe mais ne livre pas les
+     échus ; `dispatch_path_event` pompe à chaque input
+     (`session.rs` ~l.2556). Une page dont le contenu arrive
+     par timer reste figée sans interaction ;
+  2. **texte tapé invisible** — `keydown` → `edited` + repaint,
+     mais le run texte de l'`<input>` est figé au layout :
+     repaint sans re-layout ;
+  3. **`document.title` par JS** → aucun `title_changed` émis
+     (le seul reçu portait l'ancienne valeur).
+- [ ] **Étape 53d. API réactive pendant la navigation** (QA
+  daemon @ `cfa0514`) : le mutex session unique gèle toute
+  l'API pendant `navigate` — nav France > 8 min ⇒ `status`,
+  `tabs`, `frame` timeoutent tous ; l'app Flutter serait
+  morte pendant la charge. La nav devient une tâche à lock
+  court + progression par événements (déjà le protocole SSE).
+  **Bloquant produit** — à faire avant ou avec l'étape 54.
 - [x] **Étape 53c. Tolérance TLS `close_notify` absent**
   (bug terrain, repro : craigslist.org — `TLS unexpected-eof`)
   : un pair qui ferme TCP sans `close_notify` doit terminer
