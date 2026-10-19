@@ -243,8 +243,10 @@ pub(crate) fn flow_grid_children(
     let mut occupancy: Vec<Vec<bool>> = Vec::new();
     let free_at = |occ: &[Vec<bool>], r: usize, c: usize, span: usize| -> bool {
         c + span <= ncols
-            && (0..span)
-                .all(|k| occ.get(r).is_none_or(|row| !row.get(c + k).copied().unwrap_or(false)))
+            && (0..span).all(|k| {
+                occ.get(r)
+                    .is_none_or(|row| !row.get(c + k).copied().unwrap_or(false))
+            })
     };
     let mut slots: Vec<(usize, usize, usize, usize)> = Vec::with_capacity(order_idx.len());
     let (mut auto_col, mut auto_row) = (0usize, 0usize);

@@ -27,6 +27,7 @@
 #![forbid(unsafe_code)]
 
 mod cascade;
+mod fontface;
 mod parser;
 mod selector;
 mod token;
@@ -38,6 +39,7 @@ pub use cascade::{
     StyleMap,
 };
 
+pub use fontface::{FontFace, FontSrc};
 pub use parser::{
     parse_stylesheet, AtKind, AtRule, Declaration, ImportRule, MediaQuery, QualifiedRule, Rule,
     Stylesheet,

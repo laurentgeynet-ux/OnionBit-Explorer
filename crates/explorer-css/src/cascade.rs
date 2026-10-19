@@ -126,11 +126,24 @@ struct CollectedRule {
     media: Vec<Vec<MediaQuery>>,
 }
 
+/// Un bloc `@font-face` collecté — conservé hors cascade
+/// d'éléments (ces règles ne stylent rien : elles décrivent
+/// des fontes à charger, servies par
+/// [`StyleEngine::font_faces`]).
+pub(crate) struct CollectedFontFace {
+    /// Pile des listes `@media` englobantes (AND entre piles,
+    /// OR interne à une liste) — vide = inconditionnel.
+    pub(crate) media: Vec<Vec<MediaQuery>>,
+    pub(crate) declarations: Vec<Declaration>,
+}
+
 /// Moteur de cascade : accumulateur de feuilles + calcul.
 #[derive(Default)]
 pub struct StyleEngine {
     rules: Vec<CollectedRule>,
     next_order: u32,
+    /// `@font-face` avec leur contexte media (étape 46).
+    pub(crate) font_faces: Vec<CollectedFontFace>,
 }
 
 /// Computed style d'un nœud : propriété (minuscules) → valeur
@@ -249,6 +262,13 @@ impl StyleEngine {
                         let mut nested = media.to_vec();
                         nested.push(queries.clone());
                         self.collect_rules(rules, origin, &nested);
+                    } else if let AtKind::Declarations { declarations, .. } = &at.kind {
+                        if at.name.eq_ignore_ascii_case("font-face") {
+                            self.font_faces.push(CollectedFontFace {
+                                media: media.to_vec(),
+                                declarations: declarations.clone(),
+                            });
+                        }
                     }
                 }
             }

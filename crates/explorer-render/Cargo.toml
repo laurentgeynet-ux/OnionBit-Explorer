@@ -10,9 +10,11 @@ description = "Display list → framebuffer RGBA → PNG / buffer brut"
 workspace = true
 
 [dependencies]
+brotli.workspace = true
 explorer-css.workspace = true
 explorer-dom.workspace = true
 explorer-layout.workspace = true
+flate2.workspace = true
 image.workspace = true
 tiny-skia.workspace = true
 ttf-parser.workspace = true

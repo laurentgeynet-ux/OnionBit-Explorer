@@ -103,6 +103,8 @@ fn bench_session() -> (Session, Arc<FakeTransport>) {
             js_ops: 5_000_000,
             max_images: 32,
             image_max_px: 16_000_000,
+            max_sheets: 8,
+            max_fonts: 16,
         },
     );
     (s, t)

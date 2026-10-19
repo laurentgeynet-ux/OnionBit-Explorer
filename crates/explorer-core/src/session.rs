@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use explorer_css::{Origin, StyleEngine, StyleEnv};
+use explorer_css::{FontSrc, Origin, StyleEngine, StyleEnv};
 use explorer_dom::{Dom, DomError, NodeId};
 use explorer_html::encoding::decode_sniffed;
 use explorer_html::TreeBuilder;
@@ -25,7 +25,8 @@ use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, LayoutBox};
 use explorer_net::http::{HttpTransport, Method, Request};
 use explorer_net::url::Url;
 use explorer_render::{
-    build_display_list_imaged, decode_image, rasterize, DisplayList, Frame, ImageTable,
+    build_display_list_imaged, decode_font, decode_image, rasterize, DisplayList, Frame,
+    ImageTable, WebFontSource,
 };
 use tokio::sync::broadcast;
 
@@ -250,6 +251,10 @@ struct Tab {
     /// chaque re-parse (les ids changent), les `<img>` hors
     /// map retombent sur leur texte `alt`.
     images: ImageTable,
+    /// Feuilles `<link rel=stylesheet>` fetchées à la
+    /// navigation — concaténées, vidées à chaque re-parse
+    /// (étape 46 : premières sous-ressources CSS).
+    linked_css: String,
 }
 
 /// Configuration de session — seuils et viewport initiaux
@@ -272,6 +277,14 @@ pub struct SessionConfig {
     /// Budget pixels par image décodée (≈ 4 octets/pixel —
     /// borne l'allocation avant décodage).
     pub image_max_px: u32,
+    /// Nombre max de feuilles `<link>` fetchées par document
+    /// (bornes sous-ressources — une page peut en chaîner
+    /// des centaines).
+    pub max_sheets: usize,
+    /// Capacité du registre `@font-face` par session
+    /// (règle budgets — les faces sont par document, le
+    /// registre est purgé à chaque navigation).
+    pub max_fonts: usize,
 }
 
 impl Default for SessionConfig {
@@ -283,6 +296,8 @@ impl Default for SessionConfig {
             js_ops: 5_000_000,
             max_images: 32,
             image_max_px: 16_000_000,
+            max_sheets: 8,
+            max_fonts: 16,
         }
     }
 }
@@ -291,7 +306,10 @@ impl Default for SessionConfig {
 /// bus d'événements.
 pub struct Session {
     transport: Arc<dyn HttpTransport>,
-    fonts: Arc<dyn FontSource + Send + Sync>,
+    /// Registre de fontes : faces `@font-face` fetchées
+    /// devant la source locale injectée (ADR-0016). Purge
+    /// par navigation (faces par document).
+    webfonts: WebFontSource,
     tabs: HashMap<TabId, Tab>,
     events: broadcast::Sender<CoreEvent>,
     next_tab: TabId,
@@ -315,6 +333,8 @@ pub struct Session {
     /// et pixels décodés).
     max_images: usize,
     image_max_px: u32,
+    /// Bornes sous-ressources (`max_sheets` feuilles liées).
+    max_sheets: usize,
 }
 
 impl Session {
@@ -340,7 +360,7 @@ impl Session {
         let (events, _) = broadcast::channel(cfg.event_capacity.max(1));
         Self {
             transport,
-            fonts,
+            webfonts: WebFontSource::new(fonts, cfg.max_fonts),
             tabs: HashMap::new(),
             events,
             next_tab: 1,
@@ -352,6 +372,7 @@ impl Session {
             js_ops: cfg.js_ops,
             max_images: cfg.max_images,
             image_max_px: cfg.image_max_px,
+            max_sheets: cfg.max_sheets,
         }
     }
 
@@ -413,6 +434,7 @@ impl Session {
                 focused: None,
                 js: None,
                 images: ImageTable::new(),
+                linked_css: String::new(),
             },
         );
         let _ = self.events.send(CoreEvent::TabOpened { tab: id });
@@ -645,12 +667,102 @@ impl Session {
             entry.focused = None;
             entry.js = None;
             entry.images.clear();
+            entry.linked_css.clear();
             entry.dom = Some(dom);
         }
+        self.webfonts.clear();
         self.run_scripts(tab, &html);
+        self.fetch_stylesheets(tab).await;
         self.fetch_images(tab).await;
+        self.fetch_webfonts(tab).await;
         self.relayout(tab)?;
         Ok(title)
+    }
+
+    /// Fetch des feuilles `<link rel=stylesheet>` — premières
+    /// sous-ressources CSS (étape 46), séquentiel borné par
+    /// `max_sheets`. Le CSS rejoint `linked_css` de l'onglet
+    /// et est ajouté à la cascade en origine auteur par
+    /// `relayout`. Un échec individuel (réseau, résolution,
+    /// statut) laisse la feuille absente — la page dégrade.
+    async fn fetch_stylesheets(&mut self, tab: TabId) {
+        let (Some(base), Some(dom)) = (
+            self.tabs.get(&tab).and_then(|t| t.url.clone()),
+            self.tabs.get(&tab).and_then(|t| t.dom.as_ref()),
+        ) else {
+            return;
+        };
+        let mut css = String::new();
+        for href in collect_stylesheet_links(dom)
+            .into_iter()
+            .take(self.max_sheets)
+        {
+            let Ok(url) = Url::resolve(&base, &href) else {
+                continue;
+            };
+            let Ok(resp) = self.transport.fetch(&Request::get(url)).await else {
+                continue;
+            };
+            if !(200..300).contains(&resp.status) {
+                continue;
+            }
+            let (text, _enc) = decode_sniffed(&resp.body);
+            css.push_str(&text);
+            css.push('\n');
+        }
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.linked_css = css;
+        }
+    }
+
+    /// Fetch + décode + inscription des `@font-face` du
+    /// document (étape 46). Séquentiel borné : `max_fonts`
+    /// faces au registre, chaque source `url()` essayée dans
+    /// l'ordre (première qui décode gagne), `local()` sans
+    /// fetch (la source locale repli résout par famille). La
+    /// fonte est présente au `relayout` suivant — jamais de
+    /// re-layout partiel (une frame = un état cohérent).
+    async fn fetch_webfonts(&mut self, tab: TabId) {
+        let (Some(base), Some(dom)) = (
+            self.tabs.get(&tab).and_then(|t| t.url.clone()),
+            self.tabs.get(&tab).and_then(|t| t.dom.as_ref()),
+        ) else {
+            return;
+        };
+        let mut eng = StyleEngine::new();
+        eng.add_css(&collect_style_css(dom), Origin::Author);
+        if let Some(entry) = self.tabs.get(&tab) {
+            eng.add_css(&entry.linked_css.clone(), Origin::Author);
+        }
+        let faces = eng.font_faces(&StyleEnv::default());
+        for face in faces {
+            if self.webfonts.is_full() {
+                break;
+            }
+            for src in &face.srcs {
+                let FontSrc::Url(href) = src else {
+                    continue;
+                };
+                let Ok(url) = Url::resolve(&base, href) else {
+                    continue;
+                };
+                let Ok(resp) = self.transport.fetch(&Request::get(url)).await else {
+                    continue;
+                };
+                if !(200..300).contains(&resp.status) {
+                    continue;
+                }
+                let Some(data) = decode_font(&resp.body) else {
+                    continue;
+                };
+                if self
+                    .webfonts
+                    .register(&face.family, face.weight, face.italic, data)
+                {
+                    break;
+                }
+            }
+        }
     }
 
     /// Fetch + décode des `<img src>` du document — séquentiel
@@ -805,10 +917,11 @@ impl Session {
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
         let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
 
-        // Feuilles : inline `<style>` du document (les
-        // feuilles liées sont l'étape « sous-ressources »).
+        // Feuilles : `<style>` inline puis `<link>` fetchées
+        // (étape 46) — même origine auteur, ordre source.
         let mut eng = StyleEngine::new();
         eng.add_css(&collect_style_css(dom), Origin::Author);
+        eng.add_css(&entry.linked_css.clone(), Origin::Author);
         let styles = eng.compute_tree(dom, dom.document(), &StyleEnv::default());
         let Some(root_el) = dom
             .children(dom.document())
@@ -824,7 +937,7 @@ impl Session {
         };
         let (vw, _vh) = self.viewport;
         let ctx = BlockCtx {
-            fonts: Some(self.fonts.as_ref() as &dyn FontSource),
+            fonts: Some(&self.webfonts as &dyn FontSource),
             ..BlockCtx::default()
         };
         layout_tree(&mut bx, vw, &ctx);
@@ -842,7 +955,7 @@ impl Session {
         };
         let (vw, vh) = self.viewport;
         let list = build_display_list_imaged(bx, vw, vh, entry.scroll_y, &entry.images);
-        let frame = rasterize(&list, self.fonts.as_ref() as &dyn FontSource, self.scale)
+        let frame = rasterize(&list, &self.webfonts as &dyn FontSource, self.scale)
             .ok_or(CoreError::FrameTooBig)?;
         let png = frame.encode_png();
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
@@ -1374,6 +1487,35 @@ fn collect_style_css(dom: &Dom) -> String {
         }
     }
     css
+}
+
+/// `href` des `<link rel=stylesheet>` dans l'ordre — `rel`
+/// case-insensitive à tokens (la spec admet `rel="stylesheet
+/// alternate"` et cie) ; `href` vide sauté.
+fn collect_stylesheet_links(dom: &Dom) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "link") {
+            let rel = dom
+                .attribute(n, "rel")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if rel.split_whitespace().any(|w| w == "stylesheet") {
+                if let Ok(Some(href)) = dom.attribute(n, "href") {
+                    if !href.is_empty() {
+                        out.push(href);
+                    }
+                }
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    out
 }
 
 /// `(NodeId, src)` des `<img>` du document dans l'ordre —

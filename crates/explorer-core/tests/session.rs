@@ -119,6 +119,8 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
             js_ops: 5_000_000,
             max_images: 32,
             image_max_px: 16_000_000,
+            max_sheets: 8,
+            max_fonts: 16,
         },
     );
     (s, t)
@@ -1101,4 +1103,156 @@ async fn submit_preventdefault_skips_navigation() {
         s.tab_info(id).unwrap().url.as_deref(),
         Some("http://h.test/p")
     );
+}
+
+// ---- Étape 46 : feuilles liées + fontes web ----
+
+/// TTF de la fixture dont `hmtx` est patchée (avance 800 au
+/// lieu de 500) — texte plus large → PNG discriminants.
+fn fat_fixture_ttf() -> Vec<u8> {
+    let mut ttf = fixture_ttf();
+    let n = u16::from_be_bytes([ttf[4], ttf[5]]) as usize;
+    for i in 0..n {
+        let rec = 12 + i * 16;
+        if ttf[rec..rec + 4] == *b"hmtx" {
+            let off = u32::from_be_bytes([ttf[rec + 8], ttf[rec + 9], ttf[rec + 10], ttf[rec + 11]])
+                as usize;
+            for g in 0..256 {
+                ttf[off + g * 4..off + g * 4 + 2].copy_from_slice(&800u16.to_be_bytes());
+            }
+            return ttf;
+        }
+    }
+    ttf
+}
+
+/// Enveloppe WOFF1 sans compression (compLen == origLen)
+/// autour d'un sfnt — reconstruit le répertoire table par
+/// table depuis le sfnt source.
+// Tailles/offsets issus de `len()` de fixtures — bornés.
+#[allow(clippy::cast_possible_truncation)]
+fn wrap_woff1(sfnt: &[u8]) -> Vec<u8> {
+    let n = u16::from_be_bytes([sfnt[4], sfnt[5]]) as usize;
+    let mut tables: Vec<([u8; 4], &[u8])> = Vec::with_capacity(n);
+    for i in 0..n {
+        let rec = 12 + i * 16;
+        let tag: [u8; 4] = sfnt[rec..rec + 4].try_into().unwrap();
+        let off = u32::from_be_bytes([sfnt[rec + 8], sfnt[rec + 9], sfnt[rec + 10], sfnt[rec + 11]])
+            as usize;
+        let len = u32::from_be_bytes([
+            sfnt[rec + 12],
+            sfnt[rec + 13],
+            sfnt[rec + 14],
+            sfnt[rec + 15],
+        ]) as usize;
+        tables.push((tag, &sfnt[off..off + len]));
+    }
+    let mut w = Vec::new();
+    let push = |w: &mut Vec<u8>, x: u32| w.extend_from_slice(&x.to_be_bytes());
+    w.extend_from_slice(b"wOFF");
+    push(&mut w, 0x0001_0000);
+    push(&mut w, 0); // length (ignoré par le décodeur)
+    w.extend_from_slice(&(n as u16).to_be_bytes());
+    w.extend_from_slice(&[0; 2]); // reserved
+    for _ in 0..7 {
+        push(&mut w, 0); // totalSfntSize, versions, meta, priv
+    }
+    let data_start = 44 + 20 * n;
+    let mut body = Vec::new();
+    for (tag, data) in &tables {
+        w.extend_from_slice(tag);
+        push(&mut w, (data_start + body.len()) as u32);
+        push(&mut w, data.len() as u32);
+        push(&mut w, data.len() as u32);
+        push(&mut w, 0);
+        body.extend_from_slice(data);
+        while body.len() % 4 != 0 {
+            body.push(0);
+        }
+    }
+    w.extend_from_slice(&body);
+    w
+}
+
+const PAGE_WEBFONT: &str = r#"<!doctype html><html><head><style>
+@font-face { font-family: "WF"; src: url(/w.ttf); }
+p { font-family: WF; font-size: 20px; margin: 0; }
+</style></head><body><p>HELLO WORLD</p></body></html>"#;
+
+const PAGE_LINKED: &str = r#"<!doctype html><html><head>
+<link rel="stylesheet" href="/s.css">
+</head><body><p>LINKED TEXT</p></body></html>"#;
+
+const LINKED_CSS: &str = r#"
+@font-face { font-family: "WF"; src: url(/w.woff) format("woff"); font-weight: 700; }
+p { font-family: WF; font-size: 20px; margin: 0; }
+"#;
+
+#[tokio::test]
+async fn webfont_ttf_fetched_and_used() {
+    let (mut s, t) = test_session();
+    t.route("/p", 200, PAGE_WEBFONT);
+    t.route_bin("/w.ttf", 200, fat_fixture_ttf());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/p").await.unwrap();
+    // La fonte est fetchée et ses avances (800) produisent un
+    // rendu différent du repli fixture (500).
+    let with_font = s.frame_png(id).unwrap();
+    let (mut s2, t2) = test_session();
+    t2.route("/p", 200, PAGE_WEBFONT);
+    t2.route_bin("/w.ttf", 404, Vec::new());
+    let id2 = s2.open_tab();
+    s2.navigate(id2, "http://h.test/p").await.unwrap();
+    let fallback = s2.frame_png(id2).unwrap();
+    assert_ne!(with_font, fallback);
+}
+
+#[tokio::test]
+async fn webfont_woff_via_linked_stylesheet() {
+    let (mut s, t) = test_session();
+    t.route("/p", 200, PAGE_LINKED);
+    t.route("/s.css", 200, LINKED_CSS);
+    t.route_bin("/w.woff", 200, wrap_woff1(&fat_fixture_ttf()));
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/p").await.unwrap();
+    // La feuille liée est fetchée, sa `@font-face` aussi ;
+    // le texte utilise les avances 800 (≠ repli 500).
+    let with_font = s.frame_png(id).unwrap();
+    let (mut s2, t2) = test_session();
+    t2.route("/p", 200, PAGE_LINKED);
+    t2.route("/s.css", 200, LINKED_CSS);
+    let id2 = s2.open_tab();
+    s2.navigate(id2, "http://h.test/p").await.unwrap();
+    assert_ne!(with_font, s2.frame_png(id2).unwrap());
+}
+
+#[tokio::test]
+async fn webfont_register_bounded() {
+    let (mut s, t) = {
+        let t = Arc::new(FakeTransport::new());
+        let s = Session::with_config(
+            t.clone(),
+            Arc::new(FixtureFont),
+            SessionConfig {
+                max_fonts: 1,
+                ..SessionConfig::default()
+            },
+        );
+        (s, t)
+    };
+    t.route(
+        "/p",
+        200,
+        r"<!doctype html><html><head><style>
+@font-face { font-family: A; src: url(/a.ttf); }
+@font-face { font-family: B; src: url(/b.ttf); }
+</style></head><body><p>x</p></body></html>",
+    );
+    t.route_bin("/a.ttf", 200, fixture_ttf());
+    t.route_bin("/b.ttf", 200, fixture_ttf());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/p").await.unwrap();
+    // Page + a.ttf fetchés ; b.ttf jamais (registre plein).
+    assert!(t.last().is_some_and(|(_, q, _)| q == "/a.ttf"));
+    assert_eq!(t.calls(), 2);
 }

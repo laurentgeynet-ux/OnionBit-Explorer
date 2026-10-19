@@ -208,7 +208,11 @@ fn align_offset(mode: &str, line_cross: f32, item_cross: f32) -> f32 {
 /// Flux flex des enfants de `bx` — appelé par `layout_block`
 /// après son propre dimensionnement. Retourne le curseur
 /// final (bas du contenu).
-#[allow(clippy::too_many_arguments, clippy::too_many_lines, clippy::cast_precision_loss)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::cast_precision_loss
+)]
 pub(crate) fn flow_flex_children(
     bx: &mut LayoutBox,
     content_x: f32,
