@@ -358,16 +358,21 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Fenêtre commit/repaint : le commit a lieu mais le produit
   peint n'atterrit pas (ou est écrasé) dans certains
   timings — renav vers la même URL peint correctement.
-- [ ] **Étape 56c. État hybride bfcache après back+navigate**
+- [x] **Étape 56c. État hybride bfcache après back+navigate**
   (terrain mission 11, repro A→B→back→`navigate B`) :
-  `navigate` vers l'URL forward pendant `can_forward:true`
-  peint le **snapshot bfcache de B** mais l'entry courante
-  reste A — l'onglet affiche B, hit-test et `/status` url
-  restent sur A (liens de A résolus sous la frame de B).
-  Fix attendu : `navigate` vers l'URL forward doit soit
-  restaurer l'entrée forward (commit complet), soit
-  refuser — jamais peindre le snapshot d'une autre entrée
-  sans la commettre.
+  **livré.** Deux mécanismes corrigés : (1) `spec_paint` +
+  `unspec` — toute frame issue d'un document en vol est
+  révertée au gel/abandon/échec/commit (repeint depuis le
+  DOM commis, ou jette arbre/frame si rien de commis), le
+  snapshot bfcache ne peut plus capturer l'hybride ;
+  (2) `try_forward_nav` — `navigate` GET vers l'URL exacte
+  de l'entrée forward = restauration bfcache (commit
+  complet : snapshot + `hist_idx` + événements), jamais un
+  fetch peint sans commit. Cadence progressive durcie :
+  pas de tick sur morceau sans texte décodé (fenêtre de
+  sniffing `StreamDecoder`). Régressions :
+  `superseded_nav_reverts_speculative_paint`,
+  `navigate_to_forward_url_restores_bfcache_entry`.
 - [ ] **Étape 56d. `#fragment` = navigation complète, sans
   scroll** (terrain mission 11 — `anchor.html` + footnote
   wikipedia) : clic sur `href="#id"` ou `name=` →

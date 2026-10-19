@@ -3672,3 +3672,213 @@ async fn dom_sync_falls_back_when_floats_present() {
         "le repli doit produire la même frame que la page statique"
     );
 }
+
+/// Étape 56e — métrique mission 11 : `<img src>` déclenche
+/// bien une requête de sous-ressource (document + image =
+/// 2 hits transport). La panne observée terrain venait du
+/// harness `cache_server.py` (variable `PAGE` morte — la
+/// page servie ne contenait pas d'`<img>`).
+#[tokio::test]
+async fn img_src_triggers_subresource_fetch() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, "<html><body><img src=\"/i.png\"></body></html>");
+    t.route_bin("/i.png", 200, red_png());
+    let id = s.open_tab();
+    let before = t.calls();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(t.calls(), before + 2, "document + <img> attendus (56e)");
+}
+
+/// Transport à goulot par route (régression 56c) : `/slow`
+/// livre un premier morceau (peinture progressive) puis
+/// attend `released` pour la fin — reproduit la fenêtre
+/// « peint mais jamais commis » d'une nav supplantée.
+struct SlowThenGate {
+    released: Arc<tokio::sync::Notify>,
+    painted: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait]
+impl HttpTransport for SlowThenGate {
+    async fn fetch(&self, _req: &Request) -> NetResult<Response> {
+        Ok(Response {
+            status: 404,
+            reason: "gated".to_string(),
+            headers: vec![],
+            body: b"missing".to_vec(),
+            reused_connection: false,
+        })
+    }
+
+    async fn fetch_stream(&self, req: &Request) -> NetResult<explorer_net::http::StreamedResponse> {
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let (released, painted) = (self.released.clone(), self.painted.clone());
+        let path = req.url.path().to_string();
+        tokio::spawn(async move {
+            if path == "/slow" {
+                // Premier morceau > fenêtre de sniffing du
+                // décodeur (1 024 octets) : sans ça `feed`
+                // tamponne et la peinture progressive verrait
+                // un DOM vide (no-op `EmptyDocument`).
+                let mut first = b"<html><title>slow</title><body>SLOW ".to_vec();
+                first.extend(std::iter::repeat(b'S').take(1100));
+                let _ = tx.send(Ok(first)).await;
+                painted.notify_one();
+                released.notified().await;
+                let _ = tx.send(Ok(b" fin</body></html>".to_vec())).await;
+            } else {
+                let body = match path.as_str() {
+                    "/a" => "<html><title>a</title><body>AAA</body></html>",
+                    _ => "<html><title>c</title><body>CCC</body></html>",
+                };
+                let _ = tx.send(Ok(body.as_bytes().to_vec())).await;
+            }
+        });
+        Ok(explorer_net::http::StreamedResponse {
+            status: 200,
+            reason: "gated".to_string(),
+            headers: vec![],
+            reused_connection: false,
+            body: rx,
+        })
+    }
+}
+
+/// Étape 56c — la peinture progressive d'une navigation
+/// **supplantée** ne doit pas laisser l'onglet hybride
+/// (frame du document en vol + DOM/URL de l'ancienne page)
+/// ni empoisonner le snapshot bfcache : A → nav /slow
+/// (peint, en vol) → nav /c commit → /slow est jetée, le
+/// repeint depuis le DOM commis doit ramener la frame sur C.
+#[tokio::test]
+async fn superseded_nav_reverts_speculative_paint() {
+    use explorer_net::url::Url;
+
+    let released = Arc::new(tokio::sync::Notify::new());
+    let painted = Arc::new(tokio::sync::Notify::new());
+    let t = Arc::new(SlowThenGate {
+        released: released.clone(),
+        painted: painted.clone(),
+    });
+    let sess = Arc::new(tokio::sync::Mutex::new(Session::with_config(
+        t,
+        Arc::new(FixtureFont),
+        SessionConfig {
+            paint_chunk_bytes: 1,
+            paint_interval_ms: 0,
+            ..SessionConfig::default()
+        },
+    )));
+    let tab = sess.lock().await.open_tab();
+
+    // A commit sa page.
+    explorer_core::navigate_shared(
+        &sess,
+        tab,
+        Request::get(Url::parse("https://h/a").unwrap()),
+        true,
+    )
+    .await
+    .unwrap();
+    let a_frame = sess.lock().await.frame_png(tab);
+
+    // /slow démarre, peint son document en vol, puis attend.
+    let s2 = sess.clone();
+    let slow = tokio::spawn(async move {
+        explorer_core::navigate_shared(
+            &s2,
+            tab,
+            Request::get(Url::parse("https://h/slow").unwrap()),
+            true,
+        )
+        .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), painted.notified())
+        .await
+        .expect("/slow n'a jamais peint");
+    // La peinture spéculative doit s'appliquer : la frame
+    // montre /slow alors que l'URL commise reste /a — on
+    // attend le changement effectif (pas un délai fixe).
+    let mut spec_seen = false;
+    for _ in 0..100 {
+        {
+            let s = sess.lock().await;
+            if s.frame_png(tab) != a_frame {
+                spec_seen = true;
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        spec_seen,
+        "sanité : la peinture progressive n'a jamais changé la frame"
+    );
+
+    // /c commit — /slow est supplantée : sa nav_apply sera
+    // jetée, la peinture spéculative doit être révertée.
+    explorer_core::navigate_shared(
+        &sess,
+        tab,
+        Request::get(Url::parse("https://h/c").unwrap()),
+        true,
+    )
+    .await
+    .unwrap();
+    released.notify_waiters();
+    slow.await.unwrap().unwrap();
+
+    // Référence : la page /c rendue dans un onglet neuf.
+    let ref_tab = sess.lock().await.open_tab();
+    explorer_core::navigate_shared(
+        &sess,
+        ref_tab,
+        Request::get(Url::parse("https://h/c").unwrap()),
+        true,
+    )
+    .await
+    .unwrap();
+
+    let s = sess.lock().await;
+    assert_eq!(s.tab_url(tab).as_deref(), Some("https://h/c"));
+    assert_eq!(
+        s.frame_png(tab),
+        s.frame_png(ref_tab),
+        "l'état hybride (frame /slow + DOM /c) a survécu (56c)"
+    );
+}
+
+/// Étape 56c — `navigate` vers l'URL de l'entrée **forward**
+/// (`can_forward: true`) restaure le snapshot bfcache comme
+/// un `go_forward` — commit complet de l'entrée — au lieu
+/// d'un fetch neuf dont la peinture progressive afficherait
+/// B pendant que l'entrée commise reste A (état hybride du
+/// repro terrain mission 11 : A→B→back→`navigate B`).
+#[tokio::test]
+async fn navigate_to_forward_url_restores_bfcache_entry() {
+    let (mut s, t) = test_session();
+    t.route("/a", 200, PAGE_T);
+    t.route("/b", 200, PAGE);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/a").await.unwrap();
+    s.navigate(id, "http://h.test/b").await.unwrap();
+    s.go_back(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/a"));
+    let calls = t.calls();
+
+    // navigate(B) pendant can_forward → restauration gelée :
+    // zéro réseau, et l'entrée forward est réellement commise.
+    s.navigate(id, "http://h.test/b").await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/b"));
+    assert_eq!(t.calls(), calls, "restauration bfcache — pas de re-fetch");
+    assert!(
+        matches!(s.go_forward(id).await, Err(CoreError::EmptyDocument)),
+        "l'entrée forward doit être consommée par la restauration"
+    );
+
+    // Un navigate vers une URL absente de l'historique reste
+    // un fetch normal (pas de faux positif sur le raccourci).
+    t.route("/d", 200, PAGE);
+    s.navigate(id, "http://h.test/d").await.unwrap();
+    assert_eq!(t.calls(), calls + 1);
+}

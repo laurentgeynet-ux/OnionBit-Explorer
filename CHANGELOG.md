@@ -107,6 +107,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Reste connu : `column wrap` multi-colonnes, marges
   `auto` verticales en column, écarts fins justify/align.
 
+- **Étape 56c — état hybride résolu : peinture spéculative
+  révertée + `navigate` forward = restauration bfcache**
+  (`explorer-core`) : deux mécanismes derrière le repro
+  terrain mission 11 (A→B→back→`navigate B` — l'onglet
+  affichait B, hit-test et `/status` restaient sur A).
+  (1) `Tab::spec_paint` marque toute frame/arbre issus
+  d'un document **en vol** (peinture progressive 53d) ;
+  `unspec` repeint depuis le DOM commis — ou jette
+  arbre/liste/frame/png si rien n'est commis — aux points
+  de gel bfcache, d'abandon (epoch supplantée), d'échec
+  et de commit, et `repaint` ré-arme le drapeau après
+  chaque peinture non spéculative. Le snapshot gelé ne
+  peut plus embarquer une frame qui ne correspond pas à
+  son DOM. (2) `try_forward_nav` réécrit un `navigate`
+  GET sans corps vers l'URL **exacte** de l'entrée
+  forward en `try_bfcache` — commit complet de l'entrée
+  (snapshot restauré, `hist_idx` avancé, événements
+  `Navigated`/`TitleChanged` émis) au lieu d'un fetch
+  dont la peinture en vol recréerait l'hybride ; POST ou
+  URL différente naviguent normalement. Correctif
+  robustesse au passage : la cadence de peinture
+  progressive ne se déclenche plus sur un morceau sans
+  texte décodé (fenêtre de sniffing 1 024 octets du
+  `StreamDecoder` — peindre un DOM vide était un no-op
+  `EmptyDocument` par chunk). Régressions :
+  `superseded_nav_reverts_speculative_paint`,
+  `navigate_to_forward_url_restores_bfcache_entry`.
+
 - **Étape 55f — `relayout_subtree` adopté en session**
   (`explorer-core`, `explorer-js`, `dillo-js` — adoption
   R-12) : le miroir suit le **sous-arbre sale**

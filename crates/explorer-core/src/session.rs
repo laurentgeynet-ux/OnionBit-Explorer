@@ -456,6 +456,13 @@ struct Tab {
     /// position gelée restaure l'état complet sans réseau.
     /// Bornée par `SessionConfig::bfcache_pages` (FIFO).
     bfcache: VecDeque<PageSnapshot>,
+    /// La frame/arbre courants proviennent d'un document
+    /// **en vol** (peinture progressive 53d), pas du DOM
+    /// commis (étape 56c) — à réverter au gel, à l'abandon
+    /// ou à l'échec de la navigation, sinon l'état hybride
+    /// (frame neuve + DOM/URL anciens) persiste ou est
+    /// capturé dans un snapshot bfcache.
+    spec_paint: bool,
 }
 
 /// Page gelée pour le bfcache (étape 56) — tout l'état qui
@@ -586,6 +593,7 @@ impl Tab {
         self.prev_styles = snap.prev_styles;
         self.dirty = snap.dirty;
         self.emitted = snap.emitted;
+        self.spec_paint = false; // snapshot auto-cohérent (56c)
         self.last_req = snap.last_req;
         self.transitions.clear();
         self.nav_epoch += 1;
@@ -1175,6 +1183,7 @@ impl Session {
                 dirty: Vec::new(),
                 emitted: 0,
                 bfcache: VecDeque::new(),
+                spec_paint: false,
             },
         );
         let _ = self.events.send(CoreEvent::TabOpened { tab: id });
@@ -1555,6 +1564,13 @@ impl Session {
         let Some(snap) = entry.take_snapshot(idx) else {
             return false;
         };
+        // La page quittée gèle son état affiché — une
+        // peinture spéculative en vol ne doit pas être
+        // embarquée (étape 56c).
+        self.unspec(tab);
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return false;
+        };
         entry.freeze(self.bfcache_pages);
         entry.restore(snap);
         entry.hist_idx = idx;
@@ -1567,6 +1583,32 @@ impl Session {
             self.emit_navigated(tab, &u, title, prev.as_deref());
         }
         true
+    }
+
+    /// `navigate` vers l'URL de l'entrée **forward** (étape
+    /// 56c, repro A→B→back→`navigate B`) : restaurer le
+    /// snapshot bfcache — un commit complet de l'entrée —
+    /// plutôt qu'un fetch neuf dont la peinture progressive
+    /// afficherait B pendant que l'entrée commise reste A
+    /// (état hybride : frame B + hit-test/`status` sur A).
+    /// Seul un GET sans corps vers l'URL exacte de
+    /// l'entrée forward est réécrit en restauration ; un
+    /// POST ou une URL différente navigue normalement, et
+    /// l'absence de snapshot retombe sur le chemin classique.
+    fn try_forward_nav(&mut self, tab: TabId, req: &Request) -> bool {
+        if req.method != Method::Get || req.body.is_some() {
+            return false;
+        }
+        let fwd = self
+            .tabs
+            .get(&tab)
+            .map(|e| e.hist_idx + 1)
+            .unwrap_or_default();
+        let matches = self
+            .tabs
+            .get(&tab)
+            .is_some_and(|e| e.hist.get(fwd).is_some_and(|r| r.url == req.url));
+        matches && self.try_bfcache(tab, fwd)
     }
 
     /// Déplacement dans l'historique — `delta` = ±1.
@@ -1628,14 +1670,29 @@ impl Session {
         req: Request,
         push: bool,
     ) -> Result<Option<String>, CoreError> {
+        // `navigate` vers l'entrée forward = restauration
+        // bfcache, jamais une peinture non commise (56c).
+        if push && self.try_forward_nav(tab, &req) {
+            return Ok(self.tabs.get(&tab).and_then(|e| e.title.clone()));
+        }
         let mut job = self.nav_begin(tab, req, push)?;
         let epoch = job.epoch;
-        let (done, tail) = job
+        let (done, tail) = match job
             .run(|dom: &Dom| -> PaintFut<'_> {
                 self.nav_paint(tab, epoch, dom);
                 Box::pin(async {})
             })
-            .await?;
+            .await
+        {
+            Ok(out) => out,
+            Err(e) => {
+                // Le document en vol a pu être peint
+                // progressivement — on réverte avant de
+                // propager (étape 56c).
+                self.unspec(tab);
+                return Err(e);
+            }
+        };
         let Some(mut sub) = self.nav_apply(tab, tail, done)? else {
             return Ok(None);
         };
@@ -1699,7 +1756,39 @@ impl Session {
     fn nav_paint(&mut self, tab: TabId, epoch: u64, dom: &Dom) {
         let live = self.tabs.get(&tab).is_some_and(|e| e.nav_epoch == epoch);
         if live && self.relayout_dom(tab, dom).is_ok() {
+            // Peinture spéculative (étape 56c) : l'arbre et la
+            // frame montrent un document non commis — marqué
+            // pour réversion au gel/abandon/échec.
+            if let Some(e) = self.tabs.get_mut(&tab) {
+                e.spec_paint = true;
+            }
             self.emit_invalidated(tab);
+        }
+    }
+
+    /// Réverte une peinture spéculative (étape 56c) : la
+    /// frame provenait d'un document en vol — repeint depuis
+    /// le DOM commis pour que frame et DOM redeviennent
+    /// cohérents. No-op si rien de spéculatif.
+    fn unspec(&mut self, tab: TabId) {
+        let spec = self.tabs.get(&tab).is_some_and(|e| e.spec_paint);
+        if !spec {
+            return;
+        }
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            e.spec_paint = false;
+        }
+        if self.relayout(tab).is_ok() {
+            self.emit_invalidated(tab);
+        } else if let Some(e) = self.tabs.get_mut(&tab) {
+            // Rien de commis à repeindre (onglet jamais
+            // navigué) : on jette l'arbre et la frame
+            // spéculatifs plutôt que de laisser un état
+            // sans DOM derrière.
+            e.tree = None;
+            e.list = None;
+            e.frame = None;
+            e.png = None;
         }
     }
 
@@ -1716,6 +1805,7 @@ impl Session {
         {
             let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
             if entry.nav_epoch != tail.epoch {
+                self.unspec(tab);
                 return Ok(None);
             }
         }
@@ -1731,6 +1821,10 @@ impl Session {
         let scripting = self.js_factory.is_some();
         let (sheet_urls, scripts, img_urls) = self.plan_subresources(&dom, &url, scripting);
         let doc_css = collect_style_css(&dom);
+        // Le gel capture l'état affiché — une peinture
+        // spéculative du document en vol ne doit pas être
+        // embarquée dans le snapshot (étape 56c).
+        self.unspec(tab);
         {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
             // bfcache (étape 56) : la page quittée est gelée
@@ -1791,6 +1885,7 @@ impl Session {
         {
             let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
             if entry.nav_epoch != job.epoch {
+                self.unspec(tab);
                 return Ok(None);
             }
         }
@@ -2847,6 +2942,10 @@ impl Session {
         entry.list = Some(list);
         entry.frame = Some(frame);
         entry.png = png;
+        // Une peinture aboutie produit un état cohérent
+        // (étape 56c) — le drapeau spéculatif est ré-armé
+        // par `nav_paint` **après** son propre appel ici.
+        entry.spec_paint = false;
         Ok(())
     }
 
@@ -4140,7 +4239,13 @@ impl NavJob {
             html.push_str(&text);
             tb.push(&text);
             since_paint += bytes.len();
-            if since_paint >= self.paint_chunk_bytes || last_paint.elapsed() >= self.paint_interval
+            // Fenêtre de sniffing du décodeur ou morceau sans
+            // texte décodable : le DOM n'a pas bougé — peindre
+            // serait un no-op (et `since_paint` reste accumulé
+            // pour déclencher dès le premier texte réel, 56c).
+            if !text.is_empty()
+                && (since_paint >= self.paint_chunk_bytes
+                    || last_paint.elapsed() >= self.paint_interval)
             {
                 paint(tb.dom()).await;
                 since_paint = 0;
@@ -5479,6 +5584,11 @@ pub async fn navigate_shared(
 ) -> Result<(), CoreError> {
     let mut job = {
         let mut s = sess.lock().await;
+        // `navigate` vers l'entrée forward = restauration
+        // bfcache (56c) — jamais une peinture non commise.
+        if push && s.try_forward_nav(tab, &req) {
+            return Ok(());
+        }
         s.nav_begin(tab, req, push)?
     };
     let epoch = job.epoch;
@@ -5499,6 +5609,7 @@ pub async fn navigate_shared(
         Ok(out) => out,
         Err(e) => {
             let mut s = sess.lock().await;
+            s.unspec(tab); // peinture spéculative → réverte (56c)
             return Err(s.emit_error(tab, e));
         }
     };
