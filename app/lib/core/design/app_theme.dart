@@ -35,11 +35,14 @@ ThemeData buildTheme(DesignTokens t) {
   final rMd = t.dim('radius', 'md', fallback: 8);
   final rLg = t.dim('radius', 'lg', fallback: 14);
   final iconMd = t.dim('metrics', 'iconMd', fallback: 20);
-  final motionFast =
-      t.dim2('motion', 'durationMs', 'fast', fallback: 120);
+  final motionFast = t.dim2('motion', 'durationMs', 'fast', fallback: 120);
   final elevHigh = t.dim('elevation', 'high', fallback: 8);
 
-  final scheme = ColorScheme.dark(
+  // `meta.scheme` pilote la luminosité du ColorScheme — la
+  // palette elle-même vient toujours des tokens (étape 57 :
+  // variante claire `tokens.light.json`).
+  final light = t.scheme == 'light';
+  final scheme = (light ? ColorScheme.light : ColorScheme.dark)(
     surface: base,
     primary: accent,
     onSurface: onSurface,
@@ -49,11 +52,10 @@ ThemeData buildTheme(DesignTokens t) {
   );
 
   TextStyle style(double size, Color color, double weight) => TextStyle(
-        color: color,
-        fontSize: size,
-        fontWeight:
-            FontWeight.values[((weight / 100).round() - 1).clamp(0, 8)],
-      );
+    color: color,
+    fontSize: size,
+    fontWeight: FontWeight.values[((weight / 100).round() - 1).clamp(0, 8)],
+  );
 
   return ThemeData(
     useMaterial3: true,
@@ -154,10 +156,7 @@ ThemeData buildTheme(DesignTokens t) {
         borderRadius: BorderRadius.circular(rMd),
         borderSide: BorderSide(color: accent, width: 1.5),
       ),
-      contentPadding: EdgeInsets.symmetric(
-        horizontal: spMd,
-        vertical: spSm,
-      ),
+      contentPadding: EdgeInsets.symmetric(horizontal: spMd, vertical: spSm),
     ),
 
     cardTheme: CardThemeData(

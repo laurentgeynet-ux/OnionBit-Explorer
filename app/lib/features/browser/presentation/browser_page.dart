@@ -10,8 +10,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/design/design_tokens.dart';
+import '../../settings/presentation/settings_dialog.dart';
 import '../domain/browser_tab.dart';
 import 'browser_controller.dart';
+import 'library_panels.dart';
 
 /// Coquille navigateur — étape 29 : barre d'onglets, boutons
 /// back/forward/reload, omnibox, états de chargement poussés
@@ -82,17 +84,13 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
                       ),
                     )
                   : st.pageErrors[active.id] != null
-                      ? _ErrorPage(
-                          tokens: t,
-                          url: active.url,
-                          message: st.pageErrors[active.id]!,
-                          onRetry: () => ctrl.navigate(active.url),
-                        )
-                      : _FrameView(
-                          tokens: t,
-                          state: st,
-                          ctrl: ctrl,
-                        ),
+                  ? _ErrorPage(
+                      tokens: t,
+                      url: active.url,
+                      message: st.pageErrors[active.id]!,
+                      onRetry: () => ctrl.navigate(active.url),
+                    )
+                  : _FrameView(tokens: t, state: st, ctrl: ctrl),
             ),
             _StatusBar(tokens: t, state: st),
           ],
@@ -144,8 +142,7 @@ class _ErrorPage extends StatelessWidget {
               'Impossible de charger la page',
               style: TextStyle(
                 color: tokens.color('onSurface', 'base'),
-                fontSize:
-                    tokens.dim2('typography', 'size', 'lg', fallback: 18),
+                fontSize: tokens.dim2('typography', 'size', 'lg', fallback: 18),
               ),
             ),
             SizedBox(height: tokens.dim('spacing', 'sm', fallback: 8)),
@@ -153,8 +150,7 @@ class _ErrorPage extends StatelessWidget {
               url,
               style: TextStyle(
                 color: muted,
-                fontSize:
-                    tokens.dim2('typography', 'size', 'sm', fallback: 12),
+                fontSize: tokens.dim2('typography', 'size', 'sm', fallback: 12),
               ),
             ),
             SizedBox(height: tokens.dim('spacing', 'xs', fallback: 4)),
@@ -162,8 +158,7 @@ class _ErrorPage extends StatelessWidget {
               message,
               style: TextStyle(
                 color: muted,
-                fontSize:
-                    tokens.dim2('typography', 'size', 'sm', fallback: 12),
+                fontSize: tokens.dim2('typography', 'size', 'sm', fallback: 12),
               ),
             ),
             SizedBox(height: tokens.dim('spacing', 'md', fallback: 16)),
@@ -190,7 +185,8 @@ class _StatusBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = state.hoverUrl ??
+    final label =
+        state.hoverUrl ??
         (state.fieldFocused ? 'Champ actif — saisie envoyée au moteur' : '');
     if (label.isEmpty) return const SizedBox.shrink();
     return Container(
@@ -200,9 +196,7 @@ class _StatusBar extends StatelessWidget {
       ),
       decoration: BoxDecoration(
         color: tokens.color('surface', 'raised'),
-        border: Border(
-          top: BorderSide(color: tokens.color('border', 'base')),
-        ),
+        border: Border(top: BorderSide(color: tokens.color('border', 'base'))),
       ),
       alignment: Alignment.centerLeft,
       child: Text(
@@ -211,8 +205,7 @@ class _StatusBar extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
           color: tokens.color('onSurface', 'muted'),
-          fontSize:
-              tokens.dim2('typography', 'size', 'sm', fallback: 12),
+          fontSize: tokens.dim2('typography', 'size', 'sm', fallback: 12),
         ),
       ),
     );
@@ -251,7 +244,11 @@ class _OfflineBanner extends StatelessWidget {
 /// Barre d'onglets horizontale : titre + spinner + fermeture,
 /// « + » en fin de liste.
 class _TabStrip extends StatelessWidget {
-  const _TabStrip({required this.tokens, required this.state, required this.ctrl});
+  const _TabStrip({
+    required this.tokens,
+    required this.state,
+    required this.ctrl,
+  });
 
   final DesignTokens tokens;
   final BrowserState state;
@@ -319,8 +316,7 @@ class _TabChip extends StatelessWidget {
               color: active
                   ? tokens.color('accent', 'base')
                   : Colors.transparent,
-              width: tokens.dim('metrics', 'tabIndicatorWidth',
-                  fallback: 2),
+              width: tokens.dim('metrics', 'tabIndicatorWidth', fallback: 2),
             ),
           ),
         ),
@@ -328,10 +324,8 @@ class _TabChip extends StatelessWidget {
           children: [
             if (tab.loading)
               SizedBox(
-                width: tokens.dim('metrics', 'progressSize',
-                    fallback: 12),
-                height: tokens.dim('metrics', 'progressSize',
-                    fallback: 12),
+                width: tokens.dim('metrics', 'progressSize', fallback: 12),
+                height: tokens.dim('metrics', 'progressSize', fallback: 12),
                 child: const CircularProgressIndicator(),
               )
             else
@@ -361,8 +355,10 @@ class _TabChip extends StatelessWidget {
   }
 }
 
-/// Rangée de navigation : back/forward/reload + omnibox.
-class _NavBar extends StatelessWidget {
+/// Rangée de navigation : back/forward/reload + omnibox +
+/// étoile signet, bibliothèque (historique/signets), zoom et
+/// réglages (étape 57).
+class _NavBar extends ConsumerWidget {
   const _NavBar({
     required this.tokens,
     required this.tab,
@@ -378,8 +374,13 @@ class _NavBar extends StatelessWidget {
   final BrowserController ctrl;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final pad = tokens.dim('spacing', 'sm', fallback: 8);
+    final url = tab?.url as String? ?? '';
+    final markable = enabled && url.isNotEmpty && url != 'about:blank';
+    final marked =
+        ref.watch(bookmarksProvider).value?.any((b) => b.url == url) == true;
+    final zoom = ref.watch(zoomProvider);
     return Padding(
       padding: EdgeInsets.all(pad),
       child: Row(
@@ -387,14 +388,14 @@ class _NavBar extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.arrow_back),
             tooltip: 'Précédent',
-            onPressed:
-                enabled && tab?.canBack == true ? ctrl.goBack : null,
+            onPressed: enabled && tab?.canBack == true ? ctrl.goBack : null,
           ),
           IconButton(
             icon: const Icon(Icons.arrow_forward),
             tooltip: 'Suivant',
-            onPressed:
-                enabled && tab?.canForward == true ? ctrl.goForward : null,
+            onPressed: enabled && tab?.canForward == true
+                ? ctrl.goForward
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -413,6 +414,58 @@ class _NavBar extends StatelessWidget {
               textInputAction: TextInputAction.go,
               onSubmitted: enabled ? ctrl.navigate : null,
             ),
+          ),
+          IconButton(
+            icon: Icon(marked ? Icons.star : Icons.star_border),
+            tooltip: marked ? 'Retirer le signet' : 'Ajouter le signet',
+            onPressed: markable
+                ? () => ref
+                      .read(bookmarksProvider.notifier)
+                      .toggle(url, title: tab?.title as String? ?? '')
+                : null,
+          ),
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Historique',
+            onPressed: enabled
+                ? () => LibraryPanel.showHistory(context, tokens)
+                : null,
+          ),
+          IconButton(
+            icon: const Icon(Icons.bookmarks_outlined),
+            tooltip: 'Signets',
+            onPressed: enabled
+                ? () => LibraryPanel.showBookmarks(context, tokens)
+                : null,
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.zoom_in),
+            tooltip: 'Zoom ${(zoom * 100).round()} %',
+            enabled: enabled,
+            onSelected: (v) {
+              final z = ref.read(zoomProvider.notifier);
+              switch (v) {
+                case 'in':
+                  z.zoomIn();
+                case 'out':
+                  z.zoomOut();
+                case 'reset':
+                  z.reset();
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'in', child: Text('Zoom avant (+)')),
+              const PopupMenuItem(
+                value: 'out',
+                child: Text('Zoom arrière (−)'),
+              ),
+              const PopupMenuItem(value: 'reset', child: Text('Taille réelle')),
+            ],
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Réglages',
+            onPressed: () => SettingsDialog.show(context, tokens),
           ),
         ],
       ),
@@ -442,6 +495,7 @@ class _FrameView extends ConsumerStatefulWidget {
 class _FrameViewState extends ConsumerState<_FrameView> {
   Timer? _resizeDebounce;
   Size? _lastSent;
+  double _lastScale = 0;
   final FocusNode _keys = FocusNode();
 
   @override
@@ -451,23 +505,52 @@ class _FrameViewState extends ConsumerState<_FrameView> {
     super.dispose();
   }
 
-  void _onResize(Size size, double dpr) {
+  /// Envoie le viewport moteur en unités **CSS** : `w/zoom` —
+  /// l'étape 57 implémente le zoom côté UI via `scale = zoom×dpr`
+  /// (layout refondu à `w/z`, raster net à `w×dpr` px — ADR-0021).
+  void _onResize(Size size, double zoom, double dpr) {
+    final scale = zoom * dpr;
     // Identique → rien (le debounce ne déduppe pas les tailles).
-    if (size == _lastSent && _resizeDebounce == null) return;
+    if (size == _lastSent && scale == _lastScale && _resizeDebounce == null) {
+      return;
+    }
     _resizeDebounce?.cancel();
-    _resizeDebounce = Timer(
-      const Duration(milliseconds: 150),
-      () {
-        _resizeDebounce = null;
-        _lastSent = size;
-        widget.ctrl.setViewport(size.width, size.height, dpr);
-      },
-    );
+    _resizeDebounce = Timer(const Duration(milliseconds: 150), () {
+      _resizeDebounce = null;
+      _lastSent = size;
+      _lastScale = scale;
+      widget.ctrl.setViewport(size.width / zoom, size.height / zoom, scale);
+    });
+  }
+
+  /// Raccourcis zoom — Ctrl+`+`/`-`/`0`, actifs même quand un
+  /// champ moteur a le focus (ils ne lui sont pas relayés).
+  bool _zoomKey(LogicalKeyboardKey key) {
+    final kb = HardwareKeyboard.instance;
+    final ctrl =
+        kb.isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) ||
+        kb.isLogicalKeyPressed(LogicalKeyboardKey.controlRight);
+    if (!ctrl) return false;
+    final z = ref.read(zoomProvider.notifier);
+    switch (key) {
+      case LogicalKeyboardKey.equal ||
+          LogicalKeyboardKey.add ||
+          LogicalKeyboardKey.numpadAdd:
+        z.zoomIn();
+      case LogicalKeyboardKey.minus || LogicalKeyboardKey.numpadSubtract:
+        z.zoomOut();
+      case LogicalKeyboardKey.digit0 || LogicalKeyboardKey.numpad0:
+        z.reset();
+      default:
+        return false;
+    }
+    return true;
   }
 
   @override
   Widget build(BuildContext context) {
     final t = widget.tokens;
+    final zoom = ref.watch(zoomProvider);
     final active = widget.state.active;
     final bytes = active == null ? null : widget.state.frames[active.id];
     final raw = active == null ? null : widget.state.rawFrames[active.id];
@@ -476,8 +559,9 @@ class _FrameViewState extends ConsumerState<_FrameView> {
       margin: EdgeInsets.all(t.dim('spacing', 'lg', fallback: 24)),
       decoration: BoxDecoration(
         color: t.color('surface', 'raised'),
-        borderRadius:
-            BorderRadius.circular(t.dim('radius', 'lg', fallback: 14)),
+        borderRadius: BorderRadius.circular(
+          t.dim('radius', 'lg', fallback: 14),
+        ),
       ),
       clipBehavior: Clip.hardEdge,
       child: bytes == null && raw == null
@@ -487,33 +571,42 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                 final size = Size(c.maxWidth, c.maxHeight);
                 final dpr = MediaQuery.devicePixelRatioOf(context);
                 WidgetsBinding.instance.addPostFrameCallback(
-                  (_) => _onResize(size, dpr),
+                  (_) => _onResize(size, zoom, dpr),
                 );
                 final st = widget.state;
+                // 1 px CSS moteur = `zoom·dpr` px logiques affichés
+                // (raster brut `fit:none`) → les coordonnées
+                // d'entrée se divisent par ce facteur.
+                final cssPerLogical = zoom * dpr;
                 return MouseRegion(
                   cursor: st.hoverEditable
                       ? SystemMouseCursors.text
                       : st.hoverUrl != null
-                          ? SystemMouseCursors.click
-                          : SystemMouseCursors.basic,
+                      ? SystemMouseCursors.click
+                      : SystemMouseCursors.basic,
                   child: Listener(
                     onPointerSignal: (ev) {
                       if (ev is PointerScrollEvent) {
-                        widget.ctrl.scroll(ev.scrollDelta.dy);
+                        // dy en px logiques → px CSS moteur.
+                        widget.ctrl.scroll(ev.scrollDelta.dy / cssPerLogical);
                       }
                     },
-                    onPointerHover: (ev) => widget.ctrl
-                        .hover(ev.localPosition.dx, ev.localPosition.dy),
+                    onPointerHover: (ev) => widget.ctrl.hover(
+                      ev.localPosition.dx / cssPerLogical,
+                      ev.localPosition.dy / cssPerLogical,
+                    ),
                     child: GestureDetector(
-                      onTapUp: (d) => widget.ctrl
-                          .click(d.localPosition.dx, d.localPosition.dy),
+                      onTapUp: (d) => widget.ctrl.click(
+                        d.localPosition.dx / cssPerLogical,
+                        d.localPosition.dy / cssPerLogical,
+                      ),
                       child: KeyboardListener(
                         focusNode: _keys,
                         autofocus: true,
                         onKeyEvent: (e) {
-                          if (e is! KeyDownEvent || !st.fieldFocused) {
-                            return;
-                          }
+                          if (e is! KeyDownEvent) return;
+                          if (_zoomKey(e.logicalKey)) return;
+                          if (!st.fieldFocused) return;
                           // keyLabel couvre lettres et touches
                           // nommées (« Backspace », « Enter »).
                           widget.ctrl.key(e.logicalKey.keyLabel);
@@ -523,16 +616,13 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                           // Canal FFI (ADR-0018) : `ui.Image`
                           // brute, sinon PNG mémoire (ADR-0004).
                           child: raw != null
-                              ? RawImage(
-                                  image: raw,
-                                  fit: BoxFit.none,
-                                )
+                              ? RawImage(image: raw, fit: BoxFit.none)
                               : Image.memory(
                                   Uint8List.fromList(bytes!),
                                   gaplessPlayback:
                                       true, // pas de flash entre frames
-                                  fit: BoxFit
-                                      .none, // 1 px CSS = 1 pixel logique
+                                  fit:
+                                      BoxFit.none, // 1 px CSS = 1 pixel logique
                                 ),
                         ),
                       ),
@@ -545,30 +635,30 @@ class _FrameViewState extends ConsumerState<_FrameView> {
   }
 
   Widget _empty(DesignTokens t, BrowserTab? active, Color muted) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (active?.loading == true)
-              Padding(
-                padding: EdgeInsets.only(
-                  bottom: t.dim('spacing', 'sm', fallback: 8),
-                ),
-                child: const CircularProgressIndicator(),
-              )
-            else
-              Icon(
-                Icons.public,
-                size: t.dim('metrics', 'iconXl', fallback: 64),
-                color: muted,
-              ),
-            SizedBox(height: t.dim('spacing', 'sm', fallback: 8)),
-            Text(
-              active?.url.isNotEmpty == true
-                  ? active!.url
-                  : 'Naviguez vers une URL',
-              style: TextStyle(color: muted),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (active?.loading == true)
+          Padding(
+            padding: EdgeInsets.only(
+              bottom: t.dim('spacing', 'sm', fallback: 8),
             ),
-          ],
+            child: const CircularProgressIndicator(),
+          )
+        else
+          Icon(
+            Icons.public,
+            size: t.dim('metrics', 'iconXl', fallback: 64),
+            color: muted,
+          ),
+        SizedBox(height: t.dim('spacing', 'sm', fallback: 8)),
+        Text(
+          active?.url.isNotEmpty == true
+              ? active!.url
+              : 'Naviguez vers une URL',
+          style: TextStyle(color: muted),
         ),
-      );
+      ],
+    ),
+  );
 }

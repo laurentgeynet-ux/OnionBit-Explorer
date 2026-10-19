@@ -19,20 +19,35 @@ class DesignTokens {
   final Map<String, dynamic> _raw;
 
   /// Charge les tokens depuis l'asset bundle ; repli si absent.
-  static Future<DesignTokens> load() async {
+  static Future<DesignTokens> load() => loadVariant();
+
+  /// Charge une variante nommée (`loadVariant('light')` →
+  /// `assets/design/tokens.light.json` ; nom vide → fichier de
+  /// base). Repli embarqué de la variante si l'asset est absent
+  /// — `light` retombe sur [fallbackLight].
+  static Future<DesignTokens> loadVariant([String variant = '']) async {
     try {
-      final json = await rootBundle.loadString('assets/design/tokens.json');
+      final suffix = variant.isEmpty ? '' : '.$variant';
+      final json = await rootBundle.loadString(
+        'assets/design/tokens$suffix.json',
+      );
       final decoded = jsonDecode(json);
       if (decoded is Map<String, dynamic>) return DesignTokens._(decoded);
     } on Object {
       // Fichier absent/corrompu → repli embarqué (ADR-0005 §conséquences).
     }
-    return fallback;
+    return variant == 'light' ? fallbackLight : fallback;
   }
+
+  /// Schéma de la variante (`meta.scheme` — `'dark'` ou
+  /// `'light'`) : pilote `ColorScheme` dans `buildTheme` et le
+  /// `ThemeMode` de `MaterialApp`.
+  String get scheme => str('meta', 'scheme', fallback: 'dark');
 
   /// Tokens de repli embarqués — utilisés si l'asset est absent,
   /// et dans les tests de widgets sans bundle.
   static final DesignTokens fallback = DesignTokens._(const {
+    'meta': {'scheme': 'dark'},
     'color': {
       'surface': {'base': '#10141A', 'raised': '#1A1F27', 'overlay': '#232A35'},
       'onSurface': {'base': '#E8ECF2', 'muted': '#9AA5B4'},
@@ -47,7 +62,45 @@ class DesignTokens {
       'size': {'sm': 12.0, 'md': 14.0, 'lg': 18.0, 'title': 22.0},
       'weight': {'regular': 400, 'medium': 500, 'bold': 700},
     },
-    'motion': {'durationMs': {'fast': 120, 'normal': 220}},
+    'motion': {
+      'durationMs': {'fast': 120, 'normal': 220},
+    },
+    'elevation': {'low': 1.0, 'high': 8.0},
+    'metrics': {
+      'tabHeight': 36.0,
+      'tabMaxWidth': 220.0,
+      'tabIndicatorWidth': 2.0,
+      'statusBarHeight': 22.0,
+      'iconSm': 14.0,
+      'iconMd': 20.0,
+      'iconXl': 64.0,
+      'progressSize': 12.0,
+      'progressStroke': 2.0,
+    },
+  });
+
+  /// Repli de la variante claire — mêmes métriques que
+  /// [fallback], seule la palette `color` (et `meta.scheme`)
+  /// s'inverse.
+  static final DesignTokens fallbackLight = DesignTokens._(const {
+    'meta': {'scheme': 'light'},
+    'color': {
+      'surface': {'base': '#F4F6F9', 'raised': '#FFFFFF', 'overlay': '#E7EBF1'},
+      'onSurface': {'base': '#1C2430', 'muted': '#5C6B7E'},
+      'accent': {'base': '#2F6FDB', 'pressed': '#1F57B8'},
+      'danger': {'base': '#C44040'},
+      'border': {'base': '#C9D2DE'},
+    },
+    'spacing': {'xs': 4.0, 'sm': 8.0, 'md': 16.0, 'lg': 24.0, 'xl': 40.0},
+    'radius': {'sm': 4.0, 'md': 8.0, 'lg': 14.0},
+    'typography': {
+      'fontFamily': 'Segoe UI',
+      'size': {'sm': 12.0, 'md': 14.0, 'lg': 18.0, 'title': 22.0},
+      'weight': {'regular': 400, 'medium': 500, 'bold': 700},
+    },
+    'motion': {
+      'durationMs': {'fast': 120, 'normal': 220},
+    },
     'elevation': {'low': 1.0, 'high': 8.0},
     'metrics': {
       'tabHeight': 36.0,
@@ -73,7 +126,11 @@ class DesignTokens {
 
   /// Couleur au chemin `section.name` (`color('surface', 'base')`).
   /// Retourne `fallback` si le chemin est absent ou non hexadécimal.
-  Color color(String section, String name, {Color fallback = const Color(0xFF101418)}) {
+  Color color(
+    String section,
+    String name, {
+    Color fallback = const Color(0xFF101418),
+  }) {
     final v = _at(['color', section, name]);
     if (v is String && v.startsWith('#')) {
       final hex = v.substring(1);
@@ -92,7 +149,12 @@ class DesignTokens {
   }
 
   /// Valeur numérique imbriquée (`dim2('typography','size','md')`).
-  double dim2(String section, String group, String name, {double fallback = 0}) {
+  double dim2(
+    String section,
+    String group,
+    String name, {
+    double fallback = 0,
+  }) {
     final v = _at([section, group, name]);
     return v is double ? v : (v is int ? v.toDouble() : fallback);
   }

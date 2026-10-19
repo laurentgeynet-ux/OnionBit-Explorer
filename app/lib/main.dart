@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/design/app_theme.dart';
 import 'core/design/design_tokens.dart';
 import 'core/di/providers.dart';
+import 'core/settings/app_settings.dart';
 import 'features/browser/presentation/browser_page.dart';
 
 void main() {
@@ -15,30 +16,45 @@ void main() {
 }
 
 /// Racine de l'app — attend le chargement des tokens (source de
-/// vérité ADR-0005) puis construit le thème dérivé. Splash minimal
-/// pendant la lecture (la connexion daemon viendra s'y greffer).
+/// vérité ADR-0005) puis construit les thèmes dérivés. Splash
+/// minimal pendant la lecture. `AppSettings.theme` choisit la
+/// variante claire/sombre/système (étape 57) : `MaterialApp`
+/// reçoit `theme` (clair) + `darkTheme` (sombre) + `themeMode`.
 class ExplorerApp extends ConsumerWidget {
   const ExplorerApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final tokens = ref.watch(designTokensProvider);
-    return tokens.when(
-      loading: () => MaterialApp(
-        debugShowCheckedModeBanner: false,
-        theme: buildTheme(DesignTokens.fallback),
-        home: const Scaffold(body: Center(child: CircularProgressIndicator())),
-      ),
-      error: (_, _) => MaterialApp(
-        debugShowCheckedModeBanner: false,
-        theme: buildTheme(DesignTokens.fallback),
-        home: BrowserPage(tokens: DesignTokens.fallback),
-      ),
-      data: (t) => MaterialApp(
-        debugShowCheckedModeBanner: false,
-        theme: buildTheme(t),
-        home: BrowserPage(tokens: t),
-      ),
+    final dark = ref.watch(designTokensProvider);
+    final light = ref.watch(lightTokensProvider);
+    final themeMode = switch (ref.watch(settingsProvider).theme) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+
+    // Les deux jeux de tokens doivent être prêts avant de
+    // construire le thème actif ; chaque état dégrade vers son
+    // repli embarqué (jamais d'écran noir sur asset absent).
+    final darkTokens = dark.value ?? DesignTokens.fallback;
+    final lightTokens = light.value ?? DesignTokens.fallbackLight;
+    final loading = dark.isLoading || light.isLoading;
+    // `system` suit la luminosité OS — les tokens passés aux
+    // widgets doivent refléter le thème réellement actif.
+    final lightActive =
+        themeMode == ThemeMode.light ||
+        (themeMode == ThemeMode.system &&
+            MediaQuery.platformBrightnessOf(context) == Brightness.light);
+    final active = lightActive ? lightTokens : darkTokens;
+
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: buildTheme(lightTokens),
+      darkTheme: buildTheme(darkTokens),
+      themeMode: themeMode,
+      home: loading
+          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          : BrowserPage(tokens: active),
     );
   }
 }

@@ -11,7 +11,9 @@ import 'dart:ui' as ui;
 import 'package:ffi/ffi.dart';
 
 import '../../features/browser/data/browser_repository.dart';
+import '../../features/browser/domain/bookmark.dart';
 import '../../features/browser/domain/browser_tab.dart';
+import '../../features/browser/domain/history_entry.dart';
 import '../config/app_config.dart';
 
 // ---------------------------------------------------------------------------
@@ -29,32 +31,80 @@ typedef _OpenTabD = int Function(_NativeHandle);
 typedef _TabCodeN = ffi.Int32 Function(_NativeHandle, ffi.Uint64);
 typedef _TabCodeD = int Function(_NativeHandle, int);
 typedef _NavigateN = ffi.Int32 Function(
-    _NativeHandle, ffi.Uint64, ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
 typedef _NavigateD = int Function(
-    _NativeHandle, int, ffi.Pointer<ffi.Uint8>, int);
+  _NativeHandle,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
 typedef _ViewportN = ffi.Int32 Function(
-    _NativeHandle, ffi.Float, ffi.Float, ffi.Float);
-typedef _ViewportD = int Function(
-    _NativeHandle, double, double, double);
-typedef _InputN = ffi.Int32 Function(_NativeHandle, ffi.Uint64, ffi.Uint8,
-    ffi.Float, ffi.Float, ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
-typedef _InputD = int Function(_NativeHandle, int, int, double, double,
-    ffi.Pointer<ffi.Uint8>, int);
+  _NativeHandle,
+  ffi.Float,
+  ffi.Float,
+  ffi.Float,
+);
+typedef _ViewportD = int Function(_NativeHandle, double, double, double);
+typedef _InputN = ffi.Int32 Function(
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Uint8,
+  ffi.Float,
+  ffi.Float,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
+typedef _InputD = int Function(
+  _NativeHandle,
+  int,
+  int,
+  double,
+  double,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
 typedef _FrameSizeN = ffi.Int32 Function(
-    _NativeHandle, ffi.Uint64, ffi.Pointer<ffi.Uint32>, ffi.Pointer<ffi.Uint32>);
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Pointer<ffi.Uint32>,
+  ffi.Pointer<ffi.Uint32>,
+);
 typedef _FrameSizeD = int Function(
-    _NativeHandle, int, ffi.Pointer<ffi.Uint32>, ffi.Pointer<ffi.Uint32>);
+  _NativeHandle,
+  int,
+  ffi.Pointer<ffi.Uint32>,
+  ffi.Pointer<ffi.Uint32>,
+);
 typedef _FrameCopyN = ffi.IntPtr Function(
-    _NativeHandle, ffi.Uint64, ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
 typedef _FrameCopyD = int Function(
-    _NativeHandle, int, ffi.Pointer<ffi.Uint8>, int);
-typedef _BufReadN = ffi.IntPtr Function(
-    ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
+  _NativeHandle,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
+typedef _BufReadN = ffi.IntPtr Function(ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
 typedef _BufReadD = int Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _TabUrlN = ffi.IntPtr Function(
-    _NativeHandle, ffi.Uint64, ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
 typedef _TabUrlD = int Function(
-    _NativeHandle, int, ffi.Pointer<ffi.Uint8>, int);
+  _NativeHandle,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
 
 /// Erreur remontée par `explorer-ffi` — détail via
 /// `explorer_last_error`.
@@ -80,32 +130,35 @@ class FfiException implements Exception {
 ///   [fetchFrameImage] — `ui.Image` sans aucun codec.
 class FfiEngine implements BrowserRepository {
   FfiEngine._(ffi.DynamicLibrary lib)
-      : _create = lib.lookupFunction<_CreateN, _CreateD>('explorer_create'),
-        _destroy =
-            lib.lookupFunction<_DestroyN, _DestroyD>('explorer_destroy'),
-        _openTab =
-            lib.lookupFunction<_OpenTabN, _OpenTabD>('explorer_open_tab'),
-        _closeTab =
-            lib.lookupFunction<_TabCodeN, _TabCodeD>('explorer_close_tab'),
-        _navigate =
-            lib.lookupFunction<_NavigateN, _NavigateD>('explorer_navigate'),
-        _reload =
-            lib.lookupFunction<_TabCodeN, _TabCodeD>('explorer_reload'),
-        _goBack =
-            lib.lookupFunction<_TabCodeN, _TabCodeD>('explorer_go_back'),
-        _goForward =
-            lib.lookupFunction<_TabCodeN, _TabCodeD>('explorer_go_forward'),
-        _setViewport = lib.lookupFunction<_ViewportN, _ViewportD>(
-            'explorer_set_viewport'),
-        _input = lib.lookupFunction<_InputN, _InputD>('explorer_input'),
-        _tick = lib.lookupFunction<_TabCodeN, _TabCodeD>('explorer_tick'),
-        _frameSize = lib.lookupFunction<_FrameSizeN, _FrameSizeD>(
-            'explorer_frame_size'),
-        _frameCopy = lib.lookupFunction<_FrameCopyN, _FrameCopyD>(
-            'explorer_frame_copy'),
-        _tabUrl = lib.lookupFunction<_TabUrlN, _TabUrlD>('explorer_tab_url'),
-        _lastError =
-            lib.lookupFunction<_BufReadN, _BufReadD>('explorer_last_error') {
+    : _create = lib.lookupFunction<_CreateN, _CreateD>('explorer_create'),
+      _destroy = lib.lookupFunction<_DestroyN, _DestroyD>('explorer_destroy'),
+      _openTab = lib.lookupFunction<_OpenTabN, _OpenTabD>('explorer_open_tab'),
+      _closeTab = lib.lookupFunction<_TabCodeN, _TabCodeD>(
+        'explorer_close_tab',
+      ),
+      _navigate = lib.lookupFunction<_NavigateN, _NavigateD>(
+        'explorer_navigate',
+      ),
+      _reload = lib.lookupFunction<_TabCodeN, _TabCodeD>('explorer_reload'),
+      _goBack = lib.lookupFunction<_TabCodeN, _TabCodeD>('explorer_go_back'),
+      _goForward = lib.lookupFunction<_TabCodeN, _TabCodeD>(
+        'explorer_go_forward',
+      ),
+      _setViewport = lib.lookupFunction<_ViewportN, _ViewportD>(
+        'explorer_set_viewport',
+      ),
+      _input = lib.lookupFunction<_InputN, _InputD>('explorer_input'),
+      _tick = lib.lookupFunction<_TabCodeN, _TabCodeD>('explorer_tick'),
+      _frameSize = lib.lookupFunction<_FrameSizeN, _FrameSizeD>(
+        'explorer_frame_size',
+      ),
+      _frameCopy = lib.lookupFunction<_FrameCopyN, _FrameCopyD>(
+        'explorer_frame_copy',
+      ),
+      _tabUrl = lib.lookupFunction<_TabUrlN, _TabUrlD>('explorer_tab_url'),
+      _lastError = lib.lookupFunction<_BufReadN, _BufReadD>(
+        'explorer_last_error',
+      ) {
     _handle = _create();
     if (_handle == ffi.nullptr) {
       throw FfiException(lastError());
@@ -133,8 +186,8 @@ class FfiEngine implements BrowserRepository {
     final names = Platform.isWindows
         ? ['explorer_ffi.dll']
         : Platform.isMacOS
-            ? ['libexplorer_ffi.dylib']
-            : ['libexplorer_ffi.so'];
+        ? ['libexplorer_ffi.dylib']
+        : ['libexplorer_ffi.so'];
     return [
       for (final n in names) ...[
         // À côté de l'exécutable (déploiement).
@@ -215,9 +268,7 @@ class FfiEngine implements BrowserRepository {
     final id = _idOf(tabId);
     final bytes = url.toNativeUtf8();
     try {
-      if (_navigate(
-              _handle, id, bytes.cast<ffi.Uint8>(), bytes.length) !=
-          0) {
+      if (_navigate(_handle, id, bytes.cast<ffi.Uint8>(), bytes.length) != 0) {
         _fail();
       }
     } finally {
@@ -254,16 +305,13 @@ class FfiEngine implements BrowserRepository {
   }
 
   @override
-  Future<BrowserTab?> reload(String tabId) =>
-      _action(tabId, _reload);
+  Future<BrowserTab?> reload(String tabId) => _action(tabId, _reload);
 
   @override
-  Future<BrowserTab?> back(String tabId) =>
-      _action(tabId, _goBack);
+  Future<BrowserTab?> back(String tabId) => _action(tabId, _goBack);
 
   @override
-  Future<BrowserTab?> forward(String tabId) =>
-      _action(tabId, _goForward);
+  Future<BrowserTab?> forward(String tabId) => _action(tabId, _goForward);
 
   Future<BrowserTab?> _action(String tabId, _TabCodeD f) async {
     final id = _idOf(tabId);
@@ -329,7 +377,9 @@ class FfiEngine implements BrowserRepository {
 
   @override
   Future<Map<String, dynamic>> sendInput(
-      String tabId, Map<String, dynamic> ev) async {
+    String tabId,
+    Map<String, dynamic> ev,
+  ) async {
     final id = _idOf(tabId);
     final kind = switch (ev['type']) {
       'click' => 0,
@@ -349,8 +399,15 @@ class FfiEngine implements BrowserRepository {
         keyBuf = ('${ev['key'] ?? ''}').toNativeUtf8();
         key = keyBuf.cast<ffi.Uint8>();
       }
-      final code = _input(_handle, id, kind, x, y, key,
-          key == ffi.nullptr ? 0 : keyBuf.length);
+      final code = _input(
+        _handle,
+        id,
+        kind,
+        x,
+        y,
+        key,
+        key == ffi.nullptr ? 0 : keyBuf.length,
+      );
       if (code < 0) _fail();
       return {
         'result': const [
@@ -371,9 +428,33 @@ class FfiEngine implements BrowserRepository {
 
   @override
   Future<void> setViewport(
-      String tabId, double w, double h, double scale) async {
+    String tabId,
+    double w,
+    double h,
+    double scale,
+  ) async {
     if (_setViewport(_handle, w, h, scale) != 0) _fail();
   }
+
+  // ------------------------------------------------------------------
+  // Bibliothèque — dégradation documentée (étape 57) : l'ABI
+  // n'exporte ni signets ni historique (le store du profil est
+  // câblé côté daemon uniquement). Listes vides / no-op → l'UI
+  // affiche le panneau vide plutôt que crasher ; à étendre via
+  // de nouveaux exports quand le profil FFI existera.
+  // ------------------------------------------------------------------
+
+  @override
+  Future<List<Bookmark>> bookmarks() async => const [];
+
+  @override
+  Future<bool> addBookmark(String url, {String title = ''}) async => false;
+
+  @override
+  Future<bool> removeBookmark(String url) async => false;
+
+  @override
+  Future<List<HistoryEntry>> history() async => const [];
 
   /// Avance les animations moteur — `true` si la frame a été
   /// invalidée (le contrôleur la retire). Remplace le SSE

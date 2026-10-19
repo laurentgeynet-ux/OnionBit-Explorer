@@ -11,8 +11,12 @@ import '../../../core/api/api_client.dart';
 import '../../../core/api/events_client.dart';
 import '../../../core/api/ffi_engine.dart';
 import '../../../core/di/providers.dart';
+import '../../../core/platform/env.dart';
+import '../../../core/settings/app_settings.dart';
 import '../data/browser_repository.dart';
+import '../domain/bookmark.dart';
 import '../domain/browser_tab.dart';
+import '../domain/history_entry.dart';
 
 /// État UI du navigateur : onglets, onglet actif, disponibilité
 /// du daemon, dernière erreur métier.
@@ -93,32 +97,111 @@ class BrowserState {
     bool? fieldFocused,
     Map<String, String>? pageErrors,
     Map<String, ui.Image>? rawFrames,
-  }) =>
-      BrowserState(
-        tabs: tabs ?? this.tabs,
-        activeId: activeId ?? this.activeId,
-        frames: frames ?? this.frames,
-        rawFrames: rawFrames ?? this.rawFrames,
-        daemonOnline: daemonOnline ?? this.daemonOnline,
-        lastError: lastError != null ? lastError() : this.lastError,
-        frameTick: frameTick ?? this.frameTick,
-        hoverUrl: hoverUrl != null ? hoverUrl() : this.hoverUrl,
-        hoverEditable: hoverEditable ?? this.hoverEditable,
-        fieldFocused: fieldFocused ?? this.fieldFocused,
-        pageErrors: pageErrors ?? this.pageErrors,
-      );
+  }) => BrowserState(
+    tabs: tabs ?? this.tabs,
+    activeId: activeId ?? this.activeId,
+    frames: frames ?? this.frames,
+    rawFrames: rawFrames ?? this.rawFrames,
+    daemonOnline: daemonOnline ?? this.daemonOnline,
+    lastError: lastError != null ? lastError() : this.lastError,
+    frameTick: frameTick ?? this.frameTick,
+    hoverUrl: hoverUrl != null ? hoverUrl() : this.hoverUrl,
+    hoverEditable: hoverEditable ?? this.hoverEditable,
+    fieldFocused: fieldFocused ?? this.fieldFocused,
+    pageErrors: pageErrors ?? this.pageErrors,
+  );
 }
 
 /// Dépôt injectable (tests : `Provider.overrideWith`).
 /// `auto` : `FfiEngine` (moteur in-process, ADR-0018) si la
 /// bibliothèque dynamique charge, sinon le repo REST daemon.
-final browserRepositoryProvider = Provider<BrowserRepository>(
-  (ref) {
-    final cfg = ref.watch(configProvider);
-    final ffi = FfiEngine.tryLoad(cfg);
-    ref.onDispose(() => ffi?.dispose());
-    return ffi ?? BrowserRepository(ref.watch(apiClientProvider));
-  },
+/// Le réglage `AppSettings.engine` l'emporte sur l'env
+/// (`effectiveEngineModeProvider`) ; `profileDir` est exporté
+/// vers `EXPLORER_PROFILE` **avant** le chargement FFI —
+/// changement de mode = re-création du provider (l'ancien
+/// moteur est disposé via `onDispose`).
+final browserRepositoryProvider = Provider<BrowserRepository>((ref) {
+  final cfg = ref.watch(configProvider);
+  final mode = ref.watch(effectiveEngineModeProvider);
+  final profile = ref.watch(settingsProvider).profileDir;
+  if (profile.isNotEmpty) setProcessEnv('EXPLORER_PROFILE', profile);
+  final ffi = mode == 'rest' ? null : FfiEngine.tryLoad(cfg);
+  ref.onDispose(() => ffi?.dispose());
+  return ffi ?? BrowserRepository(ref.watch(apiClientProvider));
+});
+
+/// Signets du store moteur — `AsyncNotifier` rechargé après
+/// chaque mutation (`toggle`/`remove`). En mode FFI la liste
+/// reste vide (dégradation documentée, ADR-0018).
+class BookmarksController extends AsyncNotifier<List<Bookmark>> {
+  @override
+  Future<List<Bookmark>> build() =>
+      ref.watch(browserRepositoryProvider).bookmarks();
+
+  /// Ajoute le signet s'il est absent, le retire sinon —
+  /// `true` si l'URL est signetée après l'appel.
+  Future<bool> toggle(String url, {String title = ''}) async {
+    if (url.isEmpty || url == 'about:blank') return false;
+    final repo = ref.read(browserRepositoryProvider);
+    final list = state.value ?? const <Bookmark>[];
+    final marked = list.any((b) => b.url == url);
+    try {
+      if (marked) {
+        await repo.removeBookmark(url);
+      } else {
+        await repo.addBookmark(url, title: title);
+      }
+    } on Object {
+      return marked;
+    }
+    state = AsyncData(await repo.bookmarks());
+    return !marked;
+  }
+
+  /// Retire un signet du store puis recharge la liste.
+  Future<void> remove(String url) async {
+    final repo = ref.read(browserRepositoryProvider);
+    try {
+      await repo.removeBookmark(url);
+    } on Object {
+      // Daemon injoignable → la liste visible reste telle quelle.
+      return;
+    }
+    state = AsyncData(await repo.bookmarks());
+  }
+}
+
+final bookmarksProvider =
+    AsyncNotifierProvider<BookmarksController, List<Bookmark>>(
+      BookmarksController.new,
+    );
+
+/// Historique de navigation du store moteur — rechargé à
+/// chaque ouverture du panneau (`autoDispose`).
+final historyProvider = FutureProvider.autoDispose<List<HistoryEntry>>(
+  (ref) => ref.watch(browserRepositoryProvider).history(),
+);
+
+/// Facteur de zoom d'affichage (étape 57) — implémenté
+/// côté UI via le viewport moteur : `setViewport(w/z, h/z,
+/// z×dpr)` refond le layout à `w/z` unités CSS puis rasterise
+/// net à `w×dpr` px physiques (ADR-0021 — aucune API moteur).
+/// Borné pour rester dans les budgets de frame.
+class ZoomController extends Notifier<double> {
+  static const min = 0.25;
+  static const max = 4.0;
+  static const step = 1.25;
+
+  @override
+  double build() => 1.0;
+
+  void zoomIn() => state = (state * step).clamp(min, max);
+  void zoomOut() => state = (state / step).clamp(min, max);
+  void reset() => state = 1.0;
+}
+
+final zoomProvider = NotifierProvider<ZoomController, double>(
+  ZoomController.new,
 );
 
 /// Contrôleur navigateur — pilote les actions REST et applique
@@ -200,19 +283,24 @@ class BrowserController extends Notifier<BrowserState> {
     final tabId = '${ev.data['tab']}';
     switch (ev.name) {
       case 'navigated':
-        _patch(tabId, (t) => t.copyWith(
-              url: ev.data['url'] as String? ?? t.url,
-              title: ev.data['title'] as String? ?? t.title,
-              loading: false,
-            ));
+        _patch(
+          tabId,
+          (t) => t.copyWith(
+            url: ev.data['url'] as String? ?? t.url,
+            title: ev.data['title'] as String? ?? t.title,
+            loading: false,
+          ),
+        );
         if (state.pageErrors.containsKey(tabId)) {
           state = state.copyWith(
             pageErrors: {...state.pageErrors}..remove(tabId),
           );
         }
       case 'title_changed':
-        _patch(tabId, (t) =>
-            t.copyWith(title: ev.data['title'] as String? ?? t.title));
+        _patch(
+          tabId,
+          (t) => t.copyWith(title: ev.data['title'] as String? ?? t.title),
+        );
       case 'frame_invalidated':
         if (tabId == state.activeId) {
           state = state.copyWith(frameTick: state.frameTick + 1);
@@ -223,8 +311,7 @@ class BrowserController extends Notifier<BrowserState> {
         final msg = ev.data['message'] as String?;
         state = state.copyWith(
           lastError: () => msg,
-          pageErrors:
-              msg == null ? null : {...state.pageErrors, tabId: msg},
+          pageErrors: msg == null ? null : {...state.pageErrors, tabId: msg},
         );
       case 'tab_closed':
         final tabs = state.tabs.where((t) => t.id != tabId).toList();
@@ -286,9 +373,7 @@ class BrowserController extends Notifier<BrowserState> {
         final img = await engine.fetchFrameImage(tabId);
         if (img == null || !ref.mounted) return;
         final old = state.rawFrames[tabId];
-        state = state.copyWith(
-          rawFrames: {...state.rawFrames, tabId: img},
-        );
+        state = state.copyWith(rawFrames: {...state.rawFrames, tabId: img});
         old?.dispose();
       } on Object {
         // Moteur indisponible → le prochain tick retentera.
@@ -298,9 +383,7 @@ class BrowserController extends Notifier<BrowserState> {
     try {
       final bytes = await _repo.fetchFrame(tabId);
       if (bytes == null || !ref.mounted) return;
-      state = state.copyWith(
-        frames: {...state.frames, tabId: bytes},
-      );
+      state = state.copyWith(frames: {...state.frames, tabId: bytes});
     } on Object {
       // Daemon coupé → la prochaine invalidation retentera.
     }
@@ -329,20 +412,16 @@ class BrowserController extends Notifier<BrowserState> {
   Future<void> click(double x, double y) async {
     final res = await _sendInput({'type': 'click', 'x': x, 'y': y});
     if (res == null || !ref.mounted) return;
-    state = state.copyWith(
-      fieldFocused: res['result'] == 'focused',
-    );
+    state = state.copyWith(fieldFocused: res['result'] == 'focused');
   }
 
   /// Frappe clavier → `input key` — n'a de sens que si un
   /// champ est focalisé (`fieldFocused`).
-  Future<void> key(String key) =>
-      _sendInput({'type': 'key', 'key': key});
+  Future<void> key(String key) => _sendInput({'type': 'key', 'key': key});
 
   /// Envoie un événement d'entrée ; retourne le JSON de
   /// résultat (`null` en cas d'erreur — déjà en `lastError`).
-  Future<Map<String, dynamic>?> _sendInput(
-      Map<String, dynamic> ev) async {
+  Future<Map<String, dynamic>?> _sendInput(Map<String, dynamic> ev) async {
     final id = state.activeId;
     if (id == null) return null;
     try {
@@ -419,5 +498,6 @@ class BrowserController extends Notifier<BrowserState> {
 }
 
 /// Provider du contrôleur — l'UI lit `browserProvider`.
-final browserProvider =
-    NotifierProvider<BrowserController, BrowserState>(BrowserController.new);
+final browserProvider = NotifierProvider<BrowserController, BrowserState>(
+  BrowserController.new,
+);

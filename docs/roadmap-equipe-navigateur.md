@@ -466,10 +466,26 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `data_url_images_paint_inline`. **Vérifié terrain mission
   13** : b1–b4 = 1 800 px non-blancs (`<img>`/`<object>`/
   cascade `data:` peints) ; img http + data = 12 800 px.
-- [ ] **Étape 57. UI Flutter v2** (ex-65) : thème clair
-  (`tokens.json` variante), settings (moteur REST/FFI, thème,
-  profil), UI historique + bookmarks (store core existant),
-  arbitrage find-in-page / zoom (petit ADR si reclassés).
+- [x] **Étape 57. UI Flutter v2** (ex-65) : **thème clair** —
+  variante `tokens.light.json` + `meta.scheme` (pilote
+  `ColorScheme` et `ThemeMode` : clair/sombre/système, repli
+  embarqué `fallbackLight`) ; **settings** persistés
+  (`ui_settings.json` zéro-dep dart:io) — thème, moteur
+  auto/REST/FFI (re-création du dépôt via provider), profil
+  `EXPLORER_PROFILE` exporté avant chargement FFI ;
+  **bibliothèque** — `GET/POST/DELETE /api/bookmarks` +
+  `GET /api/history` consommés (étoile navbar togglée,
+  panneaux historique/signets — FFI dégradé : ABI sans store,
+  documenté) ; **arbitrage ADR-0021** : **zoom livré côté UI**
+  — `setViewport(w/z, h/z, z·dpr)` = reflow réel + raster net,
+  entrées ÷(z·dpr), Ctrl±/0 + menu — **find-in-page reclassé**
+  (surface moteur requise → étape dédiée + journal).
+  Régressions : signet toggle, historique provider, zoom
+  borné, store réglages roundtrip, thème clair dérivé.
+- [ ] **Étape 57bis. Find-in-page** (reclassé depuis 57,
+  ADR-0021) : contrat moteur à ouvrir — recherche textuelle
+  DOM → surlignage display-list + scroll-vers-occurrence
+  (demande PIPE dans `interface-equipes.md`), puis UI Ctrl+F.
 - [ ] **Étape 58. `<video>`/`<audio>`** (ex-66) : arbitrage
   décodage pur Rust requis (ADR) — sinon stubs propres + affiche.
 - [ ] **Étape 60. Éclater `session.rs`** (audit externe) :

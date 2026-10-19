@@ -3,7 +3,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import '../../../core/api/api_client.dart';
+import '../domain/bookmark.dart';
 import '../domain/browser_tab.dart';
+import '../domain/history_entry.dart';
 
 /// Accès aux onglets via le contrat REST du daemon (ADR-0003) :
 /// `GET/POST /api/tabs`, `…/navigate`, `…/reload`, `…/back`,
@@ -38,8 +40,10 @@ class BrowserRepository {
   /// Demande la navigation d'un onglet vers `url` — renvoie
   /// l'état résultant de l'onglet.
   Future<BrowserTab?> navigate(String tabId, String url) async {
-    final res =
-        await _api.postJson('/api/tabs/$tabId/navigate', body: {'url': url});
+    final res = await _api.postJson(
+      '/api/tabs/$tabId/navigate',
+      body: {'url': url},
+    );
     return res is Map<String, dynamic> ? BrowserTab.fromJson(res) : null;
   }
 
@@ -76,13 +80,73 @@ class BrowserRepository {
   /// `mousemove`, `scroll`, `key` (étape 26). Retourne le
   /// résultat (`{"result":"hover","url":…,"editable":…}`…).
   Future<Map<String, dynamic>> sendInput(
-      String tabId, Map<String, dynamic> ev) async {
+    String tabId,
+    Map<String, dynamic> ev,
+  ) async {
     final res = await _api.postJson('/api/tabs/$tabId/input', body: ev);
     return res is Map<String, dynamic> ? res : const {};
   }
 
   /// Viewport moteur (`POST …/viewport`) — envoyé au resize.
+  /// `scale` = facteur DPI : l'app compose zoom × dpr (étape 57).
   Future<void> setViewport(String tabId, double w, double h, double scale) =>
-      _api.postJson('/api/tabs/$tabId/viewport',
-          body: {'w': w, 'h': h, 'scale': scale});
+      _api.postJson(
+        '/api/tabs/$tabId/viewport',
+        body: {'w': w, 'h': h, 'scale': scale},
+      );
+
+  // ------------------------------------------------------------------
+  // Bibliothèque — signets + historique du store moteur (étape 57).
+  // ------------------------------------------------------------------
+
+  /// Signets persistés (`GET /api/bookmarks` → `{bookmarks:[…]}`).
+  Future<List<Bookmark>> bookmarks() async {
+    final res = await _api.getJson('/api/bookmarks');
+    if (res is Map<String, dynamic> && res['bookmarks'] is List) {
+      return (res['bookmarks'] as List)
+          .whereType<Map<String, dynamic>>()
+          .map(Bookmark.fromJson)
+          .where((b) => b.url.isNotEmpty)
+          .toList();
+    }
+    throw const ApiException('GET /api/bookmarks : réponse inattendue');
+  }
+
+  /// Ajoute un signet (`POST /api/bookmarks`) — `false` si déjà
+  /// présent (409 dédupliqué côté moteur).
+  Future<bool> addBookmark(String url, {String title = ''}) async {
+    try {
+      await _api.postJson('/api/bookmarks', body: {'url': url, 'title': title});
+      return true;
+    } on ApiException catch (e) {
+      if (e.statusCode == 409) return false;
+      rethrow;
+    }
+  }
+
+  /// Retire un signet (`DELETE /api/bookmarks` corps `{url}`) —
+  /// `false` si absent (404).
+  Future<bool> removeBookmark(String url) async {
+    try {
+      await _api.deleteJson('/api/bookmarks', body: {'url': url});
+      return true;
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) return false;
+      rethrow;
+    }
+  }
+
+  /// Historique persisté (`GET /api/history` → `{history:[…]}`,
+  /// le plus récent d'abord).
+  Future<List<HistoryEntry>> history() async {
+    final res = await _api.getJson('/api/history');
+    if (res is Map<String, dynamic> && res['history'] is List) {
+      return (res['history'] as List)
+          .whereType<Map<String, dynamic>>()
+          .map(HistoryEntry.fromJson)
+          .where((e) => e.url.isNotEmpty)
+          .toList();
+    }
+    throw const ApiException('GET /api/history : réponse inattendue');
+  }
 }

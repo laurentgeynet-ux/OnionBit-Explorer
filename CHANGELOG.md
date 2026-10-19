@@ -9,6 +9,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 57 — UI Flutter v2** (`app/`) : thème clair via
+  variante `tokens.light.json` (`meta.scheme` pilote
+  `ColorScheme`/`ThemeMode` — clair, sombre ou système) ;
+  réglages persistés (`AppSettings` → `ui_settings.json`,
+  zéro dépendance) : thème, moteur auto/REST/FFI (le dépôt
+  se recrée via provider), répertoire de profil exporté vers
+  `EXPLORER_PROFILE` avant chargement FFI (`setenv` process,
+  effet au prochain démarrage du moteur) ; bibliothèque —
+  signets + historique du store moteur consommés
+  (`/api/bookmarks`, `/api/history` : étoile de la barre,
+  panneaux historique/signets — mode FFI dégradé, l'ABI
+  n'exporte pas le store) ; zoom de page **côté UI**
+  (ADR-0021 : `setViewport(w/z, h/z, z·dpr)` — reflow réel,
+  raster net, entrées ÷`z·dpr`, Ctrl±/0 + menu, borné
+  [0,25 ; 4]) ; find-in-page reclassé (étape 57bis — surface
+  moteur requise).
+
 - **Étape 55g-suite — resyncs pompe coalescés + cible
   `sync_profile`** (`explorer-core`, terrain mission 13) :
   le gel ~7 min terrain s'explique par des apply **en

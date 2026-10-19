@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "meta": {
+    "scheme": "light"
+  },
+  "color": {
+    "surface": {
+      "base": "#F4F6F9",
+      "raised": "#FFFFFF",
+      "overlay": "#E7EBF1"
+    },
+    "onSurface": {
+      "base": "#1C2430",
+      "muted": "#5C6B7E"
+    },
+    "accent": {
+      "base": "#2F6FDB",
+      "pressed": "#1F57B8"
+    },
+    "danger": {
+      "base": "#C44040"
+    },
+    "border": {
+      "base": "#C9D2DE"
+    }
+  },
+  "spacing": {
+    "xs": 4.0,
+    "sm": 8.0,
+    "md": 16.0,
+    "lg": 24.0,
+    "xl": 40.0
+  },
+  "radius": {
+    "sm": 4.0,
+    "md": 8.0,
+    "lg": 14.0
+  },
+  "typography": {
+    "fontFamily": "Segoe UI",
+    "size": {
+      "sm": 12.0,
+      "md": 14.0,
+      "lg": 18.0,
+      "title": 22.0
+    },
+    "weight": {
+      "regular": 400,
+      "medium": 500,
+      "bold": 700
+    }
+  },
+  "motion": {
+    "durationMs": {
+      "fast": 120,
+      "normal": 220
+    },
+    "curve": "easeInOut"
+  },
+  "elevation": {
+    "low": 1.0,
+    "high": 8.0
+  },
+  "metrics": {
+    "tabHeight": 36.0,
+    "tabMaxWidth": 220.0,
+    "tabIndicatorWidth": 2.0,
+    "statusBarHeight": 22.0,
+    "iconSm": 14.0,
+    "iconMd": 20.0,
+    "iconXl": 64.0,
+    "progressSize": 12.0,
+    "progressStroke": 2.0
+  }
+}

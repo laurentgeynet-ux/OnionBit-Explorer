@@ -8,15 +8,31 @@ import '../api/api_client.dart';
 import '../api/events_client.dart';
 import '../config/app_config.dart';
 import '../design/design_tokens.dart';
+import '../settings/app_settings.dart';
 
 /// Configuration runtime — surchargeable en test via `override`.
 final configProvider = Provider<AppConfig>((ref) => const AppConfig());
 
 /// Tokens de design — chargés au démarrage (`DesignTokens.load`),
-/// repli embarqué si l'asset est absent.
+/// repli embarqué si l'asset est absent. C'est la variante
+/// **sombre** (`meta.scheme = "dark"`).
 final designTokensProvider = FutureProvider<DesignTokens>(
   (ref) => DesignTokens.load(),
 );
+
+/// Variante **claire** des tokens (`tokens.light.json`) — chargée
+/// une fois, utilisée quand `AppSettings.theme` l'exige
+/// (étape 57).
+final lightTokensProvider = FutureProvider<DesignTokens>(
+  (ref) => DesignTokens.loadVariant('light'),
+);
+
+/// Mode moteur effectif — `AppSettings.engine` l'emporte ;
+/// `'auto'` défère à `AppConfig.engineMode` (env `EXPLORER_ENGINE`).
+final effectiveEngineModeProvider = Provider<String>((ref) {
+  final s = ref.watch(settingsProvider).engine;
+  return s == 'auto' ? ref.watch(configProvider).engineMode : s;
+});
 
 /// Client REST du daemon (dispose au shutdown du provider scope).
 final apiClientProvider = Provider<ApiClient>((ref) {
