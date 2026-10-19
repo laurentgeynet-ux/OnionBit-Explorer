@@ -9,6 +9,12 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-21 — Valeur des contrôles peinte** (`explorer-layout`) :
+  le `Text` synthétique d'`<input>`/`<select>` est enveloppé
+  dans un `AnonymousBlock` — avant, enfant inline nu d'une
+  boîte atomique, il n'entrait jamais dans `lines` (le texte
+  tapé restait invisible). `DisplayItem::Text` émis.
+
 - **R-20 — Jamais-rendus robustes** (`explorer-layout`) :
   `script|style|template|head|meta|link|base|title` ne
   produisent aucune boîte même sans style calculé —

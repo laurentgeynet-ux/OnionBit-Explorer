@@ -584,3 +584,22 @@ fn svg_inline_rasterise_des_pixels() {
     let px = &frame.pixels[idx..idx + 4];
     assert!(px[0] > 200 && px[1] < 60, "pixel rouge attendu, got {px:?}");
 }
+
+#[test]
+fn controle_input_peint_sa_valeur() {
+    // R-21 : la valeur synthétique d'un `<input>` doit
+    // produire un item Text (avant : enfant Text nu dans une
+    // boîte atomique → jamais posé en ligne → invisible).
+    let (_dom, _bx, items) = dl("<input value=\"abc\">", "body{margin:0}");
+    let has_text = items.iter().any(|i| matches!(i, DisplayItem::Text { .. }));
+    assert!(
+        has_text,
+        "valeur input → item Text : {}",
+        explorer_render::DisplayList {
+            items: items.clone(),
+            width: 400.0,
+            height: 200.0
+        }
+        .dump()
+    );
+}

@@ -284,40 +284,11 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
             .flatten()
             .unwrap_or_default()
             .to_lowercase();
-        let (text, checked) = control_paint(dom, root, &ty);
-        return Some(LayoutBox {
-            kind: box_kind_of(&style),
-            node: Some(root),
-            style: style.clone(),
-            text: None,
-            children: text
-                .map(|t| {
-                    vec![LayoutBox {
-                        kind: BoxKind::Text,
-                        node: Some(root),
-                        style: style.clone(),
-                        text: Some(t),
-                        children: Vec::new(),
-                        lines: Vec::new(),
-                        rect: Rect::default(),
-                        position: Position::Static,
-                        float: Float::None,
-                        overflow: Overflow::Visible,
-                        z_index: 0,
-                        intrinsic: None,
-                        control_checked: false,
-                    }]
-                })
-                .unwrap_or_default(),
-            lines: Vec::new(),
-            rect: Rect::default(),
-            position: Position::Static,
-            float: Float::None,
-            overflow: Overflow::Visible,
-            z_index: 0,
-            intrinsic: None,
-            control_checked: checked,
-        });
+        return Some(control_box(
+            root,
+            style.clone(),
+            control_paint(dom, root, &ty),
+        ));
     }
     let kind = box_kind_of(&style);
     let mut b = LayoutBox {
@@ -601,4 +572,41 @@ fn leaf_box(
         intrinsic,
         control_checked: false,
     }
+}
+
+/// Bras `input`/`select` : boîte atomique + valeur en enfant
+/// `Text` **enveloppé d'un `AnonymousBlock`** (R-21 — un texte
+/// nu ne rentrait jamais dans `lines`, la valeur tapée restait
+/// invisible). `checked` = marque peinte au rendu.
+fn control_box(
+    node: NodeId,
+    style: ComputedStyle,
+    (text, checked): (Option<String>, bool),
+) -> LayoutBox {
+    let children = text
+        .map(|t| {
+            wrap_anonymous(
+                vec![LayoutBox {
+                    kind: BoxKind::Text,
+                    node: Some(node),
+                    style: style.clone(),
+                    text: Some(t),
+                    children: Vec::new(),
+                    lines: Vec::new(),
+                    rect: Rect::default(),
+                    position: Position::Static,
+                    float: Float::None,
+                    overflow: Overflow::Visible,
+                    z_index: 0,
+                    intrinsic: None,
+                    control_checked: false,
+                }],
+                &style,
+            )
+        })
+        .unwrap_or_default();
+    let mut bx = leaf_box(box_kind_of(&style), node, style, None);
+    bx.children = children;
+    bx.control_checked = checked;
+    bx
 }

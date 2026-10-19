@@ -196,7 +196,7 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   le nœud (injection DOM post-compute = le cas wikipedia ;
   le test reproduit l'injection sans style). `noscript`
   exclus : scripting off ⇒ contenu rendu (UA).
-- [ ] **R-21. Texte synthétique des contrôles hors ligne**
+- [x] **R-21. Texte synthétique des contrôles hors ligne**
   (bug terrain mission 5, journal `interface-equipes.md`,
   repro : `typed_text_repaints_new_value` ignoré) : la valeur
   des `<input>`/`<select>` est synthétisée en enfant `Text`,
@@ -204,9 +204,12 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `flow_children`/`layout_block` avance le curseur sur le
   `Text` nu sans l'ajouter aux `lines` → aucun
   `DisplayItem::Text` → le glyphe tapé reste invisible alors
-  que `edited`/`frame_invalidated` partent. Fix : poser le
-  texte synthétique dans la boîte contrôle (enfant ligne ou
-  fragment atomique peint), puis **réactiver le test ignoré**.
+  que `edited`/`frame_invalidated` partent. **Fix** : enfant
+  `Text` enveloppé dans un `AnonymousBlock` dans
+  `build_box_tree_sized` (chemin standard du flux en-ligne) —
+  le texte est posé en ligne et émis en `DisplayItem::Text`
+  (test `controle_input_peint_sa_valeur` côté render).
+  Réactivation du test NAV = à leur commit (fichier WIP).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
