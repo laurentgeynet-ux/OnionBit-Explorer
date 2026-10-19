@@ -317,7 +317,11 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   POST** (terrain mission 6) tranchée navigateur-réel :
   l'entrée est poussée **sans dédup** et la requête
   complète est rejouée au déplacement/`reload` — re-POST,
-  plus de re-GET.
+  plus de re-GET. **Vérifié terrain mission 9** : back
+  ~40 s → **46 ms** zéro hit réseau, forward 52 ms, scroll
+  restauré, FIFO exact (5ᵉ back sur page évincée = re-fetch),
+  `back` sur un POST retombe sur la page résultats (61 ms —
+  l'entrée est désormais poussée), forward re-gel instantané.
 - [ ] **Étape 57. UI Flutter v2** (ex-65) : thème clair
   (`tokens.json` variante), settings (moteur REST/FFI, thème,
   profil), UI historique + bookmarks (store core existant),

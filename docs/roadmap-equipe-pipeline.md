@@ -352,7 +352,15 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
 - [ ] **R-13. Acid2 ≥ 60 %** (ex-61) + extension du corpus
   WPT reftests : extraction `css/css-flexbox` + `css/css-grid`
   ciblés, baselines mesurées, skip-list versionnée — les écarts
-  deviennent des étapes R-xx.
+  deviennent des étapes R-xx. **Baseline terrain mission 9**
+  (shot `repros/acid2/` vs page de référence) : ~15 % du
+  visage — `.intro` bordée, liens bleus et « Hello World! »
+  peints ; `.picture p` fixed ≈ au bon endroit. **Écart n°1** :
+  le **bloc conteneur positionné** — les boîtes du visage
+  existent mais tombent en flux normal au bas du document
+  (~y 2540) au lieu de se rapporter à `.picture` ; ensuite la
+  chaîne `<object>` → `data:` (yeux blancs), puis les
+  pseudo-éléments/bordures-seules (nez, sourcils).
 
 ## Tâches continues
 
