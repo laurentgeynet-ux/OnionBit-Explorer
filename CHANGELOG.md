@@ -9,6 +9,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 5 — `explorer-net` : TLS** (`tls.rs`) : `TlsConnector`
+  implémente la couture `Connector` — TCP clair pour `http:`,
+  handshake `rustls` pour `https:` (SNI/ALPN par `tokio-rustls`),
+  racines Mozilla `webpki-roots` ou store injecté
+  (`with_roots` — tests/enterprise), erreurs certificat/SNI/
+  handshake en `NetError::Tls` typées. Provider crypto **`ring`** :
+  exception `*-sys*` consignée ADR-0002 (pas de pile TLS viable
+  100 % Rust ; `ring` build Windows sans cmake, `aws-lc-rs` exclu).
+  3 tests loopback avec cert `rcgen` : handshake OK, cert non
+  approuvé → `Tls`, mauvais hostname → `Tls`.
 - **Étape 4 — `explorer-net` : client HTTP/1.1** (`http.rs`,
   `h1.rs`, `error.rs`) : `Request`/`Response`/`Method`, trait
   `HttpTransport` injectable (ADR-0002), `H1Client` sur `Connector`

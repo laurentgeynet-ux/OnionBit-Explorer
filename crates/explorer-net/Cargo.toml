@@ -16,3 +16,11 @@ idna.workspace = true
 tokio.workspace = true
 httparse.workspace = true
 async-trait.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+webpki-roots.workspace = true
+
+[dev-dependencies]
+# Certificats de test TLS auto-signés (étape 5) — pur Rust,
+# même provider `ring` que rustls.
+rcgen = "0.13"

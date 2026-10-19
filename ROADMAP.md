@@ -50,7 +50,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   requêtes pipelinables non — séquentielles d'abord ; parsing
   statut/en-têtes via `httparse`, corps `Content-Length` +
   `chunked`. Timeouts bornés.
-- [ ] **Étape 5. TLS.** `rustls` + `webpki-roots` ; erreurs
+- [x] **Étape 5. TLS.** `rustls` + `webpki-roots` ; erreurs
   certificat remontées typées (l'UI affichera une page d'erreur,
   pas un crash).
 - [ ] **Étape 6. Décodage.** `gzip`/`deflate`/`br` (crates pur

@@ -50,6 +50,13 @@ sur les en-têtes), corps `Content-Length` + `chunked`, décodage
   diminue pas la mission et élimine une classe de bugs. *(Arbitré
   étape 4 : `tokio` sockets/timers, `httparse`, `async-trait` pour
   les traits dyn-compatibles `HttpTransport`/`Connector`.)*
+- Étape 5 : `rustls` + `tokio-rustls` + `webpki-roots` épinglés.
+  **Exception `*-sys*` consignée** : le provider crypto est `ring`
+  (C/assembleur audité). Aucune pile TLS viable n'est pure Rust ;
+  `ring` se build Windows sans cmake (contrairement à
+  `aws-lc-rs`, exclu de l'arbre). C'est la seule dépendance à
+  liaison C du workspace — justifiée par l'infrastructure, pas le
+  moteur.
 
 ## Conséquences
 
