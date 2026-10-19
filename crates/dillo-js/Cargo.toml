@@ -20,3 +20,4 @@ workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 regex.workspace = true
+unicode-ident.workspace = true

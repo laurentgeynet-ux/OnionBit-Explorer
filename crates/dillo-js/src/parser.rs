@@ -25,7 +25,9 @@ pub fn parse(src: &str) -> Result<Program> {
         toks,
         pos: 0,
         nest: 0,
+        strict: false,
     };
+    p.scan_directives();
     let mut body = Vec::new();
     while !p.at_eof() {
         body.push(p.stmt()?);
@@ -39,6 +41,11 @@ struct Parser {
     /// Expression nesting guard — `((((…` input must not blow the
     /// native stack through recursive descent.
     nest: u32,
+    /// `true` dans une unité `"use strict"` — script ou corps de
+    /// fonction (hérité par les corps internes). Pilote les early
+    /// errors strict : octales legacy, `delete x`, liaisons
+    /// réservées.
+    strict: bool,
 }
 
 impl Parser {
@@ -281,6 +288,58 @@ impl Parser {
         Ok(out)
     }
 
+    /// Directive prologue scan — lecture seule sur les tokens à
+    /// venir (les directives restent parsées comme statements).
+    /// `"use strict"` en tête de script/corps de fonction active le
+    /// mode strict pour toute l'unité. Une directive = littéral de
+    /// chaîne terminant un statement (`;`, `}`, EOF ou ASI).
+    fn scan_directives(&mut self) {
+        let mut i = self.pos;
+        while let Some(t) = self.toks.get(i) {
+            let Tok::Str(s) = &t.tok else { break };
+            let ends = match self.toks.get(i + 1) {
+                None => true,
+                Some(n) => {
+                    n.newline_before || matches!(n.tok, Tok::Eof | Tok::P(P::Semi | P::RBrace))
+                }
+            };
+            if !ends {
+                break;
+            }
+            if s == "use strict" {
+                self.strict = true;
+            }
+            i += 1;
+            if matches!(self.toks.get(i).map(|t| &t.tok), Some(Tok::P(P::Semi))) {
+                i += 1;
+            }
+        }
+    }
+
+    /// Early errors strict sur un nom de liaison (`var`/`let`/
+    /// `const`, param, catch, nom de fonction).
+    fn check_strict_binding(&self, name: &str) -> Result<()> {
+        if self.strict
+            && matches!(
+                name,
+                "eval"
+                    | "arguments"
+                    | "implements"
+                    | "interface"
+                    | "let"
+                    | "package"
+                    | "private"
+                    | "protected"
+                    | "public"
+                    | "static"
+                    | "yield"
+            )
+        {
+            return Err(self.err(format!("`{name}` is reserved in strict mode")));
+        }
+        Ok(())
+    }
+
     fn if_stmt(&mut self) -> Result<Stmt> {
         self.expect_kw(Kw::If, "`if`")?;
         self.expect_p(P::LParen, "`(`")?;
@@ -390,11 +449,13 @@ impl Parser {
                 Pat::Object { props, rest }
             }
             Tok::Ident(s) => {
+                self.check_strict_binding(&s)?;
                 self.next();
                 Pat::Ident(s)
             }
             // Sloppy tolerance: `let` is a binding name.
             Tok::Kw(Kw::Let) => {
+                self.check_strict_binding("let")?;
                 self.next();
                 Pat::Ident("let".into())
             }
@@ -841,7 +902,11 @@ impl Parser {
     /// `return expr`).
     fn arrow_body(&mut self, no_in: bool) -> Result<Vec<Stmt>> {
         if self.eat_p(P::LBrace) {
-            return self.stmt_list();
+            let outer_strict = self.strict;
+            self.scan_directives();
+            let body = self.stmt_list();
+            self.strict = outer_strict;
+            return body;
         }
         let e = self.assign(no_in)?;
         Ok(vec![Stmt::Return(Some(e))])
@@ -969,7 +1034,13 @@ impl Parser {
             }
             let e = self.unary(no_in);
             self.nest -= 1;
-            return Ok(Expr::Unary(op, Box::new(e?)));
+            let e = e?;
+            // Strict : `delete` d'un identifiant nu est une early
+            // error (seules les propriétés sont supprimables).
+            if self.strict && op == UnOp::Delete && matches!(e, Expr::Ident(_)) {
+                return Err(self.err("delete of unqualified identifier in strict mode"));
+            }
+            return Ok(Expr::Unary(op, Box::new(e)));
         }
         self.postfix(no_in)
     }
@@ -1106,10 +1177,16 @@ impl Parser {
     fn primary(&mut self, no_in: bool) -> Result<Expr> {
         match self.peek().clone() {
             Tok::Num(n) => {
+                if self.strict && self.cur().legacy_octal {
+                    return Err(self.err("legacy octal literal in strict mode"));
+                }
                 self.next();
                 Ok(Expr::Num(n))
             }
             Tok::Str(s) => {
+                if self.strict && self.cur().legacy_octal {
+                    return Err(self.err("legacy octal escape in strict mode"));
+                }
                 self.next();
                 Ok(Expr::Str(s))
             }
@@ -1173,6 +1250,12 @@ impl Parser {
             }
             Tok::Regex { body, flags } => {
                 self.next();
+                // Validation eager (spec `negative.phase: parse`) :
+                // pattern/flags invalides → SyntaxError au parse,
+                // pas au premier `.test()`.
+                if let Err(msg) = crate::regexp::JsRegExp::compile(&body, &flags) {
+                    return Err(self.err(msg));
+                }
                 Ok(Expr::Regex {
                     pattern: body,
                     flags,
@@ -1359,6 +1442,7 @@ impl Parser {
                         toks,
                         pos: 0,
                         nest: 0,
+                        strict: self.strict,
                     };
                     let e = sub.expr(no_in)?;
                     if !sub.at_eof() {
@@ -1390,14 +1474,24 @@ impl Parser {
             _ if decl => return Err(self.err("function declaration needs a name")),
             _ => None,
         };
+        if let Some(n) = &name {
+            self.check_strict_binding(n)?;
+        }
         self.expect_p(P::LParen, "`(`")?;
         let params = self.params()?;
         self.expect_p(P::LBrace, "`{`")?;
-        let body = self.stmt_list()?;
+        // Le strict du corps = hérité OU directive propre — les
+        // paramètres ont été parsés dans le mode du parent (la spec
+        // exige des params « simples » quand le corps est strict ;
+        // tolérance : on n'a pas de paramètres non-simples).
+        let outer_strict = self.strict;
+        self.scan_directives();
+        let body = self.stmt_list();
+        self.strict = outer_strict;
         Ok(Rc::new(FnLit {
             name,
             params,
-            body,
+            body: body?,
             is_arrow: false,
             is_async: async_,
         }))

@@ -177,6 +177,12 @@ fn harness_src(name: &str) -> Option<String> {
 /// commentaire).
 fn build_source(m: &Meta, body: &str) -> Option<String> {
     let mut src = String::new();
+    // `onlyStrict` : la directive doit ouvrir le script entier
+    // (le harnais tourne alors en strict — c'est le modèle du
+    // runner officiel test262).
+    if m.flags.iter().any(|f| f == "onlyStrict") {
+        src.push_str("\"use strict\";\n");
+    }
     if !m.flags.iter().any(|f| f == "raw") {
         src.push_str(&harness_src("sta.js")?);
         src.push('\n');
@@ -186,9 +192,6 @@ fn build_source(m: &Meta, body: &str) -> Option<String> {
     for inc in &m.includes {
         src.push_str(&harness_src(inc)?);
         src.push('\n');
-    }
-    if m.flags.iter().any(|f| f == "onlyStrict") {
-        src.push_str("\"use strict\";\n");
     }
     src.push_str(body);
     Some(src)
@@ -315,7 +318,7 @@ fn baseline_inner() {
         eprintln!("  {r}: {n}");
     }
     eprintln!("failed {}", failures.len());
-    for (f, msg) in failures.iter().take(40) {
+    for (f, msg) in &failures {
         eprintln!("  {} — {msg}", f.display());
     }
 

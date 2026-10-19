@@ -87,7 +87,7 @@ impl JsRegExp {
         if dot_all {
             pat.push_str("(?s)");
         }
-        pat.push_str(&translate_pattern(source));
+        pat.push_str(&translate_pattern(source, unicode));
         let re = regex::Regex::new(&pat)
             .map_err(|e| format!("invalid regex /{source}/: {}", short_regex_error(&e)))?;
         Ok(JsRegExp {
@@ -236,7 +236,7 @@ impl JsRegExp {
 
 /// `(?<name>…)` → `(?P<name>…)`; everything else passes through
 /// (regex-crate syntax is a superset of what we need).
-fn translate_pattern(src: &str) -> String {
+fn translate_pattern(src: &str, unicode: bool) -> String {
     let mut out = String::with_capacity(src.len() + 4);
     let cs: Vec<char> = src.chars().collect();
     let mut i = 0;
@@ -244,11 +244,86 @@ fn translate_pattern(src: &str) -> String {
     while i < cs.len() {
         match cs[i] {
             '\\' => {
-                out.push('\\');
                 if let Some(&c) = cs.get(i + 1) {
-                    out.push(c);
+                    if c == '0' && !cs.get(i + 2).is_some_and(char::is_ascii_digit) {
+                        // JS `\0` (NUL) — le crate `regex` attend
+                        // `\x{0}` ; `\01`… reste un backref (rejeté
+                        // comme les autres `\N`).
+                        out.push_str("\\x{0}");
+                    } else if c == 'u' && cs.get(i + 2) == Some(&'{') {
+                        // `\u{XXXX}` (légal dans les deux modes) →
+                        // `\x{XXXX}` natif du crate.
+                        let mut j = i + 3;
+                        while j < cs.len() && cs[j] != '}' {
+                            j += 1;
+                        }
+                        if j < cs.len() {
+                            out.push_str("\\x{");
+                            for &ch in &cs[i + 3..j] {
+                                out.push(ch);
+                            }
+                            out.push('}');
+                            i = j + 1;
+                            continue;
+                        }
+                        out.push_str("\\u");
+                    } else if c == 'u' && unicode {
+                        // Mode `u` : `\uD8xx\uDCxx` = un seul point
+                        // de code — le crate rejette les surrogates
+                        // seuls, on fusionne la paire.
+                        if let Some((cp, next)) = surrogate_pair(&cs, i) {
+                            out.push_str(&format!("\\x{{{:x}}}", u32::from(cp)));
+                            i = next;
+                            continue;
+                        }
+                        out.push_str("\\u");
+                    } else if c == 'c' && cs.get(i + 2).is_some_and(char::is_ascii_alphabetic) {
+                        // `\cX` → char de contrôle (le crate ne
+                        // connaît pas `\c`).
+                        let l = cs[i + 2];
+                        let v = u32::from(l) % 32;
+                        out.push_str(&format!("\\x{{{v:x}}}"));
+                        i += 3;
+                        continue;
+                    } else if !unicode
+                        && c.is_ascii_alphanumeric()
+                        && !matches!(
+                            c,
+                            'd' | 'D'
+                                | 's'
+                                | 'S'
+                                | 'w'
+                                | 'W'
+                                | 'b'
+                                | 'B'
+                                | 'f'
+                                | 'n'
+                                | 'r'
+                                | 't'
+                                | 'v'
+                                | 'x'
+                                | 'u'
+                                | 'k'
+                                | 'p'
+                                | 'P'
+                                | '1'..='9'
+                        )
+                    {
+                        // Annex B (sloppy) : `\` + alphanumérique
+                        // non reconnu = identity escape littéral
+                        // (`\y` → 'y'). En mode `u` c'est une
+                        // erreur → passthrough, le crate rejette.
+                        out.push(c);
+                    } else if !unicode && !c.is_ascii() {
+                        // Idem pour les non-ASCII (`\€` → '€').
+                        out.push(c);
+                    } else {
+                        out.push('\\');
+                        out.push(c);
+                    }
                     i += 2;
                 } else {
+                    out.push('\\');
                     i += 1;
                 }
                 continue;
@@ -270,6 +345,34 @@ fn translate_pattern(src: &str) -> String {
         i += 1;
     }
     out
+}
+
+/// `\uD8xx\uDCxx` à `cs[i]` → (point de code fusionné, index
+/// suivant) — paire de surrogates complète uniquement.
+fn surrogate_pair(cs: &[char], i: usize) -> Option<(char, usize)> {
+    // cs[i] == '\\', cs[i + 1] == 'u'
+    let hi = hex4(cs, i + 2)?;
+    if !(0xd800..0xdc00).contains(&hi) {
+        return None;
+    }
+    if cs.get(i + 6) != Some(&'\\') || cs.get(i + 7) != Some(&'u') {
+        return None;
+    }
+    let lo = hex4(cs, i + 8)?;
+    if !(0xdc00..0xe000).contains(&lo) {
+        return None;
+    }
+    let cp = 0x1_0000 + ((hi - 0xd800) << 10) + (lo - 0xdc00);
+    char::from_u32(cp).map(|c| (c, i + 12))
+}
+
+/// 4 chiffres hexadécimaux à partir de `at`.
+fn hex4(cs: &[char], at: usize) -> Option<u32> {
+    let mut v = 0u32;
+    for k in 0..4 {
+        v = v * 16 + cs.get(at + k)?.to_digit(16)?;
+    }
+    Some(v)
 }
 
 /// Trim the `regex` crate's multi-line error down to its first line.

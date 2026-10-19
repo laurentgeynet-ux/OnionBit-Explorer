@@ -1685,3 +1685,156 @@ fn math_number_7g() {
     assert_eq!(ev_str("(123.456).toPrecision(4)"), "123.5");
     assert_eq!(ev_str("(12345).toExponential(2)"), "1.23e+4");
 }
+
+// -- JS-C1 : lexique conforme test262 (identifiants Unicode, échappements) ----
+
+#[test]
+fn unicode_identifiers() {
+    // Lettres et marques Unicode valides.
+    assert_eq!(num(ev("var καλημέρα = 3; καλημέρα")), 3.0);
+    assert_eq!(num(ev("var \\u0061bc = 4; abc")), 4.0);
+    assert_eq!(num(ev("var \\u{62}c = 5; bc")), 5.0);
+    // ZWNJ/ZWJ autorisés en continuation.
+    assert_eq!(num(ev("var a\\u200cb = 6; a\u{200c}b")), 6.0);
+    // U+2E2F VERTICAL TILDE : Lm mais Pattern_Syntax → rejeté.
+    assert!(matches!(
+        Engine::new().eval("var \u{2e2f} = 1"),
+        Err(dillo_js::Error::Syntax { .. })
+    ));
+    // Mot réservé échappé → rejeté.
+    assert!(matches!(
+        Engine::new().eval("var \\u{69}f = 1"),
+        Err(dillo_js::Error::Syntax { .. })
+    ));
+}
+
+#[test]
+fn whitespace_and_line_terminators() {
+    // U+FEFF est un WhiteSpace ES.
+    assert_eq!(num(ev("var\u{feff}x = 7; x")), 7.0);
+    assert_eq!(num(ev("var x = /a/.source.length\u{feff}+ 6; x")), 7.0);
+    // LS/PS sont des terminateurs (ASI) — deux instructions.
+    assert_eq!(num(ev("var a = 1\u{2028}a + 1")), 2.0);
+    assert_eq!(num(ev("var a = 1\u{2029}a + 1")), 2.0);
+    // Terminateur dans une regex → erreur de syntaxe.
+    for src in ["var r = /a\nb/", "var r = /a\rb/", "var r = /a\u{2028}b/"] {
+        assert!(matches!(
+            Engine::new().eval(src),
+            Err(dillo_js::Error::Syntax { .. })
+        ));
+    }
+}
+
+#[test]
+fn html_style_comments() {
+    assert_eq!(num(ev("var x = 1; <!-- note\nx + 1")), 2.0);
+    // `-->` en début de ligne est un commentaire (Annex B).
+    assert_eq!(num(ev("var x = 2;\n--> fin de commentaire\nx")), 2.0);
+    // `-->` hors début de ligne : décrément + comparaison.
+    assert_eq!(ev_str("var x = 1; x --> 0"), "true");
+}
+
+#[test]
+fn string_escapes() {
+    // LegacyOctalEscapeSequence (sloppy).
+    assert_eq!(ev_str(r"'\077'"), "?");
+    assert_eq!(ev_str(r"'\1'"), "\u{1}");
+    assert_eq!(ev_str(r"'\18'"), "\u{1}8");
+    assert_eq!(ev_str(r"'\477'"), "'7");
+    assert_eq!(ev_str(r"'\0'"), "\0");
+    // `\0` suivi d'un chiffre non-octal : NUL + chiffre littéral.
+    assert_eq!(ev_str(r"'\08'"), "\08");
+    // `\u{…}` dans les chaînes.
+    assert_eq!(ev_str(r"'\u{1f600}'"), "\u{1f600}");
+    // Paire de surrogates fusionnée ; surrogate seul → U+FFFD.
+    assert_eq!(ev_str(r"'\ud83c\udf06'"), "\u{1f306}");
+    assert_eq!(ev_str(r"'\ud83c'"), "\u{fffd}");
+    // Continuation de ligne sur tout terminateur.
+    assert_eq!(ev_str("'a\\\u{2028}b'"), "ab");
+    // CR/LF bruts restent interdits ; LS/PS bruts permis (ES2019).
+    assert!(Engine::new().eval("'a\nb'").is_err());
+    assert!(Engine::new().eval("'a\rb'").is_err());
+    assert_eq!(ev_str("'a\u{2028}b'"), "a\u{2028}b");
+}
+
+#[test]
+fn unterminated_inputs_rejected() {
+    for src in [
+        "var x = /* jamais fermé",
+        "'chaîne",
+        "var r = /regex",
+        r"var s = '\",
+    ] {
+        assert!(matches!(
+            Engine::new().eval(src),
+            Err(dillo_js::Error::Syntax { .. })
+        ));
+    }
+}
+
+#[test]
+fn malformed_numbers_rejected() {
+    for src in ["var n = 3in", "var n = 1e", "var n = 1e+", "var n = 0x"] {
+        assert!(matches!(
+            Engine::new().eval(src),
+            Err(dillo_js::Error::Syntax { .. })
+        ));
+    }
+    // Octales legacy sloppy restent acceptées.
+    assert_eq!(num(ev("var n = 010; n")), 8.0);
+}
+
+#[test]
+fn regex_literal_eager_validation() {
+    // Pattern invalide → SyntaxError au parse, pas d'objet RegExp.
+    for src in ["var r = /[/", r"var r = /x\y/u", "var r = /a/zz"] {
+        assert!(matches!(
+            Engine::new().eval(src),
+            Err(dillo_js::Error::Syntax { .. })
+        ));
+    }
+    // Identity escape Annex B (sloppy) : `\y` = 'y' littéral.
+    assert_eq!(ev_str(r"/x\y/.test('xy')"), "true");
+    // `\0` NUL compilé.
+    assert_eq!(ev_str(r"/a\0b/.test('a\0b')"), "true");
+    // `\u{…}` et paires de surrogates en mode `u`.
+    assert_eq!(ev_str(r"/\u{1f600}/u.test('\u{1f600}')"), "true");
+    assert_eq!(ev_str(r"/^\ud83c\udf06$/u.test('\u{1f306}')"), "true");
+}
+
+#[test]
+fn strict_mode() {
+    let syn = |src: &str| matches!(Engine::new().eval(src), Err(dillo_js::Error::Syntax { .. }));
+    // Octales legacy interdites en strict, tolérées en sloppy.
+    assert!(syn(r#""use strict"; var n = 010"#));
+    assert!(syn(r#""use strict"; var n = 08"#));
+    assert!(syn(r#""use strict"; var s = "\1""#));
+    assert_eq!(num(ev("var n = 010; n")), 8.0);
+    // `\0` NUL reste légal en strict.
+    assert_eq!(ev_str(r#""use strict"; "\0""#), "\0");
+    // `delete` d'identifiant nu → early error.
+    assert!(syn(r#""use strict"; var x = 1; delete x"#));
+    assert!(!syn(r#""use strict"; var o = {a:1}; delete o.a"#));
+    // Liaisons réservées strict.
+    for src in [
+        r#""use strict"; var eval = 1"#,
+        r#""use strict"; var arguments = 1"#,
+        r#""use strict"; function package() {}"#,
+        r#""use strict"; var let = 1"#,
+    ] {
+        assert!(syn(src), "{src}");
+    }
+    // Sloppy : mêmes formes OK.
+    assert_eq!(num(ev("var eval_ = 1; eval_")), 1.0);
+    // Strict au niveau fonction seulement.
+    assert_eq!(
+        num(ev(
+            "function f() { 'use strict'; return 1; } var n = 010; f() + n"
+        )),
+        9.0
+    );
+    // Hérité par les fonctions internes d'un script strict.
+    assert!(syn(
+        r#""use strict"; function g() { return function() { var n = 010; }; }"#
+    ));
+}
