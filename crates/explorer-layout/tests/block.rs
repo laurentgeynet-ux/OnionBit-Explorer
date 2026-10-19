@@ -11,7 +11,7 @@ mod common;
 use explorer_css::{Origin, StyleEngine, StyleEnv};
 use explorer_dom::{Dom, NodeId};
 use explorer_html::TreeBuilder;
-use explorer_layout::{build_box_tree, layout_tree, BlockCtx, LayoutBox};
+use explorer_layout::{build_box_tree, layout_tree, BlockCtx, BoxKind, LayoutBox};
 
 const VIEW: f32 = 800.0;
 
@@ -180,4 +180,63 @@ fn texte_donne_des_lignes() {
     let anon = &p.children[0];
     assert!(anon.rect.height >= 24.0, "{}", anon.rect.height);
     assert!(p.rect.height >= 24.0);
+}
+
+// ── legacy HTML : <center>, hints de table (R-16) ─────────
+
+#[test]
+fn center_est_bloc_pleine_largeur() {
+    // Avant R-16 : <center> absent de la feuille UA → inline,
+    // la table enfant perdait son conteneur bloc.
+    let (dom, bx) = laid("<!doctype html><center>x</center>", "");
+    let c = find(&bx, by_tag(&dom, "center"));
+    assert_eq!(c.kind, BoxKind::Block);
+    assert!(approx(c.rect.width, VIEW), "{}", c.rect.width);
+}
+
+#[test]
+fn center_centre_un_descendant_bloc() {
+    // `-webkit-center` (UA <center>) : les descendants bloc
+    // plus étroits sont centrés — comportement historique
+    // des navigateurs que les tables à width% attendent.
+    let (dom, bx) = laid(
+        "<!doctype html><center><div style=\"width:200px\">x</div></center>",
+        "",
+    );
+    let div = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(div.rect.width, 200.0), "{}", div.rect.width);
+    assert!(
+        approx(div.rect.x, (VIEW - 200.0) / 2.0),
+        "div centrée : x={} attendu {}",
+        div.rect.x,
+        (VIEW - 200.0) / 2.0
+    );
+}
+
+#[test]
+fn center_centre_une_table_etroite() {
+    // Le cas terrain : table auto dans <center>.
+    let (dom, bx) = laid(
+        "<!doctype html><center><table><tr><td>x</td></tr></table></center>",
+        "",
+    );
+    let t = find(&bx, by_tag(&dom, "table"));
+    assert!(t.rect.width < VIEW, "{}", t.rect.width);
+    assert!(
+        approx(t.rect.x, (VIEW - t.rect.width) / 2.0),
+        "table centrée : x={}",
+        t.rect.x
+    );
+}
+
+#[test]
+fn table_width_pourcent_du_conteneur() {
+    // `width="85%"` en attribut → la table mesure 85 % du
+    // bloc conteneur (présentational hint → width CSS).
+    let (dom, bx) = laid(
+        "<!doctype html><table width=\"85%\"><tr><td>x</td></tr></table>",
+        "",
+    );
+    let t = find(&bx, by_tag(&dom, "table"));
+    assert!(approx(t.rect.width, VIEW * 0.85), "{}", t.rect.width);
 }

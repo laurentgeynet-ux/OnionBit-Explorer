@@ -797,6 +797,13 @@ fn flow_children(
 ) -> f32 {
     let mut cursor = start_cursor;
     let own_bfc = establishes_bfc(&bx.style);
+    // `text-align: -webkit-center` (UA : <center>, spec
+    // « align descendants to the center ») centre aussi les
+    // descendants **bloc** plus étroits que le conteneur —
+    // comportement historique que les pages tabulaires (HN,
+    // anciens sites) attendent. `center` standard ne touche
+    // que les lignes inline.
+    let webkit_center = bx.style.get("text-align") == Some("-webkit-center");
 
     let mut prev_margin: Option<f32> = None;
     let mut first = true;
@@ -943,6 +950,16 @@ fn flow_children(
             )
         };
         cursor += used;
+        // `-webkit-center` : enfant bloc in-flow plus étroit
+        // que le conteneur → centré horizontalement (comme
+        // des marges `auto`). La translation s'applique à
+        // tout le sous-arbre (rects posés en absolu).
+        if webkit_center {
+            let cw = bx.children[i].rect.width;
+            if cw < content_w {
+                crate::flex::translate_subtree(&mut bx.children[i], (content_w - cw) / 2.0, 0.0);
+            }
+        }
         // Enfant bloc in-flow : la prochaine ligne est
         // nouvelle — l'ancre des flottants repasse au curseur.
         inline_anchor = None;

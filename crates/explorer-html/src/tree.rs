@@ -3085,12 +3085,9 @@ impl TreeBuilder {
             "svg" => {
                 self.insert_foreign_element("svg", &attributes, Namespace::Svg, self_closing);
             }
-            "math" => self.insert_foreign_element(
-                "math",
-                &attributes,
-                Namespace::MathMl,
-                self_closing,
-            ),
+            "math" => {
+                self.insert_foreign_element("math", &attributes, Namespace::MathMl, self_closing);
+            }
             // Balises de table hors contexte table : ignorées
             // (le mode « in select in table » les traite à part).
             "caption" | "table" | "tbody" | "tfoot" | "thead" | "tr" | "td" | "th" => {}

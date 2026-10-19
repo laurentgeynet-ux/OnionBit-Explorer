@@ -510,44 +510,167 @@ fn apply_presentational_hints(dom: &Dom, node: NodeId, props: &mut HashMap<Strin
     let Ok(tag) = dom.tag_name(node) else {
         return;
     };
-    let attr = |name: &str| dom.attribute(node, name).ok().flatten();
-    // `N` → "Npx", `N%` → "N%" ; autres syntaxes → None.
-    let dim = |a: Option<String>| -> Option<String> {
-        let v = a?;
-        let v = v.trim();
-        if v.is_empty() {
-            return None;
-        }
-        if let Some(p) = v.strip_suffix('%') {
-            return p
-                .trim()
-                .parse::<f32>()
-                .ok()
-                .filter(|f| *f >= 0.0)
-                .map(|f| format!("{f}%"));
-        }
-        v.trim_end_matches("px")
-            .parse::<f32>()
-            .ok()
-            .filter(|f| *f >= 0.0)
-            .map(|f| format!("{f}px"))
-    };
-    let mut hint = |prop: &str, val: Option<String>| {
-        if let Some(v) = val {
-            props.entry(prop.to_string()).or_insert(v);
-        }
-    };
     match tag {
         "table" | "td" | "th" | "tr" | "col" | "colgroup" | "img" | "iframe" | "object"
         | "embed" | "canvas" | "video" | "svg" => {
-            hint("width", dim(attr("width")));
-            hint("height", dim(attr("height")));
+            hint(props, "width", dim(hint_attr(dom, node, "width")));
+            hint(props, "height", dim(hint_attr(dom, node, "height")));
         }
         "hr" => {
-            hint("width", dim(attr("width")));
+            hint(props, "width", dim(hint_attr(dom, node, "width")));
             // `size` = hauteur du filet — compteurs/bordures
             // exclus (approximation documentée).
-            hint("height", dim(attr("size")));
+            hint(props, "height", dim(hint_attr(dom, node, "size")));
+        }
+        _ => {}
+    }
+    legacy_presentational_hints(dom, node, tag, props);
+}
+
+/// Dépose `prop = val` dans `props` si la propriété n'est
+/// pas déjà fixée par une vraie règle ou l'attribut `style`
+/// (hints = déclarations de spécificité nulle).
+fn hint(props: &mut HashMap<String, String>, prop: &str, val: Option<String>) {
+    if let Some(v) = val {
+        props.entry(prop.to_string()).or_insert(v);
+    }
+}
+
+/// Valeur d'attribut HTML sur le nœud.
+fn hint_attr(dom: &Dom, node: NodeId, name: &str) -> Option<String> {
+    dom.attribute(node, name).ok().flatten()
+}
+
+/// `N` → "Npx", `N%` → "N%" ; autres syntaxes → None.
+fn dim(a: Option<String>) -> Option<String> {
+    let v = a?;
+    let v = v.trim();
+    if v.is_empty() {
+        return None;
+    }
+    if let Some(p) = v.strip_suffix('%') {
+        return p
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|f| *f >= 0.0)
+            .map(|f| format!("{f}%"));
+    }
+    v.trim_end_matches("px")
+        .parse::<f32>()
+        .ok()
+        .filter(|f| *f >= 0.0)
+        .map(|f| format!("{f}px"))
+}
+
+/// `align` → text-align (spec : presentational hint) ;
+/// `middle` sur `div` vaut `center` (HTML Rendering).
+fn hint_align(a: Option<String>) -> Option<String> {
+    match a?.trim().to_ascii_lowercase().as_str() {
+        v @ ("left" | "right" | "center" | "justify") => Some(v.to_string()),
+        "middle" => Some("center".to_string()),
+        _ => None,
+    }
+}
+
+/// Attribut `name` du `table` ancêtre le plus proche
+/// (`cellpadding`/`border` vivent sur la table mais
+/// s'appliquent aux cellules — spec HTML Rendering).
+/// La **première** table ancêtre est la bonne (`<table>`
+/// imbriquée : une cellule relève de SA table, trouvée en
+/// remontant — `tr`/`tbody` intermédiaires ne comptent pas).
+fn ancestor_table_attr(dom: &Dom, node: NodeId, name: &str) -> Option<String> {
+    let mut n = dom.parent(node).ok()?;
+    while let Some(id) = n {
+        if dom.tag_name(id).is_ok_and(|t| t == "table") {
+            return dom.attribute(id, name).ok().flatten();
+        }
+        n = dom.parent(id).ok()?;
+    }
+    None
+}
+
+/// Hints « legacy » HTML Rendering : `bgcolor`, `align`,
+/// `valign`, `cellspacing`/`cellpadding`/`border` des tables
+/// (R-16 — les pages tabulaires type HN en dépendent).
+fn legacy_presentational_hints(
+    dom: &Dom,
+    node: NodeId,
+    tag: &str,
+    props: &mut HashMap<String, String>,
+) {
+    match tag {
+        "body" | "table" | "tr" | "td" | "th" | "colgroup" | "col" | "thead" | "tbody"
+        | "tfoot" => {
+            hint(
+                props,
+                "background-color",
+                hint_attr(dom, node, "bgcolor").map(|v| v.trim().to_string()),
+            );
+        }
+        _ => {}
+    }
+    match tag {
+        "caption" | "col" | "colgroup" | "div" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+        | "legend" | "p" | "td" | "th" | "tr" => {
+            hint(
+                props,
+                "text-align",
+                hint_align(hint_attr(dom, node, "align")),
+            );
+        }
+        _ => {}
+    }
+    match tag {
+        "col" | "colgroup" | "tbody" | "td" | "tfoot" | "th" | "thead" | "tr" => {
+            hint(
+                props,
+                "vertical-align",
+                hint_attr(dom, node, "valign").map(|v| v.trim().to_string()),
+            );
+        }
+        _ => {}
+    }
+    match tag {
+        "table" => {
+            // `cellspacing` → espacement des cellules ; le
+            // défaut 2px est émis **en hint** (une règle UA
+            // `border-spacing: 2px` écraserait l'attribut —
+            // approche Blink : le défaut vit au même niveau
+            // que l'attribut). `border` > 0 → bordure de la
+            // table (filet 1px inset sur les cellules via
+            // `ancestor_table_attr`).
+            hint(
+                props,
+                "border-spacing",
+                dim(hint_attr(dom, node, "cellspacing")).or_else(|| Some("2px".to_string())),
+            );
+            if let Some(bw) = dim(hint_attr(dom, node, "border")) {
+                hint(props, "border-width", Some(bw));
+                hint(props, "border-style", Some("outset".to_string()));
+            }
+        }
+        "td" | "th" => {
+            // `cellpadding` de la table ancêtre → padding des
+            // cellules ; `border` > 0 → filet 1px inset.
+            hint(
+                props,
+                "padding",
+                ancestor_table_attr(dom, node, "cellpadding").and_then(|v| dim(Some(v))),
+            );
+            if let Some(b) = ancestor_table_attr(dom, node, "border") {
+                if b.trim().parse::<f32>().is_ok_and(|f| f > 0.0) {
+                    hint(props, "border-width", Some("1px".to_string()));
+                    hint(props, "border-style", Some("inset".to_string()));
+                }
+            }
+        }
+        "body" => {
+            hint(
+                props,
+                "color",
+                hint_attr(dom, node, "text").map(|v| v.trim().to_string()),
+            );
         }
         _ => {}
     }
@@ -734,27 +857,43 @@ pub fn initial_value(name: &str) -> Option<&'static str> {
 /// Feuille agent-utilisateur intégrée — écrite en CSS et
 /// parsée par notre propre pipeline (dogfooding). Reprend
 /// les défauts classiques de la spec HTML Rendering.
+///
+/// `noscript` n'est **pas** masqué : scripting désactivé
+/// (périmètre domaine) ⇒ son contenu est un vrai sous-arbre
+/// rendu. `noframes`/`noembed` restent visibles pour la même
+/// raison (pas de frames ni de plugins — leur contenu EST le
+/// repli). `center` porte `-webkit-center` : centre aussi les
+/// descendants **bloc** (spec « align descendants to the
+/// center », comportement navigateur historique — les tables
+/// à `width` en % des pages d'antan en dépendent).
 const UA_CSS: &str = "
 html, body, div, p, ul, ol, li, dl, dt, dd, blockquote, pre,
 form, fieldset, figure, figcaption, h1, h2, h3, h4, h5, h6,
 hr, address, article, aside, footer, header, nav, section,
-main, legend, video { display: block }
+main, legend, video, center, details, dialog, dir, hgroup,
+listing, marquee, menu, plaintext, search, summary, xmp,
+frameset { display: block }
 table { display: table }
 thead { display: table-header-group }
 tbody { display: table-row-group }
 tfoot { display: table-footer-group }
 tr { display: table-row }
 caption { display: block }
-head, script, style, link, meta, title, template, noscript, area,
-base, basefont, datalist, param, source, track { display: none }
+[hidden], head, script, style, link, meta, title, template,
+area, base, basefont, datalist, param, source, track,
+frame { display: none }
+details:not([open]) > :not(summary) { display: none }
+dialog:not([open]) { display: none }
 li { display: list-item }
 td, th { display: table-cell }
+center { text-align: -webkit-center }
 b, strong { font-weight: bold }
 i, em, cite, dfn, var, address { font-style: italic }
 u, ins { text-decoration: underline }
 s, del, strike { text-decoration: line-through }
-code, kbd, pre, samp, tt { font-family: monospace }
+code, kbd, pre, samp, tt, listing, plaintext, xmp { font-family: monospace }
 pre, textarea { white-space: pre-wrap }
+listing, plaintext, xmp { white-space: pre }
 h1 { font-size: 2em; font-weight: bold; margin-top: 0.67em; margin-bottom: 0.67em }
 h2 { font-size: 1.5em; font-weight: bold; margin-top: 0.83em; margin-bottom: 0.83em }
 h3 { font-size: 1.17em; font-weight: bold; margin-top: 1em; margin-bottom: 1em }
@@ -762,13 +901,13 @@ h4 { font-size: 1em; font-weight: bold; margin-top: 1.33em; margin-bottom: 1.33e
 h5 { font-size: 0.83em; font-weight: bold; margin-top: 1.67em; margin-bottom: 1.67em }
 h6 { font-size: 0.67em; font-weight: bold; margin-top: 2.33em; margin-bottom: 2.33em }
 p { margin-top: 1em; margin-bottom: 1em }
-ul, ol, dd { margin-top: 1em; margin-bottom: 1em }
-ul, ol { padding-left: 40px }
+ul, ol, menu, dir, dl, dd { margin-top: 1em; margin-bottom: 1em }
+ul, ol, menu, dir { padding-left: 40px }
 dd { margin-left: 40px }
 blockquote { margin: 1em 40px }
 hr { border-top-width: 1px; border-style: inset }
 a[href] { color: #00e; text-decoration: underline }
-table { border-collapse: separate; border-spacing: 2px }
+table { border-collapse: separate }
 th { font-weight: bold; text-align: center }
 input, textarea, select, button, img { display: inline-block }
 input, textarea {

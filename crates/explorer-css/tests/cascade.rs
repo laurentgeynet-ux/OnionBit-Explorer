@@ -308,3 +308,166 @@ fn var_ne_se_substitut_pas_aux_proprietes_custom() {
     // À l'usage : var(--x) → « var(--y) » → re-substitution → 4px.
     assert_eq!(e.compute(&f.dom, f.p, &env()).get("width"), Some("4px"));
 }
+
+// ── feuille UA legacy et hints présentationnels (R-16) ────
+
+/// Crée un élément `tag` avec `attrs` sous `parent`.
+fn el(dom: &mut Dom, parent: NodeId, tag: &str, attrs: &[(&str, &str)]) -> NodeId {
+    let e = dom.create_element(tag).unwrap();
+    for (k, v) in attrs {
+        dom.set_attribute(e, k, v).unwrap();
+    }
+    dom.append_child(parent, e).unwrap();
+    e
+}
+
+#[test]
+fn ua_bloc_legacy() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    for tag in [
+        "center",
+        "dir",
+        "menu",
+        "hgroup",
+        "search",
+        "listing",
+        "xmp",
+        "plaintext",
+        "details",
+        "summary",
+        "marquee",
+        "frameset",
+    ] {
+        let n = el(&mut dom, f.body, tag, &[]);
+        assert_eq!(
+            e.compute(&dom, n, &env()).get("display"),
+            Some("block"),
+            "<{tag}> doit être block"
+        );
+    }
+}
+
+#[test]
+fn ua_center_porte_webkit_center() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let c = el(&mut dom, f.body, "center", &[]);
+    assert_eq!(
+        e.compute(&dom, c, &env()).get("text-align"),
+        Some("-webkit-center"),
+        "spec : <center> aligne aussi les descendants bloc"
+    );
+}
+
+#[test]
+fn ua_hidden_et_dialog_ferme_masques() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let hid = el(&mut dom, f.body, "div", &[("hidden", "")]);
+    assert_eq!(e.compute(&dom, hid, &env()).get("display"), Some("none"));
+    let closed = el(&mut dom, f.body, "dialog", &[]);
+    assert_eq!(e.compute(&dom, closed, &env()).get("display"), Some("none"));
+    let opened = el(&mut dom, f.body, "dialog", &[("open", "")]);
+    assert_eq!(e.compute(&dom, opened, &env()).get("display"), Some("block"));
+}
+
+#[test]
+fn ua_details_ferme_ne_montre_que_summary() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let det = el(&mut dom, f.body, "details", &[]);
+    let sum = el(&mut dom, det, "summary", &[]);
+    let p = el(&mut dom, det, "p", &[]);
+    assert_eq!(e.compute(&dom, sum, &env()).get("display"), Some("block"));
+    assert_eq!(e.compute(&dom, p, &env()).get("display"), Some("none"));
+    // details[open] : le p redevient visible.
+    let open = el(&mut dom, f.body, "details", &[("open", "")]);
+    let p2 = el(&mut dom, open, "p", &[]);
+    assert_eq!(e.compute(&dom, p2, &env()).get("display"), Some("block"));
+}
+
+#[test]
+fn ua_noscript_reste_visible() {
+    // Scripting désactivé (domaine pur) : le contenu de
+    // <noscript> est un vrai sous-arbre rendu — contrairement
+    // à un navigateur scripté qui le masque.
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let n = el(&mut dom, f.body, "noscript", &[]);
+    assert_ne!(e.compute(&dom, n, &env()).get("display"), Some("none"));
+}
+
+#[test]
+fn hint_bgcolor_vers_background_color() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    for tag in ["table", "tr", "td", "th", "body"] {
+        let n = el(&mut dom, f.body, tag, &[("bgcolor", "#ff6600")]);
+        assert_eq!(
+            e.compute(&dom, n, &env()).get("background-color"),
+            Some("#ff6600"),
+            "<{tag} bgcolor> → background-color"
+        );
+    }
+}
+
+#[test]
+fn hint_align_vers_text_align() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let td = el(&mut dom, f.body, "td", &[("align", "right")]);
+    assert_eq!(e.compute(&dom, td, &env()).get("text-align"), Some("right"));
+    // `middle` vaut `center` en hint (HTML Rendering).
+    let d = el(&mut dom, f.body, "div", &[("align", "middle")]);
+    assert_eq!(e.compute(&dom, d, &env()).get("text-align"), Some("center"));
+    // Valeur invalide → pas de hint (propriété non déclarée).
+    let x = el(&mut dom, f.body, "td", &[("align", "nawak")]);
+    assert_eq!(e.compute(&dom, x, &env()).get("text-align"), None);
+}
+
+#[test]
+fn hint_table_spacing_padding_border() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let table = el(
+        &mut dom,
+        f.body,
+        "table",
+        &[("cellspacing", "7"), ("cellpadding", "4"), ("border", "2")],
+    );
+    let tr = el(&mut dom, table, "tr", &[]);
+    let td = el(&mut dom, tr, "td", &[]);
+    let s = e.compute(&dom, table, &env());
+    assert_eq!(s.get("border-spacing"), Some("7px"));
+    assert_eq!(s.get("border-width"), Some("2px"));
+    assert_eq!(s.get("border-style"), Some("outset"));
+    let c = e.compute(&dom, td, &env());
+    // cellpadding de la table ancêtre → padding de la cellule.
+    assert_eq!(c.get("padding"), Some("4px"));
+    // border > 0 → filet 1px inset sur les cellules.
+    assert_eq!(c.get("border-width"), Some("1px"));
+    assert_eq!(c.get("border-style"), Some("inset"));
+}
+
+#[test]
+fn hint_body_text_et_valign() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let body = el(&mut dom, f.body, "body", &[("text", "silver")]);
+    assert_eq!(e.compute(&dom, body, &env()).get("color"), Some("silver"));
+    let td = el(&mut dom, f.body, "td", &[("valign", "middle")]);
+    assert_eq!(
+        e.compute(&dom, td, &env()).get("vertical-align"),
+        Some("middle")
+    );
+}

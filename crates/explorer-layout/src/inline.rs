@@ -651,6 +651,11 @@ fn align_lines(st: &ComputedStyle, lines: &mut [LineBox], x: f32, w: f32, fl: &F
                 "right"
             }
         }
+        // `-webkit-center` (UA : <center>, comportement
+        // historique) = `center` pour les lignes inline ; la
+        // centrage des boîtes bloc filles est fait dans
+        // `flow_children`.
+        "-webkit-center" => "center",
         a => a,
     };
     let count = lines.len();

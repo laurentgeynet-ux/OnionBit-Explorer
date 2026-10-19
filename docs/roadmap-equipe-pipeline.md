@@ -106,15 +106,38 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   borne de scope (WHATWG PR 10557), scoping namespace-aware,
   foster-parenting vers `template::content`, frameset_ok
   préservé sur `\0` étranger, EOF/comment/CDATA tokenizer.
-- [ ] **R-16. Layout : tables réelles** (bug terrain @
+- [x] **R-16. Layout : tables réelles** (bug terrain @
   `2693959`, repro : news.ycombinator.com) — DOM complet et
   correct (158 `.titleline`) mais table **explosée**.
-  **Diagnostic fait** (repro `r16-center.html`, 1 ligne) :
+  **Diagnostic** (repro `r16-center.html`, 1 ligne) :
   `<center>` **absent de `UA_CSS`** → rendu `inline` → une
   table dans un contexte inline perd son containing-block
-  → boîte 0×0 + cellules pleine largeur. Fix probable :
-  `center{display:block;text-align:center}` dans la feuille
-  UA + audit des autres tags bloc absents (`<menu>`, `<dir>`…).
+  → boîte 0×0 + cellules pleine largeur. Livré :
+  - `center{display:block;text-align:-webkit-center}` +
+    audit complet : `dir`, `menu`, `hgroup`, `search`,
+    `listing`, `xmp`, `plaintext`, `details`, `summary`,
+    `dialog`, `marquee`, `frameset` blocs ; `[hidden]`,
+    `frame`, `details` fermé, `dialog` fermé masqués ;
+    `noscript`/`noembed`/`noframes` visibles (scripting
+    off — leur contenu EST le repli).
+  - `text-align: -webkit-center` en layout : lignes
+    inline = `center` ; descendants **bloc** plus étroits
+    centrés via `translate_subtree` (hérité → la table
+    de contenu HN se centre dans sa cellule).
+  - Hints présentationnels (spécificité 0, `or_insert`) :
+    `bgcolor`→`background-color`, `align`→`text-align`
+    (`middle`=`center`), `valign`→`vertical-align`,
+    `cellspacing`→`border-spacing` (défaut 2px émis en
+    hint — une règle UA écraserait l'attribut),
+    `cellpadding`→`padding` des `td`/`th` via la table
+    ancêtre, `border>0`→`border outset` (filet `1px
+    inset` cellules), `body[text]`→`color`.
+  - Mesuré : `r16.html` → `block<center>` 800px, table
+    85% = 680px à x=60 ; `r16-center` table étroite à
+    x=396 ; `r16-pct` 680px ; `r16-nowidth` pleine
+    largeur ; `r16-nocenter` à x=0. Tests :
+    `cascade.rs` (UA legacy + hints), `block.rs`
+    (center/table%).
 - [ ] **R-17. Texte : `em` résolu deux fois** (bug terrain
   @ `2693959`, repro : info.cern.ch, wikipedia). **Diagnostic
   fait** (repro `r17b.html`, 1 ligne) : `font-size:2em` →

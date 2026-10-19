@@ -9,6 +9,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-16 — Tables réelles et HTML legacy** (`explorer-css`/
+  `explorer-layout`, repro terrain news.ycombinator.com) :
+  `<center>` et les balises bloc historiques (`dir`, `menu`,
+  `hgroup`, `search`, `listing`, `xmp`, `plaintext`,
+  `details`, `summary`, `dialog`, `marquee`, `frameset`)
+  rejoignent la feuille UA ; `[hidden]`, `frame`, `details`
+  fermé et `dialog` fermé sont masqués ; `noscript` reste
+  visible (scripting off). `text-align: -webkit-center`
+  centre aussi les descendants **bloc** (lignes inline =
+  `center`, boîtes filles étroites translatées au centre —
+  comportement navigateur historique dont dépendent les
+  tables à `width` en %). Hints présentationnels étendus :
+  `bgcolor`→`background-color`, `align`→`text-align`,
+  `valign`→`vertical-align`, `cellspacing`→`border-spacing`
+  (défaut 2px en hint), `cellpadding`→`padding` des cellules
+  via la table ancêtre, `border`→filets `outset`/`inset`,
+  `body[text]`→`color`. Mesuré : table HN `width=85%`
+  centrée à x=60 sur viewport 800.
+
 - **R-15 — Tree-builder : 100 % du corpus tree-construction**
   (`explorer-html`/`explorer-dom`, html5lib-tests
   **1592/1592** exécutables, 200 fragment/script-on hors
