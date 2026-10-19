@@ -242,10 +242,16 @@ impl Heap {
                     push_value(out, *v);
                 }
             }
-            ObjKind::Set(items) | ObjKind::Iter { items, .. } => {
+            ObjKind::Set(items) => {
                 for &v in items {
                     push_value(out, v);
                 }
+            }
+            ObjKind::Iter { items, ret, .. } => {
+                for &v in items {
+                    push_value(out, v);
+                }
+                push_value(out, *ret);
             }
             ObjKind::Proxy { target, handler } => {
                 push_value(out, *target);
@@ -497,6 +503,9 @@ pub enum ObjKind {
         items: Vec<Value>,
         /// Next index to yield.
         idx: usize,
+        /// Terminal value — `{value, done:true}` after exhaustion
+        /// (generator `return v`; `Undefined` for plain iterators).
+        ret: Value,
     },
     /// `Symbol(desc)` — unique identity per alloc (`===` by `ObjId`,
     /// `typeof` → `"symbol"`). Well-known symbols stay string

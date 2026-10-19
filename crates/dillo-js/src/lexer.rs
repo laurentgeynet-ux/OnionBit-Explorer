@@ -1099,7 +1099,6 @@ fn keyword(s: &str) -> Option<Kw> {
         "enum" => U("enum"),
         "import" => Import,
         "export" => Export,
-        "yield" => U("yield"),
         _ => return None,
     })
 }

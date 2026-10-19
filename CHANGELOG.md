@@ -9,6 +9,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 38 — formulaires** (`explorer-core`,
+  `explorer-layout`, `explorer-render`, `explorer-css`) :
+  champs natifs rendus par le moteur (ADR-0014) —
+  `LayoutBox.control_checked` + enfant `Text` synthétique
+  pour `value`/`placeholder`/libellé de bouton/option
+  `selected`, marque pleine centrée pour `checkbox`/`radio`,
+  feuille UA complétée (`select`, `button`, types `input`,
+  `input[type=hidden]`). Soumission : clic sur
+  `<button>`/`<input type=submit|image>` ou `Enter` dans un
+  `<input>` → événement `submit` dispatché au miroir JS
+  (`preventDefault` annule) → contrôles *successful*
+  (nommés, non `disabled`, cases cochées, submitter seul) →
+  `GET` query ou `POST` urlencodé via `HttpTransport` →
+  pipeline de navigation complet + historique.
+  `checkbox`/`radio` se basculent au clic (exclusivité
+  `radio` par `name`), `<select>` cycle, `label[for]`
+  délègue. Déviations documentées : popup `<select>` natif
+  différé, `reload` d'un POST refait `GET`, pas de
+  `multipart`, `password` non masqué. 6 tests session +
+  `Enter` implicite.
+
 - **Étape 37 — images `<img>`** (`explorer-layout`,
   `explorer-render`, `explorer-core`) : `LayoutBox.intrinsic`
   + `build_box_tree_sized`/`build_display_list_imaged` (les
@@ -466,6 +487,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`upper(v) == upper(borne)`) ; backrefs wrappées `(?i:…)`.
   16 assertions de régression `tests/lang.rs`
   (`regexp_js_c3_semantics`).
+- **JS-C9 — Générateurs eager** (`dillo-js`) : `function*` /
+  `yield` / `yield*`, méthodes génératrices `*m(){}` (objet et
+  classe), `async function*`. Le corps tourne à l'appel en
+  empilant un collecteur `Engine::gen_collect` — pas de
+  suspension (déviation documentée cohérente avec `await`
+  settled-only : `next(v)` ignore `v`, l'expression `yield`
+  vaut `undefined`, générateur infini → budget d'opérations).
+  `ObjKind::Iter` étendu d'un champ `ret` (valeur terminale
+  `{value, done:true}` du `return`), `gen_iter_obj` pour les
+  appels ; proto itérateur enrichi : `return(v)` (clôture),
+  `throw(e)` (relève). Parser : flag `in_gen` save/restore
+  (flèches et get/set réinitialisés), `yield` redevient
+  contextuel (hors table de mots-clés — identifiant sloppy,
+  `SyntaxError` hors générateur), pas de saut de ligne avant
+  l'opérande. `for await` sur générateur = fallback sync avec
+  valeurs awaitées (spec `AsyncFromSyncIterator`). test262
+  reste 859/859 ; 1 test de régression `lang.rs`.
 - **JS-C8 — APIs modernes** (`dillo-js`) :
   - `AggregateError` (prototype dédié, `errors` own prop) +
     `Error(m, {cause})` sur toute la famille Error ;

@@ -35,6 +35,7 @@ pub(crate) fn parse_in(src: &str, strict: bool) -> Result<Program> {
         nest: 0,
         strict,
         module: false,
+        in_gen: false,
     };
     p.scan_directives();
     let mut body = Vec::new();
@@ -58,6 +59,7 @@ pub fn parse_module(src: &str) -> Result<Program> {
         nest: 0,
         strict: true,
         module: true,
+        in_gen: false,
     };
     p.scan_directives();
     let mut body = Vec::new();
@@ -84,6 +86,10 @@ struct Parser {
     /// `true` dans le but de grammaire *module* — autorise les
     /// statements `import`/`export` au niveau top.
     module: bool,
+    /// `true` dans un corps de fonction générateur — autorise
+    /// l'expression `yield` (contextuelle : identifiant ailleurs,
+    /// réservée en strict).
+    in_gen: bool,
 }
 
 impl Parser {
@@ -1045,6 +1051,32 @@ impl Parser {
     }
 
     fn assign(&mut self, no_in: bool) -> Result<Expr> {
+        // `yield [e]` / `yield* it` — corps de générateur seulement ;
+        // ailleurs `yield` reste un identifiant (réservé en strict
+        // via `check_strict_binding`). Pas de saut de ligne avant
+        // l'opérande (spec `YieldExpression`).
+        if self.in_gen && matches!(self.peek(), Tok::Ident(s) if s == "yield") {
+            self.next();
+            let delegate = self.eat_p(P::Star);
+            let no_arg = matches!(
+                self.peek(),
+                Tok::P(
+                    P::RParen
+                        | P::RBracket
+                        | P::RBrace
+                        | P::Comma
+                        | P::Semi
+                        | P::Colon
+                        | P::Question
+                ) | Tok::Eof
+            ) || self.toks[self.pos].newline_before;
+            let arg = if no_arg {
+                None
+            } else {
+                Some(Box::new(self.assign(no_in)?))
+            };
+            return Ok(Expr::Yield { arg, delegate });
+        }
         if let Some(arrow) = self.try_arrow(no_in)? {
             return Ok(arrow);
         }
@@ -1113,6 +1145,7 @@ impl Parser {
                     body,
                     is_arrow: true,
                     is_async: false,
+                    is_gen: false,
                     strict,
                 }))));
             }
@@ -1130,6 +1163,7 @@ impl Parser {
                     body,
                     is_arrow: true,
                     is_async: false,
+                    is_gen: false,
                     strict,
                 }))));
             }
@@ -1162,6 +1196,7 @@ impl Parser {
                     body,
                     is_arrow: true,
                     is_async: true,
+                    is_gen: false,
                     strict,
                 }))));
             }
@@ -1180,6 +1215,7 @@ impl Parser {
                         body,
                         is_arrow: true,
                         is_async: true,
+                        is_gen: false,
                         strict,
                     }))));
                 }
@@ -1210,10 +1246,13 @@ impl Parser {
     fn arrow_body(&mut self, no_in: bool) -> Result<(Vec<Stmt>, bool)> {
         if self.eat_p(P::LBrace) {
             let outer_strict = self.strict;
+            let outer_gen = self.in_gen;
+            self.in_gen = false; // les flèches ne sont jamais génératrices
             self.scan_directives();
             let body = self.stmt_list();
             let strict = self.strict;
             self.strict = outer_strict;
+            self.in_gen = outer_gen;
             return body.map(|b| (b, strict));
         }
         let e = self.assign(no_in)?;
@@ -1638,6 +1677,8 @@ impl Parser {
             if self.eat_p(P::Ellipsis) {
                 props.push(ObjProp::Spread(self.assign(no_in)?));
             } else {
+                // `*m(){}` generator method / `async *m(){}`.
+                let mut gen = self.eat_p(P::Star);
                 // `async m(){}` method.
                 let async_ = matches!(self.peek(), Tok::Ident(s) if s == "async")
                     && !matches!(
@@ -1656,7 +1697,8 @@ impl Parser {
                     } else {
                         false
                     };
-                // `get k(){}`/`set k(v){}` vs a `get:`/`set:` prop.
+                gen |= self.eat_p(P::Star); // `async *m(){}`
+                                            // `get k(){}`/`set k(v){}` vs a `get:`/`set:` prop.
                 let mut accessor: Option<ClassMemberKind> = None;
                 if matches!(self.peek(), Tok::Ident(s) if s == "get" || s == "set")
                     && !matches!(
@@ -1680,6 +1722,7 @@ impl Parser {
                         self.expect_p(P::LParen, "`(`")?;
                         let params = self.params()?;
                         self.expect_p(P::LBrace, "`{`")?;
+                        self.in_gen = false; // get/set : jamais générateurs
                         let body = self.fn_body()?;
                         let fun = Rc::new(FnLit {
                             name: None,
@@ -1687,6 +1730,7 @@ impl Parser {
                             body: body.0,
                             is_arrow: false,
                             is_async: false,
+                            is_gen: false,
                             strict: body.1,
                         });
                         props.push(if kind == ClassMemberKind::Getter {
@@ -1696,10 +1740,11 @@ impl Parser {
                         });
                     }
                     None if self.check_p(P::LParen) => {
-                        // Shorthand method `{ f(a) {…} }`.
+                        // Shorthand method `{ f(a) {…} }` / `{ *f() {…} }`.
                         self.expect_p(P::LParen, "`(`")?;
                         let params = self.params()?;
                         self.expect_p(P::LBrace, "`{`")?;
+                        self.in_gen = gen;
                         let body = self.fn_body()?;
                         props.push(ObjProp::Prop(
                             key,
@@ -1709,6 +1754,7 @@ impl Parser {
                                 body: body.0,
                                 is_arrow: false,
                                 is_async: async_,
+                                is_gen: gen,
                                 strict: body.1,
                             })),
                         ));
@@ -1774,6 +1820,7 @@ impl Parser {
                         nest: 0,
                         strict: self.strict,
                         module: self.module,
+                        in_gen: self.in_gen,
                     };
                     let e = sub.expr(no_in)?;
                     if !sub.at_eof() {
@@ -1797,6 +1844,8 @@ impl Parser {
     /// resolved promise — see ast.rs).
     fn function(&mut self, decl: bool, async_: bool) -> Result<Rc<FnLit>> {
         self.expect_kw(Kw::Function, "`function`")?;
+        // `function*` / `async function*`.
+        let gen = self.eat_p(P::Star);
         let name = match self.peek().clone() {
             Tok::Ident(s) => {
                 self.next();
@@ -1815,6 +1864,7 @@ impl Parser {
         // paramètres ont été parsés dans le mode du parent (la spec
         // exige des params « simples » quand le corps est strict ;
         // tolérance : on n'a pas de paramètres non-simples).
+        self.in_gen = gen;
         let (body, strict) = self.fn_body()?;
         Ok(Rc::new(FnLit {
             name,
@@ -1822,18 +1872,22 @@ impl Parser {
             body,
             is_arrow: false,
             is_async: async_,
+            is_gen: gen,
             strict,
         }))
     }
 
     /// Corps de fonction déjà ouvert (`{` consommé) — prologue de
     /// directives scanné, retourne `(stmts, strict_effectif)`.
+    /// `self.in_gen` est celui posé par l'appelant (save/restore ici).
     fn fn_body(&mut self) -> Result<(Vec<Stmt>, bool)> {
         let outer_strict = self.strict;
+        let outer_gen = self.in_gen;
         self.scan_directives();
         let body = self.stmt_list();
         let strict = self.strict;
         self.strict = outer_strict;
+        self.in_gen = outer_gen;
         body.map(|b| (b, strict))
     }
 
@@ -1911,7 +1965,8 @@ impl Parser {
                 } else {
                     false
                 };
-            // `get k()`/`set k(v)` vs a plain `get`/`set` member.
+            let gen = self.eat_p(P::Star); // `*m(){}` / `async *m(){}`
+                                           // `get k()`/`set k(v)` vs a plain `get`/`set` member.
             let mut kind = ClassMemberKind::Method;
             if matches!(self.peek(), Tok::Ident(s) if s == "get" || s == "set")
                 && !matches!(
@@ -1944,8 +1999,13 @@ impl Parser {
             // pour les early errors.
             let outer_strict = self.strict;
             self.strict = true;
+            let outer_gen = self.in_gen;
+            // get/set ne sont jamais générateurs ; `*m` oui.
+            self.in_gen = gen && kind == ClassMemberKind::Method;
             let body = self.stmt_list();
+            let is_gen = self.in_gen;
             self.strict = outer_strict;
+            self.in_gen = outer_gen;
             members.push(ClassMember {
                 key,
                 kind,
@@ -1956,6 +2016,7 @@ impl Parser {
                     body: body?,
                     is_arrow: false,
                     is_async: async_,
+                    is_gen,
                     strict: true,
                 }),
             });

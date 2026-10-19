@@ -266,6 +266,7 @@ pub struct SwitchCase {
 }
 
 /// Function literal (declaration, expression or arrow).
+#[allow(clippy::struct_excessive_bools)] // flags are flags.
 #[derive(Debug, Clone)]
 pub struct FnLit {
     /// Name (declarations always have one; expressions may not).
@@ -283,6 +284,12 @@ pub struct FnLit {
     /// — a pending `await` raises a runtime error; documented
     /// deviation).
     pub is_async: bool,
+    /// `function*` — appeler la fonction rend un itérateur dont le
+    /// corps a tourné à l'appel en collectant les `yield`
+    /// (générateur *eager* : pas de suspension — déviation
+    /// documentée ; `next(v)` ignore `v`, les générateurs
+    /// infinis butent sur le budget d'opérations).
+    pub is_gen: bool,
     /// Corps en mode strict — hérité du contexte OU activé par un
     /// prologue `"use strict"` dans le corps. `true` pour tous les
     /// membres de classe (les corps de classe sont stricts par spec).
@@ -536,6 +543,15 @@ pub enum Expr {
     /// promise raises a runtime error: the tree-walking interpreter
     /// cannot suspend mid-function (documented deviation).
     Await(Box<Expr>),
+    /// `yield [x]` / `yield* it` — pushes onto the generator's
+    /// eager collector; the expression evaluates to `undefined`
+    /// (the `next(v)` argument is unavailable — no suspension).
+    Yield {
+        /// Yielded expression (`None` → `undefined`).
+        arg: Option<Box<Expr>>,
+        /// `yield*` — drains the sub-iterable into the collector.
+        delegate: bool,
+    },
     /// `import(spec)` — dynamic import: returns a promise resolved
     /// with the module namespace object.
     ImportCall(Box<Expr>),

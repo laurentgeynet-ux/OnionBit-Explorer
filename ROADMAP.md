@@ -392,6 +392,21 @@ d'intégration, pas par la couverture :
   documentée, paresse spec → timing). `await_value` extrait
   d'`Expr::Await` (partagé `fromAsync`/`for await`). test262
   reste 859/859.
+- [x] **JS-C9. Générateurs eager** : `function*`/`yield`/
+  `yield*`, méthodes `*m(){}` objet+classe, `async function*`.
+  Modèle : le corps tourne **à l'appel** en empilant un
+  collecteur `gen_collect` (pile pour générateurs imbriqués) —
+  pas de suspension (déviation documentée, cohérente avec
+  `await` settled-only ; `next(v)` ignore `v` → l'expression
+  `yield` vaut `undefined` ; les générateurs infinis butent
+  sur le budget d'opérations). L'appel rend un `ObjKind::Iter`
+  étendu (`ret` terminal → `{value, done:true}` du `return`),
+  proto partagé + `gen.return(v)`/`gen.throw(e)`. Parser :
+  `in_gen` save/restore (flèches/accessors reset), `yield`
+  contextuel (identifiant sloppy, `SyntaxError` hors gen),
+  pas de newline avant l'opérande, `for await` sur
+  générateurs via fallback sync (valeurs awaitées, spec
+  `AsyncFromSyncIterator`). test262 reste 859/859.
 - [ ] **JS-C. Couverture par besoin** : `Intl` —
   ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
@@ -474,8 +489,11 @@ d'intégration, pas par la couverture :
   (png/jpeg/gif/webp), blit nearest-neighbor + alpha dans le
   raster, repli `alt` sur tout échec. Décodage progressif
   (incrémental) reporté — hors scope du palier.
-- [ ] **Étape 38. Formes.** `<form>`, GET/POST, champs natifs
-  rendus moteur ou délégués UI (ADR de phase).
+- [x] **Étape 38. Formes.** `<form>` GET/POST : champs natifs
+  rendus par le moteur (ADR-0014) — valeur en enfant `Text`
+  synthétique, marque `checked`, `<select>` cycle au clic,
+  soumission urlencodée via `HttpTransport`, événement
+  `submit` JS + `preventDefault` honoré.
 - [ ] **Étape 39. Perf + fuzz.** Benchs pipeline, bornes
   mémoire/temps, corpus fuzz tokenizer/parser.
 - [ ] **Étape 40. Release 0.1.** Packaging Windows

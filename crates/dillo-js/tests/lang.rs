@@ -3179,3 +3179,89 @@ fn iterator_helpers() {
         "TypeError"
     );
 }
+
+#[test]
+fn generators_eager() {
+    // `function*` + `yield` — itérateur standard.
+    assert_eq!(
+        ev_str(
+            "function* g() { yield 1; yield 2; } var it = g(); \
+             it.next().value + '|' + it.next().value + '|' + it.next().done"
+        ),
+        "1|2|true"
+    );
+    // `for-of` sur générateur.
+    assert_eq!(
+        ev_str(
+            "function* g() { for (var i = 0; i < 3; i++) yield i * 2; } \
+                var r = []; for (var x of g()) r.push(x); r.join(',')"
+        ),
+        "0,2,4"
+    );
+    // `yield*` délègue à un sous-itérable.
+    assert_eq!(
+        ev_str(
+            "function* g() { yield 1; yield* [2, 3]; yield* g2(); } \
+                function* g2() { yield 4; } \
+                var r = []; for (var x of g()) r.push(x); r.join(',')"
+        ),
+        "1,2,3,4"
+    );
+    // `return v` terminal : `{value, done:true}`.
+    assert_eq!(
+        ev_str(
+            "function* g() { yield 1; return 9; yield 2; } var it = g(); \
+             it.next(); it.next().value + '|' + it.next().done"
+        ),
+        "9|true"
+    );
+    // Spread consomme le générateur.
+    assert_eq!(
+        ev_str("function* g() { yield 'a'; yield 'b'; } [...g()].join('')"),
+        "ab"
+    );
+    // Méthodes génératrices `{*m(){}}` et `class {*m(){}}`.
+    assert_eq!(
+        ev_str("var o = { *gen() { yield 7; } }; o.gen().next().value"),
+        "7"
+    );
+    assert_eq!(
+        ev_str("class C { *gen() { yield 8; } } new C().gen().next().value"),
+        "8"
+    );
+    // `gen.return(v)` clôt ; `gen.throw(e)` lève.
+    assert_eq!(
+        ev_str(
+            "function* g() { yield 1; } var it = g(); \
+             var r = it.return(5); r.value + '|' + r.done + '|' + it.next().done"
+        ),
+        "5|true|true"
+    );
+    assert_eq!(
+        ev_str(
+            "function* g() { yield 1; } var it = g(); \
+             try { it.throw('boom') } catch(e) { e }"
+        ),
+        "boom"
+    );
+    // `yield` hors générateur reste un identifiant (sloppy).
+    assert_eq!(ev_str("var yield = 3; yield + 1"), "4");
+    // `for await` sur générateur.
+    assert_eq!(
+        seq_str(
+            "function* g() { yield Promise.resolve(1); yield 2; } \
+             var r = []; for await (var x of g()) r.push(x);",
+            "r.join(',')"
+        ),
+        "1,2"
+    );
+    // `async function*` : corps eager + itérateur (déviation).
+    assert_eq!(
+        seq_str(
+            "async function* g() { yield 1; } \
+             var r = []; for await (var x of g()) r.push(x);",
+            "r.join(',')"
+        ),
+        "1"
+    );
+}

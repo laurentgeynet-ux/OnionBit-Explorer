@@ -117,6 +117,11 @@ pub struct Engine {
     /// Specifier du module en cours d'exécution (`import.meta.url`
     /// et referrer de `import()`).
     pub(crate) current_module: String,
+    /// Pile de collecteurs `yield` des générateurs en cours
+    /// (générateur eager : le corps tourne à l'appel et chaque
+    /// `yield` pousse sur le collecteur du sommet — déviation
+    /// documentée, pas de suspension).
+    pub(crate) gen_collect: Vec<Vec<Value>>,
 }
 
 /// Prototype objects captured at engine init.
@@ -281,6 +286,7 @@ impl Engine {
             module_envs: Vec::new(),
             module_loader: None,
             current_module: String::new(),
+            gen_collect: Vec::new(),
         };
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
@@ -1300,6 +1306,7 @@ impl Engine {
                         },
                         is_arrow: false,
                         is_async: false,
+                        is_gen: false,
                         strict: true, // corps de classe
                     })
                 },
@@ -2354,9 +2361,29 @@ impl Engine {
                     }
                 }
                 self.hoist(&lit.body, &local);
+                // Générateur eager : le corps tourne à l'appel en
+                // empilant un collecteur ; chaque `yield` pousse sa
+                // valeur (déviation — pas de suspension).
+                if lit.is_gen {
+                    self.gen_collect.push(Vec::new());
+                }
                 let r = self.exec_body(&local, this, &lit.body);
                 self.call_depth -= 1;
                 self.strict = outer_strict;
+                if lit.is_gen {
+                    let items = self.gen_collect.pop().unwrap_or_default();
+                    return match r {
+                        Ok(Flow::Return(ret)) => {
+                            Ok(crate::collections::gen_iter_obj(self, items, ret))
+                        }
+                        Ok(_) => Ok(crate::collections::gen_iter_obj(
+                            self,
+                            items,
+                            Value::Undefined,
+                        )),
+                        Err(t) => Err(t),
+                    };
+                }
                 let out = match r {
                     Ok(Flow::Return(v)) => Ok(v),
                     Ok(_) => Ok(Value::Undefined),
@@ -3010,6 +3037,34 @@ impl Engine {
             Expr::Await(e) => {
                 let v = self.eval_expr(env, this, e)?;
                 self.await_value(v)
+            }
+            Expr::Yield { arg, delegate } => {
+                if self.gen_collect.is_empty() {
+                    // `yield` hors générateur — le parseur le
+                    // refuse, garde-fou pour les chemins détournés.
+                    return Err(self.syntax_error("yield outside a generator"));
+                }
+                if *delegate {
+                    let Some(ae) = arg else {
+                        return Err(self.syntax_error("yield* needs an operand"));
+                    };
+                    let v = self.eval_expr(env, this, ae)?;
+                    let items = self.iter_values_await(v)?;
+                    if let Some(c) = self.gen_collect.last_mut() {
+                        c.extend(items);
+                    }
+                } else {
+                    let v = match arg {
+                        Some(e) => self.eval_expr(env, this, e)?,
+                        None => Value::Undefined,
+                    };
+                    if let Some(c) = self.gen_collect.last_mut() {
+                        c.push(v);
+                    }
+                }
+                // `next(v)` est indisponible en mode eager — le
+                // résultat de l'expression `yield` est `undefined`.
+                Ok(Value::Undefined)
             }
             // `import(spec)` — dynamic import: loads, instantiates
             // and evaluates the module, then resolves with its

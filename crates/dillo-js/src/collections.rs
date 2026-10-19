@@ -10,7 +10,7 @@
 //! (spec semantics: live iterators — ours freeze a snapshot, a
 //! documented deviation).
 
-use crate::heap::{JsResult, ObjKind, Object};
+use crate::heap::{JsResult, ObjKind, Object, Thrown};
 use crate::interp::SYM_ITERATOR;
 use crate::value::{ObjId, Value};
 use crate::Engine;
@@ -39,6 +39,20 @@ fn set_items(e: &Engine, id: ObjId) -> Vec<Value> {
     }
 }
 
+/// Generator object — `Iter` snapshot plus a terminal `ret`
+/// (`gen.return v` → `{value: v, done: true}` after exhaustion).
+pub(crate) fn gen_iter_obj(e: &mut Engine, items: Vec<Value>, ret: Value) -> Value {
+    let it = iter_obj(e, items);
+    if let Value::Obj(id) = it {
+        if let Some(o) = e.heap.obj_mut(id) {
+            if let ObjKind::Iter { ret: r, .. } = &mut o.kind {
+                *r = ret;
+            }
+        }
+    }
+    it
+}
+
 /// `{value, done}` iterator result.
 fn iter_result(e: &mut Engine, value: Value, done: bool) -> Value {
     let o = e.new_object();
@@ -57,7 +71,11 @@ pub(crate) fn iter_obj(e: &mut Engine, items: Vec<Value>) -> Value {
     Value::Obj(e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
-        kind: ObjKind::Iter { items, idx: 0 },
+        kind: ObjKind::Iter {
+            items,
+            idx: 0,
+            ret: Value::Undefined,
+        },
         extensible: true,
     }))
 }
@@ -326,33 +344,50 @@ fn iter_next(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Err(e.type_error("next on non-iterator"));
     };
-    let item = {
+    let (item, ret) = {
         let Some(o) = e.heap.obj_mut(id) else {
             return Err(e.type_error("next on non-iterator"));
         };
         match &mut o.kind {
-            ObjKind::Iter { items, idx } => {
+            ObjKind::Iter { items, idx, ret } => {
                 if *idx < items.len() {
                     let v = items[*idx];
                     *idx += 1;
-                    Some(v)
+                    (Some(v), Value::Undefined)
                 } else {
-                    None
+                    (None, *ret)
                 }
             }
             _ => return Err(e.type_error("next on non-iterator")),
         }
     };
-    Ok(iter_result(
-        e,
-        item.unwrap_or(Value::Undefined),
-        item.is_none(),
-    ))
+    Ok(iter_result(e, item.unwrap_or(ret), item.is_none()))
 }
 
 /// Iterator proto's `[Symbol.iterator]` returns `this`.
 fn iter_self(_e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(this)
+}
+
+/// `gen.return(v)` — termine l'itérateur (le corps a déjà tourné
+/// en mode eager : pas de `finally` à rejouer) → `{value: v,
+/// done: true}`.
+fn iter_return(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("return on non-iterator"));
+    };
+    if let Some(o) = e.heap.obj_mut(id) {
+        if let ObjKind::Iter { items, idx, .. } = &mut o.kind {
+            *idx = items.len();
+        }
+    }
+    Ok(iter_result(e, arg(args, 0), true))
+}
+
+/// `gen.throw(e)` — le corps eager a déjà terminé : la spec lève
+/// l'erreur directement à l'appelant.
+fn iter_throw(_e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    Err(Thrown(arg(args, 0)))
 }
 
 fn c_id(v: Value) -> ObjId {
@@ -366,9 +401,14 @@ fn c_id(v: Value) -> ObjId {
 pub(crate) fn install(e: &mut Engine) {
     let iterator = e.protos.iterator;
     e.add_method(iterator, "next", iter_next);
+    e.add_method(iterator, "return", iter_return);
+    e.add_method(iterator, "throw", iter_throw);
     {
         let self_fn = e.native_fn("[Symbol.iterator]", iter_self);
         e.set_own(iterator, SYM_ITERATOR, self_fn, false);
+        // PAS de `[Symbol.asyncIterator]` : un `Iter` est un
+        // itérable *sync* — `for await` doit passer par le fallback
+        // `AsyncFromSyncIterator` qui awaite chaque valeur.
     }
     // JS-C8 — Iterator helpers (ES2025) : snapshot eager, les
     // méthodes paresseuses spec sont matérialisées (déviation).
@@ -503,7 +543,7 @@ fn map_group_by(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 fn it_pull_all(e: &mut Engine, this: Value) -> JsResult<Vec<Value>> {
     if let Value::Obj(id) = this {
         if let Some(o) = e.heap.obj_mut(id) {
-            if let ObjKind::Iter { items, idx } = &mut o.kind {
+            if let ObjKind::Iter { items, idx, .. } = &mut o.kind {
                 let rest = items.split_off(*idx);
                 *idx = 0;
                 return Ok(rest);
