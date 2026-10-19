@@ -170,6 +170,25 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   fonte et taille par fragment. Mesuré : `span` → bleu,
   `a[href]` → `#00e` UA, texte direct → couleur du bloc —
   test `color_inline_atteint_le_run`.
+- [ ] **R-19. Rects parents non-bondants → hit-test mort**
+  (bug terrain mission 5, journal `interface-equipes.md`,
+  repro : lite.ddg entier + zones wikipedia/example.com) :
+  `hit_test` élague le sous-arbre quand le point sort du
+  rect parent — or `<center>` pose son `<form>` HORS de son
+  propre rect (`[0 256 1024×192]` vs enfant `y=76.8`) → tout
+  le peint devient incliquable. À arbitrer : rect parent =
+  union de ses enfants à la pose, ou hit-test tolérant sans
+  élagage (perf). Hypothèse connexe à vérifier : le contenu
+  **injecté JS** peint mais non hit-testable (example.com,
+  ~800 sondes) — même famille ou `tree` non rafraîchi après
+  `apply_dom_sync`.
+- [ ] **R-20. `<script>` peint en texte** (bug terrain
+  mission 5, wikipedia — clientpref/RLSTATE JSON visibles
+  vers 300 px) : `script{display:none}` existe dans
+  `UA_CSS` mais des scripts inline entrent au box tree.
+  Diagnostic à écrire : dump layout wikipedia conservé ;
+  suspect à éliminer en premier : noscript/scripting-flag
+  après R-15, ou élément inséré sans cascade.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

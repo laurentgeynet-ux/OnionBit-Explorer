@@ -224,7 +224,10 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
 - [ ] **Étape 56. Profil persisté complet** (ex-64) : cookies,
   localStorage (cf. 51), cache disque borné, historique —
   namespaces de session cloisonnés (ADR-0011), répertoire
-  déplaçable.
+  déplaçable. + **bfcache minimal** (terrain mission 5 :
+  back/forward re-fetche systématiquement — HN retour 40 s) :
+  garder la page quittée en mémoire bornée, restauration
+  instantanée.
 - [ ] **Étape 57. UI Flutter v2** (ex-65) : thème clair
   (`tokens.json` variante), settings (moteur REST/FFI, thème,
   profil), UI historique + bookmarks (store core existant),
@@ -286,6 +289,11 @@ déclencheur documenté** : échec `site_smoke`, bug d'un site
 réel, ou besoin d'une étape produit. Le % de couverture n'est
 jamais un déclencheur (état des lieux §2 — limites des
 mesures).
+
+**Déclencheurs accumulés** : lobste.rs — `TypeError: value is
+not a function` ×4 (mission 5, API manquante à identifier) ;
+example.com — `TypeError` sur `s.js` (injection partielle) ;
+github.com — bundle > plafonds (JS-C41 livré le cadre).
 
 - [ ] **JS-C30. Extension corpus test262** : extraire les
   répertoires non couverts (`builtins/` complet,
