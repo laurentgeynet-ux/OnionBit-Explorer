@@ -9,6 +9,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 7 — `explorer-net` : cookies + cache** (`cookies.rs`,
+  `cache.rs`) : `CookieJar` RFC 6265 durci — `Domain=` validé par
+  **Public Suffix List** (`psl`, supercookies `.co.uk` rejetés),
+  `Secure` https-only (localhost toléré), `HttpOnly` filtré de la
+  vue `document.cookie`, `SameSite`, préfixes `__Host-`/`__Secure-`
+  requis, `Max-Age=0` = suppression, chemins RFC 6265 §5.1.4,
+  budgets `CookieConfig` (total/par-domaine, éviction). `MemoryCache`
+  — GET only, `no-store`/`Vary: *` exclus, statuts cachables RFC
+  9111, fraîcheur `max-age`/`Expires`, revalidation `If-None-Match`/
+  `If-Modified-Since` sur 304 (corps caché servi, en-têtes
+  fusionnés), éviction FIFO bornée. Décorateurs `CookieTransport`
+  (Cookie: injecté + Set-Cookie capturé) et `CachingTransport`
+  composables. 17 tests dont wire end-to-end.
 - **Étape 6 — `explorer-net` : décodage des corps** (`decode.rs`)
   : `DecodingTransport` décorateur — `Accept-Encoding: gzip,
   deflate, br` injecté, `Content-Encoding` multi-codages décodés

@@ -5,10 +5,10 @@
 //! Tests du décodage des corps — `DecodingTransport` sur serveur
 //! loopback scripté + assertions charset/nosniff sur `Response`.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::Arc;
 
-use explorer_net::decode::{decode_response, DecodingTransport, ACCEPT_ENCODING};
+use explorer_net::decode::{decode_response, DecodingTransport};
 use explorer_net::error::NetError;
 use explorer_net::h1::{H1Client, HttpConfig, TcpConnector};
 use explorer_net::http::{HttpTransport, Request, Response};

@@ -121,14 +121,12 @@ impl Response {
     #[must_use]
     pub fn charset(&self) -> Option<String> {
         let ct = self.content_type()?;
-        ct.split(';')
-            .skip(1)
-            .find_map(|p| {
-                let (k, v) = p.trim().split_once('=')?;
-                k.trim()
-                    .eq_ignore_ascii_case("charset")
-                    .then(|| v.trim().trim_matches('"').to_ascii_lowercase())
-            })
+        ct.split(';').skip(1).find_map(|p| {
+            let (k, v) = p.trim().split_once('=')?;
+            k.trim()
+                .eq_ignore_ascii_case("charset")
+                .then(|| v.trim().trim_matches('"').to_ascii_lowercase())
+        })
     }
 
     /// `X-Content-Type-Options: nosniff` — le client doit honorer

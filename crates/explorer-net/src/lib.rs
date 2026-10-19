@@ -12,6 +12,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod cache;
+pub mod cookies;
 pub mod decode;
 pub mod error;
 pub mod h1;

@@ -57,7 +57,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   Rust), content-length vs chunked résolus, charset déclaré exposé
   + **transcodage** (UTF-8, windows-1252 — `encoding_rs` ou tables
   maison, à arbitrer), `X-Content-Type-Options` honoré.
-- [ ] **Étape 7. Cookies + cache.** Jar mémoire avec politique
+- [x] **Étape 7. Cookies + cache.** Jar mémoire avec politique
   réelle dès le départ : `Secure`/`HttpOnly`/`SameSite`,
   préfixes `__Host-`/`__Secure-`, domaines validés par **Public
   Suffix List** (crate pur Rust type `psl` — sans elle, un jar
