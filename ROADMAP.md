@@ -138,7 +138,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
 
 ## Phase 4 — Layout (`explorer-layout`)
 
-- [ ] **Étape 17. Arbre de boîtes.** Block/inline/anonymous,
+- [x] **Étape 17. Arbre de boîtes.** Block/inline/anonymous,
   lien nœud DOM ↔ boîte, dump wireframe debug dans `explorer-cli`
   (feedback visuel immédiat des rectangles avant la phase 5).
 - [ ] **Étape 18. Stack texte et fontes** (ADR-0009).

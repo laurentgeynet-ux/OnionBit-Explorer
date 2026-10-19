@@ -9,6 +9,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 17 — `explorer-layout` : arbre de boîtes**
+  (`boxtree.rs`) : `LayoutBox`/`BoxKind`
+  (block/inline/list-item/texte/anonyme) + lien
+  `node: Option<NodeId>` ↔ boîte, `Rect` (géométrie remplie
+  par les étapes 19+). `build_box_tree` : `display:none`
+  saute le sous-arbre, texte porte le style du parent,
+  enveloppes anonymes CSS 2.1 §9.2.1.1 avec troncature des
+  blancs purs en bord de run (l'espace entre inlines
+  survit). `dump` wireframe + commande `explorer-cli layout`
+  (pipeline fetch → parse → style → boîtes, `<style>`
+  embarqués collectés — feuilles liées hors périmètre).
+  8 tests.
+
 - **JS-B — harness test262 (ADR-0010)** : extrait versionné de
   la suite ECMAScript officielle @ `d53ebc8` (1077 fichiers,
   sous-ensembles `test/language/{types,literals,comments,

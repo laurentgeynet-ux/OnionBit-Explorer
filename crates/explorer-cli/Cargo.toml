@@ -15,3 +15,5 @@ explorer-dom.workspace = true
 explorer-html.workspace = true
 explorer-net.workspace = true
 tokio.workspace = true
+explorer-css.workspace = true
+explorer-layout.workspace = true
