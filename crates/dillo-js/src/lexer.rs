@@ -82,8 +82,10 @@ pub enum Kw {
     Import,
     /// `export`
     Export,
+    /// `with`
+    With,
     /// A real ECMAScript keyword the engine does not implement yet
-    /// (`with`, `yield`…).
+    /// (`debugger`, `enum`…).
     Unsupported(&'static str),
 }
 
@@ -1059,7 +1061,7 @@ fn keyword(s: &str) -> Option<Kw> {
     use Kw::{
         Break, Case, Catch, Class, Const, Continue, Default, Delete, Do, Else, Export, Extends,
         False, Finally, For, Function, If, Import, In, Instanceof, Let, New, Null, Return, Super,
-        Switch, This, Throw, True, Try, Typeof, Unsupported as U, Var, Void, While,
+        Switch, This, Throw, True, Try, Typeof, Unsupported as U, Var, Void, While, With,
     };
     Some(match s {
         "var" => Var,
@@ -1094,7 +1096,7 @@ fn keyword(s: &str) -> Option<Kw> {
         "class" => Class,
         "extends" => Extends,
         "super" => Super,
-        "with" => U("with"),
+        "with" => With,
         "debugger" => U("debugger"),
         "enum" => U("enum"),
         "import" => Import,

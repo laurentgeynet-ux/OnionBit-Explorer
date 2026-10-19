@@ -487,6 +487,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`upper(v) == upper(borne)`) ; backrefs wrappées `(?i:…)`.
   16 assertions de régression `tests/lang.rs`
   (`regexp_js_c3_semantics`).
+- **JS-C10 — Symboles bien connus, `with`, `Reflect` complet**
+  (`dillo-js`) :
+  - `Symbol.toPrimitive` honoré dans `ToPrimitive` avec hint
+    spec à trois états (`"default"` pour `+`/`==`, `"number"`
+    pour l'arithmétique, `"string"` pour `ToString`) — retour
+    non-primitif → `TypeError` ;
+  - `Symbol.hasInstance` lu **avant** le garde callable dans
+    `instanceof` (spec `InstanceofOperator`) ;
+  - `Symbol.toStringTag` dans `Object.prototype.toString`
+    (propre ou hérité) ;
+  - `Symbol.unscopables` installé sur `Array.prototype` (17
+    noms spec) et honoré par `with` ;
+  - `with (o)` : `Stmt::With` + `EnvKind::With(ObjId)` —
+    résolution des noms via les props de `o` (proto incluse,
+    filtre `@@unscopables`), écriture sur prop existante sinon
+    scope parent, `var` hoiste au scope fonction, primitives
+    enrobées dans un wrapper jetable, `null`/`undefined` →
+    `TypeError`, `SyntaxError` en strict ;
+  - `Object.getOwnPropertySymbols` + exclusion des clés-
+    sentinelles de `getOwnPropertyNames` ;
+  - `Reflect` complété à 13 méthodes : `defineProperty`,
+    `deleteProperty`, `getOwnPropertyDescriptor`,
+    `getPrototypeOf`, `setPrototypeOf`, `isExtensible`,
+    `preventExtensions` — `false` sur refus plutôt que throw
+    (déviation : une trap lancée est aussi rendue `false`) ;
+  - test262 : 859/859 conservé ; 7 tests de régression.
 - **JS-C9 — Générateurs eager** (`dillo-js`) : `function*` /
   `yield` / `yield*`, méthodes génératrices `*m(){}` (objet et
   classe), `async function*`. Le corps tourne à l'appel en

@@ -352,17 +352,20 @@ pub(crate) fn trace_env(env: &EnvRef, out: &mut Vec<ObjId>, visited: &mut HashSe
                 break;
             }
             let borrowed = e.borrow();
-            let map = match &borrowed.kind {
-                EnvKind::Global(m) | EnvKind::Local(m) => m,
-            };
-            for c in map.values() {
-                match c {
-                    EnvCell::Bind(b) => push_value(out, b.value),
-                    // Alias d'import : l'env du module exporteur est
-                    // aussi une racine — ses liaisons restent
-                    // vivantes tant qu'un importeur les référence.
-                    EnvCell::Alias(target, _) => stack.push(target.clone()),
+            match &borrowed.kind {
+                EnvKind::Global(m) | EnvKind::Local(m) => {
+                    for c in m.values() {
+                        match c {
+                            EnvCell::Bind(b) => push_value(out, b.value),
+                            // Alias d'import : l'env du module exporteur est
+                            // aussi une racine — ses liaisons restent
+                            // vivantes tant qu'un importeur les référence.
+                            EnvCell::Alias(target, _) => stack.push(target.clone()),
+                        }
+                    }
                 }
+                // `with (o)` — l'objet-scope vit tant que le bloc.
+                EnvKind::With(oid) => push_value(out, Value::Obj(*oid)),
             }
             cur.clone_from(&borrowed.parent);
         }
@@ -1099,6 +1102,10 @@ pub enum EnvKind {
     Global(HashMap<String, EnvCell>),
     /// Function/catch scope.
     Local(HashMap<String, EnvCell>),
+    /// `with (obj)` — object-as-scope : la résolution d'un nom
+    /// consulte les props de l'objet (sauf `@@unscopables`)
+    /// puis remonte au parent.
+    With(ObjId),
 }
 
 /// A binding cell: a normal [`Binding`], or a module import alias
@@ -1142,6 +1149,14 @@ impl Env {
         Rc::new(RefCell::new(Env {
             kind: EnvKind::Global(HashMap::new()),
             parent: None,
+        }))
+    }
+
+    /// `with (obj)` — object-as-scope chained to `parent`.
+    pub fn with(parent: EnvRef, obj: ObjId) -> EnvRef {
+        Rc::new(RefCell::new(Env {
+            kind: EnvKind::With(obj),
+            parent: Some(parent),
         }))
     }
 }

@@ -407,6 +407,27 @@ d'intégration, pas par la couverture :
   pas de newline avant l'opérande, `for await` sur
   générateurs via fallback sync (valeurs awaitées, spec
   `AsyncFromSyncIterator`). test262 reste 859/859.
+- [x] **JS-C10. Symboles bien connus + `with` + `Reflect`
+  complet** : `@@toPrimitive` (hint `default`/`number`/`string`
+  — `+` et `==` passent `"default"`, arithmétique `"number"`),
+  `@@hasInstance` (hook lu **avant** l'exigence callable, spec
+  `InstanceofOperator`), `@@toStringTag` dans
+  `Object.prototype.toString` (tag propre ou hérité),
+  `@@unscopables` sur `Array.prototype` (liste spec ES2015+).
+  `with (o)` : `Stmt::With`, `EnvKind::With(ObjId)` — les noms
+  se résolvent dans les props de `o` (chaîne proto incluse,
+  filtre `@@unscopables`), l'écriture va à la prop existante
+  sinon remonte au scope parent, `var` hoiste au scope fonction
+  (records declarative : le `with` est transparent), primitives
+  enrobées dans un wrapper jetable (`with ("abc") { length }`
+  → 3), `null`/`undefined` → `TypeError`, early-error en strict.
+  Énumération symbole-aware : `Object.getOwnPropertyNames`
+  exclut les clés-sentinelles, `getOwnPropertySymbols` les rend.
+  `Reflect` complété à 13 méthodes (`defineProperty`,
+  `deleteProperty`, `getOwnPropertyDescriptor`, `getPrototypeOf`,
+  `setPrototypeOf`, `isExtensible`, `preventExtensions` rendent
+  `false` sur refus — déviation : une trap lancée surface aussi
+  `false`). test262 reste 859/859 ; 7 tests de régression.
 - [ ] **JS-C. Couverture par besoin** : `Intl` —
   ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/

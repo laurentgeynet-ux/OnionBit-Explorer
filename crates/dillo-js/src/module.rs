@@ -413,6 +413,8 @@ fn env_alias(env: &EnvRef, local: &str, dep_env: &EnvRef, binding: &str) {
                 EnvCell::Alias(dep_env.clone(), binding.to_string()),
             );
         }
+        // Env de module — jamais un `with`.
+        crate::heap::EnvKind::With(_) => {}
     }
 }
 

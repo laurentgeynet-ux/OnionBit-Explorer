@@ -260,6 +260,18 @@ impl Parser {
             }
             Tok::Kw(Kw::Class) => Ok(Stmt::ClassDecl(self.class_lit()?)),
             Tok::Kw(Kw::If) => self.if_stmt(),
+            Tok::Kw(Kw::With) => {
+                // `with` est interdit en strict — early error spec.
+                if self.strict {
+                    return Err(self.err("`with` is not allowed in strict mode"));
+                }
+                self.next();
+                self.expect_p(P::LParen, "`(`")?;
+                let obj = self.expr(false)?;
+                self.expect_p(P::RParen, "`)`")?;
+                let body = Box::new(self.stmt()?);
+                Ok(Stmt::With { obj, body })
+            }
             Tok::Kw(Kw::While) => {
                 self.next();
                 self.expect_p(P::LParen, "`(`")?;
@@ -2046,6 +2058,7 @@ fn kw_str(kw: Kw) -> &'static str {
         Kw::If => "if",
         Kw::Else => "else",
         Kw::While => "while",
+        Kw::With => "with",
         Kw::Do => "do",
         Kw::For => "for",
         Kw::Break => "break",

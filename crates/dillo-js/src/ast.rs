@@ -104,6 +104,13 @@ pub enum Stmt {
         /// `for await` — async iterator protocol.
         is_await: bool,
     },
+    /// `with (obj) b` — object-as-scope (sloppy only).
+    With {
+        /// Scope object.
+        obj: Expr,
+        /// Body.
+        body: Box<Stmt>,
+    },
     /// `break` (unlabelled only)
     Break,
     /// `continue` (unlabelled only)

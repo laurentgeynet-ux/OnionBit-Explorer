@@ -137,6 +137,25 @@ pub(crate) fn install(e: &mut Engine) {
         e.set_own(sid, "iterator", it, false);
         let ait = e.str_val(crate::interp::SYM_ASYNC_ITERATOR);
         e.set_own(sid, "asyncIterator", ait, false);
+        // Well-known symbols exposés (certains honorés par le
+        // moteur : toPrimitive/hasInstance/toStringTag/unscopables ;
+        // les autres sont des clés utilisables par les scripts).
+        for (name, key) in [
+            ("toPrimitive", "\u{f130}Symbol.toPrimitive"),
+            ("hasInstance", "\u{f130}Symbol.hasInstance"),
+            ("toStringTag", "\u{f130}Symbol.toStringTag"),
+            ("unscopables", "\u{f130}Symbol.unscopables"),
+            ("species", "\u{f130}Symbol.species"),
+            ("match", "\u{f130}Symbol.match"),
+            ("matchAll", "\u{f130}Symbol.matchAll"),
+            ("replace", "\u{f130}Symbol.replace"),
+            ("search", "\u{f130}Symbol.search"),
+            ("split", "\u{f130}Symbol.split"),
+            ("isConcatSpreadable", "\u{f130}Symbol.isConcatSpreadable"),
+        ] {
+            let v = e.str_val(key);
+            e.set_own(sid, name, v, false);
+        }
         e.add_method(sid, "for", symbol_for);
         e.add_method(sid, "keyFor", symbol_key_for);
         e.add_method(e.protos.symbol, "toString", symbol_to_string);
@@ -154,6 +173,17 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(reflect, "ownKeys", reflect_own_keys);
     e.add_method(reflect, "apply", reflect_apply);
     e.add_method(reflect, "construct", reflect_construct);
+    e.add_method(reflect, "defineProperty", reflect_define_property);
+    e.add_method(reflect, "deleteProperty", reflect_delete_property);
+    e.add_method(
+        reflect,
+        "getOwnPropertyDescriptor",
+        reflect_get_own_property_descriptor,
+    );
+    e.add_method(reflect, "getPrototypeOf", reflect_get_prototype_of);
+    e.add_method(reflect, "setPrototypeOf", reflect_set_prototype_of);
+    e.add_method(reflect, "isExtensible", reflect_is_extensible);
+    e.add_method(reflect, "preventExtensions", reflect_prevent_extensions);
     e.set_own(g, "Reflect", Value::Obj(reflect), false);
     // `Proxy` — construct-only (`Proxy(t,h)` → TypeError) ; la
     // méthode statique `revocable` rend `{proxy, revoke}`.
@@ -207,6 +237,11 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(oid, "getPrototypeOf", object_get_proto);
         e.add_method(oid, "setPrototypeOf", object_set_proto);
         e.add_method(oid, "getOwnPropertyNames", object_get_own_property_names);
+        e.add_method(
+            oid,
+            "getOwnPropertySymbols",
+            object_get_own_property_symbols,
+        );
         e.add_method(oid, "entries", object_entries);
         e.add_method(oid, "fromEntries", object_from_entries);
         e.add_method(oid, "hasOwn", object_has_own);
@@ -289,6 +324,31 @@ pub(crate) fn install(e: &mut Engine) {
     // `[Symbol.iterator]` ≙ `values` (spec).
     let values_fn = e.native_fn("values", array_values);
     e.set_own(ap, crate::interp::SYM_ITERATOR, values_fn, false);
+    // `[Symbol.unscopables]` — méthodes exclues de la liaison `with`
+    // (liste spec ES2015+ ; `with ([]) { find }` → scope externe).
+    let unsc = e.new_object();
+    for n in [
+        "at",
+        "copyWithin",
+        "entries",
+        "fill",
+        "find",
+        "findIndex",
+        "findLast",
+        "findLastIndex",
+        "flat",
+        "flatMap",
+        "includes",
+        "keys",
+        "values",
+        "with",
+        "toReversed",
+        "toSorted",
+        "toSpliced",
+    ] {
+        e.set_own(unsc, n, Value::Bool(true), false);
+    }
+    e.set_own(ap, crate::interp::SYM_UNSCOPABLES, Value::Obj(unsc), false);
     // `Array.isArray` sur le ctor.
     if let Value::Obj(aid) = array {
         e.add_method(aid, "isArray", array_is_array);
@@ -968,6 +1028,14 @@ fn object_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value
             _ => "Object",
         },
     };
+    // `@@toStringTag` override (spec `Object.prototype.toString` —
+    // les instances lisent leur tag propre ou hérité).
+    if let Value::Obj(id) = this {
+        if let Some(Value::Str(sid)) = e.get_prop(id, crate::interp::SYM_TO_STRING_TAG) {
+            let s = e.heap.string(sid).unwrap_or_default();
+            return Ok(e.str_val(format!("[object {s}]")));
+        }
+    }
     Ok(e.str_val(format!("[object {tag}]")))
 }
 
@@ -1301,6 +1369,12 @@ fn object_get_own_property_descriptor(
     let Some(p) = e.get_own_prop(id, &key)? else {
         return Ok(Value::Undefined);
     };
+    Ok(prop_desc_object(e, p))
+}
+
+/// Property descriptor object from a `Prop` — shared by
+/// `Object.getOwnPropertyDescriptor` and `Reflect.*`.
+fn prop_desc_object(e: &mut Engine, p: crate::heap::Prop) -> Value {
     let d = e.new_object();
     match p {
         crate::heap::Prop::Data { value, attrs } => {
@@ -1316,7 +1390,7 @@ fn object_get_own_property_descriptor(
             e.set_own(d, "configurable", Value::Bool(attrs.configurable), true);
         }
     }
-    Ok(Value::Obj(d))
+    Value::Obj(d)
 }
 
 /// `Object.getOwnPropertyDescriptors(o)` — map `key → descriptor`
@@ -2538,7 +2612,7 @@ fn bigint_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
         return Ok(e.big_val(b));
     }
     let prim = if let Value::Obj(_) = v {
-        e.to_primitive(v, false)?
+        e.to_primitive(v, crate::interp::PrimHint::Number)?
     } else {
         v
     };
@@ -2720,6 +2794,100 @@ fn reflect_construct(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
         _ => Vec::new(),
     };
     e.construct(f, &list)
+}
+
+/// `Reflect.defineProperty(t, k, desc)` — mêmes règles que
+/// `Object.defineProperty` mais rend `false` sur échec au lieu de
+/// jeter (spec `Reflect.defineProperty` — les erreurs internes de
+/// `[[DefineOwnProperty]]` surface en `false`, déviation documentée :
+/// un getter de descripteur qui jette est aussi rendu `false`).
+fn reflect_define_property(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = arg(args, 0) else {
+        return Err(e.type_error("Reflect.defineProperty on non-object"));
+    };
+    let k = e.prop_key(arg(args, 1))?;
+    let Value::Obj(desc) = arg(args, 2) else {
+        return Err(e.type_error("Reflect.defineProperty: descriptor is not an object"));
+    };
+    Ok(Value::Bool(define_one_prop(e, id, &k, desc).is_ok()))
+}
+
+/// `Reflect.deleteProperty(t, k)` — `false` si la prop refuse,
+/// jamais de `TypeError` de suppression (contrairement au `delete`
+/// strict).
+fn reflect_delete_property(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = arg(args, 0) else {
+        return Err(e.type_error("Reflect.deleteProperty on non-object"));
+    };
+    let k = e.prop_key(arg(args, 1))?;
+    // `delete_result` jette en mode strict sur refus — pour
+    // `Reflect` tout échec se rabat sur `false` (déviation
+    // documentée : une trap `deleteProperty` qui jette est aussi
+    // rendue `false`).
+    Ok(Value::Bool(
+        e.delete_result(id, &k).is_ok_and(|v| e.to_boolean(v)),
+    ))
+}
+
+/// `Reflect.getOwnPropertyDescriptor(t, k)` — objet descripteur ou
+/// `undefined` ; passe par la trap `getOwnPropertyDescriptor`.
+fn reflect_get_own_property_descriptor(
+    e: &mut Engine,
+    _t: Value,
+    args: &[Value],
+) -> JsResult<Value> {
+    let Value::Obj(id) = arg(args, 0) else {
+        return Err(e.type_error("Reflect.getOwnPropertyDescriptor on non-object"));
+    };
+    let k = e.prop_key(arg(args, 1))?;
+    let Some(p) = e.get_own_prop(id, &k)? else {
+        return Ok(Value::Undefined);
+    };
+    Ok(prop_desc_object(e, p))
+}
+
+/// `Reflect.getPrototypeOf(t)` — `TypeError` sur primitive
+/// (contrairement à `Object.getPrototypeOf` qui ignore).
+fn reflect_get_prototype_of(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    match arg(args, 0) {
+        v @ Value::Obj(_) => object_get_proto(e, Value::Undefined, &[v]),
+        _ => Err(e.type_error("Reflect.getPrototypeOf on non-object")),
+    }
+}
+
+/// `Reflect.setPrototypeOf(t, p)` — `false` sur refus (cycle,
+/// non-extensible, trap `false`), `TypeError` sur args invalides.
+fn reflect_set_prototype_of(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let target = arg(args, 0);
+    if !matches!(target, Value::Obj(_)) {
+        return Err(e.type_error("Reflect.setPrototypeOf on non-object"));
+    }
+    if !matches!(arg(args, 1), Value::Obj(_) | Value::Null) {
+        return Err(e.type_error("Reflect.setPrototypeOf: proto must be an object or null"));
+    }
+    match object_set_proto(e, Value::Undefined, &[target, arg(args, 1)]) {
+        Ok(_) => Ok(Value::Bool(true)),
+        Err(_) => Ok(Value::Bool(false)),
+    }
+}
+
+/// `Reflect.isExtensible(t)` — `TypeError` sur primitive.
+fn reflect_is_extensible(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    match arg(args, 0) {
+        v @ Value::Obj(_) => object_is_extensible(e, Value::Undefined, &[v]),
+        _ => Err(e.type_error("Reflect.isExtensible on non-object")),
+    }
+}
+
+/// `Reflect.preventExtensions(t)` — `true` si l'opération a réussi,
+/// `false` sur refus (trap `false` ou cible déjà scellée).
+fn reflect_prevent_extensions(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    match arg(args, 0) {
+        v @ Value::Obj(_) => Ok(Value::Bool(
+            object_prevent_extensions(e, Value::Undefined, &[v]).is_ok(),
+        )),
+        _ => Err(e.type_error("Reflect.preventExtensions on non-object")),
+    }
 }
 
 // -- Proxy ------------------------------------------------------------
@@ -3034,12 +3202,37 @@ fn number_is_integer(_e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Val
 // -- Object extras -------------------------------------------------------
 
 /// `Object.getOwnPropertyNames` — all own props (enum + non-enum).
+/// Préfixe sentinelle des clés-symboles (`\u{f130}Symbol.*`).
+const SYM_PREFIX: &str = crate::interp::SYM_PREFIX;
+
 fn object_get_own_property_names(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let keys = match arg(args, 0) {
         Value::Obj(id) => e.own_keys_trapped(id)?,
         _ => Vec::new(),
     };
-    let vals = keys.iter().map(|k| e.str_val(k.clone())).collect();
+    // Spec : `getOwnPropertyNames` ne rend que les clés string —
+    // les clés-symboles sentinelles sont exclues.
+    let vals = keys
+        .iter()
+        .filter(|k| !k.starts_with(SYM_PREFIX))
+        .map(|k| e.str_val(k.clone()))
+        .collect();
+    Ok(e.new_array(vals))
+}
+
+/// `Object.getOwnPropertySymbols` — clés sentinelles `\u{f130}…`
+/// (la Value retournée *est* le symbole : `Symbol.iterator ===
+/// sym` tient car même string heap).
+fn object_get_own_property_symbols(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let keys = match arg(args, 0) {
+        Value::Obj(id) => e.own_keys_trapped(id)?,
+        _ => Vec::new(),
+    };
+    let vals = keys
+        .iter()
+        .filter(|k| k.starts_with(SYM_PREFIX))
+        .map(|k| e.str_val(k.clone()))
+        .collect();
     Ok(e.new_array(vals))
 }
 

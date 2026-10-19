@@ -40,11 +40,39 @@ pub(crate) const SUPER_BIND: &str = "\u{f120}super";
 /// `Symbol.iterator` property key — a private-use sentinel string
 /// (symbols are represented as opaque string keys; `typeof sym`
 /// yields `"string"`, a documented deviation).
+/// Préfixe sentinelle des clés-symboles `\u{f130}Symbol.*` —
+/// jamais énumérable (`for-in`, `Object.keys`, `JSON`).
+pub(crate) const SYM_PREFIX: &str = "\u{f130}Symbol.";
+
 pub(crate) const SYM_ITERATOR: &str = "\u{f130}Symbol.iterator";
 
 /// `Symbol.asyncIterator` property key — same private-use sentinel
 /// trick as `SYM_ITERATOR` (invisible to `for-in`/`Object.keys`).
 pub(crate) const SYM_ASYNC_ITERATOR: &str = "\u{f130}Symbol.asyncIterator";
+
+/// `Symbol.toPrimitive` — `@@toPrimitive(hint)` appelé avant
+/// `valueOf`/`toString` dans `ToPrimitive`.
+pub(crate) const SYM_TO_PRIMITIVE: &str = "\u{f130}Symbol.toPrimitive";
+
+/// `Symbol.hasInstance` — `@@hasInstance` appelé par `instanceof`.
+pub(crate) const SYM_HAS_INSTANCE: &str = "\u{f130}Symbol.hasInstance";
+
+/// `Symbol.toStringTag` — tag personnalisé d'`Object::toString`.
+pub(crate) const SYM_TO_STRING_TAG: &str = "\u{f130}Symbol.toStringTag";
+
+/// `Symbol.unscopables` — noms exclus de la liaison `with`.
+pub(crate) const SYM_UNSCOPABLES: &str = "\u{f130}Symbol.unscopables";
+
+/// `ToPrimitive` preferred-type hint (spec `ToPrimitive`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PrimHint {
+    /// `+`, `==`, `Date` conversions.
+    Default,
+    /// `ToNumber`, arithmetic, comparisons.
+    Number,
+    /// `ToString`, property keys.
+    String,
+}
 
 /// How a destructuring pattern binds its targets.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -533,7 +561,7 @@ impl Engine {
                 }
             }
             Value::Obj(_) => {
-                let p = self.to_primitive(v, false)?;
+                let p = self.to_primitive(v, PrimHint::Number)?;
                 self.to_bigint(p)
             }
             _ => Err(self.type_error("cannot convert to BigInt")),
@@ -722,6 +750,27 @@ impl Engine {
                 Up(Option<EnvRef>),
                 Alias(EnvRef, String),
             }
+            // `with (o)` — la résolution passe par les props de
+            // l'objet (hors `@@unscopables`) puis remonte.
+            let with_oid = {
+                let b = e.borrow();
+                match &b.kind {
+                    EnvKind::With(oid) => Some(*oid),
+                    _ => None,
+                }
+            };
+            if let Some(oid) = with_oid {
+                // Traps proxy en échec → nom non lié (tolérance).
+                let bound = self.with_has(oid, &name).unwrap_or(false);
+                cur = {
+                    let b = e.borrow();
+                    b.parent.clone()
+                };
+                if bound {
+                    return self.get_prop(oid, &name);
+                }
+                continue;
+            }
             let next = {
                 let b = e.borrow();
                 match &b.kind {
@@ -741,6 +790,8 @@ impl Engine {
                             Next::Up(b.parent.clone())
                         }
                     },
+                    // Déjà géré au-dessus — repli défensif.
+                    EnvKind::With(_) => Next::Up(b.parent.clone()),
                 }
             };
             match next {
@@ -758,6 +809,58 @@ impl Engine {
         None
     }
 
+    /// `ToObject` pour `with` — un objet reste lui-même ; une
+    /// primitive est enrobée dans un objet-wrapper jetable (les
+    /// écritures `with` vont au wrapper, spec `ToObject`).
+    /// `null`/`undefined` → `TypeError`.
+    fn with_object_of(&mut self, v: Value) -> Option<ObjId> {
+        let (proto, own_len, chars): (ObjId, Option<usize>, Option<Vec<String>>) = match v {
+            Value::Obj(id) => return Some(id),
+            Value::Str(sid) => {
+                let s = self.heap.string(sid).unwrap_or_default();
+                let cs: Vec<String> = s.chars().map(|c| c.to_string()).collect();
+                (self.protos.string, Some(cs.len()), Some(cs))
+            }
+            Value::Num(_) => (self.protos.number, None, None),
+            Value::Bool(_) => (self.protos.boolean, None, None),
+            Value::Big(_) => (self.protos.bigint, None, None),
+            Value::Undefined | Value::Null => return None,
+        };
+        // Wrapper éphémère — jamais observable par le script hors
+        // du bloc `with` (aucune référence ne s'en échappe sauf si
+        // le bloc l'y place explicitement).
+        let w = self.new_object();
+        if let Some(o) = self.heap.obj_mut(w) {
+            o.proto = Value::Obj(proto);
+        }
+        if let Some(n) = own_len {
+            self.set_own(w, "length", Value::Num(n as f64), false);
+        }
+        if let Some(cs) = chars {
+            for (i, c) in cs.iter().enumerate() {
+                let cv = self.str_val(c.clone());
+                self.set_own(w, &i.to_string(), cv, true);
+            }
+        }
+        Some(w)
+    }
+
+    /// `with (o)` — `o` lierait-il `name` ? Spec
+    /// `ObjectEnvironmentRecord.HasBinding` : `name` doit être une
+    /// prop de `o` (proto chaine incluse) **et** ne pas être marqué
+    /// `@@unscopables[name] === true`.
+    fn with_has(&mut self, oid: ObjId, name: &str) -> JsResult<bool> {
+        if !self.has_prop(oid, name)? {
+            return Ok(false);
+        }
+        if let Some(Value::Obj(uid)) = self.get_prop(oid, SYM_UNSCOPABLES) {
+            if self.get_prop(uid, name).is_some_and(|v| self.to_boolean(v)) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     /// `true` si `name` est une liaison d'un env record (local ou
     /// global declarative) — les props de l'objet global ne
     /// comptent pas (elles passent par `[[Delete]]`).
@@ -773,6 +876,8 @@ impl Engine {
                         }
                         b.parent.clone()
                     }
+                    // `with` n'est pas un record declaratif.
+                    EnvKind::With(_) => b.parent.clone(),
                 }
             };
             cur = next;
@@ -792,13 +897,35 @@ impl Engine {
                 Global,
                 Up(Option<EnvRef>),
             }
+            // `with (o)` — écriture sur une prop existante,
+            // sinon remontée au scope parent.
+            let with_oid = {
+                let b = e.borrow();
+                match &b.kind {
+                    EnvKind::With(oid) => Some(*oid),
+                    _ => None,
+                }
+            };
+            if let Some(oid) = with_oid {
+                if self.with_has(oid, name)? {
+                    self.write_prop(oid, Value::Obj(oid), name, v)?;
+                    return Ok(());
+                }
+                cur = {
+                    let b = e.borrow();
+                    b.parent.clone()
+                };
+                continue;
+            }
             let act = {
                 let b = e.borrow();
                 match &b.kind {
                     EnvKind::Local(m) if m.contains_key(name) => Act::Local(e.clone()),
-                    EnvKind::Local(_) => Act::Up(b.parent.clone()),
                     EnvKind::Global(m) if m.contains_key(name) => Act::Local(e.clone()),
                     EnvKind::Global(_) => Act::Global,
+                    // `With` déjà géré au-dessus — repli défensif
+                    // identique à `Local` sans la clé.
+                    EnvKind::Local(_) | EnvKind::With(_) => Act::Up(b.parent.clone()),
                 }
             };
             match act {
@@ -806,6 +933,8 @@ impl Engine {
                     let mut b = e.borrow_mut();
                     let m = match &mut b.kind {
                         EnvKind::Local(m) | EnvKind::Global(m) => m,
+                        // `Act::Local` ne cible jamais un `with`.
+                        EnvKind::With(_) => return Ok(()),
                     };
                     if let Some(cell) = m.get_mut(name) {
                         match cell {
@@ -866,46 +995,64 @@ impl Engine {
     }
 
     fn env_declare(&mut self, env: &EnvRef, name: &str) {
-        let mut b = env.borrow_mut();
-        match &mut b.kind {
-            EnvKind::Local(m) => {
-                m.entry(name.to_string()).or_insert(EnvCell::Bind(Binding {
-                    value: Value::Undefined,
-                    mutable: true,
-                }));
-            }
-            EnvKind::Global(_) => {
-                // `var` vit sur l'objet global — prop non
-                // configurable (`delete x` → `false`, spec).
-                let g = self.global;
-                drop(b);
-                if self.heap.obj(g).is_some_and(|o| o.get_own(name).is_none()) {
-                    self.set_own_attrs(
-                        g,
-                        name,
-                        Value::Undefined,
-                        crate::heap::PropAttrs {
-                            writable: true,
-                            enumerable: true,
-                            configurable: false,
-                        },
-                    );
+        let parent = {
+            let mut b = env.borrow_mut();
+            match &mut b.kind {
+                EnvKind::Local(m) => {
+                    m.entry(name.to_string()).or_insert(EnvCell::Bind(Binding {
+                        value: Value::Undefined,
+                        mutable: true,
+                    }));
+                    return;
                 }
+                EnvKind::Global(_) => {
+                    // `var` vit sur l'objet global — prop non
+                    // configurable (`delete x` → `false`, spec).
+                    let g = self.global;
+                    drop(b);
+                    if self.heap.obj(g).is_some_and(|o| o.get_own(name).is_none()) {
+                        self.set_own_attrs(
+                            g,
+                            name,
+                            Value::Undefined,
+                            crate::heap::PropAttrs {
+                                writable: true,
+                                enumerable: true,
+                                configurable: false,
+                            },
+                        );
+                    }
+                    return;
+                }
+                // `var` dans un `with` se déclare dans le scope
+                // fonction englobant (spec `VarDeclaredNames`).
+                EnvKind::With(_) => b.parent.clone(),
             }
+        };
+        if let Some(p) = parent {
+            self.env_declare(&p, name);
         }
     }
 
     /// Insert (or overwrite) a binding in `env`'s own map — used by
     /// the class scope for the hidden `super`/`home` names.
+    /// `with` envs are skipped — a `with` has no declarative record.
     pub(crate) fn env_put(env: &EnvRef, name: &str, v: Value, mutable: bool) {
-        let mut b = env.borrow_mut();
-        match &mut b.kind {
-            EnvKind::Local(m) | EnvKind::Global(m) => {
-                m.insert(
-                    name.to_string(),
-                    EnvCell::Bind(Binding { value: v, mutable }),
-                );
+        let parent = {
+            let mut b = env.borrow_mut();
+            match &mut b.kind {
+                EnvKind::Local(m) | EnvKind::Global(m) => {
+                    m.insert(
+                        name.to_string(),
+                        EnvCell::Bind(Binding { value: v, mutable }),
+                    );
+                    return;
+                }
+                EnvKind::With(_) => b.parent.clone(),
             }
+        };
+        if let Some(p) = parent {
+            Self::env_put(&p, name, v, mutable);
         }
     }
 
@@ -917,30 +1064,45 @@ impl Engine {
     /// Global `let`/`const` go to the declarative record, *not* the
     /// global object — `window.x` stays `undefined` for `let x`.
     pub(crate) fn env_declare_lex(env: &EnvRef, name: &str, mutable: bool) {
-        let mut b = env.borrow_mut();
-        match &mut b.kind {
-            EnvKind::Local(m) | EnvKind::Global(m) => {
-                m.insert(
-                    name.to_string(),
-                    EnvCell::Bind(Binding {
-                        value: Value::Undefined,
-                        mutable,
-                    }),
-                );
+        let parent = {
+            let mut b = env.borrow_mut();
+            match &mut b.kind {
+                EnvKind::Local(m) | EnvKind::Global(m) => {
+                    m.insert(
+                        name.to_string(),
+                        EnvCell::Bind(Binding {
+                            value: Value::Undefined,
+                            mutable,
+                        }),
+                    );
+                    return;
+                }
+                // `with` n'a pas de record — `let`/`const` montent.
+                EnvKind::With(_) => b.parent.clone(),
             }
+        };
+        if let Some(p) = parent {
+            Self::env_declare_lex(&p, name, mutable);
         }
     }
 
     /// Initialize a binding just created by `env_declare_lex` —
     /// bypasses the `const` guard (initialisation is not mutation).
     pub(crate) fn env_init_lex(env: &EnvRef, name: &str, v: Value) {
-        let mut b = env.borrow_mut();
-        match &mut b.kind {
-            EnvKind::Local(m) | EnvKind::Global(m) => {
-                if let Some(EnvCell::Bind(bnd)) = m.get_mut(name) {
-                    bnd.value = v;
+        let parent = {
+            let mut b = env.borrow_mut();
+            match &mut b.kind {
+                EnvKind::Local(m) | EnvKind::Global(m) => {
+                    if let Some(EnvCell::Bind(bnd)) = m.get_mut(name) {
+                        bnd.value = v;
+                    }
+                    return;
                 }
+                EnvKind::With(_) => b.parent.clone(),
             }
+        };
+        if let Some(p) = parent {
+            Self::env_init_lex(&p, name, v);
         }
     }
 
@@ -1922,7 +2084,7 @@ impl Engine {
 
     /// `delete o.k` → `false` si refusé ; en strict un refus est un
     /// `TypeError` (spec `[[Delete]]` + strict Delete).
-    fn delete_result(&mut self, id: ObjId, key: &str) -> JsResult<Value> {
+    pub(crate) fn delete_result(&mut self, id: ObjId, key: &str) -> JsResult<Value> {
         if let Some((tid, target, handler)) = self.proxy_th(id)? {
             let trap = self.proxy_trap(handler, "deleteProperty")?;
             let ok = if matches!(trap, Value::Obj(_)) {
@@ -1997,7 +2159,8 @@ impl Engine {
                 _ => {}
             }
             for (k, p) in &o.props {
-                if p.enumerable() {
+                // Clés-symboles sentinelles : jamais énumérées.
+                if p.enumerable() && !k.starts_with(SYM_PREFIX) {
                     out.push(k.clone());
                 }
             }
@@ -2189,12 +2352,30 @@ impl Engine {
         }
     }
 
-    /// `ToPrimitive` — may run `valueOf`/`toString`.
-    pub(crate) fn to_primitive(&mut self, v: Value, prefer_str: bool) -> JsResult<Value> {
+    /// `ToPrimitive` — may run `@@toPrimitive`/`valueOf`/`toString`.
+    /// `hint` suit la spec : `Number` pour `ToNumber`/arithmétique,
+    /// `String` pour `ToString`, `Default` pour `+` et `==`.
+    pub(crate) fn to_primitive(&mut self, v: Value, hint: PrimHint) -> JsResult<Value> {
         let Value::Obj(id) = v else {
             return Ok(v);
         };
-        let order: [&str; 2] = if prefer_str {
+        // `@@toPrimitive(hint)` prend le pas (spec `ToPrimitive`).
+        if let Some(f) = self.get_prop(id, SYM_TO_PRIMITIVE) {
+            if self.is_callable(f) {
+                let h = match hint {
+                    PrimHint::String => "string",
+                    PrimHint::Number => "number",
+                    PrimHint::Default => "default",
+                };
+                let hv = self.str_val(h.to_string());
+                let r = self.call_value(f, v, &[hv])?;
+                if r.is_object() {
+                    return Err(self.type_error("Symbol.toPrimitive must return a primitive"));
+                }
+                return Ok(r);
+            }
+        }
+        let order: [&str; 2] = if matches!(hint, PrimHint::String) {
             ["toString", "valueOf"]
         } else {
             ["valueOf", "toString"]
@@ -2242,7 +2423,7 @@ impl Engine {
                 if matches!(self.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Symbol(_))) {
                     return Err(self.type_error("cannot convert a Symbol to number"));
                 }
-                let p = self.to_primitive(v, false)?;
+                let p = self.to_primitive(v, PrimHint::Number)?;
                 self.to_number(p)?
             }
         })
@@ -2258,7 +2439,7 @@ impl Engine {
             Value::Str(id) => self.heap.string(id).unwrap_or_default(),
             Value::Big(_) => self.bigint_of(v).map(|b| b.to_string()).unwrap_or_default(),
             Value::Obj(_) => {
-                let p = self.to_primitive(v, true)?;
+                let p = self.to_primitive(v, PrimHint::String)?;
                 self.to_js_string(p)?
             }
         })
@@ -2521,7 +2702,7 @@ impl Engine {
                         self.hoist_vars_only(std::slice::from_ref(&**e), env);
                     }
                 }
-                Stmt::While { body, .. } | Stmt::DoWhile { body, .. } => {
+                Stmt::While { body, .. } | Stmt::DoWhile { body, .. } | Stmt::With { body, .. } => {
                     self.hoist_vars_only(std::slice::from_ref(&**body), env);
                 }
                 Stmt::For { init, body, .. } => {
@@ -2702,6 +2883,17 @@ impl Engine {
                 } else {
                     Ok(Flow::Normal)
                 }
+            }
+            // `with (o) b` — les noms se résolvent d'abord dans les
+            // props de `o` (sauf `@@unscopables`), puis le scope
+            // englobant. Sloppy uniquement (early-error du parseur).
+            Stmt::With { obj, body } => {
+                let v = self.eval_expr(env, this, obj)?;
+                let Some(oid) = self.with_object_of(v) else {
+                    return Err(self.type_error("cannot use `with` on `null` or `undefined`"));
+                };
+                let with_env = Env::with(env.clone(), oid);
+                self.exec_stmt(&with_env, this, body)
             }
             Stmt::While { cond, body } => loop {
                 self.tick()?;
@@ -3437,8 +3629,8 @@ impl Engine {
         };
         Ok(match op {
             Add => {
-                let lp = self.to_primitive(l, false)?;
-                let rp = self.to_primitive(r, false)?;
+                let lp = self.to_primitive(l, PrimHint::Default)?;
+                let rp = self.to_primitive(r, PrimHint::Default)?;
                 if matches!(lp, Value::Str(_)) || matches!(rp, Value::Str(_)) {
                     let ls = self.to_js_string(lp)?;
                     let rs = self.to_js_string(rp)?;
@@ -3454,8 +3646,8 @@ impl Engine {
                 }
             }
             Sub | Mul | Div | Mod | Pow | Shl | Shr | ShrU | BitAnd | BitOr | BitXor => {
-                let lp = self.to_primitive(l, false)?;
-                let rp = self.to_primitive(r, false)?;
+                let lp = self.to_primitive(l, PrimHint::Number)?;
+                let rp = self.to_primitive(r, PrimHint::Number)?;
                 if matches!(lp, Value::Big(_)) || matches!(rp, Value::Big(_)) {
                     return self.big_binary(op, lp, rp);
                 }
@@ -3486,8 +3678,8 @@ impl Engine {
                 }
             }
             Lt | Le | Gt | Ge => {
-                let lp = self.to_primitive(l, false)?;
-                let rp = self.to_primitive(r, false)?;
+                let lp = self.to_primitive(l, PrimHint::Number)?;
+                let rp = self.to_primitive(r, PrimHint::Number)?;
                 let ord = if matches!(lp, Value::Big(_)) || matches!(rp, Value::Big(_)) {
                     self.big_rel(lp, rp)?
                 } else if let (Value::Str(a), Value::Str(b)) = (lp, rp) {
@@ -3522,6 +3714,13 @@ impl Engine {
                 let Value::Obj(_) = r else {
                     return Err(self.type_error("`instanceof` requires an object"));
                 };
+                // `@@hasInstance` d'abord (spec `InstanceofOperator` :
+                // le hook prime sur l'exigence callable).
+                let m = self.get_prop_value(r, SYM_HAS_INSTANCE)?;
+                if self.is_callable(m) {
+                    let b = self.call_value(m, r, &[l])?;
+                    return Ok(Value::Bool(self.to_boolean(b)));
+                }
                 if !self.is_callable(r) {
                     return Err(self.type_error("right side of `instanceof` is not callable"));
                 }
@@ -3663,11 +3862,11 @@ impl Engine {
                 Ok(ln == rn)
             }
             (Value::Obj(_), Value::Num(_) | Value::Str(_) | Value::Big(_)) => {
-                let p = self.to_primitive(l, false)?;
+                let p = self.to_primitive(l, PrimHint::Default)?;
                 self.loose_eq(p, r)
             }
             (Value::Num(_) | Value::Str(_) | Value::Big(_), Value::Obj(_)) => {
-                let p = self.to_primitive(r, false)?;
+                let p = self.to_primitive(r, PrimHint::Default)?;
                 self.loose_eq(l, p)
             }
             _ => Ok(false),

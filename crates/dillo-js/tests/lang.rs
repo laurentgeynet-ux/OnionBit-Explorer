@@ -299,9 +299,9 @@ fn syntax_error() {
         e.eval("var = 3"),
         Err(dillo_js::Error::Syntax { .. })
     ));
-    // Still rejected: `with` is out of the subset by design.
+    // `with` est supporté en sloppy ; en strict c'est une SyntaxError.
     assert!(matches!(
-        e.eval("with (o) { x }"),
+        e.eval("'use strict'; with (o) { x }"),
         Err(dillo_js::Error::Syntax { .. })
     ));
     assert!(matches!(
@@ -3264,4 +3264,207 @@ fn generators_eager() {
         ),
         "1"
     );
+}
+
+// -- JS-C10 : symboles bien connus, `with`, Reflect ------------------
+
+#[test]
+fn symbol_to_primitive_hook() {
+    // `@@toPrimitive` intercepte la conversion objet → primitif.
+    assert_eq!(
+        ev_str(
+            "var o = {}; o[Symbol.toPrimitive] = function(h) { \
+             return h == 'number' ? 42 : 'str'; }; o * 2"
+        ),
+        "84"
+    );
+    assert_eq!(
+        ev_str(
+            "var o = {}; o[Symbol.toPrimitive] = function(h) { \
+             return h; }; '' + o"
+        ),
+        "default"
+    );
+    // Retour non-primitif → TypeError.
+    assert!(Engine::new()
+        .eval("var o = {}; o[Symbol.toPrimitive] = function() { return {}; }; o + 1")
+        .is_err());
+    // `valueOf`/`toString` restent le repli.
+    assert_eq!(
+        ev_str("var o = {valueOf: function() { return 7; }}; o + 1"),
+        "8"
+    );
+}
+
+#[test]
+fn symbol_has_instance_hook() {
+    // `@@hasInstance` pilote `instanceof`.
+    assert_eq!(
+        ev_str(
+            "var fake = {}; fake[Symbol.hasInstance] = function(v) { \
+             return v == 'x'; }; ('x' instanceof fake) + '|' + ('y' instanceof fake)"
+        ),
+        "true|false"
+    );
+    // Sans hook : parcours ordinaire de la chaîne de prototype.
+    assert_eq!(
+        ev_str("function C() {}; var c = new C(); c instanceof C"),
+        "true"
+    );
+}
+
+#[test]
+fn symbol_to_string_tag() {
+    assert_eq!(
+        ev_str(
+            "var o = {}; o[Symbol.toStringTag] = 'Tag'; \
+             Object.prototype.toString.call(o)"
+        ),
+        "[object Tag]"
+    );
+    // Tag hérité via la chaîne de prototype.
+    assert_eq!(
+        ev_str(
+            "var p = {}; p[Symbol.toStringTag] = 'Base'; \
+             var o = Object.create(p); Object.prototype.toString.call(o)"
+        ),
+        "[object Base]"
+    );
+}
+
+#[test]
+fn with_statement_scope() {
+    // Lecture de props comme liaisons.
+    assert_eq!(ev_str("var o = {x: 3}; with (o) { x + 1 }"), "4");
+    // Écriture sur une prop existante.
+    assert_eq!(ev_str("var o = {x: 3}; with (o) { x = 9 } o.x"), "9");
+    // Nom absent de l'objet → scope parent.
+    assert_eq!(ev_str("var y = 5; var o = {x: 3}; with (o) { x + y }"), "8");
+    // Chaînage : props héritées comptent.
+    assert_eq!(
+        ev_str(
+            "var p = {a: 1}; var o = Object.create(p); o.b = 2; \
+             with (o) { a + b }"
+        ),
+        "3"
+    );
+    // `with` sur primitive lit le prototype (ToObject).
+    assert_eq!(ev_str("with ('abc') { length }"), "3");
+    // `with (null)` → TypeError.
+    assert!(Engine::new().eval("with (null) { 1 }").is_err());
+    // `with` en mode strict → SyntaxError.
+    assert!(Engine::new().eval("'use strict'; with ({}) { 1 }").is_err());
+    // `var` dans un `with` remonte au scope fonction.
+    assert_eq!(ev_str("var o = {}; with (o) { var z = 7; } z"), "7");
+}
+
+#[test]
+fn symbol_unscopables() {
+    // `find` est dans `Array.prototype[@@unscopables]` → le nom
+    // externe gagne (spec `with ([])`).
+    assert_eq!(
+        ev_str(
+            "var find = 'outer'; var a = [1]; \
+             with (a) { find + '|' + length }"
+        ),
+        "outer|1"
+    );
+    // `@@unscopables` personnalisé.
+    assert_eq!(
+        ev_str(
+            "var o = {x: 'in'}; var unsc = {}; unsc.x = true; \
+             o[Symbol.unscopables] = unsc; var x = 'out'; \
+             with (o) { x }"
+        ),
+        "out"
+    );
+}
+
+#[test]
+fn own_property_symbols() {
+    // `getOwnPropertySymbols` rend les clés-symboles…
+    assert_eq!(
+        ev_str(
+            "var o = {a: 1}; o[Symbol.iterator] = function() {}; \
+             var s = Object.getOwnPropertySymbols(o); \
+             s.length + '|' + (s[0] === Symbol.iterator)"
+        ),
+        "1|true"
+    );
+    // … et `getOwnPropertyNames` les exclut.
+    assert_eq!(
+        ev_str(
+            "var o = {a: 1}; o[Symbol.iterator] = function() {}; \
+             Object.getOwnPropertyNames(o).join(',')"
+        ),
+        "a"
+    );
+}
+
+#[test]
+fn reflect_methods() {
+    // get / set / has / ownKeys.
+    assert_eq!(
+        ev_str("var o = {x: 1}; Reflect.get(o, 'x') + '|' + Reflect.has(o, 'x')"),
+        "1|true"
+    );
+    assert_eq!(
+        ev_str(
+            "var o = {}; Reflect.set(o, 'x', 4) + '|' + o.x + '|' + \
+             Reflect.ownKeys(o).join(',')"
+        ),
+        "true|4|x"
+    );
+    // deleteProperty — booléen, pas de throw.
+    assert_eq!(
+        ev_str("var o = {x: 1}; Reflect.deleteProperty(o, 'x') + '|' + ('x' in o)"),
+        "true|false"
+    );
+    // getOwnPropertyDescriptor.
+    assert_eq!(
+        ev_str(
+            "var o = {x: 1}; var d = Reflect.getOwnPropertyDescriptor(o, 'x'); \
+             d.value + '|' + d.writable"
+        ),
+        "1|true"
+    );
+    // defineProperty — `true` au succès, `false` sur non-config.
+    assert_eq!(
+        ev_str("var o = {}; Reflect.defineProperty(o, 'x', {value: 2}) + '|' + o.x"),
+        "true|2"
+    );
+    assert_eq!(
+        ev_str(
+            "var o = {}; Object.defineProperty(o, 'x', {value: 1, configurable: false}); \
+             Reflect.defineProperty(o, 'x', {value: 2})"
+        ),
+        "false"
+    );
+    // getPrototypeOf / setPrototypeOf.
+    assert_eq!(
+        ev_str(
+            "var p = {a: 1}; var o = {}; \
+             Reflect.setPrototypeOf(o, p) + '|' + (Reflect.getPrototypeOf(o) === p) + '|' + o.a"
+        ),
+        "true|true|1"
+    );
+    // setPrototypeOf → false sur cycle / non-extensible.
+    assert_eq!(
+        ev_str(
+            "var o = {}; Object.preventExtensions(o); \
+             Reflect.setPrototypeOf(o, {})"
+        ),
+        "false"
+    );
+    // isExtensible / preventExtensions.
+    assert_eq!(
+        ev_str(
+            "var o = {}; var b = Reflect.isExtensible(o); \
+             Reflect.preventExtensions(o); \
+             b + '|' + Reflect.isExtensible(o)"
+        ),
+        "true|false"
+    );
+    // `Reflect.*` sur primitive → TypeError.
+    assert!(Engine::new().eval("Reflect.getPrototypeOf(1)").is_err());
 }
