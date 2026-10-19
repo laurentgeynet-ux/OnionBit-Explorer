@@ -318,6 +318,14 @@ Règles de la coexistence :
    dans commits, bugs et conversations ; jamais réutilisés.
    Préfixes : `Étape NN` (navigateur), `R-N` (pipeline),
    `JS-CNN` (piste JS de navigateur).
+5b. **Livré = consommé en session** : une capacité domaine
+   (PIPE) n'est pas livrée tant qu'aucun chemin produit ne la
+   consomme — le domaine seul ne peint rien. Anti-pattern
+   observé trois fois (missions 7–8) : `PaintImages.svgs` vide
+   à vie (R-9), `animation_decls` jamais appelé (R-10),
+   `relayout_subtree` jamais appelé (R-12). La livraison
+   domaine doit nommer l'appelant session prévu ; l'adoption
+   est une étape NAV explicite, pas un oubli découvert en QA.
 6. **Triage transverse** : un bug à cheval se corrige du côté
    fautif (visuel/layout → PIPELINE ; session/réseau/JS/UI →
    NAVIGATEUR ; parse miroir fautif → piste JS).

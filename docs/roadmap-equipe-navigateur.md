@@ -214,6 +214,15 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   le fallback windows-1252 est conforme WHATWG et le défaut
   est côté extraction/émission du titre.
 
+- [ ] **Étape 53f. `run_pending`/`sync_dom` hors verrou**
+  (résidu 53d, terrain mission 8 : `repros/relayout.html` —
+  200 `appendChild` triviaux → `/status` gelé ~20 s) : le
+  fetch est libéré mais l'exécution JS + la synchro miroir
+  au commit restent sous le verrou session — toute page
+  réelle qui construit son DOM en JS (Gmail, Twitter…)
+  gèlera pareil. Sortir la phase commit-script du verrou
+  comme `NavJob`/`SubJob` l'ont fait pour le fetch.
+
 - [x] **Étape 54. Formulaires v2 — côté produit** (ex-55, moitié
   session) : `multipart/form-data`, états `:valid`/`:invalid`
   exposés aux events, popup `<select>` via widget natif Flutter
@@ -268,17 +277,47 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   visible. Le filet doit vivre dans la sérialisation
   `dom_host`→`Dom`, pas seulement au box-building : jamais de
   `Text` portant la source de `script|style|template|…`.
-- [ ] **Étape 56. Profil persisté complet** (ex-64) : cookies,
-  localStorage (cf. 51), cache disque borné, historique —
-  namespaces de session cloisonnés (ADR-0011), répertoire
-  déplaçable. + **bfcache minimal** (terrain mission 5 :
-  back/forward re-fetche systématiquement — HN retour 40 s) :
-  garder la page quittée en mémoire bornée, restauration
-  instantanée. + **sémantique historique POST** (terrain
-  mission 6) : un `navigated` POST vers l'URL courante n'est
-  pas poussé (dédup silencieuse) — `back` saute la page de
-  résultats, écart navigateur réel à trancher : pousser
-  l'entrée malgré l'URL identique, ou documenter la dédup.
+- [ ] **Étape 55d. `dirty` drainé par événement SSE/REST**
+  (défaut 55, terrain mission 8) : `take_dirty` n'est appelé
+  que par FFI — côté REST les rects s'accumulent à vie →
+  >32 → collapse « plein cadre » (`relayout.html`), et
+  chaque `frame_invalidated` re-rapporte l'historique au
+  lieu du delta. Chaque émission doit drainer : le client
+  SSE reçoit le delta, `take_dirty` reste l'API FFI.
+  Limite connue à documenter : après `scroll` les rects =
+  document entier (le défilement est cuit dans le raster —
+  vrai mais inutilisable pour un pull partiel).
+- [ ] **Étape 55e. `@keyframes` cadencés en session**
+  (adoption R-10, règle AGENTS §10.5b — confirmé non-câblé
+  par `anim.html` : frames identiques à 400 ms) : zéro
+  référence `keyframe`/`animation` hors `explorer-css` —
+  `ActiveTransition` ne naît que de `transition-*` et
+  `tick_animations` ne tourne qu'au pull de frame. Brancher
+  `animation_decls`+`keyframe_style` au moteur d'animations
+  + tick au pump de timers (sinon l'animation est figée
+  entre deux pulls).
+- [ ] **Étape 55f. `relayout_subtree` adopté en session**
+  (adoption R-12, §10.5b — mesuré : mutation DOM = re-parse
+  + relayout global) : `apply_dom_sync`/`repaint` doivent
+  viser le sous-arbre sale (`Relayout::Done`) et ne retomber
+  en reflow que sur `NeedsFullLayout` — bench PIPE :
+  ~33 ms → ~1,9 ms feuille, soit ~17× sur mutation locale.
+- [x] **Étape 56. Profil persisté complet** (ex-64) : cookies
+  (`cookies.json` via `ProfileStore`, session exclus),
+  localStorage (cf. 51), **cache disque borné**
+  (`DiskCache` daemon, port `CacheStore` net — FIFO
+  `max_total_bytes`), historique — namespaces cloisonnés
+  par répertoire de profil (`EXPLORER_PROFILE`, ADR-0011),
+  répertoire déplaçable. + **bfcache minimal** (terrain
+  mission 5 : back/forward re-fetche systématiquement — HN
+  retour 40 s) : `PageSnapshot` gelé à la position
+  d'historique (DOM, arbre, frame, scroll, moteur JS figé),
+  restauration instantanée sans réseau, borné
+  `bfcache_pages` (FIFO, 4). + **sémantique historique
+  POST** (terrain mission 6) tranchée navigateur-réel :
+  l'entrée est poussée **sans dédup** et la requête
+  complète est rejouée au déplacement/`reload` — re-POST,
+  plus de re-GET.
 - [ ] **Étape 57. UI Flutter v2** (ex-65) : thème clair
   (`tokens.json` variante), settings (moteur REST/FFI, thème,
   profil), UI historique + bookmarks (store core existant),
