@@ -914,3 +914,205 @@ fn outer_html_and_dataset() {
         "false"
     );
 }
+
+// -- MutationObserver (JS-C26) -----------------------------------------
+//
+// Les callbacks sont livrés au checkpoint microtask (fin
+// d'`eval`) — le test lit leurs effets via une sonde `eval`
+// séparée.
+
+/// `setup` puis `probe` sur le même moteur — le probe lit les
+/// effets des callbacks `MutationObserver` livrés au checkpoint
+/// du premier eval.
+fn ev2(html: &str, setup: &str, probe: &str) -> String {
+    let mut e = engine_with(html);
+    match e.eval(setup) {
+        Ok(_) => {}
+        Err(err) => panic!("{setup} -> {err}"),
+    }
+    match e.eval(probe) {
+        Ok(v) => e.describe(v),
+        Err(err) => panic!("{probe} -> {err}"),
+    }
+}
+
+#[test]
+fn mutation_observer_child_list() {
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var log=[];\
+             var mo=new MutationObserver(function(rs,o){\
+               log.push(rs[0].type+'|'+rs[0].addedNodes.length+'|'+(o===mo));\
+             });\
+             mo.observe(document.body,{childList:true});\
+             document.body.appendChild(document.createElement('i'));",
+            "log.join(',')"
+        ),
+        "childList|1|true"
+    );
+}
+
+#[test]
+fn mutation_observer_attributes_and_old_value() {
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var log=[];\
+             var mo=new MutationObserver(function(rs){\
+               log.push(rs[0].type+'|'+rs[0].attributeName+'|'+rs[0].oldValue);\
+             });\
+             var el=document.getElementById('main');\
+             mo.observe(el,{attributes:true,attributeOldValue:true});\
+             el.setAttribute('class','new');",
+            "log.join(',')"
+        ),
+        "attributes|class|box"
+    );
+}
+
+#[test]
+fn mutation_observer_attribute_filter() {
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var n=0;\
+             var mo=new MutationObserver(function(){n++});\
+             var el=document.getElementById('main');\
+             mo.observe(el,{attributes:true,attributeFilter:['class']});\
+             el.setAttribute('id','z');\
+             el.setAttribute('class','q');\
+             el.removeAttribute('title');",
+            "n"
+        ),
+        "1"
+    );
+}
+
+#[test]
+fn mutation_observer_subtree() {
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var n=0;\
+             var mo=new MutationObserver(function(){n++});\
+             mo.observe(document.body,{childList:true,subtree:true});\
+             document.getElementById('list').appendChild(document.createElement('li'));\
+             document.getElementById('inp').setAttribute('value','x');",
+            "n"
+        ),
+        "1"
+    );
+}
+
+#[test]
+fn mutation_observer_batches_once_per_checkpoint() {
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var calls=0,total=0;\
+             var mo=new MutationObserver(function(rs){calls++;total+=rs.length});\
+             mo.observe(document.body,{childList:true});\
+             document.body.appendChild(document.createElement('i'));\
+             document.body.appendChild(document.createElement('b'));\
+             document.body.appendChild(document.createElement('u'));",
+            "calls+'/'+total"
+        ),
+        "1/3"
+    );
+}
+
+#[test]
+fn mutation_observer_disconnect_stops_delivery() {
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var n=0;\
+             var mo=new MutationObserver(function(){n++});\
+             mo.observe(document.body,{childList:true});\
+             document.body.appendChild(document.createElement('i'));\
+             mo.disconnect();\
+             document.body.appendChild(document.createElement('b'));",
+            "n"
+        ),
+        // disconnect purge la file : le record déjà produit
+        // n'est pas livré non plus (spec).
+        "0"
+    );
+}
+
+#[test]
+fn mutation_observer_take_records() {
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var called=0,len=0;\
+             var mo=new MutationObserver(function(){called++});\
+             mo.observe(document.body,{childList:true});\
+             document.body.appendChild(document.createElement('i'));\
+             len=mo.takeRecords().length;\
+             document.body.appendChild(document.createElement('b'));",
+            "len+'/'+called"
+        ),
+        // takeRecords vide la file — le record suivant est
+        // livré normalement au checkpoint.
+        "1/1"
+    );
+}
+
+#[test]
+fn mutation_observer_character_data() {
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var log='';\
+             var tn=document.createTextNode('abc');\
+             var mo=new MutationObserver(function(rs){\
+               log=rs[0].type+'|'+rs[0].oldValue;\
+             });\
+             mo.observe(tn,{characterData:true,characterDataOldValue:true});\
+             tn.data='xyz';",
+            "log"
+        ),
+        "characterData|abc"
+    );
+}
+
+#[test]
+fn mutation_observer_callback_can_mutate_again() {
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var n=0;\
+             var mo=new MutationObserver(function(){\
+               if(n++<2){document.body.appendChild(document.createElement('i'))}\
+             });\
+             mo.observe(document.body,{childList:true});\
+             document.body.appendChild(document.createElement('b'));",
+            "n"
+        ),
+        // 1re livraison → le callback remute → nouvelle file →
+        // 2e livraison au même checkpoint (boucle bornée).
+        "3"
+    );
+}
+
+#[test]
+fn mutation_observer_survives_gc() {
+    // Le callback n'est référencé que par `mutobs.cbs` — un
+    // GC entre observe et mutation ne doit pas le balayer.
+    let mut e = engine_with(PAGE);
+    e.eval(
+        "var log=[];\
+         new MutationObserver(function(){log.push(1)})\
+           .observe(document.body,{childList:true});",
+    )
+    .unwrap_or_else(|err| panic!("setup -> {err}"));
+    e.collect();
+    e.eval("document.body.appendChild(document.createElement('i'));")
+        .unwrap_or_else(|err| panic!("mutate -> {err}"));
+    match e.eval("log.join(',')") {
+        Ok(v) => assert_eq!(e.describe(v), "1"),
+        Err(err) => panic!("probe -> {err}"),
+    }
+}

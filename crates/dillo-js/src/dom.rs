@@ -17,9 +17,111 @@
 
 use crate::value::Value;
 use std::cell::Cell;
+use std::collections::HashMap;
 
 /// Arena handle.
 pub type NodeId = u32;
+
+/// Options d'enregistrement d'un `MutationObserver` (JS-C26) —
+/// capturées par `observe(target, options)` ; chaque drapeau
+/// correspond à un membre de `MutationObserverInit`.
+#[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)] // options spec, flags are flags.
+pub struct MutObsReg {
+    /// Id de l'observer (alloué par le moteur — un observer
+    /// peut observer plusieurs cibles).
+    pub id: u64,
+    /// `childList`.
+    pub child_list: bool,
+    /// `attributes` — `true` implicite si `attributeFilter` ou
+    /// `attributeOldValue` est fourni (spec).
+    pub attributes: bool,
+    /// `characterData` — `true` implicite si
+    /// `characterDataOldValue` est fourni.
+    pub character_data: bool,
+    /// `subtree` — mutations des descendants retenues.
+    pub subtree: bool,
+    /// `attributeFilter` — noms d'attributs retenus (`None` =
+    /// tous ; présent ⇒ `attributes` implicite).
+    pub attribute_filter: Option<Vec<String>>,
+    /// `attributeOldValue` — la valeur d'avant est capturée.
+    pub attribute_old_value: bool,
+    /// `characterDataOldValue`.
+    pub character_data_old_value: bool,
+}
+
+impl MutObsReg {
+    /// Ce type de record est-il retenu par les options ?
+    fn wants(&self, rec: &MutationRecord) -> bool {
+        match rec.ty {
+            "childList" => self.child_list,
+            "attributes" => {
+                self.attributes
+                    && self.attribute_filter.as_ref().is_none_or(|f| {
+                        rec.attr_name
+                            .as_ref()
+                            .is_some_and(|n| f.iter().any(|x| x == n))
+                    })
+            }
+            "characterData" => self.character_data,
+            _ => false,
+        }
+    }
+
+    /// `oldValue` retenu pour ce type de record ?
+    fn keeps_old(&self, rec: &MutationRecord) -> bool {
+        match rec.ty {
+            "attributes" => self.attribute_old_value,
+            "characterData" => self.character_data_old_value,
+            _ => false,
+        }
+    }
+}
+
+/// Un `MutationRecord` en file — matérialisé en objet JS à la
+/// livraison (microtask checkpoint).
+#[derive(Debug, Clone)]
+pub struct MutationRecord {
+    /// `"childList"` | `"attributes"` | `"characterData"`.
+    pub ty: &'static str,
+    /// Nœud sur lequel la mutation a eu lieu.
+    pub target: NodeId,
+    /// `childList` : nœuds ajoutés / retirés.
+    pub added: Vec<NodeId>,
+    /// `childList` : nœuds retirés.
+    pub removed: Vec<NodeId>,
+    /// Frère précédent / suivant du bloc inséré ou retiré.
+    pub prev_sibling: Option<NodeId>,
+    /// Voir [`MutationRecord::prev_sibling`].
+    pub next_sibling: Option<NodeId>,
+    /// `attributes` : nom de l'attribut muté.
+    pub attr_name: Option<String>,
+    /// Valeur d'avant — déjà filtrée par observer
+    /// (`*OldValue` non demandé → `None` à l'enfilage).
+    pub old_value: Option<String>,
+}
+
+impl MutationRecord {
+    /// Record `childList` sur `target`.
+    fn child_list(
+        target: NodeId,
+        added: Vec<NodeId>,
+        removed: Vec<NodeId>,
+        prev_sibling: Option<NodeId>,
+        next_sibling: Option<NodeId>,
+    ) -> Self {
+        Self {
+            ty: "childList",
+            target,
+            added,
+            removed,
+            prev_sibling,
+            next_sibling,
+            attr_name: None,
+            old_value: None,
+        }
+    }
+}
 
 /// Kind of node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +164,13 @@ pub struct Dom {
     /// lit (et efface) le flag pour savoir si le rendu doit être
     /// resynchronisé avec le miroir (JS-5b).
     dirty: Cell<bool>,
+    /// Registrations `MutationObserver` : `cible → options`
+    /// (un observer peut suivre plusieurs cibles — JS-C26).
+    observers: HashMap<NodeId, Vec<MutObsReg>>,
+    /// File des records produits, `(obs_id, record)` — la
+    /// `oldValue` est déjà filtrée par observer à l'enfilage ;
+    /// drainée au microtask checkpoint.
+    mutations: Vec<(u64, MutationRecord)>,
 }
 
 impl Default for Dom {
@@ -78,9 +187,84 @@ impl Dom {
             nodes: Vec::new(),
             root: 0,
             dirty: Cell::new(false),
+            observers: HashMap::new(),
+            mutations: Vec::new(),
         };
         d.root = d.alloc(NodeKind::Element, "#document");
         d
+    }
+
+    // -- MutationObserver (JS-C26) ------------------------------------
+
+    /// `observer.observe(target, options)` — une registration
+    /// par `(id, cible)` ; re-`observe` remplace les options.
+    pub fn observe_mutations(&mut self, target: NodeId, reg: MutObsReg) {
+        if target as usize >= self.nodes.len() {
+            return;
+        }
+        let regs = self.observers.entry(target).or_default();
+        regs.retain(|r| r.id != reg.id);
+        regs.push(reg);
+    }
+
+    /// `observer.disconnect()` — retire toutes les
+    /// registrations de `id` **et** purge ses records en file
+    /// (spec : disconnect vide aussi la queue).
+    pub fn disconnect_observer(&mut self, id: u64) {
+        for regs in self.observers.values_mut() {
+            regs.retain(|r| r.id != id);
+        }
+        self.mutations.retain(|(o, _)| *o != id);
+    }
+
+    /// `observer.takeRecords()` — purge et rend la file d'un
+    /// observer (les autres conservent la leur).
+    pub fn take_mutation_records(&mut self, id: u64) -> Vec<MutationRecord> {
+        let mut out = Vec::new();
+        let mut rest = Vec::new();
+        for (o, r) in std::mem::take(&mut self.mutations) {
+            if o == id {
+                out.push(r);
+            } else {
+                rest.push((o, r));
+            }
+        }
+        self.mutations = rest;
+        out
+    }
+
+    /// Toute la file, drainée — le groupage par observer est
+    /// à la charge du moteur (microtask checkpoint).
+    pub fn drain_mutations(&mut self) -> Vec<(u64, MutationRecord)> {
+        std::mem::take(&mut self.mutations)
+    }
+
+    /// Dispatch d'un record aux observers correspondants :
+    /// registrations propres de `target` + registrations
+    /// `subtree` des ancêtres — un observer enregistré aux
+    /// deux niveaux n'est notifié qu'**une** fois. La valeur
+    /// d'avant est filtrée par observer (`*OldValue`).
+    fn queue_mutation(&mut self, rec: &MutationRecord) {
+        if self.observers.is_empty() {
+            return;
+        }
+        let mut hits: Vec<&MutObsReg> = self
+            .observers
+            .get(&rec.target)
+            .map(|regs| regs.iter().filter(|r| r.wants(rec)).collect())
+            .unwrap_or_default();
+        for a in self.ancestors(rec.target) {
+            if let Some(regs) = self.observers.get(&a) {
+                hits.extend(regs.iter().filter(|r| r.subtree && r.wants(rec)));
+            }
+        }
+        for r in hits {
+            let mut rec = rec.clone();
+            if !r.keeps_old(&rec) {
+                rec.old_value = None;
+            }
+            self.mutations.push((r.id, rec));
+        }
     }
 
     /// Parse a full document fragment under the root.
@@ -116,6 +300,26 @@ impl Dom {
         id
     }
 
+    /// `CharacterData.data`/`nodeValue` sur un nœud texte —
+    /// émet un record `characterData` (JS-C26).
+    pub fn set_text(&mut self, node: NodeId, text: &str) {
+        if node as usize >= self.nodes.len() {
+            return;
+        }
+        let old = std::mem::replace(&mut self.nodes[node as usize].text, text.to_string());
+        self.dirty.set(true);
+        self.queue_mutation(&MutationRecord {
+            ty: "characterData",
+            target: node,
+            added: Vec::new(),
+            removed: Vec::new(),
+            prev_sibling: None,
+            next_sibling: None,
+            attr_name: None,
+            old_value: Some(old),
+        });
+    }
+
     /// Dirty = mutation depuis la dernière synchro de rendu.
     pub fn mark_dirty(&self) {
         self.dirty.set(true);
@@ -138,27 +342,69 @@ impl Dom {
         self.nodes[child as usize].parent = Some(parent);
         self.nodes[parent as usize].children.push(child);
         self.dirty.set(true);
+        let prev = {
+            let kids = &self.nodes[parent as usize].children;
+            kids.get(kids.len().saturating_sub(2)).copied()
+        };
+        // Le retrait sur l'ancien parent a été émis par `detach`.
+        self.queue_mutation(&MutationRecord::child_list(
+            parent,
+            vec![child],
+            Vec::new(),
+            prev,
+            None,
+        ));
     }
 
     /// Detach `node` from its parent (keeps the node alive).
     pub fn detach(&mut self, node: NodeId) {
         if let Some(p) = self.nodes[node as usize].parent {
+            let (prev, next) = {
+                let kids = &self.nodes[p as usize].children;
+                kids.iter()
+                    .position(|&c| c == node)
+                    .map_or((None, None), |i| {
+                        (
+                            i.checked_sub(1).and_then(|j| kids.get(j).copied()),
+                            kids.get(i + 1).copied(),
+                        )
+                    })
+            };
             self.nodes[p as usize].children.retain(|&c| c != node);
             self.dirty.set(true);
             self.nodes[node as usize].parent = None;
+            self.queue_mutation(&MutationRecord::child_list(
+                p,
+                Vec::new(),
+                vec![node],
+                prev,
+                next,
+            ));
         }
     }
 
     /// Replace all children of `node` with `kids` (innerHTML setter).
+    /// Spec : un seul record `childList` `removed+added` par
+    /// « replace all » — les `append` internes n'en émettent pas
+    /// (on mute directement, sans passer par [`Dom::append`]).
     pub fn replace_children(&mut self, node: NodeId, kids: &[NodeId]) {
         let old = std::mem::take(&mut self.nodes[node as usize].children);
-        for c in old {
-            self.nodes[c as usize].parent = None;
+        for c in &old {
+            self.nodes[*c as usize].parent = None;
         }
         for &k in kids {
-            self.append(node, k);
+            self.detach(k);
+            self.nodes[k as usize].parent = Some(node);
         }
+        self.nodes[node as usize].children = kids.to_vec();
         self.dirty.set(true);
+        self.queue_mutation(&MutationRecord::child_list(
+            node,
+            kids.to_vec(),
+            old,
+            None,
+            None,
+        ));
     }
 
     /// All children — elements *and* text (`childNodes`; `children`
@@ -202,6 +448,24 @@ impl Dom {
         }
         self.nodes[child as usize].parent = Some(parent);
         self.dirty.set(true);
+        let (prev, next) = {
+            let kids = &self.nodes[parent as usize].children;
+            kids.iter()
+                .position(|&c| c == child)
+                .map_or((None, None), |i| {
+                    (
+                        i.checked_sub(1).and_then(|j| kids.get(j).copied()),
+                        kids.get(i + 1).copied(),
+                    )
+                })
+        };
+        self.queue_mutation(&MutationRecord::child_list(
+            parent,
+            vec![child],
+            Vec::new(),
+            prev,
+            next,
+        ));
     }
 
     /// `replaceChild(new, old)` — `old` is detached, `new` takes
@@ -213,10 +477,24 @@ impl Dom {
             .position(|&c| c == old);
         if let Some(i) = idx {
             self.detach(new);
+            let (prev, next) = {
+                let kids = &self.nodes[parent as usize].children;
+                (
+                    i.checked_sub(1).and_then(|j| kids.get(j).copied()),
+                    kids.get(i + 1).copied(),
+                )
+            };
             self.nodes[parent as usize].children[i] = new;
             self.nodes[new as usize].parent = Some(parent);
             self.nodes[old as usize].parent = None;
             self.dirty.set(true);
+            self.queue_mutation(&MutationRecord::child_list(
+                parent,
+                vec![new],
+                vec![old],
+                prev,
+                next,
+            ));
         }
     }
 
@@ -301,6 +579,7 @@ impl Dom {
 
     /// `setAttribute`.
     pub fn set_attr(&mut self, node: NodeId, name: &str, value: &str) {
+        let old = self.attr(node, name).map(str::to_string);
         let attrs = &mut self.nodes[node as usize].attrs;
         if let Some((_, v)) = attrs.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(name)) {
             *v = value.to_string();
@@ -308,17 +587,39 @@ impl Dom {
             attrs.push((name.to_lowercase(), value.to_string()));
         }
         self.dirty.set(true);
+        self.queue_mutation(&MutationRecord {
+            ty: "attributes",
+            target: node,
+            added: Vec::new(),
+            removed: Vec::new(),
+            prev_sibling: None,
+            next_sibling: None,
+            attr_name: Some(name.to_lowercase()),
+            old_value: old,
+        });
     }
 
     /// `removeAttribute`. Returns whether it existed.
     pub fn remove_attr(&mut self, node: NodeId, name: &str) -> bool {
+        let old = self.attr(node, name).map(str::to_string);
         let attrs = &mut self.nodes[node as usize].attrs;
         let before = attrs.len();
         attrs.retain(|(k, _)| !k.eq_ignore_ascii_case(name));
-        if attrs.len() != before {
+        let removed = attrs.len() != before;
+        if removed {
             self.dirty.set(true);
+            self.queue_mutation(&MutationRecord {
+                ty: "attributes",
+                target: node,
+                added: Vec::new(),
+                removed: Vec::new(),
+                prev_sibling: None,
+                next_sibling: None,
+                attr_name: Some(name.to_lowercase()),
+                old_value: old,
+            });
         }
-        attrs.len() != before
+        removed
     }
 
     /// `hasAttribute`.

@@ -234,53 +234,60 @@ impl Engine {
     /// callback exception.
     pub fn run_microtasks(&mut self) -> JsResult<usize> {
         let mut ran = 0usize;
-        while let Some(job) = self.microtasks.pop_front() {
-            self.tick()?;
-            ran += 1;
-            match job {
-                Job::Reaction {
-                    cb,
-                    arg,
-                    rejected,
-                    next,
-                } => {
-                    if self.is_callable(cb) {
-                        match self.call_value(cb, Value::Undefined, &[arg]) {
-                            Ok(v) => self.resolve_promise(next, v),
-                            Err(Thrown(t)) => {
-                                self.settle_promise(next, PromiseState::Rejected, t);
+        loop {
+            while let Some(job) = self.microtasks.pop_front() {
+                self.tick()?;
+                ran += 1;
+                match job {
+                    Job::Reaction {
+                        cb,
+                        arg,
+                        rejected,
+                        next,
+                    } => {
+                        if self.is_callable(cb) {
+                            match self.call_value(cb, Value::Undefined, &[arg]) {
+                                Ok(v) => self.resolve_promise(next, v),
+                                Err(Thrown(t)) => {
+                                    self.settle_promise(next, PromiseState::Rejected, t);
+                                }
                             }
+                        } else {
+                            // Pass-through: `then()` without a handler for
+                            // this outcome forwards state/result as-is.
+                            self.settle_promise(
+                                next,
+                                if rejected {
+                                    PromiseState::Rejected
+                                } else {
+                                    PromiseState::Fulfilled
+                                },
+                                arg,
+                            );
                         }
-                    } else {
-                        // Pass-through: `then()` without a handler for
-                        // this outcome forwards state/result as-is.
-                        self.settle_promise(
-                            next,
-                            if rejected {
-                                PromiseState::Rejected
-                            } else {
-                                PromiseState::Fulfilled
-                            },
-                            arg,
-                        );
                     }
-                }
-                Job::Thenable {
-                    then_fn,
-                    this,
-                    resolve,
-                    reject,
-                } => {
-                    if let Err(Thrown(t)) = self.call_value(then_fn, this, &[resolve, reject]) {
-                        let _ = self.call_value(reject, Value::Undefined, &[t]);
+                    Job::Thenable {
+                        then_fn,
+                        this,
+                        resolve,
+                        reject,
+                    } => {
+                        if let Err(Thrown(t)) = self.call_value(then_fn, this, &[resolve, reject]) {
+                            let _ = self.call_value(reject, Value::Undefined, &[t]);
+                        }
                     }
-                }
-                Job::Plain(f) => {
-                    self.call_value(f, Value::Undefined, &[])?;
+                    Job::Plain(f) => {
+                        self.call_value(f, Value::Undefined, &[])?;
+                    }
                 }
             }
+            // JS-C26 : livraison MutationObserver en fin de
+            // checkpoint — leurs callbacks peuvent enqueuer de
+            // nouveaux jobs → reboucle (budget ops borne).
+            if !self.deliver_mutations()? {
+                return Ok(ran);
+            }
         }
-        Ok(ran)
     }
 }
 

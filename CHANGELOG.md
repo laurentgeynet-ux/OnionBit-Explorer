@@ -9,6 +9,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C26 — `MutationObserver`** (`dillo-js`) : le `Dom` miroir
+  enregistre des observateurs par cible (`MutObsReg`, options
+  `childList`/`attributes`/`characterData`, `subtree`,
+  `attributeFilter`, `attributeOldValue`,
+  `characterDataOldValue` — `attributes`/`characterData`
+  implicites quand le `*Filter`/`*OldValue` associé est posé)
+  et produit des `MutationRecord` (`type`, `target`,
+  `addedNodes`/`removedNodes`, `attributeName`, `oldValue`)
+  sur tout mutateurs instrumentés : `appendChild`,
+  `insertBefore`, `removeChild`, `replaceChild`,
+  `textContent`/`innerHTML`/`nodeValue`/`data`,
+  `setAttribute`/`removeAttribute`. Côté moteur
+  (`src/mutation.rs`) : constructeur `MutationObserver(cb)`,
+  `observe`/`disconnect`/`takeRecords`, file de records par
+  observer délivrée au **microtask checkpoint**
+  (`promise.rs` — jamais en synchrone depuis le mutateur,
+  batching en une livraison par checkpoint, livraison
+  bouclée bornée pour les mutations ré-entrantes émises par
+  le callback, records purgés par `disconnect`). Comportement
+  confiné au DOM miroir — aucune fuite vers `explorer-dom`.
+  Débloque l'étape 52.
 - **Étape 51 — Câblage XHR/fetch/storage/cookie** (`explorer-core`,
   `explorer-daemon`, `explorer-cli`, `explorer-js`) : les
   `NetRequest` du moteur sont drainés aux points de synchro et

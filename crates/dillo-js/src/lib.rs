@@ -53,6 +53,7 @@ mod intl;
 mod json;
 mod lexer;
 mod module;
+mod mutation;
 mod parser;
 mod promise;
 mod regexp;

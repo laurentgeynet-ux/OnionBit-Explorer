@@ -196,6 +196,9 @@ pub struct Engine {
     /// `queueMicrotask`. Drained by [`Engine::run_microtasks`] at
     /// every job boundary (end of `eval`, timer cb, event, XHR).
     pub(crate) microtasks: std::collections::VecDeque<crate::promise::Job>,
+    /// `MutationObserver` bookkeeping (JS-C26) — callbacks par
+    /// id d'observer ; les records vivent dans la file du `Dom`.
+    pub(crate) mutobs: crate::mutation::MutObsState,
     /// Browser-surface hooks (JS-7e) — page URL, cookie jar,
     /// navigation/history callbacks injected by the embedder.
     pub(crate) hooks: crate::dom_host::BrowserHooks,
@@ -456,6 +459,7 @@ impl Engine {
             xhr: crate::xhr::XhrEngineState::default(),
             dom_ctx: None,
             microtasks: std::collections::VecDeque::new(),
+            mutobs: crate::mutation::MutObsState::default(),
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,
             strict: false,
@@ -526,10 +530,11 @@ impl Engine {
     ///
     /// Racines semées : objet global + prototypes, registre
     /// `Symbol.for`, env global (bindings `let`/`const`), timers
-    /// en attente, file de microtasks, XHR/`fetch` en vol, table
-    /// DOM↔JS (cache + listeners de nœuds), hooks navigateur,
-    /// valeur de complétion — plus les racines explicites posées
-    /// par [`Engine::add_root`]. Retourne le nombre de cellules
+    /// en attente, file de microtasks, XHR/`fetch` en vol,
+    /// callbacks `MutationObserver`, table DOM↔JS (cache +
+    /// listeners de nœuds), hooks navigateur, valeur de
+    /// complétion — plus les racines explicites posées par
+    /// [`Engine::add_root`]. Retourne le nombre de cellules
     /// réclamées ; les host objects balayés reçoivent leur
     /// hook `Host::finalize` avant libération.
     pub fn collect(&mut self) -> usize {
@@ -574,6 +579,9 @@ impl Engine {
                 crate::promise::Job::Plain(v) => crate::heap::push_value(&mut ids, *v),
             }
         }
+        // `MutationObserver` (JS-C26) — callbacks + wrappers
+        // racines tant que l'engine vit (ré-armement possible).
+        self.mutobs.root_ids(&mut ids);
         if let Some((dom, cache)) = &self.dom_ctx {
             for &id in cache.borrow().values() {
                 ids.push(id);

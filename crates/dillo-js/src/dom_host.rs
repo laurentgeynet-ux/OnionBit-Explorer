@@ -285,7 +285,7 @@ struct EventHost {
     state: Rc<EventState>,
 }
 
-fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId) -> Value {
+pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId) -> Value {
     if let Some(&id) = cache.borrow().get(&node) {
         return Value::Obj(id);
     }
@@ -358,6 +358,9 @@ impl Engine {
         self.set_own(g, "window", gv, false);
         self.set_own(g, "self", gv, false);
         self.set_own(g, "globalThis", gv, false);
+        // `MutationObserver` (JS-C26) — les records vivent dans
+        // la file du `Dom`, livrés au microtask checkpoint.
+        self.install_mutation_observer();
         // `location` + `history` — hooks-driven (see BrowserHooks).
         let loc = self.new_host_object(Rc::new(LocationHost));
         let hist = self.new_host_object(Rc::new(HistoryHost));
@@ -1042,6 +1045,16 @@ impl Host for NodeHost {
                 d.replace_children(node, &[t]);
                 Ok(true)
             }
+            // `CharacterData` — écriture directe du payload
+            // texte (record `characterData`, JS-C26).
+            "nodeValue" | "data" => {
+                let is_text = self.dom.borrow().nodes[node as usize].kind == NodeKind::Text;
+                if is_text {
+                    let s = e.to_js_string(v)?;
+                    self.dom.borrow_mut().set_text(node, &s);
+                }
+                Ok(is_text)
+            }
             "className" => {
                 let s = e.to_js_string(v)?;
                 self.dom.borrow_mut().set_attr(node, "class", &s);
@@ -1323,7 +1336,7 @@ impl Host for NodeHost {
 }
 
 /// Extract the DOM node behind a host value, if it is one of ours.
-fn node_for(e: &mut Engine, v: Value) -> Option<NodeId> {
+pub(crate) fn node_for(e: &mut Engine, v: Value) -> Option<NodeId> {
     let Value::Obj(id) = v else {
         return None;
     };
