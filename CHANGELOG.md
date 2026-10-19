@@ -9,6 +9,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-6 — `position: sticky` tous côtés** (`explorer-render`)
+  : `sticky_offset` généralise les quatre seuils — `bottom`
+  épingle au bas du viewport, `right` au bord droit,
+  sur-contrainte spec (`top` gagne `bottom`, `left` gagne
+  `right` en LTR), borne = border box du parent sur les deux
+  axes. Nouvelle API additive `build_display_list_scrolled`
+  (scroll `(x, y)`) — les builders existants délèguent à
+  `x = 0`, signature inchangée. Les conteneurs `overflow`
+  internes ne scrollent pas encore (référence = viewport
+  racine, documenté).
+
 - **R-5 — Grid MVP+** (`explorer-layout`) :
   `grid-template-areas` + `grid-area` (nom → bounding box,
   ou forme numérique `r/c/r2/c2`), lignes nommées

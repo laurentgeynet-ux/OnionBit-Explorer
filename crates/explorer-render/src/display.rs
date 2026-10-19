@@ -215,8 +215,27 @@ pub fn build_display_list_full(
     scroll_y: f32,
     images: &crate::PaintImages,
 ) -> DisplayList {
+    build_display_list_scrolled(root, viewport_w, viewport_h, (0.0, scroll_y), images)
+}
+
+/// Variante à scroll horizontal : `scroll = (x, y)` — les
+/// seuils sticky `left`/`right` le consomment (R-6).
+#[must_use]
+pub fn build_display_list_scrolled(
+    root: &LayoutBox,
+    viewport_w: f32,
+    viewport_h: f32,
+    scroll: (f32, f32),
+    images: &crate::PaintImages,
+) -> DisplayList {
     let mut items = Vec::new();
-    paint_box(root, &mut items, -scroll_y, images);
+    paint_box(
+        root,
+        &mut items,
+        (-scroll.0, -scroll.1),
+        (viewport_w, viewport_h),
+        images,
+    );
     DisplayList {
         items,
         width: viewport_w,
@@ -243,8 +262,12 @@ pub fn build_display_list(
 }
 
 /// `rect` translaté de `dy`.
-fn shifted(r: Rect, dy: f32) -> Rect {
-    Rect { y: r.y + dy, ..r }
+fn shifted(r: Rect, off: (f32, f32)) -> Rect {
+    Rect {
+        x: r.x + off.0,
+        y: r.y + off.1,
+        ..r
+    }
 }
 
 /// Style usé d'un côté de bordure.
@@ -280,7 +303,12 @@ fn prop_px(st: &explorer_css::ComputedStyle, prop: &str, fallback: f32) -> f32 {
 /// `off` = décalage vertical de scroll (`0` dans les
 /// sous-arbres `position: fixed`).
 #[allow(clippy::too_many_lines)]
-fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32, images: &crate::PaintImages) {
+fn paint_self(
+    bx: &LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    images: &crate::PaintImages,
+) {
     let rect = shifted(bx.rect, off);
     // Blocs anonymes et boîtes texte clonent le style du
     // parent, mais `background`/`border` ne sont PAS hérités
@@ -380,7 +408,7 @@ fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32, images: &c
                         .and_then(parse_color)
                         .unwrap_or(Color::BLACK);
                     items.push(DisplayItem::Text {
-                        origin: (frag.rect.x, frag.rect.y + frag.baseline + off),
+                        origin: (frag.rect.x + off.0, frag.rect.y + frag.baseline + off.1),
                         run: run.clone(),
                         font: font_request(&frag.style),
                         color: ink,
@@ -414,20 +442,45 @@ fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32, images: &c
     }
 }
 
-/// Décalage `position: sticky` (seuil `top` uniquement) :
-/// `off` = translation de scroll déjà appliquée (négative),
-/// `bound_bottom` = bas du bloc conteneur en coordonnées
-/// document. Retourne `> 0` quand le collage est engagé —
-/// borné pour que la boîte ne sorte pas de son parent.
-/// `bottom` non supporté (seuil haut seul — MVP documenté).
-fn sticky_dy(bx: &LayoutBox, off: f32, bound_bottom: f32) -> f32 {
+/// Décalage `position: sticky` — les **quatre côtés**
+/// (R-6) : `off` = translation de scroll déjà appliquée
+/// `(x, y)` (négative), `bound` = border box du bloc
+/// conteneur en coordonnées document, `vp` = `(largeur,
+/// hauteur)` du scrollport (le viewport — référence du
+/// sticky racine ; les conteneurs `overflow` internes ne
+/// scrollent pas encore). La boîte collée est bornée pour
+/// ne jamais sortir de son parent. Sur-contrainte spec :
+/// `top` gagne sur `bottom`, `left` sur `right` (LTR).
+fn sticky_offset(bx: &LayoutBox, off: (f32, f32), bound: Rect, vp: (f32, f32)) -> (f32, f32) {
     if bx.position != Position::Sticky {
-        return 0.0;
+        return (0.0, 0.0);
     }
-    let top = prop_px(&bx.style, "top", 0.0);
-    let painted_top = bx.rect.y + off;
-    let room = (bound_bottom + off - painted_top - bx.rect.height).max(0.0);
-    (top - painted_top).clamp(0.0, room)
+    let painted = shifted(bx.rect, off);
+    let bound_p = shifted(bound, off);
+    let dy = if bx.style.get("top").is_some_and(|v| v != "auto") {
+        let thr = prop_px(&bx.style, "top", 0.0);
+        let room = (bound_p.y + bound_p.height - painted.y - painted.height).max(0.0);
+        (thr - painted.y).clamp(0.0, room)
+    } else if bx.style.get("bottom").is_some_and(|v| v != "auto") {
+        let thr = prop_px(&bx.style, "bottom", 0.0);
+        // Colle quand le bas peint dépasserait `vp_h - bottom`.
+        let room = (painted.y - bound_p.y).max(0.0);
+        -(painted.y + painted.height - (vp.1 - thr)).clamp(0.0, room)
+    } else {
+        0.0
+    };
+    let dx = if bx.style.get("left").is_some_and(|v| v != "auto") {
+        let thr = prop_px(&bx.style, "left", 0.0);
+        let room = (bound_p.x + bound_p.width - painted.x - painted.width).max(0.0);
+        (thr - painted.x).clamp(0.0, room)
+    } else if bx.style.get("right").is_some_and(|v| v != "auto") {
+        let thr = prop_px(&bx.style, "right", 0.0);
+        let room = (painted.x - bound_p.x).max(0.0);
+        -(painted.x + painted.width - (vp.0 - thr)).clamp(0.0, room)
+    } else {
+        0.0
+    };
+    (dx, dy)
 }
 
 /// `FontRequest` dérivé du style : familles `font-family`
@@ -594,11 +647,17 @@ fn box_transform(bx: &LayoutBox, rect: &Rect) -> Option<tiny_skia::Transform> {
 }
 
 /// Peint une boîte et ses descendants dans l'ordre borné.
-fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32, images: &crate::PaintImages) {
+fn paint_box(
+    bx: &LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    vp: (f32, f32),
+    images: &crate::PaintImages,
+) {
     // `position: fixed` est ancrée au viewport : son sous-arbre
     // ignore le scroll.
     let off = if bx.position == Position::Fixed {
-        0.0
+        (0.0, 0.0)
     } else {
         off
     };
@@ -627,17 +686,17 @@ fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32, images: &cr
         // Enfants non positionnés d'abord (ordre de l'arbre) —
         // `sticky` reste en flux : sa contrainte est une
         // translation de peinture, pas un re-flow.
-        let bound_bottom = bx.rect.y + bx.rect.height;
+        let bound = bx.rect;
         for child in &bx.children {
             if matches!(child.position, Position::Static | Position::Sticky) {
-                let stick = sticky_dy(child, off, bound_bottom);
-                if stick > 0.0 {
+                let stick = sticky_offset(child, off, bound, vp);
+                if stick != (0.0, 0.0) {
                     items.push(DisplayItem::PushTransform(
-                        tiny_skia::Transform::from_translate(0.0, stick),
+                        tiny_skia::Transform::from_translate(stick.0, stick.1),
                     ));
                 }
-                paint_box(child, items, off, images);
-                if stick > 0.0 {
+                paint_box(child, items, off, vp, images);
+                if stick != (0.0, 0.0) {
                     items.push(DisplayItem::PopTransform);
                 }
             }
@@ -650,7 +709,7 @@ fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32, images: &cr
             .collect();
         positioned.sort_by_key(|c| c.z_index);
         for child in positioned {
-            paint_box(child, items, off, images);
+            paint_box(child, items, off, vp, images);
         }
         if clipped {
             items.push(DisplayItem::PopClip);

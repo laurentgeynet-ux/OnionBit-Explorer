@@ -300,3 +300,108 @@ fn color_inline_atteint_le_run() {
         "a[href] → #00e UA"
     );
 }
+
+// ── R-6 : sticky tous côtés ─────────────────────────────────
+
+/// Variante à scroll `(x, y)` — seuils `left`/`right`.
+fn dl_scrolled_xy(html: &str, css: &str, scroll: (f32, f32)) -> (Dom, LayoutBox, Vec<DisplayItem>) {
+    let dom = TreeBuilder::parse(html);
+    let mut eng = StyleEngine::new();
+    eng.add_css(css, Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let list = explorer_render::build_display_list_scrolled(
+        &bx,
+        VIEW,
+        200.0,
+        scroll,
+        &explorer_render::PaintImages::default(),
+    );
+    (dom, bx, list.items)
+}
+
+#[test]
+fn sticky_bottom_epingle_au_bas() {
+    // Footer APRÈS un espaceur de 1100px (bas naturel = 1120),
+    // `bottom: 0`, viewport 200 — au repos son bas dépasse le
+    // viewport → translation -920 (colle au bas visible).
+    let (_dom, _bx, items) = dl_scrolled(
+        "<main><div style=\"height:1100px\"></div><footer id=f></footer></main>",
+        "body{margin:0}\
+         #f{position:sticky;bottom:0;height:20px;background-color:#ff0000}",
+        0.0,
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushTransform(_)))
+        .expect("sticky bottom → transform");
+    if let DisplayItem::PushTransform(m) = &items[push] {
+        assert!((m.ty + 920.0).abs() < 1.0, "ty={}", m.ty);
+    }
+}
+
+#[test]
+fn sticky_left_epingle_au_bord() {
+    // Item à x=50, `left: 0` — scroll_x 100 → peint à -50,
+    // collé au bord gauche (dx=+50).
+    let (_dom, _bx, items) = dl_scrolled_xy(
+        "<main><div id=l></div></main>",
+        "body{margin:0} main{width:1200px}\
+         #l{position:sticky;left:0;margin-left:50px;width:50px;height:20px}",
+        (100.0, 0.0),
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushTransform(_)))
+        .expect("sticky left → transform");
+    if let DisplayItem::PushTransform(m) = &items[push] {
+        assert!((m.tx - 50.0).abs() < 1.0, "tx={}", m.tx);
+        assert!(m.ty.abs() < 0.01, "ty={}", m.ty);
+    }
+}
+
+#[test]
+fn sticky_right_epingle_au_bord() {
+    // Item débordant à droite (x=900, w=50), `right: 0` —
+    // peint à droite du viewport 800 → tiré à gauche.
+    let (_dom, _bx, items) = dl_scrolled_xy(
+        "<main><div id=r></div></main>",
+        "body{margin:0} main{width:1200px}\
+         #r{position:sticky;right:0;margin-left:900px;width:50px;height:20px}",
+        (0.0, 0.0),
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushTransform(_)))
+        .expect("sticky right → transform");
+    if let DisplayItem::PushTransform(m) = &items[push] {
+        // painted_right = 950 > vp 400 → tx = -(950-400) = -550.
+        assert!((m.tx + 550.0).abs() < 1.0, "tx={}", m.tx);
+    }
+}
+
+#[test]
+fn sticky_ne_sort_pas_du_parent() {
+    // Borne parente : scroll 500, parent haut 100px — le
+    // sticky s'arrête au bas du parent (dy=80, pas 500).
+    let (_dom, _bx, items) = dl_scrolled(
+        "<main><header id=h></header></main>",
+        "body{margin:0} main{height:100px}\
+         #h{position:sticky;top:0;height:20px;background-color:#ff0000}",
+        500.0,
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushTransform(_)))
+        .expect("sticky → transform");
+    if let DisplayItem::PushTransform(m) = &items[push] {
+        assert!((m.ty - 80.0).abs() < 1.0, "borné ty={}", m.ty);
+    }
+}

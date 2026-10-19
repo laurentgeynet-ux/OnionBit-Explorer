@@ -220,9 +220,15 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `minmax(min, max)` deux bornes (fr borné par min).
   Écarts : `fr` vertical ≈ auto, `auto-fill|fit` ignorés,
   spans multi-pistes hors mesure auto, indices négatifs.
-- [ ] **R-6. `position: sticky` tous côtés** (ex-59) :
+- [x] **R-6. `position: sticky` tous côtés** (ex-59) :
   `right`/`bottom`/`left`, conteneur de scroll correct,
-  référence `overflow` non-visible.
+  référence `overflow` non-visible. Livré : `sticky_offset`
+  4 côtés (top gagne sur bottom, left sur right en LTR),
+  borne = border box du parent, scrollport = viewport —
+  `build_display_list_scrolled` ajoute `scroll_x` (les
+  anciens builders délèguent à x=0). Écart documenté : les
+  conteneurs `overflow` internes ne scrollent pas encore —
+  la référence reste le viewport racine.
 - [ ] **R-7. Dirty-rects produits** (ex-63a) : la display list
   rapporte les régions modifiées par frame. **Doit être livré
   avant que NAVIGATEUR n'aborde l'étape 55** (palier N-B) —
