@@ -9,6 +9,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-B — harness test262 (ADR-0010)** : extrait versionné de
+  la suite ECMAScript officielle @ `d53ebc8` (1077 fichiers,
+  sous-ensembles `test/language/{types,literals,comments,
+  white-space,line-terminators,identifiers,hashbang}` +
+  `harness/`), frontmatter `flags`/`features`/`includes`/
+  `negative` exécuté, skips whitelistés comptés, cliquet
+  `BASELINE_PASSED = 531` — **score initial 531/859 (62 %)**,
+  218 skips (BigInt, champs privés, séparateurs numériques,
+  hashbang, modules…), 328 échecs documentés.
+- **fix(dillo-js)** : wrappers `new String/Number/Boolean` sans
+  `[[PrimitiveValue]]` — `ToPrimitive`→`toString`→`ToString`
+  bouclait à l'infini (trouvé par test262 `S8.7_A4`). Ajout de
+  la prop cachée `__prim`, `valueOf`/`toString` stricts
+  (`TypeError` sur receiver incompatible, spec) et `__prim` sur
+  les prototypes eux-mêmes.
 - **JS-A — GC mark-sweep `dillo-js` (ADR-0008)** : l'arène
   `ObjId` ne « meurt plus avec la page » —
   - `Heap` : tombstones + freelist (réutilisation de slots),

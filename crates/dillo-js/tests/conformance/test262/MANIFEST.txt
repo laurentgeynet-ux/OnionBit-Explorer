@@ -1,0 +1,17 @@
+Test262 — ECMAScript Test Suite
+===============================
+
+Source      : https://github.com/tc39/test262
+Commit      : d53ebc8 (sparse-checkout, depth 1)
+Licensing   : BSD — each file carries its own copyright header;
+              see https://github.com/tc39/test262/blob/main/LICENSE
+Subsets     : test/language/{types,literals,comments,white-space,
+              line-terminators,identifiers,hashbang}
+Harness     : harness/*.js copied to _harness/ (same license,
+              same commit)
+Case count  : 1077 .js files
+
+NEVER edit files by hand — re-extract with the same
+sparse-checkout command and bump the commit hash above.
+The skip list and measured score live in tests/test262.rs;
+the tracked % is published in CHANGELOG.md (ADR-0010).

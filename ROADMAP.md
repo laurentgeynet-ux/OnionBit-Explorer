@@ -224,9 +224,17 @@ d'intégration, pas par la couverture :
   jobs (contrat documenté). 13 tests `tests/gc.rs`.
   **Prérequis de l'étape 34 levé** pour la partie heap — reste
   le branchement `explorer-js`/`explorer-dom` générationnel.
-- [ ] **JS-B. Harness test262** : extraction par script vers
-  `tests/conformance/`, skip list versionnée, % publié dans
-  CHANGELOG (ADR-0010) — la couverture devient un signal objectif.
+- [x] **JS-B. Harness test262** : sous-ensemble langage extrait
+  (sparse-checkout @ `d53ebc8`, 1077 fichiers — `types`, `literals`,
+  `comments`, `white-space`, `line-terminators`, `identifiers`,
+  `hashbang` + `harness/`), frontmatter `flags`/`features`/
+  `includes`/`negative` parsé, skips whitelistés et comptés,
+  cliquet `BASELINE_PASSED`. **Score initial : 531/859 (62 %),
+  218 skips** — échecs concentrés sur identifiants Unicode,
+  ASI LS/PS, commentaires HTML. Premier bug trouvé par la suite :
+  wrappers `String/Number/Boolean` sans `[[PrimitiveValue]]` →
+  récursion infinie `ToPrimitive`→`toString` (corrigé via prop
+  cachée `__prim` + `valueOf`/`toString` stricts).
 - [ ] **JS-C. Couverture par besoin** : modules ES
   (`import`/`export` + graphe de chargeur), `Proxy`, `Intl`,
   regex lookahead/backrefs — ordre piloté par les pages réelles.

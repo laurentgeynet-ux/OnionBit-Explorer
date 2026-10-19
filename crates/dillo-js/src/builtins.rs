@@ -81,6 +81,12 @@ pub(crate) fn install(e: &mut Engine) {
     let string = ctor(e, "String", string_ctor, p_str);
     let number = ctor(e, "Number", number_ctor, p_num);
     let boolean = ctor(e, "Boolean", boolean_ctor, p_bool);
+    // Les prototypes sont eux-mêmes des wrappers spec :
+    // `String.prototype` ≙ `new String("")`, etc.
+    let empty = e.str_val("");
+    e.set_own(p_str, PRIM, empty, false);
+    e.set_own(p_num, PRIM, Value::Num(0.0), false);
+    e.set_own(p_bool, PRIM, Value::Bool(false), false);
     let error = ctor(e, "Error", error_ctor, p_err);
     let t_err = ctor(e, "TypeError", type_error_ctor, p_terr);
     let r_err = ctor(e, "ReferenceError", reference_error_ctor, p_rerr);
@@ -746,25 +752,85 @@ fn array_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     Ok(arr_of(e, args.to_vec()))
 }
 
-fn string_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+/// Propriété cachée portant `[[PrimitiveValue]]` des wrappers
+/// `new String/Number/Boolean` — sans elle, `valueOf`/`toString`
+/// retomberaient sur `ToPrimitive(this)` → boucle infinie.
+const PRIM: &str = "__prim";
+
+/// `this` est-il l'objet frais d'un `new` sur le proto donné ?
+/// (Les natifs ne voient pas le drapeau construct — l'heuristique
+/// est le proto exact, assez pour `String/Number/Boolean`.)
+fn constructed_this(e: &Engine, this: Value, proto: ObjId) -> Option<ObjId> {
+    let Value::Obj(id) = this else {
+        return None;
+    };
+    match e.heap.obj(id).map(|o| o.proto) {
+        Some(Value::Obj(p)) if p == proto => Some(id),
+        _ => None,
+    }
+}
+
+/// Pose `__prim` sur `this` et retourne `this` si `this` est un
+/// wrapper construit sur `proto` ; sinon retourne `prim` (appel
+/// fonctionnel — `String(x)` produit une primitive).
+fn wrap_or_prim(e: &mut Engine, this: Value, proto: ObjId, prim: Value) -> Value {
+    match constructed_this(e, this, proto) {
+        Some(id) => {
+            e.set_own(id, PRIM, prim, false);
+            this
+        }
+        None => prim,
+    }
+}
+
+fn string_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
     match arg(args, 0) {
-        Value::Undefined => Ok(e.str_val("")),
+        Value::Undefined => {
+            let prim = e.str_val("");
+            Ok(wrap_or_prim(e, t, e.protos.string, prim))
+        }
         v => {
             let s = e.to_js_string(v)?;
-            Ok(e.str_val(s))
+            let prim = e.str_val(s);
+            Ok(wrap_or_prim(e, t, e.protos.string, prim))
         }
     }
 }
 
-fn number_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+fn number_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
     match arg(args, 0) {
-        Value::Undefined => Ok(Value::Num(0.0)),
-        v => Ok(Value::Num(e.to_number(v)?)),
+        Value::Undefined => Ok(wrap_or_prim(e, t, e.protos.number, Value::Num(0.0))),
+        v => {
+            let n = e.to_number(v)?;
+            Ok(wrap_or_prim(e, t, e.protos.number, Value::Num(n)))
+        }
     }
 }
 
-fn boolean_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    Ok(Value::Bool(e.to_boolean(arg(args, 0))))
+fn boolean_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let b = Value::Bool(e.to_boolean(arg(args, 0)));
+    Ok(wrap_or_prim(e, t, e.protos.boolean, b))
+}
+
+/// `this` en tant que primitive String — wrapper `new String` via
+/// `__prim`, primitive directe, sinon `ToString(this)`. Ne boucle
+/// jamais : les méthodes strictes (`toString`/`valueOf`) lisent
+/// `__prim` ou jettent.
+fn this_prim(e: &Engine, this: Value) -> Option<Value> {
+    match this {
+        Value::Obj(id) => e.heap.obj(id).and_then(|o| o.get_own(PRIM)),
+        v => Some(v),
+    }
+}
+
+/// `this` strict pour `String.prototype.{toString,valueOf}` :
+/// primitive string ou wrapper — `TypeError` sinon (spec
+/// `thisStringValue`, évite aussi la récursion ToString→toString).
+fn this_string_strict(e: &mut Engine, this: Value) -> JsResult<Value> {
+    match this_prim(e, this) {
+        Some(v @ Value::Str(_)) => Ok(v),
+        _ => Err(e.type_error("String.prototype method called on incompatible receiver")),
+    }
 }
 
 fn make_named_error(e: &mut Engine, proto: ObjId, name: &str, args: &[Value]) -> JsResult<Value> {
@@ -1312,8 +1378,7 @@ fn array_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
 // ------------------------------------------------------------------
 
 fn string_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
-    Ok(e.str_val(s))
+    this_string_strict(e, this)
 }
 
 fn string_char_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -1897,7 +1962,10 @@ fn number_to_string(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
 }
 
 fn number_value_of(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(Value::Num(this_num(e, this)?))
+    match this_prim(e, this) {
+        Some(v @ Value::Num(_)) => Ok(v),
+        _ => Err(e.type_error("Number.prototype.valueOf on incompatible receiver")),
+    }
 }
 
 fn number_to_fixed(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -1919,10 +1987,10 @@ fn boolean_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Valu
     }
 }
 
-fn boolean_value_of(_e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    match this {
-        Value::Bool(b) => Ok(Value::Bool(b)),
-        _ => Ok(Value::Bool(false)),
+fn boolean_value_of(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    match this_prim(e, this) {
+        Some(v @ Value::Bool(_)) => Ok(v),
+        _ => Err(e.type_error("Boolean.prototype.valueOf on incompatible receiver")),
     }
 }
 
