@@ -103,19 +103,24 @@ fn fill_guarded(pixmap: &mut Pixmap, r: &Rect, paint: &Paint, tf: Transform, cli
         // Clippe en espace device : un fond couvrant tout le
         // domaine reste peint, un rect lointain disparaît.
         if let Some(c) = b.intersect(&domain) {
-            // Bug tiny-skia 0.11 (hairline_aa/fill_dot8) : un
-            // rect dont les bords sub-pixel couvrent toute la
-            // largeur (fill_inner ≤ 0 — ex. bordure de 1 px
-            // tombant sur une frontière fractionnaire,
-            // duckduckgo.com, étape 48) déclenche
-            // `debug_assert!(false)` → panic en debug. On
-            // contourne par `fill_path` : le rasteriseur de
-            // chemins gère l'AA correctement sans ce bug.
-            if paint.anti_alias && c.left().ceil() >= c.right().floor() {
-                let path = PathBuilder::from_rect(c);
-                pixmap.fill_path(&path, paint, FillRule::Winding, Transform::default(), clip);
-            } else {
-                pixmap.fill_rect(c, paint, Transform::default(), clip);
+            // Pixel-snap des arêtes sur la grille device, comme
+            // les moteurs établis pour les remplissages pleins.
+            // Sinon deux rectangles abutés à une coordonnée
+            // fractionnaire composent deux arêtes AA au lieu
+            // d'une (couture sombre — reftests WPT), et un rect
+            // dont les bords sub-pixel couvrent toute la
+            // largeur déclenchait le `debug_assert!(false)` de
+            // tiny-skia 0.11 (hairline_aa/fill_dot8 — bordure
+            // 1 px à position fractionnaire, duckduckgo.com).
+            // Des arêtes entières rendent ce bug impossible.
+            let snapped = Rect::from_ltrb(
+                c.left().round(),
+                c.top().round(),
+                c.right().round(),
+                c.bottom().round(),
+            );
+            if let Some(s) = snapped {
+                pixmap.fill_rect(s, paint, Transform::default(), clip);
             }
         }
     } else if b.left().abs() <= SAFE_COORD

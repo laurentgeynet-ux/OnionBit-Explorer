@@ -142,6 +142,30 @@ pub fn parse_stylesheet(input: &str) -> Stylesheet {
     Parser::new(&tokens).stylesheet()
 }
 
+/// Parse une liste de déclarations nues — attribut HTML
+/// `style="…"` (spec : même grammaire qu'un bloc de
+/// déclarations, sans les accolades). Récupération d'erreur
+/// identique aux feuilles : une déclaration fautive est
+/// sautée, jamais fatale.
+#[must_use]
+pub fn parse_declarations(input: &str) -> Vec<Declaration> {
+    let tokens = tokenize(input);
+    let mut p = Parser::new(&tokens);
+    let mut out = Vec::new();
+    while p.peek().is_some() {
+        let before = p.pos;
+        if let Some(d) = p.declaration() {
+            out.push(d);
+        }
+        // Aucun progrès (token non-consommé par la
+        // récupération) → on avance d'un cran, jamais boucle.
+        if p.pos == before {
+            p.pos += 1;
+        }
+    }
+    out
+}
+
 /// Imbrication maximale des règles en bloc (`@media`/`@supports`
 /// dans `@media`…) — au-delà, le bloc est avalé comme inconnu.
 /// `nested_rules` est récursif : sans borne, une feuille hostile

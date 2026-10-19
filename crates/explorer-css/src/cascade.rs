@@ -375,6 +375,21 @@ impl StyleEngine {
         }
         // 1. Collecte (rang, spécificité, ordre, déclaration).
         let mut cand: Vec<(u8, Specificity, u32, &Declaration)> = Vec::new();
+        // Attribut `style="…"` : déclarations auteur inline —
+        // normal au-dessus de tout sélecteur normal (spécificité
+        // et ordre maximaux à rang égal), `!important` au rang
+        // le plus haut (au-dessus même de l'auteur-`!important`,
+        // rang 3 = UA-`!important` : spec CSS2 §6.4.4).
+        let inline_decls = dom
+            .attribute(node, "style")
+            .ok()
+            .flatten()
+            .map(|s| crate::parser::parse_declarations(&s))
+            .unwrap_or_default();
+        for d in &inline_decls {
+            let rank = if d.important { 4 } else { 1 };
+            cand.push((rank, (u32::MAX, u32::MAX, u32::MAX), u32::MAX, d));
+        }
         for rule in &self.rules {
             // Chaque groupe `@media` englobant doit matcher.
             if !rule.media.is_empty() && !rule.media.iter().all(|qs| media_matches(env, qs)) {

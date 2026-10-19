@@ -24,7 +24,7 @@
 use explorer_css::ComputedStyle;
 
 use crate::block::{
-    css_px, font_size_px, layout_anon_block, layout_block, raw_length_px, BlockCtx,
+    css_px, font_size_px, layout_anon_block, layout_block, raw_length_px, BlockCtx, FloatCtx,
 };
 use crate::boxtree::{BoxKind, LayoutBox};
 use crate::Rect;
@@ -172,10 +172,11 @@ pub(crate) fn layout_item(
 ) {
     match c.kind {
         BoxKind::AnonymousBlock => {
-            layout_anon_block(c, ix, iy, iw, ctx, fs, pos_cb);
+            layout_anon_block(c, ix, iy, iw, ctx, fs, pos_cb, &FloatCtx::default());
         }
         _ => {
-            layout_block(c, ix, iy, iw, ctx, fs, pos_cb);
+            // Item flex = BFC propre : registre vierge.
+            layout_block(c, ix, iy, iw, ctx, fs, pos_cb, &mut FloatCtx::default());
         }
     }
 }

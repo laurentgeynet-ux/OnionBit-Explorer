@@ -25,7 +25,7 @@
 use explorer_css::value::Color;
 use explorer_css::value::{parse_color, parse_length};
 use explorer_layout::font::ShapedRun;
-use explorer_layout::{LayoutBox, Overflow, Position, Rect};
+use explorer_layout::{BoxKind, LayoutBox, Overflow, Position, Rect};
 
 /// Une primitive de dessin, dans l'ordre de peinture.
 #[derive(Debug, Clone)]
@@ -241,19 +241,32 @@ fn prop_px(st: &explorer_css::ComputedStyle, prop: &str, fallback: f32) -> f32 {
 /// sous-arbres `position: fixed`).
 fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32) {
     let rect = shifted(bx.rect, off);
+    // Blocs anonymes et boîtes texte clonent le style du
+    // parent, mais `background`/`border` ne sont PAS hérités
+    // en CSS : ils ne peignent ni fond ni bordure propre
+    // (sinon le clone masquerait les flottants posés avant,
+    // ou la bordure du parent serait redessinée sur chaque
+    // fragment de texte — §9.2.1.1).
+    let anonymous = matches!(bx.kind, BoxKind::AnonymousBlock | BoxKind::Text);
     // Fond : `background-color` non transparente.
-    if let Some(c) = bx.style.get("background-color").and_then(parse_color) {
-        if c.a > 0 {
-            items.push(DisplayItem::FillRect { rect, color: c });
+    if !anonymous {
+        if let Some(c) = bx.style.get("background-color").and_then(parse_color) {
+            if c.a > 0 {
+                items.push(DisplayItem::FillRect { rect, color: c });
+            }
         }
     }
     // Bordures : 4 côtés, épaisseur > 0 et style non `none`.
-    let widths = [
-        prop_px(&bx.style, "border-top-width", 0.0),
-        prop_px(&bx.style, "border-right-width", 0.0),
-        prop_px(&bx.style, "border-bottom-width", 0.0),
-        prop_px(&bx.style, "border-left-width", 0.0),
-    ];
+    let widths = if anonymous {
+        [0.0; 4]
+    } else {
+        [
+            prop_px(&bx.style, "border-top-width", 0.0),
+            prop_px(&bx.style, "border-right-width", 0.0),
+            prop_px(&bx.style, "border-bottom-width", 0.0),
+            prop_px(&bx.style, "border-left-width", 0.0),
+        ]
+    };
     if widths.iter().any(|v| *v > 0.0) {
         let color_of = |side: &str| {
             bx.style

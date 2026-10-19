@@ -156,7 +156,8 @@ async fn layout(src: &str) -> ExitCode {
                 eprintln!("aucun élément sous le document");
                 return ExitCode::FAILURE;
             };
-            if let Some(bx) = explorer_layout::build_box_tree(&dom, root_el, &styles) {
+            if let Some(mut bx) = explorer_layout::build_box_tree(&dom, root_el, &styles) {
+                explorer_layout::layout_tree(&mut bx, 800.0, &explorer_layout::BlockCtx::default());
                 print!("{}", bx.dump(&dom));
                 ExitCode::SUCCESS
             } else {

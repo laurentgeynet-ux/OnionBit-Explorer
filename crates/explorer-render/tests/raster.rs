@@ -99,18 +99,17 @@ fn hairline_fractionnaire_ne_panique_pas() {
     // tombant sur une frontière fractionnaire — les bords
     // sub-pixel AA couvrent toute la largeur → bug tiny-skia
     // `hairline_aa/fill_dot8` (`debug_assert`, panic en
-    // debug). Le garde `fill_guarded` doit router par
-    // `fill_path` : rasterise sans panic et peint l'arête.
+    // debug). `fill_guarded` pixel-snappe les arêtes pleines :
+    // la hairline devient une colonne nette, jamais un panic.
     let f = frame(
         "<div id=d></div>",
         "#d{border-left:1px solid #00ff00;margin-left:0.4px;\
          width:40px;height:40px}",
     );
-    // La bordure verticale ~x=0,4 a laissé des pixels verts
-    // (deux arêtes AA : x=0 couvert ~0,6, x=1 ~0,4).
-    let verts = (0..f.height.min(40)).any(|y| px(&f, 0, y)[1] > 100)
-        && (0..f.height.min(40)).any(|y| px(&f, 1, y)[1] > 60);
-    assert!(verts, "bordure hairline non peinte");
+    // La bordure ~x=0,4 est snappée sur la colonne x=0 —
+    // pleine et nette (comportement des moteurs établis).
+    let peinte = (0..f.height.min(40)).all(|y| px(&f, 0, y)[1] == 255);
+    assert!(peinte, "bordure hairline non peinte");
 }
 
 #[test]

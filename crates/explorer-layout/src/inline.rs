@@ -26,7 +26,7 @@ use std::collections::HashMap;
 
 use explorer_css::ComputedStyle;
 
-use crate::block::{css_px, font_size_px, layout_block, measure_fn, BlockCtx};
+use crate::block::{css_px, font_size_px, layout_block, measure_fn, side_px, BlockCtx, FloatCtx};
 use crate::boxtree::{LayoutBox, Rect};
 use crate::font::{self, FontRequest, ShapedRun};
 use crate::text::{self, Direction};
@@ -50,6 +50,11 @@ pub struct Fragment {
     pub baseline: f32,
     /// Glyphes shapés si la fonte était disponible.
     pub shaped: Option<ShapedRun>,
+    /// Avance du whitespace FINAL du fragment — retirée de
+    /// `rect.width` à la fermeture quand le fragment est le
+    /// dernier de la ligne (§16.6.1 : les espaces de fin de
+    /// ligne ne comptent pas dans la largeur ni `text-align`).
+    pub trail_w: f32,
 }
 
 /// Une ligne de contenu en-ligne posée.
@@ -89,7 +94,10 @@ struct Piece {
 
 /// Layout en-ligne du conteneur `bx` dans `[x, y, w]` : pose
 /// `bx.lines` + `rect` des enfants (union des fragments) et
-/// retourne la hauteur utilisée.
+/// retourne la hauteur utilisée. `fl` est le registre des
+/// flottants du BFC — chaque ligne se pose dans la bande
+/// libre à son propre `y` (§9.5).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn layout_inline(
     bx: &mut LayoutBox,
     x: f32,
@@ -98,6 +106,7 @@ pub(crate) fn layout_inline(
     ctx: &BlockCtx,
     parent_fs: f32,
     abs_cb: Rect,
+    fl: &FloatCtx,
 ) -> f32 {
     let st = bx.style.clone();
     let fs = font_size_px(&st, parent_fs, ctx);
@@ -110,16 +119,27 @@ pub(crate) fn layout_inline(
     let mut atomics: HashMap<usize, Rect> = HashMap::new();
     for (i, child) in bx.children.iter_mut().enumerate() {
         if child.display() == "inline-block" && child.text.is_none() {
-            layout_block(child, 0.0, 0.0, w, ctx, fs, abs_cb);
+            layout_block(
+                child,
+                0.0,
+                0.0,
+                w,
+                ctx,
+                fs,
+                abs_cb,
+                &mut FloatCtx::default(),
+            );
             atomics.insert(i, child.rect);
         }
     }
 
     let items = collect_items(bx);
-    let mut lines = break_into_lines(&items, &atomics, x, y, w, ctx, fs);
-    align_lines(&st, &mut lines, x, w);
+    let mut lines = break_into_lines(&items, &atomics, x, y, w, ctx, fs, fl);
+    align_lines(&st, &mut lines, x, w, fl);
     assign_child_rects(bx, &lines);
-    let h = lines.iter().map(|l| l.rect.height).sum::<f32>();
+    // Span réelle `y → bas de la dernière ligne` : la descente
+    // sous les flottants a pu sauter de l'espace vertical.
+    let h = lines.last().map_or(0.0, |l| l.rect.y + l.rect.height - y);
     bx.lines = lines;
     bx.rect.height = h;
     h
@@ -162,19 +182,37 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>) {
 
 /// Item texte : runs itemisés → pièces entre opportunités.
 fn text_item(b: &LayoutBox, owner: usize, t: &str) -> Item {
+    // §16.6.1 white-space processing : `normal`/`nowrap` effondrent
+    // toute suite de blancs en une espace ; `pre-line` effondre les
+    // espaces/tabs mais garde `\n` (saut forcé) ; `pre`/`pre-wrap`
+    // préservent tout. Sans ça, `\n`/`\t` bruts sont shapés →
+    // glyphe `.notdef` visible (ex. carré Ahem des reftests WPT).
+    let collapsed;
+    let src = match b.style.get("white-space") {
+        Some(v) if v.trim() == "pre" || v.trim() == "pre-wrap" => t,
+        Some(v) if v.trim() == "pre-line" => {
+            collapsed = collapse_spaces(t);
+            &collapsed
+        }
+        _ => {
+            collapsed = collapse_ws(t);
+            &collapsed
+        }
+    };
     let mut pieces = Vec::new();
-    for run in text::itemize(t) {
+    for run in text::itemize(src) {
         let mut prev = 0usize;
         for br in &run.breaks {
             if br.offset > prev && br.offset <= run.text.len() {
                 if let Some(p) = run.text.get(prev..br.offset) {
+                    // UAX #14 marque la FIN du texte comme
+                    // mandatory — une vraie coupure dure n'est
+                    // que celle après un caractère de saut de
+                    // ligne (\n, NEL, LS/PS…). Ce caractère est
+                    // retiré du texte shapé (sinon `.notdef`).
                     pieces.push(Piece {
-                        text: p.to_string(),
+                        text: strip_break_chars(p).to_string(),
                         dir: run.direction,
-                        // UAX #14 marque la FIN du texte comme
-                        // mandatory — une vraie coupure dure n'est
-                        // que celle après un caractère de saut de
-                        // ligne (\n, NEL, LS/PS…).
                         hard_after: br.mandatory && ends_hard_break(p),
                     });
                 }
@@ -184,7 +222,7 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str) -> Item {
         if prev < run.text.len() {
             if let Some(p) = run.text.get(prev..) {
                 pieces.push(Piece {
-                    text: p.to_string(),
+                    text: strip_break_chars(p).to_string(),
                     dir: run.direction,
                     hard_after: ends_hard_break(p),
                 });
@@ -198,6 +236,55 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str) -> Item {
         pieces,
         atomic: false,
     }
+}
+
+/// §16.6.1 : espaces CSS (` ` `\t` `\n` `\r` `\x0B` `\x0C`)
+/// — une suite quelconque devient une seule ` `.
+fn collapse_ws(t: &str) -> String {
+    let mut out = String::with_capacity(t.len());
+    let mut in_ws = false;
+    for c in t.chars() {
+        if matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{B}' | '\u{C}') {
+            if !in_ws {
+                out.push(' ');
+                in_ws = true;
+            }
+        } else {
+            out.push(c);
+            in_ws = false;
+        }
+    }
+    out
+}
+
+/// Variante `pre-line` : seuls espaces et tabulations sont
+/// effondrés ; les sauts de ligne restent des coupures dures.
+fn collapse_spaces(t: &str) -> String {
+    let mut out = String::with_capacity(t.len());
+    let mut in_ws = false;
+    for c in t.chars() {
+        if matches!(c, ' ' | '\t') {
+            if !in_ws {
+                out.push(' ');
+                in_ws = true;
+            }
+        } else {
+            out.push(c);
+            in_ws = false;
+        }
+    }
+    out
+}
+
+/// Retire les caractères de saut dur en fin de pièce — ils
+/// portent la coupure (`hard_after`) mais ne se rendent pas.
+fn strip_break_chars(p: &str) -> &str {
+    p.trim_end_matches(|c| {
+        matches!(
+            c,
+            '\n' | '\r' | '\u{85}' | '\u{B}' | '\u{C}' | '\u{2028}' | '\u{2029}'
+        )
+    })
 }
 
 /// La pièce finit-elle par un caractère de saut de ligne dur
@@ -264,6 +351,23 @@ impl LineAcc {
     /// Ferme la ligne à `y` : aligne les fragments sur la
     /// baseline commune, calcule le rect.
     fn close(&mut self, y: &mut f32, lines: &mut Vec<LineBox>) {
+        // §16.6.1 : les espaces en FIN de ligne sont retirées
+        // (elles ne rendent rien et ne comptent pas dans la
+        // largeur — `text-align` mesure sans elles).
+        while self
+            .frags
+            .last()
+            .is_some_and(|f| !f.atomic && f.text.trim().is_empty())
+        {
+            self.frags.pop();
+        }
+        // L'espace finale intra-fragment (pièce fusionnée
+        // `"mot "`) est exclue aussi : la ligne se mesure sur
+        // le contenu visible.
+        if let Some(f) = self.frags.last_mut() {
+            f.rect.width -= f.trail_w;
+            f.trail_w = 0.0;
+        }
         if self.is_empty() {
             return;
         }
@@ -298,7 +402,13 @@ impl LineAcc {
     }
 }
 
-/// Greedy : pièces → lignes à `w` max, fragments posés en x.
+/// Greedy : pièces → lignes posées dans la bande libre de
+/// leur `y` (`fl` — registre des flottants du BFC ; §9.5).
+/// Une ligne démarre dans `fl.band(y)` ; un fragment seul
+/// plus large que la bande fait descendre la ligne sous le
+/// prochain flottant — à bande vide (`w ≤ 0`) la ligne
+/// descend jusqu'à réapparition d'espace.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn break_into_lines(
     items: &[Item],
     atomics: &HashMap<usize, Rect>,
@@ -307,11 +417,46 @@ fn break_into_lines(
     w: f32,
     ctx: &BlockCtx,
     parent_fs: f32,
+    fl: &FloatCtx,
 ) -> Vec<LineBox> {
+    /// Requêtes de bande bornées (contenu hostile : les
+    /// flottants sont finis, chaque descente en franchit un).
+    const MAX_BAND_STEPS: u32 = 128;
+
     let mut lines = Vec::new();
     let mut acc = LineAcc::new();
-    let mut cursor_x = x;
+    let (mut line_x, mut line_w) = fl.band(y, x, w);
+    let mut cursor_x = line_x;
     let mut cursor_y = y;
+
+    // Descend la ligne tant que la bande est vide ou trop
+    // étroite pour un fragment **seul** de `pw` — borne dure.
+    macro_rules! descend_band {
+        ($pw:expr) => {{
+            let pw = $pw;
+            let mut steps = 0u32;
+            while (line_w <= 0.01 || pw > line_w) && steps < MAX_BAND_STEPS {
+                steps += 1;
+                match fl.next_band_change(cursor_y) {
+                    Some(ny) if ny > cursor_y => {
+                        cursor_y = ny;
+                        (line_x, line_w) = fl.band(ny, x, w);
+                        cursor_x = line_x;
+                    }
+                    _ => break,
+                }
+            }
+        }};
+    }
+    // Ferme la ligne courante et repart sur la bande du `y`
+    // suivant (les flottants peuvent avoir commencé/fini).
+    macro_rules! new_line {
+        () => {{
+            acc.close(&mut cursor_y, &mut lines);
+            (line_x, line_w) = fl.band(cursor_y, x, w);
+            cursor_x = line_x;
+        }};
+    }
 
     for item in items {
         let fs = font_size_px(&item.style, parent_fs, ctx);
@@ -320,31 +465,73 @@ fn break_into_lines(
         let measure = measure_fn(&item.style, fs, ctx);
 
         // Boîte atomique : coule comme une pièce incassable.
+        // Ses marges horizontales font partie de sa boîte
+        // externe (§8.3) — y compris en tête de ligne après
+        // un wrap : `margin-left` s'y applique aussi.
         if item.atomic {
             let Some(r) = atomics.get(&item.owner) else {
                 continue;
             };
-            if cursor_x > x && cursor_x - x + r.width > w && !acc.is_empty() {
-                acc.close(&mut cursor_y, &mut lines);
-                cursor_x = x;
+            let ml = side_px(&item.style, "margin-left", w, fs, ctx, 0.0);
+            let mr = side_px(&item.style, "margin-right", w, fs, ctx, 0.0);
+            // Marges verticales : appliquées aussi sur les
+            // atomes (inline-block, §10.8 — c'est leur margin
+            // box qui compte dans la hauteur de ligne).
+            let mt = side_px(&item.style, "margin-top", w, fs, ctx, 0.0);
+            let mb = side_px(&item.style, "margin-bottom", w, fs, ctx, 0.0);
+            let outer = ml + r.width + mr;
+            let outer_h = mt + r.height + mb;
+            // §9.5 : la boîte externe d'un atome (inline-block =
+            // BFC) ne doit chevaucher aucun flottant sur toute
+            // sa hauteur — bande effective intersectée sur
+            // `[y, y+h]` ; si elle n'y tient pas, elle descend
+            // sous le premier flottant finissant dans l'étendue.
+            let (mut ebx, mut ebw) = fl.band_over(cursor_y, outer_h, x, w);
+            let fits = cursor_x - line_x + outer <= line_w
+                && cursor_x >= ebx - 0.01
+                && cursor_x + outer <= ebx + ebw + 0.01;
+            if !fits && !acc.is_empty() {
+                new_line!();
+                (ebx, ebw) = fl.band_over(cursor_y, outer_h, x, w);
             }
+            if acc.is_empty() {
+                let mut steps = 0u32;
+                while outer > ebw + 0.01 && steps < MAX_BAND_STEPS {
+                    steps += 1;
+                    match fl.first_bottom_within(cursor_y, outer_h) {
+                        Some(ny) if ny > cursor_y => {
+                            cursor_y = ny;
+                            (ebx, ebw) = fl.band_over(ny, outer_h, x, w);
+                        }
+                        _ => break,
+                    }
+                }
+                line_x = ebx;
+                line_w = ebw;
+                cursor_x = line_x;
+            }
+            let px = cursor_x.max(ebx);
             acc.frags.push(Fragment {
                 node: item.node,
                 owner: item.owner,
                 text: String::new(),
                 atomic: true,
                 rect: Rect {
-                    x: cursor_x,
-                    y: cursor_y,
+                    x: px + ml,
+                    y: cursor_y + mt,
                     width: r.width,
                     height: r.height,
                 },
                 baseline: r.height,
                 shaped: None,
+                trail_w: 0.0,
             });
-            acc.max_lh = acc.max_lh.max(r.height);
-            acc.max_base = acc.max_base.max(r.height);
-            cursor_x += r.width;
+            // Margin box dans la ligne (§10.8) : `mt` pousse
+            // la boîte vers le bas via la baseline commune
+            // (`rect.y = y + base - h`), `mb` allonge la ligne.
+            acc.max_lh = acc.max_lh.max(mt + r.height + mb);
+            acc.max_base = acc.max_base.max(mt + r.height);
+            cursor_x = px + outer;
             continue;
         }
 
@@ -352,23 +539,38 @@ fn break_into_lines(
             if piece.text.is_empty() {
                 continue;
             }
-            let pw = measure(&piece.text);
-            if cursor_x > x && cursor_x - x + pw > w && !acc.is_empty() {
-                acc.close(&mut cursor_y, &mut lines);
-                cursor_x = x;
-            }
-            // Blanc en tête de ligne : supprimé (collapsing).
-            if cursor_x <= x && piece.text.trim().is_empty() {
+            // §16.6.1 : les espaces en TÊTE de ligne sont
+            // supprimées — y compris en tête d'une pièce
+            // non-blanche (le collapse fusionne `"  mot"`).
+            let line_start = cursor_x <= line_x;
+            let text = if line_start {
+                piece.text.trim_start()
+            } else {
+                piece.text.as_str()
+            };
+            if text.is_empty() {
                 continue;
+            }
+            let pw = measure(text);
+            if cursor_x > line_x && cursor_x - line_x + pw > line_w && !acc.is_empty() {
+                new_line!();
+            }
+            if acc.is_empty() {
+                descend_band!(pw);
             }
             let shaped = font_data
                 .as_deref()
-                .and_then(|d| font::shape(d, &piece.text, fs, piece.dir == Direction::Rtl));
+                .and_then(|d| font::shape(d, text, fs, piece.dir == Direction::Rtl));
             let baseline = shaped.as_ref().map_or(fs * 0.8, |s| s.metrics.ascent);
+            let trail_w = if text.ends_with(char::is_whitespace) {
+                pw - measure(text.trim_end())
+            } else {
+                0.0
+            };
             acc.frags.push(Fragment {
                 node: item.node,
                 owner: item.owner,
-                text: piece.text.clone(),
+                text: text.to_string(),
                 atomic: false,
                 rect: Rect {
                     x: cursor_x,
@@ -378,13 +580,13 @@ fn break_into_lines(
                 },
                 baseline,
                 shaped,
+                trail_w,
             });
             acc.max_lh = acc.max_lh.max(lh);
             acc.max_base = acc.max_base.max(baseline);
             cursor_x += pw;
             if piece.hard_after {
-                acc.close(&mut cursor_y, &mut lines);
-                cursor_x = x;
+                new_line!();
             }
         }
     }
@@ -394,13 +596,15 @@ fn break_into_lines(
 
 /// `text-align` sur les lignes posées. `justify` étire
 /// l'espace inter-fragments (approximation word-spacing,
-/// documentée) sauf sur la dernière ligne.
-fn align_lines(st: &ComputedStyle, lines: &mut [LineBox], _x: f32, w: f32) {
+/// documentée) sauf sur la dernière ligne. Le slack est
+/// mesuré dans la **bande** de la ligne (flottants, §9.5).
+fn align_lines(st: &ComputedStyle, lines: &mut [LineBox], x: f32, w: f32, fl: &FloatCtx) {
     let align = st.get_or("text-align", "start");
     let count = lines.len();
     for (i, line) in lines.iter_mut().enumerate() {
         let used = line.fragments.iter().map(|f| f.rect.width).sum::<f32>();
-        let slack = (w - used).max(0.0);
+        let (_bx, bw) = fl.band(line.rect.y + 0.01, x, w);
+        let slack = (bw - used).max(0.0);
         let last = i + 1 == count;
         #[allow(clippy::cast_precision_loss)]
         let (dx, space) = match align {

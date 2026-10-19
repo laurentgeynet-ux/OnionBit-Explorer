@@ -325,8 +325,13 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
     Some(b)
 }
 
-/// `display` → nature de boîte.
+/// `display` → nature de boîte. §9.7 : `float` ≠ none force
+/// un niveau bloc (`display` calculé → block) — un `<span>`
+/// flottant n'est plus inline et interrompt la ligne.
 fn box_kind_of(style: &ComputedStyle) -> BoxKind {
+    if matches!(style.get("float"), Some("left" | "right")) {
+        return BoxKind::Block;
+    }
     match style.get_or("display", "inline") {
         "inline" | "inline-block" | "inline-table" | "inline-flex" => BoxKind::Inline,
         "list-item" => BoxKind::ListItem,
@@ -359,7 +364,10 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                 out.push(b);
             }
             // `display: none` ou absent de la map → sauté.
-        } else if let Ok(text) = dom.text(child) {
+        } else if matches!(dom.data(child), Ok(explorer_dom::NodeData::Text(_))) {
+            // Commentaires, doctype… : pas de boîte (seuls
+            // les vrais `Text` en produisent une).
+            let text = dom.text(child).unwrap_or_default();
             // Tout texte produit une boîte — les blancs purs
             // sont aussi gardés : ils portent l'espace entre
             // éléments en-ligne (`<b>x</b> <b>y</b>`). C'est

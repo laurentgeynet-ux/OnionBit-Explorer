@@ -19,7 +19,7 @@
 //! `border-spacing` horizontal 0 — l'espace vient des marges
 //! des cellules), `display: table-column`, `caption`.
 
-use crate::block::{css_px, font_size_px, layout_block, measure_fn, BlockCtx};
+use crate::block::{css_px, font_size_px, layout_block, measure_fn, BlockCtx, FloatCtx};
 use crate::boxtree::{LayoutBox, Rect};
 
 /// Une cellule repérée : (rangée, colonne, indice dans
@@ -144,7 +144,17 @@ pub(crate) fn layout_table(
             let Some(cell_box) = cell_ref_mut(bx, *r, cell.idx) else {
                 continue;
             };
-            let used = layout_block(cell_box, col_x, cursor_y, cw, ctx, fs, cell_cb);
+            // Cellule = BFC propre : registre vierge (§9.4.1).
+            let used = layout_block(
+                cell_box,
+                col_x,
+                cursor_y,
+                cw,
+                ctx,
+                fs,
+                cell_cb,
+                &mut FloatCtx::default(),
+            );
             row_h = row_h.max(used);
         }
         row_tops.push((cursor_y, row_h));

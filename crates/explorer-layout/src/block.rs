@@ -70,6 +70,149 @@ fn collapse(a: f32, b: f32) -> f32 {
     }
 }
 
+/// Registre des flottants d'un contexte de formatage bloc :
+/// les **marge-rects** posés, partagés par toutes les boîtes
+/// du même BFC — un enfant qui établit son propre BFC repart
+/// d'un registre vierge (§9.4.1 : ses flottants ne mordent
+/// pas l'extérieur, et réciproquement).
+#[derive(Default)]
+pub(crate) struct FloatCtx {
+    /// Flottants gauche (marge-rects).
+    pub left: Vec<Rect>,
+    /// Flottants droit (marge-rects).
+    pub right: Vec<Rect>,
+}
+
+impl FloatCtx {
+    /// Bande libre `cx..cx+cw` rétrécie par les flottants qui
+    /// mordent à `top` : retourne `(x, largeur)` effectifs.
+    pub(crate) fn band(&self, top: f32, cx: f32, cw: f32) -> (f32, f32) {
+        let mut xl = cx;
+        let mut xr = cx + cw;
+        for f in &self.left {
+            if f.y <= top && f.y + f.height > top {
+                xl = xl.max(f.x + f.width);
+            }
+        }
+        for f in &self.right {
+            if f.y <= top && f.y + f.height > top {
+                xr = xr.min(f.x);
+            }
+        }
+        (xl, (xr - xl).max(0.0))
+    }
+
+    /// Bas le plus profond des flottants `side` (`None` si
+    /// aucun) — pour `clear` et la containment BFC.
+    pub(crate) fn bottom_of(list: &[Rect]) -> Option<f32> {
+        list.iter().map(|f| f.y + f.height).reduce(f32::max)
+    }
+
+    /// Haut le plus élevé des flottants déjà posés (§9.5.1
+    /// règle 5 : un nouveau flottant ne peut pas être plus
+    /// haut que le HAUT de tout flottant antérieur — les
+    /// blocs in-flow antérieurs sont déjà couverts par la
+    /// position de flux, qui est sous leurs hauts).
+    fn max_top(&self) -> Option<f32> {
+        self.left
+            .iter()
+            .chain(self.right.iter())
+            .map(|f| f.y)
+            .reduce(f32::max)
+    }
+
+    /// `clear` : position minimale sous les flottants du côté.
+    pub(crate) fn cleared(&self, side: Option<&str>, y: f32) -> f32 {
+        match side {
+            Some("left") => Self::bottom_of(&self.left).map_or(y, |b| y.max(b)),
+            Some("right") => Self::bottom_of(&self.right).map_or(y, |b| y.max(b)),
+            Some("both") => {
+                let l = Self::bottom_of(&self.left).unwrap_or(f32::NEG_INFINITY);
+                let r = Self::bottom_of(&self.right).unwrap_or(f32::NEG_INFINITY);
+                y.max(l.max(r))
+            }
+            _ => y,
+        }
+    }
+
+    /// Premier `y > top` où la bande change — bas du flottant
+    /// mordant `top` qui finit le plus tôt (`None` si la
+    /// bande ne change plus).
+    pub(crate) fn next_band_change(&self, top: f32) -> Option<f32> {
+        self.left
+            .iter()
+            .chain(self.right.iter())
+            .filter(|f| f.y <= top && f.y + f.height > top)
+            .map(|f| f.y + f.height)
+            .reduce(f32::min)
+    }
+
+    /// Bande effective sur un intervalle `[top, top+h]` :
+    /// intersection des bandes — tout flottant dont l'étendue
+    /// verticale touche l'intervalle contraint. C'est la
+    /// bande qu'une boîte de hauteur `h` doit respecter pour
+    /// ne chevaucher aucun flottant (§9.5 : la border box
+    /// d'un BFC tient sur TOUTE sa hauteur).
+    pub(crate) fn band_over(&self, top: f32, h: f32, cx: f32, cw: f32) -> (f32, f32) {
+        if h <= 0.0 {
+            return self.band(top, cx, cw);
+        }
+        let bottom = top + h;
+        let mut xl = cx;
+        let mut xr = cx + cw;
+        for f in &self.left {
+            if f.y < bottom && f.y + f.height > top {
+                xl = xl.max(f.x + f.width);
+            }
+        }
+        for f in &self.right {
+            if f.y < bottom && f.y + f.height > top {
+                xr = xr.min(f.x);
+            }
+        }
+        (xl, (xr - xl).max(0.0))
+    }
+
+    /// Premier bas de flottant `> y` parmi ceux dont l'étendue
+    /// intersecte `[y, y+h]` — descente minimale qui élargit
+    /// la bande (un flottant qui finit libère sa morsure).
+    pub(crate) fn first_bottom_within(&self, y: f32, h: f32) -> Option<f32> {
+        let bottom = y + h;
+        self.left
+            .iter()
+            .chain(self.right.iter())
+            .filter(|f| f.y < bottom && f.y + f.height > y)
+            .map(|f| f.y + f.height)
+            .filter(|b| *b > y)
+            .reduce(f32::min)
+    }
+}
+
+/// `true` si la boîte établit un contexte de formatage bloc
+/// propre (CSS 2.1 §9.4.1 + Display L3 `flow-root`) : floats,
+/// absolus, inline-blocks, `overflow ≠ visible`, flow-root,
+/// cellules/légendes de table, conteneurs flex/grid.
+fn establishes_bfc(st: &ComputedStyle) -> bool {
+    matches!(
+        st.get("display"),
+        Some(
+            "flow-root"
+                | "inline-block"
+                | "inline-flex"
+                | "inline-grid"
+                | "inline-table"
+                | "table-cell"
+                | "table-caption"
+                | "flex"
+                | "grid"
+        )
+    ) || matches!(st.get("overflow"), Some("hidden" | "auto" | "scroll"))
+        || matches!(st.get("overflow-x"), Some("hidden" | "auto" | "scroll"))
+        || matches!(st.get("overflow-y"), Some("hidden" | "auto" | "scroll"))
+        || matches!(st.get("float"), Some("left" | "right"))
+        || matches!(st.get("position"), Some("absolute" | "fixed"))
+}
+
 /// Dimensionne l'arbre de boîtes dans un viewport de largeur
 /// `viewport_w` : chaque `rect` est rempli (x, y, border-box
 /// width/height). Le `y` de départ est 0.
@@ -80,6 +223,9 @@ pub fn layout_tree(root: &mut LayoutBox, viewport_w: f32, ctx: &BlockCtx) {
         width: viewport_w,
         height: ctx.viewport_h,
     };
+    // La racine établit le BFC initial : ses flottants sont
+    // contenus dans sa hauteur (§9.4.1/§10.6.7).
+    let mut floats = FloatCtx::default();
     layout_block(
         root,
         0.0,
@@ -88,7 +234,12 @@ pub fn layout_tree(root: &mut LayoutBox, viewport_w: f32, ctx: &BlockCtx) {
         ctx,
         ctx.base_font_size,
         viewport,
+        &mut floats,
     );
+    let deep = FloatCtx::bottom_of(&floats.left)
+        .unwrap_or(0.0)
+        .max(FloatCtx::bottom_of(&floats.right).unwrap_or(0.0));
+    root.rect.height = root.rect.height.max(deep);
     resolve_absolutes(root, viewport, ctx, ctx.base_font_size);
 }
 
@@ -280,7 +431,7 @@ fn eval_calc(expr: &str, pct_basis: f32, em_basis: f32, ctx: &BlockCtx) -> Optio
 
 /// Côté de marge/bordure/padding en px (`auto` et manquant →
 /// `fallback`).
-fn side_px(
+pub(crate) fn side_px(
     style: &ComputedStyle,
     prop: &str,
     cb_w: f32,
@@ -327,8 +478,10 @@ fn margins(style: &ComputedStyle, cb_w: f32, em: f32, ctx: &BlockCtx) -> Margins
 /// conteneur de largeur `cb_w`, bord haut à `y`. Pose
 /// `bx.rect` et descend récursivement. `abs_cb` = bloc
 /// conteneur du positionnement absolu (plus proche ancêtre
-/// positionné, ou viewport).
-#[allow(clippy::too_many_lines)]
+/// positionné, ou viewport). `fl` = registre des flottants
+/// du BFC auquel `bx` appartient (vierge si `bx` établit
+/// le sien — fourni par l'appelant).
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 pub(crate) fn layout_block(
     bx: &mut LayoutBox,
     x: f32,
@@ -337,6 +490,7 @@ pub(crate) fn layout_block(
     ctx: &BlockCtx,
     parent_fs: f32,
     abs_cb: Rect,
+    fl: &mut FloatCtx,
 ) -> f32 {
     let st = bx.style.clone();
     let fs = font_size_px(&st, parent_fs, ctx);
@@ -428,6 +582,7 @@ pub(crate) fn layout_block(
             ctx,
             fs,
             pos_cb,
+            fl,
         ),
     };
 
@@ -500,36 +655,99 @@ fn apply_layout_metadata(bx: &mut LayoutBox, st: &ComputedStyle) {
         .unwrap_or(0);
 }
 
-/// Bande libre `cx..cx+cw` rétrécie par les flottants qui
-/// mordent à `top` : retourne `(x, largeur)` effectifs.
-fn float_band(fl: &[Rect], fr: &[Rect], top: f32, cx: f32, cw: f32) -> (f32, f32) {
-    let mut xl = cx;
-    let mut xr = cx + cw;
-    for f in fl {
-        if f.y <= top && f.y + f.height > top {
-            xl = xl.max(f.x + f.width);
-        }
-    }
-    for f in fr {
-        if f.y <= top && f.y + f.height > top {
-            xr = xr.min(f.x);
-        }
-    }
-    (xl, (xr - xl).max(0.0))
-}
+/// Itérations max de la descente d'un flottant — chaque tour
+/// franchit le bas d'un flottant mordant ; la borne n'est
+/// qu'une garde contre la pathologie (contenu hostile).
+const MAX_FLOAT_STEPS: u32 = 64;
 
-/// `clear` : descend `cursor` sous le bas des flottants.
-fn float_clear(floats: &[Rect], cursor: &mut f32) {
-    if let Some(b) = floats.iter().map(|f| f.y + f.height).reduce(f32::max) {
-        *cursor = (*cursor).max(b);
+/// Pose le flottant `parent.children[i]` : position de flux
+/// = `flow_y` (son « parent anonyme » virtuel, §9.5.1 règle
+/// 4), abaissée par `clear` et par les collisions jusqu'à ce
+/// que la boîte tienne dans la bande (règles 2, 3, 7 — la
+/// bande les encode). Le curseur de flux n'est **pas** avancé.
+#[allow(clippy::too_many_arguments)]
+fn place_float(
+    parent: &mut LayoutBox,
+    i: usize,
+    cst: &ComputedStyle,
+    right_side: bool,
+    flow_y: f32,
+    content_x: f32,
+    content_w: f32,
+    ctx: &BlockCtx,
+    fs: f32,
+    pos_cb: Rect,
+    fl: &mut FloatCtx,
+) {
+    let cfs = font_size_px(cst, fs, ctx);
+    // Marges résolues sur la largeur du bloc conteneur (§8.3)
+    // — le registre mémorise les marge-rects, pas les bordures.
+    let ml = side_px(cst, "margin-left", content_w, cfs, ctx, 0.0);
+    let mr = side_px(cst, "margin-right", content_w, cfs, ctx, 0.0);
+    let mt = side_px(cst, "margin-top", content_w, cfs, ctx, 0.0);
+    let mb = side_px(cst, "margin-bottom", content_w, cfs, ctx, 0.0);
+
+    // §9.5.1 : le haut du flottant ne peut être plus haut
+    // que le haut de tout flottant antérieur (règle 5) ni
+    // violer `clear` (dégagement vers le bas, §9.5.2).
+    let mut fy = fl
+        .max_top()
+        .map_or(flow_y, |t| flow_y.max(t))
+        .max(fl.cleared(cst.get("clear"), f32::NEG_INFINITY));
+    let mut placed = Rect::default();
+    for _ in 0..MAX_FLOAT_STEPS {
+        let (bx0, bw) = fl.band(fy, content_x, content_w);
+        // BFC propre au flottant : registre vierge pour ses
+        // propres descendants (§9.4.1).
+        let mut inner = FloatCtx::default();
+        let child = &mut parent.children[i];
+        layout_block(child, bx0, fy, bw, ctx, fs, pos_cb, &mut inner);
+        let r = child.rect;
+        if right_side {
+            let corrected = bx0 + bw - r.width;
+            child.rect.x = corrected;
+            placed = Rect {
+                x: corrected - ml,
+                y: r.y - mt,
+                width: r.width + ml + mr,
+                height: r.height + mt + mb,
+            };
+        } else {
+            placed = Rect {
+                x: r.x - ml,
+                y: r.y - mt,
+                width: r.width + ml + mr,
+                height: r.height + mt + mb,
+            };
+        }
+        // Tient dans la bande (ou la bande est déjà pleine
+        // largeur : dépassement toléré, règle 7 — « déjà aussi
+        // loin que possible »).
+        if placed.width <= bw + 0.01 || bw >= content_w - 0.01 {
+            break;
+        }
+        // Descendre sous le prochain flottant mordant.
+        match fl.next_band_change(fy) {
+            Some(next) if next > fy + 0.01 => fy = next,
+            _ => break,
+        }
+    }
+    if right_side {
+        fl.right.push(placed);
+    } else {
+        fl.left.push(placed);
     }
 }
 
 /// Empilement vertical des enfants de niveau bloc : marges
-/// collapsées, flottants posés au bord (bandes réservées),
+/// collapsées, flottants posés « aussi haut que possible »
+/// depuis leur position de flux (sans l'avancer — §9.5.1),
 /// `clear`, absolus laissés hors flux (rect statique
-/// placeholder pour `resolve_absolutes`). Retourne le curseur
-/// final (bas du contenu).
+/// placeholder pour `resolve_absolutes`). Les enfants non-BFC
+/// restent pleine largeur : ce sont leurs **lignes** qui se
+/// rétrécissent, via le registre `fl` partagé ; les enfants
+/// BFC se rangent dans la bande. Retourne le curseur final —
+/// étendu au bas des flottants propres si `bx` est un BFC.
 #[allow(clippy::too_many_arguments)]
 fn flow_children(
     bx: &mut LayoutBox,
@@ -541,14 +759,10 @@ fn flow_children(
     ctx: &BlockCtx,
     fs: f32,
     pos_cb: Rect,
+    fl: &mut FloatCtx,
 ) -> f32 {
     let mut cursor = start_cursor;
-    // Bandes réservées (rect margin-compris) par côté — le
-    // contenu suivant se rétrécit où ils mordent
-    // (approximation : bande prise au bord haut de l'enfant —
-    // affinage ligne par ligne reporté, documenté).
-    let mut floats_l: Vec<Rect> = Vec::new();
-    let mut floats_r: Vec<Rect> = Vec::new();
+    let own_bfc = establishes_bfc(&bx.style);
 
     let mut prev_margin: Option<f32> = None;
     let mut first = true;
@@ -578,32 +792,31 @@ fn flow_children(
             continue;
         }
 
-        // `clear` : le flux descend sous les flottants du côté.
-        match cst.get("clear") {
-            Some("left") => float_clear(&floats_l, &mut cursor),
-            Some("right") => float_clear(&floats_r, &mut cursor),
-            Some("both") => {
-                float_clear(&floats_l, &mut cursor);
-                float_clear(&floats_r, &mut cursor);
-            }
-            _ => {}
-        }
-
-        // `float` : posé au bord de la bande courante,
-        // enregistré — n'avance pas le curseur.
+        // `float` : posé dans la bande à sa position de flux
+        // — n'avance ni curseur ni marges (hors flux ; les
+        // marges in-flow collapse « à travers » lui, §8.3.1).
         let cfloat = cst.get("float");
         if kind != BoxKind::AnonymousBlock && matches!(cfloat, Some("left" | "right")) {
-            let (fx0, fw) = float_band(&floats_l, &floats_r, cursor, content_x, content_w);
-            let child = &mut bx.children[i];
-            layout_block(child, fx0, cursor, fw, ctx, fs, pos_cb);
-            let frect = child.rect;
-            if cfloat == Some("right") {
-                child.rect.x = fx0 + fw - frect.width;
-                floats_r.push(frect);
-            } else {
-                floats_l.push(frect);
-            }
+            place_float(
+                bx,
+                i,
+                &cst,
+                cfloat == Some("right"),
+                cursor,
+                content_x,
+                content_w,
+                ctx,
+                fs,
+                pos_cb,
+                fl,
+            );
             continue;
+        }
+
+        // `clear` (contenu in-flow) : le curseur descend sous
+        // les flottants du côté déclaré (dégagement, §9.5.2).
+        if matches!(cst.get("clear"), Some("left" | "right" | "both")) {
+            cursor = fl.cleared(cst.get("clear"), cursor);
         }
 
         // Premier enfant adjoining : sa marge « traverse » le
@@ -616,18 +829,102 @@ fn flow_children(
             prev_margin.map_or(cm.top, |p| collapse(p, cm.top))
         };
         cursor += gap;
-        // Bande effective au bord haut de l'enfant.
-        let (ex, ew) = float_band(&floats_l, &floats_r, cursor, content_x, content_w);
+
+        // Non-BFC et anonymes : boîte pleine largeur — ce sont
+        // leurs **lignes** qui se rangent dans la bande libre
+        // (registre partagé `fl`, ligne par ligne). BFC : la
+        // boîte elle-même se range ; ses descendants voient
+        // un registre vierge.
+        let child_bfc = establishes_bfc(&cst);
+        let (ex, ew) = if child_bfc {
+            fl.band(cursor, content_x, content_w)
+        } else {
+            (content_x, content_w)
+        };
         let child = &mut bx.children[i];
         let used = match kind {
-            BoxKind::AnonymousBlock => layout_anon_block(child, ex, cursor, ew, ctx, fs, pos_cb),
-            _ => layout_block(child, ex, cursor, ew, ctx, fs, pos_cb),
+            // Lignes : registre partagé (bande propre à chaque y).
+            BoxKind::AnonymousBlock => {
+                layout_anon_block(child, ex, cursor, ew, ctx, fs, pos_cb, fl)
+            }
+            // BFC : registre vierge — les flottants internes ne
+            // mordent pas l'extérieur (§9.4.1). Placement
+            // complet dans `layout_bfc_child`.
+            _ if child_bfc => {
+                layout_bfc_child(child, cursor, content_x, content_w, ctx, fs, pos_cb, fl)
+            }
+            _ => layout_block(child, ex, cursor, ew, ctx, fs, pos_cb, fl),
         };
         cursor += used;
         prev_margin = Some(cm.bottom);
         first = false;
     }
+    // Containment : un BFC englobe le bas de ses flottants
+    // propres (§10.6.7) — le registre `fl` est alors vierge
+    // à son entrée et ne contient que les siens.
+    if own_bfc {
+        let deep = FloatCtx::bottom_of(&fl.left)
+            .unwrap_or(f32::NEG_INFINITY)
+            .max(FloatCtx::bottom_of(&fl.right).unwrap_or(f32::NEG_INFINITY));
+        if deep.is_finite() {
+            cursor = cursor.max(deep);
+        }
+    }
     cursor
+}
+
+/// Pose un enfant BFC : sa border box ne doit chevaucher
+/// AUCUN flottant du registre `fl` sur toute sa hauteur
+/// (§9.5) — la bande retenue est l'intersection des bandes
+/// sur `[y, y+h]`. On itère — poser dans la bande, mesurer
+/// `h`, ré-intersecter — jusqu'à bande stable ; si la boîte
+/// n'y tient pas (largeur fixe > bande), elle descend sous
+/// le premier flottant finissant dans son étendue. Borné :
+/// chaque descente passe un bas de flottant, jamais deux
+/// fois le même. Retourne l'avance verticale consommée
+/// (descente éventuelle incluse).
+#[allow(clippy::too_many_arguments)]
+fn layout_bfc_child(
+    child: &mut LayoutBox,
+    cursor: f32,
+    content_x: f32,
+    content_w: f32,
+    ctx: &BlockCtx,
+    fs: f32,
+    pos_cb: Rect,
+    fl: &FloatCtx,
+) -> f32 {
+    let mut y = cursor;
+    let mut est = 0.0;
+    let mut used = 0.0;
+    for _ in 0..=fl.left.len() + fl.right.len() + 2 {
+        let (bx0, bw) = fl.band_over(y, est, content_x, content_w);
+        let mut fresh = FloatCtx::default();
+        let h = layout_block(child, bx0, y, bw, ctx, fs, pos_cb, &mut fresh);
+        let (bx1, bw1) = fl.band_over(y, h, content_x, content_w);
+        used = h;
+        if (bx1, bw1) == (bx0, bw) {
+            // Bande stable — la boîte y tient-elle ?
+            let fits =
+                child.rect.x >= bx1 - 0.5 && child.rect.x + child.rect.width <= bx1 + bw1 + 0.5;
+            if fits {
+                break;
+            }
+            match fl.first_bottom_within(y, h) {
+                Some(nb) if nb > y => {
+                    y = nb;
+                    est = h;
+                }
+                _ => break,
+            }
+        } else {
+            // Bande resserrée/élargie : reposer dedans.
+            est = h;
+        }
+    }
+    // Le curseur rejoint le bas de la boîte — une descente
+    // (`y > cursor`) compte dans l'avance.
+    y + used - cursor
 }
 
 /// Second passage (étape 21) : pose les boîtes
@@ -689,7 +986,8 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
         let cx = l.map_or(static_x, |v| target.x + v);
         let cy = t.map_or(static_y, |v| target.y + v);
         let child = &mut bx.children[i];
-        layout_block(child, cx, cy, cw, ctx, fs, target);
+        // Boîte absolue = BFC propre : registre vierge.
+        layout_block(child, cx, cy, cw, ctx, fs, target, &mut FloatCtx::default());
         // right/bottom sans left/top : ancrage au bord opposé.
         if l.is_none() {
             if let Some(rv) = r {
@@ -709,7 +1007,10 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
 }
 
 /// Hauteur d'un bloc anonyme : délégué au layout en-ligne
-/// (étape 20 — vraies line boxes dans `bx.lines`).
+/// (étape 20 — vraies line boxes dans `bx.lines`). `fl` est
+/// le registre partagé : les lignes se rétrécissent dans la
+/// bande de leur propre `y` (§9.5).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn layout_anon_block(
     bx: &mut LayoutBox,
     x: f32,
@@ -718,6 +1019,7 @@ pub(crate) fn layout_anon_block(
     ctx: &BlockCtx,
     parent_fs: f32,
     abs_cb: Rect,
+    fl: &FloatCtx,
 ) -> f32 {
     bx.rect = Rect {
         x,
@@ -725,7 +1027,7 @@ pub(crate) fn layout_anon_block(
         width: w,
         height: 0.0,
     };
-    crate::inline::layout_inline(bx, x, y, w, ctx, parent_fs, abs_cb)
+    crate::inline::layout_inline(bx, x, y, w, ctx, parent_fs, abs_cb, fl)
 }
 
 /// `line-height` en px : nombre → ×font-size, longueur →

@@ -276,7 +276,10 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    /// `<!--` / `-->` si présents, sinon `Delim` du char entrée.
+    /// `<!--` / `-->` / `<![CDATA[` / `]]>` si présents, sinon
+    /// `Delim` du char entrée. Les marqueurs CDATA survivent quand
+    /// une feuille XHTML est servie en `text/html` (reftests WPT)
+    /// ou inline — le parser les saute comme `Cdo`/`Cdc`.
     /// Invariant : `first` est `<` ou `-` (déjà consommé).
     fn markup(&mut self, first: char) -> Token {
         match first {
@@ -288,6 +291,29 @@ impl<'a> Tokenizer<'a> {
                     self.next_char();
                     self.next_char();
                     self.next_char();
+                    Token::Cdo
+                } else if [
+                    self.peek(0),
+                    self.peek(1),
+                    self.peek(2),
+                    self.peek(3),
+                    self.peek(4),
+                    self.peek(5),
+                    self.peek(6),
+                    self.peek(7),
+                ] == [
+                    Some('!'),
+                    Some('['),
+                    Some('C'),
+                    Some('D'),
+                    Some('A'),
+                    Some('T'),
+                    Some('A'),
+                    Some('['),
+                ] {
+                    for _ in 0..8 {
+                        self.next_char();
+                    }
                     Token::Cdo
                 } else {
                     Token::Delim('<')
@@ -358,7 +384,16 @@ impl<'a> Tokenizer<'a> {
                 Some('(') => return Token::OpenParen,
                 Some(')') => return Token::CloseParen,
                 Some('[') => return Token::OpenBracket,
-                Some(']') => return Token::CloseBracket,
+                Some(']') => {
+                    // `]]>` : fermant CDATA d'une feuille XHTML
+                    // servie en HTML — traité comme `Cdc` (sauté).
+                    if self.peek(0) == Some(']') && self.peek(1) == Some('>') {
+                        self.next_char();
+                        self.next_char();
+                        return Token::Cdc;
+                    }
+                    return Token::CloseBracket;
+                }
                 Some('{') => return Token::OpenBrace,
                 Some('}') => return Token::CloseBrace,
                 Some(':') => return Token::Colon,
