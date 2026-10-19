@@ -121,7 +121,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
 
 ## Phase 3 — CSS (`explorer-css`)
 
-- [ ] **Étape 13. Tokenizer/parser.** Règles, déclarations,
+- [x] **Étape 13. Tokenizer/parser.** Règles, déclarations,
   at-rules (`@media` minimal), tolérance aux erreurs de la spec.
 - [ ] **Étape 14. Sélecteurs.** Tag/classe/id/descendant/enfant/
   attribut — matching sur le DOM.

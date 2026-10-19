@@ -29,6 +29,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - 13 tests `tests/gc.rs` : cycles, fermetures, timers,
     promesses, cache DOM, racines explicites, idempotence.
 
+- **Étape 13 — `explorer-css` : tokenizer + parser**
+  (`tokenizer.rs`/`parser.rs`, ~1 600 lignes) : tokens CSS
+  Syntax (ident, function, nombre/dimension/pourcentage,
+  chaîne, url, hash, CDO/CDC, delim) avec échappements résolus
+  et `BadString`/`BadUrl` en dégradé ; buffer d'avance
+  `VecDeque` (look-ahead 2-3 chars) ; borne `MAX_TOKENS`
+  anti-contenu-hostile. Parser tolérant : feuille de style →
+  règles qualifiées + déclarations ordonnées, `!important`
+  détecté/retiré, récupération spec (saut à `;`/`}` avec
+  profondeur, blocs non fermés à EOF avalés, garde
+  anti-progression) ; at-rules `@charset`, `@import`,
+  `@font-face`, `@keyframes` (règles imbriquées), at-rules
+  inconnues avalées sainement ; `@media` minimal : type,
+  conditions `(min-width: 600px)`, négation `not`, listes `,`.
+  32 tests (14 tokenizer + 18 parser) couvrant nombres
+  signés/exposants, `url()` brut vs `url("…")`, `calc(`,
+  déclarations invalides sautées sans perte des suivantes.
+
 - **Étape 12 — golden tests + premier artefact** :
   - Corpus **html5lib-tests tree-construction** (57 fichiers
     `.dat`, ~1 600 cas) extrait @ `9329e64694` vers

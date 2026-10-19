@@ -4,7 +4,19 @@
 
 //! `explorer-css` — tokenizer, parser, sélecteurs et cascade CSS.
 //!
-//! Squelette de l'étape 1 — la phase 3 implémente le contenu.
-//! Domaine pur : aucun I/O, aucune dépendance async.
+//! Étape 13 : [`tokenize`] + [`parse_stylesheet`] — tolérant aux
+//! erreurs de la spec (déclarations/règles invalides sautées,
+//! jamais de panic). Domaine pur : aucun I/O, aucun async.
 
 #![forbid(unsafe_code)]
+
+mod parser;
+mod token;
+mod tokenizer;
+
+pub use parser::{
+    parse_stylesheet, AtKind, AtRule, Declaration, ImportRule, MediaQuery, QualifiedRule, Rule,
+    Stylesheet,
+};
+pub use token::Token;
+pub use tokenizer::tokenize;
