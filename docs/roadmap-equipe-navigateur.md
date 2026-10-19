@@ -258,16 +258,18 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   **ExternalTexture GPU reporté** — à mesurer sur de vraies
   frames avant révision ADR-0004/0018. Régression :
   `dirty_rects_reported_and_region_served`.
-- [ ] **Étape 55b. `<svg>` branché en session** (terrain
+- [x] **Étape 55b. `<svg>` branché en session** (terrain
   mission 7 — R-9 livré mais jamais câblé : espace réservé,
   rien peint ; repro `svg.html` + example.com + octicons
-  github) : `Session::repaint` appelle
-  `build_display_list_imaged` avec `PaintImages::from_replaced`
-  → la table `svgs` reste vide à vie. À brancher :
-  `svg::svg_sizes` avant `build_box_tree_sized` (intrinsèques)
-  + `svg::collect_svg` au repaint → `PaintImages.svgs`.
-  `canvases` attendra JS-C28 (enregistrement op-list côté
-  `dillo-js`) — même couture déjà figée.
+  github) : `Tab::images` promu `PaintImages` complet —
+  `svg::svg_sizes` fusionné aux tailles `<img>` avant
+  `build_box_tree_sized`, `svg::collect_svg` rasterise à
+  chaque reflow vers `PaintImages.svgs` (borne
+  `image_max_px`), `repaint` consomme
+  `build_display_list_full`. Gelée dans le bfcache avec le
+  reste de la table. `canvases` attendra JS-C28
+  (enregistrement op-list côté `dillo-js`) — même couture
+  déjà figée.
 - [x] **Étape 55c. Miroir→DOM : source `<script>` injectée
   comme texte** (terrain mission 6+7, wikipedia — clientpref/
   RLSTATE JSON toujours peints après R-20) : le filet R-20 vit

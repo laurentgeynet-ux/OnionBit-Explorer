@@ -3492,3 +3492,31 @@ async fn post_history_entry_replays_request() {
     s.reload(id).await.unwrap();
     assert_eq!(t.last().unwrap().0, "Post", "reload réémet le POST");
 }
+
+/// Étape 55b — `<svg>` inline câblé en session : tailles
+/// intrinsèques (`svg_sizes` → `build_box_tree_sized`) et
+/// bitmap rasterisé (`collect_svg` → `PaintImages.svgs`)
+/// participent au rendu — un rect rouge SVG laisse des
+/// pixels rouges dans la frame (avant : espace réservé).
+#[tokio::test]
+async fn inline_svg_is_rasterized_into_frame() {
+    const SVG_PAGE: &str = "<!doctype html><html><body>\
+         <svg width=\"40\" height=\"40\" viewBox=\"0 0 40 40\">\
+         <rect x=\"0\" y=\"0\" width=\"40\" height=\"40\" fill=\"red\"/></svg>\
+         </body></html>";
+    let (mut s, t) = test_session();
+    t.route("/", 200, SVG_PAGE);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let (w, h, px) = s.frame_pixels(id).unwrap();
+    assert!(w > 0 && h > 0);
+    let red = px
+        .chunks_exact(4)
+        .filter(|p| p[0] > 200 && p[1] < 60 && p[2] < 60)
+        .count();
+    assert!(
+        red > 100,
+        "le rect SVG rouge doit peindre (pixels rouges : {red})"
+    );
+}

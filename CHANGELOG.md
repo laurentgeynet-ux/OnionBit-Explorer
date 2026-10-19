@@ -9,6 +9,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 55b — `<svg>` inline câblé en session**
+  (`explorer-core`, adoption R-9) : `Tab::images` devient la
+  table `PaintImages` complète — `svg::svg_sizes` fournit
+  les tailles intrinsèques (`width`/`height`/`viewBox`,
+  défaut remplacé 300×150) à `build_box_tree_sized`, et
+  `svg::collect_svg` rasterise les racines `<svg>` du DOM
+  vers `PaintImages.svgs` une fois par reflow (borné
+  `image_max_px`, sources >4 Mio ignorées — boîte
+  remplacée vide en dégradé). `repaint` consomme
+  `build_display_list_full`. Le bfcache gèle la table
+  entière — retour arrière sans re-raster. Régression :
+  `inline_svg_is_rasterized_into_frame` (pixels rouges
+  mesurés dans la frame).
+
 - **Étape 55c — Miroir→DOM : la source `<script>` ne fuit
   plus en texte peint** (`dillo-js`) : la recherche du
   `</tag` fermant un élément rawtext passait par

@@ -34,8 +34,8 @@ use explorer_net::http::{HttpTransport, Method, Request, Response};
 use explorer_net::policy::{initiator_headers, is_mixed_content};
 use explorer_net::url::Url;
 use explorer_render::{
-    build_display_list_imaged, decode_font, decode_image, rasterize, BorderStyle, DecodedImage,
-    DisplayItem, DisplayList, Frame, ImageTable, WebFontSource,
+    build_display_list_full, decode_font, decode_image, rasterize, BorderStyle, DecodedImage,
+    DisplayItem, DisplayList, Frame, ImageTable, PaintImages, WebFontSource,
 };
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::broadcast;
@@ -400,10 +400,12 @@ struct Tab {
     /// `<script>` et qu'une fabrique est injectée ; meurt à
     /// la navigation (un contexte par document).
     js: Option<Box<dyn JsEngine>>,
-    /// Pixels `<img>` décodés, indexés par `NodeId` — vidée à
-    /// chaque re-parse (les ids changent), les `<img>` hors
-    /// map retombent sur leur texte `alt`.
-    images: ImageTable,
+    /// Bitmaps de peinture indexés par `NodeId` — `<img>`
+    /// décodés (`replaced`) + `<svg>` inline rasterisés
+    /// (`svgs`, étape 55b). Vidée à chaque re-parse (les ids
+    /// changent), les `<img>` hors map retombent sur leur
+    /// texte `alt`.
+    images: PaintImages,
     /// Feuilles `<link rel=stylesheet>` fetchées à la
     /// navigation — concaténées, vidées à chaque re-parse
     /// (étape 46 : premières sous-ressources CSS).
@@ -482,8 +484,8 @@ struct PageSnapshot {
     /// Moteur JS figé — le contexte survit, reprend tel
     /// quel à la restauration (modèle bfcache).
     js: Option<Box<dyn JsEngine>>,
-    /// Pixels `<img>` décodés.
-    images: ImageTable,
+    /// Bitmaps de peinture (`<img>` + `<svg>` inline).
+    images: PaintImages,
     /// Feuilles `<link>` concaténées.
     linked_css: String,
     /// Styles calculés (transitions — vidées au gel).
@@ -1131,7 +1133,7 @@ impl Session {
                 hovered: None,
                 popup: None,
                 js: None,
-                images: ImageTable::new(),
+                images: PaintImages::default(),
                 linked_css: String::new(),
                 prev_styles: HashMap::new(),
                 transitions: Vec::new(),
@@ -1697,7 +1699,7 @@ impl Session {
             entry.hovered = None;
             entry.popup = None;
             entry.js = None;
-            entry.images.clear();
+            entry.images = PaintImages::default();
             entry.linked_css.clear();
             entry.prev_styles = HashMap::new();
             entry.transitions.clear();
@@ -2483,7 +2485,7 @@ impl Session {
                 .entry(u.as_str())
                 .or_insert_with(|| decode_image(body, max_px).map(Arc::new));
             if let Some(img) = img {
-                entry.images.insert(node, img.clone());
+                entry.images.replaced.insert(node, img.clone());
             }
         }
     }
@@ -2508,7 +2510,7 @@ impl Session {
             // indexés par nœud sont obsolètes (les `<img>`
             // nouveaux retombent sur `alt` jusqu'à la
             // prochaine navigation — borne documentée).
-            entry.images.clear();
+            entry.images = PaintImages::default();
             // Un re-parse de synchro rend obsolètes les
             // options figées du popup `<select>` — il se
             // referme (étape 54).
@@ -2618,7 +2620,14 @@ impl Session {
         let Some(root_el) = dom.document_element() else {
             return Err(CoreError::EmptyDocument);
         };
-        let sizes = image_sizes(dom, &entry.images);
+        let mut sizes = image_sizes(dom, &entry.images.replaced);
+        // `<svg>` inline (étape 55b) : tailles intrinsèques
+        // `width`/`height`/`viewBox` pour la mise en boîte,
+        // bitmap rasterisé une fois par reflow pour la
+        // peinture (borné `image_max_px`, sous-arbres hostiles
+        // refusés → la boîte retombe remplacée sans image).
+        sizes.extend(explorer_render::svg::svg_sizes(dom, root_el));
+        let svgs = explorer_render::svg::collect_svg(dom, root_el, self.image_max_px);
         let Some(mut bx) = build_box_tree_sized(dom, root_el, &styles, &sizes) else {
             return Err(CoreError::NothingToPaint);
         };
@@ -2630,6 +2639,7 @@ impl Session {
         layout_tree(&mut bx, vw, &ctx);
         entry.doc_h = bx.rect.height;
         entry.tree = Some(bx);
+        entry.images.svgs = svgs;
         self.repaint(tab)
     }
 
@@ -2641,7 +2651,7 @@ impl Session {
             return Err(CoreError::EmptyDocument);
         };
         let (vw, vh) = self.viewport;
-        let mut list = build_display_list_imaged(bx, vw, vh, entry.scroll_y, &entry.images);
+        let mut list = build_display_list_full(bx, vw, vh, entry.scroll_y, &entry.images);
         // Popup `<select>` ouvert : overlay chrome peint en
         // dernier — au-dessus de tout contenu (étape 54).
         if let Some(pop) = &entry.popup {
