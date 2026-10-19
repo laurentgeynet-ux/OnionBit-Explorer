@@ -212,3 +212,138 @@ fn grid_repeat() {
     assert!(approx(c.rect.x, 200.0), "{}", c.rect.x);
     assert!(approx(c.rect.width, 100.0), "{}", c.rect.width);
 }
+
+// ── R-5 : grid MVP+ ──────────────────────────────────────────
+
+#[test]
+fn grid_template_areas_place_par_nom() {
+    // `grid-template-areas` + `grid-area: nav|main` : pose par
+    // bounding box de la zone nommée.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div id=\"m\">M</div><div id=\"n\">N</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: 200px 1fr; \
+         grid-template-areas: \"nav main\" } \
+         #n { grid-area: nav; height: 10px } #m { grid-area: main; height: 10px }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    // #m déclaré en premier dans le DOM mais posé en col 2.
+    let (m, n) = (&section.children[0], &section.children[1]);
+    assert!(
+        approx(n.rect.x, 0.0) && approx(n.rect.width, 200.0),
+        "nav {:?}",
+        n.rect
+    );
+    assert!(
+        approx(m.rect.x, 200.0) && approx(m.rect.width, 600.0),
+        "main {:?}",
+        m.rect
+    );
+}
+
+#[test]
+fn grid_area_span_multi_cellules() {
+    // Area 2×2 : l'item occupe la bbox complète.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div id=\"h\">H</div><div>x</div><div>y</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: 100px 1fr; grid-template-rows: 20px 20px; \
+         grid-template-areas: \"head head\" \"l r\" } \
+         #h { grid-area: head; height: 10px }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    let h = &section.children[0];
+    assert!(approx(h.rect.width, 800.0), "{}", h.rect.width);
+    assert!(approx(h.rect.x, 0.0) && approx(h.rect.y, 0.0));
+}
+
+#[test]
+fn grid_lignes_nommees() {
+    // `[mid]` dans le template nomme la bordure —
+    // `grid-column: mid / end` place entre les lignes nommées.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div>X</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: [start] 100px [mid] 200px [end] } \
+         section > div { grid-column: mid / end; height: 10px }",
+    );
+    let d = find(&bx, by_tag(&dom, "section")).children[0].clone();
+    assert!(approx(d.rect.x, 100.0), "x={}", d.rect.x);
+    assert!(approx(d.rect.width, 200.0), "w={}", d.rect.width);
+}
+
+#[test]
+fn grid_auto_flow_column() {
+    // `column` : remplit les lignes d'une colonne avant de
+    // passer à la suivante (ici 2 lignes → items 0,1 en col 0).
+    let (dom, bx) = laid(
+        "<!doctype html><section><div>a</div><div>b</div><div>c</div></section>",
+        "body { margin: 0 } section { display: grid; grid-auto-flow: column; \
+         grid-template-rows: 10px 10px; grid-template-columns: 300px 1fr } \
+         section > div { height: 10px }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    let (a, b, c) = (
+        &section.children[0],
+        &section.children[1],
+        &section.children[2],
+    );
+    assert!(approx(a.rect.x, 0.0) && approx(a.rect.y, 0.0));
+    assert!(
+        approx(b.rect.x, 0.0) && approx(b.rect.y, 10.0),
+        "b {:?}",
+        b.rect
+    );
+    assert!(
+        approx(c.rect.x, 300.0) && approx(c.rect.y, 0.0),
+        "c {:?}",
+        c.rect
+    );
+}
+
+#[test]
+fn grid_auto_flow_dense_rebouche() {
+    // `dense` : l'item auto rescanne depuis (0,0) et rebouche
+    // le trou laissé par l'item explicitement placé en col 2.
+    let (dom, bx) = laid(
+        "<!doctype html><section>\
+           <div id=\"p\">P</div><div>A</div><div>B</div></section>",
+        "body { margin: 0 } section { display: grid; grid-auto-flow: dense; \
+         grid-template-columns: 100px 100px } #p { grid-column: 2; height: 10px } \
+         section > div { height: 10px }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    let a = &section.children[1];
+    assert!(
+        approx(a.rect.x, 0.0) && approx(a.rect.y, 0.0),
+        "dense {:?}",
+        a.rect
+    );
+    // Sans dense : le trou (0,0) reste vide, A part en (1,0).
+    let (dom2, bx2) = laid(
+        "<!doctype html><section>\
+           <div id=\"p\">P</div><div>A</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: 100px 100px } #p { grid-column: 2; height: 10px } \
+         section > div { height: 10px }",
+    );
+    let a2 = &find(&bx2, by_tag(&dom2, "section")).children[1];
+    assert!(a2.rect.y > 0.0, "sparse laisse le trou : {:?}", a2.rect);
+}
+
+#[test]
+fn grid_minmax_fr_borne() {
+    // `minmax(400px, 1fr)` : la part fr est bornée par le min
+    // quand le libre est insuffisant.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div>a</div><div>b</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: minmax(400px, 1fr) 1fr } \
+         section > div { height: 10px }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    let (a, b) = (&section.children[0], &section.children[1]);
+    // free = 800-400 = 400 → part fr = 200 < min 400 → col0=400.
+    assert!(approx(a.rect.width, 400.0), "{}", a.rect.width);
+    assert!(approx(b.rect.width, 200.0), "{}", b.rect.width);
+}

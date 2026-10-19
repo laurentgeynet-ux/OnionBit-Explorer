@@ -211,10 +211,15 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   hauteur du conteneur est définie, `wrap-reverse` miroir
   l'axe cross. Hors scope documenté : wrap en `column`,
   `height` en % sans base définie.
-- [ ] **R-5. Grid complet MVP+** (ex-58) :
+- [x] **R-5. Grid complet MVP+** (ex-58) :
   `grid-template-areas`, placement nommé, `auto-flow`
   dense/column, `minmax`/`fr` mixtes résolus ; `subgrid`
-  documenté hors scope.
+  documenté hors scope. Livré : `[noms]` de lignes,
+  `grid-area` (nom d'area ou `r/c/r2/c2`), `auto-flow:
+  column` (colonnes implicites) et `dense` (backfill),
+  `minmax(min, max)` deux bornes (fr borné par min).
+  Écarts : `fr` vertical ≈ auto, `auto-fill|fit` ignorés,
+  spans multi-pistes hors mesure auto, indices négatifs.
 - [ ] **R-6. `position: sticky` tous côtés** (ex-59) :
   `right`/`bottom`/`left`, conteneur de scroll correct,
   référence `overflow` non-visible.
