@@ -49,6 +49,17 @@ class DesignTokens {
     },
     'motion': {'durationMs': {'fast': 120, 'normal': 220}},
     'elevation': {'low': 1.0, 'high': 8.0},
+    'metrics': {
+      'tabHeight': 36.0,
+      'tabMaxWidth': 220.0,
+      'tabIndicatorWidth': 2.0,
+      'statusBarHeight': 22.0,
+      'iconSm': 14.0,
+      'iconMd': 20.0,
+      'iconXl': 64.0,
+      'progressSize': 12.0,
+      'progressStroke': 2.0,
+    },
   });
 
   dynamic _at(List<String> path) {

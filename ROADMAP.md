@@ -216,8 +216,11 @@ L'UI évolue **au fil des phases backend** ; cette phase consolide.
   navigation, hover → curseur (lien/champ), saisie champs
   `input`/`textarea` (focus au clic, `key` édite `value`,
   `<br>` = saut de ligne forcé).
-- [ ] **Étape 32. Design system.** Thème complet depuis
-  `tokens.json`, dark/light, polish visuel.
+- [x] **Étape 32. Design system.** Thème complet dérivé de
+  `tokens.json` (ADR-0005) — section `metrics` ajoutée,
+  tous les composants stylés ; barre de statut (href
+  survolé / champ actif). Thème clair : variante future
+  (le JSON accepte d'autres palettes).
 - [ ] **Étape 33. Pages d'erreur.** Échec réseau/TLS rendu en
   page stylée côté UI (pas de frame moteur).
 

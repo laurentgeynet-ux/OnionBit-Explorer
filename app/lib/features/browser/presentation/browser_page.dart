@@ -87,7 +87,48 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
                       ctrl: ctrl,
                     ),
             ),
+            _StatusBar(tokens: t, state: st),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Barre de statut : `href` survolé (curseur lien) ou
+/// indicateur de champ focalisé — hauteur `metrics.
+/// statusBarHeight`, invisible quand rien à dire.
+class _StatusBar extends StatelessWidget {
+  const _StatusBar({required this.tokens, required this.state});
+
+  final DesignTokens tokens;
+  final BrowserState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = state.hoverUrl ??
+        (state.fieldFocused ? 'Champ actif — saisie envoyée au moteur' : '');
+    if (label.isEmpty) return const SizedBox.shrink();
+    return Container(
+      height: tokens.dim('metrics', 'statusBarHeight', fallback: 22),
+      padding: EdgeInsets.symmetric(
+        horizontal: tokens.dim('spacing', 'sm', fallback: 8),
+      ),
+      decoration: BoxDecoration(
+        color: tokens.color('surface', 'raised'),
+        border: Border(
+          top: BorderSide(color: tokens.color('border', 'base')),
+        ),
+      ),
+      alignment: Alignment.centerLeft,
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: tokens.color('onSurface', 'muted'),
+          fontSize:
+              tokens.dim2('typography', 'size', 'sm', fallback: 12),
         ),
       ),
     );
@@ -181,7 +222,9 @@ class _TabChip extends StatelessWidget {
     return InkWell(
       onTap: onSelect,
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 220),
+        constraints: BoxConstraints(
+          maxWidth: tokens.dim('metrics', 'tabMaxWidth', fallback: 220),
+        ),
         padding: EdgeInsets.symmetric(
           horizontal: tokens.dim('spacing', 'sm', fallback: 8),
         ),
@@ -192,21 +235,27 @@ class _TabChip extends StatelessWidget {
               color: active
                   ? tokens.color('accent', 'base')
                   : Colors.transparent,
-              width: 2,
+              width: tokens.dim('metrics', 'tabIndicatorWidth',
+                  fallback: 2),
             ),
           ),
         ),
         child: Row(
           children: [
             if (tab.loading)
-              const SizedBox(
-                width: 12,
-                height: 12,
-                child: CircularProgressIndicator(strokeWidth: 2),
+              SizedBox(
+                width: tokens.dim('metrics', 'progressSize',
+                    fallback: 12),
+                height: tokens.dim('metrics', 'progressSize',
+                    fallback: 12),
+                child: const CircularProgressIndicator(),
               )
             else
-              const Icon(Icons.public, size: 14),
-            const SizedBox(width: 6),
+              Icon(
+                Icons.public,
+                size: tokens.dim('metrics', 'iconSm', fallback: 14),
+              ),
+            SizedBox(width: tokens.dim('spacing', 'xs', fallback: 4)),
             Expanded(
               child: Text(
                 label.isEmpty ? 'Nouvel onglet' : label,
@@ -216,7 +265,10 @@ class _TabChip extends StatelessWidget {
             ),
             InkWell(
               onTap: onClose,
-              child: const Icon(Icons.close, size: 14),
+              child: Icon(
+                Icons.close,
+                size: tokens.dim('metrics', 'iconSm', fallback: 14),
+              ),
             ),
           ],
         ),
@@ -284,9 +336,6 @@ class _NavBar extends StatelessWidget {
   }
 }
 
-/// Zone de contenu — placeholder en attendant la frame PNG
-/// (étape 30) ; reflète déjà `frameTick` pour observer le
-/// cycle d'invalidation.
 /// Viewport moteur : `Image.memory` du PNG tiré sur
 /// `frame_invalidated` (le SSE ne pousse qu'un signal —
 /// ADR-0004). La molette envoie `scroll`, le resize envoie
@@ -408,10 +457,19 @@ class _FrameViewState extends ConsumerState<_FrameView> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (active?.loading == true)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 12),
-                child: CircularProgressIndicator(),
+              Padding(
+                padding: EdgeInsets.only(
+                  bottom: t.dim('spacing', 'sm', fallback: 8),
+                ),
+                child: const CircularProgressIndicator(),
+              )
+            else
+              Icon(
+                Icons.public,
+                size: t.dim('metrics', 'iconXl', fallback: 64),
+                color: muted,
               ),
+            SizedBox(height: t.dim('spacing', 'sm', fallback: 8)),
             Text(
               active?.url.isNotEmpty == true
                   ? active!.url

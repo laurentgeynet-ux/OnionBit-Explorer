@@ -9,6 +9,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 32 — design system** (`app/`) : section `metrics`
+  dans `tokens.json` (+ repli embarqué) : `tabHeight`,
+  `tabMaxWidth`, `tabIndicatorWidth`, `statusBarHeight`,
+  `iconSm/Md/Xl`, `progressSize/Stroke`. `buildTheme` couvre
+  désormais icônes, tooltips, scrollbar, appBar, snackBar,
+  boutons, sélection de texte, cartes, progress indicators —
+  tout dérivé des tokens (couleurs, espacements, rayons,
+  typographie avec graisse, motion, élévation). Barre de
+  statut en bas de page : `href` survolé ou indicateur de
+  champ actif. Plus aucune constante visuelle en dur dans
+  `browser_page.dart`.
+
 - **Étape 31 — interactions** (`explorer-core`, `explorer-api`,
   `explorer-layout`, `explorer-css`, `app/`) : champs de
   formulaire focalisables — clic sur `input`/`textarea` →
