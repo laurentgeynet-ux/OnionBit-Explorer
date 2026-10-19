@@ -318,15 +318,27 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `sync_dom_path` (`DomSyncPayload`), remap pré-relayout des
   boîtes conservées (ids non stables au re-parse), repli
   sûr sur `NeedsFullLayout`/id irrésolvable.
-- [ ] **Étape 55g. La resynchro reste globale — l'incrémental
-  ne vise que le relayout** (terrain mission 12) : `sync_dom`
-  re-parse + re-cascade + re-boxtree le document **entier**
-  avant que `relayout_subtree` ne vise le sous-arbre — le
-  gain 55f n'atteint pas le goulot réel. Mesuré : mutation
-  par clic sur doc de 3 000 nœuds → **gel > 5 min** puis
-  `/frame` 204 (récidive 56b) ; petit doc = 468 ms + rects
-  localisés corrects. Pistes : synchro partielle du sous-
-  arbre seul, ou diff miroir→DOM sans re-parse global.
+- [x] **Étape 55g. La resynchro reste globale — l'incrémental
+  ne vise que le relayout** (terrain mission 12) : **livré
+  côté NAV** — mesure par phases sur ~3 000 nœuds (test
+  `profile_resync_phases`, `#[ignore]` à la demande) :
+  `relayout+repaint` 28,6 s → **~17 s** debug. Trois gardes
+  posées : (1) **cull raster** — les items-feuilles
+  entièrement hors zone raster réelle (post-cap
+  `MAX_FRAME_DIM`, jamais sous `PushTransform`) sont jetés
+  avant `rasterize` : ~18,5 s → ~6,5 s sur le repro
+  (`paint_text` ne re-trace plus chaque glyphe du document
+  hors-champ) ; (2) **diff dirty-rects borné**
+  (`DIRTY_DIFF_MAX_ITEMS` = 2 000 items) — `merge_rects`
+  O(k²) coûtait ~2 s sur ~8 500 rects avant de s'effondrer
+  en pleine frame : on la produit directement ; (3) **PNG
+  paresseux** — `repaint` n'encode plus : `frame_png(&mut)`
+  encode+cache à la demande (~4 s sortis du chemin de
+  resynchro ; un burst de repaints n'encode qu'une fois).
+  Reste en PIPE (journal `interface-equipes.md`) : fusion
+  de rects linéaire ou seuil interne à `changed_rects`,
+  cache glyphe→outline pour `paint_text`, layout/cascade
+  scopés sous-arbre — les ~15 s résiduels du repro debug.
 - [x] **Étape 56. Profil persisté complet** (ex-64) : cookies
   (`cookies.json` via `ProfileStore`, session exclus),
   localStorage (cf. 51), **cache disque borné**

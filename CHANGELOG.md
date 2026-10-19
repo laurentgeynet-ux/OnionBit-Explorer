@@ -9,6 +9,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 55g — resynchro grand document : trois gardes de
+  coût** (`explorer-core`) : le gel terrain mission 12
+  (mutation JS par clic sur ~3 000 nœuds → gel > 5 min) —
+  mesure par phases (`profile_resync_phases`, `#[ignore]`d)
+  : `relayout+repaint` **28,6 s → ~17 s** debug.
+  (1) **Cull raster** : les items-feuilles entièrement
+  hors de la zone raster réelle (post-cap `MAX_FRAME_DIM`,
+  jamais sous `PushTransform` dont les bornes brutes ne
+  sont pas fiables) sont jetés avant `rasterize` —
+  `paint_text` ne re-trace plus chaque glyphe du document
+  hors-champ : raster ~18,5 s → ~6,5 s sur le repro.
+  (2) **Diff dirty-rects borné** (`DIRTY_DIFF_MAX_ITEMS` =
+  2 000 items) : `merge_rects` O(k²) coûtait ~2 s sur
+  ~8 500 rects avant de s'effondrer en « pleine frame » —
+  on la produit directement au-delà du seuil.
+  (3) **PNG paresseux** : `repaint` n'encode plus —
+  `frame_png(&mut)` encode+cache à la demande, un burst de
+  repaints entre deux lectures n'encode qu'une fois (~4 s
+  sortis du chemin de resynchro). `freeze`/`try_bfcache`
+  jugent désormais le produit peint sur `frame` (la frame
+  raster est l'autorité, le PNG un cache). Restes logués
+  pour PIPE dans `docs/interface-equipes.md` : fusion de
+  rects linéaire, cache glyphe→outline, layout/cascade
+  scopés. Régressions : `cull_keeps_only_in_frame_items`
+  + suite session 111/111.
+
 - **R-23 — valeur de contrôle peinte à sa position**
   (`explorer-layout`) : résidu de R-21 — le glyphe tapé
   apparaissait en haut à gauche du document (repro

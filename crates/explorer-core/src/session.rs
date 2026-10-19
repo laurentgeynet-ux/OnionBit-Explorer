@@ -383,7 +383,10 @@ struct Tab {
     list: Option<DisplayList>,
     /// Frame rasterisée.
     frame: Option<Frame>,
-    /// PNG encodé prêt à servir.
+    /// PNG encodé — **cache paresseux** invalidé à chaque
+    /// repaint, rempli par [`Session::frame_png`] (étape
+    /// 55g : l'encodage n'est plus payé qu'une fois par
+    /// frame servie).
     png: Option<Vec<u8>>,
     /// Champ de formulaire focalisé (`input`/`textarea`) —
     /// **chemin** `(tag, index)` dans `dom`, pas `NodeId` :
@@ -493,7 +496,8 @@ struct PageSnapshot {
     list: Option<DisplayList>,
     /// Frame rasterisée (servie dès la restauration).
     frame: Option<Frame>,
-    /// PNG encodé prêt à servir.
+    /// PNG encodé — cache paresseux du live au moment du
+    /// gel ; `None` si jamais servi (étape 55g).
     png: Option<Vec<u8>>,
     /// Champ focalisé (chemin `(tag, index)`).
     focused: Option<Vec<(String, u32)>>,
@@ -531,7 +535,7 @@ impl Tab {
         // un snapshot empoisonné : sa restauration servirait
         // un `/frame` 204 persistant avec hit-test mort.
         // Mieux vaut re-fetcher la position plus tard.
-        if self.dom.is_none() || self.png.is_none() {
+        if self.dom.is_none() || self.frame.is_none() {
             return;
         }
         // Une page ne vit qu'une fois par position —
@@ -647,6 +651,11 @@ const MAX_DIRTY_RECTS: usize = 32;
 /// téléchargement, même sur page géante — borne documentée,
 /// stratégie fenêtre/tuiles consignée `interface-equipes.md`).
 const MAX_FRAME_DIM: f32 = 16_384.0;
+
+/// Seuil du diff de dirty-rects (étape 55g) : au-delà, la
+/// fusion O(k²) des régions dans `changed_rects` coûte plus
+/// cher que la pleine frame — on la produit directement.
+const DIRTY_DIFF_MAX_ITEMS: usize = 2_000;
 
 /// Transition en vol sur `(nœud, propriété)` — étape 45 :
 /// `from`/`to` sont les valeurs calculées textuelles
@@ -1252,10 +1261,18 @@ impl Session {
             .collect()
     }
 
-    /// PNG courant de l'onglet (`None` si jamais navigué).
+    /// PNG courant de l'onglet (`None` si jamais navigué) —
+    /// encodé paresseusement depuis la frame raster puis
+    /// caché jusqu'au prochain repaint (étape 55g : un
+    /// burst de repaints entre deux lectures n'encode
+    /// qu'une fois, pas par repaint).
     #[must_use]
-    pub fn frame_png(&self, tab: TabId) -> Option<Vec<u8>> {
-        self.tabs.get(&tab).and_then(|t| t.png.clone())
+    pub fn frame_png(&mut self, tab: TabId) -> Option<Vec<u8>> {
+        let entry = self.tabs.get_mut(&tab)?;
+        if entry.png.is_none() {
+            entry.png = entry.frame.as_ref()?.encode_png();
+        }
+        entry.png.clone()
     }
 
     /// Frame brute courante `(largeur, hauteur, RGBA)` —
@@ -1586,7 +1603,7 @@ impl Session {
         // le DOM restauré suffit à re-peindre plutôt que de
         // servir un `/frame` 204 persistant avec hit-test
         // mort et scroll bloqué à 0.
-        let needs_paint = entry.dom.is_some() && entry.png.is_none();
+        let needs_paint = entry.dom.is_some() && entry.frame.is_none();
         let url = entry.url.clone();
         let title = entry.title.clone();
         if needs_paint {
@@ -1637,7 +1654,7 @@ impl Session {
             // `#` nu = haut de page.
             let _ = self.scroll_to_y(tab, 0.0);
         } else {
-            self.scroll_to_fragment(tab, &frag.to_string());
+            self.scroll_to_fragment(tab, frag);
         }
         true
     }
@@ -1661,8 +1678,8 @@ impl Session {
         let _ = self.scroll_to_y(tab, y);
     }
 
-    /// Scroll absolu borné `[0, doc_h − viewport]` + repaint
-    /// + `FrameInvalidated` — variante absolue de
+    /// Scroll absolu borné `[0, doc_h − viewport]` avec
+    /// repaint et `FrameInvalidated` — variante absolue de
     /// `scroll_by` pour la navigation fragment (56d).
     fn scroll_to_y(&mut self, tab: TabId, y: f32) -> Result<(), CoreError> {
         {
@@ -3024,9 +3041,13 @@ impl Session {
         if list.height > frame_cap {
             list.height = frame_cap;
         }
+        // Hors-champ raster (étape 55g) : jeter les items
+        // entièrement sous la borne de hauteur ou hors cadre
+        // — `paint_text` re-dessinait chaque glyphe du
+        // document, visible ou non (~18 s sur ~3 000 nœuds).
+        cull_display_list(&mut list);
         let frame = rasterize(&list, &self.webfonts as &dyn FontSource, self.scale)
             .ok_or(CoreError::FrameTooBig)?;
-        let png = frame.encode_png();
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
         // Dirty-rects (étape 55) : diff avec la liste
         // précédente — première peinture ou listes
@@ -3040,7 +3061,25 @@ impl Session {
                     height: list.height,
                 }]
             },
-            |prev| list.changed_rects(prev),
+            |prev| {
+                // Au-delà du seuil, la fusion O(k²) des rects
+                // de `changed_rects` coûte plus cher que la
+                // pleine frame qu'elle produirait de toute
+                // façon (étape 55g — ~2 s mesurés pour
+                // ~8 500 rects sur ~3 000 nœuds).
+                if list.items.len() > DIRTY_DIFF_MAX_ITEMS
+                    || prev.items.len() > DIRTY_DIFF_MAX_ITEMS
+                {
+                    vec![Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: list.width,
+                        height: list.height,
+                    }]
+                } else {
+                    list.changed_rects(prev)
+                }
+            },
         );
         entry.dirty.extend(regions);
         if entry.dirty.len() > MAX_DIRTY_RECTS {
@@ -3057,7 +3096,9 @@ impl Session {
         }
         entry.list = Some(list);
         entry.frame = Some(frame);
-        entry.png = png;
+        // Invalidation du cache PNG (étape 55g) — l'encodage
+        // est paresseux, servi par `frame_png` à la demande.
+        entry.png = None;
         // Une peinture aboutie produit un état cohérent
         // (étape 56c) — le drapeau spéculatif est ré-armé
         // par `nav_paint` **après** son propre appel ici.
@@ -4996,7 +5037,7 @@ fn find_by_id(dom: &Dom, id: &str) -> Option<NodeId> {
 fn find_named_anchor(dom: &Dom, name: &str) -> Option<NodeId> {
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
-        if dom.tag_name(n).ok().is_some_and(|t| t == "a")
+        if dom.tag_name(n).is_ok_and(|t| t == "a")
             && dom.attribute(n, "name").ok().flatten().as_deref() == Some(name)
         {
             return Some(n);
@@ -5021,6 +5062,65 @@ fn box_y_of_node(root: &LayoutBox, target: NodeId) -> Option<f32> {
         stack.extend(bx.children.iter());
     }
     best
+}
+
+/// Couverture brute d'un item de dessin (avant transform/
+/// clip) — même géométrie que `item_bounds` côté PIPE,
+/// pour le filtre viewport de `repaint` (étape 55g).
+fn display_item_bounds(item: &DisplayItem) -> Option<Rect> {
+    match item {
+        DisplayItem::FillRect { rect, .. }
+        | DisplayItem::Border { rect, .. }
+        | DisplayItem::Placeholder { rect, .. }
+        | DisplayItem::Image { rect, .. }
+        | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
+        DisplayItem::Text { origin, run, .. } => Some(Rect {
+            x: origin.0,
+            y: origin.1 - run.metrics.ascent,
+            width: run.advance,
+            height: run.metrics.ascent - run.metrics.descent,
+        }),
+        DisplayItem::PushClip(_)
+        | DisplayItem::PopClip
+        | DisplayItem::PushTransform(_)
+        | DisplayItem::PopTransform => None,
+    }
+}
+
+/// Filtre hors-cadre avant raster (étape 55g — le goulot
+/// de la resynchro n'est pas le parse ni la cascade mais
+/// le raster qui re-dessine **tous** les glyphes du
+/// document à chaque repaint : ~18 s mesurés sur
+/// ~3 000 nœuds). Un item-feuille dont la couverture est
+/// entièrement hors de la zone raster
+/// `[0,width]×[0,height]` (coordonnées liste — scroll et
+/// borne de hauteur déjà cuits dedans) est jeté.
+/// Conservateurs : (a) sous `PushTransform` actif on garde
+/// tout — les bornes brutes ne sont pas fiables sans
+/// composer les matrices ; (b) les `PushClip`/`Pop*` sont
+/// conservés pour l'équilibre des piles (un clip ignoré
+/// garderait de toute façon plus de contenu, jamais moins).
+fn cull_display_list(list: &mut DisplayList) {
+    let (vw, vh) = (list.width, list.height);
+    let mut in_transform = 0usize;
+    list.items.retain(|item| match item {
+        DisplayItem::PushTransform(_) => {
+            in_transform += 1;
+            true
+        }
+        DisplayItem::PopTransform => {
+            in_transform = in_transform.saturating_sub(1);
+            true
+        }
+        DisplayItem::PushClip(_) | DisplayItem::PopClip => true,
+        _ => {
+            in_transform > 0
+                || display_item_bounds(item).is_none_or(|r| {
+                    let (rx, ry) = (r.x, r.y);
+                    rx < vw && ry < vh && rx + r.width > 0.0 && ry + r.height > 0.0
+                })
+        }
+    });
 }
 
 /// Bascule l'état du contrôle : `checkbox` inverse son
@@ -6290,6 +6390,117 @@ mod tests {
             s.tabs.get(&tab).unwrap().tree.is_some(),
             "l'arbre repeint restaure aussi le hit-test et le scroll"
         );
+    }
+
+    /// 55g — le cull ne jette que les items-feuilles
+    /// entièrement hors de la zone raster et conserve les
+    /// items d'état (`PushClip`/`PopClip`) pour l'équilibre
+    /// des piles.
+    #[test]
+    fn cull_keeps_only_in_frame_items() {
+        let rect = |y: f32| DisplayItem::FillRect {
+            rect: Rect {
+                x: 0.0,
+                y,
+                width: 10.0,
+                height: 10.0,
+            },
+            color: Color::BLACK,
+        };
+        let mut list = DisplayList {
+            items: vec![
+                rect(50.0),  // dedans
+                rect(500.0), // hors (h>100)
+                DisplayItem::PushClip(Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 10.0,
+                    height: 10.0,
+                }),
+                rect(600.0), // hors même sous clip — jeté (bornes fiables)
+                DisplayItem::PopClip,
+            ],
+            width: 100.0,
+            height: 100.0,
+        };
+        cull_display_list(&mut list);
+        let fills = list
+            .items
+            .iter()
+            .filter(|i| matches!(i, DisplayItem::FillRect { .. }))
+            .count();
+        assert_eq!(fills, 1, "seul l'item en cadre survit");
+        assert_eq!(list.items.len(), 3, "items d'état conservés");
+    }
+
+    /// Profilage 55g — temps par phase de resynchro sur un
+    /// document ~3 000 nœuds (repro mission 12 : >5 min au
+    /// clic). `#[ignore]` : à la demande —
+    /// `cargo test -p explorer-core --lib profile_ -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "profil 55g, à la demande"]
+    fn profile_resync_phases() {
+        use std::fmt::Write;
+        let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+        let tab = s.open_tab();
+        let mut html = String::from("<html><body>");
+        for i in 0..3000 {
+            let _ = write!(html, "<div class=\"r{i}\"><p>ligne {i} de texte</p></div>");
+        }
+        html.push_str("</body></html>");
+        let t0 = Instant::now();
+        let mut tb = TreeBuilder::new();
+        tb.push(&html);
+        tb.finish();
+        let dom = tb.into_dom();
+        eprintln!("parse          : {:?}", t0.elapsed());
+        {
+            let e = s.tabs.get_mut(&tab).unwrap();
+            e.dom = Some(dom);
+            e.url = Some(Url::parse("http://h.test/x").unwrap());
+        }
+        // `Dom` n'est pas Clone — même pattern take/restore
+        // que `relayout`.
+        let dom_c = s.tabs.get_mut(&tab).unwrap().dom.take().unwrap();
+        let t = Instant::now();
+        let _styles = s.compute_styles(tab, &dom_c);
+        eprintln!("compute_styles : {:?}", t.elapsed());
+        s.tabs.get_mut(&tab).unwrap().dom = Some(dom_c);
+        let t = Instant::now();
+        let _ = s.relayout(tab);
+        eprintln!("relayout total : {:?}", t.elapsed());
+        // Sous-phases du repaint : display list → diff →
+        // raster → PNG.
+        let e = s.tabs.get(&tab).unwrap();
+        let bx = e.tree.as_ref().unwrap();
+        let (vw, vh) = s.viewport;
+        let t = Instant::now();
+        let mut list = build_display_list_full(bx, vw, vh, e.scroll_y, &e.images);
+        eprintln!(
+            "  display list : {:?} ({} items)",
+            t.elapsed(),
+            list.items.len()
+        );
+        let prev = s.tabs.get(&tab).unwrap().list.as_ref().unwrap().clone();
+        let t = Instant::now();
+        if list.items.len() > DIRTY_DIFF_MAX_ITEMS || prev.items.len() > DIRTY_DIFF_MAX_ITEMS {
+            eprintln!("  changed_rects: sauté (seuil {DIRTY_DIFF_MAX_ITEMS} items → pleine frame)");
+        } else {
+            let rects = list.changed_rects(&prev);
+            eprintln!("  changed_rects: {:?} ({} rects)", t.elapsed(), rects.len());
+        }
+        // Même cap que `repaint` puis cull — fenêtre raster.
+        if list.height > MAX_FRAME_DIM {
+            list.height = MAX_FRAME_DIM;
+        }
+        cull_display_list(&mut list);
+        eprintln!("  après cull   : {} items", list.items.len());
+        let t = Instant::now();
+        let frame = rasterize(&list, &s.webfonts as &dyn FontSource, s.scale).unwrap();
+        eprintln!("  rasterize    : {:?}", t.elapsed());
+        let t = Instant::now();
+        let _png = frame.encode_png();
+        eprintln!("  encode_png   : {:?}", t.elapsed());
     }
 
     /// UTF-8 par défaut — la régression 53b : « ’ » (E2 80 99)

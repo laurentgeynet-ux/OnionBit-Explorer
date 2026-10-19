@@ -3721,7 +3721,7 @@ impl HttpTransport for SlowThenGate {
                 // tamponne et la peinture progressive verrait
                 // un DOM vide (no-op `EmptyDocument`).
                 let mut first = b"<html><title>slow</title><body>SLOW ".to_vec();
-                first.extend(std::iter::repeat(b'S').take(1100));
+                first.extend(std::iter::repeat_n(b'S', 1100));
                 let _ = tx.send(Ok(first)).await;
                 painted.notify_one();
                 released.notified().await;
@@ -3802,7 +3802,7 @@ async fn superseded_nav_reverts_speculative_paint() {
     let mut spec_seen = false;
     for _ in 0..100 {
         {
-            let s = sess.lock().await;
+            let mut s = sess.lock().await;
             if s.frame_png(tab) != a_frame {
                 spec_seen = true;
                 break;
@@ -3839,7 +3839,7 @@ async fn superseded_nav_reverts_speculative_paint() {
     .await
     .unwrap();
 
-    let s = sess.lock().await;
+    let mut s = sess.lock().await;
     assert_eq!(s.tab_url(tab).as_deref(), Some("https://h/c"));
     assert_eq!(
         s.frame_png(tab),
@@ -3953,12 +3953,13 @@ async fn fragment_nav_scrolls_without_refetch() {
 /// `data_url_bytes` le traite sans base64).
 #[tokio::test]
 async fn data_url_images_paint_inline() {
-    let (mut s, t) = test_session();
-    let enc = red_png()
-        .iter()
-        .map(|b| format!("%{b:02X}"))
-        .collect::<String>();
-    t.route(
+    use std::fmt::Write;
+    let (mut sess, tr) = test_session();
+    let enc = red_png().iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "%{byte:02X}");
+        out
+    });
+    tr.route(
         "/i",
         200,
         Box::leak(
@@ -3966,7 +3967,7 @@ async fn data_url_images_paint_inline() {
                 .into_boxed_str(),
         ),
     );
-    t.route(
+    tr.route(
         "/g",
         200,
         Box::leak(
@@ -3979,7 +3980,7 @@ async fn data_url_images_paint_inline() {
     );
     // Référence : bloc 2×2 à fond rouge (même oracle que
     // `img_renders_decoded_bitmap`).
-    t.route(
+    tr.route(
         "/s",
         200,
         "<html><head><style>#b{background-color:#ff0000;\
@@ -3987,23 +3988,23 @@ async fn data_url_images_paint_inline() {
          <body><div id=\"b\"></div></body></html>",
     );
 
-    let a = s.open_tab();
-    s.navigate(a, "http://h.test/i").await.unwrap();
-    let b = s.open_tab();
-    s.navigate(b, "http://h.test/s").await.unwrap();
-    let c = s.open_tab();
-    s.navigate(c, "http://h.test/g").await.unwrap();
+    let img_tab = sess.open_tab();
+    sess.navigate(img_tab, "http://h.test/i").await.unwrap();
+    let ref_tab = sess.open_tab();
+    sess.navigate(ref_tab, "http://h.test/s").await.unwrap();
+    let bg_tab = sess.open_tab();
+    sess.navigate(bg_tab, "http://h.test/g").await.unwrap();
 
     assert_eq!(
-        s.frame_png(a),
-        s.frame_png(b),
+        sess.frame_png(img_tab),
+        sess.frame_png(ref_tab),
         "img data: = bitmap peinte (56f)"
     );
     assert_eq!(
-        s.frame_png(c),
-        s.frame_png(b),
+        sess.frame_png(bg_tab),
+        sess.frame_png(ref_tab),
         "background-image data: = bitmap peinte (56f)"
     );
     // Aucune sous-ressource `data:` ne part en fetch.
-    assert_eq!(t.calls(), 3, "data: = zéro requête réseau (56f)");
+    assert_eq!(tr.calls(), 3, "data: = zéro requête réseau (56f)");
 }
