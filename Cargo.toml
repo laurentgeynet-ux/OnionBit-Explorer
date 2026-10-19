@@ -77,6 +77,11 @@ unicode-normalization = "0.1"
 # pas de GMP. num-traits pour les casts BigInt→i64/u64/f64.
 num-bigint = "0.4"
 num-traits = "0.2"
+# Sonde de pile restante pour les descentes récursives de
+# dillo-js (JS-C41 — parseur/évaluateur/appels bornés par la
+# pile réelle, pas par des constantes calibrées). Pur Rust
+# (`psm`, asm inline) — mécanisme utilisé par rustc.
+stacker = "0.1.25"
 # Pile réseau explorer-net (ADR-0002) — tokio sockets/timers,
 # httparse wire-format HTTP/1.1, async-trait pour les transports
 # injectables (HttpTransport/Connector dyn-compatibles).

@@ -6336,3 +6336,73 @@ fn c25_regex_unicode_props() {
         "SyntaxError"
     );
 }
+
+// ===== JS-C41 — récursion bornée (stack overflow sur le
+// bundle réel de github.com) =====
+
+/// Une entrée profondément imbriquée rend une erreur typée —
+/// jamais un crash de pile native. Chaque cas vise un
+/// transporteur récursif du parseur : flèches (`assign↔
+/// arrow_body`), ternaires (`cond↔assign`), `**` right-assoc
+/// (`binary↔binary`), statements `if(` (`stmt↔stmt`), `new`
+/// (`new_callee↔new_callee`), déstructuration (`pattern↔pattern`),
+/// parenthèses, templates `${` imbriqués (sous-parseur avec
+/// `nest` propagé) et `class extends` (`primary↔class`).
+#[test]
+fn c41_deep_nesting_is_bounded() {
+    let cases: Vec<String> = vec![
+        "x=>".repeat(50_000) + "1",
+        "1?2:".repeat(50_000) + "3",
+        "2**".repeat(50_000) + "2",
+        "if(1)".repeat(50_000) + ";",
+        "new ".repeat(50_000) + "x",
+        format!("let {}x{}=0;", "[".repeat(50_000), "]".repeat(50_000)),
+        "(".repeat(50_000) + "1" + &")".repeat(50_000),
+        format!("`{}1{}`", "${`".repeat(50_000), "`}`".repeat(50_000)),
+        "class A extends ".repeat(50_000) + "X",
+    ];
+    for (i, src) in cases.iter().enumerate() {
+        let mut e = Engine::new();
+        match e.eval(src) {
+            Err(_) => {}
+            Ok(v) => panic!("cas {i} : attendu erreur bornée, obtenu {v:?}"),
+        }
+    }
+}
+
+/// La récursion d'exécution rend `RangeError` — la borne
+/// logique (`call_depth_limit`) ou la sonde de pile restante
+/// l'attrape avant tout débordement natif.
+#[test]
+fn c41_call_recursion_is_typed() {
+    let mut e = Engine::new();
+    let r = e.eval("function f(){f()}f()");
+    match r {
+        Err(err) => {
+            let d = format!("{err}");
+            assert!(d.contains("call stack") || d.contains("depth"), "{d}");
+        }
+        Ok(v) => panic!("attendu RangeError, obtenu {v:?}"),
+    }
+}
+
+/// Récursion indirecte (a↔b) — même borne.
+#[test]
+fn c41_mutual_recursion_is_typed() {
+    let mut e = Engine::new();
+    let r = e.eval("function a(){b()}function b(){a()}a()");
+    assert!(r.is_err());
+}
+
+/// L'imbrication profonde mais légitime reste acceptée : la
+/// borne logique tolère ~100 niveaux de parenthèses et la
+/// sonde ne coupe que le vrai épuisement de pile.
+#[test]
+fn c41_moderate_nesting_still_parses() {
+    let s = "(".repeat(60) + "1" + &")".repeat(60);
+    assert_eq!(ev_str(&s), "1");
+    // `if` chaînés sans accolades — emboîtement stmt réel.
+    let deep_if = format!("var n=0;{}n=42;n", "if(1)".repeat(40));
+    assert_eq!(ev_str(&deep_if), "42");
+    assert_eq!(ev_str("function f(n){return n<=0?0:f(n-1)+1}f(30)"), "30");
+}

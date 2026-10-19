@@ -20,20 +20,17 @@ use crate::lexer::{lex, Kw, Tok, Token, TplPart, P};
 use std::collections::HashSet;
 use std::rc::Rc;
 
-/// Parse a whole script.
-pub fn parse(src: &str) -> Result<Program> {
-    parse_in(src, false)
-}
-
 /// Parse avec strict hérité — `eval` direct dans du code strict :
 /// ses early errors s'appliquent aussi au texte évalué (spec
-/// `PerformEval` — « strictCaller »).
-pub(crate) fn parse_in(src: &str, strict: bool) -> Result<Program> {
+/// `PerformEval` — « strictCaller »). `nest_max` borne
+/// l'emboîtement natif du parseur récursif (JS-C41).
+pub(crate) fn parse_in(src: &str, strict: bool, nest_max: u32) -> Result<Program> {
     let toks = lex(src)?;
     let mut p = Parser {
         toks,
         pos: 0,
         nest: 0,
+        nest_max,
         strict,
         module: false,
         in_gen: false,
@@ -56,11 +53,17 @@ pub(crate) fn parse_in(src: &str, strict: bool) -> Result<Program> {
 /// are allowed and the code is always strict (spec : un module ne
 /// quitte jamais le mode strict).
 pub fn parse_module(src: &str) -> Result<Program> {
+    parse_module_in(src, DEFAULT_NEST_LIMIT)
+}
+
+/// Module goal avec borne d'emboîtement explicite (JS-C41).
+pub(crate) fn parse_module_in(src: &str, nest_max: u32) -> Result<Program> {
     let toks = lex(src)?;
     let mut p = Parser {
         toks,
         pos: 0,
         nest: 0,
+        nest_max,
         strict: true,
         module: true,
         in_gen: false,
@@ -79,12 +82,33 @@ pub fn parse_module(src: &str) -> Result<Program> {
     })
 }
 
+/// Borne logique d'emboîtement par défaut du parse (JS-C41) —
+/// chaque transporteur récursif l'incrémente (~5 coups par niveau
+/// de parenthèse → ~100 niveaux logiques). La protection anti-crash
+/// est `stacker::maybe_grow` aux points de récursion, qui alloue un
+/// segment de pile sur tas quand la pile native s'épuise — la borne
+/// numérique ne coupe que les entrées absurdes. L'[`Engine`] la
+/// relève via [`crate::interp::Engine::set_nest_limit`].
+pub(crate) const DEFAULT_NEST_LIMIT: u32 = 512;
+
+/// Marge déclenchant la croissance de pile (`maybe_grow`) — en
+/// dessous, la récursion bascule sur un segment tas plutôt que de
+/// risquer le débordement natif (le coût par niveau varie de ~3 à
+/// ~55 Kio selon le transporteur et le profil, JS-C41).
+pub(crate) const STACK_RED_ZONE: usize = 256 * 1024;
+
+/// Taille d'un segment de pile alloué sur tas par `maybe_grow`.
+pub(crate) const STACK_GROW: usize = 2 * 1024 * 1024;
+
 struct Parser {
     toks: Vec<Token>,
     pos: usize,
     /// Expression nesting guard — `((((…` input must not blow the
     /// native stack through recursive descent.
     nest: u32,
+    /// Borne de `nest` — `DEFAULT_NEST_LIMIT` par défaut,
+    /// relevable par l'`Engine` (`Engine::set_nest_limit`).
+    nest_max: u32,
     /// `true` dans une unité `"use strict"` — script ou corps de
     /// fonction (hérité par les corps internes). Pilote les early
     /// errors strict : octales legacy, `delete x`, liaisons
@@ -134,6 +158,24 @@ impl Parser {
 
     fn at_eof(&self) -> bool {
         matches!(self.peek(), Tok::Eof)
+    }
+
+    /// Incrémente la borne d'emboîtement — appelé en tête de
+    /// chaque transporteur récursif (JS-C41). La pile elle-même
+    /// est protégée par `stacker::maybe_grow` autour de l'appel
+    /// récursif — ici, borne logique seule.
+    fn nest_in(&mut self) -> Result<()> {
+        if self.nest >= self.nest_max {
+            return Err(self.err("input too deeply nested"));
+        }
+        self.nest += 1;
+        Ok(())
+    }
+
+    /// Décrit la borne d'emboîtement — symétrique de
+    /// [`Self::nest_in`], appelé à chaque sortie.
+    fn nest_out(&mut self) {
+        self.nest -= 1;
     }
 
     fn err(&self, message: impl Into<String>) -> Error {
@@ -318,6 +360,13 @@ impl Parser {
     }
 
     fn stmt(&mut self) -> Result<Stmt> {
+        self.nest_in()?;
+        let r = stacker::maybe_grow(STACK_RED_ZONE, STACK_GROW, || self.stmt_inner());
+        self.nest_out();
+        r
+    }
+
+    fn stmt_inner(&mut self) -> Result<Stmt> {
         match self.peek().clone() {
             Tok::P(P::Semi) => {
                 self.next();
@@ -876,6 +925,15 @@ impl Parser {
     }
 
     fn pattern_inner(&mut self, allow_default: bool) -> Result<Pat> {
+        self.nest_in()?;
+        let r = stacker::maybe_grow(STACK_RED_ZONE, STACK_GROW, || {
+            self.pattern_nested(allow_default)
+        });
+        self.nest_out();
+        r
+    }
+
+    fn pattern_nested(&mut self, allow_default: bool) -> Result<Pat> {
         let mut pat = match self.peek().clone() {
             Tok::P(P::Ellipsis) => {
                 self.next();
@@ -1242,13 +1300,9 @@ impl Parser {
     // -- expressions ---------------------------------------------------
 
     fn expr(&mut self, no_in: bool) -> Result<Expr> {
-        self.nest += 1;
-        if self.nest > 300 {
-            self.nest -= 1;
-            return Err(self.err("expression too deeply nested"));
-        }
-        let r = self.expr_inner(no_in);
-        self.nest -= 1;
+        self.nest_in()?;
+        let r = stacker::maybe_grow(STACK_RED_ZONE, STACK_GROW, || self.expr_inner(no_in));
+        self.nest_out();
         r
     }
 
@@ -1265,6 +1319,13 @@ impl Parser {
     }
 
     fn assign(&mut self, no_in: bool) -> Result<Expr> {
+        self.nest_in()?;
+        let r = stacker::maybe_grow(STACK_RED_ZONE, STACK_GROW, || self.assign_inner(no_in));
+        self.nest_out();
+        r
+    }
+
+    fn assign_inner(&mut self, no_in: bool) -> Result<Expr> {
         // `yield [e]` / `yield* it` — corps de générateur seulement ;
         // ailleurs `yield` reste un identifiant (réservé en strict
         // via `check_strict_binding`). Pas de saut de ligne avant
@@ -1487,6 +1548,15 @@ impl Parser {
     }
 
     fn binary(&mut self, min_prec: u8, no_in: bool) -> Result<Expr> {
+        self.nest_in()?;
+        let r = stacker::maybe_grow(STACK_RED_ZONE, STACK_GROW, || {
+            self.binary_inner(min_prec, no_in)
+        });
+        self.nest_out();
+        r
+    }
+
+    fn binary_inner(&mut self, min_prec: u8, no_in: bool) -> Result<Expr> {
         let mut lhs = self.unary(no_in)?;
         loop {
             let (op, prec, right_assoc) = match self.peek() {
@@ -1572,8 +1642,10 @@ impl Parser {
             // would misparse `+` as Pos anyway (fine — `await` then
             // unary `+` is still `await(+1)`, intended).
             self.next();
-            let e = self.unary(no_in)?;
-            return Ok(Expr::Await(Box::new(e)));
+            self.nest_in()?;
+            let e = stacker::maybe_grow(STACK_RED_ZONE, STACK_GROW, || self.unary(no_in));
+            self.nest_out();
+            return Ok(Expr::Await(Box::new(e?)));
         }
         let op = match self.peek() {
             Tok::P(P::Bang) => Some(UnOp::Not),
@@ -1589,13 +1661,9 @@ impl Parser {
         };
         if let Some(op) = op {
             self.next();
-            self.nest += 1;
-            if self.nest > 300 {
-                self.nest -= 1;
-                return Err(self.err("expression too deeply nested"));
-            }
-            let e = self.unary(no_in);
-            self.nest -= 1;
+            self.nest_in()?;
+            let e = stacker::maybe_grow(STACK_RED_ZONE, STACK_GROW, || self.unary(no_in));
+            self.nest_out();
             let e = e?;
             // Strict : `delete` d'un identifiant nu est une early
             // error (seules les propriétés sont supprimables).
@@ -1717,6 +1785,13 @@ impl Parser {
 
     /// Callee of `new`: another `new`, or primary + `.`/`[]` (no calls).
     fn new_callee(&mut self, no_in: bool) -> Result<Expr> {
+        self.nest_in()?;
+        let r = stacker::maybe_grow(STACK_RED_ZONE, STACK_GROW, || self.new_callee_inner(no_in));
+        self.nest_out();
+        r
+    }
+
+    fn new_callee_inner(&mut self, no_in: bool) -> Result<Expr> {
         let mut e = if self.eat_kw(Kw::New) {
             let callee = self.new_callee(no_in)?;
             let args = if self.check_p(P::LParen) {
@@ -2083,7 +2158,10 @@ impl Parser {
                     let mut sub = Parser {
                         toks,
                         pos: 0,
-                        nest: 0,
+                        // Accumule l'emboîtement : `${`x${`…`}`}`
+                        // récursive via des sous-parseurs (JS-C41).
+                        nest: self.nest,
+                        nest_max: self.nest_max,
                         strict: self.strict,
                         module: self.module,
                         in_gen: self.in_gen,
@@ -2191,6 +2269,16 @@ impl Parser {
     /// `class [C] [extends e] { members }` — statement or
     /// expression position produce the same literal.
     fn class_lit(&mut self) -> Result<Rc<ClassLit>> {
+        // JS-C41 : `class A extends class B extends …` boucle
+        // `class_lit → lhs_expr → primary → class_lit` — borne
+        // + segment tas comme les autres transporteurs.
+        self.nest_in()?;
+        let r = stacker::maybe_grow(STACK_RED_ZONE, STACK_GROW, || self.class_lit_inner());
+        self.nest_out();
+        r
+    }
+
+    fn class_lit_inner(&mut self) -> Result<Rc<ClassLit>> {
         self.expect_kw(Kw::Class, "`class`")?;
         let name = match self.peek().clone() {
             Tok::Ident(s) => {

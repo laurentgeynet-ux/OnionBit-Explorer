@@ -24,9 +24,12 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-// ~5 fat debug frames per JS call; keep well under a 2 MiB thread.
-const MAX_CALL_DEPTH: u32 = 100;
-const MAX_EXPR_DEPTH: u32 = 300;
+// Plafonds logiques anti-contenu hostile (JS-C41) — la pile
+// elle-même est protégée par `stacker::maybe_grow` (segment tas
+// quand la pile native s'épuise) : ces bornes décident du
+// `RangeError` spec, pas de la survie du processus. Un appel JS
+// mesure ~27–55 Kio natif ; 256 ≈ ~14 Mio de segments max.
+const DEFAULT_CALL_DEPTH: u32 = 256;
 const MAX_PROTO_DEPTH: u32 = 512;
 const DEFAULT_OP_LIMIT: u64 = 10_000_000;
 
@@ -180,7 +183,12 @@ pub struct Engine {
     pub(crate) async_gen_proto: Value,
     pub(crate) symbol_reg: std::collections::BTreeMap<String, Value>,
     call_depth: u32,
+    call_depth_limit: u32,
     expr_depth: u32,
+    /// Borne d'emboîtement du parseur et de l'évaluateur
+    /// d'expressions (JS-C41) — relevable par l'embeddeur sur un
+    /// thread moteur à pile large.
+    pub(crate) nest_limit: u32,
     pub(crate) ops_left: u64,
     pub(crate) op_limit: u64,
     /// Host-side timer queue (JS-3) — pumped by the embedder's event
@@ -452,7 +460,9 @@ impl Engine {
             async_gen_fn_proto: Value::Undefined,
             async_gen_proto: Value::Undefined,
             call_depth: 0,
+            call_depth_limit: DEFAULT_CALL_DEPTH,
             expr_depth: 0,
+            nest_limit: crate::parser::DEFAULT_NEST_LIMIT,
             ops_left: DEFAULT_OP_LIMIT,
             op_limit: DEFAULT_OP_LIMIT,
             timers: crate::timers::TimerQueue::default(),
@@ -488,6 +498,20 @@ impl Engine {
     /// is killed. Reset by each `eval` call.
     pub fn set_op_limit(&mut self, limit: u64) {
         self.op_limit = limit;
+    }
+
+    /// Borne d'appels JS imbriqués — le défaut est calibré sur une
+    /// pile de thread de 2 Mio (~27,5 Kio/appel mesuré, JS-C41).
+    /// À relever quand le moteur tourne sur un thread à pile large.
+    pub fn set_call_depth_limit(&mut self, limit: u32) {
+        self.call_depth_limit = limit;
+    }
+
+    /// Borne d'emboîtement du parseur et de l'évaluateur
+    /// d'expressions — même calcul que [`Self::set_call_depth_limit`]
+    /// (jusqu'à ~19 Kio/niveau de parse mesuré, JS-C41).
+    pub fn set_nest_limit(&mut self, limit: u32) {
+        self.nest_limit = limit;
     }
 
     /// Roote `id` jusqu'au [`Engine::remove_root`] correspondant —
@@ -673,7 +697,7 @@ impl Engine {
     /// `Error::Syntax` on parse failure, `Error::Uncaught` if the
     /// script threw and nothing caught it.
     pub fn eval(&mut self, src: &str) -> Result<Value> {
-        let prog = parser::parse(src)?;
+        let prog = parser::parse_in(src, false, self.nest_limit)?;
         self.ops_left = self.op_limit;
         let r = match self.exec_program(&prog) {
             Ok(v) => Ok(v),
@@ -3297,7 +3321,9 @@ impl Engine {
             }
             Fun::Script { lit, env, lex_this } => {
                 self.call_depth += 1;
-                if self.call_depth > MAX_CALL_DEPTH {
+                // JS-C41 : borne logique d'appels — la pile elle-
+                // même est protégée par `maybe_grow` au corps.
+                if self.call_depth > self.call_depth_limit {
                     self.call_depth -= 1;
                     return Err(self.range_error("maximum call stack exceeded"));
                 }
@@ -3391,7 +3417,15 @@ impl Engine {
                 if lit.is_gen {
                     self.gen_collect.push(Vec::new());
                 }
-                let r = self.exec_body(&local, this, &lit.body);
+                // JS-C41 : un appel JS coûte ~27–55 Kio de pile
+                // native (mesuré) — la récursion bascule sur un
+                // segment tas avant tout débordement ; la borne
+                // `call_depth_limit` garde le plafond logique.
+                let r = stacker::maybe_grow(
+                    crate::parser::STACK_RED_ZONE,
+                    crate::parser::STACK_GROW,
+                    || self.exec_body(&local, this, &lit.body),
+                );
                 self.call_depth -= 1;
                 self.strict = outer_strict;
                 if lit.is_gen {
@@ -3653,7 +3687,7 @@ impl Engine {
     pub(crate) fn eval_source(&mut self, src: &str) -> JsResult<Value> {
         // `eval` direct : le texte hérite du strict appelant —
         // early errors (`01`, `delete x`) et effets runtime.
-        let prog = crate::parser::parse_in(src, self.strict).map_err(|err| {
+        let prog = crate::parser::parse_in(src, self.strict, self.nest_limit).map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
         })?;
         self.exec_program(&prog)
@@ -3685,7 +3719,7 @@ impl Engine {
         this: Value,
         src: &str,
     ) -> JsResult<Value> {
-        let prog = crate::parser::parse_in(src, self.strict).map_err(|err| {
+        let prog = crate::parser::parse_in(src, self.strict, self.nest_limit).map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
         })?;
         let outer_strict = self.strict;
@@ -3813,6 +3847,16 @@ impl Engine {
 
     pub(crate) fn exec_stmt(&mut self, env: &EnvRef, this: Value, s: &Stmt) -> JsResult<Flow> {
         self.tick()?;
+        // JS-C41 : `if`/`try`/`for` s'exécutent en récursion
+        // native — segment tas de secours avant débordement.
+        stacker::maybe_grow(
+            crate::parser::STACK_RED_ZONE,
+            crate::parser::STACK_GROW,
+            || self.exec_stmt_inner(env, this, s),
+        )
+    }
+
+    fn exec_stmt_inner(&mut self, env: &EnvRef, this: Value, s: &Stmt) -> JsResult<Flow> {
         match s {
             // `import …` — liaisons câblées à l'instanciation ;
             // l'exécution n'a rien à faire (idem `;`).
@@ -4212,11 +4256,17 @@ impl Engine {
 
     fn eval_expr(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
         self.expr_depth += 1;
-        if self.expr_depth > MAX_EXPR_DEPTH {
+        if self.expr_depth > self.nest_limit {
             self.expr_depth -= 1;
             return Err(self.range_error("expression too deeply nested"));
         }
-        let r = self.eval_inner(env, this, e);
+        // JS-C41 : la descente d'expressions imbriquées croît sur
+        // un segment tas avant d'épuiser la pile native.
+        let r = stacker::maybe_grow(
+            crate::parser::STACK_RED_ZONE,
+            crate::parser::STACK_GROW,
+            || self.eval_inner(env, this, e),
+        );
         self.expr_depth -= 1;
         r
     }

@@ -3328,7 +3328,7 @@ fn function_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         params.push_str(&e.to_js_string(*p)?);
     }
     let src = format!("function anonymous({params}) {{\n{body}\n}}");
-    let prog = crate::parser::parse(&src).map_err(|err| {
+    let prog = crate::parser::parse_in(&src, false, e.nest_limit).map_err(|err| {
         crate::heap::Thrown(e.error_value(
             e.protos.syntax_error,
             "SyntaxError",

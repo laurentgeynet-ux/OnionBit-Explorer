@@ -271,15 +271,29 @@ pub struct Token {
 
 /// Lex `src` into a token vector terminated by a `Tok::Eof` token.
 pub fn lex(src: &str) -> Result<Vec<Token>> {
+    lex_in(src, 0)
+}
+
+/// `lex` avec profondeur de substitution héritée (JS-C41) —
+/// les templates `` `${…}` `` ré-entrent le lexer pour leur
+/// contenu : la profondeur se cumule à travers les re-entrées.
+fn lex_in(src: &str, tpl_nest: u32) -> Result<Vec<Token>> {
     Lexer {
         chars: src.chars().collect(),
         pos: 0,
         line: 1,
         col: 1,
         legacy_octal: false,
+        tpl_nest,
     }
     .run()
 }
+
+/// Plafond d'emboîtement `` `${`${`…`}`}` `` — la descente est
+/// récursive (`template`→`lex_in`, `expr_src`↔`skip_nested`) ;
+/// la pile est protégée par `maybe_grow`, cette borne ne coupe
+/// que l'hostile (JS-C41).
+const MAX_TPL_NEST: u32 = 512;
 
 struct Lexer {
     chars: Vec<char>,
@@ -288,6 +302,8 @@ struct Lexer {
     col: usize,
     /// Set while producing the current token (see `Token::legacy_octal`).
     legacy_octal: bool,
+    /// Emboîtement courant des substitutions de template (JS-C41).
+    tpl_nest: u32,
 }
 
 impl Lexer {
@@ -817,7 +833,15 @@ impl Lexer {
                     let raw: String = self.chars[seg_start..self.pos - 2].iter().collect();
                     parts.push(TplPart::Str(std::mem::take(&mut cur), raw));
                     let src = self.template_expr_src()?;
-                    parts.push(TplPart::Expr(lex(&src)?));
+                    // Ré-entrée du lexer pour le contenu — profon-
+                    // deur propagée + segment tas de secours (JS-C41).
+                    let nest = self.tpl_nest;
+                    let toks = stacker::maybe_grow(
+                        crate::parser::STACK_RED_ZONE,
+                        crate::parser::STACK_GROW,
+                        || lex_in(&src, nest),
+                    )?;
+                    parts.push(TplPart::Expr(toks));
                     seg_start = self.pos;
                 }
                 Some('\\') => match self.bump() {
@@ -848,6 +872,17 @@ impl Lexer {
     /// `}` — nested `{}`, quoted strings and nested templates are
     /// balanced so `}` inside them does not close the substitution.
     fn template_expr_src(&mut self) -> Result<String> {
+        self.tpl_nest += 1;
+        if self.tpl_nest > MAX_TPL_NEST {
+            self.tpl_nest -= 1;
+            return Err(self.err("template substitution too deeply nested"));
+        }
+        let r = self.template_expr_src_inner();
+        self.tpl_nest -= 1;
+        r
+    }
+
+    fn template_expr_src_inner(&mut self) -> Result<String> {
         let start = self.pos;
         let mut depth = 1usize;
         loop {
@@ -906,7 +941,11 @@ impl Lexer {
                 Some('$') if self.peek_at(1) == Some('{') => {
                     self.bump();
                     self.bump();
-                    self.template_expr_src()?;
+                    stacker::maybe_grow(
+                        crate::parser::STACK_RED_ZONE,
+                        crate::parser::STACK_GROW,
+                        || self.template_expr_src().map(|_| ()),
+                    )?;
                 }
                 Some('\'' | '"') => self.skip_quoted()?,
                 Some(_) => {

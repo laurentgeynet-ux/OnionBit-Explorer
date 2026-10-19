@@ -394,6 +394,12 @@ impl DilloEngine {
         let (tx, rx) = channel::<Cmd>();
         let join = std::thread::Builder::new()
             .name("dillo-js".to_string())
+            // Pile large : le parseur/évaluateur descendant coûte
+            // ~8–55 Kio natif par niveau d'emboîtement/appel JS
+            // (JS-C41, mesuré). 32 Mio couvre les usages réels sans
+            // recourir aux segments tas de `maybe_grow` ; les
+            // plafonds logiques sont relevés dans `worker`.
+            .stack_size(32 * 1024 * 1024)
             .spawn(move || Self::worker(&rx));
         match join {
             Ok(j) => Self { tx, join: Some(j) },
@@ -408,6 +414,12 @@ impl DilloEngine {
     /// canal (le `Sender` meurt avec le proxy).
     fn worker(rx: &Receiver<Cmd>) {
         let mut eng = dillo_js::Engine::new();
+        // Plafonds logiques relevés pour la pile de 32 Mio du
+        // thread moteur (JS-C41) : la pile est aussi protégée par
+        // `maybe_grow`, ces bornes ne fixent que le `RangeError`
+        // — ~1024 appels/parse niveaux, proche des usages réels.
+        eng.set_call_depth_limit(1024);
+        eng.set_nest_limit(1024);
         // Miroir DOM installé par `install_dom` (`Rc` — vit et
         // meurt sur ce thread). Le `Dom` y reste mutable par les
         // bindings ; `DomSync` lit le dirty bit et sérialise.

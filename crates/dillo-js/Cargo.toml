@@ -25,3 +25,4 @@ unicode-ident.workspace = true
 num-bigint.workspace = true
 unicode-normalization.workspace = true
 num-traits.workspace = true
+stacker.workspace = true

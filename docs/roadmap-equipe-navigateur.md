@@ -287,7 +287,7 @@ mesures).
   Nouveau point de cohérence → tests croisés miroir ↔
   `explorer-dom` exigés (règle de tri « corrige le côté
   fautif »).
-- [ ] **JS-C41. Récursion bornée — stack overflow site réel**
+- [x] **JS-C41. Récursion bornée — stack overflow site réel**
   (bug terrain, repro : github.com) : `dillo-js` fait un
   stack overflow sur le bundle réel de github (`dump`/`layout`
   OK, `shot` 💥 ; `EXPLORER_NO_JS=1` → erreur propre →

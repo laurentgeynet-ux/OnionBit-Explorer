@@ -9,6 +9,69 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-15 — Tree-builder : 100 % du corpus tree-construction**
+  (`explorer-html`/`explorer-dom`, html5lib-tests
+  **1592/1592** exécutables, 200 fragment/script-on hors
+  périmètre — cliquet `BASELINE_PASSED` 953→1592). Tous les
+  clusters du triage R-14 fermés :
+  - **Contenu étranger** : namespaces `Svg`/`MathMl` sur les
+    éléments du DOM, tables d'ajustement SVG (casse tags/attrs,
+    `definitionURL`, `xlink:*`/`xml:*`/`xmlns`), points
+    d'intégration MathML/HTML, breakout, CDATA (`]]]>`),
+    end tags étrangers à la marche spec (HTML → retraitement,
+    sinon pop jusqu'au match), scoping namespace-aware
+    (élément cherché HTML, bornes étrangères par nom local).
+  - **`<template>`** : fragment `content`, pile de modes
+    template, redirection d'insertion, foster-parenting vers
+    le template le plus récent, EOF avec template ouvert.
+  - **Adoption agency réelle** (§13.2.6.4.7) : boucle
+    externe ×8, boucle interne avec compteur et retrait AFE
+    >3, bookmark, clones — remplace la version « lite ».
+    `nobr` spécial (AAA implicite + reconstruction), règle
+    « 3 éléments » comparant tag **et** attributs.
+  - **Tokenizer** : états script escaped/double-escaped,
+    `--!>`, `<!` à EOF → commentaire vide, `\0` en étranger
+    → U+FFFD sans toucher `frameset_ok`, casse préservée
+    dans les faux end tags raw-text, `&#xD;` → `\r` littéral
+    (normalisation `\r\n` déplacée du DOM au prétraitement
+    d'entrée — spec), `MAX_NAME` 64 Kio (attributs longs),
+    **table d'entités officielle complète** (2125 entrées,
+    106 legacy — `entities.json` upstream).
+  - **Modes résiduels** : in-select + in-select-in-table,
+    frameset/after-frameset/after-after-body (ws en in-body,
+    reste ignoré sauf body présent), `InHeadNoscript`,
+    `search`/`keygen`/`</button>`/`</h1>-</h6>` premier
+    heading rencontré, `hr`/`input`/`param`/`source`/`track`,
+    `select` **borne de scope** (WHATWG PR 10557 — `</font>`
+    sous select ignoré, `</i>` intérieur → AAA), select
+    permissif (éléments étrangers, formatage AFE dans
+    option), **miroir `selectedcontent`** (clone profond des
+    enfants de l'option sélectionnée à la fermeture).
+  - **DOM** (`explorer-dom`) : `Namespace` sur `ElementData`,
+    `set_text` tolère `Text|Comment`, `create_text` stocke
+    verbatim ; dump html5lib namespacé (`<svg svg>`, attrs
+    `xml lang`, PI `?target:data`, `template>content`).
+- **JS-C41 — Récursion bornée, stack overflow site réel**
+  (`dillo-js`, bug terrain, repro : github.com — violation
+  « jamais crash ») : le parseur et l'évaluateur ne peuvent
+  plus épuiser la pile native. Deux mécanismes combinés :
+  `stacker::maybe_grow` (nouvelle dépendance, pur Rust `psm`)
+  alloue un segment de pile de 2 Mio sur tas quand il reste
+  moins de 256 Kio de pile native, aux points de récursion de
+  `Parser` (`stmt`, `expr`, `assign`, `binary`, `unary`,
+  `new_callee`, `pattern`, `class_lit`), du `Lexer`
+  (templates `` `${…}` `` ré-entrants, nouveau compteur
+  `tpl_nest` propagé à travers `lex_in`) et de l'`Engine`
+  (`eval_expr`, corps `Fun::Script`, `exec_stmt`) ; les
+  plafonds logiques deviennent configurables —
+  `Engine::set_call_depth_limit` / `set_nest_limit`
+  (défauts 256/512, l'adaptateur `explorer-js` monte à
+  1024 sur son thread moteur à pile de 32 Mio). Trous
+  fermés : `x=>x=>`, `a?b:c?d`, `**`, `if(`, `new new`,
+  `[[[[`, `((((`, `${`${`, `class extends class`,
+  `await await`. Tests : 4 régressions (`c41_*`) — 9 cas
+  hostiles ×50 000 → erreur typée, récursion directe et
+  croisée → `RangeError`, imbrication légitime préservée.
 - **Étape 53c — Tolérance TLS `close_notify` absent**
   (`explorer-net`, bug terrain, repro : craigslist.org —
   `TLS unexpected-eof`) : `TolerantEof` wrappe le `TlsStream`
