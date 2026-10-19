@@ -36,8 +36,9 @@ use explorer_net::http::{HttpTransport, Method, Request, Response};
 use explorer_net::policy::{initiator_headers, is_mixed_content};
 use explorer_net::url::Url;
 use explorer_render::{
-    build_display_list_full, decode_font, decode_image, rasterize, BorderStyle, DecodedImage,
-    DisplayItem, DisplayList, Frame, ImageTable, PaintImages, WebFontSource,
+    build_display_list_full, collect_data_images, decode_font, decode_image, rasterize,
+    BorderStyle, DecodedImage, DisplayItem, DisplayList, Frame, ImageTable, PaintImages,
+    WebFontSource,
 };
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::broadcast;
@@ -2582,6 +2583,9 @@ impl Session {
         let imgs: Vec<Url> = collect_images(dom)
             .into_iter()
             .filter_map(|(_, src)| Url::resolve(base, &src).ok())
+            // `data:` (et autres non-http) ne se fetch pas —
+            // peints inline par `collect_data_images` (56f).
+            .filter(|u| matches!(u.scheme(), "http" | "https"))
             .filter(|u| !is_mixed_content(base, u) && seen_img.insert(u.as_str()))
             .take(self.max_images)
             .collect();
@@ -2966,6 +2970,14 @@ impl Session {
         let Some(root_el) = dom.document_element() else {
             return Err(CoreError::EmptyDocument);
         };
+        // Images `data:` inline (étape 56f) : zéro réseau —
+        // `<img src=data:>`/`<object data=data:>` → `replaced`
+        // (sert le sizing intrinsèque juste après),
+        // `background-image: url(data:)` en cascade →
+        // `backgrounds`. Fusionnées avec les corps fetchés.
+        let data_imgs = collect_data_images(dom, &styles, self.image_max_px);
+        entry.images.replaced.extend(data_imgs.replaced);
+        entry.images.backgrounds.extend(data_imgs.backgrounds);
         let mut sizes = image_sizes(dom, &entry.images.replaced);
         // `<svg>` inline (étape 55b) : tailles intrinsèques
         // `width`/`height`/`viewBox` pour la mise en boîte,

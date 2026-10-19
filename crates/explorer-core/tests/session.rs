@@ -3945,3 +3945,65 @@ async fn fragment_nav_scrolls_without_refetch() {
         "fragment cross-document appliqué post-commit (56d)"
     );
 }
+
+/// Étape 56f — les images `data:` peignent leur bitmap
+/// inline en session (zéro requête réseau) au lieu de 0
+/// pixel : `<img src=data:>` et `background-image:
+/// url(data:)` — payload percent-encodé (le décodeur
+/// `data_url_bytes` le traite sans base64).
+#[tokio::test]
+async fn data_url_images_paint_inline() {
+    let (mut s, t) = test_session();
+    let enc = red_png()
+        .iter()
+        .map(|b| format!("%{b:02X}"))
+        .collect::<String>();
+    t.route(
+        "/i",
+        200,
+        Box::leak(
+            format!("<html><body><img src=\"data:image/png,{enc}\"></body></html>")
+                .into_boxed_str(),
+        ),
+    );
+    t.route(
+        "/g",
+        200,
+        Box::leak(
+            format!(
+                "<html><head><style>#b{{background-image:url(\"data:image/png,{enc}\");\
+                 width:2px;height:2px}}</style></head><body><div id=\"b\"></div></body></html>"
+            )
+            .into_boxed_str(),
+        ),
+    );
+    // Référence : bloc 2×2 à fond rouge (même oracle que
+    // `img_renders_decoded_bitmap`).
+    t.route(
+        "/s",
+        200,
+        "<html><head><style>#b{background-color:#ff0000;\
+         width:2px;height:2px}</style></head>\
+         <body><div id=\"b\"></div></body></html>",
+    );
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    let c = s.open_tab();
+    s.navigate(c, "http://h.test/g").await.unwrap();
+
+    assert_eq!(
+        s.frame_png(a),
+        s.frame_png(b),
+        "img data: = bitmap peinte (56f)"
+    );
+    assert_eq!(
+        s.frame_png(c),
+        s.frame_png(b),
+        "background-image data: = bitmap peinte (56f)"
+    );
+    // Aucune sous-ressource `data:` ne part en fetch.
+    assert_eq!(t.calls(), 3, "data: = zéro requête réseau (56f)");
+}

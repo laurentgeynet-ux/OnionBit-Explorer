@@ -397,18 +397,16 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `cache_server.py` : variable `PAGE` morte — `do_GET` ne la
   servait jamais, la page réelle ne contenait pas d'`<img>`.
   Harness corrigé (`/page` sert `PAGE`).
-- [ ] **Étape 56f. Images `data:` invisibles en session**
+- [x] **Étape 56f. Images `data:` invisibles en session**
   (terrain mission 12 — fixtures `img.html`, `b1`-`b4`) :
-  `<img src=data:>`, `<object data=data:>` et
-  `background-image: data:` peignent **0 pixel** — le fetch
-  http `<img>` fonctionne (HIT + pixels mesurés), mais
-  `collect_data_images`/`collect_images` n'est appelé que
-  par les harnais de test, jamais en session
-  (`insert_images` ne traite que les corps fetchés réseau).
-  Câblage à faire : décoder les `data:` inline à
-  `insert_images` (même entrée que les corps fetchés) —
-  débloque d'un coup img `data:`, les yeux Acid2 (avec
-  R-25 côté PIPE) et les backgrounds `data:`.
+  **livré.** `collect_data_images` (R-13) câblé dans
+  `relayout_dom` après la cascade — `replaced`/`backgrounds`
+  décodés inline avant `image_sizes` (sizing intrinsèque
+  servi), fusionnés aux corps fetchés. Planificateur :
+  seuls http(s) partent en fetch — un `data:` ne produisait
+  qu'un échec. Débloque img `data:` + backgrounds `data:` +
+  les yeux Acid2 (avec R-25). Régression :
+  `data_url_images_paint_inline`.
 - [ ] **Étape 57. UI Flutter v2** (ex-65) : thème clair
   (`tokens.json` variante), settings (moteur REST/FFI, thème,
   profil), UI historique + bookmarks (store core existant),

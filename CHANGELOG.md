@@ -107,6 +107,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Reste connu : `column wrap` multi-colonnes, marges
   `auto` verticales en column, écarts fins justify/align.
 
+- **Étape 56f — images `data:` peintes en session**
+  (`explorer-core`) : le défaut terrain mission 12
+  (`img.html`, `b1`-`b4` — `<img src=data:>`,
+  `<object data=data:>` et `background-image: url(data:)`
+  peignaient 0 pixel). `collect_data_images` (R-13) est
+  désormais appelé dans `relayout_dom` après la cascade —
+  `replaced`/`backgrounds` décodés inline (zéro réseau) et
+  fusionnés aux corps fetchés, injectés **avant**
+  `image_sizes` pour servir le sizing intrinsèque. Le
+  planificateur de sous-ressources n'émet plus de job fetch
+  pour les URL non-http(s) — un `data:` ne partait de toute
+  façon nulle part (échec inutile). Débloque aussi les yeux
+  Acid2 (avec R-25 côté PIPE). Régression :
+  `data_url_images_paint_inline` — `<img>` et
+  `background-image` `data:` == bloc 2×2 rouge de
+  référence, 3 requêtes document, 0 sous-ressource.
+
 - **Étape 56d — `#fragment` : navigation + scroll vers la
   cible** (`explorer-core`) : le défaut terrain mission 11
   (`anchor.html`, footnotes Wikipedia — clic `href="#id"` :
