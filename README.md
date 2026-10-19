@@ -9,19 +9,23 @@ desktop, reliées par une API de contrôle locale **REST + SSE**
 > (`C:\OnionBit-Explorer`) sera renommé quand l'identité finale sera
 > choisie. Les crates `explorer-*` ne changent pas.
 >
-> État : **phase 0/1 — workspace bootstrappé**. Les 13 crates
-> `explorer-*` squelettes compilent et `scripts/verify_all.ps1`
-> orchestre les vérifications. Le moteur JavaScript **`dillo-js`**
-> (crate autonome de ce workspace, chantier de l'équipe JS dédiée)
-> est déjà présent et testé ; son intégration derrière le trait
-> `JsEngine` est prévue en phase 8. Voir `ROADMAP.md`.
+> État : **release 0.1.0 livrée — phases 0 à 9 terminées**
+> (748 tests workspace verts, 5/5 sites réels au smoke).
+> Travail organisé en deux équipes : **PIPELINE** (domaine pur :
+> `docs/roadmap-equipe-pipeline.md`) et **NAVIGATEUR**
+> (plateforme produit + JS : `docs/roadmap-equipe-navigateur.md`).
+> État détaillé : `docs/etat-des-lieux-2026-10-19.md` —
+> `ROADMAP.md` pour l'index maître.
 
 ## Documents de pilotage
 
 | Fichier | Rôle |
 |---|---|
 | `AGENTS.md` | Contrat de travail (règles, conventions, workflow) |
-| `ROADMAP.md` | Source de vérité de l'avancement, par phases |
+| `ROADMAP.md` | Index maître — renvoie vers les roadmaps d'équipe |
+| `docs/roadmap-equipe-*.md` | Files de travail PIPELINE / NAVIGATEUR |
+| `docs/interface-equipes.md` | Journal des coutures inter-équipes |
+| `docs/etat-des-lieux-*.md` | Audit daté de l'avancement mesuré |
 | `CHANGELOG.md` | Historique Keep a Changelog |
 | `docs/architecture.md` | Cartographie des couches et crates cibles |
 | `docs/architecture/decisions/` | ADR numérotés |
@@ -50,6 +54,11 @@ cargo fuzz run tokenizer            # fuzz HTML (aussi : css, url)
 
 Le daemon (`explorer-daemon`) expose l'API REST+SSE sur
 `127.0.0.1:9377` — l'app Flutter s'y connecte (ADR-0003).
+
+Le dossier `target/` est déporté sur `D:` via `.cargo/config.toml`
+(commité — postes de dev sur la même machine). Sur une machine
+sans `D:` ou en CI, définir `CARGO_TARGET_DIR` — la variable
+d'environnement a priorité sur la config.
 
 ## Licence
 

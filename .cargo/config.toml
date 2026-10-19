@@ -1,4 +1,5 @@
-# Répertoire de build Cargo déporté sur D: (machine-locale —
-# exclu du dépôt via .git/info/exclude, chaque poste choisit le sien).
+# Répertoire de build Cargo déporté sur D: — commité car les
+# postes de dev partagent cette machine. Sur une machine sans
+# D: ou en CI : CARGO_TARGET_DIR a priorité sur ce réglage.
 [build]
 target-dir = "D:/cargo-target/OnionBit-Explorer"
