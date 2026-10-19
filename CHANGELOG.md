@@ -9,6 +9,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 46 — Webfonts + sous-ressources CSS**
+  (`explorer-css`, `explorer-render`, `explorer-core`,
+  ADR-0016) : `@font-face` conservé par `StyleEngine` avec
+  pile `@media` — `font_faces(env)` sert les descripteurs
+  (`font-family`, `src` `url()`/`local()`, weight, style,
+  `font-display`) ; feuilles `<link rel=stylesheet>`
+  fetchées borné (`max_sheets`) et jointes à la cascade en
+  origine auteur ; `woff.rs` — WOFF1 complet (tables
+  zlib/brutes → sfnt avec checksums) + WOFF2 à transform
+  nulle (flot brotli, glyf transformé refusé proprement,
+  `ttcf` refusé) — bornes 64 tables / 32 Mio table /
+  64 Mio sortie, décompression plafonnée ; `WebFontSource`
+  composite — faces web (famille normalisée + meilleure
+  graisse/italique, validées `ttf-parser` à l'inscription,
+  registre `max_fonts` purgé par navigation) devant la
+  source locale de repli ; `font-display` parsé,
+  comportement `block` synchrone appliqué (une frame = un
+  état cohérent). 14 tests : descripteurs+media (4), woff
+  (5), WebFontSource (3), pipeline session TTF/WOFF/feuille
+  liée/cap (3).
+
 - **Étape 42 — Layout moderne MVP** (`explorer-css`,
   `explorer-layout`, `explorer-render`, ADR-0015) : custom
   properties `--*` héritées + `var()` substitué au temps de
@@ -616,6 +637,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`new_target_binding`, `set_composition_es2025`,
     `string_well_formed_and_regexp_escape`,
     `arraybuffer_resize_transfer`).
+- **JS-C15 — dispatch `@@*`, `Array.of`, `@@species`,
+  `captureStackTrace`** (`dillo-js`) :
+  - `str.match/matchAll/replace/replaceAll/search/split`
+    dispatchent via `GetMethod(pat, @@x)` (spec) —
+    `RegExp.prototype` porte `@@match`, `@@matchAll`,
+    `@@replace`, `@@search`, `@@split` ; un objet custom
+    `{[Symbol.replace](s,r){…}}` intercepte l'appel ; le
+    check `replaceAll`/`matchAll` RegExp-sans-`g` reste
+    `TypeError` avant le hook ;
+  - `Array.of(…items)` — `this` ctor → `new this(len)`
+    (sous-classes), sinon Array ordinaire ;
+  - `@@species` (`ArraySpeciesCreate`) dans `map`/`filter`/
+    `slice`/`concat` — `this.constructor[@@species]` définit
+    le ctor du résultat ; `null`/`undefined` → Array
+    ordinaire ;
+  - `@@isConcatSpreadable` dans `concat` — la prop prime sur
+    `Array.isArray`, spread via `length` + `Get` par indice
+    (sous-classes/array-likes/proxies) ;
+  - `Error.captureStackTrace(obj)` — extension V8 : own prop
+    `stack` non-énumérable `Name: message` (déviation
+    documentée : pas de frames) ;
+  - test262 : 859/859 conservé ; 4 tests de régression
+    (`c15_array_of`, `c15_sym_method_dispatch`,
+    `c15_species_concat_spreadable`,
+    `c15_capture_stack_trace`).
 - **JS-C14 — `@@toStringTag`, chaîne générateur, reviver,
   `stack`, `normalize`** (`dillo-js`) :
   - `@@toStringTag` installé sur les prototypes concrets et

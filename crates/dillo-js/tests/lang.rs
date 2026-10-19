@@ -4005,3 +4005,131 @@ fn c14_string_normalize() {
     // Forme invalide → RangeError.
     assert!(Engine::new().eval("'x'.normalize('BOGUS')").is_err());
 }
+
+// ------------------------------------------------------------------
+// JS-C15 — Array.of, dispatch @@match/@@replace/@@search/@@split,
+//          @@species, @@isConcatSpreadable, Error.captureStackTrace
+// ------------------------------------------------------------------
+
+#[test]
+fn c15_array_of() {
+    for (src, want) in [
+        ("Array.of(1,2,3).join(',')", "1,2,3"),
+        ("Array.of(7).length", "1"),
+        ("Array.of().length", "0"),
+        // `this` ctor (spec) — Array.of.call(fn) → `new fn(len)`.
+        (
+            "var C=function(n){this.n=n}; Array.of.call(C,'a','b').n",
+            "2",
+        ),
+        ("Array.of.call(undefined,1).join(',')", "1"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c15_sym_method_dispatch() {
+    for (src, want) in [
+        // Hooks custom appelés avec le receiver + l'arg (spec
+        // `GetMethod(pat, @@x)` puis `Call(pat)`).
+        (
+            "'aXbXc'.replace({[Symbol.replace](s,r){return s.split('X').join(r)}},'|')",
+            "a|b|c",
+        ),
+        (
+            "'a-b'.split({[Symbol.split](s,l){return [s,l]}})",
+            "a-b,",
+        ),
+        ("'xxayy'.search({[Symbol.search](s){return 42}})", "42"),
+        (
+            "'abab'.match({[Symbol.match](s){return ['m1','m2']}})",
+            "m1,m2",
+        ),
+        (
+            "'aa'.matchAll({[Symbol.matchAll](s){return [s]}})",
+            "aa",
+        ),
+        // RegExp.prototype porte les hooks (spec).
+        ("typeof /x/[Symbol.match]", "function"),
+        ("typeof /x/[Symbol.replace]", "function"),
+        ("typeof /x/[Symbol.split]", "function"),
+        // Chemins builtin inchangés via le hook RegExp.
+        ("'aab'.replace(/a/g,'X')", "XXb"),
+        ("'aab'.replace(/a/,'X')", "Xab"),
+        ("'aab'.match(/a/g).join(',')", "a,a"),
+        ("'a1b2'.split(/[0-9]/).join('|')", "a|b|"),
+        ("'abc'.search(/b/)", "1"),
+        ("'qq'.replaceAll(/q/g,'z')", "zz"),
+        // `this` passé au hook (primitive string coercée).
+        (
+            "var h=[]; 'aab'.replace({[Symbol.replace](s,r){h.push(String(s),r);return 'C'}},'R'); h.join('|')",
+            "aab|R",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    // replaceAll RegExp non-global → TypeError (avant le hook).
+    assert!(Engine::new().eval("'q'.replaceAll(/q/,'z')").is_err());
+    // matchAll RegExp non-global → TypeError.
+    assert!(Engine::new().eval("'q'.matchAll(/q/)").is_err());
+}
+
+#[test]
+fn c15_species_concat_spreadable() {
+    for (src, want) in [
+        // `@@species` : ctor custom utilisé pour le résultat.
+        (
+            "var a=[1,2]; a.constructor={[Symbol.species]:function(n){var o={custom:true,length:n};return o}}; var r=a.map(x=>x); r.custom+':'+r[1]",
+            "true:2",
+        ),
+        (
+            "var a=[1,2,3]; a.constructor={[Symbol.species]:function(n){return {length:n}}}; a.filter(x=>true).length",
+            "3",
+        ),
+        // `null`/`undefined` species → Array ordinaire.
+        (
+            "var a=[1,2]; a.constructor={[Symbol.species]:null}; a.slice(0).join(',')",
+            "1,2",
+        ),
+        (
+            "var a=[1]; a.constructor={}; a.concat([2]).join(',')",
+            "1,2",
+        ),
+        // `@@isConcatSpreadable` prime sur Array.isArray.
+        (
+            "[1,2].concat({[Symbol.isConcatSpreadable]:true,length:2,0:'a',1:'b'}).join(',')",
+            "1,2,a,b",
+        ),
+        (
+            "[[1],[2]].concat([[3]]).join('|')",
+            "1|2|3",
+        ),
+        (
+            "[0].concat([9],[8]).join(',')",
+            "0,9,8",
+        ),
+        (
+            "var o={0:'z',length:1}; o[Symbol.isConcatSpreadable]=false; [1].concat(o).length",
+            "2",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c15_capture_stack_trace() {
+    assert_eq!(
+        ev_str("var e={name:'MyErr',message:'boom'}; Error.captureStackTrace(e); e.stack"),
+        "MyErr: boom"
+    );
+    // Own prop non-énumérable.
+    assert_eq!(
+        ev_str("var e={}; Error.captureStackTrace(e); Object.keys(e).join(',')"),
+        ""
+    );
+    assert_eq!(ev_str("typeof Error.captureStackTrace"), "function");
+    // Non-objet → TypeError.
+    assert!(Engine::new().eval("Error.captureStackTrace(5)").is_err());
+}

@@ -81,6 +81,31 @@ pub(crate) const SYM_TO_STRING_TAG: &str = "\u{f130}Symbol.toStringTag";
 /// `Symbol.unscopables` — noms exclus de la liaison `with`.
 pub(crate) const SYM_UNSCOPABLES: &str = "\u{f130}Symbol.unscopables";
 
+// Clés de dispatch @@symbols — consommées par le chantier
+// regexp/symbol en cours (équipe JS) ; `allow` le temps que
+// les dispatches soient branchés.
+#[allow(dead_code)]
+/// `Symbol.match` — dispatch `str.match(rx)` → `rx[@@match]`.
+pub(crate) const SYM_MATCH: &str = "\u{f130}Symbol.match";
+/// `Symbol.matchAll` — dispatch `str.matchAll(rx)` → `rx[@@matchAll]`.
+#[allow(dead_code)]
+pub(crate) const SYM_MATCH_ALL: &str = "\u{f130}Symbol.matchAll";
+/// `Symbol.replace` — dispatch `str.replace(rx, r)` → `rx[@@replace]`.
+#[allow(dead_code)]
+pub(crate) const SYM_REPLACE: &str = "\u{f130}Symbol.replace";
+/// `Symbol.search` — dispatch `str.search(rx)` → `rx[@@search]`.
+#[allow(dead_code)]
+pub(crate) const SYM_SEARCH: &str = "\u{f130}Symbol.search";
+/// `Symbol.split` — dispatch `str.split(rx, lim)` → `rx[@@split]`.
+#[allow(dead_code)]
+pub(crate) const SYM_SPLIT: &str = "\u{f130}Symbol.split";
+/// `Symbol.species` — ctor de résultat (`ArraySpeciesCreate`…).
+#[allow(dead_code)]
+pub(crate) const SYM_SPECIES: &str = "\u{f130}Symbol.species";
+/// `Symbol.isConcatSpreadable` — override du spread de `concat`.
+#[allow(dead_code)]
+pub(crate) const SYM_IS_CONCAT_SPREADABLE: &str = "\u{f130}Symbol.isConcatSpreadable";
+
 /// `ToPrimitive` preferred-type hint (spec `ToPrimitive`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PrimHint {

@@ -493,6 +493,18 @@ d'intégration, pas par la couverture :
   frames), `String.prototype.normalize` NFC/NFD/NFKC/NFKD via
   `unicode-normalization`. test262 : 859/859 ; 5 tests de
   régression.
+- [x] **JS-C15. Hooks `@@*` + `Array.of` +
+  captureStackTrace** : dispatch spec `str.x(rx)` →
+  `rx[@@x](str)` pour `match`/`matchAll`/`replace`/
+  `replaceAll`/`search`/`split` (RegExp.prototype porte les 5
+  hooks — objets custom interceptables), `Array.of` (`this`
+  ctor → `new this(len)`), `@@species` (`ArraySpeciesCreate`
+  pour `map`/`filter`/`slice`/`concat` — `null`/`undefined` →
+  Array ordinaire), `@@isConcatSpreadable` dans `concat`
+  (spread via `length` + `Get` — array-likes et proxies
+  traversés), `Error.captureStackTrace` (own `stack`
+  `Name: message` — V8-compat, pas de frames). test262 :
+  859/859 ; 4 tests de régression.
 - [ ] **JS-C. Couverture par besoin** : `Intl` —
   ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
@@ -634,8 +646,13 @@ progresse en trois paliers structurants :
   animations/transitions CSS, **`<svg>` statique** (sous-ensemble —
   `resvg`/crate équivalent ; SMIL et animations SVG restent hors
   périmètre).
-- [ ] **Étape 46. Webfonts + charsets.** WOFF/WOFF2, `font-display`,
-  encodages legacy (windows-1252, ISO-8859-*).
+- [x] **Étape 46. Webfonts + charsets.** `@font-face` (inline et
+  feuilles `<link>` — premières sous-ressources CSS), fetch borné,
+  WOFF1 complet + WOFF2 transform nulle (glyf transformé refusé
+  proprement), `font-display` parsé (comportement `block`
+  appliqué), matching famille/graisse/style — ADR-0016.
+  Encodages legacy : déjà livrés à l'étape 5 (windows-1252,
+  BOM, meta sniff).
 - [ ] **Étape 47. Streaming UI haute performance.** Texture externe
   Flutter via FFI (upgrade d'ADR-0004) pour les framerates élevés et
   médias animés.

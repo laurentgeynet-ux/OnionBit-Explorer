@@ -115,6 +115,9 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(p_num, PRIM, Value::Num(0.0), false);
     e.set_own(p_bool, PRIM, Value::Bool(false), false);
     let error = ctor(e, "Error", error_ctor, p_err);
+    if let Value::Obj(eid) = error {
+        e.add_method(eid, "captureStackTrace", error_capture_stack);
+    }
     let t_err = ctor(e, "TypeError", type_error_ctor, p_terr);
     let r_err = ctor(e, "ReferenceError", reference_error_ctor, p_rerr);
     let s_err = ctor(e, "SyntaxError", syntax_error_ctor, p_serr);
@@ -451,6 +454,7 @@ pub(crate) fn install(e: &mut Engine) {
     if let Value::Obj(aid) = array {
         e.add_method(aid, "isArray", array_is_array);
         e.add_method(aid, "from", array_from);
+        e.add_method(aid, "of", array_of);
         e.add_method(aid, "fromAsync", array_from_async);
     }
 
@@ -522,6 +526,13 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(rp, "exec", regexp_exec);
     e.add_method(rp, "test", regexp_test);
     e.add_method(rp, "toString", regexp_to_string);
+    // `@@match`/`@@matchAll`/`@@replace`/`@@search`/`@@split`
+    // (spec) — les méthodes String dispatchent vers ces hooks.
+    e.add_method(rp, crate::interp::SYM_MATCH, re_sym_match);
+    e.add_method(rp, crate::interp::SYM_MATCH_ALL, re_sym_match_all);
+    e.add_method(rp, crate::interp::SYM_REPLACE, re_sym_replace);
+    e.add_method(rp, crate::interp::SYM_SEARCH, re_sym_search);
+    e.add_method(rp, crate::interp::SYM_SPLIT, re_sym_split);
     let regexp = ctor(e, "RegExp", regexp_ctor, rp);
     if let Value::Obj(rid) = regexp {
         e.add_method(rid, "escape", regexp_escape);
@@ -1709,7 +1720,12 @@ fn array_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         Vec::new()
     };
     put_elems(e, id, elems);
-    Ok(arr_of(e, out))
+    // `ArraySpeciesCreate(this, out.len)` — sous-classes.
+    let a_v = species_array(e, this, out.len())?;
+    for (i, v) in out.iter().enumerate() {
+        e.set_prop_value(a_v, &i.to_string(), *v)?;
+    }
+    Ok(a_v)
 }
 
 fn array_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -1717,18 +1733,35 @@ fn array_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
     let mut out = take_elems(e, id);
     put_elems(e, id, out.clone());
     for a in args {
-        match a {
-            Value::Obj(aid)
-                if matches!(e.heap.obj(*aid).map(|o| &o.kind), Some(ObjKind::Array(_))) =>
-            {
-                let inner = take_elems(e, *aid);
-                put_elems(e, *aid, inner.clone());
-                out.extend(inner);
+        // `IsConcatSpreadable` (spec) : `arg[@@isConcatSpreadable]`
+        // prime, sinon le défaut est `Array.isArray(arg)`.
+        let spread = match a {
+            Value::Obj(aid) => match e.get_prop(*aid, crate::interp::SYM_IS_CONCAT_SPREADABLE) {
+                Some(v) if !matches!(v, Value::Undefined) => e.to_boolean(v),
+                _ => matches!(e.heap.obj(*aid).map(|o| &o.kind), Some(ObjKind::Array(_))),
+            },
+            _ => false,
+        };
+        if spread {
+            // Lecture via `length` + `Get` par indice (sous-classes,
+            // array-likes et proxies traversés, spec).
+            let len = match e.get_prop_value(*a, "length")? {
+                Value::Num(n) => n.max(0.0) as usize,
+                _ => 0,
+            };
+            for i in 0..len {
+                let v = e.get_prop_value(*a, &i.to_string())?;
+                out.push(v);
             }
-            v => out.push(*v),
+        } else {
+            out.push(*a);
         }
     }
-    Ok(arr_of(e, out))
+    let a_v = species_array(e, this, out.len())?;
+    for (i, v) in out.iter().enumerate() {
+        e.set_prop_value(a_v, &i.to_string(), *v)?;
+    }
+    Ok(a_v)
 }
 
 fn array_reverse(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -1798,7 +1831,11 @@ fn array_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         out.push(e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?);
     }
     put_elems(e, id, elems);
-    Ok(arr_of(e, out))
+    let a_v = species_array(e, this, out.len())?;
+    for (i, v) in out.iter().enumerate() {
+        e.set_prop_value(a_v, &i.to_string(), *v)?;
+    }
+    Ok(a_v)
 }
 
 fn array_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -1817,7 +1854,11 @@ fn array_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
         }
     }
     put_elems(e, id, elems);
-    Ok(arr_of(e, out))
+    let a_v = species_array(e, this, out.len())?;
+    for (i, v) in out.iter().enumerate() {
+        e.set_prop_value(a_v, &i.to_string(), *v)?;
+    }
+    Ok(a_v)
 }
 
 fn array_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -1994,6 +2035,15 @@ fn string_trim(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 
 fn string_split(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this)?;
+    // `sep[Symbol.split](this, limit)` (spec `GetMethod`).
+    if let Some(v) = sym_method(
+        e,
+        arg(args, 0),
+        crate::interp::SYM_SPLIT,
+        &[this, arg(args, 1)],
+    )? {
+        return Ok(v);
+    }
     let limit = match arg(args, 1) {
         Value::Undefined => usize::MAX,
         v => e.to_number(v)? as usize,
@@ -2038,20 +2088,21 @@ fn replace_impl(e: &mut Engine, this: Value, args: &[Value], all: bool) -> JsRes
     let s = this_str(e, this)?;
     let pat = arg(args, 0);
     let rep = arg(args, 1);
+    // Spec `replaceAll` : un pattern RegExp sans `g` est rejeté
+    // AVANT le dispatch `@@replace` (`IsRegExp` + flags).
+    if all {
+        if let Some(re) = re_of(e, pat) {
+            if !re.global {
+                return Err(e.type_error("replaceAll requires a global regex"));
+            }
+        }
+    }
+    // `pat[Symbol.replace](this, rep)` (spec `GetMethod`).
+    if let Some(v) = sym_method(e, pat, crate::interp::SYM_REPLACE, &[this, rep])? {
+        return Ok(v);
+    }
     if let Some(re) = re_of(e, pat) {
-        // Spec: replaceAll requires the regex to be global.
-        if all && !re.global {
-            return Err(e.type_error("replaceAll requires a global regex"));
-        }
-        let matches = if re.global {
-            re.exec_all(&s, 0)
-        } else {
-            re.exec(&s, 0).into_iter().collect()
-        };
-        if matches.is_empty() {
-            return Ok(e.str_val(s));
-        }
-        return splice_matches(e, &s, &matches, rep);
+        return re_replace_impl(e, &re, &s, rep);
     }
     // String pattern — first occurrence (or all for replaceAll).
     let pat = e.to_js_string(pat)?;
@@ -2425,28 +2476,20 @@ fn regexp_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value
 
 fn string_match(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this)?;
+    // `rx[Symbol.match](this)` (spec `GetMethod`).
+    if let Some(v) = sym_method(e, arg(args, 0), crate::interp::SYM_MATCH, &[this])? {
+        return Ok(v);
+    }
     let (re, id) = as_regexp(e, arg(args, 0))?;
-    if re.global {
-        let texts: Vec<Value> = re
-            .exec_all(&s, 0)
-            .into_iter()
-            .map(|m| e.str_val(m.text))
-            .collect();
-        let _ = e.set_prop(id, "lastIndex", Value::Num(0.0));
-        return Ok(if texts.is_empty() {
-            Value::Null
-        } else {
-            arr_of(e, texts)
-        });
-    }
-    match re.exec(&s, 0) {
-        Some(m) => Ok(match_result(e, &m, &re, &s)),
-        None => Ok(Value::Null),
-    }
+    re_match_exec(e, &re, id, &s)
 }
 
 fn string_search(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this)?;
+    // `rx[Symbol.search](this)` (spec `GetMethod`).
+    if let Some(v) = sym_method(e, arg(args, 0), crate::interp::SYM_SEARCH, &[this])? {
+        return Ok(v);
+    }
     let (re, _id) = as_regexp(e, arg(args, 0))?;
     match re.exec(&s, 0) {
         Some(m) => Ok(Value::Num(m.index as f64)),
@@ -3830,16 +3873,12 @@ fn string_code_point_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
 /// an iterator of match arrays.
 fn string_match_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this)?;
-    let (re, _id) = as_regexp(e, arg(args, 0))?;
-    if !re.global {
-        return Err(e.type_error("matchAll needs a global regex"));
+    // `rx[Symbol.matchAll](this)` (spec `GetMethod`).
+    if let Some(v) = sym_method(e, arg(args, 0), crate::interp::SYM_MATCH_ALL, &[this])? {
+        return Ok(v);
     }
-    let items: Vec<Value> = re
-        .exec_all(&s, 0)
-        .iter()
-        .map(|m| match_result(e, m, &re, &s))
-        .collect();
-    Ok(crate::collections::iter_obj(e, items))
+    let (re, _id) = as_regexp(e, arg(args, 0))?;
+    re_match_all_impl(e, &re, &s)
 }
 
 /// `String.fromCodePoint(...)` — scalar values; lone surrogates
@@ -4670,4 +4709,196 @@ fn string_normalize(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
         _ => return Err(e.range_error("invalid normalization form")),
     };
     Ok(e.str_val(out))
+}
+
+// ------------------------------------------------------------------
+// JS-C15 — `Array.of`, dispatch `@@*`, `@@species`, captureStackTrace
+// ------------------------------------------------------------------
+
+/// `Array.of(…items)` — spec : si `this` est un ctor → `new this(len)`
+/// (sous-classes `Array.of.call(C, …)`), sinon un Array ordinaire.
+fn array_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let len = args.len();
+    let a = if e.is_callable(this) {
+        e.construct(this, &[Value::Num(len as f64)])?
+    } else {
+        e.new_array(vec![Value::Undefined; len])
+    };
+    for (i, v) in args.iter().enumerate() {
+        e.set_prop_value(a, &i.to_string(), *v)?;
+    }
+    e.set_prop_value(a, "length", Value::Num(len as f64))?;
+    Ok(a)
+}
+
+/// `GetMethod(obj, sym)` — dispatch spec `str.x(rx)` → `rx[@@x](…)`.
+/// `Ok(None)` → chemin builtin (`sym` absent, `undefined` ou `null`).
+fn sym_method(e: &mut Engine, obj: Value, sym: &str, args: &[Value]) -> JsResult<Option<Value>> {
+    let Value::Obj(id) = obj else { return Ok(None) };
+    match e.get_prop(id, sym) {
+        None | Some(Value::Undefined | Value::Null) => Ok(None),
+        Some(m) if e.is_callable(m) => e.call_value(m, obj, args).map(Some),
+        Some(_) => Err(e.type_error("symbol method is not callable")),
+    }
+}
+
+/// `ArraySpeciesCreate(src, len)` (spec) : `new src.constructor
+/// [@@species](len)` si la prop existe ; un `undefined`/`null` →
+/// tableau ordinaire, autre chose → `TypeError` via `construct`.
+fn species_array(e: &mut Engine, src: Value, len: usize) -> JsResult<Value> {
+    if let Value::Obj(id) = src {
+        if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_))) {
+            let sp = e.get_prop(id, "constructor").and_then(|c| match c {
+                Value::Obj(cid) => e.get_prop(cid, crate::interp::SYM_SPECIES),
+                _ => None,
+            });
+            match sp {
+                None | Some(Value::Undefined | Value::Null) => {}
+                Some(ctor_v) => return e.construct(ctor_v, &[Value::Num(len as f64)]),
+            }
+        }
+    }
+    Ok(e.new_array(Vec::new()))
+}
+
+/// Algorithme `rx.exec`-résultat partagé `str.match`/`@@match`
+/// (spec : global → liste de textes + `lastIndex` reset ; sinon
+/// résultat d'un seul `exec`).
+fn re_match_exec(
+    e: &mut Engine,
+    re: &std::rc::Rc<crate::regexp::JsRegExp>,
+    id: crate::value::ObjId,
+    s: &str,
+) -> JsResult<Value> {
+    if re.global {
+        let texts: Vec<Value> = re
+            .exec_all(s, 0)
+            .into_iter()
+            .map(|m| e.str_val(m.text))
+            .collect();
+        let _ = e.set_prop(id, "lastIndex", Value::Num(0.0));
+        return Ok(if texts.is_empty() {
+            Value::Null
+        } else {
+            arr_of(e, texts)
+        });
+    }
+    match re.exec(s, 0) {
+        Some(m) => Ok(match_result(e, &m, re, s)),
+        None => Ok(Value::Null),
+    }
+}
+
+fn re_match_all_impl(
+    e: &mut Engine,
+    re: &std::rc::Rc<crate::regexp::JsRegExp>,
+    s: &str,
+) -> JsResult<Value> {
+    if !re.global {
+        return Err(e.type_error("matchAll needs a global regex"));
+    }
+    let items: Vec<Value> = re
+        .exec_all(s, 0)
+        .iter()
+        .map(|m| match_result(e, m, re, s))
+        .collect();
+    Ok(crate::collections::iter_obj(e, items))
+}
+
+/// Branche `RegExp` de `replace`/`@@replace` (global → toutes les
+/// occurrences ; sinon la première).
+fn re_replace_impl(
+    e: &mut Engine,
+    re: &std::rc::Rc<crate::regexp::JsRegExp>,
+    s: &str,
+    rep: Value,
+) -> JsResult<Value> {
+    let matches = if re.global {
+        re.exec_all(s, 0)
+    } else {
+        re.exec(s, 0).into_iter().collect()
+    };
+    if matches.is_empty() {
+        return Ok(e.str_val(s.to_string()));
+    }
+    splice_matches(e, s, &matches, rep)
+}
+
+/// `rx[Symbol.match](str)` — `RegExp.prototype[@@match]` (spec).
+fn re_sym_match(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_js_string(arg(args, 0))?;
+    let (re, id) = as_regexp(e, this)?;
+    re_match_exec(e, &re, id, &s)
+}
+
+/// `rx[Symbol.matchAll](str)` — itérateur de résultats, `g` requis.
+fn re_sym_match_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_js_string(arg(args, 0))?;
+    let (re, _id) = as_regexp(e, this)?;
+    re_match_all_impl(e, &re, &s)
+}
+
+/// `rx[Symbol.replace](str, rep)` — global ou première occurrence.
+fn re_sym_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_js_string(arg(args, 0))?;
+    let rep = arg(args, 1);
+    let (re, _id) = as_regexp(e, this)?;
+    re_replace_impl(e, &re, &s, rep)
+}
+
+/// `rx[Symbol.search](str)` — indice du premier match, `-1` sinon.
+fn re_sym_search(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_js_string(arg(args, 0))?;
+    let (re, _id) = as_regexp(e, this)?;
+    match re.exec(&s, 0) {
+        Some(m) => Ok(Value::Num(m.index as f64)),
+        None => Ok(Value::Num(-1.0)),
+    }
+}
+
+/// `rx[Symbol.split](str, limit)` — captures insérées entre les
+/// morceaux (délègue à `JsRegExp::split`).
+fn re_sym_split(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_js_string(arg(args, 0))?;
+    let limit = match arg(args, 1) {
+        Value::Undefined => usize::MAX,
+        v => e.to_number(v)? as usize,
+    };
+    let (re, _id) = as_regexp(e, this)?;
+    if limit == 0 {
+        return Ok(arr_of(e, Vec::new()));
+    }
+    let vals: Vec<Value> = re
+        .split(&s)
+        .into_iter()
+        .take(limit)
+        .map(|p| e.str_val(p))
+        .collect();
+    Ok(arr_of(e, vals))
+}
+
+/// `Error.captureStackTrace(obj, ctor?)` — extension V8 : pose la
+/// own prop `stack` non-énumérable (même contenu `Name: message`
+/// que les erreurs moteur — pas de frames, déviation documentée).
+fn error_capture_stack(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = arg(args, 0) else {
+        return Err(e.type_error("captureStackTrace target must be an object"));
+    };
+    let name = e
+        .get_prop(id, "name")
+        .and_then(|v| e.to_js_string(v).ok())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "Error".to_string());
+    let msg = e
+        .get_prop(id, "message")
+        .and_then(|v| e.to_js_string(v).ok())
+        .unwrap_or_default();
+    let head = if msg.is_empty() {
+        name
+    } else {
+        format!("{name}: {msg}")
+    };
+    let s = e.str_val(head);
+    e.set_own(id, "stack", s, false);
+    Ok(Value::Undefined)
 }
