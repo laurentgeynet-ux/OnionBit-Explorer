@@ -490,11 +490,18 @@ couverture).
   `DilloEngine` (`drain_net_requests`/`deliver_net_response`/
   `set_storage`/`set_cookie_jar`) — prérequis interne de
   l'étape 51.
-- [ ] **JS-C28. `<canvas>` 2D surface** : `getContext('2d')` +
-  `CanvasRenderingContext2D` complet niveau API (chemins,
-  fills/strokes, transforms, `drawImage`, `fillText`, gradients,
-  `getImageData`/`putImageData`) enregistrant une **op-list**
-  exposée via `drain_canvas_ops` — raster = PIPE **R-11**.
+- [x] **JS-C28. `<canvas>` 2D surface** : `getContext('2d')` +
+  `CanvasRenderingContext2D` enregistrant une **op-list**
+  (`CanvasOpRecord` miroir → `CanvasTable` R-11, snapshot
+  `canvas_ops()` cumulé). Couverture = MVP R-11 : rects,
+  chemins, fill/stroke/clip, transforms, alpha, lineWidth,
+  save/restore, couleurs ; `width=`/`height=` effacent
+  (spec) ; APIs hors MVP (`drawImage`, `fillText`,
+  gradients, `getImageData`) absorbées en no-op/retour
+  plausible — jamais de `TypeError` au milieu d'une
+  séquence. Contexte raciné GC, borne `canvas_op_limit`,
+  dessin = mutation de rendu → relayout ciblé du sous-arbre.
+  Raster = PIPE **R-11** (livré).
 - [ ] **JS-C29. `Worker` bornés** : Engine par thread (patron
   `DilloEngine`), `postMessage` structuredClone (livré),
   `onmessage`, `importScripts` minimal, `terminate`, pool

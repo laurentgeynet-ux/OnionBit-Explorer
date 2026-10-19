@@ -615,6 +615,11 @@ impl Engine {
                     crate::heap::push_value(&mut ids, *cb);
                 }
             }
+            // Contextes 2D `<canvas>` (JS-C28) — détenus par la
+            // side-table du miroir, racines tant qu'il vit.
+            for v in dom.borrow().canvas_ctx_values() {
+                crate::heap::push_value(&mut ids, v);
+            }
         }
         if let Some(s) = self.hooks.screen_obj {
             ids.push(s);

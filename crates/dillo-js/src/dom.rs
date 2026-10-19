@@ -153,6 +153,164 @@ pub struct Node {
     pub listeners: Vec<(String, Value, bool)>,
 }
 
+/// Opération `CanvasRenderingContext2D` enregistrée sur le
+/// miroir (JS-C28) — miroir sérialisable de
+/// `explorer_render::canvas::CanvasOp` (couture R-11) : la
+/// couche navigateur la traduit champ pour champ. `dillo-js`
+/// n'a aucune dépendance interne (ADR-0007) — les couleurs
+/// voyagent en `rgba8`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CanvasOpRecord {
+    /// `save()` — empile l'état.
+    Save,
+    /// `restore()` — dépile l'état.
+    Restore,
+    /// `translate(x, y)`.
+    Translate(f32, f32),
+    /// `scale(x, y)`.
+    Scale(f32, f32),
+    /// `rotate(rad)`.
+    Rotate(f32),
+    /// `transform(a, b, c, d, e, f)`.
+    Transform(f32, f32, f32, f32, f32, f32),
+    /// `setTransform(a, b, c, d, e, f)`.
+    SetTransform(f32, f32, f32, f32, f32, f32),
+    /// `fillStyle = couleur`.
+    FillColor {
+        /// Rouge.
+        r: u8,
+        /// Vert.
+        g: u8,
+        /// Bleu.
+        b: u8,
+        /// Alpha.
+        a: u8,
+    },
+    /// `strokeStyle = couleur`.
+    StrokeColor {
+        /// Rouge.
+        r: u8,
+        /// Vert.
+        g: u8,
+        /// Bleu.
+        b: u8,
+        /// Alpha.
+        a: u8,
+    },
+    /// `globalAlpha = v`.
+    GlobalAlpha(f32),
+    /// `lineWidth = px`.
+    LineWidth(f32),
+    /// `beginPath()`.
+    BeginPath,
+    /// `moveTo(x, y)`.
+    MoveTo(f32, f32),
+    /// `lineTo(x, y)`.
+    LineTo(f32, f32),
+    /// `quadraticCurveTo(cx, cy, x, y)`.
+    QuadraticTo(f32, f32, f32, f32),
+    /// `bezierCurveTo(c1x, c1y, c2x, c2y, x, y)`.
+    BezierTo(f32, f32, f32, f32, f32, f32),
+    /// `arc(cx, cy, r, start_rad, end_rad, anticlockwise)`.
+    Arc(f32, f32, f32, f32, f32, bool),
+    /// `rect(x, y, w, h)`.
+    Rect(f32, f32, f32, f32),
+    /// `closePath()`.
+    ClosePath,
+    /// `fill()`.
+    Fill,
+    /// `stroke()`.
+    Stroke,
+    /// `clip()`.
+    Clip,
+    /// `fillRect(x, y, w, h)`.
+    FillRect(f32, f32, f32, f32),
+    /// `strokeRect(x, y, w, h)`.
+    StrokeRect(f32, f32, f32, f32),
+    /// `clearRect(x, y, w, h)`.
+    ClearRect(f32, f32, f32, f32),
+}
+
+impl CanvasOpRecord {
+    /// `false` si un scalaire est NaN/infini — spec canvas :
+    /// l'appel est alors ignoré silencieusement.
+    fn args_finite(&self) -> bool {
+        use CanvasOpRecord as C;
+        match *self {
+            C::Translate(x, y) | C::Scale(x, y) | C::MoveTo(x, y) | C::LineTo(x, y) => {
+                x.is_finite() && y.is_finite()
+            }
+            C::Rotate(r) | C::GlobalAlpha(r) | C::LineWidth(r) => r.is_finite(),
+            C::QuadraticTo(a, b, c, d)
+            | C::Rect(a, b, c, d)
+            | C::FillRect(a, b, c, d)
+            | C::StrokeRect(a, b, c, d)
+            | C::ClearRect(a, b, c, d) => {
+                a.is_finite() && b.is_finite() && c.is_finite() && d.is_finite()
+            }
+            C::Arc(x, y, r, sa, ea, _) => {
+                x.is_finite() && y.is_finite() && r.is_finite() && sa.is_finite() && ea.is_finite()
+            }
+            C::BezierTo(a, b, c, d, e, f)
+            | C::Transform(a, b, c, d, e, f)
+            | C::SetTransform(a, b, c, d, e, f) => {
+                a.is_finite()
+                    && b.is_finite()
+                    && c.is_finite()
+                    && d.is_finite()
+                    && e.is_finite()
+                    && f.is_finite()
+            }
+            _ => true,
+        }
+    }
+}
+
+/// État du contexte 2D attaché à un `<canvas>` (JS-C28) —
+/// l'op-list est **cumulative** (la bitmap persiste entre
+/// les re-peintures) : elle n'est jamais drainée, seulement
+/// relue par [`Dom::canvas_ops`].
+#[derive(Debug)]
+pub struct CanvasState {
+    /// Op-list enregistrée, dans l'ordre d'appel JS.
+    pub ops: Vec<CanvasOpRecord>,
+    /// Objet contexte JS — `getContext("2d")` renvoie
+    /// toujours la même valeur (spec : un contexte par mode).
+    pub ctx_value: Option<Value>,
+    /// `fillStyle` courant (pour le getter JS).
+    pub fill: (u8, u8, u8, u8),
+    /// `strokeStyle` courant.
+    pub stroke: (u8, u8, u8, u8),
+    /// `globalAlpha` courant.
+    pub alpha: f32,
+    /// `lineWidth` courant.
+    pub line_w: f32,
+}
+
+impl Default for CanvasState {
+    fn default() -> Self {
+        Self {
+            ops: Vec::new(),
+            ctx_value: None,
+            fill: (0, 0, 0, 255),
+            stroke: (0, 0, 0, 255),
+            alpha: 1.0,
+            line_w: 1.0,
+        }
+    }
+}
+
+/// Borne par défaut d'ops enregistrées par `<canvas>` —
+/// chaque record ≈ 24–48 o : quelques Mio au pire, et le
+/// playback R-11 reste linéaire (règle « budgets » — boucles
+/// de dessin hostiles).
+const DEFAULT_CANVAS_OP_LIMIT: usize = 65_536;
+
+/// Snapshot « chemin élément → op-list cumulée » exporté par
+/// [`Dom::canvas_ops`] (JS-C28) — même format de chemin que
+/// `take_dirty_path`.
+pub type CanvasOps = Vec<(Vec<(String, u32)>, Vec<CanvasOpRecord>)>;
+
 /// A standalone DOM tree: node arena + document root.
 #[derive(Debug)]
 pub struct Dom {
@@ -160,6 +318,15 @@ pub struct Dom {
     pub nodes: Vec<Node>,
     /// The `#document` node.
     pub root: NodeId,
+    /// Contextes 2D attachés aux `<canvas>` (JS-C28) — un état
+    /// par surface ayant obtenu `getContext("2d")`. Pub comme
+    /// `nodes` (lecture host objects) ; les mutations passent
+    /// par `push_canvas_op`/`set_canvas_ctx`/`clear_canvas`
+    /// (bornage + marquage sale). Meurt avec le document —
+    /// le bitmap appartient à la page.
+    pub canvases: HashMap<NodeId, CanvasState>,
+    /// Borne d'ops par canvas (réglable `set_canvas_op_limit`).
+    canvas_op_limit: usize,
     /// Marqué par toute mutation structurelle/attributaire — l'embedder
     /// lit (et efface) le flag pour savoir si le rendu doit être
     /// resynchronisé avec le miroir (JS-5b).
@@ -196,6 +363,8 @@ impl Dom {
             dirty_node: Cell::new(None),
             observers: HashMap::new(),
             mutations: Vec::new(),
+            canvases: HashMap::new(),
+            canvas_op_limit: DEFAULT_CANVAS_OP_LIMIT,
         };
         d.root = d.alloc(NodeKind::Element, "#document");
         d
@@ -418,6 +587,92 @@ impl Dom {
         }
         path.reverse();
         Some(path)
+    }
+
+    // -- `<canvas>` 2D (JS-C28, couture R-11) ------------------------
+
+    /// État 2D du `<canvas>` `node`, créé au premier
+    /// `getContext("2d")`.
+    pub fn canvas_state(&mut self, node: NodeId) -> &mut CanvasState {
+        self.canvases.entry(node).or_default()
+    }
+
+    /// Enregistre `op` sur le `<canvas>` `node` et marque le
+    /// nœud sale (le dessin est une mutation de **rendu** : la
+    /// session re-peint le sous-arbre — le HTML sérialisé ne
+    /// change pas). Ignorée si `node` n'est pas un élément
+    /// connu, si un scalaire de l'op n'est pas fini (spec :
+    /// arguments NaN/infini ignorés) ou si la borne
+    /// `canvas_op_limit` est atteinte.
+    pub fn push_canvas_op(&mut self, node: NodeId, op: CanvasOpRecord) {
+        let valid = self
+            .nodes
+            .get(node as usize)
+            .is_some_and(|n| n.kind == NodeKind::Element);
+        let room = self
+            .canvases
+            .get(&node)
+            .is_none_or(|s| s.ops.len() < self.canvas_op_limit);
+        if !valid || !room || !op.args_finite() {
+            return;
+        }
+        self.canvases.entry(node).or_default().ops.push(op);
+        self.mark_dirty_at(node);
+    }
+
+    /// Objet contexte JS déjà créé pour `node` — `getContext`
+    /// est idempotent par mode.
+    pub fn canvas_ctx(&self, node: NodeId) -> Option<Value> {
+        self.canvases.get(&node).and_then(|s| s.ctx_value)
+    }
+
+    /// Enregistre l'objet contexte de `node` — semé comme
+    /// racine GC via `canvas_ctx_values`.
+    pub fn set_canvas_ctx(&mut self, node: NodeId, v: Value) {
+        self.canvas_state(node).ctx_value = Some(v);
+    }
+
+    /// Objets JS détenus par la side-table (contextes 2D) —
+    /// semés comme racines GC par `Engine` : un `ctx` survit
+    /// tant que le miroir vit, même si le script a lâché sa
+    /// référence (le canvas reste ré-utilisable).
+    pub fn canvas_ctx_values(&self) -> Vec<Value> {
+        self.canvases.values().filter_map(|s| s.ctx_value).collect()
+    }
+
+    /// `canvas.width=`/`height=` efface le bitmap et remet
+    /// l'état du contexte aux défauts (spec) — l'objet
+    /// contexte survit, la op-list repart à zéro, le nœud
+    /// est marqué sale.
+    pub fn clear_canvas(&mut self, node: NodeId) {
+        if let Some(s) = self.canvases.get_mut(&node) {
+            *s = CanvasState {
+                ctx_value: s.ctx_value.take(),
+                ..CanvasState::default()
+            };
+        }
+        self.mark_dirty_at(node);
+    }
+
+    /// Snapshot « chemin élément → op-list **cumulée** » de
+    /// chaque `<canvas>` ayant dessiné — le playback
+    /// navigateur (R-11) rejoue la liste entière à chaque
+    /// re-peinture : les états ne sont **pas** drainés
+    /// (bitmap persistante, pas un diff). Un `<canvas>`
+    /// détaché du document n'exporte rien — son chemin ne
+    /// résout plus.
+    pub fn canvas_ops(&self) -> CanvasOps {
+        self.canvases
+            .iter()
+            .filter(|(_, s)| !s.ops.is_empty())
+            .filter_map(|(&n, s)| self.element_path(n).map(|p| (p, s.ops.clone())))
+            .collect()
+    }
+
+    /// Règle la borne d'ops par `<canvas>` (règle « budgets »
+    /// — boucles de dessin hostiles).
+    pub fn set_canvas_op_limit(&mut self, limit: usize) {
+        self.canvas_op_limit = limit;
     }
 
     /// Sérialisation du document entier (source de re-rendu, JS-5b).

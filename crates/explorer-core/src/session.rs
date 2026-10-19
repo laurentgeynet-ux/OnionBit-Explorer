@@ -27,7 +27,8 @@ use explorer_dom::{Dom, DomError, NodeId};
 use explorer_html::encoding::{decode, decode_windows1252, sniff_encoding, Encoding};
 use explorer_html::TreeBuilder;
 use explorer_js::{
-    DomSyncPayload, JsEngine, JsFactory, NavRequest, NetRequest, NetResponse, UrlResolver,
+    CanvasOpRecord, DomSyncPayload, JsEngine, JsFactory, NavRequest, NetRequest, NetResponse,
+    UrlResolver,
 };
 use explorer_layout::font::FontSource;
 use explorer_layout::{
@@ -38,6 +39,7 @@ use explorer_net::error::NetResult;
 use explorer_net::http::{HttpTransport, Method, Request, Response};
 use explorer_net::policy::{initiator_headers, is_mixed_content};
 use explorer_net::url::Url;
+use explorer_render::canvas::{CanvasOp, CanvasTable};
 use explorer_render::{
     build_display_list_full, collect_data_images, decode_font, decode_image, rasterize,
     BorderStyle, DecodedImage, DisplayItem, DisplayList, Frame, ImageTable, PaintImages,
@@ -3072,6 +3074,14 @@ impl Session {
         // — il a besoin de l'ancien DOM et de l'ancien arbre.
         let incremental =
             relayout && dirty_path.is_some_and(|p| self.try_sync_incremental(tab, &new_dom, p));
+        // Les op-lists `<canvas>` survivent au re-parse : le
+        // miroir les conserve (bitmap cumulative) — la table
+        // est construite sur `new_dom` **avant** le move dans
+        // l'onglet (chemins → `NodeId` du DOM commis, JS-C28).
+        let canvases = self
+            .tabs
+            .get_mut(&tab)
+            .map_or_else(CanvasTable::new, |e| canvas_table(e, &new_dom));
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.dom = Some(new_dom);
             // `focused`/`hovered` sont des **chemins** — ils
@@ -3085,6 +3095,7 @@ impl Session {
             // En chemin incrémental `svgs`/`tree` sont déjà
             // à jour ; `replaced` seule est vidée.
             entry.images = PaintImages::default();
+            entry.images.canvases = canvases;
             // Un re-parse de synchro rend obsolètes les
             // options figées du popup `<select>` — il se
             // referme (étape 54).
@@ -3168,6 +3179,9 @@ impl Session {
             }
             entry.doc_h = tree.rect.height;
             entry.images.svgs = svgs;
+            // `<canvas>` (JS-C28) — les boîtes re-mappées
+            // portent les `NodeId` du **nouveau** DOM.
+            entry.images.canvases = canvas_table(entry, new_dom);
         }
         if self.repaint(tab).is_ok() {
             self.incremental_syncs += 1;
@@ -3316,6 +3330,10 @@ impl Session {
         entry.doc_h = bx.rect.height;
         entry.tree = Some(bx);
         entry.images.svgs = svgs;
+        // `<canvas>` 2D (JS-C28) : op-lists cumulées du miroir,
+        // re-résolues par chemin d'élément dans `dom` (les
+        // `NodeId` commis indexent la table).
+        entry.images.canvases = canvas_table(entry, dom);
         self.repaint(tab)
     }
 
@@ -5334,6 +5352,65 @@ fn dom_path_node(dom: &Dom, path: &[(String, u32)]) -> Option<NodeId> {
         cur = next?;
     }
     Some(cur)
+}
+
+/// `<canvas>` 2D (JS-C28, couture R-11) : les op-lists
+/// **cumulées** du miroir sont re-résolues par chemin
+/// d'élément vers les `NodeId` du DOM **commis** — un chemin
+/// qui ne mène nulle part (canvas détaché, arbres divergents)
+/// est ignoré : le `<canvas>` reste un remplacé vide, jamais
+/// une erreur. Pas de moteur (onglet sans JS, moteur détaché
+/// 53f) → table vide, les ops seront relues à la prochaine
+/// passe.
+fn canvas_table(entry: &mut Tab, dom: &Dom) -> CanvasTable {
+    let mut out = CanvasTable::new();
+    let Some(eng) = entry.js.as_deref_mut() else {
+        return out;
+    };
+    for (path, recs) in eng.canvas_ops() {
+        if recs.is_empty() {
+            continue;
+        }
+        let Some(n) = dom_path_node(dom, &path) else {
+            continue;
+        };
+        out.insert(n, recs.iter().map(to_canvas_op).collect());
+    }
+    out
+}
+
+/// `CanvasOpRecord` (miroir `dillo-js`, sérialisable) →
+/// `CanvasOp` (playback R-11) — traduction champ pour champ
+/// des deux énumérations figées par la couture.
+fn to_canvas_op(rec: &CanvasOpRecord) -> CanvasOp {
+    use CanvasOpRecord as R;
+    match *rec {
+        R::Save => CanvasOp::Save,
+        R::Restore => CanvasOp::Restore,
+        R::Translate(x, y) => CanvasOp::Translate(x, y),
+        R::Scale(x, y) => CanvasOp::Scale(x, y),
+        R::Rotate(r) => CanvasOp::Rotate(r),
+        R::Transform(m1, m2, m3, m4, m5, m6) => CanvasOp::Transform(m1, m2, m3, m4, m5, m6),
+        R::SetTransform(m1, m2, m3, m4, m5, m6) => CanvasOp::SetTransform(m1, m2, m3, m4, m5, m6),
+        R::FillColor { r, g, b, a } => CanvasOp::FillColor(Color { r, g, b, a }),
+        R::StrokeColor { r, g, b, a } => CanvasOp::StrokeColor(Color { r, g, b, a }),
+        R::GlobalAlpha(v) => CanvasOp::GlobalAlpha(v),
+        R::LineWidth(v) => CanvasOp::LineWidth(v),
+        R::BeginPath => CanvasOp::BeginPath,
+        R::MoveTo(x, y) => CanvasOp::MoveTo(x, y),
+        R::LineTo(x, y) => CanvasOp::LineTo(x, y),
+        R::QuadraticTo(cx, cy, x, y) => CanvasOp::QuadraticTo(cx, cy, x, y),
+        R::BezierTo(x1, y1, x2, y2, x3, y3) => CanvasOp::BezierTo(x1, y1, x2, y2, x3, y3),
+        R::Arc(x, y, r, sa, ea, ccw) => CanvasOp::Arc(x, y, r, sa, ea, ccw),
+        R::Rect(x, y, w, h) => CanvasOp::Rect(x, y, w, h),
+        R::ClosePath => CanvasOp::ClosePath,
+        R::Fill => CanvasOp::Fill,
+        R::Stroke => CanvasOp::Stroke,
+        R::Clip => CanvasOp::Clip,
+        R::FillRect(x, y, w, h) => CanvasOp::FillRect(x, y, w, h),
+        R::StrokeRect(x, y, w, h) => CanvasOp::StrokeRect(x, y, w, h),
+        R::ClearRect(x, y, w, h) => CanvasOp::ClearRect(x, y, w, h),
+    }
 }
 
 fn find_by_id(dom: &Dom, id: &str) -> Option<NodeId> {

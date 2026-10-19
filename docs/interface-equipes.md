@@ -47,7 +47,7 @@ Règles :
 | Date | Contrat | Extension | Demandeur | État |
 |---|---|---|---|---|
 | 2026-10-19 | display list `explorer-render` | dirty rects rapportés par frame | NAV (étape 55) | livré → **R-7** (`DisplayList::changed_rects`) |
-| 2026-10-19 | `explorer-render` | playback op-list canvas → `DisplayItem::Image` | NAV (JS-C28) | livré → **R-11** — couture figée : `canvas::CanvasOp`/`CanvasTable` (`NodeId` → `Vec<CanvasOp>`), champ `PaintImages.canvases`, `<canvas>` remplacé intrinsèque 300×150 (attrs `width`/`height`) ; NAV enregistre les appels `getContext("2d")` en `CanvasOp` et remplit la table |
+| 2026-10-19 | `explorer-render` | playback op-list canvas → `DisplayItem::Image` | NAV (JS-C28) | livré → **R-11** — couture figée : `canvas::CanvasOp`/`CanvasTable` (`NodeId` → `Vec<CanvasOp>`), champ `PaintImages.canvases`, `<canvas>` remplacé intrinsèque 300×150 (attrs `width`/`height`) ; **consommé** — JS-C28 enregistre en `CanvasOpRecord` miroir → `canvas_ops()` → `CanvasTable` |
 | 2026-10-19 | domaine (boxtree/display list) | tolérance « document en construction » pour peinture progressive | NAV (étape 53) | livré → **R-1** (`TreeBuilder::push`/`finish`, `Dom::document_element`) |
 | 2026-10-19 | `dillo-js` (interne NAV) | `MutationObserver` delivery microtask | NAV (étape 52) | proposé → JS-C26 |
 | 2026-10-19 | `explorer-css` sélecteurs | pseudo-classes `:valid` / `:invalid` (`:user-invalid`) appuyées sur l'état de validation formulaires (hôte : `Dom::element` + règles §4.10.21.2) | NAV (étape 54) | proposé |

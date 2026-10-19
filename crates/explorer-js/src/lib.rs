@@ -143,6 +143,20 @@ pub type DomPath = Vec<(String, u32)>;
 /// granulaire → l'appelant refait un reflow global).
 pub type DomSyncPayload = (String, Option<DomPath>);
 
+/// Op-list `<canvas>` enregistrée par un contexte 2D du
+/// miroir (JS-C28, couture R-11) — `dillo_js::CanvasOpRecord`
+/// est le miroir sérialisable de
+/// `explorer_render::canvas::CanvasOp` : la session traduit
+/// champ pour champ et re-résout les chemins en `NodeId`.
+pub use dillo_js::CanvasOpRecord;
+
+/// Table « chemin élément → op-list **cumulée** » lue sur le
+/// moteur — mêmes chemins que [`DomSyncPayload`] (ils
+/// survivent au re-parse). La liste n'est pas drainée : la
+/// bitmap canvas est persistante (spec), le playback R-11
+/// la rejoue entière à chaque re-peinture.
+pub type CanvasOpsTable = Vec<(DomPath, Vec<CanvasOpRecord>)>;
+
 /// Moteur JavaScript vu du navigateur — un contexte par document.
 /// `Send` exigé : la session est partagée derrière l'API.
 pub trait JsEngine: Send {
@@ -220,6 +234,16 @@ pub trait JsEngine: Send {
     /// Défaut : délègue à [`Self::sync_dom`] sans chemin.
     fn sync_dom_path(&mut self) -> Option<DomSyncPayload> {
         self.sync_dom().map(|h| (h, None))
+    }
+
+    /// Snapshot « chemin élément → op-list » des `<canvas>`
+    /// ayant dessiné (JS-C28, couture R-11) — liste
+    /// **cumulée** relue à chaque appel (bitmap persistante,
+    /// jamais drainée). La session la traduit en `CanvasOp`
+    /// et re-résout les chemins dans le DOM commis. Défaut :
+    /// vide (moteur sans surface canvas).
+    fn canvas_ops(&mut self) -> CanvasOpsTable {
+        Vec::new()
     }
 
     /// Évalue un module ES (étape 50) : `entry` est le nom
@@ -377,6 +401,9 @@ enum Cmd {
     },
     DomSync {
         tx: Sender<Option<DomSyncPayload>>,
+    },
+    CanvasOps {
+        tx: Sender<CanvasOpsTable>,
     },
     EvalModule {
         entry: String,
@@ -553,9 +580,9 @@ impl DilloEngine {
                 }
                 Cmd::SetBudget { ops } => eng.set_op_limit(ops),
                 Cmd::Shutdown => return,
-                // Surfaces script-initiées (JS-C27) déléguées.
+                // Surfaces script-initiées (JS-C27/C28) déléguées.
                 net => {
-                    if !serve_net(&mut eng, &net_q, &jar, &mut local_store, net) {
+                    if !serve_side(&mut eng, jsd.as_ref(), &net_q, &jar, &mut local_store, net) {
                         return;
                     }
                 }
@@ -646,6 +673,14 @@ impl JsEngine for DilloEngine {
             return None;
         }
         rx.recv().ok().flatten()
+    }
+
+    fn canvas_ops(&mut self) -> CanvasOpsTable {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::CanvasOps { tx }).is_err() {
+            return Vec::new();
+        }
+        rx.recv().unwrap_or_default()
     }
 
     fn eval_module(
@@ -764,6 +799,15 @@ fn eval_module(
     }
 }
 
+/// `Cmd::CanvasOps` côté worker : op-lists `<canvas>`
+/// cumulées du miroir (JS-C28) — snapshot par chemin
+/// d'élément, jamais drainé (la bitmap persiste entre deux
+/// re-peintures).
+fn canvas_ops_of(jsd: Option<&dillo_js::DomRef>) -> CanvasOpsTable {
+    jsd.as_ref()
+        .map_or_else(Vec::new, |d| d.borrow().canvas_ops())
+}
+
 /// `Cmd::SyncField` côté worker : l'état hôte d'un champ
 /// (`value`, `checked`, `open`…) est reporté dans le miroir
 /// pour que les handlers JS le lisent. `<textarea>` expose sa
@@ -813,18 +857,22 @@ fn dispatch_event(
     }
 }
 
-/// Bras JS-C27 du worker : drains et livraisons des surfaces
-/// net/storage/cookie. `false` = canal de réponse fermé → le
-/// worker s'arrête ; tout autre `Cmd` est ignoré (invariant :
-/// l'appelant ne délègue que les commandes net).
-fn serve_net(
+/// Bras délégué du worker : drains/livraisons des surfaces
+/// script-initiées — net/storage/cookie (JS-C27) **et**
+/// op-lists `<canvas>` (JS-C28, lecture de la side-table du
+/// miroir). `false` = canal de réponse fermé → le worker
+/// s'arrête ; tout autre `Cmd` est ignoré (invariant :
+/// l'appelant ne délègue que ces commandes).
+fn serve_side(
     eng: &mut dillo_js::Engine,
+    jsd: Option<&dillo_js::DomRef>,
     net_q: &std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
     jar: &std::rc::Rc<SnapshotJar>,
     local_store: &mut Option<dillo_js::Storage>,
     cmd: Cmd,
 ) -> bool {
     match cmd {
+        Cmd::CanvasOps { tx } => tx.send(canvas_ops_of(jsd)).is_ok(),
         Cmd::DrainNet { tx } => {
             let out = std::mem::take(&mut *net_q.borrow_mut());
             tx.send(out).is_ok()

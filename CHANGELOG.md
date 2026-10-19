@@ -9,6 +9,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C28 — surface `<canvas>` 2D** (`dillo-js`,
+  `explorer-js`, `explorer-core` — adoption de la couture
+  **R-11** côté NAV) : `canvas.getContext('2d')` rend un
+  `CanvasRenderingContext2D` qui **enregistre** ses appels —
+  `CanvasOpRecord`, miroir sérialisable de `CanvasOp` —
+  dans une side-table du DOM miroir (bitmap cumulative,
+  spec). Couverture MVP : `fillRect`/`strokeRect`/`clearRect`,
+  chemins (`beginPath`/`moveTo`/`lineTo`/`quadraticCurveTo`/
+  `bezierCurveTo`/`arc`/`rect`/`closePath`), `fill`/`stroke`/
+  `clip`, transforms complètes, `fillStyle`/`strokeStyle`
+  (couleurs `#rgb[a]`/`#rrggbb[aa]`/`rgb[a]`/noms),
+  `globalAlpha`, `lineWidth`, `save`/`restore` ; `canvas.
+  width`/`height` numériques, leur écriture efface le bitmap
+  (spec). APIs hors MVP absorbées sans `TypeError`
+  (`drawImage`, `fillText`, gradients opaques, `measureText`,
+  `getImageData` minimal, `isPointIn*`) ; mode ≠ `2d` →
+  `null`. Chaque op marque le `<canvas>` sale → synchro à
+  chemin ciblé (`relayout_subtree`), bornée
+  `canvas_op_limit` ; contextes semés en racines GC. La
+  session traduit `CanvasOpRecord → CanvasOp` et résout les
+  chemins miroir en `NodeId` du DOM commis
+  (`PaintImages.canvases`, y compris bfcache). Régressions :
+  `canvas_context_records_ops`, `canvas_getctx_kinds_and_
+  identity`, `canvas_op_marks_dirty_path`,
+  `canvas_width_reset_clears_ops` (dillo-js) ;
+  `canvas_2d_script_paints_bitmap` (session, pixels).
+
 - **Étape 56b — auto-réparation du `/frame` 204 persistant**
   (`explorer-core`, rouvert terrain mission 13) : un DOM
   commis sans produit peint — fenêtre `nav_apply` →

@@ -1475,3 +1475,111 @@ fn dirty_path_tracks_mutated_subtree() {
         "mutation localisée → sous-arbre précis"
     );
 }
+
+// -- `<canvas>` 2D (JS-C28, couture R-11) ------------------------------
+
+const PAGE_CANVAS: &str = r#"
+<html><body><canvas id="c" width="100" height="80"></canvas></body></html>
+"#;
+
+#[test]
+fn canvas_context_records_ops() {
+    use dillo_js::CanvasOpRecord as R;
+    let dom = Rc::new(RefCell::new(Dom::from_html(PAGE_CANVAS)));
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    e.eval(
+        r"const ctx = document.getElementById('c').getContext('2d');
+          ctx.fillStyle = '#ff0000';
+          ctx.fillRect(1, 2, 30, 40);
+          ctx.globalAlpha = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(0, 0); ctx.lineTo(10, 10); ctx.stroke();",
+    )
+    .expect("eval canvas");
+    let ops = dom.borrow().canvas_ops();
+    assert_eq!(ops.len(), 1);
+    let (path, recs) = &ops[0];
+    assert_eq!(path.last().map(|(t, _)| t.as_str()), Some("canvas"));
+    assert_eq!(
+        recs.as_slice(),
+        &[
+            R::FillColor {
+                r: 255,
+                g: 0,
+                b: 0,
+                a: 255
+            },
+            R::FillRect(1.0, 2.0, 30.0, 40.0),
+            R::GlobalAlpha(0.5),
+            R::BeginPath,
+            R::MoveTo(0.0, 0.0),
+            R::LineTo(10.0, 10.0),
+            R::Stroke,
+        ]
+    );
+}
+
+#[test]
+fn canvas_getctx_kinds_and_identity() {
+    let dom = Rc::new(RefCell::new(Dom::from_html(PAGE_CANVAS)));
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    // Spec : un seul contexte par mode ; mode inconnu → null ;
+    // non-canvas → null.
+    let webgl = e
+        .eval("document.getElementById('c').getContext('webgl')")
+        .expect("webgl");
+    assert_eq!(e.describe(webgl), "null");
+    let same = e
+        .eval(
+            "document.getElementById('c').getContext('2d') === \
+             document.getElementById('c').getContext('2d')",
+        )
+        .expect("identity");
+    assert_eq!(e.describe(same), "true");
+    let not_canvas = e
+        .eval("document.body.getContext('2d')")
+        .expect("non-canvas");
+    assert_eq!(e.describe(not_canvas), "null");
+}
+
+#[test]
+fn canvas_op_marks_dirty_path() {
+    // Un dessin est une mutation de rendu — le `<canvas>` est
+    // le chemin sale rapporté à la synchro (relayout ciblé).
+    let dom = Rc::new(RefCell::new(Dom::from_html(PAGE_CANVAS)));
+    dom.borrow().take_dirty();
+    dom.borrow().take_dirty_path();
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    e.eval("document.getElementById('c').getContext('2d').fillRect(0,0,5,5)")
+        .expect("fillRect");
+    let path = dom
+        .borrow()
+        .take_dirty_path()
+        .expect("une op canvas doit salir");
+    assert_eq!(path.last().map(|(t, _)| t.as_str()), Some("canvas"));
+}
+
+#[test]
+fn canvas_width_reset_clears_ops() {
+    // `canvas.width =` efface le bitmap enregistré (spec).
+    let dom = Rc::new(RefCell::new(Dom::from_html(PAGE_CANVAS)));
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    e.eval(
+        r"const c = document.getElementById('c');
+          const ctx = c.getContext('2d');
+          ctx.fillRect(0, 0, 9, 9);
+          c.width = 200;",
+    )
+    .expect("resize");
+    assert!(
+        dom.borrow().canvas_ops().is_empty() || dom.borrow().canvas_ops()[0].1.is_empty(),
+        "width= efface la op-list"
+    );
+    // La valeur numérique est relue depuis l'attribut.
+    let w = e.eval("c.width").expect("width prop");
+    assert_eq!(e.describe(w), "200");
+}

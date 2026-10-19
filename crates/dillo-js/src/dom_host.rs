@@ -9,7 +9,7 @@
 //! `innerHTML`, `className`, `style`, `value`, `addEventListener`
 //! (dispatch réelle = JS-3), `querySelector` à sélecteur simple.
 
-use crate::dom::{Dom, NodeId, NodeKind};
+use crate::dom::{CanvasOpRecord, Dom, NodeId, NodeKind};
 use crate::heap::{Host, JsResult, ObjKind};
 use crate::value::{ObjId, Value};
 use crate::Engine;
@@ -922,6 +922,20 @@ impl Host for NodeHost {
 
     fn get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
         let node = self.node;
+        // `<canvas>.width`/`.height` (JS-C28) : valeur
+        // **numérique** lue sur l'attribut — défaut spec
+        // 300×150 (les autres éléments suivent le chemin
+        // générique prop→attr).
+        if matches!(key, "width" | "height")
+            && self.dom.borrow().nodes[node as usize].tag == "canvas"
+        {
+            let d = self.dom.borrow();
+            let v = d
+                .attr(node, key)
+                .and_then(|s| s.trim().parse::<f64>().ok())
+                .unwrap_or(if key == "width" { 300.0 } else { 150.0 });
+            return Ok(Some(Value::Num(v.max(0.0))));
+        }
         // Fast paths that don't need the dom borrow held across calls.
         match key {
             "style" => {
@@ -1190,6 +1204,21 @@ impl Host for NodeHost {
                 let s = e.to_js_string(v)?;
                 self.dom.borrow_mut().set_attr(node, "class", &s);
                 Ok(true)
+            }
+            // `<canvas>.width=`/`height=` (JS-C28) :
+            // attribut + effacement du bitmap + remise à
+            // zéro de l'état 2D (spec). Coercion avant le
+            // borrow — un `valueOf` ré-entrant peut toucher
+            // le miroir.
+            "width" | "height" => {
+                let s = e.to_js_string(v)?;
+                let mut d = self.dom.borrow_mut();
+                if d.nodes[node as usize].tag == "canvas" {
+                    d.set_attr(node, key, &s);
+                    d.clear_canvas(node);
+                    return Ok(true);
+                }
+                Ok(false)
             }
             "value" => {
                 let s = e.to_js_string(v)?;
@@ -1466,6 +1495,28 @@ impl Host for NodeHost {
                     Some(n) => node_value(e, &self.dom, &self.cache, n),
                     None => Value::Null,
                 }))
+            }
+            // `<canvas>.getContext("2d")` (JS-C28, couture
+            // R-11) : le contexte **enregistre** ses appels
+            // dans la side-table du miroir — jamais de raster
+            // ici. Un contexte par mode et par nœud : l'objet
+            // est mis en cache sur le `Dom`.
+            "getContext" => {
+                let kind = e.to_js_string(arg(args, 0))?;
+                let is_canvas = self.dom.borrow().nodes[node as usize].tag == "canvas";
+                if !is_canvas || kind != "2d" {
+                    return Ok(Some(Value::Null));
+                }
+                if let Some(v) = self.dom.borrow().canvas_ctx(node) {
+                    return Ok(Some(v));
+                }
+                let v = e.new_host_object(Rc::new(Ctx2dHost {
+                    dom: self.dom.clone(),
+                    cache: self.cache.clone(),
+                    node,
+                }));
+                self.dom.borrow_mut().set_canvas_ctx(node, v);
+                Ok(Some(v))
             }
             // `prepend(...kids)` / `before`/`after`/`replaceWith` —
             // nodes or strings (strings → text nodes).
@@ -2368,3 +2419,434 @@ fn push_named_field(d: &Dom, n: NodeId, value: String, out: &mut Vec<(String, St
         }
     }
 }
+
+// -- `<canvas>` 2D (JS-C28, couture R-11) ------------------------------
+//
+// `Ctx2dHost` **enregistre** les appels `CanvasRenderingContext2D`
+// dans la side-table `Dom::canvases` — aucun raster côté moteur :
+// la session traduit `CanvasOpRecord` → `CanvasOp` et le playback
+// `raster_ops` peint un bitmap remplacé. Chaque op pousse
+// `mark_dirty_at(canvas)` → le nœud est le chemin sale de la
+// prochaine synchro (relayout ciblé du sous-arbre `<canvas>`).
+
+/// Méthodes contexte 2D hors MVP R-11 absorbées en no-op — les
+/// scripts réels les chaînent au milieu d'une séquence de
+/// dessin ; une `TypeError` tuerait le bloc entier alors que
+/// l'op manquante est un trou visuel acceptable.
+const NOOP_CTX_METHODS: &[&str] = &[
+    "ellipse",
+    "roundRect",
+    "drawImage",
+    "fillText",
+    "strokeText",
+    "setLineDash",
+    "drawFocusIfNeeded",
+    "scrollPathIntoView",
+    "putImageData",
+    "reset",
+    "resetTransform",
+];
+
+/// `CanvasRenderingContext2D` — enregistreur d'op-list sur le
+/// `<canvas>` `node` (JS-C28).
+struct Ctx2dHost {
+    dom: DomRef,
+    cache: NodeCache,
+    node: NodeId,
+}
+
+/// `CanvasGradient`/`CanvasPattern` opaque (hors MVP R-11) :
+/// `addColorStop` existe pour que les scripts n'échouent pas ;
+/// assigné à `fillStyle`, le parse couleur échoue et le
+/// réglage précédent survit (spec : valeur illisible ignorée).
+struct GradientHost;
+
+/// Argument numérique `i` coercé (`to_number` — un `valueOf`
+/// ré-entrant peut toucher le miroir : toujours **avant** le
+/// `borrow_mut` qui pousse l'op).
+fn fnum(e: &mut Engine, args: &[Value], i: usize) -> JsResult<f32> {
+    Ok(e.to_number(arg(args, i))? as f32)
+}
+
+impl Host for Ctx2dHost {
+    fn class_name(&self) -> &'static str {
+        "CanvasRenderingContext2D"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn get(&self, e: &mut Engine, _this: Value, key: &str) -> JsResult<Option<Value>> {
+        match key {
+            "canvas" => Ok(Some(node_value(e, &self.dom, &self.cache, self.node))),
+            "fillStyle" | "strokeStyle" => {
+                let c = self
+                    .dom
+                    .borrow()
+                    .canvases
+                    .get(&self.node)
+                    .map_or((0, 0, 0, 255), |s| {
+                        if key == "fillStyle" {
+                            s.fill
+                        } else {
+                            s.stroke
+                        }
+                    });
+                Ok(Some(e.str_val(css_color_string(c))))
+            }
+            "globalAlpha" => {
+                let a = self
+                    .dom
+                    .borrow()
+                    .canvases
+                    .get(&self.node)
+                    .map_or(1.0, |s| s.alpha);
+                Ok(Some(Value::Num(f64::from(a))))
+            }
+            "lineWidth" => {
+                let w = self
+                    .dom
+                    .borrow()
+                    .canvases
+                    .get(&self.node)
+                    .map_or(1.0, |s| s.line_w);
+                Ok(Some(Value::Num(f64::from(w))))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn set(&self, e: &mut Engine, _this: Value, key: &str, v: Value) -> JsResult<bool> {
+        match key {
+            // Spec : valeur illisible → assignation ignorée
+            // (pas d'exception, pas d'op enregistrée).
+            "fillStyle" | "strokeStyle" => {
+                let s = e.to_js_string(v)?;
+                if let Some((r, g, b, a)) = parse_css_color(&s) {
+                    let mut d = self.dom.borrow_mut();
+                    {
+                        let st = d.canvas_state(self.node);
+                        if key == "fillStyle" {
+                            st.fill = (r, g, b, a);
+                        } else {
+                            st.stroke = (r, g, b, a);
+                        }
+                    }
+                    d.push_canvas_op(
+                        self.node,
+                        if key == "fillStyle" {
+                            CanvasOpRecord::FillColor { r, g, b, a }
+                        } else {
+                            CanvasOpRecord::StrokeColor { r, g, b, a }
+                        },
+                    );
+                }
+                Ok(true)
+            }
+            // Spec : hors `[0, 1]` → assignation ignorée.
+            "globalAlpha" => {
+                let x = e.to_number(v)?;
+                if (0.0..=1.0).contains(&x) {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let x = x as f32;
+                    let mut d = self.dom.borrow_mut();
+                    d.canvas_state(self.node).alpha = x;
+                    d.push_canvas_op(self.node, CanvasOpRecord::GlobalAlpha(x));
+                }
+                Ok(true)
+            }
+            // Spec : non fini ou ≤ 0 → assignation ignorée.
+            "lineWidth" => {
+                let x = e.to_number(v)?;
+                if x.is_finite() && x > 0.0 {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let x = x as f32;
+                    let mut d = self.dom.borrow_mut();
+                    d.canvas_state(self.node).line_w = x;
+                    d.push_canvas_op(self.node, CanvasOpRecord::LineWidth(x));
+                }
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _this: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        use CanvasOpRecord as R;
+        let op = match name {
+            "save" => R::Save,
+            "restore" => R::Restore,
+            "beginPath" => R::BeginPath,
+            "closePath" => R::ClosePath,
+            "fill" => R::Fill,
+            "stroke" => R::Stroke,
+            "clip" => R::Clip,
+            "translate" => R::Translate(fnum(e, args, 0)?, fnum(e, args, 1)?),
+            "scale" => R::Scale(fnum(e, args, 0)?, fnum(e, args, 1)?),
+            "rotate" => R::Rotate(fnum(e, args, 0)?),
+            "transform" => R::Transform(
+                fnum(e, args, 0)?,
+                fnum(e, args, 1)?,
+                fnum(e, args, 2)?,
+                fnum(e, args, 3)?,
+                fnum(e, args, 4)?,
+                fnum(e, args, 5)?,
+            ),
+            "setTransform" => R::SetTransform(
+                fnum(e, args, 0)?,
+                fnum(e, args, 1)?,
+                fnum(e, args, 2)?,
+                fnum(e, args, 3)?,
+                fnum(e, args, 4)?,
+                fnum(e, args, 5)?,
+            ),
+            "moveTo" => R::MoveTo(fnum(e, args, 0)?, fnum(e, args, 1)?),
+            "lineTo" => R::LineTo(fnum(e, args, 0)?, fnum(e, args, 1)?),
+            "quadraticCurveTo" => R::QuadraticTo(
+                fnum(e, args, 0)?,
+                fnum(e, args, 1)?,
+                fnum(e, args, 2)?,
+                fnum(e, args, 3)?,
+            ),
+            "bezierCurveTo" => R::BezierTo(
+                fnum(e, args, 0)?,
+                fnum(e, args, 1)?,
+                fnum(e, args, 2)?,
+                fnum(e, args, 3)?,
+                fnum(e, args, 4)?,
+                fnum(e, args, 5)?,
+            ),
+            "arc" => R::Arc(
+                fnum(e, args, 0)?,
+                fnum(e, args, 1)?,
+                fnum(e, args, 2)?,
+                fnum(e, args, 3)?,
+                fnum(e, args, 4)?,
+                e.to_boolean(arg(args, 5)),
+            ),
+            "rect" => R::Rect(
+                fnum(e, args, 0)?,
+                fnum(e, args, 1)?,
+                fnum(e, args, 2)?,
+                fnum(e, args, 3)?,
+            ),
+            "fillRect" => R::FillRect(
+                fnum(e, args, 0)?,
+                fnum(e, args, 1)?,
+                fnum(e, args, 2)?,
+                fnum(e, args, 3)?,
+            ),
+            "strokeRect" => R::StrokeRect(
+                fnum(e, args, 0)?,
+                fnum(e, args, 1)?,
+                fnum(e, args, 2)?,
+                fnum(e, args, 3)?,
+            ),
+            "clearRect" => R::ClearRect(
+                fnum(e, args, 0)?,
+                fnum(e, args, 1)?,
+                fnum(e, args, 2)?,
+                fnum(e, args, 3)?,
+            ),
+            // APIs hors MVP R-11 avec valeur de retour
+            // plausible — absorbées, jamais de TypeError.
+            "measureText" => {
+                let o = e.new_object();
+                e.set_own(o, "width", Value::Num(0.0), true);
+                return Ok(Some(Value::Obj(o)));
+            }
+            "getLineDash" => return Ok(Some(e.new_array(Vec::new()))),
+            "isPointInPath" | "isPointInStroke" => return Ok(Some(Value::Bool(false))),
+            "createLinearGradient"
+            | "createRadialGradient"
+            | "createConicGradient"
+            | "createPattern" => {
+                return Ok(Some(e.new_host_object(Rc::new(GradientHost))));
+            }
+            "getImageData" => {
+                let w = fnum(e, args, 2)?.max(0.0);
+                let h = fnum(e, args, 3)?.max(0.0);
+                let o = e.new_object();
+                e.set_own(o, "width", Value::Num(f64::from(w)), true);
+                e.set_own(o, "height", Value::Num(f64::from(h)), true);
+                let data = e.new_array(Vec::new());
+                e.set_own(o, "data", data, true);
+                return Ok(Some(Value::Obj(o)));
+            }
+            _ if NOOP_CTX_METHODS.contains(&name) => return Ok(Some(Value::Undefined)),
+            _ => return Ok(None),
+        };
+        self.dom.borrow_mut().push_canvas_op(self.node, op);
+        Ok(Some(Value::Undefined))
+    }
+}
+
+impl Host for GradientHost {
+    fn class_name(&self) -> &'static str {
+        "CanvasGradient"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn invoke(
+        &self,
+        _e: &mut Engine,
+        _this: Value,
+        name: &str,
+        _args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        if name == "addColorStop" {
+            return Ok(Some(Value::Undefined));
+        }
+        Ok(None)
+    }
+}
+
+/// `rgba8` — la forme couleur des op-lists canvas (JS-C28).
+type Rgba8 = (u8, u8, u8, u8);
+
+/// Couleur courante → chaîne normalisée du getter
+/// (`#rrggbb` si opaque, `rgba(…)` sinon — forme spec).
+fn css_color_string((r, g, b, a): Rgba8) -> String {
+    if a == 255 {
+        format!("#{r:02x}{g:02x}{b:02x}")
+    } else {
+        format!("rgba({r}, {g}, {b}, {:.3})", f64::from(a) / 255.0)
+    }
+}
+
+/// Parse couleur CSS pour `fillStyle`/`strokeStyle` (JS-C28)
+/// : `#rgb[a]`, `#rrggbb[aa]`, `rgb[a](…)` (entiers ou `%`,
+/// alpha `0–1` ou `%`), `transparent`, noms usuels. Hors MVP :
+/// `hsl()`/`hwb()`/`color()`/dégradés — `None` = assignation
+/// ignorée (spec).
+fn parse_css_color(s: &str) -> Option<Rgba8> {
+    let s = s.trim();
+    if let Some(hex) = s.strip_prefix('#') {
+        let h = hex.as_bytes();
+        let dig = |i: usize| (h.get(i).copied()? as char).to_digit(16).map(|d| d as u8);
+        return match h.len() {
+            3 | 4 => Some((
+                dig(0)? * 17,
+                dig(1)? * 17,
+                dig(2)? * 17,
+                if h.len() == 4 { dig(3)? * 17 } else { 255 },
+            )),
+            6 | 8 => Some((
+                dig(0)? * 16 + dig(1)?,
+                dig(2)? * 16 + dig(3)?,
+                dig(4)? * 16 + dig(5)?,
+                if h.len() == 8 {
+                    dig(6)? * 16 + dig(7)?
+                } else {
+                    255
+                },
+            )),
+            _ => None,
+        };
+    }
+    let fn_body = s
+        .strip_prefix("rgba(")
+        .or_else(|| s.strip_prefix("rgb("))
+        .and_then(|t| t.strip_suffix(')'));
+    if let Some(inner) = fn_body {
+        return parse_rgb_fn(inner);
+    }
+    if s.eq_ignore_ascii_case("transparent") {
+        return Some((0, 0, 0, 0));
+    }
+    NAMED_COLORS
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(s))
+        .map(|(_, c)| *c)
+}
+
+/// `rgb()`/`rgba()` — composantes `0–255` ou `%`, alpha
+/// `0–1` ou `%` ; formes virgule et espace (`/`) acceptées.
+fn parse_rgb_fn(inner: &str) -> Option<Rgba8> {
+    let (comps, alpha) = match inner.split_once('/') {
+        Some((c, a)) => (c, Some(a.trim())),
+        None => (inner, None),
+    };
+    let toks: Vec<&str> = if comps.contains(',') {
+        let t: Vec<&str> = comps.split(',').map(str::trim).collect();
+        let (rgb, a) = t.split_at(t.len().min(3));
+        let alpha = alpha.or_else(|| a.first().copied());
+        return toks_color(rgb, alpha);
+    } else {
+        comps.split_whitespace().collect()
+    };
+    toks_color(&toks, alpha)
+}
+
+fn toks_color(rgb: &[&str], alpha: Option<&str>) -> Option<Rgba8> {
+    if rgb.len() != 3 {
+        return None;
+    }
+    Some((
+        css_chan(rgb[0])?,
+        css_chan(rgb[1])?,
+        css_chan(rgb[2])?,
+        alpha.map_or(Some(255), css_alpha)?,
+    ))
+}
+
+/// Composante `0–255` ou `%`.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn css_chan(t: &str) -> Option<u8> {
+    if let Some(p) = t.strip_suffix('%') {
+        return Some((p.parse::<f32>().ok()? * 2.55).round().clamp(0.0, 255.0) as u8);
+    }
+    Some(t.parse::<f32>().ok()?.round().clamp(0.0, 255.0) as u8)
+}
+
+/// Alpha `0–1` ou `%`.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn css_alpha(t: &str) -> Option<u8> {
+    if let Some(p) = t.strip_suffix('%') {
+        return Some((p.parse::<f32>().ok()? * 2.55).round().clamp(0.0, 255.0) as u8);
+    }
+    Some((t.parse::<f32>().ok()? * 255.0).round().clamp(0.0, 255.0) as u8)
+}
+
+/// `(nom, rgba8)` d'une couleur nommée.
+type NamedColor = (&'static str, Rgba8);
+
+/// Noms usuels (niveau CSS 1 + fréquents du web réel) —
+/// la table complète (~150) est un chantier PIPE, pas ici.
+const NAMED_COLORS: &[NamedColor] = &[
+    ("black", (0, 0, 0, 255)),
+    ("white", (255, 255, 255, 255)),
+    ("red", (255, 0, 0, 255)),
+    ("lime", (0, 255, 0, 255)),
+    ("green", (0, 128, 0, 255)),
+    ("blue", (0, 0, 255, 255)),
+    ("yellow", (255, 255, 0, 255)),
+    ("cyan", (0, 255, 255, 255)),
+    ("aqua", (0, 255, 255, 255)),
+    ("magenta", (255, 0, 255, 255)),
+    ("fuchsia", (255, 0, 255, 255)),
+    ("gray", (128, 128, 128, 255)),
+    ("grey", (128, 128, 128, 255)),
+    ("silver", (192, 192, 192, 255)),
+    ("maroon", (128, 0, 0, 255)),
+    ("olive", (128, 128, 0, 255)),
+    ("purple", (128, 0, 128, 255)),
+    ("teal", (0, 128, 128, 255)),
+    ("navy", (0, 0, 128, 255)),
+    ("orange", (255, 165, 0, 255)),
+    ("brown", (165, 42, 42, 255)),
+    ("pink", (255, 192, 203, 255)),
+    ("gold", (255, 215, 0, 255)),
+    ("rebeccapurple", (102, 51, 153, 255)),
+];

@@ -860,6 +860,52 @@ async fn script_dom_append_is_rendered() {
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
 
+/// Page `<canvas>` dessinée par script (JS-C28, couture R-11).
+const PAGE_CANVAS: &str = "<!doctype html><html><body>\
+<canvas id=\"c\" width=\"40\" height=\"30\"></canvas>\
+<script>var x=document.getElementById('c').getContext('2d');\
+x.fillStyle='#ff0000';x.fillRect(0,0,40,30);\
+x.strokeStyle='#0000ff';x.strokeRect(2,2,10,10)</script></body></html>";
+
+/// `<canvas>` 2D : `getContext`/`fillRect` enregistrent dans
+/// le miroir → la session rejoue la op-list (R-11) et la
+/// frame contient les pixels peints par le script.
+#[tokio::test]
+async fn canvas_2d_script_paints_bitmap() {
+    let (mut sess, tr) = test_session();
+    tr.route("/c", 200, PAGE_CANVAS);
+    tr.route(
+        "/plain",
+        200,
+        "<!doctype html><html><body><canvas width=\"40\" height=\"30\"></canvas></body></html>",
+    );
+    sess.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let drawn = sess.open_tab();
+    sess.navigate(drawn, "http://h.test/c").await.unwrap();
+    let blank = sess.open_tab();
+    sess.navigate(blank, "http://h.test/plain").await.unwrap();
+
+    // Le fillRect couvre toute la surface 40×30 → la frame
+    // contient des pixels rouges ; la page sans script n'a
+    // rien dessiné.
+    let red = {
+        let (fw, fh, px) = sess.frame_pixels(drawn).unwrap();
+        (0..fh).any(|row| {
+            (0..fw).any(|col| {
+                let i = ((row * fw + col) * 4) as usize;
+                px[i] > 200 && px[i + 1] < 80 && px[i + 2] < 80
+            })
+        })
+    };
+    assert!(red, "le fillRect rouge du script doit être peint");
+    assert_ne!(
+        sess.frame_png(drawn),
+        sess.frame_png(blank),
+        "canvas dessiné vs canvas vierge"
+    );
+}
+
 /// Page avec listener `click` qui mute le DOM miroir.
 const PAGE_ONCLICK: &str = "<!doctype html><html><body>\
      <div id=\"b\">avant</div>\
