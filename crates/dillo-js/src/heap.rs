@@ -260,7 +260,8 @@ impl Heap {
             | ObjKind::RegExp(_)
             | ObjKind::Symbol(_)
             | ObjKind::FetchResponse { .. }
-            | ObjKind::ByteBuf(_) => {}
+            | ObjKind::ByteBuf(_)
+            | ObjKind::BigInt(_) => {}
         }
     }
 
@@ -327,7 +328,7 @@ impl Heap {
 /// Pousse l'`ObjId` d'un `Value` (no-op pour les scalaires).
 pub(crate) fn push_value(out: &mut Vec<ObjId>, v: Value) {
     match v {
-        Value::Obj(i) | Value::Str(i) => out.push(i),
+        Value::Obj(i) | Value::Str(i) | Value::Big(i) => out.push(i),
         _ => {}
     }
 }
@@ -544,6 +545,11 @@ pub enum ObjKind {
         /// Element count.
         len: usize,
     },
+    /// `bigint` primitive cell — digits only (immutables : chaque
+    /// op arithmétique alloue une nouvelle cellule). Référencée par
+    /// `Value::Big`, jamais par `Value::Obj` — pas de proto, pas de
+    /// props (les accesseurs vivent sur `BigInt.prototype`).
+    BigInt(num_bigint::BigInt),
 }
 
 /// Element kind of a [`ObjKind::TypedArray`] view.
@@ -567,6 +573,10 @@ pub enum TaKind {
     F32,
     /// `Float64Array`.
     F64,
+    /// `BigInt64Array` — éléments `BigInt` (JS-C7).
+    I64,
+    /// `BigUint64Array`.
+    U64,
 }
 
 impl TaKind {
@@ -576,7 +586,7 @@ impl TaKind {
             TaKind::I8 | TaKind::U8 | TaKind::U8C => 1,
             TaKind::I16 | TaKind::U16 => 2,
             TaKind::I32 | TaKind::U32 | TaKind::F32 => 4,
-            TaKind::F64 => 8,
+            TaKind::F64 | TaKind::I64 | TaKind::U64 => 8,
         }
     }
 
@@ -592,11 +602,13 @@ impl TaKind {
             TaKind::U32 => "Uint32Array",
             TaKind::F32 => "Float32Array",
             TaKind::F64 => "Float64Array",
+            TaKind::I64 => "BigInt64Array",
+            TaKind::U64 => "BigUint64Array",
         }
     }
 
     /// All kinds in spec order (for the `install` loop).
-    pub const ALL: [TaKind; 9] = [
+    pub const ALL: [TaKind; 11] = [
         TaKind::I8,
         TaKind::U8,
         TaKind::U8C,
@@ -606,6 +618,8 @@ impl TaKind {
         TaKind::U32,
         TaKind::F32,
         TaKind::F64,
+        TaKind::I64,
+        TaKind::U64,
     ];
 
     /// Index used as the ctor bound-arg (`ta_ctor` dispatch).
@@ -620,7 +634,16 @@ impl TaKind {
             TaKind::U32 => 6,
             TaKind::F32 => 7,
             TaKind::F64 => 8,
+            TaKind::I64 => 9,
+            TaKind::U64 => 10,
         }
+    }
+
+    /// `true` pour les kinds dont les éléments sont des `BigInt`
+    /// (`BigInt64Array`/`BigUint64Array`) — conversions `ToBigInt`
+    /// au lieu de `ToNumber` à l'écriture.
+    pub fn is_big(self) -> bool {
+        matches!(self, TaKind::I64 | TaKind::U64)
     }
 
     /// Inverse of [`TaKind::index`].
@@ -642,7 +665,45 @@ impl TaKind {
             TaKind::U32 => u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64,
             TaKind::F32 => f32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64,
             TaKind::F64 => f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]),
+            // Fallback numérique pour les kinds BigInt — tronque à
+            // f64 ; le chemin nominal est `get_big` (précision pleine).
+            TaKind::I64 => {
+                i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]) as f64
+            }
+            TaKind::U64 => {
+                u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]) as f64
+            }
         }
+    }
+
+    /// Read element `i` as `BigInt` — `I64` signe-étendu,
+    /// `U64` non signé. Ne s'appelle que sur les kinds big
+    /// (`is_big`).
+    pub fn get_big(self, bytes: &[u8], i: usize) -> num_bigint::BigInt {
+        let o = i * self.size();
+        let a: [u8; 8] = bytes
+            .get(o..o + 8)
+            .and_then(|s| <[u8; 8]>::try_from(s).ok())
+            .unwrap_or([0; 8]);
+        match self {
+            TaKind::U64 => num_bigint::BigInt::from(u64::from_le_bytes(a)),
+            _ => num_bigint::BigInt::from(i64::from_le_bytes(a)),
+        }
+    }
+
+    /// `SetValueInBuffer` pour les kinds big — `v mod 2^64`,
+    /// complément à deux stocké little-endian (la lecture `I64`
+    /// ré-interprète le signe).
+    pub fn set_big(self, bytes: &mut [u8], i: usize, v: &num_bigint::BigInt) {
+        use num_traits::ToPrimitive;
+        let o = i * self.size();
+        let m = num_bigint::BigInt::from(1) << 64u32;
+        let mut r = v % &m;
+        if r.sign() == num_bigint::Sign::Minus {
+            r += &m;
+        }
+        let bits = r.to_u64().unwrap_or(0).to_le_bytes();
+        bytes[o..o + 8].copy_from_slice(&bits);
     }
 
     /// `SetValueInBuffer` — convert `v` through the kind's
@@ -677,6 +738,15 @@ impl TaKind {
             }
             TaKind::F64 => {
                 bytes[o..o + 8].copy_from_slice(&v.to_le_bytes());
+            }
+            // Fallback : écriture f64 dans un kind big (le chemin
+            // nominal est `set_big`). Saturante `as` — ne se produit
+            // que hors des méthodes refactorées.
+            TaKind::I64 => {
+                bytes[o..o + 8].copy_from_slice(&(v as i64).to_le_bytes());
+            }
+            TaKind::U64 => {
+                bytes[o..o + 8].copy_from_slice(&(v as u64).to_le_bytes());
             }
         }
     }

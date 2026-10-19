@@ -2686,3 +2686,196 @@ fn ta_gc_retention() {
         77.0
     );
 }
+
+// -- BigInt (JS-C7) ---------------------------------------------------
+
+/// `ev` renvoyant le bigint affiché en décimal (`describe`).
+#[track_caller]
+fn big(src: &str) -> String {
+    ev_str(src)
+}
+
+#[test]
+fn bigint_literals() {
+    assert_eq!(big("123n"), "123");
+    assert_eq!(big("0xFn"), "15");
+    assert_eq!(big("0b101n"), "5");
+    assert_eq!(big("0o17n"), "15");
+    assert_eq!(ev_str("typeof 1n"), "bigint");
+    for bad in ["08n", "1.5n", "123n4", "1e3n", "0xn"] {
+        assert!(
+            Engine::new().eval(bad).is_err(),
+            "{bad} should be a syntax error"
+        );
+    }
+}
+
+#[test]
+fn bigint_arithmetic() {
+    assert_eq!(big("1n + 2n"), "3");
+    assert_eq!(big("7n * 6n"), "42");
+    assert_eq!(big("7n / 2n"), "3"); // tronquée, pas d'arrondi
+    assert_eq!(big("7n % 3n"), "1");
+    assert_eq!(big("2n ** 10n"), "1024");
+    assert_eq!(big("-5n"), "-5");
+    assert_eq!(big("~5n"), "-6");
+    assert_eq!(big("5n & 3n"), "1");
+    assert_eq!(big("5n | 3n"), "7");
+    assert_eq!(big("5n ^ 3n"), "6");
+    assert_eq!(big("5n << 2n"), "20");
+    assert_eq!(big("10n >> 2n"), "2");
+    assert_eq!(big("-8n >> 1n"), "-4");
+    assert_eq!(big("var x = 5n; ++x"), "6");
+    assert_eq!(big("var x = 5n; x--; x"), "4");
+    // Concaténation string (spec : `+` mixte string/bigint = concat).
+    assert_eq!(ev_str("1n + 'x'"), "1x");
+    assert_eq!(ev_str("'x' + 1n"), "x1");
+    // 0n est falsy.
+    assert_eq!(num(ev("0n ? 1 : 2")), 2.0);
+}
+
+#[test]
+fn bigint_errors() {
+    // Mixte arithmétique → TypeError.
+    for bad in [
+        "1n + 1",
+        "1n * 2.0",
+        "1n - 1",
+        "-5n >>> 1n",
+        "1n / 0n",
+        "1n % 0n",
+    ] {
+        assert!(Engine::new().eval(bad).is_err(), "{bad} should throw");
+    }
+    // `+1n` unaire → TypeError (spec).
+    assert!(Engine::new().eval("+1n").is_err());
+    // `1n >>> 0n` interdit (pas de remplissage zéro non signé).
+    assert!(Engine::new().eval("1n >>> 0n").is_err());
+    // JSON.stringify lève sur BigInt.
+    assert!(Engine::new().eval("JSON.stringify(1n)").is_err());
+    assert!(Engine::new().eval("JSON.stringify({a: 1n})").is_err());
+}
+
+#[test]
+fn bigint_comparisons() {
+    assert_eq!(ev_str("1n === 1n"), "true");
+    assert_eq!(ev_str("1n === 1"), "false");
+    assert_eq!(ev_str("1n == 1"), "true");
+    assert_eq!(ev_str("1n == '1'"), "true");
+    assert_eq!(ev_str("0n == false"), "true");
+    assert_eq!(ev_str("1n < 2"), "true");
+    assert_eq!(ev_str("2n < 10"), "true");
+    assert_eq!(ev_str("1n < 1n"), "false");
+    assert_eq!(ev_str("3n > 2n"), "true");
+    assert_eq!(ev_str("1n <= 1"), "true");
+    assert_eq!(ev_str("1n >= '2'"), "false");
+}
+
+#[test]
+fn bigint_ctor_and_methods() {
+    assert_eq!(big("BigInt('42')"), "42");
+    assert_eq!(big("BigInt('0x10')"), "16");
+    assert_eq!(big("BigInt(42)"), "42");
+    assert_eq!(big("BigInt(true)"), "1");
+    assert_eq!(big("BigInt('')"), "0");
+    assert_eq!(big("BigInt.asIntN(8, 255n)"), "-1");
+    assert_eq!(big("BigInt.asUintN(8, -1n)"), "255");
+    assert_eq!(big("BigInt.asIntN(0, 7n)"), "0");
+    assert_eq!(big("255n.toString(16)"), "ff");
+    assert_eq!(ev_str("(5n).toString(2)"), "101");
+    assert_eq!(big("(9n).valueOf()"), "9");
+    assert_eq!(num(ev("Number(1n)")), 1.0);
+    assert_eq!(
+        ev_str("Object.prototype.toString.call(1n)"),
+        "[object BigInt]"
+    );
+    for bad in ["new BigInt()", "BigInt(1.5)", "BigInt('zz')", "BigInt(NaN)"] {
+        assert!(Engine::new().eval(bad).is_err(), "{bad} should throw");
+    }
+}
+
+#[test]
+fn bigint_property_keys_and_misc() {
+    // `o[1n]` ≡ `o["1"]`.
+    assert_eq!(num(ev("var o = {}; o[1n] = 7; o['1']")), 7.0);
+    // Template littéral.
+    assert_eq!(ev_str("`b=${4n}`"), "b=4");
+    // `Math.max` sur bigint → TypeError (ToNumber).
+    assert!(Engine::new().eval("Math.max(1n)").is_err());
+    // `parseInt`/`isNaN` restent numériques.
+    assert!(Engine::new().eval("isNaN(1n)").is_err());
+}
+
+#[test]
+fn bigint_typed_arrays() {
+    // Construction et accès indexés.
+    assert_eq!(
+        big("var b = new BigInt64Array(2); b[0] = 5n; b[1] = -3n; b[0]"),
+        "5"
+    );
+    assert_eq!(
+        big("var b = new BigInt64Array(2); b[0] = 5n; b[1] = -3n; b[1]"),
+        "-3"
+    );
+    assert_eq!(ev_str("typeof new BigInt64Array(1)[0]"), "bigint");
+    assert_eq!(big("new BigInt64Array([3n, 4n])[1]"), "4");
+    assert_eq!(big("BigInt64Array.of(9n)[0]"), "9");
+    // Complément à deux / wraparound `mod 2^64`.
+    assert_eq!(
+        big("var u = new BigUint64Array(1); u[0] = -1n; u[0]"),
+        "18446744073709551615"
+    );
+    assert_eq!(big("var b = new BigInt64Array(1); b[0] = -1n; b[0]"), "-1");
+    // BYTES_PER_ELEMENT.
+    assert_eq!(num(ev("BigInt64Array.BYTES_PER_ELEMENT")), 8.0);
+    // `set`, `subarray`, méthodes génériques.
+    assert_eq!(
+        big("var b = new BigInt64Array(2); b.set([7n, 8n]); b[1]"),
+        "8"
+    );
+    assert_eq!(
+        big("var b = new BigInt64Array([1n,2n,3n]); b.subarray(1)[0]"),
+        "2"
+    );
+    assert_eq!(
+        big("var b = new BigInt64Array([1n,2n]); b.map(v => v * 3n)[1]"),
+        "6"
+    );
+    assert_eq!(
+        ev_str("var b = new BigInt64Array([3n,1n]); b.sort(); b.join('-')"),
+        "1-3"
+    );
+    assert_eq!(
+        big("var b = new BigInt64Array([1n,2n,3n]); b.reduce((a,v)=>a+v)"),
+        "6"
+    );
+    assert_eq!(ev_str("new BigInt64Array([1n,2n]).join()"), "1,2");
+    assert_eq!(num(ev("new BigInt64Array([7n]).indexOf(7n)")), 0.0);
+    assert_eq!(num(ev("new BigInt64Array([7n]).indexOf(7)")), -1.0);
+    // Écrire un Number dans une vue big → TypeError (spec).
+    assert!(Engine::new()
+        .eval("var b = new BigInt64Array(1); b[0] = 1")
+        .is_err());
+    // Écrire un BigInt dans une vue numérique → TypeError.
+    assert!(Engine::new()
+        .eval("var u = new Uint8Array(1); u[0] = 1n")
+        .is_err());
+    assert!(Engine::new().eval("new Int8Array([1n])").is_err());
+    assert!(Engine::new().eval("BigInt64Array.of(1)").is_err());
+    // `indexOf` Number sur vue big → -1 sans lever.
+    assert_eq!(num(ev("new BigInt64Array([1n]).indexOf(1)")), -1.0);
+    // DataView accesseurs big.
+    assert_eq!(
+        big("var dv = new DataView(new ArrayBuffer(8)); dv.setBigInt64(0, -2n, true); dv.getBigInt64(0, true)"),
+        "-2"
+    );
+    assert_eq!(
+        big("var dv = new DataView(new ArrayBuffer(8)); dv.setBigUint64(0, 0xFFFFFFFFFFFFFFFFn, true); dv.getBigUint64(0, true)"),
+        "18446744073709551615"
+    );
+    // Object.prototype.toString.
+    assert_eq!(
+        ev_str("Object.prototype.toString.call(new BigInt64Array(1))"),
+        "[object BigInt64Array]"
+    );
+}

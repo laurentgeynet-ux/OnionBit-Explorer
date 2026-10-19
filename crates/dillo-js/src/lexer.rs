@@ -217,6 +217,9 @@ pub enum Tok {
     Kw(Kw),
     /// Numeric literal (already converted to `f64`).
     Num(f64),
+    /// `BigInt` literal `123n` / `0xFn` / `0o17n` / `0b101n` —
+    /// digits normalisés en décimal (le lexer connaît la base).
+    Big(String),
     /// String literal (escapes already decoded).
     Str(String),
     /// Punctuation / operator.
@@ -566,6 +569,20 @@ impl Lexer {
                     if s.is_empty() {
                         return Err(self.err("malformed numeric literal"));
                     }
+                    // Suffixe `n` → BigInt (`0xFn`, `0o17n`, `0b101n`).
+                    if self.peek() == Some('n') {
+                        self.bump();
+                        if self
+                            .peek()
+                            .is_some_and(|c| is_ident_start(c) || c.is_ascii_digit())
+                        {
+                            return Err(self.err("identifier directly after number"));
+                        }
+                        return match num_bigint::BigInt::parse_bytes(s.as_bytes(), radix) {
+                            Some(b) => Ok(Tok::Big(b.to_string())),
+                            None => Err(self.err("malformed bigint literal")),
+                        };
+                    }
                     if self.peek().is_some_and(is_ident_start) {
                         return Err(self.err("identifier directly after number"));
                     }
@@ -610,6 +627,25 @@ impl Lexer {
         }
         while self.peek().is_some_and(|c| c.is_ascii_digit()) {
             self.bump();
+        }
+        // Suffixe `n` → BigInt décimal — pas de point ni exposant,
+        // et `08n`/`010n` (NonOctalDecimal/octale legacy) rejetés.
+        if self.peek() == Some('n') {
+            let lit: String = self.chars[start..self.pos].iter().collect();
+            if lit.len() > 1 && lit.starts_with('0') {
+                return Err(self.err("legacy octal bigint literal"));
+            }
+            self.bump();
+            if self
+                .peek()
+                .is_some_and(|c| is_ident_start(c) || c.is_ascii_digit())
+            {
+                return Err(self.err("identifier directly after number"));
+            }
+            return match num_bigint::BigInt::parse_bytes(lit.as_bytes(), 10) {
+                Some(b) => Ok(Tok::Big(b.to_string())),
+                None => Err(self.err("malformed bigint literal")),
+            };
         }
         if self.peek() == Some('.') {
             self.bump();
@@ -960,6 +996,7 @@ fn ends_operand(t: &Tok) -> bool {
         t,
         Tok::Ident(_)
             | Tok::Num(_)
+            | Tok::Big(_)
             | Tok::Str(_)
             | Tok::Tpl(_)
             | Tok::Regex { .. }

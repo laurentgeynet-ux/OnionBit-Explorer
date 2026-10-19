@@ -21,6 +21,10 @@ pub enum Value {
     Num(f64),
     /// Heap-allocated string.
     Str(ObjId),
+    /// `bigint` primitive — `ObjId` of an `ObjKind::BigInt` cell
+    /// (primitive semantics : `1n === 1n`, never a `[[Prototype]]`
+    /// chain — the id only carries the digits).
+    Big(ObjId),
     /// Heap-allocated object.
     Obj(ObjId),
 }

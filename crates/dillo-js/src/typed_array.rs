@@ -152,80 +152,113 @@ fn buf_region(e: &Engine, bid: ObjId, offset: usize, len: usize) -> Option<Vec<u
     }
 }
 
-/// Snapshot des éléments de `this` (`Vec<f64>` pour les méthodes) —
-/// lecture dans la région `offset..offset+len*size` du buffer.
-fn ta_nums(e: &mut Engine, this: Value) -> JsResult<(TaKind, Vec<f64>)> {
+/// Snapshot des éléments de `this` (`Vec<Value>` — `Num`, ou `Big`
+/// pour les kinds big) lu dans la région `offset..offset+len*size`.
+fn ta_vals(e: &mut Engine, this: Value) -> JsResult<(TaKind, Vec<Value>)> {
     let (ta, bid, off, len) = ta_view(e, this)?;
-    let bytes = match e.heap.obj(bid).map(|b| &b.kind) {
-        Some(ObjKind::ByteBuf(b)) => b.clone(),
-        _ => return Err(e.type_error("detached typed array")),
-    };
-    let end = (off + len * ta.size()).min(bytes.len());
-    let region = &bytes[off.min(end)..end];
-    Ok((
-        ta,
-        (0..region.len() / ta.size())
-            .map(|i| ta.get(region, i))
-            .collect(),
-    ))
+    Ok((ta, e.ta_elements(ta, bid, off, len)))
 }
 
-/// Alloue un buffer + view `ta` et écrit `vals` convertis.
-fn ta_from_nums(e: &mut Engine, ta: TaKind, vals: &[f64]) -> Value {
+/// Alloue un buffer + view `ta` et écrit `vals` (conversions
+/// `ToNumber`/`ToBigInt` selon le kind — les échecs se propagent).
+fn ta_from_vals(e: &mut Engine, ta: TaKind, vals: &[Value]) -> JsResult<Value> {
     let bid = new_buffer(e, vals.len() * ta.size());
+    // Conversion d'abord (le `&mut` du buffer interdit `to_number`).
+    let conv = conv_vals(e, ta, vals)?;
     if let Some(b) = e.heap.obj_mut(bid) {
         if let ObjKind::ByteBuf(bytes) = &mut b.kind {
-            for (i, v) in vals.iter().enumerate() {
-                ta.set(bytes, i, *v);
+            write_conv(ta, bytes, 0, &conv);
+        }
+    }
+    Ok(new_ta(e, ta, bid, 0, vals.len()))
+}
+
+/// Élément converti prêt-à-écrire (conversion faite avant le
+/// `&mut` du buffer — voir `ta_from_vals`).
+enum Conv {
+    N(f64),
+    B(num_bigint::BigInt),
+}
+
+/// `vals` convertis selon `ta` — `ToBigInt` (propage `TypeError`)
+/// pour les kinds big, `ToNumber` sinon.
+fn conv_vals(e: &mut Engine, ta: TaKind, vals: &[Value]) -> JsResult<Vec<Conv>> {
+    let mut out = Vec::with_capacity(vals.len());
+    for v in vals {
+        out.push(if ta.is_big() {
+            Conv::B(e.to_bigint(*v)?)
+        } else {
+            // `ToNumber` propage : `new Int8Array([1n])` → TypeError.
+            Conv::N(e.to_number(*v)?)
+        });
+    }
+    Ok(out)
+}
+
+/// Écrit `conv` dans `bytes` (région de vue déjà extraite).
+fn write_conv(ta: TaKind, region: &mut [u8], base: usize, conv: &[Conv]) {
+    for (i, c) in conv.iter().enumerate() {
+        match c {
+            Conv::N(n) => ta.set(region, base + i, *n),
+            Conv::B(b) => ta.set_big(region, base + i, b),
+        }
+    }
+}
+
+/// Réécrit `vals` dans la région `voff..` du buffer `bid` (in-place
+/// : `reverse`, `sort`, `copyWithin`, `fill`, `set`). Conversion
+/// avant le `&mut` du buffer.
+fn ta_write_back(
+    e: &mut Engine,
+    ta: TaKind,
+    bid: ObjId,
+    voff: usize,
+    base: usize,
+    vals: &[Value],
+) -> JsResult<()> {
+    let conv = conv_vals(e, ta, vals)?;
+    if let Some(b) = e.heap.obj_mut(bid) {
+        if let ObjKind::ByteBuf(bytes) = &mut b.kind {
+            if let Some(region) = bytes.get_mut(voff..) {
+                write_conv(ta, region, base, &conv);
             }
         }
     }
-    new_ta(e, ta, bid, 0, vals.len())
+    Ok(())
 }
 
-/// `src` lu comme liste de nombres (view typée, tableau, iterable
-/// ou array-like `{length}`).
-fn src_nums(e: &mut Engine, src: Value) -> JsResult<Vec<f64>> {
+/// `src` lu comme liste de valeurs (view typée, tableau, iterable
+/// ou array-like `{length}`). Les conversions arrivent à
+/// l'écriture — `ToBigInt`/`ToNumber` selon le kind cible.
+fn src_vals(e: &mut Engine, src: Value) -> JsResult<Vec<Value>> {
     if let Value::Obj(id) = src {
-        // Vue typée → copie élément à élément (conversion à l'écriture
-        // côté `ta_from_nums`).
-        let is_ta = matches!(
-            e.heap.obj(id).map(|o| &o.kind),
-            Some(ObjKind::TypedArray { .. })
-        );
-        if is_ta {
-            let vals = e
-                .heap
-                .obj(id)
-                .map(|o| e.ta_elements(&o.kind))
-                .unwrap_or_default();
-            return Ok(vals
-                .iter()
-                .map(|v| match v {
-                    Value::Num(n) => *n,
-                    _ => f64::NAN,
-                })
-                .collect());
+        // Vue typée → copie élément à élément (`Big` préservés).
+        let view = match e.heap.obj(id).map(|o| &o.kind) {
+            Some(ObjKind::TypedArray {
+                ta,
+                buffer: Value::Obj(bid),
+                offset,
+                len,
+            }) => Some((*ta, *bid, *offset, *len)),
+            _ => None,
+        };
+        if let Some((ta, bid, off, len)) = view {
+            return Ok(e.ta_elements(ta, bid, off, len));
         }
         // Array / iterable / array-like.
         if let Ok(items) = e.iter_values(src) {
-            let mut out = Vec::with_capacity(items.len());
-            for v in items {
-                out.push(e.to_number(v).unwrap_or(f64::NAN));
-            }
-            return Ok(out);
+            return Ok(items);
         }
         if let Some(Value::Num(n)) = e.get_prop(id, "length") {
             let mut out = Vec::with_capacity(n as usize);
             for i in 0..(n as usize) {
-                let v = e.get_prop(id, &i.to_string()).unwrap_or(Value::Undefined);
-                out.push(e.to_number(v).unwrap_or(f64::NAN));
+                out.push(e.get_prop(id, &i.to_string()).unwrap_or(Value::Undefined));
             }
             return Ok(out);
         }
     }
     if let Value::Num(n) = src {
-        return Ok(vec![0.0; if n >= 0.0 { n as usize } else { 0 }]);
+        return Ok(vec![Value::Num(0.0); if n >= 0.0 { n as usize } else { 0 }]);
     }
     Ok(Vec::new())
 }
@@ -293,6 +326,8 @@ pub(crate) fn install(e: &mut Engine) {
         (TaKind::U32, "getUint32", "setUint32"),
         (TaKind::F32, "getFloat32", "setFloat32"),
         (TaKind::F64, "getFloat64", "setFloat64"),
+        (TaKind::I64, "getBigInt64", "setBigInt64"),
+        (TaKind::U64, "getBigUint64", "setBigUint64"),
     ] {
         let gv = e.bound_native(gname, dv_get, vec![Value::Num(kind.index() as f64)]);
         e.set_own(dvp, gname, gv, false);
@@ -493,6 +528,24 @@ fn dv_num(kind: TaKind, bytes: &[u8], off: usize, le: bool) -> Option<f64> {
                 f64::from_be_bytes(a)
             }
         }
+        // Les accesseurs `getBigInt64`/`getBigUint64` ne passent pas
+        // par `dv_num` — voir `dv_get` (retour `Value::Big`).
+        TaKind::I64 => {
+            let a = [b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]];
+            (if le {
+                i64::from_le_bytes(a)
+            } else {
+                i64::from_be_bytes(a)
+            }) as f64
+        }
+        TaKind::U64 => {
+            let a = [b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]];
+            (if le {
+                u64::from_le_bytes(a)
+            } else {
+                u64::from_be_bytes(a)
+            }) as f64
+        }
     };
     Some(v)
 }
@@ -515,6 +568,26 @@ fn dv_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         Some(ObjKind::ByteBuf(b)) => b.clone(),
         _ => return Err(e.type_error("detached DataView")),
     };
+    // Kinds big → `Value::Big` (spec `getBigInt64`/`getBigUint64`).
+    if kind.is_big() {
+        let Some(s) = bytes.get(base + off..base + off + 8) else {
+            return Err(e.range_error("offset out of DataView bounds"));
+        };
+        let a: [u8; 8] = <[u8; 8]>::try_from(s).unwrap_or([0; 8]);
+        let bi = match kind {
+            TaKind::U64 => num_bigint::BigInt::from(if le {
+                u64::from_le_bytes(a)
+            } else {
+                u64::from_be_bytes(a)
+            }),
+            _ => num_bigint::BigInt::from(if le {
+                i64::from_le_bytes(a)
+            } else {
+                i64::from_be_bytes(a)
+            }),
+        };
+        return Ok(e.big_val(bi));
+    }
     match dv_num(kind, &bytes, base + off, le) {
         Some(n) => Ok(Value::Num(n)),
         None => Err(e.range_error("offset out of DataView bounds")),
@@ -530,12 +603,37 @@ fn dv_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     .unwrap_or(TaKind::F64);
     let (bid, base, vlen) = dv_view(e, this)?;
     let off = to_index(e, arg(args, 1))?;
-    let v = e.to_number(arg(args, 2))?;
     let le = e.to_boolean(arg(args, 3));
     if off + kind.size() > vlen {
         return Err(e.range_error("offset out of DataView bounds"));
     }
     let o = base + off;
+    // Kinds big — `ToBigInt` puis `v mod 2^64`, endianness au choix
+    // (spec `setBigInt64`/`setBigUint64`).
+    if kind.is_big() {
+        use num_traits::ToPrimitive;
+        let b = e.to_bigint(arg(args, 2))?;
+        let m = num_bigint::BigInt::from(1) << 64u32;
+        let mut r = &b % &m;
+        if r.sign() == num_bigint::Sign::Minus {
+            r += &m;
+        }
+        let bits = r.to_u64().unwrap_or(0);
+        let arr = if le {
+            bits.to_le_bytes()
+        } else {
+            bits.to_be_bytes()
+        };
+        let Some(bo) = e.heap.obj_mut(bid) else {
+            return Err(e.type_error("detached DataView"));
+        };
+        let ObjKind::ByteBuf(bytes) = &mut bo.kind else {
+            return Err(e.type_error("detached DataView"));
+        };
+        bytes[o..o + 8].copy_from_slice(&arr);
+        return Ok(Value::Undefined);
+    }
+    let v = e.to_number(arg(args, 2))?;
     let Some(b) = e.heap.obj_mut(bid) else {
         return Err(e.type_error("detached DataView"));
     };
@@ -638,11 +736,11 @@ fn ta_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         }
         // `new TA(src)` — iterable / array-like / autre view.
         Value::Obj(_) => {
-            let vals = src_nums(e, arg(args, 1))?;
-            Ok(ta_from_nums(e, ta, &vals))
+            let vals = src_vals(e, arg(args, 1))?;
+            ta_from_vals(e, ta, &vals)
         }
         // `new TA()` / primitifs non-numériques → vide.
-        _ => Ok(ta_from_nums(e, ta, &[])),
+        _ => ta_from_vals(e, ta, &[]),
     }
 }
 
@@ -653,7 +751,7 @@ fn ta_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         _ => 0,
     })
     .unwrap_or(TaKind::U8);
-    let mut vals = src_nums(e, arg(args, 1))?;
+    let mut vals = src_vals(e, arg(args, 1))?;
     if let Value::Obj(_) = arg(args, 2) {
         let f = arg(args, 2);
         if !e.is_callable(f) {
@@ -661,11 +759,12 @@ fn ta_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         }
         let this_arg = arg(args, 3);
         for (i, v) in vals.iter_mut().enumerate() {
-            let r = e.call_value(f, this_arg, &[Value::Num(*v), Value::Num(i as f64)])?;
-            *v = e.to_number(r).unwrap_or(f64::NAN);
+            // Le résultat du mapfn est stocké brut — la conversion
+            // `ToNumber`/`ToBigInt` se fait dans `ta_from_vals`.
+            *v = e.call_value(f, this_arg, &[*v, Value::Num(i as f64)])?;
         }
     }
-    Ok(ta_from_nums(e, ta, &vals))
+    ta_from_vals(e, ta, &vals)
 }
 
 /// `XxxArray.of(...items)` — bound arg = kind.
@@ -675,11 +774,8 @@ fn ta_of(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         _ => 0,
     })
     .unwrap_or(TaKind::U8);
-    let mut vals = Vec::with_capacity(args.len().saturating_sub(1));
-    for a in &args[1..] {
-        vals.push(e.to_number(*a).unwrap_or(f64::NAN));
-    }
-    Ok(ta_from_nums(e, ta, &vals))
+    let vals: Vec<Value> = args[1..].to_vec();
+    ta_from_vals(e, ta, &vals)
 }
 
 // -- méthodes %TypedArray% -----------------------------------------------
@@ -692,7 +788,7 @@ fn ta_set_m(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     if !matches!(arg(args, 0), Value::Obj(_)) {
         return Err(e.type_error("set source is not an object"));
     }
-    let vals = src_nums(e, arg(args, 0))?;
+    let vals = src_vals(e, arg(args, 0))?;
     let off = if matches!(arg(args, 1), Value::Undefined) {
         0
     } else {
@@ -701,6 +797,9 @@ fn ta_set_m(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     if off + vals.len() > len {
         return Err(e.range_error("source too large for target"));
     }
+    // Conversion avant le `&mut` du buffer — `ToBigInt` peut lever
+    // (`set` d'un Number dans une vue big → TypeError, spec).
+    let conv = conv_vals(e, ta, &vals)?;
     let Some(b) = e.heap.obj_mut(bid) else {
         return Err(e.type_error("detached typed array"));
     };
@@ -708,9 +807,7 @@ fn ta_set_m(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         return Err(e.type_error("detached typed array"));
     };
     if let Some(region) = bytes.get_mut(voff..) {
-        for (i, v) in vals.iter().enumerate() {
-            ta.set(region, off + i, *v);
-        }
+        write_conv(ta, region, off, &conv);
     }
     Ok(Value::Undefined)
 }
@@ -739,33 +836,23 @@ fn ta_subarray(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// `ta.fill(v, start?, end?)`.
 fn ta_fill(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (ta, bid, voff, len) = ta_view(e, this)?;
-    let v = e.to_number(arg(args, 0))?;
+    let v = arg(args, 0);
     let (s, en) = rel_bounds(e, arg(args, 1), arg(args, 2), len)?;
-    let Some(b) = e.heap.obj_mut(bid) else {
-        return Err(e.type_error("detached typed array"));
-    };
-    let ObjKind::ByteBuf(bytes) = &mut b.kind else {
-        return Err(e.type_error("detached typed array"));
-    };
-    if let Some(region) = bytes.get_mut(voff..) {
-        for i in s..en {
-            ta.set(region, i, v);
-        }
-    }
+    ta_write_back(e, ta, bid, voff, s, &vec![v; en - s])?;
     Ok(this)
 }
 
 /// `ta.slice(begin?, end?)` — nouvelle view du même kind, copie.
 fn ta_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (ta, vals) = ta_nums(e, this)?;
+    let (ta, vals) = ta_vals(e, this)?;
     let (s, en) = rel_bounds(e, arg(args, 0), arg(args, 1), vals.len())?;
     let out = vals[s..en].to_vec();
-    Ok(ta_from_nums(e, ta, &out))
+    ta_from_vals(e, ta, &out)
 }
 
 /// `ta.map(fn)` — nouvelle view du même kind.
 fn ta_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (ta, vals) = ta_nums(e, this)?;
+    let (ta, vals) = ta_vals(e, this)?;
     let f = arg(args, 0);
     if !e.is_callable(f) {
         return Err(e.type_error("callback is not callable"));
@@ -773,15 +860,14 @@ fn ta_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let t = arg(args, 1);
     let mut out = Vec::with_capacity(vals.len());
     for (i, v) in vals.iter().enumerate() {
-        let r = e.call_value(f, t, &[Value::Num(*v), Value::Num(i as f64), this])?;
-        out.push(e.to_number(r).unwrap_or(f64::NAN));
+        out.push(e.call_value(f, t, &[*v, Value::Num(i as f64), this])?);
     }
-    Ok(ta_from_nums(e, ta, &out))
+    ta_from_vals(e, ta, &out)
 }
 
 /// `ta.filter(fn)` — nouvelle view du même kind.
 fn ta_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (ta, vals) = ta_nums(e, this)?;
+    let (ta, vals) = ta_vals(e, this)?;
     let f = arg(args, 0);
     if !e.is_callable(f) {
         return Err(e.type_error("callback is not callable"));
@@ -789,31 +875,31 @@ fn ta_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let t = arg(args, 1);
     let mut out = Vec::new();
     for (i, v) in vals.iter().enumerate() {
-        let r = e.call_value(f, t, &[Value::Num(*v), Value::Num(i as f64), this])?;
+        let r = e.call_value(f, t, &[*v, Value::Num(i as f64), this])?;
         if e.to_boolean(r) {
             out.push(*v);
         }
     }
-    Ok(ta_from_nums(e, ta, &out))
+    ta_from_vals(e, ta, &out)
 }
 
 /// `ta.forEach(fn)`.
 fn ta_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
+    let (_, vals) = ta_vals(e, this)?;
     let f = arg(args, 0);
     if !e.is_callable(f) {
         return Err(e.type_error("callback is not callable"));
     }
     let t = arg(args, 1);
     for (i, v) in vals.iter().enumerate() {
-        e.call_value(f, t, &[Value::Num(*v), Value::Num(i as f64), this])?;
+        e.call_value(f, t, &[*v, Value::Num(i as f64), this])?;
     }
     Ok(Value::Undefined)
 }
 
 /// `ta.join(sep?)` — aussi `toString`.
 fn ta_join(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
+    let (_, vals) = ta_vals(e, this)?;
     let sep = match arg(args, 0) {
         Value::Undefined => ",".to_string(),
         v => e.to_js_string(v)?,
@@ -823,17 +909,17 @@ fn ta_join(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         if i > 0 {
             out.push_str(&sep);
         }
-        let s = e.to_js_string(Value::Num(*v))?;
+        let s = e.to_js_string(*v)?;
         out.push_str(&s);
     }
     Ok(e.str_val(out))
 }
 
-/// `ta.indexOf(v, from?)` — égalité stricte (NaN ne matche pas).
-#[allow(clippy::float_cmp)] // spec `StrictEqual` : comparaison exacte.
+/// `ta.indexOf(v, from?)` — `StrictEqual` : pas de conversion de
+/// `needle` (`u8.indexOf(1n)` → -1, `big.indexOf(1)` → -1).
 fn ta_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
-    let needle = e.to_number(arg(args, 0))?;
+    let (_, vals) = ta_vals(e, this)?;
+    let needle = arg(args, 0);
     let from = match arg(args, 1) {
         Value::Undefined => 0.0,
         v => e.to_number(v)?,
@@ -844,7 +930,7 @@ fn ta_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         from as usize
     };
     for (i, v) in vals.iter().enumerate().skip(start) {
-        if *v == needle {
+        if e.strict_eq(*v, needle) {
             return Ok(Value::Num(i as f64));
         }
     }
@@ -852,10 +938,9 @@ fn ta_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 }
 
 /// `ta.lastIndexOf(v, from?)`.
-#[allow(clippy::float_cmp)] // spec `StrictEqual` : comparaison exacte.
 fn ta_last_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
-    let needle = e.to_number(arg(args, 0))?;
+    let (_, vals) = ta_vals(e, this)?;
+    let needle = arg(args, 0);
     let from = match arg(args, 1) {
         Value::Undefined => vals.len() as f64 - 1.0,
         v => e.to_number(v)?,
@@ -867,7 +952,7 @@ fn ta_last_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     };
     if start >= 0.0 {
         for i in (0..=start as usize).rev() {
-            if vals[i] == needle {
+            if e.strict_eq(vals[i], needle) {
                 return Ok(Value::Num(i as f64));
             }
         }
@@ -875,11 +960,10 @@ fn ta_last_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     Ok(Value::Num(-1.0))
 }
 
-/// `ta.includes(v, from?)` — `SameValueZero` : NaN matche.
-#[allow(clippy::float_cmp)] // spec `SameValueZero` : `==` + cas NaN.
+/// `ta.includes(v, from?)` — `SameValueZero` : `===` + cas NaN.
 fn ta_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
-    let needle = e.to_number(arg(args, 0))?;
+    let (_, vals) = ta_vals(e, this)?;
+    let needle = arg(args, 0);
     let from = match arg(args, 1) {
         Value::Undefined => 0.0,
         v => e.to_number(v)?,
@@ -890,7 +974,9 @@ fn ta_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         from as usize
     };
     for v in vals.iter().skip(start) {
-        if *v == needle || (v.is_nan() && needle.is_nan()) {
+        let nan =
+            matches!((*v, needle), (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan());
+        if nan || e.strict_eq(*v, needle) {
             return Ok(Value::Bool(true));
         }
     }
@@ -899,14 +985,14 @@ fn ta_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.every(fn)` — tous les éléments passent le prédicat.
 fn ta_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
+    let (_, vals) = ta_vals(e, this)?;
     let f = arg(args, 0);
     if !e.is_callable(f) {
         return Err(e.type_error("callback is not callable"));
     }
     let t = arg(args, 1);
     for (i, v) in vals.iter().enumerate() {
-        let r = e.call_value(f, t, &[Value::Num(*v), Value::Num(i as f64), this])?;
+        let r = e.call_value(f, t, &[*v, Value::Num(i as f64), this])?;
         if !e.to_boolean(r) {
             return Ok(Value::Bool(false));
         }
@@ -916,14 +1002,14 @@ fn ta_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.some(fn)`.
 fn ta_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
+    let (_, vals) = ta_vals(e, this)?;
     let f = arg(args, 0);
     if !e.is_callable(f) {
         return Err(e.type_error("callback is not callable"));
     }
     let t = arg(args, 1);
     for (i, v) in vals.iter().enumerate() {
-        let r = e.call_value(f, t, &[Value::Num(*v), Value::Num(i as f64), this])?;
+        let r = e.call_value(f, t, &[*v, Value::Num(i as f64), this])?;
         if e.to_boolean(r) {
             return Ok(Value::Bool(true));
         }
@@ -933,16 +1019,16 @@ fn ta_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.find(fn)` — premier élément passant le prédicat.
 fn ta_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
+    let (_, vals) = ta_vals(e, this)?;
     let f = arg(args, 0);
     if !e.is_callable(f) {
         return Err(e.type_error("callback is not callable"));
     }
     let t = arg(args, 1);
     for (i, v) in vals.iter().enumerate() {
-        let r = e.call_value(f, t, &[Value::Num(*v), Value::Num(i as f64), this])?;
+        let r = e.call_value(f, t, &[*v, Value::Num(i as f64), this])?;
         if e.to_boolean(r) {
-            return Ok(Value::Num(*v));
+            return Ok(*v);
         }
     }
     Ok(Value::Undefined)
@@ -950,14 +1036,14 @@ fn ta_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.findIndex(fn)`.
 fn ta_find_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
+    let (_, vals) = ta_vals(e, this)?;
     let f = arg(args, 0);
     if !e.is_callable(f) {
         return Err(e.type_error("callback is not callable"));
     }
     let t = arg(args, 1);
     for (i, v) in vals.iter().enumerate() {
-        let r = e.call_value(f, t, &[Value::Num(*v), Value::Num(i as f64), this])?;
+        let r = e.call_value(f, t, &[*v, Value::Num(i as f64), this])?;
         if e.to_boolean(r) {
             return Ok(Value::Num(i as f64));
         }
@@ -967,11 +1053,11 @@ fn ta_find_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
 
 /// `ta.at(i)` — index négatif depuis la fin.
 fn ta_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
+    let (_, vals) = ta_vals(e, this)?;
     let n = e.to_number(arg(args, 0))?;
     let i = if n < 0.0 { vals.len() as f64 + n } else { n };
     if i >= 0.0 && i < vals.len() as f64 {
-        Ok(Value::Num(vals[i as usize]))
+        Ok(vals[i as usize])
     } else {
         Ok(Value::Undefined)
     }
@@ -979,7 +1065,7 @@ fn ta_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `ta.reduce(fn, init?)` — `TypeError` sur vide sans init (spec).
 fn ta_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
+    let (_, vals) = ta_vals(e, this)?;
     let f = arg(args, 0);
     if !e.is_callable(f) {
         return Err(e.type_error("callback is not callable"));
@@ -988,23 +1074,19 @@ fn ta_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         if vals.is_empty() {
             return Err(e.type_error("reduce of empty typed array"));
         }
-        (Value::Num(vals[0]), 1)
+        (vals[0], 1)
     } else {
         (arg(args, 1), 0)
     };
     for (i, v) in vals.iter().enumerate().skip(start) {
-        acc = e.call_value(
-            f,
-            Value::Undefined,
-            &[acc, Value::Num(*v), Value::Num(i as f64), this],
-        )?;
+        acc = e.call_value(f, Value::Undefined, &[acc, *v, Value::Num(i as f64), this])?;
     }
     Ok(acc)
 }
 
 /// `ta.reduceRight(fn, init?)`.
 fn ta_reduce_right(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
+    let (_, vals) = ta_vals(e, this)?;
     let f = arg(args, 0);
     if !e.is_callable(f) {
         return Err(e.type_error("callback is not callable"));
@@ -1013,7 +1095,7 @@ fn ta_reduce_right(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
         if vals.is_empty() {
             return Err(e.type_error("reduce of empty typed array"));
         }
-        (Value::Num(vals[vals.len() - 1]), vals.len() - 1)
+        (vals[vals.len() - 1], vals.len() - 1)
     } else {
         (arg(args, 1), vals.len())
     };
@@ -1021,27 +1103,26 @@ fn ta_reduce_right(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
         acc = e.call_value(
             f,
             Value::Undefined,
-            &[acc, Value::Num(vals[i]), Value::Num(i as f64), this],
+            &[acc, vals[i], Value::Num(i as f64), this],
         )?;
     }
     Ok(acc)
 }
 
-/// `ta.reverse()` — in-place dans la région de vue.
+/// `ta.reverse()` — in-place, au niveau octet de la région de vue
+/// (indifférent au kind, `Big` inclus).
 fn ta_reverse(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let _ = args;
     let (ta, bid, voff, len) = ta_view(e, this)?;
-    let bytes = match e.heap.obj(bid).map(|b| &b.kind) {
-        Some(ObjKind::ByteBuf(b)) => b.clone(),
-        _ => return Err(e.type_error("detached typed array")),
-    };
-    let mut vals: Vec<f64> = (0..len).map(|i| ta.get(&bytes[voff..], i)).collect();
-    vals.reverse();
+    let size = ta.size();
     if let Some(b) = e.heap.obj_mut(bid) {
         if let ObjKind::ByteBuf(bytes) = &mut b.kind {
-            if let Some(region) = bytes.get_mut(voff..) {
-                for (i, v) in vals.iter().enumerate() {
-                    ta.set(region, i, *v);
+            if let Some(region) = bytes.get_mut(voff..voff + len * size) {
+                for i in 0..len / 2 {
+                    let (a, c) = (i * size, (len - 1 - i) * size);
+                    for k in 0..size {
+                        region.swap(a + k, c + k);
+                    }
                 }
             }
         }
@@ -1050,17 +1131,22 @@ fn ta_reverse(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 }
 
 /// `ta.sort(cmp?)` — tri *numérique* par défaut (contrairement à
-/// `Array.sort`), comparateur optionnel. In-place.
+/// `Array.sort` ; les kinds big comparent des `BigInt`),
+/// comparateur optionnel. In-place.
 fn ta_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (ta, bid, voff, len) = ta_view(e, this)?;
     let cmp = arg(args, 0);
-    let bytes = match e.heap.obj(bid).map(|b| &b.kind) {
-        Some(ObjKind::ByteBuf(b)) => b.clone(),
-        _ => return Err(e.type_error("detached typed array")),
-    };
-    let mut vals: Vec<f64> = (0..len).map(|i| ta.get(&bytes[voff..], i)).collect();
+    let mut vals = e.ta_elements(ta, bid, voff, len);
     if matches!(cmp, Value::Undefined) {
-        vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        vals.sort_by(|a, b| match (*a, *b) {
+            (Value::Num(x), Value::Num(y)) => {
+                x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal)
+            }
+            _ => match (e.bigint_of(*a), e.bigint_of(*b)) {
+                (Some(x), Some(y)) => x.cmp(&y),
+                _ => std::cmp::Ordering::Equal,
+            },
+        });
     } else {
         if !e.is_callable(cmp) {
             return Err(e.type_error("comparator is not callable"));
@@ -1069,11 +1155,7 @@ fn ta_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         for i in 1..vals.len() {
             let mut j = i;
             while j > 0 {
-                let r = e.call_value(
-                    cmp,
-                    Value::Undefined,
-                    &[Value::Num(vals[j - 1]), Value::Num(vals[j])],
-                )?;
+                let r = e.call_value(cmp, Value::Undefined, &[vals[j - 1], vals[j]])?;
                 if e.to_number(r).unwrap_or(0.0) > 0.0 {
                     vals.swap(j - 1, j);
                     j -= 1;
@@ -1083,20 +1165,13 @@ fn ta_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             }
         }
     }
-    if let Some(b) = e.heap.obj_mut(bid) {
-        if let ObjKind::ByteBuf(bytes) = &mut b.kind {
-            if let Some(region) = bytes.get_mut(voff..) {
-                for (i, v) in vals.iter().enumerate() {
-                    ta.set(region, i, *v);
-                }
-            }
-        }
-    }
+    ta_write_back(e, ta, bid, voff, 0, &vals)?;
     Ok(this)
 }
 
 /// `ta.copyWithin(target, start, end?)` — copie d'éléments à
-/// l'intérieur de la région de vue (le snapshot règle le chevauchement).
+/// l'intérieur de la région de vue — `copy_within` au niveau octet
+/// (gère le chevauchement nativement, indifférent au kind).
 fn ta_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (ta, bid, voff, len) = ta_view(e, this)?;
     let to = e.to_number(arg(args, 0))?;
@@ -1111,18 +1186,12 @@ fn ta_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value
     let li = len as f64;
     let rel = |n: f64| if n < 0.0 { (li + n).max(0.0) } else { n.min(li) } as usize;
     let (t, f, en) = (rel(to), rel(from), rel(end));
-    let bytes = match e.heap.obj(bid).map(|b| &b.kind) {
-        Some(ObjKind::ByteBuf(b)) => b.clone(),
-        _ => return Err(e.type_error("detached typed array")),
-    };
-    let vals: Vec<f64> = (0..len).map(|i| ta.get(&bytes[voff..], i)).collect();
+    let size = ta.size();
     let count = en.saturating_sub(f).min(len.saturating_sub(t));
     if let Some(b) = e.heap.obj_mut(bid) {
         if let ObjKind::ByteBuf(bytes) = &mut b.kind {
-            if let Some(region) = bytes.get_mut(voff..) {
-                for i in 0..count {
-                    ta.set(region, t + i, vals[f + i]);
-                }
+            if let Some(region) = bytes.get_mut(voff..voff + len * size) {
+                region.copy_within(f * size..(f + count) * size, t * size);
             }
         }
     }
@@ -1138,17 +1207,16 @@ fn ta_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 
 /// `ta.values()` / `[Symbol.iterator]` — itérateur d'éléments.
 fn ta_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
-    let items = vals.into_iter().map(Value::Num).collect();
-    Ok(crate::collections::iter_obj(e, items))
+    let (_, vals) = ta_vals(e, this)?;
+    Ok(crate::collections::iter_obj(e, vals))
 }
 
 /// `ta.entries()` — itérateur `[i, v]`.
 fn ta_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_nums(e, this)?;
+    let (_, vals) = ta_vals(e, this)?;
     let mut items = Vec::with_capacity(vals.len());
     for (i, v) in vals.iter().enumerate() {
-        items.push(e.new_array(vec![Value::Num(i as f64), Value::Num(*v)]));
+        items.push(e.new_array(vec![Value::Num(i as f64), *v]));
     }
     Ok(crate::collections::iter_obj(e, items))
 }

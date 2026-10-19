@@ -15,7 +15,8 @@ use crate::ast::{
 };
 use crate::error::{Error, Result};
 use crate::heap::{
-    Binding, Env, EnvCell, EnvKind, EnvRef, Fun, Heap, JsResult, ObjKind, Object, Prop, Thrown,
+    Binding, Env, EnvCell, EnvKind, EnvRef, Fun, Heap, JsResult, ObjKind, Object, Prop, TaKind,
+    Thrown,
 };
 use crate::parser;
 use crate::value::{num_to_js_string, to_int32, to_uint32, ObjId, Value};
@@ -145,11 +146,13 @@ pub(crate) struct Protos {
     /// `%TypedArray%.prototype` — proto partagé des 9 protos
     /// `XxxArray.prototype` (`set`, `subarray`, `keys`…).
     pub typed_array: ObjId,
+    /// `BigInt.prototype` (`toString`/`valueOf`/`@@toPrimitive`).
+    pub bigint: ObjId,
 }
 
 impl Protos {
     /// Tous les prototypes — racines GC permanentes.
-    fn all(&self) -> [ObjId; 21] {
+    fn all(&self) -> [ObjId; 22] {
         [
             self.object,
             self.function,
@@ -172,6 +175,7 @@ impl Protos {
             self.array_buffer,
             self.data_view,
             self.typed_array,
+            self.bigint,
         ]
     }
 }
@@ -216,6 +220,7 @@ impl Engine {
         let array_buffer = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let data_view = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let typed_array = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
+        let bigint = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let global = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -246,6 +251,7 @@ impl Engine {
                 array_buffer,
                 data_view,
                 typed_array,
+                bigint,
             },
             rng: seed | 1,
             t0: Instant::now(),
@@ -455,6 +461,70 @@ impl Engine {
         Value::Str(self.heap.alloc_str(s))
     }
 
+    /// Allocate a `bigint` primitive (`ObjKind::BigInt` cell,
+    /// `BigInt.prototype` proto — inerte car `Value::Big` ne suit
+    /// pas la chaîne de prototypes).
+    pub(crate) fn big_val(&mut self, b: num_bigint::BigInt) -> Value {
+        let proto = Value::Obj(self.protos.bigint);
+        Value::Big(self.heap.alloc_obj(Object {
+            proto,
+            props: Vec::new(),
+            kind: ObjKind::BigInt(b),
+            extensible: true,
+        }))
+    }
+
+    /// Digits d'un `Value::Big` — `None` si `v` n'est pas un bigint.
+    pub(crate) fn bigint_of(&self, v: Value) -> Option<num_bigint::BigInt> {
+        match v {
+            Value::Big(id) => match self.heap.obj(id).map(|o| &o.kind) {
+                Some(ObjKind::BigInt(b)) => Some(b.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// `ToBigInt` — spec : `Number`/`Symbol`/objet non-primitive →
+    /// `TypeError` ; chaîne non-entière → `SyntaxError`.
+    pub(crate) fn to_bigint(&mut self, v: Value) -> JsResult<num_bigint::BigInt> {
+        use num_traits::Zero;
+        match v {
+            Value::Big(_) => Ok(self.bigint_of(v).unwrap_or_default()),
+            Value::Bool(b) => Ok(num_bigint::BigInt::from(u8::from(b))),
+            Value::Str(id) => {
+                let s = self.heap.string(id).unwrap_or_default();
+                let t = s.trim();
+                if t.is_empty() {
+                    return Ok(num_bigint::BigInt::zero());
+                }
+                let (body, base) =
+                    if let Some(r) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+                        (r, 16)
+                    } else if let Some(r) = t.strip_prefix("0o").or_else(|| t.strip_prefix("0O")) {
+                        (r, 8)
+                    } else if let Some(r) = t.strip_prefix("0b").or_else(|| t.strip_prefix("0B")) {
+                        (r, 2)
+                    } else {
+                        (t, 10)
+                    };
+                let (sign, digits) = match body.strip_prefix('-') {
+                    Some(d) => (-1i8, d),
+                    None => (1, body.strip_prefix('+').unwrap_or(body)),
+                };
+                match num_bigint::BigInt::parse_bytes(digits.as_bytes(), base) {
+                    Some(b) => Ok(b * num_bigint::BigInt::from(sign)),
+                    None => Err(self.syntax_error("cannot convert string to BigInt")),
+                }
+            }
+            Value::Obj(_) => {
+                let p = self.to_primitive(v, false)?;
+                self.to_bigint(p)
+            }
+            _ => Err(self.type_error("cannot convert to BigInt")),
+        }
+    }
+
     /// New ordinary object (`Object.prototype` proto).
     pub(crate) fn new_object(&mut self) -> ObjId {
         let proto = Value::Obj(self.protos.object);
@@ -619,12 +689,12 @@ impl Engine {
     /// d'import de module renvoient vers l'env exporteur (live
     /// binding) ; `visited` borne les chaînes cycliques
     /// (`export {a} from 'b'` ↔ `export {b} from 'a'`).
-    pub(crate) fn env_get(&self, env: &EnvRef, name: &str) -> Option<Value> {
+    pub(crate) fn env_get(&mut self, env: &EnvRef, name: &str) -> Option<Value> {
         self.env_get_seen(env, name, &mut HashSet::new())
     }
 
     fn env_get_seen(
-        &self,
+        &mut self,
         env: &EnvRef,
         name: &str,
         visited: &mut HashSet<(usize, String)>,
@@ -1043,14 +1113,18 @@ impl Engine {
                         return Ok(out);
                     }
                 }
-                if let Some(o) = self.heap.obj(id) {
-                    match &o.kind {
-                        ObjKind::Array(elems) => return Ok(elems.clone()),
-                        ObjKind::TypedArray { .. } => {
-                            return Ok(self.ta_elements(&o.kind));
-                        }
-                        _ => {}
-                    }
+                let ta_view = match self.heap.obj(id).map(|o| &o.kind) {
+                    Some(ObjKind::Array(elems)) => return Ok(elems.clone()),
+                    Some(ObjKind::TypedArray {
+                        ta,
+                        buffer: Value::Obj(bid),
+                        offset,
+                        len,
+                    }) => Some((*ta, *bid, *offset, *len)),
+                    _ => None,
+                };
+                if let Some((ta, bid, off, len)) = ta_view {
+                    return Ok(self.ta_elements(ta, bid, off, len));
                 }
                 Err(self.type_error("object is not iterable"))
             }
@@ -1201,7 +1275,7 @@ impl Engine {
 
     /// Own-property lookup with array/`length` semantics — returns
     /// the raw `Prop` so accessor pairs are visible to the caller.
-    pub(crate) fn find_own(&self, id: ObjId, key: &str) -> Option<Prop> {
+    pub(crate) fn find_own(&mut self, id: ObjId, key: &str) -> Option<Prop> {
         let o = self.heap.obj(id)?;
         if let ObjKind::Array(elems) = &o.kind {
             if key == "length" {
@@ -1245,7 +1319,44 @@ impl Engine {
         if let Some(p) = self.ta_prop(&o.kind, key) {
             return Some(p);
         }
-        o.find(key)
+        if let Some(p) = o.find(key) {
+            return Some(p);
+        }
+        // Kinds `BigInt` : la lecture d'un élément alloue un
+        // `Value::Big` — d'où le `&mut` de cette méthode.
+        let big = match &o.kind {
+            ObjKind::TypedArray {
+                ta,
+                buffer,
+                offset,
+                len,
+            } if ta.is_big() => Some((*ta, *buffer, *offset, *len)),
+            _ => None,
+        };
+        if let Some((ta, buffer, offset, len)) = big {
+            let i = array_index(key)?;
+            if i >= len {
+                return None;
+            }
+            let Value::Obj(bid) = buffer else { return None };
+            let b = {
+                let Some(ObjKind::ByteBuf(bytes)) = self.heap.obj(bid).map(|b| &b.kind) else {
+                    return None;
+                };
+                bytes
+                    .get(offset..offset + len * ta.size())
+                    .map(|region| ta.get_big(region, i))
+            };
+            return b.map(|b| Prop::Data {
+                value: self.big_val(b),
+                attrs: crate::heap::PropAttrs {
+                    writable: true,
+                    enumerable: true,
+                    configurable: false,
+                },
+            });
+        }
+        None
     }
 
     /// Propriété synthétisée d'un `ArrayBuffer`/`DataView`/view
@@ -1286,6 +1397,11 @@ impl Engine {
                 "byteOffset" => Some(fixed(Value::Num(*offset as f64))),
                 "buffer" => Some(fixed(*buffer)),
                 _ => {
+                    // Kinds big : résolus dans `find_own` (&mut —
+                    // matérialise un `Value::Big`).
+                    if ta.is_big() {
+                        return None;
+                    }
                     let i = array_index(key)?;
                     if i >= *len {
                         return None;
@@ -1310,30 +1426,35 @@ impl Engine {
         }
     }
 
-    /// Éléments d'une vue typée — `Vec<Value>` de nombres lus dans
-    /// le buffer (partagé avec `iter_values` et les méthodes de
+    /// Éléments d'une vue typée — `Vec<Value>` (`Num`, ou `Big`
+    /// matérialisé pour les kinds big) lus dans la région de vue
+    /// du buffer (partagé avec `iter_values` et les méthodes de
     /// `typed_array.rs`).
-    pub(crate) fn ta_elements(&self, kind: &ObjKind) -> Vec<Value> {
-        if let ObjKind::TypedArray {
-            ta,
-            buffer: Value::Obj(bid),
-            offset,
-            len,
-        } = kind
-        {
-            if let Some(ObjKind::ByteBuf(bytes)) = self.heap.obj(*bid).map(|b| &b.kind) {
-                let end = (*offset + *len * ta.size()).min(bytes.len());
-                let region = &bytes[(*offset).min(end)..end];
-                return (0..region.len() / ta.size())
-                    .map(|i| Value::Num(ta.get(region, i)))
-                    .collect();
-            }
+    pub(crate) fn ta_elements(
+        &mut self,
+        ta: TaKind,
+        bid: ObjId,
+        offset: usize,
+        len: usize,
+    ) -> Vec<Value> {
+        let Some(ObjKind::ByteBuf(bytes)) = self.heap.obj(bid).map(|b| &b.kind) else {
+            return Vec::new();
+        };
+        let end = (offset + len * ta.size()).min(bytes.len());
+        let region = &bytes[offset.min(end)..end];
+        if ta.is_big() {
+            let vals: Vec<_> = (0..region.len() / ta.size())
+                .map(|i| ta.get_big(region, i))
+                .collect();
+            return vals.into_iter().map(|b| self.big_val(b)).collect();
         }
-        Vec::new()
+        (0..region.len() / ta.size())
+            .map(|i| Value::Num(ta.get(region, i)))
+            .collect()
     }
 
     /// First `Prop` found on `id`'s prototype chain.
-    fn find_prop(&self, id: ObjId, key: &str) -> Option<Prop> {
+    fn find_prop(&mut self, id: ObjId, key: &str) -> Option<Prop> {
         let mut cur = Some(id);
         let mut depth = 0;
         while let Some(cid) = cur {
@@ -1356,7 +1477,7 @@ impl Engine {
     /// reads must go through [`Engine::read_prop`] (the getter may
     /// run script code, needing `&mut self`); internal callers get
     /// `None` for accessor props.
-    pub(crate) fn get_prop(&self, id: ObjId, key: &str) -> Option<Value> {
+    pub(crate) fn get_prop(&mut self, id: ObjId, key: &str) -> Option<Value> {
         self.find_prop(id, key).and_then(|p| p.data_value())
     }
 
@@ -1435,7 +1556,7 @@ impl Engine {
                 break;
             }
         }
-        if self.set_prop(id, key, v) {
+        if self.set_prop(id, key, v)? {
             Ok(())
         } else {
             self.write_refused(key)
@@ -1540,6 +1661,10 @@ impl Engine {
                 let proto = self.protos.boolean;
                 Ok(self.get_prop(proto, key).unwrap_or(Value::Undefined))
             }
+            Value::Big(_) => {
+                let proto = self.protos.bigint;
+                Ok(self.get_prop(proto, key).unwrap_or(Value::Undefined))
+            }
         }
     }
 
@@ -1572,10 +1697,14 @@ impl Engine {
     /// `[[Set]]` sur un own data prop — `false` si refusé
     /// (non-writable, non-extensible, frozen). Le caller décide
     /// silence sloppy vs `TypeError` strict.
-    pub(crate) fn set_prop(&mut self, id: ObjId, key: &str, v: Value) -> bool {
+    pub(crate) fn set_prop(&mut self, id: ObjId, key: &str, v: Value) -> JsResult<bool> {
         // Élément indexé d'une vue typée : la cible est le *buffer*
         // partagé, pas la vue ; hors-bornes canonique → ignoré
         // (spec `IntegerIndexedElementSet` retourne `true`).
+        // Kinds big : `ToBigInt` — écrire un Number dans un
+        // `BigInt64Array` lève `TypeError` (spec), d'où le
+        // `JsResult` (les conversions échouées doivent pouvoir
+        // se propager même sloppy).
         let ta_t = match self.heap.obj(id).map(|o| &o.kind) {
             Some(ObjKind::TypedArray {
                 ta,
@@ -1587,9 +1716,22 @@ impl Engine {
         };
         if let Some((ta, Value::Obj(bid), off, i, in_range)) = ta_t {
             if !in_range {
-                return true;
+                return Ok(true);
             }
-            let n = self.to_number(v).unwrap_or(f64::NAN);
+            if ta.is_big() {
+                let b = self.to_bigint(v)?;
+                if let Some(bo) = self.heap.obj_mut(bid) {
+                    if let ObjKind::ByteBuf(bytes) = &mut bo.kind {
+                        if off <= bytes.len() {
+                            ta.set_big(&mut bytes[off..], i, &b);
+                        }
+                    }
+                }
+                return Ok(true);
+            }
+            // `ToNumber` propage — `u8[0] = 1n` lève `TypeError`
+            // (spec `SetValueInBuffer`), comme un `valueOf` qui lève.
+            let n = self.to_number(v)?;
             if let Some(b) = self.heap.obj_mut(bid) {
                 if let ObjKind::ByteBuf(bytes) = &mut b.kind {
                     if off <= bytes.len() {
@@ -1597,10 +1739,10 @@ impl Engine {
                     }
                 }
             }
-            return true;
+            return Ok(true);
         }
         let Some(o) = self.heap.obj_mut(id) else {
-            return false;
+            return Ok(false);
         };
         if let ObjKind::Array(elems) = &mut o.kind {
             if key == "length" {
@@ -1609,30 +1751,30 @@ impl Engine {
                     _ => elems.len(),
                 };
                 elems.resize(n, Value::Undefined);
-                return true;
+                return Ok(true);
             }
             if let Some(i) = array_index(key) {
                 if !o.extensible && i >= elems.len() {
-                    return false;
+                    return Ok(false);
                 }
                 if i >= elems.len() {
                     elems.resize(i + 1, Value::Undefined);
                 }
                 elems[i] = v;
-                return true;
+                return Ok(true);
             }
         }
         if let Some((_, p)) = o.props.iter_mut().find(|(k, _)| k == key) {
             match p {
                 crate::heap::Prop::Data { value, attrs } => {
                     if !attrs.writable {
-                        return false;
+                        return Ok(false);
                     }
                     *value = v;
-                    true
+                    Ok(true)
                 }
                 // Setter sans set → l'écriture échoue (spec).
-                crate::heap::Prop::Acc { set, .. } => matches!(*set, Value::Obj(_)),
+                crate::heap::Prop::Acc { set, .. } => Ok(matches!(*set, Value::Obj(_))),
             }
         } else if o.extensible {
             o.props.push((
@@ -1642,9 +1784,9 @@ impl Engine {
                     attrs: crate::heap::PropAttrs::FULL,
                 },
             ));
-            true
+            Ok(true)
         } else {
-            false
+            Ok(false)
         }
     }
 
@@ -1951,13 +2093,17 @@ impl Engine {
             Value::Undefined | Value::Null => false,
             Value::Bool(b) => b,
             Value::Num(n) => n != 0.0 && !n.is_nan(),
+            // `0n` falsy, tout le reste truthy.
+            Value::Big(_) => self
+                .bigint_of(v)
+                .is_some_and(|b| !num_traits::Zero::is_zero(&b)),
             Value::Str(id) => self.heap.string(id).is_some_and(|s| !s.is_empty()),
             Value::Obj(_) => true,
         }
     }
 
     /// `ToPrimitive` — may run `valueOf`/`toString`.
-    fn to_primitive(&mut self, v: Value, prefer_str: bool) -> JsResult<Value> {
+    pub(crate) fn to_primitive(&mut self, v: Value, prefer_str: bool) -> JsResult<Value> {
         let Value::Obj(id) = v else {
             return Ok(v);
         };
@@ -2001,6 +2147,9 @@ impl Engine {
             Value::Bool(b) => f64::from(u8::from(b)),
             Value::Num(n) => n,
             Value::Str(id) => parse_js_number(&self.heap.string(id).unwrap_or_default()),
+            // `ToNumber(bigint)` → TypeError (spec) — `Number(1n)`
+            // passe par `to_numeric` côté builtin, pas ici.
+            Value::Big(_) => return Err(self.type_error("cannot convert a BigInt to number")),
             Value::Obj(id) => {
                 // `ToNumber(Symbol)` throws — spec TypeError.
                 if matches!(self.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Symbol(_))) {
@@ -2020,6 +2169,7 @@ impl Engine {
             Value::Bool(b) => if b { "true" } else { "false" }.into(),
             Value::Num(n) => num_to_js_string(n),
             Value::Str(id) => self.heap.string(id).unwrap_or_default(),
+            Value::Big(_) => self.bigint_of(v).map(|b| b.to_string()).unwrap_or_default(),
             Value::Obj(_) => {
                 let p = self.to_primitive(v, true)?;
                 self.to_js_string(p)?
@@ -2672,6 +2822,10 @@ impl Engine {
     fn eval_inner(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
         match e {
             Expr::Num(n) => Ok(Value::Num(*n)),
+            Expr::BigInt(s) => {
+                Ok(self
+                    .big_val(num_bigint::BigInt::parse_bytes(s.as_bytes(), 10).unwrap_or_default()))
+            }
             Expr::Str(s) => Ok(self.str_val(s.clone())),
             Expr::Bool(b) => Ok(Value::Bool(*b)),
             Expr::Null => Ok(Value::Null),
@@ -3047,14 +3201,27 @@ impl Engine {
             }
             UnOp::BitNot => {
                 let v = self.eval_expr(env, this, operand)?;
+                if let Value::Big(_) = v {
+                    let b = self.to_bigint(v)?;
+                    return Ok(self.big_val(-(b + num_bigint::BigInt::from(1))));
+                }
                 Ok(Value::Num(f64::from(!to_int32(self.to_number(v)?))))
             }
             UnOp::Pos => {
                 let v = self.eval_expr(env, this, operand)?;
+                // `+1n` → TypeError (spec `ToNumeric` ≠ `ToNumber` :
+                // le `+` unaire refuse explicitement les BigInt).
+                if matches!(v, Value::Big(_)) {
+                    return Err(self.type_error("cannot convert a BigInt to number"));
+                }
                 Ok(Value::Num(self.to_number(v)?))
             }
             UnOp::Neg => {
                 let v = self.eval_expr(env, this, operand)?;
+                if let Value::Big(_) = v {
+                    let b = self.to_bigint(v)?;
+                    return Ok(self.big_val(-b));
+                }
                 Ok(Value::Num(-self.to_number(v)?))
             }
             UnOp::Void => {
@@ -3113,6 +3280,23 @@ impl Engine {
             },
             UnOp::PreInc | UnOp::PreDec | UnOp::PostInc | UnOp::PostDec => {
                 let cur = self.read_lvalue(env, this, operand)?;
+                // `++`/`--` sur un bigint : ±1n, sans passer par
+                // `ToNumber` (spec `Increment`/`Decrement`).
+                if let Value::Big(_) = cur {
+                    let b = self.to_bigint(cur)?;
+                    let d = if matches!(op, UnOp::PreInc | UnOp::PostInc) {
+                        num_bigint::BigInt::from(1)
+                    } else {
+                        num_bigint::BigInt::from(-1)
+                    };
+                    let new = self.big_val(b + d);
+                    self.write_lvalue(env, this, operand, new)?;
+                    return Ok(if matches!(op, UnOp::PostInc | UnOp::PostDec) {
+                        cur
+                    } else {
+                        new
+                    });
+                }
                 let n = self.to_number(cur)?;
                 let d = if matches!(op, UnOp::PreInc | UnOp::PostInc) {
                     1.0
@@ -3143,37 +3327,54 @@ impl Engine {
                     let ls = self.to_js_string(lp)?;
                     let rs = self.to_js_string(rp)?;
                     self.str_val(format!("{ls}{rs}"))
+                } else if matches!(lp, Value::Big(_)) || matches!(rp, Value::Big(_)) {
+                    // `1n + 2n` → `3n` ; mixte Num/Big → `TypeError`
+                    // via `to_bigint`.
+                    let a = self.to_bigint(lp)?;
+                    let b = self.to_bigint(rp)?;
+                    self.big_val(a + b)
                 } else {
                     Value::Num(self.to_number(lp)? + self.to_number(rp)?)
                 }
             }
-            Sub => Value::Num(self.to_number(l)? - self.to_number(r)?),
-            Mul => Value::Num(self.to_number(l)? * self.to_number(r)?),
-            Div => Value::Num(self.to_number(l)? / self.to_number(r)?),
-            Mod => Value::Num(self.to_number(l)? % self.to_number(r)?),
-            Pow => Value::Num(self.to_number(l)?.powf(self.to_number(r)?)),
-            Shl => Value::Num(f64::from(
-                to_int32(self.to_number(l)?) << (to_uint32(self.to_number(r)?) & 31),
-            )),
-            Shr => Value::Num(f64::from(
-                to_int32(self.to_number(l)?) >> (to_uint32(self.to_number(r)?) & 31),
-            )),
-            ShrU => Value::Num(f64::from(
-                to_uint32(self.to_number(l)?) >> (to_uint32(self.to_number(r)?) & 31),
-            )),
-            BitAnd => Value::Num(f64::from(
-                to_int32(self.to_number(l)?) & to_int32(self.to_number(r)?),
-            )),
-            BitOr => Value::Num(f64::from(
-                to_int32(self.to_number(l)?) | to_int32(self.to_number(r)?),
-            )),
-            BitXor => Value::Num(f64::from(
-                to_int32(self.to_number(l)?) ^ to_int32(self.to_number(r)?),
-            )),
+            Sub | Mul | Div | Mod | Pow | Shl | Shr | ShrU | BitAnd | BitOr | BitXor => {
+                let lp = self.to_primitive(l, false)?;
+                let rp = self.to_primitive(r, false)?;
+                if matches!(lp, Value::Big(_)) || matches!(rp, Value::Big(_)) {
+                    return self.big_binary(op, lp, rp);
+                }
+                match op {
+                    Sub => Value::Num(self.to_number(lp)? - self.to_number(rp)?),
+                    Mul => Value::Num(self.to_number(lp)? * self.to_number(rp)?),
+                    Div => Value::Num(self.to_number(lp)? / self.to_number(rp)?),
+                    Mod => Value::Num(self.to_number(lp)? % self.to_number(rp)?),
+                    Pow => Value::Num(self.to_number(lp)?.powf(self.to_number(rp)?)),
+                    Shl => Value::Num(f64::from(
+                        to_int32(self.to_number(lp)?) << (to_uint32(self.to_number(rp)?) & 31),
+                    )),
+                    Shr => Value::Num(f64::from(
+                        to_int32(self.to_number(lp)?) >> (to_uint32(self.to_number(rp)?) & 31),
+                    )),
+                    ShrU => Value::Num(f64::from(
+                        to_uint32(self.to_number(lp)?) >> (to_uint32(self.to_number(rp)?) & 31),
+                    )),
+                    BitAnd => Value::Num(f64::from(
+                        to_int32(self.to_number(lp)?) & to_int32(self.to_number(rp)?),
+                    )),
+                    BitOr => Value::Num(f64::from(
+                        to_int32(self.to_number(lp)?) | to_int32(self.to_number(rp)?),
+                    )),
+                    _ => Value::Num(f64::from(
+                        to_int32(self.to_number(lp)?) ^ to_int32(self.to_number(rp)?),
+                    )),
+                }
+            }
             Lt | Le | Gt | Ge => {
                 let lp = self.to_primitive(l, false)?;
                 let rp = self.to_primitive(r, false)?;
-                let ord = if let (Value::Str(a), Value::Str(b)) = (lp, rp) {
+                let ord = if matches!(lp, Value::Big(_)) || matches!(rp, Value::Big(_)) {
+                    self.big_rel(lp, rp)?
+                } else if let (Value::Str(a), Value::Str(b)) = (lp, rp) {
                     let a = self.heap.string(a).unwrap_or_default();
                     let b = self.heap.string(b).unwrap_or_default();
                     Some(a.cmp(&b))
@@ -3314,6 +3515,29 @@ impl Engine {
         }
         match (l, r) {
             (Value::Null, Value::Undefined) | (Value::Undefined, Value::Null) => Ok(true),
+            // BigInt loose-eq (spec `IsLooselyEqual`) : Num →
+            // égalité mathématique, Str → `StringToBigInt`,
+            // Bool → 0n/1n, objet → `ToPrimitive` puis re-tour.
+            // Ces bras passent avant `(Bool, _)` pour capter
+            // `(BigInt, Bool)`.
+            (Value::Big(_), Value::Num(n)) | (Value::Num(n), Value::Big(_)) => {
+                let bv = if matches!(l, Value::Big(_)) { l } else { r };
+                Ok(self.bigint_of(bv).is_some_and(|b| big_eq_num(&b, n)))
+            }
+            (Value::Big(_), Value::Str(_)) | (Value::Str(_), Value::Big(_)) => {
+                let bv = if matches!(l, Value::Big(_)) { l } else { r };
+                let sv = if matches!(l, Value::Str(_)) { l } else { r };
+                match self.to_bigint(sv) {
+                    Ok(sb) => Ok(self.bigint_of(bv).is_some_and(|b| b == sb)),
+                    Err(_) => Ok(false), // `StringToBigInt` invalide → pas égal.
+                }
+            }
+            (Value::Big(_), Value::Bool(b)) | (Value::Bool(b), Value::Big(_)) => {
+                let bv = if matches!(l, Value::Big(_)) { l } else { r };
+                Ok(self
+                    .bigint_of(bv)
+                    .is_some_and(|v| v == num_bigint::BigInt::from(u8::from(b))))
+            }
             (Value::Num(_), Value::Str(_))
             | (Value::Str(_), Value::Num(_))
             | (Value::Bool(_), _)
@@ -3322,15 +3546,163 @@ impl Engine {
                 let rn = self.to_number(r)?;
                 Ok(ln == rn)
             }
-            (Value::Obj(_), Value::Num(_) | Value::Str(_)) => {
+            (Value::Obj(_), Value::Num(_) | Value::Str(_) | Value::Big(_)) => {
                 let p = self.to_primitive(l, false)?;
                 self.loose_eq(p, r)
             }
-            (Value::Num(_) | Value::Str(_), Value::Obj(_)) => {
+            (Value::Num(_) | Value::Str(_) | Value::Big(_), Value::Obj(_)) => {
                 let p = self.to_primitive(r, false)?;
                 self.loose_eq(l, p)
             }
             _ => Ok(false),
+        }
+    }
+
+    /// Arithmétique/bitwise sur opérandes dont au moins une est
+    /// `BigInt` — `TypeError` si l'autre n'est pas `ToBigInt`-able
+    /// (mixte `Number`/`BigInt` interdit par la spec).
+    fn big_binary(&mut self, op: BinOp, l: Value, r: Value) -> JsResult<Value> {
+        use num_traits::{Signed, Zero};
+        let a = self.to_bigint(l)?;
+        let b = self.to_bigint(r)?;
+        let one = num_bigint::BigInt::from(1);
+        let v = match op {
+            BinOp::Sub => a - b,
+            BinOp::Mul => a * b,
+            BinOp::Div => {
+                if b.is_zero() {
+                    return Err(self.range_error("BigInt division by zero"));
+                }
+                a / b // num-bigint `/` tronque vers 0 — sémantique spec.
+            }
+            BinOp::Mod => {
+                if b.is_zero() {
+                    return Err(self.range_error("BigInt division by zero"));
+                }
+                a % b // reste signe-dividende — sémantique spec.
+            }
+            BinOp::Pow => {
+                if b.is_negative() {
+                    return Err(self.range_error("BigInt negative exponent"));
+                }
+                let Ok(e) = u32::try_from(&b) else {
+                    return Err(self.range_error("BigInt exponent too large"));
+                };
+                a.pow(e)
+            }
+            BinOp::Shl | BinOp::Shr => {
+                // Décalage signé (négatif = sens inverse). Borné à
+                // 1 M de bits — au-delà la valeur exploserait la
+                // mémoire (deviation documentée, spec n'borne pas).
+                let shift = b.abs();
+                if shift > num_bigint::BigInt::from(1_000_000u32) {
+                    return Err(self.range_error("BigInt shift too large"));
+                }
+                let Ok(s) = usize::try_from(&shift) else {
+                    return Err(self.range_error("BigInt shift too large"));
+                };
+                match (op, b.is_negative()) {
+                    (BinOp::Shl, false) | (BinOp::Shr, true) => a << s,
+                    _ => a >> s,
+                }
+            }
+            BinOp::BitAnd => a & b,
+            BinOp::BitOr => a | b,
+            BinOp::BitXor => a ^ b,
+            BinOp::ShrU => {
+                return Err(self.type_error("BigInts have no unsigned right shift"));
+            }
+            _ => return Err(self.type_error("invalid BigInt operator")),
+        };
+        let _ = one;
+        Ok(self.big_val(v))
+    }
+
+    /// `bigint <rel> x` — `Ordering` mathématique (`None` → `false`,
+    /// ex. comparaison contre `NaN` ou chaîne non-entière).
+    fn big_rel(&mut self, l: Value, r: Value) -> JsResult<Option<std::cmp::Ordering>> {
+        // `StringToBigInt` d'un côté si chaîne, numérique sinon.
+        let cmp_num = |e: &mut Self,
+                       bv: num_bigint::BigInt,
+                       o: Value|
+         -> JsResult<Option<std::cmp::Ordering>> {
+            if let Value::Num(n) = o {
+                return Ok(big_cmp_num(&bv, n));
+            }
+            let n = e.to_number(o)?;
+            Ok(big_cmp_num(&bv, n))
+        };
+        match (l, r) {
+            (Value::Big(_), Value::Big(_)) => {
+                let a = self.bigint_of(l).unwrap_or_default();
+                let b = self.bigint_of(r).unwrap_or_default();
+                Ok(Some(a.cmp(&b)))
+            }
+            (Value::Big(_), Value::Str(_)) => {
+                let a = self.bigint_of(l).unwrap_or_default();
+                match self.to_bigint(r) {
+                    Ok(b) => Ok(Some(a.cmp(&b))),
+                    Err(_) => Ok(None),
+                }
+            }
+            (Value::Str(_), Value::Big(_)) => {
+                let b = self.bigint_of(r).unwrap_or_default();
+                match self.to_bigint(l) {
+                    Ok(a) => Ok(Some(a.cmp(&b))),
+                    Err(_) => Ok(None),
+                }
+            }
+            (Value::Big(_), o) => {
+                let a = self.bigint_of(l).unwrap_or_default();
+                cmp_num(self, a, o)
+            }
+            (o, Value::Big(_)) => {
+                let b = self.bigint_of(r).unwrap_or_default();
+                match cmp_num(self, b, o)? {
+                    Some(ord) => Ok(Some(ord.reverse())),
+                    None => Ok(None),
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
+/// `bigint == number` — égalité mathématique (spec `IsLooselyEqual`
+/// étape : le `number` doit être fini et entier).
+fn big_eq_num(b: &num_bigint::BigInt, n: f64) -> bool {
+    if !n.is_finite() || n.fract() != 0.0 {
+        return false;
+    }
+    num_traits::FromPrimitive::from_f64(n).is_some_and(|nb| b == &nb)
+}
+
+/// `bigint <op> number` — comparaison mathématique exacte :
+/// `None` si `n` est `NaN`. Pour `n` fractionnaire, le bigint
+/// (entier) est `Less` ssi `b <= floor(n)`, `Greater` ssi
+/// `b >= ceil(n)` — il ne peut jamais égaler.
+fn big_cmp_num(b: &num_bigint::BigInt, n: f64) -> Option<std::cmp::Ordering> {
+    if n.is_nan() {
+        return None;
+    }
+    if n.is_infinite() {
+        return Some(if n < 0.0 {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Less
+        });
+    }
+    let f = n.floor();
+    let lo: num_bigint::BigInt = num_traits::FromPrimitive::from_f64(f)?;
+    match b.cmp(&lo) {
+        std::cmp::Ordering::Less => Some(std::cmp::Ordering::Less),
+        std::cmp::Ordering::Greater => Some(std::cmp::Ordering::Greater),
+        std::cmp::Ordering::Equal => {
+            if n.fract() == 0.0 {
+                Some(std::cmp::Ordering::Equal)
+            } else {
+                Some(std::cmp::Ordering::Greater) // b == floor(n) < n
+            }
         }
     }
 }
@@ -3346,6 +3718,16 @@ pub(crate) fn strict_eq(l: Value, r: Value, heap: &Heap) -> bool {
                 heap.string(a) == heap.string(b)
             }
         }
+        (Value::Big(a), Value::Big(b)) => {
+            if a == b {
+                true
+            } else {
+                matches!(
+                    (heap.obj(a).map(|o| &o.kind), heap.obj(b).map(|o| &o.kind)),
+                    (Some(ObjKind::BigInt(x)), Some(ObjKind::BigInt(y))) if x == y
+                )
+            }
+        }
         _ => l == r,
     }
 }
@@ -3357,6 +3739,7 @@ fn typeof_str(v: Value, heap: &Heap) -> &'static str {
         Value::Bool(_) => "boolean",
         Value::Num(_) => "number",
         Value::Str(_) => "string",
+        Value::Big(_) => "bigint",
         Value::Obj(mut id) => loop {
             match heap.obj(id).map(|o| &o.kind) {
                 Some(ObjKind::Fun(_)) => break "function",

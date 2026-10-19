@@ -348,8 +348,29 @@ d'intégration, pas par la couverture :
   `TextEncoder.encode` rend un vrai `Uint8Array`,
   `TextDecoder.decode` lit vues/`DataView`/buffer.
   Déviations : props synthétiques = data props (spec :
-  accesseurs proto), pas de `BigInt64Array`/`Atomics`/
-  resizable/`SharedArrayBuffer`.
+  accesseurs proto), pas d'`Atomics`/resizable/
+  `SharedArrayBuffer`.
+- [x] **JS-C7. `BigInt` + vues big** : primitive
+  `Value::Big(ObjId)` → `ObjKind::BigInt(num-bigint)`
+  (tracée GC). Littéraux `123n`/radix (`0xFn`…) lexés, formes
+  malformées rejetées (`08n`, `123n4`). Sémantique complète :
+  `typeof` → `"bigint"`, arithmétique exacte (`/` tronquée,
+  `**`, `-`/`~`/`++` unaires), bitwise (`>>>` interdit),
+  `TypeError` sur mixte bigint/number, comparaisons mixtes
+  (`1n < 2` ok), `==`/`===` spec, concat string, `ToBigInt`
+  (chaîne → `SyntaxError`, number non-entier → `RangeError`).
+  Builtins : `BigInt()` (pas de `new`), `asIntN`/`asUintN`,
+  proto `toString(radix)`/`valueOf`, `Number(1n)`,
+  `JSON.stringify` → `TypeError`, `[object BigInt]`.
+  `TaKind::I64`/`U64` : `BigInt64Array`/`BigUint64Array`
+  complètes (mod 2^64, complément à 2) — refactor
+  `ta_nums`→`ta_vals` (éléments `Value`, `Big` préservés,
+  `reverse`/`copyWithin` au niveau octet), `DataView`
+  get/set `BigInt64`/`BigUint64` endianness paramétrable.
+  `set_prop`/`find_own`/`get_prop`/`env_get` passés `JsResult`/
+  `&mut` pour matérialiser les `Value::Big` et propager les
+  `TypeError` de conversion (`u8[0]=1n`, `big[0]=1` lèvent).
+  test262 reste 859/859.
 - [ ] **JS-C. Couverture par besoin** : `Intl` —
   ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
@@ -426,8 +447,12 @@ d'intégration, pas par la couverture :
 
 ## Phase 9 — Consolidation
 
-- [ ] **Étape 37. Images.** Décodeurs pur Rust (png/jpeg/gif/webp)
-  derrière l'abstraction d'image, décodage progressif.
+- [x] **Étape 37. Images.** `<img>` = boîte remplacée à taille
+  intrinsèque : fetch sous-ressource via `HttpTransport` injecté
+  (borné `max_images`/`image_max_px`), décodage pur Rust `image`
+  (png/jpeg/gif/webp), blit nearest-neighbor + alpha dans le
+  raster, repli `alt` sur tout échec. Décodage progressif
+  (incrémental) reporté — hors scope du palier.
 - [ ] **Étape 38. Formes.** `<form>`, GET/POST, champs natifs
   rendus moteur ou délégués UI (ADR de phase).
 - [ ] **Étape 39. Perf + fuzz.** Benchs pipeline, bornes

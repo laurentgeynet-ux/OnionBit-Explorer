@@ -460,6 +460,9 @@ pub enum AssignOp {
 pub enum Expr {
     /// Number literal.
     Num(f64),
+    /// `123n` `BigInt` literal — digits normalisés en décimal par le
+    /// lexer (`0xFn` déjà converti).
+    BigInt(String),
     /// String literal.
     Str(String),
     /// `true` / `false`.

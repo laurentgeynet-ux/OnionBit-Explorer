@@ -67,6 +67,10 @@ idna = "1.0"
 # (dillo-js lexer) — `char::is_alphabetic` n'implémente ni UAX #31
 # ni les exclusions Pattern_Syntax (ex. U+2E2F). Pur Rust.
 unicode-ident = "1.0"
+# Entiers arbitraires pour BigInt (dillo-js JS-C7) — pur Rust,
+# pas de GMP. num-traits pour les casts BigInt→i64/u64/f64.
+num-bigint = "0.4"
+num-traits = "0.2"
 # Pile réseau explorer-net (ADR-0002) — tokio sockets/timers,
 # httparse wire-format HTTP/1.1, async-trait pour les transports
 # injectables (HttpTransport/Connector dyn-compatibles).
@@ -95,6 +99,10 @@ encoding_rs = "0.8"
 # embarquée : sans elle, un jar naïf accepte les supercookies
 # `.co.uk`. Pur Rust.
 psl = "2"
+# Décodeurs d'images explorer-render (étape 37) — `image` est LA
+# référence pur Rust (png/jpeg/gif/webp embarqués, aucun *-sys) ;
+# features réduites aux formats du MVP.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -103,6 +103,21 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(g, "SyntaxError", s_err, false);
     e.set_own(g, "Date", date, false);
 
+    // `BigInt` (JS-C7) — ctor fonctionnel (`new` → TypeError),
+    // `asIntN`/`asUintN`, proto `toString`/`valueOf`. Le proto est
+    // un wrapper de `0n` comme les autres primitives.
+    let p_big = e.protos.bigint;
+    let zero = e.big_val(num_bigint::BigInt::from(0));
+    e.set_own(p_big, PRIM, zero, false);
+    e.add_method(p_big, "toString", bigint_to_string);
+    e.add_method(p_big, "valueOf", bigint_value_of);
+    let big = ctor(e, "BigInt", bigint_ctor, p_big);
+    if let Value::Obj(bid) = big {
+        e.add_method(bid, "asIntN", bigint_as_int_n);
+        e.add_method(bid, "asUintN", bigint_as_uint_n);
+    }
+    e.set_own(g, "BigInt", big, false);
+
     // `Function(p1,…,body)` ctor + `Symbol` + `Reflect` (JS-7f).
     let function_v = ctor(e, "Function", function_ctor, p_fun);
     e.set_own(g, "Function", function_v, false);
@@ -806,6 +821,15 @@ fn string_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
 fn number_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
     match arg(args, 0) {
         Value::Undefined => Ok(wrap_or_prim(e, t, e.protos.number, Value::Num(0.0))),
+        // `Number(1n)` — `ToNumeric` autorise le bigint (troncation
+        // `to_f64` documentée pour |b| > 2^53).
+        Value::Big(_) => {
+            let n = e
+                .bigint_of(arg(args, 0))
+                .and_then(|b| num_traits::ToPrimitive::to_f64(&b))
+                .unwrap_or(f64::NAN);
+            Ok(wrap_or_prim(e, t, e.protos.number, Value::Num(n)))
+        }
         v => {
             let n = e.to_number(v)?;
             Ok(wrap_or_prim(e, t, e.protos.number, Value::Num(n)))
@@ -898,6 +922,7 @@ fn object_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value
         Value::Num(_) => "Number",
         Value::Bool(_) => "Boolean",
         Value::Str(_) => "String",
+        Value::Big(_) => "BigInt",
         Value::Obj(id) => match e.heap.obj(id).map(|o| &o.kind) {
             Some(ObjKind::Array(_)) => "Array",
             Some(ObjKind::Fun(_)) => "Function",
@@ -2077,12 +2102,12 @@ fn regexp_exec(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let last = if use_last { re_last_index(e, id)? } else { 0 };
     if let Some((m, new_last)) = re.exec_from(&s, last) {
         if use_last {
-            e.set_prop(id, "lastIndex", Value::Num(new_last as f64));
+            let _ = e.set_prop(id, "lastIndex", Value::Num(new_last as f64));
         }
         Ok(match_result(e, &m, &s))
     } else {
         if use_last {
-            e.set_prop(id, "lastIndex", Value::Num(0.0));
+            let _ = e.set_prop(id, "lastIndex", Value::Num(0.0));
         }
         Ok(Value::Null)
     }
@@ -2112,7 +2137,7 @@ fn string_match(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
             .into_iter()
             .map(|m| e.str_val(m.text))
             .collect();
-        e.set_prop(id, "lastIndex", Value::Num(0.0));
+        let _ = e.set_prop(id, "lastIndex", Value::Num(0.0));
         return Ok(if texts.is_empty() {
             Value::Null
         } else {
@@ -2402,6 +2427,120 @@ fn symbol_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         kind: ObjKind::Symbol(desc),
         extensible: true,
     })))
+}
+
+// ---- BigInt (JS-C7) --------------------------------------------------
+
+/// `this` d'une méthode `BigInt.prototype` : primitive `Value::Big`
+/// ou wrapper `Object(1n)`/`new` portant `__prim`.
+fn bigint_this(e: &mut Engine, this: Value) -> JsResult<num_bigint::BigInt> {
+    let prim = match this {
+        v @ Value::Big(_) => v,
+        Value::Obj(id) => {
+            let own = e.heap.obj(id).and_then(|o| o.get_own(PRIM));
+            match own {
+                Some(p @ Value::Big(_)) => p,
+                _ => {
+                    return Err(
+                        e.type_error("BigInt.prototype method called on incompatible receiver")
+                    );
+                }
+            }
+        }
+        _ => {
+            return Err(e.type_error("BigInt.prototype method called on incompatible receiver"));
+        }
+    };
+    match e.bigint_of(prim) {
+        Some(b) => Ok(b),
+        None => Err(e.type_error("invalid BigInt value")),
+    }
+}
+
+/// `BigInt(x)` — fonctionnel uniquement (`new` → `TypeError`, spec
+/// `isConstructor` interdit). `x` numérique doit être entier.
+fn bigint_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    if constructed_this(e, t, e.protos.bigint).is_some() {
+        return Err(e.type_error("BigInt is not a constructor"));
+    }
+    let v = arg(args, 0);
+    if let Value::Num(n) = v {
+        if !n.is_finite() || n.fract() != 0.0 {
+            return Err(e.range_error("the number is not a safe integer"));
+        }
+        let b = num_traits::FromPrimitive::from_f64(n).unwrap_or_else(num_bigint::BigInt::default);
+        return Ok(e.big_val(b));
+    }
+    let prim = if let Value::Obj(_) = v {
+        e.to_primitive(v, false)?
+    } else {
+        v
+    };
+    // `to_bigint` produit le SyntaxError spec pour les chaînes
+    // non-parsables (`StringToBigInt`).
+    let b = e.to_bigint(prim)?;
+    Ok(e.big_val(b))
+}
+
+fn bigint_to_string(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let b = bigint_this(e, this)?;
+    let radix = match arg(args, 0) {
+        Value::Undefined => 10,
+        v => {
+            let n = e.to_number(v)?;
+            if !(2.0..=36.0).contains(&n) || n.fract() != 0.0 {
+                return Err(e.range_error("toString() radix must be between 2 and 36"));
+            }
+            n as u32
+        }
+    };
+    Ok(e.str_val(b.to_str_radix(radix)))
+}
+
+fn bigint_value_of(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let b = bigint_this(e, this)?;
+    Ok(e.big_val(b))
+}
+
+/// `ToIndex` simplifié : entier ≥ 0 (borné à 2^53-1 implicite f64).
+fn to_bits(e: &mut Engine, v: Value) -> JsResult<u32> {
+    let n = e.to_number(v)?;
+    if !n.is_finite() || n < 0.0 || n.fract() != 0.0 {
+        return Err(e.range_error("invalid bigint bit width"));
+    }
+    Ok(n as u32)
+}
+
+fn bigint_as_int_n(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let bits = to_bits(e, arg(args, 0))?;
+    let b = e.to_bigint(arg(args, 1))?;
+    if bits == 0 {
+        return Ok(e.big_val(num_bigint::BigInt::from(0)));
+    }
+    let m = num_bigint::BigInt::from(1) << bits;
+    let mut r = &b % &m;
+    if r.sign() == num_bigint::Sign::Minus {
+        r += &m;
+    }
+    let half = &m >> 1u32;
+    if r >= half {
+        r -= &m;
+    }
+    Ok(e.big_val(r))
+}
+
+fn bigint_as_uint_n(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let bits = to_bits(e, arg(args, 0))?;
+    let b = e.to_bigint(arg(args, 1))?;
+    if bits == 0 {
+        return Ok(e.big_val(num_bigint::BigInt::from(0)));
+    }
+    let m = num_bigint::BigInt::from(1) << bits;
+    let mut r = &b % &m;
+    if r.sign() == num_bigint::Sign::Minus {
+        r += &m;
+    }
+    Ok(e.big_val(r))
 }
 
 /// `Symbol.for(key)` — global registry on the engine (survives

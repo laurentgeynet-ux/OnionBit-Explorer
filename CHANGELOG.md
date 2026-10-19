@@ -9,6 +9,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 37 — images `<img>`** (`explorer-layout`,
+  `explorer-render`, `explorer-core`) : `LayoutBox.intrinsic`
+  + `build_box_tree_sized`/`build_display_list_imaged` (les
+  wrappers historiques sans table restent compatibles) ;
+  `ImageTable` (pixels RGBA `Arc` par `NodeId`) et
+  `DisplayItem::Image` — blit nearest-neighbor borné,
+  alpha prémultiplié et clip respectés. `Session` fetch
+  chaque `<img src>` via le `HttpTransport` injecté
+  (résolution `Url::resolve`, statut 2xx requis), décode
+  via le crate pur Rust `image` (png/jpeg/gif/webp), borne
+  `SessionConfig::max_images`/`image_max_px` ; tout échec
+  (réseau, format, borne) laisse le nœud hors table → le
+  boxtree peint le texte `alt` (itemisé malgré
+  `display:inline-block` — fix `collect_child`). Attributs
+  `width`/`height` HTML honnêtement résolus axe par axe.
+  Tests : unitaires render (décodage, blit, clip, garbage),
+  boxtree (alt↔intrinsèque), session (PNG rouge ≡ bloc,
+  alt cassé, borne 32 requêtes).
+
 - **Étape 36 — boucle d'événements** (`explorer-js`,
   `explorer-core`) : `JsEngine::dispatch_event(ty, path)`
   — chemin `(tag, index same-tag)` depuis la racine,
@@ -447,6 +466,37 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`upper(v) == upper(borne)`) ; backrefs wrappées `(?i:…)`.
   16 assertions de régression `tests/lang.rs`
   (`regexp_js_c3_semantics`).
+- **JS-C7 — `BigInt` + `BigInt64Array`/`BigUint64Array`**
+  (`dillo-js`) : primitive `Value::Big(ObjId)` →
+  `ObjKind::BigInt` (`num-bigint`, tracée GC). Littéraux
+  `123n` et radix (`0xFn`/`0o17n`/`0b101n`) ; formes
+  malformées rejetées (`08n`, `123n4`, `1.5n`, `1e3n`).
+  Sémantique : `typeof` → `"bigint"`, arithmétique exacte
+  (`/` tronquée, `%`, `**`, `-`/`~`/`++`/`--`), bitwise avec
+  `>>>` interdit, `TypeError` sur mixte bigint/number,
+  comparaisons relationnelles mixtes, `==`/`===` spec
+  (`1n == 1` vrai, `1n === 1` faux), concat string,
+  `to_number`/`to_js_string`/`prop_key`/`describe` intégrés,
+  `0n` falsy. `ToBigInt` : chaîne non-parsable →
+  `SyntaxError` (`0x`/`0o`/`0b` reconnus), number non-entier
+  → `RangeError`. Builtins : `BigInt()` (`new` → `TypeError`),
+  `asIntN`/`asUintN` (mod 2^bits), proto `toString(radix)`/
+  `valueOf`, `Number(1n)` (perte documentée > 2^53),
+  `JSON.stringify` → `TypeError`, `[object BigInt]`.
+  `TaKind::I64`/`U64` — éléments `BigInt` (mod 2^64,
+  complément à deux) : refactor `ta_nums`/`src_nums`/
+  `ta_from_nums` → `ta_vals`/`src_vals`/`ta_from_vals`
+  (`Vec<Value>`, `Big` préservés, `conv_vals`/`write_conv`
+  convertissent avant le `&mut` du buffer), `reverse`/
+  `copyWithin` au niveau octet, `sort` comparateur big-aware,
+  `indexOf`/`includes` en `StrictEqual`/`SameValueZero` sans
+  conversion. `DataView` `get`/`setBigInt64`/`BigUint64`
+  endianness paramétrable. `find_own`/`find_prop`/`get_prop`/
+  `env_get`/`ta_elements` passés `&mut` (matérialisation des
+  `Value::Big`), `set_prop` → `JsResult` pour propager les
+  `TypeError` de conversion (`u8[0]=1n`, `b64[0]=1` lèvent,
+  spec `SetValueInBuffer`). test262 reste 859/859 (sous-
+  ensemble extrait) ; 7 tests de régression `lang.rs`.
 - **JS-C6 — `ArrayBuffer`/`DataView`/vues typées** (`dillo-js`) :
   `ObjKind::ByteBuf` (buffer d'octets fixe, proto
   `ArrayBuffer.prototype`), `ObjKind::DataView {buffer, offset,

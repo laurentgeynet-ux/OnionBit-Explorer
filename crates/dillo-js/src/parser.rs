@@ -1483,6 +1483,10 @@ impl Parser {
                 self.next();
                 Ok(Expr::Num(n))
             }
+            Tok::Big(s) => {
+                self.next();
+                Ok(Expr::BigInt(s))
+            }
             Tok::Str(s) => {
                 if self.strict && self.cur().legacy_octal {
                     return Err(self.err("legacy octal escape in strict mode"));

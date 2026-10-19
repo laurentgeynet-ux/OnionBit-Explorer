@@ -311,6 +311,8 @@ fn json_write(
             let s = e.heap.string(id).unwrap_or_default();
             esc_str(out, &s);
         }
+        // Spec `SerializeJSONProperty` : BigInt → TypeError.
+        Value::Big(_) => return Err(e.type_error("do not know how to serialize a BigInt")),
         Value::Obj(id) => {
             // Functions are not JSON values — elided like undefined.
             if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Fun(_))) {
