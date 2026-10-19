@@ -58,7 +58,7 @@ pub(crate) fn iter_obj(e: &mut Engine, items: Vec<Value>) -> Value {
         proto,
         props: Vec::new(),
         kind: ObjKind::Iter { items, idx: 0 },
-        frozen: false,
+        extensible: true,
     }))
 }
 
@@ -72,7 +72,7 @@ fn map_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         proto,
         props: Vec::new(),
         kind: ObjKind::Map(Vec::new()),
-        frozen: false,
+        extensible: true,
     });
     let m = Value::Obj(id);
     // `new Map([[k, v], …])` — iterate the source, each entry must
@@ -93,7 +93,7 @@ fn set_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         proto,
         props: Vec::new(),
         kind: ObjKind::Set(Vec::new()),
-        frozen: false,
+        extensible: true,
     });
     let s = Value::Obj(id);
     if !matches!(arg(args, 0), Value::Undefined | Value::Null) {

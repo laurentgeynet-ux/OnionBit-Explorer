@@ -37,9 +37,9 @@ fn c_id(v: Value) -> ObjId {
 /// Install the whole builtin surface on `e`'s global object.
 pub(crate) fn install(e: &mut Engine) {
     let g = e.global;
-    e.set_own(g, "undefined", Value::Undefined, false);
-    e.set_own(g, "NaN", Value::Num(f64::NAN), false);
-    e.set_own(g, "Infinity", Value::Num(f64::INFINITY), false);
+    e.set_const(g, "undefined", Value::Undefined);
+    e.set_const(g, "NaN", Value::Num(f64::NAN));
+    e.set_const(g, "Infinity", Value::Num(f64::INFINITY));
     e.set_own(g, "window", Value::Obj(g), false);
     e.set_own(g, "self", Value::Obj(g), false);
     e.set_own(g, "globalThis", Value::Obj(g), false);
@@ -106,15 +106,14 @@ pub(crate) fn install(e: &mut Engine) {
     // `Function(p1,…,body)` ctor + `Symbol` + `Reflect` (JS-7f).
     let function_v = ctor(e, "Function", function_ctor, p_fun);
     e.set_own(g, "Function", function_v, false);
-    let sym = ctor(e, "Symbol", symbol_ctor, p_obj);
+    // `Symbol` — son propre prototype (`protos.symbol`) ; passer
+    // `p_obj` écraserait `Object.prototype.constructor`.
+    let sym = ctor(e, "Symbol", symbol_ctor, e.protos.symbol);
     if let Value::Obj(sid) = sym {
         let it = e.str_val(crate::interp::SYM_ITERATOR);
         e.set_own(sid, "iterator", it, false);
         e.add_method(sid, "for", symbol_for);
         e.add_method(sid, "keyFor", symbol_key_for);
-        // `Symbol.prototype` — toString/valueOf read `this`'s desc.
-        let sp = Value::Obj(e.protos.symbol);
-        e.set_own(sid, "prototype", sp, false);
         e.add_method(e.protos.symbol, "toString", symbol_to_string);
         e.add_method(e.protos.symbol, "valueOf", symbol_value_of);
         let desc_fn = e.native_fn("get description", symbol_description);
@@ -135,9 +134,13 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(performance, "now", performance_now);
     e.set_own(g, "performance", Value::Obj(performance), false);
 
-    // `TextEncoder`/`TextDecoder` — UTF-8 only.
-    let te = ctor(e, "TextEncoder", text_encoder_ctor, p_obj);
-    let td = ctor(e, "TextDecoder", text_decoder_ctor, p_obj);
+    // `TextEncoder`/`TextDecoder` — UTF-8 only. Chacun a SON
+    // prototype (héritant `Object.prototype`) — partager `p_obj`
+    // écraserait `Object.prototype.constructor`.
+    let te_proto = e.new_object();
+    let td_proto = e.new_object();
+    let te = ctor(e, "TextEncoder", text_encoder_ctor, te_proto);
+    let td = ctor(e, "TextDecoder", text_decoder_ctor, td_proto);
     e.set_own(g, "TextEncoder", te, false);
     e.set_own(g, "TextDecoder", td, false);
 
@@ -158,18 +161,29 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(oid, "assign", object_assign);
         e.add_method(oid, "create", object_create);
         e.add_method(oid, "defineProperty", object_define_property);
+        e.add_method(oid, "defineProperties", object_define_properties);
         e.add_method(
             oid,
             "getOwnPropertyDescriptor",
             object_get_own_property_descriptor,
         );
+        e.add_method(
+            oid,
+            "getOwnPropertyDescriptors",
+            object_get_own_property_descriptors,
+        );
         e.add_method(oid, "getPrototypeOf", object_get_proto);
+        e.add_method(oid, "setPrototypeOf", object_set_proto);
         e.add_method(oid, "getOwnPropertyNames", object_get_own_property_names);
         e.add_method(oid, "entries", object_entries);
         e.add_method(oid, "fromEntries", object_from_entries);
         e.add_method(oid, "hasOwn", object_has_own);
         e.add_method(oid, "freeze", object_freeze);
         e.add_method(oid, "isFrozen", object_is_frozen);
+        e.add_method(oid, "seal", object_seal);
+        e.add_method(oid, "isSealed", object_is_sealed);
+        e.add_method(oid, "preventExtensions", object_prevent_extensions);
+        e.add_method(oid, "isExtensible", object_is_extensible);
         e.add_method(oid, "is", object_is);
     }
     // `Number` ctor statics.
@@ -179,32 +193,22 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(nid, "isInteger", number_is_integer);
         e.add_method(nid, "parseInt", parse_int);
         e.add_method(nid, "parseFloat", parse_float);
-        e.set_own(
-            nid,
-            "MAX_SAFE_INTEGER",
-            Value::Num(9_007_199_254_740_991.0),
-            false,
-        );
-        e.set_own(
+        e.set_const(nid, "MAX_SAFE_INTEGER", Value::Num(9_007_199_254_740_991.0));
+        e.set_const(
             nid,
             "MIN_SAFE_INTEGER",
             Value::Num(-9_007_199_254_740_991.0),
-            false,
         );
-        e.set_own(nid, "MAX_VALUE", Value::Num(f64::MAX), false);
-        e.set_own(nid, "POSITIVE_INFINITY", Value::Num(f64::INFINITY), false);
-        e.set_own(
-            nid,
-            "NEGATIVE_INFINITY",
-            Value::Num(f64::NEG_INFINITY),
-            false,
-        );
-        e.set_own(nid, "NaN", Value::Num(f64::NAN), false);
+        e.set_const(nid, "MAX_VALUE", Value::Num(f64::MAX));
+        e.set_const(nid, "POSITIVE_INFINITY", Value::Num(f64::INFINITY));
+        e.set_const(nid, "NEGATIVE_INFINITY", Value::Num(f64::NEG_INFINITY));
+        e.set_const(nid, "NaN", Value::Num(f64::NAN));
     }
     let op = e.protos.object;
     e.add_method(op, "toString", object_to_string);
     e.add_method(op, "hasOwnProperty", has_own_property);
     e.add_method(op, "valueOf", object_value_of);
+    e.add_method(op, "isPrototypeOf", object_is_prototype_of);
 
     // Function.prototype.
     let fp = e.protos.function;
@@ -360,19 +364,14 @@ pub(crate) fn install(e: &mut Engine) {
 
     // Math object.
     let math = e.new_object();
-    e.set_own(math, "PI", Value::Num(std::f64::consts::PI), false);
-    e.set_own(math, "E", Value::Num(std::f64::consts::E), false);
-    e.set_own(math, "LN2", Value::Num(std::f64::consts::LN_2), false);
-    e.set_own(math, "LN10", Value::Num(std::f64::consts::LN_10), false);
-    e.set_own(math, "SQRT2", Value::Num(std::f64::consts::SQRT_2), false);
-    e.set_own(
-        math,
-        "SQRT1_2",
-        Value::Num(std::f64::consts::FRAC_1_SQRT_2),
-        false,
-    );
-    e.set_own(math, "LOG2E", Value::Num(std::f64::consts::LOG2_E), false);
-    e.set_own(math, "LOG10E", Value::Num(std::f64::consts::LOG10_E), false);
+    e.set_const(math, "PI", Value::Num(std::f64::consts::PI));
+    e.set_const(math, "E", Value::Num(std::f64::consts::E));
+    e.set_const(math, "LN2", Value::Num(std::f64::consts::LN_2));
+    e.set_const(math, "LN10", Value::Num(std::f64::consts::LN_10));
+    e.set_const(math, "SQRT2", Value::Num(std::f64::consts::SQRT_2));
+    e.set_const(math, "SQRT1_2", Value::Num(std::f64::consts::FRAC_1_SQRT_2));
+    e.set_const(math, "LOG2E", Value::Num(std::f64::consts::LOG2_E));
+    e.set_const(math, "LOG10E", Value::Num(std::f64::consts::LOG10_E));
     e.add_method(math, "abs", math_abs);
     e.add_method(math, "floor", math_floor);
     e.add_method(math, "ceil", math_ceil);
@@ -932,6 +931,27 @@ fn object_value_of(_e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value
     Ok(this)
 }
 
+/// `o.isPrototypeOf(v)` — `this` se trouve-t-il sur la chaîne de
+/// prototypes de `v` (bornée à 100 sauts).
+fn object_is_prototype_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (Value::Obj(pid), Value::Obj(vid)) = (this, arg(args, 0)) else {
+        return Ok(Value::Bool(false));
+    };
+    let mut cur = e.heap.obj(vid).map(|o| o.proto);
+    let mut depth = 0;
+    while let Some(Value::Obj(c)) = cur {
+        if c == pid {
+            return Ok(Value::Bool(true));
+        }
+        cur = e.heap.obj(c).map(|o| o.proto);
+        depth += 1;
+        if depth > 100 {
+            break;
+        }
+    }
+    Ok(Value::Bool(false))
+}
+
 fn object_keys(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = arg(args, 0) else {
         return Ok(arr_of(e, Vec::new()));
@@ -946,6 +966,35 @@ fn object_get_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
         Value::Obj(id) => Ok(e.heap.obj(id).map_or(Value::Null, |o| o.proto)),
         _ => Ok(Value::Null),
     }
+}
+
+/// `Object.setPrototypeOf(o, p)` — `p` objet ou `null` ; refus sur
+/// cycle de prototype et sur objet non-extensible (spec).
+fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let target = arg(args, 0);
+    let proto = match arg(args, 1) {
+        v @ Value::Obj(_) => v,
+        Value::Null | Value::Undefined => Value::Null,
+        _ => return Err(e.type_error("setPrototypeOf: proto must be an object or null")),
+    };
+    let Value::Obj(id) = target else {
+        return Ok(target); // primitives are ignored, per spec
+    };
+    if !e.heap.obj(id).is_some_and(|o| o.extensible) {
+        return Err(e.type_error("cannot set prototype of non-extensible object"));
+    }
+    // Cycle check : remonter la chaîne de `proto` jusqu'à `id`.
+    let mut cur = proto;
+    while let Value::Obj(cid) = cur {
+        if cid == id {
+            return Err(e.type_error("cyclic prototype value"));
+        }
+        cur = e.heap.obj(cid).map_or(Value::Null, |o| o.proto);
+    }
+    if let Some(o) = e.heap.obj_mut(id) {
+        o.proto = proto;
+    }
+    Ok(target)
 }
 
 fn object_values(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
@@ -976,20 +1025,25 @@ fn object_assign(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     Ok(target)
 }
 
-/// `Object.create(proto)` — proto must be an object or `null`.
+/// `Object.create(proto[, propsMap])` — proto must be an object or
+/// `null`; the optional map applies `defineProperties` semantics.
 fn object_create(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let proto = match arg(args, 0) {
         v @ Value::Obj(_) => v,
         Value::Null | Value::Undefined => Value::Null,
         _ => return Err(e.type_error("Object.create: proto must be an object")),
     };
-    Ok(Value::Obj(e.heap.alloc_obj(Object::ordinary(proto))))
+    let id = e.heap.alloc_obj(Object::ordinary(proto));
+    if let Value::Obj(_) = arg(args, 1) {
+        define_props_from_map(e, id, arg(args, 1))?;
+    }
+    Ok(Value::Obj(id))
 }
 
-/// `Object.defineProperty(o, k, desc)` — `value`/`enumerable` for
-/// data props, `get`/`set` for accessors. `writable`/`configurable`
-/// are accepted and ignored (the engine has no descriptor-level
-/// protection — documented deviation).
+/// `Object.defineProperty(o, k, desc)` — descripteur complet :
+/// `value`/`writable`/`enumerable`/`configurable`/`get`/`set`.
+/// Règles simplifiées de `[[DefineOwnProperty]]` (heap.rs) :
+/// non-configurable → rejet `TypeError`.
 fn object_define_property(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let target @ Value::Obj(id) = arg(args, 0) else {
         return Err(e.type_error("Object.defineProperty on non-object"));
@@ -1001,44 +1055,117 @@ fn object_define_property(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
     let Value::Obj(desc_id) = arg(args, 2) else {
         return Err(e.type_error("property descriptor must be an object"));
     };
-    let enumerable = e
-        .get_prop_value(Value::Obj(desc_id), "enumerable")
-        .is_ok_and(|v| e.to_boolean(v));
-    let get = e.get_prop_value(Value::Obj(desc_id), "get")?;
-    let set = e.get_prop_value(Value::Obj(desc_id), "set")?;
-    let is_acc = e.is_callable(get) || e.is_callable(set);
-    let has_value = e
-        .heap
-        .obj(desc_id)
-        .is_some_and(|o| o.find("value").is_some());
-    if !is_acc && !has_value {
-        // No `value`, no callable accessor — still installs an
-        // empty descriptor (spec puts `undefined`).
-        if let Some(o) = e.heap.obj_mut(id) {
-            if o.find(&key).is_none() {
-                o.set_own(&key, Value::Undefined, enumerable);
-            }
-        }
-        return Ok(target);
-    }
-    let v = if is_acc {
-        None
-    } else {
-        Some(e.get_prop_value(Value::Obj(desc_id), "value")?)
-    };
-    if let Some(o) = e.heap.obj_mut(id) {
-        if is_acc {
-            o.set_accessor(&key, get, set, enumerable);
-        } else if let Some(v) = v {
-            o.set_own(&key, v, enumerable);
-        }
-    }
+    define_one_prop(e, id, &key, desc_id)?;
     Ok(target)
 }
 
-/// `Object.getOwnPropertyDescriptor(o, k)` — a `{value, enumerable}`
-/// or `{get, set, enumerable}` descriptor object, `undefined` when
-/// absent.
+/// Corps de `[[DefineOwnProperty]]` piloté par un objet descripteur —
+/// partagé par `defineProperty`/`defineProperties`/`Object.create`.
+fn define_one_prop(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) -> JsResult<()> {
+    let desc = Value::Obj(desc_id);
+    let (has_value, has_writable, has_enumerable, has_configurable, has_get, has_set) = {
+        let o = e.heap.obj(desc_id);
+        let h = |k: &str| o.is_some_and(|o| o.find(k).is_some());
+        (
+            h("value"),
+            h("writable"),
+            h("enumerable"),
+            h("configurable"),
+            h("get"),
+            h("set"),
+        )
+    };
+    let cur = e.find_own(id, key);
+    // Flags absents du descripteur → valeur de la prop existante,
+    // `false` sinon (spec `[[DefineOwnProperty]]`).
+    let enumerable = if has_enumerable {
+        let v = e.get_prop_value(desc, "enumerable")?;
+        e.to_boolean(v)
+    } else {
+        cur.is_some_and(|p| p.enumerable())
+    };
+    let configurable = if has_configurable {
+        let v = e.get_prop_value(desc, "configurable")?;
+        e.to_boolean(v)
+    } else {
+        cur.is_some_and(|p| p.configurable())
+    };
+    let writable = if has_writable {
+        let v = e.get_prop_value(desc, "writable")?;
+        e.to_boolean(v)
+    } else {
+        cur.is_some_and(|p| matches!(p, crate::heap::Prop::Data { attrs, .. } if attrs.writable))
+    };
+    let get = e.get_prop_value(desc, "get")?;
+    let set = e.get_prop_value(desc, "set")?;
+    let has_acc = has_get || has_set;
+    let has_data = has_value || has_writable;
+    if has_acc && has_data {
+        return Err(e.type_error("descriptor cannot be both data and accessor"));
+    }
+    if has_acc && !matches!(get, Value::Undefined) && !e.is_callable(get)
+        || has_acc && !matches!(set, Value::Undefined) && !e.is_callable(set)
+    {
+        return Err(e.type_error("accessor descriptor `get`/`set` must be callable"));
+    }
+    let attrs = crate::heap::PropAttrs {
+        writable,
+        enumerable,
+        configurable,
+    };
+    let v = if has_value {
+        e.get_prop_value(desc, "value")?
+    } else {
+        cur.and_then(|p| p.data_value()).unwrap_or(Value::Undefined)
+    };
+    // Côté absent : getter/setter existant conservé.
+    let (g, s) = match cur {
+        Some(crate::heap::Prop::Acc { get: g, set: s, .. }) => {
+            (if has_get { get } else { g }, if has_set { set } else { s })
+        }
+        _ => (get, set),
+    };
+    let ok = e.heap.obj_mut(id).is_some_and(|o| {
+        if has_acc {
+            o.define_accessor(key, g, s, attrs)
+        } else {
+            o.define_data(key, v, attrs)
+        }
+    });
+    if !ok {
+        return Err(e.type_error(format!("cannot define property `{key}`")));
+    }
+    Ok(())
+}
+
+/// `Object.defineProperties(o, propsMap)` — chaque propre prop
+/// énumérable de la map est un descripteur appliqué à `o`.
+fn object_define_properties(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let target @ Value::Obj(id) = arg(args, 0) else {
+        return Err(e.type_error("Object.defineProperties on non-object"));
+    };
+    define_props_from_map(e, id, arg(args, 1))?;
+    Ok(target)
+}
+
+/// Map de descripteurs → définitions (ordre d'insertion conservé).
+fn define_props_from_map(e: &mut Engine, id: ObjId, map: Value) -> JsResult<()> {
+    let Value::Obj(mid) = map else {
+        return Err(e.type_error("property map must be an object"));
+    };
+    for k in e.own_enum_keys(mid) {
+        let dv = e.get_prop_value(map, &k)?;
+        let Value::Obj(did) = dv else {
+            return Err(e.type_error(format!("descriptor for `{k}` must be an object")));
+        };
+        define_one_prop(e, id, &k, did)?;
+    }
+    Ok(())
+}
+
+/// `Object.getOwnPropertyDescriptor(o, k)` — `{value, writable,
+/// enumerable, configurable}` ou `{get, set, enumerable,
+/// configurable}`, `undefined` quand la prop est absente.
 fn object_get_own_property_descriptor(
     e: &mut Engine,
     _t: Value,
@@ -1056,21 +1183,50 @@ fn object_get_own_property_descriptor(
     };
     let d = e.new_object();
     match p {
-        crate::heap::Prop::Data { value, enumerable } => {
+        crate::heap::Prop::Data { value, attrs } => {
             e.set_own(d, "value", value, true);
-            e.set_own(d, "enumerable", Value::Bool(enumerable), true);
+            e.set_own(d, "writable", Value::Bool(attrs.writable), true);
+            e.set_own(d, "enumerable", Value::Bool(attrs.enumerable), true);
+            e.set_own(d, "configurable", Value::Bool(attrs.configurable), true);
         }
-        crate::heap::Prop::Acc {
-            get,
-            set,
-            enumerable,
-        } => {
+        crate::heap::Prop::Acc { get, set, attrs } => {
             e.set_own(d, "get", get, true);
             e.set_own(d, "set", set, true);
-            e.set_own(d, "enumerable", Value::Bool(enumerable), true);
+            e.set_own(d, "enumerable", Value::Bool(attrs.enumerable), true);
+            e.set_own(d, "configurable", Value::Bool(attrs.configurable), true);
         }
     }
     Ok(Value::Obj(d))
+}
+
+/// `Object.getOwnPropertyDescriptors(o)` — map `key → descriptor`
+/// pour chaque propre prop (ordre d'insertion conservé).
+fn object_get_own_property_descriptors(
+    e: &mut Engine,
+    _t: Value,
+    args: &[Value],
+) -> JsResult<Value> {
+    let out = e.new_object();
+    let Value::Obj(id) = arg(args, 0) else {
+        return Ok(Value::Obj(out));
+    };
+    let keys: Vec<String> = match e.heap.obj(id) {
+        Some(o) => {
+            let mut ks: Vec<String> = o.props.iter().map(|(k, _)| k.clone()).collect();
+            if let ObjKind::Array(elems) = &o.kind {
+                ks.splice(0..0, (0..elems.len()).map(|i| i.to_string()));
+                ks.insert(elems.len(), "length".into());
+            }
+            ks
+        }
+        None => Vec::new(),
+    };
+    for k in keys {
+        let kv = e.str_val(k.clone());
+        let d = object_get_own_property_descriptor(e, Value::Undefined, &[arg(args, 0), kv])?;
+        e.set_own(out, &k, d, true);
+    }
+    Ok(Value::Obj(out))
 }
 
 // ------------------------------------------------------------------
@@ -1855,12 +2011,12 @@ fn regexp_exec(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let last = if use_last { re_last_index(e, id)? } else { 0 };
     if let Some((m, new_last)) = re.exec_from(&s, last) {
         if use_last {
-            e.set_own(id, "lastIndex", Value::Num(new_last as f64), true);
+            e.set_prop(id, "lastIndex", Value::Num(new_last as f64));
         }
         Ok(match_result(e, &m, &s))
     } else {
         if use_last {
-            e.set_own(id, "lastIndex", Value::Num(0.0), true);
+            e.set_prop(id, "lastIndex", Value::Num(0.0));
         }
         Ok(Value::Null)
     }
@@ -1890,7 +2046,7 @@ fn string_match(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
             .into_iter()
             .map(|m| e.str_val(m.text))
             .collect();
-        e.set_own(id, "lastIndex", Value::Num(0.0), true);
+        e.set_prop(id, "lastIndex", Value::Num(0.0));
         return Ok(if texts.is_empty() {
             Value::Null
         } else {
@@ -2178,7 +2334,7 @@ fn symbol_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         proto,
         props: Vec::new(),
         kind: ObjKind::Symbol(desc),
-        frozen: false,
+        extensible: true,
     })))
 }
 
@@ -2556,12 +2712,65 @@ fn object_get_own_property_names(e: &mut Engine, _t: Value, args: &[Value]) -> J
     Ok(e.new_array(vals))
 }
 
-/// `Object.freeze` — sets the flag checked by `set_own` (writes
-/// become silent no-ops, sloppy mode). Returns the object.
+/// `Object.preventExtensions` — `[[Extensible]] = false`.
+fn object_prevent_extensions(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = arg(args, 0) {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.extensible = false;
+        }
+    }
+    Ok(arg(args, 0))
+}
+
+fn object_is_extensible(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(match arg(args, 0) {
+        Value::Obj(id) => e.heap.obj(id).is_some_and(|o| o.extensible),
+        _ => false,
+    }))
+}
+
+/// `Object.seal` — non-extensible + toutes props non-configurables.
+fn object_seal(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = arg(args, 0) {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.extensible = false;
+            for (_, p) in &mut o.props {
+                match p {
+                    crate::heap::Prop::Data { attrs, .. }
+                    | crate::heap::Prop::Acc { attrs, .. } => {
+                        attrs.configurable = false;
+                    }
+                }
+            }
+        }
+    }
+    Ok(arg(args, 0))
+}
+
+fn object_is_sealed(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(match arg(args, 0) {
+        Value::Obj(id) => e
+            .heap
+            .obj(id)
+            .is_some_and(|o| !o.extensible && o.props.iter().all(|(_, p)| !p.configurable())),
+        _ => true,
+    }))
+}
+
+/// `Object.freeze` — seal + toutes data props non-writable.
 fn object_freeze(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     if let Value::Obj(id) = arg(args, 0) {
         if let Some(o) = e.heap.obj_mut(id) {
-            o.frozen = true;
+            o.extensible = false;
+            for (_, p) in &mut o.props {
+                match p {
+                    crate::heap::Prop::Data { attrs, .. } => {
+                        attrs.configurable = false;
+                        attrs.writable = false;
+                    }
+                    crate::heap::Prop::Acc { attrs, .. } => attrs.configurable = false,
+                }
+            }
         }
     }
     Ok(arg(args, 0))
@@ -2569,7 +2778,12 @@ fn object_freeze(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 
 fn object_is_frozen(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Bool(match arg(args, 0) {
-        Value::Obj(id) => e.heap.obj(id).is_some_and(|o| o.frozen),
+        Value::Obj(id) => e.heap.obj(id).is_some_and(|o| {
+            !o.extensible
+                && o.props
+                    .iter()
+                    .all(|(_, p)| !p.configurable() && !p.writable())
+        }),
         _ => true, // primitives are frozen by nature
     }))
 }

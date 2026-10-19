@@ -87,7 +87,7 @@ impl JsRegExp {
         if dot_all {
             pat.push_str("(?s)");
         }
-        pat.push_str(&translate_pattern(source, unicode));
+        pat.push_str(&translate_pattern(source, unicode)?);
         let re = regex::Regex::new(&pat)
             .map_err(|e| format!("invalid regex /{source}/: {}", short_regex_error(&e)))?;
         Ok(JsRegExp {
@@ -236,7 +236,7 @@ impl JsRegExp {
 
 /// `(?<name>…)` → `(?P<name>…)`; everything else passes through
 /// (regex-crate syntax is a superset of what we need).
-fn translate_pattern(src: &str, unicode: bool) -> String {
+fn translate_pattern(src: &str, unicode: bool) -> Result<String, String> {
     let mut out = String::with_capacity(src.len() + 4);
     let cs: Vec<char> = src.chars().collect();
     let mut i = 0;
@@ -285,6 +285,34 @@ fn translate_pattern(src: &str, unicode: bool) -> String {
                         out.push_str(&format!("\\x{{{v:x}}}"));
                         i += 3;
                         continue;
+                    } else if unicode
+                        && c.is_ascii_alphanumeric()
+                        && !matches!(
+                            c,
+                            'd' | 'D'
+                                | 's'
+                                | 'S'
+                                | 'w'
+                                | 'W'
+                                | 'b'
+                                | 'B'
+                                | 'f'
+                                | 'n'
+                                | 'r'
+                                | 't'
+                                | 'v'
+                                | 'x'
+                                | 'u'
+                                | 'k'
+                                | 'p'
+                                | 'P'
+                                | '1'..='9'
+                        )
+                    {
+                        // Mode `u` : pas d'identity escape — erreur
+                        // de syntaxe stricte (spec `AtomEscape` ; le
+                        // crate `regex` accepterait `\a`/`\\e`).
+                        return Err(format!("invalid escape `\\{c}` in `u` regex /{src}/"));
                     } else if !unicode
                         && c.is_ascii_alphanumeric()
                         && !matches!(
@@ -312,7 +340,7 @@ fn translate_pattern(src: &str, unicode: bool) -> String {
                         // Annex B (sloppy) : `\` + alphanumérique
                         // non reconnu = identity escape littéral
                         // (`\y` → 'y'). En mode `u` c'est une
-                        // erreur → passthrough, le crate rejette.
+                        // erreur → bras précédent.
                         out.push(c);
                     } else if !unicode && !c.is_ascii() {
                         // Idem pour les non-ASCII (`\€` → '€').
@@ -344,7 +372,7 @@ fn translate_pattern(src: &str, unicode: bool) -> String {
         out.push(cs[i]);
         i += 1;
     }
-    out
+    Ok(out)
 }
 
 /// `\uD8xx\uDCxx` à `cs[i]` → (point de code fusionné, index

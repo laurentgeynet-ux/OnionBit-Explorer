@@ -319,8 +319,13 @@ fn let_const_bindings() {
     assert_eq!(num(ev("let a = 1, b = 2; a + b")), 3.0);
     // Declared in the current scope — `{ x = 2 }` writes through.
     assert_eq!(num(ev("let x = 1; { x = 2; } x")), 2.0);
-    // `const` write is ignored (documented sloppy tolerance).
-    assert_eq!(num(ev("const c = 1; c = 9; c")), 1.0);
+    // `const` write → `TypeError` (spec `SetMutableBinding`) —
+    // l'ancienne tolérance silencieuse est corrigée en JS-C2.
+    assert!(matches!(
+        Engine::new().eval("const c = 1; c = 9"),
+        Err(dillo_js::Error::Uncaught(_))
+    ));
+    assert_eq!(num(ev("const c = 1; try { c = 9; } catch(e) {} c")), 1.0);
     // `let` still works as a sloppy-mode identifier.
     assert_eq!(num(ev("var let = 3; let + 1")), 4.0);
     assert_eq!(ev_str("for (let i = 0; i < 3; i++) {} 'done'"), "done");
@@ -1837,4 +1842,160 @@ fn strict_mode() {
     assert!(syn(
         r#""use strict"; function g() { return function() { var n = 010; }; }"#
     ));
+}
+
+// -- JS-C2 : descripteurs de propriétés + strict runtime -------------
+
+#[test]
+fn property_descriptors() {
+    // Descripteur partiel → flags par défaut `false` à la création.
+    assert_eq!(
+        ev_str(
+            "var o = {}; Object.defineProperty(o, 'x', {value: 7}); \
+             [o.x, Object.keys(o).length, delete o.x].join(',')"
+        ),
+        "7,0,false"
+    );
+    // Descripteur complet : flags lus et écrits.
+    assert_eq!(
+        ev_str(
+            "var o = {}; Object.defineProperty(o, 'x', \
+             {value: 1, writable: true, enumerable: true, configurable: true}); \
+             o.x = 9; delete o.x; typeof o.x"
+        ),
+        "undefined"
+    );
+    // `getOwnPropertyDescriptor` reflète les flags.
+    assert_eq!(
+        ev_str(
+            "var o = {a: 5}; var d = Object.getOwnPropertyDescriptor(o, 'a'); \
+             [d.value, d.writable, d.enumerable, d.configurable].join(',')"
+        ),
+        "5,true,true,true"
+    );
+    // Redéfinition d'une non-configurable → TypeError.
+    assert!(matches!(
+        Engine::new().eval(
+            "var o = {}; Object.defineProperty(o, 'x', {value: 1}); \
+             Object.defineProperty(o, 'x', {value: 2})"
+        ),
+        Err(dillo_js::Error::Uncaught(_))
+    ));
+    // `defineProperties` + `getOwnPropertyDescriptors`.
+    assert_eq!(
+        ev_str(
+            "var o = {}; Object.defineProperties(o, {a: {value: 1, enumerable: true}, \
+             b: {value: 2}}); var ds = Object.getOwnPropertyDescriptors(o); \
+             [o.a, o.b, ds.a.enumerable, ds.b.enumerable].join(',')"
+        ),
+        "1,2,true,false"
+    );
+    // `Object.create` avec map de descripteurs + héritage proto.
+    assert_eq!(
+        ev_str(
+            "var p = {g: function() { return 1; }}; \
+             var o = Object.create(p, {x: {value: 41, enumerable: true, writable: true}}); \
+             o.x + o.g()"
+        ),
+        "42"
+    );
+    // `setPrototypeOf` + rejet de cycle.
+    assert_eq!(
+        ev_str("var o = {}, p = {k: 3}; Object.setPrototypeOf(o, p); o.k"),
+        "3"
+    );
+    assert!(matches!(
+        Engine::new().eval("var o = {}; Object.setPrototypeOf(o, o)"),
+        Err(dillo_js::Error::Uncaught(_))
+    ));
+    // Constantes globales : `undefined`/`NaN`/`Math.E` verrouillées.
+    assert_eq!(
+        ev_str(
+            "undefined = 5; NaN = 0; Math.E = 9; \
+             [typeof undefined, isNaN(NaN), Math.E > 2.7 && Math.E < 2.72].join(',')"
+        ),
+        "undefined,true,true"
+    );
+    // `var` global non-configurable.
+    assert_eq!(ev_str("var q = 1; delete q; q"), "1");
+}
+
+#[test]
+fn freeze_seal_semantics() {
+    // freeze : écriture silencieuse sloppy, TypeError strict.
+    assert_eq!(
+        ev_str("var o = Object.freeze({a: 1}); o.a = 9; o.b = 1; o.a + ',' + ('b' in o)"),
+        "1,false"
+    );
+    assert!(matches!(
+        Engine::new().eval("'use strict'; var o = Object.freeze({a: 1}); o.a = 9"),
+        Err(dillo_js::Error::Uncaught(_))
+    ));
+    // seal : écriture OK, delete refusé.
+    assert_eq!(
+        ev_str(
+            "var o = Object.seal({a: 1}); o.a = 9; \
+             [o.a, delete o.a, Object.isSealed(o)].join(',')"
+        ),
+        "9,false,true"
+    );
+    // preventExtensions.
+    assert_eq!(
+        ev_str(
+            "var o = Object.preventExtensions({}); o.x = 1; \
+             [Object.isExtensible(o), 'x' in o].join(',')"
+        ),
+        "false,false"
+    );
+}
+
+#[test]
+fn strict_runtime() {
+    let uncaught = |src: &str| matches!(Engine::new().eval(src), Err(dillo_js::Error::Uncaught(_)));
+    // Écriture sur identifiant non déclaré : ReferenceError strict,
+    // global implicite sloppy.
+    assert!(uncaught("'use strict'; nouvelleVar = 1"));
+    assert_eq!(num(ev("nouvelleVar2 = 3; nouvelleVar2")), 3.0);
+    // Écriture sur prop non-writable : TypeError strict, silence sloppy.
+    assert!(uncaught(
+        "'use strict'; var o = {}; \
+         Object.defineProperty(o, 'x', {value: 1, writable: false, configurable: true}); \
+         o.x = 2"
+    ));
+    assert_eq!(
+        ev_str("var o = {}; Object.defineProperty(o, 'x', {value: 1}); o.x = 2; o.x"),
+        "1"
+    );
+    // delete non-configurable : TypeError strict.
+    assert!(uncaught(
+        "'use strict'; var o = {}; \
+         Object.defineProperty(o, 'x', {value: 1}); delete o.x"
+    ));
+    // Écriture sur primitive : TypeError strict.
+    assert!(uncaught("'use strict'; var s = 'ab'; s.x = 1"));
+    // `this` : sloppy → objet global, strict → undefined.
+    assert_eq!(
+        ev_str("function f() { return this === window; } f()"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("function f() { 'use strict'; return this === undefined; } f()"),
+        "true"
+    );
+    // Strict hérité via fonction interne en script strict.
+    assert!(uncaught(
+        "'use strict'; function outer() { return function inner() { u = 1; }; } \
+         outer()()"
+    ));
+    // Fonction strict dans script sloppy.
+    assert!(uncaught("function s() { 'use strict'; y = 1; } s()"));
+    // Accessor sans setter : TypeError strict, silence sloppy.
+    assert!(uncaught(
+        "'use strict'; var o = {}; \
+         Object.defineProperty(o, 'x', {get: function() { return 1; }, configurable: true}); \
+         o.x = 2"
+    ));
+    // const assign → TypeError dans les deux modes.
+    assert!(uncaught("const c = 1; c = 2"));
+    assert!(uncaught("'use strict'; const c = 1; c = 2"));
 }

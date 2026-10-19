@@ -20,19 +20,29 @@ use std::rc::Rc;
 
 /// Parse a whole script.
 pub fn parse(src: &str) -> Result<Program> {
+    parse_in(src, false)
+}
+
+/// Parse avec strict hérité — `eval` direct dans du code strict :
+/// ses early errors s'appliquent aussi au texte évalué (spec
+/// `PerformEval` — « strictCaller »).
+pub(crate) fn parse_in(src: &str, strict: bool) -> Result<Program> {
     let toks = lex(src)?;
     let mut p = Parser {
         toks,
         pos: 0,
         nest: 0,
-        strict: false,
+        strict,
     };
     p.scan_directives();
     let mut body = Vec::new();
     while !p.at_eof() {
         body.push(p.stmt()?);
     }
-    Ok(Program { body })
+    Ok(Program {
+        body,
+        strict: p.strict,
+    })
 }
 
 struct Parser {
@@ -802,7 +812,7 @@ impl Parser {
             {
                 self.next();
                 self.next();
-                let body = self.arrow_body(no_in)?;
+                let (body, strict) = self.arrow_body(no_in)?;
                 return Ok(Some(Expr::Function(Rc::new(FnLit {
                     name: None,
                     params: vec![Param {
@@ -812,6 +822,7 @@ impl Parser {
                     body,
                     is_arrow: true,
                     is_async: false,
+                    strict,
                 }))));
             }
         }
@@ -821,13 +832,14 @@ impl Parser {
             if let Some(params) = self.scan_arrow_params() {
                 // cursor is on `=>`
                 self.next();
-                let body = self.arrow_body(no_in)?;
+                let (body, strict) = self.arrow_body(no_in)?;
                 return Ok(Some(Expr::Function(Rc::new(FnLit {
                     name: None,
                     params,
                     body,
                     is_arrow: true,
                     is_async: false,
+                    strict,
                 }))));
             }
             self.pos = save;
@@ -849,7 +861,7 @@ impl Parser {
             {
                 self.next();
                 self.next();
-                let body = self.arrow_body(no_in)?;
+                let (body, strict) = self.arrow_body(no_in)?;
                 return Ok(Some(Expr::Function(Rc::new(FnLit {
                     name: None,
                     params: vec![Param {
@@ -859,6 +871,7 @@ impl Parser {
                     body,
                     is_arrow: true,
                     is_async: true,
+                    strict,
                 }))));
             }
             self.pos = save;
@@ -869,13 +882,14 @@ impl Parser {
             if let Some(params) = self.scan_arrow_params() {
                 if self.check_p(P::Arrow) {
                     self.next();
-                    let body = self.arrow_body(no_in)?;
+                    let (body, strict) = self.arrow_body(no_in)?;
                     return Ok(Some(Expr::Function(Rc::new(FnLit {
                         name: None,
                         params,
                         body,
                         is_arrow: true,
                         is_async: true,
+                        strict,
                     }))));
                 }
             }
@@ -900,16 +914,20 @@ impl Parser {
 
     /// `=>` body: `{ stmts }` or a single expression (desugared to
     /// `return expr`).
-    fn arrow_body(&mut self, no_in: bool) -> Result<Vec<Stmt>> {
+    /// Corps de flèche — retourne aussi le strict effectif du corps
+    /// (hérité ou prologue `"use strict"`).
+    fn arrow_body(&mut self, no_in: bool) -> Result<(Vec<Stmt>, bool)> {
         if self.eat_p(P::LBrace) {
             let outer_strict = self.strict;
             self.scan_directives();
             let body = self.stmt_list();
+            let strict = self.strict;
             self.strict = outer_strict;
-            return body;
+            return body.map(|b| (b, strict));
         }
         let e = self.assign(no_in)?;
-        Ok(vec![Stmt::Return(Some(e))])
+        let strict = self.strict;
+        Ok((vec![Stmt::Return(Some(e))], strict))
     }
 
     fn cond(&mut self, no_in: bool) -> Result<Expr> {
@@ -1352,13 +1370,14 @@ impl Parser {
                         self.expect_p(P::LParen, "`(`")?;
                         let params = self.params()?;
                         self.expect_p(P::LBrace, "`{`")?;
-                        let body = self.stmt_list()?;
+                        let body = self.fn_body()?;
                         let fun = Rc::new(FnLit {
                             name: None,
                             params,
-                            body,
+                            body: body.0,
                             is_arrow: false,
                             is_async: false,
+                            strict: body.1,
                         });
                         props.push(if kind == ClassMemberKind::Getter {
                             ObjProp::Getter(key, fun)
@@ -1371,15 +1390,16 @@ impl Parser {
                         self.expect_p(P::LParen, "`(`")?;
                         let params = self.params()?;
                         self.expect_p(P::LBrace, "`{`")?;
-                        let body = self.stmt_list()?;
+                        let body = self.fn_body()?;
                         props.push(ObjProp::Prop(
                             key,
                             Expr::Function(Rc::new(FnLit {
                                 name: None,
                                 params,
-                                body,
+                                body: body.0,
                                 is_arrow: false,
                                 is_async: async_,
+                                strict: body.1,
                             })),
                         ));
                     }
@@ -1484,17 +1504,26 @@ impl Parser {
         // paramètres ont été parsés dans le mode du parent (la spec
         // exige des params « simples » quand le corps est strict ;
         // tolérance : on n'a pas de paramètres non-simples).
-        let outer_strict = self.strict;
-        self.scan_directives();
-        let body = self.stmt_list();
-        self.strict = outer_strict;
+        let (body, strict) = self.fn_body()?;
         Ok(Rc::new(FnLit {
             name,
             params,
-            body: body?,
+            body,
             is_arrow: false,
             is_async: async_,
+            strict,
         }))
+    }
+
+    /// Corps de fonction déjà ouvert (`{` consommé) — prologue de
+    /// directives scanné, retourne `(stmts, strict_effectif)`.
+    fn fn_body(&mut self) -> Result<(Vec<Stmt>, bool)> {
+        let outer_strict = self.strict;
+        self.scan_directives();
+        let body = self.stmt_list();
+        let strict = self.strict;
+        self.strict = outer_strict;
+        body.map(|b| (b, strict))
     }
 
     /// `pat (= default)? (, …)*` with a possible trailing `...rest`
@@ -1600,7 +1629,12 @@ impl Parser {
             self.expect_p(P::LParen, "`(`")?;
             let params = self.params()?;
             self.expect_p(P::LBrace, "`{`")?;
-            let body = self.stmt_list()?;
+            // Corps de classe : toujours strict, prologue scanné
+            // pour les early errors.
+            let outer_strict = self.strict;
+            self.strict = true;
+            let body = self.stmt_list();
+            self.strict = outer_strict;
             members.push(ClassMember {
                 key,
                 kind,
@@ -1608,9 +1642,10 @@ impl Parser {
                 fun: Rc::new(FnLit {
                     name: None,
                     params,
-                    body,
+                    body: body?,
                     is_arrow: false,
                     is_async: async_,
+                    strict: true,
                 }),
             });
         }

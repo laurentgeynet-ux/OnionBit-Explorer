@@ -90,6 +90,11 @@ pub struct Engine {
     /// Last non-empty statement completion (`eval`-style result of
     /// `if (1) 'yes'` must be `"yes"`, as real engines produce).
     completion: Value,
+    /// Contexte strict courant — posé par `exec_program`
+    /// (`Program::strict`) et par chaque appel `Fun::Script`
+    /// (`FnLit::strict`). Pilote `TypeError`/`ReferenceError` vs
+    /// échecs silencieux sloppy.
+    strict: bool,
 }
 
 /// Prototype objects captured at engine init.
@@ -216,6 +221,7 @@ impl Engine {
             microtasks: std::collections::VecDeque::new(),
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,
+            strict: false,
         };
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
@@ -448,6 +454,27 @@ impl Engine {
         }
     }
 
+    /// Attache une constante builtin `{w: false, e: false, c: false}`
+    /// (`undefined`, `NaN`, `Infinity`, `Math.PI`, `Number.NaN`, …).
+    pub(crate) fn set_const(&mut self, obj: ObjId, key: &str, v: Value) {
+        if let Some(o) = self.heap.obj_mut(obj) {
+            o.define_data(key, v, crate::heap::PropAttrs::FIXED);
+        }
+    }
+
+    /// Attache une data prop avec des flags explicites.
+    pub(crate) fn set_own_attrs(
+        &mut self,
+        obj: ObjId,
+        key: &str,
+        v: Value,
+        attrs: crate::heap::PropAttrs,
+    ) {
+        if let Some(o) = self.heap.obj_mut(obj) {
+            o.define_data(key, v, attrs);
+        }
+    }
+
     /// New `Error`-family object value (`{name, message}` on `proto`).
     pub(crate) fn error_value(&mut self, proto: ObjId, name: &str, msg: &str) -> Value {
         let id = self.heap.alloc_obj(Object::ordinary(Value::Obj(proto)));
@@ -498,7 +525,7 @@ impl Engine {
             proto: Value::Obj(self.protos.regexp),
             props: Vec::new(),
             kind: ObjKind::RegExp(Rc::new(re)),
-            frozen: false,
+            extensible: true,
         });
         let src = self.str_val(pattern.to_string());
         let fl = self.str_val(flag_str);
@@ -514,7 +541,16 @@ impl Engine {
         self.set_own(id, "dotAll", Value::Bool(re.dot_all), false);
         self.set_own(id, "sticky", Value::Bool(re.sticky), false);
         self.set_own(id, "unicode", Value::Bool(re.unicode), false);
-        self.set_own(id, "lastIndex", Value::Num(0.0), true);
+        self.set_own_attrs(
+            id,
+            "lastIndex",
+            Value::Num(0.0),
+            crate::heap::PropAttrs {
+                writable: true,
+                enumerable: false,
+                configurable: false,
+            },
+        );
         Ok(Value::Obj(id))
     }
 
@@ -559,7 +595,33 @@ impl Engine {
         None
     }
 
-    fn env_set(&mut self, env: &EnvRef, name: &str, v: Value) {
+    /// `true` si `name` est une liaison d'un env record (local ou
+    /// global declarative) — les props de l'objet global ne
+    /// comptent pas (elles passent par `[[Delete]]`).
+    fn env_has_binding(env: &EnvRef, name: &str) -> bool {
+        let mut cur = Some(env.clone());
+        while let Some(e) = cur {
+            let next = {
+                let b = e.borrow();
+                match &b.kind {
+                    EnvKind::Local(m) | EnvKind::Global(m) => {
+                        if m.contains_key(name) {
+                            return true;
+                        }
+                        b.parent.clone()
+                    }
+                }
+            };
+            cur = next;
+        }
+        false
+    }
+
+    /// `SetMutableBinding` — résout la liaison, écrit, ou crée le
+    /// global implicite sloppy. Erreurs : `TypeError` sur liaison
+    /// `const`, `TypeError` strict sur écriture refusée,
+    /// `ReferenceError` strict sur identifiant non déclaré.
+    fn env_set(&mut self, env: &EnvRef, name: &str, v: Value) -> JsResult<()> {
         let mut cur = Some(env.clone());
         while let Some(e) = cur {
             enum Act {
@@ -583,21 +645,48 @@ impl Engine {
                         EnvKind::Local(m) | EnvKind::Global(m) => m,
                     };
                     if let Some(bnd) = m.get_mut(name) {
-                        if bnd.mutable {
-                            bnd.value = v;
+                        if !bnd.mutable {
+                            return Err(self.type_error(format!("assignment to constant `{name}`")));
                         }
+                        bnd.value = v;
                     }
-                    return;
+                    return Ok(());
                 }
                 Act::Global => {
-                    self.set_own(self.global, name, v, true);
-                    return;
+                    // L'identifiant se résout via les props de
+                    // l'objet global (own + chaîne proto) —
+                    // `ReferenceError` strict sinon, écriture
+                    // ordinaire si résolu.
+                    let g = self.global;
+                    if self.find_prop(g, name).is_none() {
+                        if self.strict {
+                            return Err(self.ref_error(format!("{name} is not defined")));
+                        }
+                        self.set_own(g, name, v, true);
+                        return Ok(());
+                    }
+                    return self.set_global_prop(name, v);
                 }
                 Act::Up(p) => cur = p,
             }
         }
-        // Implicit global (sloppy mode).
+        // Identifiant non déclaré : `ReferenceError` en strict,
+        // global implicite en sloppy.
+        if self.strict {
+            return Err(self.ref_error(format!("{name} is not defined")));
+        }
         self.set_own(self.global, name, v, true);
+        Ok(())
+    }
+
+    /// Écriture d'une prop de l'objet global — erreurs strict vs
+    /// silence sloppy sur refus (`undefined = 1`, prop gelée…).
+    fn set_global_prop(&mut self, name: &str, v: Value) -> JsResult<()> {
+        let g = self.global;
+        match self.write_prop(g, Value::Obj(g), name, v) {
+            Ok(()) => Ok(()),
+            Err(t) => Err(t),
+        }
     }
 
     fn env_declare(&mut self, env: &EnvRef, name: &str) {
@@ -610,11 +699,21 @@ impl Engine {
                 });
             }
             EnvKind::Global(_) => {
-                // `var` lives on the global object, not the record.
+                // `var` vit sur l'objet global — prop non
+                // configurable (`delete x` → `false`, spec).
                 let g = self.global;
                 drop(b);
                 if self.heap.obj(g).is_some_and(|o| o.get_own(name).is_none()) {
-                    self.set_own(g, name, Value::Undefined, true);
+                    self.set_own_attrs(
+                        g,
+                        name,
+                        Value::Undefined,
+                        crate::heap::PropAttrs {
+                            writable: true,
+                            enumerable: true,
+                            configurable: false,
+                        },
+                    );
                 }
             }
         }
@@ -734,7 +833,7 @@ impl Engine {
                 match mode {
                     BindMode::Var => {
                         self.env_declare(env, name);
-                        self.env_set(env, name, v);
+                        self.env_set(env, name, v)?;
                     }
                     BindMode::Lex { mutable } => {
                         // `declare_pat_lex` may have pre-declared the
@@ -744,7 +843,7 @@ impl Engine {
                         Self::env_declare_lex(env, name, mutable);
                         Self::env_init_lex(env, name, v);
                     }
-                    BindMode::Assign => self.env_set(env, name, v),
+                    BindMode::Assign => return self.env_set(env, name, v),
                 }
                 Ok(())
             }
@@ -950,6 +1049,7 @@ impl Engine {
                         },
                         is_arrow: false,
                         is_async: false,
+                        strict: true, // corps de classe
                     })
                 },
                 |m| m.fun.clone(),
@@ -1010,13 +1110,17 @@ impl Engine {
             if key == "length" {
                 return Some(Prop::Data {
                     value: Value::Num(elems.len() as f64),
-                    enumerable: false,
+                    attrs: crate::heap::PropAttrs {
+                        writable: true,
+                        enumerable: false,
+                        configurable: false,
+                    },
                 });
             }
             if let Some(i) = array_index(key) {
                 return elems.get(i).copied().map(|value| Prop::Data {
                     value,
-                    enumerable: true,
+                    attrs: crate::heap::PropAttrs::FULL,
                 });
             }
         }
@@ -1030,7 +1134,11 @@ impl Engine {
                     .count();
                 return Some(Prop::Data {
                     value: Value::Num(n as f64),
-                    enumerable: false,
+                    attrs: crate::heap::PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
                 });
             }
         }
@@ -1093,14 +1201,22 @@ impl Engine {
         let mut cur = Some(id);
         let mut depth = 0;
         while let Some(cid) = cur {
-            if let Some(Prop::Acc { set, .. }) = self.find_own(cid, key) {
-                if self.is_callable(set) {
-                    self.call_value(set, recv, &[v])?;
+            match self.find_own(cid, key) {
+                Some(Prop::Acc { set, .. }) => {
+                    if self.is_callable(set) {
+                        self.call_value(set, recv, &[v])?;
+                        return Ok(());
+                    }
+                    // Accessor sans setter → écriture refusée.
+                    return self.write_refused(key);
                 }
-                return Ok(());
-            }
-            if self.find_own(cid, key).is_some() {
-                break; // data prop on the chain → shadow with own write
+                // Data prop non-writable *héritée* → l'écriture est
+                // refusée (pas de shadowing possible, spec [[Set]]).
+                Some(Prop::Data { attrs, .. }) if cid != id && !attrs.writable => {
+                    return self.write_refused(key);
+                }
+                Some(_) => break, // data writable → shadow with own write
+                None => {}
             }
             cur = match self.heap.obj(cid).map(|o| o.proto) {
                 Some(Value::Obj(p)) => Some(p),
@@ -1111,8 +1227,21 @@ impl Engine {
                 break;
             }
         }
-        self.set_prop(id, key, v);
-        Ok(())
+        if self.set_prop(id, key, v) {
+            Ok(())
+        } else {
+            self.write_refused(key)
+        }
+    }
+
+    /// Écriture refusée (`[[Set]]` → `false`) — `TypeError` en
+    /// strict, silence en sloppy.
+    fn write_refused(&mut self, key: &str) -> JsResult<()> {
+        if self.strict {
+            Err(self.type_error(format!("cannot write `{key}`")))
+        } else {
+            Ok(())
+        }
     }
 
     /// Extract the host delegate of an object, if any.
@@ -1130,7 +1259,7 @@ impl Engine {
             proto,
             props: Vec::new(),
             kind: ObjKind::Host(host),
-            frozen: false,
+            extensible: true,
         }))
     }
 
@@ -1192,31 +1321,68 @@ impl Engine {
                 }
                 self.write_prop(id, base, key, v)
             }
-            // Sloppy mode: writes to primitives are silently ignored.
-            _ => Ok(()),
+            // Sloppy mode: writes to primitives are silently ignored;
+            // strict: `TypeError` (spec `PutValue` on a primitive base).
+            _ => {
+                if self.strict {
+                    Err(self.type_error(format!("cannot write `{key}`")))
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 
-    fn set_prop(&mut self, id: ObjId, key: &str, v: Value) {
-        if let Some(o) = self.heap.obj_mut(id) {
-            if let ObjKind::Array(elems) = &mut o.kind {
-                if key == "length" {
-                    let n = match v {
-                        Value::Num(n) if n >= 0.0 => to_uint32(n) as usize,
-                        _ => elems.len(),
-                    };
-                    elems.resize(n, Value::Undefined);
-                    return;
-                }
-                if let Some(i) = array_index(key) {
-                    if i >= elems.len() {
-                        elems.resize(i + 1, Value::Undefined);
-                    }
-                    elems[i] = v;
-                    return;
-                }
+    /// `[[Set]]` sur un own data prop — `false` si refusé
+    /// (non-writable, non-extensible, frozen). Le caller décide
+    /// silence sloppy vs `TypeError` strict.
+    pub(crate) fn set_prop(&mut self, id: ObjId, key: &str, v: Value) -> bool {
+        let Some(o) = self.heap.obj_mut(id) else {
+            return false;
+        };
+        if let ObjKind::Array(elems) = &mut o.kind {
+            if key == "length" {
+                let n = match v {
+                    Value::Num(n) if n >= 0.0 => to_uint32(n) as usize,
+                    _ => elems.len(),
+                };
+                elems.resize(n, Value::Undefined);
+                return true;
             }
-            o.set_own(key, v, true);
+            if let Some(i) = array_index(key) {
+                if !o.extensible && i >= elems.len() {
+                    return false;
+                }
+                if i >= elems.len() {
+                    elems.resize(i + 1, Value::Undefined);
+                }
+                elems[i] = v;
+                return true;
+            }
+        }
+        if let Some((_, p)) = o.props.iter_mut().find(|(k, _)| k == key) {
+            match p {
+                crate::heap::Prop::Data { value, attrs } => {
+                    if !attrs.writable {
+                        return false;
+                    }
+                    *value = v;
+                    true
+                }
+                // Setter sans set → l'écriture échoue (spec).
+                crate::heap::Prop::Acc { set, .. } => matches!(*set, Value::Obj(_)),
+            }
+        } else if o.extensible {
+            o.props.push((
+                key.to_string(),
+                crate::heap::Prop::Data {
+                    value: v,
+                    attrs: crate::heap::PropAttrs::FULL,
+                },
+            ));
+            true
+        } else {
+            false
         }
     }
 
@@ -1242,10 +1408,21 @@ impl Engine {
                     return true;
                 }
             }
-            o.remove_own(key);
-            return true;
+            return o.remove_own(key);
         }
         false
+    }
+
+    /// `delete o.k` → `false` si refusé ; en strict un refus est un
+    /// `TypeError` (spec `[[Delete]]` + strict Delete).
+    fn delete_result(&mut self, id: ObjId, key: &str) -> JsResult<Value> {
+        if self.delete_prop(id, key) {
+            Ok(Value::Bool(true))
+        } else if self.strict {
+            Err(self.type_error(format!("cannot delete `{key}`")))
+        } else {
+            Ok(Value::Bool(false))
+        }
     }
 
     /// `===` exposed for builtins (no user code runs).
@@ -1453,8 +1630,17 @@ impl Engine {
                     return Err(self.range_error("maximum call stack exceeded"));
                 }
                 // Arrow functions ignore the caller's receiver —
-                // `this` was captured at creation time.
+                // `this` was captured at creation time. En sloppy,
+                // `this` null/undefined est coercé vers l'objet
+                // global (spec § OrdinaryCallBindThis).
                 let this = lex_this.unwrap_or(this);
+                let this = if lit.strict || matches!(this, Value::Obj(_)) {
+                    this
+                } else {
+                    Value::Obj(self.global)
+                };
+                let outer_strict = self.strict;
+                self.strict = lit.strict;
                 let local = Env::local(env);
                 // Param binding: patterns + `= default` + `...rest`.
                 for (i, p) in lit.params.iter().enumerate() {
@@ -1488,6 +1674,7 @@ impl Engine {
                 self.hoist(&lit.body, &local);
                 let r = self.exec_body(&local, this, &lit.body);
                 self.call_depth -= 1;
+                self.strict = outer_strict;
                 let out = match r {
                     Ok(Flow::Return(v)) => Ok(v),
                     Ok(_) => Ok(Value::Undefined),
@@ -1579,7 +1766,10 @@ impl Engine {
                     if let Some(name) = &f.name {
                         self.env_declare(env, name);
                         let fv = self.make_function(f, env, Value::Undefined);
-                        self.env_set(env, name, fv);
+                        // Le hoisting installe dans une liaison
+                        // mutable — l'erreur stricte n'a pas lieu
+                        // d'être ; ignorer le résultat est sûr.
+                        let _ = self.env_set(env, name, fv);
                     }
                 }
                 other => self.hoist_vars_only(std::slice::from_ref(other), env),
@@ -1657,13 +1847,23 @@ impl Engine {
     /// semantics; direct-eval scoping is a documented deviation).
     /// Microtasks are *not* drained here — the enclosing job does.
     pub(crate) fn eval_source(&mut self, src: &str) -> JsResult<Value> {
-        let prog = crate::parser::parse(src).map_err(|err| {
+        // `eval` direct : le texte hérite du strict appelant —
+        // early errors (`01`, `delete x`) et effets runtime.
+        let prog = crate::parser::parse_in(src, self.strict).map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
         })?;
         self.exec_program(&prog)
     }
 
     pub(crate) fn exec_program(&mut self, prog: &Program) -> JsResult<Value> {
+        let outer_strict = self.strict;
+        self.strict |= prog.strict;
+        let r = self.exec_program_inner(prog);
+        self.strict = outer_strict;
+        r
+    }
+
+    fn exec_program_inner(&mut self, prog: &Program) -> JsResult<Value> {
         let env = self.global_env.clone();
         self.hoist(&prog.body, &env);
         self.completion = Value::Undefined;
@@ -1723,7 +1923,7 @@ impl Engine {
             Stmt::FunctionDecl(f) => {
                 if let Some(name) = &f.name {
                     let fv = self.make_function(f, env, Value::Undefined);
-                    self.env_set(env, name, fv);
+                    self.env_set(env, name, fv)?;
                 }
                 Ok(Flow::Normal)
             }
@@ -1733,7 +1933,7 @@ impl Engine {
                 let v = self.eval_class(env, this, cl)?;
                 if let Some(name) = &cl.name {
                     Self::env_declare_lex(env, name, true);
-                    self.env_set(env, name, v);
+                    self.env_set(env, name, v)?;
                 }
                 Ok(Flow::Normal)
             }
@@ -2159,7 +2359,10 @@ impl Engine {
                 };
                 let args = self.eval_args(env, this, arg_exprs)?;
                 match callee {
-                    Callee::Bare(f) => self.call_value(f, Value::Obj(self.global), &args),
+                    // Receiver `undefined` — le callee sloppy le
+                    // coercera vers l'objet global, le strict le
+                    // garde (spec `OrdinaryCallBindThis`).
+                    Callee::Bare(f) => self.call_value(f, Value::Undefined, &args),
                     Callee::Member(recv, name) => {
                         // Host method dispatch first: `hostObj.m(…)`
                         // hits the host's `invoke` before prop lookup.
@@ -2297,10 +2500,7 @@ impl Engine {
 
     fn write_lvalue(&mut self, env: &EnvRef, this: Value, e: &Expr, v: Value) -> JsResult<()> {
         match e {
-            Expr::Ident(name) => {
-                self.env_set(env, name, v);
-                Ok(())
-            }
+            Expr::Ident(name) => self.env_set(env, name, v),
             Expr::Member(base, name) => {
                 let b = self.eval_expr(env, this, base)?;
                 self.set_prop_value(b, name, v)
@@ -2358,7 +2558,7 @@ impl Engine {
                 Expr::Member(base, name) => {
                     let b = self.eval_expr(env, this, base)?;
                     if let Value::Obj(id) = b {
-                        Ok(Value::Bool(self.delete_prop(id, name)))
+                        self.delete_result(id, name)
                     } else {
                         Ok(Value::Bool(true))
                     }
@@ -2368,15 +2568,29 @@ impl Engine {
                     let k = self.eval_expr(env, this, key)?;
                     let k = self.prop_key(k)?;
                     if let Value::Obj(id) = b {
-                        Ok(Value::Bool(self.delete_prop(id, &k)))
+                        self.delete_result(id, &k)
                     } else {
                         Ok(Value::Bool(true))
                     }
                 }
-                // `delete x` on a variable: vars are non-configurable.
+                // `delete x` : une liaison d'env (var/let/fn) est
+                // non-supprimable → `false`; sinon la prop de
+                // l'objet global — configurable incluse
+                // (global implicite sloppy → `true`).
+                Expr::Ident(name) => {
+                    if Self::env_has_binding(env, name) {
+                        if self.strict {
+                            return Err(self.type_error(format!("cannot delete `{name}`")));
+                        }
+                        Ok(Value::Bool(false))
+                    } else {
+                        let g = self.global;
+                        self.delete_result(g, name)
+                    }
+                }
                 _ => {
                     self.eval_expr(env, this, operand).ok();
-                    Ok(Value::Bool(false))
+                    Ok(Value::Bool(true))
                 }
             },
             UnOp::PreInc | UnOp::PreDec | UnOp::PostInc | UnOp::PostDec => {

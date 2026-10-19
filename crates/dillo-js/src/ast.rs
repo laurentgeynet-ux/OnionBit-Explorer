@@ -17,6 +17,11 @@ use std::rc::Rc;
 pub struct Program {
     /// Top-level statements.
     pub body: Vec<Stmt>,
+    /// `"use strict"` en prologue — le runtime bascule : écritures
+    /// refusées → `TypeError`, identifiants non déclarés en
+    /// écriture → `ReferenceError`, `delete` non-configurable →
+    /// `TypeError`, `this` non coercé.
+    pub strict: bool,
 }
 
 /// Statements.
@@ -228,6 +233,13 @@ pub struct FnLit {
     /// — a pending `await` raises a runtime error; documented
     /// deviation).
     pub is_async: bool,
+    /// Corps en mode strict — hérité du contexte OU activé par un
+    /// prologue `"use strict"` dans le corps. `true` pour tous les
+    /// membres de classe (les corps de classe sont stricts par spec).
+    /// Consommé par le runtime : `TypeError`/`ReferenceError` au lieu
+    /// d'échecs silencieux (écriture non-writable, delete
+    /// non-configurable, identifiant non déclaré).
+    pub strict: bool,
 }
 
 /// One formal parameter.

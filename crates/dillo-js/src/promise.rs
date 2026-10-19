@@ -97,7 +97,7 @@ impl Engine {
                 resolve_fn: Value::Undefined,
                 reject_fn: Value::Undefined,
             }),
-            frozen: false,
+            extensible: true,
         });
         let resolve = self.bound_native("resolve", promise_resolve, vec![Value::Obj(id)]);
         let reject = self.bound_native("reject", promise_reject, vec![Value::Obj(id)]);

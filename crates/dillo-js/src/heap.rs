@@ -343,6 +343,40 @@ pub(crate) fn trace_env(env: &EnvRef, out: &mut Vec<ObjId>, visited: &mut HashSe
     }
 }
 
+/// Property attributes — `[[Writable]]` (data only),
+/// `[[Enumerable]]`, `[[Configurable]]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PropAttrs {
+    /// `[[Writable]]` — meaningful on `Data` only.
+    pub writable: bool,
+    /// `[[Enumerable]]` — gates `for-in`/`Object.keys`.
+    pub enumerable: bool,
+    /// `[[Configurable]]` — gates `delete`/redefinition.
+    pub configurable: bool,
+}
+
+impl PropAttrs {
+    /// Ordinary assignment / literal prop : `wec = true`.
+    pub const FULL: Self = Self {
+        writable: true,
+        enumerable: true,
+        configurable: true,
+    };
+    /// Builtin install (methods, prototypes) : non-énumérable,
+    /// réinscriptible et reconfigurable.
+    pub const BUILTIN: Self = Self {
+        writable: true,
+        enumerable: false,
+        configurable: true,
+    };
+    /// Constante figée (`NaN`, `undefined`, `Math.E`…) : `wec = false`.
+    pub const FIXED: Self = Self {
+        writable: false,
+        enumerable: false,
+        configurable: false,
+    };
+}
+
 /// A property entry. `enumerable` gates `for-in` enumeration
 /// (builtins install themselves as non-enumerable).
 #[derive(Debug, Clone, Copy)]
@@ -351,8 +385,8 @@ pub enum Prop {
     Data {
         /// Stored value.
         value: Value,
-        /// Shows up in `for-in`/`Object.keys`-style enumeration.
-        enumerable: bool,
+        /// `[[Writable]]`/`[[Enumerable]]`/`[[Configurable]]`.
+        attrs: PropAttrs,
     },
     /// Getter/setter pair (`{get x(){}}`, `Object.defineProperty`,
     /// class accessors). `Undefined` = absent side.
@@ -361,8 +395,8 @@ pub enum Prop {
         get: Value,
         /// Setter callable or `Undefined`.
         set: Value,
-        /// Enumeration flag.
-        enumerable: bool,
+        /// `[[Enumerable]]`/`[[Configurable]]` (`writable` n/a).
+        attrs: PropAttrs,
     },
 }
 
@@ -370,7 +404,22 @@ impl Prop {
     /// `true` when the property shows up in `for-in`.
     pub fn enumerable(&self) -> bool {
         match self {
-            Prop::Data { enumerable, .. } | Prop::Acc { enumerable, .. } => *enumerable,
+            Prop::Data { attrs, .. } | Prop::Acc { attrs, .. } => attrs.enumerable,
+        }
+    }
+
+    /// `[[Configurable]]`.
+    pub fn configurable(&self) -> bool {
+        match self {
+            Prop::Data { attrs, .. } | Prop::Acc { attrs, .. } => attrs.configurable,
+        }
+    }
+
+    /// `[[Writable]]` — `false` for accessors.
+    pub fn writable(&self) -> bool {
+        match self {
+            Prop::Data { attrs, .. } => attrs.writable,
+            Prop::Acc { .. } => false,
         }
     }
 
@@ -394,9 +443,10 @@ pub struct Object {
     pub props: Vec<(String, Prop)>,
     /// Kind-specific payload.
     pub kind: ObjKind,
-    /// `Object.freeze` — own writes become silent no-ops (sloppy
-    /// mode semantics; no accessor/install-time distinction).
-    pub frozen: bool,
+    /// `[[Extensible]]` — `Object.preventExtensions`/`seal`/`freeze`
+    /// le passent à `false` : les nouvelles props sont alors refusées
+    /// (silencieux en sloppy, `TypeError` en strict côté moteur).
+    pub extensible: bool,
 }
 
 /// What kind of object this is.
@@ -450,7 +500,7 @@ impl Object {
             proto,
             props: Vec::new(),
             kind: ObjKind::Ordinary,
-            frozen: false,
+            extensible: true,
         }
     }
 
@@ -460,7 +510,7 @@ impl Object {
             proto,
             props: Vec::new(),
             kind: ObjKind::Array(elems),
-            frozen: false,
+            extensible: true,
         }
     }
 
@@ -470,7 +520,7 @@ impl Object {
             proto,
             props: Vec::new(),
             kind: ObjKind::Fun(f),
-            frozen: false,
+            extensible: true,
         }
     }
 
@@ -485,24 +535,130 @@ impl Object {
         self.find(key).and_then(|p| p.data_value())
     }
 
+    /// `[[DefineOwnProperty]]` for a data property — respects
+    /// `extensible`/existing attrs (simplified spec rules) :
+    /// non-configurable props keep their attributes (`value` update
+    /// honoured iff still `writable` — same-value case included).
+    /// Returns `false` on rejection.
+    pub fn define_data(&mut self, key: &str, value: Value, attrs: PropAttrs) -> bool {
+        if let Some((_, p)) = self.props.iter_mut().find(|(k, _)| k == key) {
+            match p {
+                Prop::Data { value: v, attrs: a } => {
+                    if a.configurable {
+                        *v = value;
+                        *a = attrs;
+                        true
+                    } else {
+                        // Attrs may only shrink further
+                        // (`false`→`false` transitions kept).
+                        if attrs.enumerable != a.enumerable
+                            || attrs.configurable
+                            || (attrs.writable && !a.writable)
+                        {
+                            return false;
+                        }
+                        if !a.writable && *v != value {
+                            return false;
+                        }
+                        *v = value;
+                        a.writable &= attrs.writable;
+                        true
+                    }
+                }
+                Prop::Acc { attrs: a, .. } => {
+                    if !a.configurable {
+                        return false;
+                    }
+                    *p = Prop::Data { value, attrs };
+                    true
+                }
+            }
+        } else if self.extensible {
+            self.props
+                .push((key.to_string(), Prop::Data { value, attrs }));
+            true
+        } else {
+            false
+        }
+    }
+
+    /// `[[DefineOwnProperty]]` for an accessor — same rules. `get`
+    /// or `set` may be `Undefined` (absent side).
+    pub fn define_accessor(&mut self, key: &str, get: Value, set: Value, attrs: PropAttrs) -> bool {
+        if let Some((_, p)) = self.props.iter_mut().find(|(k, _)| k == key) {
+            match p {
+                Prop::Acc {
+                    get: g,
+                    set: s,
+                    attrs: a,
+                } => {
+                    if !a.configurable {
+                        // Only flag-compatible attr writes allowed.
+                        if attrs.enumerable != a.enumerable || attrs.configurable {
+                            return false;
+                        }
+                        if !matches!(get, Value::Undefined) && *g != get {
+                            return false;
+                        }
+                        if !matches!(set, Value::Undefined) && *s != set {
+                            return false;
+                        }
+                    }
+                    if !matches!(get, Value::Undefined) {
+                        *g = get;
+                    }
+                    if !matches!(set, Value::Undefined) {
+                        *s = set;
+                    }
+                    a.enumerable = attrs.enumerable;
+                    true
+                }
+                Prop::Data { attrs: a, .. } => {
+                    if !a.configurable {
+                        return false;
+                    }
+                    *p = Prop::Acc { get, set, attrs };
+                    true
+                }
+            }
+        } else if self.extensible {
+            self.props
+                .push((key.to_string(), Prop::Acc { get, set, attrs }));
+            true
+        } else {
+            false
+        }
+    }
+
     /// Insert or overwrite an own data property (keeps insertion
     /// order). A data write over an existing accessor replaces it.
-    /// Frozen objects silently reject the write (sloppy mode).
+    /// Convenience for install paths : writable+configurable,
+    /// `enumerable` au choix.
     pub fn set_own(&mut self, key: &str, value: Value, enumerable: bool) {
-        if self.frozen {
-            return;
-        }
+        let attrs = if enumerable {
+            PropAttrs::FULL
+        } else {
+            PropAttrs::BUILTIN
+        };
+        // Force-install : utilisé par les builtins avant toute
+        // protection — on outrepasse configurable.
         if let Some((_, p)) = self.props.iter_mut().find(|(k, _)| k == key) {
-            *p = Prop::Data { value, enumerable };
+            *p = Prop::Data { value, attrs };
             return;
         }
         self.props
-            .push((key.to_string(), Prop::Data { value, enumerable }));
+            .push((key.to_string(), Prop::Data { value, attrs }));
     }
 
     /// Merge a getter/setter side into an own property (existing
     /// accessor sides are preserved, à la `Object.defineProperty`).
+    /// Install path — attributes forced configurable.
     pub fn set_accessor(&mut self, key: &str, get: Value, set: Value, enumerable: bool) {
+        let attrs = PropAttrs {
+            writable: false,
+            enumerable,
+            configurable: true,
+        };
         if let Some((_, p)) = self.props.iter_mut().find(|(k, _)| k == key) {
             match p {
                 Prop::Acc { get: g, set: s, .. } => {
@@ -515,30 +671,27 @@ impl Object {
                     return;
                 }
                 Prop::Data { .. } => {
-                    *p = Prop::Acc {
-                        get,
-                        set,
-                        enumerable,
-                    };
+                    *p = Prop::Acc { get, set, attrs };
                     return;
                 }
             }
         }
-        self.props.push((
-            key.to_string(),
-            Prop::Acc {
-                get,
-                set,
-                enumerable,
-            },
-        ));
+        self.props
+            .push((key.to_string(), Prop::Acc { get, set, attrs }));
     }
 
-    /// Remove an own property. Returns whether it existed.
+    /// Remove an own property if `[[Configurable]]`. Returns `false`
+    /// when the prop exists and is locked (the caller decides
+    /// sloppy-silent vs strict-`TypeError`).
     pub fn remove_own(&mut self, key: &str) -> bool {
-        let before = self.props.len();
-        self.props.retain(|(k, _)| k != key);
-        self.props.len() != before
+        match self.props.iter().position(|(k, _)| k == key) {
+            Some(i) if !self.props[i].1.configurable() => false,
+            Some(i) => {
+                self.props.remove(i);
+                true
+            }
+            None => true,
+        }
     }
 }
 
