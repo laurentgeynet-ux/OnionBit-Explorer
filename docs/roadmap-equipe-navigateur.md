@@ -231,7 +231,13 @@ mesures).
      ou churn DoS démontré sur un cas réel) : `JsEngine`
      gagne `drain_dom_mutations()` **additif** réutilisant
      les `MutationRecord` (mécanique JS-C26) — diff d'arbre
-     au lieu du HTML complet ;
+     au lieu du HTML complet. **Le critère exige un
+     instrument** : `benches/pipeline.rs` ne benche que
+     `navigate`/`scroll_repaint` globaux — la branche 1
+     inclut donc un bench `mirror_sync` dédié (ou les
+     compteurs suffisent s'ils donnent ms/octets par synchro
+     isolée). « DoS démontré » reste un critère par
+     observation, sans instrument ;
   3. *si le problème est le modèle* (divergences miroir ↔
      `explorer-dom` récurrentes, état non sérialisable,
      fidélité): escalade = **ADR amendant ADR-0013** (partage

@@ -78,7 +78,9 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   Livré : harnais ouvert (comptage par `.dat` + liste complète),
   code cas/dump partagé (`tests/common/`).
 - [ ] **R-15. Tree-builder : clusters du triage** — issue de la
-  décision R-14, **préempte R-3/R-4**. Ordre par volume :
+  décision R-14, **préempte R-3/R-4**. Ordre par volume
+  (inventaire R-14 : harnais ouvert, comptage par `.dat`,
+  `tests/common/`) :
   1. foreign content (namespaces sur les éléments, insertion
      mode §13.2.6.5, tables d'ajustement attrs/tags, CDATA
      dans svg/math, points de breakout) — débloque aussi
