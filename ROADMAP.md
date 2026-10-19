@@ -123,7 +123,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
 
 - [x] **Étape 13. Tokenizer/parser.** Règles, déclarations,
   at-rules (`@media` minimal), tolérance aux erreurs de la spec.
-- [ ] **Étape 14. Sélecteurs.** Tag/classe/id/descendant/enfant/
+- [x] **Étape 14. Sélecteurs.** Tag/classe/id/descendant/enfant/
   attribut — matching sur le DOM.
 - [ ] **Étape 15. Cascade + héritage.** Spécificité, `!important`,
   valeurs initiales/héritées, `computed style` par nœud.

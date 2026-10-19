@@ -29,6 +29,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - 13 tests `tests/gc.rs` : cycles, fermetures, timers,
     promesses, cache DOM, racines explicites, idempotence.
 
+- **Étape 14 — `explorer-css` : sélecteurs + matching DOM**
+  (`selector.rs`, ~700 lignes) : parsing depuis le flux de
+  tokens — type, `*`, `.classe`, `#id`, `[a]`/`[a=v]`/`~=`/
+  `|=`/`^=`/`$=`/`*=` + drapeau `i`, combinateurs descendant,
+  `>`, `+`, `~`, listes `,` ; pseudo-classes structurelles
+  `:root`, `:empty`, `:first/last/only-child`, `:nth-child()`,
+  `:nth-last-child()`, les quatre `*-of-type`, `:not()`, `:is()`,
+  `:where()` — dynamiques (`:hover`…) et pseudo-éléments
+  réservés à l'étape 16 (présence → sélecteur invalide, règle
+  ignorée). `an+b` complet (`odd`/`even`/`-n+3`). Matching
+  droite→gauche sur `explorer-dom` via ses accesseurs
+  `Result` (handle obsolète → non-match, jamais de panic) ;
+  combinateurs frères ignorant les nœuds texte. Spécificité
+  `(id, classe, type)` exposée pour la cascade. 17 tests :
+  parsing, ops attributs, nth, combinateurs, matching réel,
+  handles obsolètes.
+
 - **Étape 13 — `explorer-css` : tokenizer + parser**
   (`tokenizer.rs`/`parser.rs`, ~1 600 lignes) : tokens CSS
   Syntax (ident, function, nombre/dimension/pourcentage,
