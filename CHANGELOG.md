@@ -9,6 +9,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 53b — Charset des sous-ressources** (bug terrain
+  `2693959`, repro example.com) : scripts, modules et feuilles
+  liées ne passent plus par le sniffer **HTML** — son repli
+  `windows-1252` corrompait les littéraux UTF-8 des scripts
+  réels (mojibake « Lâ€™usage » via `insertAdjacentHTML` /
+  `textContent`). Ordre implémenté : classiques = attribut
+  `<script charset>` → BOM → UTF-8 ; modules = UTF-8 strict
+  (le `charset` de la balise est ignoré, spec) ; CSS =
+  `charset` du `Content-Type` transport → BOM → `@charset`
+  en tête → UTF-8. `decode_subresource`/`decode_stylesheet`/
+  `label_encoding`/`transport_charset`/`css_charset` +
+  `ScriptItem.charset` collecté. Tests : 8 unitaires
+  (décodeurs, labels, BOM, `@charset` tardif ignoré) + 3
+  intégration PNG (littéral `’` préservé, `charset`
+  Latin-1 honoré, module UTF-8 malgré l'attribut).
 - **Étape 53 — Session incrémentale** (`explorer-net`,
   `explorer-core`) : la page se peint pendant le
   téléchargement. `HttpTransport::fetch_stream` renvoie

@@ -2583,3 +2583,102 @@ async fn progressive_stream_error_is_typed() {
     let err = s.navigate(a, "http://h.test/err").await.unwrap_err();
     assert!(matches!(err, CoreError::HttpStatus(404)));
 }
+
+// ===== Étape 53b — charset des sous-ressources =====
+
+/// Script externe UTF-8 sans `charset` : les littéraux
+/// multi-octets restent intacts — le sniffer HTML (repli
+/// Latin-1) ne s'applique plus aux sous-ressources
+/// (mojibake « Lâ€™usage » constaté sur example.com).
+#[tokio::test]
+async fn script_utf8_literals_not_mojibake() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script src=\"/s.js\"></script></body></html>",
+    );
+    // « L'usage » — apostrophe U+2019 codée E2 80 99 : sous
+    // l'ancien décodage elle devenait « â€™ ».
+    t.route_bin(
+        "/s.js",
+        200,
+        b"document.getElementById('x').textContent='L\xE2\x80\x99usage'".to_vec(),
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><head><meta charset=\"utf-8\"></head>\
+         <body><div id=\"x\">L\u{2019}usage</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// `<script charset>` honoré : l'octet 0xE9 se décode « é »
+/// sous `iso-8859-1` — le label déclaré l'emporte sur UTF-8.
+#[tokio::test]
+async fn script_charset_attr_decodes_latin1() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script src=\"/s.js\" charset=\"iso-8859-1\"></script></body></html>",
+    );
+    t.route_bin(
+        "/s.js",
+        200,
+        b"document.getElementById('x').textContent='caf\xE9'".to_vec(),
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><head><meta charset=\"utf-8\"></head>\
+         <body><div id=\"x\">caf\u{E9}</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// Module externe : toujours UTF-8 par spec — même un
+/// `charset` déclaré sur la balise est ignoré.
+#[tokio::test]
+async fn module_script_utf8_despite_charset_attr() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script type=\"module\" src=\"/m.js\" charset=\"iso-8859-1\"></script></body></html>",
+    );
+    t.route_bin(
+        "/m.js",
+        200,
+        b"document.getElementById('x').textContent='caf\xC3\xA9'".to_vec(),
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><head><meta charset=\"utf-8\"></head>\
+         <body><div id=\"x\">caf\u{E9}</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}

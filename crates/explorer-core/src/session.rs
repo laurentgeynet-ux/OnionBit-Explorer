@@ -22,7 +22,7 @@ use explorer_css::{
     initial_value, ComputedStyle, FontSrc, Origin, StyleEngine, StyleEnv, StyleMap,
 };
 use explorer_dom::{Dom, DomError, NodeId};
-use explorer_html::encoding::{decode_sniffed, decode_windows1252, sniff_encoding, Encoding};
+use explorer_html::encoding::{decode, decode_windows1252, sniff_encoding, Encoding};
 use explorer_html::TreeBuilder;
 use explorer_js::{JsEngine, JsFactory, NavRequest, NetRequest, NetResponse, UrlResolver};
 use explorer_layout::font::FontSource;
@@ -1601,10 +1601,14 @@ impl Session {
                 return;
             }
             match tag {
-                SubTag::Css(i) => css_slots[i] = Some(decode_sniffed(&resp.body).0),
+                SubTag::Css(i) => {
+                    css_slots[i] = Some(decode_stylesheet(&resp.body, &resp.headers));
+                }
                 SubTag::Script(slot) => {
-                    let (text, _) = decode_sniffed(&resp.body);
                     let item = &scripts[slot_items[slot]];
+                    // Étape 53b : charset déclaré (classique) →
+                    // BOM → UTF-8 — pas le sniffer HTML.
+                    let text = decode_subresource(&resp.body, item.charset.as_deref());
                     if item.exec == ScriptExec::Arrival {
                         if item.module {
                             if let Some(u) = &item.src {
@@ -1881,7 +1885,7 @@ impl Session {
                 if !(200..300).contains(&resp.status) {
                     continue;
                 }
-                let (text, _) = decode_sniffed(&resp.body);
+                let text = decode_subresource(&resp.body, None);
                 graph.sources.insert(key, text.clone());
                 for (spec2, u2) in module_deps(&text, &u) {
                     graph
@@ -3013,6 +3017,10 @@ struct ScriptItem {
     module: bool,
     /// File d'exécution.
     exec: ScriptExec,
+    /// `charset` déclaré sur la balise (script classique
+    /// externe seulement — ignoré par spec pour les modules,
+    /// toujours UTF-8 ; étape 53b).
+    charset: Option<String>,
     /// Slot de réception du corps fetché (index dans
     /// `script_srcs`) — `None` pour les inline.
     slot: Option<usize>,
@@ -3058,6 +3066,11 @@ fn collect_scripts(dom: &Dom, base: &Url, scripting: bool, max_src: usize) -> Ve
                             out.push(ScriptItem {
                                 src: Some(u),
                                 inline: None,
+                                charset: if module {
+                                    None
+                                } else {
+                                    dom.attribute(n, "charset").ok().flatten()
+                                },
                                 module,
                                 exec: if async_ {
                                     ScriptExec::Arrival
@@ -3083,6 +3096,7 @@ fn collect_scripts(dom: &Dom, base: &Url, scripting: bool, max_src: usize) -> Ve
                             out.push(ScriptItem {
                                 src: None,
                                 inline: Some(text),
+                                charset: None,
                                 module,
                                 exec: if module {
                                     ScriptExec::Post
@@ -3814,5 +3828,197 @@ fn decode_prefix(buf: &[u8], enc: Encoding, last: bool) -> (String, Vec<u8>) {
                 .collect();
             (String::from_utf16_lossy(&units), buf[n..].to_vec())
         }
+    }
+}
+
+/// BOM d'une sous-ressource (étape 53b) — `(encodage, octets
+/// à sauter)`. Contrairement au sniffer HTML, aucun `<meta>` :
+/// un script ou une feuille n'est pas un document.
+fn sniff_bom(bytes: &[u8]) -> (Encoding, usize) {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        (Encoding::Utf8, 3)
+    } else if bytes.starts_with(&[0xFE, 0xFF]) {
+        (Encoding::Utf16Be, 2)
+    } else if bytes.starts_with(&[0xFF, 0xFE]) {
+        (Encoding::Utf16Le, 2)
+    } else {
+        (Encoding::Utf8, 0)
+    }
+}
+
+/// Label de charset WHATWG → encodage supporté — mêmes
+/// mappings que `explorer-html::encoding` (famille latin-1 →
+/// `Windows1252`). `None` = label absent/inconnu : la
+/// priorité retombe sur l'échelon suivant (BOM, UTF-8).
+fn label_encoding(label: &str) -> Option<Encoding> {
+    match label
+        .trim()
+        .trim_matches(['"', '\''])
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "utf-8" | "utf8" | "unicode-1-1-utf-8" => Some(Encoding::Utf8),
+        "utf-16" | "utf-16le" | "utf-16l" => Some(Encoding::Utf16Le),
+        "utf-16be" => Some(Encoding::Utf16Be),
+        "windows-1252" | "iso-8859-1" | "latin1" | "latin-1" | "ascii" | "us-ascii"
+        | "iso8859-1" | "iso_8859-1" | "cp1252" => Some(Encoding::Windows1252),
+        _ => None,
+    }
+}
+
+/// Corps de sous-ressource texte (étape 53b) : `charset`
+/// explicite → BOM → **UTF-8** — jamais le sniffer HTML ni
+/// son repli `windows-1252`, qui corrompt les littéraux UTF-8
+/// des scripts réels (mojibake « Lâ€™usage » sur
+/// example.com). `charset` = attribut `<script charset>`
+/// (classiques uniquement — les modules sont toujours UTF-8)
+/// ou label de transport/déclaration CSS. Les octets de BOM
+/// sont toujours sautés — ils n'appartiennent pas au texte.
+fn decode_subresource(bytes: &[u8], charset: Option<&str>) -> String {
+    let (bom_enc, skip) = sniff_bom(bytes);
+    let enc = charset.and_then(label_encoding).unwrap_or(bom_enc);
+    decode(&bytes[skip..], enc)
+}
+
+/// `charset=` du `Content-Type` transport (priorité maximale
+/// pour les feuilles, WHATWG §4.4 — étape 53b).
+fn transport_charset(headers: &[(String, String)]) -> Option<String> {
+    let v = headers
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case("content-type"))?
+        .1
+        .as_str();
+    let pos = v.to_ascii_lowercase().find("charset=")? + 8;
+    let raw = v[pos..]
+        .trim_start_matches(['"', '\''])
+        .split([';', '"', '\'', ' '])
+        .next()?
+        .trim();
+    (!raw.is_empty()).then(|| raw.to_string())
+}
+
+/// `@charset "…"` en tête de feuille (étape 53b) — la règle
+/// ne compte que tout au début (après BOM éventuel) ; ASCII
+/// tolérant sur la casse et les espaces.
+fn css_charset(bytes: &[u8]) -> Option<String> {
+    let (_, skip) = sniff_bom(bytes);
+    let head = &bytes[skip..bytes.len().min(skip + 128)];
+    let lower: Vec<u8> = head.iter().map(u8::to_ascii_lowercase).collect();
+    let mut i = 0;
+    while i < lower.len() && lower[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let rest = lower.get(i..)?;
+    rest.strip_prefix(b"@charset")?;
+    let mut j = i + "@charset".len();
+    while j < lower.len() && lower[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    let quote = *lower.get(j)?;
+    if quote != b'"' && quote != b'\'' {
+        return None;
+    }
+    let start = j + 1;
+    let end = lower[start..]
+        .iter()
+        .position(|&b| b == quote)
+        .map(|p| start + p)?;
+    let label = String::from_utf8_lossy(&head[start..end]).trim().to_owned();
+    (!label.is_empty()).then_some(label)
+}
+
+/// Corps de feuille liée (étape 53b) : `charset` transport →
+/// BOM → `@charset` → UTF-8 (ordre WHATWG §4.4 — le document
+/// référent n'entre pas en jeu : nos feuilles externes sont
+/// décodées sur leur propre étiquette).
+fn decode_stylesheet(body: &[u8], headers: &[(String, String)]) -> String {
+    if let Some(c) = transport_charset(headers) {
+        return decode_subresource(body, Some(&c));
+    }
+    let (enc, skip) = sniff_bom(body);
+    if skip > 0 {
+        return decode(&body[skip..], enc);
+    }
+    decode_subresource(body, css_charset(body).as_deref())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// UTF-8 par défaut — la régression 53b : « ’ » (E2 80 99)
+    /// reste « ’ », pas « â€™ » (repli 1252 du sniffer HTML).
+    #[test]
+    fn subresource_utf8_default() {
+        assert_eq!(
+            decode_subresource("L\u{2019}usage".as_bytes(), None),
+            "L\u{2019}usage"
+        );
+    }
+
+    /// `charset` déclaré → label appliqué : 0xE9 = « é ».
+    #[test]
+    fn subresource_charset_label() {
+        assert_eq!(
+            decode_subresource(b"caf\xE9", Some("iso-8859-1")),
+            "caf\u{E9}"
+        );
+    }
+
+    /// Label inconnu → échelon suivant (UTF-8) — 0xE9 nu
+    /// devient U+FFFD, pas « é » (le label ne gagne pas par
+    /// défaut).
+    #[test]
+    fn subresource_unknown_label_falls_through() {
+        assert_eq!(
+            decode_subresource(b"caf\xE9", Some("x-bogus")),
+            "caf\u{FFFD}"
+        );
+    }
+
+    /// BOM UTF-8 + charset Latin-1 : le label déclaré décide
+    /// de l'encodage, le BOM est sauté du texte.
+    #[test]
+    fn subresource_bom_stripped() {
+        assert_eq!(
+            decode_subresource(b"\xEF\xBB\xBFcaf\xE9", Some("iso-8859-1")),
+            "caf\u{E9}"
+        );
+    }
+
+    /// `Content-Type: …; charset=` l'emporte sur tout.
+    #[test]
+    fn stylesheet_transport_charset() {
+        let h = [(
+            "content-type".to_string(),
+            "text/css; charset=ISO-8859-1".to_string(),
+        )];
+        assert!(decode_stylesheet(b".x{content:'caf\xE9'}", &h).contains("caf\u{E9}"));
+    }
+
+    /// `@charset` en tête, sans transport → label appliqué.
+    #[test]
+    fn stylesheet_at_charset() {
+        assert!(
+            decode_stylesheet(b"@charset \"iso-8859-1\";.x{content:'caf\xE9'}", &[])
+                .contains("caf\u{E9}")
+        );
+    }
+
+    /// Rien déclaré → UTF-8 (jamais 1252).
+    #[test]
+    fn stylesheet_utf8_default() {
+        assert_eq!(
+            decode_stylesheet(".x{content:'café'}".as_bytes(), &[]),
+            ".x{content:'café'}"
+        );
+    }
+
+    /// `@charset` pas en tête → ignoré (spec CSS : la règle
+    /// doit être absolument première).
+    #[test]
+    fn stylesheet_at_charset_late_ignored() {
+        let body = b".a{color:red}@charset 'iso-8859-1';.x{content:'caf\xE9'}".as_slice();
+        assert_eq!(css_charset(body), None);
     }
 }
