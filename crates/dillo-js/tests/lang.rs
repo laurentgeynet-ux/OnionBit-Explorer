@@ -6406,3 +6406,29 @@ fn c41_moderate_nesting_still_parses() {
     assert_eq!(ev_str(&deep_if), "42");
     assert_eq!(ev_str("function f(n){return n<=0?0:f(n-1)+1}f(30)"), "30");
 }
+
+/// Résidu JS-C41 (terrain `gh/`) : les opérandes chaînées
+/// `1+1+…`/`a&&a&&…` sont parsées **itérativement** — elles
+/// produisent une AST à 15 K+ maillons sans déclencher la
+/// borne `nest` du parseur, puis la détruisent. Le `Drop`
+/// d'`Expr` est itératif : ni `eval` (erreur typée de la
+/// borne `expr_depth`) ni `module_specifiers` (parse + drop
+/// immédiat, aucun `eval`) ne débordent la pile native.
+#[test]
+fn c41_deep_operand_chain_drops_iteratively() {
+    for src in [
+        "1+".repeat(15_000) + "1",
+        "true&&".repeat(15_000) + "true",
+        format!("var r;r={};r", "1+".repeat(15_000) + "1"),
+    ] {
+        // Parse + destruction immédiate — l'ancien crash
+        // (drop récursif) vivait ici, sans aucun `eval`.
+        let specs = dillo_js::module_specifiers(&src);
+        assert!(specs.is_empty());
+        // `eval` : la borne `expr_depth` rend une erreur
+        // typée — la destruction de l'AST d'erreur ne doit
+        // pas déborder non plus.
+        let mut e = Engine::new();
+        assert!(e.eval(&src).is_err(), "chaîne bornée attendue");
+    }
+}

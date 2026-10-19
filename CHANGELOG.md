@@ -97,6 +97,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (drapeaux, check/report, custom, `invalid`, radios,
   hooks submit/requestSubmit).
 
+- **JS-C41 résidu — destruction itérative de l'AST**
+  (`dillo-js`, terrain `gh/landing-pages-*.js`) : les chaînes
+  d'opérandes `1+1+…`/`a&&a&&…` se parsent itérativement et
+  produisent une AST à 15 K+ maillons que la borne `nest` ne
+  voit jamais — leur destruction récursive débordait la pile
+  via `module_specifiers` (parse + drop, aucun `eval`). Le
+  `Drop` d'`Expr` vide désormais les enfants `Box`/`Vec` dans
+  une file explicite — plus de descente récursive, plus de
+  cas non couvert. `eval` reste borné par `expr_depth`
+  (erreur typée).
+
 - **Documents géants : `FrameTooBig` devient une frame
   plafonnée** (`explorer-core`, décision roadmap NAV —
   terrain github/MDN/stallman) : `Session::repaint` tronque

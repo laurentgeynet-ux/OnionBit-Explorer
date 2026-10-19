@@ -611,6 +611,85 @@ pub enum Expr {
     NewTarget,
 }
 
+impl Expr {
+    /// Déplace les sous-expressions possédées dans `out` en
+    /// laissant des feuilles `Null` — utilisé par le `Drop`
+    /// itératif (les chaînes `Binary`/`Call` de 15 K+ maillons
+    /// produites par le parser itératif `1+1+…`/`a&&a&&…` ne
+    /// doivent pas descendre en récursion à la destruction —
+    /// résidu JS-C41).
+    fn take_children(&mut self, out: &mut Vec<Expr>) {
+        let take = |b: &mut Box<Expr>, out: &mut Vec<Expr>| {
+            out.push(std::mem::replace(&mut **b, Expr::Null));
+        };
+        match self {
+            Expr::Unary(_, e)
+            | Expr::Member(e, _)
+            | Expr::Spread(e)
+            | Expr::Await(e)
+            | Expr::ImportCall(e)
+            | Expr::SuperIndex(e) => take(e, out),
+            Expr::Binary(_, l, r) | Expr::Assign(l, _, r) | Expr::Index(l, r) => {
+                take(l, out);
+                take(r, out);
+            }
+            Expr::Cond(c, t, e) => {
+                take(c, out);
+                take(t, out);
+                take(e, out);
+            }
+            Expr::Call(f, args) | Expr::New(f, args) => {
+                take(f, out);
+                out.append(args);
+            }
+            Expr::Array(items) => out.extend(items.drain(..).flatten()),
+            Expr::Object(props) => {
+                for p in props.drain(..) {
+                    match p {
+                        ObjProp::Prop(_, e) | ObjProp::Spread(e) => out.push(e),
+                        ObjProp::Getter(..) | ObjProp::Setter(..) => {}
+                    }
+                }
+            }
+            Expr::Seq(items) | Expr::SuperCall(items) => out.append(items),
+            Expr::Template { exprs, .. } => out.append(exprs),
+            Expr::TaggedTemplate { tag, exprs, .. } => {
+                take(tag, out);
+                out.append(exprs);
+            }
+            Expr::Chain { head, steps } => {
+                take(head, out);
+                for s in steps.drain(..) {
+                    match s {
+                        ChainStep::Index(e) | ChainStep::OptIndex(e) => out.push(e),
+                        ChainStep::Call(args) | ChainStep::OptCall(args) => out.extend(args),
+                        ChainStep::Member(_) | ChainStep::OptMember(_) => {}
+                    }
+                }
+            }
+            Expr::Yield { arg, .. } => {
+                if let Some(e) = arg {
+                    take(e, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Drop for Expr {
+    /// Destruction itérative : les enfants `Box`/`Vec`
+    /// transitent par une file explicite — une AST profonde
+    /// (opérandes chaînées ~15 K+) ne déborde plus la pile.
+    fn drop(&mut self) {
+        let mut queue = Vec::new();
+        self.take_children(&mut queue);
+        while let Some(mut e) = queue.pop() {
+            e.take_children(&mut queue);
+        }
+    }
+}
+
 /// One member of an object literal.
 #[derive(Debug, Clone)]
 pub enum ObjProp {
