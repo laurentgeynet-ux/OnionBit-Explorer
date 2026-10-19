@@ -127,6 +127,54 @@ pub enum Stmt {
         /// Clauses in source order (`test` = `None` is `default`).
         cases: Vec<SwitchCase>,
     },
+    /// `import …` — module only. Liaisons installées à
+    /// l'instanciation ; exécuter le statement est un no-op.
+    Import {
+        /// Bindings declared by the clause.
+        binds: Vec<ImportBind>,
+        /// Module specifier source string.
+        source: String,
+    },
+    /// `export …` — module only.
+    Export(ExportDecl),
+}
+
+/// One binding introduced by an `import` clause.
+#[derive(Debug, Clone)]
+pub enum ImportBind {
+    /// `import def from 'm'` — liaise le `default` du module.
+    Default(String),
+    /// `import {a as b}` — `(exported name, local name)`.
+    Named(String, String),
+    /// `import * as ns from 'm'` — whole module namespace object.
+    Namespace(String),
+}
+
+/// `export` forms.
+#[derive(Debug, Clone)]
+pub enum ExportDecl {
+    /// `export {a as b, c}` — `(local, exported)`. `from` is set
+    /// for `export {a} from 'm'` (re-export: no local binding).
+    Named {
+        /// `(local name, exported name)` pairs.
+        list: Vec<(String, String)>,
+        /// Re-export source specifier, if any.
+        from: Option<String>,
+    },
+    /// `export var|let|const|function|class …` — the declaration
+    /// executes normally; its declared names become exports.
+    Decl(Box<Stmt>),
+    /// `export default <expr|function|class>` — binds the hidden
+    /// `default` export (plus the function/class own name if given).
+    Default(Box<Expr>),
+    /// `export * [as ns] from 'm'` — re-exports every named export
+    /// of the dependency (except `default`).
+    Star {
+        /// `export * as ns` — the whole namespace re-exported as one name.
+        ns: Option<String>,
+        /// Module specifier.
+        from: String,
+    },
 }
 
 /// `name [= init]` inside a `var`/`let`/`const` statement — the
@@ -483,6 +531,11 @@ pub enum Expr {
     /// promise raises a runtime error: the tree-walking interpreter
     /// cannot suspend mid-function (documented deviation).
     Await(Box<Expr>),
+    /// `import(spec)` — dynamic import: returns a promise resolved
+    /// with the module namespace object.
+    ImportCall(Box<Expr>),
+    /// `import.meta` — `{url: <module specifier>}`.
+    ImportMeta,
 }
 
 /// One member of an object literal.

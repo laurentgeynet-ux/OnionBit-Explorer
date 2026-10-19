@@ -9,6 +9,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 36 — boucle d'événements** (`explorer-js`,
+  `explorer-core`) : `JsEngine::dispatch_event(ty, path)`
+  — chemin `(tag, index same-tag)` depuis la racine,
+  rejoué sur le miroir avec saut des wrappers implicites ;
+  `Engine::dom_event_on` donne la propagation
+  capture→cible→bulle complète (`addEventListener` +
+  `onclick=`), microtasks drainées, `defaultPrevented`
+  remonté → un clic `preventDefault` sur `<a>` supprime
+  la navigation (événement avant action par défaut).
+  `run_pending` post-dispatch draine les timers dus
+  (`setTimeout(0)` au chargement rendu) ; mutations de
+  listener → `sync_dom` → re-parse/relayout/
+  `frame_invalidated` via `apply_dom_sync` factorisé ;
+  erreur de listener → `pipeline_error` sans blocage.
+  Non dispatchés à cette étape : `mouseover`, `keydown`,
+  `focus`/`blur` ; tick de timers différés différé au
+  prochain point de synchro (input/navigation).
+  5 tests adaptateur + 3 tests session.
+
 - **Étape 35 — bindings DOM par miroir synchronisé**
   (`explorer-js`, `explorer-core`) : `JsEngine` gagne
   `install_dom(html)` + `sync_dom()` (no-op par défaut).
@@ -428,6 +447,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`upper(v) == upper(borne)`) ; backrefs wrappées `(?i:…)`.
   16 assertions de régression `tests/lang.rs`
   (`regexp_js_c3_semantics`).
+- **JS-C5 — Modules ES** (`dillo-js`) : `parse_module` (but
+  module : `import`/`export` top-level, toujours strict) ;
+  **live bindings** via `EnvCell::Alias(EnvRef, name)` —
+  l'importeur lit l'env de l'exporteur à chaque accès
+  (mutations visibles), écriture sur import → `TypeError`,
+  chaînes d'alias bornées par visited-set (ré-exports
+  cycliques). Instanciation DFS : module enregistré avant
+  récursion (cycles re-résolvent au même index), exports
+  *locaux* statiques d'abord, `pending` (`export {…} from`,
+  `export *`) résolus une fois les deps instanciées ;
+  `ResolveExport` → `SyntaxError` précoce sur nom manquant.
+  Évaluation post-order avec `Evaluating`/`Evaluated` pour
+  les cycles. Namespace exotique : proto nul, getters bornés
+  sur `(env_index, binding)` résolvant live. `import(spec)`
+  → promesse du namespace, `import.meta.url`. Chargeur hôte
+  `ModuleLoader` injecté (`Engine::set_module_loader`,
+  `Engine::eval_module`). GC : envs de modules tracés,
+  cellules `Alias` remontent l'env cible. 15 tests
+  `tests/lang.rs` (imports nommés/default/namespace, live
+  binding, ré-exports, cycle, immuabilité, strict, `import()`,
+  `import.meta`). test262 toujours 859/859.
 - **JS-C4 — `Proxy` complet** (`dillo-js`) : `ObjKind::Proxy
   {target, handler}` (tracé GC, `handler: None` = révoqué) — les
   13 méthodes internes routées : `get`/`set`/`has`/`deleteProperty`

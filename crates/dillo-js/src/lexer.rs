@@ -78,8 +78,12 @@ pub enum Kw {
     Extends,
     /// `super`
     Super,
+    /// `import`
+    Import,
+    /// `export`
+    Export,
     /// A real ECMAScript keyword the engine does not implement yet
-    /// (`with`, `import`, `yield`…).
+    /// (`with`, `yield`…).
     Unsupported(&'static str),
 }
 
@@ -1016,9 +1020,9 @@ fn is_line_term(c: char) -> bool {
 
 fn keyword(s: &str) -> Option<Kw> {
     use Kw::{
-        Break, Case, Catch, Class, Const, Continue, Default, Delete, Do, Else, Extends, False,
-        Finally, For, Function, If, In, Instanceof, Let, New, Null, Return, Super, Switch, This,
-        Throw, True, Try, Typeof, Unsupported as U, Var, Void, While,
+        Break, Case, Catch, Class, Const, Continue, Default, Delete, Do, Else, Export, Extends,
+        False, Finally, For, Function, If, Import, In, Instanceof, Let, New, Null, Return, Super,
+        Switch, This, Throw, True, Try, Typeof, Unsupported as U, Var, Void, While,
     };
     Some(match s {
         "var" => Var,
@@ -1056,8 +1060,8 @@ fn keyword(s: &str) -> Option<Kw> {
         "with" => U("with"),
         "debugger" => U("debugger"),
         "enum" => U("enum"),
-        "import" => U("import"),
-        "export" => U("export"),
+        "import" => Import,
+        "export" => Export,
         "yield" => U("yield"),
         _ => return None,
     })

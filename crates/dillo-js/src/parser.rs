@@ -11,8 +11,9 @@
 //! init clauses (the `no_in` flag), like the spec's `NoIn` grammar.
 
 use crate::ast::{
-    AssignOp, BinOp, ChainStep, ClassLit, ClassMember, ClassMemberKind, Expr, FnLit, ForInit,
-    ForTarget, ObjProp, Param, Pat, Program, PropKey, Stmt, SwitchCase, UnOp, VarDecl,
+    AssignOp, BinOp, ChainStep, ClassLit, ClassMember, ClassMemberKind, ExportDecl, Expr, FnLit,
+    ForInit, ForTarget, ImportBind, ObjProp, Param, Pat, Program, PropKey, Stmt, SwitchCase, UnOp,
+    VarDecl,
 };
 use crate::error::{Error, Result};
 use crate::lexer::{lex, Kw, Tok, Token, TplPart, P};
@@ -33,6 +34,30 @@ pub(crate) fn parse_in(src: &str, strict: bool) -> Result<Program> {
         pos: 0,
         nest: 0,
         strict,
+        module: false,
+    };
+    p.scan_directives();
+    let mut body = Vec::new();
+    while !p.at_eof() {
+        body.push(p.stmt()?);
+    }
+    Ok(Program {
+        body,
+        strict: p.strict,
+    })
+}
+
+/// Parse a whole module — module goal: `import`/`export` statements
+/// are allowed and the code is always strict (spec : un module ne
+/// quitte jamais le mode strict).
+pub fn parse_module(src: &str) -> Result<Program> {
+    let toks = lex(src)?;
+    let mut p = Parser {
+        toks,
+        pos: 0,
+        nest: 0,
+        strict: true,
+        module: true,
     };
     p.scan_directives();
     let mut body = Vec::new();
@@ -56,6 +81,9 @@ struct Parser {
     /// errors strict : octales legacy, `delete x`, liaisons
     /// réservées.
     strict: bool,
+    /// `true` dans le but de grammaire *module* — autorise les
+    /// statements `import`/`export` au niveau top.
+    module: bool,
 }
 
 impl Parser {
@@ -280,12 +308,266 @@ impl Parser {
             }
             Tok::Kw(Kw::Try) => self.try_stmt(),
             Tok::Kw(Kw::Switch) => self.switch_stmt(),
+            // `import …` : statement de module — sauf `import(` /
+            // `import.meta` qui sont des expressions (dynamic
+            // import est légal aussi dans un script classique).
+            Tok::Kw(Kw::Import)
+                if self.module
+                    && !matches!(
+                        self.toks.get(self.pos + 1).map(|t| &t.tok),
+                        Some(Tok::P(P::LParen | P::Dot))
+                    ) =>
+            {
+                self.import_stmt()
+            }
+            Tok::Kw(Kw::Export) if self.module => self.export_stmt(),
+            Tok::Kw(Kw::Export) => Err(self.err("`export` outside a module")),
             Tok::Kw(Kw::Unsupported(k)) => Err(self.err(format!("`{k}` is not supported"))),
+            // `import` en position statement hors module retombe
+            // ici — seuls `import(`/`import.meta` sont des
+            // expressions (dispatchées plus haut).
             _ => {
                 let e = self.expr(false)?;
                 self.expect_semi()?;
                 Ok(Stmt::Expr(e))
             }
+        }
+    }
+
+    /// `import … from 'mod'` / `import 'mod'` — curseur sur
+    /// `import`, module goal garanti par le dispatch de `stmt`.
+    fn import_stmt(&mut self) -> Result<Stmt> {
+        self.next(); // `import`
+                     // `import 'mod';` — side-effect only, no bindings.
+        if let Tok::Str(src) = self.peek().clone() {
+            self.next();
+            self.expect_semi()?;
+            return Ok(Stmt::Import {
+                binds: Vec::new(),
+                source: src,
+            });
+        }
+        let mut binds = Vec::new();
+        match self.peek().clone() {
+            Tok::P(P::Star) => {
+                self.next();
+                self.expect_ident("as")?;
+                binds.push(ImportBind::Namespace(self.module_export_name()?));
+            }
+            Tok::P(P::LBrace) => self.import_specifiers(&mut binds)?,
+            // `import def` — default binding, optionally followed by
+            // `, {…}` or `, * as ns`.
+            Tok::Ident(_) | Tok::Kw(_) => {
+                binds.push(ImportBind::Default(self.module_export_name()?));
+                if self.eat_p(P::Comma) {
+                    match self.peek().clone() {
+                        Tok::P(P::Star) => {
+                            self.next();
+                            self.expect_ident("as")?;
+                            binds.push(ImportBind::Namespace(self.module_export_name()?));
+                        }
+                        Tok::P(P::LBrace) => self.import_specifiers(&mut binds)?,
+                        _ => return Err(self.err("expected `*` or `{` after `,`")),
+                    }
+                }
+            }
+            _ => return Err(self.err("expected import clause")),
+        }
+        self.expect_ident("from")?;
+        let source = self.expect_str_tok()?;
+        self.expect_semi()?;
+        Ok(Stmt::Import { binds, source })
+    }
+
+    /// `{a, b as c}` — named import specifiers.
+    fn import_specifiers(&mut self, binds: &mut Vec<ImportBind>) -> Result<()> {
+        self.expect_p(P::LBrace, "`{`")?;
+        loop {
+            if self.eat_p(P::RBrace) {
+                return Ok(());
+            }
+            let imported = self.module_export_name()?;
+            let local = if self.eat_ident("as") {
+                self.module_export_name()?
+            } else {
+                imported.clone()
+            };
+            binds.push(ImportBind::Named(imported, local));
+            if self.eat_p(P::Comma) {
+                continue;
+            }
+            self.expect_p(P::RBrace, "`}`")?;
+            return Ok(());
+        }
+    }
+
+    /// `export …` — cursor on `export`, module goal.
+    fn export_stmt(&mut self) -> Result<Stmt> {
+        self.next(); // `export`
+        match self.peek().clone() {
+            // `export * [as ns] from 'm'`
+            Tok::P(P::Star) => {
+                self.next();
+                let ns = if self.eat_ident("as") {
+                    Some(self.module_export_name()?)
+                } else {
+                    None
+                };
+                self.expect_ident("from")?;
+                let from = self.expect_str_tok()?;
+                self.expect_semi()?;
+                Ok(Stmt::Export(ExportDecl::Star { ns, from }))
+            }
+            // `export {a as b}` [`from 'm'`]
+            Tok::P(P::LBrace) => {
+                let list = self.export_specifiers()?;
+                let from = if self.eat_ident("from") {
+                    Some(self.expect_str_tok()?)
+                } else {
+                    None
+                };
+                self.expect_semi()?;
+                Ok(Stmt::Export(ExportDecl::Named { list, from }))
+            }
+            // `export default <expr|function|class>`
+            Tok::Kw(Kw::Default) => {
+                self.next();
+                let e = match self.peek().clone() {
+                    Tok::Kw(Kw::Function) => Expr::Function(self.function(false, false)?),
+                    // `export default async function`
+                    Tok::Ident(s)
+                        if s == "async"
+                            && matches!(
+                                self.toks.get(self.pos + 1),
+                                Some(t) if t.tok == Tok::Kw(Kw::Function) && !t.newline_before
+                            ) =>
+                    {
+                        self.next();
+                        Expr::Function(self.function(false, true)?)
+                    }
+                    Tok::Kw(Kw::Class) => Expr::Class(self.class_lit()?),
+                    _ => self.assign(false)?,
+                };
+                self.expect_semi()?;
+                Ok(Stmt::Export(ExportDecl::Default(Box::new(e))))
+            }
+            Tok::Kw(Kw::Var) => {
+                self.next();
+                let decls = self.var_decls(false)?;
+                self.expect_semi()?;
+                Ok(Stmt::Export(ExportDecl::Decl(Box::new(Stmt::Var(decls)))))
+            }
+            Tok::Kw(Kw::Const) => {
+                self.next();
+                let decls = self.var_decls(false)?;
+                self.expect_semi()?;
+                Ok(Stmt::Export(ExportDecl::Decl(Box::new(Stmt::Lexical {
+                    decls,
+                    constant: true,
+                }))))
+            }
+            Tok::Kw(Kw::Let) => {
+                self.next();
+                let decls = self.var_decls(false)?;
+                self.expect_semi()?;
+                Ok(Stmt::Export(ExportDecl::Decl(Box::new(Stmt::Lexical {
+                    decls,
+                    constant: false,
+                }))))
+            }
+            Tok::Kw(Kw::Function) => {
+                let f = self.function(true, false)?;
+                Ok(Stmt::Export(ExportDecl::Decl(Box::new(
+                    Stmt::FunctionDecl(f),
+                ))))
+            }
+            Tok::Ident(s)
+                if s == "async"
+                    && matches!(
+                        self.toks.get(self.pos + 1),
+                        Some(t) if t.tok == Tok::Kw(Kw::Function) && !t.newline_before
+                    ) =>
+            {
+                self.next();
+                let f = self.function(true, true)?;
+                Ok(Stmt::Export(ExportDecl::Decl(Box::new(
+                    Stmt::FunctionDecl(f),
+                ))))
+            }
+            Tok::Kw(Kw::Class) => {
+                let c = self.class_lit()?;
+                Ok(Stmt::Export(ExportDecl::Decl(Box::new(Stmt::ClassDecl(c)))))
+            }
+            _ => Err(self.err("expected export declaration")),
+        }
+    }
+
+    /// `{a as b, c}` — `export` specifier list, returns
+    /// `(local, exported)` pairs.
+    fn export_specifiers(&mut self) -> Result<Vec<(String, String)>> {
+        self.expect_p(P::LBrace, "`{`")?;
+        let mut list = Vec::new();
+        loop {
+            if self.eat_p(P::RBrace) {
+                return Ok(list);
+            }
+            let local = self.module_export_name()?;
+            let exported = if self.eat_ident("as") {
+                self.module_export_name()?
+            } else {
+                local.clone()
+            };
+            list.push((local, exported));
+            if self.eat_p(P::Comma) {
+                continue;
+            }
+            self.expect_p(P::RBrace, "`}`")?;
+            return Ok(list);
+        }
+    }
+
+    /// `IdentifierName` or string literal — the names allowed on
+    /// each side of `as` (`import {a}`, `export {a as b}`, string
+    /// export names ES2022).
+    fn module_export_name(&mut self) -> Result<String> {
+        match self.peek().clone() {
+            Tok::Ident(s) | Tok::Str(s) => {
+                self.next();
+                Ok(s)
+            }
+            Tok::Kw(kw) => {
+                self.next();
+                Ok(kw_str(kw).to_string())
+            }
+            _ => Err(self.err("expected export name")),
+        }
+    }
+
+    /// Literal string argument (`'mod'` specifier).
+    fn expect_str_tok(&mut self) -> Result<String> {
+        match self.peek().clone() {
+            Tok::Str(s) => {
+                self.next();
+                Ok(s)
+            }
+            _ => Err(self.err("expected module specifier string")),
+        }
+    }
+
+    fn eat_ident(&mut self, word: &str) -> bool {
+        if matches!(self.peek(), Tok::Ident(s) if s == word) {
+            self.next();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn expect_ident(&mut self, word: &str) -> Result<()> {
+        if self.eat_ident(word) {
+            Ok(())
+        } else {
+            Err(self.err(format!("expected `{word}`")))
         }
     }
 
@@ -1279,6 +1561,21 @@ impl Parser {
                     flags,
                 })
             }
+            // `import(spec)` / `import.meta` — legal in modules and
+            // classic scripts alike.
+            Tok::Kw(Kw::Import) => {
+                self.next();
+                if self.eat_p(P::LParen) {
+                    let spec = self.assign(no_in)?;
+                    self.expect_p(P::RParen, "`)`")?;
+                    Ok(Expr::ImportCall(Box::new(spec)))
+                } else if self.eat_p(P::Dot) {
+                    self.expect_ident("meta")?;
+                    Ok(Expr::ImportMeta)
+                } else {
+                    Err(self.err("expected `(` or `.meta` after `import`"))
+                }
+            }
             Tok::Kw(Kw::Unsupported(k)) => Err(self.err(format!("`{k}` is not supported"))),
             Tok::P(P::LParen) => {
                 self.next();
@@ -1463,6 +1760,7 @@ impl Parser {
                         pos: 0,
                         nest: 0,
                         strict: self.strict,
+                        module: self.module,
                     };
                     let e = sub.expr(no_in)?;
                     if !sub.at_eof() {
@@ -1698,6 +1996,8 @@ fn kw_str(kw: Kw) -> &'static str {
         Kw::Class => "class",
         Kw::Extends => "extends",
         Kw::Super => "super",
+        Kw::Import => "import",
+        Kw::Export => "export",
         Kw::Unsupported(s) => s,
     }
 }

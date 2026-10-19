@@ -332,20 +332,29 @@ pub(crate) fn push_value(out: &mut Vec<ObjId>, v: Value) {
 /// `parent` — visited-set par adresse `Rc` (les envs peuvent boucler
 /// via `env → binding → Fun::Script → env`).
 pub(crate) fn trace_env(env: &EnvRef, out: &mut Vec<ObjId>, visited: &mut HashSet<usize>) {
-    let mut cur = Some(env.clone());
-    while let Some(e) = cur.take() {
-        let key = Rc::as_ptr(&e) as usize;
-        if !visited.insert(key) {
-            return;
+    let mut stack = vec![env.clone()];
+    while let Some(root) = stack.pop() {
+        let mut cur = Some(root);
+        while let Some(e) = cur.take() {
+            let key = Rc::as_ptr(&e) as usize;
+            if !visited.insert(key) {
+                break;
+            }
+            let borrowed = e.borrow();
+            let map = match &borrowed.kind {
+                EnvKind::Global(m) | EnvKind::Local(m) => m,
+            };
+            for c in map.values() {
+                match c {
+                    EnvCell::Bind(b) => push_value(out, b.value),
+                    // Alias d'import : l'env du module exporteur est
+                    // aussi une racine — ses liaisons restent
+                    // vivantes tant qu'un importeur les référence.
+                    EnvCell::Alias(target, _) => stack.push(target.clone()),
+                }
+            }
+            cur.clone_from(&borrowed.parent);
         }
-        let borrowed = e.borrow();
-        let map = match &borrowed.kind {
-            EnvKind::Global(m) | EnvKind::Local(m) => m,
-        };
-        for b in map.values() {
-            push_value(out, b.value);
-        }
-        cur.clone_from(&borrowed.parent);
     }
 }
 
@@ -844,9 +853,22 @@ pub enum EnvKind {
     /// Global scope — `var`/implicit bindings live on the global
     /// object; the map is the declarative global record holding
     /// `let`/`const` names (they do *not* appear on `window`).
-    Global(HashMap<String, Binding>),
+    Global(HashMap<String, EnvCell>),
     /// Function/catch scope.
-    Local(HashMap<String, Binding>),
+    Local(HashMap<String, EnvCell>),
+}
+
+/// A binding cell: a normal [`Binding`], or a module import alias
+/// forwarding to a name in the exporting module's env — *live
+/// binding* (spec : l'importeur voit les mutations ultérieures de
+/// l'exporteur, et ne peut pas écrire lui-même).
+#[derive(Clone)]
+pub enum EnvCell {
+    /// Ordinary binding.
+    Bind(Binding),
+    /// `import {x as y}` — forwards every read/write attempt to
+    /// `name` in `env` (the exporter's module scope).
+    Alias(EnvRef, String),
 }
 
 /// A local-scope binding. `var`/`let` are mutable; `const` writes

@@ -316,8 +316,21 @@ d'intégration, pas par la couverture :
   `construct`), `Proxy.revocable` + `revoke` (handler nul →
   `TypeError` partout), construct-only, `typeof`/`instanceof`/
   `for-in`/`in`/`delete`/spreads/`Object.*`/`Reflect.*` trap-aware.
-- [ ] **JS-C. Couverture par besoin** : modules ES
-  (`import`/`export` + graphe de chargeur), `Intl` —
+- [x] **JS-C5. Modules ES** : `import`/`export` complets (nommés,
+  `default`, `* as ns`, `export {…} from`, `export *`, import
+  d'effet de bord), **live bindings** via `EnvCell::Alias`
+  (l'importeur lit l'env de l'exporteur — mutations visibles,
+  écriture → `TypeError`), graphe d'instanciation DFS avec
+  cycles (exports statiques connus avant récursion,
+  `pending` résolus post-DFS), évaluation post-order,
+  objet namespace exotique à getters live et proto nul,
+  `import()` dynamique → promesse de namespace,
+  `import.meta.url`, modules toujours stricts,
+  `SyntaxError` précoce sur export manquant. Chargeur hôte
+  via trait `ModuleLoader` injecté (`set_module_loader`).
+  Approximations documentées : pas de TDZ, specifier =
+  identité brute, pas d'ambiguïté `*` (premier gagne).
+- [ ] **JS-C. Couverture par besoin** : `Intl` —
   ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
   `Video` — phase 10, dépend du pipeline rendu.
@@ -364,8 +377,32 @@ d'intégration, pas par la couverture :
   lecture seule, noop `NullEngine`) + 2 session bout en
   bout (`textContent`/appendChild mutés → PNG identique à
   la page statique équivalente).
-- [ ] **Étape 36. Boucle d'événements.** `onclick`, timers
-  bornés, `setTimeout` minimal — jamais de blocage du pipeline.
+- [x] **Étape 36. Boucle d'événements.** `click` dispatché
+  dans le miroir via `JsEngine::dispatch_event` : le core
+  calcule le chemin `(tag, index parmi les frères de même
+  tag)` de la cible hit-testée, le worker le rejoue sur le
+  `dillo_js::Dom` (saut tolérant des wrappers implicites
+  `html`/`body`/`head`/`tbody*` absents du parse littéral)
+  puis `Engine::dom_event_on` — propagation
+  capture→cible→bulle complète, listeners
+  `addEventListener` **et** `onclick=` propres, microtasks
+  drainées par dispatch, `defaultPrevented` remonté (un
+  clic `preventDefault` sur `<a>` ne navigue pas).
+  `run_pending` après chaque dispatch draine les timers
+  dus — `setTimeout(…, 0)` pendant le chargement mute le
+  document et le rendu final (timers différés : tirent au
+  prochain point de synchro — input/navigation —, un tick
+  dédié reste une amélioration documentée). Mutations de
+  listener → `sync_dom` → re-parse + relayout +
+  `frame_invalidated` ; erreur de listener →
+  `pipeline_error`, jamais de blocage du pipeline.
+  Limites assumées : `mouseover`/`keydown`/`focus`/`blur`
+  non dispatchés (clic seul à cette étape), l'action par
+  défaut champ-lien suit l'événement (spéc DOM). Tests :
+  5 adaptateur (listener atteint, saut de wrappers,
+  preventDefault, chemin fautif no-op, sans miroir) + 3
+  session bout en bout (click→PNG muté ≡ statique,
+  preventDefault→`Ignored`+URL inchangée, timer 0 rendu).
 
 ## Phase 9 — Consolidation
 

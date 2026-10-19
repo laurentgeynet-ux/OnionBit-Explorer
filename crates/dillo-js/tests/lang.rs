@@ -656,11 +656,21 @@ fn op_limit_kills_infinite_loop() {
 
 #[test]
 fn deep_recursion_throws() {
-    let mut e = Engine::new();
-    match e.eval("function f() { f() } f()") {
-        Err(dillo_js::Error::Uncaught(m)) => assert!(m.contains("stack")),
-        other => panic!("expected Uncaught, got {other:?}"),
-    }
+    // Debug frames are fat — run on a big stack like the test262
+    // harness: this tests the engine's call_depth guard, not the
+    // host's stack budget.
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let mut e = Engine::new();
+            match e.eval("function f() { f() } f()") {
+                Err(dillo_js::Error::Uncaught(m)) => assert!(m.contains("stack"), "{m}"),
+                other => panic!("expected Uncaught, got {other:?}"),
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }
 
 // -- real-world-ish script shapes ----------------------------------------
@@ -2129,4 +2139,198 @@ fn proxy_traps() {
         ev_str("var p = new Proxy({a: 1, b: 2}, {}); var s = []; for (var k in p) s.push(k); s.join(',')"),
         "a,b"
     );
+}
+
+// -- ES modules (JS-C5) ---------------------------------------------
+
+/// In-memory module loader for tests.
+struct MapLoader(std::collections::BTreeMap<&'static str, &'static str>);
+
+impl dillo_js::ModuleLoader for MapLoader {
+    fn load(&mut self, specifier: &str, _referrer: &str) -> std::result::Result<String, String> {
+        self.0
+            .get(specifier)
+            .map(std::string::ToString::to_string)
+            .ok_or_else(|| format!("not found: {specifier}"))
+    }
+}
+
+/// Eval `main` as a module with `deps` available to the loader;
+/// returns the engine (outcomes are read back via `globalThis.__r`).
+#[track_caller]
+fn mod_ev(main: &str, deps: &[(&'static str, &'static str)]) -> Engine {
+    let mut e = Engine::new();
+    let loader = MapLoader(deps.iter().copied().collect());
+    e.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
+    e.eval_module(main, "main.js")
+        .unwrap_or_else(|err| panic!("{main} -> {err}"));
+    e
+}
+
+#[track_caller]
+fn global(e: &mut Engine, name: &str) -> String {
+    let v = e.eval(name).unwrap_or_else(|err| panic!("{name} -> {err}"));
+    e.describe(v)
+}
+
+#[test]
+fn mod_named_import() {
+    let mut e = mod_ev(
+        "import {a, f as g} from 'dep'; globalThis.__r = a + g(2);",
+        &[(
+            "dep",
+            "export const a = 1; export function f(x) { return x * 10; }",
+        )],
+    );
+    assert_eq!(global(&mut e, "__r"), "21");
+}
+
+#[test]
+fn mod_default_export() {
+    let mut e = mod_ev(
+        "import d from 'dep'; import f from 'fn'; globalThis.__r = d + ':' + f();",
+        &[
+            ("dep", "export default 'value';"),
+            ("fn", "export default function () { return 'called'; }"),
+        ],
+    );
+    assert_eq!(global(&mut e, "__r"), "value:called");
+}
+
+#[test]
+fn mod_namespace_object() {
+    let mut e = mod_ev(
+        "import * as ns from 'dep'; globalThis.__r = ns.a + ns.b + ':' + Object.getPrototypeOf(ns);",
+        &[("dep", "export const a = 1; export const b = 2;")],
+    );
+    assert_eq!(global(&mut e, "__r"), "3:null");
+}
+
+#[test]
+fn mod_live_binding() {
+    // Live binding : la mutation côté exporteur est visible chez
+    // l'importeur (lecture via l'alias à chaque accès).
+    let mut e = mod_ev(
+        "import {x, bump} from 'dep'; bump(); globalThis.__r = x;",
+        &[("dep", "export let x = 1; export function bump() { x++; }")],
+    );
+    assert_eq!(global(&mut e, "__r"), "2");
+}
+
+#[test]
+fn mod_reexport() {
+    let mut e = mod_ev(
+        "import {v} from 'mid'; globalThis.__r = v;",
+        &[
+            ("leaf", "export const v = 7;"),
+            ("mid", "export {v} from 'leaf';"),
+        ],
+    );
+    assert_eq!(global(&mut e, "__r"), "7");
+}
+
+#[test]
+fn mod_reexport_star() {
+    // `export *` reprend les exports nommés — pas `default`.
+    let mut e = mod_ev(
+        "import {p, q} from 'mid'; globalThis.__r = '' + p + q;",
+        &[
+            (
+                "leaf",
+                "export const p = 4; export const q = 2; export default 'hidden';",
+            ),
+            ("mid", "export * from 'leaf';"),
+        ],
+    );
+    assert_eq!(global(&mut e, "__r"), "42");
+}
+
+#[test]
+fn mod_star_as_namespace() {
+    let mut e = mod_ev(
+        "import {ns} from 'mid'; globalThis.__r = ns.v;",
+        &[
+            ("leaf", "export const v = 9;"),
+            ("mid", "export * as ns from 'leaf';"),
+        ],
+    );
+    assert_eq!(global(&mut e, "__r"), "9");
+}
+
+#[test]
+fn mod_cycle() {
+    // Cycle a → b → a : b s'évalue pendant a — la liaison `a` de b
+    // lit `undefined` (pas encore exécutée), pas un crash.
+    let mut e = mod_ev(
+        "import {a} from 'a'; import {b} from 'b'; globalThis.__r = a + '/' + b;",
+        &[
+            ("a", "import {b} from 'b'; export const a = 'A';"),
+            (
+                "b",
+                "import {a} from 'a'; export const b = (typeof a === 'undefined' ? 'U' : a) + 'B';",
+            ),
+        ],
+    );
+    assert_eq!(global(&mut e, "__r"), "A/UB");
+}
+
+#[test]
+fn mod_import_binding_immutable() {
+    let mut e = Engine::new();
+    let loader = MapLoader([("dep", "export const x = 1;")].iter().copied().collect());
+    e.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
+    let err = e
+        .eval_module("import {x} from 'dep'; x = 2;", "main.js")
+        .unwrap_err();
+    assert!(err.to_string().contains("TypeError"), "{err}");
+}
+
+#[test]
+fn mod_missing_export_is_syntax_error() {
+    let mut e = Engine::new();
+    let loader = MapLoader([("dep", "export const x = 1;")].iter().copied().collect());
+    e.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
+    let err = e
+        .eval_module("import {nope} from 'dep';", "main.js")
+        .unwrap_err();
+    assert!(err.to_string().contains("has no export"), "{err}");
+}
+
+#[test]
+fn mod_always_strict() {
+    // Les modules sont stricts : global implicite → ReferenceError.
+    let mut e = Engine::new();
+    let err = e.eval_module("undeclared = 1;", "main.js").unwrap_err();
+    assert!(err.to_string().contains("ReferenceError"), "{err}");
+}
+
+#[test]
+fn mod_this_is_undefined() {
+    let mut e = mod_ev("globalThis.__r = (this === undefined);", &[]);
+    assert_eq!(global(&mut e, "__r"), "true");
+}
+
+#[test]
+fn mod_side_effect_import() {
+    let mut e = mod_ev(
+        "import 'dep'; globalThis.__r = 'after';",
+        &[("dep", "globalThis.__side = 'ran';")],
+    );
+    assert_eq!(global(&mut e, "__side"), "ran");
+}
+
+#[test]
+fn mod_dynamic_import() {
+    let mut e = Engine::new();
+    let loader = MapLoader([("dep", "export const v = 42;")].iter().copied().collect());
+    e.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
+    e.eval("import('dep').then(function (ns) { globalThis.__r = ns.v; })")
+        .unwrap_or_else(|err| panic!("{err}"));
+    assert_eq!(global(&mut e, "__r"), "42");
+}
+
+#[test]
+fn mod_import_meta_url() {
+    let mut e = mod_ev("globalThis.__r = import.meta.url;", &[]);
+    assert_eq!(global(&mut e, "__r"), "main.js");
 }

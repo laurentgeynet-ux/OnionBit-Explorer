@@ -10,12 +10,12 @@
 //! recursion, `expr_depth` bounds nested expressions.
 
 use crate::ast::{
-    AssignOp, BinOp, ChainStep, ClassLit, ClassMemberKind, Expr, FnLit, ForInit, ForTarget,
-    ObjProp, Param, Pat, Program, PropKey, Stmt, UnOp,
+    AssignOp, BinOp, ChainStep, ClassLit, ClassMemberKind, ExportDecl, Expr, FnLit, ForInit,
+    ForTarget, ObjProp, Param, Pat, Program, PropKey, Stmt, UnOp,
 };
 use crate::error::{Error, Result};
 use crate::heap::{
-    Binding, Env, EnvKind, EnvRef, Fun, Heap, JsResult, ObjKind, Object, Prop, Thrown,
+    Binding, Env, EnvCell, EnvKind, EnvRef, Fun, Heap, JsResult, ObjKind, Object, Prop, Thrown,
 };
 use crate::parser;
 use crate::value::{num_to_js_string, to_int32, to_uint32, ObjId, Value};
@@ -94,7 +94,24 @@ pub struct Engine {
     /// (`Program::strict`) et par chaque appel `Fun::Script`
     /// (`FnLit::strict`). Pilote `TypeError`/`ReferenceError` vs
     /// échecs silencieux sloppy.
-    strict: bool,
+    pub(crate) strict: bool,
+    /// Modules ES instanciés (JS-C5) — index = l'identité stable
+    /// utilisée par les getters de namespace et le graphe.
+    pub(crate) modules: Vec<crate::module::Module>,
+    /// Cache `specifier → module index` — deux `import` du même
+    /// specifier résolvent vers la même instance (et coupent les
+    /// cycles à l'instanciation).
+    pub(crate) module_specs: std::collections::HashMap<String, usize>,
+    /// Registre des envs référencés par les getters de namespace —
+    /// les natives bornées n'emportent que des `Value` (l'index
+    /// suffit, l'env vit tant que le module vit).
+    pub(crate) module_envs: Vec<EnvRef>,
+    /// Chargeur de sources de modules injecté par l'hôte
+    /// (fetch/cache/résolution `file:`/URL).
+    pub(crate) module_loader: Option<Rc<std::cell::RefCell<dyn crate::module::ModuleLoader>>>,
+    /// Specifier du module en cours d'exécution (`import.meta.url`
+    /// et referrer de `import()`).
+    pub(crate) current_module: String,
 }
 
 /// Prototype objects captured at engine init.
@@ -150,7 +167,7 @@ impl Protos {
 }
 
 /// Statement completion — `throw` travels via `Err(Thrown)`.
-enum Flow {
+pub(crate) enum Flow {
     Normal,
     Break,
     Continue,
@@ -228,6 +245,11 @@ impl Engine {
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,
             strict: false,
+            modules: Vec::new(),
+            module_specs: std::collections::HashMap::new(),
+            module_envs: Vec::new(),
+            module_loader: None,
+            current_module: String::new(),
         };
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
@@ -349,9 +371,13 @@ impl Engine {
         }
         crate::heap::push_value(&mut ids, self.completion);
         // 2. Env global — les bindings `let`/`const` ne vivent pas
-        //    sur l'objet global.
+        //    sur l'objet global — + envs de modules (leurs exports
+        //    restent vivants tant que le graphe tient).
         let mut visited = HashSet::new();
         crate::heap::trace_env(&self.global_env, &mut ids, &mut visited);
+        for m in &self.modules {
+            crate::heap::trace_env(&m.env, &mut ids, &mut visited);
+        }
         // 3. Mark-sweep.
         self.heap.collect(|mark| {
             for &id in &ids {
@@ -572,31 +598,59 @@ impl Engine {
 
     // -- environments --------------------------------------------------
 
-    fn env_get(&self, env: &EnvRef, name: &str) -> Option<Value> {
+    /// Lookup de `name` le long de la chaîne de portée — les alias
+    /// d'import de module renvoient vers l'env exporteur (live
+    /// binding) ; `visited` borne les chaînes cycliques
+    /// (`export {a} from 'b'` ↔ `export {b} from 'a'`).
+    pub(crate) fn env_get(&self, env: &EnvRef, name: &str) -> Option<Value> {
+        self.env_get_seen(env, name, &mut HashSet::new())
+    }
+
+    fn env_get_seen(
+        &self,
+        env: &EnvRef,
+        name: &str,
+        visited: &mut HashSet<(usize, String)>,
+    ) -> Option<Value> {
         let mut cur = Some(env.clone());
+        let name = name.to_string();
         while let Some(e) = cur {
+            enum Next {
+                Up(Option<EnvRef>),
+                Alias(EnvRef, String),
+            }
             let next = {
                 let b = e.borrow();
                 match &b.kind {
-                    EnvKind::Local(m) => {
-                        if let Some(v) = m.get(name) {
-                            return Some(v.value);
+                    EnvKind::Local(m) => match m.get(&name) {
+                        Some(EnvCell::Bind(v)) => return Some(v.value),
+                        Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
+                        None => Next::Up(b.parent.clone()),
+                    },
+                    EnvKind::Global(m) => match m.get(&name) {
+                        Some(EnvCell::Bind(v)) => return Some(v.value),
+                        Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
+                        None => {
+                            // Declarative record first, then `window` props.
+                            if let Some(v) = self.get_prop(self.global, &name) {
+                                return Some(v);
+                            }
+                            Next::Up(b.parent.clone())
                         }
-                        b.parent.clone()
-                    }
-                    EnvKind::Global(m) => {
-                        // Declarative record first, then `window` props.
-                        if let Some(v) = m.get(name) {
-                            return Some(v.value);
-                        }
-                        if let Some(v) = self.get_prop(self.global, name) {
-                            return Some(v);
-                        }
-                        b.parent.clone()
-                    }
+                    },
                 }
             };
-            cur = next;
+            match next {
+                Next::Up(p) => cur = p,
+                Next::Alias(t, n) => {
+                    // Boucle d'alias (ré-exports circulaires) — la
+                    // liaison est indéfinie, pas un crash.
+                    if !visited.insert((Rc::as_ptr(&t) as usize, n.clone())) {
+                        return None;
+                    }
+                    return self.env_get_seen(&t, &n, visited);
+                }
+            }
         }
         None
     }
@@ -627,7 +681,7 @@ impl Engine {
     /// global implicite sloppy. Erreurs : `TypeError` sur liaison
     /// `const`, `TypeError` strict sur écriture refusée,
     /// `ReferenceError` strict sur identifiant non déclaré.
-    fn env_set(&mut self, env: &EnvRef, name: &str, v: Value) -> JsResult<()> {
+    pub(crate) fn env_set(&mut self, env: &EnvRef, name: &str, v: Value) -> JsResult<()> {
         let mut cur = Some(env.clone());
         while let Some(e) = cur {
             enum Act {
@@ -650,11 +704,24 @@ impl Engine {
                     let m = match &mut b.kind {
                         EnvKind::Local(m) | EnvKind::Global(m) => m,
                     };
-                    if let Some(bnd) = m.get_mut(name) {
-                        if !bnd.mutable {
-                            return Err(self.type_error(format!("assignment to constant `{name}`")));
+                    if let Some(cell) = m.get_mut(name) {
+                        match cell {
+                            // Liaison d'import — immuable côté
+                            // importeur (les modules sont stricts).
+                            EnvCell::Alias(..) => {
+                                return Err(
+                                    self.type_error(format!("cannot assign to import `{name}`"))
+                                );
+                            }
+                            EnvCell::Bind(bnd) => {
+                                if !bnd.mutable {
+                                    return Err(
+                                        self.type_error(format!("assignment to constant `{name}`"))
+                                    );
+                                }
+                                bnd.value = v;
+                            }
                         }
-                        bnd.value = v;
                     }
                     return Ok(());
                 }
@@ -699,10 +766,10 @@ impl Engine {
         let mut b = env.borrow_mut();
         match &mut b.kind {
             EnvKind::Local(m) => {
-                m.entry(name.to_string()).or_insert(Binding {
+                m.entry(name.to_string()).or_insert(EnvCell::Bind(Binding {
                     value: Value::Undefined,
                     mutable: true,
-                });
+                }));
             }
             EnvKind::Global(_) => {
                 // `var` vit sur l'objet global — prop non
@@ -727,11 +794,14 @@ impl Engine {
 
     /// Insert (or overwrite) a binding in `env`'s own map — used by
     /// the class scope for the hidden `super`/`home` names.
-    fn env_put(env: &EnvRef, name: &str, v: Value, mutable: bool) {
+    pub(crate) fn env_put(env: &EnvRef, name: &str, v: Value, mutable: bool) {
         let mut b = env.borrow_mut();
         match &mut b.kind {
             EnvKind::Local(m) | EnvKind::Global(m) => {
-                m.insert(name.to_string(), Binding { value: v, mutable });
+                m.insert(
+                    name.to_string(),
+                    EnvCell::Bind(Binding { value: v, mutable }),
+                );
             }
         }
     }
@@ -743,16 +813,16 @@ impl Engine {
     ///
     /// Global `let`/`const` go to the declarative record, *not* the
     /// global object — `window.x` stays `undefined` for `let x`.
-    fn env_declare_lex(env: &EnvRef, name: &str, mutable: bool) {
+    pub(crate) fn env_declare_lex(env: &EnvRef, name: &str, mutable: bool) {
         let mut b = env.borrow_mut();
         match &mut b.kind {
             EnvKind::Local(m) | EnvKind::Global(m) => {
                 m.insert(
                     name.to_string(),
-                    Binding {
+                    EnvCell::Bind(Binding {
                         value: Value::Undefined,
                         mutable,
-                    },
+                    }),
                 );
             }
         }
@@ -760,11 +830,11 @@ impl Engine {
 
     /// Initialize a binding just created by `env_declare_lex` —
     /// bypasses the `const` guard (initialisation is not mutation).
-    fn env_init_lex(env: &EnvRef, name: &str, v: Value) {
+    pub(crate) fn env_init_lex(env: &EnvRef, name: &str, v: Value) {
         let mut b = env.borrow_mut();
         match &mut b.kind {
             EnvKind::Local(m) | EnvKind::Global(m) => {
-                if let Some(bnd) = m.get_mut(name) {
+                if let Some(EnvCell::Bind(bnd)) = m.get_mut(name) {
                     bnd.value = v;
                 }
             }
@@ -775,7 +845,7 @@ impl Engine {
 
     /// `var`-declare every `Ident` inside `pat` (hoisting support —
     /// `var [a, {b}] = …` declares `a` and `b`).
-    fn declare_pat_names(&mut self, env: &EnvRef, pat: &Pat) {
+    pub(crate) fn declare_pat_names(&mut self, env: &EnvRef, pat: &Pat) {
         match pat {
             Pat::Ident(n) => self.env_declare(env, n),
             Pat::Lvalue(_) => {}
@@ -1886,10 +1956,10 @@ impl Engine {
                     if let (EnvKind::Local(m), Some(argv)) = (&mut b.kind, argv) {
                         m.insert(
                             "arguments".into(),
-                            Binding {
+                            EnvCell::Bind(Binding {
                                 value: argv,
                                 mutable: true,
-                            },
+                            }),
                         );
                     }
                 }
@@ -1985,7 +2055,7 @@ impl Engine {
     /// declarations installed as values. Nested statements contribute
     /// `var` names only (Annex-B tolerance for inner function decls:
     /// declared `undefined`, installed when actually executed).
-    fn hoist(&mut self, body: &[Stmt], env: &EnvRef) {
+    pub(crate) fn hoist(&mut self, body: &[Stmt], env: &EnvRef) {
         for s in body {
             match s {
                 Stmt::Var(decls) => {
@@ -2002,6 +2072,11 @@ impl Engine {
                         // d'être ; ignorer le résultat est sûr.
                         let _ = self.env_set(env, name, fv);
                     }
+                }
+                // `export <decl>` — la déclaration interne se
+                // hoistée complètement (fonctions initialisées).
+                Stmt::Export(ExportDecl::Decl(inner)) => {
+                    self.hoist(std::slice::from_ref(&**inner), env);
                 }
                 other => self.hoist_vars_only(std::slice::from_ref(other), env),
             }
@@ -2064,6 +2139,11 @@ impl Engine {
                         self.hoist_vars_only(&c.body, env);
                     }
                 }
+                // `export var/function` — la déclaration interne est
+                // hoistée comme au top-level.
+                Stmt::Export(ExportDecl::Decl(inner)) => {
+                    self.hoist_vars_only(std::slice::from_ref(&**inner), env);
+                }
                 _ => {}
             }
         }
@@ -2108,7 +2188,7 @@ impl Engine {
         Ok(self.completion)
     }
 
-    fn exec_body(&mut self, env: &EnvRef, this: Value, body: &[Stmt]) -> JsResult<Flow> {
+    pub(crate) fn exec_body(&mut self, env: &EnvRef, this: Value, body: &[Stmt]) -> JsResult<Flow> {
         for s in body {
             let f = self.exec_stmt(env, this, s)?;
             if !matches!(f, Flow::Normal) {
@@ -2118,10 +2198,37 @@ impl Engine {
         Ok(Flow::Normal)
     }
 
-    fn exec_stmt(&mut self, env: &EnvRef, this: Value, s: &Stmt) -> JsResult<Flow> {
+    pub(crate) fn exec_stmt(&mut self, env: &EnvRef, this: Value, s: &Stmt) -> JsResult<Flow> {
         self.tick()?;
         match s {
-            Stmt::Empty => Ok(Flow::Normal),
+            // `import …` — liaisons câblées à l'instanciation ;
+            // l'exécution n'a rien à faire (idem `;`).
+            Stmt::Empty | Stmt::Import { .. } => Ok(Flow::Normal),
+            Stmt::Export(d) => match d {
+                // `export <decl>` — la déclaration s'exécute
+                // normalement (les noms sont déjà exportés).
+                ExportDecl::Decl(inner) => self.exec_stmt(env, this, inner),
+                // `export default <expr|function|class>` — lie le
+                // slot `default` (déclaré à l'instanciation) ; une
+                // fonction/classe nommée lie aussi son propre nom.
+                ExportDecl::Default(e) => {
+                    let v = self.eval_expr(env, this, e)?;
+                    self.env_set(env, "default", v)?;
+                    let own = match &**e {
+                        Expr::Function(lit) => lit.name.clone(),
+                        Expr::Class(lit) => lit.name.clone(),
+                        _ => None,
+                    };
+                    if let Some(n) = own {
+                        Self::env_declare_lex(env, &n, true);
+                        self.env_set(env, &n, v)?;
+                    }
+                    Ok(Flow::Normal)
+                }
+                // `export {…}` / `export * …` — pure liaison, déjà
+                // résolue à l'instanciation.
+                _ => Ok(Flow::Normal),
+            },
             Stmt::Expr(e) => {
                 self.completion = self.eval_expr(env, this, e)?;
                 Ok(Flow::Normal)
@@ -2470,10 +2577,10 @@ impl Engine {
                     if let EnvKind::Local(m) = &mut scope.borrow_mut().kind {
                         m.insert(
                             name.clone(),
-                            Binding {
+                            EnvCell::Bind(Binding {
                                 value: fv,
                                 mutable: true,
-                            },
+                            }),
                         );
                     }
                     Ok(fv)
@@ -2528,6 +2635,26 @@ impl Engine {
                     // it — same observable result).
                     _ => Ok(v),
                 }
+            }
+            // `import(spec)` — dynamic import: loads, instantiates
+            // and evaluates the module, then resolves with its
+            // namespace object. Errors reject the promise.
+            Expr::ImportCall(e) => {
+                let sv = self.eval_expr(env, this, e)?;
+                let spec = self.to_js_string(sv)?;
+                let pid = self.new_promise();
+                match self.dynamic_import(&spec) {
+                    Ok(ns) => self.resolve_promise(pid, ns),
+                    Err(Thrown(t)) => self.reject_promise(pid, t),
+                }
+                Ok(Value::Obj(pid))
+            }
+            // `import.meta` — `{url: <specifier courant>}`.
+            Expr::ImportMeta => {
+                let obj = self.new_object();
+                let url = self.str_val(self.current_module.clone());
+                self.set_own(obj, "url", url, false);
+                Ok(Value::Obj(obj))
             }
             Expr::SuperCall(arg_exprs) => {
                 let parent = self.env_get(env, SUPER_BIND);
