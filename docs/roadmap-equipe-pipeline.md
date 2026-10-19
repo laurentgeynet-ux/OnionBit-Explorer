@@ -282,7 +282,7 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   déborderait à lui seul). Régression : `tests/deep.rs`
   (pipeline complet sous pile 512 Kio, 4000 niveaux
   demandés).
-- [ ] **R-25. `<object>` résolu inline ne peint pas sa
+- [x] **R-25. `<object>` résolu inline ne peint pas sa
   ressource** (terrain mission 12 — fixtures `b2`/`b4`) :
   la cascade `<object>` descend correctement (repli
   fonctionnel — texte `ERROR` au bout), mais même dans le
@@ -296,13 +296,21 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   session et `<object data>` **bloc** peint ; le trou
   résiduel est la feuille remplacée **inline** (l'objet
   résolu sous `display:inline` ne peint pas sa ressource).
-  Dernier maillon avant les yeux.
-- [ ] **R-26. Compteur de diff WPT : underflow `usize`**
+  Dernier maillon avant les yeux. **Résolu par la salve 3
+  de R-13** — les sprites verts des yeux peignent (≈240 px
+  verts mesurés x125-186 / y2691-2710 au harnais Acid2) :
+  l'objet remplacé inline est atomisé et peint en content
+  box (`content_rect` — la border box l'étirait sur les
+  bordures/padding, l'ordre App. E le fait passer au-dessus
+  des flottants).
+- [x] **R-26. Compteur de diff WPT : underflow `usize`**
   (terrain mission 12 — triage du corpus) : un échec
   `justify-content` rapporte `18446744073709551615 px durs`
-  — `b - a` wrappe quand le produit dépasse la référence.
-  Borner/saturer le comptage dans `wpt_reftests.rs` (le
-  chiffre nuit au triage des vrais échecs).
+  — sentinelle `usize::MAX` renvoyée quand les dimensions
+  diffèrent. `diff_stats` compare désormais la zone de
+  recouvrement et compte l'excédent comme « dur »
+  (`…-002.xhtml` : 59 156 px réels au lieu de la sentinelle).
+  Cliquet inchangé : 41/58.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

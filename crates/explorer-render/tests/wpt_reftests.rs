@@ -46,24 +46,36 @@ const FUZZY_CHANNEL: u8 = 16;
 /// Nombre maximal de pixels « doux » tolérés (800×600).
 const FUZZY_MAX: usize = 512;
 
-/// `(durs, doux)` — pixels divergents par gravité.
+/// `(durs, doux)` — pixels divergents par gravité. Dimensions
+/// divergentes : la zone hors recouvrement compte « dure » en
+/// entier (avant : sentinelle `usize::MAX` — `18446744…`
+/// illisible dans le triage des échecs, R-26).
 fn diff_stats(a: &Frame, b: &Frame) -> (usize, usize) {
-    if a.width != b.width || a.height != b.height {
-        return (usize::MAX, 0);
-    }
-    let mut hard = 0;
+    let w = a.width.min(b.width) as usize;
+    let h = a.height.min(b.height) as usize;
+    let mut hard =
+        (a.width as usize * a.height as usize).max(b.width as usize * b.height as usize) - w * h;
     let mut soft = 0;
-    for (pa, pb) in a.pixels.chunks(4).zip(b.pixels.chunks(4)) {
-        let d = pa
-            .iter()
-            .zip(pb)
-            .map(|(x, y)| x.abs_diff(*y))
-            .max()
-            .unwrap_or(0);
-        if d > FUZZY_CHANNEL {
-            hard += 1;
-        } else if d > 0 {
-            soft += 1;
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * a.width as usize + x) * 4;
+            let j = (y * b.width as usize + x) * 4;
+            match (a.pixels.get(i..i + 4), b.pixels.get(j..j + 4)) {
+                (Some(pa), Some(pb)) => {
+                    let d = pa
+                        .iter()
+                        .zip(pb)
+                        .map(|(p, q)| p.abs_diff(*q))
+                        .max()
+                        .unwrap_or(0);
+                    if d > FUZZY_CHANNEL {
+                        hard += 1;
+                    } else if d > 0 {
+                        soft += 1;
+                    }
+                }
+                _ => hard += 1,
+            }
         }
     }
     (hard, soft)

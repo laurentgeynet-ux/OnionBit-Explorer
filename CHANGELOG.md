@@ -318,6 +318,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Reste connu : `column wrap` multi-colonnes, marges
   `auto` verticales en column, écarts fins justify/align.
 
+- **R-25/R-26 — clôture Acid2** (`explorer-render`) :
+  `R-25` vérifié résolu par la salve 3 de R-13 — l'objet
+  remplacé **inline** peint sa ressource (≈240 px verts
+  mesurés dans la zone yeux au harnais Acid2, après
+  `content_rect` + ordre Appendice E). `R-26` : le compteur
+  de diff `wpt_reftests` ne renvoie plus `usize::MAX`
+  (`18446744073709551615 px durs`) quand les dimensions
+  divergent — la zone hors recouvrement compte « dure » en
+  entier, chiffres réels pour le triage (ex. 59 156 px).
+
 - **R-13 — compatibilité Acid2 ≥ 60 % atteinte (86,1 %)**
   (`explorer-css`, `explorer-layout`, `explorer-render`) :
   score informatif 22 % → 86,1 %, étape terminée.
