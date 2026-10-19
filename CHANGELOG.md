@@ -9,6 +9,14 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-7 — Dirty-rects produits** (`explorer-render`) :
+  `DisplayList::changed_rects(prev)` rapporte les régions
+  modifiées entre deux frames — bounds résolus sous la pile
+  transform/clip (ordre `pre_concat` du raster), zones
+  ancienne+nouvelle à chaque item différent ou déplacé,
+  fusion par intersection. `[]` = frame propre. API
+  additive ; débloque le transport FFI dirty-rects (NAV-55).
+
 - **R-6 — `position: sticky` tous côtés** (`explorer-render`)
   : `sticky_offset` généralise les quatre seuils — `bottom`
   épingle au bas du viewport, `right` au bord droit,

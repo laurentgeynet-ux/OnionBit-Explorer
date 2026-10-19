@@ -229,10 +229,15 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   anciens builders délèguent à x=0). Écart documenté : les
   conteneurs `overflow` internes ne scrollent pas encore —
   la référence reste le viewport racine.
-- [ ] **R-7. Dirty-rects produits** (ex-63a) : la display list
+- [x] **R-7. Dirty-rects produits** (ex-63a) : la display list
   rapporte les régions modifiées par frame. **Doit être livré
   avant que NAVIGATEUR n'aborde l'étape 55** (palier N-B) —
-  remonte automatiquement si NAV accélère.
+  remonte automatiquement si NAV accélère. Livré :
+  `DisplayList::changed_rects(prev)` — bounds résolus dans le
+  contexte transform/clip (même ordre `pre_concat` que le
+  raster), zones ancienne+nouvelle rapportées, fusion par
+  intersection, `[]` si frame identique. API additive, aucun
+  changement de signature — débloque NAV-55.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

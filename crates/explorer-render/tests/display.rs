@@ -405,3 +405,103 @@ fn sticky_ne_sort_pas_du_parent() {
         assert!((m.ty - 80.0).abs() < 1.0, "borné ty={}", m.ty);
     }
 }
+
+#[test]
+fn dirty_listes_identiques_rien_a_peindre() {
+    let (_d1, _b1, i1) = dl("<p>x</p>", "body{margin:0}");
+    let (_d2, _b2, i2) = dl("<p>x</p>", "body{margin:0}");
+    let (l1, l2) = (
+        explorer_render::DisplayList {
+            items: i1,
+            width: 400.0,
+            height: 200.0,
+        },
+        explorer_render::DisplayList {
+            items: i2,
+            width: 400.0,
+            height: 200.0,
+        },
+    );
+    assert!(
+        l2.changed_rects(&l1).is_empty(),
+        "frame identique → aucun dirty"
+    );
+}
+
+#[test]
+fn dirty_couleur_changee_zone_de_litem() {
+    // Même géométrie, fond rouge→bleu : le dirty rect = la
+    // boîte du div (ancienne + nouvelle zone, ici identiques).
+    let (_d, _b, i1) = dl(
+        "<div></div>",
+        "body{margin:0} div{height:50px;background-color:#ff0000}",
+    );
+    let (_d2, _b2, i2) = dl(
+        "<div></div>",
+        "body{margin:0} div{height:50px;background-color:#0000ff}",
+    );
+    let mk = |items| explorer_render::DisplayList {
+        items,
+        width: 400.0,
+        height: 200.0,
+    };
+    let (l1, l2) = (mk(i1), mk(i2));
+    let dirty = l2.changed_rects(&l1);
+    assert_eq!(dirty.len(), 1, "une seule zone fusionnée : {dirty:?}");
+    let r = dirty[0];
+    assert!(
+        r.height >= 50.0 && r.width >= 400.0,
+        "couvre le div : {r:?}"
+    );
+}
+
+#[test]
+fn dirty_element_deplace_vieille_et_nouvelle_zones() {
+    // Le bloc descend de 40px → deux zones (ou leur union
+    // fusionnée) couvrant l'ancien et le nouvel emplacement.
+    let (_d, _b, i1) = dl(
+        "<div></div>",
+        "body{margin:0} div{height:40px;background-color:#f00}",
+    );
+    let (_d2, _b2, i2) = dl(
+        "<div></div>",
+        "body{margin:0;padding-top:40px} div{height:40px;background-color:#f00}",
+    );
+    let mk = |items| explorer_render::DisplayList {
+        items,
+        width: 400.0,
+        height: 200.0,
+    };
+    let (l1, l2) = (mk(i1), mk(i2));
+    let dirty = l2.changed_rects(&l1);
+    assert!(!dirty.is_empty(), "déplacement → dirty");
+    let cover = dirty.iter().fold(f32::INFINITY, |a, r| a.min(r.y));
+    let bottom = dirty
+        .iter()
+        .fold(f32::NEG_INFINITY, |a, r| a.max(r.y + r.height));
+    assert!(cover <= 0.5 && bottom >= 79.5, "couvre y=0..80 : {dirty:?}");
+}
+
+#[test]
+fn dirty_item_ajoute_sa_zone() {
+    // Un div de plus en fin de liste → sa zone est dirty.
+    let (_d, _b, i1) = dl(
+        "<div></div>",
+        "body{margin:0} div{height:30px;background-color:#f00}",
+    );
+    let (_d2, _b2, i2) = dl(
+        "<div></div><section></section>",
+        "body{margin:0} div{height:30px;background-color:#f00} section{height:20px;background-color:#0f0}",
+    );
+    let mk = |items| explorer_render::DisplayList {
+        items,
+        width: 400.0,
+        height: 200.0,
+    };
+    let (l1, l2) = (mk(i1), mk(i2));
+    let dirty = l2.changed_rects(&l1);
+    assert!(
+        dirty.iter().any(|r| r.y >= 29.0 && r.height >= 19.0),
+        "nouvelle section dirty : {dirty:?}"
+    );
+}

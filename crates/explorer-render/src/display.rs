@@ -172,6 +172,258 @@ impl DisplayList {
         }
         out
     }
+
+    /// Régions à repeindre entre `prev` et `self` — dirty-rects
+    /// (R-7). Chaque item est résolu dans son contexte de peinture
+    /// (pile `PushTransform`/`PushClip`, même ordre
+    /// `pre_concat` que le raster) ; quand un item diffère — ou
+    /// que sa zone résolue a bougé — les zones ancienne **et**
+    /// nouvelle sont rapportées. Les rects retournés sont dans
+    /// l'espace framebuffer (scroll déjà cuit), fusionnés par
+    /// intersection ; à l'appelant d'intersecter sa cible.
+    /// Listes identiques → `vec![]` (frame propre, rien à
+    /// soumettre).
+    #[must_use]
+    pub fn changed_rects(&self, prev: &DisplayList) -> Vec<Rect> {
+        let (old, new) = (resolved_bounds(&prev.items), resolved_bounds(&self.items));
+        let mut out = Vec::new();
+        for i in 0..self.items.len().max(prev.items.len()) {
+            let same = match (self.items.get(i), prev.items.get(i)) {
+                (Some(a), Some(b)) => item_eq(a, b) && new[i] == old[i],
+                (None, None) => true,
+                _ => false,
+            };
+            if !same {
+                if let Some(r) = old.get(i).copied().flatten() {
+                    out.push(r);
+                }
+                if let Some(r) = new.get(i).copied().flatten() {
+                    out.push(r);
+                }
+            }
+        }
+        merge_rects(&mut out);
+        out
+    }
+}
+
+/// Zone peinte de chaque item, transform/clip résolus — `None`
+/// pour les items d'état (`Push*/Pop*`). Rejoue la même
+/// sémantique de pile que `rasterize` (transforms en
+/// `pre_concat`, clips poussés dans leur transform courant).
+fn resolved_bounds(items: &[DisplayItem]) -> Vec<Option<Rect>> {
+    let mut tfs: Vec<tiny_skia::Transform> = Vec::new();
+    let mut clips: Vec<Rect> = Vec::new();
+    let mut cur = tiny_skia::Transform::default();
+    items
+        .iter()
+        .map(|item| match item {
+            DisplayItem::PushTransform(m) => {
+                tfs.push(*m);
+                cur = tfs
+                    .iter()
+                    .fold(tiny_skia::Transform::default(), |acc, t| acc.pre_concat(*t));
+                None
+            }
+            DisplayItem::PopTransform => {
+                tfs.pop();
+                cur = tfs
+                    .iter()
+                    .fold(tiny_skia::Transform::default(), |acc, t| acc.pre_concat(*t));
+                None
+            }
+            DisplayItem::PushClip(r) => {
+                clips.push(apply_tf(*r, cur));
+                None
+            }
+            DisplayItem::PopClip => {
+                clips.pop();
+                None
+            }
+            _ => item_bounds(item).map(|r| {
+                let r = apply_tf(r, cur);
+                clips
+                    .iter()
+                    .fold(r, |a, c| rect_intersect(a, *c).unwrap_or(a))
+            }),
+        })
+        .collect()
+}
+
+/// Zone couverte par un item de dessin, avant transform/clip.
+fn item_bounds(item: &DisplayItem) -> Option<Rect> {
+    match item {
+        DisplayItem::FillRect { rect, .. }
+        | DisplayItem::Border { rect, .. }
+        | DisplayItem::Placeholder { rect, .. }
+        | DisplayItem::Image { rect, .. }
+        | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
+        DisplayItem::Text { origin, run, .. } => Some(Rect {
+            x: origin.0,
+            y: origin.1 - run.metrics.ascent,
+            width: run.advance,
+            height: run.metrics.ascent - run.metrics.descent,
+        }),
+        DisplayItem::PushClip(_)
+        | DisplayItem::PopClip
+        | DisplayItem::PushTransform(_)
+        | DisplayItem::PopTransform => None,
+    }
+}
+
+/// Applique une matrice affine à un `Rect` — AABB des quatre
+/// coins transformés (la rotation élargit, comme le raster).
+fn apply_tf(r: Rect, t: tiny_skia::Transform) -> Rect {
+    let (mut lx, mut ly, mut hx, mut hy) = (
+        f32::INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    );
+    for (cx, cy) in [
+        (r.x, r.y),
+        (r.x + r.width, r.y),
+        (r.x, r.y + r.height),
+        (r.x + r.width, r.y + r.height),
+    ] {
+        let (px, py) = (t.sx * cx + t.kx * cy + t.tx, t.ky * cx + t.sy * cy + t.ty);
+        lx = lx.min(px);
+        ly = ly.min(py);
+        hx = hx.max(px);
+        hy = hy.max(py);
+    }
+    Rect {
+        x: lx,
+        y: ly,
+        width: hx - lx,
+        height: hy - ly,
+    }
+}
+
+/// Égalité visuelle de deux items — `Arc` comparés par
+/// identité (pixels différents = arc différent ⇒ dirty).
+fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
+    use DisplayItem as D;
+    match (a, b) {
+        (
+            D::FillRect {
+                rect: r1,
+                color: c1,
+            },
+            D::FillRect {
+                rect: r2,
+                color: c2,
+            },
+        ) => r1 == r2 && c1 == c2,
+        (
+            D::Border {
+                rect: r1,
+                widths: w1,
+                colors: c1,
+                styles: s1,
+            },
+            D::Border {
+                rect: r2,
+                widths: w2,
+                colors: c2,
+                styles: s2,
+            },
+        ) => r1 == r2 && w1 == w2 && c1 == c2 && s1 == s2,
+        (
+            D::Text {
+                origin: o1,
+                run: ru1,
+                font: f1,
+                color: c1,
+                size_px: p1,
+            },
+            D::Text {
+                origin: o2,
+                run: ru2,
+                font: f2,
+                color: c2,
+                size_px: p2,
+            },
+        ) => o1 == o2 && ru1 == ru2 && f1 == f2 && c1 == c2 && p1 == p2,
+        (
+            D::Placeholder {
+                rect: r1,
+                label: l1,
+            },
+            D::Placeholder {
+                rect: r2,
+                label: l2,
+            },
+        ) => r1 == r2 && l1 == l2,
+        (D::Image { rect: r1, img: i1 }, D::Image { rect: r2, img: i2 }) => {
+            r1 == r2 && std::sync::Arc::ptr_eq(i1, i2)
+        }
+        (
+            D::BackgroundImage {
+                rect: r1,
+                img: i1,
+                repeat: p1,
+            },
+            D::BackgroundImage {
+                rect: r2,
+                img: i2,
+                repeat: p2,
+            },
+        ) => r1 == r2 && p1 == p2 && std::sync::Arc::ptr_eq(i1, i2),
+        (D::PushClip(r1), D::PushClip(r2)) => r1 == r2,
+        (D::PushTransform(m1), D::PushTransform(m2)) => {
+            (m1.sx, m1.ky, m1.kx, m1.sy, m1.tx, m1.ty) == (m2.sx, m2.ky, m2.kx, m2.sy, m2.tx, m2.ty)
+        }
+        _ => std::mem::discriminant(a) == std::mem::discriminant(b),
+    }
+}
+
+/// Intersection de deux rects — `None` si disjoints.
+fn rect_intersect(a: Rect, b: Rect) -> Option<Rect> {
+    let (x1, y1) = (a.x.max(b.x), a.y.max(b.y));
+    let (x2, y2) = (
+        (a.x + a.width).min(b.x + b.width),
+        (a.y + a.height).min(b.y + b.height),
+    );
+    (x2 > x1 && y2 > y1).then_some(Rect {
+        x: x1,
+        y: y1,
+        width: x2 - x1,
+        height: y2 - y1,
+    })
+}
+
+/// Union englobante de deux rects.
+fn rect_union(a: Rect, b: Rect) -> Rect {
+    let (x1, y1) = (a.x.min(b.x), a.y.min(b.y));
+    let (x2, y2) = (
+        (a.x + a.width).max(b.x + b.width),
+        (a.y + a.height).max(b.y + b.height),
+    );
+    Rect {
+        x: x1,
+        y: y1,
+        width: x2 - x1,
+        height: y2 - y1,
+    }
+}
+
+/// Fusionne les rects qui se chevauchent (point fixe) — borne
+/// le nombre de zones rapportées sans perdre de couverture.
+fn merge_rects(rects: &mut Vec<Rect>) {
+    let mut i = 0;
+    while i < rects.len() {
+        let mut j = i + 1;
+        while j < rects.len() {
+            if rect_intersect(rects[i], rects[j]).is_some() {
+                rects[i] = rect_union(rects[i], rects[j]);
+                rects.swap_remove(j);
+            } else {
+                j += 1;
+            }
+        }
+        i += 1;
+    }
 }
 
 /// Construit la display list d'un arbre posé — pur,
