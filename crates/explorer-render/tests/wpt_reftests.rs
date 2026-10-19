@@ -226,6 +226,7 @@ fn render(src: &str, file_dir: &Path) -> Option<Frame> {
     let images = PaintImages {
         replaced,
         backgrounds: collect_backgrounds(&dom, &styles, file_dir),
+        svgs: explorer_render::ImageTable::new(),
     };
     let mut bx = build_box_tree_sized(&dom, root, &styles, &sizes)?;
     layout_tree(&mut bx, VIEW_W, &ctx());

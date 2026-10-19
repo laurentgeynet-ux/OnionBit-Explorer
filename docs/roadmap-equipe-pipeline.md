@@ -266,10 +266,19 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `<svg>` inline réel. **Livré par R-15** (sous-chantier 1 :
   namespaces, points d'intégration, breakout, `CDATA`,
   ajustements d'attributs étrangers — 1592/1592 html5lib).
-- [ ] **R-9. `<svg>` inline** (ex-60b) : sous-arbre SVG rendu
+- [x] **R-9. `<svg>` inline** (ex-60b) : sous-arbre SVG rendu
   (via `usvg` sur le sous-arbre sérialisé, ou display items
   dédiés — arbitrer en début d'étape), `<foreignObject>`
-  documenté hors scope.
+  documenté hors scope. Arbitrage : **sérialisation + usvg**
+  (réutilise le moteur conforme d'étape 45 au lieu de
+  dupliquer un parseur SVG). Livré : `svg::collect_svg` +
+  `svg::svg_sizes` (sérialisation XML échappée, bornée
+  `SVG_MAX_SOURCE` ; tailles attrs/`viewBox`/300×150),
+  `PaintImages.svgs`, bras atomique dans `build_box_tree_sized`
+  (sous-arbre jamais boxifié HTML), `svg` en `inline-block`
+  UA. Hors scope documenté : `foreignObject` refusé par
+  usvg → zone vide ; bitmap à taille naturelle (re-raster
+  DPI exact = chantier ultérieur).
 - [ ] **R-10. `@keyframes`** (ex-60c) : parsing dans
   `explorer-css`, timeline partagée avec le moteur de
   transitions de l'étape 45 — le cadenceur reste côté session

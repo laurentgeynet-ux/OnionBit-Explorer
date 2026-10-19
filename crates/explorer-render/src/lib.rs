@@ -17,6 +17,7 @@ pub mod display;
 pub mod fonts;
 pub mod image;
 pub mod raster;
+pub mod svg;
 pub mod woff;
 
 pub use display::{
@@ -26,4 +27,5 @@ pub use display::{
 pub use fonts::{DirFontSource, WebFontSource};
 pub use image::{decode_image, DecodedImage, ImageTable, PaintImages};
 pub use raster::{rasterize, Frame};
+pub use svg::{collect_svg, svg_sizes, SVG_MAX_SOURCE};
 pub use woff::decode_font;

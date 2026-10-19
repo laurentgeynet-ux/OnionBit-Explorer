@@ -9,8 +9,10 @@ use explorer_css::{Origin, StyleEngine, StyleEnv};
 use explorer_dom::{Dom, NodeId};
 use explorer_html::TreeBuilder;
 use explorer_layout::font::{FontRequest, FontSource};
-use explorer_layout::{build_box_tree, layout_tree, BlockCtx, LayoutBox};
-use explorer_render::{build_display_list, BorderStyle, DisplayItem};
+use explorer_layout::{build_box_tree, build_box_tree_sized, layout_tree, BlockCtx, LayoutBox};
+use explorer_render::{
+    build_display_list, build_display_list_full, rasterize, BorderStyle, DisplayItem,
+};
 
 const VIEW: f32 = 400.0;
 
@@ -504,4 +506,81 @@ fn dirty_item_ajoute_sa_zone() {
         dirty.iter().any(|r| r.y >= 29.0 && r.height >= 19.0),
         "nouvelle section dirty : {dirty:?}"
     );
+}
+
+// ── R-9 : `<svg>` inline ────────────────────────────────────
+
+#[test]
+fn svg_inline_boite_remplacee_et_image() {
+    // `<svg width=100 height=50>` → boîte remplacée 100×50 ;
+    // `collect_svg` rasterise le sous-arbre → `Image` émis.
+    let dom = TreeBuilder::parse(
+        "<div><svg width=\"100\" height=\"50\"><rect width=\"100\" height=\"50\" fill=\"red\"/></svg></div>",
+    );
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("racine");
+    let sizes = explorer_render::svg_sizes(&dom, root_el);
+    let svgs = explorer_render::collect_svg(&dom, root_el, 1_000_000);
+    assert_eq!(svgs.len(), 1, "un svg collecté");
+    let mut bx = build_box_tree_sized(&dom, root_el, &styles, &sizes).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let images = explorer_render::PaintImages {
+        svgs,
+        ..explorer_render::PaintImages::default()
+    };
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &images);
+    let img = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::Image { rect, .. } => Some(*rect),
+            _ => None,
+        })
+        .expect("svg → item Image");
+    assert_eq!((img.width, img.height), (100.0, 50.0), "rect svg : {img:?}");
+}
+
+#[test]
+fn svg_inline_rasterise_des_pixels() {
+    // Le rect rouge du SVG doit produire des pixels rouges.
+    let dom = TreeBuilder::parse(
+        "<svg width=\"40\" height=\"40\"><rect width=\"40\" height=\"40\" fill=\"#ff0000\"/></svg>",
+    );
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("racine");
+    let svgs = explorer_render::collect_svg(&dom, root_el, 1_000_000);
+    assert!(!svgs.is_empty(), "svg rasterisé");
+    let mut bx = build_box_tree_sized(
+        &dom,
+        root_el,
+        &styles,
+        &explorer_render::svg_sizes(&dom, root_el),
+    )
+    .expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let images = explorer_render::PaintImages {
+        svgs,
+        ..explorer_render::PaintImages::default()
+    };
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &images);
+    let fonts = ctx().fonts.expect("fixture fonte");
+    let frame = rasterize(&list, fonts, 1.0).expect("frame");
+    // pixel (10,10) — dans le rect svg rouge.
+    let idx = (10 * frame.width as usize + 10) * 4;
+    let px = &frame.pixels[idx..idx + 4];
+    assert!(px[0] > 200 && px[1] < 60, "pixel rouge attendu, got {px:?}");
 }

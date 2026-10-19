@@ -41,15 +41,19 @@ pub struct PaintImages {
     pub replaced: ImageTable,
     /// `background-image: url(...)` décodés (`NodeId` → bitmap).
     pub backgrounds: ImageTable,
+    /// `<svg>` inline rasterisés (`NodeId` → bitmap) — R-9,
+    /// produits par [`crate::svg::collect_svg`].
+    pub svgs: ImageTable,
 }
 
 impl PaintImages {
-    /// Variante sans fonds (compat de [`crate::ImageTable`]).
+    /// Variante sans fonds ni SVG (compat de [`crate::ImageTable`]).
     #[must_use]
     pub fn from_replaced(replaced: ImageTable) -> Self {
         Self {
             replaced,
             backgrounds: ImageTable::new(),
+            svgs: ImageTable::new(),
         }
     }
 }
@@ -63,7 +67,7 @@ impl PaintImages {
 #[must_use]
 pub fn decode_image(bytes: &[u8], max_px: u32) -> Option<DecodedImage> {
     if looks_like_svg(bytes) {
-        return decode_svg(bytes, max_px);
+        return decode_svg_raster(bytes, max_px);
     }
     let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
@@ -110,7 +114,8 @@ fn looks_like_svg(bytes: &[u8]) -> bool {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 // les dims sont vérifiées finies, > 0 et ≤ `max_px` juste au-
 // dessus — le cast ne peut ni tronquer ni perdre le signe.
-fn decode_svg(bytes: &[u8], max_px: u32) -> Option<DecodedImage> {
+/// Aussi utilisé par le `<svg>` inline (R-9, module `svg`).
+pub(crate) fn decode_svg_raster(bytes: &[u8], max_px: u32) -> Option<DecodedImage> {
     let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default()).ok()?;
     let size = tree.size();
     let (w, h) = (f64::from(size.width()), f64::from(size.height()));

@@ -984,7 +984,7 @@ hr { border-top-width: 1px; border-style: inset }
 a[href] { color: #00e; text-decoration: underline }
 table { border-collapse: separate }
 th { font-weight: bold; text-align: center }
-input, textarea, select, button, img { display: inline-block }
+input, textarea, select, button, img, svg { display: inline-block }
 input, textarea {
   border: 1px solid #767676; padding: 1px; width: 10em; height: 1.2em
 }

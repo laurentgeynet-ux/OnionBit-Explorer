@@ -232,31 +232,28 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
     // `<img>` : élément remplacé si l'image est disponible,
     // texte `alt` sinon (repli du navigateur classique).
     if dom.tag_name(root).is_ok_and(|t| t == "img") {
-        let alt = dom
-            .attribute(root, "alt")
-            .ok()
-            .flatten()
-            .unwrap_or_default()
-            .clone();
-        let (kind, text) = match sizes.get(&root) {
-            Some(_) => (box_kind_of(&style), None),
-            None => (BoxKind::Text, (!alt.is_empty()).then_some(alt)),
-        };
-        return Some(LayoutBox {
-            kind,
-            node: Some(root),
-            style: style.clone(),
-            text,
-            children: Vec::new(),
-            lines: Vec::new(),
-            rect: Rect::default(),
-            position: Position::Static,
-            float: Float::None,
-            overflow: Overflow::Visible,
-            z_index: 0,
-            intrinsic: sizes.get(&root).copied(),
-            control_checked: false,
-        });
+        return Some(img_box(dom, root, style.clone(), sizes));
+    }
+    // `<svg>` : élément remplacé **atomique** (R-9) — son
+    // sous-arbre étranger n'est jamais boxifié en HTML ; la
+    // taille vient de `sizes` (collecte [`svg_sizes`] amont) ou
+    // à défaut des attributs/`viewBox` (300×150 en dernier
+    // ressort — même repli que `img`).
+    if dom.tag_name(root).is_ok_and(|t| t == "svg")
+        && dom
+            .namespace(root)
+            .is_ok_and(|ns| ns == explorer_dom::Namespace::Svg)
+    {
+        let intrinsic = sizes
+            .get(&root)
+            .copied()
+            .or_else(|| Some(svg_intrinsic(dom, root)));
+        return Some(leaf_box(
+            box_kind_of(&style),
+            root,
+            style.clone(),
+            intrinsic,
+        ));
     }
     // Contrôles de formulaire (étape 38) : `input`/`select` —
     // la valeur peinte est synthétisée en enfant `Text` (la
@@ -502,5 +499,91 @@ fn control_paint(dom: &Dom, node: NodeId, ty: &str) -> (Option<String>, bool) {
             let v = attr(node, "value").filter(|s| !s.is_empty());
             (v.or_else(|| attr(node, "placeholder")), false)
         }
+    }
+}
+
+/// Taille intrinsèque de repli d'un `<svg>` (R-9) : attributs
+/// `width`/`height` (px ou nombre nu — `%` ignoré, pas de
+/// repère à cette étape), puis aspect du `viewBox`, enfin le
+/// défaut CSS des remplacés 300×150.
+fn svg_intrinsic(dom: &Dom, node: NodeId) -> (f32, f32) {
+    let attr_px = |name: &str| {
+        dom.attribute(node, name).ok().flatten().and_then(|v| {
+            let t = v.trim();
+            if t.ends_with('%') {
+                return None;
+            }
+            t.trim_end_matches("px")
+                .parse::<f32>()
+                .ok()
+                .filter(|f| f.is_finite() && *f > 0.0)
+        })
+    };
+    let vb = dom.attribute(node, "viewBox").ok().flatten().and_then(|v| {
+        let nums: Vec<f32> = v
+            .split([',', ' ', '\t'])
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        (nums.len() == 4).then(|| (nums[2], nums[3]))
+    });
+    let (w, h) = (attr_px("width"), attr_px("height"));
+    match (w, h, vb) {
+        (Some(w), Some(h), _) => (w, h),
+        (Some(w), None, Some((vw, vh))) if vw > 0.0 => (w, w * vh / vw),
+        (None, Some(h), Some((vw, vh))) if vh > 0.0 => (h * vw / vh, h),
+        (None, None, Some((vw, vh))) if vw > 0.0 && vh > 0.0 => (vw, vh),
+        (Some(w), None, _) => (w, 150.0),
+        (None, Some(h), _) => (300.0, h),
+        _ => (300.0, 150.0),
+    }
+}
+
+/// Bras `<img>` de [`build_box_tree_sized`] : remplacé si
+/// l'image est résolue (`sizes`), boîte texte `alt` sinon.
+fn img_box<S: ::std::hash::BuildHasher>(
+    dom: &Dom,
+    node: NodeId,
+    style: ComputedStyle,
+    sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
+) -> LayoutBox {
+    let alt = dom
+        .attribute(node, "alt")
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+        .clone();
+    let (kind, text) = match sizes.get(&node) {
+        Some(_) => (box_kind_of(&style), None),
+        None => (BoxKind::Text, (!alt.is_empty()).then_some(alt)),
+    };
+    let mut bx = leaf_box(kind, node, style, sizes.get(&node).copied());
+    bx.text = text;
+    bx
+}
+
+/// Boîte feuille sans enfants ni texte — éléments atomiques
+/// (`<svg>` R-9, contrôles vides) : même gabarit que le bras
+/// `<img>`.
+fn leaf_box(
+    kind: BoxKind,
+    node: NodeId,
+    style: ComputedStyle,
+    intrinsic: Option<(f32, f32)>,
+) -> LayoutBox {
+    LayoutBox {
+        kind,
+        node: Some(node),
+        style,
+        text: None,
+        children: Vec::new(),
+        lines: Vec::new(),
+        rect: Rect::default(),
+        position: Position::Static,
+        float: Float::None,
+        overflow: Overflow::Visible,
+        z_index: 0,
+        intrinsic,
+        control_checked: false,
     }
 }

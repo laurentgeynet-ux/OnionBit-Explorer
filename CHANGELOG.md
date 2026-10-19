@@ -9,6 +9,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-9 — `<svg>` inline** (`explorer-render` +
+  `explorer-layout` + `explorer-css`) : le sous-arbre DOM
+  étranger est re-sérialisé en source SVG (échappement XML,
+  `xmlns` injecté, borne `SVG_MAX_SOURCE`) puis rasterisé par
+  `usvg`+`resvg` — même chemin que `<img src=*.svg>`. Nouveau
+  module `svg` : `collect_svg` (`NodeId` → bitmap, `max_px`)
+  et `svg_sizes` (intrinsèque attrs/`viewBox`/300×150) ;
+  `PaintImages.svgs` (additif). Le `<svg>` devient boîte
+  remplacée atomique (sous-arbre jamais boxifié HTML) via
+  `build_box_tree_sized` ; UA passe `svg` en `inline-block`.
+  `foreignObject` dégradé vide (refus usvg documenté).
+
 - **R-7 — Dirty-rects produits** (`explorer-render`) :
   `DisplayList::changed_rects(prev)` rapporte les régions
   modifiées entre deux frames — bounds résolus sous la pile
@@ -658,6 +670,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   h1 sur même connexion, `http:` h1.
 
 ### Changed
+
+- **Étape 53d — navigation éclatée, API réactive pendant la
+  charge** (`explorer-core`, `explorer-api`, `explorer-daemon`,
+  bloquant produit — QA daemon @ `cfa0514`) : le
+  `Mutex<Session>` unique était tenu pendant tout le
+  `fetch`/parse/sub-ressources d'une navigation — nav > 8
+  min ⇒ `/status`, `/tabs`, `/frame`, l'input et le SSE
+  timeoutaient tous. La navigation est désormais découpée
+  en phases : `nav_begin`/`nav_apply`/`sub_commit` sous
+  verrou court ; `NavJob::run` (fetch + parse incrémental)
+  et `SubJob::run` (vague CSS/scripts/images, `@font-face`,
+  prefetch des graphes de modules — les `eval` restent
+  synchrones au commit) tournent **hors verrou** sur des
+  `Arc` du transport. Nouveaux drivers publics
+  `navigate_shared`/`drain_navs_shared`/`history_move_shared`
+  pour les hôtes à session partagée ; les intentions de
+  navigation input (`clic lien`, `Enter`/submit) et script
+  (`location`, `history`, `form.submit()`) convergent dans
+  `pending_nav` — `handle_input` n'attend plus le réseau
+  non plus. Epoch par onglet : une navigation supplantée
+  (double-clic, redirect plus récent) est abandonnée avant
+  tout commit. Peinture progressive par `try_lock` (tick
+  manqué = repeint au suivant). Handlers API
+  `navigate`/`reload`/`back`/`forward`/`input` et pompe
+  daemon basculés ; `navigate`/`reload`/`go_*`/`handle_input`/
+  `drain_script_nav` restent en compat `&mut self` pour
+  CLI/FFI/tests. Régression couverte : la session partagée
+  répond en <500 ms pendant un corps de document en vol.
 
 - **Organisation deux équipes** (réorganisation de
   pilotage, code inchangé) : périmètres disjoints actés sur
