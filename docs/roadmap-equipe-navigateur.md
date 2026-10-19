@@ -343,15 +343,22 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   de rects linéaire ou seuil interne à `changed_rects`,
   cache glyphe→outline pour `paint_text`, layout/cascade
   scopés sous-arbre — les ~15 s résiduels du repro debug.
-  **Terrain mission 13 — le goulot dominant est ailleurs** :
-  clic-mutation sur ~3 000 nœuds = **~7 min de gel** puis
-  `/frame` 204 (récidive 56b), alors que le profil phases
-  du même doc totalise ~24 s (relayout 14,5 + raster 5,4 +
-  png 3,1). Le temps non mesuré vit hors de ces phases :
-  sérialisation miroir JS, re-parse du document complet,
-  pompage des réponses, ou un seul chemin qui retombe en
-  reflow+repeint global — à instrumenter (tracer la frontière
-  `sync_dom` → `try_sync_incremental` côté session).
+  **Terrain mission 13 — frontière instrumentée** :
+  `profile_click_sync_heavy` (mod interne, `#[ignore]`)
+  mesure le clic-mutation ~3 000 nœuds bout à bout :
+  `dispatch_path_event` ~18 s debug **sous verrou** dont
+  eval 0,5 ms + sérialisation miroir ~5 ms + re-parse ~38 ms
+  + `try_sync_incremental` ~18 s — pas de repli, le
+  sous-arbre couvre presque tout le `<body>` pour un append
+  en tête de flux (`relayout_subtree` ~14 s, cascade ~0,3 s,
+  repaint ~3,7 s). NAV sorti : remap des `NodeId` mémoïsé
+  par parent (~3,4 s). Reste PIPE (journal
+  `interface-equipes.md`) : `relayout_subtree` dominant,
+  cascade scopée sous-arbre, cache glyphe→outline
+  `paint_text`. La récidive `/frame` 204 post-gel est
+  couverte par `ensure_painted` (56b). Le gel ~7 min terrain
+  n'est pas reproduit par le profil in-process (~18 s) —
+  piste restante : contention verrou/sondage côté harness.
 - [x] **Étape 56. Profil persisté complet** (ex-64) : cookies
   (`cookies.json` via `ProfileStore`, session exclus),
   localStorage (cf. 51), **cache disque borné**
@@ -375,19 +382,19 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   **Vérifié terrain mission 11** : profil complet (cookie +
   localStorage + cache disque) survit à `taskkill /F` ×2 —
   nav post-kill = 0 hit serveur.
-- [ ] **Étape 56b. `/frame` → 204 persistant après commit
-  — ROUVERT (reproduit mission 13)** : le fix « snapshot
-  sans produit » livré n'a pas tenu en terrain — repro
-  M11 à l'identique : nav `World_Wide_Web` commitée
-  (`navigated`, titre, url) → `/frame` 204 persistant,
-  scroll 0, hit-test mort, seul `back` restaure. Récidive
-  aussi après le gel long `heavy.html` (~7 min, 55g). La
-  cause « freeze pendant `nav_apply`→`sub_commit` » était
-  réelle mais **incomplète** : il reste un chemin où le
-  commit avance sans produit peint (ou le produit est
-  jeté après commit — `unspec` 56c ?). Régression existante
-  `paintless_snapshot_repairs_on_restore` couvre le cas
-  bfcache, pas la fenêtre nav→pull.
+- [x] **Étape 56b. `/frame` → 204 persistant après commit
+  — ROUVERT (reproduit mission 13), fermé par auto-guérison** :
+  le fix « snapshot sans produit » couvrait bfcache, pas la
+  classe entière — mission 13 : nav `World_Wide_Web`
+  commitée → 204 persistant ; récidive après gel
+  `heavy.html`. **Livré** : `ensure_painted` — un DOM
+  commis sans frame re-peint paresseusement à la première
+  demande (`frame_png`, `handle_input`), quel que soit le
+  chemin qui a jeté le produit (`unspec` sur relayout
+  impossible, fenêtre commit→repaint…) — l'état empoisonné
+  devient transitoire au lieu de persistant ; un DOM
+  réellement non-layable sert un 204 honnête. Régression :
+  `committed_dom_repaints_on_frame_pull`.
 - [x] **Étape 56c. État hybride bfcache après back+navigate**
   (terrain mission 11, repro A→B→back→`navigate B`) :
   **livré.** Deux mécanismes corrigés : (1) `spec_paint` +

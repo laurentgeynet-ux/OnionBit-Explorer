@@ -1434,11 +1434,31 @@ impl Session {
     /// qu'une fois, pas par repaint).
     #[must_use]
     pub fn frame_png(&mut self, tab: TabId) -> Option<Vec<u8>> {
+        self.ensure_painted(tab);
         let entry = self.tabs.get_mut(&tab)?;
         if entry.png.is_none() {
             entry.png = entry.frame.as_ref()?.encode_png();
         }
         entry.png.clone()
+    }
+
+    /// Auto-réparation (étape 56b rouvert, terrain mission
+    /// 13) : un **DOM commis** sans produit peint — fenêtre
+    /// `nav_apply` → `sub_commit`, `unspec` sur relayout
+    /// impossible, tout chemin qui jette la frame — re-peint
+    /// paresseusement à la première demande plutôt que de
+    /// servir `/frame` 204 avec hit-test mort à vie. No-op
+    /// si une frame existe ou si rien n'est commis ; si le
+    /// DOM commis est réellement non-layable, le relayout
+    /// échoue et l'appelant sert un 204 honnête.
+    fn ensure_painted(&mut self, tab: TabId) {
+        let needs = self
+            .tabs
+            .get(&tab)
+            .is_some_and(|e| e.dom.is_some() && e.frame.is_none());
+        if needs {
+            let _ = self.relayout(tab);
+        }
     }
 
     /// Frame brute courante `(largeur, hauteur, RGBA)` —
@@ -3424,6 +3444,10 @@ impl Session {
         if !self.tabs.contains_key(&tab) {
             return Err(CoreError::UnknownTab(tab));
         }
+        // Un input sur une page « commise mais jamais peinte »
+        // (56b) repart d'une frame nulle : hit-test mort
+        // sinon — auto-réparation avant tout dispatch.
+        self.ensure_painted(tab);
         match ev {
             InputEvent::Key { key } => {
                 // `keydown` sur le champ focalisé, sinon niveau
@@ -6263,7 +6287,7 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
 }
 
 /// Pompe JS partagée (étape 53f) — même contrat qu'un tour de
-/// [`Session::pump_timers`] + [`Session::advance_animations`]
+/// [`Session::pump_timers`] + `advance_animations` (55e)
 /// mais le travail long (`run_pending` + sérialisation du
 /// miroir) s'exécute dans `spawn_blocking` avec le moteur
 /// **extrait** de l'onglet : un burst JS (`repros/relayout.html`
@@ -6575,14 +6599,19 @@ fn remap_box_nodes(
 ) -> bool {
     // Itératif — le parcours suit la profondeur du document
     // (R-24 : ~300 <div> imbriqués réels, pas de récursion).
+    // `memo` : les enfants d'un même parent réutilisent sa
+    // résolution — sans elle chaque nœud texte re-calculait
+    // le `element_path` de son élément père (~3 s sur ~3 000
+    // nœuds, profil mission 13).
     let mut stack = vec![root];
+    let mut memo: HashMap<NodeId, Option<NodeId>> = HashMap::new();
     while let Some(bx) = stack.pop() {
         if bx.node == Some(target_old) {
             bx.node = Some(target_new);
             continue;
         }
         if let Some(id) = bx.node {
-            let Some(fresh) = remap_node(old, new, id) else {
+            let Some(fresh) = remap_node(old, new, id, &mut memo) else {
                 return false;
             };
             bx.node = Some(fresh);
@@ -6595,13 +6624,35 @@ fn remap_box_nodes(
 /// `id` (ancien DOM) → `NodeId` équivalent dans `new` :
 /// éléments par `element_path`, non-éléments par index dans
 /// les enfants du parent (inchangé hors sous-arbre sale).
-fn remap_node(old: &Dom, new: &Dom, id: NodeId) -> Option<NodeId> {
+/// Les résolutions — succès comme échecs — sont mémoïsées
+/// dans `memo` : les frères d'un même parent ne paient sa
+/// `element_path` qu'une fois.
+fn remap_node(
+    old: &Dom,
+    new: &Dom,
+    id: NodeId,
+    memo: &mut HashMap<NodeId, Option<NodeId>>,
+) -> Option<NodeId> {
+    if let Some(&cached) = memo.get(&id) {
+        return cached;
+    }
+    let out = remap_node_uncached(old, new, id, memo);
+    memo.insert(id, out);
+    out
+}
+
+fn remap_node_uncached(
+    old: &Dom,
+    new: &Dom,
+    id: NodeId,
+    memo: &mut HashMap<NodeId, Option<NodeId>>,
+) -> Option<NodeId> {
     if old.element(id).is_ok() {
         return dom_path_node(new, &element_path(old, id)?);
     }
     let parent = old.parent(id).ok()??;
     let new_parent = if old.element(parent).is_ok() {
-        dom_path_node(new, &element_path(old, parent)?)?
+        remap_node(old, new, parent, memo)?
     } else {
         new.document()
     };
@@ -6912,5 +6963,93 @@ mod tests {
     fn stylesheet_at_charset_late_ignored() {
         let body = b".a{color:red}@charset 'iso-8859-1';.x{content:'caf\xE9'}".as_slice();
         assert_eq!(css_charset(body), None);
+    }
+
+    /// Étape 56b (rouvert, terrain mission 13) — un DOM
+    /// commis sans produit peint (frame jetée après commit)
+    /// se répare paresseusement au premier `/frame` au lieu
+    /// de servir 204 à vie : `ensure_painted` repeint depuis
+    /// le DOM avant d'encoder.
+    #[test]
+    fn committed_dom_repaints_on_frame_pull() {
+        let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+        let tab = s.open_tab();
+        {
+            let e = s.tabs.get_mut(&tab).unwrap();
+            e.dom = Some(test_dom("<p>commise sans produit</p>"));
+            e.url = Some(Url::parse("http://h.test/x").unwrap());
+            // `tree`/`list`/`frame`/`png` tous None : l'état
+            // empoisonné du 204 persistant.
+        }
+        assert!(s.frame_pixels(tab).is_none());
+        let png = s.frame_png(tab);
+        assert!(
+            png.as_ref().is_some_and(|b| b.starts_with(b"\x89PNG")),
+            "le pull /frame répare la peinture depuis le DOM commis (56b)"
+        );
+        assert!(s.frame_pixels(tab).is_some());
+    }
+
+    /// Profil mission 13 (55g-suite) — clic-mutation sur
+    /// ~3 000 nœuds : temps total `dispatch_path_event`
+    /// (eval + sérialisation + re-parse + incrémental).
+    /// Mesuré : ~21 s debug, quasi entièrement dans
+    /// `try_sync_incremental` (remap ~3 s, `relayout_subtree`
+    /// ~14 s — un append en tête de flux re-pose presque
+    /// tout le body — repaint ~4 s).
+    #[test]
+    #[ignore = "profil mission 13, à la demande"]
+    fn profile_click_sync_heavy() {
+        use std::fmt::Write;
+        let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+        s.set_js_factory(explorer_js::DilloEngine::factory());
+        let tab = s.open_tab();
+        let mut html = String::from("<!doctype html><html><body><div id=\"zone\">ZONE</div>");
+        for i in 0..3000 {
+            let _ = write!(html, "<p>ligne {i} de texte</p>");
+        }
+        html.push_str(
+            "<script>\
+             document.getElementById('zone').addEventListener('click',function(){\
+             var d=document.createElement('div');d.textContent='AJOUT';\
+             this.appendChild(d);})</script></body></html>",
+        );
+        let eng = s.spawn_engine(tab, &html, true);
+        {
+            let e = s.tabs.get_mut(&tab).unwrap();
+            let mut tb = TreeBuilder::new();
+            tb.push(&html);
+            tb.finish();
+            e.dom = Some(tb.into_dom());
+            e.url = Some(Url::parse("http://h.test/heavy").unwrap());
+            e.js = eng;
+        }
+        // Le <script> n'est évalué que via le pipeline de
+        // commit — ici on l'exécute à la main pour armer le
+        // listener.
+        s.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()).map(|eng| {
+            eng.eval(
+                "document.getElementById('zone').addEventListener('click',function(){\
+                     var d=document.createElement('div');d.textContent='AJOUT';\
+                     this.appendChild(d);})",
+            )
+        });
+        let t = Instant::now();
+        s.relayout(tab).unwrap();
+        eprintln!("peinture initiale : {:?}", t.elapsed());
+        // Chemin élément vers #zone : document→html→body→div[0].
+        let path = vec![
+            ("html".to_string(), 0u32),
+            ("body".to_string(), 0),
+            ("div".to_string(), 0),
+        ];
+        let t = Instant::now();
+        s.dispatch_path_event(tab, "click", &path);
+        eprintln!("DISPATCH TOTAL   : {:?}", t.elapsed());
+        eprintln!(
+            "frame: {}, incremental_syncs: {}",
+            s.tabs.get(&tab).unwrap().frame.is_some(),
+            s.incremental_syncs()
+        );
     }
 }

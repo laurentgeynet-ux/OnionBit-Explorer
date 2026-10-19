@@ -9,6 +9,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 56b — auto-réparation du `/frame` 204 persistant**
+  (`explorer-core`, rouvert terrain mission 13) : un DOM
+  commis sans produit peint — fenêtre `nav_apply` →
+  `sub_commit`, `unspec` sur relayout impossible, tout
+  chemin jetant la frame après commit — produisait un
+  `/frame` 204 à vie, hit-test mort, scroll figé.
+  `ensure_painted` re-peint paresseusement depuis le DOM
+  commis à la première demande (`frame_png`, dispatch
+  d'input) — l'état empoisonné devient transitoire ; un
+  DOM réellement non-layable sert un 204 honnête.
+  Régression : `committed_dom_repaints_on_frame_pull`.
+
+- **Étape 55g-suite — frontière du clic-mutation
+  instrumentée** (`explorer-core`, terrain mission 13) :
+  `dispatch_path_event` ~18 s debug sous verrou sur ~3 000
+  nœuds, quasi entièrement dans `try_sync_incremental` —
+  `relayout_subtree` ~14 s (append en tête de flux =
+  sous-arbre ≈ document), cascade ~0,3 s, repaint ~3,7 s.
+  Le remap des `NodeId` conservés est mémoïsé par parent
+  (~3,4 s sortis, 21,7 → 18 s). Le reste est consigné au
+  journal inter-équipes (cascade scopée, cache glyphe,
+  `relayout_subtree` dominant) ; le test
+  `profile_click_sync_heavy` (`#[ignore]`) mesure le chemin
+  bout à bout.
+
 - **Étape 53f — `run_pending`/`sync_dom` hors verrou**
   (`explorer-core`, résidu 53d / terrain mission 8) : un
   burst JS (`repros/relayout.html`, ~200 `appendChild`)
