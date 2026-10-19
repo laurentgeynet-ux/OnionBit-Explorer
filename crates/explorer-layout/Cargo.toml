@@ -12,6 +12,10 @@ workspace = true
 [dependencies]
 explorer-css.workspace = true
 explorer-dom.workspace = true
+rustybuzz.workspace = true
+ttf-parser.workspace = true
+unicode-bidi.workspace = true
+unicode-linebreak.workspace = true
 
 [dev-dependencies]
 explorer-html.workspace = true

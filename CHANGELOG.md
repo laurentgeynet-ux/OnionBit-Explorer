@@ -9,6 +9,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 18 — `explorer-layout` : stack texte et fontes
+  (ADR-0009)** (`text.rs` + `font.rs`) : port `FontSource`
+  (données de fontes — `fontdb` reste en infra, injecté par
+  `explorer-core`), `FontRequest`/`FontMetrics`/`Glyph`/
+  `ShapedRun`. Métriques réelles via `ttf-parser`, shaping
+  via `rustybuzz` (`shape`/`measure`, direction RTL).
+  `itemize` : segmentation bidi UAX #9 par niveau
+  (`unicode-bidi`) + opportunités de coupure UAX #14
+  (`unicode-linebreak`) recalées au run. `break_lines` :
+  greedy avec blancs de fin hors mesure, débordement de mot
+  géant sans coupure forcée (`overflow-wrap: normal`),
+  progression stricte garantie. **Fonte fixture embarquée**
+  (`tests/common`) : TTF minimal construit en code
+  (`unitsPerEm` 1000, ascender 800/descender -200, cmap
+  format 4) — métriques réelles en headless, aucune mesure
+  fixe approximative. 11 tests.
+
 - **Étape 17 — `explorer-layout` : arbre de boîtes**
   (`boxtree.rs`) : `LayoutBox`/`BoxKind`
   (block/inline/list-item/texte/anonyme) + lien

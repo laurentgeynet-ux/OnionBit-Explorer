@@ -9,12 +9,18 @@
 //! transforme DOM + styles calculés en [`LayoutBox`]
 //! block/inline/anonymes/texte ; [`LayoutBox::dump`] produit un
 //! wireframe texte (feedback visuel avant le raster).
-//! Domaine pur : le texte travaille sur des runs itemisés
-//! (ADR-0009) et les fontes arrivent par un port `FontProvider`
-//! injecté — aucun I/O ici.
+//! L'étape 18 pose la stack texte (ADR-0009) : [`text`]
+//! itemise bidi/UAX #14, [`font`] shape via `rustybuzz` derrière
+//! le port [`FontSource`] (implémentation `fontdb` en infra,
+//! injectée par `explorer-core`).
+//! Domaine pur : aucun I/O ici.
 
 #![forbid(unsafe_code)]
 
 mod boxtree;
+pub mod font;
+pub mod text;
 
 pub use boxtree::{build_box_tree, BoxKind, LayoutBox, Rect};
+pub use font::{FontMetrics, FontRequest, FontSource, Glyph, ShapedRun};
+pub use text::{Break, Direction, TextRun};

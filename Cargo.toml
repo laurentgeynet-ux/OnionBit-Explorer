@@ -43,6 +43,13 @@ dillo-js = { path = "crates/dillo-js" }
 # Crates externes — pur Rust uniquement (AGENTS.md §4.2),
 # pin mineur, ≥ 7 jours depuis publication.
 thiserror = "2.0"
+# Stack texte ADR-0009 (explorer-layout) — shaping/itemisation
+# purs, aucun I/O (fontdb reste en couche infra, port
+# FontSource côté layout).
+rustybuzz = "0.20"
+unicode-bidi = "0.3"
+unicode-linebreak = "0.1"
+ttf-parser = "0.25"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
 # Moteur regex de dillo-js (pur Rust) — lookahead/backrefs non
@@ -51,6 +58,10 @@ regex = "1.11"
 # IDNA/punycode UTS-46 pour explorer-net::url (ADR-0002, étape 3) —
 # pur Rust, pas de *-sys.
 idna = "1.0"
+# Tables Unicode XID_Start/XID_Continue pour les identifiants JS
+# (dillo-js lexer) — `char::is_alphabetic` n'implémente ni UAX #31
+# ni les exclusions Pattern_Syntax (ex. U+2E2F). Pur Rust.
+unicode-ident = "1.0"
 # Pile réseau explorer-net (ADR-0002) — tokio sockets/timers,
 # httparse wire-format HTTP/1.1, async-trait pour les transports
 # injectables (HttpTransport/Connector dyn-compatibles).
