@@ -332,9 +332,14 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
 
 ## Palier R-C — Incrémental interne, mesure, robustesse
 
-- [ ] **R-12. Layout incrémental** (tiers `DirtyLayout`
-  d'ADR-0012 réalisé) : reboîtage par sous-arbre sale au lieu du
-  reflow complet — mesuré sur bench pipeline.
+- [x] **R-12. Layout incrémental** (tiers `DirtyLayout`
+  d'ADR-0012 réalisé) : `relayout_subtree` reboîte le sous-arbre
+  sale (`build_box_tree_sized`), le re-pose à son `BoxSlot`
+  enregistré et propage la hauteur aux ancêtres — repli
+  `NeedsFullLayout` sur flottants dans le document, chemin
+  absolu/fixe ou inline/anonyme. Mesuré
+  (`benches/relayout.rs`, page 200 blocs) : ~33 ms reflow
+  complet → ~1.9 ms relayout feuille (~17×).
 - [ ] **R-13. Acid2 ≥ 60 %** (ex-61) + extension du corpus
   WPT reftests : extraction `css/css-flexbox` + `css/css-grid`
   ciblés, baselines mesurées, skip-list versionnée — les écarts

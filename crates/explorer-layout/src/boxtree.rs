@@ -145,6 +145,30 @@ pub struct LayoutBox {
     /// champs est portée par un enfant `Text` synthétique, pas
     /// par ce champ.
     pub control_checked: bool,
+    /// Paramètres d'entrée du dernier passage de `layout_block`
+    /// — R-12 : permettent de re-poser la boîte en place lors
+    /// d'un relayout incrémental (`relayout_subtree`). Défaut
+    /// avant le premier layout.
+    pub slot: BoxSlot,
+}
+
+/// Contexte de pose enregistré par `layout_block` (R-12) :
+/// origine, largeur/hauteur du bloc conteneur, font-size du
+/// parent et bloc conteneur des descendants positionnés.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BoxSlot {
+    /// Origine de flux (x, y) au moment de la pose.
+    pub x: f32,
+    /// Idem — y.
+    pub y: f32,
+    /// Largeur du bloc conteneur.
+    pub cb_w: f32,
+    /// Hauteur du bloc conteneur si définie.
+    pub cb_h: Option<f32>,
+    /// `font-size` du parent en px.
+    pub parent_fs: f32,
+    /// Bloc conteneur des descendants `position:absolute/fixed`.
+    pub abs_cb: Rect,
 }
 
 impl LayoutBox {
@@ -317,6 +341,7 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
         z_index: 0,
         intrinsic: None,
         control_checked: false,
+        slot: BoxSlot::default(),
     };
     let children = child_boxes(dom, root, styles, &style, sizes);
     b.children = if kind.is_inline_level() {
@@ -392,6 +417,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     z_index: 0,
                     intrinsic: None,
                     control_checked: false,
+                    slot: BoxSlot::default(),
                 });
             }
         }
@@ -448,6 +474,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             z_index: 0,
             intrinsic: None,
             control_checked: false,
+            slot: BoxSlot::default(),
         });
     }
 }
@@ -583,6 +610,7 @@ fn leaf_box(
         z_index: 0,
         intrinsic,
         control_checked: false,
+        slot: BoxSlot::default(),
     }
 }
 
@@ -627,6 +655,7 @@ fn control_box(
                     z_index: 0,
                     intrinsic: None,
                     control_checked: false,
+                    slot: BoxSlot::default(),
                 }],
                 &style,
             )

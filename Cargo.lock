@@ -595,6 +595,7 @@ dependencies = [
 name = "explorer-layout"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "explorer-css",
  "explorer-dom",
  "explorer-html",

@@ -18,5 +18,10 @@ unicode-bidi.workspace = true
 unicode-linebreak.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 explorer-html.workspace = true
 explorer-test-support.workspace = true
+
+[[bench]]
+name = "relayout"
+harness = false

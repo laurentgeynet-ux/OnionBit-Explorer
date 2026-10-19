@@ -25,6 +25,14 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Arbitrage `ExternalTexture` GPU reporté : à mesurer sur
   l'app avec de vraies frames avant de réviser ADR-0004/0018.
 
+- **R-12 — Layout incrémental** (`explorer-layout`, tiers
+  `DirtyLayout` d'ADR-0012) : `relayout_subtree` reboîte +
+  re-pose un sous-arbre sale en place (`LayoutBox.slot`
+  mémorise le contexte de pose), propagation de hauteur aux
+  ancêtres ; repli `NeedsFullLayout` conservateur (flottants,
+  chemin absolu/fixe, flux inline). Bench `relayout` : ~33 ms
+  reflow → ~1.9 ms relayout feuille (page 200 blocs, ~17×).
+
 - **R-11 — Raster `<canvas>` 2D** (`explorer-render` +
   `explorer-layout`) : `CanvasOp`/`CanvasTable` (couture
   NAV↔PIPELINE — `dillo-js` JS-C28 enregistrera les appels

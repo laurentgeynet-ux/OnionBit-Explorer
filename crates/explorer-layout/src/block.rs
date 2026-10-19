@@ -505,6 +505,16 @@ pub(crate) fn layout_block(
     let st = bx.style.clone();
     let fs = font_size_px(&st, parent_fs, ctx);
 
+    // R-12 : contexte de pose mémorisé pour `relayout_subtree`.
+    bx.slot = crate::boxtree::BoxSlot {
+        x,
+        y,
+        cb_w,
+        cb_h,
+        parent_fs,
+        abs_cb,
+    };
+
     apply_layout_metadata(bx, &st);
 
     // §10.5 : `height` en % résout contre la hauteur du bloc
