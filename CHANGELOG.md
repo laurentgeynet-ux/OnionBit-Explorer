@@ -656,6 +656,40 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`new_target_binding`, `set_composition_es2025`,
     `string_well_formed_and_regexp_escape`,
     `arraybuffer_resize_transfer`).
+- **JS-C18 — Annex B complet, `SharedArrayBuffer`,
+  `Atomics`** (`dillo-js`) :
+  - méthodes HTML `String.prototype` (Annex B) :
+    `anchor`/`big`/`blink`/`bold`/`fixed`/`fontcolor`/
+    `fontsize`/`italics`/`link`/`small`/`strike`/`sub`/
+    `sup` — `CreateHTML`, `"` → `&quot;` dans l'attribut ;
+  - `Date.prototype.getYear`/`setYear` (Annex B : années
+    0-99 → 1900+n, mois/jour conservés) ;
+  - `Number.EPSILON`, `Number.MIN_VALUE` (5e-324),
+    `Number.isSafeInteger` ; `BigInt.prototype.
+    toLocaleString` (repli `toString` — pas de CLDR) ;
+  - `AggregateError.prototype.name` propre (spec — était
+    hérité `"Error"`) ;
+  - accesseurs `ArrayBuffer.prototype` spec :
+    `resizable`/`maxByteLength`/`detached` (`TypeError`
+    sur non-buffer — les instances gardent des props
+    propres, déviation mineure `hasOwnProperty`) ;
+  - `SharedArrayBuffer` : ctor `{maxByteLength}` →
+    `growable`/`grow`, `ByteBuf` partageable par les vues,
+    `@@toStringTag` ;
+  - `Atomics` complet (mono-thread — le partage inter-
+    worker est indiscernable sauf `wait`) : `load`/`store`/
+    `add`/`sub`/`and`/`or`/`xor`/`exchange`/
+    `compareExchange` (ancienne valeur retournée, wrap à
+    la largeur d'élément, kinds BigInt en opérandes
+    `BigInt` stricts), `isLockFree` (1/2/4/8), `wait` →
+    `TypeError` (spec navigateur main thread), `notify` →
+    0, `waitAsync` → `{async:false, value:"not-equal"|
+    "timed-out"}` ; `Uint8ClampedArray` et floats exclus
+    (spec `ValidateIntegerTA`), hors-bornes → `RangeError` ;
+  - test262 : 859/859 conservé ; 6 tests de régression
+    (`c18_string_html_annex_b`, `c18_number_consts`,
+    `c18_date_year`, `c18_aggregate_and_accessors`,
+    `c18_shared_array_buffer`, `c18_atomics`).
 - **JS-C17 — Float16, base64/hex, Annex B, `Iterator`,
   `crypto`, `DisposableStack`** (`dillo-js`) :
   - `Float16Array` : `TaKind::F16` bout en bout (ctor,

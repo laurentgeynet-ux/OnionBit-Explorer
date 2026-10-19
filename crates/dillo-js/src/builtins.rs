@@ -127,6 +127,12 @@ pub(crate) fn install(e: &mut Engine) {
         aggregate_error_ctor,
         e.protos.aggregate_error,
     );
+    // Spec : `AggregateError.prototype.name` = "AggregateError"
+    // (propre, pas hérité d'`Error.prototype`).
+    {
+        let an = e.str_val("AggregateError");
+        e.set_own(e.protos.aggregate_error, "name", an, false);
+    }
     let date = ctor(e, "Date", date_ctor, p_date);
 
     // `URL`/`URLSearchParams` (WHATWG subset — JS-C16) : parsing
@@ -252,6 +258,8 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(p_big, PRIM, zero, false);
     e.add_method(p_big, "toString", bigint_to_string);
     e.add_method(p_big, "valueOf", bigint_value_of);
+    // Repli locale (déviation documentée — pas de CLDR).
+    e.add_method(p_big, "toLocaleString", bigint_to_string);
     let big = ctor(e, "BigInt", bigint_ctor, p_big);
     if let Value::Obj(bid) = big {
         e.add_method(bid, "asIntN", bigint_as_int_n);
@@ -452,6 +460,9 @@ pub(crate) fn install(e: &mut Engine) {
             Value::Num(-9_007_199_254_740_991.0),
         );
         e.set_const(nid, "MAX_VALUE", Value::Num(f64::MAX));
+        e.set_const(nid, "MIN_VALUE", Value::Num(5e-324));
+        e.set_const(nid, "EPSILON", Value::Num(f64::EPSILON));
+        e.add_method(nid, "isSafeInteger", number_is_safe_integer);
         e.set_const(nid, "POSITIVE_INFINITY", Value::Num(f64::INFINITY));
         e.set_const(nid, "NEGATIVE_INFINITY", Value::Num(f64::NEG_INFINITY));
         e.set_const(nid, "NaN", Value::Num(f64::NAN));
@@ -591,6 +602,28 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(sp, "toLocaleUpperCase", string_to_upper);
     e.add_method(sp, "toLocaleString", string_to_string);
     e.add_method(sp, "localeCompare", string_locale_compare);
+    // Annex B — méthodes HTML legacy (`'x'.bold()` → `<b>x</b>`),
+    // encore présentes sur nombre de vieux sites.
+    for (n, tag, attr) in [
+        ("anchor", "a", "name"),
+        ("big", "big", ""),
+        ("blink", "blink", ""),
+        ("bold", "b", ""),
+        ("fixed", "tt", ""),
+        ("fontcolor", "font", "color"),
+        ("fontsize", "font", "size"),
+        ("italics", "i", ""),
+        ("link", "a", "href"),
+        ("small", "small", ""),
+        ("strike", "strike", ""),
+        ("sub", "sub", ""),
+        ("sup", "sup", ""),
+    ] {
+        let tag_v = e.str_val(tag);
+        let attr_v = e.str_val(attr);
+        let f = e.bound_native(n, string_html_wrap, vec![tag_v, attr_v]);
+        e.set_own(sp, n, f, false);
+    }
     e.add_method(sp, "trim", string_trim);
     e.add_method(sp, "split", string_split);
     e.add_method(sp, "replace", string_replace);
@@ -689,6 +722,10 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(dp, "getMilliseconds", date_get_milliseconds);
     e.add_method(dp, "getUTCMilliseconds", date_get_milliseconds);
     e.add_method(dp, "getTimezoneOffset", date_get_timezone_offset);
+    // Annex B legacy — `getYear` = année - 1900, `setYear` 0-99 →
+    // 1900+n (utilisés par du code pré-2000 encore vivant).
+    e.add_method(dp, "getYear", date_get_year);
+    e.add_method(dp, "setYear", date_set_year);
     e.add_method(dp, "toISOString", date_to_iso);
     e.add_method(dp, "toUTCString", date_to_utc_string);
     e.add_method(dp, "toGMTString", date_to_utc_string);
@@ -6165,4 +6202,85 @@ fn make_suppressed(e: &mut Engine, err: Value, prev: Value) -> Value {
         e.set_own(id, "suppressed", prev, true);
     }
     v
+}
+
+// ------------------------------------------------------------------
+// JS-C18 — Annex B complétion + Number/Atomics
+// ------------------------------------------------------------------
+
+/// `Number.isSafeInteger(v)` — entier dans ]-2^53, 2^53[.
+fn number_is_safe_integer(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ok = match arg(args, 0) {
+        Value::Num(n) => n.is_finite() && n.fract() == 0.0 && n.abs() < 9_007_199_254_740_992.0,
+        _ => false,
+    };
+    let _ = e;
+    Ok(Value::Bool(ok))
+}
+
+/// `d.getYear()` (Annex B) — `getFullYear() - 1900`.
+fn date_get_year(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let y = date_part(e, this, 0)?;
+    Ok(Value::Num(if y.is_nan() { y } else { y - 1900.0 }))
+}
+
+/// `d.setYear(y)` (Annex B) — 0-99 → 1900+y ; conserve mois/jour/
+/// heure ; retourne le nouveau timestamp (NaN → Invalid Date).
+fn date_set_year(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("Date method on non-Date"));
+    };
+    if e.get_prop(id, "__time").is_none() {
+        return Err(e.type_error("Date method on non-Date"));
+    }
+    let y = e.to_number(arg(args, 0))?;
+    let ms = e.get_prop(id, "__time").map_or(f64::NAN, |v| match v {
+        Value::Num(n) => n,
+        _ => f64::NAN,
+    });
+    let new_ms = if y.is_nan() {
+        f64::NAN
+    } else {
+        let (oy, mo, d, _w, h, mi, s, mss) = if ms.is_finite() {
+            ms_to_parts(ms)
+        } else {
+            (1970, 1, 1, 4, 0, 0, 0, 0) // date invalide → base epoch
+        };
+        let _ = oy;
+        let yi = y.trunc() as i64;
+        let full = if (0..=99).contains(&yi) {
+            yi + 1900
+        } else {
+            yi
+        };
+        // `ms_to_parts` rend le mois 1-based ; `parts_to_ms`
+        // attend le mois 0-based JS.
+        parts_to_ms(
+            full,
+            i64::from(mo) - 1,
+            i64::from(d),
+            i64::from(h),
+            i64::from(mi),
+            i64::from(s),
+            i64::from(mss),
+        )
+    };
+    e.set_own(id, "__time", Value::Num(new_ms), false);
+    Ok(Value::Num(new_ms))
+}
+
+/// `str.m()` Annex B — `<tag>m</tag>` ou `<tag attr="v">m</tag>`
+/// (`"` échappé `&quot;` dans la valeur d'attribut, spec `CreateHTML`).
+/// Bound args : `[tag, attr]` ; `attr` vide → pas d'attribut.
+fn string_html_wrap(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let s = this_str(e, this)?;
+    let tag = e.to_js_string(arg(args, 0))?;
+    let attr = e.to_js_string(arg(args, 1))?;
+    let out = if attr.is_empty() {
+        format!("<{tag}>{s}</{tag}>")
+    } else {
+        let v = e.to_js_string(arg(args, 2))?.replace('"', "&quot;");
+        format!("<{tag} {attr}=\"{v}\">{s}</{tag}>")
+    };
+    Ok(e.str_val(out))
 }

@@ -346,6 +346,74 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(id, "isView", ab_is_view);
         e.set_own(g, "ArrayBuffer", ab, false);
     }
+    // Accesseurs spec sur le proto — les instances portent les
+    // flags en props propres (déviation : `hasOwnProperty` visible)
+    // mais `ArrayBuffer.prototype.resizable` doit exister et lever
+    // `TypeError` sur `this` non-buffer (spec `get resizable`).
+    for (n, f, gname) in [
+        (
+            "resizable",
+            ab_resizable_get as crate::heap::NativeFn,
+            "get resizable",
+        ),
+        (
+            "maxByteLength",
+            ab_max_get as crate::heap::NativeFn,
+            "get maxByteLength",
+        ),
+        (
+            "detached",
+            ab_detached_get as crate::heap::NativeFn,
+            "get detached",
+        ),
+    ] {
+        let gf = e.native_fn(gname, f);
+        if let Some(o) = e.heap.obj_mut(abp) {
+            o.set_accessor(n, gf, Value::Undefined, false);
+        }
+    }
+
+    // -- SharedArrayBuffer / Atomics (JS-C18) -------------------------
+    // Moteur mono-thread : le SAB est un `ByteBuf` ordinaire
+    // (indiscernable observablement hors `Atomics.wait` qui lève
+    // `TypeError` comme sur le main thread navigateur — spec).
+    {
+        let sabp = e.new_object();
+        e.add_method(sabp, "grow", sab_grow);
+        {
+            let gg = e.native_fn("get growable", sab_growable_get);
+            if let Some(o) = e.heap.obj_mut(sabp) {
+                o.set_accessor("growable", gg, Value::Undefined, false);
+            }
+        }
+        let tag = e.str_val("SharedArrayBuffer");
+        e.set_own(sabp, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        let sab = e.native_fn("SharedArrayBuffer", sab_ctor);
+        let sid = c_id(sab);
+        e.set_own(sid, "prototype", Value::Obj(sabp), false);
+        e.set_own(sabp, "constructor", sab, false);
+        e.set_own(g, "SharedArrayBuffer", sab, false);
+    }
+
+    {
+        let at = e.new_object();
+        e.add_method(at, "load", atomics_load);
+        e.add_method(at, "store", atomics_store);
+        e.add_method(at, "add", atomics_add);
+        e.add_method(at, "sub", atomics_sub);
+        e.add_method(at, "and", atomics_and);
+        e.add_method(at, "or", atomics_or);
+        e.add_method(at, "xor", atomics_xor);
+        e.add_method(at, "exchange", atomics_exchange);
+        e.add_method(at, "compareExchange", atomics_compare_exchange);
+        e.add_method(at, "isLockFree", atomics_is_lock_free);
+        e.add_method(at, "wait", atomics_wait);
+        e.add_method(at, "notify", atomics_notify);
+        e.add_method(at, "waitAsync", atomics_wait_async);
+        let tag = e.str_val("Atomics");
+        e.set_own(at, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        e.set_own(g, "Atomics", Value::Obj(at), false);
+    }
 
     // -- DataView ------------------------------------------------------
     let dvp = e.protos.data_view;
@@ -1543,4 +1611,339 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
         }
     }
     Some(out)
+}
+
+// ------------------------------------------------------------------
+// JS-C18 — `SharedArrayBuffer` + `Atomics` (mono-thread)
+// ------------------------------------------------------------------
+
+/// `new SharedArrayBuffer(len, {maxByteLength?})` — `ByteBuf` avec
+/// `growable`/`maxByteLength`/`detached` en props propres.
+fn sab_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let n = to_index(e, arg(args, 0))?;
+    let proto = e
+        .get_prop(e.global, "SharedArrayBuffer")
+        .and_then(|c| match c {
+            Value::Obj(cid) => e.get_prop(cid, "prototype"),
+            _ => None,
+        })
+        .unwrap_or(Value::Obj(e.protos.array_buffer));
+    let id = e.heap.alloc_obj(Object {
+        proto,
+        props: Vec::new(),
+        kind: ObjKind::ByteBuf(vec![0; n]),
+        extensible: true,
+    });
+    e.set_own(id, "growable", Value::Bool(false), false);
+    e.set_own(id, "maxByteLength", Value::Num(n as f64), false);
+    e.set_own(id, "detached", Value::Bool(false), false);
+    if let Value::Obj(opts) = arg(args, 1) {
+        if let Some(mv) = e.get_prop(opts, "maxByteLength") {
+            if !matches!(mv, Value::Undefined) {
+                let max = to_index(e, mv)?;
+                if max < n {
+                    return Err(e.range_error("maxByteLength smaller than length"));
+                }
+                e.set_own(id, "growable", Value::Bool(true), false);
+                e.set_own(id, "maxByteLength", Value::Num(max as f64), false);
+            }
+        }
+    }
+    Ok(Value::Obj(id))
+}
+
+/// `sab.grow(newLen)` — `resize` côté SAB (spec `growable`).
+fn sab_grow(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = ab_this(e, this)?;
+    let growable = matches!(e.get_prop(id, "growable"), Some(Value::Bool(true)));
+    if !growable {
+        return Err(e.type_error("SharedArrayBuffer is not growable"));
+    }
+    let max = match e.get_prop(id, "maxByteLength") {
+        Some(Value::Num(m)) => m as usize,
+        _ => usize::MAX,
+    };
+    let n = to_index(e, arg(args, 0))?;
+    if n > max {
+        return Err(e.range_error("new length exceeds maxByteLength"));
+    }
+    if let Some(b) = e.heap.obj_mut(id) {
+        if let ObjKind::ByteBuf(bytes) = &mut b.kind {
+            bytes.resize(n, 0);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+fn sab_growable_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = ab_this(e, this)?;
+    Ok(e.get_prop(id, "growable").unwrap_or(Value::Bool(false)))
+}
+
+/// `get resizable` — own flag lu sur `this` (`TypeError` sur tout
+/// non-`ByteBuf`, proto compris — spec).
+fn ab_resizable_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = ab_this(e, this)?;
+    Ok(e.get_prop(id, "resizable").unwrap_or(Value::Bool(false)))
+}
+
+fn ab_max_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = ab_this(e, this)?;
+    Ok(e.get_prop(id, "maxByteLength").unwrap_or(Value::Num(0.0)))
+}
+
+fn ab_detached_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = ab_this(e, this)?;
+    Ok(e.get_prop(id, "detached").unwrap_or(Value::Bool(false)))
+}
+
+/// Kinds Atomics (spec : hors `Uint8Clamped` et tout float).
+fn atomic_ok(ta: TaKind) -> bool {
+    matches!(
+        ta,
+        TaKind::I8
+            | TaKind::U8
+            | TaKind::I16
+            | TaKind::U16
+            | TaKind::I32
+            | TaKind::U32
+            | TaKind::I64
+            | TaKind::U64
+    )
+}
+
+/// Résout `(kind, buffer, octet)` pour `Atomics.op(ta, idx, …)` —
+/// `TypeError` sur non-TA/kind non-atomique, `RangeError` hors
+/// bornes (spec `ValidateAtomicAccess` + `ValidateIntegerTA`).
+fn atomic_access(e: &mut Engine, ta_v: Value, idx_v: Value) -> JsResult<(TaKind, ObjId, usize)> {
+    let (ta, bid, off, len) = ta_view(e, ta_v)?;
+    if !atomic_ok(ta) {
+        return Err(e.type_error("operation cannot be performed on this TypedArray type"));
+    }
+    let idx = to_index(e, idx_v)?;
+    if idx >= len {
+        return Err(e.range_error("index out of bounds"));
+    }
+    Ok((ta, bid, off + idx * ta.size()))
+}
+
+/// Lit l'élément atomique — `Value::Num` ou `Value::Big`.
+fn atomic_read(e: &mut Engine, ta: TaKind, bid: ObjId, o: usize) -> Value {
+    match e.heap.obj(bid).map(|b| &b.kind) {
+        Some(ObjKind::ByteBuf(bytes)) if o + ta.size() <= bytes.len() => {
+            let region = &bytes[o..];
+            if ta.is_big() {
+                e.big_val(ta.get_big(region, 0))
+            } else {
+                Value::Num(ta.get(region, 0))
+            }
+        }
+        _ => Value::Num(f64::NAN),
+    }
+}
+
+/// Écrit l'élément atomique (f64 ou `BigInt` selon le kind).
+fn atomic_write(e: &mut Engine, ta: TaKind, bid: ObjId, o: usize, v: AtomicVal) {
+    let Some(b) = e.heap.obj_mut(bid) else { return };
+    let ObjKind::ByteBuf(bytes) = &mut b.kind else {
+        return;
+    };
+    if o + ta.size() > bytes.len() {
+        return;
+    }
+    let region = &mut bytes[o..];
+    match v {
+        AtomicVal::Num(n) => ta.set(region, 0, n),
+        AtomicVal::Big(b) => ta.set_big(region, 0, &b),
+    }
+}
+
+/// Valeur atomique lue/construite (nombre f64 ou `BigInt`).
+#[derive(Clone)]
+enum AtomicVal {
+    Num(f64),
+    Big(num_bigint::BigInt),
+}
+
+/// Convertit `v` selon le kind — `ToBigInt` sur les vues 64 bits
+/// (spec : `TypeError` si Number sur vue `BigInt` et réciproquement).
+fn atomic_operand(e: &mut Engine, ta: TaKind, v: Value) -> JsResult<AtomicVal> {
+    if ta.is_big() {
+        match v {
+            Value::Big(_) => Ok(AtomicVal::Big(e.to_bigint(v)?)),
+            _ => Err(e.type_error("cannot convert Number to BigInt")),
+        }
+    } else {
+        Ok(AtomicVal::Num(e.to_number(v)?))
+    }
+}
+
+fn atomic_num_val(v: &AtomicVal) -> f64 {
+    match v {
+        AtomicVal::Num(n) => *n,
+        AtomicVal::Big(_) => 0.0,
+    }
+}
+
+fn atomics_load(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
+    Ok(atomic_read(e, ta, bid, o))
+}
+
+/// `store` → retourne la valeur posée (spec).
+fn atomics_store(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
+    let v = atomic_operand(e, ta, arg(args, 2))?;
+    atomic_write(e, ta, bid, o, v.clone());
+    Ok(match v {
+        AtomicVal::Num(n) => Value::Num(n),
+        AtomicVal::Big(b) => e.big_val(b),
+    })
+}
+
+/// Coeur RMW non-big — `add`/`sub`/`and`/`or`/`xor` :
+/// `(ta, idx, v)` → ancienne valeur. Arithmétique 32 bits wrapping
+/// (les kinds < 32 bits re-wrapptent à l'écriture via `ta.set` —
+/// `to_int32` mod 2^32 puis troncature à la largeur, spec).
+fn atomics_rmw(e: &mut Engine, args: &[Value], op: fn(i64, i64) -> i64) -> JsResult<Value> {
+    let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
+    let v = atomic_operand(e, ta, arg(args, 2))?;
+    let old = atomic_read(e, ta, bid, o);
+    let cur = match old {
+        Value::Num(n) => n,
+        _ => f64::NAN,
+    };
+    let new = AtomicVal::Num(op(
+        i64::from(crate::value::to_int32(cur)),
+        i64::from(crate::value::to_int32(atomic_num_val(&v))),
+    ) as f64);
+    atomic_write(e, ta, bid, o, new);
+    Ok(old)
+}
+
+fn atomics_add(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
+    if ta.is_big() {
+        let old = atomic_read(e, ta, bid, o);
+        let a = e.to_bigint(old)?;
+        let b = e.to_bigint(arg(args, 2))?;
+        atomic_write(e, ta, bid, o, AtomicVal::Big(a + b));
+        return Ok(old);
+    }
+    atomics_rmw(e, args, i64::wrapping_add)
+}
+
+fn atomics_sub(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
+    if ta.is_big() {
+        let old = atomic_read(e, ta, bid, o);
+        let a = e.to_bigint(old)?;
+        let b = e.to_bigint(arg(args, 2))?;
+        atomic_write(e, ta, bid, o, AtomicVal::Big(a - b));
+        return Ok(old);
+    }
+    atomics_rmw(e, args, i64::wrapping_sub)
+}
+
+fn atomics_and(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
+    if ta.is_big() {
+        let old = atomic_read(e, ta, bid, o);
+        let a = e.to_bigint(old)?;
+        let b = e.to_bigint(arg(args, 2))?;
+        atomic_write(e, ta, bid, o, AtomicVal::Big(a & b));
+        return Ok(old);
+    }
+    atomics_rmw(e, args, |a, b| a & b)
+}
+
+fn atomics_or(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
+    if ta.is_big() {
+        let old = atomic_read(e, ta, bid, o);
+        let a = e.to_bigint(old)?;
+        let b = e.to_bigint(arg(args, 2))?;
+        atomic_write(e, ta, bid, o, AtomicVal::Big(a | b));
+        return Ok(old);
+    }
+    atomics_rmw(e, args, |a, b| a | b)
+}
+
+fn atomics_xor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
+    if ta.is_big() {
+        let old = atomic_read(e, ta, bid, o);
+        let a = e.to_bigint(old)?;
+        let b = e.to_bigint(arg(args, 2))?;
+        atomic_write(e, ta, bid, o, AtomicVal::Big(a ^ b));
+        return Ok(old);
+    }
+    atomics_rmw(e, args, |a, b| a ^ b)
+}
+
+fn atomics_exchange(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
+    let v = atomic_operand(e, ta, arg(args, 2))?;
+    let old = atomic_read(e, ta, bid, o);
+    atomic_write(e, ta, bid, o, v);
+    Ok(old)
+}
+
+/// `compareExchange(ta, idx, expected, replacement)` → ancienne
+/// valeur (spec : comparaison sur la valeur, pas l'identité).
+fn atomics_compare_exchange(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
+    let old = atomic_read(e, ta, bid, o);
+    #[allow(clippy::float_cmp)] // égalité exacte spec `SameValue`.
+    let eq = if ta.is_big() {
+        e.to_bigint(old)? == e.to_bigint(arg(args, 2))?
+    } else {
+        matches!(old, Value::Num(n) if n == e.to_number(arg(args, 2))?)
+    };
+    if eq {
+        let rep = atomic_operand(e, ta, arg(args, 3))?;
+        atomic_write(e, ta, bid, o, rep);
+    }
+    Ok(old)
+}
+
+/// `isLockFree(size)` — atomique lock-free pour 1/2/4/8 octets
+/// (convention V8/JSC ; impl-defined spec).
+fn atomics_is_lock_free(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let n = e.to_number(arg(args, 0))?;
+    Ok(Value::Bool(matches!(n as u32, 1 | 2 | 4 | 8)))
+}
+
+/// `Atomics.wait` — `TypeError` systématique : mono-thread =
+/// main thread navigateur où `wait` est interdit (spec navigateur).
+fn atomics_wait(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Err(e.type_error("Atomics.wait cannot be called in this context"))
+}
+
+/// `Atomics.notify` → nombre d'attentes réveillées (toujours 0 —
+/// aucune attente possible sans worker).
+fn atomics_notify(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    // Validation d'accès quand même (spec : vérifie ta/idx).
+    atomic_access(e, arg(args, 0), arg(args, 1))?;
+    Ok(Value::Num(0.0))
+}
+
+/// `Atomics.waitAsync` → `{async:false, value:"not-equal"}` si la
+/// valeur diffère de l'attendue, `{async:false, value:"timed-out"}`
+/// sinon (aucun notify ne viendra jamais — mono-thread).
+fn atomics_wait_async(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (ta, bid, o) = atomic_access(e, arg(args, 0), arg(args, 1))?;
+    let cur = atomic_read(e, ta, bid, o);
+    #[allow(clippy::float_cmp)] // égalité exacte spec `SameValue`.
+    let eq = if ta.is_big() {
+        e.to_bigint(cur)? == e.to_bigint(arg(args, 2))?
+    } else {
+        matches!(cur, Value::Num(n) if n == e.to_number(arg(args, 2))?)
+    };
+    let o2 = e.new_object();
+    e.set_own(o2, "async", Value::Bool(false), true);
+    let msg = if eq { "timed-out" } else { "not-equal" };
+    let v = e.str_val(msg);
+    e.set_own(o2, "value", v, true);
+    Ok(Value::Obj(o2))
 }

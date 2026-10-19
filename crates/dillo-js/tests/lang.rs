@@ -4547,3 +4547,256 @@ fn c17_disposable_stack() {
         .eval("var d=new DisposableStack();d.dispose();d.defer(function(){})")
         .is_err());
 }
+
+// ------------------------------------------------------------------
+// JS-C18 — Annex B complétion : méthodes HTML, getYear/setYear,
+// constantes Number, AggregateError.name, accesseurs ArrayBuffer,
+// `SharedArrayBuffer` + `Atomics` (mono-thread)
+// ------------------------------------------------------------------
+
+#[test]
+fn c18_string_html_annex_b() {
+    for (src, want) in [
+        ("'x'.bold()", "<b>x</b>"),
+        ("'x'.italics()", "<i>x</i>"),
+        ("'x'.big()", "<big>x</big>"),
+        ("'x'.small()", "<small>x</small>"),
+        ("'x'.blink()", "<blink>x</blink>"),
+        ("'x'.fixed()", "<tt>x</tt>"),
+        ("'x'.strike()", "<strike>x</strike>"),
+        ("'x'.sub()", "<sub>x</sub>"),
+        ("'x'.sup()", "<sup>x</sup>"),
+        ("'x'.anchor('n')", "<a name=\"n\">x</a>"),
+        ("'x'.link('http://u')", "<a href=\"http://u\">x</a>"),
+        ("'x'.fontcolor('red')", "<font color=\"red\">x</font>"),
+        ("'x'.fontsize('+2')", "<font size=\"+2\">x</font>"),
+        // `"` échappé dans la valeur d'attribut (spec CreateHTML).
+        ("'x'.link('a\"b')", "<a href=\"a&quot;b\">x</a>"),
+        // ToString appliqué au receiver.
+        ("(5).toString().bold()", "<b>5</b>"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c18_number_consts() {
+    for (src, want) in [
+        ("Number.EPSILON", "2.220446049250313e-16"),
+        ("Number.MIN_VALUE", "5e-324"),
+        ("Number.EPSILON === Number.MIN_VALUE", "false"),
+        ("Number.isSafeInteger(9007199254740991)", "true"),
+        ("Number.isSafeInteger(-9007199254740991)", "true"),
+        ("Number.isSafeInteger(9007199254740992)", "false"),
+        ("Number.isSafeInteger(1.5)", "false"),
+        ("Number.isSafeInteger('1')", "false"),
+        ("Number.isSafeInteger(NaN)", "false"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c18_date_year() {
+    for (src, want) in [
+        ("new Date(0).getYear()", "70"),
+        ("new Date(2000,0,1).getYear()", "100"),
+        // setYear 0-99 → 1900+n (Annex B).
+        (
+            "var d=new Date(2000,5,15);d.setYear(99);d.getFullYear()",
+            "1999",
+        ),
+        (
+            "var d=new Date(2000,5,15);d.setYear(1950);d.getFullYear()",
+            "1950",
+        ),
+        (
+            "var d=new Date(2000,5,15);d.setYear(5);d.getFullYear()",
+            "1905",
+        ),
+        // conserve mois/jour ; retourne le nouveau timestamp.
+        (
+            "var d=new Date(2000,5,15,10,30);d.setYear(99);d.getMonth()+'/'+d.getDate()",
+            "5/15",
+        ),
+        ("var d=new Date(2000,0,1);typeof d.setYear(99)", "number"),
+        ("new Date(NaN).getYear()", "NaN"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c18_aggregate_and_accessors() {
+    for (src, want) in [
+        // Spec : `name` propre sur le proto (pas hérité "Error").
+        ("AggregateError.prototype.name", "AggregateError"),
+        ("new AggregateError([1,2],'m').name", "AggregateError"),
+        (
+            "new AggregateError([1,2],'m') instanceof AggregateError",
+            "true",
+        ),
+        // `resizable`/`maxByteLength`/`detached` : proto accessors
+        // (spec) — TypeError sur non-buffer, flags sur instances.
+        (
+            "typeof Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,'resizable').get",
+            "function",
+        ),
+        ("(new ArrayBuffer(4)).resizable", "false"),
+        ("(new ArrayBuffer(4,{maxByteLength:8})).resizable", "true"),
+        ("(new ArrayBuffer(4,{maxByteLength:8})).maxByteLength", "8"),
+        ("(new ArrayBuffer(4)).detached", "false"),
+        // `transfer()` détache la SOURCE (le buffer retourné
+        // reste attaché — spec ES2024).
+        ("var b=new ArrayBuffer(4);b.transfer();b.detached", "true"),
+        ("10n.toLocaleString()", "10"),
+        ("10n.toLocaleString()===10n.toString()", "true"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    assert!(Engine::new()
+        .eval("ArrayBuffer.prototype.resizable")
+        .is_err());
+}
+
+#[test]
+fn c18_shared_array_buffer() {
+    for (src, want) in [
+        ("typeof SharedArrayBuffer", "function"),
+        ("new SharedArrayBuffer(8).byteLength", "8"),
+        ("new SharedArrayBuffer(4).growable", "false"),
+        (
+            "new SharedArrayBuffer(4,{maxByteLength:16}).growable",
+            "true",
+        ),
+        (
+            "new SharedArrayBuffer(4,{maxByteLength:16}).maxByteLength",
+            "16",
+        ),
+        (
+            "var s=new SharedArrayBuffer(4,{maxByteLength:16});s.grow(16);s.byteLength",
+            "16",
+        ),
+        // Les vues acceptent un SAB comme buffer (ByteBuf partagé).
+        (
+            "var b=new SharedArrayBuffer(8);new Int32Array(b).length",
+            "2",
+        ),
+        (
+            "var b=new SharedArrayBuffer(4);var u=new Uint8Array(b);u[0]=9;b.byteLength",
+            "4",
+        ),
+        (
+            "Object.prototype.toString.call(new SharedArrayBuffer(4))",
+            "[object SharedArrayBuffer]",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    assert!(Engine::new()
+        .eval("new SharedArrayBuffer(4).grow(8)")
+        .is_err());
+    assert!(Engine::new()
+        .eval("new SharedArrayBuffer(8,{maxByteLength:4})")
+        .is_err());
+}
+
+#[test]
+fn c18_atomics() {
+    for (src, want) in [
+        ("typeof Atomics", "object"),
+        ("Object.prototype.toString.call(Atomics)", "[object Atomics]"),
+        (
+            "var a=new Int32Array(new SharedArrayBuffer(8));Atomics.store(a,0,10);Atomics.load(a,0)",
+            "10",
+        ),
+        // RMW retourne l'ancienne valeur.
+        (
+            "var a=new Int32Array(new SharedArrayBuffer(8));Atomics.store(a,0,10);Atomics.sub(a,0,3)+'/'+Atomics.load(a,0)",
+            "10/7",
+        ),
+        (
+            "var a=new Int32Array(new SharedArrayBuffer(8));Atomics.store(a,0,10);Atomics.add(a,0,5)+'/'+Atomics.load(a,0)",
+            "10/15",
+        ),
+        (
+            "var a=new Int32Array(new SharedArrayBuffer(8));Atomics.store(a,0,7);Atomics.and(a,0,6)+'/'+Atomics.load(a,0)",
+            "7/6",
+        ),
+        (
+            "var a=new Int32Array(new SharedArrayBuffer(8));Atomics.store(a,0,6);Atomics.or(a,0,8)+'/'+Atomics.load(a,0)",
+            "6/14",
+        ),
+        (
+            "var a=new Int32Array(new SharedArrayBuffer(8));Atomics.store(a,0,14);Atomics.xor(a,0,15)+'/'+Atomics.load(a,0)",
+            "14/1",
+        ),
+        (
+            "var a=new Int32Array(new SharedArrayBuffer(8));Atomics.store(a,0,1);Atomics.exchange(a,0,42)+'/'+Atomics.load(a,0)",
+            "1/42",
+        ),
+        (
+            "var a=new Int32Array(new SharedArrayBuffer(8));Atomics.store(a,0,42);Atomics.compareExchange(a,0,42,100)+'/'+Atomics.load(a,0)",
+            "42/100",
+        ),
+        (
+            "var a=new Int32Array(new SharedArrayBuffer(8));Atomics.store(a,0,42);Atomics.compareExchange(a,0,43,200)+'/'+Atomics.load(a,0)",
+            "42/42",
+        ),
+        // wrap à la largeur de l'élément.
+        (
+            "var i=new Int8Array(new SharedArrayBuffer(2));Atomics.store(i,0,127);Atomics.add(i,0,1)+'/'+Atomics.load(i,0)",
+            "127/-128",
+        ),
+        (
+            "var u=new Uint8Array(new SharedArrayBuffer(2));Atomics.store(u,0,255);Atomics.add(u,0,1)+'/'+Atomics.load(u,0)",
+            "255/0",
+        ),
+        // BigInt64 : opérandes BigInt obligatoires.
+        (
+            "var b=new BigInt64Array(new SharedArrayBuffer(8));Atomics.store(b,0,5n);Atomics.load(b,0)",
+            "5",
+        ),
+        (
+            "var b=new BigUint64Array(new SharedArrayBuffer(8));Atomics.store(b,0,5n);Atomics.and(b,0,3n)+'/'+Atomics.load(b,0)",
+            "5/1",
+        ),
+        // Atomics fonctionne aussi sur ArrayBuffer ordinaire
+        // (mono-thread — indiscernable spec).
+        ("var a=new Int32Array(4);Atomics.add(a,0,3);a[0]", "3"),
+        ("Atomics.isLockFree(1)", "true"),
+        ("Atomics.isLockFree(4)", "true"),
+        ("Atomics.isLockFree(8)", "true"),
+        ("Atomics.isLockFree(3)", "false"),
+        ("Atomics.notify(new Int32Array(new SharedArrayBuffer(4)),0)", "0"),
+        // waitAsync : not-equal / timed-out (mono-thread).
+        (
+            "var a=new Int32Array(new SharedArrayBuffer(4));var w=Atomics.waitAsync(a,0,999);w.async+'/'+w.value",
+            "false/not-equal",
+        ),
+        (
+            "var a=new Int32Array(new SharedArrayBuffer(4));var w=Atomics.waitAsync(a,0,0);w.async+'/'+w.value",
+            "false/timed-out",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    // `wait` → TypeError (main thread, spec navigateur).
+    assert!(Engine::new()
+        .eval("Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0)")
+        .is_err());
+    // Kinds exclus : Float64Array, Uint8ClampedArray.
+    assert!(Engine::new()
+        .eval("Atomics.load(new Float64Array(8),0)")
+        .is_err());
+    assert!(Engine::new()
+        .eval("Atomics.load(new Uint8ClampedArray(new SharedArrayBuffer(4)),0)")
+        .is_err());
+    // hors bornes → RangeError ; Number sur vue BigInt → TypeError.
+    assert!(Engine::new()
+        .eval("Atomics.load(new Int32Array(new SharedArrayBuffer(4)),9)")
+        .is_err());
+    assert!(Engine::new()
+        .eval("Atomics.add(new BigInt64Array(new SharedArrayBuffer(8)),0,1)")
+        .is_err());
+}

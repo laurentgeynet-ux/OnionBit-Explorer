@@ -542,9 +542,29 @@ d'intégration, pas par la couverture :
   `SuppressedError`. `using`/`AsyncDisposableStack`/`Intl`/
   `Temporal` reportés. test262 : 859/859 ; 7 tests de
   régression.
+- [x] **JS-C18. Annex B complet + `SharedArrayBuffer`/
+  `Atomics`** : méthodes HTML String (`anchor`/`big`/`blink`/
+  `bold`/`fixed`/`fontcolor`/`fontsize`/`italics`/`link`/
+  `small`/`strike`/`sub`/`sup` — `CreateHTML`, `"` →
+  `&quot;`), `Date.prototype.getYear`/`setYear` (année
+  0-99 → 1900+n), `Number.EPSILON`/`MIN_VALUE`/
+  `isSafeInteger`, `AggregateError.prototype.name` propre,
+  accesseurs `ArrayBuffer.prototype` (`resizable`/
+  `maxByteLength`/`detached` — `TypeError` sur non-buffer,
+  spec), `BigInt.prototype.toLocaleString`,
+  `SharedArrayBuffer` (`ByteBuf` partagé, `growable`/
+  `grow`), `Atomics` complet : `load`/`store`/`add`/`sub`/
+  `and`/`or`/`xor`/`exchange`/`compareExchange` (retour
+  ancienne valeur, wrap à la largeur, BigInt64/Uint64 —
+  opérandes BigInt obligatoires), `isLockFree`,
+  `wait` → `TypeError` (main thread, spec navigateur),
+  `notify` → 0, `waitAsync` → `{async:false,value}`.
+  Mono-thread : aucun partage inter-worker — indiscernable
+  sauf `wait`/`waitAsync`, déviation documentée.
+  test262 : 859/859 ; 6 tests de régression.
 - [ ] **JS-C. Couverture par besoin** : `Intl`,
-  `AsyncDisposableStack`, `Temporal` — ordre piloté par les
-  pages réelles.
+  `AsyncDisposableStack`, `Temporal`, `using` — ordre
+  piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
   `Video` — phase 10, dépend du pipeline rendu.
 
