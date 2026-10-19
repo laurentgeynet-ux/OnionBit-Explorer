@@ -302,6 +302,10 @@ Règles de la coexistence :
    - **`Cargo.lock` en conflit** : jamais de fusion à la
      main — `cargo check`/`cargo update` régénère un
      lockfile cohérent.
+   - **Pas de CI distante** (dépôt mono-machine) : « main
+     vert » est garanti par le gate `verify_all` manuel.
+     `scripts/verify_all.ps1` est conçu CI-ready — le jour
+     où un remote existe, il devient le job CI tel quel.
 4. **Fichiers partagés** : `CHANGELOG.md` est union-mergé ;
    `Cargo.lock` se régénère (règle §10.3) ;
    `[workspace.dependencies]` et `AGENTS.md`/ADR relèvent du

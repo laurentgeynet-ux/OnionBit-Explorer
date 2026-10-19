@@ -121,6 +121,14 @@ Objectif : les blocages du web réel sautent. Sortie de palier :
   arbitrage find-in-page / zoom (petit ADR si reclassés).
 - [ ] **Étape 58. `<video>`/`<audio>`** (ex-66) : arbitrage
   décodage pur Rust requis (ADR) — sinon stubs propres + affiche.
+- [ ] **Étape 60. Éclater `session.rs`** (audit externe) :
+  3 500+ lignes / 133 Ko — le god module porte session +
+  pipeline + scheduler + profil + hit-test + glue JS + décodage
+  images. Extraire en sous-modules (`session/` : onglets,
+  navigation, `load_subresources`, net pump, événements,
+  storage/profil) — **sans changement de comportement**, tests
+  intacts. À faire entre deux étapes fonctionnelles, fichier au
+  calme — pas pendant un chantier session en vol.
 - [ ] **Étape 59. Release 0.2** (ex-67) : packaging, smoke E2E
   étendu, doc. **Prérequis d'ouverture** : renommage
   `crates/dillo-js` → `explorer-jscore` (ADR-0020) — commit
@@ -195,8 +203,17 @@ mesures).
   coût `serialize_document` instrumenté.
 - [ ] **JS-C38. Fuzz lexer/parser `dillo-js`** : cible
   cargo-fuzz (extension de `fuzz/` — périmètre équipe).
+- [ ] **JS-C40. Découpage interne `dillo-js`** (audit externe) :
+  `builtins.rs` 269 Ko / `interp.rs` 222 Ko — extraire par
+  domaine (builtins → `builtins/{object,array,string,…}.rs`,
+  interp → dispatch + groupes d'opcodes). Pur reformatage
+  mécanique, tests intacts — le tree-walker reste ; cette étape
+  ne change **pas** la sémantique, elle rend le code revoyable
+  à plusieurs. Écarts sémantiques assumés (générateurs eager,
+  `await` pending) = JS-C34, déclenché site réel — pas ici.
 - [ ] **JS-C39. Sync DOM incrémentale — instrumenter puis
-  drainer les records** (dette ADR-0013 budgétisée tôt) :
+  drainer les records** (dette ADR-0013 budgétisée tôt ; le
+  pont `dom_host.rs` = 69 Ko, son empreinte se mesure ici) :
   d'abord **mesurer** le coût réel de la resérialisation
   `sync_dom` — compteurs ms/octets par synchro dans la
   session, visibles au profilage (étape 57) ; si le coût le
