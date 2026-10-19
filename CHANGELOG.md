@@ -175,6 +175,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   de couche. 4 tests : h2 corps+en-têtes, POST echo, repli
   h1 sur même connexion, `http:` h1.
 
+### Fixed
+
+- **`<br>` et sauts de ligne forcés perdus (régression
+  étape 49)** (`explorer-layout`) : le collapsing
+  §16.6.1 transformait le `"\n"` synthétique du `<br>`
+  en espace avant l'itemisation — plus de coupure dure,
+  tout coulait sur une seule ligne (champs de formulaire
+  intraçables au hit-test). Le `<br>` porte désormais un
+  texte sentinelle **U+2028 LINE SEPARATOR** — pas un
+  blanc CSS, il survit au collapsing et reste une
+  coupure dure UAX #14. Les pièces réduites à leur
+  coupure (`strip_break_chars` vide le texte) étaient
+  sautées avant l'évaluation de `hard_after` : elles
+  poussent maintenant une sentinelle atomique
+  zéro-largeur + `new_line!` — une ligne vide est
+  réémise (`<br>` seul, lignes vides de `pre`). Bonus :
+  `pre`/`pre-wrap` préservent les espaces de tête de
+  ligne. Détecté par le gate `verify_all` au point
+  d'équipe — session 44/44, WPT 27/40 tenu.
+
 ## [0.1.0] - 2026-10-19
 
 ### Added

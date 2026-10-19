@@ -535,20 +535,51 @@ fn break_into_lines(
             continue;
         }
 
+        // `pre`/`pre-wrap` : §16.6.1 ne s'applique pas — les
+        // espaces de tête de ligne sont préservées aussi.
+        let keep_ws = matches!(
+            item.style.get("white-space"),
+            Some(v) if matches!(v.trim(), "pre" | "pre-wrap")
+        );
         for piece in &item.pieces {
-            if piece.text.is_empty() {
-                continue;
-            }
             // §16.6.1 : les espaces en TÊTE de ligne sont
             // supprimées — y compris en tête d'une pièce
             // non-blanche (le collapse fusionne `"  mot"`).
             let line_start = cursor_x <= line_x;
-            let text = if line_start {
+            let text = if line_start && !keep_ws {
                 piece.text.trim_start()
             } else {
                 piece.text.as_str()
             };
             if text.is_empty() {
+                // Pièce réduite à sa coupure dure — le `<br>`
+                // porte un U+2028 strippé, `\n` nu en `pre` :
+                // rien à rendre mais la ligne force quand
+                // même. Sentinelle atomique zéro-largeur
+                // pour qu'une ligne vide soit quand même
+                // émise (`<br>` seul, lignes vides de `pre`)
+                // — `atomic` la met à l'abri du retrait
+                // des blancs de `close`.
+                if piece.hard_after {
+                    acc.frags.push(Fragment {
+                        node: item.node,
+                        owner: item.owner,
+                        text: String::new(),
+                        atomic: true,
+                        rect: Rect {
+                            x: cursor_x,
+                            y: cursor_y,
+                            width: 0.0,
+                            height: lh,
+                        },
+                        baseline: fs * 0.8,
+                        shaped: None,
+                        trail_w: 0.0,
+                    });
+                    acc.max_lh = acc.max_lh.max(lh);
+                    acc.max_base = acc.max_base.max(fs * 0.8);
+                    new_line!();
+                }
                 continue;
             }
             let pw = measure(text);

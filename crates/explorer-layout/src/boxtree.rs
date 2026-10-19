@@ -355,11 +355,14 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     for child in children {
         if dom.element(child).is_ok() {
             if let Some(mut b) = build_box_tree_sized(dom, child, styles, sizes) {
-                // `<br>` : saut de ligne forcé — on lui donne
-                // un texte "\n" que l'itemisation UAX #14
-                // coupe durement (`ends_hard_break`).
+                // `<br>` : saut de ligne forcé — texte sentinelle
+                // U+2028 LINE SEPARATOR, que l'itemisation UAX #14
+                // coupe durement (`ends_hard_break`). Choisi plutôt
+                // que "\n" parce qu'il N'EST PAS un blanc CSS : il
+                // survit au collapsing §16.6.1 de `text_item`
+                // (étape 49), là où "\n" deviendrait une espace.
                 if dom.tag_name(child).is_ok_and(|t| t == "br") && b.text.is_none() {
-                    b.text = Some("\n".to_string());
+                    b.text = Some("\u{2028}".to_string());
                 }
                 out.push(b);
             }
