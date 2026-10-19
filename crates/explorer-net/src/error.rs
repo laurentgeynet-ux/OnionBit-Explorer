@@ -73,6 +73,12 @@ pub enum NetError {
     /// Chunked invalide (taille hex illisible, CR/LF manquant…).
     #[error("chunked invalide : {0}")]
     InvalidChunked(&'static str),
+    /// Trop de redirections (boucle 3xx).
+    #[error("trop de redirections (>{0})")]
+    TooManyRedirects(usize),
+    /// Requête bloquée par la politique de sécurité (mixed-content).
+    #[error("mixed-content bloqué : {0}")]
+    BlockedMixedContent(String),
     /// Corps au-delà du budget après décompression.
     #[error("corps décodé > {0} octets")]
     DecodedTooLarge(usize),

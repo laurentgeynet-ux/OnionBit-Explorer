@@ -26,19 +26,28 @@ use crate::h1::{Connector, IoStream, TcpConnector};
 
 /// Connecteur `http:` (TCP clair) + `https:` (TLS rustls).
 pub struct TlsConnector {
-    tcp: TcpConnector,
+    tcp: Arc<dyn Connector>,
     tls: RustlsConnector,
 }
 
 impl TlsConnector {
-    /// Connecteur TLS avec un magasin de racines explicite.
+    /// Connecteur TLS avec un magasin de racines explicite, sur
+    /// TCP direct.
     #[must_use]
     pub fn with_roots(roots: RootCertStore) -> Self {
+        Self::with_inner(roots, Arc::new(TcpConnector))
+    }
+
+    /// Connecteur TLS dont la couche TCP passe par `inner` —
+    /// composition : [`crate::proxy::ProxyConnector`] pour
+    /// `CONNECT`+TLS, un fake en test.
+    #[must_use]
+    pub fn with_inner(roots: RootCertStore, inner: Arc<dyn Connector>) -> Self {
         let config = ClientConfig::builder()
             .with_root_certificates(roots)
             .with_no_client_auth();
         Self {
-            tcp: TcpConnector,
+            tcp: inner,
             tls: RustlsConnector::from(Arc::new(config)),
         }
     }
@@ -71,7 +80,9 @@ impl Connector for TlsConnector {
             "http" => self.tcp.connect(scheme, host, port).await,
             "https" => {
                 let target = format!("{scheme}://{host}:{port}");
-                let tcp = self.tcp.connect("http", host, port).await?;
+                // La couche sous-jacente peut être un tunnel
+                // CONNECT (proxy) — `inner` décide.
+                let tcp = self.tcp.connect("https", host, port).await?;
 
                 // SNI : nom DNS ou adresse IP littérale — jamais vide.
                 let name = ServerName::try_from(host.to_string()).map_err(|_| NetError::Tls {
@@ -91,6 +102,11 @@ impl Connector for TlsConnector {
             }
             other => Err(NetError::UnsupportedScheme(other.to_string())),
         }
+    }
+
+    /// Délègue à l'inner — le proxy décide de la forme.
+    fn absolute_form(&self, scheme: &str, host: &str) -> bool {
+        self.tcp.absolute_form(scheme, host)
     }
 }
 

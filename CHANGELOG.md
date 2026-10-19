@@ -31,6 +31,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   surrogates/dépassements. Bornes contenu hostile : noms
   1 Kio, valeurs/commentaires 64 Kio, purge texte 16 Kio
   (ADR-0011). 34 tests dont coupures de chunk exhaustives.
+- **Étape 8 — `explorer-net` : redirections & politique**
+  (`policy.rs`, `proxy.rs`) : `RedirectTransport` — suivi 3xx borné
+  (`TooManyRedirects`), `Location` résolu contre la base, 303 → GET
+  (sauf HEAD), 301/302 POST → GET, 307/308 préservés intégralement.
+  `HstsStore` mémoire borné — `max-age`/`includeSubDomains`,
+  `max-age=0` révoque, upgrade `http→https` appliqué par
+  `HstsTransport` sur le fil, header capturé sur réponses https.
+  `ProxyConfig` env (`http_proxy`/`https_proxy`/`no_proxy`,
+  suffixes `.dom`/`*.dom`) + `ProxyConnector` — absolute-form pour
+  HTTP, tunnel `CONNECT` pour HTTPS (TLS posé sur le tunnel via le
+  `inner` injectable de `TlsConnector`). `RefererTransport` —
+  URL complète same-origin, origine seule cross-origin, droppé en
+  `https→http` ; `Origin` posé sur les requêtes mutantes
+  cross-origin. `PolicyTransport` — mixed-content `http` sous page
+  `https` bloqué (`BlockedMixedContent`), localhost/`data:`/`about:`
+  exempts. `Connector` gagne `absolute_form()`. 18 tests.
 - **Étape 7 — `explorer-net` : cookies + cache** (`cookies.rs`,
   `cache.rs`) : `CookieJar` RFC 6265 durci — `Domain=` validé par
   **Public Suffix List** (`psl`, supercookies `.co.uk` rejetés),

@@ -18,5 +18,7 @@ pub mod decode;
 pub mod error;
 pub mod h1;
 pub mod http;
+pub mod policy;
+pub mod proxy;
 pub mod tls;
 pub mod url;

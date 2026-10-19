@@ -68,3 +68,12 @@ sur les en-têtes), corps `Content-Length` + `chunked`, décodage
 - `windows-1252` arrive dès la phase 1/2 : c'est le défaut de la
   spec HTML pour la plupart des locales — le palier 1
   « documentaire » en dépend, pas la phase 10.
+- Étape 8 : la politique réseau (redirections, HSTS, Referer/Origin,
+  mixed-content) est implémentée en **décorateurs `HttpTransport`
+  empilables** — la couture injectable suffit, aucun canal
+  additionnel n'est nécessaire. Le proxy s'insère plus bas, au
+  niveau `Connector` : `Connector::absolute_form()` décide la
+  request-target origin-form vs absolute-form (HTTP via
+  mandataire), et `TlsConnector` accepte un `inner` injectable —
+  un tunnel `CONNECT` `ProxyConnector` y est composé pour poser
+  TLS **sur** le tunnel, en réutilisant le même chemin H1.

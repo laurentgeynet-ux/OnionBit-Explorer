@@ -63,7 +63,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   Suffix List** (crate pur Rust type `psl` — sans elle, un jar
   naïf accepte les supercookies `.co.uk`) ; cache mémoire borné
   (ETag/Last-Modified) — disque optionnel en phase ultérieure.
-- [ ] **Étape 8. Redirections & politique.** Suivi 3xx borné, store
+- [x] **Étape 8. Redirections & politique.** Suivi 3xx borné, store
   **HSTS** mémoire borné, `http_proxy`/`no_proxy` honorés
   (fonctionnalité standard — la couture reste ouverte à tout
   transport mandataire futur : proxy d'entreprise, Tor…) ;

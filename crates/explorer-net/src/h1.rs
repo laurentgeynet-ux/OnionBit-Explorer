@@ -41,6 +41,14 @@ impl<T> IoStream for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 pub trait Connector: Send + Sync {
     /// Connecte à `(scheme, host, port)`.
     async fn connect(&self, scheme: &str, host: &str, port: u16) -> NetResult<Box<dyn IoStream>>;
+
+    /// `true` si les requêtes `scheme://host` doivent partir en
+    /// *absolute-form* (proxy HTTP : `GET http://h/p HTTP/1.1`).
+    /// `false` par défaut — *origin-form*.
+    fn absolute_form(&self, scheme: &str, host: &str) -> bool {
+        let _ = (scheme, host);
+        false
+    }
 }
 
 /// Connecteur TCP en clair — `http:` et `file:`-sans-hôte refusés
@@ -115,6 +123,8 @@ struct PoolKey {
 struct Pooled {
     stream: Box<dyn IoStream>,
     buf: Vec<u8>,
+    /// Requêtes en *absolute-form* (proxy HTTP).
+    absolute_form: bool,
 }
 
 /// Client HTTP/1.1 — implémente [`HttpTransport`].
@@ -162,6 +172,7 @@ impl H1Client {
         if let Some(p) = pooled {
             return Ok((p, true));
         }
+        let absolute_form = self.connector.absolute_form(&key.scheme, &key.host);
         let stream = timeout(
             self.cfg.connect_timeout,
             self.connector.connect(&key.scheme, &key.host, key.port),
@@ -176,6 +187,7 @@ impl H1Client {
             Pooled {
                 stream,
                 buf: Vec::new(),
+                absolute_form,
             },
             false,
         ))
@@ -196,14 +208,19 @@ impl H1Client {
             .map_err(NetError::Io)
     }
 
-    fn write_request(&self, req: &Request) -> Vec<u8> {
+    fn write_request(&self, req: &Request, absolute_form: bool) -> Vec<u8> {
         let mut s = String::with_capacity(512);
-        let _ = write!(
-            s,
-            "{} {} HTTP/1.1\r\n",
-            req.method.as_str(),
+        let target = if absolute_form {
+            // Proxy HTTP : *absolute-form* `GET http://h[:p]/path?q`.
+            let mut a = format!("{}://{}", req.url.scheme(), req.url.host());
+            if let Some(p) = req.url.port() {
+                let _ = write!(a, ":{p}");
+            }
+            format!("{a}{}", req.url.path_query())
+        } else {
             req.url.path_query()
-        );
+        };
+        let _ = write!(s, "{} {} HTTP/1.1\r\n", req.method.as_str(), target);
         // Host — inclut le port explicite (pas le port par défaut).
         let mut host = req.url.host();
         if let Some(p) = req.url.port() {
@@ -234,7 +251,7 @@ impl HttpTransport for H1Client {
         };
 
         let (mut conn, reused) = self.take_conn(&key, req).await?;
-        let wire = self.write_request(req);
+        let wire = self.write_request(req, conn.absolute_form);
 
         let res = self.roundtrip(req, &mut conn, &wire).await;
         match res {
@@ -256,6 +273,7 @@ impl HttpTransport for H1Client {
                             .connect(&key.scheme, &key.host, key.port)
                             .await?,
                         buf: Vec::new(),
+                        absolute_form: self.connector.absolute_form(&key.scheme, &key.host),
                     };
                     let mut resp = self.roundtrip(req, &mut fresh, &wire).await?;
                     resp.reused_connection = false;
