@@ -200,6 +200,10 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
   jamais d'accès invalide (ADR-0008).
 - **Corpus > intuition** : la compat se mesure en % sur les suites
   publiques trackées (ADR-0010), pas sur « ça a l'air de marcher ».
+  Et **jamais un % sans son dénominateur** : un score se rapporte
+  « x/y exécutés (z skips) sur sous-ensemble S » — test262 extrait
+  ≠ test262, un dossier WPT ≠ WPT. Le cliquet verrouille une
+  régression, il ne mesure pas une couverture globale.
 
 ## 9. Ce qui n'est PAS ce projet
 

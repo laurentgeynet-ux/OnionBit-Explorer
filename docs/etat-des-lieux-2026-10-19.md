@@ -59,6 +59,17 @@ arbre de travail non commité, en attente de validation finale.
 | Sites réels smoke | **5/5** (example.com, info.cern.ch, duckduckgo, wikipedia, MDN) |
 | Bench pipeline (criterion) | navigate ≈ 63 ms, scroll repaint ≈ 19 ms |
 
+**Limites des mesures** (à lire avec le tableau) : les scores de
+corpus portent sur des **sous-ensembles extraits**, pas sur les
+suites complètes — test262 : 1 077 fichiers lexicaux sur ~50 000
+(littéraux, commentaires, identifiants, whitespace ; aucun
+`builtins/` ni `statements/` — l'extension est JS-C30) ; WPT :
+40 reftests de deux dossiers (`floats`, `normal-flow`). Le
+cliquet verrouille une régression, il n'exprime pas une
+couverture globale ; les chiffres ci-dessus ne peuvent pas être
+lus comme des % de conformité aux suites entières. Le signal le
+moins gonflable est le smoke sites réels.
+
 ## 3. État par module
 
 | Module | État | Forces | Lacunes / restes |
@@ -152,10 +163,13 @@ l'historique montre que les pistes `dillo-js` / `explorer-*` ne
 se touchent quasiment jamais. Un découpage MOTEUR/JS serait le
 choix le plus confortable — mais l'état des lieux le contredit :
 
-- **`dillo-js` est en avance de phase** : test262 859/859,
-  ES2026 quasi complet — le moteur couvre un langage que le
-  navigateur ne peut pas encore exploiter (pas de `<script
-  src>`, pas d'événements complets, pas de XHR câblé).
+- **`dillo-js` est en avance de phase** : couverture langue
+  large (Promise, Proxy, Temporal partiel, modules — démontrée
+  par ses tests internes ; le score test262 reste un sous-
+  ensemble lexical extrait, cf. limites §2) — le moteur couvre
+  un langage que le navigateur ne peut pas encore exploiter
+  (pas de `<script src>`, pas d'événements complets, pas de
+  XHR câblé).
 - Son travail restant est réduit et **piloté par le navigateur** :
   MutationObserver, traverse proxy XHR/storage, canvas, workers —
   ~4 livrables d'intégration puis couverture réactive. Pas de quoi
