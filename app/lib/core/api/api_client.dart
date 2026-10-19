@@ -55,8 +55,10 @@ class ApiClient {
   }) =>
       _send('POST', path, body: body, query: query);
 
-  /// `DELETE` → JSON décodé.
-  Future<dynamic> deleteJson(String path) => _send('DELETE', path);
+  /// `DELETE` → JSON décodé (corps optionnel — `?url=` pour
+  /// les signets).
+  Future<dynamic> deleteJson(String path, {Map<String, dynamic>? body}) =>
+      _send('DELETE', path, body: body);
 
   /// `GET` → octets bruts (frame PNG — `GET /api/tabs/{id}/frame`).
   Future<List<int>> getBytes(String path) async {

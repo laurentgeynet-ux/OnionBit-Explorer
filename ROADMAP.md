@@ -204,7 +204,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
 
 L'UI évolue **au fil des phases backend** ; cette phase consolide.
 
-- [ ] **Étape 29. Chrome navigateur.** Omnibox, onglets,
+- [x] **Étape 29. Chrome navigateur.** Omnibox, onglets,
   boutons back/forward/reload, états de chargement via SSE.
 - [ ] **Étape 30. Viewport & transport direct.** Affichage frame PNG
   (MVP) puis canal direct mémoire partagée / buffer brut (ADR-0004),
@@ -261,6 +261,27 @@ d'intégration, pas par la couverture :
   **Score : 836/859 (97 %)** — résidu : attributs de
   propriétés, strict runtime (`ReferenceError`), backrefs,
   modificateurs regexp ES2025.
+- [x] **JS-C2. Attributs de propriétés + strict runtime** :
+  `PropAttrs` `{writable, enumerable, configurable}` sur
+  data/accessor (`Prop::Data`/`Prop::Acc`), `[[Extensible]]`,
+  `[[DefineOwnProperty]]` simplifié (fusion, rejet
+  non-configurable), `[[Set]]`/`[[Delete]]` ordinaires respectant
+  les flags. API surface : `Object.defineProperty` descripteur
+  complet, `defineProperties`, `getOwnPropertyDescriptor(s)`,
+  `create(proto, map)`, `setPrototypeOf` (+ rejet cycle),
+  `freeze`/`seal`/`preventExtensions`/`is*`, `isPrototypeOf`.
+  Constantes verrouillées (`undefined`, `NaN`, `Infinity`,
+  `Math.*`, `Number.*`), `lastIndex` `{w,e¬,c¬}`, `var` global
+  non-configurable. Strict runtime : `FnLit::strict`/`Program::
+  strict` propagés (corps de classe toujours stricts),
+  `ReferenceError` identifiant non déclaré, `TypeError` écriture
+  refusée/delete non-configurable/assign `const`, `this` sloppy
+  coercé en global — `eval` direct hérite du strict appelant
+  (`parse_in`). Fix : `TextEncoder`/`TextDecoder`/`Symbol` ne
+  partagent plus `Object.prototype` (`constructor` correct).
+  **Score : 851/859 (99 %)** — résidu : backrefs/lookahead
+  regexp (limite du crate `regex`), modificateurs ES2025,
+  validations `u` profondes.
 - [ ] **JS-C. Couverture par besoin** : modules ES
   (`import`/`export` + graphe de chargeur), `Proxy`, `Intl`,
   regex lookahead/backrefs — ordre piloté par les pages réelles.

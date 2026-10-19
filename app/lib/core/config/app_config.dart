@@ -6,7 +6,7 @@
 /// (AGENTS.md §4.13 : aucune valeur en dur ailleurs).
 class AppConfig {
   const AppConfig({
-    this.daemonBaseUrl = 'http://127.0.0.1:8321',
+    this.daemonBaseUrl = 'http://127.0.0.1:9377',
     this.apiKey = '',
     this.connectTimeout = const Duration(seconds: 5),
     this.requestTimeout = const Duration(seconds: 10),

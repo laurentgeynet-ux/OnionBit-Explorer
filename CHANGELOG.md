@@ -9,6 +9,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 29 — chrome navigateur Flutter** (`app/`) :
+  `BrowserController` (`NotifierProvider` Riverpod 3) pilote
+  le daemon via `BrowserRepository` (CRUD onglets, navigate,
+  reload, back, forward — `BrowserTab.fromJson` mappe
+  `can_back`/`can_forward`) et applique les événements SSE
+  (`navigated`, `title_changed`, `frame_invalidated` →
+  `frameTick`, `pipeline_error` → snackbar, `tab_closed`) ;
+  `loading` optimiste à la soumission, `daemonOnline` prouvé
+  par le bootstrap + bandeau « injoignable » + retry.
+  `BrowserPage` : barre d'onglets (titre/spinner/fermeture +
+  « + »), boutons nav conditionnés par `canBack`/`canForward`,
+  omnibox synchronisée et complétion de schéma. Port daemon
+  aligné sur 9377, `EventsClient` rend son délai de
+  reconnexion annulable (timer purgé au `dispose`), repo
+  enrichi (`listTabs`, actions, `DELETE` avec corps).
+  6 tests : contrôleur (fake repo + SSE injectés) et widget
+  fumée.
+
+### Fixed
+
+- `BrowserRepository.createTab` acceptait seulement un `id`
+  texte — l'API renvoie un numérique (`'${id}'`).
+
 - **Étape 28 — profil persistant (historique + signets)** :
   port `ProfileStore` injecté dans `Session` (`record_visit`,
   `load_bookmarks`, `save_bookmarks`, `history` — le core
@@ -240,6 +263,47 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     `ReferenceError` strict au runtime, backrefs/lookahead
     regex, modificateurs ES2025, `eval` héritant le strict.
   15 tests de régression `tests/lang.rs`.
+- **JS-C2 — attributs de propriétés + strict runtime**
+  (`dillo-js`) : **851/859 (99 %), 8 échecs résiduels** —
+  progression 836 → 851.
+  - modèle : `PropAttrs` `{writable, enumerable, configurable}`
+    sur `Prop::Data`/`Prop::Acc` + `[[Extensible]]` (remplace
+    `enumerable` seul + `frozen`) — `[[DefineOwnProperty]]`
+    simplifié (fusion des champs absents, `writable` ne peut
+    que rétrécir sur prop verrouillée), `[[Set]]`/`[[Delete]]`
+    ordinaires respectant flags/extensibilité/accès proto ;
+  - API : `Object.defineProperty` descripteur complet
+    (`value`/`writable`/`enumerable`/`configurable`/`get`/`set`,
+    data-vs-accessor exclusif), `defineProperties`,
+    `getOwnPropertyDescriptor(s)`, `create(proto, map)`,
+    `setPrototypeOf` (+ rejet de cycle et non-extensible),
+    `freeze`/`seal`/`preventExtensions` + `isFrozen`/`isSealed`/
+    `isExtensible`, `isPrototypeOf` — constantes verrouillées
+    `{w,e,c} = false` (`undefined`, `NaN`, `Infinity`, `Math.*`,
+    `Number.*`), `regexp.lastIndex` `{w:true,e,c}` non
+    configurable, `var` global non-configurable ;
+  - strict runtime : `FnLit::strict`/`Program::strict` propagés
+    au moteur (corps de classe stricts par spec), écriture sur
+    identifiant non déclaré → `ReferenceError`, écriture refusée
+    (non-writable own/héritée, accessor sans setter, primitive,
+    objet gelé) → `TypeError` strict vs silence sloppy, `delete`
+    non-configurable → `TypeError`, assignation `const` →
+    `TypeError` dans les deux modes, `this` coercé vers le
+    global en sloppy (`undefined` préservé en strict), `eval`
+    direct hérite du strict appelant (`parse_in` — early errors
+    comprises) ;
+  - fix : `TextEncoder`/`TextDecoder`/`Symbol` installaient
+    `constructor` sur `Object.prototype` partagé —
+    `objInstance.constructor` retournait le mauvais ctor ;
+  - `delete ident` : liaison d'env record → `false`, sinon
+    `[[Delete]]` sur l'objet global (global implicite
+    configurable → `true`) ;
+  - résidu (8 tests) : backrefs/forward-refs regexp (`\1`,
+    `\k<a>` avant `(?<a>…)`), lookahead, modificateurs ES2025,
+    case-mapping non-`u`, validations `u` profondes — limites
+    du crate `regex` documentées.
+  3 tests de régression `tests/lang.rs` (descripteurs,
+  freeze/seal, strict runtime).
 - **JS-B — harness test262 (ADR-0010)** : extrait versionné de
   la suite ECMAScript officielle @ `d53ebc8` (1077 fichiers,
   sous-ensembles `test/language/{types,literals,comments,

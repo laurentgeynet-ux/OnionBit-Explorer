@@ -26,6 +26,8 @@ class EventsClient {
   final HttpClient _http;
   StreamSubscription<Object>? _sub;
   bool _closed = false;
+  Timer? _retryTimer;
+  Completer<void>? _retryWake;
 
   /// Stream des événements parsés. Démarre la connexion SSE ;
   /// `EventSource` ne posant pas d'en-têtes, la clé part en `?key=`.
@@ -76,13 +78,19 @@ class EventsClient {
         // Daemon absent/coupé → délai puis retry (tolérance).
       }
       if (!_closed && !ctrl.isClosed) {
-        await Future<void>.delayed(config.sseReconnectDelay);
+        // Délai de reconnexion annulable : `dispose` réveille
+        // la boucle immédiatement au lieu d'attendre le timer.
+        _retryWake = Completer<void>();
+        _retryTimer = Timer(config.sseReconnectDelay, _retryWake!.complete);
+        await _retryWake!.future;
       }
     }
   }
 
   Future<void> dispose() async {
     _closed = true;
+    _retryTimer?.cancel();
+    if (_retryWake?.isCompleted == false) _retryWake?.complete();
     await _sub?.cancel();
     _http.close();
   }
