@@ -1421,3 +1421,57 @@ fn rawtext_serialization_is_verbatim() {
         "aucune fuite hors script : {s3}"
     );
 }
+
+/// Étape 55f — le chemin du sous-arbre sale : mutations
+/// rapportées par `take_dirty_path` au format
+/// `(tag, index)` depuis la racine ; un nœud détaché ne fixe
+/// pas la cible (couvert à l'attachement par la marque du
+/// parent) ; deux sous-arbres distincts escaladent à
+/// l'ancêtre commun.
+#[test]
+fn dirty_path_tracks_mutated_subtree() {
+    let mut dom = Dom::from_html(
+        "<html><body><div id=\"a\"><p>x</p></div><div id=\"b\">y</div></body></html>",
+    );
+    dom.take_dirty();
+    dom.take_dirty_path(); // purge construction (cf. install_dom)
+    assert_eq!(dom.take_dirty_path(), None, "rien de sale après purge");
+
+    let body = dom.parent(dom.by_id("b").unwrap()).unwrap();
+    // Mutation d'un nœud détaché puis attachement : la cible
+    // est le parent d'attachement, pas le fragment.
+    let frag = dom.create_element("span");
+    let text = dom.create_text("z");
+    dom.append(frag, text);
+    dom.append(body, frag);
+    assert_eq!(
+        dom.take_dirty_path(),
+        Some(vec![("html".to_string(), 0), ("body".to_string(), 0)]),
+        "l'attachement vise le parent, pas le fragment détaché"
+    );
+
+    // Deux sous-arbres distincts → ancêtre commun.
+    let first = dom.by_id("a").unwrap();
+    let second = dom.by_id("b").unwrap();
+    dom.set_attr(first, "class", "m");
+    dom.set_attr(second, "class", "n");
+    assert_eq!(
+        dom.take_dirty_path(),
+        Some(vec![("html".to_string(), 0), ("body".to_string(), 0)]),
+        "mutations dispersées → ancêtre commun (body)"
+    );
+
+    // Une seule cible → son propre chemin.
+    let para = dom.element_children(first)[0];
+    dom.set_text(dom.child_nodes(para)[0], "q");
+    assert_eq!(
+        dom.take_dirty_path(),
+        Some(vec![
+            ("html".to_string(), 0),
+            ("body".to_string(), 0),
+            ("div".to_string(), 0),
+            ("p".to_string(), 0)
+        ]),
+        "mutation localisée → sous-arbre précis"
+    );
+}

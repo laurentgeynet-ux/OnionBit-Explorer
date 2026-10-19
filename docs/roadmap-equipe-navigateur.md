@@ -308,12 +308,16 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `animation_decls`+`keyframe_style` au moteur d'animations
   + tick au pump de timers (sinon l'animation est figée
   entre deux pulls).
-- [ ] **Étape 55f. `relayout_subtree` adopté en session**
+- [x] **Étape 55f. `relayout_subtree` adopté en session**
   (adoption R-12, §10.5b — mesuré : mutation DOM = re-parse
   + relayout global) : `apply_dom_sync`/`repaint` doivent
   viser le sous-arbre sale (`Relayout::Done`) et ne retomber
   en reflow que sur `NeedsFullLayout` — bench PIPE :
   ~33 ms → ~1,9 ms feuille, soit ~17× sur mutation locale.
+  Livré : miroir → `dirty_node`/`take_dirty_path`, contrat
+  `sync_dom_path` (`DomSyncPayload`), remap pré-relayout des
+  boîtes conservées (ids non stables au re-parse), repli
+  sûr sur `NeedsFullLayout`/id irrésolvable.
 - [x] **Étape 56. Profil persisté complet** (ex-64) : cookies
   (`cookies.json` via `ProfileStore`, session exclus),
   localStorage (cf. 51), **cache disque borné**

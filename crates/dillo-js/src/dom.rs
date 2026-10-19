@@ -164,6 +164,12 @@ pub struct Dom {
     /// lit (et efface) le flag pour savoir si le rendu doit être
     /// resynchronisé avec le miroir (JS-5b).
     dirty: Cell<bool>,
+    /// Nœud couvrant toutes les mutations depuis la dernière
+    /// synchro (étape 55f) — escaladé au plus proche ancêtre
+    /// commun quand les mutations frappent des sous-arbres
+    /// distincts. Sert à viser le relayout incrémental
+    /// (`relayout_subtree`) au lieu d'un reflow global.
+    dirty_node: Cell<Option<NodeId>>,
     /// Registrations `MutationObserver` : `cible → options`
     /// (un observer peut suivre plusieurs cibles — JS-C26).
     observers: HashMap<NodeId, Vec<MutObsReg>>,
@@ -187,6 +193,7 @@ impl Dom {
             nodes: Vec::new(),
             root: 0,
             dirty: Cell::new(false),
+            dirty_node: Cell::new(None),
             observers: HashMap::new(),
             mutations: Vec::new(),
         };
@@ -307,7 +314,8 @@ impl Dom {
             return;
         }
         let old = std::mem::replace(&mut self.nodes[node as usize].text, text.to_string());
-        self.dirty.set(true);
+        // Le nœud texte se reboîte via son élément parent.
+        self.mark_dirty_at(self.parent(node).unwrap_or(node));
         self.queue_mutation(&MutationRecord {
             ty: "characterData",
             target: node,
@@ -321,13 +329,95 @@ impl Dom {
     }
 
     /// Dirty = mutation depuis la dernière synchro de rendu.
+    /// Cible inconnue → tout le document (conservateur).
     pub fn mark_dirty(&self) {
+        self.mark_dirty_at(self.root);
+    }
+
+    /// Marque le document sale **avec** la cible `node`
+    /// (étape 55f) — escalade à l'ancêtre commun si un autre
+    /// sous-arbre était déjà sale. Un nœud **détaché** du
+    /// document ne fixe pas la cible : sa mutation devient
+    /// visible à l'attachement, qui marque le parent
+    /// (évite qu'un fragment hors-arbre n'escalade la cible
+    /// à la racine).
+    pub fn mark_dirty_at(&self, node: NodeId) {
         self.dirty.set(true);
+        if node != self.root && !self.is_ancestor(self.root, node) {
+            return;
+        }
+        let next = match self.dirty_node.get() {
+            Some(d) if d == node => d,
+            Some(d) => self.common_ancestor(d, node),
+            None => node,
+        };
+        self.dirty_node.set(Some(next));
+    }
+
+    /// Plus proche ancêtre commun de `a` et `b` (racine
+    /// `#document` en dernier recours).
+    fn common_ancestor(&self, a: NodeId, b: NodeId) -> NodeId {
+        let mut x = a;
+        while !self.is_ancestor(x, b) {
+            match self.parent(x) {
+                Some(p) => x = p,
+                None => return self.root,
+            }
+        }
+        x
+    }
+
+    /// `a` est un ancêtre strict de `b` (ou `a == b`).
+    fn is_ancestor(&self, a: NodeId, b: NodeId) -> bool {
+        let mut cur = Some(b);
+        while let Some(n) = cur {
+            if n == a {
+                return true;
+            }
+            cur = self.parent(n);
+        }
+        false
     }
 
     /// Lit et efface le flag de mutation (≙ « dirty bit » des toolkits).
     pub fn take_dirty(&self) -> bool {
         self.dirty.replace(false)
+    }
+
+    /// Chemin `(tag, index parmi les frères éléments de même
+    /// tag)` du sous-arbre sale depuis la racine — même format
+    /// que `element_path` côté session (étape 55f : il survit
+    /// au re-parse contrairement aux `NodeId`). `Some(vec![])`
+    /// = cible non résolvable (nœud détaché) → document entier,
+    /// conservateur. `None` = rien de sale.
+    pub fn take_dirty_path(&self) -> Option<Vec<(String, u32)>> {
+        let node = self.dirty_node.take()?;
+        Some(self.element_path(node).unwrap_or_default())
+    }
+
+    /// `element_path` du nœud `n` (remonté à l'élément le plus
+    /// proche) — `None` si le nœud est détaché du document.
+    fn element_path(&self, mut n: NodeId) -> Option<Vec<(String, u32)>> {
+        while self.nodes[n as usize].kind != NodeKind::Element
+            || self.nodes[n as usize].tag == "#document"
+        {
+            n = self.parent(n)?;
+        }
+        let mut path = Vec::new();
+        let mut cur = n;
+        while let Some(p) = self.parent(cur) {
+            let tag = self.nodes[cur as usize].tag.clone();
+            let k = self.nodes[p as usize]
+                .children
+                .iter()
+                .take_while(|&&c| c != cur)
+                .filter(|&&c| self.nodes[c as usize].tag == tag)
+                .count();
+            path.push((tag, k as u32));
+            cur = p;
+        }
+        path.reverse();
+        Some(path)
     }
 
     /// Sérialisation du document entier (source de re-rendu, JS-5b).
@@ -341,7 +431,7 @@ impl Dom {
         self.detach(child);
         self.nodes[child as usize].parent = Some(parent);
         self.nodes[parent as usize].children.push(child);
-        self.dirty.set(true);
+        self.mark_dirty_at(parent);
         let prev = {
             let kids = &self.nodes[parent as usize].children;
             kids.get(kids.len().saturating_sub(2)).copied()
@@ -371,7 +461,7 @@ impl Dom {
                     })
             };
             self.nodes[p as usize].children.retain(|&c| c != node);
-            self.dirty.set(true);
+            self.mark_dirty_at(p);
             self.nodes[node as usize].parent = None;
             self.queue_mutation(&MutationRecord::child_list(
                 p,
@@ -397,7 +487,7 @@ impl Dom {
             self.nodes[k as usize].parent = Some(node);
         }
         self.nodes[node as usize].children = kids.to_vec();
-        self.dirty.set(true);
+        self.mark_dirty_at(node);
         self.queue_mutation(&MutationRecord::child_list(
             node,
             kids.to_vec(),
@@ -447,7 +537,7 @@ impl Dom {
             None => self.nodes[parent as usize].children.push(child),
         }
         self.nodes[child as usize].parent = Some(parent);
-        self.dirty.set(true);
+        self.mark_dirty_at(parent);
         let (prev, next) = {
             let kids = &self.nodes[parent as usize].children;
             kids.iter()
@@ -487,7 +577,7 @@ impl Dom {
             self.nodes[parent as usize].children[i] = new;
             self.nodes[new as usize].parent = Some(parent);
             self.nodes[old as usize].parent = None;
-            self.dirty.set(true);
+            self.mark_dirty_at(parent);
             self.queue_mutation(&MutationRecord::child_list(
                 parent,
                 vec![new],
@@ -586,7 +676,7 @@ impl Dom {
         } else {
             attrs.push((name.to_lowercase(), value.to_string()));
         }
-        self.dirty.set(true);
+        self.mark_dirty_at(node);
         self.queue_mutation(&MutationRecord {
             ty: "attributes",
             target: node,
@@ -607,7 +697,7 @@ impl Dom {
         attrs.retain(|(k, _)| !k.eq_ignore_ascii_case(name));
         let removed = attrs.len() != before;
         if removed {
-            self.dirty.set(true);
+            self.mark_dirty_at(node);
             self.queue_mutation(&MutationRecord {
                 ty: "attributes",
                 target: node,

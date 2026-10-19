@@ -3583,3 +3583,92 @@ async fn frame_invalidated_reports_delta_not_history() {
     );
     assert_eq!(s.take_dirty(a), []);
 }
+
+/// Étape 55f — la synchro DOM vise le sous-arbre sale :
+/// un `appendChild` déclenché par événement doit passer par
+/// `relayout_subtree` (compteur `incremental_syncs`) plutôt
+/// qu'un reflow global, tout en produisant la même frame
+/// que la page statique équivalente.
+#[tokio::test]
+async fn dom_sync_uses_incremental_relayout() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=\"h\">x</div>\
+         <script>document.body.onclick=function(){\
+         var b=document.createElement('div');b.textContent='AJOUT';\
+         document.body.appendChild(b)}</script></body></html>",
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"h\">x</div>\
+         <div>AJOUT</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    let before = s.incremental_syncs();
+
+    s.handle_input(a, InputEvent::Click { x: 10.0, y: 10.0 })
+        .await
+        .unwrap();
+    assert!(
+        s.incremental_syncs() > before,
+        "la synchro DOM doit emprunter relayout_subtree (55f)"
+    );
+
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+    assert_eq!(
+        s.frame_png(a),
+        s.frame_png(b),
+        "le rendu incrémental doit égaler la page statique"
+    );
+}
+
+/// Étape 55f — borne conservatrice : un flottant dans le
+/// document rend le rejeu local impossible (`FloatCtx`
+/// perdu) — la synchro retombe sur le reflow global et le
+/// rendu reste correct (le compteur incrémental ne bouge
+/// pas).
+#[tokio::test]
+async fn dom_sync_falls_back_when_floats_present() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div style=\"float:left\">f</div>\
+         <script>document.body.onclick=function(){\
+         var b=document.createElement('div');b.textContent='AJOUT';\
+         document.body.appendChild(b)}</script></body></html>",
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div style=\"float:left\">f</div>\
+         <div>AJOUT</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    let before = s.incremental_syncs();
+
+    s.handle_input(a, InputEvent::Click { x: 10.0, y: 10.0 })
+        .await
+        .unwrap();
+    assert_eq!(
+        s.incremental_syncs(),
+        before,
+        "flottant → repli conservateur sur reflow global"
+    );
+
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+    assert_eq!(
+        s.frame_png(a),
+        s.frame_png(b),
+        "le repli doit produire la même frame que la page statique"
+    );
+}

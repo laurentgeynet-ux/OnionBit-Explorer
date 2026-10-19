@@ -27,7 +27,9 @@ use explorer_html::encoding::{decode, decode_windows1252, sniff_encoding, Encodi
 use explorer_html::TreeBuilder;
 use explorer_js::{JsEngine, JsFactory, NavRequest, NetRequest, NetResponse, UrlResolver};
 use explorer_layout::font::FontSource;
-use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, LayoutBox, Rect};
+use explorer_layout::{
+    build_box_tree_sized, layout_tree, relayout_subtree, BlockCtx, LayoutBox, Rect, Relayout,
+};
 use explorer_net::cookies::{Cookie, CookieJar, SameSite};
 use explorer_net::error::NetResult;
 use explorer_net::http::{HttpTransport, Method, Request, Response};
@@ -992,6 +994,9 @@ pub struct Session {
     /// Pages gelées par onglet dans le bfcache
     /// (`bfcache_pages` de config, étape 56).
     bfcache_pages: usize,
+    /// Compteur de relayouts incrémentaux réussis (étape
+    /// 55f) — diagnostic, lu par les tests de régression.
+    incremental_syncs: u32,
 }
 
 impl Session {
@@ -1045,7 +1050,18 @@ impl Session {
             paint_chunk_bytes: cfg.paint_chunk_bytes,
             paint_interval: std::time::Duration::from_millis(cfg.paint_interval_ms),
             bfcache_pages: cfg.bfcache_pages,
+            incremental_syncs: 0,
         }
+    }
+
+    /// Nombre de synchros DOM résolues par relayout
+    /// incrémental (`relayout_subtree`, étape 55f) — reste
+    /// de la session. Diagnostic interne pour les tests de
+    /// régression — pas un contrat d'API.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn incremental_syncs(&self) -> u32 {
+        self.incremental_syncs
     }
 
     /// Branche la fabrique de moteurs JS (`DilloEngine::factory()`
@@ -1364,10 +1380,10 @@ impl Session {
             let Some(eng) = entry.js.as_mut() else {
                 return 0;
             };
-            (eng.run_pending_bounded(max), eng.sync_dom())
+            (eng.run_pending_bounded(max), eng.sync_dom_path())
         };
-        if let Some(html) = mutated {
-            self.apply_dom_sync(tab, &html, true);
+        if let Some((html, dirty)) = mutated {
+            self.apply_dom_sync(tab, &html, dirty.as_deref(), true);
         }
         if jobs > 0 {
             // Les callbacks ont pu émettre XHR/cookies/storage.
@@ -1832,8 +1848,8 @@ impl Session {
             // Miroir muté ? → re-parse : le relayout qui suit
             // rend les modifications (dirty bit consommé côté
             // moteur).
-            if let Some(mutated) = eng.sync_dom() {
-                self.apply_dom_sync(tab, &mutated, false);
+            if let Some((mutated, _)) = eng.sync_dom_path() {
+                self.apply_dom_sync(tab, &mutated, None, false);
             }
         }
         if let Some(entry) = self.tabs.get_mut(&tab) {
@@ -2232,10 +2248,10 @@ impl Session {
             }
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après réponse réseau");
-            eng.sync_dom()
+            eng.sync_dom_path()
         };
-        if let Some(html) = mutated {
-            self.apply_dom_sync(tab, &html, true);
+        if let Some((html, dirty)) = mutated {
+            self.apply_dom_sync(tab, &html, dirty.as_deref(), true);
         }
         self.after_script(tab);
     }
@@ -2527,9 +2543,22 @@ impl Session {
     /// (étape 52). `relayout` contrôle
     /// l'invalidation immédiate — vrai depuis les événements,
     /// faux pendant la navigation (qui relayout juste après).
-    fn apply_dom_sync(&mut self, tab: TabId, html: &str, relayout: bool) {
+    /// `dirty_path` = chemin du sous-arbre sale rapporté par
+    /// le miroir (étape 55f) — sert à viser
+    /// [`Self::try_sync_incremental`] au lieu du reflow global.
+    fn apply_dom_sync(
+        &mut self,
+        tab: TabId,
+        html: &str,
+        dirty_path: Option<&[(String, u32)]>,
+        relayout: bool,
+    ) {
         let new_dom = TreeBuilder::parse(html);
         let new_title = extract_title(&new_dom);
+        // Relayout incrémental (étape 55f) avant tout remplacement
+        // — il a besoin de l'ancien DOM et de l'ancien arbre.
+        let incremental =
+            relayout && dirty_path.is_some_and(|p| self.try_sync_incremental(tab, &new_dom, p));
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.dom = Some(new_dom);
             // `focused`/`hovered` sont des **chemins** — ils
@@ -2540,6 +2569,8 @@ impl Session {
             // indexés par nœud sont obsolètes (les `<img>`
             // nouveaux retombent sur `alt` jusqu'à la
             // prochaine navigation — borne documentée).
+            // En chemin incrémental `svgs`/`tree` sont déjà
+            // à jour ; `replaced` seule est vidée.
             entry.images = PaintImages::default();
             // Un re-parse de synchro rend obsolètes les
             // options figées du popup `<select>` — il se
@@ -2553,12 +2584,83 @@ impl Session {
             }
         }
         if relayout {
+            if incremental {
+                self.emit_invalidated(tab);
+                return;
+            }
             if let Err(e) = self.relayout(tab) {
                 tracing::debug!(tab, error = %e, "relayout après mutation js");
                 return;
             }
             self.emit_invalidated(tab);
         }
+    }
+
+    /// Relayout incrémental d'une synchro DOM (étape 55f —
+    /// adoption R-12) : le sous-arbre sale rapporté par le
+    /// miroir est reboîté + re-posé en place par
+    /// [`relayout_subtree`] **si** la cible résout au même
+    /// `NodeId` dans l'ancien et le nouveau DOM (le préfixe
+    /// structurel est alors stable — une mutation interne au
+    /// sous-arbre ne décale pas son propre id). Les boîtes
+    /// conservées portent d'anciens ids : re-mappés par
+    /// chemin d'élément — un id qui ne se re-résout pas
+    /// proprement renvoie `false` (l'appelant refait un
+    /// reflow global : l'arbre mixte est alors entièrement
+    /// reconstruit — toujours sûr).
+    fn try_sync_incremental(&mut self, tab: TabId, new_dom: &Dom, path: &[(String, u32)]) -> bool {
+        // Phase 1 — résolution de la cible sous emprunt court.
+        let resolve = |s: &Session, dom: &Dom| {
+            let entry = s.tabs.get(&tab)?;
+            let old_dom = entry.dom.as_ref()?;
+            entry.tree.as_ref()?;
+            let sizes = image_sizes(dom, &entry.images.replaced);
+            Some((dom_path_node(old_dom, path)?, sizes))
+        };
+        let Some((target_old, mut sizes)) = resolve(self, new_dom) else {
+            return false;
+        };
+        let Some(target_new) = dom_path_node(new_dom, path) else {
+            return false;
+        };
+        let Some(root_el) = new_dom.document_element() else {
+            return false;
+        };
+        let styles = self.compute_styles(tab, new_dom);
+        sizes.extend(explorer_render::svg::svg_sizes(new_dom, root_el));
+        let svgs = explorer_render::svg::collect_svg(new_dom, root_el, self.image_max_px);
+        let ctx = BlockCtx {
+            fonts: Some(&self.webfonts as &dyn FontSource),
+            ..BlockCtx::default()
+        };
+        // Phase 2 — remap des ids conservés + relayout local,
+        // sous emprunt mutable court. Le remap précède le
+        // relayout : `bx.node == target` doit comparer des
+        // ids du **nouveau** DOM (les indices d'arène ne sont
+        // pas stables au re-parse — la sérialisation n'est
+        // pas structure-identique).
+        {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return false;
+            };
+            let (Some(old_dom), Some(tree)) = (entry.dom.as_ref(), entry.tree.as_mut()) else {
+                return false;
+            };
+            if !remap_box_nodes(old_dom, new_dom, tree, target_old, target_new) {
+                return false; // id irrésolvable → reflow global de l'appelant
+            }
+            if relayout_subtree(tree, new_dom, &styles, &sizes, target_new, &ctx) != Relayout::Done
+            {
+                return false; // arbre mixte jeté → fallback sûr
+            }
+            entry.doc_h = tree.rect.height;
+            entry.images.svgs = svgs;
+        }
+        if self.repaint(tab).is_ok() {
+            self.incremental_syncs += 1;
+            return true;
+        }
+        false
     }
 
     /// `Navigated` + `TitleChanged` (si le titre change) +
@@ -2621,14 +2723,21 @@ impl Session {
     /// Pipeline style → layout → raster sur `dom` (emprunté —
     /// `relayout` pour le DOM posé, `nav_paint` pour le DOM
     /// en construction). Écrit `tree`/`doc_h`/frame/png.
-    fn relayout_dom(&mut self, tab: TabId, dom: &Dom) -> Result<(), CoreError> {
-        let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
-
+    /// Passe de styles partagée par le reflow complet et le
+    /// relayout incrémental (étape 55f) : cascade `<style>` +
+    /// `<link>`, calcul sur tout `dom`, surcharge des
+    /// transitions en vol. Effet de bord : `prev_styles`/
+    /// `transitions` de l'onglet mis à jour.
+    fn compute_styles(&mut self, tab: TabId, dom: &Dom) -> StyleMap {
         // Feuilles : `<style>` inline puis `<link>` fetchées
         // (étape 46) — même origine auteur, ordre source.
+        let linked = self
+            .tabs
+            .get(&tab)
+            .map_or_else(String::new, |e| e.linked_css.clone());
         let mut eng = StyleEngine::new();
         eng.add_css(&collect_style_css(dom), Origin::Author);
-        eng.add_css(&entry.linked_css.clone(), Origin::Author);
+        eng.add_css(&linked, Origin::Author);
         let mut styles = eng.compute_tree(dom, dom.document(), &StyleEnv::default());
         // Transitions (étape 45) : diff sur le brut, surcharge
         // des progressions — `prev_styles` conserve le map
@@ -2639,14 +2748,22 @@ impl Session {
             .iter()
             .filter_map(|(n, c)| ord_of.get(&n).map(|o| (*o, c.clone())))
             .collect();
-        update_transitions(
-            &entry.prev_styles,
-            &mut entry.transitions,
-            &mut styles,
-            &ord_of,
-            Instant::now(),
-        );
-        entry.prev_styles = raw;
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            update_transitions(
+                &e.prev_styles,
+                &mut e.transitions,
+                &mut styles,
+                &ord_of,
+                Instant::now(),
+            );
+            e.prev_styles = raw;
+        }
+        styles
+    }
+
+    fn relayout_dom(&mut self, tab: TabId, dom: &Dom) -> Result<(), CoreError> {
+        let styles = self.compute_styles(tab, dom);
+        let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
         let Some(root_el) = dom.document_element() else {
             return Err(CoreError::EmptyDocument);
         };
@@ -3349,10 +3466,10 @@ impl Session {
             };
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après événement");
-            (p, eng.sync_dom())
+            (p, eng.sync_dom_path())
         };
-        if let Some(html) = mutated {
-            self.apply_dom_sync(tab, &html, true);
+        if let Some((html, dirty)) = mutated {
+            self.apply_dom_sync(tab, &html, dirty.as_deref(), true);
         }
         // Les listeners ont pu émettre XHR/cookies/storage
         // (étape 51) — drains + livraison de ce qui est déjà
@@ -5739,6 +5856,67 @@ fn decode_stylesheet(body: &[u8], headers: &[(String, String)]) -> String {
     decode_subresource(body, css_charset(body).as_deref())
 }
 
+/// Re-mappe les `NodeId` des boîtes conservées **avant** le
+/// relayout incrémental (étape 55f) : l'arbre porte des ids
+/// de l'**ancien** DOM — chacun est re-résolu dans le
+/// nouveau par son chemin d'élément (les non-éléments via
+/// l'index dans les enfants du parent, inchangé hors
+/// sous-arbre). La racine du sous-arbre sale (`target_old`)
+/// est traduite en `target_new` et sa descendance n'est pas
+/// visitée — elle sera reconstruite par `relayout_subtree`.
+/// `false` = un id irrésolvable → l'appelant fait un reflow
+/// global (l'arbre mixte est alors jeté, jamais servi).
+fn remap_box_nodes(
+    old: &Dom,
+    new: &Dom,
+    root: &mut LayoutBox,
+    target_old: NodeId,
+    target_new: NodeId,
+) -> bool {
+    // Itératif — le parcours suit la profondeur du document
+    // (R-24 : ~300 <div> imbriqués réels, pas de récursion).
+    let mut stack = vec![root];
+    while let Some(bx) = stack.pop() {
+        if bx.node == Some(target_old) {
+            bx.node = Some(target_new);
+            continue;
+        }
+        if let Some(id) = bx.node {
+            let Some(fresh) = remap_node(old, new, id) else {
+                return false;
+            };
+            bx.node = Some(fresh);
+        }
+        stack.extend(bx.children.iter_mut());
+    }
+    true
+}
+
+/// `id` (ancien DOM) → `NodeId` équivalent dans `new` :
+/// éléments par `element_path`, non-éléments par index dans
+/// les enfants du parent (inchangé hors sous-arbre sale).
+fn remap_node(old: &Dom, new: &Dom, id: NodeId) -> Option<NodeId> {
+    if old.element(id).is_ok() {
+        return dom_path_node(new, &element_path(old, id)?);
+    }
+    let parent = old.parent(id).ok()??;
+    let new_parent = if old.element(parent).is_ok() {
+        dom_path_node(new, &element_path(old, parent)?)?
+    } else {
+        new.document()
+    };
+    let sibs = old.children(parent).ok()?;
+    let idx = sibs.iter().position(|&c| c == id)?;
+    let cand = new.children(new_parent).ok()?.get(idx).copied()?;
+    // Garde structurelle : élément ↔ élément (même tag),
+    // texte/commentaire ↔ non-élément.
+    let ok = match (old.element(id).is_ok(), new.element(cand).is_ok()) {
+        (true, true) => old.tag_name(id).ok() == new.tag_name(cand).ok(),
+        (false, false) => true,
+        _ => false,
+    };
+    ok.then_some(cand)
+}
 #[cfg(test)]
 mod tests {
     use super::*;

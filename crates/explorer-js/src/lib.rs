@@ -133,6 +133,16 @@ pub struct NetResponse {
     pub body: Vec<u8>,
 }
 
+/// Chemin `(tag, index parmi les frères éléments de même
+/// tag)` d'un sous-arbre depuis la racine du document —
+/// format partagé miroir ↔ session (étape 55f).
+pub type DomPath = Vec<(String, u32)>;
+
+/// Charge d'une synchro DOM : HTML sérialisé du miroir +
+/// chemin du sous-arbre sale (`None` = moteur sans suivi
+/// granulaire → l'appelant refait un reflow global).
+pub type DomSyncPayload = (String, Option<DomPath>);
+
 /// Moteur JavaScript vu du navigateur — un contexte par document.
 /// `Send` exigé : la session est partagée derrière l'API.
 pub trait JsEngine: Send {
@@ -200,6 +210,16 @@ pub trait JsEngine: Send {
     /// re-parse alors le document), `None` sinon.
     fn sync_dom(&mut self) -> Option<String> {
         None
+    }
+
+    /// [`Self::sync_dom`] + le chemin `(tag, index)` du
+    /// sous-arbre sale du miroir (étape 55f — même format que
+    /// `element_path` côté session : survit au re-parse,
+    /// sert à viser `relayout_subtree` au lieu d'un reflow
+    /// global ; `None` = moteur sans suivi → reflow complet).
+    /// Défaut : délègue à [`Self::sync_dom`] sans chemin.
+    fn sync_dom_path(&mut self) -> Option<DomSyncPayload> {
+        self.sync_dom().map(|h| (h, None))
     }
 
     /// Évalue un module ES (étape 50) : `entry` est le nom
@@ -356,7 +376,7 @@ enum Cmd {
         tx: Sender<Vec<NavRequest>>,
     },
     DomSync {
-        tx: Sender<Option<String>>,
+        tx: Sender<Option<DomSyncPayload>>,
     },
     EvalModule {
         entry: String,
@@ -507,7 +527,8 @@ impl DilloEngine {
                 Cmd::DomSync { tx } => {
                     let out = jsd.as_ref().and_then(|d| {
                         let d = d.borrow();
-                        d.take_dirty().then(|| d.serialize_document())
+                        d.take_dirty()
+                            .then(|| (d.serialize_document(), d.take_dirty_path()))
                     });
                     if tx.send(out).is_err() {
                         return;
@@ -616,6 +637,10 @@ impl JsEngine for DilloEngine {
     }
 
     fn sync_dom(&mut self) -> Option<String> {
+        self.sync_dom_path().map(|(html, _)| html)
+    }
+
+    fn sync_dom_path(&mut self) -> Option<DomSyncPayload> {
         let (tx, rx) = channel();
         if self.tx.send(Cmd::DomSync { tx }).is_err() {
             return None;
@@ -856,6 +881,11 @@ fn install_dom(
 ) -> dillo_js::DomRef {
     let d = std::rc::Rc::new(std::cell::RefCell::new(dillo_js::Dom::from_html(html)));
     d.borrow().take_dirty();
+    // La construction a aussi marqué un `dirty_node` (étape
+    // 55f) — le vider avec le flag, sinon un `#document`
+    // résiduel « empoisonne » l'ancêtre commun des marques
+    // suivantes (le chemin sale resterait vide à vie).
+    d.borrow().take_dirty_path();
     eng.install_dom(&d);
     // Timers hôtes (étape 52) : `setTimeout`/`setInterval`/
     // `clearTimeout`/`requestAnimationFrame` — les callbacks
