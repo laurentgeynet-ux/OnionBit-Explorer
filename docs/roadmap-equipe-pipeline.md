@@ -378,9 +378,28 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   table anonymes + stretch §17.5.3, shrink-to-fit §10.3.7,
   collapse à travers les vides. Score informatif 23,3 % →
   22,0 % (géométrie plus juste, comptage pixel encore bas) —
-  la structure du visage tient (front, yeux verts peints via
-  `data:` PNG, nez, sourire, `ul` en cellules 12 px) mais le
-  compactage vertical et les alignements fins restent à moudre.
+  la structure du visage tient (front, nez, sourire, `ul` en
+  cellules 12 px) mais le compactage vertical et les
+  alignements fins restent à moudre. **Correction terrain
+  mission 11** : contrairement à la lecture initiale, les
+  yeux verts sont **absents** (0 px vert mesuré — la chaîne
+  `<object>`→`data:` PNG ne peint toujours pas) et le visage
+  reste ~y2650 au lieu de ~y1400 (compactage vertical).
+  **Métrique** : le score pixel global punit la convergence
+  (un offset corrigé réduit le recouvrement avant de
+  l'augmenter) — compléter par un tableau par composant
+  (front/yeux/nez/sourire/fond : présent/partiel/absent)
+  dans le harnais `tests/acid2.rs`.
+  **Salve 2** : items flex/grid blockifiés (plus de bloc anonyme
+  unique), contenu en-ligne des `inline-block` items coulé via
+  `layout_inline` (le texte restait 0×0), marges items flex
+  (axe principal + cross, §9.4), shorthands `flex-flow`/`flex`/
+  `gap`, harnais `.xhtml` normalisé (`<t/>` auto-fermant),
+  corpus +19 reftests flexbox/grid, cliquet 38 → 40/58.
+  Reste : `column wrap` multi-colonnes, `margin:auto` vertical
+  en column, écarts fins `justify-content`/`align-items`,
+  `fr`/`grid` margins — chacun devient une étape si le triage
+  le justifie.
 
 ## Tâches continues
 

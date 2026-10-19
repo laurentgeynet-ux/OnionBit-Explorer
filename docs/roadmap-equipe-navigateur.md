@@ -294,7 +294,11 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   handle FFI garde un receveur inerte, un vrai drain
   l'affamerait). Limite documentée : après `scroll` les
   rects = document entier (défilement cuit dans le raster —
-  inutilisable pour un pull partiel).
+  inutilisable pour un pull partiel). **Vérifié terrain
+  mission 11** : 38 deltas sur 41 événements, zéro collapse
+  permanent au-delà de 32 — mais 2 pleins cadres
+  sporadiques (~clic 16/32, périodicité à creuser : tick
+  timer ou GC déclenchant un full relayout ?).
 - [ ] **Étape 55e. `@keyframes` cadencés en session**
   (adoption R-10, règle AGENTS §10.5b — confirmé non-câblé
   par `anim.html` : frames identiques à 400 ms) : zéro
@@ -330,6 +334,42 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   restauré, FIFO exact (5ᵉ back sur page évincée = re-fetch),
   `back` sur un POST retombe sur la page résultats (61 ms —
   l'entrée est désormais poussée), forward re-gel instantané.
+  **Vérifié terrain mission 11** : profil complet (cookie +
+  localStorage + cache disque) survit à `taskkill /F` ×2 —
+  nav post-kill = 0 hit serveur.
+- [ ] **Étape 56b. `/frame` → 204 transitoire après commit**
+  (terrain mission 11) : première nav `World_Wide_Web` —
+  `navigated` émis, `frame_invalidated` avec rects, mais
+  `/frame` répond 204 persistant (scroll bloqué à 0,
+  hit-test mort) jusqu'au `back` qui restaure une frame.
+  Fenêtre commit/repaint : le commit a lieu mais le produit
+  peint n'atterrit pas (ou est écrasé) dans certains
+  timings — renav vers la même URL peint correctement.
+- [ ] **Étape 56c. État hybride bfcache après back+navigate**
+  (terrain mission 11, repro A→B→back→`navigate B`) :
+  `navigate` vers l'URL forward pendant `can_forward:true`
+  peint le **snapshot bfcache de B** mais l'entry courante
+  reste A — l'onglet affiche B, hit-test et `/status` url
+  restent sur A (liens de A résolus sous la frame de B).
+  Fix attendu : `navigate` vers l'URL forward doit soit
+  restaurer l'entrée forward (commit complet), soit
+  refuser — jamais peindre le snapshot d'une autre entrée
+  sans la commettre.
+- [ ] **Étape 56d. `#fragment` = navigation complète, sans
+  scroll** (terrain mission 11 — `anchor.html` + footnote
+  wikipedia) : clic sur `href="#id"` ou `name=` →
+  `navigated` émis, nouvelle entrée d'historique,
+  `frame_invalidated` plein document — mais `scroll_y`
+  reste 0 : jamais de déplacement vers la cible. Fix :
+  post-commit, résoudre le fragment (id puis `name`) et
+  scroller à sa position — sans re-fetch si même document.
+- [ ] **Étape 56e. `<img src>` jamais fetchée en session**
+  (terrain mission 11 — `cache_server` `/page` avec
+  `<img src=img.png>` : nav complète, zéro requête serveur
+  pour l'image). Le scheduler de sous-ressources ne
+  déclenche pas le fetch `<img>` — SVG passe (DOM-sérialisé)
+  mais une image bitmap référencée reste jamais réclamée.
+  À câbler comme les autres sous-ressources de 53/53b.
 - [ ] **Étape 57. UI Flutter v2** (ex-65) : thème clair
   (`tokens.json` variante), settings (moteur REST/FFI, thème,
   profil), UI historique + bookmarks (store core existant),
