@@ -247,6 +247,12 @@ impl Heap {
                     push_value(out, v);
                 }
             }
+            ObjKind::Proxy { target, handler } => {
+                push_value(out, *target);
+                if let Some(h) = handler {
+                    push_value(out, *h);
+                }
+            }
             ObjKind::Ordinary
             | ObjKind::RegExp(_)
             | ObjKind::Symbol(_)
@@ -482,6 +488,16 @@ pub enum ObjKind {
     /// `typeof` → `"symbol"`). Well-known symbols stay string
     /// sentinels (`SYM_ITERATOR` — prop keys are strings).
     Symbol(Option<String>),
+    /// `new Proxy(target, handler)` — `[[ProxyTarget]]` +
+    /// `[[ProxyHandler]]` (`None` une fois révoqué → toute
+    /// opération lève `TypeError`). Toutes les méthodes internes
+    /// sont interceptées par les traps côté moteur (interp.rs).
+    Proxy {
+        /// `[[ProxyTarget]]`.
+        target: Value,
+        /// `[[ProxyHandler]]` — `None` après `revoke()`.
+        handler: Option<Value>,
+    },
     /// `fetch` Response — body + headers delivered by the embedder's
     /// transport (`status`/`statusText`/`ok` are plain own props);
     /// `text()`/`json()` read `body` as resolved promises.

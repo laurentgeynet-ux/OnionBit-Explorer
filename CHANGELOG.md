@@ -9,6 +9,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 35 — bindings DOM par miroir synchronisé**
+  (`explorer-js`, `explorer-core`) : `JsEngine` gagne
+  `install_dom(html)` + `sync_dom()` (no-op par défaut).
+  `DilloEngine` : le worker installe la surface DOM
+  complète de `dillo-js` (`document`, `navigator`,
+  `window`, `getElementById`, `querySelector`,
+  `createElement`/`appendChild`/`textContent`/`innerHTML`,
+  attributs…) sur un `dillo_js::Dom` parsé depuis le HTML
+  source — **aucune ligne de binding réécrite**, la
+  vérité script vit dans le miroir `Rc`. `sync_dom()`
+  sonde le dirty bit ; si levé, le core re-parse
+  `serialize_document()` dans `explorer-dom` → relayout
+  → `frame_invalidated` (les `NodeId` générationnels ne
+  traversent jamais la frontière — la génération reste
+  interne à chaque arène). Le titre est relu au passage
+  (`TitleChanged` si mutation indirecte de `<title>`).
+  Limites documentées : miroir re-parsé (divergence
+  possible vs corrections HTML5), `document.title=` non
+  setter en amont, synchro en fin de navigation uniquement
+  (boucle d'événements = étape 36). 4 tests adaptateur +
+  2 tests session bout en bout (PNG muté ≡ PNG statique).
+
 - **Étape 34 — intégration `dillo-js`** (`explorer-js`,
   `explorer-core`, `explorer-daemon`) : trait `JsEngine`
   (`Send`) — `eval` → complétion décrite, `run_pending`,
@@ -406,6 +428,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`upper(v) == upper(borne)`) ; backrefs wrappées `(?i:…)`.
   16 assertions de régression `tests/lang.rs`
   (`regexp_js_c3_semantics`).
+- **JS-C4 — `Proxy` complet** (`dillo-js`) : `ObjKind::Proxy
+  {target, handler}` (tracé GC, `handler: None` = révoqué) — les
+  13 méthodes internes routées : `get`/`set`/`has`/`deleteProperty`
+  (chemins `read_prop`/`write_prop`/`has_prop`/`delete_result`),
+  `ownKeys` + `getOwnPropertyDescriptor` (énumérations
+  `Object.keys`/`getOwnPropertyNames`/`Reflect.ownKeys`/`for-in`/
+  spreads/rest — versions `*_trapped`), `defineProperty`
+  (`Object.defineProperty`/`defineProperties`/`create`),
+  `get/setPrototypeOf`, `isExtensible`/`preventExtensions`
+  (`seal`/`freeze` délégués), `apply`/`construct` (`call_value`/
+  `construct` — `typeof`/`is_callable`/`instanceof` suivent la
+  cible). `Proxy.revocable` + `revoke` (`BoundNative` lié au proxy
+  → handler nul → `TypeError` sur toute opération), `Proxy()`
+  sans `new` → `TypeError`, traps non-callables → `TypeError`,
+  `ownKeys` non-tableau/doublon → `TypeError`. test262 toujours
+  859/859. 15 assertions `tests/lang.rs` (`proxy_traps`).
 - **JS-B — harness test262 (ADR-0010)** : extrait versionné de
   la suite ECMAScript officielle @ `d53ebc8` (1077 fichiers,
   sous-ensembles `test/language/{types,literals,comments,

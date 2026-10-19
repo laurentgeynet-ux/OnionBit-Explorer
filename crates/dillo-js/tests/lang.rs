@@ -2055,3 +2055,78 @@ fn strict_runtime() {
     assert!(uncaught("const c = 1; c = 2"));
     assert!(uncaught("'use strict'; const c = 1; c = 2"));
 }
+
+#[test]
+fn proxy_traps() {
+    // get/set/has/deleteProperty.
+    assert_eq!(
+        ev_str("var t = {a: 1}; var p = new Proxy(t, {get: function(o, k) { return k === 'b' ? 9 : o[k]; }}); p.a + '/' + p.b"),
+        "1/9"
+    );
+    assert_eq!(
+        ev_str("var t = {}; var p = new Proxy(t, {set: function(o, k, v) { o[k] = v * 2; return true; }}); p.x = 3; t.x"),
+        "6"
+    );
+    assert_eq!(
+        ev_str("var p = new Proxy({}, {has: function() { return true; }}); 'anything' in p"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("var p = new Proxy({}, {deleteProperty: function() { return true; }}); delete p.x"),
+        "true"
+    );
+    // Sans trap → transparent vers la cible.
+    assert_eq!(ev_str("var t = {a: 5}; var p = new Proxy(t, {}); p.a"), "5");
+    // apply/construct sur proxy de fonction.
+    assert_eq!(
+        ev_str("var f = function(x) { return x + 1; }; var p = new Proxy(f, {apply: function(t, th, args) { return t.apply(th, args) + 100; }}); p(1)"),
+        "102"
+    );
+    assert_eq!(
+        ev_str(
+            "var C = function(v) { this.v = v; }; var p = new Proxy(C, {}); var o = new p(7); o.v"
+        ),
+        "7"
+    );
+    assert_eq!(ev_str("typeof new Proxy(function(){}, {})"), "function");
+    assert_eq!(ev_str("typeof new Proxy({}, {})"), "object");
+    // ownKeys + defineProperty + getOwnPropertyDescriptor.
+    assert_eq!(
+        ev_str("var p = new Proxy({a:1}, {ownKeys: function() { return ['x','y']; }, getOwnPropertyDescriptor: function() { return {value: 1, enumerable: true, configurable: true, writable: true}; }}); Object.keys(p).join(',')"),
+        "x,y"
+    );
+    assert_eq!(
+        ev_str("var seen; var p = new Proxy({}, {defineProperty: function(t, k, d) { seen = k; return true; }}); Object.defineProperty(p, 'z', {value: 1}); seen"),
+        "z"
+    );
+    // getPrototypeOf/setPrototypeOf/isExtensible/preventExtensions.
+    assert_eq!(
+        ev_str("var m = {}; var p = new Proxy({}, {getPrototypeOf: function() { return m; }}); Object.getPrototypeOf(p) === m"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("var p = new Proxy({}, {isExtensible: function() { return false; }}); Object.isExtensible(p)"),
+        "false"
+    );
+    // Revocable : revoke() puis TypeError sur toute opération.
+    assert_eq!(
+        ev_str("var r = Proxy.revocable({a: 1}, {}); r.revoke(); try { r.proxy.a; 'no' } catch (e) { e.name }"),
+        "TypeError"
+    );
+    // `Proxy()` sans new → TypeError.
+    assert_eq!(
+        ev_str("try { Proxy({}, {}); 'no' } catch (e) { e.name }"),
+        "TypeError"
+    );
+    // instanceof à travers le proxy : la lecture de `prototype`
+    // passe par la trap get.
+    assert_eq!(
+        ev_str("function F() {} var pf = new Proxy(F, {}); (new pf()) instanceof pf"),
+        "true"
+    );
+    // for-in sur proxy : ownKeys + desc énumérables.
+    assert_eq!(
+        ev_str("var p = new Proxy({a: 1, b: 2}, {}); var s = []; for (var k in p) s.push(k); s.join(',')"),
+        "a,b"
+    );
+}

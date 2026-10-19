@@ -130,6 +130,13 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(reflect, "apply", reflect_apply);
     e.add_method(reflect, "construct", reflect_construct);
     e.set_own(g, "Reflect", Value::Obj(reflect), false);
+    // `Proxy` — construct-only (`Proxy(t,h)` → TypeError) ; la
+    // méthode statique `revocable` rend `{proxy, revoke}`.
+    let proxy = ctor(e, "Proxy", proxy_ctor, e.protos.proxy);
+    if let Value::Obj(pid) = proxy {
+        e.add_method(pid, "revocable", proxy_revocable);
+    }
+    e.set_own(g, "Proxy", proxy, false);
     let performance = e.new_object();
     e.add_method(performance, "now", performance_now);
     e.set_own(g, "performance", Value::Obj(performance), false);
@@ -908,6 +915,13 @@ fn has_own_property(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
         v => e.to_js_string(v)?,
     };
     let has = match this {
+        // Proxy : `hasOwnProperty` passe par la trap
+        // `getOwnPropertyDescriptor` (spec `[[GetOwnProperty]]`).
+        Value::Obj(id)
+            if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) =>
+        {
+            e.get_own_prop(id, &key)?.is_some()
+        }
         Value::Obj(id) => match e.heap.obj(id) {
             Some(o) => match &o.kind {
                 ObjKind::Array(elems) => {
@@ -956,20 +970,38 @@ fn object_keys(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = arg(args, 0) else {
         return Ok(arr_of(e, Vec::new()));
     };
-    let keys = e.own_enum_keys(id);
+    let keys = e.own_enum_keys_trapped(id)?;
     let vals: Vec<Value> = keys.iter().map(|k| e.str_val(k.clone())).collect();
     Ok(arr_of(e, vals))
 }
 
 fn object_get_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     match arg(args, 0) {
-        Value::Obj(id) => Ok(e.heap.obj(id).map_or(Value::Null, |o| o.proto)),
+        // Proxy : trap `getPrototypeOf` (objet ou null requis),
+        // sinon proto de la cible.
+        Value::Obj(id) => {
+            if let Some((tid, target, handler)) = e.proxy_th(id)? {
+                let trap = e.proxy_trap(handler, "getPrototypeOf")?;
+                if matches!(trap, Value::Obj(_)) {
+                    let r = e.call_value(trap, handler, &[target])?;
+                    return match r {
+                        Value::Obj(_) | Value::Null => Ok(r),
+                        _ => Err(
+                            e.type_error("proxy getPrototypeOf trap must return an object or null")
+                        ),
+                    };
+                }
+                return Ok(e.heap.obj(tid).map_or(Value::Null, |o| o.proto));
+            }
+            Ok(e.heap.obj(id).map_or(Value::Null, |o| o.proto))
+        }
         _ => Ok(Value::Null),
     }
 }
 
 /// `Object.setPrototypeOf(o, p)` — `p` objet ou `null` ; refus sur
-/// cycle de prototype et sur objet non-extensible (spec).
+/// cycle de prototype et sur objet non-extensible (spec). Sur un
+/// proxy : trap `setPrototypeOf` → `false` = `TypeError`.
 fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let target = arg(args, 0);
     let proto = match arg(args, 1) {
@@ -980,6 +1012,18 @@ fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
     let Value::Obj(id) = target else {
         return Ok(target); // primitives are ignored, per spec
     };
+    if let Some((tid, tv, handler)) = e.proxy_th(id)? {
+        let trap = e.proxy_trap(handler, "setPrototypeOf")?;
+        if matches!(trap, Value::Obj(_)) {
+            let ok = e.call_value(trap, handler, &[tv, proto])?;
+            return if e.to_boolean(ok) {
+                Ok(target)
+            } else {
+                Err(e.type_error("proxy setPrototypeOf trap returned false"))
+            };
+        }
+        return object_set_proto(e, Value::Undefined, &[Value::Obj(tid), proto]);
+    }
     if !e.heap.obj(id).is_some_and(|o| o.extensible) {
         return Err(e.type_error("cannot set prototype of non-extensible object"));
     }
@@ -1001,7 +1045,7 @@ fn object_values(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = arg(args, 0) else {
         return Ok(arr_of(e, Vec::new()));
     };
-    let keys = e.own_enum_keys(id);
+    let keys = e.own_enum_keys_trapped(id)?;
     let mut vals = Vec::with_capacity(keys.len());
     for k in keys {
         // Getter-aware read (class accessors are own props).
@@ -1016,7 +1060,7 @@ fn object_assign(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let target = arg(args, 0);
     for src in &args[1.min(args.len())..] {
         if let Value::Obj(sid) = src {
-            for k in e.own_enum_keys(*sid) {
+            for k in e.own_enum_keys_trapped(*sid)? {
                 let v = e.get_prop_value(*src, &k)?;
                 e.set_prop_value(target, &k, v)?;
             }
@@ -1061,7 +1105,21 @@ fn object_define_property(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
 
 /// Corps de `[[DefineOwnProperty]]` piloté par un objet descripteur —
 /// partagé par `defineProperty`/`defineProperties`/`Object.create`.
+/// Sur un proxy : trap `defineProperty` ou délégation à la cible.
 fn define_one_prop(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) -> JsResult<()> {
+    if let Some((tid, target, handler)) = e.proxy_th(id)? {
+        let trap = e.proxy_trap(handler, "defineProperty")?;
+        if matches!(trap, Value::Obj(_)) {
+            let kv = e.str_val(key);
+            let r = e.call_value(trap, handler, &[target, kv, Value::Obj(desc_id)])?;
+            return if e.to_boolean(r) {
+                Ok(())
+            } else {
+                Err(e.type_error(format!("cannot define property `{key}`")))
+            };
+        }
+        return define_one_prop(e, tid, key, desc_id);
+    }
     let desc = Value::Obj(desc_id);
     let (has_value, has_writable, has_enumerable, has_configurable, has_get, has_set) = {
         let o = e.heap.obj(desc_id);
@@ -1153,7 +1211,7 @@ fn define_props_from_map(e: &mut Engine, id: ObjId, map: Value) -> JsResult<()> 
     let Value::Obj(mid) = map else {
         return Err(e.type_error("property map must be an object"));
     };
-    for k in e.own_enum_keys(mid) {
+    for k in e.own_enum_keys_trapped(mid)? {
         let dv = e.get_prop_value(map, &k)?;
         let Value::Obj(did) = dv else {
             return Err(e.type_error(format!("descriptor for `{k}` must be an object")));
@@ -1178,7 +1236,7 @@ fn object_get_own_property_descriptor(
         Value::Num(n) => num_to_js_string(n),
         v => e.to_js_string(v)?,
     };
-    let Some(p) = e.find_own(id, &key) else {
+    let Some(p) = e.get_own_prop(id, &key)? else {
         return Ok(Value::Undefined);
     };
     let d = e.new_object();
@@ -1210,17 +1268,22 @@ fn object_get_own_property_descriptors(
     let Value::Obj(id) = arg(args, 0) else {
         return Ok(Value::Obj(out));
     };
-    let keys: Vec<String> = match e.heap.obj(id) {
-        Some(o) => {
-            let mut ks: Vec<String> = o.props.iter().map(|(k, _)| k.clone()).collect();
-            if let ObjKind::Array(elems) = &o.kind {
-                ks.splice(0..0, (0..elems.len()).map(|i| i.to_string()));
-                ks.insert(elems.len(), "length".into());
+    let keys: Vec<String> =
+        if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) {
+            e.own_keys_trapped(id)?
+        } else {
+            match e.heap.obj(id) {
+                Some(o) => {
+                    let mut ks: Vec<String> = o.props.iter().map(|(k, _)| k.clone()).collect();
+                    if let ObjKind::Array(elems) = &o.kind {
+                        ks.splice(0..0, (0..elems.len()).map(|i| i.to_string()));
+                        ks.insert(elems.len(), "length".into());
+                    }
+                    ks
+                }
+                None => Vec::new(),
             }
-            ks
-        }
-        None => Vec::new(),
-    };
+        };
     for k in keys {
         let kv = e.str_val(k.clone());
         let d = object_get_own_property_descriptor(e, Value::Undefined, &[arg(args, 0), kv])?;
@@ -2427,7 +2490,7 @@ fn reflect_own_keys(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
     let Value::Obj(id) = arg(args, 0) else {
         return Ok(e.new_array(Vec::new()));
     };
-    let keys = e.own_keys(id);
+    let keys = e.own_keys_trapped(id)?;
     let vals = keys.iter().map(|k| e.str_val(k.clone())).collect();
     Ok(e.new_array(vals))
 }
@@ -2449,6 +2512,66 @@ fn reflect_construct(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
         _ => Vec::new(),
     };
     e.construct(f, &list)
+}
+
+// -- Proxy ------------------------------------------------------------
+
+/// Alloue `new Proxy(target, handler)` — les deux arguments doivent
+/// être des objets (spec `Proxy` step 1-2).
+fn new_proxy(e: &mut Engine, target: Value, handler: Value) -> JsResult<Value> {
+    if !matches!(target, Value::Obj(_)) || !matches!(handler, Value::Obj(_)) {
+        return Err(e.type_error("Proxy target and handler must be objects"));
+    }
+    // Proto apparent du proxy = celui de la cible (approximation
+    // pour les marches `for-in`/`instanceof` qui ne passent pas
+    // par la trap `getPrototypeOf`).
+    let proto = match target {
+        Value::Obj(tid) => e.heap.obj(tid).map_or(Value::Null, |o| o.proto),
+        _ => Value::Null,
+    };
+    Ok(Value::Obj(e.heap.alloc_obj(Object {
+        proto,
+        props: Vec::new(),
+        kind: ObjKind::Proxy {
+            target,
+            handler: Some(handler),
+        },
+        extensible: true,
+    })))
+}
+
+/// `new Proxy(t, h)` — construct-only : l'appel fonctionnel lève
+/// `TypeError` (heuristique `this` = objet frais sur
+/// `Proxy.prototype`, même technique que `String`/`Number`).
+fn proxy_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    if constructed_this(e, t, e.protos.proxy).is_none() {
+        return Err(e.type_error("Proxy constructor must be called with `new`"));
+    }
+    new_proxy(e, arg(args, 0), arg(args, 1))
+}
+
+/// `Proxy.revocable(t, h)` → `{proxy, revoke}` — `revoke` est une
+/// native liée au proxy (`BoundNative`) qui nulle son handler.
+fn proxy_revocable(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let p = new_proxy(e, arg(args, 0), arg(args, 1))?;
+    let revoke = e.bound_native("revoke", proxy_revoke, vec![p]);
+    let out = e.new_object();
+    e.set_own(out, "proxy", p, true);
+    e.set_own(out, "revoke", revoke, true);
+    Ok(Value::Obj(out))
+}
+
+/// `revoke()` — l'objet proxy est passé en arg lié (`bound[0]`) ;
+/// après appel, toute opération sur le proxy lève `TypeError`.
+fn proxy_revoke(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if let Some(Value::Obj(id)) = args.first() {
+        if let Some(o) = e.heap.obj_mut(*id) {
+            if let ObjKind::Proxy { handler, .. } = &mut o.kind {
+                *handler = None;
+            }
+        }
+    }
+    Ok(Value::Undefined)
 }
 
 // -- performance ------------------------------------------------------
@@ -2705,16 +2828,28 @@ fn number_is_integer(_e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Val
 /// `Object.getOwnPropertyNames` — all own props (enum + non-enum).
 fn object_get_own_property_names(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let keys = match arg(args, 0) {
-        Value::Obj(id) => e.own_keys(id),
+        Value::Obj(id) => e.own_keys_trapped(id)?,
         _ => Vec::new(),
     };
     let vals = keys.iter().map(|k| e.str_val(k.clone())).collect();
     Ok(e.new_array(vals))
 }
 
-/// `Object.preventExtensions` — `[[Extensible]] = false`.
+/// `Object.preventExtensions` — `[[Extensible]] = false`. Sur un
+/// proxy : trap `preventExtensions` ou délégation à la cible.
 fn object_prevent_extensions(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     if let Value::Obj(id) = arg(args, 0) {
+        if let Some((tid, target, handler)) = e.proxy_th(id)? {
+            let trap = e.proxy_trap(handler, "preventExtensions")?;
+            if matches!(trap, Value::Obj(_)) {
+                let ok = e.call_value(trap, handler, &[target])?;
+                if !e.to_boolean(ok) {
+                    return Err(e.type_error("proxy preventExtensions trap returned false"));
+                }
+                return Ok(arg(args, 0));
+            }
+            return object_prevent_extensions(e, Value::Undefined, &[Value::Obj(tid)]);
+        }
         if let Some(o) = e.heap.obj_mut(id) {
             o.extensible = false;
         }
@@ -2723,15 +2858,29 @@ fn object_prevent_extensions(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
 }
 
 fn object_is_extensible(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    Ok(Value::Bool(match arg(args, 0) {
-        Value::Obj(id) => e.heap.obj(id).is_some_and(|o| o.extensible),
-        _ => false,
-    }))
+    if let Value::Obj(id) = arg(args, 0) {
+        if let Some((tid, target, handler)) = e.proxy_th(id)? {
+            let trap = e.proxy_trap(handler, "isExtensible")?;
+            if matches!(trap, Value::Obj(_)) {
+                let r = e.call_value(trap, handler, &[target])?;
+                return Ok(Value::Bool(e.to_boolean(r)));
+            }
+            return object_is_extensible(e, Value::Undefined, &[Value::Obj(tid)]);
+        }
+        return Ok(Value::Bool(e.heap.obj(id).is_some_and(|o| o.extensible)));
+    }
+    Ok(Value::Bool(false))
 }
 
 /// `Object.seal` — non-extensible + toutes props non-configurables.
+/// Sur un proxy : la trap `preventExtensions` si présente, sinon la
+/// cible (approximation — la spec définit chaque prop via la trap
+/// `defineProperty`, surface jugée trop lourde ici).
 fn object_seal(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     if let Value::Obj(id) = arg(args, 0) {
+        if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) {
+            return object_prevent_extensions(e, Value::Undefined, &[arg(args, 0)]);
+        }
         if let Some(o) = e.heap.obj_mut(id) {
             o.extensible = false;
             for (_, p) in &mut o.props {
@@ -2758,8 +2907,13 @@ fn object_is_sealed(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
 }
 
 /// `Object.freeze` — seal + toutes data props non-writable.
+/// Sur un proxy : même approximation que `seal` (trap
+/// `preventExtensions` ou cible).
 fn object_freeze(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     if let Value::Obj(id) = arg(args, 0) {
+        if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) {
+            return object_prevent_extensions(e, Value::Undefined, &[arg(args, 0)]);
+        }
         if let Some(o) = e.heap.obj_mut(id) {
             o.extensible = false;
             for (_, p) in &mut o.props {
@@ -2831,15 +2985,14 @@ fn object_entries(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
     let Value::Obj(id) = arg(args, 0) else {
         return Ok(e.new_array(Vec::new()));
     };
-    let keys = e.own_enum_keys(id);
+    let keys = e.own_enum_keys_trapped(id)?;
     let mut out = Vec::with_capacity(keys.len());
     for k in keys {
-        let v = e.get_prop(id, &k);
-        if let Some(v) = v {
-            let ks = e.str_val(k);
-            let kv = e.new_array(vec![ks, v]);
-            out.push(kv);
-        }
+        // Lecture `[[Get]]` (getters et traps proxy déclenchés).
+        let v = e.get_prop_value(Value::Obj(id), &k)?;
+        let ks = e.str_val(k);
+        let kv = e.new_array(vec![ks, v]);
+        out.push(kv);
     }
     Ok(e.new_array(out))
 }
@@ -2868,6 +3021,11 @@ fn object_from_entries(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
 fn object_has_own(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let key = e.prop_key(arg(args, 1))?;
     Ok(Value::Bool(match arg(args, 0) {
+        Value::Obj(id)
+            if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) =>
+        {
+            e.get_own_prop(id, &key)?.is_some()
+        }
         Value::Obj(id) => has_own(e, id, &key),
         _ => false,
     }))

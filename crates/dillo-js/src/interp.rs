@@ -118,11 +118,14 @@ pub(crate) struct Protos {
     pub set: ObjId,
     /// `Symbol.prototype` (`toString`/`valueOf`/`description`).
     pub symbol: ObjId,
+    /// `Proxy.prototype` (les instances n'ont pas de proto fixe —
+    /// utilisé seulement pour détecter l'appel construct-only).
+    pub proxy: ObjId,
 }
 
 impl Protos {
     /// Tous les prototypes — racines GC permanentes.
-    fn all(&self) -> [ObjId; 17] {
+    fn all(&self) -> [ObjId; 18] {
         [
             self.object,
             self.function,
@@ -141,6 +144,7 @@ impl Protos {
             self.map,
             self.set,
             self.symbol,
+            self.proxy,
         ]
     }
 }
@@ -181,6 +185,7 @@ impl Engine {
         let map = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let set = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let symbol = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
+        let proxy = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let global = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -207,6 +212,7 @@ impl Engine {
                 map,
                 set,
                 symbol,
+                proxy,
             },
             rng: seed | 1,
             t0: Instant::now(),
@@ -890,7 +896,7 @@ impl Engine {
                     // `{...rest}` — remaining enumerable own props.
                     let rest_obj = self.new_object();
                     if let Value::Obj(id) = v {
-                        for k in self.own_enum_keys(id) {
+                        for k in self.own_enum_keys_trapped(id)? {
                             if !consumed.contains(&k) {
                                 let sv = self.get_prop_value(v, &k)?;
                                 self.set_own(rest_obj, &k, sv, true);
@@ -1180,6 +1186,14 @@ impl Engine {
         let Value::Obj(id) = base else {
             return self.get_prop_value(base, key);
         };
+        if let Some((_, target, handler)) = self.proxy_th(id)? {
+            let trap = self.proxy_trap(handler, "get")?;
+            if matches!(trap, Value::Obj(_)) {
+                let kv = self.str_val(key);
+                return self.call_value(trap, handler, &[target, kv, recv]);
+            }
+            return self.read_prop(target, recv, key);
+        }
         match self.find_prop(id, key) {
             Some(Prop::Data { value, .. }) => Ok(value),
             Some(Prop::Acc { get, .. }) => {
@@ -1197,6 +1211,19 @@ impl Engine {
     /// is an accessor on the chain calls the setter instead of
     /// shadowing it.
     fn write_prop(&mut self, id: ObjId, recv: Value, key: &str, v: Value) -> JsResult<()> {
+        if let Some((tid, target, handler)) = self.proxy_th(id)? {
+            let trap = self.proxy_trap(handler, "set")?;
+            if matches!(trap, Value::Obj(_)) {
+                let kv = self.str_val(key);
+                let ok = self.call_value(trap, handler, &[target, kv, v, recv])?;
+                return if self.to_boolean(ok) {
+                    Ok(())
+                } else {
+                    self.write_refused(key)
+                };
+            }
+            return self.write_prop(tid, recv, key, v);
+        }
         // Accessors on the chain intercept the write.
         let mut cur = Some(id);
         let mut depth = 0;
@@ -1249,6 +1276,34 @@ impl Engine {
         match self.heap.obj(id).map(|o| &o.kind) {
             Some(ObjKind::Host(h)) => Some(h.clone()),
             _ => None,
+        }
+    }
+
+    /// `id` est-il un proxy ? → `(target_id, target, handler)` ;
+    /// `TypeError` sur proxy révoqué (spec : toute méthode interne
+    /// d'un `[[ProxyHandler]]` nul lève).
+    pub(crate) fn proxy_th(&mut self, id: ObjId) -> JsResult<Option<(ObjId, Value, Value)>> {
+        let (target, handler) = match self.heap.obj(id).map(|o| &o.kind) {
+            Some(ObjKind::Proxy { target, handler }) => (*target, *handler),
+            _ => return Ok(None),
+        };
+        let Some(handler) = handler else {
+            return Err(self.type_error("cannot perform operation on a revoked proxy"));
+        };
+        let Value::Obj(tid) = target else {
+            return Err(self.type_error("invalid proxy target"));
+        };
+        Ok(Some((tid, target, handler)))
+    }
+
+    /// Lookup d'une trap sur le handler : fonction callable,
+    /// `Undefined` si absente/null, `TypeError` si non-callable.
+    pub(crate) fn proxy_trap(&mut self, handler: Value, name: &str) -> JsResult<Value> {
+        let f = self.get_prop_value(handler, name)?;
+        match f {
+            Value::Undefined | Value::Null => Ok(Value::Undefined),
+            _ if self.is_callable(f) => Ok(f),
+            _ => Err(self.type_error(format!("proxy trap `{name}` is not callable"))),
         }
     }
 
@@ -1387,6 +1442,15 @@ impl Engine {
     }
 
     pub(crate) fn has_prop(&mut self, id: ObjId, key: &str) -> JsResult<bool> {
+        if let Some((tid, target, handler)) = self.proxy_th(id)? {
+            let trap = self.proxy_trap(handler, "has")?;
+            if matches!(trap, Value::Obj(_)) {
+                let kv = self.str_val(key);
+                let r = self.call_value(trap, handler, &[target, kv])?;
+                return Ok(self.to_boolean(r));
+            }
+            return self.has_prop(tid, key);
+        }
         if let Some(h) = self.host_of(id) {
             if h.get(self, Value::Obj(id), key)?.is_some() {
                 return Ok(true);
@@ -1416,6 +1480,23 @@ impl Engine {
     /// `delete o.k` → `false` si refusé ; en strict un refus est un
     /// `TypeError` (spec `[[Delete]]` + strict Delete).
     fn delete_result(&mut self, id: ObjId, key: &str) -> JsResult<Value> {
+        if let Some((tid, target, handler)) = self.proxy_th(id)? {
+            let trap = self.proxy_trap(handler, "deleteProperty")?;
+            let ok = if matches!(trap, Value::Obj(_)) {
+                let kv = self.str_val(key);
+                let r = self.call_value(trap, handler, &[target, kv])?;
+                self.to_boolean(r)
+            } else {
+                return self.delete_result(tid, key);
+            };
+            return if ok {
+                Ok(Value::Bool(true))
+            } else if self.strict {
+                Err(self.type_error(format!("cannot delete `{key}`")))
+            } else {
+                Ok(Value::Bool(false))
+            };
+        }
         if self.delete_prop(id, key) {
             Ok(Value::Bool(true))
         } else if self.strict {
@@ -1465,10 +1546,115 @@ impl Engine {
         out
     }
 
+    /// `[[OwnPropertyKeys]]` trap-aware (`Reflect.ownKeys`,
+    /// `getOwnPropertyNames`) — la trap `ownKeys` doit rendre un
+    /// tableau de strings dédupliquées (spec : `TypeError` sinon).
+    pub(crate) fn own_keys_trapped(&mut self, id: ObjId) -> JsResult<Vec<String>> {
+        if let Some((tid, target, handler)) = self.proxy_th(id)? {
+            let trap = self.proxy_trap(handler, "ownKeys")?;
+            if matches!(trap, Value::Obj(_)) {
+                let r = self.call_value(trap, handler, &[target])?;
+                let Value::Obj(arr) = r else {
+                    return Err(self.type_error("proxy ownKeys trap must return an array"));
+                };
+                let elems = match self.heap.obj(arr).map(|o| &o.kind) {
+                    Some(ObjKind::Array(e)) => e.clone(),
+                    _ => Vec::new(),
+                };
+                let mut out = Vec::new();
+                for v in elems {
+                    let k = self.prop_key(v)?;
+                    if out.contains(&k) {
+                        return Err(self.type_error("proxy ownKeys trap returned duplicate key"));
+                    }
+                    out.push(k);
+                }
+                return Ok(out);
+            }
+            return self.own_keys_trapped(tid);
+        }
+        Ok(self.own_keys(id))
+    }
+
+    /// `[[GetOwnProperty]]` trap-aware — la trap rend un objet
+    /// descripteur ou `undefined` (spec : `TypeError` sinon).
+    pub(crate) fn get_own_prop(&mut self, id: ObjId, key: &str) -> JsResult<Option<Prop>> {
+        if let Some((tid, target, handler)) = self.proxy_th(id)? {
+            let trap = self.proxy_trap(handler, "getOwnPropertyDescriptor")?;
+            if matches!(trap, Value::Obj(_)) {
+                let kv = self.str_val(key);
+                let r = self.call_value(trap, handler, &[target, kv])?;
+                return match r {
+                    Value::Undefined => Ok(None),
+                    Value::Obj(d) => self.prop_from_desc_obj(d),
+                    _ => Err(self.type_error(
+                        "proxy getOwnPropertyDescriptor trap must return object or undefined",
+                    )),
+                };
+            }
+            return self.get_own_prop(tid, key);
+        }
+        Ok(self.find_own(id, key))
+    }
+
+    /// Objet descripteur `{value,writable,enumerable,configurable}`
+    /// ou `{get,set,…}` → `Prop` (résultat de la trap
+    /// `getOwnPropertyDescriptor`).
+    fn prop_from_desc_obj(&mut self, d: ObjId) -> JsResult<Option<Prop>> {
+        let dv = Value::Obj(d);
+        let enumerable = {
+            let v = self.get_prop_value(dv, "enumerable")?;
+            self.to_boolean(v)
+        };
+        let configurable = {
+            let v = self.get_prop_value(dv, "configurable")?;
+            self.to_boolean(v)
+        };
+        let get = self.get_prop_value(dv, "get")?;
+        let set = self.get_prop_value(dv, "set")?;
+        let is_acc = !matches!(get, Value::Undefined) || !matches!(set, Value::Undefined);
+        if is_acc {
+            return Ok(Some(Prop::Acc {
+                get,
+                set,
+                attrs: crate::heap::PropAttrs {
+                    writable: false,
+                    enumerable,
+                    configurable,
+                },
+            }));
+        }
+        let value = self.get_prop_value(dv, "value")?;
+        let writable = {
+            let v = self.get_prop_value(dv, "writable")?;
+            self.to_boolean(v)
+        };
+        Ok(Some(Prop::Data {
+            value,
+            attrs: crate::heap::PropAttrs {
+                writable,
+                enumerable,
+                configurable,
+            },
+        }))
+    }
+
+    /// Enumerable own keys trap-aware (`Object.keys`, spreads,
+    /// `for-in` head) — `ownKeys` puis filtrage par le descripteur.
+    pub(crate) fn own_enum_keys_trapped(&mut self, id: ObjId) -> JsResult<Vec<String>> {
+        let mut out = Vec::new();
+        for k in self.own_keys_trapped(id)? {
+            if self.get_own_prop(id, &k)?.is_some_and(|p| p.enumerable()) {
+                out.push(k);
+            }
+        }
+        Ok(out)
+    }
+
     /// Enumerable keys for `for-in`: host keys, array indices, then
     /// enumerable own props, then enumerable proto-chain props
     /// (deduplicated).
-    fn enum_keys(&mut self, id: ObjId) -> Vec<String> {
+    fn enum_keys(&mut self, id: ObjId) -> JsResult<Vec<String>> {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
         if let Some(h) = self.host_of(id) {
@@ -1481,7 +1667,25 @@ impl Engine {
         let mut cur = Some(id);
         let mut depth = 0;
         while let Some(cid) = cur {
-            if let Some(o) = self.heap.obj(cid) {
+            if matches!(
+                self.heap.obj(cid).map(|o| &o.kind),
+                Some(ObjKind::Proxy { .. })
+            ) {
+                // Proxy : ses props propres passent par les traps ;
+                // la chaîne repart du proto du *target*.
+                for k in self.own_enum_keys_trapped(cid)? {
+                    if seen.insert(k.clone()) {
+                        out.push(k);
+                    }
+                }
+                cur = match self.proxy_th(cid)? {
+                    Some((tid, _, _)) => match self.heap.obj(tid).map(|o| o.proto) {
+                        Some(Value::Obj(p)) => Some(p),
+                        _ => None,
+                    },
+                    None => None,
+                };
+            } else if let Some(o) = self.heap.obj(cid) {
                 if let ObjKind::Array(elems) = &o.kind {
                     for i in 0..elems.len() {
                         if seen.insert(i.to_string()) {
@@ -1506,7 +1710,7 @@ impl Engine {
                 break;
             }
         }
-        out
+        Ok(out)
     }
 
     // -- coercions -------------------------------------------------------
@@ -1546,8 +1750,17 @@ impl Engine {
     }
 
     pub(crate) fn is_callable(&self, v: Value) -> bool {
-        matches!(v, Value::Obj(id)
-            if matches!(self.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Fun(_))))
+        match v {
+            Value::Obj(id) => match self.heap.obj(id).map(|o| &o.kind) {
+                Some(ObjKind::Fun(_)) => true,
+                // Proxy : callable ssi sa cible l'est (révoqué → non).
+                Some(ObjKind::Proxy { target, handler }) => {
+                    handler.is_some() && self.is_callable(*target)
+                }
+                _ => false,
+            },
+            _ => false,
+        }
     }
 
     /// `ToNumber`.
@@ -1598,6 +1811,15 @@ impl Engine {
         let Value::Obj(id) = f else {
             return Err(self.type_error("value is not a function"));
         };
+        // Proxy callable : trap `apply` ou délégation à la cible.
+        if let Some((_, target, handler)) = self.proxy_th(id)? {
+            let trap = self.proxy_trap(handler, "apply")?;
+            if matches!(trap, Value::Obj(_)) {
+                let argv = self.new_array(args.to_vec());
+                return self.call_value(trap, handler, &[target, this, argv]);
+            }
+            return self.call_value(target, this, args);
+        }
         let fun = match self.heap.obj(id) {
             Some(o) => match &o.kind {
                 ObjKind::Fun(fu) => fu.clone(),
@@ -1703,6 +1925,15 @@ impl Engine {
         let Value::Obj(fid) = f else {
             return Err(self.type_error("constructor is not a function"));
         };
+        // Proxy : trap `construct` ou délégation à la cible.
+        if let Some((_, target, handler)) = self.proxy_th(fid)? {
+            let trap = self.proxy_trap(handler, "construct")?;
+            if matches!(trap, Value::Obj(_)) {
+                let argv = self.new_array(args.to_vec());
+                return self.call_value(trap, handler, &[target, argv, f]);
+            }
+            return self.construct(target, args);
+        }
         // `new boundFn(...)` delegates to the target with the bound
         // args — the *bound this is ignored* under construction
         // (spec [[Construct]] of BoundFunctionExoticObject).
@@ -2040,7 +2271,7 @@ impl Engine {
                 let Value::Obj(id) = ov else {
                     return Ok(Flow::Normal); // for-in over primitives: skip
                 };
-                for key in self.enum_keys(id) {
+                for key in self.enum_keys(id)? {
                     let kv = self.str_val(key);
                     self.assign_target(env, this, target, kv)?;
                     match self.exec_stmt(env, this, body)? {
@@ -2209,7 +2440,7 @@ impl Engine {
                             // `{...o}` — enumerable own props only.
                             let v = self.eval_expr(env, this, e)?;
                             if let Value::Obj(sid) = v {
-                                for k in self.own_enum_keys(sid) {
+                                for k in self.own_enum_keys_trapped(sid)? {
                                     let sv = self.get_prop_value(v, &k)?;
                                     self.set_own(id, &k, sv, true);
                                 }
@@ -2684,13 +2915,16 @@ impl Engine {
                 Value::Bool(self.has_prop(id, &k)?)
             }
             Instanceof => {
-                let Value::Obj(fid) = r else {
+                let Value::Obj(_) = r else {
                     return Err(self.type_error("`instanceof` requires an object"));
                 };
                 if !self.is_callable(r) {
                     return Err(self.type_error("right side of `instanceof` is not callable"));
                 }
-                let Some(Value::Obj(proto)) = self.get_prop(fid, "prototype") else {
+                // Lecture via `get_prop_value` : `prototype` peut
+                // passer par une trap `get` de proxy (spec
+                // `OrdinaryHasInstance` fait un `[[Get]]`).
+                let Value::Obj(proto) = self.get_prop_value(r, "prototype")? else {
                     return Err(self.type_error("constructor has no prototype"));
                 };
                 let mut cur = match l {
@@ -2836,10 +3070,18 @@ fn typeof_str(v: Value, heap: &Heap) -> &'static str {
         Value::Bool(_) => "boolean",
         Value::Num(_) => "number",
         Value::Str(_) => "string",
-        Value::Obj(id) => match heap.obj(id).map(|o| &o.kind) {
-            Some(ObjKind::Fun(_)) => "function",
-            Some(ObjKind::Symbol(_)) => "symbol",
-            _ => "object",
+        Value::Obj(mut id) => loop {
+            match heap.obj(id).map(|o| &o.kind) {
+                Some(ObjKind::Fun(_)) => break "function",
+                Some(ObjKind::Symbol(_)) => break "symbol",
+                // `typeof proxy` = `typeof target` (révoqué → object :
+                // la spec lève TypeError — approximation documentée).
+                Some(ObjKind::Proxy { target, handler }) => match (handler.is_some(), target) {
+                    (true, Value::Obj(tid)) => id = *tid,
+                    _ => break "object",
+                },
+                _ => break "object",
+            }
         },
     }
 }

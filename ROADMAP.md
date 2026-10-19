@@ -308,8 +308,16 @@ d'intégration, pas par la couverture :
   matche plus 'k').
   **Score : 859/859 (100 %)** — corpus extrait entièrement
   vert.
+- [x] **JS-C4. `Proxy` complet** : `ObjKind::Proxy {target,
+  handler}` tracé GC, les 13 méthodes internes routées vers les
+  traps (`get`/`set`/`has`/`deleteProperty`/`ownKeys`/
+  `getOwnPropertyDescriptor`/`defineProperty`/`getPrototypeOf`/
+  `setPrototypeOf`/`isExtensible`/`preventExtensions`/`apply`/
+  `construct`), `Proxy.revocable` + `revoke` (handler nul →
+  `TypeError` partout), construct-only, `typeof`/`instanceof`/
+  `for-in`/`in`/`delete`/spreads/`Object.*`/`Reflect.*` trap-aware.
 - [ ] **JS-C. Couverture par besoin** : modules ES
-  (`import`/`export` + graphe de chargeur), `Proxy`, `Intl` —
+  (`import`/`export` + graphe de chargeur), `Intl` —
   ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/
   `Video` — phase 10, dépend du pipeline rendu.
@@ -333,9 +341,29 @@ d'intégration, pas par la couverture :
   noyau ES3/ES5 + subset ES2015 (test262 851/859, 99 % sur
   le sous-ensemble extrait) ; la couverture grandit en
   phase 10 (étape 43).
-- [ ] **Étape 35. Bindings DOM.** `document`, lecture/écriture
-  d'attributs, `getElementById` & co avec handles sécurisés
-  (générationnels) — invalidation layout.
+- [x] **Étape 35. Bindings DOM.** Livré par **miroir
+  synchronisé** (pas de re-implémentation) : la surface DOM
+  complète de `dillo-js` (`document`, `navigator`, `window`,
+  `getElementById`, `querySelector`, `createElement`,
+  `appendChild`, `textContent`, `innerHTML`, attributs,
+  collections live…) est installée via `Engine::install_dom`
+  sur un `dillo_js::Dom` parsé depuis le HTML source, côté
+  thread JS. `JsEngine` gagne `install_dom(html)` +
+  `sync_dom()` : le dirty bit du miroir est sondé après les
+  scripts ; s'il est levé, `serialize_document()` est
+  **re-parsé dans `explorer-dom`** → le relayout qui suit
+  rend les mutations à l'écran (invalidation = re-parse
+  borné + relayout existants — handles `NodeId` jamais
+  exposés au JS, la génération reste interne). Limites
+  assumées documentées : le miroir re-parse le HTML source
+  (les corrections du tree-builder HTML5 peuvent diverger
+  légèrement), `document.title=` n'est pas un setter en
+  amont, et la synchro n'est déclenchée qu'en fin de
+  navigation (pas encore par événement — étape 36). Tests :
+  4 adaptateur (global `document`, dirty+serialize,
+  lecture seule, noop `NullEngine`) + 2 session bout en
+  bout (`textContent`/appendChild mutés → PNG identique à
+  la page statique équivalente).
 - [ ] **Étape 36. Boucle d'événements.** `onclick`, timers
   bornés, `setTimeout` minimal — jamais de blocage du pipeline.
 
