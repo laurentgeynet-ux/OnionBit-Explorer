@@ -40,6 +40,7 @@ Les besoins qui sortent du périmètre passent par
 | 62 (moitié raster — canvas op-list) | **R-11** |
 | — (layout incrémental) | **R-12** |
 | 61 (Acid2 + corpus) | **R-13** |
+| — (triage échecs html5lib) | **R-14** |
 
 ---
 
@@ -57,6 +58,17 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   tête de file pour ça. Livré :
   `TreeBuilder::push`/`finish` + `Dom::document_element` +
   contrat rustdoc DOM partiel, tests `incremental`/`progressive`.
+- [ ] **R-14. Triage des échecs tree-construction** — diagnostic
+  avant de poursuivre le layout. Corpus complet html5lib :
+  **953/1592 (59 %)** mesuré à l'état des lieux §2. Regrouper
+  les échecs par fichier `.dat` / mode d'insertion → inventaire
+  nommé des algorithmes fautifs (le harnais n'affiche que 20
+  échecs — l'ouvrir d'abord). **Décision en sortie** : si les
+  échecs se concentrent (adoption agency, foster parenting,
+  modes table/select/template…), le chantier tree-builder
+  devient une étape R-xx qui **préempte R-3/R-4** — un DOM mal
+  construit empoisonne layout, rendu et miroir JS ; des reftests
+  qui passent sur un arbre faux ne valent rien.
 - [ ] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
