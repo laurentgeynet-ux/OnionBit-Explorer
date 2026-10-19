@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use crate::error::{DomError, Result};
 use crate::id::{NodeId, RootId};
-use crate::node::{Attribute, DoctypeData, ElementData, Node, NodeData};
+use crate::node::{Attribute, DoctypeData, ElementData, Namespace, Node, NodeData};
 
 /// Sentinelle de free-list (« pas de case libre »).
 const NIL: u32 = u32::MAX;
@@ -102,13 +102,33 @@ impl Dom {
         self.alloc(NodeData::Element(ElementData::new(tag_name)))
     }
 
-    /// Crée un nœud texte détaché — newlines normalisés
-    /// (`\r\n`/`\r` → `\n`, conventions DOM/HTML).
+    /// Crée un élément détaché dans un namespace étranger
+    /// (SVG/MathML — contenu étranger du tree-builder, R-15).
+    ///
+    /// # Errors
+    /// [`DomError::BudgetExceeded`] si le budget de nœuds est atteint.
+    pub fn create_element_ns(&mut self, tag_name: &str, ns: Namespace) -> Result<NodeId> {
+        self.alloc(NodeData::Element(ElementData::with_namespace(tag_name, ns)))
+    }
+
+    /// Crée un **fragment de document** détaché — contenu propre
+    /// d'un `<template>` (R-15) : pas enfant du template mais
+    /// référencé par son `template_contents`.
+    ///
+    /// # Errors
+    /// [`DomError::BudgetExceeded`] si le budget de nœuds est atteint.
+    pub fn create_fragment(&mut self) -> Result<NodeId> {
+        self.alloc(NodeData::Document)
+    }
+
+    /// Crée un nœud texte détaché — contenu stocké **tel quel**
+    /// (la normalisation `\r\n`/`\r` → `\n` relève du prétraitement
+    /// d'entrée du tokenizer HTML, pas du DOM — spec §parsing).
     ///
     /// # Errors
     /// [`DomError::BudgetExceeded`] si le budget de nœuds est atteint.
     pub fn create_text(&mut self, data: &str) -> Result<NodeId> {
-        self.alloc(NodeData::Text(normalize_newlines(data)))
+        self.alloc(NodeData::Text(data.to_owned()))
     }
 
     /// Crée un commentaire détaché.
@@ -203,16 +223,15 @@ impl Dom {
         }
     }
 
-    /// Remplace le texte d'un nœud `Text`/`Comment` (newlines
-    /// normalisés pour `Text`).
+    /// Remplace le texte d'un nœud `Text`/`Comment` (contenu tel
+    /// quel — voir [`Dom::create_text`]).
     ///
     /// # Errors
     /// Comme [`Dom::text`].
     pub fn set_text(&mut self, id: NodeId, data: &str) -> Result<()> {
         let node = self.node_mut(id)?;
         match &mut node.data {
-            NodeData::Text(t) => *t = normalize_newlines(data),
-            NodeData::Comment(t) => data.clone_into(t),
+            NodeData::Text(t) | NodeData::Comment(t) => data.clone_into(t),
             _ => {
                 return Err(DomError::WrongKind {
                     id,
@@ -475,6 +494,32 @@ impl Dom {
     /// Comme [`Dom::element`].
     pub fn tag_name(&self, id: NodeId) -> Result<&str> {
         Ok(&self.element(id)?.tag_name)
+    }
+
+    /// Namespace d'un élément (`Html` par défaut — R-15).
+    ///
+    /// # Errors
+    /// Comme [`Dom::element`].
+    pub fn namespace(&self, id: NodeId) -> Result<Namespace> {
+        Ok(self.element(id)?.namespace)
+    }
+
+    /// Fragment `content` d'un `<template>` (R-15) — `None` si
+    /// l'élément n'est pas un template ou sans fragment.
+    ///
+    /// # Errors
+    /// Comme [`Dom::element`].
+    pub fn template_contents(&self, id: NodeId) -> Result<Option<NodeId>> {
+        Ok(self.element(id)?.template_contents)
+    }
+
+    /// Pose le fragment `content` d'un `<template>` (R-15).
+    ///
+    /// # Errors
+    /// Comme [`Dom::element_mut`].
+    pub fn set_template_contents(&mut self, id: NodeId, fragment: NodeId) -> Result<()> {
+        self.element_mut(id)?.template_contents = Some(fragment);
+        Ok(())
     }
 
     // -----------------------------------------------------------------
@@ -812,12 +857,4 @@ fn slot_idx(index: u32) -> usize {
 /// mais reste non-fatale.
 fn index_as_u32(index: usize) -> u32 {
     u32::try_from(index).unwrap_or(u32::MAX)
-}
-
-/// Normalisation des fins de ligne DOM/HTML : `\r\n` puis `\r` → `\n`.
-fn normalize_newlines(input: &str) -> String {
-    if !input.contains('\r') {
-        return input.to_owned();
-    }
-    input.replace("\r\n", "\n").replace('\r', "\n")
 }

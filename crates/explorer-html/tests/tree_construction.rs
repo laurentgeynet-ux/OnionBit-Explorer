@@ -27,7 +27,8 @@ use common::{dump, normalize_expected, parse_cases};
 
 /// Nombre de cas qui passent aujourd'hui — ne faire QUE monter.
 /// Relevé à chaque avancée du tree-builder (cf. CHANGELOG).
-const BASELINE_PASSED: usize = 953;
+/// **R-15 : 100 % du corpus exécutable** (fragment/script-on exclus).
+const BASELINE_PASSED: usize = 1592;
 
 #[test]
 fn html5lib_tree_construction() {

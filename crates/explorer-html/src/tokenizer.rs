@@ -20,7 +20,7 @@ const COMPACT_AT: usize = 64 * 1024;
 
 /// Longueur max d'un nom de balise/attribut/doctype avant coupure
 /// tolérée (borne contenu hostile — au-delà on tronque).
-const MAX_NAME: usize = 1024;
+const MAX_NAME: usize = 64 * 1024;
 
 /// Taille max d'une valeur d'attribut ou d'un identifiant de
 /// doctype (borne contenu hostile — au-delà on tronque).
@@ -69,6 +69,7 @@ enum State {
     Comment,
     CommentEndDash,
     CommentEnd,
+    CommentEndBang,
     Doctype,
     BeforeDoctypeName,
     DoctypeName,
@@ -95,6 +96,20 @@ enum State {
     ScriptLessThan,
     ScriptEndTagOpen,
     ScriptEndTagName,
+    ScriptEscapeStart,
+    ScriptEscapeStartDash,
+    ScriptEscaped,
+    ScriptEscapedDash,
+    ScriptEscapedDashDash,
+    ScriptEscapedLessThan,
+    ScriptEscapedEndTagOpen,
+    ScriptEscapedEndTagName,
+    ScriptDoubleEscapeStart,
+    ScriptDoubleEscaped,
+    ScriptDoubleEscapedDash,
+    ScriptDoubleEscapedDashDash,
+    ScriptDoubleEscapedLessThan,
+    ScriptDoubleEscapeEnd,
     PlainText,
 }
 
@@ -128,6 +143,7 @@ enum Classify {
 }
 
 /// Tokenizer HTML5 à entrée incrémentale.
+#[allow(clippy::struct_excessive_bools)] // drapeaux d'état orthogonaux.
 pub struct Tokenizer {
     buf: String,
     pos: usize,
@@ -140,6 +156,9 @@ pub struct Tokenizer {
     /// `<![CDATA[` toléré (contenu étranger signalé par le
     /// tree-builder) ; sinon `<![` ouvre un bogus comment.
     allow_cdata: bool,
+    /// `\r` retenu en fin de `feed` — sa suite peut être `\n`
+    /// (normalisation `\r\n` → `\n` au prétraitement d'entrée).
+    pending_cr: bool,
     /// Texte en attente (coalescé avant émission).
     pending_text: String,
     /// Token produit mais retenu : le `pending_text` accumulé avant
@@ -164,6 +183,7 @@ impl Tokenizer {
             eof_emitted: false,
             last_start: String::new(),
             allow_cdata: false,
+            pending_cr: false,
             pending_text: String::new(),
             held: None,
             tag: TagBuild::default(),
@@ -182,15 +202,40 @@ impl Tokenizer {
         t
     }
 
-    /// Alimente le tokenizer (chunk borné, texte déjà décodé et
-    /// newlines normalisés — voir [`crate::encoding`]).
+    /// Alimente le tokenizer (chunk borné, texte déjà décodé).
+    /// Normalise les fins de ligne à l'entrée — prétraitement
+    /// spec : `\r\n` et `\r` → `\n` (les références numériques
+    /// `&#xD;`, émises plus tard, gardent leur `\r` littéral).
+    /// Un `\r` en fin de chunk est retenu : sa suite peut être `\n`.
     pub fn feed(&mut self, chunk: &str) {
-        self.buf.push_str(chunk);
+        let mut s = chunk;
+        if self.pending_cr {
+            // `\r` retenu au chunk précédent : devient `\n` ; un
+            // `\n` jointif complète la séquence `\r\n` → une newline.
+            self.pending_cr = false;
+            self.buf.push('\n');
+            s = s.strip_prefix('\n').unwrap_or(s);
+        }
+        let (body, tail_cr) = match s.strip_suffix('\r') {
+            Some(rest) if !self.finished => (rest, true),
+            _ => (s, false),
+        };
+        if body.contains('\r') {
+            self.buf.push_str(&body.replace('\r', "\n"));
+        } else {
+            self.buf.push_str(body);
+        }
+        self.pending_cr = tail_cr;
     }
 
     /// Signale la fin du flux — les états suspendus se résolvent
     /// (commentaire émis, tag partiel abandonné, `Eof`).
     pub fn finish(&mut self) {
+        if self.pending_cr {
+            // `\r` final jamais confirmé → newline.
+            self.pending_cr = false;
+            self.buf.push('\n');
+        }
         self.finished = true;
     }
 
@@ -327,26 +372,34 @@ impl Tokenizer {
             State::TagOpen
             | State::RcdataLessThan
             | State::RawTextLessThan
-            | State::ScriptLessThan => {
+            | State::ScriptLessThan
+            | State::ScriptEscapedLessThan
+            | State::ScriptDoubleEscapedLessThan => {
                 self.pending_text.push('<');
                 self.state = State::Data;
             }
             State::EndTagOpen
             | State::RcdataEndTagOpen
             | State::RawTextEndTagOpen
-            | State::ScriptEndTagOpen => {
+            | State::ScriptEndTagOpen
+            | State::ScriptEscapedEndTagOpen => {
                 self.pending_text.push_str("</");
                 self.state = State::Data;
             }
-            State::RcdataEndTagName | State::RawTextEndTagName | State::ScriptEndTagName => {
+            State::RcdataEndTagName
+            | State::RawTextEndTagName
+            | State::ScriptEndTagName
+            | State::ScriptEscapedEndTagName => {
                 self.pending_text.push_str("</");
                 let t = std::mem::take(&mut self.temp);
                 self.pending_text.push_str(&t);
                 self.state = State::Data;
             }
             State::MarkupDeclOpen => {
-                self.pending_text.push_str("<!");
+                // `<!` interrompu à EOF : spec → bogus comment
+                // vide (`<!-- -->`), pas du texte.
                 self.state = State::Data;
+                return Some(Token::Comment(std::mem::take(&mut self.comment)));
             }
             State::CdataEnd1 => {
                 self.pending_text.push(']');
@@ -365,6 +418,7 @@ impl Tokenizer {
             State::Comment
             | State::CommentEndDash
             | State::CommentEnd
+            | State::CommentEndBang
             | State::CommentStart
             | State::CommentStartDash
             | State::BogusComment => {
@@ -413,6 +467,7 @@ impl Tokenizer {
             State::Comment => self.step_comment(),
             State::CommentEndDash => self.step_comment_end_dash(),
             State::CommentEnd => self.step_comment_end(),
+            State::CommentEndBang => self.step_comment_end_bang(),
             State::Doctype => self.step_doctype(),
             State::BeforeDoctypeName => self.step_before_doctype_name(),
             State::DoctypeName => self.step_doctype_name(),
@@ -439,11 +494,30 @@ impl Tokenizer {
             State::RawTextEndTagOpen => self.step_text_end_tag_open(State::RawTextEndTagName),
             State::RawTextEndTagName => self.step_text_end_tag_name(State::RawText),
             State::ScriptData => self.step_text_like(State::ScriptData),
-            State::ScriptLessThan => {
-                self.step_text_less_than(State::ScriptData, State::ScriptEndTagOpen)
-            }
+            State::ScriptLessThan => self.step_script_less_than(),
             State::ScriptEndTagOpen => self.step_text_end_tag_open(State::ScriptEndTagName),
             State::ScriptEndTagName => self.step_text_end_tag_name(State::ScriptData),
+            State::ScriptEscapeStart => self.step_script_escape(State::ScriptEscapeStartDash),
+            State::ScriptEscapeStartDash => self.step_script_escape(State::ScriptEscaped),
+            State::ScriptEscaped => self.step_script_escaped(State::ScriptEscapedDash),
+            State::ScriptEscapedDash => self.step_script_escaped_dash(State::ScriptEscapedDashDash),
+            State::ScriptEscapedDashDash => {
+                self.step_script_escaped_dash_dash(State::ScriptEscaped, State::ScriptData)
+            }
+            State::ScriptEscapedLessThan => self.step_script_escaped_less_than(),
+            State::ScriptEscapedEndTagOpen => self
+                .step_text_end_tag_open_back(State::ScriptEscapedEndTagName, State::ScriptEscaped),
+            State::ScriptEscapedEndTagName => self.step_text_end_tag_name(State::ScriptEscaped),
+            State::ScriptDoubleEscapeStart => self.step_script_double_escape_start(),
+            State::ScriptDoubleEscaped => self.step_script_escaped(State::ScriptDoubleEscapedDash),
+            State::ScriptDoubleEscapedDash => {
+                self.step_script_escaped_dash(State::ScriptDoubleEscapedDashDash)
+            }
+            State::ScriptDoubleEscapedDashDash => {
+                self.step_script_escaped_dash_dash(State::ScriptDoubleEscaped, State::ScriptEscaped)
+            }
+            State::ScriptDoubleEscapedLessThan => self.step_script_double_escaped_less_than(),
+            State::ScriptDoubleEscapeEnd => self.step_script_double_escape_end(),
             State::PlainText => self.step_plain_text(),
         }
     }
@@ -468,7 +542,15 @@ impl Tokenizer {
             }
             Some(c) => {
                 self.advance();
-                self.push_text_char(c);
+                // Spec : en `Data`, `\0` est émis **tel quel** — le
+                // tree-builder l'ignore en « in body » ; seuls les
+                // états texte (rawtext/rcdata/script/plaintext)
+                // substituent U+FFFD (`push_text_char`).
+                if c == '\0' {
+                    self.pending_text.push('\0');
+                } else {
+                    self.push_text_char(c);
+                }
                 None
             }
             None => None,
@@ -1059,6 +1141,11 @@ impl Tokenizer {
                 self.state = State::Data;
                 Some(Token::Comment(std::mem::take(&mut self.comment)))
             }
+            Some('!') => {
+                self.advance();
+                self.state = State::CommentEndBang;
+                None
+            }
             Some('-') => {
                 self.comment.push('-');
                 self.advance();
@@ -1069,6 +1156,32 @@ impl Tokenizer {
                 // commentaire (approximation de la spec).
                 self.comment.push('-');
                 self.comment.push('-');
+                self.comment.push(c);
+                self.advance();
+                self.state = State::Comment;
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// `<!-- x --!` vu : spec « comment end bang » — `--!>` ferme
+    /// le commentaire (fermeture abrupte tolérée).
+    fn step_comment_end_bang(&mut self) -> Option<Token> {
+        match self.peek() {
+            Some('>') => {
+                self.advance();
+                self.state = State::Data;
+                Some(Token::Comment(std::mem::take(&mut self.comment)))
+            }
+            Some('-') => {
+                self.advance();
+                self.comment.push_str("--!");
+                self.state = State::CommentEndDash;
+                None
+            }
+            Some(c) => {
+                self.comment.push_str("--!");
                 self.comment.push(c);
                 self.advance();
                 self.state = State::Comment;
@@ -1153,13 +1266,18 @@ impl Tokenizer {
                 return Some(self.emit_doctype());
             }
             Some(_) => match self.classify(&["public", "system"]) {
-                Classify::Matched(6) => {
-                    self.pos += 6;
-                    self.state = State::BeforeDoctypePublicId;
-                }
                 Classify::Matched(len) => {
+                    // `public`/`system` font tous deux 6 caractères —
+                    // la longueur seule ne discrimine pas : comparer
+                    // le texte réellement consommé.
+                    let kw = &self.buf[self.pos..self.pos + len];
+                    let is_public = kw.eq_ignore_ascii_case("public");
                     self.pos += len;
-                    self.state = State::BeforeDoctypeSystemId;
+                    self.state = if is_public {
+                        State::BeforeDoctypePublicId
+                    } else {
+                        State::BeforeDoctypeSystemId
+                    };
                 }
                 Classify::Bogus => {
                     self.doctype.force_quirks = true;
@@ -1321,8 +1439,9 @@ impl Tokenizer {
     }
 
     fn step_cdata_end(&mut self) -> Option<Token> {
-        // `]]>` ferme ; tout autre caractère réinjecte les `]`
-        // accumulés dans le texte.
+        // `]]>` ferme. Spec : `CdataEnd1` = un `]` vu,
+        // `CdataEnd2` = `]]` vu — un `]` en trop s'émet mais
+        // laisse l'état en End2 (`]]]>` → contenu `foo]`).
         match self.peek() {
             Some('>') if self.state == State::CdataEnd2 => {
                 self.advance();
@@ -1333,9 +1452,13 @@ impl Tokenizer {
                     return Some(Token::Character(std::mem::take(&mut self.pending_text)));
                 }
             }
-            Some(']') if self.state == State::CdataEnd1 => {
+            Some(']') => {
                 self.advance();
-                self.state = State::CdataEnd2;
+                if self.state == State::CdataEnd2 {
+                    self.pending_text.push(']');
+                } else {
+                    self.state = State::CdataEnd2;
+                }
             }
             Some(c) => {
                 let brackets = if self.state == State::CdataEnd2 { 2 } else { 1 };
@@ -1397,17 +1520,23 @@ impl Tokenizer {
     }
 
     fn step_text_end_tag_open(&mut self, end_tag_name: State) -> Option<Token> {
+        let back = match end_tag_name {
+            State::RcdataEndTagName => State::Rcdata,
+            State::RawTextEndTagName => State::RawText,
+            State::ScriptEscapedEndTagName => State::ScriptEscaped,
+            _ => State::ScriptData,
+        };
+        self.step_text_end_tag_open_back(end_tag_name, back)
+    }
+
+    fn step_text_end_tag_open_back(&mut self, end_tag_name: State, back: State) -> Option<Token> {
         match self.peek() {
             Some(c) if c.is_ascii_alphabetic() => {
                 self.state = end_tag_name;
             }
             Some(_) => {
                 self.pending_text.push_str("</");
-                self.state = match end_tag_name {
-                    State::RcdataEndTagName => State::Rcdata,
-                    State::RawTextEndTagName => State::RawText,
-                    _ => State::ScriptData,
-                };
+                self.state = back;
             }
             None => {}
         }
@@ -1421,10 +1550,14 @@ impl Tokenizer {
         match self.peek() {
             Some(c) if c.is_ascii_alphabetic() => {
                 self.advance();
-                self.temp.push(c.to_ascii_lowercase());
+                // Casse brute conservée : en échec de reconnaissance
+                // le texte ressort tel quel (R-15) ; la comparaison
+                // « appropriate end tag » est case-insensitive.
+                self.temp.push(c);
             }
             Some(c) if c.is_ascii_whitespace() || c == '/' || c == '>' => {
-                if self.temp == self.last_start {
+                if self.temp.eq_ignore_ascii_case(&self.last_start) {
+                    self.temp.make_ascii_lowercase();
                     self.tag = TagBuild {
                         is_end: true,
                         name: std::mem::take(&mut self.temp),
@@ -1447,6 +1580,209 @@ impl Tokenizer {
                 self.advance();
                 self.state = back;
             }
+            None => {}
+        }
+        None
+    }
+
+    // -----------------------------------------------------------------
+    // Script escaped / double-escaped (spec, R-15)
+    // -----------------------------------------------------------------
+
+    fn step_script_less_than(&mut self) -> Option<Token> {
+        match self.peek() {
+            Some('/') => {
+                self.advance();
+                self.temp.clear();
+                self.state = State::ScriptEndTagOpen;
+            }
+            Some('!') => {
+                self.advance();
+                self.pending_text.push_str("<!");
+                self.state = State::ScriptEscapeStart;
+            }
+            _ => {
+                self.pending_text.push('<');
+                self.state = State::ScriptData;
+            }
+        }
+        None
+    }
+
+    /// `-` → prochain état ; sinon re-consommation dans `ScriptData`.
+    fn step_script_escape(&mut self, next: State) -> Option<Token> {
+        match self.peek() {
+            Some('-') => {
+                self.advance();
+                self.pending_text.push('-');
+                self.state = next;
+            }
+            Some(_) => self.state = State::ScriptData,
+            None => {}
+        }
+        None
+    }
+
+    fn step_script_escaped(&mut self, dash: State) -> Option<Token> {
+        match self.peek() {
+            Some('-') => {
+                self.advance();
+                self.pending_text.push('-');
+                self.state = dash;
+            }
+            Some('<') => {
+                self.advance();
+                self.state = match dash {
+                    State::ScriptEscapedDash => State::ScriptEscapedLessThan,
+                    _ => State::ScriptDoubleEscapedLessThan,
+                };
+            }
+            Some(c) => {
+                self.advance();
+                self.push_text_char(c);
+            }
+            None => {}
+        }
+        None
+    }
+
+    fn step_script_escaped_dash(&mut self, dash_dash: State) -> Option<Token> {
+        let back = match dash_dash {
+            State::ScriptEscapedDashDash => State::ScriptEscaped,
+            _ => State::ScriptDoubleEscaped,
+        };
+        let less_than = match dash_dash {
+            State::ScriptEscapedDashDash => State::ScriptEscapedLessThan,
+            _ => State::ScriptDoubleEscapedLessThan,
+        };
+        match self.peek() {
+            Some('-') => {
+                self.advance();
+                self.pending_text.push('-');
+                self.state = dash_dash;
+            }
+            Some('<') => {
+                self.advance();
+                self.state = less_than;
+            }
+            Some(c) => {
+                self.advance();
+                self.push_text_char(c);
+                self.state = back;
+            }
+            None => {}
+        }
+        None
+    }
+
+    fn step_script_escaped_dash_dash(&mut self, back: State, gt_next: State) -> Option<Token> {
+        match self.peek() {
+            Some('-') => {
+                self.advance();
+                self.pending_text.push('-');
+            }
+            Some('<') => {
+                self.advance();
+                self.state = match back {
+                    State::ScriptEscaped => State::ScriptEscapedLessThan,
+                    _ => State::ScriptDoubleEscapedLessThan,
+                };
+            }
+            Some('>') => {
+                self.advance();
+                self.pending_text.push('>');
+                self.state = gt_next;
+            }
+            Some(c) => {
+                self.advance();
+                self.push_text_char(c);
+                self.state = back;
+            }
+            None => {}
+        }
+        None
+    }
+
+    fn step_script_escaped_less_than(&mut self) -> Option<Token> {
+        match self.peek() {
+            Some('/') => {
+                self.advance();
+                self.temp.clear();
+                self.state = State::ScriptEscapedEndTagOpen;
+            }
+            Some(c) if c.is_ascii_alphabetic() => {
+                self.advance();
+                self.temp.clear();
+                self.temp.push(c.to_ascii_lowercase());
+                self.pending_text.push('<');
+                self.pending_text.push(c);
+                self.state = State::ScriptDoubleEscapeStart;
+            }
+            _ => {
+                self.pending_text.push('<');
+                self.state = State::ScriptEscaped;
+            }
+        }
+        None
+    }
+
+    /// Préfixe `<script` en escaped : si le tampon vaut `script` à
+    /// un délimiteur → double-escaped ; sinon retour escaped.
+    fn step_script_double_escape_start(&mut self) -> Option<Token> {
+        match self.peek() {
+            Some(c) if c.is_ascii_whitespace() || c == '/' || c == '>' => {
+                self.advance();
+                self.pending_text.push(c);
+                self.state = if self.temp == "script" {
+                    State::ScriptDoubleEscaped
+                } else {
+                    State::ScriptEscaped
+                };
+            }
+            Some(c) if c.is_ascii_alphabetic() => {
+                self.advance();
+                self.temp.push(c.to_ascii_lowercase());
+                self.pending_text.push(c);
+            }
+            Some(_) => self.state = State::ScriptEscaped,
+            None => {}
+        }
+        None
+    }
+
+    fn step_script_double_escaped_less_than(&mut self) -> Option<Token> {
+        if let Some('/') = self.peek() {
+            self.advance();
+            self.temp.clear();
+            self.pending_text.push_str("</");
+            self.state = State::ScriptDoubleEscapeEnd;
+        } else {
+            self.pending_text.push('<');
+            self.state = State::ScriptDoubleEscaped;
+        }
+        None
+    }
+
+    /// Préfixe `</script` en double-escaped : à un délimiteur, le
+    /// tampon `script` ramène en escaped simple (le texte reste du
+    /// contenu, **pas** une vraie balise fermante).
+    fn step_script_double_escape_end(&mut self) -> Option<Token> {
+        match self.peek() {
+            Some(c) if c.is_ascii_whitespace() || c == '/' || c == '>' => {
+                self.advance();
+                self.pending_text.push(c);
+                self.state = if self.temp == "script" {
+                    State::ScriptEscaped
+                } else {
+                    State::ScriptDoubleEscaped
+                };
+            }
+            Some(c) if c.is_ascii_alphabetic() => {
+                self.advance();
+                self.temp.push(c.to_ascii_lowercase());
+                self.pending_text.push(c);
+            }
+            Some(_) => self.state = State::ScriptDoubleEscaped,
             None => {}
         }
         None

@@ -77,7 +77,7 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   empoisonne layout, rendu et miroir JS).
   Livré : harnais ouvert (comptage par `.dat` + liste complète),
   code cas/dump partagé (`tests/common/`).
-- [ ] **R-15. Tree-builder : clusters du triage** — issue de la
+- [x] **R-15. Tree-builder : clusters du triage** — issue de la
   décision R-14, **préempte R-3/R-4**. Ordre par volume
   (inventaire R-14 : harnais ouvert, comptage par `.dat`,
   `tests/common/`) :
@@ -97,6 +97,15 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
      (texte ignoré hors whitespace), button-scope,
      after/after-after-body, catégories spec.
   Cliquet `BASELINE_PASSED` monté au fil des sous-chantiers.
+  **Livré : 1592/1592 — 100 % du corpus exécutable** (200 cas
+  fragment/script-on hors périmètre). Contenu additionnel au
+  plan : table d'entités complète `entities.json` (2125
+  entrées vs ~250), normalisation `\r\n` déplacée du DOM au
+  prétraitement d'entrée du tokenizer (spec), miroir
+  `selectedcontent` du select personnalisable, `select`
+  borne de scope (WHATWG PR 10557), scoping namespace-aware,
+  foster-parenting vers `template::content`, frameset_ok
+  préservé sur `\0` étranger, EOF/comment/CDATA tokenizer.
 - [ ] **R-16. Layout : tables réelles** (bug terrain @
   `2693959`, repro : news.ycombinator.com) — DOM complet et
   correct (158 `.titleline`) mais table **explosée**.

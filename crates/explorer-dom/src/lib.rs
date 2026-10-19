@@ -32,4 +32,4 @@ mod node;
 pub use dom::{Dom, DEFAULT_MAX_NODES};
 pub use error::{DomError, Result};
 pub use id::{NodeId, RootId};
-pub use node::{Attribute, DoctypeData, ElementData, NodeData};
+pub use node::{Attribute, DoctypeData, ElementData, Namespace, NodeData};

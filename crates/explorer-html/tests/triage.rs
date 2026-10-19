@@ -21,10 +21,21 @@ fn triage() {
     let spec = std::env::var("TRIAGE").expect("TRIAGE=file:idx,...");
     for sel in spec.split(',') {
         let (file, idx) = sel.split_once(':').expect("file:idx");
-        let idx: usize = idx.parse().expect("idx numérique");
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/tree-construction");
         let content = std::fs::read_to_string(dir.join(file)).expect("read .dat");
-        let case = &parse_cases(&content)[idx];
+        let cases = parse_cases(&content);
+        if idx == "all" {
+            // Parcourt le fichier : affiche l'index avant chaque
+            // parse — le dernier index imprimé avant un crash
+            // désigne le cas fautif.
+            for (i, case) in cases.iter().enumerate() {
+                println!("{file}:{i} input {:?}", case.input);
+                let _ = explorer_html::TreeBuilder::parse(&case.input);
+            }
+            continue;
+        }
+        let idx: usize = idx.parse().expect("idx numérique");
+        let case = &cases[idx];
         let dom = explorer_html::TreeBuilder::parse(&case.input);
         let (got, want) = (dump(&dom), normalize_expected(&case.expected));
         println!(

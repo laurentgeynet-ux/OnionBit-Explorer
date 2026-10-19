@@ -23,6 +23,7 @@
 pub mod debug;
 pub mod encoding;
 pub mod entities;
+mod foreign;
 mod token;
 mod tokenizer;
 mod tree;

@@ -106,6 +106,7 @@ pub fn dump(dom: &Dom) -> String {
 
 fn dump_children(dom: &Dom, parent: NodeId, depth: usize, out: &mut String) {
     for child in dom.children(parent).unwrap_or_default() {
+        let mut template_frag = None;
         out.push_str("| ");
         for _ in 1..depth {
             out.push_str("  ");
@@ -113,23 +114,55 @@ fn dump_children(dom: &Dom, parent: NodeId, depth: usize, out: &mut String) {
         match dom.data(child).unwrap_or(&NodeData::Document) {
             NodeData::Document => out.push_str("#document-nested"),
             NodeData::Doctype(d) => {
-                let _ = write!(out, "<!DOCTYPE {}>", d.name);
+                // Format html5lib : `<!DOCTYPE name "pub" "sys">` —
+                // les identifiants n'apparaissent que si au moins
+                // l'un est présent (public = "" par défaut).
+                if d.public_id.is_empty() && d.system_id.is_empty() {
+                    let _ = write!(out, "<!DOCTYPE {}>", d.name);
+                } else {
+                    let _ = write!(
+                        out,
+                        "<!DOCTYPE {} \"{}\" \"{}\">",
+                        d.name, d.public_id, d.system_id
+                    );
+                }
             }
             NodeData::Element(e) => {
-                let _ = write!(out, "<{}>", e.tag_name);
-                let mut attrs: Vec<_> = e
+                // Format html5lib : `<ns tag>` — préfixe de
+                // namespace pour le contenu étranger (R-15).
+                let _ = match e.namespace {
+                    explorer_dom::Namespace::Svg => write!(out, "<svg {}>", e.tag_name),
+                    explorer_dom::Namespace::MathMl => write!(out, "<math {}>", e.tag_name),
+                    explorer_dom::Namespace::Html => write!(out, "<{}>", e.tag_name),
+                };
+                // Le dump html5lib trie par la chaîne sérialisée
+                // `prefix local` — un `x:y` non ajusté garde son
+                // `:` et trie APRÈS les versions à espace
+                // (`xml:baaah` > `xml space`, corpus webkit02:22).
+                let mut attrs: Vec<(String, String)> = e
                     .attributes
                     .iter()
-                    .map(|a| format!("{}=\"{}\"", a.name, a.value))
+                    .map(|a| {
+                        (
+                            attr_sort_key(&a.name),
+                            format!("{}=\"{}\"", a.name, a.value),
+                        )
+                    })
                     .collect();
-                attrs.sort();
-                for a in attrs {
+                attrs.sort_by(|x, y| x.0.cmp(&y.0).then(x.1.cmp(&y.1)));
+                for (_, a) in attrs {
                     out.push('\n');
                     out.push_str("| ");
                     for _ in 0..depth {
                         out.push_str("  ");
                     }
                     out.push_str(&a);
+                }
+                // `<template>` : le fragment `content` apparaît
+                // comme pseudo-enfant (format html5lib, R-15) —
+                // signalé à l'émission post-`\n` ci-dessous.
+                if e.namespace == explorer_dom::Namespace::Html && e.tag_name == "template" {
+                    template_frag = e.template_contents;
                 }
             }
             NodeData::Text(t) => {
@@ -140,6 +173,16 @@ fn dump_children(dom: &Dom, parent: NodeId, depth: usize, out: &mut String) {
             }
         }
         out.push('\n');
+        // `<template>` : `content` pseudo-enfant puis les enfants
+        // du fragment à profondeur +2 (format html5lib).
+        if let Some(frag) = template_frag {
+            out.push_str("| ");
+            for _ in 0..depth {
+                out.push_str("  ");
+            }
+            out.push_str("content\n");
+            dump_children(dom, frag, depth + 2, out);
+        }
         dump_children(dom, child, depth + 1, out);
     }
 }
@@ -149,6 +192,35 @@ fn dump_children(dom: &Dom, parent: NodeId, depth: usize, out: &mut String) {
 /// xlink` → `xmlns:xlink`, `xml lang` → `xml:lang`), et fusion des
 /// nœuds texte adjacents (notre dump n'en produit pas, la spec non
 /// plus — garde-fou).
+/// Clé de tri html5lib : les attributs **réellement ajustés** par
+/// `adjustForeignAttributes` se trient sous la forme `prefix
+/// local` (espace) ; les autres gardent leur nom brut. Un
+/// `xml:baaah` littéral trie donc après `xml space`.
+fn attr_sort_key(name: &str) -> String {
+    // NB corpus : `xml:base` n'est PAS ajusté par la référence
+    // (il garde son `:` et trie en `xml:`) — seuls `lang`/`space`
+    // le sont.
+    const NS_LOCALS: &[(&str, &[&str])] = &[
+        ("xml", &["lang", "space"]),
+        (
+            "xlink",
+            &[
+                "actuate", "arcrole", "href", "role", "show", "title", "type",
+            ],
+        ),
+        ("xmlns", &["xlink"]),
+    ];
+    if let Some((prefix, local)) = name.split_once(':') {
+        if NS_LOCALS
+            .iter()
+            .any(|(p, locals)| *p == prefix && locals.contains(&local))
+        {
+            return format!("{prefix} {local}");
+        }
+    }
+    name.to_string()
+}
+
 pub fn normalize_expected(expected: &str) -> String {
     let mut out = String::new();
     for line in expected.lines() {
@@ -166,12 +238,18 @@ pub fn normalize_expected(expected: &str) -> String {
                 format!("<{rest}")
             }
         } else if let Some((name, val)) = content.split_once('=') {
-            // Attribut étranger `xlink href` → `xlink:href`.
-            let name = name
-                .replace("xlink ", "xlink:")
-                .replace("xml ", "xml:")
-                .replace("xmlns ", "xmlns:");
-            format!("{name}={val}")
+            // Attribut étranger `xlink href` → `xlink:href` —
+            // sauf si la ligne est un commentaire (`<!-- ?xml
+            // version=... -->` ne doit pas être retouché).
+            if name.contains("<!--") {
+                content.to_string()
+            } else {
+                let name = name
+                    .replace("xlink ", "xlink:")
+                    .replace("xml ", "xml:")
+                    .replace("xmlns ", "xmlns:");
+                format!("{name}={val}")
+            }
         } else {
             content.to_string()
         };

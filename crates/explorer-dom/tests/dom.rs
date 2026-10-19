@@ -246,11 +246,14 @@ fn texte_newlines_et_normalize() {
     let div = el(&mut dom, "div");
     dom.append_child(doc, div).expect("div");
 
-    // Normalisation \r\n / \r → \n à la création et au set.
+    // Le DOM stocke le texte **tel quel** — la normalisation
+    // `\r\n`/`\r` → `\n` relève du prétraitement d'entrée du
+    // tokenizer HTML (spec : les charrefs `&#xD;` doivent
+    // produire un `\r` littéral dans le DOM — R-15).
     let t1 = txt(&mut dom, "a\r\nb\rc");
-    assert_eq!(dom.text(t1), Ok("a\nb\nc"));
+    assert_eq!(dom.text(t1), Ok("a\r\nb\rc"));
     dom.set_text(t1, "x\r\ny").expect("set");
-    assert_eq!(dom.text(t1), Ok("x\ny"));
+    assert_eq!(dom.text(t1), Ok("x\r\ny"));
 
     // Fusion des textes adjacents + suppression des vides.
     let a = txt(&mut dom, "un");
