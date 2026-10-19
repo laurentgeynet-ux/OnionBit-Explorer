@@ -616,6 +616,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`new_target_binding`, `set_composition_es2025`,
     `string_well_formed_and_regexp_escape`,
     `arraybuffer_resize_transfer`).
+- **JS-C14 — `@@toStringTag`, chaîne générateur, reviver,
+  `stack`, `normalize`** (`dillo-js`) :
+  - `@@toStringTag` installé sur les prototypes concrets et
+    les namespaces (`Map`/`Set`/`Promise`/`Date`/`Math`/
+    `JSON`/`ArrayBuffer`/`DataView`/`globalThis`…), lu par
+    `obj[Symbol.toStringTag]` et `Object.prototype.toString`
+    — `[object Map]`/`[object Math]` conformes ; tag
+    synthétique par kind sur les vues typées (`Uint8Array`,
+    `BigInt64Array` — lecture d'indice non-numérique ne
+    court-circuite plus `find_own`) ;
+  - chaîne prototype générateurs conforme : ctors cachés
+    `%GeneratorFunction%`/`%AsyncGeneratorFunction%` (pas de
+    global, spec), `%GeneratorFunction.prototype%` →
+    `%Generator%` → `%IteratorPrototype%` ; `function*` a
+    pour proto `%GeneratorFunction.prototype%` et son
+    `.prototype` hérite `%Generator%` →
+    `getPrototypeOf(g()) === g.prototype`,
+    `toString.call(g())` = `"[object Generator]"`,
+    `constructor.name` = `"GeneratorFunction"` ;
+  - `JSON.parse(text, reviver)` — `InternalizeJSONProperty`
+    en post-ordre (enfants avant parents), `undefined` →
+    suppression de la prop (arrays + objets) ;
+  - `Error.stack` — own prop non-énumérable `Name: message`
+    (déviation documentée : pas d'introspection de la pile
+    d'appel) ;
+  - `String.prototype.normalize` — NFC (défaut)/NFD/NFKC/
+    NFKD via `unicode-normalization` (nouvelle dépendance :
+    tables Unicode réelles, pur Rust ; forme invalide →
+    `RangeError`) ;
+  - test262 : 859/859 conservé ; 5 tests de régression
+    (`c14_tostring_tags`, `c14_generator_function_chain`,
+    `c14_json_reviver`, `c14_error_stack`,
+    `c14_string_normalize`).
 - **JS-C13 — Symboles réels, tagged templates, `WeakRef`**
   (`dillo-js`) :
   - clés-symboles uniques : `ObjKind::Symbol{desc,key}` porte

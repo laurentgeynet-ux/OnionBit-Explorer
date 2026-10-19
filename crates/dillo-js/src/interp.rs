@@ -126,6 +126,25 @@ pub struct Engine {
     /// Registres `FinalizationRegistry` vivants (liste faible —
     /// les entrées mortes sont purgées à chaque collecte).
     pub(crate) finregs: Vec<ObjId>,
+    /// `%GeneratorFunction%`/`%AsyncGeneratorFunction%` — ctors
+    /// cachés (pas de binding global, spec) posés en own
+    /// `constructor` des fonctions `function*`/`async function*`
+    /// pour `(f*).constructor.name` = `"GeneratorFunction"`.
+    pub(crate) gen_ctor: Value,
+    /// Voir `gen_ctor`.
+    pub(crate) async_gen_ctor: Value,
+    /// `%GeneratorFunction.prototype%` — proto des fonctions
+    /// `function*` (own `.constructor` = `gen_ctor`,
+    /// own `.prototype` = `gen_proto`, spec).
+    pub(crate) gen_fn_proto: Value,
+    /// `%Generator%` (= `%GeneratorFunction.prototype.prototype%`)
+    /// — proto de `g.prototype` pour `function* g` ; son propre
+    /// proto est `%IteratorPrototype%` (`protos.iterator`).
+    pub(crate) gen_proto: Value,
+    /// Voir `gen_fn_proto` — variante `async function*`.
+    pub(crate) async_gen_fn_proto: Value,
+    /// Voir `gen_proto` — variante `async function*`.
+    pub(crate) async_gen_proto: Value,
     pub(crate) symbol_reg: std::collections::BTreeMap<String, Value>,
     call_depth: u32,
     expr_depth: u32,
@@ -336,6 +355,12 @@ impl Engine {
             sym_seq: 0,
             sym_index: std::collections::BTreeMap::new(),
             finregs: Vec::new(),
+            gen_ctor: Value::Undefined,
+            async_gen_ctor: Value::Undefined,
+            gen_fn_proto: Value::Undefined,
+            gen_proto: Value::Undefined,
+            async_gen_fn_proto: Value::Undefined,
+            async_gen_proto: Value::Undefined,
             call_depth: 0,
             expr_depth: 0,
             ops_left: DEFAULT_OP_LIMIT,
@@ -477,6 +502,12 @@ impl Engine {
         for id in self.sym_index.values() {
             ids.push(*id);
         }
+        crate::heap::push_value(&mut ids, self.gen_ctor);
+        crate::heap::push_value(&mut ids, self.async_gen_ctor);
+        crate::heap::push_value(&mut ids, self.gen_fn_proto);
+        crate::heap::push_value(&mut ids, self.gen_proto);
+        crate::heap::push_value(&mut ids, self.async_gen_fn_proto);
+        crate::heap::push_value(&mut ids, self.async_gen_proto);
         crate::heap::push_value(&mut ids, self.completion);
         // 2. Env global — les bindings `let`/`const` ne vivent pas
         //    sur l'objet global — + envs de modules (leurs exports
@@ -724,6 +755,16 @@ impl Engine {
         let m = self.str_val(msg);
         self.set_own(id, "name", n, false);
         self.set_own(id, "message", m, false);
+        //  (own, non-enum). Deviation documentee : pas
+        // d introspection de la pile d appel — on ne rend que la
+        // premiere ligne V8-style Name: message.
+        let head = if msg.is_empty() {
+            name.to_string()
+        } else {
+            format!("{name}: {msg}")
+        };
+        let s = self.str_val(head);
+        self.set_own(id, "stack", s, false);
         Value::Obj(id)
     }
 
@@ -1725,6 +1766,10 @@ impl Engine {
             ObjKind::Fun(Fun::Bound { target, .. }) => (None, Some(*target)),
             _ => (None, None),
         };
+        let ta_tag = match &o.kind {
+            ObjKind::TypedArray { ta, .. } => Some(ta.name()),
+            _ => None,
+        };
         // Vues binaires — synthèse des props dérivées
         // (`length`/`byteLength`/`byteOffset`/`buffer`) et des
         // éléments indexés, comme pour `Array`.
@@ -1745,8 +1790,10 @@ impl Engine {
             } if ta.is_big() => Some((*ta, *buffer, *offset, *len)),
             _ => None,
         };
-        if let Some((ta, buffer, offset, len)) = big {
-            let i = array_index(key)?;
+        if let (Some((ta, buffer, offset, len)), Some(i)) = (big, array_index(key)) {
+            // Cle non-numerique (`name`, `@@toStringTag`...) → tomber
+            // sur la synthese ci-dessous ; cle numerique hors-bornes
+            // → `None` (proto chain).
             if i >= len {
                 return None;
             }
@@ -1770,6 +1817,19 @@ impl Engine {
         }
         // `fn.name` — `o` est mort ici (dernier use : `big`) :
         // allocs et lectures mutables permises.
+        // `@@toStringTag` d'une vue typée — nom du kind (spec :
+        // getter sur `%TypedArray%.prototype`, rendu ici en data
+        // propre — `ta[Symbol.toStringTag]` → `"Int8Array"` etc.).
+        if key == SYM_TO_STRING_TAG {
+            return ta_tag.map(|n| Prop::Data {
+                value: self.str_val(n),
+                attrs: crate::heap::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            });
+        }
         if key == "name" {
             let n = match (fname, ftgt) {
                 (Some(n), _) => Some(n),
@@ -2812,17 +2872,23 @@ impl Engine {
                 self.strict = outer_strict;
                 if lit.is_gen {
                     let items = self.gen_collect.pop().unwrap_or_default();
-                    return match r {
-                        Ok(Flow::Return(ret)) => {
-                            Ok(crate::collections::gen_iter_obj(self, items, ret))
-                        }
-                        Ok(_) => Ok(crate::collections::gen_iter_obj(
-                            self,
-                            items,
-                            Value::Undefined,
-                        )),
-                        Err(t) => Err(t),
+                    let ret = match r {
+                        Ok(Flow::Return(ret)) => ret,
+                        Ok(_) => Value::Undefined,
+                        Err(t) => return Err(t),
                     };
+                    let it = crate::collections::gen_iter_obj(self, items, ret);
+                    // `Object.getPrototypeOf(g()) === g.prototype`
+                    // (spec) — l'itérateur partagé rendait le proto
+                    // `Iterator.prototype` à la place.
+                    if let (Value::Obj(iid), Value::Obj(fid)) = (it, f) {
+                        if let Some(proto) = self.get_prop(fid, "prototype") {
+                            if let Some(o) = self.heap.obj_mut(iid) {
+                                o.proto = proto;
+                            }
+                        }
+                    }
+                    return Ok(it);
                 }
                 let out = match r {
                     Ok(Flow::Return(v)) => Ok(v),
@@ -2907,7 +2973,23 @@ impl Engine {
     }
 
     pub(crate) fn make_function(&mut self, lit: &Rc<FnLit>, env: &EnvRef, this: Value) -> Value {
-        let proto = Value::Obj(self.protos.function);
+        // Spec chaîne générateurs : `function*` → proto
+        // `%GeneratorFunction.prototype%` et `.prototype` héritant
+        // de `%Generator%` (repli `Function`/`Object` avant
+        // l'initialisation des ctors cachés).
+        let (proto, p_obj) = if lit.is_gen && self.gen_proto != Value::Undefined {
+            let (fp, gp) = if lit.is_async {
+                (self.async_gen_fn_proto, self.async_gen_proto)
+            } else {
+                (self.gen_fn_proto, self.gen_proto)
+            };
+            (fp, gp)
+        } else {
+            (
+                Value::Obj(self.protos.function),
+                Value::Obj(self.protos.object),
+            )
+        };
         let id = self.heap.alloc_obj(Object::fun(
             Fun::Script {
                 lit: lit.clone(),
@@ -2916,7 +2998,6 @@ impl Engine {
             },
             proto,
         ));
-        let p_obj = Value::Obj(self.protos.object);
         let p = self.heap.alloc_obj(Object::ordinary(p_obj));
         self.set_own(p, "constructor", Value::Obj(id), false);
         self.set_own(id, "prototype", Value::Obj(p), false);

@@ -477,6 +477,22 @@ d'intégration, pas par la couverture :
   (cibles non tracées par le GC, `deref()` → `undefined`
   après collecte, cleanup `cb(held)` en microtask). test262 :
   859/859 ; 4 tests de régression.
+- [x] **JS-C14. Tags, chaîne générateur, reviver, stack,
+  normalize** : `@@toStringTag` posé sur les prototypes et
+  namespaces (`Map`/`Set`/`Promise`/`Math`/`JSON`/typed
+  arrays/`globalThis`… — `new Map()[Symbol.toStringTag]` =
+  `"Map"`, `toString.call` → `"[object Map]"` ; tag par kind
+  sur les vues typées BigInt corrigé), chaîne prototype
+  `function*`/`async function*` conforme (`%GeneratorFunction%
+  .prototype%` → `%Generator%` → `%IteratorPrototype%` :
+  `getPrototypeOf(g()).constructor.name` = `"GeneratorFunction"`,
+  `getPrototypeOf(g()) === g.prototype`, `[object Generator]`),
+  `JSON.parse` reviver (`InternalizeJSONProperty` —
+  post-ordre, `undefined` → suppression), `Error.prototype.
+  stack` own (première ligne `Name: msg` — déviation : pas de
+  frames), `String.prototype.normalize` NFC/NFD/NFKC/NFKD via
+  `unicode-normalization`. test262 : 859/859 ; 5 tests de
+  régression.
 - [ ] **JS-C. Couverture par besoin** : `Intl` —
   ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/

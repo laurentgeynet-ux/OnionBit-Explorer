@@ -68,6 +68,9 @@ idna = "1.0"
 # (dillo-js lexer) — `char::is_alphabetic` n'implémente ni UAX #31
 # ni les exclusions Pattern_Syntax (ex. U+2E2F). Pur Rust.
 unicode-ident = "1.0"
+# `String.prototype.normalize` (dillo-js JS-C14) — tables de
+# normalisation Unicode réelles (NFC/NFD/NFKC/NFKD). Pur Rust.
+unicode-normalization = "0.1"
 # Entiers arbitraires pour BigInt (dillo-js JS-C7) — pur Rust,
 # pas de GMP. num-traits pour les casts BigInt→i64/u64/f64.
 num-bigint = "0.4"

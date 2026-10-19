@@ -3881,3 +3881,127 @@ fn weakref_finreg() {
         "held-x"
     );
 }
+
+// ------------------------------------------------------------------
+// JS-C14 — @@toStringTag, chaîne GeneratorFunction, JSON reviver,
+//           Error.stack, String.prototype.normalize
+// ------------------------------------------------------------------
+
+#[test]
+fn c14_tostring_tags() {
+    for (src, want) in [
+        ("new Map()[Symbol.toStringTag]", "Map"),
+        ("new Set()[Symbol.toStringTag]", "Set"),
+        ("new Promise(function(){})[Symbol.toStringTag]", "Promise"),
+        ("new Date(0)[Symbol.toStringTag]", "Date"),
+        ("Math[Symbol.toStringTag]", "Math"),
+        ("JSON[Symbol.toStringTag]", "JSON"),
+        ("new Uint8Array(1)[Symbol.toStringTag]", "Uint8Array"),
+        ("new BigInt64Array(1)[Symbol.toStringTag]", "BigInt64Array"),
+        ("new ArrayBuffer(4)[Symbol.toStringTag]", "ArrayBuffer"),
+        (
+            "new DataView(new ArrayBuffer(8))[Symbol.toStringTag]",
+            "DataView",
+        ),
+        ("Symbol()[Symbol.toStringTag]", "Symbol"),
+        ("globalThis[Symbol.toStringTag]", "globalThis"),
+        ("Object.prototype.toString.call(new Map())", "[object Map]"),
+        ("Object.prototype.toString.call(new Set())", "[object Set]"),
+        ("Object.prototype.toString.call(Math)", "[object Math]"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c14_generator_function_chain() {
+    // Spec : (function*).[[Prototype]] = %GeneratorFunction.prototype%
+    // dont .constructor.name = "GeneratorFunction" ; `%Generator%`
+    // porte @@toStringTag "Generator".
+    for (src, want) in [
+        (
+            "Object.getPrototypeOf(function*(){}).constructor.name",
+            "GeneratorFunction",
+        ),
+        (
+            "Object.getPrototypeOf(async function*(){}).constructor.name",
+            "AsyncGeneratorFunction",
+        ),
+        ("(function*(){}).constructor.name", "GeneratorFunction"),
+        (
+            "var g = function*(){yield 1}; Object.getPrototypeOf(g()) === g.prototype",
+            "true",
+        ),
+        (
+            "var h = function*(){yield 1}; h.prototype.constructor === h",
+            "true",
+        ),
+        (
+            "Object.prototype.toString.call((function*(){yield 1})())",
+            "[object Generator]",
+        ),
+        // `.name` lu via %Function.prototype% (spec — pas de own).
+        ("Object.getPrototypeOf(function*(){}).name", ""),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c14_json_reviver() {
+    // Spec `InternalizeJSONProperty` : post-ordre, retour
+    // `undefined` → suppression de la prop.
+    for (src, want) in [
+        ("JSON.parse('{\"a\":1}', (k,v)=>k=='a'?v*10:v).a", "10"),
+        (
+            "JSON.parse('{\"a\":1,\"b\":2}', (k,v)=>k=='b'?undefined:v).b",
+            "undefined",
+        ),
+        (
+            "JSON.parse('[1,2]', (k,v)=>typeof v=='number'?v+1:v).join(',')",
+            "2,3",
+        ),
+        (
+            "JSON.parse('{\"a\":{\"b\":5}}',(k,v)=>k=='b'?v*2:v).a.b",
+            "10",
+        ),
+        // Racine : key "" — holder interne.
+        ("JSON.parse('3',(k,v)=>k==''?v+1:v)", "4"),
+        // Sans reviver : inchangé.
+        ("JSON.parse('{\"a\":1}').a", "1"),
+        // Reviver non-callable ignoré.
+        ("JSON.parse('{\"a\":1}', 5).a", "1"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+}
+
+#[test]
+fn c14_error_stack() {
+    // Own prop non-énumérable, format première ligne V8-style
+    // (déviation : pas de frames d'appel).
+    assert_eq!(ev_str("new Error('x').stack"), "Error: x");
+    assert_eq!(ev_str("new TypeError('m').stack"), "TypeError: m");
+    assert_eq!(ev_str("Object.keys(new Error('x')).join()"), "");
+    assert_eq!(
+        ev_str("Object.getOwnPropertyNames(new Error('x')).sort().join(',')"),
+        "message,name,stack"
+    );
+    assert_eq!(ev_str("new Error().stack"), "Error");
+}
+
+#[test]
+fn c14_string_normalize() {
+    for (src, want) in [
+        ("'\u{e9}'.normalize('NFD').length", "2"),
+        ("'e\u{301}'.normalize().length", "1"),
+        ("'\u{2460}'.normalize('NFKC')", "1"),
+        ("'\u{212b}'.normalize('NFC')", "Å"),
+        ("'abc'.normalize()", "abc"),
+        ("typeof 'x'.normalize", "function"),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    // Forme invalide → RangeError.
+    assert!(Engine::new().eval("'x'.normalize('BOGUS')").is_err());
+}

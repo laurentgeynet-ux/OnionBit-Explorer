@@ -256,7 +256,57 @@ pub(crate) fn parse(e: &mut Engine, v: Value) -> JsResult<Value> {
 }
 
 fn json_parse(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    parse(e, arg(args, 0))
+    let v = parse(e, arg(args, 0))?;
+    let reviver = arg(args, 1);
+    if !e.is_callable(reviver) {
+        return Ok(v);
+    }
+    // Reviver (spec `InternalizeJSONProperty`) : parcours
+    // post-ordre, `reviver.call(holder, key, value)` — retour
+    // `undefined` → suppression de la prop.
+    let holder = e.new_object();
+    let root_key = e.str_val("");
+    e.set_own(holder, "", v, true);
+    internalize(e, holder, root_key, reviver)
+}
+
+/// `InternalizeJSONProperty(holder, name)` — descend dans les
+/// objets/tableaux puis appelle le reviver sur `holder[name]`.
+fn internalize(
+    e: &mut Engine,
+    holder: crate::value::ObjId,
+    name: Value,
+    reviver: Value,
+) -> JsResult<Value> {
+    let key = match name {
+        Value::Str(sid) => e.heap.string(sid).unwrap_or_default(),
+        Value::Num(n) => crate::value::num_to_js_string(n),
+        _ => String::new(),
+    };
+    let val = e
+        .get_prop_value(Value::Obj(holder), &key)
+        .unwrap_or(Value::Undefined);
+    if let Value::Obj(oid) = val {
+        let keys: Vec<String> = match e.heap.obj(oid).map(|o| &o.kind) {
+            Some(crate::heap::ObjKind::Array(elems)) => {
+                (0..elems.len()).map(|i| i.to_string()).collect()
+            }
+            Some(_) => e.own_enum_keys(oid),
+            None => Vec::new(),
+        };
+        for k in keys {
+            let kval = e.str_val(k.clone());
+            let sub = internalize(e, oid, kval, reviver)?;
+            if matches!(sub, Value::Undefined) {
+                e.delete_result(oid, &k)?;
+            } else {
+                // `set_prop_value` : les indices tombent dans les
+                // éléments (`set_own` ne touche pas `ObjKind::Array`).
+                e.set_prop_value(Value::Obj(oid), &k, sub)?;
+            }
+        }
+    }
+    e.call_value(reviver, Value::Obj(holder), &[name, val])
 }
 
 // ------------------------------------------------------------------
@@ -423,6 +473,8 @@ pub(crate) fn install(e: &mut Engine) {
     let j = e.new_object();
     e.add_method(j, "parse", json_parse);
     e.add_method(j, "stringify", json_stringify);
+    let tag = e.str_val("JSON");
+    e.set_own(j, crate::interp::SYM_TO_STRING_TAG, tag, false);
     let g = e.global;
     e.set_own(g, "JSON", Value::Obj(j), false);
 }

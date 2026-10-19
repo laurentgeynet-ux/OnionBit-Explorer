@@ -44,6 +44,32 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(g, "self", Value::Obj(g), false);
     e.set_own(g, "globalThis", Value::Obj(g), false);
 
+    // `@@toStringTag` (spec) — prototypes concrets, namespaces et
+    // `globalThis`. Lus par `obj[Symbol.toStringTag]` et par
+    // `Object.prototype.toString`. Les sous-classes d'`Error`
+    // héritent le tag `"Error"` (spec).
+    for (pid, tag) in [
+        (e.protos.string, "String"),
+        (e.protos.number, "Number"),
+        (e.protos.boolean, "Boolean"),
+        (e.protos.bigint, "BigInt"),
+        (e.protos.symbol, "Symbol"),
+        (e.protos.error, "Error"),
+        (e.protos.date, "Date"),
+        (e.protos.regexp, "RegExp"),
+        (e.protos.promise, "Promise"),
+        (e.protos.map, "Map"),
+        (e.protos.set, "Set"),
+        (e.protos.iterator, "Iterator"),
+        (e.protos.array_buffer, "ArrayBuffer"),
+        (e.protos.data_view, "DataView"),
+        (e.protos.typed_array, "TypedArray"),
+        (e.global, "globalThis"),
+    ] {
+        let t = e.str_val(tag);
+        e.set_own(pid, crate::interp::SYM_TO_STRING_TAG, t, false);
+    }
+
     e.add_method(g, "parseInt", parse_int);
     e.add_method(g, "parseFloat", parse_float);
     e.add_method(g, "isNaN", is_nan);
@@ -146,6 +172,50 @@ pub(crate) fn install(e: &mut Engine) {
     // `Function(p1,…,body)` ctor + `Symbol` + `Reflect` (JS-7f).
     let function_v = ctor(e, "Function", function_ctor, p_fun);
     e.set_own(g, "Function", function_v, false);
+    // `%GeneratorFunction%`/`%AsyncGeneratorFunction%` — ctors
+    // cachés (pas de global, spec) : own `constructor` des
+    // générateurs, délèguent à `Function` en approximation.
+    e.gen_ctor = e.native_fn("GeneratorFunction", function_ctor);
+    e.async_gen_ctor = e.native_fn("AsyncGeneratorFunction", function_ctor);
+    // Chaîne prototype (spec) :
+    //   %GeneratorFunction%.prototype          = %GeneratorFunction.prototype% (gfp)
+    //   gfp.constructor                        = %GeneratorFunction%
+    //   gfp.prototype                          = %Generator% (gp)
+    //   gfp.[[Prototype]]                      = %Function.prototype%
+    //   gp.constructor                         = gfp
+    //   gp.[[Prototype]]                       = %IteratorPrototype%
+    //   gp[@@toStringTag]                      = "Generator"
+    // Même forme pour `AsyncGeneratorFunction` ; `%AsyncGenerator%`
+    // hérite `%IteratorPrototype%` par approximation (déviation —
+    // pas d'`%AsyncIteratorPrototype%` distinct).
+    let fn_proto = Value::Obj(e.protos.function);
+    let it_proto = Value::Obj(e.protos.iterator);
+    for (ctor_v, tag) in [
+        (e.gen_ctor, "Generator"),
+        (e.async_gen_ctor, "AsyncGenerator"),
+    ] {
+        let gfp_v = Value::Obj(e.heap.alloc_obj(crate::heap::Object::ordinary(fn_proto)));
+        let gp_v = Value::Obj(e.heap.alloc_obj(crate::heap::Object::ordinary(it_proto)));
+        if let (Value::Obj(gfp), Value::Obj(gp)) = (gfp_v, gp_v) {
+            e.set_own(gfp, "constructor", ctor_v, false);
+            e.set_own(gfp, "prototype", gp_v, false);
+            e.set_own(gp, "constructor", gfp_v, false);
+            let t = e.str_val(tag);
+            e.set_own(gp, crate::interp::SYM_TO_STRING_TAG, t, false);
+            let ft = e.str_val(format!("{tag}Function"));
+            e.set_own(gfp, crate::interp::SYM_TO_STRING_TAG, ft, false);
+            if let Value::Obj(cid) = ctor_v {
+                e.set_own(cid, "prototype", gfp_v, false);
+            }
+            if tag == "Generator" {
+                e.gen_fn_proto = gfp_v;
+                e.gen_proto = gp_v;
+            } else {
+                e.async_gen_fn_proto = gfp_v;
+                e.async_gen_proto = gp_v;
+            }
+        }
+    }
     // `Symbol` — son propre prototype (`protos.symbol`) ; passer
     // `p_obj` écraserait `Object.prototype.constructor`.
     let sym = ctor(e, "Symbol", symbol_ctor, e.protos.symbol);
@@ -206,6 +276,8 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(reflect, "setPrototypeOf", reflect_set_prototype_of);
     e.add_method(reflect, "isExtensible", reflect_is_extensible);
     e.add_method(reflect, "preventExtensions", reflect_prevent_extensions);
+    let tag = e.str_val("Reflect");
+    e.set_own(reflect, crate::interp::SYM_TO_STRING_TAG, tag, false);
     e.set_own(g, "Reflect", Value::Obj(reflect), false);
     // `Proxy` — construct-only (`Proxy(t,h)` → TypeError) ; la
     // méthode statique `revocable` rend `{proxy, revoke}`.
@@ -417,6 +489,7 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(sp, "at", string_at);
     e.add_method(sp, "codePointAt", string_code_point_at);
     e.add_method(sp, "matchAll", string_match_all);
+    e.add_method(sp, "normalize", string_normalize);
     if let Value::Obj(sid) = string {
         e.add_method(sid, "fromCharCode", string_from_char_code);
         e.add_method(sid, "fromCodePoint", string_from_code_point);
@@ -532,6 +605,8 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(math, "hypot", math_hypot);
     e.add_method(math, "imul", math_imul);
     e.add_method(math, "clz32", math_clz32);
+    let tag = e.str_val("Math");
+    e.set_own(math, crate::interp::SYM_TO_STRING_TAG, tag, false);
     e.set_own(g, "Math", Value::Obj(math), false);
 }
 
@@ -4576,4 +4651,23 @@ pub(crate) fn finreg_cleanup(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
     let cb = arg(args, 0);
     let held = arg(args, 1);
     e.call_value(cb, Value::Undefined, &[held])
+}
+
+/// `String.prototype.normalize(form?)` — NFC par défaut, NFD/NFKC/
+/// NFKD explicites (unicode-normalization, tables Unicode réelles).
+fn string_normalize(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    use unicode_normalization::UnicodeNormalization;
+    let s = e.to_js_string(this)?;
+    let form = match arg(args, 0) {
+        Value::Undefined => "NFC".to_string(),
+        v => e.to_js_string(v)?,
+    };
+    let out: String = match form.as_str() {
+        "NFC" => s.nfc().collect(),
+        "NFD" => s.nfd().collect(),
+        "NFKC" => s.nfkc().collect(),
+        "NFKD" => s.nfkd().collect(),
+        _ => return Err(e.range_error("invalid normalization form")),
+    };
+    Ok(e.str_val(out))
 }
