@@ -36,6 +36,9 @@ const DEFAULT_OP_LIMIT: u64 = 10_000_000;
 pub(crate) const HOME_BIND: &str = "\u{f120}home";
 /// Parent constructor value for `super(...)`.
 pub(crate) const SUPER_BIND: &str = "\u{f120}super";
+/// Liaison cachée `new.target` dans l'env local d'une
+/// fonction invoquée par `new`/`Reflect.construct`.
+pub(crate) const NEW_TARGET: &str = "\u{f120}new.target";
 
 /// Préfixe des clés privées `\u{f131}privN.name` — produit par le
 /// parser (résolution lexicale des `#x`), jamais énumérable.
@@ -1581,7 +1584,13 @@ impl Engine {
     /// on the constructor and installs each field on `this`.
     /// Private-name keys stay non-enumerable; thunks close over
     /// the class scope.
-    fn install_class_fields(&mut self, ctor_id: ObjId, marker: &str, this: Value) -> JsResult<()> {
+    fn install_class_fields(
+        &mut self,
+        ctor_id: ObjId,
+        marker: &str,
+        this: Value,
+        nt: Value,
+    ) -> JsResult<()> {
         let Some(Prop::Data {
             value: Value::Obj(arr),
             ..
@@ -1597,7 +1606,7 @@ impl Engine {
             let k = self.get_prop(pid, "0").unwrap_or(Value::Undefined);
             let f = self.get_prop(pid, "1").unwrap_or(Value::Undefined);
             let key = self.prop_key(k)?;
-            let v = self.call_value(f, this, &[])?;
+            let v = self.call_value_impl(f, this, &[], nt)?;
             let Value::Obj(tid) = this else {
                 return Err(self.type_error("field init without instance"));
             };
@@ -2551,16 +2560,28 @@ impl Engine {
                 return Err(self.type_error("class constructor cannot be invoked without `new`"));
             }
         }
-        self.call_value_impl(f, this, args)
+        self.call_value_impl(f, this, args, Value::Undefined)
     }
 
     /// Appel en contexte de construction (`new`, `super(...)`) —
     /// la marque de constructeur de classe y est attendue.
-    fn call_value_ctor(&mut self, f: Value, this: Value, args: &[Value]) -> JsResult<Value> {
-        self.call_value_impl(f, this, args)
+    fn call_value_ctor(
+        &mut self,
+        f: Value,
+        this: Value,
+        args: &[Value],
+        nt: Value,
+    ) -> JsResult<Value> {
+        self.call_value_impl(f, this, args, nt)
     }
 
-    fn call_value_impl(&mut self, f: Value, this: Value, args: &[Value]) -> JsResult<Value> {
+    fn call_value_impl(
+        &mut self,
+        f: Value,
+        this: Value,
+        args: &[Value],
+        nt: Value,
+    ) -> JsResult<Value> {
         let Value::Obj(id) = f else {
             return Err(self.type_error("value is not a function"));
         };
@@ -2646,6 +2667,13 @@ impl Engine {
                         );
                     }
                 }
+                // Les flèches n'ont pas de `new.target` propre —
+                // la lecture remonte lexicalement au ctor englobant
+                // (spec : `new.target` est une MetaProperty du
+                // contexte d'exécution englobant, pas de l'arrow).
+                if !lit.is_arrow {
+                    Self::env_put(&local, NEW_TARGET, nt, false);
+                }
                 self.hoist(&lit.body, &local);
                 // Générateur eager : le corps tourne à l'appel en
                 // empilant un collecteur ; chaque `yield` pousse sa
@@ -2690,8 +2718,14 @@ impl Engine {
         }
     }
 
-    /// `new F(args)`.
+    /// `new F(args)` — `new.target` = `f`.
     pub(crate) fn construct(&mut self, f: Value, args: &[Value]) -> JsResult<Value> {
+        self.construct_nt(f, args, f)
+    }
+
+    /// `Reflect.construct(F, args, newTarget)` — `new.target`
+    /// explicite, partagé avec les sous-constructions.
+    pub(crate) fn construct_nt(&mut self, f: Value, args: &[Value], nt: Value) -> JsResult<Value> {
         if !self.is_callable(f) {
             return Err(self.type_error("constructor is not a function"));
         }
@@ -2703,9 +2737,9 @@ impl Engine {
             let trap = self.proxy_trap(handler, "construct")?;
             if matches!(trap, Value::Obj(_)) {
                 let argv = self.new_array(args.to_vec());
-                return self.call_value(trap, handler, &[target, argv, f]);
+                return self.call_value(trap, handler, &[target, argv, nt]);
             }
-            return self.construct(target, args);
+            return self.construct_nt(target, args, nt);
         }
         // `new boundFn(...)` delegates to the target with the bound
         // args — the *bound this is ignored* under construction
@@ -2715,7 +2749,7 @@ impl Engine {
                 let mut a = bound.clone();
                 a.extend_from_slice(args);
                 let target = *target;
-                return self.construct(target, &a);
+                return self.construct_nt(target, &a, nt);
             }
         }
         // `new (() => {})` — arrows are not constructors.
@@ -2726,15 +2760,23 @@ impl Engine {
                 }
             }
         }
-        let proto = match self.get_prop(fid, "prototype") {
-            Some(Value::Obj(p)) => Value::Obj(p),
+        // Le [[Prototype]] de l'instance vient de
+        // `newTarget.prototype` — spec `OrdinaryCreateFromConstructor`
+        // (`Reflect.construct(f, args, other)` prend le proto
+        // d'`other`).
+        let proto_src = match nt {
+            Value::Obj(nid) => nid,
+            _ => fid,
+        };
+        let proto = match self.get_prop_value(Value::Obj(proto_src), "prototype")? {
+            p @ Value::Obj(_) => p,
             _ => Value::Obj(self.protos.object),
         };
         let obj = Value::Obj(self.heap.alloc_obj(Object::ordinary(proto)));
         // Champs d'instance d'une classe de base : installés à
         // l'entrée du corps (spec `DefineField` en tête de ctor).
-        self.install_class_fields(fid, FLD_FIELDS, obj)?;
-        let r = self.call_value_ctor(f, obj, args)?;
+        self.install_class_fields(fid, FLD_FIELDS, obj, nt)?;
+        let r = self.call_value_ctor(f, obj, args, nt)?;
         Ok(if r.is_object() { r } else { obj })
     }
 
@@ -3455,24 +3497,31 @@ impl Engine {
                 if self.find_own(tid, FLD_DONE).is_some() {
                     return Err(self.type_error("super() may only be called once"));
                 }
+                // `new.target` de l'englobant se propage (spec :
+                // il reste lié au constructeur d'origine toute la
+                // chaîne `super`).
+                let nt = self.env_get(env, NEW_TARGET).unwrap_or(Value::Undefined);
                 // Champs d'instance du parent base : installés à
                 // l'entrée de son corps — `super()` l'appelle comme
                 // fonction ordinaire, on pose la liste avant.
                 if let Value::Obj(pid) = parent {
-                    self.install_class_fields(pid, FLD_FIELDS, this)?;
+                    self.install_class_fields(pid, FLD_FIELDS, this, nt)?;
                 }
                 let args = self.eval_args(env, this, arg_exprs)?;
-                self.call_value_ctor(parent, this, &args)?;
+                self.call_value_ctor(parent, this, &args, nt)?;
                 self.set_own(tid, FLD_DONE, Value::Bool(true), false);
                 // Nos champs de classe dérivée : installés juste
                 // après `super()` — le constructeur de *cette*
                 // classe est la fermeture courante (`HOME_BIND`).
                 let own_ctor = self.env_get(env, HOME_BIND);
                 if let Some(Value::Obj(cid)) = own_ctor {
-                    self.install_class_fields(cid, FLD_FIELDS_D, this)?;
+                    self.install_class_fields(cid, FLD_FIELDS_D, this, nt)?;
                 }
                 Ok(this)
             }
+            // `new.target` — liaison posée par `call_value_impl` :
+            // undefined en appel ordinaire, ctor cible sous `new`.
+            Expr::NewTarget => Ok(self.env_get(env, NEW_TARGET).unwrap_or(Value::Undefined)),
             Expr::SuperMember(name) => {
                 let base = self.super_base(env)?;
                 self.read_prop(base, this, name)

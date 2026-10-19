@@ -1578,13 +1578,23 @@ impl Parser {
     /// `?.` base is nullish (`a?.b.c` never evaluates `.c`).
     fn lhs_expr(&mut self, no_in: bool) -> Result<Expr> {
         let mut e = if self.eat_kw(Kw::New) {
-            let callee = self.new_callee(no_in)?;
-            let args = if self.check_p(P::LParen) {
-                self.args(no_in)?
+            if self.eat_p(P::Dot) {
+                // `new.target` — meta-property : la seule paire
+                // `new . nom` valide de la grammaire.
+                let n = self.expect_prop_name()?;
+                if n != "target" {
+                    return Err(self.err("expected `new.target`"));
+                }
+                Expr::NewTarget
             } else {
-                Vec::new()
-            };
-            Expr::New(Box::new(callee), args)
+                let callee = self.new_callee(no_in)?;
+                let args = if self.check_p(P::LParen) {
+                    self.args(no_in)?
+                } else {
+                    Vec::new()
+                };
+                Expr::New(Box::new(callee), args)
+            }
         } else {
             self.primary(no_in)?
         };

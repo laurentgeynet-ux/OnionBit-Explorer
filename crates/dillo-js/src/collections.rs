@@ -336,6 +336,81 @@ fn set_entries_iter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value
     Ok(iter_obj(e, out))
 }
 
+// -- ES2025 Set composition ------------------------------------------------
+
+/// Alloue un `Set` pré-rempli (dédup via `set_add`, ordre
+/// d'insertion préservé).
+fn new_set_from(e: &mut Engine, items: Vec<Value>) -> Value {
+    let proto = Value::Obj(e.protos.set);
+    let id = e.heap.alloc_obj(Object {
+        proto,
+        props: Vec::new(),
+        kind: ObjKind::Set(Vec::new()),
+        extensible: true,
+    });
+    for v in items {
+        set_add(e, id, v);
+    }
+    Value::Obj(id)
+}
+
+/// `this` et l'argument doivent être des `Set` — retourne les
+/// deux listes d'éléments (ordre d'insertion).
+fn two_sets(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<(Vec<Value>, Vec<Value>)> {
+    let mine = set_items(e, c_id(this));
+    let other = match arg(args, 0) {
+        Value::Obj(oid) if matches!(e.heap.obj(oid).map(|o| &o.kind), Some(ObjKind::Set(_))) => {
+            set_items(e, oid)
+        }
+        _ => return Err(e.type_error("expected a Set argument")),
+    };
+    Ok((mine, other))
+}
+
+fn contains(e: &Engine, hay: &[Value], v: Value) -> bool {
+    hay.iter().any(|&x| svz(&e.heap, x, v))
+}
+
+fn set_union(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (mut a, b) = two_sets(e, this, args)?;
+    a.extend(b);
+    Ok(new_set_from(e, a))
+}
+
+fn set_intersection(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (a, b) = two_sets(e, this, args)?;
+    let keep: Vec<Value> = a.iter().copied().filter(|&v| contains(e, &b, v)).collect();
+    Ok(new_set_from(e, keep))
+}
+
+fn set_difference(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (a, b) = two_sets(e, this, args)?;
+    let keep: Vec<Value> = a.iter().copied().filter(|&v| !contains(e, &b, v)).collect();
+    Ok(new_set_from(e, keep))
+}
+
+fn set_sym_diff(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (a, b) = two_sets(e, this, args)?;
+    let mut out: Vec<Value> = a.iter().copied().filter(|&v| !contains(e, &b, v)).collect();
+    out.extend(b.iter().copied().filter(|&v| !contains(e, &a, v)));
+    Ok(new_set_from(e, out))
+}
+
+fn set_is_subset(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (a, b) = two_sets(e, this, args)?;
+    Ok(Value::Bool(a.iter().all(|&v| contains(e, &b, v))))
+}
+
+fn set_is_superset(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (a, b) = two_sets(e, this, args)?;
+    Ok(Value::Bool(b.iter().all(|&v| contains(e, &a, v))))
+}
+
+fn set_is_disjoint(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (a, b) = two_sets(e, this, args)?;
+    Ok(Value::Bool(!a.iter().any(|&v| contains(e, &b, v))))
+}
+
 // ------------------------------------------------------------------
 // Iterator prototype — `next()` on ObjKind::Iter
 // ------------------------------------------------------------------
@@ -457,6 +532,14 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(set_proto, "keys", set_values_iter);
     e.add_method(set_proto, "values", set_values_iter);
     e.add_method(set_proto, "entries", set_entries_iter);
+    // ES2025 `Set` composition methods.
+    e.add_method(set_proto, "union", set_union);
+    e.add_method(set_proto, "intersection", set_intersection);
+    e.add_method(set_proto, "difference", set_difference);
+    e.add_method(set_proto, "symmetricDifference", set_sym_diff);
+    e.add_method(set_proto, "isSubsetOf", set_is_subset);
+    e.add_method(set_proto, "isSupersetOf", set_is_superset);
+    e.add_method(set_proto, "isDisjointFrom", set_is_disjoint);
     {
         let values_fn = e.native_fn("values", set_values_iter);
         e.set_own(set_proto, SYM_ITERATOR, values_fn, false);

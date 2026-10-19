@@ -3586,3 +3586,148 @@ fn class_call_rules() {
         "object"
     );
 }
+
+// -- JS-C12 : new.target, Set ES2025, misc modernes ----------------------
+
+#[test]
+fn new_target_binding() {
+    // `new F()` -> new.target = F ; appel ordinaire -> undefined.
+    assert_eq!(
+        ev_str(
+            "var r; function F() { r = new.target === F; } \
+                new F(); r + ',' + (new.target === undefined)"
+        ),
+        "true,true"
+    );
+    // new.target à travers la chaîne super() : reste la classe la
+    // plus dérivée (les *constructeurs* la voient ; les méthodes
+    // ordinaires reçoivent `undefined`).
+    assert_eq!(
+        ev_str(
+            "var a = 0, b = 0; \
+                class B { constructor() { a = new.target === D; } } \
+                class D extends B { constructor() { super(); b = new.target === D; } } \
+                new D(); a + ',' + b"
+        ),
+        "true,true"
+    );
+    // Reflect.construct(cible, args, newTarget) — proto de
+    // newTarget.prototype, new.target = newTarget.
+    assert_eq!(
+        ev_str(
+            "var seen; function F() { seen = new.target; } \
+                var t = function T() {}; t.prototype = {tag: 7}; \
+                var o = Reflect.construct(F, [], t); \
+                (o.tag === 7) + ',' + (o instanceof t) + ',' + (seen === t)"
+        ),
+        "true,true,true"
+    );
+    // Dans un champ d'instance : le ctor courant.
+    assert_eq!(
+        ev_str(
+            "class C { nt = new.target === C; ok = () => new.target === C; } \
+                var c = new C(); c.nt + ',' + c.ok()"
+        ),
+        "true,true"
+    );
+}
+
+#[test]
+fn set_composition_es2025() {
+    assert_eq!(
+        ev_str(
+            "var a = new Set([1, 2, 3]), b = new Set([2, 4]); \
+                [...a.union(b)].join(',')"
+        ),
+        "1,2,3,4"
+    );
+    assert_eq!(
+        ev_str(
+            "var a = new Set([1, 2, 3]), b = new Set([2, 4]); \
+                [...a.intersection(b)].join(',') + '|' + \
+                [...a.difference(b)].join(',') + '|' + \
+                [...a.symmetricDifference(b)].join(',')"
+        ),
+        "2|1,3|1,3,4"
+    );
+    assert_eq!(
+        ev_str(
+            "var a = new Set([1, 2]), b = new Set([1, 2, 3]); \
+                a.isSubsetOf(b) + ',' + b.isSupersetOf(a) + ',' + \
+                a.isDisjointFrom(b) + ',' + a.isDisjointFrom(new Set([9]))"
+        ),
+        "true,true,false,true"
+    );
+    // Non-Set -> TypeError.
+    assert!(Engine::new().eval("new Set([1]).union([2])").is_err());
+    // Résultat = vrai Set.
+    assert_eq!(
+        ev_str(
+            "var u = new Set([1]).union(new Set([2])); \
+                (u instanceof Set) + ',' + u.size"
+        ),
+        "true,2"
+    );
+}
+
+#[test]
+fn arraybuffer_resize_transfer() {
+    // Buffer fixe : pas resizable.
+    assert_eq!(
+        ev_str(
+            "var b = new ArrayBuffer(8); \
+                b.resizable + ',' + b.maxByteLength + ',' + b.detached"
+        ),
+        "false,8,false"
+    );
+    // resizable via option + resize.
+    assert_eq!(
+        ev_str(
+            "var b = new ArrayBuffer(4, {maxByteLength: 16}); \
+                var r = b.resizable + ',' + b.byteLength + '|'; \
+                b.resize(12); r += b.byteLength + '|'; \
+                b.resize(2); r += b.byteLength; r"
+        ),
+        "true,4|12|2"
+    );
+    // resize au-delà du max -> RangeError ; sur buffer fixe -> TypeError.
+    assert!(Engine::new()
+        .eval("var b = new ArrayBuffer(4, {maxByteLength: 8}); b.resize(9)")
+        .is_err());
+    assert!(Engine::new().eval("new ArrayBuffer(4).resize(8)").is_err());
+    // transfer : données copiées, source détachée.
+    assert_eq!(
+        ev_str(
+            "var b = new ArrayBuffer(8); \
+                new Uint8Array(b)[0] = 42; \
+                var t = b.transfer(); \
+                b.detached + ',' + b.byteLength + '|' + \
+                t.detached + ',' + t.byteLength + ',' + new Uint8Array(t)[0]"
+        ),
+        "true,0|false,8,42"
+    );
+    // transfer sur détaché -> TypeError.
+    assert!(Engine::new()
+        .eval("var b = new ArrayBuffer(4); b.transfer(); b.transfer()")
+        .is_err());
+}
+
+#[test]
+fn string_well_formed_and_regexp_escape() {
+    assert_eq!(
+        ev_str("'abc'.isWellFormed() + ',' + 'x'.toWellFormed()"),
+        "true,x"
+    );
+    // escape : SyntaxCharacters backslashés, tête sûre en \x.
+    assert_eq!(
+        ev_str(
+            "RegExp.escape('a.b*c?') + '|' + RegExp.escape('1abc') + '|' + RegExp.escape(' foo')"
+        ),
+        "\\x61\\.b\\*c\\?|\\x31abc|\\x20foo"
+    );
+    // round-trip : la chaîne échappée matche littéralement.
+    assert_eq!(
+        ev_str("new RegExp('^' + RegExp.escape('a.b') + '$').test('a.b')"),
+        "true"
+    );
+}

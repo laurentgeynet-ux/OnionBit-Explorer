@@ -373,6 +373,10 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(sp, "split", string_split);
     e.add_method(sp, "replace", string_replace);
     e.add_method(sp, "replaceAll", string_replace_all);
+    // ES2024 well-formedness — nos chaînes sont des `char` Rust
+    // (scalaires Unicode valides, jamais de lone surrogate).
+    e.add_method(sp, "isWellFormed", string_is_well_formed);
+    e.add_method(sp, "toWellFormed", string_to_well_formed);
     e.add_method(sp, "match", string_match);
     e.add_method(sp, "search", string_search);
     e.add_method(sp, "concat", string_concat);
@@ -419,6 +423,9 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(rp, "test", regexp_test);
     e.add_method(rp, "toString", regexp_to_string);
     let regexp = ctor(e, "RegExp", regexp_ctor, rp);
+    if let Value::Obj(rid) = regexp {
+        e.add_method(rid, "escape", regexp_escape);
+    }
     e.set_own(g, "RegExp", regexp, false);
 
     // Promise + queueMicrotask (JS-7c).
@@ -2263,6 +2270,47 @@ fn regexp_test(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Bool(!matches!(r, Value::Null)))
 }
 
+/// `RegExp.escape(s)` — ES2025 : échappe `s` pour insertion
+/// littérale dans un pattern. `SyntaxCharacter`s/`/` → `\c` ;
+/// en tête, tout autre caractère ASCII non sûr (ponctuation,
+/// chiffres, lettres, espace) → `\xNN` ou `\uNNNN`.
+fn regexp_escape(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    const SYNTAX: &str = "^$\\.*+?()[]{}|/";
+    let src = e.to_js_string(arg(args, 0))?;
+    let mut out = String::with_capacity(src.len() * 2);
+    for (i, c) in src.chars().enumerate() {
+        let esc_hex = i == 0 && (c.is_ascii_alphanumeric() || c.is_ascii_punctuation() || c == ' ');
+        if SYNTAX.contains(c) {
+            out.push('\\');
+            out.push(c);
+        } else if esc_hex {
+            let cp = c as u32;
+            if cp <= 0xff {
+                out.push_str(&format!("\\x{cp:02x}"));
+            } else {
+                out.push_str(&format!("\\u{cp:04x}"));
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    Ok(e.str_val(out))
+}
+
+/// `s.isWellFormed()` — nos `char` sont toujours des scalaires
+/// valides : `true` (les surrogates orphelins dégradent en
+/// U+FFFD au lexing).
+fn string_is_well_formed(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    this_str(e, this)?;
+    Ok(Value::Bool(true))
+}
+
+/// `s.toWellFormed()` — identité (même raison).
+fn string_to_well_formed(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let s = this_str(e, this)?;
+    Ok(e.str_val(s))
+}
+
 fn regexp_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let (re, _id) = as_regexp(e, this)?;
     let src = if re.source.is_empty() {
@@ -2803,7 +2851,13 @@ fn reflect_construct(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
         Value::Obj(id) => e.iter_values(Value::Obj(id))?,
         _ => Vec::new(),
     };
-    e.construct(f, &list)
+    // `newTarget` optionnel — `new.target` vu par `f` (spec :
+    // défaut = la cible).
+    let nt = match arg(args, 2) {
+        Value::Undefined | Value::Null => f,
+        v => v,
+    };
+    e.construct_nt(f, &list, nt)
 }
 
 /// `Reflect.defineProperty(t, k, desc)` — mêmes règles que

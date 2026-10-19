@@ -15,7 +15,7 @@
 //! ni `BigInt64Array`/`BigUint64Array` ni `Atomics`/`resizable`/
 //! `SharedArrayBuffer`.
 
-use crate::heap::{JsResult, ObjKind, Object, TaKind};
+use crate::heap::{JsResult, ObjKind, Object, Prop, TaKind};
 use crate::interp::SYM_ITERATOR;
 use crate::value::{ObjId, Value};
 use crate::Engine;
@@ -73,15 +73,44 @@ fn ab_this(e: &mut Engine, this: Value) -> JsResult<ObjId> {
     }
 }
 
-/// New `ByteBuf` object of `n` zeroed bytes.
+/// New `ByteBuf` object of `n` zeroed bytes — les flags spec
+/// `resizable`/`maxByteLength`/`detached` sont portés par des
+/// props propres non énumérables.
 fn new_buffer(e: &mut Engine, n: usize) -> ObjId {
     let proto = Value::Obj(e.protos.array_buffer);
-    e.heap.alloc_obj(Object {
+    let id = e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
         kind: ObjKind::ByteBuf(vec![0; n]),
         extensible: true,
-    })
+    });
+    mark_buffer(e, id, false, n);
+    id
+}
+
+/// Installe les props `resizable`/`maxByteLength`/`detached`
+/// (non énumérables) d'un `ArrayBuffer`.
+fn mark_buffer(e: &mut Engine, id: ObjId, resizable: bool, max: usize) {
+    e.set_own(id, "resizable", Value::Bool(resizable), false);
+    e.set_own(id, "maxByteLength", Value::Num(max as f64), false);
+    e.set_own(id, "detached", Value::Bool(false), false);
+}
+
+/// `buf.detached === true` — lu sur la prop propre (posée par
+/// `transfer`, déviation : prop mutable ordinaire).
+fn is_detached(e: &Engine, id: ObjId) -> bool {
+    matches!(
+        e.heap.obj(id).and_then(|o| {
+            o.props
+                .iter()
+                .find(|(k, _)| k == "detached")
+                .map(|(_, p)| p)
+        }),
+        Some(Prop::Data {
+            value: Value::Bool(true),
+            ..
+        })
+    )
 }
 
 /// New typed view `ta` over `bid` (`offset` bytes, `len` éléments),
@@ -117,6 +146,7 @@ pub(crate) fn new_u8_array(e: &mut Engine, bytes: Vec<u8>) -> Value {
         kind: ObjKind::ByteBuf(bytes),
         extensible: true,
     });
+    mark_buffer(e, bid, false, len);
     new_ta(e, TaKind::U8, bid, 0, len)
 }
 
@@ -306,6 +336,8 @@ pub(crate) fn install(e: &mut Engine) {
     // -- ArrayBuffer --------------------------------------------------
     let abp = e.protos.array_buffer;
     e.add_method(abp, "slice", ab_slice);
+    e.add_method(abp, "resize", ab_resize);
+    e.add_method(abp, "transfer", ab_transfer);
     {
         let ab = e.native_fn("ArrayBuffer", ab_ctor);
         let id = c_id(ab);
@@ -393,15 +425,98 @@ pub(crate) fn install(e: &mut Engine) {
 
 // -- ArrayBuffer --------------------------------------------------------
 
-/// `new ArrayBuffer(len)` — `len` bytes, zero-filled.
+/// `new ArrayBuffer(len, {maxByteLength?})` — `len` bytes,
+/// zero-filled. `maxByteLength` ≥ len rend le buffer `resizable`.
 fn ab_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let n = to_index(e, arg(args, 0))?;
-    Ok(Value::Obj(new_buffer(e, n)))
+    let id = new_buffer(e, n);
+    if let Value::Obj(opts) = arg(args, 1) {
+        if let Some(mv) = e.get_prop(opts, "maxByteLength") {
+            if !matches!(mv, Value::Undefined) {
+                let max = to_index(e, mv)?;
+                if max < n {
+                    return Err(e.range_error("maxByteLength smaller than length"));
+                }
+                e.set_own(id, "resizable", Value::Bool(true), false);
+                e.set_own(id, "maxByteLength", Value::Num(max as f64), false);
+            }
+        }
+    }
+    Ok(Value::Obj(id))
+}
+
+/// `buf.resize(newLen)` — ES2024, buffers `resizable` only.
+fn ab_resize(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = ab_this(e, this)?;
+    if is_detached(e, id) {
+        return Err(e.type_error("detached ArrayBuffer"));
+    }
+    let resizable = matches!(e.get_prop(id, "resizable"), Some(Value::Bool(true)));
+    if !resizable {
+        return Err(e.type_error("ArrayBuffer is not resizable"));
+    }
+    let max = match e.get_prop(id, "maxByteLength") {
+        Some(Value::Num(n)) => n as usize,
+        _ => usize::MAX,
+    };
+    let n = to_index(e, arg(args, 0))?;
+    if n > max {
+        return Err(e.range_error("new length exceeds maxByteLength"));
+    }
+    if let Some(b) = e.heap.obj_mut(id) {
+        if let ObjKind::ByteBuf(bytes) = &mut b.kind {
+            bytes.resize(n, 0);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `buf.transfer(len?)` — ES2024 : copie les données dans un
+/// nouveau buffer et détache l'ancien (`detached` + vidé).
+fn ab_transfer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = ab_this(e, this)?;
+    if is_detached(e, id) {
+        return Err(e.type_error("detached ArrayBuffer"));
+    }
+    // Props lues d'abord (`get_prop` prend `&mut`).
+    let (max_p, res_p) = (e.get_prop(id, "maxByteLength"), e.get_prop(id, "resizable"));
+    let bytes = match e.heap.obj(id).map(|b| &b.kind) {
+        Some(ObjKind::ByteBuf(b)) => b.clone(),
+        _ => Vec::new(),
+    };
+    let resizable = matches!(res_p, Some(Value::Bool(true)));
+    let max = match max_p {
+        Some(Value::Num(n)) => n as usize,
+        _ => bytes.len(),
+    };
+    let n = if matches!(arg(args, 0), Value::Undefined) {
+        bytes.len()
+    } else {
+        to_index(e, arg(args, 0))?
+    };
+    let nid = new_buffer(e, n.min(bytes.len()));
+    if let Some(b) = e.heap.obj_mut(nid) {
+        if let ObjKind::ByteBuf(nb) = &mut b.kind {
+            *nb = bytes[..n.min(bytes.len())].to_vec();
+        }
+    }
+    e.set_own(nid, "resizable", Value::Bool(resizable), false);
+    e.set_own(nid, "maxByteLength", Value::Num(max as f64), false);
+    if let Some(b) = e.heap.obj_mut(id) {
+        if let ObjKind::ByteBuf(nb) = &mut b.kind {
+            nb.clear();
+        }
+    }
+    e.set_own(id, "detached", Value::Bool(true), false);
+    Ok(Value::Obj(nid))
 }
 
 /// `buf.slice(begin?, end?)` — copie dans un nouveau buffer.
 fn ab_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = ab_this(e, this)?;
+    if is_detached(e, id) {
+        return Err(e.type_error("detached ArrayBuffer"));
+    }
     let len = match e.heap.obj(id).map(|o| &o.kind) {
         Some(ObjKind::ByteBuf(b)) => b.len(),
         _ => 0,
@@ -630,6 +745,9 @@ fn dv_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         let ObjKind::ByteBuf(bytes) = &mut bo.kind else {
             return Err(e.type_error("detached DataView"));
         };
+        if bytes.len() < o + 8 {
+            return Err(e.range_error("offset out of DataView bounds"));
+        }
         bytes[o..o + 8].copy_from_slice(&arr);
         return Ok(Value::Undefined);
     }

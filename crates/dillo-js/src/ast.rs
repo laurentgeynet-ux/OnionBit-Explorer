@@ -578,6 +578,9 @@ pub enum Expr {
     ImportCall(Box<Expr>),
     /// `import.meta` — `{url: <module specifier>}`.
     ImportMeta,
+    /// `new.target` — `undefined` en appel ordinaire, le
+    /// constructeur cible sous `new`/`Reflect.construct`.
+    NewTarget,
 }
 
 /// One member of an object literal.
