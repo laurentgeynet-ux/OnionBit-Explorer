@@ -22,7 +22,7 @@ use explorer_css::{
     initial_value, ComputedStyle, FontSrc, Origin, StyleEngine, StyleEnv, StyleMap,
 };
 use explorer_dom::{Dom, DomError, NodeId};
-use explorer_html::encoding::decode_sniffed;
+use explorer_html::encoding::{decode_sniffed, decode_windows1252, sniff_encoding, Encoding};
 use explorer_html::TreeBuilder;
 use explorer_js::{JsEngine, JsFactory, NavRequest, NetRequest, NetResponse, UrlResolver};
 use explorer_layout::font::FontSource;
@@ -540,6 +540,14 @@ pub struct SessionConfig {
     /// de timers échus ne monopolise pas la pompe ; le reste
     /// attend le tick suivant).
     pub max_timer_jobs: usize,
+    /// Octets de corps reçus entre deux peintures progressives
+    /// (étape 53 — cadence « N octets » du relayout pendant le
+    /// téléchargement ; `0` = peinture à chaque morceau reçu).
+    pub paint_chunk_bytes: usize,
+    /// Intervalle minimal entre deux peintures progressives, en
+    /// millisecondes (étape 53 — cadence « N ms » ; `0` = pas de
+    /// seuil temporel, seuls les octets cadencent).
+    pub paint_interval_ms: u64,
 }
 
 impl Default for SessionConfig {
@@ -558,6 +566,8 @@ impl Default for SessionConfig {
             max_inflight: 6,
             max_script_net: 16,
             max_timer_jobs: 128,
+            paint_chunk_bytes: 32 * 1024,
+            paint_interval_ms: 100,
         }
     }
 }
@@ -626,6 +636,12 @@ pub struct Session {
     /// (`max_timer_jobs` de config, étape 52 — borne
     /// ADR-0019).
     max_timer_jobs: usize,
+    /// Octets reçus entre peintures progressives
+    /// (`paint_chunk_bytes` de config, étape 53).
+    paint_chunk_bytes: usize,
+    /// Intervalle minimal entre peintures progressives
+    /// (`paint_interval_ms` de config, étape 53).
+    paint_interval: std::time::Duration,
 }
 
 impl Session {
@@ -675,6 +691,8 @@ impl Session {
             net_tasks: HashMap::new(),
             max_script_net: cfg.max_script_net,
             max_timer_jobs: cfg.max_timer_jobs,
+            paint_chunk_bytes: cfg.paint_chunk_bytes,
+            paint_interval: std::time::Duration::from_millis(cfg.paint_interval_ms),
         }
     }
 
@@ -1082,16 +1100,42 @@ impl Session {
         let url = req.url.clone();
         // Titre avant écrasement — pour `emit_navigated`.
         let prev_title = self.tabs.get(&tab).and_then(|t| t.title.clone());
-        let resp = self
+        let mut resp = self
             .transport
-            .fetch(&req)
+            .fetch_stream(&req)
             .await
             .map_err(|e| CoreError::Fetch(e.to_string()))?;
         if !(200..300).contains(&resp.status) {
             return Err(CoreError::HttpStatus(resp.status));
         }
-        let (html, _enc) = decode_sniffed(&resp.body);
-        let dom = TreeBuilder::parse(&html);
+        // Parse incrémental (étape 53) : chaque morceau de corps
+        // décodé alimente le tree-builder — `TreeBuilder::push`
+        // garantit un arbre cohérent à frontière de token (R-1) —
+        // et la peinture est cadencée (N octets ou N ms) : la
+        // page se peint pendant le téléchargement.
+        let mut tb = TreeBuilder::new();
+        let mut dec = StreamDecoder::new();
+        let mut html = String::new();
+        let mut since_paint = 0usize;
+        let mut last_paint = Instant::now();
+        while let Some(chunk) = resp.body.recv().await {
+            let bytes = chunk.map_err(|e| CoreError::Fetch(e.to_string()))?;
+            let text = dec.feed(&bytes);
+            html.push_str(&text);
+            tb.push(&text);
+            since_paint += bytes.len();
+            if since_paint >= self.paint_chunk_bytes || last_paint.elapsed() >= self.paint_interval
+            {
+                self.paint_progress(tab, &tb);
+                since_paint = 0;
+                last_paint = Instant::now();
+            }
+        }
+        let text = dec.finish();
+        html.push_str(&text);
+        tb.push(&text);
+        tb.finish();
+        let dom = tb.into_dom();
         let title = extract_title(&dom);
         if let Some(s) = &self.store {
             s.record_visit(&url.to_string(), title.as_deref());
@@ -2017,8 +2061,35 @@ impl Session {
 
     /// Style → boîtes → layout → display list → raster → PNG.
     fn relayout(&mut self, tab: TabId) -> Result<(), CoreError> {
+        // Le DOM sort de l'onglet le temps du pipeline —
+        // `relayout_dom` veut `&mut self` et un `&Dom` disjoint.
+        let dom = self
+            .tabs
+            .get_mut(&tab)
+            .and_then(|e| e.dom.take())
+            .ok_or(CoreError::EmptyDocument)?;
+        let r = self.relayout_dom(tab, &dom);
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            e.dom = Some(dom);
+        }
+        r
+    }
+
+    /// Peinture progressive (étape 53) : relayout + raster sur
+    /// le DOM **en construction** du `TreeBuilder` — cohérent à
+    /// frontière de token (R-1). L'échec est ignoré : un arbre
+    /// trop tôt (pas encore de `<html>`) ne peint rien.
+    fn paint_progress(&mut self, tab: TabId, tb: &TreeBuilder) {
+        if self.relayout_dom(tab, tb.dom()).is_ok() {
+            let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+        }
+    }
+
+    /// Pipeline style → layout → raster sur `dom` (emprunté —
+    /// `relayout` pour le DOM posé, `paint_progress` pour le
+    /// DOM en construction). Écrit `tree`/`doc_h`/frame/png.
+    fn relayout_dom(&mut self, tab: TabId, dom: &Dom) -> Result<(), CoreError> {
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
-        let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
 
         // Feuilles : `<style>` inline puis `<link>` fetchées
         // (étape 46) — même origine auteur, ordre source.
@@ -2043,12 +2114,7 @@ impl Session {
             Instant::now(),
         );
         entry.prev_styles = raw;
-        let Some(root_el) = dom
-            .children(dom.document())
-            .into_iter()
-            .flatten()
-            .find(|&c| dom.element(c).is_ok())
-        else {
+        let Some(root_el) = dom.document_element() else {
             return Err(CoreError::EmptyDocument);
         };
         let sizes = image_sizes(dom, &entry.images);
@@ -3607,4 +3673,146 @@ enum ScriptNav {
     /// `history.go/back/forward` : déplacement relatif
     /// (0 = rechargement de l'entrée courante).
     Go(isize),
+}
+
+/// Fenêtre de sniffing `<meta charset>` — même borne que
+/// `explorer-html` (`META_SCAN_LEN`, privée côté domaine) : la
+/// spec WHATWG limite la recherche au premier kilo-octet.
+const SNIFF_WINDOW: usize = 1024;
+
+/// Décodeur de document progressif (étape 53) : sniffing
+/// WHATWG sur les `SNIFF_WINDOW` premiers octets (ou à EOF),
+/// puis décodage incrémental — une séquence multi-octets
+/// coupée par une frontière de morceau est conservée en queue
+/// plutôt que perdue en `U+FFFD` (le décodage one-shot de
+/// `decode_sniffed` est préservé à l'assemblage final).
+struct StreamDecoder {
+    /// Octets non encore décodés (pré-sniffing ou queue
+    /// d'une séquence incomplète).
+    buf: Vec<u8>,
+    /// Encodage décidé — `None` tant que la fenêtre de
+    /// sniffing n'est pas pleine (et pas EOF).
+    enc: Option<Encoding>,
+}
+
+impl StreamDecoder {
+    fn new() -> Self {
+        Self {
+            buf: Vec::new(),
+            enc: None,
+        }
+    }
+
+    /// Morceau de corps → texte décodé (potentiellement vide
+    /// pendant la fenêtre de sniffing).
+    fn feed(&mut self, chunk: &[u8]) -> String {
+        self.buf.extend_from_slice(chunk);
+        if self.enc.is_none() {
+            if self.buf.len() < SNIFF_WINDOW {
+                return String::new();
+            }
+            self.decide();
+        }
+        self.decode_tail(false)
+    }
+
+    /// Fin de corps — force la décision si la fenêtre n'était
+    /// pas pleine, puis vide la queue.
+    fn finish(&mut self) -> String {
+        if self.enc.is_none() {
+            self.decide();
+        }
+        self.decode_tail(true)
+    }
+
+    /// Sniffing + consommation du BOM (même règle que
+    /// `decode_sniffed` : BOM réel seulement).
+    fn decide(&mut self) {
+        let enc = sniff_encoding(&self.buf);
+        let bom = match enc {
+            Encoding::Utf8 if self.buf.starts_with(&[0xEF, 0xBB, 0xBF]) => 3,
+            Encoding::Utf16Le | Encoding::Utf16Be
+                if self.buf.starts_with(&[0xFF, 0xFE]) || self.buf.starts_with(&[0xFE, 0xFF]) =>
+            {
+                2
+            }
+            _ => 0,
+        };
+        self.buf.drain(..bom);
+        self.enc = Some(enc);
+    }
+
+    /// Décode le maximum décodable ; `last` = fin de flux (la
+    /// queue incomplète est alors décodée en perte tolérante).
+    fn decode_tail(&mut self, last: bool) -> String {
+        let Some(enc) = self.enc else {
+            return String::new();
+        };
+        let buf = std::mem::take(&mut self.buf);
+        let (text, rest) = decode_prefix(&buf, enc, last);
+        self.buf = rest;
+        text
+    }
+}
+
+/// Préfixe décodable de `buf` selon `enc` — renvoie le texte et
+/// la queue d'octets non consommés (séquence incomplète en fin,
+/// conservée pour le morceau suivant ; vide quand `last`).
+fn decode_prefix(buf: &[u8], enc: Encoding, last: bool) -> (String, Vec<u8>) {
+    match enc {
+        // Un octet = un codepoint — tout est décodable.
+        Encoding::Windows1252 => (decode_windows1252(buf), Vec::new()),
+        // Multi-octets : seule la queue d'une séquence coupée en
+        // frontière de morceau est conservée.
+        Encoding::Utf8 => {
+            // Fin de flux : décodage lossy complet — identique au
+            // chemin one-shot `decode` (U+FFFD par séquence
+            // invalide).
+            if last {
+                return (String::from_utf8_lossy(buf).into_owned(), Vec::new());
+            }
+            let (text, rest) = match std::str::from_utf8(buf) {
+                Ok(_) => (String::from_utf8_lossy(buf).into_owned(), Vec::new()),
+                Err(e) => {
+                    let valid = e.valid_up_to();
+                    let mut text = String::from_utf8_lossy(&buf[..valid]).into_owned();
+                    match e.error_len() {
+                        // Séquence valide tronquée en queue —
+                        // conservée pour le morceau suivant.
+                        None => (text, buf[valid..].to_vec()),
+                        // Séquence invalide : `U+FFFD` une fois, le
+                        // suffixe repart en queue (une séquence
+                        // valide coupée y survivra).
+                        Some(bad) => {
+                            text.push('\u{FFFD}');
+                            (text, buf[valid + bad..].to_vec())
+                        }
+                    }
+                }
+            };
+            (text, rest)
+        }
+        Encoding::Utf16Le | Encoding::Utf16Be => {
+            // Par paires d'octets ; une paire de surrogates ne
+            // doit pas être coupée en frontière de morceau.
+            let mut n = buf.len() & !1;
+            if !last && n >= 2 {
+                let unit = match enc {
+                    Encoding::Utf16Le => u16::from_le_bytes([buf[n - 2], buf[n - 1]]),
+                    _ => u16::from_be_bytes([buf[n - 2], buf[n - 1]]),
+                };
+                if (0xD800..=0xDBFF).contains(&unit) {
+                    n -= 2; // lead surrogate sans trail — attendu.
+                }
+            }
+            let units: Vec<u16> = buf[..n]
+                .chunks_exact(2)
+                .map(|c| match enc {
+                    Encoding::Utf16Le => u16::from_le_bytes([c[0], c[1]]),
+                    _ => u16::from_be_bytes([c[0], c[1]]),
+                })
+                .collect();
+            (String::from_utf16_lossy(&units), buf[n..].to_vec())
+        }
+    }
 }

@@ -42,6 +42,10 @@ struct FakeTransport {
     /// En-têtes par route — `path → en-têtes de réponse`
     /// (ACAO pour les tests CORS).
     resp_headers: Mutex<HashMap<String, Vec<(String, String)>>>,
+    /// Corps streamés par route — `path → morceaux` (étape 53 ;
+    /// les routes ordinaires passent par le corps unique de
+    /// `routes` via le défaut du trait).
+    chunks: Mutex<HashMap<String, Vec<Vec<u8>>>>,
 }
 
 impl FakeTransport {
@@ -52,6 +56,7 @@ impl FakeTransport {
             last: Mutex::new(None),
             last_headers: Mutex::new(Vec::new()),
             resp_headers: Mutex::new(HashMap::new()),
+            chunks: Mutex::new(HashMap::new()),
         }
     }
 
@@ -80,6 +85,18 @@ impl FakeTransport {
         }
     }
 
+    /// Route à corps streamé — les morceaux arrivent tels quels
+    /// sur le canal (frontières de chunk arbitraires, y compris
+    /// au milieu d'une balise ou d'un caractère multi-octets).
+    fn route_chunks(&self, path: &str, status: u16, parts: Vec<Vec<u8>>) {
+        if let Ok(mut r) = self.routes.lock() {
+            r.insert(path.to_string(), (status, Vec::new()));
+        }
+        if let Ok(mut c) = self.chunks.lock() {
+            c.insert(path.to_string(), parts);
+        }
+    }
+
     /// Requêtes servies.
     fn calls(&self) -> u32 {
         self.calls.lock().map_or(0, |c| *c)
@@ -98,11 +115,9 @@ impl FakeTransport {
                 .map(|(_, v)| v.clone())
         })
     }
-}
 
-#[async_trait]
-impl HttpTransport for FakeTransport {
-    async fn fetch(&self, req: &Request) -> NetResult<Response> {
+    /// Comptabilisation commune `fetch`/`fetch_stream`.
+    fn record(&self, req: &Request) {
         if let Ok(mut c) = self.calls.lock() {
             *c += 1;
         }
@@ -116,6 +131,10 @@ impl HttpTransport for FakeTransport {
         if let Ok(mut h) = self.last_headers.lock() {
             h.clone_from(&req.headers);
         }
+    }
+
+    /// Réponse simulée — la même pour `fetch` et `fetch_stream`.
+    fn serve(&self, req: &Request) -> (u16, Vec<(String, String)>, Vec<u8>) {
         let found = self
             .routes
             .lock()
@@ -128,21 +147,48 @@ impl HttpTransport for FakeTransport {
             .and_then(|h| h.get(req.url.path()).cloned())
             .unwrap_or_default();
         match found {
-            Some((status, body)) => Ok(Response {
-                status,
-                reason: "fake".to_string(),
-                headers,
-                body,
-                reused_connection: false,
-            }),
-            None => Ok(Response {
-                status: 404,
-                reason: "fake".to_string(),
-                headers,
-                body: b"missing".to_vec(),
-                reused_connection: false,
-            }),
+            Some((status, body)) => (status, headers, body),
+            None => (404, headers, b"missing".to_vec()),
         }
+    }
+}
+
+#[async_trait]
+impl HttpTransport for FakeTransport {
+    async fn fetch(&self, req: &Request) -> NetResult<Response> {
+        self.record(req);
+        let (status, headers, body) = self.serve(req);
+        Ok(Response {
+            status,
+            reason: "fake".to_string(),
+            headers,
+            body,
+            reused_connection: false,
+        })
+    }
+
+    /// Sert les routes `route_chunks` morceau par morceau ;
+    /// les autres envoient leur corps en un seul morceau.
+    async fn fetch_stream(&self, req: &Request) -> NetResult<explorer_net::http::StreamedResponse> {
+        self.record(req);
+        let parts = self
+            .chunks
+            .lock()
+            .ok()
+            .and_then(|c| c.get(req.url.path()).cloned());
+        let (status, headers, body) = self.serve(req);
+        let parts = parts.unwrap_or_else(|| vec![body]);
+        let (tx, rx) = tokio::sync::mpsc::channel(parts.len().max(1));
+        for p in parts {
+            let _ = tx.try_send(Ok(p));
+        }
+        Ok(explorer_net::http::StreamedResponse {
+            status,
+            reason: "fake".to_string(),
+            headers,
+            reused_connection: false,
+            body: rx,
+        })
     }
 }
 
@@ -166,6 +212,8 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
             max_inflight: 6,
             max_script_net: 16,
             max_timer_jobs: 64,
+            paint_chunk_bytes: 32 * 1024,
+            paint_interval_ms: 100,
         },
     );
     (s, t)
@@ -2373,4 +2421,165 @@ async fn checkbox_prevented_click_restores_state() {
         .unwrap();
     assert_eq!(out, InputOutcome::Ignored);
     assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+// ===== Étape 53 — session incrémentale (peinture pendant le
+// téléchargement) =====
+
+/// Session à cadence de peinture réglable — `usize::MAX`/`u64::MAX`
+/// désactive chaque seuil indépendamment.
+fn paint_session(chunk_bytes: usize, interval_ms: u64) -> (Session, Arc<FakeTransport>) {
+    let t = Arc::new(FakeTransport::new());
+    let s = Session::with_config(
+        t.clone(),
+        Arc::new(FixtureFont),
+        SessionConfig {
+            paint_chunk_bytes: chunk_bytes,
+            paint_interval_ms: interval_ms,
+            ..SessionConfig::default()
+        },
+    );
+    (s, t)
+}
+
+/// `FrameInvalidated` reçus sur l'abonnement (drain non
+/// bloquant — les événements sont déjà tous émis).
+fn invalidated(rx: &mut tokio::sync::broadcast::Receiver<CoreEvent>) -> usize {
+    let mut n = 0;
+    while let Ok(ev) = rx.try_recv() {
+        if matches!(ev, CoreEvent::FrameInvalidated { .. }) {
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Page assez grande pour plusieurs peintures (> fenêtre de
+/// sniffing de 1024 o, sinon tout reste tamponné chez le
+/// décodeur) : le contenu croît au fil des morceaux.
+fn page_stream() -> String {
+    use std::fmt::Write as _;
+    let mut p = String::from("<!doctype html><html><body>");
+    for i in 0..40 {
+        let _ = write!(
+            p,
+            "<div style=\"height:24px\">ligne {i} — contenu progressif</div>"
+        );
+    }
+    p.push_str("</body></html>");
+    p
+}
+
+/// Découpe `s` en morceaux de `n` octets (frontières de chunk
+/// arbitraires — y compris au milieu d'une balise).
+fn byte_parts(s: &str, n: usize) -> Vec<Vec<u8>> {
+    s.as_bytes().chunks(n).map(<[u8]>::to_vec).collect()
+}
+
+#[tokio::test]
+async fn progressive_paint_per_chunk() {
+    let (mut s, t) = paint_session(1, 0);
+    let mut rx = s.subscribe();
+    let parts = byte_parts(&page_stream(), 512);
+    t.route_chunks("/ev", 200, parts);
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+
+    // Cadence « chaque morceau » : des peintures intermédiaires
+    // s'ajoutent à l'invalidation finale (les tous premiers
+    // chunks ne peignent pas — l'arbre n'a pas encore de
+    // contenu, et la fenêtre de sniffing tamponne le début).
+    assert!(invalidated(&mut rx) > 1, "peintures progressives attendues");
+}
+
+#[tokio::test]
+async fn progressive_paint_cadence_respected() {
+    // Seuils hors de portée → zéro peinture intermédiaire ;
+    // seule l'invalidation finale subsiste.
+    let (mut s, t) = paint_session(usize::MAX, u64::MAX);
+    let mut rx = s.subscribe();
+    let parts = byte_parts(&page_stream(), 512);
+    t.route_chunks("/ev", 200, parts);
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    assert_eq!(invalidated(&mut rx), 1);
+}
+
+#[tokio::test]
+async fn progressive_final_equals_one_shot() {
+    // Même document, livré en morceaux ou en un coup → même
+    // frame finale.
+    let (mut s, t) = paint_session(usize::MAX, u64::MAX);
+    let page = page_stream();
+    t.route("/one", 200, Box::leak(page.clone().into_boxed_str()));
+    t.route_chunks("/many", 200, byte_parts(&page, 137));
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/one").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/many").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+#[tokio::test]
+async fn progressive_utf8_boundary_no_replacement() {
+    // Document UTF-8 (BOM) dont `é` (C3 A9) est coupé en
+    // frontière de morceau : la séquence est conservée en
+    // queue plutôt que perdue en U+FFFD — la frame égale
+    // celle de la livraison en un coup.
+    let (mut s, t) = paint_session(usize::MAX, u64::MAX);
+    let mut page = b"\xEF\xBB\xBF<!doctype html><html><body><p>caf".to_vec();
+    page.extend_from_slice(&[0xC3, 0xA9]);
+    page.extend_from_slice(b"</p></body></html>");
+    // Le découpage coupe pile au milieu du C3 A9.
+    let mut parts: Vec<Vec<u8>> = page[..page.len() - 16]
+        .chunks(11)
+        .map(<[u8]>::to_vec)
+        .collect();
+    parts.extend(page[page.len() - 16..].chunks(3).map(<[u8]>::to_vec));
+    t.route_chunks("/split", 200, parts);
+    let b = s.open_tab();
+    t.route_bin("/whole", 200, page);
+    s.navigate(b, "http://h.test/whole").await.unwrap();
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/split").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+#[tokio::test]
+async fn progressive_meta_sniff_windows1252() {
+    // `<meta charset>` dans la fenêtre de sniffing puis octet
+    // 0xE9 en 1252 → « é » — le décodage décide après la
+    // fenêtre, le texte suivant en profite.
+    let (mut s, t) = paint_session(usize::MAX, u64::MAX);
+    let mut page = b"<!doctype html><html><head>\
+        <meta charset=\"windows-1252\"></head><body><p>caf"
+        .to_vec();
+    page.push(0xE9);
+    page.extend_from_slice(b"</p></body></html>");
+    let parts: Vec<Vec<u8>> = page.chunks(13).map(<[u8]>::to_vec).collect();
+    t.route_chunks("/sniff", 200, parts);
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/sniff").await.unwrap();
+    let b = s.open_tab();
+    // Référence en vrais octets 1252 (0xE9 = « é ») — un `\u{E9}`
+    // dans la source serait deux octets UTF-8, sniffés « Ã© ».
+    let mut refp = b"<!doctype html><html><head>\
+        <meta charset=\"windows-1252\"></head><body><p>caf"
+        .to_vec();
+    refp.push(0xE9);
+    refp.extend_from_slice(b"</p></body></html>");
+    t.route_bin("/ref", 200, refp);
+    s.navigate(b, "http://h.test/ref").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+#[tokio::test]
+async fn progressive_stream_error_is_typed() {
+    // Corps non-2xx streamé → `HttpStatus` comme le chemin
+    // bufferisé (le canal est abandonné, la tâche se termine).
+    let (mut s, t) = paint_session(1, 0);
+    t.route_chunks("/err", 404, vec![b"nope".to_vec()]);
+    let a = s.open_tab();
+    let err = s.navigate(a, "http://h.test/err").await.unwrap_err();
+    assert!(matches!(err, CoreError::HttpStatus(404)));
 }

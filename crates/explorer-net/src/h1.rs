@@ -27,7 +27,7 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 
 use crate::error::{NetError, NetResult};
-use crate::http::{HttpTransport, Method, Request, Response};
+use crate::http::{HttpTransport, Method, Request, Response, StreamedResponse};
 
 /// Un flot bidirectionnel — `TcpStream` en prod, TLS à l'étape 5,
 /// duplex simulé en test.
@@ -155,7 +155,10 @@ pub(crate) struct Pooled {
 pub struct H1Client {
     connector: Arc<dyn Connector>,
     cfg: HttpConfig,
-    pool: Mutex<HashMap<PoolKey, Vec<Pooled>>>,
+    /// `Arc` : la tâche de streaming corps (étape 53) remet la
+    /// connexion au pool après la fin du corps — elle survit à
+    /// l'appel `fetch_stream`.
+    pool: Arc<Mutex<HashMap<PoolKey, Vec<Pooled>>>>,
 }
 
 impl H1Client {
@@ -171,7 +174,7 @@ impl H1Client {
         Self {
             connector,
             cfg,
-            pool: Mutex::new(HashMap::new()),
+            pool: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -281,13 +284,19 @@ impl HttpTransport for H1Client {
         let (conn, reused) = self.take_conn(&key, req).await?;
         self.exchange(req, &key, conn, reused).await
     }
+
+    async fn fetch_stream(&self, req: &Request) -> NetResult<StreamedResponse> {
+        let key = pool_key(req)?;
+        let (conn, reused) = self.take_conn(&key, req).await?;
+        self.exchange_stream(req, &key, conn, reused).await
+    }
 }
 
 impl H1Client {
     /// Sert `req` sur une connexion déjà établie — chemin de repli
     /// ALPN `http/1.1` d'[`crate::h2::AutoClient`], qui conserve la
     /// connexion négociée plutôt que d'en rouvrir une.
-    pub(crate) async fn fetch_stream(
+    pub(crate) async fn fetch_on_stream(
         &self,
         key: &PoolKey,
         stream: Box<dyn IoStream>,
@@ -301,29 +310,94 @@ impl H1Client {
         self.exchange(req, key, conn, false).await
     }
 
+    /// Variante streamée de [`Self::fetch_on_stream`] (étape 53) —
+    /// même connexion conservée, corps par morceaux.
+    pub(crate) async fn stream_on_conn(
+        &self,
+        key: &PoolKey,
+        stream: Box<dyn IoStream>,
+        req: &Request,
+    ) -> NetResult<StreamedResponse> {
+        let conn = Pooled {
+            stream,
+            buf: Vec::new(),
+            absolute_form: self.connector.absolute_form(&key.scheme, &key.host),
+        };
+        self.exchange_stream(req, key, conn, false).await
+    }
+
     /// Un aller-retour + gestion de pool — corps de `fetch`.
     async fn exchange(
         &self,
         req: &Request,
         key: &PoolKey,
-        mut conn: Pooled,
+        conn: Pooled,
         reused: bool,
     ) -> NetResult<Response> {
-        let wire = self.write_request(req, conn.absolute_form);
+        let (mut conn, mut resp) = self.open_response(req, key, conn, reused).await?;
+        resp.body = self.read_body(req, &resp, &mut conn).await?;
+        resp.reused_connection = reused;
+        if is_reusable(&resp, req) {
+            self.put_back(key, conn);
+        }
+        Ok(resp)
+    }
 
-        let res = self.roundtrip(req, &mut conn, &wire).await;
-        match res {
-            Ok(mut resp) => {
-                resp.reused_connection = reused;
-                if is_reusable(&resp, req) {
-                    self.put_back(key, conn);
-                }
-                Ok(resp)
-            }
+    /// Réponse streamée (étape 53) : en-têtes lues ici, corps
+    /// lu en tâche — chaque morceau déframé part sur le canal
+    /// et la connexion rejoint le pool à la fin si réutilisable.
+    async fn exchange_stream(
+        &self,
+        req: &Request,
+        key: &PoolKey,
+        conn: Pooled,
+        reused: bool,
+    ) -> NetResult<StreamedResponse> {
+        let (conn, resp) = self.open_response(req, key, conn, reused).await?;
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        // La tâche possède la connexion jusqu'à fin de corps —
+        // remise au pool par `pool` si la réponse est réutilisable.
+        let task = BodyTask {
+            ctx: IoCtx {
+                io_timeout: self.cfg.io_timeout,
+                target: target_of(req),
+                max_body: self.cfg.max_body_bytes,
+            },
+            method: req.method,
+            status: resp.status,
+            headers: resp.headers.clone(),
+            conn,
+            tx,
+            pool: Arc::clone(&self.pool),
+            key: key.clone(),
+            pool_max: self.cfg.pool_max_per_origin,
+        };
+        tokio::spawn(task.run());
+        Ok(StreamedResponse {
+            status: resp.status,
+            reason: resp.reason,
+            headers: resp.headers,
+            reused_connection: reused,
+            body: rx,
+        })
+    }
+
+    /// Écrit la requête et lit l'en-tête — partagé par
+    /// [`exchange`] (corps bufferisé) et [`exchange_stream`]
+    /// (corps streamé). Une connexion poolée qui échoue à
+    /// l'écriture/lecture est réessayée une fois sur une
+    /// connexion neuve — méthodes idempotentes seulement.
+    async fn open_response(
+        &self,
+        req: &Request,
+        key: &PoolKey,
+        mut conn: Pooled,
+        reused: bool,
+    ) -> NetResult<(Pooled, Response)> {
+        let wire = self.write_request(req, conn.absolute_form);
+        match self.roundtrip(req, &mut conn, &wire).await {
+            Ok(resp) => Ok((conn, resp)),
             Err(e) => {
-                // Une connexion poolée qui échoue à l'écriture/lecture
-                // est réessayée une fois sur une connexion neuve —
-                // uniquement pour les méthodes idempotentes.
                 if reused && matches!(req.method, Method::Get | Method::Head | Method::Options) {
                     let mut fresh = Pooled {
                         stream: self
@@ -333,12 +407,8 @@ impl H1Client {
                         buf: Vec::new(),
                         absolute_form: self.connector.absolute_form(&key.scheme, &key.host),
                     };
-                    let mut resp = self.roundtrip(req, &mut fresh, &wire).await?;
-                    resp.reused_connection = false;
-                    if is_reusable(&resp, req) {
-                        self.put_back(key, fresh);
-                    }
-                    Ok(resp)
+                    let resp = self.roundtrip(req, &mut fresh, &wire).await?;
+                    Ok((fresh, resp))
                 } else {
                     Err(e)
                 }
@@ -396,8 +466,10 @@ fn no_body(method: Method, status: u16) -> bool {
 }
 
 impl H1Client {
-    /// Un aller-retour complet sur `conn` — écrit, lit l'en-tête,
-    /// lit le corps déframé. Erreur typée à chaque étape.
+    /// Écrit la requête et lit l'en-tête de la réponse — le corps
+    /// reste à lire dans `conn.buf`/le flot (bufferisé par
+    /// [`Self::read_body`], streamé par [`BodyTask`]). Erreur
+    /// typée à chaque étape.
     async fn roundtrip(
         &self,
         req: &Request,
@@ -435,15 +507,13 @@ impl H1Client {
         let body_start = conn.buf.split_off(head_end);
         conn.buf = body_start;
 
-        let mut resp = Response {
+        Ok(Response {
             status,
             reason,
             headers,
             body: Vec::new(),
             reused_connection: false,
-        };
-        resp.body = self.read_body(req, &resp, conn).await?;
-        Ok(resp)
+        })
     }
 
     /// Lit jusqu'à `\r\n\r\n` ou le budget d'en-tête.
@@ -593,6 +663,242 @@ impl H1Client {
             conn.buf.extend_from_slice(&chunk[..n]);
         }
     }
+}
+
+/// Contexte I/O de la tâche de lecture corps — ce que `self.io`
+/// fournit au chemin bufferisé, sans `&H1Client` (la tâche
+/// streamée est `'static`, étape 53).
+struct IoCtx {
+    io_timeout: std::time::Duration,
+    target: String,
+    max_body: usize,
+}
+
+impl IoCtx {
+    /// Timeout par opération + aplatissement `io::Result` —
+    /// même facteur que `H1Client::io`.
+    async fn io<T>(
+        &self,
+        fut: impl std::future::Future<Output = std::io::Result<T>>,
+    ) -> NetResult<T> {
+        timeout(self.io_timeout, fut)
+            .await
+            .map_err(|_| NetError::Timeout {
+                phase: "io",
+                ms: u64::try_from(self.io_timeout.as_millis()).unwrap_or(u64::MAX),
+                target: self.target.clone(),
+            })?
+            .map_err(NetError::Io)
+    }
+}
+
+/// Tâche de lecture corps streamée (étape 53) — possède la
+/// connexion : chaque morceau déframé part sur `tx`, la
+/// connexion rejoint le pool en fin de corps si réutilisable,
+/// une erreur est livrée en dernier item avant fermeture.
+struct BodyTask {
+    ctx: IoCtx,
+    method: Method,
+    status: u16,
+    headers: Vec<(String, String)>,
+    conn: Pooled,
+    tx: tokio::sync::mpsc::Sender<NetResult<Vec<u8>>>,
+    pool: Arc<Mutex<HashMap<PoolKey, Vec<Pooled>>>>,
+    key: PoolKey,
+    pool_max: usize,
+}
+
+impl BodyTask {
+    /// La future est volumineuse par construction (connexion +
+    /// tampon + pool + en-têtes) — elle n'est `.await`ée que par
+    /// `tokio::spawn`, allocation unique, pas de pile à grossir.
+    #[allow(clippy::large_futures)]
+    async fn run(mut self) {
+        let reusable = is_reusable_parts(&self.headers, self.method, self.status);
+        match self.stream_body().await {
+            Ok(()) if reusable => {
+                let mut pool = self
+                    .pool
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let v = pool.entry(self.key).or_default();
+                if v.len() < self.pool_max {
+                    v.push(self.conn);
+                }
+            }
+            Ok(()) => {}
+            Err(e) => {
+                let _ = self.tx.send(Err(e)).await;
+            }
+        }
+    }
+
+    /// Le corps déframé, morceau par morceau — même découpage
+    /// que `read_body` (`Content-Length` / `chunked` / EOF),
+    /// chaque segment part immédiatement sur le canal.
+    async fn stream_body(&mut self) -> NetResult<()> {
+        if no_body(self.method, self.status) {
+            return Ok(());
+        }
+        let chunked = self.headers.iter().any(|(n, v)| {
+            n.eq_ignore_ascii_case("transfer-encoding") && v.eq_ignore_ascii_case("chunked")
+        });
+        if chunked {
+            return self.stream_chunked().await;
+        }
+        if let Some(cl) = self
+            .headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case("content-length"))
+            .map(|(_, v)| v.as_str())
+        {
+            let len: usize = cl
+                .trim()
+                .parse()
+                .map_err(|_| NetError::InvalidResponse(format!("Content-Length invalide: {cl}")))?;
+            if len > self.ctx.max_body {
+                return Err(NetError::BodyTooLarge(len));
+            }
+            let mut sent = 0usize;
+            while sent < len {
+                if self.conn.buf.is_empty() {
+                    let mut chunk = [0u8; 8192];
+                    let n = self.ctx.io(self.conn.stream.read(&mut chunk)).await?;
+                    if n == 0 {
+                        return Err(NetError::TruncatedBody {
+                            got: sent,
+                            expected: len,
+                        });
+                    }
+                    self.conn.buf.extend_from_slice(&chunk[..n]);
+                }
+                let take = self.conn.buf.len().min(len - sent);
+                let piece: Vec<u8> = self.conn.buf.drain(..take).collect();
+                sent += take;
+                if self.tx.send(Ok(piece)).await.is_err() {
+                    return Ok(()); // receveur parti — connexion consumée.
+                }
+            }
+            return Ok(());
+        }
+        // Pas de délimiteur → corps jusqu'à EOF (HTTP/1.0) — la
+        // connexion n'est pas réutilisable.
+        let mut total = self.conn.buf.len();
+        if !self.conn.buf.is_empty() {
+            let piece = std::mem::take(&mut self.conn.buf);
+            if self.tx.send(Ok(piece)).await.is_err() {
+                return Ok(());
+            }
+        }
+        let mut chunk = [0u8; 8192];
+        loop {
+            let n = self.ctx.io(self.conn.stream.read(&mut chunk)).await?;
+            if n == 0 {
+                return Ok(());
+            }
+            total += n;
+            if total > self.ctx.max_body {
+                return Err(NetError::BodyTooLarge(total));
+            }
+            if self.tx.send(Ok(chunk[..n].to_vec())).await.is_err() {
+                return Ok(());
+            }
+        }
+    }
+
+    /// `Transfer-Encoding: chunked` streamé — chaque segment de
+    /// données part dès sa réception (jamais assemblé en entier).
+    async fn stream_chunked(&mut self) -> NetResult<()> {
+        let mut total = 0usize;
+        loop {
+            let line = self.stream_line().await?;
+            let size = usize::from_str_radix(
+                line.trim_end_matches(['\r', '\n'])
+                    .split(';')
+                    .next()
+                    .unwrap_or(""),
+                16,
+            )
+            .map_err(|_| NetError::InvalidChunked("taille hex illisible"))?;
+            if total + size > self.ctx.max_body {
+                return Err(NetError::BodyTooLarge(total + size));
+            }
+            if size == 0 {
+                loop {
+                    let l = self.stream_line().await?;
+                    if l == "\r\n" || l.is_empty() {
+                        return Ok(());
+                    }
+                }
+            }
+            total += size;
+            // `size` octets de données + `\r\n` terminal : les
+            // données partent sur le canal, le CRLF est drainé.
+            let mut read = 0usize;
+            while read < size + 2 {
+                if self.conn.buf.is_empty() {
+                    let mut chunk = [0u8; 8192];
+                    let n = self.ctx.io(self.conn.stream.read(&mut chunk)).await?;
+                    if n == 0 {
+                        return Err(NetError::TruncatedBody {
+                            got: total,
+                            expected: total + size,
+                        });
+                    }
+                    self.conn.buf.extend_from_slice(&chunk[..n]);
+                }
+                let take = self.conn.buf.len().min(size + 2 - read);
+                let data = take.min(size.saturating_sub(read));
+                let piece: Vec<u8> = self.conn.buf.drain(..data).collect();
+                self.conn.buf.drain(..take - data);
+                read += take;
+                if !piece.is_empty() && self.tx.send(Ok(piece)).await.is_err() {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    /// Lit une ligne `\r\n` depuis le tampon + flot (version
+    /// tâche de `H1Client::read_line`).
+    async fn stream_line(&mut self) -> NetResult<String> {
+        loop {
+            if let Some(i) = find_seq(&self.conn.buf, b"\r\n") {
+                let line: Vec<u8> = self.conn.buf.drain(..i + 2).collect();
+                return Ok(String::from_utf8_lossy(&line).into_owned());
+            }
+            let mut chunk = [0u8; 8192];
+            let n = self.ctx.io(self.conn.stream.read(&mut chunk)).await?;
+            if n == 0 {
+                return Err(NetError::TruncatedBody {
+                    got: 0,
+                    expected: usize::MAX,
+                });
+            }
+            self.conn.buf.extend_from_slice(&chunk[..n]);
+        }
+    }
+}
+
+/// `is_reusable` sur les champs de tête (avant lecture du corps) —
+/// même règle : `close` demandé → non, corps absent → oui,
+/// délimiteur CL/chunked requis sinon.
+fn is_reusable_parts(headers: &[(String, String)], method: Method, status: u16) -> bool {
+    if headers
+        .iter()
+        .any(|(n, v)| n.eq_ignore_ascii_case("connection") && v.eq_ignore_ascii_case("close"))
+    {
+        return false;
+    }
+    if no_body(method, status) {
+        return true;
+    }
+    headers
+        .iter()
+        .any(|(n, _)| n.eq_ignore_ascii_case("content-length"))
+        || headers.iter().any(|(n, v)| {
+            n.eq_ignore_ascii_case("transfer-encoding") && v.eq_ignore_ascii_case("chunked")
+        })
 }
 
 /// `memchr` sur séquence — première occurrence de `needle`.

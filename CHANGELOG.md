@@ -9,6 +9,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 53 — Session incrémentale** (`explorer-net`,
+  `explorer-core`) : la page se peint pendant le
+  téléchargement. `HttpTransport::fetch_stream` renvoie
+  `StreamedResponse` (statut + en-têtes dès leur réception,
+  corps par morceaux déframés sur un canal) ; défaut bufferisé
+  un-morceau pour les fakes. `H1Client` streame réellement :
+  la lecture corps tourne en tâche (`BodyTask`), chaque
+  segment CL/chunked/EOF part immédiatement, la connexion
+  rejoint le pool keep-alive à la fin si réutilisable ;
+  `AutoClient` streame h2 (`DATA` → canal, fenêtre de
+  flow-control libérée au fil de l'eau) et le repli ALPN
+  `http/1.1` conserve sa connexion. Côté session,
+  `navigate_request` alimente `TreeBuilder::push` au fil des
+  morceaux (R-1 : arbre cohérent à frontière de token),
+  `StreamDecoder` sniffe WHATWG sur 1 Ko puis décode
+  incrémentalement (séquence UTF-8/surrogate UTF-16 coupée en
+  frontière de morceau conservée en queue, pas de `U+FFFD`
+  parasite), et `paint_progress` relayout+raster cadencé par
+  `SessionConfig::paint_chunk_bytes` (32 Ko) ou
+  `paint_interval_ms` (100 ms) — chaque peinture émet
+  `FrameInvalidated` (SSE/UI repeignent en direct). Tests : 6
+  scénarios session (cadence, frontières UTF-8/1252, égalité
+  streamé/bufferisé, erreur typée) + 3 tests h1 réels
+  (morceaux, chunked, remise au pool).
 - **Étape 52 — Boucle d'événements v2 + tick timers**
   (`explorer-core`, `explorer-js`, `dillo-js`,
   `explorer-daemon`, `explorer-api`, `explorer-cli`,

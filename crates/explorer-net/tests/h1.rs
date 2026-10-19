@@ -335,3 +335,123 @@ async fn status_and_headers_preserved() {
     assert_eq!(vals, ["1", "2"]);
     let _ = srv;
 }
+
+/// Serveur lent : écrit la réponse en morceaux espacés — force
+/// plusieurs lectures TCP côté client (streaming observable,
+/// étape 53). Chaque élément de `pieces` est un `write_all`
+/// séparé par `gap`.
+async fn serve_slow(pieces: Vec<Vec<u8>>, gap: Duration) -> Server {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        let Ok((mut sock, _)) = listener.accept().await else {
+            return;
+        };
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let Ok(n) = sock.read(&mut chunk).await else {
+                return;
+            };
+            if n == 0 {
+                return;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let _ = tx.send(String::from_utf8_lossy(&buf).into_owned());
+        for p in pieces {
+            if sock.write_all(&p).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(gap).await;
+        }
+    });
+    Server { port, rx }
+}
+
+/// Collecte le canal corps d'une `StreamedResponse`.
+async fn collect(
+    mut rx: tokio::sync::mpsc::Receiver<explorer_net::error::NetResult<Vec<u8>>>,
+) -> (Vec<Vec<u8>>, Vec<u8>) {
+    let mut pieces = Vec::new();
+    let mut all = Vec::new();
+    while let Some(item) = rx.recv().await {
+        let piece = item.unwrap();
+        all.extend_from_slice(&piece);
+        pieces.push(piece);
+    }
+    (pieces, all)
+}
+
+#[tokio::test]
+async fn stream_cl_body_arrives_in_pieces() {
+    let srv = serve_slow(
+        vec![
+            b"HTTP/1.1 200 OK\r\nContent-Length: 34\r\n\r\npremier ".to_vec(),
+            b"deuxieme ".to_vec(),
+            b"troisieme morceau".to_vec(),
+        ],
+        Duration::from_millis(25),
+    )
+    .await;
+    let resp = client()
+        .fetch_stream(&Request::get(url(srv.port, "/")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status, 200);
+    let (pieces, all) = collect(resp.body).await;
+    assert_eq!(all, b"premier deuxieme troisieme morceau");
+    // Le corps a réellement été streamé — pas assemblé en amont.
+    assert!(pieces.len() >= 2, "pieces={:?}", pieces.len());
+    let _ = srv;
+}
+
+#[tokio::test]
+async fn stream_chunked_body_sends_per_chunk() {
+    let srv = serve_slow(
+        vec![
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nwiki\r\n".to_vec(),
+            b"5\r\npedia\r\n".to_vec(),
+            b"0\r\n\r\n".to_vec(),
+        ],
+        Duration::from_millis(25),
+    )
+    .await;
+    let resp = client()
+        .fetch_stream(&Request::get(url(srv.port, "/")))
+        .await
+        .unwrap();
+    let (pieces, all) = collect(resp.body).await;
+    assert_eq!(all, b"wikipedia");
+    assert_eq!(pieces.len(), 2, "un envoi par chunk de données");
+    let _ = srv;
+}
+
+#[tokio::test]
+async fn stream_reusable_conn_returns_to_pool() {
+    let srv = serve(
+        vec![
+            "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello",
+            "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nworld",
+        ],
+        true,
+    )
+    .await;
+    let c = client();
+    let resp = c
+        .fetch_stream(&Request::get(url(srv.port, "/a")))
+        .await
+        .unwrap();
+    let (_pieces, all) = collect(resp.body).await;
+    assert_eq!(all, b"hello");
+    // La connexion a rejoint le pool à la fin du corps — la
+    // requête suivante la réutilise.
+    let resp2 = c.fetch(&Request::get(url(srv.port, "/b"))).await.unwrap();
+    assert_eq!(resp2.body, b"world");
+    assert!(resp2.reused_connection);
+    let _ = srv;
+}

@@ -26,7 +26,7 @@ use tokio::time::timeout;
 
 use crate::error::{NetError, NetResult};
 use crate::h1::{pool_key, Conn, Connector, H1Client, HttpConfig, PoolKey};
-use crate::http::{HttpTransport, Request, Response};
+use crate::http::{HttpTransport, Request, Response, StreamedResponse};
 
 /// Type alias de la poignée d'envoi multiplexée `h2`.
 type SendRequest = h2::client::SendRequest<Bytes>;
@@ -119,9 +119,16 @@ impl AutoClient {
         Ok(sr)
     }
 
-    /// Une requête sur connexion h2 — corps borné par
-    /// `max_body_bytes` (défense anti-mémoire identique à h1).
-    async fn h2_send(&self, sr: SendRequest, req: &Request) -> NetResult<Response> {
+    /// Envoie la requête sur connexion h2 et attend l'en-tête de
+    /// réponse — partagé par [`Self::h2_send`] (corps bufferisé)
+    /// et [`Self::h2_send_stream`] (corps streamé, étape 53).
+    /// Le corps requête est envoyé par tranches sur le crédit de
+    /// flow-control.
+    async fn h2_request(
+        &self,
+        sr: SendRequest,
+        req: &Request,
+    ) -> NetResult<http::Response<h2::RecvStream>> {
         let mut sr = self
             .io(req, sr.ready())
             .await?
@@ -169,10 +176,15 @@ impl AutoClient {
             }
         }
 
-        let mut resp = self
-            .io(req, resp_fut)
+        self.io(req, resp_fut)
             .await?
-            .map_err(|e| NetError::Http2(format!("response {e}")))?;
+            .map_err(|e| NetError::Http2(format!("response {e}")))
+    }
+
+    /// Une requête sur connexion h2 — corps borné par
+    /// `max_body_bytes` (défense anti-mémoire identique à h1).
+    async fn h2_send(&self, sr: SendRequest, req: &Request) -> NetResult<Response> {
+        let mut resp = self.h2_request(sr, req).await?;
 
         let headers: Vec<(String, String)> = resp
             .headers()
@@ -198,6 +210,63 @@ impl AutoClient {
             headers,
             body,
             reused_connection: true, // multiplexage = toujours partagée.
+        })
+    }
+
+    /// Variante streamée de [`Self::h2_send`] (étape 53) : la
+    /// réception tourne en tâche — chaque `DATA` part sur le
+    /// canal et libère sa fenêtre de flow-control aussitôt.
+    async fn h2_send_stream(&self, sr: SendRequest, req: &Request) -> NetResult<StreamedResponse> {
+        let mut resp = self.h2_request(sr, req).await?;
+        let headers: Vec<(String, String)> = resp
+            .headers()
+            .iter()
+            .map(|(n, v)| (n.to_string(), v.to_str().unwrap_or_default().to_string()))
+            .collect();
+        let status = resp.status().as_u16();
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let io_timeout = self.cfg.io_timeout;
+        let max_body = self.cfg.max_body_bytes;
+        let target = target_of(req);
+        tokio::spawn(async move {
+            let mut total = 0usize;
+            loop {
+                let Ok(next) = timeout(io_timeout, resp.body_mut().data()).await else {
+                    let _ = tx
+                        .send(Err(NetError::Timeout {
+                            phase: "io",
+                            ms: u64::try_from(io_timeout.as_millis()).unwrap_or(u64::MAX),
+                            target: target.clone(),
+                        }))
+                        .await;
+                    return;
+                };
+                let Some(chunk) = next else { return };
+                match chunk {
+                    Ok(c) => {
+                        total += c.len();
+                        let _ = resp.body_mut().flow_control().release_capacity(c.len());
+                        if total > max_body {
+                            let _ = tx.send(Err(NetError::BodyTooLarge(total))).await;
+                            return;
+                        }
+                        if tx.send(Ok(c.to_vec())).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(NetError::Http2(format!("data {e}")))).await;
+                        return;
+                    }
+                }
+            }
+        });
+        Ok(StreamedResponse {
+            status,
+            reason: String::new(),
+            headers,
+            reused_connection: true,
+            body: rx,
         })
     }
 
@@ -260,7 +329,40 @@ impl HttpTransport for AutoClient {
             }
         }
         // ALPN `http/1.1` ou absent → h1 sur la connexion ouverte.
-        self.h1.fetch_stream(&key, conn.stream, req).await
+        self.h1.fetch_on_stream(&key, conn.stream, req).await
+    }
+
+    async fn fetch_stream(&self, req: &Request) -> NetResult<StreamedResponse> {
+        let key = pool_key(req)?;
+        if key.scheme == "http" {
+            return self.h1.fetch_stream(req).await;
+        }
+        if let Some(sr) = self.h2_conn(&key) {
+            match self.h2_send_stream(sr, req).await {
+                Ok(r) => return Ok(r),
+                Err(e) => {
+                    tracing::debug!(%e, "échec h2 — connexion abandonnée");
+                    self.h2_forget(&key);
+                }
+            }
+        }
+        let conn = timeout(
+            self.cfg.connect_timeout,
+            self.connector
+                .connect_negotiated(&key.scheme, &key.host, key.port),
+        )
+        .await
+        .map_err(|_| NetError::Timeout {
+            phase: "connect",
+            ms: u64::try_from(self.cfg.connect_timeout.as_millis()).unwrap_or(u64::MAX),
+            target: target_of(req),
+        })??;
+
+        if conn.alpn.as_deref() == Some(b"h2") {
+            let sr = self.h2_handshake(&key, conn).await?;
+            return self.h2_send_stream(sr, req).await;
+        }
+        self.h1.stream_on_conn(&key, conn.stream, req).await
     }
 }
 

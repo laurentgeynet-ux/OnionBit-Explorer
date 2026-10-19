@@ -150,6 +150,37 @@ impl Response {
     }
 }
 
+/// Réponse à corps **streamé** (étape 53) : statut et en-têtes
+/// disponibles dès leur réception, le corps arrive déframé par
+/// morceaux sur `body` — la session parse et peint pendant le
+/// téléchargement (ADR-0012). Le canal se ferme en fin de corps ;
+/// une erreur de lecture est livrée comme dernier item `Err`.
+pub struct StreamedResponse {
+    /// Code de statut (`200`, `404`…).
+    pub status: u16,
+    /// Raison (`OK`, `Not Found`…).
+    pub reason: String,
+    /// En-têtes — paires `(nom, valeur)`, ordre et doublons
+    /// préservés.
+    pub headers: Vec<(String, String)>,
+    /// `true` si la connexion a été réutilisée depuis le pool
+    /// keep-alive.
+    pub reused_connection: bool,
+    /// Morceaux de corps déframé — se ferme proprement à EOF.
+    pub body: tokio::sync::mpsc::Receiver<NetResult<Vec<u8>>>,
+}
+
+impl StreamedResponse {
+    /// Première valeur d'un en-tête (nom case-insensitive).
+    #[must_use]
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+}
+
 /// Port réseau : exécute une requête et rend une réponse déframée.
 ///
 /// Injectable — les tests passent un fake in-process, jamais de
@@ -159,4 +190,24 @@ pub trait HttpTransport: Send + Sync {
     /// Exécute `req`, renvoie la réponse déframée ou une erreur
     /// typée.
     async fn fetch(&self, req: &Request) -> NetResult<Response>;
+
+    /// Variante streamée de [`HttpTransport::fetch`] (étape 53) :
+    /// métadonnées dès les en-têtes, corps par morceaux sur le
+    /// canal — la navigation peint pendant le téléchargement.
+    /// Implémentation par défaut : `fetch` bufferisé, le corps
+    /// arrive en un seul morceau (fakes, transports simples).
+    async fn fetch_stream(&self, req: &Request) -> NetResult<StreamedResponse> {
+        let resp = self.fetch(req).await?;
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        // Capacité 1 — `try_send` ne bloque pas ; le canal se
+        // ferme en quittant la portée (fin de corps signalée).
+        let _ = tx.try_send(Ok(resp.body));
+        Ok(StreamedResponse {
+            status: resp.status,
+            reason: resp.reason,
+            headers: resp.headers,
+            reused_connection: resp.reused_connection,
+            body: rx,
+        })
+    }
 }
