@@ -159,20 +159,33 @@ couverture).
 
 ### J-B — Couverture langue par besoin (réactive)
 
+**Règle du palier — aucune de ces étapes ne s'ouvre sans un
+déclencheur documenté** : échec `site_smoke`, bug d'un site
+réel, ou besoin d'une étape produit. Le % de couverture n'est
+jamais un déclencheur (état des lieux §2 — limites des
+mesures).
+
 - [ ] **JS-C30. Extension corpus test262** : extraire les
   répertoires non couverts (`builtins/` complet,
   `language/statements|expressions`) → baseline mesurée, skips
   whitelistés, remontée par échecs groupés.
+  *Déclencheur : aussi l'élargissement honnête du chiffre
+  test262 publié — à faire quand le reporting l'exige.*
 - [ ] **JS-C31. `Temporal` complet** : `ZonedDateTime`
   (arbitrage fuseaux), `round`/`smallestUnit`, calendriers.
+  *Déclencheur : site réel.*
 - [ ] **JS-C32. `Intl` multi-locale** : arbitrage CLDR
   (`icu4x` pur Rust — ADR dédié, dépendance lourde).
-- [ ] **JS-C33. Décorateurs ES2026** — si sites réels.
+  *Déclencheur : site réel + ADR de dépendance.*
+- [ ] **JS-C33. Décorateurs ES2026** — *déclencheur : site
+  réel.*
 - [ ] **JS-C34. Générateurs lazy + `await` pending** : refacto
   structurel, **uniquement si des sites réels bloquent**
   (l'eager documenté tient le corpus actuel).
 - [ ] **JS-C35. `document.write` complet + insertion dynamique**
   — ordre cohérent avec le scheduler de l'étape 50.
+  *Déclencheur : insertion dynamique constatée sur sites
+  réels.*
 
 ### J-C — Mesure, perf, robustesse
 
