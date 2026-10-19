@@ -1037,7 +1037,10 @@ fn paint_box(
                         tiny_skia::Transform::from_translate(stick.0, stick.1),
                     ));
                 }
-                paint_box(child, items, off, vp, images);
+                // Arêtes `deep` : récursion ∝ profondeur de
+                // l'arbre de boîtes — document hostile sans
+                // débordement de pile (R-24).
+                explorer_common::deep(|| paint_box(child, items, off, vp, images));
                 if stick != (0.0, 0.0) {
                     items.push(DisplayItem::PopTransform);
                 }
@@ -1051,7 +1054,7 @@ fn paint_box(
             .collect();
         positioned.sort_by_key(|c| c.z_index);
         for child in positioned {
-            paint_box(child, items, off, vp, images);
+            explorer_common::deep(|| paint_box(child, items, off, vp, images));
         }
         if clipped {
             items.push(DisplayItem::PopClip);

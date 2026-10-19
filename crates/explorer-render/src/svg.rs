@@ -169,7 +169,8 @@ fn serialize_into(dom: &Dom, node: NodeId, out: &mut String) {
             } else {
                 out.push('>');
                 for c in children {
-                    serialize_into(dom, c, out);
+                    // Arête ∝ profondeur DOM (R-24).
+                    explorer_common::deep(|| serialize_into(dom, c, out));
                 }
                 let _ = write!(out, "</{}>", e.tag_name);
             }

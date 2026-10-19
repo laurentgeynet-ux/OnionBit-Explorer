@@ -763,15 +763,19 @@ fn match_selector_part(
     // Le combinateur est porté par le composé PRÉCÉDENT
     // (lien de `parts[idx-1]` vers `parts[idx]`).
     let combinator = selector.parts[idx - 1].1.unwrap_or(Combinator::Descendant);
+    // Récursion ∝ profondeur du sélecteur et des ancêtres DOM
+    // → arêtes garanties `deep` (R-24).
     match combinator {
         Combinator::Child => match parent_element(dom, node) {
-            Some(p) => match_selector_part(dom, p, selector, idx - 1, state),
+            Some(p) => {
+                explorer_common::deep(|| match_selector_part(dom, p, selector, idx - 1, state))
+            }
             None => false,
         },
         Combinator::Descendant => {
             let mut cur = parent_element(dom, node);
             while let Some(p) = cur {
-                if match_selector_part(dom, p, selector, idx - 1, state) {
+                if explorer_common::deep(|| match_selector_part(dom, p, selector, idx - 1, state)) {
                     return true;
                 }
                 cur = parent_element(dom, p);
@@ -779,13 +783,15 @@ fn match_selector_part(
             false
         }
         Combinator::NextSibling => match prev_element_sibling(dom, node) {
-            Some(s) => match_selector_part(dom, s, selector, idx - 1, state),
+            Some(s) => {
+                explorer_common::deep(|| match_selector_part(dom, s, selector, idx - 1, state))
+            }
             None => false,
         },
         Combinator::SubsequentSibling => {
             let mut cur = prev_element_sibling(dom, node);
             while let Some(s) = cur {
-                if match_selector_part(dom, s, selector, idx - 1, state) {
+                if explorer_common::deep(|| match_selector_part(dom, s, selector, idx - 1, state)) {
                     return true;
                 }
                 cur = prev_element_sibling(dom, s);

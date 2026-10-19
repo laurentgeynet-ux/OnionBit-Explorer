@@ -10,4 +10,5 @@ description = "Tokenizer, parser, selecteurs, cascade, computed style"
 workspace = true
 
 [dependencies]
+explorer-common.workspace = true
 explorer-dom.workspace = true

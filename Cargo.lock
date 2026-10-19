@@ -507,6 +507,9 @@ dependencies = [
 [[package]]
 name = "explorer-common"
 version = "0.1.0"
+dependencies = [
+ "stacker",
+]
 
 [[package]]
 name = "explorer-core"
@@ -534,6 +537,7 @@ dependencies = [
 name = "explorer-css"
 version = "0.1.0"
 dependencies = [
+ "explorer-common",
  "explorer-dom",
 ]
 
@@ -558,6 +562,7 @@ dependencies = [
 name = "explorer-dom"
 version = "0.1.0"
 dependencies = [
+ "explorer-common",
  "thiserror",
 ]
 
@@ -596,6 +601,7 @@ name = "explorer-layout"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "explorer-common",
  "explorer-css",
  "explorer-dom",
  "explorer-html",
@@ -635,6 +641,7 @@ name = "explorer-render"
 version = "0.1.0"
 dependencies = [
  "brotli",
+ "explorer-common",
  "explorer-css",
  "explorer-dom",
  "explorer-html",

@@ -118,7 +118,10 @@ fn step<S: BuildHasher>(
             if !relayable(bx) || !relayable(&bx.children[i]) {
                 return Step::Full;
             }
-            return match step(&mut bx.children[i], dom, styles, sizes, target, ctx) {
+            // Arête ∝ profondeur de l'arbre (R-24).
+            return match explorer_common::deep(|| {
+                step(&mut bx.children[i], dom, styles, sizes, target, ctx)
+            }) {
                 // contains() vrai → NotFound impossible ; défensif.
                 Step::NotFound | Step::Full => Step::Full,
                 Step::Relaid(changed) => {
@@ -171,13 +174,21 @@ fn relayable(bx: &LayoutBox) -> bool {
 
 /// `target` dans le sous-arbre de `bx` (comparaison `NodeId`).
 fn contains(bx: &LayoutBox, target: NodeId) -> bool {
-    bx.node == Some(target) || bx.children.iter().any(|c| contains(c, target))
+    // Arêtes `deep` : récursion ∝ profondeur de l'arbre (R-24).
+    bx.node == Some(target)
+        || bx
+            .children
+            .iter()
+            .any(|c| explorer_common::deep(|| contains(c, target)))
 }
 
 /// Un flottant dans le sous-arbre — style calculé ou usé.
 fn has_float(bx: &LayoutBox) -> bool {
     (bx.float != Float::None || matches!(bx.style.get("float"), Some("left" | "right")))
-        || bx.children.iter().any(has_float)
+        || bx
+            .children
+            .iter()
+            .any(|c| explorer_common::deep(|| has_float(c)))
 }
 
 /// `n` ou son plus proche ancêtre élément (un nœud texte sale

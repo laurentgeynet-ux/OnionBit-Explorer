@@ -437,7 +437,19 @@ impl StyleEngine {
         for child in children {
             if dom.element(child).is_ok() {
                 let parent_style = map.get(&node).cloned();
-                self.compute_subtree(dom, child, env, parent_style.as_ref(), map, pseudos, state);
+                // Récursion ∝ profondeur DOM → pile garantie
+                // (R-24) : bascule tas en zone rouge.
+                explorer_common::deep(|| {
+                    self.compute_subtree(
+                        dom,
+                        child,
+                        env,
+                        parent_style.as_ref(),
+                        map,
+                        pseudos,
+                        state,
+                    );
+                });
             }
         }
     }

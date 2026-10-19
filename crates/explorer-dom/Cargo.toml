@@ -10,4 +10,5 @@ description = "Arene DOM + NodeId generationnels (ADR-0008), mutations typees"
 workspace = true
 
 [dependencies]
+explorer-common.workspace = true
 thiserror.workspace = true

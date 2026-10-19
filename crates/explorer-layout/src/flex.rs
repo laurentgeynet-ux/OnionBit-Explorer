@@ -142,7 +142,8 @@ pub(crate) fn translate_subtree(bx: &mut LayoutBox, dx: f32, dy: f32) {
         }
     }
     for c in &mut bx.children {
-        translate_subtree(c, dx, dy);
+        // Arête ∝ profondeur de l'arbre → pile garantie (R-24).
+        explorer_common::deep(|| translate_subtree(c, dx, dy));
     }
 }
 

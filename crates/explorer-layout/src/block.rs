@@ -526,8 +526,27 @@ fn escaped_bottom_margin(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockC
 /// positionné, ou viewport). `fl` = registre des flottants
 /// du BFC auquel `bx` appartient (vierge si `bx` établit
 /// le sien — fourni par l'appelant).
-#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+///
+/// Chaque appel passe par [`explorer_common::deep`] (R-24) :
+/// la récursion suit la profondeur DOM — un document hostile
+/// bascule sur des segments tas au lieu de déborder la pile.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn layout_block(
+    bx: &mut LayoutBox,
+    x: f32,
+    y: f32,
+    cb_w: f32,
+    cb_h: Option<f32>,
+    ctx: &BlockCtx,
+    parent_fs: f32,
+    abs_cb: Rect,
+    fl: &mut FloatCtx,
+) -> f32 {
+    explorer_common::deep(|| layout_block_inner(bx, x, y, cb_w, cb_h, ctx, parent_fs, abs_cb, fl))
+}
+
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+fn layout_block_inner(
     bx: &mut LayoutBox,
     x: f32,
     y: f32,
@@ -1278,7 +1297,8 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
     // Descendre dans tous les enfants (cb mis à jour) avec
     // leur contexte de fonte — `own_fs` = fonte de `bx`.
     for child in &mut bx.children {
-        resolve_absolutes(child, own_cb, ctx, own_fs);
+        // Descente ∝ profondeur de l'arbre → pile garantie (R-24).
+        explorer_common::deep(|| resolve_absolutes(child, own_cb, ctx, own_fs));
     }
 }
 

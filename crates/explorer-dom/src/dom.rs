@@ -263,7 +263,9 @@ impl Dom {
         while let Some(child) = cursor {
             match self.data(child)? {
                 NodeData::Text(t) => out.push_str(t),
-                NodeData::Element(_) => self.collect_text(child, out)?,
+                // Descente bornée-pile : un DOM hostile peut
+                // nicher des milliers d'éléments (R-24).
+                NodeData::Element(_) => explorer_common::deep(|| self.collect_text(child, out))?,
                 NodeData::Document | NodeData::Doctype(_) | NodeData::Comment(_) => {}
             }
             cursor = self.next_sibling(child)?;

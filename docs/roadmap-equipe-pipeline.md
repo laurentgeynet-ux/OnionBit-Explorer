@@ -226,7 +226,7 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   n'est jamais reportée dans l'enveloppe à la pose. Fix :
   poser l'enfant anonyme dans le rect du contrôle (padding/
   border UA compris).
-- [ ] **R-24. Profondeur d'arbre bornée — stack overflow**
+- [x] **R-24. Profondeur d'arbre bornée — stack overflow**
   (**préempte** — 2ᵉ violation « jamais crash » après
   JS-C41 ; terrain mission 10, repro `repros/host-nest.html`
   : **~300 `<div>` imbriqués tuent le process**,
@@ -236,9 +236,20 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   profondeur DOM). Arbitrer : borne de profondeur avec
   dégradation documentée (sous-arbre aplati/tronqué à N),
   ou traversées itératives — le patron `stacker::maybe_grow`
-  de JS-C41 existe déjà comme précédent. Vérifier le seuil
-  réel : 250 passe, ~300 meurt — le réglage dépend de la
-  pile worker tokio, pas d'une limite naturelle du web.
+  de JS-C41 existe déjà comme précédent. **Livré** :
+  `explorer_common::deep` (`stacker::maybe_grow`, zone rouge
+  128 Kio / segment tas 1 Mio) sur chaque arête récursive ∝
+  profondeur DOM — `Dom::collect_text`, `compute_subtree`,
+  `match_selector_part`, boxtree, `layout_block` (hub :
+  flow/flex/grid/table/inline/relayout/absolus),
+  `translate_subtree`, `size_atomics_walk`, `assign_*_rects`,
+  `content_px`, `walk_children` (tables), `paint_bounds` +
+  `hit_test`, `relayout::step`/`contains`/`has_float`,
+  `paint_box`, `svg::serialize_into`, `dump` — + **drop
+  itératif** de `LayoutBox` (le drop récursif par défaut
+  déborderait à lui seul). Régression : `tests/deep.rs`
+  (pipeline complet sous pile 512 Kio, 4000 niveaux
+  demandés).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

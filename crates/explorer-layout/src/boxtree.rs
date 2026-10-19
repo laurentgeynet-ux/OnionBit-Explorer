@@ -214,7 +214,22 @@ impl LayoutBox {
             self.rect.x, self.rect.y, self.rect.width, self.rect.height
         );
         for c in &self.children {
-            c.dump_into(dom, out, depth + 1);
+            explorer_common::deep(|| c.dump_into(dom, out, depth + 1));
+        }
+    }
+}
+
+impl Drop for LayoutBox {
+    /// Destruction itérative (R-24) : l'arbre peut atteindre
+    /// des milliers de niveaux une fois la construction
+    /// protégée par [`explorer_common::deep`] — le drop
+    /// récursif par défaut déborderait la pile malgré tout.
+    /// Chaque enfant est vidé de ses descendants avant sa
+    /// propre destruction → aucune descente.
+    fn drop(&mut self) {
+        let mut stack = std::mem::take(&mut self.children);
+        while let Some(mut child) = stack.pop() {
+            stack.append(&mut child.children);
         }
     }
 }
@@ -386,7 +401,12 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     }
     for child in children {
         if dom.element(child).is_ok() {
-            if let Some(mut b) = build_box_tree_sized(dom, child, styles, sizes) {
+            // Récursion ∝ profondeur DOM — pile garantie
+            // (R-24 : `host-nest3000` ne doit plus tuer le
+            // worker).
+            if let Some(mut b) =
+                explorer_common::deep(|| build_box_tree_sized(dom, child, styles, sizes))
+            {
                 // `<br>` : saut de ligne forcé — texte sentinelle
                 // U+2028 LINE SEPARATOR, que l'itemisation UAX #14
                 // coupe durement (`ends_hard_break`). Choisi plutôt

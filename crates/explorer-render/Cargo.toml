@@ -10,6 +10,7 @@ description = "Display list → framebuffer RGBA → PNG / buffer brut"
 workspace = true
 
 [dependencies]
+explorer-common.workspace = true
 brotli.workspace = true
 explorer-css.workspace = true
 explorer-dom.workspace = true

@@ -8,3 +8,6 @@ description = "Types partages, erreurs racines, configuration — socle du works
 
 [lints]
 workspace = true
+
+[dependencies]
+stacker.workspace = true

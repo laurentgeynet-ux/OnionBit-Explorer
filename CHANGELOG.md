@@ -9,6 +9,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-24 — profondeur d'arbre sans stack overflow**
+  (`explorer-common`, `explorer-dom`, `explorer-css`,
+  `explorer-layout`, `explorer-render`) : bug terrain
+  `repros/host-nest*.html` — ~300 `<div>` imbriqués tuaient
+  le worker tokio (`dump` DOM seul survivait : la récursion
+  était en aval — boxtree, layout, display list, hit-test,
+  cascade). Livré : `explorer_common::deep` =
+  `stacker::maybe_grow` (zone rouge 128 Kio, segment tas
+  1 Mio — patron JS-C41) appliqué à **chaque arête
+  récursive ∝ profondeur DOM** : `collect_text`,
+  `compute_subtree`, `match_selector_part`, boxtree,
+  `layout_block` (hub unique — couvre flow, flex, grid,
+  table, inline, relayout, absolus), `translate_subtree`,
+  atomiques inline, `content_px`, tables, `hit_test`,
+  `paint_box`, `svg::serialize_into`, `dump`. Plus drop
+  **itératif** de `LayoutBox` (le drop récursif par défaut
+  aurait débordé à lui seul). Régression :
+  `tests/deep.rs` — pipeline complet + hit-test + dump sous
+  une pile de 384–512 Kio.
+
 - **R-13 (en cours) — compatibilité Acid2, première
   salve** (`explorer-css`, `explorer-layout`,
   `explorer-render`) : score informatif 23,3 % → 22,0 %
@@ -73,6 +93,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     cliquet `WPT_BASELINE` 38 → 40/58.
   Reste connu : `column wrap` multi-colonnes, marges
   `auto` verticales en column, écarts fins justify/align.
+
+- **Étape 55f — `relayout_subtree` adopté en session**
+  (`explorer-core`, `explorer-js`, `dillo-js` — adoption
+  R-12) : le miroir suit le **sous-arbre sale**
+  (`Dom::dirty_node`, escalade à l'ancêtre commun, cible
+  rapportée en chemin `(tag, index)` via `take_dirty_path` —
+  survit au re-parse contrairement aux `NodeId` d'arène) ;
+  `JsEngine::sync_dom_path` la transporte (contrat interne
+  NAV étendu, `DomSyncPayload`/`DomPath` aliases).
+  `apply_dom_sync` tente `try_sync_incremental` : remap des
+  `NodeId` des boîtes conservées par chemin d'élément
+  **avant** `relayout_subtree` (la sérialisation n'est pas
+  structure-identique — les indices d'arène ne coincident
+  pas entre parses), puis relayout local. Repli
+  conservateur sur `NeedsFullLayout` (flottants, inline,
+  positionnés), cible sans boîte ou id irrésolvable —
+  l'arbre mixte est toujours jeté et reconstruit, jamais
+  servi. Dette corrigée au passage : un `dirty_node`
+  résiduel `#document` à l'installation empoisonnait
+  l'ancêtre commun (chemin vide à vie) ; une mutation sur
+  nœud détaché ne fixe plus la cible (couverte par la marque
+  du parent à l'attachement). Compteur diagnostic
+  `incremental_syncs`. Régressions :
+  `dom_sync_uses_incremental_relayout`,
+  `dom_sync_falls_back_when_floats_present`,
+  `dirty_path_tracks_mutated_subtree`.
 
 - **Étape 55d — `FrameInvalidated` rapporte le delta, pas
   l'historique** (`explorer-core`) : `Tab::dirty` garde

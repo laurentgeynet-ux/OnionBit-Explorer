@@ -207,7 +207,10 @@ fn size_atomics_walk(
             atomics.insert(*aid, child.rect);
             *aid += 1;
         } else {
-            size_atomics_walk(child, w, cb_h, ctx, fs, abs_cb, atomics, aid);
+            // Arête ∝ profondeur de l'arbre (R-24).
+            explorer_common::deep(|| {
+                size_atomics_walk(child, w, cb_h, ctx, fs, abs_cb, atomics, aid);
+            });
         }
     }
 }
@@ -791,7 +794,8 @@ fn assign_child_rects(bx: &mut LayoutBox, lines: &[LineBox]) {
         if let Some(u) = union {
             child.rect = u;
         }
-        assign_child_rects(child, lines);
+        // Arête ∝ profondeur de l'arbre (R-24).
+        explorer_common::deep(|| assign_child_rects(child, lines));
     }
 }
 
@@ -813,7 +817,8 @@ fn assign_atomic_rects(bx: &mut LayoutBox, lines: &[LineBox], aid: &mut usize) {
                 }
             }
         } else {
-            assign_atomic_rects(child, lines, aid);
+            // Arête ∝ profondeur de l'arbre (R-24).
+            explorer_common::deep(|| assign_atomic_rects(child, lines, aid));
         }
     }
 }

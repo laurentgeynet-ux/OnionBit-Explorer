@@ -88,12 +88,15 @@ fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
         return 0.0;
     }
     // Ligne de table = somme des cellules (colonnes).
+    // Chaque arête ∝ profondeur de l'arbre passe par
+    // `explorer_common::deep` (R-24).
     if bx.display() == "table-row" {
         return bx
             .children
             .iter()
             .map(|c| {
-                content_px(c, font_size_px(&c.style, fs, ctx), ctx, max) + own_sides(c, fs, ctx)
+                explorer_common::deep(|| content_px(c, font_size_px(&c.style, fs, ctx), ctx, max))
+                    + own_sides(c, fs, ctx)
             })
             .sum();
     }
@@ -104,7 +107,7 @@ fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
     for c in &bx.children {
         let cfs = font_size_px(&c.style, fs, ctx);
         if inline_level(c) {
-            let w = content_px(c, cfs, ctx, max);
+            let w = explorer_common::deep(|| content_px(c, cfs, ctx, max));
             if max {
                 run += w;
             } else {
@@ -113,7 +116,9 @@ fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
         } else {
             best = best.max(run);
             run = 0.0;
-            best = best.max(content_px(c, cfs, ctx, max) + own_sides(c, fs, ctx));
+            best = best.max(
+                explorer_common::deep(|| content_px(c, cfs, ctx, max)) + own_sides(c, fs, ctx),
+            );
         }
     }
     best.max(run)

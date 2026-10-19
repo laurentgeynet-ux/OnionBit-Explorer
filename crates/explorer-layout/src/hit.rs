@@ -30,9 +30,10 @@ use crate::boxtree::{LayoutBox, Rect};
 /// stade : l'union est une borne *conservative*, jamais
 /// restrictive).
 fn paint_bounds(bx: &LayoutBox) -> Rect {
-    bx.children
-        .iter()
-        .fold(bx.rect, |acc, c| union(acc, paint_bounds(c)))
+    // Récursion ∝ profondeur de l'arbre → arêtes `deep` (R-24).
+    bx.children.iter().fold(bx.rect, |acc, c| {
+        union(acc, explorer_common::deep(|| paint_bounds(c)))
+    })
 }
 
 fn union(a: Rect, b: Rect) -> Rect {
@@ -69,7 +70,7 @@ pub fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
         return None;
     }
     for child in &bx.children {
-        if let Some(n) = hit_test(child, x, y) {
+        if let Some(n) = explorer_common::deep(|| hit_test(child, x, y)) {
             return Some(n);
         }
     }

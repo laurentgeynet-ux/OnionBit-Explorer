@@ -144,7 +144,8 @@ fn collect_grid(bx: &LayoutBox) -> Vec<Row> {
                         _ => RowClass::Body,
                     };
                     prefix.push(i);
-                    walk_children(c, g, prefix, rows);
+                    // Arête ∝ profondeur de l'arbre (R-24).
+                    explorer_common::deep(|| walk_children(c, g, prefix, rows));
                     prefix.pop();
                 }
                 _ => {
