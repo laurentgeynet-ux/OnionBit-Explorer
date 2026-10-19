@@ -492,6 +492,17 @@ struct Tab {
     /// à la réinsertion, sinon la synchro miroir→hôte
     /// écraserait la saisie.
     js_pending_attrs: Vec<PendingMirrorAttr>,
+    /// Coalescence des resyncs DOM déclenchés par la pompe
+    /// (55g-suite) : instant avant lequel le prochain
+    /// `sync_dom` piloté par timer est **sauté** — le miroir
+    /// reste sale et le prochain apply autorisé absorbe
+    /// toutes les mutations accumulées en une passe. Posé
+    /// après chaque `apply_dom_sync` proportionnellement à
+    /// son coût : une page qui mute en continu (`setInterval`)
+    /// ne tient plus le verrou en permanence — l'API respire
+    /// entre deux peintures. Les synchros d'événements
+    /// restent immédiates (clic = retour visuel attendu).
+    sync_floor: Option<Instant>,
 }
 
 /// Push d'attribut session→miroir tamponné pendant le
@@ -640,6 +651,7 @@ impl Tab {
         self.js_detached = None;
         self.js_pending_net.clear();
         self.js_pending_attrs.clear();
+        self.sync_floor = None;
         self.last_req = snap.last_req;
         self.transitions.clear();
         // Idem animations : la restauration repart sur les
@@ -1080,6 +1092,14 @@ pub struct SessionConfig {
     /// millisecondes (étape 53 — cadence « N ms » ; `0` = pas de
     /// seuil temporel, seuls les octets cadencent).
     pub paint_interval_ms: u64,
+    /// Plafond de la fenêtre de coalescence des resyncs DOM
+    /// pilotés par la pompe JS, en millisecondes (55g-suite) :
+    /// après un `apply_dom_sync`, le prochain apply pompe
+    /// attend `min(coût_apply, resync_gap_max)` au moins
+    /// `paint_interval` — une page qui mute en continu
+    /// (`setInterval`) laisse alors respirer l'API entre deux
+    /// peintures au lieu de tenir le verrou en permanence.
+    pub resync_gap_max_ms: u64,
 }
 
 impl Default for SessionConfig {
@@ -1100,6 +1120,7 @@ impl Default for SessionConfig {
             max_timer_jobs: 128,
             paint_chunk_bytes: 32 * 1024,
             paint_interval_ms: 100,
+            resync_gap_max_ms: 4_000,
             bfcache_pages: 4,
         }
     }
@@ -1179,6 +1200,10 @@ pub struct Session {
     /// Intervalle minimal entre peintures progressives
     /// (`paint_interval_ms` de config, étape 53).
     paint_interval: std::time::Duration,
+    /// Plafond de la fenêtre de coalescence des resyncs
+    /// pilotés par la pompe (`resync_gap_max_ms` de config,
+    /// 55g-suite).
+    resync_gap_max: std::time::Duration,
     /// Pages gelées par onglet dans le bfcache
     /// (`bfcache_pages` de config, étape 56).
     bfcache_pages: usize,
@@ -1237,6 +1262,7 @@ impl Session {
             max_timer_jobs: cfg.max_timer_jobs,
             paint_chunk_bytes: cfg.paint_chunk_bytes,
             paint_interval: std::time::Duration::from_millis(cfg.paint_interval_ms),
+            resync_gap_max: std::time::Duration::from_millis(cfg.resync_gap_max_ms),
             bfcache_pages: cfg.bfcache_pages,
             incremental_syncs: 0,
         }
@@ -1368,6 +1394,7 @@ impl Session {
                 js_detached: None,
                 js_pending_net: Vec::new(),
                 js_pending_attrs: Vec::new(),
+                sync_floor: None,
             },
         );
         let _ = self.events.send(CoreEvent::TabOpened { tab: id });
@@ -1610,22 +1637,30 @@ impl Session {
     /// [`Self::drain_script_nav`] (async).
     pub fn pump_timers(&mut self, tab: TabId) -> usize {
         let max = self.max_timer_jobs;
+        let t0 = Instant::now();
         let (jobs, mutated) = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return 0;
             };
+            let sync_ok = entry.sync_floor.is_none_or(|f| Instant::now() >= f);
             let Some(eng) = entry.js.as_mut() else {
                 return 0;
             };
-            (eng.run_pending_bounded(max), eng.sync_dom_path())
+            let jobs = eng.run_pending_bounded(max);
+            let m = if sync_ok { eng.sync_dom_path() } else { None };
+            (jobs, m)
         };
+        let mut t = sync_phase(tab, "pump.js_run_sync", t0);
         if let Some((html, dirty)) = mutated {
+            let ta = Instant::now();
             self.apply_dom_sync(tab, &html, dirty.as_deref(), true);
+            t = sync_phase(tab, "pump.apply_dom_sync", ta);
         }
         if jobs > 0 {
             // Les callbacks ont pu émettre XHR/cookies/storage.
             self.after_script(tab);
             self.poll_net();
+            sync_phase(tab, "pump.drains", t);
         }
         jobs
     }
@@ -1652,15 +1687,20 @@ impl Session {
     /// `js_detached` à l'epoch courante — l'exécution
     /// (`run_pending` + sérialisation miroir) se fera hors
     /// verrou. `None` sans moteur ou si une pompe détachée
-    /// est déjà en vol (la suivante reprendra ses jobs).
-    fn take_js_engine(&mut self, tab: TabId) -> Option<(Box<dyn JsEngine>, usize, u64)> {
+    /// est déjà en vol (la suivante reprendra ses jobs). Le
+    /// booléen final autorise la resynchro DOM : `false`
+    /// sous la fenêtre de coalescence `sync_floor`
+    /// (55g-suite — le miroir garde son bit sale et le
+    /// prochain apply absorbable absorbe tout d'un coup).
+    fn take_js_engine(&mut self, tab: TabId) -> Option<(Box<dyn JsEngine>, usize, u64, bool)> {
         let entry = self.tabs.get_mut(&tab)?;
         if entry.js_detached.is_some() {
             return None;
         }
+        let sync_ok = entry.sync_floor.is_none_or(|f| Instant::now() >= f);
         let eng = entry.js.take()?;
         entry.js_detached = Some(entry.nav_epoch);
-        Some((eng, self.max_timer_jobs, entry.nav_epoch))
+        Some((eng, self.max_timer_jobs, entry.nav_epoch, sync_ok))
     }
 
     /// Phase « commit » de la pompe détachée (53f) : réinsère
@@ -1678,7 +1718,9 @@ impl Session {
         tab: TabId,
         epoch: u64,
         out: Option<(usize, Option<DomSyncPayload>, Box<dyn JsEngine>)>,
+        sync_ok: bool,
     ) -> usize {
+        let t0 = Instant::now();
         let phase = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return 0;
@@ -1698,24 +1740,37 @@ impl Session {
                 let _ = eng.deliver_net_response(resp);
             }
             let attrs = std::mem::take(&mut entry.js_pending_attrs);
+            // Les pushes sont **toujours** rejoués dans le
+            // miroir (la saisie ne se perd pas) ; la
+            // re-sérialisation attend la fin de la fenêtre de
+            // coalescence — le bit sale persiste jusqu'au
+            // prochain apply autorisé (55g-suite).
             let mutated = if attrs.is_empty() {
                 mutated
             } else {
                 for (path, attr, value) in attrs {
                     eng.sync_mirror_attr(&path, &attr, value.as_deref());
                 }
-                eng.sync_dom_path()
+                if sync_ok {
+                    eng.sync_dom_path()
+                } else {
+                    None
+                }
             };
             entry.js = Some(eng);
             (jobs, mutated)
         };
         let (jobs, mutated) = phase;
+        let mut t = sync_phase(tab, "commit.deliver", t0);
         if let Some((html, dirty)) = mutated {
+            let ta = Instant::now();
             self.apply_dom_sync(tab, &html, dirty.as_deref(), true);
+            t = sync_phase(tab, "commit.apply_dom_sync", ta);
         }
         if jobs > 0 {
             self.after_script(tab);
             self.poll_net();
+            sync_phase(tab, "commit.drains", t);
         }
         jobs
     }
@@ -2246,6 +2301,7 @@ impl Session {
             entry.linked_css.clear();
             entry.prev_styles = HashMap::new();
             entry.transitions.clear();
+            entry.sync_floor = None;
             entry.dom = Some(dom);
         }
         self.webfonts.clear();
@@ -3068,12 +3124,17 @@ impl Session {
         dirty_path: Option<&[(String, u32)]>,
         relayout: bool,
     ) {
+        let t0 = Instant::now();
         let new_dom = TreeBuilder::parse(html);
+        let mut t = sync_phase(tab, "sync.reparse", t0);
         let new_title = extract_title(&new_dom);
         // Relayout incrémental (étape 55f) avant tout remplacement
         // — il a besoin de l'ancien DOM et de l'ancien arbre.
         let incremental =
             relayout && dirty_path.is_some_and(|p| self.try_sync_incremental(tab, &new_dom, p));
+        if relayout {
+            t = sync_phase(tab, "sync.incremental", t);
+        }
         // Les op-lists `<canvas>` survivent au re-parse : le
         // miroir les conserve (bitmap cumulative) — la table
         // est construite sur `new_dom` **avant** le move dans
@@ -3082,6 +3143,7 @@ impl Session {
             .tabs
             .get_mut(&tab)
             .map_or_else(CanvasTable::new, |e| canvas_table(e, &new_dom));
+        let _ = sync_phase(tab, "sync.canvas_table", t);
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.dom = Some(new_dom);
             // `focused`/`hovered` sont des **chemins** — ils
@@ -3108,13 +3170,21 @@ impl Session {
             }
         }
         if relayout {
-            if incremental {
-                self.emit_invalidated(tab);
-                return;
+            if !incremental {
+                let tf = Instant::now();
+                if let Err(e) = self.relayout(tab) {
+                    tracing::debug!(tab, error = %e, "relayout après mutation js");
+                    return;
+                }
+                sync_phase(tab, "sync.relayout_full", tf);
             }
-            if let Err(e) = self.relayout(tab) {
-                tracing::debug!(tab, error = %e, "relayout après mutation js");
-                return;
+            // Coalescence pompe (55g-suite) : la fenêtre avant
+            // le prochain `sync_dom` de timer est
+            // proportionnelle au coût de cet apply — bornée
+            // [`paint_interval`, `resync_gap_max`].
+            let floor = t0.elapsed().clamp(self.paint_interval, self.resync_gap_max);
+            if let Some(entry) = self.tabs.get_mut(&tab) {
+                entry.sync_floor = Some(Instant::now() + floor);
             }
             self.emit_invalidated(tab);
         }
@@ -3150,7 +3220,9 @@ impl Session {
         let Some(root_el) = new_dom.document_element() else {
             return false;
         };
+        let t0 = Instant::now();
         let styles = self.compute_styles(tab, new_dom);
+        let t = sync_phase(tab, "incr.compute_styles", t0);
         sizes.extend(explorer_render::svg::svg_sizes(new_dom, root_el));
         let svgs = explorer_render::svg::collect_svg(new_dom, root_el, self.image_max_px);
         let ctx = BlockCtx {
@@ -3183,7 +3255,9 @@ impl Session {
             // portent les `NodeId` du **nouveau** DOM.
             entry.images.canvases = canvas_table(entry, new_dom);
         }
+        let tr = sync_phase(tab, "incr.remap_relayout", t);
         if self.repaint(tab).is_ok() {
+            sync_phase(tab, "incr.repaint", tr);
             self.incremental_syncs += 1;
             return true;
         }
@@ -4025,7 +4099,8 @@ impl Session {
     /// script (étapes 50-51) — point de synchro partagé par
     /// les événements utilisateur et le tick timers.
     fn dispatch_path_event(&mut self, tab: TabId, ty: &str, path: &[(String, u32)]) -> bool {
-        let (prevented, mutated) = {
+        let t0 = Instant::now();
+        let (prevented, mut t, mutated) = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return false;
             };
@@ -4043,18 +4118,24 @@ impl Session {
                     false
                 }
             };
+            let t1 = sync_phase(tab, "event.dispatch", t0);
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après événement");
-            (p, eng.sync_dom_path())
+            let m = eng.sync_dom_path();
+            (p, sync_phase(tab, "event.mirror_sync", t1), m)
         };
         if let Some((html, dirty)) = mutated {
+            let ta = Instant::now();
             self.apply_dom_sync(tab, &html, dirty.as_deref(), true);
+            t = sync_phase(tab, "event.apply_dom_sync", ta);
         }
         // Les listeners ont pu émettre XHR/cookies/storage
         // (étape 51) — drains + livraison de ce qui est déjà
         // arrivé, sans yield (point de synchro interne).
         self.after_script(tab);
+        let t = sync_phase(tab, "event.after_script", t);
         self.poll_net();
+        sync_phase(tab, "event.poll_net", t);
         prevented
     }
 
@@ -5335,6 +5416,25 @@ fn select_control(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
 /// dans `dom` courant — utilisé pour re-résoudre les cibles
 /// stockées après un re-parse de synchro (les `NodeId`
 /// meurent, les chemins survivent).
+/// Chronométrage de phase des chemins de synchro (55g-suite)
+/// : émet `phase = <µs>` sur la cible `sync_profile` — coût
+/// quasi nul quand le filtre est inactif (`RUST_LOG=
+/// sync_profile=info` pour attribuer un gel terrain à ses
+/// phases sous verrou : dispatch, sérialisation miroir,
+/// re-parse, relayout incrémental/global, repaint). Renvoie
+/// l'instant courant pour chaîner les phases.
+fn sync_phase(tab: TabId, phase: &'static str, start: Instant) -> Instant {
+    let now = Instant::now();
+    tracing::info!(
+        target: "sync_profile",
+        tab,
+        phase,
+        us = u64::try_from(now.duration_since(start).as_micros()).unwrap_or(u64::MAX),
+        "phase sync"
+    );
+    now
+}
+
 fn dom_path_node(dom: &Dom, path: &[(String, u32)]) -> Option<NodeId> {
     let mut cur = dom.document();
     for (tag, k) in path {
@@ -6386,21 +6486,28 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
         let mut s = sess.lock().await;
         s.take_js_engine(tab)
     };
-    let Some((mut eng, max, epoch)) = taken else {
+    let Some((mut eng, max, epoch, sync_ok)) = taken else {
         return 0;
     };
     // Hors verrou : le burst JS n'occupe ni le verrou ni le
-    // worker tokio (spawn_blocking — `JsEngine: Send`).
+    // worker tokio (spawn_blocking — `JsEngine: Send`). Sous
+    // fenêtre de coalescence `sync_floor` la sérialisation
+    // est sautée — le miroir accumule, l'API respire
+    // (55g-suite).
+    let tb = Instant::now();
     let out = tokio::task::spawn_blocking(move || {
         let jobs = eng.run_pending_bounded(max);
-        let mutated = eng.sync_dom_path();
+        let mutated = if sync_ok { eng.sync_dom_path() } else { None };
         (jobs, mutated, eng)
     })
     .await;
+    sync_phase(tab, "pump.offlock", tb);
     let mut s = sess.lock().await;
-    let jobs = s.commit_js_pump(tab, epoch, out.ok());
+    let tc = Instant::now();
+    let jobs = s.commit_js_pump(tab, epoch, out.ok(), sync_ok);
     // 55e : les animations cadencées par ce battement.
     let _ = s.advance_animations(tab);
+    sync_phase(tab, "pump.commit_lock", tc);
     jobs
 }
 
@@ -7128,5 +7235,73 @@ mod tests {
             s.tabs.get(&tab).unwrap().frame.is_some(),
             s.incremental_syncs()
         );
+    }
+
+    /// 55g-suite — la coalescence borne les resyncs pilotés
+    /// par la pompe : après un apply, `sync_floor` saute la
+    /// sérialisation tant que la fenêtre n'est pas échue —
+    /// le miroir accumule (le timer tourne à chaque pompe)
+    /// et le DOM commis n'avance qu'à la cadence autorisée.
+    /// Un `setTimeout` auto-réarmé imite le motif terrain
+    /// « site qui mute en continu ».
+    #[test]
+    fn pump_resync_coalesced_under_floor() {
+        let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+        s.set_js_factory(explorer_js::DilloEngine::factory());
+        let tab = s.open_tab();
+        let html = "<!doctype html><html><body><div id=\"x\">init</div></body></html>";
+        let eng = s.spawn_engine(tab, html, true);
+        {
+            let e = s.tabs.get_mut(&tab).unwrap();
+            let mut tb = TreeBuilder::new();
+            tb.push(html);
+            tb.finish();
+            e.dom = Some(tb.into_dom());
+            e.url = Some(Url::parse("http://h.test/pump").unwrap());
+            e.js = eng;
+        }
+        s.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()).map(|eng| {
+            eng.eval(
+                "window.n=0;\
+                 function tick(){window.n++;\
+                   document.getElementById('x').textContent='n'+window.n;\
+                   setTimeout(tick,0);}\
+                 setTimeout(tick,0);",
+            )
+        });
+        s.relayout(tab).unwrap();
+        let dom_text = |s: &Session| {
+            s.tabs
+                .get(&tab)
+                .and_then(|e| e.dom.as_ref())
+                .and_then(|d| find_by_id(d, "x"))
+                .and_then(|n| {
+                    s.tabs
+                        .get(&tab)
+                        .and_then(|e| e.dom.as_ref())
+                        .map(|d| d.text_content(n).unwrap_or_default())
+                })
+                .unwrap_or_default()
+        };
+        // 1re pompe : le tick mute → apply → floor posé.
+        s.pump_timers(tab);
+        assert_eq!(dom_text(&s), "n1");
+        assert!(s.tabs.get(&tab).unwrap().sync_floor.is_some());
+        // Pompe immédiate : le timer a re-muté le miroir mais
+        // la synchro est sautée — le DOM commis reste « n1 ».
+        s.pump_timers(tab);
+        let mirror_n = s
+            .tabs
+            .get_mut(&tab)
+            .and_then(|e| e.js.as_mut())
+            .and_then(|eng| eng.eval("window.n").ok())
+            .unwrap_or_default();
+        assert_eq!(mirror_n.trim(), "2");
+        assert_eq!(dom_text(&s), "n1");
+        // Fenêtre échue : la pompe suivante absorbe toutes
+        // les mutations accumulées en une passe.
+        s.tabs.get_mut(&tab).unwrap().sync_floor = None;
+        s.pump_timers(tab);
+        assert_eq!(dom_text(&s), "n3");
     }
 }

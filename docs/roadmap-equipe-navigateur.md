@@ -356,9 +356,28 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `interface-equipes.md`) : `relayout_subtree` dominant,
   cascade scopée sous-arbre, cache glyphe→outline
   `paint_text`. La récidive `/frame` 204 post-gel est
-  couverte par `ensure_painted` (56b). Le gel ~7 min terrain
-  n'est pas reproduit par le profil in-process (~18 s) —
-  piste restante : contention verrou/sondage côté harness.
+  couverte par `ensure_painted` (56b). **Suite livrée** :
+  (1) instrumentation de phase permanente sur la cible
+  `sync_profile` (`RUST_LOG=sync_profile=info` — dispatch,
+  run_pending, sérialisation miroir, re-parse, incrémental
+  vs reflow, repaint, phases pompe off-lock/commit) pour
+  attribuer le prochain gel à ses phases exactes ;
+  (2) **coalescence `sync_floor`** — le mécanisme du trou
+  ~7 min : une page qui mute en continu (`setInterval`)
+  rendait le miroir sale à chaque battement → chaque pompe
+  payait un apply complet **sous verrou** → verrou tenu
+  ~100 %, API morte. Désormais le prochain apply pompe
+  attend `coût_apply.clamp(paint_interval,
+  resync_gap_max_ms)` (config, 4 s) — le miroir accumule,
+  l'apply autorisé absorbe tout en une passe, l'API
+  respire entre deux peintures. Les synchros d'événements
+  restent immédiates ; la saisie (pushes d'attributs) est
+  toujours rejouée. Régression :
+  `pump_resync_coalesced_under_floor`. Reste PIPE : coût
+  unitaire de l'apply (`relayout_subtree` dominant) —
+  chaque fenêtre de coalescence agrandit le delta
+  accumulé, mais la cadence reste bornée par le coût
+  unitaire (journal `interface-equipes.md`).
 - [x] **Étape 56. Profil persisté complet** (ex-64) : cookies
   (`cookies.json` via `ProfileStore`, session exclus),
   localStorage (cf. 51), **cache disque borné**

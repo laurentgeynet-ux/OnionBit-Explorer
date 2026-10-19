@@ -9,6 +9,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 55g-suite — resyncs pompe coalescés + cible
+  `sync_profile`** (`explorer-core`, terrain mission 13) :
+  le gel ~7 min terrain s'explique par des apply **en
+  série sous verrou** — une page qui mute en continu
+  (`setInterval`/`setTimeout` réarmé, motif courant réel)
+  rend le miroir sale à chaque battement et chaque pompe
+  payait re-parse + relayout + repaint sous le mutex
+  session. Deux livrables NAV :
+  (1) **instrumentation de phase** — `tracing::info!` sur
+  la cible `sync_profile` à chaque frontière (dispatch,
+  run_pending, sérialisation miroir, re-parse, incrémental
+  vs reflow global, repaint, commit pompe vs off-lock) :
+  `RUST_LOG=sync_profile=info` attribue le prochain gel à
+  ses phases exactes ;
+  (2) **coalescence `sync_floor`** — après chaque
+  `apply_dom_sync` piloté par la pompe, la prochaine
+  synchro timer attend `coût_apply.clamp(paint_interval,
+  resync_gap_max_ms)` (config, défaut 4 s) : le miroir
+  reste sale, le premier apply autorisé absorbe toutes
+  les mutations accumulées en une passe — le verrou
+  retrouve des fenêtres proportionnelles au coût réel et
+  l'API (`/status`, `/frame`, `/input`) redevient
+  joignable entre deux peintures. Les synchros
+  d'événements restent immédiates (clic = retour visuel
+  attendu) ; les pushes d'attributs session→miroir sont
+  toujours rejoués (saisie préservée). Régression :
+  `pump_resync_coalesced_under_floor`.
+
 - **JS-C28 — surface `<canvas>` 2D** (`dillo-js`,
   `explorer-js`, `explorer-core` — adoption de la couture
   **R-11** côté NAV) : `canvas.getContext('2d')` rend un

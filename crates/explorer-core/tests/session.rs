@@ -214,6 +214,7 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
             max_timer_jobs: 64,
             paint_chunk_bytes: 32 * 1024,
             paint_interval_ms: 100,
+            resync_gap_max_ms: 4_000,
             bfcache_pages: 4,
         },
     );
