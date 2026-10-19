@@ -59,6 +59,7 @@ pub(crate) fn install(e: &mut Engine) {
     // `eval(src)` — global scope (indirect-eval semantics; the
     // caller's local scope is out of reach — documented deviation).
     e.add_method(g, "eval", eval_fn);
+    e.add_method(g, "structuredClone", structured_clone);
 
     let (p_obj, p_arr, p_str, p_num, p_bool, p_err, p_terr, p_rerr, p_serr, p_date, p_fun) = {
         let p = &e.protos;
@@ -91,6 +92,12 @@ pub(crate) fn install(e: &mut Engine) {
     let t_err = ctor(e, "TypeError", type_error_ctor, p_terr);
     let r_err = ctor(e, "ReferenceError", reference_error_ctor, p_rerr);
     let s_err = ctor(e, "SyntaxError", syntax_error_ctor, p_serr);
+    let a_err = ctor(
+        e,
+        "AggregateError",
+        aggregate_error_ctor,
+        e.protos.aggregate_error,
+    );
     let date = ctor(e, "Date", date_ctor, p_date);
     e.set_own(g, "Object", object, false);
     e.set_own(g, "Array", array, false);
@@ -101,6 +108,7 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(g, "TypeError", t_err, false);
     e.set_own(g, "ReferenceError", r_err, false);
     e.set_own(g, "SyntaxError", s_err, false);
+    e.set_own(g, "AggregateError", a_err, false);
     e.set_own(g, "Date", date, false);
 
     // `BigInt` (JS-C7) — ctor fonctionnel (`new` → TypeError),
@@ -127,6 +135,8 @@ pub(crate) fn install(e: &mut Engine) {
     if let Value::Obj(sid) = sym {
         let it = e.str_val(crate::interp::SYM_ITERATOR);
         e.set_own(sid, "iterator", it, false);
+        let ait = e.str_val(crate::interp::SYM_ASYNC_ITERATOR);
+        e.set_own(sid, "asyncIterator", ait, false);
         e.add_method(sid, "for", symbol_for);
         e.add_method(sid, "keyFor", symbol_key_for);
         e.add_method(e.protos.symbol, "toString", symbol_to_string);
@@ -207,6 +217,7 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(oid, "preventExtensions", object_prevent_extensions);
         e.add_method(oid, "isExtensible", object_is_extensible);
         e.add_method(oid, "is", object_is);
+        e.add_method(oid, "groupBy", object_group_by);
     }
     // `Number` ctor statics.
     if let Value::Obj(nid) = number {
@@ -282,6 +293,7 @@ pub(crate) fn install(e: &mut Engine) {
     if let Value::Obj(aid) = array {
         e.add_method(aid, "isArray", array_is_array);
         e.add_method(aid, "from", array_from);
+        e.add_method(aid, "fromAsync", array_from_async);
     }
 
     // String.prototype + String.fromCharCode.
@@ -868,7 +880,29 @@ fn make_named_error(e: &mut Engine, proto: ObjId, name: &str, args: &[Value]) ->
         Value::Undefined => String::new(),
         v => e.to_js_string(v)?,
     };
-    Ok(e.error_value(proto, name, &msg))
+    let err = e.error_value(proto, name, &msg);
+    // `new Error(msg, {cause})` → `err.cause` (own, non-énumérable).
+    if let (Value::Obj(eid), Value::Obj(opt)) = (err, arg(args, 1)) {
+        if let Some(c) = e.get_prop(opt, "cause") {
+            e.set_own(eid, "cause", c, false);
+        }
+    }
+    Ok(err)
+}
+
+/// `AggregateError(errors, message?, options?)` — iterable `errors`
+/// matérialisé en tableau propre (spec `CreateArrayFromList`-like).
+fn aggregate_error_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let errs = match arg(args, 0) {
+        Value::Undefined | Value::Null => Vec::new(),
+        v => e.iter_values(v)?,
+    };
+    let list = e.new_array(errs);
+    let err = make_named_error(e, e.protos.aggregate_error, "AggregateError", &args[1..])?;
+    if let Value::Obj(eid) = err {
+        e.set_own(eid, "errors", list, false);
+    }
+    Ok(err)
 }
 
 fn error_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
@@ -2034,7 +2068,12 @@ fn splice_matches(
 }
 
 /// `exec`/`test` result array: `[m0, m1…].index/.input/.groups`.
-fn match_result(e: &mut Engine, m: &crate::regexp::ExecMatch, input: &str) -> Value {
+fn match_result(
+    e: &mut Engine,
+    m: &crate::regexp::ExecMatch,
+    re: &crate::regexp::JsRegExp,
+    input: &str,
+) -> Value {
     let elems: Vec<Value> = m
         .groups
         .iter()
@@ -2060,6 +2099,33 @@ fn match_result(e: &mut Engine, m: &crate::regexp::ExecMatch, input: &str) -> Va
         Value::Obj(gobj)
     };
     e.set_own(arr, "groups", groups_v, false);
+    // `d` flag : `indices` = [[start, end] | undefined] par groupe
+    // (+ `indices.groups` miroir des groupes nommés).
+    if re.has_indices {
+        let idx: Vec<Value> = m
+            .group_indices
+            .iter()
+            .map(|r| match r {
+                Some((s, t)) => e.new_array(vec![Value::Num(*s as f64), Value::Num(*t as f64)]),
+                None => Value::Undefined,
+            })
+            .collect();
+        let Value::Obj(ia) = e.new_array(idx) else {
+            return Value::Obj(arr);
+        };
+        if !m.named_indices.is_empty() {
+            let gobj = e.new_object();
+            for (k, r) in &m.named_indices {
+                let v = match r {
+                    Some((s, t)) => e.new_array(vec![Value::Num(*s as f64), Value::Num(*t as f64)]),
+                    None => Value::Undefined,
+                };
+                e.set_own(gobj, k, v, true);
+            }
+            e.set_own(ia, "groups", Value::Obj(gobj), false);
+        }
+        e.set_own(arr, "indices", Value::Obj(ia), false);
+    }
     Value::Obj(arr)
 }
 
@@ -2104,7 +2170,7 @@ fn regexp_exec(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         if use_last {
             let _ = e.set_prop(id, "lastIndex", Value::Num(new_last as f64));
         }
-        Ok(match_result(e, &m, &s))
+        Ok(match_result(e, &m, &re, &s))
     } else {
         if use_last {
             let _ = e.set_prop(id, "lastIndex", Value::Num(0.0));
@@ -2145,7 +2211,7 @@ fn string_match(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
         });
     }
     match re.exec(&s, 0) {
-        Some(m) => Ok(match_result(e, &m, &s)),
+        Some(m) => Ok(match_result(e, &m, &re, &s)),
         None => Ok(Value::Null),
     }
 }
@@ -3395,7 +3461,7 @@ fn string_match_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     let items: Vec<Value> = re
         .exec_all(&s, 0)
         .iter()
-        .map(|m| match_result(e, m, &s))
+        .map(|m| match_result(e, m, &re, &s))
         .collect();
     Ok(crate::collections::iter_obj(e, items))
 }
@@ -3819,4 +3885,246 @@ date_get!(date_get_milliseconds, 7);
 
 fn date_get_timezone_offset(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Num(0.0)) // always UTC — no tz db in the engine
+}
+
+// ------------------------------------------------------------------
+// JS-C8 — structuredClone / groupBy / fromAsync
+// ------------------------------------------------------------------
+
+/// `structuredClone(v)` — copie profonde spec `StructuredSerialize` :
+/// cycles préservés (table id→clone), `Fun`/`Promise`/`Proxy`/`Host`/
+/// `Symbol`/`Iter` non-clonables → `TypeError` (`DataCloneError`).
+fn structured_clone(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let mut seen: Vec<(ObjId, ObjId)> = Vec::new();
+    clone_deep(e, arg(args, 0), &mut seen)
+}
+
+/// Forme extraite du `ObjKind` (champs Copy — le borrow du heap
+/// s'arrête avant toute allocation).
+enum CloneShape {
+    Arr,
+    Map,
+    Set,
+    Buf(Vec<u8>),
+    Dv(ObjId, usize, usize),
+    Ta(crate::heap::TaKind, ObjId, usize, usize),
+    Re(String, String),
+    Ordinary,
+    Err(&'static str),
+}
+
+fn clone_deep(e: &mut Engine, v: Value, seen: &mut Vec<(ObjId, ObjId)>) -> JsResult<Value> {
+    let Value::Obj(id) = v else { return Ok(v) };
+    if let Some((_, c)) = seen.iter().find(|(s, _)| *s == id) {
+        return Ok(Value::Obj(*c));
+    }
+    let shape = match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::Array(_)) => CloneShape::Arr,
+        Some(ObjKind::Map(_)) => CloneShape::Map,
+        Some(ObjKind::Set(_)) => CloneShape::Set,
+        Some(ObjKind::ByteBuf(b)) => CloneShape::Buf(b.clone()),
+        Some(ObjKind::DataView {
+            buffer: Value::Obj(bid),
+            offset,
+            len,
+        }) => CloneShape::Dv(*bid, *offset, *len),
+        Some(ObjKind::TypedArray {
+            ta,
+            buffer: Value::Obj(bid),
+            offset,
+            len,
+        }) => CloneShape::Ta(*ta, *bid, *offset, *len),
+        Some(ObjKind::RegExp(re)) => CloneShape::Re(re.source.clone(), re.flag_string()),
+        Some(ObjKind::Fun(_)) => CloneShape::Err("function"),
+        Some(ObjKind::Promise(_)) => CloneShape::Err("Promise"),
+        Some(ObjKind::Host(_)) => CloneShape::Err("host object"),
+        Some(ObjKind::Symbol(_)) => CloneShape::Err("Symbol"),
+        Some(ObjKind::Proxy { .. }) => CloneShape::Err("Proxy"),
+        Some(ObjKind::Iter { .. }) => CloneShape::Err("iterator"),
+        Some(ObjKind::FetchResponse { .. }) => CloneShape::Err("Response"),
+        _ => CloneShape::Ordinary,
+    };
+    match shape {
+        CloneShape::Err(w) => Err(e.type_error(format!("structuredClone: cannot clone {w}"))),
+        CloneShape::Buf(b) => Ok(Value::Obj(e.heap.alloc_obj(Object {
+            proto: Value::Obj(e.protos.array_buffer),
+            props: Vec::new(),
+            kind: ObjKind::ByteBuf(b),
+            extensible: true,
+        }))),
+        CloneShape::Dv(bid, offset, len) => {
+            let nb = clone_deep(e, Value::Obj(bid), seen)?;
+            Ok(Value::Obj(e.heap.alloc_obj(Object {
+                proto: Value::Obj(e.protos.data_view),
+                props: Vec::new(),
+                kind: ObjKind::DataView {
+                    buffer: nb,
+                    offset,
+                    len,
+                },
+                extensible: true,
+            })))
+        }
+        CloneShape::Ta(ta, bid, offset, len) => {
+            let nb = clone_deep(e, Value::Obj(bid), seen)?;
+            let Value::Obj(nbid) = nb else {
+                return Err(e.type_error("structuredClone: bad buffer"));
+            };
+            Ok(crate::typed_array::new_ta(e, ta, nbid, offset, len))
+        }
+        CloneShape::Re(src, flags) => e.make_regexp(&src, &flags),
+        CloneShape::Arr => {
+            let arr = e.new_array(Vec::new());
+            let Value::Obj(cid) = arr else {
+                return Err(e.type_error("structuredClone: bad array"));
+            };
+            seen.push((id, cid));
+            let elems = match e.heap.obj(id).map(|o| &o.kind) {
+                Some(ObjKind::Array(elems)) => elems.clone(),
+                _ => Vec::new(),
+            };
+            let mut out = Vec::with_capacity(elems.len());
+            for v in elems {
+                out.push(clone_deep(e, v, seen)?);
+            }
+            if let Some(o) = e.heap.obj_mut(cid) {
+                if let ObjKind::Array(el) = &mut o.kind {
+                    *el = out;
+                }
+            }
+            Ok(arr)
+        }
+        CloneShape::Map => {
+            let cid = e.heap.alloc_obj(Object {
+                proto: Value::Obj(e.protos.map),
+                props: Vec::new(),
+                kind: ObjKind::Map(Vec::new()),
+                extensible: true,
+            });
+            seen.push((id, cid));
+            let pairs = match e.heap.obj(id).map(|o| &o.kind) {
+                Some(ObjKind::Map(m)) => m.clone(),
+                _ => Vec::new(),
+            };
+            for (k, v) in pairs {
+                let kc = clone_deep(e, k, seen)?;
+                let vc = clone_deep(e, v, seen)?;
+                crate::collections::map_set_entry(e, cid, kc, vc);
+            }
+            Ok(Value::Obj(cid))
+        }
+        CloneShape::Set => {
+            let cid = e.heap.alloc_obj(Object {
+                proto: Value::Obj(e.protos.set),
+                props: Vec::new(),
+                kind: ObjKind::Set(Vec::new()),
+                extensible: true,
+            });
+            seen.push((id, cid));
+            let items = match e.heap.obj(id).map(|o| &o.kind) {
+                Some(ObjKind::Set(s)) => s.clone(),
+                _ => Vec::new(),
+            };
+            for v in items {
+                let vc = clone_deep(e, v, seen)?;
+                crate::collections::set_add(e, cid, vc);
+            }
+            Ok(Value::Obj(cid))
+        }
+        CloneShape::Ordinary => {
+            let (proto, props) = match e.heap.obj(id) {
+                Some(o) => (o.proto, o.props.clone()),
+                _ => (Value::Obj(e.protos.object), Vec::new()),
+            };
+            let cid = e.heap.alloc_obj(Object::ordinary(proto));
+            seen.push((id, cid));
+            for (key, prop) in props {
+                // Spec : props énumérables propres, clonées en data.
+                let crate::heap::Prop::Data { value, attrs } = prop else {
+                    continue;
+                };
+                if !attrs.enumerable {
+                    continue;
+                }
+                let cv = clone_deep(e, value, seen)?;
+                e.set_own(cid, &key, cv, true);
+            }
+            Ok(Value::Obj(cid))
+        }
+    }
+}
+
+/// `Object.groupBy(items, cb)` — objet à proto nul `key → [items]`
+/// (ES2024 ; les clés passent par `ToString` comme `groupBy` spec).
+fn object_group_by(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let items = e.iter_values(arg(args, 0))?;
+    let f = arg(args, 1);
+    if !e.is_callable(f) {
+        return Err(e.type_error("groupBy callback is not callable"));
+    }
+    let out = e.heap.alloc_obj(Object::ordinary(Value::Null));
+    for (i, v) in items.into_iter().enumerate() {
+        let k = e.call_value(f, Value::Undefined, &[v, Value::Num(i as f64)])?;
+        let key = e.to_js_string(k)?;
+        let arr = if let Some(v @ Value::Obj(_)) = e.get_prop(out, &key) {
+            v
+        } else {
+            let a = e.new_array(Vec::new());
+            e.set_own(out, &key, a, true);
+            a
+        };
+        if let Value::Obj(aid) = arr {
+            if let Some(o) = e.heap.obj_mut(aid) {
+                if let ObjKind::Array(elems) = &mut o.kind {
+                    elems.push(v);
+                }
+            }
+        }
+    }
+    Ok(Value::Obj(out))
+}
+
+/// `Array.fromAsync(src, mapfn?, thisArg?)` — `await` de chaque
+/// élément puis du résultat de mapfn, promesse de tableau
+/// (même déviation settled-only qu'`await` : pending → `TypeError`).
+fn array_from_async(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let src = arg(args, 0);
+    let f = arg(args, 1);
+    let has_map = !matches!(f, Value::Undefined);
+    if has_map && !e.is_callable(f) {
+        return Err(e.type_error("fromAsync mapfn is not callable"));
+    }
+    let t = arg(args, 2);
+    // Comme toute fonction async, `fromAsync` ne jette jamais
+    // synchrone : les erreurs (itération, mapfn, rejet d'élément)
+    // rejettent la promesse retournée.
+    let mut collect = || -> JsResult<Vec<Value>> {
+        let vals = crate::typed_array::src_vals(e, src)?;
+        let mut out = Vec::with_capacity(vals.len());
+        for (i, v) in vals.iter().enumerate() {
+            let mut x = await_settled(e, *v)?;
+            if has_map {
+                x = e.call_value(f, t, &[x, Value::Num(i as f64)])?;
+                x = await_settled(e, x)?;
+            }
+            out.push(x);
+        }
+        Ok(out)
+    };
+    let result = collect();
+    let pid = e.new_promise();
+    match result {
+        Ok(out) => {
+            let arr = e.new_array(out);
+            e.resolve_promise(pid, arr);
+        }
+        Err(Thrown(v)) => e.reject_promise(pid, v),
+    }
+    Ok(Value::Obj(pid))
+}
+
+/// `await` limité aux promesses settled — déviation documentée
+/// partagée avec `Expr::Await` (pending → `TypeError`).
+fn await_settled(e: &mut Engine, v: Value) -> JsResult<Value> {
+    e.await_value(v)
 }

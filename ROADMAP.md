@@ -371,6 +371,27 @@ d'intégration, pas par la couverture :
   `&mut` pour matérialiser les `Value::Big` et propager les
   `TypeError` de conversion (`u8[0]=1n`, `big[0]=1` lèvent).
   test262 reste 859/859.
+- [x] **JS-C8. APIs modernes** : `AggregateError` (proto dédié,
+  `errors` own prop), `Error(m, {cause})`, `Promise.withResolvers`/
+  `try`/`any` raisons collectées. `structuredClone` — copie
+  profonde spec `StructuredSerialize` : cycles préservés
+  (table id→clone), objets/tableaux/`Map`/`Set`/buffers/vues
+  typées/`RegExp`, `Fun`/`Symbol`/`Promise`/`Proxy`/`Iter`/
+  host → `TypeError`. `Object.groupBy` (proto nul, clés
+  `ToString`) / `Map.groupBy` (clés `SameValueZero`).
+  `Array.fromAsync` — `await` par élément + mapfn, erreurs en
+  promesse rejetée. RegExp : flag `d` → `hasIndices` +
+  `match.indices`/`indices.groups` (unités char), lookbehind
+  `(?<=)`/`(?<!)` natif fancy-regex, ordre canonique `dgimsuy`.
+  `Symbol.asyncIterator` + `for await` — `next()` awaité par
+  étape, fallback itérable sync (valeurs awaitées, spec
+  `CreateAsyncFromSyncIterator`), `for await…in` →
+  `SyntaxError`. Iterator helpers ES2025 (`map`/`filter`/`take`/
+  `drop`/`flatMap`/`toArray`/`forEach`/`reduce`/`some`/`every`/
+  `find`) — drain eager en snapshot `Iter` (déviation
+  documentée, paresse spec → timing). `await_value` extrait
+  d'`Expr::Await` (partagé `fromAsync`/`for await`). test262
+  reste 859/859.
 - [ ] **JS-C. Couverture par besoin** : `Intl` —
   ordre piloté par les pages réelles.
 - [ ] **JS-D. Médias** : `canvas` 2D (pont tiny-skia), `Audio`/

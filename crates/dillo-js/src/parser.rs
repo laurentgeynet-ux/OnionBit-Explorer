@@ -800,7 +800,12 @@ impl Parser {
     }
 
     /// `in`/`of` tail shared by the three `for` header forms.
-    fn for_in_of(&mut self, var_target: ForTarget, var_init: Option<Expr>) -> Result<Stmt> {
+    fn for_in_of(
+        &mut self,
+        var_target: ForTarget,
+        var_init: Option<Expr>,
+        is_await: bool,
+    ) -> Result<Stmt> {
         if self.eat_of() {
             let iter = self.expr(false)?;
             self.expect_p(P::RParen, "`)`")?;
@@ -809,7 +814,11 @@ impl Parser {
                 target: var_target,
                 iter,
                 body,
+                is_await,
             });
+        }
+        if is_await {
+            return Err(self.err("for await requires `of`"));
         }
         if self.eat_kw(Kw::In) {
             let obj = self.expr(false)?;
@@ -834,13 +843,13 @@ impl Parser {
         }
         self.expect_kw(Kw::For, "`for`")?;
         // `for await (…)` — `await` is contextual; the paren follows.
-        if matches!(self.peek(), Tok::Ident(s) if s == "await")
+        let is_await = matches!(self.peek(), Tok::Ident(s) if s == "await")
             && matches!(
                 self.toks.get(self.pos + 1).map(|t| &t.tok),
                 Some(Tok::P(P::LParen))
-            )
-        {
-            self.next(); // `await` — same loop, just tolerant
+            );
+        if is_await {
+            self.next(); // `await`
         }
         self.expect_p(P::LParen, "`(`")?;
         // init clause — `in` is not an operator here.
@@ -877,7 +886,7 @@ impl Parser {
                         constant: matches!(dk, DK::Const),
                     },
                 };
-                return self.for_in_of(target, var_init.filter(|_| is_in));
+                return self.for_in_of(target, var_init.filter(|_| is_in), is_await);
             }
             // Normal for(;;) — continue the decl list.
             let mut decls = vec![VarDecl {
@@ -907,7 +916,7 @@ impl Parser {
             if !is_lvalue(&init) && !matches!(init, Expr::Array(_) | Expr::Object(_)) {
                 return Err(self.err("invalid for-in/of target"));
             }
-            return self.for_in_of(ForTarget::Expr(init), None);
+            return self.for_in_of(ForTarget::Expr(init), None, is_await);
         }
         self.for_rest(Some(ForInit::Expr(init)))
     }

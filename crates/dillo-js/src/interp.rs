@@ -42,6 +42,10 @@ pub(crate) const SUPER_BIND: &str = "\u{f120}super";
 /// yields `"string"`, a documented deviation).
 pub(crate) const SYM_ITERATOR: &str = "\u{f130}Symbol.iterator";
 
+/// `Symbol.asyncIterator` property key — same private-use sentinel
+/// trick as `SYM_ITERATOR` (invisible to `for-in`/`Object.keys`).
+pub(crate) const SYM_ASYNC_ITERATOR: &str = "\u{f130}Symbol.asyncIterator";
+
 /// How a destructuring pattern binds its targets.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BindMode {
@@ -148,11 +152,13 @@ pub(crate) struct Protos {
     pub typed_array: ObjId,
     /// `BigInt.prototype` (`toString`/`valueOf`/`@@toPrimitive`).
     pub bigint: ObjId,
+    /// `AggregateError.prototype` (proto `Error.prototype`).
+    pub aggregate_error: ObjId,
 }
 
 impl Protos {
     /// Tous les prototypes — racines GC permanentes.
-    fn all(&self) -> [ObjId; 22] {
+    fn all(&self) -> [ObjId; 23] {
         [
             self.object,
             self.function,
@@ -176,6 +182,7 @@ impl Protos {
             self.data_view,
             self.typed_array,
             self.bigint,
+            self.aggregate_error,
         ]
     }
 }
@@ -221,6 +228,7 @@ impl Engine {
         let data_view = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let typed_array = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let bigint = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
+        let aggregate_error = heap.alloc_obj(Object::ordinary(Value::Obj(error)));
         let global = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -252,6 +260,7 @@ impl Engine {
                 data_view,
                 typed_array,
                 bigint,
+                aggregate_error,
             },
             rng: seed | 1,
             t0: Instant::now(),
@@ -660,6 +669,7 @@ impl Engine {
         self.set_own(id, "dotAll", Value::Bool(re.dot_all), false);
         self.set_own(id, "sticky", Value::Bool(re.sticky), false);
         self.set_own(id, "unicode", Value::Bool(re.unicode), false);
+        self.set_own(id, "hasIndices", Value::Bool(re.has_indices), false);
         self.set_own_attrs(
             id,
             "lastIndex",
@@ -1134,6 +1144,76 @@ impl Engine {
             }
             _ => Err(self.type_error("value is not iterable")),
         }
+    }
+
+    /// `await v` — unwraps a *settled* promise; a pending one
+    /// throws (tree-walk interpreter cannot suspend — documented
+    /// deviation). Non-promises pass through (spec wraps, same
+    /// observable result).
+    ///
+    /// # Errors
+    /// `Rejected` promise → throws its reason; `Pending` → `TypeError`.
+    pub(crate) fn await_value(&mut self, v: Value) -> JsResult<Value> {
+        if let Value::Obj(id) = v {
+            if let Some(ObjKind::Promise(p)) = self.heap.obj(id).map(|o| &o.kind) {
+                let (state, result) = (p.state, p.result);
+                return match state {
+                    crate::promise::PromiseState::Fulfilled => Ok(result),
+                    crate::promise::PromiseState::Rejected => Err(Thrown(result)),
+                    // No continuations — `await` on pending
+                    // work cannot suspend (documented).
+                    crate::promise::PromiseState::Pending => {
+                        Err(self.type_error("await on a pending promise is unsupported"))
+                    }
+                };
+            }
+        }
+        Ok(v)
+    }
+
+    /// `for await` semantics — `Symbol.asyncIterator` first
+    /// (`next()` result awaited per step), then sync-iterable
+    /// fallback with each *value* awaited (spec
+    /// `CreateAsyncFromSyncIterator`).
+    ///
+    /// # Errors
+    /// Same as `iter_values` + `await_value` (pending → `TypeError`).
+    pub(crate) fn iter_values_await(&mut self, v: Value) -> JsResult<Vec<Value>> {
+        if let Value::Obj(id) = v {
+            if let Some(m) = self.get_prop(id, SYM_ASYNC_ITERATOR) {
+                if self.is_callable(m) {
+                    let it = self.call_value(m, v, &[])?;
+                    let mut out = Vec::new();
+                    loop {
+                        self.tick()?;
+                        let Value::Obj(iid) = it else { break };
+                        let Some(nf) = self.get_prop(iid, "next") else {
+                            break;
+                        };
+                        if !self.is_callable(nf) {
+                            break;
+                        }
+                        let r = self.call_value(nf, it, &[])?;
+                        let r = self.await_value(r)?;
+                        let Value::Obj(rid) = r else { break };
+                        if self
+                            .get_prop(rid, "done")
+                            .is_some_and(|d| self.to_boolean(d))
+                        {
+                            break;
+                        }
+                        out.push(self.get_prop(rid, "value").unwrap_or(Value::Undefined));
+                    }
+                    return Ok(out);
+                }
+            }
+        }
+        let vals = self.iter_values(v)?;
+        let mut out = Vec::with_capacity(vals.len());
+        for x in vals {
+            out.push(self.await_value(x)?);
+        }
+        Ok(out)
     }
 
     /// Argument-list evaluation with `...spread` expansion.
@@ -2699,9 +2779,19 @@ impl Engine {
                 }
                 Ok(Flow::Normal)
             }
-            Stmt::ForOf { target, iter, body } => {
+            Stmt::ForOf {
+                target,
+                iter,
+                body,
+                is_await,
+            } => {
                 let v = self.eval_expr(env, this, iter)?;
-                for item in self.iter_values(v)? {
+                let items = if *is_await {
+                    self.iter_values_await(v)?
+                } else {
+                    self.iter_values(v)?
+                };
+                for item in items {
                     self.assign_target(env, this, target, item)?;
                     match self.exec_stmt(env, this, body)? {
                         Flow::Normal | Flow::Continue => {}
@@ -2919,36 +3009,7 @@ impl Engine {
             Expr::Spread(_) => Err(self.type_error("`...` outside a call or array literal")),
             Expr::Await(e) => {
                 let v = self.eval_expr(env, this, e)?;
-                match v {
-                    Value::Obj(id)
-                        if matches!(
-                            self.heap.obj(id).map(|o| &o.kind),
-                            Some(ObjKind::Promise(_))
-                        ) =>
-                    {
-                        let (state, result) = {
-                            let Some(o) = self.heap.obj(id) else {
-                                return Err(self.type_error("await: bad promise"));
-                            };
-                            let ObjKind::Promise(p) = &o.kind else {
-                                return Err(self.type_error("await: bad promise"));
-                            };
-                            (p.state, p.result)
-                        };
-                        match state {
-                            crate::promise::PromiseState::Fulfilled => Ok(result),
-                            crate::promise::PromiseState::Rejected => Err(Thrown(result)),
-                            // No continuations — `await` on pending
-                            // work cannot suspend (documented).
-                            crate::promise::PromiseState::Pending => {
-                                Err(self.type_error("await on a pending promise is unsupported"))
-                            }
-                        }
-                    }
-                    // Non-promise await returns the value (spec wraps
-                    // it — same observable result).
-                    _ => Ok(v),
-                }
+                self.await_value(v)
             }
             // `import(spec)` — dynamic import: loads, instantiates
             // and evaluates the module, then resolves with its

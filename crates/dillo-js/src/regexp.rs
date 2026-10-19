@@ -34,6 +34,8 @@ pub struct JsRegExp {
     pub sticky: bool,
     /// `u` — accepted, always on (regex crate is Unicode-native).
     pub unicode: bool,
+    /// `d` — `exec` results carry `indices` (start/end per group).
+    pub has_indices: bool,
 }
 
 /// One `exec` result, in *char* units (the engine's strings are
@@ -53,6 +55,11 @@ pub struct ExecMatch {
     pub groups: Vec<Option<String>>,
     /// `(?<name>…)` captures.
     pub named: Vec<(String, String)>,
+    /// Char-unit `[start, end)` per group (for `d`-flag `indices`).
+    pub group_indices: Vec<Option<(usize, usize)>>,
+    /// Char-unit `(start, end)` per named capture — `None` when
+    /// the group did not participate (→ `undefined` in `indices.groups`).
+    pub named_indices: Vec<(String, Option<(usize, usize)>)>,
 }
 
 impl JsRegExp {
@@ -65,6 +72,7 @@ impl JsRegExp {
         let mut dot_all = false;
         let mut sticky = false;
         let mut unicode = false;
+        let mut has_indices = false;
         for f in flags.chars() {
             match f {
                 'g' if !global => global = true,
@@ -73,7 +81,8 @@ impl JsRegExp {
                 's' if !dot_all => dot_all = true,
                 'y' if !sticky => sticky = true,
                 'u' if !unicode => unicode = true,
-                'd' | 'v' => {} // accepted, no observable effect here
+                'd' if !has_indices => has_indices = true,
+                'v' => {} // accepted, unicodeSets not implemented
                 _ => return Err(format!("invalid regex flag `{f}`")),
             }
         }
@@ -109,12 +118,17 @@ impl JsRegExp {
             dot_all,
             sticky,
             unicode,
+            has_indices,
         })
     }
 
-    /// `/src/flags` rendering (`toString`).
+    /// `/src/flags` rendering (`toString`) — ordre canonique
+    /// `dgimsuy` (spec `RegExp.prototype.flags`).
     pub fn flag_string(&self) -> String {
         let mut f = String::new();
+        if self.has_indices {
+            f.push('d');
+        }
         if self.global {
             f.push('g');
         }
@@ -227,10 +241,24 @@ impl JsRegExp {
             groups.push(caps.get(i).map(|g| g.as_str().to_string()));
         }
         let mut named = Vec::new();
+        let mut named_indices = Vec::new();
         for name in self.re.capture_names().flatten() {
             if let Some(g) = caps.name(name) {
                 named.push((name.to_string(), g.as_str().to_string()));
+                named_indices.push((
+                    name.to_string(),
+                    Some((byte_to_char(hay, g.start()), byte_to_char(hay, g.end()))),
+                ));
+            } else {
+                named_indices.push((name.to_string(), None));
             }
+        }
+        let mut group_indices = Vec::with_capacity(caps.len());
+        for i in 0..caps.len() {
+            group_indices.push(
+                caps.get(i)
+                    .map(|g| (byte_to_char(hay, g.start()), byte_to_char(hay, g.end()))),
+            );
         }
         ExecMatch {
             index,
@@ -240,6 +268,8 @@ impl JsRegExp {
             text,
             groups,
             named,
+            group_indices,
+            named_indices,
         }
     }
 }

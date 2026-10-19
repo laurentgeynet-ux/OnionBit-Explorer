@@ -466,6 +466,38 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     (`upper(v) == upper(borne)`) ; backrefs wrappées `(?i:…)`.
   16 assertions de régression `tests/lang.rs`
   (`regexp_js_c3_semantics`).
+- **JS-C8 — APIs modernes** (`dillo-js`) :
+  - `AggregateError` (prototype dédié, `errors` own prop) +
+    `Error(m, {cause})` sur toute la famille Error ;
+    `Promise.withResolvers()`/`Promise.try()`/`Promise.any`
+    collectant les raisons de rejet dans `errors` ;
+  - `structuredClone` — copie profonde spec
+    `StructuredSerialize` : cycles et aliasing préservés
+    (table id→clone), objets ordinaires (props énumérables
+    propres), tableaux, `Map`/`Set`, `ArrayBuffer`/`DataView`/
+    vues typées (buffers dupliqués), `RegExp` (source+flags) ;
+    `Fun`/`Symbol`/`Promise`/`Proxy`/`Iter`/host/`FetchResponse`
+    → `TypeError` (classe `DataCloneError`) ;
+  - `Object.groupBy` (objet à prototype nul, clés `ToString`)
+    et `Map.groupBy` (clés `SameValueZero` — pas de `ToString`),
+    callbacks `(item, index)` ;
+  - `Array.fromAsync` — `await` par élément puis par résultat
+    de mapfn ; jamais de throw synchrone (erreurs → promesse
+    rejetée, spec async) ;
+  - RegExp : flag `d` → `hasIndices` + `match.indices`/
+    `indices.groups` en unités char (groupes non-participants
+    → `undefined`), ordre canonique `dgimsuy` ; lookbehind
+    `(?<=)`/`(?<!)` natif fancy-regex ;
+  - `Symbol.asyncIterator` + `for await` — `next()` awaité
+    par étape, fallback itérable sync avec valeur awaitée
+    (`CreateAsyncFromSyncIterator`), `for await … in` →
+    `SyntaxError` ; `await_value` extrait d'`Expr::Await`
+    (partagé par `fromAsync`/`for await`) ;
+  - Iterator helpers ES2025 (`map`/`filter`/`take`/`drop`/
+    `flatMap`/`toArray`/`forEach`/`reduce`/`some`/`every`/
+    `find`) — drain eager en snapshot `Iter` partagé
+    (paresse spec → déviation documentée de timing) ;
+  test262 reste 859/859 ; 7 tests de régression `lang.rs`.
 - **JS-C7 — `BigInt` + `BigInt64Array`/`BigUint64Array`**
   (`dillo-js`) : primitive `Value::Big(ObjId)` →
   `ObjKind::BigInt` (`num-bigint`, tracée GC). Littéraux

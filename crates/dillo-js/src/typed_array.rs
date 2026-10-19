@@ -86,7 +86,7 @@ fn new_buffer(e: &mut Engine, n: usize) -> ObjId {
 
 /// New typed view `ta` over `bid` (`offset` bytes, `len` éléments),
 /// proto = le proto du ctor correspondant.
-fn new_ta(e: &mut Engine, ta: TaKind, bid: ObjId, offset: usize, len: usize) -> Value {
+pub(crate) fn new_ta(e: &mut Engine, ta: TaKind, bid: ObjId, offset: usize, len: usize) -> Value {
     let proto = match e.get_prop(e.global, ta.name()).and_then(|c| match c {
         Value::Obj(cid) => e.get_prop(cid, "prototype"),
         _ => None,
@@ -230,7 +230,7 @@ fn ta_write_back(
 /// `src` lu comme liste de valeurs (view typée, tableau, iterable
 /// ou array-like `{length}`). Les conversions arrivent à
 /// l'écriture — `ToBigInt`/`ToNumber` selon le kind cible.
-fn src_vals(e: &mut Engine, src: Value) -> JsResult<Vec<Value>> {
+pub(crate) fn src_vals(e: &mut Engine, src: Value) -> JsResult<Vec<Value>> {
     if let Value::Obj(id) = src {
         // Vue typée → copie élément à élément (`Big` préservés).
         let view = match e.heap.obj(id).map(|o| &o.kind) {

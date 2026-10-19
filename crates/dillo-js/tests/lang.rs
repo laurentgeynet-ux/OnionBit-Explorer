@@ -2879,3 +2879,303 @@ fn bigint_typed_arrays() {
         "[object BigInt64Array]"
     );
 }
+
+// -- ES2024/2025 — gaps usuels (JS-C8) --------------------------------
+
+#[test]
+fn promise_with_resolvers_try_any() {
+    assert_eq!(
+        seq_str(
+            "var r = []; var p = Promise.withResolvers(); p.resolve(42); p.promise.then(v => r.push(v))",
+            "typeof p.resolve + '|' + r.join('')"
+        ),
+        "function|42"
+    );
+    // `Promise.any` — premier fulfill gagne, erreurs collectées.
+    assert_eq!(
+        seq_str(
+            "var r; Promise.any([Promise.reject(1), Promise.resolve(7)]).then(v => r = v)",
+            "r"
+        ),
+        "7"
+    );
+    assert_eq!(
+        seq_str(
+            "var r; Promise.any([Promise.reject('a'), Promise.reject('b')]).catch(e => r = e.name + ':' + e.errors.join('+'))",
+            "r"
+        ),
+        "AggregateError:a+b"
+    );
+    // `AggregateError` ctor — `errors` own prop, proto dédié.
+    assert_eq!(
+        ev_str("var a = new AggregateError([1,2], 'many'); a.name + '|' + a.errors.join(',') + '|' + (a instanceof Error)"),
+        "AggregateError|1,2|true"
+    );
+    // `Promise.try` — retour adopté, exception rejetée.
+    assert_eq!(
+        seq_str(
+            "var r; Promise.try((a, b) => a + b, 2, 3).then(v => r = v)",
+            "r"
+        ),
+        "5"
+    );
+    assert_eq!(
+        seq_str(
+            "var r; Promise.try(() => { throw 'x'; }).catch(e => r = e)",
+            "r"
+        ),
+        "x"
+    );
+    // `new Error(m, {cause})`.
+    assert_eq!(
+        ev_str("var e = new Error('m', {cause: 9}); e.cause + '|' + e.message"),
+        "9|m"
+    );
+}
+
+#[test]
+fn structured_clone() {
+    // Copie profonde : objets imbriqués séparés.
+    assert_eq!(
+        ev_str(
+            "var a = {x: 1, n: {y: 2}}; var b = structuredClone(a);              b.n.y = 9; a.n.y + '|' + b.n.y + '|' + (a === b) + '|' + (a.n === b.n)"
+        ),
+        "2|9|false|false"
+    );
+    // Tableaux.
+    assert_eq!(
+        ev_str(
+            "var a = [1, [2, 3]]; var b = structuredClone(a);              b[1][0] = 8; a[1][0] + '|' + b[1][0] + '|' + b.length"
+        ),
+        "2|8|2"
+    );
+    // Cycles préservés.
+    assert_eq!(
+        ev_str("var o = {}; o.self = o; var c = structuredClone(o); c.self === c"),
+        "true"
+    );
+    // Map / Set.
+    assert_eq!(
+        ev_str(
+            "var m = new Map([['k', {v: 1}]]); var s = new Set([1, 2]);              var cm = structuredClone(m), cs = structuredClone(s);              cm.get('k').v + '|' + cs.has(2) + '|' + (cm.get('k') === m.get('k'))"
+        ),
+        "1|true|false"
+    );
+    // TypedArray + buffer indépendants.
+    assert_eq!(
+        ev_str(
+            "var u = new Uint8Array([1, 2, 3]); var c = structuredClone(u);              c[0] = 9; u[0] + '|' + c[0] + '|' + c.length + '|' + (c instanceof Uint8Array)"
+        ),
+        "1|9|3|true"
+    );
+    // RegExp clonée (source + flags).
+    assert_eq!(
+        ev_str("var r = structuredClone(/ab+c/i); r.source + '|' + r.flags + '|' + r.test('aBc')"),
+        "ab+c|i|true"
+    );
+    // Non-clonables : fonctions, symboles, promesses → TypeError.
+    for code in [
+        "structuredClone(function(){})",
+        "structuredClone(Symbol('s'))",
+        "structuredClone(Promise.resolve(1))",
+    ] {
+        assert_eq!(
+            ev_str(&format!("try {{ {code} }} catch(e) {{ e.name }}")),
+            "TypeError"
+        );
+    }
+    // Primitives passent telles quelles.
+    assert_eq!(
+        ev_str("structuredClone(42) + '|' + structuredClone('hi') + '|' + structuredClone(1n)"),
+        "42|hi|1"
+    );
+}
+
+#[test]
+fn object_map_group_by() {
+    // `Object.groupBy` — objet à proto nul.
+    assert_eq!(
+        ev_str(
+            "var g = Object.groupBy([1, 2, 3, 4, 5], n => n % 2 ? 'odd' : 'even');              g.odd.join(',') + '|' + g.even.join(',') + '|' + Object.getPrototypeOf(g)"
+        ),
+        "1,3,5|2,4|null"
+    );
+    // Callback reçoit (item, index) ; callback non callable → TypeError.
+    assert_eq!(
+        ev_str("var g = Object.groupBy('abc', (c, i) => i); g['1'][0] + '|' + g['2'][0]"),
+        "b|c"
+    );
+    assert_eq!(
+        ev_str("try { Object.groupBy([1], 'x') } catch(e) { e.name }"),
+        "TypeError"
+    );
+    // `Map.groupBy` — clés SameValueZero (pas ToString).
+    assert_eq!(
+        ev_str(
+            "var m = Map.groupBy([1.2, 1.9, 2.1], Math.floor);              m.get(1).join(',') + '|' + m.get(2).join(',') + '|' + (m instanceof Map)"
+        ),
+        "1.2,1.9|2.1|true"
+    );
+    // Clés objets conservées par référence.
+    assert_eq!(
+        ev_str(
+            "var k = {}; var m = Map.groupBy([5, 7], () => k);              m.get(k).join(',') + '|' + m.has('object Object')"
+        ),
+        "5,7|false"
+    );
+}
+
+#[test]
+fn regexp_lookbehind_has_indices() {
+    // Lookbehind positif et négatif.
+    assert_eq!(
+        ev_str("'abc xbc'.replace(/(?<=a)bc/, 'X') + '|' + 'ab xb'.replace(/(?<!a)b/g, 'Y')"),
+        "aX xbc|ab xY"
+    );
+    assert_eq!(ev_str("/(?<=\\d)x/.test('3x')"), "true");
+    assert_eq!(ev_str("/(?<=\\d)x/.test('ax')"), "false");
+    // Flag `d` — `hasIndices` + `indices` sur les résultats.
+    assert_eq!(
+        ev_str("var r = /(?<y>\\d+)(x)/d; r.hasIndices + '|' + r.flags + '|' + /x/.hasIndices"),
+        "true|d|false"
+    );
+    assert_eq!(
+        ev_str(
+            "var m = 'a12x'.match(/(?<y>\\d+)(x)/d); \
+             m.indices[0][0] + '|' + m.indices[0][1] + '|' + m.indices[1][0] + '|' + m.indices[2][1]"
+        ),
+        "1|4|1|4"
+    );
+    // `indices.groups` miroir des groupes nommés.
+    assert_eq!(
+        ev_str("var m = 'a12x'.match(/(?<y>\\d+)(x)/d); m.indices.groups.y[0] + '|' + m.indices.groups.y[1]"),
+        "1|3"
+    );
+    // Groupe non-participant → `undefined`.
+    assert_eq!(
+        ev_str("var m = 'ab'.match(/(a)(b)?(c)?/d); String(m.indices[2]) + '|' + m.indices[3]"),
+        "1,2|undefined"
+    );
+    // Flag `d` dupliqué → SyntaxError.
+    assert_eq!(
+        ev_str("try { new RegExp('x', 'dd') } catch(e) { e.name }"),
+        "SyntaxError"
+    );
+}
+
+#[test]
+fn array_from_async() {
+    // Éléments synchrones.
+    assert_eq!(
+        seq_str(
+            "var r; Array.fromAsync([1, 2, 3]).then(v => r = v.join(','))",
+            "r"
+        ),
+        "1,2,3"
+    );
+    // Éléments déjà résolus + mapfn (les deux awaités).
+    assert_eq!(
+        seq_str(
+            "var r; Array.fromAsync([Promise.resolve(2)], x => Promise.resolve(x * 10)).then(v => r = v[0])",
+            "r"
+        ),
+        "20"
+    );
+    // Rejet propagé.
+    assert_eq!(
+        seq_str(
+            "var r; Array.fromAsync([Promise.reject('bad')]).catch(e => r = e)",
+            "r"
+        ),
+        "bad"
+    );
+}
+
+#[test]
+fn for_await_and_async_iterator() {
+    // `Symbol.asyncIterator` exposé.
+    assert_eq!(ev_str("typeof Symbol.asyncIterator"), "string");
+    // `for await` sur itérable sync — les valeurs promise sont awaitées.
+    assert_eq!(
+        seq_str(
+            "var r = []; for await (var x of [1, Promise.resolve(2), 3]) r.push(x);",
+            "r.join(',')"
+        ),
+        "1,2,3"
+    );
+    // `for await` sur async iterator custom — `next()` → promise {value, done}.
+    assert_eq!(
+        seq_str(
+            "var it = { i: 0, [Symbol.asyncIterator]() { return this; }, \
+             next() { this.i++; return Promise.resolve(this.i <= 3 \
+             ? {value: this.i * 10, done: false} : {value: undefined, done: true}); } }; \
+             var r = []; for await (var x of it) r.push(x);",
+            "r.join(',')"
+        ),
+        "10,20,30"
+    );
+    // Rejet d'un `next()` → propagation.
+    assert_eq!(
+        seq_str(
+            "var it = { [Symbol.asyncIterator]() { return this; }, \
+             next() { return Promise.reject('nope'); } }; \
+             var r; try { for await (var x of it) {} } catch(e) { r = e; }",
+            "r"
+        ),
+        "nope"
+    );
+    // `for await … in` → SyntaxError (spec : `of` obligatoire).
+    assert_eq!(
+        ev_str("try { new Function('x', 'for await (var k in x) {}') } catch(e) { e.name }"),
+        "SyntaxError"
+    );
+}
+
+#[test]
+fn iterator_helpers() {
+    // `map`/`filter` chaînables — itérateur paresseur matérialisé.
+    assert_eq!(
+        ev_str("[1, 2, 3, 4].values().map(x => x * 2).filter(x => x > 4).toArray().join(',')"),
+        "6,8"
+    );
+    // `take`/`drop`/`flatMap`.
+    assert_eq!(
+        ev_str("[1, 2, 3, 4, 5].values().drop(1).take(2).toArray().join(',')"),
+        "2,3"
+    );
+    assert_eq!(
+        ev_str("[1, 2].values().flatMap(x => [x, x * 10]).toArray().join(',')"),
+        "1,10,2,20"
+    );
+    // Réducteurs : `reduce`/`some`/`every`/`find`/`forEach`.
+    assert_eq!(ev_str("[1, 2, 3].values().reduce((a, b) => a + b)"), "6");
+    assert_eq!(
+        ev_str(
+            "[1, 2, 3].values().reduce((a, b) => a + b, 10) + '|' + \
+                [2, 4].values().some(x => x % 2) + '|' + \
+                [2, 4].values().every(x => !(x % 2)) + '|' + \
+                [1, 2, 3].values().find(x => x > 1)"
+        ),
+        "16|false|true|2"
+    );
+    // Callback reçoit (item, index).
+    assert_eq!(
+        ev_str("var s = []; [7, 8].values().forEach((v, i) => s.push(i + ':' + v)); s.join(',')"),
+        "0:7,1:8"
+    );
+    // Consommation : l'itérateur source est vidé.
+    assert_eq!(
+        ev_str("var it = [1, 2].values(); it.toArray(); it.next().done"),
+        "true"
+    );
+    // `map` sur Map iterator.
+    assert_eq!(
+        ev_str("new Map([['a', 1]]).keys().map(k => k + '!').toArray().join(',')"),
+        "a!"
+    );
+    // `reduce` vide sans init → TypeError.
+    assert_eq!(
+        ev_str("try { [].values().reduce((a, b) => a + b) } catch(e) { e.name }"),
+        "TypeError"
+    );
+}

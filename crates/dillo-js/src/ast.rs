@@ -101,6 +101,8 @@ pub enum Stmt {
         iter: Expr,
         /// Loop body.
         body: Box<Stmt>,
+        /// `for await` — async iterator protocol.
+        is_await: bool,
     },
     /// `break` (unlabelled only)
     Break,

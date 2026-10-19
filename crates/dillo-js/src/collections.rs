@@ -104,7 +104,7 @@ fn set_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     Ok(s)
 }
 
-fn map_set_entry(e: &mut Engine, id: ObjId, k: Value, v: Value) {
+pub(crate) fn map_set_entry(e: &mut Engine, id: ObjId, k: Value, v: Value) {
     // Two-phase: find the slot immutably, then mutate — `svz` needs
     // the heap for string comparison.
     let pos = e.heap.obj(id).and_then(|o| match &o.kind {
@@ -119,7 +119,7 @@ fn map_set_entry(e: &mut Engine, id: ObjId, k: Value, v: Value) {
     }
 }
 
-fn set_add(e: &mut Engine, id: ObjId, v: Value) {
+pub(crate) fn set_add(e: &mut Engine, id: ObjId, v: Value) {
     let has = e.heap.obj(id).is_some_and(|o| match &o.kind {
         ObjKind::Set(s) => s.iter().any(|&ev| svz(&e.heap, ev, v)),
         _ => true,
@@ -370,6 +370,19 @@ pub(crate) fn install(e: &mut Engine) {
         let self_fn = e.native_fn("[Symbol.iterator]", iter_self);
         e.set_own(iterator, SYM_ITERATOR, self_fn, false);
     }
+    // JS-C8 — Iterator helpers (ES2025) : snapshot eager, les
+    // méthodes paresseuses spec sont matérialisées (déviation).
+    e.add_method(iterator, "map", it_map);
+    e.add_method(iterator, "filter", it_filter);
+    e.add_method(iterator, "take", it_take);
+    e.add_method(iterator, "drop", it_drop);
+    e.add_method(iterator, "flatMap", it_flat_map);
+    e.add_method(iterator, "toArray", it_to_array);
+    e.add_method(iterator, "forEach", it_for_each);
+    e.add_method(iterator, "reduce", it_reduce);
+    e.add_method(iterator, "some", it_some);
+    e.add_method(iterator, "every", it_every);
+    e.add_method(iterator, "find", it_find);
 
     let map_proto = e.protos.map;
     e.add_method(map_proto, "set", map_set);
@@ -391,6 +404,7 @@ pub(crate) fn install(e: &mut Engine) {
     }
     let map_ctor_v = e.native_fn("Map", map_ctor);
     e.set_own(c_id(map_ctor_v), "prototype", Value::Obj(map_proto), false);
+    e.add_method(c_id(map_ctor_v), "groupBy", map_group_by);
     let g = e.global;
     e.set_own(g, "Map", map_ctor_v, false);
 
@@ -424,4 +438,212 @@ pub(crate) fn install(e: &mut Engine) {
     if let Some(ws) = e.get_prop(g, "Set") {
         e.set_own(g, "WeakSet", ws, false);
     }
+}
+
+// ------------------------------------------------------------------
+// JS-C8 — Map.groupBy (ES2024)
+// ------------------------------------------------------------------
+
+/// `Map.groupBy(items, cb)` — `Map` groupé par clé callback
+/// (`SameValueZero` — clés `Value` brutes, pas `ToString`).
+fn map_group_by(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let items = e.iter_values(arg(args, 0))?;
+    let f = arg(args, 1);
+    if !e.is_callable(f) {
+        return Err(e.type_error("groupBy callback is not callable"));
+    }
+    let out = e.heap.alloc_obj(Object {
+        proto: Value::Obj(e.protos.map),
+        props: Vec::new(),
+        kind: ObjKind::Map(Vec::new()),
+        extensible: true,
+    });
+    for (i, v) in items.into_iter().enumerate() {
+        let k = e.call_value(f, Value::Undefined, &[v, Value::Num(i as f64)])?;
+        let existing = e.heap.obj(out).and_then(|o| match &o.kind {
+            ObjKind::Map(m) => m
+                .iter()
+                .find(|(ek, _)| svz(&e.heap, *ek, k))
+                .and_then(|(_, ev)| {
+                    if let Value::Obj(id) = ev {
+                        Some(*id)
+                    } else {
+                        None
+                    }
+                }),
+            _ => None,
+        });
+        let aid = if let Some(id) = existing {
+            id
+        } else {
+            let a = e.new_array(Vec::new());
+            let Value::Obj(aid) = a else { continue };
+            map_set_entry(e, out, k, a);
+            aid
+        };
+        if let Some(o) = e.heap.obj_mut(aid) {
+            if let ObjKind::Array(elems) = &mut o.kind {
+                elems.push(v);
+            }
+        }
+    }
+    Ok(Value::Obj(out))
+}
+
+// ------------------------------------------------------------------
+// JS-C8 — Iterator helpers (ES2025)
+//
+// Spec helpers are lazy; ours drain the source eagerly into the
+// shared `Iter` snapshot — same observable values, different
+// timing (documented deviation, same class as live-vs-snapshot).
+// ------------------------------------------------------------------
+
+/// Drain `this` iterator's remaining items — fast path on
+/// `ObjKind::Iter`, else the generic `next()` protocol.
+fn it_pull_all(e: &mut Engine, this: Value) -> JsResult<Vec<Value>> {
+    if let Value::Obj(id) = this {
+        if let Some(o) = e.heap.obj_mut(id) {
+            if let ObjKind::Iter { items, idx } = &mut o.kind {
+                let rest = items.split_off(*idx);
+                *idx = 0;
+                return Ok(rest);
+            }
+        }
+        // Itérateur arbitraire — protocole `next()`.
+        let mut out = Vec::new();
+        loop {
+            e.tick()?;
+            let Some(nf) = e.get_prop(id, "next") else {
+                break;
+            };
+            if !e.is_callable(nf) {
+                break;
+            }
+            let r = e.call_value(nf, this, &[])?;
+            let Value::Obj(rid) = r else { break };
+            if e.get_prop(rid, "done").is_some_and(|d| e.to_boolean(d)) {
+                break;
+            }
+            out.push(e.get_prop(rid, "value").unwrap_or(Value::Undefined));
+        }
+        return Ok(out);
+    }
+    Err(e.type_error("iterator helper on non-iterator"))
+}
+
+fn it_callback(e: &mut Engine, f: Value, v: Value, i: usize) -> JsResult<Value> {
+    if !e.is_callable(f) {
+        return Err(e.type_error("iterator callback is not callable"));
+    }
+    e.call_value(f, Value::Undefined, &[v, Value::Num(i as f64)])
+}
+
+fn it_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    let vals = it_pull_all(e, this)?;
+    let mut out = Vec::with_capacity(vals.len());
+    for (i, v) in vals.into_iter().enumerate() {
+        out.push(it_callback(e, f, v, i)?);
+    }
+    Ok(iter_obj(e, out))
+}
+
+fn it_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    let vals = it_pull_all(e, this)?;
+    let mut out = Vec::new();
+    for (i, v) in vals.into_iter().enumerate() {
+        let k = it_callback(e, f, v, i)?;
+        if e.to_boolean(k) {
+            out.push(v);
+        }
+    }
+    Ok(iter_obj(e, out))
+}
+
+fn it_take(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let n = e.to_number(arg(args, 0))?.max(0.0) as usize;
+    let vals = it_pull_all(e, this)?;
+    Ok(iter_obj(e, vals.into_iter().take(n).collect()))
+}
+
+fn it_drop(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let n = e.to_number(arg(args, 0))?.max(0.0) as usize;
+    let vals = it_pull_all(e, this)?;
+    Ok(iter_obj(e, vals.into_iter().skip(n).collect()))
+}
+
+fn it_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    let vals = it_pull_all(e, this)?;
+    let mut out = Vec::new();
+    for (i, v) in vals.into_iter().enumerate() {
+        let m = it_callback(e, f, v, i)?;
+        out.extend(e.iter_values(m)?);
+    }
+    Ok(iter_obj(e, out))
+}
+
+fn it_to_array(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let vals = it_pull_all(e, this)?;
+    Ok(e.new_array(vals))
+}
+
+fn it_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    let vals = it_pull_all(e, this)?;
+    for (i, v) in vals.into_iter().enumerate() {
+        it_callback(e, f, v, i)?;
+    }
+    Ok(Value::Undefined)
+}
+
+fn it_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    let vals = it_pull_all(e, this)?;
+    let mut it = vals.into_iter().enumerate();
+    let mut acc = match arg(args, 1) {
+        Value::Undefined => match it.next() {
+            Some((_, v)) => v,
+            None => return Err(e.type_error("reduce of empty iterator with no initial value")),
+        },
+        v => v,
+    };
+    for (i, v) in it {
+        acc = e.call_value(f, Value::Undefined, &[acc, v, Value::Num(i as f64)])?;
+    }
+    Ok(acc)
+}
+
+fn it_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    for (i, v) in it_pull_all(e, this)?.into_iter().enumerate() {
+        let k = it_callback(e, f, v, i)?;
+        if e.to_boolean(k) {
+            return Ok(Value::Bool(true));
+        }
+    }
+    Ok(Value::Bool(false))
+}
+
+fn it_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    for (i, v) in it_pull_all(e, this)?.into_iter().enumerate() {
+        let k = it_callback(e, f, v, i)?;
+        if !e.to_boolean(k) {
+            return Ok(Value::Bool(false));
+        }
+    }
+    Ok(Value::Bool(true))
+}
+
+fn it_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    for (i, v) in it_pull_all(e, this)?.into_iter().enumerate() {
+        let k = it_callback(e, f, v, i)?;
+        if e.to_boolean(k) {
+            return Ok(v);
+        }
+    }
+    Ok(Value::Undefined)
 }

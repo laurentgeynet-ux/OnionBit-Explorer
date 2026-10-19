@@ -638,18 +638,16 @@ fn promise_any(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let vals = iter_values(e, arg(args, 0))?;
     let id = e.new_promise();
     if vals.is_empty() {
-        let err = e.error_value(
-            e.protos.error,
-            "AggregateError",
-            "All promises were rejected",
-        );
+        let err = aggregate(e, Vec::new());
         e.reject_promise(id, err);
         return Ok(Value::Obj(id));
     }
     let state = e.new_object();
+    let arr = e.new_array(vec![Value::Undefined; vals.len()]);
     e.set_own(state, "remaining", Value::Num(vals.len() as f64), false);
     e.set_own(state, "target", Value::Obj(id), false);
-    for v in vals {
+    e.set_own(state, "errors", arr, false);
+    for (i, v) in vals.into_iter().enumerate() {
         let pv = if e.is_promise(v) {
             v
         } else {
@@ -664,34 +662,113 @@ fn promise_any(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             };
             p.resolve_fn
         };
-        let on_r = e.bound_native("any", promise_any_reject, vec![Value::Obj(state)]);
+        let on_r = e.bound_native(
+            "any",
+            promise_any_reject,
+            vec![Value::Obj(state), Value::Num(i as f64)],
+        );
         promise_then(e, pv, &[on_f, on_r])?;
     }
     Ok(Value::Obj(id))
 }
 
-/// `any` reject bookkeeping — last reject produces `AggregateError`.
+/// `AggregateError` produit par `Promise.any` — proto dédié +
+/// prop `errors` (spec `AggregateError(errors, msg)`).
+fn aggregate(e: &mut Engine, errors: Vec<Value>) -> Value {
+    let list = e.new_array(errors);
+    let err = e.error_value(
+        e.protos.aggregate_error,
+        "AggregateError",
+        "All promises were rejected",
+    );
+    if let Value::Obj(eid) = err {
+        e.set_own(eid, "errors", list, false);
+    }
+    err
+}
+
+/// `any` reject bookkeeping — raisons collectées en `errors[i]` ;
+/// la dernière produit l'`AggregateError`.
 fn promise_any_reject(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let Some(Value::Obj(state)) = args.first().copied() else {
         return Err(e.type_error("any: missing state"));
     };
-    let target = e.get_prop(state, "target").unwrap_or(Value::Undefined);
+    let i = e.to_number(args.get(1).copied().unwrap_or(Value::Num(0.0)))? as usize;
+    let reason = args.get(2).copied().unwrap_or(Value::Undefined);
+    let (target, errors) = {
+        let t = e.get_prop(state, "target").unwrap_or(Value::Undefined);
+        let r = e.get_prop(state, "errors").unwrap_or(Value::Undefined);
+        (t, r)
+    };
+    if let Value::Obj(rid) = errors {
+        if let Some(o) = e.heap.obj_mut(rid) {
+            if let ObjKind::Array(elems) = &mut o.kind {
+                if let Some(slot) = elems.get_mut(i) {
+                    *slot = reason;
+                }
+            }
+        }
+    }
     let rem = e
         .get_prop(state, "remaining")
         .map_or(1.0, |v| e.to_number(v).unwrap_or(1.0))
         - 1.0;
     e.set_own(state, "remaining", Value::Num(rem), false);
     if rem <= 0.0 {
-        if let Value::Obj(tid) = target {
-            let err = e.error_value(
-                e.protos.error,
-                "AggregateError",
-                "All promises were rejected",
-            );
+        if let (Value::Obj(tid), Value::Obj(rid)) = (target, errors) {
+            let errs = match e.heap.obj(rid).map(|o| &o.kind) {
+                Some(ObjKind::Array(elems)) => elems.clone(),
+                _ => Vec::new(),
+            };
+            let err = aggregate(e, errs);
             e.reject_promise(tid, err);
         }
     }
     Ok(Value::Undefined)
+}
+
+/// `Promise.withResolvers()` → `{promise, resolve, reject}` (ES2024).
+fn promise_with_resolvers(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = e.new_promise();
+    let (resolve, reject) = {
+        let Some(o) = e.heap.obj(id) else {
+            return Err(e.type_error("internal promise error"));
+        };
+        let ObjKind::Promise(p) = &o.kind else {
+            return Err(e.type_error("internal promise error"));
+        };
+        (p.resolve_fn, p.reject_fn)
+    };
+    let out = e.new_object();
+    e.set_own(out, "promise", Value::Obj(id), true);
+    e.set_own(out, "resolve", resolve, true);
+    e.set_own(out, "reject", reject, true);
+    Ok(Value::Obj(out))
+}
+
+/// `Promise.try(fn, ...args)` (ES2025) — `fn(...args)` appelé en
+/// microtâche (via `then` sur une promesse résolue), résultat
+/// adopté / exception rejetée.
+fn promise_try(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let f = arg(args, 0);
+    if !e.is_callable(f) {
+        return Err(e.type_error("Promise.try: not a function"));
+    }
+    // Bound = `[f, ...extras]` ; le dernier arg reçu à l'appel est
+    // la valeur `then` (ignorée).
+    let cb = e.bound_native("try", promise_try_call, args.to_vec());
+    let pid = e.new_promise();
+    e.resolve_promise(pid, Value::Undefined);
+    promise_then(e, Value::Obj(pid), &[cb, Value::Undefined])
+}
+
+/// Callback `then` de `Promise.try` — bound `[f, ...extras]`,
+/// appelle `f(...extras)` et laisse `then` adopter le retour.
+fn promise_try_call(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let f = args.first().copied().unwrap_or(Value::Undefined);
+    let end = args.len().saturating_sub(1).max(1);
+    let extras: Vec<Value> = args.get(1..end).unwrap_or(&[]).to_vec();
+    e.call_value(f, Value::Undefined, &extras)
 }
 
 /// `queueMicrotask(f)`.
@@ -730,6 +807,8 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(cid, "race", promise_race);
         e.add_method(cid, "allSettled", promise_all_settled);
         e.add_method(cid, "any", promise_any);
+        e.add_method(cid, "withResolvers", promise_with_resolvers);
+        e.add_method(cid, "try", promise_try);
     }
     e.set_own(g, "Promise", ctor, false);
     e.add_method(g, "queueMicrotask", queue_microtask);
