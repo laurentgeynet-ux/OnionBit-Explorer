@@ -124,11 +124,15 @@ Objectif : les blocages du web réel sautent. Sortie de palier :
 - [ ] **Étape 60. Éclater `session.rs`** (audit externe) :
   3 500+ lignes / 133 Ko — le god module porte session +
   pipeline + scheduler + profil + hit-test + glue JS + décodage
-  images. Extraire en sous-modules (`session/` : onglets,
-  navigation, `load_subresources`, net pump, événements,
-  storage/profil) — **sans changement de comportement**, tests
-  intacts. À faire entre deux étapes fonctionnelles, fichier au
-  calme — pas pendant un chantier session en vol.
+  images. **Découpler, pas juste déménager** : chaque
+  sous-module sort avec sa frontière de responsabilité **et
+  ses propres tests** (le scheduler de sous-ressources
+  testable sans réseau ni DOM ; le net pump sans session
+  complète) — sinon les 40+ champs de `Session` gardent le
+  couplage sous un autre nom de fichier. Critère de sortie :
+  au moins un module extrait testé en isolation. À faire
+  entre deux étapes fonctionnelles, fichier au calme — pas
+  pendant un chantier session en vol.
 - [ ] **Étape 59. Release 0.2** (ex-67) : packaging, smoke E2E
   étendu, doc. **Prérequis d'ouverture** : renommage
   `crates/dillo-js` → `explorer-jscore` (ADR-0020) — commit
@@ -189,7 +193,12 @@ mesures).
   réel.*
 - [ ] **JS-C34. Générateurs lazy + `await` pending** : refacto
   structurel, **uniquement si des sites réels bloquent**
-  (l'eager documenté tient le corpus actuel).
+  (l'eager documenté tient le corpus actuel). **Rendre le
+  déclencheur observable** : un fixture minimal volontairement
+  en échec (plus petit programme démontrant la déviation,
+  `#[ignore]` documenté) — sinon la panne silencieuse sur un
+  site n'est pas attribuable à cet écart et le trigger ne
+  peut pas tirer.
 - [ ] **JS-C35. `document.write` complet + insertion dynamique**
   — ordre cohérent avec le scheduler de l'étape 50.
   *Déclencheur : insertion dynamique constatée sur sites
@@ -213,16 +222,24 @@ mesures).
   `await` pending) = JS-C34, déclenché site réel — pas ici.
 - [ ] **JS-C39. Sync DOM incrémentale — instrumenter puis
   drainer les records** (dette ADR-0013 budgétisée tôt ; le
-  pont `dom_host.rs` = 69 Ko, son empreinte se mesure ici) :
-  d'abord **mesurer** le coût réel de la resérialisation
-  `sync_dom` — compteurs ms/octets par synchro dans la
-  session, visibles au profilage (étape 57) ; si le coût le
-  justifie, `JsEngine` gagne un `drain_dom_mutations()`
-  **additif** qui réutilise les `MutationRecord` du miroir
-  (mécanique JS-C26) comme diff d'arbre au lieu du HTML
-  complet. Nouveau point de cohérence → tests croisés
-  miroir ↔ `explorer-dom` exigés (règle de tri « corrige
-  le côté fautif »).
+  pont `dom_host.rs` = 69 Ko, son empreinte se mesure ici).
+  **Point de décision, pas juste mesure** — trois issues
+  possibles, critères explicites :
+  1. *mesure* : compteurs ms/octets par synchro `sync_dom`
+     dans la session (visibles au profilage, étape 57) ;
+  2. *si le coût domine* (synchro > ~10 % d'un frame budget
+     ou churn DoS démontré sur un cas réel) : `JsEngine`
+     gagne `drain_dom_mutations()` **additif** réutilisant
+     les `MutationRecord` (mécanique JS-C26) — diff d'arbre
+     au lieu du HTML complet ;
+  3. *si le problème est le modèle* (divergences miroir ↔
+     `explorer-dom` récurrentes, état non sérialisable,
+     fidélité): escalade = **ADR amendant ADR-0013** (partage
+     réel ou diff natif `explorer-dom`-à-`explorer-dom`) —
+     décision tranchée à l'écrit, pas calculée au fil.
+  Nouveau point de cohérence → tests croisés miroir ↔
+  `explorer-dom` exigés (règle de tri « corrige le côté
+  fautif »).
 
 ## Tâches continues
 

@@ -305,7 +305,10 @@ Règles de la coexistence :
    - **Pas de CI distante** (dépôt mono-machine) : « main
      vert » est garanti par le gate `verify_all` manuel.
      `scripts/verify_all.ps1` est conçu CI-ready — le jour
-     où un remote existe, il devient le job CI tel quel.
+     où un remote existe, il devient le job CI tel quel, à
+     ceci près : `.cargo/config.toml` (commité — postes
+     partagés) pointe `target-dir` sur `D:` ; la CI devra
+     poser `CARGO_TARGET_DIR` (prioritaire sur la config).
 4. **Fichiers partagés** : `CHANGELOG.md` est union-mergé ;
    `Cargo.lock` se régénère (règle §10.3) ;
    `[workspace.dependencies]` et `AGENTS.md`/ADR relèvent du
