@@ -25,6 +25,7 @@ class BrowserState {
     this.hoverUrl,
     this.hoverEditable = false,
     this.fieldFocused = false,
+    this.pageErrors = const {},
   });
 
   final List<BrowserTab> tabs;
@@ -58,6 +59,12 @@ class BrowserState {
   /// frappes clavier sont relayées en `input key`.
   final bool fieldFocused;
 
+  /// Erreur de chargement par onglet (`pipeline_error` SSE ou
+  /// `navigate` en échec) — affichée en page d'erreur stylée
+  /// à la place de la frame (étape 33). Effacée au prochain
+  /// `navigated` de l'onglet.
+  final Map<String, String> pageErrors;
+
   /// Onglet actif, ou `null`.
   BrowserTab? get active {
     for (final t in tabs) {
@@ -76,6 +83,7 @@ class BrowserState {
     String? Function()? hoverUrl,
     bool? hoverEditable,
     bool? fieldFocused,
+    Map<String, String>? pageErrors,
   }) =>
       BrowserState(
         tabs: tabs ?? this.tabs,
@@ -87,6 +95,7 @@ class BrowserState {
         hoverUrl: hoverUrl != null ? hoverUrl() : this.hoverUrl,
         hoverEditable: hoverEditable ?? this.hoverEditable,
         fieldFocused: fieldFocused ?? this.fieldFocused,
+        pageErrors: pageErrors ?? this.pageErrors,
       );
 }
 
@@ -151,6 +160,11 @@ class BrowserController extends Notifier<BrowserState> {
               title: ev.data['title'] as String? ?? t.title,
               loading: false,
             ));
+        if (state.pageErrors.containsKey(tabId)) {
+          state = state.copyWith(
+            pageErrors: {...state.pageErrors}..remove(tabId),
+          );
+        }
       case 'title_changed':
         _patch(tabId, (t) =>
             t.copyWith(title: ev.data['title'] as String? ?? t.title));
@@ -161,8 +175,11 @@ class BrowserController extends Notifier<BrowserState> {
         unawaited(_pullFrame(tabId));
       case 'pipeline_error':
         _patch(tabId, (t) => t.copyWith(loading: false));
+        final msg = ev.data['message'] as String?;
         state = state.copyWith(
-          lastError: () => ev.data['message'] as String?,
+          lastError: () => msg,
+          pageErrors:
+              msg == null ? null : {...state.pageErrors, tabId: msg},
         );
       case 'tab_closed':
         final tabs = state.tabs.where((t) => t.id != tabId).toList();
@@ -302,7 +319,10 @@ class BrowserController extends Notifier<BrowserState> {
       unawaited(_pullFrame(id));
     } on ApiException catch (e) {
       _patch(id, (t) => t.copyWith(loading: false));
-      state = state.copyWith(lastError: () => e.message);
+      state = state.copyWith(
+        lastError: () => e.message,
+        pageErrors: {...state.pageErrors, id: e.message},
+      );
     }
   }
 

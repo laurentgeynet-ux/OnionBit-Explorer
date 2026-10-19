@@ -9,6 +9,13 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 33 — pages d'erreur** (`app/`) : `pageErrors` par
+  onglet alimenté par `pipeline_error` (SSE) et les échecs
+  `navigate` — la zone frame affiche une page d'erreur
+  stylée (icône danger, URL, message moteur, bouton
+  réessayer) au lieu d'une frame vide ; effacée au prochain
+  `navigated` de l'onglet.
+
 - **Étape 32 — design system** (`app/`) : section `metrics`
   dans `tokens.json` (+ repli embarqué) : `tabHeight`,
   `tabMaxWidth`, `tabIndicatorWidth`, `statusBarHeight`,

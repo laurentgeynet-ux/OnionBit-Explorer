@@ -221,8 +221,10 @@ L'UI évolue **au fil des phases backend** ; cette phase consolide.
   tous les composants stylés ; barre de statut (href
   survolé / champ actif). Thème clair : variante future
   (le JSON accepte d'autres palettes).
-- [ ] **Étape 33. Pages d'erreur.** Échec réseau/TLS rendu en
-  page stylée côté UI (pas de frame moteur).
+- [x] **Étape 33. Pages d'erreur.** Échec réseau/TLS rendu en
+  page stylée côté UI (`pageErrors` par onglet via
+  `pipeline_error`/`navigate` en échec, effacée au
+  `navigated` suivant).
 
 ## Phase 8 — JavaScript (`explorer-js`)
 

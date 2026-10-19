@@ -175,6 +175,30 @@ void main() {
     expect(c.read(browserProvider).lastError, 'boom');
   });
 
+  test('pipeline_error pose la page d’erreur, navigated l’efface',
+      () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+
+    events.ctrl.add(ServerEvent('pipeline_error', {
+      'tab': 1,
+      'message': 'HTTP 404',
+    }));
+    await Future<void>.delayed(Duration.zero);
+    expect(c.read(browserProvider).pageErrors['1'], 'HTTP 404');
+
+    events.ctrl.add(ServerEvent('navigated', {
+      'tab': 1,
+      'url': 'http://h/ok',
+      'title': 'OK',
+    }));
+    await Future<void>.delayed(Duration.zero);
+    expect(c.read(browserProvider).pageErrors.containsKey('1'), isFalse);
+  });
+
   test('daemon absent → daemonOnline false, retry récupère',
       () async {
     final events = FakeEvents();

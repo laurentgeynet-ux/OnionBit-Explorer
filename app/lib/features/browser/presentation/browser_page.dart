@@ -81,13 +81,97 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
                         style: TextStyle(color: muted),
                       ),
                     )
-                  : _FrameView(
-                      tokens: t,
-                      state: st,
-                      ctrl: ctrl,
-                    ),
+                  : st.pageErrors[active.id] != null
+                      ? _ErrorPage(
+                          tokens: t,
+                          url: active.url,
+                          message: st.pageErrors[active.id]!,
+                          onRetry: () => ctrl.navigate(active.url),
+                        )
+                      : _FrameView(
+                          tokens: t,
+                          state: st,
+                          ctrl: ctrl,
+                        ),
             ),
             _StatusBar(tokens: t, state: st),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Page d'erreur stylée (étape 33) — échec réseau/TLS :
+/// pas de frame moteur, l'UI rend l'échec elle-même avec
+/// les tokens (icône danger, message, réessayer).
+class _ErrorPage extends StatelessWidget {
+  const _ErrorPage({
+    required this.tokens,
+    required this.url,
+    required this.message,
+    required this.onRetry,
+  });
+
+  final DesignTokens tokens;
+  final String url;
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = tokens.color('onSurface', 'muted');
+    return Container(
+      margin: EdgeInsets.all(tokens.dim('spacing', 'lg', fallback: 24)),
+      decoration: BoxDecoration(
+        color: tokens.color('surface', 'raised'),
+        borderRadius: BorderRadius.circular(
+          tokens.dim('radius', 'lg', fallback: 14),
+        ),
+        border: Border.all(color: tokens.color('border', 'base')),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: tokens.dim('metrics', 'iconXl', fallback: 64),
+              color: tokens.color('danger', 'base'),
+            ),
+            SizedBox(height: tokens.dim('spacing', 'md', fallback: 16)),
+            Text(
+              'Impossible de charger la page',
+              style: TextStyle(
+                color: tokens.color('onSurface', 'base'),
+                fontSize:
+                    tokens.dim2('typography', 'size', 'lg', fallback: 18),
+              ),
+            ),
+            SizedBox(height: tokens.dim('spacing', 'sm', fallback: 8)),
+            Text(
+              url,
+              style: TextStyle(
+                color: muted,
+                fontSize:
+                    tokens.dim2('typography', 'size', 'sm', fallback: 12),
+              ),
+            ),
+            SizedBox(height: tokens.dim('spacing', 'xs', fallback: 4)),
+            Text(
+              message,
+              style: TextStyle(
+                color: muted,
+                fontSize:
+                    tokens.dim2('typography', 'size', 'sm', fallback: 12),
+              ),
+            ),
+            SizedBox(height: tokens.dim('spacing', 'md', fallback: 16)),
+            TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Réessayer'),
+            ),
           ],
         ),
       ),
