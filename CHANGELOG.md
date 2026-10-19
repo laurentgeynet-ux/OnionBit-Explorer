@@ -9,6 +9,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 19 — `explorer-layout` : block layout, flux
+  normal** (`block.rs`) : résolution horizontale §10.3.3 —
+  `width` spécifiée/auto, slack aux marges `auto` (centrage),
+  `margin-right` reprend la surcontrainte LTR ; `%` et
+  `em`/`rem`/`ex`/`ch` résolus (base font-size chaînée par
+  parent). Empilement vertical avec **marges collapsées**
+  §8.3.1 (positives→max, négatives→min, mixte→somme ;
+  premier/dernier enfant adjoining traversent le parent
+  sans padding/bordure). `height` auto = somme du flux,
+  `min|max-*` bornent. Blocs anonymes : lignes estimées par
+  `break_lines` (hauteurs seules — la pose inline arrive à
+  l'étape 20), mesure via `FontSource` injectée ou repli
+  métrique `0.55em` documenté (headless uniquement). 9 tests.
+
 - **Étape 18 — `explorer-layout` : stack texte et fontes
   (ADR-0009)** (`text.rs` + `font.rs`) : port `FontSource`
   (données de fontes — `fontdb` reste en infra, injecté par

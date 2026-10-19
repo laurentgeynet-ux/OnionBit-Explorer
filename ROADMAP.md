@@ -150,7 +150,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   port `FontProvider`/`FontSource` est défini côté layout,
   l'implémentation `fontdb` vit en couche infra injectée par
   `explorer-core` (ADR-0009).
-- [ ] **Étape 19. Block layout.** Flux normal, marges collapsées,
+- [x] **Étape 19. Block layout.** Flux normal, marges collapsées,
   dimensions auto/spécifiées.
 - [ ] **Étape 20. Inline layout.** Line boxes sur runs itemisés,
   word wrap (opportunités UAX #14), `text-align`, inline-block
