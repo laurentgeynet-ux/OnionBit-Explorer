@@ -171,6 +171,8 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `a[href]` → `#00e` UA, texte direct → couleur du bloc —
   test `color_inline_atteint_le_run`.
 - [ ] **R-19. Rects parents non-bondants → hit-test mort**
+  (**préempte** — une page qui peint mais ne se clique pas
+  est le pire mode d'échec ; lite.ddg entier est mort)
   (bug terrain mission 5, journal `interface-equipes.md`,
   repro : lite.ddg entier + zones wikipedia/example.com) :
   `hit_test` élague le sous-arbre quand le point sort du
@@ -189,6 +191,17 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   Diagnostic à écrire : dump layout wikipedia conservé ;
   suspect à éliminer en premier : noscript/scripting-flag
   après R-15, ou élément inséré sans cascade.
+- [ ] **R-21. Texte synthétique des contrôles hors ligne**
+  (bug terrain mission 5, journal `interface-equipes.md`,
+  repro : `typed_text_repaints_new_value` ignoré) : la valeur
+  des `<input>`/`<select>` est synthétisée en enfant `Text`,
+  mais le contrôle `inline-block` est traité atomiquement —
+  `flow_children`/`layout_block` avance le curseur sur le
+  `Text` nu sans l'ajouter aux `lines` → aucun
+  `DisplayItem::Text` → le glyphe tapé reste invisible alors
+  que `edited`/`frame_invalidated` partent. Fix : poser le
+  texte synthétique dans la boîte contrôle (enfant ligne ou
+  fragment atomique peint), puis **réactiver le test ignoré**.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
