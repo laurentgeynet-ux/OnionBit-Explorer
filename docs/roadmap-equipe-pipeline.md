@@ -237,7 +237,10 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   niché, `inline-block` + bloc), `display.rs` (déco par
   fragment, `currentColor`). Reste : `@import` jamais
   fetchée — les couleurs `--color-tag-*` restent non
-  résolues (couture NAVIGATEUR, journal).
+  résolues (couture NAVIGATEUR, journal). **Vérifié terrain
+  mission 13** : lobste.rs transformé — titres propres,
+  seules les vraies pastilles de tags gardent leurs
+  bordures (`currentColor`).
 - [x] **R-23. Valeur de contrôle peinte à (0,0)** (résidu
   R-21, terrain mission 7 — fixture `repros/form.html` : le
   glyphe tapé apparaît mais chevauche le `<h1>` en haut à
@@ -253,6 +256,8 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   parent). Couvre tout contenu d'atome : valeur de
   contrôle, texte d'`inline-block`, repli d'`object`.
   Test : `controle_input_valeur_posee_sous_le_controle`.
+  **Vérifié terrain mission 13** : « test » peint dans
+  l'input, plus à (0,0).
 - [x] **R-24. Profondeur d'arbre bornée — stack overflow**
   (**préempte** — 2ᵉ violation « jamais crash » après
   JS-C41 ; terrain mission 10, repro `repros/host-nest.html`
@@ -287,6 +292,11 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   nulle ou n'est pas atomisée → 0 px vert mesuré malgré
   l'image décodée. Second maillon après 56e (câblage
   session) — les deux sont nécessaires pour les yeux.
+  **Précisé mission 13** : 56f livré — `data:` peint en
+  session et `<object data>` **bloc** peint ; le trou
+  résiduel est la feuille remplacée **inline** (l'objet
+  résolu sous `display:inline` ne peint pas sa ressource).
+  Dernier maillon avant les yeux.
 - [ ] **R-26. Compteur de diff WPT : underflow `usize`**
   (terrain mission 12 — triage du corpus) : un échec
   `justify-content` rapporte `18446744073709551615 px durs`

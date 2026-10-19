@@ -340,6 +340,15 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   de rects linéaire ou seuil interne à `changed_rects`,
   cache glyphe→outline pour `paint_text`, layout/cascade
   scopés sous-arbre — les ~15 s résiduels du repro debug.
+  **Terrain mission 13 — le goulot dominant est ailleurs** :
+  clic-mutation sur ~3 000 nœuds = **~7 min de gel** puis
+  `/frame` 204 (récidive 56b), alors que le profil phases
+  du même doc totalise ~24 s (relayout 14,5 + raster 5,4 +
+  png 3,1). Le temps non mesuré vit hors de ces phases :
+  sérialisation miroir JS, re-parse du document complet,
+  pompage des réponses, ou un seul chemin qui retombe en
+  reflow+repeint global — à instrumenter (tracer la frontière
+  `sync_dom` → `try_sync_incremental` côté session).
 - [x] **Étape 56. Profil persisté complet** (ex-64) : cookies
   (`cookies.json` via `ProfileStore`, session exclus),
   localStorage (cf. 51), **cache disque borné**
@@ -363,17 +372,19 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   **Vérifié terrain mission 11** : profil complet (cookie +
   localStorage + cache disque) survit à `taskkill /F` ×2 —
   nav post-kill = 0 hit serveur.
-- [x] **Étape 56b. `/frame` → 204 transitoire après commit**
-  (terrain mission 11) : **livré.** Cause : `freeze`
-  drainait l'état vivant pendant la fenêtre
-  `nav_apply`→`sub_commit` — un `try_bfcache` concurrent
-  gelait un snapshot commis-mais-jamais-peint
-  (`png`/`tree` absents), servi en 204 persistant à la
-  restauration. Fix : `freeze` exige `dom` **et** `png`
-  (pas de gel sans produit peint) + `try_bfcache` repeint
-  depuis le DOM restauré si le snapshot n'a pas de produit
-  (répare aussi l'existant). Régression :
-  `paintless_snapshot_repairs_on_restore`.
+- [ ] **Étape 56b. `/frame` → 204 persistant après commit
+  — ROUVERT (reproduit mission 13)** : le fix « snapshot
+  sans produit » livré n'a pas tenu en terrain — repro
+  M11 à l'identique : nav `World_Wide_Web` commitée
+  (`navigated`, titre, url) → `/frame` 204 persistant,
+  scroll 0, hit-test mort, seul `back` restaure. Récidive
+  aussi après le gel long `heavy.html` (~7 min, 55g). La
+  cause « freeze pendant `nav_apply`→`sub_commit` » était
+  réelle mais **incomplète** : il reste un chemin où le
+  commit avance sans produit peint (ou le produit est
+  jeté après commit — `unspec` 56c ?). Régression existante
+  `paintless_snapshot_repairs_on_restore` couvre le cas
+  bfcache, pas la fenêtre nav→pull.
 - [x] **Étape 56c. État hybride bfcache après back+navigate**
   (terrain mission 11, repro A→B→back→`navigate B`) :
   **livré.** Deux mécanismes corrigés : (1) `spec_paint` +
@@ -389,6 +400,8 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   sniffing `StreamDecoder`). Régressions :
   `superseded_nav_reverts_speculative_paint`,
   `navigate_to_forward_url_restores_bfcache_entry`.
+  **Vérifié terrain mission 13** : A→B→back→`navigate B` →
+  url=frame=hit-test=B, `can_forward:false` — hybride mort.
 - [x] **Étape 56d. `#fragment` = navigation complète, sans
   scroll** (terrain mission 11 — `anchor.html` + footnote
   wikipedia) : **livré.** `try_fragment_nav` traite le
@@ -399,7 +412,9 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `box_y_of_node`, borné `scroll_to_y`). Back/forward vers
   une entrée fragmentée rescrolle — la requête historiée
   porte le fragment. Régression :
-  `fragment_nav_scrolls_without_refetch`.
+  `fragment_nav_scrolls_without_refetch`. **Vérifié terrain
+  mission 13** : clic `#sec50` → `scroll_y:1433` sans
+  re-fetch ; back→haut, forward→rescrolle ; `name=` idem.
 - [x] **Étape 56e. `<img src>` jamais fetchée en session**
   (terrain mission 11 — `cache_server` `/page` avec
   `<img src=img.png>` : nav complète, zéro requête serveur
@@ -419,7 +434,9 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   seuls http(s) partent en fetch — un `data:` ne produisait
   qu'un échec. Débloque img `data:` + backgrounds `data:` +
   les yeux Acid2 (avec R-25). Régression :
-  `data_url_images_paint_inline`.
+  `data_url_images_paint_inline`. **Vérifié terrain mission
+  13** : b1–b4 = 1 800 px non-blancs (`<img>`/`<object>`/
+  cascade `data:` peints) ; img http + data = 12 800 px.
 - [ ] **Étape 57. UI Flutter v2** (ex-65) : thème clair
   (`tokens.json` variante), settings (moteur REST/FFI, thème,
   profil), UI historique + bookmarks (store core existant),
