@@ -9,6 +9,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 10 — `explorer-html` : encodage, entités et tokenizer
+  incrémental** (`encoding.rs`, `entities.rs`, `token.rs`,
+  `tokenizer.rs`) : sniffing WHATWG — BOM UTF-8/UTF-16LE/BE,
+  `<meta charset>` prescanné dans les 1024 premiers octets (case
+  et quoting tolérants, hors-balise rejeté), défaut
+  `windows-1252` — puis transcodage tolérant (`U+FFFD`, BOM
+  consommé). Tokenizer machine-à-états incrémental : chunks
+  bornés via `feed`/`next_token`, reprise de coupure au milieu
+  d'une balise, d'une entité ou d'un mot-clé (`doctype`,
+  `public`, `system`, `[CDATA[` — matching incrémental), texte
+  `Character` coalescé avec ordre du flux préservé (token retenu
+  pendant la purge), états rawtext/RCDATA/script/PLAINTEXT
+  pilotés par le tree-builder (`ContentKind`, « appropriate end
+  tag » via `last_start`), CDATA en contenu étranger, `Eof` après
+  résolution des constructions suspendues (orphelins `<`/`</`/
+  `<!`/`]]` réinjectés en texte). Entités : table nommée
+  longest-prefix (`;` d'abord, legacy sans `;` — règle de
+  l'esperluette ambiguë en attribut), numériques décimales/hexa
+  avec remap `0x80..0x9F` windows-1252 et `U+FFFD` sur
+  surrogates/dépassements. Bornes contenu hostile : noms
+  1 Kio, valeurs/commentaires 64 Kio, purge texte 16 Kio
+  (ADR-0011). 34 tests dont coupures de chunk exhaustives.
 - **Étape 7 — `explorer-net` : cookies + cache** (`cookies.rs`,
   `cache.rs`) : `CookieJar` RFC 6265 durci — `Domain=` validé par
   **Public Suffix List** (`psl`, supercookies `.co.uk` rejetés),

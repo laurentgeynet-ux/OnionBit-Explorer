@@ -83,11 +83,19 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   adjacents), `remove` détache sans détruire, `collect` réclame
   les sous-arbres non rootés, budget `max_nodes` (ADR-0011).
   `text_content`, `insert_before`, garde anti-cycles. 13 tests.
-- [ ] **Étape 10. Tokenizer HTML5.** États de la spec WHATWG,
+- [x] **Étape 10. Tokenizer HTML5.** États de la spec WHATWG,
   entités nommées/numériques, DOCTYPE/quirks mode — entrée
   **incrémentale** (chunks bornés, ADR-0012) pré-décodée avec
   **sniffing d'encodage WHATWG** (BOM, `<meta>` dans les premiers
-  octets, défaut `windows-1252`).
+  octets, défaut `windows-1252`). Machine à états incrémentale
+  (reprise de coupure au milieu de balise/entité/mot-clé),
+  texte `Character` coalescé avec ordre du flux préservé,
+  rawtext/RCDATA/script/PLAINTEXT pilotés par le tree-builder
+  (`ContentKind` + « appropriate end tag »), CDATA en contenu
+  étranger, entités longest-prefix + legacy sans `;` (règle de
+  l'esperluette ambiguë en attribut), remap `&#80..9F;`
+  windows-1252, bornes hostile (`MAX_NAME`/`MAX_VALUE`/flush).
+  34 tests (25 tokenizer + 9 encodage).
 - [ ] **Étape 11. Tree-builder.** Insertion modes, fermetures
   implicites, `<table>`/foster parenting, éléments `html/head/body`
   synthétisés — dégradation tag-soup tolérante.
