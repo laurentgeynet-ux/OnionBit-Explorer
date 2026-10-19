@@ -660,3 +660,61 @@ async fn no_factory_means_scripts_ignored() {
     s.navigate(id, "http://h.test/").await.unwrap();
     assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
 }
+
+/// Page dont un script mute le DOM miroir (`textContent`).
+const PAGE_MUT: &str = "<!doctype html><html><body>\
+     <div id=\"x\">avant</div>\
+     <script>document.getElementById('x').textContent='APRES'</script>\
+     </body></html>";
+
+/// Page statique équivalente au résultat de la mutation.
+const PAGE_MUT_STATIC: &str = "<!doctype html><html><body>\
+     <div id=\"x\">APRES</div></body></html>";
+
+#[tokio::test]
+async fn script_dom_mutation_is_rendered() {
+    let (mut s, t) = test_session();
+    t.route("/mut", 200, PAGE_MUT);
+    t.route("/stat", 200, PAGE_MUT_STATIC);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/mut").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // Le PNG de la page mutée par le script doit être
+    // identique à celui de la page statique équivalente.
+    let (pa, pb) = (s.frame_png(a), s.frame_png(b));
+    assert!(pa.is_some() && pb.is_some());
+    assert_eq!(pa, pb, "la mutation JS du DOM doit être rendue à l'écran");
+}
+
+#[tokio::test]
+async fn script_dom_append_is_rendered() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=\"h\">x</div>\
+         <script>var b=document.createElement('div');\
+         b.textContent='AJOUT';document.body.appendChild(b)</script>\
+         </body></html>",
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"h\">x</div>\
+         <div>AJOUT</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // `createElement` + `appendChild` mutent le miroir → le
+    // rendu doit correspondre à la page statique équivalente.
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}

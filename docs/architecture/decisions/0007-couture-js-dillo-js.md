@@ -32,9 +32,10 @@ cycles de vie croisés entre son heap (futur GC) et l'arène DOM ?
   possédé par ce dépôt.
 - `dillo-js` reste un crate **autonome** (aucune dépendance interne)
   développé par l'équipe JS dédiée ; il sera adapté derrière le
-  trait en phase 8. Son mini-DOM (`dom`/`dom_host`) est un harnais
-  de test — les vrais bindings passent par `explorer-js` +
-  `explorer-dom`.
+  trait en phase 8. Son mini-DOM (`dom`/`dom_host`) — initialement
+  prévu comme harnais de test — sert finalement de **miroir DOM
+  script-facing synchronisé** avec `explorer-dom` (ADR-0013,
+  étape 35).
 - **Licence** : `MIT OR Apache-2.0`, héritée du workspace — la
   migration a consumé la dépendance externe et le risque copyleft
   avec.

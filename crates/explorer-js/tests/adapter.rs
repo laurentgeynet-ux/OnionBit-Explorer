@@ -74,4 +74,37 @@ fn null_engine_noops() {
     assert_eq!(eng.eval("anything").unwrap(), "undefined");
     eng.set_budget(1);
     assert_eq!(eng.run_pending(), 0);
+    eng.install_dom("<html></html>");
+    assert_eq!(eng.sync_dom(), None);
+}
+
+#[test]
+fn install_dom_exposes_document_global() {
+    let mut eng = DilloEngine::new();
+    eng.install_dom("<html><body><div id=\"x\">old</div></body></html>");
+    // `document` installé → bindings visibles, pas de dirty.
+    assert_eq!(eng.eval("typeof document").unwrap(), "object");
+    assert_eq!(eng.sync_dom(), None);
+}
+
+#[test]
+fn dom_mutation_sets_dirty_and_serializes() {
+    let mut eng = DilloEngine::new();
+    eng.install_dom("<html><body><div id=\"x\">old</div></body></html>");
+    eng.eval("document.getElementById('x').textContent = 'NEUF'")
+        .unwrap();
+    let html = eng.sync_dom().expect("mutation attendue : dirty bit levé");
+    assert!(html.contains("NEUF"), "sérialisation = {html}");
+    assert!(!html.contains(">old<"), "sérialisation = {html}");
+    // Dirty bit consommé : la synchro suivante ne revoit rien.
+    assert_eq!(eng.sync_dom(), None);
+}
+
+#[test]
+fn dom_untouched_stays_clean() {
+    let mut eng = DilloEngine::new();
+    eng.install_dom("<html><body><p>stable</p></body></html>");
+    // Lecture seule (getElementById) → pas de mutation.
+    eng.eval("document.getElementById('p')").unwrap();
+    assert_eq!(eng.sync_dom(), None);
 }

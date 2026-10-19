@@ -68,6 +68,19 @@ pub trait JsEngine: Send {
         0
     }
 
+    /// Installe le DOM miroir du document (bindings `document`,
+    /// `navigator`, `window`…). `html` = source du document tel
+    /// que reçu — le miroir le re-parse côté moteur.
+    /// Défaut : pas de bindings (moteur nu).
+    fn install_dom(&mut self, _html: &str) {}
+
+    /// Synchronise le DOM miroir → `Some(html)` si des mutations
+    /// JS ont eu lieu depuis la dernière synchro (le hôte
+    /// re-parse alors le document), `None` sinon.
+    fn sync_dom(&mut self) -> Option<String> {
+        None
+    }
+
     /// Borne le budget d'opérations de la prochaine évaluation
     /// (protection anti-script-infini — règle « budgets »).
     fn set_budget(&mut self, ops: u64);
@@ -105,6 +118,12 @@ enum Cmd {
     RunPending {
         tx: Sender<usize>,
     },
+    InstallDom {
+        html: String,
+    },
+    DomSync {
+        tx: Sender<Option<String>>,
+    },
     SetBudget {
         ops: u64,
     },
@@ -139,6 +158,10 @@ impl DilloEngine {
     /// canal (le `Sender` meurt avec le proxy).
     fn worker(rx: &Receiver<Cmd>) {
         let mut eng = dillo_js::Engine::new();
+        // Miroir DOM installé par `install_dom` (`Rc` — vit et
+        // meurt sur ce thread). Le `Dom` y reste mutable par les
+        // bindings ; `DomSync` lit le dirty bit et sérialise.
+        let mut jsd: Option<dillo_js::DomRef> = None;
         while let Ok(cmd) = rx.recv() {
             match cmd {
                 Cmd::Eval { src, tx } => {
@@ -151,9 +174,28 @@ impl DilloEngine {
                     }
                 }
                 Cmd::RunPending { tx } => {
-                    let n = eng.run_due_timers().unwrap_or(0)
-                        + eng.run_microtasks().unwrap_or(0);
+                    let n = eng.run_due_timers().unwrap_or(0) + eng.run_microtasks().unwrap_or(0);
                     if tx.send(n).is_err() {
+                        return;
+                    }
+                }
+                Cmd::InstallDom { html } => {
+                    let d =
+                        std::rc::Rc::new(std::cell::RefCell::new(dillo_js::Dom::from_html(&html)));
+                    // Le parse initial lève le dirty bit — la
+                    // construction n'est pas une mutation JS,
+                    // on le consomme pour ne resynchroniser que
+                    // les vraies mutations de script.
+                    d.borrow().take_dirty();
+                    eng.install_dom(&d);
+                    jsd = Some(d);
+                }
+                Cmd::DomSync { tx } => {
+                    let out = jsd.as_ref().and_then(|d| {
+                        let d = d.borrow();
+                        d.take_dirty().then(|| d.serialize_document())
+                    });
+                    if tx.send(out).is_err() {
                         return;
                     }
                 }
@@ -198,6 +240,20 @@ impl JsEngine for DilloEngine {
             return 0;
         }
         rx.recv().unwrap_or(0)
+    }
+
+    fn install_dom(&mut self, html: &str) {
+        let _ = self.tx.send(Cmd::InstallDom {
+            html: html.to_string(),
+        });
+    }
+
+    fn sync_dom(&mut self) -> Option<String> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DomSync { tx }).is_err() {
+            return None;
+        }
+        rx.recv().ok().flatten()
     }
 
     fn set_budget(&mut self, ops: u64) {

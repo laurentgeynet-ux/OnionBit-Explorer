@@ -613,16 +613,19 @@ impl Session {
             entry.js = None;
             entry.dom = Some(dom);
         }
-        self.run_scripts(tab);
+        self.run_scripts(tab, &html);
         self.relayout(tab)?;
         Ok(title)
     }
 
     /// Évalue les `<script>` inline du document — contexte neuf
     /// par document (créé ici, détruit à la prochaine
-    /// navigation). Un script en échec émet `PipelineError`
-    /// mais ne fait pas échouer la page (dégradation, règle 3).
-    fn run_scripts(&mut self, tab: TabId) {
+    /// navigation) avec le DOM miroir installé (`document`…).
+    /// Un script en échec émet `PipelineError` mais ne fait pas
+    /// échouer la page (dégradation, règle 3). Les mutations
+    /// du miroir sont resynchronisées : re-parse du document
+    /// sérialisé → le `relayout` suivant les rend à l'écran.
+    fn run_scripts(&mut self, tab: TabId, html: &str) {
         let (Some(f), Some(dom)) = (
             self.js_factory.clone(),
             self.tabs.get(&tab).and_then(|t| t.dom.as_ref()),
@@ -635,6 +638,7 @@ impl Session {
         }
         let mut eng = (f)();
         eng.set_budget(self.js_ops);
+        eng.install_dom(html);
         for src in &scripts {
             if let Err(e) = eng.eval(src) {
                 tracing::debug!(tab, error = %e, "script en échec");
@@ -646,6 +650,23 @@ impl Session {
         }
         let n = eng.run_pending();
         tracing::trace!(tab, jobs = n, "jobs js exécutés");
+        // Miroir muté ? → re-parse : le relayout qui suit rend
+        // les modifications (dirty bit consommé côté moteur).
+        // Le titre est relu aussi (`document.title = …`).
+        if let Some(mutated) = eng.sync_dom() {
+            let new_dom = TreeBuilder::parse(&mutated);
+            let new_title = extract_title(&new_dom);
+            if let Some(entry) = self.tabs.get_mut(&tab) {
+                entry.dom = Some(new_dom);
+                entry.focused = None;
+                if entry.title != new_title {
+                    entry.title.clone_from(&new_title);
+                    if let Some(t) = new_title {
+                        let _ = self.events.send(CoreEvent::TitleChanged { tab, title: t });
+                    }
+                }
+            }
+        }
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.js = Some(eng);
         }
