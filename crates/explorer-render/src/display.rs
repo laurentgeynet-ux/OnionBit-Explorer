@@ -79,6 +79,18 @@ pub enum DisplayItem {
         /// Pixels décodés.
         img: std::sync::Arc<crate::image::DecodedImage>,
     },
+    /// `background-image` décodée, tuilée dans `rect` selon
+    /// `background-repeat` — origine padding box, aire border
+    /// box (defaults CSS2 ; `background-position`/`size` hors
+    /// portée — origine au coin, taille naturelle).
+    BackgroundImage {
+        /// Border box de la boîte porteuse.
+        rect: Rect,
+        /// Pixels décodés.
+        img: std::sync::Arc<crate::image::DecodedImage>,
+        /// Répétition `(x, y)` de `background-repeat`.
+        repeat: (bool, bool),
+    },
     /// Entrée de zone de clipping (`overflow` ≠ `visible`).
     PushClip(Rect),
     /// Sortie de la zone de clipping correspondante.
@@ -145,6 +157,9 @@ impl DisplayList {
                 DisplayItem::Image { rect, img } => {
                     let _ = writeln!(out, "image {}x{} {rect:?}", img.width, img.height);
                 }
+                DisplayItem::BackgroundImage { rect, img, .. } => {
+                    let _ = writeln!(out, "bg-image {}x{} {rect:?}", img.width, img.height);
+                }
                 DisplayItem::PushClip(r) => {
                     let _ = writeln!(out, "push-clip {r:?}");
                 }
@@ -179,6 +194,26 @@ pub fn build_display_list_imaged(
     viewport_h: f32,
     scroll_y: f32,
     images: &crate::ImageTable,
+) -> DisplayList {
+    build_display_list_full(
+        root,
+        viewport_w,
+        viewport_h,
+        scroll_y,
+        &crate::PaintImages::from_replaced(images.clone()),
+    )
+}
+
+/// Variante complète : `images` porte les `<img>` décodés ET
+/// les `background-image` résolus (par `NodeId`). [`build_display_list`]
+/// équivaut à des tables vides.
+#[must_use]
+pub fn build_display_list_full(
+    root: &LayoutBox,
+    viewport_w: f32,
+    viewport_h: f32,
+    scroll_y: f32,
+    images: &crate::PaintImages,
 ) -> DisplayList {
     let mut items = Vec::new();
     paint_box(root, &mut items, -scroll_y, images);
@@ -244,7 +279,8 @@ fn prop_px(st: &explorer_css::ComputedStyle, prop: &str, fallback: f32) -> f32 {
 /// enfants — le fond passe TOUJOURS sous son contenu).
 /// `off` = décalage vertical de scroll (`0` dans les
 /// sous-arbres `position: fixed`).
-fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32) {
+#[allow(clippy::too_many_lines)]
+fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32, images: &crate::PaintImages) {
     let rect = shifted(bx.rect, off);
     // Blocs anonymes et boîtes texte clonent le style du
     // parent, mais `background`/`border` ne sont PAS hérités
@@ -253,23 +289,52 @@ fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32) {
     // ou la bordure du parent serait redessinée sur chaque
     // fragment de texte — §9.2.1.1).
     let anonymous = matches!(bx.kind, BoxKind::AnonymousBlock | BoxKind::Text);
-    // Fond : `background-color` non transparente.
+    // Fond : `background-color` non transparente, puis
+    // `background-image` décodée (au-dessus de la couleur,
+    // sous la bordure — App. E ; origine padding box ≈ bord
+    // interne de la bordure gauche/haute).
     if !anonymous {
         if let Some(c) = bx.style.get("background-color").and_then(parse_color) {
             if c.a > 0 {
                 items.push(DisplayItem::FillRect { rect, color: c });
             }
         }
+        if bx
+            .style
+            .get("background-image")
+            .is_some_and(|v| v.starts_with("url("))
+        {
+            if let Some(img) = bx.node.and_then(|n| images.backgrounds.get(&n)).cloned() {
+                let repeat = match bx.style.get("background-repeat") {
+                    Some("no-repeat") => (false, false),
+                    Some("repeat-x") => (true, false),
+                    Some("repeat-y") => (false, true),
+                    _ => (true, true), // `repeat` = défaut.
+                };
+                items.push(DisplayItem::BackgroundImage { rect, img, repeat });
+            }
+        }
     }
     // Bordures : 4 côtés, épaisseur > 0 et style non `none`.
+    // Sémantique de `border_px` (layout) : la largeur ne
+    // compte que si le style du côté est déclaré non-`none` —
+    // l'initiale `medium` vaut alors 3 px (`border: solid`
+    // sans épaisseur peint 3 px).
+    let side_w = |side: &str| -> f32 {
+        let style_prop = format!("border-{side}-style");
+        if bx.style.get(&style_prop).is_none_or(|s| s.trim() == "none") {
+            return 0.0;
+        }
+        prop_px(&bx.style, &format!("border-{side}-width"), 3.0)
+    };
     let widths = if anonymous {
         [0.0; 4]
     } else {
         [
-            prop_px(&bx.style, "border-top-width", 0.0),
-            prop_px(&bx.style, "border-right-width", 0.0),
-            prop_px(&bx.style, "border-bottom-width", 0.0),
-            prop_px(&bx.style, "border-left-width", 0.0),
+            side_w("top"),
+            side_w("right"),
+            side_w("bottom"),
+            side_w("left"),
         ]
     };
     if widths.iter().any(|v| *v > 0.0) {
@@ -527,7 +592,7 @@ fn box_transform(bx: &LayoutBox, rect: &Rect) -> Option<tiny_skia::Transform> {
 }
 
 /// Peint une boîte et ses descendants dans l'ordre borné.
-fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32, images: &crate::ImageTable) {
+fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32, images: &crate::PaintImages) {
     // `position: fixed` est ancrée au viewport : son sous-arbre
     // ignore le scroll.
     let off = if bx.position == Position::Fixed {
@@ -541,10 +606,10 @@ fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32, images: &cr
     if let Some(m) = tf {
         items.push(DisplayItem::PushTransform(m));
     }
-    paint_self(bx, items, off);
+    paint_self(bx, items, off, images);
     // Élément remplacé : bitmap par-dessus bordure (contenu —
     // ordre CSS 2.1 App. E : fond → bordure → contenu).
-    if let Some(img) = bx.node.and_then(|n| images.get(&n)).cloned() {
+    if let Some(img) = bx.node.and_then(|n| images.replaced.get(&n)).cloned() {
         items.push(DisplayItem::Image {
             rect: shifted(bx.rect, off),
             img,

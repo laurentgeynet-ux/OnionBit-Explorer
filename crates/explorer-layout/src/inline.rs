@@ -107,6 +107,7 @@ pub(crate) fn layout_inline(
     parent_fs: f32,
     abs_cb: Rect,
     fl: &FloatCtx,
+    cb_h: Option<f32>,
 ) -> f32 {
     let st = bx.style.clone();
     let fs = font_size_px(&st, parent_fs, ctx);
@@ -124,6 +125,7 @@ pub(crate) fn layout_inline(
                 0.0,
                 0.0,
                 w,
+                cb_h,
                 ctx,
                 fs,
                 abs_cb,
@@ -357,7 +359,7 @@ impl LineAcc {
         while self
             .frags
             .last()
-            .is_some_and(|f| !f.atomic && f.text.trim().is_empty())
+            .is_some_and(|f| !f.atomic && text::trim_css_ws(&f.text).is_empty())
         {
             self.frags.pop();
         }
@@ -547,7 +549,7 @@ fn break_into_lines(
             // non-blanche (le collapse fusionne `"  mot"`).
             let line_start = cursor_x <= line_x;
             let text = if line_start && !keep_ws {
-                piece.text.trim_start()
+                piece.text.trim_start_matches(text::is_css_ws)
             } else {
                 piece.text.as_str()
             };
@@ -593,8 +595,8 @@ fn break_into_lines(
                 .as_deref()
                 .and_then(|d| font::shape(d, text, fs, piece.dir == Direction::Rtl));
             let baseline = shaped.as_ref().map_or(fs * 0.8, |s| s.metrics.ascent);
-            let trail_w = if text.ends_with(char::is_whitespace) {
-                pw - measure(text.trim_end())
+            let trail_w = if text.ends_with(text::is_css_ws) {
+                pw - measure(text.trim_end_matches(text::is_css_ws))
             } else {
                 0.0
             };
@@ -627,26 +629,60 @@ fn break_into_lines(
 
 /// `text-align` sur les lignes posées. `justify` étire
 /// l'espace inter-fragments (approximation word-spacing,
-/// documentée) sauf sur la dernière ligne. Le slack est
-/// mesuré dans la **bande** de la ligne (flottants, §9.5).
+/// documentée) sauf sur la dernière ligne. La bande retenue
+/// est l'intersection sur toute l'étendue verticale de la
+/// ligne (§9.5 : une line box est raccourcie par TOUT
+/// flottant qu'elle touche, pas seulement à son haut).
+/// `start`/`end` suivent `direction` (rtl → start = right).
 fn align_lines(st: &ComputedStyle, lines: &mut [LineBox], x: f32, w: f32, fl: &FloatCtx) {
-    let align = st.get_or("text-align", "start");
+    let rtl = st.get("direction").is_some_and(|d| d.trim() == "rtl");
+    let align = match st.get_or("text-align", "start") {
+        "start" => {
+            if rtl {
+                "right"
+            } else {
+                "left"
+            }
+        }
+        "end" => {
+            if rtl {
+                "left"
+            } else {
+                "right"
+            }
+        }
+        a => a,
+    };
     let count = lines.len();
     for (i, line) in lines.iter_mut().enumerate() {
         let used = line.fragments.iter().map(|f| f.rect.width).sum::<f32>();
-        let (_bx, bw) = fl.band(line.rect.y + 0.01, x, w);
-        let slack = (bw - used).max(0.0);
+        let (ebx, ebw) = fl.band_over(line.rect.y, line.rect.height, x, w);
+        let slack = (ebw - used).max(0.0);
+        let line_left = line
+            .fragments
+            .iter()
+            .map(|f| f.rect.x)
+            .fold(f32::INFINITY, f32::min);
+        if !line_left.is_finite() {
+            continue;
+        }
         let last = i + 1 == count;
+        // Le bord gauche de la bande intersectée peut être à
+        // droite de celui où la ligne a été coulée (flottant
+        // commençant au milieu de la ligne) : on y recale
+        // d'abord, puis l'alignement consomme le slack restant.
+        // Jamais de tirage vers la gauche (max 0).
+        let recale = (ebx - line_left).max(0.0);
         #[allow(clippy::cast_precision_loss)]
         let (dx, space) = match align {
-            "right" | "end" => (slack, 0.0),
-            "center" => (slack / 2.0, 0.0),
+            "right" => ((ebx + ebw) - (line_left + used), 0.0),
+            "center" => (recale + slack / 2.0, 0.0),
             "justify" if !last && line.fragments.len() > 1 => {
-                (0.0, slack / (line.fragments.len() - 1) as f32)
+                (recale, slack / (line.fragments.len() - 1) as f32)
             }
-            _ => (0.0, 0.0),
+            _ => (recale, 0.0),
         };
-        if dx <= 0.0 && space <= 0.0 {
+        if dx == 0.0 && space <= 0.0 {
             continue;
         }
         let mut shift = dx;

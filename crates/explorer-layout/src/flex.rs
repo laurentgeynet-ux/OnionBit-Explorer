@@ -172,11 +172,23 @@ pub(crate) fn layout_item(
 ) {
     match c.kind {
         BoxKind::AnonymousBlock => {
-            layout_anon_block(c, ix, iy, iw, ctx, fs, pos_cb, &FloatCtx::default());
+            layout_anon_block(c, ix, iy, iw, ctx, fs, pos_cb, &FloatCtx::default(), None);
         }
         _ => {
-            // Item flex = BFC propre : registre vierge.
-            layout_block(c, ix, iy, iw, ctx, fs, pos_cb, &mut FloatCtx::default());
+            // Item flex = BFC propre : registre vierge. `cb_h`
+            // non propagé : la hauteur de la ligne flex dépend
+            // du contenu — % enfants indéfinis (§10.5).
+            layout_block(
+                c,
+                ix,
+                iy,
+                iw,
+                None,
+                ctx,
+                fs,
+                pos_cb,
+                &mut FloatCtx::default(),
+            );
         }
     }
 }

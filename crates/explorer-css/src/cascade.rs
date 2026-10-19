@@ -430,6 +430,12 @@ impl StyleEngine {
                 }
             }
         }
+        // 2b. Attributs de présentation HTML (§ rendering :
+        // « presentational hints » — équivalents à des
+        // déclarations auteur de spécificité nulle, donc
+        // appliqués seulement si la propriété n'est pas déjà
+        // fixée par une vraie règle ou l'attribut `style`).
+        apply_presentational_hints(dom, node, &mut props);
         // 3. Héritage : propriétés héritées non déclarées.
         if let Some(p) = parent {
             for name in INHERITED_PROPS {
@@ -490,6 +496,60 @@ impl StyleEngine {
         }
         props.retain(|_, v| v != "\u{0}");
         ComputedStyle { props }
+    }
+}
+
+/// Attributs de présentation HTML → propriétés CSS
+/// (dimension seulement — sous-ensemble documenté). Un
+/// attribut `width`/`height` se lit en px CSS ou en `%`
+/// (`<td width="50%">`) ; `hr@size` → `height`. Valeur
+/// non analysable → ignorée (contenu hostile → dégradation).
+/// Jamais au-dessus d'une vraie déclaration : `insert` si
+/// la propriété est absente uniquement.
+fn apply_presentational_hints(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
+    let Ok(tag) = dom.tag_name(node) else {
+        return;
+    };
+    let attr = |name: &str| dom.attribute(node, name).ok().flatten();
+    // `N` → "Npx", `N%` → "N%" ; autres syntaxes → None.
+    let dim = |a: Option<String>| -> Option<String> {
+        let v = a?;
+        let v = v.trim();
+        if v.is_empty() {
+            return None;
+        }
+        if let Some(p) = v.strip_suffix('%') {
+            return p
+                .trim()
+                .parse::<f32>()
+                .ok()
+                .filter(|f| *f >= 0.0)
+                .map(|f| format!("{f}%"));
+        }
+        v.trim_end_matches("px")
+            .parse::<f32>()
+            .ok()
+            .filter(|f| *f >= 0.0)
+            .map(|f| format!("{f}px"))
+    };
+    let mut hint = |prop: &str, val: Option<String>| {
+        if let Some(v) = val {
+            props.entry(prop.to_string()).or_insert(v);
+        }
+    };
+    match tag {
+        "table" | "td" | "th" | "tr" | "col" | "colgroup" | "img" | "iframe" | "object"
+        | "embed" | "canvas" | "video" | "svg" => {
+            hint("width", dim(attr("width")));
+            hint("height", dim(attr("height")));
+        }
+        "hr" => {
+            hint("width", dim(attr("width")));
+            // `size` = hauteur du filet — compteurs/bordures
+            // exclus (approximation documentée).
+            hint("height", dim(attr("size")));
+        }
+        _ => {}
     }
 }
 
@@ -680,7 +740,9 @@ form, fieldset, figure, figcaption, h1, h2, h3, h4, h5, h6,
 hr, address, article, aside, footer, header, nav, section,
 main, legend, video { display: block }
 table { display: table }
-thead, tbody, tfoot { display: table-row-group }
+thead { display: table-header-group }
+tbody { display: table-row-group }
+tfoot { display: table-footer-group }
 tr { display: table-row }
 caption { display: block }
 head, script, style, link, meta, title, template, noscript, area,

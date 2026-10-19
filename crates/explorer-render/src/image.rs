@@ -31,6 +31,29 @@ pub struct DecodedImage {
 /// de l'élément `<img>` source.
 pub type ImageTable = HashMap<NodeId, Arc<DecodedImage>>;
 
+/// Bitmaps de la page pour la peinture : éléments remplacés
+/// (`<img>` — sert aussi le layout via leurs tailles) et fonds
+/// (`background-image` — résolus et décodés par l'appelant,
+/// clés par `NodeId` de l'élément porteur).
+#[derive(Debug, Default)]
+pub struct PaintImages {
+    /// `<img>` décodés (`NodeId` → bitmap).
+    pub replaced: ImageTable,
+    /// `background-image: url(...)` décodés (`NodeId` → bitmap).
+    pub backgrounds: ImageTable,
+}
+
+impl PaintImages {
+    /// Variante sans fonds (compat de [`crate::ImageTable`]).
+    #[must_use]
+    pub fn from_replaced(replaced: ImageTable) -> Self {
+        Self {
+            replaced,
+            backgrounds: ImageTable::new(),
+        }
+    }
+}
+
 /// Décode `bytes` en RGBA — `None` si le format n'est pas
 /// reconnu ou si l'image dépasse `max_px` pixels (borne
 /// mémoire : 4 octets/pixel → `max_px` plafonne l'allocation

@@ -69,12 +69,26 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   devient une étape R-xx qui **préempte R-3/R-4** — un DOM mal
   construit empoisonne layout, rendu et miroir JS ; des reftests
   qui passent sur un arbre faux ne valent rien.
-- [ ] **R-2. WPT floats/block-formatting — finir les 13 cas**
+- [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
   `zero-height`, `block-formatting-001/003/004/008/015`.
   Cliquet `WPT_BASELINE` monté dans le même commit — objectif
-  ≥ 35/40.
+  ≥ 35/40 → **38/38 mesurés (2 exclus documentés)**.
+  Livré : blocs anonymes = flux pur (jamais BFC/float),
+  ancre des flottants au haut de ligne, bandes `band_over`
+  + `direction: rtl`, attributs présentationnels
+  `width`/`height` en cascade, `%height` contre le bloc
+  conteneur, hauteur border-box des tables, `\u{A0}` =
+  blanc non-collapsible (`is_css_ws`), `border-collapse`
+  horizontal MVP + ordre visuel thead/tbody/tfoot, canvas
+  blanche, `background-image` peinte (`PaintImages` +
+  `build_display_list_full`), snap du clip à la grille
+  device, peinture texte réparée (ordre de composition
+  fonte→plume + pen arrêté au pixel), harnais WPT étendu
+  (images `support/` + `url()`), bordure `medium` 3 px par
+  défaut. Skips : `bfc-011` (métrique fonte Ahem seule),
+  `block-in-inline-append-001` (`flags: dom` ⇒ JS requis).
 - [ ] **R-3. Tailles intrinsèques réelles** (ex-56).
   `min-content`/`max-content` mesurés par contenu (plus
   d'approximation), `margin:auto` (block horizontal + axes flex),

@@ -19,15 +19,17 @@
 //!
 //! Le cliquet [`WPT_BASELINE`] monte au fil des progrès moteur.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use explorer_css::{Origin, StyleEngine, StyleEnv};
-use explorer_dom::Dom;
+use explorer_dom::{Dom, NodeId};
 use explorer_html::TreeBuilder;
-use explorer_layout::{build_box_tree, layout_tree, BlockCtx, FontRequest, FontSource};
-use explorer_render::{build_display_list, rasterize, Frame};
+use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, FontRequest, FontSource};
+use explorer_render::{
+    build_display_list_full, decode_image, rasterize, Frame, ImageTable, PaintImages,
+};
 
 /// Viewport reftest standard du WPT.
 const VIEW_W: f32 = 800.0;
@@ -36,7 +38,7 @@ const VIEW_H: f32 = 600.0;
 /// Cliquet : score minimal attendu — mesuré 2026-02 à 17/40
 /// (42 %) sur la première extraction ; à monter à chaque
 /// progrès float/BFC/marges.
-const WPT_BASELINE: usize = 27;
+const WPT_BASELINE: usize = 38;
 
 /// Tolérance AA : pixels dont le delta maximal de canal est
 /// ≤ [`FUZZY_CHANNEL`] comptent « doux » ; au-delà « dur ».
@@ -140,9 +142,77 @@ fn ref_link(dom: &Dom) -> Option<(&'static str, String)> {
     None
 }
 
+/// Borne de décodage d'une image du corpus (pixels décodés).
+const IMG_MAX_PX: u32 = 1_000_000;
+
+/// `<img src>` → `(tailles intrinsèques, pixels décodés)`,
+/// `src` résolu relativement au fichier source (`support/`…).
+#[allow(clippy::cast_precision_loss)] // pixels image ≪ 2^23
+fn collect_images(dom: &Dom, file_dir: &Path) -> (HashMap<NodeId, (f32, f32)>, ImageTable) {
+    let mut sizes = HashMap::new();
+    let mut images = ImageTable::new();
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "img") {
+            if let Some(src) = dom.attribute(n, "src").ok().flatten() {
+                let path = file_dir.join(&src);
+                if let Ok(bytes) = std::fs::read(&path) {
+                    if let Some(img) = decode_image(&bytes, IMG_MAX_PX) {
+                        sizes.insert(n, (img.width as f32, img.height as f32));
+                        images.insert(n, Arc::new(img));
+                    }
+                }
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    (sizes, images)
+}
+
+/// `url(...)` → chemin relatif (guillemets optionnels).
+fn bg_url(raw: &str) -> Option<String> {
+    let inner = raw.trim().strip_prefix("url(")?.strip_suffix(')')?;
+    Some(
+        inner
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string(),
+    )
+}
+
+/// `background-image` des éléments → bitmaps décodés,
+/// résolus relativement au fichier source.
+fn collect_backgrounds(dom: &Dom, styles: &explorer_css::StyleMap, file_dir: &Path) -> ImageTable {
+    let mut out = ImageTable::new();
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.element(n).is_ok() {
+            if let Some(url) = styles
+                .get(n)
+                .and_then(|st| st.get("background-image"))
+                .and_then(bg_url)
+            {
+                if let Ok(bytes) = std::fs::read(file_dir.join(&url)) {
+                    if let Some(img) = decode_image(&bytes, IMG_MAX_PX) {
+                        out.insert(n, Arc::new(img));
+                    }
+                }
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    out
+}
+
 /// Pipeline complet : HTML → cascade (UA + `<style>`) →
-/// layout → display list → raster RGBA.
-fn render(src: &str) -> Option<Frame> {
+/// layout → display list → raster RGBA. `file_dir` = dossier
+/// du fichier source (résolution des `src`/`url()` d'images).
+fn render(src: &str, file_dir: &Path) -> Option<Frame> {
     let dom = TreeBuilder::parse(strip_xml_prolog(src));
     let mut eng = StyleEngine::new();
     eng.add_css(&collect_css(&dom), Origin::Author);
@@ -152,9 +222,14 @@ fn render(src: &str) -> Option<Frame> {
         .into_iter()
         .flatten()
         .find(|&c| dom.element(c).is_ok())?;
-    let mut bx = build_box_tree(&dom, root, &styles)?;
+    let (sizes, replaced) = collect_images(&dom, file_dir);
+    let images = PaintImages {
+        replaced,
+        backgrounds: collect_backgrounds(&dom, &styles, file_dir),
+    };
+    let mut bx = build_box_tree_sized(&dom, root, &styles, &sizes)?;
     layout_tree(&mut bx, VIEW_W, &ctx());
-    let list = build_display_list(&bx, VIEW_W, VIEW_H, 0.0);
+    let list = build_display_list_full(&bx, VIEW_W, VIEW_H, 0.0, &images);
     rasterize(&list, &Ahem, 1.0)
 }
 
@@ -225,7 +300,12 @@ fn wpt_reftests_pixel() {
             failures.push(format!("{name}: ref {href} absente"));
             continue;
         };
-        let (Some(a), Some(b)) = (render(&src), render(&ref_src)) else {
+        let test_dir = test_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        let ref_dir = ref_path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let (Some(a), Some(b)) = (render(&src, &test_dir), render(&ref_src, &ref_dir)) else {
             failures.push(format!("{name}: rendu impossible"));
             continue;
         };

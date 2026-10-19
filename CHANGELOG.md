@@ -98,6 +98,46 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   cohérente à chaque push, contenu progressif, dernière frame
   pixel-identique au parse complet). Débloque la session
   incrémentale côté NAVIGATEUR (étape 53).
+- **R-2 — WPT floats/block-formatting : 38/38 (2 exclus
+  documentés)** (`explorer-css`, `explorer-layout`,
+  `explorer-render`) : reftests CSS2 normal-flow de 27/40 à
+  **38 cas jouables tous verts** (cliquet `WPT_BASELINE`
+  27 → 38). Layout : les blocs anonymes sont du flux pur
+  (n'héritent ni BFC ni float — corrige les placements
+  bandés à zéro) ; les flottants s'ancrent au **haut de la
+  ligne courante** ; les bandes en-ligne mesurent
+  l'étendue complète (`band_over`) et honorent
+  `direction: rtl`. Cascade : attributs de présentation
+  HTML `width`/`height` injectés en préséance auteur
+  minimale (CSS l'emporte) ; feuille UA corrigée
+  (`thead` → `table-header-group`, `tfoot` →
+  `table-footer-group` — ordre visuel de la grille).
+  Tailles : `height:%` résout contre la hauteur du bloc
+  conteneur (§10.5) propagée dans toutes les voies de
+  layout ; la hauteur de table réserve ses propres
+  bordures/padding ; `\u{A0}` n'est plus un blanc
+  collapsible (`text::is_css_ws` — `&nbsp;` tient sa
+  ligne). Tables : `border-collapse: collapse` MVP
+  horizontal — arête partagée = max des candidats, rangs
+  décalés, géométrie réelle des groupes de rangs peignant
+  les lignes. Rendu : canvas blanche (fond de document) ;
+  `background-image: url()` peinte en tuiles
+  (`PaintImages` + `build_display_list_full`, additif) ;
+  clip `overflow` arrêté à la grille device (bords AA
+  cohérents avec les fill/blit) ; bordure `solid` sans
+  largeur peint `medium` = 3 px ; **peinture du texte
+  réparée** — ordre de composition fonte→plume
+  (`post_concat` applique `self` puis `other`) qui
+  collapsait tout glyphe à ~1 px, puis point de plume
+  arrêté sur la grille device. Harnais WPT : résolution
+  relative des `src`/`url()`, décodage des PNG
+  `support/` (`ImageTable`, `build_box_tree_sized`).
+  Skips `wpt_skip.txt` : `bfc-011` (reftest dépendant
+  des métriques d'une fonte proportionnelle — le harnais
+  n'a qu'Ahem : « Filler Text » = 176 px > 100 px wrappe
+  dans la ref seule) et `block-in-inline-append-001`
+  (`flags: dom` — la ref exige l'exécution JS, harnais
+  statique).
 - **Étape 50 — Scripts externes + scheduler de sous-ressources
   parallèle** (`explorer-core`, `explorer-net`, `explorer-js`,
   `dillo-js`) : `<script src>` fetché via `HttpTransport` —

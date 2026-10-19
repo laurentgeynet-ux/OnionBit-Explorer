@@ -75,8 +75,8 @@ fn fond_remplit_le_framebuffer() {
         "#d{background-color:#ff0000;width:200px;height:60px}",
     );
     assert_eq!(px(&f, 10, 10), [255, 0, 0, 255]);
-    // Au-delà de la boîte : transparent (fond du document).
-    assert_eq!(px(&f, 10, 190)[3], 0);
+    // Au-delà de la boîte : la canvas blanche du document.
+    assert_eq!(px(&f, 10, 190), [255, 255, 255, 255]);
 }
 
 #[test]
@@ -89,8 +89,8 @@ fn bordure_peint_les_cotes() {
     assert_eq!(px(&f, 20, 1)[1], 255);
     // Bord gauche.
     assert_eq!(px(&f, 1, 20)[1], 255);
-    // Centre : pas de bordure, pas de fond → transparent.
-    assert_eq!(px(&f, 20, 20)[3], 0);
+    // Centre : pas de bordure, pas de fond → canvas blanche.
+    assert_eq!(px(&f, 20, 20), [255, 255, 255, 255]);
 }
 
 #[test]
@@ -138,17 +138,20 @@ fn clip_borne_le_dessin_enfant() {
          #in{background-color:#ff0000;width:100px;height:60px}",
     );
     assert_eq!(px(&f, 10, 10), [255, 0, 0, 255]);
-    assert_eq!(px(&f, 10, 30)[3], 0, "hors clip → non peint");
+    assert_eq!(px(&f, 10, 30), [255, 255, 255, 255], "hors clip → canvas");
 }
 
 #[test]
 fn texte_laisse_des_pixels() {
     let f = frame("<p>AAAA</p>", "p{margin:0;font-size:20px;color:#000000}");
-    // Des pixels noirs quelque part dans la zone de texte.
+    // De l'encre sombre quelque part dans la zone de texte
+    // (la canvas est blanche — on cherche le dessin du
+    // glyphe, pas juste de l'opacité).
     let mut found = false;
     'outer: for y in 0..30u32 {
         for x in 0..80u32 {
-            if px(&f, x, y)[3] > 0 {
+            let p = px(&f, x, y);
+            if p[0] < 128 && p[3] > 128 {
                 found = true;
                 break 'outer;
             }
@@ -167,7 +170,7 @@ fn dpi_double_la_taille_physique() {
     assert_eq!(f.width, 400);
     // Le fond bleu couvre 100px physiques (50 CSS × 2).
     assert_eq!(px(&f, 20, 90)[2], 255);
-    assert_eq!(px(&f, 20, 110)[3], 0);
+    assert_eq!(px(&f, 20, 110), [255, 255, 255, 255]);
 }
 
 #[test]
@@ -190,7 +193,7 @@ fn transform_translate_deplace_les_pixels() {
          transform:translate(60px, 30px)}",
     );
     assert_eq!(px(&f, 70, 40)[0], 255, "rouge translaté");
-    assert_eq!(px(&f, 10, 10)[0], 0, "origine vide");
+    assert_eq!(px(&f, 10, 10), [255, 255, 255, 255], "origine = canvas");
 }
 
 #[test]
@@ -204,7 +207,7 @@ fn transform_scale_grossit_la_zone_peinte() {
          transform:scale(2)}",
     );
     assert_eq!(px(&f, 25, 25)[0], 255, "scalé couvre");
-    assert_eq!(px(&f, 35, 25)[0], 0, "hors portée");
+    assert_eq!(px(&f, 35, 25), [255, 255, 255, 255], "hors portée = canvas");
 }
 
 #[test]

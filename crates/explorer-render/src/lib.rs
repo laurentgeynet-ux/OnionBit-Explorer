@@ -20,9 +20,10 @@ pub mod raster;
 pub mod woff;
 
 pub use display::{
-    build_display_list, build_display_list_imaged, BorderStyle, DisplayItem, DisplayList,
+    build_display_list, build_display_list_full, build_display_list_imaged, BorderStyle,
+    DisplayItem, DisplayList,
 };
 pub use fonts::{DirFontSource, WebFontSource};
-pub use image::{decode_image, DecodedImage, ImageTable};
+pub use image::{decode_image, DecodedImage, ImageTable, PaintImages};
 pub use raster::{rasterize, Frame};
 pub use woff::decode_font;

@@ -246,9 +246,25 @@ fn draw_glyph(
     {
         return;
     }
-    let tf = Transform::from_translate(pen + g.offset_x, baseline - g.offset_y)
-        .post_concat(Transform::from_scale(gscale, -gscale))
-        .post_concat(cur);
+    let tf = if cur.kx == 0.0 && cur.ky == 0.0 {
+        // Pixel snapping : le point de plume est arrêté sur la
+        // grille device (comportement des moteurs — lignes à
+        // offsets fractionnaires ×,2 sans liseré AA incohérent
+        // avec les fill/blit snapés). L'échelle fonte et celle
+        // de `cur` (dpi) se composent en une seule.
+        Transform::from_scale(gscale * cur.sx, -gscale * cur.sy)
+            .post_concat(Transform::from_translate(px.round(), py.round()))
+    } else {
+        // Ordre de composition : les unités fonte sont mises à
+        // l'échelle AVANT la translation plume/baseline —
+        // `post_concat` applique `self` puis `other`.
+        Transform::from_scale(gscale, -gscale)
+            .post_concat(Transform::from_translate(
+                pen + g.offset_x,
+                baseline - g.offset_y,
+            ))
+            .post_concat(cur)
+    };
     let mut pb = PathBuilder::new();
     face.outline_glyph(
         ttf_parser::GlyphId(g.id),
@@ -273,6 +289,11 @@ pub fn rasterize(list: &DisplayList, fonts: &dyn FontSource, scale: f32) -> Opti
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let (w, h) = (w_px as u32, h_px as u32);
     let mut pixmap = Pixmap::new(w, h)?;
+    // Canvas : opaque blanche — le fond de canvas par défaut
+    // de l'UA (CSS2 §14.2 : le document n'y dépose son fond
+    // que si html/body en déclarent un). Sans elle, les zones
+    // non couvertes resteraient transparentes.
+    pixmap.fill(tiny_skia::Color::WHITE);
     let dpi = Transform::from_scale(scale, scale);
 
     let mut clips: Vec<Mask> = Vec::new();
@@ -288,6 +309,23 @@ pub fn rasterize(list: &DisplayList, fonts: &dyn FontSource, scale: f32) -> Opti
                     if let Some(phys) = Rect::from_xywh(r.x, r.y, r.width, r.height)
                         .and_then(|rr| rr.transform(cur))
                     {
+                        // Sous transform axis-aligned, le clip
+                        // rectangulaire est arrêté sur la grille de
+                        // pixels device — cohérent avec les `fill`
+                        // et blits qui arrêtent leurs bords : un
+                        // `overflow` fractionnaire ne produit pas
+                        // de liseré AA que ses voisins n'ont pas.
+                        let phys = if cur.kx == 0.0 && cur.ky == 0.0 {
+                            Rect::from_ltrb(
+                                phys.left().round(),
+                                phys.top().round(),
+                                phys.right().round(),
+                                phys.bottom().round(),
+                            )
+                            .unwrap_or(phys)
+                        } else {
+                            phys
+                        };
                         // Clippe au domaine fixed-point : un clip
                         // couvrant tout reste plein, un clip
                         // lointain reste vide — même sémantique.
@@ -379,6 +417,9 @@ fn paint_item(
         }
         DisplayItem::Image { rect, img } => {
             paint_image(pixmap, rect, img, dpi, clip);
+        }
+        DisplayItem::BackgroundImage { rect, img, repeat } => {
+            paint_tiled(pixmap, rect, img, *repeat, dpi, clip);
         }
         DisplayItem::PushClip(_)
         | DisplayItem::PopClip
@@ -501,6 +542,82 @@ fn paint_image_axis(
                 u32::from(img.rgba[s + 2]),
             );
             // Source-over prémultiplié : src + dst·(1−α).
+            let inv = 255 - sa;
+            let d = dst[i];
+            let blend = |sv: u32, dv: u8| ((sv * sa + u32::from(dv) * inv + 127) / 255) as u8;
+            dst[i] = tiny_skia::PremultipliedColorU8::from_rgba(
+                blend(sr, d.red()),
+                blend(sg, d.green()),
+                blend(sb, d.blue()),
+                (sa + u32::from(d.alpha()) * inv / 255) as u8,
+            )
+            .unwrap_or(tiny_skia::PremultipliedColorU8::TRANSPARENT);
+        }
+    }
+}
+
+/// `background-image` : tuilée à taille naturelle depuis le
+/// coin haut-gauche de `rect` (origin ≈ padding box), selon
+/// `repeat` `(x, y)`. Axis-aligned → boucle directe ; le cas
+/// général tombe sur la boucle avec `cur` appliqué par point
+/// — approximation bornée documentée.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn paint_tiled(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    img: &crate::DecodedImage,
+    repeat: (bool, bool),
+    cur: Transform,
+    clip: Option<&Mask>,
+) {
+    let (pw, ph) = (
+        i32::try_from(pixmap.width()).unwrap_or(i32::MAX),
+        i32::try_from(pixmap.height()).unwrap_or(i32::MAX),
+    );
+    let Some(phys) =
+        Rect::from_xywh(rect.x, rect.y, rect.width, rect.height).and_then(|r| r.transform(cur))
+    else {
+        return;
+    };
+    // L'origine suit la transform — l'échelle n'est pas
+    // supportée sur les tuiles (CSS `background-size` hors
+    // portée) : on garde la taille naturelle.
+    let (ox, oy) = (phys.x().round() as i32, phys.y().round() as i32);
+    let (dx0, dy0) = (ox.max(0), oy.max(0));
+    let (dx1, dy1) = (
+        ((phys.x() + phys.width()).round() as i32).min(pw),
+        ((phys.y() + phys.height()).round() as i32).min(ph),
+    );
+    if dx0 >= dx1 || dy0 >= dy1 {
+        return;
+    }
+    let iw = img.width as usize;
+    let ih = img.height as usize;
+    let clip_data = clip.map(tiny_skia::Mask::data);
+    let dst = pixmap.pixels_mut();
+    for dy in dy0..dy1 {
+        let rel_y = (dy - oy) as usize;
+        if !repeat.1 && rel_y >= ih {
+            break;
+        }
+        let sy = if repeat.1 { rel_y % ih } else { rel_y };
+        for dx in dx0..dx1 {
+            let rel_x = (dx - ox) as usize;
+            if !repeat.0 && rel_x >= iw {
+                break;
+            }
+            let i = dy as usize * pw as usize + dx as usize;
+            if clip_data.is_some_and(|m| m[i] == 0) {
+                continue;
+            }
+            let sx = if repeat.0 { rel_x % iw } else { rel_x };
+            let s = (sy.min(ih - 1) * iw + sx.min(iw - 1)) * 4;
+            let (sa, sr, sg, sb) = (
+                u32::from(img.rgba[s + 3]),
+                u32::from(img.rgba[s]),
+                u32::from(img.rgba[s + 1]),
+                u32::from(img.rgba[s + 2]),
+            );
             let inv = 255 - sa;
             let d = dst[i];
             let blend = |sv: u32, dv: u8| ((sv * sa + u32::from(dv) * inv + 127) / 255) as u8;

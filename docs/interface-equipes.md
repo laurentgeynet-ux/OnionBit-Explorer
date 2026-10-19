@@ -57,3 +57,4 @@ Règles :
 |---|---|---|---|
 | 2026-10-19 | — | Création du journal (réorg deux équipes — découpage PIPELINE/NAVIGATEUR) | — |
 | 2026-10-19 | entrée incrémentale `explorer-html` + `explorer-dom` | **Additif** : `TreeBuilder::push(&str)`/`finish()` (tokenizer interne), `Dom::document_element()`, `Tokenizer::is_finished()` — aucune casse de signature ; `parse` délègue au nouveau chemin | R-1 |
+| 2026-10-19 | `explorer-render` display list + `explorer-layout` texte | **Additif** : `PaintImages` (replaced + backgrounds), `build_display_list_full`, `DisplayItem::BackgroundImage`, `text::is_css_ws`/`trim_css_ws` (`\u{A0}` non-collapsible) — aucune casse ; `rasterize` peint désormais la **canvas blanche** (fond de document) — sortie modifiée, tests du crate ajustés dans le commit | R-2 |

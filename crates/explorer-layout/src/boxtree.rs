@@ -427,7 +427,10 @@ fn wrap_anonymous(children: Vec<LayoutBox>, parent_style: &ComputedStyle) -> Vec
 /// bord, saute la suite si entièrement blanche.
 fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &ComputedStyle) {
     let is_ws = |b: &LayoutBox| {
-        b.kind == BoxKind::Text && b.text.as_deref().is_some_and(|t| t.trim().is_empty())
+        b.kind == BoxKind::Text
+            && b.text
+                .as_deref()
+                .is_some_and(|t| crate::text::trim_css_ws(t).is_empty())
     };
     while run.first().is_some_and(is_ws) {
         run.remove(0);

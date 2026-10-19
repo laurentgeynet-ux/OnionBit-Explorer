@@ -49,6 +49,23 @@ pub struct TextRun {
     pub breaks: Vec<Break>,
 }
 
+/// Blanc CSS au sens de §16.6.1 (` ` `\t` `\n` `\r` `\x0B`
+/// `\x0C`). Les autres espaces Unicode — `\u{A0}` en tête —
+/// NE sont PAS collapsibles : ils portent une avance et une
+/// encre propres (`&nbsp;` tient une ligne à lui seul).
+/// `char::is_whitespace`/`str::trim` avalent `\u{A0}` —
+/// interdits pour toute décision de visibilité.
+#[must_use]
+pub fn is_css_ws(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{B}' | '\u{C}')
+}
+
+/// `trim` restreint aux blancs CSS — préserve `\u{A0}` & co.
+#[must_use]
+pub fn trim_css_ws(s: &str) -> &str {
+    s.trim_matches(is_css_ws)
+}
+
 /// Itemise `text` en runs de direction homogène.
 ///
 /// - Segmentation par niveau bidi (UAX #9 via `unicode-bidi`,
@@ -161,7 +178,7 @@ pub fn break_lines(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) ->
         // Blancs de fin : la coupure rend cet espace invisible
         // — il ne doit pas décider du reflow.
         text.get(a..b)
-            .is_some_and(|s| measure(s.trim_end()) <= max_width)
+            .is_some_and(|s| measure(s.trim_end_matches(is_css_ws)) <= max_width)
     };
     let mut starts = vec![0usize];
     let mut line_start = 0usize;
