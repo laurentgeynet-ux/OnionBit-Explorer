@@ -53,7 +53,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
 - [x] **Étape 5. TLS.** `rustls` + `webpki-roots` ; erreurs
   certificat remontées typées (l'UI affichera une page d'erreur,
   pas un crash).
-- [ ] **Étape 6. Décodage.** `gzip`/`deflate`/`br` (crates pur
+- [x] **Étape 6. Décodage.** `gzip`/`deflate`/`br` (crates pur
   Rust), content-length vs chunked résolus, charset déclaré exposé
   + **transcodage** (UTF-8, windows-1252 — `encoding_rs` ou tables
   maison, à arbitrer), `X-Content-Type-Options` honoré.

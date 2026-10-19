@@ -108,6 +108,48 @@ impl Response {
             .filter(move |(n, _)| n.eq_ignore_ascii_case(name))
             .map(|(_, v)| v.as_str())
     }
+
+    /// `Content-Type` brut (paramètres compris).
+    #[must_use]
+    pub fn content_type(&self) -> Option<&str> {
+        self.header("content-type")
+    }
+
+    /// Charset déclaré dans `Content-Type` (`; charset=x`), en
+    /// minuscules — `None` si absent (le sniffing WHATWG est
+    /// l'affaire de `explorer-html`, pas du transport).
+    #[must_use]
+    pub fn charset(&self) -> Option<String> {
+        let ct = self.content_type()?;
+        ct.split(';')
+            .skip(1)
+            .find_map(|p| {
+                let (k, v) = p.trim().split_once('=')?;
+                k.trim()
+                    .eq_ignore_ascii_case("charset")
+                    .then(|| v.trim().trim_matches('"').to_ascii_lowercase())
+            })
+    }
+
+    /// `X-Content-Type-Options: nosniff` — le client doit honorer
+    /// le `Content-Type` déclaré (étape 6).
+    #[must_use]
+    pub fn nosniff(&self) -> bool {
+        self.header("x-content-type-options")
+            .is_some_and(|v| v.trim().eq_ignore_ascii_case("nosniff"))
+    }
+
+    /// Corps transcodé en texte selon `charset` (labels WHATWG via
+    /// `encoding_rs`, remplacement U+FFFD sur erreur) ; défaut
+    /// `windows-1252` (défaut de la spec HTML).
+    #[must_use]
+    pub fn text(&self) -> String {
+        let label = self.charset().unwrap_or_else(|| "windows-1252".to_string());
+        let enc =
+            encoding_rs::Encoding::for_label(label.as_bytes()).unwrap_or(encoding_rs::WINDOWS_1252);
+        let (s, _, _) = enc.decode(&self.body);
+        s.into_owned()
+    }
 }
 
 /// Port réseau : exécute une requête et rend une réponse déframée.

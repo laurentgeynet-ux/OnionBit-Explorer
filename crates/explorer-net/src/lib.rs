@@ -12,6 +12,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod decode;
 pub mod error;
 pub mod h1;
 pub mod http;

@@ -19,6 +19,9 @@ async-trait.workspace = true
 rustls.workspace = true
 tokio-rustls.workspace = true
 webpki-roots.workspace = true
+flate2.workspace = true
+brotli.workspace = true
+encoding_rs.workspace = true
 
 [dev-dependencies]
 # Certificats de test TLS auto-signés (étape 5) — pur Rust,

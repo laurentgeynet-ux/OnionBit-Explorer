@@ -9,6 +9,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 6 — `explorer-net` : décodage des corps** (`decode.rs`)
+  : `DecodingTransport` décorateur — `Accept-Encoding: gzip,
+  deflate, br` injecté, `Content-Encoding` multi-codages décodés
+  en ordre inverse, zlib **et** raw deflate (le web réel mélange),
+  `br` via `brotli`, budget `max_decoded_bytes` anti-bombe zip →
+  `NetError::DecodedTooLarge`, flux corrompus/codages inconnus →
+  `NetError::ContentDecode`, `Content-Length` ré-écrit à la taille
+  décodée. `Response` gagne `content_type()`/`charset()`/
+  `nosniff()` (`X-Content-Type-Options` exposé) et `text()` —
+  transcodage WHATWG par `encoding_rs` (défaut `windows-1252`).
+  Deps : `flate2`/`brotli`/`encoding_rs` (pur Rust). 13 tests.
 - **Étape 5 — `explorer-net` : TLS** (`tls.rs`) : `TlsConnector`
   implémente la couture `Connector` — TCP clair pour `http:`,
   handshake `rustls` pour `https:` (SNI/ALPN par `tokio-rustls`),

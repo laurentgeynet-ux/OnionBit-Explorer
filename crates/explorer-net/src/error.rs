@@ -73,6 +73,12 @@ pub enum NetError {
     /// Chunked invalide (taille hex illisible, CR/LF manquant…).
     #[error("chunked invalide : {0}")]
     InvalidChunked(&'static str),
+    /// Corps au-delà du budget après décompression.
+    #[error("corps décodé > {0} octets")]
+    DecodedTooLarge(usize),
+    /// `Content-Encoding` non supporté ou flux corrompu.
+    #[error("décodage du corps impossible ({0})")]
+    ContentDecode(String),
     /// Erreur I/O générique pendant le transfert.
     #[error("I/O : {0}")]
     Io(#[from] io::Error),
