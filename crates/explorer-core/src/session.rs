@@ -141,6 +141,39 @@ pub struct TabInfo {
     pub can_forward: bool,
 }
 
+/// Signet utilisateur.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Bookmark {
+    /// URL enregistrée.
+    pub url: String,
+    /// Titre au moment de l'enregistrement.
+    pub title: Option<String>,
+}
+
+/// Entrée du journal de visites (historique global).
+#[derive(Debug, Clone)]
+pub struct Visit {
+    /// URL visitée.
+    pub url: String,
+    /// Titre de la page.
+    pub title: Option<String>,
+}
+
+/// Port de persistance du profil — implémenté en couche
+/// infra (`JsonFileStore` du daemon, fichier dans le
+/// répertoire de profil). Injecté, jamais d'I/O ici.
+pub trait ProfileStore: Send + Sync {
+    /// Enregistre une navigation aboutie (append borné).
+    fn record_visit(&self, url: &str, title: Option<&str>);
+    /// Charge les signets au démarrage.
+    fn load_bookmarks(&self) -> Vec<Bookmark>;
+    /// Persiste la liste complète des signets.
+    fn save_bookmarks(&self, b: &[Bookmark]);
+    /// Journal des visites (le plus récent en tête ou en
+    /// queue — choix de l'impl).
+    fn history(&self) -> Vec<Visit>;
+}
+
 /// Erreur de session — typée, jamais de panic.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
@@ -232,6 +265,11 @@ pub struct Session {
     viewport: (f32, f32),
     /// Facteur DPI.
     scale: f32,
+    /// Persistance du profil (historique + signets) — `None`
+    /// en mémoire pure (tests, CLI).
+    store: Option<Arc<dyn ProfileStore>>,
+    /// Signets en mémoire (miroir du store).
+    bookmarks: Vec<Bookmark>,
 }
 
 impl Session {
@@ -263,7 +301,16 @@ impl Session {
             next_tab: 1,
             viewport: cfg.viewport,
             scale: cfg.scale,
+            store: None,
+            bookmarks: Vec::new(),
         }
+    }
+
+    /// Branche un magasin de profil : charge les signets et
+    /// enregistre chaque navigation suivante.
+    pub fn set_store(&mut self, store: Arc<dyn ProfileStore>) {
+        self.bookmarks = store.load_bookmarks();
+        self.store = Some(store);
     }
 
     /// Abonnement au bus d'événements (SSE côté API).
@@ -361,6 +408,45 @@ impl Session {
     #[must_use]
     pub fn frame_png(&self, tab: TabId) -> Option<Vec<u8>> {
         self.tabs.get(&tab).and_then(|t| t.png.clone())
+    }
+
+    /// Signets (miroir du store).
+    #[must_use]
+    pub fn bookmarks(&self) -> &[Bookmark] {
+        &self.bookmarks
+    }
+
+    /// Ajoute un signet — dédupliqué par URL. Persiste via
+    /// le store si branché.
+    pub fn add_bookmark(&mut self, url: String, title: Option<String>) -> bool {
+        if url.is_empty() || self.bookmarks.iter().any(|b| b.url == url) {
+            return false;
+        }
+        self.bookmarks.push(Bookmark { url, title });
+        if let Some(s) = &self.store {
+            s.save_bookmarks(&self.bookmarks);
+        }
+        true
+    }
+
+    /// Retire un signet par URL — `true` s'il existait.
+    pub fn remove_bookmark(&mut self, url: &str) -> bool {
+        let n = self.bookmarks.len();
+        self.bookmarks.retain(|b| b.url != url);
+        if self.bookmarks.len() == n {
+            false
+        } else {
+            if let Some(s) = &self.store {
+                s.save_bookmarks(&self.bookmarks);
+            }
+            true
+        }
+    }
+
+    /// Journal des visites du store — vide en mémoire pure.
+    #[must_use]
+    pub fn history(&self) -> Vec<Visit> {
+        self.store.as_ref().map_or_else(Vec::new, |s| s.history())
     }
 
     /// Navigue : fetch → decode → parse → style → layout →
@@ -476,6 +562,9 @@ impl Session {
         let (html, _enc) = decode_sniffed(&resp.body);
         let dom = TreeBuilder::parse(&html);
         let title = extract_title(&dom);
+        if let Some(s) = &self.store {
+            s.record_visit(&url.to_string(), title.as_deref());
+        }
         {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
             entry.url = Some(url);

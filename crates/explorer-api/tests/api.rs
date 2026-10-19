@@ -402,3 +402,82 @@ async fn api_key_gates_routes() {
         .unwrap();
     assert_eq!(r.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn bookmarks_and_history_endpoints() {
+    let app = test_app();
+    // Signet : ajout → liste → conflit → retrait → 404.
+    let r = app
+        .clone()
+        .oneshot(json_post(
+            "/api/bookmarks",
+            r#"{"url":"http://h.test/","title":"T"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+
+    let r = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/bookmarks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["bookmarks"][0]["url"], "http://h.test/");
+    assert_eq!(v["bookmarks"][0]["title"], "T");
+
+    let r = app
+        .clone()
+        .oneshot(json_post("/api/bookmarks", r#"{"url":"http://h.test/"}"#))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CONFLICT);
+
+    let r = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .method("DELETE")
+                .uri("/api/bookmarks")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"url":"http://h.test/"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NO_CONTENT);
+
+    let r = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .method("DELETE")
+                .uri("/api/bookmarks")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"url":"http://h.test/"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+
+    // Historique : vide sans store de profil.
+    let r = app
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/history")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["history"], serde_json::json!([]));
+}

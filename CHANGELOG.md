@@ -9,6 +9,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 28 — profil persistant (historique + signets)** :
+  port `ProfileStore` injecté dans `Session` (`record_visit`,
+  `load_bookmarks`, `save_bookmarks`, `history` — le core
+  reste sans I/O) ; `Bookmark`/`Visit` en types publics ;
+  signets en mémoire dédupliqués par URL persistés à chaque
+  mutation, chaque navigation aboutie journalisée.
+  `JsonFileStore` côté daemon : `history.json` (journal
+  borné à 5000 entrées) + `bookmarks.json` dans le répertoire
+  de profil (`EXPLORER_PROFILE`, sinon `%APPDATA%`/`XDG`/macOS
+  par défaut), écriture atomique tmp+rename, tolérant aux
+  fichiers corrompus. API : `GET/POST/DELETE /api/bookmarks`
+  (409 dédup, 404 absent), `GET /api/history`. 2 tests
+  (`MemStore` in-process, routes).
 - **Étape 27 — daemon durci** : clé d'API optionnelle
   (`EXPLORER_API_KEY` → middleware `auth` sur `router_with_key` —
   `x-api-key` prioritaire, `?key=` en repli pour `EventSource`,

@@ -197,7 +197,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
   round-trips (ADR-0003).
 - [x] **Étape 27. Daemon.** `explorer-daemon` : bind loopback,
   clé d'API optionnelle, arrêt propre, logs `tracing`.
-- [ ] **Étape 28. Historique + bookmarks.** Persistance fichier
+- [x] **Étape 28. Historique + bookmarks.** Persistance fichier
   (répertoire de profil déplaçable — couture suite).
 
 ## Phase 7 — Interface Flutter (`app/`)

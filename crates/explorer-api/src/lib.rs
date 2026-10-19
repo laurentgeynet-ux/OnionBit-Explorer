@@ -68,6 +68,11 @@ pub fn router_with_key(session: Arc<tokio::sync::Mutex<Session>>, key: Option<St
         .route("/api/tabs/{id}/forward", post(forward))
         .route("/api/tabs/{id}/viewport", post(viewport))
         .route("/api/tabs/{id}/input", post(input))
+        .route(
+            "/api/bookmarks",
+            get(list_bookmarks).post(add_bookmark).delete(del_bookmark),
+        )
+        .route("/api/history", get(history))
         .route("/api/events", get(events))
         .with_state(ApiState { session });
     match key {
@@ -319,6 +324,72 @@ async fn input(
         }
     })
     .into_response()
+}
+
+/// `GET /api/bookmarks` → `[{url, title}]`.
+async fn list_bookmarks(State(st): State<ApiState>) -> impl IntoResponse {
+    let session = st.session.lock().await;
+    let v: Vec<_> = session
+        .bookmarks()
+        .iter()
+        .map(|b| serde_json::json!({ "url": b.url, "title": b.title }))
+        .collect();
+    Json(serde_json::json!({ "bookmarks": v }))
+}
+
+/// `POST /api/bookmarks` `{ "url": "…", "title": "…"? }` —
+/// dédupliqué par URL (409 si déjà présent).
+async fn add_bookmark(State(st): State<ApiState>, Json(body): Json<serde_json::Value>) -> Response {
+    let Some(url) = body.get("url").and_then(|u| u.as_str()).map(str::to_string) else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            &CoreError::Url("champ « url » manquant".to_string()),
+        );
+    };
+    let title = body
+        .get("title")
+        .and_then(|t| t.as_str())
+        .map(str::to_string);
+    let mut session = st.session.lock().await;
+    if session.add_bookmark(url, title) {
+        StatusCode::CREATED.into_response()
+    } else {
+        err(
+            StatusCode::CONFLICT,
+            &CoreError::Url("signet déjà présent".to_string()),
+        )
+    }
+}
+
+/// `DELETE /api/bookmarks` `{ "url": "…" }` — 404 si absent.
+async fn del_bookmark(State(st): State<ApiState>, Json(body): Json<serde_json::Value>) -> Response {
+    let Some(url) = body.get("url").and_then(|u| u.as_str()).map(str::to_string) else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            &CoreError::Url("champ « url » manquant".to_string()),
+        );
+    };
+    let mut session = st.session.lock().await;
+    if session.remove_bookmark(&url) {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        err(
+            StatusCode::NOT_FOUND,
+            &CoreError::Url("signet inconnu".to_string()),
+        )
+    }
+}
+
+/// `GET /api/history` → `[{url, title}]` du store (vide si
+/// pas de profil persistant).
+async fn history(State(st): State<ApiState>) -> impl IntoResponse {
+    let session = st.session.lock().await;
+    let v: Vec<_> = session
+        .history()
+        .iter()
+        .map(|e| serde_json::json!({ "url": e.url, "title": e.title }))
+        .collect();
+    Json(serde_json::json!({ "history": v }))
 }
 
 /// `GET /api/events` — flux SSE des événements de session.

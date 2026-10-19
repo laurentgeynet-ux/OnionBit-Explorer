@@ -22,6 +22,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+mod store;
+
 use explorer_core::Session;
 use explorer_net::decode::DecodingTransport;
 use explorer_net::h1::{H1Client, HttpConfig};
@@ -108,10 +110,13 @@ async fn main() {
     let fonts = DirFontSource::new(&cfg.fonts_dir);
     tracing::info!(dir = %cfg.fonts_dir.display(), "fontes système scannées");
 
-    let session = Arc::new(tokio::sync::Mutex::new(Session::new(
-        http_stack(&cfg),
-        Arc::new(fonts),
-    )));
+    let store = Arc::new(store::JsonFileStore::open(
+        &store::JsonFileStore::default_dir(),
+    ));
+    tracing::info!(dir = %store::JsonFileStore::default_dir().display(), "profil chargé");
+    let mut session = Session::new(http_stack(&cfg), Arc::new(fonts));
+    session.set_store(store);
+    let session = Arc::new(tokio::sync::Mutex::new(session));
     let app = explorer_api::router_with_key(session, cfg.api_key.clone());
     if cfg.api_key.is_some() {
         tracing::info!("clé d'API requise (x-api-key / ?key=)");

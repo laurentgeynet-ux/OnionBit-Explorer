@@ -11,7 +11,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use explorer_core::{CoreError, CoreEvent, InputEvent, InputOutcome, Session, SessionConfig};
+use explorer_core::{
+    Bookmark, CoreError, CoreEvent, InputEvent, InputOutcome, Session, SessionConfig,
+};
 use explorer_layout::font::{FontRequest, FontSource};
 use explorer_net::error::NetResult;
 use explorer_net::http::{HttpTransport, Request, Response};
@@ -429,4 +431,69 @@ async fn key_input_is_ignored() {
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Ignored);
+}
+
+/// Store en mémoire pour tester le câblage du port
+/// `ProfileStore` (l'impl fichier est au daemon).
+struct MemStore {
+    visits: Mutex<Vec<(String, Option<String>)>>,
+    bookmarks: Mutex<Vec<Bookmark>>,
+}
+
+impl explorer_core::ProfileStore for MemStore {
+    fn record_visit(&self, url: &str, title: Option<&str>) {
+        if let Ok(mut v) = self.visits.lock() {
+            v.push((url.to_string(), title.map(str::to_string)));
+        }
+    }
+    fn load_bookmarks(&self) -> Vec<Bookmark> {
+        self.bookmarks
+            .lock()
+            .map_or_else(|_| Vec::new(), |b| b.clone())
+    }
+    fn save_bookmarks(&self, b: &[explorer_core::Bookmark]) {
+        if let Ok(mut m) = self.bookmarks.lock() {
+            *m = b.to_vec();
+        }
+    }
+    fn history(&self) -> Vec<explorer_core::Visit> {
+        self.visits.lock().map_or_else(
+            |_| Vec::new(),
+            |v| {
+                v.iter()
+                    .map(|(url, title)| explorer_core::Visit {
+                        url: url.clone(),
+                        title: title.clone(),
+                    })
+                    .collect()
+            },
+        )
+    }
+}
+
+#[tokio::test]
+async fn visits_are_recorded_and_bookmarks_persisted() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_T);
+    let store = Arc::new(MemStore {
+        visits: Mutex::new(Vec::new()),
+        bookmarks: Mutex::new(Vec::new()),
+    });
+    s.set_store(store.clone());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    // La visite est enregistrée (url + titre).
+    let h = s.history();
+    assert_eq!(h.len(), 1);
+    assert_eq!(h[0].url, "http://h.test/");
+    assert_eq!(h[0].title.as_deref(), Some("Page A"));
+
+    // Signet : ajout, dédup, persistance, retrait.
+    assert!(s.add_bookmark("http://h.test/".to_string(), None));
+    assert!(!s.add_bookmark("http://h.test/".to_string(), None));
+    assert_eq!(store.bookmarks.lock().unwrap().len(), 1);
+    assert!(s.remove_bookmark("http://h.test/"));
+    assert!(!s.remove_bookmark("http://h.test/"));
+    assert_eq!(s.bookmarks().len(), 0);
 }
