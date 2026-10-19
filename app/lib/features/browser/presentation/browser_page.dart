@@ -470,6 +470,7 @@ class _FrameViewState extends ConsumerState<_FrameView> {
     final t = widget.tokens;
     final active = widget.state.active;
     final bytes = active == null ? null : widget.state.frames[active.id];
+    final raw = active == null ? null : widget.state.rawFrames[active.id];
     final muted = t.color('onSurface', 'muted');
     return Container(
       margin: EdgeInsets.all(t.dim('spacing', 'lg', fallback: 24)),
@@ -479,7 +480,7 @@ class _FrameViewState extends ConsumerState<_FrameView> {
             BorderRadius.circular(t.dim('radius', 'lg', fallback: 14)),
       ),
       clipBehavior: Clip.hardEdge,
-      child: bytes == null
+      child: bytes == null && raw == null
           ? _empty(t, active, muted)
           : LayoutBuilder(
               builder: (context, c) {
@@ -519,13 +520,20 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                         },
                         child: Align(
                           alignment: Alignment.topLeft,
-                          child: Image.memory(
-                            Uint8List.fromList(bytes),
-                            gaplessPlayback:
-                                true, // pas de flash entre frames
-                            fit: BoxFit
-                                .none, // 1 px CSS = 1 pixel logique
-                          ),
+                          // Canal FFI (ADR-0018) : `ui.Image`
+                          // brute, sinon PNG mémoire (ADR-0004).
+                          child: raw != null
+                              ? RawImage(
+                                  image: raw,
+                                  fit: BoxFit.none,
+                                )
+                              : Image.memory(
+                                  Uint8List.fromList(bytes!),
+                                  gaplessPlayback:
+                                      true, // pas de flash entre frames
+                                  fit: BoxFit
+                                      .none, // 1 px CSS = 1 pixel logique
+                                ),
                         ),
                       ),
                     ),

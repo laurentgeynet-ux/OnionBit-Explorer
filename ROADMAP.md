@@ -721,9 +721,18 @@ progresse en trois paliers structurants :
   appliqué), matching famille/graisse/style — ADR-0016.
   Encodages legacy : déjà livrés à l'étape 5 (windows-1252,
   BOM, meta sniff).
-- [ ] **Étape 47. Streaming UI haute performance.** Texture externe
-  Flutter via FFI (upgrade d'ADR-0004) pour les framerates élevés et
-  médias animés.
+- [x] **Étape 47. Streaming UI haute performance.** Mode
+  **in-process** `explorer-ffi` (cdylib, ADR-0018 — tranche la
+  tension documentée dans ADR-0004) : ABI C étroite
+  (`create`/`navigate`/`input`/`frame_size`/`frame_copy` RGBA
+  brut/`tick`/`last_error`), `dart:ffi` `FfiEngine implements
+  BrowserRepository` → `ui.Image` via `decodeImageFromPixels` +
+  `RawImage` — zéro codec PNG ni socket sur le chemin frame.
+  Repli REST transparent (`EXPLORER_ENGINE=auto`), sondage
+  `tick` 50 ms remplace le SSE. Déviations : isolation
+  processus dégradée en mode FFI (REST reste la référence),
+  titre/URL de survol non exportés, pas d'`ExternalTexture`
+  GPU (plugin C++ reporté).
 - [ ] **Étape 48. Interop continue.** Corpus **WPT** ciblés +
   sites réels, jalons Acid2/Acid3 informatifs (ADR-0010) ; les
   écarts constatés deviennent des étapes.

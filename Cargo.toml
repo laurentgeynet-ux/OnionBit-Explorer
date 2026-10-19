@@ -12,6 +12,7 @@ members = [
     "crates/explorer-core",
     "crates/explorer-api",
     "crates/explorer-cli",
+    "crates/explorer-ffi",
     "crates/explorer-daemon",
     "crates/explorer-test-support",
     # Moteur JavaScript de l'équipe dédiée (ADR-0007) — nom de produit
@@ -38,6 +39,7 @@ explorer-layout = { path = "crates/explorer-layout" }
 explorer-render = { path = "crates/explorer-render" }
 explorer-core = { path = "crates/explorer-core" }
 explorer-api = { path = "crates/explorer-api" }
+explorer-ffi = { path = "crates/explorer-ffi" }
 explorer-test-support = { path = "crates/explorer-test-support" }
 dillo-js = { path = "crates/dillo-js" }
 

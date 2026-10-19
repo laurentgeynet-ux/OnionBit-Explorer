@@ -3,11 +3,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/api/events_client.dart';
+import '../../../core/api/ffi_engine.dart';
 import '../../../core/di/providers.dart';
 import '../data/browser_repository.dart';
 import '../domain/browser_tab.dart';
@@ -26,6 +28,7 @@ class BrowserState {
     this.hoverEditable = false,
     this.fieldFocused = false,
     this.pageErrors = const {},
+    this.rawFrames = const {},
   });
 
   final List<BrowserTab> tabs;
@@ -34,6 +37,11 @@ class BrowserState {
   /// Frames PNG par onglet (octets bruts) — tirées sur
   /// `frame_invalidated` (ADR-0004 : pull, pas push).
   final Map<String, List<int>> frames;
+
+  /// Frames décodées `ui.Image` par onglet — canal FFI
+  /// in-process (ADR-0018) : pixels RGBA bruts, aucun codec
+  /// PNG sur le chemin de rendu.
+  final Map<String, ui.Image> rawFrames;
 
   /// `false` tant que le daemon n'a pas répondu — l'UI affiche
   /// l'état dégradé (omnibox désactivée, bouton réessayer).
@@ -84,11 +92,13 @@ class BrowserState {
     bool? hoverEditable,
     bool? fieldFocused,
     Map<String, String>? pageErrors,
+    Map<String, ui.Image>? rawFrames,
   }) =>
       BrowserState(
         tabs: tabs ?? this.tabs,
         activeId: activeId ?? this.activeId,
         frames: frames ?? this.frames,
+        rawFrames: rawFrames ?? this.rawFrames,
         daemonOnline: daemonOnline ?? this.daemonOnline,
         lastError: lastError != null ? lastError() : this.lastError,
         frameTick: frameTick ?? this.frameTick,
@@ -100,8 +110,15 @@ class BrowserState {
 }
 
 /// Dépôt injectable (tests : `Provider.overrideWith`).
+/// `auto` : `FfiEngine` (moteur in-process, ADR-0018) si la
+/// bibliothèque dynamique charge, sinon le repo REST daemon.
 final browserRepositoryProvider = Provider<BrowserRepository>(
-  (ref) => BrowserRepository(ref.watch(apiClientProvider)),
+  (ref) {
+    final cfg = ref.watch(configProvider);
+    final ffi = FfiEngine.tryLoad(cfg);
+    ref.onDispose(() => ffi?.dispose());
+    return ffi ?? BrowserRepository(ref.watch(apiClientProvider));
+  },
 );
 
 /// Contrôleur navigateur — pilote les actions REST et applique
@@ -109,22 +126,50 @@ final browserRepositoryProvider = Provider<BrowserRepository>(
 class BrowserController extends Notifier<BrowserState> {
   StreamSubscription<ServerEvent>? _sub;
 
+  /// Timer de sondage des animations en mode FFI — remplace
+  /// le SSE `frame_invalidated` absent du canal (ADR-0018).
+  Timer? _animTimer;
+
   /// Dépôt capturé dans `build` — `ref` est invalide après un
   /// `await`, les lectures post-build passent par ce champ.
   late final BrowserRepository _repo;
 
   @override
   BrowserState build() {
-    final events = ref.watch(eventsClientProvider);
     _repo = ref.watch(browserRepositoryProvider);
-    _sub?.cancel();
-    _sub = events.events().listen(_onEvent);
-    ref.onDispose(() => _sub?.cancel());
+    if (_repo is FfiEngine) {
+      // Pas de SSE in-process : la sondage d'animations porte
+      // l'invalidation ; les actions tirent leur frame au
+      // retour (navigate/input).
+      _animTimer = Timer.periodic(
+        const Duration(milliseconds: 50),
+        (_) => _tickFfi(),
+      );
+      ref.onDispose(() => _animTimer?.cancel());
+    } else {
+      final events = ref.watch(eventsClientProvider);
+      _sub?.cancel();
+      _sub = events.events().listen(_onEvent);
+      ref.onDispose(() => _sub?.cancel());
+    }
     // Microtask : le bootstrap touche `state` après le retour
     // de `build` (un dépôt qui jette synchronement ne doit
     // pas lire un provider non initialisé).
     unawaited(Future.microtask(_bootstrap));
     return const BrowserState();
+  }
+
+  /// Sondage `explorer_tick` — avance transitions/animations
+  /// et retire la frame de l'onglet actif si invalidée.
+  void _tickFfi() {
+    final engine = _repo;
+    final id = state.activeId;
+    if (engine is! FfiEngine || id == null) return;
+    try {
+      if (engine.tick(id)) unawaited(_pullFrame(id));
+    } on Object {
+      // Moteur in-process indisponible → prochain tick.
+    }
   }
 
   /// Premier contact : liste les onglets existants ou en crée
@@ -141,7 +186,7 @@ class BrowserController extends Notifier<BrowserState> {
         activeId: state.activeId ?? tabs.first.id,
         daemonOnline: true,
       );
-    } on ApiException {
+    } on Object {
       if (ref.mounted) state = state.copyWith(daemonOnline: false);
     }
   }
@@ -226,12 +271,30 @@ class BrowserController extends Notifier<BrowserState> {
   /// Sélectionne l'onglet affiché — tire sa frame si absente.
   void selectTab(String id) {
     state = state.copyWith(activeId: id);
-    if (!state.frames.containsKey(id)) unawaited(_pullFrame(id));
+    if (!state.frames.containsKey(id) && !state.rawFrames.containsKey(id)) {
+      unawaited(_pullFrame(id));
+    }
   }
 
-  /// Tire le PNG de l'onglet (`GET …/frame`) — le push SSE ne
-  /// fait que signaler, le contenu voyage en pull (ADR-0004).
+  /// Tire la frame de l'onglet — `ui.Image` brute en mode
+  /// FFI (ADR-0018), PNG en mode REST (ADR-0004 : le push ne
+  /// signale que, le contenu voyage en pull).
   Future<void> _pullFrame(String tabId) async {
+    final engine = _repo;
+    if (engine is FfiEngine) {
+      try {
+        final img = await engine.fetchFrameImage(tabId);
+        if (img == null || !ref.mounted) return;
+        final old = state.rawFrames[tabId];
+        state = state.copyWith(
+          rawFrames: {...state.rawFrames, tabId: img},
+        );
+        old?.dispose();
+      } on Object {
+        // Moteur indisponible → le prochain tick retentera.
+      }
+      return;
+    }
     try {
       final bytes = await _repo.fetchFrame(tabId);
       if (bytes == null || !ref.mounted) return;
@@ -283,9 +346,17 @@ class BrowserController extends Notifier<BrowserState> {
     final id = state.activeId;
     if (id == null) return null;
     try {
-      return await _repo.sendInput(id, ev);
-    } on ApiException catch (e) {
-      state = state.copyWith(lastError: () => e.message);
+      final res = await _repo.sendInput(id, ev);
+      // Mode FFI : pas de SSE — l'input invalide → pull
+      // direct (le hover pur ne repeint pas forcément).
+      if (_repo is FfiEngine &&
+          res['result'] != 'hover' &&
+          res['result'] != 'ignored') {
+        unawaited(_pullFrame(id));
+      }
+      return res;
+    } on Object catch (e) {
+      state = state.copyWith(lastError: () => '$e');
       return null;
     }
   }

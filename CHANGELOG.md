@@ -9,6 +9,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 47 — Mode in-process `explorer-ffi` + frames RGBA
+  via `dart:ffi`** (`explorer-ffi` nouveau crate `cdylib`,
+  `app/`, ADR-0018) : ABI C volontairement étroite — handle
+  opaque + `open_tab`/`close_tab`/`navigate`/`reload`/
+  `go_back`/`go_forward`/`set_viewport`/`input` (codes
+  discrets)/`tick`/`frame_size`/`frame_copy` RGBA brut/
+  `tab_url`/`last_error` thread-local ; runtime tokio privé
+  `current_thread`, pile réseau identique au démon.
+  `Session::frame_pixels` expose la frame empruntée.
+  **Dérogation unique** : seul crate du workspace en `unsafe`
+  (frontière C — validation pointeurs + copies bornées, lint
+  `unsafe_code` recopié en `allow` dans son manifeste seul).
+  Côté Flutter : `FfiEngine implements BrowserRepository`
+  (dart:ffi), `fetchFrameImage` → `ui.decodeImageFromPixels`
+  → `RawImage` (zéro PNG/socket), `tryLoad` → repli REST ;
+  `EXPLORER_ENGINE=auto|rest|ffi`, `EXPLORER_ENGINE_LIB`.
+  Pas de SSE → `Timer` 50 ms `tick` + pull post-action.
+  Tests : 4 Rust (pipeline ABI navigate→RGBA pixel, bornes
+  buffer, handle nul, tick) + 2 Dart (repli, ABI réel si DLL).
+
 - **Étape 45 (partie moteur) — SVG statique + transitions
   CSS** (`explorer-render`, `explorer-css`, `explorer-core`,
   `explorer-api`, ADR-0017) : `decode_image` détecte le SVG

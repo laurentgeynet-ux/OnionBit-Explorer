@@ -547,6 +547,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "explorer-ffi"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "explorer-core",
+ "explorer-js",
+ "explorer-layout",
+ "explorer-net",
+ "explorer-render",
+ "explorer-test-support",
+ "tokio",
+]
+
+[[package]]
 name = "explorer-html"
 version = "0.1.0"
 dependencies = [

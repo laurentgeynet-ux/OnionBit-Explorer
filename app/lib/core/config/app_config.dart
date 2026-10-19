@@ -11,10 +11,23 @@ class AppConfig {
     this.connectTimeout = const Duration(seconds: 5),
     this.requestTimeout = const Duration(seconds: 10),
     this.sseReconnectDelay = const Duration(seconds: 2),
+    this.engineMode = const String.fromEnvironment('EXPLORER_ENGINE',
+        defaultValue: 'auto'),
+    this.engineLibPath = const String.fromEnvironment('EXPLORER_ENGINE_LIB',
+        defaultValue: ''),
   });
 
   /// URL de base du daemon `explorer-daemon` (loopback — ADR-0003).
   final String daemonBaseUrl;
+
+  /// Backend moteur : `auto` (FFI si la DLL est présente, REST
+  /// sinon), `rest` (daemon seul), `ffi` (in-process seul —
+  /// échoue si la bibliothèque ne charge pas). ADR-0018.
+  final String engineMode;
+
+  /// Chemin explicite vers `explorer_ffi.dll` — vide = noms
+  /// standards dans le répertoire de l'exécutable / `PATH`.
+  final String engineLibPath;
 
   /// Clé d'API optionnelle (`x-api-key` / `?key=` pour le SSE).
   final String apiKey;

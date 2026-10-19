@@ -702,6 +702,19 @@ impl Session {
         self.tabs.get(&tab).and_then(|t| t.png.clone())
     }
 
+    /// Frame brute courante `(largeur, hauteur, RGBA)` —
+    /// `None` si jamais navigué. Canal FFI/texture (étape
+    /// 47, ADR-0018) : les pixels restent empruntés, la
+    /// copie est à la charge de l'appelant.
+    #[must_use]
+    pub fn frame_pixels(&self, tab: TabId) -> Option<(u32, u32, &[u8])> {
+        self.tabs.get(&tab).and_then(|t| {
+            t.frame
+                .as_ref()
+                .map(|f| (f.width, f.height, f.pixels.as_slice()))
+        })
+    }
+
     /// Fait avancer les transitions CSS en vol (étape 45) :
     /// relayout + repaint si des transitions sont actives —
     /// l'animation est pilotée par le pull de frames de l'UI

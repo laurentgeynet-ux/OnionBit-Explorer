@@ -1,0 +1,36 @@
+[package]
+name = "explorer-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Surface FFI (cdylib) — moteur in-process + frames RGBA brutes pour Flutter (étape 47, ADR-0018)"
+
+# Dérogation unique et assumée (ADR-0018) : l'ABI C ne peut pas
+# s'exprimer en safe Rust — `forbid` → `allow` dans CE crate
+# seulement ; tout `unsafe` reste confiné à la validation des
+# pointeurs et aux copies bornées. Les autres lints workspace
+# sont recopiés à l'identique (`workspace = true` interdit les
+# surcharges).
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+[lib]
+# `cdylib` → explorer_ffi.dll chargée par dart:ffi ; `rlib` →
+# les tests Rust appellent les fonctions en-process.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+explorer-core.workspace = true
+explorer-js.workspace = true
+explorer-net.workspace = true
+explorer-render.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+explorer-layout.workspace = true
+explorer-test-support.workspace = true
+async-trait.workspace = true
