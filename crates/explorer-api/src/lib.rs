@@ -173,8 +173,13 @@ async fn close_tab(State(st): State<ApiState>, Path(id): Path<TabId>) -> Respons
 }
 
 /// `GET /api/tabs/{id}/frame` → `image/png` (pull ADR-0004).
+/// Le pull fait avancer les transitions CSS (étape 45) :
+/// l'UI cadence les frames, le moteur échantillonne le
+/// progrès à chaque appel.
 async fn frame(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
-    let png = st.session.lock().await.frame_png(id);
+    let mut session = st.session.lock().await;
+    let _ = session.tick_animations(id);
+    let png = session.frame_png(id);
     match png {
         Some(bytes) => (
             [(header::CONTENT_TYPE, HeaderValue::from_static("image/png"))],

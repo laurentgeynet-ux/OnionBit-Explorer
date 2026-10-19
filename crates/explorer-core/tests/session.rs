@@ -1323,3 +1323,49 @@ history.go(99);
         Some("http://h.test/p")
     );
 }
+
+/// Transition (étape 45) : un handler `click` change `class`
+/// → la resynchro relayout voit le diff `opacity` et
+/// enregistre la transition — `tick_animations` avance
+/// alors la frame.
+#[tokio::test]
+async fn transition_declenchee_sur_mutation_classe() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/tr",
+        200,
+        r#"<!doctype html><html><head><style>
+        div { transition: opacity 60s linear; }
+        .f { opacity: 0; }
+        </style></head><body><div id="d" style="width:80px;height:80px">hello</div>
+        <script>
+        document.getElementById('d').addEventListener('click', function(){
+          document.getElementById('d').setAttribute('class','f');
+        });
+        </script></body></html>"#,
+    );
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/tr").await.unwrap();
+    // Clic dans la div : la mutation synchronisée relance le
+    // layout → diff opacity 1→0 avec `transition` → en vol.
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert!(s.tick_animations(id).unwrap());
+    assert!(s.frame_png(id).is_some());
+}
+
+/// Sans transition déclarée, `tick_animations` est inerte.
+#[tokio::test]
+async fn tick_animations_sans_transition_inerte() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/n",
+        200,
+        "<!doctype html><html><body><p>x</p></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/n").await.unwrap();
+    assert!(!s.tick_animations(id).unwrap());
+}

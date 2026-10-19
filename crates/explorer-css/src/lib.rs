@@ -32,6 +32,7 @@ mod parser;
 mod selector;
 mod token;
 mod tokenizer;
+pub mod transition;
 pub mod value;
 
 pub use cascade::{

@@ -14,8 +14,12 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use explorer_css::{FontSrc, Origin, StyleEngine, StyleEnv};
+use explorer_css::transition::{interpolate, transition_decls, Timing};
+use explorer_css::{
+    initial_value, ComputedStyle, FontSrc, Origin, StyleEngine, StyleEnv, StyleMap,
+};
 use explorer_dom::{Dom, DomError, NodeId};
 use explorer_html::encoding::decode_sniffed;
 use explorer_html::TreeBuilder;
@@ -255,6 +259,210 @@ struct Tab {
     /// navigation — concaténées, vidées à chaque re-parse
     /// (étape 46 : premières sous-ressources CSS).
     linked_css: String,
+    /// Styles calculés de la dernière mise en page, indexés
+    /// par **ordinal d'élément** (ordre document) — la clé
+    /// survit au re-parse des synchronisations DOM, là où un
+    /// `NodeId` est régénéré (étape 45).
+    prev_styles: HashMap<usize, ComputedStyle>,
+    /// Transitions en vol (`elem` ordinal + `prop` →
+    /// horaire) — bornées par `MAX_TRANSITIONS`.
+    transitions: Vec<ActiveTransition>,
+}
+
+/// Transition en vol sur `(nœud, propriété)` — étape 45 :
+/// `from`/`to` sont les valeurs calculées textuelles
+/// (interpolées par `explorer_css::transition`), `start`
+/// l'`Instant` d'enregistrement.
+#[derive(Clone)]
+struct ActiveTransition {
+    /// Ordinal de l'élément en ordre document — stable au
+    /// re-parse (`NodeId` régénéré), seules les insertions
+    /// structurelles décalent (déviation MVP documentée).
+    elem: usize,
+    prop: String,
+    from: String,
+    to: String,
+    start: Instant,
+    /// Durée en secondes (> 0 garanti à l'enregistrement).
+    duration: f64,
+    /// Délai en secondes (négatif = déjà entamée, spec).
+    delay: f64,
+    timing: Timing,
+}
+
+impl ActiveTransition {
+    /// Instant de fin (`start + max(0, delay + duration)`).
+    fn end(&self) -> Instant {
+        self.start + Duration::from_secs_f64((self.delay + self.duration).max(0.0))
+    }
+
+    /// Valeur affichée à `now` : `Some` tant que la
+    /// transition n'est pas terminée — la phase de délai
+    /// reste sur `from`, une valeur non interpolable commute
+    /// discrètement à `to` en fin (spec).
+    fn value_at(&self, now: Instant) -> Option<String> {
+        let elapsed = now.saturating_duration_since(self.start).as_secs_f64() - self.delay;
+        if elapsed >= self.duration {
+            return None;
+        }
+        let p = self.timing.apply(elapsed / self.duration);
+        Some(interpolate(&self.from, &self.to, p).unwrap_or_else(|| {
+            if p < 1.0 {
+                self.from.clone()
+            } else {
+                self.to.clone()
+            }
+        }))
+    }
+}
+
+/// Borne anti-hostile : transitions simultanées par onglet
+/// (une page hostile peut déclencher des milliers de diffs).
+const MAX_TRANSITIONS: usize = 256;
+
+/// `NodeId` → ordinal d'élément en ordre document (étape
+/// 45) — clé stable au re-parse des synchronisations DOM :
+/// les attributs mutés ne changent pas l'ordre, seules les
+/// insertions d'éléments décalent les suivants (leurs
+/// transitions repartent alors — déviation MVP).
+fn element_ordinals(dom: &Dom) -> HashMap<NodeId, usize> {
+    let mut out = HashMap::new();
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.element(n).is_ok() {
+            out.insert(n, out.len());
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    out
+}
+
+/// Diff `prev_styles` → `styles` (étape 45) : enregistre les
+/// nouvelles transitions (`transition-*` déclarés, valeur
+/// modifiée), retarget les transitions en vol depuis leur
+/// valeur courante, applique les progressions en surcharge
+/// post-cascade sur `styles`. Renvoie `true` s'il reste des
+/// transitions actives. `prev` DOIT être le map brut de la
+/// passe précédente (sans les surcharges d'animation),
+/// indexé par ordinal d'élément.
+fn update_transitions(
+    prev: &HashMap<usize, ComputedStyle>,
+    transitions: &mut Vec<ActiveTransition>,
+    styles: &mut StyleMap,
+    ord_of: &HashMap<NodeId, usize>,
+    now: Instant,
+) -> bool {
+    let mut fresh: Vec<ActiveTransition> = Vec::new();
+    for (node, cs) in styles.iter() {
+        let Some(&ord) = ord_of.get(&node) else {
+            continue;
+        };
+        // Pas de « before-change style » (premier rendu,
+        // nœud inséré) → pas de transition (spec).
+        let Some(old) = prev.get(&ord) else {
+            continue;
+        };
+        for decl in transition_decls(cs)
+            .iter()
+            .filter(|d| d.duration > 0.0 && d.property != "none")
+        {
+            let targets: Vec<String> = if decl.property == "all" {
+                cs.iter()
+                    .map(|(k, _)| k.to_string())
+                    .filter(|k| !k.starts_with("transition"))
+                    .collect()
+            } else {
+                vec![decl.property.clone()]
+            };
+            for prop in targets {
+                let new = cs
+                    .get(&prop)
+                    .or_else(|| initial_value(&prop))
+                    .unwrap_or("")
+                    .to_string();
+                let ongoing = transitions
+                    .iter()
+                    .position(|t| t.elem == ord && t.prop == prop);
+                if let Some(i) = ongoing {
+                    if transitions[i].to == new {
+                        // Même cible — la transition continue.
+                        fresh.push(transitions[i].clone());
+                        continue;
+                    }
+                }
+                let oldv = old
+                    .get(&prop)
+                    .or_else(|| initial_value(&prop))
+                    .unwrap_or("")
+                    .to_string();
+                if new == oldv && ongoing.is_none() {
+                    continue;
+                }
+                // Retarget : repart de la valeur actuellement
+                // affichée, sinon de l'ancienne calculée.
+                let from = ongoing
+                    .and_then(|i| transitions[i].value_at(now))
+                    .unwrap_or(oldv);
+                fresh.retain(|t| !(t.elem == ord && t.prop == prop));
+                if from != new {
+                    fresh.push(ActiveTransition {
+                        elem: ord,
+                        prop,
+                        from,
+                        to: new,
+                        start: now,
+                        duration: decl.duration,
+                        delay: decl.delay,
+                        timing: decl.timing,
+                    });
+                }
+            }
+        }
+    }
+    // Transitions non revisitées : survivent si leur
+    // déclaration existe encore, la cible reste la valeur
+    // calculée et elles ne sont pas finies.
+    let cs_of: HashMap<usize, &ComputedStyle> = styles
+        .iter()
+        .filter_map(|(n, c)| ord_of.get(&n).map(|o| (*o, c)))
+        .collect();
+    for t in transitions.drain(..) {
+        if fresh.iter().any(|f| f.elem == t.elem && f.prop == t.prop) || t.end() <= now {
+            continue;
+        }
+        let alive = cs_of.get(&t.elem).is_some_and(|c| {
+            c.get(&t.prop)
+                .or_else(|| initial_value(&t.prop))
+                .unwrap_or("")
+                == t.to
+                && transition_decls(c)
+                    .iter()
+                    .any(|d| d.duration > 0.0 && (d.property == "all" || d.property == t.prop))
+        });
+        if alive {
+            fresh.push(t);
+        }
+    }
+    transitions.clone_from(&fresh);
+    transitions.truncate(MAX_TRANSITIONS);
+    // Surcharges : la progression l'emporte sur toute
+    // déclaration (post-cascade, spec « current transition »).
+    let mut running = false;
+    let node_of: HashMap<usize, NodeId> = ord_of.iter().map(|(n, o)| (*o, *n)).collect();
+    for t in transitions.iter() {
+        if t.end() > now {
+            running = true;
+            if let Some(v) = t.value_at(now) {
+                if let Some(cs) = node_of.get(&t.elem).and_then(|n| styles.get_mut(*n)) {
+                    cs.set(&t.prop, &v);
+                }
+            }
+        }
+    }
+    transitions.retain(|t| t.end() > now);
+    running
 }
 
 /// Configuration de session — seuils et viewport initiaux
@@ -435,6 +643,8 @@ impl Session {
                 js: None,
                 images: ImageTable::new(),
                 linked_css: String::new(),
+                prev_styles: HashMap::new(),
+                transitions: Vec::new(),
             },
         );
         let _ = self.events.send(CoreEvent::TabOpened { tab: id });
@@ -490,6 +700,28 @@ impl Session {
     #[must_use]
     pub fn frame_png(&self, tab: TabId) -> Option<Vec<u8>> {
         self.tabs.get(&tab).and_then(|t| t.png.clone())
+    }
+
+    /// Fait avancer les transitions CSS en vol (étape 45) :
+    /// relayout + repaint si des transitions sont actives —
+    /// l'animation est pilotée par le pull de frames de l'UI
+    /// (le moteur n'a pas de boucle vsync propre ; `rAF` vit
+    /// côté `dillo-js`). `Ok(true)` = une nouvelle frame a
+    /// été produite et `FrameInvalidated` émis.
+    ///
+    /// # Errors
+    /// [`CoreError::UnknownTab`], ou erreur de rendu.
+    pub fn tick_animations(&mut self, tab: TabId) -> Result<bool, CoreError> {
+        let active = self
+            .tabs
+            .get(&tab)
+            .is_some_and(|t| !t.transitions.is_empty());
+        if !active {
+            return Ok(false);
+        }
+        self.relayout(tab)?;
+        let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+        Ok(true)
     }
 
     /// Signets (miroir du store).
@@ -678,6 +910,8 @@ impl Session {
             entry.js = None;
             entry.images.clear();
             entry.linked_css.clear();
+            entry.prev_styles = HashMap::new();
+            entry.transitions.clear();
             entry.dom = Some(dom);
         }
         self.webfonts.clear();
@@ -1035,7 +1269,24 @@ impl Session {
         let mut eng = StyleEngine::new();
         eng.add_css(&collect_style_css(dom), Origin::Author);
         eng.add_css(&entry.linked_css.clone(), Origin::Author);
-        let styles = eng.compute_tree(dom, dom.document(), &StyleEnv::default());
+        let mut styles = eng.compute_tree(dom, dom.document(), &StyleEnv::default());
+        // Transitions (étape 45) : diff sur le brut, surcharge
+        // des progressions — `prev_styles` conserve le map
+        // AVANT animation, indexé par ordinal d'élément (le
+        // `NodeId` meurt au prochain re-parse).
+        let ord_of = element_ordinals(dom);
+        let raw: HashMap<usize, ComputedStyle> = styles
+            .iter()
+            .filter_map(|(n, c)| ord_of.get(&n).map(|o| (*o, c.clone())))
+            .collect();
+        update_transitions(
+            &entry.prev_styles,
+            &mut entry.transitions,
+            &mut styles,
+            &ord_of,
+            Instant::now(),
+        );
+        entry.prev_styles = raw;
         let Some(root_el) = dom
             .children(dom.document())
             .into_iter()

@@ -122,6 +122,48 @@ fn missing_image_falls_back_to_alt_text() {
     let _ = node;
 }
 
+// ─────────────── SVG (étape 45) ───────────────
+
+/// SVG 10×10 : fond transparent + rectangle vert plein cadre.
+const GREEN_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><rect x="0" y="0" width="10" height="10" fill="#00ff00"/></svg>"##;
+
+#[test]
+fn svg_decode_rect_rgba() {
+    let img = decode_image(GREEN_SVG.as_bytes(), 1_000_000).expect("svg décodé");
+    assert_eq!((img.width, img.height), (10, 10));
+    // Pixel central : vert opaque (RGBA droit, démultiplié).
+    let c = (5 * 10 + 5) * 4;
+    assert_eq!(
+        &img.rgba[c..c + 4],
+        &[0, 255, 0, 255],
+        "px = {:?}",
+        &img.rgba[c..c + 4]
+    );
+}
+
+#[test]
+fn svg_xml_prolog_et_doctype() {
+    let svg = format!("<?xml version=\"1.0\"?>\n<!DOCTYPE svg>\n{GREEN_SVG}");
+    assert!(decode_image(svg.as_bytes(), 1_000_000).is_some());
+}
+
+#[test]
+fn svg_viewbox_geant_borne() {
+    // Géométrie déclarée 10⁶ × 10⁶ = 10¹² px → réduite au
+    // budget, jamais d'allocation démesurée (hostile).
+    let big = r##"<svg xmlns="http://www.w3.org/2000/svg" width="1000000" height="1000000" viewBox="0 0 1000000 1000000"><rect width="1000000" height="1000000" fill="#00ff00"/></svg>"##;
+    let img = decode_image(big.as_bytes(), 1_000_000).expect("borné pas refusé");
+    assert!(u64::from(img.width) * u64::from(img.height) <= 1_000_000);
+}
+
+#[test]
+fn svg_malforme_est_none() {
+    assert!(decode_image(b"<svg><rect", 1_000_000).is_none());
+    // HTML portant un svg inline : root non-SVG → refus (un
+    // `<img>` ne sert pas un document HTML).
+    assert!(decode_image(b"<html><body><svg width=10></svg></body></html>", 1_000_000).is_none());
+}
+
 /// Fonte absente — le test image n'a pas de texte à shaper.
 struct NullFonts;
 impl explorer_layout::font::FontSource for NullFonts {

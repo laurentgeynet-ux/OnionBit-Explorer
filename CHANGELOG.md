@@ -9,6 +9,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 45 (partie moteur) — SVG statique + transitions
+  CSS** (`explorer-render`, `explorer-css`, `explorer-core`,
+  `explorer-api`, ADR-0017) : `decode_image` détecte le SVG
+  par sniff (`<` + `<svg` prolog) et le rasterise via
+  `resvg`/`usvg` 0.45 à taille naturelle réduite au budget
+  `max_px` (viewBox hostile plafonné, pixmap prémultiplié →
+  RGBA droit) — `<img src=*.svg>` complet ; SMIL/scripts
+  hors périmètre, `<svg>` inline en déviation documentée
+  (foreign-content tokenizer requis). `transition.rs` :
+  parsing `transition`/longhands, `linear`/`ease*`/
+  `cubic-bezier` (Newton+bissection), interpolation nombres/
+  longueurs (même unité ou absolues→px)/couleurs RGBA, le
+  reste discret à t=1. Session : diff sur valeurs calculées
+  indexé par **ordinal d'élément** (survit au re-parse de la
+  synchro DOM — `NodeId` régénéré), surcharge post-cascade
+  de priorité max, `MAX_TRANSITIONS` = 256, retarget depuis
+  la valeur courante, mort à la navigation ;
+  `tick_animations` appelé par `GET /frame` — l'animation
+  est cadencée par le pull de l'UI. 12 tests : transition
+  (6), svg (4), session tick (2).
+
 - **Étape 44 (partie moteur) — `location`/`history` →
   navigation** (`explorer-js`, `explorer-core`) :
   `JsEngine::drain_nav_requests` + `NavRequest`

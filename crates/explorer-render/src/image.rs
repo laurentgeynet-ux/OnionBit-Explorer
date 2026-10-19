@@ -35,8 +35,13 @@ pub type ImageTable = HashMap<NodeId, Arc<DecodedImage>>;
 /// reconnu ou si l'image dépasse `max_px` pixels (borne
 /// mémoire : 4 octets/pixel → `max_px` plafonne l'allocation
 /// *avant* décodage via les limites du décodeur).
+/// SVG (étape 45) est détecté par le sniff et rasterisé via
+/// `resvg`/`usvg` — statique : SMIL et scripts SVG ignorés.
 #[must_use]
 pub fn decode_image(bytes: &[u8], max_px: u32) -> Option<DecodedImage> {
+    if looks_like_svg(bytes) {
+        return decode_svg(bytes, max_px);
+    }
     let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .ok()?;
@@ -58,6 +63,68 @@ pub fn decode_image(bytes: &[u8], max_px: u32) -> Option<DecodedImage> {
     Some(DecodedImage {
         width: w,
         height: h,
+        rgba,
+    })
+}
+
+/// Sniff SVG (étape 45) : le document commence par `<` après
+/// BOM/espaces et porte un élément `<svg` dans son prolog —
+/// `usvg` valide ensuite strictement (un HTML avec `<svg>`
+/// embarqué est refusé, root non-SVG).
+fn looks_like_svg(bytes: &[u8]) -> bool {
+    let head = &bytes[..bytes.len().min(4096)];
+    let Ok(s) = core::str::from_utf8(head) else {
+        return false;
+    };
+    let t = s.trim_start_matches('\u{feff}').trim_start();
+    t.starts_with('<') && t.contains("<svg")
+}
+
+/// Rasterise un document SVG via `usvg`+`resvg` — taille
+/// naturelle (`width`/`height`/`viewBox`), réduite
+/// proportionnellement si elle dépasse `max_px`. `None` si
+/// le document est refusé, sans géométrie ou trop grand.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+// les dims sont vérifiées finies, > 0 et ≤ `max_px` juste au-
+// dessus — le cast ne peut ni tronquer ni perdre le signe.
+fn decode_svg(bytes: &[u8], max_px: u32) -> Option<DecodedImage> {
+    let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default()).ok()?;
+    let size = tree.size();
+    let (w, h) = (f64::from(size.width()), f64::from(size.height()));
+    if !(w.is_finite() && h.is_finite()) || w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    // Borne pixels : échelle de réduction si le naturel
+    // dépasse le budget — un SVG « infini » (viewBox géant)
+    // reste plafonné comme un bitmap hostile.
+    let scale = if w * h > f64::from(max_px) {
+        (f64::from(max_px) / (w * h)).sqrt()
+    } else {
+        1.0
+    };
+    let iw = u32::try_from((w * scale).ceil() as u64).ok()?.max(1);
+    let ih = u32::try_from((h * scale).ceil() as u64).ok()?.max(1);
+    if u64::from(iw) * u64::from(ih) > u64::from(max_px) {
+        return None;
+    }
+    let mut pm = tiny_skia::Pixmap::new(iw, ih)?;
+    let tf = tiny_skia::Transform::from_scale(scale as f32, scale as f32);
+    resvg::render(&tree, tf, &mut pm.as_mut());
+    // tiny-skia stocke du prémultiplié — `DecodedImage`
+    // contracte du RGBA droit : démultiplie pixel à pixel.
+    let mut rgba = pm.data().to_vec();
+    for px in rgba.chunks_exact_mut(4) {
+        if let Some(c) = tiny_skia::PremultipliedColorU8::from_rgba(px[0], px[1], px[2], px[3]) {
+            let d = c.demultiply();
+            px[0] = d.red();
+            px[1] = d.green();
+            px[2] = d.blue();
+            px[3] = d.alpha();
+        }
+    }
+    Some(DecodedImage {
+        width: iw,
+        height: ih,
         rgba,
     })
 }

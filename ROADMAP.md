@@ -703,11 +703,17 @@ progresse en trois paliers structurants :
   drainées par la session (navigation, historique, `go(0)` =
   reload, borne 8 sauts) ; `fetch`/`XHR`/storage livrés
   côté `dillo-js` par l'équipe JS (JS-C16+).*
-- [ ] **Étape 45. Médias et graphiques.** `<canvas>` 2D,
-  `<video>`/`<audio>` (décodage à arbitrer), `requestAnimationFrame`,
-  animations/transitions CSS, **`<svg>` statique** (sous-ensemble —
-  `resvg`/crate équivalent ; SMIL et animations SVG restent hors
-  périmètre).
+- [x] **Étape 45. Médias et graphiques.** *Côté moteur livré
+  (ADR-0017) : `<img src=*.svg>` rasterisé via `resvg`/`usvg`
+  (sniff + borne `max_px`, SMIL/scripts hors périmètre) ;
+  transitions CSS — `transition`/longhands, `cubic-bezier`,
+  interpolation nombres/longueurs/couleurs, diff sur valeurs
+  calculées indexé par **ordinal d'élément** (survit au
+  re-parse), tick piloté par le pull `/frame`. `rAF` déjà
+  livré côté `dillo-js`. Déviations : `<svg>` inline (exige
+  foreign-content tokenizer), `<canvas>` 2D (couture JS —
+  équipe dédiée), `<video>`/`<audio>` (décodage à arbitrer),
+  `@keyframes`.*
 - [x] **Étape 46. Webfonts + charsets.** `@font-face` (inline et
   feuilles `<link>` — premières sous-ressources CSS), fetch borné,
   WOFF1 complet + WOFF2 transform nulle (glyf transformé refusé

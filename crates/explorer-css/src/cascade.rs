@@ -199,6 +199,13 @@ impl ComputedStyle {
     pub fn number(&self, name: &str) -> Option<f64> {
         self.get(name)?.trim().parse().ok()
     }
+
+    /// Pose `name = value` — réservé aux surcharges
+    /// post-cascade (transitions, étape 45 : la valeur
+    /// interpolée l'emporte sur toute déclaration).
+    pub fn set(&mut self, name: &str, value: &str) {
+        self.props.insert(name.to_string(), value.to_string());
+    }
 }
 
 /// Table des styles calculés d'un sous-arbre (mémoïsation
@@ -214,6 +221,17 @@ impl StyleMap {
     #[must_use]
     pub fn get(&self, node: NodeId) -> Option<&ComputedStyle> {
         self.map.get(&node)
+    }
+
+    /// Style mutable du nœud — surcharge post-cascade
+    /// (transitions, étape 45).
+    pub fn get_mut(&mut self, node: NodeId) -> Option<&mut ComputedStyle> {
+        self.map.get_mut(&node)
+    }
+
+    /// Itère `(nœud, style)` — ordre indéfini.
+    pub fn iter(&self) -> impl Iterator<Item = (NodeId, &ComputedStyle)> {
+        self.map.iter().map(|(n, c)| (*n, c))
     }
 }
 
