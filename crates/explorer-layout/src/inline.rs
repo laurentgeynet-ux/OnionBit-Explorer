@@ -195,12 +195,39 @@ fn size_atomics_walk(
     aid: &mut usize,
 ) {
     for child in &mut b.children {
+        // Hors-flux : `absolute`/`fixed` est posé plus tard par
+        // `resolve_absolutes` — jamais atomisé ici (la série
+        // `aid` doit rester synchrone avec `collect_child`,
+        // qui les saute aussi — R-22). Le champ `position` n'est
+        // renseigné qu'au layout : on lit le style calculé.
+        if child.out_of_flow() {
+            continue;
+        }
         if is_atomic(child) {
+            // §10.3.9 shrink-to-fit : un atome `inline-block`
+            // à `width:auto` occupe `clamp(dispo, min-content,
+            // max-content)` — jamais toute la ligne si son
+            // contenu est étroit (R-22 : `ul.tags` de lobste.rs
+            // s'étalait sur la largeur conteneur → une ligne
+            // entière par story, interlignes ~180 px). Les
+            // remplacés (`intrinsic`) se dimensionnent déjà.
+            let own = crate::intrinsic::own_sides(child, fs, ctx);
+            let cb_w = if child.intrinsic.is_none()
+                && css_px(&child.style, "width", w, fs, ctx).is_none()
+            {
+                (w - own)
+                    .max(0.0)
+                    .min(crate::intrinsic::max_content_px(child, fs, ctx))
+                    .max(crate::intrinsic::min_content_px(child, fs, ctx))
+                    + own
+            } else {
+                w
+            };
             layout_block(
                 child,
                 0.0,
                 0.0,
-                w,
+                cb_w,
                 cb_h,
                 ctx,
                 fs,
@@ -229,6 +256,16 @@ fn collect_items(bx: &LayoutBox) -> Vec<Item> {
 }
 
 fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut usize) {
+    // Hors-flux : `absolute`/`fixed` est posé par
+    // `resolve_absolutes` — son contenu n'entre jamais dans
+    // les items de la ligne, sinon son texte serait posé une
+    // fois ici et une fois par l'absolu, et son encombrement
+    // gonflerait la hauteur de ligne (R-22 : `#flag_dropdown`
+    // de lobste.rs, absolu sous un `span` inline → ligne
+    // de ~93 px).
+    if b.out_of_flow() {
+        return;
+    }
     // Texte d'abord : une boîte `Text` (dont le repli `alt`
     // d'un `<img>` cassé) s'itemise même si son style porte
     // `display: inline-block` — l'atomicité ne vaut que pour
@@ -785,8 +822,11 @@ fn assign_child_rects(bx: &mut LayoutBox, lines: &[LineBox]) {
     for (i, child) in bx.children.iter_mut().enumerate() {
         // Atome : rect et sous-arbre déjà posés par
         // `assign_atomic_rects` — les indices `owner` de ces
-        // lignes ne parlent pas de son intérieur.
-        if is_atomic(child) {
+        // lignes ne parlent pas de son intérieur. Hors-flux
+        // (`absolute`/`fixed`) : aucun fragment émis → union
+        // vide, et sa descendance garde la pose de
+        // `resolve_absolutes`.
+        if is_atomic(child) || child.out_of_flow() {
             continue;
         }
         let mut union: Option<Rect> = None;
@@ -814,6 +854,11 @@ fn assign_child_rects(bx: &mut LayoutBox, lines: &[LineBox]) {
 /// [`size_atomics`]) et copie son rect posé.
 fn assign_atomic_rects(bx: &mut LayoutBox, lines: &[LineBox], aid: &mut usize) {
     for child in &mut bx.children {
+        // Même saut hors-flux que `size_atomics`/`collect_child`
+        // — sinon la série `aid` se désynchronise.
+        if child.out_of_flow() {
+            continue;
+        }
         if is_atomic(child) {
             let id = *aid;
             *aid += 1;

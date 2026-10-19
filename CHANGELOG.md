@@ -9,6 +9,48 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-22 — décorations inline par fragment + flux en-ligne
+  réel** (`explorer-css`, `explorer-layout`,
+  `explorer-render`) : bug terrain lobste.rs — titres en
+  « pastilles sombres », interlignes ~180 px.
+  (1) **Shrink-to-fit §10.3.9** des atomes `inline-block`
+  à `width:auto` (`clamp(dispo, min-content, max-content)`
+  via `intrinsic::own_sides`/`min_content_px`/
+  `max_content_px`) : `ul.tags` 978 px → ~87 px.
+  (2) **Fond/bordure d'inline peints par fragment**
+  (`paint_inline_deco`) — l'union des fragments wrappés
+  produisait un blob couvrant le texte voisin ;
+  approximation `box-decoration-break: clone` documentée.
+  (3) **`border-*-color` absent → `currentColor`** (spec)
+  au lieu de noir — les pastilles `a.tag` dont les `var()`
+  vivent derrière `@import` non résolue retombent sur
+  `color`.
+  (4) **§9.2.1.1 complet** : `hoist_blocks` éclate un
+  inline pur autour d'un bloc en flux niché (récursif,
+  `deep` R-24), et un `inline-block`/`inline-flex`…
+  atomique anonymise ses enfants comme un conteneur bloc —
+  `details.caches > summary` ne compte plus une ligne par
+  blanc (byline lobste.rs ~93 px → ~23 px, story ~158 px →
+  ~81-89 px).
+  (5) **Hors-flux exclus de l'itemisation inline** :
+  `absolute`/`fixed` sautés de `size_atomics`/
+  `collect_child`/`assign_*` (série `aid` synchrone) mais
+  conservés dans l'arbre pour `resolve_absolutes` ; tests
+  de positionnement/float lus sur le **style calculé**
+  (`LayoutBox::out_of_flow`, kind-aware : le style cloné
+  d'un `Text`/`AnonymousBlock` n'est pas une position
+  d'élément — corrige le double placement du texte d'un
+  absolu qui a cassé puis réparé `flexbox_align-items-
+  flexstart`). `ComputedStyle` gagne `PartialEq` (style du
+  fragment ≠ style du conteneur = discriminant de
+  décoration). Régressions : `tests/repros.rs` (fixture
+  lobste.rs figée, 25 stories), `tests/boxtree.rs` +
+  `tests/inline.rs` (split bloc-dans-inline, absolu niché,
+  atome + bloc), `tests/display.rs` (déco par fragment,
+  `currentColor`). Cliquet WPT toujours 40/58. Reste :
+  `@import` non résolue (fetch = couture NAVIGATEUR —
+  journal `interface-equipes.md`).
+
 - **Étape 55g — resynchro grand document : trois gardes de
   coût** (`explorer-core`) : le gel terrain mission 12
   (mutation JS par clic sur ~3 000 nœuds → gel > 5 min) —

@@ -140,6 +140,77 @@ fn espace_entre_inlines_preserve() {
 }
 
 #[test]
+fn bloc_dans_inline_eclate_le_parent() {
+    // §9.2.1.1 : un bloc en flux niché dans une boîte inline
+    // la scinde — le bloc remonte au niveau du conteneur
+    // (R-22). Conteneur `div` : dans un `<p>`, le parseur
+    // HTML aurait déjà fermé le paragraphe.
+    let (dom, bx) = tree(
+        "<!doctype html><div class=w>avant <span>dans <div class=in>bloc</div> fin</span> après</div>",
+    );
+    let w = find(&bx, by_tag(&dom, "div")).expect("conteneur");
+    let kinds: Vec<BoxKind> = w.children.iter().map(|c| c.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            BoxKind::AnonymousBlock,
+            BoxKind::Block,
+            BoxKind::AnonymousBlock
+        ],
+        "le <div> interne doit couper la suite en-ligne (anon, div, anon)"
+    );
+    // Les deux moitiés du span restent des boîtes `Inline`.
+    assert_eq!(w.children[0].children[1].kind, BoxKind::Inline);
+    assert_eq!(w.children[2].children[0].kind, BoxKind::Inline);
+}
+
+#[test]
+fn absolu_ne_eclate_pas_inline() {
+    // `position:absolute` est hors flux — il NE scinde PAS la
+    // boîte inline : il reste niché dans le span pour que son
+    // bloc conteneur de positionnement reste correct
+    // (R-22 — `#flag_dropdown` sous `.dropdown_parent`).
+    let (dom, bx) = tree(
+        "<!doctype html><style>.dp{position:relative}.a{position:absolute}</style>\
+         <div class=w>av <span class=dp>x<div class=a>abs</div>y</span> ap</div>",
+    );
+    let span = find(&bx, by_tag(&dom, "span")).expect("span");
+    assert_eq!(span.kind, BoxKind::Inline);
+    // Le span garde le div absolu comme enfant (pas de split).
+    assert!(
+        span.children.iter().any(|c| c.kind == BoxKind::Block),
+        "le div absolu doit rester niché dans le span"
+    );
+    // Et la ligne externe ne contient pas le contenu de
+    // l'absolu : le conteneur a un seul enfant anonyme.
+    let w = find(&bx, by_tag(&dom, "div")).expect("conteneur");
+    assert_eq!(w.children.len(), 1);
+    assert_eq!(w.children[0].kind, BoxKind::AnonymousBlock);
+}
+
+#[test]
+fn inline_block_anonymise_ses_enfants() {
+    // Un `inline-block` = BFC : ses enfants sont anonymisés
+    // comme un conteneur bloc — les blancs entre enfants blocs
+    // disparaissent (R-22 — `details.caches` de lobste.rs
+    // comptait une ligne pleine par enfant blanc : hauteur
+    // 4× la ligne). `details` fermé : la feuille UA masque
+    // tout sauf le <summary> → un seul enfant `Block`.
+    let (dom, bx) = tree(
+        "<!doctype html><style>.c{display:inline-block}</style>\
+         <div class=w><details class=c> <summary>sommaire</summary> <div>suite</div> </details></div>",
+    );
+    let d = find(&bx, by_tag(&dom, "details")).expect("details");
+    assert_eq!(d.kind, BoxKind::Inline);
+    let kinds: Vec<BoxKind> = d.children.iter().map(|c| c.kind).collect();
+    assert_eq!(
+        kinds,
+        [BoxKind::Block],
+        "seul le summary — blancs purgés (était [Text, Block, Text, Text])"
+    );
+}
+
+#[test]
 fn list_item_est_bloc_avec_puce() {
     let (dom, bx) = tree("<!doctype html><ul><li>un</li><li>deux</li></ul>");
     let li = find(&bx, by_tag(&dom, "li")).expect("li");

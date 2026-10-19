@@ -146,7 +146,7 @@ fn text_px(st: &ComputedStyle, text: &str, fs: f32, ctx: &BlockCtx, max: bool) -
 /// Marges + padding + bordures horizontales propres d'un
 /// enfant — comptées dans l'intrinsèque du parent (la boîte
 /// de marge déborde la content box du conteneur).
-fn own_sides(c: &LayoutBox, fs: f32, ctx: &BlockCtx) -> f32 {
+pub(crate) fn own_sides(c: &LayoutBox, fs: f32, ctx: &BlockCtx) -> f32 {
     let st = &c.style;
     let cfs = font_size_px(st, fs, ctx);
     let mut acc = 0.0f32;

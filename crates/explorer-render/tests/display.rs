@@ -702,3 +702,54 @@ fn background_fixed_ancre_au_viewport() {
     // Viewport à scroll 0 : origine = (0,0) + position 0.
     assert_eq!(origin, (0.0, 0.0));
 }
+
+#[test]
+fn deco_inline_peinte_par_fragment_pas_par_union() {
+    // R-22 : le fond/la bordure d'un lien qui se coupe sur
+    // deux lignes doit être repeint PAR FRAGMENT (rect de
+    // chaque fragment), pas une fois sur l'union — sinon le
+    // fond couvre toute la zone entre les deux morceaux.
+    let (_d, _b, items) = dl(
+        "<p>pré <a>aaaa bbbb cccc dddd eeee ffff gggg</a> post</p>",
+        "p{font-size:10px;width:80px} a{background-color:#00ff00;border:1px solid #000000;padding:2px}",
+    );
+    let fills: Vec<(f32, f32)> = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::FillRect { rect, color } if color.g > 200 => {
+                Some((rect.width, rect.height))
+            }
+            _ => None,
+        })
+        .collect();
+    // Le lien se coupe sur ≥2 lignes → ≥2 fills verts, chacun
+    // large de son fragment + padding (≤ 80px conteneur), et
+    // bien plus étroit qu'une union traversière.
+    assert!(fills.len() >= 2, "un fill par fragment : {fills:?}");
+    for (w, h) in &fills {
+        assert!(*w <= 80.0, "fill {w}×{h} > conteneur");
+        assert!(*h <= 20.0, "fill hauteur fragment ~16, mesuré {h}");
+    }
+}
+
+#[test]
+fn border_color_sans_couleur_suit_currentcolor() {
+    // R-22 : `border:1px solid` sans couleur → currentColor
+    // = `color` de l'élément (≠ noir). Avant : BLACK codé en
+    // dur → pastilles lobste.rs sombres.
+    let (_d, _b, items) = dl(
+        "<div id=x>texte</div>",
+        "#x{color:#123456;border:1px solid}",
+    );
+    let colors = items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::Border { colors, .. } => Some(*colors),
+            _ => None,
+        })
+        .expect("item bordure");
+    // #123456 = rgb(18,52,86).
+    assert_eq!(colors[0].r, 18);
+    assert_eq!(colors[0].g, 52);
+    assert_eq!(colors[0].b, 86, "currentColor attendu : {colors:?}");
+}

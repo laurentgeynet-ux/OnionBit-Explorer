@@ -1247,13 +1247,21 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
     let count = bx.children.len();
     for i in 0..count {
         // Lire le STYLE (`c.position` reste `Static` tant que
-        // l'enfant n'a pas été posé — bootstrap du champ).
+        // l'enfant n'a pas été posé — bootstrap du champ) —
+        // via `out_of_flow` : une boîte `Text`/`AnonymousBlock`
+        // clonant `position:absolute` du parent n'est PAS un
+        // élément positionné (R-22 — sinon le texte d'un
+        // absolu était re-posé une deuxième fois, décalé des
+        // offsets de l'ancêtre à chaque niveau).
         let (pos, cst) = {
             let c = &bx.children[i];
-            let p = match c.style.get("position") {
-                Some("absolute") => Position::Absolute,
-                Some("fixed") => Position::Fixed,
-                _ => Position::Static,
+            let p = if c.out_of_flow() {
+                match c.style.get("position") {
+                    Some("fixed") => Position::Fixed,
+                    _ => Position::Absolute,
+                }
+            } else {
+                Position::Static
             };
             (p, c.style.clone())
         };

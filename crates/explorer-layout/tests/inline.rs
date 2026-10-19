@@ -185,3 +185,67 @@ fn baseline_aligne_les_fragments() {
         assert!((b - bs[0]).abs() < 0.6, "baselines {bs:?}");
     }
 }
+
+#[test]
+fn absolu_niche_ne_gonfle_pas_la_ligne() {
+    // Un `position:absolute` niché dans un inline ne produit
+    // aucun item dans la ligne englobante — sinon son
+    // encombrement gonflerait la hauteur de ligne (R-22 :
+    // lobste.rs, ligne de byline à ~4 lignes de haut).
+    // Conteneur `div` : dans un `<p>`, le parseur HTML
+    // fermerait le paragraphe avant le <div>.
+    let (dom, bx) = laid(
+        "<!doctype html><div class=w>av <span class=dp>x<div class=a>absolu</div></span> ap</div>",
+        ".w{font-size:10px} .dp{position:relative} .a{position:absolute;top:40px;left:0}",
+    );
+    let w = find(&bx, by_tag(&dom, "div"));
+    let anon = &w.children[0];
+    assert_eq!(anon.lines.len(), 1);
+    let h = anon.lines[0].rect.height;
+    assert!(h < 15.0, "ligne ~12 px attendue, mesuré {h}");
+    // Et l'absolu a bien été posé à top:40px sous le span
+    // `position:relative` (son bloc conteneur).
+    let span = find(&bx, by_tag(&dom, "span"));
+    let a_node = {
+        let mut q = vec![dom.document()];
+        let mut hit = None;
+        while let Some(n) = q.pop() {
+            if dom.attribute(n, "class").ok().flatten().as_deref() == Some("a") {
+                hit = Some(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+        hit.expect("div.a")
+    };
+    let abs = find(&bx, a_node);
+    assert!(
+        (abs.rect.y - span.rect.y - 40.0).abs() < 1.0,
+        "abs y={:?} span y={:?}",
+        abs.rect,
+        span.rect
+    );
+}
+
+#[test]
+fn inline_block_avec_bloc_ne_gonfle_pas() {
+    // `details.caches` (lobste.rs) : un atome `inline-block`
+    // dont les enfants blocs + blancs doivent compter UNE
+    // fois le contenu, pas une ligne par enfant blanc.
+    let (dom, bx) = laid(
+        "<!doctype html><div class=w>av <span class=c> <b>uni</b> <i>deux</i> </span> ap</div>",
+        ".w{font-size:10px} .c{display:inline-block} b,i{display:block}",
+    );
+    let w = find(&bx, by_tag(&dom, "div"));
+    let c = find(&bx, by_tag(&dom, "span"));
+    // Deux lignes de contenu (b puis i), pas +3 lignes de blancs.
+    assert!(
+        c.rect.height < 30.0,
+        "atome ~2×12 px attendu, mesuré {}",
+        c.rect.height
+    );
+    // La ligne du conteneur reste proche de la hauteur atome.
+    let h = w.children[0].lines[0].rect.height;
+    assert!(h < 30.0, "hauteur de ligne {h}");
+}

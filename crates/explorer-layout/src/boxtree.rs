@@ -178,6 +178,21 @@ impl LayoutBox {
         self.style.get_or("display", "block")
     }
 
+    /// Hors du flux normal : `position: absolute|fixed` sur une
+    /// boîte d'**élément**. `position` n'est pas hérité en CSS,
+    /// mais les boîtes `Text`/`AnonymousBlock` clonent le style
+    /// complet du parent — leur `position` copiée ne les rend
+    /// PAS positionnées (R-22 : le texte d'un `span` absolu
+    /// était sauté du flux en-ligne ET re-posé comme absolu
+    /// une deuxième fois). `bx.position` n'est renseigné qu'au
+    /// layout — cette lecture du style calculé vaut à tout
+    /// moment.
+    #[must_use]
+    pub fn out_of_flow(&self) -> bool {
+        !matches!(self.kind, BoxKind::Text | BoxKind::AnonymousBlock)
+            && matches!(self.style.get("position"), Some("absolute" | "fixed"))
+    }
+
     /// Dump texte indenté pour debug (format wireframe —
     /// stable pour les golden tests). `dom` sert à résoudre
     /// les noms de balise.
@@ -558,9 +573,24 @@ fn wrap_items(children: Vec<LayoutBox>, parent_style: &ComputedStyle) -> Vec<Lay
 /// Post-traitement des enfants selon le conteneur :
 /// flex/grid → items (§9.7 blockification), autre bloc →
 /// anonymisation des suites en-ligne (§9.2.1.1), inline →
-/// enfants directs.
+/// enfants directs — **sauf** l'inline **atomique**
+/// (`inline-block`/`inline-table`/remplacé), qui établit un
+/// contexte de formatage bloc : ses enfants sont anonymisés
+/// pareil (sinon les blancs inter-blocs compteraient chacun
+/// une ligne pleine au flux bloc — R-22 : `details.caches`
+/// de lobste.rs, hauteur 4× la ligne).
 fn wrap_children(children: Vec<LayoutBox>, style: &ComputedStyle, kind: BoxKind) -> Vec<LayoutBox> {
-    if kind.is_inline_level() {
+    // §9.2.1.1 (2ᵉ moitié) : un bloc en flux niché dans une
+    // boîte inline éclate celle-ci — hissage récursif au niveau
+    // du conteneur AVANT anonymisation, pour que le bloc
+    // coupe proprement la suite en-ligne (R-22).
+    let children: Vec<LayoutBox> = children.into_iter().flat_map(hoist_blocks).collect();
+    let atomic_inline = kind == BoxKind::Inline
+        && matches!(
+            style.get("display"),
+            Some("inline-block" | "inline-flex" | "inline-grid" | "inline-table")
+        );
+    if kind.is_inline_level() && !atomic_inline {
         return children;
     }
     if matches!(
@@ -571,6 +601,92 @@ fn wrap_children(children: Vec<LayoutBox>, style: &ComputedStyle, kind: BoxKind)
     } else {
         wrap_anonymous(children, style)
     }
+}
+
+/// §9.2.1.1 : un enfant **bloc en flux** d'une boîte de flux
+/// en-ligne (`inline` pur, ou bloc anonyme après
+/// anonymisation) la scinde en morceaux autour de lui — le
+/// bloc est hissé au niveau du parent. La récursion fait
+/// remonter un bloc profond niveau par niveau (span → a →
+/// conteneur). Ne se scindent pas : les atomes
+/// (`inline-block`, `inline-table`, `inline-flex`, remplacés)
+/// — contexte de formatage propre — ni les boîtes hors-flux
+/// (`absolute`/`fixed`). (R-22 : `span.dropdown_parent >
+/// div` de lobste.rs gonflait sa ligne à ~93 px.)
+fn hoist_blocks(bx: LayoutBox) -> Vec<LayoutBox> {
+    let mut bx = bx;
+    // `take` : un move de champ est impossible (`LayoutBox`
+    // implémente `Drop` — itératif, R-24).
+    let kids = std::mem::take(&mut bx.children);
+    bx.children = kids
+        .into_iter()
+        // Arête ∝ profondeur de l'arbre → pile garantie (R-24).
+        .flat_map(|c| explorer_common::deep(|| hoist_blocks(c)))
+        .collect();
+    let inline_container = bx.kind == BoxKind::AnonymousBlock
+        || (bx.kind == BoxKind::Inline
+            && bx.intrinsic.is_none()
+            && !matches!(
+                bx.display(),
+                "inline-block" | "inline-flex" | "inline-grid" | "inline-table"
+            )
+            && !bx.out_of_flow());
+    if !inline_container || !bx.children.iter().any(is_inflow_block) {
+        return vec![bx];
+    }
+    let mut out = Vec::new();
+    let mut seg: Vec<LayoutBox> = Vec::new();
+    for c in std::mem::take(&mut bx.children) {
+        if is_inflow_block(&c) {
+            if !seg.is_empty() && !all_whitespace(&seg) {
+                out.push(split_piece(&bx, &mut seg));
+            } else {
+                seg.clear();
+            }
+            out.push(c);
+        } else {
+            seg.push(c);
+        }
+    }
+    if !seg.is_empty() && !all_whitespace(&seg) {
+        out.push(split_piece(&bx, &mut seg));
+    }
+    out
+}
+
+/// Morceau d'une boîte inline scindée : clone de `bx` vidé
+/// de sa pose (rect/lignes), portant `seg` comme enfants —
+/// `..bx` est impossible (`LayoutBox` implémente `Drop`,
+/// drop itératif R-24).
+fn split_piece(bx: &LayoutBox, seg: &mut Vec<LayoutBox>) -> LayoutBox {
+    let mut p = bx.clone();
+    p.children = std::mem::take(seg);
+    p.lines.clear();
+    p.rect = Rect::default();
+    p
+}
+
+/// `true` pour un enfant de niveau bloc **en flux** — il
+/// échappe au flux en-ligne (un flottant ou un positionné
+/// reste à sa place dans la boîte inline). `position`/`float`
+/// se lisent sur le style calculé : les champs de `LayoutBox`
+/// ne sont renseignés qu'au layout (`apply_layout_metadata`).
+fn is_inflow_block(c: &LayoutBox) -> bool {
+    !c.out_of_flow()
+        && !matches!(c.style.get("float"), Some("left" | "right"))
+        && !c.kind.is_inline_level()
+}
+
+/// Suite entièrement blanche — un morceau de scission qui ne
+/// contient que des espaces ne produit pas de boîte (même
+/// règle que `flush_run`).
+fn all_whitespace(seg: &[LayoutBox]) -> bool {
+    seg.iter().all(|b| {
+        b.kind == BoxKind::Text
+            && b.text
+                .as_deref()
+                .is_some_and(|t| crate::text::trim_css_ws(t).is_empty())
+    })
 }
 
 /// Enveloppe les suites de niveau en-ligne dans des blocs

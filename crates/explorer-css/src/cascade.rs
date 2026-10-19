@@ -157,7 +157,7 @@ pub struct StyleEngine {
 /// Computed style d'un nœud : propriété (minuscules) → valeur
 /// texte résolue (mot-clés `inherit`/`initial`/`unset` déjà
 /// réduits ; le *typage* est l'affaire de l'étape 16).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ComputedStyle {
     props: HashMap<String, String>,
 }

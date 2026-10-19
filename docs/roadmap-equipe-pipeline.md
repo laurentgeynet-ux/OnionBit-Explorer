@@ -210,13 +210,34 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   le texte est posé en ligne et émis en `DisplayItem::Text`
   (test `controle_input_peint_sa_valeur` côté render).
   Réactivation du test NAV = à leur commit (fichier WIP).
-- [ ] **R-22. Décoration de lien peinte par fragment**
-  (bug terrain mission 6, lobste.rs — cosmétique) : titres
-  de stories en « pastilles sombres » + interlignes ~180 px.
-  Suspect : R-18 fait porter à chaque `Fragment` le
-  `ComputedStyle` de son item inline — vérifier qu'une
-  bordure/fond/décoration de l'élément n'est pas repeinte
-  par fragment au lieu d'une fois sur la boîte propriétaire.
+- [x] **R-22. Décoration de lien peinte par fragment +
+  flux en-ligne réel** (bug terrain mission 6, lobste.rs) :
+  trois défauts confondus sur la page réelle. **Livré** :
+  (1) **shrink-to-fit §10.3.9** des atomes `inline-block`
+  (`ul.tags` : 978 px conteneur → ~87 px — les interlignes
+  ~180 px venaient de là) ; (2) **fond/bordure inline
+  peints par fragment** (`paint_inline_deco`) au lieu de
+  l'union des fragments wrappés (blob sur le texte voisin) ;
+  (3) **`border-*-color` absent → `currentColor`** (spec),
+  pas noir — les `var(--color-tag-*)` derrière `@import`
+  non résolue retombent proprement ; (4) **§9.2.1.1** : un
+  bloc en flux niché dans un inline pur éclate la boîte
+  (`hoist_blocks` — `details.caches > summary` : ligne de
+  byline ~93 px → ~23 px) et un `inline-block` établit son
+  contexte bloc (enfants anonymisés — les blancs ne
+  comptent plus une ligne chacun) ; (5) **hors-flux hors
+  de la ligne** : `absolute`/`fixed` sautés de
+  l'itemisation inline tout en restant nichés pour
+  `resolve_absolutes`, avec garde **kind-aware**
+  (`LayoutBox::out_of_flow` — le style cloné d'un `Text`/
+  `AnonymousBlock` n'est pas une position d'élément, sinon
+  le texte d'un absolu était posé deux fois).
+  Régressions : `tests/repros.rs` (fixture lobste.rs figée,
+  25 stories), `boxtree.rs`/`inline.rs` (split, absolu
+  niché, `inline-block` + bloc), `display.rs` (déco par
+  fragment, `currentColor`). Reste : `@import` jamais
+  fetchée — les couleurs `--color-tag-*` restent non
+  résolues (couture NAVIGATEUR, journal).
 - [x] **R-23. Valeur de contrôle peinte à (0,0)** (résidu
   R-21, terrain mission 7 — fixture `repros/form.html` : le
   glyphe tapé apparaît mais chevauche le `<h1>` en haut à

@@ -25,7 +25,7 @@
 use explorer_css::value::Color;
 use explorer_css::value::{parse_color, parse_length};
 use explorer_layout::font::ShapedRun;
-use explorer_layout::{BoxKind, LayoutBox, Overflow, Position, Rect};
+use explorer_layout::{BoxKind, Fragment, LayoutBox, Overflow, Position, Rect};
 
 /// Une primitive de dessin, dans l'ordre de peinture.
 #[derive(Debug, Clone)]
@@ -557,6 +557,31 @@ fn prop_px(st: &explorer_css::ComputedStyle, prop: &str, fallback: f32) -> f32 {
     }
 }
 
+/// Couleur de bordure `side` (`border-top-color`…) — initiale
+/// spec = **`currentcolor`** : une déclaration absente (ex.
+/// `var()` non résolue retirée à la cascade) retombe sur la
+/// `color` de la boîte, pas sur du noir (R-22 — les pastilles
+/// `a.tag` de lobste.rs peignaient un cadre noir).
+fn border_color_of(st: &explorer_css::ComputedStyle, side: &str) -> Color {
+    st.get(side)
+        .and_then(parse_color)
+        .or_else(|| st.get("color").and_then(parse_color))
+        .unwrap_or(Color::BLACK)
+}
+
+/// Épaisseur de bordure `side` (`top`/`right`/…) — 0 si le
+/// style du côté est absent ou `none` (`border: solid` sans
+/// épaisseur peint `medium` = 3 px).
+fn border_side_w(st: &explorer_css::ComputedStyle, side: &str) -> f32 {
+    if st
+        .get(&format!("border-{side}-style"))
+        .is_none_or(|s| s.trim() == "none")
+    {
+        return 0.0;
+    }
+    prop_px(st, &format!("border-{side}-width"), 3.0)
+}
+
 /// `background-position` → décalage (px) de la tuile (0,0)
 /// dans la zone de positionnement `area` (CSS2 §14.2.1 :
 /// `%` mesure `(zone - image)` ; mots-clés = 0/50/100 % ;
@@ -623,11 +648,25 @@ fn paint_self(
     // ou la bordure du parent serait redessinée sur chaque
     // fragment de texte — §9.2.1.1).
     let anonymous = matches!(bx.kind, BoxKind::AnonymousBlock | BoxKind::Text);
+    // Boîte `display:inline` pure (ni atome ni remplacé) :
+    // `bx.rect` n'est que l'UNION de ses fragments — un fond
+    // ou une bordure peint dessus produirait un blob couvrant
+    // le texte voisin (R-22). Sa décoration est émise par
+    // fragment dans la boucle des lignes (voir plus bas).
+    // `display()` retombe sur "block" pour un élément sans
+    // déclaration — le discriminant fiable est `kind` : une
+    // boîte `Inline` non atomique (pas `inline-block`, pas
+    // remplacée) est un pur conteneur de flux en-ligne.
+    let inline_flow = bx.kind == BoxKind::Inline
+        && bx.intrinsic.is_none()
+        && bx.display() != "inline-block"
+        && bx.display() != "inline-flex"
+        && bx.display() != "inline-table";
     // Fond : `background-color` non transparente, puis
     // `background-image` décodée (au-dessus de la couleur,
     // sous la bordure — App. E ; origine padding box ≈ bord
     // interne de la bordure gauche/haute).
-    if !anonymous {
+    if !anonymous && !inline_flow {
         if let Some(c) = bx.style.get("background-color").and_then(parse_color) {
             if c.a > 0 {
                 items.push(DisplayItem::FillRect { rect, color: c });
@@ -669,34 +708,22 @@ fn paint_self(
         }
     }
     // Bordures : 4 côtés, épaisseur > 0 et style non `none`.
-    // Sémantique de `border_px` (layout) : la largeur ne
-    // compte que si le style du côté est déclaré non-`none` —
-    // l'initiale `medium` vaut alors 3 px (`border: solid`
-    // sans épaisseur peint 3 px).
-    let side_w = |side: &str| -> f32 {
-        let style_prop = format!("border-{side}-style");
-        if bx.style.get(&style_prop).is_none_or(|s| s.trim() == "none") {
-            return 0.0;
-        }
-        prop_px(&bx.style, &format!("border-{side}-width"), 3.0)
-    };
-    let widths = if anonymous {
+    // Sémantique de `border_side_w` : la largeur ne compte que
+    // si le style du côté est déclaré non-`none` — l'initiale
+    // `medium` vaut alors 3 px (`border: solid` sans épaisseur
+    // peint 3 px).
+    let widths = if anonymous || inline_flow {
         [0.0; 4]
     } else {
         [
-            side_w("top"),
-            side_w("right"),
-            side_w("bottom"),
-            side_w("left"),
+            border_side_w(&bx.style, "top"),
+            border_side_w(&bx.style, "right"),
+            border_side_w(&bx.style, "bottom"),
+            border_side_w(&bx.style, "left"),
         ]
     };
     if widths.iter().any(|v| *v > 0.0) {
-        let color_of = |side: &str| {
-            bx.style
-                .get(side)
-                .and_then(parse_color)
-                .unwrap_or(Color::BLACK)
-        };
+        let color_of = |side: &str| border_color_of(&bx.style, side);
         items.push(DisplayItem::Border {
             rect,
             widths,
@@ -725,6 +752,15 @@ fn paint_self(
             for frag in &line.fragments {
                 if frag.atomic {
                     continue;
+                }
+                // R-22 : fond + bordure de l'élément INLINE
+                // propriétaire, tranchés par fragment. Le texte
+                // direct du conteneur porte `bx.style` (déjà
+                // peint sur la boîte entière) → sauté ; un
+                // fragment de style différent appartient à un
+                // élément inline avec ses propres déclarations.
+                if frag.style != bx.style {
+                    paint_inline_deco(frag, items, off);
                 }
                 if let Some(run) = &frag.shaped {
                     let ink = frag
@@ -764,6 +800,76 @@ fn paint_self(
                 color: ink,
             });
         }
+    }
+}
+
+/// Décorations d'un fragment d'élément inline (R-22) : fond et
+/// bordure sur le rect du fragment étendu de son padding et des
+/// épaisseurs de bordure.
+///
+/// Approximation « `box-decoration-break: clone` » documentée :
+/// chaque fragment porte les 4 côtés — la spec `slice` ouvre
+/// les bords verticaux aux coupures de ligne ; et `em`/`rem`
+/// ≈ font-size du fragment (pas de contexte racine ici).
+fn paint_inline_deco(frag: &Fragment, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
+    let st = &frag.style;
+    let fs = prop_px(st, "font-size", 16.0);
+    #[allow(clippy::cast_possible_truncation)]
+    let pad = |name: &str| -> f32 {
+        let Some(l) = parse_length(st.get_or(name, "")) else {
+            return 0.0;
+        };
+        match l.unit.px_factor() {
+            Some(f) => (l.value * f) as f32,
+            None => l.value as f32 * fs,
+        }
+    };
+    let l = pad("padding-left") + border_side_w(st, "left");
+    let r = pad("padding-right") + border_side_w(st, "right");
+    let t = pad("padding-top") + border_side_w(st, "top");
+    let b = pad("padding-bottom") + border_side_w(st, "bottom");
+    let outer = shifted(
+        Rect {
+            x: frag.rect.x - l,
+            y: frag.rect.y - t,
+            width: frag.rect.width + l + r,
+            height: frag.rect.height + t + b,
+        },
+        off,
+    );
+    if let Some(c) = st.get("background-color").and_then(parse_color) {
+        if c.a > 0 {
+            items.push(DisplayItem::FillRect {
+                rect: outer,
+                color: c,
+            });
+        }
+    }
+    // `background-image` sur élément inline : hors portée
+    // (rare — la plupart des fonds inline sont des couleurs).
+    let widths = [
+        border_side_w(st, "top"),
+        border_side_w(st, "right"),
+        border_side_w(st, "bottom"),
+        border_side_w(st, "left"),
+    ];
+    if widths.iter().any(|v| *v > 0.0) {
+        items.push(DisplayItem::Border {
+            rect: outer,
+            widths,
+            colors: [
+                border_color_of(st, "border-top-color"),
+                border_color_of(st, "border-right-color"),
+                border_color_of(st, "border-bottom-color"),
+                border_color_of(st, "border-left-color"),
+            ],
+            styles: [
+                border_style(st.get("border-top-style")),
+                border_style(st.get("border-right-style")),
+                border_style(st.get("border-bottom-style")),
+                border_style(st.get("border-left-style")),
+            ],
+        });
     }
 }
 
