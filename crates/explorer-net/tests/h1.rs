@@ -455,3 +455,39 @@ async fn stream_reusable_conn_returns_to_pool() {
     assert!(resp2.reused_connection);
     let _ = srv;
 }
+
+/// Corps chunked dont la connexion coupe juste après `0\r\n`
+/// — trailers absents puis FIN (étape 53c, `close_notify`
+/// absent côté TLS) : le corps est complet, pas d'erreur.
+#[tokio::test]
+async fn chunked_close_after_last_chunk_is_clean() {
+    let srv = serve(
+        vec!["HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n"],
+        false,
+    )
+    .await;
+    let resp = client()
+        .fetch(&Request::get(url(srv.port, "/")))
+        .await
+        .unwrap();
+    assert_eq!(resp.body, b"abc");
+    let _ = srv;
+}
+
+/// Même scénario via `fetch_stream` — la fin streamée est
+/// propre elle aussi.
+#[tokio::test]
+async fn stream_chunked_close_after_last_chunk_is_clean() {
+    let srv = serve(
+        vec!["HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n"],
+        false,
+    )
+    .await;
+    let resp = client()
+        .fetch_stream(&Request::get(url(srv.port, "/")))
+        .await
+        .unwrap();
+    let (_pieces, all) = collect(resp.body).await;
+    assert_eq!(all, b"abc");
+    let _ = srv;
+}

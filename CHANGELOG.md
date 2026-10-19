@@ -9,6 +9,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 53c — Tolérance TLS `close_notify` absent**
+  (`explorer-net`, bug terrain, repro : craigslist.org —
+  `TLS unexpected-eof`) : `TolerantEof` wrappe le `TlsStream`
+  — un `UnexpectedEof` en lecture devient une fin de flot
+  propre, le cadrage HTTP tranche ensuite : `Content-Length`
+  ou chunk incomplet → `TruncatedBody` conservé ; corps
+  délimité par la coupure → complet. Les autres erreurs
+  (`ConnectionReset`…) ne sont pas masquées. Cohérent en
+  plus : EOF toléré dans les trailers chunked finaux
+  (`read_line_opt`/`stream_line_opt`, corps complet dès
+  `0\r\n` — chemins bufferisé et streamé). Tests : 2
+  unitaires (mapping UnexpectedEof→EOF, erreurs autres
+  intactes) + 2 intégration (chunk `0` suivi de coupure,
+  buffered + stream).
 - **Étape 53b — Charset des sous-ressources** (bug terrain
   `2693959`, repro example.com) : scripts, modules et feuilles
   liées ne passent plus par le sniffer **HTML** — son repli

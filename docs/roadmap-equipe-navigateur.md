@@ -133,7 +133,7 @@ encode PNG streamé. À trancher avant l'extension du smoke.
   `@charset`/transport → UTF-8 ; jamais le sniffer HTML hors
   document. Borné — régression vérifiée sur example.com.
 
-- [ ] **Étape 53c. Tolérance TLS `close_notify` absent**
+- [x] **Étape 53c. Tolérance TLS `close_notify` absent**
   (bug terrain, repro : craigslist.org — `TLS unexpected-eof`)
   : un pair qui ferme TCP sans `close_notify` doit terminer
   le corps proprement quand la longueur est connue (CL/CD

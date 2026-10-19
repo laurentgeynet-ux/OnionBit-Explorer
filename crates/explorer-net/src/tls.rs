@@ -14,11 +14,14 @@
 //! le choix audité de-facto et se build sous Windows sans cmake).
 
 use std::io;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, RootCertStore};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_rustls::TlsConnector as RustlsConnector;
 
 use crate::error::{NetError, NetResult};
@@ -111,7 +114,7 @@ impl Connector for TlsConnector {
     async fn connect(&self, scheme: &str, host: &str, port: u16) -> NetResult<Box<dyn IoStream>> {
         match scheme {
             "http" => self.tcp.connect(scheme, host, port).await,
-            "https" => Ok(Box::new(self.connect_tls(host, port).await?)),
+            "https" => Ok(Box::new(TolerantEof(self.connect_tls(host, port).await?))),
             other => Err(NetError::UnsupportedScheme(other.to_string())),
         }
     }
@@ -135,9 +138,66 @@ impl Connector for TlsConnector {
         let tls = self.connect_tls(host, port).await?;
         let alpn = tls.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
         Ok(crate::h1::Conn {
-            stream: Box::new(tls),
+            stream: Box::new(TolerantEof(tls)),
             alpn,
         })
+    }
+}
+
+/// Flot TLS tolérant la fermeture TCP sans `close_notify`
+/// (étape 53c — vieux serveurs/CDN, repro : craigslist.org,
+/// `TLS unexpected-eof`). Un `UnexpectedEof` en lecture devient
+/// une fin de flot propre : le cadrage HTTP tranche ensuite —
+/// `Content-Length` ou chunk incomplet → `TruncatedBody`
+/// conservé ; corps délimité par la coupure → complet (la
+/// coupure EST le délimiteur). L'écriture n'est pas touchée :
+/// écrire sur une connexion coupée reste une erreur.
+struct TolerantEof<S>(S);
+
+// Jamais de projection pinned : le wrapper peut être `Unpin`
+// inconditionnellement (`TlsStream` ne l'exige pas pour poller).
+impl<S> Unpin for TolerantEof<S> {}
+
+impl<S: AsyncRead + Unpin> AsyncRead for TolerantEof<S> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        match Pin::new(&mut self.0).poll_read(cx, buf) {
+            Poll::Ready(Err(e)) if e.kind() == io::ErrorKind::UnexpectedEof => Poll::Ready(Ok(())),
+            other => other,
+        }
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for TolerantEof<S> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.0).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.0).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.0).poll_shutdown(cx)
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.0).poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.0.is_write_vectored()
     }
 }
 
@@ -148,5 +208,61 @@ fn tls_message(e: &io::Error) -> String {
         format!("{inner}")
     } else {
         format!("{e}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncReadExt;
+
+    /// Flot qui livre `data` une fois puis coupe en
+    /// `UnexpectedEof` — simule un pair TLS fermé sans
+    /// `close_notify` (étape 53c).
+    struct CutStream(Option<Vec<u8>>, io::ErrorKind);
+
+    impl AsyncRead for CutStream {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            match self.0.take() {
+                Some(data) => {
+                    buf.put_slice(&data);
+                    Poll::Ready(Ok(()))
+                }
+                None => Poll::Ready(Err(io::Error::new(self.1, "coupure simulée"))),
+            }
+        }
+    }
+
+    /// `UnexpectedEof` → fin de flot propre : les octets déjà
+    /// lus sont servis, la lecture suivante rend `Ok(0)`.
+    #[tokio::test]
+    async fn unexpected_eof_becomes_clean_eof() {
+        let mut s = TolerantEof(CutStream(
+            Some(b"abc".to_vec()),
+            io::ErrorKind::UnexpectedEof,
+        ));
+        let mut buf = [0u8; 8];
+        let n = s.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"abc");
+        let n = s.read(&mut buf).await.unwrap();
+        assert_eq!(n, 0);
+    }
+
+    /// Les autres erreurs ne sont PAS masquées — une vraie
+    /// coupure en vol (`ConnectionReset`) remonte en erreur.
+    #[tokio::test]
+    async fn other_errors_pass_through() {
+        let mut s = TolerantEof(CutStream(
+            Some(b"ab".to_vec()),
+            io::ErrorKind::ConnectionReset,
+        ));
+        let mut buf = [0u8; 8];
+        let _ = s.read(&mut buf).await.unwrap();
+        let err = s.read(&mut buf).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::ConnectionReset);
     }
 }

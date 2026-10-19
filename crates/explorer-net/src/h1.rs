@@ -595,6 +595,27 @@ impl H1Client {
         Ok(body)
     }
 
+    /// `read_line` qui rend `None` à EOF au lieu d'échouer —
+    /// fin légitime dans les trailers finaux optionnels
+    /// (étape 53c, `close_notify` absent).
+    async fn read_line_opt(&self, req: &Request, conn: &mut Pooled) -> NetResult<Option<String>> {
+        loop {
+            if let Some(i) = find_seq(&conn.buf, b"\r\n") {
+                let line: Vec<u8> = conn.buf.drain(..i + 2).collect();
+                return Ok(Some(String::from_utf8_lossy(&line).into_owned()));
+            }
+            if conn.buf.len() > self.cfg.max_head_bytes {
+                return Err(NetError::InvalidChunked("ligne > budget en-tête"));
+            }
+            let mut chunk = [0u8; 8192];
+            let n = self.io(req, conn.stream.read(&mut chunk)).await?;
+            if n == 0 {
+                return Ok(None);
+            }
+            conn.buf.extend_from_slice(&chunk[..n]);
+        }
+    }
+
     /// `Transfer-Encoding: chunked` — parse `<hex>\r\n<data>\r\n`
     /// jusqu'au chunk `0` + trailers terminés par `\r\n`.
     async fn read_chunked(&self, req: &Request, conn: &mut Pooled) -> NetResult<Vec<u8>> {
@@ -614,13 +635,15 @@ impl H1Client {
                 return Err(NetError::BodyTooLarge(self.cfg.max_body_bytes));
             }
             if size == 0 {
-                // Trailers jusqu'à ligne vide.
-                loop {
-                    let l = self.read_line(req, conn).await?;
+                // Trailers optionnels : ligne vide ou coupure
+                // terminent — la fin de corps est acquise à
+                // `0\r\n` (étape 53c, `close_notify` absent).
+                while let Some(l) = self.read_line_opt(req, conn).await? {
                     if l == "\r\n" || l.is_empty() {
-                        return Ok(body);
+                        break;
                     }
                 }
+                return Ok(body);
             }
             while conn.buf.len() < size + 2 {
                 let mut chunk = vec![0u8; (size + 2 - conn.buf.len()).min(8192)];
@@ -824,12 +847,13 @@ impl BodyTask {
                 return Err(NetError::BodyTooLarge(total + size));
             }
             if size == 0 {
-                loop {
-                    let l = self.stream_line().await?;
+                // Trailers optionnels — coupure tolérée (53c).
+                while let Some(l) = self.stream_line_opt().await? {
                     if l == "\r\n" || l.is_empty() {
-                        return Ok(());
+                        break;
                     }
                 }
+                return Ok(());
             }
             total += size;
             // `size` octets de données + `\r\n` terminal : les
@@ -856,6 +880,23 @@ impl BodyTask {
                     return Ok(());
                 }
             }
+        }
+    }
+
+    /// `stream_line` qui rend `None` à EOF — fin légitime dans
+    /// les trailers finaux (étape 53c).
+    async fn stream_line_opt(&mut self) -> NetResult<Option<String>> {
+        loop {
+            if let Some(i) = find_seq(&self.conn.buf, b"\r\n") {
+                let line: Vec<u8> = self.conn.buf.drain(..i + 2).collect();
+                return Ok(Some(String::from_utf8_lossy(&line).into_owned()));
+            }
+            let mut chunk = [0u8; 8192];
+            let n = self.ctx.io(self.conn.stream.read(&mut chunk)).await?;
+            if n == 0 {
+                return Ok(None);
+            }
+            self.conn.buf.extend_from_slice(&chunk[..n]);
         }
     }
 
