@@ -412,8 +412,98 @@ impl StyleEngine {
                 _ => continue,
             };
         }
+        // 5. `var()` : substitution depuis les `--*` résolus
+        //    du nœud (hérités étape 3 ou déclarés ici). Une
+        //    référence non résoluble rend la déclaration
+        //    invalide (spec « invalid at computed-value time »
+        //    → on retire la propriété ; pour une héritée, la
+        //    valeur du parent est restaurée).
+        let snap = props.clone();
+        for (k, v) in &mut props {
+            if !k.starts_with("--") && v.contains("var(") {
+                if let Some(resolved) = substitute_vars(v, &snap, 0) {
+                    *v = resolved;
+                } else {
+                    if is_inherited(k) {
+                        if let Some(pv) = parent.and_then(|p| p.get(k)) {
+                            *v = pv.to_string();
+                            continue;
+                        }
+                    }
+                    // Marqueur de retrait — éliminé juste après.
+                    *v = "\u{0}".to_string();
+                }
+            }
+        }
+        props.retain(|_, v| v != "\u{0}");
         ComputedStyle { props }
     }
+}
+
+/// Substitue les `var(--name[, fallback])` de `text` depuis
+/// `props` — `None` si une référence est irrésoluble (pas de
+/// `--name` ni de fallback). Récursion bornée (var dans var,
+/// cycles → échec tolérant).
+fn substitute_vars(text: &str, props: &HashMap<String, String>, depth: u32) -> Option<String> {
+    if depth > 8 {
+        return None;
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("var(") {
+        out.push_str(&rest[..start]);
+        let inner = &rest[start + 4..];
+        // Parenthèses équilibrées — le fallback peut contenir
+        // un `var(` imbriqué.
+        let mut parens = 1usize;
+        let mut end = None;
+        for (i, c) in inner.char_indices() {
+            match c {
+                '(' => parens += 1,
+                ')' => {
+                    parens -= 1;
+                    if parens == 0 {
+                        end = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let end = end?;
+        let body = &inner[..end];
+        rest = &inner[end + 1..];
+        // `--name` + virgule de premier niveau → fallback.
+        let (name, fallback) = split_top_comma(body);
+        let resolved = props
+            .get(name.trim())
+            .and_then(|v| substitute_vars(v, props, depth + 1));
+        // --x résolue (sa propre chaîne var() comprise) →
+        // substitution ; invalide ou absente → fallback.
+        if let Some(v) = resolved {
+            out.push_str(&v);
+        } else {
+            let fb = fallback?;
+            out.push_str(&substitute_vars(fb.trim(), props, depth + 1)?);
+        }
+    }
+    out.push_str(rest);
+    Some(out)
+}
+
+/// Coupe `a, reste` à la première virgule de niveau 0
+/// (parenthèses ignorées) — `None` si pas de virgule.
+fn split_top_comma(s: &str) -> (&str, Option<&str>) {
+    let mut parens = 0usize;
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' => parens += 1,
+            ')' => parens = parens.saturating_sub(1),
+            ',' if parens == 0 => return (&s[..i], Some(&s[i + 1..])),
+            _ => {}
+        }
+    }
+    (s, None)
 }
 
 /// Style calculé du parent élément (mémoïsation locale).

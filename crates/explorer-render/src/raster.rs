@@ -91,9 +91,10 @@ impl ttf_parser::OutlineBuilder for GlyphSink<'_> {
     }
 }
 
-/// Peint un run texte : résolution de la fonte puis contours
-/// de chaque glyphe posés à la plume. `ox`/`oy` et
-/// `size_px` sont déjà en pixels physiques (dpi appliqué).
+/// Peint un run texte : contours de chaque glyphe posés à la
+/// plume. `ox`/`oy`/`size_px` en **px CSS** ; `cur` = dpi ·
+/// transforms actifs — il achève la correspondance vers les
+/// pixels physiques (rotation/échelle héritées du CSS).
 #[allow(clippy::too_many_arguments)]
 fn paint_text(
     pixmap: &mut Pixmap,
@@ -103,7 +104,7 @@ fn paint_text(
     font: &FontRequest,
     color: tiny_skia::Color,
     size_px: f32,
-    scale: f32,
+    cur: Transform,
     fonts: &dyn FontSource,
     clip: Option<&Mask>,
 ) {
@@ -122,14 +123,14 @@ fn paint_text(
     paint.set_color(color);
     let mut pen = ox;
     for g in &run.glyphs {
-        draw_glyph(pixmap, &face, g, pen, oy, gscale, scale, &paint, clip);
-        pen += g.advance * scale;
+        draw_glyph(pixmap, &face, g, pen, oy, gscale, cur, &paint, clip);
+        pen += g.advance;
     }
 }
 
-/// Contour d'un glyphe : unités fonte → px (y fonte monte
-/// vers le haut → inversion) → translation plume/baseline.
-/// Offsets/avances en px CSS → multipliés par `scale`.
+/// Contour d'un glyphe : unités fonte → px CSS (y fonte monte
+/// vers le haut → inversion) → translation plume/baseline →
+/// `cur` vers les pixels physiques. Offsets/avances en px CSS.
 #[allow(clippy::too_many_arguments)]
 fn draw_glyph(
     pixmap: &mut Pixmap,
@@ -138,12 +139,13 @@ fn draw_glyph(
     pen: f32,
     baseline: f32,
     gscale: f32,
-    scale: f32,
+    cur: Transform,
     paint: &Paint,
     clip: Option<&Mask>,
 ) {
-    let tf = Transform::from_translate(pen + g.offset_x * scale, baseline - g.offset_y * scale)
-        .post_concat(Transform::from_scale(gscale, -gscale));
+    let tf = Transform::from_translate(pen + g.offset_x, baseline - g.offset_y)
+        .post_concat(Transform::from_scale(gscale, -gscale))
+        .post_concat(cur);
     let mut pb = PathBuilder::new();
     face.outline_glyph(
         ttf_parser::GlyphId(g.id),
@@ -171,12 +173,17 @@ pub fn rasterize(list: &DisplayList, fonts: &dyn FontSource, scale: f32) -> Opti
     let dpi = Transform::from_scale(scale, scale);
 
     let mut clips: Vec<Mask> = Vec::new();
+    // Pile des `transform` CSS : `cur` = dpi · produit des
+    // matrices actives — recomposé à chaque push/pop (peu de
+    // niveaux en pratique).
+    let mut tfs: Vec<Transform> = Vec::new();
+    let mut cur = dpi;
     for item in &list.items {
         match item {
             DisplayItem::PushClip(r) => {
                 if let Some(mut mask) = Mask::new(w, h) {
                     if let Some(phys) = Rect::from_xywh(r.x, r.y, r.width, r.height)
-                        .and_then(|rr| rr.transform(dpi))
+                        .and_then(|rr| rr.transform(cur))
                     {
                         let path = PathBuilder::from_rect(phys);
                         mask.fill_path(&path, FillRule::Winding, true, Transform::default());
@@ -187,7 +194,15 @@ pub fn rasterize(list: &DisplayList, fonts: &dyn FontSource, scale: f32) -> Opti
             DisplayItem::PopClip => {
                 clips.pop();
             }
-            _ => paint_item(&mut pixmap, item, dpi, scale, fonts, clips.last()),
+            DisplayItem::PushTransform(m) => {
+                tfs.push(*m);
+                cur = tfs.iter().fold(dpi, |acc, t| acc.pre_concat(*t));
+            }
+            DisplayItem::PopTransform => {
+                tfs.pop();
+                cur = tfs.iter().fold(dpi, |acc, t| acc.pre_concat(*t));
+            }
+            _ => paint_item(&mut pixmap, item, cur, fonts, clips.last()),
         }
     }
     Some(Frame {
@@ -204,7 +219,6 @@ fn paint_item(
     pixmap: &mut Pixmap,
     item: &DisplayItem,
     dpi: Transform,
-    scale: f32,
     fonts: &dyn FontSource,
     clip: Option<&Mask>,
 ) {
@@ -234,16 +248,15 @@ fn paint_item(
             color,
             size_px,
         } => {
-            let (ox, oy) = map(dpi, origin.0, origin.1);
             paint_text(
                 pixmap,
-                ox,
-                oy,
+                origin.0,
+                origin.1,
                 run,
                 font,
                 skia_color(*color),
-                size_px * scale,
-                scale,
+                *size_px,
+                dpi,
                 fonts,
                 clip,
             );
@@ -256,34 +269,87 @@ fn paint_item(
             }
         }
         DisplayItem::Image { rect, img } => {
-            paint_image(pixmap, rect, img, scale, clip);
+            paint_image(pixmap, rect, img, dpi, clip);
         }
-        DisplayItem::PushClip(_) | DisplayItem::PopClip => {}
+        DisplayItem::PushClip(_)
+        | DisplayItem::PopClip
+        | DisplayItem::PushTransform(_)
+        | DisplayItem::PopTransform => {}
     }
 }
 
-/// Bitmap `img` blittée dans `rect` — nearest-neighbor
-/// (aucun lissage à cette étape), source-over en espace
-/// prémultiplié, pixels hors clip sauté pixel à pixel.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+/// Bitmap `img` blittée dans `rect` sous la transform `cur`.
+/// `cur` axis-aligned (translate/scale/flip) → boucle
+/// nearest-neighbor historique ; rotation/skew →
+/// `draw_pixmap` affine (buffer prémultiplié temporaire).
 fn paint_image(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,
     img: &crate::DecodedImage,
-    scale: f32,
+    cur: Transform,
+    clip: Option<&Mask>,
+) {
+    if cur.kx == 0.0 && cur.ky == 0.0 && cur.sx != 0.0 && cur.sy != 0.0 {
+        paint_image_axis(pixmap, rect, img, cur, clip);
+        return;
+    }
+    // Affine générale : source prémultipliée → draw_pixmap.
+    let (iw, ih) = (img.width, img.height);
+    let Some(mut src) = Pixmap::new(iw, ih) else {
+        return;
+    };
+    for (i, px) in img.rgba.chunks_exact(4).enumerate() {
+        let a = u32::from(px[3]);
+        // Prémultiplication bornée [0,255] par construction.
+        #[allow(clippy::cast_possible_truncation)]
+        let m = |v: u8| ((u32::from(v) * a + 127) / 255) as u8;
+        if let Some(c) =
+            tiny_skia::PremultipliedColorU8::from_rgba(m(px[0]), m(px[1]), m(px[2]), px[3])
+        {
+            src.pixels_mut()[i] = c;
+        }
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let tf = Transform::from_scale(
+        rect.width.max(0.0) / iw as f32,
+        rect.height.max(0.0) / ih as f32,
+    )
+    .post_concat(Transform::from_translate(rect.x, rect.y))
+    .post_concat(cur);
+    pixmap.draw_pixmap(
+        0,
+        0,
+        src.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        tf,
+        clip,
+    );
+}
+
+/// Blit nearest-neighbor dans la bbox de `rect` transformée
+/// par `cur` (scale/translate/flip — le miroir de contenu
+/// n'est pas reproduit : approximation documentée).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn paint_image_axis(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    img: &crate::DecodedImage,
+    cur: Transform,
     clip: Option<&Mask>,
 ) {
     let (pw, ph) = (
         i32::try_from(pixmap.width()).unwrap_or(i32::MAX),
         i32::try_from(pixmap.height()).unwrap_or(i32::MAX),
     );
-    let (x0, y0) = (
-        (rect.x * scale).round() as i32,
-        (rect.y * scale).round() as i32,
-    );
+    let Some(phys) =
+        Rect::from_xywh(rect.x, rect.y, rect.width, rect.height).and_then(|r| r.transform(cur))
+    else {
+        return;
+    };
+    let (x0, y0) = (phys.x().round() as i32, phys.y().round() as i32);
     let (x1, y1) = (
-        ((rect.x + rect.width) * scale).round() as i32,
-        ((rect.y + rect.height) * scale).round() as i32,
+        (phys.x() + phys.width()).round() as i32,
+        (phys.y() + phys.height()).round() as i32,
     );
     let (dx0, dy0) = (x0.max(0), y0.max(0));
     let (dx1, dy1) = (x1.min(pw), y1.min(ph));

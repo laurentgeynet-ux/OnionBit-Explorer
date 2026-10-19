@@ -66,6 +66,9 @@ pub enum Position {
     Absolute,
     /// Hors flux, relative au viewport.
     Fixed,
+    /// En flux (relative) puis collée au seuil `top` quand
+    /// le scroll l'atteint — contrainte appliquée au paint.
+    Sticky,
 }
 
 /// `float` usé (étape 21).

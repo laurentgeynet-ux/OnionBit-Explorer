@@ -244,3 +244,67 @@ fn compute_sur_handle_obsolete_ne_panique_pas() {
     let s: ComputedStyle = e.compute(&f.dom, f.div, &env());
     assert_eq!(s.get("display"), None); // vide, pas de panic
 }
+
+// ── propriétés custom / var() (étape 42) ──────────────────────
+
+#[test]
+fn var_resout_depuis_le_parent() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { --x: 30px } p { width: var(--x); color: var(--absent, teal) }",
+        Origin::Author,
+    );
+    let s = e.compute(&f.dom, f.p, &env());
+    assert_eq!(s.get("width"), Some("30px"));
+    assert_eq!(s.get("color"), Some("teal"), "fallback utilisé");
+}
+
+#[test]
+fn var_declare_sur_le_meme_element() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("p { --c: red; color: var(--c) }", Origin::Author);
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("color"), Some("red"));
+}
+
+#[test]
+fn var_irresoluble_invalide_la_declaration() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("p { width: var(--nope) }", Origin::Author);
+    // Référence sans fallback → déclaration invalide : la
+    // propriété disparaît (pas de texte `var(` résiduel).
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("width"), None);
+}
+
+#[test]
+fn var_imbrique_dans_fallback_et_valeur() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { --a: var(--b) } p { width: var(--a, var(--c, 7px)) }",
+        Origin::Author,
+    );
+    // --a → --b absent → --a invalide → fallback var(--c, 7px)
+    // → --c absent → 7px.
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("width"), Some("7px"));
+}
+
+#[test]
+fn var_ne_se_substitut_pas_aux_proprietes_custom() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    // `--x: var(--y)` reste textuel (spec : les customs gardent
+    // leur token stream — la substitution se fait à l'usage).
+    e.add_css(
+        "div { --x: var(--y); --y: 4px } p { width: var(--x) }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("--x"),
+        Some("var(--y)")
+    );
+    // À l'usage : var(--x) → « var(--y) » → re-substitution → 4px.
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("width"), Some("4px"));
+}

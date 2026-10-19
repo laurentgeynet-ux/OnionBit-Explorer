@@ -169,3 +169,101 @@ fn display_none_nemet_rien() {
         .count();
     assert_eq!(greens, 0, "display:none ne peint pas");
 }
+
+// ── transforms / sticky (étape 42) ────────────────────────────
+
+/// `dl` avec `scroll_y` réglable (sticky dépend du scroll).
+fn dl_scrolled(html: &str, css: &str, scroll_y: f32) -> (Dom, LayoutBox, Vec<DisplayItem>) {
+    let dom = TreeBuilder::parse(html);
+    let mut eng = StyleEngine::new();
+    eng.add_css(css, Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let list = build_display_list(&bx, VIEW, 200.0, scroll_y);
+    (dom, bx, list.items)
+}
+
+#[test]
+fn transform_translate_encadre_le_sous_arbre() {
+    let (_dom, _bx, items) = dl(
+        "<div id=t><span>x</span></div>",
+        "#t{transform:translate(10px, 5px);background-color:#ff0000;\
+         width:20px;height:20px}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushTransform(_)))
+        .expect("push-transform émis");
+    let pop = items
+        .iter()
+        .rposition(|i| matches!(i, DisplayItem::PopTransform))
+        .expect("pop-transform émis");
+    let fill = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::FillRect { .. }))
+        .expect("fond émis");
+    assert!(push < fill && fill < pop, "fond encadré par la transform");
+    // La matrice porte la translation + origine centre :
+    // T(20,15) · translate(10,5) · T(-20,-15) — résultat net
+    // = translate(10,5) quel que soit l'origine.
+    if let DisplayItem::PushTransform(m) = &items[push] {
+        assert!((m.tx - 10.0).abs() < 0.5, "tx={}", m.tx);
+        assert!((m.ty - 5.0).abs() < 0.5, "ty={}", m.ty);
+    }
+}
+
+#[test]
+fn transform_none_ou_invalide_nemet_rien() {
+    let (_dom, _bx, items) = dl(
+        "<div id=t></div>",
+        "#t{transform:foo(1);background-color:#ff0000;height:5px}",
+    );
+    assert!(
+        !items
+            .iter()
+            .any(|i| matches!(i, DisplayItem::PushTransform(_))),
+        "transform invalide ignorée"
+    );
+}
+
+#[test]
+fn sticky_colle_au_seuil_sous_le_scroll() {
+    // Document 600px, header sticky top:0 — scroll 300 →
+    // le header (haut document à y≈0) doit être translaté
+    // de ~300 pour rester visible.
+    let (_dom, _bx, items) = dl_scrolled(
+        "<header id=h></header><main></main>",
+        "body{margin:0} main{height:600px} #h{position:sticky;top:0;background-color:#ff0000;height:20px}",
+        300.0,
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushTransform(_)))
+        .expect("sticky → transform émise");
+    if let DisplayItem::PushTransform(m) = &items[push] {
+        // painted_top = 0 - 300 = -300 → dy = 0 - (-300) = 300.
+        assert!((m.ty - 300.0).abs() < 1.0, "ty={}", m.ty);
+    }
+}
+
+#[test]
+fn sticky_sans_scroll_ne_decolle_pas() {
+    let (_dom, _bx, items) = dl_scrolled(
+        "<header id=h></header><main></main>",
+        "body{margin:0} main{height:600px} #h{position:sticky;top:0;background-color:#ff0000;height:20px}",
+        0.0,
+    );
+    assert!(
+        !items
+            .iter()
+            .any(|i| matches!(i, DisplayItem::PushTransform(_))),
+        "pas de scroll → pas de translation"
+    );
+}

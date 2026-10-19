@@ -112,7 +112,18 @@ pub(crate) fn css_px(
     em_basis: f32,
     ctx: &BlockCtx,
 ) -> Option<f32> {
-    let raw = style.get(prop)?;
+    raw_length_px(style.get(prop)?, pct_basis, em_basis, ctx)
+}
+
+/// Même résolution que [`css_px`] mais sur la valeur brute —
+/// pour les syntaxes multi-valeurs (`flex`, `gap`…) qui ne
+/// sont pas une propriété unique.
+pub(crate) fn raw_length_px(
+    raw: &str,
+    pct_basis: f32,
+    em_basis: f32,
+    ctx: &BlockCtx,
+) -> Option<f32> {
     let raw = raw.trim();
     if let Some(pct) = raw.strip_suffix('%') {
         return pct
@@ -120,6 +131,12 @@ pub(crate) fn css_px(
             .parse::<f32>()
             .ok()
             .map(|v| v * pct_basis / 100.0);
+    }
+    // `calc(...)` : mini-évaluateur — termes résolus en px
+    // avec les mêmes bases que ci-dessous (`%` → `pct_basis`,
+    // `em` → `em_basis`…), opérateurs `+ - * /` et parenthèses.
+    if raw.len() > 5 && raw[..5].eq_ignore_ascii_case("calc(") && raw.ends_with(')') {
+        return eval_calc(&raw[5..raw.len() - 1], pct_basis, em_basis, ctx);
     }
     let len = parse_length(raw)?;
     #[allow(clippy::cast_possible_truncation)]
@@ -129,6 +146,136 @@ pub(crate) fn css_px(
         Unit::Ex | Unit::Ch => len.value as f32 * em_basis * 0.5,
         u => (len.value * u.px_factor()?) as f32,
     })
+}
+
+/// Évalue l'intérieur d'un `calc(...)` en px : `term ((+|-) term)*`,
+/// `term = factor ((*|/) factor)*`, `factor = '(' expr ')' | dim`.
+/// `N%` → base `pct_basis` ; unités comme `css_px` ; nombre nu
+/// toléré comme px (spec : invalide hors `*`/`/` — on dégrade).
+/// `None` sur toute irrégularité (jamais de panique).
+#[allow(clippy::too_many_lines)]
+fn eval_calc(expr: &str, pct_basis: f32, em_basis: f32, ctx: &BlockCtx) -> Option<f32> {
+    // Un nombre nu n'est pas une dimension : on le note pour
+    // interdire `1px + 2` et `a * b` entre deux dimensions.
+    #[derive(Clone, Copy)]
+    struct Term {
+        px: f64,
+        dim: bool,
+    }
+    fn dim_px(text: &str, pct: f32, em: f32, ctx: &BlockCtx) -> Option<Term> {
+        let t = text.trim();
+        if let Some(p) = t.strip_suffix('%') {
+            return p.trim().parse::<f64>().ok().map(|v| Term {
+                px: v * f64::from(pct) / 100.0,
+                dim: true,
+            });
+        }
+        if let Some(l) = parse_length(t) {
+            let px = match l.unit {
+                Unit::Em => l.value * f64::from(em),
+                Unit::Rem => l.value * f64::from(ctx.base_font_size),
+                Unit::Ex | Unit::Ch => l.value * f64::from(em) * 0.5,
+                u => l.value * u.px_factor()?,
+            };
+            return Some(Term { px, dim: true });
+        }
+        t.parse::<f64>().ok().map(|px| Term { px, dim: false })
+    }
+    fn factor(s: &str, i: &mut usize, pct: f32, em: f32, ctx: &BlockCtx) -> Option<Term> {
+        let b = s.as_bytes();
+        while *i < b.len() && b[*i].is_ascii_whitespace() {
+            *i += 1;
+        }
+        if *i >= b.len() {
+            return None;
+        }
+        // `calc(` imbriqué ≡ parenthèse (le préfixe est sauté).
+        let calc_open =
+            s[*i..].len() >= 5 && s[*i..*i + 4].eq_ignore_ascii_case("calc") && b[*i + 4] == b'(';
+        if calc_open {
+            *i += 4;
+        }
+        if b[*i] == b'(' {
+            *i += 1;
+            let t = expr_in(s, i, pct, em, ctx)?;
+            while *i < b.len() && b[*i].is_ascii_whitespace() {
+                *i += 1;
+            }
+            if *i >= b.len() || b[*i] != b')' {
+                return None;
+            }
+            *i += 1;
+            return Some(t);
+        }
+        let start = *i;
+        // `-` n'est PAS un délimiteur : le signe colle au nombre
+        // (« -5px ») — « 10px-5px » sans espaces forme un seul
+        // token invalide (spec : espaces requis autour de ±).
+        while *i < b.len() && !matches!(b[*i], b'+' | b'*' | b'/' | b')' | b' ' | b'\t') {
+            *i += 1;
+        }
+        dim_px(&s[start..*i], pct, em, ctx)
+    }
+    fn term(s: &str, i: &mut usize, pct: f32, em: f32, ctx: &BlockCtx) -> Option<Term> {
+        let mut acc = factor(s, i, pct, em, ctx)?;
+        loop {
+            let b = s.as_bytes();
+            while *i < b.len() && b[*i].is_ascii_whitespace() {
+                *i += 1;
+            }
+            if *i >= b.len() || !matches!(b[*i], b'*' | b'/') {
+                return Some(acc);
+            }
+            let div = b[*i] == b'/';
+            *i += 1;
+            let rhs = factor(s, i, pct, em, ctx)?;
+            acc = match (div, acc.dim, rhs.dim) {
+                // `*` : un seul côté dimensionné ; `/` : diviseur nu.
+                (false, true, false) | (false, false, _) => Term {
+                    px: acc.px * rhs.px,
+                    dim: acc.dim || rhs.dim,
+                },
+                (true, _, false) if rhs.px != 0.0 => Term {
+                    px: acc.px / rhs.px,
+                    dim: acc.dim,
+                },
+                _ => return None,
+            };
+        }
+    }
+    fn expr_in(s: &str, i: &mut usize, pct: f32, em: f32, ctx: &BlockCtx) -> Option<Term> {
+        let mut acc = term(s, i, pct, em, ctx)?;
+        loop {
+            let b = s.as_bytes();
+            while *i < b.len() && b[*i].is_ascii_whitespace() {
+                *i += 1;
+            }
+            if *i >= b.len() || !matches!(b[*i], b'+' | b'-') {
+                return Some(acc);
+            }
+            let neg = b[*i] == b'-';
+            *i += 1;
+            let rhs = term(s, i, pct, em, ctx)?;
+            if acc.dim != rhs.dim {
+                return None; // dim ± nombre nu : invalide
+            }
+            acc.px = if neg {
+                acc.px - rhs.px
+            } else {
+                acc.px + rhs.px
+            };
+        }
+    }
+    let mut i = 0;
+    let out = expr_in(expr, &mut i, pct_basis, em_basis, ctx)?;
+    while i < expr.len() && expr.as_bytes()[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == expr.len() && out.dim {
+        #[allow(clippy::cast_possible_truncation)]
+        return Some(out.px as f32);
+    }
+    None
 }
 
 /// Côté de marge/bordure/padding en px (`auto` et manquant →
@@ -157,6 +304,7 @@ fn margins(style: &ComputedStyle, cb_w: f32, em: f32, ctx: &BlockCtx) -> Margins
 /// `bx.rect` et descend récursivement. `abs_cb` = bloc
 /// conteneur du positionnement absolu (plus proche ancêtre
 /// positionné, ou viewport).
+#[allow(clippy::too_many_lines)]
 pub(crate) fn layout_block(
     bx: &mut LayoutBox,
     x: f32,
@@ -239,17 +387,25 @@ pub(crate) fn layout_block(
     };
 
     let line_h = line_height(&st, fs, ctx);
-    let cursor = flow_children(
-        bx,
-        content_x,
-        cursor,
-        content_w,
-        pt + bt <= 0.0,
-        line_h,
-        ctx,
-        fs,
-        pos_cb,
-    );
+    let cursor = match st.get("display") {
+        Some("flex" | "inline-flex") => {
+            crate::flex::flow_flex_children(bx, content_x, cursor, content_w, ctx, fs, pos_cb)
+        }
+        Some("grid" | "inline-grid") => {
+            crate::grid::flow_grid_children(bx, content_x, cursor, content_w, ctx, fs, pos_cb)
+        }
+        _ => flow_children(
+            bx,
+            content_x,
+            cursor,
+            content_w,
+            pt + bt <= 0.0,
+            line_h,
+            ctx,
+            fs,
+            pos_cb,
+        ),
+    };
 
     let content_h = cursor - (y + bt + pt);
     let h_spec = css_px(&st, "height", ctx.base_font_size, fs, ctx).or(bx.intrinsic.map(|i| i.1));
@@ -294,6 +450,7 @@ fn apply_layout_metadata(bx: &mut LayoutBox, st: &ComputedStyle) {
         Some("relative") => Position::Relative,
         Some("absolute") => Position::Absolute,
         Some("fixed") => Position::Fixed,
+        Some("sticky") => Position::Sticky,
         _ => Position::Static,
     };
     bx.float = match st.get("float") {
@@ -529,7 +686,7 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
 
 /// Hauteur d'un bloc anonyme : délégué au layout en-ligne
 /// (étape 20 — vraies line boxes dans `bx.lines`).
-fn layout_anon_block(
+pub(crate) fn layout_anon_block(
     bx: &mut LayoutBox,
     x: f32,
     y: f32,

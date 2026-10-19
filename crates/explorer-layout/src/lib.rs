@@ -19,7 +19,9 @@
 
 pub mod block;
 mod boxtree;
+mod flex;
 pub mod font;
+mod grid;
 pub mod inline;
 mod tables;
 pub mod text;

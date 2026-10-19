@@ -141,3 +141,46 @@ fn png_encode_produit_des_octets() {
     let png = f.encode_png().expect("encodage png");
     assert_eq!(&png[..4], &[137, 80, 78, 71], "signature PNG");
 }
+
+// ── transform (étape 42) ──────────────────────────────────────
+
+#[test]
+fn transform_translate_deplace_les_pixels() {
+    // Carré rouge 20×20 à (0,0), translaté de (60,30) — le
+    // pixel rouge doit apparaître dans la zone translatée et
+    // l'emplacement d'origine rester blanc.
+    let f = frame(
+        "<div id=t></div>",
+        "body{margin:0} #t{background-color:#ff0000;width:20px;height:20px;\
+         transform:translate(60px, 30px)}",
+    );
+    assert_eq!(px(&f, 70, 40)[0], 255, "rouge translaté");
+    assert_eq!(px(&f, 10, 10)[0], 0, "origine vide");
+}
+
+#[test]
+fn transform_scale_grossit_la_zone_peinte() {
+    // 20×20 scalé ×2 depuis le centre (10,10) : couvre
+    // [−10,30) sur les deux axes → (25,25) rouge, (35,25)
+    // hors portée reste blanc.
+    let f = frame(
+        "<div id=t></div>",
+        "body{margin:0} #t{background-color:#ff0000;width:20px;height:20px;\
+         transform:scale(2)}",
+    );
+    assert_eq!(px(&f, 25, 25)[0], 255, "scalé couvre");
+    assert_eq!(px(&f, 35, 25)[0], 0, "hors portée");
+}
+
+#[test]
+fn transform_rotate_peint_hors_bbox_alignee() {
+    // 40×10 tourné de 90° autour du centre (20,5) → couvre
+    // la colonne x∈[15,25) y∈[-10,20) : (20,15) rouge alors
+    // qu'une bbox alignée ne l'atteindrait pas.
+    let f = frame(
+        "<div id=t></div>",
+        "body{margin:0} #t{background-color:#ff0000;width:40px;height:10px;\
+         transform:rotate(90deg)}",
+    );
+    assert_eq!(px(&f, 20, 15)[0], 255, "rotation peinte");
+}
