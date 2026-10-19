@@ -9,6 +9,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-23 — valeur de contrôle peinte à sa position**
+  (`explorer-layout`) : résidu de R-21 — le glyphe tapé
+  apparaissait en haut à gauche du document (repro
+  `repros/form.html`, mission 7). Le fragment atomique
+  recevait son rect final mais son sous-arbre posé en
+  (0,0) n'était jamais translaté. `assign_atomic_rects`
+  applique désormais `translate_subtree` (delta fragment −
+  rect pré-layout) et s'ordonne avant `assign_child_rects`,
+  qui saute les atomes. Couvre aussi le texte d'un
+  `inline-block` et le repli d'`object`. Régression :
+  `controle_input_valeur_posee_sous_le_controle`
+  (`tests/display.rs`).
+
 - **R-24 — profondeur d'arbre sans stack overflow**
   (`explorer-common`, `explorer-dom`, `explorer-css`,
   `explorer-layout`, `explorer-render`) : bug terrain

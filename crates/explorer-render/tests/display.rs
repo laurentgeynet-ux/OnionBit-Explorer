@@ -604,6 +604,31 @@ fn controle_input_peint_sa_valeur() {
     );
 }
 
+#[test]
+fn controle_input_valeur_posee_sous_le_controle() {
+    // R-23 : la valeur doit peindre à la POSITION du
+    // contrôle — avant : le fragment recevait le rect final
+    // mais le sous-arbre de l'atome restait posé en (0,0).
+    let (_dom, _bx, items) = dl(
+        "<p>avant</p><input value=\"abc\">",
+        "body{margin:0} p{height:40px;line-height:40px}",
+    );
+    let origins: Vec<(f32, f32)> = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::Text { origin, .. } => Some(*origin),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(origins.len(), 2, "texte p + valeur input : {origins:?}");
+    assert!(
+        origins[1].1 > origins[0].1,
+        "valeur attendue sous le paragraphe, origines {origins:?}"
+    );
+    // Et pas collée à l'origine du document.
+    assert!(origins[1].1 > 20.0, "valeur en (0,0) = régression R-23");
+}
+
 // ── R-13d : background-position / attachment ─────────────────
 
 /// div 40×20 avec `css_extra` + un fond image factice 4×2

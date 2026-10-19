@@ -217,15 +217,21 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `ComputedStyle` de son item inline — vérifier qu'une
   bordure/fond/décoration de l'élément n'est pas repeinte
   par fragment au lieu d'une fois sur la boîte propriétaire.
-- [ ] **R-23. Valeur de contrôle peinte à (0,0)** (résidu
+- [x] **R-23. Valeur de contrôle peinte à (0,0)** (résidu
   R-21, terrain mission 7 — fixture `repros/form.html` : le
   glyphe tapé apparaît mais chevauche le `<h1>` en haut à
-  gauche) : l'`AnonymousBlock` enveloppant le `Text`
-  synthétique produit bien le `DisplayItem::Text`, mais son
-  rect reste à l'origine — la position de la boîte contrôle
-  n'est jamais reportée dans l'enveloppe à la pose. Fix :
-  poser l'enfant anonyme dans le rect du contrôle (padding/
-  border UA compris).
+  gauche) : le fragment atomique recevait son rect final
+  (`assign_atomic_rects`) mais son **sous-arbre** restait
+  posé en (0,0) — `size_atomics` y avait appelé
+  `layout_block` pour le dimensionner. **Fix** :
+  `translate_subtree` (delta fragment − rect pré-layout) sur
+  l'atome, ordonné **avant** `assign_child_rects` (l'union
+  `owner` aurait sinon écrasé le rect source → delta nul) ;
+  les atomes sont sautés dans `assign_child_rects` (leurs
+  indices `owner` internes ne parlent pas des lignes du
+  parent). Couvre tout contenu d'atome : valeur de
+  contrôle, texte d'`inline-block`, repli d'`object`.
+  Test : `controle_input_valeur_posee_sous_le_controle`.
 - [x] **R-24. Profondeur d'arbre bornée — stack overflow**
   (**préempte** — 2ᵉ violation « jamais crash » après
   JS-C41 ; terrain mission 10, repro `repros/host-nest.html`

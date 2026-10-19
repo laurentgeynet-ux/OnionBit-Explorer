@@ -138,12 +138,15 @@ pub(crate) fn layout_inline(
     let items = collect_items(bx);
     let mut lines = break_into_lines(&items, &atomics, x, y, w, ctx, fs, fl);
     align_lines(&st, &mut lines, x, w, fl);
-    assign_child_rects(bx, &lines);
-    // Les boîtes atomiques nichées reçoivent leur rect depuis
-    // le fragment (l'union par `owner` n'atteint que les
-    // enfants directs).
+    // Atomes d'abord : leur sous-arbre a été posé en (0,0)
+    // par `size_atomics` — translation au rect du fragment
+    // (R-23 : sans elle, les enfants d'un atome — valeur d'un
+    // contrôle — peignent à l'origine). L'union par `owner`
+    // ensuite : elle saute les atomes (leur rect vient déjà
+    // du fragment via `aid`).
     let mut aid = 0usize;
     assign_atomic_rects(bx, &lines, &mut aid);
+    assign_child_rects(bx, &lines);
     // Span réelle `y → bas de la dernière ligne` : la descente
     // sous les flottants a pu sauter de l'espace vertical.
     let h = lines.last().map_or(0.0, |l| l.rect.y + l.rect.height - y);
@@ -780,6 +783,12 @@ fn align_lines(st: &ComputedStyle, lines: &mut [LineBox], x: f32, w: f32, fl: &F
 /// (récursif pour les inline imbriqués).
 fn assign_child_rects(bx: &mut LayoutBox, lines: &[LineBox]) {
     for (i, child) in bx.children.iter_mut().enumerate() {
+        // Atome : rect et sous-arbre déjà posés par
+        // `assign_atomic_rects` — les indices `owner` de ces
+        // lignes ne parlent pas de son intérieur.
+        if is_atomic(child) {
+            continue;
+        }
         let mut union: Option<Rect> = None;
         for line in lines {
             for f in &line.fragments {
@@ -811,7 +820,13 @@ fn assign_atomic_rects(bx: &mut LayoutBox, lines: &[LineBox], aid: &mut usize) {
             for line in lines {
                 for f in &line.fragments {
                     if f.aid == Some(id) {
-                        child.rect = f.rect;
+                        // `layout_block` a posé le sous-arbre
+                        // en (0,0) → translation entière au
+                        // rect du fragment (rect, lignes,
+                        // enfants — R-23).
+                        let dx = f.rect.x - child.rect.x;
+                        let dy = f.rect.y - child.rect.y;
+                        crate::flex::translate_subtree(child, dx, dy);
                         break;
                     }
                 }
