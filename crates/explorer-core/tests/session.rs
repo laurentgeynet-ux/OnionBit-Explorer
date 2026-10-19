@@ -4079,3 +4079,107 @@ async fn keyframes_absent_means_no_animation_ticks() {
         "aucun relayout sans animation en lecture (55e)"
     );
 }
+
+/// Moteur de test : `run_pending` signale son entrée puis
+/// bloque sur un canal — sert à prouver que la pompe partagée
+/// laisse le verrou session libre pendant l'exécution JS
+/// (étape 53f : `repros/relayout.html` figeait `/status`
+/// ~20 s en tenant `&mut Session`).
+struct BarrierEngine {
+    entered: std::sync::mpsc::Sender<()>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+
+impl explorer_js::JsEngine for BarrierEngine {
+    fn eval(&mut self, _src: &str) -> Result<String, explorer_js::JsError> {
+        Ok("undefined".to_string())
+    }
+
+    fn run_pending_bounded(&mut self, _max: usize) -> usize {
+        let _ = self.entered.send(());
+        let _ = self.release.recv();
+        1
+    }
+
+    fn set_budget(&mut self, _ops: u64) {}
+}
+
+/// Étape 53f — pendant que `run_pending` est bloqué (moteur
+/// extrait dans `spawn_blocking`), le verrou session doit
+/// rester acquisissable : `/status` ne gèle plus.
+#[tokio::test(flavor = "current_thread")]
+async fn pump_shared_keeps_lock_free_during_js_burst() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_SCRIPT);
+    // Fabrique one-shot : les canaux de la barrière sont
+    // posés avant la navigation qui installe le moteur.
+    let slot = Arc::new(Mutex::new(
+        None::<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>,
+    ));
+    let slot2 = slot.clone();
+    s.set_js_factory(Arc::new(move || {
+        let (entered, release) = slot2
+            .lock()
+            .unwrap()
+            .take()
+            .expect("barrière posée avant la navigation");
+        Box::new(BarrierEngine { entered, release })
+    }));
+    let (etx, erx) = std::sync::mpsc::channel::<()>();
+    let (rtx, rrx) = std::sync::mpsc::channel::<()>();
+    *slot.lock().unwrap() = Some((etx, rrx));
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let sess = Arc::new(tokio::sync::Mutex::new(s));
+    let s2 = sess.clone();
+    let pump = tokio::spawn(async move { explorer_core::pump_timers_shared(&s2, id).await });
+
+    // Le moteur est entré dans `run_pending` — attente sans
+    // bloquer le worker (runtime current_thread).
+    tokio::task::spawn_blocking(move || erx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Le verrou session reste acquisissable pendant le burst.
+    let guard = tokio::time::timeout(std::time::Duration::from_secs(5), sess.lock())
+        .await
+        .expect("le verrou session reste libre pendant le burst JS");
+    drop(guard);
+
+    let _ = rtx.send(());
+    assert_eq!(pump.await.unwrap(), 1, "le job bloqué est bien rapporté");
+}
+
+/// Étape 53f — la pompe partagée applique les mutations DOM
+/// comme la pompe synchrone : même résultat rendu que la
+/// page statique équivalente.
+#[tokio::test(flavor = "current_thread")]
+async fn pump_shared_applies_dom_mutations() {
+    let (mut s, t) = test_session();
+    t.route("/ev", 200, PAGE_PUMP);
+    t.route("/stat", 200, PAGE_PUMP_AFTER);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    let sess = Arc::new(tokio::sync::Mutex::new(s));
+    // Pomper jusqu'à épuisement des timers — chaque phase
+    // take/commit ne tient le verrou que quelques µs.
+    for _ in 0..10 {
+        explorer_core::pump_timers_shared(&sess, a).await;
+        let done = sess.lock().await.next_timer_deadline().is_none();
+        if done {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    explorer_core::pump_timers_shared(&sess, a).await;
+
+    let mut s = sess.lock().await;
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+    assert_eq!(s.next_timer_deadline(), None);
+}

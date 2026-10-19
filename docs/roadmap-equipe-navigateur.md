@@ -214,14 +214,17 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   le fallback windows-1252 est conforme WHATWG et le défaut
   est côté extraction/émission du titre.
 
-- [ ] **Étape 53f. `run_pending`/`sync_dom` hors verrou**
+- [x] **Étape 53f. `run_pending`/`sync_dom` hors verrou**
   (résidu 53d, terrain mission 8 : `repros/relayout.html` —
-  200 `appendChild` triviaux → `/status` gelé ~20 s) : le
-  fetch est libéré mais l'exécution JS + la synchro miroir
-  au commit restent sous le verrou session — toute page
-  réelle qui construit son DOM en JS (Gmail, Twitter…)
-  gèlera pareil. Sortir la phase commit-script du verrou
-  comme `NavJob`/`SubJob` l'ont fait pour le fetch.
+  200 `appendChild` triviaux → `/status` gelé ~20 s) :
+  `pump_timers_shared` sort le moteur de l'onglet
+  (`js_detached(epoch)`) et exécute `run_pending` +
+  sérialisation miroir dans `spawn_blocking` — le verrou
+  n'est tenu qu'au take/commit, garde epoch anti-commit
+  concurrent, tampons réponses net + pushes d'attributs
+  rejoués à la réinsertion. Boucle daemon migrée ;
+  dégradation documentée : `dispatch_event` en plein run =
+  handler inerte (input traité côté hôte).
 
 - [x] **Étape 54. Formulaires v2 — côté produit** (ex-55, moitié
   session) : `multipart/form-data`, états `:valid`/`:invalid`

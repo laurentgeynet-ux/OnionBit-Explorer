@@ -9,6 +9,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 53f — `run_pending`/`sync_dom` hors verrou**
+  (`explorer-core`, résidu 53d / terrain mission 8) : un
+  burst JS (`repros/relayout.html`, ~200 `appendChild`)
+  figeait `/status` ~20 s — l'exécution + la sérialisation
+  du miroir se faisaient sous `&mut Session`.
+  `pump_timers_shared` suit le patron de `navigate_shared` :
+  take/commit sous verrou court, moteur **extrait** de
+  l'onglet (`js_detached(epoch)`) et travail long dans
+  `spawn_blocking` (`JsEngine: Send`). À la réinsertion,
+  une epoch supplantée jette le moteur sans sync (jamais de
+  miroir caduc) ; les réponses `fetch`/XHR et les pushes
+  d'attributs (`value`, `checked`) survenus pendant le run
+  sont tamponnés puis livrés/rejoués **avant** la
+  re-sérialisation — la saisie utilisateur n'est jamais
+  écrasée. Boucle daemon migrée (`pump_timers_shared` +
+  `drain_navs_shared` hors verrou). Dégradation assumée et
+  documentée : un événement DOM dispatché en plein run
+  trouve `js` absent → handler inerte, input traité côté
+  hôte — comme une page sans script. Régressions :
+  `pump_shared_keeps_lock_free_during_js_burst` (verrou
+  acquisissable pendant `run_pending` bloqué),
+  `pump_shared_applies_dom_mutations` (rendu identique à la
+  pompe synchrone).
+
 - **Étape 55e — `@keyframes` cadencés en session**
   (`explorer-core`, adoption R-10) : les animations CSS ne
   produisaient qu'une frame figée (repro `anim.html` — deux

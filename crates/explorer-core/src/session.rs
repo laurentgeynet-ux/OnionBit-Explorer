@@ -26,7 +26,9 @@ use explorer_css::{
 use explorer_dom::{Dom, DomError, NodeId};
 use explorer_html::encoding::{decode, decode_windows1252, sniff_encoding, Encoding};
 use explorer_html::TreeBuilder;
-use explorer_js::{JsEngine, JsFactory, NavRequest, NetRequest, NetResponse, UrlResolver};
+use explorer_js::{
+    DomSyncPayload, JsEngine, JsFactory, NavRequest, NetRequest, NetResponse, UrlResolver,
+};
 use explorer_layout::font::FontSource;
 use explorer_layout::{
     build_box_tree_sized, layout_tree, relayout_subtree, BlockCtx, LayoutBox, Rect, Relayout,
@@ -472,7 +474,27 @@ struct Tab {
     /// (frame neuve + DOM/URL anciens) persiste ou est
     /// capturé dans un snapshot bfcache.
     spec_paint: bool,
+    /// Epoch de navigation à laquelle le moteur JS détaché
+    /// appartient (étape 53f) — `Some` = `js` est sorti pour
+    /// un `run_pending`/`sync_dom` **hors verrou**. À la
+    /// réinsertion, une epoch changée jette le moteur (son
+    /// miroir parle de l'ancienne page).
+    js_detached: Option<u64>,
+    /// Réponses script-net arrivées pendant le détachement
+    /// JS (53f) — livrées au moteur à sa réinsertion, leurs
+    /// callbacks tournent à la pompe suivante.
+    js_pending_net: Vec<NetResponse>,
+    /// Pushes d'attributs session→miroir survenus pendant le
+    /// détachement JS (53f — `value`/`checked` des champs
+    /// édités pendant le burst) : rejoués puis re-sérialisés
+    /// à la réinsertion, sinon la synchro miroir→hôte
+    /// écraserait la saisie.
+    js_pending_attrs: Vec<PendingMirrorAttr>,
 }
+
+/// Push d'attribut session→miroir tamponné pendant le
+/// détachement JS (53f) : `(chemin d'élément, nom, valeur)`.
+type PendingMirrorAttr = (Vec<(String, u32)>, String, Option<String>);
 
 /// Page gelée pour le bfcache (étape 56) — tout l'état qui
 /// reconstruit la page **sans réseau** : DOM, arbre posé,
@@ -610,6 +632,12 @@ impl Tab {
         self.dirty = snap.dirty;
         self.emitted = snap.emitted;
         self.spec_paint = false; // snapshot auto-cohérent (56c)
+                                 // Le moteur détaché de l'ancien contexte est mort —
+                                 // son drapeau et les tampons qui lui appartenaient
+                                 // (53f) ne doivent pas survivre à la restauration.
+        self.js_detached = None;
+        self.js_pending_net.clear();
+        self.js_pending_attrs.clear();
         self.last_req = snap.last_req;
         self.transitions.clear();
         // Idem animations : la restauration repart sur les
@@ -1335,6 +1363,9 @@ impl Session {
                 emitted: 0,
                 bfcache: VecDeque::new(),
                 spec_paint: false,
+                js_detached: None,
+                js_pending_net: Vec::new(),
+                js_pending_attrs: Vec::new(),
             },
         );
         let _ = self.events.send(CoreEvent::TabOpened { tab: id });
@@ -1590,6 +1621,79 @@ impl Session {
             // Dégradation silencieuse : un onglet sans arbre
             // posé ne produit pas d'erreur de pompe.
             let _ = self.advance_animations(t);
+        }
+        jobs
+    }
+
+    /// Phase « take » de la pompe détachée (étape 53f) : sort
+    /// le moteur JS de l'onglet sous verrou court et marque
+    /// `js_detached` à l'epoch courante — l'exécution
+    /// (`run_pending` + sérialisation miroir) se fera hors
+    /// verrou. `None` sans moteur ou si une pompe détachée
+    /// est déjà en vol (la suivante reprendra ses jobs).
+    fn take_js_engine(&mut self, tab: TabId) -> Option<(Box<dyn JsEngine>, usize, u64)> {
+        let entry = self.tabs.get_mut(&tab)?;
+        if entry.js_detached.is_some() {
+            return None;
+        }
+        let eng = entry.js.take()?;
+        entry.js_detached = Some(entry.nav_epoch);
+        Some((eng, self.max_timer_jobs, entry.nav_epoch))
+    }
+
+    /// Phase « commit » de la pompe détachée (53f) : réinsère
+    /// le moteur si l'onglet n'a pas navigué pendant le run —
+    /// une epoch différente jette le moteur et ses tampons
+    /// (le miroir parlerait de l'ancienne page, jamais
+    /// appliqué par-dessus la neuve). Livre les réponses net
+    /// tamponnées, rejoue les pushes d'attributs **avant**
+    /// re-sérialisation, applique la synchro DOM puis les
+    /// drains de fin de script — même ordre que
+    /// [`Self::pump_timers`]. `out: None` = le bloc a paniqué
+    /// (moteur perdu : l'onglet continue sans JS).
+    fn commit_js_pump(
+        &mut self,
+        tab: TabId,
+        epoch: u64,
+        out: Option<(usize, Option<DomSyncPayload>, Box<dyn JsEngine>)>,
+    ) -> usize {
+        let phase = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return 0;
+            };
+            entry.js_detached = None;
+            let Some((jobs, mutated, mut eng)) = out else {
+                entry.js_pending_net.clear();
+                entry.js_pending_attrs.clear();
+                return 0;
+            };
+            if entry.nav_epoch != epoch {
+                entry.js_pending_net.clear();
+                entry.js_pending_attrs.clear();
+                return 0;
+            }
+            for resp in std::mem::take(&mut entry.js_pending_net) {
+                let _ = eng.deliver_net_response(resp);
+            }
+            let attrs = std::mem::take(&mut entry.js_pending_attrs);
+            let mutated = if attrs.is_empty() {
+                mutated
+            } else {
+                for (path, attr, value) in attrs {
+                    eng.sync_mirror_attr(&path, &attr, value.as_deref());
+                }
+                eng.sync_dom_path()
+            };
+            entry.js = Some(eng);
+            (jobs, mutated)
+        };
+        let (jobs, mutated) = phase;
+        if let Some((html, dirty)) = mutated {
+            self.apply_dom_sync(tab, &html, dirty.as_deref(), true);
+        }
+        if jobs > 0 {
+            self.after_script(tab);
+            self.poll_net();
         }
         jobs
     }
@@ -2614,6 +2718,14 @@ impl Session {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return;
             };
+            // Moteur sorti pour exécution hors verrou (53f) —
+            // la réponse est tamponnée et livrée à sa
+            // réinsertion ; la jeter ici pendrait le `fetch`/
+            // XHR émetteur à jamais.
+            if entry.js_detached.is_some() {
+                entry.js_pending_net.push(resp);
+                return;
+            }
             let Some(eng) = entry.js.as_mut() else {
                 return;
             };
@@ -3992,7 +4104,20 @@ impl Session {
             .and_then(|e| e.dom.as_ref())
             .and_then(|d| element_path(d, node));
         let Some(path) = path else { return };
-        if let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()) {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        // Moteur détaché (53f) : le push est rejoué à la
+        // réinsertion **avant** la re-sérialisation miroir —
+        // sinon la saisie utilisateur pendant le burst serait
+        // écrasée par l'ancien miroir.
+        if entry.js_detached.is_some() {
+            entry
+                .js_pending_attrs
+                .push((path, attr.to_string(), value.map(str::to_string)));
+            return;
+        }
+        if let Some(eng) = entry.js.as_mut() {
             eng.sync_mirror_attr(&path, attr, value);
         }
     }
@@ -6135,6 +6260,47 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
         applied = true;
     }
     applied
+}
+
+/// Pompe JS partagée (étape 53f) — même contrat qu'un tour de
+/// [`Session::pump_timers`] + [`Session::advance_animations`]
+/// mais le travail long (`run_pending` + sérialisation du
+/// miroir) s'exécute dans `spawn_blocking` avec le moteur
+/// **extrait** de l'onglet : un burst JS (`repros/relayout.html`
+/// ~200 `appendChild`) ne fige plus `/status` — le verrou n'est
+/// tenu qu'aux phases take/commit.
+///
+/// Pendant le détachement : réponses `fetch`/XHR et pushes
+/// d'attributs (`value`, `checked`…) sont tamponnés et livrés
+/// à la réinsertion ; une navigation supplantant l'onglet jette
+/// le moteur détaché (garde epoch, jamais de miroir caduc
+/// appliqué). Dégradation documentée : un `dispatch_event`
+/// arrivant en plein run trouve `js: None` → handler inerte —
+/// l'input reste traité côté hôte, comme une page sans script.
+///
+/// Retourne le nombre de jobs JS exécutés (0 = pas de moteur,
+/// pompe déjà en vol, ou epoch supplantée).
+pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -> usize {
+    let taken = {
+        let mut s = sess.lock().await;
+        s.take_js_engine(tab)
+    };
+    let Some((mut eng, max, epoch)) = taken else {
+        return 0;
+    };
+    // Hors verrou : le burst JS n'occupe ni le verrou ni le
+    // worker tokio (spawn_blocking — `JsEngine: Send`).
+    let out = tokio::task::spawn_blocking(move || {
+        let jobs = eng.run_pending_bounded(max);
+        let mutated = eng.sync_dom_path();
+        (jobs, mutated, eng)
+    })
+    .await;
+    let mut s = sess.lock().await;
+    let jobs = s.commit_js_pump(tab, epoch, out.ok());
+    // 55e : les animations cadencées par ce battement.
+    let _ = s.advance_animations(tab);
+    jobs
 }
 
 /// Fenêtre de sniffing `<meta charset>` — même borne que

@@ -152,10 +152,10 @@ async fn main() {
     // pompe, un `setTimeout` tire sans attendre un input.
     // La sieste est `min(échéance timer, NET_PUMP_MS)` : un
     // timer à 10 ms n'attend pas le battement complet.
-    // Étape 53d : les drains de navigation sortent du
-    // verrou (`drain_navs_shared`) — une `location.href=`
-    // tirée par un timer ne gèle plus l'API pendant le
-    // téléchargement de la cible.
+    // Étapes 53d/53f : drains de navigation et pompe JS
+    // hors verrou — ni une `location.href=` tirée par un
+    // timer ni un burst `run_pending`/`sync_dom` ne gèlent
+    // l'API pendant leur exécution.
     {
         let s = session.clone();
         tokio::spawn(async move {
@@ -163,12 +163,18 @@ async fn main() {
                 let (wait, tabs) = {
                     let mut sess = s.lock().await;
                     sess.pump_net().await;
-                    sess.pump_timers_all();
                     let w = sess
                         .next_timer_deadline()
                         .map_or(NET_PUMP_MS, |d| d.min(NET_PUMP_MS));
                     (w, sess.tabs())
                 };
+                // Pompe JS par onglet : `run_pending` +
+                // `sync_dom` tournent en `spawn_blocking`
+                // avec le moteur extrait — le verrou n'est
+                // tenu qu'au take/commit (étape 53f).
+                for tab in &tabs {
+                    explorer_core::pump_timers_shared(&s, *tab).await;
+                }
                 // Un timer peut émettre `location.href` —
                 // les intentions sont honorées ici, hors
                 // verrou (la pompe reste à sens unique).
