@@ -35,7 +35,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use explorer_core::{CoreError, CoreEvent, Session, TabId};
+use explorer_core::{CoreError, CoreEvent, InputEvent, InputOutcome, Session, TabId};
 use futures_util::Stream;
 
 /// État partagé : la session moteur, sérialisée.
@@ -59,6 +59,7 @@ pub fn router(session: Arc<tokio::sync::Mutex<Session>>) -> Router {
         .route("/api/tabs/{id}/back", post(back))
         .route("/api/tabs/{id}/forward", post(forward))
         .route("/api/tabs/{id}/viewport", post(viewport))
+        .route("/api/tabs/{id}/input", post(input))
         .route("/api/events", get(events))
         .with_state(ApiState { session })
 }
@@ -223,6 +224,62 @@ async fn viewport(
     // Re-render immédiat de l'onglet courant (resize live).
     let _ = session.rerender(id);
     StatusCode::OK.into_response()
+}
+
+/// `POST …/input` : `{ "type": "click|mousemove|scroll|key", … }`.
+/// Les `mousemove` sont coalescés côté client (dernier état
+/// suffit — ADR-0003).
+#[allow(clippy::cast_possible_truncation)] // px UI : f32 suffit
+async fn input(
+    State(st): State<ApiState>,
+    Path(id): Path<TabId>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let f = |k: &str| body.get(k).and_then(serde_json::Value::as_f64);
+    let ev = match body.get("type").and_then(|t| t.as_str()) {
+        Some("click") => InputEvent::Click {
+            x: f("x").unwrap_or(0.0) as f32,
+            y: f("y").unwrap_or(0.0) as f32,
+        },
+        Some("mousemove") => InputEvent::MouseMove {
+            x: f("x").unwrap_or(0.0) as f32,
+            y: f("y").unwrap_or(0.0) as f32,
+        },
+        Some("scroll") => InputEvent::Scroll {
+            dy: f("dy").unwrap_or(0.0) as f32,
+        },
+        Some("key") => InputEvent::Key {
+            key: body
+                .get("key")
+                .and_then(|k| k.as_str())
+                .unwrap_or("")
+                .to_string(),
+        },
+        _ => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                &CoreError::Url("type d'entrée inconnu".to_string()),
+            );
+        }
+    };
+    let outcome = {
+        let mut session = st.session.lock().await;
+        match session.handle_input(id, ev).await {
+            Ok(o) => o,
+            Err(e) => return err(err_status(&e), &e),
+        }
+    };
+    Json(match outcome {
+        InputOutcome::Ignored => serde_json::json!({ "result": "ignored" }),
+        InputOutcome::Scrolled { scroll_y } => {
+            serde_json::json!({ "result": "scrolled", "scroll_y": scroll_y })
+        }
+        InputOutcome::Navigated => serde_json::json!({ "result": "navigated" }),
+        InputOutcome::Hover { url } => {
+            serde_json::json!({ "result": "hover", "url": url })
+        }
+    })
+    .into_response()
 }
 
 /// `GET /api/events` — flux SSE des événements de session.

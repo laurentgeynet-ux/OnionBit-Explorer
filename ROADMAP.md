@@ -191,7 +191,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
 - [x] **Étape 25. Contrat REST.** `/status`, `/tabs` CRUD,
   `navigate`, `reload`, `back`/`forward`, `/events` SSE — erreurs
   `{"error":{handled,message}}`.
-- [ ] **Étape 26. Entrées.** `POST /api/tabs/{id}/input` :
+- [x] **Étape 26. Entrées.** `POST /api/tabs/{id}/input` :
   clics/souris/clavier/scroll traduits en hit-test sur le layout ;
   **coalescing** des événements mouvement pour limiter les
   round-trips (ADR-0003).

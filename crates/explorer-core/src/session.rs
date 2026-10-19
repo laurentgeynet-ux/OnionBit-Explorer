@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use explorer_css::{Origin, StyleEngine, StyleEnv};
-use explorer_dom::Dom;
+use explorer_dom::{Dom, NodeId};
 use explorer_html::encoding::decode_sniffed;
 use explorer_html::TreeBuilder;
 use explorer_layout::font::FontSource;
@@ -71,6 +71,57 @@ pub enum CoreEvent {
         tab: Option<TabId>,
         /// Message d'erreur.
         message: String,
+    },
+}
+
+/// Événement d'entrée côté UI — coordonnées en px CSS du
+/// viewport (le scroll est compensé par le hit-test).
+#[derive(Debug, Clone)]
+pub enum InputEvent {
+    /// Clic principal à `(x, y)`.
+    Click {
+        /// Position viewport.
+        x: f32,
+        /// Position viewport.
+        y: f32,
+    },
+    /// Survol à `(x, y)` — coalescé côté client (ADR-0003).
+    MouseMove {
+        /// Position viewport.
+        x: f32,
+        /// Position viewport.
+        y: f32,
+    },
+    /// Scroll vertical (delta px CSS).
+    Scroll {
+        /// Delta (positif = vers le bas).
+        dy: f32,
+    },
+    /// Touche clavier — ignorée au MVP (pas de champ
+    /// focalisable avant les formulaires).
+    Key {
+        /// Identifiant de touche (`"a"`, `"Enter"`…).
+        key: String,
+    },
+}
+
+/// Résultat d'un événement d'entrée.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InputOutcome {
+    /// Rien à signaler.
+    Ignored,
+    /// Scroll appliqué → `scroll_y` résultant.
+    Scrolled {
+        /// Décalage courant.
+        scroll_y: f32,
+    },
+    /// Un lien a été suivi (navigation déclenchée).
+    Navigated,
+    /// Survol : URL du lien sous le curseur, s'il y en a un
+    /// (le client choisit le curseur à afficher).
+    Hover {
+        /// `href` résolu, ou `None` hors lien.
+        url: Option<String>,
     },
 }
 
@@ -129,6 +180,10 @@ struct Tab {
     hist: Vec<Url>,
     /// Position dans `hist`.
     hist_idx: usize,
+    /// Décalage de scroll (px CSS).
+    scroll_y: f32,
+    /// Hauteur du document posé — borne max du scroll.
+    doc_h: f32,
     /// DOM parsé.
     dom: Option<Dom>,
     /// Arbre de boîtes posé.
@@ -244,6 +299,8 @@ impl Session {
                 title: None,
                 hist: Vec::new(),
                 hist_idx: 0,
+                scroll_y: 0.0,
+                doc_h: 0.0,
                 dom: None,
                 tree: None,
                 list: None,
@@ -423,6 +480,7 @@ impl Session {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
             entry.url = Some(url);
             entry.title.clone_from(&title);
+            entry.scroll_y = 0.0;
             entry.dom = Some(dom);
         }
         self.relayout(tab)?;
@@ -491,22 +549,141 @@ impl Session {
         let Some(mut bx) = build_box_tree(dom, root_el, &styles) else {
             return Err(CoreError::NothingToPaint);
         };
-        let (vw, vh) = self.viewport;
+        let (vw, _vh) = self.viewport;
         let ctx = BlockCtx {
             fonts: Some(self.fonts.as_ref() as &dyn FontSource),
             ..BlockCtx::default()
         };
         layout_tree(&mut bx, vw, &ctx);
-        let list = build_display_list(&bx, vw, vh);
-        let fonts = Arc::clone(&self.fonts);
-        let frame = rasterize(&list, fonts.as_ref() as &dyn FontSource, self.scale)
+        entry.doc_h = bx.rect.height;
+        entry.tree = Some(bx);
+        self.repaint(tab)
+    }
+
+    /// Display list + raster + PNG depuis l'arbre posé —
+    /// sans re-layout (scroll, invalidation partielle).
+    fn repaint(&mut self, tab: TabId) -> Result<(), CoreError> {
+        let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        let Some(bx) = entry.tree.as_ref() else {
+            return Err(CoreError::EmptyDocument);
+        };
+        let (vw, vh) = self.viewport;
+        let list = build_display_list(bx, vw, vh, entry.scroll_y);
+        let frame = rasterize(&list, self.fonts.as_ref() as &dyn FontSource, self.scale)
             .ok_or(CoreError::FrameTooBig)?;
         let png = frame.encode_png();
-        entry.tree = Some(bx);
+        let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
         entry.list = Some(list);
         entry.frame = Some(frame);
         entry.png = png;
         Ok(())
+    }
+
+    /// Applique un événement d'entrée à l'onglet : hit-test
+    /// sur l'arbre posé, scroll borné, suivi de lien.
+    ///
+    /// # Errors
+    /// [`CoreError::UnknownTab`], ou erreur de navigation si
+    /// un clic de lien déclenche un fetch qui échoue.
+    pub async fn handle_input(
+        &mut self,
+        tab: TabId,
+        ev: InputEvent,
+    ) -> Result<InputOutcome, CoreError> {
+        if !self.tabs.contains_key(&tab) {
+            return Err(CoreError::UnknownTab(tab));
+        }
+        match ev {
+            InputEvent::Key { key } => {
+                // Pas de champ focalisable avant les
+                // formulaires — la touche est acceptée et
+                // tracée, rien d'autre.
+                tracing::trace!(tab, key, "touche ignorée (MVP)");
+                Ok(InputOutcome::Ignored)
+            }
+            InputEvent::Scroll { dy } => {
+                self.scroll_by(tab, dy)?;
+                Ok(InputOutcome::Scrolled {
+                    scroll_y: self.tabs.get(&tab).map_or(0.0, |t| t.scroll_y),
+                })
+            }
+            InputEvent::MouseMove { x, y } => Ok(InputOutcome::Hover {
+                url: self.link_at(tab, x, y),
+            }),
+            InputEvent::Click { x, y } => match self.link_at(tab, x, y) {
+                Some(url) => {
+                    self.navigate(tab, &url).await?;
+                    Ok(InputOutcome::Navigated)
+                }
+                None => Ok(InputOutcome::Ignored),
+            },
+        }
+    }
+
+    /// `href` résolu du lien `<a>` sous `(x, y)` viewport —
+    /// hit-test profond sur la boîte posée + remontée des
+    /// ancêtres DOM.
+    fn link_at(&self, tab: TabId, x: f32, y: f32) -> Option<String> {
+        let entry = self.tabs.get(&tab)?;
+        let tree = entry.tree.as_ref()?;
+        let dom = entry.dom.as_ref()?;
+        let node = hit_test(tree, x, y + entry.scroll_y)?;
+        let href = ancestor_href(dom, node)?;
+        let base = entry.url.as_ref()?;
+        Some(Url::resolve(base, &href).ok()?.to_string())
+    }
+
+    /// Scroll borné `[0, doc_h - viewport_h]` puis repaint +
+    /// `frame_invalidated`.
+    fn scroll_by(&mut self, tab: TabId, dy: f32) -> Result<(), CoreError> {
+        {
+            let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+            let max = (entry.doc_h - self.viewport.1).max(0.0);
+            let next = (entry.scroll_y + dy).clamp(0.0, max);
+            if (next - entry.scroll_y).abs() < f32::EPSILON {
+                return Ok(());
+            }
+            entry.scroll_y = next;
+        }
+        self.repaint(tab)?;
+        let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+        Ok(())
+    }
+}
+
+/// Hit-test profond : la boîte la plus imbriquée contenant
+/// `(x, y)` document gagne — renvoie son `NodeId` source
+/// (`None` pour les boîtes anonymes → on remonte au parent
+/// peint le plus proche via les ancêtres DOM côté appelant).
+fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
+    if !(bx.rect.x <= x
+        && x <= bx.rect.x + bx.rect.width
+        && bx.rect.y <= y
+        && y <= bx.rect.y + bx.rect.height)
+    {
+        return None;
+    }
+    for child in &bx.children {
+        if let Some(n) = hit_test(child, x, y) {
+            return Some(n);
+        }
+    }
+    bx.node
+}
+
+/// `href` du plus proche ancêtre `<a>` (le nœud lui-même
+/// compris) — `None` si le point n'est pas dans un lien.
+fn ancestor_href(dom: &Dom, mut node: NodeId) -> Option<String> {
+    loop {
+        if dom.tag_name(node).is_ok_and(|t| t == "a") {
+            if let Ok(Some(href)) = dom.attribute(node, "href") {
+                return Some(href);
+            }
+        }
+        node = match dom.parent(node) {
+            Ok(Some(p)) => p,
+            _ => return None,
+        };
     }
 }
 

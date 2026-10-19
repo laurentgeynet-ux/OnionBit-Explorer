@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use explorer_core::{CoreError, CoreEvent, Session, SessionConfig};
+use explorer_core::{CoreError, CoreEvent, InputEvent, InputOutcome, Session, SessionConfig};
 use explorer_layout::font::{FontRequest, FontSource};
 use explorer_net::error::NetResult;
 use explorer_net::http::{HttpTransport, Request, Response};
@@ -100,6 +100,16 @@ const PAGE: &str = "<!doctype html><html><body>\
 /// Page avec `<title>`.
 const PAGE_T: &str = "<!doctype html><html><head>\
      <title>Page A</title></head><body><div>a</div></body></html>";
+
+/// Page avec un lien en haut à gauche.
+const PAGE_LINK: &str = "<!doctype html><html><body>\
+     <a href=\"/b\">lien vers b</a></body></html>";
+
+/// Page haute (déborde le viewport 800×600 → scrollable).
+fn tall_page() -> &'static str {
+    "<!doctype html><html><head><style>#t{height:2000px}</style></head>\
+     <body><div id=\"t\">haut</div></body></html>"
+}
 
 #[tokio::test]
 async fn open_tab_emits_event() {
@@ -300,4 +310,123 @@ async fn close_tab_emits_and_removes() {
     }
     assert!(saw);
     assert!(matches!(s.close_tab(id), Err(CoreError::UnknownTab(_))));
+}
+
+#[tokio::test]
+async fn click_on_link_navigates() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_LINK);
+    t.route("/b", 200, PAGE_T);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/b"));
+}
+
+#[tokio::test]
+async fn click_off_link_is_ignored() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_LINK);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    // Le lien fait ~20px de haut ; un clic à y=400 tombe dans
+    // le body, hors lien.
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 400.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+}
+
+#[tokio::test]
+async fn mousemove_reports_link_href() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_LINK);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let out = s
+        .handle_input(id, InputEvent::MouseMove { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(
+        out,
+        InputOutcome::Hover {
+            url: Some("http://h.test/b".to_string())
+        }
+    );
+}
+
+#[tokio::test]
+async fn scroll_is_clamped_and_invalidates() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, tall_page());
+    let mut rx = s.subscribe();
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    // Scroll dans la borne : doc 2000+ → max = doc - 600.
+    let out = s
+        .handle_input(id, InputEvent::Scroll { dy: 300.0 })
+        .await
+        .unwrap();
+    match out {
+        InputOutcome::Scrolled { scroll_y } => {
+            assert!((scroll_y - 300.0).abs() < 0.01);
+        }
+        o => panic!("inattendu : {o:?}"),
+    }
+
+    // Dépassement → clampé à doc_h - viewport.
+    let out = s
+        .handle_input(id, InputEvent::Scroll { dy: 99999.0 })
+        .await
+        .unwrap();
+    let max = match out {
+        InputOutcome::Scrolled { scroll_y } => scroll_y,
+        o => panic!("inattendu : {o:?}"),
+    };
+    assert!(max > 300.0 && max <= 2000.0);
+
+    // Scroll négatif au-delà → clampé à 0.
+    let out = s
+        .handle_input(id, InputEvent::Scroll { dy: -99999.0 })
+        .await
+        .unwrap();
+    match out {
+        InputOutcome::Scrolled { scroll_y } => assert!(scroll_y.abs() < 0.01),
+        o => panic!("inattendu : {o:?}"),
+    }
+
+    // Les scrolls ont émis des frame_invalidated.
+    let mut n = 0;
+    while let Ok(e) = rx.try_recv() {
+        if matches!(e, CoreEvent::FrameInvalidated { tab } if tab == id) {
+            n += 1;
+        }
+    }
+    assert!(n >= 2);
+}
+
+#[tokio::test]
+async fn key_input_is_ignored() {
+    let (mut s, _t) = test_session();
+    let id = s.open_tab();
+    let out = s
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "a".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
 }

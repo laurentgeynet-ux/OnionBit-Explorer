@@ -53,7 +53,7 @@ fn frame_at(html: &str, css: &str, scale: f32) -> Frame {
         .expect("élément racine");
     let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
     layout_tree(&mut bx, VIEW, &ctx());
-    let list = build_display_list(&bx, VIEW, 200.0);
+    let list = build_display_list(&bx, VIEW, 200.0, 0.0);
     rasterize(&list, font_src(), scale).expect("frame allouée")
 }
 

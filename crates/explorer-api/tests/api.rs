@@ -32,12 +32,18 @@ struct FakeTransport {
 
 #[async_trait]
 impl HttpTransport for FakeTransport {
-    async fn fetch(&self, _req: &Request) -> NetResult<Response> {
+    async fn fetch(&self, req: &Request) -> NetResult<Response> {
+        let body = if req.url.path() == "/link" {
+            "<!doctype html><html><body>\
+             <a href=\"/b\">lien</a></body></html>"
+        } else {
+            self.body
+        };
         Ok(Response {
             status: 200,
             reason: "fake".to_string(),
             headers: vec![],
-            body: self.body.as_bytes().to_vec(),
+            body: body.as_bytes().to_vec(),
             reused_connection: false,
         })
     }
@@ -294,4 +300,53 @@ async fn navigate_then_back_forward_reload() {
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["url"], want, "{route}");
     }
+}
+
+#[tokio::test]
+async fn input_click_link_navigates() {
+    let app = test_app();
+    let resp = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let id = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    app.clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/navigate"),
+            r#"{"url":"http://h.test/link"}"#,
+        ))
+        .await
+        .unwrap();
+
+    // Clic sur le lien → navigated.
+    let r = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/input"),
+            r#"{"type":"click","x":5,"y":5}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["result"], "navigated");
+
+    // Scroll → scrolled + scroll_y.
+    let r = app
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/input"),
+            r#"{"type":"scroll","dy":50}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["result"], "scrolled");
+    assert!(v["scroll_y"].is_number());
 }

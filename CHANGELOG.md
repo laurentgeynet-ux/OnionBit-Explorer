@@ -9,6 +9,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 26 — entrées et scroll** : `InputEvent`
+  (`Click`, `MouseMove`, `Scroll`, `Key` — ignorée au MVP
+  sans champs focalisables) et `InputOutcome` (`Ignored`,
+  `Scrolled`, `Navigated`, `Hover`) ; `handle_input` fait le
+  hit-test profond sur l'arbre posé (`hit_test` renvoie le
+  `NodeId` de la boîte la plus imbriquée, `ancestor_href`
+  remonte au `<a>` le plus proche, `Url::resolve` résout
+  l'`href` relatif) — un clic sur un lien navigue, le survol
+  rapporte l'URL pour le curseur. Scroll : `scroll_y` borné
+  `[0, doc_h - viewport_h]` par onglet, `repaint` réémet la
+  display list sans re-layout (`build_display_list` prend
+  `scroll_y` ; les sous-arbres `position:fixed` peignent avec
+  un offset nul — ancrés viewport) puis `frame_invalidated`.
+  `POST /api/tabs/{id}/input` route les quatre types
+  (`mousemove` coalescé côté client, ADR-0003). 6 tests
+  (clic lien/hors-lien, hover, bornes de scroll, clavier,
+  route API).
 - **Étape 25 — contrat REST + historique de session** :
   `explorer-core` : `Tab` porte `title`, `hist`/`hist_idx`
   (historique local navigateur — `navigate` tronque le futur,

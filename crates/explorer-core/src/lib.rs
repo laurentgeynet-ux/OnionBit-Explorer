@@ -16,4 +16,6 @@
 
 pub mod session;
 
-pub use session::{CoreError, CoreEvent, Session, SessionConfig, TabId, TabInfo};
+pub use session::{
+    CoreError, CoreEvent, InputEvent, InputOutcome, Session, SessionConfig, TabId, TabInfo,
+};

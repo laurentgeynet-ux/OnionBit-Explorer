@@ -140,17 +140,28 @@ impl DisplayList {
 
 /// Construit la display list d'un arbre posé — pur,
 /// déterministe, borné par la taille de l'arbre. `height`
-/// couvre au moins le viewport (le document peut dépasser —
-/// le scroll vient plus tard).
+/// couvre au moins le viewport. `scroll_y` décale tout le
+/// contenu vers le haut, **sauf** les sous-arbres
+/// `position: fixed` qui restent ancrés au viewport.
 #[must_use]
-pub fn build_display_list(root: &LayoutBox, viewport_w: f32, viewport_h: f32) -> DisplayList {
+pub fn build_display_list(
+    root: &LayoutBox,
+    viewport_w: f32,
+    viewport_h: f32,
+    scroll_y: f32,
+) -> DisplayList {
     let mut items = Vec::new();
-    paint_box(root, &mut items);
+    paint_box(root, &mut items, -scroll_y);
     DisplayList {
         items,
         width: viewport_w,
         height: root.rect.height.max(viewport_h),
     }
+}
+
+/// `rect` translaté de `dy`.
+fn shifted(r: Rect, dy: f32) -> Rect {
+    Rect { y: r.y + dy, ..r }
 }
 
 /// Style usé d'un côté de bordure.
@@ -183,14 +194,14 @@ fn prop_px(st: &explorer_css::ComputedStyle, prop: &str, fallback: f32) -> f32 {
 
 /// Fond + bordures + texte propre d'une boîte (avant les
 /// enfants — le fond passe TOUJOURS sous son contenu).
-fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>) {
+/// `off` = décalage vertical de scroll (`0` dans les
+/// sous-arbres `position: fixed`).
+fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32) {
+    let rect = shifted(bx.rect, off);
     // Fond : `background-color` non transparente.
     if let Some(c) = bx.style.get("background-color").and_then(parse_color) {
         if c.a > 0 {
-            items.push(DisplayItem::FillRect {
-                rect: bx.rect,
-                color: c,
-            });
+            items.push(DisplayItem::FillRect { rect, color: c });
         }
     }
     // Bordures : 4 côtés, épaisseur > 0 et style non `none`.
@@ -208,7 +219,7 @@ fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>) {
                 .unwrap_or(Color::BLACK)
         };
         items.push(DisplayItem::Border {
-            rect: bx.rect,
+            rect,
             widths,
             colors: [
                 color_of("border-top-color"),
@@ -241,7 +252,7 @@ fn paint_self(bx: &LayoutBox, items: &mut Vec<DisplayItem>) {
                 }
                 if let Some(run) = &frag.shaped {
                     items.push(DisplayItem::Text {
-                        origin: (frag.rect.x, frag.rect.y + frag.baseline),
+                        origin: (frag.rect.x, frag.rect.y + frag.baseline + off),
                         run: run.clone(),
                         font: font_request(&bx.style),
                         color: ink,
@@ -281,8 +292,15 @@ fn font_request(st: &explorer_css::ComputedStyle) -> explorer_layout::font::Font
 }
 
 /// Peint une boîte et ses descendants dans l'ordre borné.
-fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>) {
-    paint_self(bx, items);
+fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: f32) {
+    // `position: fixed` est ancrée au viewport : son sous-arbre
+    // ignore le scroll.
+    let off = if bx.position == Position::Fixed {
+        0.0
+    } else {
+        off
+    };
+    paint_self(bx, items, off);
     if bx.children.is_empty() {
         return;
     }
@@ -290,12 +308,12 @@ fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>) {
     // bordures — on garde le rect entier, documenté).
     let clipped = bx.overflow != Overflow::Visible;
     if clipped {
-        items.push(DisplayItem::PushClip(bx.rect));
+        items.push(DisplayItem::PushClip(shifted(bx.rect, off)));
     }
     // Enfants non positionnés d'abord (ordre de l'arbre).
     for child in &bx.children {
         if child.position == Position::Static {
-            paint_box(child, items);
+            paint_box(child, items, off);
         }
     }
     // Enfants positionnés ensuite, triés par z-index (stable).
@@ -306,7 +324,7 @@ fn paint_box(bx: &LayoutBox, items: &mut Vec<DisplayItem>) {
         .collect();
     positioned.sort_by_key(|c| c.z_index);
     for child in positioned {
-        paint_box(child, items);
+        paint_box(child, items, off);
     }
     if clipped {
         items.push(DisplayItem::PopClip);
