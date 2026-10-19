@@ -9,6 +9,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-4 — `flex-wrap` multi-lignes** (`explorer-layout`) :
+  découpe des items en lignes par taille hypothétique
+  (`flex-wrap: wrap`/`wrap-reverse`), facteurs flex,
+  marges `auto` et `justify-content` résolus **par ligne**
+  (spec §9.5-9.7), `row-gap` inter-lignes, `align-content`
+  complet (7 valeurs ; `stretch` répartit le libre sur les
+  crosses de ligne) quand la hauteur du conteneur est
+  définie, miroir cross pour `wrap-reverse`. Les items
+  `order`és franchissent les lignes dans l'ordre trié.
+  Hors scope documenté : `wrap` en `column`.
+
 - **R-3 — Tailles intrinsèques réelles** (`explorer-layout`,
   nouveau module `intrinsic`) : `min-content`/`max-content`/
   `fit-content` sont désormais **mesurés sur le contenu

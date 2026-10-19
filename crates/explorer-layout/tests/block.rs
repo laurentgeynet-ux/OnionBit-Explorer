@@ -401,3 +401,133 @@ fn flex_align_stretch_etire_la_boite() {
         f2.children[1].rect.height
     );
 }
+
+#[test]
+fn flex_wrap_coupe_en_lignes() {
+    // R-4 : `flex-wrap: wrap` — les items qui dépassent la
+    // piste principale passent à la ligne suivante (3×300px
+    // dans 800 → 2 sur la 1re ligne, 1 sur la 2e).
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"display:flex;flex-wrap:wrap\">\
+           <div style=\"width:300px\">a</div>\
+           <div style=\"width:300px\">b</div>\
+           <div style=\"width:300px\">c</div></div>",
+        "",
+    );
+    let f = find(&bx, by_tag(&dom, "div"));
+    let (a, b, c) = (&f.children[0], &f.children[1], &f.children[2]);
+    assert!(approx(a.rect.y, 0.0) && approx(b.rect.y, 0.0), "ligne 1");
+    assert!(approx(b.rect.x, 300.0), "b x={}", b.rect.x);
+    assert!(
+        c.rect.y > a.rect.height - 0.5,
+        "c sur ligne 2 y={}",
+        c.rect.y
+    );
+    assert!(approx(c.rect.x, 0.0), "c x={}", c.rect.x);
+    // Hauteur du conteneur = 2 lignes.
+    assert!(
+        approx(f.rect.height, 2.0 * a.rect.height),
+        "{}",
+        f.rect.height
+    );
+}
+
+#[test]
+fn flex_wrap_nowrap_par_defaut() {
+    // Sans wrap : débordement reste sur une ligne.
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"display:flex\">\
+           <div style=\"width:500px\">a</div>\
+           <div style=\"width:500px\">b</div></div>",
+        "",
+    );
+    let f = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(f.children[1].rect.y, 0.0), "même ligne");
+    assert!(f.children[1].rect.x > 0.0, "b déborde à droite");
+}
+
+#[test]
+fn flex_wrap_row_gap_entre_lignes() {
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"display:flex;flex-wrap:wrap;row-gap:10px\">\
+           <div style=\"width:600px\">a</div>\
+           <div style=\"width:600px\">b</div></div>",
+        "",
+    );
+    let f = find(&bx, by_tag(&dom, "div"));
+    let (a, b) = (&f.children[0], &f.children[1]);
+    assert!(
+        approx(b.rect.y - a.rect.y - a.rect.height, 10.0),
+        "row-gap dy={}",
+        b.rect.y - a.rect.y
+    );
+}
+
+#[test]
+fn flex_wrap_align_content_center() {
+    // `align-content: center` sur conteneur à hauteur fixe :
+    // le bloc de lignes est centré dans l'axe cross.
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"display:flex;flex-wrap:wrap;\
+           height:200px;align-content:center\">\
+           <div style=\"width:600px\">a</div>\
+           <div style=\"width:600px\">b</div></div>",
+        "",
+    );
+    let f = find(&bx, by_tag(&dom, "div"));
+    let a = &f.children[0];
+    let expected = (200.0 - 2.0 * a.rect.height) / 2.0;
+    assert!(
+        approx(a.rect.y, expected),
+        "y={} attendu {expected}",
+        a.rect.y
+    );
+}
+
+#[test]
+fn flex_wrap_reverse_inverse_le_cross() {
+    // `wrap-reverse` : la première ligne part du BAS de la
+    // zone cross (hauteur définie requise pour voir l'effet).
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"display:flex;flex-wrap:wrap-reverse;\
+           height:100px\">\
+           <div style=\"width:600px\">a</div>\
+           <div style=\"width:600px\">b</div></div>",
+        "",
+    );
+    let f = find(&bx, by_tag(&dom, "div"));
+    let (a, b) = (&f.children[0], &f.children[1]);
+    // a (1re ligne) se colle en bas, b au-dessus.
+    assert!(
+        approx(a.rect.y + a.rect.height, 100.0),
+        "a en bas y={} h={}",
+        a.rect.y,
+        a.rect.height
+    );
+    assert!(
+        approx(b.rect.y, 100.0 - 2.0 * a.rect.height),
+        "b y={}",
+        b.rect.y
+    );
+}
+
+#[test]
+fn flex_wrap_justify_par_ligne() {
+    // `justify-content: flex-end` s'applique à chaque ligne.
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"display:flex;flex-wrap:wrap;\
+           justify-content:flex-end\">\
+           <div style=\"width:300px\">a</div>\
+           <div style=\"width:300px\">b</div>\
+           <div style=\"width:300px\">c</div></div>",
+        "",
+    );
+    let f = find(&bx, by_tag(&dom, "div"));
+    let c = &f.children[2];
+    assert!(
+        approx(c.rect.x + c.rect.width, VIEW),
+        "c fin x={}",
+        c.rect.x
+    );
+    assert!(c.rect.y > 0.0, "c ligne 2");
+}

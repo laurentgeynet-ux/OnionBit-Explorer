@@ -202,8 +202,15 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `margin:auto` sur items flex (axe principal avant
   `justify-content`, cross = reliquat) ; `stretch` étire le
   rect cross quand la taille est `auto`.
-- [ ] **R-4. `flex-wrap` multi-lignes** (ex-57) :
+- [x] **R-4. `flex-wrap` multi-lignes** (ex-57) :
   coupures de lignes flex, `align-content`, `order` cross-line.
+  Livré : découpe en lignes par taille hypothétique
+  (base+marges), flex/marges `auto`/`justify-content`
+  calculés **par ligne**, `row-gap`, `align-content`
+  (7 valeurs + `stretch` qui grandit les lignes) quand la
+  hauteur du conteneur est définie, `wrap-reverse` miroir
+  l'axe cross. Hors scope documenté : wrap en `column`,
+  `height` en % sans base définie.
 - [ ] **R-5. Grid complet MVP+** (ex-58) :
   `grid-template-areas`, placement nommé, `auto-flow`
   dense/column, `minmax`/`fr` mixtes résolus ; `subgrid`
