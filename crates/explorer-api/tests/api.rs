@@ -167,4 +167,131 @@ async fn navigate_bad_body_is_400() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    // Format d'erreur du contrat ADR-0003.
+    assert_eq!(v["error"]["handled"], true);
+    assert!(v["error"]["message"].is_string());
+}
+
+#[tokio::test]
+async fn status_lists_engine_and_tabs() {
+    let app = test_app();
+    let resp = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["engine"], "explorer");
+    assert_eq!(v["tabs"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn tabs_crud_contract() {
+    let app = test_app();
+    // Crée.
+    let resp = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let id = v["id"].as_u64().unwrap();
+
+    // Liste.
+    let resp = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/tabs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["tabs"].as_array().unwrap().len(), 1);
+    assert_eq!(v["tabs"][0]["id"], id);
+
+    // Supprime.
+    let resp = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .method("DELETE")
+                .uri(format!("/api/tabs/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    // Inconnu → 404 avec le format d'erreur.
+    let resp = app
+        .oneshot(
+            HttpRequest::builder()
+                .method("DELETE")
+                .uri(format!("/api/tabs/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["error"]["handled"], true);
+}
+
+#[tokio::test]
+async fn navigate_then_back_forward_reload() {
+    let app = test_app();
+    let resp = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let id = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+
+    for url in ["http://h.test/a", "http://h.test/b"] {
+        let r = app
+            .clone()
+            .oneshot(json_post(
+                &format!("/api/tabs/{id}/navigate"),
+                &format!(r#"{{"url":"{url}"}}"#),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+    }
+    // back → /a, forward → /b, reload → /b.
+    for (route, want) in [
+        ("back", "http://h.test/a"),
+        ("forward", "http://h.test/b"),
+        ("reload", "http://h.test/b"),
+    ] {
+        let r = app
+            .clone()
+            .oneshot(json_post(&format!("/api/tabs/{id}/{route}"), "{}"))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK, "{route}");
+        let bytes = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["url"], want, "{route}");
+    }
 }

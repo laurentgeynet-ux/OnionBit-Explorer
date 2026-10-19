@@ -5,16 +5,23 @@
 //! `explorer-api` — API REST + SSE (`axum`) exposée sur loopback :
 //! routes, DTO, SSE, clé optionnelle (ADR-0003/0004).
 //!
-//! Étape 24 : `GET /api/tabs/{id}/frame` sert le PNG de
-//! l'onglet, `GET /api/events` diffuse `frame_invalidated` et
-//! les événements de session en SSE, `POST /api/tabs`,
-//! `POST /api/tabs/{id}/navigate`, `POST /api/tabs/{id}/viewport`.
-//! Le contrat complet (onglets CRUD, historique, input) est
-//! l'étape 25.
+//! Étape 25 — contrat REST :
+//! - `GET  /api/status`              → état du moteur ;
+//! - `GET  /api/tabs`                → liste des onglets ;
+//! - `POST /api/tabs`                → `{ "id": n }` ;
+//! - `DELETE /api/tabs/{id}`         → ferme l'onglet ;
+//! - `POST /api/tabs/{id}/navigate`  → `{ "url": "…" }` ;
+//! - `POST /api/tabs/{id}/reload`    → re-fetch ;
+//! - `POST /api/tabs/{id}/back`      → historique −1 ;
+//! - `POST /api/tabs/{id}/forward`   → historique +1 ;
+//! - `POST /api/tabs/{id}/viewport`  → `{ "w", "h", "scale" }` ;
+//! - `GET  /api/tabs/{id}/frame`     → `image/png` (ADR-0004) ;
+//! - `GET  /api/events`              → flux SSE.
 //!
+//! Erreurs : `{"error":{"handled":true,"message":"…"}}` (ADR-0003).
 //! Les DTO ne fuient jamais dans `explorer-core`. Session
-//! sérialisée par `Mutex` (single-writer : le DOM/layout ne
-//! sort jamais de ce flux).
+//! sérialisée par `tokio::Mutex` (single-writer : le DOM/layout
+//! ne sort jamais de ce flux).
 
 #![forbid(unsafe_code)]
 
@@ -26,9 +33,9 @@ use axum::extract::{Path, State};
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use explorer_core::{CoreEvent, Session, TabId};
+use explorer_core::{CoreError, CoreEvent, Session, TabId};
 use futures_util::Stream;
 
 /// État partagé : la session moteur, sérialisée.
@@ -43,18 +50,81 @@ pub struct ApiState {
 /// le daemon — l'API ne crée jamais de moteur.
 pub fn router(session: Arc<tokio::sync::Mutex<Session>>) -> Router {
     Router::new()
-        .route("/api/tabs", post(open_tab))
+        .route("/api/status", get(status))
+        .route("/api/tabs", get(list_tabs).post(open_tab))
+        .route("/api/tabs/{id}", delete(close_tab))
         .route("/api/tabs/{id}/frame", get(frame))
         .route("/api/tabs/{id}/navigate", post(navigate))
+        .route("/api/tabs/{id}/reload", post(reload))
+        .route("/api/tabs/{id}/back", post(back))
+        .route("/api/tabs/{id}/forward", post(forward))
         .route("/api/tabs/{id}/viewport", post(viewport))
         .route("/api/events", get(events))
         .with_state(ApiState { session })
+}
+
+/// Corps d'erreur du contrat : `{"error":{handled,message}}`.
+fn err(status: StatusCode, e: &CoreError) -> Response {
+    (
+        status,
+        Json(serde_json::json!({
+            "error": { "handled": true, "message": e.to_string() }
+        })),
+    )
+        .into_response()
+}
+
+/// Erreur métier → HTTP : `UnknownTab` → 404, erreurs de
+/// pipeline (fetch, HTTP amont, parse) → 502.
+fn err_status(e: &CoreError) -> StatusCode {
+    match e {
+        CoreError::UnknownTab(_) => StatusCode::NOT_FOUND,
+        _ => StatusCode::BAD_GATEWAY,
+    }
+}
+
+/// `GET /api/status` → état du moteur.
+async fn status(State(st): State<ApiState>) -> impl IntoResponse {
+    let session = st.session.lock().await;
+    Json(serde_json::json!({
+        "engine": "explorer",
+        "version": env!("CARGO_PKG_VERSION"),
+        "tabs": session.tabs(),
+    }))
+}
+
+/// `GET /api/tabs` → `[{id, url, title, can_back, can_forward}]`.
+async fn list_tabs(State(st): State<ApiState>) -> impl IntoResponse {
+    let session = st.session.lock().await;
+    let tabs: Vec<_> = session
+        .tab_infos()
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "id": t.id,
+                "url": t.url,
+                "title": t.title,
+                "can_back": t.can_back,
+                "can_forward": t.can_forward,
+            })
+        })
+        .collect();
+    Json(serde_json::json!({ "tabs": tabs }))
 }
 
 /// `POST /api/tabs` → `{ "id": n }`.
 async fn open_tab(State(st): State<ApiState>) -> impl IntoResponse {
     let id = st.session.lock().await.open_tab();
     (StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response()
+}
+
+/// `DELETE /api/tabs/{id}`.
+async fn close_tab(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
+    let mut session = st.session.lock().await;
+    match session.close_tab(id) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => err(err_status(&e), &e),
+    }
 }
 
 /// `GET /api/tabs/{id}/frame` → `image/png` (pull ADR-0004).
@@ -70,29 +140,70 @@ async fn frame(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
     }
 }
 
-/// Corps `POST …/navigate` : `{ "url": "https://…" }`.
+/// Corps `{ "url": "…" }` → `POST …/navigate`.
 async fn navigate(
     State(st): State<ApiState>,
     Path(id): Path<TabId>,
     Json(body): Json<serde_json::Value>,
 ) -> Response {
     let Some(url) = body.get("url").and_then(|u| u.as_str()).map(str::to_string) else {
-        return StatusCode::BAD_REQUEST.into_response();
+        return err(
+            StatusCode::BAD_REQUEST,
+            &CoreError::Url("champ « url » manquant".to_string()),
+        );
     };
     // La garde vit pendant tout l'await : single-writer strict
     // — une navigation en cours sérialise les autres actions.
     let mut session = st.session.lock().await;
     match session.navigate(id, &url).await {
-        Ok(()) => StatusCode::OK.into_response(),
-        Err(e) => (
-            StatusCode::BAD_GATEWAY,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Ok(()) => tab_json(&session, id),
+        Err(e) => err(err_status(&e), &e),
     }
 }
 
-/// Corps `POST …/viewport` : `{ "w": f32, "h": f32, "scale": f32 }`.
+/// `POST …/reload` — re-fetch de l'URL courante.
+async fn reload(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
+    let mut session = st.session.lock().await;
+    match session.reload(id).await {
+        Ok(()) => tab_json(&session, id),
+        Err(e) => err(err_status(&e), &e),
+    }
+}
+
+/// `POST …/back` — historique −1.
+async fn back(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
+    let mut session = st.session.lock().await;
+    match session.go_back(id).await {
+        Ok(()) => tab_json(&session, id),
+        Err(e) => err(err_status(&e), &e),
+    }
+}
+
+/// `POST …/forward` — historique +1.
+async fn forward(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
+    let mut session = st.session.lock().await;
+    match session.go_forward(id).await {
+        Ok(()) => tab_json(&session, id),
+        Err(e) => err(err_status(&e), &e),
+    }
+}
+
+/// Réponse de navigation : l'état de l'onglet résultant.
+fn tab_json(session: &Session, id: TabId) -> Response {
+    match session.tab_info(id) {
+        Some(t) => Json(serde_json::json!({
+            "id": t.id,
+            "url": t.url,
+            "title": t.title,
+            "can_back": t.can_back,
+            "can_forward": t.can_forward,
+        }))
+        .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// `POST …/viewport` : `{ "w": f32, "h": f32, "scale": f32 }`.
 async fn viewport(
     State(st): State<ApiState>,
     Path(id): Path<TabId>,
@@ -100,7 +211,10 @@ async fn viewport(
 ) -> Response {
     let f = |k: &str| body.get(k).and_then(serde_json::Value::as_f64);
     let (Some(w), Some(h)) = (f("w"), f("h")) else {
-        return StatusCode::BAD_REQUEST.into_response();
+        return err(
+            StatusCode::BAD_REQUEST,
+            &CoreError::Url("champs « w »/« h » manquants".to_string()),
+        );
     };
     let scale = f("scale").unwrap_or(1.0);
     let mut session = st.session.lock().await;
@@ -150,9 +264,16 @@ fn event_json(ev: &CoreEvent) -> (&'static str, String) {
         CoreEvent::TabOpened { tab } => {
             ("tab_opened", serde_json::json!({ "tab": tab }).to_string())
         }
-        CoreEvent::Navigated { tab, url } => (
+        CoreEvent::TabClosed { tab } => {
+            ("tab_closed", serde_json::json!({ "tab": tab }).to_string())
+        }
+        CoreEvent::Navigated { tab, url, title } => (
             "navigated",
-            serde_json::json!({ "tab": tab, "url": url }).to_string(),
+            serde_json::json!({ "tab": tab, "url": url, "title": title }).to_string(),
+        ),
+        CoreEvent::TitleChanged { tab, title } => (
+            "title_changed",
+            serde_json::json!({ "tab": tab, "title": title }).to_string(),
         ),
         CoreEvent::FrameInvalidated { tab } => (
             "frame_invalidated",

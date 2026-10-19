@@ -9,6 +9,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 25 — contrat REST + historique de session** :
+  `explorer-core` : `Tab` porte `title`, `hist`/`hist_idx`
+  (historique local navigateur — `navigate` tronque le futur,
+  `reload` re-fetch sans toucher l'historique, `go_back`/
+  `go_forward` déplacent l'index) ; `TabInfo`/`tab_infos`
+  (`url`, `title`, `can_back`, `can_forward`) exposés à l'API ;
+  `extract_title` lit le premier `<title>` non vide ;
+  événements `TabClosed` et `TitleChanged` ajoutés au bus
+  (`Navigated` porte désormais le titre). `explorer-api` :
+  `GET /api/status`, `GET /api/tabs`, `DELETE /api/tabs/{id}`,
+  `POST …/reload|back|forward` — corps d'erreur du contrat
+  `{"error":{"handled":true,"message":"…"}}` (ADR-0003),
+  `UnknownTab` → 404, erreurs de pipeline → 502 ; SSE émet
+  `tab_closed` et `title_changed`. 7 tests de contrat
+  (`oneshot` : status, CRUD, back/forward/reload, format
+  d'erreur) + 3 tests session (historique, titre, close).
 - **Étape 24 — `explorer-core`/`explorer-api`/`explorer-daemon` :
   session et frame PNG servie** : `Session` (`session.rs`)
   orchestre le pipeline complet `fetch → décodage → parse →

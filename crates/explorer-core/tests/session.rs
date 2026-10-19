@@ -97,6 +97,10 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
 const PAGE: &str = "<!doctype html><html><body>\
      <div>bonjour monde</div></body></html>";
 
+/// Page avec `<title>`.
+const PAGE_T: &str = "<!doctype html><html><head>\
+     <title>Page A</title></head><body><div>a</div></body></html>";
+
 #[tokio::test]
 async fn open_tab_emits_event() {
     let (mut s, _t) = test_session();
@@ -213,4 +217,87 @@ async fn invalid_viewport_is_ignored() {
     let (mut s, _t) = test_session();
     s.set_viewport(0.0, -5.0, 1.0);
     assert_eq!(s.viewport(), (800.0, 600.0));
+}
+
+#[tokio::test]
+async fn title_is_extracted_and_title_changed_emitted() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_T);
+    let mut rx = s.subscribe();
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let info = s.tab_info(id).unwrap();
+    assert_eq!(info.title.as_deref(), Some("Page A"));
+
+    let mut saw_title = false;
+    while let Ok(e) = rx.try_recv() {
+        if matches!(e, CoreEvent::TitleChanged { title, .. } if title == "Page A") {
+            saw_title = true;
+        }
+    }
+    assert!(saw_title);
+}
+
+#[tokio::test]
+async fn history_back_forward_reload() {
+    let (mut s, t) = test_session();
+    t.route("/a", 200, PAGE_T);
+    t.route(
+        "/b",
+        200,
+        "<!doctype html><html><head>\
+         <title>Page B</title></head><body><div>b</div></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/a").await.unwrap();
+    s.navigate(id, "http://h.test/b").await.unwrap();
+
+    let info = s.tab_info(id).unwrap();
+    assert!(info.can_back && !info.can_forward);
+
+    // back → /a
+    s.go_back(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/a"));
+    let info = s.tab_info(id).unwrap();
+    assert!(!info.can_back && info.can_forward);
+
+    // forward → /b
+    s.go_forward(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/b"));
+
+    // Nouvelle navigation : tronque le futur.
+    s.go_back(id).await.unwrap();
+    s.navigate(id, "http://h.test/b").await.unwrap();
+    let info = s.tab_info(id).unwrap();
+    assert!(!info.can_forward, "futur tronqué");
+
+    // reload : re-fetch, historique inchangé.
+    let calls = *t.calls.lock().unwrap();
+    s.reload(id).await.unwrap();
+    assert_eq!(*t.calls.lock().unwrap(), calls + 1);
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/b"));
+    assert!(s.tab_info(id).unwrap().can_back);
+
+    // back sans page précédente → erreur typée, pas de panic.
+    s.go_back(id).await.unwrap();
+    assert!(matches!(s.go_back(id).await, Err(CoreError::EmptyDocument)));
+}
+
+#[tokio::test]
+async fn close_tab_emits_and_removes() {
+    let (mut s, _t) = test_session();
+    let mut rx = s.subscribe();
+    let id = s.open_tab();
+    s.close_tab(id).unwrap();
+    assert_eq!(s.tabs(), Vec::<u64>::new());
+    assert!(s.tab_info(id).is_none());
+    let mut saw = false;
+    while let Ok(e) = rx.try_recv() {
+        if matches!(e, CoreEvent::TabClosed { tab } if tab == id) {
+            saw = true;
+        }
+    }
+    assert!(saw);
+    assert!(matches!(s.close_tab(id), Err(CoreError::UnknownTab(_))));
 }

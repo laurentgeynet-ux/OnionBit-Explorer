@@ -188,7 +188,7 @@ Objectif : télécharger une page `http(s)` réelle, décodée, bornée.
 
 ## Phase 6 — API et daemon (`explorer-api`, `explorer-daemon`)
 
-- [ ] **Étape 25. Contrat REST.** `/status`, `/tabs` CRUD,
+- [x] **Étape 25. Contrat REST.** `/status`, `/tabs` CRUD,
   `navigate`, `reload`, `back`/`forward`, `/events` SSE — erreurs
   `{"error":{handled,message}}`.
 - [ ] **Étape 26. Entrées.** `POST /api/tabs/{id}/input` :

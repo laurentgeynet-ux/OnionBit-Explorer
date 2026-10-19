@@ -43,6 +43,20 @@ pub enum CoreEvent {
         tab: TabId,
         /// URL finale (après redirections).
         url: String,
+        /// Titre de la page (`None` si absent).
+        title: Option<String>,
+    },
+    /// Onglet fermé.
+    TabClosed {
+        /// Onglet fermé.
+        tab: TabId,
+    },
+    /// Le `<title>` de la page a changé.
+    TitleChanged {
+        /// Onglet concerné.
+        tab: TabId,
+        /// Nouveau titre.
+        title: String,
     },
     /// La frame de l'onglet a changé — l'UI tire
     /// `GET /api/tabs/{id}/frame` (ADR-0004).
@@ -58,6 +72,22 @@ pub enum CoreEvent {
         /// Message d'erreur.
         message: String,
     },
+}
+
+/// Vue publique d'un onglet pour l'API (DTO de sortie —
+/// pas de référence interne exposée).
+#[derive(Debug, Clone)]
+pub struct TabInfo {
+    /// Identifiant.
+    pub id: TabId,
+    /// URL courante (`None` si jamais navigué).
+    pub url: Option<String>,
+    /// Titre de la page.
+    pub title: Option<String>,
+    /// `back` possible.
+    pub can_back: bool,
+    /// `forward` possible.
+    pub can_forward: bool,
 }
 
 /// Erreur de session — typée, jamais de panic.
@@ -91,6 +121,14 @@ pub enum CoreError {
 struct Tab {
     /// URL courante.
     url: Option<Url>,
+    /// Titre de la page (`<title>`).
+    title: Option<String>,
+    /// Historique local : URLs visitées + index courant
+    /// (`hist[..=hist_idx]`, le futur est tronqué à la
+    /// navigation — modèle navigateur classique).
+    hist: Vec<Url>,
+    /// Position dans `hist`.
+    hist_idx: usize,
     /// DOM parsé.
     dom: Option<Dom>,
     /// Arbre de boîtes posé.
@@ -203,6 +241,9 @@ impl Session {
             id,
             Tab {
                 url: None,
+                title: None,
+                hist: Vec::new(),
+                hist_idx: 0,
                 dom: None,
                 tree: None,
                 list: None,
@@ -220,6 +261,7 @@ impl Session {
     /// [`CoreError::UnknownTab`] si l'onglet n'existe pas.
     pub fn close_tab(&mut self, tab: TabId) -> Result<(), CoreError> {
         self.tabs.remove(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        let _ = self.events.send(CoreEvent::TabClosed { tab });
         Ok(())
     }
 
@@ -235,6 +277,27 @@ impl Session {
         self.tabs
             .get(&tab)
             .and_then(|t| t.url.as_ref().map(std::string::ToString::to_string))
+    }
+
+    /// Vue publique de l'onglet (`None` si inconnu).
+    #[must_use]
+    pub fn tab_info(&self, tab: TabId) -> Option<TabInfo> {
+        self.tabs.get(&tab).map(|t| TabInfo {
+            id: tab,
+            url: t.url.as_ref().map(std::string::ToString::to_string),
+            title: t.title.clone(),
+            can_back: t.hist_idx > 0,
+            can_forward: t.hist_idx + 1 < t.hist.len(),
+        })
+    }
+
+    /// Vue publique de tous les onglets.
+    #[must_use]
+    pub fn tab_infos(&self) -> Vec<TabInfo> {
+        self.tabs
+            .keys()
+            .filter_map(|&id| self.tab_info(id))
+            .collect()
     }
 
     /// PNG courant de l'onglet (`None` si jamais navigué).
@@ -260,29 +323,91 @@ impl Session {
         if !self.tabs.contains_key(&tab) {
             return Err(CoreError::UnknownTab(tab));
         }
-        match self.navigate_inner(tab, url).await {
-            Ok(final_url) => {
-                let _ = self.events.send(CoreEvent::Navigated {
-                    tab,
-                    url: final_url.to_string(),
-                });
-                let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+        let url = Url::parse(url).map_err(|e| CoreError::Url(e.to_string()))?;
+        let prev = self.tabs.get(&tab).and_then(|t| t.title.clone());
+        match self.navigate_to(tab, url.clone()).await {
+            Ok(title) => {
+                // Historique : tronque le « futur » puis pousse.
+                if let Some(entry) = self.tabs.get_mut(&tab) {
+                    entry.hist.truncate(entry.hist_idx + 1);
+                    entry.hist.push(url.clone());
+                    entry.hist_idx = entry.hist.len() - 1;
+                }
+                self.emit_navigated(tab, &url, title, prev.as_deref());
                 Ok(())
             }
-            Err(e) => {
-                tracing::debug!(tab, error = %e, "pipeline en échec");
-                let _ = self.events.send(CoreEvent::PipelineError {
-                    tab: Some(tab),
-                    message: e.to_string(),
-                });
-                Err(e)
-            }
+            Err(e) => Err(self.emit_error(tab, e)),
         }
     }
 
-    /// Pipeline proprement dit — erreurs typées remontées.
-    async fn navigate_inner(&mut self, tab: TabId, url: &str) -> Result<Url, CoreError> {
-        let url = Url::parse(url).map_err(|e| CoreError::Url(e.to_string()))?;
+    /// Recharge l'URL courante (re-fetch complet, historique
+    /// inchangé).
+    ///
+    /// # Errors
+    /// [`CoreError::UnknownTab`], [`CoreError::EmptyDocument`]
+    /// si l'onglet n'a jamais été navigué, ou erreur de fetch.
+    pub async fn reload(&mut self, tab: TabId) -> Result<(), CoreError> {
+        let Some(url) = self.tabs.get(&tab).and_then(|t| t.url.clone()) else {
+            return Err(if self.tabs.contains_key(&tab) {
+                CoreError::EmptyDocument
+            } else {
+                CoreError::UnknownTab(tab)
+            });
+        };
+        let prev = self.tabs.get(&tab).and_then(|t| t.title.clone());
+        match self.navigate_to(tab, url.clone()).await {
+            Ok(title) => {
+                self.emit_navigated(tab, &url, title, prev.as_deref());
+                Ok(())
+            }
+            Err(e) => Err(self.emit_error(tab, e)),
+        }
+    }
+
+    /// Recule dans l'historique local de l'onglet (re-fetch —
+    /// pas de cache de pages, les états intermédiaires ne sont
+    /// pas snapshotés au MVP).
+    ///
+    /// # Errors
+    /// [`CoreError::UnknownTab`] ou [`CoreError::EmptyDocument`]
+    /// s'il n'y a pas de page précédente.
+    pub async fn go_back(&mut self, tab: TabId) -> Result<(), CoreError> {
+        self.history_move(tab, -1).await
+    }
+
+    /// Avance dans l'historique local de l'onglet.
+    ///
+    /// # Errors
+    /// [`CoreError::UnknownTab`] ou [`CoreError::EmptyDocument`]
+    /// s'il n'y a pas de page suivante.
+    pub async fn go_forward(&mut self, tab: TabId) -> Result<(), CoreError> {
+        self.history_move(tab, 1).await
+    }
+
+    /// Déplacement dans l'historique — `delta` = ±1.
+    async fn history_move(&mut self, tab: TabId, delta: isize) -> Result<(), CoreError> {
+        let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        let next = entry.hist_idx.checked_add_signed(delta);
+        let Some(idx) = next.filter(|&i| i < entry.hist.len()) else {
+            return Err(CoreError::EmptyDocument);
+        };
+        let url = entry.hist[idx].clone();
+        let prev = entry.title.clone();
+        match self.navigate_to(tab, url.clone()).await {
+            Ok(title) => {
+                if let Some(entry) = self.tabs.get_mut(&tab) {
+                    entry.hist_idx = idx;
+                }
+                self.emit_navigated(tab, &url, title, prev.as_deref());
+                Ok(())
+            }
+            Err(e) => Err(self.emit_error(tab, e)),
+        }
+    }
+
+    /// Fetch → parse → état de l'onglet → rendu. Ne touche
+    /// pas à l'historique. Renvoie le titre de la page.
+    async fn navigate_to(&mut self, tab: TabId, url: Url) -> Result<Option<String>, CoreError> {
         let resp = self
             .transport
             .fetch(&Request::get(url.clone()))
@@ -293,13 +418,41 @@ impl Session {
         }
         let (html, _enc) = decode_sniffed(&resp.body);
         let dom = TreeBuilder::parse(&html);
+        let title = extract_title(&dom);
         {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
-            entry.url = Some(url.clone());
+            entry.url = Some(url);
+            entry.title.clone_from(&title);
             entry.dom = Some(dom);
         }
         self.relayout(tab)?;
-        Ok(url)
+        Ok(title)
+    }
+
+    /// `Navigated` + `TitleChanged` (si le titre change) +
+    /// `FrameInvalidated` — séquence d'événements post-rendu.
+    /// `prev` = titre avant navigation (capturé par l'appelant,
+    /// `navigate_to` l'ayant déjà écrasé).
+    fn emit_navigated(&mut self, tab: TabId, url: &Url, title: Option<String>, prev: Option<&str>) {
+        let _ = self.events.send(CoreEvent::Navigated {
+            tab,
+            url: url.to_string(),
+            title: title.clone(),
+        });
+        if let Some(t) = title.filter(|t| prev != Some(t.as_str())) {
+            let _ = self.events.send(CoreEvent::TitleChanged { tab, title: t });
+        }
+        let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
+    }
+
+    /// Log + `PipelineError` sur le bus, renvoie l'erreur.
+    fn emit_error(&mut self, tab: TabId, e: CoreError) -> CoreError {
+        tracing::debug!(tab, error = %e, "pipeline en échec");
+        let _ = self.events.send(CoreEvent::PipelineError {
+            tab: Some(tab),
+            message: e.to_string(),
+        });
+        e
     }
 
     /// Re-pose l'arbre et re-peint depuis l'état courant
@@ -355,6 +508,26 @@ impl Session {
         entry.png = png;
         Ok(())
     }
+}
+
+/// Extrait le texte du premier `<title>` du document —
+/// `None` si absent ou vide.
+fn extract_title(dom: &Dom) -> Option<String> {
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "title") {
+            if let Ok(t) = dom.text_content(n) {
+                let t = t.trim().to_string();
+                if !t.is_empty() {
+                    return Some(t);
+                }
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    None
 }
 
 /// Concatène le contenu des `<style>` du document —
