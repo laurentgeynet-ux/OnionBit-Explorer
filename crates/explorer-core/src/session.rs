@@ -652,23 +652,39 @@ impl Session {
         tracing::trace!(tab, jobs = n, "jobs js exécutés");
         // Miroir muté ? → re-parse : le relayout qui suit rend
         // les modifications (dirty bit consommé côté moteur).
-        // Le titre est relu aussi (`document.title = …`).
         if let Some(mutated) = eng.sync_dom() {
-            let new_dom = TreeBuilder::parse(&mutated);
-            let new_title = extract_title(&new_dom);
-            if let Some(entry) = self.tabs.get_mut(&tab) {
-                entry.dom = Some(new_dom);
-                entry.focused = None;
-                if entry.title != new_title {
-                    entry.title.clone_from(&new_title);
-                    if let Some(t) = new_title {
-                        let _ = self.events.send(CoreEvent::TitleChanged { tab, title: t });
-                    }
-                }
-            }
+            self.apply_dom_sync(tab, &mutated, false);
         }
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.js = Some(eng);
+        }
+    }
+
+    /// Resynchronise le document depuis le miroir JS muté :
+    /// re-parse du HTML sérialisé, relecture du titre
+    /// (`TitleChanged` si changé), reset du focus (les
+    /// `NodeId` changent au re-parse). `relayout` contrôle
+    /// l'invalidation immédiate — vrai depuis les événements,
+    /// faux pendant la navigation (qui relayout juste après).
+    fn apply_dom_sync(&mut self, tab: TabId, html: &str, relayout: bool) {
+        let new_dom = TreeBuilder::parse(html);
+        let new_title = extract_title(&new_dom);
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.dom = Some(new_dom);
+            entry.focused = None;
+            if entry.title != new_title {
+                entry.title.clone_from(&new_title);
+                if let Some(t) = new_title {
+                    let _ = self.events.send(CoreEvent::TitleChanged { tab, title: t });
+                }
+            }
+        }
+        if relayout {
+            if let Err(e) = self.relayout(tab) {
+                tracing::debug!(tab, error = %e, "relayout après mutation js");
+                return;
+            }
+            let _ = self.events.send(CoreEvent::FrameInvalidated { tab });
         }
     }
 
@@ -791,6 +807,10 @@ impl Session {
                 editable: self.field_at(tab, x, y).is_some(),
             }),
             InputEvent::Click { x, y } => {
+                // L'événement DOM précède l'action par défaut :
+                // un handler peut muter la page (resynchronisée
+                // et re-peinte ici) ou `preventDefault`.
+                let prevented = self.dispatch_click(tab, x, y);
                 if let Some(field) = self.field_at(tab, x, y) {
                     if let Some(entry) = self.tabs.get_mut(&tab) {
                         entry.focused = Some(field);
@@ -799,11 +819,11 @@ impl Session {
                 }
                 self.blur(tab);
                 match self.link_at(tab, x, y) {
-                    Some(url) => {
+                    Some(url) if !prevented => {
                         self.navigate(tab, &url).await?;
                         Ok(InputOutcome::Navigated)
                     }
-                    None => Ok(InputOutcome::Ignored),
+                    _ => Ok(InputOutcome::Ignored),
                 }
             }
         }
@@ -858,6 +878,45 @@ impl Session {
         Ok(InputOutcome::Edited)
     }
 
+    /// Dispatche `click` dans le miroir JS (propagation
+    /// capture→cible→bulle côté moteur, microtasks et timers
+    /// dus drainés), puis resynchronise les mutations DOM.
+    /// Retourne `defaultPrevented` — l'appelant supprime alors
+    /// l'action par défaut (navigation de lien).
+    fn dispatch_click(&mut self, tab: TabId, x: f32, y: f32) -> bool {
+        let path = self.tabs.get(&tab).and_then(|entry| {
+            let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
+            hit_test(tree, x, y + entry.scroll_y).and_then(|n| element_path(dom, n))
+        });
+        let Some(path) = path else { return false };
+        let (prevented, mutated) = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return false;
+            };
+            let Some(eng) = entry.js.as_mut() else {
+                return false;
+            };
+            let p = match eng.dispatch_event("click", &path) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::debug!(tab, error = %e, "listener click en échec");
+                    let _ = self.events.send(CoreEvent::PipelineError {
+                        tab: Some(tab),
+                        message: e.to_string(),
+                    });
+                    false
+                }
+            };
+            let n = eng.run_pending();
+            tracing::trace!(tab, jobs = n, "jobs js après click");
+            (p, eng.sync_dom())
+        };
+        if let Some(html) = mutated {
+            self.apply_dom_sync(tab, &html, true);
+        }
+        prevented
+    }
+
     /// `href` résolu du lien `<a>` sous `(x, y)` viewport —
     /// hit-test profond sur la boîte posée + remontée des
     /// ancêtres DOM.
@@ -907,6 +966,32 @@ fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
         }
     }
     bx.node
+}
+
+/// Chemin `(tag, index parmi les frères éléments de même tag)`
+/// de `node` (ou de son plus proche ancêtre élément) depuis la
+/// racine — rejoué côté miroir JS pour localiser la cible d'un
+/// événement (les deux arbres peuvent diverger sur les
+/// wrappers implicites, voir `mirror_node` d'`explorer-js`).
+fn element_path(dom: &Dom, node: NodeId) -> Option<Vec<(String, u32)>> {
+    let mut cur = node;
+    while dom.element(cur).is_err() {
+        cur = dom.parent(cur).ok()??;
+    }
+    let mut path = Vec::new();
+    while let Some(p) = dom.parent(cur).ok().flatten() {
+        let tag = dom.tag_name(cur).ok()?.to_string();
+        let k = dom
+            .children(p)
+            .ok()?
+            .iter()
+            .filter(|&&c| c != cur && dom.tag_name(c).is_ok_and(|t| t == tag))
+            .count();
+        path.push((tag, u32::try_from(k).ok()?));
+        cur = p;
+    }
+    path.reverse();
+    Some(path)
 }
 
 /// Champ éditable le plus proche du nœud (lui-même compris) :

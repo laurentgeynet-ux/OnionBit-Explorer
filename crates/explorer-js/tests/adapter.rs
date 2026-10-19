@@ -108,3 +108,66 @@ fn dom_untouched_stays_clean() {
     eng.eval("document.getElementById('p')").unwrap();
     assert_eq!(eng.sync_dom(), None);
 }
+
+/// Chemin type produit par `element_path` (core) pour un div
+/// dans body — wrappers `html`/`body` inclus.
+fn path_to_div() -> Vec<(String, u32)> {
+    vec![("html".into(), 0), ("body".into(), 0), ("div".into(), 0)]
+}
+
+#[test]
+fn dispatch_reaches_mirror_listener() {
+    let mut eng = DilloEngine::new();
+    eng.install_dom("<html><body><div id=\"b\">x</div></body></html>");
+    eng.eval(
+        "document.getElementById('b').addEventListener('click',\
+         function(){this.textContent='HIT'})",
+    )
+    .unwrap();
+    let prevented = eng.dispatch_event("click", &path_to_div()).unwrap();
+    assert!(!prevented);
+    let html = eng.sync_dom().expect("listener a muté le miroir");
+    assert!(html.contains("HIT"), "sérialisation = {html}");
+}
+
+#[test]
+fn dispatch_skips_implicit_wrappers() {
+    let mut eng = DilloEngine::new();
+    // Source SANS <html>/<body> : le miroir n'a que le div —
+    // le chemin core (avec wrappers) doit quand même l'atteindre.
+    eng.install_dom("<div id=\"b\">x</div>");
+    eng.eval(
+        "document.getElementById('b').addEventListener('click',\
+         function(){this.textContent='HIT'})",
+    )
+    .unwrap();
+    assert!(eng.dispatch_event("click", &path_to_div()).is_ok());
+    assert!(eng.sync_dom().is_some_and(|h| h.contains("HIT")));
+}
+
+#[test]
+fn dispatch_prevent_default_propagates() {
+    let mut eng = DilloEngine::new();
+    eng.install_dom("<html><body><div id=\"b\">x</div></body></html>");
+    eng.eval(
+        "document.getElementById('b').addEventListener('click',\
+         function(e){e.preventDefault()})",
+    )
+    .unwrap();
+    assert!(eng.dispatch_event("click", &path_to_div()).unwrap());
+}
+
+#[test]
+fn dispatch_bad_path_is_noop() {
+    let mut eng = DilloEngine::new();
+    eng.install_dom("<html><body><div id=\"b\">x</div></body></html>");
+    let bogus = vec![("html".into(), 0), ("body".into(), 0), ("table".into(), 0)];
+    assert!(!eng.dispatch_event("click", &bogus).unwrap());
+    assert_eq!(eng.sync_dom(), None);
+}
+
+#[test]
+fn dispatch_without_mirror_is_noop() {
+    let mut eng = DilloEngine::new();
+    assert!(!eng.dispatch_event("click", &path_to_div()).unwrap());
+}

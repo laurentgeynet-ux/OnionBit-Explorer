@@ -718,3 +718,89 @@ async fn script_dom_append_is_rendered() {
     // rendu doit correspondre à la page statique équivalente.
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
+
+/// Page avec listener `click` qui mute le DOM miroir.
+const PAGE_ONCLICK: &str = "<!doctype html><html><body>\
+     <div id=\"b\">avant</div>\
+     <script>document.getElementById('b').addEventListener('click',\
+     function(){document.getElementById('b').textContent='CLIQUE'})</script>\
+     </body></html>";
+
+/// Statique équivalente au résultat du click.
+const PAGE_ONCLICK_AFTER: &str = "<!doctype html><html><body>\
+     <div id=\"b\">CLIQUE</div></body></html>";
+
+#[tokio::test]
+async fn click_dispatches_dom_event_and_rerenders() {
+    let (mut s, t) = test_session();
+    t.route("/ev", 200, PAGE_ONCLICK);
+    t.route("/stat", 200, PAGE_ONCLICK_AFTER);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // Clic sur le div : le listener mute le miroir → resynchro
+    // → rendu identique à la page statique cible.
+    let out = s
+        .handle_input(a, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert!(matches!(out, InputOutcome::Ignored));
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// Lien avec `preventDefault` — l'action par défaut est
+/// supprimée : pas de navigation.
+const PAGE_PREVENT: &str = "<!doctype html><html><body>\
+     <a id=\"l\" href=\"/b\">lien</a>\
+     <script>document.getElementById('l').addEventListener('click',\
+     function(e){e.preventDefault()})</script></body></html>";
+
+#[tokio::test]
+async fn click_prevented_link_does_not_navigate() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_PREVENT);
+    t.route("/b", 200, "<html><body><p>page b</p></body></html>");
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+
+    // `preventDefault` remonte → le lien ne navigue pas.
+    assert!(matches!(out, InputOutcome::Ignored));
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+}
+
+/// `setTimeout(…, 0)` pendant le chargement — le timer dû est
+/// drainé par `run_pending` et sa mutation est rendue.
+const PAGE_TIMER: &str = "<!doctype html><html><body>\
+     <div id=\"b\">avant</div>\
+     <script>setTimeout(function(){\
+     document.getElementById('b').textContent='TIMER'},0)</script>\
+     </body></html>";
+
+/// Statique équivalente au résultat du timer.
+const PAGE_TIMER_AFTER: &str = "<!doctype html><html><body>\
+     <div id=\"b\">TIMER</div></body></html>";
+
+#[tokio::test]
+async fn timer_zero_fires_and_rerenders() {
+    let (mut s, t) = test_session();
+    t.route("/t", 200, PAGE_TIMER);
+    t.route("/stat", 200, PAGE_TIMER_AFTER);
+    s.set_js_factory(explorer_js::DilloEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/t").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}

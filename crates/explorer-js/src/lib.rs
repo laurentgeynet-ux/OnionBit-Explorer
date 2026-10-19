@@ -81,6 +81,23 @@ pub trait JsEngine: Send {
         None
     }
 
+    /// Dispatche l'événement `ty` au nœud miroir désigné par
+    /// `path` — chemin depuis la racine du document, chaque
+    /// étape = `(tag, index parmi les frères éléments de même
+    /// tag)`. Retourne `defaultPrevented`. Défaut : `Ok(false)`
+    /// (pas de miroir → rien à dispatcher).
+    ///
+    /// Le chemin tolère les divergences de parse : les balises
+    /// implicitement synthétisées par un tree-builder
+    /// (`html`, `head`, `body`, `tbody`…) sont sautées si
+    /// absentes du miroir.
+    ///
+    /// # Errors
+    /// Erreur de listener JS propagée en [`JsError::Uncaught`].
+    fn dispatch_event(&mut self, _ty: &str, _path: &[(String, u32)]) -> Result<bool, JsError> {
+        Ok(false)
+    }
+
     /// Borne le budget d'opérations de la prochaine évaluation
     /// (protection anti-script-infini — règle « budgets »).
     fn set_budget(&mut self, ops: u64);
@@ -123,6 +140,11 @@ enum Cmd {
     },
     DomSync {
         tx: Sender<Option<String>>,
+    },
+    Dispatch {
+        ty: String,
+        path: Vec<(String, u32)>,
+        tx: Sender<Result<bool, JsError>>,
     },
     SetBudget {
         ops: u64,
@@ -199,6 +221,19 @@ impl DilloEngine {
                         return;
                     }
                 }
+                Cmd::Dispatch { ty, path, tx } => {
+                    let node = jsd.as_ref().and_then(|d| mirror_node(&d.borrow(), &path));
+                    let out = match node {
+                        Some(n) => match eng.dom_event_on(&ty, n) {
+                            Ok(p) => Ok(p),
+                            Err(t) => Err(JsError::Uncaught(eng.describe(t.0))),
+                        },
+                        None => Ok(false),
+                    };
+                    if tx.send(out).is_err() {
+                        return;
+                    }
+                }
                 Cmd::SetBudget { ops } => eng.set_op_limit(ops),
                 Cmd::Shutdown => return,
             }
@@ -256,6 +291,22 @@ impl JsEngine for DilloEngine {
         rx.recv().ok().flatten()
     }
 
+    fn dispatch_event(&mut self, ty: &str, path: &[(String, u32)]) -> Result<bool, JsError> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::Dispatch {
+                ty: ty.to_string(),
+                path: path.to_vec(),
+                tx,
+            })
+            .is_err()
+        {
+            return Err(JsError::Dead);
+        }
+        rx.recv().map_err(|_| JsError::Dead)?
+    }
+
     fn set_budget(&mut self, ops: u64) {
         // Feu-et-oublie : le budget s'applique au prochain eval.
         let _ = self.tx.send(Cmd::SetBudget { ops });
@@ -269,4 +320,35 @@ impl Drop for DilloEngine {
             let _ = j.join();
         }
     }
+}
+
+/// Balises que le tree-builder HTML5 synthétise quand la source
+/// les omet — le parseur littéral du miroir ne les produit pas.
+/// À la descente de `path`, un niveau implicitement absent est
+/// sauté sans consommer d'enfant.
+const IMPLICIT_TAGS: &[&str] = &["html", "head", "body", "tbody", "thead", "tfoot"];
+
+/// Rejoue `path` (depuis la racine `#document` du miroir) et
+/// retourne le `NodeId` miroir — `None` si le chemin ne mène à
+/// aucun élément compatible (arbres divergents → dégradation,
+/// pas d'event vers le mauvais nœud).
+fn mirror_node(d: &dillo_js::Dom, path: &[(String, u32)]) -> Option<dillo_js::NodeId> {
+    let mut cur = d.root;
+    for (tag, k) in path {
+        let kids = d.element_children(cur);
+        let found = kids
+            .iter()
+            .filter(|&&c| d.nodes[c as usize].tag == *tag)
+            .nth(*k as usize)
+            .copied();
+        match found {
+            Some(n) => cur = n,
+            // Wrapper synthétisé côté navigateur, absent du miroir
+            // → ne pas descendre : le niveau suivant retente sur
+            // les mêmes enfants.
+            None if IMPLICIT_TAGS.contains(&tag.as_str()) => {}
+            None => return None,
+        }
+    }
+    Some(cur)
 }
