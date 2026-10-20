@@ -210,6 +210,7 @@ impl AutoClient {
             headers,
             body,
             reused_connection: true, // multiplexage = toujours partagée.
+            resolved_url: None,
         })
     }
 
@@ -266,6 +267,7 @@ impl AutoClient {
             reason: String::new(),
             headers,
             reused_connection: true,
+            resolved_url: None,
             body: rx,
         })
     }

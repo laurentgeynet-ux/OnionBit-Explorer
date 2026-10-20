@@ -89,6 +89,11 @@ pub struct Response {
     /// `true` si la connexion a été réutilisée depuis le pool
     /// keep-alive — exposé pour les tests et les métriques.
     pub reused_connection: bool,
+    /// URL finale de la ressource quand une chaîne de
+    /// redirections a été suivie (`301`/`302`/`303`/`307`/
+    /// `308` — `RedirectTransport`), fragment `Location`
+    /// inclus ; `None` = URL de la requête (étape 67).
+    pub resolved_url: Option<crate::url::Url>,
 }
 
 impl Response {
@@ -166,6 +171,9 @@ pub struct StreamedResponse {
     /// `true` si la connexion a été réutilisée depuis le pool
     /// keep-alive.
     pub reused_connection: bool,
+    /// URL finale après redirections éventuelles — même
+    /// sémantique que [`Response::resolved_url`] (étape 67).
+    pub resolved_url: Option<crate::url::Url>,
     /// Morceaux de corps déframé — se ferme proprement à EOF.
     pub body: tokio::sync::mpsc::Receiver<NetResult<Vec<u8>>>,
 }
@@ -207,6 +215,7 @@ pub trait HttpTransport: Send + Sync {
             reason: resp.reason,
             headers: resp.headers,
             reused_connection: resp.reused_connection,
+            resolved_url: resp.resolved_url,
             body: rx,
         })
     }

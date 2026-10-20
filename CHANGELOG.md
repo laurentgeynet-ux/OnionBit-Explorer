@@ -29,6 +29,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   cassent plus leurs scripts ; les fallbacks des pages
   s'activent proprement.
 
+- **R-30 — `fr` vertical grid + résiduels `display:grid`**
+  (`explorer-layout` + `explorer-render`) : pistes `fr`
+  verticales distribuées contre la hauteur définie du
+  conteneur (§12.7) ; `height:%` des items grid résolu
+  contre l'aire de cellule — `cb_h` propagé à
+  `layout_item` (§6.5) ; position statique des absolus
+  inclut la marge collapsée en attente du frère précédent
+  (§10.6.4) ; `width` de cellule de table cloue sa
+  colonne, reste aux colonnes auto (§17.5.2.2) ; `height`
+  définie de table distribuée aux rangs auto (§17.5.3) ;
+  peinture des positionnés `z-index` négatif avant les
+  blocs en flux (§E.2). Corpus WPT **57/57** (100 %,
+  3 ignorés documentés).
+
 - **R-29 — wrap flex horizontal/colonne + `column/row-gap`**
   (`explorer-layout`) : flottant `width:auto` shrink-to-fit
   avec `min|max-width` appliqué à la boîte de contenu avant
@@ -78,6 +92,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   sans le savoir.
 
 ### Fixed
+
+- **Étape 67 — URL post-redirection jamais commise**
+  (`explorer-net` + `explorer-core`) : `tab.url` gardait
+  l'URL de requête après un 3xx — barre d'adresse fausse,
+  fragment du `Location` perdu (`scroll_y: 0`), entrée
+  d'historique cléée sur l'URL pré-redirect, sous-
+  ressources relatives résolues sur la mauvaise base.
+  `resolved_url: Option<Url>` (additif) sur `Response` et
+  `StreamedResponse` ; `RedirectTransport` pose la cible
+  finale (fragment inclus) ; la navigation commet l'URL
+  résolue — la requête d'origine reste celle stockée
+  pour le replay historique (POST).
 
 - **Étape 68 — find : surlignage invisible sans
   déplacement** (`explorer-core`) : occurrence déjà dans

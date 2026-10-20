@@ -769,6 +769,7 @@ mod tests {
                     headers: vec![],
                     body,
                     reused_connection: false,
+                    resolved_url: None,
                 }),
                 None => Ok(Response {
                     status: 404,
@@ -776,6 +777,7 @@ mod tests {
                     headers: vec![],
                     body: b"not found".to_vec(),
                     reused_connection: false,
+                    resolved_url: None,
                 }),
             }
         }

@@ -120,6 +120,14 @@ impl NavJob {
         if !(200..300).contains(&resp.status) {
             return Err(CoreError::HttpStatus(resp.status));
         }
+        // Cible post-redirection (étape 67) : barre d'adresse,
+        // historique, base des sous-ressources et fragment
+        // `Location` (`/x#sec`) se commettent sur l'URL finale,
+        // pas sur l'URL de requête.
+        let resolved = resp
+            .resolved_url
+            .take()
+            .unwrap_or_else(|| self.req.url.clone());
         let mut tb = TreeBuilder::new();
         let mut dec = StreamDecoder::new();
         let mut html = String::new();
@@ -151,7 +159,7 @@ impl NavJob {
         let dom = tb.into_dom();
         let title = extract_title(&dom);
         let done = NavDone {
-            url: self.req.url.clone(),
+            url: resolved,
             dom,
             html,
             title,

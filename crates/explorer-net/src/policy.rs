@@ -77,13 +77,19 @@ fn method_has_body(m: Method) -> bool {
 #[async_trait]
 impl HttpTransport for RedirectTransport {
     async fn fetch(&self, req: &Request) -> NetResult<Response> {
+        let orig = req.url.clone();
         let mut req = req.clone();
         for _ in 0..self.max_redirects {
-            let resp = self.inner.fetch(&req).await?;
+            let mut resp = self.inner.fetch(&req).await?;
             if !matches!(resp.status, 301 | 302 | 303 | 307 | 308) {
+                // Cible finale de la chaîne — `None` si la
+                // première réponse n'était pas un 3xx (URL
+                // de requête inchangée — étape 67).
+                resp.resolved_url = (req.url != orig).then(|| req.url.clone());
                 return Ok(resp);
             }
             let Some(loc) = resp.header("location") else {
+                resp.resolved_url = (req.url != orig).then(|| req.url.clone());
                 return Ok(resp); // 3xx sans Location → tel quel.
             };
             let next = Url::resolve(&req.url, loc)

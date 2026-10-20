@@ -378,6 +378,7 @@ impl H1Client {
             reason: resp.reason,
             headers: resp.headers,
             reused_connection: reused,
+            resolved_url: None,
             body: rx,
         })
     }
@@ -513,6 +514,7 @@ impl H1Client {
             headers,
             body: Vec::new(),
             reused_connection: false,
+            resolved_url: None,
         })
     }
 

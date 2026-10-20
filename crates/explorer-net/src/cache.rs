@@ -226,6 +226,7 @@ impl HttpTransport for CachingTransport {
                     headers: e.headers.clone(),
                     body: e.body.clone(),
                     reused_connection: false,
+                    resolved_url: None,
                 });
             }
         }
@@ -268,6 +269,7 @@ impl HttpTransport for CachingTransport {
                         headers: e.headers,
                         body: e.body,
                         reused_connection: resp.reused_connection,
+                        resolved_url: None,
                     });
                 }
             }

@@ -164,6 +164,7 @@ impl HttpTransport for FakeTransport {
             headers,
             body,
             reused_connection: false,
+            resolved_url: None,
         })
     }
 
@@ -187,6 +188,7 @@ impl HttpTransport for FakeTransport {
             reason: "fake".to_string(),
             headers,
             reused_connection: false,
+            resolved_url: None,
             body: rx,
         })
     }
@@ -1889,6 +1891,7 @@ impl HttpTransport for ConcurrencyTransport {
                 headers: vec![],
                 body,
                 reused_connection: false,
+                resolved_url: None,
             }),
             None => Ok(Response {
                 status: 404,
@@ -1896,6 +1899,7 @@ impl HttpTransport for ConcurrencyTransport {
                 headers: vec![],
                 body: b"missing".to_vec(),
                 reused_connection: false,
+                resolved_url: None,
             }),
         }
     }
@@ -3209,6 +3213,7 @@ impl HttpTransport for GatedTransport {
             headers: vec![],
             body: b"missing".to_vec(),
             reused_connection: false,
+            resolved_url: None,
         })
     }
 
@@ -3231,6 +3236,7 @@ impl HttpTransport for GatedTransport {
             reason: "gated".to_string(),
             headers: vec![],
             reused_connection: false,
+            resolved_url: None,
             body: rx,
         })
     }
@@ -3758,6 +3764,7 @@ impl HttpTransport for SlowThenGate {
             headers: vec![],
             body: b"missing".to_vec(),
             reused_connection: false,
+            resolved_url: None,
         })
     }
 
@@ -3790,6 +3797,7 @@ impl HttpTransport for SlowThenGate {
             reason: "gated".to_string(),
             headers: vec![],
             reused_connection: false,
+            resolved_url: None,
             body: rx,
         })
     }
@@ -4375,7 +4383,7 @@ async fn video_poster_data_url_paints() {
 
 /// Étape 68 — occurrence déjà dans le viewport : le scroll
 /// ne bouge pas mais la surbrillance doit quand même être
-/// rasterisée (avant : FillRect calculés, jamais peints).
+/// rasterisée (avant : `FillRect` calculés, jamais peints).
 #[tokio::test]
 async fn find_highlight_repaints_without_scroll() {
     let (mut s, t) = test_session();
@@ -4386,4 +4394,61 @@ async fn find_highlight_repaints_without_scroll() {
     assert_eq!(s.find_in_page(a, "lorem"), 1);
     let after = s.frame_png(a);
     assert_ne!(before, after, "surbrillance rasterisée sans déplacement");
+}
+
+/// Étape 67 — l'URL commise est la cible **finale** de la
+/// chaîne de redirections (barre d'adresse + historique),
+/// et le fragment du `Location` est appliqué au commit
+/// (`/landing#sec` scrollait à 0 avant le fix).
+#[tokio::test]
+async fn redirect_commits_final_url_and_fragment() {
+    let inner = Arc::new(FakeTransport::new());
+    inner.route_headers("/r301", 301, "", &[("Location", "/landing#sec")]);
+    inner.route(
+        "/landing",
+        200,
+        "<html><body>\
+         <div style=\"height:2000px\">haut</div>\
+         <div id=\"sec\">cible</div></body></html>",
+    );
+    let t: Arc<dyn explorer_net::http::HttpTransport> =
+        Arc::new(explorer_net::policy::RedirectTransport::wrap(inner, 8));
+    let mut s = Session::with_config(
+        t,
+        Arc::new(FixtureFont),
+        SessionConfig {
+            event_capacity: 16,
+            viewport: (800.0, 600.0),
+            scale: 1.0,
+            js_ops: 5_000_000,
+            max_images: 32,
+            image_max_px: 16_000_000,
+            max_sheets: 8,
+            max_fonts: 16,
+            max_scripts: 32,
+            max_modules: 64,
+            max_inflight: 6,
+            max_script_net: 16,
+            max_timer_jobs: 64,
+            paint_chunk_bytes: 32 * 1024,
+            paint_interval_ms: 100,
+            resync_gap_max_ms: 4_000,
+            bfcache_pages: 4,
+        },
+    );
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/r301").await.unwrap();
+    // URL commise = cible finale + son fragment.
+    assert_eq!(s.tab_url(a).as_deref(), Some("http://h.test/landing#sec"));
+    // Le fragment du Location a scrollé vers `#sec`.
+    let scroll = match s
+        .handle_input(a, InputEvent::Scroll { dy: 0.0 })
+        .await
+        .unwrap()
+    {
+        InputOutcome::Scrolled { scroll_y } => scroll_y,
+        o => panic!("inattendu : {o:?}"),
+    };
+    assert!(scroll > 0.0, "fragment du Location appliqué");
 }

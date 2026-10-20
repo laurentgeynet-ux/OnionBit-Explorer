@@ -696,17 +696,21 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   suffixe public (`localhost` via PSL), `Max-Age=0`/
   `Expires` passé suppriment, `Secure` sur http rejeté sauf
   exemption localhost documentée.
-- [ ] **Étape 67. URL post-redirection non commise**
+- [x] **Étape 67. URL post-redirection non commise**
   (terrain mission 17) : `/r301` → `/landing` suit bien la
   chaîne (contenu peint, historique fusionné, borne 8 hops
   + erreur typée, 303 → GET et 307 → POST conservé), mais
   `tab.url` reste l'URL de **requête** — jamais la cible
-  finale. Conséquences réelles : barre d'adresse affiche la
-  mauvaise URL, le **fragment du `Location`** (`/x#sec`) est
-  perdu (`scroll_y: 0` mesuré), entrée d'historique cléée
-  sur l'URL pré-redirect. `RedirectTransport` (net) connaît
-  la cible — faire remonter l'URL finale dans la réponse ou
-  un champ `Request` résolu au commit.
+  finale. Livré : `resolved_url: Option<Url>` additif sur
+  `Response` **et** `StreamedResponse` (le défaut
+  `fetch_stream` propage) ; `RedirectTransport` pose la
+  cible quand ≥1 hop est suivi (fragment `Location`
+  inclus) ; `NavJob::run` commet l'URL résolue — barre
+  d'adresse, `record_visit`, base des sous-ressources
+  relatives et `scroll_to_fragment` (`/x#sec`) alignés ;
+  `tail.req` garde la requête d'origine (replay POST
+  historique inchangé). Régression :
+  `redirect_commits_final_url_and_fragment`.
 - [x] **Étape 68. Find : surlignage absent quand le scroll
   ne bouge pas** (terrain mission 17, `session/find.rs` +
   `scroll_to_y`) : `find_in_page` → `find_scroll` →

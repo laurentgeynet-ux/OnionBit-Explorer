@@ -51,6 +51,7 @@ impl HttpTransport for FakeTransport {
             headers: vec![],
             body,
             reused_connection: false,
+            resolved_url: None,
         })
     }
 }
