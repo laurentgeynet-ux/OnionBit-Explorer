@@ -222,7 +222,8 @@ fn profile_resync_phases() {
     cull_display_list(&mut list);
     eprintln!("  après cull   : {} items", list.items.len());
     let t = Instant::now();
-    let frame = rasterize(&list, &s.webfonts as &dyn FontSource, s.scale).unwrap();
+    let fonts = crate::session::apply::SharedFonts(Arc::clone(&s.webfonts));
+    let frame = rasterize(&list, &fonts, s.scale).unwrap();
     eprintln!("  rasterize    : {:?}", t.elapsed());
     let t = Instant::now();
     let _png = frame.encode_png();

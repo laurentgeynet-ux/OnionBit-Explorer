@@ -41,8 +41,8 @@ impl Session {
         let mut t = sync_phase(tab, "pump.js_run_sync", t0);
         if let Some((html, dirty)) = mutated {
             let ta = Instant::now();
-            self.apply_dom_sync(tab, &html, dirty.as_deref(), true);
-            t = sync_phase(tab, "pump.apply_dom_sync", ta);
+            self.queue_apply(tab, html, dirty);
+            t = sync_phase(tab, "pump.apply_queued", ta);
         }
         if jobs > 0 {
             // Les callbacks ont pu émettre XHR/cookies/storage.
@@ -50,6 +50,9 @@ impl Session {
             self.poll_net();
             sync_phase(tab, "pump.drains", t);
         }
+        // Les applies enfilés par cette pompe sont exécutés
+        // ici (hôte `&mut` synchrone — étape 55h).
+        self.drain_applies();
         jobs
     }
 
@@ -155,8 +158,11 @@ impl Session {
         let mut t = sync_phase(tab, "commit.deliver", t0);
         if let Some((html, dirty)) = mutated {
             let ta = Instant::now();
-            self.apply_dom_sync(tab, &html, dirty.as_deref(), true);
-            t = sync_phase(tab, "commit.apply_dom_sync", ta);
+            // La mutation est enfilée — l'apply tournera hors
+            // verrou via `drain_applies_shared` (étape 55h,
+            // l'appelant pompe partagée draine juste après).
+            self.queue_apply(tab, html, dirty);
+            t = sync_phase(tab, "commit.apply_queued", ta);
         }
         if jobs > 0 {
             self.after_script(tab);
@@ -313,8 +319,12 @@ impl Session {
         };
         if let Some((html, dirty)) = mutated {
             let ta = Instant::now();
-            self.apply_dom_sync(tab, &html, dirty.as_deref(), true);
-            t = sync_phase(tab, "event.apply_dom_sync", ta);
+            // Mutation enfilée — l'apply tourne hors verrou
+            // chez les hôtes partagés (étape 55h) ; le drain
+            // de compat `handle_input`/`drain_applies` garde
+            // la sémantique synchrone.
+            self.queue_apply(tab, html, dirty);
+            t = sync_phase(tab, "event.apply_queued", ta);
         }
         // Les listeners ont pu émettre XHR/cookies/storage
         // (étape 51) — drains + livraison de ce qui est déjà

@@ -552,7 +552,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `chore:` dédié, à un moment où aucune piste ne touche le crate
   ; le nom de crate est surface publique de release.
 
-- [ ] **Étape 55h. Apply de resynchro borné — verrou tenu
+- [x] **Étape 55h. Apply de resynchro borné — verrou tenu
   en continu** (terrain missions 14+15 — la coalescence
   `sync_floor` borne la cadence, jamais la durée unitaire) :
   `storm.html` (`setInterval` 10 ms, ~600 nœuds) → ~85 s
@@ -566,13 +566,26 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ni la cadence (55g-suite) : c'est **l'atomicité de
   l'apply** — sérialisation miroir → re-parse → cascade →
   remap/relayout → repaint, tout sous `&mut Session`.
-  Pistes : checkpoints entre phases rendant le verrou
-  (patron `NavJob`/`SubJob`), budget + requeue, ou phases
-  extractibles en `spawn_blocking`. Le coût **unitaire**
-  `remap_relayout` (150 s terrain vs ~14 s au profil test —
-  écart ×10 : saleté accumulée ? remap mémoïsé ? cascade
-  globale ?) fait l'objet d'une demande PIPE dans
-  `interface-equipes.md`.
+  **Livré** : `session/apply.rs` — file `pending_applies`
+  par onglet (une entrée coalescée par onglet, epoch-gardée)
+  + `PaintPayload` détachable (`take_paint`/`put_paint`,
+  les champs `Option` de `Tab` restent vides → dégradation
+  naturelle : `/frame` 204 lazy-heal, hit-test mort,
+  tick animation inerte). Tous les points de synchro
+  (dispatch événement, pompe JS, livraisons XHR) enfilent
+  au lieu d'appliquer ; la pipeline tourne en
+  `spawn_blocking` via `drain_applies_shared` (daemon :
+  pompe partagée + handler `/input` + battement net), le
+  verrou n'est tenu qu'au take/commit. Hôtes `&mut`
+  (FFI/CLI/tests) : `drain_applies` synchrone aux mêmes
+  frontières — sémantique d'avant conservée. Deux
+  rattrapages de fidélité : `freshen_apply` re-sérialise au
+  drain si le miroir a remuté depuis l'enfilement (séquence
+  bascule→`preventDefault`→restauration), et le commit
+  repeint si le scroll a avancé pendant la fenêtre détachée.
+  Le coût **unitaire** `remap_relayout` (150 s terrain vs
+  ~14 s au profil test — écart ×10) reste la demande PIPE
+  consignée dans `interface-equipes.md`.
 - [x] **Étape 61. FFI : profil persistant + surface
   d'état** (terrain mission 15 — ABI exercée via ctypes,
   cycle complet OK mais deux gaps produit) : (1)
@@ -643,6 +656,42 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   exposer la hauteur mesurée vs le plafond raster
   (`MAX_FRAME_DIM`), ou typer la réponse
   (`doc_h: 16384, doc_h_clamped: true`).
+- [ ] **Étape 66. `SameSite` stocké mais jamais appliqué à
+  l'envoi** (terrain mission 17 — `cookies.rs`,
+  `header_for`) : un `Set-Cookie SameSite=Strict` posé sur
+  `localhost` est **renvoyé** sur navigation cross-site
+  depuis `127.0.0.1` (`CK=k=v` — Chrome/Firefox bloquent).
+  Le flag est parsé et persisté mais l'envoi n'a aucun
+  contexte d'initiateur : `header_for` ne connaît pas le
+  site de la page à l'origine de la requête. Fix = passer
+  l'initiator (top-level vs sous-ressource cross-site) au
+  jar — `Strict` : same-site seul ; `Lax` : + navigation
+  top-level GET ; `None` : cross-site libre. Le reste du
+  jar vérifié sain : host-only filtré, `Domain=` rejeté sur
+  suffixe public (`localhost` via PSL), `Max-Age=0`/
+  `Expires` passé suppriment, `Secure` sur http rejeté sauf
+  exemption localhost documentée.
+- [ ] **Étape 67. URL post-redirection non commise**
+  (terrain mission 17) : `/r301` → `/landing` suit bien la
+  chaîne (contenu peint, historique fusionné, borne 8 hops
+  + erreur typée, 303 → GET et 307 → POST conservé), mais
+  `tab.url` reste l'URL de **requête** — jamais la cible
+  finale. Conséquences réelles : barre d'adresse affiche la
+  mauvaise URL, le **fragment du `Location`** (`/x#sec`) est
+  perdu (`scroll_y: 0` mesuré), entrée d'historique cléée
+  sur l'URL pré-redirect. `RedirectTransport` (net) connaît
+  la cible — faire remonter l'URL finale dans la réponse ou
+  un champ `Request` résolu au commit.
+- [ ] **Étape 68. Find : surlignage absent quand le scroll
+  ne bouge pas** (terrain mission 17, `session/find.rs` +
+  `scroll_to_y`) : `find_in_page` → `find_scroll` →
+  `scroll_to_y` ; si l'occurrence est déjà dans le
+  viewport le early-return saute repaint + invalidate —
+  les `FillRect` de surlignage sont calculés mais jamais
+  rasterisés (0 px sur page courte ; 2 470 px corrects
+  dès que le scroll bouge). Fix : repeindre même à scroll
+  inchangé — la surbrillance est un changement de frame
+  indépendant du déplacement.
 
 ## Piste JS (JS-C26+) — spécialiste `dillo-js`
 

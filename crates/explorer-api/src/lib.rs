@@ -36,8 +36,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use explorer_core::{
-    drain_navs_shared, history_move_shared, navigate_shared, CoreError, CoreEvent, InputEvent,
-    InputOutcome, Session, TabId,
+    drain_applies_shared, drain_navs_shared, history_move_shared, navigate_shared, CoreError,
+    CoreEvent, InputEvent, InputOutcome, Session, TabId,
 };
 use explorer_net::http::Request;
 use explorer_net::url::Url;
@@ -394,6 +394,9 @@ async fn input(
     // `handle_input_now` pose les intentions (étape 53d) ;
     // `drain_navs_shared` les conduit hors verrou — un clic
     // de lien ne gèle plus l'API pendant la navigation.
+    // Idem pour les resyncs DOM rapportées par les
+    // listeners : enfilées sous verrou, appliquées en
+    // `spawn_blocking` par `drain_applies_shared` (55h).
     let outcome = {
         let mut session = st.session.lock().await;
         match session.handle_input_now(id, ev) {
@@ -401,6 +404,7 @@ async fn input(
             Err(e) => return err(err_status(&e), &e),
         }
     };
+    drain_applies_shared(&st.session, id).await;
     drain_navs_shared(&st.session, id).await;
     Json(match outcome {
         InputOutcome::Ignored => serde_json::json!({ "result": "ignored" }),

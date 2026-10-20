@@ -9,6 +9,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-29 — wrap flex horizontal/colonne + `column/row-gap`**
+  (`explorer-layout`) : flottant `width:auto` shrink-to-fit
+  avec `min|max-width` appliqué à la boîte de contenu avant
+  la pose des enfants (§10.3.5/§10.4) ; enfants flottants
+  comptés en somme dans le max-content d'un parent
+  shrink-to-fit ; `column wrap` complet (découpe en
+  colonnes sur hauteur définie, grow/shrink sur `height`,
+  marges `auto` et `justify-content` par colonne,
+  `align-content` entre colonnes, gaps sur les bons axes,
+  `wrap-reverse` miroir cross). Corpus WPT **55/57**
+  (96 %, 3 ignorés documentés).
+
 - **ADR-0022 — politique d'égress unique et détection de
   fuites (préparation Tor)** : `EgressConnector` par
   capacité dans `explorer-net` (en mode Tor, aucun dialer
@@ -60,6 +72,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (`shared_pump_advances_scriptless_animations`).
 
 ### Changed
+
+- **Étape 55h — apply de resynchro borné hors verrou**
+  (`explorer-core`, `explorer-api`, `explorer-daemon`) :
+  les synchros DOM rapportées par le miroir JS ne sont plus
+  appliquées atomiquement sous `&mut Session` (jusqu'à
+  **157 s** de verrou mesuré sur `storm.html`). Nouveau
+  `session/apply.rs` : file `pending_applies` coalescée par
+  onglet + `PaintPayload` détachable (`take_paint`/
+  `put_paint` — l'onglet dégrade naturellement pendant la
+  fenêtre : `/frame` 204 lazy-heal, hit-test mort, tick
+  d'animation inerte, scroll accepté et repeint au commit).
+  Tous les points de synchro (dispatch événement, pompe
+  JS, livraisons XHR) enfilent ; l'apply tourne en
+  `spawn_blocking` via `drain_applies_shared` (pompe
+  partagée, handler `/input`, battement réseau du daemon —
+  le verrou n'est tenu qu'au take/commit). Hôtes `&mut`
+  (FFI, CLI, tests) : `drain_applies` synchrone aux mêmes
+  frontières — sémantique inchangée. Fidélité préservée :
+  `freshen_apply` re-sérialise au drain si le miroir a
+  remuté depuis l'enfilement (ex. `preventDefault` d'un
+  clic checkbox : bascule → synchro enfilée → restauration),
+  epoch-guards anti-supplantation, op-lists `<canvas>`
+  capturées à l'enfilement et re-résolues sur le DOM
+  commis, `sync_floor` 55g armé sur le coût réel de
+  l'apply.
 
 - **Étape 60 — éclatement de `session.rs`** (`explorer-core`) :
   le god module (7 307 lignes) devient `session/` — 20

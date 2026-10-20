@@ -51,8 +51,16 @@ impl Session {
         if !active {
             return Ok(false);
         }
-        self.relayout(tab)?;
-        self.emit_invalidated(tab);
-        Ok(true)
+        match self.relayout(tab) {
+            Ok(()) => {
+                self.emit_invalidated(tab);
+                Ok(true)
+            }
+            // Peinture détachée pour un apply hors verrou
+            // (étape 55h) — l'onglet est transitoirement sans
+            // arbre : tick sauté, pas une erreur.
+            Err(CoreError::EmptyDocument) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 }

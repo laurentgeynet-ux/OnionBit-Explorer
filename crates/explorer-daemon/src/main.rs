@@ -238,12 +238,18 @@ async fn main() {
             loop {
                 let (wait, tabs) = {
                     let mut sess = s.lock().await;
-                    sess.pump_net().await;
+                    tokio::task::yield_now().await;
+                    sess.poll_net();
                     let w = sess
                         .next_timer_deadline()
                         .map_or(NET_PUMP_MS, |d| d.min(NET_PUMP_MS));
                     (w, sess.tabs())
                 };
+                // Livraisons réseau → resynchros enfilées,
+                // appliquées hors verrou (étape 55h).
+                for tab in &tabs {
+                    explorer_core::drain_applies_shared(&s, *tab).await;
+                }
                 // Pompe JS par onglet : `run_pending` +
                 // `sync_dom` tournent en `spawn_blocking`
                 // avec le moteur extrait — le verrou n'est

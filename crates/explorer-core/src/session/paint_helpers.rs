@@ -71,6 +71,7 @@ pub(crate) fn sync_phase(tab: TabId, phase: &'static str, start: Instant) -> Ins
 /// une erreur. Pas de moteur (onglet sans JS, moteur détaché
 /// 53f) → table vide, les ops seront relues à la prochaine
 /// passe.
+#[allow(dead_code)]
 pub(crate) fn canvas_table(entry: &mut Tab, dom: &Dom) -> CanvasTable {
     let mut out = CanvasTable::new();
     let Some(eng) = entry.js.as_deref_mut() else {

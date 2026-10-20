@@ -42,6 +42,8 @@ mod anim;
 #[allow(clippy::wildcard_imports)]
 mod anim_items;
 #[allow(clippy::wildcard_imports)]
+mod apply;
+#[allow(clippy::wildcard_imports)]
 mod decode;
 #[allow(clippy::wildcard_imports)]
 mod dom_helpers;
@@ -233,6 +235,13 @@ pub(crate) struct Tab {
     /// réinsertion, une epoch changée jette le moteur (son
     /// miroir parle de l'ancienne page).
     js_detached: Option<u64>,
+    /// État de peinture détaché pour un apply hors verrou
+    /// (étape 55h) — les champs `dom`/`tree`/`list`/`frame`
+    /// sont vides le temps du `spawn_blocking` : la session
+    /// répond comme pour une page jamais peinte (204 heal,
+    /// hit-test inerte). Une navigation supplantant l'epoch
+    /// jette la payload à la réinsertion.
+    paint_detached: bool,
     /// Réponses script-net arrivées pendant le détachement
     /// JS (53f) — livrées au moteur à sa réinsertion, leurs
     /// callbacks tournent à la pompe suivante.
@@ -323,8 +332,10 @@ pub struct Session {
     transport: Arc<dyn HttpTransport>,
     /// Registre de fontes : faces `@font-face` fetchées
     /// devant la source locale injectée (ADR-0016). Purge
-    /// par navigation (faces par document).
-    webfonts: WebFontSource,
+    /// par navigation (faces par document). Sous `Mutex`
+    /// depuis l'étape 55h : un apply détaché emporte un
+    /// handle `SharedFonts` pendant son `spawn_blocking`.
+    webfonts: Arc<std::sync::Mutex<WebFontSource>>,
     tabs: HashMap<TabId, Tab>,
     events: broadcast::Sender<CoreEvent>,
     next_tab: TabId,
@@ -401,6 +412,11 @@ pub struct Session {
     /// Compteur de relayouts incrémentaux réussis (étape
     /// 55f) — diagnostic, lu par les tests de régression.
     incremental_syncs: u32,
+    /// Applies de resynchro en file (étape 55h) — les points
+    /// de synchro enfilent, les hôtes drainent (`drain_applies`
+    /// synchrone ou `drain_applies_shared` hors verrou).
+    /// Une entrée par onglet au plus (coalescence).
+    pending_applies: apply::ApplyQueue,
 }
 
 impl Session {
@@ -427,7 +443,10 @@ impl Session {
         let (net_tx, net_rx) = channel();
         Self {
             transport,
-            webfonts: WebFontSource::new(fonts, cfg.max_fonts),
+            webfonts: Arc::new(std::sync::Mutex::new(WebFontSource::new(
+                fonts,
+                cfg.max_fonts,
+            ))),
             tabs: HashMap::new(),
             events,
             next_tab: 1,
@@ -456,6 +475,7 @@ impl Session {
             resync_gap_max: std::time::Duration::from_millis(cfg.resync_gap_max_ms),
             bfcache_pages: cfg.bfcache_pages,
             incremental_syncs: 0,
+            pending_applies: std::collections::VecDeque::new(),
         }
     }
 
@@ -584,6 +604,7 @@ impl Session {
                 bfcache: VecDeque::new(),
                 spec_paint: false,
                 js_detached: None,
+                paint_detached: false,
                 js_pending_net: Vec::new(),
                 js_pending_attrs: Vec::new(),
                 sync_floor: None,

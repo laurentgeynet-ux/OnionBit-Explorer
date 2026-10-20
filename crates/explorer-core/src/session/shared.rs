@@ -232,5 +232,59 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     // 55e : les animations cadencées par ce battement.
     let _ = s.advance_animations(tab);
     sync_phase(tab, "pump.commit_lock", tc);
+    drop(s);
+    // 55h : la mutation rapportée par le miroir a été
+    // enfilée — l'apply (re-parse → cascade → relayout →
+    // repaint) tourne en `spawn_blocking` hors verrou.
+    drain_applies_shared(sess, tab).await;
     jobs
+}
+
+/// Drain d'applies sur session partagée (étape 55h) :
+/// détache l'état de peinture de l'onglet, applique en
+/// `spawn_blocking` (re-parse → cascade → remap/relayout →
+/// repaint — le mur de ~157 s mesuré sur `storm.html` ne
+/// gèle plus l'API), puis réinsère sous verrou court gardé
+/// par epoch de navigation. Itère la file — un apply
+/// commis peut en dévoiler un enfilé entre-temps.
+///
+/// Appelée par la pompe (`pump_timers_shared` la suit) et
+/// par les handlers d'entrée des hôtes partagés (après
+/// `handle_input_now`, avant `drain_navs_shared`).
+/// Retourne le nombre d'applies commis.
+pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, _tab: TabId) -> usize {
+    let mut applied = 0;
+    loop {
+        let job = {
+            let mut s = sess.lock().await;
+            s.take_next_apply()
+        };
+        let Some((job, mut payload, ctx, old_title)) = job else {
+            break;
+        };
+        let (tab, epoch) = (job.tab, job.epoch);
+        // Hors verrou : les phases lourdes ne gèlent plus
+        // ni l'API ni les autres onglets.
+        let out = tokio::task::spawn_blocking(move || {
+            let o = apply::apply_payload(&mut payload, &ctx, &job, old_title.as_deref());
+            (payload, o)
+        })
+        .await;
+        let mut s = sess.lock().await;
+        match out {
+            Ok((p, o)) => s.commit_apply_detached(tab, epoch, p, &o),
+            Err(_) => {
+                // Panic dans le worker : la payload est
+                // perdue avec la tâche — l'onglet redevient
+                // « jamais peint » (lazy-heal au prochain
+                // `/frame`, étape 56b) plutôt que détaché
+                // à vie.
+                if let Some(e) = s.tabs.get_mut(&tab) {
+                    e.paint_detached = false;
+                }
+            }
+        }
+        applied += 1;
+    }
+    applied
 }

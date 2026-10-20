@@ -59,8 +59,10 @@ impl Session {
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.linked_css = css;
         }
-        for (family, weight, italic, data) in fonts {
-            self.webfonts.register(&family, weight, italic, data);
+        if let Ok(mut wf) = self.webfonts.lock() {
+            for (family, weight, italic, data) in fonts {
+                wf.register(&family, weight, italic, data);
+            }
         }
         if let Some(eng) = eng.as_mut() {
             for item in scripts.iter().filter(|i| i.exec == ScriptExec::Parse) {
@@ -250,7 +252,7 @@ impl Session {
             eng.sync_dom_path()
         };
         if let Some((html, dirty)) = mutated {
-            self.apply_dom_sync(tab, &html, dirty.as_deref(), true);
+            self.queue_apply(tab, html, dirty);
         }
         self.after_script(tab);
     }
@@ -299,8 +301,12 @@ impl Session {
     }
 
     /// Livre les réponses arrivées — synchrone, sans yield :
-    /// appelée aux points de synchro internes (événements).
-    pub(crate) fn poll_net(&mut self) -> usize {
+    /// appelée aux points de synchro internes (événements)
+    /// **et** par les hôtes partagés — les resynchros DOM
+    /// rapportées sont enfilées (étape 55h), à drainer via
+    /// `drain_applies_shared` hors verrou ou `drain_applies`
+    /// sous `&mut self`.
+    pub fn poll_net(&mut self) -> usize {
         let mut done = Vec::new();
         while let Ok(d) = self.net_rx.try_recv() {
             done.push(d);
@@ -347,10 +353,17 @@ impl Session {
     /// Renvoie le nombre livré. La session n'a pas
     /// d'horloge propre : l'hôte appelle périodiquement
     /// (daemon : battement dédié ; CLI/tests : après
-    /// navigation) — jamais de callback ré-entrant.
+    /// navigation) — jamais de callback ré-entrant. Les
+    /// resynchros rapportées par les livraisons sont
+    /// enfilées puis drainées ici (étape 55h — sémantique
+    /// synchrone `&mut` conservée ; les hôtes partagés
+    /// livrent via `poll_net` interne et drainent hors
+    /// verrou avec `drain_applies_shared`).
     pub async fn pump_net(&mut self) -> usize {
         tokio::task::yield_now().await;
-        self.poll_net()
+        let n = self.poll_net();
+        self.drain_applies();
+        n
     }
 
     /// Requêtes script-initiées encore en vol (tous onglets)

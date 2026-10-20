@@ -474,7 +474,9 @@ impl Session {
             entry.sync_floor = None;
             entry.dom = Some(dom);
         }
-        self.webfonts.clear();
+        if let Ok(mut wf) = self.webfonts.lock() {
+            wf.clear();
+        }
         let eng = self.spawn_engine(tab, &html, !scripts.is_empty());
         Ok(Some(SubJob {
             tab,

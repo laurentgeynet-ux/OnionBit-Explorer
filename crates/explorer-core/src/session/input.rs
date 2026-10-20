@@ -15,7 +15,10 @@ impl Session {
     /// sur l'arbre posé, scroll borné, suivi de lien.
     /// Corps synchrone + drain compat `&mut self` (étape
     /// 53d) — les hôtes à session partagée appellent
-    /// [`Self::handle_input_now`] puis `drain_navs_shared`.
+    /// [`Self::handle_input_now`] puis `drain_navs_shared`
+    /// et `drain_applies_shared` (étape 55h : les mutations
+    /// DOM rapportées par les listeners sont enfilées —
+    /// ce drain synchrone garde la sémantique d'avant).
     ///
     /// # Errors
     /// [`CoreError::UnknownTab`], ou erreur de navigation si
@@ -26,16 +29,19 @@ impl Session {
         ev: InputEvent,
     ) -> Result<InputOutcome, CoreError> {
         let out = self.handle_input_now(tab, ev)?;
+        self.drain_applies();
         self.drain_script_nav(tab).await;
         Ok(out)
     }
 
     /// Corps synchrone de [`Self::handle_input`] (étape
-    /// 53d) : dispatche l'événement DOM et pose les
-    /// intentions de navigation dans `pending_nav` —
-    /// **jamais de fetch sous `&mut self`**. Les hôtes à
-    /// session partagée enchaînent `drain_navs_shared` ;
-    /// `handle_input` draine en compat.
+    /// 53d) : dispatche l'événement DOM, pose les intentions
+    /// de navigation dans `pending_nav` et les resyncs DOM
+    /// dans `pending_applies` (étape 55h) — **jamais de fetch
+    /// ni de relayout complet sous `&mut self`**. Les hôtes
+    /// à session partagée enchaînent `drain_navs_shared` +
+    /// `drain_applies_shared` ; `handle_input` draine en
+    /// compat.
     ///
     /// # Errors
     /// [`CoreError::UnknownTab`] ou erreur de pipeline
@@ -680,8 +686,14 @@ impl Session {
             }
             entry.scroll_y = next;
         }
-        self.repaint(tab)?;
-        self.emit_invalidated(tab);
+        // Peinture détachée pour un apply hors verrou (étape
+        // 55h) : la position est acceptée tout de suite — le
+        // commit de l'apply en vol repeint à la position
+        // courante (`commit_apply_detached`).
+        if !self.tabs.get(&tab).is_some_and(|e| e.paint_detached) {
+            self.repaint(tab)?;
+            self.emit_invalidated(tab);
+        }
         Ok(())
     }
 }
