@@ -89,11 +89,18 @@ pub async fn navigate_shared(
             return Err(s.emit_error(tab, e));
         }
     };
+    // URL de l'éventuelle page d'erreur : l'URL effectivement
+    // naviguée (post-redirections) — les erreurs post-fetch
+    // sont couvertes aussi (étape 75).
+    let err_url = done.url.clone();
     let sub = {
         let mut s = sess.lock().await;
         match s.nav_apply(tab, tail, done) {
             Ok(sub) => sub,
-            Err(e) => return Err(s.emit_error(tab, e)),
+            Err(e) => {
+                s.paint_error_page(tab, &err_url, &e);
+                return Err(s.emit_error(tab, e));
+            }
         }
     };
     // Epoch supplantée : la navigation la plus récente a
@@ -106,7 +113,10 @@ pub async fn navigate_shared(
     let mut s = sess.lock().await;
     match s.sub_commit(tab, sub).await {
         Ok(_) => Ok(()),
-        Err(e) => Err(s.emit_error(tab, e)),
+        Err(e) => {
+            s.paint_error_page(tab, &err_url, &e);
+            Err(s.emit_error(tab, e))
+        }
     }
 }
 

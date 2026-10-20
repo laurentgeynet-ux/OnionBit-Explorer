@@ -372,11 +372,26 @@ impl Session {
                 return Err(e);
             }
         };
-        let Some(mut sub) = self.nav_apply(tab, tail, done)? else {
-            return Ok(None);
+        // Erreurs post-fetch (pose DOM, commit) : la couverture
+        // de l'étape 69 s'étend — la page d'erreur est peinte
+        // avec l'URL effectivement naviguée (étape 75).
+        let err_url = done.url.clone();
+        let mut sub = match self.nav_apply(tab, tail, done) {
+            Ok(Some(s)) => s,
+            Ok(None) => return Ok(None),
+            Err(e) => {
+                self.paint_error_page(tab, &err_url, &e);
+                return Err(e);
+            }
         };
         sub.run().await;
-        self.sub_commit(tab, sub).await
+        match self.sub_commit(tab, sub).await {
+            Ok(t) => Ok(t),
+            Err(e) => {
+                self.paint_error_page(tab, &err_url, &e);
+                Err(e)
+            }
+        }
     }
 
     /// Phase 1 de la navigation éclatée (étape 53d) :

@@ -884,7 +884,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (`HTMLElement` ailleurs) ; non constructible (déviation
   v1 documentée). Régression :
   `media_constructor_name_is_class_name`.
-- [ ] **Étape 75. Page d'erreur : purger `find` AVANT le
+- [x] **Étape 75. Page d'erreur : purger `find` AVANT le
   relayout** (ticket terrain mission 19-D, pixel) :
   `paint_error_page` pose `e.find = None` **après**
   `relayout_dom` (paint.rs) — les `FillRect` du find stale
@@ -895,6 +895,13 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   mesurée : les erreurs de `nav_apply`/`sub_commit`
   (chemin `Err` post-fetch) partent à `emit_error`
   **sans** page d'erreur — trou de couverture 69.
+  Livré : la purge interactive (find, popup, focus, hover,
+  spec_paint) précède `relayout_dom` — régression mesurée
+  à **624 pixels orange cuits** avant le fix, 0 après.
+  Les erreurs `Err` de `nav_apply`/`sub_commit` peignent
+  la page d'erreur aussi (URL effectivement naviguée),
+  sur les chemins direct et partagé — la couverture 69
+  est complète.
 - [ ] **Étape 76. Nav échouée : entrée d'historique**
   (ticket terrain mission 19-D, sémantique) : la nav
   échouée ne pousse pas d'entrée — repro A→B→refus :

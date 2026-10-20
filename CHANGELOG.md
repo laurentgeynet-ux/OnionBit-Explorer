@@ -59,6 +59,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `frame_invalidated`). `handle_input` `&mut` (FFI/CLI)
   inchangé : outcome de commit réel.
 
+### Fixed
+
+- **Étape 75 — page d'erreur sans reliquats `find`**
+  (`explorer-core`) : `paint_error_page` purge l'état
+  interactif (find, popup, focus, hover) **avant**
+  `relayout_dom` — les `FillRect` de surlignage de la
+  page précédente ne cuisent plus dans la frame d'erreur
+  (bande orange du 404 ; régression : 624 px cuits → 0).
+  Les erreurs post-fetch de `nav_apply`/`sub_commit`
+  peignent désormais la page d'erreur sur les deux
+  chemins (trou de couverture de l'étape 69).
+
 ### Changed
 
 - **Étape 77 — sortie fatale du daemon visible**

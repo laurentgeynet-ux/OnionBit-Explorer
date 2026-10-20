@@ -95,6 +95,19 @@ impl Session {
         let dom = tb.into_dom();
         let prev = self.tabs.get(&tab).and_then(|e| e.title.clone());
         let title = Some("Erreur de chargement".to_string());
+        // Purge interactive AVANT le relayout — les `find`
+        // de la page précédente ne doivent pas cuire dans la
+        // frame d'erreur (étape 75 : bande orange stale).
+        {
+            let Some(e) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            e.popup = None;
+            e.find = None;
+            e.focused = None;
+            e.hovered = None;
+            e.spec_paint = false;
+        }
         if self.relayout_dom(tab, &dom).is_err() {
             return;
         }
@@ -108,11 +121,6 @@ impl Session {
             // tentée (retente honnête) ; `can_back` intact
             // puisque `hist` n'a pas bougé.
             e.last_req = None;
-            e.popup = None;
-            e.find = None;
-            e.focused = None;
-            e.hovered = None;
-            e.spec_paint = false;
         }
         self.emit_navigated(tab, url, title, prev.as_deref());
     }

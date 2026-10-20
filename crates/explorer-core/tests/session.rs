@@ -351,6 +351,39 @@ async fn failed_nav_commits_error_page() {
     );
 }
 
+/// Étape 75 — le surlignage `find` de la page précédente ne
+/// cuit pas dans la frame d'erreur : la purge interactive a
+/// lieu AVANT le relayout (avant : `find` n'était effacé
+/// qu'après `relayout_dom` → bande orange peinte sur le 404).
+#[tokio::test]
+async fn failed_nav_error_page_has_no_stale_find_highlight() {
+    let (mut s, t) = test_session();
+    t.route("/ok", 200, PAGE);
+    t.route("/ko", 404, "nope");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/ok").await.unwrap();
+    assert!(s.find_in_page(id, "bonjour") > 0);
+    // Surbrillance find ≈ orange (255,152,0,α) / jaune
+    // (255,235,59,α) blendée — pixels chauds r≈255, g 120-250,
+    // b < 150.
+    let warm = |px: &[u8]| {
+        px.chunks_exact(4)
+            .filter(|p| p[0] > 230 && p[1] > 110 && p[1] < 250 && p[2] < 150)
+            .count()
+    };
+    {
+        let (_, _, px) = s.frame_pixels(id).unwrap();
+        assert!(warm(px) > 0, "le find doit peindre son surlignage");
+    }
+    assert!(matches!(
+        s.navigate(id, "http://h.test/ko").await,
+        Err(CoreError::HttpStatus(404))
+    ));
+    assert!(s.find_state(id).is_none(), "le find est purgé");
+    let (_, _, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(warm(px), 0, "aucun reste de find sur la page d'erreur");
+}
+
 /// Étape 69 — le chemin hors-verrou (`navigate_shared`)
 /// commet la même page d'erreur.
 #[tokio::test]
