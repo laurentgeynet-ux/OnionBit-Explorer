@@ -20,13 +20,22 @@
   rapport console est la mesure. Sortie PNG sous
   `target/site_smoke/` pour inspection visuelle.
 
-  Usage : pwsh -File scripts/site_smoke.ps1 [sites.txt]
+  Phase 2 (sauf -SkipFunctional) : le critère « fonctionnel »
+  du palier N-A se mesure par sondes sur le daemon — pour
+  chaque site rendu, on sonde la page par `mousemove`
+  (l'outcome `hover` rapporte `url`/`editable` : le hit-test
+  moteur désigne les cibles, aucune coordonnée devinée) puis
+  `click` de lien → navigation réelle + `back`, et champ
+  `editable` → `focused` + `key` → `edited`.
+
+  Usage : pwsh -File scripts/site_smoke.ps1 [sites.txt] [-SkipFunctional]
   La liste par défaut est embarquée ci-dessous (sites
   stables, sans login, majoritairement HTML/CSS).
 #>
 
 param(
-    [string]$ListFile = ''
+    [string]$ListFile = '',
+    [switch]$SkipFunctional
 )
 
 $ErrorActionPreference = 'Continue'
@@ -35,14 +44,23 @@ $outDir = Join-Path $root 'target\site_smoke'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 if ($ListFile -eq '') {
-    # Corpus embarqué : diversité de formes (document statique,
-    # moteur de recherche, wiki, site CSS-moderne).
+    # Corpus embarqué (10 sites — palier N-A, ≥8/10 attendu) :
+    # diversité de formes — document statique, wiki, site
+    # CSS-moderne, gros documents (cap FrameTooBig), scripts
+    # réels. Shortlist terrain de la roadmap navigateur ;
+    # duckduckgo écarté (blanc « par design » — anti-FOUC
+    # honoré, script de déblocage non exécuté : faux échec).
     $sites = @(
         'https://example.com/',
         'https://info.cern.ch/',
-        'https://duckduckgo.com/html/',
         'https://en.wikipedia.org/wiki/Main_Page',
-        'https://developer.mozilla.org/en-US/'
+        'https://lobste.rs/',
+        'https://news.ycombinator.com/',
+        'https://text.npr.org/',
+        'https://www.weather.gov/',
+        'https://developer.mozilla.org/en-US/',
+        'https://github.com/',
+        'https://stallman.org/'
     )
 } else {
     $sites = Get-Content $ListFile |
@@ -75,6 +93,7 @@ Get-ChildItem -Path $outDir -Filter '*.png' -ErrorAction SilentlyContinue |
 
 $ok = 0
 $fail = 0
+$okSites = @()
 foreach ($site in $sites) {
     $name = ($site -replace '^https?://', '') -replace '[^A-Za-z0-9_.-]', '_'
     $png = Join-Path $outDir "$name.png"
@@ -84,14 +103,340 @@ foreach ($site in $sites) {
         $size = [math]::Round((Get-Item $png).Length / 1KB, 1)
         Write-Output "  OK   $site  ->  $name.png (${size} Ko)"
         $ok++
+        $okSites += $site
     } else {
         Write-Output "  FAIL $site"
         $fail++
     }
 }
 
+# --- Phase 2 : probes fonctionnelles via le daemon -------------------------
+# Le palier N-A exige « fonctionnel », pas seulement rendu. Le
+# daemon expose le hit-test moteur via `mousemove` → outcome
+# `hover` rapporte `url` (lien sous le point) et `editable`
+# (champ éditable) : on sonde la page en grille viewport —
+# aucune coordonnée n'est devinée, c'est le moteur qui désigne.
+$funcOk = 0
+if (-not $SkipFunctional -and $ok -gt 0) {
+    Write-Output ''
+    Write-Output "Construction d'explorer-daemon…"
+    cargo build -p explorer-daemon 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error 'cargo build -p explorer-daemon a échoué'
+        exit 1
+    }
+    $daemon = Join-Path $meta.target_directory 'debug\explorer-daemon.exe'
+    if (-not (Test-Path $daemon)) {
+        Write-Error "explorer-daemon introuvable : $daemon"
+        exit 1
+    }
+    $FuncPort = 9379
+    $FuncBase = "http://127.0.0.1:$FuncPort/api"
+    # Profil jetable : le smoke ne pollue ni le cache ni
+    # l'historique du profil utilisateur.
+    $profDir = Join-Path $env:TEMP 'explorer-site-smoke'
+    New-Item -ItemType Directory -Force -Path $profDir | Out-Null
+    # stderr capturé : une mort du daemon en cours de sondage
+    # (observée une fois — cause non attribuée) doit laisser
+    # une trace, pas disparaître dans le silence.
+    $daemonErr = Join-Path $env:TEMP 'explorer-site-smoke-daemon.log'
+    $proc = Start-Process -FilePath $daemon -PassThru -WindowStyle Hidden `
+        -ArgumentList '--port', "$FuncPort", '--profile', $profDir `
+        -RedirectStandardError $daemonErr
+
+    function Wait-Func([scriptblock]$Probe, [int]$Tries = 300) {
+        foreach ($i in 1..$Tries) {
+            $r = & $Probe
+            if ($null -ne $r -and $r -ne $false) { return $r }
+            Start-Sleep -Milliseconds 200
+        }
+        return $null
+    }
+    function Send-Input($Id, [hashtable]$Ev) {
+        try {
+            # 30 s : l'input attend le verrou session — une
+            # page lourde en apply (wikipedia 10 Mo) le tient
+            # plusieurs secondes ; 10 s = timeout mensonger.
+            Invoke-RestMethod -Method Post -Uri "$FuncBase/tabs/$Id/input" `
+                -ContentType 'application/json' -Body ($Ev | ConvertTo-Json) `
+                -TimeoutSec 30
+        } catch { $null }
+    }
+    function Get-TabUrl($Id) {
+        try {
+            ((Invoke-RestMethod -Uri "$FuncBase/tabs" -TimeoutSec 20).tabs |
+                Where-Object { $_.id -eq $Id }).url
+        } catch { $null }
+    }
+    function Get-Scroll($Id) {
+        # `scroll dy=0` est un no-op qui rapporte la position
+        # courante — nécessaire après nav/back : le bfcache
+        # restaure `scroll_y` hors de notre suivi local.
+        $r = Send-Input $Id @{ type = 'scroll'; dy = 0 }
+        if ($r -and $null -ne $r.scroll_y) { [double]$r.scroll_y } else { 0.0 }
+    }
+
+    try {
+        $up = Wait-Func {
+            try {
+                Invoke-RestMethod -Uri "$FuncBase/status" -TimeoutSec 2 |
+                    Out-Null
+                $true
+            } catch { $false }
+        } 60
+        if (-not $up) {
+            Write-Output '  daemon indisponible — phase fonctionnelle sautée'
+        } else {
+            foreach ($site in $okSites) {
+                if ($proc.HasExited) {
+                    Write-Output "  daemon mort (code $($proc.ExitCode)) — " +
+                        "stderr sous $daemonErr — fin de phase"
+                    break
+                }
+                $tag = ($site -replace '^https?://', '') -replace '/.*', ''
+                $verdict = 'nav:TIMEOUT'
+                $id = $null
+                try {
+                    $tab = Invoke-RestMethod -Method Post `
+                        -Uri "$FuncBase/tabs" -TimeoutSec 60
+                    $id = $tab.id
+                    # `/navigate` est synchrone jusqu'au commit —
+                    # le pipeline complet d'un document géant
+                    # (github = frame 49 Mo) dépasse 30 s.
+                    Invoke-RestMethod -Method Post `
+                        -Uri "$FuncBase/tabs/$id/navigate" `
+                        -ContentType 'application/json' `
+                        -Body (@{ url = $site } | ConvertTo-Json) `
+                        -TimeoutSec 120 | Out-Null
+                    # Frame produite (~60 s de grâce pour les
+                    # gros documents — github a pris ~30 s).
+                    $framed = Wait-Func {
+                        try {
+                            $r = Invoke-WebRequest `
+                                -Uri "$FuncBase/tabs/$id/frame" `
+                                -TimeoutSec 30
+                            if ($r.Content.Length -gt 0) { $true } else { $false }
+                        } catch { $false }
+                    } 300
+                    if (-not $framed) { Write-Output "  $tag  $verdict"; continue }
+                    $url0 = Get-TabUrl $id
+                    if (-not $url0) { $url0 = $site }
+
+                    # Sondage grille (viewport 1024×768, bandes de
+                    # 700 px de scroll) : premier lien + premier
+                    # champ éditable désignés par le hit-test.
+                    # Le lien préféré pointe AILLEURS que la page
+                    # courante — le logo d'en-tête lie presque
+                    # toujours la page elle-même, et attendre
+                    # « url ≠ url0 » sur lui = faux négatif garanti.
+                    function Resolve-Url([string]$raw, [string]$base) {
+                        if ($raw -match '^https?://') { return $raw }
+                        if ($raw.StartsWith('/')) {
+                            $u = [uri]$base
+                            $p = ''
+                            if (-not $u.IsDefaultPort) { $p = ":$($u.Port)" }
+                            return "$($u.Scheme)://$($u.Host)$p$raw"
+                        }
+                        return $raw
+                    }
+                    $selfUrl = ($url0 -replace '#.*$', '').TrimEnd('/')
+                    $link = $null       # premier lien trouvé (repli)
+                    $link2 = $null      # premier lien vers autre URL
+                    $edit = $null
+                    $scrollY = 0.0
+                    $jsErr = 0
+                    $navByScript = $false
+                    foreach ($band in @(0, 700)) {
+                        if ($band -gt $scrollY) {
+                            $r = Send-Input $id @{
+                                type = 'scroll'; dy = ($band - $scrollY) }
+                            if ($r -and $null -ne $r.scroll_y) {
+                                $scrollY = [double]$r.scroll_y
+                            }
+                        }
+                        for ($y = 40; $y -le 704 -and -not ($link2 -and $edit);
+                             $y += 48) {
+                            for ($x = 40; $x -le 968 -and
+                                 -not ($link2 -and $edit); $x += 64) {
+                                $r = Send-Input $id @{
+                                    type = 'mousemove'; x = $x; y = $y }
+                                if (-not $r) { $jsErr++; continue }
+                                if ($r.result -eq 'navigated') {
+                                    # Un handler script a enfilé une
+                                    # nav pendant le sondage — preuve
+                                    # « scripts actifs », on bascule
+                                    # directement sur l'attente + back.
+                                    $navByScript = $true
+                                    break
+                                }
+                                if ($r.result -eq 'hover') {
+                                    # Les ancres `#…` prouvent le
+                                    # hit-test mais pas la navigation.
+                                    if ($r.url -and
+                                        -not "$($r.url)".StartsWith('#')) {
+                                        $cand = @{ x = $x; y = $y;
+                                                   url = "$($r.url)";
+                                                   sy = $scrollY }
+                                        if (-not $link) { $link = $cand }
+                                        if (-not $link2 -and
+                                            ((Resolve-Url $r.url $site).
+                                                TrimEnd('/') -replace
+                                                '#.*$', '') -ne $selfUrl) {
+                                            $link2 = $cand
+                                        }
+                                    }
+                                    if (-not $edit -and $r.editable) {
+                                        $edit = @{ x = $x; y = $y;
+                                                   sy = $scrollY }
+                                    }
+                                }
+                            }
+                            if ($navByScript) { break }
+                        }
+                        if (($link2 -and $edit) -or $navByScript) { break }
+                    }
+                    $clickLink = if ($link2) { $link2 } else { $link }
+
+                    # Lien : clic → navigation réelle → back restaure.
+                    # Le sondage se fait bande par bande (le scroll
+                    # décale la fenêtre de hit-test) ; avant le clic on
+                    # relit le scroll réel — `back`/bfcache peut avoir
+                    # restauré une position hors de notre suivi.
+                    $lienRes = 'lien:absent'
+                    if ($navByScript) {
+                        $moved = Wait-Func {
+                            $u = Get-TabUrl $id
+                            if ($u -and $u -ne $url0) { $u } else { $false }
+                        } 300
+                        if ($moved) {
+                            # L'URL commute avant la fin de peinture —
+                            # `back` pendant un apply en vol attend le
+                            # verrou session : attendre la frame de la
+                            # page d'arrivée d'abord.
+                            $null = Wait-Func {
+                                try {
+                                    $r = Invoke-WebRequest `
+                                        -Uri "$FuncBase/tabs/$id/frame" `
+                                        -TimeoutSec 30
+                                    if ($r.Content.Length -gt 0) { $true } `
+                                        else { $false }
+                                } catch { $false }
+                            } 300
+                            $backSent = $true
+                            try {
+                                Invoke-RestMethod -Method Post `
+                                    -Uri "$FuncBase/tabs/$id/back" `
+                                    -TimeoutSec 60 | Out-Null
+                            } catch { $backSent = $false }
+                            $restored = Wait-Func {
+                                $u = Get-TabUrl $id
+                                if ($u -eq $url0) { $true } else { $false }
+                            } 200
+                            $lienRes = if ($restored) {
+                                "lien:script-nav+back($moved)"
+                            } elseif (-not $backSent) {
+                                'lien:script-nav/back-POST-TIMEOUT'
+                            } else { 'lien:script-nav/back-TIMEOUT' }
+                        } else {
+                            $lienRes = 'lien:script-nav-TIMEOUT'
+                        }
+                    } elseif ($clickLink) {
+                        $need = $clickLink.sy - (Get-Scroll $id)
+                        if ([math]::Abs($need) -gt 1) {
+                            $null = Send-Input $id @{
+                                type = 'scroll'; dy = $need }
+                        }
+                        $out = Send-Input $id @{
+                            type = 'click'; x = $clickLink.x;
+                            y = $clickLink.y }
+                        $moved = Wait-Func {
+                            $u = Get-TabUrl $id
+                            if ($u -and $u -ne $url0) { $u } else { $false }
+                        } 300
+                        if ($moved) {
+                            # Idem : attendre la frame de la page
+                            # d'arrivée avant `back` (verrou session).
+                            $null = Wait-Func {
+                                try {
+                                    $r = Invoke-WebRequest `
+                                        -Uri "$FuncBase/tabs/$id/frame" `
+                                        -TimeoutSec 30
+                                    if ($r.Content.Length -gt 0) { $true } `
+                                        else { $false }
+                                } catch { $false }
+                            } 300
+                            $backSent = $true
+                            try {
+                                Invoke-RestMethod -Method Post `
+                                    -Uri "$FuncBase/tabs/$id/back" `
+                                    -TimeoutSec 60 | Out-Null
+                            } catch { $backSent = $false }
+                            $restored = Wait-Func {
+                                $u = Get-TabUrl $id
+                                if ($u -eq $url0) { $true } else { $false }
+                            } 200
+                            $lienRes = if ($restored) {
+                                "lien:OK+back($($clickLink.url))"
+                            } elseif (-not $backSent) {
+                                "lien:nav-OK/back-POST-TIMEOUT($($clickLink.url))"
+                            } else {
+                                "lien:nav-OK/back-TIMEOUT($($clickLink.url))" }
+                        } else {
+                            $lienRes = "lien:clic-sans-nav($($out.result),$($clickLink.url))"
+                        }
+                    }
+
+                    # Formulaire : clic → focused, touche → edited.
+                    $formRes = 'form:absent'
+                    if ($edit) {
+                        $need = $edit.sy - (Get-Scroll $id)
+                        if ([math]::Abs($need) -gt 1) {
+                            $null = Send-Input $id @{
+                                type = 'scroll'; dy = $need }
+                        }
+                        $out = Send-Input $id @{
+                            type = 'click'; x = $edit.x; y = $edit.y }
+                        if ($out -and $out.result -eq 'focused') {
+                            $k = Send-Input $id @{ type = 'key'; key = 'x' }
+                            $formRes = if ($k -and $k.result -eq 'edited') {
+                                'form:OK'
+                            } else { "form:focus/edit:$($k.result)" }
+                        } else {
+                            $formRes = "form:clic:$($out.result)"
+                        }
+                    }
+                    $jsRes = if ($jsErr -eq 0) { 'dispatch:OK' }
+                             else { "dispatch:$jsErr timeouts" }
+                    $verdict = "nav:OK $lienRes $formRes $jsRes"
+                    if ($lienRes -match '^lien:(OK\+back|script-nav\+back)') {
+                        $funcOk++
+                    }
+                } catch {
+                    $verdict = "ERREUR: $_"
+                } finally {
+                    if ($null -ne $id) {
+                        try {
+                            Invoke-RestMethod -Method Delete `
+                                -Uri "$FuncBase/tabs/$id" `
+                                -TimeoutSec 30 | Out-Null
+                        } catch {}
+                    }
+                }
+                Write-Output "  $tag  $verdict"
+            }
+        }
+    } finally {
+        if ($proc -and -not $proc.HasExited) {
+            Stop-Process -Id $proc.Id -Force
+        }
+    }
+}
+
 Write-Output ''
 Write-Output "=== Smoke sites réels : $ok OK / $fail FAIL ==="
+if (-not $SkipFunctional -and $ok -gt 0) {
+    Write-Output "=== Fonctionnels (nav + lien + back) : $funcOk/$($okSites.Count) ==="
+}
 Write-Output "PNG sous $outDir"
 # Code de sortie informatif : 0 si au moins un site rend.
 if ($ok -gt 0) { exit 0 } else { exit 1 }
