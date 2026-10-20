@@ -48,6 +48,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (résolveur DoH optionnel, prolonge ADR-0022) ouvertes
   côté NAVIGATEUR — aucun code modifié.
 
+### Changed
+
+- **Étape 73 — `/input` rend l'outcome à l'enfilement**
+  (`explorer-api`) : les drains apply (spawn_blocking,
+  >30 s sur heavy.html) et navs tournent en tâche
+  détachée — la réponse ne retient plus le clic toute la
+  durée du pipeline ; `result` = intention, le commit
+  effectif arrive par SSE (`navigated`/`pipeline_error`/
+  `frame_invalidated`). `handle_input` `&mut` (FFI/CLI)
+  inchangé : outcome de commit réel.
+
+### Added
+
 - **Étape 74 — `constructor.name` des éléments**
   (`dillo-js`) : `v.constructor.name` vaut
   `HTMLVideoElement`/`HTMLAudioElement`/`HTMLCanvasElement`

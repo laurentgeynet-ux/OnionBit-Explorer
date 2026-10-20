@@ -410,16 +410,17 @@ async fn input(
             );
         }
     };
-    // `handle_input_now` pose les intentions (étape 53d) ;
-    // `drain_navs_shared` les conduit hors verrou — un clic
-    // de lien ne gèle plus l'API pendant la navigation.
-    // Idem pour les resyncs DOM rapportées par les
-    // listeners : enfilées sous verrou, appliquées en
-    // `spawn_blocking` par `drain_applies_shared` (55h).
-    // `navigated` n'est rapporté qu'au commit effectif
-    // (étape 64) : l'outcome reflète une intention — si la
-    // nav drainée échoue (fetch mort), zéro commit →
-    // `edited` plutôt qu'une page jamais atteinte.
+    // `handle_input_now` pose les intentions (étape 53d) et
+    // la réponse rend l'outcome d'enfilement **immédiatement**
+    // (étape 73) : les drains — apply en `spawn_blocking`
+    // (>30 s sur heavy.html) et navs réseau — tournent en
+    // tâche détachée, pas dans l'attente HTTP. La vérité du
+    // commit arrive par SSE : `navigated`/`pipeline_error`
+    // pour les navs, `frame_invalidated` pour la peinture ;
+    // un apply supplanté par epoch est jeté par la garde
+    // (observable via les events du gagnant). Les appelants
+    // `&mut` (FFI/CLI) gardent `handle_input` qui draine en
+    // synchrone et rapporte le commit réel.
     let outcome = {
         let mut session = st.session.lock().await;
         match session.handle_input_now(id, ev) {
@@ -427,12 +428,13 @@ async fn input(
             Err(e) => return err(err_status(&e), &e),
         }
     };
-    drain_applies_shared(&st.session, id).await;
-    let committed = drain_navs_shared(&st.session, id).await;
-    let outcome = match outcome {
-        InputOutcome::Navigated if committed == 0 => InputOutcome::Edited,
-        o => o,
-    };
+    {
+        let sess = st.session.clone();
+        tokio::spawn(async move {
+            drain_applies_shared(&sess, id).await;
+            drain_navs_shared(&sess, id).await;
+        });
+    }
     Json(match outcome {
         InputOutcome::Ignored => serde_json::json!({ "result": "ignored" }),
         InputOutcome::Scrolled { scroll_y } => {

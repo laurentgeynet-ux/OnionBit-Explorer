@@ -835,7 +835,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   loopback/Tor reste la réponse pour ce niveau. Contrat :
   le mode choisi est observable (`GET /api/egress` ou
   équivalent) et `no_proxy` inchangé hors mode Tor.
-- [ ] **Étape 73. `/input` : outcome rendu à
+- [x] **Étape 73. `/input` : outcome rendu à
   l'enfilement, pas au commit de l'apply** (ticket
   terrain mission 18-A — mesuré : `POST /input`
   `await`e `drain_applies_shared` → le `spawn_blocking` ;
@@ -848,6 +848,16 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   des appelants `&mut` (FFI/CLI) qui lisent l'outcome
   synchrone ; le cas « apply supplanté par epoch » doit
   rester observable.
+  Livré : les drains (`drain_applies_shared` puis
+  `drain_navs_shared`, ordre conservé) tournent en
+  `tokio::spawn` détaché — la réponse rend l'outcome
+  d'enfilement (`navigated`/`edited`/`focused` =
+  **intention**) ; le commit effectif reste porté par
+  `navigated`/`pipeline_error`/`frame_invalidated` SSE,
+  et un apply supplanté par epoch est jeté par la garde
+  (observable via les events du gagnant). `handle_input`
+  `&mut` (FFI/CLI) inchangé : drain synchrone + outcome
+  de commit réel (étape 64 intacte côté lib).
 - [x] **Étape 74. `constructor.name` des éléments média**
   (ticket terrain mission 18-B, cosmétique) :
   `v.constructor.name` vaut `Object` au lieu de
