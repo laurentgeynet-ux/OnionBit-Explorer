@@ -33,12 +33,13 @@ fn main() -> ExitCode {
         [_, cmd, arg] if cmd == "dump" => dump(arg),
         [_, cmd, arg] if cmd == "fetch" => fetch(arg),
         [_, cmd, arg] if cmd == "layout" => layout(arg),
-        [_, cmd, url, out] if cmd == "shot" => shot(url, out),
+        [_, cmd, url, out] if cmd == "shot" => shot(url, out, None),
+        [_, cmd, url, out, size] if cmd == "shot" => shot(url, out, Some(size)),
         _ => {
             eprintln!("usage : explorer-cli dump <fichier|url>");
             eprintln!("        explorer-cli fetch <url>");
             eprintln!("        explorer-cli layout <fichier|url>");
-            eprintln!("        explorer-cli shot <url> <sortie.png>");
+            eprintln!("        explorer-cli shot <url> <sortie.png> [LxH]");
             ExitCode::FAILURE
         }
     }
@@ -77,10 +78,20 @@ fn default_fonts_dir() -> std::path::PathBuf {
 const XHR_GRACE_MS: u64 = 1_000;
 
 #[tokio::main(flavor = "current_thread")]
-async fn shot(url: &str, out: &str) -> ExitCode {
+async fn shot(url: &str, out: &str, size: Option<&str>) -> ExitCode {
     let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
     let mut session = explorer_core::Session::new(client_stack(), Arc::new(fonts));
     session.set_js_factory(explorer_js::JscoreEngine::factory());
+    if let Some(s) = size {
+        // `LxH` optionnel — triage terrain à la taille de
+        // la fenêtre app (défaut session : 1024×768).
+        let mut it = s.split('x');
+        if let (Some(w), Some(h)) = (it.next(), it.next()) {
+            if let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>()) {
+                session.set_viewport(w, h, 1.0);
+            }
+        }
+    }
     let tab = session.open_tab();
     if let Err(e) = session.navigate(tab, url).await {
         eprintln!("erreur : {e}");
