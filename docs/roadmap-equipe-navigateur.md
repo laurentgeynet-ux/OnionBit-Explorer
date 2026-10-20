@@ -1132,6 +1132,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Wikipedia 5/5 via daemon sur profil
   empoisonné après fix.
 
+- [x] **Étape 84. `back` pendant navigation
+  en vol** (`explorer-core`) — déclencheur
+  `site_smoke` : « précédent » pendant la
+  vague de sous-ressources répondait 502
+  `EmptyDocument` (iana ~10 s de fenêtre,
+  github ~100 s). L'entrée hist n'était
+  poussée qu'en `sub_commit`, après
+  `sub.run()` — `hist_target` comptait alors
+  depuis `hist_idx` (page quittée) et
+  échouait. `hist_pending` marque la fenêtre
+  `nav_apply`→commit : la position logique
+  devient `hist_idx + 1` pour
+  `hist_target`/`history_move`/`can_back`/
+  `can_forward`/`try_forward_nav`. La page
+  en vol n'est pas gelée (pas de slot —
+  empoisonnait le snapshot précédent) ;
+  `restore` bump `nav_epoch` → la nav en
+  vol est supplantée, son commit tardif
+  jeté. Sémantique Chrome : back annule et
+  restaure (bfcache ou rejeu). Terrain :
+  clic→iana, back en vol = 3 ms, A restauré.
+  2 tests de régression.
+
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
 Ordre dicté par les besoins de la piste produit d'abord, puis

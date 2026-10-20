@@ -152,6 +152,18 @@ pub(crate) struct Tab {
     last_req: Option<Request>,
     /// Position dans `hist`.
     hist_idx: usize,
+    /// La page **affichée** provient d'une navigation `push`
+    /// dont l'entrée d'historique n'est pas encore poussée —
+    /// fenêtre `nav_apply` (URL commise) → `sub_commit`
+    /// (entrée poussée) / `paint_error_page` (entrée
+    /// `failed`). Pendant ce vol, la position logique est
+    /// `hist_idx + 1` : `back` doit viser `hist_idx` (la page
+    /// quittée, déjà gelée) et non `hist_idx - 1` ou pire,
+    /// `EmptyDocument` → 502 (étape 84 — mesuré : `back`
+    /// pendant la vague de sous-ressources d'une grosse page
+    /// échouait pendant ~100 s). Non gelable : la page en vol
+    /// n'a pas de position — `freeze` la saute.
+    hist_pending: bool,
     /// Décalage de scroll (px CSS).
     scroll_y: f32,
     /// Hauteur du document posé — borne max du scroll.
@@ -640,6 +652,7 @@ impl Session {
                 hist: Vec::new(),
                 last_req: None,
                 hist_idx: 0,
+                hist_pending: false,
                 scroll_y: 0.0,
                 doc_h: 0.0,
                 dom: None,
@@ -716,17 +729,25 @@ impl Session {
     /// Vue publique de l'onglet (`None` si inconnu).
     #[must_use]
     pub fn tab_info(&self, tab: TabId) -> Option<TabInfo> {
-        self.tabs.get(&tab).map(|t| TabInfo {
-            id: tab,
-            url: t.url.as_ref().map(std::string::ToString::to_string),
-            title: t.title.clone(),
-            can_back: t.hist_idx > 0,
-            can_forward: t.hist_idx + 1 < t.hist.len(),
-            scroll_y: t.scroll_y,
-            doc_h: t.doc_h,
-            // Plafond raster en px CSS (étape 65) — la frame
-            // ne peint rien au-delà, `doc_h` reste réel.
-            doc_h_clamped: t.doc_h > MAX_FRAME_DIM / self.scale.max(f32::EPSILON),
+        self.tabs.get(&tab).map(|t| {
+            // Position logique : une nav `push` en vol
+            // (URL commise, entrée pas encore poussée) est
+            // une place au-delà de `hist_idx` — `back` reste
+            // possible pendant le chargement (étape 84), le
+            // futur est mort (tronqué au commit).
+            let pos = t.hist_idx + usize::from(t.hist_pending);
+            TabInfo {
+                id: tab,
+                url: t.url.as_ref().map(std::string::ToString::to_string),
+                title: t.title.clone(),
+                can_back: pos > 0,
+                can_forward: pos + 1 < t.hist.len(),
+                scroll_y: t.scroll_y,
+                doc_h: t.doc_h,
+                // Plafond raster en px CSS (étape 65) — la frame
+                // ne peint rien au-delà, `doc_h` reste réel.
+                doc_h_clamped: t.doc_h > MAX_FRAME_DIM / self.scale.max(f32::EPSILON),
+            }
         })
     }
 

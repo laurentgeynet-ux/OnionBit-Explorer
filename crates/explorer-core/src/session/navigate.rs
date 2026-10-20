@@ -149,13 +149,18 @@ impl Session {
             .tabs
             .get(&tab)
             .is_some_and(|e| e.hist.get(e.hist_idx).is_some_and(|h| h.failed));
+        let cur_pending = self.tabs.get(&tab).is_some_and(|e| e.hist_pending);
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return false;
         };
         // Une page d'erreur quittée ne gèle pas (étape 76) :
         // son slot servirait une erreur périmée à la
         // traversée — la retente est la sémantique voulue.
-        if !cur_failed {
+        // Une page en vol ne gèle pas non plus (étape 84) :
+        // sans entrée d'historique elle n'a pas de slot —
+        // la geler sous `hist_idx` empoisonnerait la page
+        // quittée (son snapshot vient d'être retiré).
+        if !cur_failed && !cur_pending {
             entry.freeze(self.bfcache_pages);
         }
         entry.restore(snap);
@@ -216,6 +221,11 @@ impl Session {
                 failed: false,
             });
             e.hist_idx = e.hist.len() - 1;
+            // L'entrée fragment résout la position — la page
+            // affichée a désormais son entrée, `hist_pending`
+            // tombe. La nav en vol poussera quand même la
+            // sienne à son commit (au-dessus, futur tronqué).
+            e.hist_pending = false;
             e.url = Some(req.url.clone());
         }
         let title = self.tabs.get(&tab).and_then(|e| e.title.clone());
@@ -284,6 +294,11 @@ impl Session {
         if req.method != Method::Get || req.body.is_some() {
             return false;
         }
+        // Nav `push` en vol : le futur va être tronqué au
+        // commit — il n'y a plus d'entrée « forward » (84).
+        if self.tabs.get(&tab).is_some_and(|e| e.hist_pending) {
+            return false;
+        }
         let fwd = self
             .tabs
             .get(&tab)
@@ -299,7 +314,12 @@ impl Session {
     /// Déplacement dans l'historique — `delta` = ±1.
     pub(crate) async fn history_move(&mut self, tab: TabId, delta: isize) -> Result<(), CoreError> {
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
-        let next = entry.hist_idx.checked_add_signed(delta);
+        // Nav `push` en vol (URL commise, entrée pas encore
+        // poussée) : la page affichée est logiquement une place
+        // au-delà — `back` vise alors `hist_idx`, la page
+        // quittée (étape 84).
+        let pos = entry.hist_idx + usize::from(entry.hist_pending);
+        let next = pos.checked_add_signed(delta);
         let Some(idx) = next.filter(|&i| i < entry.hist.len()) else {
             return Err(CoreError::EmptyDocument);
         };
@@ -582,10 +602,20 @@ impl Session {
             // à sa position d'historique — un retour
             // arrière la restaurera sans réseau. Une page
             // d'erreur (entrée `failed`, étape 76) n'est pas
-            // gelée : sa traversée retente la requête.
-            if !entry.hist.get(entry.hist_idx).is_some_and(|h| h.failed) {
+            // gelée : sa traversée retente la requête. Ni
+            // une page **en vol** (étape 84) : sans entrée
+            // elle n'a pas de slot — la geler sous
+            // `hist_idx` écraserait le snapshot de la page
+            // d'avant avec le document entrant.
+            if !entry.hist_pending && !entry.hist.get(entry.hist_idx).is_some_and(|h| h.failed) {
                 entry.freeze(self.bfcache_pages);
             }
+            // Fenêtre « URL commise, entrée pas poussée »
+            // (étape 84) : `sub_commit` poussera après la
+            // vague de sous-ressources — `hist_target`
+            // compte la page affichée comme position
+            // `hist_idx + 1` jusque-là.
+            entry.hist_pending = tail.push;
             entry.last_req = Some(tail.req.clone());
             entry.url = Some(url.clone());
             entry.title.clone_from(&title);
@@ -688,8 +718,12 @@ impl Session {
         delta: isize,
     ) -> Result<(usize, Request), CoreError> {
         let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
-        let Some(idx) = entry
-            .hist_idx
+        // Même correction que `history_move` (étape 84) :
+        // la page affichée par une nav `push` en vol compte
+        // pour une place — `back` retombe sur `hist_idx`,
+        // la page quittée, au lieu d'échouer `EmptyDocument`.
+        let pos = entry.hist_idx + usize::from(entry.hist_pending);
+        let Some(idx) = pos
             .checked_add_signed(delta)
             .filter(|&i| i < entry.hist.len())
         else {

@@ -126,7 +126,9 @@ impl Session {
             // restaure sans réseau, comme après une nav
             // réussie (une page d'erreur quittée ne gèle
             // jamais — sa traversée retente la requête).
-            if !e.hist.get(e.hist_idx).is_some_and(|h| h.failed) {
+            // Ni une page en vol (étape 84 : pas d'entrée,
+            // pas de slot — geler empoisonnerait `hist_idx`).
+            if !e.hist_pending && !e.hist.get(e.hist_idx).is_some_and(|h| h.failed) {
                 e.freeze(cap);
             }
         }
@@ -154,6 +156,8 @@ impl Session {
                     failed: true,
                 });
                 e.hist_idx = e.hist.len() - 1;
+                // L'entrée `failed` résout la position (84).
+                e.hist_pending = false;
             }
         }
         self.emit_navigated(tab, url, title, prev.as_deref());

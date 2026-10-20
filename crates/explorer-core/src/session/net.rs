@@ -120,6 +120,9 @@ impl Session {
                     failed: false,
                 });
                 entry.hist_idx = entry.hist.len() - 1;
+                // Fenêtre « en vol » refermée (étape 84) :
+                // la page commise a désormais son entrée.
+                entry.hist_pending = false;
             }
         }
         // `Navigated` seulement si le document final est bien

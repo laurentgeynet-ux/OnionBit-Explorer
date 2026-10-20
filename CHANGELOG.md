@@ -9,6 +9,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Étape 84 — `back` pendant une navigation en vol**
+  (`explorer-core`) : bug site-réel mesuré par `site_smoke`
+  — « précédent » pendant la vague de sous-ressources d'une
+  page répondait **502 `EmptyDocument`** (repro clic→iana.org,
+  fenêtre ~10 s ; sur github ~100 s). Racine : `nav_apply`
+  commet l'URL mais l'entrée d'historique n'est poussée qu'en
+  `sub_commit` après `sub.run()` — pendant le vol,
+  `hist_target(-1)` partait de `hist_idx` (page quittée) au
+  lieu de la position logique `hist_idx + 1`. Nouveau marqueur
+  `Tab::hist_pending` posé à `nav_apply`, résolu à
+  `sub_commit`/`paint_error_page`/restauration ;
+  `hist_target`, `history_move`, `can_back`, `can_forward`
+  (le futur est mort — tronqué au commit) et
+  `try_forward_nav` comptent la position logique. La page en
+  vol n'est **pas gelée** (pas d'entrée = pas de slot — la
+  geler sous `hist_idx` empoisonnait le snapshot de la page
+  quittée) et `restore` bump `nav_epoch` : la nav en vol est
+  supplantée, son `sub_commit` tardif jeté par la garde
+  epoch. Comme Chrome : back annule le chargement et restaure
+  l'entrée précédente (bfcache instantané, sinon rejeu).
+  Régression : `back_during_inflight_nav_restores_previous` +
+  `hist_target_during_inflight_nav`. Terrain : clic→iana,
+  `back` en vol = 3 ms, `example.com` restauré.
+
 - **Étape 83 — revalidation cache : 304 gzip vide +
   partiels tronqués** (`explorer-net`) : bug site-réel
   mesuré par `site_smoke` — wikipedia échouait de façon

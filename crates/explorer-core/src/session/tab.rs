@@ -107,5 +107,8 @@ impl Tab {
         self.animations.clear();
         self.nav_epoch += 1;
         self.pending_nav.clear();
+        // La position restaurée a son entrée d'historique —
+        // plus de fenêtre « en vol » (étape 84).
+        self.hist_pending = false;
     }
 }

@@ -128,6 +128,123 @@ fn paintless_snapshot_repairs_on_restore() {
     );
 }
 
+/// Étape 84 — `back` pendant la fenêtre `nav_apply` →
+/// `sub_commit` (URL commise, entrée pas encore poussée —
+/// toute la vague de sous-ressources ; mesuré terrain :
+/// 502 immédiat sur clic→iana, jusqu'à ~100 s sur github).
+/// La page en vol compte pour une place au-delà de
+/// `hist_idx` : `back` retombe sur la page quittée (déjà
+/// gelée) au lieu d'échouer `EmptyDocument`, et la page
+/// en vol n'est PAS gelée sous l'index de l'ancienne
+/// (empoisonnement du slot bfcache).
+#[tokio::test]
+async fn back_during_inflight_nav_restores_previous() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    let url_a = Url::parse("http://h.test/a").unwrap();
+    let url_b = Url::parse("http://h.test/b").unwrap();
+
+    // État « en vol » : A commise et gelée, B affichée
+    // (URL + DOM posés par nav_apply) mais son entrée
+    // d'historique n'existe pas encore — `hist_pending`.
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.url = Some(url_b.clone());
+        e.dom = Some(test_dom("<p>page B en vol</p>"));
+        e.png = Some(b"png-b".to_vec());
+        e.frame = Some(Frame {
+            width: 8,
+            height: 8,
+            pixels: vec![0; 8 * 8 * 4],
+            scale: 1.0,
+        });
+        e.hist = vec![HistEntry {
+            req: Request::get(url_a.clone()),
+            failed: false,
+        }];
+        e.hist_idx = 0;
+        e.hist_pending = true;
+        e.bfcache.push_back(PageSnapshot {
+            hist_idx: 0,
+            url: Some(url_a.clone()),
+            title: None,
+            scroll_y: 0.0,
+            doc_h: 0.0,
+            dom: Some(test_dom("<p>page A gelée</p>")),
+            tree: None,
+            tree_epoch: 0,
+            list: None,
+            frame: Some(Frame {
+                width: 8,
+                height: 8,
+                pixels: vec![0; 8 * 8 * 4],
+                scale: 1.0,
+            }),
+            png: None,
+            focused: None,
+            hovered: None,
+            popup: None,
+            find: None,
+            js: None,
+            images: PaintImages::default(),
+            linked_css: String::new(),
+            prev_styles: HashMap::new(),
+            dirty: Vec::new(),
+            emitted: 0,
+            last_req: None,
+        });
+    }
+
+    // `can_back` vit pendant le vol — la position logique
+    // est hist_idx+1.
+    assert!(
+        s.tab_info(tab).unwrap().can_back,
+        "back possible pendant le vol"
+    );
+    assert!(
+        !s.tab_info(tab).unwrap().can_forward,
+        "le futur est mort — tronqué au commit de la nav en vol"
+    );
+
+    // `back` restaure la page quittée — pas EmptyDocument.
+    s.history_move(tab, -1).await.unwrap();
+    assert_eq!(s.tab_url(tab).as_deref(), Some("http://h.test/a"));
+    assert!(!s.tabs.get(&tab).unwrap().hist_pending);
+
+    // Le slot bfcache de A a été consommé par la
+    // restauration ; la page en vol n'a RIEN gelé sous
+    // l'index 0 (sinon un futur back servirait B déguisé
+    // en A).
+    let e = s.tabs.get(&tab).unwrap();
+    assert!(
+        e.bfcache.iter().all(|snap| snap.hist_idx != 0),
+        "la page en vol ne doit pas empoisonner le slot de A"
+    );
+}
+
+/// Même fenêtre côté API partagée : `hist_target` compte
+/// la page en vol — `delta=-1` vise `hist_idx` au lieu de
+/// retourner `EmptyDocument` (le 502 observé).
+#[test]
+fn hist_target_during_inflight_nav() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    let url_a = Url::parse("http://h.test/a").unwrap();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.url = Some(Url::parse("http://h.test/b").unwrap());
+        e.hist = vec![HistEntry {
+            req: Request::get(url_a.clone()),
+            failed: false,
+        }];
+        e.hist_idx = 0;
+        e.hist_pending = true;
+    }
+    let (idx, req) = s.hist_target(tab, -1).unwrap();
+    assert_eq!(idx, 0);
+    assert_eq!(req.url, url_a);
+}
+
 /// 55g — le cull ne jette que les items-feuilles
 /// entièrement hors de la zone raster et conserve les
 /// items d'état (`PushClip`/`PopClip`) pour l'équilibre
