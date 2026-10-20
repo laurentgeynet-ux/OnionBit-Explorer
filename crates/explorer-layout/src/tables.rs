@@ -27,19 +27,34 @@
 //! bords), `hidden` n'écrase pas, pas de résolution de
 //! couleur gagnante.
 //!
-//! Hors périmètre documenté : `colspan`/`rowspan` (cellules
-//! comptées 1×1), `border-spacing`, `display: table-column`,
+//! `colspan`/`rowspan` (R-47) : placement par occupation de
+//! grille — un `rowspan` retient ses colonnes sur les rangs
+//! suivants, un `colspan` réserve sa plage ; la mesure d'une
+//! cellule à span se répartit en déficit égal sur les
+//! colonnes couvertes (§17.5.2.2), sa boîte s'étend sur la
+//! somme des rangs/colonnes couverts.
+//!
+//! Hors périmètre documenté : distribution de la hauteur
+//! d'un `rowspan` entre ses rangs (toute la hauteur reste
+//! dans le rang d'origine), `colspan=0` (= 1), `span` des
+//! `col`, `border-spacing`, `display: table-column`,
 //! `caption`.
 
 use crate::block::{border_px, css_px, font_size_px, layout_block, side_px, BlockCtx, FloatCtx};
 use crate::boxtree::{LayoutBox, Rect};
 use explorer_css::ComputedStyle;
 
-/// Une cellule repérée : colonne + chemin d'indices depuis
-/// la boîte table jusqu'à elle (le chemin traverse un rang
-/// explicite ou désigne un enfant direct = cellule anonyme).
+/// Une cellule repérée : colonne de départ (assignée par le
+/// placement, R-47), étendue `cols`×`rows` + chemin d'indices
+/// depuis la boîte table jusqu'à elle (le chemin traverse un
+/// rang explicite ou désigne un enfant direct = cellule
+/// anonyme).
 struct Cell {
     col: usize,
+    /// `colspan` utilisé (≥ 1).
+    cols: usize,
+    /// `rowspan` utilisé (≥ 1).
+    span_rows: usize,
     /// Indices `bx → … → table-cell`.
     path: Vec<usize>,
 }
@@ -111,12 +126,22 @@ fn collect_col_styles<'a>(bx: &'a LayoutBox, out: &mut Vec<&'a ComputedStyle>) {
     }
 }
 
+/// Span d'une cellule (hints `-x-colspan`/`-x-rowspan`
+/// livrés par la cascade, R-47) — ≥ 1, plafond défensif
+/// 1000 (borne HTML table model).
+fn span_of(st: &ComputedStyle, prop: &str) -> usize {
+    st.get(prop)
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .map_or(1, |n| usize::try_from(n).unwrap_or(1000).clamp(1, 1000))
+}
+
 /// Repère les rangs (`display: table-row` explicites ou
 /// anonymes) en traversant les groupes — renvoyés en **ordre
 /// visuel** (tête, corps en ordre document, pied), tri stable.
 /// §17.2.1 : les `table-cell` nues et tout autre contenu sont
 /// emballés dans des cellules/rangs anonymes ; une table
 /// **imbriquée** est du contenu (on ne descend pas dedans).
+/// Les `col` sont assignés par [`place_cells`] après le tri.
 fn collect_grid(bx: &LayoutBox) -> Vec<Row> {
     /// Cellules d'un rang explicite (enfants `table-cell`
     /// directs — le reste est ignoré, rangs réels seuls).
@@ -125,11 +150,15 @@ fn collect_grid(bx: &LayoutBox) -> Vec<Row> {
             .iter()
             .enumerate()
             .filter(|(_, c)| c.display() == "table-cell")
-            .enumerate()
-            .map(|(col, (idx, _))| {
+            .map(|(idx, c)| {
                 let mut p = path.to_vec();
                 p.push(idx);
-                Cell { col, path: p }
+                Cell {
+                    col: 0,
+                    cols: span_of(&c.style, "-x-colspan"),
+                    span_rows: span_of(&c.style, "-x-rowspan"),
+                    path: p,
+                }
             })
             .collect()
     }
@@ -184,7 +213,9 @@ fn collect_grid(bx: &LayoutBox) -> Vec<Row> {
                         let mut p = prefix.clone();
                         p.push(i);
                         pending.push(Cell {
-                            col: pending.len(),
+                            col: 0,
+                            cols: span_of(&c.style, "-x-colspan"),
+                            span_rows: span_of(&c.style, "-x-rowspan"),
                             path: p,
                         });
                     }
@@ -201,9 +232,46 @@ fn collect_grid(bx: &LayoutBox) -> Vec<Row> {
         RowClass::Footer => 2,
     };
     rows.sort_by_key(|r| rank(r.class));
-    // Recolonne : `col` suit l'ordre des cellules dans CHAQUE
-    // rang (déjà en ordre doc — rien à faire).
+    place_cells(&mut rows);
     rows
+}
+
+/// Assigne `col` à chaque cellule en **ordre visuel**
+/// (R-47 — HTML table model §forming a table, simplifié) :
+/// curseur de colonne qui saute les colonnes retenues par les
+/// `rowspan` des rangs précédents ; un `colspan` réserve sa
+/// plage entière (la plage ne peut pas enjamber une colonne
+/// retenue — le curseur avance au-delà). `held[c]` = rangs
+/// futurs où la colonne `c` reste occupée.
+fn place_cells(rows: &mut [Row]) {
+    let mut held: Vec<u32> = Vec::new();
+    for row in rows.iter_mut() {
+        let mut col = 0usize;
+        for cell in &mut row.cells {
+            loop {
+                while held.get(col).copied().unwrap_or(0) > 0 {
+                    col += 1;
+                }
+                if (col..col + cell.cols).any(|c| held.get(c).copied().unwrap_or(0) > 0) {
+                    col += 1;
+                } else {
+                    break;
+                }
+            }
+            cell.col = col;
+            let end = col + cell.cols;
+            if held.len() < end {
+                held.resize(end, 0);
+            }
+            for h in &mut held[col..end] {
+                *h = (*h).max(u32::try_from(cell.span_rows).unwrap_or(u32::MAX));
+            }
+            col = end;
+        }
+        for h in &mut held {
+            *h = h.saturating_sub(1);
+        }
+    }
 }
 
 /// Descend le chemin d'indices — `None` si l'arbre a été
@@ -214,6 +282,23 @@ fn at_path<'a>(bx: &'a mut LayoutBox, path: &[usize]) -> Option<&'a mut LayoutBo
         cur = cur.children.get_mut(i)?;
     }
     Some(cur)
+}
+
+/// Les colonnes couvertes par un `colspan` doivent atteindre
+/// **collectivement** la mesure de la cellule — le déficit se
+/// répartit à parts égales (§17.5.2.2 ; aucune colonne ne
+/// redescend sous sa valeur courante).
+fn spread_deficit(cols: &mut [f32], need: f32) {
+    if cols.is_empty() {
+        return;
+    }
+    let cur: f32 = cols.iter().sum();
+    if need > cur {
+        let add = (need - cur) / u16::try_from(cols.len()).map_or(1.0, f32::from);
+        for w in cols.iter_mut() {
+            *w += add;
+        }
+    }
 }
 
 /// Largeur d'arête horizontale fusionnée candidate pour un
@@ -260,7 +345,12 @@ pub(crate) fn layout_table(
     let st = bx.style.clone();
     let fs = font_size_px(&st, parent_fs, ctx);
     let rows = collect_grid(bx);
-    let ncols = rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
+    let ncols = rows
+        .iter()
+        .flat_map(|r| r.cells.iter())
+        .map(|c| c.col + c.cols)
+        .max()
+        .unwrap_or(0);
     if ncols == 0 {
         // Table sans aucune cellule : le `width`/`height`
         // spécifiés s'appliquent quand même (une table vide
@@ -292,14 +382,36 @@ pub(crate) fn layout_table(
     if fixed_layout {
         collect_col_styles(bx, &mut col_styles);
     }
+    // Cellules mono-colonne : max direct sur leur colonne
+    // (comportement historique). Puis cellules à `colspan` :
+    // les colonnes couvertes doivent **collectivement**
+    // atteindre la mesure de la cellule — le déficit se
+    // répartit à parts égales (§17.5.2.2).
     for (ri, row) in rows.iter().enumerate() {
         for cell in &row.cells {
+            if cell.cols != 1 {
+                continue;
+            }
             let (min, pref, spec) = cell_widths(bx, &cell.path, ctx, fs);
             min_w[cell.col] = min_w[cell.col].max(min);
             pref_w[cell.col] = pref_w[cell.col].max(pref.max(min));
             spec_w[cell.col] = spec_w[cell.col].max(spec);
             if ri == 0 {
                 first_spec[cell.col] = first_spec[cell.col].max(spec);
+            }
+        }
+    }
+    for (ri, row) in rows.iter().enumerate() {
+        for cell in &row.cells {
+            if cell.cols <= 1 {
+                continue;
+            }
+            let (min, pref, spec) = cell_widths(bx, &cell.path, ctx, fs);
+            spread_deficit(&mut min_w[cell.col..cell.col + cell.cols], min);
+            spread_deficit(&mut pref_w[cell.col..cell.col + cell.cols], pref.max(min));
+            spread_deficit(&mut spec_w[cell.col..cell.col + cell.cols], spec);
+            if ri == 0 {
+                spread_deficit(&mut first_spec[cell.col..cell.col + cell.cols], spec);
             }
         }
     }
@@ -417,15 +529,39 @@ pub(crate) fn layout_table(
                 *w = (left * pref_w[i] / auto_pref).max(min_w[i].min(left));
                 slack -= *w;
             }
-            // Reste/retirer : ajuste sur la plus large colonne auto.
-            if let Some(max) = col_w
-                .iter_mut()
-                .enumerate()
-                .filter(|(i, _)| spec_w[*i] <= 0.0)
-                .max_by(|a, b| a.1.total_cmp(b.1))
-                .map(|(_, w)| w)
-            {
-                *max = (*max + slack).max(0.0);
+            // Reste/retirer : ajuste sur la plus large colonne
+            // auto — le retrait ne descend JAMAIS sous `min`
+            // (R-47 : un span massif qui gonfle la somme au-
+            // delà de la table ne peut pas annuler une
+            // colonne voisine ; la table déborde plutôt).
+            if slack > 0.0 {
+                if let Some(max) = col_w
+                    .iter_mut()
+                    .enumerate()
+                    .filter(|(i, _)| spec_w[*i] <= 0.0)
+                    .max_by(|a, b| a.1.total_cmp(b.1))
+                    .map(|(_, w)| w)
+                {
+                    *max += slack;
+                }
+            } else if slack < -0.01 {
+                let mut rem = -slack;
+                for _ in 0..ncols {
+                    let Some((i, max)) = col_w
+                        .iter_mut()
+                        .enumerate()
+                        .filter(|(i, _)| spec_w[*i] <= 0.0)
+                        .max_by(|a, b| a.1.total_cmp(b.1))
+                    else {
+                        break;
+                    };
+                    let take = (*max - min_w[i].min(*max)).max(0.0).min(rem);
+                    *max -= take;
+                    rem -= take;
+                    if take <= 0.0 {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -469,7 +605,9 @@ pub(crate) fn layout_table(
         let mut row_h = 0.0_f32;
         for cell in &row.cells {
             let col_x: f32 = x + il + col_w[..cell.col].iter().sum::<f32>();
-            let cw = col_w[cell.col];
+            // `colspan` : la cellule occupe la somme des
+            // colonnes couvertes (R-47).
+            let cw: f32 = col_w[cell.col..cell.col + cell.cols].iter().sum();
             // Cellule positionnée → conteneur pour ses absolus.
             let cell_cb = Rect {
                 x: col_x,
@@ -544,7 +682,14 @@ pub(crate) fn layout_table(
             let Some(cell_box) = at_path(bx, &cell.path) else {
                 continue;
             };
-            cell_box.rect.height = cell_box.rect.height.max(rh);
+            // `rowspan` : la boîte peinte couvre la somme des
+            // rangs traversés + les arêtes partagées internes
+            // (R-47 — la distribution de la hauteur de
+            // contenu entre rangs reste hors périmètre).
+            let last = (k + cell.span_rows).min(nrows);
+            let span_h: f32 = row_tops[k..last].iter().map(|t| t.1).sum::<f32>()
+                + gap[k + 1..last].iter().sum::<f32>();
+            cell_box.rect.height = cell_box.rect.height.max(span_h.max(rh));
             cell_box.rect.y = ry;
         }
         let mut cur = &mut *bx;

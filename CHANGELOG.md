@@ -196,6 +196,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `LayoutBox.fc_root` posé par `layout_item` (flex + grid),
   `is_fc_root` aux gardes §8.3.1 + englobage des flottants
   §9.4.1 ; le champ survit au relayout incrémental.
+- **R-47 — `colspan`/`rowspan` : grille de table à
+  occupation** (`explorer-css` + `explorer-layout`) : bug
+  site-réel — sur Hacker News, le rang `subtext`
+  (`<td colspan=2></td>` vide puis la cellule utile) posait
+  la méta sous la colonne rang au lieu du titre ; les
+  cellules étaient comptées 1×1. Livré : hints
+  `-x-colspan`/`-x-rowspan` livrés par la cascade (`td`/`th`
+  — attributs du modèle de grille, pas des propriétés CSS),
+  `place_cells` assigne les colonnes en sautant celles
+  retenues par les `rowspan` antérieurs, la mesure d'une
+  cellule à span se répartit en déficit égal sur les
+  colonnes couvertes (§17.5.2.2), la boîte peinte s'étend
+  sur les rangs/colonnes traversés. Correctif connexe : le
+  retrait du résidu de distribution ne descend plus sous
+  `min` — un span massif (`colspan=999999999`) ne peut plus
+  annuler une colonne voisine. Limites : hauteur d'un
+  `rowspan` non distribuée entre rangs, `colspan=0` = 1.
 - **`scripts/spawn_daemon.ps1` — spawn WMI durci** :
   les morts silencieuses du daemon (3 occurrences
   non reproductibles, zéro stderr, zéro event) sont

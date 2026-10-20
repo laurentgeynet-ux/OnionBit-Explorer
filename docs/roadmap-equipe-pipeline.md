@@ -903,6 +903,40 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `block` (marges contenues + item
   suivant après la margin box ; cross
   `row` englobe les marges verticales).
+- [x] **R-47. `colspan`/`rowspan` — grille
+  de table à occupation** (résidu terrain
+  HN) — **livré** : les cellules étaient
+  comptées 1×1 — la 2ᵉ rangée de
+  `itemlist` HN (`<td colspan=2></td>`
+  vide puis `subtext`) posait le
+  sous-texte sous la colonne rang au
+  lieu du titre. Livré : hints
+  `-x-colspan`/`-x-rowspan` posés par la
+  cascade (`td`/`th`, entier ≥ 1 plafonné
+  1000 — `0` et invalides ignorés) ;
+  `place_cells` assigne les colonnes en
+  ordre visuel en sautant les colonnes
+  retenues par les `rowspan` (HTML table
+  model simplifié) ; la mesure d'une
+  cellule à `colspan` se répartit en
+  **déficit égal** sur les colonnes
+  couvertes (§17.5.2.2, mono-colonnes
+  d'abord) ; la boîte posée couvre la
+  somme des colonnes/rangs traversés
+  (+ arêtes `collapse` internes). Effet
+  de bord réparé : le correcteur de
+  résidu de la distribution ne retire
+  plus jamais sous `min` — un span
+  massif ne peut plus annuler une
+  colonne voisine (la table déborde).
+  Hors périmètre : distribution de la
+  hauteur d'un `rowspan` entre ses rangs,
+  `colspan=0`, `span` des `col`.
+  Terrain : subtext HN aligné sous le
+  titre. Tests : 4 cas `positioning`
+  (forme HN, répartition de mesure,
+  rétention `rowspan`, valeurs
+  malformées).
 - [x] **Écarts terrain — vol humain M-H1
   (22/10)** : trois constats rendu du
   premier run humain — **triage terminé** :
@@ -962,11 +996,12 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   stables ; octets PNG ↑ (contenu
   réellement peint, pas du blanc).
   **Nouveaux résidus notés** (non promus,
-  à reproduire) : (a) HN — la cellule
+  à reproduire) : ~~(a) HN — la cellule
   `subtext` tombe sous la colonne rang au
   lieu d'aligner sous le titre (attribution
   de grille `colspan` sur la 2ᵉ rangée —
-  candidat tables) ; (b) example.com —
+  candidat tables)~~ → **livré R-47** ;
+  (b) example.com —
   le `<svg>` injecté par `insertAdjacent
   HTML` (`/s.js`, logo 44×44) n'est pas
   peint alors que les `<p>` injectés

@@ -831,6 +831,18 @@ fn dim(a: Option<String>) -> Option<String> {
         .map(|f| format!("{f}px"))
 }
 
+/// `colspan`/`rowspan` (R-47) : entier ≥ 1 ; `0` et les
+/// valeurs invalides → None (= 1 par défaut). Le plafond
+/// 1000 (borne HTML table model) reste défensif — le vrai
+/// clamp visuel s'applique dans `explorer-layout`.
+fn span(a: Option<String>) -> Option<String> {
+    a?.trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|n| *n >= 1)
+        .map(|n| n.min(1000).to_string())
+}
+
 /// `align` → text-align (spec : presentational hint) ;
 /// `middle` sur `div` vaut `center` (HTML Rendering).
 fn hint_align(a: Option<String>) -> Option<String> {
@@ -932,6 +944,11 @@ fn legacy_presentational_hints(
                     hint(props, "border-style", Some("inset".to_string()));
                 }
             }
+            // `colspan`/`rowspan` (R-47) — attributs du modèle
+            // de grille HTML, pas des propriétés CSS : livrés
+            // au layout table via des clés internes.
+            hint(props, "-x-colspan", span(hint_attr(dom, node, "colspan")));
+            hint(props, "-x-rowspan", span(hint_attr(dom, node, "rowspan")));
         }
         "body" => {
             hint(

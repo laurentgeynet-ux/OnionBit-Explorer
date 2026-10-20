@@ -151,6 +151,104 @@ fn table_largeur_specifiee_cellule() {
     assert!(b.rect.width > 0.0);
 }
 
+#[test]
+fn table_colspan_cellule_couvre_ses_colonnes() {
+    // R-47 — la forme réelle de Hacker News : 3 colonnes
+    // (rang, vote, titre) ; le rang subtext est
+    // <td colspan=2></td><td class=subtext> — la cellule
+    // utile tombe dans la TROISIÈME colonne (sous le titre),
+    // pas sous le rang.
+    let (dom, bx) = laid(
+        "<table><tr><td id=rank>1.</td><td id=vote>^</td>\
+         <td id=title>titre long de la dépêche</td></tr>\
+         <tr><td colspan=2></td><td id=sub>123 points par x il y a 2 h</td></tr></table>",
+        "table{width:400px}",
+    );
+    let rank = find(&bx, by_id(&dom, "rank"));
+    let title = find(&bx, by_id(&dom, "title"));
+    let sub = find(&bx, by_id(&dom, "sub"));
+    assert!(
+        (sub.rect.x - title.rect.x).abs() < 0.01,
+        "subtext sous la colonne titre : rank={:?} title={:?} sub={:?}",
+        rank.rect,
+        title.rect,
+        sub.rect
+    );
+    assert!((sub.rect.width - title.rect.width).abs() < 0.01);
+}
+
+#[test]
+fn table_colspan_mesure_repartie_sur_les_colonnes() {
+    // Une cellule à span impose son contenu aux colonnes
+    // couvertes collectivement : sans elle elles seraient
+    // étroites, le déficit se répartit (ici la seule source
+    // de largeur — la table est élargie par le span).
+    let (dom, bx) = laid(
+        "<table><tr><td colspan=2 id=w>contenu très large de la cellule enjambée</td></tr>\
+         <tr><td id=a>x</td><td id=b>y</td></tr></table>",
+        "table{width:400px}",
+    );
+    let w = find(&bx, by_id(&dom, "w"));
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    // La cellule enjambée couvre exactement les deux colonnes.
+    assert!(
+        (w.rect.width - (a.rect.width + b.rect.width)).abs() < 0.01,
+        "w={:?} a={:?} b={:?}",
+        w.rect,
+        a.rect,
+        b.rect
+    );
+    assert!((w.rect.x - a.rect.x).abs() < 0.01);
+}
+
+#[test]
+fn table_rowspan_retient_sa_colonne() {
+    // R-47 — `rowspan=2` : la cellule du rang suivant ne peut
+    // pas s'installer dans la colonne retenue — elle glisse
+    // sous la deuxième colonne.
+    let (dom, bx) = laid(
+        "<table><tr><td id=sp rowspan=2>a</td><td id=b>b</td></tr>\
+         <tr><td id=c>c</td></tr></table>",
+        "table{width:200px}",
+    );
+    let sp = find(&bx, by_id(&dom, "sp"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let c = find(&bx, by_id(&dom, "c"));
+    assert!(
+        (c.rect.x - b.rect.x).abs() < 0.01,
+        "c sous b (colonne retenue) : sp={:?} b={:?} c={:?}",
+        sp.rect,
+        b.rect,
+        c.rect
+    );
+    // La boîte du span s'étend sur les deux rangs.
+    assert!(
+        sp.rect.height > b.rect.height,
+        "étendue peinte ≥ 2 rangs : sp={:?} b={:?}",
+        sp.rect,
+        b.rect
+    );
+}
+
+#[test]
+fn table_spans_malformes_degradent() {
+    // R-47 — tolérance : `0`, non-numérique et débordement se
+    // comportent comme 1, jamais de panique.
+    let (dom, bx) = laid(
+        "<table><tr><td id=a colspan=0>x</td><td id=b colspan=abc>y</td>\
+         <td id=c colspan=999999999>z</td></tr></table>",
+        "table{width:300px}",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let c = find(&bx, by_id(&dom, "c"));
+    for (n, r) in [("a", a), ("b", b), ("c", c)] {
+        assert!(r.rect.width > 0.0, "{n} posée : {r:?}");
+    }
+    assert!(b.rect.x >= a.rect.x + a.rect.width - 0.01);
+}
+
 // ---------- floats / clear ----------
 
 #[test]
