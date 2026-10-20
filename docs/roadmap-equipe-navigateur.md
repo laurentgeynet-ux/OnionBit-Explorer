@@ -944,6 +944,23 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `RUST_LOG` ne peut plus avaler la cause de mort. La
   cause de l'`Err` devient observable par construction
   (`Err` io de l'accept-loop rapporté tel quel).
+- [ ] **Étape 78. DoH : noms d'usage spécial court-circuités**
+  (ticket terrain mission 20-B) : en mode `--doh`,
+  `localhost` (et la famille RFC 6761 — `.localhost`,
+  `.local`, `.test`, `.invalid`, `.example`, adresses
+  de documentation) est routé **par le résolveur DoH**
+  comme un nom ordinaire → l'endpoint public répond
+  « aucune adresse » et les fixtures/pages locales sont
+  mortes en mode DoH. Chrome/Firefox gardent ces noms
+  sur la résolution système quoi qu'il arrive. Les
+  littéraux IP court-circuitent déjà correctement
+  (`127.0.0.1` bypass). Correctif attendu : liste
+  special-use dans `DohResolver` (ou le trait
+  `Resolver`) → délégation système, avec test de
+  régression. Comportement DoH par ailleurs validé
+  terrain : `/api/egress` observable, `http://` refusé
+  au démarrage, endpoint mort → page d'erreur honnête
+  sans repli système silencieux.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
