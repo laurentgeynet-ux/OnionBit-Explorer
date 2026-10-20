@@ -1265,6 +1265,68 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   rebasées + contrôleur (resync +
   reset). Gate entier vert.
 
+- [ ] **Écarts terrain — vol humain M-H1
+  (22/10)** : premier run humain sur
+  daemon `99782ac`. Validé : AZERTY
+  complet (`@\|[]{}#é"(èç)=^`), submit
+  Enter+clic → résultats DDG réels,
+  back/forward, historique, zoom
+  manuel, reconnexion auto. Chaque
+  écart ci-dessous est une mesure
+  terrain — promotion en Étape/JS-C au
+  triage :
+  - **caret absent** : le champ
+    focalisé n'affiche aucun `|` — il
+    paraît vide avant la 1re frappe.
+    Le PNG ne porte aucun caret —
+    arbitrage : peint par le moteur
+    (display item) ou overlay app.
+  - **snackbar `ApiException`
+    persistant** : la reconnexion auto
+    fonctionne mais l'erreur reste
+    affichée — purge manquante.
+  - **`Ctrl`+molette sans zoom** :
+    `onPointerSignal` ne lit que
+    `scrollDelta.dy` → scroll pur ;
+    badge zoom manuel OK. Câblage
+    `Control`→zoom à ajouter.
+  - **badge/menu Home absent** —
+    feature inexistante.
+  - **RSS `explorer_app` 3,7→4,5 Go
+    en ~10 min** : croissance côté
+    **app Flutter**, pas le daemon —
+    suspect n°1 : cache de frames PNG
+    non borné. Joint la veille mémoire
+    ci-dessus : le protocole doit
+    mesurer les DEUX processus.
+  - **daemon injoignable sous charge
+    machine, retour seul** : pas un
+    crash (reconnexion auto OK) —
+    famine probable : `sess.lock()`
+    tenu ~85 s sur github (phases
+    `nav.*` mesurées). Corréler au log
+    stderr. Lie la perf cache-cascade
+    au produit.
+  - **google « oignon » → page stub
+    « Cliquez ici si… pas été
+    redirigé » + `exception js :
+    Error: b`** : interstitiel à
+    redirect JS (`location.replace`/
+    `assign`) — même famille que le
+    tunnel consentement T2 (boutons
+    JS-driven, `addEventListener` +
+    `location`/`fetch`). Et la
+    remontée d'erreurs JS est à
+    étoffer : `Error: b` minifié
+    n'informe ni l'utilisateur ni le
+    dev.
+  - **reload sur page résultats POST
+    → formulaire vide** : re-navigation
+    GET sans re-soumission du corps —
+    sémantiquement défendable mais
+    Chrome re-prompte ; trancher
+    re-POST vs avertissement.
+
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
 Ordre dicté par les besoins de la piste produit d'abord, puis

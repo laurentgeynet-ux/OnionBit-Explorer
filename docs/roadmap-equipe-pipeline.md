@@ -785,6 +785,49 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   invisible ici car contenu > viewport), marges `<p>`
   qui collapse à travers l'item flex, icônes sociales
   empilées.
+- [x] **R-42. Unités viewport `vw`/`vh`/`vmin`/`vmax`**
+  (résidu terrain, triage `site_smoke`) — **livré** :
+  l'enum `Unit` les parsait mais `px_factor` renvoyait
+  `None` → toute longueur viewport s'évaporait
+  (`min-height:100vh` du sticky-footer rust-lang.org,
+  `max-width:90vw`, héros `height:100vh` — famille de
+  R-39). Livré : `BlockCtx.viewport_w` (additif,
+  défaut 800 — `viewport_h`=600 existait) ; résolution
+  dans `raw_length_px` ET `eval_calc` (`calc(100vh-60px)`
+  marche) ; media queries `condition_matches` résout les
+  4 unités contre `env.width_px`/`height_px` (MQ4 §6.4) ;
+  `font-size:Nvw` résolu en cascade via `env` (valeur
+  calculée absolue). Carve-out aval : `explorer-core`
+  câble `viewport_w`/`viewport_h` depuis `ctx.viewport`
+  dans les deux `BlockCtx` (avant : `viewport_h` restait
+  au défaut 600 — `position:fixed`/ICB aussi plus justes).
+  Tests : 2 cas cascade (`(min-width:50vw)`, `font-size:2vw`)
+  + 2 cas modern (4 unités 800×600, `calc(100vh-60px)`=540).
+- [ ] **Écarts terrain — vol humain M-H1
+  (22/10)** : trois constats rendu du
+  premier run humain — promotion en
+  R-xx après triage/repro :
+  - **résultats DDG tronqués au bord
+    droit** : texte coupé mi-mot à
+    ~75 % du viewport — clip
+    horizontal ou mismatch largeur
+    layout/viewport à cerner.
+  - **entités littérales sur
+    google.fr** : `&nbsp;`/`&copy;`
+    rendus en clair **alors que la
+    table `entities_data` les connaît**
+    — le trou est dans le chemin :
+    entité sans `;`, ou texte inséré
+    par JS (`innerHTML`/`document.write`)
+    non décodé. Même page : texte
+    « Lornaeniaiae » corrompu (footer)
+    et bouton Connexion surdimensionné.
+    Repro minimal à forger.
+  - **frame décalée haut-gauche au
+    survol d'un lien** : restyle
+    `:hover` → repaint à origine
+    différente ; revient au départ.
+    Glitch très visible.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
