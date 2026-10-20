@@ -4866,6 +4866,66 @@ async fn find_highlight_repaints_without_scroll() {
     assert_ne!(before, after, "surbrillance rasterisée sans déplacement");
 }
 
+/// R-35 — le surlignage find suit les métriques glyphe, pas
+/// la boîte texte : « rem » dans « loremipsum » couvre ≈ 3
+/// glyphes sur 10 (bande étroite), positionnée sur le mot.
+#[allow(clippy::cast_precision_loss)]
+#[tokio::test]
+async fn find_highlight_follows_glyph_metrics() {
+    let (mut s, t) = test_session();
+    // Fixture Ahem : avance uniforme 0.5em → 20 px/car à 40px.
+    t.route(
+        "/f",
+        200,
+        "<html><body><p style=\"font-size:40px\">loremipsum</p></body></html>",
+    );
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/f").await.unwrap();
+    assert_eq!(s.find_in_page(a, "rem"), 1);
+    let (w, _h, px) = s.frame_pixels(a).unwrap();
+    // Colonnes couvertes par la surbrillance chaude (orange
+    // occurrence courante — même seuil que le test étape 75).
+    let mut xs = Vec::new();
+    for (i, p) in px.chunks_exact(4).enumerate() {
+        if p[0] > 230 && p[1] > 110 && p[1] < 250 && p[2] < 150 {
+            xs.push(i % w as usize);
+        }
+    }
+    assert!(!xs.is_empty(), "surbrillance peinte");
+    let (lo, hi) = (
+        *xs.iter().min().unwrap() as f32,
+        *xs.iter().max().unwrap() as f32,
+    );
+    // « rem » = caractères 2..5 : bande ≈ [40, 100] px (avec
+    // l'anti-aliasing du blend, tolérance généreuse) — l'ancien
+    // repli boîte-entière peignait ≈ [0, 200].
+    assert!(lo >= 25.0, "début {lo} : les 2 premiers glyphes exclus");
+    assert!(hi <= 140.0, "fin {hi} : le reste du mot exclu");
+}
+
+/// R-35 — granularité occurrence : un match dans un élément
+/// niché (<b>) n'est compté qu'une fois (le repli boîte ne
+/// double pas la couverture fragments) ; un match qui
+/// enjambe deux fragments reste UNE occurrence navigable.
+#[tokio::test]
+async fn find_groups_cross_fragment_occurrence() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/f",
+        200,
+        "<html><body><p style=\"font-size:40px\">aa<b>bb</b>cc</p></body></html>",
+    );
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/f").await.unwrap();
+    // « bb » vit dans un fragment niché — une occurrence, pas
+    // de doublon boîte-entière.
+    assert_eq!(s.find_in_page(a, "bb"), 1, "match niché dédupliqué");
+    // « abb » enjambe les fragments « aa » et « bb » : une
+    // occurrence (deux sous-rects peints), navigation stable.
+    assert_eq!(s.find_in_page(a, "abb"), 1, "match transversal groupé");
+    assert_eq!(s.find_step(a, 1), (0, 1), "une seule occurrence navigable");
+}
+
 /// Étape 67 — l'URL commise est la cible **finale** de la
 /// chaîne de redirections (barre d'adresse + historique),
 /// et le fragment du `Location` est appliqué au commit

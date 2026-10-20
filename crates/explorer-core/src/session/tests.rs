@@ -607,20 +607,21 @@ fn find_in_page_counts_steps_and_highlights() {
     }
     s.relayout(tab).unwrap();
 
-    // Granularité v1 : une boîte de texte = une occurrence —
-    // les deux « lorem » du 3e paragraphe partagent la run.
+    // R-35 : granularité **occurrence** — les deux « lorem »
+    // du 3e paragraphe comptent chacun (comportement Chrome).
     let n = s.find_in_page(tab, "LOREM"); // insensible à la casse
-    assert_eq!(n, 2, "2 boîtes texte contiennent lorem");
+    assert_eq!(n, 3, "3 occurrences de lorem");
     let (q, i, total) = s.find_state(tab).unwrap();
-    assert_eq!((q.as_str(), i, total), ("lorem", 0, 2));
+    assert_eq!((q.as_str(), i, total), ("lorem", 0, 3));
 
     let (i, n) = s.find_step(tab, 1);
-    assert_eq!((i, n), (1, 2));
+    assert_eq!((i, n), (1, 3));
     // Boucle : après la dernière on repart à 0.
+    let _ = s.find_step(tab, 1);
     let (i, _) = s.find_step(tab, 1);
     assert_eq!(i, 0);
     let (i, _) = s.find_step(tab, -1);
-    assert_eq!(i, 1, "dir -1 boucle sur la fin");
+    assert_eq!(i, 2, "dir -1 boucle sur la fin");
 
     // Le surlignage est peint : FillRect translucides en
     // queue de display list (couleur occurrence courante).

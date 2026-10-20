@@ -445,22 +445,7 @@ pub(crate) fn repaint_payload(p: &mut PaintPayload, ctx: &ApplyCtx) -> Result<()
         p.tree_epoch,
     );
     if let Some(f) = &p.find {
-        let base = Color {
-            r: 255,
-            g: 235,
-            b: 59,
-            a: 110,
-        };
-        let cur = Color {
-            r: 255,
-            g: 152,
-            b: 0,
-            a: 160,
-        };
-        for (i, &rect) in f.rects.iter().enumerate() {
-            let color = if i == f.current { cur } else { base };
-            list.items.push(DisplayItem::FillRect { rect, color });
-        }
+        append_find_highlights(&mut list, f);
     }
     if let Some(pop) = &p.popup {
         append_select_popup(&mut list, pop, vw, p.doc_h, &ctx.fonts);
@@ -549,6 +534,30 @@ pub(crate) fn repaint_payload(p: &mut PaintPayload, ctx: &ApplyCtx) -> Result<()
     p.png = None;
     p.spec_paint = false;
     Ok(())
+}
+
+/// Surlignage find en overlay : jaune par occurrence,
+/// orange sur la courante — un match qui enjambe plusieurs
+/// fragments peint chacun de ses sous-rects (R-35).
+fn append_find_highlights(list: &mut DisplayList, f: &FindState) {
+    let base = Color {
+        r: 255,
+        g: 235,
+        b: 59,
+        a: 110,
+    };
+    let cur = Color {
+        r: 255,
+        g: 152,
+        b: 0,
+        a: 160,
+    };
+    for (i, occ) in f.rects.iter().enumerate() {
+        let color = if i == f.current { cur } else { base };
+        for &rect in occ {
+            list.items.push(DisplayItem::FillRect { rect, color });
+        }
+    }
 }
 
 /// Table `<canvas>` depuis les ops capturées — variante de

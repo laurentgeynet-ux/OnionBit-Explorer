@@ -195,6 +195,59 @@ fn is_atomic(b: &LayoutBox) -> bool {
     b.text.is_none() && (b.display() == "inline-block" || b.intrinsic.is_some())
 }
 
+/// Sous-rect d'une tranche d'octets `start..end` de
+/// `frag.text` (R-35 — surlignage find au glyphe près).
+///
+/// Horizontalement, l'union des cellules des glyphes dont
+/// le `cluster` (offset octet dans le run — les glyphes
+/// sont en ordre visuel) tombe dans la tranche : exacte
+/// pour LTR comme RTL, ligatures incluses (un glyphe dont
+/// le cluster entre dans la tranche est couvert entier).
+/// Verticalement, la hauteur de ligne du fragment — un
+/// surlignage couvre la ligne, pas l'encre seule.
+///
+/// `None` : tranche vide ou hors bornes, fragment atomique.
+/// Sans run shapé (fonte absente) — ou si aucun cluster ne
+/// tombe dedans (tranche hors texte rendu, ex. blancs
+/// collapsés) : repli **proportionnel** aux octets sur la
+/// largeur du fragment (avances inconnues — approximation
+/// documentée).
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+pub fn fragment_sub_rect(frag: &Fragment, start: usize, end: usize) -> Option<Rect> {
+    if frag.atomic || start >= end || end > frag.text.len() {
+        return None;
+    }
+    let band = |x: f32, w: f32| Rect {
+        x,
+        y: frag.rect.y,
+        width: w,
+        height: frag.rect.height,
+    };
+    if let Some(run) = &frag.shaped {
+        let mut pen = frag.rect.x;
+        let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+        for g in &run.glyphs {
+            let next = pen + g.advance;
+            if (g.cluster as usize) >= start && (g.cluster as usize) < end {
+                lo = lo.min(pen.min(next));
+                hi = hi.max(pen.max(next));
+            }
+            pen = next;
+        }
+        if hi > lo {
+            return Some(band(lo, hi - lo));
+        }
+    }
+    let len = frag.text.len() as f32;
+    if len <= 0.0 {
+        return None;
+    }
+    let x = frag.rect.x + frag.rect.width * (start as f32 / len);
+    let w = frag.rect.width * ((end - start) as f32 / len);
+    Some(band(x, w))
+}
+
 /// Dimensionne récursivement chaque boîte atomique du
 /// sous-arbre inline (bloc bloc, puis coulée comme pièce
 /// incassable). La clé `aid` = ordre pré-ordre : le même

@@ -268,3 +268,58 @@ fn text_align_mesure_les_margin_boxes() {
     // mesure border-box la plaçait à 300).
     assert!((span.rect.x - 280.0).abs() < 0.5, "x={}", span.rect.x);
 }
+
+/// R-35 : `fragment_sub_rect` — sous-rect glyphe exact sur
+/// run shapé (fixture 0.5em → 5 px/car à 10 px), repli
+/// proportionnel sans run, `None` sur tranche invalide.
+#[test]
+fn fragment_sub_rect_glyph_metrics() {
+    use explorer_layout::{fragment_sub_rect, Fragment, Rect};
+    use std::sync::Arc;
+
+    let run =
+        explorer_layout::font::shape(&common::fixture_ttf(), "abcde", 10.0, false).expect("run");
+    let frag = |shaped| Fragment {
+        node: None,
+        owner: 0,
+        text: "abcde".into(),
+        atomic: false,
+        aid: None,
+        rect: Rect {
+            x: 10.0,
+            y: 5.0,
+            width: 25.0,
+            height: 12.0,
+        },
+        baseline: 8.0,
+        shaped,
+        trail_w: 0.0,
+        marg_l: 0.0,
+        marg_r: 0.0,
+        marg_t: 0.0,
+        marg_b: 0.0,
+        style: explorer_css::ComputedStyle::default(),
+    };
+
+    // Tranche "bc" (octets 1..3) : x = 10 + 5 = 15, w = 10.
+    let f = frag(Some(Arc::new(run)));
+    let r = fragment_sub_rect(&f, 1, 3).expect("sous-rect");
+    assert!((r.x - 15.0).abs() < 0.01, "x={} attendu 15", r.x);
+    assert!((r.width - 10.0).abs() < 0.01, "w={} attendu 10", r.width);
+    assert_eq!((r.y, r.height), (5.0, 12.0), "bande de ligne pleine");
+    // Plein texte = plein fragment.
+    let r = fragment_sub_rect(&f, 0, 5).expect("plein");
+    assert!((r.x - 10.0).abs() < 0.01 && (r.width - 25.0).abs() < 0.01);
+
+    // Sans run shapé : repli proportionnel (mêmes bornes).
+    let f2 = frag(None);
+    let r2 = fragment_sub_rect(&f2, 1, 3).expect("repli");
+    assert!((r2.x - 15.0).abs() < 0.01 && (r2.width - 10.0).abs() < 0.01);
+
+    // Hors bornes / vide / atomique → None.
+    assert!(fragment_sub_rect(&f, 3, 3).is_none());
+    assert!(fragment_sub_rect(&f, 2, 9).is_none());
+    let mut fa = frag(None);
+    fa.atomic = true;
+    assert!(fragment_sub_rect(&fa, 0, 2).is_none());
+}

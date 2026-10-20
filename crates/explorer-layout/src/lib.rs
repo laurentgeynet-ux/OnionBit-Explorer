@@ -36,6 +36,6 @@ pub use boxtree::{
 };
 pub use font::{FontMetrics, FontRequest, FontSource, Glyph, ShapedRun};
 pub use hit::hit_test;
-pub use inline::{Fragment, LineBox};
+pub use inline::{fragment_sub_rect, Fragment, LineBox};
 pub use relayout::{relayout_subtree, Relayout};
 pub use text::{Break, Direction, TextRun};

@@ -61,6 +61,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   clip (`display`), collecte poster (`dataurl`),
   équivalence intrinsèque `<video poster>` ≡ `<img>`
   bout en bout (session).
+- **R-35 — métriques de runs pour find** : le surlignage
+  find passe de la boîte `Text` entière au **glyphe près**.
+  API additive `explorer_layout::fragment_sub_rect` :
+  sous-rect d'une tranche d'octets d'un fragment posé —
+  union des cellules des glyphes dont le `cluster` tombe
+  dans la tranche (ordre visuel → exact LTR/RTL, ligatures
+  couvertes entières), bande verticale = hauteur de ligne
+  du fragment ; repli proportionnel aux octets sans run
+  shapé, `None` sur tranche vide ou atome. `find.rs`
+  recherche sur le texte tel qu'**affiché** (fragments
+  concaténés par boîte — un match enjambe fragments,
+  éléments inline internes et retours à la ligne) et
+  groupe les sous-rects par occurrence : le compte et la
+  navigation sont à l'**occurrence** (deux « lorem » dans
+  un même paragraphe = 2, comme Chrome — carve-out du
+  test unitaire session). Repli boîte-entière conservé
+  pour les `Text` rendus hors lignes (valeurs de
+  contrôle), dédupliqué par collecte globale des nœuds
+  couverts (le texte niché `<b>` vit dans les lignes de
+  l'ancêtre). Tests : sous-rect exact au glyphe sur
+  fixture 0.5em, replis proportionnel/invalide, bande
+  peinte 3 glyphes sur 10 vs boîte entière, dédup match
+  niché + groupement occurrence transversale.
 
 ### Fixed
 

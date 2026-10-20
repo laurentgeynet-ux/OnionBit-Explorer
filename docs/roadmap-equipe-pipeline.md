@@ -543,11 +543,23 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (fond noir, chrome audio). Tests : feuilles natives
   boxtree, rect/clip `object-fit`, collecte poster
   `data:`, équivalence intrinsèque bout en bout.
-- [ ] **R-35. Métriques de runs pour find**
-  (résidu 57bis, demande consignée) : API de métriques —
-  sous-rect du match dans une boîte `Text` (offsets glyphe
-  → `Rect`), remplace le surlignage boîte-entière actuel.
-  API publique additive, consommée par `session/find.rs`.
+- [x] **R-35. Métriques de runs pour find** — livré :
+  `fragment_sub_rect` (PIPE, additif) donne le sous-rect
+  d'une tranche d'octets d'un fragment posé — union des
+  cellules des glyphes dont le `cluster` tombe dans la
+  tranche (ordre visuel → LTR/RTL, ligatures), bande =
+  hauteur de ligne du fragment ; repli proportionnel aux
+  octets sans run shapé, `None` sur tranche vide/atome.
+  `session/find.rs` recherche sur le texte **affiché**
+  (fragments concaténés par boîte — les matches enjambent
+  fragments, styles internes et retours à la ligne) et
+  groupe les sous-rects par occurrence (`Vec<Vec<Rect>>` :
+  compte/navigation à l'occurrence, comme Chrome). Repli
+  boîte-entière conservé pour les `Text` hors lignes
+  (valeurs de contrôle), dédupliqué via collecte globale
+  des nœuds couverts. Tests : sous-rect exact au glyphe
+  (fixture 0.5em), replis, bande peinte 3 glyphes sur 10,
+  dédup match niché + groupement transversal.
 - [ ] **R-36. Cache glyphes `paint_text`** (demande
   consignée, perf raster) : le raster ne re-shape pas
   (les `ShapedRun` du layout sont réutilisés) mais re-
