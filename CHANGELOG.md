@@ -168,6 +168,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-41 — flex colonne : base `%` et `grow` en hauteur
+  indéfinie** (`explorer-layout`) : bug site-réel au
+  triage `site_smoke` — le pied de rust-lang.org se
+  peignait sur le héros. `body{flex column}` +
+  `main{flex:1}` : `flex-basis:0%` contre taille main
+  indéfinie résolvait `0` au lieu de `content` (§9.2) et
+  l'espace libre indéfini ne distribuait rien (§9.9.2 :
+  `grow` → max-content) — `main` contribuait 0 → footer
+  posé à l'origine de main. Livré : `%` `flex-basis`/
+  `height` contre indéfini → `content` ; `grow` en
+  indéfini → hauteur mesurée. `shot` après fix : page
+  complète enchaînée, footer en bas.
 - **R-40 — ratio intrinsèque des remplacés (§10.6.2)**
   (`explorer-layout`) : bug site-réel au triage
   `site_smoke` — la bande blanche verticale de

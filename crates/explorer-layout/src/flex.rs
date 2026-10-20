@@ -76,7 +76,10 @@ pub(crate) fn gap_px(st: &ComputedStyle, row: bool, basis: f32, fs: f32, ctx: &B
 }
 
 /// Résout les facteurs `flex-*` d'un enfant pour l'axe `row`.
-fn item_flex(c: &LayoutBox, row: bool, cb: f32, fs: f32, ctx: &BlockCtx) -> ItemFlex {
+/// `cb_def` = la taille main du conteneur est définie ; une
+/// base en `%` ne se résout que si elle l'est (§9.2 : contre
+/// une taille indéfinie, la base `%` vaut `content`).
+fn item_flex(c: &LayoutBox, row: bool, cb: f32, cb_def: bool, fs: f32, ctx: &BlockCtx) -> ItemFlex {
     let st = &c.style;
     let (mut grow, mut shrink, mut basis_raw) = (
         prop_num(st, "flex-grow"),
@@ -113,12 +116,21 @@ fn item_flex(c: &LayoutBox, row: bool, cb: f32, fs: f32, ctx: &BlockCtx) -> Item
         }
     }
     let basis_prop = if row { "width" } else { "height" };
+    // §9.2/§10.5 : une longueur en `%` sans base définie
+    // résout `auto`/`content`, pas `0`.
+    let len_px = |v: &str| {
+        if cb_def || !v.trim_end().ends_with('%') {
+            raw_length_px(v, cb, fs, ctx)
+        } else {
+            None
+        }
+    };
     let base = basis_raw
         .as_deref()
         .filter(|b| !b.eq_ignore_ascii_case("auto") && !b.eq_ignore_ascii_case("content"))
-        .and_then(|b| raw_length_px(b, cb, fs, ctx))
+        .and_then(len_px)
         .or_else(|| crate::intrinsic::intrinsic_size_px(st, "flex-basis", c, cb, fs, ctx))
-        .or_else(|| css_px(st, basis_prop, cb, fs, ctx))
+        .or_else(|| st.get(basis_prop).and_then(len_px))
         .or_else(|| crate::intrinsic::intrinsic_size_px(st, basis_prop, c, cb, fs, ctx))
         .or_else(|| c.intrinsic.map(|i| if row { i.0 } else { i.1 }));
     ItemFlex {
@@ -304,7 +316,7 @@ pub(crate) fn flow_flex_children(
         for &i in &order_idx {
             let c = &bx.children[i];
             let cfs = font_size_px(&c.style, fs, ctx);
-            let mut f = item_flex(c, true, main_cb, cfs, ctx);
+            let mut f = item_flex(c, true, main_cb, true, cfs, ctx);
             if f.base.is_none() {
                 // R-3 : mesure max-content réelle du contenu
                 // (était : texte direct seulement).
@@ -641,7 +653,7 @@ pub(crate) fn flow_flex_children(
         for (k, &i) in order_idx.iter().enumerate() {
             let c = &mut bx.children[i];
             let cfs = font_size_px(&c.style, fs, ctx);
-            items.push(item_flex(c, false, main_h, cfs, ctx));
+            items.push(item_flex(c, false, main_h, h_def.is_some(), cfs, ctx));
             main_auto[k] = (
                 c.style.get("margin-top") == Some("auto"),
                 c.style.get("margin-bottom") == Some("auto"),
@@ -697,16 +709,17 @@ pub(crate) fn flow_flex_children(
             );
         }
         let mut bases: Vec<f32> = Vec::with_capacity(n);
+        // Hauteur de contenu mesurée (passe 0) — taille cible
+        // d'un item `grow` quand l'espace libre est indéfini.
+        let mut measured: Vec<f32> = Vec::with_capacity(n);
         let mut crosses: Vec<f32> = vec![0.0; n];
         let mut cross_margins: Vec<(f32, f32)> = vec![(0.0, 0.0); n];
         for (k, &i) in order_idx.iter().enumerate() {
             let c = &bx.children[i];
             let cfs = font_size_px(&c.style, fs, ctx);
-            bases.push(
-                items[k]
-                    .base
-                    .unwrap_or_else(|| (c.rect.height - extras[k]).max(0.0)),
-            );
+            let m = (c.rect.height - extras[k]).max(0.0);
+            measured.push(m);
+            bases.push(items[k].base.unwrap_or(m));
             let ml = side_px(&c.style, "margin-left", content_w, cfs, ctx, 0.0);
             let mr = side_px(&c.style, "margin-right", content_w, cfs, ctx, 0.0);
             cross_margins[k] = (ml, mr);
@@ -755,7 +768,22 @@ pub(crate) fn flow_flex_children(
             };
             let total_grow: f32 = line.iter().map(|&k| items[k].grow).sum();
             let mut sizes_l: Vec<f32> = Vec::with_capacity(line.len());
-            if free > 0.0 && total_grow > 0.0 {
+            if h_def.is_none() {
+                // §9.9.2 : espace libre indéfini — les items à
+                // `grow` positif prennent leur taille de
+                // contenu mesurée (un `flex:1`/`flex-basis:0px`
+                // garde sa hauteur naturelle au lieu de
+                // s'effondrer et de recouvrir l'item suivant —
+                // terrain : pied de rust-lang.org peint sur le
+                // héros). Les autres gardent leur base.
+                for &k in line {
+                    sizes_l.push(if items[k].grow > 0.0 {
+                        measured[k]
+                    } else {
+                        bases[k]
+                    });
+                }
+            } else if free > 0.0 && total_grow > 0.0 {
                 for &k in line {
                     sizes_l.push(bases[k] + free * items[k].grow / total_grow);
                 }

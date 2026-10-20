@@ -761,6 +761,30 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   bridant → h dérivée, height → w dérivée, deux axes
   explicites inchangés, forme réelle `<a><img>` atomique
   inline portrait 480×511 → ~215×229 au lieu de 215×511).
+- [x] **R-41. Flex colonne : base `%` et `grow` en hauteur
+  indéfinie** (résidu terrain, triage `site_smoke`) —
+  **livré** : le pied de rust-lang.org se peignait **sur**
+  le héros — `body{display:flex;flex-direction:column;
+  min-height:100vh}` + `main{flex:1}` : le shorthand
+  pose `flex-basis:0%`, qui contre une taille main
+  indéfinie (`min-height` non résolu → `height:auto`)
+  résolvait `0` au lieu de `content` (§9.2) ; l'espace
+  libre indéfini ne distribuait rien (§9.9.2 : items à
+  `grow` → max-content). `main` contribuait donc 0 au
+  `pen_y` → footer posé à l'origine de main = overlap
+  complet du héros. Livré : `item_flex` reçoit `cb_def`
+  (taille main définie) — base `flex-basis`/`height` en
+  `%` contre indéfini → `content` ; colonne `h_def` absent
+  → `grow>0` → hauteur mesurée (passe 0). Vérif terrain :
+  dump boxtree → footer y=5226 (après main) vs 316
+  (sur main) avant ; `shot` = page complète enchaînée
+  nav→héros→sections→pied. Tests : 3 cas `modern`
+  (`flex:1` indéfini, `flex-basis:50%` indéfini,
+  `flex:1 1 0px` indéfini). Reste sur ce site : unités
+  `vh`/`vw` jamais résolues (`min-height:100vh` ignoré —
+  invisible ici car contenu > viewport), marges `<p>`
+  qui collapse à travers l'item flex, icônes sociales
+  empilées.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

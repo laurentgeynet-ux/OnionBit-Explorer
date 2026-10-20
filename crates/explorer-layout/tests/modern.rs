@@ -646,3 +646,55 @@ fn table_height_excedent_distribue() {
     // rang2 = 100 - 30 = 70 (rang1 fixé à 30).
     assert!(approx(b.rect.height, 70.0), "{}", b.rect.height);
 }
+
+#[test]
+fn flex_column_grow_espace_indefini_garde_le_contenu() {
+    // R-41 — terrain rust-lang.org : `body{display:flex;
+    // flex-direction:column}` sans hauteur définie +
+    // `main{flex:1}` → basis `0%` du shorthand. La base `%`
+    // contre une taille main indéfinie vaut `content` (§9.2)
+    // et l'espace libre indéfini fait croître l'item à son
+    // max-content (§9.9.2) : le footer suivant ne doit PAS
+    // recouvrir main.
+    let (dom, bx) = laid(
+        "<!doctype html><nav></nav><main><p>x</p></main><footer></footer>",
+        "section{display:flex;flex-direction:column} nav{height:100px} \
+         main{flex:1} p{height:40px;margin:0} footer{height:60px}",
+    );
+    // Le conteneur est `section` — retrouvé par by_tag.
+    let m = find(&bx, by_tag(&dom, "main"));
+    let f = find(&bx, by_tag(&dom, "footer"));
+    assert!(approx(m.rect.y, 100.0), "main.y={}", m.rect.y);
+    assert!(approx(m.rect.height, 40.0), "main.h={}", m.rect.height);
+    assert!(approx(f.rect.y, 140.0), "footer.y={}", f.rect.y);
+}
+
+#[test]
+fn flex_column_basis_pct_taille_indefinie_vaut_contenu() {
+    // R-41 — §9.2 : `flex-basis:50%`/`height:50%` contre une
+    // colonne sans hauteur définie → `content`, pas `0`.
+    let (dom, bx) = laid(
+        "<!doctype html><main><p>x</p></main><footer></footer>",
+        "section{display:flex;flex-direction:column} \
+         main{flex-basis:50%} p{height:40px;margin:0} footer{height:10px}",
+    );
+    let m = find(&bx, by_tag(&dom, "main"));
+    let f = find(&bx, by_tag(&dom, "footer"));
+    assert!(approx(m.rect.height, 40.0), "main.h={}", m.rect.height);
+    assert!(approx(f.rect.y, 40.0), "footer.y={}", f.rect.y);
+}
+
+#[test]
+fn flex_column_basis_px_grow_espace_indefini() {
+    // R-41 — §9.9.2 : `flex-basis:0px` explicite + `grow` en
+    // espace libre indéfini → l'item prend son max-content.
+    let (dom, bx) = laid(
+        "<!doctype html><main><p>x</p></main><footer></footer>",
+        "section{display:flex;flex-direction:column} \
+         main{flex:1 1 0px} p{height:40px;margin:0} footer{height:10px}",
+    );
+    let m = find(&bx, by_tag(&dom, "main"));
+    let f = find(&bx, by_tag(&dom, "footer"));
+    assert!(approx(m.rect.height, 40.0), "main.h={}", m.rect.height);
+    assert!(approx(f.rect.y, 40.0), "footer.y={}", f.rect.y);
+}
