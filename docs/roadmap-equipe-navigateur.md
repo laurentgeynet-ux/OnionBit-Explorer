@@ -667,16 +667,17 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `checkValidity`/`setCustomValidity`/`validationMessage`
   via JS, Enter implicite → POST urlencoded correct,
   multipart boundary cohérent.
-- [ ] **Étape 64. `navigated` rapporté avant commit de
-  l'URL** (terrain mission 16 — séquencement) : premier
-  `Enter` dans un input → événement `navigated` émis alors
-  que `tab_url` reste sur l'ancienne page ; le commit
-  n'apparaît qu'au second Enter. L'API rapporte une
-  intention comme un état commis — l'UI afficherait une
-  URL jamais atteinte si la nav échoue ensuite (observé :
-  fetch mort derrière → on reste sur `/`). Séquencer :
-  émettre `navigated` au commit effectif, ou typer le
-  statut « en vol ».
+- [x] **Étape 64. `navigated` rapporté au commit
+  effectif** (terrain mission 16 — séquencement) : les
+  drains `drain_script_nav`/`drain_navs_shared`
+  comptabilisent les navigations **commises** (`is_ok`,
+  y compris bfcache/fragment — un fetch mort n'en est
+  pas une) ; `handle_input` et `POST /input` dégradent
+  `Navigated` en `Edited` quand zéro nav n'a abouti —
+  l'API ne rapporte plus une intention comme un état
+  commis. `drain_navs_shared` retourne `usize` (appelants
+  ignoraient le booléen) ; FFI `> 0`. Test : soumission
+  vers cible 404 → `Edited`, URL inchangée.
 - [ ] **Étape 65. `doc_h` clampé à 2¹⁴ masque la hauteur
   réelle** (terrain mission 16 — mesure) : sur un document
   plus haut que 16 384 px (`heavy.html`), `doc_h` rapporte

@@ -403,6 +403,10 @@ async fn input(
     // Idem pour les resyncs DOM rapportées par les
     // listeners : enfilées sous verrou, appliquées en
     // `spawn_blocking` par `drain_applies_shared` (55h).
+    // `navigated` n'est rapporté qu'au commit effectif
+    // (étape 64) : l'outcome reflète une intention — si la
+    // nav drainée échoue (fetch mort), zéro commit →
+    // `edited` plutôt qu'une page jamais atteinte.
     let outcome = {
         let mut session = st.session.lock().await;
         match session.handle_input_now(id, ev) {
@@ -411,7 +415,11 @@ async fn input(
         }
     };
     drain_applies_shared(&st.session, id).await;
-    drain_navs_shared(&st.session, id).await;
+    let committed = drain_navs_shared(&st.session, id).await;
+    let outcome = match outcome {
+        InputOutcome::Navigated if committed == 0 => InputOutcome::Edited,
+        o => o,
+    };
     Json(match outcome {
         InputOutcome::Ignored => serde_json::json!({ "result": "ignored" }),
         InputOutcome::Scrolled { scroll_y } => {

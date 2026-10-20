@@ -9,6 +9,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 64 — `navigated` rapporté au commit effectif**
+  (`explorer-core` + `explorer-api`) : les drains de nav
+  (`drain_script_nav`, `drain_navs_shared`) comptent les
+  navigations commises (`is_ok` — bfcache et fragments
+  inclus) ; `handle_input` et `POST /api/tabs/{id}/input`
+  dégradent `Navigated` en `Edited` quand la nav enfilée
+  échoue — plus de « navigated » vers une page jamais
+  atteinte (fetch mort → `edited`, URL inchangée).
+
 - **Étape 63 — popup `<select>` : étiquettes en vrai
   texte** (`explorer-core`) : les options figées sont
   shapées via `explorer_layout::font::shape` + les fontes

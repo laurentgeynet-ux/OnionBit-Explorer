@@ -680,23 +680,27 @@ impl Session {
     /// feuille du graphe d'appels (seul `history_move`,
     /// boxé, boucle pour la taille du future). `true` si au
     /// moins une navigation a été appliquée.
-    pub async fn drain_script_nav(&mut self, tab: TabId) -> bool {
+    /// Draine `pending_nav` — renvoie le nombre de
+    /// navigations **commises** (étape 64 : les appelants
+    //  distinguent intention et commit effectif — un fetch
+    /// mort ne rapporte pas « navigated »).
+    pub async fn drain_script_nav(&mut self, tab: TabId) -> usize {
         const MAX_NAV_HOPS: u8 = 8;
-        let mut applied = false;
+        let mut committed = 0usize;
         for _ in 0..MAX_NAV_HOPS {
             self.collect_script_navs(tab);
             let Some(act) = self.pop_pending_nav(tab) else {
                 break;
             };
-            match act {
-                DrainAct::Req(req, push) => {
-                    let _ = self.navigate_request(tab, *req, push).await;
-                }
+            let ok = match act {
+                DrainAct::Req(req, push) => self.navigate_request(tab, *req, push).await.is_ok(),
                 DrainAct::Go(0) => {
                     // `history.go(0)` = rechargement de
                     // l'entrée courante (spec HTML).
                     if let Some(u) = self.tabs.get(&tab).and_then(|t| t.url.clone()) {
-                        let _ = self.navigate_to(tab, u).await;
+                        self.navigate_to(tab, u).await.is_ok()
+                    } else {
+                        false
                     }
                 }
                 DrainAct::Go(d) => {
@@ -705,12 +709,12 @@ impl Session {
                     // cassée ici (taille + inférence `Send`).
                     let mv: std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send + '_>> =
                         Box::pin(self.history_move(tab, d));
-                    let _ = mv.await;
+                    mv.await.is_ok()
                 }
-            }
-            applied = true;
+            };
+            committed += usize::from(ok);
         }
-        applied
+        committed
     }
 
     /// `NetRequest::Fetch` → `Request` émettable (étape 51),

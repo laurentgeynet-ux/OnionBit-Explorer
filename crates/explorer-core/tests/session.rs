@@ -1354,6 +1354,38 @@ async fn select_popup_paints_option_text() {
     assert_ne!(s.frame_png(id).unwrap(), before);
 }
 
+/// Étape 64 — `Navigated` n'est rapporté qu'au **commit
+/// effectif** : une soumission dont le fetch meurt (404)
+/// laisse l'URL inchangée — l'outcome dégrade en `Edited`
+/// (avant : l'intention était rapportée comme un état
+/// commis — l'UI affichait une URL jamais atteinte).
+#[tokio::test]
+async fn failed_submit_reports_edited_not_navigated() {
+    let (mut s, t) = test_session();
+    t.route("/sl", 200, PAGE_SEL_FORM);
+    // `/sgo` non routé → 404 → la nav échoue.
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/sl").await.unwrap();
+    // Focus le champ texte puis Enter → soumission implicite.
+    s.handle_input(id, InputEvent::Click { x: 6.0, y: 6.0 })
+        .await
+        .unwrap();
+    let out = s
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "Enter".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited, "{out:?}");
+    assert_eq!(
+        s.tab_info(id).and_then(|t| t.url).as_deref(),
+        Some("http://h.test/sl")
+    );
+}
+
 /// `Escape` referme sans choix — `s=o1` à la soumission.
 #[tokio::test]
 async fn select_popup_escape_keeps_default() {

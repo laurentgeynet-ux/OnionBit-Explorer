@@ -28,10 +28,19 @@ impl Session {
         tab: TabId,
         ev: InputEvent,
     ) -> Result<InputOutcome, CoreError> {
+        // `Navigated` n'est rapporté qu'au commit effectif
+        // (étape 64) : l'outcome de `handle_input_now`
+        // reflète une **intention** (nav enfilée) — si la
+        // nav drainée échoue (fetch mort), zéro commit et
+        // l'on dégrade honnêtement en `Edited` plutôt que
+        // d'annoncer une page jamais atteinte.
         let out = self.handle_input_now(tab, ev)?;
         self.drain_applies();
-        self.drain_script_nav(tab).await;
-        Ok(out)
+        let committed = self.drain_script_nav(tab).await;
+        Ok(match out {
+            InputOutcome::Navigated if committed == 0 => InputOutcome::Edited,
+            o => o,
+        })
     }
 
     /// Corps synchrone de [`Self::handle_input`] (étape

@@ -477,7 +477,7 @@ pub unsafe extern "C" fn explorer_tick(h: *mut ExplorerHandle, tab: u64) -> i32 
         // synchrone (l'hôte FFI n'a pas de battement).
         Some(h) => match h.session.tick_animations(tab) {
             Ok(worked) => {
-                if h.rt.block_on(h.session.drain_script_nav(tab)) {
+                if h.rt.block_on(h.session.drain_script_nav(tab)) > 0 {
                     1
                 } else {
                     i32::from(worked)

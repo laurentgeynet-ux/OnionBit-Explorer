@@ -144,22 +144,22 @@ pub async fn history_move_shared(
 /// **hors verrou** : la boucle bornée `MAX_NAV_HOPS`
 /// alterne collecte sous verrou court et conduite libre —
 /// `form.submit()`, `location=` et les clics de liens n'en
-/// gèlent plus l'API non plus. `true` si au moins une
-/// navigation a été appliquée.
-pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -> bool {
+/// gèlent plus l'API non plus.
+/// Renvoie le nombre de navigations **commises** (étape
+/// 64 : les appelants distinguent intention et commit
+/// effectif — un fetch mort ne rapporte pas « navigated »).
+pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -> usize {
     const MAX_NAV_HOPS: u8 = 8;
-    let mut applied = false;
+    let mut committed = 0usize;
     for _ in 0..MAX_NAV_HOPS {
         let act = {
             let mut s = sess.lock().await;
             s.collect_script_navs(tab);
             s.pop_pending_nav(tab)
         };
-        match act {
+        let ok = match act {
             None => break,
-            Some(DrainAct::Req(req, push)) => {
-                let _ = navigate_shared(sess, tab, *req, push).await;
-            }
+            Some(DrainAct::Req(req, push)) => navigate_shared(sess, tab, *req, push).await.is_ok(),
             Some(DrainAct::Go(0)) => {
                 // `history.go(0)` = rechargement de l'entrée
                 // courante (spec HTML).
@@ -168,16 +168,18 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
                     s.tabs.get(&tab).and_then(|t| t.url.clone())
                 };
                 if let Some(u) = url {
-                    let _ = navigate_shared(sess, tab, Request::get(u), false).await;
+                    navigate_shared(sess, tab, Request::get(u), false)
+                        .await
+                        .is_ok()
+                } else {
+                    false
                 }
             }
-            Some(DrainAct::Go(d)) => {
-                let _ = history_move_shared(sess, tab, d).await;
-            }
-        }
-        applied = true;
+            Some(DrainAct::Go(d)) => history_move_shared(sess, tab, d).await.is_ok(),
+        };
+        committed += usize::from(ok);
     }
-    applied
+    committed
 }
 
 /// Pompe JS partagée (étape 53f) — même contrat qu'un tour de
