@@ -79,6 +79,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Étape 68 — find : surlignage invisible sans
+  déplacement** (`explorer-core`) : occurrence déjà dans
+  le viewport → `scroll_to_y` court-circuitait repaint +
+  `FrameInvalidated` → les `FillRect` de surlignage
+  restaient calculés mais jamais rasterisés (0 px sur
+  page courte). `scroll_to_y` rapporte désormais le
+  déplacement ; `find_scroll` repeint quand la position
+  n'a pas bougé — la surbrillance est un changement de
+  frame indépendant du scroll.
+
 - **Étape 55e (rouvert) — animations figées sous pompe
   partagée** (`explorer-core`) : `pump_timers_shared`
   rendait `0` dès l'absence de moteur JS détachable —

@@ -134,6 +134,17 @@ impl Session {
             return;
         };
         let vh = self.viewport.1;
-        let _ = self.scroll_to_y(tab, (y - vh / 3.0).max(0.0));
+        // Le surlignage est un changement de frame
+        // indépendant du déplacement : occurrence déjà dans
+        // le viewport → `scroll_to_y` ne repeint pas, on le
+        // fait quand même (étape 68 — sinon les `FillRect`
+        // restent calculés mais jamais rasterisés).
+        let moved = self
+            .scroll_to_y(tab, (y - vh / 3.0).max(0.0))
+            .unwrap_or(false);
+        if !moved {
+            let _ = self.repaint(tab);
+            self.emit_invalidated(tab);
+        }
     }
 }

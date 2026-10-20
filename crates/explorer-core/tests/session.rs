@@ -4372,3 +4372,18 @@ async fn video_poster_data_url_paints() {
     s.navigate(b, "http://h.test/s").await.unwrap();
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
+
+/// Étape 68 — occurrence déjà dans le viewport : le scroll
+/// ne bouge pas mais la surbrillance doit quand même être
+/// rasterisée (avant : FillRect calculés, jamais peints).
+#[tokio::test]
+async fn find_highlight_repaints_without_scroll() {
+    let (mut s, t) = test_session();
+    t.route("/f", 200, "<html><body><p>lorem ipsum</p></body></html>");
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/f").await.unwrap();
+    let before = s.frame_png(a);
+    assert_eq!(s.find_in_page(a, "lorem"), 1);
+    let after = s.frame_png(a);
+    assert_ne!(before, after, "surbrillance rasterisée sans déplacement");
+}

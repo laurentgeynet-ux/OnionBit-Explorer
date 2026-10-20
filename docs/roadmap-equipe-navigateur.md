@@ -707,7 +707,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   sur l'URL pré-redirect. `RedirectTransport` (net) connaît
   la cible — faire remonter l'URL finale dans la réponse ou
   un champ `Request` résolu au commit.
-- [ ] **Étape 68. Find : surlignage absent quand le scroll
+- [x] **Étape 68. Find : surlignage absent quand le scroll
   ne bouge pas** (terrain mission 17, `session/find.rs` +
   `scroll_to_y`) : `find_in_page` → `find_scroll` →
   `scroll_to_y` ; si l'occurrence est déjà dans le
@@ -716,7 +716,10 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   rasterisés (0 px sur page courte ; 2 470 px corrects
   dès que le scroll bouge). Fix : repeindre même à scroll
   inchangé — la surbrillance est un changement de frame
-  indépendant du déplacement.
+  indépendant du déplacement. Livré : `scroll_to_y` renvoie
+  `bool` déplacé (repaint fait) ; `find_scroll` repeint +
+  invalide quand la position n'a pas bougé. Régression :
+  `find_highlight_repaints_without_scroll`.
 
 ## Piste JS (JS-C26+) — spécialiste `dillo-js`
 

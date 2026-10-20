@@ -212,19 +212,23 @@ impl Session {
     /// Scroll absolu borné `[0, doc_h − viewport]` avec
     /// repaint et `FrameInvalidated` — variante absolue de
     /// `scroll_by` pour la navigation fragment (56d).
-    pub(crate) fn scroll_to_y(&mut self, tab: TabId, y: f32) -> Result<(), CoreError> {
+    /// Retour : `true` si la position a bougé (repaint fait) —
+    /// l'appelant peut repeindre lui-même sinon quand il a un
+    /// changement de frame indépendant du déplacement (find,
+    /// étape 68).
+    pub(crate) fn scroll_to_y(&mut self, tab: TabId, y: f32) -> Result<bool, CoreError> {
         {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
             let max = (entry.doc_h - self.viewport.1).max(0.0);
             let next = y.clamp(0.0, max);
             if (next - entry.scroll_y).abs() < f32::EPSILON {
-                return Ok(());
+                return Ok(false);
             }
             entry.scroll_y = next;
         }
         self.repaint(tab)?;
         self.emit_invalidated(tab);
-        Ok(())
+        Ok(true)
     }
 
     /// `navigate` vers l'URL de l'entrée **forward** (étape
