@@ -9,6 +9,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 63 — popup `<select>` : étiquettes en vrai
+  texte** (`explorer-core`) : les options figées sont
+  shapées via `explorer_layout::font::shape` + les fontes
+  de la session (`sans-serif`, ~¾ de ligne, tronquées
+  `...` à la largeur) et peintes en `DisplayItem::Text` —
+  avant : `Placeholder` gris sans glyphe, le surlignage
+  clavier restait invisible. Baseline centrée, encre
+  `#202020`, blanc sur ligne sélectionnée.
+
 - **Étape 66 — `SameSite` appliqué à l'envoi**
   (`explorer-net` + `explorer-core` + `explorer-api`) :
   le flag était stocké mais `CookieTransport` renvoyait

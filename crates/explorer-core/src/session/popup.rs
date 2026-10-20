@@ -6,6 +6,7 @@
 //! la display list (ADR-0014).
 
 use explorer_css::value::Color;
+use explorer_layout::font::{self, FontRequest, FontSource};
 use explorer_layout::Rect;
 use explorer_render::{BorderStyle, DisplayItem, DisplayList};
 
@@ -30,6 +31,9 @@ pub(crate) struct SelectPopup {
 /// Lignes visibles du popup `<select>` — le reste des
 /// options est tronqué (MVP, pas de défilement interne).
 pub(crate) const MAX_POPUP_ROWS: usize = 8;
+
+/// Retrait horizontal du texte dans une ligne du popup.
+const PAD_X: f32 = 5.0;
 
 /// Rectangle du popup ouvert (coords document) : sous le
 /// contrôle, basculé au-dessus quand il déborderait la page.
@@ -80,9 +84,18 @@ pub(crate) fn point_in(r: &Rect, x: f32, y: f32) -> bool {
 }
 
 /// Overlay du popup `<select>` en fin de display list —
-/// fond opaque + bordure, lignes `Placeholder` (étiquette
-/// rendue), ligne sélectionnée ou survolée teintée.
-pub(crate) fn append_select_popup(list: &mut DisplayList, pop: &SelectPopup, vw: f32, doc_h: f32) {
+/// fond opaque + bordure, étiquettes d'options en vrai
+/// texte shapé (étape 63 — `Placeholder` ne peignait qu'un
+/// gris translucide), ligne sélectionnée/survolée teintée.
+/// `fonts` résout la fonte UI (`sans-serif`) — un label
+/// trop long est tronqué avec `...` plutôt que déborder.
+pub(crate) fn append_select_popup(
+    list: &mut DisplayList,
+    pop: &SelectPopup,
+    vw: f32,
+    doc_h: f32,
+    fonts: &dyn FontSource,
+) {
     if pop.options.is_empty() {
         return;
     }
@@ -111,6 +124,12 @@ pub(crate) fn append_select_popup(list: &mut DisplayList, pop: &SelectPopup, vw:
         b: 255,
         a: 255,
     };
+    let ink = Color {
+        r: 32,
+        g: 32,
+        b: 32,
+        a: 255,
+    };
     list.items
         .push(DisplayItem::FillRect { rect, color: white });
     list.items.push(DisplayItem::Border {
@@ -119,6 +138,16 @@ pub(crate) fn append_select_popup(list: &mut DisplayList, pop: &SelectPopup, vw:
         colors: [edge; 4],
         styles: [BorderStyle::Solid; 4],
     });
+    // Police chrome du popup : `sans-serif` ~¾ de ligne,
+    // bornée — lisible sans dépendre du style de la page.
+    let size_px = (pop.row_h * 0.75).clamp(9.0, 16.0);
+    let freq = FontRequest {
+        families: vec!["sans-serif".to_string()],
+        weight: 400,
+        italic: false,
+    };
+    let data = fonts.font_data(&freq);
+    let avail = (rect.width - 2.0 * PAD_X).max(0.0);
     for (i, (label, selected)) in pop.options.iter().take(MAX_POPUP_ROWS).enumerate() {
         // `i < MAX_POPUP_ROWS` — conversion exacte.
         #[allow(clippy::cast_precision_loss)]
@@ -139,9 +168,45 @@ pub(crate) fn append_select_popup(list: &mut DisplayList, pop: &SelectPopup, vw:
                 color: hov_bg,
             });
         }
-        list.items.push(DisplayItem::Placeholder {
-            rect: row,
-            label: label.clone(),
+        let Some(run) = data
+            .as_deref()
+            .and_then(|d| shape_fitted(d, label, size_px, avail))
+        else {
+            continue;
+        };
+        // Baseline centrée dans la ligne.
+        let lh = run.metrics.line_height();
+        let baseline = row.y + (row.height - lh).max(0.0) / 2.0 + run.metrics.ascent;
+        list.items.push(DisplayItem::Text {
+            origin: (row.x + PAD_X, baseline),
+            run,
+            font: freq.clone(),
+            color: if *selected { white } else { ink },
+            size_px,
         });
     }
+}
+
+/// Shape `text` à `size_px` en tronquant à `avail` px de
+/// large — le suffixe `...` remplace la queue (ASCII, le
+/// glyphe `…` n'est pas garanti dans la fonte). `None` si
+/// la fonte est illisible.
+fn shape_fitted(font_data: &[u8], text: &str, size_px: f32, avail: f32) -> Option<font::ShapedRun> {
+    let run = font::shape(font_data, text, size_px, false)?;
+    if run.advance <= avail {
+        return Some(run);
+    }
+    // Tronquage : retire des caractères jusqu'à tenir
+    // (étiquettes courtes — le re-shape itératif est borné
+    // par la longueur du label).
+    let mut t = text.to_string();
+    while !t.is_empty() {
+        t.pop();
+        let cand = format!("{t}...");
+        let r = font::shape(font_data, &cand, size_px, false)?;
+        if r.advance <= avail {
+            return Some(r);
+        }
+    }
+    font::shape(font_data, "...", size_px, false).filter(|r| r.advance <= avail)
 }

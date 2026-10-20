@@ -460,7 +460,7 @@ pub(crate) fn repaint_payload(p: &mut PaintPayload, ctx: &ApplyCtx) -> Result<()
         }
     }
     if let Some(pop) = &p.popup {
-        append_select_popup(&mut list, pop, vw, p.doc_h);
+        append_select_popup(&mut list, pop, vw, p.doc_h, &ctx.fonts);
     }
     let frame_cap = MAX_FRAME_DIM / ctx.scale.max(f32::EPSILON);
     if list.height > frame_cap {

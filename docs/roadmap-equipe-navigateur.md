@@ -649,20 +649,24 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   et `--x=v`) sont honorés en surcharge des variables ;
   `--help` affiche l'usage ; tout flag inconnu ou valeur
   invalide sort 2 + usage — parser maison, zéro dépendance.
-- [ ] **Étape 63. Popup `<select>` : options non peintes +
-  clavier inerte** (terrain mission 16, repro `repros/
-  form.html` — feature livrée en 54 mais inutilisable en
-  vrai) : l'overlay s'ouvre bien **en fin de display list**
-  au-dessus du contenu, mais deux défauts : (1) **zéro
-  pixel de texte** dans la boîte — les labels d'options
-  figées ne sont jamais émis (`FillRect` de fond seul) ;
-  (2) `Arrow↓`/`Enter` retournent `edited` sans changer la
-  sélection affichée — seul `Escape` produit un effet
-  (fermeture). Deux sous-défauts, même fixture. Reste de
-  l'étape 54 vérifié sain : `required` bloque la nav +
-  `invalid`, `checkValidity`/`setCustomValidity`/
-  `validationMessage` via JS, Enter implicite → POST
-  urlencoded correct, multipart boundary cohérent.
+- [x] **Étape 63. Popup `<select>` : options peintes en
+  vrai texte** (terrain mission 16, repro `repros/
+  form.html`) : l'overlay s'ouvrait en fin de display list
+  mais n'émettait que des `Placeholder` gris translucides —
+  zéro glyphe, le surlignage flèches/Enter était sans
+  retour visuel. Livré : `append_select_popup` shape
+  chaque étiquette via `explorer_layout::font::shape` +
+  `SharedFonts` (`sans-serif` ~¾ de ligne borné 9–16 px,
+  encre `#202020`, blanc sur ligne sélectionnée), tronqué
+  à la largeur avec `...` ; la baseline est centrée dans
+  la ligne. Le clavier était logique-correct (choix et
+  soumission déjà testés) — c'est l'absence de texte qui
+  rendait le retour invisible ; `ArrowDown` repeint le
+  bandeau de surlignage (test pixel). Reste de l'étape 54
+  vérifié sain : `required` bloque la nav + `invalid`,
+  `checkValidity`/`setCustomValidity`/`validationMessage`
+  via JS, Enter implicite → POST urlencoded correct,
+  multipart boundary cohérent.
 - [ ] **Étape 64. `navigated` rapporté avant commit de
   l'URL** (terrain mission 16 — séquencement) : premier
   `Enter` dans un input → événement `navigated` émis alors

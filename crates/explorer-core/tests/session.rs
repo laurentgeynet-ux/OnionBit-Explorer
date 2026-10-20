@@ -1306,6 +1306,54 @@ async fn select_popup_keyboard_navigates() {
     assert_eq!(t.last().unwrap().1, "/sgo?s=o2");
 }
 
+/// Étape 63 — le popup peint les **étiquettes** des options
+/// en vrai texte (avant : `Placeholder` = boîte grise sans
+/// glyphe — zéro pixel d'encre). Des pixels sombres doivent
+/// apparaître dans les lignes du popup ouvert.
+#[tokio::test]
+async fn select_popup_paints_option_text() {
+    let (mut s, t) = test_session();
+    t.route("/sl", 200, PAGE_SEL_FORM);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/sl").await.unwrap();
+    // Clic sur le select → popup ouvert.
+    s.handle_input(id, InputEvent::Click { x: 10.0, y: 6.0 })
+        .await
+        .unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    // Le popup vit sous le contrôle (≈y 15..110, x 0..160) —
+    // encre #202020 sur fond blanc : compter les pixels
+    // franchement sombres (border 118 gris et placeholder
+    // ~0xcc clair sont exclus par <80).
+    let (fw, fh) = (fw as usize, fh as usize);
+    let mut dark = 0usize;
+    for row in 15..fh.min(110) {
+        for col in 0..fw.min(160) {
+            let p = &px[(row * fw + col) * 4..][..4];
+            if p[0] < 80 && p[1] < 80 && p[2] < 80 {
+                dark += 1;
+            }
+        }
+    }
+    assert!(
+        dark > 50,
+        "les étiquettes du popup doivent peindre de l'encre (pixels sombres : {dark})"
+    );
+    // `ArrowDown` déplace le surlignage — la frame change
+    // (retour visuel du clavier, aussi vérifié en valeur
+    // par `select_popup_keyboard_navigates`).
+    let before = s.frame_png(id).unwrap();
+    s.handle_input(
+        id,
+        InputEvent::Key {
+            key: "ArrowDown".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_ne!(s.frame_png(id).unwrap(), before);
+}
+
 /// `Escape` referme sans choix — `s=o1` à la soumission.
 #[tokio::test]
 async fn select_popup_escape_keeps_default() {
