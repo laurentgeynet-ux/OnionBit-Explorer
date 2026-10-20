@@ -1238,6 +1238,21 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Instrument livré :
   `scripts/daemon_watch.ps1` — cycles
   répétés sur daemon dédié + CSV RSS.
+  **Attribution probable (3e mort)** :
+  le `cmd.exe` parent WMI ouvrait une
+  fenêtre console **visible** — sa
+  fermeture manuelle tue tout l'arbre
+  sans stderr ni event (signature
+  `^C` retrouvée dans stderr = event
+  console propagé). Durcissement :
+  `scripts/spawn_daemon.ps1` — spawn
+  `SW_HIDE` + watchdog `cmd /v:on`
+  qui écrit `EXIT:!ERRORLEVEL!` dans
+  `daemon-<port>.exit.log` (kill
+  externe → `-1`, crash → code
+  exception, absence = kill d'arbre).
+  La prochaine disparition laissera
+  une signature — ou n'arrivera plus.
 
 - [x] **Étape 86. Resync `fieldFocused` —
   outcome `unfocused`** (core + api + ffi

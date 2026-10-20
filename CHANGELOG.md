@@ -178,6 +178,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `width`/`min|max-width` non-% font foi avant l'intrinsèque
   (§5.1) — généralise aux bases flex, pistes grid, flottants,
   cellules. `shot` : icônes en ligne horizontale.
+- **`scripts/spawn_daemon.ps1` — spawn WMI durci** :
+  les morts silencieuses du daemon (3 occurrences
+  non reproductibles, zéro stderr, zéro event) sont
+  attribuées à la **fenêtre console visible** du
+  `cmd.exe` parent — sa fermeture manuelle tuait tout
+  l'arbre. Le script lance via
+  `Win32_ProcessStartup{ShowWindow=SW_HIDE}` (le
+  `CREATE_NO_WINDOW` est refusé par WMI,
+  `ReturnValue 21`) un `cmd /v:on` chien de garde :
+  stdout+stderr redirigés, et `& echo
+  EXIT:!ERRORLEVEL!` écrit le code de sortie dans
+  `daemon-<port>.exit.log` — `0` propre, `-1` kill
+  externe (`Stop-Process`), `0xC0000409` fail-fast/
+  stack overflow ; **absence** du fichier = kill de
+  l'arbre entier (teardown machine), signature en
+  soi. Validé en direct : kill → `EXIT:-1` horodaté.
 
 ### Added
 

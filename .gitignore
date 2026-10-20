@@ -27,3 +27,4 @@ fuzz/artifacts/
 # Fichiers de triage/sonde locaux (jamais commités)
 **/tests/scratch*.rs
 **/tests/probe*.rs
+test-run/
