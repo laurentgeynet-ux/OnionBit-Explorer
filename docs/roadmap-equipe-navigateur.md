@@ -902,7 +902,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   la page d'erreur aussi (URL effectivement naviguée),
   sur les chemins direct et partagé — la couverture 69
   est complète.
-- [ ] **Étape 76. Nav échouée : entrée d'historique**
+- [x] **Étape 76. Nav échouée : entrée d'historique**
   (ticket terrain mission 19-D, sémantique) : la nav
   échouée ne pousse pas d'entrée — repro A→B→refus :
   `back` depuis la page d'erreur atterrit sur **A** (B
@@ -913,6 +913,19 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   : pousser l'entrée avec marqueur « échec » (retry à la
   traversée) vs ne pas pousser mais préserver le slot —
   décision + gestion bfcache documentées.
+  Livré : `Tab.hist` passe de `Vec<Request>` à
+  `Vec<HistEntry { req, failed }>` — `paint_error_page`
+  pousse l'entrée marquée `failed` (method+body préservés,
+  replay POST couvert par construction). La traversée
+  (`history_move`, chemins direct et partagé) retente la
+  requête d'origine sur entrée échouée : succès = nav
+  normale, échec = page d'erreur repeinte à la même
+  position (pas de doublon d'entrée). `try_bfcache`
+  ignore les entrées `failed` — jamais de page d'erreur
+  gelée ; une page d'erreur courante n'est pas
+  snapshotée. Repro validé : A→B→refus, `back` revient à
+  B, `fwd` retente et repeint l'erreur, `back` revient
+  encore à B.
 - [x] **Étape 77. Daemon : `axum::serve` en échec visible
   + sortie gouvernée** (ticket terrain mission 19,
   explique la mort « silencieuse » de mission 18) : en

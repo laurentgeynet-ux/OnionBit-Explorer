@@ -115,7 +115,10 @@ impl Session {
                 // une position rejouable — pas de dédup
                 // d'URL, le résultat est une page à part
                 // entière comme chez les navigateurs.
-                entry.hist.push(req.clone());
+                entry.hist.push(HistEntry {
+                    req: req.clone(),
+                    failed: false,
+                });
                 entry.hist_idx = entry.hist.len() - 1;
             }
         }

@@ -10,6 +10,7 @@
 //! détaché `spawn_blocking`.
 use super::*;
 
+use explorer_net::http::Request;
 use explorer_net::url::Url;
 
 impl Session {
@@ -87,7 +88,14 @@ impl Session {
     /// précédente ou un vide. La barre montre l'URL tentée,
     /// `can_back` est préservé (historique intact), un
     /// reload retente la cible en `GET`.
-    pub(crate) fn paint_error_page(&mut self, tab: TabId, url: &Url, err: &CoreError) {
+    pub(crate) fn paint_error_page(
+        &mut self,
+        tab: TabId,
+        req: &Request,
+        push: bool,
+        err: &CoreError,
+    ) {
+        let url = &req.url;
         let html = error_document(url, err);
         let mut tb = explorer_html::TreeBuilder::new();
         tb.push(&html);
@@ -98,6 +106,7 @@ impl Session {
         // Purge interactive AVANT le relayout — les `find`
         // de la page précédente ne doivent pas cuire dans la
         // frame d'erreur (étape 75 : bande orange stale).
+        let cap = self.bfcache_pages;
         {
             let Some(e) = self.tabs.get_mut(&tab) else {
                 return;
@@ -107,6 +116,14 @@ impl Session {
             e.focused = None;
             e.hovered = None;
             e.spec_paint = false;
+            // Étape 76 : la page quittée gèle à son index
+            // avant que l'erreur ne la remplace — `back` la
+            // restaure sans réseau, comme après une nav
+            // réussie (une page d'erreur quittée ne gèle
+            // jamais — sa traversée retente la requête).
+            if !e.hist.get(e.hist_idx).is_some_and(|h| h.failed) {
+                e.freeze(cap);
+            }
         }
         if self.relayout_dom(tab, &dom).is_err() {
             return;
@@ -118,9 +135,21 @@ impl Session {
             e.title.clone_from(&title);
             e.url = Some(url.clone());
             // `last_req = None` → reload = `GET` sur l'URL
-            // tentée (retente honnête) ; `can_back` intact
-            // puisque `hist` n'a pas bougé.
+            // tentée (retente honnête).
             e.last_req = None;
+            // Étape 76 : la navigation en échec prend son
+            // entrée d'historique (Chrome/Firefox) — `back`
+            // revient à la page précédente, `forward` et la
+            // traversée **retentent** la cible (entrée
+            // `failed` : jamais de restauration bfcache).
+            if push {
+                e.hist.truncate(e.hist_idx + 1);
+                e.hist.push(HistEntry {
+                    req: req.clone(),
+                    failed: true,
+                });
+                e.hist_idx = e.hist.len() - 1;
+            }
         }
         self.emit_navigated(tab, url, title, prev.as_deref());
     }

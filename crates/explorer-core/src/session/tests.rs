@@ -77,7 +77,16 @@ fn paintless_snapshot_repairs_on_restore() {
         e.url = Some(url_a.clone());
         e.dom = Some(test_dom("<p>page A</p>"));
         e.png = Some(b"png-a".to_vec());
-        e.hist = vec![Request::get(url_a), Request::get(url_b.clone())];
+        e.hist = vec![
+            HistEntry {
+                req: Request::get(url_a),
+                failed: false,
+            },
+            HistEntry {
+                req: Request::get(url_b.clone()),
+                failed: false,
+            },
+        ];
         e.hist_idx = 0;
         e.bfcache.push_back(PageSnapshot {
             hist_idx: 1,

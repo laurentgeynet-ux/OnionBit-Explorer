@@ -84,21 +84,26 @@ pub async fn navigate_shared(
             let mut s = sess.lock().await;
             s.unspec(tab); // peinture spéculative → réverte (56c)
                            // Page d'erreur commise (étape 69) — l'URL tentée
-                           // s'affiche, `can_back` est préservé.
-            s.paint_error_page(tab, &job.req.url, &e);
+                           // s'affiche ; étape 76 : entrée `failed` poussée.
+            s.paint_error_page(tab, &job.req, job.push, &e);
             return Err(s.emit_error(tab, e));
         }
     };
-    // URL de l'éventuelle page d'erreur : l'URL effectivement
+    // Requête/page d'erreur éventuelle : l'URL effectivement
     // naviguée (post-redirections) — les erreurs post-fetch
-    // sont couvertes aussi (étape 75).
-    let err_url = done.url.clone();
+    // sont couvertes aussi (étapes 75/76).
+    let err_req = {
+        let mut r = tail.req.clone();
+        r.url = done.url.clone();
+        r
+    };
+    let push = tail.push;
     let sub = {
         let mut s = sess.lock().await;
         match s.nav_apply(tab, tail, done) {
             Ok(sub) => sub,
             Err(e) => {
-                s.paint_error_page(tab, &err_url, &e);
+                s.paint_error_page(tab, &err_req, push, &e);
                 return Err(s.emit_error(tab, e));
             }
         }
@@ -112,9 +117,18 @@ pub async fn navigate_shared(
     sub.run().await;
     let mut s = sess.lock().await;
     match s.sub_commit(tab, sub).await {
-        Ok(_) => Ok(()),
+        Ok(_) => {
+            // Rejeu/reload réussi : la position courante n'est
+            // plus en échec (étape 76) — la traversée partagée
+            // marque en plus sa cible via `history_move_shared`.
+            let idx = s.tabs.get(&tab).map(|e| e.hist_idx);
+            if let Some(i) = idx {
+                s.mark_hist_ok(tab, i);
+            }
+            Ok(())
+        }
         Err(e) => {
-            s.paint_error_page(tab, &err_url, &e);
+            s.paint_error_page(tab, &err_req, push, &e);
             Err(s.emit_error(tab, e))
         }
     }
@@ -149,10 +163,17 @@ pub async fn history_move_shared(
         Ok(()) => {
             let mut s = sess.lock().await;
             s.set_hist_idx(tab, idx);
+            // Rejeu d'une entrée `failed` ayant abouti : la
+            // cible héberge une vraie page (étape 76).
+            s.mark_hist_ok(tab, idx);
             Ok(())
         }
         Err(e) => {
             let mut s = sess.lock().await;
+            // Page d'erreur commise à la position de l'entrée
+            // (étape 76) — la traversée a atterri malgré
+            // l'échec du rejeu.
+            s.set_hist_idx(tab, idx);
             Err(s.emit_error(tab, e))
         }
     }

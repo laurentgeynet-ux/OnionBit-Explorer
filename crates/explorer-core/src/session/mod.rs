@@ -110,6 +110,21 @@ pub use shared::*;
 #[allow(clippy::wildcard_imports)]
 pub use types::*;
 
+/// Entrée d'historique d'onglet (étape 76) : la requête
+/// d'origine (rejouée à la traversée hors bfcache) + le
+/// marqueur « échec » — une navigation en échec pousse son
+/// entrée comme chez Chrome/Firefox : `back` revient à la
+/// page précédente, `forward`/`go_back` **retente** la
+/// cible au lieu de servir une page d'erreur gelée.
+#[derive(Clone)]
+pub(crate) struct HistEntry {
+    /// Requête d'origine (méthode + corps — POST rejoué).
+    pub(crate) req: Request,
+    /// `true` = navigation en échec (page d'erreur commise).
+    /// Aucune restauration bfcache — la traversée retente.
+    pub(crate) failed: bool,
+}
+
 /// État d'un onglet : pipeline complet gardé — le re-render
 /// (`resize`) repart du `dom` sans re-fetch.
 pub(crate) struct Tab {
@@ -123,8 +138,11 @@ pub(crate) struct Tab {
     /// **requête** complète est stockée (étape 56) : un POST
     /// de formulaire pousse son entrée comme tout autre —
     /// pas de dédup d'URL — et back/forward la rejouent
-    /// telle quelle si le bfcache l'a évincée.
-    hist: Vec<Request>,
+    /// telle quelle si le bfcache l'a évincée. Une entrée
+    /// `failed` (étape 76) = navigation en échec commise en
+    /// page d'erreur : la traversée la **retente** (jamais de
+    /// restauration bfcache de la page d'erreur).
+    hist: Vec<HistEntry>,
     /// Requête qui a produit la page courante — `reload`
     /// réémet la vraie requête (un POST re-POSTe, étape 56).
     last_req: Option<Request>,

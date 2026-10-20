@@ -78,6 +78,13 @@ impl Session {
         };
         match self.navigate_request(tab, req, false).await {
             Ok(_) => {
+                // Reload réussi sur une page d'erreur : la
+                // position courante n'est plus en échec
+                // (étape 76).
+                let idx = self.tabs.get(&tab).map(|e| e.hist_idx);
+                if let Some(i) = idx {
+                    self.mark_hist_ok(tab, i);
+                }
                 self.drain_script_nav(tab).await;
                 Ok(())
             }
@@ -124,6 +131,12 @@ impl Session {
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return false;
         };
+        // Une entrée en échec n'est jamais restaurée
+        // (étape 76) — sa « page d'erreur » n'est pas un
+        // snapshot : la traversée retente la requête.
+        if entry.hist.get(idx).is_some_and(|h| h.failed) {
+            return false;
+        }
         let prev = entry.title.clone();
         let Some(snap) = entry.take_snapshot(idx) else {
             return false;
@@ -132,10 +145,19 @@ impl Session {
         // peinture spéculative en vol ne doit pas être
         // embarquée (étape 56c).
         self.unspec(tab);
+        let cur_failed = self
+            .tabs
+            .get(&tab)
+            .is_some_and(|e| e.hist.get(e.hist_idx).is_some_and(|h| h.failed));
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return false;
         };
-        entry.freeze(self.bfcache_pages);
+        // Une page d'erreur quittée ne gèle pas (étape 76) :
+        // son slot servirait une erreur périmée à la
+        // traversée — la retente est la sémantique voulue.
+        if !cur_failed {
+            entry.freeze(self.bfcache_pages);
+        }
         entry.restore(snap);
         entry.hist_idx = idx;
         // Snapshot gelé avant sa première peinture (étape
@@ -184,7 +206,10 @@ impl Session {
         let prev = self.tabs.get(&tab).and_then(|e| e.title.clone());
         if let Some(e) = self.tabs.get_mut(&tab) {
             e.hist.truncate(e.hist_idx + 1);
-            e.hist.push(req.clone());
+            e.hist.push(HistEntry {
+                req: req.clone(),
+                failed: false,
+            });
             e.hist_idx = e.hist.len() - 1;
             e.url = Some(req.url.clone());
         }
@@ -262,7 +287,7 @@ impl Session {
         let matches = self
             .tabs
             .get(&tab)
-            .is_some_and(|e| e.hist.get(fwd).is_some_and(|r| r.url == req.url));
+            .is_some_and(|e| e.hist.get(fwd).is_some_and(|r| r.req.url == req.url));
         matches && self.try_bfcache(tab, fwd)
     }
 
@@ -273,7 +298,7 @@ impl Session {
         let Some(idx) = next.filter(|&i| i < entry.hist.len()) else {
             return Err(CoreError::EmptyDocument);
         };
-        let mut req = entry.hist[idx].clone();
+        let mut req = entry.hist[idx].req.clone();
         // Back/forward = navigation top-level pilotée par le
         // navigateur — le contexte initiateur historié ne
         // s'applique plus (étape 66).
@@ -292,6 +317,12 @@ impl Session {
             Ok(_) => {
                 if let Some(entry) = self.tabs.get_mut(&tab) {
                     entry.hist_idx = idx;
+                    // Rejeu d'une entrée `failed` ayant abouti :
+                    // la position héberge une vraie page —
+                    // bfcache redevient éligible (étape 76).
+                    if let Some(h) = entry.hist.get_mut(idx) {
+                        h.failed = false;
+                    }
                 }
                 // Pas de drain ici : les appelants publics
                 // (`go_back/forward`) le font après — sinon
@@ -299,7 +330,16 @@ impl Session {
                 // `drain_script_nav` bouclerait l'inférence.
                 Ok(())
             }
-            Err(e) => Err(self.emit_error(tab, e)),
+            Err(e) => {
+                // La page d'erreur est commise à la position de
+                // l'entrée — la traversée a « atterri » (étape 76 :
+                // back depuis l'erreur revient à la source, pas à
+                // l'entrée d'avant).
+                if let Some(entry) = self.tabs.get_mut(&tab) {
+                    entry.hist_idx = idx;
+                }
+                Err(self.emit_error(tab, e))
+            }
         }
     }
 
@@ -368,19 +408,25 @@ impl Session {
                 // fetch en échec, document vide — plus de
                 // vide, `can_back` préservé).
                 self.unspec(tab);
-                self.paint_error_page(tab, &job.req.url, &e);
+                self.paint_error_page(tab, &job.req, job.push, &e);
                 return Err(e);
             }
         };
         // Erreurs post-fetch (pose DOM, commit) : la couverture
         // de l'étape 69 s'étend — la page d'erreur est peinte
-        // avec l'URL effectivement naviguée (étape 75).
-        let err_url = done.url.clone();
+        // avec l'URL effectivement naviguée (étape 75), et
+        // l'entrée d'historique en échec est poussée (76).
+        let err_req = {
+            let mut r = tail.req.clone();
+            r.url = done.url.clone();
+            r
+        };
+        let push = tail.push;
         let mut sub = match self.nav_apply(tab, tail, done) {
             Ok(Some(s)) => s,
             Ok(None) => return Ok(None),
             Err(e) => {
-                self.paint_error_page(tab, &err_url, &e);
+                self.paint_error_page(tab, &err_req, push, &e);
                 return Err(e);
             }
         };
@@ -388,7 +434,7 @@ impl Session {
         match self.sub_commit(tab, sub).await {
             Ok(t) => Ok(t),
             Err(e) => {
-                self.paint_error_page(tab, &err_url, &e);
+                self.paint_error_page(tab, &err_req, push, &e);
                 Err(e)
             }
         }
@@ -521,8 +567,12 @@ impl Session {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
             // bfcache (étape 56) : la page quittée est gelée
             // à sa position d'historique — un retour
-            // arrière la restaurera sans réseau.
-            entry.freeze(self.bfcache_pages);
+            // arrière la restaurera sans réseau. Une page
+            // d'erreur (entrée `failed`, étape 76) n'est pas
+            // gelée : sa traversée retente la requête.
+            if !entry.hist.get(entry.hist_idx).is_some_and(|h| h.failed) {
+                entry.freeze(self.bfcache_pages);
+            }
             entry.last_req = Some(tail.req.clone());
             entry.url = Some(url.clone());
             entry.title.clone_from(&title);
@@ -632,7 +682,7 @@ impl Session {
         else {
             return Err(CoreError::EmptyDocument);
         };
-        Ok((idx, entry.hist[idx].clone()))
+        Ok((idx, entry.hist[idx].req.clone()))
     }
 
     /// Fixe l'index courant d'historique (commit côté driver
@@ -640,6 +690,18 @@ impl Session {
     pub(crate) fn set_hist_idx(&mut self, tab: TabId, idx: usize) {
         if let Some(e) = self.tabs.get_mut(&tab) {
             e.hist_idx = idx;
+        }
+    }
+
+    /// Rejeu réussi (étape 76) : l'entrée `idx` — traversée ou
+    /// reload d'une page d'erreur — héberge désormais une vraie
+    /// page ; le marqueur `failed` tombe et le bfcache redevient
+    /// éligible pour elle.
+    pub(crate) fn mark_hist_ok(&mut self, tab: TabId, idx: usize) {
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            if let Some(h) = e.hist.get_mut(idx) {
+                h.failed = false;
+            }
         }
     }
 

@@ -343,11 +343,13 @@ async fn failed_nav_commits_error_page() {
     // précédente ni un vide.
     assert!(s.find_in_page(id, "Page inaccessible") > 0);
     assert!(s.find_in_page(id, "HTTP 404") > 0);
-    // Retour arrière : la page précédente est restaurée.
+    // Retour arrière (étape 76) : la page précédente `ok2` est
+    // restaurée — la nav échouée a sa propre entrée, la
+    // cible n'est pas sautée.
     s.go_back(id).await.unwrap();
     assert_eq!(
         s.tab_info(id).and_then(|i| i.url).as_deref(),
-        Some("http://h.test/ok")
+        Some("http://h.test/ok2")
     );
 }
 
@@ -382,6 +384,55 @@ async fn failed_nav_error_page_has_no_stale_find_highlight() {
     assert!(s.find_state(id).is_none(), "le find est purgé");
     let (_, _, px) = s.frame_pixels(id).unwrap();
     assert_eq!(warm(px), 0, "aucun reste de find sur la page d'erreur");
+}
+
+/// Étape 76 — la navigation en échec pousse son entrée
+/// d'historique (sémantique Chrome/Firefox) : `back` depuis
+/// la page d'erreur revient à la page précédente (la cible
+/// n'est pas sautée), `forward` retente la cible — jamais
+/// de page d'erreur gelée via bfcache.
+#[tokio::test]
+async fn failed_nav_pushes_history_entry_and_retries() {
+    let (mut s, t) = test_session();
+    t.route("/a", 200, PAGE);
+    t.route("/b", 200, PAGE_T);
+    t.route("/ko", 404, "nope");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/a").await.unwrap();
+    s.navigate(id, "http://h.test/b").await.unwrap();
+    assert!(matches!(
+        s.navigate(id, "http://h.test/ko").await,
+        Err(CoreError::HttpStatus(404))
+    ));
+    // Position = l'entrée d'erreur : can_back ET can_forward
+    // faux — l'entrée est la dernière.
+    let info = s.tab_info(id).unwrap();
+    assert!(info.can_back, "B doit être accessible par back");
+    assert!(!info.can_forward, "l'entrée d'erreur est terminale");
+    // `back` revient à B — la cible échouée n'est pas sautée.
+    s.go_back(id).await.unwrap();
+    assert_eq!(
+        s.tab_info(id).and_then(|i| i.url).as_deref(),
+        Some("http://h.test/b")
+    );
+    // `forward` retente la cible (pas de snapshot d'erreur) —
+    // le 404 renvoie la page d'erreur à la position de
+    // l'entrée.
+    assert!(matches!(
+        s.go_forward(id).await,
+        Err(CoreError::HttpStatus(404))
+    ));
+    let info = s.tab_info(id).unwrap();
+    assert_eq!(info.url.as_deref(), Some("http://h.test/ko"));
+    assert_eq!(info.title.as_deref(), Some("Erreur de chargement"));
+    assert!(info.can_back && !info.can_forward);
+    // Et `back` re-revient à B (pas à A — la position est
+    // bien l'entrée en échec).
+    s.go_back(id).await.unwrap();
+    assert_eq!(
+        s.tab_info(id).and_then(|i| i.url).as_deref(),
+        Some("http://h.test/b")
+    );
 }
 
 /// Étape 69 — le chemin hors-verrou (`navigate_shared`)
