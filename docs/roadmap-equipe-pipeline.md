@@ -952,6 +952,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
     global) ou du slicing côté app —
     non promu, à ré-observer avec
     capture.
+- [x] **Re-run `site_smoke` post-R-39→R-46
+  (20/10)** : corpus 10 sites — **10/10
+  OK, zéro régression**. Gains confirmés
+  à l'œil : titres HN désormais alignés à
+  gauche (R-38), vignettes Wikipedia en
+  place (R-45), icônes rust-lang en ligne
+  (R-44). Hauteurs document quasi
+  stables ; octets PNG ↑ (contenu
+  réellement peint, pas du blanc).
+  **Nouveaux résidus notés** (non promus,
+  à reproduire) : (a) HN — la cellule
+  `subtext` tombe sous la colonne rang au
+  lieu d'aligner sous le titre (attribution
+  de grille `colspan` sur la 2ᵉ rangée —
+  candidat tables) ; (b) example.com —
+  le `<svg>` injecté par `insertAdjacent
+  HTML` (`/s.js`, logo 44×44) n'est pas
+  peint alors que les `<p>` injectés
+  oui — suspect chaîne miroir→sérialise
+  →re-parse (`href=#q` non-quoté ou
+  `<use/>`), en lien avec le trou NAV
+  `parse_fragment_into` ; statique
+  `<svg viewBox="0,0,20,20">` rend bien.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
