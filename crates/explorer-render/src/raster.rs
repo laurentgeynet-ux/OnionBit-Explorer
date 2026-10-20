@@ -597,7 +597,7 @@ fn paint_item(
                 pixmap,
                 origin.0,
                 origin.1,
-                run,
+                run.as_ref(),
                 font,
                 skia_color(*color),
                 *size_px,

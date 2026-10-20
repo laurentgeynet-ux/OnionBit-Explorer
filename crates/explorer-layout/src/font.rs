@@ -110,10 +110,11 @@ pub struct FontCache {
     /// verticales. L'identité = l'adresse des octets cachés —
     /// stable tant que `data` vit.
     metrics: HashMap<(usize, u32), Option<FontMetrics>>,
-    /// (identité, taille, texte, rtl) → run shapé — `measure`,
-    /// le repli de ligne et `trail_w` rejouent les mêmes
-    /// pièces. Borné (page hostile) : au-delà, plus d'insert.
-    shape: HashMap<(usize, u32, String, bool), Option<ShapedRun>>,
+    /// Runs shapés mémoïsés par (identité, taille, texte,
+    /// rtl). `Arc` : les fragments partagent le run (R-37 —
+    /// identité de contenu stable pour le build incrémental
+    /// + mémoire dédupliquée). Borné à `SHAPE_CACHE_CAP`.
+    shape: HashMap<(usize, u32, String, bool), Option<std::sync::Arc<ShapedRun>>>,
 }
 
 /// Borne des entrées `shape` mémorisées.
@@ -160,6 +161,8 @@ impl FontCache {
 
     /// Run shapé — mémoïsé par (fonte, taille, texte, dir) ;
     /// borne `SHAPE_CACHE_CAP` (au-delà, calcul sans insert).
+    /// Retour `Arc` partagé : deux fragments du même texte
+    /// pointent le **même** run (mémoire + identité R-37).
     pub fn shape(
         &mut self,
         src: &dyn FontSource,
@@ -167,7 +170,7 @@ impl FontCache {
         text: &str,
         size_px: f32,
         rtl: bool,
-    ) -> Option<ShapedRun> {
+    ) -> Option<std::sync::Arc<ShapedRun>> {
         let k = self.key(src, req)?;
         if let Some(hit) = self
             .shape
@@ -177,7 +180,8 @@ impl FontCache {
         }
         let run = self
             .data(src, req)
-            .and_then(|d| shape(&d, text, size_px, rtl));
+            .and_then(|d| shape(&d, text, size_px, rtl))
+            .map(std::sync::Arc::new);
         if self.shape.len() < SHAPE_CACHE_CAP {
             self.shape
                 .insert((k, size_px.to_bits(), text.to_string(), rtl), run.clone());

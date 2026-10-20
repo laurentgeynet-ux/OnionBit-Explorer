@@ -417,11 +417,15 @@ fn dirty_listes_identiques_rien_a_peindre() {
             items: i1,
             width: 400.0,
             height: 200.0,
+            spans: explorer_render::SpanMap::default(),
+            tree_epoch: 0,
         },
         explorer_render::DisplayList {
             items: i2,
             width: 400.0,
             height: 200.0,
+            spans: explorer_render::SpanMap::default(),
+            tree_epoch: 0,
         },
     );
     assert!(
@@ -446,6 +450,8 @@ fn dirty_couleur_changee_zone_de_litem() {
         items,
         width: 400.0,
         height: 200.0,
+        spans: explorer_render::SpanMap::default(),
+        tree_epoch: 0,
     };
     let (l1, l2) = (mk(i1), mk(i2));
     let dirty = l2.changed_rects(&l1);
@@ -473,6 +479,8 @@ fn dirty_element_deplace_vieille_et_nouvelle_zones() {
         items,
         width: 400.0,
         height: 200.0,
+        spans: explorer_render::SpanMap::default(),
+        tree_epoch: 0,
     };
     let (l1, l2) = (mk(i1), mk(i2));
     let dirty = l2.changed_rects(&l1);
@@ -499,6 +507,8 @@ fn dirty_item_ajoute_sa_zone() {
         items,
         width: 400.0,
         height: 200.0,
+        spans: explorer_render::SpanMap::default(),
+        tree_epoch: 0,
     };
     let (l1, l2) = (mk(i1), mk(i2));
     let dirty = l2.changed_rects(&l1);
@@ -598,7 +608,9 @@ fn controle_input_peint_sa_valeur() {
         explorer_render::DisplayList {
             items: items.clone(),
             width: 400.0,
-            height: 200.0
+            height: 200.0,
+            spans: explorer_render::SpanMap::default(),
+            tree_epoch: 0,
         }
         .dump()
     );

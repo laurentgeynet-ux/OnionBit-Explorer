@@ -53,8 +53,10 @@ pub enum DisplayItem {
     Text {
         /// Origine : x du fragment, y de la baseline.
         origin: (f32, f32),
-        /// Glyphes + métriques produits par le shaping.
-        run: ShapedRun,
+        /// Glyphes + métriques produits par le shaping —
+        /// `Arc` : le clone d'item est O(1) (R-37, re-usage
+        /// de plages dans le build incrémental).
+        run: std::sync::Arc<ShapedRun>,
         /// Requête fonte — le raster résout les octets via
         /// `FontSource` pour les contours de glyphes.
         font: explorer_layout::font::FontRequest,
@@ -131,7 +133,79 @@ pub struct DisplayList {
     /// Hauteur du document posé (px) — scrollable au-delà
     /// du viewport.
     pub height: f32,
+    /// Correspondance boîte → plage d'items pour le build
+    /// incrémental (R-37) — clé = chemin d'index enfants
+    /// depuis la racine (stable aux re-mappages `NodeId`,
+    /// conservateur aux insertions : un décalage produit
+    /// un *miss*, jamais une copie fautive).
+    pub spans: SpanMap,
+    /// Epoch de l'arbre de boîtes peint (compteur côté
+    /// appelant, bumpé au remplacement — la mutation
+    /// in-place du chemin `relayout_subtree` conserve
+    /// l'epoch). Égalité ⇒ fast-path pointeur autorisé.
+    pub tree_epoch: u64,
 }
+
+/// Plage d'items émise par une boîte — indexe le re-usage
+/// de `build_display_list_incremental` (R-37).
+#[derive(Debug, Clone)]
+pub struct SpanRec {
+    /// Début de la plage dans `items`.
+    pub start: u32,
+    /// Fin de la plage (exclue).
+    pub end: u32,
+    /// `bx.rect` à l'émission (coords document, scroll exclu).
+    pub rect: Rect,
+    /// `off` utilisé à l'émission (`-scroll`, `(0,0)` sous
+    /// `position: fixed`).
+    pub off: (f32, f32),
+    /// Fingerprint des champs peints — voir `box_sig`.
+    pub sig: u64,
+    /// `F_*` — restrictions de ré-usage.
+    pub flags: u8,
+    /// Adresse de la boîte à l'émission — fast-path quand
+    /// l'arbre est **le même objet** (`tree_epoch` inchangé,
+    /// mutation in-place du chemin `relayout_subtree`) :
+    /// contrat — hors `{rect, node, lines, slot}`, aucun
+    /// champ peint n'est muté in-place sur une boîte
+    /// préservée (asserté en debug par `reuse_delta`).
+    pub bx_ptr: usize,
+    /// `bx.lines.as_ptr()` — `layout_block` réécrit `lines`
+    /// (nouvelle allocation) sur les ancêtres re-posés :
+    /// ptr différent ⇒ contenu inline potentiellement refait.
+    pub lines_ptr: usize,
+    /// `bx.children.as_ptr()` — le discriminant du fast-path :
+    /// `*bx = fresh` (boîte sale remplacée par
+    /// `relayout_subtree`) conserve l'adresse du *slot* mais
+    /// le Vec enfants de `fresh` est alloué pendant que
+    /// l'ancien vit encore — adresses disjointes garanties.
+    /// `usize::MAX` quand `children` est vide : le ptr
+    /// dangling ne discrimine pas — la feuille retombe alors
+    /// sur `lines_ptr`, et les deux vides → signature.
+    pub kids_ptr: usize,
+    /// `bx.children.len()` — insertion d'enfants.
+    pub kids_len: u32,
+    /// Chemins des porteurs inline reportés au `defer`
+    /// **hérité** pendant l'émission de la plage — relatifs
+    /// à la boîte (préfixe = son chemin). Une copie plate
+    /// les re-pousse dans le `defer` courant pour que le
+    /// drain englobant les ré-émette (via leurs propres
+    /// spans) — sinon le contenu en ligne disparaîtrait.
+    pub escaped: Box<[Box<[u16]>]>,
+}
+
+/// Boîte `position: fixed` — sa plage n'est **pas**
+/// translatée au scroll.
+pub const F_FIXED: u8 = 1;
+/// Ré-usage interdit (média remplacé dont le bitmap arrive
+/// tard, `background-attachment: fixed` dont l'origine est
+/// ancrée viewport) — la boîte se ré-émet toujours.
+pub const F_NO_REUSE: u8 = 2;
+/// La boîte a un enfant `position: sticky` — ses items
+/// portent le `PushTransform` du décalage sticky, non
+/// linéaire en scroll : toute translation non nulle
+/// impose une ré-émission.
+pub const F_STICKY_KID: u8 = 4;
 
 impl DisplayList {
     /// Dump texte indenté — debug/golden sans raster.
@@ -489,34 +563,191 @@ pub fn build_display_list_scrolled(
     scroll: (f32, f32),
     images: &crate::PaintImages,
 ) -> DisplayList {
+    build_list(root, viewport_w, viewport_h, scroll, images, None, 0)
+}
+
+/// Variante incrémentale (R-37) : `prev` fournit les plages
+/// de la peinture précédente — les sous-arbres inchangés
+/// (même `sig`, même taille) sont **copiés** au lieu d'être
+/// ré-émis, éventuellement translatés. `prev` ignorée si la
+/// largeur diffère (les coords viewport-ancrées bougent).
+///
+/// Correction du ré-usage : une plage n'est copiée que si
+/// **tous** les descendants partagent le même Δ (translation
+/// rigide — un `fixed` interne a Δ=0 et fait descendre le
+/// parent) ; contenu/style/lignes sont fingerprintés par
+/// `box_sig`. L'équivalence « liste incrémentale == liste
+/// pleine » est assertée par `tests/dirty_raster.rs`.
+#[must_use]
+pub fn build_display_list_incremental(
+    root: &LayoutBox,
+    viewport_w: f32,
+    viewport_h: f32,
+    scroll: (f32, f32),
+    images: &crate::PaintImages,
+    prev: Option<&DisplayList>,
+    tree_epoch: u64,
+) -> DisplayList {
+    build_list(
+        root, viewport_w, viewport_h, scroll, images, prev, tree_epoch,
+    )
+}
+
+/// Corps partagé des builders — `prev = None` : build plein.
+fn build_list(
+    root: &LayoutBox,
+    viewport_w: f32,
+    viewport_h: f32,
+    scroll: (f32, f32),
+    images: &crate::PaintImages,
+    prev: Option<&DisplayList>,
+    tree_epoch: u64,
+) -> DisplayList {
     let mut items = Vec::new();
+    let mut spans = SpanMap::default();
+    let same_tree = prev.is_some_and(|p| p.tree_epoch == tree_epoch);
+    let inc = prev
+        .filter(|p| p.width.to_bits() == viewport_w.to_bits())
+        .map(|p| IncCx {
+            items: &p.items,
+            spans: &p.spans,
+        });
+    let mut cx = PaintCx {
+        vp: (viewport_w, viewport_h),
+        images,
+        spans: &mut spans,
+        path: Vec::new(),
+        inc,
+        same_tree,
+    };
     // Portée racine du report des inlines (App. E étape 5).
     let mut defer = Vec::new();
     paint_box(
         root,
         &mut items,
         (-scroll.0, -scroll.1),
-        (viewport_w, viewport_h),
-        images,
+        &mut cx,
         &mut defer,
     );
+    {
+        // Span racine — `escaped` = les porteurs poussés au
+        // defer racine (chemins absolus = relatifs à la racine).
+        let esc = escaped_paths(&defer, 0, &cx.path);
+        let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
+        let sig = box_sig(root);
+        cx.record_span(root, 0, end, (-scroll.0, -scroll.1), sig, esc);
+    }
     let mut i = 0;
     while i < defer.len() {
-        let c = defer[i];
+        let (p, c) = defer[i].clone();
         i += 1;
-        paint_scoped(
-            c,
-            &mut items,
-            (-scroll.0, -scroll.1),
-            (viewport_w, viewport_h),
-            images,
-        );
+        emit_scoped_at(p, c, &mut items, (-scroll.0, -scroll.1), &mut cx);
     }
     DisplayList {
         items,
         width: viewport_w,
         height: root.rect.height.max(viewport_h),
+        spans,
+        tree_epoch,
     }
+}
+
+/// Contexte d'une passe de peinture — viewport, images,
+/// collecteur de `spans`, chemin courant (clé des spans)
+/// et source de ré-usage incrémental éventuelle (R-37).
+struct PaintCx<'a> {
+    /// Viewport `(w, h)` — consommé par sticky et les fonds
+    /// `background-attachment: fixed`.
+    vp: (f32, f32),
+    /// Bitmaps par `NodeId` (remplacés, fonds, svg, canvas).
+    images: &'a crate::PaintImages,
+    /// Spans produits par cette passe.
+    spans: &'a mut SpanMap,
+    /// Chemin d'index-enfants de la boîte courante — la clé
+    /// de span (un `u16` par niveau, saturé — l'overflow est
+    /// un miss, jamais une collision fausse).
+    path: Vec<u16>,
+    /// Items + spans de la peinture précédente.
+    inc: Option<IncCx<'a>>,
+    /// `prev.tree_epoch == epoch` — l'arbre est le même objet
+    /// : le fast-path `bx_ptr` est valide (sinon une adresse
+    /// recyclée pourrait mentir).
+    same_tree: bool,
+}
+
+/// Source de ré-usage incrémental.
+#[derive(Clone, Copy)]
+struct IncCx<'a> {
+    /// Items de la liste précédente (copiés par plage).
+    items: &'a [DisplayItem],
+    /// Spans de la liste précédente.
+    spans: &'a SpanMap,
+}
+
+impl PaintCx<'_> {
+    /// Enregistre la plage `[start, end)` émise pour `bx`
+    /// sous le chemin courant — flags de ré-usage calculés.
+    /// `escaped` = porteurs reportés au `defer` hérité
+    /// (chemins **relatifs** à `bx` — voir `SpanRec::escaped`).
+    fn record_span(
+        &mut self,
+        bx: &LayoutBox,
+        start: u32,
+        end: u32,
+        off: (f32, f32),
+        sig: u64,
+        escaped: Box<[Box<[u16]>]>,
+    ) {
+        let mut flags = 0u8;
+        if bx.position == Position::Fixed {
+            flags |= F_FIXED;
+        }
+        if is_media(bx, self.images) {
+            flags |= F_NO_REUSE;
+        }
+        if bx.children.iter().any(|c| c.position == Position::Sticky) {
+            flags |= F_STICKY_KID;
+        }
+        self.spans.insert(
+            self.path.clone().into_boxed_slice(),
+            SpanRec {
+                start,
+                end,
+                rect: bx.rect,
+                off,
+                sig,
+                flags,
+                bx_ptr: std::ptr::from_ref(bx) as usize,
+                lines_ptr: bx.lines.as_ptr() as usize,
+                kids_ptr: if bx.children.is_empty() {
+                    usize::MAX
+                } else {
+                    bx.children.as_ptr() as usize
+                },
+                kids_len: u32::try_from(bx.children.len()).unwrap_or(u32::MAX),
+                escaped,
+            },
+        );
+    }
+}
+
+/// Extrait les chemins des porteurs poussés dans `defer`
+/// depuis l'indice `base`, relativisés à `path` (le chemin
+/// de la boîte en cours d'enregistrement).
+fn escaped_paths(defer: &[(Vec<u16>, &LayoutBox)], base: usize, path: &[u16]) -> Box<[Box<[u16]>]> {
+    defer[base..]
+        .iter()
+        .filter_map(|(p, _)| p.strip_prefix(path).map(Box::from))
+        .collect()
+}
+
+/// Résout un chemin relatif depuis `bx` vers la boîte cible.
+fn resolve_rel<'a>(bx: &'a LayoutBox, rel: &[u16]) -> Option<&'a LayoutBox> {
+    let mut cur = bx;
+    for &i in rel {
+        cur = cur.children.get(usize::from(i))?;
+    }
+    Some(cur)
 }
 
 /// Sans images (tout `<img>` tombe en boîte `alt`) — voir
@@ -1168,47 +1399,464 @@ fn inline_carrier(c: &LayoutBox) -> bool {
 /// Peint `bx` avec sa propre portée de report — utilisé pour
 /// les flottants, les positionnés et les porteurs inline
 /// drainés : leurs descendants en ligne se peignent dedans.
-fn paint_scoped(
-    bx: &LayoutBox,
-    items: &mut Vec<DisplayItem>,
-    off: (f32, f32),
-    vp: (f32, f32),
-    images: &crate::PaintImages,
-) {
-    let mut defer = Vec::new();
-    paint_box(bx, items, off, vp, images, &mut defer);
-    let mut i = 0;
-    while i < defer.len() {
-        let c = defer[i];
-        i += 1;
-        paint_scoped(c, items, off, vp, images);
-    }
-}
-
-fn paint_box<'a>(
+fn paint_scoped<'a>(
     bx: &'a LayoutBox,
     items: &mut Vec<DisplayItem>,
     off: (f32, f32),
-    vp: (f32, f32),
-    images: &crate::PaintImages,
-    defer: &mut Vec<&'a LayoutBox>,
+    cx: &mut PaintCx<'a>,
 ) {
-    // `position: fixed` est ancrée au viewport : son sous-arbre
-    // ignore le scroll.
-    let off = if bx.position == Position::Fixed {
+    let mut defer = Vec::new();
+    paint_box(bx, items, off, cx, &mut defer);
+    let mut i = 0;
+    while i < defer.len() {
+        let (p, c) = defer[i].clone();
+        i += 1;
+        emit_scoped_at(p, c, items, off, cx);
+    }
+}
+
+/// Émet `bx` en réutilisant sa plage précédente si le
+/// sous-arbre est ré-utilisable — sinon descente normale.
+/// `idx` = son index dans `parent.children` (clé de span).
+#[allow(clippy::too_many_arguments)]
+fn emit_child<'a>(
+    idx: usize,
+    bx: &'a LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    cx: &mut PaintCx<'a>,
+    defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+) {
+    cx.path.push(u16::try_from(idx).unwrap_or(u16::MAX));
+    if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
+        copy_span(bx, s, d, sig, items, off, cx);
+        // Re-pousse les porteurs échappés de la plage —
+        // relatifs → absolus ; le drain englobant les
+        // ré-émettra via leurs propres spans.
+        for rel in &s.escaped {
+            if let Some(target) = resolve_rel(bx, rel) {
+                let mut p = cx.path.clone();
+                p.extend(rel.iter().copied());
+                defer.push((p, target));
+            }
+        }
+    } else {
+        let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
+        let base = defer.len();
+        explorer_common::deep(|| paint_box(bx, items, off, cx, defer));
+        let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
+        let sig = box_sig(bx);
+        let esc = escaped_paths(defer, base, &cx.path);
+        cx.record_span(bx, start, end, effective_off(bx, off), sig, esc);
+    }
+    cx.path.pop();
+}
+
+/// Variante pour les enfants peints hors-flux (flottants,
+/// positionnés, porteurs drainés) — portée propre.
+fn emit_scoped<'a>(
+    idx: usize,
+    bx: &'a LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    cx: &mut PaintCx<'a>,
+) {
+    cx.path.push(u16::try_from(idx).unwrap_or(u16::MAX));
+    if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
+        copy_span(bx, s, d, sig, items, off, cx);
+    } else {
+        let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
+        explorer_common::deep(|| paint_scoped(bx, items, off, cx));
+        let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
+        let sig = box_sig(bx);
+        cx.record_span(bx, start, end, effective_off(bx, off), sig, Box::default());
+    }
+    cx.path.pop();
+}
+
+/// Variante pour les porteurs inline reportés — leur vrai
+/// chemin (captured à l'enfilement, dans le parent direct)
+/// remplace le chemin courant le temps de l'émission, sinon
+/// leur span s'enregistrerait sous le chemin de l'ancêtre
+/// drainant et pourrait entrer en collision avec un vrai
+/// enfant de celui-ci.
+fn emit_scoped_at<'a>(
+    path: Vec<u16>,
+    bx: &'a LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    cx: &mut PaintCx<'a>,
+) {
+    let saved = std::mem::replace(&mut cx.path, path);
+    if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
+        copy_span(bx, s, d, sig, items, off, cx);
+    } else {
+        let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
+        explorer_common::deep(|| paint_scoped(bx, items, off, cx));
+        let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
+        let sig = box_sig(bx);
+        cx.record_span(bx, start, end, effective_off(bx, off), sig, Box::default());
+    }
+    cx.path = saved;
+}
+
+/// `off` réellement appliqué aux items de `bx` —
+/// `position: fixed` ré-initialise l'offset (ses coords
+/// sont viewport). `paint_box` fait de même : `reuse_delta`
+/// et `copy_span` doivent comparer/enregistrer sur cette
+/// base, sinon un fixe se voit appliquer le scroll du parent.
+fn effective_off(bx: &LayoutBox, off: (f32, f32)) -> (f32, f32) {
+    if bx.position == Position::Fixed {
         (0.0, 0.0)
     } else {
         off
-    };
-    // `transform` : matrice poussée avant tout item du
-    // sous-arbre, retirée après (imbrication additive).
-    let tf = box_transform(bx, &shifted(bx.rect, off));
-    if let Some(m) = tf {
-        items.push(DisplayItem::PushTransform(m));
     }
-    paint_self(bx, items, off, vp, images);
-    // Élément remplacé : bitmap par-dessus bordure (contenu —
-    // ordre CSS 2.1 App. E : fond → bordure → contenu).
+}
+
+/// Δ de translation si le sous-arbre `bx` est ré-utilisable
+/// en entier — `Some((d, span, sig))`, `None` = ré-émission
+/// requise. **Invariant** : la copie plate d'une plage n'est
+/// valide que si tous les items bougent du même Δ — chaque
+/// descendant doit retourner le même Δ (un `fixed` interne
+/// donne Δ=0 ≠ Δ du parent → le parent descend ; un sticky
+/// est couvert par le flag `F_STICKY_KID` du parent).
+fn reuse_delta<'a>(
+    bx: &'a LayoutBox,
+    off: (f32, f32),
+    cx: &mut PaintCx<'a>,
+) -> Option<((f32, f32), &'a SpanRec, u64)> {
+    let inc = cx.inc?;
+    let s = inc.spans.get(cx.path.as_slice())?;
+    // Jamais de ré-usage sur média remplacé (bitmap tardif) ou
+    // fond `attachment:fixed` (origine ancrée viewport — sa
+    // translation divergerait de la géométrie).
+    if s.flags & F_NO_REUSE != 0 {
+        return None;
+    }
+    // Même objet LayoutBox (mutation in-place) : `lines`
+    // (Vec réassigné par `relay`) et les enfants sont les
+    // champs réalloués sur une boîte préservée — comparés ;
+    // la signature est sautée (contrat consigné dans
+    // `SpanRec::bx_ptr`, **vérifié** en debug ci-dessous).
+    // `bx.node` n'est **pas** comparé : `remap_box_nodes`
+    // le réécrit sur toute boîte préservée à chaque reparse
+    // — et il n'est pas émis dans les items.
+    // `kids_ptr` est le discriminant des remplacements
+    // `*bx = fresh` : le slot garde son adresse mais le Vec
+    // de `fresh` est alloué avant le drop de l'ancien —
+    // disjoint. Une **feuille** (children + lines vides) n'a
+    // que des ptrs dangling : rien ne la distingue d'une
+    // remplacée au même slot → signature obligatoire.
+    let leaf = bx.children.is_empty() && bx.lines.is_empty();
+    let same_obj = !leaf
+        && cx.same_tree
+        && s.bx_ptr == std::ptr::from_ref(bx) as usize
+        && s.lines_ptr == bx.lines.as_ptr() as usize
+        && s.kids_ptr
+            == if bx.children.is_empty() {
+                usize::MAX
+            } else {
+                bx.children.as_ptr() as usize
+            }
+        && s.kids_len == u32::try_from(bx.children.len()).unwrap_or(u32::MAX);
+    let sig = if same_obj {
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
+            box_sig(bx),
+            s.sig,
+            "contrat R-37 violé : champ peint muté in-place              hors {{rect, node, lines, slot}} sur boîte préservée"
+        );
+        s.sig
+    } else {
+        let sig = box_sig(bx);
+        if sig != s.sig {
+            return None;
+        }
+        sig
+    };
+    if s.rect.width.to_bits() != bx.rect.width.to_bits()
+        || s.rect.height.to_bits() != bx.rect.height.to_bits()
+    {
+        return None;
+    }
+    let eff = effective_off(bx, off);
+    let d = (
+        bx.rect.x - s.rect.x + eff.0 - s.off.0,
+        bx.rect.y - s.rect.y + eff.1 - s.off.1,
+    );
+    // Enfant sticky → le wrap de décalage vit dans la plage
+    // du parent et dépend du scroll non linéairement — toute
+    // translation non nulle impose la ré-émission du parent.
+    if s.flags & F_STICKY_KID != 0 && d != (0.0, 0.0) {
+        return None;
+    }
+    for (i, c) in bx.children.iter().enumerate() {
+        cx.path.push(u16::try_from(i).unwrap_or(u16::MAX));
+        let cof = effective_off(c, off);
+        let cd = explorer_common::deep(|| reuse_delta(c, cof, cx));
+        cx.path.pop();
+        // Translation uniforme exigée — un descendant qui
+        // diverge (fixed, sale) interdit la copie plate.
+        if cd.map(|(cd, _, _)| cd) != Some(d) {
+            return None;
+        }
+    }
+    Some((d, s, sig))
+}
+
+/// Copie la plage `s` en translatant chaque item de `d` et
+/// enregistre le nouveau span de `bx`.
+#[allow(clippy::too_many_arguments)]
+fn copy_span(
+    bx: &LayoutBox,
+    s: &SpanRec,
+    d: (f32, f32),
+    sig: u64,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    cx: &mut PaintCx,
+) {
+    let Some(inc) = cx.inc else { return };
+    let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
+    for it in &inc.items[(s.start as usize)..(s.end as usize)] {
+        items.push(translate_item(it, d));
+    }
+    let eff = effective_off(bx, off);
+    // `escaped` est préservé : les chemins relatifs restent
+    // valides dans le nouvel arbre (même sous-arbre).
+    cx.record_span(
+        bx,
+        start,
+        u32::try_from(items.len()).unwrap_or(u32::MAX),
+        eff,
+        sig,
+        s.escaped.clone(),
+    );
+}
+
+/// `bx` a-t-il du contenu remplacé/retardé — bitmap `<img>`,
+/// `background-image`, svg, `<canvas>` (arrivent après le
+/// paint, `Arc` nouvelle à chaque build) → ré-usage interdit.
+fn is_media(bx: &LayoutBox, images: &crate::PaintImages) -> bool {
+    bx.node.is_some_and(|n| {
+        images.replaced.contains_key(&n)
+            || images.svgs.contains_key(&n)
+            || images.backgrounds.contains_key(&n)
+            || images.canvases.contains_key(&n)
+    }) || bx.style.get("background-attachment") == Some("fixed")
+}
+
+/// FNV-1a — fingerprint interne des spans (signature de
+/// boîte + clés de `spans`). Pas cryptographique : le rôle
+/// est de rejeter une égalité fausse, et le volume (~10⁴
+/// spans par paint) exige ~1 ns/octet, pas `SipHash`.
+#[derive(Clone)]
+pub struct SigHasher(u64);
+
+impl Default for SigHasher {
+    fn default() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+}
+
+impl SigHasher {
+    #[inline]
+    fn mix(&mut self, v: u64) {
+        for b in v.to_ne_bytes() {
+            self.0 = (self.0 ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+
+    #[inline]
+    fn mix_f32(&mut self, v: f32) {
+        self.mix(u64::from(v.to_bits()));
+    }
+}
+
+impl std::hash::Hasher for SigHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0 ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+}
+
+/// Table de correspondance boîte→plage — hasher rapide (les
+/// clés sont des chemins courts `u16`, hashés à chaque
+/// span produit *et* cherché).
+pub type SpanMap =
+    std::collections::HashMap<Box<[u16]>, SpanRec, std::hash::BuildHasherDefault<SigHasher>>;
+
+/// Fingerprint des champs lus par l'émission hors géométrie —
+/// deux boîtes de `sig` égale produisent des items égaux aux
+/// mêmes positions (modulo `rect`/`off`, comparés à part).
+/// Couvre kind/positions/overflow/z-index/checked/intrinsic/
+/// texte/style/lignes (rects de fragments, contenu texte et
+/// **identité** des runs shapés — le `Arc` refait à chaque
+/// layout, donc conservateur : même texte re-shapé ≠ réusé).
+fn box_sig(bx: &LayoutBox) -> u64 {
+    use std::hash::Hasher;
+    let mut h = SigHasher::default();
+    // Discriminants d'enums → petit rang stable.
+    h.mix(match bx.kind {
+        BoxKind::Block => 0,
+        BoxKind::ListItem => 1,
+        BoxKind::Inline => 2,
+        BoxKind::Text => 3,
+        BoxKind::AnonymousBlock => 4,
+    });
+    h.mix(match bx.position {
+        Position::Static => 0,
+        Position::Relative => 1,
+        Position::Absolute => 2,
+        Position::Fixed => 3,
+        Position::Sticky => 4,
+    });
+    h.mix(match bx.float {
+        Float::None => 0,
+        Float::Left => 1,
+        Float::Right => 2,
+    });
+    h.mix(match bx.overflow {
+        Overflow::Visible => 0,
+        Overflow::Hidden => 1,
+        Overflow::Scroll => 2,
+        Overflow::Auto => 3,
+    });
+    h.mix(u64::from(u32::from_ne_bytes(bx.z_index.to_ne_bytes())));
+    h.mix(u64::from(bx.control_checked));
+    let (iw, ih) = bx.intrinsic.unwrap_or((0.0, 0.0));
+    h.mix_f32(iw);
+    h.mix_f32(ih);
+    if let Some(t) = &bx.text {
+        h.write(t.as_bytes());
+    }
+    h.mix(0x9e37);
+    // Style : itération d'ordre instable → hash par paire,
+    // pli commutatif (XOR) — ordre-insensible.
+    let mut sh = 0u64;
+    for (k, v) in bx.style.iter() {
+        let mut ph = SigHasher::default();
+        ph.write(k.as_bytes());
+        ph.write(v.as_bytes());
+        sh ^= ph.finish();
+    }
+    h.mix(sh);
+    for line in &bx.lines {
+        for f in &line.fragments {
+            // La géométrie des fragments (rect, baseline,
+            // marges, trail_w) est **dérivée** des entrées
+            // signées (style + texte + taille du conteneur,
+            // comparée à part) — et `translate_y` la décale
+            // in-place sous `relayout_subtree` : l'inclure
+            // violerait le contrat du fast-path. Elle est
+            // couverte par `s.rect` + l'invariant Δ-uniforme.
+            h.write(f.text.as_bytes());
+            h.mix(u64::from(f.atomic));
+            // Contenu du run (pas le ptr `Arc` — instable
+            // entre passes) : une fonte chargée entre deux
+            // builds change les glyphes → la signature doit
+            // l'attraper. Même ordre de coût que le texte.
+            if let Some(r) = &f.shaped {
+                h.mix(r.glyphs.len() as u64);
+                for g in &r.glyphs {
+                    h.mix(u64::from(g.id));
+                    h.mix_f32(g.advance);
+                    h.mix_f32(g.offset_x);
+                    h.mix_f32(g.offset_y);
+                }
+            }
+            let mut fh = 0u64;
+            for (k, v) in f.style.iter() {
+                let mut ph = SigHasher::default();
+                ph.write(k.as_bytes());
+                ph.write(v.as_bytes());
+                fh ^= ph.finish();
+            }
+            h.mix(fh);
+        }
+    }
+    h.finish()
+}
+
+/// Item translaté de `d` — utilisé par les copies de plage
+/// incrémentales. `d = (0,0)` → clone simple.
+fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
+    use DisplayItem as D;
+    if d == (0.0, 0.0) {
+        return it.clone();
+    }
+    match it {
+        D::FillRect { rect, color } => D::FillRect {
+            rect: shifted(*rect, d),
+            color: *color,
+        },
+        D::Border {
+            rect,
+            widths,
+            colors,
+            styles,
+        } => D::Border {
+            rect: shifted(*rect, d),
+            widths: *widths,
+            colors: *colors,
+            styles: *styles,
+        },
+        D::Text {
+            origin,
+            run,
+            font,
+            color,
+            size_px,
+        } => D::Text {
+            origin: (origin.0 + d.0, origin.1 + d.1),
+            run: run.clone(),
+            font: font.clone(),
+            color: *color,
+            size_px: *size_px,
+        },
+        D::Placeholder { rect, label } => D::Placeholder {
+            rect: shifted(*rect, d),
+            label: label.clone(),
+        },
+        D::Image { rect, img } => D::Image {
+            rect: shifted(*rect, d),
+            img: img.clone(),
+        },
+        D::BackgroundImage {
+            rect,
+            img,
+            repeat,
+            origin,
+        } => D::BackgroundImage {
+            rect: shifted(*rect, d),
+            img: img.clone(),
+            repeat: *repeat,
+            origin: (origin.0 + d.0, origin.1 + d.1),
+        },
+        D::PushClip(r) => D::PushClip(shifted(*r, d)),
+        D::PushTransform(m) => {
+            let mut m = *m;
+            m.tx += d.0;
+            m.ty += d.1;
+            D::PushTransform(m)
+        }
+        D::PopClip | D::PopTransform => it.clone(),
+    }
+}
+
+/// Élément remplacé : bitmap par-dessus bordure (contenu —
+/// ordre CSS 2.1 App. E : fond → bordure → contenu).
+fn paint_replaced(
+    bx: &LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    images: &crate::PaintImages,
+) {
     if let Some(img) = bx.node.and_then(|n| {
         images
             .replaced
@@ -1236,6 +1884,31 @@ fn paint_box<'a>(
             img,
         });
     }
+}
+
+fn paint_box<'a>(
+    bx: &'a LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    cx: &mut PaintCx<'a>,
+    defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+) {
+    // `position: fixed` est ancrée au viewport : son sous-arbre
+    // ignore le scroll.
+    let off = if bx.position == Position::Fixed {
+        (0.0, 0.0)
+    } else {
+        off
+    };
+
+    // `transform` : matrice poussée avant tout item du
+    // sous-arbre, retiré après (imbrication additive).
+    let tf = box_transform(bx, &shifted(bx.rect, off));
+    if let Some(m) = tf {
+        items.push(DisplayItem::PushTransform(m));
+    }
+    paint_self(bx, items, off, cx.vp, cx.images);
+    paint_replaced(bx, items, off, cx.images);
     if !bx.children.is_empty() {
         // Clip sur le padding box (approx : border box moins les
         // bordures — on garde le rect entier, documenté).
@@ -1252,71 +1925,77 @@ fn paint_box<'a>(
         // les blocs en flux (étape 2 de l'ordre de peinture —
         // le fond d'erreur `z-index:-1` des reftests WPT se
         // peint sous la grille, pas dessus).
-        let mut scoped_defer: Vec<&LayoutBox> = Vec::new();
-        let d: &mut Vec<&LayoutBox> = if inline_scope(bx) {
+        let mut scoped_defer: Vec<(Vec<u16>, &LayoutBox)> = Vec::new();
+        let d: &mut Vec<(Vec<u16>, &LayoutBox)> = if inline_scope(bx) {
             &mut scoped_defer
         } else {
             defer
         };
         let bound = bx.rect;
         let in_flow = |c: &&LayoutBox| matches!(c.position, Position::Static | Position::Sticky);
-        let mut neg_z: Vec<&LayoutBox> = bx
+        let mut neg_z: Vec<(usize, &LayoutBox)> = bx
             .children
             .iter()
-            .filter(|c| !in_flow(c) && c.z_index < 0)
+            .enumerate()
+            .filter(|(_, c)| !in_flow(c) && c.z_index < 0)
             .collect();
-        neg_z.sort_by_key(|c| c.z_index);
-        for child in neg_z {
-            explorer_common::deep(|| paint_scoped(child, items, off, vp, images));
+        neg_z.sort_by_key(|(_, c)| c.z_index);
+        for (ci, child) in neg_z {
+            emit_scoped(ci, child, items, off, cx);
         }
         // (a) blocs en flux — `sticky` garde sa translation de
         // peinture ; récursion `deep` ∝ profondeur (R-24).
-        for child in &bx.children {
+        for (ci, child) in bx.children.iter().enumerate() {
             if !in_flow(&child) || child.float != Float::None || inline_carrier(child) {
                 continue;
             }
-            let stick = sticky_offset(child, off, bound, vp);
+            let stick = sticky_offset(child, off, bound, cx.vp);
             if stick != (0.0, 0.0) {
                 items.push(DisplayItem::PushTransform(
                     tiny_skia::Transform::from_translate(stick.0, stick.1),
                 ));
             }
-            explorer_common::deep(|| paint_box(child, items, off, vp, images, d));
+            emit_child(ci, child, items, off, cx, d);
             if stick != (0.0, 0.0) {
                 items.push(DisplayItem::PopTransform);
             }
         }
         // (b) flottants non positionnés — portée propre.
-        for child in &bx.children {
+        for (ci, child) in bx.children.iter().enumerate() {
             if in_flow(&child) && child.float != Float::None {
-                explorer_common::deep(|| paint_scoped(child, items, off, vp, images));
+                emit_scoped(ci, child, items, off, cx);
             }
         }
         // (c) porteurs inline — reportés au contexte englobant.
-        for child in &bx.children {
+        for (ci, child) in bx.children.iter().enumerate() {
             if in_flow(&child) && inline_carrier(child) {
-                d.push(child);
+                // Le chemin complet est capturé ici — le drain
+                // peut avoir lieu chez un ancêtre englobant.
+                let mut p = cx.path.clone();
+                p.push(u16::try_from(ci).unwrap_or(u16::MAX));
+                d.push((p, child));
             }
         }
         // Si cette boîte ferme la portée : drainer ses inlines
         // dans l'ordre de collecte (étape 5).
         let mut i = 0;
         while i < scoped_defer.len() {
-            let c = scoped_defer[i];
+            let (p, c) = scoped_defer[i].clone();
             i += 1;
-            paint_scoped(c, items, off, vp, images);
+            emit_scoped_at(p, c, items, off, cx);
         }
         // Enfants positionnés `z-index` ≥ 0 ensuite, triés
         // (stable) — les négatifs ont déjà été peints sous
         // les blocs en flux.
-        let mut positioned: Vec<&LayoutBox> = bx
+        let mut positioned: Vec<(usize, &LayoutBox)> = bx
             .children
             .iter()
-            .filter(|c| !in_flow(c) && c.z_index >= 0)
+            .enumerate()
+            .filter(|(_, c)| !in_flow(c) && c.z_index >= 0)
             .collect();
-        positioned.sort_by_key(|c| c.z_index);
-        for child in positioned {
-            explorer_common::deep(|| paint_scoped(child, items, off, vp, images));
+        positioned.sort_by_key(|(_, c)| c.z_index);
+        for (ci, child) in positioned {
+            emit_scoped(ci, child, items, off, cx);
         }
         if clipped {
             items.push(DisplayItem::PopClip);

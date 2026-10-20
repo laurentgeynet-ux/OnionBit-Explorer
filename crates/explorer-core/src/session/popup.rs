@@ -179,7 +179,7 @@ pub(crate) fn append_select_popup(
         let baseline = row.y + (row.height - lh).max(0.0) / 2.0 + run.metrics.ascent;
         list.items.push(DisplayItem::Text {
             origin: (row.x + PAD_X, baseline),
-            run,
+            run: std::sync::Arc::new(run),
             font: freq.clone(),
             color: if *selected { white } else { ink },
             size_px,

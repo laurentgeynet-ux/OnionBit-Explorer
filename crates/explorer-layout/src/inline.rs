@@ -55,7 +55,7 @@ pub struct Fragment {
     /// Distance du haut du fragment à sa baseline.
     pub baseline: f32,
     /// Glyphes shapés si la fonte était disponible.
-    pub shaped: Option<ShapedRun>,
+    pub shaped: Option<std::sync::Arc<ShapedRun>>,
     /// Avance du whitespace FINAL du fragment — retirée de
     /// `rect.width` à la fermeture quand le fragment est le
     /// dernier de la ligne (§16.6.1 : les espaces de fin de

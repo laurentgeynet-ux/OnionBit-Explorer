@@ -54,8 +54,7 @@ use explorer_layout::{
 };
 use explorer_render::canvas::CanvasTable;
 use explorer_render::{
-    build_display_list_full, collect_data_images, rasterize, DisplayItem, DisplayList, Frame,
-    PaintImages, WebFontSource,
+    collect_data_images, rasterize, DisplayItem, DisplayList, Frame, PaintImages, WebFontSource,
 };
 
 /// Complément de feuille UA pour `<video>`/`<audio>` sans
@@ -119,6 +118,10 @@ pub(crate) struct PaintPayload {
     pub dom: Option<Dom>,
     /// Arbre de boîtes posé.
     pub tree: Option<LayoutBox>,
+    /// Epoch de `tree` — bumpée à chaque **remplacement**
+    /// (`relayout_subtree` mute en place → epoch stable ⇒
+    /// fast-path pointeur du build incrémental, R-37).
+    pub tree_epoch: u64,
     /// Display list de la dernière peinture (diff dirty).
     pub list: Option<DisplayList>,
     /// Frame rasterisée courante.
@@ -203,6 +206,7 @@ impl Tab {
         PaintPayload {
             dom: self.dom.take(),
             tree: self.tree.take(),
+            tree_epoch: self.tree_epoch,
             list: self.list.take(),
             frame: self.frame.take(),
             png: self.png.take(),
@@ -228,6 +232,7 @@ impl Tab {
     pub(crate) fn put_paint(&mut self, p: PaintPayload) {
         self.dom = p.dom;
         self.tree = p.tree;
+        self.tree_epoch = p.tree_epoch;
         self.list = p.list;
         self.frame = p.frame;
         self.png = p.png;
@@ -424,6 +429,7 @@ pub(crate) fn relayout_dom_payload(
     layout_tree(&mut bx, vw, &block);
     p.doc_h = bx.rect.height;
     p.tree = Some(bx);
+    p.tree_epoch = p.tree_epoch.wrapping_add(1);
     p.images.svgs = svgs;
     // `<canvas>` 2D (JS-C28) : op-lists cumulées du miroir,
     // re-résolues par chemin d'élément dans `dom`.
@@ -440,7 +446,19 @@ pub(crate) fn repaint_payload(p: &mut PaintPayload, ctx: &ApplyCtx) -> Result<()
         return Err(CoreError::EmptyDocument);
     };
     let (vw, vh) = ctx.viewport;
-    let mut list = build_display_list_full(bx, vw, vh, p.scroll_y, &p.images);
+    // R-37 : build incrémental — les sous-arbres inchangés
+    // (même signature `box_sig`, même taille, Δ uniforme)
+    // sont copiés depuis la liste précédente au lieu d'être
+    // ré-émis ; `prev=None` ou largeur changée → plein.
+    let mut list = explorer_render::build_display_list_incremental(
+        bx,
+        vw,
+        vh,
+        (0.0, p.scroll_y),
+        &p.images,
+        p.list.as_ref(),
+        p.tree_epoch,
+    );
     if let Some(f) = &p.find {
         let base = Color {
             r: 255,
@@ -466,7 +484,12 @@ pub(crate) fn repaint_payload(p: &mut PaintPayload, ctx: &ApplyCtx) -> Result<()
     if list.height > frame_cap {
         list.height = frame_cap;
     }
-    cull_display_list(&mut list);
+    // Le diff se calcule sur les listes **non cullées** :
+    // la cullée stockée perdait ses `spans` (indices
+    // décalés → purgés), ce qui tuait le build incrémental
+    // à chaque frame dès qu'un item sortait de la vue.
+    // Le diff non cullé est d'ailleurs plus précis — plus
+    // de faux changements à la frontière de cull.
     let regions = p.list.as_ref().map_or_else(
         || {
             vec![Rect {
@@ -513,7 +536,16 @@ pub(crate) fn repaint_payload(p: &mut PaintPayload, ctx: &ApplyCtx) -> Result<()
             )
         })
         .map_or_else(
-            || rasterize(&list, &ctx.fonts as &dyn FontSource, ctx.scale),
+            || {
+                // Le cull ne sert que le plein cadre (sauter
+                // les items hors vue) — `rasterize_dirty`
+                // est déjà borné par ses fenêtres de damage.
+                // La cullée est une copie jetable : `list`
+                // garde ses `spans` pour le prochain build.
+                let mut culled = list.clone();
+                cull_display_list(&mut culled);
+                rasterize(&culled, &ctx.fonts as &dyn FontSource, ctx.scale)
+            },
             Some,
         )
         .ok_or(CoreError::FrameTooBig)?;

@@ -160,6 +160,10 @@ pub(crate) struct Tab {
     dom: Option<Dom>,
     /// Arbre de boîtes posé.
     tree: Option<LayoutBox>,
+    /// Epoch de `tree` — bumpée à chaque remplacement
+    /// (`relayout_subtree` mute en place → epoch stable ⇒
+    /// fast-path pointeur du build incrémental R-37).
+    tree_epoch: u64,
     /// Display list courante.
     list: Option<DisplayList>,
     /// Frame rasterisée.
@@ -323,6 +327,8 @@ pub(crate) struct PageSnapshot {
     dom: Option<Dom>,
     /// Arbre de boîtes posé.
     tree: Option<LayoutBox>,
+    /// Epoch de `tree` (R-37 — cf. `Tab::tree_epoch`).
+    tree_epoch: u64,
     /// Display list (diff des dirty-rects au retour).
     list: Option<DisplayList>,
     /// Frame rasterisée (servie dès la restauration).
@@ -638,6 +644,7 @@ impl Session {
                 doc_h: 0.0,
                 dom: None,
                 tree: None,
+                tree_epoch: 0,
                 list: None,
                 frame: None,
                 png: None,

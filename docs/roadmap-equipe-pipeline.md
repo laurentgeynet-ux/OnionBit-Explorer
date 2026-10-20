@@ -547,9 +547,8 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   identiques). MediaSurface inchangée : les rects média
   restent relus du boxtree après relayout complet — le
   dirty ne borne que le raster, jamais le layout.
-  Reste ouvert dans le ticket : display-list
-  incrémentale (re-jouer seulement les boîtes touchées)
-  et PNG streamé/borné. **Dette consignée** :
+  Reste ouvert dans le ticket : PNG streamé/borné.
+  **Dette consignée** :
   `DAMAGE_INFLATE_CSS = 2` est une borne jamais validée
   par mutation — les tests couvrent l'AA des formes
   testées, pas un overhang glyphe extrême (italique,
@@ -560,6 +559,63 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (`ttf-parser`) au lieu de la boîte de métriques — la
   seconde supprime la dépendance à l'inflation pour le
   texte.
+  — sous-entrée « **display-list incrémentale** »
+  **livrée** : `build_display_list_incremental(prev,
+  tree_epoch)` copie les plages d'items des sous-arbres
+  prouvés équivalents au lieu de les ré-émettre. Index
+  boîte→plage : `DisplayList.spans` (`SpanMap` chemin
+  d'enfants → `SpanRec{start,end,rect,off,sig,flags,
+  bx_ptr,lines_ptr,kids_ptr,kids_len,escaped}`).
+  Correspondance par **chemin d'index** (les `NodeId`
+  sont remappés au reparse — instables) ; une plage ne
+  se copie que si signature de contenu `box_sig`
+  (kind/position/float/overflow/z-index/checked/
+  intrinsic/texte/style/fragments) + taille identiques
+  et **Δ uniforme récursif** (un descendant divergent —
+  `fixed`, sale, restructuré — fait descendre le parent).
+  `F_DEFERS` + `escaped` : les porteurs inline reportés
+  restent drainés par l'ancêtre de portée (copie plate
+  interdite, re-push des chemins). `off` séparé de
+  `rect` → le scroll copie translaté et `fixed` garde
+  son ancre viewport (`effective_off`).
+  **Fast-path `tree_epoch`** : le relayout incrémental
+  session mute `p.tree` **en place** — epoch inchangée ⇒
+  même objet ⇒ identité par pointeurs `{bx_ptr,
+  kids_ptr, lines_ptr, kids_len}` sans signature (les
+  `*bx = fresh` de `relayout_subtree` allouent avant de
+  libérer → adresses disjointes garanties ; feuille =
+  ptrs dangling → signature toujours). Contrat
+  auto-testé : en `debug_assertions` la signature reste
+  vérifiée quand le fast-path tire — il a attrapé que
+  `translate_y` déplace `frag.rect` in-place (géométrie
+  retirée de `box_sig` — dérivée, couverte par
+  `s.rect`+Δ). `FontCache::shape` → `Arc<ShapedRun>`
+  (runs partagés — mémoire dédupliquée) ; `box_sig`
+  hache le **contenu** des glyphes (fonte chargée entre
+  builds ⇒ glyphes différents ⇒ détecté).
+  Côté session : `p.list` est stockée **non cullée** —
+  `cull_display_list` purgeait les spans à chaque frame
+  sur page longue (indices décalés) ; la cullée est une
+  copie jetable réservée au plein cadre, le diff se fait
+  non cullé (plus précis : plus de churn à la frontière).
+  `tree_epoch` propagé `Tab`↔`PaintPayload`↔`PageSnapshot`
+  (bfcache : même arbre ⇒ même epoch, ptrs valides).
+  **Équivalence d'abord** : 15 tests `incremental_list`
+  — dump item-par-item + frame pixel-à-pixel (identique,
+  texte, restyle sans géométrie, translation rigide,
+  non-rigide, scroll, fixed-sous-scroll, sticky, clip
+  overflow, floats/positionnés, porteur inline+drain,
+  image, insertion de frère = chemins décalés, frame
+  session). La méthode a attrapé deux vrais bugs au
+  premier atterrissage : drains inline perdus (span
+  enregistré avant le drain → `F_DEFERS`/`escaped`) et
+  `fixed` translaté sous scroll (`effective_off`).
+  Mesure (release, doc 84 000 items / 60 002 spans) :
+  scroll **74 ms vs 197 ms (×2,7)**, restyle locale
+  142 vs 196 (×1,4), shift 161 vs 206 (×1,3) — le
+  fast-path pointeur évite la signature ; la signature-
+  contenu matche désormais **entre arbres** (glyphes,
+  pas pointeurs).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

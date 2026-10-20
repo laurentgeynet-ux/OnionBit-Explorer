@@ -161,6 +161,7 @@ pub(crate) fn display_item_bounds(item: &DisplayItem) -> Option<Rect> {
 /// garderait de toute façon plus de contenu, jamais moins).
 pub(crate) fn cull_display_list(list: &mut DisplayList) {
     let (vw, vh) = (list.width, list.height);
+    let n0 = list.items.len();
     let mut in_transform = 0usize;
     list.items.retain(|item| match item {
         DisplayItem::PushTransform(_) => {
@@ -180,6 +181,13 @@ pub(crate) fn cull_display_list(list: &mut DisplayList) {
                 })
         }
     });
+    // Le retrait d'items décale les indices : les `spans`
+    // (index boîte→plage pour le build incrémental R-37)
+    // pointent sur l'ancienne séquence — purgés, le prochain
+    // build ré-émettra sans copie fautive.
+    if list.items.len() != n0 {
+        list.spans.clear();
+    }
 }
 
 /// Re-mappe les `NodeId` des boîtes conservées **avant** le

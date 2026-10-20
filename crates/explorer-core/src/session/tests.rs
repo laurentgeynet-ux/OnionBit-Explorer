@@ -96,6 +96,7 @@ fn paintless_snapshot_repairs_on_restore() {
             doc_h: 0.0,
             dom: Some(test_dom("<p>page B gelée tôt</p>")),
             tree: None,
+            tree_epoch: 0,
             list: None,
             frame: None,
             png: None,
@@ -157,6 +158,8 @@ fn cull_keeps_only_in_frame_items() {
         ],
         width: 100.0,
         height: 100.0,
+        spans: explorer_render::SpanMap::default(),
+        tree_epoch: 0,
     };
     cull_display_list(&mut list);
     let fills = list

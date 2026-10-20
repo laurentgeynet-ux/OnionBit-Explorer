@@ -210,19 +210,20 @@ fn cache_metrics_et_shape_coherents() {
     for _ in 0..3 {
         assert_eq!(fc.metrics(&src, &req, 10.0), Some(direct));
     }
-    // Shape : même entrée → même run, sans re-shaping.
+    // Shape : même entrée → même run (l'`Arc` est partagé),
+    // sans re-shaping.
     let direct_run = font::shape(&src.ttf, "abcd", 20.0, false).expect("shape");
+    let first = fc.shape(&src, &req, "abcd", 20.0, false).expect("shape");
+    assert_eq!(*first, direct_run);
     for _ in 0..3 {
-        assert_eq!(
-            fc.shape(&src, &req, "abcd", 20.0, false).as_ref(),
-            Some(&direct_run)
-        );
+        let hit = fc.shape(&src, &req, "abcd", 20.0, false).expect("shape");
+        assert!(std::sync::Arc::ptr_eq(&hit, &first));
     }
     // Texte différent = entrée différente.
     let other = fc
         .shape(&src, &req, "xy", 20.0, false)
         .expect("autre pièce");
-    assert_ne!(other, direct_run);
+    assert_ne!(*other, direct_run);
     // Une seule résolution de fonte pour tout.
     assert_eq!(src.calls.get(), 1);
 }

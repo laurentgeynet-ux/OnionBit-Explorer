@@ -32,6 +32,7 @@ impl Tab {
             doc_h: self.doc_h,
             dom: self.dom.take(),
             tree: self.tree.take(),
+            tree_epoch: self.tree_epoch,
             list: self.list.take(),
             frame: self.frame.take(),
             png: self.png.take(),
@@ -76,6 +77,7 @@ impl Tab {
         self.doc_h = snap.doc_h;
         self.dom = snap.dom;
         self.tree = snap.tree;
+        self.tree_epoch = snap.tree_epoch;
         self.list = snap.list;
         self.frame = snap.frame;
         self.png = snap.png;

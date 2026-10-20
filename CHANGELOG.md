@@ -25,6 +25,47 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `controls` → tap = play/pause (v1). FFI : stubs
   `UnsupportedError` (variante in-process au premier hôte
   FFI — journal d'interface).
+- **R-37 — Display-list incrémentale** (`explorer-render`,
+  `explorer-layout`, `explorer-core`) :
+  `build_display_list_incremental(prev, tree_epoch)`
+  copie les plages d'items des sous-arbres prouvés
+  équivalents au lieu de les ré-émettre —
+  `DisplayList.spans` indexe chaque boîte (chemin
+  d'enfants) vers sa plage `[start,end)` avec rect,
+  offset effectif, signature de contenu (`box_sig`) et
+  identité mémoire. Une plage ne se copie que si
+  signature + taille identiques **et** translation
+  uniforme récursive — un descendant `fixed`, sale ou
+  restructuré fait redescendre le parent (ré-émission
+  locale, jamais de copie fautive). Porteurs inline
+  reportés : `F_DEFERS` + chemins `escaped` re-poussés
+  au drain englobant (le premier essai faisait
+  disparaître le texte — attrapé par l'équivalence).
+  **Fast-path `tree_epoch`** : le relayout incrémental
+  session mute `p.tree` en place → epoch inchangée ⇒
+  identité par pointeurs `{bx_ptr, kids_ptr, lines_ptr,
+  kids_len}` sans signature ; `*bx = fresh` alloue avant
+  de libérer → adresses disjointes garanties, feuilles
+  (ptrs dangling) exclues du fast-path. Contrat
+  auto-testé : en debug la signature reste vérifiée
+  quand le fast-path tire — il a attrapé `translate_y`
+  (géométrie de fragments mutée in-place → retirée de
+  `box_sig`, dérivée et couverte par rect+Δ).
+  `FontCache::shape` retourne `Arc<ShapedRun>` (runs
+  partagés, mémoire dédupliquée) ; `box_sig` hache le
+  **contenu** des glyphes (une fonte chargée entre
+  builds est détectée). Session : `p.list` stockée non
+  cullée (le cull purgeait les spans à chaque frame) —
+  cullée = copie jetable du plein cadre, diff calculé
+  non cullé (plus précis). **Équivalence d'abord** :
+  15 tests `incremental_list` assertent dump
+  item-par-item + frame pixel-à-pixel sur identique,
+  texte, restyle, translations rigide/non-rigide,
+  scroll, fixed/sticky, clip, floats/positionnés,
+  inline drains, image, insertion de frère, frame
+  session. Mesure release (doc 84 000 items / 60 002
+  spans) : scroll **74 vs 197 ms (×2,7)**, restyle
+  142 vs 196 (×1,4), shift 161 vs 206 (×1,3).
 - **R-37 — Raster borné par dirty-rects** (`explorer-render`,
   `explorer-core`) : `rasterize_dirty` repeint seulement
   les fenêtres de `DisplayList::changed_rects` par-dessus
