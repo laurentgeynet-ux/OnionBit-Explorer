@@ -558,6 +558,45 @@ fn attribute_entities_and_case() {
     );
 }
 
+#[test]
+fn text_entities_decoded_and_roundtrip() {
+    // JS-C46 : les références de caractères du texte injecté
+    // sont décodées à l'entrée — `textContent` lit le caractère
+    // réel et la resérialisation ne l'échappe qu'une fois
+    // (`&nbsp;` injecté → `\u{A0}` → `&nbsp;`, jamais
+    // `&amp;nbsp;` affiché en clair après re-parse).
+    assert_eq!(
+        ev_in(
+            "<div id=a>t</div>",
+            "var el = document.getElementById('a');\
+             el.innerHTML = 'caf&eacute;&nbsp;x&#8217;y&#x2019;&copy;';\
+             el.textContent"
+        ),
+        "café\u{A0}x’y’©"
+    );
+    // Round-trip : le texte décodé `<`/`&` re-échappe une
+    // seule fois à la lecture d'innerHTML.
+    assert_eq!(
+        ev_in(
+            "<div id=a>t</div>",
+            "var el = document.getElementById('a');\
+             el.innerHTML = 'a &lt; b &amp; c';\
+             el.innerHTML"
+        ),
+        "a &lt; b &amp; c"
+    );
+    // Inconnue : passthrough verbatim tolérant.
+    assert_eq!(
+        ev_in(
+            "<div id=a>t</div>",
+            "var el = document.getElementById('a');\
+             el.innerHTML = 'x&notanentity;y';\
+             el.textContent"
+        ),
+        "x&notanentity;y"
+    );
+}
+
 // -- browser surface (JS-7e): cookie, storage, location, history -------
 
 /// In-memory `CookieJar` — `set` keeps raw `k=v` pairs (attrs ignored).

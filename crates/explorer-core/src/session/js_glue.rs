@@ -202,7 +202,7 @@ impl Session {
             tracing::debug!(tab, error = %e, "module en échec");
             let _ = self.events.send(CoreEvent::PipelineError {
                 tab: Some(tab),
-                message: e.to_string(),
+                message: format!("{e} — module «{}»", me.name),
             });
         }
     }
@@ -253,12 +253,16 @@ impl Session {
 
     /// `eval` avec rapport : un échec émet `PipelineError`
     /// sans faire échouer la page (dégradation, règle 3).
+    /// Le message porte l'en-tête de la source fautive —
+    /// « Error: b » seul ne localise rien sur du minifié
+    /// (triage M-H1 : trouver quel `<script>` jette est la
+    /// moitié du diagnostic).
     pub(crate) fn eval_or_report(&mut self, tab: TabId, eng: &mut dyn JsEngine, src: &str) {
         if let Err(e) = eng.eval(src) {
             tracing::debug!(tab, error = %e, "script en échec");
             let _ = self.events.send(CoreEvent::PipelineError {
                 tab: Some(tab),
-                message: e.to_string(),
+                message: format!("{e} — src «{}»", src_head(src)),
             });
         }
     }
@@ -415,4 +419,16 @@ impl Session {
             eng.sync_mirror_attr(&path, attr, value);
         }
     }
+}
+
+/// En-tête de source fautive pour le diagnostic — espaces
+/// compactés, 96 caractères (assez pour reconnaître le script
+/// minifié coupable, assez court pour un event SSE).
+fn src_head(src: &str) -> String {
+    let collapsed: String = src.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut head: String = collapsed.chars().take(96).collect();
+    if collapsed.chars().count() > 96 {
+        head.push('…');
+    }
+    head
 }

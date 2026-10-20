@@ -232,6 +232,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `frames` (bytes) reste écrit — marqueur de présence
   de `selectTab`. Test : rafale de 3 invalidations
   pendant un pull bloqué → exactement 2 fetches.
+- **JS-C46 — entités du miroir JS décodées**
+  (`explorer-jscore` + `explorer-core`) : verdict
+  PIPE→NAV au triage M-H1 — `parse_fragment_into`
+  n'appelait `decode_entities` que sur les valeurs
+  d'attribut et le RCDATA (`title`/`textarea`) ; le texte
+  courant passait brut → `escape_text` ré-échappait `&` →
+  `&amp;nbsp;` affiché en clair après re-parse (toute page
+  scriptée corrompait ses entités — google.fr montrait
+  `&nbsp;`/`&copy;` littéraux), et `textContent` lisait le
+  littéral. Livré : décodage au `flush_text!` + mini-table
+  élargie au jeu HTML 4.01 (~200 noms), `&#x…;` hex, remap
+  windows-1252 des `0x80..=0x9F` et `U+FFFD` spec.
+  jscore reste autonome (pas de dep `explorer-html`) —
+  écart connu : entités legacy sans `;` non décodées ;
+  couture pour la table WHATWG complète consignée dans
+  `docs/interface-equipes.md`. Bonus du même commit :
+  `PipelineError` porte l'en-tête de la source/module
+  fautif — `Error: b` localise enfin son script.
 - **Étape 90 — rendu de commit nav détaché**
   (`explorer-core`) : constat M-H1 #6 — `sub_commit`
   tenait `sess.lock()` pendant toute la cascade + layout

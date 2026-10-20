@@ -1436,11 +1436,15 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     `assign`) — même famille que le
     tunnel consentement T2 (boutons
     JS-driven, `addEventListener` +
-    `location`/`fetch`). Et la
-    remontée d'erreurs JS est à
-    étoffer : `Error: b` minifié
-    n'informe ni l'utilisateur ni le
-    dev.
+    `location`/`fetch`). Avancées :
+    `location.assign`/`replace`/
+    `href=`/`reload` vérifiés complets
+    (hook → `Url::resolve`) — le mur
+    est ailleurs ; entités du miroir
+    corrigées (**JS-C46**) ;
+    `PipelineError` cite désormais la
+    source fautive. Reste la pile
+    d'appel — **JS-C47** ouvert.
   - **reload sur page résultats POST
     → formulaire vide** : re-navigation
     GET sans re-soumission du corps —
@@ -1625,6 +1629,32 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   muet : le `want` ne regardait que les balises script).
   Test session : `onclick=` → mutation → PNG identique à la
   page statique cible.
+- [x] **JS-C46. Entités non décodées dans le miroir**
+  (verdict PIPE→NAV au triage M-H1 — `&nbsp;`/`&copy;`
+  littéraux sur google.fr) : `parse_fragment_into`
+  n'appelait `decode_entities` que sur attributs et RCDATA
+  (`title`/`textarea`) — le texte courant passait brut →
+  `escape_text` ré-échappait `&` → `&amp;nbsp;` affiché en
+  clair après re-parse, et `textContent` lisait le littéral.
+  Livré : `decode_entities` au `flush_text!` + table élargie
+  (jeu HTML 4.01 ~200 noms, `&#x…;` hex, remap windows-1252
+  des `0x80..=0x9F`, `U+FFFD` spec) — jscore reste autonome,
+  pas de dep sur `explorer-html`. Écart connu documenté :
+  entités legacy sans `;` non décodées (règle de
+  l'esperluette ambiguë = table complète), demande de
+  couture `explorer_html::entities` consignée au journal.
+  Bonus diagnostic (même commit) : `PipelineError` porte
+  l'en-tête de la source/module fautif — « Error: b »
+  localise enfin son `<script>`.
+- [ ] **JS-C47. Diagnostic d'exception — pile d'appel** :
+  `error.stack` est stubbé à `Name: message` (déviation
+  documentée interp) et `JsError::Uncaught` ne porte ni
+  position ni frames — `Error: b` reste non localisable
+  *dans* le script coupable (le src est désormais cité).
+  Travail : pister une pile d'appels minimale dans l'interp
+  et la rendre dans `stack`/`Uncaught`. Prochain vol google
+  attendu pour confirmer si l'exception tue la redirection
+  consent.
 
 ## Tâches continues
 

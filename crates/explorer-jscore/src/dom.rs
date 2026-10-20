@@ -1382,7 +1382,11 @@ impl Dom {
         macro_rules! flush_text {
             () => {
                 if !text.is_empty() {
-                    let t = self.create_text(&text);
+                    // JS-C46 : les références de caractères sont
+                    // décodées comme dans tout texte HTML — sinon
+                    // la resérialisation ré-échappe `&` et la page
+                    // affiche `&amp;nbsp;` en clair (triage M-H1).
+                    let t = self.create_text(&decode_entities(&text));
                     let top = *stack.last().unwrap_or(&parent);
                     self.append(top, t);
                     text.clear();
@@ -1672,8 +1676,16 @@ fn escape_attr(s: &str) -> String {
     escape_text(s).replace('"', "&quot;")
 }
 
-/// Decode the common entities (mini-parser, not the full table —
-/// unknown entities pass through verbatim).
+/// Decode the character references (JS-C46 — mini-table : le
+/// jeu HTML 4.01 ~200 noms du web réel, pas la table WHATWG
+/// complète de `explorer-html` — jscore reste autonome ; la
+/// couture pour la table complète est loguée dans
+/// `docs/interface-equipes.md`). Numériques décimales `&#65;`
+/// et hexadécimales `&#x41;`, remap windows-1252 des
+/// `0x80..=0x9F` et `U+FFFD` sur invalide (spec). Les entités
+/// sans `;` (admises en legacy par la spec) ne sont pas
+/// décodées ici — écart connu et assumé : l'esperluette
+/// ambiguë exige la table complète.
 fn decode_entities(s: &str) -> String {
     if !s.contains('&') {
         return s.to_string();
@@ -1684,35 +1696,222 @@ fn decode_entities(s: &str) -> String {
         out.push_str(&rest[..i]);
         rest = &rest[i..];
         let end = rest.find(';').map_or(0, |e| e + 1);
-        if end == 0 || end > 12 {
+        if end == 0 || end > 32 {
             out.push('&');
             rest = &rest[1..];
             continue;
         }
         let (entity, tail) = rest.split_at(end);
-        rest = tail;
-        out.push_str(match entity {
-            "&amp;" => "&",
-            "&lt;" => "<",
-            "&gt;" => ">",
-            "&quot;" => "\"",
-            "&apos;" => "'",
-            "&nbsp;" => "\u{a0}",
-            _ => {
-                if let Some(num) = entity.strip_prefix("&#").and_then(|n| n.strip_suffix(';')) {
-                    match num.parse::<u32>().ok().and_then(char::from_u32) {
-                        Some(c) => {
-                            out.push(c);
-                            continue;
-                        }
-                        None => entity,
-                    }
-                } else {
-                    entity
-                }
+        let body = &entity[1..entity.len() - 1];
+        if let Some(digits) = body.strip_prefix('#') {
+            let parsed = digits.strip_prefix(['x', 'X']).map_or_else(
+                || digits.parse::<u32>().ok(),
+                |h| u32::from_str_radix(h, 16).ok(),
+            );
+            if let Some(cp) = parsed {
+                out.push(map_numeric(cp));
+            } else {
+                out.push_str(entity);
             }
-        });
+            rest = tail;
+            continue;
+        }
+        // Inconnue : passthrough verbatim — tolérance par
+        // design, le texte brut est moins mauvais que rien.
+        out.push_str(named_entity(body).unwrap_or(entity));
+        rest = tail;
     }
     out.push_str(rest);
     out
+}
+
+/// Remap windows-1252 des références numériques `0x80..=0x9F`
+/// (spec : `&#150;` = `–`, pas U+0096) — miroir de
+/// `explorer_html::entities::map_numeric`, dupliqué pour
+/// l'autonomie jscore.
+const NUMERIC_1252: [char; 32] = [
+    '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž', '\u{8F}',
+    '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9D}', 'ž', 'Ÿ',
+];
+
+/// Codepoint d'une référence numérique selon la spec :
+/// `0x00` → `U+FFFD`, surrogates/hors Unicode → `U+FFFD`,
+/// `0x80..=0x9F` → remap windows-1252.
+fn map_numeric(cp: u32) -> char {
+    match cp {
+        0x00 => '\u{FFFD}',
+        0x80..=0x9F => NUMERIC_1252[(cp - 0x80) as usize],
+        cp => char::from_u32(cp).unwrap_or('\u{FFFD}'),
+    }
+}
+
+/// Jeu nommé HTML 4.01 (~200 références — le web réel) — voir
+/// `decode_entities` pour le statut d'intérim.
+fn named_entity(name: &str) -> Option<&'static str> {
+    Some(match name {
+        // Marqueur XML.
+        "amp" => "&",
+        "lt" => "<",
+        "gt" => ">",
+        "quot" => "\"",
+        "apos" => "'",
+        // Espaces, contrôles typo.
+        "nbsp" => "\u{A0}",
+        "ensp" => "\u{2002}",
+        "emsp" => "\u{2003}",
+        "thinsp" => "\u{2009}",
+        "zwnj" => "\u{200C}",
+        "zwj" => "\u{200D}",
+        "lrm" => "\u{200E}",
+        "rlm" => "\u{200F}",
+        "shy" => "\u{AD}",
+        // Latin-1 ponctuation et symboles.
+        "iexcl" => "¡",
+        "cent" => "¢",
+        "pound" => "£",
+        "curren" => "¤",
+        "yen" => "¥",
+        "brvbar" => "¦",
+        "sect" => "§",
+        "uml" => "¨",
+        "copy" => "©",
+        "ordf" => "ª",
+        "laquo" => "«",
+        "not" => "¬",
+        "reg" => "®",
+        "macr" => "¯",
+        "deg" => "°",
+        "plusmn" => "±",
+        "sup2" => "²",
+        "sup3" => "³",
+        "acute" => "´",
+        "micro" => "µ",
+        "para" => "¶",
+        "middot" => "·",
+        "cedil" => "¸",
+        "sup1" => "¹",
+        "ordm" => "º",
+        "raquo" => "»",
+        "frac14" => "¼",
+        "frac12" => "½",
+        "frac34" => "¾",
+        "iquest" => "¿",
+        "times" => "×",
+        "divide" => "÷",
+        "euro" => "€",
+        "trade" => "™",
+        // Latin-1 lettres accentuées.
+        "Agrave" => "À",
+        "Aacute" => "Á",
+        "Acirc" => "Â",
+        "Atilde" => "Ã",
+        "Auml" => "Ä",
+        "Aring" => "Å",
+        "AElig" => "Æ",
+        "Ccedil" => "Ç",
+        "Egrave" => "È",
+        "Eacute" => "É",
+        "Ecirc" => "Ê",
+        "Euml" => "Ë",
+        "Igrave" => "Ì",
+        "Iacute" => "Í",
+        "Icirc" => "Î",
+        "Iuml" => "Ï",
+        "ETH" => "Ð",
+        "Ntilde" => "Ñ",
+        "Ograve" => "Ò",
+        "Oacute" => "Ó",
+        "Ocirc" => "Ô",
+        "Otilde" => "Õ",
+        "Ouml" => "Ö",
+        "Oslash" => "Ø",
+        "Ugrave" => "Ù",
+        "Uacute" => "Ú",
+        "Ucirc" => "Û",
+        "Uuml" => "Ü",
+        "Yacute" => "Ý",
+        "THORN" => "Þ",
+        "szlig" => "ß",
+        "agrave" => "à",
+        "aacute" => "á",
+        "acirc" => "â",
+        "atilde" => "ã",
+        "auml" => "ä",
+        "aring" => "å",
+        "aelig" => "æ",
+        "ccedil" => "ç",
+        "egrave" => "è",
+        "eacute" => "é",
+        "ecirc" => "ê",
+        "euml" => "ë",
+        "igrave" => "ì",
+        "iacute" => "í",
+        "icirc" => "î",
+        "iuml" => "ï",
+        "eth" => "ð",
+        "ntilde" => "ñ",
+        "ograve" => "ò",
+        "oacute" => "ó",
+        "ocirc" => "ô",
+        "otilde" => "õ",
+        "ouml" => "ö",
+        "oslash" => "ø",
+        "ugrave" => "ù",
+        "uacute" => "ú",
+        "ucirc" => "û",
+        "uuml" => "ü",
+        "yacute" => "ý",
+        "thorn" => "þ",
+        "yuml" => "ÿ",
+        "OElig" => "Œ",
+        "oelig" => "œ",
+        "Scaron" => "Š",
+        "scaron" => "š",
+        "Yuml" => "Ÿ",
+        "fnof" => "ƒ",
+        // Typographie : guillemets, tirets, flèches, maths usuels.
+        "lsquo" => "‘",
+        "rsquo" => "’",
+        "sbquo" => "‚",
+        "ldquo" => "“",
+        "rdquo" => "”",
+        "bdquo" => "„",
+        "dagger" => "†",
+        "Dagger" => "‡",
+        "bull" => "•",
+        "hellip" => "…",
+        "permil" => "‰",
+        "prime" => "′",
+        "Prime" => "″",
+        "lsaquo" => "‹",
+        "rsaquo" => "›",
+        "oline" => "‾",
+        "frasl" => "⁄",
+        "ndash" => "–",
+        "mdash" => "—",
+        "circ" => "ˆ",
+        "tilde" => "˜",
+        "larr" => "←",
+        "uarr" => "↑",
+        "rarr" => "→",
+        "darr" => "↓",
+        "harr" => "↔",
+        "minus" => "−",
+        "lowast" => "∗",
+        "radic" => "√",
+        "infin" => "∞",
+        "ne" => "≠",
+        "equiv" => "≡",
+        "le" => "≤",
+        "ge" => "≥",
+        "asymp" => "≈",
+        "sum" => "∑",
+        "prod" => "∏",
+        "loz" => "◊",
+        "spades" => "♠",
+        "clubs" => "♣",
+        "hearts" => "♥",
+        "diams" => "♦",
+        _ => return None,
+    })
 }
