@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/api/events_client.dart';
 import '../../../core/api/ffi_engine.dart';
+import '../../../core/config/app_config.dart';
 import '../../../core/di/providers.dart';
 import '../../../core/platform/env.dart';
 import '../../../core/settings/app_settings.dart';
@@ -322,13 +323,25 @@ class BrowserController extends Notifier<BrowserState> {
   /// le SSE `frame_invalidated` absent du canal (ADR-0018).
   Timer? _animTimer;
 
+  /// Re-bootstrap borné tant que le daemon est injoignable
+  /// (étape 81) — annulé au premier succès. Sans lui,
+  /// `daemonOnline:false` n'était relâché que par le bouton
+  /// « Réessayer » : le SSE reconnectait en silence pendant
+  /// que la bannière affirmait « daemon absent ».
+  Timer? _daemonRetry;
+
   /// Dépôt capturé dans `build` — `ref` est invalide après un
   /// `await`, les lectures post-build passent par ce champ.
   late final BrowserRepository _repo;
 
+  /// Config capturée dans `build` (cadence de re-bootstrap).
+  late final AppConfig _cfg;
+
   @override
   BrowserState build() {
     _repo = ref.watch(browserRepositoryProvider);
+    _cfg = ref.read(configProvider);
+    ref.onDispose(() => _daemonRetry?.cancel());
     if (_repo is FfiEngine) {
       // Pas de SSE in-process : la sondage d'animations porte
       // l'invalidation ; les actions tirent leur frame au
@@ -373,6 +386,8 @@ class BrowserController extends Notifier<BrowserState> {
         tabs = [await _repo.createTab()];
       }
       if (!ref.mounted) return;
+      _daemonRetry?.cancel();
+      _daemonRetry = null;
       state = state.copyWith(
         tabs: tabs,
         activeId: state.activeId ?? tabs.first.id,
@@ -380,7 +395,19 @@ class BrowserController extends Notifier<BrowserState> {
       );
     } on Object {
       if (ref.mounted) state = state.copyWith(daemonOnline: false);
+      _scheduleDaemonRetry();
     }
+  }
+
+  /// Arme le re-bootstrap — idempotent : un timer déjà armé
+  /// couvre les échecs suivants (bootstrap et actions REST
+  /// échouées en « injoignable » partagent la même file).
+  void _scheduleDaemonRetry() {
+    if (!ref.mounted || _daemonRetry?.isActive == true) return;
+    _daemonRetry = Timer(_cfg.daemonRetryDelay, () {
+      _daemonRetry = null;
+      unawaited(_bootstrap());
+    });
   }
 
   /// Réessaie la connexion (bouton « daemon absent »).
@@ -622,6 +649,7 @@ class BrowserController extends Notifier<BrowserState> {
         lastError: () => e.message,
         pageErrors: {...state.pageErrors, id: e.message},
       );
+      _markOfflineIfUnreachable(e);
     }
   }
 
@@ -642,7 +670,20 @@ class BrowserController extends Notifier<BrowserState> {
     } on ApiException catch (e) {
       _patch(id, (t) => t.copyWith(loading: false));
       state = state.copyWith(lastError: () => e.message);
+      _markOfflineIfUnreachable(e);
     }
+  }
+
+  /// Échec **de connexion** (`statusCode` absent = « daemon
+  /// injoignable », pas une erreur HTTP) → la bannière reflète
+  /// l'état réel et le re-bootstrap est armé. Une erreur HTTP
+  /// prouve au contraire que le daemon répond.
+  void _markOfflineIfUnreachable(ApiException e) {
+    if (e.statusCode != null) return;
+    if (state.daemonOnline) {
+      state = state.copyWith(daemonOnline: false);
+    }
+    _scheduleDaemonRetry();
   }
 }
 

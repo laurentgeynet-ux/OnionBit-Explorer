@@ -11,6 +11,7 @@ class AppConfig {
     this.connectTimeout = const Duration(seconds: 5),
     this.requestTimeout = const Duration(seconds: 10),
     this.sseReconnectDelay = const Duration(seconds: 2),
+    this.daemonRetryDelay = const Duration(seconds: 3),
     this.engineMode = const String.fromEnvironment('EXPLORER_ENGINE',
         defaultValue: 'auto'),
     this.engineLibPath = const String.fromEnvironment('EXPLORER_ENGINE_LIB',
@@ -38,4 +39,10 @@ class AppConfig {
 
   /// Délai avant reconnexion du canal SSE `GET /api/events`.
   final Duration sseReconnectDelay;
+
+  /// Cadence de re-bootstrap tant que le daemon est injoignable —
+  /// `daemonOnline` repasse à `true` dès le premier `listTabs`
+  /// réussi (étape 81 : récupération automatique, pas seulement
+  /// au bouton « Réessayer »).
+  final Duration daemonRetryDelay;
 }

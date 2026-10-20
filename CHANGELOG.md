@@ -203,6 +203,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Étape 81 — `daemonOnline` récupère automatiquement**
+  (`app/`) : un bootstrap échoué figeait `daemonOnline:
+  false` jusqu'au bouton « Réessayer » — alors que le
+  canal SSE reconnectait en silence (`EventsClient` a sa
+  propre boucle). La bannière « daemon injoignable »
+  pouvait donc affirmer le contraire de la réalité.
+  Re-bootstrap borné à `AppConfig.daemonRetryDelay`
+  (3 s) : armé sur échec bootstrap **et** sur tout
+  `ApiException` sans `statusCode` (« injoignable »,
+  distinct d'une erreur HTTP qui prouve le daemon
+  vivant), annulé au premier `listTabs` réussi.
+  Récupération mid-session couverte : un daemon qui
+  meurt puis revient remet l'UI en ligne sans geste.
+
 - **Étape 82 — FrameView : frame clippée de `1−1/dpr`**
   (`app/`) : le raster moteur fait `viewport_css ×
   zoom·dpr` px physiques mais `Image.memory`/`RawImage`

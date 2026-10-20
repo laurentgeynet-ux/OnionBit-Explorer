@@ -156,10 +156,14 @@ class FakeEvents implements EventsClient {
   }
 }
 
-ProviderContainer makeContainer(FakeRepo repo, FakeEvents events) {
+ProviderContainer makeContainer(
+  FakeRepo repo,
+  FakeEvents events, {
+  AppConfig config = const AppConfig(),
+}) {
   return ProviderContainer(
     overrides: [
-      configProvider.overrideWithValue(const AppConfig()),
+      configProvider.overrideWithValue(config),
       apiClientProvider.overrideWithValue(ApiClient(const AppConfig())),
       browserRepositoryProvider.overrideWithValue(repo),
       eventsClientProvider.overrideWithValue(events),
@@ -332,6 +336,26 @@ void main() {
 
     repo.online = true;
     await c.read(browserProvider.notifier).retry();
+    expect(c.read(browserProvider).daemonOnline, isTrue);
+    expect(c.read(browserProvider).tabs, hasLength(1));
+  });
+
+  test('daemon absent → re-bootstrap automatique (étape 81)', () async {
+    final events = FakeEvents();
+    final repo = FakeRepo()..online = false;
+    final c = makeContainer(
+      repo,
+      events,
+      config: const AppConfig(daemonRetryDelay: Duration(milliseconds: 10)),
+    );
+    addTearDown(c.dispose);
+    await settle(c);
+    expect(c.read(browserProvider).daemonOnline, isFalse);
+
+    // Le daemon revient sans toucher le bouton « Réessayer » :
+    // le timer de re-bootstrap doit le détecter seul.
+    repo.online = true;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
     expect(c.read(browserProvider).daemonOnline, isTrue);
     expect(c.read(browserProvider).tabs, hasLength(1));
   });

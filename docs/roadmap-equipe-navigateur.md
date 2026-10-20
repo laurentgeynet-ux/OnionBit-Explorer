@@ -1035,6 +1035,32 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   frame remplit le viewport et que les clics
   touchent les éléments visés.
 
+- [x] **Étape 81. `daemonOnline` : récupération
+  automatique** (mensonge visible quotidien — la
+  bannière « daemon injoignable » survivait à un
+  daemon revenu, SSE reconnecté en silence) :
+  `_bootstrap` échoué figeait l'état offline
+  jusqu'au « Réessayer » manuel. Correctif :
+  `AppConfig.daemonRetryDelay` (3 s) + timer de
+  re-bootstrap armé sur échec bootstrap et sur
+  tout `ApiException` à `statusCode` nul (échec
+  de connexion — une erreur HTTP prouve le
+  daemon vivant et ne pose pas offline) ;
+  annulé au premier `listTabs` réussi. Couvre
+  le démarrage app-avant-daemon **et** la mort
+  + renaissance mid-session. Test : récupération
+  automatique sans geste (repo simulé offline→
+  online, timer 10 ms). `analyze` + `test` verts.
+- [ ] **Étape 80. Icônes trailing de la navbar
+  non déterministes** (rapport M22 : étoile,
+  historique, signets, find, zoom, réglages
+  absents en run mission — confirmé en capture
+  foreground — mais visibles en session manuelle) :
+  hypothèse de départ = rendu icon-font / timing
+  au bootstrap, **pas** hit-test. Reproduire
+  l'état fautif avant de corriger — sans repro,
+  on répare le mauvais étage.
+
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
 Ordre dicté par les besoins de la piste produit d'abord, puis
