@@ -61,6 +61,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 72 — résolveur DoH optionnel**
+  (`explorer-net` + `explorer-api` + `explorer-daemon`) :
+  trait `resolver::Resolver` injecté dans
+  `h1::ResolvingConnector` (sous `TlsConnector`) — `system`
+  (défaut, `lookup_host`) ou `doh` (`POST
+  application/dns-message`, RFC 8484, format filaire
+  embarqué sans dépendance : `A`/`AAAA`, pointeurs de
+  compression) ; cache par hôte borné par TTL RR
+  (10–300 s), IP littérales court-circuitées, endpoint
+  résolu par le système (pas de récursion). Daemon
+  `--doh`/`EXPLORER_DOH` + `EXPLORER_DOH_TIMEOUT_MS` ;
+  `GET /api/egress` expose `{resolver}` — jamais de
+  basculement silencieux.
+
 - **Étape 74 — `constructor.name` des éléments**
   (`dillo-js`) : `v.constructor.name` vaut
   `HTMLVideoElement`/`HTMLAudioElement`/`HTMLCanvasElement`

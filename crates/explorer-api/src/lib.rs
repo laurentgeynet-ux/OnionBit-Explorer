@@ -49,6 +49,10 @@ pub struct ApiState {
     /// Session — `tokio::Mutex` : la garde survit aux `.await`
     /// de `navigate` (future `Send`, single-writer strict).
     pub session: Arc<tokio::sync::Mutex<Session>>,
+    /// Descripteur du résolveur en sortie (`system`,
+    /// `doh:<endpoint>` — étape 72) — observabilité
+    /// `GET /api/egress`, jamais de basculement silencieux.
+    pub egress: String,
 }
 
 /// Construit le routeur de l'API. `session` est injectée par
@@ -62,8 +66,19 @@ pub fn router(session: Arc<tokio::sync::Mutex<Session>>) -> Router {
 /// **ou** `?key=key` (SSE `EventSource` ne pose pas d'en-têtes
 /// — compromis documenté).
 pub fn router_with_key(session: Arc<tokio::sync::Mutex<Session>>, key: Option<String>) -> Router {
+    router_with_egress(session, key, "system".to_string())
+}
+
+/// Routeur complet : clé optionnelle + descripteur de
+/// résolveur exposé par `GET /api/egress` (étape 72).
+pub fn router_with_egress(
+    session: Arc<tokio::sync::Mutex<Session>>,
+    key: Option<String>,
+    egress: String,
+) -> Router {
     let r = Router::new()
         .route("/api/status", get(status))
+        .route("/api/egress", get(egress_info))
         .route("/api/tabs", get(list_tabs).post(open_tab))
         .route("/api/tabs/{id}", delete(close_tab))
         .route("/api/tabs/{id}/frame", get(frame))
@@ -89,7 +104,7 @@ pub fn router_with_key(session: Arc<tokio::sync::Mutex<Session>>, key: Option<St
         )
         .route("/api/history", get(history))
         .route("/api/events", get(events))
-        .with_state(ApiState { session });
+        .with_state(ApiState { session, egress });
     match key {
         Some(k) if !k.is_empty() => r.layer(axum::middleware::from_fn(move |req, next| {
             auth(k.clone(), req, next)
@@ -151,6 +166,14 @@ async fn status(State(st): State<ApiState>) -> impl IntoResponse {
         "version": env!("CARGO_PKG_VERSION"),
         "tabs": session.tabs(),
     }))
+}
+
+/// `GET /api/egress` → `{resolver}` — mode de résolution DNS
+/// configuré à l'assemblage (`system` ou `doh:<endpoint>`,
+/// étape 72). Observabilité uniquement : le mode ne bascule
+/// jamais en cours de route.
+async fn egress_info(State(st): State<ApiState>) -> impl IntoResponse {
+    Json(serde_json::json!({ "resolver": st.egress }))
 }
 
 /// `GET /api/tabs` → `[{id, url, title, can_back, can_forward}]`.

@@ -51,6 +51,9 @@ struct DaemonConfig {
     max_redirects: usize,
     /// Clé d'API optionnelle (`EXPLORER_API_KEY` — ADR-0003).
     api_key: Option<String>,
+    /// Timeout d'une requête `DoH` (`EXPLORER_DOH_TIMEOUT_MS`,
+    /// étape 72 — règle 13).
+    doh_timeout: std::time::Duration,
 }
 
 impl DaemonConfig {
@@ -75,6 +78,13 @@ impl DaemonConfig {
             api_key: std::env::var("EXPLORER_API_KEY")
                 .ok()
                 .filter(|k| !k.is_empty()),
+            doh_timeout: std::env::var("EXPLORER_DOH_TIMEOUT_MS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .map_or(
+                    std::time::Duration::from_secs(5),
+                    std::time::Duration::from_millis,
+                ),
         }
     }
 }
@@ -92,6 +102,10 @@ struct CliArgs {
     /// `--download-dir DIR` → surcharge `EXPLORER_DOWNLOAD_DIR`
     /// (étape 70 ; défaut `<profil>/downloads`).
     download_dir: Option<PathBuf>,
+    /// `--doh URL` → surcharge `EXPLORER_DOH` (étape 72) —
+    /// endpoint DNS-over-HTTPS (`https://…/dns-query`) ;
+    /// absent = résolution système.
+    doh: Option<String>,
 }
 
 /// Usage affiché sur `--help` ou argument invalide.
@@ -105,9 +119,13 @@ fn print_usage() {
          \x20 --download-dir DIR  répertoire des téléchargements acceptés\n\
          \x20                     (surcharge EXPLORER_DOWNLOAD_DIR ;\n\
          \x20                     défaut <profil>/downloads)\n\
+         \x20 --doh URL           endpoint DNS-over-HTTPS\n\
+         \x20                     (surcharge EXPLORER_DOH ;\n\
+         \x20                     ex. https://r/dns-query)\n\
          \x20 --help              affiche cette aide\n\
          variables : EXPLORER_PORT, EXPLORER_PROFILE, EXPLORER_FONT_DIR,\n\
-         \x20            EXPLORER_MAX_BODY, EXPLORER_API_KEY, EXPLORER_DOWNLOAD_DIR"
+         \x20            EXPLORER_MAX_BODY, EXPLORER_API_KEY, EXPLORER_DOWNLOAD_DIR,\n\
+         \x20            EXPLORER_DOH, EXPLORER_DOH_TIMEOUT_MS"
     );
 }
 
@@ -127,6 +145,7 @@ fn parse_args() -> CliArgs {
         port: None,
         profile: None,
         download_dir: std::env::var_os("EXPLORER_DOWNLOAD_DIR").map(PathBuf::from),
+        doh: std::env::var("EXPLORER_DOH").ok().filter(|v| !v.is_empty()),
     };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -155,6 +174,7 @@ fn parse_args() -> CliArgs {
             "--download-dir" => {
                 out.download_dir = Some(PathBuf::from(value("--download-dir")));
             }
+            "--doh" => out.doh = Some(value("--doh")),
             _ => arg_fail(&format!("argument inconnu : {a}")),
         }
     }
@@ -183,8 +203,20 @@ fn default_fonts_dir() -> PathBuf {
 /// `CookieJar` partagé avec la session (étape 51) est
 /// **sous** la couche redirection : chaque hop re-reçoit
 /// les cookies de sa propre URL.
-fn http_stack(cfg: &DaemonConfig, jar: Arc<CookieJar>, profile: &Path) -> Arc<dyn HttpTransport> {
-    let tls = Arc::new(TlsConnector::web_roots());
+fn http_stack(
+    cfg: &DaemonConfig,
+    jar: Arc<CookieJar>,
+    profile: &Path,
+    resolver: Option<Arc<dyn explorer_net::resolver::Resolver>>,
+) -> Arc<dyn HttpTransport> {
+    // Résolution injectable (étape 72) : `system` (défaut)
+    // ou `doh` — le connecteur tente chaque IP résolue.
+    let tls = Arc::new(match resolver {
+        Some(r) => {
+            TlsConnector::web_roots_over(Arc::new(explorer_net::h1::ResolvingConnector::new(r)))
+        }
+        None => TlsConnector::web_roots(),
+    });
     // ALPN : h2 si le serveur le propose, h1 sinon (etape 41).
     let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
     let decoded: Arc<dyn HttpTransport> = Arc::new(DecodingTransport::wrap(h1, cfg.max_body));
@@ -226,7 +258,32 @@ async fn main() {
     // `document.cookie`, les XHR same-origin et les
     // navigations voient le même état.
     let jar = Arc::new(CookieJar::new());
-    let mut session = Session::new(http_stack(&cfg, jar.clone(), &profile_dir), Arc::new(fonts));
+    // Résolution DoH optionnelle (étape 72) : l'endpoint est
+    // résolu par le système via une pile TLS ordinaire — pas
+    // de récursion DoH, aucun endpoint en dur.
+    let (resolver, egress) = match cli.doh.as_deref() {
+        Some(raw) => match explorer_net::url::Url::parse(raw) {
+            Ok(u) if u.scheme() == "https" => {
+                let doh_transport: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(
+                    Arc::new(TlsConnector::web_roots()),
+                    HttpConfig::default(),
+                ));
+                let r: Arc<dyn explorer_net::resolver::Resolver> = Arc::new(
+                    explorer_net::resolver::DohResolver::new(u, doh_transport, cfg.doh_timeout),
+                );
+                let egress = r.describe();
+                tracing::info!(egress = %egress, "résolution DoH configurée");
+                (Some(r), egress)
+            }
+            Ok(_) => arg_fail("--doh : l'endpoint doit être en https://"),
+            Err(e) => arg_fail(&format!("--doh : URL invalide : {e}")),
+        },
+        None => (None, "system".to_string()),
+    };
+    let mut session = Session::new(
+        http_stack(&cfg, jar.clone(), &profile_dir, resolver),
+        Arc::new(fonts),
+    );
     session.set_cookie_jar(jar);
     session.set_store(store);
     // Répertoire des téléchargements acceptés sans chemin
@@ -283,7 +340,7 @@ async fn main() {
             }
         });
     }
-    let app = explorer_api::router_with_key(session, cfg.api_key.clone());
+    let app = explorer_api::router_with_egress(session, cfg.api_key.clone(), egress);
     if cfg.api_key.is_some() {
         tracing::info!("clé d'API requise (x-api-key / ?key=)");
     }

@@ -201,6 +201,27 @@ async fn status_lists_engine_and_tabs() {
     assert_eq!(v["tabs"], serde_json::json!([]));
 }
 
+/// `GET /api/egress` (étape 72) — le mode de résolution
+/// configuré est observable ; `system` par défaut.
+#[tokio::test]
+async fn egress_reports_resolver_mode() {
+    let app = test_app();
+    let resp = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/egress")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["resolver"], "system");
+}
+
 #[tokio::test]
 async fn tabs_crud_contract() {
     let app = test_app();

@@ -21,5 +21,6 @@ pub mod h2;
 pub mod http;
 pub mod policy;
 pub mod proxy;
+pub mod resolver;
 pub mod tls;
 pub mod url;

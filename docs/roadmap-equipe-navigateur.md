@@ -819,7 +819,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   vérifier la config FFmpeg/libmpv de `fvp` (LGPL dynamique
   OK, GPL statique non). Prérequis doc : R-34 donne au
   seam une géométrie fiable (non bloquant).
-- [ ] **Étape 72. Résolveur sécurisé (DoH) — capacité
+- [x] **Étape 72. Résolveur sécurisé (DoH) — capacité
   d'égress optionnelle** (lead — anti-blocage FAI « DNS
   menteur », même patron que le resolver custom de l'app
   IPTV ; prolonge ADR-0022) : `explorer-net` gagne un
@@ -835,6 +835,20 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   loopback/Tor reste la réponse pour ce niveau. Contrat :
   le mode choisi est observable (`GET /api/egress` ou
   équivalent) et `no_proxy` inchangé hors mode Tor.
+  Livré : trait `resolver::Resolver` injecté dans
+  `h1::ResolvingConnector` sous `TlsConnector`
+  (`web_roots_over`) — `SystemResolver` ≡ `TcpConnector`
+  (`lookup_host`), `DohResolver` POSTe un
+  `application/dns-message` (RFC 8484, format filaire
+  embarqué : requêtes `A`/`AAAA`, réponses compressées par
+  pointeurs, aucune dépendance) via une pile TLS+H1
+  ordinaire — la résolution de l'endpoint reste système,
+  pas de récursion DoH. Cache par hôte borné par TTL RR
+  (clamp 10–300 s). IP littérales court-circuitées,
+  candidates tentées dans l'ordre. Daemon : `--doh`/
+  `EXPLORER_DOH` + `EXPLORER_DOH_TIMEOUT_MS` ; le mode est
+  observable (`GET /api/egress` → `{resolver}`) et ne
+  bascule jamais en cours de route.
 - [x] **Étape 73. `/input` : outcome rendu à
   l'enfilement, pas au commit de l'apply** (ticket
   terrain mission 18-A — mesuré : `POST /input`

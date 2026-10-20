@@ -103,6 +103,69 @@ impl Connector for TcpConnector {
     }
 }
 
+/// Connecteur TCP qui résout `host` via un
+/// [`Resolver`](crate::resolver::Resolver) injecté
+/// (étape 72) — [`SystemResolver`](crate::resolver::SystemResolver)
+/// ≡ comportement
+/// de [`TcpConnector`] ; [`crate::resolver::DohResolver`]
+/// route la résolution par HTTPS. Les adresses IP
+/// littérales court-circuitent la résolution ; les IP
+/// candidates sont tentées dans l'ordre jusqu'à la
+/// première connexion réussie.
+pub struct ResolvingConnector {
+    resolver: Arc<dyn crate::resolver::Resolver>,
+}
+
+impl std::fmt::Debug for ResolvingConnector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvingConnector")
+            .field("resolver", &self.resolver.describe())
+            .finish()
+    }
+}
+
+impl ResolvingConnector {
+    /// Connecteur TCP résolvant via `resolver`.
+    #[must_use]
+    pub fn new(resolver: Arc<dyn crate::resolver::Resolver>) -> Self {
+        Self { resolver }
+    }
+}
+
+#[async_trait]
+impl Connector for ResolvingConnector {
+    async fn connect(&self, scheme: &str, host: &str, port: u16) -> NetResult<Box<dyn IoStream>> {
+        if !matches!(scheme, "http" | "https") {
+            return Err(NetError::UnsupportedScheme(scheme.to_string()));
+        }
+        let ips: Vec<std::net::IpAddr> = match host.parse::<std::net::IpAddr>() {
+            Ok(ip) => vec![ip],
+            Err(_) => self.resolver.resolve(host).await?,
+        };
+        let mut last = None;
+        for ip in &ips {
+            match TcpStream::connect((*ip, port)).await {
+                Ok(s) => return Ok(Box::new(s)),
+                Err(e) => last = Some(e),
+            }
+        }
+        match last {
+            Some(e) if e.kind() == std::io::ErrorKind::NotFound => Err(NetError::Dns {
+                host: host.to_string(),
+                source: e,
+            }),
+            Some(e) => Err(NetError::Connect {
+                target: format!("{scheme}://{host}:{port}"),
+                source: e,
+            }),
+            None => Err(NetError::Dns {
+                host: host.to_string(),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, "aucune adresse résolue"),
+            }),
+        }
+    }
+}
+
 /// Budgets et identification du client (règle AGENTS #13 : aucune
 /// valeur en dur dans la logique).
 #[derive(Debug, Clone)]

@@ -66,6 +66,19 @@ impl TlsConnector {
             roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
         })
     }
+
+    /// Racines Mozilla sur une couche TCP `inner` composée —
+    /// [`crate::h1::ResolvingConnector`] (résolution `DoH`,
+    /// étape 72), proxy, fake de test.
+    #[must_use]
+    pub fn web_roots_over(inner: Arc<dyn Connector>) -> Self {
+        Self::with_inner(
+            RootCertStore {
+                roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+            },
+            inner,
+        )
+    }
 }
 
 impl Default for TlsConnector {
