@@ -884,6 +884,39 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (`HTMLElement` ailleurs) ; non constructible (déviation
   v1 documentée). Régression :
   `media_constructor_name_is_class_name`.
+- [ ] **Étape 75. Page d'erreur : purger `find` AVANT le
+  relayout** (ticket terrain mission 19-D, pixel) :
+  `paint_error_page` pose `e.find = None` **après**
+  `relayout_dom` (paint.rs) — les `FillRect` du find stale
+  de la page précédente sont cuits dans la frame d'erreur
+  (bande orange observée sous le h1 du 404, disparue à la
+  nav suivante). Fix = inverser l'ordre (purge d'état
+  interactif avant pose). Couvrir aussi la réserve
+  mesurée : les erreurs de `nav_apply`/`sub_commit`
+  (chemin `Err` post-fetch) partent à `emit_error`
+  **sans** page d'erreur — trou de couverture 69.
+- [ ] **Étape 76. Nav échouée : entrée d'historique**
+  (ticket terrain mission 19-D, sémantique) : la nav
+  échouée ne pousse pas d'entrée — repro A→B→refus :
+  `back` depuis la page d'erreur atterrit sur **A** (B
+  sauté), `fwd` ressort l'erreur gelée dans le slot
+  bfcache de B (snapshot écrasé) → B inaccessible par
+  traversée. Chrome/Firefox poussent la nav échouée en
+  entrée (back revient à B, forward réessaie). Arbitrage
+  : pousser l'entrée avec marqueur « échec » (retry à la
+  traversée) vs ne pas pousser mais préserver le slot —
+  décision + gestion bfcache documentées.
+- [ ] **Étape 77. Daemon : `axum::serve` en échec visible
+  + sortie gouvernée** (ticket terrain mission 19,
+  explique la mort « silencieuse » de mission 18) : en
+  vol le daemon a quitté `exit(1)` — `axum::serve` a
+  renvoyé `Err` et le filtre `RUST_LOG=sync_profile` a
+  avalé le `tracing::error!`. Deux fixes : (1) le message
+  de sortie fatale doit survivre à tout filtre (stderr
+  direct ou niveau toujours émis) ; (2) investiguer la
+  cause de l'`Err` serveur (accept-loop, bind perdu ?) —
+  un daemon navigateur ne meurt pas sans laisser de
+  raison.
 
 ## Piste JS (JS-C26+) — spécialiste `dillo-js`
 
