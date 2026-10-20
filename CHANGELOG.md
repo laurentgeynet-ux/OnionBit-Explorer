@@ -48,6 +48,12 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (résolveur DoH optionnel, prolonge ADR-0022) ouvertes
   côté NAVIGATEUR — aucun code modifié.
 
+- **Étape 74 — `constructor.name` des éléments**
+  (`dillo-js`) : `v.constructor.name` vaut
+  `HTMLVideoElement`/`HTMLAudioElement`/`HTMLCanvasElement`
+  (`HTMLElement` ailleurs) au lieu de `Object` — objet
+  allégé `{name}` non constructible (déviation v1).
+
 - **Étape 70 — téléchargements** (`explorer-core` +
   `explorer-api` + `explorer-daemon` + app) : une réponse
   top-level non affichable (`attachment`,

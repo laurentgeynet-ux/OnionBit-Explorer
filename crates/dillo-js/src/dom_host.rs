@@ -977,6 +977,17 @@ impl Host for NodeHost {
                 .unwrap_or(if key == "width" { 300.0 } else { 150.0 });
             return Ok(Some(Value::Num(v.max(0.0))));
         }
+        // `constructor.name` (étape 74) : objet allégé
+        // portant le nom de classe — `v.constructor.name`
+        // vaut « HTMLVideoElement », pas « Object ». Non
+        // constructible (v1 cosmétique documentée — de vrais
+        // bindings `new`-ables sont un chantier plus large).
+        if key == "constructor" {
+            let o = e.new_object();
+            let name = e.str_val(self.class_name());
+            e.set_own(o, "name", name, true);
+            return Ok(Some(Value::Obj(o)));
+        }
         // Fast paths that don't need the dom borrow held across calls.
         match key {
             "style" => {
@@ -1220,9 +1231,7 @@ impl Host for NodeHost {
                     "paused" | "preservesPitch" => Value::Bool(true),
                     "ended" | "seeking" | "disableRemotePlayback" => Value::Bool(false),
                     "volume" | "playbackRate" | "defaultPlaybackRate" => Value::Num(1.0),
-                    "currentTime" | "videoWidth" | "videoHeight" | "readyState" => {
-                        Value::Num(0.0)
-                    }
+                    "currentTime" | "videoWidth" | "videoHeight" | "readyState" => Value::Num(0.0),
                     "duration" => Value::Num(f64::NAN),
                     // `src` présent mais indécodable → NO_SOURCE ;
                     // sinon EMPTY.

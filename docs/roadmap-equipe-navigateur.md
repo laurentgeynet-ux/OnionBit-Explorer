@@ -848,12 +848,18 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   des appelants `&mut` (FFI/CLI) qui lisent l'outcome
   synchrone ; le cas « apply supplanté par epoch » doit
   rester observable.
-- [ ] **Étape 74. `constructor.name` des éléments média**
+- [x] **Étape 74. `constructor.name` des éléments média**
   (ticket terrain mission 18-B, cosmétique) :
   `v.constructor.name` vaut `Object` au lieu de
   `HTMLVideoElement`/`HTMLAudioElement` — la
   `class_name` host de l'étape 58 n'irrigue pas
   `constructor`. Surface : `dillo-js` bindings média.
+  Livré : `NodeHost::get("constructor")` renvoie un objet
+  allégé `{name: class_name}` — `v.constructor.name` vaut
+  `HTMLVideoElement`/`HTMLAudioElement`/`HTMLCanvasElement`
+  (`HTMLElement` ailleurs) ; non constructible (déviation
+  v1 documentée). Régression :
+  `media_constructor_name_is_class_name`.
 
 ## Piste JS (JS-C26+) — spécialiste `dillo-js`
 

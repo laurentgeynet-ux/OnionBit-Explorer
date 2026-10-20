@@ -1700,3 +1700,22 @@ fn media_play_rejects_like_no_source() {
         "ok"
     );
 }
+
+/// Étape 74 — `constructor.name` reflète le nom de classe
+/// hôte (`HTMLVideoElement`…), pas « Object ».
+#[test]
+fn media_constructor_name_is_class_name() {
+    let mut e = engine_with(PAGE_MEDIA);
+    assert_eq!(
+        e.eval("document.getElementById('v').constructor.name")
+            .map(|v| e.describe(v))
+            .unwrap_or_default(),
+        "HTMLVideoElement"
+    );
+    assert_eq!(
+        e.eval("document.getElementById('a').constructor.name")
+            .map(|v| e.describe(v))
+            .unwrap_or_default(),
+        "HTMLAudioElement"
+    );
+}
