@@ -835,6 +835,25 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   loopback/Tor reste la réponse pour ce niveau. Contrat :
   le mode choisi est observable (`GET /api/egress` ou
   équivalent) et `no_proxy` inchangé hors mode Tor.
+- [ ] **Étape 73. `/input` : outcome rendu à
+  l'enfilement, pas au commit de l'apply** (ticket
+  terrain mission 18-A — mesuré : `POST /input`
+  `await`e `drain_applies_shared` → le `spawn_blocking` ;
+  la réponse HTTP du clic est retenue toute la durée de
+  l'apply, >30 s sur `heavy.html`, alors que l'API
+  respire à ~1,4 ms pendant). L'UI perçoit une latence
+  qui n'existe plus. Arbitrage : retourner l'outcome
+  dès l'enfilement (202-like) et laisser `Edited`/
+  `Navigated` arriver par SSE — vérifier la sémantique
+  des appelants `&mut` (FFI/CLI) qui lisent l'outcome
+  synchrone ; le cas « apply supplanté par epoch » doit
+  rester observable.
+- [ ] **Étape 74. `constructor.name` des éléments média**
+  (ticket terrain mission 18-B, cosmétique) :
+  `v.constructor.name` vaut `Object` au lieu de
+  `HTMLVideoElement`/`HTMLAudioElement` — la
+  `class_name` host de l'étape 58 n'irrigue pas
+  `constructor`. Surface : `dillo-js` bindings média.
 
 ## Piste JS (JS-C26+) — spécialiste `dillo-js`
 
