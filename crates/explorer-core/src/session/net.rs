@@ -5,6 +5,7 @@
 //! `impl Session` réseau : commits de sous-ressources,
 //! livraisons JS, pompe de transports.
 use super::*;
+use apply::PaintPayload;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
@@ -16,16 +17,37 @@ use explorer_net::url::Url;
 use explorer_render::{decode_image, DecodedImage};
 
 impl Session {
-    /// Phase finale — commit des sous-ressources et du rendu
-    /// sous `&mut self` : cascade, moteur JS, files
-    /// d'exécution (les graphes modules sont déjà remplis —
-    /// synchrones), images, fontes, layout, historique et
-    /// `Navigated`. `None` = epoch supplantée, tout est jeté.
+    /// Le commit complet sous `&mut self` (hôtes synchrones :
+    /// CLI, FFI, tests) = tête + rendu inline + queue. Les
+    /// hôtes partagés appellent les trois morceaux à part et
+    /// exécutent le rendu détaché hors verrou (étape 90).
+    /// `None` = epoch supplantée, tout est jeté.
     pub(crate) async fn sub_commit(
         &mut self,
         tab: TabId,
         job: SubJob,
     ) -> Result<Option<String>, CoreError> {
+        let Some(tail) = self.sub_commit_head(tab, job).await? else {
+            return Ok(None);
+        };
+        self.insert_images(tab, &tail.url, &tail.img_bodies);
+        self.relayout(tab)?;
+        Ok(self.sub_commit_tail(tab, tail))
+    }
+
+    /// Tête du commit — sous `&mut self` : garde epoch,
+    /// feuilles liées, fontes, évaluations JS (scripts
+    /// parse/post, modules, `run_pending`, resynchro miroir),
+    /// réinsertion du moteur, drains post-script et pompe
+    /// réseau. Le rendu (`insert_images` + `relayout`) n'y
+    /// figure pas : il peut coûter des dizaines de secondes
+    /// sur une cascade de terrain — les hôtes partagés le
+    /// détachent (étape 90). `Ok(None)` = epoch supplantée.
+    pub(crate) async fn sub_commit_head(
+        &mut self,
+        tab: TabId,
+        job: SubJob,
+    ) -> Result<Option<SubCommitTail>, CoreError> {
         {
             let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
             if entry.nav_epoch != job.epoch {
@@ -101,8 +123,28 @@ impl Session {
         // l'hôte pompe périodiquement pour le reste.
         self.after_script(tab);
         self.pump_net().await;
-        self.insert_images(tab, &url, &img_bodies);
-        self.relayout(tab)?;
+        Ok(Some(SubCommitTail {
+            url,
+            push,
+            prev_title,
+            req,
+            title,
+            img_bodies,
+        }))
+    }
+
+    /// Queue du commit — après le rendu (inline ou détaché) :
+    /// historique, `Navigated`, persistance des cookies et
+    /// scroll de fragment. Renvoie le titre extrait au parse.
+    pub(crate) fn sub_commit_tail(&mut self, tab: TabId, tail: SubCommitTail) -> Option<String> {
+        let SubCommitTail {
+            url,
+            push,
+            prev_title,
+            req,
+            title,
+            ..
+        } = tail;
         // La page chargée prend sa place dans l'historique
         // AVANT le drain script : un `history.go` en vol la
         // voit (index réel), une redirection script pousse sa
@@ -148,7 +190,7 @@ impl Session {
             let frag = frag.to_string();
             self.scroll_to_fragment(tab, &frag);
         }
-        Ok(title)
+        title
     }
 
     /// Draine les `NetRequest` du moteur (étape 51) : chaque
@@ -494,21 +536,53 @@ impl Session {
         let Some(dom) = entry.dom.as_ref() else {
             return;
         };
-        let items = collect_images(dom);
-        let mut decoded: HashMap<String, Option<Arc<DecodedImage>>> = HashMap::new();
-        for (node, src) in items {
-            let Ok(u) = Url::resolve(base, &src) else {
-                continue;
-            };
-            let Some(body) = bodies.get(&u.as_str()) else {
-                continue;
-            };
-            let img = decoded
-                .entry(u.as_str())
-                .or_insert_with(|| decode_image(body, max_px).map(Arc::new));
-            if let Some(img) = img {
-                entry.images.replaced.insert(node, img.clone());
-            }
+        insert_images_into(dom, &mut entry.images, base, bodies, max_px);
+    }
+}
+
+/// Boucle `insert_images` partagée — `dom` et `images`
+/// proviennent de l'onglet (chemin synchrone) ou de la
+/// payload détachée (étape 90).
+fn insert_images_into(
+    dom: &Dom,
+    images: &mut PaintImages,
+    base: &Url,
+    bodies: &HashMap<String, Vec<u8>>,
+    max_px: u32,
+) {
+    let items = collect_images(dom);
+    let mut decoded: HashMap<String, Option<Arc<DecodedImage>>> = HashMap::new();
+    for (node, src) in items {
+        let Ok(u) = Url::resolve(base, &src) else {
+            continue;
+        };
+        let Some(body) = bodies.get(&u.as_str()) else {
+            continue;
+        };
+        let img = decoded
+            .entry(u.as_str())
+            .or_insert_with(|| decode_image(body, max_px).map(Arc::new));
+        if let Some(img) = img {
+            images.replaced.insert(node, img.clone());
         }
     }
+}
+
+/// Variante payload d'`insert_images` pour le rendu de
+/// navigation détaché (étape 90) — même sémantique, hors
+/// session : le DOM et la table `images` vivent dans `p`.
+pub(crate) fn insert_images_payload(
+    p: &mut PaintPayload,
+    base: &Url,
+    bodies: &HashMap<String, Vec<u8>>,
+    max_px: u32,
+) {
+    if bodies.is_empty() {
+        return;
+    }
+    let PaintPayload { dom, images, .. } = p;
+    let Some(dom) = dom.as_ref() else {
+        return;
+    };
+    insert_images_into(dom, images, base, bodies, max_px);
 }

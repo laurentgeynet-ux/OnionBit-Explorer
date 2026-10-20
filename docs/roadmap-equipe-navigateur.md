@@ -1349,6 +1349,34 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   gate FakeRepo, 3 invalidations
   en vol → 2 fetches.
 
+- [x] **Étape 90. Rendu de commit
+  nav détaché** (core) — constat M-H1
+  #6 : `sub_commit` tenait
+  `sess.lock()` pendant la cascade
+  + layout + raster du document
+  (famine ~85 s sur terrain, API
+  gelée : `/status`, `/frame`,
+  input, autres onglets). Livré :
+  `sub_commit` = `sub_commit_head`
+  (verrou : epoch, CSS, fontes, JS,
+  drains) → rendu hors verrou en
+  `spawn_blocking` sur payload
+  (`insert_images_payload` +
+  `relayout_dom_payload`,
+  mécanique `paint_detached` de
+  55h : `take_nav_paint`/`Busy`/
+  `commit_nav_paint`/`rearm_nav_paint`)
+  → `sub_commit_tail` (verrou :
+  historique, `Navigated`, fragment,
+  `mark_hist_ok`). Chemin `&mut self`
+  (CLI/FFI/tests) inchangé. Réserve
+  honnête : la **durée** de la cascade
+  est inchangée (perf = chantier
+  PIPE) — l'API reste serviable
+  pendant ; les applies enfilés par
+  `pump_net` drainent encore sous
+  verrou (livraisons bornées).
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY
@@ -1393,11 +1421,13 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   - **daemon injoignable sous charge
     machine, retour seul** : pas un
     crash (reconnexion auto OK) —
-    famine probable : `sess.lock()`
-    tenu ~85 s sur github (phases
-    `nav.*` mesurées). Corréler au log
-    stderr. Lie la perf cache-cascade
-    au produit.
+    famine `sess.lock()` ~85 s sur
+    github. **Atténué, Étape 90** :
+    le rendu de commit nav tourne
+    hors verrou — l'API reste
+    serviable pendant la cascade.
+    La durée reste au chantier
+    perf cache-cascade (PIPE).
   - **google « oignon » → page stub
     « Cliquez ici si… pas été
     redirigé » + `exception js :

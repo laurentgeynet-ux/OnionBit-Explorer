@@ -417,6 +417,27 @@ pub(crate) struct SubJob {
     pub(crate) font_budget: usize,
 }
 
+/// Reliquat du commit de navigation entre la tête (sous
+/// `&mut self`) et la queue (étape 90) — les champs que le
+/// rendu détaché et la finalisation consomment encore :
+/// `img_bodies` nourrit le décodage hors verrou, le reste
+/// sert à `sub_commit_tail` (historique, `Navigated`,
+/// fragment).
+pub(crate) struct SubCommitTail {
+    /// URL du document — base du matching `<img>` et
+    /// comparaison `Navigated`.
+    pub(crate) url: Url,
+    /// `push` historique + titre avant navigation.
+    pub(crate) push: bool,
+    pub(crate) prev_title: Option<String>,
+    /// Requête d'origine — entrée d'historique poussée.
+    pub(crate) req: Request,
+    /// Titre extrait au parse — valeur de retour du commit.
+    pub(crate) title: Option<String>,
+    /// Corps `<img>` de la vague — décodés pendant le rendu.
+    pub(crate) img_bodies: HashMap<String, Vec<u8>>,
+}
+
 impl SubJob {
     /// Vague de sous-ressources + fontes + prefetch des
     /// graphes de modules — intégralement hors session :

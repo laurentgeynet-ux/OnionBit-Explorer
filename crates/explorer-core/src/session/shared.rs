@@ -5,7 +5,8 @@
 //! API partagée async — points d'entrée prenant
 //! `&Mutex<Session>` sans détenir le verrou.
 use super::*;
-use std::time::Instant;
+use apply::NavPaint;
+use std::time::{Duration, Instant};
 
 use explorer_dom::Dom;
 use explorer_net::http::Request;
@@ -115,21 +116,96 @@ pub async fn navigate_shared(
         return Ok(());
     };
     sub.run().await;
+    nav_commit_shared(sess, tab, epoch, sub, &err_req, push).await
+}
+
+/// Commit partagé d'une navigation — trois temps (étape 90) :
+/// la cascade+layout d'un document de terrain peut coûter des
+/// dizaines de secondes — sous le verrou elle affamait toute
+/// l'API (gel ~85 s mesuré sur github). Tête sous verrou
+/// court (epoch, CSS, JS, drains), rendu détaché en
+/// `spawn_blocking` sur la payload (même mécanique que
+/// l'apply 55h), queue sous verrou (historique, `Navigated`,
+/// fragment, `mark_hist_ok`).
+async fn nav_commit_shared(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+    epoch: u64,
+    sub: SubJob,
+    err_req: &Request,
+    push: bool,
+) -> Result<(), CoreError> {
+    let head = {
+        let mut s = sess.lock().await;
+        s.sub_commit_head(tab, sub).await
+    };
+    let mut tail = match head {
+        Ok(Some(t)) => t,
+        // Epoch supplantée en cours de route — silencieux.
+        Ok(None) => return Ok(()),
+        Err(e) => {
+            let mut s = sess.lock().await;
+            s.paint_error_page(tab, err_req, push, &e);
+            return Err(s.emit_error(tab, e));
+        }
+    };
+    // Un apply détaché peut tenir la payload (navigation
+    // pendant une mutation JS) : attente pollée — le
+    // détenteur la restitue toujours à son commit, l'epoch
+    // est revérifiée à chaque tour (une nav plus récente
+    // coupe court). Le verrou n'est jamais tenu ici.
+    let (mut p, ctx, canvas_ops) = loop {
+        let take = {
+            let mut s = sess.lock().await;
+            s.take_nav_paint(tab, epoch)
+        };
+        match take {
+            NavPaint::Ready(p, c, o) => break (*p, c, o),
+            NavPaint::Superseded => return Ok(()),
+            NavPaint::Busy => tokio::time::sleep(Duration::from_millis(50)).await,
+        }
+    };
+    let base = tail.url.clone();
+    let bodies = std::mem::take(&mut tail.img_bodies);
+    let work = tokio::task::spawn_blocking(move || {
+        net::insert_images_payload(&mut p, &base, &bodies, ctx.image_max_px);
+        let Some(dom) = p.dom.take() else {
+            return (p, Err(CoreError::EmptyDocument));
+        };
+        let r = apply::relayout_dom_payload(&mut p, &ctx, &dom, &canvas_ops);
+        p.dom = Some(dom);
+        (p, r)
+    })
+    .await;
     let mut s = sess.lock().await;
-    match s.sub_commit(tab, sub).await {
-        Ok(_) => {
-            // Rejeu/reload réussi : la position courante n'est
-            // plus en échec (étape 76) — la traversée partagée
-            // marque en plus sa cible via `history_move_shared`.
-            let idx = s.tabs.get(&tab).map(|e| e.hist_idx);
-            if let Some(i) = idx {
-                s.mark_hist_ok(tab, i);
+    match work {
+        Ok((p, r)) => {
+            let live = s.commit_nav_paint(tab, epoch, p);
+            match (r, live) {
+                (Ok(()), true) => {
+                    s.sub_commit_tail(tab, tail);
+                    // Rejeu/reload réussi : la position courante
+                    // n'est plus en échec (étape 76).
+                    let idx = s.tabs.get(&tab).map(|e| e.hist_idx);
+                    if let Some(i) = idx {
+                        s.mark_hist_ok(tab, i);
+                    }
+                    Ok(())
+                }
+                (Err(e), true) => {
+                    s.paint_error_page(tab, err_req, push, &e);
+                    Err(s.emit_error(tab, e))
+                }
+                // Epoch supplantée pendant le rendu — la
+                // payload a été jetée, silencieux.
+                _ => Ok(()),
             }
-            Ok(())
         }
         Err(e) => {
-            s.paint_error_page(tab, &err_req, push, &e);
-            Err(s.emit_error(tab, e))
+            s.rearm_nav_paint(tab);
+            let err = CoreError::Fetch(format!("worker rendu de navigation paniqué : {e}"));
+            s.paint_error_page(tab, err_req, push, &err);
+            Err(s.emit_error(tab, err))
         }
     }
 }

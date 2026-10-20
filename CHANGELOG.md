@@ -223,6 +223,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `frames` (bytes) reste écrit — marqueur de présence
   de `selectTab`. Test : rafale de 3 invalidations
   pendant un pull bloqué → exactement 2 fetches.
+- **Étape 90 — rendu de commit nav détaché**
+  (`explorer-core`) : constat M-H1 #6 — `sub_commit`
+  tenait `sess.lock()` pendant toute la cascade + layout
+  + raster du document final : ~85 s de famine sur
+  terrain (`/status`, `/frame`, input et autres onglets
+  gelés — le « daemon injoignable sous charge » du vol).
+  Livré : le commit partagé se scinde en tête sous verrou
+  court (`sub_commit_head` : epoch, CSS liées, fontes,
+  évaluations JS, drains post-script), rendu hors verrou
+  en `spawn_blocking` sur la `PaintPayload` détachée
+  (`insert_images_payload` + `relayout_dom_payload` —
+  même mécanique que l'apply 55h : `take_nav_paint`,
+  `NavPaint::Busy` pollé, `commit_nav_paint` gardé par
+  epoch, `rearm_nav_paint` au panic), puis queue sous
+  verrou (`sub_commit_tail` : historique, `Navigated`,
+  cookies, fragment, `mark_hist_ok`). Le chemin
+  `&mut self` (CLI/FFI/tests) conserve le commit inline.
+  Réserve honnête : la durée de la cascade est inchangée
+  — c'est le chantier perf PIPE ; l'API reste serviable
+  pendant le rendu, c'est la famine qui disparaît.
 
 ### Added
 

@@ -262,6 +262,18 @@ impl Tab {
     }
 }
 
+/// Sortie de [`Session::take_nav_paint`] (étape 90).
+pub(crate) enum NavPaint {
+    /// Payload + contexte prêts pour le worker de rendu.
+    Ready(Box<PaintPayload>, ApplyCtx, CanvasOpsTable),
+    /// Un apply (ou un rendu de nav) détaché tient la
+    /// payload — réessayer après son commit : le détenteur
+    /// la restitue toujours, même supplanté (epoch jetée).
+    Busy,
+    /// Onglet fermé ou navigation supplantée — abandon.
+    Superseded,
+}
+
 /// Corps de l'apply — exécutable sous `&mut Session` ou en
 /// `spawn_blocking` sur payload détachée (mêmes phases).
 /// Retourne l'[`ApplyOutcome`] à committer sous verrou.
@@ -782,6 +794,71 @@ impl Session {
         }
         // Epoch changée : la page a été supplantée — la
         // payload est abandonnée (sa propre nav repeint).
+    }
+
+    /// Détache la payload de l'onglet pour le rendu de
+    /// navigation hors verrou (étape 90) — même mécanique
+    /// que l'apply (55h) : `paint_detached` posé, les
+    /// applies en file attendent la réinsertion. Le
+    /// `canvas_ops` du moteur est capturé ici (le moteur
+    /// reste sur `Tab`).
+    pub(crate) fn take_nav_paint(&mut self, tab: TabId, epoch: u64) -> NavPaint {
+        let ctx = self.apply_ctx();
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return NavPaint::Superseded;
+        };
+        if entry.paint_detached {
+            return NavPaint::Busy;
+        }
+        if entry.nav_epoch != epoch {
+            return NavPaint::Superseded;
+        }
+        let canvas_ops = entry
+            .js
+            .as_deref_mut()
+            .map_or_else(CanvasOpsTable::new, explorer_js::JsEngine::canvas_ops);
+        entry.paint_detached = true;
+        NavPaint::Ready(Box::new(entry.take_paint()), ctx, canvas_ops)
+    }
+
+    /// Réinsère la payload de rendu de navigation — garde
+    /// epoch identique à `commit_apply_detached` : le flag
+    /// est toujours libéré (le worker est le seul détenteur,
+    /// une nav plus récente ne peut pas l'avoir repris —
+    /// `Busy` l'en empêche) ; la payload n'est réinsérée que
+    /// si l'epoch vit encore. `true` = commise sur l'epoch
+    /// vivante (l'appelant enchaîne `sub_commit_tail`).
+    pub(crate) fn commit_nav_paint(
+        &mut self,
+        tab: TabId,
+        epoch: u64,
+        payload: PaintPayload,
+    ) -> bool {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return false;
+        };
+        if !entry.paint_detached {
+            return false;
+        }
+        entry.paint_detached = false;
+        if entry.nav_epoch != epoch {
+            return false; // nav supplantée : la payload est jetée
+        }
+        let scrolled = (entry.scroll_y - payload.scroll_y).abs() > f32::EPSILON;
+        entry.put_paint(payload);
+        if scrolled && self.repaint(tab).is_ok() {
+            self.emit_invalidated(tab);
+        }
+        true
+    }
+
+    /// Réarme `paint_detached` après une panique du worker de
+    /// rendu de nav — la payload est perdue avec lui : l'état
+    /// vide dégrade en lazy-heal (comme après apply, 55h).
+    pub(crate) fn rearm_nav_paint(&mut self, tab: TabId) {
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.paint_detached = false;
+        }
     }
 
     /// Apply synchrone d'une entrée de file — take/put sous
