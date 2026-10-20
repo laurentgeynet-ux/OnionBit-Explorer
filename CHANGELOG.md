@@ -187,6 +187,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Livré : `translate_subtree(child, delta, 0)` — même motif
   que l'ancrage `right`/`bottom` des absolus. `shot` :
   vignettes à droite, légendes en place, texte enroulé.
+- **R-46 — item flex/grid = contexte de formatage
+  indépendant** (`explorer-layout`) : les marges des
+  descendants d'un item s'évaporaient (traversaient la boîte
+  item sans être posées ni comptées) — un `<p>` en tête
+  d'item perdait sa marge et l'item se mesurait trop petit.
+  Flexbox §4.1 : l'item établit un FC indépendant. Livré :
+  `LayoutBox.fc_root` posé par `layout_item` (flex + grid),
+  `is_fc_root` aux gardes §8.3.1 + englobage des flottants
+  §9.4.1 ; le champ survit au relayout incrémental.
 - **`scripts/spawn_daemon.ps1` — spawn WMI durci** :
   les morts silencieuses du daemon (3 occurrences
   non reproductibles, zéro stderr, zéro event) sont

@@ -1028,3 +1028,61 @@ fn float_left_inchange() {
     let inner = find(&bx, by_tag(&dom, "section"));
     assert!(approx(inner.rect.x, 0.0), "inner.x={}", inner.rect.x);
 }
+
+// ── R-46 : un item flex/grid établit un contexte de
+// formatage indépendant (Flexbox §4.1 / Grid §6) — les
+// marges de ses descendants ne s'échappent jamais de
+// l'item (ni haut ni bas) et il englobe ses flottants.
+// Terrain : la marge `1em` du premier `<p>` d'un item
+// s'évaporait dans la mesure flex (item posé sans elle).
+
+#[test]
+fn item_flex_contient_les_marges_de_ses_fils() {
+    let html = concat!(
+        "<!doctype html><div class=\"fc\">",
+        "<div class=\"it\"><p>aaa</p></div>",
+        "<div class=\"nx\">bbb</div>",
+        "</div>"
+    );
+    let (dom, bx) = laid(
+        html,
+        ".fc{display:flex;flex-direction:column} p{margin:16px 0}",
+    );
+    // `.it` = second div du doc (le 1er est `.fc`).
+    let mut divs = Vec::new();
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "div") {
+            divs.push(n);
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    let it = find(&bx, divs[1]);
+    let nx = find(&bx, divs[2]);
+    let p = find(&bx, by_tag(&dom, "p"));
+    // Marge contenue : le <p> commence à 16 sous le haut de
+    // l'item ; l'item englobe la marge basse → h = 51.2.
+    assert!(
+        approx(p.rect.y - it.rect.y, 16.0),
+        "p.y-it.y={}",
+        p.rect.y - it.rect.y
+    );
+    assert!(approx(it.rect.height, 51.2), "it.h={}", it.rect.height);
+    // L'item suivant est posé APRÈS la margin box de `.it`.
+    assert!(approx(nx.rect.y, it.rect.y + 51.2), "nx.y={}", nx.rect.y);
+}
+
+#[test]
+fn item_flex_row_marges_dans_le_cross() {
+    // En `row`, la hauteur cross de l'item englobe les
+    // marges verticales contenues (§4.1 — pas de collapse).
+    let html = "<!doctype html><div class=\"fc\"><div class=\"it\"><p>aaa</p></div></div>";
+    let (dom, bx) = laid(
+        html,
+        ".fc{display:flex;flex-direction:row} p{margin:16px 0}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    assert!(approx(p.rect.y, 16.0), "p.y={}", p.rect.y);
+}

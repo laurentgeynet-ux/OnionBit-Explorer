@@ -156,6 +156,16 @@ pub struct LayoutBox {
     /// alors pas (elle est avalée, ni contenu ni marge externe —
     /// WPT `margin-collapse-min-height-001`).
     pub height_raised: bool,
+    /// La boîte établit un contexte de formatage indépendant sans
+    /// que son propre style ne le signale — posé par le layout
+    /// parent pour les items flex (`layout_item`) et grid
+    /// (Flexbox §4.1 / Grid §6 : un item « establishes an
+    /// independent formatting context »). Conséquences §8.3.1 +
+    /// §9.4.1 : les marges des descendants ne s'échappent jamais
+    /// de l'item (haut ni bas) et l'item englobe ses flottants.
+    /// Champ (pas paramètre) : il survit au relayout incrémental
+    /// `relayout_subtree`, qui repose la boîte via `slot`.
+    pub fc_root: bool,
 }
 
 /// Contexte de pose enregistré par `layout_block` (R-12) :
@@ -405,6 +415,7 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
         control_checked: false,
         slot: BoxSlot::default(),
         height_raised: false,
+        fc_root: false,
     };
     let children = child_boxes(dom, root, styles, &style, sizes);
     b.children = wrap_children(children, &style, kind);
@@ -487,6 +498,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     control_checked: false,
                     slot: BoxSlot::default(),
                     height_raised: false,
+                    fc_root: false,
                 });
             }
         }
@@ -577,6 +589,7 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         control_checked: false,
         slot: BoxSlot::default(),
         height_raised: false,
+        fc_root: false,
     }
 }
 
@@ -770,6 +783,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             control_checked: false,
             slot: BoxSlot::default(),
             height_raised: false,
+            fc_root: false,
         });
     }
 }
@@ -856,6 +870,7 @@ fn object_box(
         control_checked: false,
         slot: BoxSlot::default(),
         height_raised: false,
+        fc_root: false,
     };
     // Ressource résolue → feuille remplacée ; sinon les
     // enfants prennent la place de l'objet.
@@ -947,6 +962,7 @@ fn leaf_box(
         control_checked: false,
         slot: BoxSlot::default(),
         height_raised: false,
+        fc_root: false,
     }
 }
 
@@ -993,6 +1009,7 @@ fn control_box(
                     control_checked: false,
                     slot: BoxSlot::default(),
                     height_raised: false,
+                    fc_root: false,
                 }],
                 &style,
             )

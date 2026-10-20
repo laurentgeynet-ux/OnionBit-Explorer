@@ -243,6 +243,15 @@ fn establishes_bfc(st: &ComputedStyle) -> bool {
         || matches!(st.get("position"), Some("absolute" | "fixed"))
 }
 
+/// Contexte de formatage indépendant, au sens où §8.3.1/§9.4.1
+/// en ont besoin : BFC propre **ou** `fc_root` posé par le parent
+/// (item flex/grid — Flexbox §4.1 : la boîte blockifiée de l'item
+/// établit un FC indépendant → marges des descendants contenues,
+/// flottants englobés).
+fn is_fc_root(bx: &LayoutBox) -> bool {
+    bx.fc_root || establishes_bfc(&bx.style)
+}
+
 /// Dimensionne l'arbre de boîtes dans un viewport de largeur
 /// `viewport_w` : chaque `rect` est rempli (x, y, border-box
 /// width/height). Le `y` de départ est 0.
@@ -555,7 +564,7 @@ fn margin_transparent(bx: &LayoutBox, cb_w: f32, fs: f32, ctx: &BlockCtx) -> boo
     bx.rect.height <= 0.0
         && !matches!(bx.position, Position::Absolute | Position::Fixed)
         && bx.float == Float::None
-        && !establishes_bfc(st)
+        && !is_fc_root(bx)
         && side_px(st, "padding-top", cb_w, fs, ctx, 0.0) <= 0.0
         && side_px(st, "padding-bottom", cb_w, fs, ctx, 0.0) <= 0.0
         && border_px(st, "border-top-width", cb_w, fs, ctx) <= 0.0
@@ -585,7 +594,7 @@ fn transparent_candidate(
     };
     !matches!(bx.position, Position::Absolute | Position::Fixed)
         && bx.float == Float::None
-        && !establishes_bfc(st)
+        && !is_fc_root(bx)
         && side_px(st, "padding-top", cb_w, fs, ctx, 0.0) <= 0.0
         && side_px(st, "padding-bottom", cb_w, fs, ctx, 0.0) <= 0.0
         && border_px(st, "border-top-width", cb_w, fs, ctx) <= 0.0
@@ -613,7 +622,7 @@ fn bottom_adjoining(bx: &LayoutBox, cb_w: f32, fs: f32, ctx: &BlockCtx) -> bool 
     };
     !matches!(bx.position, Position::Absolute | Position::Fixed)
         && bx.float == Float::None
-        && !establishes_bfc(st)
+        && !is_fc_root(bx)
         && side_px(st, "padding-bottom", cb_w, fs, ctx, 0.0) <= 0.0
         && border_px(st, "border-bottom-width", cb_w, fs, ctx) <= 0.0
         && !matches!(st.get("clear"), Some("left" | "right" | "both"))
@@ -649,7 +658,7 @@ fn escaped_bottom_run(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx)
 /// joue pas (contrairement au bas, qui exige `height:auto`).
 fn top_adjoining(bx: &LayoutBox, cb_w: f32, fs: f32, ctx: &BlockCtx) -> bool {
     let st = &bx.style;
-    !establishes_bfc(st)
+    !is_fc_root(bx)
         && side_px(st, "padding-top", cb_w, fs, ctx, 0.0) <= 0.0
         && border_px(st, "border-top-width", cb_w, fs, ctx) <= 0.0
 }
@@ -1073,7 +1082,7 @@ fn layout_block_inner(
             // de son premier fils à l'intérieur). Jamais pour
             // la racine : ses marges ne collapsent pas, la
             // chaîne du premier fils reste à l'intérieur.
-            !is_root && pt + bt <= 0.0 && !establishes_bfc(&st),
+            !is_root && pt + bt <= 0.0 && !is_fc_root(bx),
             line_h,
             ctx,
             fs,
@@ -1360,7 +1369,7 @@ fn flow_children(
     // leur place hypothétique se mesure depuis le bas réel
     // du frère précédent, pas depuis le curseur global).
     let mut flow_bottom = start_cursor;
-    let own_bfc = establishes_bfc(&bx.style);
+    let own_bfc = is_fc_root(bx);
     // `text-align: -webkit-center` (UA : <center>, spec
     // « align descendants to the center ») centre aussi les
     // descendants **bloc** plus étroits que le conteneur —
@@ -1612,7 +1621,7 @@ fn flow_children(
         // BFC : la boîte elle-même se range dans la bande ;
         // non-BFC : pleine largeur — ce sont leurs **lignes**
         // qui se rangent (registre partagé `fl`, ligne par ligne).
-        let child_bfc = establishes_bfc(&cst);
+        let child_bfc = establishes_bfc(&cst) || bx.children[i].fc_root;
         let used = if child_bfc {
             // BFC : registre vierge — les flottants internes ne
             // mordent pas l'extérieur (§9.4.1). Placement

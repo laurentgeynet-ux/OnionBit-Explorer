@@ -188,28 +188,30 @@ pub(crate) fn layout_item(
     pos_cb: Rect,
     cb_h: Option<f32>,
 ) {
-    match c.kind {
-        BoxKind::AnonymousBlock => {
-            layout_anon_block(c, ix, iy, iw, ctx, fs, pos_cb, &FloatCtx::default(), cb_h);
-        }
-        _ => {
-            // Item flex = BFC propre : registre vierge. `cb_h`
-            // non propagé par défaut (`None` — la hauteur de la
-            // ligne flex dépend du contenu, §10.5) ; grid passe
-            // la hauteur de sa cellule — l'aire de grille EST
-            // le bloc conteneur des % de l'item (§6.5).
-            layout_block(
-                c,
-                ix,
-                iy,
-                iw,
-                cb_h,
-                ctx,
-                fs,
-                pos_cb,
-                &mut FloatCtx::default(),
-            );
-        }
+    if c.kind == BoxKind::AnonymousBlock {
+        layout_anon_block(c, ix, iy, iw, ctx, fs, pos_cb, &FloatCtx::default(), cb_h);
+    } else {
+        // Item flex = contexte de formatage indépendant
+        // (§4.1 — idem pour les items grid, même point
+        // d'entrée) : registre de flottants vierge ET les
+        // marges des descendants restent dans l'item
+        // (`fc_root`, §8.3.1). `cb_h` non propagé par
+        // défaut (`None` — la hauteur de la ligne flex
+        // dépend du contenu, §10.5) ; grid passe la
+        // hauteur de sa cellule — l'aire de grille EST
+        // le bloc conteneur des % de l'item (§6.5).
+        c.fc_root = true;
+        layout_block(
+            c,
+            ix,
+            iy,
+            iw,
+            cb_h,
+            ctx,
+            fs,
+            pos_cb,
+            &mut FloatCtx::default(),
+        );
     }
 }
 

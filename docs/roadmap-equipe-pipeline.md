@@ -873,6 +873,36 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   qui s'enroule. Tests : 2 cas `block`
   (`float:right` → descendant collé au
   bord droit ; `float:left` inchangé).
+- [x] **R-46. Item flex/grid = contexte de
+  formatage indépendant (§4.1 /
+  §8.3.1)** (résidu terrain) — **livré** :
+  les marges des descendants d'un item
+  flex **s'évaporaient** — elles
+  traversaient la boîte item (pas de BFC
+  propre sur son style) sans être ni
+  posées dedans ni comptées dans sa
+  hauteur. Repro : `<p>` `margin:16px`
+  premier fils d'un item column → posé à
+  `y=0` (marge perdue), item mesuré à
+  19.2 au lieu de 51.2. Terrain : marge
+  `1em` du `<p>` d'un item poussait le
+  flex dans la fixture rust-lang
+  (`main.y` décalé). Livré : champ
+  `LayoutBox.fc_root` posé par
+  `layout_item` (couvre flex **et** grid,
+  même point d'entrée) — `is_fc_root` =
+  `establishes_bfc(style) || fc_root`
+  aux quatre gardes §8.3.1
+  (`top/bottom_adjoining`,
+  `margin_transparent`,
+  `transparent_candidate`), à
+  `own_bfc` (flottants englobés, §9.4.1)
+  et à `child_bfc` (défensif). Champ et
+  non paramètre : survit au relayout
+  incrémental via `slot`. Tests : 2 cas
+  `block` (marges contenues + item
+  suivant après la margin box ; cross
+  `row` englobe les marges verticales).
 - [x] **Écarts terrain — vol humain M-H1
   (22/10)** : trois constats rendu du
   premier run humain — **triage terminé** :
