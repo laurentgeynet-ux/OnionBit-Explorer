@@ -982,3 +982,49 @@ fn remplace_max_width_px_borne_la_mesure_intrinseque() {
     let a = find(&bx, by_tag(&dom, "a"));
     assert!(a.rect.width <= 31.0, "a.w={}", a.rect.width);
 }
+
+// ── R-45 : `float:right` translate le sous-arbre — la boîte
+// du flottant partait au bord droit mais ses descendants
+// restaient au bord gauche de la bande (`rect.x` corrigé
+// sans translation — même motif que l'ancrage right/bottom
+// des absolus). Terrain : thumbs Wikipedia ITN/OTD peints
+// à gauche, texte chevauché.
+
+#[test]
+fn float_right_translate_tout_le_sous_arbre() {
+    let html = concat!(
+        "<!doctype html><div style=\"width:400px\">",
+        "<aside class=\"itn-img\"><section style=\"width:143px;height:60px\"></section></aside>",
+        "<p>alpha beta gamma delta epsilon zeta eta theta</p>",
+        "</div>"
+    );
+    let (dom, bx) = laid(html, ".itn-img{float:right;margin-left:8px;margin-top:3px}");
+    let outer = find(&bx, by_tag(&dom, "aside"));
+    let inner = find(&bx, by_tag(&dom, "section"));
+    // Boîte ET contenu collés au bord droit (400).
+    assert!(
+        approx(outer.rect.x + outer.rect.width, 400.0),
+        "outer.right={}",
+        outer.rect.x + outer.rect.width
+    );
+    assert!(
+        approx(inner.rect.x + inner.rect.width, 400.0),
+        "inner.right={} (sous-arbre non translaté)",
+        inner.rect.x + inner.rect.width
+    );
+}
+
+#[test]
+fn float_left_inchange() {
+    // Contrôle : le flottant gauche n'a aucune translation
+    // à appliquer — sa boîte et son contenu restent au bord
+    // gauche de la bande.
+    let html = concat!(
+        "<!doctype html><div style=\"width:400px\">",
+        "<aside class=\"fl\"><section style=\"width:100px;height:50px\"></section></aside>",
+        "</div>"
+    );
+    let (dom, bx) = laid(html, ".fl{float:left;margin-right:8px}");
+    let inner = find(&bx, by_tag(&dom, "section"));
+    assert!(approx(inner.rect.x, 0.0), "inner.x={}", inner.rect.x);
+}

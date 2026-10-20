@@ -1234,7 +1234,13 @@ fn place_float(
         let r = child.rect;
         if right_side {
             let corrected = bx0 + bw - r.width;
-            child.rect.x = corrected;
+            // Le delta translate TOUT le sous-arbre : les
+            // descendants ont été posés à `bx0`, ils doivent
+            // suivre la boîte (même motif que l'ancrage
+            // `right`/`bottom` des absolus — terrain :
+            // thumb Wikipedia `.itn-img` peint à gauche
+            // pendant que sa boîte flottait à droite).
+            crate::flex::translate_subtree(child, corrected - child.rect.x, 0.0);
             placed = Rect {
                 x: corrected - ml,
                 y: r.y - mt,

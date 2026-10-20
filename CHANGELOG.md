@@ -178,6 +178,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `width`/`min|max-width` non-% font foi avant l'intrinsèque
   (§5.1) — généralise aux bases flex, pistes grid, flottants,
   cellules. `shot` : icônes en ligne horizontale.
+- **R-45 — `float:right` translate le sous-arbre entier**
+  (`explorer-layout`) : bug site-réel — les vignettes
+  ITN/OTD de en.wikipedia.org se peintaient au bord gauche
+  de la colonne, texte par-dessus. `place_float` corrigeait
+  `child.rect.x` après le layout interne sans translater les
+  descendants : boîte à droite, contenu resté à gauche.
+  Livré : `translate_subtree(child, delta, 0)` — même motif
+  que l'ancrage `right`/`bottom` des absolus. `shot` :
+  vignettes à droite, légendes en place, texte enroulé.
 - **`scripts/spawn_daemon.ps1` — spawn WMI durci** :
   les morts silencieuses du daemon (3 occurrences
   non reproductibles, zéro stderr, zéro event) sont

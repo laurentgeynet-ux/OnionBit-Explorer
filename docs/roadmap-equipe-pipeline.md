@@ -850,6 +850,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `block` (4×`<a><img width:40>` 512² dans un
   wrap 200 → une ligne ; `max-width:30px` px
   borne l'intrinsèque).
+- [x] **R-45. `float:right` translate le
+  sous-arbre entier** (résidu terrain,
+  thumbs Wikipedia) — **livré** : les
+  vignettes ITN/OTD de en.wikipedia.org
+  se peintaient au bord **gauche** de la
+  colonne, le texte par-dessus. Cause :
+  `place_float` corrigeait `child.rect.x`
+  après le layout interne sans translater
+  les descendants — la border box partait
+  à droite, son contenu restait posé au
+  bord gauche de la bande. Même motif que
+  l'ancrage `right`/`bottom` des absolus :
+  correction par `translate_subtree(child,
+  delta, 0)` après placement. Le registre
+  des bandes était sain (texte contracté
+  correctement dans les repros) — seule la
+  position finale du sous-arbre manquait.
+  Vérif terrain : `shot` en.wikipedia.org
+  → vignettes ITN/OTD/Help-us-improve à
+  droite, légendes sous l'image, texte
+  qui s'enroule. Tests : 2 cas `block`
+  (`float:right` → descendant collé au
+  bord droit ; `float:left` inchangé).
 - [x] **Écarts terrain — vol humain M-H1
   (22/10)** : trois constats rendu du
   premier run humain — **triage terminé** :
