@@ -315,6 +315,63 @@ async fn http_error_is_typed_and_emits_pipeline_error() {
     assert!(saw_err);
 }
 
+/// Étape 69 — une nav en échec commet une page d'erreur
+/// peinte par le moteur : URL tentée en barre, cause
+/// lisible dans le document, `can_back` préservé (la
+/// page précédente reste restaurée par l'historique).
+#[tokio::test]
+async fn failed_nav_commits_error_page() {
+    let (mut s, t) = test_session();
+    t.route("/ok", 200, PAGE_T);
+    t.route("/ok2", 200, PAGE);
+    t.route("/ko", 404, "nope");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/ok").await.unwrap();
+    s.navigate(id, "http://h.test/ok2").await.unwrap();
+    assert!(s.tab_info(id).is_some_and(|i| i.can_back));
+    assert_eq!(s.find_in_page(id, "Page inaccessible"), 0);
+    assert!(matches!(
+        s.navigate(id, "http://h.test/ko").await,
+        Err(CoreError::HttpStatus(404))
+    ));
+    let info = s.tab_info(id).unwrap();
+    assert_eq!(info.url.as_deref(), Some("http://h.test/ko"));
+    assert_eq!(info.title.as_deref(), Some("Erreur de chargement"));
+    assert!(info.can_back, "l'historique ne doit pas être consumé");
+    // Le document commis est la page d'erreur, pas la page
+    // précédente ni un vide.
+    assert!(s.find_in_page(id, "Page inaccessible") > 0);
+    assert!(s.find_in_page(id, "HTTP 404") > 0);
+    // Retour arrière : la page précédente est restaurée.
+    s.go_back(id).await.unwrap();
+    assert_eq!(
+        s.tab_info(id).and_then(|i| i.url).as_deref(),
+        Some("http://h.test/ok")
+    );
+}
+
+/// Étape 69 — le chemin hors-verrou (`navigate_shared`)
+/// commet la même page d'erreur.
+#[tokio::test]
+async fn failed_nav_shared_commits_error_page() {
+    use explorer_net::url::Url;
+    let (s, t) = test_session();
+    t.route("/ko", 500, "boom");
+    let sess = std::sync::Arc::new(tokio::sync::Mutex::new(s));
+    let id = sess.lock().await.open_tab();
+    let req = Request::get(Url::parse("http://h.test/ko").unwrap());
+    assert!(matches!(
+        explorer_core::navigate_shared(&sess, id, req, true).await,
+        Err(CoreError::HttpStatus(500))
+    ));
+    let mut g = sess.lock().await;
+    assert_eq!(
+        g.tab_info(id).and_then(|i| i.url).as_deref(),
+        Some("http://h.test/ko")
+    );
+    assert!(g.find_in_page(id, "Page inaccessible") > 0);
+}
+
 #[tokio::test]
 async fn unknown_tab_is_typed_error() {
     let (mut s, _t) = test_session();
@@ -1694,12 +1751,15 @@ history.go(99);
     s.set_js_factory(explorer_js::DilloEngine::factory());
     let id = s.open_tab();
     s.navigate(id, "http://h.test/p").await.unwrap();
-    // URL irrésolvable + borne historique : aucune navigation,
-    // aucune erreur — la page reste en place.
+    // Le href irrégulier se résout en relatif contre la base
+    // → la nav part quand même et échoue en 404 : depuis
+    // l'étape 69 la page d'erreur moteur est commise sous
+    // l'URL tentée (borne historique : toujours ignorée).
     assert_eq!(
         s.tab_info(id).unwrap().url.as_deref(),
-        Some("http://h.test/p")
+        Some("http://h.test/ht!tp://%5B::1%5Dbad")
     );
+    assert!(s.find_in_page(id, "Page inaccessible") > 0);
 }
 
 /// Transition (étape 45) : un handler `click` change `class`

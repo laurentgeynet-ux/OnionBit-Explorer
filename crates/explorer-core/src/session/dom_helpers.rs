@@ -9,7 +9,10 @@ use std::sync::Arc;
 
 use explorer_dom::{Dom, DomError, NodeId};
 use explorer_layout::{LayoutBox, Rect};
+use explorer_net::url::Url;
 use explorer_render::{decode_data_url, DecodedImage, ImageTable};
+
+use super::CoreError;
 
 /// Hit-test profond : la boîte la plus imbriquée contenant
 /// `(x, y)` document gagne — renvoie son `NodeId` source
@@ -432,4 +435,41 @@ pub(crate) fn descendant_elements(dom: &Dom, root: NodeId, tag: &str) -> Vec<Nod
         }
     }
     out
+}
+
+// -- Page d'erreur navigateur (étape 69) -------------------------------
+
+/// Échappement minimal d'un texte injecté dans le document
+/// d'erreur généré (URL, cause) — `&` `<` `>` suffisent, les
+/// autres séquences sont inertes en contexte texte/attribut
+/// double-quoté.
+pub(crate) fn esc_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// Document d'erreur **peint par le moteur** (étape 69) :
+/// une nav qui échoue (404/5xx, connexion refusée, DNS,
+/// document vide) produit une page lisible plutôt qu'un
+/// vide — statut, URL tentée, cause. Markup minimal volontaire
+/// (UA stylesheet + styles inline, zéro dépendance UI).
+pub(crate) fn error_document(url: &Url, err: &CoreError) -> String {
+    let cause = match err {
+        CoreError::HttpStatus(s) => format!("Le serveur a répondu « HTTP {s} »."),
+        CoreError::Fetch(m) => format!("Impossible de joindre le serveur ({m})."),
+        CoreError::Url(m) => format!("Adresse invalide ({m})."),
+        other => other.to_string(),
+    };
+    format!(
+        "<!doctype html><html><head><title>Erreur de chargement</title></head>\
+         <body style=\"font-family:sans-serif;margin:3em auto;max-width:34em\">\
+         <h1>Page inaccessible</h1>\
+         <p>La page <code>{}</code> n’a pas pu être chargée.</p>\
+         <p><strong>{}</strong></p>\
+         <p>Réessayez plus tard, ou revenez à la page précédente.</p>\
+         </body></html>",
+        esc_html(&url.to_string()),
+        esc_html(&cause),
+    )
 }

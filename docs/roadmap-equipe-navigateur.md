@@ -740,7 +740,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `bool` déplacé (repaint fait) ; `find_scroll` repeint +
   invalide quand la position n'a pas bougé. Régression :
   `find_highlight_repaints_without_scroll`.
-- [ ] **Étape 69. Pages d'erreur navigateur** (lead —
+- [x] **Étape 69. Pages d'erreur navigateur** (lead —
   trou produit, terrain missions 16/17) : aujourd'hui une
   nav qui échoue (`HttpStatus` 404/5xx, `Fetch` connexion
   refusée/DNS, `EmptyDocument`) ne produit aucune surface —
@@ -752,6 +752,18 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (`CoreError`) — il manque la surface. Bonus : même canal
   pour `pipeline_error` SSE → la frame montre l'échec au
   lieu de figer l'ancienne page.
+  Livré : `error_document` (dom_helpers) génère le markup
+  (URL + cause échappées, cause lisible par variante
+  `CoreError`, styles inline minimaux) ; `paint_error_page`
+  (paint.rs) le commet via `relayout_dom` — URL tentée en
+  barre, titre « Erreur de chargement », `last_req=None`
+  (reload = retente GET), historique intact → `can_back`
+  préservé, `Navigated` émis (commit effectif, §64) +
+  `PipelineError` inchangé. Câblé sur les deux chemins
+  d'échec `NavJob::run` (`navigate_request` +
+  `navigate_shared`). Régressions :
+  `failed_nav_commits_error_page`,
+  `failed_nav_shared_commits_error_page`.
 - [ ] **Étape 70. Téléchargements** (lead — trou produit,
   terrain mission 17-D) : `application/octet-stream`,
   `Content-Disposition: attachment`, type inconnu en

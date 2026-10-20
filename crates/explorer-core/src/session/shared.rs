@@ -76,6 +76,9 @@ pub async fn navigate_shared(
         Err(e) => {
             let mut s = sess.lock().await;
             s.unspec(tab); // peinture spéculative → réverte (56c)
+                           // Page d'erreur commise (étape 69) — l'URL tentée
+                           // s'affiche, `can_back` est préservé.
+            s.paint_error_page(tab, &job.req.url, &e);
             return Err(s.emit_error(tab, e));
         }
     };

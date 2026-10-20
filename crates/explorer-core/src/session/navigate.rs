@@ -356,8 +356,12 @@ impl Session {
             Err(e) => {
                 // Le document en vol a pu être peint
                 // progressivement — on réverte avant de
-                // propager (étape 56c).
+                // propager (étape 56c), puis la page
+                // d'erreur est commise (étape 69 : 404/5xx,
+                // fetch en échec, document vide — plus de
+                // vide, `can_back` préservé).
                 self.unspec(tab);
+                self.paint_error_page(tab, &job.req.url, &e);
                 return Err(e);
             }
         };

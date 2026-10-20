@@ -9,6 +9,14 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 69 — pages d'erreur navigateur**
+  (`explorer-core`) : une nav en échec (HTTP 404/5xx,
+  connexion refusée/DNS, document vide) commet un document
+  d'erreur généré par le moteur — statut, URL tentée, cause
+  lisible — au lieu de laisser la page précédente ou un
+  vide. `can_back` préservé (historique intact), reload
+  retente la cible, `PipelineError` SSE inchangé.
+
 - **Étape 53e — charset transport honoré pour le
   document** (`explorer-core`) : `StreamDecoder` prend le
   `charset=` du `Content-Type` en amorce — ordre WHATWG

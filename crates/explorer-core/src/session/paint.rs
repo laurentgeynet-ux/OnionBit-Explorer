@@ -81,6 +81,42 @@ impl Session {
         self.emit_invalidated(tab);
     }
 
+    /// Page d'erreur **peinte par le moteur** (étape 69) :
+    /// une nav qui échoue commet un document d'erreur
+    /// (statut, URL, cause) au lieu de laisser la page
+    /// précédente ou un vide. La barre montre l'URL tentée,
+    /// `can_back` est préservé (historique intact), un
+    /// reload retente la cible en `GET`.
+    pub(crate) fn paint_error_page(&mut self, tab: TabId, url: &Url, err: &CoreError) {
+        let html = error_document(url, err);
+        let mut tb = explorer_html::TreeBuilder::new();
+        tb.push(&html);
+        tb.finish();
+        let dom = tb.into_dom();
+        let prev = self.tabs.get(&tab).and_then(|e| e.title.clone());
+        let title = Some("Erreur de chargement".to_string());
+        if self.relayout_dom(tab, &dom).is_err() {
+            return;
+        }
+        {
+            let Some(e) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            e.title.clone_from(&title);
+            e.url = Some(url.clone());
+            // `last_req = None` → reload = `GET` sur l'URL
+            // tentée (retente honnête) ; `can_back` intact
+            // puisque `hist` n'a pas bougé.
+            e.last_req = None;
+            e.popup = None;
+            e.find = None;
+            e.focused = None;
+            e.hovered = None;
+            e.spec_paint = false;
+        }
+        self.emit_navigated(tab, url, title, prev.as_deref());
+    }
+
     /// Log + `PipelineError` sur le bus, renvoie l'erreur.
     pub(crate) fn emit_error(&mut self, tab: TabId, e: CoreError) -> CoreError {
         tracing::debug!(tab, error = %e, "pipeline en échec");
