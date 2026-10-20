@@ -91,11 +91,22 @@ fn query_matches(env: &StyleEnv, q: &MediaQuery) -> bool {
 fn condition_matches(env: &StyleEnv, name: &str, value: &str) -> bool {
     let px = || -> Option<f64> {
         let v = value.trim();
-        // Ordre : `rem` avant `em` (suffixe partagé).
+        // Ordre : `rem` avant `em`, `vmin`/`vmax` avant
+        // `vw`/`vh` (suffixes partagés). R-42 : les unités
+        // viewport sont légales dans les features de taille
+        // (MQ4 §6.4) et se résolvent contre le viewport.
         let (num, mul) = if let Some(s) = v.strip_suffix("rem") {
             (s, f64::from(env.font_size_base))
         } else if let Some(s) = v.strip_suffix("em") {
             (s, f64::from(env.font_size_base))
+        } else if let Some(s) = v.strip_suffix("vmin") {
+            (s, f64::from(env.width_px.min(env.height_px)) / 100.0)
+        } else if let Some(s) = v.strip_suffix("vmax") {
+            (s, f64::from(env.width_px.max(env.height_px)) / 100.0)
+        } else if let Some(s) = v.strip_suffix("vw") {
+            (s, f64::from(env.width_px) / 100.0)
+        } else if let Some(s) = v.strip_suffix("vh") {
+            (s, f64::from(env.height_px) / 100.0)
         } else if let Some(s) = v.strip_suffix("px") {
             (s, 1.0)
         } else {
@@ -622,7 +633,7 @@ impl StyleEngine {
         props.retain(|_, v| v != "\u{0}");
         // 6. `font-size` → valeur calculée absolue (R-17 —
         //    détail dans `normalize_font_size`).
-        normalize_font_size(&mut props, parent, env.font_size_base);
+        normalize_font_size(&mut props, parent, env);
         ComputedStyle { props }
     }
 
@@ -690,7 +701,7 @@ impl StyleEngine {
 fn normalize_font_size(
     props: &mut HashMap<String, String>,
     parent: Option<&ComputedStyle>,
-    base: f32,
+    env: &StyleEnv,
 ) {
     let Some(raw) = props.get("font-size").cloned() else {
         return;
@@ -698,8 +709,8 @@ fn normalize_font_size(
     let parent_fs = parent
         .and_then(|p| p.get("font-size"))
         .and_then(|v| v.trim().trim_end_matches("px").trim().parse::<f32>().ok())
-        .unwrap_or(base);
-    if let Some(px) = resolve_font_size(&raw, parent_fs, base) {
+        .unwrap_or(env.font_size_base);
+    if let Some(px) = resolve_font_size(&raw, parent_fs, env) {
         props.insert("font-size".to_string(), format!("{px}px"));
     }
 }
@@ -710,8 +721,9 @@ fn normalize_font_size(
 /// (`base`). `calc()` et syntaxes inconnues → `None` (la
 /// valeur brute survit pour le layout — dégradation
 /// documentée, jamais de panique).
-fn resolve_font_size(raw: &str, parent_fs: f32, base: f32) -> Option<f32> {
+fn resolve_font_size(raw: &str, parent_fs: f32, env: &StyleEnv) -> Option<f32> {
     let v = raw.trim();
+    let base = env.font_size_base;
     // Mots-clés de la spec : échelle absolue ×1.2 autour de
     // `medium` (CSS Fonts §5.2) ; `smaller`/`larger` sont
     // relatifs au parent par convention navigateur (≈ ÷/× 1.2).
@@ -741,6 +753,16 @@ fn resolve_font_size(raw: &str, parent_fs: f32, base: f32) -> Option<f32> {
         crate::value::Unit::Em => len.value as f32 * parent_fs,
         crate::value::Unit::Rem => len.value as f32 * base,
         crate::value::Unit::Ex | crate::value::Unit::Ch => len.value as f32 * parent_fs * 0.5,
+        // R-42 : `font-size:Nvw` légal — résolu au moment de
+        // la cascade contre `env` (valeur calculée absolue).
+        crate::value::Unit::Vw => (len.value * f64::from(env.width_px) / 100.0) as f32,
+        crate::value::Unit::Vh => (len.value * f64::from(env.height_px) / 100.0) as f32,
+        crate::value::Unit::Vmin => {
+            (len.value * f64::from(env.width_px.min(env.height_px)) / 100.0) as f32
+        }
+        crate::value::Unit::Vmax => {
+            (len.value * f64::from(env.width_px.max(env.height_px)) / 100.0) as f32
+        }
         u => (len.value * u.px_factor()?) as f32,
     })
 }

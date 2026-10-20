@@ -777,3 +777,49 @@ fn quirks_table_font_size_initiale() {
     let s = StyleEngine::new().compute(&dom, td, &env());
     assert_eq!(s.get("font-size"), Some("16px"));
 }
+
+#[test]
+fn media_query_unites_viewport() {
+    // R-42 : `vw`/`vh`/`vmin`/`vmax` dans les media queries —
+    // résolus contre `env.width_px`/`height_px` (MQ4 §6.4).
+    // env() : 1024×768 → 50vw=512 ✓, 50vh=384 ✗, 100vmin=768.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@media (min-width: 50vw) { div { color: red } } \
+         @media (max-width: 50vh) { p { margin-top: 9px } } \
+         @media (min-width: 100vmin) { div { display: none } }",
+        Origin::Author,
+    );
+    let s = e.compute(&f.dom, f.div, &env());
+    assert_eq!(s.get("color"), Some("red"), "50vw=512 ≤ 1024");
+    assert_eq!(
+        s.get("display"),
+        Some("none"),
+        "100vmin=min(1024,768)=768 ≤ 1024"
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.p, &env()).get("margin-top"),
+        Some("1em"),
+        "50vh=384 < 1024 → query fausse, retombe UA"
+    );
+}
+
+#[test]
+fn font_size_unites_viewport() {
+    // R-42 : `font-size:Nvw` est légal — résolu en valeur
+    // calculée absolue contre `env` (1024 → 2vw = 20.48px).
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { font-size: 2vw } p { font-size: 1vmax }",
+        Origin::Author,
+    );
+    let s = e.compute(&f.dom, f.div, &env());
+    assert_eq!(s.get("font-size"), Some("20.48px"), "2vw de 1024");
+    assert_eq!(
+        e.compute(&f.dom, f.p, &env()).get("font-size"),
+        Some("10.24px"),
+        "1vmax de max(1024,768)"
+    );
+}

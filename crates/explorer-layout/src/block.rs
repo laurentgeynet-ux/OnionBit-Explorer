@@ -41,6 +41,8 @@ pub struct BlockCtx<'a> {
     /// Hauteur du viewport — bloc conteneur des `fixed` et
     /// base des `vh` (étape 21).
     pub viewport_h: f32,
+    /// Largeur du viewport — base des `vw` (R-42).
+    pub viewport_w: f32,
     /// Cache de la pipeline fonte pour la passe (R-33b) :
     /// `font_data`/métriques/shaping ne sont facturés qu'une
     /// fois par requête, pas par run de texte.
@@ -54,6 +56,7 @@ impl Default for BlockCtx<'_> {
             default_family: "sans-serif",
             base_font_size: 16.0,
             viewport_h: 600.0,
+            viewport_w: 800.0,
             font_cache: std::cell::RefCell::new(font::FontCache::new()),
         }
     }
@@ -335,6 +338,12 @@ pub(crate) fn raw_length_px(
         Unit::Em => len.value as f32 * em_basis,
         Unit::Rem => len.value as f32 * ctx.base_font_size,
         Unit::Ex | Unit::Ch => len.value as f32 * em_basis * 0.5,
+        // Unités viewport (R-42) : `vw`/`vh` sur leurs axes,
+        // `vmin`/`vmax` sur min/max des deux (§5.1.2 MQ4/CSS3).
+        Unit::Vw => len.value as f32 * ctx.viewport_w / 100.0,
+        Unit::Vh => len.value as f32 * ctx.viewport_h / 100.0,
+        Unit::Vmin => len.value as f32 * ctx.viewport_w.min(ctx.viewport_h) / 100.0,
+        Unit::Vmax => len.value as f32 * ctx.viewport_w.max(ctx.viewport_h) / 100.0,
         u => (len.value * u.px_factor()?) as f32,
     })
 }
@@ -366,6 +375,10 @@ fn eval_calc(expr: &str, pct_basis: f32, em_basis: f32, ctx: &BlockCtx) -> Optio
                 Unit::Em => l.value * f64::from(em),
                 Unit::Rem => l.value * f64::from(ctx.base_font_size),
                 Unit::Ex | Unit::Ch => l.value * f64::from(em) * 0.5,
+                Unit::Vw => l.value * f64::from(ctx.viewport_w) / 100.0,
+                Unit::Vh => l.value * f64::from(ctx.viewport_h) / 100.0,
+                Unit::Vmin => l.value * f64::from(ctx.viewport_w.min(ctx.viewport_h)) / 100.0,
+                Unit::Vmax => l.value * f64::from(ctx.viewport_w.max(ctx.viewport_h)) / 100.0,
                 u => l.value * u.px_factor()?,
             };
             return Some(Term { px, dim: true });

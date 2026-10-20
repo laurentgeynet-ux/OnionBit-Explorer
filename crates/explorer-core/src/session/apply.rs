@@ -345,6 +345,8 @@ fn try_incr_payload(
     let svgs = explorer_render::svg::collect_svg(new_dom, root_el, ctx.image_max_px);
     let block = BlockCtx {
         fonts: Some(&ctx.fonts as &dyn FontSource),
+        viewport_w: ctx.viewport.0,
+        viewport_h: ctx.viewport.1,
         ..BlockCtx::default()
     };
     // Phase 2 — remap + relayout local (le remap précède :
@@ -419,9 +421,11 @@ pub(crate) fn relayout_dom_payload(
     let Some(mut bx) = build_box_tree_sized(dom, root_el, &styles, &sizes) else {
         return Err(CoreError::NothingToPaint);
     };
-    let (vw, _vh) = ctx.viewport;
+    let (vw, vh) = ctx.viewport;
     let block = BlockCtx {
         fonts: Some(&ctx.fonts as &dyn FontSource),
+        viewport_w: vw,
+        viewport_h: vh,
         ..BlockCtx::default()
     };
     layout_tree(&mut bx, vw, &block);

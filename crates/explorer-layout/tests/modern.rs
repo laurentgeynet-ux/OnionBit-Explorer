@@ -698,3 +698,32 @@ fn flex_column_basis_px_grow_espace_indefini() {
     assert!(approx(m.rect.height, 40.0), "main.h={}", m.rect.height);
     assert!(approx(f.rect.y, 40.0), "footer.y={}", f.rect.y);
 }
+
+#[test]
+fn unites_viewport_vw_vh_min_max() {
+    // R-42 — `vw`/`vh`/`vmin`/`vmax` résolus contre le
+    // viewport du ctx (défaut test : 800×600).
+    // `width:50vw`=400, `height:50vh`=300, `10vmin`=60,
+    // `10vmax`=80.
+    let (dom, bx) = laid(
+        "<!doctype html><div id=w></div><div id=h></div><div id=mn></div><div id=mx></div>",
+        "div{margin:0} #w{width:50vw;height:10px} #h{width:10px;height:50vh} \
+         #mn{width:10vmin;height:10px} #mx{width:10vmax;height:10px}",
+    );
+    assert!(approx(find(&bx, by_id(&dom, "w")).rect.width, 400.0));
+    assert!(approx(find(&bx, by_id(&dom, "h")).rect.height, 300.0));
+    assert!(approx(find(&bx, by_id(&dom, "mn")).rect.width, 60.0));
+    assert!(approx(find(&bx, by_id(&dom, "mx")).rect.width, 80.0));
+}
+
+#[test]
+fn calc_melange_unites_viewport() {
+    // R-42 — `calc(100vh - 60px)` : unité viewport dans un
+    // calc (héros/classique `sticky`). 600−60 = 540.
+    let (dom, bx) = laid(
+        "<!doctype html><div id=d></div>",
+        "#d{height:calc(100vh - 60px);width:10px}",
+    );
+    let d = find(&bx, by_id(&dom, "d"));
+    assert!(approx(d.rect.height, 540.0), "h={}", d.rect.height);
+}

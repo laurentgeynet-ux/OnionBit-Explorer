@@ -166,6 +166,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   ou mort = repro ; RSS plat sur fenêtre longue =
   exonération progressive.
 
+### Added
+
+- **R-42 — unités viewport `vw`/`vh`/`vmin`/`vmax`**
+  (`explorer-layout`/`explorer-css`) : parsées mais jamais
+  résolues (`px_factor` → `None`) — `min-height:100vh`,
+  `max-width:90vw`, héros `100vh` s'évaporaient.
+  `BlockCtx.viewport_w` (additif, défaut 800), résolution
+  dans `raw_length_px` + `eval_calc` (`calc(100vh-60px)`
+  inclus), media queries (MQ4 §6.4) et `font-size:Nvw`
+  contre `env`/`ctx`. Carve-out : `explorer-core` câble
+  `ctx.viewport` dans `BlockCtx` (`viewport_h` était au
+  défaut 600 — `position:fixed` aussi plus juste).
+
 ### Fixed
 
 - **R-41 — flex colonne : base `%` et `grow` en hauteur
