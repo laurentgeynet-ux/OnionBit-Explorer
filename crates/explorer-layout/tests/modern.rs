@@ -300,6 +300,72 @@ fn flex_shrink_cible_appliquee() {
 }
 
 #[test]
+fn flex_row_wrap_gap() {
+    // R-29 : `row wrap` — découpe en lignes sur la largeur,
+    // `column-gap` entre items, `row-gap` entre lignes.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div>A</div><div>B</div><div>C</div></section>",
+        "body { margin: 0 } \
+         section { display: flex; flex-flow: row wrap; width: 100px; \
+                   column-gap: 10px; row-gap: 5px } \
+         section > div { width: 40px; height: 10px }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    // Ligne 1 : 40+10+40 = 90 ≤ 100 ; C déborderait (140).
+    let (a, b, c) = (
+        &section.children[0],
+        &section.children[1],
+        &section.children[2],
+    );
+    assert!(approx(b.rect.x, 50.0), "b.x={}", b.rect.x);
+    assert!(approx(c.rect.x, 0.0), "c.x={}", c.rect.x);
+    assert!(approx(c.rect.y, 15.0), "c.y={}", c.rect.y);
+    let _ = a;
+}
+
+#[test]
+fn flex_column_wrap_gap_align_content() {
+    // R-29 : `column wrap` — découpe en colonnes sur la
+    // hauteur définie ; `justify-content` distribue le libre
+    // main dans chaque colonne, `align-content` répartit les
+    // colonnes sur le cross, la marge `auto` main absorbe le
+    // libre avant justify. Géométrie de la fixture WPT
+    // `flexbox-column-row-gap-001`.
+    let (dom, bx) = laid(
+        "<!doctype html><section>\
+         <div>A</div><div>B</div><div>C</div><div>D</div><div>E</div><div id=\"f\">F</div></section>",
+        "body { margin: 0 } \
+         section { display: flex; flex-flow: column wrap; width: 200px; height: 220px; \
+                   column-gap: 20px; row-gap: 40px; justify-content: space-around; \
+                   align-content: space-around } \
+         section > div { width: 28px; height: 28px; border: 1px solid } \
+         #f { margin-bottom: auto }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    let (a, d) = (&section.children[0], &section.children[3]);
+    // 3 items par colonne (170 px) ; le 4e déborderait.
+    // Cross : 30+20+30 = 80 → libre 120 → space-around
+    // lead 30, entre 60 — ajouté AU column-gap → colonnes
+    // à x=30 et x=140 (espacement 20+60 = 80).
+    assert!(approx(a.rect.x, 30.0), "col1.x={}", a.rect.x);
+    assert!(approx(d.rect.x, 140.0), "col2.x={}", d.rect.x);
+    // Col1 : libre main 50, justify space-around →
+    // lead 50/6 ≈ 8.33, entre 50/3 ≈ 16.67.
+    let b = &section.children[1];
+    assert!(approx(a.rect.y, 25.0 / 3.0), "a.y={}", a.rect.y);
+    assert!(
+        approx(b.rect.y, 25.0 / 3.0 + 30.0 + 40.0 + 50.0 / 3.0),
+        "b.y={}",
+        b.rect.y
+    );
+    // Col2 : `margin-bottom:auto` de F absorbe les 50 px de
+    // libre → empilement serré depuis le haut (row-gap seul).
+    assert!(approx(d.rect.y, 0.0), "d.y={}", d.rect.y);
+    let f = find(&bx, by_id(&dom, "f"));
+    assert!(approx(f.rect.y, 140.0), "f.y={}", f.rect.y);
+}
+
+#[test]
 fn inline_block_vertical_align_top() {
     // R-28 : `vertical-align: top` ancre la margin box de
     // l'atome au sommet de la ligne (§10.8), pas baseline.

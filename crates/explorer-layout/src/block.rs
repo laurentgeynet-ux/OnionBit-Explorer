@@ -761,7 +761,22 @@ fn layout_block_inner(
     // repli remplacé.
     let w_spec = css_px(&st, "width", cb_w, fs, ctx)
         .or_else(|| crate::intrinsic::intrinsic_size_px(&st, "width", bx, cb_w, fs, ctx))
-        .or(bx.intrinsic.map(|i| i.0));
+        .or(bx.intrinsic.map(|i| i.0))
+        .or_else(|| {
+            // §10.3.5 : flottant à `width:auto` →
+            // shrink-to-fit = clamp(dispo, min-content,
+            // max-content). La dispo = bande du flottant
+            // moins marges et châssis propres.
+            if bx.float == Float::None {
+                return None;
+            }
+            let avail = (cb_w - ml - mr - bl - br - pl - pr).max(0.0);
+            Some(
+                avail
+                    .min(crate::intrinsic::max_content_px(bx, fs, ctx))
+                    .max(crate::intrinsic::min_content_px(bx, fs, ctx)),
+            )
+        });
     let auto_left = st.get("margin-left") == Some("auto");
     let auto_right = st.get("margin-right") == Some("auto");
     let fixed = bl + br + pl + pr;
@@ -779,6 +794,26 @@ fn layout_block_inner(
             }
         }
         None => (ml, mr, (cb_w - fixed - ml - mr).max(0.0)),
+    };
+    // §10.4 : `min|max-width` bornent la boîte de CONTENU
+    // (`box-sizing: content-box`) — avant la pose des
+    // enfants : une valeur « auto » shrink-to-fit trop
+    // étroite (flottant) doit être élargie ICI, pas
+    // seulement sur le rect final — sinon les descendants
+    // se rangent dans la largeur non bornée.
+    let content_w = {
+        let bound_px = |prop: &str| {
+            css_px(&st, prop, cb_w, fs, ctx)
+                .or_else(|| crate::intrinsic::intrinsic_size_px(&st, prop, bx, cb_w, fs, ctx))
+        };
+        let mut w = content_w;
+        if let Some(mn) = bound_px("min-width") {
+            w = w.max(mn);
+        }
+        if let Some(mx) = bound_px("max-width") {
+            w = w.min(mx);
+        }
+        w
     };
 
     let rect_x = x + ml_used;
@@ -861,21 +896,9 @@ fn layout_block_inner(
     if let Some(mx) = vert_spec("max-height") {
         used_h = used_h.min(mx);
     }
-    let w = {
-        let mut w = bl + pl + content_w + pr + br;
-        let bound_px = |prop: &str| {
-            css_px(&st, prop, cb_w, fs, ctx)
-                .or_else(|| crate::intrinsic::intrinsic_size_px(&st, prop, bx, cb_w, fs, ctx))
-        };
-        if let Some(mn) = bound_px("min-width") {
-            w = w.max(mn);
-        }
-        if let Some(mx) = bound_px("max-width") {
-            w = w.min(mx);
-        }
-        w
-    };
-    bx.rect.width = w;
+    // La boîte de contenu est déjà bornée par `min|max-width`
+    // en amont de la pose des enfants — le rect suit.
+    bx.rect.width = bl + pl + content_w + pr + br;
     bx.rect.height = bt + pt + used_h + pb + bb;
 
     // `position: relative` : décalage après le flux

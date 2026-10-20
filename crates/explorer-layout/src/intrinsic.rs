@@ -87,6 +87,32 @@ fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
         }
         return 0.0;
     }
+    // Conteneur flex en axe horizontal (§9.9) : les items
+    // s'alignent sur le main axis → max-content = somme d'une
+    // ligne ; min-content d'un conteneur `wrap` = plus grand
+    // item (chacun peut tenir sa propre ligne), `nowrap` =
+    // somme également (aucune coupure possible).
+    if matches!(bx.display(), "flex" | "inline-flex") {
+        let dir = bx.style.get("flex-direction").unwrap_or("row");
+        if matches!(dir.trim(), "row" | "row-reverse") {
+            let wrap = bx
+                .style
+                .get("flex-wrap")
+                .is_some_and(|v| v.trim() != "nowrap");
+            let items: Vec<f32> = bx
+                .children
+                .iter()
+                .map(|c| {
+                    let cfs = font_size_px(&c.style, fs, ctx);
+                    explorer_common::deep(|| content_px(c, cfs, ctx, max)) + own_sides(c, fs, ctx)
+                })
+                .collect();
+            if max || !wrap {
+                return items.iter().sum();
+            }
+            return items.iter().fold(0.0_f32, |a, &b| a.max(b));
+        }
+    }
     // Ligne de table = somme des cellules (colonnes).
     // Chaque arête ∝ profondeur de l'arbre passe par
     // `explorer_common::deep` (R-24).
@@ -108,6 +134,20 @@ fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
         let cfs = font_size_px(&c.style, fs, ctx);
         if inline_level(c) {
             let w = explorer_common::deep(|| content_px(c, cfs, ctx, max));
+            if max {
+                run += w;
+            } else {
+                run = run.max(w);
+            }
+        } else if matches!(c.style.get("float"), Some("left" | "right")) {
+            // Enfant flottant : à max-content il se tasse en
+            // ligne avec ses voisins flottants — la même
+            // contribution de « run » que l'en-ligne (un bloc
+            // en-flux clôt la suite), **châssis compris**
+            // (§4.2 : la contribution inclut marges, padding
+            // et bordures). Le style est lu ici : `c.float`
+            // n'est posé que lors de la pose de l'enfant.
+            let w = explorer_common::deep(|| content_px(c, cfs, ctx, max)) + own_sides(c, fs, ctx);
             if max {
                 run += w;
             } else {

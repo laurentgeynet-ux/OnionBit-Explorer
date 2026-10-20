@@ -3702,7 +3702,11 @@ async fn dom_sync_falls_back_when_floats_present() {
     s.navigate(a, "http://h.test/").await.unwrap();
     let before = s.incremental_syncs();
 
-    s.handle_input(a, InputEvent::Click { x: 10.0, y: 10.0 })
+    // Clic dans le flottant (shrink-to-fit R-29 : ~8 px de
+    // large — le body a hauteur nulle, un clic hors du
+    // flottant tombe sur <html>, hors de la chaîne de
+    // propagation vers body).
+    s.handle_input(a, InputEvent::Click { x: 4.0, y: 4.0 })
         .await
         .unwrap();
     assert_eq!(

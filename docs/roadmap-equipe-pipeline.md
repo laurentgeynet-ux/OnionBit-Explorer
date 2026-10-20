@@ -365,9 +365,23 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (bug Mozilla 1954193 — ses rangées `left`/`right` codent
   une sémantique qu'aucun navigateur n'implémente ; le diff
   est normalement sous le viewport 600 px).
-- [ ] **R-29. Wrap horizontal + `column/row-gap` flex**
-  (3 échecs WPT) : `flexbox-flex-wrap-horiz-001/002`,
+- [x] **R-29. Wrap horizontal + `column/row-gap` flex**
+  (2 échecs WPT) : `flexbox-flex-wrap-horiz-002`,
   `flexbox-column-row-gap-001` — dépend de R-28.
+  Livré : (a) flottant `width:auto` shrink-to-fit —
+  `min|max-width` bornent la boîte de **contenu** avant la
+  pose des enfants (§10.3.5/§10.4) ; (b) enfants flottants
+  comptés en **somme** dans le max-content d'un parent
+  shrink-to-fit (une ligne, pas un empilement) ;
+  (c) `column wrap` complet — découpe en colonnes sur la
+  hauteur définie, tailles flex grow/shrink sur `height`,
+  marges `auto` main, `justify-content` par colonne,
+  `align-content` entre colonnes sur la largeur cross,
+  `column-gap`/`row-gap` sur les bons axes, `wrap-reverse`
+  en miroir cross ; (d) marge cross `auto` figée à 0 pendant
+  la mesure (résolue sur la colonne, pas le conteneur).
+  Cliquet WPT 53 → **55/57 (3 ignorés)** — les 2 échecs
+  restants sont le lot grid R-30.
 - [ ] **R-30. Unité `fr` grid + `display:grid` résiduels**
   (3 échecs WPT) : `fr-unit`, `grid-display-grid-001`,
   marges — lot séparé, algos disjoints de flex.

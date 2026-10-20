@@ -16,11 +16,12 @@
 //! le max-content réel du contenu (R-3) ; `stretch` étend le
 //! rect cross sans re-fluide le contenu ; `margin: auto` est
 //! résolu sur les deux axes (le libre principal avant
-//! `justify-content`, le cross en reliquat) ; `flex-wrap` en
-//! `column` n'est pas implémenté (colonnes empilées sans
-//! hauteur de conteneur) ; `align-content` n'agit que si la
-//! hauteur du conteneur est définie en px (% sans base =
-//! indéfini).
+//! `justify-content`, le cross en reliquat) ; en `column`,
+//! la base main est la hauteur mesurée quand
+//! `flex-basis`/`height` sont absents, et `align-content`
+//! n'agit que si la taille cross concernée est définie
+//! (hauteur px en `row`, largeur toujours définie en
+//! `column` ; % sans base = indéfini).
 
 use explorer_css::ComputedStyle;
 
@@ -261,6 +262,19 @@ pub(crate) fn flow_flex_children(
     let gap = gap_px(&st, axis.row, main_cb, fs, ctx);
     let justify = st.get_or("justify-content", "flex-start").to_string();
     let align = st.get_or("align-items", "stretch").to_string();
+    // Hauteur de conteneur définie — une `%` sans base
+    // propagée reste indéfinie (pas de `cb_h` ici) : taille
+    // main de l'axe `column` et base des % `row-gap`.
+    let h_def = if st
+        .get("height")
+        .unwrap_or_default()
+        .trim_end()
+        .ends_with('%')
+    {
+        None
+    } else {
+        css_px(&st, "height", 0.0, fs, ctx)
+    };
 
     // Indices d'items triés par `order` (stable).
     let mut order_idx: Vec<usize> = (0..bx.children.len()).collect();
@@ -501,18 +515,6 @@ pub(crate) fn flow_flex_children(
         // = indéfini, lignes soudées en haut).
         let n_lines = lines.len() as f32;
         let mut total_cross = line_crosses.iter().sum::<f32>() + row_gap * (n_lines - 1.0).max(0.0);
-        // Hauteur de conteneur définie — une `%` sans base
-        // propagée reste indéfinie (pas de `cb_h` ici).
-        let h_def = if st
-            .get("height")
-            .unwrap_or_default()
-            .trim_end()
-            .ends_with('%')
-        {
-            None
-        } else {
-            css_px(&st, "height", 0.0, fs, ctx)
-        };
         let ac = st.get("align-content").unwrap_or("stretch");
         let (lead_c, between_c) = if wrap {
             if let Some(h) = h_def {
@@ -608,72 +610,332 @@ pub(crate) fn flow_flex_children(
         }
         start_cursor + total_cross
     } else {
-        // Colonne : empilement à taille naturelle, pleine
-        // largeur cross ; `align-*` décale horizontalement les
-        // items à `width` explicite. `column-reverse` inverse
-        // l'ordre (ancrage haut conservé — MVP).
-        let mut pen_y = start_cursor;
-        let iter: Vec<usize> = if axis.reverse {
-            order_idx.iter().rev().copied().collect()
-        } else {
-            order_idx
-        };
-        for (k, i) in iter.into_iter().enumerate() {
-            if k > 0 {
-                pen_y += gap;
-            }
+        // ---- Colonne : main = vertical, cross = horizontal.
+        // Même plan que la branche row, axes permutés :
+        // découpe en colonnes (`wrap` borne la hauteur
+        // définie), tailles flex + marges `auto` +
+        // `justify-content` par colonne, puis `align-content`
+        // répartit les colonnes sur la largeur cross.
+        let wrap_mode = st.get("flex-wrap").unwrap_or("nowrap");
+        let wrap = wrap_mode != "nowrap";
+        let wrap_rev = wrap_mode == "wrap-reverse";
+        // `row-gap` = écart main entre items d'une colonne
+        // (% sur la hauteur) ; `column-gap` = écart cross
+        // entre colonnes (% sur la largeur).
+        let gap = gap_px(&st, false, h_def.unwrap_or(0.0), fs, ctx);
+        let col_gap = gap_px(&st, true, content_w, fs, ctx);
+        // Sans hauteur définie : une seule colonne, espace
+        // libre nul (le conteneur épouse le contenu).
+        let main_h = h_def.unwrap_or(0.0);
+
+        let mut items: Vec<ItemFlex> = Vec::with_capacity(n);
+        let mut margins: Vec<(f32, f32)> = Vec::with_capacity(n);
+        let mut main_auto = vec![(false, false); n];
+        let mut cross_auto = vec![(false, false); n];
+        let mut extras: Vec<f32> = Vec::with_capacity(n);
+        for (k, &i) in order_idx.iter().enumerate() {
             let c = &mut bx.children[i];
             let cfs = font_size_px(&c.style, fs, ctx);
-            // Marges de l'axe principal (vertical) : à la
-            // charge du conteneur flex — `layout_block` ne
-            // gère pas sa propre marge haute (rôle du parent
-            // en flux normal).
-            let mt = if c.style.get("margin-top") == Some("auto") {
-                0.0
-            } else {
-                side_px(&c.style, "margin-top", main_cb, cfs, ctx, 0.0)
-            };
-            let mb = if c.style.get("margin-bottom") == Some("auto") {
-                0.0
-            } else {
-                side_px(&c.style, "margin-bottom", main_cb, cfs, ctx, 0.0)
-            };
-            pen_y += mt;
-            let mode = item_flex(c, false, main_cb, fs, ctx)
-                .align
-                .unwrap_or_else(|| align.clone());
-            layout_item(c, content_x, pen_y, content_w, ctx, fs, pos_cb);
-            // Cross = horizontal : marges `auto` → centrage.
-            let (l_auto, r_auto) = (
+            items.push(item_flex(c, false, main_h, cfs, ctx));
+            main_auto[k] = (
+                c.style.get("margin-top") == Some("auto"),
+                c.style.get("margin-bottom") == Some("auto"),
+            );
+            cross_auto[k] = (
                 c.style.get("margin-left") == Some("auto"),
                 c.style.get("margin-right") == Some("auto"),
             );
-            let ml = if l_auto {
-                0.0
-            } else {
-                side_px(&c.style, "margin-left", content_w, cfs, ctx, 0.0)
-            };
-            let mr = if r_auto {
-                0.0
-            } else {
-                side_px(&c.style, "margin-right", content_w, cfs, ctx, 0.0)
-            };
-            // `layout_block` a déjà décalé la border box de
-            // ml — la margin box est donc à content_x ; on
-            // translate du delta d'alignement seulement.
-            let outer_w = c.rect.width + ml + mr;
-            let slack = (content_w - outer_w).max(0.0);
-            let dx = match (l_auto, r_auto) {
-                (true, true) => slack / 2.0,
-                (true, false) => slack,
-                (false, true) => 0.0,
-                (false, false) => align_offset(&mode, content_w, outer_w),
-            };
-            if dx > 0.0 {
-                translate_subtree(c, dx, 0.0);
+            // % de marges : toujours sur la **largeur** du
+            // bloc conteneur (§8.3), pas sur l'axe main.
+            margins.push((
+                if main_auto[k].0 {
+                    0.0
+                } else {
+                    side_px(&c.style, "margin-top", content_w, cfs, ctx, 0.0)
+                },
+                if main_auto[k].1 {
+                    0.0
+                } else {
+                    side_px(&c.style, "margin-bottom", content_w, cfs, ctx, 0.0)
+                },
+            ));
+            extras.push(
+                side_px(&c.style, "padding-top", content_w, cfs, ctx, 0.0)
+                    + side_px(&c.style, "padding-bottom", content_w, cfs, ctx, 0.0)
+                    + border_px(&c.style, "border-top-width", content_w, cfs, ctx)
+                    + border_px(&c.style, "border-bottom-width", content_w, cfs, ctx),
+            );
+            // Marges cross `auto` : figées à 0 pendant la
+            // mesure — `layout_block` les résoudrait sur la
+            // largeur du conteneur au lieu de la colonne.
+            if cross_auto[k].0 {
+                c.style.set("margin-left", "0px");
             }
-            pen_y += c.rect.height + mb;
+            if cross_auto[k].1 {
+                c.style.set("margin-right", "0px");
+            }
         }
-        pen_y
+
+        // Passe 0 : pose mesurée — les hauteurs obtenues
+        // servent de base quand `flex-basis`/`height` ne sont
+        // pas déclarés (contenu à hauteur naturelle).
+        for &i in &order_idx {
+            layout_item(
+                &mut bx.children[i],
+                content_x,
+                start_cursor,
+                content_w,
+                ctx,
+                fs,
+                pos_cb,
+            );
+        }
+        let mut bases: Vec<f32> = Vec::with_capacity(n);
+        let mut crosses: Vec<f32> = vec![0.0; n];
+        let mut cross_margins: Vec<(f32, f32)> = vec![(0.0, 0.0); n];
+        for (k, &i) in order_idx.iter().enumerate() {
+            let c = &bx.children[i];
+            let cfs = font_size_px(&c.style, fs, ctx);
+            bases.push(
+                items[k]
+                    .base
+                    .unwrap_or_else(|| (c.rect.height - extras[k]).max(0.0)),
+            );
+            let ml = side_px(&c.style, "margin-left", content_w, cfs, ctx, 0.0);
+            let mr = side_px(&c.style, "margin-right", content_w, cfs, ctx, 0.0);
+            cross_margins[k] = (ml, mr);
+            crosses[k] = c.rect.width + ml + mr;
+        }
+
+        // Découpe en colonnes : `wrap` borne la hauteur
+        // définie (`h_def`) — taille hypothétique §9.5.
+        let mut lines: Vec<Vec<usize>> = Vec::new();
+        {
+            let mut cur: Vec<usize> = Vec::new();
+            let mut cur_h = 0.0f32;
+            for k in 0..n {
+                let outer = bases[k] + extras[k] + margins[k].0 + margins[k].1;
+                let need = outer + if cur.is_empty() { 0.0 } else { gap };
+                if wrap && h_def.is_some() && !cur.is_empty() && cur_h + need > main_h + 0.01 {
+                    lines.push(std::mem::take(&mut cur));
+                    cur_h = 0.0;
+                }
+                cur_h += if cur.is_empty() { outer } else { outer + gap };
+                cur.push(k);
+            }
+            if !cur.is_empty() {
+                lines.push(cur);
+            }
+        }
+
+        // Passe 1 : tailles main (grow/shrink sur la
+        // hauteur), marges `auto`, `justify-content` — par
+        // colonne. `pen_y` marche depuis le haut.
+        let mut line_crosses = Vec::with_capacity(lines.len());
+        let mut col_used = Vec::with_capacity(lines.len());
+        for line in &lines {
+            let lgaps = gap * (line.len() as f32 - 1.0).max(0.0);
+            let mut used_base = lgaps;
+            for &k in line {
+                used_base += bases[k] + extras[k] + margins[k].0 + margins[k].1;
+            }
+            // Hauteur indéfinie → pas d'espace libre à
+            // distribuer (0, jamais négatif : le contenu
+            // définit la taille).
+            let free = if h_def.is_some() {
+                main_h - used_base
+            } else {
+                0.0
+            };
+            let total_grow: f32 = line.iter().map(|&k| items[k].grow).sum();
+            let mut sizes_l: Vec<f32> = Vec::with_capacity(line.len());
+            if free > 0.0 && total_grow > 0.0 {
+                for &k in line {
+                    sizes_l.push(bases[k] + free * items[k].grow / total_grow);
+                }
+            } else {
+                let denom: f32 = line.iter().map(|&k| items[k].shrink * bases[k]).sum();
+                for &k in line {
+                    let b = bases[k];
+                    sizes_l.push(if denom > 0.0 && free < 0.0 {
+                        (b + free * (items[k].shrink * b) / denom).max(0.0)
+                    } else {
+                        b
+                    });
+                }
+            }
+            // Marges `auto` main : part égale du libre avant
+            // `justify-content` (§8.1).
+            let free_m = if h_def.is_some() {
+                main_h
+                    - lgaps
+                    - line
+                        .iter()
+                        .zip(&sizes_l)
+                        .map(|(&k, s)| s + extras[k] + margins[k].0 + margins[k].1)
+                        .sum::<f32>()
+            } else {
+                0.0
+            };
+            let mut line_margins = margins.clone();
+            if free_m > 0.0 {
+                let n_auto_l: usize = line
+                    .iter()
+                    .map(|&k| usize::from(main_auto[k].0) + usize::from(main_auto[k].1))
+                    .sum();
+                if n_auto_l > 0 {
+                    let share = free_m / n_auto_l as f32;
+                    for &k in line {
+                        if main_auto[k].0 {
+                            line_margins[k].0 = share;
+                        }
+                        if main_auto[k].1 {
+                            line_margins[k].1 = share;
+                        }
+                    }
+                }
+            }
+            // Hauteur cible écrite quand elle diffère de la
+            // base mesurée — `layout_block` reproduit alors
+            // la border box exacte (content-box §9.7).
+            for (lk, &k) in line.iter().enumerate() {
+                if (sizes_l[lk] - bases[k]).abs() > 0.01 {
+                    let i = order_idx[k];
+                    let c = &mut bx.children[i];
+                    c.style.set("height", &format!("{}px", sizes_l[lk]));
+                    layout_item(c, content_x, start_cursor, content_w, ctx, fs, pos_cb);
+                }
+            }
+            let used: f32 = line
+                .iter()
+                .zip(&sizes_l)
+                .map(|(&k, s)| s + extras[k] + line_margins[k].0 + line_margins[k].1)
+                .sum::<f32>()
+                + lgaps;
+            // `column-reverse` : l'axe main part du bas —
+            // miroir du lead, espacement inclus (cf. row).
+            let (lead_j, between) = justify_offsets(
+                &justify,
+                if h_def.is_some() { main_h - used } else { 0.0 },
+                line.len(),
+            );
+            let between_total = (line.len() as f32 - 1.0).max(0.0) * between;
+            let lead = if axis.reverse {
+                if h_def.is_some() {
+                    main_h - used - between_total - lead_j
+                } else {
+                    0.0
+                }
+            } else {
+                lead_j
+            };
+            let mut pen_y = start_cursor + lead;
+            let lay_order: Vec<usize> = if axis.reverse {
+                (0..line.len()).rev().collect()
+            } else {
+                (0..line.len()).collect()
+            };
+            let mut col_cross = 0.0f32;
+            for &lk in &lay_order {
+                let k = line[lk];
+                let i = order_idx[k];
+                let c = &mut bx.children[i];
+                // La margin box vise `pen_y` — l'item posé à
+                // `start_cursor` translate du delta.
+                let dy = pen_y + line_margins[k].0 - c.rect.y;
+                translate_subtree(c, 0.0, dy);
+                col_cross = col_cross.max(crosses[k]);
+                pen_y +=
+                    sizes_l[lk] + extras[k] + line_margins[k].0 + line_margins[k].1 + gap + between;
+            }
+            line_crosses.push(col_cross);
+            col_used.push(used + lead);
+        }
+
+        // Cross : `align-content` répartit les colonnes sur
+        // la largeur du conteneur (toujours définie).
+        let n_lines = lines.len() as f32;
+        let mut total_cross = line_crosses.iter().sum::<f32>() + col_gap * (n_lines - 1.0).max(0.0);
+        let ac = st.get("align-content").unwrap_or("stretch");
+        let (lead_c, between_c) = if wrap {
+            let free_c = (content_w - total_cross).max(0.0);
+            if ac == "stretch" && free_c > 0.0 && n_lines > 0.0 {
+                let add = free_c / n_lines;
+                for lc in &mut line_crosses {
+                    *lc += add;
+                }
+                total_cross += free_c;
+            }
+            match ac {
+                "flex-end" => (free_c, 0.0),
+                "center" => (free_c / 2.0, 0.0),
+                "space-between" if lines.len() > 1 => (0.0, free_c / (n_lines - 1.0)),
+                "space-around" => (free_c / n_lines / 2.0, free_c / n_lines),
+                "space-evenly" => (free_c / (n_lines + 1.0), free_c / (n_lines + 1.0)),
+                _ => (0.0, 0.0),
+            }
+        } else {
+            (0.0, 0.0)
+        };
+        // §9.4 : conteneur mono-colonne (`nowrap`) — la
+        // colonne prend la largeur cross interne du
+        // conteneur (`align-items`/`stretch` y puisent).
+        if !wrap {
+            line_crosses.fill(content_w);
+            total_cross = content_w;
+        }
+
+        // Passe 2 : translation cross par colonne — offset
+        // (align-content / wrap-reverse) + alignement
+        // intra-colonne (align-items/self, stretch, marges
+        // cross auto).
+        let mut x_off = Vec::with_capacity(lines.len());
+        {
+            let mut x = content_x + lead_c;
+            for lc in &line_crosses {
+                x_off.push(x);
+                x += *lc + col_gap + between_c;
+            }
+            if wrap_rev {
+                // Miroir cross : la 1re colonne part du bord
+                // droit de la zone cross.
+                let end = content_x + total_cross + lead_c;
+                for (li, xo) in x_off.iter_mut().enumerate() {
+                    *xo = end - (*xo - content_x) - line_crosses[li];
+                }
+            }
+        }
+        for (li, line) in lines.iter().enumerate() {
+            let col_cross = line_crosses[li];
+            for &k in line {
+                let i = order_idx[k];
+                let c = &mut bx.children[i];
+                let mode = items[k].align.as_deref().unwrap_or(&align);
+                let (l_auto, r_auto) = cross_auto[k];
+                let (ml, mr) = cross_margins[k];
+                let col_dx = x_off[li] - content_x;
+                let outer_w = crosses[k];
+                if mode == "stretch" && c.style.get("width").is_none_or(|v| v == "auto") {
+                    // La margin box remplit la colonne :
+                    // border box = colonne − marges cross.
+                    c.rect.width = (col_cross - ml - mr).max(0.0);
+                    translate_subtree(c, col_dx, 0.0);
+                    continue;
+                }
+                let inner = if l_auto || r_auto {
+                    let slack = (col_cross - outer_w).max(0.0);
+                    match (l_auto, r_auto) {
+                        (true, true) => slack / 2.0,
+                        (true, false) => slack,
+                        _ => 0.0,
+                    }
+                } else {
+                    align_offset(mode, col_cross, outer_w)
+                };
+                translate_subtree(c, col_dx + inner, 0.0);
+            }
+        }
+        // Fond du flux = bas de la plus haute colonne.
+        start_cursor + col_used.iter().copied().fold(0.0f32, f32::max)
     }
 }

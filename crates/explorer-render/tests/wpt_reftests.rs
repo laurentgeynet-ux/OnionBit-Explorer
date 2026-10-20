@@ -38,7 +38,7 @@ const VIEW_H: f32 = 600.0;
 /// Cliquet : score minimal attendu — mesuré 2026-02 à 17/40
 /// (42 %) sur la première extraction ; à monter à chaque
 /// progrès float/BFC/marges.
-const WPT_BASELINE: usize = 53;
+const WPT_BASELINE: usize = 55;
 
 /// Tolérance AA : pixels dont le delta maximal de canal est
 /// ≤ [`FUZZY_CHANNEL`] comptent « doux » ; au-delà « dur ».
