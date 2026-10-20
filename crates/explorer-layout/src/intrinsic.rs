@@ -24,7 +24,7 @@
 //! - marges/paddings des enfants ignorés, sauf le padding
 //!   propre porté par l'appelant (`width` = content box).
 
-use crate::block::{css_px, font_size_px, measure_fn, side_px, BlockCtx};
+use crate::block::{box_size_to_content, css_px, font_size_px, measure_fn, side_px, BlockCtx};
 use crate::boxtree::{BoxKind, LayoutBox};
 use explorer_css::ComputedStyle;
 
@@ -73,10 +73,23 @@ fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
     }
     // `width` explicite (hors %) : l'enfant impose sa taille
     // fixe — un % indéfini retombe sur son contenu (§5.2).
+    // `box-sizing` la convertit en contenu (R-43) : la mesure
+    // rendue est une boîte de contenu — padding/bordure
+    // propres retranchés (les marges restent hors — comptées
+    // par `own_sides` côté appelant).
     if let Some(v) = bx.style.get("width") {
         if !v.contains('%') {
             if let Some(w) = css_px(&bx.style, "width", 0.0, fs, ctx) {
-                return w;
+                let chassis: f32 = [
+                    "padding-left",
+                    "padding-right",
+                    "border-left-width",
+                    "border-right-width",
+                ]
+                .iter()
+                .map(|p| side_px(&bx.style, p, 0.0, fs, ctx, 0.0))
+                .sum();
+                return box_size_to_content(&bx.style, w, chassis);
             }
         }
     }

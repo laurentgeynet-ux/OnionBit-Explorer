@@ -168,6 +168,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-43 — `box-sizing` (css-sizing-3 §4)** (`explorer-layout`) :
+  trou site-réel au triage M-H1 — le bouton Connexion de
+  google.fr rendait ~60 px au lieu de 40 (`min-height:40px`
+  + `padding:10px` sous `*{box-sizing:border-box}`, toutes
+  les tailles spécifiées étaient lues en content-box).
+  `box_size_to_content` convertit `width`/`height`/`min-*`/
+  `max-*` border-box → contenu (plancher 0) dans
+  `layout_block`, `abs_geo`, les bases flex (`item_flex`),
+  la mesure de piste grid `auto` et `content_px` ; les
+  write-backs flex écrivent la valeur border-box
+  équivalente pour que `layout_block` retombe sur la cible.
+  `shot` google.fr : bouton à ~40 px.
 - **R-42 — unités viewport `vw`/`vh`/`vmin`/`vmax`**
   (`explorer-layout`/`explorer-css`) : parsées mais jamais
   résolues (`px_factor` → `None`) — `min-height:100vh`,

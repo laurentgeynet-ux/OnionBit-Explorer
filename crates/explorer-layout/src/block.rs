@@ -295,6 +295,19 @@ pub(crate) fn font_size_px(style: &ComputedStyle, parent_fs: f32, ctx: &BlockCtx
     }
 }
 
+/// `box-sizing` (css-sizing-3 §4) : convertit une taille
+/// **spécifiée** (`width`/`height`/`min-*`/`max-*` déjà en px)
+/// en taille de boîte de contenu — `border-box` soustrait le
+/// châssis (padding + bordure de l'axe), plancher 0. Taille
+/// intrinsèque et `content-box` (défaut) inchangées (R-43).
+pub(crate) fn box_size_to_content(st: &ComputedStyle, spec_px: f32, chassis: f32) -> f32 {
+    if st.get("box-sizing") == Some("border-box") {
+        (spec_px - chassis).max(0.0)
+    } else {
+        spec_px
+    }
+}
+
 /// `prop` → px. `pct_basis` = base des pourcents (largeur du
 /// bloc conteneur ou font-size selon la propriété) ;
 /// `em_basis` = base des unités `em`.
@@ -863,6 +876,22 @@ fn layout_block_inner(
 
     apply_layout_metadata(bx, &st);
 
+    // Châssis (padding + bordure) — résolu tôt : `box-sizing`
+    // convertit les tailles spécifiées en boîte de contenu
+    // (R-43) et `pos_cb`/le rect final en ont besoin.
+    let ml = side_px(&st, "margin-left", cb_w, fs, ctx, 0.0);
+    let mr = side_px(&st, "margin-right", cb_w, fs, ctx, 0.0);
+    let bl = border_px(&st, "border-left-width", cb_w, fs, ctx);
+    let br = border_px(&st, "border-right-width", cb_w, fs, ctx);
+    let pl = side_px(&st, "padding-left", cb_w, fs, ctx, 0.0);
+    let pr = side_px(&st, "padding-right", cb_w, fs, ctx, 0.0);
+    let bt = border_px(&st, "border-top-width", cb_w, fs, ctx);
+    let bb = border_px(&st, "border-bottom-width", cb_w, fs, ctx);
+    let pt = side_px(&st, "padding-top", cb_w, fs, ctx, 0.0);
+    let pb = side_px(&st, "padding-bottom", cb_w, fs, ctx, 0.0);
+    let chassis_h = pl + pr + bl + br;
+    let chassis_v = pt + pb + bt + bb;
+
     // §10.5 : `height` en % résout contre la hauteur du bloc
     // conteneur — uniquement si celle-ci est définie
     // (spécifiée, indépendante du contenu) ; sinon la valeur
@@ -874,7 +903,8 @@ fn layout_block_inner(
         cb_h.and_then(|h| css_px(&st, "height", h, fs, ctx))
     } else {
         css_px(&st, "height", 0.0, fs, ctx)
-    };
+    }
+    .map(|h| box_size_to_content(&st, h, chassis_v));
     let h_spec = h_css.or(bx.intrinsic.map(|i| i.1));
 
     // `display: table` → dimensionnement dédié. La marge
@@ -894,16 +924,8 @@ fn layout_block_inner(
         );
     }
 
-    let ml = side_px(&st, "margin-left", cb_w, fs, ctx, 0.0);
-    let mr = side_px(&st, "margin-right", cb_w, fs, ctx, 0.0);
-    let bl = border_px(&st, "border-left-width", cb_w, fs, ctx);
-    let br = border_px(&st, "border-right-width", cb_w, fs, ctx);
-    let pl = side_px(&st, "padding-left", cb_w, fs, ctx, 0.0);
-    let pr = side_px(&st, "padding-right", cb_w, fs, ctx, 0.0);
-    let bt = border_px(&st, "border-top-width", cb_w, fs, ctx);
-    let bb = border_px(&st, "border-bottom-width", cb_w, fs, ctx);
-    let pt = side_px(&st, "padding-top", cb_w, fs, ctx, 0.0);
-    let pb = side_px(&st, "padding-bottom", cb_w, fs, ctx, 0.0);
+    // Châssis et marges déjà résolus plus haut (R-43 —
+    // `box-sizing` en a besoin avant `h_css`).
 
     // §10.3.3 : width spécifiée → le slack (éventuellement
     // négatif → débordement) va aux marges `auto` ; tout
@@ -917,6 +939,7 @@ fn layout_block_inner(
     // `fit-content` — mesurés sur le contenu réel avant le
     // repli remplacé.
     let w_spec = css_px(&st, "width", cb_w, fs, ctx)
+        .map(|w| box_size_to_content(&st, w, chassis_h))
         .or_else(|| crate::intrinsic::intrinsic_size_px(&st, "width", bx, cb_w, fs, ctx))
         .or(bx.intrinsic.map(|i| {
             // §10.6.2 : `width:auto` + `height` spécifiée → la
@@ -969,6 +992,7 @@ fn layout_block_inner(
     let content_w = {
         let bound_px = |prop: &str| {
             css_px(&st, prop, cb_w, fs, ctx)
+                .map(|v| box_size_to_content(&st, v, chassis_h))
                 .or_else(|| crate::intrinsic::intrinsic_size_px(&st, prop, bx, cb_w, fs, ctx))
         };
         let mut w = content_w;
@@ -1019,9 +1043,9 @@ fn layout_block_inner(
 
     let line_h = line_height(&st, fs, ctx);
     let cursor = match st.get("display") {
-        Some("flex" | "inline-flex") => {
-            crate::flex::flow_flex_children(bx, content_x, cursor, content_w, ctx, fs, pos_cb)
-        }
+        Some("flex" | "inline-flex") => crate::flex::flow_flex_children(
+            bx, content_x, cursor, content_w, ctx, fs, pos_cb, h_css,
+        ),
         Some("grid" | "inline-grid") => crate::grid::flow_grid_children(
             bx, content_x, cursor, content_w, ctx, fs, pos_cb, h_spec,
         ),
@@ -1069,6 +1093,7 @@ fn layout_block_inner(
         } else {
             css_px(&st, prop, 0.0, fs, ctx)
         }
+        .map(|v| box_size_to_content(&st, v, chassis_v))
     };
     // §10.7 : `max-height` s'applique AVANT `min-height` —
     // en cas de conflit (`min > max`), le min gagne (Acid2
@@ -1764,6 +1789,10 @@ fn abs_geometry(
     let br = border_px(cst, "border-right-width", target.width, cfs, ctx);
     let extras = pl + pr + bl + br;
     let w_css = css_px(cst, "width", target.width, cfs, ctx);
+    // `cw` attendue = border box : `width` border-box la
+    // donne directement ; content-box → + châssis (R-43).
+    let bb_w = cst.get("box-sizing") == Some("border-box");
+    let w_border = w_css.map(|w| if bb_w { w } else { w + extras });
     let shrink = |avail: f32| -> f32 {
         let min = crate::intrinsic::min_content_px(child, cfs, ctx);
         let pref = crate::intrinsic::max_content_px(child, cfs, ctx);
@@ -1773,22 +1802,18 @@ fn abs_geometry(
         // `left`+`right`+`width:auto` : border box contrainte
         // (§10.3.7). `width` non-auto → sur-contraint, `right`
         // absorbé en LTR : la boîte garde sa largeur à gauche.
-        (Some(lv), Some(rv)) => w_css.map_or_else(
-            || (target.width - lv - rv - ml - mr).max(0.0),
-            |w| w + extras,
-        ),
-        (Some(lv), None) => w_css.map_or_else(
-            || shrink((target.width - lv - ml - mr - extras).max(0.0)),
-            |w| w + extras,
-        ),
-        (None, Some(rv)) => w_css.map_or_else(
-            || shrink((target.width - rv - ml - mr - extras).max(0.0)),
-            |w| w + extras,
-        ),
-        (None, None) => w_css.map_or_else(
-            || shrink((target.width - ml - mr - extras).max(0.0)),
-            |w| w + extras,
-        ),
+        (Some(lv), Some(rv)) => {
+            w_border.unwrap_or_else(|| (target.width - lv - rv - ml - mr).max(0.0))
+        }
+        (Some(lv), None) => {
+            w_border.unwrap_or_else(|| shrink((target.width - lv - ml - mr - extras).max(0.0)))
+        }
+        (None, Some(rv)) => {
+            w_border.unwrap_or_else(|| shrink((target.width - rv - ml - mr - extras).max(0.0)))
+        }
+        (None, None) => {
+            w_border.unwrap_or_else(|| shrink((target.width - ml - mr - extras).max(0.0)))
+        }
     };
     AbsGeo {
         // Horizontalement, `cx` = bord de la margin box —

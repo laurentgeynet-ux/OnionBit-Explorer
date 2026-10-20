@@ -22,7 +22,9 @@
 //! (pas de redistribution), indices négatifs et `repeat(
 //! auto-fill|fit)` ignorés, `subgrid` hors scope.
 
-use crate::block::{css_px, font_size_px, raw_length_px, side_px, BlockCtx};
+use crate::block::{
+    border_px, box_size_to_content, css_px, font_size_px, raw_length_px, side_px, BlockCtx,
+};
 use crate::flex::{gap_px, layout_item, translate_subtree};
 use crate::{BoxKind, LayoutBox};
 
@@ -516,7 +518,15 @@ pub(crate) fn flow_grid_children(
         .map(|(&(c, span, _, _), &i)| {
             let ch = &bx.children[i];
             let cfs = font_size_px(&ch.style, fs, ctx);
+            // `width` border-box → contenu = spécifiée −
+            // châssis propre (R-43 — la mesure de piste est
+            // en boîte de contenu).
+            let chassis = side_px(&ch.style, "padding-left", content_w, cfs, ctx, 0.0)
+                + side_px(&ch.style, "padding-right", content_w, cfs, ctx, 0.0)
+                + border_px(&ch.style, "border-left-width", content_w, cfs, ctx)
+                + border_px(&ch.style, "border-right-width", content_w, cfs, ctx);
             let base = css_px(&ch.style, "width", content_w, cfs, ctx)
+                .map(|w| box_size_to_content(&ch.style, w, chassis))
                 .or_else(|| ch.intrinsic.map(|v| v.0))
                 .unwrap_or_else(|| crate::intrinsic::max_content_px(ch, cfs, ctx));
             (c, span, base)

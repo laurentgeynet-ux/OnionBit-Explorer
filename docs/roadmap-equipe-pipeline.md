@@ -803,31 +803,78 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   au défaut 600 — `position:fixed`/ICB aussi plus justes).
   Tests : 2 cas cascade (`(min-width:50vw)`, `font-size:2vw`)
   + 2 cas modern (4 unités 800×600, `calc(100vh-60px)`=540).
-- [ ] **Écarts terrain — vol humain M-H1
+- [x] **R-43. `box-sizing` (css-sizing-3 §4)**
+  (résidu terrain, triage M-H1) — **livré** : le
+  bouton Connexion de google.fr rendait ~60 px
+  au lieu de 40 — `min-height:40px` +
+  `padding:10px 0` + `box-sizing:border-box`
+  (universel `*{}`) : toutes les tailles
+  spécifiées étaient traitées en content-box.
+  Livré : `box_size_to_content` convertit
+  `width`/`height`/`min-*`/`max-*` border-box →
+  contenu (plancher 0) aux 4 sites de
+  `layout_block`, `abs_geo`, bases `item_flex`
+  (châssis résolu avant), mesure de piste grid
+  `auto`, `width` explicite dans `content_px`.
+  Write-backs flex compensés (`sizes` internes
+  = contenu → écriture border-box équivalente,
+  `layout_block` reconvertit et retombe sur la
+  cible). Tables inchangées (`width` y est déjà
+  border-box, §17.5.2). Vérif terrain :
+  `shot` google.fr → bouton ~40 px.
+  Tests : 4 cas `block` (width, min-height
+  châssis>valeur → border box 40, height<
+  padding, max clampés) + 2 cas `modern`
+  (`flex:none`+width bb, `flex:1` grow bb).
+- [x] **Écarts terrain — vol humain M-H1
   (22/10)** : trois constats rendu du
-  premier run humain — promotion en
-  R-xx après triage/repro :
-  - **résultats DDG tronqués au bord
-    droit** : texte coupé mi-mot à
-    ~75 % du viewport — clip
-    horizontal ou mismatch largeur
-    layout/viewport à cerner.
-  - **entités littérales sur
-    google.fr** : `&nbsp;`/`&copy;`
-    rendus en clair **alors que la
-    table `entities_data` les connaît**
-    — le trou est dans le chemin :
-    entité sans `;`, ou texte inséré
-    par JS (`innerHTML`/`document.write`)
-    non décodé. Même page : texte
-    « Lornaeniaiae » corrompu (footer)
-    et bouton Connexion surdimensionné.
-    Repro minimal à forger.
-  - **frame décalée haut-gauche au
-    survol d'un lien** : restyle
-    `:hover` → repaint à origine
-    différente ; revient au départ.
-    Glitch très visible.
+  premier run humain — **triage terminé** :
+  - ~~**résultats DDG tronqués au bord
+    droit**~~ → **non reproduit** : captures
+    `shot` à 800/1024/1440 px sur les versions
+    `html.` et `lite.` — les tables résultats
+    reflow correctement, aucun clip. Le rendu
+    moteur (`ddg-lite-r.png`) est quasi
+    identique au frame utilisateur. Constat
+    probablement transitoire ou propre à la
+    version JS (redirigée vers `html.` chez
+    nous) — non promu, à ré-observer au
+    prochain vol.
+  - ~~**entités littérales sur
+    google.fr**~~ → **trié : bug NAV
+    (jscore), pas PIPE** — entrée
+    journal 2026-10-20. Le trou :
+    `parse_fragment_into` n'appelle
+    `decode_entities` que sur
+    attributs + RCDATA, jamais sur le
+    texte courant → tout markup
+    injecté (`innerHTML`,
+    `document.write`, parse miroir
+    initial) sérialise `&amp;nbsp;`
+    → littéral au re-parse. Mini-table
+    sans `&copy;`. Repro prouvée.
+    « Lornaeniaiae » : même famille
+    (corruption charset/JS), non revu au
+    re-shot — suivi côté NAV.
+  - ~~**bouton Connexion
+    surdimensionné**~~ → **confirmé PIPE** :
+    `box-sizing` ignoré → promu **R-43**
+    (livré ci-dessus).
+  - ~~**frame décalée haut-gauche au
+    survol d'un lien**~~ → **non confirmé
+    PIPE** : l'hypothèse « restyle `:hover` »
+    est éliminée — `matches_with_state`
+    n'est appelée par aucun chemin session.
+    Repros session propres : mutation
+    `onmouseover` (texte, `setAttribute(
+    style)`, overlay `absolute`, page
+    scrollée) → repaint correct, aucune
+    translation d'origine. Le symptôme
+    réel relève probablement d'une
+    mutation JS plus lourde (re-layout
+    global) ou du slicing côté app —
+    non promu, à ré-observer avec
+    capture.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

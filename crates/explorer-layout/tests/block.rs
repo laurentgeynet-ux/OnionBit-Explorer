@@ -862,3 +862,63 @@ fn remplace_inline_atomic_brida_par_max_width() {
         attendu
     );
 }
+
+// ── R-43 : `box-sizing` — les tailles spécifiées s'appliquent
+// à la border box ; le contenu en est déduit (terrain :
+// bouton « Connexion » de google.fr — `min-height:40px` +
+// `padding:10px` rendu ~60 px au lieu de 40).
+
+#[test]
+fn border_box_width_inclut_padding_et_bordure() {
+    // `width:100px` border-box + padding 20 + border 5 →
+    // border box 100, contenu 50. Content-box (défaut) → 150.
+    let (dom, bx) = laid(
+        "<!doctype html><div id=\"t\" style=\"width:100px;padding:0 20px;border:0 solid #000;border-width:0 5px;box-sizing:border-box\">x</div>",
+        "",
+    );
+    let d = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(d.rect.width, 100.0), "w={}", d.rect.width);
+    let (dom2, bx2) = laid(
+        "<!doctype html><div style=\"width:100px;padding:0 20px;border:0 solid #000;border-width:0 5px\">x</div>",
+        "",
+    );
+    let d2 = find(&bx2, by_tag(&dom2, "div"));
+    assert!(approx(d2.rect.width, 150.0), "w={}", d2.rect.width);
+}
+
+#[test]
+fn border_box_min_height_plancher_sur_border_box() {
+    // google.fr `.gb_6a` : `min-height:40px` + `padding:10px` +
+    // `box-sizing:border-box` → total 40, contenu ≥ 20.
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"box-sizing:border-box;min-height:40px;padding:10px 24px;line-height:18px\">x</div>",
+        "",
+    );
+    let d = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(d.rect.height, 40.0), "h={}", d.rect.height);
+}
+
+#[test]
+fn border_box_height_plancher_zero_du_contenu() {
+    // `height:30px` border-box + padding 40 → contenu planché
+    // à 0 ; css-sizing-3 : la border box résultante DÉPASSE
+    // la taille spécifiée (40 — le châssis ne se compresse
+    // pas sous la taille demandée).
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"box-sizing:border-box;height:30px;padding:20px\">x</div>",
+        "",
+    );
+    let d = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(d.rect.height, 40.0), "h={}", d.rect.height);
+}
+
+#[test]
+fn border_box_max_width_et_max_height_bornent_la_border_box() {
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"box-sizing:border-box;width:500px;height:500px;max-width:100px;max-height:80px;padding:10px\">x</div>",
+        "",
+    );
+    let d = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(d.rect.width, 100.0), "w={}", d.rect.width);
+    assert!(approx(d.rect.height, 80.0), "h={}", d.rect.height);
+}

@@ -26,8 +26,8 @@
 use explorer_css::ComputedStyle;
 
 use crate::block::{
-    border_px, css_px, font_size_px, layout_anon_block, layout_block, raw_length_px, side_px,
-    BlockCtx, FloatCtx,
+    border_px, box_size_to_content, css_px, font_size_px, layout_anon_block, layout_block,
+    raw_length_px, side_px, BlockCtx, FloatCtx,
 };
 use crate::boxtree::{BoxKind, LayoutBox};
 use crate::Rect;
@@ -79,7 +79,17 @@ pub(crate) fn gap_px(st: &ComputedStyle, row: bool, basis: f32, fs: f32, ctx: &B
 /// `cb_def` = la taille main du conteneur est définie ; une
 /// base en `%` ne se résout que si elle l'est (§9.2 : contre
 /// une taille indéfinie, la base `%` vaut `content`).
-fn item_flex(c: &LayoutBox, row: bool, cb: f32, cb_def: bool, fs: f32, ctx: &BlockCtx) -> ItemFlex {
+/// `chassis` = padding+bordure main de l'item — `box-sizing`
+/// convertit `flex-basis`/`width`/`height` en contenu (R-43).
+fn item_flex(
+    c: &LayoutBox,
+    row: bool,
+    cb: f32,
+    cb_def: bool,
+    chassis: f32,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> ItemFlex {
     let st = &c.style;
     let (mut grow, mut shrink, mut basis_raw) = (
         prop_num(st, "flex-grow"),
@@ -125,12 +135,17 @@ fn item_flex(c: &LayoutBox, row: bool, cb: f32, cb_def: bool, fs: f32, ctx: &Blo
             None
         }
     };
+    // Sources CSS (`flex-basis`, `width`/`height`) : tailles
+    // spécifiées — `box-sizing` s'applique (R-43). Les mesures
+    // intrinsèques (`intrinsic_size_px`, `intrinsic`) sont
+    // déjà des tailles de contenu — pas de conversion.
+    let css_len = |v: &str| len_px(v).map(|b| box_size_to_content(st, b, chassis));
     let base = basis_raw
         .as_deref()
         .filter(|b| !b.eq_ignore_ascii_case("auto") && !b.eq_ignore_ascii_case("content"))
-        .and_then(len_px)
+        .and_then(css_len)
         .or_else(|| crate::intrinsic::intrinsic_size_px(st, "flex-basis", c, cb, fs, ctx))
-        .or_else(|| st.get(basis_prop).and_then(len_px))
+        .or_else(|| st.get(basis_prop).and_then(css_len))
         .or_else(|| crate::intrinsic::intrinsic_size_px(st, basis_prop, c, cb, fs, ctx))
         .or_else(|| c.intrinsic.map(|i| if row { i.0 } else { i.1 }));
     ItemFlex {
@@ -254,6 +269,7 @@ pub(crate) fn flow_flex_children(
     ctx: &BlockCtx,
     fs: f32,
     pos_cb: Rect,
+    h_css: Option<f32>,
 ) -> f32 {
     let st = bx.style.clone();
     let axis = match st.get("flex-direction") {
@@ -278,19 +294,11 @@ pub(crate) fn flow_flex_children(
     let gap = gap_px(&st, axis.row, main_cb, fs, ctx);
     let justify = st.get_or("justify-content", "flex-start").to_string();
     let align = st.get_or("align-items", "stretch").to_string();
-    // Hauteur de conteneur définie — une `%` sans base
-    // propagée reste indéfinie (pas de `cb_h` ici) : taille
-    // main de l'axe `column` et base des % `row-gap`.
-    let h_def = if st
-        .get("height")
-        .unwrap_or_default()
-        .trim_end()
-        .ends_with('%')
-    {
-        None
-    } else {
-        css_px(&st, "height", 0.0, fs, ctx)
-    };
+    // Hauteur de conteneur définie : `h_css` — résolue par
+    // `layout_block` (%, `box-sizing` déjà appliqués, R-43) ;
+    // `None` = indéfinie (taille main de l'axe `column` et
+    // base des % `row-gap`).
+    let h_def = h_css;
 
     // Indices d'items triés par `order` (stable).
     let mut order_idx: Vec<usize> = (0..bx.children.len()).collect();
@@ -316,7 +324,11 @@ pub(crate) fn flow_flex_children(
         for &i in &order_idx {
             let c = &bx.children[i];
             let cfs = font_size_px(&c.style, fs, ctx);
-            let mut f = item_flex(c, true, main_cb, true, cfs, ctx);
+            let ch = side_px(&c.style, "padding-left", main_cb, cfs, ctx, 0.0)
+                + side_px(&c.style, "padding-right", main_cb, cfs, ctx, 0.0)
+                + border_px(&c.style, "border-left-width", main_cb, cfs, ctx)
+                + border_px(&c.style, "border-right-width", main_cb, cfs, ctx);
+            let mut f = item_flex(c, true, main_cb, true, ch, cfs, ctx);
             if f.base.is_none() {
                 // R-3 : mesure max-content réelle du contenu
                 // (était : texte direct seulement).
@@ -350,10 +362,10 @@ pub(crate) fn flow_flex_children(
         }
 
         // Padding + bordures axe principal : `flex-basis` et
-        // `width` sont des tailles de **contenu** (content-box
-        // — `box-sizing` n'est pas supporté, R-13e). Espace
-        // libre, pistes et retraits se mesurent en border-box
-        // (+ marges = margin-box).
+        // `width` sont des tailles de **contenu** internes —
+        // `box-sizing: border-box` y est converti amont (R-43).
+        // Espace libre, pistes et retraits se mesurent en
+        // border-box (+ marges = margin-box).
         let mut extras: Vec<f32> = Vec::with_capacity(n);
         for &i in &order_idx {
             let c = &bx.children[i];
@@ -461,14 +473,22 @@ pub(crate) fn flow_flex_children(
             // Marges résolues + taille main cible écrites en px
             // sur le style de l'item : `layout_block` les
             // applique une fois — la border box obtenue =
-            // cible + padding + bordures (content-box).
+            // cible + padding + bordures (content-box). Sur
+            // item `border-box` on écrit la valeur border-box
+            // équivalente : `layout_block` reconvertit en
+            // contenu et retombe exactement sur la cible (R-43).
             for (lk, &k) in line.iter().enumerate() {
                 let c = &mut bx.children[order_idx[k]];
                 c.style
                     .set("margin-left", &format!("{}px", line_margins[k].0));
                 c.style
                     .set("margin-right", &format!("{}px", line_margins[k].1));
-                c.style.set("width", &format!("{}px", sizes_l[lk]));
+                let w = if c.style.get("box-sizing") == Some("border-box") {
+                    sizes_l[lk] + extras[k]
+                } else {
+                    sizes_l[lk]
+                };
+                c.style.set("width", &format!("{w}px"));
             }
             let used: f32 = line
                 .iter()
@@ -653,7 +673,11 @@ pub(crate) fn flow_flex_children(
         for (k, &i) in order_idx.iter().enumerate() {
             let c = &mut bx.children[i];
             let cfs = font_size_px(&c.style, fs, ctx);
-            items.push(item_flex(c, false, main_h, h_def.is_some(), cfs, ctx));
+            let ch = side_px(&c.style, "padding-top", content_w, cfs, ctx, 0.0)
+                + side_px(&c.style, "padding-bottom", content_w, cfs, ctx, 0.0)
+                + border_px(&c.style, "border-top-width", content_w, cfs, ctx)
+                + border_px(&c.style, "border-bottom-width", content_w, cfs, ctx);
+            items.push(item_flex(c, false, main_h, h_def.is_some(), ch, cfs, ctx));
             main_auto[k] = (
                 c.style.get("margin-top") == Some("auto"),
                 c.style.get("margin-bottom") == Some("auto"),
@@ -831,12 +855,18 @@ pub(crate) fn flow_flex_children(
             }
             // Hauteur cible écrite quand elle diffère de la
             // base mesurée — `layout_block` reproduit alors
-            // la border box exacte (content-box §9.7).
+            // la border box exacte (content-box §9.7 ; valeur
+            // border-box équivalente pour `border-box`, R-43).
             for (lk, &k) in line.iter().enumerate() {
                 if (sizes_l[lk] - bases[k]).abs() > 0.01 {
                     let i = order_idx[k];
                     let c = &mut bx.children[i];
-                    c.style.set("height", &format!("{}px", sizes_l[lk]));
+                    let h = if c.style.get("box-sizing") == Some("border-box") {
+                        sizes_l[lk] + extras[k]
+                    } else {
+                        sizes_l[lk]
+                    };
+                    c.style.set("height", &format!("{h}px"));
                     layout_item(c, content_x, start_cursor, content_w, ctx, fs, pos_cb, None);
                 }
             }

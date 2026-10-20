@@ -727,3 +727,35 @@ fn calc_melange_unites_viewport() {
     let d = find(&bx, by_id(&dom, "d"));
     assert!(approx(d.rect.height, 540.0), "h={}", d.rect.height);
 }
+
+// ── R-43 : `box-sizing` en flex — la base interne reste du
+// contenu ; `width`/`flex-basis`/`height` honorent
+// `border-box` sans double-châssis au write-back.
+
+#[test]
+fn flex_item_width_border_box_garde_sa_border_box() {
+    // `width:100px` border-box + padding 20 → item 100 de
+    // border box (contenu 60), pas 120 ni 80.
+    let (dom, bx) = laid(
+        "<!doctype html><div id=f style=\"display:flex;width:400px\">\
+         <div id=i style=\"box-sizing:border-box;width:100px;padding:0 20px;flex:none\">x</div>\
+         </div>",
+        "",
+    );
+    let i = find(&bx, by_id(&dom, "i"));
+    assert!(approx(i.rect.width, 100.0), "w={}", i.rect.width);
+}
+
+#[test]
+fn flex_grow_border_box_cible_border_box() {
+    // `flex:1` border-box + padding 20 → grow remplit la
+    // colonne : border box = 200 (contenu 160).
+    let (dom, bx) = laid(
+        "<!doctype html><div id=f style=\"display:flex;width:400px\">\
+         <div id=i style=\"box-sizing:border-box;flex:1;padding:0 20px\">x</div>\
+         <div id=j style=\"width:200px;flex:none\">y</div></div>",
+        "",
+    );
+    let i = find(&bx, by_id(&dom, "i"));
+    assert!(approx(i.rect.width, 200.0), "w={}", i.rect.width);
+}
