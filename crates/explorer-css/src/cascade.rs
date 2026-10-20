@@ -86,10 +86,22 @@ fn query_matches(env: &StyleEnv, q: &MediaQuery) -> bool {
 }
 
 /// `(name: value)` d'une media query — px pour *-width/-height.
+/// `em`/`rem` y sont résolus contre la font-size INITIALE
+/// (spec MQ4 — jamais le `:root` calculé) : `env.font_size_base`.
 fn condition_matches(env: &StyleEnv, name: &str, value: &str) -> bool {
     let px = || -> Option<f64> {
-        let v = value.strip_suffix("px").unwrap_or(value);
-        v.trim().parse().ok()
+        let v = value.trim();
+        // Ordre : `rem` avant `em` (suffixe partagé).
+        let (num, mul) = if let Some(s) = v.strip_suffix("rem") {
+            (s, f64::from(env.font_size_base))
+        } else if let Some(s) = v.strip_suffix("em") {
+            (s, f64::from(env.font_size_base))
+        } else if let Some(s) = v.strip_suffix("px") {
+            (s, 1.0)
+        } else {
+            (v, 1.0)
+        };
+        num.trim().parse::<f64>().ok().map(|n| n * mul)
     };
     match name {
         "min-width" => px().is_some_and(|v| f64::from(env.width_px) >= v),

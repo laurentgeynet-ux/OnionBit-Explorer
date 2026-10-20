@@ -719,6 +719,25 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   exempt du reset, `font-size` initiale, contrôle
   no-quirks) + 2 cas géométrie `inline` (fragment
   cellule à gauche en quirks vs centré avec DOCTYPE).
+- [x] **R-39. `em`/`rem` dans les media queries** (résidu
+  terrain, triage `site_smoke`) — **livré** : rust-lang.org
+  se rendait comme une page mobile empilée à 1024 px —
+  Tachyons (sa feuille) met **tout** le CSS desktop derrière
+  `(min-width: 30em)`/`(min-width: 60em)` et l'app derrière
+  `(min-width: 64rem)`, mais `condition_matches` ne
+  résolvait que les `px` nus : toute feature non-px →
+  fausse → colonnes/flex/grilles desktop morts. Spec MQ4 :
+  `em`/`rem` en media query se résolvent contre la
+  font-size **initiale** (jamais le `:root` calculé) —
+  `env.font_size_base` (16 par défaut). Livré : résolution
+  `px`/`em`/`rem` sur les six conditions `*-width`/`*-height`.
+  Vérif terrain : `shot` rust-lang.org après fix = footer
+  en 3 colonnes, liens orange, hiérarchie restaurée.
+  Reste sur ce site (écarts séparés, triage suivant) :
+  superposition hero/footer (hauteur `vh` ?) et une bande
+  blanche verticale (SVG/icône à gabarit intrinsèque
+  hostile). Test : `media_query_em_rem_resolus` (30em=480
+  ✓, 64rem=1024 ✓, 100em=1600 ✗, seuil qui suit la base).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

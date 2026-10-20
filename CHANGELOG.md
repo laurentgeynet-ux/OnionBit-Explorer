@@ -157,6 +157,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-39 — `em`/`rem` dans les media queries**
+  (`explorer-css`) : bug site-réel au triage `site_smoke`
+  — rust-lang.org se rendait comme une page mobile
+  empilée à 1024 px : Tachyons met tout son CSS desktop
+  derrière `(min-width: 30em)`/`60em`/`64rem`, mais
+  `condition_matches` ne résolvait que les `px` nus —
+  toute feature non-px évaluée fausse, colonnes/flex
+  desktop morts. Spec MQ4 : `em`/`rem` en media query =
+  font-size **initiale** (`env.font_size_base`, jamais
+  le `:root` calculé). Résolution `px`/`em`/`rem` sur
+  les six conditions `*-width`/`*-height` ; `shot`
+  rust-lang.org après fix : footer 3 colonnes, flex
+  restaurés.
 - **R-38 — mode quirks propagé à la cascade** : bug
   site-réel au triage `site_smoke` — les titres de
   news.ycombinator.com rendaient **centrés** dans leur

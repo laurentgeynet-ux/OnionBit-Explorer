@@ -210,6 +210,48 @@ fn media_query_filtrage() {
 }
 
 #[test]
+fn media_query_em_rem_resolus() {
+    // `em`/`rem` dans une media query = font-size INITIALE
+    // (spec MQ4 — jamais le `:root` calculé). Terrain :
+    // rust-lang.org (Tachyons) met tout son CSS desktop
+    // derrière `(min-width: 30em)`/`(min-width: 60em)` —
+    // non résolu = tout ignoré → rendu mobile empilé.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@media (min-width: 30em) { div { color: red } } \
+         @media (min-width: 64rem) { p { margin-top: 9px } } \
+         @media (min-width: 100em) { div { display: none } }",
+        Origin::Author,
+    );
+    // env : 1024px, base 16px → 30em=480 ✓, 64rem=1024 ✓,
+    // 100em=1600 ✗.
+    let s = e.compute(&f.dom, f.div, &env());
+    assert_eq!(s.get("color"), Some("red"));
+    assert_eq!(s.get("display"), Some("block"), "100em > 1024px");
+    assert_eq!(
+        e.compute(&f.dom, f.p, &env()).get("margin-top"),
+        Some("9px"),
+        "64rem == 1024px à base 16"
+    );
+    // Base différente → seuil différent (em suit la base).
+    let big = StyleEnv {
+        font_size_base: 20.0,
+        ..env()
+    };
+    assert_eq!(
+        e.compute(&f.dom, f.div, &big).get("color"),
+        Some("red"),
+        "30em=600 ≤ 1024"
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.p, &big).get("margin-top"),
+        Some("1em"), // retombe sur la feuille UA
+        "64rem=1280 > 1024 à base 20"
+    );
+}
+
+#[test]
 fn media_negation_et_type() {
     let f = fixture();
     let mut eng = StyleEngine::new();
