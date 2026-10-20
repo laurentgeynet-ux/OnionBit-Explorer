@@ -166,6 +166,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   ou mort = repro ; RSS plat sur fenêtre longue =
   exonération progressive.
 
+### Fixed
+
+- **R-44 — `width` explicite d'un remplacé dans la mesure
+  intrinsèque** (`explorer-layout`) : bug site-réel au triage
+  `site_smoke` — les 4 icônes sociales de rust-lang.org
+  s'empilaient une par ligne. `footer img{width:40px}` :
+  `content_px` retournait l'intrinsèque (512) avant la taille
+  spécifiée → base flex des `<a>` > conteneur → `flex-wrap`
+  posait une ligne par item (§9.5, avant le shrink). Livré :
+  `width`/`min|max-width` non-% font foi avant l'intrinsèque
+  (§5.1) — généralise aux bases flex, pistes grid, flottants,
+  cellules. `shot` : icônes en ligne horizontale.
+
 ### Added
 
 - **R-43 — `box-sizing` (css-sizing-3 §4)** (`explorer-layout`) :

@@ -922,3 +922,63 @@ fn border_box_max_width_et_max_height_bornent_la_border_box() {
     assert!(approx(d.rect.width, 100.0), "w={}", d.rect.width);
     assert!(approx(d.rect.height, 80.0), "h={}", d.rect.height);
 }
+
+// ── R-44 : `width` explicite d'un remplacé fait foi dans la
+// mesure intrinsèque — les `<a>` sociaux de rust-lang.org
+// (`footer img{width:40px}`) mesuraient l'intrinsèque 512
+// comme base flex → chacun > conteneur → wrap : une icône
+// par ligne (§9.5 : la ligne se décide sur la base
+// hypothétique, avant le shrink).
+
+#[test]
+fn remplace_width_specifiee_mesure_la_base_flex() {
+    // 4 × `<a><img style="width:40px">` (intrinsèque 512²)
+    // dans un `flex-wrap` de 200 px → tous tiennent sur une
+    // seule ligne (~40 px de haut) ; avant : base 512 →
+    // 4 lignes de ~40 = ~160.
+    let html = concat!(
+        "<!doctype html><div style=\"display:flex;flex-wrap:wrap;width:200px\">",
+        "<a><img style=\"width:40px\"></a>",
+        "<a><img style=\"width:40px\"></a>",
+        "<a><img style=\"width:40px\"></a>",
+        "<a><img style=\"width:40px\"></a>",
+        "</div>"
+    );
+    let probe = TreeBuilder::parse(html);
+    let mut sizes = std::collections::HashMap::new();
+    let mut queue = vec![probe.document()];
+    while let Some(n) = queue.pop() {
+        if probe.tag_name(n).is_ok_and(|t| t == "img") {
+            sizes.insert(n, (512.0, 512.0));
+        }
+        if let Ok(ch) = probe.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    let (dom, bx) = laid_sized(html, "", &sizes);
+    let container = find(&bx, by_tag(&dom, "div"));
+    assert!(
+        container.rect.height < 60.0,
+        "items attendus sur une ligne, h={}",
+        container.rect.height
+    );
+    let a = find(&bx, by_tag(&dom, "a"));
+    assert!(approx(a.rect.width, 40.0), "a.w={}", a.rect.width);
+}
+
+#[test]
+fn remplace_max_width_px_borne_la_mesure_intrinseque() {
+    // `img` sans `width` mais `max-width` en px : la borne
+    // s'applique à la contribution intrinsèque (§5.1) — un
+    // item flex ne dépasse pas la borne par sa base.
+    let html = concat!(
+        "<!doctype html><div style=\"display:flex;width:200px\">",
+        "<a><img style=\"max-width:30px\"></a>",
+        "</div>"
+    );
+    let probe = TreeBuilder::parse(html);
+    let sizes = ratio_sizes(&probe, "img", 512.0, 512.0);
+    let (dom, bx) = laid_sized(html, "", &sizes);
+    let a = find(&bx, by_tag(&dom, "a"));
+    assert!(a.rect.width <= 31.0, "a.w={}", a.rect.width);
+}

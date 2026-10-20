@@ -67,31 +67,44 @@ pub(crate) fn min_content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx) -> f32 {
 /// plus grand morceau insécable. `fs` = font-size **de bx**
 /// (résolu par l'appelant).
 fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
-    // Remplacé (`img`…) : la taille préférée fait foi.
-    if let Some((w, _)) = bx.intrinsic {
-        return w;
-    }
-    // `width` explicite (hors %) : l'enfant impose sa taille
-    // fixe — un % indéfini retombe sur son contenu (§5.2).
-    // `box-sizing` la convertit en contenu (R-43) : la mesure
-    // rendue est une boîte de contenu — padding/bordure
-    // propres retranchés (les marges restent hors — comptées
-    // par `own_sides` côté appelant).
-    if let Some(v) = bx.style.get("width") {
-        if !v.contains('%') {
-            if let Some(w) = css_px(&bx.style, "width", 0.0, fs, ctx) {
-                let chassis: f32 = [
-                    "padding-left",
-                    "padding-right",
-                    "border-left-width",
-                    "border-right-width",
-                ]
-                .iter()
-                .map(|p| side_px(&bx.style, p, 0.0, fs, ctx, 0.0))
-                .sum();
-                return box_size_to_content(&bx.style, w, chassis);
-            }
+    // Taille directe : `width` explicite (hors %) fait foi
+    // AVANT l'intrinsèque remplacé (§5.1 : la contribution
+    // d'un remplacé est sa taille utilisée — un
+    // `img{width:40px}` mesure 40, pas son intrinsèque.
+    // Terrain : icônes sociales rust-lang.org empilées une
+    // par ligne, la base flex des `<a>` valant l'intrinsèque
+    // 512 > conteneur). Un `%` indéfini retombe sur le
+    // contenu (§5.2). `min|max-width` non-% bornent la
+    // source retenue. `box-sizing` convertit les tailles
+    // SPÉCIFIÉES en contenu (R-43) — l'intrinsèque est déjà
+    // du contenu (les marges restent hors — comptées par
+    // `own_sides` côté appelant).
+    let st = &bx.style;
+    let chassis: f32 = [
+        "padding-left",
+        "padding-right",
+        "border-left-width",
+        "border-right-width",
+    ]
+    .iter()
+    .map(|p| side_px(st, p, 0.0, fs, ctx, 0.0))
+    .sum();
+    let conv = |v: f32| box_size_to_content(st, v, chassis);
+    let bound = |p: &str| -> Option<f32> {
+        let v = st.get(p)?;
+        if v.contains('%') {
+            return None;
         }
+        css_px(st, p, 0.0, fs, ctx).map(conv)
+    };
+    if let Some(mut w) = bound("width").or(bx.intrinsic.map(|i| i.0)) {
+        if let Some(mx) = bound("max-width") {
+            w = w.min(mx);
+        }
+        if let Some(mn) = bound("min-width") {
+            w = w.max(mn);
+        }
+        return w;
     }
     // Boîte texte : mesure de la fonte réelle.
     if bx.kind == BoxKind::Text {

@@ -826,6 +826,30 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   châssis>valeur → border box 40, height<
   padding, max clampés) + 2 cas `modern`
   (`flex:none`+width bb, `flex:1` grow bb).
+- [x] **R-44. `width` explicite d'un remplacé
+  fait foi dans la mesure intrinsèque (§5.1)**
+  (résidu terrain, triage `site_smoke`) —
+  **livré** : les 4 icônes sociales de
+  rust-lang.org s'empilaient une par ligne
+  dans le pied. `footer img{width:40px}` :
+  `content_px` retournait l'intrinsèque (512)
+  **avant** la `width` spécifiée → les `<a>`
+  flex mesuraient 512 de base, chacun >
+  conteneur (~215) → `flex-wrap` pose une
+  ligne par item (§9.5 : la ligne se décide
+  sur la base hypothétique, **avant** le
+  shrink qui les aurait fait tenir). Livré :
+  `width` non-% d'abord, intrinsèque ensuite ;
+  `min|max-width` non-% bornent la source
+  retenue (les `%` indéfinis retombent sur le
+  contenu, §5.2). Généralise à toutes les
+  mesures : bases flex, pistes grid `auto`,
+  flottants shrink-to-fit, cellules de table.
+  Vérif terrain : `shot` rust-lang.org → les
+  4 icônes en ligne horizontale. Tests : 2 cas
+  `block` (4×`<a><img width:40>` 512² dans un
+  wrap 200 → une ligne ; `max-width:30px` px
+  borne l'intrinsèque).
 - [x] **Écarts terrain — vol humain M-H1
   (22/10)** : trois constats rendu du
   premier run humain — **triage terminé** :
