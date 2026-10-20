@@ -4104,6 +4104,43 @@ async fn keyframes_animation_advances_and_finishes() {
     );
 }
 
+/// Étape 55e (rouvert, mission 15) — la pompe **partagée**
+/// doit avancer les animations même sans moteur JS : une
+/// page `@keyframes` purement CSS a `js: None` → la branche
+/// « pas de moteur » de `pump_timers_shared` doit quand
+/// même battre `advance_animations`, sinon le daemon
+/// produit des frames identiques (anim.html, 6 pulls).
+#[tokio::test]
+async fn shared_pump_advances_scriptless_animations() {
+    let (sess0, tr) = test_session();
+    tr.route(
+        "/a",
+        200,
+        "<html><head><style>\
+         @keyframes k { from { background-color: #ff0000 }\
+         to { background-color: #0000ff } }\
+         #b { width:2px; height:2px; animation: k 500ms linear }\
+         </style></head><body><div id=\"b\"></div></body></html>",
+    );
+    let sess = std::sync::Arc::new(tokio::sync::Mutex::new(sess0));
+    let tab = sess.lock().await.open_tab();
+    sess.lock()
+        .await
+        .navigate(tab, "http://h.test/a")
+        .await
+        .unwrap();
+    let start = sess.lock().await.frame_png(tab).unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    // Page sans <script> → `take_js_engine` rend None : le
+    // battement doit tout de même relayout+repaint l'anim.
+    explorer_core::pump_timers_shared(&sess, tab).await;
+    let mid = sess.lock().await.frame_png(tab).unwrap();
+    assert_ne!(
+        start, mid,
+        "pompe partagée inerte sans moteur JS — anim figée (55e)"
+    );
+}
+
 /// Étape 55e — garde : un élément sans `animation` (ou
 /// `animation-name: none`) ne déclenche aucun tick de
 /// relayout — `tick_animations` reste inerte.

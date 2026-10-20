@@ -7,6 +7,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Étape 55e (rouvert) — animations figées sous pompe
+  partagée** (`explorer-core`) : `pump_timers_shared`
+  rendait `0` dès l'absence de moteur JS détachable —
+  une page `@keyframes` purement CSS (`js: None`) ne
+  battait jamais côté daemon, et l'UI ne tirant
+  `/frame` que sur `FrameInvalidated` (jamais émis),
+  `anim.html` restait figé (6 pulls identiques). La
+  branche « pas de moteur » appelle désormais
+  `advance_animations` sous verrou court — early-out
+  ~gratuit quand rien n'est en lecture
+  (`shared_pump_advances_scriptless_animations`).
+
 ### Changed
 
 - **Étape 60 — éclatement de `session.rs`** (`explorer-core`) :

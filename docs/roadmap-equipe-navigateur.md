@@ -308,7 +308,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   permanent au-delà de 32 — mais 2 pleins cadres
   sporadiques (~clic 16/32, périodicité à creuser : tick
   timer ou GC déclenchant un full relayout ?).
-- [ ] **Étape 55e. `@keyframes` cadencés en session**
+- [x] **Étape 55e. `@keyframes` cadencés en session**
   (adoption R-10, règle AGENTS §10.5b — confirmé non-câblé
   par `anim.html` : frames identiques à 400 ms) : **livré** —
   `ActiveAnimation` par `(ordinal, index)` + `start` conservé
@@ -323,6 +323,15 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   aucun raster en session. Piste : `pump_timers_all` a été
   remplacé par `pump_timers_shared` (53f) — le battement hôte
   `tick_animations` a-t-il survécu à la migration ?
+  **Résolu** : la branche « pas de moteur » de
+  `pump_timers_shared` rendait `0` sans avancer les
+  animations — une page `@keyframes` purement CSS
+  (`js: None`) ne battait jamais côté daemon, et l'UI v2 ne
+  tire `/frame` que sur `FrameInvalidated` SSE (jamais émis)
+  → figé total. Le `else` appelle désormais
+  `advance_animations` sous verrou court (early-out ~gratuit
+  sans anim en lecture) ; régression couverte par
+  `shared_pump_advances_scriptless_animations`.
 - [x] **Étape 55f. `relayout_subtree` adopté en session**
   (adoption R-12, §10.5b — mesuré : mutation DOM = re-parse
   + relayout global) : `apply_dom_sync`/`repaint` doivent

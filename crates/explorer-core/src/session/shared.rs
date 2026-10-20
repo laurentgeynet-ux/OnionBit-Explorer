@@ -204,6 +204,13 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
         s.take_js_engine(tab)
     };
     let Some((mut eng, max, epoch, sync_ok)) = taken else {
+        // Pas de moteur détachable (page sans <script>, pompe
+        // déjà en vol, epoch supplantée) — le battement
+        // d'animation tourne quand même : `@keyframes` est
+        // purement CSS, un document sans JS doit animer
+        // (55e rouvert — 6 frames identiques sur anim.html).
+        let mut s = sess.lock().await;
+        let _ = s.advance_animations(tab);
         return 0;
     };
     // Hors verrou : le burst JS n'occupe ni le verrou ni le
