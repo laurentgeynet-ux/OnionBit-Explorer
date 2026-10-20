@@ -764,3 +764,101 @@ fn marge_haute_premier_fils_reste_dans_bfc() {
     assert!(approx(c.rect.height, 24.0), "h={}", c.rect.height);
     assert!(approx(p.rect.y, 14.0), "p.y={}", p.rect.y);
 }
+
+/// Variante de `laid` avec tailles intrinsèques injectées
+/// (`build_box_tree_sized`) pour les éléments remplacés.
+fn laid_sized(
+    html: &str,
+    css: &str,
+    sizes: &std::collections::HashMap<explorer_dom::NodeId, (f32, f32)>,
+) -> (Dom, LayoutBox) {
+    let dom = TreeBuilder::parse(html);
+    let mut eng = StyleEngine::new();
+    eng.add_css("body { margin: 0 }", Origin::Author);
+    eng.add_css(css, Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root = dom.document_element().expect("racine");
+    let mut bx = build_box_tree_sized(&dom, root, &styles, sizes).expect("arbre");
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    (dom, bx)
+}
+
+fn ratio_sizes(
+    dom: &Dom,
+    tag: &str,
+    w: f32,
+    h: f32,
+) -> std::collections::HashMap<explorer_dom::NodeId, (f32, f32)> {
+    let mut m = std::collections::HashMap::new();
+    m.insert(by_tag(dom, tag), (w, h));
+    m
+}
+
+#[test]
+fn remplace_max_width_bridant_derive_la_hauteur_par_ratio() {
+    // Terrain rust-lang.org : `img{max-width:100%}` bride
+    // l'icône à la largeur du conteneur → la hauteur doit
+    // suivre le ratio (§10.6.2), pas rester à l'intrinsèque.
+    // Sans le fix : 100×480 (étiré vertical) au lieu de ~100.
+    let html = "<!doctype html><div style=\"width:100px\"><img style=\"max-width:100%\"></div>";
+    let dom_probe = TreeBuilder::parse(html);
+    let sizes = ratio_sizes(&dom_probe, "img", 480.0, 480.0);
+    let (dom, bx) = {
+        // `sizes` indexe les NodeId du dom parsé par le probe —
+        // `laid_sized` reparse le même html → ids identiques
+        // (parsage déterministe).
+        laid_sized(html, "", &sizes)
+    };
+    let img = find(&bx, by_tag(&dom, "img"));
+    assert!(approx(img.rect.width, 100.0), "w={}", img.rect.width);
+    assert!(approx(img.rect.height, 100.0), "h={}", img.rect.height);
+}
+
+#[test]
+fn remplace_height_specifiee_derive_la_largeur_par_ratio() {
+    // §10.6.2 symétrique : `height:100px` + `width:auto` →
+    // w = h × iw/ih (format paysage 480×240 → w=200).
+    let html = "<!doctype html><img style=\"display:block;height:100px\">";
+    let dom_probe = TreeBuilder::parse(html);
+    let sizes = ratio_sizes(&dom_probe, "img", 480.0, 240.0);
+    let (dom, bx) = laid_sized(html, "", &sizes);
+    let img = find(&bx, by_tag(&dom, "img"));
+    assert!(approx(img.rect.width, 200.0), "w={}", img.rect.width);
+    assert!(approx(img.rect.height, 100.0), "h={}", img.rect.height);
+}
+
+#[test]
+fn remplace_deux_axes_specifies_inchanges() {
+    // Carve-out : `width`+`height` explicites gagnent — le
+    // ratio ne s'interpose que sur l'axe `auto`.
+    let html = "<!doctype html><img style=\"display:block;width:60px;height:40px\">";
+    let dom_probe = TreeBuilder::parse(html);
+    let sizes = ratio_sizes(&dom_probe, "img", 480.0, 240.0);
+    let (dom, bx) = laid_sized(html, "", &sizes);
+    let img = find(&bx, by_tag(&dom, "img"));
+    assert!(approx(img.rect.width, 60.0), "w={}", img.rect.width);
+    assert!(approx(img.rect.height, 40.0), "h={}", img.rect.height);
+}
+
+#[test]
+fn remplace_inline_atomic_brida_par_max_width() {
+    // Forme réelle du bug : <a><img style=max-width:100%></a>
+    // dans un conteneur étroit — l'img passe par le chemin
+    // atomique inline (size_atomics_walk → layout_block).
+    // Intrinsèque portrait 480×511 (mastodon) bridée à 215 :
+    // h attendue = 215 × 511/480 ≈ 229, pas 511.
+    let html =
+        "<!doctype html><div style=\"width:215px\"><a><img style=\"max-width:100%\"></a></div>";
+    let dom_probe = TreeBuilder::parse(html);
+    let sizes = ratio_sizes(&dom_probe, "img", 480.0, 511.0);
+    let (dom, bx) = laid_sized(html, "", &sizes);
+    let img = find(&bx, by_tag(&dom, "img"));
+    assert!(approx(img.rect.width, 215.0), "w={}", img.rect.width);
+    let attendu = 215.0 * 511.0 / 480.0;
+    assert!(
+        approx(img.rect.height, attendu),
+        "h={} vs {}",
+        img.rect.height,
+        attendu
+    );
+}

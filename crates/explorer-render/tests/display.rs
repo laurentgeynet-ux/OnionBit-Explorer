@@ -904,3 +904,63 @@ fn ordre_appendice_e_bloc_flottant_inline() {
     let flt = pos([4, 5, 6]);
     assert!(blk < flt, "bloc {blk} avant flottant {flt}");
 }
+
+// ── triage terrain : <img> remplacée dans une flex row ──────
+
+#[test]
+fn img_flex_row_garde_son_ratio() {
+    // rust-lang.org : icônes blanches étirées en colonne —
+    // un <img> remplacé dans une flex row ne doit pas hériter
+    // la hauteur de la rangée (align-items:stretch → start
+    // pour un élément à ratio intrinsèque, CSS Align §5.3).
+    let dom = TreeBuilder::parse("<div id=r><div><img id=i></div><div id=t>t</div></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        "#r{display:flex} #t{width:200px;height:2000px}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("racine");
+    let i = by_id(&dom, "i");
+    let sizes: std::collections::HashMap<NodeId, (f32, f32)> =
+        std::iter::once((i, (512.0, 512.0))).collect();
+    let mut bx = build_box_tree_sized(&dom, root_el, &styles, &sizes).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let img = find(&bx, i).expect("box img");
+    eprintln!("img box = {:?}", img.rect);
+    assert!(
+        (img.rect.height - 512.0).abs() < 1.0,
+        "img étirée à la rangée : {:?}",
+        img.rect
+    );
+}
+#[test]
+fn repro_social() {
+    let dom = TreeBuilder::parse("<div id=c><a><img id=i></a><a><img id=j></a></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        "#c{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;width:215px}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("racine");
+    let mut sizes = std::collections::HashMap::<NodeId, (f32, f32)>::new();
+    sizes.insert(by_id(&dom, "i"), (480.0, 511.0));
+    sizes.insert(by_id(&dom, "j"), (235.0, 166.0));
+    let mut bx = build_box_tree_sized(&dom, root_el, &styles, &sizes).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    eprintln!("img i = {:?}", find(&bx, by_id(&dom, "i")).unwrap().rect);
+    eprintln!("img j = {:?}", find(&bx, by_id(&dom, "j")).unwrap().rect);
+}

@@ -738,6 +738,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   blanche verticale (SVG/icône à gabarit intrinsèque
   hostile). Test : `media_query_em_rem_resolus` (30em=480
   ✓, 64rem=1024 ✓, 100em=1600 ✗, seuil qui suit la base).
+- [x] **R-40. Ratio intrinsèque des remplacés (§10.6.2)**
+  (résidu terrain, triage `site_smoke`) — **livré** : la
+  bande blanche verticale de rust-lang.org était ses 4
+  icônes sociales SVG empilées — `img{max-width:100%}`
+  (Normalize/Tachyons) bridait la largeur à celle du
+  `<a>` flex-shrinké (~70 px) mais la hauteur restait
+  à l'intrinsèque (511 px) : chaque icône s'étirait en
+  un blob blanc ~70×500, empilées ≈ 1800 px de bande.
+  Spec §10.6.2 : un axe `auto` d'un remplacé dérive de
+  l'axe utilisé via le ratio intrinsèque. Livré dans
+  `layout_block` : `h_css` conservé sans le repli
+  intrinsèque ; `width:auto` + `height` spécifiée →
+  `w = h × iw/ih` ; `height:auto` → `h = w_utilisée ×
+  ih/iw` calculée **après** le bridage `min|max-width`
+  (le clamp entre dans la dérivation, comme la spec).
+  Vérif terrain : `shot` rust-lang.org → icônes carrées
+  proportionnées, bande disparue. Reste sur ce site :
+  superposition hero/footer (écart séparé) et taille/
+  disposition des icônes (probablement liée au flex
+  shrink des `<a>`). Tests : 4 cas `block` (max-width
+  bridant → h dérivée, height → w dérivée, deux axes
+  explicites inchangés, forme réelle `<a><img>` atomique
+  inline portrait 480×511 → ~215×229 au lieu de 215×511).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

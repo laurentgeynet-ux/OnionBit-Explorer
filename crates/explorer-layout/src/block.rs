@@ -855,13 +855,14 @@ fn layout_block_inner(
     // (spécifiée, indépendante du contenu) ; sinon la valeur
     // vaut `auto` (repli contenu). Calculée tôt : elle fait
     // office de `cb_h` pour les descendants (base de leurs
-    // propres %).
-    let h_spec = if st.get("height").is_some_and(|v| v.contains('%')) {
+    // propres %). `h_css` garde la part purement CSS pour la
+    // dérivation de ratio §10.6.2 plus bas.
+    let h_css = if st.get("height").is_some_and(|v| v.contains('%')) {
         cb_h.and_then(|h| css_px(&st, "height", h, fs, ctx))
     } else {
         css_px(&st, "height", 0.0, fs, ctx)
-    }
-    .or(bx.intrinsic.map(|i| i.1));
+    };
+    let h_spec = h_css.or(bx.intrinsic.map(|i| i.1));
 
     // `display: table` → dimensionnement dédié. La marge
     // gauche s'applique à la boîte table (§10.3 : `auto` →
@@ -904,7 +905,15 @@ fn layout_block_inner(
     // repli remplacé.
     let w_spec = css_px(&st, "width", cb_w, fs, ctx)
         .or_else(|| crate::intrinsic::intrinsic_size_px(&st, "width", bx, cb_w, fs, ctx))
-        .or(bx.intrinsic.map(|i| i.0))
+        .or(bx.intrinsic.map(|i| {
+            // §10.6.2 : `width:auto` + `height` spécifiée → la
+            // largeur dérive du ratio intrinsèque (h × iw/ih).
+            if i.1 > 0.0 {
+                h_css.map_or(i.0, |h| h * i.0 / i.1)
+            } else {
+                i.0
+            }
+        }))
         .or_else(|| {
             // §10.3.5 : flottant à `width:auto` →
             // shrink-to-fit = clamp(dispo, min-content,
@@ -959,6 +968,17 @@ fn layout_block_inner(
             w = w.max(mn);
         }
         w
+    };
+
+    // §10.6.2 : remplacé à `height:auto` — la hauteur dérive
+    // de la largeur utilisée via le ratio intrinsèque, APRES
+    // le bridage `min|max-width` (un `img{max-width:100%}`
+    // bridé se rétrécit proportionnellement au lieu de
+    // s'étirer — terrain : icônes sociales rust-lang.org
+    // rendues en bandes blanches ~70×511).
+    let h_spec = match (h_css, bx.intrinsic) {
+        (None, Some((iw, ih))) if iw > 0.0 => Some(content_w * ih / iw),
+        _ => h_spec,
     };
 
     let rect_x = x + ml_used;

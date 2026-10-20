@@ -157,6 +157,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-40 — ratio intrinsèque des remplacés (§10.6.2)**
+  (`explorer-layout`) : bug site-réel au triage
+  `site_smoke` — la bande blanche verticale de
+  rust-lang.org était ses 4 icônes sociales SVG
+  empilées : `img{max-width:100%}` (Normalize/Tachyons)
+  bridait la largeur (~70 px) mais la hauteur restait
+  à l'intrinsèque (511 px) → blobs étirés ~70×500.
+  Spec : un axe `auto` d'un remplacé dérive de l'axe
+  utilisé via le ratio. `width:auto`+`height` →
+  `w = h × iw/ih` ; `height:auto` → `h = w × ih/iw`
+  après bridage `min|max-width`. `shot` rust-lang.org
+  après fix : icônes carrées proportionnées, bande
+  disparue.
 - **R-39 — `em`/`rem` dans les media queries**
   (`explorer-css`) : bug site-réel au triage `site_smoke`
   — rust-lang.org se rendait comme une page mobile
