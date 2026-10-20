@@ -259,11 +259,21 @@ impl Session {
         }
         if let Some(field) = self.field_at(tab, x, y) {
             // `blur` sur l'ancien focus puis `focus` sur le
-            // champ (étape 52).
+            // champ (étape 52) — repeint pour le caret du
+            // champ focalisé, overlay de frame (M-H1 #1).
             self.set_focus(tab, Some(field));
+            self.repaint(tab)?;
+            self.emit_invalidated(tab);
             return Ok(InputOutcome::Focused);
         }
+        // Perte de focus (clic hors champ) : le caret doit
+        // disparaître — repeint si un champ était focalisé.
+        let had_focus = self.tabs.get(&tab).is_some_and(|e| e.focused.is_some());
         self.set_focus(tab, None);
+        if had_focus {
+            self.repaint(tab)?;
+            self.emit_invalidated(tab);
+        }
         // `<select>` : ouvre/ferme le popup options moteur
         // (étape 54 — overlay de la display list, peint
         // chrome-side, remplace le cycle MVP d'ADR-0014).
@@ -599,6 +609,9 @@ impl Session {
         match key {
             "Enter" | "Escape" => {
                 self.set_focus(tab, None);
+                // Le caret disparaît avec le focus (M-H1 #1).
+                let _ = self.repaint(tab);
+                self.emit_invalidated(tab);
                 return Ok(InputOutcome::Unfocused);
             }
             _ => {}

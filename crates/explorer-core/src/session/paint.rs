@@ -263,7 +263,7 @@ impl Session {
             return Err(CoreError::UnknownTab(tab));
         };
         let mut p = entry.take_paint();
-        let r = apply::repaint_payload(&mut p, &ctx);
+        let r = apply::repaint_payload(&mut p, &ctx, None);
         entry.put_paint(p);
         r
     }

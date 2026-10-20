@@ -136,6 +136,11 @@ pub(crate) struct PaintPayload {
     pub popup: Option<SelectPopup>,
     /// Recherche en cours (rectangles de surlignage).
     pub find: Option<FindState>,
+    /// Snapshot du champ focalisé (chemin `(tag, index)`) —
+    /// copié à la sortie pour le caret ; jamais ré-écrit sur
+    /// `Tab` (le focus y reste autoritaire : il peut changer
+    /// pendant la fenêtre d'apply).
+    pub focused: Option<Vec<(String, u32)>>,
     /// Bitmaps indexés par `NodeId`.
     pub images: PaintImages,
     /// Feuilles `<link>` concaténées (cascade).
@@ -217,6 +222,7 @@ impl Tab {
             png: self.png.take(),
             popup: self.popup.take(),
             find: self.find.take(),
+            focused: self.focused.clone(),
             images: std::mem::take(&mut self.images),
             linked_css: std::mem::take(&mut self.linked_css),
             prev_styles: std::mem::take(&mut self.prev_styles),
@@ -366,7 +372,7 @@ fn try_incr_payload(
     p.doc_h = doc_h;
     p.images.svgs = svgs;
     p.images.canvases = canvas_table_from_ops(canvas_ops, new_dom);
-    repaint_payload(p, ctx).is_ok()
+    repaint_payload(p, ctx, None).is_ok()
 }
 
 /// Cascade + transitions/animations sur payload — la passe
@@ -436,14 +442,21 @@ pub(crate) fn relayout_dom_payload(
     // `<canvas>` 2D (JS-C28) : op-lists cumulées du miroir,
     // re-résolues par chemin d'élément dans `dom`.
     p.images.canvases = canvas_table_from_ops(canvas_ops, dom);
-    repaint_payload(p, ctx)
+    repaint_payload(p, ctx, Some(dom))
 }
 
 /// `repaint` sur payload — display list + raster + diff
 /// dirty. Les overlays (find, popup `<select>`) suivent la
 /// payload — le find est effacé au re-parse (`NodeId`s
 /// morts) mais peut revivre via `find_step` sous verrou.
-pub(crate) fn repaint_payload(p: &mut PaintPayload, ctx: &ApplyCtx) -> Result<(), CoreError> {
+/// `dom_hint` : le `dom` du job quand `p.dom` est sorti pour
+/// la durée du pipeline (`relayout` le prend pour disjoindre
+/// les emprunts) — le caret résout le focus dessus.
+pub(crate) fn repaint_payload(
+    p: &mut PaintPayload,
+    ctx: &ApplyCtx,
+    dom_hint: Option<&Dom>,
+) -> Result<(), CoreError> {
     let Some(bx) = p.tree.as_ref() else {
         return Err(CoreError::EmptyDocument);
     };
@@ -466,6 +479,12 @@ pub(crate) fn repaint_payload(p: &mut PaintPayload, ctx: &ApplyCtx) -> Result<()
     }
     if let Some(pop) = &p.popup {
         append_select_popup(&mut list, pop, vw, p.doc_h, &ctx.fonts);
+    }
+    // Caret du champ focalisé (M-H1 #1) — dernier overlay :
+    // il doit rester visible au-dessus du popup `<select>`.
+    let cdom = dom_hint.or(p.dom.as_ref());
+    if let Some((rect, color)) = caret::caret_rect(p, ctx, cdom) {
+        list.items.push(DisplayItem::FillRect { rect, color });
     }
     let frame_cap = MAX_FRAME_DIM / ctx.scale.max(f32::EPSILON);
     if list.height > frame_cap {

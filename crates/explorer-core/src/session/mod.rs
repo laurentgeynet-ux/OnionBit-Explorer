@@ -43,6 +43,7 @@ mod anim;
 mod anim_items;
 #[allow(clippy::wildcard_imports)]
 mod apply;
+mod caret;
 #[allow(clippy::wildcard_imports)]
 mod decode;
 #[allow(clippy::wildcard_imports)]

@@ -325,6 +325,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   unfocused`, 3 assertions existantes rebasées
   (`Ignored`→`Unfocused`), contrôleur `unfocused`→flag
   et `selectTab`→reset.
+- **Étape 87 — caret du champ focalisé** (`explorer-core`) :
+  constat M-H1 #1 du vol humain — un `input`/`textarea`
+  focalisé n'affichait **rien** avant la première frappe
+  (le PNG ne portait aucune barre d'insertion). Le caret
+  est un overlay de la display list (même mécanisme que
+  find/popup `<select>`), en coords **frame** (`scroll_y`
+  retiré) : barre 1 px couleur du texte du champ, à la fin
+  du dernier fragment posé (`rect.x + width + trail_w`),
+  ou à l'origine du contenu quand la valeur est vide — un
+  `placeholder` affiché n'avance pas le point d'insertion.
+  `PaintPayload` transporte un snapshot `focused`
+  (copié à la sortie, jamais ré-écrit — le focus reste
+  autoritaire sur `Tab`) ; `repaint_payload` reçoit un
+  `dom_hint` pour résoudre le chemin quand `p.dom` est
+  sorti le temps du relayout. Effets de bord corrigés au
+  passage : le clic-focus et la perte de focus
+  (`Escape`/clic hors champ) repeignent désormais +
+  `emit_invalidated` — avant, le caret n'aurait pu
+  apparaître qu'à la frappe suivante. MVP sans
+  clignotement ni point d'insertion interne (même champ
+  que `edit_field` : insertion en fin seule). Test :
+  `caret_paints_moves_and_clears_with_focus` (barre
+  ≥16 px contigus — discriminant fût-de-glyphe) +
+  `key_and_focus_events_dispatch_in_order` rebasé
+  (défocalisé par `Escape` avant la comparaison PNG).
+  Divergence connue documentée dans le module : les
+  overlays find/popup restent en coords **document**
+  (décalage sous scroll pré-existant).
 
 ## [0.2.0] - 2026-10-20
 

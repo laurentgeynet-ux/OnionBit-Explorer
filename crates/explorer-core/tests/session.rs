@@ -991,6 +991,87 @@ async fn click_input_focuses_then_keys_edit() {
     assert_eq!(out, InputOutcome::Unfocused);
 }
 
+/// M-H1 #1 — caret du champ focalisé : le clic dans un
+/// `input` peint une barre verticale pleine (≈1 px ×
+/// interligne) à l'origine du contenu ; une frappe la décale
+/// à la fin du texte tapé ; `Escape` la retire avec le
+/// focus. La barre se distingue des glyphes : ≥10 px sombres
+/// **contigus** sur une même colonne (la bordure UA
+/// `#767676`=118 reste au-dessus du seuil).
+#[tokio::test]
+async fn caret_paints_moves_and_clears_with_focus() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FORM);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    // Première colonne portant ≥16 px sombres contigus dans
+    // la bande haute de la page (x <200) : discriminant du
+    // caret = hauteur d'interligne (~18 px) — un fût de
+    // glyphe à fs16 plafonne ~13 px, la bordure UA
+    // `#767676`=118 reste au-dessus du seuil d'encre.
+    let bar_col = |s: &Session, id: u64| -> Option<usize> {
+        let (fw, fh, px) = s.frame_pixels(id).unwrap();
+        let (fw, fh) = (fw as usize, fh as usize);
+        for col in 0..fw.min(200) {
+            let mut run = 0usize;
+            for row in 0..fh.min(80) {
+                let p = &px[(row * fw + col) * 4..][..4];
+                if p[0] < 100 && p[1] < 100 && p[2] < 100 && p[3] > 200 {
+                    run += 1;
+                    if run >= 16 {
+                        return Some(col);
+                    }
+                } else {
+                    run = 0;
+                }
+            }
+        }
+        None
+    };
+
+    // Avant le focus : aucune barre pleine.
+    assert!(
+        bar_col(&s, id).is_none(),
+        "aucun caret avant que le champ soit focalisé"
+    );
+
+    // Clic dans l'input → focus → caret à l'origine du
+    // contenu (champ vide).
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Focused);
+    let col0 = bar_col(&s, id).expect("caret peint au focus");
+    assert!(col0 < 30, "caret au début du contenu, col={col0}");
+
+    // Frappe → le caret suit la fin du texte (colonne > au
+    // départ — les glyphes tapés ne sont pas des barres
+    // pleines, `bar_col` retrouve bien le caret).
+    for k in ["a", "b", "c", "d"] {
+        s.handle_input(id, InputEvent::Key { key: k.into() })
+            .await
+            .unwrap();
+    }
+    let col1 = bar_col(&s, id).expect("caret après frappe");
+    assert!(col1 > col0 + 4, "caret avancé : {col0} → {col1}");
+
+    // `Escape` → focus perdu → plus de barre.
+    s.handle_input(
+        id,
+        InputEvent::Key {
+            key: "Escape".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        bar_col(&s, id).is_none(),
+        "le caret disparaît avec le focus"
+    );
+}
+
 /// Étape 86 — `Enter`/`Escape` hors `<form>` perdent le
 /// focus : l'outcome `Unfocused` signale la perte au client
 /// (avant : `Ignored` indistinct du `keydown` consommé par
@@ -2800,6 +2881,19 @@ async fn key_and_focus_events_dispatch_in_order() {
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Focused);
+    // M-H1 #1 : `a` peint le caret de `c` focalisé — le
+    // défocaliser (Escape) le retire pour rester
+    // pixel-comparable à la page statique sans focus.
+    let out = s
+        .handle_input(
+            a,
+            InputEvent::Key {
+                key: "Escape".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Unfocused);
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
 

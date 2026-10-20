@@ -1265,6 +1265,38 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   rebasées + contrôleur (resync +
   reset). Gate entier vert.
 
+- [x] **Étape 87. Caret du champ
+  focalisé** (core) — constat M-H1 #1 :
+  un champ focalisé n'affichait rien
+  avant la 1re frappe. Overlay de la
+  display list façon find/popup, coords
+  **frame** (`scroll_y` retiré) : barre
+  1 px à l'encre du champ, fin du
+  dernier fragment posé (`x+width+
+  trail_w`) ou origine du contenu si
+  valeur vide (le `placeholder` peint
+  n'avance pas le point d'insertion).
+  `PaintPayload.focused` = snapshot
+  copié à la sortie (jamais ré-écrit
+  sur `Tab`) ; `repaint_payload`
+  reçoit `dom_hint` (le `dom` sorti
+  pendant le relayout) — sinon le
+  caret tombait à `dom: None` après
+  chaque frappe. Corrigé au passage :
+  focus par clic / perte par clic
+  hors champ ou `Escape` repeignent +
+  invalident — avant, rien ne
+  déclenchait de peinture au focus.
+  MVP : pas de clignotement, pas de
+  point interne (`edit_field` n'insère
+  qu'en fin). Test :
+  `caret_paints_moves_and_clears_
+  with_focus` + test d'événements
+  rebasé (`Escape` avant comparaison
+  PNG). Écart documenté : find/popup
+  restent en coords document sous
+  scroll (latence pré-existante).
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY
@@ -1275,12 +1307,11 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   écart ci-dessous est une mesure
   terrain — promotion en Étape/JS-C au
   triage :
-  - **caret absent** : le champ
-    focalisé n'affiche aucun `|` — il
-    paraît vide avant la 1re frappe.
-    Le PNG ne porte aucun caret —
-    arbitrage : peint par le moteur
-    (display item) ou overlay app.
+  - ~~**caret absent**~~ → **résolu,
+    Étape 87** : overlay display list
+    (coords frame), barre 1 px en fin
+    de texte ou à l'origine du contenu
+    si champ vide.
   - **snackbar `ApiException`
     persistant** : la reconnexion auto
     fonctionne mais l'erreur reste
