@@ -224,7 +224,13 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   concurrent, tampons réponses net + pushes d'attributs
   rejoués à la réinsertion. Boucle daemon migrée ;
   dégradation documentée : `dispatch_event` en plein run =
-  handler inerte (input traité côté hôte).
+  handler inerte (input traité côté hôte). **Terrain mission
+  14** : le run JS est bien libéré — l'API répond pendant
+  ~5 min de travail post-commit. **Mais** la phase commit
+  `sync_dom` (sérialisation miroir → re-parse → cascade →
+  layout → raster) reste intégralement sous verrou :
+  ~9-10 min de gel sur clic-mutation à 3 000 nœuds — le
+  mur s'est déplacé, pas tombé → étape 55h.
 
 - [x] **Étape 54. Formulaires v2 — côté produit** (ex-55, moitié
   session) : `multipart/form-data`, états `:valid`/`:invalid`
@@ -302,7 +308,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   permanent au-delà de 32 — mais 2 pleins cadres
   sporadiques (~clic 16/32, périodicité à creuser : tick
   timer ou GC déclenchant un full relayout ?).
-- [x] **Étape 55e. `@keyframes` cadencés en session**
+- [ ] **Étape 55e. `@keyframes` cadencés en session**
   (adoption R-10, règle AGENTS §10.5b — confirmé non-câblé
   par `anim.html` : frames identiques à 400 ms) : **livré** —
   `ActiveAnimation` par `(ordinal, index)` + `start` conservé
@@ -312,6 +318,11 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `tick_animations` (pull `/frame`) + `pump_timers_all`
   (battement hôte) — plus figée entre deux pulls ; repli
   style de base en fin de lecture via drapeau `applied`.
+  **Terrain mission 14 — rouvert** : `anim.html` = 6 pulls
+  `/frame` byte-identiques sur ~4 s — la cadence ne produit
+  aucun raster en session. Piste : `pump_timers_all` a été
+  remplacé par `pump_timers_shared` (53f) — le battement hôte
+  `tick_animations` a-t-il survécu à la migration ?
 - [x] **Étape 55f. `relayout_subtree` adopté en session**
   (adoption R-12, §10.5b — mesuré : mutation DOM = re-parse
   + relayout global) : `apply_dom_sync`/`repaint` doivent
@@ -516,6 +527,50 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `crates/dillo-js` → `explorer-jscore` (ADR-0020) — commit
   `chore:` dédié, à un moment où aucune piste ne touche le crate
   ; le nom de crate est surface publique de release.
+
+- [ ] **Étape 55h. Apply de resynchro borné — verrou tenu
+  en continu** (terrain missions 14+15 — la coalescence
+  `sync_floor` borne la cadence, jamais la durée unitaire) :
+  `storm.html` (`setInterval` 10 ms, ~600 nœuds) → ~85 s
+  d'API morte sur un seul apply ; `sync_profile` en vrai :
+  `pump.apply_dom_sync` = **157,1 s sous verrou** dont
+  `incr.remap_relayout` 150,3 s et `incr.repaint` 6,7 s
+  (`pump.offlock` 472 µs, `commit_lock` 810 µs). Idem
+  mission 14 : clic-mutation sur 3 000 nœuds (synchro
+  événement, exemptée du floor par design) = ~9-10 min de
+  gel continu. Le mur n'est plus le run JS (53f l'a sorti)
+  ni la cadence (55g-suite) : c'est **l'atomicité de
+  l'apply** — sérialisation miroir → re-parse → cascade →
+  remap/relayout → repaint, tout sous `&mut Session`.
+  Pistes : checkpoints entre phases rendant le verrou
+  (patron `NavJob`/`SubJob`), budget + requeue, ou phases
+  extractibles en `spawn_blocking`. Le coût **unitaire**
+  `remap_relayout` (150 s terrain vs ~14 s au profil test —
+  écart ×10 : saleté accumulée ? remap mémoïsé ? cascade
+  globale ?) fait l'objet d'une demande PIPE dans
+  `interface-equipes.md`.
+- [ ] **Étape 61. FFI : profil persistant + surface
+  d'état** (terrain mission 15 — ABI exercée via ctypes,
+  cycle complet OK mais deux gaps produit) : (1)
+  `EXPLORER_PROFILE` exporté par l'app avant chargement FFI
+  (étape 57) **jamais lu** par `explorer_create` → mode FFI
+  = zéro persistance (le `ProfileStore` vit dans
+  `explorer-daemon`) — lire l'env dans `explorer_create`
+  ou ajouter `explorer_create_with_profile(path)` (ABI
+  additive) ; (2) exports d'état manquants : `tab_title`,
+  `tab_scroll` — le titre d'onglet n'a aucun canal FFI (la
+  bibliothèque store est déjà documentée dégradée). Reste
+  de l'ABI vérifié sain : nav réelle, `frame_copy`/régions
+  clipées exactes, erreurs typées (`last_error`), UTF-8
+  roundtrip, `dirty_rects`/`tick`/`close_tab`/`destroy`.
+- [ ] **Étape 62. Daemon : arguments CLI ignorés
+  silencieusement** (terrain mission 15) : `--port`/
+  `--profile` acceptés sans effet — toute la configuration
+  passe par les variables `EXPLORER_*` (`EXPLORER_PORT`,
+  `EXPLORER_PROFILE`, `EXPLORER_FONT_DIR`…). Les missions
+  antérieures écrivaient dans le profil par défaut sans le
+  savoir. Rejeter les args inconnus + `--help`, ou les
+  honorer ; à minima documenter l'absence de CLI.
 
 ## Piste JS (JS-C26+) — spécialiste `dillo-js`
 
