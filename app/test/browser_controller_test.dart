@@ -65,8 +65,19 @@ class FakeRepo implements BrowserRepository {
   @override
   Future<void> closeTab(String tabId) async => actions.add('close:$tabId');
 
+  /// Gate optionnelle sur `fetchFrame` (étape 89) : tant que
+  /// `frameGate` n'est pas complété, le pull attend — permet
+  /// de mesurer la coalescence des rafales `frame_invalidated`.
+  Completer<void>? frameGate;
+  int frameFetches = 0;
+
   @override
-  Future<List<int>?> fetchFrame(String tabId) async => [1, 2, 3];
+  Future<List<int>?> fetchFrame(String tabId) async {
+    frameFetches++;
+    final gate = frameGate;
+    if (gate != null) await gate.future;
+    return [1, 2, 3];
+  }
 
   /// Résultat scripté pour les événements `key` (étape 86 —
   /// « unfocused » doit resynchroniser `fieldFocused`).
@@ -518,6 +529,31 @@ void main() {
     // Une entrée sans schéma est toujours préfixée.
     await c.read(browserProvider.notifier).navigate('example.com');
     expect(repo.navigations, ['1:about:blank', '1:http://example.com']);
+  });
+
+  test('rafale frame_invalidated → pulls coalescés (étape 89)', () async {
+    final events = FakeEvents();
+    final repo = FakeRepo()..frameGate = Completer<void>();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+
+    // 1re invalidation → pull en vol (bloqué par la gate) ;
+    // les suivantes se replient en un seul « à refaire ».
+    events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+    await Future<void>.delayed(Duration.zero);
+    events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+    events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+    await Future<void>.delayed(Duration.zero);
+    expect(repo.frameFetches, 1);
+
+    // Libération : un seul second pull rejoue la dernière
+    // frame — « dernière gagne », pas une file par event.
+    repo.frameGate!.complete();
+    for (var i = 0; i < 5; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(repo.frameFetches, 2);
   });
 
   test('frame_invalidated porte scroll_y par onglet (étape 71d)', () async {

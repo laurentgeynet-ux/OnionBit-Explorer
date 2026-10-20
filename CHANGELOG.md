@@ -194,6 +194,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   stack overflow ; **absence** du fichier = kill de
   l'arbre entier (teardown machine), signature en
   soi. Validé en direct : kill → `EXIT:-1` horodaté.
+- **Étape 89 — flux de frames app borné** (`app`) :
+  constat M-H1 #5 — `explorer_app` gonflait ~80 Mio/min
+  en usage réel (3,7→4,5 Go/10 min). Deux fuites
+  composées : 1. `_pullFrame` tiré à **chaque**
+  `frame_invalidated` sans coalescence — les rafales
+  (hover, scroll, caret) empilaient fetch+decode PNG
+  sans borne, onglets d'arrière-plan inclus ;
+  2. `Image.memory(Uint8List.fromList(bytes))` créait
+  une entrée `imageCache` par frame (clé = identité
+  des bytes) + une copie de mémoire externe par
+  rebuild + `gaplessPlayback` retenait l'ancienne.
+  Livré : coalescence « dernière gagne » (au plus
+  1 pull en vol + 1 en attente par onglet) et le
+  chemin REST décode **une fois** en `ui.Image`
+  (`instantiateImageCodec`) posée dans `rawFrames` —
+  même discipline que le canal FFI : l'ancienne image
+  est `dispose()`d explicitement, `RawImage` la peint.
+  `frames` (bytes) reste écrit — marqueur de présence
+  de `selectTab`. Test : rafale de 3 invalidations
+  pendant un pull bloqué → exactement 2 fetches.
 
 ### Added
 

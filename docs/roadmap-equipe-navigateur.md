@@ -1333,6 +1333,22 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   d'erreur). Omnibox : `about:`
   non préfixé.
 
+- [x] **Étape 89. Flux de frames
+  app borné** (app) — constat M-H1
+  #5 (`explorer_app` +80 Mio/min) :
+  pulls coalescés « dernière
+  gagne » (1 en vol + 1 en attente
+  par onglet — avant : un fetch+
+  decode par `frame_invalidated`,
+  rafales non bornées) + chemin
+  REST décodé une fois en
+  `ui.Image`/`rawFrames` (avant :
+  `Image.memory` par frame = clé
+  de cache par identité + copie
+  externe par rebuild). Test :
+  gate FakeRepo, 3 invalidations
+  en vol → 2 fetches.
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY
@@ -1369,6 +1385,11 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     non borné. Joint la veille mémoire
     ci-dessus : le protocole doit
     mesurer les DEUX processus.
+    **Borné, Étape 89** : pulls
+    coalescés + `ui.Image` décodée
+    une fois par frame — mesure
+    terrain `-AppPid` pour confirmer
+    la courbe aplatie.
   - **daemon injoignable sous charge
     machine, retour seul** : pas un
     crash (reconnexion auto OK) —

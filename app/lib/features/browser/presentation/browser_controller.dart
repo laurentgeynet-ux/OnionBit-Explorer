@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
@@ -863,10 +864,39 @@ class BrowserController extends Notifier<BrowserState> {
     if (prev != null) selectTab(prev);
   }
 
-  /// Tire la frame de l'onglet — `ui.Image` brute en mode
-  /// FFI (ADR-0018), PNG en mode REST (ADR-0004 : le push ne
-  /// signale que, le contenu voyage en pull).
+  /// Pulls en vol / demandés par onglet (étape 89) : un
+  /// `frame_invalidated` pendant un pull marque juste
+  /// « à refaire » — au plus 1 fetch en vol + 1 en attente,
+  /// les rafales (scroll, hover, caret) se replient en
+  /// « dernière frame gagne ».
+  final Set<String> _pullInflight = {};
+  final Set<String> _pullPending = {};
+
+  /// Tire la frame de l'onglet — `ui.Image` brute dans les
+  /// deux modes (étape 89 : le REST décode une fois au lieu
+  /// de recréer une `MemoryImage` par frame — la clé de cache
+  /// par identité des bytes y accumulait des images décodées,
+  /// et `Uint8List.fromList` allouait de la mémoire externe
+  /// à chaque rebuild). Les PNG octets restent dans `frames`
+  /// (marqueur de présence pour `selectTab`).
   Future<void> _pullFrame(String tabId) async {
+    if (_pullInflight.contains(tabId)) {
+      _pullPending.add(tabId);
+      return;
+    }
+    _pullInflight.add(tabId);
+    try {
+      do {
+        _pullPending.remove(tabId);
+        await _pullFrameOnce(tabId);
+        if (!ref.mounted) return;
+      } while (_pullPending.contains(tabId));
+    } finally {
+      _pullInflight.remove(tabId);
+    }
+  }
+
+  Future<void> _pullFrameOnce(String tabId) async {
     final engine = _repo;
     if (engine is FfiEngine) {
       try {
@@ -883,9 +913,25 @@ class BrowserController extends Notifier<BrowserState> {
     try {
       final bytes = await _repo.fetchFrame(tabId);
       if (bytes == null || !ref.mounted) return;
-      state = state.copyWith(frames: {...state.frames, tabId: bytes});
+      final codec = await ui.instantiateImageCodec(
+        Uint8List.fromList(bytes),
+      );
+      final frame = await codec.getNextFrame();
+      codec.dispose();
+      final img = frame.image;
+      if (!ref.mounted) {
+        img.dispose();
+        return;
+      }
+      final old = state.rawFrames[tabId];
+      state = state.copyWith(
+        frames: {...state.frames, tabId: bytes},
+        rawFrames: {...state.rawFrames, tabId: img},
+      );
+      old?.dispose();
     } on Object {
-      // Daemon coupé → la prochaine invalidation retentera.
+      // Daemon coupé ou PNG indécodable → le prochain tick
+      // retentera.
     }
   }
 
