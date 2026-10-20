@@ -1081,7 +1081,7 @@ fn assign_atomic_rects(
 }
 
 /// Union de deux rectangles.
-fn union_rect(first: Rect, second: Rect) -> Rect {
+pub(crate) fn union_rect(first: Rect, second: Rect) -> Rect {
     let left = first.x.min(second.x);
     let top = first.y.min(second.y);
     let right = (first.x + first.width).max(second.x + second.width);

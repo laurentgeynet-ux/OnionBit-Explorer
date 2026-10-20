@@ -16,4 +16,4 @@
 
 pub mod font_fixture;
 
-pub use font_fixture::fixture_ttf;
+pub use font_fixture::{fixture_ttf, fixture_ttf_overhang};

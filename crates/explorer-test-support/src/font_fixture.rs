@@ -24,10 +24,29 @@ const NUM_GLYPHS: u16 = 256;
 /// Construit le TTF en mémoire (checksums calculés).
 #[must_use]
 pub fn fixture_ttf() -> Vec<u8> {
+    build_ttf((50, -50, 450, 700))
+}
+
+/// Variante à **overhang mesuré** (R-37) : chaque glyphe
+/// dessine x∈[−100,950] / y∈[−50,1050] en unités fonte —
+/// l'encre déborde la boîte de métriques (avance 500,
+/// ascender 800) de **0.10em à gauche, 0.45em à droite et
+/// 0.25em au-dessus** (à 20 px : 2 / 9 / 5 px > l'inflation
+/// dirty de 2 px). Sert à valider les bounds du raster
+/// borné : sans bounds d'encre réelles, le débord laisse
+/// des reliques de pixels au bord des fenêtres.
+#[must_use]
+pub fn fixture_ttf_overhang() -> Vec<u8> {
+    build_ttf((-100, -50, 950, 1050))
+}
+
+/// `bbox` = (xMin, yMin, xMax, yMax) en unités fonte,
+/// appliquée à chaque glyphe et à l'en-tête `head`.
+fn build_ttf(bbox: (i16, i16, i16, i16)) -> Vec<u8> {
     let tables: Vec<(&'static str, Vec<u8>)> = vec![
         ("cmap", t_cmap()),
-        ("glyf", t_glyf()),
-        ("head", t_head()),
+        ("glyf", t_glyf(bbox)),
+        ("head", t_head(bbox)),
         ("hhea", t_hhea()),
         ("hmtx", t_hmtx()),
         ("loca", t_loca()),
@@ -114,7 +133,7 @@ fn push_i64(v: &mut Vec<u8>, x: i64) {
     v.extend_from_slice(&x.to_be_bytes());
 }
 
-fn t_head() -> Vec<u8> {
+fn t_head(bbox: (i16, i16, i16, i16)) -> Vec<u8> {
     let mut v = Vec::new();
     push_u32(&mut v, 0x0001_0000); // version
     push_u32(&mut v, 0x0001_0000); // fontRevision
@@ -124,10 +143,10 @@ fn t_head() -> Vec<u8> {
     push_u16(&mut v, UPEM);
     push_i64(&mut v, 0); // created
     push_i64(&mut v, 0); // modified
-    push_i16(&mut v, 0); // xMin
-    push_i16(&mut v, 0); // yMin
-    push_i16(&mut v, 500); // xMax
-    push_i16(&mut v, 800); // yMax
+    push_i16(&mut v, bbox.0); // xMin
+    push_i16(&mut v, bbox.1); // yMin
+    push_i16(&mut v, bbox.2); // xMax
+    push_i16(&mut v, bbox.3); // yMax
     push_u16(&mut v, 0); // macStyle
     push_u16(&mut v, 8); // lowestRecPPEM
     push_i16(&mut v, 2); // fontDirectionHint
@@ -178,23 +197,26 @@ fn t_hmtx() -> Vec<u8> {
 
 /// Table `glyf` : glyphe 0 (`.notdef`) vide ; glyphes 1-255
 /// = un rectangle simple (contour 4 points) — contours réels
-/// pour la rasterisation de l'étape 23.
-fn t_glyf() -> Vec<u8> {
+/// pour la rasterisation de l'étape 23. `bbox` = (xMin,
+/// yMin, xMax, yMax) — la variante overhang l'excède hors
+/// de l'avance et de l'ascender.
+fn t_glyf(bbox: (i16, i16, i16, i16)) -> Vec<u8> {
+    let (x_min, y_min, x_max, y_max) = bbox;
     let mut v = Vec::new();
     for _ in 1..NUM_GLYPHS {
         push_i16(&mut v, 1); // numberOfContours
-        push_i16(&mut v, 50); // xMin
-        push_i16(&mut v, -50); // yMin
-        push_i16(&mut v, 450); // xMax
-        push_i16(&mut v, 700); // yMax
+        push_i16(&mut v, x_min);
+        push_i16(&mut v, y_min);
+        push_i16(&mut v, x_max);
+        push_i16(&mut v, y_max);
         push_u16(&mut v, 3); // endPtsOfContours[0]
         push_u16(&mut v, 0); // instructionLength
         v.extend_from_slice(&[0x01; 4]); // flags : on-curve, deltas i16
                                          // Coords = DEUX flux séparés : tous les dx, puis les dy.
-        for dx in [50i16, 400, 0, -400] {
+        for dx in [x_min, x_max - x_min, 0, x_min - x_max] {
             push_i16(&mut v, dx);
         }
-        for dy in [-50i16, 0, 750, 0] {
+        for dy in [y_min, 0, y_max - y_min, 0] {
             push_i16(&mut v, dy);
         }
     }

@@ -100,6 +100,16 @@ pub struct ShapedRun {
     pub advance: f32,
     /// Métriques de la fonte à la taille utilisée.
     pub metrics: FontMetrics,
+    /// Bbox d'**encre réelle** du run (px CSS, origine =
+    /// plume du premier glyphe, baseline = 0 : les `y`
+    /// négatifs montent au-dessus de la ligne de base) —
+    /// union des `glyph_bounding_box` décalés par position
+    /// de plume et offsets. L'encre d'un glyphe peut sortir
+    /// de la boîte de métriques (italique, accents,
+    /// fontes plein-em type Ahem) : `None` si aucun glyphe
+    /// n'a de contour (run d'espaces). Sert aux bounds de
+    /// peinture du raster — R-37.
+    pub ink: Option<crate::Rect>,
 }
 
 /// Cache de la pipeline fonte, borné à une passe de layout
@@ -235,7 +245,12 @@ pub fn request_of(style: &explorer_css::ComputedStyle, ctx: &crate::BlockCtx<'_>
 /// suivante ou un carré `.notdef`).
 #[must_use]
 pub fn metrics(font_data: &[u8], size_px: f32) -> Option<FontMetrics> {
-    let face = ttf_parser::Face::parse(font_data, 0).ok()?;
+    metrics_of(&ttf_parser::Face::parse(font_data, 0).ok()?, size_px)
+}
+
+/// [`metrics`] sur une face déjà parsée — évite un second
+/// parse quand l'appelant la possède (`shape`).
+fn metrics_of(face: &ttf_parser::Face<'_>, size_px: f32) -> Option<FontMetrics> {
     let upem = f32::from(face.units_per_em());
     if upem <= 0.0 {
         return None;
@@ -257,7 +272,8 @@ pub fn metrics(font_data: &[u8], size_px: f32) -> Option<FontMetrics> {
 /// côté appelant, jamais panic sur fonte hostile.
 #[must_use]
 pub fn shape(font_data: &[u8], text: &str, size_px: f32, rtl: bool) -> Option<ShapedRun> {
-    let met = metrics(font_data, size_px)?;
+    let tface = ttf_parser::Face::parse(font_data, 0).ok()?;
+    let met = metrics_of(&tface, size_px)?;
     let face = rustybuzz::Face::from_slice(font_data, 0)?;
     // rustybuzz expose `units_per_em` en `i32` — clamp avant
     // conversion (fonte hostile → 0/négatif possible).
@@ -291,10 +307,33 @@ pub fn shape(font_data: &[u8], text: &str, size_px: f32, rtl: bool) -> Option<Sh
         })
         .collect();
     let advance = glyphs.iter().map(|g| g.advance).sum();
+    // Bbox d'encre réelle : union des bounding boxes de
+    // contours décalées par position de plume (même
+    // cumul `pen += advance` que le raster) et offsets —
+    // y fonte monte → y CSS = −offset_y − y·scale. Un
+    // glyphe peut sortir de la boîte de métriques.
+    let mut pen = 0.0_f32;
+    let mut ink: Option<crate::Rect> = None;
+    for g in &glyphs {
+        if let Some(b) = tface.glyph_bounding_box(ttf_parser::GlyphId(g.id)) {
+            let r = crate::Rect {
+                x: pen + g.offset_x + f32::from(b.x_min) * scale,
+                y: -g.offset_y - f32::from(b.y_max) * scale,
+                width: f32::from(b.x_max - b.x_min) * scale,
+                height: f32::from(b.y_max - b.y_min) * scale,
+            };
+            ink = Some(match ink {
+                Some(i) => crate::inline::union_rect(i, r),
+                None => r,
+            });
+        }
+        pen += g.advance;
+    }
     Some(ShapedRun {
         glyphs,
         advance,
         metrics: met,
+        ink,
     })
 }
 

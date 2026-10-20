@@ -27,7 +27,16 @@ impl FontSource for Fixture {
 }
 
 fn ctx() -> BlockCtx<'static> {
-    let data = explorer_test_support::fixture_ttf();
+    ctx_with(explorer_test_support::fixture_ttf())
+}
+
+/// Contexte avec la fonte à **overhang mesuré** (R-37) —
+/// encre débordant la boîte de métriques.
+fn ctx_overhang() -> BlockCtx<'static> {
+    ctx_with(explorer_test_support::fixture_ttf_overhang())
+}
+
+fn ctx_with(data: Vec<u8>) -> BlockCtx<'static> {
     let src: &'static Fixture = Box::leak(Box::new(Fixture(data)));
     BlockCtx {
         fonts: Some(src),
@@ -37,6 +46,11 @@ fn ctx() -> BlockCtx<'static> {
 
 /// Display list d'un document posé.
 fn list_of(html: &str, css: &str) -> DisplayList {
+    list_of_ctx(html, css, &ctx())
+}
+
+/// Display list posée avec un contexte donné.
+fn list_of_ctx(html: &str, css: &str, bctx: &BlockCtx<'static>) -> DisplayList {
     let dom = TreeBuilder::parse(html);
     let mut eng = StyleEngine::new();
     // R-32 : marge UA `body { margin: 8px }` neutralisée —
@@ -51,7 +65,7 @@ fn list_of(html: &str, css: &str) -> DisplayList {
         .find(|&c| dom.element(c).is_ok())
         .expect("élément racine");
     let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
-    layout_tree(&mut bx, VIEW, &ctx());
+    layout_tree(&mut bx, VIEW, bctx);
     let mut list = build_display_list(&bx, VIEW, DOC_H, 0.0);
     list.width = VIEW;
     list
@@ -62,16 +76,26 @@ fn full(list: &DisplayList) -> Frame {
     rasterize(list, ctx().fonts.expect("fonte"), 1.0).expect("frame")
 }
 
+/// Frame pleine avec un contexte donné.
+fn full_ctx(list: &DisplayList, bctx: &BlockCtx<'static>) -> Frame {
+    rasterize(list, bctx.fonts.expect("fonte"), 1.0).expect("frame")
+}
+
 /// La garde d'équivalence : rasterise `next` en complet,
 /// puis via `rasterize_dirty` par-dessus la frame de `prev`
 /// — les deux frames doivent être **identiques au pixel**.
 fn assert_regional_eq_full(prev: &DisplayList, next: &DisplayList) {
-    let f_prev = full(prev);
-    let f_next_full = full(next);
+    assert_regional_eq_ctx(prev, next, &ctx());
+}
+
+/// Garde d'équivalence avec un contexte donné.
+fn assert_regional_eq_ctx(prev: &DisplayList, next: &DisplayList, bctx: &BlockCtx<'static>) {
+    let f_prev = full_ctx(prev, bctx);
+    let f_next_full = full_ctx(next, bctx);
     let damage = next.changed_rects(prev);
     assert!(!damage.is_empty(), "le scénario doit produire du dirty");
     let f_next_dirty =
-        rasterize_dirty(next, ctx().fonts.expect("fonte"), 1.0, f_prev, &damage).expect("régional");
+        rasterize_dirty(next, bctx.fonts.expect("fonte"), 1.0, f_prev, &damage).expect("régional");
     assert_eq!(
         f_next_dirty.pixels, f_next_full.pixels,
         "régional ≠ plein cadre — débordement d'encre hors bounds"
@@ -229,4 +253,56 @@ fn hauteur_changee_repli_plein_cadre() {
         rasterize_dirty(&l2, ctx().fonts.expect("fonte"), 1.0, f, &damage).is_none(),
         "hauteur différente → repli plein cadre"
     );
+}
+
+// ── bounds d'encre réelles / overhang glyphe (R-37) ──────────
+
+#[test]
+fn ink_bounds_du_run_depasse_la_boite_metrique() {
+    // Fixture overhang : l'encre sort de la boîte de
+    // métriques de 0.10em (gauche), 0.45em (droite) et
+    // 0.25em (haut) — à 20 px : 2 / 9 / 5 px, dont deux
+    // strictement au-delà de l'inflation dirty de 2 px.
+    // `ShapedRun.ink` doit refléter ce débord mesuré.
+    let data = explorer_test_support::fixture_ttf_overhang();
+    let run = explorer_layout::font::shape(&data, "XX", 20.0, false).expect("run shapé");
+    let ink = run.ink.expect("bbox d'encre présente");
+    assert!(
+        ink.x < 0.0,
+        "overhang gauche mesuré : ink.x={} attendu < 0",
+        ink.x
+    );
+    assert!(
+        ink.x + ink.width > run.advance + 2.0,
+        "overhang droit > 2px : ink.x_max={} advance={}",
+        ink.x + ink.width,
+        run.advance
+    );
+    assert!(
+        ink.y < -run.metrics.ascent - 2.0,
+        "overhang haut > 2px : ink.y={} ascent={}",
+        ink.y,
+        run.metrics.ascent
+    );
+}
+
+#[test]
+fn equivalence_overhang_glyphe_hors_boite_metrique() {
+    // Mutation réelle (R-37) : texte → vide et vide → texte
+    // avec la fonte à overhang — l'encre déborde la boîte de
+    // métriques de >2 px ; seules les bounds d'encre
+    // réelles couvrent le débord dans la fenêtre dirty.
+    let bctx = ctx_overhang();
+    let l1 = list_of_ctx(
+        "<div><p>XXXX</p></div>",
+        "body{margin:0} div{height:80px;background-color:#eee} p{margin:0;font-size:20px}",
+        &bctx,
+    );
+    let l2 = list_of_ctx(
+        "<div></div>",
+        "body{margin:0} div{height:80px;background-color:#eee}",
+        &bctx,
+    );
+    assert_regional_eq_ctx(&l1, &l2, &bctx);
+    assert_regional_eq_ctx(&l2, &l1, &bctx);
 }

@@ -621,19 +621,24 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   Tests : équivalence bytes `encode_png`/`encode_png_to`,
   décodage pixel-exact en travers de la frontière de
   bande, démultiplication (a=0 → noir, 128/128 → 255).
-  Reste ouvert dans le ticket : validation de
-  `DAMAGE_INFLATE_CSS` (voir dette ci-dessous).
-  **Dette consignée** :
-  `DAMAGE_INFLATE_CSS = 2` est une borne jamais validée
-  par mutation — les tests couvrent l'AA des formes
-  testées, pas un overhang glyphe extrême (italique,
-  accents hors em-box) ni l'encre d'un item qui déborde
-  sa `item_bounds`. Levées possibles : test mutationnel
-  (fonte à overhang mesuré → inflation nécessaire), ou
-  bounds texte réelles par extents de glyphes
-  (`ttf-parser`) au lieu de la boîte de métriques — la
-  seconde supprime la dépendance à l'inflation pour le
-  texte.
+  — sous-entrée « **validation `DAMAGE_INFLATE_CSS`** »
+  **livrée** (option « bounds d'encre réelles » de la
+  dette ci-dessous) : `ShapedRun.ink` = union des
+  `ttf_parser::glyph_bounding_box` décalées par position
+  de plume (calculée au shaping, `Arc`-partagée) ;
+  `item_bounds` des items `Text` utilise l'encre réelle
+  au lieu de la boîte de métriques — l'overhang glyphe
+  (italique, accents, fontes plein-em type Ahem) n'a plus
+  besoin d'inflation. `DAMAGE_INFLATE_CSS = 2` reste pour
+  le seul AA sous-pixel et les encre non-glyphiques.
+  Fixture `fixture_ttf_overhang` (test-support, additif) :
+  encre mesurée débordant de 0.10/0.45/0.25em — à 20 px,
+  9 px à droite et 5 px en haut > l'inflation : le test
+  mutationnel `dirty_raster` (texte ↔ vide) passerait en
+  reliques sans les bounds d'encre ; il est vert avec.
+  Résidu de la dette : items non-texte sans bounds
+  exactes (aucune encre débordante implémentée — pas de
+  box-shadow/text-shadow/outline dans le moteur actuel).
   — sous-entrée « **display-list incrémentale** »
   **livrée** : `build_display_list_incremental(prev,
   tree_epoch)` copie les plages d'items des sous-arbres

@@ -339,11 +339,24 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::Placeholder { rect, .. }
         | DisplayItem::Image { rect, .. }
         | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
-        DisplayItem::Text { origin, run, .. } => Some(Rect {
-            x: origin.0,
-            y: origin.1 - run.metrics.ascent,
-            width: run.advance,
-            height: run.metrics.ascent - run.metrics.descent,
+        DisplayItem::Text { origin, run, .. } => Some(match run.ink {
+            // R-37 : bbox d'encre réelle (glyphes) plutôt que
+            // la boîte de métriques — couvre l'overhang
+            // (italique, accents, plein-em) sans inflation.
+            // Repli boîte métrique si le run n'a pas de
+            // contours (espaces) ou fonte sans bbox.
+            Some(ink) => Rect {
+                x: origin.0 + ink.x,
+                y: origin.1 + ink.y,
+                width: ink.width,
+                height: ink.height,
+            },
+            None => Rect {
+                x: origin.0,
+                y: origin.1 - run.metrics.ascent,
+                width: run.advance,
+                height: run.metrics.ascent - run.metrics.descent,
+            },
         }),
         DisplayItem::PushClip(_)
         | DisplayItem::PopClip

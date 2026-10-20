@@ -120,8 +120,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : équivalence bytes `encode_png`/`encode_png_to`,
   décodage pixel-exact en travers de la frontière de
   bande, démultiplication (alpha 0 → noir, 128/128 → 255).
-  Reste ouvert : validation de `DAMAGE_INFLATE_CSS` par
-  fixture à overhang mesuré ou bounds `ttf-parser`.
+- **R-37 (résidu) — `DAMAGE_INFLATE_CSS` validée, bounds
+  d'encre réelles** : `ShapedRun.ink` (champ additif) =
+  union des `ttf_parser::glyph_bounding_box` décalées par
+  position de plume et offsets, calculée au shaping et
+  `Arc`-partagée — `item_bounds` des items `Text` passe
+  de la boîte de métriques à l'encre réelle : l'overhang
+  glyphe (italique, accents, fontes plein-em type Ahem)
+  est couvert **sans inflation**. `DAMAGE_INFLATE_CSS = 2`
+  ne couvre plus que l'AA sous-pixel (les items non-texte
+  peignent tous dans leurs bounds). Fixture additive
+  `explorer_test_support::fixture_ttf_overhang` : encre
+  mesurée débordant de 0.10/0.45/0.25em (9 px droite,
+  5 px haut à 20 px > 2 px d'inflation) — le test
+  mutationnel texte↔vide de `dirty_raster` verrouille
+  l'absence de reliques aux bords de fenêtre ; unit-test
+  des débords mesurés sur `run.ink`.
 
 ### Fixed
 
