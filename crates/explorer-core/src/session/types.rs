@@ -55,6 +55,12 @@ pub enum CoreEvent {
         /// (`frame?x=&y=&w=&h=` côté REST,
         /// `explorer_frame_copy_region` côté FFI).
         rects: Vec<FrameRegion>,
+        /// Scroll vertical de la frame peinte (px CSS) —
+        /// transport `MediaSurface` : l'hôte positionne ses
+        /// overlays à `rect.y − scroll_y` (contrat 71, les
+        /// rects média sont en espace document). Pas de
+        /// `scroll_x` : le moteur ne scrolle que verticalement.
+        scroll_y: f32,
     },
     /// Erreur de pipeline (fetch, parse, alloc) — dégradation
     /// signalée, la session continue.

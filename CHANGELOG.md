@@ -9,6 +9,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 71d — composite Flutter `MediaSurface`** (`app/`) :
+  le navigateur joue de la vidéo/audio natifs. `scroll_y`
+  transporté par `frame_invalidated` (champ additif du
+  contrat — l'overlay se repositionne **dans le même event**
+  que le repaint : scroll moteur, ancre `#`, `scrollTo` JS
+  ne dérivent plus). `media_offered` → `POST …/claim`
+  (`AppConfig.mediaCodecs`) → lecteur `video_player`+`fvp`
+  (MDK/FFmpeg, linking dynamique — licence vérifiée) ;
+  `media_command` routé vers le lecteur, `POST …/state`
+  borné à ≤ 4 Hz sauf changement d'état ; `media_moved`/
+  `gone`/`tab_closed`/`navigated` purgent et disposent.
+  Overlay `Positioned` à `rect − scroll_y` × zoom sur la
+  frame étape 82 ; audio 0×0 joue sans overlay ;
+  `controls` → tap = play/pause (v1). FFI : stubs
+  `UnsupportedError` (variante in-process au premier hôte
+  FFI — journal d'interface).
 - **R-37 — Raster borné par dirty-rects** (`explorer-render`,
   `explorer-core`) : `rasterize_dirty` repeint seulement
   les fenêtres de `DisplayList::changed_rects` par-dessus

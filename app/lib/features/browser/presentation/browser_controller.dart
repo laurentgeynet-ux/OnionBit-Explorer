@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/api_client.dart';
@@ -15,10 +16,12 @@ import '../../../core/di/providers.dart';
 import '../../../core/platform/env.dart';
 import '../../../core/settings/app_settings.dart';
 import '../data/browser_repository.dart';
+import '../data/media_player.dart';
 import '../domain/bookmark.dart';
 import '../domain/browser_tab.dart';
 import '../domain/download_offer.dart';
 import '../domain/history_entry.dart';
+import '../domain/media_offer.dart';
 
 /// État UI du navigateur : onglets, onglet actif, disponibilité
 /// du daemon, dernière erreur métier.
@@ -36,6 +39,8 @@ class BrowserState {
     this.pageErrors = const {},
     this.rawFrames = const {},
     this.downloadOffer,
+    this.media = const {},
+    this.scrollY = const {},
   });
 
   final List<BrowserTab> tabs;
@@ -86,6 +91,18 @@ class BrowserState {
   /// dès qu'une décision est prise.
   final DownloadOffer? downloadOffer;
 
+  /// Surfaces média live par onglet (seam `MediaSurface`,
+  /// étape 71) : `{tabId: {mediaId: offer}}` — alimenté par
+  /// `media_offered`/`moved`/`gone` + `GET …/media` au
+  /// bootstrap. `rect` en px CSS document.
+  final Map<String, Map<int, MediaOffer>> media;
+
+  /// Scroll vertical courant par onglet, porté par
+  /// `frame_invalidated.scroll_y` (champ additif 71d) —
+  /// l'overlay média positionne à `rect.y − scroll_y`.
+  /// `scroll_x` n'existe pas : le moteur est vertical-seul.
+  final Map<String, double> scrollY;
+
   /// Onglet actif, ou `null`.
   BrowserTab? get active {
     for (final t in tabs) {
@@ -107,6 +124,8 @@ class BrowserState {
     Map<String, String>? pageErrors,
     Map<String, ui.Image>? rawFrames,
     DownloadOffer? Function()? downloadOffer,
+    Map<String, Map<int, MediaOffer>>? media,
+    Map<String, double>? scrollY,
   }) => BrowserState(
     tabs: tabs ?? this.tabs,
     activeId: activeId ?? this.activeId,
@@ -120,8 +139,16 @@ class BrowserState {
     fieldFocused: fieldFocused ?? this.fieldFocused,
     pageErrors: pageErrors ?? this.pageErrors,
     downloadOffer: downloadOffer != null ? downloadOffer() : this.downloadOffer,
+    media: media ?? this.media,
+    scrollY: scrollY ?? this.scrollY,
   );
 }
+
+/// Fabrique de lecteurs natifs pour la seam `MediaSurface` —
+/// `VideoMediaPlayer` (MDK/`fvp`) en prod, fake en test.
+final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
+  (ref) => VideoMediaPlayer.create,
+);
 
 /// Dépôt injectable (tests : `Provider.overrideWith`).
 /// `auto` : `FfiEngine` (moteur in-process, ADR-0018) si la
@@ -337,11 +364,31 @@ class BrowserController extends Notifier<BrowserState> {
   /// Config capturée dans `build` (cadence de re-bootstrap).
   late final AppConfig _cfg;
 
+  /// Fabrique de lecteurs natifs — injectable en test.
+  late final MediaPlayerFactory _playerFactory;
+
+  /// Lecteurs natifs par surface claimée : `{tab: {media: p}}`
+  /// — hors `BrowserState` (objets à ressources, pas de l'état).
+  final Map<String, Map<int, MediaPlayer>> _players = {};
+
+  /// Écouteurs posés sur chaque lecteur — clés `tab/media`
+  /// pour `removeListener` au dispose.
+  final Map<String, void Function()> _playerListeners = {};
+
+  /// Horodatage + dernier `state` POSTés par surface —
+  /// borne « ≤ 4 Hz » du contrat (`_cfg.mediaReportInterval`).
+  final Map<String, DateTime> _reportTimes = {};
+  final Map<String, String> _reportStates = {};
+
+  static String _mkey(String tab, int media) => '$tab/$media';
+
   @override
   BrowserState build() {
     _repo = ref.watch(browserRepositoryProvider);
     _cfg = ref.read(configProvider);
+    _playerFactory = ref.read(mediaPlayerFactoryProvider);
     ref.onDispose(() => _daemonRetry?.cancel());
+    ref.onDispose(_releaseAllPlayers);
     if (_repo is FfiEngine) {
       // Pas de SSE in-process : la sondage d'animations porte
       // l'invalidation ; les actions tirent leur frame au
@@ -393,6 +440,11 @@ class BrowserController extends Notifier<BrowserState> {
         activeId: state.activeId ?? tabs.first.id,
         daemonOnline: true,
       );
+      // Réconciliation à froid : les offres émises avant la
+      // reconnexion SSE sont récupérées par `GET …/media`.
+      for (final t in tabs) {
+        unawaited(_syncMedia(t.id));
+      }
     } on Object {
       // Pas de rebuild si déjà offline — la boucle de retry
       // n'émet un frame qu'au changement d'état réel.
@@ -436,16 +488,58 @@ class BrowserController extends Notifier<BrowserState> {
             pageErrors: {...state.pageErrors}..remove(tabId),
           );
         }
+        // Filet : `MediaGone` précède `navigated` au contrat —
+        // la purge couvre tout ordre inattendu côté daemon.
+        if (state.media.containsKey(tabId) && state.media[tabId]!.isNotEmpty) {
+          _dropAllMedia(tabId);
+        }
       case 'title_changed':
         _patch(
           tabId,
           (t) => t.copyWith(title: ev.data['title'] as String? ?? t.title),
         );
       case 'frame_invalidated':
+        // Scroll atomique avec l'invalidation (champ additif
+        // 71d) — n'écrire qu'au changement : un rebuild par
+        // frame pour rien coûte plus que le test.
+        final y = (ev.data['scroll_y'] as num?)?.toDouble();
+        if (y != null && state.scrollY[tabId] != y) {
+          state = state.copyWith(scrollY: {...state.scrollY, tabId: y});
+        }
         if (tabId == state.activeId) {
           state = state.copyWith(frameTick: state.frameTick + 1);
         }
         unawaited(_pullFrame(tabId));
+      case 'media_offered':
+        final offer = MediaOffer.fromJson(ev.data);
+        _putMedia(tabId, offer);
+        unawaited(_claimMedia(tabId, offer));
+      case 'media_moved':
+        {
+          final mid = (ev.data['media'] as num?)?.toInt();
+          final r = ev.data['rect'] as Map<String, dynamic>?;
+          if (mid != null && r != null) {
+            _patchMedia(
+              tabId,
+              mid,
+              (m) => m.copyWith(
+                rect: ui.Rect.fromLTWH(
+                  (r['x'] as num?)?.toDouble() ?? m.rect.left,
+                  (r['y'] as num?)?.toDouble() ?? m.rect.top,
+                  (r['w'] as num?)?.toDouble() ?? m.rect.width,
+                  (r['h'] as num?)?.toDouble() ?? m.rect.height,
+                ),
+              ),
+            );
+          }
+        }
+      case 'media_gone':
+        {
+          final mid = (ev.data['media'] as num?)?.toInt();
+          if (mid != null) _dropMedia(tabId, mid);
+        }
+      case 'media_command':
+        _onMediaCommand(tabId, ev.data);
       case 'pipeline_error':
         _patch(tabId, (t) => t.copyWith(loading: false));
         final msg = ev.data['message'] as String?;
@@ -461,16 +555,18 @@ class BrowserController extends Notifier<BrowserState> {
         );
       case 'download_done':
         state = state.copyWith(
-          lastError: () =>
-              'Téléchargement enregistré : ${ev.data['path']}',
+          lastError: () => 'Téléchargement enregistré : ${ev.data['path']}',
         );
       case 'tab_closed':
         final tabs = state.tabs.where((t) => t.id != tabId).toList();
+        _dropAllMedia(tabId);
         state = state.copyWith(
           tabs: tabs,
           activeId: state.activeId == tabId
               ? (tabs.isEmpty ? null : tabs.first.id)
               : state.activeId,
+          scrollY: {...state.scrollY}..remove(tabId),
+          media: {...state.media}..remove(tabId),
         );
     }
   }
@@ -496,6 +592,185 @@ class BrowserController extends Notifier<BrowserState> {
     } on Exception catch (e) {
       state = state.copyWith(lastError: () => 'Téléchargement : $e');
     }
+  }
+
+  // ----------------------------------------------------------------
+  // Seam MediaSurface (étape 71d) — offres → claim → lecteur
+  // natif ; commandes JS → lecteur ; état lecteur → moteur
+  // (≤ 4 Hz). `rect` document − `scroll_y` côté overlay.
+  // ----------------------------------------------------------------
+
+  /// Vue vidéo native d'une surface claimée (`null` si le
+  /// lecteur n'existe pas encore) — posée dans l'overlay
+  /// `Positioned` du `_FrameView`.
+  Widget? mediaView(String tabId, int mediaId) =>
+      _players[tabId]?[mediaId]?.view;
+
+  /// `true` quand le lecteur a une première frame — l'overlay
+  /// affiche un fond opaque en attendant (pas de « trou »).
+  bool mediaReady(String tabId, int mediaId) =>
+      _players[tabId]?[mediaId]?.ready == true;
+
+  /// Toggle play/pause pour les surfaces `controls` (UI hôte
+  /// minimale v1 : tap = play/pause).
+  void mediaToggle(String tabId, int mediaId) {
+    final p = _players[tabId]?[mediaId];
+    if (p == null) return;
+    unawaited(p.snapshot.state == 'playing' ? p.pause() : p.play());
+  }
+
+  /// Réconciliation au bootstrap : les offres déjà présentes
+  /// (émises avant la reconnexion SSE) sont listées puis
+  /// claimées comme les offres live.
+  Future<void> _syncMedia(String tabId) async {
+    try {
+      for (final m in await _repo.listMedia(tabId)) {
+        _putMedia(tabId, m);
+        if (!m.claimed) unawaited(_claimMedia(tabId, m));
+      }
+    } on Object {
+      // Daemon sans surfaces — rien à réconcilier.
+    }
+  }
+
+  /// Pose le claim REST puis instancie le lecteur natif.
+  /// Échec → l'offre reste non claimée (les stubs ADR-0023
+  /// continuent côté JS — comportement honnête du contrat).
+  Future<void> _claimMedia(String tabId, MediaOffer offer) async {
+    try {
+      final ok = await _repo.claimMedia(tabId, offer.id, _cfg.mediaCodecs);
+      if (!ok || !ref.mounted) return;
+      _patchMedia(tabId, offer.id, (m) => m.copyWith(claimed: true));
+      final player = await _playerFactory(offer.url);
+      if (!ref.mounted || state.media[tabId]?[offer.id] == null) {
+        unawaited(player.dispose());
+        return;
+      }
+      final key = _mkey(tabId, offer.id);
+      void listener() => _reportMedia(tabId, offer.id);
+      _playerListeners[key] = listener;
+      player.addListener(listener);
+      (_players[tabId] ??= {})[offer.id] = player;
+      // Premier rapport forcé : le moteur attend un état
+      // initial pour refléter `paused`/`readyState`.
+      unawaited(_reportMedia(tabId, offer.id, force: true));
+      if (offer.autoplay) unawaited(player.play());
+    } on Object {
+      // Claim refusé ou lecteur en échec — non claimé honnête.
+    }
+  }
+
+  /// Ordre `media_command` JS → lecteur natif (uniquement
+  /// sur surface claimée — le moteur n'émet que là).
+  void _onMediaCommand(String tabId, Map<String, dynamic> data) {
+    final mid = (data['media'] as num?)?.toInt();
+    final p = mid == null ? null : _players[tabId]?[mid];
+    final cmd = data['cmd'];
+    if (p == null || cmd is! Map<String, dynamic>) return;
+    switch (cmd['type']) {
+      case 'play':
+        unawaited(p.play());
+      case 'pause':
+        unawaited(p.pause());
+      case 'seek':
+        unawaited(
+          p.seekTo(Duration(milliseconds: (cmd['ms'] as num?)?.toInt() ?? 0)),
+        );
+      case 'volume':
+        unawaited(p.setVolume((cmd['v'] as num?)?.toDouble() ?? 1.0));
+      case 'muted':
+        unawaited(p.setMuted(cmd['on'] == true));
+      case 'rate':
+        unawaited(p.setRate((cmd['r'] as num?)?.toDouble() ?? 1.0));
+    }
+  }
+
+  /// Rapport `POST …/state` borné : saut si < `mediaReportInterval`
+  /// sauf changement d'état (playing↔paused↔ended↔error) ou
+  /// `force` — le changement d'état vaut plus que la cadence.
+  Future<void> _reportMedia(
+    String tabId,
+    int mediaId, {
+    bool force = false,
+  }) async {
+    final p = _players[tabId]?[mediaId];
+    if (p == null) return;
+    final key = _mkey(tabId, mediaId);
+    final snap = p.snapshot;
+    final now = DateTime.now();
+    final changed = _reportStates[key] != snap.state;
+    final at = _reportTimes[key];
+    final due = at == null || now.difference(at) >= _cfg.mediaReportInterval;
+    if (!force && !changed && !due) return;
+    _reportStates[key] = snap.state;
+    _reportTimes[key] = now;
+    try {
+      await _repo.mediaState(tabId, mediaId, snap.toJson());
+    } on Object {
+      // Surface morte (410) → `media_gone` nettoiera.
+    }
+  }
+
+  void _putMedia(String tabId, MediaOffer offer) {
+    final perTab = {...?state.media[tabId], offer.id: offer};
+    state = state.copyWith(media: {...state.media, tabId: perTab});
+  }
+
+  void _patchMedia(
+    String tabId,
+    int mediaId,
+    MediaOffer Function(MediaOffer) f,
+  ) {
+    final cur = state.media[tabId]?[mediaId];
+    if (cur == null) return;
+    _putMedia(tabId, f(cur));
+  }
+
+  /// Retire une surface : listener → dispose lecteur → offre.
+  /// Pas de `release` REST — `MediaGone` signifie que le
+  /// moteur a déjà oublié la surface (410 garanti).
+  void _dropMedia(String tabId, int mediaId) {
+    final key = _mkey(tabId, mediaId);
+    final p = _players[tabId]?.remove(mediaId);
+    if (p != null) {
+      final l = _playerListeners.remove(key);
+      if (l != null) p.removeListener(l);
+      unawaited(p.dispose());
+    }
+    if (_players[tabId]?.isEmpty ?? false) _players.remove(tabId);
+    _reportTimes.remove(key);
+    _reportStates.remove(key);
+    final perTab = state.media[tabId];
+    if (perTab != null && perTab.containsKey(mediaId)) {
+      final next = {...perTab}..remove(mediaId);
+      state = state.copyWith(media: {...state.media, tabId: next});
+    }
+  }
+
+  void _dropAllMedia(String tabId) {
+    for (final mid in _players[tabId]?.keys.toList() ?? const <int>[]) {
+      _dropMedia(tabId, mid);
+    }
+  }
+
+  /// Libère les ressources natives **sans toucher `state`** —
+  /// réservé à `onDispose` (Riverpod interdit l'écriture
+  /// d'état dans le cycle de vie du provider).
+  void _releaseAllPlayers() {
+    for (final entry in _players.entries.toList()) {
+      for (final mid in entry.value.keys.toList()) {
+        final key = _mkey(entry.key, mid);
+        final p = entry.value.remove(mid);
+        if (p != null) {
+          final l = _playerListeners.remove(key);
+          if (l != null) p.removeListener(l);
+          unawaited(p.dispose());
+        }
+      }
+    }
+    _players.clear();
+    _reportTimes.clear();
+    _reportStates.clear();
   }
 
   void _patch(String tabId, BrowserTab Function(BrowserTab) f) {

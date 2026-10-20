@@ -781,12 +781,19 @@ async fn scroll_is_clamped_and_invalidates() {
 
     // Les scrolls ont émis des frame_invalidated.
     let mut n = 0;
+    let mut last_scroll = -1.0f32;
     while let Ok(e) = rx.try_recv() {
-        if matches!(e, CoreEvent::FrameInvalidated { tab, .. } if tab == id) {
-            n += 1;
+        // Étape 71d : l'event porte le scroll de la frame —
+        // l'hôte positionne ses overlays à `rect − scroll_y`.
+        if let CoreEvent::FrameInvalidated { tab, scroll_y, .. } = e {
+            if tab == id {
+                n += 1;
+                last_scroll = scroll_y;
+            }
         }
     }
     assert!(n >= 2);
+    assert!((last_scroll - 0.0).abs() < f32::EPSILON);
 }
 
 #[tokio::test]
@@ -3711,7 +3718,7 @@ async fn dirty_rects_reported_and_region_served() {
     let (fw, fh, _) = s.frame_pixels(a).unwrap();
     let mut rects = Vec::new();
     while let Ok(ev) = rx.try_recv() {
-        if let CoreEvent::FrameInvalidated { tab, rects: r } = ev {
+        if let CoreEvent::FrameInvalidated { tab, rects: r, .. } = ev {
             if tab == a {
                 rects = r;
             }
@@ -3972,7 +3979,7 @@ async fn frame_invalidated_reports_delta_not_history() {
     let grab = |rx: &mut tokio::sync::broadcast::Receiver<CoreEvent>| {
         let mut rects = Vec::new();
         while let Ok(ev) = rx.try_recv() {
-            if let CoreEvent::FrameInvalidated { tab, rects: r } = ev {
+            if let CoreEvent::FrameInvalidated { tab, rects: r, .. } = ev {
                 if tab == a {
                     rects = r;
                 }

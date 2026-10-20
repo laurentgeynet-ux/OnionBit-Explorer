@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/design/design_tokens.dart';
 import '../../settings/presentation/settings_dialog.dart';
 import '../domain/browser_tab.dart';
+import '../domain/media_offer.dart';
 import 'browser_controller.dart';
 import 'library_panels.dart';
 
@@ -565,98 +566,93 @@ class _NavBar extends ConsumerWidget {
     double zoom,
   ) {
     return Row(
-        children: [
-          IconButton(
-            icon: const Icon(Icons.arrow_back),
-            tooltip: 'Précédent',
-            onPressed: enabled && tab?.canBack == true ? ctrl.goBack : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.arrow_forward),
-            tooltip: 'Suivant',
-            onPressed: enabled && tab?.canForward == true
-                ? ctrl.goForward
-                : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Recharger',
-            onPressed: enabled ? ctrl.reload : null,
-          ),
-          Expanded(
-            child: TextField(
-              controller: omnibox,
-              enabled: enabled,
-              decoration: const InputDecoration(
-                hintText: 'Rechercher ou saisir une URL',
-                prefixIcon: Icon(Icons.search),
-                isDense: true,
-              ),
-              textInputAction: TextInputAction.go,
-              onSubmitted: enabled ? ctrl.navigate : null,
-            ),
-          ),
-          IconButton(
-            icon: Icon(marked ? Icons.star : Icons.star_border),
-            tooltip: marked ? 'Retirer le signet' : 'Ajouter le signet',
-            onPressed: markable
-                ? () => ref
-                      .read(bookmarksProvider.notifier)
-                      .toggle(url, title: tab?.title as String? ?? '')
-                : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.history),
-            tooltip: 'Historique',
-            onPressed: enabled
-                ? () => LibraryPanel.showHistory(context, tokens)
-                : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.bookmarks_outlined),
-            tooltip: 'Signets',
-            onPressed: enabled
-                ? () => LibraryPanel.showBookmarks(context, tokens)
-                : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.find_in_page_outlined),
-            tooltip: 'Rechercher dans la page (Ctrl+F)',
-            onPressed: enabled
-                ? () => ref.read(findProvider.notifier).open()
-                : null,
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.zoom_in),
-            tooltip: 'Zoom ${(zoom * 100).round()} %',
+      children: [
+        IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Précédent',
+          onPressed: enabled && tab?.canBack == true ? ctrl.goBack : null,
+        ),
+        IconButton(
+          icon: const Icon(Icons.arrow_forward),
+          tooltip: 'Suivant',
+          onPressed: enabled && tab?.canForward == true ? ctrl.goForward : null,
+        ),
+        IconButton(
+          icon: const Icon(Icons.refresh),
+          tooltip: 'Recharger',
+          onPressed: enabled ? ctrl.reload : null,
+        ),
+        Expanded(
+          child: TextField(
+            controller: omnibox,
             enabled: enabled,
-            onSelected: (v) {
-              final z = ref.read(zoomProvider.notifier);
-              switch (v) {
-                case 'in':
-                  z.zoomIn();
-                case 'out':
-                  z.zoomOut();
-                case 'reset':
-                  z.reset();
-              }
-            },
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: 'in', child: Text('Zoom avant (+)')),
-              const PopupMenuItem(
-                value: 'out',
-                child: Text('Zoom arrière (−)'),
-              ),
-              const PopupMenuItem(value: 'reset', child: Text('Taille réelle')),
-            ],
+            decoration: const InputDecoration(
+              hintText: 'Rechercher ou saisir une URL',
+              prefixIcon: Icon(Icons.search),
+              isDense: true,
+            ),
+            textInputAction: TextInputAction.go,
+            onSubmitted: enabled ? ctrl.navigate : null,
           ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Réglages',
-            onPressed: () => SettingsDialog.show(context, tokens),
-          ),
-        ],
-      );
+        ),
+        IconButton(
+          icon: Icon(marked ? Icons.star : Icons.star_border),
+          tooltip: marked ? 'Retirer le signet' : 'Ajouter le signet',
+          onPressed: markable
+              ? () => ref
+                    .read(bookmarksProvider.notifier)
+                    .toggle(url, title: tab?.title as String? ?? '')
+              : null,
+        ),
+        IconButton(
+          icon: const Icon(Icons.history),
+          tooltip: 'Historique',
+          onPressed: enabled
+              ? () => LibraryPanel.showHistory(context, tokens)
+              : null,
+        ),
+        IconButton(
+          icon: const Icon(Icons.bookmarks_outlined),
+          tooltip: 'Signets',
+          onPressed: enabled
+              ? () => LibraryPanel.showBookmarks(context, tokens)
+              : null,
+        ),
+        IconButton(
+          icon: const Icon(Icons.find_in_page_outlined),
+          tooltip: 'Rechercher dans la page (Ctrl+F)',
+          onPressed: enabled
+              ? () => ref.read(findProvider.notifier).open()
+              : null,
+        ),
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.zoom_in),
+          tooltip: 'Zoom ${(zoom * 100).round()} %',
+          enabled: enabled,
+          onSelected: (v) {
+            final z = ref.read(zoomProvider.notifier);
+            switch (v) {
+              case 'in':
+                z.zoomIn();
+              case 'out':
+                z.zoomOut();
+              case 'reset':
+                z.reset();
+            }
+          },
+          itemBuilder: (_) => [
+            const PopupMenuItem(value: 'in', child: Text('Zoom avant (+)')),
+            const PopupMenuItem(value: 'out', child: Text('Zoom arrière (−)')),
+            const PopupMenuItem(value: 'reset', child: Text('Taille réelle')),
+          ],
+        ),
+        IconButton(
+          icon: const Icon(Icons.settings_outlined),
+          tooltip: 'Réglages',
+          onPressed: () => SettingsDialog.show(context, tokens),
+        ),
+      ],
+    );
   }
 
   /// Disposition étroite — navigation + omnibox + menu « ⋮ »
@@ -680,9 +676,7 @@ class _NavBar extends ConsumerWidget {
         children: [
           Icon(icon, size: 18),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(label, overflow: TextOverflow.ellipsis),
-          ),
+          Expanded(child: Text(label, overflow: TextOverflow.ellipsis)),
         ],
       ),
     );
@@ -752,7 +746,12 @@ class _NavBar extends ConsumerWidget {
               enabled: markable,
             ),
             item('history', Icons.history, 'Historique', enabled: enabled),
-            item('marks', Icons.bookmarks_outlined, 'Signets', enabled: enabled),
+            item(
+              'marks',
+              Icons.bookmarks_outlined,
+              'Signets',
+              enabled: enabled,
+            ),
             item(
               'find',
               Icons.find_in_page_outlined,
@@ -762,8 +761,12 @@ class _NavBar extends ConsumerWidget {
             const PopupMenuDivider(),
             item('zoom-in', Icons.zoom_in, 'Zoom avant', enabled: enabled),
             item('zoom-out', Icons.zoom_out, 'Zoom arrière', enabled: enabled),
-            item('zoom-reset', Icons.zoom_out_map, 'Taille réelle',
-                enabled: enabled),
+            item(
+              'zoom-reset',
+              Icons.zoom_out_map,
+              'Taille réelle',
+              enabled: enabled,
+            ),
             const PopupMenuDivider(),
             item('settings', Icons.settings_outlined, 'Réglages'),
           ],
@@ -924,25 +927,35 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                           // nommées (« Backspace », « Enter »).
                           widget.ctrl.key(e.logicalKey.keyLabel);
                         },
-                        child: Align(
-                          alignment: Alignment.topLeft,
-                          // Canal FFI (ADR-0018) : `ui.Image`
-                          // brute, sinon PNG mémoire (ADR-0004).
-                          child: raw != null
-                              ? RawImage(
-                                  image: raw,
-                                  fit: BoxFit.none,
-                                  // 1 px image = 1 px physique :
-                                  // taille logique = px/dpr.
-                                  scale: dpr,
-                                )
-                              : Image.memory(
-                                  Uint8List.fromList(bytes!),
-                                  gaplessPlayback:
-                                      true, // pas de flash entre frames
-                                  fit: BoxFit.none,
-                                  scale: dpr, // idem : px → px physiques
-                                ),
+                        child: Stack(
+                          children: [
+                            Align(
+                              alignment: Alignment.topLeft,
+                              // Canal FFI (ADR-0018) : `ui.Image`
+                              // brute, sinon PNG mémoire (ADR-0004).
+                              child: raw != null
+                                  ? RawImage(
+                                      image: raw,
+                                      fit: BoxFit.none,
+                                      // 1 px image = 1 px physique :
+                                      // taille logique = px/dpr.
+                                      scale: dpr,
+                                    )
+                                  : Image.memory(
+                                      Uint8List.fromList(bytes!),
+                                      gaplessPlayback:
+                                          true, // pas de flash entre frames
+                                      fit: BoxFit.none,
+                                      scale: dpr, // idem : px → px physiques
+                                    ),
+                            ),
+                            // Overlay MediaSurface (71d) : rects
+                            // en px CSS document → position =
+                            // (x, y − scroll_y) × zoom, la frame
+                            // étant affichée à 1 px CSS = `zoom`
+                            // px logiques (étape 82).
+                            ..._mediaOverlays(st, active!.id, zoom),
+                          ],
                         ),
                       ),
                     ),
@@ -951,6 +964,43 @@ class _FrameViewState extends ConsumerState<_FrameView> {
               },
             ),
     );
+  }
+
+  /// Surfaces média claimées positionnées en overlay —
+  /// `rect` espace document → viewport : `(x, y − scroll_y)`
+  /// en px CSS × `zoom` px logiques (même facteur que
+  /// l'entrée, fix étape 82). Audio 0×0 : joue sans overlay.
+  /// `controls` → tap = play/pause (UI hôte minimale v1).
+  List<Widget> _mediaOverlays(BrowserState st, String tabId, double zoom) {
+    final offers = st.media[tabId]?.values;
+    if (offers == null || offers.isEmpty) return const [];
+    final scrollY = st.scrollY[tabId] ?? 0;
+    return [
+      for (final m in offers)
+        if (m.hasOverlay)
+          Positioned(
+            left: m.rect.left * zoom,
+            top: (m.rect.top - scrollY) * zoom,
+            width: m.rect.width * zoom,
+            height: m.rect.height * zoom,
+            child: _mediaSurface(st, tabId, m),
+          ),
+    ];
+  }
+
+  /// La vue native du lecteur, sur fond noir (letterbox) tant
+  /// qu'elle n'existe pas — la surface existe dès l'offre, la
+  /// texture arrive après `claim` + init asynchrone.
+  Widget _mediaSurface(BrowserState st, String tabId, MediaOffer m) {
+    final view = widget.ctrl.mediaView(tabId, m.id);
+    Widget child = Container(color: Colors.black, child: view);
+    if (m.controls) {
+      child = GestureDetector(
+        onTap: () => widget.ctrl.mediaToggle(tabId, m.id),
+        child: child,
+      );
+    }
+    return child;
   }
 
   Widget _empty(DesignTokens t, BrowserTab? active, Color muted) => Center(

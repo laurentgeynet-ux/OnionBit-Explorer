@@ -12,10 +12,29 @@ class AppConfig {
     this.requestTimeout = const Duration(seconds: 10),
     this.sseReconnectDelay = const Duration(seconds: 2),
     this.daemonRetryDelay = const Duration(seconds: 3),
-    this.engineMode = const String.fromEnvironment('EXPLORER_ENGINE',
-        defaultValue: 'auto'),
-    this.engineLibPath = const String.fromEnvironment('EXPLORER_ENGINE_LIB',
-        defaultValue: ''),
+    this.mediaReportInterval = const Duration(milliseconds: 250),
+    this.mediaCodecs = const [
+      'video/mp4',
+      'video/webm',
+      'video/x-matroska',
+      'video/avi',
+      'video/mp2t',
+      'audio/mpeg',
+      'audio/mp4',
+      'audio/aac',
+      'audio/ogg',
+      'audio/wav',
+      'audio/webm',
+      'application/vnd.apple.mpegurl',
+    ],
+    this.engineMode = const String.fromEnvironment(
+      'EXPLORER_ENGINE',
+      defaultValue: 'auto',
+    ),
+    this.engineLibPath = const String.fromEnvironment(
+      'EXPLORER_ENGINE_LIB',
+      defaultValue: '',
+    ),
   });
 
   /// URL de base du daemon `explorer-daemon` (loopback — ADR-0003).
@@ -45,4 +64,13 @@ class AppConfig {
   /// réussi (étape 81 : récupération automatique, pas seulement
   /// au bouton « Réessayer »).
   final Duration daemonRetryDelay;
+
+  /// Borne basse entre deux `POST …/media/{id}/state` par
+  /// surface (contrat : battement ≤ 4 Hz, étape 71d).
+  final Duration mediaReportInterval;
+
+  /// Types média déclarés dans `POST …/media/{id}/claim` —
+  /// containers/codecs que le backend MDK (`fvp`) sait jouer ;
+  /// `canPlayType` côté JS se reflète dessus.
+  final List<String> mediaCodecs;
 }

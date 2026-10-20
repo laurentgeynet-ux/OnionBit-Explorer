@@ -7,6 +7,7 @@ import '../domain/bookmark.dart';
 import '../domain/browser_tab.dart';
 import '../domain/find_result.dart';
 import '../domain/history_entry.dart';
+import '../domain/media_offer.dart';
 
 /// Accès aux onglets via le contrat REST du daemon (ADR-0003) :
 /// `GET/POST /api/tabs`, `…/navigate`, `…/reload`, `…/back`,
@@ -183,7 +184,58 @@ class BrowserRepository {
 
   /// Rejette un téléchargement : le corps est rejoué comme
   /// document (dégradation « dump texte » historique).
-  Future<void> declineDownload(String tabId, int dlId) => _api.postJson(
-    '/api/tabs/$tabId/downloads/$dlId/decline',
-  );
+  Future<void> declineDownload(String tabId, int dlId) =>
+      _api.postJson('/api/tabs/$tabId/downloads/$dlId/decline');
+
+  // ------------------------------------------------------------------
+  // Seam MediaSurface (étape 71, ADR-0024) — offres `media_offered`
+  // SSE, claim/release/state REST. `rect` reste en px CSS document.
+  // ------------------------------------------------------------------
+
+  /// Surfaces média live d'un onglet (`GET …/media`).
+  Future<List<MediaOffer>> listMedia(String tabId) async {
+    final res = await _api.getJson('/api/tabs/$tabId/media');
+    if (res is Map<String, dynamic> && res['media'] is List) {
+      return (res['media'] as List)
+          .whereType<Map<String, dynamic>>()
+          .map(MediaOffer.fromJson)
+          .toList();
+    }
+    throw const ApiException('GET /media : réponse inattendue');
+  }
+
+  /// Pose le claim sur une surface (`POST …/claim`) — `codecs`
+  /// déclare ce que l'hôte sait jouer ; `false` si 409/410
+  /// (déjà claimée ou morte — l'offre reste honnêtement
+  /// non claimée, les stubs ADR-0023 continuent côté JS).
+  Future<bool> claimMedia(
+    String tabId,
+    int mediaId,
+    List<String> codecs,
+  ) async {
+    try {
+      await _api.postJson(
+        '/api/tabs/$tabId/media/$mediaId/claim',
+        body: {'codecs': codecs},
+      );
+      return true;
+    } on ApiException catch (e) {
+      if (e.statusCode == 409 || e.statusCode == 410) return false;
+      rethrow;
+    }
+  }
+
+  /// Rend la surface au moteur (`POST …/release`) — ordre de
+  /// nettoyage local : dispose d'abord, release ensuite.
+  Future<void> releaseMedia(String tabId, int mediaId) =>
+      _api.postJson('/api/tabs/$tabId/media/$mediaId/release');
+
+  /// Rapporte l'état hôte (`POST …/state`) — le moteur le
+  /// pousse dans le nœud média claimé (props + events DOM).
+  /// Les appels doivent rester bornés (≤ 4 Hz, contrat).
+  Future<void> mediaState(
+    String tabId,
+    int mediaId,
+    Map<String, dynamic> report,
+  ) => _api.postJson('/api/tabs/$tabId/media/$mediaId/state', body: report);
 }

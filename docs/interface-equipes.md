@@ -103,13 +103,21 @@ déclaré. DRM (Widevine/FairPlay) et MSE hors scope v1.
 ### Événements SSE (moteur → hôte)
 
 - `MediaOffered { tab: u64, media: u64, kind: "video"|"audio", rect: {x,y,w,h}, url: String, mime: Option<String>, controls: bool, autoplay: bool }`
-  — `rect` en **px CSS document** (l'hôte soustrait
-  `scroll_y` pour l'overlay) ; `mime` = attribut `type`
+  — `rect` en **px CSS document** ; l'hôte positionne
+  son overlay à `rect.y − scroll_y` (voir transport
+  `scroll_y` ci-dessous). `mime` = attribut `type`
   ou suffixe d'URL, `None` si inconnu ; `controls`
   indique que l'hôte doit afficher son UI native.
   **`audio` sans `controls`** : offre à `rect` 0×0 —
   rien à positionner, l'hôte n'attache que le pipeline
   de lecture (pas d'overlay).
+- **`scroll_y` est transporté par `frame_invalidated`**
+  (champ additif du DTO, émis à chaque repaint/scroll) —
+  l'overlay recalcule sa position au même instant où la
+  frame bouge : pas de course scroll/rect, pas de poll.
+  `scroll_x` n'existe pas : le moteur ne scrolle que
+  verticalement (champ additif futur si horizontal un
+  jour). Côté FFI : `explorer_scroll_y(tab)`.
 - `MediaMoved { tab: u64, media: u64, rect: {x,y,w,h} }`
   — relayout, scroll, resize. **Coalescence à la cadence
   de peinture** : au plus un `MediaMoved` par frame
@@ -184,3 +192,5 @@ ni l'un ni l'autre — variante `explorer_media_*`
 | 2026-11-08 | seam `MediaSurface` — délégation JS | **Implémenté (71c)** : `claim`/`release`/`state` poussés au miroir JS via `JsEngine::set_media_claim`/`deliver_media_state` ; ordres page (`play`/`pause`/`seek`/`volume`/`muted`/`rate`) drainés → `CoreEvent::MediaCommand` SSE. Identité : `media: u64` session transmis au claim, rappelé dans les commandes (robuste aux re-paths). `play()` résout au premier `playing`, rejette `error`/release ; props `HTMLMediaElement` refletées + events DOM non-bubblants. **Ajustement contractuel v1** (clause « vocabulaire au premier consommateur ») : variante `MediaCmd::Muted{on}` ajoutée — distincte de `volume=0` (le dé-mute restaure le volume courant) ; `Volume`/`Rate` passés en `f64` côté core (alignement JS natif). Non claimée = stubs ADR-0023 inchangés. Consommateurs NAV uniquement (`explorer-jscore`/`explorer-js`/`explorer-core`). | NAV (étape 71c) |
 | 2026-11-08 | **Process — isolation des index** | **Worktree par équipe** (deux incidents en deux jours : staged-but-uncommitted capturé par le commit concurrent — CHANGELOG de NAV dans `4cfd052` puis étape 78 dans `dc3e627`) : chaque équipe travaille dans son propre arbre avec son propre index — NAV : `D:\explorer-nav` sur `nav/main`, PIPE : `C:\OnionBit-Explorer` sur `main`. Atterrissage NAV : `git rebase main` dans le worktree NAV, puis `git -C C:/OnionBit-Explorer merge --ff-only nav/main` (refus net si le worktree main est sale). Filet de secours : `git commit -o -- <paths>` (jamais d'index tenu entre deux commandes). `CARGO_TARGET_DIR` distinct par worktree (ex. `D:\cargo-target\explorer-nav`) — sinon les builds sérialisent sur le lock du target-dir et les `.exe` en cours se verrouillent mutuellement. | NAV (adopté lead) |
 | 2026-11-08 | `explorer-render` R-37 — dette d'heuristique | **Observation pour PIPE** (à ranger dans la roadmap R-37 restante) : `DAMAGE_INFLATE_CSS = 2.0` est une constante jamais validée par mutation terrain — les 9 tests d'équivalence comparent raster régional vs plein cadre sur les **mêmes** `changed_rects`, donc aucun n'exerce un overhang > 2 px (italique fort, `outline` dépassant le border-box, `box-shadow`/`text-shadow` à blur étalé, caret). Un dépassement se manifesterait en **relique de pixels** au bord d'une fenêtre — défaut silencieux, pas un échec de test. Suggestion : fixture terrain avec glyphe italique à fort débord + outline 4 px, ou inflation dérivée des métriques d'item (`paint_bounds`) plutôt que constante. | NAV (relecture) |
+| 2026-11-08 | seam `MediaSurface` — transport `scroll_y` | **Additif (71d)** : `frame_invalidated` gagne `scroll_y: f32` (px CSS de la frame peinte) — trou contractuel colmaté : l'offre promettait « l'hôte soustrait `scroll_y` » mais rien ne le transportait à jour (scroll moteur par ancre/`scrollTo`/clavier = repaint sans `POST /input` → overlay dérivant). Champ co-émis avec la frame → recalcul atomique, pas de course scroll/rect. `scroll_x` absent volontairement : pas de scroll horizontal dans le moteur — sera additif le jour où il existera. FFI : `explorer_scroll_y(tab)` déjà exposé. Consommateurs NAV uniquement. | NAV (étape 71d) |
+| 2026-11-08 | seam `MediaSurface` — premier consommateur | **Implémenté (71d)** : `app/` consomme le contrat de bout en bout — `media_offered` → `POST …/claim` (`AppConfig.mediaCodecs`, containers MDK) → `MediaPlayer` natif (`video_player` + `fvp`, backend MDK/FFmpeg en linking dynamique — licence LGPL vérifiée) ; `media_command` routé (`play`/`pause`/`seek`/`volume`/`muted`/`rate`), `POST …/state` borné ≤ 4 Hz (`AppConfig.mediaReportInterval`, saut de cadence au changement d'état). Overlay `Positioned` à `rect − scroll_y` × zoom ; audio 0×0 joue sans overlay ; `controls` → tap = play/pause (UI hôte minimale v1). Cycle de vie : `media_gone`/`tab_closed`/`navigated` → `dispose` ; réconciliation `GET …/media` au bootstrap (offres pré-reconnexion SSE). **FFI** : `listMedia` → `[]`, `claim`/`release`/`state` → `UnsupportedError` — la variante in-process reste à spécifier au premier hôte FFI (les events média ne traversent pas l'ABI aujourd'hui). Consommateurs `app/` uniquement — aucune API moteur touchée. | NAV (étape 71d) |

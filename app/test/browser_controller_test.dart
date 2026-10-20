@@ -11,9 +11,12 @@ import 'package:explorer_app/core/di/providers.dart';
 import 'package:explorer_app/features/browser/data/browser_repository.dart';
 import 'package:explorer_app/features/browser/domain/bookmark.dart';
 import 'package:explorer_app/features/browser/domain/browser_tab.dart';
+import 'package:explorer_app/features/browser/data/media_player.dart';
 import 'package:explorer_app/features/browser/domain/find_result.dart';
 import 'package:explorer_app/features/browser/domain/history_entry.dart';
+import 'package:explorer_app/features/browser/domain/media_offer.dart';
 import 'package:explorer_app/features/browser/presentation/browser_controller.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -136,6 +139,111 @@ class FakeRepo implements BrowserRepository {
   Future<void> declineDownload(String tabId, int dlId) async {
     declinedDownloads.add('$tabId:$dlId');
   }
+
+  /// Appels média enregistrés (`claim:`/`release:`/`state:`) +
+  /// offres servies par `listMedia` (réconciliation bootstrap).
+  final List<String> mediaCalls = [];
+  List<MediaOffer> mediaList = [];
+
+  @override
+  Future<List<MediaOffer>> listMedia(String tabId) async => List.of(mediaList);
+
+  @override
+  Future<bool> claimMedia(
+    String tabId,
+    int mediaId,
+    List<String> codecs,
+  ) async {
+    mediaCalls.add('claim:$tabId:$mediaId');
+    return true;
+  }
+
+  @override
+  Future<void> releaseMedia(String tabId, int mediaId) async {
+    mediaCalls.add('release:$tabId:$mediaId');
+  }
+
+  @override
+  Future<void> mediaState(
+    String tabId,
+    int mediaId,
+    Map<String, dynamic> report,
+  ) async {
+    mediaCalls.add('state:$tabId:$mediaId:${report['state']}');
+  }
+}
+
+/// Lecteur natif simulé — compte les ordres `MediaCommand` et
+/// notifie comme un `VideoPlayerController` pour les rapports.
+class FakePlayer implements MediaPlayer {
+  FakePlayer(this.url);
+
+  /// Toutes les instances créées via la fabrique injectée —
+  /// la dernière = la surface sous test.
+  static final List<FakePlayer> instances = [];
+  final String url;
+
+  int plays = 0, pauses = 0, disposes = 0;
+  Duration? seeked;
+  double? volume, rate;
+  bool? muted;
+  String state = 'paused';
+  int positionMs = 0;
+  final List<void Function()> _listeners = [];
+
+  void notify() {
+    for (final l in List.of(_listeners)) {
+      l();
+    }
+  }
+
+  @override
+  Widget get view => const SizedBox();
+  @override
+  bool get ready => true;
+  @override
+  MediaSnapshot get snapshot => MediaSnapshot(
+    positionMs: positionMs,
+    bufferedMs: 0,
+    durationMs: 1000,
+    state: state,
+  );
+  @override
+  void addListener(void Function() l) => _listeners.add(l);
+  @override
+  void removeListener(void Function() l) => _listeners.remove(l);
+  @override
+  Future<void> play() async {
+    plays++;
+    state = 'playing';
+    notify();
+  }
+
+  @override
+  Future<void> pause() async {
+    pauses++;
+    state = 'paused';
+    notify();
+  }
+
+  @override
+  Future<void> seekTo(Duration pos) async => seeked = pos;
+  @override
+  Future<void> setVolume(double v) async => volume = v;
+  @override
+  Future<void> setMuted(bool on) async => muted = on;
+  @override
+  Future<void> setRate(double r) async => rate = r;
+  @override
+  Future<void> dispose() async => disposes++;
+}
+
+/// Fabrique enregistrant ses instances — les tests lisent le
+/// dernier `FakePlayer` pour vérifier commandes et dispose.
+Future<MediaPlayer> fakeFactory(String url) async {
+  final p = FakePlayer(url);
+  FakePlayer.instances.add(p);
+  return p;
 }
 
 /// Client SSE simulé — événements injectés à la main.
@@ -160,6 +268,7 @@ ProviderContainer makeContainer(
   FakeRepo repo,
   FakeEvents events, {
   AppConfig config = const AppConfig(),
+  MediaPlayerFactory? playerFactory,
 }) {
   return ProviderContainer(
     overrides: [
@@ -167,6 +276,9 @@ ProviderContainer makeContainer(
       apiClientProvider.overrideWithValue(ApiClient(const AppConfig())),
       browserRepositoryProvider.overrideWithValue(repo),
       eventsClientProvider.overrideWithValue(events),
+      mediaPlayerFactoryProvider.overrideWithValue(
+        playerFactory ?? fakeFactory,
+      ),
     ],
   );
 }
@@ -297,17 +409,10 @@ void main() {
     expect(c.read(browserProvider).downloadOffer, isNull);
 
     events.ctrl.add(
-      ServerEvent('download_done', {
-        'tab': 1,
-        'id': 7,
-        'path': '/dl/f.bin',
-      }),
+      ServerEvent('download_done', {'tab': 1, 'id': 7, 'path': '/dl/f.bin'}),
     );
     await Future<void>.delayed(Duration.zero);
-    expect(
-      c.read(browserProvider).lastError,
-      contains('/dl/f.bin'),
-    );
+    expect(c.read(browserProvider).lastError, contains('/dl/f.bin'));
 
     // Rejet d'une seconde offre → declineDownload.
     events.ctrl.add(
@@ -358,6 +463,221 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 50));
     expect(c.read(browserProvider).daemonOnline, isTrue);
     expect(c.read(browserProvider).tabs, hasLength(1));
+  });
+
+  test('frame_invalidated porte scroll_y par onglet (étape 71d)', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+
+    // Champ additif : un event ancien (sans scroll_y) ne casse
+    // rien ; un event récent pose la valeur pour l'onglet.
+    events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+    await Future<void>.delayed(Duration.zero);
+    expect(c.read(browserProvider).scrollY['1'], isNull);
+
+    events.ctrl.add(
+      ServerEvent('frame_invalidated', {'tab': 1, 'scroll_y': 240.5}),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(c.read(browserProvider).scrollY['1'], 240.5);
+
+    // Autre onglet isolé — le scroll est par-onglet.
+    events.ctrl.add(
+      ServerEvent('frame_invalidated', {'tab': 9, 'scroll_y': 10}),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(c.read(browserProvider).scrollY['9'], 10);
+    expect(c.read(browserProvider).scrollY['1'], 240.5);
+  });
+
+  test('media_offered → claim + lecteur natif (étape 71d)', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    FakePlayer.instances.clear();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+
+    events.ctrl.add(
+      ServerEvent('media_offered', {
+        'tab': 1,
+        'media': 42,
+        'kind': 'video',
+        'rect': {'x': 10.0, 'y': 500.0, 'w': 320.0, 'h': 180.0},
+        'url': 'http://h/v.mp4',
+        'mime': 'video/mp4',
+        'controls': true,
+        'autoplay': false,
+      }),
+    );
+    // claim REST → fabrique async → listener : quelques ticks.
+    for (var i = 0; i < 5; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    final m = c.read(browserProvider).media['1']?[42];
+    expect(m, isNotNull);
+    expect(m!.claimed, isTrue);
+    expect(m.rect.width, 320);
+    expect(repo.mediaCalls, contains('claim:1:42'));
+    expect(FakePlayer.instances, hasLength(1));
+    expect(FakePlayer.instances.single.url, 'http://h/v.mp4');
+    // Premier rapport d'état forcé (paused initial).
+    expect(repo.mediaCalls, contains('state:1:42:paused'));
+  });
+
+  test('media_command route vers le lecteur, media_gone dispose', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    FakePlayer.instances.clear();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+
+    events.ctrl.add(
+      ServerEvent('media_offered', {
+        'tab': 1,
+        'media': 7,
+        'kind': 'video',
+        'rect': {'x': 0, 'y': 0, 'w': 100, 'h': 50},
+        'url': 'http://h/v.mp4',
+      }),
+    );
+    for (var i = 0; i < 5; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    final p = FakePlayer.instances.single;
+
+    // Commandes JS → méthodes natives.
+    for (final cmd in [
+      {'type': 'play'},
+      {'type': 'pause'},
+      {'type': 'seek', 'ms': 1500},
+      {'type': 'volume', 'v': 0.4},
+      {'type': 'muted', 'on': true},
+      {'type': 'rate', 'r': 1.5},
+    ]) {
+      events.ctrl.add(
+        ServerEvent('media_command', {'tab': 1, 'media': 7, 'cmd': cmd}),
+      );
+    }
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    expect(p.plays, 1);
+    expect(p.pauses, 1);
+    expect(p.seeked, const Duration(milliseconds: 1500));
+    expect(p.volume, 0.4);
+    expect(p.muted, isTrue);
+    expect(p.rate, 1.5);
+
+    // media_moved met à jour le rect document.
+    events.ctrl.add(
+      ServerEvent('media_moved', {
+        'tab': 1,
+        'media': 7,
+        'rect': {'x': 5.0, 'y': 999.0, 'w': 100.0, 'h': 60.0},
+      }),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(c.read(browserProvider).media['1']?[7]?.rect.top, 999);
+
+    // media_gone → dispose + retrait de l'état.
+    events.ctrl.add(ServerEvent('media_gone', {'tab': 1, 'media': 7}));
+    await Future<void>.delayed(Duration.zero);
+    expect(c.read(browserProvider).media['1'], isNot(contains(7)));
+    expect(p.disposes, 1);
+
+    // Commande tardive sur surface morte → ignorée proprement.
+    events.ctrl.add(
+      ServerEvent('media_command', {
+        'tab': 1,
+        'media': 7,
+        'cmd': {'type': 'play'},
+      }),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(p.plays, 1);
+  });
+
+  test('rapport state borné à 4 Hz sauf changement d’état', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    FakePlayer.instances.clear();
+    final c = makeContainer(
+      repo,
+      events,
+      config: const AppConfig(mediaReportInterval: Duration(milliseconds: 250)),
+    );
+    addTearDown(c.dispose);
+    await settle(c);
+
+    events.ctrl.add(
+      ServerEvent('media_offered', {
+        'tab': 1,
+        'media': 5,
+        'kind': 'audio',
+        'rect': {'x': 0, 'y': 0, 'w': 0, 'h': 0},
+        'url': 'http://h/a.mp3',
+      }),
+    );
+    for (var i = 0; i < 5; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    final p = FakePlayer.instances.single;
+    // Rapport initial forcé (paused).
+    expect(repo.mediaCalls.where((s) => s.startsWith('state:')), hasLength(1));
+
+    // Rafale de notifications même-état dans la fenêtre → 0 POST.
+    for (var i = 0; i < 5; i++) {
+      p.positionMs = i * 16;
+      p.notify();
+    }
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    expect(repo.mediaCalls.where((s) => s.startsWith('state:')), hasLength(1));
+
+    // Changement d'état dans la fenêtre → POST immédiat.
+    p.state = 'playing';
+    p.notify();
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    expect(repo.mediaCalls, contains('state:1:5:playing'));
+  });
+
+  test('tab_closed dispose les surfaces de l’onglet', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    FakePlayer.instances.clear();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+
+    events.ctrl.add(
+      ServerEvent('media_offered', {
+        'tab': 1,
+        'media': 3,
+        'kind': 'video',
+        'rect': {'x': 0, 'y': 0, 'w': 10, 'h': 10},
+        'url': 'http://h/v.mp4',
+      }),
+    );
+    for (var i = 0; i < 5; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    final p = FakePlayer.instances.single;
+
+    events.ctrl.add(
+      ServerEvent('frame_invalidated', {'tab': 1, 'scroll_y': 33}),
+    );
+    await Future<void>.delayed(Duration.zero);
+    events.ctrl.add(ServerEvent('tab_closed', {'tab': 1}));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(p.disposes, 1);
+    expect(c.read(browserProvider).media.containsKey('1'), isFalse);
+    expect(c.read(browserProvider).scrollY.containsKey('1'), isFalse);
   });
 
   test('signet : toggle ajoute puis retire, état rechargé', () async {

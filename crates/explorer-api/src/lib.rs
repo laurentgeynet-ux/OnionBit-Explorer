@@ -828,7 +828,11 @@ fn event_json(ev: &CoreEvent) -> (&'static str, String) {
             "title_changed",
             serde_json::json!({ "tab": tab, "title": title }).to_string(),
         ),
-        CoreEvent::FrameInvalidated { tab, rects } => (
+        CoreEvent::FrameInvalidated {
+            tab,
+            rects,
+            scroll_y,
+        } => (
             "frame_invalidated",
             serde_json::json!({
                 "tab": tab,
@@ -839,6 +843,9 @@ fn event_json(ev: &CoreEvent) -> (&'static str, String) {
                 "rects": rects.iter().map(|r| serde_json::json!({
                     "x": r.x, "y": r.y, "w": r.w, "h": r.h,
                 })).collect::<Vec<_>>(),
+                // Étape 71d : scroll de la frame (px CSS) —
+                // overlays média positionnés à `rect − scroll_y`.
+                "scroll_y": scroll_y,
             })
             .to_string(),
         ),

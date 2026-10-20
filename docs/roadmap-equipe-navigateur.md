@@ -861,10 +861,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     `volume=0` — le dé-mute restaure). Tests :
     `media_js_commands_only_when_claimed`,
     `media_js_report_resolves_play_and_reflects_props`.
-  - [ ] **71d — composite Flutter** : overlay de lecture
-    positionné sur `rect - scroll_y`, hôte
-    `AbstractPlayerEngine`/`fvp` comme consommateur de
-    référence, licence FFmpeg vérifiée.
+  - [x] **71d — composite Flutter** : overlay de lecture
+    positionné `rect − scroll_y` × zoom (rects espace
+    document, `scroll_y` transporté par `frame_invalidated`
+    — champ additif du contrat, atomique avec
+    l'invalidation). Consommateur de référence :
+    `video_player` + `fvp` (backend MDK/FFmpeg — licence
+    LGPL vérifiée : linking dynamique, binaire
+    `mdk.dll`/`ffmpeg` non statique). `media_offered` →
+    `claim` REST (`mediaCodecs` en `AppConfig`) →
+    `MediaPlayer` natif ; `media_command` routé
+    (`play`/`pause`/`seek`/`volume`/`muted`/`rate`),
+    `media_moved`/`gone` mettent à jour/purgent ;
+    `tab_closed`/`navigated` disposent. Rapports hôte
+    `POST …/state` bornés ≤ 4 Hz (`mediaReportInterval`),
+    saut de cadence au changement d'état. Audio 0×0 :
+    joue sans overlay. `controls` → tap = play/pause
+    (UI hôte minimale v1). FFI : méthodes stub
+    `UnsupportedError` — variante in-process à spécifier
+    au premier hôte FFI (journal). Tests :
+    `media_offered → claim + lecteur natif`,
+    `media_command route vers le lecteur`,
+    `rapport state borné à 4 Hz`, `tab_closed dispose`,
+    `frame_invalidated porte scroll_y`.
 - [x] **Étape 72. Résolveur sécurisé (DoH) — capacité
   d'égress optionnelle** (lead — anti-blocage FAI « DNS
   menteur », même patron que le resolver custom de l'app

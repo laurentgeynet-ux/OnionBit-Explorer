@@ -14,6 +14,7 @@ import '../../features/browser/data/browser_repository.dart';
 import '../../features/browser/domain/bookmark.dart';
 import '../../features/browser/domain/browser_tab.dart';
 import '../../features/browser/domain/find_result.dart';
+import '../../features/browser/domain/media_offer.dart';
 import '../../features/browser/domain/history_entry.dart';
 import '../config/app_config.dart';
 
@@ -166,9 +167,7 @@ class FfiEngine implements BrowserRepository {
           ? lib.lookupFunction<_TabUrlN, _TabUrlD>('explorer_tab_title')
           : null,
       _tabScroll = lib.providesSymbol('explorer_tab_scroll')
-          ? lib.lookupFunction<_TabScrollN, _TabScrollD>(
-              'explorer_tab_scroll',
-            )
+          ? lib.lookupFunction<_TabScrollN, _TabScrollD>('explorer_tab_scroll')
           : null,
       _lastError = lib.lookupFunction<_BufReadN, _BufReadD>(
         'explorer_last_error',
@@ -453,7 +452,8 @@ class FfiEngine implements BrowserRepository {
         ][code],
         // Étape 61 : l'offset est re-lu via `tab_scroll`
         // (même forme que la réponse REST `scrolled`).
-        if (code == 1 && _tabScroll != null) 'scroll_y': _tabScroll(_handle, id),
+        if (code == 1 && _tabScroll != null)
+          'scroll_y': _tabScroll(_handle, id),
         // L'URL de survol n'est pas exportée par le FFI (MVP,
         // ADR-0018) — le client garde sa barre de statut vide.
       };
@@ -512,6 +512,31 @@ class FfiEngine implements BrowserRepository {
   @override
   Future<void> declineDownload(String tabId, int dlId) =>
       throw UnsupportedError('downloads : non exposé en FFI (étape 70)');
+
+  /// Seam MediaSurface (étape 71) : l'ABI n'exporte pas le
+  /// cycle claim/state — variante FFI à spécifier au premier
+  /// hôte in-process (journal d'interface). Dégradation honnête :
+  /// aucune offre listée, les appels tombent en UnsupportedError.
+  @override
+  Future<List<MediaOffer>> listMedia(String tabId) async => const [];
+
+  /// Voir [listMedia].
+  @override
+  Future<bool> claimMedia(String tabId, int mediaId, List<String> codecs) =>
+      throw UnsupportedError('media : non exposé en FFI (étape 71)');
+
+  /// Voir [listMedia].
+  @override
+  Future<void> releaseMedia(String tabId, int mediaId) =>
+      throw UnsupportedError('media : non exposé en FFI (étape 71)');
+
+  /// Voir [listMedia].
+  @override
+  Future<void> mediaState(
+    String tabId,
+    int mediaId,
+    Map<String, dynamic> report,
+  ) => throw UnsupportedError('media : non exposé en FFI (étape 71)');
 
   /// Avance les animations moteur — `true` si la frame a été
   /// invalidée (le contrôleur la retire). Remplace le SSE

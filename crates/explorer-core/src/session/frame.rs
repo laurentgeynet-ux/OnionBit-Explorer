@@ -155,6 +155,13 @@ impl Session {
             })
             .collect();
         entry.emitted = entry.dirty.len();
-        let _ = self.events.send(CoreEvent::FrameInvalidated { tab, rects });
+        // `scroll_y` de la frame peinte — l'hôte positionne
+        // les overlays média à `rect − scroll_y` (contrat 71).
+        let scroll_y = entry.scroll_y;
+        let _ = self.events.send(CoreEvent::FrameInvalidated {
+            tab,
+            rects,
+            scroll_y,
+        });
     }
 }

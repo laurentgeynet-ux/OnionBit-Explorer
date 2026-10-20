@@ -36,6 +36,8 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_riverpod: ^3.4.3
   ffi: ^2.2.0
+  video_player: ^2.14.1
+  fvp: ^0.39.1
 
 dev_dependencies:
   flutter_test:
