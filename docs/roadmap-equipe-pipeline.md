@@ -549,7 +549,17 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   dirty ne borne que le raster, jamais le layout.
   Reste ouvert dans le ticket : display-list
   incrémentale (re-jouer seulement les boîtes touchées)
-  et PNG streamé/borné.
+  et PNG streamé/borné. **Dette consignée** :
+  `DAMAGE_INFLATE_CSS = 2` est une borne jamais validée
+  par mutation — les tests couvrent l'AA des formes
+  testées, pas un overhang glyphe extrême (italique,
+  accents hors em-box) ni l'encre d'un item qui déborde
+  sa `item_bounds`. Levées possibles : test mutationnel
+  (fonte à overhang mesuré → inflation nécessaire), ou
+  bounds texte réelles par extents de glyphes
+  (`ttf-parser`) au lieu de la boîte de métriques — la
+  seconde supprime la dépendance à l'inflation pour le
+  texte.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
