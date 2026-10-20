@@ -9,6 +9,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **ADR-0024 — lecture média : responsabilité d'hôte**
+  (proposée) : seam `MediaSurface` (`MediaOffered` SSE +
+  REST claim/play/pause/seek/volume) — le moteur garde
+  stubs + poster (ADR-0023 intact sans hôte), l'app
+  composite une surface vidéo au-dessus du rect déclaré ;
+  surface JS devient réelle par délégation quand un hôte
+  claim (jamais de faux succès). Zéro codec dans le
+  workspace ; DRM (Widevine/FairPlay) et MSE documentés
+  hors atteinte v1. Roadmap : étapes 71 (seam) et 72
+  (résolveur DoH optionnel, prolonge ADR-0022) ouvertes
+  côté NAVIGATEUR — aucun code modifié.
+
 - **Étape 69 — pages d'erreur navigateur**
   (`explorer-core`) : une nav en échec (HTTP 404/5xx,
   connexion refusée/DNS, document vide) commet un document

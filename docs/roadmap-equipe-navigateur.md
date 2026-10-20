@@ -776,6 +776,44 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   bornes de taille réseau respectées ; UI Flutter = entrée
   de téléchargement. Le dump-texte actuel reste la
   dégradation si le téléchargement est refusé.
+- [ ] **Étape 71. Seam `MediaSurface` — lecture média par
+  l'hôte** (lead + ADR-0024 — le moteur ne décode pas, la
+  lecture est un service d'hôte contracté) : les stubs
+  honnêtes de l'étape 58 restent la norme *sans* hôte ;
+  quand un hôte est attaché, `MediaOffered` (SSE : `tab`,
+  `node`, `rect` de la boîte remplacée, `url` résolue,
+  `mime`, `controls`) est émis pour chaque média lisible ;
+  endpoints REST `POST /api/media/{id}/{claim|play|pause|
+  seek|volume}` ; l'état hôte remonte en events → les props
+  JS deviennent réelles (`play()` résout à la 1re frame,
+  `currentTime`/`duration`/`buffered` vivants,
+  `canPlayType` reflète les codecs déclarés de l'hôte) —
+  jamais de faux succès (hôte muet = stub ADR-0023).
+  `MediaMoved` ou rects à jour sur `FrameInvalidated`
+  quand relayout/scroll déplace la boîte. Côté app : la
+  surface vidéo est un overlay au-dessus du rect — la
+  pattern `AbstractPlayerEngine` (backends `fvp`/FFmpeg
+  desktop, ExoPlayer Android) de l'écosystème adjacent est
+  le consommateur de référence. **Vigilance licence** :
+  vérifier la config FFmpeg/libmpv de `fvp` (LGPL dynamique
+  OK, GPL statique non). Prérequis doc : R-34 donne au
+  seam une géométrie fiable (non bloquant).
+- [ ] **Étape 72. Résolveur sécurisé (DoH) — capacité
+  d'égress optionnelle** (lead — anti-blocage FAI « DNS
+  menteur », même patron que le resolver custom de l'app
+  IPTV ; prolonge ADR-0022) : `explorer-net` gagne un
+  résolveur DoH (`application/dns-message` en GET/POST
+  HTTPS vers un résolveur configuré — Cloudflare/Quad9/
+  serveur perso, **aucune valeur en dur**, `ResolverConfig`
+  ouvert en config session) comme stratégie de résolution
+  optionnelle derrière `HttpTransport` : `system |
+  doh(url)` au niveau du connecteur, jamais en silencieux.
+  Réutilise la pile TLS+H1 existante (pas de crate lourde
+  — ou `hickory-proto` pur Rust si ADR de dépendance le
+  préfère). Ne contourne pas le blocage IP/SNI — le proxy
+  loopback/Tor reste la réponse pour ce niveau. Contrat :
+  le mode choisi est observable (`GET /api/egress` ou
+  équivalent) et `no_proxy` inchangé hors mode Tor.
 
 ## Piste JS (JS-C26+) — spécialiste `dillo-js`
 
