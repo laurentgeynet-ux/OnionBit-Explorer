@@ -1201,12 +1201,28 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   repro manuel, RSS plat à ~330 Mo, aucun
   événement crash Windows (pas d'abort
   1000 — la piste restante est une sortie
-  silencieuse ou un OOM). Indice
-  corroborant : `RADAR_PRE_LEAK_64` du
-  19/10 avait déjà flagué
-  `explorer-daemon` comme suspect de
-  **fuite mémoire** (peut dater d'avant
-  les fix 55h/83/84). Protocole proposé
+  silencieuse ou un OOM). **Requalifié le
+  jour même** : 2e disparition — daemon
+  relancé (PID 13176) mort en même temps
+  qu'un crash de session Devin, logs
+  vides, aucun event 1000. Suspect
+  principal désormais externe : les
+  shells de session tournent sous un job
+  object Windows — un crash de session
+  ferme le job et tue ses descendants
+  (le daemon `Start-Process` compris)
+  sans laisser de trace. Parade livrée :
+  daemon relancé via WMI
+  (`Win32_Process.Create`, parent = hôte
+  WMI hors job — survit aux crashes de
+  session). Si les morts cessent, la
+  veille peut se clore « teardown job »
+  sans OOM. Indice résiduel :
+  `RADAR_PRE_LEAK_64` du 19/10 avait
+  flagué `explorer-daemon` comme suspect
+  de **fuite mémoire** (peut dater
+  d'avant les fix 55h/83/84). Protocole
+  proposé
   pour trancher : RSS-watch long —
   script qui polle le RSS du daemon
   pendant un cycle répété
