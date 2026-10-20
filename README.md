@@ -9,8 +9,9 @@ desktop, reliées par une API de contrôle locale **REST + SSE**
 > (`C:\OnionBit-Explorer`) sera renommé quand l'identité finale sera
 > choisie. Les crates `explorer-*` ne changent pas.
 >
-> État : **release 0.1.0 livrée — phases 0 à 9 terminées**
-> (748 tests workspace verts, 5/5 sites réels au smoke).
+> État : **release 0.2.0 livrée** — vidéo native via
+> `MediaSurface`, handlers inline `on*`, daemon auto-réparant,
+> smoke E2E étendu (liens, scroll, média, find).
 > Travail organisé en deux équipes : **PIPELINE** (domaine pur :
 > `docs/roadmap-equipe-pipeline.md`) et **NAVIGATEUR**
 > (plateforme produit + JS : `docs/roadmap-equipe-navigateur.md`).
@@ -47,7 +48,7 @@ extensions, SVG animé (SMIL), isolation multi-processus par site
 ```powershell
 pwsh -File scripts/verify_all.ps1   # fmt, clippy, tests, doc, flutter
 pwsh -File scripts/smoke.ps1        # test de fumée E2E loopback
-pwsh -File scripts/package.ps1      # bundle release dist/explorer-0.1.0
+pwsh -File scripts/package.ps1      # bundle release dist/explorer-0.2.0
 cargo bench -p explorer-core        # benchs pipeline (criterion)
 cargo fuzz run tokenizer            # fuzz HTML (aussi : css, url)
 ```

@@ -575,11 +575,21 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   responsabilité est posé, l'état `Session` unique
   demeure le point de cohésion (documenté dans
   `session/mod.rs`).
-- [ ] **Étape 59. Release 0.2** (ex-67) : packaging, smoke E2E
+- [x] **Étape 59. Release 0.2** (ex-67) : packaging, smoke E2E
   étendu, doc. **Prérequis d'ouverture** : renommage
   `crates/dillo-js` → `explorer-jscore` (ADR-0020) — commit
   `chore:` dédié, à un moment où aucune piste ne touche le crate
   ; le nom de crate est surface publique de release.
+  **Livré** : version workspace `0.1.0` → `0.2.0` (Cargo.lock
+  régénéré), `package.ps1` → bundle `dist/explorer-0.2.0`,
+  `smoke.ps1` étendu — serveur loopback routé par chemin,
+  assertions sur les faits du cycle : `onclick=` → mutation
+  rendue (hash PNG diffère), clic lien → nav + `back`,
+  `scroll` → `scroll_y` (contrat 71d), `<video>` → offre
+  `GET /media` (seam 71b), `find` → compte. CHANGELOG
+  `[0.2.0] - 2026-10-20`. Prérequis déjà satisfait : le
+  renommage est `a9a2d27`. Réceptions humaines ouvertes :
+  vidéo réelle dans l'overlay (M25), œil dpr > 1 (82).
 
 - [x] **Étape 55h. Apply de resynchro borné — verrou tenu
   en continu** (terrain missions 14+15 — la coalescence

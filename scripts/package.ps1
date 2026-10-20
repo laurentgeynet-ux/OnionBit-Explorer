@@ -2,10 +2,10 @@
 # Copyright (C) 2026 Laurent Geynet
 # SPDX-License-Identifier: MIT OR Apache-2.0
 
-# package.ps1 — bundle release 0.1.0 (etape 40) :
-#   dist/explorer-0.1.0/bin/explorer-daemon.exe, explorer-cli.exe
-#   dist/explorer-0.1.0/app/        runner Flutter Windows (si flutter dispo)
-#   dist/explorer-0.1.0.zip
+# package.ps1 — bundle release 0.2.0 (etape 59) :
+#   dist/explorer-0.2.0/bin/explorer-daemon.exe, explorer-cli.exe
+#   dist/explorer-0.2.0/app/        runner Flutter Windows (si flutter dispo)
+#   dist/explorer-0.2.0.zip
 # Usage : pwsh -File scripts/package.ps1 [-SkipApp] [-NoZip]
 
 param([switch]$SkipApp, [switch]$NoZip)
@@ -13,7 +13,7 @@ param([switch]$SkipApp, [switch]$NoZip)
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
-$Version = '0.1.0'
+$Version = '0.2.0'
 $Dist    = "dist/explorer-$Version"
 
 Write-Host "==> cargo build --release (daemon + cli)" -ForegroundColor Cyan

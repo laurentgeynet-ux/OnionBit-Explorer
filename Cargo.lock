@@ -459,7 +459,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "explorer-core",
  "explorer-css",
@@ -491,14 +491,14 @@ dependencies = [
 
 [[package]]
 name = "explorer-common"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "stacker",
 ]
 
 [[package]]
 name = "explorer-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -522,7 +522,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-css"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "explorer-common",
  "explorer-dom",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-daemon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "explorer-api",
@@ -547,7 +547,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-dom"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "explorer-common",
  "thiserror",
@@ -555,7 +555,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-ffi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "explorer-core",
@@ -569,14 +569,14 @@ dependencies = [
 
 [[package]]
 name = "explorer-html"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "explorer-dom",
 ]
 
 [[package]]
 name = "explorer-js"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "explorer-dom",
  "explorer-jscore",
@@ -585,7 +585,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-jscore"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fancy-regex",
  "num-bigint",
@@ -600,7 +600,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-layout"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "explorer-common",
@@ -616,7 +616,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-net"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "brotli",
@@ -640,7 +640,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-render"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "brotli",
  "explorer-common",
@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-test-support"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "fancy-regex"

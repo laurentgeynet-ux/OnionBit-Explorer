@@ -32,6 +32,7 @@ phase backend débloque les évolutions UI correspondantes.
 | **J3** | Première page stylée servie en PNG (`GET /frame`) | 5 |
 | **J4** | Navigation réelle dans l'app Flutter (liens, scroll, back) | 7 |
 | **J5** | Release 0.1 packagée | 9 |
+| **J6** | Release 0.2 packagée — vidéo native (`MediaSurface`), handlers `on*`, smoke E2E étendu | nav 59 |
 
 J2 compte double : il rend visible le pipeline bien avant le moindre
 pixel, et c'est le premier vrai test bout-en-bout net+dom+html.

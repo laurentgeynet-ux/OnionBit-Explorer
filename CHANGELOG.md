@@ -7,7 +7,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-20
+
 ### Added
+
+- **Étape 59 — release 0.2** : version workspace
+  `0.1.0` → `0.2.0` ; `scripts/package.ps1` mis à jour
+  (bundle `dist/explorer-0.2.0`) ; `scripts/smoke.ps1`
+  **étendu** — le serveur loopback route désormais par
+  chemin et le test couvre les faits de la release en bout
+  en bout : `onclick=` compilé (mutation rendue — PNG
+  différent après clic), clic de lien → navigation puis
+  `back`, `scroll` → outcome `scrolled` + `scroll_y`
+  (contrat 71d), `<video>` → offre `GET /media` (seam
+  71b), `find` → occurrences comptées. Faits marquants du
+  cycle : `MediaSurface` complet moteur→hôte (71a-d) avec
+  lecteur natif `video_player`+`fvp`, handlers inline
+  `on*` (JS-C45), récupération automatique `daemonOnline`
+  (81), navbar compacte (80), frame affichée à `dpr`
+  exact (82), renommage `dillo-js` → `explorer-jscore`
+  (ADR-0020).
 
 - **Étape 71d — composite Flutter `MediaSurface`** (`app/`) :
   le navigateur joue de la vidéo/audio natifs. `scroll_y`
