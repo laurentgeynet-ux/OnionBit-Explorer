@@ -484,6 +484,24 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   chaque run — cache par (fonte, taille, texte) ou
   run-level, borné. À instrumenter `sync_profile` avant/
   après pour chiffrer le gain.
+- [ ] **R-37. Invalidation bornée display-list / raster**
+  (ticket terrain mission 21-E) : l'apply détaché rejoue
+  **tout** le pipeline par commit — re-parse → cascade →
+  boxtree → display-list complète → raster + encodage
+  PNG du document entier (jusqu'à 16 384 px). Seul
+  `relayout_subtree` est incrémental (R-33, ×16 — le
+  terrain M21 confirme ~3 s/commit à ~700 nœuds vs
+  ~150 s baseline, ×50 à taille égale). Poste dominant
+  résiduel : la **passe peinture plein document**.
+  Leviers : dirty-rects déjà émis (`frame_invalidated
+  rects`) → raster partiel par région ; display-list
+  incrémentale (re-jouer seulement les boîtes touchées
+  par le relayout) ; cap/compression du payload PNG
+  (encodeur `Fast` déjà posé en R-33b). Sous-entrées
+  mesurables : raster par dirty-rect, PNG streamé ou
+  borné. Règle AGENTS §8 : une frame = un état cohérent —
+  la régionnalité ne doit jamais rasteriser un arbre en
+  mutation.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
