@@ -266,3 +266,56 @@ fn acid2_robustesse_et_score_informatif() {
         samples.len(),
     );
 }
+
+/// Hauteur de la boîte portant `node`, `None` si absente.
+fn height_of(b: &explorer_layout::LayoutBox, node: explorer_dom::NodeId) -> Option<f32> {
+    if b.node == Some(node) {
+        return Some(b.rect.height);
+    }
+    b.children.iter().find_map(|c| height_of(c, node))
+}
+
+/// `line-height: normal` = métriques réelles de la fonte
+/// (§10.8.1) — Ahem sert `hhea` 800/−200/0 → 1em pile : la
+/// ligne d'un bloc à `font-size:20px` mesure 20 px, pas 24
+/// (l'ancien repli UA 1.2em décalait tout le visage de 0.2 px
+/// — arêtes AA des triangles du nez ; R-31).
+#[test]
+fn line_height_normal_uses_font_metrics() {
+    let dom = TreeBuilder::parse("<html><body><div>x</div></body></html>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("div{font-size:20px}", Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("racine");
+    let mut bx = build_box_tree_sized(&dom, root, &styles, &std::collections::HashMap::new())
+        .expect("arbre");
+    layout_tree(
+        &mut bx,
+        VIEW_W,
+        &BlockCtx {
+            fonts: Some(&Ahem as &dyn FontSource),
+            ..BlockCtx::default()
+        },
+    );
+    let div = {
+        let mut queue = vec![dom.document()];
+        let mut found = None;
+        while let Some(n) = queue.pop() {
+            if dom.tag_name(n).is_ok_and(|t| t == "div") {
+                found = Some(n);
+                break;
+            }
+            if let Ok(ch) = dom.children(n) {
+                queue.extend(ch.iter().rev());
+            }
+        }
+        found.expect("div")
+    };
+    let h = height_of(&bx, div).expect("boîte div");
+    assert_eq!(h, 20.0, "line-height normal = métriques Ahem (1em)");
+}

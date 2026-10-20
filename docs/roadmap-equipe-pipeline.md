@@ -402,16 +402,23 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   **Le sous-ensemble WPT extrait est soldé** — plus aucun
   échec connu à cliqueter ; la suite se joue sur Acid2
   (R-31) et un corpus élargi (R-32).
-- [ ] **R-31. Acid2 → 100 %** (lead) : corpus à
-  **96,5 %** (1282/1329, alignement (72,108) avec émulation
-  du scroll de capture). Soldés : strut §10.8.1 (menton),
+- [x] **R-31. Acid2 → 100 %** (lead) : corpus à
+  **99,5 %** (1323/1329, alignement (72,108) avec émulation
+  du scroll de capture) — refermée : le reste est le
+  plancher de bruit AA (tiny-skia vs renderer 2005), pas
+  de la conformité. Soldés : strut §10.8.1 (menton),
   `;` orphelin avalant la règle qualifiée (Syntax §5.4.4 —
   `.parser` 1em), marge basse échappée §8.3.1 (`<ul>`),
   ordre `min|max` §10.7 (barre fixe 12 px), CB des inlines
-  `relative` §10.1. Reste ~47 px : bords AA du PNG œil et
-  du damier `fixed` sous échantillonnage 4 px, arête du nez
-  (~5 px). Méthode éprouvée : crop par région, diff pixel,
-  un commit par cause.
+  `relative` §10.1, phase de tuile des fonds `fixed` ancrée
+  viewport (bug dormant scroll>0), `line-height: normal`
+  aux métriques réelles `hhea` (le 1.2em codé en dur
+  décalait tout le visage de 0.2 px — la vraie cause
+  « AA » des yeux et du nez). Plancher documenté : 6
+  échantillons = mélanges AA sur les mitres 45° du losange
+  (96,36,0 / 219,159,0 — couverture sub-pixel, jamais une
+  couleur franche). Méthode éprouvée : crop par région,
+  diff pixel, un commit par cause.
 - [ ] **R-32. Élargir le corpus WPT** (lead) : le
   cliquet actuel (57/57) ne mesure plus rien — extraire une
   tranche nouvelle via le script existant (candidats :

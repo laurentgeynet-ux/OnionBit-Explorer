@@ -745,9 +745,12 @@ fn paint_self(
                 // Zone de positionnement : border box ≈ padding
                 // box pour `scroll`, **viewport** pour `fixed`
                 // (CSS2 §14.2.1 — le fond reste calé à l'écran).
+                // L'origine est en coords FRAME : le viewport
+                // y démarre en (0,0) — ancrer au scroll
+                // déphaserait la tuile de `scroll mod taille`.
                 let fixed = bx.style.get("background-attachment") == Some("fixed");
                 let (area, base) = if fixed {
-                    ((vp.0, vp.1), (-off.0, -off.1))
+                    ((vp.0, vp.1), (0.0, 0.0))
                 } else {
                     ((rect.width, rect.height), (rect.x, rect.y))
                 };

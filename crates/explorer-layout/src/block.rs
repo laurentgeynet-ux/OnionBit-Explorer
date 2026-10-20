@@ -1740,19 +1740,21 @@ pub(crate) fn layout_anon_block(
 }
 
 /// `line-height` en px : nombre → ×font-size, longueur →
-/// directe, `normal` → 1.2em (arrêté commun des UA).
+/// directe, `normal` → métriques réelles de la fonte
+/// (`natural_line_height`, §10.8.1 — 1.2em en repli).
 fn line_height(style: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> f32 {
+    let normal = crate::font::natural_line_height(style, fs, ctx);
     let Some(raw) = style.get("line-height") else {
-        return fs * 1.2;
+        return normal;
     };
     let raw = raw.trim();
     if raw == "normal" {
-        return fs * 1.2;
+        return normal;
     }
     if let Ok(n) = raw.parse::<f32>() {
         return (n * fs).max(1.0);
     }
-    css_px(style, "line-height", fs, fs, ctx).unwrap_or(fs * 1.2)
+    css_px(style, "line-height", fs, fs, ctx).unwrap_or(normal)
 }
 
 /// Fonction de mesure px d'une chaîne, par la fonte réelle

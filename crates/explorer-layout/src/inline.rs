@@ -153,7 +153,7 @@ pub(crate) fn layout_inline(
     // boîte — plancher de chaque ligne (`.chin` Acid2 :
     // `line-height:1em` tient la rangée à 12 px même si le
     // texte dedans fait 4 px).
-    let strut_lh = line_height_of(&st, fs);
+    let strut_lh = line_height_of(&st, fs, ctx);
     let mut lines = break_into_lines(&items, &atomics, x, y, w, ctx, fs, fl, strut_lh);
     align_lines(&st, &mut lines, x, w, fl);
     // Atomes d'abord : leur sous-arbre a été posé en (0,0)
@@ -624,7 +624,7 @@ fn break_into_lines(
 
     for item in items {
         let fs = font_size_px(&item.style, parent_fs, ctx);
-        let lh = line_height_of(&item.style, fs);
+        let lh = line_height_of(&item.style, fs, ctx);
         let font_data = font_data_of(&item.style, ctx);
         let measure = measure_fn(&item.style, fs, ctx);
 
@@ -963,17 +963,20 @@ fn union_rect(first: Rect, second: Rect) -> Rect {
     }
 }
 
-/// `line-height` en px.
-fn line_height_of(style: &ComputedStyle, fs: f32) -> f32 {
+/// `line-height` en px : `normal` (ou absent) → métriques
+/// réelles de la fonte (`natural_line_height`, §10.8.1 —
+/// 1.2em en repli sans `FontSource`).
+fn line_height_of(style: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> f32 {
+    let normal = crate::font::natural_line_height(style, fs, ctx);
     let Some(raw) = style.get("line-height") else {
-        return fs * 1.2;
+        return normal;
     };
     let raw = raw.trim();
     if raw == "normal" {
-        return fs * 1.2;
+        return normal;
     }
     if let Ok(n) = raw.parse::<f32>() {
         return (n * fs).max(1.0);
     }
-    css_px(style, "line-height", fs, fs, &BlockCtx::default()).unwrap_or(fs * 1.2)
+    css_px(style, "line-height", fs, fs, ctx).unwrap_or(normal)
 }

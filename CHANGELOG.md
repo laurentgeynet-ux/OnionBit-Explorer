@@ -33,8 +33,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   émulation du scroll de capture (la référence a été shootée
   document défilé — `build_display_list_full(scroll)` en deux
   passes ; les boîtes/fonds `fixed` restent ancrés au
-  viewport). Reste ~3,5 % : bords AA du PNG œil/checker sous
-  pixels échantillonnés et l'arête du nez (~5 px).
+  viewport). **Seconde passe → 99,5 %** (1323/1329) : phase
+  de tuile `background-attachment:fixed` ancrée au viewport
+  (§14.2.1 — bug dormant : tuile déphasée de `scroll mod
+  taille` dès qu'on scroll) ; `line-height: normal` aux
+  **métriques réelles `hhea`** (§10.8.1 — le 1.2em codé en
+  dur décalait tout le visage de 0.2 px, la vraie cause des
+  « AA » yeux/nez ; Ahem sert 1em pile). **Plancher AA
+  refermé** : 6 échantillons restants = mélanges sub-pixel
+  sur les mitres 45° du losange (jamais une couleur franche)
+  — borne connue, pas de la conformité.
 
 - **ADR-0024 — lecture média : responsabilité d'hôte**
   (proposée) : seam `MediaSurface` (`MediaOffered` SSE +
@@ -58,6 +66,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   effectif arrive par SSE (`navigated`/`pipeline_error`/
   `frame_invalidated`). `handle_input` `&mut` (FFI/CLI)
   inchangé : outcome de commit réel.
+
+### Changed
+
+- **Étape 76 — nav échouée : entrée d'historique réelle**
+  (`explorer-core`) : `Tab.hist` passe à
+  `Vec<HistEntry { req, failed }>` — une navigation en
+  échec pousse son entrée marquée (method+body, replay
+  POST couvert) comme Chrome/Firefox. `back` depuis la
+  page d'erreur revient à la page précédente — la cible
+  n'est plus sautée (repro A→B→refus : back rendait A).
+  La traversée d'une entrée `failed` **retente** la
+  requête d'origine au lieu de restaurer la page d'erreur
+  — bfcache ignore les entrées échouées et ne snapshotte
+  pas la page d'erreur courante. Chemins `&mut` et
+  partagé alignés.
 
 ### Fixed
 

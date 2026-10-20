@@ -160,3 +160,48 @@ pub fn shape(font_data: &[u8], text: &str, size_px: f32, rtl: bool) -> Option<Sh
 pub fn measure(font_data: &[u8], text: &str, size_px: f32) -> f32 {
     shape(font_data, text, size_px, false).map_or(0.0, |r| r.advance)
 }
+
+/// `line-height: normal` (§10.8.1) : la valeur « raisonnable
+/// basée sur la fonte » = ses métriques réelles `hhea`
+/// (`ascent − descent + gap` à `size_px`) — Ahem sert 1.0em,
+/// les textes de conformance restent sur la grille entière.
+/// `font_data_of` résout la requête style → octets ; repli
+/// `size_px * 1.2` (arrêté UA) quand aucune fonte n'est
+/// disponible (domaine sans `FontSource` ou fonte absente).
+#[must_use]
+pub fn natural_line_height(
+    style: &explorer_css::ComputedStyle,
+    size_px: f32,
+    ctx: &crate::BlockCtx<'_>,
+) -> f32 {
+    font_data(style, ctx)
+        .and_then(|data| metrics(&data, size_px))
+        .map_or(size_px * 1.2, FontMetrics::line_height)
+}
+
+/// Octets de la fonte du style via le port `FontSource` —
+/// `None` sans source injectée ni fonte trouvée.
+fn font_data(style: &explorer_css::ComputedStyle, ctx: &crate::BlockCtx<'_>) -> Option<Vec<u8>> {
+    let src = ctx.fonts?;
+    let families: Vec<String> = style.get("font-family").map_or_else(
+        || vec![ctx.default_family.to_string()],
+        |f| {
+            f.split(',')
+                .map(|s| s.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
+                .collect()
+        },
+    );
+    let weight = style
+        .get("font-weight")
+        .and_then(|w| match w.trim() {
+            "bold" | "bolder" => Some(700u16),
+            _ => w.trim().parse().ok(),
+        })
+        .unwrap_or(400);
+    let italic = matches!(style.get("font-style"), Some("italic" | "oblique"));
+    src.font_data(&FontRequest {
+        families,
+        weight,
+        italic,
+    })
+}
