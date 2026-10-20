@@ -488,18 +488,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (demande PIPE dans `interface-equipes.md`), puis UI Ctrl+F.
 - [ ] **Étape 58. `<video>`/`<audio>`** (ex-66) : arbitrage
   décodage pur Rust requis (ADR) — sinon stubs propres + affiche.
-- [ ] **Étape 60. Éclater `session.rs`** (audit externe) :
-  3 500+ lignes / 133 Ko — le god module porte session +
-  pipeline + scheduler + profil + hit-test + glue JS + décodage
-  images. **Découpler, pas juste déménager** : chaque
-  sous-module sort avec sa frontière de responsabilité **et
-  ses propres tests** (le scheduler de sous-ressources
-  testable sans réseau ni DOM ; le net pump sans session
-  complète) — sinon les 40+ champs de `Session` gardent le
-  couplage sous un autre nom de fichier. Critère de sortie :
-  au moins un module extrait testé en isolation. À faire
-  entre deux étapes fonctionnelles, fichier au calme — pas
-  pendant un chantier session en vol.
+- [x] **Étape 60. Éclater `session.rs`** (audit externe) :
+  ~~3 500+~~ 7 307 lignes — le god module portait session +
+  pipeline + scheduler + profil + hit-test + glue JS +
+  décodage. Livré : `session.rs` → `session/` — 20 fichiers
+  par responsabilité (`types`, `tab`, `navigate`, `net`,
+  `js_glue`, `input`, `paint`, `frame`, `store`, `anim`,
+  `popup`, `forms`, `scripts`, `dom_helpers`,
+  `paint_helpers`, `nav_types`, `net_items`, `anim_items`,
+  `decode`, `shared`, `tests`). Frontières : items internes
+  en `pub(crate)` (`Session`/`Tab` gardent leurs champs
+  privés dans `mod.rs` — les sous-modules sont des
+  descendants, visibilité inchangée), API publique et
+  ré-exports `lib.rs` strictement identiques (237 fns /
+  49 items dénombrés identiques avant/après). Isolation :
+  `session::decode` sort avec son propre `mod tests` —
+  5 tests sur les fonctions pures (BOM, labels charset,
+  morceaux UTF-8/UTF-16 coupés, ordre WHATWG feuilles)
+  sans session ni réseau. Suite : l'éclatement des gros
+  impl (`navigate`, `net`, `input` > 700 lignes) reste
+  ouvert aux étapes suivantes — le découpage par
+  responsabilité est posé, l'état `Session` unique
+  demeure le point de cohésion (documenté dans
+  `session/mod.rs`).
 - [ ] **Étape 59. Release 0.2** (ex-67) : packaging, smoke E2E
   étendu, doc. **Prérequis d'ouverture** : renommage
   `crates/dillo-js` → `explorer-jscore` (ADR-0020) — commit

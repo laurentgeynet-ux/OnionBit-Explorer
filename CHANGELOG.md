@@ -7,6 +7,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Étape 60 — éclatement de `session.rs`** (`explorer-core`) :
+  le god module (7 307 lignes) devient `session/` — 20
+  sous-fichiers par responsabilité (`navigate`, `net`,
+  `js_glue`, `input`, `paint`, `frame`, `store`, `anim`,
+  `popup`, `forms`, `scripts`, `decode`, `dom_helpers`,
+  `paint_helpers`, `types`, `tab`, `nav_types`, `net_items`,
+  `anim_items`, `shared`, `tests`). `Session`/`Tab` gardent
+  état et champs privés dans `mod.rs` — les sous-modules
+  restent descendants (visibilité inchangée) ; items
+  internes levés en `pub(crate)`. API publique et
+  ré-exports `lib.rs` identiques ; dénombrement des
+  items inchangé (237 fonctions, 49 types). Critère
+  d'isolation rempli : `session::decode` embarque son
+  propre `mod tests` (5 tests — BOM, labels charset,
+  morceaux UTF-8/UTF-16 coupés, ordre WHATWG des feuilles)
+  sans session ni réseau.
+
 ### Added
 
 - **R-27 — direction d'axe flex `row-reverse`/`column`**
