@@ -26,7 +26,7 @@ use explorer_css::value::{parse_length, Unit};
 use explorer_css::ComputedStyle;
 
 use crate::boxtree::{BoxKind, Float, LayoutBox, Overflow, Position, Rect};
-use crate::font::{self, FontRequest, FontSource};
+use crate::font::{self, FontSource};
 
 /// Contexte de dimensionnement (une passe de layout).
 pub struct BlockCtx<'a> {
@@ -41,6 +41,10 @@ pub struct BlockCtx<'a> {
     /// Hauteur du viewport — bloc conteneur des `fixed` et
     /// base des `vh` (étape 21).
     pub viewport_h: f32,
+    /// Cache de la pipeline fonte pour la passe (R-33b) :
+    /// `font_data`/métriques/shaping ne sont facturés qu'une
+    /// fois par requête, pas par run de texte.
+    pub font_cache: std::cell::RefCell<font::FontCache>,
 }
 
 impl Default for BlockCtx<'_> {
@@ -50,6 +54,7 @@ impl Default for BlockCtx<'_> {
             default_family: "sans-serif",
             base_font_size: 16.0,
             viewport_h: 600.0,
+            font_cache: std::cell::RefCell::new(font::FontCache::new()),
         }
     }
 }
@@ -1765,35 +1770,14 @@ pub(crate) fn measure_fn<'a>(
     fs: f32,
     ctx: &'a BlockCtx,
 ) -> impl Fn(&str) -> f32 + 'a {
-    let font_data = ctx.fonts.and_then(|src| {
-        let families: Vec<String> = style.get("font-family").map_or_else(
-            || vec![ctx.default_family.to_string()],
-            |f| {
-                f.split(',')
-                    .map(|s| s.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
-                    .collect()
-            },
-        );
-        let weight = style
-            .get("font-weight")
-            .and_then(|w| match w.trim() {
-                "bold" | "bolder" => Some(700u16),
-                "normal" | "lighter" => Some(400),
-                v => v.parse().ok(),
-            })
-            .unwrap_or(400);
-        let italic = matches!(style.get("font-style"), Some("italic" | "oblique"));
-        let req = FontRequest {
-            families,
-            weight,
-            italic,
-        };
-        src.font_data(&req)
-    });
+    let font = ctx.fonts.map(|src| (src, font::request_of(style, ctx)));
     #[allow(clippy::cast_precision_loss)]
     move |s: &str| {
-        if let Some(d) = &font_data {
-            font::measure(d, s, fs)
+        if let Some((src, req)) = &font {
+            ctx.font_cache
+                .borrow_mut()
+                .shape(*src, req, s, fs, false)
+                .map_or(0.0, |r| r.advance)
         } else {
             s.chars().count() as f32 * fs * 0.55
         }

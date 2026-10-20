@@ -18,7 +18,8 @@
 //!   multipliée, le framebuffer sort en pixels physiques.
 
 use explorer_css::value::Color;
-use explorer_layout::font::{FontRequest, FontSource, Glyph, ShapedRun};
+use explorer_layout::font::{FontCache, FontRequest, FontSource, Glyph, ShapedRun};
+use image::ImageEncoder;
 use tiny_skia::{FillRule, Mask, Paint, PathBuilder, Pixmap, Point, Rect, Transform};
 
 use crate::display::{BorderStyle, DisplayItem, DisplayList};
@@ -37,12 +38,41 @@ pub struct Frame {
 }
 
 impl Frame {
-    /// Encode la frame en PNG (`tiny-skia` fournit l'encodeur).
+    /// Encode la frame en PNG.
+    ///
+    /// Les pixels sont **prémultipliés** (convention tiny-skia) :
+    /// démultiplication avant encodage, comme
+    /// `Pixmap::encode_png`. Compression `Fast` (fdeflate —
+    /// R-33b : l'encodeur par défaut coûtait ~4 s sur une
+    /// frame de page lourde, poste dominant du repaint
+    /// progressif).
     #[must_use]
     pub fn encode_png(&self) -> Option<Vec<u8>> {
-        let size = tiny_skia::IntSize::from_wh(self.width, self.height)?;
-        let pm = Pixmap::from_vec(self.pixels.clone(), size)?;
-        pm.encode_png().ok()
+        let mut rgba = self.pixels.clone();
+        for px in rgba.chunks_exact_mut(4) {
+            let a = u32::from(px[3]);
+            if a == 0 {
+                px[..3].fill(0);
+            } else if a < 255 {
+                for c in &mut px[..3] {
+                    *c = ((u32::from(*c) * 255 + a / 2) / a).min(255) as u8;
+                }
+            }
+        }
+        let mut out = Vec::new();
+        image::codecs::png::PngEncoder::new_with_quality(
+            &mut out,
+            image::codecs::png::CompressionType::Fast,
+            image::codecs::png::FilterType::NoFilter,
+        )
+        .write_image(
+            &rgba,
+            self.width,
+            self.height,
+            image::ExtendedColorType::Rgba8,
+        )
+        .ok()?;
+        Some(out)
     }
 }
 
@@ -188,9 +218,10 @@ fn paint_text(
     size_px: f32,
     cur: Transform,
     fonts: &dyn FontSource,
+    fc: &mut FontCache,
     clip: Option<&Mask>,
 ) {
-    let Some(data) = fonts.font_data(font) else {
+    let Some(data) = fc.data(fonts, font) else {
         return;
     };
     let Ok(face) = ttf_parser::Face::parse(&data, 0) else {
@@ -297,6 +328,9 @@ pub fn rasterize(list: &DisplayList, fonts: &dyn FontSource, scale: f32) -> Opti
     let dpi = Transform::from_scale(scale, scale);
 
     let mut clips: Vec<Mask> = Vec::new();
+    // Cache fonte de la passe (R-33b) : `font_data` n'est
+    // re-facturé qu'une fois par `FontRequest`, pas par item.
+    let mut fc = FontCache::new();
     // Pile des `transform` CSS : `cur` = dpi · produit des
     // matrices actives — recomposé à chaque push/pop (peu de
     // niveaux en pratique).
@@ -349,7 +383,7 @@ pub fn rasterize(list: &DisplayList, fonts: &dyn FontSource, scale: f32) -> Opti
                 tfs.pop();
                 cur = tfs.iter().fold(dpi, |acc, t| acc.pre_concat(*t));
             }
-            _ => paint_item(&mut pixmap, item, cur, fonts, clips.last()),
+            _ => paint_item(&mut pixmap, item, cur, fonts, &mut fc, clips.last()),
         }
     }
     Some(Frame {
@@ -367,6 +401,7 @@ fn paint_item(
     item: &DisplayItem,
     dpi: Transform,
     fonts: &dyn FontSource,
+    fc: &mut FontCache,
     clip: Option<&Mask>,
 ) {
     match item {
@@ -405,6 +440,7 @@ fn paint_item(
                 *size_px,
                 dpi,
                 fonts,
+                fc,
                 clip,
             );
         }

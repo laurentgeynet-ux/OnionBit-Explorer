@@ -466,6 +466,32 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   cascade), responsabilité partagée : NAV étudiera la
   découpe du commit sous verrou ; le coût pur du pipeline
   relève d'ici.
+  **R-33b — part pipeline du mur frère soldée.** Attribution
+  (harnais `profile_resync_phases`, ~9 000 nœuds, debug) :
+  `layout_tree` = **27,7 s**, dont la quasi-totalité fonte —
+  chaque run de texte re-facturait `font_data` (rebuild
+  fixture en test / clone ~200 Ko en prod) + `Face::parse`
+  ×2 + shaping `rustybuzz`, ~10 appels/item, **zéro cache**
+  dans tout le pipeline fonte. **Fix** : `FontCache`
+  (`font.rs`) borné à une passe — octets par `FontRequest`
+  (miss figé), métriques par (fonte, taille), shaping par
+  (fonte, taille, texte, dir) borné à 8 192 entrées ;
+  `BlockCtx::font_cache` côté layout, cache propre à
+  `rasterize` côté render — `request_of` mutualise la
+  résolution style → requête (avant : triple copie).
+  **Encode PNG** : `Frame::encode_png` passe de tiny-skia
+  (clone + démultiplication + deflate `Balanced`) à
+  `image::PngEncoder` `Compression::Fast`/`NoFilter`
+  (fdeflate) — la démultiplication est conservée à
+  l'identique. **Résultats** : layout 27,7 → **1,09 s**
+  debug (×25) ; `relayout total` 24,8 → **3,78 s** debug,
+  **289 ms** release ; `encode_png` 4,3 s → **125 ms**
+  release. 3 tests permanents `text.rs` (dédupe source,
+  cohérence métriques/shape, fonte invalide jamais panic).
+  WPT 57/57, Acid2 99,5 % inchangés. Reste chez NAV : la
+  répétition des `relayout_dom` progressifs sous verrou et
+  le miroir DOM→JS de `spawn_engine` sur 3 000 nœuds —
+  réception-baseline mission 21-F.
 - [ ] **R-34. Médias vrais remplacés boxtree**
   (résidu étape 58, demande consignée) : `video`/`audio`
   comme remplacés natifs — taille intrinsèque de l'affiche
@@ -480,10 +506,14 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   → `Rect`), remplace le surlignage boîte-entière actuel.
   API publique additive, consommée par `session/find.rs`.
 - [ ] **R-36. Cache glyphes `paint_text`** (demande
-  consignée, perf raster) : le repaint global re-shape
-  chaque run — cache par (fonte, taille, texte) ou
-  run-level, borné. À instrumenter `sync_profile` avant/
-  après pour chiffrer le gain.
+  consignée, perf raster) : le raster ne re-shape pas
+  (les `ShapedRun` du layout sont réutilisés) mais re-
+  résolvait `font_data` + `Face::parse` par item — **soldé
+  par `FontCache` en R-33b** (cache par passe). Reste à
+  ouvrir : cache **cross-passe** (persister les faces
+  parsées entre repaints — la passe `rasterize` recrée
+  son `FontCache` à chaque appel). À instrumenter
+  `sync_profile` avant/après pour chiffrer le gain.
 - [ ] **R-37. Invalidation bornée display-list / raster**
   (ticket terrain mission 21-E) : l'apply détaché rejoue
   **tout** le pipeline par commit — re-parse → cascade →

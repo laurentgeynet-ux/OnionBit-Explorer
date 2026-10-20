@@ -9,6 +9,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-33b — Perf : `FontCache` + encodage PNG rapide**
+  (`explorer-layout`, `explorer-render`) : part pipeline
+  du « mur frère » (nav `heavy.html` ~3 000 nœuds gelant
+  l'API sous verrou). Attribution sur
+  `profile_resync_phases` (~9 000 nœuds, debug) :
+  `layout_tree` = **27,7 s**, quasi-totalité fonte —
+  chaque run re-facturait `font_data` + `Face::parse` ×2 +
+  shaping `rustybuzz` (~10 appels/item, aucun cache).
+  **`FontCache`** borné à une passe : octets par
+  `FontRequest` (miss figé), métriques par (fonte, taille),
+  shaping par (fonte, taille, texte, dir) borné à 8 192
+  entrées ; `BlockCtx::font_cache` en layout, cache propre
+  en `rasterize`. **`Frame::encode_png`** :
+  `image::PngEncoder` `Compression::Fast`/`NoFilter`
+  (fdeflate) — démultiplication prémultiplié → alpha
+  conservée à l'identique. Résultats : layout 27,7 →
+  **1,09 s** debug (×25), `relayout` 24,8 → 3,78 s debug /
+  **289 ms** release, `encode_png` 4,3 s → **125 ms**
+  release. Reste chez NAV : répétition des `relayout_dom`
+  progressifs sous verrou et miroir DOM→JS de
+  `spawn_engine` (réception mission 21-F).
+
 - **R-33 — Perf : propagation par translation dans le
   relayout incrémental** (`explorer-layout`) : attribution
   du ×10 `incr.remap_relayout` (150,3 s terrain / ~14 s

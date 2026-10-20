@@ -28,7 +28,7 @@ use explorer_css::ComputedStyle;
 
 use crate::block::{css_px, font_size_px, layout_block, measure_fn, side_px, BlockCtx, FloatCtx};
 use crate::boxtree::{LayoutBox, Rect};
-use crate::font::{self, FontRequest, ShapedRun};
+use crate::font::{self, ShapedRun};
 use crate::text::{self, Direction};
 
 /// Fragment posé dans une ligne : tranche de texte shapé, ou
@@ -431,32 +431,6 @@ fn ends_hard_break(piece: &str) -> bool {
     })
 }
 
-/// Fonte (octets) éventuelle pour le shaping des fragments.
-fn font_data_of(style: &ComputedStyle, ctx: &BlockCtx) -> Option<Vec<u8>> {
-    let src = ctx.fonts?;
-    let families: Vec<String> = style.get("font-family").map_or_else(
-        || vec![ctx.default_family.to_string()],
-        |f| {
-            f.split(',')
-                .map(|s| s.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
-                .collect()
-        },
-    );
-    let weight = style
-        .get("font-weight")
-        .and_then(|w| match w.trim() {
-            "bold" | "bolder" => Some(700u16),
-            _ => w.trim().parse().ok(),
-        })
-        .unwrap_or(400);
-    let italic = matches!(style.get("font-style"), Some("italic" | "oblique"));
-    src.font_data(&FontRequest {
-        families,
-        weight,
-        italic,
-    })
-}
-
 /// État courant de la ligne en construction.
 struct LineAcc {
     frags: Vec<Fragment>,
@@ -625,7 +599,7 @@ fn break_into_lines(
     for item in items {
         let fs = font_size_px(&item.style, parent_fs, ctx);
         let lh = line_height_of(&item.style, fs, ctx);
-        let font_data = font_data_of(&item.style, ctx);
+        let font_req = font::request_of(&item.style, ctx);
         let measure = measure_fn(&item.style, fs, ctx);
 
         // Boîte atomique : coule comme une pièce incassable.
@@ -763,9 +737,15 @@ fn break_into_lines(
             if acc.is_empty() {
                 descend_band!(pw);
             }
-            let shaped = font_data
-                .as_deref()
-                .and_then(|d| font::shape(d, text, fs, piece.dir == Direction::Rtl));
+            let shaped = ctx.fonts.and_then(|src| {
+                ctx.font_cache.borrow_mut().shape(
+                    src,
+                    &font_req,
+                    text,
+                    fs,
+                    piece.dir == Direction::Rtl,
+                )
+            });
             let baseline = shaped.as_ref().map_or(fs * 0.8, |s| s.metrics.ascent);
             let trail_w = if text.ends_with(text::is_css_ws) {
                 pw - measure(text.trim_end_matches(text::is_css_ws))

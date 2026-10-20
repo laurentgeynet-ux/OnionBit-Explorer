@@ -12,7 +12,7 @@
 
 mod common;
 
-use explorer_layout::font::{self, FontRequest, FontSource};
+use explorer_layout::font::{self, FontCache, FontRequest, FontSource};
 use explorer_layout::text::{self, Direction};
 
 /// Port `FontSource` minimal dosé sur la fixture.
@@ -24,6 +24,31 @@ impl FontSource for FixtureSource {
         } else {
             None
         }
+    }
+}
+
+/// Source qui compte ses appels — prouve que le cache ne
+/// re-facture pas `font_data` par run (R-33b).
+struct CountingSource {
+    ttf: Vec<u8>,
+    calls: std::cell::Cell<usize>,
+}
+impl FontSource for CountingSource {
+    fn font_data(&self, req: &FontRequest) -> Option<Vec<u8>> {
+        self.calls.set(self.calls.get() + 1);
+        if req.families.iter().any(|f| f == "Fixture") {
+            Some(self.ttf.clone())
+        } else {
+            None
+        }
+    }
+}
+
+fn fixture_req() -> FontRequest {
+    FontRequest {
+        families: vec!["Fixture".into()],
+        weight: 400,
+        italic: false,
     }
 }
 
@@ -144,4 +169,79 @@ fn port_fontsource() {
         italic: false,
     });
     assert!(ko.is_none());
+}
+
+#[test]
+fn cache_dedupe_font_data() {
+    let src = CountingSource {
+        ttf: common::fixture_ttf(),
+        calls: std::cell::Cell::new(0),
+    };
+    let mut fc = FontCache::new();
+    let req = fixture_req();
+    // 10 résolutions de la même requête = 1 seul appel source.
+    for _ in 0..10 {
+        assert!(fc.data(&src, &req).is_some());
+    }
+    assert_eq!(src.calls.get(), 1);
+    // Un miss est figé aussi : famille inconnue, 1 appel.
+    let miss = FontRequest {
+        families: vec!["Inconnue".into()],
+        weight: 400,
+        italic: false,
+    };
+    for _ in 0..5 {
+        assert!(fc.data(&src, &miss).is_none());
+    }
+    assert_eq!(src.calls.get(), 2);
+}
+
+#[test]
+fn cache_metrics_et_shape_coherents() {
+    let src = CountingSource {
+        ttf: common::fixture_ttf(),
+        calls: std::cell::Cell::new(0),
+    };
+    let mut fc = FontCache::new();
+    let req = fixture_req();
+    // Métriques : un parse par (fonte, taille) ; la valeur
+    // est identique au calcul direct sur les octets.
+    let direct = font::metrics(&src.ttf, 10.0).expect("métriques");
+    for _ in 0..3 {
+        assert_eq!(fc.metrics(&src, &req, 10.0), Some(direct));
+    }
+    // Shape : même entrée → même run, sans re-shaping.
+    let direct_run = font::shape(&src.ttf, "abcd", 20.0, false).expect("shape");
+    for _ in 0..3 {
+        assert_eq!(
+            fc.shape(&src, &req, "abcd", 20.0, false).as_ref(),
+            Some(&direct_run)
+        );
+    }
+    // Texte différent = entrée différente.
+    let other = fc
+        .shape(&src, &req, "xy", 20.0, false)
+        .expect("autre pièce");
+    assert_ne!(other, direct_run);
+    // Une seule résolution de fonte pour tout.
+    assert_eq!(src.calls.get(), 1);
+}
+
+#[test]
+fn cache_tolere_fonte_invalide() {
+    // Octets hostiles : ni métriques ni shape ne paniquent.
+    struct Garbage;
+    impl FontSource for Garbage {
+        fn font_data(&self, _req: &FontRequest) -> Option<Vec<u8>> {
+            Some(vec![0xDE, 0xAD, 0xBE, 0xEF])
+        }
+    }
+    let src = Garbage;
+    let mut fc = FontCache::new();
+    let req = fixture_req();
+    assert!(fc.data(&src, &req).is_some()); // octets servis
+    assert!(fc.metrics(&src, &req, 10.0).is_none());
+    assert!(fc.shape(&src, &req, "abc", 10.0, false).is_none());
+    // Miss re-joué : toujours None, jamais panic.
+    assert!(fc.metrics(&src, &req, 12.0).is_none());
 }

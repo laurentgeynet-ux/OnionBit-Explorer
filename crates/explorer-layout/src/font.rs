@@ -16,6 +16,9 @@
 //! [`ttf_parser::Face`] est une optimisation d'infra, pas un
 //! invariant du domaine.
 
+use std::collections::HashMap;
+use std::rc::Rc;
+
 /// Port : source de données de fontes (ADR-0009).
 ///
 /// Contrat : retourne les octets d'une fonte TTF/OTF répondant
@@ -28,7 +31,7 @@ pub trait FontSource {
 }
 
 /// Requête de fonte issue du style calculé.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FontRequest {
     /// Familles demandées, par ordre de préférence
     /// (`font-family` CSS, génériques en dernier recours).
@@ -85,6 +88,130 @@ pub struct ShapedRun {
     pub advance: f32,
     /// Métriques de la fonte à la taille utilisée.
     pub metrics: FontMetrics,
+}
+
+/// Cache de la pipeline fonte, borné à une passe de layout
+/// ou de raster (R-33b) : auparavant `font_data`, le parse de
+/// face et le shaping étaient re-facturés pour **chaque** run
+/// de texte — plusieurs milliers d'appels par page lourde
+/// (~28 s de layout sur ~9 000 nœuds, profil
+/// `profile_resync_phases`). Une résolution par `FontRequest`,
+/// un parse de métriques par (fonte, taille), un shaping par
+/// (fonte, taille, texte, direction).
+///
+/// `!Send`/`!Sync` (Rc + sert sous `RefCell`) : le domaine est
+/// single-writer par contrat — le cache vit dans
+/// [`crate::BlockCtx::font_cache`] ou dans la passe raster.
+#[derive(Debug, Default)]
+pub struct FontCache {
+    /// `FontRequest` → octets résolus (`None` = miss figé).
+    data: HashMap<FontRequest, Option<Rc<Vec<u8>>>>,
+    /// (identité de fonte, taille px en bits) → métriques
+    /// verticales. L'identité = l'adresse des octets cachés —
+    /// stable tant que `data` vit.
+    metrics: HashMap<(usize, u32), Option<FontMetrics>>,
+    /// (identité, taille, texte, rtl) → run shapé — `measure`,
+    /// le repli de ligne et `trail_w` rejouent les mêmes
+    /// pièces. Borné (page hostile) : au-delà, plus d'insert.
+    shape: HashMap<(usize, u32, String, bool), Option<ShapedRun>>,
+}
+
+/// Borne des entrées `shape` mémorisées.
+const SHAPE_CACHE_CAP: usize = 8192;
+
+impl FontCache {
+    /// Cache vide pour une passe.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Octets de la fonte — mémoïsés par requête ; `None`
+    /// figé (une famille absente ne re-coûte rien).
+    pub fn data(&mut self, src: &dyn FontSource, req: &FontRequest) -> Option<Rc<Vec<u8>>> {
+        self.data
+            .entry(req.clone())
+            .or_insert_with(|| src.font_data(req).map(Rc::new))
+            .clone()
+    }
+
+    /// Adresse d'identité des octets cachés (clé des cartes
+    /// `metrics`/`shape`) — `None` si la fonte est absente.
+    fn key(&mut self, src: &dyn FontSource, req: &FontRequest) -> Option<usize> {
+        self.data(src, req).map(|d| Rc::as_ptr(&d) as usize)
+    }
+
+    /// Métriques verticales à `size_px` — un parse `hhea`
+    /// par (fonte, taille).
+    pub fn metrics(
+        &mut self,
+        src: &dyn FontSource,
+        req: &FontRequest,
+        size_px: f32,
+    ) -> Option<FontMetrics> {
+        let k = self.key(src, req)?;
+        if let Some(&m) = self.metrics.get(&(k, size_px.to_bits())) {
+            return m;
+        }
+        let m = self.data(src, req).and_then(|d| metrics(&d, size_px));
+        self.metrics.insert((k, size_px.to_bits()), m);
+        m
+    }
+
+    /// Run shapé — mémoïsé par (fonte, taille, texte, dir) ;
+    /// borne `SHAPE_CACHE_CAP` (au-delà, calcul sans insert).
+    pub fn shape(
+        &mut self,
+        src: &dyn FontSource,
+        req: &FontRequest,
+        text: &str,
+        size_px: f32,
+        rtl: bool,
+    ) -> Option<ShapedRun> {
+        let k = self.key(src, req)?;
+        if let Some(hit) = self
+            .shape
+            .get(&(k, size_px.to_bits(), text.to_string(), rtl))
+        {
+            return hit.clone();
+        }
+        let run = self
+            .data(src, req)
+            .and_then(|d| shape(&d, text, size_px, rtl));
+        if self.shape.len() < SHAPE_CACHE_CAP {
+            self.shape
+                .insert((k, size_px.to_bits(), text.to_string(), rtl), run.clone());
+        }
+        run
+    }
+}
+
+/// `FontRequest` du style calculé — partagée par les points
+/// d'entrée fonte (avant : triple copie inline/block/font).
+#[must_use]
+pub fn request_of(style: &explorer_css::ComputedStyle, ctx: &crate::BlockCtx<'_>) -> FontRequest {
+    let families: Vec<String> = style.get("font-family").map_or_else(
+        || vec![ctx.default_family.to_string()],
+        |f| {
+            f.split(',')
+                .map(|s| s.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
+                .collect()
+        },
+    );
+    let weight = style
+        .get("font-weight")
+        .and_then(|w| match w.trim() {
+            "bold" | "bolder" => Some(700u16),
+            "normal" | "lighter" => Some(400),
+            v => v.parse().ok(),
+        })
+        .unwrap_or(400);
+    let italic = matches!(style.get("font-style"), Some("italic" | "oblique"));
+    FontRequest {
+        families,
+        weight,
+        italic,
+    }
 }
 
 /// Métriques d'une fonte à `size_px`, `None` si octets
@@ -174,34 +301,25 @@ pub fn natural_line_height(
     size_px: f32,
     ctx: &crate::BlockCtx<'_>,
 ) -> f32 {
-    font_data(style, ctx)
-        .and_then(|data| metrics(&data, size_px))
+    let Some(src) = ctx.fonts else {
+        return size_px * 1.2;
+    };
+    let req = request_of(style, ctx);
+    ctx.font_cache
+        .borrow_mut()
+        .metrics(src, &req, size_px)
         .map_or(size_px * 1.2, FontMetrics::line_height)
 }
 
 /// Octets de la fonte du style via le port `FontSource` —
-/// `None` sans source injectée ni fonte trouvée.
-fn font_data(style: &explorer_css::ComputedStyle, ctx: &crate::BlockCtx<'_>) -> Option<Vec<u8>> {
+/// mémoïsés dans `ctx.font_cache` (R-33b) ; `None` sans
+/// source injectée ni fonte trouvée.
+#[must_use]
+pub fn font_data_of(
+    style: &explorer_css::ComputedStyle,
+    ctx: &crate::BlockCtx<'_>,
+) -> Option<Rc<Vec<u8>>> {
     let src = ctx.fonts?;
-    let families: Vec<String> = style.get("font-family").map_or_else(
-        || vec![ctx.default_family.to_string()],
-        |f| {
-            f.split(',')
-                .map(|s| s.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
-                .collect()
-        },
-    );
-    let weight = style
-        .get("font-weight")
-        .and_then(|w| match w.trim() {
-            "bold" | "bolder" => Some(700u16),
-            _ => w.trim().parse().ok(),
-        })
-        .unwrap_or(400);
-    let italic = matches!(style.get("font-style"), Some("italic" | "oblique"));
-    src.font_data(&FontRequest {
-        families,
-        weight,
-        italic,
-    })
+    let req = request_of(style, ctx);
+    ctx.font_cache.borrow_mut().data(src, &req)
 }
