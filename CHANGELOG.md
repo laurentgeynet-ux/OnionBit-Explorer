@@ -84,6 +84,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   fixture 0.5em, replis proportionnel/invalide, bande
   peinte 3 glyphes sur 10 vs boîte entière, dédup match
   niché + groupement occurrence transversale.
+- **R-36 — cache glyphes cross-passe du raster** :
+  `explorer_render::GlyphCache` (module `glyph_cache`)
+  persiste entre repaints — faces `ttf_parser` possédées
+  (`owned_ttf_parser::OwnedFace`, nouvelle dep appariée
+  0.25, pur Rust) et contours de glyphes en unités fonte
+  (`Path::transform` = même `map_point` par point que
+  l'ancien sink transformé, pixels identiques). APIs
+  additives `rasterize_cached` / `rasterize_dirty_cached`
+  — `rasterize`/`rasterize_dirty` inchangées (délèguent
+  à cache jetable). Invalidation : `FontSource::revision`
+  (trait, méthode additive `0` par défaut) bumpée par
+  `WebFontSource::register`/`clear` — une face `@font-face`
+  arrivée entre deux repaints vide le cache au sync
+  suivant. `PaintPayload.font_cache` câblé (`Send` —
+  `Arc`, jamais `Rc`). **Mesure `sync_profile`** : ~0 %
+  de gain (165.5 ms/passe neuf = chaud sur page dense en
+  texte) — `outline_glyph`/`Face::parse` ≪ 1 % du raster ;
+  le poste dominant est le fill scanline tiny-skia → la
+  suite perf texte = atlas bitmap de glyphes (travail
+  séparé consigné en roadmap). Tests : équivalence pixels
+  passe cachée/neuve (plein + dirty), réutilisation face
+  `Arc`, vidage à révision changée.
 
 ### Fixed
 

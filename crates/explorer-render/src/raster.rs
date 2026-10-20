@@ -18,11 +18,13 @@
 //!   multipliée, le framebuffer sort en pixels physiques.
 
 use explorer_css::value::Color;
-use explorer_layout::font::{FontCache, FontRequest, FontSource, Glyph, ShapedRun};
+use explorer_layout::font::{FontRequest, FontSource, Glyph, ShapedRun};
 use image::ImageEncoder;
 use tiny_skia::{FillRule, Mask, Paint, PathBuilder, Pixmap, Point, Rect, Transform};
 
 use crate::display::{BorderStyle, DisplayItem, DisplayList};
+use crate::glyph_cache::GlyphCache;
+use owned_ttf_parser::AsFaceRef;
 
 /// Framebuffer RGBA prémultiplié (format natif tiny-skia).
 #[derive(Debug, Clone)]
@@ -170,43 +172,15 @@ fn map(tf: Transform, x: f32, y: f32) -> (f32, f32) {
     (p.x, p.y)
 }
 
-/// Adaptateur `ttf_parser::OutlineBuilder` → `PathBuilder`
-/// tiny-skia : les coordonnées arrivent en unités fonte
-/// (upem) et sont transformées par `tf` à la volée.
-struct GlyphSink<'a> {
-    pb: &'a mut PathBuilder,
-    tf: Transform,
-}
-
-impl ttf_parser::OutlineBuilder for GlyphSink<'_> {
-    fn move_to(&mut self, x: f32, y: f32) {
-        let (x, y) = map(self.tf, x, y);
-        self.pb.move_to(x, y);
-    }
-    fn line_to(&mut self, x: f32, y: f32) {
-        let (x, y) = map(self.tf, x, y);
-        self.pb.line_to(x, y);
-    }
-    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        let (x1, y1) = map(self.tf, x1, y1);
-        let (x, y) = map(self.tf, x, y);
-        self.pb.quad_to(x1, y1, x, y);
-    }
-    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        let (x1, y1) = map(self.tf, x1, y1);
-        let (x2, y2) = map(self.tf, x2, y2);
-        let (x, y) = map(self.tf, x, y);
-        self.pb.cubic_to(x1, y1, x2, y2, x, y);
-    }
-    fn close(&mut self) {
-        self.pb.close();
-    }
-}
-
 /// Peint un run texte : contours de chaque glyphe posés à la
 /// plume. `ox`/`oy`/`size_px` en **px CSS** ; `cur` = dpi ·
 /// transforms actifs — il achève la correspondance vers les
 /// pixels physiques (rotation/échelle héritées du CSS).
+///
+/// R-36 : la face est `gc.face()` (parsée une fois, possédée,
+/// partagée entre repaints) et chaque contour vient de
+/// `gc.glyph_path()` en unités fonte — plus de `Face::parse`
+/// ni de `outline_glyph` par glyphe à chaque frame.
 #[allow(clippy::too_many_arguments)]
 fn paint_text(
     pixmap: &mut Pixmap,
@@ -218,15 +192,14 @@ fn paint_text(
     size_px: f32,
     cur: Transform,
     fonts: &dyn FontSource,
-    fc: &mut FontCache,
+    gc: &mut GlyphCache,
     clip: Option<&Mask>,
 ) {
-    let Some(data) = fc.data(fonts, font) else {
+    let Some(oface) = gc.face(fonts, font) else {
         return;
     };
-    let Ok(face) = ttf_parser::Face::parse(&data, 0) else {
-        return;
-    };
+    let face = oface.as_face_ref();
+    let face_key = std::sync::Arc::as_ptr(&oface) as usize;
     let upem = f32::from(face.units_per_em()).max(1.0);
     let gscale = size_px / upem;
     let mut paint = Paint {
@@ -237,7 +210,7 @@ fn paint_text(
     let mut pen = ox;
     for g in &run.glyphs {
         draw_glyph(
-            pixmap, &face, g, pen, oy, gscale, size_px, cur, &paint, clip,
+            pixmap, gc, face, face_key, g, pen, oy, gscale, size_px, cur, &paint, clip,
         );
         pen += g.advance;
     }
@@ -246,10 +219,15 @@ fn paint_text(
 /// Contour d'un glyphe : unités fonte → px CSS (y fonte monte
 /// vers le haut → inversion) → translation plume/baseline →
 /// `cur` vers les pixels physiques. Offsets/avances en px CSS.
+/// Le contour brut sort du cache cross-passe (unités fonte) ;
+/// `Path::transform` applique `tf` — même `map_point` par
+/// point que le `GlyphSink` historique, résultat identique.
 #[allow(clippy::too_many_arguments)]
 fn draw_glyph(
     pixmap: &mut Pixmap,
-    face: &ttf_parser::Face,
+    gc: &mut GlyphCache,
+    face: &ttf_parser::Face<'_>,
+    face_key: usize,
     g: &Glyph,
     pen: f32,
     baseline: f32,
@@ -296,12 +274,10 @@ fn draw_glyph(
             ))
             .post_concat(cur)
     };
-    let mut pb = PathBuilder::new();
-    face.outline_glyph(
-        ttf_parser::GlyphId(g.id),
-        &mut GlyphSink { pb: &mut pb, tf },
-    );
-    if let Some(path) = pb.finish() {
+    if let Some(path) = gc
+        .glyph_path(face, face_key, g.id)
+        .and_then(|p| p.transform(tf))
+    {
         pixmap.fill_path(&path, paint, FillRule::Winding, Transform::default(), clip);
     }
 }
@@ -310,8 +286,25 @@ fn draw_glyph(
 /// framebuffer. `fonts` = port `FontSource` injecté par core
 /// (même source que le layout pour des glyphes cohérents).
 /// `None` si la frame est hors bornes allouables.
+/// Équivalent de [`rasterize_cached`] avec un cache jetable
+/// — préférer la variante cachée entre repaints (R-36).
 #[must_use]
 pub fn rasterize(list: &DisplayList, fonts: &dyn FontSource, scale: f32) -> Option<Frame> {
+    rasterize_cached(list, fonts, scale, &mut GlyphCache::new())
+}
+
+/// [`rasterize`] avec un [`GlyphCache`] persistant (R-36) :
+/// faces parsées et contours de glyphes sont réutilisés
+/// d'un repaint à l'autre — sync automatique sur
+/// `FontSource::revision` (faces `@font-face` inscrites ou
+/// purgées → cache vidé).
+#[must_use]
+pub fn rasterize_cached(
+    list: &DisplayList,
+    fonts: &dyn FontSource,
+    scale: f32,
+    gc: &mut GlyphCache,
+) -> Option<Frame> {
     let w_px = (list.width * scale).round().max(1.0);
     let h_px = (list.height * scale).round().max(1.0);
     if !(w_px.is_finite() && h_px.is_finite()) || w_px > 16384.0 || h_px > 16384.0 {
@@ -327,8 +320,8 @@ pub fn rasterize(list: &DisplayList, fonts: &dyn FontSource, scale: f32) -> Opti
     pixmap.fill(tiny_skia::Color::WHITE);
     let dpi = Transform::from_scale(scale, scale);
 
-    let mut fc = FontCache::new();
-    replay_items(&mut pixmap, &list.items, dpi, fonts, &mut fc, None);
+    gc.sync(fonts);
+    replay_items(&mut pixmap, &list.items, dpi, fonts, gc, None);
     Some(Frame {
         width: w,
         height: h,
@@ -361,13 +354,29 @@ const DAMAGE_MAX_RECTS: usize = 64;
 /// clip/transform identique) — l'équivalence « régional ==
 /// plein cadre » est assertée pixel-à-pixel par
 /// `tests/dirty_raster.rs`.
+/// Équivalent de [`rasterize_dirty_cached`] à cache jetable.
 #[must_use]
 pub fn rasterize_dirty(
     list: &DisplayList,
     fonts: &dyn FontSource,
     scale: f32,
+    prev: Frame,
+    damage: &[explorer_layout::Rect],
+) -> Option<Frame> {
+    rasterize_dirty_cached(list, fonts, scale, prev, damage, &mut GlyphCache::new())
+}
+
+/// [`rasterize_dirty`] avec un [`GlyphCache`] persistant
+/// (R-36) — même sync `FontSource::revision` que
+/// [`rasterize_cached`].
+#[must_use]
+pub fn rasterize_dirty_cached(
+    list: &DisplayList,
+    fonts: &dyn FontSource,
+    scale: f32,
     mut prev: Frame,
     damage: &[explorer_layout::Rect],
+    gc: &mut GlyphCache,
 ) -> Option<Frame> {
     let w_px = (list.width * scale).round().max(1.0);
     let h_px = (list.height * scale).round().max(1.0);
@@ -424,7 +433,7 @@ pub fn rasterize_dirty(
     }
 
     let bounds = crate::display::resolved_bounds(&list.items);
-    let mut fc = FontCache::new();
+    gc.sync(fonts);
     for (x0, y0, x1, y1) in merged {
         let (rw, rh) = (x1 - x0, y1 - y0);
         let mut pm = Pixmap::new(rw, rh)?;
@@ -448,7 +457,7 @@ pub fn rasterize_dirty(
             &list.items,
             base,
             fonts,
-            &mut fc,
+            gc,
             Some((&bounds, win_css)),
         );
         // Blit de la fenêtre dans la frame.
@@ -476,7 +485,7 @@ fn replay_items(
     items: &[DisplayItem],
     dpi: Transform,
     fonts: &dyn FontSource,
-    fc: &mut FontCache,
+    gc: &mut GlyphCache,
     filter: Option<(&[Option<explorer_layout::Rect>], explorer_layout::Rect)>,
 ) {
     let mut clips: Vec<Mask> = Vec::new();
@@ -544,7 +553,7 @@ fn replay_items(
                         .is_none_or(|b| rects_overlap(b, win))
                 });
                 if draw {
-                    paint_item(pixmap, item, cur, fonts, fc, clips.last());
+                    paint_item(pixmap, item, cur, fonts, gc, clips.last());
                 }
             }
         }
@@ -564,7 +573,7 @@ fn paint_item(
     item: &DisplayItem,
     dpi: Transform,
     fonts: &dyn FontSource,
-    fc: &mut FontCache,
+    gc: &mut GlyphCache,
     clip: Option<&Mask>,
 ) {
     match item {
@@ -603,7 +612,7 @@ fn paint_item(
                 *size_px,
                 dpi,
                 fonts,
-                fc,
+                gc,
                 clip,
             );
         }

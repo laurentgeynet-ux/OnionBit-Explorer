@@ -28,6 +28,18 @@ use std::rc::Rc;
 pub trait FontSource {
     /// Octets de la fonte pour `req`, `None` si inconnue.
     fn font_data(&self, req: &FontRequest) -> Option<Vec<u8>>;
+
+    /// Révision du registre — `0` pour une source figée
+    /// (défaut). Une source **mutable** (ex.
+    /// `WebFontSource`, faces `@font-face` inscrites à la
+    /// volée) la renvoie croissante à chaque mutation : les
+    /// caches cross-passe (`GlyphCache` côté render, R-36)
+    /// la comparent pour vider leurs entrées figées — sinon
+    /// une famille absente à `t` resterait « inconnue »
+    /// après l'arrivée de sa face.
+    fn revision(&self) -> u64 {
+        0
+    }
 }
 
 /// Requête de fonte issue du style calculé.

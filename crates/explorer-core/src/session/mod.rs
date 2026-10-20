@@ -180,6 +180,10 @@ pub(crate) struct Tab {
     list: Option<DisplayList>,
     /// Frame rasterisée.
     frame: Option<Frame>,
+    /// Cache glyphes du raster persisté entre repaints
+    /// (R-36) — faces `OwnedFace` + contours en unités
+    /// fonte ; invalidé par `FontSource::revision`.
+    font_cache: explorer_render::GlyphCache,
     /// PNG encodé — **cache paresseux** invalidé à chaque
     /// repaint, rempli par [`Session::frame_png`] (étape
     /// 55g : l'encodage n'est plus payé qu'une fois par
@@ -660,6 +664,7 @@ impl Session {
                 tree_epoch: 0,
                 list: None,
                 frame: None,
+                font_cache: explorer_render::GlyphCache::new(),
                 png: None,
                 focused: None,
                 hovered: None,

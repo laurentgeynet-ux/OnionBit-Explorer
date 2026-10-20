@@ -187,6 +187,10 @@ pub struct WebFontSource {
     inner: Arc<dyn FontSource + Send + Sync>,
     faces: Vec<WebFace>,
     cap: usize,
+    /// Compteur de mutations (`register`/`clear`) — lu par
+    /// les caches cross-passe (`GlyphCache`, R-36) pour
+    /// invalider leurs entrées figées.
+    rev: u64,
 }
 
 impl WebFontSource {
@@ -197,6 +201,7 @@ impl WebFontSource {
             inner,
             faces: Vec::new(),
             cap,
+            rev: 0,
         }
     }
 
@@ -236,12 +241,14 @@ impl WebFontSource {
             italic,
             data: Arc::new(data),
         });
+        self.rev += 1;
         true
     }
 
     /// Purge le registre (navigation → faces par document).
     pub fn clear(&mut self) {
         self.faces.clear();
+        self.rev += 1;
     }
 
     /// Score d'appariement : famille égale exigée en amont —
@@ -266,6 +273,12 @@ impl FontSource for WebFontSource {
             }
         }
         self.inner.font_data(req)
+    }
+
+    /// Le registre mute : `register`/`clear` la bumpent —
+    /// propage aussi le delta de la source interne.
+    fn revision(&self) -> u64 {
+        self.rev.wrapping_add(self.inner.revision())
     }
 }
 

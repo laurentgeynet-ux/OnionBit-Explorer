@@ -353,7 +353,16 @@ fn profile_resync_phases() {
     let t = Instant::now();
     let fonts = crate::session::apply::SharedFonts(Arc::clone(&s.webfonts));
     let frame = rasterize(&list, &fonts, s.scale).unwrap();
-    eprintln!("  rasterize    : {:?}", t.elapsed());
+    eprintln!("  rasterize    : {:?} (cache neuf)", t.elapsed());
+    // R-36 : même liste, cache glyphes persistant — la 2e
+    // passe rejoue faces + contours retenus (le chemin réel
+    // des repaints session via `p.font_cache`).
+    let mut gc = explorer_render::GlyphCache::new();
+    let _ = explorer_render::rasterize_cached(&list, &fonts, s.scale, &mut gc);
+    let t = Instant::now();
+    let warm = explorer_render::rasterize_cached(&list, &fonts, s.scale, &mut gc).unwrap();
+    eprintln!("  rasterize_cached : {:?} (chaude)", t.elapsed());
+    assert_eq!(frame.pixels, warm.pixels, "équivalence cache");
     let t = Instant::now();
     let _png = frame.encode_png();
     eprintln!("  encode_png   : {:?}", t.elapsed());

@@ -560,15 +560,31 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   des nœuds couverts. Tests : sous-rect exact au glyphe
   (fixture 0.5em), replis, bande peinte 3 glyphes sur 10,
   dédup match niché + groupement transversal.
-- [ ] **R-36. Cache glyphes `paint_text`** (demande
-  consignée, perf raster) : le raster ne re-shape pas
-  (les `ShapedRun` du layout sont réutilisés) mais re-
-  résolvait `font_data` + `Face::parse` par item — **soldé
-  par `FontCache` en R-33b** (cache par passe). Reste à
-  ouvrir : cache **cross-passe** (persister les faces
-  parsées entre repaints — la passe `rasterize` recrée
-  son `FontCache` à chaque appel). À instrumenter
-  `sync_profile` avant/après pour chiffrer le gain.
+- [x] **R-36. Cache glyphes `paint_text`** — livré :
+  `GlyphCache` persistant (module `glyph_cache`,
+  `Send` — `Arc`/`OwnedFace`, voyage dans `PaintPayload`
+  détachée) : faces `ttf_parser` possédées + contours de
+  glyphes en unités fonte (upem) réutilisés d'un repaint
+  à l'autre — `Path::transform` applique le même
+  `map_point` par point que l'ancien sink transformé
+  (équivalence pixel assertée). Variantes additives
+  `rasterize_cached` / `rasterize_dirty_cached` ; les
+  signatures historiques délèguent à cache jetable.
+  Invalidation : `FontSource::revision` (méthode de
+  trait additive, `0` figé par défaut) — bumpée par
+  `WebFontSource::register`/`clear`, relue à chaque
+  passe ; une révision changée vide tout (pointeurs de
+  faces recyclables). `PaintPayload.font_cache` câblé.
+  **Mesure honnête (`sync_profile`)** : ~0 % de gain —
+  165.5 ms/passe neuf *vs* chaud sur page dense en texte,
+  1.22 s sur la fixture 3 000 nœuds. Le poste dominant
+  du raster est le **fill scanline** de tiny-skia
+  (`fill_path`), pas `outline_glyph`/`Face::parse` —
+  la prochaine étape perf texte n'est pas un cache de
+  chemins mais un **atlas bitmap de glyphes** (blit de
+  masques pré-rendus — exige une équivalence de blend
+  prémultiplié ±0 LSB ou une garde d'approximation
+  documentée, travail séparé).
 - [x] **R-37. Invalidation bornée display-list / raster**
   — sous-entrée « raster par dirty-rect » **livrée** :
   `rasterize_dirty` repeint uniquement les fenêtres de

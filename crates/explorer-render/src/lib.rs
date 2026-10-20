@@ -17,6 +17,7 @@ pub mod canvas;
 pub mod dataurl;
 pub mod display;
 pub mod fonts;
+pub mod glyph_cache;
 pub mod image;
 pub mod raster;
 pub mod svg;
@@ -30,7 +31,8 @@ pub use display::{
     DisplayList, SpanMap, SpanRec,
 };
 pub use fonts::{DirFontSource, WebFontSource};
+pub use glyph_cache::GlyphCache;
 pub use image::{decode_image, DecodedImage, ImageTable, PaintImages};
-pub use raster::{rasterize, rasterize_dirty, Frame};
+pub use raster::{rasterize, rasterize_cached, rasterize_dirty, rasterize_dirty_cached, Frame};
 pub use svg::{collect_svg, svg_sizes, SVG_MAX_SOURCE};
 pub use woff::decode_font;

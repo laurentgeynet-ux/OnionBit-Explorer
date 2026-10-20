@@ -54,7 +54,7 @@ use explorer_layout::{
 };
 use explorer_render::canvas::CanvasTable;
 use explorer_render::{
-    collect_data_images, rasterize, DisplayItem, DisplayList, Frame, PaintImages, WebFontSource,
+    collect_data_images, DisplayItem, DisplayList, Frame, PaintImages, WebFontSource,
 };
 
 /// Complément de feuille UA pour `<video>`/`<audio>` sans
@@ -84,6 +84,14 @@ pub(crate) struct SharedFonts(pub Arc<std::sync::Mutex<WebFontSource>>);
 impl FontSource for SharedFonts {
     fn font_data(&self, req: &explorer_layout::font::FontRequest) -> Option<Vec<u8>> {
         self.0.lock().ok()?.font_data(req)
+    }
+
+    /// Révision du registre `@font-face` — le `GlyphCache`
+    /// persistant de la payload la lit par passe (R-36) :
+    /// une face inscrite entre deux repaints vide le cache
+    /// (une famille « inconnue » figée resterait repliée).
+    fn revision(&self) -> u64 {
+        self.0.lock().map_or(0, |w| w.revision())
     }
 }
 
@@ -119,6 +127,9 @@ pub(crate) struct PaintPayload {
     pub list: Option<DisplayList>,
     /// Frame rasterisée courante.
     pub frame: Option<Frame>,
+    /// Cache glyphes cross-passe du raster (R-36) — `Send`,
+    /// voyage avec la payload détachée.
+    pub font_cache: explorer_render::GlyphCache,
     /// PNG paresseux (cache de `frame_png`).
     pub png: Option<Vec<u8>>,
     /// Popup `<select>` ouvert.
@@ -202,6 +213,7 @@ impl Tab {
             tree_epoch: self.tree_epoch,
             list: self.list.take(),
             frame: self.frame.take(),
+            font_cache: std::mem::take(&mut self.font_cache),
             png: self.png.take(),
             popup: self.popup.take(),
             find: self.find.take(),
@@ -228,6 +240,7 @@ impl Tab {
         self.tree_epoch = p.tree_epoch;
         self.list = p.list;
         self.frame = p.frame;
+        self.font_cache = p.font_cache;
         self.png = p.png;
         self.popup = p.popup;
         self.find = p.find;
@@ -497,12 +510,13 @@ pub(crate) fn repaint_payload(p: &mut PaintPayload, ctx: &ApplyCtx) -> Result<()
         .take()
         .filter(|_| !full_cover)
         .and_then(|prev| {
-            explorer_render::rasterize_dirty(
+            explorer_render::rasterize_dirty_cached(
                 &list,
                 &ctx.fonts as &dyn FontSource,
                 ctx.scale,
                 prev,
                 &regions,
+                &mut p.font_cache,
             )
         })
         .map_or_else(
@@ -514,7 +528,12 @@ pub(crate) fn repaint_payload(p: &mut PaintPayload, ctx: &ApplyCtx) -> Result<()
                 // garde ses `spans` pour le prochain build.
                 let mut culled = list.clone();
                 cull_display_list(&mut culled);
-                rasterize(&culled, &ctx.fonts as &dyn FontSource, ctx.scale)
+                explorer_render::rasterize_cached(
+                    &culled,
+                    &ctx.fonts as &dyn FontSource,
+                    ctx.scale,
+                    &mut p.font_cache,
+                )
             },
             Some,
         )
