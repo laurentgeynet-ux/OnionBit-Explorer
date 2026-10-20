@@ -89,19 +89,25 @@ struct CliArgs {
     port: Option<u16>,
     /// `--profile DIR` → surcharge `EXPLORER_PROFILE`.
     profile: Option<PathBuf>,
+    /// `--download-dir DIR` → surcharge `EXPLORER_DOWNLOAD_DIR`
+    /// (étape 70 ; défaut `<profil>/downloads`).
+    download_dir: Option<PathBuf>,
 }
 
 /// Usage affiché sur `--help` ou argument invalide.
 fn print_usage() {
     eprintln!(
         "explorer-daemon — hôte moteur + API REST/SSE loopback (ADR-0003)\n\
-         usage : explorer-daemon [--port N] [--profile DIR] [--help]\n\
-         \x20 --port N       port d'écoute (surcharge EXPLORER_PORT)\n\
-         \x20 --profile DIR  répertoire de profil persistant\n\
-         \x20               (surcharge EXPLORER_PROFILE)\n\
-         \x20 --help         affiche cette aide\n\
+         usage : explorer-daemon [--port N] [--profile DIR] [--download-dir DIR] [--help]\n\
+         \x20 --port N            port d'écoute (surcharge EXPLORER_PORT)\n\
+         \x20 --profile DIR       répertoire de profil persistant\n\
+         \x20                     (surcharge EXPLORER_PROFILE)\n\
+         \x20 --download-dir DIR  répertoire des téléchargements acceptés\n\
+         \x20                     (surcharge EXPLORER_DOWNLOAD_DIR ;\n\
+         \x20                     défaut <profil>/downloads)\n\
+         \x20 --help              affiche cette aide\n\
          variables : EXPLORER_PORT, EXPLORER_PROFILE, EXPLORER_FONT_DIR,\n\
-         \x20            EXPLORER_MAX_BODY, EXPLORER_API_KEY"
+         \x20            EXPLORER_MAX_BODY, EXPLORER_API_KEY, EXPLORER_DOWNLOAD_DIR"
     );
 }
 
@@ -120,6 +126,7 @@ fn parse_args() -> CliArgs {
     let mut out = CliArgs {
         port: None,
         profile: None,
+        download_dir: std::env::var_os("EXPLORER_DOWNLOAD_DIR").map(PathBuf::from),
     };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -145,6 +152,9 @@ fn parse_args() -> CliArgs {
                 out.port = Some(p);
             }
             "--profile" => out.profile = Some(PathBuf::from(value("--profile"))),
+            "--download-dir" => {
+                out.download_dir = Some(PathBuf::from(value("--download-dir")));
+            }
             _ => arg_fail(&format!("argument inconnu : {a}")),
         }
     }
@@ -219,6 +229,12 @@ async fn main() {
     let mut session = Session::new(http_stack(&cfg, jar.clone(), &profile_dir), Arc::new(fonts));
     session.set_cookie_jar(jar);
     session.set_store(store);
+    // Répertoire des téléchargements acceptés sans chemin
+    // explicite (étape 70) — `<profil>/downloads` par défaut.
+    session.set_download_dir(Some(
+        cli.download_dir
+            .unwrap_or_else(|| profile_dir.join("downloads")),
+    ));
     session.set_js_factory(explorer_js::DilloEngine::factory());
     let session = Arc::new(tokio::sync::Mutex::new(session));
 

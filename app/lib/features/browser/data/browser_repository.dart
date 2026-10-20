@@ -165,4 +165,25 @@ class BrowserRepository {
     }
     throw const ApiException('POST /find : réponse inattendue');
   }
+
+  /// Accepte un téléchargement en attente (étape 70) :
+  /// écrit le corps bufferisé sous le répertoire de
+  /// téléchargement du daemon ( explicite possible).
+  /// Retourne le chemin écrit.
+  Future<String> acceptDownload(String tabId, int dlId, {String? path}) async {
+    final res = await _api.postJson(
+      '/api/tabs/$tabId/downloads/$dlId/accept',
+      body: {'path': ?path},
+    );
+    if (res is Map<String, dynamic>) {
+      return res['path'] as String? ?? '';
+    }
+    throw const ApiException('POST /downloads/accept : réponse inattendue');
+  }
+
+  /// Rejette un téléchargement : le corps est rejoué comme
+  /// document (dégradation « dump texte » historique).
+  Future<void> declineDownload(String tabId, int dlId) => _api.postJson(
+    '/api/tabs/$tabId/downloads/$dlId/decline',
+  );
 }

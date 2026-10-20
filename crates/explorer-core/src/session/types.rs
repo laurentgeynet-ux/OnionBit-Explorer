@@ -64,6 +64,66 @@ pub enum CoreEvent {
         /// Message d'erreur.
         message: String,
     },
+    /// Réponse en navigation top-level non affichable
+    /// (étape 70) : `Content-Disposition: attachment`,
+    /// `application/octet-stream` ou type inconnu — le corps
+    /// est bufferisé en session, l'UI propose l'enregistrement
+    /// (`accept_download`) ou le rejet (`decline_download`
+    /// → rejeu comme document, dégradation historique).
+    DownloadOffered {
+        /// Onglet de la navigation.
+        tab: TabId,
+        /// Identifiant du téléchargement en attente.
+        id: u64,
+        /// URL servie (post-redirection).
+        url: String,
+        /// Nom de fichier suggéré (sanitisé).
+        filename: String,
+        /// Type MIME déclaré (sans paramètres).
+        mime: String,
+        /// Taille annoncée (`Content-Length`) si connue.
+        size: Option<u64>,
+    },
+    /// Progression de la réception d'un téléchargement —
+    /// émis par morceau reçu pendant le buffer.
+    DownloadProgress {
+        /// Onglet de la navigation.
+        tab: TabId,
+        /// Identifiant du téléchargement.
+        id: u64,
+        /// Octets reçus à date.
+        received: u64,
+        /// Taille annoncée si connue.
+        total: Option<u64>,
+    },
+    /// Téléchargement accepté et écrit sur disque.
+    DownloadDone {
+        /// Onglet de la navigation.
+        tab: TabId,
+        /// Identifiant du téléchargement.
+        id: u64,
+        /// Chemin du fichier écrit.
+        path: String,
+    },
+}
+
+/// Fiche publique d'un téléchargement en attente (étape 70)
+/// — exposée par `Session::pending_downloads` et l'API ;
+/// le corps reste interne (`PendingDownload`).
+#[derive(Debug, Clone)]
+pub struct DownloadInfo {
+    /// Identifiant du téléchargement.
+    pub id: u64,
+    /// Onglet de la navigation.
+    pub tab: TabId,
+    /// URL servie (post-redirection).
+    pub url: String,
+    /// Nom de fichier suggéré (sanitisé).
+    pub filename: String,
+    /// Type MIME déclaré.
+    pub mime: String,
+    /// Octets reçus.
+    pub size: usize,
 }
 
 /// Région invalide d'une frame (étape 55) — **pixels
@@ -327,6 +387,10 @@ pub enum CoreError {
     /// Mutation DOM refusée (nœud mort, arène pleine…).
     #[error("dom : {0}")]
     Dom(#[from] explorer_dom::DomError),
+    /// Téléchargement : identifiant inconnu, chemin
+    /// refusé, écriture en échec (étape 70).
+    #[error("téléchargement : {0}")]
+    Download(String),
 }
 
 /// Configuration de session — seuils et viewport initiaux
@@ -400,6 +464,11 @@ pub struct SessionConfig {
     /// (`setInterval`) laisse alors respirer l'API entre deux
     /// peintures au lieu de tenir le verrou en permanence.
     pub resync_gap_max_ms: u64,
+    /// Borne du corps bufferisé d'un téléchargement en
+    /// attente (étape 70) — un octet-stream hostile au-delà
+    /// est rejeté en `Fetch` (page d'erreur, étape 69)
+    /// plutôt que de gonfler la mémoire.
+    pub max_download_bytes: usize,
 }
 
 impl Default for SessionConfig {
@@ -421,6 +490,7 @@ impl Default for SessionConfig {
             paint_chunk_bytes: 32 * 1024,
             paint_interval_ms: 100,
             resync_gap_max_ms: 4_000,
+            max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
         }
     }

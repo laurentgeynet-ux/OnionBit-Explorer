@@ -16,6 +16,7 @@ import '../../../core/settings/app_settings.dart';
 import '../data/browser_repository.dart';
 import '../domain/bookmark.dart';
 import '../domain/browser_tab.dart';
+import '../domain/download_offer.dart';
 import '../domain/history_entry.dart';
 
 /// État UI du navigateur : onglets, onglet actif, disponibilité
@@ -33,6 +34,7 @@ class BrowserState {
     this.fieldFocused = false,
     this.pageErrors = const {},
     this.rawFrames = const {},
+    this.downloadOffer,
   });
 
   final List<BrowserTab> tabs;
@@ -77,6 +79,12 @@ class BrowserState {
   /// `navigated` de l'onglet.
   final Map<String, String> pageErrors;
 
+  /// Dernier téléchargement proposé en attente de décision
+  /// (étape 70, SSE `download_offered`) — l'UI affiche la
+  /// boîte « Enregistrer / Ouvrir comme texte ». `null`
+  /// dès qu'une décision est prise.
+  final DownloadOffer? downloadOffer;
+
   /// Onglet actif, ou `null`.
   BrowserTab? get active {
     for (final t in tabs) {
@@ -97,6 +105,7 @@ class BrowserState {
     bool? fieldFocused,
     Map<String, String>? pageErrors,
     Map<String, ui.Image>? rawFrames,
+    DownloadOffer? Function()? downloadOffer,
   }) => BrowserState(
     tabs: tabs ?? this.tabs,
     activeId: activeId ?? this.activeId,
@@ -109,6 +118,7 @@ class BrowserState {
     hoverEditable: hoverEditable ?? this.hoverEditable,
     fieldFocused: fieldFocused ?? this.fieldFocused,
     pageErrors: pageErrors ?? this.pageErrors,
+    downloadOffer: downloadOffer != null ? downloadOffer() : this.downloadOffer,
   );
 }
 
@@ -412,6 +422,17 @@ class BrowserController extends Notifier<BrowserState> {
           lastError: () => msg,
           pageErrors: msg == null ? null : {...state.pageErrors, tabId: msg},
         );
+      case 'download_offered':
+        // Étape 70 : corps non affichable bufferisé —
+        // l'UI propose « Enregistrer / Ouvrir comme texte ».
+        state = state.copyWith(
+          downloadOffer: () => DownloadOffer.fromJson(ev.data),
+        );
+      case 'download_done':
+        state = state.copyWith(
+          lastError: () =>
+              'Téléchargement enregistré : ${ev.data['path']}',
+        );
       case 'tab_closed':
         final tabs = state.tabs.where((t) => t.id != tabId).toList();
         state = state.copyWith(
@@ -420,6 +441,29 @@ class BrowserController extends Notifier<BrowserState> {
               ? (tabs.isEmpty ? null : tabs.first.id)
               : state.activeId,
         );
+    }
+  }
+
+  /// Accepte le téléchargement proposé (étape 70) : écrit
+  /// sous le répertoire du daemon — `DownloadDone` SSE
+  /// rapporte le chemin (snackbar via `lastError`).
+  Future<void> acceptDownload(DownloadOffer offer) async {
+    state = state.copyWith(downloadOffer: () => null);
+    try {
+      await _repo.acceptDownload(offer.tab, offer.id);
+    } on Exception catch (e) {
+      state = state.copyWith(lastError: () => 'Téléchargement : $e');
+    }
+  }
+
+  /// Rejette le téléchargement : le corps est rejoué comme
+  /// document (« dump texte » — l'onglet navigue dessus).
+  Future<void> declineDownload(DownloadOffer offer) async {
+    state = state.copyWith(downloadOffer: () => null);
+    try {
+      await _repo.declineDownload(offer.tab, offer.id);
+    } on Exception catch (e) {
+      state = state.copyWith(lastError: () => 'Téléchargement : $e');
     }
   }
 

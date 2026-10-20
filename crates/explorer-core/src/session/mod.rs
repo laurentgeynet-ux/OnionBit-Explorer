@@ -47,6 +47,8 @@ mod apply;
 mod decode;
 #[allow(clippy::wildcard_imports)]
 mod dom_helpers;
+
+mod downloads;
 #[allow(clippy::wildcard_imports)]
 mod find;
 #[allow(clippy::wildcard_imports)]
@@ -87,6 +89,8 @@ pub(crate) use anim_items::*;
 pub(crate) use decode::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use dom_helpers::*;
+
+pub(crate) use downloads::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use find::*;
 #[allow(clippy::wildcard_imports)]
@@ -389,6 +393,21 @@ pub struct Session {
     /// tâche tokio — `Abort` moteur ou fermeture d'onglet
     /// tuent la jointure.
     net_tasks: HashMap<(TabId, u64), JoinHandle<()>>,
+    /// Téléchargements bufferisés en attente de décision
+    /// (étape 70), `id → corps + méta`.
+    downloads: HashMap<u64, PendingDownload>,
+    /// Identifiants de téléchargement — un id est réservé
+    /// par navigation (`nav_begin`) pour que la progression
+    /// hors verrou porte déjà l'id final ; les ids non
+    /// consécutifs sont volontaires (toute nav en consomme
+    /// un, document ou pas).
+    next_download_id: u64,
+    /// Répertoire par défaut des téléchargements acceptés
+    /// sans chemin explicite — `None` = chemin requis.
+    download_dir: Option<std::path::PathBuf>,
+    /// Borne du corps bufferisé d'un téléchargement
+    /// (`SessionConfig::max_download_bytes`).
+    max_download_bytes: usize,
     /// Quota de requêtes script-initiées simultanées par
     /// onglet (`max_script_net` de config, ADR-0019).
     max_script_net: usize,
@@ -476,6 +495,10 @@ impl Session {
             bfcache_pages: cfg.bfcache_pages,
             incremental_syncs: 0,
             pending_applies: std::collections::VecDeque::new(),
+            downloads: HashMap::new(),
+            next_download_id: 1,
+            download_dir: None,
+            max_download_bytes: cfg.max_download_bytes,
         }
     }
 

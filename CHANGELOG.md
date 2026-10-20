@@ -9,6 +9,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-31 — Acid2, première passe de causes** (`explorer-css`,
+  `explorer-layout`, `explorer-render`) : 90,1 % → **96,5 %**
+  (1282/1329 pixels de structure) — quatre causes racines.
+  **Strut de ligne** (`inline.rs`, §10.8.1) : chaque line box
+  démarre d'une boîte invisible de la `line-height` du bloc —
+  baseline = demi-leading + ascent — `.chin` passe 4 px →
+  12 px. **`;` orphelin en prélude** (`parser.rs`, CSS Syntax
+  §5.4.4) : il entre dans la règle qualifiée au lieu de la
+  terminer — `; .parser{height:3em}` devient un sélecteur
+  invalide et la règle tombe (`.parser` = 1em, comme la
+  référence 2005). **Marge basse échappée** (`block.rs`,
+  §8.3.1) : le `margin-bottom` du dernier fils in-flow fuit
+  sous un parent à `height:auto` sans bordure/padding — le
+  `<ul>` à marge négative ne recouvre plus `.parser`.
+  **`min|max-height|width` dans l'ordre spec** (§10.4/10.7) :
+  max appliqué avant min (le min gagne les conflits) — la
+  barre fixe `.picture p` fait bien 12 px (8 → 2mm → 1em).
+  **CB des inlines `position:relative`** (`block.rs`, §10.1) :
+  `resolve_absolutes` lit le style pour les boîtes inline
+  (jamais de métadonnées posées), en excluant les boîtes
+  anonymes/texte qui clonent le style parent. **Harnais** :
+  émulation du scroll de capture (la référence a été shootée
+  document défilé — `build_display_list_full(scroll)` en deux
+  passes ; les boîtes/fonds `fixed` restent ancrés au
+  viewport). Reste ~3,5 % : bords AA du PNG œil/checker sous
+  pixels échantillonnés et l'arête du nez (~5 px).
+
 - **ADR-0024 — lecture média : responsabilité d'hôte**
   (proposée) : seam `MediaSurface` (`MediaOffered` SSE +
   REST claim/play/pause/seek/volume) — le moteur garde
@@ -20,6 +47,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   hors atteinte v1. Roadmap : étapes 71 (seam) et 72
   (résolveur DoH optionnel, prolonge ADR-0022) ouvertes
   côté NAVIGATEUR — aucun code modifié.
+
+- **Étape 70 — téléchargements** (`explorer-core` +
+  `explorer-api` + `explorer-daemon` + app) : une réponse
+  top-level non affichable (`attachment`,
+  `application/octet-stream`, type inconnu) est bufferisée
+  (borne 64 Mio) et proposée via SSE
+  `download_offered`/`download_progress`/`download_done`
+  au lieu d'être peinte en mojibake — la page courante
+  reste. REST `GET /api/tabs/{id}/downloads`,
+  `POST …/accept` (chemin ou répertoire du profil, nom
+  sanitisé), `POST …/decline` (rejeu « dump texte »).
+  Daemon `--download-dir`, dialogue Flutter
+  « Enregistrer / Ouvrir comme texte ».
 
 - **Étape 69 — pages d'erreur navigateur**
   (`explorer-core`) : une nav en échec (HTTP 404/5xx,

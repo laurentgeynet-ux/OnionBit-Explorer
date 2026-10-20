@@ -72,7 +72,14 @@ pub async fn navigate_shared(
         })
         .await
     {
-        Ok(out) => out,
+        // Téléchargement (étape 70) : enregistré en attente
+        // — rien de committé, la page courante reste.
+        Ok(NavOutcome::Download(dl)) => {
+            let mut s = sess.lock().await;
+            s.offer_download(tab, dl);
+            return Ok(());
+        }
+        Ok(NavOutcome::Document(d, t)) => (d, t),
         Err(e) => {
             let mut s = sess.lock().await;
             s.unspec(tab); // peinture spéculative → réverte (56c)

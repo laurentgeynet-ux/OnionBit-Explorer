@@ -74,6 +74,15 @@ pub fn router_with_key(session: Arc<tokio::sync::Mutex<Session>>, key: Option<St
         .route("/api/tabs/{id}/viewport", post(viewport))
         .route("/api/tabs/{id}/input", post(input))
         .route("/api/tabs/{id}/find", post(find))
+        .route("/api/tabs/{id}/downloads", get(list_downloads))
+        .route(
+            "/api/tabs/{id}/downloads/{dl}/accept",
+            post(accept_download),
+        )
+        .route(
+            "/api/tabs/{id}/downloads/{dl}/decline",
+            post(decline_download),
+        )
         .route(
             "/api/bookmarks",
             get(list_bookmarks).post(add_bookmark).delete(del_bookmark),
@@ -473,6 +482,60 @@ async fn find(
     .into_response()
 }
 
+/// `GET /api/tabs/{id}/downloads` → téléchargements en
+/// attente de l'onglet (étape 70).
+async fn list_downloads(State(st): State<ApiState>, Path(id): Path<TabId>) -> impl IntoResponse {
+    let session = st.session.lock().await;
+    let v: Vec<_> = session
+        .pending_downloads(id)
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "id": d.id, "tab": d.tab, "url": d.url,
+                "filename": d.filename, "mime": d.mime, "size": d.size,
+            })
+        })
+        .collect();
+    Json(serde_json::json!({ "downloads": v }))
+}
+
+/// `POST /api/tabs/{id}/downloads/{dl}/accept`
+/// `{ "path": "…"? }` — écrit le corps bufferisé au chemin
+/// donné ou sous le répertoire de téléchargement de la
+/// session avec le nom suggéré (étape 70).
+async fn accept_download(
+    State(st): State<ApiState>,
+    Path((id, dl)): Path<(TabId, u64)>,
+    body: Option<Json<serde_json::Value>>,
+) -> Response {
+    let path = body.and_then(|Json(v)| {
+        v.get("path")
+            .and_then(|p| p.as_str())
+            .map(std::path::PathBuf::from)
+    });
+    let mut session = st.session.lock().await;
+    match session.accept_download(id, dl, path) {
+        Ok(target) => Json(serde_json::json!({
+            "path": target.display().to_string()
+        }))
+        .into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e),
+    }
+}
+
+/// `POST /api/tabs/{id}/downloads/{dl}/decline` — le corps
+/// est rejoué comme document (dégradation « dump texte »).
+async fn decline_download(
+    State(st): State<ApiState>,
+    Path((id, dl)): Path<(TabId, u64)>,
+) -> Response {
+    let mut session = st.session.lock().await;
+    match session.decline_download(id, dl).await {
+        Ok(_) => Json(serde_json::json!({ "declined": true })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e),
+    }
+}
+
 /// `GET /api/bookmarks` → `[{url, title}]`.
 async fn list_bookmarks(State(st): State<ApiState>) -> impl IntoResponse {
     let session = st.session.lock().await;
@@ -606,6 +669,38 @@ fn event_json(ev: &CoreEvent) -> (&'static str, String) {
         CoreEvent::PipelineError { tab, message } => (
             "pipeline_error",
             serde_json::json!({ "tab": tab, "message": message }).to_string(),
+        ),
+        CoreEvent::DownloadOffered {
+            tab,
+            id,
+            url,
+            filename,
+            mime,
+            size,
+        } => (
+            "download_offered",
+            serde_json::json!({
+                "tab": tab, "id": id, "url": url,
+                "filename": filename, "mime": mime, "size": size,
+            })
+            .to_string(),
+        ),
+        CoreEvent::DownloadProgress {
+            tab,
+            id,
+            received,
+            total,
+        } => (
+            "download_progress",
+            serde_json::json!({
+                "tab": tab, "id": id,
+                "received": received, "total": total,
+            })
+            .to_string(),
+        ),
+        CoreEvent::DownloadDone { tab, id, path } => (
+            "download_done",
+            serde_json::json!({ "tab": tab, "id": id, "path": path }).to_string(),
         ),
     }
 }

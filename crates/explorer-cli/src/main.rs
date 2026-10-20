@@ -94,7 +94,7 @@ async fn shot(url: &str, out: &str) -> ExitCode {
     loop {
         session.pump_net().await;
         session.pump_timers(tab);
-        if session.drain_script_nav(tab).await {
+        if session.drain_script_nav(tab).await > 0 {
             continue;
         }
         let idle = session.net_pending() == 0 && session.next_timer_deadline().is_none();

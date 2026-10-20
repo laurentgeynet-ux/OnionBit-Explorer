@@ -56,6 +56,41 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
             .showSnackBar(SnackBar(content: Text(msg)));
       }
     });
+    // Téléchargement proposé (étape 70) : « Enregistrer »
+    // écrit sous le répertoire du daemon, « Ouvrir comme
+    // texte » rejoue le corps comme document.
+    ref.listen(browserProvider.select((s) => s.downloadOffer), (_, offer) {
+      if (offer == null || !mounted) return;
+      final size = offer.size == null
+          ? ''
+          : ' — ${(offer.size! / 1024).toStringAsFixed(1)} Kio';
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Téléchargement'),
+          content: Text(
+            '${offer.filename}$size\n${offer.url}\n\n'
+            'Ce fichier n’est pas affichable dans le navigateur.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                ctrl.declineDownload(offer);
+              },
+              child: const Text('Ouvrir comme texte'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                ctrl.acceptDownload(offer);
+              },
+              child: const Text('Enregistrer'),
+            ),
+          ],
+        ),
+      );
+    });
 
     final active = st.active;
     final muted = t.color('onSurface', 'muted');

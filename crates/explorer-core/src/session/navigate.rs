@@ -352,7 +352,14 @@ impl Session {
             })
             .await
         {
-            Ok(out) => out,
+            // Téléchargement (étape 70) : corps bufferisé
+            // proposé à l'UI — rien n'est committé, la page
+            // courante reste en place.
+            Ok(NavOutcome::Download(dl)) => {
+                self.offer_download(tab, dl);
+                return Ok(None);
+            }
+            Ok(NavOutcome::Document(d, t)) => (d, t),
             Err(e) => {
                 // Le document en vol a pu être peint
                 // progressivement — on réverte avant de
@@ -398,7 +405,14 @@ impl Session {
         }
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
         entry.nav_epoch += 1;
+        // Un id de téléchargement est réservé par navigation
+        // (étape 70) : la progression hors verrou porte l'id
+        // final dès le premier morceau — non-consécutivité
+        // volontaire et documentée.
+        let dl_id = self.next_download_id;
+        self.next_download_id += 1;
         Ok(NavJob {
+            tab,
             epoch: entry.nav_epoch,
             req,
             push,
@@ -406,6 +420,9 @@ impl Session {
             transport: Arc::clone(&self.transport),
             paint_chunk_bytes: self.paint_chunk_bytes,
             paint_interval: self.paint_interval,
+            events: self.events.clone(),
+            max_download_bytes: self.max_download_bytes,
+            next_download_id: dl_id,
         })
     }
 

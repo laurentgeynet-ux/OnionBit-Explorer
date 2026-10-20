@@ -764,7 +764,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `navigate_shared`). Régressions :
   `failed_nav_commits_error_page`,
   `failed_nav_shared_commits_error_page`.
-- [ ] **Étape 70. Téléchargements** (lead — trou produit,
+- [x] **Étape 70. Téléchargements** (lead — trou produit,
   terrain mission 17-D) : `application/octet-stream`,
   `Content-Disposition: attachment`, type inconnu en
   navigation top-level → aujourd'hui dump binaire mojibake
@@ -776,6 +776,27 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   bornes de taille réseau respectées ; UI Flutter = entrée
   de téléchargement. Le dump-texte actuel reste la
   dégradation si le téléchargement est refusé.
+  Livré : `download_meta` (net_items) détecte attachment /
+  octet-stream / types non-documentaires ; `NavJob::run`
+  renvoie `NavOutcome::Download(PendingDownload)` — corps
+  bufferisé borné (`max_download_bytes`, défaut 64 Mio) +
+  `DownloadProgress` par morceau. `Session::offer_download`
+  enregistre sans commettre (page courante conservée) ;
+  `accept_download` écrit (chemin explicite ou
+  `download_dir` + nom sanitisé/unifié, `DownloadDone`),
+  `decline_download` rejoue le corps par le pipeline
+  document complet (dump texte historique). REST :
+  `GET /api/tabs/{id}/downloads`,
+  `POST …/downloads/{dl}/accept|decline` ; daemon :
+  `--download-dir`/`EXPLORER_DOWNLOAD_DIR` (défaut
+  `<profil>/downloads`) ; Flutter : dialogue
+  « Enregistrer / Ouvrir comme texte ». FFI : stubs
+  dégradés (`UnsupportedError`, pas de canal
+  d'acceptation). Régressions :
+  `download_offered_buffers_and_keeps_page`,
+  `decline_download_replays_as_document`,
+  `document_types_never_download`, REST
+  `download_accept_writes_body`.
 - [ ] **Étape 71. Seam `MediaSurface` — lecture média par
   l'hôte** (lead + ADR-0024 — le moteur ne décode pas, la
   lecture est un service d'hôte contracté) : les stubs

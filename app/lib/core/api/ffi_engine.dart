@@ -500,6 +500,19 @@ class FfiEngine implements BrowserRepository {
   Future<FindResult> find(String tabId, String query, {int dir = 0}) async =>
       FindResult.empty;
 
+  /// Téléchargements (étape 70) : pas de canal d'acceptation
+  /// en mode in-process — le pending resterait bloqué ; la
+  /// dégradation honnête est le rejet (rejeu document) —
+  /// à étendre via un export `explorer_download_*`.
+  @override
+  Future<String> acceptDownload(String tabId, int dlId, {String? path}) =>
+      throw UnsupportedError('downloads : non exposé en FFI (étape 70)');
+
+  /// Voir [acceptDownload].
+  @override
+  Future<void> declineDownload(String tabId, int dlId) =>
+      throw UnsupportedError('downloads : non exposé en FFI (étape 70)');
+
   /// Avance les animations moteur — `true` si la frame a été
   /// invalidée (le contrôleur la retire). Remplace le SSE
   /// `frame_invalidated` absent du canal FFI.

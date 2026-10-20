@@ -114,6 +114,7 @@ fn bench_session() -> (Session, Arc<FakeTransport>) {
             paint_chunk_bytes: 32 * 1024,
             paint_interval_ms: 100,
             resync_gap_max_ms: 4_000,
+            max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
         },
     );

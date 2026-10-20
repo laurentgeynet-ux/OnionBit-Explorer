@@ -217,6 +217,7 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
             paint_chunk_bytes: 32 * 1024,
             paint_interval_ms: 100,
             resync_gap_max_ms: 4_000,
+            max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
         },
     );
@@ -370,6 +371,107 @@ async fn failed_nav_shared_commits_error_page() {
         Some("http://h.test/ko")
     );
     assert!(g.find_in_page(id, "Page inaccessible") > 0);
+}
+
+/// Étape 70 — un octet-stream top-level est bufferisé et
+/// proposé (`DownloadOffered`) : la page courante reste,
+/// rien n'est committé ; `accept` écrit le corps.
+#[tokio::test]
+async fn download_offered_buffers_and_keeps_page() {
+    let (mut s, t) = test_session();
+    t.route("/page", 200, PAGE_T);
+    t.route_headers(
+        "/file.bin",
+        200,
+        "\u{0}PK\u{3}\u{4}binary",
+        &[
+            ("Content-Type", "application/octet-stream"),
+            ("Content-Disposition", "attachment; filename=\"x.bin\""),
+        ],
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/page").await.unwrap();
+    let mut rx = s.subscribe();
+    // La nav vers un attachment aboutit sans commettre :
+    // pas d'URL, pas d'historique — la page reste.
+    s.navigate(id, "http://h.test/file.bin").await.unwrap();
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/page")
+    );
+    let pending = s.pending_downloads(id);
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].filename, "x.bin");
+    assert_eq!(pending[0].mime, "application/octet-stream");
+    assert_eq!(pending[0].size, 11);
+    let mut offered = false;
+    while let Ok(ev) = rx.try_recv() {
+        if matches!(ev, CoreEvent::DownloadOffered { filename, .. } if filename == "x.bin") {
+            offered = true;
+        }
+    }
+    assert!(offered, "DownloadOffered attendu");
+    // Acceptation → fichier écrit + DownloadDone.
+    let dir = std::env::temp_dir().join("explorer-dl-test");
+    let target = s
+        .accept_download(id, pending[0].id, Some(dir.join("out.bin")))
+        .unwrap();
+    assert_eq!(std::fs::read(&target).unwrap().len(), 11);
+    assert!(s.pending_downloads(id).is_empty());
+    let mut done = false;
+    while let Ok(ev) = rx.try_recv() {
+        if matches!(ev, CoreEvent::DownloadDone { .. }) {
+            done = true;
+        }
+    }
+    assert!(done, "DownloadDone attendu");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Étape 70 — le rejet rejoue le corps comme document
+/// (dégradation « dump texte » historique) : l'URL est
+/// committée et le contenu peint.
+#[tokio::test]
+async fn decline_download_replays_as_document() {
+    let (mut s, t) = test_session();
+    t.route("/page", 200, PAGE_T);
+    t.route_headers(
+        "/data.bin",
+        200,
+        "<b>blob texte</b>",
+        &[("Content-Type", "application/octet-stream")],
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/page").await.unwrap();
+    s.navigate(id, "http://h.test/data.bin").await.unwrap();
+    let dl = s.pending_downloads(id)[0].id;
+    s.decline_download(id, dl).await.unwrap();
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/data.bin")
+    );
+    assert!(s.find_in_page(id, "blob texte") > 0);
+    assert!(s.pending_downloads(id).is_empty());
+}
+
+/// Étape 70 — un type documentaire (`text/plain`, HTML
+/// sans type déclaré) ne part jamais en téléchargement.
+#[tokio::test]
+async fn document_types_never_download() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/notes",
+        200,
+        "plain body",
+        &[("Content-Type", "text/plain")],
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/notes").await.unwrap();
+    assert!(s.pending_downloads(id).is_empty());
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/notes")
+    );
 }
 
 #[tokio::test]
@@ -4622,6 +4724,7 @@ async fn redirect_commits_final_url_and_fragment() {
             paint_chunk_bytes: 32 * 1024,
             paint_interval_ms: 100,
             resync_gap_max_ms: 4_000,
+            max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
         },
     );

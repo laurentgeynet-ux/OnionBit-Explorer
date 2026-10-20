@@ -119,6 +119,23 @@ class FakeRepo implements BrowserRepository {
       query: query,
     );
   }
+
+  /// Acceptations enregistrées (`$tabId:$dlId`).
+  final List<String> acceptedDownloads = [];
+
+  /// Rejets enregistrés.
+  final List<String> declinedDownloads = [];
+
+  @override
+  Future<String> acceptDownload(String tabId, int dlId, {String? path}) async {
+    acceptedDownloads.add('$tabId:$dlId');
+    return path ?? '/dl/file.bin';
+  }
+
+  @override
+  Future<void> declineDownload(String tabId, int dlId) async {
+    declinedDownloads.add('$tabId:$dlId');
+  }
 }
 
 /// Client SSE simulé — événements injectés à la main.
@@ -244,6 +261,65 @@ void main() {
     );
     await Future<void>.delayed(Duration.zero);
     expect(c.read(browserProvider).pageErrors.containsKey('1'), isFalse);
+  });
+
+  test('download_offered expose l’offre, accept/decline décident', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+
+    events.ctrl.add(
+      ServerEvent('download_offered', {
+        'tab': 1,
+        'id': 7,
+        'url': 'http://h/f.bin',
+        'filename': 'f.bin',
+        'mime': 'application/octet-stream',
+        'size': 42,
+      }),
+    );
+    await Future<void>.delayed(Duration.zero);
+    final offer = c.read(browserProvider).downloadOffer!;
+    expect(offer.id, 7);
+    expect(offer.filename, 'f.bin');
+    expect(offer.size, 42);
+
+    // Accepter → appel repo + offre consumée ; DownloadDone
+    // SSE rapporte le chemin en lastError (snackbar).
+    await c.read(browserProvider.notifier).acceptDownload(offer);
+    expect(repo.acceptedDownloads, ['1:7']);
+    expect(c.read(browserProvider).downloadOffer, isNull);
+
+    events.ctrl.add(
+      ServerEvent('download_done', {
+        'tab': 1,
+        'id': 7,
+        'path': '/dl/f.bin',
+      }),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(
+      c.read(browserProvider).lastError,
+      contains('/dl/f.bin'),
+    );
+
+    // Rejet d'une seconde offre → declineDownload.
+    events.ctrl.add(
+      ServerEvent('download_offered', {
+        'tab': 1,
+        'id': 8,
+        'url': 'http://h/g.bin',
+        'filename': 'g.bin',
+        'mime': 'application/octet-stream',
+      }),
+    );
+    await Future<void>.delayed(Duration.zero);
+    final offer2 = c.read(browserProvider).downloadOffer!;
+    await c.read(browserProvider.notifier).declineDownload(offer2);
+    expect(repo.declinedDownloads, ['1:8']);
+    expect(c.read(browserProvider).downloadOffer, isNull);
   });
 
   test('daemon absent → daemonOnline false, retry récupère', () async {

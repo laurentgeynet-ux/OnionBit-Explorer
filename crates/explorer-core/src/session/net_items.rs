@@ -56,6 +56,8 @@ pub(crate) type PaintFut<'a> = std::pin::Pin<Box<dyn std::future::Future<Output 
 /// (re-lock court côté appelant partagé, `nav_paint`
 /// direct côté `&mut self`).
 pub(crate) struct NavJob {
+    /// Onglet — `DownloadProgress`/`DownloadOffered` (70).
+    pub(crate) tab: TabId,
     /// Epoch capturée à `nav_begin` — comparée à
     /// `Tab::nav_epoch` à chaque reprise du verrou.
     pub(crate) epoch: u64,
@@ -70,6 +72,15 @@ pub(crate) struct NavJob {
     /// Cadence de peinture progressive.
     pub(crate) paint_chunk_bytes: usize,
     pub(crate) paint_interval: std::time::Duration,
+    /// Bus d'événements — progression du buffer
+    /// téléchargement émise hors verrou (étape 70).
+    pub(crate) events: broadcast::Sender<CoreEvent>,
+    /// Borne du corps bufferisé (étape 70) — dépassement =
+    /// `Fetch` (page d'erreur 69), jamais de gonflage.
+    pub(crate) max_download_bytes: usize,
+    /// Compteur d'identifiants de téléchargement — cloné
+    /// par `nav_begin`, incrémenté à la détection.
+    pub(crate) next_download_id: u64,
 }
 
 /// Queue de [`NavJob::run`] — ce que le commit consomme
@@ -99,6 +110,95 @@ pub(crate) struct NavDone {
     pub(crate) title: Option<String>,
 }
 
+/// Issue de [`NavJob::run`] (étape 70) : document à commettre
+/// ou téléchargement bufferisé à proposer.
+pub(crate) enum NavOutcome {
+    /// Document affichable — commit `nav_apply` habituel.
+    Document(NavDone, NavTail),
+    /// Corps non affichable bufferisé — la session le garde
+    /// en attente d'acceptation (`PendingDownload`, queue de
+    /// navigation incluse pour le rejeu « dump document »
+    /// d'un rejet).
+    Download(super::downloads::PendingDownload),
+}
+
+/// Métadonnées de détection téléchargement (étape 70) —
+/// extraites des en-têtes de la réponse top-level.
+pub(crate) struct DownloadMeta {
+    /// `filename=` du `Content-Disposition`, si déclaré.
+    pub(crate) filename_hint: Option<String>,
+    /// Type MIME déclaré (sans paramètres, minuscules).
+    pub(crate) mime: String,
+    /// `Content-Length` annoncé, si présent et valide.
+    pub(crate) total: Option<u64>,
+}
+
+/// `Some(meta)` si la réponse top-level n'est **pas** un
+/// document affichable (étape 70) : `Content-Disposition:
+/// attachment`, `application/octet-stream`, ou type
+/// inconnu du pipeline (`application/*` hors html/xhtml,
+/// `image/*`, `audio/*`, `video/*`, `font/*`). `text/*`,
+/// les XML de document et l'absence de type restent
+/// traités comme document — le statu quo est la dégradation.
+pub(crate) fn download_meta(headers: &[(String, String)]) -> Option<DownloadMeta> {
+    let get = |name: &str| {
+        headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    };
+    let total = get("content-length").and_then(|v| v.trim().parse::<u64>().ok());
+    let disposition = get("content-disposition").unwrap_or_default();
+    let mime = get("content-type")
+        .unwrap_or_default()
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
+    let filename_hint = disposition_filename(disposition);
+    let attached = disposition
+        .split(';')
+        .next()
+        .is_some_and(|d| d.trim().eq_ignore_ascii_case("attachment"));
+    let doc_like = mime.is_empty()
+        || mime == "text/html"
+        || mime == "application/xhtml+xml"
+        || mime.starts_with("text/")
+        || mime.ends_with("+xml");
+    if attached || !doc_like {
+        return Some(DownloadMeta {
+            filename_hint,
+            mime: if mime.is_empty() {
+                "application/octet-stream".to_string()
+            } else {
+                mime
+            },
+            total,
+        });
+    }
+    None
+}
+
+/// `filename=` d'un `Content-Disposition` — guillemets et
+/// espaces tolérés ; `filename*=` (RFC 5987) non décodé
+/// en v1 (déviation documentée, le repli est le segment
+/// d'URL).
+fn disposition_filename(disposition: &str) -> Option<String> {
+    for part in disposition.split(';').skip(1) {
+        let Some((k, v)) = part.split_once('=') else {
+            continue;
+        };
+        if k.trim().eq_ignore_ascii_case("filename") {
+            let f = v.trim().trim_matches('"');
+            if !f.is_empty() {
+                return Some(f.to_string());
+            }
+        }
+    }
+    None
+}
+
 impl NavJob {
     /// Fetch + parse incrémental hors session : chaque
     /// morceau décodé alimente le tree-builder —
@@ -108,7 +208,7 @@ impl NavJob {
     /// est livré à `paint`. Aucun `&mut Session` ne
     /// traverse l'`await` : le verrou hôte reste libre
     /// pendant tout le téléchargement (étape 53d).
-    pub(crate) async fn run<F>(&mut self, mut paint: F) -> Result<(NavDone, NavTail), CoreError>
+    pub(crate) async fn run<F>(&mut self, mut paint: F) -> Result<NavOutcome, CoreError>
     where
         F: for<'a> FnMut(&'a Dom) -> PaintFut<'a>,
     {
@@ -128,6 +228,43 @@ impl NavJob {
             .resolved_url
             .take()
             .unwrap_or_else(|| self.req.url.clone());
+        // Corps non affichable (étape 70) : bufferisé avec
+        // borne et progression — jamais décodé en mojibake.
+        // `DownloadOffered` n'est émis qu'au commit
+        // (`offer_download`) : un « accept » de l'UI avant
+        // l'enregistrement du pending ne peut pas échouer.
+        if let Some(meta) = download_meta(&resp.headers) {
+            let dl_id = self.next_download_id;
+            let mut body = Vec::new();
+            while let Some(chunk) = resp.body.recv().await {
+                let bytes = chunk.map_err(|e| CoreError::Fetch(e.to_string()))?;
+                if body.len() + bytes.len() > self.max_download_bytes {
+                    return Err(CoreError::Fetch("téléchargement hors bornes".to_string()));
+                }
+                body.extend_from_slice(&bytes);
+                let _ = self.events.send(CoreEvent::DownloadProgress {
+                    tab: self.tab,
+                    id: dl_id,
+                    received: body.len() as u64,
+                    total: meta.total,
+                });
+            }
+            return Ok(NavOutcome::Download(super::downloads::PendingDownload {
+                tail: NavTail {
+                    epoch: self.epoch,
+                    push: self.push,
+                    prev_title: self.prev_title.take(),
+                    req: self.req.clone(),
+                },
+                id: dl_id,
+                tab: self.tab,
+                url: resolved,
+                filename_hint: meta.filename_hint,
+                mime: meta.mime,
+                size: meta.total,
+                body,
+            }));
+        }
         let mut tb = TreeBuilder::new();
         // Charset du transport (`Content-Type`) en amorce du
         // décodeur — priorité sur le prescan `<meta>` (53e).
@@ -175,7 +312,7 @@ impl NavJob {
             prev_title: self.prev_title.take(),
             req: self.req.clone(),
         };
-        Ok((done, tail))
+        Ok(NavOutcome::Document(done, tail))
     }
 }
 

@@ -482,3 +482,102 @@ async fn bookmarks_and_history_endpoints() {
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(v["history"], serde_json::json!([]));
 }
+
+// -- Étape 70 : téléchargements REST ----------------------------------
+
+/// Transport octet-stream — toute URL sert le même blob
+/// marqué `attachment`.
+struct DlTransport;
+
+#[async_trait]
+impl HttpTransport for DlTransport {
+    async fn fetch(&self, _req: &Request) -> NetResult<Response> {
+        Ok(Response {
+            status: 200,
+            reason: "fake".to_string(),
+            headers: vec![
+                (
+                    "Content-Type".to_string(),
+                    "application/octet-stream".to_string(),
+                ),
+                (
+                    "Content-Disposition".to_string(),
+                    "attachment; filename=\"r.bin\"".to_string(),
+                ),
+            ],
+            body: b"\x01\x02\x03blob".to_vec(),
+            reused_connection: false,
+            resolved_url: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn download_accept_writes_body() {
+    let session = Arc::new(tokio::sync::Mutex::new(Session::new(
+        Arc::new(DlTransport),
+        Arc::new(FixtureFont),
+    )));
+    let app = explorer_api::router(session);
+    let r = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let r = app
+        .clone()
+        .oneshot(json_post(
+            "/api/tabs/1/navigate",
+            r#"{"url":"http://h.test/r.bin"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    // L'offre est enregistrée.
+    let r = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/tabs/1/downloads")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["downloads"][0]["filename"], "r.bin");
+    assert_eq!(v["downloads"][0]["size"], 7);
+    let dl = v["downloads"][0]["id"].as_u64().unwrap();
+    // Acceptation avec chemin explicite → corps écrit.
+    let dir = std::env::temp_dir().join("explorer-api-dl");
+    let target = dir.join("r.bin");
+    // Chemin POSIX : JSON sans échappement backslash.
+    let posix = target.display().to_string().replace('\\', "/");
+    let body = format!(r#"{{"path":"{posix}"}}"#);
+    let r = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/1/downloads/{dl}/accept"),
+            &body,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(std::fs::read(&target).unwrap(), b"\x01\x02\x03blob");
+    // Le pending est consommé.
+    let r = app
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/tabs/1/downloads")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["downloads"], serde_json::json!([]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
