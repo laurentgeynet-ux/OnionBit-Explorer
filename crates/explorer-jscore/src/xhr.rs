@@ -122,6 +122,7 @@ impl Engine {
         let g = self.global;
         self.set_own(g, "XMLHttpRequest", v, false);
         self.install_fetch();
+        self.install_abort();
     }
 
     /// Deliver a completed response: fills the XHR, moves it to
@@ -527,6 +528,19 @@ fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         }
     }
     let pid = e.new_promise();
+    // `{signal}` déjà aborted → rejet `AbortError` immédiat (l'abord
+    // d'un transfert en vol n'est pas câblé — stub honnête).
+    if let Value::Obj(oid) = opts {
+        if let Some(s) = e.get_prop(oid, "signal") {
+            if let Some(d) = abort_data(e, s) {
+                if d.borrow().aborted {
+                    let msg = e.str_val("AbortError: signal is aborted");
+                    e.reject_promise(pid, msg);
+                    return Ok(Value::Obj(pid));
+                }
+            }
+        }
+    }
     if let Some(t) = &e.xhr.transport {
         let h = t.send(&req);
         e.xhr.fetches.push((h, pid));
@@ -536,4 +550,214 @@ fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         e.reject_promise(pid, msg);
     }
     Ok(Value::Obj(pid))
+}
+
+// ------------------------------------------------------------------
+// AbortController / AbortSignal (JS-7f) — `abort()` marque le signal
+// et dispatche `abort` ; `fetch` rejette un signal déjà aborted.
+// ------------------------------------------------------------------
+
+/// État partagé d'un `AbortSignal` — `(callback, once)`.
+struct AbortData {
+    aborted: bool,
+    reason: Value,
+    listeners: Vec<(Value, bool)>,
+}
+
+/// The `AbortSignal` host object.
+struct AbortSignalHost {
+    data: Rc<RefCell<AbortData>>,
+}
+
+/// `Value` → son `AbortData` si c'est un `AbortSignal` à nous.
+fn abort_data(e: &Engine, v: Value) -> Option<Rc<RefCell<AbortData>>> {
+    let Value::Obj(id) = v else {
+        return None;
+    };
+    match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::Host(h)) => h
+            .clone()
+            .as_any()
+            .downcast_ref::<AbortSignalHost>()
+            .map(|s| s.data.clone()),
+        _ => None,
+    }
+}
+
+impl Engine {
+    /// Installe `AbortController` + `AbortSignal` sur le global —
+    /// complément honnête de `fetch` (stub : pas d'abord d'un
+    /// transfert en vol, seul le rejet si déjà aborted est câblé).
+    fn install_abort(&mut self) {
+        let g = self.global;
+        let ac = self.native_fn("AbortController", abort_controller_ctor);
+        self.set_own(g, "AbortController", ac, false);
+        let asig = self.native_fn("AbortSignal", abort_signal_ctor);
+        if let Value::Obj(cid) = asig {
+            // `AbortSignal.abort(reason?)` — signal déjà aborted.
+            let f = self.native_fn("abort", abort_signal_static_abort);
+            self.set_own(cid, "abort", f, false);
+        }
+        self.set_own(g, "AbortSignal", asig, false);
+    }
+}
+
+impl Host for AbortSignalHost {
+    fn class_name(&self) -> &'static str {
+        "AbortSignal"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn get(&self, _e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        Ok(match key {
+            "aborted" => Some(Value::Bool(self.data.borrow().aborted)),
+            "reason" => {
+                let d = self.data.borrow();
+                if d.aborted {
+                    Some(d.reason)
+                } else {
+                    Some(Value::Undefined)
+                }
+            }
+            _ => None,
+        })
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _this: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        match name {
+            "addEventListener" => {
+                let ty = e.to_js_string(arg(args, 0))?;
+                let f = arg(args, 1);
+                if ty == "abort" && e.is_callable(f) {
+                    let once = matches!(arg(args, 2), Value::Obj(o)
+                        if matches!(e.get_prop(o, "once"), Some(Value::Bool(true))));
+                    self.data.borrow_mut().listeners.push((f, once));
+                }
+                Ok(Some(Value::Undefined))
+            }
+            "removeEventListener" => {
+                let ty = e.to_js_string(arg(args, 0))?;
+                let f = arg(args, 1);
+                self.data
+                    .borrow_mut()
+                    .listeners
+                    .retain(|(g, _)| ty != "abort" || *g != f);
+                Ok(Some(Value::Undefined))
+            }
+            "throwIfAborted" => {
+                let r = {
+                    let d = self.data.borrow();
+                    d.aborted.then_some(d.reason)
+                };
+                if let Some(r) = r {
+                    return Err(crate::heap::Thrown(if matches!(r, Value::Undefined) {
+                        e.str_val("AbortError")
+                    } else {
+                        r
+                    }));
+                }
+                Ok(Some(Value::Undefined))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn trace(&self, out: &mut Vec<crate::value::ObjId>) {
+        for (f, _) in &self.data.borrow().listeners {
+            if let Value::Obj(id) = f {
+                out.push(*id);
+            }
+        }
+    }
+
+    fn keys(&self, _e: &mut Engine, _t: Value) -> Vec<String> {
+        vec!["aborted".into()]
+    }
+}
+
+/// `new AbortSignal()` — `TypeError` per spec ("illegal
+/// constructor" : un signal ne vient que d'un contrôleur ou d'un
+/// constructeur statique).
+fn abort_signal_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Err(e.type_error("AbortSignal: illegal constructor"))
+}
+
+/// `AbortSignal.abort(reason?)` — signal déjà aborted.
+fn abort_signal_static_abort(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let reason = arg(args, 0);
+    Ok(e.new_host_object(Rc::new(AbortSignalHost {
+        data: Rc::new(RefCell::new(AbortData {
+            aborted: true,
+            reason,
+            listeners: Vec::new(),
+        })),
+    })))
+}
+
+/// `new AbortController()` — `{signal, abort()}` : le signal est un
+/// host, `abort` un natif bound sur sa `Value`.
+fn abort_controller_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let signal = e.new_host_object(Rc::new(AbortSignalHost {
+        data: Rc::new(RefCell::new(AbortData {
+            aborted: false,
+            reason: Value::Undefined,
+            listeners: Vec::new(),
+        })),
+    }));
+    let ctrl = e.new_object();
+    e.set_own(ctrl, "signal", signal, true);
+    let f = e.bound_native("abort", controller_abort, vec![signal]);
+    e.set_own(ctrl, "abort", f, false);
+    Ok(Value::Obj(ctrl))
+}
+
+/// `controller.abort(reason?)` — marque le signal (idempotent) et
+/// dispatche `abort` : `onabort` puis les listeners.
+fn controller_abort(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let sig = arg(args, 0);
+    let reason = arg(args, 1);
+    let Some(data) = abort_data(e, sig) else {
+        return Ok(Value::Undefined);
+    };
+    {
+        let mut d = data.borrow_mut();
+        if d.aborted {
+            return Ok(Value::Undefined);
+        }
+        d.aborted = true;
+        d.reason = reason;
+    }
+    let ev = {
+        let o = e.new_object();
+        let t = e.str_val("abort");
+        e.set_own(o, "type", t, true);
+        e.set_own(o, "target", sig, true);
+        Value::Obj(o)
+    };
+    if let Value::Obj(sid) = sig {
+        if let Some(f) = e.get_prop(sid, "onabort") {
+            if e.is_callable(f) {
+                e.call_value(f, sig, &[ev])?;
+            }
+        }
+    }
+    let listeners = data.borrow().listeners.clone();
+    for (f, once) in listeners {
+        if e.is_callable(f) {
+            e.call_value(f, sig, &[ev])?;
+        }
+        if once {
+            data.borrow_mut().listeners.retain(|(g, _)| *g != f);
+        }
+    }
+    Ok(Value::Undefined)
 }

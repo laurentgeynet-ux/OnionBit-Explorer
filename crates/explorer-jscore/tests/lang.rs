@@ -498,6 +498,9 @@ fn regex_replace_split() {
 }
 
 #[test]
+// U+212A KELVIN SIGN non-NFC volontaire : le folding `i` doit le
+// distinguer de 'k' (test cible folding, pas un accident d'encodage).
+#[allow(clippy::unicode_not_nfc)]
 fn regexp_js_c3_semantics() {
     // Backref nommée avant sa déclaration → match vide (21.2.2.9).
     assert_eq!(ev_str("/\\k<a>(?<a>x)/.test('x')"), "true");
@@ -513,9 +516,9 @@ fn regexp_js_c3_semantics() {
     );
     // Folding `i` non-`u` = ToUppercase simple : KELVIN U+212A ne
     // matche ni 'k' ni 'K', mais 'k' et 'K' se matchent entre eux.
-    assert_eq!(ev_str("/\\u212a/i.test('k')"), "false");
-    assert_eq!(ev_str("/\\u212a/i.test('K')"), "false");
     assert_eq!(ev_str("/\\u212a/i.test('\\u212a')"), "true");
+    assert_eq!(ev_str("/\\u212a/i.test('k')"), "false");
+    assert_eq!(ev_str("/\u{212a}/i.test('\u{212a}')"), "true");
     assert_eq!(ev_str("/k/i.test('K')"), "true");
     assert_eq!(ev_str("/K/i.test('k')"), "true");
     assert_eq!(ev_str("/[a-z]+/i.test('ABC')"), "true");
@@ -544,6 +547,114 @@ fn regexp_js_c3_semantics() {
     assert_eq!(
         ev_str("try { eval('/\\\\8/u'); 'no' } catch (e) { e.name }"),
         "SyntaxError"
+    );
+}
+
+#[test]
+fn regexp_lazy_quantifiers() {
+    // `*?`/`+?`/`??`/`{n,m}?` — le `?` est le modifieur lazy du
+    // quantificateur qui précède (mesuré sur une page réelle :
+    // `/^[\s\xa0]*([\s\S]*?)[\s\xa0]*$/` = trim idiomatique Google).
+    assert_eq!(ev_str("'   a  '.match(/^\\s*([\\s\\S]*?)\\s*$/)[1]"), "a");
+    // lazy = match minimal : `a+?` prend un seul 'a'.
+    assert_eq!(ev_str("'aaa'.match(/a+?/)[0]"), "a");
+    assert_eq!(ev_str("'aaa'.match(/a+?a/)[0]"), "aa");
+    // `??` = optionnel lazy (préfère 0 occurrence).
+    assert_eq!(ev_str("'ab'.match(/ab??/)[0]"), "a");
+    // `{n,m}?` lazy.
+    assert_eq!(ev_str("'aaaa'.match(/a{1,3}?/)[0]"), "a");
+    assert_eq!(ev_str("'aaaa'.match(/a{2,}?/)[0]"), "aa");
+    // Le greedy identique reste inchangé.
+    assert_eq!(ev_str("'aaa'.match(/a+/)[0]"), "aaa");
+    // `?` seul après `)` : un groupe reste quantifiable (lazy inclus).
+    assert_eq!(ev_str("'ab'.match(/(ab)??/)[0]"), "");
+}
+
+#[test]
+fn regexp_class_escape_bounds() {
+    // Les bornes de plage décodent les échappements comme le
+    // traducteur lui-même : `\xHH`, `\uHHHH`, `\u{…}`, `\0`,
+    // `\cX`, octales Annex B. Le bug mesuré : `\x00` lu comme
+    // 'x' (0x78) → "empty class range" sur `/[\x00- ]/`
+    // (pattern réel d'un bundle Google).
+    assert_eq!(ev_str("new RegExp('[\\\\x00- ]').test(' ')"), "true");
+    assert_eq!(ev_str("new RegExp('[\\\\x00- ]').test('a')"), "false");
+    // `\xHH` des deux côtés.
+    assert_eq!(ev_str("new RegExp('[\\\\x20-\\\\x30]').test('%')"), "true");
+    // `\uHHHH` en borne basse et haute.
+    assert_eq!(
+        ev_str("new RegExp('[\\\\u2020-\\\\u2030]').test('\\u2025')"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("new RegExp('[\\\\u2020-\\\\u2030]').test('a')"),
+        "false"
+    );
+    // `\u{…}` (hors flag u, Annex B autorise la syntaxe sloppy).
+    assert_eq!(
+        ev_str("new RegExp('[\\\\u{1F600}-\\\\u{1F64F}]').test('\\u{1F610}')"),
+        "true"
+    );
+    // `\0` NUL en borne basse.
+    assert_eq!(
+        ev_str("new RegExp('[\\\\0-\\\\x1f]').test('\\x07')"),
+        "true"
+    );
+    // `\cX` control-letter.
+    assert_eq!(
+        ev_str("new RegExp('[\\\\cA-\\\\cZ]').test('\\x0b')"),
+        "true"
+    );
+    // Octale Annex B en classe.
+    assert_eq!(ev_str("new RegExp('[\\\\101-\\\\103]').test('B')"), "true");
+    // Échappement identité en borne (`\-`, `\\`, `\/`).
+    assert_eq!(ev_str("new RegExp('[\\\\--\\\\/]').test('.')"), "true");
+    // La classe réelle du bundle Google (validation CSP).
+    assert_eq!(
+        ev_str("new RegExp('[\\\\x00- \\\\x22\\\\x27-\\\\x29\\\\x3c\\\\x3e\\\\\\\\\\\\x7b\\\\x7d\\\\x7f\\\\x85\\\\xa0\\\\u2028\\\\u2029\\\\uff01\\\\uff03\\\\uff04\\\\uff06-\\\\uff0c\\\\uff0f\\\\uff1a\\\\uff1b\\\\uff1d\\\\uff1f\\\\uff20\\\\uff3b\\\\uff3d]').test('\\uff08')"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("new RegExp('[\\\\x00- \\\\x22\\\\x27-\\\\x29\\\\x3c\\\\x3e\\\\\\\\\\\\x7b\\\\x7d\\\\x7f\\\\x85\\\\xa0\\\\u2028\\\\u2029\\\\uff01\\\\uff03\\\\uff04\\\\uff06-\\\\uff0c\\\\uff0f\\\\uff1a\\\\uff1b\\\\uff1d\\\\uff1f\\\\uff20\\\\uff3b\\\\uff3d]').test('p')"),
+        "false"
+    );
+}
+
+#[test]
+fn regexp_surrogate_bounds() {
+    // Nos strings sont UTF-8 — les surrogates n'y existent
+    // jamais : un atome surrogate ne peut rien matcher. La
+    // plage est clampée et une classe entièrement surrogate
+    // dégénère en `(?!)` ; sa négation en `[\s\S]`.
+    assert_eq!(
+        ev_str("new RegExp('[\\\\uD800-\\\\uDFFF]').test('a')"),
+        "false"
+    );
+    assert_eq!(
+        ev_str("new RegExp('[^\\\\uD800-\\\\uDBFF]').test('a')"),
+        "true"
+    );
+    // Plage mixte : la partie non-surrogate reste active.
+    assert_eq!(ev_str("new RegExp('[a-\\\\uDFFF]').test('m')"), "true");
+    // Borne basse surrogate, haute juste au-dessus : clampée
+    // en `\x{e000}-\x{e000}` — matche le premier scalar.
+    assert_eq!(
+        ev_str("new RegExp('[\\\\uD800-\\\\uE000]').test('\\uE000')"),
+        "true"
+    );
+    // `lo > hi` brut reste une erreur (`\uD800 > 'z'`).
+    assert_eq!(
+        ev_str("try { eval('/[\\\\uD800-z]/'); 'no' } catch (e) { e.name }"),
+        "SyntaxError"
+    );
+    // Hors classe : `\uD800` seul ne matche rien.
+    assert_eq!(ev_str("new RegExp('\\\\uD800').test('a')"), "false");
+    // Le pattern réel du bundle Google (détection de surrogates
+    // orphelins — jamais vrai sur nos strings) : parse sans
+    // erreur, matche `false`.
+    assert_eq!(
+        ev_str("new RegExp('(?:[^\\\\uD800-\\\\uDBFF]|^)[\\\\uDC00-\\\\uDFFF]|[\\\\uD800-\\\\uDBFF](?![\\\\uDC00-\\\\uDFFF])').test('abc')"),
+        "false"
     );
 }
 

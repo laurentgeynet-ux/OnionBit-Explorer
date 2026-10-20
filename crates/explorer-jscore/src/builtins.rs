@@ -422,6 +422,51 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(g, "Proxy", proxy, false);
     let performance = e.new_object();
     e.add_method(performance, "now", performance_now);
+    // `mark`/`measure` — instrumentation : mesurées par la télémétrie
+    // des pages réelles, jamais relues (getEntries* → `[]` honnêtement
+    // vide, les marks ne sont pas stockés — ADR perf : pas de
+    // timeline dans ce moteur).
+    e.add_method(performance, "mark", performance_noop);
+    e.add_method(performance, "measure", performance_noop);
+    e.add_method(performance, "clearMarks", performance_noop);
+    e.add_method(performance, "clearMeasures", performance_noop);
+    e.add_method(performance, "getEntries", performance_empty_entries);
+    e.add_method(performance, "getEntriesByName", performance_empty_entries);
+    e.add_method(performance, "getEntriesByType", performance_empty_entries);
+    // `timeOrigin` — wall-clock de création du moteur (≙
+    // navigationStart ; `now()` reste monotique depuis `t0`).
+    let origin_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64() * 1000.0);
+    e.set_own(performance, "timeOrigin", Value::Num(origin_ms), true);
+    // `performance.timing`/`navigation` — objets legacy lus par les
+    // pages âgées : toutes les bornes = origine de navigation.
+    let timing = e.new_object();
+    for k in [
+        "navigationStart",
+        "fetchStart",
+        "domainLookupStart",
+        "domainLookupEnd",
+        "connectStart",
+        "connectEnd",
+        "requestStart",
+        "responseStart",
+        "responseEnd",
+        "domLoading",
+        "domInteractive",
+        "domContentLoadedEventStart",
+        "domContentLoadedEventEnd",
+        "domComplete",
+        "loadEventStart",
+        "loadEventEnd",
+    ] {
+        e.set_own(timing, k, Value::Num(origin_ms), true);
+    }
+    e.set_own(performance, "timing", Value::Obj(timing), true);
+    let navigation = e.new_object();
+    e.set_own(navigation, "type", Value::Num(0.0), true);
+    e.set_own(navigation, "redirectCount", Value::Num(0.0), true);
+    e.set_own(performance, "navigation", Value::Obj(navigation), true);
     e.set_own(g, "performance", Value::Obj(performance), false);
 
     // `TextEncoder`/`TextDecoder` — UTF-8 only. Chacun a SON
@@ -3838,6 +3883,16 @@ fn proxy_revoke(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 /// `performance.now()` — ms since engine creation (monotonic).
 fn performance_now(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Num(e.t0.elapsed().as_secs_f64() * 1000.0))
+}
+
+/// `performance.mark/measure/clear*` — pas de timeline : no-op.
+fn performance_noop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Undefined)
+}
+
+/// `performance.getEntries*` — rien n'est collecté → `[]`.
+fn performance_empty_entries(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(e.new_array(Vec::new()))
 }
 
 // -- encodeURI / decodeURI -------------------------------------------

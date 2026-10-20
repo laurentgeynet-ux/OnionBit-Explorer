@@ -14,6 +14,7 @@ use crate::dom::{
 };
 use crate::heap::{Host, JsResult, ObjKind};
 use crate::value::{ObjId, Value};
+use crate::xhr::XhrRequest;
 use crate::Engine;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -427,6 +428,10 @@ impl Engine {
             let s = self.str_val(v);
             self.set_own(nav, k, s, true);
         }
+        // `navigator.sendBeacon(url, data?)` — POST fire-and-forget
+        // via le transport XHR (staple de télémétrie des pages
+        // réelles ; `false` sans connecteur, comme la spec).
+        self.add_method(nav, "sendBeacon", nav_send_beacon);
         self.set_own(g, "navigator", Value::Obj(nav), false);
 
         // `window`/`self`/`globalThis` — the global object itself.
@@ -434,6 +439,10 @@ impl Engine {
         self.set_own(g, "window", gv, false);
         self.set_own(g, "self", gv, false);
         self.set_own(g, "globalThis", gv, false);
+        // Pas de frames → `top`/`parent`/`frames` ≙ la fenêtre elle-même.
+        self.set_own(g, "top", gv, false);
+        self.set_own(g, "parent", gv, false);
+        self.set_own(g, "frames", gv, false);
         // `MutationObserver` (JS-C26) — les records vivent dans
         // la file du `Dom`, livrés au microtask checkpoint.
         self.install_mutation_observer();
@@ -450,6 +459,56 @@ impl Engine {
         self.add_method(g, "confirm", win_confirm);
         self.add_method(g, "prompt", win_prompt);
         self.add_method(g, "open", win_open);
+        // `window.addEventListener`/`removeEventListener`/
+        // `dispatchEvent` — `window` ≙ sommet de propagation : les
+        // listeners vivent sur le nœud racine, comme `document`.
+        self.add_method(g, "addEventListener", win_add_event_listener);
+        self.add_method(g, "removeEventListener", win_remove_event_listener);
+        self.add_method(g, "dispatchEvent", win_dispatch_event);
+        // `getComputedStyle(el)` — pas de cascade CSS réelle : rend
+        // le `StyleHost` de l'élément (valeurs inline uniquement).
+        self.add_method(g, "getComputedStyle", win_get_computed_style);
+        // `matchMedia(q)` — pas de moteur de media queries :
+        // `MediaQueryList` honnête `matches:false`, listeners no-op.
+        self.add_method(g, "matchMedia", win_match_media);
+        // `CSS` namespace — pas de moteur CSS : `supports` → false,
+        // `registerProperty` no-op, `escape` = algorithme spec.
+        let css = self.new_object();
+        self.add_method(css, "supports", css_supports);
+        self.add_method(css, "registerProperty", mql_noop);
+        self.add_method(css, "escape", css_escape);
+        self.set_own(g, "CSS", Value::Obj(css), false);
+        // `Node` — constructeur (inconstructible) portant les
+        // constantes `*_NODE` / `DOCUMENT_POSITION_*` ; `prototype`
+        // existe pour que `instanceof` reste sûr.
+        let node_f = self.native_fn("Node", node_ctor);
+        if let Value::Obj(nid) = node_f {
+            let p = self.new_object();
+            self.set_own(nid, "prototype", Value::Obj(p), false);
+            for (k, v) in [
+                ("ELEMENT_NODE", 1),
+                ("ATTRIBUTE_NODE", 2),
+                ("TEXT_NODE", 3),
+                ("CDATA_SECTION_NODE", 4),
+                ("ENTITY_REFERENCE_NODE", 5),
+                ("ENTITY_NODE", 6),
+                ("PROCESSING_INSTRUCTION_NODE", 7),
+                ("COMMENT_NODE", 8),
+                ("DOCUMENT_NODE", 9),
+                ("DOCUMENT_TYPE_NODE", 10),
+                ("DOCUMENT_FRAGMENT_NODE", 11),
+                ("NOTATION_NODE", 12),
+                ("DOCUMENT_POSITION_DISCONNECTED", 1),
+                ("DOCUMENT_POSITION_PRECEDING", 2),
+                ("DOCUMENT_POSITION_FOLLOWING", 4),
+                ("DOCUMENT_POSITION_CONTAINS", 8),
+                ("DOCUMENT_POSITION_CONTAINED_BY", 16),
+                ("DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC", 32),
+            ] {
+                self.set_own(nid, k, Value::Num(f64::from(v)), false);
+            }
+        }
+        self.set_own(g, "Node", node_f, false);
         let screen = self.new_object();
         let (w, h) = self.hooks.viewport;
         for (k, v) in [
@@ -469,6 +528,10 @@ impl Engine {
         self.set_own(g, "outerWidth", Value::Num(f64::from(w)), false);
         self.set_own(g, "outerHeight", Value::Num(f64::from(h)), false);
         self.set_own(g, "devicePixelRatio", Value::Num(1.0), false);
+        // Pas de scroll réel — la page tient dans le viewport.
+        for k in ["scrollX", "scrollY", "pageXOffset", "pageYOffset"] {
+            self.set_own(g, k, Value::Num(0.0), false);
+        }
     }
 
     /// Build the `Event` host wrapper for `state`.
@@ -775,7 +838,12 @@ impl Engine {
                 _ => self.inline_handler(dom, node, &key)?,
             };
             if let Some(f) = f {
-                self.call_value(f, this, &[*ev_val])?;
+                // Spec : un handler `on*` qui retourne `false`
+                // annule l'événement (≙ `preventDefault` — pattern
+                // `onsubmit="return check()"`).
+                if matches!(self.call_value(f, this, &[*ev_val])?, Value::Bool(false)) {
+                    ev.prevented.set(true);
+                }
             }
         }
         Ok(())
@@ -858,6 +926,9 @@ impl Host for DocumentHost {
                     None => Value::Null,
                 }))
             }
+            // `document.defaultView` — la fenêtre du document ≙ le
+            // global (single-window model).
+            "defaultView" => Ok(Some(Value::Obj(e.global))),
             "title" => {
                 let t = {
                     let d = self.dom.borrow();
@@ -902,6 +973,17 @@ impl Host for DocumentHost {
             // Parsing is done when scripts run — `complete` is the
             // only state we can observe (no `loading`/`interactive`).
             "readyState" => Ok(Some(e.str_val("complete"))),
+            // `document.fonts` — FontFaceSet stub : pas de pipeline
+            // de fontes web, `load()`/`ready` résolvent toujours.
+            "fonts" => Ok(Some(e.new_host_object(Rc::new(FontFaceSetHost)))),
+            // Page affichée = visible/active — pas d'onglet caché
+            // dans ce modèle.
+            "visibilityState" => Ok(Some(e.str_val("visible"))),
+            "hidden" => Ok(Some(Value::Bool(false))),
+            // `document.nodeType` — 9 (DOCUMENT_NODE), constant.
+            "nodeType" => Ok(Some(Value::Num(9.0))),
+            // `document.nodeName`/`tagName` — `#document` / absent.
+            "nodeName" => Ok(Some(e.str_val("#document"))),
             // `document.cookie` — raw `"k=v; …"` via the injected jar.
             "cookie" => Ok(Some(e.str_val(match &e.hooks.cookie_jar {
                 Some(jar) => jar.get(&e.hooks.page_url),
@@ -987,6 +1069,8 @@ impl Host for DocumentHost {
                 e.propagate_event(&self.dom, &self.cache, &state)?;
                 Ok(Some(Value::Bool(!state.prevented.get())))
             }
+            // Fenêtre unique affichée → focus constant.
+            "hasFocus" => Ok(Some(Value::Bool(true))),
             "getElementById" => {
                 let id = e.to_js_string(arg(args, 0))?;
                 let found = self.dom.borrow().by_id(&id);
@@ -1545,8 +1629,28 @@ impl Host for NodeHost {
                     node,
                 }))));
             }
-            "parentNode" | "parentElement" => {
+            "parentNode" => {
                 let p = self.dom.borrow().nodes[node as usize].parent;
+                return Ok(Some(match p {
+                    Some(p) => node_value(e, &self.dom, &self.cache, p),
+                    None => Value::Null,
+                }));
+            }
+            // `parentElement` : spec — `null` quand le parent n'est
+            // pas un élément (ex. `html.parentElement`, dont le
+            // parentNode est `#document`). Le confondre avec
+            // `parentNode` casse les remontées d'arbre qui
+            // terminent sur `null` (mesuré sur google.com).
+            "parentElement" => {
+                let p = {
+                    let d = self.dom.borrow();
+                    d.nodes[node as usize].parent.filter(|&p| {
+                        // La racine `#document` est stockée `Element`
+                        // dans le miroir mais n'est PAS un Element
+                        // DOM : `html.parentElement` doit être null.
+                        p != d.root && d.nodes[p as usize].kind == NodeKind::Element
+                    })
+                };
                 return Ok(Some(match p {
                     Some(p) => node_value(e, &self.dom, &self.cache, p),
                     None => Value::Null,
@@ -1770,6 +1874,27 @@ impl Host for NodeHost {
                 if is_media(&self.dom, node) =>
             {
                 return Ok(Some(media_prop(e, &self.dom, node, key)));
+            }
+            // Dimensions sans moteur de mise en page derrière :
+            // `documentElement`/`body` empruntent le viewport,
+            // tout autre élément vaut 0 — stub honnête (les pages
+            // lisent `documentElement.clientHeight` pour le
+            // « scroll bottom » — mesuré sur google.com).
+            "clientWidth" | "clientHeight" | "scrollWidth" | "scrollHeight" | "offsetWidth"
+            | "offsetHeight" => {
+                let (vw, vh) = e.hooks.viewport;
+                let is_root = {
+                    let d = self.dom.borrow();
+                    node == d.body() || Some(node) == d.document_element()
+                };
+                let px = if is_root && key.ends_with("Height") {
+                    vh
+                } else if is_root {
+                    vw
+                } else {
+                    0
+                };
+                return Ok(Some(Value::Num(f64::from(px))));
             }
             _ => {}
         }
@@ -2702,6 +2827,18 @@ impl Host for HistoryHost {
             "back" => -1,
             "forward" => 1,
             "go" => e.to_number(arg(args, 0))? as i32,
+            "pushState" | "replaceState" => {
+                // Pas de pile de session — l'URL courante change
+                // comme chez un navigateur, sans rechargement.
+                let u = arg(args, 2);
+                if !matches!(u, Value::Undefined | Value::Null) {
+                    let url = e.to_js_string(u)?;
+                    if !url.is_empty() {
+                        e.hooks.page_url = url;
+                    }
+                }
+                return Ok(Some(Value::Undefined));
+            }
             _ => return Ok(None),
         };
         if n != 0 {
@@ -2711,6 +2848,205 @@ impl Host for HistoryHost {
         }
         Ok(Some(Value::Undefined))
     }
+}
+
+/// `document.fonts` — `FontFaceSet` minimal. Pas de pipeline de
+/// fontes web dans ce moteur : `load()`/`ready` résolvent
+/// toujours, `check()` dit vrai — surface honnête pour les pages
+/// qui feature-detectent puis chargent une fonte de marque
+/// (mesuré : bootstrap `Google Sans` de google.com).
+struct FontFaceSetHost;
+
+impl Host for FontFaceSetHost {
+    fn class_name(&self) -> &'static str {
+        "FontFaceSet"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
+        match key {
+            "size" => Ok(Some(Value::Num(0.0))),
+            "status" => Ok(Some(e.str_val("loaded"))),
+            // `fonts.ready` — résolue avec le set lui-même (spec).
+            "ready" => {
+                let pid = e.new_promise();
+                e.resolve_promise(pid, this);
+                Ok(Some(Value::Obj(pid)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _t: Value,
+        name: &str,
+        _args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        match name {
+            // `load(font, text?)` → Promise<FontFace[]> — résolu
+            // avec un tableau vide : aucune fonte web déclarée.
+            "load" => {
+                let arr = e.new_array(Vec::new());
+                let pid = e.new_promise();
+                e.resolve_promise(pid, arr);
+                Ok(Some(Value::Obj(pid)))
+            }
+            "check" => Ok(Some(Value::Bool(true))),
+            _ => Ok(None),
+        }
+    }
+}
+
+/// `window.addEventListener(ty, f, capture?)` — enregistré sur le
+/// nœud racine (`window` ≙ sommet de l'arbre de propagation, même
+/// cible que les listeners `document.*`).
+fn win_add_event_listener(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ty = e.to_js_string(arg(args, 0))?;
+    let f = arg(args, 1);
+    let capture = e.to_boolean(arg(args, 2));
+    if e.is_callable(f) {
+        if let Some((dom, _)) = &e.dom_ctx {
+            let root = dom.borrow().root;
+            dom.borrow_mut().nodes[root as usize]
+                .listeners
+                .push((ty, f, capture));
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `window.removeEventListener(ty, f, capture?)` — miroir de
+/// [`win_add_event_listener`].
+fn win_remove_event_listener(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ty = e.to_js_string(arg(args, 0))?;
+    let f = arg(args, 1);
+    let capture = e.to_boolean(arg(args, 2));
+    if let Some((dom, _)) = &e.dom_ctx {
+        let root = dom.borrow().root;
+        dom.borrow_mut().nodes[root as usize]
+            .listeners
+            .retain(|(t, lf, c)| !(t == &ty && *c == capture && e.strict_eq(*lf, f)));
+    }
+    Ok(Value::Undefined)
+}
+
+/// `window.dispatchEvent(ev)` — propagation complète depuis le
+/// nœud racine (≙ `document.dispatchEvent` sur `#document`).
+fn win_dispatch_event(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((dom, cache)) = e.dom_ctx.clone() else {
+        return Ok(Value::Bool(false));
+    };
+    let root = dom.borrow().root;
+    let Some(state) = event_state_of(e, root, &dom, &cache, arg(args, 0))? else {
+        return Ok(Value::Bool(false));
+    };
+    e.propagate_event(&dom, &cache, &state)?;
+    Ok(Value::Bool(!state.prevented.get()))
+}
+
+/// `getComputedStyle(el, pseudo?)` — pas de cascade CSS : l'objet
+/// rendu lit les valeurs **inline** de l'élément (honnête — les
+/// sondes `display`/`visibility` des scripts obtiennent `""`,
+/// jamais une exception). `TypeError` si l'argument n'est pas un
+/// élément, comme la spec.
+fn win_get_computed_style(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some(node) = node_for(e, arg(args, 0)) else {
+        return Err(e.type_error("getComputedStyle: parameter 1 is not of type 'Element'"));
+    };
+    let Some((dom, _)) = e.dom_ctx.clone() else {
+        return Err(e.type_error("getComputedStyle: no document"));
+    };
+    Ok(e.new_host_object(Rc::new(StyleHost { dom, node })))
+}
+
+/// `window.matchMedia(q)` — pas de moteur de media queries :
+/// `MediaQueryList` honnête `matches:false`, `media` = la requête,
+/// listeners no-op (viewport fixe, jamais de `change`).
+fn win_match_media(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let q = e.to_js_string(arg(args, 0))?;
+    let m = e.new_object();
+    e.set_own(m, "matches", Value::Bool(false), true);
+    let media = e.str_val(q);
+    e.set_own(m, "media", media, true);
+    e.set_own(m, "onchange", Value::Null, true);
+    e.add_method(m, "addListener", mql_noop);
+    e.add_method(m, "removeListener", mql_noop);
+    e.add_method(m, "addEventListener", mql_noop);
+    e.add_method(m, "removeEventListener", mql_noop);
+    e.add_method(m, "dispatchEvent", mql_noop);
+    Ok(Value::Obj(m))
+}
+
+/// `MediaQueryList` listener no-op — les queries ne changent pas.
+fn mql_noop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Undefined)
+}
+
+/// `CSS.supports(…)` — pas de moteur CSS : `false` honnête.
+fn css_supports(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(false))
+}
+
+/// `new Node()` — inconstructible ("illegal constructor" per spec).
+fn node_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Err(e.type_error("Node: illegal constructor"))
+}
+
+/// `CSS.escape(s)` — algorithme « serialize an identifier »
+/// (cssom) : échappement `\NN ` des contrôles, chiffre initial,
+/// `-` seul ; identité pour ident-chars et non-ASCII.
+fn css_escape(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_js_string(arg(args, 0))?;
+    let mut out = String::with_capacity(s.len());
+    let chars: Vec<char> = s.chars().collect();
+    for (i, &c) in chars.iter().enumerate() {
+        let cp = c as u32;
+        if cp == 0 {
+            out.push('\u{fffd}');
+        } else if (0x01..=0x1f).contains(&cp)
+            || cp == 0x7f
+            || (i == 0 && c.is_ascii_digit())
+            || (i == 1 && c.is_ascii_digit() && chars[0] == '-')
+        {
+            out.push_str(&format!("\\{cp:x} "));
+        } else if i == 0 && c == '-' && chars.len() == 1 {
+            out.push_str("\\-");
+        } else if c == '-' || c == '_' || c.is_ascii_alphanumeric() || cp >= 0x80 {
+            out.push(c);
+        } else {
+            out.push('\\');
+            out.push(c);
+        }
+    }
+    Ok(e.str_val(out))
+}
+
+/// `navigator.sendBeacon(url, data?)` — POST fire-and-forget sur
+/// le transport XHR de l'embedder ; `false` sans connecteur.
+fn nav_send_beacon(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let url = e.to_js_string(arg(args, 0))?;
+    if url.is_empty() {
+        return Ok(Value::Bool(false));
+    }
+    let body = match arg(args, 1) {
+        Value::Undefined => None,
+        v => Some(e.to_js_string(v)?),
+    };
+    let Some(t) = &e.xhr.transport else {
+        return Ok(Value::Bool(false));
+    };
+    t.send(&XhrRequest {
+        method: "POST".into(),
+        url,
+        headers: Vec::new(),
+        body,
+    });
+    Ok(Value::Bool(true))
 }
 
 // ------------------------------------------------------------------

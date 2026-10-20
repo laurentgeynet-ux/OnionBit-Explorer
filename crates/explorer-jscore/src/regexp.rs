@@ -326,12 +326,32 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
     // L'atome précédent était une borne de range — un `-` qui suit
     // est littéral, jamais le début d'une autre range (`[a-b-c]`).
     let mut class_prev_bound = false;
+    // Suivi d'émission de la classe courante : les atomes
+    // surrogate (jamais dans nos strings UTF-8) sont omis — une
+    // classe entièrement vidée dégénère en `(?!)` / `[\s\S]`.
+    let mut class_start_out = 0usize;
+    let mut class_negated = false;
+    let mut class_emitted = false;
     while i < cs.len() {
         let c = cs[i];
         if c == '\\' {
             let (frag, next) = t.escape(&cs, i, src)?;
             if in_class {
+                // Surrogate : nos strings UTF-8 n'en contiennent
+                // jamais — l'atome ne peut matcher → omis (il reste
+                // compté comme borne de range éventuelle).
+                let atom = class_atom_of(&cs, i);
+                if let ClassAtom::Char(cp) = atom {
+                    if is_surrogate(cp) {
+                        class_prev = Some(atom);
+                        class_prev_bound = class_dash;
+                        class_dash = false;
+                        i = next;
+                        continue;
+                    }
+                }
                 out.push_str(&frag);
+                class_emitted = true;
                 // Fold individuel — jamais sur une borne de range
                 // (le `-` émet le fold de la range en un bloc).
                 if t.fold {
@@ -339,15 +359,26 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                         || (cs.get(next) == Some(&'-')
                             && !matches!(class_atom_of(&cs, next + 1), ClassAtom::End));
                     if !is_bound {
-                        if let ClassAtom::Char(cp) = class_atom_of(&cs, i) {
+                        if let ClassAtom::Char(cp) = atom {
                             emit_fold_variants(&mut out, cp);
                         }
                     }
                 }
-                class_prev = Some(class_atom_of(&cs, i));
+                class_prev = Some(atom);
                 class_prev_bound = class_dash;
                 class_dash = false;
             } else {
+                // Hors classe : un atome surrogate ne peut matcher
+                // — `(?!)` (jamais) plutôt qu'un codepoint invalide
+                // pour le backend.
+                if let ClassAtom::Char(cp) = class_atom_of(&cs, i) {
+                    if is_surrogate(cp) {
+                        out.push_str("(?!)");
+                        last_atom = true;
+                        i = next;
+                        continue;
+                    }
+                }
                 emit_escape(&mut out, &frag, t.fold);
                 last_atom = true;
             }
@@ -360,9 +391,12 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                 class_prev = None;
                 class_dash = false;
                 class_prev_bound = false;
+                class_start_out = out.len();
+                class_emitted = false;
                 out.push('[');
                 // `[^` — la négation n'est pas un atome.
-                if cs.get(i + 1) == Some(&'^') {
+                class_negated = cs.get(i + 1) == Some(&'^');
+                if class_negated {
                     out.push('^');
                     i += 1;
                 }
@@ -370,7 +404,14 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
             ']' if in_class => {
                 in_class = false;
                 last_atom = true;
-                out.push(']');
+                if class_emitted {
+                    out.push(']');
+                } else {
+                    // Classe vidée par les surrogates omis :
+                    // `[^surr]` matche tout, `[surr]` jamais.
+                    out.truncate(class_start_out);
+                    out.push_str(if class_negated { "[\\s\\S]" } else { "(?!)" });
+                }
             }
             ']' if unicode => {
                 // `]` nu : littéral sloppy (Annex B), erreur en `u`.
@@ -392,6 +433,7 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                     }
                     // Sloppy : `-` littéral devant une class-escape.
                     out.push_str("\\-");
+                    class_emitted = true;
                     class_prev = Some(ClassAtom::Char(u32::from('-')));
                     class_prev_bound = false;
                 } else if is_range {
@@ -399,39 +441,62 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                         if lo > hi {
                             return Err(format!("empty class range in /{src}/"));
                         }
-                        if t.fold {
-                            // La range est émise en un bloc — un fold
-                            // individuel des bornes produirait des
-                            // ranges invalides (`a-z` → `aA-zA-Z`).
-                            let (hfrag, hnext) = if cs[i + 1] == '\\' {
-                                t.escape(&cs, i + 1, src)?
-                            } else {
-                                (cs[i + 1].to_string(), i + 2)
-                            };
+                        // Bornes surrogate : jamais présentes dans
+                        // nos strings UTF-8 — la plage est clampée
+                        // (`lo`→`\x{e000}`, `hi`→`\x{d7ff}`) ; une
+                        // plage entièrement surrogate n'émet rien.
+                        let lo_c = if is_surrogate(lo) { 0xe000 } else { lo };
+                        let hi_c = if is_surrogate(hi) { 0xd7ff } else { hi };
+                        // La borne haute est toujours consommée ici
+                        // (fold ou non) — l'émission décalée au tour
+                        // suivant empêcherait le clamp.
+                        let (hfrag, hnext) = if cs[i + 1] == '\\' {
+                            t.escape(&cs, i + 1, src)?
+                        } else {
+                            (cs[i + 1].to_string(), i + 2)
+                        };
+                        if lo_c <= hi_c {
+                            // La borne basse n'a été émise que si
+                            // non-surrogate — sinon on l'émet ici
+                            // clampée.
+                            if is_surrogate(lo) {
+                                class_char(&mut out, lo_c);
+                            }
                             out.push('-');
-                            out.push_str(&hfrag);
-                            for map in [simple_upper, simple_lower] {
-                                if let (Some(flo), Some(fhi)) = (map(lo), map(hi)) {
-                                    // La variante de la borne doit
-                                    // se canoniser comme la borne.
-                                    if flo <= fhi
-                                        && simple_upper(flo).unwrap_or(flo)
-                                            == simple_upper(lo).unwrap_or(lo)
-                                        && simple_upper(fhi).unwrap_or(fhi)
-                                            == simple_upper(hi).unwrap_or(hi)
-                                    {
-                                        class_char(&mut out, flo);
-                                        out.push('-');
-                                        class_char(&mut out, fhi);
+                            if is_surrogate(hi) {
+                                class_char(&mut out, hi_c);
+                            } else {
+                                out.push_str(&hfrag);
+                            }
+                            class_emitted = true;
+                            if t.fold {
+                                // La range est émise en un bloc —
+                                // un fold individuel des bornes
+                                // produirait des ranges invalides.
+                                for map in [simple_upper, simple_lower] {
+                                    if let (Some(flo), Some(fhi)) = (map(lo_c), map(hi_c)) {
+                                        // La variante de la borne
+                                        // doit se canoniser comme
+                                        // la borne.
+                                        if flo <= fhi
+                                            && simple_upper(flo).unwrap_or(flo)
+                                                == simple_upper(lo_c).unwrap_or(lo_c)
+                                            && simple_upper(fhi).unwrap_or(fhi)
+                                                == simple_upper(hi_c).unwrap_or(hi_c)
+                                        {
+                                            class_char(&mut out, flo);
+                                            out.push('-');
+                                            class_char(&mut out, fhi);
+                                        }
                                     }
                                 }
                             }
-                            class_prev = Some(ClassAtom::Char(hi));
-                            class_prev_bound = true;
-                            class_dash = false;
-                            i = hnext;
-                            continue;
                         }
+                        class_prev = Some(ClassAtom::Char(hi));
+                        class_prev_bound = true;
+                        class_dash = false;
+                        i = hnext;
+                        continue;
                     }
                     out.push('-');
                     class_dash = true;
@@ -471,6 +536,12 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                     out.push_str(&cs[i..next].iter().collect::<String>());
                     last_atom = false;
                     i = next;
+                    // `?` modifieur lazy (`{n,m}?`) — syntaxe
+                    // identique côté backend, émis tel quel.
+                    if cs.get(i) == Some(&'?') {
+                        out.push('?');
+                        i += 1;
+                    }
                     continue;
                 }
                 if unicode {
@@ -496,6 +567,12 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                 }
                 last_atom = false;
                 out.push(c);
+                // `?` modifieur lazy (`*?`/`+?`/`??`) — syntaxe
+                // identique côté backend, émis tel quel.
+                if cs.get(i + 1) == Some(&'?') {
+                    out.push('?');
+                    i += 1;
+                }
             }
             '.' if !in_class => {
                 last_atom = true;
@@ -504,6 +581,7 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
             _ => {
                 if in_class {
                     out.push(c);
+                    class_emitted = true;
                     if t.fold {
                         let is_bound = class_dash
                             || (cs.get(i + 1) == Some(&'-')
@@ -684,23 +762,120 @@ enum ClassAtom {
     End,
 }
 
-/// Classifie l'atome de classe à `cs[i]` (sans l'émettre).
+/// Classifie l'atome de classe à `cs[i]` (sans l'émettre) —
+/// décode les échappements comme `escape()` : `\xHH`, `\uHHHH`
+/// (paires de surrogates fusionnées), `\u{…}`, `\0`/octales
+/// Annex B, `\cX`. `\d`/`\p`/`\k<…>` → `Escape`.
 fn class_atom_of(cs: &[char], i: usize) -> ClassAtom {
     match cs.get(i) {
         None | Some(']') => ClassAtom::End,
         Some('\\') => match cs.get(i + 1) {
-            Some('d' | 'D' | 's' | 'S' | 'w' | 'W') => ClassAtom::Escape,
+            Some('d' | 'D' | 's' | 'S' | 'w' | 'W' | 'p' | 'P') => ClassAtom::Escape,
             Some('b') => ClassAtom::Char(8), // `\b` in class = backspace
             Some('n') => ClassAtom::Char(10),
             Some('r') => ClassAtom::Char(13),
             Some('t') => ClassAtom::Char(9),
             Some('f') => ClassAtom::Char(12),
             Some('v') => ClassAtom::Char(11),
+            Some('x') => match (
+                cs.get(i + 2).and_then(|d| d.to_digit(16)),
+                cs.get(i + 3).and_then(|d| d.to_digit(16)),
+            ) {
+                (Some(a), Some(b)) => ClassAtom::Char(a * 16 + b),
+                // `\x` malformé sloppy → identité `x`.
+                _ => ClassAtom::Char(u32::from('x')),
+            },
+            Some('u') => {
+                if cs.get(i + 2) == Some(&'{') {
+                    let mut j = i + 3;
+                    let mut v = 0u32;
+                    let mut digits = 0;
+                    while let Some(&d) = cs.get(j) {
+                        if let Some(h) = d.to_digit(16) {
+                            v = v.saturating_mul(16).saturating_add(h);
+                            digits += 1;
+                            j += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    if cs.get(j) == Some(&'}') && digits > 0 {
+                        return ClassAtom::Char(v);
+                    }
+                    return ClassAtom::Char(u32::from('u')); // sloppy identité
+                }
+                // Paire de surrogates → point de code fusionné.
+                if let Some((cp, _)) = surrogate_pair(cs, i) {
+                    return ClassAtom::Char(u32::from(cp));
+                }
+                match hex4(cs, i + 2) {
+                    Some(v) => ClassAtom::Char(v),
+                    None => ClassAtom::Char(u32::from('u')),
+                }
+            }
+            // `\0` NUL ; `\0N` → octale Annex B (`\07`).
+            Some('0') => {
+                if cs.get(i + 2).is_some_and(char::is_ascii_digit) {
+                    let mut v = 0u32;
+                    let mut j = i + 2;
+                    let mut nd = 0;
+                    while nd < 2 {
+                        match cs.get(j).and_then(|d| d.to_digit(8)) {
+                            Some(o) => {
+                                v = v * 8 + o;
+                                j += 1;
+                                nd += 1;
+                            }
+                            None => break,
+                        }
+                    }
+                    ClassAtom::Char(v)
+                } else {
+                    ClassAtom::Char(0)
+                }
+            }
+            Some('c') => match cs.get(i + 2).filter(|d| d.is_ascii_alphabetic()) {
+                Some(&d) => ClassAtom::Char(u32::from(d) % 32),
+                // `\c` non suivi d'une lettre → `\\c` émis :
+                // la borne vue est le backslash.
+                None => ClassAtom::Char(u32::from('\\')),
+            },
+            // `\1`–`\7` : dans une classe les backrefs sont des
+            // octales Annex B ; `\8`/`\9` → identité.
+            Some(&d) if d.is_ascii_digit() => {
+                if matches!(d, '8' | '9') {
+                    ClassAtom::Char(u32::from(d))
+                } else {
+                    let mut v = 0u32;
+                    let mut j = i + 1;
+                    let mut nd = 0;
+                    while nd < 3 {
+                        match cs.get(j).and_then(|x| x.to_digit(8)) {
+                            Some(o) => {
+                                v = v * 8 + o;
+                                j += 1;
+                                nd += 1;
+                            }
+                            None => break,
+                        }
+                    }
+                    ClassAtom::Char(v)
+                }
+            }
+            // `\k` en classe : identité Annex B (les backrefs
+            // nommées ne vivent pas dans les classes).
+            Some('k') => ClassAtom::Char(u32::from('k')),
             Some(&c) => ClassAtom::Char(u32::from(c)),
             None => ClassAtom::End,
         },
         Some(&c) => ClassAtom::Char(u32::from(c)),
     }
+}
+
+/// `cp` est-il un surrogate — jamais présent dans nos strings
+/// UTF-8 : un tel atome ne peut matcher aucun caractère.
+fn is_surrogate(cp: u32) -> bool {
+    (0xd800..=0xdfff).contains(&cp)
 }
 
 /// `{n}` / `{n,}` / `{n,m}` à `cs[i]` → `(lo, hi, next)`.
@@ -1151,4 +1326,74 @@ fn next_boundary(hay: &str, byte: usize) -> usize {
         b += 1;
     }
     b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::translate_pattern;
+
+    fn tr(src: &str) -> String {
+        translate_pattern(src, false, false).unwrap()
+    }
+
+    /// Bornes de plage : les échappements sont décodés — bug
+    /// mesuré : `\x00` lu comme 'x' (0x78) → "empty class range"
+    /// sur `/[\x00- ]/` (pattern réel d'un bundle Google).
+    #[test]
+    fn class_escape_bounds_decode() {
+        assert_eq!(tr(r"[\x00- ]"), "[\\x{0}- ]");
+        assert_eq!(tr(r"[\x20-\x30]"), "[\\x{20}-\\x{30}]");
+        assert_eq!(tr(r"[\u2020-\u2030]"), "[\\x{2020}-\\x{2030}]");
+        assert_eq!(tr(r"[\u{1F600}-\u{1F64F}]"), "[\\x{1f600}-\\x{1f64f}]");
+        assert_eq!(tr(r"[\0-\x1f]"), "[\\x{0}-\\x{1f}]");
+        assert_eq!(tr(r"[\cA-\cZ]"), "[\\x{1}-\\x{1a}]");
+        assert_eq!(tr(r"[\101-\103]"), "[\\x{41}-\\x{43}]");
+        assert_eq!(
+            tr(r"[\x00- \x22\x27-\x29\x3c\x3e\\\x7b\x7d\x7f\x85\xa0\u2028\u2029\uff01\uff03\uff04\uff06-\uff0c\uff0f\uff1a\uff1b\uff1d\uff1f\uff20\uff3b\uff3d]"),
+            "[\\x{0}- \\x{22}\\x{27}-\\x{29}\\x{3c}\\x{3e}\\\\\\x{7b}\\x{7d}\\x{7f}\\x{85}\\x{a0}\\x{2028}\\x{2029}\\x{ff01}\\x{ff03}\\x{ff04}\\x{ff06}-\\x{ff0c}\\x{ff0f}\\x{ff1a}\\x{ff1b}\\x{ff1d}\\x{ff1f}\\x{ff20}\\x{ff3b}\\x{ff3d}]"
+        );
+    }
+
+    /// Surrogates : jamais présents dans nos strings UTF-8 — atome
+    /// omis/(?!), plages clampées, classe vidée → `(?!)`/`[\s\S]`.
+    #[test]
+    fn surrogate_bounds_degrade() {
+        assert_eq!(tr(r"[\uD800-\uDFFF]"), "(?!)");
+        assert_eq!(tr(r"[^\uD800-\uDBFF]"), "[\\s\\S]");
+        assert_eq!(tr(r"[\uD800-\uE000]"), "[\\x{e000}-\\x{e000}]");
+        assert_eq!(tr(r"[a-\uDFFF]"), "[a-\\x{d7ff}]");
+        assert_eq!(tr(r"\uD800"), "(?!)");
+        // `lo > hi` brut reste une erreur (surrogate > ASCII).
+        assert!(translate_pattern(r"[\uD800-z]", false, false).is_err());
+        // Le pattern réel du bundle Google compile et ne matche
+        // rien (nos strings n'ont pas de surrogate orphelin).
+        let t = tr(r"(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])");
+        assert!(!t.contains("d800") && !t.contains("dc00") && !t.contains("dbff"));
+    }
+
+    /// Le résultat traduit matche ce qu'il doit matcher.
+    #[test]
+    fn class_escapes_exec() {
+        let probe = |src: &str, hay: &str| {
+            let re = super::JsRegExp::compile(src, "").unwrap();
+            re.exec(hay, 0).is_some()
+        };
+        assert!(probe(r"[\x00- ]", " "));
+        assert!(!probe(r"[\x00- ]", "a"));
+        assert!(probe(r"[\x20-\x30]", "%"));
+        assert!(probe(r"[\u2020-\u2030]", "\u{2025}"));
+        assert!(probe(r"[\u{1F600}-\u{1F64F}]", "\u{1f610}"));
+        assert!(probe(r"[\0-\x1f]", "\x07"));
+        assert!(probe(r"[\cA-\cZ]", "\x0b"));
+        assert!(probe(r"[\101-\103]", "B"));
+        assert!(!probe(r"[\uD800-\uDFFF]", "a"));
+        assert!(probe(r"[^\uD800-\uDBFF]", "a"));
+        assert!(probe(r"[\uD800-\uE000]", "\u{e000}"));
+        assert!(probe(r"[a-\uDFFF]", "m"));
+        assert!(!probe(r"\uD800", "a"));
+        assert!(!probe(
+            r"(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])",
+            "abc"
+        ));
+    }
 }

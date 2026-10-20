@@ -30,54 +30,39 @@ use explorer_jscore::{Engine, Error};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Cliquet de régression (score @ extraction d53ebc8 :
-/// 531/859 exécutés, 218 skips, 328 échecs — concentrés sur
-/// identifiants Unicode et `\uXXXX` en position identifiant,
-/// ASI après commentaires multi-lignes avec LS/PS, commentaires
-/// HTML `<!--`/`-->`, négatifs `early`/`runtime` fins).
-const BASELINE_PASSED: usize = 531;
+/// Cliquet de régression — **re-mesuré après la vague JS-8+** (la
+/// whitelist `UNSUPPORTED` était périmée : TypedArray/Proxy/Intl/
+/// Temporal/BigInt/générateurs/async/modules/privés/etc. étaient
+/// implémentés mais skippés). Score @ extraction d53ebc8 :
+/// **1007/1046 exécutés (96 %), 31 skips, 39 échecs** — concentrés
+/// sur `\uXXXX` dans les identifiants Unicode (`ID_Start`/`ID_Continue`
+/// incomplets, 30 cas), négatifs de séparateurs numériques à zéro
+/// en tête (`08`/`0_8`/`0_0` acceptés au lieu de `SyntaxError`, 8 cas),
+/// `put-value-prop-base-primitive` (1 cas).
+const BASELINE_PASSED: usize = 1007;
 /// Plafond de skips toléré — monte seulement si le corpus grossit.
-const BASELINE_SKIPPED_MAX: usize = 218;
+const BASELINE_SKIPPED_MAX: usize = 31;
 
 /// Features présents dans le corpus mais absents du moteur —
 /// vérifiés contre `builtins.rs`/`lexer.rs`/`regexp.rs`, pas
 /// supposés : skip explicite et compté. Tout le reste TOURNE et
-/// échoue honnêtement si le moteur ne suit pas (ex. `object-is`,
-/// `object-rest`, `regexp-named-groups` partiels).
+/// échoue honnêtement si le moteur ne suit pas.
+///
+/// Liste re-vérifiée à la vague JS-8+ (re-mesure) : generators,
+/// async (functions/iteration/`for await`), `BigInt`, `TypedArray`/
+/// `ArrayBuffer`/`DataView`/SAB/`Atomics`, `Intl`, `Temporal`,
+/// `WeakRef`/`FinalizationRegistry`, `Proxy`, `import.meta`,
+/// dynamic `import()`, regexp lookbehind/`d`-flag, séparateurs
+/// `1_0`, champs et méthodes privés de classe, `static {}`,
+/// `Symbol.asyncIterator`/`matchAll`/`toStringTag`/`toPrimitive`/
+/// `species` sont tous implémentés — ils tournent donc désormais au
+/// lieu d'être skippés.
 const UNSUPPORTED: &[&str] = &[
-    "generators",
-    "async-functions",
-    "async-iteration",
-    "BigInt",
-    "TypedArray",
-    "ArrayBuffer",
-    "DataView",
-    "Atomics",
-    "SharedArrayBuffer",
-    "Intl",
-    "Temporal",
-    "WeakRef",
-    "FinalizationRegistry",
-    "Proxy",
-    "import.meta",
-    "dynamic-import",
-    "regexp-lookbehind",
-    "regexp-match-indices",
-    "numeric-separator-literal",
-    "class-fields-private",
-    "class-fields-public",
-    "class-methods-private",
-    "class-static-block",
-    "class-static-methods-private",
-    "hashbang",
-    "Symbol.asyncIterator",
-    "Symbol.matchAll",
-    "Symbol.toStringTag",
-    "Symbol.toPrimitive",
-    "Symbol.species",
-    "tail-call-optimization",
-    "IsHTMLDDA",
-    "cross-realm",
+    // Jamais implémentés (hors périmètre ou inobservables).
+    "hashbang",               // pas de commentaire `#!` ligne 1
+    "IsHTMLDDA",              // `document.all` (Annex B host)
+    "cross-realm",            // un seul realm par Engine
+    "tail-call-optimization", // tree-walker sans PTC
 ];
 
 /// Frontmatter `/*--- … ---*/` minimal — les champs qui pilotent

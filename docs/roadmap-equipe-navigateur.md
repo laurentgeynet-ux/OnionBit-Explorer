@@ -1655,6 +1655,34 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   et la rendre dans `stack`/`Uncaught`. Prochain vol google
   attendu pour confirmer si l'exception tue la redirection
   consent.
+- [x] **JS-C48. Rapatriement des avancées Dillo `dillo-js`** :
+  la copie vendored avait dérivé (~1 200 lignes de delta
+  bidirectionnel sur 6 fichiers). Port-back complet dans le
+  canonique : `window.addEventListener`/`removeEventListener`/
+  `dispatchEvent` (sommet de propagation), `getComputedStyle`
+  (inline `StyleHost`), `matchMedia` (`MediaQueryList`
+  `matches:false`), `CSS.supports`/`escape`/`registerProperty`,
+  constructeur `Node` + constantes, `document.fonts`
+  (`FontFaceSet`), `defaultView`/`visibilityState`/`hidden`/
+  `nodeType`/`nodeName`/`hasFocus`, `top`/`parent`/`frames`,
+  `scrollX/Y`/`pageX/YOffset`, `parentElement` ≠ `parentNode`
+  (spec — `html.parentElement` = `null`), dimensions
+  client/scroll/offset (racine ≙ viewport, sinon 0),
+  `history.pushState`/`replaceState` (URL sans rechargement),
+  `navigator.sendBeacon`, handler `on*` retournant `false` →
+  `preventDefault`, `AbortController`/`AbortSignal` (+ rejet
+  `fetch` sur signal déjà aborted), diagnostic TypeError
+  « `x` is not a function (on recv) », regexp : quantificateurs
+  lazy `*?`/`+?`/`??`/`{n,m}?`, bornes de classe échappées
+  décodées (`\xHH`, `\uHHHH`, `\u{…}`, `\0`, `\cX`, octales
+  Annex B) et surrogates omis/clampés (classe vidée →
+  `(?!)`/`[\s\S]`), `performance.mark`/`measure`/`timeOrigin`/
+  `timing`/`navigation` (stubs honnêtes), re-baseline test262
+  **1007/1046 exécutés (96 %)** avec whitelist re-vérifiée, et
+  l'outil `examples/census.rs` (compte-rendu des erreurs de
+  pages réelles). Sens inverse vérifié : JS-C46 (entités),
+  JS-C45 et la vague JS-C26+ étaient déjà Explorer-only —
+  `src/dom.rs` reste canonique.
 
 ## Tâches continues
 

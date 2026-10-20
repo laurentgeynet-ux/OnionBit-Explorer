@@ -4609,6 +4609,22 @@ impl Engine {
                             }
                         }
                         let f = self.get_prop_value(recv, &name)?;
+                        if !self.is_callable(f) {
+                            // Diagnostic : nommer la méthode + le
+                            // receveur — les erreurs de pages
+                            // réelles pointent l'API manquante.
+                            let recv_desc = match recv {
+                                Value::Obj(rid) => match self.heap.obj(rid).map(|o| &o.kind) {
+                                    Some(ObjKind::Host(h)) => h.class_name().to_string(),
+                                    Some(_) => "Object".to_string(),
+                                    None => "?".to_string(),
+                                },
+                                _ => format!("{recv:?}"),
+                            };
+                            return Err(self.type_error(format!(
+                                "`{name}` is not a function (on {recv_desc})"
+                            )));
+                        }
                         self.call_value(f, recv, &args)
                     }
                     Callee::Super(name) => {

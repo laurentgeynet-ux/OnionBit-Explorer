@@ -165,6 +165,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   listener du port. Critère : RSS croissant sans borne
   ou mort = repro ; RSS plat sur fenêtre longue =
   exonération progressive.
+- **JS-C48 — rapatriement des avancées Dillo `dillo-js`**
+  (`explorer-jscore`) : la copie vendored avait dérivé
+  (~1 200 lignes de delta bidirectionnel sur 6 fichiers) —
+  port-back complet dans le canonique avant suppression de
+  la copie. Surface `window` : `add`/`removeEventListener`,
+  `dispatchEvent` (sommet de propagation), `getComputedStyle`
+  (inline), `matchMedia`, `CSS.supports`/`escape`,
+  constructeur `Node` + constantes, `top`/`parent`/`frames`,
+  `scrollX/Y`/`pageX/YOffset`. `document` : `fonts`
+  (`FontFaceSet`), `defaultView`, `visibilityState`/`hidden`,
+  `nodeType`/`nodeName`, `hasFocus`. Éléments :
+  `parentElement` ≠ `parentNode` (spec), dimensions
+  client/scroll/offset honnêtes (racine ≙ viewport).
+  `history.pushState`/`replaceState`, `navigator.sendBeacon`,
+  handler `on*` retournant `false` → `preventDefault` (spec),
+  `AbortController`/`AbortSignal` (rejet `fetch` sur signal
+  déjà aborted), diagnostic TypeError nommant méthode +
+  receveur. Regexp : quantificateurs lazy `*?`/`+?`/`??`/
+  `{n,m}?`, bornes de classe échappées décodées (`\xHH`,
+  `\uHHHH`, `\u{…}`, `\0`, `\cX`, octales Annex B), surrogates
+  omis/clampés (classe vidée → `(?!)`/`[\s\S]`).
+  `performance.mark`/`measure`/`timeOrigin`/`timing`/
+  `navigation` (stubs honnêtes). Re-baseline test262
+  **1007/1046 exécutés (96 %)** — whitelist `UNSUPPORTED`
+  périmée re-vérifiée (31→4 entrées). Outil `examples/
+  census.rs` porté (compte-rendu d'erreurs de pages réelles).
+  Sens inverse vérifié : JS-C46, JS-C45 et la vague JS-C26+
+  étaient déjà Explorer-only — `src/dom.rs` reste canonique.
 
 ### Fixed
 
