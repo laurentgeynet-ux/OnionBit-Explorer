@@ -59,6 +59,14 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `frame_invalidated`). `handle_input` `&mut` (FFI/CLI)
   inchangé : outcome de commit réel.
 
+### Changed
+
+- **Étape 77 — sortie fatale du daemon visible**
+  (`explorer-daemon`) : `bind` en échec et `axum::serve`
+  terminé en `Err` écrivent la raison sur stderr direct
+  (`eprintln!`) en plus du `tracing::error!` — un filtre
+  `RUST_LOG` ciblé n'avale plus la cause de mort.
+
 ### Added
 
 - **Étape 72 — résolveur DoH optionnel**

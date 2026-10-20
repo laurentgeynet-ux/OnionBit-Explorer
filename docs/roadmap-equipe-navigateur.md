@@ -906,7 +906,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   : pousser l'entrée avec marqueur « échec » (retry à la
   traversée) vs ne pas pousser mais préserver le slot —
   décision + gestion bfcache documentées.
-- [ ] **Étape 77. Daemon : `axum::serve` en échec visible
+- [x] **Étape 77. Daemon : `axum::serve` en échec visible
   + sortie gouvernée** (ticket terrain mission 19,
   explique la mort « silencieuse » de mission 18) : en
   vol le daemon a quitté `exit(1)` — `axum::serve` a
@@ -917,6 +917,13 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   cause de l'`Err` serveur (accept-loop, bind perdu ?) —
   un daemon navigateur ne meurt pas sans laisser de
   raison.
+  Livré : les deux sorties fatales (`TcpListener::bind` en
+  échec, `axum::serve` terminé en `Err`) écrivent la
+  raison sur **stderr direct** (`eprintln!`) en plus du
+  `tracing::error!` structuré — aucun filtre
+  `RUST_LOG` ne peut plus avaler la cause de mort. La
+  cause de l'`Err` devient observable par construction
+  (`Err` io de l'accept-loop rapporté tel quel).
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

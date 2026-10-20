@@ -348,7 +348,11 @@ async fn main() {
     let listener = match tokio::net::TcpListener::bind(cfg.bind).await {
         Ok(l) => l,
         Err(e) => {
+            // Fatal : stderr direct — un filtre RUST_LOG
+            // ciblé (ex. sync_profile) ne doit pas avaler la
+            // raison de mort (étape 77, mission 19).
             tracing::error!(addr = %cfg.bind, error = %e, "bind impossible");
+            eprintln!("explorer-daemon : bind {} impossible : {e}", cfg.bind);
             std::process::exit(1);
         }
     };
@@ -358,6 +362,7 @@ async fn main() {
         .await;
     if let Err(e) = r {
         tracing::error!(error = %e, "serveur arrêté");
+        eprintln!("explorer-daemon : boucle serveur terminée en erreur : {e}");
         std::process::exit(1);
     }
     tracing::info!("arrêt propre");
