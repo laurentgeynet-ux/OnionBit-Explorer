@@ -2,28 +2,28 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Adaptateur `DilloEngine` : proxy canal → thread `Rc` réel,
+//! Adaptateur `JscoreEngine` : proxy canal → thread `Rc` réel,
 //! erreurs mappées, budget, `Send` — in-process, pas de socket.
 
-use explorer_js::{DilloEngine, JsEngine, JsError, NullEngine};
+use explorer_js::{JsEngine, JsError, JscoreEngine, NullEngine};
 
 #[test]
-fn dillo_engine_is_send() {
+fn jscore_engine_is_send() {
     fn assert_send<T: Send>() {}
-    assert_send::<DilloEngine>();
+    assert_send::<JscoreEngine>();
     assert_send::<NullEngine>();
 }
 
 #[test]
 fn eval_returns_described_completion() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     assert_eq!(eng.eval("1 + 2 * 3").unwrap(), "7");
     assert_eq!(eng.eval("'a' + 'b'").unwrap(), "ab");
 }
 
 #[test]
 fn syntax_error_maps_to_variant() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     match eng.eval("var = =") {
         Err(JsError::Syntax { line, .. }) => assert!(line >= 1),
         other => panic!("attendu Syntax, obtenu {other:?}"),
@@ -32,7 +32,7 @@ fn syntax_error_maps_to_variant() {
 
 #[test]
 fn uncaught_maps_to_variant() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     match eng.eval("throw 'boom'") {
         Err(JsError::Uncaught(m)) => assert!(m.contains("boom")),
         other => panic!("attendu Uncaught, obtenu {other:?}"),
@@ -41,7 +41,7 @@ fn uncaught_maps_to_variant() {
 
 #[test]
 fn budget_kills_infinite_loop() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.set_budget(10_000);
     let r = eng.eval("while (true) {}");
     assert!(r.is_err(), "la boucle infinie doit tomber sur budget");
@@ -52,14 +52,14 @@ fn budget_kills_infinite_loop() {
 
 #[test]
 fn run_pending_drains_microtasks() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     let _ = eng.eval("Promise.resolve(1)");
     let _ = eng.run_pending();
 }
 
 #[test]
 fn factory_builds_contexts() {
-    let f = DilloEngine::factory();
+    let f = JscoreEngine::factory();
     let mut a = (f)();
     let mut b = (f)();
     // Contextes isolés : la variable de a n'existe pas dans b.
@@ -80,7 +80,7 @@ fn null_engine_noops() {
 
 #[test]
 fn install_dom_exposes_document_global() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom(
         "<html><body><div id=\"x\">old</div></body></html>",
         "http://h.test/p",
@@ -93,7 +93,7 @@ fn install_dom_exposes_document_global() {
 
 #[test]
 fn dom_mutation_sets_dirty_and_serializes() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom(
         "<html><body><div id=\"x\">old</div></body></html>",
         "http://h.test/p",
@@ -110,7 +110,7 @@ fn dom_mutation_sets_dirty_and_serializes() {
 
 #[test]
 fn dom_untouched_stays_clean() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom(
         "<html><body><p>stable</p></body></html>",
         "http://h.test/p",
@@ -129,7 +129,7 @@ fn path_to_div() -> Vec<(String, u32)> {
 
 #[test]
 fn dispatch_reaches_mirror_listener() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom(
         "<html><body><div id=\"b\">x</div></body></html>",
         "http://h.test/p",
@@ -148,7 +148,7 @@ fn dispatch_reaches_mirror_listener() {
 
 #[test]
 fn dispatch_skips_implicit_wrappers() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     // Source SANS <html>/<body> : le miroir n'a que le div —
     // le chemin core (avec wrappers) doit quand même l'atteindre.
     eng.install_dom("<div id=\"b\">x</div>", "http://h.test/p", 1);
@@ -163,7 +163,7 @@ fn dispatch_skips_implicit_wrappers() {
 
 #[test]
 fn dispatch_prevent_default_propagates() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom(
         "<html><body><div id=\"b\">x</div></body></html>",
         "http://h.test/p",
@@ -179,7 +179,7 @@ fn dispatch_prevent_default_propagates() {
 
 #[test]
 fn dispatch_bad_path_is_noop() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom(
         "<html><body><div id=\"b\">x</div></body></html>",
         "http://h.test/p",
@@ -192,13 +192,13 @@ fn dispatch_bad_path_is_noop() {
 
 #[test]
 fn dispatch_without_mirror_is_noop() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     assert!(!eng.dispatch_event("click", &path_to_div()).unwrap());
 }
 
 #[test]
 fn nav_requests_drained() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom("<html></html>", "http://h.test/p", 3);
     eng.eval("location.href = '/next'; history.back(); history.go(2);")
         .unwrap();
@@ -216,7 +216,7 @@ fn nav_requests_drained() {
 
 #[test]
 fn location_reads_page_url() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom("<html></html>", "http://h.test/dir/p", 1);
     let out = eng.eval("location.pathname").unwrap();
     assert!(out.contains("/dir/p"), "got {out}");
@@ -231,7 +231,7 @@ fn location_reads_page_url() {
 /// (`readyState` 4, `responseText`) et tire `onload`.
 #[test]
 fn xhr_roundtrips_through_net_drain() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom(
         "<html><body><div id=\"x\">avant</div></body></html>",
         "http://h.test/p",
@@ -280,7 +280,7 @@ fn xhr_roundtrips_through_net_drain() {
 /// la livraison la résout (microtasks pompées au `run_pending`).
 #[test]
 fn fetch_promise_resolves_on_deliver() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom("<html></html>", "http://h.test/p", 1);
     eng.eval(
         "var res = 'rien';\
@@ -307,7 +307,7 @@ fn fetch_promise_resolves_on_deliver() {
 /// `status == 0` = échec réseau : la promesse `fetch` est rejetée.
 #[test]
 fn fetch_network_error_rejects() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom("<html></html>", "http://h.test/p", 1);
     eng.eval(
         "var err = 'non';\
@@ -333,7 +333,7 @@ fn fetch_network_error_rejects() {
 /// `xhr.abort()` sort un `Abort` pour le handle en vol.
 #[test]
 fn xhr_abort_is_drained() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom("<html></html>", "http://h.test/p", 1);
     eng.eval("var x = new XMLHttpRequest();x.open('GET','/a');x.send();x.abort()")
         .unwrap();
@@ -358,7 +358,7 @@ fn xhr_abort_is_drained() {
 /// visibles ; `sessionStorage` est isolé (pas dans le drain).
 #[test]
 fn storage_snapshot_roundtrips() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom("<html></html>", "http://h.test/p", 1);
     eng.install_storage(std::collections::BTreeMap::from([(
         "k".to_string(),
@@ -379,7 +379,7 @@ fn storage_snapshot_roundtrips() {
 /// drainée brute ET visible en relecture (miroir).
 #[test]
 fn cookie_snapshot_and_writes_roundtrip() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom("<html></html>", "http://h.test/p", 1);
     eng.set_cookie_snapshot("a=1; b=2");
     let out = eng.eval("document.cookie").unwrap();
@@ -401,7 +401,7 @@ fn cookie_snapshot_and_writes_roundtrip() {
 /// timer armé ; `None` sans timer.
 #[test]
 fn next_timer_deadline_reports_delay() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     // Les timers sont installés avec le miroir DOM.
     eng.install_dom("<html><body></body></html>", "http://h.test/p", 1);
     assert_eq!(eng.next_timer_deadline(), None);
@@ -414,7 +414,7 @@ fn next_timer_deadline_reports_delay() {
 /// — le surplus reste en file pour la pompe suivante.
 #[test]
 fn run_pending_bounded_caps_timer_jobs() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom("<html><body></body></html>", "http://h.test/p", 1);
     eng.eval(
         "var n=0; setTimeout(function(){n=n+1},0); \
@@ -431,7 +431,7 @@ fn run_pending_bounded_caps_timer_jobs() {
 /// `document.body` reçoit `scroll`/`keydown` (étape 52).
 #[test]
 fn dispatch_empty_path_targets_document() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom(
         "<html><body><div id=\"b\">x</div></body></html>",
         "http://h.test/p",
@@ -452,7 +452,7 @@ fn dispatch_empty_path_targets_document() {
 /// hors script (`value`, `checked`).
 #[test]
 fn sync_mirror_attr_writes_attribute() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom(
         "<html><body><input id=\"i\"></body></html>",
         "http://h.test/p",
@@ -474,7 +474,7 @@ fn sync_mirror_attr_writes_attribute() {
 /// attribut DOM).
 #[test]
 fn sync_mirror_attr_textarea_writes_text() {
-    let mut eng = DilloEngine::new();
+    let mut eng = JscoreEngine::new();
     eng.install_dom(
         "<html><body><textarea id=\"t\"></textarea></body></html>",
         "http://h.test/p",

@@ -352,7 +352,7 @@ fn committed_dom_repaints_on_frame_pull() {
 fn profile_click_sync_heavy() {
     use std::fmt::Write;
     let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let tab = s.open_tab();
     let mut html = String::from("<!doctype html><html><body><div id=\"zone\">ZONE</div>");
     for i in 0..3000 {
@@ -413,7 +413,7 @@ fn profile_click_sync_heavy() {
 #[test]
 fn pump_resync_coalesced_under_floor() {
     let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let tab = s.open_tab();
     let html = "<!doctype html><html><body><div id=\"x\">init</div></body></html>";
     let eng = s.spawn_engine(tab, html, true);

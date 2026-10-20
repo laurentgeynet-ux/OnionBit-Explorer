@@ -80,7 +80,7 @@ const XHR_GRACE_MS: u64 = 1_000;
 async fn shot(url: &str, out: &str) -> ExitCode {
     let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
     let mut session = explorer_core::Session::new(client_stack(), Arc::new(fonts));
-    session.set_js_factory(explorer_js::DilloEngine::factory());
+    session.set_js_factory(explorer_js::JscoreEngine::factory());
     let tab = session.open_tab();
     if let Err(e) = session.navigate(tab, url).await {
         eprintln!("erreur : {e}");

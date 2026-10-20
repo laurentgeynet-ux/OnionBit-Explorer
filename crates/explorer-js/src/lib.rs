@@ -4,11 +4,11 @@
 
 //! `explorer-js` — couture JavaScript (ADR-0007) : trait
 //! [`JsEngine`], moteur nul par défaut et adaptateur
-//! [`DilloEngine`] vers `explorer-jscore`.
+//! [`JscoreEngine`] vers `explorer-jscore`.
 //!
 //! `explorer_jscore::Engine` est `!Send` (`Rc` dans le tas, les envs et les
 //! hooks hôtes) alors que la session vit derrière un `tokio` mutex
-//! exigeant `Send`. [`DilloEngine`] est donc un **proxy canal** : un
+//! exigeant `Send`. [`JscoreEngine`] est donc un **proxy canal** : un
 //! thread dédié par contexte possède le moteur (single-writer — le
 //! modèle navigateur : un contexte JS par document, isolé), les
 //! appels (`eval`, jobs dus, budget) voyagent par message. Un script
@@ -445,12 +445,12 @@ enum Cmd {
 
 /// Adaptateur `explorer-jscore` : un thread par contexte (le `Rc` du tas
 /// ne quitte jamais son thread), le `JsEngine` n'est qu'un canal.
-pub struct DilloEngine {
+pub struct JscoreEngine {
     tx: Sender<Cmd>,
     join: Option<JoinHandle<()>>,
 }
 
-impl DilloEngine {
+impl JscoreEngine {
     /// Crée un contexte neuf — spawn le thread moteur.
     #[must_use]
     pub fn new() -> Self {
@@ -592,20 +592,20 @@ impl DilloEngine {
         }
     }
 
-    /// Fabrique de [`DilloEngine`] — pour `Session::set_js_factory`.
+    /// Fabrique de [`JscoreEngine`] — pour `Session::set_js_factory`.
     #[must_use]
     pub fn factory() -> JsFactory {
-        std::sync::Arc::new(|| Box::new(DilloEngine::new()))
+        std::sync::Arc::new(|| Box::new(JscoreEngine::new()))
     }
 }
 
-impl Default for DilloEngine {
+impl Default for JscoreEngine {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl JsEngine for DilloEngine {
+impl JsEngine for JscoreEngine {
     fn eval(&mut self, source: &str) -> Result<String, JsError> {
         let (tx, rx) = channel();
         if self
@@ -771,7 +771,7 @@ impl JsEngine for DilloEngine {
     }
 }
 
-impl Drop for DilloEngine {
+impl Drop for JscoreEngine {
     fn drop(&mut self) {
         let _ = self.tx.send(Cmd::Shutdown);
         if let Some(j) = self.join.take() {
@@ -1011,7 +1011,7 @@ fn mirror_node(
 /// Chargeur de modules préfetchés (étape 50) : le graphe statique
 /// est collecté par la session via `HttpTransport` **avant**
 /// l'évaluation — le `load` reste synchrone et le canal
-/// `DilloEngine` à sens unique (un fetch depuis le thread moteur
+/// `JscoreEngine` à sens unique (un fetch depuis le thread moteur
 /// bloquerait le hôte qui attend la fin de l'eval : deadlock).
 /// Un spécificateur hors map — `import()` dynamique non préfetché,
 /// borne `max_modules` atteinte — est une erreur JS propre.

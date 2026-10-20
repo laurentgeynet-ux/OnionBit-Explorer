@@ -530,7 +530,7 @@ impl Session {
         self.incremental_syncs
     }
 
-    /// Branche la fabrique de moteurs JS (`DilloEngine::factory()`
+    /// Branche la fabrique de moteurs JS (`JscoreEngine::factory()`
     /// côté infra, `null_factory()` pour un no-op, `None` par
     /// défaut = scripts ignorés). Un contexte neuf est créé à
     /// chaque navigation qui rencontre un `<script>`.

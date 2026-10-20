@@ -166,7 +166,7 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
     };
     let fonts = DirFontSource::new(&default_fonts_dir());
     let mut session = Session::new(http_stack(), Arc::new(fonts));
-    session.set_js_factory(explorer_js::DilloEngine::factory());
+    session.set_js_factory(explorer_js::JscoreEngine::factory());
     let dir = profile_dir.unwrap_or_else(explorer_core::JsonFileStore::default_dir);
     session.set_store(Arc::new(explorer_core::JsonFileStore::open(&dir)));
     let events = session.subscribe();

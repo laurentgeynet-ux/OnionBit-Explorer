@@ -96,6 +96,13 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Changed
 
+- **Renommage `DilloEngine` → `JscoreEngine`**
+  (`explorer-js`, ADR-0020) : le proxy-canal vers
+  `explorer_jscore::Engine` portait encore son nom
+  d'antan — le dernier résidu `Dillo*` du code est purgé
+  tant que l'API est interne au workspace (cli, daemon,
+  ffi, tests core mis à jour).
+
 - **Étape 77 — sortie fatale du daemon visible**
   (`explorer-daemon`) : `bind` en échec et `axum::serve`
   terminé en `Err` écrivent la raison sur stderr direct

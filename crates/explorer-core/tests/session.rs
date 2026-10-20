@@ -1063,7 +1063,7 @@ async fn script_dom_mutation_is_rendered() {
     let (mut s, t) = test_session();
     t.route("/mut", 200, PAGE_MUT);
     t.route("/stat", 200, PAGE_MUT_STATIC);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let a = s.open_tab();
     s.navigate(a, "http://h.test/mut").await.unwrap();
@@ -1094,7 +1094,7 @@ async fn script_dom_append_is_rendered() {
         "<!doctype html><html><body><div id=\"h\">x</div>\
          <div>AJOUT</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let a = s.open_tab();
     s.navigate(a, "http://h.test/").await.unwrap();
@@ -1125,7 +1125,7 @@ async fn canvas_2d_script_paints_bitmap() {
         200,
         "<!doctype html><html><body><canvas width=\"40\" height=\"30\"></canvas></body></html>",
     );
-    sess.set_js_factory(explorer_js::DilloEngine::factory());
+    sess.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let drawn = sess.open_tab();
     sess.navigate(drawn, "http://h.test/c").await.unwrap();
@@ -1168,7 +1168,7 @@ async fn click_dispatches_dom_event_and_rerenders() {
     let (mut s, t) = test_session();
     t.route("/ev", 200, PAGE_ONCLICK);
     t.route("/stat", 200, PAGE_ONCLICK_AFTER);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let a = s.open_tab();
     s.navigate(a, "http://h.test/ev").await.unwrap();
@@ -1197,7 +1197,7 @@ async fn click_prevented_link_does_not_navigate() {
     let (mut s, t) = test_session();
     t.route("/", 200, PAGE_PREVENT);
     t.route("/b", 200, "<html><body><p>page b</p></body></html>");
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let id = s.open_tab();
     s.navigate(id, "http://h.test/").await.unwrap();
@@ -1228,7 +1228,7 @@ async fn timer_zero_fires_and_rerenders() {
     let (mut s, t) = test_session();
     t.route("/t", 200, PAGE_TIMER);
     t.route("/stat", 200, PAGE_TIMER_AFTER);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let a = s.open_tab();
     s.navigate(a, "http://h.test/t").await.unwrap();
@@ -1710,7 +1710,7 @@ async fn select_popup_escape_keeps_default() {
 async fn submit_preventdefault_skips_navigation() {
     let (mut s, t) = test_session();
     t.route("/p", 200, PAGE_PREVENT_FORM);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let id = s.open_tab();
     s.navigate(id, "http://h.test/p").await.unwrap();
     let calls = t.calls();
@@ -1892,7 +1892,7 @@ location.href = "/cible";
 </script></body></html>"#,
     );
     t.route("/cible", 200, "<!doctype html><title>CI</title><p>dest</p>");
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let id = s.open_tab();
     s.navigate(id, "http://h.test/p").await.unwrap();
     // La navigation script s'applique après le chargement :
@@ -1913,7 +1913,7 @@ async fn script_history_back_moves() {
         200,
         "<!doctype html><html><body><script>history.back();</script></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let id = s.open_tab();
     s.navigate(id, "http://h.test/a").await.unwrap();
     s.navigate(id, "http://h.test/b").await.unwrap();
@@ -1935,7 +1935,7 @@ location.href = "ht!tp://[::1]bad";
 history.go(99);
 </script></body></html>"#,
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let id = s.open_tab();
     s.navigate(id, "http://h.test/p").await.unwrap();
     // Le href irrégulier se résout en relatif contre la base
@@ -1969,7 +1969,7 @@ async fn transition_declenchee_sur_mutation_classe() {
         });
         </script></body></html>"#,
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let id = s.open_tab();
     s.navigate(id, "http://h.test/tr").await.unwrap();
     // Clic dans la div : la mutation synchronisée relance le
@@ -2018,7 +2018,7 @@ async fn external_script_fetched_and_executed() {
         200,
         "<!doctype html><html><body><div id=\"x\">EXT</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let a = s.open_tab();
     s.navigate(a, "http://h.test/p").await.unwrap();
@@ -2050,7 +2050,7 @@ async fn external_scripts_run_in_document_order() {
         200,
         "<!doctype html><html><body><div id=\"x\">AB</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let a = s.open_tab();
     s.navigate(a, "http://h.test/p").await.unwrap();
@@ -2088,7 +2088,7 @@ async fn defer_scripts_run_after_parse_in_order() {
         200,
         "<!doctype html><html><body><div id=\"x\">P-D1-D2</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let a = s.open_tab();
     s.navigate(a, "http://h.test/p").await.unwrap();
@@ -2122,7 +2122,7 @@ async fn async_script_runs_before_defer() {
         200,
         "<!doctype html><html><body><div id=\"x\">XD</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let a = s.open_tab();
     s.navigate(a, "http://h.test/p").await.unwrap();
@@ -2156,7 +2156,7 @@ async fn module_script_fetches_graph_and_evaluates() {
         200,
         "<!doctype html><html><body><div id=\"x\">DEP</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let a = s.open_tab();
     s.navigate(a, "http://h.test/p").await.unwrap();
@@ -2189,7 +2189,7 @@ async fn inline_module_resolves_against_page() {
         200,
         "<!doctype html><html><body><div id=\"x\">IM</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let a = s.open_tab();
     s.navigate(a, "http://h.test/p").await.unwrap();
@@ -2213,7 +2213,7 @@ async fn external_script_404_is_skipped() {
          <script>document.getElementById('x').textContent='OK'</script>\
          </body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/p").await.unwrap();
     // La page charge et le script inline s'est exécuté.
@@ -2321,7 +2321,7 @@ async fn subresource_fetches_bounded_parallel() {
 
 // ===== Étape 51 — XHR/fetch/storage/cookie (ADR-0019) =====
 //
-// Vrai `DilloEngine` : les scripts émettent de vrais
+// Vrai `JscoreEngine` : les scripts émettent de vrais
 // `NetRequest` drainés par la session ; les observables sont
 // le PNG (mutation rendue) et les en-têtes capturés par le
 // `FakeTransport`.
@@ -2342,7 +2342,7 @@ async fn xhr_same_origin_fetches_and_renders() {
     t.route("/", 200, PAGE_XHR);
     t.route("/api", 200, "DATA");
     t.route("/stat", 200, PAGE_XHR_DATA);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/").await.unwrap();
     // `Referer` posé à l'émission de la requête script.
@@ -2382,7 +2382,7 @@ async fn xhr_cross_origin_opaque_without_acao() {
         200,
         "<!doctype html><html><body><div id=\"x\">ERR</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://a.test/").await.unwrap();
     // Émission OK : `Origin` canonique posé (spec Fetch —
@@ -2411,7 +2411,7 @@ async fn xhr_cross_origin_readable_with_acao() {
         200,
         "<!doctype html><html><body><div id=\"x\">OK</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://a.test/").await.unwrap();
     let b = s.open_tab();
@@ -2442,7 +2442,7 @@ async fn xhr_cross_origin_custom_header_blocked() {
         200,
         "<!doctype html><html><body><div id=\"x\">ERR</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://a.test/").await.unwrap();
     // Un seul fetch : le document — la XHR est bloquée
@@ -2487,7 +2487,7 @@ async fn xhr_quota_exceeded_fails_fast() {
             ..SessionConfig::default()
         },
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/").await.unwrap();
     let b = s.open_tab();
@@ -2520,7 +2520,7 @@ async fn document_cookie_reaches_shared_jar() {
     t.route("/set", 200, PAGE_COOKIE_SET);
     t.route("/read", 200, PAGE_COOKIE_READ);
     t.route("/stat", 200, PAGE_COOKIE_KV);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let tab_a = s.open_tab();
     s.navigate(tab_a, "http://h.test/set").await.unwrap();
     // L'écriture script a rejoint le jar partagé.
@@ -2547,7 +2547,7 @@ async fn xhr_set_cookie_same_origin_captured() {
     let (mut s, t) = test_session();
     t.route("/", 200, PAGE_XHR);
     t.route_headers("/api", 200, "DATA", &[("set-cookie", "s=1;path=/")]);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let id = s.open_tab();
     s.navigate(id, "http://h.test/").await.unwrap();
     let jar = s.cookie_jar();
@@ -2578,7 +2578,7 @@ async fn localstorage_persists_across_documents() {
     t.route("/set", 200, PAGE_LS_SET);
     t.route("/read", 200, PAGE_LS_READ);
     t.route("/stat", 200, PAGE_LS_VAL);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let tab_a = s.open_tab();
     s.navigate(tab_a, "http://h.test/set").await.unwrap();
     let tab_b = s.open_tab();
@@ -2613,7 +2613,7 @@ async fn mouse_hover_dispatches_over_move_out() {
     let (mut s, t) = test_session();
     t.route("/ev", 200, PAGE_MOUSEV);
     t.route("/stat", 200, PAGE_MOUSEV_AFTER);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/ev").await.unwrap();
     let b = s.open_tab();
@@ -2659,7 +2659,7 @@ async fn key_and_focus_events_dispatch_in_order() {
     let (mut s, t) = test_session();
     t.route("/ev", 200, PAGE_KEYS);
     t.route("/stat", 200, PAGE_KEYS_AFTER);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/ev").await.unwrap();
     let b = s.open_tab();
@@ -2713,7 +2713,7 @@ async fn scroll_dispatches_wheel_then_scroll() {
     let (mut sess, tr) = test_session();
     tr.route("/ev", 200, PAGE_SCROLL);
     tr.route("/stat", 200, PAGE_SCROLL_AFTER);
-    sess.set_js_factory(explorer_js::DilloEngine::factory());
+    sess.set_js_factory(explorer_js::JscoreEngine::factory());
     let ta = sess.open_tab();
     sess.navigate(ta, "http://h.test/ev").await.unwrap();
     let tb = sess.open_tab();
@@ -2754,7 +2754,7 @@ async fn wheel_prevented_suppresses_scroll() {
     let (mut sess, tr) = test_session();
     tr.route("/ev", 200, PAGE_WHEEL_PREV);
     tr.route("/stat", 200, PAGE_WHEEL_PREV_AFTER);
-    sess.set_js_factory(explorer_js::DilloEngine::factory());
+    sess.set_js_factory(explorer_js::JscoreEngine::factory());
     let ta = sess.open_tab();
     sess.navigate(ta, "http://h.test/ev").await.unwrap();
     let tb = sess.open_tab();
@@ -2793,7 +2793,7 @@ async fn timers_fire_via_pump_without_input() {
     let (mut s, t) = test_session();
     t.route("/ev", 200, PAGE_PUMP);
     t.route("/stat", 200, PAGE_PUMP_AFTER);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/ev").await.unwrap();
     let b = s.open_tab();
@@ -2845,7 +2845,7 @@ async fn timer_jobs_bounded_per_pump() {
             ..SessionConfig::default()
         },
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/ev").await.unwrap();
     let b = s.open_tab();
@@ -2882,7 +2882,7 @@ async fn mutation_observer_delivered_at_pump_checkpoint() {
     let (mut s, t) = test_session();
     t.route("/ev", 200, PAGE_MUT_OBS);
     t.route("/stat", 200, PAGE_MUT_OBS_AFTER);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/ev").await.unwrap();
     let b = s.open_tab();
@@ -2916,7 +2916,7 @@ async fn checkbox_click_dispatches_input_then_change() {
     let (mut s, t) = test_session();
     t.route("/ev", 200, PAGE_CHECK);
     t.route("/stat", 200, PAGE_CHECK_AFTER);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/ev").await.unwrap();
     let b = s.open_tab();
@@ -2952,7 +2952,7 @@ async fn checkbox_prevented_click_restores_state() {
     let (mut s, t) = test_session();
     t.route("/ev", 200, PAGE_CHECK_PREV);
     t.route("/stat", 200, PAGE_CHECK_PREV_AFTER);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/ev").await.unwrap();
     let b = s.open_tab();
@@ -3155,7 +3155,7 @@ async fn script_utf8_literals_not_mojibake() {
         "<!doctype html><html><head><meta charset=\"utf-8\"></head>\
          <body><div id=\"x\">L\u{2019}usage</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let a = s.open_tab();
     s.navigate(a, "http://h.test/p").await.unwrap();
@@ -3186,7 +3186,7 @@ async fn script_charset_attr_decodes_latin1() {
         "<!doctype html><html><head><meta charset=\"utf-8\"></head>\
          <body><div id=\"x\">caf\u{E9}</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let a = s.open_tab();
     s.navigate(a, "http://h.test/p").await.unwrap();
@@ -3217,7 +3217,7 @@ async fn module_script_utf8_despite_charset_attr() {
         "<!doctype html><html><head><meta charset=\"utf-8\"></head>\
          <body><div id=\"x\">caf\u{E9}</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
 
     let a = s.open_tab();
     s.navigate(a, "http://h.test/p").await.unwrap();
@@ -3384,7 +3384,7 @@ async fn novalidate_form_submits() {
 #[tokio::test]
 async fn custom_validity_blocks_submission() {
     let (mut s, t) = test_session();
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     t.route("/f", 200, PAGE_CUSTOM_VALIDITY);
     t.route("/vgo", 200, "<html><body>done</body></html>");
     let id = s.open_tab();
@@ -3431,7 +3431,7 @@ async fn multipart_post_sends_parts() {
 #[tokio::test]
 async fn js_form_submit_navigates() {
     let (mut s, t) = test_session();
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     t.route("/f", 200, PAGE_JS_SUBMIT);
     t.route("/jgo", 200, "<html><body>done</body></html>");
     let id = s.open_tab();
@@ -3447,7 +3447,7 @@ async fn js_form_submit_navigates() {
 #[tokio::test]
 async fn js_request_submit_navigates() {
     let (mut s, t) = test_session();
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     t.route("/f", 200, PAGE_REQUEST_SUBMIT);
     t.route("/jgo", 200, "<html><body>done</body></html>");
     let id = s.open_tab();
@@ -3522,7 +3522,7 @@ async fn delayed_timer_pumps_and_emits_events() {
     let (mut s, t) = test_session();
     t.route("/ev", 200, PAGE_DELAYED);
     t.route("/stat", 200, PAGE_DELAYED_AFTER);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let mut rx = s.subscribe();
     let a = s.open_tab();
     s.navigate(a, "http://h.test/ev").await.unwrap();
@@ -4035,7 +4035,7 @@ async fn dom_sync_uses_incremental_relayout() {
         "<!doctype html><html><body><div id=\"h\">x</div>\
          <div>AJOUT</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/").await.unwrap();
     let before = s.incremental_syncs();
@@ -4079,7 +4079,7 @@ async fn dom_sync_falls_back_when_floats_present() {
         "<!doctype html><html><body><div style=\"float:left\">f</div>\
          <div>AJOUT</div></body></html>",
     );
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/").await.unwrap();
     let before = s.incremental_syncs();
@@ -4632,7 +4632,7 @@ async fn pump_shared_applies_dom_mutations() {
     let (mut s, t) = test_session();
     t.route("/ev", 200, PAGE_PUMP);
     t.route("/stat", 200, PAGE_PUMP_AFTER);
-    s.set_js_factory(explorer_js::DilloEngine::factory());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/ev").await.unwrap();
     let b = s.open_tab();

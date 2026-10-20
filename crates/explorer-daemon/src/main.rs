@@ -292,7 +292,7 @@ async fn main() {
         cli.download_dir
             .unwrap_or_else(|| profile_dir.join("downloads")),
     ));
-    session.set_js_factory(explorer_js::DilloEngine::factory());
+    session.set_js_factory(explorer_js::JscoreEngine::factory());
     let session = Arc::new(tokio::sync::Mutex::new(session));
 
     // Battement des réponses réseau script-initiées (étape
