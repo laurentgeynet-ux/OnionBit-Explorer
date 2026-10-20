@@ -269,3 +269,89 @@ fn img_alt_or_intrinsic() {
     assert_eq!(img2.intrinsic, Some((40.0, 20.0)));
     assert!(img2.text.is_none());
 }
+
+/// R-34 : `<video>`/`<audio>` = remplacés **natifs** —
+/// feuille atomique dont la taille intrinsèque vient de
+/// l'affiche décodée (`sizes`), sinon du gabarit standard
+/// (vidéo 300×150, audio 300×54) ; le contenu de repli
+/// n'est jamais boxifié. Un `audio` sans `controls` est
+/// `display:none` (UA) → aucune boîte.
+#[test]
+fn media_native_replaced_boxes() {
+    use explorer_layout::build_box_tree_sized;
+    fn tag_node(dom: &Dom, tag: &str) -> NodeId {
+        let mut q = vec![dom.document()];
+        while let Some(n) = q.pop() {
+            if dom.tag_name(n).is_ok_and(|t| t == tag) {
+                return n;
+            }
+            if let Ok(c) = dom.children(n) {
+                q.extend(c);
+            }
+        }
+        panic!("<{tag}> absent")
+    }
+    fn media_tree(
+        html: &str,
+        sizes_of: impl Fn(&Dom) -> std::collections::HashMap<NodeId, (f32, f32)>,
+    ) -> (Dom, LayoutBox) {
+        let dom = TreeBuilder::parse(html);
+        let mut eng = StyleEngine::new();
+        eng.add_css(&collect_style_css(&dom), Origin::Author);
+        let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+        let root_el = dom
+            .children(dom.document())
+            .into_iter()
+            .flatten()
+            .find(|&c| dom.element(c).is_ok())
+            .expect("racine");
+        let sizes = sizes_of(&dom);
+        let bx = build_box_tree_sized(&dom, root_el, &styles, &sizes).unwrap();
+        (dom, bx)
+    }
+    fn by_tag<'a>(b: &'a LayoutBox, dom: &Dom, tag: &str) -> Option<&'a LayoutBox> {
+        if b.node
+            .is_some_and(|n| dom.tag_name(n).is_ok_and(|t| t == tag))
+        {
+            return Some(b);
+        }
+        b.children.iter().find_map(|c| by_tag(c, dom, tag))
+    }
+
+    // Vidéo sans affiche : gabarit 300×150, pas d'enfants
+    // (le contenu de repli n'est jamais boxifié).
+    let (dom, bx) = media_tree(
+        "<html><body><video><p>repli</p></video></body></html>",
+        |_| std::collections::HashMap::new(),
+    );
+    let video = by_tag(&bx, &dom, "video").expect("boîte video");
+    assert_eq!(video.intrinsic, Some((300.0, 150.0)));
+    assert!(video.children.is_empty(), "feuille : {video:?}");
+
+    // Vidéo + affiche décodée 640×360 : la taille
+    // intrinsèque vient de `sizes` (pas de 300×150 forcé).
+    let (dom2, bx2) = media_tree(
+        "<html><body><video poster=\"p.png\"></video></body></html>",
+        |d| std::iter::once((tag_node(d, "video"), (640.0, 360.0))).collect(),
+    );
+    let video2 = by_tag(&bx2, &dom2, "video").expect("boîte video");
+    assert_eq!(video2.intrinsic, Some((640.0, 360.0)));
+
+    // Audio avec `controls` : gabarit 300×54 de la barre.
+    let (dom3, bx3) = media_tree(
+        "<html><body><audio controls src=\"a.mp3\"></audio></body></html>",
+        |_| std::collections::HashMap::new(),
+    );
+    let audio = by_tag(&bx3, &dom3, "audio").expect("boîte audio");
+    assert_eq!(audio.intrinsic, Some((300.0, 54.0)));
+
+    // Audio sans `controls` : `display:none` UA → aucune boîte.
+    let (dom4, bx4) = media_tree(
+        "<html><body><audio src=\"a.mp3\"></audio></body></html>",
+        |_| std::collections::HashMap::new(),
+    );
+    assert!(
+        by_tag(&bx4, &dom4, "audio").is_none(),
+        "audio sans controls masqué par l'UA"
+    );
+}

@@ -5,12 +5,11 @@
 //! Helpers DOM : hit-test, chemins d'éléments, titre, champs
 //! éditables, collectes de sous-ressources et d'ancres.
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use explorer_dom::{Dom, DomError, NodeId};
 use explorer_layout::{LayoutBox, Rect};
 use explorer_net::url::Url;
-use explorer_render::{decode_data_url, DecodedImage, ImageTable};
+use explorer_render::ImageTable;
 
 use super::CoreError;
 
@@ -253,30 +252,11 @@ pub(crate) fn collect_images(dom: &Dom) -> Vec<(NodeId, String)> {
     out
 }
 
-/// Affiches `poster="data:…"` des `<video>` décodées en
-/// mémoire — complément de `collect_data_images` (PIPE)
-/// qui ne couvre que `img`/`object` (étape 58).
-pub(crate) fn poster_data_images(dom: &Dom, max_px: u32) -> Vec<(NodeId, Arc<DecodedImage>)> {
-    let mut out = Vec::new();
-    let mut stack = vec![dom.document()];
-    while let Some(n) = stack.pop() {
-        if dom.tag_name(n).is_ok_and(|t| t == "video") {
-            if let Ok(Some(src)) = dom.attribute(n, "poster") {
-                if let Some(img) = decode_data_url(src.trim(), max_px) {
-                    out.push((n, Arc::new(img)));
-                }
-            }
-        }
-        if let Ok(ch) = dom.children(n) {
-            stack.extend(ch);
-        }
-    }
-    out
-}
-
-/// Taille préférée `(w, h)` par `<img>` décodé : attribut
-/// `width`/`height` sain s'il existe, sinon dimension
-/// intrinsèque — chaque axe indépendamment (§10.3.2).
+/// Taille préférée `(w, h)` par élément remplacé décodé
+/// (`<img>`, `<object>`, affiche `<video poster>` — R-34) :
+/// attribut `width`/`height` sain s'il existe, sinon
+/// dimension intrinsèque — chaque axe indépendamment
+/// (§10.3.2).
 #[allow(clippy::cast_precision_loss)] // pixels u32 → f32 : < 2^24.
 pub(crate) fn image_sizes(dom: &Dom, images: &ImageTable) -> HashMap<NodeId, (f32, f32)> {
     let px_attr = |n: NodeId, name: &str| {

@@ -60,22 +60,15 @@ use explorer_render::{
 /// Complément de feuille UA pour `<video>`/`<audio>` sans
 /// décodeur (étape 58, ADR-0023) — posé à l'origine
 /// `UserAgent`, donc l'auteur l'emporte toujours. La boîte
-/// de repli prend les dimensions standard des remplacés ;
-/// l'affiche éventuelle se peint par-dessus (bitmap
-/// remplacé), le contenu de secours des enfants reste
-/// masqué — un moteur sans codec rend l'élément « supporté
-/// visuellement », pas le texte de repli.
+/// elle-même est un **remplacé natif** depuis R-34 (taille
+/// intrinsèque = affiche décodée, sinon gabarit standard,
+/// `object-fit` honoré — tout ça dans le domaine pur) ;
+/// cette feuille ne porte plus que le « look produit »
+/// d'un moteur sans codec : fond noir de la vidéo, chrome
+/// gris de la barre audio.
 const MEDIA_UA_CSS: &str = "
-video {
-    display: inline-block;
-    width: 300px; height: 150px;
-    background-color: #000;
-}
-video > *, audio > * { display: none }
-audio:not([controls]) { display: none }
+video { background-color: #000 }
 audio[controls] {
-    display: inline-block;
-    width: 300px; height: 54px;
     background-color: #f1f3f4;
     border: 1px solid #767676;
 }
@@ -407,14 +400,6 @@ pub(crate) fn relayout_dom_payload(
     let data_imgs = collect_data_images(dom, &styles, ctx.image_max_px);
     p.images.replaced.extend(data_imgs.replaced);
     p.images.backgrounds.extend(data_imgs.backgrounds);
-    // Affiches `poster="data:…"` — même canal inline que
-    // les `img` (56f) ; le collecteur PIPE ne les connaît pas.
-    p.images
-        .replaced
-        .extend(crate::session::dom_helpers::poster_data_images(
-            dom,
-            ctx.image_max_px,
-        ));
     let mut sizes = image_sizes(dom, &p.images.replaced);
     sizes.extend(explorer_render::svg::svg_sizes(dom, root_el));
     let svgs = explorer_render::svg::collect_svg(dom, root_el, ctx.image_max_px);

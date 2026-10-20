@@ -342,6 +342,27 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
             Some(canvas_intrinsic(dom, root)),
         ));
     }
+    // `<video>`/`<audio>` (R-34) : éléments remplacés
+    // **natifs** — boîte feuille atomique ; le contenu de
+    // repli n'est jamais boxifié (un moteur qui « supporte »
+    // le média l'affiche toujours). La taille intrinsèque
+    // vient de `sizes` — affiche `poster` décodée —
+    // sinon du gabarit remplacé standard : vidéo 300×150,
+    // audio 300×54 (barre de contrôle). Un `audio` sans
+    // `controls` n'arrive pas ici (UA : `display:none`).
+    if let Ok(tag @ ("video" | "audio")) = dom.tag_name(root) {
+        let fallback = if tag == "audio" {
+            (300.0, 54.0)
+        } else {
+            (300.0, 150.0)
+        };
+        return Some(leaf_box(
+            box_kind_of(&style),
+            root,
+            style.clone(),
+            Some(sizes.get(&root).copied().unwrap_or(fallback)),
+        ));
+    }
     // `<object>` (R-13c) : élément **remplacé** si sa ressource
     // est résolue, sinon ses **enfants se substituent**.
     if dom.tag_name(root).is_ok_and(|t| t == "object") {

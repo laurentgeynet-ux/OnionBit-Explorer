@@ -1071,7 +1071,7 @@ const UA_CSS: &str = "
 html, body, div, p, ul, ol, li, dl, dt, dd, blockquote, pre,
 form, fieldset, figure, figcaption, h1, h2, h3, h4, h5, h6,
 hr, address, article, aside, footer, header, nav, section,
-main, legend, video, center, details, dialog, dir, hgroup,
+main, legend, center, details, dialog, dir, hgroup,
 listing, marquee, menu, plaintext, search, summary, xmp,
 frameset { display: block }
 table { display: table }
@@ -1087,6 +1087,7 @@ area, base, basefont, datalist, param, source, track,
 frame { display: none }
 details:not([open]) > :not(summary) { display: none }
 dialog:not([open]) { display: none }
+audio:not([controls]) { display: none }
 li { display: list-item }
 td, th { display: table-cell }
 center { text-align: -webkit-center }

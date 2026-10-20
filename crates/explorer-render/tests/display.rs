@@ -527,6 +527,107 @@ fn dirty_item_ajoute_sa_zone() {
     );
 }
 
+// ── R-34 : médias remplacés + `object-fit` ──────────────
+
+/// Affiche `10×10` peinte dans une `<video>` de 300×150
+/// selon `object-fit` : `fill` (défaut) étire pleine boîte,
+/// `contain` centre en gardant le ratio, `cover` déborde et
+/// reçoit un clip sur la content box.
+#[test]
+fn object_fit_positions_media_content() {
+    use explorer_render::PaintImages;
+    use std::sync::Arc;
+
+    fn media_list(css: &str) -> Vec<DisplayItem> {
+        let dom =
+            TreeBuilder::parse("<html><body><video id=v poster=\"p.png\"></video></body></html>");
+        let mut eng = StyleEngine::new();
+        eng.add_css("body{margin:0}", Origin::Author);
+        eng.add_css(css, Origin::Author);
+        let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+        let root_el = dom
+            .children(dom.document())
+            .into_iter()
+            .flatten()
+            .find(|&c| dom.element(c).is_ok())
+            .expect("racine");
+        let video = by_id(&dom, "v");
+        let img = Arc::new(explorer_render::DecodedImage {
+            width: 10,
+            height: 10,
+            rgba: vec![255u8; 400],
+        });
+        let sizes: std::collections::HashMap<NodeId, (f32, f32)> =
+            std::iter::once((video, (10.0, 10.0))).collect();
+        let mut bx = build_box_tree_sized(&dom, root_el, &styles, &sizes).expect("arbre");
+        layout_tree(&mut bx, VIEW, &ctx());
+        let images = PaintImages {
+            replaced: std::iter::once((video, img)).collect(),
+            ..PaintImages::default()
+        };
+        build_display_list_full(&bx, VIEW, 200.0, 0.0, &images).items
+    }
+
+    // `fill` par défaut : l'image couvre toute la content
+    // box 300×150, sans clip.
+    let items = media_list("#v{width:300px;height:150px}");
+    let img = items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::Image { rect, .. } => Some(*rect),
+            _ => None,
+        })
+        .expect("affiche peinte");
+    assert_eq!((img.width, img.height), (300.0, 150.0));
+    assert!(
+        !items.iter().any(|i| matches!(i, DisplayItem::PushClip(_))),
+        "fill : pas de clip"
+    );
+
+    // `contain` : 150×150 centré horizontalement (x = 75).
+    let items = media_list("#v{width:300px;height:150px;object-fit:contain}");
+    let img = items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::Image { rect, .. } => Some(*rect),
+            _ => None,
+        })
+        .expect("affiche contain");
+    assert!(
+        (img.width - 150.0).abs() < 0.01 && (img.height - 150.0).abs() < 0.01,
+        "contain 150×150 : {img:?}"
+    );
+    assert!((img.x - 75.0).abs() < 0.01, "contain centré : {img:?}");
+
+    // `cover` : 300×300 débordant → `PushClip`/`PopClip`
+    // encadrent l'item.
+    let items = media_list("#v{width:300px;height:150px;object-fit:cover}");
+    let img = items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::Image { rect, .. } => Some(*rect),
+            _ => None,
+        })
+        .expect("affiche cover");
+    assert!(
+        img.width > 150.0 && img.height > 150.0,
+        "cover déborde : {img:?}"
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushClip(_)))
+        .expect("cover clippe");
+    let pop = items
+        .iter()
+        .rposition(|i| matches!(i, DisplayItem::PopClip))
+        .expect("pop-clip");
+    let at = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::Image { .. }))
+        .unwrap();
+    assert!(push < at && at < pop, "image entre les clips");
+}
+
 // ── R-9 : `<svg>` inline ────────────────────────────────────
 
 #[test]

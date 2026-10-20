@@ -38,6 +38,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Skip documenté :
   `margin-collapse-through-percentage-padding.html` exige
   mutation JS + relayout — piste NAVIGATEUR.
+- **R-34 — médias vrais remplacés boxtree** : `<video>` et
+  `<audio>` sont des feuilles remplacées **natives**
+  (`build_box_tree_sized`) — taille intrinsèque de
+  l'affiche décodée, gabarit standard sinon (vidéo
+  300×150, audio 300×54) ; le contenu de repli n'est
+  jamais boxifié. `object-fit` minimal à la peinture :
+  `fill` (défaut, comportement inchangé), `contain`,
+  `scale-down`, `cover`, `none` + `object-position`
+  (mots-clés, `%`, `px`) — les modes débordants sont
+  clipés à la content box. `collect_data_images` couvre
+  désormais `<video poster="data:…">` (le complément NAV
+  `poster_data_images` est retiré) ; les hints
+  présentationnels `width`/`height` sur `video`
+  existaient déjà (axe par axe). Feuille UA : `video`
+  repasse en élément en-ligne remplacé (sorti de la
+  liste `display:block`), `audio:not([controls])`
+  devient `display:none` côté domaine — le complément
+  UA session ne porte plus que le « look produit »
+  (fond noir vidéo, chrome barre audio). Tests :
+  feuilles natives (`boxtree`), rect d'`object-fit` +
+  clip (`display`), collecte poster (`dataurl`),
+  équivalence intrinsèque `<video poster>` ≡ `<img>`
+  bout en bout (session).
 
 ### Fixed
 

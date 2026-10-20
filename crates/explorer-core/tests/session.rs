@@ -4729,14 +4729,16 @@ async fn pump_shared_applies_dom_mutations() {
 #[tokio::test]
 async fn video_poster_paints_in_media_box() {
     let (mut s, t) = test_session();
+    // `width`/`height` présentationnels (R-34) : boîte
+    // 300×150, l'affiche 2×2 est étirée (`object-fit:fill`)
+    // sur toute la content-box.
     t.route(
         "/v",
         200,
-        "<html><body><video poster=\"/p.png\"></video></body></html>",
+        "<html><body><video poster=\"/p.png\" width=\"300\" height=\"150\"></video></body></html>",
     );
     t.route_bin("/p.png", 200, red_png());
-    // Référence : inline-block 300×150 uniformément rouge —
-    // l'affiche 2×2 étirée couvre toute la content-box.
+    // Référence : inline-block 300×150 uniformément rouge.
     t.route(
         "/s",
         200,
@@ -4791,6 +4793,29 @@ async fn audio_without_controls_is_hidden() {
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
 
+/// R-34 — taille **intrinsèque** de l'affiche : un `<video
+/// poster>` sans `width`/`height` prend les dimensions du
+/// bitmap décodé (2×2), comme un `<img>` — fini le 300×150
+/// forcé. La comparaison PNG couvre collecte + sizing +
+/// peinture bout en bout.
+#[tokio::test]
+async fn video_poster_intrinsic_size_matches_img() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/v",
+        200,
+        "<html><body><video poster=\"/p.png\"></video></body></html>",
+    );
+    t.route("/i", 200, "<html><body><img src=\"/p.png\"></body></html>");
+    t.route_bin("/p.png", 200, red_png());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/v").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/i").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
 /// Étape 58 — affiche `poster="data:…"` : même canal
 /// inline que `img` (percent-encodé, zéro requête réseau).
 #[tokio::test]
@@ -4805,8 +4830,11 @@ async fn video_poster_data_url_paints() {
         "/v",
         200,
         Box::leak(
-            format!("<html><body><video poster=\"data:image/png,{enc}\"></video></body></html>")
-                .into_boxed_str(),
+            format!(
+                "<html><body><video poster=\"data:image/png,{enc}\" \
+                 width=\"300\" height=\"150\"></video></body></html>"
+            )
+            .into_boxed_str(),
         ),
     );
     t.route(

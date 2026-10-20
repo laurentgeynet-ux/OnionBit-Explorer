@@ -2073,15 +2073,115 @@ fn paint_replaced(
                 })
             })
     }) {
-        items.push(DisplayItem::Image {
-            // Le contenu remplacé peint dans la **content
-            // box** — padding et bordures restent autour
-            // (§10.3.2 — Acid2 : l'œil 96×24 étiré à 131
-            // sinon, couvrant padding 11/12 + bordure 12).
-            rect: shifted(content_rect(bx), off),
-            img,
-        });
+        // Le contenu remplacé se place dans la **content
+        // box** — padding et bordures restent autour
+        // (§10.3.2 — Acid2 : l'œil 96×24 étiré à 131 sinon,
+        // couvrant padding 11/12 + bordure 12). `object-fit`
+        // (R-34) positionne le bitmap dedans ; les modes qui
+        // débordent (`cover`, `none` trop grand, position
+        // décalée) sont clipés à la content box.
+        let content = shifted(content_rect(bx), off);
+        let (dst, clip) = object_fit_dst(bx, &img, content);
+        if clip {
+            items.push(DisplayItem::PushClip(content));
+        }
+        items.push(DisplayItem::Image { rect: dst, img });
+        if clip {
+            items.push(DisplayItem::PopClip);
+        }
     }
+}
+
+/// Destination `object-fit` (R-34, minimal) dans la content
+/// box : `fill` (défaut) étire le bitmap à la boîte ;
+/// `contain`/`scale-down`/`cover`/`none` préservent le ratio
+/// ou la taille naturelle ; `object-position` règle
+/// l'ancrage dans l'espace libre (50 % par axe = centré).
+/// Renvoie `(rect, clip)` — `clip` vrai quand la destination
+/// déborde la boîte (le peintre pose un `PushClip`).
+fn object_fit_dst(bx: &LayoutBox, img: &crate::DecodedImage, content: Rect) -> (Rect, bool) {
+    #[allow(clippy::cast_precision_loss)] // bitmaps < 2^24 px par axe.
+    let (iw, ih) = (img.width as f32, img.height as f32);
+    if iw <= 0.0 || ih <= 0.0 || content.width <= 0.0 || content.height <= 0.0 {
+        return (content, false);
+    }
+    let (w, h) = match bx.style.get("object-fit").map_or("fill", |v| v.trim()) {
+        "contain" => {
+            let s = (content.width / iw).min(content.height / ih);
+            (iw * s, ih * s)
+        }
+        "cover" => {
+            let s = (content.width / iw).max(content.height / ih);
+            (iw * s, ih * s)
+        }
+        "none" => (iw, ih),
+        "scale-down" => {
+            let s = (content.width / iw).min(content.height / ih).min(1.0);
+            (iw * s, ih * s)
+        }
+        // `fill` et toute valeur inconnue : étirement pleine
+        // boîte (comportement historique — tolérance CSS).
+        _ => (content.width, content.height),
+    };
+    let (ox, oy) = object_position(&bx.style, content.width - w, content.height - h);
+    let dst = Rect {
+        x: content.x + ox,
+        y: content.y + oy,
+        width: w,
+        height: h,
+    };
+    let clip = dst.x < content.x
+        || dst.y < content.y
+        || dst.x + dst.width > content.x + content.width
+        || dst.y + dst.height > content.y + content.height;
+    (dst, clip)
+}
+
+/// `object-position` → décalage `(x, y)` en px dans
+/// l'espace libre de chaque axe : mots-clés
+/// (`left`/`center`/`right` × `top`/`center`/`bottom`),
+/// `<pourcentage>` (part de l'espace libre — 50 % centre,
+/// défaut) et `<longueur>` px. Une valeur unique sans axe
+/// explicite reçoit l'axe horizontal ; l'axe non couvert
+/// reste centré (spec `<position>`).
+fn object_position(st: &explorer_css::ComputedStyle, free_x: f32, free_y: f32) -> (f32, f32) {
+    let (mut x, mut y) = (None, None);
+    if let Some(v) = st.get("object-position") {
+        for tok in v.split_whitespace().take(2) {
+            match tok.to_ascii_lowercase().as_str() {
+                "left" => x = Some(0.0),
+                "right" => x = Some(free_x),
+                "top" => y = Some(0.0),
+                "bottom" => y = Some(free_y),
+                "center" => {
+                    if x.is_none() {
+                        x = Some(free_x / 2.0);
+                    } else {
+                        y = Some(free_y / 2.0);
+                    }
+                }
+                t => {
+                    let off = t
+                        .strip_suffix('%')
+                        .and_then(|p| p.parse::<f32>().ok())
+                        .map(|n| (n / 100.0, true))
+                        .or_else(|| {
+                            t.strip_suffix("px")
+                                .and_then(|p| p.parse::<f32>().ok())
+                                .map(|n| (n, false))
+                        });
+                    if let Some((n, frac)) = off {
+                        if x.is_none() {
+                            x = Some(if frac { free_x * n } else { n });
+                        } else {
+                            y = Some(if frac { free_y * n } else { n });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (x.unwrap_or(free_x / 2.0), y.unwrap_or(free_y / 2.0))
 }
 
 /// La boîte crée-t-elle un contexte d'empilement au sens de

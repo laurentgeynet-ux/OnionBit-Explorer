@@ -523,14 +523,26 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   miroir détaché façon 55h, cadence adaptative, verrou
   par onglet). Mesures debug — en release le gel serait
   ~3-5 s, la *structure* du verrou reste à corriger.
-- [ ] **R-34. Médias vrais remplacés boxtree**
-  (résidu étape 58, demande consignée) : `video`/`audio`
-  comme remplacés natifs — taille intrinsèque de l'affiche
-  décodée (le poster n'est plus étiré dans un 300×150
-  forcé), `object-fit` minimal, `video[poster]` couvert par
-  `collect_data_images` (le complément NAV
-  `poster_data_images` se retire alors), hints
-  présentationnels `width`/`height`.
+- [x] **R-34. Médias vrais remplacés boxtree** — livré :
+  `video`/`audio` sont des feuilles remplacées **natives**
+  du boxtree — taille intrinsèque de l'affiche décodée
+  (le poster n'est plus étiré dans un 300×150 forcé —
+  test bout en bout : `<video poster>` ≡ `<img>` du même
+  bitmap), gabarit standard sinon (vidéo 300×150, audio
+  300×54) ; le contenu de repli n'est jamais boxifié.
+  `object-fit` minimal à la peinture (`fill`/`contain`/
+  `scale-down`/`cover`/`none` + `object-position`
+  mots-clés/`%`/`px` ; les modes débordants sont clipés à
+  la content box). `collect_data_images` couvre
+  `<video poster="data:…">` → complément NAV
+  `poster_data_images` retiré ; hints `width`/`height`
+  (déjà présents pour `video`, axe par axe). UA :
+  `video` redevient remplacé en-ligne, `audio:not
+  ([controls])` = `display:none` côté domaine ; le
+  complément UA session ne garde que le look produit
+  (fond noir, chrome audio). Tests : feuilles natives
+  boxtree, rect/clip `object-fit`, collecte poster
+  `data:`, équivalence intrinsèque bout en bout.
 - [ ] **R-35. Métriques de runs pour find**
   (résidu 57bis, demande consignée) : API de métriques —
   sous-rect du match dans une boîte `Text` (offsets glyphe

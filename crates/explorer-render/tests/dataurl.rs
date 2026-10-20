@@ -51,6 +51,33 @@ fn data_url_image_png() {
     assert_eq!(&img.rgba[..4], &[255, 255, 0, 255]);
 }
 
+/// R-34 : `<video poster="data:…">` suit le même canal
+/// inline qu'`<img>` — l'affiche décodée sert à la fois la
+/// peinture et la taille intrinsèque de la boîte média.
+#[test]
+fn collect_video_poster_replaced() {
+    let dom = TreeBuilder::parse(&format!(
+        "<html><body><video poster=\"{YELLOW_PX}\" id=v></video>\
+         <audio id=a></audio></body></html>"
+    ));
+    let styles = styled(&dom, "");
+    let imgs = collect_data_images(&dom, &styles, 1_000_000);
+    assert_eq!(imgs.replaced.len(), 1, "seule l'affiche data: résout");
+    let mut q = vec![dom.document()];
+    let mut ok = false;
+    while let Some(n) = q.pop() {
+        if dom.attribute(n, "id").ok().flatten().as_deref() == Some("v") {
+            let img = imgs.replaced.get(&n).expect("affiche du video");
+            assert_eq!((img.width, img.height), (1, 1));
+            ok = true;
+        }
+        if let Ok(c) = dom.children(n) {
+            q.extend(c);
+        }
+    }
+    assert!(ok, "nœud video trouvé et indexé");
+}
+
 #[test]
 fn collect_img_et_object_replaced() {
     let dom = TreeBuilder::parse(&format!(

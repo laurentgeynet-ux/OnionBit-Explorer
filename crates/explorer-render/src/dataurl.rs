@@ -4,9 +4,10 @@
 
 //! URLs `data:` (RFC 2397) — décodage **pur** : aucune I/O,
 //! le corps voyage dans l'URL elle-même. Utilisé par
-//! `background-image: url(data:…)`, `<img src="data:…">` et
+//! `background-image: url(data:…)`, `<img src="data:…">`,
 //! `<object data="data:…">` (R-13 — Acid2 s'appuie dessus
-//! pour les yeux et le front du visage).
+//! pour les yeux et le front du visage) et
+//! `<video poster="data:…">` (R-34).
 //!
 //! [`collect_data_images`] parcourt le DOM + la `StyleMap`
 //! et renvoie un [`PaintImages`] dont `replaced`/`backgrounds`
@@ -50,8 +51,10 @@ pub fn decode_data_url(url: &str, max_px: u32) -> Option<DecodedImage> {
 
 /// Collecte les images inline `data:` de la page :
 ///
-/// - `<img src="data:…">` / `<object data="data:…">` →
-///   `replaced` (sert aussi le sizing intrinsèque) ;
+/// - `<img src="data:…">` / `<object data="data:…">` /
+///   `<video poster="data:…">` → `replaced` (sert aussi le
+///   sizing intrinsèque — l'affiche dimensionne la boîte
+///   média, R-34) ;
 /// - `background-image: url("data:…")` en cascade →
 ///   `backgrounds`, clés par `NodeId` de l'élément porteur.
 ///
@@ -68,6 +71,7 @@ pub fn collect_data_images(dom: &Dom, styles: &StyleMap, max_px: u32) -> PaintIm
         let attr = match dom.tag_name(node) {
             Ok("img") => "src",
             Ok("object") => "data",
+            Ok("video") => "poster",
             _ => "",
         };
         if !attr.is_empty() {
