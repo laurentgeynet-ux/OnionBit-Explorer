@@ -471,6 +471,7 @@ async fn input(
         InputOutcome::Navigated => serde_json::json!({ "result": "navigated" }),
         InputOutcome::Focused => serde_json::json!({ "result": "focused" }),
         InputOutcome::Edited => serde_json::json!({ "result": "edited" }),
+        InputOutcome::Unfocused => serde_json::json!({ "result": "unfocused" }),
         InputOutcome::Hover { url, editable } => {
             serde_json::json!({ "result": "hover", "url": url, "editable": editable })
         }

@@ -449,6 +449,7 @@ class FfiEngine implements BrowserRepository {
           'hover',
           'focused',
           'edited',
+          'unfocused',
         ][code],
         // Étape 61 : l'offset est re-lu via `tab_scroll`
         // (même forme que la réponse REST `scrolled`).

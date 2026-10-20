@@ -1235,6 +1235,35 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   phase fonctionnelle). *Critère de
   clôture : repro avec RSS croissant OU
   exonération sur fenêtre longue.*
+  Instrument livré :
+  `scripts/daemon_watch.ps1` — cycles
+  répétés sur daemon dédié + CSV RSS.
+
+- [x] **Étape 86. Resync `fieldFocused` —
+  outcome `unfocused`** (core + api + ffi
+  + `app/`) : désync trouvée en relisant
+  la chaîne de saisie — l'app posait
+  `fieldFocused` au clic et ne le
+  lâchait **jamais** : après
+  `Enter`/`Escape` (focus effacé par le
+  moteur) ou la mort du nœud sous les
+  mains d'un handler, chaque frappe
+  repartait en `ignored` muet — champ
+  qui semble focalisé, texte avalé.
+  Nouveau `InputOutcome::Unfocused`
+  (« aucun champ focalisé à l'arrivée
+  ou à l'issue ») — distinct
+  d'`Ignored`, qui reste réservé au
+  `keydown` consommé par
+  `preventDefault` (le champ **reste**
+  focalisé). API `"unfocused"`, FFI
+  code `6`. App : `key()` lit son
+  résultat, `navigated` et `selectTab`
+  remettent le flag à zéro. Tests :
+  `enter_escape_unfocus_reports_
+  unfocused` + assertions existantes
+  rebasées + contrôleur (resync +
+  reset). Gate entier vert.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

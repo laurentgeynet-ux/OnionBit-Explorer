@@ -85,11 +85,17 @@ impl Session {
                 // Soumission implicite : `Enter` dans un champ
                 // d'un `<form>` suit la séquence `try_submit`
                 // complète — validation + `submit` + bouton
-                // par défaut comme `submitter` (HTML).
+                // par défaut comme `submitter` (HTML). Le
+                // focus est perdu quoi qu'il advienne : une
+                // soumission bloquée (`Ignored`) doit quand
+                // même signaler la perte au client.
                 if key == "Enter" {
                     if let Some((form, sub)) = self.focused_form_default(tab) {
                         self.set_focus(tab, None);
-                        return self.try_submit(tab, form, sub, false);
+                        return Ok(match self.try_submit(tab, form, sub, false)? {
+                            InputOutcome::Ignored => InputOutcome::Unfocused,
+                            o => o,
+                        });
                     }
                 }
                 self.handle_key(tab, &key)
@@ -588,12 +594,12 @@ impl Session {
     pub(crate) fn handle_key(&mut self, tab: TabId, key: &str) -> Result<InputOutcome, CoreError> {
         let Some(field) = self.focused_node(tab) else {
             tracing::trace!(tab, key, "touche sans champ focalisé");
-            return Ok(InputOutcome::Ignored);
+            return Ok(InputOutcome::Unfocused);
         };
         match key {
             "Enter" | "Escape" => {
                 self.set_focus(tab, None);
-                return Ok(InputOutcome::Ignored);
+                return Ok(InputOutcome::Unfocused);
             }
             _ => {}
         }

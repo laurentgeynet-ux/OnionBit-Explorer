@@ -290,6 +290,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `keyLabel` pour les touches nommées (`Enter`,
   `Backspace`) qui n'ont pas de caractère.
 
+- **Étape 86 — resynchronisation `fieldFocused` /
+  outcome `unfocused`** (`explorer-core` + `api` + `ffi`
+  + `app/`) : désync mesurée en relisant la chaîne de
+  saisie avant le test humain — l'app n'apprenait
+  `fieldFocused` qu'au clic et jamais ne le lâchait ;
+  après `Enter`/`Escape` (focus effacé côté moteur) ou
+  la suppression du nœud par un handler, chaque frappe
+  suivante partait dans le vide en `ignored` muet, le
+  champ semblant focalisé. Nouveau `InputOutcome::
+  Unfocused` — « aucun champ focalisé à l'arrivée ou à
+  l'issue » — distinct d'`Ignored` (un `keydown`
+  consommé par `preventDefault` laisse le champ
+  focalisé). Chemins : frappe sans champ résolu,
+  `Enter`/`Escape`, soumission `Enter` bloquée par la
+  validation. API → `"unfocused"`, FFI → code `6`.
+  Côté app : `key()` lit enfin son résultat (`unfocused`
+  /`navigated` → flag à zéro), l'événement `navigated`
+  de l'onglet actif et tout `selectTab` le
+  réinitialisent. Tests : `enter_escape_unfocus_reports_
+  unfocused`, 3 assertions existantes rebasées
+  (`Ignored`→`Unfocused`), contrôleur `unfocused`→flag
+  et `selectTab`→reset.
+
 ## [0.2.0] - 2026-10-20
 
 ### Added

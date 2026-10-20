@@ -826,7 +826,7 @@ async fn scroll_is_clamped_and_invalidates() {
 }
 
 #[tokio::test]
-async fn key_input_is_ignored() {
+async fn key_input_is_unfocused() {
     let (mut s, _t) = test_session();
     let id = s.open_tab();
     let out = s
@@ -838,7 +838,9 @@ async fn key_input_is_ignored() {
         )
         .await
         .unwrap();
-    assert_eq!(out, InputOutcome::Ignored);
+    // Étape 86 : aucun champ focalisé → `Unfocused` (le
+    // client resynchronise son drapeau dessus).
+    assert_eq!(out, InputOutcome::Unfocused);
 }
 
 /// Store en mémoire pour tester le câblage du port
@@ -931,12 +933,13 @@ async fn click_input_focuses_then_keys_edit() {
     let id = s.open_tab();
     s.navigate(id, "http://h.test/").await.unwrap();
 
-    // Touche sans focus → ignorée.
+    // Touche sans focus → « unfocused » (étape 86 — le
+    // client resynchronise son drapeau de focus dessus).
     let out = s
         .handle_input(id, InputEvent::Key { key: "a".into() })
         .await
         .unwrap();
-    assert_eq!(out, InputOutcome::Ignored);
+    assert_eq!(out, InputOutcome::Unfocused);
 
     // Clic dans l'input (en haut à gauche, ~10em × 1.2em).
     let out = s
@@ -979,11 +982,58 @@ async fn click_input_focuses_then_keys_edit() {
     assert_eq!(out, InputOutcome::Navigated);
     let (_, pq, _) = t.last().unwrap();
     assert_eq!(pq, "/?q=a");
+    // La navigation a emporté le focus — la frappe suivante
+    // rapporte « unfocused », pas `Ignored` muet (étape 86).
     let out = s
         .handle_input(id, InputEvent::Key { key: "z".into() })
         .await
         .unwrap();
-    assert_eq!(out, InputOutcome::Ignored);
+    assert_eq!(out, InputOutcome::Unfocused);
+}
+
+/// Étape 86 — `Enter`/`Escape` hors `<form>` perdent le
+/// focus : l'outcome `Unfocused` signale la perte au client
+/// (avant : `Ignored` indistinct du `keydown` consommé par
+/// JS — l'app gardait son flag `fieldFocused` et avalait
+/// chaque frappe suivante dans le vide).
+#[tokio::test]
+async fn enter_escape_unfocus_reports_unfocused() {
+    const PAGE_INPUT_SEUL: &str = "<!doctype html><html><body><input></body></html>";
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_INPUT_SEUL);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Focused);
+    let out = s
+        .handle_input(id, InputEvent::Key { key: "a".into() })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+
+    for key in ["Enter", "Escape"] {
+        // Ré-focus pour chaque tour (Enter a tout lâché).
+        let out = s
+            .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+            .await
+            .unwrap();
+        assert_eq!(out, InputOutcome::Focused);
+        let out = s
+            .handle_input(id, InputEvent::Key { key: key.into() })
+            .await
+            .unwrap();
+        assert_eq!(out, InputOutcome::Unfocused, "{key}");
+        // La frappe suivante confirme : plus de champ.
+        let out = s
+            .handle_input(id, InputEvent::Key { key: "b".into() })
+            .await
+            .unwrap();
+        assert_eq!(out, InputOutcome::Unfocused, "après {key}");
+    }
 }
 
 #[tokio::test]
@@ -1006,8 +1056,8 @@ async fn click_outside_blurs_and_mousemove_reports_editable() {
         }
     );
 
-    // Focus puis clic loin en bas → blur (la touche est
-    // ignorée ensuite).
+    // Focus puis clic loin en bas → blur (la touche rapporte
+    // « unfocused » ensuite — étape 86).
     let _ = s
         .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
         .await;
@@ -1018,7 +1068,7 @@ async fn click_outside_blurs_and_mousemove_reports_editable() {
         .handle_input(id, InputEvent::Key { key: "x".into() })
         .await
         .unwrap();
-    assert_eq!(out, InputOutcome::Ignored);
+    assert_eq!(out, InputOutcome::Unfocused);
 }
 
 #[tokio::test]

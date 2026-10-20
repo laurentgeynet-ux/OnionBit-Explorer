@@ -68,13 +68,23 @@ class FakeRepo implements BrowserRepository {
   @override
   Future<List<int>?> fetchFrame(String tabId) async => [1, 2, 3];
 
+  /// Résultat scripté pour les événements `key` (étape 86 —
+  /// « unfocused » doit resynchroniser `fieldFocused`).
+  String keyResult = 'ignored';
+
   @override
   Future<Map<String, dynamic>> sendInput(
     String tabId,
     Map<String, dynamic> ev,
   ) async {
     actions.add('input:${ev['type']}');
-    return {'result': ev['type'] == 'click' ? 'focused' : 'ignored'};
+    return {
+      'result': switch (ev['type']) {
+        'click' => 'focused',
+        'key' => keyResult,
+        _ => 'ignored',
+      },
+    };
   }
 
   @override
@@ -838,6 +848,44 @@ void main() {
     await c.read(browserProvider.notifier).openInNewTab('http://x.test/');
     expect(repo.navigations, isEmpty);
     expect(c.read(browserProvider).activeId, '1');
+  });
+
+  test('key unfocused resynchronise fieldFocused (étape 86)', () async {
+    final repo = FakeRepo()..keyResult = 'unfocused';
+    final events = FakeEvents();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+    final ctrl = c.read(browserProvider.notifier);
+
+    // Clic sur un champ → focused → flag posé.
+    await ctrl.click(10, 10);
+    expect(c.read(browserProvider).fieldFocused, isTrue);
+
+    // Le moteur a perdu le focus (Enter/Escape, nœud mort) :
+    // le résultat `unfocused` resynchronise le flag — avant,
+    // chaque frappe suivante partait dans le vide.
+    await ctrl.key('a');
+    expect(c.read(browserProvider).fieldFocused, isFalse);
+  });
+
+  test('selectTab remet fieldFocused à zéro (étape 86)', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+    final ctrl = c.read(browserProvider.notifier);
+
+    await ctrl.newTab();
+    await ctrl.click(10, 10);
+    expect(c.read(browserProvider).fieldFocused, isTrue);
+
+    // Le flag est global mais décrit l'onglet actif — changer
+    // d'onglet le réinitialise (le focus réel de l'onglet
+    // entrant sera ré-appris au prochain clic).
+    ctrl.selectTab('1');
+    expect(c.read(browserProvider).fieldFocused, isFalse);
   });
 }
 

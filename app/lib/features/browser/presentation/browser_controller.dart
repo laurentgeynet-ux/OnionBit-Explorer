@@ -483,6 +483,11 @@ class BrowserController extends Notifier<BrowserState> {
             loading: false,
           ),
         );
+        // La nouvelle page n'a aucun champ focalisé — le
+        // flag global repart à zéro si c'est l'onglet actif.
+        if (tabId == state.activeId && state.fieldFocused) {
+          state = state.copyWith(fieldFocused: false);
+        }
         if (state.pageErrors.containsKey(tabId)) {
           state = state.copyWith(
             pageErrors: {...state.pageErrors}..remove(tabId),
@@ -811,8 +816,11 @@ class BrowserController extends Notifier<BrowserState> {
   }
 
   /// Sélectionne l'onglet affiché — tire sa frame si absente.
+  /// `fieldFocused` décrit l'onglet actif : flag global, il
+  /// repart à zéro au changement d'onglet (le focus réel de
+  /// l'onglet entrant sera re-appris au prochain clic).
   void selectTab(String id) {
-    state = state.copyWith(activeId: id);
+    state = state.copyWith(activeId: id, fieldFocused: false);
     if (!state.frames.containsKey(id) && !state.rawFrames.containsKey(id)) {
       unawaited(_pullFrame(id));
     }
@@ -905,8 +913,18 @@ class BrowserController extends Notifier<BrowserState> {
   }
 
   /// Frappe clavier → `input key` — n'a de sens que si un
-  /// champ est focalisé (`fieldFocused`).
-  Future<void> key(String key) => _sendInput({'type': 'key', 'key': key});
+  /// champ est focalisé (`fieldFocused`). `unfocused`
+  /// resynchronise le flag : le moteur a perdu le focus
+  /// (Enter/Escape, nœud supprimé) — sans ça chaque frappe
+  /// suivante était envoyée dans le vide (`ignored`) avec
+  /// un champ qui semblait focalisé.
+  Future<void> key(String key) async {
+    final res = await _sendInput({'type': 'key', 'key': key});
+    if (res == null || !ref.mounted) return;
+    if (res['result'] == 'unfocused' || res['result'] == 'navigated') {
+      state = state.copyWith(fieldFocused: false);
+    }
+  }
 
   /// Envoie un événement d'entrée ; retourne le JSON de
   /// résultat (`null` en cas d'erreur — déjà en `lastError`).

@@ -413,7 +413,9 @@ pub enum FfiInputKind {
 
 /// Événement d'entrée. `kind` ∈ `0..=3` (`FfiInputKind`).
 /// Retour : `0` ignoré, `1` scrollé, `2` navigué, `3` hover,
-/// `4` champ focalisé, `5` champ édité ; négatif = erreur.
+/// `4` champ focalisé, `5` champ édité, `6` aucun champ
+/// focalisé (frappe hors champ ou focus perdu) ; négatif =
+/// erreur.
 ///
 /// # Safety
 ///
@@ -456,6 +458,7 @@ pub unsafe extern "C" fn explorer_input(
         Ok(O::Hover { .. }) => 3,
         Ok(O::Focused) => 4,
         Ok(O::Edited) => 5,
+        Ok(O::Unfocused) => 6,
         Err(e) => {
             set_err(e);
             -2

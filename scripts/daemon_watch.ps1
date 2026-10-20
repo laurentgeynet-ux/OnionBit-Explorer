@@ -20,6 +20,10 @@ param(
     [int]$Cycles = 20,
     [int]$ProbesPerCycle = 40,
     [string]$Site = 'https://en.wikipedia.org/',
+    # 2e document par cycle : une entrée d'historique réelle
+    # pour que `back` restaure (sinon 502 EmptyDocument —
+    # attendu, pas un bug).
+    [string]$BackSite = 'https://example.com/',
     [string]$LogDir = "$PSScriptRoot\..\target\watch"
 )
 
@@ -67,6 +71,13 @@ for ($cycle = 1; $cycle -le $Cycles; $cycle++) {
         Invoke-RestMethod -Method Post -Uri "$base/tabs/$id/navigate" `
             -ContentType 'application/json' `
             -Body (@{ url = $Site } | ConvertTo-Json) `
+            -TimeoutSec 240 | Out-Null
+        # Deuxième document : le `back` qui suit a une vraie
+        # cible d'historique (le cycle nav→nav→back→DELETE est
+        # le motif de la disparition du 22/10).
+        Invoke-RestMethod -Method Post -Uri "$base/tabs/$id/navigate" `
+            -ContentType 'application/json' `
+            -Body (@{ url = $BackSite } | ConvertTo-Json) `
             -TimeoutSec 240 | Out-Null
 
         # Tempête de sondes : le motif observé lors de la disparition.

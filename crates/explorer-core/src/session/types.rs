@@ -402,6 +402,13 @@ pub enum InputOutcome {
     Focused,
     /// Le champ focalisé a été édité (frame re-peinte).
     Edited,
+    /// Aucun champ focalisé à l'arrivée ou à l'issue de la
+    /// frappe (perdu par `Enter`/`Escape`, nœud supprimé par
+    /// un handler, jamais posé) — le client peut
+    /// resynchroniser son drapeau « champ focalisé ».
+    /// Distinct d'`Ignored` (un `keydown` consommé par JS
+    /// laisse le champ focalisé).
+    Unfocused,
 }
 
 /// Vue publique d'un onglet pour l'API (DTO de sortie —
