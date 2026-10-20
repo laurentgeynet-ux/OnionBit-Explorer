@@ -7,9 +7,12 @@
 # Protocole : sur un daemon DÉDIÉ (pas celui du test humain), répéter
 # le cycle qui accompagnait la disparition du 22/10 —
 #   onglet → navigate wikipedia → tempête de mousemove → back →
-#   DELETE → RSS — et poller le WorkingSet64 à chaque cycle.
-# Critère : RSS croissant sans borne = repro fuite ; process mort =
-# repro mort ; RSS plat sur fenêtre longue = exonération progressive.
+#   DELETE → RSS — et poller la mémoire à chaque cycle.
+# Critère : mémoire engagée croissante sans borne = repro fuite ;
+# process mort = repro mort ; plat sur fenêtre longue =
+# exonération progressive. La colonne log `ws/priv` (Mio) :
+# WorkingSet64 est rogné par Windows sous pression (creux =
+# trims OS), PrivateMemorySize64 est la métrique fuite.
 #
 # Usage : pwsh -File scripts/daemon_watch.ps1 [-Port 9382] [-Cycles 20]
 # Log CSV : <LogDir>\watch-<port>.csv — colonnes
@@ -24,6 +27,10 @@ param(
     # pour que `back` restaure (sinon 502 EmptyDocument —
     # attendu, pas un bug).
     [string]$BackSite = 'https://example.com/',
+    # PID de l'app Flutter à mesurer en parallèle (M-H1 #5 :
+    # explorer_app 3,7→4,5 Go/10 min — la veille couvre les
+    # DEUX processus). Vide = daemon seul.
+    [int]$AppPid = 0,
     [string]$LogDir = "$PSScriptRoot\..\target\watch"
 )
 
@@ -32,7 +39,8 @@ $base = "http://127.0.0.1:$Port/api"
 New-Item -ItemType Directory -Force $LogDir | Out-Null
 $csv = Join-Path $LogDir "watch-$Port.csv"
 if (-not (Test-Path $csv)) {
-    'heure;cycle;rss_mio;etat' | Out-File -Encoding utf8 $csv
+    'heure;cycle;ws_priv_mio;app_ws_priv_mio;etat' |
+        Out-File -Encoding utf8 $csv
 }
 
 function Get-DaemonPid {
@@ -42,16 +50,23 @@ function Get-DaemonPid {
     } catch { $null }
 }
 
-function Get-RssMio([int]$ProcId) {
+function Get-MemMio([int]$ProcId) {
+    # WorkingSet64 (RSS) EST rogné par Windows sous pression
+    # mémoire — les creux du CSV sont des trims OS, pas des
+    # libérations. PrivateMemorySize64 (octets engagés) est la
+    # métrique fuite : elle ne retombe qu'à une vraie
+    # libération.
     try {
-        [math]::Round(
-            (Get-Process -Id $ProcId -ErrorAction Stop).WorkingSet64 / 1MB, 1)
+        $p = Get-Process -Id $ProcId -ErrorAction Stop
+        '{0}/{1}' -f [math]::Round($p.WorkingSet64 / 1MB, 1),
+            [math]::Round($p.PrivateMemorySize64 / 1MB, 1)
     } catch { $null }
 }
 
-function Write-Row([int]$Cycle, $Rss, [string]$Etat) {
-    '{0};{1};{2};{3}' -f (Get-Date -Format 'HH:mm:ss'), $Cycle, $Rss, $Etat |
-        Out-File -Append -Encoding utf8 $csv
+function Write-Row([int]$Cycle, $Mem, [string]$Etat) {
+    $app = if ($AppPid) { Get-MemMio $AppPid } else { '' }
+    '{0};{1};{2};{3};{4}' -f (Get-Date -Format 'HH:mm:ss'), $Cycle,
+        $Mem, $app, $Etat | Out-File -Append -Encoding utf8 $csv
 }
 
 Write-Host "watch : port $Port, $Cycles cycles x $ProbesPerCycle sondes -> $csv"
@@ -100,7 +115,7 @@ for ($cycle = 1; $cycle -le $Cycles; $cycle++) {
             Write-Host "cycle $cycle : daemon MORT pendant le cycle"
             break
         }
-        Write-Row $cycle (Get-RssMio $pid0) "erreur-app:$($_.Exception.Message)"
+        Write-Row $cycle (Get-MemMio $pid0) "erreur-app:$($_.Exception.Message)"
     } finally {
         if ($id) {
             try {
@@ -110,9 +125,9 @@ for ($cycle = 1; $cycle -le $Cycles; $cycle++) {
         }
     }
 
-    $rss = Get-RssMio $pid0
-    Write-Row $cycle $rss 'ok'
-    Write-Host ("cycle {0}/{1} : RSS {2} Mio" -f $cycle, $Cycles, $rss)
+    $mem = Get-MemMio $pid0
+    Write-Row $cycle $mem 'ok'
+    Write-Host ("cycle {0}/{1} : memo {2} Mio" -f $cycle, $Cycles, $mem)
 }
 
 Write-Host 'watch : fin — voir CSV pour la tendance.'
