@@ -12,9 +12,11 @@
 //! `explorer-api`. **Loopback strict** — aucun bind externe par
 //! défaut (ADR-0003).
 //!
-//! Configuration (règle 13) : tout par variables
-//! d'environnement — `EXPLORER_PORT`, `EXPLORER_FONT_DIR`,
-//! `EXPLORER_MAX_BODY`.
+//! Configuration (règle 13) : variables d'environnement —
+//! `EXPLORER_PORT`, `EXPLORER_FONT_DIR`, `EXPLORER_MAX_BODY`,
+//! `EXPLORER_PROFILE` — surchargées par les flags
+//! `--port`/`--profile` (étape 62 : les arguments inconnus
+//! sont refusés, plus d'ignorance silencieuse).
 
 #![forbid(unsafe_code)]
 
@@ -81,6 +83,74 @@ impl DaemonConfig {
 /// règle 13 : borne de config, pas de magie).
 const NET_PUMP_MS: std::time::Duration = std::time::Duration::from_millis(50);
 
+/// Arguments CLI (étape 62) — surcharges des `EXPLORER_*`.
+struct CliArgs {
+    /// `--port N` → surcharge `EXPLORER_PORT`.
+    port: Option<u16>,
+    /// `--profile DIR` → surcharge `EXPLORER_PROFILE`.
+    profile: Option<PathBuf>,
+}
+
+/// Usage affiché sur `--help` ou argument invalide.
+fn print_usage() {
+    eprintln!(
+        "explorer-daemon — hôte moteur + API REST/SSE loopback (ADR-0003)\n\
+         usage : explorer-daemon [--port N] [--profile DIR] [--help]\n\
+         \x20 --port N       port d'écoute (surcharge EXPLORER_PORT)\n\
+         \x20 --profile DIR  répertoire de profil persistant\n\
+         \x20               (surcharge EXPLORER_PROFILE)\n\
+         \x20 --help         affiche cette aide\n\
+         variables : EXPLORER_PORT, EXPLORER_PROFILE, EXPLORER_FONT_DIR,\n\
+         \x20            EXPLORER_MAX_BODY, EXPLORER_API_KEY"
+    );
+}
+
+/// Sort sur erreur d'argument (exit 2 + usage).
+fn arg_fail(msg: &str) -> ! {
+    eprintln!("{msg}");
+    print_usage();
+    std::process::exit(2);
+}
+
+/// Parse les arguments — tout flag inconnu ou valeur
+/// invalide est refusé (exit 2 + usage), `--help` affiche
+/// et sort 0 (étape 62 : les missions passaient `--port`
+/// en croyant qu'il était honoré).
+fn parse_args() -> CliArgs {
+    let mut out = CliArgs {
+        port: None,
+        profile: None,
+    };
+    let mut it = std::env::args().skip(1);
+    while let Some(a) = it.next() {
+        let (flag, inline) = a
+            .split_once('=')
+            .map_or((a.as_str(), None), |(f, v)| (f, Some(v)));
+        let mut value = |name: &str| -> String {
+            inline
+                .map(str::to_owned)
+                .or_else(|| it.next())
+                .unwrap_or_else(|| arg_fail(&format!("{name} : valeur absente")))
+        };
+        match flag {
+            "--help" | "-h" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            "--port" => {
+                let v = value("--port");
+                let Ok(p) = v.parse::<u16>() else {
+                    arg_fail(&format!("--port : {v} n'est pas un port valide"));
+                };
+                out.port = Some(p);
+            }
+            "--profile" => out.profile = Some(PathBuf::from(value("--profile"))),
+            _ => arg_fail(&format!("argument inconnu : {a}")),
+        }
+    }
+    out
+}
+
 /// Répertoire de fontes par défaut selon la plateforme.
 fn default_fonts_dir() -> PathBuf {
     #[cfg(windows)]
@@ -129,11 +199,17 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-    let cfg = DaemonConfig::from_env();
+    let mut cfg = DaemonConfig::from_env();
+    let cli = parse_args();
+    if let Some(p) = cli.port {
+        cfg.bind.set_port(p);
+    }
     let fonts = DirFontSource::new(&cfg.fonts_dir);
     tracing::info!(dir = %cfg.fonts_dir.display(), "fontes système scannées");
 
-    let profile_dir = store::JsonFileStore::default_dir();
+    let profile_dir = cli
+        .profile
+        .unwrap_or_else(store::JsonFileStore::default_dir);
     let store = Arc::new(store::JsonFileStore::open(&profile_dir));
     tracing::info!(dir = %profile_dir.display(), "profil chargé");
     // Jar partagé transport ↔ session (étape 51) :

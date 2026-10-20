@@ -7,6 +7,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Added
+
+- **Étape 62 — CLI du daemon** (`explorer-daemon`) :
+  `--port N` / `--profile DIR` (formes `--x v` et
+  `--x=v`) honorent désormais leurs surcharges sur
+  `EXPLORER_PORT`/`EXPLORER_PROFILE` ; `--help` affiche
+  l'usage ; tout argument inconnu ou invalide est refusé
+  (exit 2) — fin de l'ignorance silencieuse qui faisait
+  écrire les missions terrain dans le profil par défaut
+  sans le savoir.
+
 ### Fixed
 
 - **Étape 55e (rouvert) — animations figées sous pompe

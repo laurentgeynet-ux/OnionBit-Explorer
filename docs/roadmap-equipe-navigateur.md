@@ -587,7 +587,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   de l'ABI vérifié sain : nav réelle, `frame_copy`/régions
   clipées exactes, erreurs typées (`last_error`), UTF-8
   roundtrip, `dirty_rects`/`tick`/`close_tab`/`destroy`.
-- [ ] **Étape 62. Daemon : arguments CLI ignorés
+- [x] **Étape 62. Daemon : arguments CLI ignorés
   silencieusement** (terrain mission 15) : `--port`/
   `--profile` acceptés sans effet — toute la configuration
   passe par les variables `EXPLORER_*` (`EXPLORER_PORT`,
@@ -595,6 +595,10 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   antérieures écrivaient dans le profil par défaut sans le
   savoir. Rejeter les args inconnus + `--help`, ou les
   honorer ; à minima documenter l'absence de CLI.
+  **Livré** : `--port N`/`--profile DIR` (formes `--x v`
+  et `--x=v`) sont honorés en surcharge des variables ;
+  `--help` affiche l'usage ; tout flag inconnu ou valeur
+  invalide sort 2 + usage — parser maison, zéro dépendance.
 
 ## Piste JS (JS-C26+) — spécialiste `dillo-js`
 
