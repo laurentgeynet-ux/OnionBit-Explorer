@@ -155,6 +155,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `openInNewTab` (arrière-plan + échec de création).
   `analyze` + `test` verts (28/28).
 
+- **Veille daemon — `scripts/daemon_watch.ps1`** :
+  instrument du protocole RSS (item « veille » roadmap
+  NAV) — sur un daemon dédié, répète le cycle de la
+  disparition du 22/10 (onglet → navigate → tempête de
+  `mousemove` → back → DELETE) et échantillonne le
+  WorkingSet64 à chaque cycle en CSV. Distinction
+  « process mort » vs « erreur applicative » par le
+  listener du port. Critère : RSS croissant sans borne
+  ou mort = repro ; RSS plat sur fenêtre longue =
+  exonération progressive.
+
 ### Fixed
 
 - **R-40 — ratio intrinsèque des remplacés (§10.6.2)**
