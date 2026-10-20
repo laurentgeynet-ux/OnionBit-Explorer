@@ -177,5 +177,6 @@ pub(crate) enum ScriptNav {
     Go(isize),
     /// `form.submit()`/`requestSubmit()` : requête déjà
     /// construite (méthode + corps + en-têtes — étape 54).
-    Submit(Request),
+    /// `Box` : `Request` est la variante large de l'enum.
+    Submit(Box<Request>),
 }

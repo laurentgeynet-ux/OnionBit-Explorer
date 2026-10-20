@@ -14,7 +14,7 @@ use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
 use explorer_js::JsEngine;
 use explorer_net::error::NetResult;
-use explorer_net::http::{HttpTransport, Method, Request, Response};
+use explorer_net::http::{HttpTransport, Initiator, Method, Request, Response};
 use explorer_net::policy::initiator_headers;
 use explorer_net::url::Url;
 use explorer_render::decode_font;
@@ -343,7 +343,9 @@ impl SubJob {
                 let Ok(url) = Url::resolve(&self.url, href) else {
                     continue;
                 };
-                let Ok(resp) = self.transport.fetch(&Request::get(url)).await else {
+                let mut req = Request::get(url);
+                req.initiator = Some(Initiator::Subresource(self.url.clone()));
+                let Ok(resp) = self.transport.fetch(&req).await else {
                     continue;
                 };
                 if !(200..300).contains(&resp.status) {
@@ -560,6 +562,7 @@ pub(crate) fn sub_jobs(
 /// cross-origin) — le mixed-content est filtré en amont.
 pub(crate) fn sub_request(base: &Url, url: &Url) -> Request {
     let mut req = Request::get(url.clone());
+    req.initiator = Some(Initiator::Subresource(base.clone()));
     for (n, v) in initiator_headers(base, url, Method::Get) {
         req.headers.push((n, v));
     }

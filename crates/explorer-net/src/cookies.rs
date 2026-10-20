@@ -155,14 +155,49 @@ impl CookieJar {
     /// `Cookie:` pour `url` — nom=valeur joints par `; `, les plus
     /// spécifiques (chemins longs) d'abord. `for_http` = inclure les
     /// `HttpOnly` (le fil réseau) ; `false` = vue `document.cookie`.
+    ///
+    /// Sans contexte d'initiateur (`SameSite` non appliqué —
+    /// compat historique, requêtes hors page) ; la variante
+    /// politique est [`Self::header_for_ctx`].
     #[must_use]
     pub fn header_for(&self, url: &Url, for_http: bool) -> String {
         self.header_for_at(url, for_http, SystemTime::now())
     }
 
+    /// `Cookie:` pour `req` avec politique `SameSite` appliquée
+    /// à l'envoi (étape 66, RFC 6265bis) : `Strict` exige
+    /// same-site, `Lax` ajoute l'exception navigation top-level
+    /// sûre (`GET`/`HEAD`), `None` reste libre. Sans initiateur
+    /// (`req.initiator` vide) = envoi permissif — les requêtes
+    /// sans page (CLI, fakes) gardent le comportement historique.
+    #[must_use]
+    pub fn header_for_ctx(&self, req: &Request, for_http: bool) -> String {
+        self.header_for_ctx_at(req, for_http, SystemTime::now())
+    }
+
+    /// Variant datée de [`Self::header_for_ctx`].
+    #[must_use]
+    pub fn header_for_ctx_at(&self, req: &Request, for_http: bool, now: SystemTime) -> String {
+        self.header_for_sel(&req.url, for_http, now, |c| {
+            same_site_allows(c, req.initiator.as_ref(), req)
+        })
+    }
+
     /// Variant datée de [`Self::header_for`].
     #[must_use]
     pub fn header_for_at(&self, url: &Url, for_http: bool, now: SystemTime) -> String {
+        self.header_for_sel(url, for_http, now, |_| true)
+    }
+
+    /// Corps partagé de `header_for*` — `extra` affine
+    /// l'admission de chaque cookie (politique `SameSite`).
+    fn header_for_sel(
+        &self,
+        url: &Url,
+        for_http: bool,
+        now: SystemTime,
+        extra: impl Fn(&Cookie) -> bool,
+    ) -> String {
         let host = url.host();
         let https = url.scheme() == "https";
         let mut pairs: Vec<(usize, String)> = self
@@ -176,6 +211,7 @@ impl CookieJar {
                     && path_match(url.path(), &c.path)
                     && (!c.secure || https || is_localhost(&host))
                     && (for_http || !c.http_only)
+                    && extra(c)
             })
             .map(|c| (c.path.len(), format!("{}={}", c.name, c.value)))
             .collect();
@@ -417,6 +453,28 @@ fn path_match(req_path: &str, cookie_path: &str) -> bool {
         && (cookie_path.ends_with('/') || req_path.as_bytes().get(cookie_path.len()) == Some(&b'/'))
 }
 
+/// Politique `SameSite` à l'envoi (étape 66, RFC 6265bis) :
+/// « site » = `(schéma, domaine registrable)` — `Strict`
+/// exige same-site ; `Lax` = same-site ou navigation
+/// top-level sûre (`GET`/`HEAD`) ; `None` = libre
+/// (`Secure` exigé à la pose). Sans initiateur = permissif
+/// (compat — requêtes sans page initiatrice).
+fn same_site_allows(c: &Cookie, ini: Option<&Initiator>, req: &Request) -> bool {
+    let Some(ini) = ini else { return true };
+    let host = req.url.host();
+    let same_site = |page: &Url| {
+        page.scheme() == req.url.scheme() && registrable(&page.host()) == registrable(&host)
+    };
+    match (c.same_site, ini) {
+        (SameSite::None, _) | (_, Initiator::TopLevelNav) => true,
+        (SameSite::Strict, Initiator::NavFrom(p) | Initiator::Subresource(p))
+        | (SameSite::Lax, Initiator::Subresource(p)) => same_site(p),
+        (SameSite::Lax, Initiator::NavFrom(p)) => {
+            same_site(p) || matches!(req.method, Method::Get | Method::Head)
+        }
+    }
+}
+
 /// Chemin par défaut : le répertoire de l'URL (RFC 6265 §5.1.4).
 fn default_path(url_path: &str) -> String {
     match url_path.rfind('/') {
@@ -500,7 +558,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::error::NetResult;
-use crate::http::{HttpTransport, Request, Response};
+use crate::http::{HttpTransport, Initiator, Method, Request, Response};
 
 /// Transport décorateur : envoie `Cookie:` calculé par le jar et
 /// capture les `Set-Cookie` de la réponse (toutes les lignes —
@@ -522,7 +580,7 @@ impl CookieTransport {
 impl HttpTransport for CookieTransport {
     async fn fetch(&self, req: &Request) -> NetResult<Response> {
         let mut req = req.clone();
-        let cookie = self.jar.header_for(&req.url, true);
+        let cookie = self.jar.header_for_ctx(&req, true);
         if !cookie.is_empty()
             && !req
                 .headers

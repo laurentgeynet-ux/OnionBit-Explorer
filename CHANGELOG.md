@@ -9,6 +9,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 66 — `SameSite` appliqué à l'envoi**
+  (`explorer-net` + `explorer-core` + `explorer-api`) :
+  le flag était stocké mais `CookieTransport` renvoyait
+  tout cookie de domaine sans contexte — un
+  `SameSite=Strict` partait cross-site. `Request` gagne
+  `initiator: Option<Initiator>` (`TopLevelNav`,
+  `NavFrom(page)`, `Subresource(page)`) ; `CookieJar::
+  header_for_ctx` filtre selon le « site pour cookies »
+  `(scheme, registrable)` PSL : `Strict` same-site seul,
+  `Lax` + navigation top-level sûre (`GET`/`HEAD`),
+  `None` libre (`Secure` exigé à la pose, repli `Lax`
+  sinon). `nav_begin` pose le défaut `NavFrom(page
+  courante)` ; navigations navigateur (API REST,
+  `navigate`, reload, back/forward) = `TopLevelNav` ;
+  sous-ressources, modules, polices, `fetch`/`XHR` =
+  `Subresource` ; formulaires (GET/POST) = `NavFrom`.
+  Sans initiateur = permissif (compat fakes/CLI).
+
 - **Étape 58 — `<video>`/`<audio>` : stubs honnêtes +
   affiche (ADR-0023, aucun décodeur)** : `video[poster]`
   suit le canal image existant (fetch borné `max_images`,

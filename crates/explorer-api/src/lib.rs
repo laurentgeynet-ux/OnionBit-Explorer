@@ -39,7 +39,7 @@ use explorer_core::{
     drain_applies_shared, drain_navs_shared, history_move_shared, navigate_shared, CoreError,
     CoreEvent, InputEvent, InputOutcome, Session, TabId,
 };
-use explorer_net::http::Request;
+use explorer_net::http::{Initiator, Request};
 use explorer_net::url::Url;
 use futures_util::Stream;
 
@@ -244,7 +244,11 @@ async fn navigate(
     // verrou (`navigate_shared`) : le `Mutex<Session>` n'est
     // plus tenu pendant le téléchargement, `status`, `tabs`,
     // `frame` et les autres onglets restent serviables.
-    match navigate_shared(&st.session, id, Request::get(url), true).await {
+    // Navigation explicite (requête API) = top-level —
+    // `SameSite` : tout passe (étape 66).
+    let mut req = Request::get(url);
+    req.initiator = Some(Initiator::TopLevelNav);
+    match navigate_shared(&st.session, id, req, true).await {
         Ok(()) => {
             drain_navs_shared(&st.session, id).await;
             let session = st.session.lock().await;
@@ -277,7 +281,9 @@ async fn reload(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
         Ok(u) => u,
         Err(e) => return err(StatusCode::BAD_REQUEST, &CoreError::Url(e.to_string())),
     };
-    match navigate_shared(&st.session, id, Request::get(url), false).await {
+    let mut req = Request::get(url);
+    req.initiator = Some(Initiator::TopLevelNav);
+    match navigate_shared(&st.session, id, req, false).await {
         Ok(()) => {
             drain_navs_shared(&st.session, id).await;
             let session = st.session.lock().await;

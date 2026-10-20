@@ -63,6 +63,7 @@ fn req(url: &str) -> Request {
         url: Url::parse(url).expect("url"),
         headers: vec![],
         body: None,
+        initiator: None,
     }
 }
 

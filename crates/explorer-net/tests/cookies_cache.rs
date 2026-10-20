@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 use explorer_net::cache::{CacheConfig, CachingTransport, MemoryCache};
 use explorer_net::cookies::{CookieConfig, CookieJar, CookieTransport};
 use explorer_net::h1::{H1Client, HttpConfig, TcpConnector};
-use explorer_net::http::{HttpTransport, Request};
+use explorer_net::http::{HttpTransport, Initiator, Method, Request};
 use explorer_net::url::Url;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -152,8 +152,124 @@ fn samesite_parsed() {
     assert!(jar.set_from_header(&url, "a=1; SameSite=Strict; Secure"));
     let map_len = jar.len();
     assert_eq!(map_len, 1);
-    let _ = jar; // SameSite exposé sur le cookie — l'envoi cross-site
-                 // est la politique de l'étape 8.
+    let _ = jar;
+}
+
+// -- SameSite à l'envoi (étape 66) ------------------------------------
+
+/// Requête `GET url` initiée par `ini`.
+fn req_from(url: &str, ini: Initiator) -> Request {
+    let mut r = Request::get(u(url));
+    r.initiator = Some(ini);
+    r
+}
+
+/// Jar avec un cookie par profil `SameSite` sur `example.com`.
+fn samesite_jar() -> CookieJar {
+    let jar = CookieJar::new();
+    let url = u("https://example.com/");
+    assert!(jar.set_from_header(&url, "st=1; SameSite=Strict; Secure"));
+    assert!(jar.set_from_header(&url, "lx=1; SameSite=Lax; Secure"));
+    assert!(jar.set_from_header(&url, "nn=1; SameSite=None; Secure"));
+    jar
+}
+
+/// Noms des cookies d'un en-tête `Cookie:` — l'ordre de la
+/// jointure suit la map interne (non spécifié).
+fn names(h: &str) -> Vec<&str> {
+    if h.is_empty() {
+        return Vec::new();
+    }
+    let mut v: Vec<&str> = h
+        .split("; ")
+        .map(|p| p.split('=').next().unwrap_or(""))
+        .collect();
+    v.sort_unstable();
+    v
+}
+
+#[test]
+fn samesite_strict_needs_same_site() {
+    let jar = samesite_jar();
+    let target = "https://example.com/x";
+    // Sous-ressource cross-site → Strict masqué, Lax aussi,
+    // None passe.
+    let h = jar.header_for_ctx(
+        &req_from(target, Initiator::Subresource(u("https://other.net/"))),
+        true,
+    );
+    assert_eq!(names(&h), ["nn"], "{h}");
+    // Sous-ressource same-site : page sur un autre hôte du
+    // même registrable (same-site ≠ same-origin) → tout passe.
+    let h = jar.header_for_ctx(
+        &req_from(
+            target,
+            Initiator::Subresource(u("https://sub.example.com/")),
+        ),
+        true,
+    );
+    assert_eq!(names(&h), ["lx", "nn", "st"], "{h}");
+    // Schéma différent = site différent (scheme+registrable).
+    let h = jar.header_for_ctx(
+        &req_from(target, Initiator::Subresource(u("http://example.com/"))),
+        true,
+    );
+    assert_eq!(names(&h), ["nn"], "{h}");
+}
+
+#[test]
+fn samesite_lax_toplevel_safe_nav() {
+    let jar = samesite_jar();
+    let target = "https://example.com/x";
+    // Navigation top-level sûre (GET) initiée cross-site :
+    // Lax passe, Strict non.
+    let h = jar.header_for_ctx(
+        &req_from(target, Initiator::NavFrom(u("https://other.net/"))),
+        true,
+    );
+    assert_eq!(names(&h), ["lx", "nn"], "{h}");
+    // POST cross-site : méthode non sûre → Lax masqué aussi.
+    let mut post = req_from(target, Initiator::NavFrom(u("https://other.net/")));
+    post.method = Method::Post;
+    let h = jar.header_for_ctx(&post, true);
+    assert_eq!(names(&h), ["nn"], "{h}");
+    // Navigation same-site → tout passe.
+    let h = jar.header_for_ctx(
+        &req_from(target, Initiator::NavFrom(u("https://example.com/y"))),
+        true,
+    );
+    assert_eq!(names(&h), ["lx", "nn", "st"], "{h}");
+}
+
+#[test]
+fn samesite_toplevel_and_no_context() {
+    let jar = samesite_jar();
+    // Navigation pilotée par le navigateur (barre d'URL,
+    // reload, back/forward) : tout passe.
+    let h = jar.header_for_ctx(
+        &req_from("https://example.com/", Initiator::TopLevelNav),
+        true,
+    );
+    assert_eq!(names(&h), ["lx", "nn", "st"], "{h}");
+    // Sans initiateur (hors page) : permissif — compat.
+    let h = jar.header_for_ctx(&Request::get(u("https://example.com/")), true);
+    assert_eq!(names(&h), ["lx", "nn", "st"], "{h}");
+}
+
+#[test]
+fn samesite_none_insecure_downgrades() {
+    // `SameSite=None` sans `Secure` retombe sur `Lax` à la
+    // pose → cross-site sous-ressource : masqué.
+    let jar = CookieJar::new();
+    assert!(jar.set_from_header(&u("https://example.com/"), "n=1; SameSite=None"));
+    let h = jar.header_for_ctx(
+        &req_from(
+            "https://example.com/",
+            Initiator::Subresource(u("https://other.net/")),
+        ),
+        true,
+    );
+    assert_eq!(h, "", "{h}");
 }
 
 #[test]

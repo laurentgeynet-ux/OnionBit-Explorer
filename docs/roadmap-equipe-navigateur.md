@@ -681,21 +681,27 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   exposer la hauteur mesurée vs le plafond raster
   (`MAX_FRAME_DIM`), ou typer la réponse
   (`doc_h: 16384, doc_h_clamped: true`).
-- [ ] **Étape 66. `SameSite` stocké mais jamais appliqué à
-  l'envoi** (terrain mission 17 — `cookies.rs`,
-  `header_for`) : un `Set-Cookie SameSite=Strict` posé sur
-  `localhost` est **renvoyé** sur navigation cross-site
-  depuis `127.0.0.1` (`CK=k=v` — Chrome/Firefox bloquent).
-  Le flag est parsé et persisté mais l'envoi n'a aucun
-  contexte d'initiateur : `header_for` ne connaît pas le
-  site de la page à l'origine de la requête. Fix = passer
-  l'initiator (top-level vs sous-ressource cross-site) au
-  jar — `Strict` : same-site seul ; `Lax` : + navigation
-  top-level GET ; `None` : cross-site libre. Le reste du
-  jar vérifié sain : host-only filtré, `Domain=` rejeté sur
-  suffixe public (`localhost` via PSL), `Max-Age=0`/
-  `Expires` passé suppriment, `Secure` sur http rejeté sauf
-  exemption localhost documentée.
+- [x] **Étape 66. `SameSite` appliqué à l'envoi** (terrain
+  mission 17 — `cookies.rs`, `header_for`) : le flag était
+  parsé/persisté mais `header_for` ne connaissait aucun
+  contexte d'initiateur — un `SameSite=Strict` était
+  renvoyé cross-site. Livré : `Request.initiator`
+  (`Initiator::{TopLevelNav, NavFrom, Subresource}`,
+  additif `Option` — sans contexte = permissif compat) ;
+  `CookieJar::header_for_ctx` applique la politique
+  (`Strict` : same-site `(scheme, registrable)` PSL seul ;
+  `Lax` : + navigation top-level `GET`/`HEAD` ; `None` :
+  libre, `Secure` exigé à la pose) ; `CookieTransport`
+  passe par `_ctx` ; `nav_begin` (entonnoir `&mut` +
+  `navigate_shared`) pose le défaut `NavFrom(page)` —
+  `TopLevelNav` explicite aux navigations navigateur (API,
+  `navigate`, reload, back/forward), `Subresource` aux
+  sous-ressources/`fetch`/`XHR`/polices/modules,
+  `NavFrom` aux formulaires. Le reste du jar vérifié sain :
+  host-only filtré, `Domain=` rejeté sur suffixe public
+  (`localhost` via PSL), `Max-Age=0`/`Expires` passé
+  suppriment, `Secure` sur http rejeté sauf exemption
+  localhost documentée.
 - [x] **Étape 67. URL post-redirection non commise**
   (terrain mission 17) : `/r301` → `/landing` suit bien la
   chaîne (contenu peint, historique fusionné, borne 8 hops

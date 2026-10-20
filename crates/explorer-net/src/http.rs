@@ -56,6 +56,32 @@ pub struct Request {
     pub headers: Vec<(String, String)>,
     /// Corps (POST/PUT) — `None` = aucun.
     pub body: Option<Vec<u8>>,
+    /// Initiateur pour la politique `SameSite` (« site pour
+    /// cookies », RFC 6265bis) — `None` = pas de contexte,
+    /// envoi permissif (compat — les fakes et outils n'ont
+    /// pas de page initiatrice). Posé par la session
+    /// (étape 66).
+    pub initiator: Option<Initiator>,
+}
+
+/// Qui a initié la requête — « site pour cookies » de la
+/// politique `SameSite` (étape 66).
+#[derive(Debug, Clone)]
+pub enum Initiator {
+    /// Navigation de haut niveau sans page initiatrice
+    /// (saisie utilisateur, favori, reload, back/forward) —
+    /// le site pour cookies est la cible elle-même :
+    /// `Strict`/`Lax`/`None` passent tous.
+    TopLevelNav,
+    /// Navigation de haut niveau initiée par une page
+    /// (lien, formulaire, `location.href`) — `Strict` exige
+    /// same-site ; `Lax` passe en plus sur les méthodes
+    /// sûres (`GET`/`HEAD`).
+    NavFrom(Url),
+    /// Sous-ressource ou `fetch`/`XHR` d'une page —
+    /// `Strict`/`Lax` n'envoient que same-site ; `None`
+    /// reste libre (`Secure` exigé à la pose).
+    Subresource(Url),
 }
 
 impl Request {
@@ -67,6 +93,7 @@ impl Request {
             url,
             headers: Vec::new(),
             body: None,
+            initiator: None,
         }
     }
 }

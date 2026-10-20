@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use explorer_dom::Dom;
 use explorer_js::NavRequest;
-use explorer_net::http::{Method, Request};
+use explorer_net::http::{Initiator, Method, Request};
 use explorer_net::policy::{initiator_headers, is_mixed_content};
 use explorer_net::url::Url;
 use explorer_render::PaintImages;
@@ -37,7 +37,11 @@ impl Session {
         // `push` = l'entrée rejoint l'historique ; `Navigated`
         // est émis par `navigate_request` si le document final
         // est bien celui demandé (redirection script exclue).
-        match self.navigate_request(tab, Request::get(url), true).await {
+        let mut req = Request::get(url);
+        // Navigation explicite (barre d'URL, API) = top-level
+        // sans page initiatrice — `SameSite` tout passe (66).
+        req.initiator = Some(Initiator::TopLevelNav);
+        match self.navigate_request(tab, req, true).await {
             Ok(_) => {
                 self.drain_script_nav(tab).await;
                 Ok(())
@@ -57,9 +61,14 @@ impl Session {
     /// si l'onglet n'a jamais été navigué, ou erreur de fetch.
     pub async fn reload(&mut self, tab: TabId) -> Result<(), CoreError> {
         let Some(req) = self.tabs.get(&tab).and_then(|t| {
-            t.last_req
-                .clone()
-                .or_else(|| t.url.clone().map(Request::get))
+            t.last_req.clone().or_else(|| {
+                t.url.clone().map(|u| {
+                    // Reload direct = navigation top-level (66).
+                    let mut r = Request::get(u);
+                    r.initiator = Some(Initiator::TopLevelNav);
+                    r
+                })
+            })
         }) else {
             return Err(if self.tabs.contains_key(&tab) {
                 CoreError::EmptyDocument
@@ -264,7 +273,11 @@ impl Session {
         let Some(idx) = next.filter(|&i| i < entry.hist.len()) else {
             return Err(CoreError::EmptyDocument);
         };
-        let req = entry.hist[idx].clone();
+        let mut req = entry.hist[idx].clone();
+        // Back/forward = navigation top-level pilotée par le
+        // navigateur — le contexte initiateur historié ne
+        // s'applique plus (étape 66).
+        req.initiator = Some(Initiator::TopLevelNav);
         // Hit bfcache (étape 56) : restauration instantanée,
         // zéro réseau.
         if self.try_bfcache(tab, idx) {
@@ -364,9 +377,21 @@ impl Session {
     pub(crate) fn nav_begin(
         &mut self,
         tab: TabId,
-        req: Request,
+        mut req: Request,
         push: bool,
     ) -> Result<NavJob, CoreError> {
+        // Défaut « site pour cookies » (étape 66) : une nav
+        // sans initiateur posé est initiée par la page
+        // courante (lien, `location`, script-nav) ; onglet
+        // vierge = navigation top-level.
+        if req.initiator.is_none() {
+            req.initiator = Some(
+                self.tabs
+                    .get(&tab)
+                    .and_then(|t| t.url.clone())
+                    .map_or(Initiator::TopLevelNav, Initiator::NavFrom),
+            );
+        }
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
         entry.nav_epoch += 1;
         Ok(NavJob {
@@ -546,7 +571,7 @@ impl Session {
             let act = match n {
                 ScriptNav::To(u) => DrainAct::Req(Box::new(Request::get(u)), true),
                 ScriptNav::Go(d) => DrainAct::Go(d),
-                ScriptNav::Submit(req) => DrainAct::Req(Box::new(req), true),
+                ScriptNav::Submit(req) => DrainAct::Req(req, true),
             };
             if !self.enqueue_nav_act(tab, act) {
                 break;
@@ -633,7 +658,7 @@ impl Session {
                     if let Some(req) = base
                         .and_then(|b| script_form_request(b, &method, &action, &enctype, &fields))
                     {
-                        return Some(ScriptNav::Submit(req));
+                        return Some(ScriptNav::Submit(Box::new(req)));
                     }
                 }
             }
@@ -722,6 +747,9 @@ impl Session {
             url: url.clone(),
             headers: initiator_headers(page, &url, m),
             body: body.map(|b| b.as_bytes().to_vec()),
+            // `fetch`/`XHR` = sous-ressource de la page —
+            // `SameSite=Strict`/`Lax` exigent same-site (66).
+            initiator: Some(Initiator::Subresource(page.clone())),
         };
         if cross
             && !req
@@ -739,7 +767,7 @@ impl Session {
                 .cloned(),
         );
         if !cross {
-            let c = self.cookies.header_for(&url, true);
+            let c = self.cookies.header_for_ctx(&req, true);
             if !c.is_empty() {
                 req.headers.push(("Cookie".to_string(), c));
             }

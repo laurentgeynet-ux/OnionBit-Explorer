@@ -7,7 +7,7 @@
 use super::*;
 
 use explorer_dom::{Dom, DomError, NodeId};
-use explorer_net::http::{Method, Request};
+use explorer_net::http::{Initiator, Method, Request};
 use explorer_net::url::Url;
 
 /// Contrôle de soumission le plus proche (soi ou ancêtre) :
@@ -560,6 +560,10 @@ pub(crate) fn form_request(
             url,
             headers: vec![("content-type".to_string(), content_type)],
             body: Some(body),
+            // Soumission = navigation initiée par la page —
+            // `SameSite=Lax` n'est pas envoyé sur POST
+            // cross-site (méthode non sûre, étape 66).
+            initiator: Some(Initiator::NavFrom(base.clone())),
         });
     }
     let qs = form_url_encode(entries);
@@ -569,7 +573,9 @@ pub(crate) fn form_request(
         let sep = if action.contains('?') { '&' } else { '?' };
         format!("{action}{sep}{qs}")
     };
-    Some(Request::get(Url::resolve(base, &target).ok()?))
+    let mut req = Request::get(Url::resolve(base, &target).ok()?);
+    req.initiator = Some(Initiator::NavFrom(base.clone()));
+    Some(req)
 }
 
 /// Requête d'un `NavRequest::FormSubmit` — les champs sont
