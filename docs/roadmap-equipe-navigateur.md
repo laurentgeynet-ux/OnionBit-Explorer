@@ -611,6 +611,38 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   et `--x=v`) sont honorés en surcharge des variables ;
   `--help` affiche l'usage ; tout flag inconnu ou valeur
   invalide sort 2 + usage — parser maison, zéro dépendance.
+- [ ] **Étape 63. Popup `<select>` : options non peintes +
+  clavier inerte** (terrain mission 16, repro `repros/
+  form.html` — feature livrée en 54 mais inutilisable en
+  vrai) : l'overlay s'ouvre bien **en fin de display list**
+  au-dessus du contenu, mais deux défauts : (1) **zéro
+  pixel de texte** dans la boîte — les labels d'options
+  figées ne sont jamais émis (`FillRect` de fond seul) ;
+  (2) `Arrow↓`/`Enter` retournent `edited` sans changer la
+  sélection affichée — seul `Escape` produit un effet
+  (fermeture). Deux sous-défauts, même fixture. Reste de
+  l'étape 54 vérifié sain : `required` bloque la nav +
+  `invalid`, `checkValidity`/`setCustomValidity`/
+  `validationMessage` via JS, Enter implicite → POST
+  urlencoded correct, multipart boundary cohérent.
+- [ ] **Étape 64. `navigated` rapporté avant commit de
+  l'URL** (terrain mission 16 — séquencement) : premier
+  `Enter` dans un input → événement `navigated` émis alors
+  que `tab_url` reste sur l'ancienne page ; le commit
+  n'apparaît qu'au second Enter. L'API rapporte une
+  intention comme un état commis — l'UI afficherait une
+  URL jamais atteinte si la nav échoue ensuite (observé :
+  fetch mort derrière → on reste sur `/`). Séquencer :
+  émettre `navigated` au commit effectif, ou typer le
+  statut « en vol ».
+- [ ] **Étape 65. `doc_h` clampé à 2¹⁴ masque la hauteur
+  réelle** (terrain mission 16 — mesure) : sur un document
+  plus haut que 16 384 px (`heavy.html`), `doc_h` rapporte
+  le plafond au lieu de la hauteur posée — la hauteur
+  réelle du document n'a pas de canal. Observation/API :
+  exposer la hauteur mesurée vs le plafond raster
+  (`MAX_FRAME_DIM`), ou typer la réponse
+  (`doc_h: 16384, doc_h_clamped: true`).
 
 ## Piste JS (JS-C26+) — spécialiste `dillo-js`
 
