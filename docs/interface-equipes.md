@@ -108,8 +108,16 @@ déclaré. DRM (Widevine/FairPlay) et MSE hors scope v1.
   `scroll_y` pour l'overlay) ; `mime` = attribut `type`
   ou suffixe d'URL, `None` si inconnu ; `controls`
   indique que l'hôte doit afficher son UI native.
+  **`audio` sans `controls`** : offre à `rect` 0×0 —
+  rien à positionner, l'hôte n'attache que le pipeline
+  de lecture (pas d'overlay).
 - `MediaMoved { tab: u64, media: u64, rect: {x,y,w,h} }`
-  — relayout, scroll, resize.
+  — relayout, scroll, resize. **Coalescence à la cadence
+  de peinture** : au plus un `MediaMoved` par frame
+  produite par onglet et par surface (le dernier rect
+  connu gagne) — un scroll fluide n'émet pas un delta
+  par événement d'entrée. Asymétrie voulue : le sens
+  inverse (hôte → moteur `state`) est déjà borné ≤ 4 Hz.
 - `MediaGone { tab: u64, media: u64 }` — fin de vie.
 - `MediaCommand { tab: u64, media: u64, cmd }` — ordre
   initié par la page JS : `cmd` ∈ `play` | `pause` |
