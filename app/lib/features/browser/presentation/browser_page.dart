@@ -75,6 +75,8 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
             ),
             if (!st.daemonOnline)
               _OfflineBanner(tokens: t, onRetry: ctrl.retry),
+            if (ref.watch(findProvider).visible)
+              _FindBar(tokens: t, enabled: st.daemonOnline),
             Expanded(
               child: active == null
                   ? Center(
@@ -358,6 +360,125 @@ class _TabChip extends StatelessWidget {
 /// Rangée de navigation : back/forward/reload + omnibox +
 /// étoile signet, bibliothèque (historique/signets), zoom et
 /// réglages (étape 57).
+/// Barre find-in-page (étape 57bis) — Ctrl+F l'ouvre,
+/// Entrée cherche/passe à la suivante, Maj+Entrée la
+/// précédente, Échap ferme. Le surlignage est peint côté
+/// moteur ; la barre ne transporte que la requête.
+class _FindBar extends ConsumerStatefulWidget {
+  const _FindBar({required this.tokens, required this.enabled});
+
+  final DesignTokens tokens;
+  final bool enabled;
+
+  @override
+  ConsumerState<_FindBar> createState() => _FindBarState();
+}
+
+class _FindBarState extends ConsumerState<_FindBar> {
+  final _field = TextEditingController();
+  final _focus = FocusNode();
+  String _submitted = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.requestFocus();
+  }
+
+  @override
+  void dispose() {
+    _field.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.tokens;
+    final st = ref.watch(findProvider);
+    final ctrl = ref.read(findProvider.notifier);
+    final muted = t.color('onSurface', 'muted');
+    final canStep = widget.enabled && !st.busy && st.count > 0;
+
+    return CallbackShortcuts(
+      // Le TextField a son propre focus — Échap le ferme
+      // depuis l'intérieur de la barre (étape 57bis).
+      bindings: {const SingleActivator(LogicalKeyboardKey.escape): ctrl.close},
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: t.dim('spacing', 'md', fallback: 16),
+          vertical: t.dim('spacing', 'xs', fallback: 8),
+        ),
+        color: t.color('surface', 'raised'),
+        child: Row(
+          children: [
+            Icon(Icons.search, size: 18, color: muted),
+            SizedBox(width: t.dim('spacing', 'sm', fallback: 8)),
+            SizedBox(
+              width: 220,
+              child: TextField(
+                controller: _field,
+                focusNode: _focus,
+                enabled: widget.enabled,
+                style: TextStyle(
+                  color: t.color('onSurface', 'base'),
+                  fontSize: 13,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Rechercher dans la page',
+                  hintStyle: TextStyle(color: muted, fontSize: 13),
+                  isDense: true,
+                  border: InputBorder.none,
+                ),
+                onSubmitted: (q) {
+                  // Entrée : nouvelle requête, ou occurrence
+                  // suivante si la requête n'a pas changé.
+                  if (q == _submitted && st.count > 0) {
+                    ctrl.step(1);
+                  } else {
+                    _submitted = q;
+                    ctrl.submit(q);
+                  }
+                },
+              ),
+            ),
+            Text(
+              st.busy
+                  ? '…'
+                  : st.query.isEmpty
+                  ? ''
+                  : '${st.index + (st.count > 0 ? 1 : 0)}/${st.count}',
+              style: TextStyle(color: muted, fontSize: 12),
+            ),
+            IconButton(
+              icon: const Icon(Icons.keyboard_arrow_up, size: 20),
+              color: canStep ? t.color('onSurface', 'base') : muted,
+              onPressed: canStep ? () => ctrl.step(-1) : null,
+              tooltip: 'Précédent',
+              visualDensity: VisualDensity.compact,
+            ),
+            IconButton(
+              icon: const Icon(Icons.keyboard_arrow_down, size: 20),
+              color: canStep ? t.color('onSurface', 'base') : muted,
+              onPressed: canStep ? () => ctrl.step(1) : null,
+              tooltip: 'Suivant',
+              visualDensity: VisualDensity.compact,
+            ),
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.close, size: 18),
+              color: muted,
+              onPressed: () => ctrl.close(),
+              tooltip: 'Fermer (Échap)',
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _NavBar extends ConsumerWidget {
   const _NavBar({
     required this.tokens,
@@ -436,6 +557,13 @@ class _NavBar extends ConsumerWidget {
             tooltip: 'Signets',
             onPressed: enabled
                 ? () => LibraryPanel.showBookmarks(context, tokens)
+                : null,
+          ),
+          IconButton(
+            icon: const Icon(Icons.find_in_page_outlined),
+            tooltip: 'Rechercher dans la page (Ctrl+F)',
+            onPressed: enabled
+                ? () => ref.read(findProvider.notifier).open()
                 : null,
           ),
           PopupMenuButton<String>(
@@ -523,28 +651,39 @@ class _FrameViewState extends ConsumerState<_FrameView> {
     });
   }
 
-  /// Raccourcis zoom — Ctrl+`+`/`-`/`0`, actifs même quand un
-  /// champ moteur a le focus (ils ne lui sont pas relayés).
-  bool _zoomKey(LogicalKeyboardKey key) {
+  /// Raccourcis chrome — zoom Ctrl+`+`/`-`/`0` (étape 57) et
+  /// find-in-page Ctrl+F / Échap (étape 57bis) : actifs même
+  /// quand un champ moteur a le focus (jamais relayés au moteur).
+  bool _chromeKey(LogicalKeyboardKey key) {
     final kb = HardwareKeyboard.instance;
     final ctrl =
         kb.isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) ||
         kb.isLogicalKeyPressed(LogicalKeyboardKey.controlRight);
-    if (!ctrl) return false;
-    final z = ref.read(zoomProvider.notifier);
-    switch (key) {
-      case LogicalKeyboardKey.equal ||
-          LogicalKeyboardKey.add ||
-          LogicalKeyboardKey.numpadAdd:
-        z.zoomIn();
-      case LogicalKeyboardKey.minus || LogicalKeyboardKey.numpadSubtract:
-        z.zoomOut();
-      case LogicalKeyboardKey.digit0 || LogicalKeyboardKey.numpad0:
-        z.reset();
-      default:
-        return false;
+    if (ctrl) {
+      final z = ref.read(zoomProvider.notifier);
+      switch (key) {
+        case LogicalKeyboardKey.equal ||
+            LogicalKeyboardKey.add ||
+            LogicalKeyboardKey.numpadAdd:
+          z.zoomIn();
+        case LogicalKeyboardKey.minus || LogicalKeyboardKey.numpadSubtract:
+          z.zoomOut();
+        case LogicalKeyboardKey.digit0 || LogicalKeyboardKey.numpad0:
+          z.reset();
+        case LogicalKeyboardKey.keyF:
+          ref.read(findProvider.notifier).open();
+        default:
+          return false;
+      }
+      return true;
     }
-    return true;
+    // Échap ferme la barre de recherche si elle est ouverte —
+    // sinon la touche suit son chemin normal vers le moteur.
+    if (key == LogicalKeyboardKey.escape && ref.read(findProvider).visible) {
+      ref.read(findProvider.notifier).close();
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -605,7 +744,7 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                         autofocus: true,
                         onKeyEvent: (e) {
                           if (e is! KeyDownEvent) return;
-                          if (_zoomKey(e.logicalKey)) return;
+                          if (_chromeKey(e.logicalKey)) return;
                           if (!st.fieldFocused) return;
                           // keyLabel couvre lettres et touches
                           // nommées (« Backspace », « Enter »).

@@ -28,6 +28,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 57bis — find-in-page** (`explorer-core` + `app`,
+  ADR-0021) : recherche textuelle livrée sur la surface
+  existante — `session/find.rs` parcourt les boîtes `Text`
+  du boxtree (insensible à la casse, ordre document) →
+  `FindState` sur `Tab`/`PageSnapshot` (survit au bfcache,
+  effacé à la navigation), surlignage `FillRect`
+  translucide injecté dans la display list (jaune atténué,
+  orange pour l'occurrence courante), `find_step` boucle
+  ±1, scroll-vers-occurrence au tiers supérieur.
+  `POST /api/tabs/{id}/find` `{query, dir}` →
+  `{count, index, query}` ; FFI dégradé `FindResult.empty`.
+  UI : barre `_FindBar` (Ctrl+F, Entrée = suivante, Échap
+  ferme, compteur `i+1/n`, boutons ↑↓, entrée navbar).
+  Granularité v1 = boîte de texte entière — le surlignage
+  caractère-près reste une demande PIPE réduite
+  (métriques de runs, `interface-equipes.md`).
+
 - **R-27 — direction d'axe flex `row-reverse`/`column`**
   (`explorer-layout`) : premier lot des 17 échecs WPT
   résiduels — les 3 `flex-direction-*` passent, cliquet

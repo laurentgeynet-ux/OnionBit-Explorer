@@ -8,6 +8,7 @@ use super::*;
 use std::collections::HashMap;
 use std::time::Instant;
 
+use explorer_css::value::Color;
 use explorer_css::{ComputedStyle, Origin, StyleEngine, StyleEnv, StyleMap};
 use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
@@ -17,7 +18,9 @@ use explorer_layout::{
 };
 use explorer_net::url::Url;
 use explorer_render::canvas::CanvasTable;
-use explorer_render::{build_display_list_full, collect_data_images, rasterize, PaintImages};
+use explorer_render::{
+    build_display_list_full, collect_data_images, rasterize, DisplayItem, PaintImages,
+};
 
 impl Session {
     /// Resynchronise le document depuis le miroir JS muté :
@@ -344,6 +347,27 @@ impl Session {
         };
         let (vw, vh) = self.viewport;
         let mut list = build_display_list_full(bx, vw, vh, entry.scroll_y, &entry.images);
+        // Find-in-page : surlignage translucide des
+        // occurrences — jaune atténué, l'occurrence courante
+        // en orange plus marquée (étape 57bis).
+        if let Some(f) = &entry.find {
+            let base = Color {
+                r: 255,
+                g: 235,
+                b: 59,
+                a: 110,
+            };
+            let cur = Color {
+                r: 255,
+                g: 152,
+                b: 0,
+                a: 160,
+            };
+            for (i, &rect) in f.rects.iter().enumerate() {
+                let color = if i == f.current { cur } else { base };
+                list.items.push(DisplayItem::FillRect { rect, color });
+            }
+        }
         // Popup `<select>` ouvert : overlay chrome peint en
         // dernier — au-dessus de tout contenu (étape 54).
         if let Some(pop) = &entry.popup {

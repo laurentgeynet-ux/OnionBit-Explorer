@@ -204,6 +204,105 @@ final zoomProvider = NotifierProvider<ZoomController, double>(
   ZoomController.new,
 );
 
+/// État de la barre find-in-page (étape 57bis) — visibilité,
+/// requête et position courante. Le surlignage est peint
+/// côté moteur ; l'app ne garde que compte + indice.
+class FindBarState {
+  const FindBarState({
+    this.visible = false,
+    this.query = '',
+    this.index = 0,
+    this.count = 0,
+    this.busy = false,
+  });
+
+  final bool visible;
+  final String query;
+  final int index;
+  final int count;
+  final bool busy;
+
+  FindBarState copyWith({
+    bool? visible,
+    String? query,
+    int? index,
+    int? count,
+    bool? busy,
+  }) => FindBarState(
+    visible: visible ?? this.visible,
+    query: query ?? this.query,
+    index: index ?? this.index,
+    count: count ?? this.count,
+    busy: busy ?? this.busy,
+  );
+}
+
+/// Pilote `POST /api/tabs/{id}/find` — nouveau terme
+/// (`dir 0`), occurrence suivante/précédente (±1), fermeture
+/// (requête vide → le moteur efface le surlignage).
+class FindController extends Notifier<FindBarState> {
+  @override
+  FindBarState build() => const FindBarState();
+
+  String? get _tabId => ref.read(browserProvider).activeId;
+
+  void open() => state = state.copyWith(visible: true);
+
+  Future<void> close() async {
+    if (state.query.isNotEmpty) {
+      final id = _tabId;
+      if (id != null) {
+        try {
+          await ref.read(browserRepositoryProvider).find(id, '');
+        } on Object {
+          // fermeture locale tolérée — l'overlay se peint
+          // encore côté moteur jusqu'à la prochaine requête.
+        }
+      }
+    }
+    state = const FindBarState();
+  }
+
+  Future<void> submit(String query) async {
+    final id = _tabId;
+    if (id == null || state.busy) return;
+    state = state.copyWith(query: query, busy: true);
+    try {
+      final r = await ref
+          .read(browserRepositoryProvider)
+          .find(id, query, dir: 0);
+      state = state.copyWith(
+        index: r.index,
+        count: r.count,
+        busy: false,
+        query: r.query.isEmpty ? query : r.query,
+      );
+    } on Object catch (e) {
+      state = state.copyWith(busy: false);
+      ref.read(browserProvider.notifier).setError('$e');
+    }
+  }
+
+  Future<void> step(int dir) async {
+    final id = _tabId;
+    if (id == null || state.busy || state.count == 0) return;
+    state = state.copyWith(busy: true);
+    try {
+      final r = await ref
+          .read(browserRepositoryProvider)
+          .find(id, state.query, dir: dir);
+      state = state.copyWith(index: r.index, count: r.count, busy: false);
+    } on Object catch (e) {
+      state = state.copyWith(busy: false);
+      ref.read(browserProvider.notifier).setError('$e');
+    }
+  }
+}
+
+final findProvider = NotifierProvider<FindController, FindBarState>(
+  FindController.new,
+);
+
 /// Contrôleur navigateur — pilote les actions REST et applique
 /// les événements SSE au `BrowserState` (ADR-0003/0004).
 class BrowserController extends Notifier<BrowserState> {
@@ -343,6 +442,12 @@ class BrowserController extends Notifier<BrowserState> {
       state = state.copyWith(lastError: () => e.message);
     }
   }
+
+  /// Remonte une erreur d'un contrôleur satellite (find bar,
+  /// étape 57bis) dans `lastError` — même affichage que les
+  /// erreurs d'action.
+  void setError(String message) =>
+      state = state.copyWith(lastError: () => message);
 
   /// Ferme un onglet (côté daemon + localement — l'événement
   /// `tab_closed` confirme).

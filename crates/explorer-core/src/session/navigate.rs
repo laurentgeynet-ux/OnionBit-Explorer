@@ -465,6 +465,7 @@ impl Session {
             entry.focused = None;
             entry.hovered = None;
             entry.popup = None;
+            entry.find = None;
             entry.js = None;
             entry.images = PaintImages::default();
             entry.linked_css.clear();

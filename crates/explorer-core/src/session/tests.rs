@@ -93,6 +93,7 @@ fn paintless_snapshot_repairs_on_restore() {
             focused: None,
             hovered: None,
             popup: None,
+            find: None,
             js: None,
             images: PaintImages::default(),
             linked_css: String::new(),
@@ -458,4 +459,51 @@ fn pump_resync_coalesced_under_floor() {
     s.tabs.get_mut(&tab).unwrap().sync_floor = None;
     s.pump_timers(tab);
     assert_eq!(dom_text(&s), "n3");
+}
+
+/// Étape 57bis — find-in-page : occurrences comptées sur
+/// le boxtree, navigation cyclique, scroll-vers-courante,
+/// surlignage injecté dans la display list.
+#[test]
+fn find_in_page_counts_steps_and_highlights() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom(
+            "<p>alpha lorem un</p><p>deux</p><p>lorem trois lorem</p>",
+        ));
+        e.url = Some(Url::parse("http://h.test/find").unwrap());
+    }
+    s.relayout(tab).unwrap();
+
+    // Granularité v1 : une boîte de texte = une occurrence —
+    // les deux « lorem » du 3e paragraphe partagent la run.
+    let n = s.find_in_page(tab, "LOREM"); // insensible à la casse
+    assert_eq!(n, 2, "2 boîtes texte contiennent lorem");
+    let (q, i, total) = s.find_state(tab).unwrap();
+    assert_eq!((q.as_str(), i, total), ("lorem", 0, 2));
+
+    let (i, n) = s.find_step(tab, 1);
+    assert_eq!((i, n), (1, 2));
+    // Boucle : après la dernière on repart à 0.
+    let (i, _) = s.find_step(tab, 1);
+    assert_eq!(i, 0);
+    let (i, _) = s.find_step(tab, -1);
+    assert_eq!(i, 1, "dir -1 boucle sur la fin");
+
+    // Le surlignage est peint : FillRect translucides en
+    // queue de display list (couleur occurrence courante).
+    s.repaint(tab).unwrap();
+    let list = s.tabs.get(&tab).unwrap().list.clone().unwrap();
+    let orange = list
+        .items
+        .iter()
+        .filter(|it| matches!(it, DisplayItem::FillRect { color, .. } if color.r == 255 && color.g == 152 && color.a == 160))
+        .count();
+    assert_eq!(orange, 1, "une occurrence courante marquée");
+
+    // Requête vide = fermeture — plus d'état ni d'overlay.
+    assert_eq!(s.find_in_page(tab, ""), 0);
+    assert!(s.find_state(tab).is_none());
 }

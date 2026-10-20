@@ -13,6 +13,7 @@ import 'package:ffi/ffi.dart';
 import '../../features/browser/data/browser_repository.dart';
 import '../../features/browser/domain/bookmark.dart';
 import '../../features/browser/domain/browser_tab.dart';
+import '../../features/browser/domain/find_result.dart';
 import '../../features/browser/domain/history_entry.dart';
 import '../config/app_config.dart';
 
@@ -455,6 +456,14 @@ class FfiEngine implements BrowserRepository {
 
   @override
   Future<List<HistoryEntry>> history() async => const [];
+
+  /// Find-in-page — même dégradation que la bibliothèque :
+  /// l'ABI n'exporte pas la recherche moteur (étape 57bis).
+  /// Retour vide → la barre affiche « 0 résultat » plutôt
+  /// que crasher ; à étendre via un export `explorer_find`.
+  @override
+  Future<FindResult> find(String tabId, String query, {int dir = 0}) async =>
+      FindResult.empty;
 
   /// Avance les animations moteur — `true` si la frame a été
   /// invalidée (le contrôleur la retire). Remplace le SSE

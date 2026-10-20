@@ -73,6 +73,7 @@ pub fn router_with_key(session: Arc<tokio::sync::Mutex<Session>>, key: Option<St
         .route("/api/tabs/{id}/forward", post(forward))
         .route("/api/tabs/{id}/viewport", post(viewport))
         .route("/api/tabs/{id}/input", post(input))
+        .route("/api/tabs/{id}/find", post(find))
         .route(
             "/api/bookmarks",
             get(list_bookmarks).post(add_bookmark).delete(del_bookmark),
@@ -413,6 +414,40 @@ async fn input(
             serde_json::json!({ "result": "hover", "url": url, "editable": editable })
         }
     })
+    .into_response()
+}
+
+/// `POST /api/tabs/{id}/find` `{ "query": "…", "dir": 0|±1 }`
+/// — `dir = 0` : nouvelle recherche ; ±1 : occurrence
+/// suivante/précédente. Réponse `{ count, index, query }`.
+/// Le surlignage est peint côté moteur (étape 57bis) — la
+/// prochaine frame le montre via le pull habituel.
+async fn find(
+    State(st): State<ApiState>,
+    Path(id): Path<TabId>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let query = body
+        .get("query")
+        .and_then(|q| q.as_str())
+        .unwrap_or("")
+        .to_string();
+    let dir = body
+        .get("dir")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    let mut session = st.session.lock().await;
+    let (count, index) = if dir == 0 {
+        (session.find_in_page(id, &query), 0)
+    } else {
+        let (i, n) = session.find_step(id, dir);
+        (n, i)
+    };
+    Json(serde_json::json!({
+        "count": count,
+        "index": index,
+        "query": query,
+    }))
     .into_response()
 }
 

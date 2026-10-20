@@ -46,6 +46,8 @@ mod decode;
 #[allow(clippy::wildcard_imports)]
 mod dom_helpers;
 #[allow(clippy::wildcard_imports)]
+mod find;
+#[allow(clippy::wildcard_imports)]
 mod forms;
 #[allow(clippy::wildcard_imports)]
 mod frame;
@@ -83,6 +85,8 @@ pub(crate) use anim_items::*;
 pub(crate) use decode::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use dom_helpers::*;
+#[allow(clippy::wildcard_imports)]
+pub(crate) use find::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use forms::*;
 #[allow(clippy::wildcard_imports)]
@@ -151,6 +155,9 @@ pub(crate) struct Tab {
     /// peint en fin de display list ; refermé au clic,
     /// scroll, frappe ou navigation.
     popup: Option<SelectPopup>,
+    /// Recherche dans la page (étape 57bis) — occurrences
+    /// géométrisées, peintes en overlay translucide.
+    find: Option<FindState>,
     /// Contexte JS du document — créé si la page a des
     /// `<script>` et qu'une fabrique est injectée ; meurt à
     /// la navigation (un contexte par document).
@@ -289,6 +296,9 @@ pub(crate) struct PageSnapshot {
     hovered: Option<Vec<(String, u32)>>,
     /// Popup `<select>` ouvert (retrouvé tel quel).
     popup: Option<SelectPopup>,
+    /// Recherche active — le boxtree restauré garde la même
+    /// géométrie, les rectangles restent valides.
+    find: Option<FindState>,
     /// Moteur JS figé — le contexte survit, reprend tel
     /// quel à la restauration (modèle bfcache).
     js: Option<Box<dyn JsEngine>>,
@@ -560,6 +570,7 @@ impl Session {
                 focused: None,
                 hovered: None,
                 popup: None,
+                find: None,
                 js: None,
                 images: PaintImages::default(),
                 linked_css: String::new(),

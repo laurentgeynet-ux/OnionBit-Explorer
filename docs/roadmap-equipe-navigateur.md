@@ -493,10 +493,25 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (surface moteur requise → étape dédiée + journal).
   Régressions : signet toggle, historique provider, zoom
   borné, store réglages roundtrip, thème clair dérivé.
-- [ ] **Étape 57bis. Find-in-page** (reclassé depuis 57,
-  ADR-0021) : contrat moteur à ouvrir — recherche textuelle
-  DOM → surlignage display-list + scroll-vers-occurrence
-  (demande PIPE dans `interface-equipes.md`), puis UI Ctrl+F.
+- [x] **Étape 57bis. Find-in-page** (reclassé depuis 57,
+  ADR-0021) : livré **sans** attente PIPE — la surface
+  nécessaire existait déjà (`LayoutBox.text`/`rect`/`node`
+  publics, overlay display list du popup `<select>`).
+  `session/find.rs` : `find_text_boxes` sur le boxtree
+  (insensible à la casse, ordre document), `FindState` sur
+  `Tab`/`PageSnapshot` (survit au bfcache, effacé à la
+  navigation), surlignage `FillRect` translucide en fin de
+  display list (jaune atténué / orange pour la courante),
+  `find_step` boucle ±1, scroll-vers-occurrence tiers
+  supérieur. `POST /api/tabs/{id}/find` `{query, dir}` →
+  `{count, index, query}` ; FFI dégradé `FindResult.empty`
+  (ABI non exportée). UI : barre `_FindBar` sous la navbar
+  (Ctrl+F, Entrée = suivante, Maj+Entrée implicite via
+  boutons, Échap ferme), compteur `i+1/n`, bouton navbar.
+  **Granularité v1 : la boîte texte entière** — le
+  surlignage au caractère près reste la demande PIPE
+  (métriques de runs). Régression : comptage + boucle +
+  FillRect orange dans la liste + effacement.
 - [ ] **Étape 58. `<video>`/`<audio>`** (ex-66) : arbitrage
   décodage pur Rust requis (ADR) — sinon stubs propres + affiche.
 - [x] **Étape 60. Éclater `session.rs`** (audit externe) :

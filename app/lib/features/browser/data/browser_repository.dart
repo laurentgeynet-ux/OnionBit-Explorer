@@ -5,6 +5,7 @@
 import '../../../core/api/api_client.dart';
 import '../domain/bookmark.dart';
 import '../domain/browser_tab.dart';
+import '../domain/find_result.dart';
 import '../domain/history_entry.dart';
 
 /// Accès aux onglets via le contrat REST du daemon (ADR-0003) :
@@ -148,5 +149,20 @@ class BrowserRepository {
           .toList();
     }
     throw const ApiException('GET /api/history : réponse inattendue');
+  }
+
+  /// Recherche dans la page (`POST /api/tabs/{id}/find`,
+  /// étape 57bis). `dir = 0` lance une nouvelle recherche ;
+  /// ±1 navigue parmi les occurrences. Le surlignage est
+  /// peint côté moteur — la frame suivante le montre.
+  Future<FindResult> find(String tabId, String query, {int dir = 0}) async {
+    final res = await _api.postJson(
+      '/api/tabs/$tabId/find',
+      body: {'query': query, 'dir': dir},
+    );
+    if (res is Map<String, dynamic>) {
+      return FindResult.fromJson(res, query: query);
+    }
+    throw const ApiException('POST /find : réponse inattendue');
   }
 }

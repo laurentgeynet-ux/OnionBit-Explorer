@@ -11,6 +11,7 @@ import 'package:explorer_app/core/di/providers.dart';
 import 'package:explorer_app/features/browser/data/browser_repository.dart';
 import 'package:explorer_app/features/browser/domain/bookmark.dart';
 import 'package:explorer_app/features/browser/domain/browser_tab.dart';
+import 'package:explorer_app/features/browser/domain/find_result.dart';
 import 'package:explorer_app/features/browser/domain/history_entry.dart';
 import 'package:explorer_app/features/browser/presentation/browser_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -100,6 +101,24 @@ class FakeRepo implements BrowserRepository {
 
   @override
   Future<List<HistoryEntry>> history() async => List.of(visits);
+
+  /// Recherches find-in-page simulées (étape 57bis) —
+  /// `findCount` scripté, appels enregistrés.
+  int findCount = 0;
+  final List<String> findCalls = [];
+
+  @override
+  Future<FindResult> find(String tabId, String query, {int dir = 0}) async {
+    findCalls.add('$tabId:$query:$dir');
+    if (dir == 0) {
+      return FindResult(count: findCount, index: 0, query: query);
+    }
+    return FindResult(
+      count: findCount,
+      index: findCount == 0 ? 0 : 1,
+      query: query,
+    );
+  }
 }
 
 /// Client SSE simulé — événements injectés à la main.
@@ -290,4 +309,56 @@ void main() {
     }
     expect(c.read(zoomProvider), ZoomController.min);
   });
+
+  test(
+    'find : submit envoie la requête, step navigue, close réinitialise',
+    () async {
+      final repo = FakeRepo()..findCount = 4;
+      final events = FakeEvents();
+      final c = makeContainer(repo, events);
+      addTearDown(c.dispose);
+      await c.read(browserProvider.notifier).retry();
+      final find = c.read(findProvider.notifier);
+
+      find.open();
+      expect(c.read(findProvider).visible, isTrue);
+
+      await find.submit('lorem');
+      var st = c.read(findProvider);
+      expect(st.count, 4);
+      expect(st.index, 0);
+      expect(repo.findCalls.last, endsWith(':lorem:0'));
+
+      await find.step(1);
+      st = c.read(findProvider);
+      expect(st.index, 1);
+      expect(repo.findCalls.last, endsWith(':lorem:1'));
+
+      await find.close();
+      st = c.read(findProvider);
+      expect(st.visible, isFalse);
+      // Fermeture → requête vide envoyée au moteur (efface le
+      // surlignage).
+      expect(repo.findCalls.last, endsWith('::0'));
+    },
+  );
+
+  test('find : pas d’onglet actif → no-op sans exception', () async {
+    final repo = FakeRepo();
+    final c = ProviderContainer(
+      overrides: [
+        browserRepositoryProvider.overrideWithValue(repo),
+        browserProvider.overrideWith(FindlessBrowser.new),
+      ],
+    );
+    addTearDown(c.dispose);
+    await c.read(findProvider.notifier).submit('x');
+    expect(repo.findCalls, isEmpty);
+  });
+}
+
+/// Contrôleur minimal sans onglet — `activeId` reste null.
+class FindlessBrowser extends BrowserController {
+  @override
+  BrowserState build() => const BrowserState();
 }

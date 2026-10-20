@@ -38,6 +38,7 @@ impl Tab {
             focused: self.focused.take(),
             hovered: self.hovered.take(),
             popup: self.popup.take(),
+            find: self.find.take(),
             js: self.js.take(),
             images: std::mem::take(&mut self.images),
             linked_css: std::mem::take(&mut self.linked_css),
@@ -81,6 +82,7 @@ impl Tab {
         self.focused = snap.focused;
         self.hovered = snap.hovered;
         self.popup = snap.popup;
+        self.find = snap.find;
         self.js = snap.js;
         self.images = snap.images;
         self.linked_css = snap.linked_css;
