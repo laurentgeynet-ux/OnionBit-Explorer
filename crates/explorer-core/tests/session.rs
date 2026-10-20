@@ -5127,3 +5127,26 @@ async fn redirect_commits_final_url_and_fragment() {
     };
     assert!(scroll > 0.0, "fragment du Location appliqué");
 }
+
+/// Étape 88 — `about:blank` : le document vide canonique se
+/// navigue **sans fetch** (bouton Home, rejeu omnibox) — la
+/// preuve est le compteur du transport : aucune route
+/// `about:` n'existe, un fetch partirait en échec.
+#[tokio::test]
+async fn about_blank_navigates_sans_fetch() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_T);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let fetched = t.calls();
+
+    s.navigate(id, "about:blank").await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("about:blank"));
+    assert_eq!(t.calls(), fetched, "about:blank ne doit pas fetcher");
+    // Document commis : frame blanche peinte, titre vide
+    // (l'UI retombe sur l'URL), historique utilisable.
+    let png = s.frame_png(id).unwrap();
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    s.go_back(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+}

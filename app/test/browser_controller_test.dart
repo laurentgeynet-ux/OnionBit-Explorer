@@ -475,6 +475,51 @@ void main() {
     expect(c.read(browserProvider).tabs, hasLength(1));
   });
 
+  test('reconnexion purge le lastError persistant (étape 88)', () async {
+    final events = FakeEvents();
+    final repo = FakeRepo();
+    final c = makeContainer(
+      repo,
+      events,
+      // Timer long : le retry est piloté à la main ici.
+      config: const AppConfig(daemonRetryDelay: Duration(seconds: 30)),
+    );
+    addTearDown(c.dispose);
+    await settle(c);
+
+    events.ctrl.add(
+      ServerEvent('pipeline_error', {'tab': 1, 'message': 'boom'}),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(c.read(browserProvider).lastError, 'boom');
+
+    // Daemon parti puis revenu : le bootstrap réussi purge
+    // l'erreur — avant elle survivait à la reconnexion.
+    repo.online = false;
+    await c.read(browserProvider.notifier).retry();
+    expect(c.read(browserProvider).daemonOnline, isFalse);
+    expect(c.read(browserProvider).lastError, 'boom');
+
+    repo.online = true;
+    await c.read(browserProvider.notifier).retry();
+    expect(c.read(browserProvider).daemonOnline, isTrue);
+    expect(c.read(browserProvider).lastError, isNull);
+  });
+
+  test('about:blank passe sans complétion http:// (étape 88)', () async {
+    final repo = FakeRepo();
+    final c = makeContainer(repo, FakeEvents());
+    addTearDown(c.dispose);
+    await settle(c);
+
+    await c.read(browserProvider.notifier).navigate('about:blank');
+    expect(repo.navigations, ['1:about:blank']);
+
+    // Une entrée sans schéma est toujours préfixée.
+    await c.read(browserProvider.notifier).navigate('example.com');
+    expect(repo.navigations, ['1:about:blank', '1:http://example.com']);
+  });
+
   test('frame_invalidated porte scroll_y par onglet (étape 71d)', () async {
     final repo = FakeRepo();
     final events = FakeEvents();

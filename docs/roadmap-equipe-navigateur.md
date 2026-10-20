@@ -1297,6 +1297,27 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   restent en coords document sous
   scroll (latence pré-existante).
 
+- [x] **Étape 88. Quick wins M-H1
+  (#2 #3 #4)** (app + core) —
+  1. snackbar `ApiException` :
+  `lastError` purgé au bootstrap
+  réussi + snackbar visible masqué
+  à l'effacement — l'erreur
+  « injoignable » survivait à la
+  reconnexion et masquait la
+  récidive identique (select sans
+  changement). 2. `Ctrl`+molette →
+  `zoomProvider` (avant : dy
+  toujours scrollé). 3. Home :
+  icône barre large + entrée ⋮
+  compact → `about:blank`, servi
+  côté moteur par interception
+  dans `NavJob::run` avant fetch
+  (squelette tree-builder commis ;
+  autres `about:*` → page
+  d'erreur). Omnibox : `about:`
+  non préfixé.
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY
@@ -1312,17 +1333,20 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     (coords frame), barre 1 px en fin
     de texte ou à l'origine du contenu
     si champ vide.
-  - **snackbar `ApiException`
-    persistant** : la reconnexion auto
-    fonctionne mais l'erreur reste
-    affichée — purge manquante.
-  - **`Ctrl`+molette sans zoom** :
-    `onPointerSignal` ne lit que
-    `scrollDelta.dy` → scroll pur ;
-    badge zoom manuel OK. Câblage
-    `Control`→zoom à ajouter.
-  - **badge/menu Home absent** —
-    feature inexistante.
+  - ~~**snackbar `ApiException`
+    persistant**~~ → **résolu, Étape
+    88** : `lastError` purgé au
+    bootstrap réussi + snackbar
+    visible masqué à l'effacement.
+  - ~~**`Ctrl`+molette sans zoom**~~
+    → **résolu, Étape 88** :
+    `isControlPressed` aiguille vers
+    `zoomProvider`.
+  - ~~**badge/menu Home absent**~~
+    → **résolu, Étape 88** : icône
+    `⌂` + entrée ⋮ → `about:blank`,
+    servi sans fetch par le moteur
+    (`NavJob::run`).
   - **RSS `explorer_app` 3,7→4,5 Go
     en ~10 min** : croissance côté
     **app Flutter**, pas le daemon —

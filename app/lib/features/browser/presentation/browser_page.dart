@@ -64,9 +64,15 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
       }
     });
     ref.listen(browserProvider.select((s) => s.lastError), (_, msg) {
-      if (msg != null && mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(msg)));
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      if (msg != null) {
+        messenger.showSnackBar(SnackBar(content: Text(msg)));
+      } else {
+        // Purge (étape 88) : l'erreur est résolue (ex.
+        // reconnexion réussie) — le snackbar encore visible
+        // disparaît au lieu de survivre à son sujet.
+        messenger.hideCurrentSnackBar();
       }
     });
     // Téléchargement proposé (étape 70) : « Enregistrer »
@@ -681,6 +687,14 @@ class _NavBar extends ConsumerWidget {
           tooltip: 'Recharger',
           onPressed: enabled ? ctrl.reload : null,
         ),
+        // « Home » = page vide `about:blank` dans l'onglet
+        // courant (étape 88) — pas d'accueil configurable, la
+        // convention est la page blanche du nouvel onglet.
+        IconButton(
+          icon: const Icon(Icons.home_outlined),
+          tooltip: 'Accueil',
+          onPressed: enabled ? () => ctrl.navigate('about:blank') : null,
+        ),
         Expanded(
           child: TextField(
             controller: omnibox,
@@ -827,6 +841,8 @@ class _NavBar extends ConsumerWidget {
                 LibraryPanel.showHistory(context, tokens);
               case 'marks':
                 LibraryPanel.showBookmarks(context, tokens);
+              case 'home':
+                unawaited(ctrl.navigate('about:blank'));
               case 'find':
                 ref.read(findProvider.notifier).open();
               case 'zoom-in':
@@ -840,6 +856,12 @@ class _NavBar extends ConsumerWidget {
             }
           },
           itemBuilder: (_) => [
+            item(
+              'home',
+              Icons.home_outlined,
+              'Accueil',
+              enabled: enabled,
+            ),
             item(
               'mark',
               marked ? Icons.star : Icons.star_border,
@@ -989,8 +1011,20 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                   child: Listener(
                     onPointerSignal: (ev) {
                       if (ev is PointerScrollEvent) {
-                        // dy en px logiques → px CSS moteur.
-                        widget.ctrl.scroll(ev.scrollDelta.dy / cssPerLogical);
+                        if (HardwareKeyboard.instance.isControlPressed) {
+                          // Ctrl+molette = zoom page — la
+                          // convention navigateur (étape 88) ;
+                          // molette haut = zoom avant.
+                          final z = ref.read(zoomProvider.notifier);
+                          if (ev.scrollDelta.dy < 0) {
+                            z.zoomIn();
+                          } else {
+                            z.zoomOut();
+                          }
+                        } else {
+                          // dy en px logiques → px CSS moteur.
+                          widget.ctrl.scroll(ev.scrollDelta.dy / cssPerLogical);
+                        }
                       }
                     },
                     onPointerDown: (ev) {

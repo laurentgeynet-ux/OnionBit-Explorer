@@ -439,6 +439,9 @@ class BrowserController extends Notifier<BrowserState> {
         tabs: tabs,
         activeId: state.activeId ?? tabs.first.id,
         daemonOnline: true,
+        // « daemon injoignable » résolu par la reconnexion —
+        // l'erreur persistante est purgée (étape 88).
+        lastError: () => null,
       );
       // Réconciliation à froid : les offres émises avant la
       // reconnexion SSE sont récupérées par `GET …/media`.
@@ -967,7 +970,11 @@ class BrowserController extends Notifier<BrowserState> {
     if (id == null) return;
     var url = input.trim();
     if (url.isEmpty) return;
-    if (!url.contains('://')) url = 'http://$url';
+    // `about:blank` (bouton Home, étape 88) passe tel quel —
+    // le moteur sert le document vide canonique sans fetch.
+    if (!url.contains('://') && !url.startsWith('about:')) {
+      url = 'http://$url';
+    }
     _patch(id, (t) => t.copyWith(loading: true, url: url));
     try {
       final t = await _repo.navigate(id, url);

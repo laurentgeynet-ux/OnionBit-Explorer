@@ -365,6 +365,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Divergence connue documentée dans le module : les
   overlays find/popup restent en coords **document**
   (décalage sous scroll pré-existant).
+- **Étape 88 — quick wins M-H1 (#2 #3 #4)** (`app`,
+  `explorer-core`) : trois frictions du vol humain.
+  1. **Snackbar `ApiException` persistant** : `lastError`
+  n'était jamais purgé — l'erreur « daemon injoignable »
+  survivait à la reconnexion auto (et une récidive à
+  l'identique ne re-signalait rien, le `select` ne
+  refirant pas sur valeur égale). Le bootstrap réussi
+  pose `lastError: null` ; la page masque le snackbar
+  encore visible quand l'état s'efface.
+  2. **`Ctrl`+molette** : `onPointerSignal` ne lisait que
+  `scrollDelta.dy` → scroll pur. `isControlPressed` aiguille
+  vers `zoomProvider` (molette haut = zoom avant,
+  convention navigateur) ; sans modificateur, scroll
+  moteur inchangé.
+  3. **Bouton Home + `about:blank`** : icône `⌂` après
+  « Recharger » (barre large) et entrée « Accueil » du
+  menu ⋮ (compact) → `navigate('about:blank')`. Le
+  moteur intercepte `about:`(`blank`|vide) dans
+  `NavJob::run` **avant le fetch** : le squelette
+  html/head/body du tree-builder (Eof) est commis tel
+  quel — `navigate`, `reload`, `back`/`forward`
+  partagent le même chemin. Tout autre `about:*` tombe
+  sur le transport → page d'erreur. L'omnibox laisse
+  passer `about:` sans préfixer `http://`. Tests :
+  `about_blank_navigates_sans_fetch` (compteur transport
+  inchangé = preuve du non-fetch, frame PNG, back) ;
+  contrôleur : purge `lastError` à la reconnexion,
+  `about:blank` non préfixé.
 
 ## [0.2.0] - 2026-10-20
 

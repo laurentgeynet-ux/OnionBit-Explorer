@@ -212,6 +212,9 @@ impl NavJob {
     where
         F: for<'a> FnMut(&'a Dom) -> PaintFut<'a>,
     {
+        if let Some(outcome) = self.about_blank() {
+            return Ok(outcome);
+        }
         let mut resp = self
             .transport
             .fetch_stream(&self.req)
@@ -313,6 +316,34 @@ impl NavJob {
             req: self.req.clone(),
         };
         Ok(NavOutcome::Document(done, tail))
+    }
+
+    /// `about:blank` (étape 88) : le document vide canonique
+    /// ne se fetch pas — l'arbre squelette du tree-builder
+    /// (html/head/body implicites à l'Eof) est commis tel
+    /// quel. Tout autre `about:*` tombe sur le transport →
+    /// page d'erreur, comme Chrome.
+    fn about_blank(&mut self) -> Option<NavOutcome> {
+        if self.req.url.scheme() != "about" || !matches!(self.req.url.path(), "" | "blank") {
+            return None;
+        }
+        let mut tb = TreeBuilder::new();
+        tb.finish();
+        let tail = NavTail {
+            epoch: self.epoch,
+            push: self.push,
+            prev_title: self.prev_title.take(),
+            req: self.req.clone(),
+        };
+        Some(NavOutcome::Document(
+            NavDone {
+                url: self.req.url.clone(),
+                dom: tb.into_dom(),
+                html: String::new(),
+                title: None,
+            },
+            tail,
+        ))
     }
 }
 
