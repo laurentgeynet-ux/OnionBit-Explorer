@@ -176,6 +176,70 @@ fn chemin_inline_ou_absolu_impose_needs_full() {
     assert_eq!(r, Relayout::NeedsFullLayout);
 }
 
+/// R-33 : un fils **non vide** qui grandit décale ses frères
+/// par translation au lieu de re-poser tout le parent — le
+/// résultat doit rester identique au reflow complet (à un
+/// epsilon d'accumulation flottante près).
+#[test]
+fn croissance_non_vide_translate_les_freres() {
+    let (mut dom, styles, mut bx) = setup(
+        "<html><body><div id=a><p id=t>court</p></div>\
+         <p id=b>un</p><p id=c>deux</p></body></html>",
+        "",
+    );
+    let a = by_id(&dom, "a");
+    let t = by_id(&dom, "t");
+    let txt = dom.first_child(t).ok().flatten().expect("texte");
+    dom.set_text(txt, &"mot ".repeat(80)).expect("set_text");
+    let r = relayout_subtree(&mut bx, &dom, &styles, &HashMap::new(), a, &ctx());
+    assert_eq!(r, Relayout::Done);
+    let root = dom.document_element().expect("el");
+    let mut fresh = build_box_tree_sized(&dom, root, &styles, &HashMap::new()).expect("arbre");
+    layout_tree(&mut fresh, 400.0, &ctx());
+    let mut got = Vec::new();
+    let mut want = Vec::new();
+    positions(&bx, &mut got);
+    positions(&fresh, &mut want);
+    assert_eq!(got.len(), want.len());
+    for ((ng, rg), (nw, rw)) in got.iter().zip(&want) {
+        assert_eq!(ng, nw);
+        let eps = 0.01;
+        assert!(
+            (rg.x - rw.x).abs() < eps
+                && (rg.y - rw.y).abs() < eps
+                && (rg.width - rw.width).abs() < eps
+                && (rg.height - rw.height).abs() < eps,
+            "{ng:?} : {rg:?} vs {rw:?}"
+        );
+    }
+}
+
+/// R-33 : la transition **vide ↔ non vide** change la chaîne
+/// de margins collapsing (§8.3.1) — repli `relay`, qui doit
+/// aussi produire l'arbre du reflow complet.
+#[test]
+fn vide_vers_non_vide_relaye_et_reste_equivalent() {
+    let (mut dom, styles, mut bx) = setup(
+        "<html><body><div id=a></div><p id=b>apres</p></body></html>",
+        "",
+    );
+    let a = by_id(&dom, "a");
+    let p = dom.create_element("p").expect("p");
+    let t = dom.create_text("contenu ajoute").expect("texte");
+    dom.append_child(p, t).expect("append");
+    dom.append_child(a, p).expect("append");
+    let r = relayout_subtree(&mut bx, &dom, &styles, &HashMap::new(), a, &ctx());
+    assert_eq!(r, Relayout::Done);
+    let root = dom.document_element().expect("el");
+    let mut fresh = build_box_tree_sized(&dom, root, &styles, &HashMap::new()).expect("arbre");
+    layout_tree(&mut fresh, 400.0, &ctx());
+    let mut got = Vec::new();
+    let mut want = Vec::new();
+    positions(&bx, &mut got);
+    positions(&fresh, &mut want);
+    assert_eq!(got, want, "relay vide→plein identique au reflow");
+}
+
 #[test]
 fn texte_mute_via_noeud_texte_normalise_a_lelement() {
     let (mut dom, styles, mut bx) =

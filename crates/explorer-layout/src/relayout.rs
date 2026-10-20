@@ -118,6 +118,7 @@ fn step<S: BuildHasher>(
             if !relayable(bx) || !relayable(&bx.children[i]) {
                 return Step::Full;
             }
+            let child_h0 = bx.children[i].rect.height;
             // Arête ∝ profondeur de l'arbre (R-24).
             return match explorer_common::deep(|| {
                 step(&mut bx.children[i], dom, styles, sizes, target, ctx)
@@ -127,7 +128,39 @@ fn step<S: BuildHasher>(
                 Step::Relaid(changed) => {
                     let h0 = bx.rect.height;
                     if changed {
-                        relay(bx, ctx);
+                        // Propagation par translation (R-33) :
+                        // sans flottant (`has_float` garanti
+                        // en amont), une hausse Δ du fils
+                        // décale ses frères in-flow suivants
+                        // de Δ — leurs layouts internes sont
+                        // invariants (marges et dimensions
+                        // inchangées). Le coût passe de
+                        // `layout_block` sur tout le sous-arbre
+                        // à O(frères × nœuds) — storm.html :
+                        // ~2× le layout complet → ~ms.
+                        // Gardes : un fils hors-flux ne décale
+                        // rien, et une transition vide ↔ non
+                        // vide change la chaîne de margins
+                        // collapsing (§8.3.1 — les marges
+                        // voisines collapsent À TRAVERS une
+                        // boîte nulle) → `relay` complet.
+                        let child = &bx.children[i];
+                        let delta = child.rect.height - child_h0;
+                        let in_flow = !child.out_of_flow();
+                        let thick =
+                            child_h0.abs() > f32::EPSILON && child.rect.height.abs() > f32::EPSILON;
+                        if shiftable(bx) && in_flow && thick {
+                            for c in &mut bx.children[i + 1..] {
+                                explorer_common::deep(|| translate_y(c, delta));
+                            }
+                            if height_auto(bx) {
+                                bx.rect.height += delta;
+                            }
+                            let s = bx.slot;
+                            resolve_absolutes(bx, s.abs_cb, ctx, s.parent_fs);
+                        } else {
+                            relay(bx, ctx);
+                        }
                     }
                     Step::Relaid(height_moved(bx.rect.height, h0))
                 }
@@ -135,6 +168,48 @@ fn step<S: BuildHasher>(
         }
     }
     Step::NotFound
+}
+
+/// `bx` peut propager une hausse de fils par translation :
+/// conteneur en **flux bloc normal** — les conteneurs à
+/// mise en page coordonnée (flex, grid, table, inline)
+/// recalculent leurs enfants → repli `relay`. `min|max-
+/// height` déclaré ou `height` spécifiée ne sont pas des
+/// cas douteux : la hauteur fixe ne propage rien, les
+/// bornes seraient à recalculer → `relay` pour la sûreté.
+fn shiftable(bx: &LayoutBox) -> bool {
+    matches!(
+        bx.display(),
+        "block" | "flow-root" | "list-item" | "inline-block" | "table-cell"
+    ) && bx.style.get("min-height").is_none()
+        && bx.style.get("max-height").is_none()
+}
+
+/// Hauteur de contenu auto (ni `height` fixe ni bornes —
+/// `shiftable` a déjà exclu `min|max-height`).
+fn height_auto(bx: &LayoutBox) -> bool {
+    matches!(bx.style.get("height"), None | Some("auto"))
+}
+
+/// Translation verticale d'un sous-arbre **posé** : rect,
+/// lignes en-ligne (rect + fragments), slot enregistré et
+/// enfants récursivement. Les descendants `position:absolute`
+/// voient leur position statique bouger comme le flux —
+/// `resolve_absolutes` (re-jouée par l'appelant) refait le
+/// calcul complet à partir des rects translatés.
+fn translate_y(bx: &mut LayoutBox, dy: f32) {
+    bx.rect.y += dy;
+    bx.slot.y += dy;
+    bx.slot.abs_cb.y += dy;
+    for line in &mut bx.lines {
+        line.rect.y += dy;
+        for frag in &mut line.fragments {
+            frag.rect.y += dy;
+        }
+    }
+    for c in &mut bx.children {
+        explorer_common::deep(|| translate_y(c, dy));
+    }
 }
 
 /// Re-pose `bx` à son slot enregistré : `layout_block` +

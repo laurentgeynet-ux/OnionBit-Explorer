@@ -9,6 +9,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-33 — Perf : propagation par translation dans le
+  relayout incrémental** (`explorer-layout`) : attribution
+  du ×10 `incr.remap_relayout` (150,3 s terrain / ~14 s
+  profil sur `storm.html`) — `step` rejouait `layout_block`
+  sur **chaque ancêtre** dont la hauteur bougeait, soit
+  ~2× le layout complet par mutation sur un document plat
+  (`#cont` + ~600 `<p>` frères ; mesure : relayout 154 ms
+  vs layout 74 ms). Le relayout propage désormais la hausse
+  Δ par **translation** des frères suivants (§8.3.1 : sans
+  flottant — garanti par `has_float` — leurs layouts sont
+  invariants, marges inchangées), avec `resolve_absolutes`
+  rejoué pour les positionnés. Gardes conservatives →
+  `relay` classique : fils hors-flux, transition vide ↔
+  non vide (casse la chaîne de margins collapsing),
+  conteneur flex/grid/table/`min|max-height`. **Résultat :
+  relayout 154 → 9,7 ms (×16)**, arbre strictement
+  identique au reflow complet (2 tests permanents dans
+  `relayout.rs`, équivalence positions à 0,01 près, dont
+  le repli vide → non vide). Le poste suivant borné :
+  cascade globale `styles_payload` (~69 ms, O(n) — non
+  anormale).
+
 - **R-31 — Acid2, première passe de causes** (`explorer-css`,
   `explorer-layout`, `explorer-render`) : 90,1 % → **96,5 %**
   (1282/1329 pixels de structure) — quatre causes racines.
@@ -83,6 +105,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   partagé alignés.
 
 ### Fixed
+
+- **Étape 78 — `DoH` : noms d'usage spécial sur le
+  système** (`explorer-net`) : `localhost`, `.localhost`,
+  `.local` (mDNS), `.test`, `.invalid`, `.example` et les
+  noms de documentation RFC 6761 §6.5 ne partent plus en
+  requête `DoH` — délégation `SystemResolver` avant cache
+  (fixtures locales vivantes en mode `--doh`, comme
+  Chrome/Firefox). Les littéraux IP court-circuitaient
+  déjà côté `ResolvingConnector`.
 
 - **Étape 75 — page d'erreur sans reliquats `find`**
   (`explorer-core`) : `paint_error_page` purge l'état

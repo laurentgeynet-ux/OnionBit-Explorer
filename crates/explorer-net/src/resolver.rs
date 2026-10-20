@@ -142,6 +142,13 @@ impl DohResolver {
 #[async_trait]
 impl Resolver for DohResolver {
     async fn resolve(&self, host: &str) -> NetResult<Vec<IpAddr>> {
+        // Noms d'usage spécial (étape 78) : jamais par `DoH`
+        // — un résolveur public n'a aucune réponse légitime
+        // pour eux. Délégation système : `localhost` répond,
+        // `.test` échoue honnêtement.
+        if is_special_use(host) {
+            return SystemResolver.resolve(host).await;
+        }
         if let Ok(hit) = self.cache.lock() {
             if let Some((exp, ips)) = hit.get(host) {
                 if Instant::now() < *exp {
@@ -171,6 +178,26 @@ impl Resolver for DohResolver {
     fn describe(&self) -> String {
         format!("doh:{}", self.url.as_str())
     }
+}
+
+/// Noms d'usage spécial — RFC 6761 + `.local` (mDNS,
+/// RFC 6762). En mode `DoH` ils restent sur la résolution
+/// système (étape 78, comme Chrome/Firefox) : un résolveur
+/// public ne les connaît pas — `localhost`, les fixtures
+/// `.test`, le multicast `.local` et les noms de
+/// documentation ne doivent jamais partir en requête `DoH`.
+fn is_special_use(host: &str) -> bool {
+    let h = host.trim_end_matches('.').to_ascii_lowercase();
+    if h == "localhost" {
+        return true;
+    }
+    for suf in [".localhost", ".local", ".test", ".invalid", ".example"] {
+        if h.ends_with(suf) {
+            return true;
+        }
+    }
+    // Noms de documentation (RFC 6761 §6.5).
+    matches!(h.as_str(), "example.com" | "example.net" | "example.org")
 }
 
 const QTYPE_A: u16 = 1;

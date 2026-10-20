@@ -84,7 +84,10 @@ async fn doh_resolves_via_posted_dns_message() {
         t.clone(),
         Duration::from_secs(5),
     );
-    let ips = r.resolve("example.com").await.unwrap();
+    // Nom ordinaire (`example.com` est désormais d'usage
+    // spécial — étape 78 — et court-circuite vers le
+    // système).
+    let ips = r.resolve("webfix.dev").await.unwrap();
     assert!(ips.contains(&IpAddr::from([93, 184, 216, 34])));
     // La requête est bien un dns-message POSTé (question A).
     let got = t
@@ -92,8 +95,8 @@ async fn doh_resolves_via_posted_dns_message() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     assert!(got
-        .windows(b"\x07example\x03com\x00".len())
-        .any(|w| w == b"\x07example\x03com\x00"));
+        .windows(b"\x06webfix\x03dev\x00".len())
+        .any(|w| w == b"\x06webfix\x03dev\x00"));
     assert_eq!(r.describe(), "doh:https://dns.test/dns-query");
 }
 
@@ -105,9 +108,53 @@ async fn doh_caches_per_host_within_ttl() {
         t.clone(),
         Duration::from_secs(5),
     );
-    let a = r.resolve("example.com").await.unwrap();
-    let b = r.resolve("example.com").await.unwrap();
+    let a = r.resolve("webfix.dev").await.unwrap();
+    let b = r.resolve("webfix.dev").await.unwrap();
     assert_eq!(a, b);
+}
+
+/// Étape 78 — les noms d'usage spécial (RFC 6761 + `.local`
+/// mDNS) ne partent **jamais** en requête `DoH` :
+/// délégation système, comme Chrome/Firefox — un résolveur
+/// public n'a aucune réponse légitime pour eux.
+#[tokio::test]
+async fn doh_bypasses_special_use_names() {
+    let t = stub();
+    let r = DohResolver::new(
+        Url::parse("https://dns.test/dns-query").unwrap(),
+        t.clone(),
+        Duration::from_secs(5),
+    );
+    let clear = || {
+        t.captured
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+    };
+    // `localhost` : le système répond en loopback — et la
+    // sonde n'a été touchée par aucune requête.
+    let ips = r.resolve("localhost").await.unwrap();
+    assert!(!ips.is_empty() && ips.iter().all(IpAddr::is_loopback));
+    assert!(clear(), "localhost est parti en DoH");
+    // Le reste de la famille : succès ou échec honnête du
+    // système — le transport DoH reste vierge dans tous
+    // les cas (casse et point final couverts).
+    for h in [
+        "svc.localhost",
+        "dev.local",
+        "app.TEST.",
+        "x.invalid",
+        "doc.example",
+        "example.com",
+        "example.net",
+        "example.org",
+    ] {
+        let _ = r.resolve(h).await;
+        assert!(clear(), "{h} est parti en DoH");
+    }
+    // Un nom ordinaire passe bien par le résolveur DoH.
+    let _ = r.resolve("webfix.dev").await;
+    assert!(!clear(), "un nom ordinaire doit être requêté");
 }
 
 /// Un endpoint qui renvoie autre chose que du dns-message
@@ -135,7 +182,7 @@ async fn doh_rejects_non_dns_message() {
         Arc::new(BadContent),
         Duration::from_secs(5),
     );
-    let e = r.resolve("example.com").await.unwrap_err();
+    let e = r.resolve("webfix.dev").await.unwrap_err();
     assert!(matches!(e, NetError::Dns { .. }));
 }
 

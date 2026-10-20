@@ -944,7 +944,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `RUST_LOG` ne peut plus avaler la cause de mort. La
   cause de l'`Err` devient observable par construction
   (`Err` io de l'accept-loop rapporté tel quel).
-- [ ] **Étape 78. DoH : noms d'usage spécial court-circuités**
+- [x] **Étape 78. DoH : noms d'usage spécial court-circuités**
   (ticket terrain mission 20-B) : en mode `--doh`,
   `localhost` (et la famille RFC 6761 — `.localhost`,
   `.local`, `.test`, `.invalid`, `.example`, adresses
@@ -961,6 +961,15 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   terrain : `/api/egress` observable, `http://` refusé
   au démarrage, endpoint mort → page d'erreur honnête
   sans repli système silencieux.
+  Livré : `is_special_use` (RFC 6761 + `.local` mDNS
+  RFC 6762, casse et point final normalisés) court-
+  circuite `DohResolver::resolve` **avant** cache et
+  requête — délégation [`SystemResolver`]. Régression :
+  `localhost` → loopback sans toucher le transport,
+  huit noms spéciaux jamais requêtés, un nom ordinaire
+  passe bien par `DoH`. Fixture des tests rebasée sur
+  `webfix.dev` (`example.com` est désormais
+  special-use).
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

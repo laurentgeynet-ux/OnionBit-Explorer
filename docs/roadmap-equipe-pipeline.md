@@ -428,7 +428,7 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   « x/y exécutés (z skips) sur sous-ensemble S' élargi » +
   cliquet reposé. Objectif : réactiver la boucle
   échec→cause racine qui a produit R-27→30.
-- [ ] **R-33. Perf — coût unitaire de l'apply**
+- [x] **R-33. Perf — coût unitaire de l'apply**
   (demande consignée `interface-equipes.md`, terrain
   mission 15) : `incr.remap_relayout` = **150,3 s** sur
   `storm.html` (~600 nœuds + mutations accumulées) vs
@@ -439,6 +439,26 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `sync_profile` + fix du poste dominant + cascade scopée
   au sous-arbre sale si elle y contribue. 55h (NAV) a sorti
   l'apply du verrou — le coût restant est ici.
+  **Attribution mesurée** (harnais phases sur storm.html,
+  debug) : parse 13 ms, cascade 69 ms, boxtree 12 ms,
+  layout complet 74 ms — et `relayout_subtree` **154 ms,
+  soit ~2× le layout complet**. Cause : `step` appelait
+  `relay` = `layout_block` entier sur **chaque ancêtre**
+  dont la hauteur bougeait — sur un document plat (#cont
+  + 600 `<p>` frères), chaque append reposait `body` puis
+  `html` en entier (O(profondeur) × layout global).
+  **Fix** : propagation par translation — sans flottant
+  (garanti par `has_float`), une hausse Δ du fils décale
+  ses frères suivants de Δ, leurs layouts étant invariants
+  (§8.3.1 : marges inchangées). Gardes conservatives :
+  fils hors-flux, transition vide ↔ non vide (casse la
+  chaîne de collapse), conteneur flex/grid/table ou
+  `min|max-height` → `relay` classique. **Résultat :
+  154 → 9,7 ms (×16)**, arbre strictement égal au reflow
+  complet (2 tests permanents `relayout.rs`, comparaison
+  positions à 0,01). La cascade globale (`styles_payload`,
+  ~69 ms) devient le poste suivant — scopage non requis :
+  elle est bornée O(n), pas anormale ×10.
   **Mur frère mesuré (mission 18)** : la nav initiale de
   `heavy.html` (~3 000 nœuds) gèle l'API ~4–6,5 min —
   `nav_apply`/`sub_commit` tournent encore sous verrou
