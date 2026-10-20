@@ -106,6 +106,8 @@ typedef _TabUrlD = int Function(
   ffi.Pointer<ffi.Uint8>,
   int,
 );
+typedef _TabScrollN = ffi.Double Function(_NativeHandle, ffi.Uint64);
+typedef _TabScrollD = double Function(_NativeHandle, int);
 
 /// Erreur remontée par `explorer-ffi` — détail via
 /// `explorer_last_error`.
@@ -124,8 +126,8 @@ class FfiException implements Exception {
 ///
 /// Différences assumées (déviations documentées dans l'ADR) :
 /// - pas de SSE → le contrôleur sonde `tick` périodiquement ;
-/// - pas de titre d'onglet côté FFI (le `<title>` n'est pas
-///   exporté) — l'URL sert d'étiquette ;
+/// - titre d'onglet et offset de scroll : exports ABI de
+///   l'étape 61 — une dll antérieure garde le repli URL ;
 /// - `fetchFrame` produit un PNG en ré-encodant l'`ui.Image`
 ///   (compat interface) ; le chemin rapide est
 ///   [fetchFrameImage] — `ui.Image` sans aucun codec.
@@ -157,6 +159,17 @@ class FfiEngine implements BrowserRepository {
         'explorer_frame_copy',
       ),
       _tabUrl = lib.lookupFunction<_TabUrlN, _TabUrlD>('explorer_tab_url'),
+      // Étape 61 — ABI additive : une dll antérieure sans
+      // ces exports garde les comportements dégradés
+      // (URL en guise de titre, pas d'offset de scroll).
+      _tabTitle = lib.providesSymbol('explorer_tab_title')
+          ? lib.lookupFunction<_TabUrlN, _TabUrlD>('explorer_tab_title')
+          : null,
+      _tabScroll = lib.providesSymbol('explorer_tab_scroll')
+          ? lib.lookupFunction<_TabScrollN, _TabScrollD>(
+              'explorer_tab_scroll',
+            )
+          : null,
       _lastError = lib.lookupFunction<_BufReadN, _BufReadD>(
         'explorer_last_error',
       ) {
@@ -216,6 +229,8 @@ class FfiEngine implements BrowserRepository {
   final _FrameSizeD _frameSize;
   final _FrameCopyD _frameCopy;
   final _TabUrlD _tabUrl;
+  final _TabUrlD? _tabTitle;
+  final _TabScrollD? _tabScroll;
   final _BufReadD _lastError;
 
   late _NativeHandle _handle;
@@ -278,19 +293,20 @@ class FfiEngine implements BrowserRepository {
     return _refreshTab(id, url: url);
   }
 
-  /// Re-lit l'URL réelle (redirections) et met à jour la
-  /// liste des onglets.
+  /// Re-lit l'URL réelle (redirections) et le `<title>`
+  /// (étape 61) puis met à jour la liste des onglets.
   BrowserTab _refreshTab(int id, {String? url}) {
     var resolved = url;
     if (resolved == null || resolved.isEmpty) {
       resolved = _readUrl(id) ?? 'about:blank';
     }
+    final title = _readTitle(id) ?? '';
     final idx = _tabs.indexWhere((t) => t.id == '$id');
     if (idx >= 0) {
-      _tabs[idx] = _tabs[idx].copyWith(url: resolved);
+      _tabs[idx] = _tabs[idx].copyWith(url: resolved, title: title);
       return _tabs[idx];
     }
-    return BrowserTab(id: '$id', url: resolved);
+    return BrowserTab(id: '$id', url: resolved, title: title);
   }
 
   String? _readUrl(int id) {
@@ -299,6 +315,22 @@ class FfiEngine implements BrowserRepository {
     try {
       final n = _tabUrl(_handle, id, buf, cap);
       if (n <= 0) return null;
+      return String.fromCharCodes(buf.asTypedList(n));
+    } finally {
+      calloc.free(buf);
+    }
+  }
+
+  /// Titre via `explorer_tab_title` — `null` si l'export est
+  /// absent (dll antérieure, étape 61).
+  String? _readTitle(int id) {
+    final f = _tabTitle;
+    if (f == null) return null;
+    const cap = 2048;
+    final buf = calloc<ffi.Uint8>(cap);
+    try {
+      final n = f(_handle, id, buf, cap);
+      if (n <= 0) return '';
       return String.fromCharCodes(buf.asTypedList(n));
     } finally {
       calloc.free(buf);
@@ -419,6 +451,9 @@ class FfiEngine implements BrowserRepository {
           'focused',
           'edited',
         ][code],
+        // Étape 61 : l'offset est re-lu via `tab_scroll`
+        // (même forme que la réponse REST `scrolled`).
+        if (code == 1 && _tabScroll != null) 'scroll_y': _tabScroll(_handle, id),
         // L'URL de survol n'est pas exportée par le FFI (MVP,
         // ADR-0018) — le client garde sa barre de statut vide.
       };

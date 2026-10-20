@@ -23,6 +23,10 @@ futures-util = { workspace = true, features = ["std"] }
 # Validation `pattern` des formulaires (étape 54) — pur Rust,
 # déjà dépendance du workspace pour dillo-js.
 regex.workspace = true
+# Sérialisation JSON du store de profil (étape 61) — les formes
+# filaires `Raw*` vivent dans `profile_store`, jamais sur les DTO.
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

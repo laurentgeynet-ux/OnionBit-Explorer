@@ -573,7 +573,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   écart ×10 : saleté accumulée ? remap mémoïsé ? cascade
   globale ?) fait l'objet d'une demande PIPE dans
   `interface-equipes.md`.
-- [ ] **Étape 61. FFI : profil persistant + surface
+- [x] **Étape 61. FFI : profil persistant + surface
   d'état** (terrain mission 15 — ABI exercée via ctypes,
   cycle complet OK mais deux gaps produit) : (1)
   `EXPLORER_PROFILE` exporté par l'app avant chargement FFI
@@ -587,6 +587,18 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   de l'ABI vérifié sain : nav réelle, `frame_copy`/régions
   clipées exactes, erreurs typées (`last_error`), UTF-8
   roundtrip, `dirty_rects`/`tick`/`close_tab`/`destroy`.
+  **Livré** : `JsonFileStore` migré de `explorer-daemon` vers
+  `explorer_core::profile_store` (les deux hôtes partagent
+  l'impl — aucun crate plus bas ne peut voir les DTO sans
+  dépendance montante ; les formes filaires `Raw*` serde
+  restent privées, les DTO publiques neutres) ;
+  `explorer_create` lit désormais `EXPLORER_PROFILE` +
+  `explorer_create_with_profile(dir,len)` (ABI additive,
+  chemin invalide = échec explicite) ; exports
+  `explorer_tab_title` + `explorer_tab_scroll` (`-1` sans
+  ambiguïté), câblés côté app avec garde `providesSymbol`
+  — une dll antérieure garde le repli URL ; `sendInput`
+  `scrolled` rapporte `scroll_y` comme le REST.
 - [x] **Étape 62. Daemon : arguments CLI ignorés
   silencieusement** (terrain mission 15) : `--port`/
   `--profile` acceptés sans effet — toute la configuration

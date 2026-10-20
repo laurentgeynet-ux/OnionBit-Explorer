@@ -636,6 +636,7 @@ impl Session {
             title: t.title.clone(),
             can_back: t.hist_idx > 0,
             can_forward: t.hist_idx + 1 < t.hist.len(),
+            scroll_y: t.scroll_y,
         })
     }
 

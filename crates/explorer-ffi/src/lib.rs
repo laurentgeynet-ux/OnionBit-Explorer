@@ -148,11 +148,12 @@ unsafe fn read_str<'a>(ptr: *const u8, len: usize, max: usize) -> Option<&'a str
     }
 }
 
-/// Crée une session moteur in-process (runtime tokio privé,
-/// pile réseau réelle, fabrique JS branchée). `NULL` si le
-/// runtime n'a pas pu être construit.
-#[unsafe(no_mangle)]
-pub extern "C" fn explorer_create() -> *mut ExplorerHandle {
+/// Corps commun de création : runtime tokio privé, pile
+/// réseau réelle, fabrique JS, store de profil dans `dir`
+/// (`None` = [`explorer_core::JsonFileStore::default_dir`] — honore
+/// `EXPLORER_PROFILE`, étape 61 : le mode in-process
+/// persistait dans le vide auparavant).
+fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -166,12 +167,49 @@ pub extern "C" fn explorer_create() -> *mut ExplorerHandle {
     let fonts = DirFontSource::new(&default_fonts_dir());
     let mut session = Session::new(http_stack(), Arc::new(fonts));
     session.set_js_factory(explorer_js::DilloEngine::factory());
+    let dir = profile_dir.unwrap_or_else(explorer_core::JsonFileStore::default_dir);
+    session.set_store(Arc::new(explorer_core::JsonFileStore::open(&dir)));
     let events = session.subscribe();
     Box::into_raw(Box::new(ExplorerHandle {
         rt,
         session,
         _events: events,
     }))
+}
+
+/// Crée une session moteur in-process (runtime tokio privé,
+/// pile réseau réelle, fabrique JS branchée). `NULL` si le
+/// runtime n'a pas pu être construit.
+///
+/// Le profil persistant vient de `EXPLORER_PROFILE`
+/// (repli plateforme) — voir [`explorer_create_with_profile`]
+/// pour un chemin explicite.
+#[unsafe(no_mangle)]
+pub extern "C" fn explorer_create() -> *mut ExplorerHandle {
+    create_inner(None)
+}
+
+/// Variante à profil explicite (étape 61, ABI additive) :
+/// `dir` pointe sur un chemin UTF-8 de `len` octets ;
+/// `NULL`/`0` = repli [`explorer_core::JsonFileStore::default_dir`].
+///
+/// # Safety
+///
+/// `dir..dir+len` doit être lisible.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_create_with_profile(
+    dir: *const u8,
+    len: usize,
+) -> *mut ExplorerHandle {
+    if len == 0 {
+        return create_inner(None);
+    }
+    // Chemin fourni mais illisible/invalide : échec explicite
+    // plutôt que d'écrire le profil au mauvais endroit.
+    let Some(profile) = (unsafe { read_str(dir, len, 16384) }) else {
+        return std::ptr::null_mut();
+    };
+    create_inner(Some(PathBuf::from(profile)))
 }
 
 /// Libère le handle et sa session.
@@ -632,10 +670,55 @@ pub unsafe extern "C" fn explorer_tab_url(
     }
 }
 
+/// Copie le titre courant de l'onglet dans `buf` (UTF-8,
+/// sans NUL final si plein — même contrat que
+/// [`explorer_tab_url`]). Retourne la longueur écrite, `0`
+/// si l'onglet est inconnu ou sans titre, `-1` si buffer
+/// invalide (étape 61 : le `<title>` n'avait aucun canal
+/// FFI — l'app devait étiqueter ses onglets à l'URL).
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `buf..buf+cap`
+/// inscriptible.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_tab_title(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    buf: *mut u8,
+    cap: usize,
+) -> isize {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    match h.session.tab_info(tab).and_then(|t| t.title) {
+        Some(title) => unsafe { write_str(&title, buf, cap) },
+        None => 0,
+    }
+}
+
+/// Décalage de scroll de l'onglet en px CSS (étape 61) —
+/// `-1.0` si handle/onglet invalide (l'offset est ≥ 0, le
+/// code retour est non ambigu).
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_tab_scroll(h: *mut ExplorerHandle, tab: u64) -> f64 {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1.0;
+    };
+    h.session
+        .tab_info(tab)
+        .map_or(-1.0, |t| f64::from(t.scroll_y))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::path::Path;
     use std::sync::Mutex;
 
     use async_trait::async_trait;
@@ -701,10 +784,23 @@ mod tests {
     /// Handle de test : session sur transport simulé (aucune
     /// socket), même shape que `explorer_create`.
     fn test_handle() -> *mut ExplorerHandle {
+        test_handle_with(None)
+    }
+
+    /// Variante à store de profil injecté (étape 61).
+    fn test_handle_with(profile_dir: Option<&Path>) -> *mut ExplorerHandle {
         let t = Arc::new(FakeTransport::new());
         t.route("/a", 200, "<html><body><h1>bonjour</h1></body></html>");
+        t.route(
+            "/t",
+            200,
+            "<html><head><title>ma page</title></head><body><h1>t</h1></body></html>",
+        );
         let tr: Arc<dyn HttpTransport> = t;
         let mut session = Session::new(tr, Arc::new(FixtureFont));
+        if let Some(d) = profile_dir {
+            session.set_store(Arc::new(explorer_core::JsonFileStore::open(d)));
+        }
         session.set_viewport(800.0, 600.0, 1.0);
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -797,5 +893,64 @@ mod tests {
             assert_eq!(explorer_tick(h, tab), 0);
             explorer_destroy(h);
         }
+    }
+
+    /// Étape 61 — `tab_title` : le `<title>` atteint l'ABI.
+    #[test]
+    fn tab_title_export() {
+        let h = test_handle();
+        // SAFETY : handle frais.
+        unsafe {
+            let tab = explorer_open_tab(h);
+            let url = b"http://test/t";
+            assert_eq!(explorer_navigate(h, tab, url.as_ptr(), url.len()), 0);
+            let mut buf = [0u8; 64];
+            let n = explorer_tab_title(h, tab, buf.as_mut_ptr(), 64);
+            let n = usize::try_from(n).unwrap_or(0);
+            assert_eq!(&buf[..n], b"ma page".as_slice());
+            // Onglet inconnu → 0, handle nul → -1.
+            assert_eq!(explorer_tab_title(h, 999, buf.as_mut_ptr(), 64), 0);
+            assert_eq!(
+                explorer_tab_title(std::ptr::null_mut(), tab, buf.as_mut_ptr(), 64),
+                -1
+            );
+            explorer_destroy(h);
+        }
+    }
+
+    /// Étape 61 — `tab_scroll` : offset ≥ 0, erreur -1.
+    #[test]
+    fn tab_scroll_export() {
+        let h = test_handle();
+        // SAFETY : handle frais.
+        unsafe {
+            let tab = explorer_open_tab(h);
+            assert_eq!(explorer_tab_scroll(h, tab), 0.0);
+            assert_eq!(explorer_tab_scroll(h, 999), -1.0);
+            assert_eq!(explorer_tab_scroll(std::ptr::null_mut(), tab), -1.0);
+            explorer_destroy(h);
+        }
+    }
+
+    /// Étape 61 — `create_with_profile` : un chemin explicite
+    /// produit un profil sur disque ; un pointeur invalide
+    /// échoue sans repli silencieux.
+    #[test]
+    fn create_with_profile_persists() {
+        let dir = std::env::temp_dir().join(format!("explorer-ffi-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // SAFETY : chemin valide.
+        unsafe {
+            let d = dir.to_string_lossy();
+            let h = explorer_create_with_profile(d.as_ptr(), d.len());
+            assert!(!h.is_null());
+            explorer_destroy(h);
+        }
+        assert!(dir.is_dir(), "le profil explicite n'a pas été créé (61)");
+        // Pointeur non UTF-8 → handle nul + erreur posée.
+        let bad = [0xFFu8, 0xFE];
+        // SAFETY : le buffer est lisible ; rejet attendu.
+        assert!(unsafe { explorer_create_with_profile(bad.as_ptr(), 2) }.is_null());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

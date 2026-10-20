@@ -14,8 +14,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod profile_store;
 pub mod session;
 
+pub use profile_store::JsonFileStore;
 pub use session::{
     drain_navs_shared, history_move_shared, navigate_shared, pump_timers_shared, Bookmark,
     CoreError, CoreEvent, FrameRegion, InputEvent, InputOutcome, ProfileStore, Session,

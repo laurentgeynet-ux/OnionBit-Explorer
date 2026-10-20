@@ -9,6 +9,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 61 — FFI : profil + état d'onglet**
+  (`explorer-ffi` + `explorer-core` + `app`) :
+  `JsonFileStore` migre de `explorer-daemon` vers
+  `explorer_core::profile_store` (partagé par les deux
+  hôtes ; les formes filaires `Raw*` restent privées — les
+  DTO du cœur gardent zéro derive serde) ;
+  `explorer_create` honore enfin `EXPLORER_PROFILE` —
+  le mode in-process persistait dans le vide — et
+  `explorer_create_with_profile(dir, len)` (ABI additive)
+  accepte un chemin explicite (invalide = `NULL` +
+  `last_error`, jamais de repli silencieux). Nouveaux
+  exports `explorer_tab_title` et `explorer_tab_scroll`
+  (`-1` non ambigu) ; côté app les lookups sont gardés par
+  `providesSymbol` (dll antérieure = repli URL) et
+  `sendInput` `scrolled` rapporte `scroll_y` à parité REST.
+
 - **Étape 62 — CLI du daemon** (`explorer-daemon`) :
   `--port N` / `--profile DIR` (formes `--x v` et
   `--x=v`) honorent désormais leurs surcharges sur

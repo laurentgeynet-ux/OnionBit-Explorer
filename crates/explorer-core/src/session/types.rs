@@ -160,6 +160,9 @@ pub struct TabInfo {
     pub can_back: bool,
     /// `forward` possible.
     pub can_forward: bool,
+    /// Décalage de scroll (px CSS) — étape 61 : exposé pour
+    /// les adaptateurs qui n'ont pas de canal d'état (FFI).
+    pub scroll_y: f32,
 }
 
 /// Signet utilisateur.
@@ -255,9 +258,10 @@ pub(crate) fn stored_to_cookie(s: &StoredCookie) -> Cookie {
     }
 }
 
-/// Port de persistance du profil — implémenté en couche
-/// infra (`JsonFileStore` du daemon, fichier dans le
-/// répertoire de profil). Injecté, jamais d'I/O ici.
+/// Port de persistance du profil — implémentation de
+/// référence [`crate::JsonFileStore`] (fichiers dans le
+/// répertoire de profil, étape 61). Injecté, jamais
+/// d'I/O depuis `Session`.
 pub trait ProfileStore: Send + Sync {
     /// Enregistre une navigation aboutie (append borné).
     fn record_visit(&self, url: &str, title: Option<&str>);

@@ -5,9 +5,9 @@
 //! `explorer-daemon` — binaire hôte : moteur + API loopback
 //! supervisée par l'app Flutter (ADR-0003). La racine du
 //! binaire vit dans `main.rs` ; cette bibliothèque expose
-//! les modules d'adaptation testables : persistance du
-//! profil (`store`) et cache HTTP disque (`cache`,
-//! étape 56).
+//! les modules d'adaptation testables : ré-export du store
+//! de profil (`store`, impl dans `explorer-core` depuis
+//! l'étape 61) et cache HTTP disque (`cache`, étape 56).
 
 #![forbid(unsafe_code)]
 
