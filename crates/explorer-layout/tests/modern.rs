@@ -148,6 +148,23 @@ fn flex_direction_column() {
 }
 
 #[test]
+fn flex_row_reverse_ordre_et_ancrage() {
+    // R-27 : `row-reverse` pose les items dans l'ordre
+    // logique inversé, le groupe packé vers main-start
+    // (bord droit) — réf. WPT `flex-direction-row-reverse`.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div id=\"a\">A</div><div id=\"b\">B</div></section>",
+        "body { margin: 0 } section { display: flex; flex-direction: row-reverse } \
+         section > div { width: 100px; height: 10px }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    let (a, b) = (&section.children[0], &section.children[1]);
+    // Premier fils source à DROITE : B à 600, A à 700.
+    assert!(approx(b.rect.x, 600.0), "b.x={}", b.rect.x);
+    assert!(approx(a.rect.x, 700.0), "a.x={}", a.rect.x);
+}
+
+#[test]
 fn flex_align_center() {
     let (dom, bx) = laid(
         "<!doctype html><section><div>A</div><div id=\"t\">B</div></section>",

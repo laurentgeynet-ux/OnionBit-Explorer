@@ -311,6 +311,37 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   recouvrement et compte l'excédent comme « dur »
   (`…-002.xhtml` : 59 156 px réels au lieu de la sentinelle).
   Cliquet inchangé : 41/58.
+- [x] **R-27. Direction d'axe flex — `row-reverse`/`column`**
+  (triage mission 12 — premier lot des 17 échecs WPT
+  résiduels, la fondation qui empoisonne les mesures
+  justify/align/wrap en aval). Trois fixes orthogonaux :
+  **(a)** `row-reverse` pose les items dans l'ordre logique
+  inversé (avant : ordre DOM + décalage de groupe — les
+  libellés tombaient dans le désordre) et le `lead` miroir
+  inclut l'espacement `between` (§8.1 — `justify-content`
+  mesuré depuis main-start) ; **(b)** `text-align` mesure
+  la ligne sur les **margin boxes** (`Fragment::marg_l/r`
+  — §16.2 : les marges d'un atome comptent dans la largeur
+  de ligne — la réf `text-align:right` débordait à +112 px
+  hors conteneur) ; **(c)** la chaîne de marges basse du
+  dernier fils en flux reste **dans** la hauteur de contenu
+  quand un séparateur existe — bordure/padding bas, BFC,
+  hauteur fixe (§8.3.1 — les réf `column`/`column-reverse`
+  à `border:1px` perdaient le `mb` final : 191 px au lieu
+  de 207). Cliquet WPT 41 → **44/58** (les trois
+  `flex-direction-*` passent, zéro régression). Reste
+  documenté : `justify` sous `column-reverse` ancrait déjà
+  haut (MVP).
+- [ ] **R-28. Distribution d'espace flex** (7 échecs WPT) :
+  `justify-content` horiz-001a/002/003/004,
+  `align-items` center/flexend/stretch. Attendu : 2-3 causes
+  racines (free space, marges auto, baseline vs center).
+- [ ] **R-29. Wrap horizontal + `column/row-gap` flex**
+  (3 échecs WPT) : `flexbox-flex-wrap-horiz-001/002`,
+  `flexbox-column-row-gap-001` — dépend de R-28.
+- [ ] **R-30. Unité `fr` grid + `display:grid` résiduels**
+  (3 échecs WPT) : `fr-unit`, `grid-display-grid-001`,
+  marges — lot séparé, algos disjoints de flex.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

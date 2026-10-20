@@ -249,3 +249,19 @@ fn inline_block_avec_bloc_ne_gonfle_pas() {
     let h = w.children[0].lines[0].rect.height;
     assert!(h < 30.0, "hauteur de ligne {h}");
 }
+
+#[test]
+fn text_align_mesure_les_margin_boxes() {
+    // R-27 : `text-align` mesure la ligne sur les **margin
+    // boxes** — les marges d'un atome comptent (§16.2 +
+    // §8.3). Réf. WPT `flex-direction-row-reverse-ref`.
+    let (dom, bx) = laid(
+        "<!doctype html><div><span>x</span></div>",
+        "div{text-align:right} span{display:inline-block;width:100px;height:10px;margin:0 20px}",
+    );
+    let span = find(&bx, by_tag(&dom, "span"));
+    // Margin box droite au bord du conteneur (VIEW=400) :
+    // border box à 400 - 20(mr) - 100 = 280 (l'ancienne
+    // mesure border-box la plaçait à 300).
+    assert!((span.rect.x - 280.0).abs() < 0.5, "x={}", span.rect.x);
+}

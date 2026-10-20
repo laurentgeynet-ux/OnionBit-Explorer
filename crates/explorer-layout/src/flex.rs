@@ -412,16 +412,30 @@ pub(crate) fn flow_flex_children(
                 .map(|(&k, s)| s + line_margins[k].0 + line_margins[k].1)
                 .sum::<f32>()
                 + lgaps;
-            let (mut lead, between) = justify_offsets(&justify, main_cb - used, line.len());
-            if axis.reverse {
-                lead = main_cb - used - lead;
-            }
+            // `*-reverse` : l'axe principal part du bord
+            // opposé — les items se posent dans l'ordre
+            // logique inversé et le groupe est mesuré depuis
+            // main-start (bord droit en row-reverse) : le lead
+            // se reflète, espacement `between` inclus.
+            let (lead_j, between) = justify_offsets(&justify, main_cb - used, line.len());
+            let between_total = (line.len() as f32 - 1.0).max(0.0) * between;
+            let lead = if axis.reverse {
+                main_cb - used - between_total - lead_j
+            } else {
+                lead_j
+            };
             // Passe 1 : pose à (lead…, 0) — cross = hauteurs
             // **extérieures** (§9.4 : les marges cross
             // comptent dans la taille de ligne).
             let mut pen = content_x + lead.max(0.0);
             let mut line_cross = 0.0f32;
-            for (lk, &k) in line.iter().enumerate() {
+            let lay_order: Vec<usize> = if axis.reverse {
+                (0..line.len()).rev().collect()
+            } else {
+                (0..line.len()).collect()
+            };
+            for &lk in &lay_order {
+                let k = line[lk];
                 let i = order_idx[k];
                 layout_item(
                     &mut bx.children[i],

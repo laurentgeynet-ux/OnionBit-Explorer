@@ -704,3 +704,42 @@ fn object_resolu_est_remplace_sinon_repli_enfants() {
     assert!(ko_b.intrinsic.is_none(), "repli : pas d'intrinsèque");
     assert!(!ko_b.children.is_empty(), "repli : enfants rendus");
 }
+
+#[test]
+fn marge_basse_dernier_fils_reste_dans_conteneur_borde() {
+    // R-27 : §8.3.1 — la marge basse du dernier fils en flux
+    // ne s'échappe que si rien ne la sépare de celle du
+    // conteneur. Avec `border-bottom` (ou padding/BFC) elle
+    // compte dans la hauteur de contenu — les réf. WPT
+    // `flex-direction-column(-reverse)` en dépendent.
+    let (dom, bx) = laid(
+        "<!doctype html><div><p>x</p></div>",
+        "body{margin:0} div{border:1px solid black} p{height:10px;margin:0 0 20px}",
+    );
+    let c = find(&bx, by_tag(&dom, "div"));
+    let p = find(&bx, by_tag(&dom, "p"));
+    // border-box = 1 + 10 + 20(margin inside) + 1 = 32.
+    assert!(approx(c.rect.height, 32.0), "h={}", c.rect.height);
+    // La margin box du fils aboutit au bas du contenu.
+    assert!(
+        approx(
+            p.rect.y + p.rect.height + 20.0,
+            c.rect.y + c.rect.height - 1.0
+        ),
+        "p={:?} c={:?}",
+        p.rect,
+        c.rect
+    );
+}
+
+#[test]
+fn marge_basse_dernier_fils_sechappe_sans_separateur() {
+    // Cas témoin : sans bordure ni padding, la marge basse
+    // du dernier fils collapse par-dessous (hauteur inchangée).
+    let (dom, bx) = laid(
+        "<!doctype html><div><p>x</p></div>",
+        "body{margin:0} p{height:10px;margin:0 0 20px}",
+    );
+    let c = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(c.rect.height, 10.0), "h={}", c.rect.height);
+}

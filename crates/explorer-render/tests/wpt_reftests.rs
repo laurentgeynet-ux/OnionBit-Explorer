@@ -38,7 +38,7 @@ const VIEW_H: f32 = 600.0;
 /// Cliquet : score minimal attendu — mesuré 2026-02 à 17/40
 /// (42 %) sur la première extraction ; à monter à chaque
 /// progrès float/BFC/marges.
-const WPT_BASELINE: usize = 41;
+const WPT_BASELINE: usize = 44;
 
 /// Tolérance AA : pixels dont le delta maximal de canal est
 /// ≤ [`FUZZY_CHANNEL`] comptent « doux » ; au-delà « dur ».
@@ -51,26 +51,27 @@ const FUZZY_MAX: usize = 512;
 /// entier (avant : sentinelle `usize::MAX` — `18446744…`
 /// illisible dans le triage des échecs, R-26).
 fn diff_stats(a: &Frame, b: &Frame) -> (usize, usize) {
-    let w = a.width.min(b.width) as usize;
-    let h = a.height.min(b.height) as usize;
-    let mut hard =
-        (a.width as usize * a.height as usize).max(b.width as usize * b.height as usize) - w * h;
+    let wmin = a.width.min(b.width) as usize;
+    let hmin = a.height.min(b.height) as usize;
+    let mut hard = (a.width as usize * a.height as usize)
+        .max(b.width as usize * b.height as usize)
+        - wmin * hmin;
     let mut soft = 0;
-    for y in 0..h {
-        for x in 0..w {
-            let i = (y * a.width as usize + x) * 4;
-            let j = (y * b.width as usize + x) * 4;
-            match (a.pixels.get(i..i + 4), b.pixels.get(j..j + 4)) {
+    for y in 0..hmin {
+        for x in 0..wmin {
+            let ia = (y * a.width as usize + x) * 4;
+            let ib = (y * b.width as usize + x) * 4;
+            match (a.pixels.get(ia..ia + 4), b.pixels.get(ib..ib + 4)) {
                 (Some(pa), Some(pb)) => {
-                    let d = pa
+                    let delta = pa
                         .iter()
                         .zip(pb)
                         .map(|(p, q)| p.abs_diff(*q))
                         .max()
                         .unwrap_or(0);
-                    if d > FUZZY_CHANNEL {
+                    if delta > FUZZY_CHANNEL {
                         hard += 1;
-                    } else if d > 0 {
+                    } else if delta > 0 {
                         soft += 1;
                     }
                 }

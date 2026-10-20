@@ -9,6 +9,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-27 — direction d'axe flex `row-reverse`/`column`**
+  (`explorer-layout`) : premier lot des 17 échecs WPT
+  résiduels — les 3 `flex-direction-*` passent, cliquet
+  `WPT_BASELINE` 41 → **44/58**, zéro régression.
+  - `row-reverse` pose les items dans l'ordre logique
+    inversé (avant : ordre DOM décalé) ; `lead` miroir
+    incluant l'espacement `between` (§8.1).
+  - `text-align` mesure la ligne sur les **margin boxes**
+    (`Fragment::marg_l/marg_r` — §16.2 : les marges des
+    atomes comptent dans la largeur de ligne ; une ligne
+    `text-align:right` d'inline-blocks à marges ne déborde
+    plus du conteneur).
+  - La chaîne de marges basse du dernier fils en flux reste
+    dans la hauteur de contenu quand un séparateur existe
+    — bordure/padding bas, BFC, hauteur fixe (§8.3.1 ; un
+    conteneur `border:1px` englobe le `margin-bottom` de
+    son dernier fils au lieu de le laisser s'échapper).
+  Régressions : `flex_row_reverse_ordre_et_ancrage`,
+  `text_align_mesure_les_margin_boxes`,
+  `marge_basse_dernier_fils_reste_dans_conteneur_borde`,
+  `marge_basse_dernier_fils_sechappe_sans_separateur`.
+
 - **Étape 57 — UI Flutter v2** (`app/`) : thème clair via
   variante `tokens.light.json` (`meta.scheme` pilote
   `ColorScheme`/`ThemeMode` — clair, sombre ou système) ;

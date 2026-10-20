@@ -1045,9 +1045,18 @@ fn flow_children(
 
         if kind.is_inline_level() {
             // Enfant en-ligne direct (hors enveloppe) : une
-            // ligne de `line_h` — son haut est l'ancre.
-            inline_anchor = Some(cursor);
-            cursor += line_h;
+            // ligne de `line_h` — son haut est l'ancre. La
+            // marge en attente est un simple écart (les lignes
+            // ne collapse pas) et la chaîne est rompue.
+            let gap = if first && adjoining_top {
+                0.0
+            } else {
+                prev_margin.map_or(0.0, MarginRun::value)
+            };
+            inline_anchor = Some(cursor + gap);
+            cursor += gap + line_h;
+            prev_margin = Some(MarginRun::default());
+            first = false;
             continue;
         }
         let cfs = font_size_px(&cst, fs, ctx);
@@ -1228,6 +1237,22 @@ fn flow_children(
         prev_margin = Some(escaped_bottom_run(&bx.children[i], content_w, fs, ctx));
         first = false;
     }
+    // §8.3.1 : la chaîne de marges basse du dernier fils en
+    // flux ne s'échappe par-dessous que si rien ne la sépare
+    // de la marge du conteneur (pas de bordure ni padding bas,
+    // pas de BFC, hauteur auto — sinon elle reste DANS la
+    // hauteur de contenu : la margin box du dernier fils est
+    // mesurée (ref `border:1px` des réftests flex-direction).
+    let adjoining_bottom = !own_bfc
+        && cb_h.is_none()
+        && side_px(&bx.style, "padding-bottom", content_w, fs, ctx, 0.0) <= 0.0
+        && border_px(&bx.style, "border-bottom-width", content_w, fs, ctx) <= 0.0;
+    if !adjoining_bottom {
+        if let Some(run) = prev_margin {
+            cursor = (cursor + run.value()).max(start_cursor);
+        }
+    }
+
     // Containment : un BFC englobe le bas de ses flottants
     // propres (§10.6.7) — le registre `fl` est alors vierge
     // à son entrée et ne contient que les siens.

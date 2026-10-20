@@ -61,6 +61,13 @@ pub struct Fragment {
     /// dernier de la ligne (§16.6.1 : les espaces de fin de
     /// ligne ne comptent pas dans la largeur ni `text-align`).
     pub trail_w: f32,
+    /// Marges horizontales de l'atome (`0` pour le texte) —
+    /// elles font partie de la **margin box** qui mesure la
+    /// largeur de ligne pour `text-align` (§16.2 + §8.3 :
+    /// les marges d'un inline-block comptent dans la ligne).
+    pub marg_l: f32,
+    /// Voir [`Fragment::marg_l`].
+    pub marg_r: f32,
     /// Style de l'item propriétaire — l'élément inline le
     /// plus proche du texte (héritage fait). Le rendu lit
     /// `color`/`font-*` ICI, pas sur la boîte des lignes :
@@ -640,9 +647,9 @@ fn break_into_lines(
                 baseline: r.height,
                 shaped: None,
                 trail_w: 0.0,
+                marg_l: ml,
+                marg_r: mr,
             });
-            // Margin box dans la ligne (§10.8) : `mt` pousse
-            // la boîte vers le bas via la baseline commune
             // (`rect.y = y + base - h`), `mb` allonge la ligne.
             acc.max_lh = acc.max_lh.max(mt + r.height + mb);
             acc.max_base = acc.max_base.max(mt + r.height);
@@ -692,6 +699,8 @@ fn break_into_lines(
                         baseline: fs * 0.8,
                         shaped: None,
                         trail_w: 0.0,
+                        marg_l: 0.0,
+                        marg_r: 0.0,
                     });
                     acc.max_lh = acc.max_lh.max(lh);
                     acc.max_base = acc.max_base.max(fs * 0.8);
@@ -731,6 +740,8 @@ fn break_into_lines(
                 baseline,
                 shaped,
                 trail_w,
+                marg_l: 0.0,
+                marg_r: 0.0,
             });
             acc.max_lh = acc.max_lh.max(lh);
             acc.max_base = acc.max_base.max(baseline);
@@ -777,27 +788,32 @@ fn align_lines(st: &ComputedStyle, lines: &mut [LineBox], x: f32, w: f32, fl: &F
     };
     let count = lines.len();
     for (i, line) in lines.iter_mut().enumerate() {
-        let used = line.fragments.iter().map(|f| f.rect.width).sum::<f32>();
-        let (ebx, ebw) = fl.band_over(line.rect.y, line.rect.height, x, w);
-        let slack = (ebw - used).max(0.0);
-        let line_left = line
-            .fragments
-            .iter()
-            .map(|f| f.rect.x)
-            .fold(f32::INFINITY, f32::min);
-        if !line_left.is_finite() {
+        // Largeur de ligne = étendue des **margin boxes** :
+        // les marges d'un atome comptent dans la ligne pour
+        // l'alignement (§16.2 — `text-align:right` sur des
+        // inline-blocks à marges pousse jusqu'au bord la
+        // margin box, pas la border box).
+        let (mut mleft, mut mright) = (f32::INFINITY, 0.0f32);
+        for f in &line.fragments {
+            mleft = mleft.min(f.rect.x - f.marg_l);
+            mright = mright.max(f.rect.x + f.rect.width + f.marg_r);
+        }
+        if !mleft.is_finite() {
             continue;
         }
+        let used = mright - mleft;
+        let (ebx, ebw) = fl.band_over(line.rect.y, line.rect.height, x, w);
+        let slack = (ebw - used).max(0.0);
         let last = i + 1 == count;
         // Le bord gauche de la bande intersectée peut être à
         // droite de celui où la ligne a été coulée (flottant
         // commençant au milieu de la ligne) : on y recale
         // d'abord, puis l'alignement consomme le slack restant.
         // Jamais de tirage vers la gauche (max 0).
-        let recale = (ebx - line_left).max(0.0);
+        let recale = (ebx - mleft).max(0.0);
         #[allow(clippy::cast_precision_loss)]
         let (dx, space) = match align {
-            "right" => ((ebx + ebw) - (line_left + used), 0.0),
+            "right" => ((ebx + ebw) - mright, 0.0),
             "center" => (recale + slack / 2.0, 0.0),
             "justify" if !last && line.fragments.len() > 1 => {
                 (recale, slack / (line.fragments.len() - 1) as f32)
