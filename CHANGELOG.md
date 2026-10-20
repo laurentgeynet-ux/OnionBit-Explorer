@@ -9,6 +9,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **ADR-0022 — politique d'égress unique et détection de
+  fuites (préparation Tor)** : `EgressConnector` par
+  capacité dans `explorer-net` (en mode Tor, aucun dialer
+  direct n'existe dans la variante), DNS délégué au nœud
+  de sortie, UDP absent plutôt que routé, `no_proxy`
+  ignoré en mode Tor, détection à trois niveaux
+  (lint/`cargo-deny`, compteur de flux, canari e2e dans
+  `explorer-test-support`) — politique figée,
+  implémentation différée par déclencheurs ; aucun code
+  modifié.
+
 - **Étape 61 — FFI : profil + état d'onglet**
   (`explorer-ffi` + `explorer-core` + `app`) :
   `JsonFileStore` migre de `explorer-daemon` vers

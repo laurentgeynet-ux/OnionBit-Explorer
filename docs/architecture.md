@@ -112,6 +112,11 @@ pas dans `core` ; le DOM ne connaît pas axum.
 - `HttpTransport` injectable → un futur transport mandataire
   (proxy d'entreprise, Tor…) est une implémentation, pas une
   réécriture.
+- Point d'égress unique et politique anti-fuites arbitrés
+  (ADR-0022) : `EgressConnector` par capacité dans
+  `explorer-net`, DNS délégué à la sortie en mode Tor, UDP
+  absent plutôt que routé, détection lint/runtime/canari —
+  implémentation différée par déclencheurs.
 - `http_proxy`/`no_proxy` honorés par l'environnement.
 - `dillo-js` vit dans ce workspace sous `MIT OR Apache-2.0` — le
   trait `JsEngine` le rend remplaçable (`boa_engine` en
