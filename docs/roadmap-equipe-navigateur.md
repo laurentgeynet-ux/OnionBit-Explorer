@@ -38,6 +38,11 @@ Les besoins dans le domaine pur passent par
 Objectif : les blocages du web réel sautent. Sortie de palier :
 `site_smoke.ps1` étendu à 10 sites, **8/10 fonctionnels**
 (navigation + liens + formulaires + scripts de base actifs).
+**Mesuré : 10/10 à `ef8ee76`** — chaque site : nav OK, lien
+réel cliqué par hit-test moteur, back restauré, dispatch de
+scripts OK ; `form:absent` honnête partout (aucun champ
+éditable dans les bandes sondées — corpus quasi sans
+formulaires en premier viewport).
 
 Shortlist candidate (reconnaissance terrain @ `2693959`,
 panel de 8) : **mesurables** lobste.rs, wikipedia ·
