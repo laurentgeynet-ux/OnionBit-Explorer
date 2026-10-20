@@ -467,8 +467,6 @@ pub(crate) fn repaint_payload(p: &mut PaintPayload, ctx: &ApplyCtx) -> Result<()
         list.height = frame_cap;
     }
     cull_display_list(&mut list);
-    let frame =
-        rasterize(&list, &ctx.fonts as &dyn FontSource, ctx.scale).ok_or(CoreError::FrameTooBig)?;
     let regions = p.list.as_ref().map_or_else(
         || {
             vec![Rect {
@@ -491,6 +489,34 @@ pub(crate) fn repaint_payload(p: &mut PaintPayload, ctx: &ApplyCtx) -> Result<()
             }
         },
     );
+    // R-37 : les régions de diff pilotent maintenant le
+    // raster — repeinte bornée par-dessus la frame
+    // précédente (équivalence plein cadre assertée par
+    // explorer-render/tests/dirty_raster.rs). Repli plein
+    // cadre : pas de frame précédente, cible différente
+    // (dims/scale), borne de fenêtres dépassée, ou diff
+    // qui couvre déjà toute la page.
+    let full_cover = regions.iter().any(|r| {
+        r.x <= 0.0 && r.y <= 0.0 && r.x + r.width >= list.width && r.y + r.height >= list.height
+    });
+    let frame = p
+        .frame
+        .take()
+        .filter(|_| !full_cover)
+        .and_then(|prev| {
+            explorer_render::rasterize_dirty(
+                &list,
+                &ctx.fonts as &dyn FontSource,
+                ctx.scale,
+                prev,
+                &regions,
+            )
+        })
+        .map_or_else(
+            || rasterize(&list, &ctx.fonts as &dyn FontSource, ctx.scale),
+            Some,
+        )
+        .ok_or(CoreError::FrameTooBig)?;
     p.dirty.extend(regions);
     if p.dirty.len() > MAX_DIRTY_RECTS {
         p.emitted = 0;

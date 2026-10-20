@@ -9,6 +9,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-37 — Raster borné par dirty-rects** (`explorer-render`,
+  `explorer-core`) : `rasterize_dirty` repeint seulement
+  les fenêtres de `DisplayList::changed_rects` par-dessus
+  la frame précédente — calque blanc par fenêtre (fond UA),
+  inflation 2 px CSS (AA + overhang glyphe), fusion des
+  recouvrements, filtre d'items par `resolved_bounds`
+  (clip/transforms résolus), repli plein cadre sur cible
+  différente ou borne dépassée. `repaint_payload` consomme
+  les régions — avant, le diff n'alimentait que les events
+  `frame_invalidated`. Équivalence **pixel-à-pixel**
+  « régional == plein cadre » assertée par 9 tests
+  permanents avant le gain — la méthode a attrapé au
+  premier atterrissage un bug de fusion de fenêtres
+  (disjointes en y avalées → session
+  `checkbox_toggles_then_submits` rouge ; régression
+  verrouillée). Mesure : doc 18 001 items, mutation
+  localisée — 2,10 s → **8,2 ms** (×256, pixels
+  identiques). Seam `MediaSurface` intacte : rects média
+  toujours relus du boxtree post-relayout — le dirty ne
+  borne que le raster.
 - **R-33b — Perf : `FontCache` + encodage PNG rapide**
   (`explorer-layout`, `explorer-render`) : part pipeline
   du « mur frère » (nav `heavy.html` ~3 000 nœuds gelant

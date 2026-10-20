@@ -327,19 +327,168 @@ pub fn rasterize(list: &DisplayList, fonts: &dyn FontSource, scale: f32) -> Opti
     pixmap.fill(tiny_skia::Color::WHITE);
     let dpi = Transform::from_scale(scale, scale);
 
-    let mut clips: Vec<Mask> = Vec::new();
-    // Cache fonte de la passe (R-33b) : `font_data` n'est
-    // re-facturé qu'une fois par `FontRequest`, pas par item.
     let mut fc = FontCache::new();
+    replay_items(&mut pixmap, &list.items, dpi, fonts, &mut fc, None);
+    Some(Frame {
+        width: w,
+        height: h,
+        pixels: pixmap.data().to_vec(),
+        scale,
+    })
+}
+
+/// Inflation des fenêtres sales (px CSS) — couvre le débord
+/// AA (~1 px physique) et l'overhang modeste des glyphes
+/// hors de leur boîte de métriques. Le harnais d'équivalence
+/// `dirty_raster` est la garde qui la valide.
+const DAMAGE_INFLATE_CSS: f32 = 2.0;
+
+/// Borne du nombre de fenêtres — au-delà, le plein cadre
+/// est préférable (page hostile, dirty partout).
+const DAMAGE_MAX_RECTS: usize = 64;
+
+/// Rasterise `list` en ne repeignant que les fenêtres
+/// `damage` (px CSS, espace framebuffer — la sortie de
+/// [`DisplayList::changed_rects`]) par-dessus `prev`
+/// (consommée : son tampon est muté puis renvoyé).
+///
+/// `None` = repli [`rasterize`] requis : cible différente
+/// (taille, scale), ou borne de fenêtres dépassée.
+/// `damage` vide → `prev` renvoyée tel quel (rien à peindre).
+///
+/// Chaque fenêtre rejoue **tous** les items dont la bounds
+/// résolue l'intersecte (ordre de peinture conservé, pile
+/// clip/transform identique) — l'équivalence « régional ==
+/// plein cadre » est assertée pixel-à-pixel par
+/// `tests/dirty_raster.rs`.
+#[must_use]
+pub fn rasterize_dirty(
+    list: &DisplayList,
+    fonts: &dyn FontSource,
+    scale: f32,
+    mut prev: Frame,
+    damage: &[explorer_layout::Rect],
+) -> Option<Frame> {
+    let w_px = (list.width * scale).round().max(1.0);
+    let h_px = (list.height * scale).round().max(1.0);
+    if !(w_px.is_finite() && h_px.is_finite()) || w_px > 16384.0 || h_px > 16384.0 {
+        return None;
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let (w, h) = (w_px as u32, h_px as u32);
+    if prev.width != w || prev.height != h || (prev.scale - scale).abs() > f32::EPSILON {
+        return None; // cible différente → plein cadre.
+    }
+    if damage.is_empty() {
+        return Some(prev);
+    }
+    if damage.len() > DAMAGE_MAX_RECTS {
+        return None;
+    }
+
+    // Fenêtres physiques : inflation AA (CSS) → scale →
+    // agrandissement vers l'extérieur → bornées à la frame.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let mut wins: Vec<(u32, u32, u32, u32)> = damage
+        .iter()
+        .map(|r| {
+            let x0 = ((r.x - DAMAGE_INFLATE_CSS) * scale).floor().max(0.0) as u32;
+            let y0 = ((r.y - DAMAGE_INFLATE_CSS) * scale).floor().max(0.0) as u32;
+            let x1 = ((r.x + r.width + DAMAGE_INFLATE_CSS) * scale)
+                .ceil()
+                .min(w_px) as u32;
+            let y1 = ((r.y + r.height + DAMAGE_INFLATE_CSS) * scale)
+                .ceil()
+                .min(h_px) as u32;
+            (x0, y0, x1, y1)
+        })
+        .filter(|(x0, y0, x1, y1)| x1 > x0 && y1 > y0)
+        .collect();
+    // Fusion des fenêtres qui se recouvrent — jamais deux
+    // repeintes sur les mêmes pixels. Triées par (x0,y0) :
+    // recouvrement ↔ `x0 <= l.2` (x garanti par le tri) **et**
+    // recouvrement vertical `y0 <= l.3 && y1 >= l.1` — un test
+    // sur les deux seules bornes max avale des fenêtres
+    // disjointes (le tri casse l'ordre de parcours en y).
+    let mut merged: Vec<(u32, u32, u32, u32)> = Vec::new();
+    wins.sort_unstable();
+    for (x0, y0, x1, y1) in wins.drain(..) {
+        if let Some(l) = merged.last_mut() {
+            if x0 <= l.2 && y0 <= l.3 && y1 >= l.1 {
+                l.2 = l.2.max(x1);
+                l.3 = l.3.max(y1);
+                continue;
+            }
+        }
+        merged.push((x0, y0, x1, y1));
+    }
+
+    let bounds = crate::display::resolved_bounds(&list.items);
+    let mut fc = FontCache::new();
+    for (x0, y0, x1, y1) in merged {
+        let (rw, rh) = (x1 - x0, y1 - y0);
+        let mut pm = Pixmap::new(rw, rh)?;
+        // Même base que `rasterize` : canvas opaque blanche —
+        // les trous de la fenêtre retombent sur le fond UA.
+        pm.fill(tiny_skia::Color::WHITE);
+        // p_local = p_css·scale − (x0,y0) : translation
+        // physique composée à l'échelle.
+        #[allow(clippy::cast_precision_loss)]
+        let base = Transform::from_row(scale, 0.0, 0.0, scale, -(x0 as f32), -(y0 as f32));
+        // Fenêtre de filtre en px CSS (bounds résolues y sont).
+        #[allow(clippy::cast_precision_loss)]
+        let win_css = explorer_layout::Rect {
+            x: x0 as f32 / scale,
+            y: y0 as f32 / scale,
+            width: rw as f32 / scale,
+            height: rh as f32 / scale,
+        };
+        replay_items(
+            &mut pm,
+            &list.items,
+            base,
+            fonts,
+            &mut fc,
+            Some((&bounds, win_css)),
+        );
+        // Blit de la fenêtre dans la frame.
+        let src = pm.data();
+        for row in 0..rh {
+            let dst_off = (((y0 + row) * w + x0) * 4) as usize;
+            let src_off = (row * rw * 4) as usize;
+            let len = (rw * 4) as usize;
+            prev.pixels[dst_off..dst_off + len].copy_from_slice(&src[src_off..src_off + len]);
+        }
+    }
+    Some(prev)
+}
+
+/// Rejoue les items dans `pixmap` — boucle de peinture
+/// partagée par [`rasterize`] et [`rasterize_dirty`].
+///
+/// `filter` : quand `Some((bounds, window))`, un item de
+/// dessin dont la bounds résolue (`resolved_bounds`, même
+/// sémantique de pile) n'intersecte pas `window` est sauté ;
+/// les items d'état (`Push*/Pop*`) sont toujours rejoués —
+/// la pile doit refléter l'emplacement de chaque item.
+fn replay_items(
+    pixmap: &mut Pixmap,
+    items: &[DisplayItem],
+    dpi: Transform,
+    fonts: &dyn FontSource,
+    fc: &mut FontCache,
+    filter: Option<(&[Option<explorer_layout::Rect>], explorer_layout::Rect)>,
+) {
+    let mut clips: Vec<Mask> = Vec::new();
     // Pile des `transform` CSS : `cur` = dpi · produit des
     // matrices actives — recomposé à chaque push/pop (peu de
     // niveaux en pratique).
     let mut tfs: Vec<Transform> = Vec::new();
     let mut cur = dpi;
-    for item in &list.items {
+    for (idx, item) in items.iter().enumerate() {
         match item {
             DisplayItem::PushClip(r) => {
-                if let Some(mut mask) = Mask::new(w, h) {
+                if let Some(mut mask) = Mask::new(pixmap.width(), pixmap.height()) {
                     if let Some(phys) = Rect::from_xywh(r.x, r.y, r.width, r.height)
                         .and_then(|rr| rr.transform(cur))
                     {
@@ -383,15 +532,29 @@ pub fn rasterize(list: &DisplayList, fonts: &dyn FontSource, scale: f32) -> Opti
                 tfs.pop();
                 cur = tfs.iter().fold(dpi, |acc, t| acc.pre_concat(*t));
             }
-            _ => paint_item(&mut pixmap, item, cur, fonts, &mut fc, clips.last()),
+            _ => {
+                // Fenêtre sale : item dont la bounds résolue
+                // est hors fenêtre → sauté (son encre ne peut
+                // pas y toucher). `None` bounds = conservateur.
+                let draw = filter.is_none_or(|(bounds, win)| {
+                    bounds
+                        .get(idx)
+                        .copied()
+                        .flatten()
+                        .is_none_or(|b| rects_overlap(b, win))
+                });
+                if draw {
+                    paint_item(pixmap, item, cur, fonts, fc, clips.last());
+                }
+            }
         }
     }
-    Some(Frame {
-        width: w,
-        height: h,
-        pixels: pixmap.data().to_vec(),
-        scale,
-    })
+}
+
+/// Intersection non vide de deux rects px CSS — filtre
+/// « item × fenêtre » de `replay_items` (R-37).
+fn rects_overlap(a: explorer_layout::Rect, b: explorer_layout::Rect) -> bool {
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
 }
 
 /// Peint un item de dessin (les clips sont gérés par

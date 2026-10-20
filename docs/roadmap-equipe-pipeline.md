@@ -525,24 +525,31 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   parsées entre repaints — la passe `rasterize` recrée
   son `FontCache` à chaque appel). À instrumenter
   `sync_profile` avant/après pour chiffrer le gain.
-- [ ] **R-37. Invalidation bornée display-list / raster**
-  (ticket terrain mission 21-E) : l'apply détaché rejoue
-  **tout** le pipeline par commit — re-parse → cascade →
-  boxtree → display-list complète → raster + encodage
-  PNG du document entier (jusqu'à 16 384 px). Seul
-  `relayout_subtree` est incrémental (R-33, ×16 — le
-  terrain M21 confirme ~3 s/commit à ~700 nœuds vs
-  ~150 s baseline, ×50 à taille égale). Poste dominant
-  résiduel : la **passe peinture plein document**.
-  Leviers : dirty-rects déjà émis (`frame_invalidated
-  rects`) → raster partiel par région ; display-list
-  incrémentale (re-jouer seulement les boîtes touchées
-  par le relayout) ; cap/compression du payload PNG
-  (encodeur `Fast` déjà posé en R-33b). Sous-entrées
-  mesurables : raster par dirty-rect, PNG streamé ou
-  borné. Règle AGENTS §8 : une frame = un état cohérent —
-  la régionnalité ne doit jamais rasteriser un arbre en
-  mutation.
+- [x] **R-37. Invalidation bornée display-list / raster**
+  — sous-entrée « raster par dirty-rect » **livrée** :
+  `rasterize_dirty` repeint uniquement les fenêtres de
+  `changed_rects` par-dessus la frame précédente (calque
+  blanc par fenêtre = fond UA, inflation 2 px CSS pour
+  l'AA/overhang, fusion des recouvrements, repli plein
+  cadre si dims/scale/borne ≠). `repaint_payload`
+  consomme les régions — avant, elles n'alimentaient que
+  les events SSE. **Équivalence d'abord** : 9 tests
+  permanents `dirty_raster` assertent le strict égal
+  pixel « régional == plein cadre » (couleur, déplacement,
+  ajout/retrait texte, translate, overflow-clip,
+  sous-contenu chevauchant, dirty vide, fallback, fusion
+  disjointe-y) — la méthode a attrapé un vrai bug au
+  premier atterrissage (tri des fenêtres qui avalait une
+  région disjointe → `checkbox_toggles_then_submits`
+  session rouge, régression verrouillée par test dédié).
+  Mesure : doc 18 001 items, mutation localisée — plein
+  cadre 2,10 s → régional **8,2 ms** (×256, pixels
+  identiques). MediaSurface inchangée : les rects média
+  restent relus du boxtree après relayout complet — le
+  dirty ne borne que le raster, jamais le layout.
+  Reste ouvert dans le ticket : display-list
+  incrémentale (re-jouer seulement les boîtes touchées)
+  et PNG streamé/borné.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

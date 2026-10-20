@@ -216,7 +216,9 @@ impl DisplayList {
 /// pour les items d'état (`Push*/Pop*`). Rejoue la même
 /// sémantique de pile que `rasterize` (transforms en
 /// `pre_concat`, clips poussés dans leur transform courant).
-fn resolved_bounds(items: &[DisplayItem]) -> Vec<Option<Rect>> {
+/// `pub(crate)` : `rasterize_dirty` (R-37) filtre les items
+/// par intersection avec la fenêtre sale.
+pub(crate) fn resolved_bounds(items: &[DisplayItem]) -> Vec<Option<Rect>> {
     let mut tfs: Vec<tiny_skia::Transform> = Vec::new();
     let mut clips: Vec<Rect> = Vec::new();
     let mut cur = tiny_skia::Transform::default();
