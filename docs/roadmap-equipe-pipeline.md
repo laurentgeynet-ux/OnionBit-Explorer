@@ -607,7 +607,22 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   identiques). MediaSurface inchangée : les rects média
   restent relus du boxtree après relayout complet — le
   dirty ne borne que le raster, jamais le layout.
-  Reste ouvert dans le ticket : PNG streamé/borné.
+  — sous-entrée « **PNG streamé/borné** » **livrée** :
+  `Frame::encode_png` réécrit sur `png::StreamWriter`
+  (crate `png` 0.18, backend fdeflate identique à
+  l'`CompressionType::Fast` d'`image` — R-33b préservé).
+  La démultiplication prémultipliée se fait par bandes
+  de 256 lignes dans un scratch borné (~`width*4*256`
+  octets) — fini le clone RGBA monolithique (~50 Mio
+  sur une page de 16 384 px). Les `IDAT` partent par
+  chunks de ~256 Kio. API additive `encode_png_to(W:
+  Write)` : le flux peut écrire directement vers une
+  réponse HTTP/SSE sans matérialiser le `Vec`.
+  Tests : équivalence bytes `encode_png`/`encode_png_to`,
+  décodage pixel-exact en travers de la frontière de
+  bande, démultiplication (a=0 → noir, 128/128 → 255).
+  Reste ouvert dans le ticket : validation de
+  `DAMAGE_INFLATE_CSS` (voir dette ci-dessous).
   **Dette consignée** :
   `DAMAGE_INFLATE_CSS = 2` est une borne jamais validée
   par mutation — les tests couvrent l'AA des formes

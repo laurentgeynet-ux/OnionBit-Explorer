@@ -186,6 +186,64 @@ fn png_encode_produit_des_octets() {
     assert_eq!(&png[..4], &[137, 80, 78, 71], "signature PNG");
 }
 
+// ── PNG streamé par bandes (R-37) ───────────────────────────
+
+#[test]
+fn png_bande_encode_to_identique_au_vec() {
+    // `encode_png_to` (flux `Write` quelconque) et
+    // `encode_png` (collecte `Vec`) produisent le même flux
+    // d'octets.
+    let f = frame(
+        "<div id=d></div>",
+        "#d{background-color:#123456;width:60px;height:60px}",
+    );
+    let via_vec = f.encode_png().expect("png");
+    let mut direct = Vec::new();
+    assert!(f.encode_png_to(&mut direct), "encode_png_to ok");
+    assert_eq!(via_vec, direct);
+}
+
+#[test]
+fn png_bande_multi_bandes_decodent_les_memes_pixels() {
+    // Frame plus haute que la bande d'encodage (256 lignes)
+    // → plusieurs `write_image_data` ; le décodage doit
+    // rendre les pixels exacts de part et d'autre de la
+    // frontière de bande.
+    let f = frame(
+        "<div id=a></div><div id=b></div>",
+        "#a{background-color:#ff0000;width:40px;height:200px}\
+         #b{background-color:#00ff00;width:40px;height:200px}",
+    );
+    assert!(f.height > 256, "fixture multi-bandes : {}", f.height);
+    let png = f.encode_png().expect("png");
+    let img = image::load_from_memory(&png)
+        .expect("png décodable")
+        .to_rgba8();
+    assert_eq!(img.dimensions(), (f.width, f.height));
+    assert_eq!(img.get_pixel(10, 100).0, [255, 0, 0, 255], "bande 1");
+    assert_eq!(img.get_pixel(10, 300).0, [0, 255, 0, 255], "bande 2");
+}
+
+#[test]
+fn png_bande_demultiplie_les_pixels() {
+    // Prémultiplié → PNG non prémultiplié : alpha 0 → noir,
+    // alpha partiel → canal remonté (128/128 → 255).
+    let mut f = Frame {
+        width: 2,
+        height: 1,
+        pixels: vec![0; 8],
+        scale: 1.0,
+    };
+    f.pixels[..4].copy_from_slice(&[128, 0, 0, 128]);
+    f.pixels[4..8].copy_from_slice(&[9, 9, 9, 0]);
+    let png = f.encode_png().expect("png");
+    let img = image::load_from_memory(&png)
+        .expect("png décodable")
+        .to_rgba8();
+    assert_eq!(img.get_pixel(0, 0).0, [255, 0, 0, 128]);
+    assert_eq!(img.get_pixel(1, 0).0, [0, 0, 0, 0]);
+}
+
 // ── transform (étape 42) ──────────────────────────────────────
 
 #[test]

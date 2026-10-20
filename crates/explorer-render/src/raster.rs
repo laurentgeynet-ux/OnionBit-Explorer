@@ -19,7 +19,6 @@
 
 use explorer_css::value::Color;
 use explorer_layout::font::{FontRequest, FontSource, Glyph, ShapedRun};
-use image::ImageEncoder;
 use tiny_skia::{FillRule, Mask, Paint, PathBuilder, Pixmap, Point, Rect, Transform};
 
 use crate::display::{BorderStyle, DisplayItem, DisplayList};
@@ -39,42 +38,71 @@ pub struct Frame {
     pub scale: f32,
 }
 
+/// Hauteur d'une bande d'encodage PNG — borne la copie
+/// démultipliée (~`width*4*PNG_BAND_ROWS` octets au lieu de
+/// toute la frame, R-37).
+const PNG_BAND_ROWS: usize = 256;
+/// Taille cible des chunks `IDAT` émis par le flux PNG.
+const PNG_IDAT_TARGET: usize = 256 * 1024;
+
 impl Frame {
-    /// Encode la frame en PNG.
+    /// Encode la frame en PNG (buffer complet).
     ///
-    /// Les pixels sont **prémultipliés** (convention tiny-skia) :
-    /// démultiplication avant encodage, comme
+    /// Même encodage streamé que [`Frame::encode_png_to`],
+    /// ici collecté dans un `Vec`.
+    #[must_use]
+    pub fn encode_png(&self) -> Option<Vec<u8>> {
+        let mut out = Vec::new();
+        self.encode_png_to(&mut out).then_some(out)
+    }
+
+    /// Encode la frame en PNG dans `w`, streamé par bandes.
+    ///
+    /// Les pixels sont **prémultipliés** (convention
+    /// tiny-skia) : démultiplication par bande de
+    /// `PNG_BAND_ROWS` lignes avant écriture, comme
     /// `Pixmap::encode_png`. Compression `Fast` (fdeflate —
     /// R-33b : l'encodeur par défaut coûtait ~4 s sur une
     /// frame de page lourde, poste dominant du repaint
-    /// progressif).
-    #[must_use]
-    pub fn encode_png(&self) -> Option<Vec<u8>> {
-        let mut rgba = self.pixels.clone();
-        for px in rgba.chunks_exact_mut(4) {
-            let a = u32::from(px[3]);
-            if a == 0 {
-                px[..3].fill(0);
-            } else if a < 255 {
-                for c in &mut px[..3] {
-                    *c = ((u32::from(*c) * 255 + a / 2) / a).min(255) as u8;
+    /// progressif). R-37 : fini le clone RGBA monolithique
+    /// (~50 Mio sur une page haute) — le scratch démultiplié
+    /// reste borné à une bande et les `IDAT` partent par
+    /// chunks de ~`PNG_IDAT_TARGET` octets.
+    pub fn encode_png_to<W: std::io::Write>(&self, w: W) -> bool {
+        use std::io::Write as _;
+        let mut enc = png::Encoder::new(w, self.width, self.height);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.set_compression(png::Compression::Fast);
+        enc.set_filter(png::Filter::NoFilter);
+        let Ok(mut writer) = enc.write_header() else {
+            return false;
+        };
+        let ok = (|| {
+            let mut stream = writer.stream_writer_with_size(PNG_IDAT_TARGET).ok()?;
+            let row_len = self.width as usize * 4;
+            let h = self.height as usize;
+            let mut band = Vec::with_capacity(row_len * PNG_BAND_ROWS);
+            for y0 in (0..h).step_by(PNG_BAND_ROWS) {
+                let rows = PNG_BAND_ROWS.min(h - y0);
+                band.clear();
+                band.extend_from_slice(&self.pixels[y0 * row_len..(y0 + rows) * row_len]);
+                for px in band.chunks_exact_mut(4) {
+                    let a = u32::from(px[3]);
+                    if a == 0 {
+                        px[..3].fill(0);
+                    } else if a < 255 {
+                        for c in &mut px[..3] {
+                            *c = ((u32::from(*c) * 255 + a / 2) / a).min(255) as u8;
+                        }
+                    }
                 }
+                stream.write_all(&band).ok()?;
             }
-        }
-        let mut out = Vec::new();
-        image::codecs::png::PngEncoder::new_with_quality(
-            &mut out,
-            image::codecs::png::CompressionType::Fast,
-            image::codecs::png::FilterType::NoFilter,
-        )
-        .write_image(
-            &rgba,
-            self.width,
-            self.height,
-            image::ExtendedColorType::Rgba8,
-        )
-        .ok()?;
-        Some(out)
+            stream.finish().ok()?;
+            Some(())
+        })();
+        ok.is_some() && writer.finish().is_ok()
     }
 }
 

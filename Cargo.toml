@@ -117,6 +117,10 @@ psl = "2"
 # référence pur Rust (png/jpeg/gif/webp embarqués, aucun *-sys) ;
 # features réduites aux formats du MVP.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
+# Encodeur PNG streamé explorer-render (R-37) — `png` (piston)
+# est déjà tiré par `image` : même version, backend fdeflate
+# pur Rust identique à CompressionType::Fast.
+png = "0.18"
 # SVG statique explorer-render (étape 45) — `resvg`/`usvg` sont
 # la référence pur Rust (tiny-skia en dessous, aucun *-sys) ;
 # version appariée à notre tiny-skia 0.11.

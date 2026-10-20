@@ -652,6 +652,7 @@ dependencies = [
  "flate2",
  "image",
  "owned_ttf_parser",
+ "png 0.18.1",
  "resvg",
  "tiny-skia",
  "ttf-parser",

@@ -106,6 +106,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   séparé consigné en roadmap). Tests : équivalence pixels
   passe cachée/neuve (plein + dirty), réutilisation face
   `Arc`, vidage à révision changée.
+- **R-37 (résidu) — encodage PNG streamé par bandes** :
+  `Frame::encode_png` réécrit sur `png::StreamWriter`
+  (nouvelle dep directe `png` 0.18 — déjà tirée par
+  `image`, backend fdeflate identique à
+  `CompressionType::Fast`). La démultiplication
+  prémultipliée se fait par bandes de 256 lignes dans un
+  scratch borné (~`width*4*256` octets) — fini le clone
+  RGBA monolithique (~50 Mio sur une page de 16 384 px) ;
+  les `IDAT` partent par chunks de ~256 Kio. API additive
+  `Frame::encode_png_to(W: Write)` : écriture directe vers
+  une réponse HTTP/SSE sans matérialiser le `Vec`.
+  Tests : équivalence bytes `encode_png`/`encode_png_to`,
+  décodage pixel-exact en travers de la frontière de
+  bande, démultiplication (alpha 0 → noir, 128/128 → 255).
+  Reste ouvert : validation de `DAMAGE_INFLATE_CSS` par
+  fixture à overhang mesuré ou bounds `ttf-parser`.
 
 ### Fixed
 

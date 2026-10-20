@@ -156,10 +156,7 @@ fn perf_cache_chaud_vs_neuf() {
     use std::fmt::Write;
     let mut html = String::new();
     for i in 0..40 {
-        let _ = write!(
-            html,
-            "<p>ligne {i} de texte assez longue pour shaper</p>"
-        );
+        let _ = write!(html, "<p>ligne {i} de texte assez longue pour shaper</p>");
     }
     let list = list_of(&html, "body{margin:0} p{font-size:14px;margin:2px 0}");
     let fonts = fonts();
