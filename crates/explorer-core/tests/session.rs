@@ -1174,7 +1174,7 @@ async fn img_renders_decoded_bitmap() {
     t.route(
         "/s",
         200,
-        "<html><head><style>#b{background-color:#ff0000;\
+        "<html><head><style>#b{display:inline-block;background-color:#ff0000;\
          width:2px;height:2px}</style></head>\
          <body><div id=\"b\"></div></body></html>",
     );
@@ -1317,9 +1317,10 @@ async fn form_post_submit_sends_urlencoded_body() {
     t.route("/doit", 200, "<html><body>done</body></html>");
     let id = s.open_tab();
     s.navigate(id, "http://h.test/f").await.unwrap();
-    // Bouton : dernier div (~y 160-185 sous la textarea 4em).
+    // Bouton : dernier div (~y 172-195 sous la textarea 4em
+    // — le strut §10.8.1 élargit chaque line box).
     let out = s
-        .handle_input(id, InputEvent::Click { x: 10.0, y: 170.0 })
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 183.0 })
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Navigated);
@@ -3811,7 +3812,7 @@ async fn post_history_entry_replays_request() {
     s.navigate(id, "http://h.test/f").await.unwrap();
     // Bouton submit → POST /doit (corps urlencodé).
     let out = s
-        .handle_input(id, InputEvent::Click { x: 10.0, y: 170.0 })
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 183.0 })
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Navigated);
@@ -4322,7 +4323,7 @@ async fn data_url_images_paint_inline() {
         200,
         Box::leak(
             format!(
-                "<html><head><style>#b{{background-image:url(\"data:image/png,{enc}\");\
+                "<html><head><style>#b{{display:inline-block;background-image:url(\"data:image/png,{enc}\");\
                  width:2px;height:2px}}</style></head><body><div id=\"b\"></div></body></html>"
             )
             .into_boxed_str(),
@@ -4333,7 +4334,7 @@ async fn data_url_images_paint_inline() {
     tr.route(
         "/s",
         200,
-        "<html><head><style>#b{background-color:#ff0000;\
+        "<html><head><style>#b{display:inline-block;background-color:#ff0000;\
          width:2px;height:2px}</style></head>\
          <body><div id=\"b\"></div></body></html>",
     );

@@ -149,7 +149,12 @@ pub(crate) fn layout_inline(
     size_atomics(bx, w, cb_h, ctx, fs, abs_cb, &mut atomics);
 
     let items = collect_items(bx);
-    let mut lines = break_into_lines(&items, &atomics, x, y, w, ctx, fs, fl);
+    // Strut du conteneur (§10.8.1) : `line-height` de la
+    // boîte — plancher de chaque ligne (`.chin` Acid2 :
+    // `line-height:1em` tient la rangée à 12 px même si le
+    // texte dedans fait 4 px).
+    let strut_lh = line_height_of(&st, fs);
+    let mut lines = break_into_lines(&items, &atomics, x, y, w, ctx, fs, fl, strut_lh);
     align_lines(&st, &mut lines, x, w, fl);
     // Atomes d'abord : leur sous-arbre a été posé en (0,0)
     // par `size_atomics` — translation au rect du fragment
@@ -459,14 +464,22 @@ struct LineAcc {
     max_lh: f32,
     /// Baseline max.
     max_base: f32,
+    /// Strut du conteneur (§10.8.1) : chaque ligne démarre
+    /// avec une boîte invisible de la `line-height` du bloc —
+    /// elle plancherde la hauteur même sans fragment élevé.
+    strut_lh: f32,
+    /// Baseline du strut (même modèle que les fragments).
+    strut_base: f32,
 }
 
 impl LineAcc {
-    fn new() -> Self {
+    fn new(strut_lh: f32, strut_base: f32) -> Self {
         Self {
             frags: Vec::new(),
             max_lh: 0.0,
             max_base: 0.0,
+            strut_lh,
+            strut_base,
         }
     }
 
@@ -497,7 +510,10 @@ impl LineAcc {
         if self.is_empty() {
             return;
         }
-        let base = self.max_base;
+        // Le strut pose la baseline ET la hauteur plancher
+        // de la ligne (§10.8.1) — un fragment bas s'y aligne
+        // comme sur un caractère de la fonte du conteneur.
+        let base = self.max_base.max(self.strut_base);
         let min_x = self
             .frags
             .iter()
@@ -508,7 +524,7 @@ impl LineAcc {
             .iter()
             .map(|f| f.rect.x + f.rect.width)
             .fold(0.0_f32, f32::max);
-        let h = self.max_lh.max(base);
+        let h = self.max_lh.max(self.strut_lh).max(base);
         for f in &mut self.frags {
             // `vertical-align` des atomes (inline-block,
             // remplacés) : `top`/`bottom` ancrent la **margin
@@ -560,13 +576,19 @@ fn break_into_lines(
     ctx: &BlockCtx,
     parent_fs: f32,
     fl: &FloatCtx,
+    strut_lh: f32,
 ) -> Vec<LineBox> {
     /// Requêtes de bande bornées (contenu hostile : les
     /// flottants sont finis, chaque descente en franchit un).
     const MAX_BAND_STEPS: u32 = 128;
 
     let mut lines = Vec::new();
-    let mut acc = LineAcc::new();
+    // Baseline du strut = demi-leading + ascent (comme un
+    // fragment texte de la fonte du conteneur) — avec
+    // `line-height: 0` elle tombe sous l'em box et ne
+    // relève ni la baseline ni la hauteur de la ligne.
+    let strut_base = (strut_lh - parent_fs).mul_add(0.5, parent_fs * 0.8);
+    let mut acc = LineAcc::new(strut_lh, strut_base);
     let (mut line_x, mut line_w) = fl.band(y, x, w);
     let mut cursor_x = line_x;
     let mut cursor_y = y;

@@ -92,7 +92,12 @@ fn collect_css(dom: &Dom) -> String {
 }
 
 /// Pipeline complet : HTML → cascade → layout → raster.
-fn render(src: &str) -> Option<Frame> {
+/// `scroll` émule le défilement du viewport : le contenu en
+/// flux remonte, les boîtes `position:fixed` et les fonds
+/// `background-attachment:fixed` restent ancrés au viewport —
+/// comme la capture de référence (le visage rempli l'écran,
+/// la barre fixe recouvrant son sommet).
+fn render(src: &str, scroll: f32) -> Option<Frame> {
     let dom = TreeBuilder::parse(src);
     let mut eng = StyleEngine::new();
     eng.add_css(&collect_css(&dom), Origin::Author);
@@ -120,7 +125,7 @@ fn render(src: &str) -> Option<Frame> {
             ..BlockCtx::default()
         },
     );
-    let list = build_display_list_full(&bx, VIEW_W, VIEW_H, 0.0, &images);
+    let list = build_display_list_full(&bx, VIEW_W, VIEW_H, scroll, &images);
     rasterize(&list, &Ahem, 1.0)
 }
 
@@ -184,36 +189,15 @@ fn align_score(
     hit
 }
 
-#[test]
-fn acid2_robustesse_et_score_informatif() {
-    let dir = data_dir();
-    let src = std::fs::read_to_string(dir.join("acid2.html")).expect("acid2.html");
-    // Cliquet robustesse : rasterise sans panic, produit une frame.
-    let frame = render(&src).expect("la page Acid2 doit produire une frame");
-
-    // PNG de la frame complète pour inspection humaine.
-    if let Some(png) = frame.encode_png() {
-        let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
-        let _ = std::fs::create_dir_all(&out);
-        let _ = std::fs::write(out.join("acid2.png"), png);
-    }
-
-    // Référence officielle (le visage attendu, 168×168).
-    let ref_img = image::ImageReader::open(dir.join("acid2-reference.png"))
-        .expect("acid2-reference.png")
-        .decode()
-        .expect("décodage référence")
-        .to_rgb8();
-    let samples = ref_samples(ref_img.as_raw());
-
-    // Recherche du meilleur alignement — pas grossier (8 px)
-    // puis raffinement ±8 px autour du maximum.
-    let limit_y = frame.height.saturating_sub(168);
-    let limit_x = frame.width.saturating_sub(168);
+/// Recherche du meilleur alignement — pas grossier (8 px)
+/// puis raffinement ±8 px autour du maximum.
+fn best_align(f: &Frame, samples: &[(u32, u32, u8, u8, u8)]) -> (usize, u32, u32) {
+    let limit_y = f.height.saturating_sub(168);
+    let limit_x = f.width.saturating_sub(168);
     let mut best = (0usize, 0u32, 0u32);
     for oy in (0..limit_y).step_by(8) {
         for ox in (0..limit_x).step_by(8) {
-            let hit = align_score(&frame, &samples, ox, oy, best.0);
+            let hit = align_score(f, samples, ox, oy, best.0);
             if hit > best.0 {
                 best = (hit, ox, oy);
             }
@@ -222,18 +206,62 @@ fn acid2_robustesse_et_score_informatif() {
     let (coarse_x, coarse_y) = (best.1, best.2);
     for oy in coarse_y.saturating_sub(8)..(coarse_y + 8).min(limit_y) {
         for ox in coarse_x.saturating_sub(8)..(coarse_x + 8).min(limit_x) {
-            let hit = align_score(&frame, &samples, ox, oy, best.0);
+            let hit = align_score(f, samples, ox, oy, best.0);
             if hit > best.0 {
                 best = (hit, ox, oy);
             }
         }
     }
-    let (hit, ox, oy) = best;
+    best
+}
+
+/// `top:9em` de la barre `.picture p` (em = 12 px) — la
+/// capture de référence a été faite document scrollé de
+/// sorte que le visage commence sous la barre fixe.
+const FIXED_BAR_TOP: f32 = 108.0;
+
+#[test]
+fn acid2_robustesse_et_score_informatif() {
+    let dir = data_dir();
+    let src = std::fs::read_to_string(dir.join("acid2.html")).expect("acid2.html");
+    // Référence officielle (le visage attendu, 168×168).
+    let ref_img = image::ImageReader::open(dir.join("acid2-reference.png"))
+        .expect("acid2-reference.png")
+        .decode()
+        .expect("décodage référence")
+        .to_rgb8();
+    let samples = ref_samples(ref_img.as_raw());
+
+    // Cliquet robustesse : rasterise sans panic, produit une frame.
+    // Passe 1 : sans scroll — localise le visage (doc coords).
+    let frame0 = render(&src, 0.0).expect("la page Acid2 doit produire une frame");
+    let (_, _ox0, oy0) = best_align(&frame0, &samples);
+
+    // Passe 2 : la référence a été capturée avec le document
+    // scrollé — la barre `position:fixed` (top:9em) recouvre
+    // le sommet du visage. On émule ce scroll : le contenu
+    // remonte, la barre reste à 108 px du haut du viewport.
+    #[allow(clippy::cast_precision_loss)]
+    let scroll = (oy0 as f32 - FIXED_BAR_TOP).max(0.0);
+    let frame = if scroll > 0.0 {
+        render(&src, scroll).expect("frame scrollée")
+    } else {
+        frame0
+    };
+
+    // PNG de la frame complète pour inspection humaine.
+    if let Some(png) = frame.encode_png() {
+        let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
+        let _ = std::fs::create_dir_all(&out);
+        let _ = std::fs::write(out.join("acid2.png"), png);
+    }
+
+    let (hit, ox, oy) = best_align(&frame, &samples);
     #[allow(clippy::cast_precision_loss)]
     let rate = hit as f32 * 100.0 / samples.len().max(1) as f32;
     eprintln!(
         "\n=== Acid2 (informatif) ===\n\
-         frame {VIEW_W}x{VIEW_H} — meilleur alignement visage à \
+         frame {VIEW_W}x{VIEW_H} scroll {scroll:.0} — meilleur alignement visage à \
          ({ox},{oy}) : {hit}/{} pixels de structure ({rate:.1}%)",
         samples.len(),
     );

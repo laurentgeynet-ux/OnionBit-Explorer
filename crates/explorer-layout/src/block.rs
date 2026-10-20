@@ -557,12 +557,34 @@ fn transparent_candidate(
 /// `(pos, neg)` — identique à [`escaped_bottom_margin`] mais
 /// conserve les deux bornes de la chaîne (§8.3.1). Un
 /// dernier enfant transparent contribue sa chaîne complète.
+/// La marge basse du dernier fils in-flow s'échappe-t-elle
+/// sous la boîte ? (§8.3.1) — pas de padding/bordure bas,
+/// pas de BFC, `height:auto` (une hauteur définie cloue la
+/// boîte : la marge du fils reste dans son contenu ; un
+/// `height:%` non résoluble retombe sur `auto`, repli
+/// tolérant). Miroir bas de [`top_adjoining`].
+fn bottom_adjoining(bx: &LayoutBox, cb_w: f32, fs: f32, ctx: &BlockCtx) -> bool {
+    let st = &bx.style;
+    let h_spec = if st.get("height").is_some_and(|v| v.contains('%')) {
+        None
+    } else {
+        css_px(st, "height", 0.0, fs, ctx)
+    };
+    bx.position == Position::Static
+        && bx.float == Float::None
+        && !establishes_bfc(st)
+        && side_px(st, "padding-bottom", cb_w, fs, ctx, 0.0) <= 0.0
+        && border_px(st, "border-bottom-width", cb_w, fs, ctx) <= 0.0
+        && !matches!(st.get("clear"), Some("left" | "right" | "both"))
+        && h_spec.is_none_or(|h| h <= 0.0)
+}
+
 fn escaped_bottom_run(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx) -> MarginRun {
     let st = &bx.style;
     let fs = font_size_px(st, parent_fs, ctx);
     let mut run = MarginRun::default();
     run.add(margins(st, cb_w, fs, ctx).bottom);
-    if margin_transparent(bx, cb_w, fs, ctx) {
+    if bottom_adjoining(bx, cb_w, fs, ctx) {
         if let Some(c) = bx.children.iter().rev().find(|c| {
             !matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock)
                 && c.position == Position::Static
@@ -808,11 +830,13 @@ fn layout_block_inner(
                 .or_else(|| crate::intrinsic::intrinsic_size_px(&st, prop, bx, cb_w, fs, ctx))
         };
         let mut w = content_w;
-        if let Some(mn) = bound_px("min-width") {
-            w = w.max(mn);
-        }
+        // §10.4 : `max-width` avant `min-width` — le min
+        // gagne les conflits (miroir de `min|max-height`).
         if let Some(mx) = bound_px("max-width") {
             w = w.min(mx);
+        }
+        if let Some(mn) = bound_px("min-width") {
+            w = w.max(mn);
         }
         w
     };
@@ -891,11 +915,14 @@ fn layout_block_inner(
             css_px(&st, prop, 0.0, fs, ctx)
         }
     };
-    if let Some(mn) = vert_spec("min-height") {
-        used_h = used_h.max(mn);
-    }
+    // §10.7 : `max-height` s'applique AVANT `min-height` —
+    // en cas de conflit (`min > max`), le min gagne (Acid2
+    // `.picture p` : 8px → cap 2mm → plancher 1em → 12).
     if let Some(mx) = vert_spec("max-height") {
         used_h = used_h.min(mx);
+    }
+    if let Some(mn) = vert_spec("min-height") {
+        used_h = used_h.max(mn);
     }
     // La boîte de contenu est déjà bornée par `min|max-width`
     // en amont de la pose des enfants — le rect suit.
@@ -1386,10 +1413,7 @@ fn flow_children(
     // pas de BFC, hauteur auto — sinon elle reste DANS la
     // hauteur de contenu : la margin box du dernier fils est
     // mesurée (ref `border:1px` des réftests flex-direction).
-    let adjoining_bottom = !own_bfc
-        && cb_h.is_none()
-        && side_px(&bx.style, "padding-bottom", content_w, fs, ctx, 0.0) <= 0.0
-        && border_px(&bx.style, "border-bottom-width", content_w, fs, ctx) <= 0.0;
+    let adjoining_bottom = !own_bfc && cb_h.is_none() && bottom_adjoining(bx, content_w, fs, ctx);
     if !adjoining_bottom {
         if let Some(run) = prev_margin {
             cursor = (cursor + run.value()).max(start_cursor);
@@ -1575,8 +1599,24 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
     // **padding box** de l'ancêtre positionné (§10.1) — la
     // bordure n'en fait pas partie (Acid2 `.picture` a une
     // bordure d'1em : ancrer à la border box décale tout de
-    // 12 px).
-    let own_cb = if bx.position == Position::Static {
+    // 12 px). Style lu directement : une boîte inline
+    // `position:relative` n'a jamais ses métadonnées posées
+    // (`apply_layout_metadata` est réservé aux blocs) — son
+    // champ `position` resterait `Static` (R-31).
+    // Bloc conteneur des enfants absolus de cette boîte :
+    // **padding box** de l'ancêtre positionné (§10.1) — la
+    // bordure n'en fait pas partie (Acid2 `.picture` a une
+    // bordure d'1em : ancrer à la border box décale tout de
+    // 12 px). Champ `position` OU style non-`static` : une
+    // boîte inline `position:relative` n'a jamais ses
+    // métadonnées posées (`apply_layout_metadata` est réservé
+    // aux blocs) — son champ resterait `Static` (R-31). Les
+    // boîtes anonymes/texte clonent le style du parent mais
+    // ne sont JAMAIS des blocs conteneurs (R-22).
+    let own_cb = if (bx.position == Position::Static
+        && bx.style.get("position").is_none_or(|p| p == "static"))
+        || matches!(bx.kind, BoxKind::Text | BoxKind::AnonymousBlock)
+    {
         cb
     } else {
         let bl = border_px(&bx.style, "border-left-width", cb.width, own_fs, ctx);

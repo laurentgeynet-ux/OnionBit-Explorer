@@ -99,7 +99,15 @@ fn image_item_blits_pixels() {
     assert!(r.width >= 2.0 && r.height >= 2.0, "rect = {r:?}");
 
     let frame = rasterize(&list, &NullFonts, 1.0).expect("frame");
-    assert_eq!(&frame.pixels[..4], &[255, 0, 0, 255]);
+    // Le strut §10.8.1 peut décaler la ligne — on sonde le
+    // centre du rect déclaré par l'item, pas (0,0).
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let (cx, cy) = (
+        (r.x + r.width / 2.0) as usize,
+        (r.y + r.height / 2.0) as usize,
+    );
+    let px = &frame.pixels[(cy * frame.width as usize + cx) * 4..][..4];
+    assert_eq!(px, &[255, 0, 0, 255], "rect = {r:?}");
 }
 
 #[test]

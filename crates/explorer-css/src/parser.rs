@@ -330,7 +330,7 @@ impl<'t> Parser<'t> {
                     self.pos += 1;
                     if first && name.eq_ignore_ascii_case("charset") {
                         // `@charset "x";` — lu et rangé.
-                        let prelude = self.consume_prelude();
+                        let prelude = self.consume_prelude(true);
                         self.consume_semicolon();
                         sheet.charset = Some(extract_first_string(&prelude));
                     } else if name.eq_ignore_ascii_case("import") {
@@ -364,7 +364,7 @@ impl<'t> Parser<'t> {
 
     /// At-rule : prélude jusqu'à `;` ou `{`, puis bloc selon nom.
     fn at_rule(&mut self, name: &str) -> Rule {
-        let prelude = self.consume_prelude();
+        let prelude = self.consume_prelude(true);
         match self.peek() {
             Some(Token::Semicolon) => {
                 self.pos += 1;
@@ -437,12 +437,19 @@ impl<'t> Parser<'t> {
 
     /// Prélude : texte jusqu'à `;`/`{`/EOF (imbrications `()[]`
     /// suivies — une `)`/`]` orpheline arrête).
-    fn consume_prelude(&mut self) -> String {
+    /// `semicolon_ends` : pour les at-rules (`@import x;`) le
+    /// `;` borne le prélude. Pour une règle **qualifiée**, CSS
+    /// Syntax §5.4.4 le consomme *dans* le prélude — un `;`
+    /// orphelin devient donc un prélude invalide qui emporte
+    /// la règle entière (`.a{} ; .b{}` → `.b` tombe, cas Acid2
+    /// `.parser { height: 3em }` avalé).
+    fn consume_prelude(&mut self, semicolon_ends: bool) -> String {
         self.buf.clear();
         let mut parens = 0i32;
         while let Some(t) = self.peek() {
             match t {
-                Token::Semicolon | Token::OpenBrace if parens == 0 => break,
+                Token::Semicolon if parens == 0 && semicolon_ends => break,
+                Token::OpenBrace if parens == 0 => break,
                 // `Function` porte son `(` : il ouvre un niveau.
                 Token::Function(_) | Token::OpenParen | Token::OpenBracket => {
                     parens += 1;
@@ -602,7 +609,7 @@ impl<'t> Parser<'t> {
     /// Règle qualifiée : prélude jusqu'à `{` puis déclarations.
     /// Invalide → `None` (le prélude a déjà été sauté).
     fn qualified_rule(&mut self) -> Option<Rule> {
-        let prelude = self.consume_prelude();
+        let prelude = self.consume_prelude(false);
         if let Some(Token::OpenBrace) = self.peek() {
             self.pos += 1;
             let declarations = self.declaration_block();
@@ -614,11 +621,8 @@ impl<'t> Parser<'t> {
                 declarations,
             }))
         } else {
-            // Pas de bloc → règle abandonnée (spec) ; le `;`
-            // terminal du prélude est consommé.
-            if matches!(self.peek(), Some(Token::Semicolon)) {
-                self.pos += 1;
-            }
+            // Pas de bloc → règle abandonnée (le prélude court
+            // jusqu'à `{` ou EOF — `;` ne le borne plus).
             None
         }
     }
@@ -636,7 +640,7 @@ impl<'t> Parser<'t> {
                     break;
                 }
                 Some(_) => {
-                    let sel = self.consume_prelude();
+                    let sel = self.consume_prelude(true);
                     if matches!(self.peek(), Some(Token::OpenBrace)) {
                         self.pos += 1;
                         let decls = self.declaration_block();
