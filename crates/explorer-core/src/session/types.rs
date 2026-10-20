@@ -105,6 +105,192 @@ pub enum CoreEvent {
         /// Chemin du fichier écrit.
         path: String,
     },
+    /// Un élément `<video>`/`<audio>` lisible est présent
+    /// sur la page (étape 71b, ADR-0024) — l'hôte peut
+    /// `claim` la surface pour y composite sa lecture ;
+    /// sans claim elle reste un stub ADR-0023. `rect` est
+    /// en **px CSS de document** (l'hôte soustrait
+    /// `scroll_y` pour positionner son overlay) ; `audio`
+    /// sans `controls` arrive à `rect` 0×0 — pipeline de
+    /// lecture seul, rien à positionner.
+    MediaOffered {
+        /// Onglet de la page.
+        tab: TabId,
+        /// Identifiant de la surface — unique par onglet et
+        /// par instance d'élément ; toute ré-offre (bfcache
+        /// restauré, élément ré-inséré) produit un nouvel id.
+        media: u64,
+        /// `video` ou `audio`.
+        kind: MediaKind,
+        /// Rectangle de la boîte remplacée (px CSS document).
+        rect: MediaRect,
+        /// Source résolue (URL absolue).
+        url: String,
+        /// Type MIME — attribut `type` ou suffixe d'URL,
+        /// `None` si inconnu.
+        mime: Option<String>,
+        /// L'hôte doit afficher son UI native.
+        controls: bool,
+        /// Lecture automatique demandée par la page.
+        autoplay: bool,
+    },
+    /// Le `rect` d'une surface offerte a changé (relayout,
+    /// resize). Coalescence à la cadence de peinture : au
+    /// plus un `MediaMoved` par frame produite, le dernier
+    /// rect connu gagne.
+    MediaMoved {
+        /// Onglet de la page.
+        tab: TabId,
+        /// Identifiant de la surface.
+        media: u64,
+        /// Nouveau rectangle (px CSS document).
+        rect: MediaRect,
+    },
+    /// Fin de vie d'une surface : retrait DOM de l'élément,
+    /// navigation, fermeture d'onglet. Un claim/state sur
+    /// cet id renvoie ensuite `410`.
+    MediaGone {
+        /// Onglet de la page.
+        tab: TabId,
+        /// Identifiant de la surface morte.
+        media: u64,
+    },
+    /// Ordre initié par la page JS (étape 71c) — relayé à
+    /// l'hôte claimé ; jamais émis sur une surface non
+    /// claimée.
+    MediaCommand {
+        /// Onglet de la page.
+        tab: TabId,
+        /// Identifiant de la surface.
+        media: u64,
+        /// Commande.
+        cmd: MediaCmd,
+    },
+}
+
+/// Genre d'une surface média offerte (étape 71b, ADR-0024).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaKind {
+    /// `<video>`.
+    Video,
+    /// `<audio>`.
+    Audio,
+}
+
+/// Rectangle d'une offre média — **px CSS de document**
+/// (l'hôte soustrait `scroll_y` pour son overlay ; contrat
+/// `docs/interface-equipes.md` § `MediaSurface`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MediaRect {
+    /// Abscisse (px).
+    pub x: f32,
+    /// Ordonnée (px).
+    pub y: f32,
+    /// Largeur (px).
+    pub w: f32,
+    /// Hauteur (px).
+    pub h: f32,
+}
+
+/// Commande média émise par la page JS, relayée à l'hôte
+/// claimé (contrat `MediaSurface`, étape 71b/c).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MediaCmd {
+    /// `play()`.
+    Play,
+    /// `pause()`.
+    Pause,
+    /// `currentTime = …` (millisecondes).
+    Seek {
+        /// Position cible.
+        ms: u64,
+    },
+    /// `volume = …` (0.0–1.0).
+    Volume {
+        /// Volume demandé.
+        v: f32,
+    },
+    /// `playbackRate = …`.
+    Rate {
+        /// Débit demandé.
+        r: f32,
+    },
+}
+
+/// État de lecture rapporté par l'hôte claimé (sens
+/// hôte → moteur, contrat `MediaSurface`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaHostState {
+    /// Lecture en cours — premier rapport = première frame
+    /// (résolution de `play()`).
+    Playing,
+    /// En pause.
+    Paused,
+    /// Fin de flux atteinte.
+    Ended,
+    /// Erreur hôte — `MediaReport::error` porte la cause.
+    Error,
+}
+
+/// Rapport `state` hôte → moteur : positions en
+/// millisecondes, `None` duration = flux sans durée connue.
+/// Battement borné ≤ 4 Hz (contrat `MediaSurface`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MediaReport {
+    /// Tête de lecture (ms).
+    pub position_ms: u64,
+    /// Durée totale (ms) si connue.
+    pub duration_ms: Option<u64>,
+    /// Fin de la zone tampon (ms).
+    pub buffered_ms: u64,
+    /// État de lecture.
+    pub state: MediaHostState,
+    /// Cause si `state == Error`.
+    pub error: Option<String>,
+}
+
+/// Fiche publique d'une surface média vivante (étape 71b)
+/// — exposée par `Session::media_list` et l'API (debug,
+/// parité FFI future).
+#[derive(Debug, Clone)]
+pub struct MediaOfferInfo {
+    /// Identifiant de la surface.
+    pub id: u64,
+    /// Onglet de la page.
+    pub tab: TabId,
+    /// `video` ou `audio`.
+    pub kind: MediaKind,
+    /// Rectangle (px CSS document).
+    pub rect: MediaRect,
+    /// Source résolue (URL absolue).
+    pub url: String,
+    /// Type MIME si connu.
+    pub mime: Option<String>,
+    /// UI native attendue.
+    pub controls: bool,
+    /// Lecture automatique demandée.
+    pub autoplay: bool,
+    /// Codecs déclarés par l'hôte claimé, `None` = non
+    /// claimée (la surface reste un stub ADR-0023).
+    pub claim: Option<Vec<String>>,
+    /// Dernier état rapporté par l'hôte.
+    pub state: Option<MediaReport>,
+}
+
+/// Refus sur une surface média (étape 71b) — mappé `409`/
+/// `410` par la couche REST.
+#[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
+pub enum MediaError {
+    /// Identifiant mort (élément retiré, navigation,
+    /// onglet fermé) → `410 Gone`.
+    #[error("surface média inexistante ou morte")]
+    Dead,
+    /// Déjà claimée — premier arrivé gagne → `409 Conflict`.
+    #[error("surface média déjà claimée")]
+    Taken,
+    /// `state`/`release` exige un claim actif → `409`.
+    #[error("surface média non claimée")]
+    NotClaimed,
 }
 
 /// Fiche publique d'un téléchargement en attente (étape 70)

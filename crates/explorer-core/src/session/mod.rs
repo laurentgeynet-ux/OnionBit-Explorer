@@ -60,6 +60,8 @@ mod input;
 #[allow(clippy::wildcard_imports)]
 mod js_glue;
 #[allow(clippy::wildcard_imports)]
+mod media;
+#[allow(clippy::wildcard_imports)]
 mod nav_types;
 #[allow(clippy::wildcard_imports)]
 mod navigate;
@@ -95,6 +97,8 @@ pub(crate) use downloads::*;
 pub(crate) use find::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use forms::*;
+#[allow(clippy::wildcard_imports)]
+pub(crate) use media::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use nav_types::*;
 #[allow(clippy::wildcard_imports)]
@@ -285,6 +289,11 @@ pub(crate) struct Tab {
     /// entre deux peintures. Les synchros d'événements
     /// restent immédiates (clic = retour visuel attendu).
     sync_floor: Option<Instant>,
+    /// Surfaces média vivantes (étape 71b, ADR-0024) —
+    /// offres émises dans l'ordre du document, vidées à la
+    /// mort de la page (`close_media`) et jamais gelées :
+    /// une restauration bfcache ré-offre avec des ids neufs.
+    media: Vec<MediaSurface>,
 }
 
 /// Push d'attribut session→miroir tamponné pendant le
@@ -420,6 +429,9 @@ pub struct Session {
     /// consécutifs sont volontaires (toute nav en consomme
     /// un, document ou pas).
     next_download_id: u64,
+    /// Identifiants de surfaces média (étape 71b) — un id
+    /// par `MediaOffered`, jamais réutilisé dans la session.
+    next_media_id: u64,
     /// Répertoire par défaut des téléchargements acceptés
     /// sans chemin explicite — `None` = chemin requis.
     download_dir: Option<std::path::PathBuf>,
@@ -515,6 +527,7 @@ impl Session {
             pending_applies: std::collections::VecDeque::new(),
             downloads: HashMap::new(),
             next_download_id: 1,
+            next_media_id: 1,
             download_dir: None,
             max_download_bytes: cfg.max_download_bytes,
         }
@@ -649,6 +662,7 @@ impl Session {
                 js_pending_net: Vec::new(),
                 js_pending_attrs: Vec::new(),
                 sync_floor: None,
+                media: Vec::new(),
             },
         );
         let _ = self.events.send(CoreEvent::TabOpened { tab: id });
@@ -660,6 +674,9 @@ impl Session {
     /// # Errors
     /// [`CoreError::UnknownTab`] si l'onglet n'existe pas.
     pub fn close_tab(&mut self, tab: TabId) -> Result<(), CoreError> {
+        // Surfaces média : `MediaGone` avant `TabClosed`
+        // pour que l'hôte relâche ses pipelines (étape 71b).
+        self.close_media(tab);
         self.tabs.remove(&tab).ok_or(CoreError::UnknownTab(tab))?;
         // Requêtes script-initiées en vol : annulées — leurs
         // réponses éventuelles arriveraient à un onglet mort.

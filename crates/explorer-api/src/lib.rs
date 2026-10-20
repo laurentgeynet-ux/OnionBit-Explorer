@@ -89,6 +89,11 @@ pub fn router_with_egress(
         .route("/api/tabs/{id}/viewport", post(viewport))
         .route("/api/tabs/{id}/input", post(input))
         .route("/api/tabs/{id}/find", post(find))
+        .route("/api/tabs/{id}/media", get(list_media))
+        .route("/api/tabs/{id}/media/{mid}", get(get_media))
+        .route("/api/tabs/{id}/media/{mid}/claim", post(media_claim))
+        .route("/api/tabs/{id}/media/{mid}/release", post(media_release))
+        .route("/api/tabs/{id}/media/{mid}/state", post(media_state))
         .route("/api/tabs/{id}/downloads", get(list_downloads))
         .route(
             "/api/tabs/{id}/downloads/{dl}/accept",
@@ -139,7 +144,7 @@ async fn auth(want: String, req: axum::extract::Request, next: axum::middleware:
 }
 
 /// Corps d'erreur du contrat : `{"error":{handled,message}}`.
-fn err(status: StatusCode, e: &CoreError) -> Response {
+fn err(status: StatusCode, e: &impl std::fmt::Display) -> Response {
     (
         status,
         Json(serde_json::json!({
@@ -561,6 +566,152 @@ async fn decline_download(
     }
 }
 
+/// Sérialise une surface média (DTO du contrat
+/// `MediaSurface` — rect en px CSS document).
+fn media_json(m: &explorer_core::MediaOfferInfo) -> serde_json::Value {
+    let kind = match m.kind {
+        explorer_core::MediaKind::Video => "video",
+        explorer_core::MediaKind::Audio => "audio",
+    };
+    serde_json::json!({
+        "id": m.id, "tab": m.tab, "kind": kind,
+        "rect": { "x": m.rect.x, "y": m.rect.y, "w": m.rect.w, "h": m.rect.h },
+        "url": m.url, "mime": m.mime,
+        "controls": m.controls, "autoplay": m.autoplay,
+        "claimed": m.claim.is_some(),
+        "codecs": m.claim,
+        "state": m.state.as_ref().map(|r| serde_json::json!({
+            "position_ms": r.position_ms,
+            "duration_ms": r.duration_ms,
+            "buffered_ms": r.buffered_ms,
+            "state": media_host_state(r.state),
+            "error": r.error,
+        })),
+    })
+}
+
+/// `MediaHostState` → chaîne du contrat REST.
+fn media_host_state(s: explorer_core::MediaHostState) -> &'static str {
+    match s {
+        explorer_core::MediaHostState::Playing => "playing",
+        explorer_core::MediaHostState::Paused => "paused",
+        explorer_core::MediaHostState::Ended => "ended",
+        explorer_core::MediaHostState::Error => "error",
+    }
+}
+
+/// `MediaError` → statut HTTP du contrat (`410` id mort,
+/// `409` déjà claimée / non claimée).
+fn media_err(e: explorer_core::MediaError) -> Response {
+    let code = match e {
+        explorer_core::MediaError::Dead => StatusCode::GONE,
+        explorer_core::MediaError::Taken | explorer_core::MediaError::NotClaimed => {
+            StatusCode::CONFLICT
+        }
+    };
+    err(code, &e)
+}
+
+/// `GET /api/tabs/{id}/media` → surfaces média vivantes de
+/// l'onglet (étape 71b, contrat `MediaSurface`).
+async fn list_media(State(st): State<ApiState>, Path(id): Path<TabId>) -> impl IntoResponse {
+    let session = st.session.lock().await;
+    let v: Vec<_> = session.media_list(id).iter().map(media_json).collect();
+    Json(serde_json::json!({ "media": v }))
+}
+
+/// `GET /api/tabs/{id}/media/{mid}` → fiche d'une surface
+/// (diagnostics) — `410` si l'id est mort.
+async fn get_media(State(st): State<ApiState>, Path((id, mid)): Path<(TabId, u64)>) -> Response {
+    let session = st.session.lock().await;
+    match session.media_list(id).into_iter().find(|m| m.id == mid) {
+        Some(m) => Json(media_json(&m)).into_response(),
+        None => media_err(explorer_core::MediaError::Dead),
+    }
+}
+
+/// `POST /api/tabs/{id}/media/{mid}/claim` `{codecs: []}` —
+/// premier arrivé gagne : `200` claim acquis, `409` déjà
+/// claimée, `410` élément mort (étape 71b).
+async fn media_claim(
+    State(st): State<ApiState>,
+    Path((id, mid)): Path<(TabId, u64)>,
+    body: Option<Json<serde_json::Value>>,
+) -> Response {
+    let codecs: Vec<String> = body
+        .and_then(|Json(v)| {
+            v.get("codecs").and_then(|c| c.as_array()).map(|a| {
+                a.iter()
+                    .filter_map(|c| c.as_str().map(String::from))
+                    .collect()
+            })
+        })
+        .unwrap_or_default();
+    let mut session = st.session.lock().await;
+    match session.media_claim(id, mid, codecs) {
+        Ok(()) => Json(serde_json::json!({ "claimed": true })).into_response(),
+        Err(e) => media_err(e),
+    }
+}
+
+/// `POST /api/tabs/{id}/media/{mid}/release` — l'hôte se
+/// détache ; la surface retombe sur les stubs ADR-0023.
+async fn media_release(
+    State(st): State<ApiState>,
+    Path((id, mid)): Path<(TabId, u64)>,
+) -> Response {
+    let mut session = st.session.lock().await;
+    match session.media_release(id, mid) {
+        Ok(()) => Json(serde_json::json!({ "released": true })).into_response(),
+        Err(e) => media_err(e),
+    }
+}
+
+/// `POST /api/tabs/{id}/media/{mid}/state`
+/// `{position_ms, duration_ms, buffered_ms, state, error?}`
+/// — rapport de lecture hôte (battement ≤ 4 Hz côté hôte,
+/// étape 71b ; reflet JS à 71c).
+async fn media_state(
+    State(st): State<ApiState>,
+    Path((id, mid)): Path<(TabId, u64)>,
+    body: Option<Json<serde_json::Value>>,
+) -> Response {
+    let Some(Json(v)) = body else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            &std::io::Error::other("corps JSON requis"),
+        );
+    };
+    let u64f = |k: &str| v.get(k).and_then(serde_json::Value::as_u64);
+    let state = match v.get("state").and_then(serde_json::Value::as_str) {
+        Some("playing") => explorer_core::MediaHostState::Playing,
+        Some("paused") => explorer_core::MediaHostState::Paused,
+        Some("ended") => explorer_core::MediaHostState::Ended,
+        Some("error") => explorer_core::MediaHostState::Error,
+        _ => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                &std::io::Error::other("state ∈ playing|paused|ended|error"),
+            )
+        }
+    };
+    let report = explorer_core::MediaReport {
+        position_ms: u64f("position_ms").unwrap_or(0),
+        duration_ms: u64f("duration_ms"),
+        buffered_ms: u64f("buffered_ms").unwrap_or(0),
+        state,
+        error: v
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .map(String::from),
+    };
+    let mut session = st.session.lock().await;
+    match session.media_report(id, mid, report) {
+        Ok(()) => Json(serde_json::json!({ "reported": true })).into_response(),
+        Err(e) => media_err(e),
+    }
+}
+
 /// `GET /api/bookmarks` → `[{url, title}]`.
 async fn list_bookmarks(State(st): State<ApiState>) -> impl IntoResponse {
     let session = st.session.lock().await;
@@ -727,5 +878,78 @@ fn event_json(ev: &CoreEvent) -> (&'static str, String) {
             "download_done",
             serde_json::json!({ "tab": tab, "id": id, "path": path }).to_string(),
         ),
+        CoreEvent::MediaOffered { .. }
+        | CoreEvent::MediaMoved { .. }
+        | CoreEvent::MediaGone { .. }
+        | CoreEvent::MediaCommand { .. } => media_event_json(ev),
+    }
+}
+
+/// Bras `MediaSurface` de [`event_json`] (étape 71b) —
+/// cycle de vie SSE et commandes JS → hôte.
+fn media_event_json(ev: &CoreEvent) -> (&'static str, String) {
+    match ev {
+        CoreEvent::MediaOffered {
+            tab,
+            media,
+            kind,
+            rect,
+            url,
+            mime,
+            controls,
+            autoplay,
+        } => (
+            "media_offered",
+            serde_json::json!({
+                "tab": tab, "media": media,
+                "kind": match kind {
+                    explorer_core::MediaKind::Video => "video",
+                    explorer_core::MediaKind::Audio => "audio",
+                },
+                "rect": { "x": rect.x, "y": rect.y, "w": rect.w, "h": rect.h },
+                "url": url, "mime": mime,
+                "controls": controls, "autoplay": autoplay,
+            })
+            .to_string(),
+        ),
+        CoreEvent::MediaMoved { tab, media, rect } => (
+            "media_moved",
+            serde_json::json!({
+                "tab": tab, "media": media,
+                "rect": { "x": rect.x, "y": rect.y, "w": rect.w, "h": rect.h },
+            })
+            .to_string(),
+        ),
+        CoreEvent::MediaGone { tab, media } => (
+            "media_gone",
+            serde_json::json!({ "tab": tab, "media": media }).to_string(),
+        ),
+        CoreEvent::MediaCommand { tab, media, cmd } => (
+            "media_command",
+            serde_json::json!({
+                "tab": tab, "media": media,
+                "cmd": match cmd {
+                    explorer_core::MediaCmd::Play => serde_json::json!({ "type": "play" }),
+                    explorer_core::MediaCmd::Pause => serde_json::json!({ "type": "pause" }),
+                    explorer_core::MediaCmd::Seek { ms } => {
+                        serde_json::json!({ "type": "seek", "ms": ms })
+                    }
+                    explorer_core::MediaCmd::Volume { v } => {
+                        serde_json::json!({ "type": "volume", "v": v })
+                    }
+                    explorer_core::MediaCmd::Rate { r } => {
+                        serde_json::json!({ "type": "rate", "r": r })
+                    }
+                },
+            })
+            .to_string(),
+        ),
+        // Bras non média — impossible depuis `event_json` ;
+        // un appel direct dégrade en event muet plutôt que
+        // de paniquer (tolérance).
+        _ => {
+            debug_assert!(false, "media_event_json hors bras média");
+            ("media", String::new())
+        }
     }
 }

@@ -591,6 +591,10 @@ impl Session {
             if let Some(entry) = self.tabs.get_mut(&tab) {
                 entry.sync_floor = Some(Instant::now() + floor);
             }
+            // L'apply a repeint → DOM + arbre en phase :
+            // les surfaces média insérées/retirées/déplacées
+            // par la page JS sont diffées ici (étape 71b).
+            self.refresh_media(tab);
             self.emit_invalidated(tab);
         }
     }

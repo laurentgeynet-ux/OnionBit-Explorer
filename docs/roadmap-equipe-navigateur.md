@@ -802,16 +802,16 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   lecture est un service d'hôte contracté) : les stubs
   honnêtes de l'étape 58 restent la norme *sans* hôte ;
   quand un hôte est attaché, `MediaOffered` (SSE : `tab`,
-  `node`, `rect` de la boîte remplacée, `url` résolue,
+  `media`, `rect` de la boîte remplacée, `url` résolue,
   `mime`, `controls`) est émis pour chaque média lisible ;
-  endpoints REST `POST /api/media/{id}/{claim|play|pause|
-  seek|volume}` ; l'état hôte remonte en events → les props
-  JS deviennent réelles (`play()` résout à la 1re frame,
+  endpoints REST `claim`/`release`/`state` + `GET` ; l'état
+  hôte remonte en events → les props JS deviennent réelles
+  (`play()` résout à la 1re frame,
   `currentTime`/`duration`/`buffered` vivants,
   `canPlayType` reflète les codecs déclarés de l'hôte) —
   jamais de faux succès (hôte muet = stub ADR-0023).
-  `MediaMoved` ou rects à jour sur `FrameInvalidated`
-  quand relayout/scroll déplace la boîte. Côté app : la
+  `MediaMoved` coalescé à la cadence de peinture quand
+  relayout/resize déplace la boîte. Côté app : la
   surface vidéo est un overlay au-dessus du rect — la
   pattern `AbstractPlayerEngine` (backends `fvp`/FFmpeg
   desktop, ExoPlayer Android) de l'écosystème adjacent est
@@ -819,6 +819,40 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   vérifier la config FFmpeg/libmpv de `fvp` (LGPL dynamique
   OK, GPL statique non). Prérequis doc : R-34 donne au
   seam une géométrie fiable (non bloquant).
+  - [x] **71a — contrat** : seam rédigée dans
+    `docs/interface-equipes.md` (directions des flux,
+    identité `media: u64`, events SSE + REST, vocabulaire
+    JS claimé vs stubs, FFI proposé). Énums/DTO figés à
+    l'adoption ; routes REST et vocabulaire JS ajustables
+    au premier consommateur réel.
+  - [x] **71b — session + REST** : détection
+    `<video>`/`<audio>` lisibles sur le couple DOM/boxtree
+    posé (scan DOM — l'`audio` sans `controls` est
+    `display:none` UA et doit être offert à 0×0), ids
+    `media: u64` alloués à l'offre, retenue positionnelle
+    (`kind`+`url`) sur apply JS, `MediaGone` à la mort de
+    page (gel bfcache inclus — ré-offre = ids neufs) et à
+    la fermeture d'onglet, `MediaMoved` émis uniquement au
+    refresh post-repaint (borne « 1 par frame » tenue par
+    construction). REST `GET /api/tabs/{id}/media[/{mid}]`,
+    `POST …/claim` (409/410), `…/release`, `…/state`
+    (`MediaReport` stocké, exige un claim). `MediaCommand`
+    figé dans le DTO, non encore émis. Régressions :
+    `media_offered_scan_kinds_and_rects`,
+    `media_gone_on_close_and_navigation`,
+    `media_claim_first_wins_and_state`,
+    `media_ids_fresh_after_freeze_restore`,
+    `media_moved_on_relayout_only_when_rect_changes`,
+    REST `media_claim_state_and_gone`.
+  - [ ] **71c — délégation JS** : surface claimée →
+    `MediaCommand` relayé à l'hôte (`play`/`pause`/`seek`/
+    `volume`/`rate`), `play()` résout au premier
+    `state:"playing"`, props et events DOM refletés depuis
+    `MediaReport` ; non claimée = stubs ADR-0023 inchangés.
+  - [ ] **71d — composite Flutter** : overlay de lecture
+    positionné sur `rect - scroll_y`, hôte
+    `AbstractPlayerEngine`/`fvp` comme consommateur de
+    référence, licence FFmpeg vérifiée.
 - [x] **Étape 72. Résolveur sécurisé (DoH) — capacité
   d'égress optionnelle** (lead — anti-blocage FAI « DNS
   menteur », même patron que le resolver custom de l'app

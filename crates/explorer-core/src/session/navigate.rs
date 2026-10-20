@@ -168,6 +168,11 @@ impl Session {
         let needs_paint = entry.dom.is_some() && entry.frame.is_none();
         let url = entry.url.clone();
         let title = entry.title.clone();
+        // La page quittée (gelée à l'instant ou page
+        // d'erreur non gelable) meurt — ses surfaces média
+        // sont closes ; le snapshot restauré n'en porte
+        // pas, `refresh` ré-offrira ids neufs (71b).
+        self.close_media(tab);
         if needs_paint {
             let _ = self.relayout(tab);
         }
@@ -563,6 +568,10 @@ impl Session {
         // spéculative du document en vol ne doit pas être
         // embarquée dans le snapshot (étape 56c).
         self.unspec(tab);
+        // La page quittée meurt : ses surfaces média sont
+        // closes avant le gel — le snapshot ne les porte
+        // pas, la restauration ré-offre ids neufs (71b).
+        self.close_media(tab);
         {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
             // bfcache (étape 56) : la page quittée est gelée

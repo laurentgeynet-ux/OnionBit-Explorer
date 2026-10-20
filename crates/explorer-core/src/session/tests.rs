@@ -517,3 +517,259 @@ fn find_in_page_counts_steps_and_highlights() {
     assert_eq!(s.find_in_page(tab, ""), 0);
     assert!(s.find_state(tab).is_none());
 }
+
+// ----------------------------------------------------------------
+// Étape 71b — seam `MediaSurface` (ADR-0024) : détection,
+// cycle de vie des offres, claim/state, honnêteté des stubs.
+// ----------------------------------------------------------------
+
+/// Page commise avec `body` puis `refresh_media` — renvoie
+/// la session, l'onglet et le receveur d'événements.
+fn media_page(body: &str) -> (Session, TabId, broadcast::Receiver<CoreEvent>) {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    let rx = s.subscribe();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom(body));
+        e.url = Some(Url::parse("http://h.test/m").unwrap());
+    }
+    s.relayout(tab).unwrap();
+    let mut s = s;
+    s.refresh_media(tab);
+    (s, tab, rx)
+}
+
+/// Événements média accumulés depuis l'abonnement.
+fn media_events(rx: &mut broadcast::Receiver<CoreEvent>) -> Vec<CoreEvent> {
+    let mut out = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        if matches!(
+            ev,
+            CoreEvent::MediaOffered { .. }
+                | CoreEvent::MediaMoved { .. }
+                | CoreEvent::MediaGone { .. }
+                | CoreEvent::MediaCommand { .. }
+        ) {
+            out.push(ev);
+        }
+    }
+    out
+}
+
+#[test]
+fn media_offered_scan_kinds_and_rects() {
+    let (s, tab, mut rx) = media_page(
+        "<video src=\"v.mp4\" controls autoplay></video>\
+         <video><source src=\"w.webm\" type=\"video/webm\"></video>\
+         <audio src=\"a.mp3\"></audio>\
+         <audio src=\"b.ogg\" controls></audio>\
+         <video></video>",
+    );
+    let evs = media_events(&mut rx);
+    // 4 éléments lisibles — le <video> sans source n'émet
+    // rien (honnêteté : rien à jouer).
+    assert_eq!(evs.len(), 4, "4 MediaOffered attendus : {evs:?}");
+
+    let offer = |i: usize| match &evs[i] {
+        CoreEvent::MediaOffered {
+            media,
+            kind,
+            rect,
+            url,
+            mime,
+            controls,
+            autoplay,
+            ..
+        } => (
+            *media,
+            *kind,
+            *rect,
+            url.clone(),
+            mime.clone(),
+            *controls,
+            *autoplay,
+        ),
+        e => panic!("MediaOffered attendu, reçu {e:?}"),
+    };
+
+    let (id, kind, rect, url, mime, controls, autoplay) = offer(0);
+    assert_eq!((id, kind), (1, MediaKind::Video));
+    assert_eq!(url, "http://h.test/v.mp4");
+    assert_eq!(mime.as_deref(), Some("video/mp4"));
+    assert!(controls && autoplay);
+    assert!(rect.w > 0.0 && rect.h > 0.0, "vidéo = vraie boîte");
+
+    let (_, kind, _, url, mime, controls, _) = offer(1);
+    assert_eq!(kind, MediaKind::Video);
+    assert_eq!(url, "http://h.test/w.webm");
+    assert_eq!(mime.as_deref(), Some("video/webm"), "type du <source>");
+    assert!(!controls);
+
+    // `audio` sans controls : display:none au style UA →
+    // pas de boîte, offre à 0×0 (pipeline seul).
+    let (_, kind, rect, url, mime, controls, _) = offer(2);
+    assert_eq!(
+        (kind, url.as_str()),
+        (MediaKind::Audio, "http://h.test/a.mp3")
+    );
+    assert_eq!(mime.as_deref(), Some("audio/mpeg"));
+    assert!(!controls);
+    assert_eq!(
+        rect,
+        MediaRect {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0
+        }
+    );
+
+    let (_, kind, rect, _, _, controls, _) = offer(3);
+    assert_eq!(kind, MediaKind::Audio);
+    assert!(controls);
+    assert!(rect.w > 0.0, "audio controls = boîte UI réelle");
+
+    // `media_list` reflète les offres.
+    let list = s.media_list(tab);
+    assert_eq!(list.len(), 4);
+    assert!(list.iter().all(|m| m.claim.is_none()));
+}
+
+#[test]
+fn media_gone_on_close_and_navigation() {
+    let (mut s, tab, mut rx) = media_page("<video src=\"v.mp4\"></video>");
+    let _ = media_events(&mut rx); // purge des offres
+
+    // Retrait DOM : re-layout sans l'élément → MediaGone.
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<p>plus rien</p>"));
+    }
+    s.relayout(tab).unwrap();
+    s.refresh_media(tab);
+    let evs = media_events(&mut rx);
+    assert_eq!(evs.len(), 1);
+    assert!(matches!(evs[0], CoreEvent::MediaGone { media: 1, .. }));
+
+    // Ré-offre puis fermeture d'onglet → Gone avant
+    // `TabClosed` (l'hôte relâche son pipeline).
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<audio src=\"x.mp3\"></audio>"));
+    }
+    s.relayout(tab).unwrap();
+    s.refresh_media(tab);
+    let _ = media_events(&mut rx);
+    s.close_tab(tab).unwrap();
+    let evs = media_events(&mut rx);
+    assert!(
+        matches!(evs[0], CoreEvent::MediaGone { media: 2, .. }),
+        "Gone avant TabClosed : {evs:?}"
+    );
+}
+
+#[test]
+fn media_claim_first_wins_and_state() {
+    let (mut s, tab, _rx) = media_page("<video src=\"v.mp4\"></video>");
+    // Premier arrivé gagne ; second → Taken (409 REST).
+    s.media_claim(tab, 1, vec!["h264".into()]).unwrap();
+    assert_eq!(
+        s.media_claim(tab, 1, vec!["vp9".into()]),
+        Err(MediaError::Taken)
+    );
+    // state exige un claim actif.
+    let report = MediaReport {
+        position_ms: 1_500,
+        duration_ms: Some(60_000),
+        buffered_ms: 5_000,
+        state: MediaHostState::Playing,
+        error: None,
+    };
+    s.media_report(tab, 1, report.clone()).unwrap();
+    let m = &s.media_list(tab)[0];
+    assert_eq!(m.claim.as_deref(), Some(&["h264".to_string()][..]));
+    assert_eq!(m.state, Some(report));
+
+    // Release → stubs ADR-0023 ; un claim neuf peut venir.
+    s.media_release(tab, 1).unwrap();
+    assert_eq!(
+        s.media_report(
+            tab,
+            1,
+            MediaReport {
+                position_ms: 0,
+                duration_ms: None,
+                buffered_ms: 0,
+                state: MediaHostState::Paused,
+                error: None,
+            },
+        ),
+        Err(MediaError::NotClaimed)
+    );
+    s.media_claim(tab, 1, vec!["vp9".into()]).unwrap();
+
+    // Id mort → Dead (410 REST).
+    assert_eq!(s.media_claim(tab, 99, vec![]), Err(MediaError::Dead));
+    assert_eq!(s.media_release(tab, 99), Err(MediaError::Dead));
+}
+
+#[test]
+fn media_ids_fresh_after_freeze_restore() {
+    let (mut s, tab, mut rx) = media_page("<video src=\"v.mp4\"></video>");
+    let _ = media_events(&mut rx);
+    // Mort de page = close_media ; la restauration
+    // (bfcache) ré-offre avec un id neuf (contrat).
+    s.close_media(tab);
+    let evs = media_events(&mut rx);
+    assert!(matches!(evs[0], CoreEvent::MediaGone { media: 1, .. }));
+
+    s.refresh_media(tab);
+    let evs = media_events(&mut rx);
+    match &evs[0] {
+        CoreEvent::MediaOffered { media, .. } => {
+            assert_eq!(*media, 2, "ré-offre = nouvel id, pas de réutilisation");
+        }
+        e => panic!("MediaOffered attendu : {e:?}"),
+    }
+}
+
+#[test]
+fn media_moved_on_relayout_only_when_rect_changes() {
+    let (mut s, tab, mut rx) = media_page("<video src=\"v.mp4\"></video>");
+    let _ = media_events(&mut rx);
+
+    // Un relayout sans changement géométrique : rien.
+    s.relayout(tab).unwrap();
+    s.refresh_media(tab);
+    assert!(media_events(&mut rx).is_empty(), "rect inchangé → muet");
+
+    // Un bloc inséré au-dessus décale la vidéo → MediaMoved
+    // (un seul, coalescence par refresh).
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom(
+            "<div style=\"height:200px\"></div><video src=\"v.mp4\"></video>",
+        ));
+    }
+    s.relayout(tab).unwrap();
+    s.refresh_media(tab);
+    let evs = media_events(&mut rx);
+    assert_eq!(evs.len(), 1);
+    match &evs[0] {
+        CoreEvent::MediaMoved { media, rect, .. } => {
+            assert_eq!(*media, 1, "id conservé — même élément");
+            assert_ne!(
+                *rect,
+                MediaRect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 0.0,
+                    h: 0.0
+                }
+            );
+            assert!(rect.y > 100.0, "vidéo décalée sous le bloc : {rect:?}");
+        }
+        e => panic!("MediaMoved attendu : {e:?}"),
+    }
+}

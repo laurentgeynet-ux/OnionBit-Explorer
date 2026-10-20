@@ -64,12 +64,11 @@ Règles :
 
 ## Seam `MediaSurface` (étape 71 — ADR-0024)
 
-**Statut : proposé** — rédigé avant tout code (verdict
-mission 21 attendu pour l'implémentation). À l'adoption :
-les énums et DTO ci-dessous sont **figés champ par
-champ** ; les routes REST et le vocabulaire JS restent
-**ajustables** au premier consommateur réel (hôte
-`AbstractPlayerEngine`/`fvp`).
+**Statut : adopté** — session et REST implémentés à
+l'étape 71b selon ce texte ; les énums et DTO ci-dessous
+sont **figés champ par champ** ; les routes REST et le
+vocabulaire JS restent **ajustables** au premier
+consommateur réel (hôte `AbstractPlayerEngine`/`fvp`).
 
 Principe (ADR-0024) : le moteur ne décode pas — il émet
 l'**offre** d'une surface (élément `<video>`/`<audio>`
@@ -178,4 +177,5 @@ ni l'un ni l'autre — variante `explorer_media_*`
 | 2026-10-19 | `explorer-css`/`explorer-layout` | **Additif** : `ComputedStyle` dérive `PartialEq`/`Eq` (comparaison style fragment/conteneur à la peinture) ; `LayoutBox::out_of_flow()` — position `absolute`/`fixed` lue sur le style calculé, restreinte aux boîtes d'élément (le style cloné d'un `Text`/`AnonymousBlock` n'est pas une position) ; `intrinsic::own_sides` → `pub(crate)` | R-22 |
 | 2026-10-19 | `explorer-common` pile | **Additif** : `explorer_common::deep(f)` = `stacker::maybe_grow` (zone rouge 128 Kio / segment tas 1 Mio — patron JS-C41) — à appliquer sur toute arête récursive ∝ profondeur DOM (R-24 : ~300 `<div>` nichaient un stack overflow sur worker tokio). Toutes les traversées domaine PIPELINE sont couvertes + drop itératif de `LayoutBox`. NAV : si un marcheur récursif existe côté session (collecte DOM, sérialisation), utiliser `deep` — `explorer-common` est désormais une dep de dom/css/layout/render | R-24 |
 | 2026-11-08 | seam `MediaSurface` (session/SSE/REST/JS) | **Contrat rédigé — proposé** : section dédiée ci-dessus (étape 71, ADR-0024). Directions des flux, identité `media: u64`, events `MediaOffered`/`MediaMoved`/`MediaGone`/`MediaCommand`, REST `claim`/`release`/`state`/`GET`, vocabulaire JS claimé vs stubs ADR-0023 (clause honnêteté préservée), variante FFI à spécifier au premier hôte. À l'adoption : énums/DTO figés champ par champ ; routes REST et vocabulaire JS ajustables au premier consommateur réel. Code en attente du verdict mission 21. | NAV (étape 71a) |
+| 2026-11-08 | seam `MediaSurface` — implémentation session | **Implémenté (71b)** : détection DOM+boxtree (`audio` sans `controls` → offre 0×0), ids `media: u64`, retenue positionnelle sur apply, `MediaGone` à mort de page/onglet, `MediaMoved` au refresh post-repaint seul ; REST `GET media`, `claim`/`release`/`state` (409/410). `MediaCommand` figé dans le DTO, non encore émis (71c). Consommateurs `explorer-core` uniquement — aucune API PIPELINE touchée. | NAV (étape 71b) |
 | 2026-11-08 | **Process — isolation des index** | **Worktree par équipe** (deux incidents en deux jours : staged-but-uncommitted capturé par le commit concurrent — CHANGELOG de NAV dans `4cfd052` puis étape 78 dans `dc3e627`) : chaque équipe travaille dans son propre arbre avec son propre index — NAV : `D:\explorer-nav` sur `nav/main`, PIPE : `C:\OnionBit-Explorer` sur `main`. Atterrissage NAV : `git rebase main` dans le worktree NAV, puis `git -C C:/OnionBit-Explorer merge --ff-only nav/main` (refus net si le worktree main est sale). Filet de secours : `git commit -o -- <paths>` (jamais d'index tenu entre deux commandes). `CARGO_TARGET_DIR` distinct par worktree (ex. `D:\cargo-target\explorer-nav`) — sinon les builds sérialisent sur le lock du target-dir et les `.exe` en cours se verrouillent mutuellement. | NAV (adopté lead) |

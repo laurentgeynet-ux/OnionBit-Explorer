@@ -30,6 +30,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   release. Reste chez NAV : répétition des `relayout_dom`
   progressifs sous verrou et miroir DOM→JS de
   `spawn_engine` (réception mission 21-F).
+- **Étape 71b — Seam `MediaSurface` : session + REST**
+  (`explorer-core`, `explorer-api`, ADR-0024) : les
+  éléments `<video>`/`<audio>` lisibles sont détectés au
+  commit et offerts à l'hôte. `CoreEvent` gagne
+  `MediaOffered`/`MediaMoved`/`MediaGone`/`MediaCommand`
+  et les DTO figés `MediaKind`/`MediaRect`/`MediaCmd`/
+  `MediaHostState`/`MediaReport`/`MediaOfferInfo`/
+  `MediaError` (contrat `docs/interface-equipes.md`).
+  Scan **DOM** + carte `NodeId→rect` du boxtree : un
+  `audio` sans `controls` (`display:none` UA) est offert
+  à `rect` 0×0 — pipeline seul, pas d'overlay. Identité
+  `media: u64` par instance, retenue positionnelle
+  (`kind`+`url`) sur apply JS, `MediaGone` à la mort de
+  page (bfcache : ré-offre = ids neufs) et à la fermeture
+  d'onglet ; `MediaMoved` uniquement au refresh
+  post-repaint (borne « 1/frame » par construction).
+  REST : `GET /api/tabs/{id}/media[/{mid}]`,
+  `POST …/claim` (premier arrivé gagne → `409`, id mort
+  → `410`), `…/release`, `…/state` (`MediaReport`
+  stocké, exige un claim). Sans claim : stubs ADR-0023
+  inchangés ; la délégation JS (`MediaCommand`, props)
+  arrive à 71c.
 
 - **R-33 — Perf : propagation par translation dans le
   relayout incrémental** (`explorer-layout`) : attribution

@@ -33,11 +33,17 @@ struct FakeTransport {
 #[async_trait]
 impl HttpTransport for FakeTransport {
     async fn fetch(&self, req: &Request) -> NetResult<Response> {
-        let body = if req.url.path() == "/link" {
-            "<!doctype html><html><body>\
+        let body = match req.url.path() {
+            "/link" => {
+                "<!doctype html><html><body>\
              <a href=\"/b\">lien</a></body></html>"
-        } else {
-            self.body
+            }
+            "/media" => {
+                "<!doctype html><html><body>\
+             <video src=\"v.mp4\" controls></video>\
+             <audio src=\"a.mp3\"></audio></body></html>"
+            }
+            _ => self.body,
         };
         Ok(Response {
             status: 200,
@@ -601,4 +607,152 @@ async fn download_accept_writes_body() {
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(v["downloads"], serde_json::json!([]));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Onglet ouvert + page `/media` commise (video controls +
+/// audio nu) — helper commun des tests `MediaSurface` 71b.
+async fn media_tab() -> (axum::Router, u64) {
+    let app = test_app();
+    let resp = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let id = v["id"].as_u64().unwrap();
+    let nav = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/navigate"),
+            r#"{"url":"http://h.test/media"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(nav.status(), StatusCode::OK);
+    (app, id)
+}
+
+/// `GET …/media` d'un onglet — JSON brut de la liste ou de
+/// la fiche (`uri` = `""` ou `"/{mid}"`).
+async fn media_get(app: &axum::Router, id: u64, uri: &str) -> serde_json::Value {
+    let r = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri(format!("/api/tabs/{id}/media{uri}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(r.into_body(), 16 * 1024)
+        .await
+        .unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+/// Étape 71b — seam `MediaSurface` REST : les éléments
+/// média lisibles sont listés (video + audio 0×0) et un
+/// id mort répond `410`.
+#[tokio::test]
+async fn media_offers_listed_and_gone() {
+    let (app, id) = media_tab().await;
+    let v = media_get(&app, id, "").await;
+    let media = v["media"].as_array().unwrap();
+    assert_eq!(media.len(), 2, "video + audio offerts : {v}");
+    assert_eq!(media[0]["kind"], "video");
+    assert_eq!(media[0]["url"], "http://h.test/v.mp4");
+    assert_eq!(media[0]["mime"], "video/mp4");
+    assert_eq!(media[0]["controls"], true);
+    // audio sans controls → rect 0×0 (pipeline seul).
+    assert_eq!(media[1]["kind"], "audio");
+    assert_eq!(media[1]["rect"]["w"], 0.0);
+
+    // Id mort → 410 partout.
+    let dead = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/media/999/claim"),
+            r#"{"codecs":[]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(dead.status(), StatusCode::GONE);
+    let dead = app
+        .oneshot(
+            HttpRequest::builder()
+                .uri(format!("/api/tabs/{id}/media/999"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(dead.status(), StatusCode::GONE);
+}
+
+/// Étape 71b — cycle claim/state/release : premier arrivé
+/// gagne (`409`), `state` exige le claim, release relâche.
+#[tokio::test]
+async fn media_claim_state_release() {
+    let (app, id) = media_tab().await;
+    let v = media_get(&app, id, "").await;
+    let mid = v["media"][0]["id"].as_u64().unwrap();
+
+    // `state` sans claim → 409 ; claim → 200 ; second → 409.
+    let st = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/media/{mid}/state"),
+            r#"{"state":"playing","position_ms":0,"buffered_ms":0}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(st.status(), StatusCode::CONFLICT);
+    let cl = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/media/{mid}/claim"),
+            r#"{"codecs":["h264","aac"]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cl.status(), StatusCode::OK);
+    let cl2 = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/media/{mid}/claim"),
+            r#"{"codecs":["vp9"]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cl2.status(), StatusCode::CONFLICT, "premier arrivé gagne");
+
+    // `state` claimé → 200 et visible dans la fiche GET.
+    let st = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/media/{mid}/state"),
+            r#"{"state":"playing","position_ms":1200,"duration_ms":60000,"buffered_ms":4000}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(st.status(), StatusCode::OK);
+    let v = media_get(&app, id, &format!("/{mid}")).await;
+    assert_eq!(v["claimed"], true);
+    assert_eq!(v["state"]["position_ms"], 1200);
+    assert_eq!(v["state"]["state"], "playing");
+
+    // Release → la surface retombe sur les stubs ADR-0023.
+    let rel = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/media/{mid}/release"),
+            "{}",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(rel.status(), StatusCode::OK);
+    let v = media_get(&app, id, &format!("/{mid}")).await;
+    assert_eq!(v["claimed"], false);
 }

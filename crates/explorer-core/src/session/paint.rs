@@ -79,6 +79,11 @@ impl Session {
         if let Some(t) = title.filter(|t| prev != Some(t.as_str())) {
             let _ = self.events.send(CoreEvent::TitleChanged { tab, title: t });
         }
+        // Surfaces média de la page posée (étape 71b) —
+        // commit nav, restauration bfcache et page d'erreur
+        // passent tous par ici ; `refresh` diffe et émet
+        // `MediaOffered`/`MediaMoved`/`MediaGone`.
+        self.refresh_media(tab);
         self.emit_invalidated(tab);
     }
 
