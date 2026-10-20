@@ -1440,11 +1440,18 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     `location.assign`/`replace`/
     `href=`/`reload` vérifiés complets
     (hook → `Url::resolve`) — le mur
-    est ailleurs ; entités du miroir
-    corrigées (**JS-C46**) ;
+    était ailleurs : quantifieurs lazy
+    inconnus tuaient le `<script>` du
+    consent (**JS-C48**, vol live :
+    consent → `location` → google.fr
+    rendu de bout en bout) ; entités
+    du miroir corrigées (**JS-C46**) ;
     `PipelineError` cite désormais la
     source fautive. Reste la pile
-    d'appel — **JS-C47** ouvert.
+    d'appel — **JS-C47** ouvert ; et la
+    jonglerie focus `keydown` google
+    (un `key` sur deux `unfocused`)
+    constatée au vol.
   - **reload sur page résultats POST
     → formulaire vide** : re-navigation
     GET sans re-soumission du corps —
@@ -1696,6 +1703,20 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   pages réelles). Sens inverse vérifié : JS-C46 (entités),
   JS-C45 et la vague JS-C26+ étaient déjà Explorer-only —
   `src/dom.rs` reste canonique.
+- [x] **JS-C49. Hit-test de clic logué + validation terrain
+  consent** (`explorer-core`) : `node_at` émet un
+  `tracing::debug!` du tag frappé par le clic — premier
+  réflexe de triage des « clics ignorés » (la carte du
+  consent google est un patchwork `input`/`form`/`div`/∅ —
+  comprendre où le point atterrit explique chaque
+  `Ignored`). Validation terrain live (avec les
+  quantifieurs lazy de JS-C48) : consent rendu, scripts
+  sains, `location` redirect JS effectif → google.fr —
+  **la chaîne consent→accueil google marche de bout en
+  bout** (M-H1 #7 débloqué). Reste observé : jonglerie de
+  focus sur `keydown` (un `key` sur deux rapporte
+  `unfocused` — la machinerie suggest re-focus entre les
+  events ; constat consigné, à trier côté miroir).
 
 ## Tâches continues
 

@@ -295,6 +295,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `docs/interface-equipes.md`. Bonus du même commit :
   `PipelineError` porte l'en-tête de la source/module
   fautif — `Error: b` localise enfin son script.
+- **JS-C49 — hit-test de clic logué + validation terrain
+  consent** (`explorer-core`) : `node_at` émet un
+  `tracing::debug!` du tag frappé par le clic — premier
+  réflexe de triage des « clics ignorés » sur pages réelles
+  (M-H1 : la carte du consent google est un patchwork
+  `input`/`form`/`div`/∅ — comprendre où le point atterrit
+  explique chaque `Ignored`). Validation terrain consent
+  (avec les quantifieurs lazy de JS-C48) : la page rend ses
+  scripts sains, `location` redirect JS effectif →
+  google.fr — la chaîne consent→accueil google marche de
+  bout en bout, preuve live de M-H1 #7. Constat restant
+  noté : `keydown` google jongle le focus entre les events
+  (un `key` sur deux rapporte `unfocused` — la machinerie
+  suggest re-focus ; à trier côté miroir).
 - **Étape 90 — rendu de commit nav détaché**
   (`explorer-core`) : constat M-H1 #6 — `sub_commit`
   tenait `sess.lock()` pendant toute la cascade + layout

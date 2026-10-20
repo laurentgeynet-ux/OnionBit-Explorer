@@ -686,7 +686,26 @@ impl Session {
     pub(crate) fn node_at(&self, tab: TabId, x: f32, y: f32) -> Option<NodeId> {
         let entry = self.tabs.get(&tab)?;
         let tree = entry.tree.as_ref()?;
-        hit_test(tree, x, y + entry.scroll_y)
+        let hit = hit_test(tree, x, y + entry.scroll_y);
+        // Diagnostic hit-test : quel nœud encaisse le clic —
+        // premier réflexe de triage des « clics ignorés » sur
+        // pages réelles (M-H1 : consent google).
+        tracing::debug!(
+            tab,
+            x,
+            y,
+            hit_tag = hit
+                .and_then(|n| {
+                    entry
+                        .dom
+                        .as_ref()
+                        .and_then(|d| d.tag_name(n).ok().map(str::to_owned))
+                })
+                .as_deref()
+                .unwrap_or("∅"),
+            "clic hit-test"
+        );
+        hit
     }
 
     /// `href` résolu du lien `<a>` sous `(x, y)` viewport —
