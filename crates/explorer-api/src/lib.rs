@@ -326,6 +326,10 @@ fn tab_json(session: &Session, id: TabId) -> Response {
             "title": t.title,
             "can_back": t.can_back,
             "can_forward": t.can_forward,
+            // Hauteur document réelle vs raster plafonné
+            // (étape 65) — `doc_h` peut dépasser la frame.
+            "doc_h": t.doc_h,
+            "doc_h_clamped": t.doc_h_clamped,
         }))
         .into_response(),
         None => StatusCode::NOT_FOUND.into_response(),

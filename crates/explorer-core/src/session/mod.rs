@@ -658,6 +658,10 @@ impl Session {
             can_back: t.hist_idx > 0,
             can_forward: t.hist_idx + 1 < t.hist.len(),
             scroll_y: t.scroll_y,
+            doc_h: t.doc_h,
+            // Plafond raster en px CSS (étape 65) — la frame
+            // ne peint rien au-delà, `doc_h` reste réel.
+            doc_h_clamped: t.doc_h > MAX_FRAME_DIM / self.scale.max(f32::EPSILON),
         })
     }
 

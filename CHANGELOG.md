@@ -9,6 +9,13 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 65 — `doc_h` mesurée vs plafond raster**
+  (`explorer-core` + `explorer-api`) : `TabInfo` expose
+  `doc_h` (hauteur réelle du document posé) et
+  `doc_h_clamped` (`> MAX_FRAME_DIM / scale`) — les
+  documents plus hauts que 16 384 px ont enfin un canal
+  d'observation ; `GET /tabs/{id}` les sérialise.
+
 - **Étape 64 — `navigated` rapporté au commit effectif**
   (`explorer-core` + `explorer-api`) : les drains de nav
   (`drain_script_nav`, `drain_navs_shared`) comptent les

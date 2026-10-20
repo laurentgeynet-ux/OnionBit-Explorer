@@ -678,14 +678,15 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   commis. `drain_navs_shared` retourne `usize` (appelants
   ignoraient le booléen) ; FFI `> 0`. Test : soumission
   vers cible 404 → `Edited`, URL inchangée.
-- [ ] **Étape 65. `doc_h` clampé à 2¹⁴ masque la hauteur
-  réelle** (terrain mission 16 — mesure) : sur un document
-  plus haut que 16 384 px (`heavy.html`), `doc_h` rapporte
-  le plafond au lieu de la hauteur posée — la hauteur
-  réelle du document n'a pas de canal. Observation/API :
-  exposer la hauteur mesurée vs le plafond raster
-  (`MAX_FRAME_DIM`), ou typer la réponse
-  (`doc_h: 16384, doc_h_clamped: true`).
+- [x] **Étape 65. `doc_h` mesurée exposée (plafond
+  raster distingué)** (terrain mission 16 — mesure) :
+  `TabInfo` gagne `doc_h` (hauteur réelle posée, px CSS)
+  et `doc_h_clamped` (`doc_h > MAX_FRAME_DIM / scale`) —
+  additif ; `GET /tabs/{id}` sérialise les deux. La frame
+  reste plafonnée 16 384 px mais le document réel a
+  désormais un canal d'observation — `frame.height` n'est
+  plus l'oracle de hauteur. Test : doc 20 000 px →
+  `doc_h` > plafond, `clamped` vrai ; page courte → faux.
 - [x] **Étape 66. `SameSite` appliqué à l'envoi** (terrain
   mission 17 — `cookies.rs`, `header_for`) : le flag était
   parsé/persisté mais `header_for` ne connaissait aucun

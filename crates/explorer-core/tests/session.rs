@@ -1386,6 +1386,29 @@ async fn failed_submit_reports_edited_not_navigated() {
     );
 }
 
+/// Étape 65 — `tab_info.doc_h` rapporte la hauteur
+/// **mesurée** (pas le plafond raster 2¹⁴) et
+/// `doc_h_clamped` signale que la frame ne couvre pas le
+/// document entier.
+#[tokio::test]
+async fn doc_h_reports_measured_height_not_frame_cap() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/tall",
+        200,
+        "<html><body><div style=\"height:20000px\">deep</div></body></html>",
+    );
+    t.route("/short", 200, "<html><body><p>x</p></body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/tall").await.unwrap();
+    let info = s.tab_info(id).unwrap();
+    assert!(info.doc_h > 16_384.0, "doc_h={}", info.doc_h);
+    assert!(info.doc_h_clamped);
+    s.navigate(id, "http://h.test/short").await.unwrap();
+    let info = s.tab_info(id).unwrap();
+    assert!(!info.doc_h_clamped, "doc_h={}", info.doc_h);
+}
+
 /// `Escape` referme sans choix — `s=o1` à la soumission.
 #[tokio::test]
 async fn select_popup_escape_keeps_default() {
