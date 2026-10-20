@@ -175,6 +175,47 @@ if (-not $SkipFunctional -and $ok -gt 0) {
         $r = Send-Input $Id @{ type = 'scroll'; dy = 0 }
         if ($r -and $null -ne $r.scroll_y) { [double]$r.scroll_y } else { 0.0 }
     }
+    function Get-FrameHash($Id) {
+        # Hash de la frame courante — 204 (pas encore de frame)
+        # et corps vide rapportent $null. Sert à distinguer la
+        # frame de DESTINATION de celle de la page d'origine :
+        # `/frame` renvoie toujours l'image la plus récente, donc
+        # « contenu non vide » seul voit l'ANCIENNE frame pendant
+        # que la nav d'arrivée peint — back posté alors bloquait
+        # le verrou session (mesuré : back-POST-TIMEOUT sur
+        # iana.org alors que back vaut ~1 ms une fois peint).
+        try {
+            $r = Invoke-WebRequest -Uri "$FuncBase/tabs/$Id/frame" `
+                -TimeoutSec 30
+            if ($r.StatusCode -eq 204 -or $r.Content.Length -eq 0) {
+                return $null
+            }
+            (Get-FileHash -InputStream `
+                ([System.IO.MemoryStream]::new([byte[]]$r.Content)) `
+                -Algorithm SHA256).Hash
+        } catch { $null }
+    }
+    function Wait-DestFrame($Id, [string]$PrevHash, [int]$BudgetSec = 90) {
+        # Une frame « nouvelle » = hash différent de celui d'avant
+        # le clic. $null (204) ou hash identique = page d'origine
+        # encore affichée → on attend. Repli : si la session
+        # répond à `scroll dy=0` en < 2 s, le verrou cycle — la
+        # destination est posée même si le hash tarde à changer.
+        # Budget en TEMPS : chaque sonde peut elle-même attendre
+        # le verrou (~30 s), compter les itérations serait borné
+        # en nombre, pas en durée.
+        $deadline = (Get-Date).AddSeconds($BudgetSec)
+        while ((Get-Date) -lt $deadline) {
+            $h = Get-FrameHash $Id
+            if ($h -and $h -ne $PrevHash) { return $h }
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            $r = Send-Input $Id @{ type = 'scroll'; dy = 0 }
+            if ($h -and $r -and $sw.ElapsedMilliseconds -lt 2000) {
+                return 'settled'
+            }
+        }
+        return $null
+    }
 
     try {
         $up = Wait-Func {
@@ -202,12 +243,13 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                     $id = $tab.id
                     # `/navigate` est synchrone jusqu'au commit —
                     # le pipeline complet d'un document géant
-                    # (github = frame 49 Mo) dépasse 30 s.
+                    # (github = frame 49 Mo) dépasse 30 s ; mesuré
+                    # ~124 s au commit réel → 240 s de fenêtre.
                     Invoke-RestMethod -Method Post `
                         -Uri "$FuncBase/tabs/$id/navigate" `
                         -ContentType 'application/json' `
                         -Body (@{ url = $site } | ConvertTo-Json) `
-                        -TimeoutSec 120 | Out-Null
+                        -TimeoutSec 240 | Out-Null
                     # Frame produite (~60 s de grâce pour les
                     # gros documents — github a pris ~30 s).
                     $framed = Wait-Func {
@@ -304,6 +346,10 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                     # restauré une position hors de notre suivi.
                     $lienRes = 'lien:absent'
                     if ($navByScript) {
+                        # Nav déjà enfilée par le script : frame de
+                        # référence « à la détection » — si la dest
+                        # est déjà peinte le repli mutex tranche.
+                        $hash0 = Get-FrameHash $id
                         $moved = Wait-Func {
                             $u = Get-TabUrl $id
                             if ($u -and $u -ne $url0) { $u } else { $false }
@@ -313,20 +359,12 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                             # `back` pendant un apply en vol attend le
                             # verrou session : attendre la frame de la
                             # page d'arrivée d'abord.
-                            $null = Wait-Func {
-                                try {
-                                    $r = Invoke-WebRequest `
-                                        -Uri "$FuncBase/tabs/$id/frame" `
-                                        -TimeoutSec 30
-                                    if ($r.Content.Length -gt 0) { $true } `
-                                        else { $false }
-                                } catch { $false }
-                            } 300
+                            $null = Wait-DestFrame $id $hash0
                             $backSent = $true
                             try {
                                 Invoke-RestMethod -Method Post `
                                     -Uri "$FuncBase/tabs/$id/back" `
-                                    -TimeoutSec 60 | Out-Null
+                                    -TimeoutSec 120 | Out-Null
                             } catch { $backSent = $false }
                             $restored = Wait-Func {
                                 $u = Get-TabUrl $id
@@ -346,6 +384,11 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                             $null = Send-Input $id @{
                                 type = 'scroll'; dy = $need }
                         }
+                        # Frame de référence APRÈS le reposition-
+                        # nement (le scroll repeint l'origine) —
+                        # la frame d'arrivée se reconnaît à son
+                        # hash différent.
+                        $hash0 = Get-FrameHash $id
                         $out = Send-Input $id @{
                             type = 'click'; x = $clickLink.x;
                             y = $clickLink.y }
@@ -356,20 +399,12 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                         if ($moved) {
                             # Idem : attendre la frame de la page
                             # d'arrivée avant `back` (verrou session).
-                            $null = Wait-Func {
-                                try {
-                                    $r = Invoke-WebRequest `
-                                        -Uri "$FuncBase/tabs/$id/frame" `
-                                        -TimeoutSec 30
-                                    if ($r.Content.Length -gt 0) { $true } `
-                                        else { $false }
-                                } catch { $false }
-                            } 300
+                            $null = Wait-DestFrame $id $hash0
                             $backSent = $true
                             try {
                                 Invoke-RestMethod -Method Post `
                                     -Uri "$FuncBase/tabs/$id/back" `
-                                    -TimeoutSec 60 | Out-Null
+                                    -TimeoutSec 120 | Out-Null
                             } catch { $backSent = $false }
                             $restored = Wait-Func {
                                 $u = Get-TabUrl $id
