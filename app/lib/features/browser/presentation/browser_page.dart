@@ -539,7 +539,32 @@ class _NavBar extends ConsumerWidget {
     final zoom = ref.watch(zoomProvider);
     return Padding(
       padding: EdgeInsets.all(pad),
-      child: Row(
+      // Étroit → les actions trailing se replient dans un
+      // menu « ⋮ » plutôt que de déborder hors de la frame
+      // (étape 80 — un Row fixe peint l'overflow en silence
+      // en release ; Chrome fait pareil sous ~500 px).
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final compact =
+              c.maxWidth < tokens.dim('metrics', 'navCompact', fallback: 560);
+          return compact
+              ? _compactBar(context, ref, url, markable, marked)
+              : _wideBar(context, ref, url, markable, marked, zoom);
+        },
+      ),
+    );
+  }
+
+  /// Disposition complète — toutes les icônes visibles.
+  Widget _wideBar(
+    BuildContext context,
+    WidgetRef ref,
+    String url,
+    bool markable,
+    bool marked,
+    double zoom,
+  ) {
+    return Row(
         children: [
           IconButton(
             icon: const Icon(Icons.arrow_back),
@@ -631,7 +656,119 @@ class _NavBar extends ConsumerWidget {
             onPressed: () => SettingsDialog.show(context, tokens),
           ),
         ],
+      );
+  }
+
+  /// Disposition étroite — navigation + omnibox + menu « ⋮ »
+  /// qui regroupe les actions trailing (étape 80).
+  Widget _compactBar(
+    BuildContext context,
+    WidgetRef ref,
+    String url,
+    bool markable,
+    bool marked,
+  ) {
+    PopupMenuItem<String> item(
+      String value,
+      IconData icon,
+      String label, {
+      bool enabled = true,
+    }) => PopupMenuItem(
+      value: value,
+      enabled: enabled,
+      child: Row(
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(label, overflow: TextOverflow.ellipsis),
+          ),
+        ],
       ),
+    );
+
+    return Row(
+      children: [
+        IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Précédent',
+          onPressed: enabled && tab?.canBack == true ? ctrl.goBack : null,
+        ),
+        IconButton(
+          icon: const Icon(Icons.arrow_forward),
+          tooltip: 'Suivant',
+          onPressed: enabled && tab?.canForward == true ? ctrl.goForward : null,
+        ),
+        IconButton(
+          icon: const Icon(Icons.refresh),
+          tooltip: 'Recharger',
+          onPressed: enabled ? ctrl.reload : null,
+        ),
+        Expanded(
+          child: TextField(
+            controller: omnibox,
+            enabled: enabled,
+            decoration: const InputDecoration(
+              hintText: 'Rechercher ou saisir une URL',
+              prefixIcon: Icon(Icons.search),
+              isDense: true,
+            ),
+            textInputAction: TextInputAction.go,
+            onSubmitted: enabled ? ctrl.navigate : null,
+          ),
+        ),
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert),
+          tooltip: 'Plus d’actions',
+          onSelected: (v) {
+            switch (v) {
+              case 'mark':
+                unawaited(
+                  ref
+                      .read(bookmarksProvider.notifier)
+                      .toggle(url, title: tab?.title as String? ?? ''),
+                );
+              case 'history':
+                LibraryPanel.showHistory(context, tokens);
+              case 'marks':
+                LibraryPanel.showBookmarks(context, tokens);
+              case 'find':
+                ref.read(findProvider.notifier).open();
+              case 'zoom-in':
+                ref.read(zoomProvider.notifier).zoomIn();
+              case 'zoom-out':
+                ref.read(zoomProvider.notifier).zoomOut();
+              case 'zoom-reset':
+                ref.read(zoomProvider.notifier).reset();
+              case 'settings':
+                SettingsDialog.show(context, tokens);
+            }
+          },
+          itemBuilder: (_) => [
+            item(
+              'mark',
+              marked ? Icons.star : Icons.star_border,
+              marked ? 'Retirer le signet' : 'Ajouter le signet',
+              enabled: markable,
+            ),
+            item('history', Icons.history, 'Historique', enabled: enabled),
+            item('marks', Icons.bookmarks_outlined, 'Signets', enabled: enabled),
+            item(
+              'find',
+              Icons.find_in_page_outlined,
+              'Rechercher dans la page',
+              enabled: enabled,
+            ),
+            const PopupMenuDivider(),
+            item('zoom-in', Icons.zoom_in, 'Zoom avant', enabled: enabled),
+            item('zoom-out', Icons.zoom_out, 'Zoom arrière', enabled: enabled),
+            item('zoom-reset', Icons.zoom_out_map, 'Taille réelle',
+                enabled: enabled),
+            const PopupMenuDivider(),
+            item('settings', Icons.settings_outlined, 'Réglages'),
+          ],
+        ),
+      ],
     );
   }
 }

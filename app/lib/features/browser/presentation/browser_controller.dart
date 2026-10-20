@@ -394,7 +394,11 @@ class BrowserController extends Notifier<BrowserState> {
         daemonOnline: true,
       );
     } on Object {
-      if (ref.mounted) state = state.copyWith(daemonOnline: false);
+      // Pas de rebuild si déjà offline — la boucle de retry
+      // n'émet un frame qu'au changement d'état réel.
+      if (ref.mounted && state.daemonOnline) {
+        state = state.copyWith(daemonOnline: false);
+      }
       _scheduleDaemonRetry();
     }
   }

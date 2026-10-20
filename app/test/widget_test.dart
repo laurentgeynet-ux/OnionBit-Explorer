@@ -4,6 +4,7 @@
 
 import 'package:explorer_app/core/design/app_theme.dart';
 import 'package:explorer_app/core/design/design_tokens.dart';
+import 'package:explorer_app/core/di/providers.dart';
 import 'package:explorer_app/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -23,6 +24,52 @@ void main() {
     expect(find.byIcon(Icons.history), findsOneWidget);
     expect(find.byIcon(Icons.bookmarks_outlined), findsOneWidget);
     expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
+  });
+
+  testWidgets('navbar fenêtre étroite : trailing sans overflow', (
+    WidgetTester tester,
+  ) async {
+    // Repro étape 80 (run M22, fenêtre plus étroite que la
+    // session manuelle) : à ~380 px les IconButton fixes
+    // poussent le trailing hors de la frame.
+    tester.view.physicalSize = const Size(380, 600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    // Tokens synchrones en override — le test porte sur le
+    // layout navbar, pas sur le chargement des assets (vrai
+    // async, flaky sous charge de suite).
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          designTokensProvider.overrideWith(
+            (ref) => Future.value(DesignTokens.fallback),
+          ),
+          lightTokensProvider.overrideWith(
+            (ref) => Future.value(DesignTokens.fallbackLight),
+          ),
+        ],
+        child: const ExplorerApp(),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    // RenderFlex overflow → FlutterError pendant le layout.
+    expect(tester.takeException(), isNull);
+    // Le trailing est replié dans le menu « ⋮ » : chaque action
+    // reste joignable en une tape.
+    expect(find.byIcon(Icons.more_vert), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    for (final label in const [
+      'Historique',
+      'Signets',
+      'Rechercher dans la page',
+      'Zoom avant',
+      'Réglages',
+    ]) {
+      expect(find.text(label), findsOneWidget, reason: '$label absent du menu');
+    }
   });
 
   test('tokens de repli exposent les sections clés', () {

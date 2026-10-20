@@ -1051,15 +1051,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   + renaissance mid-session. Test : récupération
   automatique sans geste (repo simulé offline→
   online, timer 10 ms). `analyze` + `test` verts.
-- [ ] **Étape 80. Icônes trailing de la navbar
+- [x] **Étape 80. Icônes trailing de la navbar
   non déterministes** (rapport M22 : étoile,
   historique, signets, find, zoom, réglages
   absents en run mission — confirmé en capture
   foreground — mais visibles en session manuelle) :
-  hypothèse de départ = rendu icon-font / timing
-  au bootstrap, **pas** hit-test. Reproduire
-  l'état fautif avant de corriger — sans repro,
-  on répare le mauvais étage.
+  le repro a démenti l'hypothèse icon-font —
+  **`Row` fixe overflow** : sous ~560 px les 9
+  `IconButton` (48 dp mini) poussent le trailing
+  hors de la frame — silencieux en release,
+  bandes jaune/noir en debug, donc « absentes »
+  en capture et présentes en session large.
+  Correctif : `LayoutBuilder` — sous le seuil
+  `metrics.navCompact` (560, tokens les deux
+  variantes) la barre passe en mode compact :
+  navigation + omnibox + menu « ⋮ » regroupant
+  signet, historique, signets, recherche, zoom
+  ±/100 %, réglages (modèle Chrome). Régression
+  : widget test à 380 px — zéro overflow,
+  actions joignables via le menu. Les overrides
+  tokens synchrones rendent le test
+  déterministe (le chargement `rootBundle`
+  réel est flaky sous charge de suite).
+  `analyze` + `test` verts (20/20).
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

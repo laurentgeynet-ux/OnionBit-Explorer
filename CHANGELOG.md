@@ -203,6 +203,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Étape 80 — navbar : trailing replié en menu
+  « ⋮ » sous fenêtre étroite** (`app/`) : sous
+  ~560 px, les 9 `IconButton` à largeur fixe
+  (48 dp minimum M3) poussaient étoile,
+  historique, signets, find, zoom et réglages
+  **hors de la frame** — silencieux en release,
+  « icônes absentes » en capture M22 alors que
+  visibles en session large. `LayoutBuilder` +
+  seuil `metrics.navCompact` : mode compact avec
+  les actions dans un menu de débordement, à la
+  manière de Chrome. Régression verrouillée par
+  un widget test à 380 px.
+
 - **Étape 81 — `daemonOnline` récupère automatiquement**
   (`app/`) : un bootstrap échoué figeait `daemonOnline:
   false` jusqu'au bouton « Réessayer » — alors que le
