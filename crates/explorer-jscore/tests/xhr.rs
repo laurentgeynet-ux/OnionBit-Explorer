@@ -4,7 +4,7 @@
 
 //! Tests for `XMLHttpRequest` over an injectable transport (JS-4).
 
-use dillo_js::{Engine, XhrRequest, XhrResponse, XhrTransport};
+use explorer_jscore::{Engine, XhrRequest, XhrResponse, XhrTransport};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 

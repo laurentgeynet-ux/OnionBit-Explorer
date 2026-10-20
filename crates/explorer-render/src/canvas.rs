@@ -4,7 +4,7 @@
 
 //! Playback d'op-list `<canvas>` 2D (R-11, ex-62 moitié rendu).
 //!
-//! Couture NAV↔PIPELINE figée dans [`CanvasOp`] : `dillo-js`
+//! Couture NAV↔PIPELINE figée dans [`CanvasOp`] : `explorer-jscore`
 //! (JS-C28) enregistre les appels `CanvasRenderingContext2D`
 //! en une `Vec<CanvasOp>` par nœud `<canvas>` ; ce module la
 //! rejoue vers `tiny-skia` → bitmap de l'élément, consommé

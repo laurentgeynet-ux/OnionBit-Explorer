@@ -9,10 +9,10 @@
 //!
 //! Ce n'est **pas** test262 : la suite officielle cible ES5+ complet
 //! (regex, `let`, strict mode…) — hors périmètre du sous-ensemble
-//! (cf. ADR `dillo-js`). Chaque cas couvre une *forme* observée sur
+//! (cf. ADR `explorer-jscore`). Chaque cas couvre une *forme* observée sur
 //! le web jQuery-era, écrite contre notre surface supportée.
 
-use dillo_js::{Dom, Engine};
+use explorer_jscore::{Dom, Engine};
 use std::cell::RefCell;
 use std::rc::Rc;
 

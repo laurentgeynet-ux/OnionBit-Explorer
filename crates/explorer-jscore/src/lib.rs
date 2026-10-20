@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! dillo-js — moteur JavaScript écrit from scratch, livrable de
+//! explorer-jscore — moteur JavaScript écrit from scratch, livrable de
 //! l'équipe JS dédiée (ADR-0007).
 //!
 //! Noyau ES3/ES5 — `var`/`function`, prototypes, closures,

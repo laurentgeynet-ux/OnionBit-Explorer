@@ -17,7 +17,7 @@ members = [
     "crates/explorer-test-support",
     # Moteur JavaScript de l'équipe dédiée (ADR-0007) — nom de produit
     # propre, adapté derrière `explorer-js::JsEngine` en phase 8.
-    "crates/dillo-js",
+    "crates/explorer-jscore",
 ]
 
 [workspace.package]
@@ -41,7 +41,7 @@ explorer-core = { path = "crates/explorer-core" }
 explorer-api = { path = "crates/explorer-api" }
 explorer-ffi = { path = "crates/explorer-ffi" }
 explorer-test-support = { path = "crates/explorer-test-support" }
-dillo-js = { path = "crates/dillo-js" }
+explorer-jscore = { path = "crates/explorer-jscore" }
 
 # Crates externes — pur Rust uniquement (AGENTS.md §4.2),
 # pin mineur, ≥ 7 jours depuis publication.
@@ -56,7 +56,7 @@ ttf-parser = "0.25"
 tiny-skia = "0.11"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
-# Moteur regex de dillo-js (pur Rust) — lookahead/backrefs non
+# Moteur regex de explorer-jscore (pur Rust) — lookahead/backrefs non
 # supportés, dégradation SyntaxError documentée (ADR-0007).
 regex = "1.11"
 # Backtracker hybride pur Rust (regex-automata + backtrack) —
@@ -67,18 +67,18 @@ fancy-regex = "0.16"
 # pur Rust, pas de *-sys.
 idna = "1.0"
 # Tables Unicode XID_Start/XID_Continue pour les identifiants JS
-# (dillo-js lexer) — `char::is_alphabetic` n'implémente ni UAX #31
+# (explorer-jscore lexer) — `char::is_alphabetic` n'implémente ni UAX #31
 # ni les exclusions Pattern_Syntax (ex. U+2E2F). Pur Rust.
 unicode-ident = "1.0"
-# `String.prototype.normalize` (dillo-js JS-C14) — tables de
+# `String.prototype.normalize` (explorer-jscore JS-C14) — tables de
 # normalisation Unicode réelles (NFC/NFD/NFKC/NFKD). Pur Rust.
 unicode-normalization = "0.1"
-# Entiers arbitraires pour BigInt (dillo-js JS-C7) — pur Rust,
+# Entiers arbitraires pour BigInt (explorer-jscore JS-C7) — pur Rust,
 # pas de GMP. num-traits pour les casts BigInt→i64/u64/f64.
 num-bigint = "0.4"
 num-traits = "0.2"
 # Sonde de pile restante pour les descentes récursives de
-# dillo-js (JS-C41 — parseur/évaluateur/appels bornés par la
+# explorer-jscore (JS-C41 — parseur/évaluateur/appels bornés par la
 # pile réelle, pas par des constantes calibrées). Pur Rust
 # (`psm`, asm inline) — mécanisme utilisé par rustc.
 stacker = "0.1.25"

@@ -4,12 +4,12 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Trait JsEngine + bindings DOM — couture vers le moteur dillo-js (ADR-0007/0008)"
+description = "Trait JsEngine + bindings DOM — couture vers le moteur explorer-jscore (ADR-0007/0008)"
 
 [lints]
 workspace = true
 
 [dependencies]
 explorer-dom.workspace = true
-dillo-js.workspace = true
+explorer-jscore.workspace = true
 thiserror.workspace = true

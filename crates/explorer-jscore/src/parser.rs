@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Recursive-descent parser for the `dillo-js` subset.
+//! Recursive-descent parser for the `explorer-jscore` subset.
 //!
 //! Implements a pragmatic ASI: a statement may end without `;` if the
 //! next token is `}`, EOF, or was preceded by a line break; `return`

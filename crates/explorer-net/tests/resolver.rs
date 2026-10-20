@@ -27,7 +27,10 @@ struct StubDns {
 #[async_trait]
 impl HttpTransport for StubDns {
     async fn fetch(&self, req: &Request) -> NetResult<Response> {
-        *self.captured.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+        *self
+            .captured
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
             req.body.clone().unwrap_or_default();
         Ok(Response {
             status: 200,
@@ -84,7 +87,10 @@ async fn doh_resolves_via_posted_dns_message() {
     let ips = r.resolve("example.com").await.unwrap();
     assert!(ips.contains(&IpAddr::from([93, 184, 216, 34])));
     // La requête est bien un dns-message POSTé (question A).
-    let got = t.captured.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let got = t
+        .captured
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     assert!(got
         .windows(b"\x07example\x03com\x00".len())
         .any(|w| w == b"\x07example\x03com\x00"));

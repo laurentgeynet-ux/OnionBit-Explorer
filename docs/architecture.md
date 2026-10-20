@@ -24,7 +24,7 @@ structurantes sont dans `docs/architecture/decisions/` (ADR).
 │ explorer-net │ explorer-js  │  ports (traits)       │
 │ HTTP/TLS/DNS │ trait        │  injectés dans core   │
 │ cache/cookie │ JsEngine     │                       │
-│              │ dillo-js     │  moteur JS autonome — │
+│              │ explorer-jscore     │  moteur JS autonome — │
 │              │ (workspace)  │  équipe NAVIGATEUR    │
 ├──────────────┴──────────────┴───────────────────────┤
 │ explorer-dom · explorer-html · explorer-css         │
@@ -59,7 +59,7 @@ pas dans `core` ; le DOM ne connaît pas axum.
 | `explorer-layout` | arbre de boîtes, block/inline, tables, floats, positionnement ; fontes via port `FontProvider` injecté | 4 |
 | `explorer-render` | display list → framebuffer RGBA → PNG / buffer brut | 5 |
 | `explorer-js` | trait `JsEngine` + bindings DOM + table de roots (ADR-0008) | 8 |
-| `dillo-js` | moteur JS autonome — équipe NAVIGATEUR (spécialiste JS), version canonique en workspace, licence MIT/Apache | 8 |
+| `explorer-jscore` | moteur JS autonome — équipe NAVIGATEUR (spécialiste JS), version canonique en workspace, licence MIT/Apache | 8 |
 | `explorer-core` | session : onglets, pipeline, bus d'événements | 0→ |
 | `explorer-api` | REST + SSE axum, auth par clé | 6 |
 | `explorer-cli` | binaire dev (fetch, dump DOM, shot, debug layout) | 0→ |
@@ -89,7 +89,7 @@ pas dans `core` ; le DOM ne connaît pas axum.
 
 - Modèle mémoire DOM ↔ GC figé avant la phase 2 (ADR-0008) —
   rooting explicite, cycles par table de callbacks ; c'est le
-  **contrat imposé à `dillo-js`** (rooting/trace/finalization) —
+  **contrat imposé à `explorer-jscore`** (rooting/trace/finalization) —
   périmètre équipe NAVIGATEUR dans le workspace.
 - Stack texte/fontes arbitrée avant l'étape 18 (ADR-0009) —
   `fontdb`/`ttf-parser` + `rustybuzz` + `unicode-bidi` +
@@ -118,7 +118,7 @@ pas dans `core` ; le DOM ne connaît pas axum.
   absent plutôt que routé, détection lint/runtime/canari —
   implémentation différée par déclencheurs.
 - `http_proxy`/`no_proxy` honorés par l'environnement.
-- `dillo-js` vit dans ce workspace sous `MIT OR Apache-2.0` — le
+- `explorer-jscore` vit dans ce workspace sous `MIT OR Apache-2.0` — le
   trait `JsEngine` le rend remplaçable (`boa_engine` en
   échappatoire documentée, ADR-0007).
 - Répertoire de profil déplaçable (cookies, historique,

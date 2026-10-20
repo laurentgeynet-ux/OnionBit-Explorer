@@ -7,7 +7,7 @@
 //! (globals, envs capturés, timers, microtasks, racines explicites),
 //! tombstones réutilisés, handles obsolètes détectés.
 
-use dillo_js::{Engine, ObjId, Value};
+use explorer_jscore::{Engine, ObjId, Value};
 
 fn ev(e: &mut Engine, src: &str) -> Value {
     e.eval(src)
@@ -164,7 +164,7 @@ fn promise_reactions_keep_their_closures_alive() {
 
 #[test]
 fn dom_wrapper_cache_keeps_wrappers_alive() {
-    use dillo_js::Dom;
+    use explorer_jscore::Dom;
     use std::cell::RefCell;
     use std::rc::Rc;
     let mut e = Engine::new();

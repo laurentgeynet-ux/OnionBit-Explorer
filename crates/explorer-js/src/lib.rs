@@ -4,9 +4,9 @@
 
 //! `explorer-js` — couture JavaScript (ADR-0007) : trait
 //! [`JsEngine`], moteur nul par défaut et adaptateur
-//! [`DilloEngine`] vers `dillo-js`.
+//! [`DilloEngine`] vers `explorer-jscore`.
 //!
-//! `dillo_js::Engine` est `!Send` (`Rc` dans le tas, les envs et les
+//! `explorer_jscore::Engine` est `!Send` (`Rc` dans le tas, les envs et les
 //! hooks hôtes) alors que la session vit derrière un `tokio` mutex
 //! exigeant `Send`. [`DilloEngine`] est donc un **proxy canal** : un
 //! thread dédié par contexte possède le moteur (single-writer — le
@@ -44,11 +44,13 @@ pub enum JsError {
     Dead,
 }
 
-impl From<dillo_js::Error> for JsError {
-    fn from(e: dillo_js::Error) -> Self {
+impl From<explorer_jscore::Error> for JsError {
+    fn from(e: explorer_jscore::Error) -> Self {
         match e {
-            dillo_js::Error::Syntax { line, col, message } => Self::Syntax { line, col, message },
-            dillo_js::Error::Uncaught(m) => Self::Uncaught(m),
+            explorer_jscore::Error::Syntax { line, col, message } => {
+                Self::Syntax { line, col, message }
+            }
+            explorer_jscore::Error::Uncaught(m) => Self::Uncaught(m),
         }
     }
 }
@@ -118,7 +120,7 @@ pub enum NetRequest {
 /// Réponse livrée au moteur pour un `handle` drainé —
 /// `status == 0` = échec réseau (event `error`, rejet de
 /// promesse `fetch`). Miroir sérialisable de
-/// `dillo_js::XhrResponse` (aucun type moteur ne fuit).
+/// `explorer_jscore::XhrResponse` (aucun type moteur ne fuit).
 #[derive(Debug, Clone)]
 pub struct NetResponse {
     /// Identifiant rendu par [`NetRequest::Fetch`].
@@ -144,11 +146,11 @@ pub type DomPath = Vec<(String, u32)>;
 pub type DomSyncPayload = (String, Option<DomPath>);
 
 /// Op-list `<canvas>` enregistrée par un contexte 2D du
-/// miroir (JS-C28, couture R-11) — `dillo_js::CanvasOpRecord`
+/// miroir (JS-C28, couture R-11) — `explorer_jscore::CanvasOpRecord`
 /// est le miroir sérialisable de
 /// `explorer_render::canvas::CanvasOp` : la session traduit
 /// champ pour champ et re-résout les chemins en `NodeId`.
-pub use dillo_js::CanvasOpRecord;
+pub use explorer_jscore::CanvasOpRecord;
 
 /// Table « chemin élément → op-list **cumulée** » lue sur le
 /// moteur — mêmes chemins que [`DomSyncPayload`] (ils
@@ -250,7 +252,7 @@ pub trait JsEngine: Send {
     /// canonique du module d'entrée (URL résolue — ou nom
     /// synthétique aliasé pour un module inline), `sources` la
     /// map `url → source` **préfetchée** par la session (graphe
-    /// statique via `dillo_js::module_specifiers`), `resolve` la
+    /// statique via `explorer_jscore::module_specifiers`), `resolve` la
     /// résolution `(specifier, referrer) → url`. Le chargeur ne
     /// fait jamais de fetch : un `import` hors map est une erreur
     /// JS propre — le canal reste à sens unique, jamais de
@@ -351,7 +353,7 @@ pub trait JsEngine: Send {
 pub type JsFactory = std::sync::Arc<dyn Fn() -> Box<dyn JsEngine> + Send + Sync>;
 
 /// Moteur nul : évalue en succès `"undefined"` — navigation sans
-/// JavaScript (défaut, tests, `dillo-js` indisponible).
+/// JavaScript (défaut, tests, `explorer-jscore` indisponible).
 #[derive(Debug, Default)]
 pub struct NullEngine;
 
@@ -369,7 +371,7 @@ pub fn null_factory() -> JsFactory {
     std::sync::Arc::new(|| Box::new(NullEngine))
 }
 
-pub use dillo_js::module_specifiers;
+pub use explorer_jscore::module_specifiers;
 
 /// Commandes vers le thread moteur — valeurs sérialisables, aucun
 /// handle `Rc` ne traverse.
@@ -441,7 +443,7 @@ enum Cmd {
     Shutdown,
 }
 
-/// Adaptateur `dillo-js` : un thread par contexte (le `Rc` du tas
+/// Adaptateur `explorer-jscore` : un thread par contexte (le `Rc` du tas
 /// ne quitte jamais son thread), le `JsEngine` n'est qu'un canal.
 pub struct DilloEngine {
     tx: Sender<Cmd>,
@@ -454,7 +456,7 @@ impl DilloEngine {
     pub fn new() -> Self {
         let (tx, rx) = channel::<Cmd>();
         let join = std::thread::Builder::new()
-            .name("dillo-js".to_string())
+            .name("explorer-jscore".to_string())
             // Pile large : le parseur/évaluateur descendant coûte
             // ~8–55 Kio natif par niveau d'emboîtement/appel JS
             // (JS-C41, mesuré). 32 Mio couvre les usages réels sans
@@ -470,11 +472,11 @@ impl DilloEngine {
         }
     }
 
-    /// Boucle du thread : possède le `dillo_js::Engine` (`!Send`)
+    /// Boucle du thread : possède le `explorer_jscore::Engine` (`!Send`)
     /// et sert les commandes jusqu'à `Shutdown` ou fermeture du
     /// canal (le `Sender` meurt avec le proxy).
     fn worker(rx: &Receiver<Cmd>) {
-        let mut eng = dillo_js::Engine::new();
+        let mut eng = explorer_jscore::Engine::new();
         // Plafonds logiques relevés pour la pile de 32 Mio du
         // thread moteur (JS-C41) : la pile est aussi protégée par
         // `maybe_grow`, ces bornes ne fixent que le `RangeError`
@@ -484,7 +486,7 @@ impl DilloEngine {
         // Miroir DOM installé par `install_dom` (`Rc` — vit et
         // meurt sur ce thread). Le `Dom` y reste mutable par les
         // bindings ; `DomSync` lit le dirty bit et sérialise.
-        let mut jsd: Option<dillo_js::DomRef> = None;
+        let mut jsd: Option<explorer_jscore::DomRef> = None;
         // Intentions de navigation script (`location`,
         // `history`) — hooks `Rc` du thread moteur, drainées
         // par `DrainNav` (jamais de navigation re-entrante).
@@ -500,7 +502,7 @@ impl DilloEngine {
         let jar = std::rc::Rc::new(SnapshotJar::default());
         // Backing `localStorage` posé par `InstallStorage` — le
         // moteur y écrit en direct, `DrainStorage` le relit.
-        let mut local_store: Option<dillo_js::Storage> = None;
+        let mut local_store: Option<explorer_jscore::Storage> = None;
         while let Ok(cmd) = rx.recv() {
             match cmd {
                 Cmd::Eval { src, tx } => {
@@ -782,7 +784,7 @@ impl Drop for DilloEngine {
 /// servi au `ModuleLoader` par `MapLoader` (étape 50) —
 /// jamais de fetch ré-entrant depuis le thread moteur.
 fn eval_module(
-    eng: &mut dillo_js::Engine,
+    eng: &mut explorer_jscore::Engine,
     entry: &str,
     sources: std::collections::HashMap<String, String>,
     resolve: UrlResolver,
@@ -803,7 +805,7 @@ fn eval_module(
 /// cumulées du miroir (JS-C28) — snapshot par chemin
 /// d'élément, jamais drainé (la bitmap persiste entre deux
 /// re-peintures).
-fn canvas_ops_of(jsd: Option<&dillo_js::DomRef>) -> CanvasOpsTable {
+fn canvas_ops_of(jsd: Option<&explorer_jscore::DomRef>) -> CanvasOpsTable {
     jsd.as_ref()
         .map_or_else(Vec::new, |d| d.borrow().canvas_ops())
 }
@@ -813,7 +815,7 @@ fn canvas_ops_of(jsd: Option<&dillo_js::DomRef>) -> CanvasOpsTable {
 /// pour que les handlers JS le lisent. `<textarea>` expose sa
 /// valeur en contenu texte, pas en attribut.
 fn sync_field(
-    jsd: Option<&dillo_js::DomRef>,
+    jsd: Option<&explorer_jscore::DomRef>,
     path: &[(String, u32)],
     attr: &str,
     value: Option<&str>,
@@ -838,8 +840,8 @@ fn sync_field(
 /// chemin non vide non résolu = cible morte → rien
 /// (jamais de repli silencieux sur le document).
 fn dispatch_event(
-    eng: &mut dillo_js::Engine,
-    jsd: Option<&dillo_js::DomRef>,
+    eng: &mut explorer_jscore::Engine,
+    jsd: Option<&explorer_jscore::DomRef>,
     ty: &str,
     path: &[(String, u32)],
 ) -> Result<bool, JsError> {
@@ -864,11 +866,11 @@ fn dispatch_event(
 /// s'arrête ; tout autre `Cmd` est ignoré (invariant :
 /// l'appelant ne délègue que ces commandes).
 fn serve_side(
-    eng: &mut dillo_js::Engine,
-    jsd: Option<&dillo_js::DomRef>,
+    eng: &mut explorer_jscore::Engine,
+    jsd: Option<&explorer_jscore::DomRef>,
     net_q: &std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
     jar: &std::rc::Rc<SnapshotJar>,
-    local_store: &mut Option<dillo_js::Storage>,
+    local_store: &mut Option<explorer_jscore::Storage>,
     cmd: Cmd,
 ) -> bool {
     match cmd {
@@ -879,7 +881,7 @@ fn serve_side(
         }
         Cmd::DeliverNet { resp, tx } => {
             let out = eng
-                .deliver_xhr_response(dillo_js::XhrResponse {
+                .deliver_xhr_response(explorer_jscore::XhrResponse {
                     handle: resp.handle,
                     status: resp.status,
                     status_text: resp.status_text,
@@ -890,7 +892,7 @@ fn serve_side(
             tx.send(out).is_ok()
         }
         Cmd::InstallStorage { local } => {
-            let map: dillo_js::Storage = std::rc::Rc::new(std::cell::RefCell::new(local));
+            let map: explorer_jscore::Storage = std::rc::Rc::new(std::cell::RefCell::new(local));
             eng.install_storage(&map);
             *local_store = Some(map);
             true
@@ -919,15 +921,17 @@ fn serve_side(
 /// script-initiée (JS-C27) : XHR + `fetch` → `net_q`,
 /// `document.cookie` → `jar`. Renvoie le `DomRef` installé.
 fn install_dom(
-    eng: &mut dillo_js::Engine,
+    eng: &mut explorer_jscore::Engine,
     nav_q: &std::rc::Rc<std::cell::RefCell<Vec<NavRequest>>>,
     net_q: &std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
     jar: &std::rc::Rc<SnapshotJar>,
     html: &str,
     page_url: &str,
     history_len: u32,
-) -> dillo_js::DomRef {
-    let d = std::rc::Rc::new(std::cell::RefCell::new(dillo_js::Dom::from_html(html)));
+) -> explorer_jscore::DomRef {
+    let d = std::rc::Rc::new(std::cell::RefCell::new(explorer_jscore::Dom::from_html(
+        html,
+    )));
     d.borrow().take_dirty();
     // La construction a aussi marqué un `dirty_node` (étape
     // 55f) — le vider avec le flag, sinon un `#document`
@@ -953,7 +957,7 @@ fn install_dom(
         // `form.submit()`/`requestSubmit()` — champs collectés
         // côté miroir, encodage + navigation côté session.
         let q3 = nav_q.clone();
-        eng.set_form_submit_hook(std::rc::Rc::new(move |p: dillo_js::FormSubmit| {
+        eng.set_form_submit_hook(std::rc::Rc::new(move |p: explorer_jscore::FormSubmit| {
             q3.borrow_mut().push(NavRequest::FormSubmit {
                 method: p.method,
                 action: p.action,
@@ -980,7 +984,10 @@ const IMPLICIT_TAGS: &[&str] = &["html", "head", "body", "tbody", "thead", "tfoo
 /// retourne le `NodeId` miroir — `None` si le chemin ne mène à
 /// aucun élément compatible (arbres divergents → dégradation,
 /// pas d'event vers le mauvais nœud).
-fn mirror_node(d: &dillo_js::Dom, path: &[(String, u32)]) -> Option<dillo_js::NodeId> {
+fn mirror_node(
+    d: &explorer_jscore::Dom,
+    path: &[(String, u32)],
+) -> Option<explorer_jscore::NodeId> {
     let mut cur = d.root;
     for (tag, k) in path {
         let kids = d.element_children(cur);
@@ -1015,7 +1022,7 @@ struct MapLoader {
     resolve: UrlResolver,
 }
 
-impl dillo_js::ModuleLoader for MapLoader {
+impl explorer_jscore::ModuleLoader for MapLoader {
     fn load(&mut self, specifier: &str, referrer: &str) -> Result<String, String> {
         let key = (self.resolve)(specifier, referrer)
             .ok_or_else(|| format!("spécificateur irrésolvable : {specifier}"))?;
@@ -1037,8 +1044,8 @@ struct ChanXhr {
     next: std::cell::Cell<u64>,
 }
 
-impl dillo_js::XhrTransport for ChanXhr {
-    fn send(&self, req: &dillo_js::XhrRequest) -> u64 {
+impl explorer_jscore::XhrTransport for ChanXhr {
+    fn send(&self, req: &explorer_jscore::XhrRequest) -> u64 {
         let handle = self.next.get();
         self.next.set(handle + 1);
         self.q.borrow_mut().push(NetRequest::Fetch {
@@ -1094,7 +1101,7 @@ impl SnapshotJar {
     }
 }
 
-impl dillo_js::CookieJar for SnapshotJar {
+impl explorer_jscore::CookieJar for SnapshotJar {
     fn get(&self, _url: &str) -> String {
         self.header()
     }

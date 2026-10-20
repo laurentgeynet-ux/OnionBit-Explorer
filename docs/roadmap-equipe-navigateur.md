@@ -3,7 +3,7 @@
 **Périmètre :** la plateforme produit — `explorer-net`,
 `explorer-core` (session/pipeline), `explorer-api`,
 `explorer-daemon`, `explorer-cli`, `explorer-ffi`,
-**toute la surface JS** (`explorer-js` + `dillo-js`),
+**toute la surface JS** (`explorer-js` + `explorer-jscore`),
 `app/` Flutter, `scripts/`, `fuzz/`.
 **Ne touche pas :** les crates domaine pur (`explorer-common`,
 `explorer-dom`, `explorer-html`, `explorer-css`,
@@ -15,12 +15,12 @@ libres, structure via le journal — AGENTS.md §10).
 **Deux pistes de numérotation** dans ce fichier :
 - **Piste produit** : étapes **50+** (suite de la séquence
   historique phases 0–10).
-- **Piste JS** : **JS-C26+** (suite de la série `dillo-js`).
+- **Piste JS** : **JS-C26+** (suite de la série `explorer-jscore`).
 
 **Definition of done** (inchangée) : implémenté + testé +
 CHANGELOG + case cochée + `verify_all` vert + commit dédié.
 **Spécialiste JS** : la piste JS est tenue par la personne qui
-connaît `dillo-js` — rôle nommé au sein de l'équipe, pas une
+connaît `explorer-jscore` — rôle nommé au sein de l'équipe, pas une
 équipe séparée. `JsEngine` est un contrat **interne** à
 l'équipe (plus de sign-off croisé, extensions additives
 recommandées mais non bloquées par l'autre équipe).
@@ -53,7 +53,7 @@ Balayage robustesse (14 sites, même session) : **vitrine
 `text.npr.org` quasi-parfaite**, weather.gov ~75 % (images
 NOAA peintes), csszengarden/git-scm/npmjs/go.dev/arstechnica/
 rust-lang rendent — **ajouter les deux premiers au smoke**.
-Écartés en plus : github (crash dillo-js → JS-C41 livré),
+Écartés en plus : github (crash explorer-jscore → JS-C41 livré),
 stackoverflow (403 bot-block, honnête), craigslist (TLS
 `close_notify` → étape 53c livrée), **lemonde/bbc (classés :
 `<noscript>` dans `<head>` avalait le document — R-15 livre
@@ -83,7 +83,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   sous-ressources** (ADR-0012 complété côté session).
   `<script src>` fetché via `HttpTransport` : ordre document,
   `defer` (post-parse, ordre garanti), `async` (à réception),
-  `type=module` → `ModuleLoader` de `dillo-js` (existe, JS-C5).
+  `type=module` → `ModuleLoader` de `explorer-jscore` (existe, JS-C5).
   Scheduler **parallèle** : files bornées par onglet
   (`SessionConfig`), priorités `document > CSS > script > img`,
   N fetches en vol (`FuturesUnordered`), `Referer`/`Origin` et
@@ -94,7 +94,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
 - [x] **Étape 51. Câblage Web APIs — clôt l'étape 44 de
   ROADMAP.md.** Intégralement interne à l'équipe :
   - `JsEngine` : traverse proxy des surfaces déjà livrées dans
-    `dillo-js` — `XhrTransport`/`deliver_xhr_response`,
+    `explorer-jscore` — `XhrTransport`/`deliver_xhr_response`,
     `install_storage`, `CookieJar` (pattern `drain_nav_requests`
     généralisé : `drain_net_requests()` + `deliver_net_response()`).
     **Livré par JS-C27** (commit `2b73089`).
@@ -125,7 +125,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `mouseover`/`mouseout`/`mousemove` (coalesced),
   `keydown`/`keyup`/`input`, `focus`/`blur` (liés au focus champ
   existant), `wheel`/`scroll`. **Tick dédié** :
-  `next_timer_deadline` de `dillo-js` devient un délai armé par
+  `next_timer_deadline` de `explorer-jscore` devient un délai armé par
   le daemon (et `tick` FFI) — `setTimeout`/`setInterval`/`rAF`
   tirent sans attendre un input ; borne de jobs par tick
   (ADR-0019). `MutationObserver` = JS-C26, drainé aux mêmes
@@ -281,7 +281,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `image_max_px`), `repaint` consomme
   `build_display_list_full`. Gelée dans le bfcache avec le
   reste de la table. `canvases` attendra JS-C28
-  (enregistrement op-list côté `dillo-js`) — même couture
+  (enregistrement op-list côté `explorer-jscore`) — même couture
   déjà figée.
 - [x] **Étape 55c. Miroir→DOM : source `<script>` injectée
   comme texte** (terrain mission 6+7, wikipedia — clientpref/
@@ -541,14 +541,14 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   300×150 fond noir, `audio` masqué sans `controls`,
   `audio[controls]` barre 300×54 — l'auteur l'emporte) ;
   (3) **JS honnête** — stubs `HTMLMediaElement` dans
-  `dillo-js` : `play()`/`setSinkId`/`setMediaKeys` rejettent
+  `explorer-jscore` : `play()`/`setSinkId`/`setMediaKeys` rejettent
   `NotSupportedError` (chemin `.catch()` déjà géré par les
   sites), `canPlayType` avoue `""`, `paused`/`duration`(NaN)/
   `readyState`/`networkState` (NO_SOURCE si `src`) reflètent
   « rien à lire », `buffered`/`played`/`seekable` = TimeRanges
   vides, écritures IDL acceptées-ignorées — jamais de faux
   succès. Tests : 4 session (affiche peinte http+`data:`,
-  boîte noire, audio masqué) + 2 dillo-js (props, rejet
+  boîte noire, audio masqué) + 2 explorer-jscore (props, rejet
   `play()`). Refinements PIPE consignés (`interface-equipes`) :
   vrais remplacés boxtree, `collect_data_images` sur poster,
   hints `width`/`height`.
@@ -877,7 +877,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `v.constructor.name` vaut `Object` au lieu de
   `HTMLVideoElement`/`HTMLAudioElement` — la
   `class_name` host de l'étape 58 n'irrigue pas
-  `constructor`. Surface : `dillo-js` bindings média.
+  `constructor`. Surface : `explorer-jscore` bindings média.
   Livré : `NodeHost::get("constructor")` renvoie un objet
   allégé `{name: class_name}` — `v.constructor.name` vaut
   `HTMLVideoElement`/`HTMLAudioElement`/`HTMLCanvasElement`
@@ -918,7 +918,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   un daemon navigateur ne meurt pas sans laisser de
   raison.
 
-## Piste JS (JS-C26+) — spécialiste `dillo-js`
+## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
 Ordre dicté par les besoins de la piste produit d'abord, puis
 couverture **strictement réactive** (un bug site → un cas
@@ -1006,9 +1006,9 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
 - [ ] **JS-C37. Perf + borne mémoire heap** : compteurs d'ops,
   seuils GC, **borne mémoire par contexte** (exigence ADR-0019),
   coût `serialize_document` instrumenté.
-- [ ] **JS-C38. Fuzz lexer/parser `dillo-js`** : cible
+- [ ] **JS-C38. Fuzz lexer/parser `explorer-jscore`** : cible
   cargo-fuzz (extension de `fuzz/` — périmètre équipe).
-- [ ] **JS-C40. Découpage interne `dillo-js`** (audit externe) :
+- [ ] **JS-C40. Découpage interne `explorer-jscore`** (audit externe) :
   `builtins.rs` 269 Ko / `interp.rs` 222 Ko — extraire par
   domaine (builtins → `builtins/{object,array,string,…}.rs`,
   interp → dispatch + groupes d'opcodes). Pur reformatage
@@ -1043,7 +1043,7 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `explorer-dom` exigés (règle de tri « corrige le côté
   fautif »).
 - [x] **JS-C41. Récursion bornée — stack overflow site réel**
-  (bug terrain, repro : github.com) : `dillo-js` fait un
+  (bug terrain, repro : github.com) : `explorer-jscore` fait un
   stack overflow sur le bundle réel de github (`dump`/`layout`
   OK, `shot` 💥 ; `EXPLORER_NO_JS=1` → erreur propre →
   confirme le moteur JS). **Violation de la règle « jamais
@@ -1088,7 +1088,7 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand
-  le parse miroir est fautif → fix `dillo-js` + cas `corpus.rs`.
+  le parse miroir est fautif → fix `explorer-jscore` + cas `corpus.rs`.
 - **Conformance** : `explorer-test-support`, corpus extraction,
   outillage smoke — la culture « % mesurés » (ADR-0010).
 - **Triage produit** : échecs `site_smoke` classés « navigateur »

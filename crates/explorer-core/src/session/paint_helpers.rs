@@ -89,7 +89,7 @@ pub(crate) fn canvas_table(entry: &mut Tab, dom: &Dom) -> CanvasTable {
     out
 }
 
-/// `CanvasOpRecord` (miroir `dillo-js`, sérialisable) →
+/// `CanvasOpRecord` (miroir `explorer-jscore`, sérialisable) →
 /// `CanvasOp` (playback R-11) — traduction champ pour champ
 /// des deux énumérations figées par la couture.
 pub(crate) fn to_canvas_op(rec: &CanvasOpRecord) -> CanvasOp {

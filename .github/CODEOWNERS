@@ -17,7 +17,7 @@ crates/explorer-render/       @equipe-pipeline
 crates/explorer-net/          @equipe-navigateur
 crates/explorer-core/         @equipe-navigateur
 crates/explorer-js/           @equipe-navigateur
-crates/dillo-js/              @equipe-navigateur
+crates/explorer-jscore/              @equipe-navigateur
 crates/explorer-api/          @equipe-navigateur
 crates/explorer-cli/          @equipe-navigateur
 crates/explorer-daemon/       @equipe-navigateur

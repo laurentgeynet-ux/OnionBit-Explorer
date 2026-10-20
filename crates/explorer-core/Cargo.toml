@@ -21,7 +21,7 @@ explorer-render.workspace = true
 # la feature `std` est exigée (le workspace épingle `default-features = false`).
 futures-util = { workspace = true, features = ["std"] }
 # Validation `pattern` des formulaires (étape 54) — pur Rust,
-# déjà dépendance du workspace pour dillo-js.
+# déjà dépendance du workspace pour explorer-jscore.
 regex.workspace = true
 # Sérialisation JSON du store de profil (étape 61) — les formes
 # filaires `Raw*` vivent dans `profile_store`, jamais sur les DTO.

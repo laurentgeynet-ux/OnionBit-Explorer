@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `RegExp` semantics for `dillo-js`, built on the pure-Rust
+//! `RegExp` semantics for `explorer-jscore`, built on the pure-Rust
 //! `fancy-regex` backtracker.
 //!
 //! Coverage: literals, `g i m s u y` flags, `exec`/`test` with

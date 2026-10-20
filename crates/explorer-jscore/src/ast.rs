@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! AST for `dillo-js` — ES3 core plus pragmatic ES2015+ coverage.
+//! AST for `explorer-jscore` — ES3 core plus pragmatic ES2015+ coverage.
 //!
 //! Covered beyond ES3: `let`/`const`, arrow functions, template
 //! literals, optional chaining (`?.`) / nullish (`??`), `**`,

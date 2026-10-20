@@ -402,21 +402,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
 
 [[package]]
-name = "dillo-js"
-version = "0.1.0"
-dependencies = [
- "fancy-regex",
- "num-bigint",
- "num-traits",
- "regex",
- "stacker",
- "thiserror",
- "tracing",
- "unicode-ident",
- "unicode-normalization",
-]
-
-[[package]]
 name = "displaydoc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -593,9 +578,24 @@ dependencies = [
 name = "explorer-js"
 version = "0.1.0"
 dependencies = [
- "dillo-js",
  "explorer-dom",
+ "explorer-jscore",
  "thiserror",
+]
+
+[[package]]
+name = "explorer-jscore"
+version = "0.1.0"
+dependencies = [
+ "fancy-regex",
+ "num-bigint",
+ "num-traits",
+ "regex",
+ "stacker",
+ "thiserror",
+ "tracing",
+ "unicode-ident",
+ "unicode-normalization",
 ]
 
 [[package]]

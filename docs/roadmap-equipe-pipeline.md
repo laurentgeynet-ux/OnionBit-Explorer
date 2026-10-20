@@ -5,7 +5,7 @@
 `explorer-render`. Zéro I/O, zéro async, zéro réseau : tout ce qui
 transforme des octets en pixels.
 **Ne touche pas :** `explorer-net`, `explorer-core`, `explorer-js`,
-`dillo-js`, `api`/`daemon`/`cli`/`ffi`, `app/`, `scripts/`, `fuzz/`.
+`explorer-jscore`, `api`/`daemon`/`cli`/`ffi`, `app/`, `scripts/`, `fuzz/`.
 **Partagé :** `explorer-test-support` (fixtures/stubs additifs
 libres, structure via le journal — AGENTS.md §10).
 
@@ -560,7 +560,7 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (timeline partagée), frames 0 %/100 % implicites depuis le
   style calculé. Cadencement session = adoption NAV.
 - [x] **R-11. Raster `<canvas>` 2D** (ex-62, moitié rendu) :
-  playback de l'**op-list** enregistrée par `dillo-js` (JS-C28 —
+  playback de l'**op-list** enregistrée par `explorer-jscore` (JS-C28 —
   ↔ NAV, surface JS) vers tiny-skia → pixmap de l'élément →
   `DisplayItem::Image`. **Couture figée** (`interface-equipes.md`)
   : `canvas::CanvasOp`/`CanvasTable` + `PaintImages.canvases` ;
@@ -673,7 +673,7 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
 | `build_box_tree_*`/`build_display_list_*` | `explorer-core` | ✅ — variants sized/imaged |
 | hit-test / path `(tag,index)` | `explorer-core` dispatch events | ✅ |
 | `DisplayItem` + dirty rects | transport FFI (NAV-55) | R-7 à faire |
-| op-list canvas → `DisplayItem::Image` | `dillo-js` canvas (JS-C28) | R-11 à faire ↔ NAV |
+| op-list canvas → `DisplayItem::Image` | `explorer-jscore` canvas (JS-C28) | R-11 à faire ↔ NAV |
 
 Règle : les API publiques des crates PIPELINE sont le contrat —
 extensions additives de préférence ; toute casse de signature

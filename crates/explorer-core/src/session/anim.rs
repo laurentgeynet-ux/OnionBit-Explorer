@@ -13,7 +13,7 @@ impl Session {
     /// par le pull de frames de l'UI **et** le battement
     /// d'hôte ([`Self::pump_timers_all`], sinon elle resterait
     /// figée entre deux pulls ; le moteur n'a pas de boucle
-    /// vsync propre, `rAF` vit côté `dillo-js`).
+    /// vsync propre, `rAF` vit côté `explorer-jscore`).
     /// `Ok(true)` = une nouvelle frame a été produite et
     /// `FrameInvalidated` émis.
     ///

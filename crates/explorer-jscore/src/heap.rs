@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Heap, objects, environments — the arena at the heart of `dillo-js`.
+//! Heap, objects, environments — the arena at the heart of `explorer-jscore`.
 //!
 //! Same ownership philosophy as ADR-0005's widget arena: every object
 //! lives in `Heap.cells` and is referenced by `ObjId` (a `u32`), so

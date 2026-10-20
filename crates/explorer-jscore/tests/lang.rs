@@ -2,9 +2,9 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Conformance tests for the `dillo-js` ES3-subset engine.
+//! Conformance tests for the `explorer-jscore` ES3-subset engine.
 
-use dillo_js::{Engine, Value};
+use explorer_jscore::{Engine, Value};
 
 #[track_caller]
 fn ev(src: &str) -> Value {
@@ -287,7 +287,7 @@ fn exceptions() {
 fn uncaught_error_is_host_error() {
     let mut e = Engine::new();
     match e.eval("throw 'x'") {
-        Err(dillo_js::Error::Uncaught(m)) => assert_eq!(m, "x"),
+        Err(explorer_jscore::Error::Uncaught(m)) => assert_eq!(m, "x"),
         other => panic!("expected Uncaught, got {other:?}"),
     }
 }
@@ -297,16 +297,16 @@ fn syntax_error() {
     let mut e = Engine::new();
     assert!(matches!(
         e.eval("var = 3"),
-        Err(dillo_js::Error::Syntax { .. })
+        Err(explorer_jscore::Error::Syntax { .. })
     ));
     // `with` est supporté en sloppy ; en strict c'est une SyntaxError.
     assert!(matches!(
         e.eval("'use strict'; with (o) { x }"),
-        Err(dillo_js::Error::Syntax { .. })
+        Err(explorer_jscore::Error::Syntax { .. })
     ));
     assert!(matches!(
         e.eval("`tpl ${"),
-        Err(dillo_js::Error::Syntax { .. })
+        Err(explorer_jscore::Error::Syntax { .. })
     ));
 }
 
@@ -323,7 +323,7 @@ fn let_const_bindings() {
     // l'ancienne tolérance silencieuse est corrigée en JS-C2.
     assert!(matches!(
         Engine::new().eval("const c = 1; c = 9"),
-        Err(dillo_js::Error::Uncaught(_))
+        Err(explorer_jscore::Error::Uncaught(_))
     ));
     assert_eq!(num(ev("const c = 1; try { c = 9; } catch(e) {} c")), 1.0);
     // `let` still works as a sloppy-mode identifier.
@@ -649,7 +649,7 @@ fn op_limit_kills_infinite_loop() {
     let mut e = Engine::new();
     e.set_op_limit(100_000);
     match e.eval("while (true) {}") {
-        Err(dillo_js::Error::Uncaught(m)) => assert!(m.contains("execution limit")),
+        Err(explorer_jscore::Error::Uncaught(m)) => assert!(m.contains("execution limit")),
         other => panic!("expected Uncaught, got {other:?}"),
     }
 }
@@ -664,7 +664,7 @@ fn deep_recursion_throws() {
         .spawn(|| {
             let mut e = Engine::new();
             match e.eval("function f() { f() } f()") {
-                Err(dillo_js::Error::Uncaught(m)) => assert!(m.contains("stack"), "{m}"),
+                Err(explorer_jscore::Error::Uncaught(m)) => assert!(m.contains("stack"), "{m}"),
                 other => panic!("expected Uncaught, got {other:?}"),
             }
         })
@@ -1770,12 +1770,12 @@ fn unicode_identifiers() {
     // U+2E2F VERTICAL TILDE : Lm mais Pattern_Syntax → rejeté.
     assert!(matches!(
         Engine::new().eval("var \u{2e2f} = 1"),
-        Err(dillo_js::Error::Syntax { .. })
+        Err(explorer_jscore::Error::Syntax { .. })
     ));
     // Mot réservé échappé → rejeté.
     assert!(matches!(
         Engine::new().eval("var \\u{69}f = 1"),
-        Err(dillo_js::Error::Syntax { .. })
+        Err(explorer_jscore::Error::Syntax { .. })
     ));
 }
 
@@ -1791,7 +1791,7 @@ fn whitespace_and_line_terminators() {
     for src in ["var r = /a\nb/", "var r = /a\rb/", "var r = /a\u{2028}b/"] {
         assert!(matches!(
             Engine::new().eval(src),
-            Err(dillo_js::Error::Syntax { .. })
+            Err(explorer_jscore::Error::Syntax { .. })
         ));
     }
 }
@@ -1838,7 +1838,7 @@ fn unterminated_inputs_rejected() {
     ] {
         assert!(matches!(
             Engine::new().eval(src),
-            Err(dillo_js::Error::Syntax { .. })
+            Err(explorer_jscore::Error::Syntax { .. })
         ));
     }
 }
@@ -1848,7 +1848,7 @@ fn malformed_numbers_rejected() {
     for src in ["var n = 3in", "var n = 1e", "var n = 1e+", "var n = 0x"] {
         assert!(matches!(
             Engine::new().eval(src),
-            Err(dillo_js::Error::Syntax { .. })
+            Err(explorer_jscore::Error::Syntax { .. })
         ));
     }
     // Octales legacy sloppy restent acceptées.
@@ -1861,7 +1861,7 @@ fn regex_literal_eager_validation() {
     for src in ["var r = /[/", r"var r = /x\y/u", "var r = /a/zz"] {
         assert!(matches!(
             Engine::new().eval(src),
-            Err(dillo_js::Error::Syntax { .. })
+            Err(explorer_jscore::Error::Syntax { .. })
         ));
     }
     // Identity escape Annex B (sloppy) : `\y` = 'y' littéral.
@@ -1875,7 +1875,12 @@ fn regex_literal_eager_validation() {
 
 #[test]
 fn strict_mode() {
-    let syn = |src: &str| matches!(Engine::new().eval(src), Err(dillo_js::Error::Syntax { .. }));
+    let syn = |src: &str| {
+        matches!(
+            Engine::new().eval(src),
+            Err(explorer_jscore::Error::Syntax { .. })
+        )
+    };
     // Octales legacy interdites en strict, tolérées en sloppy.
     assert!(syn(r#""use strict"; var n = 010"#));
     assert!(syn(r#""use strict"; var n = 08"#));
@@ -1945,7 +1950,7 @@ fn property_descriptors() {
             "var o = {}; Object.defineProperty(o, 'x', {value: 1}); \
              Object.defineProperty(o, 'x', {value: 2})"
         ),
-        Err(dillo_js::Error::Uncaught(_))
+        Err(explorer_jscore::Error::Uncaught(_))
     ));
     // `defineProperties` + `getOwnPropertyDescriptors`.
     assert_eq!(
@@ -1972,7 +1977,7 @@ fn property_descriptors() {
     );
     assert!(matches!(
         Engine::new().eval("var o = {}; Object.setPrototypeOf(o, o)"),
-        Err(dillo_js::Error::Uncaught(_))
+        Err(explorer_jscore::Error::Uncaught(_))
     ));
     // Constantes globales : `undefined`/`NaN`/`Math.E` verrouillées.
     assert_eq!(
@@ -1995,7 +2000,7 @@ fn freeze_seal_semantics() {
     );
     assert!(matches!(
         Engine::new().eval("'use strict'; var o = Object.freeze({a: 1}); o.a = 9"),
-        Err(dillo_js::Error::Uncaught(_))
+        Err(explorer_jscore::Error::Uncaught(_))
     ));
     // seal : écriture OK, delete refusé.
     assert_eq!(
@@ -2018,7 +2023,7 @@ fn freeze_seal_semantics() {
     for lock in ["preventExtensions", "seal", "freeze"] {
         assert!(matches!(
             Engine::new().eval(&format!("var o = Object.{lock}({{}}); o.__proto__ = {{}}")),
-            Err(dillo_js::Error::Uncaught(_))
+            Err(explorer_jscore::Error::Uncaught(_))
         ));
         assert_eq!(
             ev_str(&format!(
@@ -2032,13 +2037,18 @@ fn freeze_seal_semantics() {
     // Cycle via `__proto__` refusé aussi.
     assert!(matches!(
         Engine::new().eval("var o = {}; o.__proto__ = o"),
-        Err(dillo_js::Error::Uncaught(_))
+        Err(explorer_jscore::Error::Uncaught(_))
     ));
 }
 
 #[test]
 fn strict_runtime() {
-    let uncaught = |src: &str| matches!(Engine::new().eval(src), Err(dillo_js::Error::Uncaught(_)));
+    let uncaught = |src: &str| {
+        matches!(
+            Engine::new().eval(src),
+            Err(explorer_jscore::Error::Uncaught(_))
+        )
+    };
     // Écriture sur identifiant non déclaré : ReferenceError strict,
     // global implicite sloppy.
     assert!(uncaught("'use strict'; nouvelleVar = 1"));
@@ -2173,7 +2183,7 @@ fn proxy_traps() {
 /// In-memory module loader for tests.
 struct MapLoader(std::collections::BTreeMap<&'static str, &'static str>);
 
-impl dillo_js::ModuleLoader for MapLoader {
+impl explorer_jscore::ModuleLoader for MapLoader {
     fn load(&mut self, specifier: &str, _referrer: &str) -> std::result::Result<String, String> {
         self.0
             .get(specifier)
@@ -6423,7 +6433,7 @@ fn c41_deep_operand_chain_drops_iteratively() {
     ] {
         // Parse + destruction immédiate — l'ancien crash
         // (drop récursif) vivait ici, sans aucun `eval`.
-        let specs = dillo_js::module_specifiers(&src);
+        let specs = explorer_jscore::module_specifiers(&src);
         assert_eq!(specs, Vec::<String>::new());
         // `eval` : la borne `expr_depth` rend une erreur
         // typée — la destruction de l'AST d'erreur ne doit

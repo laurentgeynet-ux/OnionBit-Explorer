@@ -416,7 +416,7 @@ impl Engine {
         // Fixed, low-fingerprint navigator — by design.
         let nav = self.new_object();
         for (k, v) in [
-            ("userAgent", "Explorer/0.1 (dillo-js)"),
+            ("userAgent", "Explorer/0.1 (explorer-jscore)"),
             ("appName", "Netscape"),
             ("platform", "Win32"),
             ("language", "en-US"),

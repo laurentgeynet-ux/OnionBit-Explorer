@@ -1,4 +1,4 @@
-# dillo-js — moteur JavaScript écrit from scratch en Rust pur.
+# explorer-jscore — moteur JavaScript écrit from scratch en Rust pur.
 #
 # Livrable de l'équipe JS dédiée. **La version canonique vit dans ce
 # workspace** : le développement se fait ici, sous le contrat
@@ -6,7 +6,7 @@
 # présente dans le chantier de port voisin est figée — elle disparaît
 # quand la dépendance bascule sur ce dépôt (cf. ADR-0007).
 [package]
-name = "dillo-js"
+name = "explorer-jscore"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

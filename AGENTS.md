@@ -17,8 +17,8 @@ toucher quoi que ce soit.
 - **Backend d'abord** : le moteur est prioritaire. L'app Flutter
   (`app/`) est un squelette qui évolue avec l'avancement — elle ne
   consomme que l'API, jamais le core (ADR-0003).
-- **JS par couture** : le moteur JavaScript `dillo-js` vit dans ce
-  workspace (`crates/dillo-js`), intégré derrière le trait
+- **JS par couture** : le moteur JavaScript `explorer-jscore` vit dans ce
+  workspace (`crates/explorer-jscore`), intégré derrière le trait
   `JsEngine` (ADR-0007) — périmètre de l'équipe NAVIGATEUR (§10),
   rôle « spécialiste JS ». Rien d'autre ne lui est couplé.
 - **Tolérant, jamais crash** : page malformée, réponse HTTP
@@ -36,7 +36,7 @@ crates/
   explorer-css       tokenizer, parser, sélecteurs, cascade
   explorer-js        trait JsEngine + adaptateur DilloEngine +
                      NullEngine — équipe NAVIGATEUR (§10)
-  dillo-js           moteur JavaScript autonome — équipe
+  explorer-jscore           moteur JavaScript autonome — équipe
                      NAVIGATEUR, spécialiste JS (ADR-0007)
   explorer-layout    arbre de boîtes, block/inline, dimensionnement
   explorer-render    display list → framebuffer RGBA → PNG
@@ -59,9 +59,9 @@ scripts/             verify_all.ps1 + utilitaires
 
 Sens de dépendance strictement descendant :
 `common ← net|dom ← html|css ← layout ← render ← core ← api ← daemon`,
-`common ← dom ← js ← core`, `dillo-js ← js`, `net ← core`. Jamais
+`common ← dom ← js ← core`, `explorer-jscore ← js`, `net ← core`. Jamais
 de dépendance montante ni latérale ; le code partagé descend d'une
-couche (ou ADR). `dillo-js` est autonome (aucune dépendance interne,
+couche (ou ADR). `explorer-jscore` est autonome (aucune dépendance interne,
 son mini-DOM est un harnais de test). `explorer-net` est le seul
 crate autorisé à ouvrir des sockets.
 
@@ -207,7 +207,7 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
 
 ## 9. Ce qui n'est PAS ce projet
 
-- Pas un port de Dillo — `dillo-js` a une histoire dans un chantier
+- Pas un port de Dillo — `explorer-jscore` a une histoire dans un chantier
   de port voisin mais aucune architecture n'en est importée :
   l'adaptation passe par le trait `JsEngine` (ADR-0007). Provenance
   figée dans ADR-0020 ; renommage en `explorer-jscore` décidé,
@@ -248,7 +248,7 @@ pur d'un côté, la plateforme produit de l'autre.
   l'orchestration) : `explorer-net`, `explorer-core`,
   `explorer-api`, `explorer-daemon`, `explorer-cli`,
   `explorer-ffi`, `app/`, `scripts/`, `fuzz/`, **+ toute la
-  surface JS** (`explorer-js`, `dillo-js`). Roadmap :
+  surface JS** (`explorer-js`, `explorer-jscore`). Roadmap :
   `docs/roadmap-equipe-navigateur.md` — piste produit
   **étapes 50+**, piste JS **JS-C26+**.
 - **`explorer-test-support` = partagé** : feuille à zéro
@@ -258,7 +258,7 @@ pur d'un côté, la plateforme produit de l'autre.
   **additifs** ; changement structurel via le journal.
 - **Spécialiste JS** : rôle nommé au sein de NAVIGATEUR (pas une
   équipe séparée) — il tient la piste JS-Cxx. La profondeur de
-  `dillo-js` (32 000 lignes) exige un détenteur du contexte ;
+  `explorer-jscore` (32 000 lignes) exige un détenteur du contexte ;
   sa file est ordonnée par les besoins produit, la couverture
   langue est strictement réactive aux sites réels.
 

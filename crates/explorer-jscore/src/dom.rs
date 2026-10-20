@@ -156,7 +156,7 @@ pub struct Node {
 /// Opération `CanvasRenderingContext2D` enregistrée sur le
 /// miroir (JS-C28) — miroir sérialisable de
 /// `explorer_render::canvas::CanvasOp` (couture R-11) : la
-/// couche navigateur la traduit champ pour champ. `dillo-js`
+/// couche navigateur la traduit champ pour champ. `explorer-jscore`
 /// n'a aucune dépendance interne (ADR-0007) — les couleurs
 /// voyagent en `rgba8`.
 #[derive(Debug, Clone, PartialEq)]

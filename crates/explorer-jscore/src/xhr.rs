@@ -4,7 +4,7 @@
 
 //! `XMLHttpRequest` over an injectable transport (JS-4).
 //!
-//! dillo-js **never touches the network itself** (§4.11): the
+//! explorer-jscore **never touches the network itself** (§4.11): the
 //! embedder installs an [`XhrTransport`] (backed by
 //! `explorer-net`'s `HttpTransport` in the browser, by an
 //! in-process stub in tests). The flow mirrors

@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Lexer for the `dillo-js` ES3-flavoured subset.
+//! Lexer for the `explorer-jscore` ES3-flavoured subset.
 //!
 //! Tokens are produced eagerly into a `Vec<Token>`; each token records
 //! its position and whether a line break preceded it, which the parser

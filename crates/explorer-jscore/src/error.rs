@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Error type for `dillo-js`.
+//! Error type for `explorer-jscore`.
 
 use thiserror::Error;
 

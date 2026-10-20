@@ -5,7 +5,7 @@
 //! Tests for the standalone mini-DOM façade (JS-2): `document`,
 //! elements, `innerHTML`, style/classList, events, `document.write`.
 
-use dillo_js::{Dom, Engine};
+use explorer_jscore::{Dom, Engine};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -74,7 +74,7 @@ fn document_write_appends_to_body() {
 
 #[test]
 fn navigator_is_fixed_and_poor() {
-    assert_eq!(ev("navigator.userAgent"), "Explorer/0.1 (dillo-js)");
+    assert_eq!(ev("navigator.userAgent"), "Explorer/0.1 (explorer-jscore)");
     // Deliberately absent: plugins, geolocation, hardware APIs…
     assert_eq!(ev("navigator.plugins === undefined"), "true");
     assert_eq!(ev("navigator.geolocation === undefined"), "true");
@@ -495,7 +495,7 @@ struct TestJar {
     inner: RefCell<Vec<String>>,
 }
 
-impl dillo_js::CookieJar for TestJar {
+impl explorer_jscore::CookieJar for TestJar {
     fn get(&self, _url: &str) -> String {
         self.inner.borrow().join("; ")
     }
@@ -1294,7 +1294,7 @@ fn form_submit_calls_hook_without_event() {
     let mut e = engine_with(FORM_PAGE);
     {
         let c = calls.clone();
-        e.set_form_submit_hook(Rc::new(move |p: dillo_js::FormSubmit| {
+        e.set_form_submit_hook(Rc::new(move |p: explorer_jscore::FormSubmit| {
             c.borrow_mut().push(p);
         }));
     }
@@ -1319,7 +1319,7 @@ fn request_submit_fires_event_then_hook() {
     let mut e = engine_with(FORM_PAGE);
     {
         let c = calls.clone();
-        e.set_form_submit_hook(Rc::new(move |p: dillo_js::FormSubmit| {
+        e.set_form_submit_hook(Rc::new(move |p: explorer_jscore::FormSubmit| {
             c.borrow_mut().push(p);
         }));
     }
@@ -1484,7 +1484,7 @@ const PAGE_CANVAS: &str = r#"
 
 #[test]
 fn canvas_context_records_ops() {
-    use dillo_js::CanvasOpRecord as R;
+    use explorer_jscore::CanvasOpRecord as R;
     let dom = Rc::new(RefCell::new(Dom::from_html(PAGE_CANVAS)));
     let mut e = Engine::new();
     e.install_dom(&dom);

@@ -746,7 +746,7 @@ pub(crate) async fn fetch_wave<T>(
 }
 
 /// Spécificateurs statiques `(spec brut, url résolue)` d'un
-/// corps de module — `module_specifiers` (dillo-js, JS-C5)
+/// corps de module — `module_specifiers` (explorer-jscore, JS-C5)
 /// + résolution contre l'URL du module parent.
 pub(crate) fn module_deps(src: &str, referrer: &Url) -> Vec<(String, Url)> {
     explorer_js::module_specifiers(src)

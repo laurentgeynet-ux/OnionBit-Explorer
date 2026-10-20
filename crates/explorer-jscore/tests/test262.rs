@@ -26,7 +26,7 @@
 //!   Symbol, Map/Set, Promise…) ; les skips sont comptés, jamais
 //!   silencieux.
 
-use dillo_js::{Engine, Error};
+use explorer_jscore::{Engine, Error};
 use std::fs;
 use std::path::{Path, PathBuf};
 
