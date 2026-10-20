@@ -62,6 +62,101 @@ Règles :
 | 2026-10-20 | `explorer-layout` flottants | **constat transitoire, résolu** : pendant le chantier float (`intrinsic.rs`/`block.rs`, livré R-28 `3cb6a98`), le test NAV `dom_sync_falls_back_when_floats_present` cassait — `hit_test` sur la boîte flottante ratait `(10,10)` → retombait sur la racine `<html>`. Repasse au vert avec la version commitée ; rien à faire côté NAV. | PIPE | résolu |
 | 2026-11-07 | `explorer-layout` boxtree + `explorer-render` `collect_data_images` | **médias (étape 58, ADR-0023)** : v1 livré NAV — `video[poster]` réutilise le canal image (fetch+décodage+générique `images.replaced`), boîte de repli via feuille UA complémentaire `MEDIA_UA_CSS` en `Origin::UserAgent` (`video` 300×150, `audio` masqué sans `controls`). Refinements demandés, non bloquants : (1) `video`/`audio` en vrais remplacés `boxtree` — taille intrinsèque de l'affiche décodée (aujourd'hui la boîte est forcée 300×150 même si le poster fait 640×360 ; l'affiche est étirée, `object-fit` absent) ; (2) `video[poster]` couvert par `collect_data_images` (complément NAV `poster_data_images` à retirer alors) ; (3) présentational hints `width`/`height` des médias. | NAV (étape 58) | v1 livré NAV — résidu : remplacé boxtree + data-collector |
 
+## Seam `MediaSurface` (étape 71 — ADR-0024)
+
+**Statut : proposé** — rédigé avant tout code (verdict
+mission 21 attendu pour l'implémentation). À l'adoption :
+les énums et DTO ci-dessous sont **figés champ par
+champ** ; les routes REST et le vocabulaire JS restent
+**ajustables** au premier consommateur réel (hôte
+`AbstractPlayerEngine`/`fvp`).
+
+Principe (ADR-0024) : le moteur ne décode pas — il émet
+l'**offre** d'une surface (élément `<video>`/`<audio>`
+lisible, rect de la boîte remplacée, source résolue) ;
+l'hôte qui veut jouer la **claim** puis pilote la
+lecture. Le moteur peint toujours (poster, boîte UA) ;
+l'hôte composite sa surface vidéo **au-dessus** du rect
+déclaré. DRM (Widevine/FairPlay) et MSE hors scope v1.
+
+### Directions des flux
+
+- **Moteur → hôte (SSE)** : cycle de vie et géométrie
+  (`MediaOffered`/`MediaMoved`/`MediaGone`) + commandes
+  initiées par la page JS (`MediaCommand`).
+- **Hôte → moteur (REST)** : `claim`/`release` et état de
+  lecture (`state`) — la vérité de lecture vit chez
+  l'hôte, le moteur la reflète.
+
+### Identité et cycle de vie
+
+- `media: u64` — alloué par le moteur à l'émission de
+  l'offre, unique par onglet et par instance d'élément ;
+  toute ré-offre (bfcache restauré, élément ré-inséré)
+  produit un **nouvel** id — l'hôte re-claim.
+- `MediaGone` sur : retrait DOM de l'élément, navigation,
+  fermeture d'onglet. Un claim/state sur id mort →
+  `410 Gone`.
+- Claim : premier arrivé gagne — un second claim reçoit
+  `409 Conflict`. Le claim déclare `codecs` (capacités
+  hôte) : elles alimentent `canPlayType`/`error`.
+
+### Événements SSE (moteur → hôte)
+
+- `MediaOffered { tab: u64, media: u64, kind: "video"|"audio", rect: {x,y,w,h}, url: String, mime: Option<String>, controls: bool, autoplay: bool }`
+  — `rect` en **px CSS document** (l'hôte soustrait
+  `scroll_y` pour l'overlay) ; `mime` = attribut `type`
+  ou suffixe d'URL, `None` si inconnu ; `controls`
+  indique que l'hôte doit afficher son UI native.
+- `MediaMoved { tab: u64, media: u64, rect: {x,y,w,h} }`
+  — relayout, scroll, resize.
+- `MediaGone { tab: u64, media: u64 }` — fin de vie.
+- `MediaCommand { tab: u64, media: u64, cmd }` — ordre
+  initié par la page JS : `cmd` ∈ `play` | `pause` |
+  `seek {ms: u64}` | `volume {v: f32}` | `rate {r: f32}`.
+
+### REST (hôte → moteur)
+
+- `POST /api/tabs/{tab}/media/{id}/claim`
+  `{codecs: Vec<String>}` → `200` (claim acquis) |
+  `409` (déjà claimé) | `410` (élément mort).
+- `POST …/release` — l'hôte se détache ; la surface
+  retombe sur les stubs ADR-0023.
+- `POST …/state`
+  `{position_ms, duration_ms, buffered_ms, state, error?}`
+  avec `state` ∈ `"playing"|"paused"|"ended"|"error"` —
+  rapport après chaque transition + battement
+  `timeupdate` borné (≤ 4 Hz) ; le moteur le reflète
+  dans les props JS et tire les events DOM.
+- `GET /api/tabs/{id}/media` — liste des offres vivantes
+  (debug, parité FFI).
+
+### Vocabulaire JS (éléments média)
+
+- **Claimé** : `play()` résout à la première frame hôte
+  (premier `state:"playing"` rapporté), `pause()`
+  résout au `paused` rapporté ; `currentTime` =
+  `position_ms/1000`, `duration`, `buffered`
+  (`TimeRanges` `[0, buffered]`), `paused`, `ended`,
+  `volume`, `muted`, `playbackRate`, `readyState = 4`
+  dès métadonnées connues ; `canPlayType` reflète les
+  `codecs` du claim. Events DOM tirés : `play`,
+  `playing`, `pause`, `seeking`, `seeked`,
+  `timeupdate`, `durationchange`, `loadedmetadata`,
+  `volumechange`, `ended`, `error`.
+- **Non claimé** : stubs ADR-0023 **inchangés** —
+  `play()`/`setSinkId` → `NotSupportedError`,
+  `canPlayType` → `""`, props figées. **Clause
+  honnêteté** : hôte absent, muet ou claim refusé =
+  stub ; jamais de faux succès.
+
+### Transport FFI (ADR-0018)
+
+La seam ci-dessus est SSE+REST ; le mode in-process n'a
+ni l'un ni l'autre — variante `explorer_media_*`
+(polling ou callbacks) à spécifier au premier hôte FFI.
+**Proposé**, non requis pour la v1 REST.
+
 ## Journal
 
 | Date | Contrat | Changement | Commit |
@@ -74,4 +169,5 @@ Règles :
 | 2026-10-19 | `explorer-layout` relayout | **Additif** : `relayout_subtree(root, dom, styles, sizes, target, ctx) -> Relayout` + champ `LayoutBox.slot: BoxSlot` (contexte de pose enregistré) — tiers `DirtyLayout` d'ADR-0012 côté domaine ; `Relayout::NeedsFullLayout` = repli `layout_tree` (flottants dans le doc, chemin absolu/fixe ou inline). Mutation DOM → NAV passe le `NodeId` sale | R-12 |
 | 2026-10-19 | `explorer-css`/`explorer-layout` | **Additif** : `ComputedStyle` dérive `PartialEq`/`Eq` (comparaison style fragment/conteneur à la peinture) ; `LayoutBox::out_of_flow()` — position `absolute`/`fixed` lue sur le style calculé, restreinte aux boîtes d'élément (le style cloné d'un `Text`/`AnonymousBlock` n'est pas une position) ; `intrinsic::own_sides` → `pub(crate)` | R-22 |
 | 2026-10-19 | `explorer-common` pile | **Additif** : `explorer_common::deep(f)` = `stacker::maybe_grow` (zone rouge 128 Kio / segment tas 1 Mio — patron JS-C41) — à appliquer sur toute arête récursive ∝ profondeur DOM (R-24 : ~300 `<div>` nichaient un stack overflow sur worker tokio). Toutes les traversées domaine PIPELINE sont couvertes + drop itératif de `LayoutBox`. NAV : si un marcheur récursif existe côté session (collecte DOM, sérialisation), utiliser `deep` — `explorer-common` est désormais une dep de dom/css/layout/render | R-24 |
+| 2026-11-08 | seam `MediaSurface` (session/SSE/REST/JS) | **Contrat rédigé — proposé** : section dédiée ci-dessus (étape 71, ADR-0024). Directions des flux, identité `media: u64`, events `MediaOffered`/`MediaMoved`/`MediaGone`/`MediaCommand`, REST `claim`/`release`/`state`/`GET`, vocabulaire JS claimé vs stubs ADR-0023 (clause honnêteté préservée), variante FFI à spécifier au premier hôte. À l'adoption : énums/DTO figés champ par champ ; routes REST et vocabulaire JS ajustables au premier consommateur réel. Code en attente du verdict mission 21. | NAV (étape 71a) |
 | 2026-11-08 | **Process — isolation des index** | **Worktree par équipe** (deux incidents en deux jours : staged-but-uncommitted capturé par le commit concurrent — CHANGELOG de NAV dans `4cfd052` puis étape 78 dans `dc3e627`) : chaque équipe travaille dans son propre arbre avec son propre index — NAV : `D:\explorer-nav` sur `nav/main`, PIPE : `C:\OnionBit-Explorer` sur `main`. Atterrissage NAV : `git rebase main` dans le worktree NAV, puis `git -C C:/OnionBit-Explorer merge --ff-only nav/main` (refus net si le worktree main est sale). Filet de secours : `git commit -o -- <paths>` (jamais d'index tenu entre deux commandes). `CARGO_TARGET_DIR` distinct par worktree (ex. `D:\cargo-target\explorer-nav`) — sinon les builds sérialisent sur le lock du target-dir et les `.exe` en cours se verrouillent mutuellement. | NAV (adopté lead) |
