@@ -761,16 +761,74 @@ impl Engine {
             }
         }
         if !capture && !ev.stopped.get() {
-            if let Value::Obj(id) = this {
-                let key = format!("on{ty}");
-                if let Some(f) = self.get_prop(id, &key) {
-                    if self.is_callable(f) {
-                        self.call_value(f, this, &[*ev_val])?;
+            let key = format!("on{ty}");
+            // Prop scriptée (`el.onclick = f`) prioritaire —
+            // dernier écrivain gagne, l'attribut est "écrit"
+            // au parse ; sinon handler d'attribut compilé.
+            let prop = if let Value::Obj(id) = this {
+                self.get_prop(id, &key)
+            } else {
+                None
+            };
+            let f = match prop {
+                Some(f) if self.is_callable(f) => Some(f),
+                _ => self.inline_handler(dom, node, &key)?,
+            };
+            if let Some(f) = f {
+                self.call_value(f, this, &[*ev_val])?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Handler d'attribut `on<ty>` (JS-C45) — la spec compile
+    /// `onclick="src"` en `function(event){with(document){
+    /// with(this.form||{}){with(this){ src }}}}` (accès nu aux
+    /// props de l'élément, de son formulaire, du document).
+    /// Compilé **paresseusement** au premier dispatch et mis
+    /// en cache sur le nœud `(attr, src, fn)` — un
+    /// `setAttribute`/`removeAttribute` qui change la source
+    /// invalide par comparaison au prochain tir. Une erreur de
+    /// compilation remonte comme une erreur de listener
+    /// (premier throw gagne — même sémantique).
+    fn inline_handler(&mut self, dom: &DomRef, node: NodeId, key: &str) -> JsResult<Option<Value>> {
+        let src = {
+            let d = dom.borrow();
+            let Some(n) = d.nodes.get(node as usize) else {
+                return Ok(None);
+            };
+            if n.kind != NodeKind::Element {
+                return Ok(None);
+            }
+            match d.attr(node, key) {
+                Some(s) => s.to_string(),
+                None => return Ok(None),
+            }
+        };
+        {
+            let d = dom.borrow();
+            if let Some(n) = d.nodes.get(node as usize) {
+                if let Some((_, s, f)) = n.inline_handlers.iter().find(|(k, ..)| k == key) {
+                    if s == &src {
+                        return Ok(Some(*f));
                     }
                 }
             }
         }
-        Ok(())
+        let wrapped = format!(
+            "(function(event){{with(document||{{}}){{with(this.form||{{}}){{with(this){{{src}\n}}}}}}}})",
+        );
+        let f = self.eval_source(&wrapped)?;
+        if self.is_callable(f) {
+            let mut d = dom.borrow_mut();
+            if let Some(n) = d.nodes.get_mut(node as usize) {
+                n.inline_handlers.retain(|(k, ..)| k != key);
+                n.inline_handlers.push((key.to_string(), src, f));
+            }
+            Ok(Some(f))
+        } else {
+            Ok(None)
+        }
     }
 }
 

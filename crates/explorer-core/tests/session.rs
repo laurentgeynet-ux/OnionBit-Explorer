@@ -1192,6 +1192,33 @@ async fn click_dispatches_dom_event_and_rerenders() {
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
 
+/// JS-C45 — le handler inline `onclick=` (attribut, pas
+/// `addEventListener`) est compilé par le moteur : clic →
+/// mutation → même rendu que la page statique cible.
+const PAGE_ONCLICK_ATTR: &str = "<!doctype html><html><body>\
+     <div id=\"b\" onclick=\"this.textContent='CLIQUE'\">avant</div>\
+     </body></html>";
+
+#[tokio::test]
+async fn click_runs_inline_onclick_attribute() {
+    let (mut s, t) = test_session();
+    t.route("/ev", 200, PAGE_ONCLICK_ATTR);
+    t.route("/stat", 200, PAGE_ONCLICK_AFTER);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    let out = s
+        .handle_input(a, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert!(matches!(out, InputOutcome::Ignored));
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
 /// Lien avec `preventDefault` — l'action par défaut est
 /// supprimée : pas de navigation.
 const PAGE_PREVENT: &str = "<!doctype html><html><body>\

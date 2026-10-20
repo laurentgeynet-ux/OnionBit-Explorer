@@ -285,6 +285,76 @@ fn onclick_property_and_event_target() {
 }
 
 #[test]
+fn inline_onclick_attribute_compiles_and_fires() {
+    // JS-C45 : `onclick="src"` est compilé paresseusement au
+    // premier dispatch — wrapper spec `with(document){
+    // with(this.form||{}){with(this){ src }}}`.
+    assert_eq!(
+        ev_in(
+            "<html><body><button id=\"b\" onclick=\"hit=(hit||0)+1\">x</button></body></html>",
+            "var hit = 0;\
+             document.getElementById('b').click();\
+             document.getElementById('b').click();\
+             hit"
+        ),
+        "2"
+    );
+}
+
+#[test]
+fn inline_handler_sees_this_event_and_bare_props() {
+    // `this` = élément, `event` porté, props nues via `with(this)`.
+    assert_eq!(
+        ev_in(
+            "<html><body><button id=\"b9\" onclick=\"mark=id+':'+event.type\">x</button></body></html>",
+            "var mark = '';\
+             document.getElementById('b9').click();\
+             mark"
+        ),
+        "b9:click"
+    );
+}
+
+#[test]
+fn inline_handler_recompiles_on_setattribute() {
+    // Le cache est invalidé par la source : `setAttribute`
+    // impose la recompilation ; `removeAttribute` éteint.
+    assert_eq!(
+        ev_in(
+            "<html><body><button id=\"b\" onclick=\"hit='v1'\">x</button></body></html>",
+            "var hit = '';\
+             var b = document.getElementById('b');\
+             b.click();\
+             var v1 = hit;\
+             b.setAttribute('onclick', \"hit='v2'\");\
+             b.click();\
+             var v2 = hit;\
+             b.removeAttribute('onclick');\
+             b.click();\
+             [v1, v2, hit].join('/')",
+        ),
+        "v1/v2/v2"
+    );
+}
+
+#[test]
+fn inline_handler_loses_to_script_prop() {
+    // `el.onclick = f` écrase l'attribut (dernier écrivain
+    // gagne — l'attribut est écrit au parse).
+    assert_eq!(
+        ev_in(
+            "<html><body><button id=\"b\" onclick=\"hit='attr'\">x</button></body></html>",
+            "var hit = '';\
+             var b = document.getElementById('b');\
+             b.onclick = function () { hit = 'prop'; };\
+             b.click();\
+             hit",
+        ),
+        "prop"
+    );
+}
+
+#[test]
 fn remove_event_listener() {
     assert_eq!(
         ev("var b = document.getElementById('main');\

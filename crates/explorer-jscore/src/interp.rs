@@ -1022,6 +1022,15 @@ impl Engine {
                     b.parent.clone()
                 };
                 if bound {
+                    // `get_prop` seul est aveugle aux props
+                    // host (`NodeHost` réfléchit `id`/`value`…
+                    // via `get`, pas de props propres) —
+                    // JS-C45 : `with(el){id}` doit la voir.
+                    if let Some(h) = self.host_of(oid) {
+                        if let Ok(Some(v)) = h.get(self, Value::Obj(oid), &name) {
+                            return Some(v);
+                        }
+                    }
                     return self.get_prop(oid, &name);
                 }
                 continue;
@@ -1163,7 +1172,12 @@ impl Engine {
             };
             if let Some(oid) = with_oid {
                 if self.with_has(oid, name)? {
-                    self.write_prop(oid, Value::Obj(oid), name, v)?;
+                    // `set_prop_value` (host-aware) plutôt que
+                    // `write_prop` : une écriture `with(el)` sur
+                    // une prop réfléchie (`value`, `href`…) doit
+                    // passer par `h.set`, pas créer une propre
+                    // prop fantôme (JS-C45 — `on*="value=…"`).
+                    self.set_prop_value(Value::Obj(oid), name, v)?;
                     return Ok(());
                 }
                 cur = {

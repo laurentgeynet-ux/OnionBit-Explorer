@@ -564,6 +564,10 @@ impl Session {
         let scripting = self.js_factory.is_some();
         let (sheet_urls, scripts, img_urls) = self.plan_subresources(&dom, &url, scripting);
         let doc_css = collect_style_css(&dom);
+        // JS-C45 : les handlers inline `on*` exigent un moteur
+        // même sans `<script>` — sinon clic muet (page à
+        // `onclick=` seul : premier bug site-réel mesuré M24).
+        let want_js = !scripts.is_empty() || has_inline_handlers(&dom);
         // Le gel capture l'état affiché — une peinture
         // spéculative du document en vol ne doit pas être
         // embarquée dans le snapshot (étape 56c).
@@ -601,7 +605,7 @@ impl Session {
         if let Ok(mut wf) = self.webfonts.lock() {
             wf.clear();
         }
-        let eng = self.spawn_engine(tab, &html, !scripts.is_empty());
+        let eng = self.spawn_engine(tab, &html, want_js);
         Ok(Some(SubJob {
             tab,
             epoch: tail.epoch,

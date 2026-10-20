@@ -156,6 +156,30 @@ pub(crate) fn collect_scripts(
     out
 }
 
+/// Le document porte-t-il un handler inline `on*` (JS-C45) ?
+/// Une page sans `<script>` mais avec `onclick=` doit quand
+/// même obtenir un moteur — sinon ses handlers sont lettre
+/// morte. Les noms d'attributs sont lowercase depuis le
+/// tokenizer ; `len > 2` écarte l'attribut `on` nu. Un faux
+/// positif (`once`, `only`…) ne coûte qu'un moteur inutilisé.
+pub(crate) fn has_inline_handlers(dom: &Dom) -> bool {
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if let Ok(attrs) = dom.attributes(n) {
+            if attrs
+                .iter()
+                .any(|a| a.name.len() > 2 && a.name.starts_with("on"))
+            {
+                return true;
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    false
+}
+
 /// Corps d'un `ScriptItem` : inline direct, externe depuis son
 /// slot (`None` = fetch en échec → le script est sauté).
 pub(crate) fn item_source<'a>(item: &'a ScriptItem, srcs: &'a [Option<String>]) -> Option<&'a str> {

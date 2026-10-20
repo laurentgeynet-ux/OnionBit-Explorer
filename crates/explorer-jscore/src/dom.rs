@@ -151,6 +151,13 @@ pub struct Node {
     /// `addEventListener` handlers: `(type, function, capture)` —
     /// dispatched by the host layer / platform events (JS-3).
     pub listeners: Vec<(String, Value, bool)>,
+    /// Handlers inline `on*` compilés : `(nom d'attribut,
+    /// source, fonction)` — le cache est invalidé par la
+    /// **source** (JS-C45) : `setAttribute`/resync qui change
+    /// le texte force la recompilation au prochain dispatch.
+    /// Même cycle de vie que `listeners` (ni clonés ni
+    /// sérialisés — morts avec le miroir).
+    pub inline_handlers: Vec<(String, String, Value)>,
 }
 
 /// Opération `CanvasRenderingContext2D` enregistrée sur le
@@ -581,6 +588,7 @@ impl Dom {
             parent: None,
             text: String::new(),
             listeners: Vec::new(),
+            inline_handlers: Vec::new(),
         });
         (self.nodes.len() - 1) as NodeId
     }

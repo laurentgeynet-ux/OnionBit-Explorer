@@ -219,6 +219,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **JS-C45 — handlers inline `on*` compilés et dispatchés**
+  (`explorer-jscore`, `explorer-core`) : premier bug
+  site-réel mesuré (mission 10/24 — `jsmut.html`,
+  `onclick=` muet). Deux trous : `fire_listeners` ne
+  lisait que `listeners` + la prop scriptée `el.onclick` —
+  l'attribut est maintenant compilé **paresseusement** au
+  dispatch (cache `(attr, src, fn)` sur le nœud miroir,
+  invalidé par la source : `setAttribute` recompile) avec
+  le wrapper spec `with(document){with(this.form||{})
+  {with(this){…}}}` — `env_get`/`env_set` des scopes
+  `with` rendus host-aware (props réfléchies `id`,
+  `class`… résolues en accès nu). **Et** la session ne
+  spawnait le moteur que si des `<script>` étaient
+  collectés : `has_inline_handlers` donne aussi un
+  moteur aux pages à `on*` seuls — sans quoi le clic
+  restait muet même compilé. Régression verrouillée :
+  `onclick=` → mutation → PNG identique à la page
+  statique cible (test session).
+
 - **Étape 80 — navbar : trailing replié en menu
   « ⋮ » sous fenêtre étroite** (`app/`) : sous
   ~560 px, les 9 `IconButton` à largeur fixe

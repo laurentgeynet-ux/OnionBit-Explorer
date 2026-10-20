@@ -1252,14 +1252,25 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   prod). Les `ReferenceError` `hljs`/`$`/`Event`/`SP`
   observés sont des **conséquences** (scripts amont morts),
   pas des tickets.
-- [ ] **JS-C45. Attributs `on*` jamais compilés**
+- [x] **JS-C45. Attributs `on*` jamais compilés**
   (déclencheur terrain mission 10 — fixture `jsmut.html` :
   `onclick="…"` mort, seul `addEventListener` tire ;
   `fire_listeners` ne lit que `listeners` + prop
   `el.onclick`). Le web réel est couvert de handlers inline
   (`onclick`, `onload`, `onsubmit`…) — HTML spec : à la
   construction du miroir, chaque attribut `on*` est compilé
-  en event handler (avec le bon `this`/scope).
+  en event handler (avec le bon `this`/scope). **Deux trous
+  colmatés** : `fire_listeners` compile l'attribut
+  paresseusement au dispatch (cache `(attr, src, fn)` sur le
+  nœud, invalidé par la source — `setAttribute` recompile),
+  wrapper spec `with(document)/with(this.form||{})/
+  with(this)` ; `env_get`/`env_set` des scopes `with` sont
+  host-aware (props réfléchies `id`, `class`… visibles en
+  accès nu). **Et** le moteur est spawné pour les pages à
+  `on*` sans `<script>` (`has_inline_handlers` — sinon clic
+  muet : le `want` ne regardait que les balises script).
+  Test session : `onclick=` → mutation → PNG identique à la
+  page statique cible.
 
 ## Tâches continues
 
