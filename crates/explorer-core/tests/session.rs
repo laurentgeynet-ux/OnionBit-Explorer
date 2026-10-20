@@ -4271,3 +4271,104 @@ async fn pump_shared_applies_dom_mutations() {
     assert_eq!(s.frame_png(a), s.frame_png(b));
     assert_eq!(s.next_timer_deadline(), None);
 }
+
+/// Étape 58 — `<video poster>` : l'affiche suit le canal
+/// image (fetch borné + décodage) et se peint étirée dans
+/// la boîte vidéo 300×150 de la feuille UA complémentaire
+/// (ADR-0023 — aucun décodeur embarqué).
+#[tokio::test]
+async fn video_poster_paints_in_media_box() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/v",
+        200,
+        "<html><body><video poster=\"/p.png\"></video></body></html>",
+    );
+    t.route_bin("/p.png", 200, red_png());
+    // Référence : inline-block 300×150 uniformément rouge —
+    // l'affiche 2×2 étirée couvre toute la content-box.
+    t.route(
+        "/s",
+        200,
+        "<html><body><div style=\"display:inline-block;width:300px;\
+         height:150px;background-color:#ff0000\"></div></body></html>",
+    );
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/v").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// Étape 58 — la boîte de repli `<video>` sans affiche :
+/// fond noir 300×150 (feuille UA complémentaire), comme
+/// l'élément remplacé standard.
+#[tokio::test]
+async fn video_without_poster_renders_black_box() {
+    let (mut s, t) = test_session();
+    t.route("/v", 200, "<html><body><video></video></body></html>");
+    t.route(
+        "/s",
+        200,
+        "<html><body><div style=\"display:inline-block;width:300px;\
+         height:150px;background-color:#000000\"></div></body></html>",
+    );
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/v").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// Étape 58 — `<audio>` sans `controls` est masqué (UA
+/// complement) : même rendu qu'une page vide.
+#[tokio::test]
+async fn audio_without_controls_is_hidden() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/a",
+        200,
+        "<html><body><audio src=\"/a.mp3\" autoplay></audio></body></html>",
+    );
+    t.route("/b", 200, "<html><body></body></html>");
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/a").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/b").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// Étape 58 — affiche `poster="data:…"` : même canal
+/// inline que `img` (percent-encodé, zéro requête réseau).
+#[tokio::test]
+async fn video_poster_data_url_paints() {
+    use std::fmt::Write;
+    let (mut s, t) = test_session();
+    let enc = red_png().iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "%{byte:02X}");
+        out
+    });
+    t.route(
+        "/v",
+        200,
+        Box::leak(
+            format!("<html><body><video poster=\"data:image/png,{enc}\"></video></body></html>")
+                .into_boxed_str(),
+        ),
+    );
+    t.route(
+        "/s",
+        200,
+        "<html><body><div style=\"display:inline-block;width:300px;\
+         height:150px;background-color:#ff0000\"></div></body></html>",
+    );
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/v").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}

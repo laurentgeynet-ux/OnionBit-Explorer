@@ -521,8 +521,33 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   surlignage au caractère près reste la demande PIPE
   (métriques de runs). Régression : comptage + boucle +
   FillRect orange dans la liste + effacement.
-- [ ] **Étape 58. `<video>`/`<audio>`** (ex-66) : arbitrage
+- [x] **Étape 58. `<video>`/`<audio>`** (ex-66) : arbitrage
   décodage pur Rust requis (ADR) — sinon stubs propres + affiche.
+  **ADR-0023 : pas de décodeur** — aucun codec vidéo pur Rust
+  viable (H.264/VP9/AV1 : openh264/dav1d lient du C, rav1d
+  instable) et la sortie audio n'existe pas ; un décodeur
+  from-scratch n'est pas une étape de palier. Livré :
+  (1) **affiche** — `video[poster]` réutilise le canal image
+  (collecte étendue, fetch borné `max_images`, bitmap remplacé
+  peint dans la content-box — mécanisme déjà générique par
+  `NodeId`) ; affiches `data:` via `poster_data_images`
+  (complément du collecteur PIPE) ;
+  (2) **boîtes de repli** — feuille UA complémentaire
+  `MEDIA_UA_CSS` en `Origin::UserAgent` (`video` inline-block
+  300×150 fond noir, `audio` masqué sans `controls`,
+  `audio[controls]` barre 300×54 — l'auteur l'emporte) ;
+  (3) **JS honnête** — stubs `HTMLMediaElement` dans
+  `dillo-js` : `play()`/`setSinkId`/`setMediaKeys` rejettent
+  `NotSupportedError` (chemin `.catch()` déjà géré par les
+  sites), `canPlayType` avoue `""`, `paused`/`duration`(NaN)/
+  `readyState`/`networkState` (NO_SOURCE si `src`) reflètent
+  « rien à lire », `buffered`/`played`/`seekable` = TimeRanges
+  vides, écritures IDL acceptées-ignorées — jamais de faux
+  succès. Tests : 4 session (affiche peinte http+`data:`,
+  boîte noire, audio masqué) + 2 dillo-js (props, rejet
+  `play()`). Refinements PIPE consignés (`interface-equipes`) :
+  vrais remplacés boxtree, `collect_data_images` sur poster,
+  hints `width`/`height`.
 - [x] **Étape 60. Éclater `session.rs`** (audit externe) :
   ~~3 500+~~ 7 307 lignes — le god module portait session +
   pipeline + scheduler + profil + hit-test + glue JS +

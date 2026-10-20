@@ -896,10 +896,18 @@ const MAPPED_ATTRS: &[&str] = &[
     "method",
     "target",
     "rel",
+    // `HTMLMediaElement` (étape 58) — attributs réfléchis
+    // de même nom sur `<video>`/`<audio>`.
+    "poster",
+    "preload",
 ];
 
 /// Boolean attributes mirrored as `bool` props (`checked`…).
-const BOOL_ATTRS: &[&str] = &["checked", "disabled", "selected", "readonly", "multiple"];
+const BOOL_ATTRS: &[&str] = &[
+    "checked", "disabled", "selected", "readonly", "multiple",
+    // `HTMLMediaElement` (étape 58).
+    "controls", "muted", "loop", "autoplay",
+];
 
 /// `className` ↔ `class`, `htmlFor` ↔ `for`, `tagName` (ro)…
 fn prop_to_attr(key: &str) -> Option<&'static str> {
@@ -907,13 +915,46 @@ fn prop_to_attr(key: &str) -> Option<&'static str> {
         "className" => "class",
         "htmlFor" => "for",
         "value" => "value",
+        "crossOrigin" => "crossorigin",
+        "playsInline" => "playsinline",
         k => return MAPPED_ATTRS.iter().copied().find(|&a| a == k),
     })
 }
 
+/// `true` si `node` est un élément média
+/// (`<video>`/`<audio>`) — gate des stubs
+/// `HTMLMediaElement` (étape 58, ADR-0023 : aucune
+/// donnée n'est jamais décodée, les réponses restent
+/// honnêtes — `canPlayType` avoue `""`, `play()` rejette).
+fn is_media(dom: &DomRef, node: NodeId) -> bool {
+    matches!(
+        dom.borrow().nodes[node as usize].tag.as_str(),
+        "video" | "audio"
+    )
+}
+
+/// `TimeRanges` vide : `length` 0, `start`/`end` lèvent
+/// (hors-bornes — spec `INDEX_SIZE_ERR`) plutôt que mentir.
+fn tr_oob(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Err(e.type_error("TimeRanges: index out of bounds"))
+}
+
+fn time_ranges_empty(e: &mut Engine) -> Value {
+    let o = e.new_object();
+    e.set_own(o, "length", Value::Num(0.0), true);
+    e.add_method(o, "start", tr_oob);
+    e.add_method(o, "end", tr_oob);
+    Value::Obj(o)
+}
+
 impl Host for NodeHost {
     fn class_name(&self) -> &'static str {
-        "HTMLElement"
+        match self.dom.borrow().nodes[self.node as usize].tag.as_str() {
+            "video" => "HTMLVideoElement",
+            "audio" => "HTMLAudioElement",
+            "canvas" => "HTMLCanvasElement",
+            _ => "HTMLElement",
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1148,6 +1189,54 @@ impl Host for NodeHost {
                 }
                 return Ok(Some(Value::Obj(obj)));
             }
+            // -- `HTMLMediaElement` (étape 58, ADR-0023) --------------
+            // Stubs honnêtes : aucune donnée décodée — les
+            // valeurs reflètent « rien à lire » plutôt qu'un
+            // faux état de lecture.
+            "paused"
+            | "ended"
+            | "seeking"
+            | "preservesPitch"
+            | "disableRemotePlayback"
+            | "volume"
+            | "currentTime"
+            | "duration"
+            | "playbackRate"
+            | "defaultPlaybackRate"
+            | "readyState"
+            | "networkState"
+            | "videoWidth"
+            | "videoHeight"
+            | "currentSrc"
+            | "buffered"
+            | "played"
+            | "seekable"
+            | "error"
+            | "mediaGroup"
+            | "controller"
+                if is_media(&self.dom, node) =>
+            {
+                return Ok(Some(match key {
+                    "paused" | "preservesPitch" => Value::Bool(true),
+                    "ended" | "seeking" | "disableRemotePlayback" => Value::Bool(false),
+                    "volume" | "playbackRate" | "defaultPlaybackRate" => Value::Num(1.0),
+                    "currentTime" | "videoWidth" | "videoHeight" | "readyState" => {
+                        Value::Num(0.0)
+                    }
+                    "duration" => Value::Num(f64::NAN),
+                    // `src` présent mais indécodable → NO_SOURCE ;
+                    // sinon EMPTY.
+                    "networkState" => Value::Num(if self.dom.borrow().has_attr(node, "src") {
+                        3.0
+                    } else {
+                        0.0
+                    }),
+                    "currentSrc" => e.str_val(""),
+                    "buffered" | "played" | "seekable" => time_ranges_empty(e),
+                    // `error`, `mediaGroup`, `controller`.
+                    _ => Value::Null,
+                }));
+            }
             _ => {}
         }
         // Attribute-mapped props.
@@ -1219,6 +1308,23 @@ impl Host for NodeHost {
                     return Ok(true);
                 }
                 Ok(false)
+            }
+            // `HTMLMediaElement` (étape 58) — props IDL sans
+            // attribut : l'écriture est acceptée-ignorée (le
+            // stub n'a pas d'état de lecture à muter) plutôt
+            // qu'échouée — les scripts réels écrivent
+            // `volume`/`currentTime` sans rien vérifier.
+            "currentTime"
+            | "volume"
+            | "playbackRate"
+            | "defaultPlaybackRate"
+            | "preservesPitch"
+            | "disableRemotePlayback"
+            | "disablePictureInPicture"
+            | "mediaGroup"
+                if is_media(&self.dom, node) =>
+            {
+                Ok(true)
             }
             "value" => {
                 let s = e.to_js_string(v)?;
@@ -1580,6 +1686,30 @@ impl Host for NodeHost {
                     e.set_own(r, k, Value::Num(0.0), true);
                 }
                 Ok(Some(Value::Obj(r)))
+            }
+            // `HTMLMediaElement` (étape 58, ADR-0023) — stubs
+            // honnêtes : aucun codec embarqué, jamais de faux
+            // succès.
+            "play" | "pause" | "load" | "fastSeek" | "canPlayType" | "setSinkId"
+            | "addTextTrack" | "captureStream" | "setMediaKeys"
+                if is_media(&self.dom, node) =>
+            {
+                match name {
+                    // Spec : sans ressource décodable la
+                    // promesse rejette `NotSupportedError` —
+                    // c'est le même chemin `.catch()` que le
+                    // blocage autoplay, déjà géré par les sites.
+                    "play" | "setSinkId" | "setMediaKeys" => {
+                        let pid = e.new_promise();
+                        let msg = e.str_val("NotSupportedError: no supported media");
+                        e.reject_promise(pid, msg);
+                        Ok(Some(Value::Obj(pid)))
+                    }
+                    // Aucun codec → `""` (« ne peut pas lire »).
+                    "canPlayType" => Ok(Some(e.str_val(""))),
+                    "addTextTrack" | "captureStream" => Ok(Some(Value::Null)),
+                    _ => Ok(Some(Value::Undefined)),
+                }
             }
             _ => Ok(None),
         }

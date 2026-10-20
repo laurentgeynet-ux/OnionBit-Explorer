@@ -1583,3 +1583,120 @@ fn canvas_width_reset_clears_ops() {
     let w = e.eval("c.width").expect("width prop");
     assert_eq!(e.describe(w), "200");
 }
+
+// -- HTMLMediaElement (étape 58, ADR-0023) ---------------------------
+
+const PAGE_MEDIA: &str = r#"<html><body>
+<video id="v" src="/v.mp4" poster="/p.png" controls></video>
+<audio id="a"></audio></body></html>"#;
+
+#[test]
+fn media_props_are_honest_stubs() {
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').paused"),
+        "true"
+    );
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').ended"),
+        "false"
+    );
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').volume"),
+        "1"
+    );
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').currentTime"),
+        "0"
+    );
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').readyState"),
+        "0"
+    );
+    // `src` présent mais indécodable → NETWORK_NO_SOURCE.
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').networkState"),
+        "3"
+    );
+    // Sans `src` → NETWORK_EMPTY.
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('a').networkState"),
+        "0"
+    );
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').currentSrc"),
+        ""
+    );
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').error"),
+        "null"
+    );
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').buffered.length"),
+        "0"
+    );
+    // Attributs réfléchis.
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').controls"),
+        "true"
+    );
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').poster"),
+        "/p.png"
+    );
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').src"),
+        "/v.mp4"
+    );
+    // Aucun codec → canPlayType avoue "".
+    assert_eq!(
+        ev_in(
+            PAGE_MEDIA,
+            "document.getElementById('v').canPlayType('video/mp4')"
+        ),
+        ""
+    );
+    // `pause()`/`load()` = no-op silencieux.
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').pause(); 'ok'"),
+        "ok"
+    );
+    // Écritures IDL sans attribut : acceptées-ignorées.
+    assert_eq!(
+        ev_in(
+            PAGE_MEDIA,
+            "document.getElementById('v').volume = 0.5; 'ok'"
+        ),
+        "ok"
+    );
+    // Non-média : les stubs ne fuient pas.
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.body.paused === undefined"),
+        "true"
+    );
+}
+
+#[test]
+fn media_play_rejects_like_no_source() {
+    let mut e = engine_with(PAGE_MEDIA);
+    e.eval(
+        "var mediaResult='';\
+         document.getElementById('v').play().then(\
+             function(){ mediaResult='resolved'; },\
+             function(r){ mediaResult=String(r); });",
+    )
+    .expect("play() call");
+    e.run_microtasks().expect("microtasks");
+    let got = e
+        .eval("mediaResult")
+        .map(|v| e.describe(v))
+        .unwrap_or_default();
+    assert!(
+        got.contains("NotSupportedError"),
+        "play() doit rejeter NotSupportedError, got {got}"
+    );
+    // `pause()`/`load()` = no-op silencieux.
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').pause(); 'ok'"),
+        "ok"
+    );
+}

@@ -9,6 +9,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 58 — `<video>`/`<audio>` : stubs honnêtes +
+  affiche (ADR-0023, aucun décodeur)** : `video[poster]`
+  suit le canal image existant (fetch borné `max_images`,
+  décodage partagé, bitmap remplacé peint dans la
+  content-box) ; affiches `data:` via `poster_data_images`.
+  Feuille UA complémentaire `MEDIA_UA_CSS` en
+  `Origin::UserAgent` depuis `explorer-core` : `video`
+  inline-block 300×150 fond noir, `audio` masqué sans
+  `controls`, `audio[controls]` barre 300×54 — l'auteur
+  l'emporte toujours. Stubs `HTMLMediaElement` dans
+  `dillo-js` : `play()`/`setSinkId`/`setMediaKeys`
+  rejettent `NotSupportedError` (chemin `.catch()` des
+  sites), `canPlayType` répond `""`, props honnêtes
+  (`paused`, `duration` NaN, `readyState` 0,
+  `networkState` NO_SOURCE si `src`), `TimeRanges` vides,
+  écritures IDL acceptées-ignorées, `class_name` par tag —
+  aucun faux succès. Les héros vidéo des sites réels ne
+  cassent plus leurs scripts ; les fallbacks des pages
+  s'activent proprement.
+
 - **R-29 — wrap flex horizontal/colonne + `column/row-gap`**
   (`explorer-layout`) : flottant `width:auto` shrink-to-fit
   avec `min|max-width` appliqué à la boîte de contenu avant

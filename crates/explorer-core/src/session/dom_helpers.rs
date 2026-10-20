@@ -5,10 +5,11 @@
 //! Helpers DOM : hit-test, chemins d'éléments, titre, champs
 //! éditables, collectes de sous-ressources et d'ancres.
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use explorer_dom::{Dom, DomError, NodeId};
 use explorer_layout::{LayoutBox, Rect};
-use explorer_render::ImageTable;
+use explorer_render::{decode_data_url, DecodedImage, ImageTable};
 
 /// Hit-test profond : la boîte la plus imbriquée contenant
 /// `(x, y)` document gagne — renvoie son `NodeId` source
@@ -222,14 +223,21 @@ pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<String> {
     out
 }
 
-/// `(NodeId, src)` des `<img>` du document dans l'ordre —
-/// `src` absent ou vide est sauté.
+/// `(NodeId, src)` des `<img>` et des affiches `<video
+/// poster>` du document dans l'ordre — `src`/`poster`
+/// absent ou vide est sauté (étape 58 : l'affiche suit le
+/// canal image, se peint dans la boîte vidéo).
 pub(crate) fn collect_images(dom: &Dom) -> Vec<(NodeId, String)> {
     let mut out = Vec::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
-        if dom.tag_name(n).is_ok_and(|t| t == "img") {
-            if let Ok(Some(src)) = dom.attribute(n, "src") {
+        let attr = match dom.tag_name(n) {
+            Ok("img") => "src",
+            Ok("video") => "poster",
+            _ => "",
+        };
+        if !attr.is_empty() {
+            if let Ok(Some(src)) = dom.attribute(n, attr) {
                 if !src.is_empty() {
                     out.push((n, src));
                 }
@@ -237,6 +245,27 @@ pub(crate) fn collect_images(dom: &Dom) -> Vec<(NodeId, String)> {
         }
         if let Ok(ch) = dom.children(n) {
             queue.extend(ch.iter().rev());
+        }
+    }
+    out
+}
+
+/// Affiches `poster="data:…"` des `<video>` décodées en
+/// mémoire — complément de `collect_data_images` (PIPE)
+/// qui ne couvre que `img`/`object` (étape 58).
+pub(crate) fn poster_data_images(dom: &Dom, max_px: u32) -> Vec<(NodeId, Arc<DecodedImage>)> {
+    let mut out = Vec::new();
+    let mut stack = vec![dom.document()];
+    while let Some(n) = stack.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "video") {
+            if let Ok(Some(src)) = dom.attribute(n, "poster") {
+                if let Some(img) = decode_data_url(src.trim(), max_px) {
+                    out.push((n, Arc::new(img)));
+                }
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            stack.extend(ch);
         }
     }
     out
