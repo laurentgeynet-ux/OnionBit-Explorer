@@ -382,9 +382,23 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   la mesure (résolue sur la colonne, pas le conteneur).
   Cliquet WPT 53 → **55/57 (3 ignorés)** — les 2 échecs
   restants sont le lot grid R-30.
-- [ ] **R-30. Unité `fr` grid + `display:grid` résiduels**
-  (3 échecs WPT) : `fr-unit`, `grid-display-grid-001`,
-  marges — lot séparé, algos disjoints de flex.
+- [x] **R-30. Unité `fr` grid + `display:grid` résiduels**
+  (2 échecs WPT) : `fr-unit`, `grid-display-grid-001` —
+  lot séparé, algos disjoints de flex.
+  Livré : (a) pistes `fr` verticales distribuées contre la
+  hauteur définie du conteneur — libre = hauteur − pistes
+  non-flexibles − gaps, plancher `minmax` (§12.7) ;
+  (b) `height:%` des items grid résolu contre l'aire de
+  grille — la cellule EST le bloc conteneur (§6.5) via
+  `cb_h` passé à `layout_item` ; (c) position statique des
+  absolus = border-box en flux — la marge en attente du
+  frère précédent est consommée (§10.6.4) ; (d) table :
+  `width` de cellule cloue sa colonne, reste aux colonnes
+  auto (§17.5.2.2) ; `height` définie distribuée aux rangs
+  auto (§17.5.3) ; (e) peinture des positionnés `z-index`
+  négatif **avant** les blocs en flux (ordre de peinture
+  §E.2 — fond `.error` sous la grille).
+  Cliquet WPT 55 → **57/57 (100 %, 3 ignorés)**.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

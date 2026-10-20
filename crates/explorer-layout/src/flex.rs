@@ -150,6 +150,7 @@ pub(crate) fn translate_subtree(bx: &mut LayoutBox, dx: f32, dy: f32) {
 
 /// Pose un item à `(ix, iy)` de piste `iw` — bloc ou bloc
 /// anonyme selon sa sorte.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn layout_item(
     c: &mut LayoutBox,
     ix: f32,
@@ -158,21 +159,24 @@ pub(crate) fn layout_item(
     ctx: &BlockCtx,
     fs: f32,
     pos_cb: Rect,
+    cb_h: Option<f32>,
 ) {
     match c.kind {
         BoxKind::AnonymousBlock => {
-            layout_anon_block(c, ix, iy, iw, ctx, fs, pos_cb, &FloatCtx::default(), None);
+            layout_anon_block(c, ix, iy, iw, ctx, fs, pos_cb, &FloatCtx::default(), cb_h);
         }
         _ => {
             // Item flex = BFC propre : registre vierge. `cb_h`
-            // non propagé : la hauteur de la ligne flex dépend
-            // du contenu — % enfants indéfinis (§10.5).
+            // non propagé par défaut (`None` — la hauteur de la
+            // ligne flex dépend du contenu, §10.5) ; grid passe
+            // la hauteur de sa cellule — l'aire de grille EST
+            // le bloc conteneur des % de l'item (§6.5).
             layout_block(
                 c,
                 ix,
                 iy,
                 iw,
-                None,
+                cb_h,
                 ctx,
                 fs,
                 pos_cb,
@@ -495,6 +499,7 @@ pub(crate) fn flow_flex_children(
                     ctx,
                     fs,
                     pos_cb,
+                    None,
                 );
                 let c = &bx.children[i];
                 let cfs = font_size_px(&c.style, fs, ctx);
@@ -688,6 +693,7 @@ pub(crate) fn flow_flex_children(
                 ctx,
                 fs,
                 pos_cb,
+                None,
             );
         }
         let mut bases: Vec<f32> = Vec::with_capacity(n);
@@ -803,7 +809,7 @@ pub(crate) fn flow_flex_children(
                     let i = order_idx[k];
                     let c = &mut bx.children[i];
                     c.style.set("height", &format!("{}px", sizes_l[lk]));
-                    layout_item(c, content_x, start_cursor, content_w, ctx, fs, pos_cb);
+                    layout_item(c, content_x, start_cursor, content_w, ctx, fs, pos_cb, None);
                 }
             }
             let used: f32 = line

@@ -216,7 +216,9 @@ fn chain_edge(bx: &LayoutBox, row: &Row, side: &str, cb_w: f32, fs: f32, ctx: &B
 }
 
 /// Boîte `display: table` : dimensionne colonnes et lignes,
-/// retourne la hauteur utilisée.
+/// retourne la hauteur utilisée. `h_spec` = `height` résolue
+/// du conteneur (content-box) — §17.5.3 : elle borne le bas
+/// de la table et l'excédent est distribué aux rangs auto.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn layout_table(
     bx: &mut LayoutBox,
@@ -225,6 +227,7 @@ pub(crate) fn layout_table(
     cb_w: f32,
     ctx: &BlockCtx,
     parent_fs: f32,
+    h_spec: Option<f32>,
 ) -> f32 {
     let st = bx.style.clone();
     let fs = font_size_px(&st, parent_fs, ctx);
@@ -234,7 +237,7 @@ pub(crate) fn layout_table(
         // Table sans aucune cellule : le `width`/`height`
         // spécifiés s'appliquent quand même (une table vide
         // imbriquée garde sa taille — Acid2 `li.second-part`).
-        let h = css_px(&st, "height", 0.0, fs, ctx).unwrap_or(0.0);
+        let h = h_spec.unwrap_or(0.0);
         bx.rect = Rect {
             x,
             y,
@@ -246,13 +249,16 @@ pub(crate) fn layout_table(
 
     // Mesures par colonne : min (plus long mot) et pref
     // (texte déroulé) — padding/bordure de cellule incluses.
+    // `spec` = `width` spécifiée qui cloue sa colonne.
     let mut min_w = vec![0.0_f32; ncols];
     let mut pref_w = vec![1.0_f32; ncols];
+    let mut spec_w = vec![0.0_f32; ncols];
     for row in &rows {
         for cell in &row.cells {
-            let (min, pref) = cell_widths(bx, &cell.path, ctx, fs);
+            let (min, pref, spec) = cell_widths(bx, &cell.path, ctx, fs);
             min_w[cell.col] = min_w[cell.col].max(min);
             pref_w[cell.col] = pref_w[cell.col].max(pref.max(min));
+            spec_w[cell.col] = spec_w[cell.col].max(spec);
         }
     }
 
@@ -278,22 +284,61 @@ pub(crate) fn layout_table(
     let table_w = table_w.max(total_min.min(cb_w));
     let grid_w = (table_w - il - ir).max(0.0);
 
-    // Distribution : surplus au prorata de pref ; déficit
-    // jamais sous min (sauf si min total > table → écrêté).
+    // Distribution (§17.5.2.2) : une `width` de cellule cloue
+    // sa colonne ; le reste va aux colonnes auto au prorata
+    // de `pref` (égalité si tout est vide) ; jamais sous
+    // `min` sauf surcontrainte totale (fixes incluses —
+    // réduction proportionnelle).
+    let fixed_sum: f32 = spec_w.iter().sum();
     let mut col_w = vec![0.0_f32; ncols];
-    if total_pref <= f32::EPSILON {
-        let ncols_f = u16::try_from(ncols).map_or(0.0, f32::from);
-        let each = if ncols_f > 0.0 { grid_w / ncols_f } else { 0.0 };
-        col_w.fill(each);
+    if fixed_sum >= grid_w && fixed_sum > 0.0 {
+        for (i, w) in col_w.iter_mut().enumerate() {
+            *w = if spec_w[i] > 0.0 {
+                spec_w[i] * grid_w / fixed_sum
+            } else {
+                min_w[i].min(grid_w)
+            };
+        }
     } else {
         let mut left = grid_w;
         for (i, w) in col_w.iter_mut().enumerate() {
-            *w = (grid_w * pref_w[i] / total_pref).max(min_w[i].min(grid_w));
+            *w = spec_w[i].min(grid_w);
             left -= *w;
         }
-        // Reste/retirer : ajuste sur la plus large colonne.
-        if let Some(max) = col_w.iter_mut().max_by(|a, b| a.total_cmp(b)) {
-            *max = (*max + left).max(0.0);
+        let auto_pref: f32 = (0..ncols)
+            .map(|i| if spec_w[i] <= 0.0 { pref_w[i] } else { 0.0 })
+            .sum();
+        let nauto = spec_w.iter().filter(|&&s| s <= 0.0).count();
+        if auto_pref <= f32::EPSILON {
+            let each = if nauto > 0 {
+                left / u16::try_from(nauto).map_or(1.0, f32::from)
+            } else {
+                0.0
+            };
+            for (i, w) in col_w.iter_mut().enumerate() {
+                if spec_w[i] <= 0.0 {
+                    *w = each.max(min_w[i].min(left));
+                }
+            }
+        } else {
+            let mut slack = left;
+            for (i, w) in col_w.iter_mut().enumerate() {
+                if spec_w[i] > 0.0 {
+                    continue;
+                }
+                *w = (left * pref_w[i] / auto_pref).max(min_w[i].min(left));
+                slack -= *w;
+            }
+            // Reste/retirer : ajuste sur la plus large colonne auto.
+            if let Some(max) = col_w
+                .iter_mut()
+                .enumerate()
+                .filter(|(i, _)| spec_w[*i] <= 0.0)
+                .max_by(|a, b| a.1.total_cmp(b.1))
+                .map(|(_, w)| w)
+            {
+                *max = (*max + slack).max(0.0);
+            }
         }
     }
 
@@ -327,8 +372,11 @@ pub(crate) fn layout_table(
     // Pose : chaque cellule est un bloc dans sa colonne ;
     // hauteur de rangée = max des hauteurs posées. La grille
     // démarre au bord interne (bordure+padding de la table).
+    // `row_fixed` : une cellule à `height` spécifiée (non-%)
+    // rend le rang fixe pour la distribution §17.5.3.
     let mut cursor_y = y + it + gap[0];
     let mut row_tops = Vec::new();
+    let mut row_fixed = vec![false; nrows];
     for (k, row) in rows.iter().enumerate() {
         let mut row_h = 0.0_f32;
         for cell in &row.cells {
@@ -344,6 +392,13 @@ pub(crate) fn layout_table(
             let Some(cell_box) = at_path(bx, &cell.path) else {
                 continue;
             };
+            if cell_box
+                .style
+                .get("height")
+                .is_some_and(|h| h != "auto" && !h.contains('%'))
+            {
+                row_fixed[k] = true;
+            }
             // Cellule = BFC propre : registre vierge (§9.4.1).
             // `cb_h` indéfini — la hauteur de rangée dépend du
             // contenu (§10.5 : % enfants → auto).
@@ -362,6 +417,31 @@ pub(crate) fn layout_table(
         }
         row_tops.push((cursor_y, row_h));
         cursor_y += row_h + gap[k + 1];
+    }
+    // §17.5.3 : `height` spécifiée plus grande que le contenu
+    // → l'excédent se répartit sur les rangs **auto**, au
+    // prorata de leur hauteur naturelle (les rangs fixés par
+    // une `height` de cellule ne bougent pas).
+    let natural = cursor_y - y + ib;
+    if let Some(hs) = h_spec {
+        let extra = hs + it + ib - natural;
+        if extra > 0.01 {
+            let free_h: f32 = (0..nrows)
+                .map(|k| if row_fixed[k] { 0.0 } else { row_tops[k].1 })
+                .sum();
+            if free_h > 0.0 {
+                let mut dy = 0.0;
+                for k in 0..nrows {
+                    row_tops[k].0 += dy;
+                    if !row_fixed[k] {
+                        let add = extra * row_tops[k].1 / free_h;
+                        row_tops[k].1 += add;
+                        dy += add;
+                    }
+                }
+                cursor_y += extra;
+            }
+        }
     }
     // Deuxième passe : uniformiser les hauteurs de cellule —
     // §17.5.3 : la `height` d'une cellule est un **minimum**,
@@ -437,11 +517,14 @@ pub(crate) fn layout_table(
 
 /// Largeurs min/pref d'une cellule : plus long mot /
 /// contenu déroulé + padding/bordure horizontaux.
-fn cell_widths(bx: &LayoutBox, cell_path: &[usize], ctx: &BlockCtx, fs: f32) -> (f32, f32) {
+/// Largeurs min/pref/spec d'une cellule : plus long mot /
+/// contenu déroulé + padding/bordure horizontaux, et `width`
+/// spécifiée qui cloue la colonne (0.0 si absente).
+fn cell_widths(bx: &LayoutBox, cell_path: &[usize], ctx: &BlockCtx, fs: f32) -> (f32, f32, f32) {
     let mut cur = bx;
     for &i in cell_path {
         let Some(c) = cur.children.get(i) else {
-            return (0.0, 0.0);
+            return (0.0, 0.0, 0.0);
         };
         cur = c;
     }
@@ -451,8 +534,9 @@ fn cell_widths(bx: &LayoutBox, cell_path: &[usize], ctx: &BlockCtx, fs: f32) -> 
     // §17.5.2.2 : une largeur fixe de cellule borne la
     // colonne — Acid2 pose `width:1em` sur des cellules
     // vides).
-    if let Some(w) = css_px(st, "width", 0.0, fs, ctx) {
-        return (w, w);
+    let spec = css_px(st, "width", 0.0, fs, ctx).unwrap_or(0.0);
+    if spec > 0.0 {
+        return (spec, spec, spec);
     }
     let measure = measure_fn(st, font_size_px(st, fs, ctx), ctx);
     let txt = flatten_text(cell);
@@ -467,7 +551,7 @@ fn cell_widths(bx: &LayoutBox, cell_path: &[usize], ctx: &BlockCtx, fs: f32) -> 
         + css_px(st, "padding-right", 0.0, fs, ctx).unwrap_or(0.0)
         + css_px(st, "border-left-width", 0.0, fs, ctx).unwrap_or(0.0)
         + css_px(st, "border-right-width", 0.0, fs, ctx).unwrap_or(0.0);
-    (longest + extras, pref + extras)
+    (longest + extras, pref + extras, 0.0)
 }
 
 /// Texte aplati d'une boîte (tous descendants).

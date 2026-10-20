@@ -563,3 +563,81 @@ fn grid_minmax_fr_borne() {
     assert!(approx(a.rect.width, 400.0), "{}", a.rect.width);
     assert!(approx(b.rect.width, 200.0), "{}", b.rect.width);
 }
+
+// ── R-30 : fr vertical grid + résiduels ───────────────────────
+
+#[test]
+fn grid_fr_vertical_distribue() {
+    // `grid-template-rows: 30px 1fr` sur conteneur à hauteur
+    // définie : le fr prend le libre (70), pas le contenu —
+    // les pistes flexibles sont exclues du calcul de l'espace
+    // (§12.7).
+    let (dom, bx) = laid(
+        "<!doctype html><section><div id=\"a\">a</div><div id=\"b\">b</div></section>",
+        "body { margin: 0 } section { display: grid; height: 100px; \
+         grid-template-rows: 30px 1fr } #a { grid-row: 1 } #b { grid-row: 2 }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    let b = &section.children[1];
+    assert!(approx(b.rect.y, section.rect.y + 30.0), "{}", b.rect.y);
+    // `stretch` (défaut) : l'item remplit la cellule de 70.
+    assert!(approx(b.rect.height, 70.0), "{}", b.rect.height);
+}
+
+#[test]
+fn grid_item_height_pct_resout_sur_cellule() {
+    // `height:100%` d'un item se résout contre son aire de
+    // grille (§6.5), pas contre le conteneur englobant.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div id=\"b\">b</div></section>",
+        "body { margin: 0 } section { display: grid; height: 100px; \
+         grid-template-rows: 30px 1fr } #b { grid-row: 2; height: 100% }",
+    );
+    let b = find(&bx, by_id(&dom, "b"));
+    assert!(approx(b.rect.height, 70.0), "{}", b.rect.height);
+}
+
+#[test]
+fn abspos_position_statique_apres_marge() {
+    // Placeholder absolu : la marge en attente du frère
+    // précédent est consommée — la position statique inclut
+    // la marge collapsée (§10.6.4).
+    let (dom, bx) = laid(
+        "<!doctype html><p>x</p><div id=\"a\"></div>",
+        "body { margin: 0 } p { margin-bottom: 16px; height: 10px } \
+         #a { position: absolute; width: 20px; height: 20px }",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    // border-top = bas du <p> (10) + marge 16 = 26.
+    assert!(approx(a.rect.y, 26.0), "{}", a.rect.y);
+}
+
+#[test]
+fn table_width_cellule_cloue_colonne() {
+    // `width:100px` sur un td cloue sa colonne ; le reste de
+    // la table va aux colonnes auto (§17.5.2.2) — avant, la
+    // colonne spécifiée prenait une part proportionnelle.
+    let (dom, bx) = laid(
+        "<!doctype html><table><tr><td id=\"a\">a</td><td id=\"b\">b</td></tr></table>",
+        "body { margin: 0 } table { width: 400px } #a { width: 100px }",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    assert!(approx(a.rect.width, 100.0), "{}", a.rect.width);
+    assert!(approx(b.rect.x, 100.0), "{}", b.rect.x);
+    assert!(approx(b.rect.width, 300.0), "{}", b.rect.width);
+}
+
+#[test]
+fn table_height_excedent_distribue() {
+    // `height` de la table > contenu : l'excédent va aux rangs
+    // sans `height` de cellule spécifiée (§17.5.3).
+    let (dom, bx) = laid(
+        "<!doctype html><table><tr><td>a</td></tr><tr><td id=\"b\">b</td></tr></table>",
+        "body { margin: 0 } table { width: 400px; height: 100px } \
+         tr:first-child td { height: 30px }",
+    );
+    let b = find(&bx, by_id(&dom, "b"));
+    // rang2 = 100 - 30 = 70 (rang1 fixé à 30).
+    assert!(approx(b.rect.height, 70.0), "{}", b.rect.height);
+}

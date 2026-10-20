@@ -734,6 +734,7 @@ fn layout_block_inner(
             (cb_w - ml - mr).max(0.0),
             ctx,
             parent_fs,
+            h_spec,
         );
     }
 
@@ -844,9 +845,9 @@ fn layout_block_inner(
         Some("flex" | "inline-flex") => {
             crate::flex::flow_flex_children(bx, content_x, cursor, content_w, ctx, fs, pos_cb)
         }
-        Some("grid" | "inline-grid") => {
-            crate::grid::flow_grid_children(bx, content_x, cursor, content_w, ctx, fs, pos_cb)
-        }
+        Some("grid" | "inline-grid") => crate::grid::flow_grid_children(
+            bx, content_x, cursor, content_w, ctx, fs, pos_cb, h_spec,
+        ),
         // Boîte en-ligne posée comme conteneur (`inline-block`,
         // item flex/grid blockifié, repli `<object>`) : son
         // contenu coule dans son PROPRE contexte en-ligne
@@ -1193,11 +1194,22 @@ fn flow_children(
 
         // `position: absolute|fixed` : hors flux — rect
         // statique placeholder, résolu en second passage par
-        // `resolve_absolutes` (layout_tree).
+        // `resolve_absolutes` (layout_tree). La position
+        // statique est celle qu'aurait la border box en flux
+        // (§10.6.4) : la marge en attente du frère précédent
+        // se replie avec la nôtre — sauf premier fils joint au
+        // haut du parent (sa marge s'échappe, §8.3.1).
         if matches!(cst.get("position"), Some("absolute" | "fixed")) {
+            let mut run = prev_margin.unwrap_or_default();
+            run.add(cm.top);
+            let gap = if first && adjoining_top {
+                0.0
+            } else {
+                run.value()
+            };
             bx.children[i].rect = Rect {
                 x: content_x,
-                y: cursor,
+                y: cursor + gap,
                 width: content_w,
                 height: 0.0,
             };

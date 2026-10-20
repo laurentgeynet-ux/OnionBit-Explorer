@@ -303,7 +303,9 @@ fn col_widths(
 }
 
 /// Flux grid des enfants de `bx` — appelé par `layout_block`.
-/// Retourne le curseur final (bas du contenu).
+/// Retourne le curseur final (bas du contenu). `h_def` =
+/// hauteur de contenu **définie** du conteneur (`None` =
+/// indéfinie : les pistes `fr` se replient sur `auto`, MVP).
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,
@@ -317,10 +319,11 @@ pub(crate) fn flow_grid_children(
     ctx: &BlockCtx,
     fs: f32,
     pos_cb: crate::Rect,
+    h_def: Option<f32>,
 ) -> f32 {
     let st = bx.style.clone();
     let gap_c = gap_px(&st, true, content_w, fs, ctx);
-    let gap_r = gap_px(&st, false, content_w, fs, ctx);
+    let gap_r = gap_px(&st, false, h_def.unwrap_or(0.0), fs, ctx);
 
     let (mut col_tracks, col_names) = st.get("grid-template-columns").map_or_else(
         || (Vec::new(), Vec::new()),
@@ -565,13 +568,16 @@ pub(crate) fn flow_grid_children(
             ctx,
             fs,
             pos_cb,
+            None,
         );
         // Piste `auto` dimensionnée sur la margin box.
         heights.push(mt + bx.children[i].rect.height + mb);
     }
 
-    // Hauteurs de lignes : piste fixe → sa valeur ; `fr`/`auto`
-    // → max des items de la ligne (fr vertical ≈ auto, MVP).
+    // Hauteurs de lignes : piste fixe → sa valeur ; `fr`
+    // distribue le libre quand la hauteur du conteneur est
+    // définie (floor = contenu — `1fr` ≡ `minmax(auto,1fr)`,
+    // §12.7) ; `auto` et `fr` à hauteur indéfinie → contenu.
     let nrows = slots
         .iter()
         .map(|&(_, _, r, s)| r + s)
@@ -591,6 +597,47 @@ pub(crate) fn flow_grid_children(
                 .is_some_and(|t| matches!(t, Track::Raw(_)));
             if !dominated {
                 row_h[r] = row_h[r].max(heights[k]);
+            }
+        }
+    }
+    if let Some(hd) = h_def {
+        let fr_of = |t: Option<&Track>| -> f32 {
+            match t {
+                Some(Track::Fr(f)) => *f,
+                Some(Track::MinMax(_, mx)) => match &**mx {
+                    Track::Fr(f) => *f,
+                    _ => 0.0,
+                },
+                _ => 0.0,
+            }
+        };
+        let total_fr: f32 = (0..nrows).map(|r| fr_of(row_tracks.get(r))).sum();
+        if total_fr > 0.0 {
+            // §12.7 : l'espace libre exclut les pistes
+            // flexibles entièrement — seules les non-`fr`
+            // (fixe + auto) et les gaps l'amputent.
+            let used: f32 = (0..nrows)
+                .map(|r| {
+                    if fr_of(row_tracks.get(r)) > 0.0 {
+                        0.0
+                    } else {
+                        row_h[r]
+                    }
+                })
+                .sum::<f32>()
+                + gap_r * nrows.saturating_sub(1) as f32;
+            let free = (hd - used).max(0.0);
+            for (r, h) in row_h.iter_mut().enumerate() {
+                let f = fr_of(row_tracks.get(r));
+                if f > 0.0 {
+                    let lo = match row_tracks.get(r) {
+                        Some(Track::MinMax(mn, _)) => {
+                            raw_length_px(mn, content_w, fs, ctx).unwrap_or(0.0)
+                        }
+                        _ => 0.0,
+                    };
+                    *h = h.max(lo).max(free * f / total_fr);
+                }
             }
         }
     }
@@ -615,26 +662,49 @@ pub(crate) fn flow_grid_children(
             .iter()
             .sum::<f32>()
             + gap_r * (span_rows.saturating_sub(1)) as f32;
-        let jmode = bx.children[i]
-            .style
-            .get("justify-self")
-            .map_or(ji.as_str(), |v| v);
-        let amode = bx.children[i]
-            .style
-            .get("align-self")
-            .map_or(ai.as_str(), |v| v);
+        let (jmode, amode, h_pct, h_auto) = {
+            let cs = &bx.children[i].style;
+            (
+                cs.get("justify-self").map_or(ji.as_str(), |v| v),
+                cs.get("align-self").map_or(ai.as_str(), |v| v),
+                cs.get("height").is_some_and(|v| v.contains('%')),
+                matches!(cs.get("height"), None | Some("auto")),
+            )
+        };
+        let jmode = jmode.to_string();
+        let amode = amode.to_string();
+        let (mt, mb, ml, mr) = item_margins[k];
+        // L'aire de grille est le bloc conteneur de l'item :
+        // `height:%` se résout contre la hauteur de la cellule
+        // (§6.5) — re-layage une fois `row_h` connu.
+        if h_pct {
+            layout_item(
+                &mut bx.children[i],
+                x_off[c],
+                mt,
+                cell_w.max(0.0),
+                ctx,
+                fs,
+                pos_cb,
+                Some(cell_h),
+            );
+        }
+        // `align-items: stretch` (défaut) : la margin box
+        // comble la cellule quand `height` est auto (§10.1).
+        if amode == "stretch" && h_auto {
+            bx.children[i].rect.height = (cell_h - mt - mb).max(0.0);
+        }
         // La margin box est alignée dans la cellule (§10.1) —
         // la border box est déjà décalée de `ml`/`mt` par la
         // passe 1, la translation vise donc la boîte externe.
-        let (mt, mb, ml, mr) = item_margins[k];
         let outer_w = ml + bx.children[i].rect.width + mr;
         let outer_h = mt + bx.children[i].rect.height + mb;
-        let dx = match jmode {
+        let dx = match jmode.as_str() {
             "center" => (cell_w - outer_w).max(0.0) / 2.0,
             "end" | "flex-end" => (cell_w - outer_w).max(0.0),
             _ => 0.0,
         };
-        let dy = match amode {
+        let dy = match amode.as_str() {
             "center" => (cell_h - outer_h).max(0.0) / 2.0,
             "end" | "flex-end" => (cell_h - outer_h).max(0.0),
             _ => 0.0,

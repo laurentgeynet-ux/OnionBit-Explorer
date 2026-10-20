@@ -1242,7 +1242,11 @@ fn paint_box<'a>(
         // blocs en flux, (b) flottants, (c) contenu en ligne
         // reporté — les porteurs inline remontent au contexte
         // de pilement englobant (`defer` hérité) sauf si cette
-        // boîte en ferme la portée (`inline_scope`).
+        // boîte en ferme la portée (`inline_scope`). Les
+        // positionnés à `z-index` **négatif** passent avant
+        // les blocs en flux (étape 2 de l'ordre de peinture —
+        // le fond d'erreur `z-index:-1` des reftests WPT se
+        // peint sous la grille, pas dessus).
         let mut scoped_defer: Vec<&LayoutBox> = Vec::new();
         let d: &mut Vec<&LayoutBox> = if inline_scope(bx) {
             &mut scoped_defer
@@ -1251,6 +1255,15 @@ fn paint_box<'a>(
         };
         let bound = bx.rect;
         let in_flow = |c: &&LayoutBox| matches!(c.position, Position::Static | Position::Sticky);
+        let mut neg_z: Vec<&LayoutBox> = bx
+            .children
+            .iter()
+            .filter(|c| !in_flow(c) && c.z_index < 0)
+            .collect();
+        neg_z.sort_by_key(|c| c.z_index);
+        for child in neg_z {
+            explorer_common::deep(|| paint_scoped(child, items, off, vp, images));
+        }
         // (a) blocs en flux — `sticky` garde sa translation de
         // peinture ; récursion `deep` ∝ profondeur (R-24).
         for child in &bx.children {
@@ -1288,8 +1301,14 @@ fn paint_box<'a>(
             i += 1;
             paint_scoped(c, items, off, vp, images);
         }
-        // Enfants positionnés ensuite, triés par z-index (stable).
-        let mut positioned: Vec<&LayoutBox> = bx.children.iter().filter(|c| !in_flow(c)).collect();
+        // Enfants positionnés `z-index` ≥ 0 ensuite, triés
+        // (stable) — les négatifs ont déjà été peints sous
+        // les blocs en flux.
+        let mut positioned: Vec<&LayoutBox> = bx
+            .children
+            .iter()
+            .filter(|c| !in_flow(c) && c.z_index >= 0)
+            .collect();
         positioned.sort_by_key(|c| c.z_index);
         for child in positioned {
             explorer_common::deep(|| paint_scoped(child, items, off, vp, images));
