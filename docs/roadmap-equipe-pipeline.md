@@ -332,10 +332,39 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `flex-direction-*` passent, zéro régression). Reste
   documenté : `justify` sous `column-reverse` ancrait déjà
   haut (MVP).
-- [ ] **R-28. Distribution d'espace flex** (7 échecs WPT) :
+- [x] **R-28. Distribution d'espace flex** (7 échecs WPT) :
   `justify-content` horiz-001a/002/003/004,
-  `align-items` center/flexend/stretch. Attendu : 2-3 causes
-  racines (free space, marges auto, baseline vs center).
+  `align-items` center/flexend/stretch. Livré — plusieurs
+  causes racines plutôt qu'une seule géométrie : **(a)**
+  alias `left`/`right`/`end` (css-align-3 §4.1 — MVP
+  horizontal LTR) ; **(b)** lead **négatif** conservé pour
+  `flex-end`/`right`/`end`/`center` en débordement (§9.5 —
+  l'overflow part vers main-start ; les `space-*` replient
+  en flex-start) ; **(c)** ligne mono-ligne = taille cross
+  interne du conteneur à hauteur définie (§9.4 — pas la
+  hauteur max des items) ; **(d)** `flex-basis`/`width` =
+  **content-box** — padding + bordures s'ajoutent à la taille
+  externe (l'item `a` de `-004` : 45 pas 35) ; **(e)** la
+  cible shrink/grow remplace le `width` déclaré à la pose
+  (§9.7) ; **(f)** `vertical-align: top/bottom/middle` des
+  atomes inline-block — margin box ancrée aux bords de ligne
+  (§10.8 — les réf `…-002/-004` à `vertical-align:top` en
+  dépendent) ; **(g)** marge haute du premier fils en flux
+  ne traverse pas un **BFC** (`adjoining_top` symétrique à
+  R-27 — les wrappers inline-block des réf gardaient leur
+  `mt` interne : 20 px au lieu de 22) ; **(h)** positionné
+  `bottom`/`right` translate **tout le sous-arbre** (les
+  enfants des spans absolus `bottom:0` restaient à la
+  position statique) ; **(i)** marges hautes échappées des
+  descendants agrégées dans `run` + règles flottantes CSS
+  2.1 n°3 (descendre sous le flottant adverse si la bande
+  est insuffisante) et n°7 (descendre sous le flottant
+  même-côté si le bord du bloc conteneur est dépassé).
+  Cliquet WPT 44 → **53/57 (3 ignorés)** — `horiz-004` entre
+  dans `wpt_skip.txt` : fixture défectueuse documentée
+  (bug Mozilla 1954193 — ses rangées `left`/`right` codent
+  une sémantique qu'aucun navigateur n'implémente ; le diff
+  est normalement sous le viewport 600 px).
 - [ ] **R-29. Wrap horizontal + `column/row-gap` flex**
   (3 échecs WPT) : `flexbox-flex-wrap-horiz-001/002`,
   `flexbox-column-row-gap-001` — dépend de R-28.

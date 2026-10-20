@@ -25,8 +25,8 @@
 use explorer_css::ComputedStyle;
 
 use crate::block::{
-    css_px, font_size_px, layout_anon_block, layout_block, raw_length_px, side_px, BlockCtx,
-    FloatCtx,
+    border_px, css_px, font_size_px, layout_anon_block, layout_block, raw_length_px, side_px,
+    BlockCtx, FloatCtx,
 };
 use crate::boxtree::{BoxKind, LayoutBox};
 use crate::Rect;
@@ -183,15 +183,27 @@ pub(crate) fn layout_item(
 
 /// `justify-content` → décalage du premier item + espacement
 /// inter-items supplémentaire.
+///
+/// `free` peut être négatif (items plus larges que le
+/// conteneur, `flex-shrink` désactivé) : les alignements
+/// bord/centre conservent ce signe — le débordement sort
+/// alors par le bord main-start (réfs horiz-003/004) —
+/// tandis que les modes distribués (`space-*`) retombent
+/// sur `flex-start`, leur alignement de secours.
 #[allow(clippy::cast_precision_loss)]
 fn justify_offsets(j: &str, free: f32, count: usize) -> (f32, f32) {
     let n = count.max(1) as f32;
     match j {
-        "flex-end" => (free.max(0.0), 0.0),
-        "center" => (free.max(0.0) / 2.0, 0.0),
-        "space-between" if count > 1 => (0.0, free.max(0.0) / (n - 1.0)),
-        "space-around" => (free.max(0.0) / n / 2.0, free.max(0.0) / n),
-        "space-evenly" => (free.max(0.0) / (n + 1.0), free.max(0.0) / (n + 1.0)),
+        // `right`/`end` : alias main-end en écriture
+        // horizontale (`direction: rtl` non géré — MVP).
+        "flex-end" | "right" | "end" => (free, 0.0),
+        "center" => (free / 2.0, 0.0),
+        "space-between" if count > 1 && free > 0.0 => (0.0, free / (n - 1.0)),
+        "space-around" if free > 0.0 => (free / n / 2.0, free / n),
+        "space-evenly" if free > 0.0 => (free / (n + 1.0), free / (n + 1.0)),
+        // `flex-start` | `left` | `start` | `normal` |
+        // `stretch`, et repli des modes distribués quand le
+        // libre est négatif.
         _ => (0.0, 0.0),
     }
 }
@@ -200,8 +212,11 @@ fn justify_offsets(j: &str, free: f32, count: usize) -> (f32, f32) {
 /// (`stretch`/`baseline` ≈ `flex-start` — MVP).
 fn align_offset(mode: &str, line_cross: f32, item_cross: f32) -> f32 {
     match mode {
-        "center" => (line_cross - item_cross).max(0.0) / 2.0,
-        "flex-end" => (line_cross - item_cross).max(0.0),
+        // Pas de clamp : un item plus grand que la ligne
+        // déborde symétriquement / par main-start (même règle
+        // que `justify_offsets`).
+        "center" => (line_cross - item_cross) / 2.0,
+        "flex-end" => line_cross - item_cross,
         _ => 0.0,
     }
 }
@@ -304,6 +319,23 @@ pub(crate) fn flow_flex_children(
             ));
         }
 
+        // Padding + bordures axe principal : `flex-basis` et
+        // `width` sont des tailles de **contenu** (content-box
+        // — `box-sizing` n'est pas supporté, R-13e). Espace
+        // libre, pistes et retraits se mesurent en border-box
+        // (+ marges = margin-box).
+        let mut extras: Vec<f32> = Vec::with_capacity(n);
+        for &i in &order_idx {
+            let c = &bx.children[i];
+            let cfs = font_size_px(&c.style, fs, ctx);
+            extras.push(
+                side_px(&c.style, "padding-left", main_cb, cfs, ctx, 0.0)
+                    + side_px(&c.style, "padding-right", main_cb, cfs, ctx, 0.0)
+                    + border_px(&c.style, "border-left-width", main_cb, cfs, ctx)
+                    + border_px(&c.style, "border-right-width", main_cb, cfs, ctx),
+            );
+        }
+
         // `flex-wrap` : découpe des items en lignes par taille
         // hypothétique (base + marges, §9.5) — `nowrap` = une
         // seule ligne ; `wrap-reverse` inverse l'axe cross.
@@ -316,7 +348,7 @@ pub(crate) fn flow_flex_children(
             let mut cur: Vec<usize> = Vec::new();
             let mut cur_w = 0.0f32;
             for k in 0..n {
-                let outer = items[k].base.unwrap_or(0.0) + margins[k].0 + margins[k].1;
+                let outer = items[k].base.unwrap_or(0.0) + extras[k] + margins[k].0 + margins[k].1;
                 let need = outer + if cur.is_empty() { 0.0 } else { gap };
                 if wrap && !cur.is_empty() && cur_w + need > main_cb + 0.01 {
                     lines.push(std::mem::take(&mut cur));
@@ -342,7 +374,7 @@ pub(crate) fn flow_flex_children(
             let lgaps = gap * (line.len() as f32 - 1.0).max(0.0);
             let mut used_base = lgaps;
             for &k in line {
-                used_base += items[k].base.unwrap_or(0.0) + margins[k].0 + margins[k].1;
+                used_base += items[k].base.unwrap_or(0.0) + extras[k] + margins[k].0 + margins[k].1;
             }
             let free = main_cb - used_base;
             let total_grow: f32 = line.iter().map(|&k| items[k].grow).sum();
@@ -374,7 +406,7 @@ pub(crate) fn flow_flex_children(
                 - line
                     .iter()
                     .zip(&sizes_l)
-                    .map(|(&k, s)| s + margins[k].0 + margins[k].1)
+                    .map(|(&k, s)| s + extras[k] + margins[k].0 + margins[k].1)
                     .sum::<f32>();
             let n_auto_l = line
                 .iter()
@@ -396,20 +428,22 @@ pub(crate) fn flow_flex_children(
                     }
                 }
             }
-            // Marges résolues en px sur le style de l'item —
-            // `layout_block` les applique une fois, dans la
-            // piste qui les inclut.
-            for &k in line {
+            // Marges résolues + taille main cible écrites en px
+            // sur le style de l'item : `layout_block` les
+            // applique une fois — la border box obtenue =
+            // cible + padding + bordures (content-box).
+            for (lk, &k) in line.iter().enumerate() {
                 let c = &mut bx.children[order_idx[k]];
                 c.style
                     .set("margin-left", &format!("{}px", line_margins[k].0));
                 c.style
                     .set("margin-right", &format!("{}px", line_margins[k].1));
+                c.style.set("width", &format!("{}px", sizes_l[lk]));
             }
             let used: f32 = line
                 .iter()
                 .zip(&sizes_l)
-                .map(|(&k, s)| s + line_margins[k].0 + line_margins[k].1)
+                .map(|(&k, s)| s + extras[k] + line_margins[k].0 + line_margins[k].1)
                 .sum::<f32>()
                 + lgaps;
             // `*-reverse` : l'axe principal part du bord
@@ -426,8 +460,10 @@ pub(crate) fn flow_flex_children(
             };
             // Passe 1 : pose à (lead…, 0) — cross = hauteurs
             // **extérieures** (§9.4 : les marges cross
-            // comptent dans la taille de ligne).
-            let mut pen = content_x + lead.max(0.0);
+            // comptent dans la taille de ligne). Pas de
+            // clamp : un `lead` négatif (débordement)
+            // pousse les items hors du bord main-start.
+            let mut pen = content_x + lead;
             let mut line_cross = 0.0f32;
             let lay_order: Vec<usize> = if axis.reverse {
                 (0..line.len()).rev().collect()
@@ -441,7 +477,7 @@ pub(crate) fn flow_flex_children(
                     &mut bx.children[i],
                     pen,
                     start_cursor,
-                    sizes_l[lk] + line_margins[k].0 + line_margins[k].1,
+                    sizes_l[lk] + extras[k] + line_margins[k].0 + line_margins[k].1,
                     ctx,
                     fs,
                     pos_cb,
@@ -453,7 +489,8 @@ pub(crate) fn flow_flex_children(
                 cross_margins[k] = (mt, mb);
                 crosses[k] = c.rect.height + mt + mb;
                 line_cross = line_cross.max(crosses[k]);
-                pen += sizes_l[lk] + line_margins[k].0 + line_margins[k].1 + gap + between;
+                pen +=
+                    sizes_l[lk] + extras[k] + line_margins[k].0 + line_margins[k].1 + gap + between;
             }
             line_crosses.push(line_cross);
         }
@@ -464,10 +501,21 @@ pub(crate) fn flow_flex_children(
         // = indéfini, lignes soudées en haut).
         let n_lines = lines.len() as f32;
         let mut total_cross = line_crosses.iter().sum::<f32>() + row_gap * (n_lines - 1.0).max(0.0);
-        let content_h = css_px(&st, "height", 0.0, fs, ctx);
+        // Hauteur de conteneur définie — une `%` sans base
+        // propagée reste indéfinie (pas de `cb_h` ici).
+        let h_def = if st
+            .get("height")
+            .unwrap_or_default()
+            .trim_end()
+            .ends_with('%')
+        {
+            None
+        } else {
+            css_px(&st, "height", 0.0, fs, ctx)
+        };
         let ac = st.get("align-content").unwrap_or("stretch");
         let (lead_c, between_c) = if wrap {
-            if let Some(h) = content_h {
+            if let Some(h) = h_def {
                 let free_c = (h - total_cross).max(0.0);
                 // `stretch` : le libre est réparti sur les
                 // lignes (leurs crosses grandissent).
@@ -493,6 +541,17 @@ pub(crate) fn flow_flex_children(
         } else {
             (0.0, 0.0)
         };
+        // §9.4 — conteneur mono-ligne (`nowrap`) à hauteur
+        // définie : la ligne prend la taille cross **interne**
+        // du conteneur, pas la hauteur max des items. C'est
+        // ce qui donne sens à `align-items`/`stretch` dans
+        // une boîte à `height` fixe.
+        if !wrap {
+            if let Some(h) = h_def {
+                line_crosses.fill(h);
+                total_cross = h;
+            }
+        }
 
         // Passe 2 : translation cross par ligne — offset de
         // ligne (align-content / empilement / wrap-reverse)

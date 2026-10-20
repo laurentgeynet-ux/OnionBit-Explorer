@@ -743,3 +743,19 @@ fn marge_basse_dernier_fils_sechappe_sans_separateur() {
     let c = find(&bx, by_tag(&dom, "div"));
     assert!(approx(c.rect.height, 10.0), "h={}", c.rect.height);
 }
+
+#[test]
+fn marge_haute_premier_fils_reste_dans_bfc() {
+    // R-28 : §8.3.1 — un bloc qui établit un BFC (ici
+    // `overflow:hidden`) ne collapse PAS avec la marge haute
+    // de son premier fils en flux : la marge compte dans la
+    // hauteur de contenu (fils posé à mt sous le bord haut).
+    let (dom, bx) = laid(
+        "<!doctype html><div><p>x</p></div>",
+        "body{margin:0} div{overflow:hidden} p{height:10px;margin:14px 0 0}",
+    );
+    let c = find(&bx, by_tag(&dom, "div"));
+    let p = find(&bx, by_tag(&dom, "p"));
+    assert!(approx(c.rect.height, 24.0), "h={}", c.rect.height);
+    assert!(approx(p.rect.y, 14.0), "p.y={}", p.rect.y);
+}

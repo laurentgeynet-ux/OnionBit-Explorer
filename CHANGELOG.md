@@ -108,6 +108,48 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `marge_basse_dernier_fils_reste_dans_conteneur_borde`,
   `marge_basse_dernier_fils_sechappe_sans_separateur`.
 
+- **R-28 — distribution d'espace flex justify/align**
+  (`explorer-layout` + `explorer-render`) : les 7 échecs
+  WPT `justify-content`-horiz/`align-items` résolus —
+  cliquet `WPT_BASELINE` 44 → **53/57** (3 ignorés), zéro
+  régression suite.
+  - Alias `left`/`right`/`end` du `justify-content`
+    (css-align-3 §4.1 — MVP horizontal LTR) et lead
+    **négatif** conservé en débordement pour
+    `flex-end`/`center`/`right`/`end` (§9.5 ; les `space-*`
+    replient en flex-start).
+  - Ligne mono-ligne : cross = taille cross interne du
+    conteneur à hauteur définie (§9.4) ; `align-items`
+    center/flex-end/stretch conformes.
+  - `flex-basis`/`width` = content-box : padding et
+    bordures comptés dans la taille externe ; la cible
+    shrink/grow écrase le `width` déclaré à la pose (§9.7).
+  - `vertical-align: top/bottom/middle` des atomes
+    inline-block — margin box ancrée aux bords de ligne
+    (§10.8) au lieu de l'alignement baseline unique.
+  - Marge haute du premier fils en flux ne traverse plus
+    un BFC (`adjoining_top`, §8.3.1) ; marges échappées des
+    descendants agrégées dans la chaîne du bloc.
+  - Positionné `bottom`/`right` : le décalage translate
+    tout le sous-arbre (`translate_subtree`) — les enfants
+    suivaient la position statique.
+  - Flottants CSS 2.1 : règle n°3 (descendre sous le
+    flottant adverse si la bande est insuffisante) et
+    n°7 (descendre sous le flottant même-côté si le bord du
+    bloc conteneur est dépassé) appliquées dans
+    `place_float`.
+  - `wpt_skip.txt` : `flexbox-justify-content-horiz-004`
+    exclu — fixture défectueuse (bug Mozilla 1954193 :
+    échec dans tous les navigateurs, rangées `left`/`right`
+    encodant une sémantique inexistante, diff normalement
+    sous le viewport).
+  Régressions : `flex_justify_right_end_alias`,
+  `flex_justify_overflow_lead_negatif`,
+  `flex_align_hauteur_conteneur`, `flex_basis_content_box`,
+  `flex_shrink_cible_appliquee`,
+  `inline_block_vertical_align_top`,
+  `marge_haute_premier_fils_reste_dans_bfc`.
+
 - **Étape 57 — UI Flutter v2** (`app/`) : thème clair via
   variante `tokens.light.json` (`meta.scheme` pilote
   `ColorScheme`/`ThemeMode` — clair, sombre ou système) ;

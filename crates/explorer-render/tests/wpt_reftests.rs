@@ -38,7 +38,7 @@ const VIEW_H: f32 = 600.0;
 /// Cliquet : score minimal attendu — mesuré 2026-02 à 17/40
 /// (42 %) sur la première extraction ; à monter à chaque
 /// progrès float/BFC/marges.
-const WPT_BASELINE: usize = 44;
+const WPT_BASELINE: usize = 53;
 
 /// Tolérance AA : pixels dont le delta maximal de canal est
 /// ≤ [`FUZZY_CHANNEL`] comptent « doux » ; au-delà « dur ».
@@ -53,8 +53,7 @@ const FUZZY_MAX: usize = 512;
 fn diff_stats(a: &Frame, b: &Frame) -> (usize, usize) {
     let wmin = a.width.min(b.width) as usize;
     let hmin = a.height.min(b.height) as usize;
-    let mut hard = (a.width as usize * a.height as usize)
-        .max(b.width as usize * b.height as usize)
+    let mut hard = (a.width as usize * a.height as usize).max(b.width as usize * b.height as usize)
         - wmin * hmin;
     let mut soft = 0;
     for y in 0..hmin {

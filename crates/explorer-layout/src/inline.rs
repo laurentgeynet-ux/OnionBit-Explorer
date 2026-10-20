@@ -68,6 +68,12 @@ pub struct Fragment {
     pub marg_l: f32,
     /// Voir [`Fragment::marg_l`].
     pub marg_r: f32,
+    /// Marges verticales de l'atome (`0` pour le texte) —
+    /// la margin box sert d'ancre à `vertical-align`
+    /// top/bottom/middle (§10.8).
+    pub marg_t: f32,
+    /// Voir [`Fragment::marg_t`].
+    pub marg_b: f32,
     /// Style de l'item propriétaire — l'élément inline le
     /// plus proche du texte (héritage fait). Le rendu lit
     /// `color`/`font-*` ICI, pas sur la boîte des lignes :
@@ -502,10 +508,26 @@ impl LineAcc {
             .iter()
             .map(|f| f.rect.x + f.rect.width)
             .fold(0.0_f32, f32::max);
-        for f in &mut self.frags {
-            f.rect.y = *y + (base - f.baseline);
-        }
         let h = self.max_lh.max(base);
+        for f in &mut self.frags {
+            // `vertical-align` des atomes (inline-block,
+            // remplacés) : `top`/`bottom` ancrent la **margin
+            // box** aux bords de la ligne, `middle` la centre
+            // (approximation — la spec centre sur x-height/2
+            // au-dessus de la baseline). Texte et autres clés
+            // : baseline.
+            let va = if f.atomic {
+                f.style.get("vertical-align").unwrap_or("baseline")
+            } else {
+                "baseline"
+            };
+            f.rect.y = match va {
+                "top" | "text-top" => *y + f.marg_t,
+                "bottom" | "text-bottom" => *y + h - (f.rect.height + f.marg_b),
+                "middle" => *y + (h - f.rect.height - f.marg_t - f.marg_b) / 2.0 + f.marg_t,
+                _ => *y + (base - f.baseline),
+            };
+        }
         lines.push(LineBox {
             rect: Rect {
                 x: min_x,
@@ -649,6 +671,8 @@ fn break_into_lines(
                 trail_w: 0.0,
                 marg_l: ml,
                 marg_r: mr,
+                marg_t: mt,
+                marg_b: mb,
             });
             // (`rect.y = y + base - h`), `mb` allonge la ligne.
             acc.max_lh = acc.max_lh.max(mt + r.height + mb);
@@ -701,6 +725,8 @@ fn break_into_lines(
                         trail_w: 0.0,
                         marg_l: 0.0,
                         marg_r: 0.0,
+                        marg_t: 0.0,
+                        marg_b: 0.0,
                     });
                     acc.max_lh = acc.max_lh.max(lh);
                     acc.max_base = acc.max_base.max(fs * 0.8);
@@ -742,6 +768,8 @@ fn break_into_lines(
                 trail_w,
                 marg_l: 0.0,
                 marg_r: 0.0,
+                marg_t: 0.0,
+                marg_b: 0.0,
             });
             acc.max_lh = acc.max_lh.max(lh);
             acc.max_base = acc.max_base.max(baseline);

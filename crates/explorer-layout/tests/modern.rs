@@ -44,6 +44,22 @@ fn by_tag(dom: &Dom, tag: &str) -> NodeId {
     panic!("<{tag}> absent")
 }
 
+fn by_id(dom: &Dom, id: &str) -> NodeId {
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom
+            .attribute(n, "id")
+            .is_ok_and(|v| v.as_deref() == Some(id))
+        {
+            return n;
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    panic!("#{id} absent")
+}
+
 fn find_opt(b: &LayoutBox, id: NodeId) -> Option<&LayoutBox> {
     if b.node == Some(id) {
         return Some(b);
@@ -184,6 +200,123 @@ fn flex_align_center() {
         .find(|c| approx(c.rect.height, 10.0))
         .expect("item 10px");
     assert!(approx(small.rect.y - t.rect.y, 10.0), "{}", small.rect.y);
+}
+
+#[test]
+fn flex_justify_right_end_alias() {
+    // R-28 : `right`/`end` ≡ `flex-end` sur un conteneur
+    // row LTR ; `left` ≡ `flex-start` (css-align-3 §4.1).
+    for (val, want_x) in [
+        ("left", 0.0),
+        ("right", VIEW - 100.0),
+        ("end", VIEW - 100.0),
+    ] {
+        let (dom, bx) = laid(
+            "<!doctype html><section><div>A</div></section>",
+            &format!(
+                "body {{ margin: 0 }} section {{ display: flex; justify-content: {val} }} \
+                 section > div {{ width: 100px; height: 10px }}"
+            ),
+        );
+        let section = find(&bx, by_tag(&dom, "section"));
+        assert!(
+            approx(section.children[0].rect.x, want_x),
+            "{val}: x={}",
+            section.children[0].rect.x
+        );
+    }
+}
+
+#[test]
+fn flex_justify_overflow_lead_negatif() {
+    // R-28 : `flex-end` sur un conteneur plus étroit que les
+    // items → lead négatif (débord vers main-start), §9.5.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div>A</div></section>",
+        "body { margin: 0 } section { display: flex; justify-content: flex-end; width: 30px } \
+         section > div { flex: 0 0 45px; height: 10px }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    assert!(
+        approx(section.children[0].rect.x, -15.0),
+        "{}",
+        section.children[0].rect.x
+    );
+}
+
+#[test]
+fn flex_align_hauteur_conteneur() {
+    // R-28 / §9.4 : conteneur mono-ligne à hauteur définie →
+    // la ligne cross = taille cross interne du conteneur,
+    // pas la hauteur max des items.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div>A</div></section>",
+        "body { margin: 0 } section { display: flex; align-items: center; height: 100px } \
+         section > div { width: 50px; height: 10px }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    assert!(
+        approx(section.children[0].rect.y, 45.0),
+        "{}",
+        section.children[0].rect.y
+    );
+}
+
+#[test]
+fn flex_basis_content_box() {
+    // R-28 : `flex-basis`/`width` = content-box — padding et
+    // bordures s'ajoutent à la taille externe de l'item.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div>A</div></section>",
+        "body { margin: 0 } section { display: flex } \
+         section > div { flex: 0 0 35px; padding: 2px; border: 4px solid; height: 10px }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    // border-box = 35 + 4 + 8 = 47.
+    assert!(
+        approx(section.children[0].rect.width, 47.0),
+        "{}",
+        section.children[0].rect.width
+    );
+}
+
+#[test]
+fn flex_shrink_cible_appliquee() {
+    // R-28 : la cible shrink calculée remplace le `width`
+    // déclaré quand l'item est posé (§9.7).
+    let (dom, bx) = laid(
+        "<!doctype html><section><div>A</div><div>B</div></section>",
+        "body { margin: 0 } section { display: flex; width: 100px } \
+         section > div { width: 80px; flex-shrink: 1; height: 10px }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    // 160 px d'items dans 100 px → chacun rétrécit de 30 → 50.
+    assert!(
+        approx(section.children[0].rect.width, 50.0),
+        "{}",
+        section.children[0].rect.width
+    );
+    assert!(approx(section.children[1].rect.width, 50.0));
+}
+
+#[test]
+fn inline_block_vertical_align_top() {
+    // R-28 : `vertical-align: top` ancre la margin box de
+    // l'atome au sommet de la ligne (§10.8), pas baseline.
+    let (dom, bx) = laid(
+        "<!doctype html><div id=\"l\"><span id=\"s\"></span><span id=\"t\"></span></div>",
+        "body { margin: 0 } #l { line-height: 0; font-size: 0 } \
+         #l > span { display: inline-block; vertical-align: top } \
+         #s { width: 20px; height: 18px } #t { width: 20px; height: 22px }",
+    );
+    let s = find(&bx, by_id(&dom, "s"));
+    let t = find(&bx, by_id(&dom, "t"));
+    assert!(
+        approx(s.rect.y, t.rect.y),
+        "s.y={} t.y={}",
+        s.rect.y,
+        t.rect.y
+    );
 }
 
 // ── grid ──────────────────────────────────────────────────────

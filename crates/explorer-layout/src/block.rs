@@ -578,6 +578,53 @@ fn escaped_bottom_run(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx)
     run
 }
 
+/// La marge haute d'une boîte peut-elle fusionner avec
+/// celle de son premier fils in-flow ? (§8.3.1) — pas de
+/// padding/bordure haut, pas de BFC propre. La hauteur ne
+/// joue pas (contrairement au bas, qui exige `height:auto`).
+fn top_adjoining(bx: &LayoutBox, cb_w: f32, fs: f32, ctx: &BlockCtx) -> bool {
+    let st = &bx.style;
+    !establishes_bfc(st)
+        && side_px(st, "padding-top", cb_w, fs, ctx, 0.0) <= 0.0
+        && border_px(st, "border-top-width", cb_w, fs, ctx) <= 0.0
+}
+
+/// Marge haute **effective** d'un enfant de flux : sa
+/// `margin-top` fusionne, tant que rien ne la sépare, avec
+/// la marge haute de son premier descendant in-flow —
+/// récursif (§8.3.1). Une boîte `padding:0; border:0` sans
+/// BFC laisse la marge de son premier fils remonter à son
+/// propre bord supérieur : c'est ce total qui sert de marge
+/// haute face aux voisins (réf float-root : `p` dont la
+/// marge traverse `body` dans le `:root` flottant).
+fn collapsed_top_margin(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx) -> MarginRun {
+    let st = &bx.style;
+    let fs = font_size_px(st, parent_fs, ctx);
+    let mut run = MarginRun::default();
+    run.add(margins(st, cb_w, fs, ctx).top);
+    if !top_adjoining(bx, cb_w, fs, ctx) {
+        return run;
+    }
+    for c in &bx.children {
+        if matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock)
+            || c.out_of_flow()
+            || c.float != Float::None
+        {
+            continue;
+        }
+        // Un contenu en-ligne (line box) arrête la fusion ;
+        // `clear` empêche la marge de rejoindre le haut.
+        if c.kind.is_inline_level()
+            || matches!(c.style.get("clear"), Some("left" | "right" | "both"))
+        {
+            break;
+        }
+        run.fold(collapsed_top_margin(c, cb_w, fs, ctx));
+        break;
+    }
+    run
+}
+
 /// Chaîne de marges complète traversant une boîte
 /// transparente aux marges (§8.3.1, « margins collapse
 /// through ») : ses marges haute et basse fusionnent avec
@@ -782,7 +829,12 @@ fn layout_block_inner(
             content_x,
             cursor,
             content_w,
-            pt + bt <= 0.0,
+            // §8.3.1 : la marge haute du premier fils ne
+            // « traverse » le parent que s'il ne la sépare
+            // de rien — pas de padding/bordure haut ET pas
+            // de BFC propre (un inline-block garde la marge
+            // de son premier fils à l'intérieur).
+            pt + bt <= 0.0 && !establishes_bfc(&st),
             line_h,
             ctx,
             fs,
@@ -944,6 +996,60 @@ fn place_float(
                 width: r.width + ml + mr,
                 height: r.height + mt + mb,
             };
+        }
+        // §9.5.1 règles 3/7 : (a) la margin box ne peut
+        // recouvrir un flottant du côté **adverse** dans sa
+        // bande verticale — `fl.band` tronque au bloc
+        // conteneur et ne voit pas un flottant adverse
+        // partiellement dehors ; (b) pas de dépassement du
+        // bord du bloc conteneur dans le sens du flottant
+        // quand un flottant du **même côté** partage la
+        // bande (rule7-outside : déborder n'est toléré que
+        // « déjà aussi loin que possible » — un voisin de
+        // même côté annule l'exception et force la descente).
+        {
+            let overlapped = |o: &Rect| {
+                placed.y < o.y + o.height - 0.01
+                    && placed.y + placed.height > o.y + 0.01
+                    && placed.x < o.x + o.width - 0.01
+                    && placed.x + placed.width > o.x + 0.01
+            };
+            let foes = if right_side { &fl.left } else { &fl.right };
+            let kin = if right_side { &fl.right } else { &fl.left };
+            let mut drop = foes
+                .iter()
+                .filter(|o| overlapped(o))
+                .map(|o| o.y + o.height)
+                .fold(f32::NEG_INFINITY, f32::max);
+            let overflows = if right_side {
+                placed.x < content_x - 0.01
+            } else {
+                placed.x + placed.width > content_x + content_w + 0.01
+            };
+            if overflows {
+                // « un autre flottant du même côté **à
+                // gauche/droite** de lui » : même bande
+                // verticale, du côté du flottement (le
+                // recouvrement horizontal n'est pas exigé).
+                drop = drop.max(
+                    kin.iter()
+                        .filter(|o| {
+                            o.y + o.height > placed.y + 0.01
+                                && o.y < placed.y + placed.height - 0.01
+                                && if right_side {
+                                    o.x >= placed.x + placed.width - 0.01
+                                } else {
+                                    o.x + o.width <= placed.x + 0.01
+                                }
+                        })
+                        .map(|o| o.y + o.height)
+                        .fold(f32::NEG_INFINITY, f32::max),
+                );
+            }
+            if drop.is_finite() && drop > my + 0.01 {
+                my = drop;
+                continue;
+            }
         }
         // Tient dans la bande (ou la bande est déjà pleine
         // largeur : dépassement toléré, règle 7 — « déjà aussi
@@ -1122,7 +1228,7 @@ fn flow_children(
         // sans objet : la chaîne entière s'échappe.
         if transparent_candidate(&bx.children[i], content_w, cb_h, cfs, ctx) {
             let mut run = prev_margin.unwrap_or_default();
-            run.add(cm.top);
+            run.fold(collapsed_top_margin(&bx.children[i], content_w, fs, ctx));
             let gap = if first && adjoining_top {
                 0.0
             } else {
@@ -1165,9 +1271,11 @@ fn flow_children(
 
         // Marge courante + marge haute de l'enfant : la
         // chaîne entière se replie en une valeur (max des
-        // positifs + min des négatifs — §8.3.1).
+        // positifs + min des négatifs — §8.3.1). La marge
+        // haute effective inclut celle qui s'échappe de ses
+        // premiers descendants adjacents.
         let mut run = prev_margin.unwrap_or_default();
-        run.add(cm.top);
+        run.fold(collapsed_top_margin(&bx.children[i], content_w, fs, ctx));
         // Premier enfant adjoining : sa marge « traverse » le
         // parent (§8.3.1 — pas d'espace interne au-dessus ;
         // c'est le parent qui ajoute la sienne propre, côté
@@ -1506,14 +1614,20 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
         // right/bottom sans left/top : ancrage au bord opposé
         // — `right`/`bottom` placent le bord de la margin
         // box, la border box recule de `mr`/`mb` (§10.3.7).
+        // Le delta translate TOUT le sous-arbre : le contenu a
+        // été posé pendant `layout_block` à l'ordonnée
+        // initiale, il doit suivre la boîte (réf align-items
+        // `bottom: 0` : le texte restait en haut).
         if geo.l.is_none() {
             if let Some(rv) = geo.r {
-                child.rect.x = target.x + target.width - rv - geo.mr - child.rect.width;
+                let target_x = target.x + target.width - rv - geo.mr - child.rect.width;
+                crate::flex::translate_subtree(child, target_x - child.rect.x, 0.0);
             }
         }
         if geo.t.is_none() {
             if let Some(bv) = geo.b {
-                child.rect.y = target.y + target.height - bv - geo.mb - child.rect.height;
+                let target_y = target.y + target.height - bv - geo.mb - child.rect.height;
+                crate::flex::translate_subtree(child, 0.0, target_y - child.rect.y);
             }
         }
     }
