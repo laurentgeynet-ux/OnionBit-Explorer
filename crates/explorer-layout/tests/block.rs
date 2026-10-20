@@ -21,6 +21,11 @@ const VIEW: f32 = 800.0;
 fn laid(html: &str, css: &str) -> (Dom, LayoutBox) {
     let dom = TreeBuilder::parse(html);
     let mut eng = StyleEngine::new();
+    // R-32 : la feuille UA pose `body { margin: 8px }` —
+    // les fixtures de ce fichier supposent une marge nulle
+    // (géométrie à coordonnées fixes). Neutralisée ici ;
+    // une règle du `css` testé garderait le dernier mot.
+    eng.add_css("body { margin: 0 }", Origin::Author);
     eng.add_css(css, Origin::Author);
     let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
     let root_el = dom

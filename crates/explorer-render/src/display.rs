@@ -593,6 +593,87 @@ pub fn build_display_list_incremental(
     )
 }
 
+/// §14.2 : émet le fond du canvas (couleur puis image) et
+/// renvoie le `NodeId` de la boîte source — racine si elle a
+/// un fond, sinon son premier enfant bloc (`body`) — pour que
+/// `paint_self` ne le repeigne pas sur sa boîte propre.
+/// `canvas` = rect de peinture (viewport × hauteur document).
+#[allow(clippy::cast_precision_loss)] // dims image ≪ 2^23
+fn emit_canvas_bg(
+    root: &LayoutBox,
+    canvas: Rect,
+    viewport_w: f32,
+    viewport_h: f32,
+    images: &crate::PaintImages,
+    items: &mut Vec<DisplayItem>,
+) -> Option<explorer_dom::NodeId> {
+    let (canvas_from_root, canvas_bx) = if has_bg(&root.style) {
+        (true, Some(root))
+    } else {
+        (
+            false,
+            root.children
+                .iter()
+                .find(|c| c.kind == BoxKind::Block && has_bg(&c.style)),
+        )
+    };
+    let src = canvas_bx?;
+    if let Some(c) = src.style.get("background-color").and_then(parse_color) {
+        if c.a > 0 {
+            items.push(DisplayItem::FillRect {
+                rect: canvas,
+                color: c,
+            });
+        }
+    }
+    if src
+        .style
+        .get("background-image")
+        .is_some_and(|v| v.starts_with("url("))
+    {
+        if let Some(img) = src.node.and_then(|n| images.backgrounds.get(&n)).cloned() {
+            let repeat = match src.style.get("background-repeat") {
+                Some("no-repeat") => (false, false),
+                Some("repeat-x") => (true, false),
+                Some("repeat-y") => (false, true),
+                _ => (true, true),
+            };
+            // Origine de la tuile : padding box de la racine
+            // pour SON fond (le `0 -1em` de `margin-collapse-020`
+            // se mesure depuis son propre bord) ; canvas pour
+            // le fond propagé de `body`.
+            let (area, base) = if canvas_from_root {
+                let bl = border_side_w(&src.style, "left");
+                let bt = border_side_w(&src.style, "top");
+                let br = border_side_w(&src.style, "right");
+                let bb = border_side_w(&src.style, "bottom");
+                (
+                    (
+                        (src.rect.width - bl - br).max(0.0),
+                        (src.rect.height - bt - bb).max(0.0),
+                    ),
+                    (src.rect.x + bl, src.rect.y + bt),
+                )
+            } else {
+                ((viewport_w, viewport_h), (0.0, 0.0))
+            };
+            let (px, py) = bg_position(
+                src.style.get("background-position"),
+                area,
+                (img.width as f32, img.height as f32),
+                font_size_of(&src.style),
+            );
+            items.push(DisplayItem::BackgroundImage {
+                rect: canvas,
+                img,
+                repeat,
+                origin: (base.0 + px, base.1 + py),
+            });
+        }
+    }
+    src.node
+}
+
 /// Corps partagé des builders — `prev = None` : build plein.
 fn build_list(
     root: &LayoutBox,
@@ -619,29 +700,78 @@ fn build_list(
         path: Vec::new(),
         inc,
         same_tree,
+        canvas_bg_src: None,
     };
-    // Portée racine du report des inlines (App. E étape 5).
+    // §14.2 : le fond du canvas vient de la racine ; si elle
+    // n'en a pas (couleur transparente et pas d'image), c'est
+    // celui de son premier enfant bloc (`body`) qui propage —
+    // ancré à l'origine du canvas alors que le fond de la
+    // racine s'ancre à sa propre padding box
+    // (`margin-collapse-021` : le fond de `body` positionné
+    // `no-repeat` part du coin du canvas, pas de sa boîte
+    // décalée par sa marge).
+    let canvas = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: viewport_w,
+        height: root.rect.height.max(viewport_h),
+    };
+    cx.canvas_bg_src = emit_canvas_bg(root, canvas, viewport_w, viewport_h, images, &mut items);
+    // Portées racine des reports : inlines (App. E étape 5)
+    // et positionnés `z ≥ 0` (étapes 8-9 — la racine ferme
+    // toujours le dernier contexte d'empilement).
     let mut defer = Vec::new();
+    let mut pos_defer = Vec::new();
     paint_box(
         root,
         &mut items,
         (-scroll.0, -scroll.1),
         &mut cx,
         &mut defer,
+        &mut pos_defer,
     );
     {
-        // Span racine — `escaped` = les porteurs poussés au
-        // defer racine (chemins absolus = relatifs à la racine).
-        let esc = escaped_paths(&defer, 0, &cx.path);
+        // Span racine — `escaped` = les porteurs poussés aux
+        // files racine (chemins absolus = relatifs à la racine).
+        let mut esc = escaped_paths(&defer, 0, &cx.path).into_vec();
+        esc.extend(escaped_paths(&pos_defer, 0, &cx.path).into_vec());
         let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let sig = box_sig(root);
-        cx.record_span(root, 0, end, (-scroll.0, -scroll.1), sig, esc);
+        cx.record_span(
+            root,
+            0,
+            end,
+            (-scroll.0, -scroll.1),
+            sig,
+            esc.into_boxed_slice(),
+        );
     }
     let mut i = 0;
     while i < defer.len() {
         let (p, c) = defer[i].clone();
         i += 1;
-        emit_scoped_at(p, c, &mut items, (-scroll.0, -scroll.1), &mut cx);
+        emit_scoped_at(
+            p,
+            c,
+            &mut items,
+            (-scroll.0, -scroll.1),
+            &mut cx,
+            &mut pos_defer,
+        );
+    }
+    // Positionnés reportés — déjà triés stable par z (`push_z`).
+    let mut i = 0;
+    while i < pos_defer.len() {
+        let (p, c) = pos_defer[i].clone();
+        i += 1;
+        emit_scoped_at(
+            p,
+            c,
+            &mut items,
+            (-scroll.0, -scroll.1),
+            &mut cx,
+            &mut pos_defer,
+        );
     }
     DisplayList {
         items,
@@ -673,6 +803,10 @@ struct PaintCx<'a> {
     /// : le fast-path `bx_ptr` est valide (sinon une adresse
     /// recyclée pourrait mentir).
     same_tree: bool,
+    /// Nœud dont le fond a été propagé au canvas (§14.2 —
+    /// racine, ou `body` quand la racine n'a pas de fond) :
+    /// sa propre boîte ne repeint pas son fond.
+    canvas_bg_src: Option<explorer_dom::NodeId>,
 }
 
 /// Source de ré-usage incrémental.
@@ -813,6 +947,18 @@ fn prop_px(st: &explorer_css::ComputedStyle, prop: &str, fallback: f32) -> f32 {
     }
 }
 
+/// La boîte déclare un fond : `background-color` non
+/// transparente ou `background-image: url()` (§14.2 —
+/// sélection de la source du fond de canvas).
+fn has_bg(st: &explorer_css::ComputedStyle) -> bool {
+    st.get("background-color")
+        .and_then(parse_color)
+        .is_some_and(|c| c.a > 0)
+        || st
+            .get("background-image")
+            .is_some_and(|v| v.starts_with("url("))
+}
+
 /// `font-size` calculée de la boîte en px (16 par défaut).
 fn font_size_of(st: &explorer_css::ComputedStyle) -> f64 {
     st.get("font-size")
@@ -876,10 +1022,12 @@ fn border_side_w(st: &explorer_css::ComputedStyle, side: &str) -> f32 {
 /// `background-position` → décalage (px) de la tuile (0,0)
 /// dans la zone de positionnement `area` (CSS2 §14.2.1 :
 /// `%` mesure `(zone - image)` ; mots-clés = 0/50/100 % ;
-/// une valeur seule → x, l'autre `center` ; `em` hors
-/// portée → 0). Acid2 utilise `1px 0` sur les yeux.
+/// une valeur seule → x, l'autre `center` ; les unités
+/// font-relatives se résolvent sur `fs` — `0 -1em` de
+/// `margin-collapse-020` décale le fond de sa propre
+/// font-size). Acid2 utilise `1px 0` sur les yeux.
 #[allow(clippy::cast_possible_truncation)]
-fn bg_position(raw: Option<&str>, area: (f32, f32), img: (f32, f32)) -> (f32, f32) {
+fn bg_position(raw: Option<&str>, area: (f32, f32), img: (f32, f32), fs: f64) -> (f32, f32) {
     let toks: Vec<&str> = raw.unwrap_or("").split_whitespace().collect();
     if toks.is_empty() {
         return (0.0, 0.0);
@@ -897,7 +1045,10 @@ fn bg_position(raw: Option<&str>, area: (f32, f32), img: (f32, f32)) -> (f32, f3
                 .map_or_else(
                     || {
                         parse_length(t)
-                            .and_then(|l| l.unit.px_factor().map(|f| l.value * f))
+                            .map(|l| match l.unit.px_factor() {
+                                Some(f) => l.value * f,
+                                None => l.value * fs * em_factor(l.unit),
+                            })
                             .map_or(0.0, |v| v as f32)
                     },
                     |p| (span - dim) * p / 100.0,
@@ -930,6 +1081,7 @@ fn paint_self(
     off: (f32, f32),
     vp: (f32, f32),
     images: &crate::PaintImages,
+    canvas_bg_src: Option<explorer_dom::NodeId>,
 ) {
     let rect = shifted(bx.rect, off);
     // Blocs anonymes et boîtes texte clonent le style du
@@ -956,8 +1108,10 @@ fn paint_self(
     // Fond : `background-color` non transparente, puis
     // `background-image` décodée (au-dessus de la couleur,
     // sous la bordure — App. E ; origine padding box ≈ bord
-    // interne de la bordure gauche/haute).
-    if !anonymous && !inline_flow {
+    // interne de la bordure gauche/haute). Sautée quand le
+    // fond de cette boîte a été propagé au canvas (§14.2) —
+    // `canvas_bg_src` l'a déjà peint sur tout le viewport.
+    if !anonymous && !inline_flow && canvas_bg_src != bx.node {
         if let Some(c) = bx.style.get("background-color").and_then(parse_color) {
             if c.a > 0 {
                 items.push(DisplayItem::FillRect { rect, color: c });
@@ -975,22 +1129,36 @@ fn paint_self(
                     Some("repeat-y") => (false, true),
                     _ => (true, true), // `repeat` = défaut.
                 };
-                // Zone de positionnement : border box ≈ padding
-                // box pour `scroll`, **viewport** pour `fixed`
-                // (CSS2 §14.2.1 — le fond reste calé à l'écran).
+                // Zone de positionnement : **padding box** (bord
+                // interne des bordures — `background-position`
+                // s'y réfère, §14.2.1) pour `scroll`, viewport
+                // pour `fixed` (le fond reste calé à l'écran).
                 // L'origine est en coords FRAME : le viewport
                 // y démarre en (0,0) — ancrer au scroll
                 // déphaserait la tuile de `scroll mod taille`.
+                // La zone PEINTE reste la border box (clip par
+                // défaut) — seule l'ancre de la tuile bouge.
                 let fixed = bx.style.get("background-attachment") == Some("fixed");
                 let (area, base) = if fixed {
                     ((vp.0, vp.1), (0.0, 0.0))
                 } else {
-                    ((rect.width, rect.height), (rect.x, rect.y))
+                    let bl = border_side_w(&bx.style, "left");
+                    let bt = border_side_w(&bx.style, "top");
+                    let br = border_side_w(&bx.style, "right");
+                    let bb = border_side_w(&bx.style, "bottom");
+                    (
+                        (
+                            (rect.width - bl - br).max(0.0),
+                            (rect.height - bt - bb).max(0.0),
+                        ),
+                        (rect.x + bl, rect.y + bt),
+                    )
                 };
                 let (px, py) = bg_position(
                     bx.style.get("background-position"),
                     area,
                     (img.width as f32, img.height as f32),
+                    font_size_of(&bx.style),
                 );
                 items.push(DisplayItem::BackgroundImage {
                     rect,
@@ -1379,10 +1547,16 @@ fn box_transform(bx: &LayoutBox, rect: &Rect) -> Option<tiny_skia::Transform> {
 /// (App. E : un flottant peint tout son sous-arbre à
 /// l'étape 4, les inlines d'un contexte à l'étape 5).
 fn inline_scope(bx: &LayoutBox) -> bool {
-    bx.position != Position::Static
+    // Tout conteneur de niveau bloc ferme la portée : ses
+    // descendants en ligne se peignent dans SA phase inline
+    // (App. E — récursion par élément, ordre document) — pas
+    // à la fin du contexte de pilement, sinon leur débord
+    // couvrirait la bordure des boîtes suivantes (wpt 155).
+    !bx.kind.is_inline_level()
+        || bx.position != Position::Static
         || bx.float != Float::None
         || bx.intrinsic.is_some()
-        || (bx.kind == BoxKind::Inline && bx.children.iter().any(|c| !c.kind.is_inline_level()))
+        || bx.children.iter().any(|c| !c.kind.is_inline_level())
 }
 
 /// Enfant porteur de contenu en ligne — peint à l'étape 5 de
@@ -1399,19 +1573,22 @@ fn inline_carrier(c: &LayoutBox) -> bool {
 /// Peint `bx` avec sa propre portée de report — utilisé pour
 /// les flottants, les positionnés et les porteurs inline
 /// drainés : leurs descendants en ligne se peignent dedans.
+/// Les positionnés `z ≥ 0` passent par `pos_defer` (file du
+/// contexte d'empilement englobant) sauf si `bx` en est un.
 fn paint_scoped<'a>(
     bx: &'a LayoutBox,
     items: &mut Vec<DisplayItem>,
     off: (f32, f32),
     cx: &mut PaintCx<'a>,
+    pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
     let mut defer = Vec::new();
-    paint_box(bx, items, off, cx, &mut defer);
+    paint_box(bx, items, off, cx, &mut defer, pos_defer);
     let mut i = 0;
     while i < defer.len() {
         let (p, c) = defer[i].clone();
         i += 1;
-        emit_scoped_at(p, c, items, off, cx);
+        emit_scoped_at(p, c, items, off, cx, pos_defer);
     }
 }
 
@@ -1426,47 +1603,67 @@ fn emit_child<'a>(
     off: (f32, f32),
     cx: &mut PaintCx<'a>,
     defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
     cx.path.push(u16::try_from(idx).unwrap_or(u16::MAX));
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
         copy_span(bx, s, d, sig, items, off, cx);
         // Re-pousse les porteurs échappés de la plage —
         // relatifs → absolus ; le drain englobant les
-        // ré-émettra via leurs propres spans.
+        // ré-émettra via leurs propres spans. La file cible
+        // se re-déduit (inlines → `defer`, positionnés →
+        // `pos_defer`) — les deux y échappent ensemble.
         for rel in &s.escaped {
             if let Some(target) = resolve_rel(bx, rel) {
                 let mut p = cx.path.clone();
                 p.extend(rel.iter().copied());
-                defer.push((p, target));
+                if !matches!(target.position, Position::Static | Position::Sticky)
+                    && target.z_index >= 0
+                {
+                    push_z(pos_defer, p, target);
+                } else {
+                    defer.push((p, target));
+                }
             }
         }
     } else {
         let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let base = defer.len();
-        explorer_common::deep(|| paint_box(bx, items, off, cx, defer));
+        let pbase = pos_defer.len();
+        explorer_common::deep(|| paint_box(bx, items, off, cx, defer, pos_defer));
         let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let sig = box_sig(bx);
-        let esc = escaped_paths(defer, base, &cx.path);
-        cx.record_span(bx, start, end, effective_off(bx, off), sig, esc);
+        let mut esc = escaped_paths(defer, base, &cx.path).into_vec();
+        esc.extend(escaped_paths(pos_defer, pbase, &cx.path).into_vec());
+        cx.record_span(
+            bx,
+            start,
+            end,
+            effective_off(bx, off),
+            sig,
+            esc.into_boxed_slice(),
+        );
     }
     cx.path.pop();
 }
 
 /// Variante pour les enfants peints hors-flux (flottants,
 /// positionnés, porteurs drainés) — portée propre.
+#[allow(clippy::too_many_arguments)]
 fn emit_scoped<'a>(
     idx: usize,
     bx: &'a LayoutBox,
     items: &mut Vec<DisplayItem>,
     off: (f32, f32),
     cx: &mut PaintCx<'a>,
+    pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
     cx.path.push(u16::try_from(idx).unwrap_or(u16::MAX));
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
         copy_span(bx, s, d, sig, items, off, cx);
     } else {
         let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
-        explorer_common::deep(|| paint_scoped(bx, items, off, cx));
+        explorer_common::deep(|| paint_scoped(bx, items, off, cx, pos_defer));
         let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let sig = box_sig(bx);
         cx.record_span(bx, start, end, effective_off(bx, off), sig, Box::default());
@@ -1486,13 +1683,14 @@ fn emit_scoped_at<'a>(
     items: &mut Vec<DisplayItem>,
     off: (f32, f32),
     cx: &mut PaintCx<'a>,
+    pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
     let saved = std::mem::replace(&mut cx.path, path);
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
         copy_span(bx, s, d, sig, items, off, cx);
     } else {
         let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
-        explorer_common::deep(|| paint_scoped(bx, items, off, cx));
+        explorer_common::deep(|| paint_scoped(bx, items, off, cx, pos_defer));
         let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let sig = box_sig(bx);
         cx.record_span(bx, start, end, effective_off(bx, off), sig, Box::default());
@@ -1886,12 +2084,35 @@ fn paint_replaced(
     }
 }
 
+/// La boîte crée-t-elle un contexte d'empilement au sens de
+/// l'App. E ? Positionnée à `z-index` explicite, ou transformée
+/// (CSS Transforms). La racine est traitée par l'appelant.
+/// `auto` et `0` ne sont pas distingués par `z_index` (champ
+/// aplati) — on lit le style calculé.
+fn stacking_ctx(bx: &LayoutBox) -> bool {
+    (bx.position != Position::Static && bx.style.get("z-index").is_some_and(|v| v.trim() != "auto"))
+        || bx
+            .style
+            .get("transform")
+            .is_some_and(|v| v.trim() != "none")
+}
+
+/// Enfile un enfant positionné dans la file de son contexte
+/// d'empilement — insertion triée par `z-index`, stable (les
+/// égalités gardent l'ordre d'arbre — App. E étapes 8-9).
+fn push_z<'a>(q: &mut Vec<(Vec<u16>, &'a LayoutBox)>, path: Vec<u16>, bx: &'a LayoutBox) {
+    let z = bx.z_index;
+    let at = q.partition_point(|(_, c)| c.z_index <= z);
+    q.insert(at, (path, bx));
+}
+
 fn paint_box<'a>(
     bx: &'a LayoutBox,
     items: &mut Vec<DisplayItem>,
     off: (f32, f32),
     cx: &mut PaintCx<'a>,
     defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
     // `position: fixed` est ancrée au viewport : son sous-arbre
     // ignore le scroll.
@@ -1907,7 +2128,7 @@ fn paint_box<'a>(
     if let Some(m) = tf {
         items.push(DisplayItem::PushTransform(m));
     }
-    paint_self(bx, items, off, cx.vp, cx.images);
+    paint_self(bx, items, off, cx.vp, cx.images, cx.canvas_bg_src);
     paint_replaced(bx, items, off, cx.images);
     if !bx.children.is_empty() {
         // Clip sur le padding box (approx : border box moins les
@@ -1931,6 +2152,17 @@ fn paint_box<'a>(
         } else {
             defer
         };
+        // File des positionnés `z ≥ 0` : le contexte d'empilement
+        // englobant les peint après TOUT le flux normal — un
+        // parent `position:relative` à `z-index:auto` ne ferme
+        // pas leur phase (App. E). `my_pos` seulement si cette
+        // boîte crée le contexte ; sinon file héritée.
+        let mut my_pos: Vec<(Vec<u16>, &LayoutBox)> = Vec::new();
+        let pd: &mut Vec<(Vec<u16>, &LayoutBox)> = if stacking_ctx(bx) {
+            &mut my_pos
+        } else {
+            pos_defer
+        };
         let bound = bx.rect;
         let in_flow = |c: &&LayoutBox| matches!(c.position, Position::Static | Position::Sticky);
         let mut neg_z: Vec<(usize, &LayoutBox)> = bx
@@ -1941,7 +2173,7 @@ fn paint_box<'a>(
             .collect();
         neg_z.sort_by_key(|(_, c)| c.z_index);
         for (ci, child) in neg_z {
-            emit_scoped(ci, child, items, off, cx);
+            emit_scoped(ci, child, items, off, cx, pd);
         }
         // (a) blocs en flux — `sticky` garde sa translation de
         // peinture ; récursion `deep` ∝ profondeur (R-24).
@@ -1955,7 +2187,7 @@ fn paint_box<'a>(
                     tiny_skia::Transform::from_translate(stick.0, stick.1),
                 ));
             }
-            emit_child(ci, child, items, off, cx, d);
+            emit_child(ci, child, items, off, cx, d, pd);
             if stick != (0.0, 0.0) {
                 items.push(DisplayItem::PopTransform);
             }
@@ -1963,7 +2195,7 @@ fn paint_box<'a>(
         // (b) flottants non positionnés — portée propre.
         for (ci, child) in bx.children.iter().enumerate() {
             if in_flow(&child) && child.float != Float::None {
-                emit_scoped(ci, child, items, off, cx);
+                emit_scoped(ci, child, items, off, cx, pd);
             }
         }
         // (c) porteurs inline — reportés au contexte englobant.
@@ -1982,20 +2214,24 @@ fn paint_box<'a>(
         while i < scoped_defer.len() {
             let (p, c) = scoped_defer[i].clone();
             i += 1;
-            emit_scoped_at(p, c, items, off, cx);
+            emit_scoped_at(p, c, items, off, cx, pd);
         }
-        // Enfants positionnés `z-index` ≥ 0 ensuite, triés
-        // (stable) — les négatifs ont déjà été peints sous
-        // les blocs en flux.
-        let mut positioned: Vec<(usize, &LayoutBox)> = bx
-            .children
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| !in_flow(c) && c.z_index >= 0)
-            .collect();
-        positioned.sort_by_key(|(_, c)| c.z_index);
-        for (ci, child) in positioned {
-            emit_scoped(ci, child, items, off, cx);
+        // Enfants positionnés `z-index` ≥ 0 : enfilés triés dans
+        // la file du contexte — drainés à sa fermeture (ici si
+        // `my_pos`), sinon au contexte ancêtre ou à la racine.
+        for (ci, child) in bx.children.iter().enumerate() {
+            if in_flow(&child) || child.z_index < 0 {
+                continue;
+            }
+            let mut p = cx.path.clone();
+            p.push(u16::try_from(ci).unwrap_or(u16::MAX));
+            push_z(pd, p, child);
+        }
+        let mut i = 0;
+        while i < my_pos.len() {
+            let (p, c) = my_pos[i].clone();
+            i += 1;
+            emit_scoped_at(p, c, items, off, cx, &mut my_pos);
         }
         if clipped {
             items.push(DisplayItem::PopClip);

@@ -18,6 +18,9 @@ const VIEW: f32 = 800.0;
 fn laid(html: &str, css: &str) -> (Dom, LayoutBox) {
     let dom = TreeBuilder::parse(html);
     let mut eng = StyleEngine::new();
+    // R-32 : marge UA `body { margin: 8px }` neutralisée —
+    // fixtures écrites pour une géométrie à marge nulle.
+    eng.add_css("body { margin: 0 }", Origin::Author);
     eng.add_css(css, Origin::Author);
     let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
     let root_el = dom
@@ -608,8 +611,10 @@ fn abspos_position_statique_apres_marge() {
          #a { position: absolute; width: 20px; height: 20px }",
     );
     let a = find(&bx, by_id(&dom, "a"));
-    // border-top = bas du <p> (10) + marge 16 = 26.
-    assert!(approx(a.rect.y, 26.0), "{}", a.rect.y);
+    // La marge haute UA du <p> (1em = 16) s'échappe de body
+    // et s'applique au bord haut de la page : p@16, bas=26,
+    // puis la marge basse 16 du <p> → border-top statique 42.
+    assert!(approx(a.rect.y, 42.0), "{}", a.rect.y);
 }
 
 #[test]

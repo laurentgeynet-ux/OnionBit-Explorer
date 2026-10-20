@@ -31,10 +31,9 @@
 //! comptées 1×1), `border-spacing`, `display: table-column`,
 //! `caption`.
 
-use crate::block::{
-    border_px, css_px, font_size_px, layout_block, measure_fn, side_px, BlockCtx, FloatCtx,
-};
+use crate::block::{border_px, css_px, font_size_px, layout_block, side_px, BlockCtx, FloatCtx};
 use crate::boxtree::{LayoutBox, Rect};
+use explorer_css::ComputedStyle;
 
 /// Une cellule repérée : colonne + chemin d'indices depuis
 /// la boîte table jusqu'à elle (le chemin traverse un rang
@@ -76,11 +75,40 @@ struct Row {
 /// dans une rangée : texte blanc inter-éléments (l'espace
 /// source entre `<li>` n'est PAS du contenu de cellule).
 fn ignorable_in_table(b: &LayoutBox) -> bool {
+    // Colonnes (`col`/`colgroup`) : des repères de grille,
+    // pas du contenu — jamais de cellule anonyme.
+    if matches!(b.display(), "table-column" | "table-column-group") {
+        return true;
+    }
     matches!(
         b.kind,
         crate::BoxKind::Text | crate::BoxKind::AnonymousBlock
     ) && b.text.as_deref().is_none_or(|t| t.trim().is_empty())
         && b.children.iter().all(ignorable_in_table)
+}
+
+/// Styles des `col` explicites en ordre document — sources de
+/// largeur du `table-layout:fixed` (§17.5.2.1). Descend dans
+/// les anonymes et les `colgroup` (un `col` est compté pour
+/// une colonne — `span` hors périmètre documenté).
+fn collect_col_styles<'a>(bx: &'a LayoutBox, out: &mut Vec<&'a ComputedStyle>) {
+    for c in &bx.children {
+        match c.display() {
+            "table-column" => out.push(&c.style),
+            "table-column-group" => {
+                for g in &c.children {
+                    if g.display() == "table-column" {
+                        out.push(&g.style);
+                    }
+                }
+            }
+            _ => {
+                if c.kind == crate::BoxKind::AnonymousBlock {
+                    collect_col_styles(c, out);
+                }
+            }
+        }
+    }
 }
 
 /// Repère les rangs (`display: table-row` explicites ou
@@ -253,13 +281,49 @@ pub(crate) fn layout_table(
     let mut min_w = vec![0.0_f32; ncols];
     let mut pref_w = vec![1.0_f32; ncols];
     let mut spec_w = vec![0.0_f32; ncols];
-    for row in &rows {
+    // `table-layout: fixed` : seules les `width` des `col` et
+    // des cellules du PREMIER rang fixent les colonnes
+    // (§17.5.2.1) — mesurées séparément.
+    let fixed_layout = st.get("table-layout").is_some_and(|v| v.trim() == "fixed");
+    let mut first_spec = vec![0.0_f32; ncols];
+    let mut fixed_auto_pref = 0.0_f32;
+    let mut fixed_sum_est = 0.0_f32;
+    let mut col_styles: Vec<&ComputedStyle> = Vec::new();
+    if fixed_layout {
+        collect_col_styles(bx, &mut col_styles);
+    }
+    for (ri, row) in rows.iter().enumerate() {
         for cell in &row.cells {
             let (min, pref, spec) = cell_widths(bx, &cell.path, ctx, fs);
             min_w[cell.col] = min_w[cell.col].max(min);
             pref_w[cell.col] = pref_w[cell.col].max(pref.max(min));
             spec_w[cell.col] = spec_w[cell.col].max(spec);
+            if ri == 0 {
+                first_spec[cell.col] = first_spec[cell.col].max(spec);
+            }
         }
+    }
+    if fixed_layout {
+        // Priorité `col` > cellule de premier rang — un `col`
+        // sans `width` laisse la cellule décider.
+        for (i, s) in spec_w.iter_mut().enumerate() {
+            *s = col_styles
+                .get(i)
+                .and_then(|cs| css_px(cs, "width", cb_w, fs, ctx))
+                .unwrap_or(0.0)
+                .max(first_spec[i]);
+        }
+        // Colonnes sans spécification : `pref` nulle → parts
+        // égales du reliquat (voir `auto_pref` nul ci-dessous)
+        // — leur estimation de contenu est conservée pour le
+        // calcul de la largeur `auto` de la table.
+        for (i, p) in pref_w.iter_mut().enumerate() {
+            if spec_w[i] <= 0.0 {
+                fixed_auto_pref += *p;
+                *p = 0.0;
+            }
+        }
+        fixed_sum_est = spec_w.iter().sum();
     }
 
     // Bordures/padding PROPRES de la table : la grille de
@@ -275,13 +339,26 @@ pub(crate) fn layout_table(
     let ib = border_px(&st, "border-bottom-width", cb_w, fs, ctx)
         + side_px(&st, "padding-bottom", cb_w, fs, ctx, 0.0);
 
-    // Largeur de la table.
+    // Largeur de la table : `pref`/`min` sont des sommes de
+    // colonnes (content-box) — en `auto` la border-box inclut
+    // en sus bordures et padding propres (§17.5.2), sinon le
+    // cadre rognerait les colonnes.
     let total_pref: f32 = pref_w.iter().sum();
     let total_min: f32 = min_w.iter().sum();
+    let frame = il + ir;
+    // En `table-layout:fixed`, une largeur `auto` s'évalue
+    // sur les colonnes spécifiées (`col` + premier rang),
+    // jamais sur le contenu (§17.5.2.1) — les colonnes
+    // restantes conservent une estimation de contenu.
+    let auto_w = if fixed_layout {
+        fixed_sum_est + fixed_auto_pref + frame
+    } else {
+        total_pref + frame
+    };
     let table_w = css_px(&st, "width", cb_w, fs, ctx)
-        .unwrap_or_else(|| total_pref.min(cb_w))
+        .unwrap_or_else(|| auto_w.min(cb_w))
         .min(cb_w);
-    let table_w = table_w.max(total_min.min(cb_w));
+    let table_w = table_w.max((total_min + frame).min(cb_w));
     let grid_w = (table_w - il - ir).max(0.0);
 
     // Distribution (§17.5.2.2) : une `width` de cellule cloue
@@ -315,6 +392,17 @@ pub(crate) fn layout_table(
             } else {
                 0.0
             };
+            // Toutes colonnes spécifiées mais table plus large
+            // (`table-layout:fixed` typiquement) : le reliquat
+            // se répartit également sur toutes (§17.5.2).
+            let bonus = if nauto == 0 && left > 0.0 {
+                left / u16::try_from(ncols).map_or(1.0, f32::from)
+            } else {
+                0.0
+            };
+            for w in &mut col_w {
+                *w += bonus;
+            }
             for (i, w) in col_w.iter_mut().enumerate() {
                 if spec_w[i] <= 0.0 {
                     *w = each.max(min_w[i].min(left));
@@ -538,31 +626,16 @@ fn cell_widths(bx: &LayoutBox, cell_path: &[usize], ctx: &BlockCtx, fs: f32) -> 
     if spec > 0.0 {
         return (spec, spec, spec);
     }
-    let measure = measure_fn(st, font_size_px(st, fs, ctx), ctx);
-    let txt = flatten_text(cell);
-    // `\u{A0}` n'est PAS un blanc CSS : il porte l'avance du
-    // min-content comme n'importe quel glyphe (§16.6.1).
-    let longest = txt
-        .split(crate::text::is_css_ws)
-        .map(&measure)
-        .fold(0.0_f32, f32::max);
-    let pref = measure(crate::text::trim_css_ws(&txt));
+    // Mesure intrinsèque générale (R-32) : les enfants bloc
+    // comptent (`width` explicite, sous-arbres récursés) —
+    // avant, seul le texte aplati pesait : une cellule à
+    // `div{width:1em}` mesurait 0 et sa colonne s'effondrait.
+    let cfs = font_size_px(st, fs, ctx);
+    let longest = crate::intrinsic::min_content_px(cell, cfs, ctx);
+    let pref = crate::intrinsic::max_content_px(cell, cfs, ctx);
     let extras = css_px(st, "padding-left", 0.0, fs, ctx).unwrap_or(0.0)
         + css_px(st, "padding-right", 0.0, fs, ctx).unwrap_or(0.0)
-        + css_px(st, "border-left-width", 0.0, fs, ctx).unwrap_or(0.0)
-        + css_px(st, "border-right-width", 0.0, fs, ctx).unwrap_or(0.0);
+        + border_px(st, "border-left-width", 0.0, fs, ctx)
+        + border_px(st, "border-right-width", 0.0, fs, ctx);
     (longest + extras, pref + extras, 0.0)
-}
-
-/// Texte aplati d'une boîte (tous descendants).
-fn flatten_text(b: &LayoutBox) -> String {
-    let mut s = String::new();
-    if let Some(t) = &b.text {
-        s.push_str(t);
-    }
-    for c in &b.children {
-        s.push_str(&flatten_text(c));
-        s.push(' ');
-    }
-    s
 }

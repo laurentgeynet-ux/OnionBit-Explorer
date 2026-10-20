@@ -419,15 +419,35 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (96,36,0 / 219,159,0 — couverture sub-pixel, jamais une
   couleur franche). Méthode éprouvée : crop par région,
   diff pixel, un commit par cause.
-- [ ] **R-32. Élargir le corpus WPT** (lead) : le
-  cliquet actuel (57/57) ne mesure plus rien — extraire une
-  tranche nouvelle via le script existant (candidats :
-  `vertical-align` complet, `overflow`, `position`,
-  margin-collapsing systématique, tables avancées,
-  `display` résiduels). Nouveau baseline honnête
-  « x/y exécutés (z skips) sur sous-ensemble S' élargi » +
-  cliquet reposé. Objectif : réactiver la boucle
-  échec→cause racine qui a produit R-27→30.
+- [x] **R-32. Élargir le corpus WPT** (lead) : tranche
+  `margin-padding-clear` + `floats-clear` + `normal-flow`
+  (margin-collapsing systématique) extraite via
+  `fetch_wpt.ps1` — 154 fichiers dont 36 sans référence.
+  Score mesuré **115/152 exécutés (6 skips)**, cliquet
+  `WPT_BASELINE` reposé à 115. La boucle échec→cause a
+  produit : collapse-through des chaînes hautes pré-layout
+  (`chain_transparent`/`candidate_chain` purement
+  stylistiques), marges de la racine jamais collapsées
+  (`is_root`), position statique des absolus ancrée au
+  `flow_bottom` du frère précédent (§10.6.4), marges des
+  flottants jamais collapsées, `table-layout:fixed` +
+  règles UA `col`/`colgroup` et somme des colonnes
+  spécifiées pour `width:auto`, `border-width` mots-clés
+  dans les extras de mesure de cellules, propagation du
+  fond de `body` au canvas (§14.2), `background-position`
+  en `em`, reset `line-height`/`font-*` du shorthand
+  `font`, ordre de pile Appendix E (portée inline fermée
+  par conteneur bloc + positionnés `z≥0` différés au
+  contexte de pilement), translation du sous-arbre pour
+  `position:relative`, marges horizontales des éléments
+  inline (marqueurs de portée). Feuille UA `body {
+  margin: 8px }` ajoutée (compat réelle — refs partagées
+  WPT la supposent) avec neutralisation `margin:0` dans
+  les fixtures downstream écrites pour une marge nulle
+  (carve-out §10.3). Skip documenté :
+  `margin-collapse-through-percentage-padding.html`
+  exige mutation JS + relayout — piste NAVIGATEUR, hors
+  périmètre PIPELINE.
 - [x] **R-33. Perf — coût unitaire de l'apply**
   (demande consignée `interface-equipes.md`, terrain
   mission 15) : `incr.remap_relayout` = **150,3 s** sur

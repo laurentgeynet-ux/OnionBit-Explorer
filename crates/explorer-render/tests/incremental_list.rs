@@ -44,6 +44,9 @@ fn ctx() -> BlockCtx<'static> {
 fn tree_of(html: &str, css: &str) -> (LayoutBox, DisplayList) {
     let dom = TreeBuilder::parse(html);
     let mut eng = StyleEngine::new();
+    // R-32 : marge UA `body { margin: 8px }` neutralisée —
+    // fixtures écrites pour une géométrie à marge nulle.
+    eng.add_css("body { margin: 0 }", Origin::Author);
     eng.add_css(css, Origin::Author);
     let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
     let root_el = dom

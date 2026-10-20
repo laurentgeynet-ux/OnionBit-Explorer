@@ -253,19 +253,29 @@ pub fn layout_tree(root: &mut LayoutBox, viewport_w: f32, ctx: &BlockCtx) {
     // La racine établit le BFC initial : ses flottants sont
     // contenus dans sa hauteur (§9.4.1/§10.6.7).
     let mut floats = FloatCtx::default();
-    layout_block(
-        root,
-        0.0,
-        0.0,
-        viewport_w,
-        // ICB : la hauteur du viewport est définie —
-        // `height: 100%` sur <html> y résout.
-        (ctx.viewport_h > 0.0).then_some(ctx.viewport_h),
-        ctx,
-        ctx.base_font_size,
-        viewport,
-        &mut floats,
-    );
+    // Les marges de la racine s'appliquent à sa border box
+    // (§8.3.1 : jamais collapsées — le collapse-through est
+    // bloqué par `is_root` plus bas). La marge haute décale
+    // la boîte dans l'ICB ; les latérales sont résolues en
+    // interne comme pour toute boîte bloc.
+    let root_fs = font_size_px(&root.style, ctx.base_font_size, ctx);
+    let root_mt = margins(&root.style, viewport_w, root_fs, ctx).top;
+    explorer_common::deep(|| {
+        layout_block_inner(
+            root,
+            0.0,
+            root_mt,
+            viewport_w,
+            // ICB : la hauteur du viewport est définie —
+            // `height: 100%` sur <html> y résout.
+            (ctx.viewport_h > 0.0).then_some(ctx.viewport_h),
+            ctx,
+            ctx.base_font_size,
+            viewport,
+            &mut floats,
+            true,
+        )
+    });
     let deep = FloatCtx::bottom_of(&floats.left)
         .unwrap_or(0.0)
         .max(FloatCtx::bottom_of(&floats.right).unwrap_or(0.0));
@@ -517,7 +527,7 @@ fn margins(style: &ComputedStyle, cb_w: f32, em: f32, ctx: &BlockCtx) -> Margins
 fn margin_transparent(bx: &LayoutBox, cb_w: f32, fs: f32, ctx: &BlockCtx) -> bool {
     let st = &bx.style;
     bx.rect.height <= 0.0
-        && bx.position == Position::Static
+        && !matches!(bx.position, Position::Absolute | Position::Fixed)
         && bx.float == Float::None
         && !establishes_bfc(st)
         && side_px(st, "padding-top", cb_w, fs, ctx, 0.0) <= 0.0
@@ -547,7 +557,7 @@ fn transparent_candidate(
     } else {
         css_px(st, "height", 0.0, fs, ctx)
     };
-    bx.position == Position::Static
+    !matches!(bx.position, Position::Absolute | Position::Fixed)
         && bx.float == Float::None
         && !establishes_bfc(st)
         && side_px(st, "padding-top", cb_w, fs, ctx, 0.0) <= 0.0
@@ -575,7 +585,7 @@ fn bottom_adjoining(bx: &LayoutBox, cb_w: f32, fs: f32, ctx: &BlockCtx) -> bool 
     } else {
         css_px(st, "height", 0.0, fs, ctx)
     };
-    bx.position == Position::Static
+    !matches!(bx.position, Position::Absolute | Position::Fixed)
         && bx.float == Float::None
         && !establishes_bfc(st)
         && side_px(st, "padding-bottom", cb_w, fs, ctx, 0.0) <= 0.0
@@ -589,10 +599,12 @@ fn escaped_bottom_run(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx)
     let fs = font_size_px(st, parent_fs, ctx);
     let mut run = MarginRun::default();
     run.add(margins(st, cb_w, fs, ctx).bottom);
-    if bottom_adjoining(bx, cb_w, fs, ctx) {
+    // `height_raised` (min-height au-dessus du contenu) coupe
+    // la chaîne du dernier fils : sa marge basse est avalée.
+    if bottom_adjoining(bx, cb_w, fs, ctx) && !bx.height_raised {
         if let Some(c) = bx.children.iter().rev().find(|c| {
             !matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock)
-                && c.position == Position::Static
+                && !matches!(c.position, Position::Absolute | Position::Fixed)
                 && c.float == Float::None
         }) {
             if margin_transparent(c, cb_w, fs, ctx) {
@@ -624,7 +636,23 @@ fn top_adjoining(bx: &LayoutBox, cb_w: f32, fs: f32, ctx: &BlockCtx) -> bool {
 /// propre bord supérieur : c'est ce total qui sert de marge
 /// haute face aux voisins (réf float-root : `p` dont la
 /// marge traverse `body` dans le `:root` flottant).
-fn collapsed_top_margin(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx) -> MarginRun {
+///
+/// Un enfant de tête « transparent à la chaîne »
+/// ([`chain_transparent`] — structurellement vide, ses bords
+/// haut et bas coïncident) apporte sa chaîne COMPLÈTE
+/// `[mt … mb]` à la fusion, pas seulement `mt` : c'est ce
+/// qui remonte la marge basse d'un dernier fils transparent
+/// jusqu'au bord haut du parent vide
+/// (`margin-collapse-min-height-001.xht`). Le parcours se
+/// poursuit alors sur les frères : toute la suite de boîtes
+/// vides en tête fusionne dans la même marge.
+fn collapsed_top_margin(
+    bx: &LayoutBox,
+    cb_w: f32,
+    cb_h: Option<f32>,
+    parent_fs: f32,
+    ctx: &BlockCtx,
+) -> MarginRun {
     let st = &bx.style;
     let fs = font_size_px(st, parent_fs, ctx);
     let mut run = MarginRun::default();
@@ -634,8 +662,8 @@ fn collapsed_top_margin(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCt
     }
     for c in &bx.children {
         if matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock)
-            || c.out_of_flow()
-            || c.float != Float::None
+            || out_of_flow_st(&c.style)
+            || floated_st(&c.style)
         {
             continue;
         }
@@ -646,9 +674,93 @@ fn collapsed_top_margin(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCt
         {
             break;
         }
-        run.fold(collapsed_top_margin(c, cb_w, fs, ctx));
+        if chain_transparent(c, cb_w, cb_h, fs, ctx) {
+            run.fold(candidate_chain(c, cb_w, cb_h, fs, ctx));
+            continue;
+        }
+        run.fold(collapsed_top_margin(c, cb_w, cb_h, fs, ctx));
         break;
     }
+    run
+}
+
+/// Hors-flux lu au style (`position` absolue/fixe) — sûr
+/// avant layout, où `bx.position` n'est pas encore posé.
+fn out_of_flow_st(st: &ComputedStyle) -> bool {
+    matches!(st.get("position"), Some("absolute" | "fixed"))
+}
+
+/// Flottant lu au style — même motif que [`out_of_flow_st`].
+fn floated_st(st: &ComputedStyle) -> bool {
+    matches!(st.get("float"), Some("left" | "right"))
+}
+
+/// « Transparent à la chaîne » **avant layout** : la boîte
+/// est candidate à la transparence ([`transparent_candidate`])
+/// ET aucun de ses enfants in-flow ne peut contribuer de la
+/// hauteur — récursif et purement stylistique, donc sûr sur
+/// un sous-arbre pas encore posé (contrairement à
+/// [`margin_transparent`], qui lit `rect.height` posé).
+/// Flottants et hors-flux ne comptent pas (§10.6.3 : la
+/// hauteur auto n'en tient pas compte).
+fn chain_transparent(
+    bx: &LayoutBox,
+    cb_w: f32,
+    cb_h: Option<f32>,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> bool {
+    transparent_candidate(bx, cb_w, cb_h, fs, ctx)
+        && bx.children.iter().all(|c| {
+            // Contenu en-ligne ou remplacé → hauteur réelle.
+            if matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock) || c.kind.is_inline_level()
+            {
+                return false;
+            }
+            // Hors-flux et flottants ne contribuent pas — lu
+            // au style : `bx.position`/`bx.float` ne sont posés
+            // qu'au layout (stale avant).
+            if out_of_flow_st(&c.style) || floated_st(&c.style) {
+                return true;
+            }
+            let cfs = font_size_px(&c.style, fs, ctx);
+            chain_transparent(c, cb_w, cb_h, cfs, ctx)
+        })
+}
+
+/// Version pré-layout de [`margin_chain`] : chaîne complète
+/// d'une boîte structurellement vide ([`chain_transparent`]),
+/// pliable dans la marge haute d'un parent avant que le
+/// sous-arbre ne soit posé.
+fn candidate_chain(
+    bx: &LayoutBox,
+    cb_w: f32,
+    cb_h: Option<f32>,
+    parent_fs: f32,
+    ctx: &BlockCtx,
+) -> MarginRun {
+    let st = &bx.style;
+    let fs = font_size_px(st, parent_fs, ctx);
+    let m = margins(st, cb_w, fs, ctx);
+    let mut run = MarginRun::default();
+    run.add(m.top);
+    for c in &bx.children {
+        if matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock)
+            || out_of_flow_st(&c.style)
+            || floated_st(&c.style)
+        {
+            continue;
+        }
+        let cfs = font_size_px(&c.style, fs, ctx);
+        if chain_transparent(c, cb_w, cb_h, cfs, ctx) {
+            run.fold(candidate_chain(c, cb_w, cb_h, cfs, ctx));
+        } else {
+            let cm = margins(&c.style, cb_w, cfs, ctx);
+            run.add(cm.top);
+            run.add(cm.bottom);
+        }
+    }
+    run.add(m.bottom);
     run
 }
 
@@ -705,7 +817,9 @@ pub(crate) fn layout_block(
     abs_cb: Rect,
     fl: &mut FloatCtx,
 ) -> f32 {
-    explorer_common::deep(|| layout_block_inner(bx, x, y, cb_w, cb_h, ctx, parent_fs, abs_cb, fl))
+    explorer_common::deep(|| {
+        layout_block_inner(bx, x, y, cb_w, cb_h, ctx, parent_fs, abs_cb, fl, false)
+    })
 }
 
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
@@ -719,6 +833,7 @@ fn layout_block_inner(
     parent_fs: f32,
     abs_cb: Rect,
     fl: &mut FloatCtx,
+    is_root: bool,
 ) -> f32 {
     let st = bx.style.clone();
     let fs = font_size_px(&st, parent_fs, ctx);
@@ -898,8 +1013,10 @@ fn layout_block_inner(
             // « traverse » le parent que s'il ne la sépare
             // de rien — pas de padding/bordure haut ET pas
             // de BFC propre (un inline-block garde la marge
-            // de son premier fils à l'intérieur).
-            pt + bt <= 0.0 && !establishes_bfc(&st),
+            // de son premier fils à l'intérieur). Jamais pour
+            // la racine : ses marges ne collapsent pas, la
+            // chaîne du premier fils reste à l'intérieur.
+            !is_root && pt + bt <= 0.0 && !establishes_bfc(&st),
             line_h,
             ctx,
             fs,
@@ -929,22 +1046,43 @@ fn layout_block_inner(
     if let Some(mn) = vert_spec("min-height") {
         used_h = used_h.max(mn);
     }
+    // §8.3.1 : hauteur utilisée au-dessus du contenu → la
+    // marge basse du dernier fils in-flow est avalée — ni
+    // comptée dans le contenu, ni échappée au parent
+    // (WPT `margin-collapse-min-height-001` ; si `min-height`
+    // ne dépasse pas le contenu, la marge traverse
+    // normalement — `-003`, `margin-collapse-037`).
+    bx.height_raised = used_h > content_h;
     // La boîte de contenu est déjà bornée par `min|max-width`
     // en amont de la pose des enfants — le rect suit.
     bx.rect.width = bl + pl + content_w + pr + br;
     bx.rect.height = bt + pt + used_h + pb + bb;
 
     // `position: relative` : décalage après le flux
-    // (top pousse vers le bas, bottom vers le haut).
-    if bx.position == Position::Relative {
-        let off_x = css_px(&st, "left", cb_w, fs, ctx).unwrap_or(0.0)
-            - css_px(&st, "right", cb_w, fs, ctx).unwrap_or(0.0);
-        let off_y = css_px(&st, "top", cb_w, fs, ctx).unwrap_or(0.0)
-            - css_px(&st, "bottom", cb_w, fs, ctx).unwrap_or(0.0);
-        bx.rect.x += off_x;
-        bx.rect.y += off_y;
+    // (top pousse vers le bas, bottom vers le haut) — tout
+    // le sous-arbre suit la boîte (enfants, lignes,
+    // fragments), pas seulement son rect.
+    let (off_x, off_y) = rel_offsets(bx, cb_w, fs, ctx);
+    if off_x != 0.0 || off_y != 0.0 {
+        crate::flex::translate_subtree(bx, off_x, off_y);
     }
     bx.rect.height
+}
+
+/// Décalage `position: relative` d'une boîte posée : zéro
+/// pour toute autre valeur de `position`. Lit le style
+/// calculé (le champ `position` peut ne pas être renseigné
+/// selon le point d'appel).
+pub(crate) fn rel_offsets(bx: &LayoutBox, cb_w: f32, fs: f32, ctx: &BlockCtx) -> (f32, f32) {
+    if bx.position != Position::Relative {
+        return (0.0, 0.0);
+    }
+    (
+        css_px(&bx.style, "left", cb_w, fs, ctx).unwrap_or(0.0)
+            - css_px(&bx.style, "right", cb_w, fs, ctx).unwrap_or(0.0),
+        css_px(&bx.style, "top", cb_w, fs, ctx).unwrap_or(0.0)
+            - css_px(&bx.style, "bottom", cb_w, fs, ctx).unwrap_or(0.0),
+    )
 }
 
 /// Métadonnées usées étape 21 : `position`, `float`,
@@ -1150,6 +1288,14 @@ fn flow_children(
     cb_h: Option<f32>,
 ) -> f32 {
     let mut cursor = start_cursor;
+    // Border-bottom du dernier enfant en flux posé — peut
+    // différer de `cursor` après un enfant « transparent »
+    // (h0) : sa marge haute a été consommée pour placer sa
+    // border box mais ne consomme pas le flux (§8.3.1). Sert
+    // d'ancre à la position statique des absolus (§10.6.4 :
+    // leur place hypothétique se mesure depuis le bas réel
+    // du frère précédent, pas depuis le curseur global).
+    let mut flow_bottom = start_cursor;
     let own_bfc = establishes_bfc(&bx.style);
     // `text-align: -webkit-center` (UA : <center>, spec
     // « align descendants to the center ») centre aussi les
@@ -1200,6 +1346,7 @@ fn flow_children(
             );
             inline_anchor = bx.children[i].lines.last().map(|l| l.rect.y);
             cursor += used;
+            flow_bottom = cursor;
             prev_margin = Some(MarginRun::default());
             first = false;
             continue;
@@ -1217,31 +1364,43 @@ fn flow_children(
             };
             inline_anchor = Some(cursor + gap);
             cursor += gap + line_h;
+            flow_bottom = cursor;
             prev_margin = Some(MarginRun::default());
             first = false;
             continue;
         }
         let cfs = font_size_px(&cst, fs, ctx);
-        let cm = margins(&cst, content_w, cfs, ctx);
 
         // `position: absolute|fixed` : hors flux — rect
         // statique placeholder, résolu en second passage par
         // `resolve_absolutes` (layout_tree). La position
         // statique est celle qu'aurait la border box en flux
         // (§10.6.4) : la marge en attente du frère précédent
-        // se replie avec la nôtre — sauf premier fils joint au
-        // haut du parent (sa marge s'échappe, §8.3.1).
+        // se replie avec sa chaîne de marges hautes —
+        // premier fils inclus : son échappement du parent
+        // est *virtuel* (la boîte posée ne bouge plus), le
+        // gap vaut alors l'excédent du repli combiné
+        // parent+enfant sur la marge propre du parent.
         if matches!(cst.get("position"), Some("absolute" | "fixed")) {
+            // Position statique = border-top de la boîte
+            // hypothétique en flux (§10.6.4) : le gap replie
+            // les marges précédentes ET la chaîne propre de
+            // l'absolu — mais PAS d'échappement « premier
+            // fils » : sa marge haute ne traverse pas le
+            // parent (les marges d'un absolu ne collapsent
+            // jamais — `.d` de margin-collapse-114).
             let mut run = prev_margin.unwrap_or_default();
-            run.add(cm.top);
-            let gap = if first && adjoining_top {
-                0.0
-            } else {
-                run.value()
-            };
+            run.fold(collapsed_top_margin(
+                &bx.children[i],
+                content_w,
+                cb_h,
+                fs,
+                ctx,
+            ));
+            let gap = run.value();
             bx.children[i].rect = Rect {
                 x: content_x,
-                y: cursor + gap,
+                y: flow_bottom + gap,
                 width: content_w,
                 height: 0.0,
             };
@@ -1262,9 +1421,12 @@ fn flow_children(
         // `.nose` : `-2em` sous les yeux).
         let cfloat = cst.get("float");
         if matches!(cfloat, Some("left" | "right")) {
-            let mut run = prev_margin.unwrap_or_default();
-            run.add(cm.top);
-            let hypo = inline_anchor.unwrap_or(cursor) + run.value() - cm.top;
+            // Les marges d'un flottant ne collapsent jamais
+            // (§8.3.1) : le haut de sa margin box s'empile
+            // après la marge basse pendante — `prev` et `mt`
+            // S'ADDITIONNENT, pas de repli. `cm.top` reste
+            // dans la margin box (appliquée par `place_float`).
+            let hypo = inline_anchor.unwrap_or(cursor) + prev_margin.unwrap_or_default().value();
             place_float(
                 bx,
                 i,
@@ -1295,7 +1457,13 @@ fn flow_children(
         // sans objet : la chaîne entière s'échappe.
         if transparent_candidate(&bx.children[i], content_w, cb_h, cfs, ctx) {
             let mut run = prev_margin.unwrap_or_default();
-            run.fold(collapsed_top_margin(&bx.children[i], content_w, fs, ctx));
+            run.fold(collapsed_top_margin(
+                &bx.children[i],
+                content_w,
+                cb_h,
+                fs,
+                ctx,
+            ));
             let gap = if first && adjoining_top {
                 0.0
             } else {
@@ -1313,6 +1481,13 @@ fn flow_children(
                 fl,
             );
             if bx.children[i].rect.height <= 0.0 {
+                // Collapse-through (§8.3.1) : la marge haute
+                // a placé sa border-top sans consommer le
+                // flux — `flow_bottom` la retient pour la
+                // position statique d'un absolu suivant,
+                // `prev_margin` garde la chaîne complète
+                // {mt,mb} pour le frère en flux suivant.
+                flow_bottom = cursor + gap;
                 let mut run = prev_margin.unwrap_or_default();
                 run.fold(margin_chain(&bx.children[i], content_w, fs, ctx));
                 prev_margin = Some(run);
@@ -1330,6 +1505,7 @@ fn flow_children(
                 }
             }
             cursor += gap + used;
+            flow_bottom = cursor;
             prev_margin = Some(escaped_bottom_run(&bx.children[i], content_w, fs, ctx));
             first = false;
             inline_anchor = None;
@@ -1342,7 +1518,13 @@ fn flow_children(
         // haute effective inclut celle qui s'échappe de ses
         // premiers descendants adjacents.
         let mut run = prev_margin.unwrap_or_default();
-        run.fold(collapsed_top_margin(&bx.children[i], content_w, fs, ctx));
+        run.fold(collapsed_top_margin(
+            &bx.children[i],
+            content_w,
+            cb_h,
+            fs,
+            ctx,
+        ));
         // Premier enfant adjoining : sa marge « traverse » le
         // parent (§8.3.1 — pas d'espace interne au-dessus ;
         // c'est le parent qui ajoute la sienne propre, côté
@@ -1396,6 +1578,7 @@ fn flow_children(
             )
         };
         cursor += used;
+        flow_bottom = cursor;
         // `-webkit-center` : enfant bloc in-flow plus étroit
         // que le conteneur → centré horizontalement (comme
         // des marges `auto`). La translation s'applique à
@@ -1418,6 +1601,8 @@ fn flow_children(
     // pas de BFC, hauteur auto — sinon elle reste DANS la
     // hauteur de contenu : la margin box du dernier fils est
     // mesurée (ref `border:1px` des réftests flex-direction).
+    // La racine a un `cb_h` défini (viewport) — ses marges ne
+    // collapsent de toute façon jamais (§8.3.1).
     let adjoining_bottom = !own_bfc && cb_h.is_none() && bottom_adjoining(bx, content_w, fs, ctx);
     if !adjoining_bottom {
         if let Some(run) = prev_margin {
@@ -1581,7 +1766,8 @@ fn abs_geometry(
         cx: l.map_or(child.rect.x, |v| target.x + v),
         // `top` ancre la margin box → border top = `top+mt`.
         // `top:auto` → position statique : `rect.y` EST déjà
-        // la border box (la marge fut consommée par le flux).
+        // la border box hypothétique (le repli ci-dessus a
+        // intégré la marge propre dans le gap).
         cy: t.map_or(child.rect.y, |v| target.y + v + mt),
         cw,
         l,
@@ -1777,7 +1963,7 @@ pub(crate) fn measure_fn<'a>(
             ctx.font_cache
                 .borrow_mut()
                 .shape(*src, req, s, fs, false)
-                .map_or(0.0, |r| r.advance)
+                .map_or_else(|| s.chars().count() as f32 * fs * 0.55, |r| r.advance)
         } else {
             s.chars().count() as f32 * fs * 0.55
         }

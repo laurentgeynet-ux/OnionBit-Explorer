@@ -38,7 +38,7 @@ const VIEW_H: f32 = 600.0;
 /// Cliquet : score minimal attendu — mesuré 2026-02 à 17/40
 /// (42 %) sur la première extraction ; à monter à chaque
 /// progrès float/BFC/marges.
-const WPT_BASELINE: usize = 57;
+const WPT_BASELINE: usize = 115;
 
 /// Tolérance AA : pixels dont le delta maximal de canal est
 /// ≤ [`FUZZY_CHANNEL`] comptent « doux » ; au-delà « dur ».
@@ -91,8 +91,16 @@ fn data_dir() -> PathBuf {
 
 struct Ahem;
 impl FontSource for Ahem {
-    fn font_data(&self, _req: &FontRequest) -> Option<Vec<u8>> {
-        Some(AHEM.clone())
+    // R-32 : comme le harnais WPT réel, Ahem n'existe que
+    // pour la famille « Ahem » — `serif`/`sans-serif` tombent
+    // sur les métriques de repli (≈ fonte système). Servir
+    // Ahem à toute requête faisait déborder « flt lef » à
+    // 7×1em = 112 px → wrap fantôme (margin-collapse-039).
+    fn font_data(&self, req: &FontRequest) -> Option<Vec<u8>> {
+        req.families
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case("ahem"))
+            .then(|| AHEM.clone())
     }
 }
 
@@ -294,7 +302,7 @@ fn collect_backgrounds(dom: &Dom, styles: &explorer_css::StyleMap, file_dir: &Pa
 /// Pipeline complet : HTML → cascade (UA + `<style>`) →
 /// layout → display list → raster RGBA. `file_dir` = dossier
 /// du fichier source (résolution des `src`/`url()` d'images).
-fn render(src: &str, file_dir: &Path) -> Option<Frame> {
+fn render(src: &str, file_dir: &Path, tag: &str) -> Option<Frame> {
     let dom = TreeBuilder::parse(strip_xml_prolog(src));
     let mut eng = StyleEngine::new();
     eng.add_css(&collect_css(&dom), Origin::Author);
@@ -313,14 +321,41 @@ fn render(src: &str, file_dir: &Path) -> Option<Frame> {
     };
     let mut bx = build_box_tree_sized(&dom, root, &styles, &sizes)?;
     layout_tree(&mut bx, VIEW_W, &ctx());
+    if std::env::var("WPT_DUMP").is_ok_and(|f| tag.contains(&f)) {
+        eprintln!("--- {tag}\n{}", bx.dump(&dom));
+        let mut q = vec![root];
+        while let Some(n) = q.pop() {
+            if let Ok(el) = dom.element(n) {
+                let st = styles.get(n);
+                eprintln!(
+                    "<{}> fs={:?} lh={:?} ff={:?}",
+                    el.tag_name,
+                    st.and_then(|s| s.get("font-size")),
+                    st.and_then(|s| s.get("line-height")),
+                    st.and_then(|s| s.get("font-family")),
+                );
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+    }
     let list = build_display_list_full(&bx, VIEW_W, VIEW_H, 0.0, &images);
+    if std::env::var("WPT_DLIST").is_ok_and(|f| tag.contains(&f)) {
+        eprintln!("--- display {tag}\n{}", list.dump());
+    }
     rasterize(&list, &Ahem, 1.0)
 }
 
 /// `href` de la référence résolu relativement au test —
 /// gère `./x` et `../reference/x` (un seul niveau de `..`
-/// observé dans ce corpus).
+/// observé dans ce corpus) ; un href **absolu** `/css/…`
+/// (R-32 : margin-collapse-clear-001 → floats-clear) se
+/// résout depuis la racine du corpus.
 fn resolve(test_path: &Path, href: &str) -> PathBuf {
+    if let Some(abs) = href.strip_prefix('/') {
+        return data_dir().join(abs);
+    }
     let href = href.strip_prefix("./").unwrap_or(href);
     let mut dir = test_path
         .parent()
@@ -389,7 +424,10 @@ fn wpt_reftests_pixel() {
             .map(Path::to_path_buf)
             .unwrap_or_default();
         let ref_dir = ref_path.parent().map(Path::to_path_buf).unwrap_or_default();
-        let (Some(a), Some(b)) = (render(&src, &test_dir), render(&ref_src, &ref_dir)) else {
+        let (Some(a), Some(b)) = (
+            render(&src, &test_dir, &name),
+            render(&ref_src, &ref_dir, &format!("{name}(ref)")),
+        ) else {
             failures.push(format!("{name}: rendu impossible"));
             continue;
         };

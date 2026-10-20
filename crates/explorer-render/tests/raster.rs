@@ -43,6 +43,9 @@ fn frame(html: &str, css: &str) -> Frame {
 fn frame_at(html: &str, css: &str, scale: f32) -> Frame {
     let dom: Dom = TreeBuilder::parse(html);
     let mut eng = StyleEngine::new();
+    // R-32 : marge UA `body { margin: 8px }` neutralisée —
+    // fixtures écrites pour une géométrie à marge nulle.
+    eng.add_css("body { margin: 0 }", Origin::Author);
     eng.add_css(css, Origin::Author);
     let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
     let root_el = dom
@@ -117,10 +120,13 @@ fn coordonnees_astronomiques_ne_paniquent_pas() {
     // Contenu hostile : géométrie au-delà du domaine
     // fixed-point 24.8 (±32 768 px) → clippe/ignorée par
     // `fill_guarded`, jamais panic. Avant le garde, ce cas
-    // panic dans `hairline_aa` en build debug.
+    // panic dans `hairline_aa` en build debug. Marge négative
+    // géante : une marge positive s'échapperait jusqu'à la
+    // racine et produirait une page >16 384 px légitime —
+    // refusée en amont (borne `rasterize`), hors du cas visé.
     let f = frame(
         "<div id=d></div>",
-        "#d{border:1px solid #f00;margin-top:100000px;\
+        "#d{border:1px solid #f00;margin-top:-100000px;\
          width:40px;height:40px}",
     );
     // L'assertion est l'absence de panic — la frame est

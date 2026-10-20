@@ -67,9 +67,14 @@ foreach ($t in $tests) {
     $rel = Get-Rel $html
     if ($null -ne $rel) {
         $href = $rel.href -replace '^\./', ''
-        # Résolution relative au répertoire du test.
+        # `/css/...` = chemin racine-dépôt (R-32 :
+        # margin-collapse-clear-001 référence floats-clear).
         $baseDir = Split-Path -Parent $t
-        $relPath = "$baseDir/$href" -replace '/', '\'
+        if ($href.StartsWith('/')) {
+            $baseDir = ''
+            $href = $href.TrimStart('/')
+        }
+        $relPath = ("$baseDir/$href" -replace '/', '\').TrimStart('\')
         # Normalise les « ../ » simples.
         while ($relPath -match '[^\\]+\\\.\.\\') {
             $relPath = $relPath -replace '[^\\]+\\\.\.\\', ''

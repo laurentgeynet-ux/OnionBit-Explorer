@@ -36,6 +36,9 @@ fn ctx() -> BlockCtx<'static> {
 fn setup(html: &str, css: &str) -> (Dom, StyleMap, LayoutBox) {
     let dom = TreeBuilder::parse(html);
     let mut eng = StyleEngine::new();
+    // R-32 : marge UA `body { margin: 8px }` neutralisée —
+    // fixtures écrites pour une géométrie à marge nulle.
+    eng.add_css("body { margin: 0 }", Origin::Author);
     eng.add_css(css, Origin::Author);
     let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
     let root = dom.document_element().expect("documentElement");
@@ -105,6 +108,9 @@ fn texte_mute_relayout_done_et_identique_au_reflow() {
     dom.set_text(txt, "zzzz wwww qqqq").expect("set_text");
     let styles2 = {
         let mut eng = StyleEngine::new();
+        // Même neutralisation que `setup` — sinon le reflow
+        // de comparaison appliquerait la marge UA `body`.
+        eng.add_css("body { margin: 0 }", Origin::Author);
         eng.add_css("div { width: 200px }", Origin::Author);
         eng.compute_tree(&dom, dom.document(), &StyleEnv::default())
     };

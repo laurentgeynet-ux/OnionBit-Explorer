@@ -48,6 +48,35 @@ struct FakeTransport {
     chunks: Mutex<HashMap<String, Vec<Vec<u8>>>>,
 }
 
+/// R-32 : la feuille UA pose `body { margin: 8px }` (compat
+/// navigateurs — les refs WPT la supposent). Les fixtures
+/// historiques ont été écrites pour une marge nulle : elle
+/// est neutralisée ici pour préserver la géométrie attendue
+/// (clics à coordonnées fixes, comparaisons de frames). La
+/// règle est injectée dans `<head>` — créé au besoin — sans
+/// toucher aux enfants de `<body>` ; une page qui pose sa
+/// propre marge garde la sienne (son `<style>` vient après).
+fn zero_body_margin(body: &str) -> String {
+    const STYLE: &str = "<style>body{margin:0}</style>";
+    if let Some(i) = body.find("<head>") {
+        let mut s = String::with_capacity(body.len() + STYLE.len());
+        s.push_str(&body[..i + 6]);
+        s.push_str(STYLE);
+        s.push_str(&body[i + 6..]);
+        s
+    } else if let Some(i) = body.find("<body") {
+        let mut s = String::with_capacity(body.len() + 13 + STYLE.len());
+        s.push_str(&body[..i]);
+        s.push_str("<head>");
+        s.push_str(STYLE);
+        s.push_str("</head>");
+        s.push_str(&body[i..]);
+        s
+    } else {
+        body.to_string()
+    }
+}
+
 impl FakeTransport {
     fn new() -> Self {
         Self {
@@ -61,7 +90,7 @@ impl FakeTransport {
     }
 
     fn route(&self, path: &str, status: u16, body: &'static str) {
-        self.route_bin(path, status, body.as_bytes().to_vec());
+        self.route_bin(path, status, zero_body_margin(body).into_bytes());
     }
 
     /// Corps binaire (images & co).
@@ -3088,7 +3117,10 @@ async fn progressive_final_equals_one_shot() {
     // frame finale.
     let (mut s, t) = paint_session(usize::MAX, u64::MAX);
     let page = page_stream();
-    t.route("/one", 200, Box::leak(page.clone().into_boxed_str()));
+    // `route_bin` direct : la page servie en un coup doit
+    // être *identique* aux morceaux (route() neutralise la
+    // marge body des fixtures interactives — hors propos ici).
+    t.route_bin("/one", 200, page.clone().into_bytes());
     t.route_chunks("/many", 200, byte_parts(&page, 137));
     let a = s.open_tab();
     s.navigate(a, "http://h.test/one").await.unwrap();

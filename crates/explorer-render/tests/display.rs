@@ -35,6 +35,9 @@ fn ctx() -> BlockCtx<'static> {
 fn dl(html: &str, css: &str) -> (Dom, LayoutBox, Vec<DisplayItem>) {
     let dom = TreeBuilder::parse(html);
     let mut eng = StyleEngine::new();
+    // R-32 : marge UA `body { margin: 8px }` neutralisée —
+    // fixtures écrites pour une géométrie à marge nulle.
+    eng.add_css("body { margin: 0 }", Origin::Author);
     eng.add_css(css, Origin::Author);
     let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
     let root_el = dom
@@ -178,6 +181,9 @@ fn display_none_nemet_rien() {
 fn dl_scrolled(html: &str, css: &str, scroll_y: f32) -> (Dom, LayoutBox, Vec<DisplayItem>) {
     let dom = TreeBuilder::parse(html);
     let mut eng = StyleEngine::new();
+    // R-32 : marge UA `body { margin: 8px }` neutralisée —
+    // fixtures écrites pour une géométrie à marge nulle.
+    eng.add_css("body { margin: 0 }", Origin::Author);
     eng.add_css(css, Origin::Author);
     let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
     let root_el = dom
@@ -309,6 +315,9 @@ fn color_inline_atteint_le_run() {
 fn dl_scrolled_xy(html: &str, css: &str, scroll: (f32, f32)) -> (Dom, LayoutBox, Vec<DisplayItem>) {
     let dom = TreeBuilder::parse(html);
     let mut eng = StyleEngine::new();
+    // R-32 : marge UA `body { margin: 8px }` neutralisée —
+    // fixtures écrites pour une géométrie à marge nulle.
+    eng.add_css("body { margin: 0 }", Origin::Author);
     eng.add_css(css, Origin::Author);
     let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
     let root_el = dom

@@ -713,6 +713,22 @@ fn expand_font(value: &str) -> Option<Vec<(String, String)>> {
     if !family.is_empty() {
         out.push(("font-family".to_string(), family));
     }
+    // Le shorthand `font` réinitialise TOUTES les
+    // sous-propriétés font-* (CSS Fonts §3) : celles non
+    // exprimées retombent à leur initiale — sinon un
+    // `font: 12pt serif` laisserait fuiter le `line-height`
+    // hérité (margin-collapse-020/021) ou un style/weight
+    // hérités. On émet les longhands absents en `normal`.
+    for (prop, init) in [
+        ("font-style", "normal"),
+        ("font-variant", "normal"),
+        ("font-weight", "normal"),
+        ("line-height", "normal"),
+    ] {
+        if !out.iter().any(|(p, _)| p == prop) {
+            out.push((prop.to_string(), init.to_string()));
+        }
+    }
     Some(out)
 }
 

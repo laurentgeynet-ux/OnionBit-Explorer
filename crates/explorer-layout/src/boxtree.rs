@@ -150,6 +150,12 @@ pub struct LayoutBox {
     /// d'un relayout incrémental (`relayout_subtree`). Défaut
     /// avant le premier layout.
     pub slot: BoxSlot,
+    /// Hauteur utilisée > hauteur de contenu (clamp `min-height`
+    /// ou `height` au-dessus de l'auto) — posé par `layout_block`.
+    /// §8.3.1 : la marge basse du dernier fils in-flow ne s'échappe
+    /// alors pas (elle est avalée, ni contenu ni marge externe —
+    /// WPT `margin-collapse-min-height-001`).
+    pub height_raised: bool,
 }
 
 /// Contexte de pose enregistré par `layout_block` (R-12) :
@@ -377,6 +383,7 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
         intrinsic: None,
         control_checked: false,
         slot: BoxSlot::default(),
+        height_raised: false,
     };
     let children = child_boxes(dom, root, styles, &style, sizes);
     b.children = wrap_children(children, &style, kind);
@@ -458,6 +465,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     intrinsic: None,
                     control_checked: false,
                     slot: BoxSlot::default(),
+                    height_raised: false,
                 });
             }
         }
@@ -547,6 +555,7 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         intrinsic: None,
         control_checked: false,
         slot: BoxSlot::default(),
+        height_raised: false,
     }
 }
 
@@ -739,6 +748,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             intrinsic: None,
             control_checked: false,
             slot: BoxSlot::default(),
+            height_raised: false,
         });
     }
 }
@@ -824,6 +834,7 @@ fn object_box(
         intrinsic: sizes.get(&root).copied(),
         control_checked: false,
         slot: BoxSlot::default(),
+        height_raised: false,
     };
     // Ressource résolue → feuille remplacée ; sinon les
     // enfants prennent la place de l'objet.
@@ -914,6 +925,7 @@ fn leaf_box(
         intrinsic,
         control_checked: false,
         slot: BoxSlot::default(),
+        height_raised: false,
     }
 }
 
@@ -959,6 +971,7 @@ fn control_box(
                     intrinsic: None,
                     control_checked: false,
                     slot: BoxSlot::default(),
+                    height_raised: false,
                 }],
                 &style,
             )

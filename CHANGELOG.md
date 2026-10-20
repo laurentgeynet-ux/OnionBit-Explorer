@@ -7,6 +7,38 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Added
+
+- **R-32 — corpus WPT élargi : margin-collapse** : tranche
+  `margin-padding-clear` + `floats-clear` + `normal-flow`
+  extraite par `fetch_wpt.ps1` — 154 fichiers (36 sans
+  référence exclus du score). Baseline honnête mesurée
+  **115/152 exécutés, 6 skips** ; cliquet `WPT_BASELINE`
+  reposé de 57 à 115. Corrections moteur au fil du triage :
+  collapse-through des chaînes de marges hautes évalué
+  pré-layout (`chain_transparent`/`candidate_chain`,
+  purement stylistiques), marges de l'élément racine jamais
+  collapsées, position statique des boîtes absolues ancrée
+  au bas réel du frère en flux précédent (§10.6.4), marges
+  des flottants jamais collapsées, `table-layout:fixed` +
+  règles UA `col`/`colgroup` (table `width:auto` = somme
+  des colonnes spécifiées), `border-width` mots-clés dans
+  la mesure intrinsèque des cellules, propagation du fond
+  de `body` au canvas (§14.2), `background-position`
+  résolu en `em`/`rem`, reset `line-height` et `font-*`
+  du shorthand `font` (§3.6), ordre de pile Appendix E
+  (portée inline fermée par tout conteneur bloc ;
+  positionnés `z≥0` différés au contexte de pilement
+  englobant), translation du sous-arbre complet pour
+  `position:relative`, marges horizontales des éléments
+  inline non-remplacés. Feuille UA `body { margin: 8px }`
+  ajoutée (compat réelle — les références partagées WPT la
+  supposent) ; les fixtures des tests downstream écrites
+  pour une marge nulle la neutralisent (`margin:0`).
+  Skip documenté :
+  `margin-collapse-through-percentage-padding.html` exige
+  mutation JS + relayout — piste NAVIGATEUR.
+
 ### Fixed
 
 - **Étape 84 — `back` pendant une navigation en vol**

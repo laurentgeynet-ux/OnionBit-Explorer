@@ -350,12 +350,15 @@ async fn input_click_link_navigates() {
         .await
         .unwrap();
 
-    // Clic sur le lien → navigated.
+    // Clic sur le lien → navigated. La feuille UA pose
+    // `body { margin: 8px }` — le lien démarre à (8, 9.6) :
+    // (15, 15) tombe dans sa boîte, (5, 5) resterait dans la
+    // marge et serait ignoré.
     let r = app
         .clone()
         .oneshot(json_post(
             &format!("/api/tabs/{id}/input"),
-            r#"{"type":"click","x":5,"y":5}"#,
+            r#"{"type":"click","x":15,"y":15}"#,
         ))
         .await
         .unwrap();

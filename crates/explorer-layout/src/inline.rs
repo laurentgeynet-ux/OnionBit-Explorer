@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use explorer_css::ComputedStyle;
 
 use crate::block::{css_px, font_size_px, layout_block, measure_fn, side_px, BlockCtx, FloatCtx};
-use crate::boxtree::{LayoutBox, Rect};
+use crate::boxtree::{BoxKind, LayoutBox, Rect};
 use crate::font::{self, ShapedRun};
 use crate::text::{self, Direction};
 
@@ -107,6 +107,19 @@ struct Item {
     /// `id` est le numéro de pré-ordre partagé avec
     /// [`size_atomics`] (table `atomics`).
     aid: Option<usize>,
+    /// `Some(…)` = borne d'un élément inline non-remplacé
+    /// (ouverture ou fermeture) — porte les marges
+    /// horizontales de l'élément (§8.3/§9.4.2).
+    marker: Option<Marker>,
+}
+
+/// Borne d'élément en-ligne : `Open` applique `margin-left`,
+/// `Close` `margin-right` (§9.4.2 — les marges verticales
+/// d'un non-remplacé sont ignorées).
+#[derive(Clone, Copy)]
+enum Marker {
+    Open,
+    Close,
 }
 
 /// Pièce coulable entre deux opportunités de coupure.
@@ -163,7 +176,7 @@ pub(crate) fn layout_inline(
     // ensuite : elle saute les atomes (leur rect vient déjà
     // du fragment via `aid`).
     let mut aid = 0usize;
-    assign_atomic_rects(bx, &lines, &mut aid);
+    assign_atomic_rects(bx, &lines, &mut aid, w, fs, ctx);
     assign_child_rects(bx, &lines);
     // Span réelle `y → bas de la dernière ligne` : la descente
     // sous les flottants a pu sauter de l'espace vertical.
@@ -301,13 +314,41 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut u
             style: b.style.clone(),
             pieces: Vec::new(),
             aid: Some(id),
+            marker: None,
         });
         return;
     }
     // Boîte inline conteneur : descendre — chaque texte
     // descendant devient un item rattaché au même owner.
+    // Les marges horizontales d'un **élément** inline non-
+    // remplacé s'appliquent à ses extrémités (§9.4.2) : on
+    // les matérialise par des items marqueurs. Les boîtes
+    // `AnonymousBlock` clonent le style du conteneur — leur
+    // « marge » copiée n'est pas la leur : transparentes.
+    let margins = b.kind == BoxKind::Inline
+        && (b.style.get("margin-left").is_some() || b.style.get("margin-right").is_some());
+    if margins {
+        items.push(Item {
+            owner,
+            node: b.node,
+            style: b.style.clone(),
+            pieces: Vec::new(),
+            aid: None,
+            marker: Some(Marker::Open),
+        });
+    }
     for c in &b.children {
         collect_child(c, owner, items, aid);
+    }
+    if margins {
+        items.push(Item {
+            owner,
+            node: b.node,
+            style: b.style.clone(),
+            pieces: Vec::new(),
+            aid: None,
+            marker: Some(Marker::Close),
+        });
     }
 }
 
@@ -366,6 +407,7 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str) -> Item {
         style: b.style.clone(),
         pieces,
         aid: None,
+        marker: None,
     }
 }
 
@@ -677,6 +719,50 @@ fn break_into_lines(
             continue;
         }
 
+        // Borne d'élément inline non-remplacé : `margin-left`
+        // à l'ouverture, `margin-right` à la fermeture
+        // (§8.3/§9.4.2 — les verticales sont ignorées).
+        // Fragment zéro-largeur portant la marge pour que
+        // `align_lines` mesure la margin box ; le marqueur
+        // n'ouvre jamais de ligne ni n'influe sa hauteur.
+        if let Some(mark) = item.marker {
+            let (prop, open) = match mark {
+                Marker::Open => ("margin-left", true),
+                Marker::Close => ("margin-right", false),
+            };
+            let m = side_px(&item.style, prop, w, fs, ctx, 0.0);
+            if m != 0.0 {
+                let (fx, marg_l, marg_r) = if open {
+                    (cursor_x + m, m, 0.0)
+                } else {
+                    (cursor_x, 0.0, m)
+                };
+                acc.frags.push(Fragment {
+                    node: item.node,
+                    owner: item.owner,
+                    text: String::new(),
+                    atomic: false,
+                    aid: None,
+                    style: item.style.clone(),
+                    rect: Rect {
+                        x: fx,
+                        y: cursor_y,
+                        width: 0.0,
+                        height: 0.0,
+                    },
+                    baseline: 0.0,
+                    shaped: None,
+                    trail_w: 0.0,
+                    marg_l,
+                    marg_r,
+                    marg_t: 0.0,
+                    marg_b: 0.0,
+                });
+                cursor_x += m;
+            }
+            continue;
+        }
+
         // `pre`/`pre-wrap` : §16.6.1 ne s'applique pas — les
         // espaces de tête de ligne sont préservées aussi.
         let keep_ws = matches!(
@@ -898,7 +984,14 @@ fn assign_child_rects(bx: &mut LayoutBox, lines: &[LineBox]) {
 /// que l'enfant direct — chaque atome retrouve son fragment
 /// par sa série `aid` (même ordre pré-ordre que
 /// [`size_atomics`]) et copie son rect posé.
-fn assign_atomic_rects(bx: &mut LayoutBox, lines: &[LineBox], aid: &mut usize) {
+fn assign_atomic_rects(
+    bx: &mut LayoutBox,
+    lines: &[LineBox],
+    aid: &mut usize,
+    w: f32,
+    fs: f32,
+    ctx: &BlockCtx,
+) {
     for child in &mut bx.children {
         // Même saut hors-flux que `size_atomics`/`collect_child`
         // — sinon la série `aid` se désynchronise.
@@ -914,9 +1007,14 @@ fn assign_atomic_rects(bx: &mut LayoutBox, lines: &[LineBox], aid: &mut usize) {
                         // `layout_block` a posé le sous-arbre
                         // en (0,0) → translation entière au
                         // rect du fragment (rect, lignes,
-                        // enfants — R-23).
-                        let dx = f.rect.x - child.rect.x;
-                        let dy = f.rect.y - child.rect.y;
+                        // enfants — R-23). Un atome
+                        // `position:relative` s'est déjà
+                        // décalé au layout : le fragment
+                        // s'ancre sur sa position **en
+                        // flux**, son offset propre reste.
+                        let (ox, oy) = crate::block::rel_offsets(child, w, fs, ctx);
+                        let dx = f.rect.x - (child.rect.x - ox);
+                        let dy = f.rect.y - (child.rect.y - oy);
                         crate::flex::translate_subtree(child, dx, dy);
                         break;
                     }
@@ -924,7 +1022,7 @@ fn assign_atomic_rects(bx: &mut LayoutBox, lines: &[LineBox], aid: &mut usize) {
             }
         } else {
             // Arête ∝ profondeur de l'arbre (R-24).
-            explorer_common::deep(|| assign_atomic_rects(child, lines, aid));
+            explorer_common::deep(|| assign_atomic_rects(child, lines, aid, w, fs, ctx));
         }
     }
 }

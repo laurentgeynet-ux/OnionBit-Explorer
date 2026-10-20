@@ -897,7 +897,14 @@ fn paint_border(
         }
         let mut paint = Paint::default();
         paint.set_color(skia_color(*c));
-        if uniform {
+        // Un côté sans voisin peint n'a pas de coin mitré : sa
+        // bande est un rectangle — passer par `fill_guarded`
+        // (pixel-snap des fonds, comme un background ; sinon un
+        // reftest à `border-top/bottom` non uniformes gardait
+        // des arêtes AA d'un pixel face aux fills snappés —
+        // margin-collapse-003).
+        let neighbors_painted = painted((side + 3) % 4) || painted((side + 1) % 4);
+        if uniform || !neighbors_painted {
             let r = match side {
                 0 => Rect::from_xywh(rect.x, rect.y, rect.width, *bw),
                 1 => Rect::from_xywh(rect.x + rect.width - *bw, rect.y, *bw, rect.height),
