@@ -1180,8 +1180,14 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   relais moteur n'envoie que des frappes
   nues (un combo modifié n'est plus tapé
   dans le champ — `Ctrl+V` envoyait `v`).
-  Tests contrôleur : cyclage, index,
-  arrière-plan, échec de création.
+  Suite : garde AltGr (`altRight` exempté —
+  Windows le synthétise `Ctrl+Alt`) et
+  relais du `character` produit plutôt que
+  `keyLabel` — `@€{}[]~`, shift, accents
+  par touches mortes atteignent le champ ;
+  repli `keyLabel` pour les touches
+  nommées. Tests contrôleur : cyclage,
+  index, arrière-plan, échec de création.
   `analyze` + `test` verts (28/28).
 
 - [ ] **Veille — mort silencieuse du

@@ -239,6 +239,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (304/204/1xx, partiel→no-store, intact→cacheable,
   header-corrompu→erreur honnête).
 
+- **Étape 85 (suite) — AltGr et caractères composés
+  atteignent les champs** (`app/`) : deux trous du relais
+  clavier repérés avant le test humain. (1) Le garde
+  « frappes nues » bloquait Ctrl **et** Alt — or Windows
+  synthétise `AltGr` en `Ctrl+Alt` : `@ € { } [ ] ~`
+  n'atteignaient plus le champ. `altRight` est exempté —
+  corde de texte, pas geste chrome. (2) Le relais envoyait
+  `keyLabel` (la touche nue) : `AltGr+à` tapait `à` au
+  lieu de `@`, `maj+lettre` tapait la minuscule, et les
+  accents par touches mortes (`ê`, `ë`) sortaient sans
+  accent. On relaie désormais `e.character` — le
+  caractère **produit** par la plateforme — avec repli
+  `keyLabel` pour les touches nommées (`Enter`,
+  `Backspace`) qui n'ont pas de caractère.
+
 ## [0.2.0] - 2026-10-20
 
 ### Added

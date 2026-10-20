@@ -931,14 +931,20 @@ class _FrameViewState extends ConsumerState<_FrameView> {
   /// sans Ctrl ni Alt : les combos modifiés sont des gestes
   /// chrome (CallbackShortcuts de page, étape 85) ou
   /// d'édition, jamais du texte à taper (Ctrl+V envoyait 'v'
-  /// au champ avant ce garde). Échap, lui, circule librement
-  /// : il ferme la barre find en page et atteint le moteur.
+  /// au champ avant ce garde). **Exception `AltGr`** : Windows
+  /// le synthétise `Ctrl+Alt` alors que c'est une corde de
+  /// texte AZERTY (`@ € { } [ ] ~`) — sans elle, plus aucune
+  /// saisie européenne n'atteint le moteur. Échap circule
+  /// librement : il ferme la barre find en page et atteint
+  /// le moteur.
   bool _chordHeld() {
     final kb = HardwareKeyboard.instance;
+    if (kb.isLogicalKeyPressed(LogicalKeyboardKey.altRight)) {
+      return false; // AltGr = texte
+    }
     return kb.isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) ||
         kb.isLogicalKeyPressed(LogicalKeyboardKey.controlRight) ||
-        kb.isLogicalKeyPressed(LogicalKeyboardKey.altLeft) ||
-        kb.isLogicalKeyPressed(LogicalKeyboardKey.altRight);
+        kb.isLogicalKeyPressed(LogicalKeyboardKey.altLeft);
   }
 
   @override
@@ -1028,9 +1034,18 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                             return;
                           }
                           if (!st.fieldFocused) return;
-                          // keyLabel couvre lettres et touches
-                          // nommées (« Backspace », « Enter »).
-                          widget.ctrl.key(e.logicalKey.keyLabel);
+                          // `character` = le caractère produit
+                          // (accents par touches mortes, AltGr,
+                          // shift — `keyLabel` ne voit que la
+                          // touche nue) ; les touches nommées
+                          // n'en ont pas → repli `keyLabel`
+                          // (« Enter », « Backspace »).
+                          final ch = e.character;
+                          widget.ctrl.key(
+                            ch != null && ch.isNotEmpty
+                                ? ch
+                                : e.logicalKey.keyLabel,
+                          );
                         },
                         child: Stack(
                           children: [
