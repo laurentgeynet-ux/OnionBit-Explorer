@@ -323,3 +323,46 @@ fn fragment_sub_rect_glyph_metrics() {
     fa.atomic = true;
     assert!(fragment_sub_rect(&fa, 0, 2).is_none());
 }
+
+// ── R-38 : quirks — reset d'héritage sur table ───────────────
+
+#[test]
+fn quirks_table_cellule_alignee_gauche() {
+    // Doctype absent → quirks : `<center>` ne centre pas le
+    // texte des cellules (reset `text-align` sur `table`,
+    // HTML Rendering « In quirks mode » — terrain : les
+    // titres de news.ycombinator.com restent à gauche).
+    let (dom, bx) = laid(
+        "<center><table><tr><td style=\"font-size:10px\">ab</td></tr></table></center>",
+        "table{width:200px}",
+    );
+    assert_eq!(dom.document_mode(), explorer_dom::DocumentMode::Quirks);
+    let td = find(&bx, by_tag(&dom, "td"));
+    let line = &td.children[0].lines[0];
+    let frag = line
+        .fragments
+        .iter()
+        .find(|f| !f.atomic)
+        .expect("frag texte");
+    let off = frag.rect.x - td.children[0].rect.x;
+    assert!(off < 5.0, "quirks : texte à gauche, off={off}");
+}
+
+#[test]
+fn no_quirks_table_cellule_herite_centre() {
+    // Contrôle : même markup avec DOCTYPE — `-webkit-center`
+    // traverse l'héritage et centre le texte de cellule.
+    let (dom, bx) = laid(
+        "<!doctype html><center><table><tr><td style=\"font-size:10px\">ab</td></tr></table></center>",
+        "table{width:200px}",
+    );
+    let td = find(&bx, by_tag(&dom, "td"));
+    let line = &td.children[0].lines[0];
+    let frag = line
+        .fragments
+        .iter()
+        .find(|f| !f.atomic)
+        .expect("frag texte");
+    let off = frag.rect.x - td.children[0].rect.x;
+    assert!(off > 40.0, "no-quirks : texte centré, off={off}");
+}

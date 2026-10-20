@@ -21,7 +21,7 @@
 //! toléré à l'intérieur), `<template>`/`select` sont traités
 //! sans leurs règles de contenu spéciales.
 
-use explorer_dom::{Dom, Namespace, NodeId};
+use explorer_dom::{DocumentMode, Dom, Namespace, NodeId};
 
 use crate::foreign;
 use crate::token::{Token, TokenAttribute};
@@ -376,7 +376,8 @@ impl TreeBuilder {
 
     /// DOM consommé une fois la construction terminée.
     #[must_use]
-    pub fn into_dom(self) -> Dom {
+    pub fn into_dom(mut self) -> Dom {
+        self.dom.set_document_mode(document_mode_of(self.quirks));
         self.dom
     }
 
@@ -1353,6 +1354,10 @@ impl TreeBuilder {
                     public_id.as_deref(),
                     system_id.as_deref(),
                 );
+                // Mode synchronisé sur le DOM dès la décision :
+                // la cascade le lit aussi sur un arbre partiel
+                // (peinture progressive).
+                self.dom.set_document_mode(document_mode_of(self.quirks));
                 let id = self
                     .dom
                     .create_doctype(
@@ -1374,11 +1379,13 @@ impl TreeBuilder {
                     return;
                 }
                 self.quirks = QuirksMode::Quirks;
+                self.dom.set_document_mode(DocumentMode::Quirks);
                 self.mode = Mode::BeforeHtml;
                 self.dispatch(tokenizer, Token::Character(rest.to_owned()));
             }
             _ => {
                 self.quirks = QuirksMode::Quirks;
+                self.dom.set_document_mode(DocumentMode::Quirks);
                 self.mode = Mode::BeforeHtml;
                 self.step_before_html(tokenizer, token);
             }
@@ -3437,6 +3444,17 @@ const QUIRKS_PREFIX: &[&str] = &[
     "-//webtechs//dtd mozilla html 2.0//",
     "-//webtechs//dtd mozilla html//",
 ];
+
+/// Traduit le mode interne du builder en [`DocumentMode`]
+/// porté par le DOM (le crate dom ne connaît pas
+/// `QuirksMode` — sens de dépendance).
+fn document_mode_of(mode: QuirksMode) -> DocumentMode {
+    match mode {
+        QuirksMode::NoQuirks => DocumentMode::NoQuirks,
+        QuirksMode::LimitedQuirks => DocumentMode::LimitedQuirks,
+        QuirksMode::Quirks => DocumentMode::Quirks,
+    }
+}
 
 /// Décide du mode de quirks d'après le DOCTYPE (sous-ensemble de
 /// la liste de la spec : les chaînes marqueurs historiques).

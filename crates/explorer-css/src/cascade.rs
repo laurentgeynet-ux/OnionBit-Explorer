@@ -148,6 +148,10 @@ pub(crate) struct CollectedFontFace {
 #[derive(Default)]
 pub struct StyleEngine {
     rules: Vec<CollectedRule>,
+    /// Règles UA **quirks-only** (HTML Rendering, « In quirks
+    /// mode ») — parsées avec la feuille UA, ne candidatent
+    /// que si `dom.document_mode() == DocumentMode::Quirks`.
+    quirks_rules: Vec<CollectedRule>,
     next_order: u32,
     /// `@font-face` avec leur contexte media (étape 46).
     pub(crate) font_faces: Vec<CollectedFontFace>,
@@ -272,11 +276,14 @@ impl StyleMap {
 }
 
 impl StyleEngine {
-    /// Moteur préchargé avec la feuille UA intégrée.
+    /// Moteur préchargé avec la feuille UA intégrée (règles
+    /// standards + règles conditionnelles quirks).
     #[must_use]
     pub fn new() -> Self {
         let mut e = Self::default();
         e.add_css(UA_CSS, Origin::UserAgent);
+        let quirks_sheet = crate::parser::parse_stylesheet(QUIRKS_UA_CSS);
+        e.collect_rules_into(&quirks_sheet.rules, Origin::UserAgent, &[], true);
         e
     }
 
@@ -295,11 +302,28 @@ impl StyleEngine {
     /// `media` = pile des listes englobantes (AND entre listes,
     /// OR entre les queries d'une même liste).
     fn collect_rules(&mut self, rules: &[Rule], origin: Origin, media: &[Vec<MediaQuery>]) {
+        self.collect_rules_into(rules, origin, media, false);
+    }
+
+    /// Collecte vers `self.rules` — ou vers `quirks_rules` quand
+    /// `quirks` est vrai (règles filtrées au document mode).
+    fn collect_rules_into(
+        &mut self,
+        rules: &[Rule],
+        origin: Origin,
+        media: &[Vec<MediaQuery>],
+        quirks: bool,
+    ) {
         for rule in rules {
             match rule {
                 Rule::Qualified(q) => {
                     if let Some(selectors) = parse_selector_list(&q.prelude) {
-                        self.rules.push(CollectedRule {
+                        let dest = if quirks {
+                            &mut self.quirks_rules
+                        } else {
+                            &mut self.rules
+                        };
+                        dest.push(CollectedRule {
                             selectors,
                             declarations: q.declarations.clone(),
                             order: self.next_order,
@@ -315,7 +339,7 @@ impl StyleEngine {
                         // liste de queries du niveau.
                         let mut nested = media.to_vec();
                         nested.push(queries.clone());
-                        self.collect_rules(rules, origin, &nested);
+                        self.collect_rules_into(rules, origin, &nested, quirks);
                     } else if let AtKind::Declarations { declarations, .. } = &at.kind {
                         if at.name.eq_ignore_ascii_case("font-face") {
                             self.font_faces.push(CollectedFontFace {
@@ -604,7 +628,16 @@ impl StyleEngine {
         state: &dyn Fn(&str) -> bool,
     ) -> Vec<(u8, Specificity, u32, &'a Declaration)> {
         let mut rules_cand: Vec<(u8, Specificity, u32, &Declaration)> = Vec::new();
-        for rule in &self.rules {
+        // Règles UA quirks : la spec HTML Rendering ne les
+        // applique qu'aux documents en mode quirks — elles
+        // partagent le rang UA et l'ordre source global.
+        let quirks = dom.document_mode() == explorer_dom::DocumentMode::Quirks;
+        for rule in self.rules.iter().chain(
+            quirks
+                .then(|| self.quirks_rules.iter())
+                .into_iter()
+                .flatten(),
+        ) {
             // Chaque groupe `@media` englobant doit matcher.
             if !rule.media.is_empty() && !rule.media.iter().all(|qs| media_matches(env, qs)) {
                 continue;
@@ -1126,4 +1159,17 @@ input[type=submit], input[type=button], input[type=reset] {
 }
 input[type=checkbox], input[type=radio] { width: 13px; height: 13px }
 input[type=hidden] { display: none }
+";
+
+/// Feuille UA **quirks mode** (HTML Standard § rendering —
+/// « In quirks mode ») : la table réinitialise les propriétés
+/// héritées de texte — un `<center>` ou une taille de fonte
+/// autour d'une table ne déteint pas dans les cellules (web
+/// d'avant-doctype type HN). Rang UA, ordre après `UA_CSS`.
+const QUIRKS_UA_CSS: &str = "
+table {
+  font-weight: initial; font-style: initial; font-variant: initial;
+  font-size: initial; line-height: initial; white-space: initial;
+  text-align: initial
+}
 ";

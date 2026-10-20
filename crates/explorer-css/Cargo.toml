@@ -12,3 +12,6 @@ workspace = true
 [dependencies]
 explorer-common.workspace = true
 explorer-dom.workspace = true
+
+[dev-dependencies]
+explorer-html.workspace = true

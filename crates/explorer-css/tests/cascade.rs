@@ -6,7 +6,8 @@
 //! héritage, mots-clés, media queries, feuille UA.
 
 use explorer_css::{ComputedStyle, Origin, StyleEngine, StyleEnv};
-use explorer_dom::{Dom, NodeId};
+use explorer_dom::{DocumentMode, Dom, NodeId};
+use explorer_html::TreeBuilder;
 
 /// DOM minimal : `body > div#a > p.b "texte"`.
 struct Fixture {
@@ -660,4 +661,77 @@ fn echappement_dans_nom_de_propriete() {
     let s = e.compute(&f.dom, f.p, &env());
     assert_eq!(s.get("margin-top"), Some("9px"));
     assert_eq!(s.get("margin-left"), None, r"m\argin ≠ margin");
+}
+
+// ── quirks mode — reset des propriétés héritées sur table ────
+// HTML Standard § rendering « In quirks mode » : la table
+// réinitialise les propriétés texte héritées (le `<center>`
+// autour d'une table ne centre pas les cellules — terrain :
+// news.ycombinator.com, R-38). Le mode voyage par
+// `Dom::document_mode`, posé par le tree-builder au DOCTYPE.
+
+/// Premier descendant portant `tag` (ordre document).
+fn find_tag(dom: &Dom, node: NodeId, tag: &str) -> Option<NodeId> {
+    if dom.tag_name(node).ok() == Some(tag) {
+        return Some(node);
+    }
+    for c in dom.children(node).unwrap_or_default() {
+        if let Some(f) = find_tag(dom, c, tag) {
+            return Some(f);
+        }
+    }
+    None
+}
+
+#[test]
+fn quirks_table_reset_text_align() {
+    // Pas de DOCTYPE → quirks : `<center>` n'atteint pas les
+    // cellules (reset `text-align: initial` sur `table`).
+    let dom = TreeBuilder::parse("<center><table><tr><td>x</td></tr></table></center>");
+    assert_eq!(dom.document_mode(), DocumentMode::Quirks);
+    let td = find_tag(&dom, dom.document(), "td").unwrap();
+    let s = StyleEngine::new().compute(&dom, td, &env());
+    assert_eq!(s.get("text-align"), Some("start"));
+}
+
+#[test]
+fn no_quirks_table_herite_text_align() {
+    // Même markup avec DOCTYPE conforme : héritage normal —
+    // la valeur `-webkit-center` de `<center>` traverse.
+    let dom =
+        TreeBuilder::parse("<!DOCTYPE html><center><table><tr><td>x</td></tr></table></center>");
+    assert_eq!(dom.document_mode(), DocumentMode::NoQuirks);
+    let td = find_tag(&dom, dom.document(), "td").unwrap();
+    let s = StyleEngine::new().compute(&dom, td, &env());
+    assert_eq!(s.get("text-align"), Some("-webkit-center"));
+}
+
+#[test]
+fn quirks_table_reset_font_weight() {
+    // `<b>` n'est pas un match du reset (propriété *héritée*
+    // seulement) : `font-weight` revient à `normal` sur la
+    // table, `th` garde son propre `bold` déclaré en UA.
+    let dom = TreeBuilder::parse("<b><table><tr><td>x</td><th>h</th></tr></table></b>");
+    assert_eq!(dom.document_mode(), DocumentMode::Quirks);
+    let e = StyleEngine::new();
+    let td = find_tag(&dom, dom.document(), "td").unwrap();
+    assert_eq!(
+        e.compute(&dom, td, &env()).get("font-weight"),
+        Some("normal")
+    );
+    let th = find_tag(&dom, dom.document(), "th").unwrap();
+    assert_eq!(e.compute(&dom, th, &env()).get("font-weight"), Some("bold"));
+}
+
+#[test]
+fn quirks_table_font_size_initiale() {
+    // `font-size` héritée est réinitialisée à `medium` (base
+    // 16px) — un `font-size` sur l'ancêtre ne traverse pas.
+    let dom = TreeBuilder::parse(
+        "<span style=\"font-size: 30px\"><table><tr><td>x</td></tr></table></span>",
+    );
+    assert_eq!(dom.document_mode(), DocumentMode::Quirks);
+    let td = find_tag(&dom, dom.document(), "td").unwrap();
+    let s = StyleEngine::new().compute(&dom, td, &env());
+    assert_eq!(s.get("font-size"), Some("16px"));
 }

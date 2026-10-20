@@ -696,6 +696,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   fast-path pointeur évite la signature ; la signature-
   contenu matche désormais **entre arbres** (glyphes,
   pas pointeurs).
+- [x] **R-38. Mode quirks → cascade** (résidu terrain,
+  triage `site_smoke`) — **livré** : les titres de
+  news.ycombinator.com se rendaient centrés dans leur
+  cellule au lieu d'alignés à gauche après le rang —
+  page sans DOCTYPE (quirks) enveloppée de `<center>`,
+  dont le `text-align: -webkit-center` UA traversait
+  l'héritage jusqu'aux `td`. La spec (HTML Standard §
+  rendering, « In quirks mode ») exige le reset
+  `table { font-weight/font-style/font-variant/
+  font-size/line-height/white-space/text-align:
+  initial }`. Livré : `DocumentMode` (`NoQuirks`/
+  `LimitedQuirks`/`Quirks`) porté par `Dom`
+  (`document_mode`/`set_document_mode`, additif),
+  synchronisé par le tree-builder dès la décision du
+  DOCTYPE — la cascade le lit aussi sur arbre partiel
+  (peinture progressive) ; `QUIRKS_UA_CSS` parsée en
+  rang UA dans `StyleEngine::new`, ne candidatant que
+  si `dom.document_mode() == Quirks` (zéro changement
+  de signature — le mode voyage par le `Dom`). Tests :
+  4 cas cascade (`text-align`, `font-weight`, `th`
+  exempt du reset, `font-size` initiale, contrôle
+  no-quirks) + 2 cas géométrie `inline` (fragment
+  cellule à gauche en quirks vs centré avec DOCTYPE).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

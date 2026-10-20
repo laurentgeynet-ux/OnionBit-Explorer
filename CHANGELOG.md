@@ -139,6 +139,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-38 — mode quirks propagé à la cascade** : bug
+  site-réel au triage `site_smoke` — les titres de
+  news.ycombinator.com rendaient **centrés** dans leur
+  cellule au lieu d'alignés à gauche après le rang.
+  Page sans DOCTYPE (quirks) enveloppée de `<center>` :
+  son `text-align: -webkit-center` UA traversait
+  l'héritage jusqu'aux `td`. La spec (HTML Standard §
+  rendering, « In quirks mode ») exige que `table`
+  réinitialise les propriétés texte héritées —
+  `font-weight`, `font-style`, `font-variant`,
+  `font-size`, `line-height`, `white-space`,
+  `text-align` à `initial`. Le `QuirksMode` du
+  tree-builder n'atteignait pas la cascade ; il voyage
+  désormais par le `Dom` (`DocumentMode` + accesseurs,
+  synchronisé dès la décision du DOCTYPE — valable sur
+  arbre partiel, peinture progressive) et une feuille
+  UA conditionnelle `QUIRKS_UA_CSS` ne candidatant
+  qu'en quirks. Zéro changement de signature.
 - **Étape 84 — `back` pendant une navigation en vol**
   (`explorer-core`) : bug site-réel mesuré par `site_smoke`
   — « précédent » pendant la vague de sous-ressources d'une

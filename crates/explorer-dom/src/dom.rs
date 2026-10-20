@@ -26,6 +26,22 @@ enum Slot {
     Occupied { generation: u32, node: Node },
 }
 
+/// Mode de compatibilité du document, tranché par le DOCTYPE
+/// au parsing (spec HTML « quirks mode and limited-quirks
+/// mode »). La cascade le consulte pour les règles UA
+/// conditionnelles — en quirks, une table réinitialise les
+/// propriétés texte héritées.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DocumentMode {
+    /// Doctype conforme (ou décision non prise) — mode standard.
+    #[default]
+    NoQuirks,
+    /// Doctype legacy partiellement conforme.
+    LimitedQuirks,
+    /// Doctype absent ou invalide — mode quirks.
+    Quirks,
+}
+
 /// Arène DOM à handles générationnels (ADR-0008).
 ///
 /// Invariants :
@@ -46,6 +62,7 @@ pub struct Dom {
     max_nodes: usize,
     roots: HashMap<RootId, NodeId>,
     next_root: u64,
+    document_mode: DocumentMode,
 }
 
 impl Dom {
@@ -66,6 +83,7 @@ impl Dom {
             max_nodes,
             roots: HashMap::new(),
             next_root: 0,
+            document_mode: DocumentMode::NoQuirks,
         };
         // Index 0 sur arène vide : ne peut pas échouer.
         let _ = dom.alloc(NodeData::Document);
@@ -76,6 +94,18 @@ impl Dom {
     #[must_use]
     pub fn document(&self) -> NodeId {
         NodeId::new(0, 1)
+    }
+
+    /// Mode de compatibilité du document (quirks) — fixé par
+    /// le tree-builder HTML quand le DOCTYPE est tranché.
+    #[must_use]
+    pub fn document_mode(&self) -> DocumentMode {
+        self.document_mode
+    }
+
+    /// Enregistre le mode quirks décidé au parsing.
+    pub fn set_document_mode(&mut self, mode: DocumentMode) {
+        self.document_mode = mode;
     }
 
     /// Nombre de nœuds vivants (occupés) dans l'arène.
