@@ -129,7 +129,12 @@ impl NavJob {
             .take()
             .unwrap_or_else(|| self.req.url.clone());
         let mut tb = TreeBuilder::new();
-        let mut dec = StreamDecoder::new();
+        // Charset du transport (`Content-Type`) en amorce du
+        // décodeur — priorité sur le prescan `<meta>` (53e).
+        let dec_hint = transport_charset(&resp.headers)
+            .as_deref()
+            .and_then(label_encoding);
+        let mut dec = StreamDecoder::new(dec_hint);
         let mut html = String::new();
         let mut since_paint = 0usize;
         let mut last_paint = Instant::now();

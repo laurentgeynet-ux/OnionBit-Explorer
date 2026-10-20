@@ -9,6 +9,13 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 53e — charset transport honoré pour le
+  document** (`explorer-core`) : `StreamDecoder` prend le
+  `charset=` du `Content-Type` en amorce — ordre WHATWG
+  BOM > transport > prescan `<meta>` > 1252. Les pages
+  déclarant UTF-8 en en-tête seul (HN, APIs) ne sont plus
+  relues en Latin-1 (`â€“` → `–`).
+
 - **Étape 65 — `doc_h` mesurée vs plafond raster**
   (`explorer-core` + `explorer-api`) : `TabInfo` expose
   `doc_h` (hauteur réelle du document posé) et

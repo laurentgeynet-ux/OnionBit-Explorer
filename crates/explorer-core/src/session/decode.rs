@@ -25,13 +25,20 @@ pub(crate) struct StreamDecoder {
     /// Encodage décidé — `None` tant que la fenêtre de
     /// sniffing n'est pas pleine (et pas EOF).
     pub(crate) enc: Option<Encoding>,
+    /// Encodage du transport (`charset=` de
+    /// `Content-Type`) — entre BOM et prescan `<meta>`
+    /// dans l'ordre WHATWG (étape 53e).
+    pub(crate) hint: Option<Encoding>,
 }
 
 impl StreamDecoder {
-    pub(crate) fn new() -> Self {
+    /// `hint` = `charset` de l'en-tête `Content-Type` de la
+    /// réponse (`transport_charset` + `label_encoding`).
+    pub(crate) fn new(hint: Option<Encoding>) -> Self {
         Self {
             buf: Vec::new(),
             enc: None,
+            hint,
         }
     }
 
@@ -57,20 +64,20 @@ impl StreamDecoder {
         self.decode_tail(true)
     }
 
-    /// Sniffing + consommation du BOM (même règle que
-    /// `decode_sniffed` : BOM réel seulement).
+    /// Sniffing + consommation du BOM — ordre WHATWG
+    /// (étape 53e) : **BOM réel** > `charset=` transport
+    /// (`Content-Type`) > prescan `<meta>` > windows-1252.
+    /// Le charset en en-tête l'emporte sur `<meta>` — une
+    /// page qui déclare UTF-8 au niveau HTTP uniquement
+    /// (HN, APIs) n'est plus relue en 1252 (`â€–`).
     pub(crate) fn decide(&mut self) {
-        let enc = sniff_encoding(&self.buf);
-        let bom = match enc {
-            Encoding::Utf8 if self.buf.starts_with(&[0xEF, 0xBB, 0xBF]) => 3,
-            Encoding::Utf16Le | Encoding::Utf16Be
-                if self.buf.starts_with(&[0xFF, 0xFE]) || self.buf.starts_with(&[0xFE, 0xFF]) =>
-            {
-                2
-            }
-            _ => 0,
+        let (bom_enc, bom_len) = sniff_bom(&self.buf);
+        let enc = if bom_len > 0 {
+            bom_enc
+        } else {
+            self.hint.unwrap_or_else(|| sniff_encoding(&self.buf))
         };
-        self.buf.drain(..bom);
+        self.buf.drain(..bom_len);
         self.enc = Some(enc);
     }
 
@@ -268,7 +275,7 @@ mod tests {
     /// frontière de morceau au lieu de perdre l'octet.
     #[test]
     fn stream_decoder_holds_split_utf8() {
-        let mut d = StreamDecoder::new();
+        let mut d = StreamDecoder::new(None);
         // « é » = C3 A9 — le premier morceau s'arrête après C3.
         // BOM UTF-8 pour fixer l'encodage (le sniffer HTML
         // replie sinon sur windows-1252 — byte 0xC3 = 'Ã'
@@ -288,7 +295,7 @@ mod tests {
     /// trail au morceau suivant.
     #[test]
     fn stream_decoder_holds_split_surrogate() {
-        let mut d = StreamDecoder::new();
+        let mut d = StreamDecoder::new(None);
         // BOM UTF-16LE + « a » + lead surrogate seul.
         let mut head = vec![0xFF, 0xFE, 0x61, 0x00];
         head.extend(std::iter::repeat_n(0x20, SNIFF_WINDOW - 6).flat_map(|b| [b, 0x00]));
@@ -330,6 +337,32 @@ mod tests {
         // Ni l'un ni l'autre : UTF-8.
         let utf8 = "a{content:\"é\"}".as_bytes();
         assert!(decode_stylesheet(utf8, &h2).contains('é'));
+    }
+
+    /// Ordre de décision (étape 53e) : BOM réel > `hint`
+    /// (charset transport) > prescan `<meta>` > 1252.
+    #[test]
+    fn stream_decoder_hint_over_meta() {
+        // hint UTF-8 + méta 1252 dans le corps → UTF-8 gagne.
+        let mut head = b"<meta charset=windows-1252>\xC3\xA9".to_vec();
+        head.extend(std::iter::repeat_n(0x20, SNIFF_WINDOW - head.len()));
+        let mut d = StreamDecoder::new(Some(Encoding::Utf8));
+        let text = d.feed(&head) + &d.finish();
+        assert!(text.contains('é'), "{text:?}");
+        // Sans hint : la méta mène → « Ã© » (1252).
+        let mut d2 = StreamDecoder::new(None);
+        let text2 = d2.feed(&head) + &d2.finish();
+        assert!(text2.contains("Ã©"), "{text2:?}");
+    }
+
+    #[test]
+    fn stream_decoder_bom_over_hint() {
+        // BOM UTF-8 + hint 1252 → BOM gagne.
+        let mut head = vec![0xEF, 0xBB, 0xBF, 0xC3, 0xA9];
+        head.extend(std::iter::repeat_n(0x20, SNIFF_WINDOW - head.len()));
+        let mut d = StreamDecoder::new(Some(Encoding::Windows1252));
+        let text = d.feed(&head) + &d.finish();
+        assert!(text.contains('é'), "{text:?}");
     }
 
     #[test]

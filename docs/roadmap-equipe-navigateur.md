@@ -206,13 +206,17 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   atteinte) au lieu d'échouer la réponse. Tolérance rustls
   documentée — cas fréquent chez les vieux serveurs/CDN.
 
-- [ ] **Étape 53e. Charset du `<title>` / `title_changed`**
-  (bug terrain mission 6, repro : `news.ycombinator.com/
-  item?id=…` — titre `â€“` = UTF-8 relu en Latin-1/1252) :
-  vérifier d'abord si la page déclare son charset tardivement
-  (prescan trop borné ?) ou pas du tout — dans ce dernier cas
-  le fallback windows-1252 est conforme WHATWG et le défaut
-  est côté extraction/émission du titre.
+- [x] **Étape 53e. Charset transport honoré pour le
+  document** (bug terrain mission 6, repro HN `â€“`) : la
+  page déclare UTF-8 par en-tête `Content-Type`
+  (`charset=utf-8`), sans `<meta>` — le `StreamDecoder`
+  ne voyait que BOM+prescan → repli 1252. Livré : le
+  décodeur reçoit `hint` (`transport_charset` +
+  `label_encoding`), décision ordre WHATWG **BOM réel >
+  charset transport > prescan `<meta>` > windows-1252** —
+  titre et corps décodés UTF-8 quand le serveur le dit.
+  Tests : hint > méta, BOM > hint, titre `Actualités –`
+  via `Content-Type` seul.
 
 - [x] **Étape 53f. `run_pending`/`sync_dom` hors verrou**
   (résidu 53d, terrain mission 8 : `repros/relayout.html` —

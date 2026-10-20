@@ -1386,6 +1386,32 @@ async fn failed_submit_reports_edited_not_navigated() {
     );
 }
 
+/// Étape 53e — le `charset=` du `Content-Type` transport
+/// l'emporte sur le prescan `<meta>` absent : un titre
+/// UTF-8 servi `text/html; charset=utf-8` n'est plus relu
+/// en windows-1252 (repro HN `â€“`).
+#[tokio::test]
+async fn document_charset_honors_transport_header() {
+    let (mut s, t) = test_session();
+    // UTF-8 réel (« Actualités – quotidien »), aucun <meta>
+    // charset — seul l'en-tête transport le déclare.
+    t.route_headers(
+        "/hn",
+        200,
+        "<html><head><title>Actualités – quotidien</title></head>\
+         <body><p>été déjà</p></body></html>",
+        &[("content-type", "text/html; charset=utf-8")],
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/hn").await.unwrap();
+    let title = s.tab_info(id).and_then(|t| t.title).unwrap_or_default();
+    assert!(
+        title.contains("Actualités"),
+        "titre relu en 1252 ? {title:?}"
+    );
+    assert!(title.contains('–'), "titre : {title:?}");
+}
+
 /// Étape 65 — `tab_info.doc_h` rapporte la hauteur
 /// **mesurée** (pas le plafond raster 2¹⁴) et
 /// `doc_h_clamped` signale que la frame ne couvre pas le
