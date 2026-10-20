@@ -748,10 +748,12 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                   (_) => _onResize(size, zoom, dpr),
                 );
                 final st = widget.state;
-                // 1 px CSS moteur = `zoom·dpr` px logiques affichés
-                // (raster brut `fit:none`) → les coordonnées
+                // Le raster produit `zoom·dpr` px par px CSS ; l'image
+                // est affichée à `scale: dpr` (1 px image = 1 px
+                // physique, nette à tout DPR) → 1 px CSS moteur =
+                // `zoom` px logiques à l'écran. Les coordonnées
                 // d'entrée se divisent par ce facteur.
-                final cssPerLogical = zoom * dpr;
+                final cssPerLogical = zoom;
                 return MouseRegion(
                   cursor: st.hoverEditable
                       ? SystemMouseCursors.text
@@ -790,13 +792,19 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                           // Canal FFI (ADR-0018) : `ui.Image`
                           // brute, sinon PNG mémoire (ADR-0004).
                           child: raw != null
-                              ? RawImage(image: raw, fit: BoxFit.none)
+                              ? RawImage(
+                                  image: raw,
+                                  fit: BoxFit.none,
+                                  // 1 px image = 1 px physique :
+                                  // taille logique = px/dpr.
+                                  scale: dpr,
+                                )
                               : Image.memory(
                                   Uint8List.fromList(bytes!),
                                   gaplessPlayback:
                                       true, // pas de flash entre frames
-                                  fit:
-                                      BoxFit.none, // 1 px CSS = 1 pixel logique
+                                  fit: BoxFit.none,
+                                  scale: dpr, // idem : px → px physiques
                                 ),
                         ),
                       ),

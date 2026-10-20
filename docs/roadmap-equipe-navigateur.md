@@ -1016,6 +1016,24 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   passe bien par `DoH`. Fixture des tests rebasée sur
   `webfix.dev` (`example.com` est désormais
   special-use).
+- [x] **Étape 82. FrameView : frame affichée sans
+  clip `dpr`** (prérequis validation overlay média
+  71d — positionner `rect − scroll_y` sur une frame
+  tronquée ne mesure rien) : le raster moteur fait
+  `w_css × zoom·dpr` px physiques ; `Image.memory` /
+  `RawImage` à `scale` 1.0 (défaut) l'affichaient en
+  px logiques = px physiques → `dpr×` trop grands,
+  `Clip.hardEdge` tronquait `1−1/dpr` (~33 % à
+  dpr 1,5, ~43 % à 1,75 — invisible à dpr 1,0, d'où
+  le passage à travers toute la chaîne de tests).
+  Correctif : `scale: dpr` (1 px image = 1 px
+  physique, netteté conservée) + diviseur d'entrée
+  `zoom·dpr` → `zoom` — il n'était cohérent qu'avec
+  l'affichage surdimensionné. `flutter analyze` +
+  `flutter test` verts (18/18). Réception humaine :
+  vérifier visuellement sur affichage dpr > 1 que la
+  frame remplit le viewport et que les clics
+  touchent les éléments visés.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

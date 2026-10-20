@@ -203,6 +203,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Étape 82 — FrameView : frame clippée de `1−1/dpr`**
+  (`app/`) : le raster moteur fait `viewport_css ×
+  zoom·dpr` px physiques mais `Image.memory`/`RawImage`
+  étaient rendus à `scale: 1.0` (défaut) → affichés en
+  px logiques = px physiques, `dpr×` trop grands dans
+  un `Clip.hardEdge` — ~33 % tronqués à dpr 1,5, ~43 %
+  à 1,75, invisible à dpr 1,0. `scale: dpr` pose 1 px
+  image = 1 px physique (rendu net conservé) ; le
+  diviseur d'entrée passe de `zoom·dpr` à `zoom` — il
+  n'était cohérent qu'avec l'affichage surdimensionné.
+  Prérequis posé pour la validation de l'overlay média
+  71d (positionner sur une frame tronquée ne mesurait
+  rien).
+
 - **Étape 78 — `DoH` : noms d'usage spécial sur le
   système** (`explorer-net`) : `localhost`, `.localhost`,
   `.local` (mDNS), `.test`, `.invalid`, `.example` et les
