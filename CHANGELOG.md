@@ -136,6 +136,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   mutationnel texte↔vide de `dirty_raster` verrouille
   l'absence de reliques aux bords de fenêtre ; unit-test
   des débords mesurés sur `run.ink`.
+- **Étape 85 — gestes chrome pour le test humain** (`app/`) :
+  les raccourcis navigateur attendus au premier usage, liés au
+  niveau **page** (`CallbackShortcuts`) — auparavant le zoom et
+  la recherche n'existaient que sous focus de la frame. Clavier
+  : `Ctrl+L` (focus + sélection omnibox), `Ctrl+T`/`Ctrl+W`
+  (onglet neuf/fermé), `Ctrl+R`/`F5` (recharger), `Alt+←`/`→` +
+  touches dédiées `browserBack`/`Forward` (précédent/suivant),
+  `Ctrl+Tab`/`Ctrl+Shift+Tab` (cyclage), `Ctrl+1..8`/`Ctrl+9`
+  (index/dernier), zoom `Ctrl`+`+`/`−`/`0`, `Ctrl+F`, `Échap`.
+  Souris : boutons `X1`/`X2` = précédent/suivant, clic-molette
+  sur un lien = **nouvel onglet en arrière-plan**
+  (`openInNewTab` — l'onglet courant garde le focus pendant le
+  chargement), clic-molette sur l'onglet = fermer. Le relais
+  clavier moteur n'envoie désormais que des frappes **nues** —
+  un combo modifié n'est plus tapé dans le champ (`Ctrl+V`
+  envoyait `v`). Tests : `cycleTab`/`selectTabAt`/
+  `openInNewTab` (arrière-plan + échec de création).
+  `analyze` + `test` verts (28/28).
 
 ### Fixed
 

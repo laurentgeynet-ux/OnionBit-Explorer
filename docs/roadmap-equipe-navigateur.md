@@ -1160,6 +1160,61 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   clic→iana, back en vol = 3 ms, A restauré.
   2 tests de régression.
 
+- [x] **Étape 85. Gestes chrome — test
+  humain** (`app/`) : les raccourcis
+  attendus au premier usage, liés au
+  niveau **page** (`CallbackShortcuts` —
+  avant, zoom/find n'existaient que sous
+  focus frame ; désormais actifs aussi
+  depuis omnibox/barre find). Clavier :
+  `Ctrl+L` (focus+sélection omnibox),
+  `Ctrl+T`/`Ctrl+W`, `Ctrl+R`/`F5`,
+  `Alt+←`/`→` + touches `browserBack`/
+  `Forward`, `Ctrl+Tab`/`Ctrl+Shift+Tab`,
+  `Ctrl+1..8`/`Ctrl+9`, zoom `Ctrl`+`+`/
+  `−`/`0`, `Ctrl+F`, `Échap`. Souris :
+  `X1`/`X2` = précédent/suivant,
+  clic-molette sur lien = **nouvel onglet
+  en arrière-plan** (`openInNewTab`),
+  clic-molette sur onglet = fermer. Le
+  relais moteur n'envoie que des frappes
+  nues (un combo modifié n'est plus tapé
+  dans le champ — `Ctrl+V` envoyait `v`).
+  Tests contrôleur : cyclage, index,
+  arrière-plan, échec de création.
+  `analyze` + `test` verts (28/28).
+
+- [ ] **Veille — mort silencieuse du
+  daemon / `RADAR_PRE_LEAK_64`** : le
+  22/10, un daemon de sondage a disparu
+  en plein `site_smoke` sur wikipedia
+  (page 10 Mo, tempête de `mousemove`
+  dispatchant des events DOM au moteur
+  JS) — **jamais reproduit** : 630 sondes
+  + cycle lobste→clic→back→wikipedia en
+  repro manuel, RSS plat à ~330 Mo, aucun
+  événement crash Windows (pas d'abort
+  1000 — la piste restante est une sortie
+  silencieuse ou un OOM). Indice
+  corroborant : `RADAR_PRE_LEAK_64` du
+  19/10 avait déjà flagué
+  `explorer-daemon` comme suspect de
+  **fuite mémoire** (peut dater d'avant
+  les fix 55h/83/84). Protocole proposé
+  pour trancher : RSS-watch long —
+  script qui polle le RSS du daemon
+  pendant un cycle répété
+  (nav grosse page → sondes → back →
+  DELETE → nouvel onglet), avec stderr
+  capturé ; si le RSS croît sans borne
+  ou si le process meurt, on a la
+  repro. Le script `site_smoke` capture
+  déjà stderr et détecte la mort du
+  daemon (étape « robustesse » de la
+  phase fonctionnelle). *Critère de
+  clôture : repro avec RSS croissant OU
+  exonération sur fenêtre longue.*
+
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
 Ordre dicté par les besoins de la piste produit d'abord, puis

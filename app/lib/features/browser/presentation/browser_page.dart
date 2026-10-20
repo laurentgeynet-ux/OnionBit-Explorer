@@ -30,11 +30,23 @@ class BrowserPage extends ConsumerStatefulWidget {
 
 class _BrowserPageState extends ConsumerState<BrowserPage> {
   final _omnibox = TextEditingController();
+  final _omniboxFocus = FocusNode();
 
   @override
   void dispose() {
     _omnibox.dispose();
+    _omniboxFocus.dispose();
     super.dispose();
+  }
+
+  /// Ctrl+L — focus omnibox + sélection intégrale (étape 85,
+  /// geste chrome) : la frappe suivante remplace l'URL.
+  void _focusOmnibox() {
+    _omniboxFocus.requestFocus();
+    _omnibox.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _omnibox.text.length,
+    );
   }
 
   @override
@@ -99,44 +111,122 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
     return Scaffold(
       backgroundColor: t.color('surface', 'base'),
       body: SafeArea(
-        child: Column(
-          children: [
-            _TabStrip(tokens: t, state: st, ctrl: ctrl),
-            _NavBar(
-              tokens: t,
-              tab: active,
-              enabled: st.daemonOnline && active != null,
-              omnibox: _omnibox,
-              ctrl: ctrl,
-            ),
-            if (!st.daemonOnline)
-              _OfflineBanner(tokens: t, onRetry: ctrl.retry),
-            if (ref.watch(findProvider).visible)
-              _FindBar(tokens: t, enabled: st.daemonOnline),
-            Expanded(
-              child: active == null
-                  ? Center(
-                      child: Text(
-                        'Aucun onglet',
-                        style: TextStyle(color: muted),
-                      ),
-                    )
-                  : st.pageErrors[active.id] != null
-                  ? _ErrorPage(
-                      tokens: t,
-                      url: active.url,
-                      message: st.pageErrors[active.id]!,
-                      onRetry: () => ctrl.navigate(active.url),
-                    )
-                  : _FrameView(tokens: t, state: st, ctrl: ctrl),
-            ),
-            _StatusBar(tokens: t, state: st),
-          ],
+        // Raccourcis chrome au niveau PAGE (étape 85) : ils
+        // doivent répondre aussi quand l'omnibox ou la barre
+        // de recherche a le focus — un binding dans _FrameView
+        // n'existait que sous focus frame. Les combos y étaient
+        // migrées (zoom, find, Échap) pour un seul lieu de vérité.
+        child: CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.keyL, control: true):
+                _focusOmnibox,
+            const SingleActivator(LogicalKeyboardKey.keyT, control: true):
+                ctrl.newTab,
+            const SingleActivator(LogicalKeyboardKey.keyW, control: true): () {
+              final id = st.activeId;
+              if (id != null) unawaited(ctrl.closeTab(id));
+            },
+            const SingleActivator(LogicalKeyboardKey.keyR, control: true):
+                ctrl.reload,
+            const SingleActivator(LogicalKeyboardKey.f5): ctrl.reload,
+            const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true):
+                ctrl.goBack,
+            const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true):
+                ctrl.goForward,
+            const SingleActivator(LogicalKeyboardKey.browserBack): ctrl.goBack,
+            const SingleActivator(LogicalKeyboardKey.browserForward):
+                ctrl.goForward,
+            const SingleActivator(LogicalKeyboardKey.tab, control: true):
+                () => ctrl.cycleTab(1),
+            const SingleActivator(
+              LogicalKeyboardKey.tab,
+              control: true,
+              shift: true,
+            ): () => ctrl.cycleTab(-1),
+            // Ctrl+1..8 → l'onglet n ; Ctrl+9 → le dernier.
+            for (var i = 0; i < _tabDigitKeys.length; i++)
+              SingleActivator(_tabDigitKeys[i], control: true):
+                  () => ctrl.selectTabAt(i),
+            const SingleActivator(LogicalKeyboardKey.digit9, control: true): () {
+              final n = ref.read(browserProvider).tabs.length;
+              if (n > 0) ctrl.selectTabAt(n - 1);
+            },
+            const SingleActivator(LogicalKeyboardKey.equal, control: true):
+                () => ref.read(zoomProvider.notifier).zoomIn(),
+            const SingleActivator(LogicalKeyboardKey.add, control: true):
+                () => ref.read(zoomProvider.notifier).zoomIn(),
+            const SingleActivator(LogicalKeyboardKey.numpadAdd, control: true):
+                () => ref.read(zoomProvider.notifier).zoomIn(),
+            const SingleActivator(LogicalKeyboardKey.minus, control: true):
+                () => ref.read(zoomProvider.notifier).zoomOut(),
+            const SingleActivator(
+              LogicalKeyboardKey.numpadSubtract,
+              control: true,
+            ): () => ref.read(zoomProvider.notifier).zoomOut(),
+            const SingleActivator(LogicalKeyboardKey.digit0, control: true):
+                () => ref.read(zoomProvider.notifier).reset(),
+            const SingleActivator(LogicalKeyboardKey.numpad0, control: true):
+                () => ref.read(zoomProvider.notifier).reset(),
+            const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+                () => ref.read(findProvider.notifier).open(),
+            const SingleActivator(LogicalKeyboardKey.escape): () {
+              if (ref.read(findProvider).visible) {
+                ref.read(findProvider.notifier).close();
+              }
+            },
+          },
+          child: Column(
+            children: [
+              _TabStrip(tokens: t, state: st, ctrl: ctrl),
+              _NavBar(
+                tokens: t,
+                tab: active,
+                enabled: st.daemonOnline && active != null,
+                omnibox: _omnibox,
+                omniboxFocus: _omniboxFocus,
+                ctrl: ctrl,
+              ),
+              if (!st.daemonOnline)
+                _OfflineBanner(tokens: t, onRetry: ctrl.retry),
+              if (ref.watch(findProvider).visible)
+                _FindBar(tokens: t, enabled: st.daemonOnline),
+              Expanded(
+                child: active == null
+                    ? Center(
+                        child: Text(
+                          'Aucun onglet',
+                          style: TextStyle(color: muted),
+                        ),
+                      )
+                    : st.pageErrors[active.id] != null
+                    ? _ErrorPage(
+                        tokens: t,
+                        url: active.url,
+                        message: st.pageErrors[active.id]!,
+                        onRetry: () => ctrl.navigate(active.url),
+                      )
+                    : _FrameView(tokens: t, state: st, ctrl: ctrl),
+              ),
+              _StatusBar(tokens: t, state: st),
+            ],
+          ),
         ),
       ),
     );
   }
 }
+
+/// Déclencheurs Ctrl+1..8 — index d'onglet direct (étape 85).
+const _tabDigitKeys = [
+  LogicalKeyboardKey.digit1,
+  LogicalKeyboardKey.digit2,
+  LogicalKeyboardKey.digit3,
+  LogicalKeyboardKey.digit4,
+  LogicalKeyboardKey.digit5,
+  LogicalKeyboardKey.digit6,
+  LogicalKeyboardKey.digit7,
+  LogicalKeyboardKey.digit8,
+];
 
 /// Page d'erreur stylée (étape 33) — échec réseau/TLS :
 /// pas de frame moteur, l'UI rend l'échec elle-même avec
@@ -338,55 +428,62 @@ class _TabChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = tab.title.isNotEmpty ? tab.title : tab.url;
-    return InkWell(
-      onTap: onSelect,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: tokens.dim('metrics', 'tabMaxWidth', fallback: 220),
-        ),
-        padding: EdgeInsets.symmetric(
-          horizontal: tokens.dim('spacing', 'sm', fallback: 8),
-        ),
-        decoration: BoxDecoration(
-          color: active ? tokens.color('surface', 'raised') : null,
-          border: Border(
-            bottom: BorderSide(
-              color: active
-                  ? tokens.color('accent', 'base')
-                  : Colors.transparent,
-              width: tokens.dim('metrics', 'tabIndicatorWidth', fallback: 2),
+    // Clic-molette sur l'onglet = fermer (étape 85, geste
+    // chrome) — le primaire sélectionne toujours via InkWell.
+    return Listener(
+      onPointerDown: (ev) {
+        if (ev.buttons == kMiddleMouseButton) onClose();
+      },
+      child: InkWell(
+        onTap: onSelect,
+        child: Container(
+          constraints: BoxConstraints(
+            maxWidth: tokens.dim('metrics', 'tabMaxWidth', fallback: 220),
+          ),
+          padding: EdgeInsets.symmetric(
+            horizontal: tokens.dim('spacing', 'sm', fallback: 8),
+          ),
+          decoration: BoxDecoration(
+            color: active ? tokens.color('surface', 'raised') : null,
+            border: Border(
+              bottom: BorderSide(
+                color: active
+                    ? tokens.color('accent', 'base')
+                    : Colors.transparent,
+                width: tokens.dim('metrics', 'tabIndicatorWidth', fallback: 2),
+              ),
             ),
           ),
-        ),
-        child: Row(
-          children: [
-            if (tab.loading)
-              SizedBox(
-                width: tokens.dim('metrics', 'progressSize', fallback: 12),
-                height: tokens.dim('metrics', 'progressSize', fallback: 12),
-                child: const CircularProgressIndicator(),
-              )
-            else
-              Icon(
-                Icons.public,
-                size: tokens.dim('metrics', 'iconSm', fallback: 14),
+          child: Row(
+            children: [
+              if (tab.loading)
+                SizedBox(
+                  width: tokens.dim('metrics', 'progressSize', fallback: 12),
+                  height: tokens.dim('metrics', 'progressSize', fallback: 12),
+                  child: const CircularProgressIndicator(),
+                )
+              else
+                Icon(
+                  Icons.public,
+                  size: tokens.dim('metrics', 'iconSm', fallback: 14),
+                ),
+              SizedBox(width: tokens.dim('spacing', 'xs', fallback: 4)),
+              Expanded(
+                child: Text(
+                  label.isEmpty ? 'Nouvel onglet' : label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-            SizedBox(width: tokens.dim('spacing', 'xs', fallback: 4)),
-            Expanded(
-              child: Text(
-                label.isEmpty ? 'Nouvel onglet' : label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              InkWell(
+                onTap: onClose,
+                child: Icon(
+                  Icons.close,
+                  size: tokens.dim('metrics', 'iconSm', fallback: 14),
+                ),
               ),
-            ),
-            InkWell(
-              onTap: onClose,
-              child: Icon(
-                Icons.close,
-                size: tokens.dim('metrics', 'iconSm', fallback: 14),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -521,6 +618,7 @@ class _NavBar extends ConsumerWidget {
     required this.tab,
     required this.enabled,
     required this.omnibox,
+    required this.omniboxFocus,
     required this.ctrl,
   });
 
@@ -528,6 +626,7 @@ class _NavBar extends ConsumerWidget {
   final dynamic tab;
   final bool enabled;
   final TextEditingController omnibox;
+  final FocusNode omniboxFocus;
   final BrowserController ctrl;
 
   @override
@@ -585,6 +684,7 @@ class _NavBar extends ConsumerWidget {
         Expanded(
           child: TextField(
             controller: omnibox,
+            focusNode: omniboxFocus,
             enabled: enabled,
             decoration: const InputDecoration(
               hintText: 'Rechercher ou saisir une URL',
@@ -701,6 +801,7 @@ class _NavBar extends ConsumerWidget {
         Expanded(
           child: TextField(
             controller: omnibox,
+            focusNode: omniboxFocus,
             enabled: enabled,
             decoration: const InputDecoration(
               hintText: 'Rechercher ou saisir une URL',
@@ -826,39 +927,18 @@ class _FrameViewState extends ConsumerState<_FrameView> {
     });
   }
 
-  /// Raccourcis chrome — zoom Ctrl+`+`/`-`/`0` (étape 57) et
-  /// find-in-page Ctrl+F / Échap (étape 57bis) : actifs même
-  /// quand un champ moteur a le focus (jamais relayés au moteur).
-  bool _chromeKey(LogicalKeyboardKey key) {
+  /// Une frappe ne rejoint le champ moteur que **nue** —
+  /// sans Ctrl ni Alt : les combos modifiés sont des gestes
+  /// chrome (CallbackShortcuts de page, étape 85) ou
+  /// d'édition, jamais du texte à taper (Ctrl+V envoyait 'v'
+  /// au champ avant ce garde). Échap, lui, circule librement
+  /// : il ferme la barre find en page et atteint le moteur.
+  bool _chordHeld() {
     final kb = HardwareKeyboard.instance;
-    final ctrl =
-        kb.isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) ||
-        kb.isLogicalKeyPressed(LogicalKeyboardKey.controlRight);
-    if (ctrl) {
-      final z = ref.read(zoomProvider.notifier);
-      switch (key) {
-        case LogicalKeyboardKey.equal ||
-            LogicalKeyboardKey.add ||
-            LogicalKeyboardKey.numpadAdd:
-          z.zoomIn();
-        case LogicalKeyboardKey.minus || LogicalKeyboardKey.numpadSubtract:
-          z.zoomOut();
-        case LogicalKeyboardKey.digit0 || LogicalKeyboardKey.numpad0:
-          z.reset();
-        case LogicalKeyboardKey.keyF:
-          ref.read(findProvider.notifier).open();
-        default:
-          return false;
-      }
-      return true;
-    }
-    // Échap ferme la barre de recherche si elle est ouverte —
-    // sinon la touche suit son chemin normal vers le moteur.
-    if (key == LogicalKeyboardKey.escape && ref.read(findProvider).visible) {
-      ref.read(findProvider.notifier).close();
-      return true;
-    }
-    return false;
+    return kb.isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) ||
+        kb.isLogicalKeyPressed(LogicalKeyboardKey.controlRight) ||
+        kb.isLogicalKeyPressed(LogicalKeyboardKey.altLeft) ||
+        kb.isLogicalKeyPressed(LogicalKeyboardKey.altRight);
   }
 
   @override
@@ -907,6 +987,24 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                         widget.ctrl.scroll(ev.scrollDelta.dy / cssPerLogical);
                       }
                     },
+                    onPointerDown: (ev) {
+                      // Boutons souris de navigation (étape 85) :
+                      // X1/X2 = précédent/suivant ; clic-molette
+                      // sur un lien = nouvel onglet en
+                      // arrière-plan (`hoverUrl` tenu par le
+                      // dernier mousemove — même pointeur).
+                      switch (ev.buttons) {
+                        case kBackMouseButton:
+                          widget.ctrl.goBack();
+                        case kForwardMouseButton:
+                          widget.ctrl.goForward();
+                        case kMiddleMouseButton:
+                          final url = st.hoverUrl;
+                          if (url != null) {
+                            unawaited(widget.ctrl.openInNewTab(url));
+                          }
+                      }
+                    },
                     onPointerHover: (ev) => widget.ctrl.hover(
                       ev.localPosition.dx / cssPerLogical,
                       ev.localPosition.dy / cssPerLogical,
@@ -921,7 +1019,14 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                         autofocus: true,
                         onKeyEvent: (e) {
                           if (e is! KeyDownEvent) return;
-                          if (_chromeKey(e.logicalKey)) return;
+                          if (_chordHeld()) return;
+                          // Échap ferme la barre find (binding
+                          // page) — il ne doit pas aussi être
+                          // tapé dans le champ moteur focalisé.
+                          if (e.logicalKey == LogicalKeyboardKey.escape &&
+                              ref.read(findProvider).visible) {
+                            return;
+                          }
                           if (!st.fieldFocused) return;
                           // keyLabel couvre lettres et touches
                           // nommées (« Backspace », « Enter »).

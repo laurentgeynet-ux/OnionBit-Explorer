@@ -818,6 +818,40 @@ class BrowserController extends Notifier<BrowserState> {
     }
   }
 
+  /// Ctrl+Tab / Ctrl+Shift+Tab — cyclage circulaire dans la
+  /// liste d'onglets (étape 85). `dir` = ±1 ; no-op sur liste
+  /// vide ou onglet actif introuvable (sélection du premier /
+  /// dernier, bord le plus proche).
+  void cycleTab(int dir) {
+    final n = state.tabs.length;
+    if (n == 0) return;
+    final i = state.tabs.indexWhere((t) => t.id == state.activeId);
+    final next = i < 0
+        ? (dir >= 0 ? 0 : n - 1)
+        : (((i + dir) % n) + n) % n;
+    selectTab(state.tabs[next].id);
+  }
+
+  /// Ctrl+1..8 — sélection directe de l'onglet `index`
+  /// (étape 85 ; Ctrl+9 = dernier, résolu par l'appelant).
+  void selectTabAt(int index) {
+    if (index < 0 || index >= state.tabs.length) return;
+    selectTab(state.tabs[index].id);
+  }
+
+  /// Clic-molette sur un lien → ouverture dans un nouvel
+  /// onglet **en arrière-plan** (étape 85 — sémantique
+  /// Chrome/Firefox) : l'onglet courant garde le premier
+  /// plan pendant que le neuf charge derrière.
+  Future<void> openInNewTab(String url) async {
+    final prev = state.activeId;
+    await newTab();
+    final fresh = state.activeId;
+    if (fresh == null || fresh == prev) return; // échec de création
+    unawaited(navigate(url));
+    if (prev != null) selectTab(prev);
+  }
+
   /// Tire la frame de l'onglet — `ui.Image` brute en mode
   /// FFI (ADR-0018), PNG en mode REST (ADR-0004 : le push ne
   /// signale que, le contenu voyage en pull).

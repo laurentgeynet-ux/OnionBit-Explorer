@@ -775,6 +775,70 @@ void main() {
     await c.read(findProvider.notifier).submit('x');
     expect(repo.findCalls, isEmpty);
   });
+
+  test('cycleTab/selectTabAt : cyclage et index (étape 85)', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+    final ctrl = c.read(browserProvider.notifier);
+    await ctrl.newTab();
+    await ctrl.newTab();
+    expect(c.read(browserProvider).tabs, hasLength(3));
+    expect(c.read(browserProvider).activeId, '3');
+
+    // Cyclage circulaire dans les deux sens.
+    ctrl.cycleTab(1);
+    expect(c.read(browserProvider).activeId, '1');
+    ctrl.cycleTab(1);
+    expect(c.read(browserProvider).activeId, '2');
+    ctrl.cycleTab(-1);
+    expect(c.read(browserProvider).activeId, '1');
+    ctrl.cycleTab(-1);
+    expect(c.read(browserProvider).activeId, '3');
+
+    // Index borné ; hors liste = no-op.
+    ctrl.selectTabAt(1);
+    expect(c.read(browserProvider).activeId, '2');
+    ctrl.selectTabAt(9);
+    expect(c.read(browserProvider).activeId, '2');
+    ctrl.selectTabAt(-1);
+    expect(c.read(browserProvider).activeId, '2');
+  });
+
+  test('openInNewTab : nouvel onglet chargé en arrière-plan (étape 85)', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+    final ctrl = c.read(browserProvider.notifier);
+
+    // Clic-molette : l'onglet neuf charge l'URL mais l'onglet
+    // d'origine garde le premier plan (sémantique Chrome).
+    await ctrl.openInNewTab('http://lien.test/');
+    expect(c.read(browserProvider).tabs, hasLength(2));
+    expect(repo.navigations, ['2:http://lien.test/']);
+    expect(c.read(browserProvider).activeId, '1');
+  });
+
+  test('openInNewTab : échec de création → aucune navigation (étape 85)', () async {
+    final repo = FakeRepo()..online = false;
+    final events = FakeEvents();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+    repo.online = true;
+    await c.read(browserProvider.notifier).retry();
+
+    // Le daemon retombe entre-temps : createTab jette → pas
+    // de navigation vers l'onglet courant, activeId inchangé.
+    repo.online = false;
+    await c.read(browserProvider.notifier).openInNewTab('http://x.test/');
+    expect(repo.navigations, isEmpty);
+    expect(c.read(browserProvider).activeId, '1');
+  });
 }
 
 /// Contrôleur minimal sans onglet — `activeId` reste null.
