@@ -734,6 +734,30 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `bool` déplacé (repaint fait) ; `find_scroll` repeint +
   invalide quand la position n'a pas bougé. Régression :
   `find_highlight_repaints_without_scroll`.
+- [ ] **Étape 69. Pages d'erreur navigateur** (lead —
+  trou produit, terrain missions 16/17) : aujourd'hui une
+  nav qui échoue (`HttpStatus` 404/5xx, `Fetch` connexion
+  refusée/DNS, `EmptyDocument`) ne produit aucune surface —
+  l'onglet garde la page précédente ou un vide, sans mot à
+  l'utilisateur. Livrable : page d'erreur **peinte par le
+  moteur** (document généré côté core, style minimal — pas
+  de dépendance Flutter) : statut/code, URL, cause lisible,
+  `can_back` conservé ; les erreurs typées existent
+  (`CoreError`) — il manque la surface. Bonus : même canal
+  pour `pipeline_error` SSE → la frame montre l'échec au
+  lieu de figer l'ancienne page.
+- [ ] **Étape 70. Téléchargements** (lead — trou produit,
+  terrain mission 17-D) : `application/octet-stream`,
+  `Content-Disposition: attachment`, type inconnu en
+  navigation top-level → aujourd'hui dump binaire mojibake
+  peint en texte. Comportement navigateur : enregistrement
+  fichier + progression. Livrable : events SSE
+  `DownloadOffered`/`DownloadProgress`/`DownloadDone` +
+  endpoint REST d'acceptation (`POST /api/downloads/{id}`
+  `{path}` ou répertoire de téléchargement du profil) ;
+  bornes de taille réseau respectées ; UI Flutter = entrée
+  de téléchargement. Le dump-texte actuel reste la
+  dégradation si le téléchargement est refusé.
 
 ## Piste JS (JS-C26+) — spécialiste `dillo-js`
 
@@ -741,6 +765,11 @@ Ordre dicté par les besoins de la piste produit d'abord, puis
 couverture **strictement réactive** (un bug site → un cas
 `corpus.rs`/test262 → un fix — fini la couverture pour la
 couverture).
+
+Priorité terrain (lead, mission 14/16) : **JS-C45** en tête
+(`onclick=` mort = casse-site réel mesuré), puis JS-C35
+(`document.write`), JS-C44 (bare specifiers), JS-C29
+(`Worker`) — le reste de la série reste réactif aux sites.
 
 ### J-A — APIs navigateur attendues par la session
 

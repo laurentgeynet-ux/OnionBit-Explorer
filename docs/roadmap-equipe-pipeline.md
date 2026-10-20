@@ -399,6 +399,55 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   négatif **avant** les blocs en flux (ordre de peinture
   §E.2 — fond `.error` sous la grille).
   Cliquet WPT 55 → **57/57 (100 %, 3 ignorés)**.
+  **Le sous-ensemble WPT extrait est soldé** — plus aucun
+  échec connu à cliqueter ; la suite se joue sur Acid2
+  (R-31) et un corpus élargi (R-32).
+- [ ] **R-31. Acid2 → 100 %** (lead) : corpus à
+  **86,1 %** (746→~1145 px structurels visés, alignement
+  (73,2650)). Le reste n'est pas un score à grappiller —
+  chaque point manquant est une cause racine spec à nommer
+  (candidats observés : oreilles en `fixed`, barre
+  `overflow`, marges fines du haut de page — à diagnostiquer
+  par salve comme R-13). Méthode éprouvée : crop par région,
+  diff pixel, un commit par cause.
+- [ ] **R-32. Élargir le corpus WPT** (lead) : le
+  cliquet actuel (57/57) ne mesure plus rien — extraire une
+  tranche nouvelle via le script existant (candidats :
+  `vertical-align` complet, `overflow`, `position`,
+  margin-collapsing systématique, tables avancées,
+  `display` résiduels). Nouveau baseline honnête
+  « x/y exécutés (z skips) sur sous-ensemble S' élargi » +
+  cliquet reposé. Objectif : réactiver la boucle
+  échec→cause racine qui a produit R-27→30.
+- [ ] **R-33. Perf — coût unitaire de l'apply**
+  (demande consignée `interface-equipes.md`, terrain
+  mission 15) : `incr.remap_relayout` = **150,3 s** sur
+  `storm.html` (~600 nœuds + mutations accumulées) vs
+  ~14 s au profil test `profile_resync_phases` — écart ×10
+  à expliquer (saleté accumulée absorbée d'un coup ? remap
+  mémoïsé dégénéré ? cascade globale re-stylée au lieu du
+  sous-arbre sale ?). Livrable : attribution précise via
+  `sync_profile` + fix du poste dominant + cascade scopée
+  au sous-arbre sale si elle y contribue. 55h (NAV) a sorti
+  l'apply du verrou — le coût restant est ici.
+- [ ] **R-34. Médias vrais remplacés boxtree**
+  (résidu étape 58, demande consignée) : `video`/`audio`
+  comme remplacés natifs — taille intrinsèque de l'affiche
+  décodée (le poster n'est plus étiré dans un 300×150
+  forcé), `object-fit` minimal, `video[poster]` couvert par
+  `collect_data_images` (le complément NAV
+  `poster_data_images` se retire alors), hints
+  présentationnels `width`/`height`.
+- [ ] **R-35. Métriques de runs pour find**
+  (résidu 57bis, demande consignée) : API de métriques —
+  sous-rect du match dans une boîte `Text` (offsets glyphe
+  → `Rect`), remplace le surlignage boîte-entière actuel.
+  API publique additive, consommée par `session/find.rs`.
+- [ ] **R-36. Cache glyphes `paint_text`** (demande
+  consignée, perf raster) : le repaint global re-shape
+  chaque run — cache par (fonte, taille, texte) ou
+  run-level, borné. À instrumenter `sync_profile` avant/
+  après pour chiffrer le gain.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
