@@ -937,6 +937,9 @@ fn media_event_json(ev: &CoreEvent) -> (&'static str, String) {
                     explorer_core::MediaCmd::Volume { v } => {
                         serde_json::json!({ "type": "volume", "v": v })
                     }
+                    explorer_core::MediaCmd::Muted { on } => {
+                        serde_json::json!({ "type": "muted", "on": on })
+                    }
                     explorer_core::MediaCmd::Rate { r } => {
                         serde_json::json!({ "type": "rate", "r": r })
                     }

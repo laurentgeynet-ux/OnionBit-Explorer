@@ -773,3 +773,186 @@ fn media_moved_on_relayout_only_when_rect_changes() {
         e => panic!("MediaMoved attendu : {e:?}"),
     }
 }
+
+/// Page `body` commise + moteur jscore installé +
+/// `refresh_media` — harnais de délégation JS média (71c).
+fn media_js_page(body: &str) -> (Session, TabId, broadcast::Receiver<CoreEvent>) {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let rx = s.subscribe();
+    let html = format!("<!doctype html><html><body>{body}</body></html>");
+    let eng = s.spawn_engine(tab, &html, true).unwrap();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom(body));
+        e.url = Some(Url::parse("http://h.test/m").unwrap());
+        e.js = Some(eng);
+    }
+    s.relayout(tab).unwrap();
+    s.refresh_media(tab);
+    (s, tab, rx)
+}
+
+/// Évalue `src` sur le moteur de `tab` puis pompe les
+/// microtasks (résolutions `play()`, callbacks `then`).
+fn media_js_eval(s: &mut Session, tab: TabId, src: &str) -> String {
+    s.tabs
+        .get_mut(&tab)
+        .and_then(|e| e.js.as_mut())
+        .map_or_else(
+            || "no-js".to_string(),
+            |eng| {
+                let out = eng.eval(src).unwrap_or_else(|e| format!("ERR:{e:?}"));
+                eng.run_pending();
+                out
+            },
+        )
+}
+
+/// Étape 71c — sans claim les stubs ADR-0023 tiennent ;
+/// claimé, `canPlayType` reflète les codecs et les ordres
+/// page (`play`/seek/volume) partent en `MediaCommand`.
+#[test]
+fn media_js_commands_only_when_claimed() {
+    let (mut s, tab, mut rx) = media_js_page("<video id=\"v\" src=\"v.mp4\"></video>");
+    let _ = media_events(&mut rx); // purge de l'offre
+
+    // Non claimé : `play()` rejette, `canPlayType` avoue "".
+    media_js_eval(
+        &mut s,
+        tab,
+        "document.querySelector('video').play().then(             ()=>window.__r='ok',()=>window.__r='ko');'p'",
+    );
+    assert_eq!(media_js_eval(&mut s, tab, "window.__r"), "ko");
+    assert_eq!(
+        media_js_eval(
+            &mut s,
+            tab,
+            "document.querySelector('video').canPlayType('video/mp4')"
+        ),
+        ""
+    );
+
+    // Claim → `canPlayType` reflète les codecs déclarés.
+    s.media_claim(tab, 1, vec!["video/mp4".into(), "avc1.42".into()])
+        .unwrap();
+    assert_eq!(
+        media_js_eval(
+            &mut s,
+            tab,
+            "document.querySelector('video').canPlayType('video/mp4; codecs=\"avc1.42E01E\"')"
+        ),
+        "probably"
+    );
+    assert_eq!(
+        media_js_eval(
+            &mut s,
+            tab,
+            "document.querySelector('video').canPlayType('video/webm')"
+        ),
+        ""
+    );
+
+    // Ordres page → hôte : play/seek/volume drainés en
+    // `MediaCommand` (id de surface rappelé).
+    media_js_eval(
+        &mut s,
+        tab,
+        "var v=document.querySelector('video');         v.play().then(()=>window.__p='ok',()=>window.__p='ko');         v.currentTime=3;v.volume=0.5;'ok'",
+    );
+    s.after_script(tab);
+    let evs = media_events(&mut rx);
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            CoreEvent::MediaCommand {
+                media: 1,
+                cmd: MediaCmd::Play,
+                ..
+            }
+        )),
+        "ordre play attendu : {evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            CoreEvent::MediaCommand {
+                media: 1,
+                cmd: MediaCmd::Seek { ms: 3000 },
+                ..
+            }
+        )),
+        "ordre seek 3000 attendu : {evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            CoreEvent::MediaCommand {
+                media: 1,
+                cmd: MediaCmd::Volume { v },
+                ..
+            } if (*v - 0.5).abs() < 0.01
+        )),
+        "ordre volume 0.5 attendu : {evs:?}"
+    );
+}
+
+/// Étape 71c — le rapport `state` hôte résout `play()`,
+/// reflète les props et tire les events DOM ; release →
+/// retour aux stubs honnêtes.
+#[test]
+fn media_js_report_resolves_play_and_reflects_props() {
+    let (mut s, tab, _rx) = media_js_page("<video id=\"v\" src=\"v.mp4\"></video>");
+    s.media_claim(tab, 1, vec!["video/mp4".into()]).unwrap();
+    media_js_eval(
+        &mut s,
+        tab,
+        "var v=document.querySelector('video');window.__log=[];         v.play().then(()=>window.__p='ok',()=>window.__p='ko');         ['loadedmetadata','play','playing','seeked','timeupdate','durationchange'].forEach(         t=>v.addEventListener(t,()=>window.__log.push(t)));v.currentTime=3;'ok'",
+    );
+    s.media_report(
+        tab,
+        1,
+        MediaReport {
+            position_ms: 3_000,
+            duration_ms: Some(60_000),
+            buffered_ms: 10_000,
+            state: MediaHostState::Playing,
+            error: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(media_js_eval(&mut s, tab, "window.__p"), "ok");
+    assert_eq!(media_js_eval(&mut s, tab, "v.paused"), "false");
+    assert_eq!(media_js_eval(&mut s, tab, "v.currentTime===3"), "true");
+    assert_eq!(media_js_eval(&mut s, tab, "v.readyState===4"), "true");
+    assert_eq!(media_js_eval(&mut s, tab, "v.duration===60"), "true");
+    assert_eq!(
+        media_js_eval(
+            &mut s,
+            tab,
+            "v.buffered.length===1 && v.buffered.end(0)===10"
+        ),
+        "true"
+    );
+    let log = media_js_eval(&mut s, tab, "window.__log.join(',')");
+    for want in [
+        "loadedmetadata",
+        "play",
+        "playing",
+        "seeked",
+        "timeupdate",
+        "durationchange",
+    ] {
+        assert!(log.contains(want), "event {want} attendu dans {log}");
+    }
+
+    // Release → retour aux stubs : `play()` rejette à nouveau.
+    s.media_release(tab, 1).unwrap();
+    media_js_eval(
+        &mut s,
+        tab,
+        "v.play().then(()=>window.__r2='ok',()=>window.__r2='ko');'p'",
+    );
+    assert_eq!(media_js_eval(&mut s, tab, "window.__r2"), "ko");
+}

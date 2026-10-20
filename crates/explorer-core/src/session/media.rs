@@ -56,6 +56,25 @@ pub(crate) struct MediaSurface {
     pub(crate) claim: Option<Vec<String>>,
     /// Dernier `state` rapporté par l'hôte.
     pub(crate) report: Option<MediaReport>,
+    /// Chemin `(tag, index)` DOM de l'élément — résolution
+    /// unique du nœud miroir à claim/release/report (étape
+    /// 71c). Maintenu à jour au refresh (l'élément peut avoir
+    /// bougé dans l'arbre entre deux applies).
+    pub(crate) path: Vec<(String, u32)>,
+}
+
+/// Surface morte au `refresh_media` (71c) — `path` et
+/// `claimed` servent à purger le claim du nœud miroir s'il
+/// survit à l'apply (ex. `src` retirée par JS : l'offre
+/// meurt, l'élément reste — `play()` retombe sur le rejet
+/// stub, jamais de promesse pendue sans réponse).
+struct GoneSurface {
+    /// Identifiant de la surface morte.
+    id: u64,
+    /// Chemin `(tag, index)` vers le nœud miroir.
+    path: Vec<(String, u32)>,
+    /// La surface était claimée par l'hôte.
+    claimed: bool,
 }
 
 /// Élément média détecté sur le boxtree posé — image fixe
@@ -74,6 +93,8 @@ struct ScannedMedia {
     controls: bool,
     /// Attribut `autoplay` présent.
     autoplay: bool,
+    /// Chemin `(tag, index)` de l'élément (71c — miroir JS).
+    path: Vec<(String, u32)>,
 }
 
 /// MIME média déduit du suffixe d'URL (contrat : `type` >
@@ -185,6 +206,7 @@ fn scan_media(tree: &LayoutBox, dom: &Dom, base: &Url) -> Vec<ScannedMedia> {
                         url: u.to_string(),
                         controls,
                         autoplay: has_bool_attr(dom, n, "autoplay"),
+                        path: element_path(dom, n).unwrap_or_default(),
                     });
                 }
             }
@@ -205,7 +227,7 @@ impl Session {
     /// si l'arbre/DOM ne sont pas un couple cohérent (`tree`
     /// absent pendant la fenêtre nav → relayout).
     pub(crate) fn refresh_media(&mut self, tab: TabId) {
-        let mut gone: Vec<u64> = Vec::new();
+        let mut gone: Vec<GoneSurface> = Vec::new();
         let mut moved: Vec<(u64, MediaRect)> = Vec::new();
         let mut offered: Vec<MediaSurface> = Vec::new();
         {
@@ -241,9 +263,14 @@ impl Session {
                     o.mime.clone_from(&s.mime);
                     o.controls = s.controls;
                     o.autoplay = s.autoplay;
+                    o.path.clone_from(&s.path);
                     retained[pos] = Some(o);
                 } else {
-                    gone.push(o.id);
+                    gone.push(GoneSurface {
+                        id: o.id,
+                        path: o.path.clone(),
+                        claimed: o.claim.is_some(),
+                    });
                 }
             }
             let mut media = Vec::with_capacity(scanned.len());
@@ -263,6 +290,7 @@ impl Session {
                         autoplay: s.autoplay,
                         claim: None,
                         report: None,
+                        path: s.path,
                     };
                     offered.push(MediaSurface {
                         id,
@@ -274,14 +302,33 @@ impl Session {
                         autoplay: surf.autoplay,
                         claim: None,
                         report: None,
+                        path: surf.path.clone(),
                     });
                     media.push(surf);
                 }
             }
             entry.media = media;
         }
-        for id in gone {
-            let _ = self.events.send(CoreEvent::MediaGone { tab, media: id });
+        self.emit_media_events(tab, gone, moved, offered);
+    }
+
+    /// Émission du diff de `refresh_media` (hors emprunt de
+    /// l'entrée) : purge des claims miroir des surfaces
+    /// mortes puis `MediaGone`, `MediaMoved`, `MediaOffered`.
+    fn emit_media_events(
+        &mut self,
+        tab: TabId,
+        gone: Vec<GoneSurface>,
+        moved: Vec<(u64, MediaRect)>,
+        offered: Vec<MediaSurface>,
+    ) {
+        for g in gone {
+            if g.claimed {
+                if let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()) {
+                    eng.set_media_claim(&g.path, g.id, None);
+                }
+            }
+            let _ = self.events.send(CoreEvent::MediaGone { tab, media: g.id });
         }
         for (id, rect) in moved {
             let _ = self.events.send(CoreEvent::MediaMoved {
@@ -352,9 +399,11 @@ impl Session {
     }
 
     /// Claim d'une surface par l'hôte (premier arrivé gagne)
-    /// — `codecs` = capacités déclarées (alimenteront
-    /// `canPlayType`/`error` à l'étape 71c). `Dead` → `410`,
-    /// `Taken` → `409`.
+    /// — `codecs` = capacités déclarées (alimentent
+    /// `canPlayType`). Le miroir JS est marqué claimé : les
+    /// props média reflètent alors les rapports hôte et les
+    /// commandes page partent vers l'hôte (étape 71c).
+    /// `Dead` → `410`, `Taken` → `409`.
     ///
     /// # Errors
     /// [`MediaError::Dead`] id inconnu ou mort ;
@@ -365,40 +414,46 @@ impl Session {
         media: u64,
         codecs: Vec<String>,
     ) -> Result<(), MediaError> {
-        let Some(m) = self
-            .tabs
-            .get_mut(&tab)
-            .and_then(|e| e.media.iter_mut().find(|m| m.id == media))
-        else {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return Err(MediaError::Dead);
+        };
+        let Some(m) = entry.media.iter_mut().find(|m| m.id == media) else {
             return Err(MediaError::Dead);
         };
         if m.claim.is_some() {
             return Err(MediaError::Taken);
         }
-        m.claim = Some(codecs);
+        m.claim = Some(codecs.clone());
+        if let Some(eng) = entry.js.as_mut() {
+            eng.set_media_claim(&m.path, media, Some(codecs));
+        }
         Ok(())
     }
 
     /// L'hôte se détache — la surface retombe sur les stubs
-    /// ADR-0023 (dernier rapport conservé, inerte).
+    /// ADR-0023 (dernier rapport conservé, inerte ; promesses
+    /// `play()` pendantes rejetées côté miroir).
     ///
     /// # Errors
     /// [`MediaError::Dead`] id inconnu ou mort.
     pub fn media_release(&mut self, tab: TabId, media: u64) -> Result<(), MediaError> {
-        let Some(m) = self
-            .tabs
-            .get_mut(&tab)
-            .and_then(|e| e.media.iter_mut().find(|m| m.id == media))
-        else {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return Err(MediaError::Dead);
+        };
+        let Some(m) = entry.media.iter_mut().find(|m| m.id == media) else {
             return Err(MediaError::Dead);
         };
         m.claim = None;
+        if let Some(eng) = entry.js.as_mut() {
+            eng.set_media_claim(&m.path, media, None);
+        }
         Ok(())
     }
 
     /// Rapport `state` hôte → moteur (battement borné ≤ 4 Hz
-    /// côté hôte — le moteur stocke sans émettre ; les props
-    /// et events DOM JS arrivent à l'étape 71c). Exige un
+    /// côté hôte). Stocké sur la surface **et** relu au miroir
+    /// JS : props média refletées, promesses `play()`
+    /// tranchées, events DOM tirés (étape 71c). Exige un
     /// claim actif : un rapport sans claim est sans effet.
     ///
     /// # Errors
@@ -410,17 +465,66 @@ impl Session {
         media: u64,
         report: MediaReport,
     ) -> Result<(), MediaError> {
-        let Some(m) = self
-            .tabs
-            .get_mut(&tab)
-            .and_then(|e| e.media.iter_mut().find(|m| m.id == media))
-        else {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return Err(MediaError::Dead);
+        };
+        let Some(m) = entry.media.iter_mut().find(|m| m.id == media) else {
             return Err(MediaError::Dead);
         };
         if m.claim.is_none() {
             return Err(MediaError::NotClaimed);
         }
+        if let Some(eng) = entry.js.as_mut() {
+            eng.deliver_media_state(
+                &m.path,
+                explorer_js::JsMediaReport {
+                    position_ms: report.position_ms,
+                    duration_ms: report.duration_ms,
+                    buffered_ms: report.buffered_ms,
+                    state: match report.state {
+                        MediaHostState::Playing => explorer_js::JsMediaHostState::Playing,
+                        MediaHostState::Paused => explorer_js::JsMediaHostState::Paused,
+                        MediaHostState::Ended => explorer_js::JsMediaHostState::Ended,
+                        MediaHostState::Error => explorer_js::JsMediaHostState::Error,
+                    },
+                    error: report.error.clone(),
+                },
+            );
+        }
         m.report = Some(report);
         Ok(())
+    }
+
+    /// Draine les ordres média émis par la page sur éléments
+    /// claimés (étape 71c) et émet `CoreEvent::MediaCommand`
+    /// pour chacun dont la surface vit encore — les commandes
+    /// d'une surface morte tombent (l'hôte a déjà `MediaGone`).
+    /// Appelée au point de synchro post-script (`after_script`)
+    /// au même titre que `drain_script_net`.
+    pub(crate) fn drain_media_commands(&mut self, tab: TabId) {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        let Some(eng) = entry.js.as_mut() else {
+            return;
+        };
+        let cmds = eng.drain_media_commands();
+        for c in cmds {
+            if entry.media.iter().any(|m| m.id == c.media) {
+                let cmd = match c.cmd {
+                    explorer_js::JsMediaCmd::Play => MediaCmd::Play,
+                    explorer_js::JsMediaCmd::Pause => MediaCmd::Pause,
+                    explorer_js::JsMediaCmd::Seek { ms } => MediaCmd::Seek { ms },
+                    explorer_js::JsMediaCmd::Volume { v } => MediaCmd::Volume { v },
+                    explorer_js::JsMediaCmd::Muted { on } => MediaCmd::Muted { on },
+                    explorer_js::JsMediaCmd::Rate { r } => MediaCmd::Rate { r },
+                };
+                let _ = self.events.send(CoreEvent::MediaCommand {
+                    tab,
+                    media: c.media,
+                    cmd,
+                });
+            }
+        }
     }
 }

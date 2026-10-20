@@ -159,6 +159,79 @@ pub use explorer_jscore::CanvasOpRecord;
 /// la rejoue entière à chaque re-peinture.
 pub type CanvasOpsTable = Vec<(DomPath, Vec<CanvasOpRecord>)>;
 
+/// État de lecture rapporté par l'hôte média (étape 71c,
+/// ADR-0024) — miroir sérialisable du DTO session ; aucun
+/// type moteur ne fuit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsMediaHostState {
+    /// Lecture en cours.
+    Playing,
+    /// En pause.
+    Paused,
+    /// Fin de flux atteinte.
+    Ended,
+    /// Erreur hôte — `JsMediaReport::error` porte la cause.
+    Error,
+}
+
+/// Rapport `state` hôte relu pour le moteur (étape 71c) —
+/// positions en millisecondes, `None` duration = flux sans
+/// durée connue.
+#[derive(Debug, Clone)]
+pub struct JsMediaReport {
+    /// Tête de lecture (ms).
+    pub position_ms: u64,
+    /// Durée totale (ms) si connue.
+    pub duration_ms: Option<u64>,
+    /// Fin de la zone tampon (ms).
+    pub buffered_ms: u64,
+    /// État de lecture.
+    pub state: JsMediaHostState,
+    /// Cause si `state == Error`.
+    pub error: Option<String>,
+}
+
+/// Ordre média page → hôte (étape 71c) — drainé par la
+/// session qui émet `CoreEvent::MediaCommand`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum JsMediaCmd {
+    /// `play()`.
+    Play,
+    /// `pause()`.
+    Pause,
+    /// `currentTime`/`fastSeek` (millisecondes).
+    Seek {
+        /// Position cible.
+        ms: u64,
+    },
+    /// `volume = …` (0.0–1.0).
+    Volume {
+        /// Volume demandé.
+        v: f64,
+    },
+    /// `muted = …`.
+    Muted {
+        /// Muet demandé.
+        on: bool,
+    },
+    /// `playbackRate`/`defaultPlaybackRate = …`.
+    Rate {
+        /// Débit demandé.
+        r: f64,
+    },
+}
+
+/// Ordre média drainé — `media` = l'id de surface `u64`
+/// transmis au claim (la session route sans re-résoudre de
+/// chemin : l'identité survit aux re-parse miroir).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct JsMediaCommand {
+    /// Surface session visée.
+    pub media: u64,
+    /// Ordre demandé par la page.
+    pub cmd: JsMediaCmd,
+}
+
 /// Moteur JavaScript vu du navigateur — un contexte par document.
 /// `Send` exigé : la session est partagée derrière l'API.
 pub trait JsEngine: Send {
@@ -347,6 +420,37 @@ pub trait JsEngine: Send {
     fn drain_cookie_writes(&mut self) -> Vec<String> {
         Vec::new()
     }
+
+    /// Marque l'élément média `path` claimé par l'hôte
+    /// (`Some(codecs)`, id de surface `media`) ou releasé
+    /// (`None` — retour aux stubs honnêtes ADR-0023) — étape
+    /// 71c, contrat `MediaSurface`. L'id `media` est rappelé
+    /// dans les commandes drainées (l'identité de surface est
+    /// côté session, le chemin sert juste à résoudre le nœud
+    /// miroir une fois). Défaut : rien (pas de surface média).
+    fn set_media_claim(
+        &mut self,
+        _path: &[(String, u32)],
+        _media: u64,
+        _codecs: Option<Vec<String>>,
+    ) {
+    }
+
+    /// Relaie le rapport `state` de l'hôte claimé vers
+    /// l'élément `path` (étape 71c) — props refletées,
+    /// promesses `play()` tranchées, events DOM tirés.
+    /// Rapport sur élément non claimé/mort → ignoré.
+    /// Défaut : rien.
+    fn deliver_media_state(&mut self, _path: &[(String, u32)], _report: JsMediaReport) {}
+
+    /// Draine les ordres média émis par la page depuis le
+    /// dernier appel (`play()`/`pause()`/seek/volume/rate
+    /// sur élément claimé — étape 71c). La session les émet
+    /// en `CoreEvent::MediaCommand` vers l'hôte. Défaut :
+    /// rien (surface jamais claimée).
+    fn drain_media_commands(&mut self) -> Vec<JsMediaCommand> {
+        Vec::new()
+    }
 }
 
 /// Fabrique de contextes — une instance par document chargé.
@@ -417,6 +521,18 @@ enum Cmd {
         ty: String,
         path: Vec<(String, u32)>,
         tx: Sender<Result<bool, JsError>>,
+    },
+    SetMediaClaim {
+        path: Vec<(String, u32)>,
+        media: u64,
+        codecs: Option<Vec<String>>,
+    },
+    DeliverMediaState {
+        path: Vec<(String, u32)>,
+        report: JsMediaReport,
+    },
+    DrainMediaCommands {
+        tx: Sender<Vec<JsMediaCommand>>,
     },
     SetBudget {
         ops: u64,
@@ -769,6 +885,29 @@ impl JsEngine for JscoreEngine {
         }
         rx.recv().unwrap_or_default()
     }
+
+    fn set_media_claim(&mut self, path: &[(String, u32)], media: u64, codecs: Option<Vec<String>>) {
+        let _ = self.tx.send(Cmd::SetMediaClaim {
+            path: path.to_vec(),
+            media,
+            codecs,
+        });
+    }
+
+    fn deliver_media_state(&mut self, path: &[(String, u32)], report: JsMediaReport) {
+        let _ = self.tx.send(Cmd::DeliverMediaState {
+            path: path.to_vec(),
+            report,
+        });
+    }
+
+    fn drain_media_commands(&mut self) -> Vec<JsMediaCommand> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainMediaCommands { tx }).is_err() {
+            return Vec::new();
+        }
+        rx.recv().unwrap_or_default()
+    }
 }
 
 impl Drop for JscoreEngine {
@@ -879,6 +1018,40 @@ fn serve_side(
             let out = std::mem::take(&mut *net_q.borrow_mut());
             tx.send(out).is_ok()
         }
+        // Seam média (étape 71c) — `path` résolu en nœud
+        // miroir une fois ; les commandes drainées rappellent
+        // l'id de surface session.
+        Cmd::SetMediaClaim {
+            path,
+            media,
+            codecs,
+        } => {
+            if let Some(n) = jsd.and_then(|d| mirror_node(&d.borrow(), &path)) {
+                eng.set_media_claim(n, media, codecs);
+            }
+            true
+        }
+        Cmd::DeliverMediaState { path, report } => {
+            if let Some(n) = jsd.and_then(|d| mirror_node(&d.borrow(), &path)) {
+                let _ = eng.deliver_media_state(n, &media_report_of(report));
+            }
+            true
+        }
+        Cmd::DrainMediaCommands { tx } => {
+            let out: Vec<JsMediaCommand> = jsd
+                .map(|d| {
+                    d.borrow_mut()
+                        .media_cmds
+                        .drain(..)
+                        .map(|(media, cmd)| JsMediaCommand {
+                            media,
+                            cmd: js_media_cmd(cmd),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            tx.send(out).is_ok()
+        }
         Cmd::DeliverNet { resp, tx } => {
             let out = eng
                 .deliver_xhr_response(explorer_jscore::XhrResponse {
@@ -984,6 +1157,35 @@ const IMPLICIT_TAGS: &[&str] = &["html", "head", "body", "tbody", "thead", "tfoo
 /// retourne le `NodeId` miroir — `None` si le chemin ne mène à
 /// aucun élément compatible (arbres divergents → dégradation,
 /// pas d'event vers le mauvais nœud).
+/// Traduction rapport session → moteur (étape 71c) — aucun
+/// type `explorer_jscore` ne fuit du trait.
+fn media_report_of(r: JsMediaReport) -> explorer_jscore::MediaReport {
+    explorer_jscore::MediaReport {
+        position_ms: r.position_ms,
+        duration_ms: r.duration_ms,
+        buffered_ms: r.buffered_ms,
+        state: match r.state {
+            JsMediaHostState::Playing => explorer_jscore::MediaState::Playing,
+            JsMediaHostState::Paused => explorer_jscore::MediaState::Paused,
+            JsMediaHostState::Ended => explorer_jscore::MediaState::Ended,
+            JsMediaHostState::Error => explorer_jscore::MediaState::Error,
+        },
+        error: r.error,
+    }
+}
+
+/// Ordre moteur → contrat session (étape 71c).
+fn js_media_cmd(c: explorer_jscore::MediaCmd) -> JsMediaCmd {
+    match c {
+        explorer_jscore::MediaCmd::Play => JsMediaCmd::Play,
+        explorer_jscore::MediaCmd::Pause => JsMediaCmd::Pause,
+        explorer_jscore::MediaCmd::Seek { ms } => JsMediaCmd::Seek { ms },
+        explorer_jscore::MediaCmd::Volume { v } => JsMediaCmd::Volume { v },
+        explorer_jscore::MediaCmd::Muted { on } => JsMediaCmd::Muted { on },
+        explorer_jscore::MediaCmd::Rate { r } => JsMediaCmd::Rate { r },
+    }
+}
+
 fn mirror_node(
     d: &explorer_jscore::Dom,
     path: &[(String, u32)],

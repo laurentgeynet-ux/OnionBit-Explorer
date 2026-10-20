@@ -311,6 +311,115 @@ const DEFAULT_CANVAS_OP_LIMIT: usize = 65_536;
 /// `take_dirty_path`.
 pub type CanvasOps = Vec<(Vec<(String, u32)>, Vec<CanvasOpRecord>)>;
 
+/// État de lecture rapporté par l'hôte média (étape 71c,
+/// ADR-0024) — miroir du DTO session ; le moteur ne décode
+/// rien, il reflète ce que l'hôte claimé rapporte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaState {
+    /// Lecture en cours.
+    Playing,
+    /// En pause.
+    Paused,
+    /// Fin de flux atteinte.
+    Ended,
+    /// Erreur hôte — `MediaReport::error` porte la cause.
+    Error,
+}
+
+/// Rapport `state` hôte → moteur (étape 71c) — positions en
+/// millisecondes, `None` duration = flux sans durée connue.
+#[derive(Debug, Clone)]
+pub struct MediaReport {
+    /// Tête de lecture (ms).
+    pub position_ms: u64,
+    /// Durée totale (ms) si connue.
+    pub duration_ms: Option<u64>,
+    /// Fin de la zone tampon (ms).
+    pub buffered_ms: u64,
+    /// État de lecture.
+    pub state: MediaState,
+    /// Cause si `state == Error`.
+    pub error: Option<String>,
+}
+
+/// Ordre média page → hôte, drainé par l'embedder qui le
+/// relaie à l'hôte claimé (étape 71c — `MediaCommand` SSE).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MediaCmd {
+    /// `play()`.
+    Play,
+    /// `pause()`.
+    Pause,
+    /// `currentTime`/`fastSeek` (millisecondes).
+    Seek {
+        /// Position cible.
+        ms: u64,
+    },
+    /// `volume = …` (0.0–1.0).
+    Volume {
+        /// Volume demandé.
+        v: f64,
+    },
+    /// `muted = …`.
+    Muted {
+        /// Muet demandé.
+        on: bool,
+    },
+    /// `playbackRate`/`defaultPlaybackRate = …`.
+    Rate {
+        /// Débit demandé.
+        r: f64,
+    },
+}
+
+/// État `HTMLMediaElement` claimé (étape 71c) — présent dans
+/// [`Dom::media`] tant que l'hôte détient la surface ; la
+/// release purge l'entrée → retour aux stubs honnêtes
+/// (ADR-0023 : jamais de faux succès).
+#[derive(Debug)]
+pub struct MediaElState {
+    /// `media: u64` de la surface session — rappelé dans les
+    /// commandes drainées (l'hôte identifie sa surface).
+    pub media: u64,
+    /// Codecs déclarés au claim — base de `canPlayType`.
+    pub codecs: Vec<String>,
+    /// Dernier rapport `state` hôte.
+    pub report: Option<MediaReport>,
+    /// `volume` géré localement (défaut spec 1.0).
+    pub volume: f64,
+    /// `playbackRate` géré localement (défaut 1.0).
+    pub rate: f64,
+    /// Seek en vol — le prochain rapport qui bouge la tête
+    /// clôt par l'event `seeked`.
+    pub seek_pending: bool,
+    /// `loadedmetadata` déjà dispatché.
+    pub metadata_fired: bool,
+    /// Dernière durée rapportée (`durationchange` sur
+    /// variation).
+    pub last_duration: Option<u64>,
+    /// Promesses `play()` en attente — résolues au premier
+    /// rapport `playing`, rejetées sur `error`/release.
+    pub pending_play: Vec<crate::value::ObjId>,
+}
+
+impl MediaElState {
+    /// État frais d'une surface nouvellement claimée.
+    #[must_use]
+    pub fn new(media: u64, codecs: Vec<String>) -> Self {
+        Self {
+            media,
+            codecs,
+            report: None,
+            volume: 1.0,
+            rate: 1.0,
+            seek_pending: false,
+            metadata_fired: false,
+            last_duration: None,
+            pending_play: Vec::new(),
+        }
+    }
+}
+
 /// A standalone DOM tree: node arena + document root.
 #[derive(Debug)]
 pub struct Dom {
@@ -325,6 +434,16 @@ pub struct Dom {
     /// (bornage + marquage sale). Meurt avec le document —
     /// le bitmap appartient à la page.
     pub canvases: HashMap<NodeId, CanvasState>,
+    /// Surfaces média claimées par l'hôte (étape 71c,
+    /// ADR-0024) — indexées par nœud miroir, meurent avec le
+    /// document (une navigation re-claim tout avec des ids
+    /// neufs). Vide tant que rien n'est claimé : les stubs
+    /// honnêtes ADR-0023 s'appliquent.
+    pub media: HashMap<NodeId, MediaElState>,
+    /// Ordres média page → hôte en file (étape 71c) —
+    /// `(media, cmd)`, drainés par l'adaptateur
+    /// (`drain_media_commands`) qui les relaie vers l'hôte.
+    pub media_cmds: Vec<(u64, MediaCmd)>,
     /// Borne d'ops par canvas (réglable `set_canvas_op_limit`).
     canvas_op_limit: usize,
     /// Marqué par toute mutation structurelle/attributaire — l'embedder
@@ -364,6 +483,8 @@ impl Dom {
             observers: HashMap::new(),
             mutations: Vec::new(),
             canvases: HashMap::new(),
+            media: HashMap::new(),
+            media_cmds: Vec::new(),
             canvas_op_limit: DEFAULT_CANVAS_OP_LIMIT,
         };
         d.root = d.alloc(NodeKind::Element, "#document");

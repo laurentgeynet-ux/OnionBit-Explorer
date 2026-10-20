@@ -73,6 +73,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   inchangés ; la délégation JS (`MediaCommand`, props)
   arrive à 71c.
 
+- **Étape 71c — Seam `MediaSurface` : délégation JS**
+  (`explorer-jscore`, `explorer-js`, `explorer-core`,
+  `explorer-api`) : la surface **claimée** délègue la
+  lecture à l'hôte — `claim`/`release`/`state` poussés au
+  miroir via `JsEngine::set_media_claim`/
+  `deliver_media_state` (résolution `path` → nœud miroir),
+  les ordres page (`play`/`pause`/`seek`/`volume`/`muted`/
+  `rate`) drainés par la session partent en
+  `CoreEvent::MediaCommand` SSE avec l'id de surface
+  rappelé. `play()` rend une promesse tenue au premier
+  rapport `playing` (rejetée `error`/`release` —
+  `NotSupportedError`), `canPlayType` reflète les `codecs`
+  du claim (`"probably"`/`"maybe"`/`""`), les props
+  `HTMLMediaElement` reflètent le `MediaReport`
+  (`paused`/`ended`/`seeking`/`currentTime`/`duration`/
+  `buffered`/`played`/`seekable` en `TimeRanges` réels,
+  `readyState`/`networkState`/`volume`/`playbackRate`/
+  `error`) et les events DOM non-bubblants tirent sur les
+  transitions (`loadedmetadata`, `durationchange`,
+  `play`+`playing`, `pause`, `seeked`, `timeupdate`,
+  `ended`, `error`, `volumechange`, `ratechange`,
+  `seeking`). Identité : le `media: u64` session est
+  transmis au claim et rappelé dans les commandes —
+  robuste aux re-parse (les chemins d'élément peuvent
+  bouger). **Clause honnêteté conservée** : non claimée,
+  release ou hôte muet = stubs ADR-0023 inchangés, jamais
+  de faux succès. Ajustement contractuel v1
+  (pré-consommateur) : `MediaCmd::Muted{on}` ajouté —
+  distinct de `volume=0` (le dé-mute restaure le volume) —
+  et `Volume`/`Rate` alignés `f64`. Tests :
+  `media_js_commands_only_when_claimed`,
+  `media_js_report_resolves_play_and_reflects_props`.
+
 - **R-33 — Perf : propagation par translation dans le
   relayout incrémental** (`explorer-layout`) : attribution
   du ×10 `incr.remap_relayout` (150,3 s terrain / ~14 s

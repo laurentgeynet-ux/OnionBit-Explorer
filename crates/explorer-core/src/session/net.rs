@@ -301,6 +301,7 @@ impl Session {
             }
         }
         self.drain_script_net(tab);
+        self.drain_media_commands(tab);
     }
 
     /// Livre les réponses arrivées — synchrone, sans yield :

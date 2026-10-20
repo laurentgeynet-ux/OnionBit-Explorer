@@ -844,11 +844,23 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     `media_ids_fresh_after_freeze_restore`,
     `media_moved_on_relayout_only_when_rect_changes`,
     REST `media_claim_state_and_gone`.
-  - [ ] **71c — délégation JS** : surface claimée →
+  - [x] **71c — délégation JS** : surface claimée →
     `MediaCommand` relayé à l'hôte (`play`/`pause`/`seek`/
-    `volume`/`rate`), `play()` résout au premier
-    `state:"playing"`, props et events DOM refletés depuis
-    `MediaReport` ; non claimée = stubs ADR-0023 inchangés.
+    `volume`/`muted`/`rate`), `play()` résout au premier
+    `state:"playing"` (rejetée sur `error`/release), props
+    refletées depuis `MediaReport` (`paused`/`currentTime`/
+    `duration`/`buffered`/`played`/`seekable`/`readyState`/
+    `networkState`/`volume`/`playbackRate`/`error`) et events
+    DOM non-bubblants tirés (`loadedmetadata`, `durationchange`,
+    `play`+`playing`, `pause`, `seeked`, `timeupdate`, `ended`,
+    `error`, `volumechange`, `ratechange`, `seeking`) ; non
+    claimée = stubs ADR-0023 inchangés. Identité : le
+    `media: u64` session transmis au claim est rappelé dans
+    les commandes drainées (robuste aux re-paths). Ajout
+    contractuel v1 : `MediaCmd::Muted` (distinct de
+    `volume=0` — le dé-mute restaure). Tests :
+    `media_js_commands_only_when_claimed`,
+    `media_js_report_resolves_play_and_reflects_props`.
   - [ ] **71d — composite Flutter** : overlay de lecture
     positionné sur `rect - scroll_y`, hôte
     `AbstractPlayerEngine`/`fvp` comme consommateur de

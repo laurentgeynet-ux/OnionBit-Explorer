@@ -9,7 +9,9 @@
 //! `innerHTML`, `className`, `style`, `value`, `addEventListener`
 //! (dispatch réelle = JS-3), `querySelector` à sélecteur simple.
 
-use crate::dom::{CanvasOpRecord, Dom, NodeId, NodeKind};
+use crate::dom::{
+    CanvasOpRecord, Dom, MediaCmd, MediaElState, MediaReport, MediaState, NodeId, NodeKind,
+};
 use crate::heap::{Host, JsResult, ObjKind};
 use crate::value::{ObjId, Value};
 use crate::Engine;
@@ -523,6 +525,149 @@ impl Engine {
         Ok(state.prevented.get())
     }
 
+    /// `set_media_claim` (étape 71c, ADR-0024) : l'embedder
+    /// marque l'élément `node` claimé par l'hôte
+    /// (`Some(codecs)`, id de surface `media`) ou releasé
+    /// (`None` — retour aux stubs honnêtes ADR-0023, promesses
+    /// `play()` pendantes rejetées `NotSupportedError`). Un
+    /// claim sur élément déjà claimé met à jour id + codecs
+    /// (ré-offre = id neuf, promesses conservées : l'élément
+    /// persiste).
+    pub fn set_media_claim(&mut self, node: NodeId, media: u64, codecs: Option<Vec<String>>) {
+        let Some((dom, _)) = self.dom_ctx.clone() else {
+            return;
+        };
+        let pending = {
+            let mut d = dom.borrow_mut();
+            match codecs {
+                Some(c) => {
+                    match d.media.get_mut(&node) {
+                        Some(st) => {
+                            st.media = media;
+                            st.codecs = c;
+                        }
+                        None => {
+                            d.media.insert(node, MediaElState::new(media, c));
+                        }
+                    }
+                    return;
+                }
+                None => d.media.remove(&node).map(|st| st.pending_play),
+            }
+        };
+        if let Some(pids) = pending {
+            let msg = self.str_val("NotSupportedError: no supported media");
+            for p in pids {
+                self.reject_promise(p, msg);
+            }
+            let _ = self.run_microtasks();
+        }
+    }
+
+    /// `deliver_media_state` (étape 71c) : l'embedder relaie le
+    /// rapport `state` de l'hôte claimé. Les props reflètent le
+    /// rapport, les promesses `play()` tranchent (`playing` →
+    /// résolution, `error` → rejet) et les events DOM
+    /// **non-bubblants** suivent les transitions :
+    /// `loadedmetadata` (premier rapport), `durationchange`,
+    /// `seeked` (seek en vol + tête déplacée), `play`+`playing`,
+    /// `pause`, `ended`, `error`, `timeupdate` (tête déplacée).
+    /// Rapport sur élément non claimé → ignoré (l'offre morte
+    /// ne réveille pas de surface).
+    ///
+    /// # Errors
+    /// Propage la première exception de listener DOM.
+    pub fn deliver_media_state(&mut self, node: NodeId, rep: &MediaReport) -> JsResult<()> {
+        let Some((dom, cache)) = self.dom_ctx.clone() else {
+            return Ok(());
+        };
+        let mut events: Vec<&'static str> = Vec::new();
+        let mut pids = Vec::new();
+        let mut err_msg = String::new();
+        {
+            let mut d = dom.borrow_mut();
+            let Some(st) = d.media.get_mut(&node) else {
+                return Ok(());
+            };
+            let prev = st.report.replace(rep.clone());
+            let prev_state = prev.as_ref().map(|r| r.state);
+            let prev_pos = prev.map(|r| r.position_ms);
+            if !st.metadata_fired {
+                st.metadata_fired = true;
+                events.push("loadedmetadata");
+            }
+            if st.last_duration != rep.duration_ms {
+                st.last_duration = rep.duration_ms;
+                events.push("durationchange");
+            }
+            if st.seek_pending && prev_pos != Some(rep.position_ms) {
+                st.seek_pending = false;
+                events.push("seeked");
+            }
+            match rep.state {
+                MediaState::Playing if prev_state != Some(MediaState::Playing) => {
+                    events.push("play");
+                    events.push("playing");
+                    pids = std::mem::take(&mut st.pending_play);
+                }
+                MediaState::Paused if prev_state != Some(MediaState::Paused) => {
+                    events.push("pause");
+                }
+                MediaState::Ended if prev_state != Some(MediaState::Ended) => {
+                    events.push("ended");
+                }
+                MediaState::Error if prev_state != Some(MediaState::Error) => {
+                    events.push("error");
+                    err_msg = rep
+                        .error
+                        .clone()
+                        .unwrap_or_else(|| "MediaError".to_string());
+                    pids = std::mem::take(&mut st.pending_play);
+                }
+                _ => {}
+            }
+            if prev_pos != Some(rep.position_ms) {
+                events.push("timeupdate");
+            }
+        }
+        if rep.state == MediaState::Error {
+            let msg = self.str_val(&err_msg);
+            for p in pids {
+                self.reject_promise(p, msg);
+            }
+        } else {
+            for p in pids {
+                self.resolve_promise(p, Value::Undefined);
+            }
+        }
+        for ty in events {
+            self.dispatch_media(&dom, &cache, node, ty)?;
+        }
+        self.run_microtasks()?;
+        Ok(())
+    }
+
+    /// Event média **non-bubblant** (spec `HTMLMediaElement` :
+    /// `play`/`pause`/`ended`/`timeupdate`… ne remontent pas).
+    /// La phase de capture reste spec (ancêtres en capture).
+    pub(crate) fn dispatch_media(
+        &mut self,
+        dom: &DomRef,
+        cache: &NodeCache,
+        node: NodeId,
+        ty: &str,
+    ) -> JsResult<()> {
+        let state = Rc::new(EventState {
+            ty: RefCell::new(ty.to_string()),
+            target: Cell::new(node),
+            current: Cell::new(None),
+            bubbles: Cell::new(false),
+            stopped: Cell::new(false),
+            prevented: Cell::new(false),
+        });
+        self.propagate_event(dom, cache, &state)
+    }
+
     /// Fire a simple bubbling event (`click()`, `submit()`… and the
     /// future platform-event entry point — JS-3/JS-5).
     pub(crate) fn dispatch_simple(
@@ -947,6 +1092,346 @@ fn time_ranges_empty(e: &mut Engine) -> Value {
     Value::Obj(o)
 }
 
+/// `TimeRanges` rempli (étape 71c) — `length` + `start(i)`/
+/// `end(i)` en secondes, `INDEX_SIZE_ERR` hors-bornes (spec).
+struct TimeRangesHost {
+    spans: Vec<(f64, f64)>,
+}
+
+impl Host for TimeRangesHost {
+    fn class_name(&self) -> &'static str {
+        "TimeRanges"
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn get(&self, _e: &mut Engine, _this: Value, key: &str) -> JsResult<Option<Value>> {
+        Ok(match key {
+            "length" => Some(Value::Num(self.spans.len() as f64)),
+            _ => None,
+        })
+    }
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _this: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        let i = match args.first() {
+            Some(Value::Num(n)) if *n >= 0.0 => *n as usize,
+            _ => usize::MAX,
+        };
+        Ok(match name {
+            "start" | "end" => match self.spans.get(i) {
+                Some(&(a, b)) => Some(Value::Num(if name == "start" { a } else { b })),
+                None => return Err(e.type_error("TimeRanges: index out of bounds")),
+            },
+            _ => None,
+        })
+    }
+}
+
+/// `TimeRanges` de `spans` (secondes) — vide → objet léger,
+/// non vide → host object `TimeRanges`.
+fn time_ranges(e: &mut Engine, spans: Vec<(f64, f64)>) -> Value {
+    if spans.is_empty() {
+        return time_ranges_empty(e);
+    }
+    e.new_host_object(Rc::new(TimeRangesHost { spans }))
+}
+
+/// Prop `HTMLMediaElement` (étape 58/71c) — **non claimé** :
+/// stubs honnêtes ADR-0023 ; **claimé** : reflet du dernier
+/// rapport `state` hôte et des réglages locaux (ADR-0024).
+fn media_prop(e: &mut Engine, dom: &DomRef, node: NodeId, key: &str) -> Value {
+    let d = dom.borrow();
+    let Some(st) = d.media.get(&node) else {
+        return match key {
+            "paused" | "preservesPitch" => Value::Bool(true),
+            "ended" | "seeking" | "disableRemotePlayback" => Value::Bool(false),
+            "volume" | "playbackRate" | "defaultPlaybackRate" => Value::Num(1.0),
+            "currentTime" | "videoWidth" | "videoHeight" | "readyState" => Value::Num(0.0),
+            "duration" => Value::Num(f64::NAN),
+            // `src` présent mais indécodable → NO_SOURCE ;
+            // sinon EMPTY.
+            "networkState" => Value::Num(if d.has_attr(node, "src") { 3.0 } else { 0.0 }),
+            "currentSrc" => e.str_val(""),
+            "buffered" | "played" | "seekable" => time_ranges_empty(e),
+            // `error`, `mediaGroup`, `controller`.
+            _ => Value::Null,
+        };
+    };
+    let rep = st.report.as_ref();
+    let state = rep.map(|r| r.state);
+    match key {
+        "paused" => Value::Bool(state != Some(MediaState::Playing)),
+        "ended" => Value::Bool(state == Some(MediaState::Ended)),
+        "seeking" => Value::Bool(st.seek_pending),
+        "preservesPitch" => Value::Bool(true),
+        "disableRemotePlayback" => Value::Bool(false),
+        "volume" => Value::Num(st.volume),
+        "playbackRate" | "defaultPlaybackRate" => Value::Num(st.rate),
+        "currentTime" => Value::Num(rep.map_or(0.0, |r| r.position_ms as f64 / 1000.0)),
+        "duration" => Value::Num(
+            rep.and_then(|r| r.duration_ms)
+                .map_or(f64::NAN, |d| d as f64 / 1000.0),
+        ),
+        // Rapport présent = métadonnées + données reçues →
+        // HAVE_ENOUGH_DATA (4) ; claimé sans rapport → rien (0).
+        "readyState" => Value::Num(if rep.is_some() { 4.0 } else { 0.0 }),
+        // Claimé en attente du premier `state` → LOADING (2) ;
+        // rapport présent → IDLE (1). Claimé ≠ NO_SOURCE.
+        "networkState" => Value::Num(if rep.is_some() { 1.0 } else { 2.0 }),
+        "currentSrc" => e.str_val(d.attr(node, "src").unwrap_or("")),
+        "buffered" => time_ranges(
+            e,
+            rep.map_or_else(Vec::new, |r| vec![(0.0, r.buffered_ms as f64 / 1000.0)]),
+        ),
+        "played" => time_ranges(
+            e,
+            rep.map_or_else(Vec::new, |r| vec![(0.0, r.position_ms as f64 / 1000.0)]),
+        ),
+        "seekable" => time_ranges(
+            e,
+            rep.and_then(|r| r.duration_ms)
+                .map_or_else(Vec::new, |d| vec![(0.0, d as f64 / 1000.0)]),
+        ),
+        "error" => match rep.filter(|r| r.state == MediaState::Error) {
+            Some(r) => {
+                let msg = e.str_val(r.error.as_deref().unwrap_or("MediaError"));
+                let o = e.new_object();
+                e.set_own(o, "code", Value::Num(4.0), true);
+                e.set_own(o, "message", msg, true);
+                Value::Obj(o)
+            }
+            None => Value::Null,
+        },
+        // `videoWidth`/`videoHeight` non rapportés par l'hôte v1
+        // → 0 honnête ; `mediaGroup`/`controller` → null.
+        _ => {
+            if matches!(key, "videoWidth" | "videoHeight") {
+                Value::Num(0.0)
+            } else {
+                Value::Null
+            }
+        }
+    }
+}
+
+/// Écriture `HTMLMediaElement` claimée (étape 71c) : les
+/// props de lecture mutent l'état local **et** enfilent
+/// l'ordre vers l'hôte (`media_cmds` → `MediaCommand` SSE) ;
+/// les events spec sont tirés (`seeking`, `volumechange`,
+/// `ratechange`). Non traitée → `false` (fallback générique).
+fn media_set_claimed(
+    e: &mut Engine,
+    dom: &DomRef,
+    cache: &NodeCache,
+    node: NodeId,
+    key: &str,
+    v: Value,
+) -> JsResult<bool> {
+    let num = |e: &mut Engine, v: Value| -> JsResult<f64> {
+        Ok(match v {
+            Value::Num(n) => n,
+            other => e
+                .to_js_string(other)?
+                .trim()
+                .parse::<f64>()
+                .unwrap_or(f64::NAN),
+        })
+    };
+    let cmd = match key {
+        "currentTime" => {
+            let ms = (num(e, v)? * 1000.0).max(0.0) as u64;
+            let mut d = dom.borrow_mut();
+            if let Some(st) = d.media.get_mut(&node) {
+                st.seek_pending = true;
+                let m = st.media;
+                d.media_cmds.push((m, MediaCmd::Seek { ms }));
+            }
+            drop(d);
+            e.dispatch_media(dom, cache, node, "seeking")?;
+            e.run_microtasks()?;
+            return Ok(true);
+        }
+        "volume" => MediaCmd::Volume {
+            v: num(e, v)?.clamp(0.0, 1.0),
+        },
+        "playbackRate" | "defaultPlaybackRate" => MediaCmd::Rate { r: num(e, v)? },
+        "muted" => MediaCmd::Muted {
+            on: e.to_boolean(v),
+        },
+        _ => return Ok(false),
+    };
+    let ty = match cmd {
+        MediaCmd::Volume { .. } | MediaCmd::Muted { .. } => "volumechange",
+        MediaCmd::Rate { .. } => "ratechange",
+        _ => "",
+    };
+    {
+        let mut d = dom.borrow_mut();
+        let mut muted = None;
+        if let Some(st) = d.media.get_mut(&node) {
+            match cmd {
+                MediaCmd::Volume { v } => st.volume = v,
+                MediaCmd::Rate { r } => {
+                    if r.is_finite() && r > 0.0 {
+                        st.rate = r;
+                    } else {
+                        return Ok(true);
+                    }
+                }
+                MediaCmd::Muted { on } => muted = Some(on),
+                _ => {}
+            }
+            let m = st.media;
+            d.media_cmds.push((m, cmd));
+        }
+        if let Some(on) = muted {
+            if on {
+                d.set_attr(node, "muted", "");
+            } else {
+                d.remove_attr(node, "muted");
+            }
+        }
+    }
+    e.dispatch_media(dom, cache, node, ty)?;
+    e.run_microtasks()?;
+    Ok(true)
+}
+
+/// Méthode `HTMLMediaElement` **claimée** (étape 71c) :
+/// `play()` enfile l'ordre `Play` et rend une promesse tenue
+/// au premier rapport `playing` (rejetée `error`/release) —
+/// déjà `playing` → résolue d'office. `canPlayType` reflète
+/// les codecs déclarés au claim (`"probably"` si un token
+/// codec matche, `"maybe"` si seul le MIME matche, `""`
+/// sinon). EME/sink/tracks restent non supportés même
+/// claimés — jamais de faux succès.
+fn media_call_claimed(
+    e: &mut Engine,
+    dom: &DomRef,
+    cache: &NodeCache,
+    node: NodeId,
+    name: &str,
+    args: &[Value],
+) -> JsResult<Option<Value>> {
+    match name {
+        "play" => {
+            let playing = {
+                let mut d = dom.borrow_mut();
+                match d.media.get_mut(&node) {
+                    Some(st)
+                        if matches!(
+                            st.report.as_ref().map(|r| r.state),
+                            Some(MediaState::Playing)
+                        ) =>
+                    {
+                        None
+                    }
+                    Some(st) => {
+                        let pid = e.new_promise();
+                        st.pending_play.push(pid);
+                        let m = st.media;
+                        d.media_cmds.push((m, MediaCmd::Play));
+                        Some(pid)
+                    }
+                    None => None,
+                }
+            };
+            Ok(Some(if let Some(pid) = playing {
+                Value::Obj(pid)
+            } else {
+                let pid = e.new_promise();
+                e.resolve_promise(pid, Value::Undefined);
+                Value::Obj(pid)
+            }))
+        }
+        "pause" => {
+            let mut d = dom.borrow_mut();
+            if let Some(st) = d.media.get_mut(&node) {
+                let m = st.media;
+                d.media_cmds.push((m, MediaCmd::Pause));
+            }
+            Ok(Some(Value::Undefined))
+        }
+        "fastSeek" => {
+            let sec = match args.first() {
+                Some(Value::Num(n)) => *n,
+                Some(other) => e.to_js_string(*other)?.trim().parse::<f64>().unwrap_or(0.0),
+                None => 0.0,
+            };
+            let ms = (sec * 1000.0).max(0.0) as u64;
+            {
+                let mut d = dom.borrow_mut();
+                if let Some(st) = d.media.get_mut(&node) {
+                    st.seek_pending = true;
+                    let m = st.media;
+                    d.media_cmds.push((m, MediaCmd::Seek { ms }));
+                }
+            }
+            e.dispatch_media(dom, cache, node, "seeking")?;
+            e.run_microtasks()?;
+            Ok(Some(Value::Undefined))
+        }
+        "canPlayType" => {
+            let t = match args.first() {
+                Some(v) => e.to_js_string(*v)?.to_lowercase(),
+                None => String::new(),
+            };
+            let codecs = dom
+                .borrow()
+                .media
+                .get(&node)
+                .map(|st| st.codecs.clone())
+                .unwrap_or_default();
+            Ok(Some(e.str_val(can_play(&t, &codecs))))
+        }
+        // Claimé ≠ EME ni sortie audio alternative — rejets
+        // honnêtes maintenus (ADR-0023).
+        "setSinkId" | "setMediaKeys" => {
+            let pid = e.new_promise();
+            let msg = e.str_val("NotSupportedError: no supported media");
+            e.reject_promise(pid, msg);
+            Ok(Some(Value::Obj(pid)))
+        }
+        "addTextTrack" | "captureStream" => Ok(Some(Value::Null)),
+        _ => Ok(Some(Value::Undefined)),
+    }
+}
+
+/// `canPlayType` contre les codecs déclarés au claim
+/// (étape 71c) — token codec présent dans l'argument →
+/// `"probably"` ; seule la base MIME matche → `"maybe"` ;
+/// rien → `""`.
+fn can_play(arg: &str, declared: &[String]) -> &'static str {
+    let mime = arg.split(';').next().unwrap_or("").trim();
+    if mime.is_empty() {
+        return "";
+    }
+    let mut mime_hit = false;
+    for c in declared {
+        let c = c.to_lowercase();
+        let c = c.trim();
+        if c.is_empty() {
+            continue;
+        }
+        if arg.contains(c) {
+            return "probably";
+        }
+        if c.contains(mime) || c.starts_with(mime) {
+            mime_hit = true;
+        }
+    }
+    if mime_hit {
+        "maybe"
+    } else {
+        ""
+    }
+}
+
 impl Host for NodeHost {
     fn class_name(&self) -> &'static str {
         match self.dom.borrow().nodes[self.node as usize].tag.as_str() {
@@ -1200,10 +1685,9 @@ impl Host for NodeHost {
                 }
                 return Ok(Some(Value::Obj(obj)));
             }
-            // -- `HTMLMediaElement` (étape 58, ADR-0023) --------------
-            // Stubs honnêtes : aucune donnée décodée — les
-            // valeurs reflètent « rien à lire » plutôt qu'un
-            // faux état de lecture.
+            // -- `HTMLMediaElement` (étape 58/71c) ------------------
+            // Non claimé : stubs honnêtes ADR-0023. Claimé :
+            // reflet du rapport `state` hôte (ADR-0024).
             "paused"
             | "ended"
             | "seeking"
@@ -1227,24 +1711,7 @@ impl Host for NodeHost {
             | "controller"
                 if is_media(&self.dom, node) =>
             {
-                return Ok(Some(match key {
-                    "paused" | "preservesPitch" => Value::Bool(true),
-                    "ended" | "seeking" | "disableRemotePlayback" => Value::Bool(false),
-                    "volume" | "playbackRate" | "defaultPlaybackRate" => Value::Num(1.0),
-                    "currentTime" | "videoWidth" | "videoHeight" | "readyState" => Value::Num(0.0),
-                    "duration" => Value::Num(f64::NAN),
-                    // `src` présent mais indécodable → NO_SOURCE ;
-                    // sinon EMPTY.
-                    "networkState" => Value::Num(if self.dom.borrow().has_attr(node, "src") {
-                        3.0
-                    } else {
-                        0.0
-                    }),
-                    "currentSrc" => e.str_val(""),
-                    "buffered" | "played" | "seekable" => time_ranges_empty(e),
-                    // `error`, `mediaGroup`, `controller`.
-                    _ => Value::Null,
-                }));
+                return Ok(Some(media_prop(e, &self.dom, node, key)));
             }
             _ => {}
         }
@@ -1318,22 +1785,27 @@ impl Host for NodeHost {
                 }
                 Ok(false)
             }
-            // `HTMLMediaElement` (étape 58) — props IDL sans
-            // attribut : l'écriture est acceptée-ignorée (le
-            // stub n'a pas d'état de lecture à muter) plutôt
-            // qu'échouée — les scripts réels écrivent
-            // `volume`/`currentTime` sans rien vérifier.
+            // `HTMLMediaElement` (étape 58/71c) — non claimé :
+            // l'écriture est acceptée-ignorée (le stub n'a pas
+            // d'état de lecture à muter) plutôt qu'échouée.
+            // Claimé : `media_set_claimed` mute l'état local,
+            // enfile l'ordre hôte et tire l'event spec.
             "currentTime"
             | "volume"
             | "playbackRate"
             | "defaultPlaybackRate"
+            | "muted"
             | "preservesPitch"
             | "disableRemotePlayback"
             | "disablePictureInPicture"
             | "mediaGroup"
                 if is_media(&self.dom, node) =>
             {
-                Ok(true)
+                if self.dom.borrow().media.contains_key(&node) {
+                    media_set_claimed(e, &self.dom, &self.cache, node, key, v)
+                } else {
+                    Ok(true)
+                }
             }
             "value" => {
                 let s = e.to_js_string(v)?;
@@ -1696,13 +2168,17 @@ impl Host for NodeHost {
                 }
                 Ok(Some(Value::Obj(r)))
             }
-            // `HTMLMediaElement` (étape 58, ADR-0023) — stubs
-            // honnêtes : aucun codec embarqué, jamais de faux
-            // succès.
+            // `HTMLMediaElement` (étape 58/71c, ADR-0023/24) —
+            // non claimé : stubs honnêtes, jamais de faux
+            // succès. Claimé : délégation hôte (`play()` tenu
+            // par le premier `playing` rapporté).
             "play" | "pause" | "load" | "fastSeek" | "canPlayType" | "setSinkId"
             | "addTextTrack" | "captureStream" | "setMediaKeys"
                 if is_media(&self.dom, node) =>
             {
+                if self.dom.borrow().media.contains_key(&node) {
+                    return media_call_claimed(e, &self.dom, &self.cache, node, name, args);
+                }
                 match name {
                     // Spec : sans ressource décodable la
                     // promesse rejette `NotSupportedError` —

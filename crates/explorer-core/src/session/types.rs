@@ -208,12 +208,18 @@ pub enum MediaCmd {
     /// `volume = …` (0.0–1.0).
     Volume {
         /// Volume demandé.
-        v: f32,
+        v: f64,
+    },
+    /// `muted = …` (étape 71c — distinct de `volume = 0` :
+    /// le dé-mute restaure le volume courant).
+    Muted {
+        /// Muet demandé.
+        on: bool,
     },
     /// `playbackRate = …`.
     Rate {
         /// Débit demandé.
-        r: f32,
+        r: f64,
     },
 }
 

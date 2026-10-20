@@ -64,7 +64,9 @@ mod typed_array;
 mod value;
 mod xhr;
 
-pub use dom::{CanvasOpRecord, CanvasState, Dom, NodeId};
+pub use dom::{
+    CanvasOpRecord, CanvasState, Dom, MediaCmd, MediaElState, MediaReport, MediaState, NodeId,
+};
 pub use dom_host::{CookieJar, DomRef, FormSubmit};
 pub use error::{Error, Result};
 pub use heap::Host;
