@@ -488,10 +488,21 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   **289 ms** release ; `encode_png` 4,3 s → **125 ms**
   release. 3 tests permanents `text.rs` (dédupe source,
   cohérence métriques/shape, fonte invalide jamais panic).
-  WPT 57/57, Acid2 99,5 % inchangés. Reste chez NAV : la
-  répétition des `relayout_dom` progressifs sous verrou et
-  le miroir DOM→JS de `spawn_engine` sur 3 000 nœuds —
-  réception-baseline mission 21-F.
+  WPT 57/57, Acid2 99,5 % inchangés. **Réception terrain
+  (même protocole que M21-F, worktree fieldwork à
+  `c2488c6`, debug)** : wall `heavy.html` **706 → 38,3 s
+  (×18)** — sous la barre de la minute ; gel API **réduit
+  mais présent** : le verrou session reste tenu pour toute
+  la nav (polls `/api/status` tenus ~35 s pendant le
+  commit, ~1,4 ms après) — `commit.apply_queued` ~31 µs
+  sur storm (hand-off détaché 55h quasi libre), API ~2 ms
+  pendant les mutations. Décomposition du reliquat 38 s :
+  ~6-10 `relayout_dom` progressifs (~3,4 s debug chacun,
+  cadence 32 Kio/100 ms) + miroir DOM→JS de `spawn_engine`
+  sur ~9 000 nœuds — **file NAV** (options notées :
+  miroir détaché façon 55h, cadence adaptative, verrou
+  par onglet). Mesures debug — en release le gel serait
+  ~3-5 s, la *structure* du verrou reste à corriger.
 - [ ] **R-34. Médias vrais remplacés boxtree**
   (résidu étape 58, demande consignée) : `video`/`audio`
   comme remplacés natifs — taille intrinsèque de l'affiche
