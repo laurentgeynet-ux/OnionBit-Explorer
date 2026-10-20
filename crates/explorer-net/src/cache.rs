@@ -255,7 +255,10 @@ impl HttpTransport for CachingTransport {
                     for (n, v) in &resp.headers {
                         if !matches!(
                             n.to_ascii_lowercase().as_str(),
-                            "content-length" | "transfer-encoding"
+                            // Corps stocké décodé : la taille filaire
+                            // et l'encodage filaire du 304 ne
+                            // correspondent pas à ce que nous avons.
+                            "content-length" | "transfer-encoding" | "content-encoding"
                         ) {
                             e.headers.retain(|(en, _)| !en.eq_ignore_ascii_case(n));
                             e.headers.push((n.clone(), v.clone()));

@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime};
 
 use explorer_net::cache::{CacheConfig, CachingTransport, MemoryCache};
 use explorer_net::cookies::{CookieConfig, CookieJar, CookieTransport};
+use explorer_net::decode::DecodingTransport;
 use explorer_net::h1::{H1Client, HttpConfig, TcpConnector};
 use explorer_net::http::{HttpTransport, Initiator, Method, Request};
 use explorer_net::url::Url;
@@ -344,7 +345,12 @@ async fn cookie_roundtrip_over_wire() {
 // -- MemoryCache / CachingTransport -------------------------------------
 
 /// Serveur scripté : une séquence de réponses, log des requêtes.
-async fn serve_seq(responses: Vec<&'static str>) -> (u16, mpsc::UnboundedReceiver<String>) {
+/// `T = &'static str` pour les réponses texte, `Vec<u8>` pour les
+/// réponses binaires (corps compressés).
+async fn serve_seq<T>(responses: Vec<T>) -> (u16, mpsc::UnboundedReceiver<String>)
+where
+    T: AsRef<[u8]> + Send + Sync + 'static,
+{
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let (tx, rx) = mpsc::unbounded_channel();
@@ -376,7 +382,7 @@ async fn serve_seq(responses: Vec<&'static str>) -> (u16, mpsc::UnboundedReceive
                 let _ = tx.send(String::from_utf8_lossy(&buf).into_owned());
                 let idx = i.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if idx < responses.len() {
-                    let _ = sock.write_all(responses[idx].as_bytes()).await;
+                    let _ = sock.write_all(responses[idx].as_ref()).await;
                 }
             });
         }
@@ -427,6 +433,54 @@ async fn stale_revalidates_304() {
     let _ = rx.recv().await;
     let second = rx.recv().await.unwrap();
     assert!(second.contains("If-None-Match: \"v1\""), "{second}");
+}
+
+#[tokio::test]
+async fn stale_304_through_decoding_layer() {
+    // Mesuré terrain : la pile daemon est `Cache → Decoding → h1`.
+    // Un 304 de revalidation porte `Content-Encoding: gzip` (les
+    // en-têtes de la ressource) avec un corps vide — le décodeur
+    // interne l'échouait en « unexpected end of file » avant que
+    // le cache ne puisse servir l'entrée. 1re réponse : corps
+    // gzip + Last-Modified SANS fraîcheur → périmée d'office →
+    // revalidation à la 2e requête.
+    let html = b"<html>page fraiche decodee</html>";
+    let gz = {
+        use std::io::Write;
+        let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        e.write_all(html).unwrap();
+        e.finish().unwrap()
+    };
+    let mut r1 = format!(
+        "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nLast-Modified: Tue, 20 Oct 2026 10:50:10 GMT\r\nContent-Length: {}\r\n\r\n",
+        gz.len()
+    )
+    .into_bytes();
+    r1.extend_from_slice(&gz);
+    let (port, mut rx) = serve_seq(vec![
+        r1,
+        b"HTTP/1.1 304 Not Modified\r\nContent-Encoding: gzip\r\nETag: \"w\"\r\n\r\n".to_vec(),
+    ])
+    .await;
+    // Chaîne réelle du daemon : cache par-dessus décodage.
+    let t = CachingTransport::wrap(
+        Arc::new(DecodingTransport::wrap(
+            Arc::new(H1Client::new(Arc::new(TcpConnector), HttpConfig::default())),
+            1 << 20,
+        )),
+        MemoryCache::new(),
+        CacheConfig::default(),
+    );
+    let url = u(&format!("http://localhost:{port}/x"));
+    let first = t.fetch(&Request::get(url.clone())).await.unwrap();
+    assert_eq!(first.body, html);
+    let second = t.fetch(&Request::get(url)).await.unwrap();
+    assert_eq!(second.status, 200);
+    assert_eq!(second.body, html, "corps caché attendu malgré le 304");
+    // Le validateur partait bien sur le fil.
+    let _ = rx.recv().await;
+    let req2 = rx.recv().await.unwrap();
+    assert!(req2.contains("If-Modified-Since:"), "{req2}");
 }
 
 #[tokio::test]

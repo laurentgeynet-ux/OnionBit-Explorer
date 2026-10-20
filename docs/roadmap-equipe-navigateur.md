@@ -1104,6 +1104,34 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   réel est flaky sous charge de suite).
   `analyze` + `test` verts (20/20).
 
+- [x] **Étape 83. Cache : revalidation 304
+  gzip vide + partiels tronqués jamais
+  stockés** (`explorer-net`) — déclencheur
+  `site_smoke` : wikipedia en échec
+  **déterministe** via daemon (5/5,
+  `gzip: unexpected end of file`) alors que
+  le cli passait — la frontière était le
+  cache disque. (a) Un 304 porte
+  `Content-Encoding: gzip` (en-têtes de la
+  ressource) et un corps **vide** :
+  `DecodingTransport` — couche interne de la
+  pile `Cache → Decoding → h1` — l'échouait
+  avant que le cache ne serve l'entrée
+  périmée ; `decode_response` saute les
+  statuts sans corps (1xx/204/304) et la
+  fusion 304 ne propage plus
+  `content-encoding` vers l'entrée (le corps
+  stocké est décodé). (b) Un flux compressé
+  tronqué (h2 coupé tôt) rendait une erreur
+  sèche : partiel décodé conservé (Chrome/
+  Firefox pareil) mais marqué `no-store` —
+  le cache disque ne doit jamais bénir un
+  corps incomplet. Repro verrouillé :
+  `stale_304_through_decoding_layer` sur la
+  chaîne réelle, 4 tests décodeur en plus.
+  Wikipedia 5/5 via daemon sur profil
+  empoisonné après fix.
+
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
 Ordre dicté par les besoins de la piste produit d'abord, puis

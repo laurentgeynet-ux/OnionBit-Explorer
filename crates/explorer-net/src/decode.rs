@@ -75,6 +75,14 @@ impl HttpTransport for DecodingTransport {
 /// corrompu, [`NetError::DecodedTooLarge`] si le résultat dépasse
 /// `max_decoded`.
 pub fn decode_response(resp: &mut Response, max_decoded: usize) -> NetResult<()> {
+    // Statuts sans corps (RFC 9110 §15) : un 304 de revalidation
+    // porte les en-têtes de la ressource — `Content-Encoding`
+    // compris — avec un corps VIDE ; tenter de le décoder cassait
+    // la revalidation cache en amont (mesuré terrain : wikipedia
+    // 304 gzip → « unexpected end of file » masquant l'entrée).
+    if resp.status == 204 || resp.status == 304 || (100..200).contains(&resp.status) {
+        return Ok(());
+    }
     let Some(ce) = resp.header("content-encoding").map(str::to_string) else {
         return Ok(());
     };
@@ -83,8 +91,11 @@ pub fn decode_response(resp: &mut Response, max_decoded: usize) -> NetResult<()>
         .map(|c| c.trim().to_ascii_lowercase())
         .filter(|c| !c.is_empty() && c != "identity")
         .collect();
+    let mut truncated = false;
     for coding in codings.iter().rev() {
-        resp.body = decode_body(&resp.body, coding, max_decoded)?;
+        let (body, trunc) = decode_body(&resp.body, coding, max_decoded)?;
+        resp.body = body;
+        truncated |= trunc;
     }
     // Le corps a changé de taille : ajuste les en-têtes pour que
     // l'amont voie une réponse cohérente et déjà décodée.
@@ -93,37 +104,60 @@ pub fn decode_response(resp: &mut Response, max_decoded: usize) -> NetResult<()>
     });
     resp.headers
         .push(("Content-Length".to_string(), resp.body.len().to_string()));
+    if truncated {
+        // Corps incomplet servi en dégradé : interdire sa mise en
+        // cache — sinon le cache disque servirait ce partiel comme
+        // corps entier jusqu'à expiration (mesuré terrain : le
+        // cache stocke le corps DÉCODÉ, sans trace de troncation).
+        resp.headers
+            .retain(|(n, _)| !n.eq_ignore_ascii_case("cache-control"));
+        resp.headers
+            .push(("Cache-Control".to_string(), "no-store".to_string()));
+    }
     Ok(())
 }
 
 /// Décode `body` selon un seul `coding`, borné à `max` octets.
-fn decode_body(body: &[u8], coding: &str, max: usize) -> NetResult<Vec<u8>> {
+///
+/// Troncation en fin de flux (`UnexpectedEof` — connexion coupée
+/// avant la fin du flux compressé, mesuré terrain : wikipedia via
+/// h2 rend parfois un corps court) : on conserve le **partiel
+/// décodé** plutôt que d'échouer — le parseur tag-soup amont est
+/// fait pour ça, et Chrome/Firefox rendent pareil. Une corruption
+/// en milieu de flux reste une erreur honnête.
+fn decode_body(body: &[u8], coding: &str, max: usize) -> NetResult<(Vec<u8>, bool)> {
     let mut out = Vec::with_capacity(body.len().min(max / 2));
     let too_large = match coding {
-        "gzip" | "x-gzip" => read_bounded(&mut flate2::read::GzDecoder::new(body), &mut out, max)
-            .map_err(|e| NetError::ContentDecode(format!("gzip: {e}")))?,
+        "gzip" | "x-gzip" => read_bounded(&mut flate2::read::GzDecoder::new(body), &mut out, max),
         "deflate" => {
             // La spec HTTP dit zlib (RFC 1950), le web réel envoie
             // souvent du raw deflate (RFC 1951) — zlib d'abord,
             // raw en repli (tolérant, jamais crash).
             if let Ok(t) = read_bounded(&mut flate2::read::ZlibDecoder::new(body), &mut out, max) {
-                t
+                Ok(t)
             } else {
                 out.clear();
                 read_bounded(&mut flate2::read::DeflateDecoder::new(body), &mut out, max)
-                    .map_err(|e| NetError::ContentDecode(format!("deflate: {e}")))?
             }
         }
-        "br" => read_bounded(&mut brotli::Decompressor::new(body, 4096), &mut out, max)
-            .map_err(|e| NetError::ContentDecode(format!("br: {e}")))?,
+        "br" => read_bounded(&mut brotli::Decompressor::new(body, 4096), &mut out, max),
         other => {
             return Err(NetError::ContentDecode(format!("codage inconnu: {other}")));
         }
     };
-    if too_large {
-        return Err(NetError::DecodedTooLarge(max));
+    match too_large {
+        Ok(true) => Err(NetError::DecodedTooLarge(max)),
+        Ok(false) => Ok((out, false)),
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof && !out.is_empty() => {
+            tracing::warn!(
+                coding,
+                decoded = out.len(),
+                "corps compressé tronqué — partiel décodé conservé"
+            );
+            Ok((out, true))
+        }
+        Err(e) => Err(NetError::ContentDecode(format!("{coding}: {e}"))),
     }
-    Ok(out)
 }
 
 /// Lit `r` dans `out`, borné à `max` — la décompression peut

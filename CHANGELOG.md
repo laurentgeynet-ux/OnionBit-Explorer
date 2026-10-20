@@ -7,6 +7,35 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Étape 83 — revalidation cache : 304 gzip vide +
+  partiels tronqués** (`explorer-net`) : bug site-réel
+  mesuré par `site_smoke` — wikipedia échouait de façon
+  **déterministe** via daemon (5/5) alors que le cli
+  passait toujours. Frontière : le cache disque du
+  daemon (absent du cli). Deux défauts. (1) Une entrée
+  périmée déclenche une revalidation conditionnelle ;
+  le 304 porte `Content-Encoding: gzip` (en-têtes de la
+  ressource) avec un corps **vide** — `DecodingTransport`
+  (couche interne, pile `Cache → Decoding → h1`)
+  l'échouait en `unexpected end of file` avant que le
+  cache ne serve l'entrée. `decode_response` saute
+  désormais les statuts sans corps (1xx, 204, 304 —
+  RFC 9110 §15), et la fusion 304 ne propage plus
+  `content-encoding`/`content-length`/`transfer-encoding`
+  vers l'entrée (corps stocké décodé). (2) Un corps
+  compressé **tronqué** (h2 qui coupe tôt) produisait
+  une erreur sèche : on conserve maintenant le partiel
+  décodé — le parseur tag-soup amont est fait pour ça
+  et Chrome/Firefox rendent pareil — mais marqué
+  `Cache-Control: no-store` pour que le cache ne stocke
+  jamais un incomplet comme sain. Repro verrouillé :
+  `stale_304_through_decoding_layer` sur la chaîne
+  réelle `Caching → Decoding`, plus 4 tests décodeur
+  (304/204/1xx, partiel→no-store, intact→cacheable,
+  header-corrompu→erreur honnête).
+
 ## [0.2.0] - 2026-10-20
 
 ### Added

@@ -159,6 +159,86 @@ async fn stacked_codings() {
 }
 
 #[test]
+fn truncated_gzip_yields_partial_body() {
+    // Mesuré terrain : un corps h2 coupé avant la fin du flux
+    // gzip (connexion refermée tôt) — Chrome/Firefox rendent le
+    // partiel décodé, on fait pareil plutôt qu'une page d'erreur.
+    let full = b"<html><body>contenu assez long pour que le gzip tronque garde un prefixe utile et decodable</body></html>";
+    let gz = gzip(full);
+    let cut = &gz[..gz.len() - 20]; // retire la queue du flux
+    let mut resp = Response {
+        status: 200,
+        reason: "OK".into(),
+        headers: vec![("Content-Encoding".into(), "gzip".into())],
+        body: cut.to_vec(),
+        reused_connection: false,
+        resolved_url: None,
+    };
+    decode_response(&mut resp, 1 << 20).unwrap();
+    // Le partiel est un préfixe exact du document.
+    assert!(full.starts_with(&resp.body), "{:?}", resp.body);
+    assert!(resp.body.len() > 20, "partiel utile attendu");
+    assert!(resp.body.len() < full.len(), "le flux était tronqué");
+    // Un partiel ne doit jamais être caché comme corps complet.
+    assert_eq!(resp.header("cache-control"), Some("no-store"));
+}
+
+#[test]
+fn intact_gzip_stays_cacheable() {
+    let full = b"corps complet et sain";
+    let mut resp = Response {
+        status: 200,
+        reason: "OK".into(),
+        headers: vec![
+            ("Content-Encoding".into(), "gzip".into()),
+            ("Cache-Control".into(), "max-age=300".into()),
+        ],
+        body: gzip(full),
+        reused_connection: false,
+        resolved_url: None,
+    };
+    decode_response(&mut resp, 1 << 20).unwrap();
+    assert_eq!(resp.body, full);
+    // Le marquage no-store n'apparaît que sur troncation.
+    assert_eq!(resp.header("cache-control"), Some("max-age=300"));
+}
+
+#[test]
+fn truncated_gzip_empty_partial_still_errors() {
+    // Tronqué dès l'en-tête : rien de décodé — erreur honnête.
+    let gz = gzip(b"page complete");
+    let mut resp = Response {
+        status: 200,
+        reason: "OK".into(),
+        headers: vec![("Content-Encoding".into(), "gzip".into())],
+        body: gz[..8].to_vec(),
+        reused_connection: false,
+        resolved_url: None,
+    };
+    let err = decode_response(&mut resp, 1 << 20).unwrap_err();
+    assert!(matches!(err, NetError::ContentDecode(_)), "{err}");
+}
+
+#[test]
+fn bodiless_status_skips_decoding() {
+    // 304 de revalidation : porte `Content-Encoding: gzip` (les
+    // en-têtes de la ressource) mais un corps vide — le décoder
+    // échouerait et bloquerait le service-cache en amont.
+    for status in [304, 204, 101] {
+        let mut resp = Response {
+            status,
+            reason: String::new(),
+            headers: vec![("Content-Encoding".into(), "gzip".into())],
+            body: vec![],
+            reused_connection: false,
+            resolved_url: None,
+        };
+        decode_response(&mut resp, 1 << 20).unwrap();
+        assert_eq!(resp.body, Vec::<u8>::new());
+    }
+}
+
+#[test]
 fn corrupted_gzip_is_typed_error() {
     let mut resp = Response {
         status: 200,
