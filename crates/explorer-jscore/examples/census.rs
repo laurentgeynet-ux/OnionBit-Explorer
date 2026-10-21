@@ -94,6 +94,17 @@ fn eval(engine: &mut Engine, code: &str, label: &str, counts: &mut BTreeMap<Stri
 
 #[allow(clippy::too_many_lines)]
 fn main() {
+    // Même filtre `type` que `collect_scripts` côté core :
+    // seuls les types exécutables comptent — `speculationrules`,
+    // `importmap`, `application/json`… sont des données, pas du JS.
+    const CLASSIC_TYPES: &[&str] = &[
+        "",
+        "text/javascript",
+        "application/javascript",
+        "text/ecmascript",
+        "application/ecmascript",
+        "text/jscript",
+    ];
     let mut path = None;
     let mut dump_dir = None;
     let mut extras = Vec::new();
@@ -188,18 +199,36 @@ fn main() {
     let (mut inline, mut external) = (0usize, 0usize);
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
 
+    let mut skipped: BTreeMap<String, usize> = BTreeMap::new();
+
     for (i, node) in scripts.iter().enumerate() {
-        let (src, body) = {
+        let (src, body, ty, nomodule) = {
             let d = dom.borrow();
             (
                 d.attr(*node, "src").map(str::to_string),
                 d.text_content(*node),
+                d.attr(*node, "type")
+                    .map(|t| t.trim().to_ascii_lowercase())
+                    .unwrap_or_default(),
+                d.attr(*node, "nomodule").is_some(),
             )
         };
+        let module = ty == "module";
+        if !(module || CLASSIC_TYPES.contains(&ty.as_str())) {
+            println!("[{i}] SKIP type=\"{ty}\"");
+            *skipped.entry(ty).or_default() += 1;
+            continue;
+        }
+        if nomodule && !module {
+            *skipped.entry("nomodule".to_string()).or_default() += 1;
+            println!("[{i}] SKIP nomodule");
+            continue;
+        }
         if let Some(s) = src {
             external += 1;
             let short: String = s.chars().take(120).collect();
-            println!("[{i}] EXTERNAL {short}");
+            let kind = if module { "MODULE " } else { "" };
+            println!("[{i}] {kind}EXTERNAL {short}");
         } else {
             inline += 1;
             if let Some(dir) = &dump_dir {
@@ -209,7 +238,18 @@ fn main() {
                 }
             }
             let label = format!("[{i}] inline {}B", body.len());
-            eval(&mut engine, &body, &label, &mut counts);
+            if module {
+                match engine.eval_module(&body, &format!("script_{i}")) {
+                    Ok(_) => println!("{label}: ok"),
+                    Err(e) => {
+                        let s = e.to_string();
+                        *counts.entry(signature(&s)).or_default() += 1;
+                        println!("{label}: {s}");
+                    }
+                }
+            } else {
+                eval(&mut engine, &body, &label, &mut counts);
+            }
         }
     }
 
@@ -268,6 +308,13 @@ fn main() {
     drop(reqs);
 
     println!("\n=== census: {inline} inline / {external} external ===");
+    if !skipped.is_empty() {
+        let detail: Vec<String> = skipped
+            .iter()
+            .map(|(t, n)| format!("\"{t}\"×{n}"))
+            .collect();
+        println!("skipped (type non exécutable) : {}", detail.join(", "));
+    }
     let mut sorted: Vec<(usize, String)> = counts.iter().map(|(s, n)| (*n, s.clone())).collect();
     sorted.sort_by_key(|(n, _)| std::cmp::Reverse(*n));
     for (n, sig) in sorted.iter().take(25) {
