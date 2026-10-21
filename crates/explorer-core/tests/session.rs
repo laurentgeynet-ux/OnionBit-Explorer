@@ -726,6 +726,58 @@ async fn color_scheme_dark_active_prefers_dark() {
     );
 }
 
+/// Fenêtre raster (consommation R-62) : un document plus haut
+/// que le cap 16 384 px reste scrollable — la frame peint la
+/// tranche viewport-ancrée, pas seulement le haut du document
+/// (github/MDN/stallman : le scroll n'y montrait rien).
+#[tokio::test]
+async fn tall_document_scrolls_past_raster_cap() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head><style>\
+         body{margin:0} #a{height:17000px;background:#00ff00}\
+         #b{height:3000px;background:#ff0000}\
+         </style></head><body><div id=a></div><div id=b></div></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    // Scroll profond : la bande rouge (y∈[17000,20000]) doit
+    // remplir la fenêtre — doc 20 000 px > cap 16 384.
+    s.handle_input(id, InputEvent::Scroll { dy: 18000.0 })
+        .await
+        .unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    // Fenêtrée : la frame couvre le viewport (800×600), pas la
+    // tranche document de 16 384 px — le cap est sur la fenêtre.
+    assert_eq!((fw, fh), (800, 600), "frame fenêtrée au viewport");
+    assert!(
+        count_color(fw as usize, fh as usize, px, [255, 0, 0]) > 0,
+        "le contenu au-delà du cap 16 384 est peint"
+    );
+    // Fond du document (scroll max = 20 000 − 600 = 19 400) —
+    // tout rouge.
+    s.handle_input(id, InputEvent::Scroll { dy: 99_999.0 })
+        .await
+        .unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]),
+        0,
+        "fond de doc : aucun pixel vert de la bande du haut"
+    );
+    // Retour en haut : la fenêtre suit — bande verte visible.
+    s.handle_input(id, InputEvent::Scroll { dy: -99_999.0 })
+        .await
+        .unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]) > 0,
+        "retour en haut : bande verte repeinte"
+    );
+}
+
 /// Compte les pixels d'une teinte dans la frame `px`.
 fn count_color(fw: usize, fh: usize, px: &[u8], target: [u8; 3]) -> usize {
     let mut n = 0;

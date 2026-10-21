@@ -9,6 +9,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-65 — `FontCache` persistant entre passes**
+  (`explorer-layout`) : attribution du mur apply journalisé
+  55g-suite (`relayout_subtree` ~14 s/150 s) — NAV
+  reconstruit `BlockCtx::default()` par apply → `font_cache`
+  froid → tout le texte posé se re-shape à chaque tick
+  (~5 ms/nœud texte en debug, cohérent avec ~14 s/~3 000
+  nœuds). Couture livrée : `BlockCtx::with_font_cache`/
+  `take_font_cache` transplantent le cache entre applys
+  (analogue au `GlyphCache` déjà persisté dans le payload
+  paint). `FontCache` synchronise désormais
+  `FontSource::revision` à chaque requête (même contrat que
+  le `GlyphCache` render, R-36) — un `@font-face` inscrit
+  entre passes invalide octets/métriques/runs au lieu de
+  figer la famille « inconnue » ; source figée (`revision`
+  = 0) : un `Option<u64>` comparé, coût négligeable.
+  `FontCache` est ré-exporté à la racine du crate. Repli
+  inchangé : aucun cache injecté = comportement actuel
+  (frais par passe).
 - **R-64 — `not` en parens MQ4** (`explorer-css`) :
   `(not (f:v))` et `(not f:v)` sont normalisés en condition
   `not-<feature>` évaluée niée — trigger terrain Étape 97 :
@@ -43,11 +61,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (variante lobste.rs : `dark-normal` fetchée,
   `light-normal` filtrée en env dark),
   `color_scheme_accepts_dark_rejects_junk` (REST).
-  **Gap révélé par la validation terrain** : les
-  `@import (cond) and (not (cond2))` de `system-system.css`
-  — `not` imbriqué MQ4 non géré par `parse_one_media`
-  (journal → PIPE) ; `dark-normal.css` de lobste.rs reste
-  donc filtrée à tort, en attente du fix parseur.
+  **Gap révélé par la validation terrain, puis comblé** :
+  les `@import (cond) and (not (cond2))` de
+  `system-system.css` — `not` imbriqué MQ4 non géré par
+  `parse_one_media` (journal → PIPE, livré **R-64**) ;
+  sonde `lobste_pipeline_errors` en env dark : **`dark-
+  normal-b6128952.css` fetchée en vol** (0 erreur).
+
+- **Étape 99 — fenêtre raster au scroll** (`explorer-core`,
+  consommation R-62 `rasterize_window_cached`) : document
+  plus haut que `16 384/scale` px → la frame ne couvre
+  plus que la tranche viewport `[0, vh]` (items ancrés
+  `-scroll_y` au build) au lieu d'un pixmap `w×16384`
+  (~52 Mio à 800 px) re-rasterisé à chaque scroll — le cap
+  passe du document à la fenêtre ; `doc_h` reste réel pour
+  le clamp de scroll, `doc_h_clamped` marque le mode, le
+  dirty dégénère honnêtement en un rect fenêtre pleine
+  (le scroll re-translate tous les items). Chemin sync et
+  apply détachée (`repaint_payload` unique). Test :
+  `tall_document_scrolls_past_raster_cap` — doc 20 000 px,
+  scroll profond → frame `800×600` peignant la bande
+  distante, aller-retour sommet/fond. Dernier blocage
+  fonctionnel connu du corpus `site_smoke` levé (github,
+  MDN, stallman scrollables).
 
 - **R-63 — cascade scopée au sous-arbre** (`explorer-css`) :
   `StyleEngine::compute_scoped(dom, root, env, parent)` +

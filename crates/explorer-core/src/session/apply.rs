@@ -548,7 +548,7 @@ pub(crate) fn repaint_payload(
     }
     let frame_cap = MAX_FRAME_DIM / ctx.scale.max(f32::EPSILON);
     if list.height > frame_cap {
-        list.height = frame_cap;
+        return raster_window(p, ctx, list, vw, vh);
     }
     // Le diff se calcule sur les listes **non cullées** :
     // la cullée stockée perdait ses `spans` (indices
@@ -631,6 +631,47 @@ pub(crate) fn repaint_payload(
             height: list.height,
         }];
     }
+    p.list = Some(list);
+    p.frame = Some(frame);
+    p.png = None;
+    p.spec_paint = false;
+    Ok(())
+}
+
+/// Fenêtre raster (consommation R-62) : document plus haut
+/// que le cap → la frame ne couvre que la tranche viewport.
+/// Les items sont déjà ancrés `-scroll_y` au build, la
+/// fenêtre liste est donc `[0, vh]` — le cap passe du
+/// document à la fenêtre : github/MDN/stallman (docs >16 384
+/// px) produisent une frame `vw×vh` au lieu d'un pixmap de
+/// ~52 Mio re-rasterisé à chaque scroll. `doc_h` reste réel
+/// pour le clamp de scroll ; `doc_h_clamped` marque le mode.
+/// Pas de diff dirty ici : le scroll re-translate tous les
+/// items (`full_cover` quasi systématique) et la fenêtre est
+/// petite — la tranche pleine coûte moins que la machinerie.
+fn raster_window(
+    p: &mut PaintPayload,
+    ctx: &ApplyCtx,
+    list: DisplayList,
+    vw: f32,
+    vh: f32,
+) -> Result<(), CoreError> {
+    let frame = explorer_render::rasterize_window_cached(
+        &list,
+        &ctx.fonts as &dyn FontSource,
+        ctx.scale,
+        0.0,
+        vh,
+        &mut p.font_cache,
+    )
+    .ok_or(CoreError::FrameTooBig)?;
+    p.emitted = 0;
+    p.dirty = vec![Rect {
+        x: 0.0,
+        y: 0.0,
+        width: vw,
+        height: vh,
+    }];
     p.list = Some(list);
     p.frame = Some(frame);
     p.png = None;

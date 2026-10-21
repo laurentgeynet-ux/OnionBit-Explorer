@@ -1543,11 +1543,8 @@ async fn lobste_pipeline_errors() {
                 errors.push(message);
             }
         }
-        eprintln!("[+{}s] pump iter", t_start.elapsed().as_secs());
         s.pump_net().await;
-        eprintln!("[+{}s] pump_net ok", t_start.elapsed().as_secs());
         s.pump_timers(tab);
-        eprintln!("[+{}s] pump_timers ok", t_start.elapsed().as_secs());
         let n = s.drain_script_nav(tab).await;
         if n > 0 {
             navs += n;

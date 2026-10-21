@@ -1601,8 +1601,32 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   imbriqué MQ4 (`(cond) and (not (c2))`
   des `@import` lobste.rs) — journal →
   PIPE, livré R-64 ; sonde réelle dark
-  à rejouer pour voir `dark-normal`
-  fetchée en vol.
+  rejouée : `dark-normal-b6128952.css`
+  fetchée en vol (0 erreur).
+
+- [x] **Étape 99. Fenêtre raster au
+  scroll** (consommation R-62 —
+  `rasterize_window_cached` livré) :
+  doc > `16 384/scale` px → la frame
+  couvre la tranche viewport
+  `[0, vh]` (items déjà ancrés
+  `-scroll_y`) au lieu d'un pixmap
+  `w×16384` de ~52 Mio re-rasterisé
+  à chaque scroll — le cap passe du
+  document à la fenêtre. `doc_h` reste
+  réel (clamp scroll), `doc_h_clamped`
+  marque le mode pour l'API ; dirty
+  remplacé par un rect fenêtre pleine
+  (le scroll re-translate tout —
+  `full_cover` quasi systématique).
+  Chemins sync et détaché couverts
+  (`repaint_payload` unique). Test :
+  `tall_document_scrolls_past_raster_cap`
+  — doc 20 000 px, scroll 18 000 →
+  frame `800×600` peignant la bande
+  profonde, aller-retour haut/fond.
+  Dernier blocage fonctionnel connu
+  du corpus levé.
 
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
