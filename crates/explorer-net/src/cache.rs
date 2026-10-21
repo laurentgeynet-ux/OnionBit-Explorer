@@ -301,6 +301,16 @@ impl HttpTransport for CachingTransport {
         }
         Ok(resp)
     }
+
+    /// Streamé : court-circuit franc (étape 101) — le corps en
+    /// vol n'est pas tamponné pour le cache (le store travaille
+    /// sur corps entiers) ; la navigation streamée ne lit ni
+    /// n'écrit le cache. Conforme à l'intention documentée —
+    /// avant, le repli `fetch` bufferisait le corps complet
+    /// derrière l'interface streamée.
+    async fn fetch_stream(&self, req: &Request) -> NetResult<crate::http::StreamedResponse> {
+        self.inner.fetch_stream(req).await
+    }
 }
 
 /// Fraîcheur : `max-age` en priorité, sinon `Expires:` absolu.

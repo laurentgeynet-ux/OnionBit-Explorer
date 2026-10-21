@@ -595,4 +595,27 @@ impl HttpTransport for CookieTransport {
         }
         Ok(resp)
     }
+
+    /// Streamé (étape 101) : `Cookie:` injecté à l'émission,
+    /// `Set-Cookie` capturé depuis les en-têtes streamés —
+    /// disponibles dès réception, le corps n'est pas attendu.
+    async fn fetch_stream(&self, req: &Request) -> NetResult<crate::http::StreamedResponse> {
+        let mut req = req.clone();
+        let cookie = self.jar.header_for_ctx(&req, true);
+        if !cookie.is_empty()
+            && !req
+                .headers
+                .iter()
+                .any(|(n, _)| n.eq_ignore_ascii_case("cookie"))
+        {
+            req.headers.push(("Cookie".to_string(), cookie));
+        }
+        let resp = self.inner.fetch_stream(&req).await?;
+        for (n, v) in &resp.headers {
+            if n.eq_ignore_ascii_case("set-cookie") {
+                let _ = self.jar.set_from_header(&req.url, v);
+            }
+        }
+        Ok(resp)
+    }
 }

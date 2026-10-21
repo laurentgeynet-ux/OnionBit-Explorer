@@ -364,3 +364,111 @@ fn text_defaults_to_1252() {
     };
     assert_eq!(resp.text(), "é");
 }
+
+// -- fetch_stream : décodage en vol (étape 101) ---------------------------
+
+/// Transport fake streamé — morceaux scriptés, en-têtes dès
+/// réception.
+struct StreamFake {
+    status: u16,
+    headers: Vec<(String, String)>,
+    chunks: Vec<Vec<u8>>,
+}
+
+#[async_trait::async_trait]
+impl HttpTransport for StreamFake {
+    async fn fetch(&self, _req: &Request) -> explorer_net::error::NetResult<Response> {
+        unimplemented!("tests streamés uniquement")
+    }
+
+    async fn fetch_stream(
+        &self,
+        _req: &Request,
+    ) -> explorer_net::error::NetResult<explorer_net::http::StreamedResponse> {
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let chunks = self.chunks.clone();
+        tokio::spawn(async move {
+            for chunk in chunks {
+                if tx.send(Ok(chunk)).await.is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(explorer_net::http::StreamedResponse {
+            status: self.status,
+            reason: String::new(),
+            headers: self.headers.clone(),
+            reused_connection: false,
+            resolved_url: None,
+            body: rx,
+        })
+    }
+}
+
+async fn collect(mut resp: explorer_net::http::StreamedResponse) -> Vec<u8> {
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.body.recv().await {
+        out.extend_from_slice(&chunk.unwrap());
+    }
+    out
+}
+
+#[tokio::test]
+async fn stream_gzip_decoded_in_flight() {
+    let plain =
+        b"<html>corps gzippe streame, un peu long pour couvrir plusieurs morceaux de sortie</html>";
+    let inner = Arc::new(StreamFake {
+        status: 200,
+        headers: vec![
+            ("Content-Encoding".into(), "gzip".into()),
+            ("Content-Length".into(), "999".into()),
+        ],
+        // Deux morceaux filaires pour couvrir le multi-chunk.
+        chunks: {
+            let g = gzip(plain);
+            vec![g[..7].to_vec(), g[7..].to_vec()]
+        },
+    });
+    let t = DecodingTransport::wrap(inner, 1 << 20);
+    let resp = t
+        .fetch_stream(&Request::get(Url::parse("http://a.example/").unwrap()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status, 200);
+    // En-têtes nettoyés : le corps vu est décodé, taille inconnue.
+    assert!(resp.header("content-encoding").is_none());
+    assert!(resp.header("content-length").is_none());
+    assert_eq!(collect(resp).await, plain);
+}
+
+#[tokio::test]
+async fn stream_raw_deflate_decoded() {
+    let plain = b"raw deflate streame";
+    let inner = Arc::new(StreamFake {
+        status: 200,
+        headers: vec![("Content-Encoding".into(), "deflate".into())],
+        chunks: vec![raw_deflate(plain)],
+    });
+    let t = DecodingTransport::wrap(inner, 1 << 20);
+    let resp = t
+        .fetch_stream(&Request::get(Url::parse("http://a.example/").unwrap()))
+        .await
+        .unwrap();
+    assert_eq!(collect(resp).await, plain);
+}
+
+#[tokio::test]
+async fn stream_identity_passthrough() {
+    let inner = Arc::new(StreamFake {
+        status: 200,
+        headers: vec![("Content-Type".into(), "text/plain".into())],
+        chunks: vec![b"clair".to_vec()],
+    });
+    let t = DecodingTransport::wrap(inner, 1 << 20);
+    let resp = t
+        .fetch_stream(&Request::get(Url::parse("http://a.example/").unwrap()))
+        .await
+        .unwrap();
+    assert_eq!(resp.header("content-type"), Some("text/plain"));
+    assert_eq!(collect(resp).await, b"clair");
+}

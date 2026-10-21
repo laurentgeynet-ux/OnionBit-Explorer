@@ -73,6 +73,126 @@ impl HttpTransport for FakeTransport {
 
 // -- RedirectTransport ---------------------------------------------------
 
+/// Réponse streamée scriptée — `stall` retient le canal de corps
+/// indéfiniment (corps jamais terminé : anti-bot, `close_delimited`
+/// sans fin), pour prouver que l'amont n'attend pas le corps.
+struct Canned {
+    status: u16,
+    headers: Vec<(String, String)>,
+    chunks: Vec<Vec<u8>>,
+    stall: bool,
+}
+
+fn canned(status: u16, headers: &[(&str, &str)], chunks: Vec<Vec<u8>>, stall: bool) -> Canned {
+    Canned {
+        status,
+        headers: headers
+            .iter()
+            .map(|(n, v)| (n.to_string(), v.to_string()))
+            .collect(),
+        chunks,
+        stall,
+    }
+}
+
+struct StreamFake {
+    responses: std::sync::Mutex<std::collections::VecDeque<Canned>>,
+}
+
+impl StreamFake {
+    fn new(responses: Vec<Canned>) -> Arc<Self> {
+        Arc::new(Self {
+            responses: std::sync::Mutex::new(responses.into()),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl HttpTransport for StreamFake {
+    async fn fetch(&self, _req: &Request) -> explorer_net::error::NetResult<Response> {
+        unimplemented!("tests streamés uniquement")
+    }
+
+    async fn fetch_stream(
+        &self,
+        _req: &Request,
+    ) -> explorer_net::error::NetResult<explorer_net::http::StreamedResponse> {
+        let c = self
+            .responses
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("canned response manquante");
+        let (tx, rx) = mpsc::channel(4);
+        if c.stall {
+            // Canal ouvert, jamais alimenté : le corps pend —
+            // `fetch_stream` doit rendre les en-têtes sans lui.
+            tokio::spawn(async move {
+                let _hold = tx;
+                std::future::pending::<()>().await;
+            });
+        } else {
+            tokio::spawn(async move {
+                for chunk in c.chunks {
+                    if tx.send(Ok(chunk)).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+        Ok(explorer_net::http::StreamedResponse {
+            status: c.status,
+            reason: String::new(),
+            headers: c.headers,
+            reused_connection: false,
+            resolved_url: None,
+            body: rx,
+        })
+    }
+}
+
+#[tokio::test]
+async fn stream_error_status_headers_early_stalled_body() {
+    // Régression fnac.fr (~60 s → page d'erreur immédiate,
+    // étape 101) : le hop 301 ET le 403 terminal portent des
+    // corps retenus indéfiniment — ni l'un ni l'autre ne doit
+    // retenir les en-têtes.
+    let inner = StreamFake::new(vec![
+        canned(301, &[("Location", "/target")], vec![], true),
+        canned(403, &[("Content-Type", "text/html")], vec![], true),
+    ]);
+    let t = RedirectTransport::wrap(inner, 8);
+    let r = tokio::time::timeout(
+        Duration::from_secs(5),
+        t.fetch_stream(&Request::get(u("http://a.example/"))),
+    )
+    .await
+    .expect("les en-têtes streamés ne doivent pas attendre le corps")
+    .unwrap();
+    assert_eq!(r.status, 403);
+    assert_eq!(r.resolved_url.unwrap().as_str(), "http://a.example/target");
+}
+
+#[tokio::test]
+async fn stream_follows_redirect_and_delivers_body() {
+    let inner = StreamFake::new(vec![
+        canned(302, &[("Location", "/b")], vec![b"hop".to_vec()], false),
+        canned(200, &[], vec![b"hel".to_vec(), b"lo".to_vec()], false),
+    ]);
+    let t = RedirectTransport::wrap(inner, 8);
+    let mut r = t
+        .fetch_stream(&Request::get(u("http://a.example/a")))
+        .await
+        .unwrap();
+    assert_eq!(r.status, 200);
+    assert_eq!(r.resolved_url.unwrap().as_str(), "http://a.example/b");
+    let mut body = Vec::new();
+    while let Some(chunk) = r.body.recv().await {
+        body.extend_from_slice(&chunk.unwrap());
+    }
+    assert_eq!(body, b"hello");
+}
+
 #[tokio::test]
 async fn follows_301_get() {
     let inner = FakeTransport::new(vec![

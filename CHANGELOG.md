@@ -23,6 +23,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `tarpit_headers_hit_request_timeout`,
   `tarpit_stream_body_hit_request_timeout`.
 
+- **Étape 102 — `fetch_stream` sur toute la chaîne de
+  décorateurs** (`explorer-net`, même trigger fnac.fr —
+  attribution creusée) : `NavJob` décide sur le statut
+  dès les en-têtes, mais `Redirect`/`Caching`/`Cookie`/
+  `Decoding` retombaient sur le `fetch` bufferisé — le
+  corps **complet** de chaque hop et de la réponse
+  terminale était lu avant les en-têtes (un 403 à corps
+  gouttant retenait la page d'erreur ; la peinture
+  progressive de l'étape 53 était morte en production).
+  Chaque décorateur streame désormais : `Redirect` suit
+  les hops sans attendre leur corps, `Decoding` décode
+  en vol (`spawn_blocking` + `ChanReader`, `deflate`
+  zlib/raw par signature), `Cookie` capture
+  `Set-Cookie` sur les en-têtes, `Caching` court-
+  circuite (intention documentée), `Hsts`/`Referer`/
+  `Policy` passent à travers. Effet : statut d'erreur
+  rendu dès les en-têtes (<1 s mesuré), navigation
+  re-peintée pendant le téléchargement. Tests :
+  `stream_error_status_headers_early_stalled_body`,
+  `stream_follows_redirect_and_delivers_body`,
+  `stream_gzip_decoded_in_flight`,
+  `stream_raw_deflate_decoded`, `stream_identity_
+  passthrough`.
+
 - **R-67 — `FontCache` `Send`** (`explorer-layout`) :
   `data` `Rc<Vec<u8>>` → `Arc<Vec<u8>>` (tampons immuables
   — `Arc::as_ptr` conserve l'identité des clés

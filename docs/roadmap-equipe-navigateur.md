@@ -1691,6 +1691,69 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   serveur — c'est sa latence qui
   est désormais bornée.
 
+- [x] **Étape 102. `fetch_stream`
+  réel sur toute la chaîne de
+  décorateurs** (même trigger
+  fnac.fr, attribution creusée) :
+  `NavJob::run` décide sur le
+  statut dès les en-têtes — mais
+  `Redirect`/`Caching`/`Cookie`/
+  `Decoding` n'implémentaient pas
+  `fetch_stream` → le repli
+  `fetch` bufferisait le corps
+  **complet à chaque hop et sur
+  la réponse terminale**. Un 403
+  à corps servi au goutte-à-
+  goutte retenait donc la page
+  d'erreur derrière le corps
+  entier (borné Étape 101, encore
+  ~45 s) — et la peinture
+  progressive de l'étape 53 était
+  morte en production sur **toute**
+  navigation. Fix : chaque
+  décorateur stream — `Redirect`
+  suit les hops sans attendre
+  leur corps (drop → la tâche
+  de corps meurt, délai nul) et
+  rend les en-têtes de la cible
+  dès réception ; `Decoding`
+  décode en vol via `spawn_
+  blocking` + `ChanReader`
+  (`deflate` zlib/raw choisi par
+  signature 2 octets, borne
+  `max_decoded` conservée) ;
+  `Cookie` capture `Set-Cookie`
+  sur les en-têtes streamés ;
+  `Caching` court-circuite franc
+  (intention documentée — le
+  store travaille sur corps
+  entiers) ; `Hsts`/`Referer`/
+  `Policy` passent à travers avec
+  leurs mutations de requête.
+  Effet mesuré : statut d'erreur
+  rendu dès les en-têtes (<1 s,
+  borne 5 s en test — vs corps
+  complet requis avant), et la
+  navigation re-peint pendant le
+  téléchargement. Vérifs terrain :
+  nav réelle `www.fnac.com` →
+  403 en 0,46 s, `lobste.rs` 200
+  streamé+décodé end-to-end →
+  PNG produit. Repros :
+  `stream_error_status_headers_
+  early_stalled_body` (hop 301 +
+  403 à corps retenus — en-têtes
+  <5 s), `stream_follows_redirect_
+  and_delivers_body`, `stream_
+  gzip/raw_deflate_decoded_in_
+  flight`, `stream_identity_
+  passthrough`. Limite honnête :
+  `fnac.fr` nu est géo-bloqué au
+  connect depuis cette machine —
+  la mesure du ~60 s exact reste
+  celle du vol humain ; la repro
+  in-process prouve le mécanisme.
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY

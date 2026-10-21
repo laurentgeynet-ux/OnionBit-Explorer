@@ -30,7 +30,7 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 
 use crate::error::{NetError, NetResult};
-use crate::http::{HttpTransport, Method, Request, Response};
+use crate::http::{HttpTransport, Method, Request, Response, StreamedResponse};
 use crate::url::Url;
 
 // ---------------------------------------------------------------------
@@ -98,6 +98,46 @@ impl HttpTransport for RedirectTransport {
             if req.method == Method::Get && method_has_body(Request::get(next.clone()).method) {
                 // unreachable — garde-fou si la table grandit.
             }
+            if req.method == Method::Get {
+                req.body = None;
+            }
+            req.url = next;
+        }
+        Err(NetError::TooManyRedirects(self.max_redirects))
+    }
+
+    /// Variante streamée (étape 101) : chaque hop est suivi en
+    /// flux — les en-têtes de la cible finale sont rendus dès
+    /// réception, sans attendre le corps du hop ni celui de la
+    /// réponse terminale. Indispensable pour la navigation :
+    /// `NavJob` décide sur le statut (403 → page d'erreur
+    /// immédiate) — le repli `fetch` bufferisé retenait le
+    /// statut derrière le corps complet (~60 s mesuré terrain
+    /// sur fnac.fr : corps anti-bot au goutte-à-goutte,
+    /// `io_timeout` par maillon). Le corps d'un hop 3xx n'est
+    /// pas drainé : sa tâche de corps meurt avec le canal
+    /// (connexion sacrifiée, délai nul — le web réel sert des
+    /// corps de redirection parfois sans fin propre).
+    async fn fetch_stream(&self, req: &Request) -> NetResult<StreamedResponse> {
+        let orig = req.url.clone();
+        let mut req = req.clone();
+        for _ in 0..self.max_redirects {
+            let mut resp = self.inner.fetch_stream(&req).await?;
+            if !matches!(resp.status, 301 | 302 | 303 | 307 | 308) {
+                // Cible finale — `None` si la première réponse
+                // n'était pas un 3xx (URL inchangée).
+                resp.resolved_url = (req.url != orig).then(|| req.url.clone());
+                return Ok(resp);
+            }
+            let status = resp.status;
+            let Some(loc) = resp.header("location").map(str::to_string) else {
+                resp.resolved_url = (req.url != orig).then(|| req.url.clone());
+                return Ok(resp); // 3xx sans Location → tel quel.
+            };
+            let next = Url::resolve(&req.url, &loc)
+                .map_err(|e| NetError::InvalidResponse(format!("Location invalide: {e}")))?;
+            drop(resp); // corps du hop abandonné — pas d'attente.
+            req.method = redirect_method(req.method, status);
             if req.method == Method::Get {
                 req.body = None;
             }
@@ -246,6 +286,29 @@ impl HttpTransport for HstsTransport {
         }
         Ok(resp)
     }
+
+    /// Streamé (étape 101) : upgrade `http:` → `https:` à
+    /// l'émission, capture `Strict-Transport-Security` depuis
+    /// les en-têtes streamés.
+    async fn fetch_stream(&self, req: &Request) -> NetResult<StreamedResponse> {
+        let mut req = req.clone();
+        if req.url.scheme() == "http" && self.store.should_upgrade(&req.url.host()) {
+            let mut u = req.url.as_str();
+            u = u.replacen("http://", "https://", 1);
+            if let Ok(upgraded) = Url::parse(&u) {
+                req.url = upgraded;
+            }
+        }
+        let resp = self.inner.fetch_stream(&req).await?;
+        if req.url.scheme() == "https" {
+            for (n, v) in &resp.headers {
+                if n.eq_ignore_ascii_case("strict-transport-security") {
+                    self.store.record(&req.url.host(), v);
+                }
+            }
+        }
+        Ok(resp)
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -375,6 +438,38 @@ impl HttpTransport for RefererTransport {
         }
         self.inner.fetch(&req).await
     }
+
+    /// Streamé (étape 101) : mêmes en-têtes `Referer`/`Origin`
+    /// injectés, passage en flux.
+    async fn fetch_stream(&self, req: &Request) -> NetResult<StreamedResponse> {
+        let mut req = req.clone();
+        let init = self
+            .initiator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(i) = init {
+            if !req
+                .headers
+                .iter()
+                .any(|(n, _)| n.eq_ignore_ascii_case("referer"))
+            {
+                if let Some(r) = referer_value(&i, &req.url) {
+                    req.headers.push(("Referer".to_string(), r));
+                }
+            }
+            if !req
+                .headers
+                .iter()
+                .any(|(n, _)| n.eq_ignore_ascii_case("origin"))
+            {
+                if let Some(o) = origin_value(&i, &req.url, req.method) {
+                    req.headers.push(("Origin".to_string(), o));
+                }
+            }
+        }
+        self.inner.fetch_stream(&req).await
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -441,5 +536,25 @@ impl HttpTransport for PolicyTransport {
             }
         }
         self.inner.fetch(req).await
+    }
+
+    /// Streamé (étape 101) : même refus mixed-content à
+    /// l'émission, passage en flux.
+    async fn fetch_stream(&self, req: &Request) -> NetResult<StreamedResponse> {
+        let page = self
+            .page
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(p) = page {
+            if is_mixed_content(&p, &req.url) {
+                return Err(NetError::BlockedMixedContent(format!(
+                    "{} → {}",
+                    p.as_str(),
+                    req.url.as_str()
+                )));
+            }
+        }
+        self.inner.fetch_stream(req).await
     }
 }
