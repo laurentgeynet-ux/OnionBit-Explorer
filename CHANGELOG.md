@@ -315,6 +315,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   perdu à 800px). Le `StyleEnv` est désormais construit
   depuis `ctx.viewport`/`SubJob.viewport` ; `cli layout`
   aligné sur sa largeur de pose (800px).
+- **Étape 95 — attribution du pic mémoire « Wikipedia Rust »**
+  (`explorer-js`, `explorer-core`) : le RSS ~1,9 Go reproduit en
+  vol piloté n'est pas un tampon réseau mais ~1,1 Go de
+  **rétention commise** — la cascade copie les custom
+  properties `--*` héritées dans chaque `ComputedStyle`
+  (~200 vars × ~19k nœuds : 3,26M entrées dans le boxtree,
+  1,89M dans `prev_styles`). Instrumentation livrée :
+  `JsEngine::heap_stats` (trait additif, défaut `None`),
+  `pub use explorer_jscore::HeapStats`, sonde in-crate
+  `tab_mem_inventory` (`#[ignore]`, inventaire par champ +
+  bissection RSS). Le correctif (partage `Rc` des vars
+  héritées) relève de `explorer-css` — demande journal.
 - **R-52 — `mask-image` borne le fond** (`explorer-render`) :
   le motif icône universel `mask-image:url(svg)` +
   `background-color` (Codex/Primer/Material) peignait un

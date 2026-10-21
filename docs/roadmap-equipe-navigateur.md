@@ -1492,6 +1492,28 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Test : `media_query_uses_session_viewport`
   (raster : le bloc `max-width:900`
   masqué à 800px).
+- [x] **Étape 95. Attribution du pic
+  mémoire Wikipedia** (veille M-H1)
+  — le RSS ~1,5–1,9 Go de la nav
+  « Rust » mesuré puis attribué :
+  allocateur compteur (live = 916 Mio
+  post-commit, ≠ transitoire),
+  bissection par drop champ à champ —
+  `tree` ~850 Mio, `prev_styles`
+  ~256 Mio : la cascade duplique les
+  `--*` héritées dans chaque
+  `ComputedStyle` (3,26M+1,89M
+  entrées). Livré : trait
+  `JsEngine::heap_stats` (additif,
+  défaut `None`, `HeapStats`
+  réexporté), commande moteur +
+  adaptateur `JscoreEngine`, sonde
+  `tab_mem_inventory` `#[ignore]`
+  (inventaire par champ + bissection
+  RSS in-process). Correctif
+  `ComputedStyle` = demande PIPE
+  déposée au journal (partage `Rc`
+  des vars héritées).
 
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
@@ -1531,13 +1553,17 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     mousemove+scroll, back) : app
     **plate 288→290 Mio** (`priv`
     324→326), daemon borné
-    ~370-450 Mio — mais pic transitoire
-    **~1,9 Go + nav >120 s** reproductible
-    sur l'article Wikipédia « Rust »
-    (retombe après — transitoire,
-    pas fuite : à isoler, probable
-    tampon de flux lourd pendant le
-    fetch/décodage).
+    ~370-450 Mio — ~~pic transitoire
+    ~1,9 Go + nav >120 s~~ →
+    **attribué Étape 95** : ~1,1 Go de
+    rétention commise dans le `Tab`
+    (`tree` ~850 Mio + `prev_styles`
+    ~256 Mio) par copie plate des
+    `--*` héritées dans chaque
+    `ComputedStyle` — ~200 vars
+    `:root` × 19k nœuds. Correctif
+    côté cascade (partage `Rc`) =
+    demande PIPE déposée au journal.
   - **daemon injoignable sous charge
     machine, retour seul** : pas un
     crash (reconnexion auto OK) —

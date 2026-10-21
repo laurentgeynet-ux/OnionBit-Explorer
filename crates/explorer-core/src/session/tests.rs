@@ -1203,3 +1203,247 @@ fn deferred_inputs_fifo_and_coalesce() {
     let v = e.dom.as_ref().unwrap().attribute(input, "value").unwrap();
     assert_eq!(v.as_deref(), Some("abc"));
 }
+
+// ------------------------------------------------------------------
+// Inventaire mémoire du Tab — sonde M-H1. Chaque champ volumineux
+// est compté en octets (capacités × size_of) ; l'écart entre la
+// somme et le `live` de l'allocateur désigne le coupable opaque.
+//
+//   cargo test -p explorer-core --lib tab_mem_inventory -- --ignored --nocapture
+// ------------------------------------------------------------------
+
+fn dom_deep_bytes(dom: &Dom, n: explorer_dom::NodeId) -> usize {
+    let mut b = dom.text(n).map_or(0, str::len);
+    if let Ok(attrs) = dom.attributes(n) {
+        b += attrs
+            .iter()
+            .map(|a| a.name.len() + a.value.len())
+            .sum::<usize>();
+    }
+    b + dom
+        .children(n)
+        .unwrap_or_default()
+        .iter()
+        .map(|&c| dom_deep_bytes(dom, c))
+        .sum::<usize>()
+}
+
+fn box_deep_bytes(bx: &explorer_layout::LayoutBox) -> usize {
+    let mut b = std::mem::size_of::<explorer_layout::LayoutBox>()
+        + bx.text.as_deref().map_or(0, str::len)
+        + bx.children.capacity() * std::mem::size_of::<explorer_layout::LayoutBox>()
+        + bx.lines.capacity() * std::mem::size_of::<explorer_layout::inline::LineBox>();
+    for l in &bx.lines {
+        b += l.fragments.capacity() * std::mem::size_of::<explorer_layout::inline::Fragment>();
+        for f in &l.fragments {
+            b += f.text.len();
+        }
+    }
+    for c in &bx.children {
+        b += box_deep_bytes(c);
+    }
+    b
+}
+
+
+/// Entrées+octets des custom properties `--*` d'un style de
+/// boîte (sonde M-H1 — inflation par héritage plat).
+fn style_vars(bx: &explorer_layout::LayoutBox, acc: &mut (usize, usize)) {
+    for (k, v) in bx.style.iter() {
+        if k.starts_with("--") {
+            acc.0 += 1;
+            acc.1 += k.len() + v.len();
+        }
+    }
+    for c in &bx.children {
+        style_vars(c, acc);
+    }
+}
+
+/// RSS du processus en Mio via pwsh (sonde M-H1 — bissection
+/// par drop : Windows décommit les gros blocs à la libération).
+fn rss_mib() -> u64 {
+    let out = std::process::Command::new("pwsh")
+        .args([
+            "-NoProfile",
+            "-Command",
+            &format!("(Get-Process -Id {}).WorkingSet64", std::process::id()),
+        ])
+        .output();
+    out.ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|t| t.trim().parse::<u64>().ok())
+        .map_or(0, |b| b / 1_048_576)
+}
+#[tokio::test]
+#[ignore = "sonde réseau réel — diagnostic M-H1 manuel"]
+#[allow(clippy::too_many_lines)] // inventaire exhaustif, pas de logique à extraire
+async fn tab_mem_inventory() {
+    use explorer_net::{
+        decode::DecodingTransport, h1::HttpConfig, h2::AutoClient, policy::RedirectTransport,
+        tls::TlsConnector,
+    };
+    let tls = Arc::new(TlsConnector::web_roots());
+    let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
+    let decoded: Arc<dyn HttpTransport> = Arc::new(DecodingTransport::wrap(h1, 16 * 1024 * 1024));
+    let transport: Arc<dyn HttpTransport> = Arc::new(RedirectTransport::wrap(decoded, 8));
+    let mut s = Session::new(transport, Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    s.navigate(
+        tab,
+        "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+    )
+    .await
+    .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        s.pump_net().await;
+        s.pump_timers(tab);
+        if s.drain_script_nav(tab).await > 0 {
+            continue;
+        }
+        let idle = s.net_pending() == 0 && s.next_timer_deadline().is_none();
+        if idle || std::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    let e = s.tabs.get_mut(&tab).unwrap();
+    let mib = |n: usize| n / 1_048_576;
+    // DOM — arène opaque : live_count × Slot estimé (~120 o) + textes.
+    let (nodes, dom_text) = e.dom.as_ref().map_or((0, 0), |d| {
+        (d.live_count(), dom_deep_bytes(d, d.document()))
+    });
+    eprintln!("dom: {nodes} nœuds, texte+attrs {} Mio", mib(dom_text));
+    let tree_b = e.tree.as_ref().map_or(0, box_deep_bytes);
+    eprintln!(
+        "boxtree: {} Mio (size_of LayoutBox={})",
+        mib(tree_b),
+        std::mem::size_of::<explorer_layout::LayoutBox>()
+    );
+    let (items_cap, spans_cap, list_txt) = e.list.as_ref().map_or((0, 0, 0), |l| {
+        (
+            l.items.capacity(),
+            l.spans.len(),
+            l.items
+                .iter()
+                .map(|i| match i {
+                    explorer_render::DisplayItem::Placeholder { label, .. } => label.len(),
+                    _ => 0,
+                })
+                .sum::<usize>(),
+        )
+    });
+    eprintln!(
+        "list: cap {} × {} o = {} Mio, spans {}, texte {} o",
+        items_cap,
+        std::mem::size_of::<explorer_render::DisplayItem>(),
+        mib(items_cap * std::mem::size_of::<explorer_render::DisplayItem>()),
+        spans_cap,
+        list_txt
+    );
+    let frame_b = e.frame.as_ref().map_or(0, |f| f.pixels.capacity());
+    eprintln!(
+        "frame: {:?} {} Mio",
+        e.frame.as_ref().map(|f| (f.width, f.height)),
+        mib(frame_b)
+    );
+    let png_b = e.png.as_ref().map_or(0, Vec::len);
+    let img_b: usize = e
+        .images
+        .replaced
+        .values()
+        .chain(e.images.backgrounds.values())
+        .chain(e.images.svgs.values())
+        .chain(e.images.masks.values())
+        .map(|i| i.rgba.len())
+        .sum();
+    eprintln!("png {} Mio, images {} Mio", mib(png_b), mib(img_b));
+    eprintln!("linked_css {} o", e.linked_css.len());
+    let cs = std::mem::size_of::<explorer_css::ComputedStyle>();
+    eprintln!(
+        "prev_styles: {} entrées × ComputedStyle({} o) ≈ {} Mio (cap {})",
+        e.prev_styles.len(),
+        cs,
+        mib(e.prev_styles.capacity() * (8 + cs)),
+        e.prev_styles.capacity()
+    );
+    eprintln!(
+        "hist {} entrées, pending_nav {}, js_pending_net {} ({} Mio corps), bfcache {}, dirty {}, media {}",
+        e.hist.len(),
+        e.pending_nav.len(),
+        e.js_pending_net.len(),
+        mib(e.js_pending_net.iter().map(|r| r.body.len()).sum()),
+        e.bfcache.len(),
+        e.dirty.len(),
+        e.media.len()
+    );
+    eprintln!(
+        "deferred {}, attrs {}, downloads session {}",
+        e.deferred_inputs.len(),
+        e.js_pending_attrs.len(),
+        s.downloads.len()
+    );
+    // Quantification `--*` : le part soupçonné de l'inflation
+    // ComputedStyle (héritage par copie plate des custom props).
+    let (mut var_entries, mut var_bytes, mut all_entries, mut all_bytes) =
+        (0usize, 0usize, 0usize, 0usize);
+    for st in e.prev_styles.values() {
+        for (k, v) in st.iter() {
+            all_entries += 1;
+            all_bytes += k.len() + v.len();
+            if k.starts_with("--") {
+                var_entries += 1;
+                var_bytes += k.len() + v.len();
+            }
+        }
+    }
+    let (te, tb, ve, vb) = (all_entries, all_bytes, var_entries, var_bytes);
+    eprintln!(
+        "prev_styles props: {te} entrées / {} Mio dont --* : {ve} / {} Mio",
+        tb / 1_048_576,
+        vb / 1_048_576
+    );
+    let mut acc = (0usize, 0usize);
+    if let Some(t) = e.tree.as_ref() {
+        style_vars(t, &mut acc);
+    }
+    eprintln!("tree --* : {} entrées / {} Mio", acc.0, acc.1 / 1_048_576);
+    // Bissection par champs — RSS auto-mesuré à chaque drop
+    // (Windows rend les gros blocs VirtualAlloc → la chute
+    // désigne le coupable ; les petits blocs restent dans le tas).
+    eprintln!("rss {} Mio -- avant drops", rss_mib());
+    macro_rules! drop_probe {
+        ($label:literal, $act:expr) => {
+            $act;
+            eprintln!("rss {} Mio -- {}", rss_mib(), $label);
+        };
+    }
+    drop_probe!("drop dom", e.dom = None);
+    drop_probe!("drop tree", e.tree = None);
+    drop_probe!("drop list", e.list = None);
+    drop_probe!("drop frame", e.frame = None);
+    drop_probe!(
+        "drop font_cache",
+        e.font_cache = explorer_render::GlyphCache::new()
+    );
+    drop_probe!(
+        "drop images",
+        e.images = explorer_render::PaintImages::from_replaced(explorer_render::ImageTable::new())
+    );
+    drop_probe!("drop prev_styles", e.prev_styles.clear());
+    drop_probe!("drop linked_css", e.linked_css.clear());
+    drop_probe!("drop js", e.js = None);
+    drop_probe!("drop pending_nav/hist/net", {
+        e.pending_nav.clear();
+        e.hist.clear();
+        e.js_pending_net.clear();
+        e.dirty.clear();
+        e.media.clear();
+        e.deferred_inputs.clear();
+        e.js_pending_attrs.clear();
+    });
+    eprintln!("-- fin");
+}

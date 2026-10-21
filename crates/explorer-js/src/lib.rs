@@ -169,6 +169,11 @@ pub struct DomSyncStats {
 /// champ pour champ et re-résout les chemins en `NodeId`.
 pub use explorer_jscore::CanvasOpRecord;
 
+/// Compteurs d'occupation du tas JS (JS-C37) — réexport de
+/// [`explorer_jscore::HeapStats`] pour que les consommateurs du
+/// trait `JsEngine` n'aient pas à dépendre du moteur.
+pub use explorer_jscore::HeapStats;
+
 /// Table « chemin élément → op-list **cumulée** » lue sur le
 /// moteur — mêmes chemins que [`DomSyncPayload`] (ils
 /// survivent au re-parse). La liste n'est pas drainée : la
@@ -332,6 +337,13 @@ pub trait JsEngine: Send {
     /// après `sync_dom_path` pour mesurer octets/temps par
     /// synchro. `None` = moteur sans miroir instrumenté.
     fn dom_sync_stats(&mut self) -> Option<DomSyncStats> {
+        None
+    }
+
+    /// Compteurs de tas JS (JS-C37) — cellules/octets vivants,
+    /// pics, passes GC. `None` = moteur sans comptage (ou heap
+    /// non instrumenté).
+    fn heap_stats(&mut self) -> Option<HeapStats> {
         None
     }
 
@@ -543,6 +555,9 @@ enum Cmd {
     DomSyncStats {
         tx: Sender<Option<DomSyncStats>>,
     },
+    HeapStats {
+        tx: Sender<HeapStats>,
+    },
     CanvasOps {
         tx: Sender<CanvasOpsTable>,
     },
@@ -734,6 +749,11 @@ impl JscoreEngine {
                         return;
                     }
                 }
+                Cmd::HeapStats { tx } => {
+                    if tx.send(eng.heap_stats()).is_err() {
+                        return;
+                    }
+                }
                 Cmd::EvalModule {
                     entry,
                     sources,
@@ -855,6 +875,14 @@ impl JsEngine for JscoreEngine {
             return None;
         }
         rx.recv().ok().flatten()
+    }
+
+    fn heap_stats(&mut self) -> Option<HeapStats> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::HeapStats { tx }).is_err() {
+            return None;
+        }
+        rx.recv().ok()
     }
 
     fn canvas_ops(&mut self) -> CanvasOpsTable {
