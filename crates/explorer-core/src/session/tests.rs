@@ -1289,12 +1289,11 @@ async fn tab_mem_inventory() {
     let mut s = Session::new(transport, Arc::new(TestFont));
     s.set_js_factory(explorer_js::JscoreEngine::factory());
     let tab = s.open_tab();
-    s.navigate(
-        tab,
-        "https://en.wikipedia.org/wiki/Rust_(programming_language)",
-    )
-    .await
-    .unwrap();
+    // Cible configurable (défaut : la page mesurée en M-H1) —
+    // MEM_PROBE_URL=https://github.com/ cargo test … tab_mem_inventory
+    let url = std::env::var("MEM_PROBE_URL")
+        .unwrap_or_else(|_| "https://en.wikipedia.org/wiki/Rust_(programming_language)".into());
+    s.navigate(tab, &url).await.unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     loop {
         s.pump_net().await;
