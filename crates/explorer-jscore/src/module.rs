@@ -250,9 +250,10 @@ impl Engine {
         if depth > MAX_MODULE_DEPTH {
             return Err(self.type_error("module graph too deep"));
         }
-        let prog = parser::parse_module_in(src, self.nest_limit).map_err(|err| {
-            Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
-        })?;
+        let prog =
+            parser::parse_module_in(src, self.nest_limit, Some(Rc::from(spec))).map_err(|err| {
+                Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
+            })?;
         let env = Env::local(self.global_env.clone());
         let idx = self.modules.len();
         self.modules.push(Module {

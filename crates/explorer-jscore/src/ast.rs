@@ -333,6 +333,12 @@ pub struct FnLit {
     /// `(0, 0)` pour les fonctions synthétisées par le moteur
     /// (ctor de classe par défaut).
     pub pos: (usize, usize),
+    /// Nom de la source qui a produit ce littéral — URL du module,
+    /// `<eval>`/`Function`… rendue dans les frames `error.stack`
+    /// (`at f (src:l:c)`) pour attribuer chaque frame à son bundle
+    /// (triage de site réel — JS-C50/C56). `None` = source sans
+    /// nom ou fonction synthétique.
+    pub src: Option<Rc<str>>,
 }
 
 /// One formal parameter.

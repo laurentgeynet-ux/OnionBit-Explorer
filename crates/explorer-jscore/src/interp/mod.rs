@@ -822,9 +822,28 @@ impl Engine {
     /// `Error::Syntax` on parse failure, `Error::Uncaught` if the
     /// script threw and nothing caught it.
     pub fn eval(&mut self, src: &str) -> Result<Value> {
-        let prog = parser::parse_in(src, false, self.nest_limit)?;
+        let prog = parser::parse_in(src, false, self.nest_limit, None)?;
+        self.run_program(&prog)
+    }
+
+    /// `eval` étiqueté : `name` identifie la source (URL du
+    /// `<script src>`, origine…) dans les frames `error.stack`
+    /// — attribution par bundle pour le triage de site réel
+    /// (JS-C56). Le moteur de session l'appelle avec l'URL.
+    ///
+    /// # Errors
+    /// Identique à [`Engine::eval`].
+    pub fn eval_named(&mut self, src: &str, name: &str) -> Result<Value> {
+        let prog = parser::parse_in(src, false, self.nest_limit, Some(std::rc::Rc::from(name)))?;
+        self.run_program(&prog)
+    }
+
+    /// Corps partagé d'`eval`/`eval_named` : budget d'ops
+    /// ré-armé, programme exécuté, microtasks drainées avant le
+    /// retour (une frontière de job).
+    fn run_program(&mut self, prog: &crate::ast::Program) -> Result<Value> {
         self.ops_left = self.op_limit;
-        let r = match self.exec_program(&prog) {
+        let r = match self.exec_program(prog) {
             Ok(v) => Ok(v),
             Err(Thrown(v)) => Err(Error::Uncaught(self.describe(v))),
         };
@@ -1030,7 +1049,13 @@ impl Engine {
             s.push_str("\n    at ");
             s.push_str(n);
             if lit.pos.0 > 0 {
-                s.push_str(&format!(" ({}:{})", lit.pos.0, lit.pos.1));
+                // `src` (nom de module / `<eval>`) préfixe la
+                // position — `at f (bundle.js:l:c)` attribue
+                // chaque frame à son bundle (JS-C56).
+                match &lit.src {
+                    Some(src) => s.push_str(&format!(" ({}:{}:{})", src, lit.pos.0, lit.pos.1)),
+                    None => s.push_str(&format!(" ({}:{})", lit.pos.0, lit.pos.1)),
+                }
             }
         }
         s
@@ -1965,6 +1990,7 @@ impl Engine {
                         is_gen: false,
                         strict: true, // corps de classe
                         pos: (0, 0),  // synthétisée — pas de site source
+                        src: None,    // synthétisée — pas de source
                     })
                 },
                 |m| m.fun.clone(),

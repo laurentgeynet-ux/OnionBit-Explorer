@@ -265,6 +265,19 @@ pub trait JsEngine: Send {
     /// script jette, [`JsError::Dead`] si le moteur est inerte.
     fn eval(&mut self, source: &str) -> Result<String, JsError>;
 
+    /// `eval` étiqueté : `name` identifie la source (URL du
+    /// `<script src>`…) dans les frames `error.stack` —
+    /// attribution par bundle pour le triage de site réel
+    /// (JS-C56). Défaut : [`Self::eval`] (moteur sans notion
+    /// d'origine).
+    ///
+    /// # Errors
+    /// Identique à [`Self::eval`].
+    fn eval_named(&mut self, source: &str, name: &str) -> Result<String, JsError> {
+        let _ = name;
+        self.eval(source)
+    }
+
     /// Vide les jobs dus (microtasks, timers échus) — retourne le
     /// nombre exécuté. Défaut : rien à faire.
     fn run_pending(&mut self) -> usize {
@@ -526,6 +539,9 @@ pub use explorer_jscore::module_specifiers;
 enum Cmd {
     Eval {
         src: String,
+        /// Étiquette de source (`JsEngine::eval_named`) —
+        /// URL du script externe, `None` = script inline.
+        name: Option<String>,
         tx: Sender<Result<String, JsError>>,
     },
     RunPending {
@@ -641,6 +657,24 @@ impl JscoreEngine {
         }
     }
 
+    /// `Eval` sur le canal — `name` étiquette la source pour
+    /// les frames `error.stack` (`JsEngine::eval_named`).
+    fn eval_cmd(&mut self, source: &str, name: Option<&str>) -> Result<String, JsError> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::Eval {
+                src: source.to_string(),
+                name: name.map(str::to_string),
+                tx,
+            })
+            .is_err()
+        {
+            return Err(JsError::Dead);
+        }
+        rx.recv().map_err(|_| JsError::Dead)?
+    }
+
     /// Boucle du thread : possède le `explorer_jscore::Engine` (`!Send`)
     /// et sert les commandes jusqu'à `Shutdown` ou fermeture du
     /// canal (le `Sender` meurt avec le proxy).
@@ -675,8 +709,12 @@ impl JscoreEngine {
         let mut local_store: Option<explorer_jscore::Storage> = None;
         while let Ok(cmd) = rx.recv() {
             match cmd {
-                Cmd::Eval { src, tx } => {
-                    let out = match eng.eval(&src) {
+                Cmd::Eval { src, name, tx } => {
+                    let res = match &name {
+                        Some(n) => eng.eval_named(&src, n),
+                        None => eng.eval(&src),
+                    };
+                    let out = match res {
                         Ok(v) => Ok(eng.describe(v)),
                         Err(e) => Err(JsError::from(e)),
                     };
@@ -799,18 +837,11 @@ impl Default for JscoreEngine {
 
 impl JsEngine for JscoreEngine {
     fn eval(&mut self, source: &str) -> Result<String, JsError> {
-        let (tx, rx) = channel();
-        if self
-            .tx
-            .send(Cmd::Eval {
-                src: source.to_string(),
-                tx,
-            })
-            .is_err()
-        {
-            return Err(JsError::Dead);
-        }
-        rx.recv().map_err(|_| JsError::Dead)?
+        self.eval_cmd(source, None)
+    }
+
+    fn eval_named(&mut self, source: &str, name: &str) -> Result<String, JsError> {
+        self.eval_cmd(source, Some(name))
     }
 
     fn run_pending(&mut self) -> usize {

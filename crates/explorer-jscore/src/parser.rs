@@ -24,7 +24,12 @@ use std::rc::Rc;
 /// ses early errors s'appliquent aussi au texte évalué (spec
 /// `PerformEval` — « strictCaller »). `nest_max` borne
 /// l'emboîtement natif du parseur récursif (JS-C41).
-pub(crate) fn parse_in(src: &str, strict: bool, nest_max: u32) -> Result<Program> {
+pub(crate) fn parse_in(
+    src: &str,
+    strict: bool,
+    nest_max: u32,
+    src_name: Option<Rc<str>>,
+) -> Result<Program> {
     let toks = lex(src)?;
     let mut p = Parser {
         toks,
@@ -37,6 +42,7 @@ pub(crate) fn parse_in(src: &str, strict: bool, nest_max: u32) -> Result<Program
         labels: Vec::new(),
         priv_seq: 0,
         priv_scopes: Vec::new(),
+        src_name,
     };
     p.scan_directives();
     let mut body = Vec::new();
@@ -53,11 +59,17 @@ pub(crate) fn parse_in(src: &str, strict: bool, nest_max: u32) -> Result<Program
 /// are allowed and the code is always strict (spec : un module ne
 /// quitte jamais le mode strict).
 pub fn parse_module(src: &str) -> Result<Program> {
-    parse_module_in(src, DEFAULT_NEST_LIMIT)
+    parse_module_in(src, DEFAULT_NEST_LIMIT, None)
 }
 
 /// Module goal avec borne d'emboîtement explicite (JS-C41).
-pub(crate) fn parse_module_in(src: &str, nest_max: u32) -> Result<Program> {
+/// `src_name` étiquette les `FnLit` produits — rendue dans les
+/// frames `error.stack` (attribution par bundle, JS-C56).
+pub(crate) fn parse_module_in(
+    src: &str,
+    nest_max: u32,
+    src_name: Option<Rc<str>>,
+) -> Result<Program> {
     let toks = lex(src)?;
     let mut p = Parser {
         toks,
@@ -70,6 +82,7 @@ pub(crate) fn parse_module_in(src: &str, nest_max: u32) -> Result<Program> {
         labels: Vec::new(),
         priv_seq: 0,
         priv_scopes: Vec::new(),
+        src_name,
     };
     p.scan_directives();
     let mut body = Vec::new();
@@ -135,6 +148,9 @@ struct Parser {
     /// le nom de la plus interne à la plus externe (spec : les
     /// `PrivateNameEnvironments` s'emboîtent).
     priv_scopes: Vec<(u32, HashSet<String>)>,
+    /// Nom de la source en cours de parse — copié dans chaque
+    /// `FnLit.src` pour les frames `error.stack` (JS-C56).
+    src_name: Option<Rc<str>>,
 }
 
 impl Parser {
@@ -1430,6 +1446,7 @@ impl Parser {
                     is_gen: false,
                     strict,
                     pos,
+                    src: self.src_name.clone(),
                 }))));
             }
         }
@@ -1450,6 +1467,7 @@ impl Parser {
                     is_gen: false,
                     strict,
                     pos,
+                    src: self.src_name.clone(),
                 }))));
             }
             self.pos = save;
@@ -1485,6 +1503,7 @@ impl Parser {
                     is_gen: false,
                     strict,
                     pos,
+                    src: self.src_name.clone(),
                 }))));
             }
             self.pos = save;
@@ -1505,6 +1524,7 @@ impl Parser {
                         is_gen: false,
                         strict,
                         pos,
+                        src: self.src_name.clone(),
                     }))));
                 }
             }
@@ -2069,6 +2089,7 @@ impl Parser {
                             is_gen: false,
                             strict: body.1,
                             pos: kpos,
+                            src: self.src_name.clone(),
                         });
                         props.push(if kind == ClassMemberKind::Getter {
                             ObjProp::Getter(key, fun)
@@ -2094,6 +2115,7 @@ impl Parser {
                                 is_gen: gen,
                                 strict: body.1,
                                 pos: kpos,
+                                src: self.src_name.clone(),
                             })),
                         ));
                     }
@@ -2187,6 +2209,7 @@ impl Parser {
                         // englobante ; l'identité reste cohérente.
                         priv_seq: self.priv_seq,
                         priv_scopes: self.priv_scopes.clone(),
+                        src_name: self.src_name.clone(),
                     };
                     let e = sub.expr(no_in)?;
                     self.priv_seq = self.priv_seq.max(sub.priv_seq);
@@ -2240,6 +2263,7 @@ impl Parser {
             is_gen: gen,
             strict,
             pos,
+            src: self.src_name.clone(),
         }))
     }
 
@@ -2360,6 +2384,7 @@ impl Parser {
                         is_gen: false,
                         strict: true,
                         pos: mpos,
+                        src: self.src_name.clone(),
                     }),
                 });
                 continue;
@@ -2435,6 +2460,7 @@ impl Parser {
                         is_gen: false,
                         strict: true,
                         pos: mpos,
+                        src: self.src_name.clone(),
                     }),
                 });
                 continue;
@@ -2466,6 +2492,7 @@ impl Parser {
                     is_gen,
                     strict: true,
                     pos: mpos,
+                    src: self.src_name.clone(),
                 }),
             });
         }

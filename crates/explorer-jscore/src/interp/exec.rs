@@ -23,7 +23,13 @@ impl Engine {
         if let Some(h) = &self.eval_hook {
             h(src);
         }
-        let prog = crate::parser::parse_in(src, self.strict, self.nest_limit).map_err(|err| {
+        let prog = crate::parser::parse_in(
+            src,
+            self.strict,
+            self.nest_limit,
+            Some(std::rc::Rc::from("<eval>")),
+        )
+        .map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
         })?;
         self.exec_program(&prog)
@@ -58,7 +64,13 @@ impl Engine {
         if let Some(h) = &self.eval_hook {
             h(src);
         }
-        let prog = crate::parser::parse_in(src, self.strict, self.nest_limit).map_err(|err| {
+        let prog = crate::parser::parse_in(
+            src,
+            self.strict,
+            self.nest_limit,
+            Some(std::rc::Rc::from("<eval>")),
+        )
+        .map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
         })?;
         let outer_strict = self.strict;

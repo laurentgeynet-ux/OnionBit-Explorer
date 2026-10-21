@@ -43,10 +43,10 @@ pub(crate) fn object_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsR
 }
 
 pub(crate) fn has_own_property(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let key = match arg(args, 0) {
-        Value::Num(n) => num_to_js_string(n),
-        v => e.to_js_string(v)?,
-    };
+    // `ToPropertyKey` — un symbole indexe sa clé, pas une
+    // conversion `ToString` (TypeError spuri — trigger réel :
+    // `hasOwnProperty.call(t, Symbol())` dans catalyst/GitHub).
+    let key = e.prop_key(arg(args, 0))?;
     let has = match this {
         // Proxy : `hasOwnProperty` passe par la trap
         // `getOwnPropertyDescriptor` (spec `[[GetOwnProperty]]`).
@@ -267,10 +267,7 @@ pub(crate) fn object_define_property(e: &mut Engine, _t: Value, args: &[Value]) 
     let target @ Value::Obj(id) = arg(args, 0) else {
         return Err(e.type_error("Object.defineProperty on non-object"));
     };
-    let key = match arg(args, 1) {
-        Value::Num(n) => num_to_js_string(n),
-        v => e.to_js_string(v)?,
-    };
+    let key = e.prop_key(arg(args, 1))?;
     let Value::Obj(desc_id) = arg(args, 2) else {
         return Err(e.type_error("property descriptor must be an object"));
     };
@@ -528,10 +525,7 @@ pub(crate) fn object_get_own_property_descriptor(
     args: &[Value],
 ) -> JsResult<Value> {
     let target = arg(args, 0);
-    let key = match arg(args, 1) {
-        Value::Num(n) => num_to_js_string(n),
-        v => e.to_js_string(v)?,
-    };
+    let key = e.prop_key(arg(args, 1))?;
     // Descripteurs propres de la string primitive (spec
     // `ToObject` + `StringGetOwnProperty`).
     if let Value::Str(sid) = target {

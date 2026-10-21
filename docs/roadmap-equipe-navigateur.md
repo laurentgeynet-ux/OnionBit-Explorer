@@ -2190,18 +2190,37 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
     `class X { a(){};b(){} }` rejeté : l'élément de classe
     vide `;` (ClassElement de la grammaire) n'était pas
     accepté. Fix : consommé dans la boucle de membres.
-  - **Résidu honnête** : `TypeError: cannot convert a
-    Symbol to string` (bundle `environment-*.js` —
-    conversion interdite par la spec, le chemin exact reste
-    à isoler dans le graphe webpack) ; `cannot read 'get'
-    of Undefined` et `value is not a function` sur les
-    modules suivants — le code progresse plus loin, les
-    erreurs se déplacent ; `react` bare specifier = import
-    map absente (hors périmètre miroir).
+  - **GitHub** : `TypeError: cannot convert a Symbol to
+    string` — attribution par frame d'abord, coupable
+    ensuite : `FnLit.src` porte le nom de la source
+    (`eval_module` → URL du bundle, `eval`/`Function` →
+    étiquette générique) et `stack_text` le rend
+    `at f (bundle.js:l:c)`. Les stacks citent alors chaque
+    maillon webpack — le Symbol sautait dans
+    `catalyst-*.js` (`hasOwnProperty.call(t, O)` avec `O`
+    symbole, callback registry des custom elements).
+    Cause : `hasOwnProperty`, `Object.defineProperty` et
+    `getOwnPropertyDescriptor` convertissaient leur clé par
+    `to_js_string` au lieu de `prop_key` — `ToString` au
+    lieu de `ToPropertyKey` (spec). Fix : `prop_key`
+    partout — un symbole indexe sa clé unique.
+    `JsEngine::eval_named` (méthode additive, défaut
+    `eval`) + `Cmd::Eval.name` : la session passe l'URL du
+    `<script src>` classique — les frames citent aussi les
+    scripts non-module.
+  - **Résidu honnête** : `react` bare specifier — le
+    registry GitHub résout `react` vers
+    `assets/react` (React réel, hors périmètre miroir) ;
+    `value is not a function` à
+    `app-foundation` (`useSyncExternalStore` — aval du
+    `react` manquant). Les autres erreurs census ont
+    disparu.
   Tests : `mutation_observer_document_target`,
   `dom_interface_constructors`, `custom_elements_registry`,
   `regexp_quantified_lookahead`, `class_empty_elements`,
-  `template_literals` (quotes en texte brut).
+  `template_literals` (quotes en texte brut),
+  `symbol_cles_propres_to_property_key`,
+  `stack_attribue_la_source_par_frame`.
 
 ## Tâches continues
 

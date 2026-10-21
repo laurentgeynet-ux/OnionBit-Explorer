@@ -110,7 +110,8 @@ impl Session {
                 let Some(src) = item_source(item, &script_srcs) else {
                     continue;
                 };
-                self.eval_or_report(tab, eng.as_mut(), src);
+                let url = item.src.as_ref().map(Url::as_str);
+                self.eval_or_report(tab, eng.as_mut(), src, url.as_deref());
             }
             for me in arrival_evals {
                 self.eval_module_graph(tab, eng.as_mut(), me);
@@ -122,7 +123,8 @@ impl Session {
                         self.eval_module_graph(tab, eng.as_mut(), me);
                     }
                 } else if let Some(src) = item_source(item, &script_srcs) {
-                    self.eval_or_report(tab, eng.as_mut(), src);
+                    let url = item.src.as_ref().map(Url::as_str);
+                    self.eval_or_report(tab, eng.as_mut(), src, url.as_deref());
                 }
             }
             let n = eng.run_pending();

@@ -46,7 +46,13 @@ pub(crate) fn function_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
     if let Some(h) = &e.eval_hook {
         h(&src);
     }
-    let prog = crate::parser::parse_in(&src, false, e.nest_limit).map_err(|err| {
+    let prog = crate::parser::parse_in(
+        &src,
+        false,
+        e.nest_limit,
+        Some(std::rc::Rc::from("<Function>")),
+    )
+    .map_err(|err| {
         crate::heap::Thrown(e.error_value(
             e.protos.syntax_error,
             "SyntaxError",

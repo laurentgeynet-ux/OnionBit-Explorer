@@ -339,6 +339,32 @@ fn uncaught_porte_la_pile() {
 }
 
 #[test]
+fn stack_attribue_la_source_par_frame() {
+    // JS-C56 : les frames d'un module citent son nom —
+    // `at f (bundle.mjs:l:c)` attribue l'erreur au bon
+    // script dans un graphe webpack (triage site réel).
+    let mut e = Engine::new();
+    match e.eval_module(
+        "function f() { throw new TypeError('b') }\nf()",
+        "bundle.mjs",
+    ) {
+        Err(explorer_jscore::Error::Uncaught(m)) => {
+            assert!(m.contains("at f (bundle.mjs:"), "bundle : {m}");
+        }
+        other => panic!("expected Uncaught, got {other:?}"),
+    }
+    // `eval` reste sans nom — format `(l:c)` inchangé.
+    let s = ev_str("function g() { return new Error('x').stack } g()");
+    assert!(s.contains("at g (1:"), "sans étiquette : {s}");
+    // `eval()` indirect étiquette les fonctions qu'il définit.
+    let s = ev_str(
+        "function h() { return eval('function z(){return new Error(\\'y\\').stack} z()') } h()",
+    );
+    assert!(s.contains("at z (<eval>:"), "étiquette eval : {s}");
+    assert!(s.contains("at h (1:"), "appelant sans étiquette : {s}");
+}
+
+#[test]
 fn stack_capturee_a_la_construction() {
     // La pile est figée à `new Error`, pas au `throw` : capturer
     // en dehors de tout appelant puis relancer garde la trace.
@@ -1696,6 +1722,38 @@ fn symbol_basics() {
     assert_eq!(ev_str("Symbol.keyFor(Symbol())"), "undefined");
     // Symbol.for sets description = key.
     assert_eq!(ev_str("Symbol.for('k').description"), "k");
+}
+
+#[test]
+fn symbol_cles_propres_to_property_key() {
+    // JS-C56 : `ToPropertyKey` pas `ToString` — les APIs à clé
+    // propre acceptent un symbole (trigger réel : catalyst/GitHub
+    // fait `hasOwnProperty.call(t, Symbol())`).
+    assert_eq!(
+        ev_str(
+            "var s = Symbol('x'); var o = {}; o[s] = 42; \
+             Object.prototype.hasOwnProperty.call(o, s)"
+        ),
+        "true"
+    );
+    assert_eq!(
+        ev_str("var s = Symbol(); var o = {}; o[s] = 1; Object.hasOwn(o, s)"),
+        "true"
+    );
+    assert_eq!(
+        ev_str(
+            "var s = Symbol(); var o = {}; \
+             Object.defineProperty(o, s, {value: 7, enumerable: true, configurable: true}); \
+             Object.getOwnPropertyDescriptor(o, s).value"
+        ),
+        "7"
+    );
+    // La coercition `String(sym)` elle, reste interdite (spec).
+    assert_eq!(ev_str("String(Symbol())"), "Symbol()");
+    assert_eq!(
+        ev_str("try { Symbol() + '' } catch (e) { e instanceof TypeError }"),
+        "true"
+    );
 }
 
 #[test]

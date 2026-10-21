@@ -257,12 +257,26 @@ impl Session {
     /// « Error: b » seul ne localise rien sur du minifié
     /// (triage M-H1 : trouver quel `<script>` jette est la
     /// moitié du diagnostic).
-    pub(crate) fn eval_or_report(&mut self, tab: TabId, eng: &mut dyn JsEngine, src: &str) {
-        if let Err(e) = eng.eval(src) {
+    /// `url` = `src` résolue du script externe — étiquette les
+    /// frames `error.stack` (`eval_named`, JS-C56) et préfixe le
+    /// rapport d'erreur.
+    pub(crate) fn eval_or_report(
+        &mut self,
+        tab: TabId,
+        eng: &mut dyn JsEngine,
+        src: &str,
+        url: Option<&str>,
+    ) {
+        let r = match url {
+            Some(u) => eng.eval_named(src, u),
+            None => eng.eval(src),
+        };
+        if let Err(e) = r {
             tracing::debug!(tab, error = %e, "script en échec");
+            let origin = url.map(|u| format!("{u} — ")).unwrap_or_default();
             let _ = self.events.send(CoreEvent::PipelineError {
                 tab: Some(tab),
-                message: format!("{e} — src «{}»", src_head(src)),
+                message: format!("{e} — {origin}src «{}»", src_head(src)),
             });
         }
     }
