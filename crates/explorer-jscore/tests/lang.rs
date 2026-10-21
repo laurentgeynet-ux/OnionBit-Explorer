@@ -702,6 +702,24 @@ fn regexp_class_escape_bounds() {
     );
 }
 
+/// JS-C43 : les littéraux `[`/`&`/`~` en classe ont une syntaxe
+/// côté backend (set/intersection/diff) — émise via `class_char`
+/// (`\x{…}`), plus de « Invalid character class ». Motif réel :
+/// `[.*+?^${}()|[\]\\]` (sanitize de classes CSS, bundle GitHub).
+#[test]
+fn regexp_class_syntax_chars_escaped() {
+    assert_eq!(ev_str("'+'.match(/[.*+?^${}()|[\\]\\\\]/)!=null"), "true");
+    assert_eq!(ev_str("'['.match(/[[]/)!=null"), "true");
+    assert_eq!(ev_str("'&'.match(/[&]/)!=null"), "true");
+    assert_eq!(ev_str("'~'.match(/[~]/)!=null"), "true");
+    // `&` isolé : jamais d'intersection backend accidentelle.
+    assert_eq!(ev_str("'x&y'.match(/[x&y]+/)[0]"), "x&y");
+    // Borne haute brute d'une plage — même échappement.
+    assert_eq!(ev_str("'['.match(/[A-[]/)!=null"), "true");
+    // Hors classe, rien ne change.
+    assert_eq!(ev_str("'a['.match(/a\\[/)!=null"), "true");
+}
+
 #[test]
 fn regexp_surrogate_bounds() {
     // Nos strings sont UTF-8 — les surrogates n'y existent

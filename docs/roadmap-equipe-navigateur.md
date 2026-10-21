@@ -1615,14 +1615,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   récursive native ; test
   `c41_deep_operand_chain_drops_iteratively` (15 K maillons,
   `eval` et `module_specifiers`).
-- [ ] **JS-C43. Parseur regex — motifs courants rejetés**
+- [x] **JS-C43. Parseur regex — motifs courants rejetés**
   (déclencheur terrain mission 6 : githubstatus.com,
   github.com — scripts réels morts au parse, erreurs typées,
   zéro crash) : `(.*?)` lazy → `quantifier without atom` ;
   `[.*+?^${}()|[\]\\]` → `Invalid character class` ;
   `[\0-\x1f]` → `empty class range` ; `\uD800` →
-  `Invalid codepoint`. Chaque motif = un cas `corpus.rs`
-  minimal avant fix — l'ordre est celui du site réel.
+  `Invalid codepoint`. Trois motifs étaient déjà colmatés
+  par le rapatriement JS-C48 (lazy `*?`, bornes de plage
+  échappées, surrogates clampés) ; le dernier trou — les
+  littéraux `[`/`&`/`~` en classe, qui ont une syntaxe de
+  classe côté backend — est échappé via `class_char`
+  (`\x{…}`), y compris en borne haute brute de plage.
+  Test : `regexp_class_syntax_chars_escaped`.
 - [x] **JS-C44. Specificateurs « bare » non résolus**
   (déclencheur terrain mission 6 : `cannot load module
   'react'`) : arbitrage = **import maps minimales** —

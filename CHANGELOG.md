@@ -440,6 +440,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `language`, même instance à chaque lecture (spec),
   low-fingerprint — la seconde injection s'exécute et le
   svg atteint le DOM.
+- **JS-C43 — parseur regex, motif `[` littéral en classe**
+  (`explorer-jscore`) : dernier rejet du quadruplet mesuré
+  sur github.com/githubstatus.com — `[.*+?^${}()|[\]\\]`
+  échouait « Invalid character class » car les littéraux de
+  classe étaient émis bruts alors que `[`/`&`/`~` ont une
+  syntaxe de classe côté backend (set/intersection/diff).
+  Livré : émission via `class_char` (`\x{…}`), y compris la
+  borne haute brute d'une plage — les trois autres motifs
+  (lazy `*?`, `[\0-\x1f]`, `\uD800`) étaient déjà colmatés
+  par le rapatriement JS-C48. Test :
+  `regexp_class_syntax_chars_escaped`.
 
 ### Added
 

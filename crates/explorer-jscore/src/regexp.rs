@@ -465,6 +465,11 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                             out.push('-');
                             if is_surrogate(hi) {
                                 class_char(&mut out, hi_c);
+                            } else if cs[i + 1] != '\\' {
+                                // Borne haute brute — `class_char`
+                                // échappe la syntaxe de classe
+                                // backend (`[`/`&`/`~`).
+                                class_char(&mut out, u32::from(cs[i + 1]));
                             } else {
                                 out.push_str(&hfrag);
                             }
@@ -580,7 +585,12 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
             }
             _ => {
                 if in_class {
-                    out.push(c);
+                    // Littéral de classe via `class_char` :
+                    // `[`/`&`/`~` ont une syntaxe en classe côté
+                    // backend (set/intersection/diff) — le brut
+                    // `[.*+?^${}()|[\]\\]` du web réel rejetait
+                    // « Invalid character class » (JS-C43).
+                    class_char(&mut out, u32::from(c));
                     class_emitted = true;
                     if t.fold {
                         let is_bound = class_dash
