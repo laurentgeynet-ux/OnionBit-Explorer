@@ -138,6 +138,20 @@ pub(crate) fn install(e: &mut Engine) {
         let an = e.str_val("AggregateError");
         e.set_own(e.protos.aggregate_error, "name", an, false);
     }
+    // `EvalError`/`RangeError`/`URIError` — mêmes gabarits que
+    // `TypeError` (dev.to : table d'intrinsèques `%EvalError%`,
+    // JS-C56 vague 2).
+    let ev_err = ctor(e, "EvalError", eval_error_ctor, e.protos.eval_error);
+    let rg_err = ctor(e, "RangeError", range_error_ctor, e.protos.range_error);
+    let ur_err = ctor(e, "URIError", uri_error_ctor, e.protos.uri_error);
+    for (p, n) in [
+        (e.protos.eval_error, "EvalError"),
+        (e.protos.range_error, "RangeError"),
+        (e.protos.uri_error, "URIError"),
+    ] {
+        let nv = e.str_val(n);
+        e.set_own(p, "name", nv, false);
+    }
     let date = ctor(e, "Date", date_ctor, p_date);
 
     // `URL`/`URLSearchParams` (WHATWG subset — JS-C16) : parsing
@@ -262,6 +276,9 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(g, "ReferenceError", r_err, false);
     e.set_own(g, "SyntaxError", s_err, false);
     e.set_own(g, "AggregateError", a_err, false);
+    e.set_own(g, "EvalError", ev_err, false);
+    e.set_own(g, "RangeError", rg_err, false);
+    e.set_own(g, "URIError", ur_err, false);
     e.set_own(g, "Date", date, false);
 
     // `WeakRef`/`FinalizationRegistry` (JS-C13) — vraies
@@ -736,6 +753,10 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(sp, "codePointAt", string_code_point_at);
     e.add_method(sp, "matchAll", string_match_all);
     e.add_method(sp, "normalize", string_normalize);
+    // `[Symbol.iterator]` — itérateur de code points (trigger
+    // réel dev.to : appel direct `str[Symbol.iterator]()`).
+    let siter_fn = e.native_fn("[Symbol.iterator]", string_iterator);
+    e.set_own(sp, crate::interp::SYM_ITERATOR, siter_fn, false);
     if let Value::Obj(sid) = string {
         e.add_method(sid, "fromCharCode", string_from_char_code);
         e.add_method(sid, "fromCodePoint", string_from_code_point);

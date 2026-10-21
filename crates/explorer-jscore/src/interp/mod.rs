@@ -353,6 +353,14 @@ pub(crate) struct Protos {
     pub type_error: ObjId,
     pub reference_error: ObjId,
     pub syntax_error: ObjId,
+    /// `EvalError.prototype` (ES2015+ le réintroduit — dev.to
+    /// l'énumère dans sa table d'intrinsèques ; JS-C56 vague 2).
+    pub eval_error: ObjId,
+    /// `RangeError.prototype` (`new RangeError(msg)`).
+    pub range_error: ObjId,
+    /// `URIError.prototype` — `error_value` l'émettait déjà pour
+    /// `decodeURI` malformé sans que le global existe.
+    pub uri_error: ObjId,
     pub date: ObjId,
     pub regexp: ObjId,
     pub promise: ObjId,
@@ -388,7 +396,7 @@ pub(crate) struct Protos {
 
 impl Protos {
     /// Tous les prototypes — racines GC permanentes.
-    pub(crate) fn all(&self) -> [ObjId; 27] {
+    pub(crate) fn all(&self) -> [ObjId; 30] {
         [
             self.object,
             self.function,
@@ -400,6 +408,9 @@ impl Protos {
             self.type_error,
             self.reference_error,
             self.syntax_error,
+            self.eval_error,
+            self.range_error,
+            self.uri_error,
             self.date,
             self.regexp,
             self.promise,
@@ -458,6 +469,9 @@ impl Engine {
         let type_error = heap.alloc_obj(Object::ordinary(Value::Obj(error)));
         let reference_error = heap.alloc_obj(Object::ordinary(Value::Obj(error)));
         let syntax_error = heap.alloc_obj(Object::ordinary(Value::Obj(error)));
+        let eval_error = heap.alloc_obj(Object::ordinary(Value::Obj(error)));
+        let range_error = heap.alloc_obj(Object::ordinary(Value::Obj(error)));
+        let uri_error = heap.alloc_obj(Object::ordinary(Value::Obj(error)));
         let date = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let regexp = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let promise = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
@@ -497,6 +511,9 @@ impl Engine {
                 type_error,
                 reference_error,
                 syntax_error,
+                eval_error,
+                range_error,
+                uri_error,
                 date,
                 regexp,
                 promise,

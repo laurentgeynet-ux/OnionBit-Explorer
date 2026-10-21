@@ -2148,6 +2148,90 @@ fn hex_literals_geants_convertissent_en_f64() {
 }
 
 #[test]
+fn chaine_parenthesee_strftime_ne_reexplose_pas() {
+    // Trigger réel : base.js de dev.to contient
+    // `n=(n=(n=…n.replace("%a",…)))` — ~50 parenthèses
+    // imbriquées. La spéculation `(params) =>` re-parsait tout
+    // le sous-arbre à chaque niveau (croissance exponentielle —
+    // parse > 10 min en release). La garde `close_of` vérifie
+    // `=>` après le `)` apparié en O(1).
+    let mut src = String::from("let n=\"%a\";let o={abbr_day_names:['x']};let i=0;n=");
+    for _ in 0..60 {
+        src.push_str("(n=");
+    }
+    src.push('n');
+    for _ in 0..60 {
+        src.push_str(".replace('%a',''))");
+    }
+    src.push(';');
+    let mut e = Engine::new();
+    assert!(e.eval(&src).is_ok(), "parse doit terminer");
+    // La spéculation reste correcte : les vraies flèches
+    // parenthésées passent toujours.
+    assert_eq!(num(ev("((a,b)=>a+b)(2,3)")), 5.0);
+    assert_eq!(ev_str("let g = async (a)=>a+1; typeof g"), "function");
+}
+
+#[test]
+fn string_symbol_iterator_appel_direct() {
+    // Trigger réel dev.to `homePage` : `str[Symbol.iterator]()`
+    // invoqué explicitement (pas via for-of/spread — le fast-path
+    // `iter_values` ne couvre pas l'appel direct sur primitive).
+    assert_eq!(
+        num(ev("var it='hé'[Symbol.iterator](); it.next().done ? 1 : 0")),
+        0.0
+    );
+    assert_eq!(ev_str("var r=''; for (var c of 'ab') r += c; r"), "ab");
+    assert_eq!(num(ev("[...'ab'].length")), 2.0);
+    // L'appel direct sur la primitive et via la variable.
+    assert_eq!(
+        ev_str("var it2='xy'[Symbol.iterator](); it2.next().value"),
+        "x"
+    );
+    assert_eq!(
+        ev_str("var s='wz'; var it3=s[Symbol.iterator](); it3.next().value + it3.next().value + it3.next().done"),
+        "wztrue"
+    );
+    // Code point entier (pas de code units) — cohérent avec
+    // `iter_values`.
+    assert_eq!(num(ev("[...'\\u{1F600}a'].length")), 2.0);
+    // Objet String wrapper — même proto.
+    assert_eq!(
+        ev_str("var it4=new String('q')[Symbol.iterator](); it4.next().value"),
+        "q"
+    );
+}
+
+#[test]
+fn sous_classes_erreur_completes() {
+    // Trigger réel : la table d'intrinsèques de dev.to lit
+    // `%EvalError%` → ReferenceError. EvalError/RangeError/
+    // URIError complètent la famille (proto = Error.prototype).
+    for name in ["EvalError", "RangeError", "URIError"] {
+        assert_eq!(
+            ev_str(&format!("typeof {name}")),
+            "function",
+            "{name} constructeur"
+        );
+        assert_eq!(
+            ev_str(&format!("new {name}('m').name")),
+            name,
+            "{name}.prototype.name"
+        );
+        assert_eq!(
+            ev_str(&format!("new {name}('m') instanceof Error")),
+            "true",
+            "{name} hérite d'Error"
+        );
+        assert_eq!(
+            ev_str(&format!("new {name}('m').message")),
+            "m",
+            "{name}(msg).message"
+        );
+    }
+}
+
+#[test]
 fn regex_literal_eager_validation() {
     // Pattern invalide → SyntaxError au parse, pas d'objet RegExp.
     for src in ["var r = /[/", r"var r = /x\y/u", "var r = /a/zz"] {

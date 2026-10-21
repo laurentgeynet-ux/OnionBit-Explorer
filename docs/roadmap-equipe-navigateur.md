@@ -2271,19 +2271,37 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
     (`jQuery.fn.jquery` vérifié) ; littéraux `0x` géants
     (obfuscateur AWS WAF, ~100 chiffres) — `u64` débordait
     en « malformed numeric literal », repli f64.
+  - **dev.to (vague 3)** : la sonde pendait >10 min.
+    Chaîne de diagnostic : fetches tous finis à +1 s
+    (pas réseau), ~1 cœur CPU stable (boucle de calcul,
+    pas attente), `lex` 35 ms / `parse` gelé en census
+    isolé — **le parseur**, pas l'eval ni les timers.
+    Cause : la spéculation `(params) =>` re-parsait
+    chaque `(` en entier — la chaîne `n=(n=(n=…` de
+    `strftime` (~60 parens, base.js) l'explosait
+    exponentiellement. Fix : `close_of`, table O(n) des
+    délimiteurs appariés — la spéculation vérifie `=>`
+    après le `)` en O(1) sans re-parse. base.js :
+    >10 min → **41 ms** ; sonde dev.to complète
+    (nav + pompes + survol) : **12,3 s**, 0 crash.
+    Après-delta : `%EvalError%`/`%Window%` absents →
+    `EvalError`/`RangeError`/`URIError` constructeurs
+    complets (proto chaîné `Error.prototype`), `Window`
+    stub inconstructible ; `str[Symbol.iterator]()`
+    appelé directement (homePage) — `iter_values`
+    fast-pathait les primitives sans exposer la méthode :
+    `String.prototype[Symbol.iterator]` ajouté,
+    itérateur de code points.
   - **Résidu honnête** : `react` bare specifier — le
     registry GitHub résout `react` vers
     `assets/react` (React réel, hors périmètre miroir) ;
     `value is not a function` à
     `app-foundation` (`useSyncExternalStore` — aval du
-    `react` manquant) ; dev.to : hang diagnostiqué —
-    **eval JS synchrone**, pas réseau ni timers
-    (fetches finis +4 s, `navigate()` jamais rendu ;
-    repro census sans DOM : `base.js` 162 Kio et
-    `baseInitializers.js` 85 Kio pendent chacun >30 s
-    malgré `js_ops=5M`, `baseTracking.js` propre) —
-    un chemin eval échappe à la borne, chantier
-    spécialiste JS ;
+    `react` manquant) ; dev.to : `paginate` →
+    `userData()` (symbole cross-bundle inline absent),
+    `then` of Undefined + `object is not a function`
+    en tête d'`application.js`/`followButtons` (aval
+    webpack runtime, attribution non isolée) ;
     `/keys` : 404 hors session authentifiée.
   Tests : `mutation_observer_document_target`,
   `dom_interface_constructors`, `custom_elements_registry`,
@@ -2293,7 +2311,10 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `stack_attribue_la_source_par_frame`,
   `document_fragment_splice_et_serialise`,
   `document_location_egale_window`,
-  `hex_literals_geants_convertissent_en_f64`.
+  `hex_literals_geants_convertissent_en_f64`,
+  `chaine_parenthesee_strftime_ne_reexplose_pas`,
+  `sous_classes_erreur_completes`,
+  `string_symbol_iterator_appel_direct`.
 
 ## Tâches continues
 

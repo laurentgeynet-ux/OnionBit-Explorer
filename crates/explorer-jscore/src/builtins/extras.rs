@@ -396,6 +396,17 @@ pub(crate) fn string_code_point_at(e: &mut Engine, this: Value, args: &[Value]) 
     Ok(Value::Num(f64::from(cp)))
 }
 
+/// `String.prototype[Symbol.iterator]` — itérateur de code points
+/// (même granularité que `iter_values` : `char` Rust = scalaire).
+/// Trigger réel : dev.to `homePage` invoque `str[Symbol.iterator]()`
+/// directement — le fast-path `iter_values` ne couvre pas l'appel
+/// explicite sur la primitive.
+pub(crate) fn string_iterator(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let s = this_str(e, this)?;
+    let items: Vec<Value> = s.chars().map(|c| e.str_val(c.to_string())).collect();
+    Ok(crate::collections::iter_obj(e, items))
+}
+
 /// `matchAll(re)` — requires the `g` flag (spec `TypeError`); yields
 /// an iterator of match arrays.
 pub(crate) fn string_match_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {

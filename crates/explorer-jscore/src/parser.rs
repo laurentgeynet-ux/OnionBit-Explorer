@@ -24,6 +24,26 @@ use std::rc::Rc;
 /// ses early errors s'appliquent aussi au texte évalué (spec
 /// `PerformEval` — « strictCaller »). `nest_max` borne
 /// l'emboîtement natif du parseur récursif (JS-C41).
+/// Table O(n) des délimiteurs appariés : `close_of[i]` = index
+/// du `)`/`]`/`}` fermant l'ouvrant à `i` (`usize::MAX` si
+/// désapparié) — voir [`Parser::close_of`].
+fn close_table(toks: &[Token]) -> Vec<usize> {
+    let mut close = vec![usize::MAX; toks.len()];
+    let mut stack: Vec<usize> = Vec::new();
+    for (i, t) in toks.iter().enumerate() {
+        match t.tok {
+            Tok::P(P::LParen | P::LBracket | P::LBrace) => stack.push(i),
+            Tok::P(P::RParen | P::RBracket | P::RBrace) => {
+                if let Some(o) = stack.pop() {
+                    close[o] = i;
+                }
+            }
+            _ => {}
+        }
+    }
+    close
+}
+
 pub(crate) fn parse_in(
     src: &str,
     strict: bool,
@@ -31,6 +51,7 @@ pub(crate) fn parse_in(
     src_name: Option<Rc<str>>,
 ) -> Result<Program> {
     let toks = lex(src)?;
+    let close_of = close_table(&toks);
     let mut p = Parser {
         toks,
         pos: 0,
@@ -43,6 +64,7 @@ pub(crate) fn parse_in(
         priv_seq: 0,
         priv_scopes: Vec::new(),
         src_name,
+        close_of,
     };
     p.scan_directives();
     let mut body = Vec::new();
@@ -71,6 +93,7 @@ pub(crate) fn parse_module_in(
     src_name: Option<Rc<str>>,
 ) -> Result<Program> {
     let toks = lex(src)?;
+    let close_of = close_table(&toks);
     let mut p = Parser {
         toks,
         pos: 0,
@@ -83,6 +106,7 @@ pub(crate) fn parse_module_in(
         priv_seq: 0,
         priv_scopes: Vec::new(),
         src_name,
+        close_of,
     };
     p.scan_directives();
     let mut body = Vec::new();
@@ -151,6 +175,14 @@ struct Parser {
     /// Nom de la source en cours de parse — copié dans chaque
     /// `FnLit.src` pour les frames `error.stack` (JS-C56).
     src_name: Option<Rc<str>>,
+    /// `close_of[i]` = index du jeton qui ferme le délimiteur
+    /// ouvrant à l'index `i` (`(`/`[`/`{`) — `usize::MAX` sinon.
+    /// Calculée en une passe O(n) : la spéculation `(params) =>`
+    /// vérifie `=>` après le `)` en O(1) au lieu de re-parser le
+    /// sous-arbre — les chaînes `n=(n=(n=…` (strftime réel,
+    /// base.js de dev.to) faisaient exploser le temps de parse
+    /// exponentiellement, un niveau par parenthèse.
+    close_of: Vec<usize>,
 }
 
 impl Parser {
@@ -1451,7 +1483,18 @@ impl Parser {
             }
         }
         // `(params) => body` — speculative scan of a param list.
-        if self.check_p(P::LParen) {
+        // Garde O(1) : `params()` n'est tenté que si `=>` suit le
+        // `)` apparié — sinon `(` ouvre une expression parenthésée
+        // et la spéculation re-parserait tout le sous-arbre (chaîne
+        // `n=(n=(n=…)` : croissance exponentielle — base.js dev.to).
+        if self.check_p(P::LParen)
+            && self
+                .close_of
+                .get(self.pos)
+                .and_then(|&c| c.checked_add(1))
+                .and_then(|i| self.toks.get(i))
+                .is_some_and(|t| t.tok == Tok::P(P::Arrow))
+        {
             let save = self.pos;
             let pos = self.pos_here();
             if let Some(params) = self.scan_arrow_params() {
@@ -1509,8 +1552,15 @@ impl Parser {
             self.pos = save;
             return Ok(None);
         }
-        // `async (…) => e`
-        if self.check_p(P::LParen) {
+        // `async (…) => e` — même garde O(1) que `try_arrow`.
+        if self.check_p(P::LParen)
+            && self
+                .close_of
+                .get(self.pos)
+                .and_then(|&c| c.checked_add(1))
+                .and_then(|i| self.toks.get(i))
+                .is_some_and(|t| t.tok == Tok::P(P::Arrow))
+        {
             if let Some(params) = self.scan_arrow_params() {
                 if self.check_p(P::Arrow) {
                     self.next();
@@ -2193,6 +2243,7 @@ impl Parser {
                     raws.push(raw);
                 }
                 TplPart::Expr(toks) => {
+                    let close_of = close_table(&toks);
                     let mut sub = Parser {
                         toks,
                         pos: 0,
@@ -2210,6 +2261,7 @@ impl Parser {
                         priv_seq: self.priv_seq,
                         priv_scopes: self.priv_scopes.clone(),
                         src_name: self.src_name.clone(),
+                        close_of,
                     };
                     let e = sub.expr(no_in)?;
                     self.priv_seq = self.priv_seq.max(sub.priv_seq);

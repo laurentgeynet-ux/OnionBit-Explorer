@@ -238,6 +238,23 @@ pub(crate) fn syntax_error_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> Js
     make_named_error(e, p, "SyntaxError", args)
 }
 
+/// `EvalError`/`RangeError`/`URIError` — dev.to énumère
+/// `%EvalError%` dans sa table d'intrinsèques (JS-C56 vague 2).
+pub(crate) fn eval_error_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let p = e.protos.eval_error;
+    make_named_error(e, p, "EvalError", args)
+}
+
+pub(crate) fn range_error_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let p = e.protos.range_error;
+    make_named_error(e, p, "RangeError", args)
+}
+
+pub(crate) fn uri_error_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let p = e.protos.uri_error;
+    make_named_error(e, p, "URIError", args)
+}
+
 pub(crate) fn date_now(_e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value> {
     Ok(Value::Num(now_millis()))
 }

@@ -564,6 +564,9 @@ impl Engine {
             "XMLSerializer",
             "AbortSignal",
             "DOMException",
+            // dev.to : `instanceOf(Window)` (prop-types react-dates)
+            // — détection seule, jamais construit.
+            "Window",
         ] {
             let f = self.native_fn(name, illegal_ctor);
             if let Value::Obj(fid) = f {
