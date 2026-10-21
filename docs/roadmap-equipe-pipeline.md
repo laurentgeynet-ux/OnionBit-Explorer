@@ -1025,6 +1025,55 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   Fix d'une ligne côté NAV
   (`languages` = array gelé) —
   entrée journal 2026-10-21.
+- [x] **R-48. Piste `auto` grid :
+  limite par PISTE, pas par item**
+  (résidu terrain, second palier
+  BBC) — **livré** : une grille
+  sans template crée une colonne
+  `Auto` implicite ; sous
+  `auto-flow: row` plusieurs
+  items y cohabitent (rangées
+  distinctes). `col_widths`
+  collectait une entrée par
+  **item** : le libre était
+  divisé par le nombre
+  d'enfants et `w[col]` écrasé
+  à chaque tour (dernier
+  gagnant) — carte BBC 180px /
+  3 enfants → piste 60px →
+  titres/descriptions/métas en
+  rivières de 60px. Livré :
+  regroupement par colonne —
+  limite = **max** des bases
+  des items (§12.6), le libre
+  se distribue entre pistes ;
+  `w[col]` ne descend plus sous
+  le plancher `lo` d'un
+  `minmax(lo, auto)` dans les
+  deux branches. Effet de bord
+  bonus : la branche « libre ≤
+  0 » prend elle aussi le max
+  au lieu d'écraser. Terrain :
+  dump BBC — `h2` 60×308 →
+  **180×132**, `p` 60×468 →
+  **180×144**, métadonnées en
+  ligne (avant : empilées
+  vertical-rivière). Test :
+  `grid_colonne_auto_multi_items`
+  (modern) — trois items en
+  colonne implicite doivent tous
+  mesurer la largeur conteneur.
+  Reste noté (non promu) :
+  d'autres zones BBC gardent du
+  texte étroit (colonne
+  droite/en-têtes de sections —
+  structure différente, à
+  diagnostiquer à part) ; deux
+  `StyleEnv::default()` hors
+  périmètre PIPE journalisés
+  (`styles_payload` évalue les
+  media à 1024×768 fixe —
+  entrée journal NAV).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

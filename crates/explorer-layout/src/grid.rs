@@ -239,7 +239,11 @@ fn col_widths(
     // pistes auto jusqu'à leur limite, donc une piste ne
     // dépasse jamais le conteneur à taille définie (un texte
     // plus large que le conteneur s'y enroule —
-    // `grid-margins-no-collapse-001`).
+    // `grid-margins-no-collapse-001`). La limite est PAR
+    // PISTE — le max des bases des items qu'elle reçoit
+    // (R-48 : plusieurs items en `auto-flow: row` partagent
+    // la même colonne — compter par item divisait le libre
+    // par le nombre d'enfants → cartes BBC à 60px).
     let mut autos: Vec<(usize, f32)> = Vec::new();
     for &(col, span, base) in items_base {
         if span == 1 && col < w.len() {
@@ -249,7 +253,11 @@ fn col_widths(
                 _ => false,
             };
             if sized {
-                autos.push((col, base));
+                if let Some(e) = autos.iter_mut().find(|(c, _)| *c == col) {
+                    e.1 = e.1.max(base);
+                } else {
+                    autos.push((col, base));
+                }
             }
         }
     }
@@ -268,15 +276,16 @@ fn col_widths(
             .sum();
         let mut free_auto = cb - fixed_sum - gap * w.len().saturating_sub(1) as f32;
         if free_auto > 0.0 {
-            for (n, (col, base)) in autos.iter().enumerate() {
+            for (n, (col, limit)) in autos.iter().enumerate() {
                 let share = free_auto / (autos.len() - n) as f32;
-                let got = base.min(share);
-                w[*col] = got;
+                let got = limit.min(share);
+                // Un `minmax(lo, auto)` garde son plancher `lo`.
+                w[*col] = w[*col].max(got);
                 free_auto -= got;
             }
         } else {
-            for (col, base) in &autos {
-                w[*col] = *base;
+            for (col, limit) in &autos {
+                w[*col] = w[*col].max(*limit);
             }
         }
     }

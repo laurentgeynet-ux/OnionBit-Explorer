@@ -272,6 +272,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `min` — un span massif (`colspan=999999999`) ne peut plus
   annuler une colonne voisine. Limites : hauteur d'un
   `rowspan` non distribuée entre rangs, `colspan=0` = 1.
+- **R-48 — piste `auto` grid : limite par piste, pas par
+  item** (`explorer-layout`) : bug site-réel — les cartes
+  BBC (`display:grid` sans template → colonne `auto`
+  implicite, 3 enfants en `auto-flow: row`) rendaient leur
+  texte en rivières de 60px (= largeur conteneur / nombre
+  d'enfants). `col_widths` collectait les bases par **item**
+  : le libre était divisé par le nombre d'enfants et
+  `w[col]` écrasé à chaque tour (dernier gagnant). Livré :
+  regroupement par colonne — limite de piste = max des
+  bases de ses items (§12.6 Maximize Tracks), distribution
+  du libre entre pistes ; les deux branches préservent le
+  plancher `lo` d'un `minmax(lo, auto)`. Terrain : `h2`
+  60×308 → 180×132, descriptions et métadonnées BBC en
+  ligne normale. Test : `grid_colonne_auto_multi_items`.
 - **`scripts/spawn_daemon.ps1` — spawn WMI durci** :
   les morts silencieuses du daemon (3 occurrences
   non reproductibles, zéro stderr, zéro event) sont

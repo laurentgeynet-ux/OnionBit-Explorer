@@ -420,6 +420,38 @@ fn grid_fixed_et_gap_et_span() {
 }
 
 #[test]
+fn grid_colonne_auto_multi_items() {
+    // R-48 : plusieurs items dans la MÊME piste `auto` —
+    // la limite de la piste = max des bases des items, pas
+    // une part du libre divisée par ITEM (la boucle
+    // écrivait `w[col]` à chaque item : free/N puis dernier
+    // gagnant). Terrain : les cartes BBC (`GridStyled` sans
+    // template → colonne implicite, 3 enfants) donnaient
+    // 180/3 = 60px de large → texte en rivières.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div id=\"a\">x</div>\
+         <p>Un titre de carte plutot long pour la mesure</p>\
+         <div id=\"m\">meta</div></section>",
+        "section { display: grid; width: 180px } #a { width: 100% }",
+    );
+    let section = find(&bx, by_tag(&dom, "section"));
+    let a = find(&bx, by_id(&dom, "a"));
+    let p = find(&bx, by_tag(&dom, "p"));
+    let m = find(&bx, by_id(&dom, "m"));
+    for (name, b) in [("a", &a), ("p", &p), ("m", &m)] {
+        assert!(
+            approx(b.rect.width, 180.0),
+            "{name} : {} attendu 180 (colonne auto pleine)",
+            b.rect.width
+        );
+    }
+    // Empilement vertical : chaque item sur sa propre ligne.
+    assert!(p.rect.y > a.rect.y, "{} vs {}", p.rect.y, a.rect.y);
+    assert!(m.rect.y > p.rect.y, "{} vs {}", m.rect.y, p.rect.y);
+    let _ = section;
+}
+
+#[test]
 fn grid_repeat() {
     let (dom, bx) = laid(
         "<!doctype html><section><div>A</div><div>B</div><div>C</div></section>",
