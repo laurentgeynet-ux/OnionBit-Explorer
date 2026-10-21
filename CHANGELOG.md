@@ -245,6 +245,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Déviation documentée : pas de `SharedArrayBuffer`
   inter-thread — un buffer posté est **copié**.
 
+- **JS-C42 — `Drop` itératif de l'AST** (`explorer-jscore`,
+  livré par `5f19372` en résidu JS-C41, case cochée à
+  retardement) : les chaînes d'opérandes `1+1+…`/`a&&a&&…`
+  (~15 000 maillons, parsées itérativement) se détruisent
+  par file explicite — `Expr::take_children` déplace les
+  enfants `Box`/`Vec` hors de la récursion native de
+  `Drop`. Ni `eval` (borne `expr_depth`, erreur typée) ni
+  `module_specifiers` (parse + drop immédiat) ne débordent
+  la pile. Test : `c41_deep_operand_chain_drops_iteratively`.
+
 ### Fixed
 
 - **R-44 — `width` explicite d'un remplacé dans la mesure

@@ -1604,15 +1604,17 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   d'appel/récursion bornée par budget → `JsError` typée,
   jamais d'overflow natif. Repro minimal : reproduire la
   pile en extrayant le pattern récursif du bundle.
-- [ ] **JS-C42. `Drop` itératif de l'AST** (résidu mesuré de
+- [x] **JS-C42. `Drop` itératif de l'AST** (résidu mesuré de
   JS-C41, repro `repros/` : `x=1+1+…`/`a&&a&&…` à ~15 000
   opérandes via `eval` **et** `module_specifiers`) : le parse
   est borné (`input too deeply nested` propre) mais la
   **destruction récursive** de la chaîne `Box<Expr>` déborde
-  — `maybe_grow` ne couvre pas `Drop`. Fix : `Drop` itératif
-  sur les nœuds unaires/binaires chaînés. Coin extrême — le
-  bundle réel github passe — mais du code généré peut
-  produire de telles chaînes.
+  — `maybe_grow` ne couvre pas `Drop`. Livré (commit
+  `5f19372`, rapatrié par JS-C48) : `Expr::take_children`
+  + `impl Drop for Expr` — file explicite, plus de descente
+  récursive native ; test
+  `c41_deep_operand_chain_drops_iteratively` (15 K maillons,
+  `eval` et `module_specifiers`).
 - [ ] **JS-C43. Parseur regex — motifs courants rejetés**
   (déclencheur terrain mission 6 : githubstatus.com,
   github.com — scripts réels morts au parse, erreurs typées,
