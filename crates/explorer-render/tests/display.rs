@@ -187,6 +187,71 @@ fn overflow_clip_encadre_les_enfants() {
 }
 
 #[test]
+fn overflow_clip_couvre_les_lignes_propres() {
+    // R-55 : motif `.sr-only` de lobste.rs — un élément EN LIGNE
+    // positionné (`position:absolute`) est racine de son propre
+    // contexte inline : ses fragments vivent sur `bx.lines`, émis
+    // par `paint_self` AVANT le `PushClip` — le texte « Lobsters »
+    // du wordmark se peignait hors de la boîte 1×1.
+    let (_dom, _bx, items) = dl(
+        "<h1><a href=#><b class=s>Lobsters</b></a></h1><nav>vu</nav>",
+        ".s{position:absolute;width:1px;height:1px;overflow:hidden;\
+         white-space:nowrap} nav{margin:0}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushClip(r) if r.width <= 2.0))
+        .expect("clip 1px");
+    let pop = items[push..]
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PopClip))
+        .map(|p| p + push)
+        .expect("PopClip");
+    // Le fragment « Lobsters » (32 px hérités du h1) doit être
+    // ENTRE le push et le pop — pas avant.
+    let sr = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::Text { size_px, .. } if *size_px > 30.0))
+        .expect("texte sr-only");
+    assert!(
+        push < sr && sr < pop,
+        "texte hors clip : {sr} vs [{push},{pop}]"
+    );
+    // Le texte du nav reste hors du clip, émis normalement.
+    assert!(items
+        .iter()
+        .any(|i| matches!(i, DisplayItem::Text { size_px, .. } if *size_px < 30.0)));
+}
+
+#[test]
+fn overflow_clip_couvre_lignes_inline_block() {
+    // R-55, variante atome : `inline-block` est aussi racine de
+    // contexte inline — `bx.lines` sur la boîte elle-même.
+    let (_dom, _bx, items) = dl(
+        "<p><span id=s>Lorem ipsum dolor</span></p>",
+        "#s{display:inline-block;overflow:hidden;width:10px;height:10px;\
+         white-space:nowrap} p{margin:0}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushClip(r) if r.width <= 11.0))
+        .expect("clip 10px");
+    let pop = items[push..]
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PopClip))
+        .map(|p| p + push)
+        .expect("PopClip");
+    let sr = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::Text { .. }))
+        .expect("texte de l'atome");
+    assert!(
+        push < sr && sr < pop,
+        "texte hors clip : {sr} vs [{push},{pop}]"
+    );
+}
+
+#[test]
 fn zindex_trie_les_positionnes() {
     // Deux positionnés : z=5 doit passer après z=1.
     let (dom, bx, items) = dl(

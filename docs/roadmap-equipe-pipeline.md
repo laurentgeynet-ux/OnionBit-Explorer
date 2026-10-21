@@ -1295,14 +1295,11 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
     sans dimensionnement+overflow.
     Candidat mineur.
   - **Reste à diagnostiquer** :
-    colonne droite weather.gov
-    écrasée à ~1 car/ligne (squeeze
-    min-content), titre héros
-    débordant ; carte « featured
-    articles » MDN étroite (sa
-    feuille 6ᵉ EST fetchée → vrai
-    suspect PIPE) ; logo lobste.rs
-    chevauchant la nav.
+    titre héros weather.gov
+    débordant (l'écrasement colonne
+    = R-53, livré ; l'étroit MDN =
+    R-54, livré ; le wordmark
+    lobste.rs = R-55, livré).
 - [x] **R-52. `mask-image` borne le
   fond (motif icône)** (issu du
   triage — loupe Wikipedia, avatar
@@ -1389,6 +1386,28 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   ident nu `content` couvre la piste
   minmax, forme `a / b` sur
   `a-start`/`b-end`.
+- [x] **R-55. `overflow` clippe les lignes propres
+  de la boîte** (App. E — le clip recouvre le contenu,
+  pas seulement les enfants) (triage lobste.rs —
+  wordmark « Lobsters » peint sur la nav) — **livré** :
+  un élément `display:inline` positionné
+  (`absolute`/`fixed`) ou flottant est racine de son
+  propre contexte inline — ses fragments vivent sur
+  `bx.lines`, émis par `paint_self` AVANT le
+  `PushClip` → le texte `.sr-only`
+  (`position:absolute;w/h:1px;overflow:hidden`)
+  fuyait sa boîte 1×1 et se peignait par-dessus le
+  header. Livré : émission extraite en `paint_lines`,
+  appelée dans la zone clippée ; l'ouverture du clip
+  compte aussi `bx.lines` (une boîte sans enfants
+  mais à lignes propres est bornée). Terrain :
+  shot lobste.rs — wordmark masqué, seul le carré
+  logo 1rem visible ; le fond de barre rouge reste
+  une entrée NAV (`@import` non résolu — déjà au
+  journal). Tests `display.rs` : texte `32px` d'un
+  inline absolu `overflow:hidden` entre `PushClip`
+  1px et `PopClip` ; variante `inline-block`
+  (contraire — déjà juste, verrouillée).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

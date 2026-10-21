@@ -612,6 +612,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   cartes featured/latest-news/contributions en pleine
   colonne `content`. Tests `modern.rs` : ident nu sur piste
   minmax, forme `a / b` sur lignes implicites.
+- **R-55 — `overflow` clippe les lignes propres de la boîte**
+  (`explorer-render`) : `paint_self` émettait les fragments
+  `bx.lines` avant le `PushClip` — une boîte racine de
+  contexte inline (élément `display:inline` positionné
+  `absolute`/`fixed` ou flottant) à `overflow:hidden`
+  laissait son propre texte fuir le clip. Bug site-réel :
+  le `.sr-only` du wordmark lobste.rs (`position:absolute;
+  width/height:1px;overflow:hidden`) peignait « Lobsters »
+  par-dessus la nav. Livré : émission extraite en
+  `paint_lines`, appelée dans la zone clippée ; l'ouverture
+  du clip compte aussi `bx.lines`. Terrain : wordmark
+  masqué, seul le carré logo 1rem reste. Tests
+  `display.rs` : texte d'inline absolu entre `PushClip` 1px
+  et `PopClip` ; `inline-block` déjà juste, verrouillé.
 
 ### Added
 

@@ -1262,44 +1262,8 @@ fn paint_self(
             ],
         });
     }
-    // Texte : fragments non atomiques des lignes produites
-    // par le layout en-ligne (les atomes = enfants
-    // inline-block, peints à leur place en récursion).
-    // `frag.style` = style de l'élément inline propriétaire
-    // (le plus proche du texte) — `a{color}`/`span{color}`
-    // colorent leurs runs, pas seulement la boîte (R-18).
-    if !bx.lines.is_empty() {
-        for line in &bx.lines {
-            for frag in &line.fragments {
-                if frag.atomic {
-                    continue;
-                }
-                // R-22 : fond + bordure de l'élément INLINE
-                // propriétaire, tranchés par fragment. Le texte
-                // direct du conteneur porte `bx.style` (déjà
-                // peint sur la boîte entière) → sauté ; un
-                // fragment de style différent appartient à un
-                // élément inline avec ses propres déclarations.
-                if frag.style != bx.style {
-                    paint_inline_deco(frag, items, off);
-                }
-                if let Some(run) = &frag.shaped {
-                    let ink = frag
-                        .style
-                        .get("color")
-                        .and_then(parse_color)
-                        .unwrap_or(Color::BLACK);
-                    items.push(DisplayItem::Text {
-                        origin: (frag.rect.x + off.0, frag.rect.y + frag.baseline + off.1),
-                        run: run.clone(),
-                        font: font_request(&frag.style),
-                        color: ink,
-                        size_px: prop_px(&frag.style, "font-size", 16.0),
-                    });
-                }
-            }
-        }
-    }
+    // (Les fragments `bx.lines` sont émis par `paint_lines`,
+    // appelée dans la zone clippée — voir `paint_box` / R-55.)
     // Contrôle coché (`checkbox`/`radio`, étape 38) : marque
     // pleine centrée — carré à ~55 % du plus petit côté,
     // couleur = encre de la boîte (approx MVP documentée).
@@ -1320,6 +1284,53 @@ fn paint_self(
                 },
                 color: ink,
             });
+        }
+    }
+}
+
+/// Fragments de texte des lignes propres de `bx` — le contenu
+/// inline de la boîte quand elle est racine d'un contexte
+/// inline (élément inline positionné/flottant, bloc anonyme).
+/// Séparé de `paint_self` : ces fragments sont du CONTENU —
+/// `paint_box` les émet dans la zone du clip `overflow`
+/// (R-55 : le `.sr-only` de lobste.rs — `position:absolute`,
+/// `overflow:hidden`, 1×1 — fuyait son clip : ses
+/// fragments sortaient avant le `PushClip`).
+///
+/// `frag.style` = style de l'élément inline propriétaire
+/// (le plus proche du texte) — `a{color}`/`span{color}`
+/// colorent leurs runs, pas seulement la boîte (R-18).
+fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
+    for line in &bx.lines {
+        for frag in &line.fragments {
+            // Les atomes (enfants inline-block) sont peints à
+            // leur place en récursion.
+            if frag.atomic {
+                continue;
+            }
+            // R-22 : fond + bordure de l'élément INLINE
+            // propriétaire, tranchés par fragment. Le texte
+            // direct du conteneur porte `bx.style` (déjà
+            // peint sur la boîte entière) → sauté ; un
+            // fragment de style différent appartient à un
+            // élément inline avec ses propres déclarations.
+            if frag.style != bx.style {
+                paint_inline_deco(frag, items, off);
+            }
+            if let Some(run) = &frag.shaped {
+                let ink = frag
+                    .style
+                    .get("color")
+                    .and_then(parse_color)
+                    .unwrap_or(Color::BLACK);
+                items.push(DisplayItem::Text {
+                    origin: (frag.rect.x + off.0, frag.rect.y + frag.baseline + off.1),
+                    run: run.clone(),
+                    font: font_request(&frag.style),
+                    color: ink,
+                    size_px: prop_px(&frag.style, "font-size", 16.0),
+                });
+            }
         }
     }
 }
@@ -2305,12 +2316,21 @@ fn paint_box<'a>(
         paint_self(bx, items, off, cx.vp, cx.images, cx.canvas_bg_src);
         paint_replaced(bx, items, off, cx.images);
     }
-    if !bx.children.is_empty() {
+    if !bx.children.is_empty() || !bx.lines.is_empty() {
         // Clip sur le padding box (approx : border box moins les
         // bordures — on garde le rect entier, documenté).
+        // `bx.lines` compte pour l'ouverture : les lignes
+        // propres sont du contenu autant que les enfants (R-55).
         let clipped = bx.overflow != Overflow::Visible;
         if clipped {
             items.push(DisplayItem::PushClip(shifted(bx.rect, off)));
+        }
+        // Fragments de lignes propres (racine d'un contexte
+        // inline — élément inline positionné, anon…) : du
+        // contenu → DANS le clip, pas avec les décorations de
+        // `paint_self` émises avant (R-55).
+        if !hidden {
+            paint_lines(bx, items, off);
         }
         // Ordre App. E au sein des non positionnés : (a)
         // blocs en flux, (b) flottants, (c) contenu en ligne
