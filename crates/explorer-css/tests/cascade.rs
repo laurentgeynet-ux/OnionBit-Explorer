@@ -736,6 +736,34 @@ fn hint_cols_rows_size_en_caracteres() {
     assert_eq!(e2.compute(&dom, ta3, &env()).get("width"), Some("500px"));
 }
 
+// ── R-68 : borne MAX_TOKENS vs feuilles concaténées réelles ──
+
+#[test]
+fn blob_geant_regle_apres_borne() {
+    // Régression R-68 : les feuilles liées arrivent concaténées
+    // en un seul `add_css` (session) — un corpus >256 K tokens
+    // (github.com ≈ 384 K) perdait silencieusement sa fin :
+    // la dernière feuille (et ses règles de masquage) était
+    // tronquée → éléments non masqués peints. La règle cible
+    // DOIT survivre au-delà de l'ancienne borne.
+    let mut css = String::new();
+    // `.a{x:y}` = 7 tokens → 45 000 règles ≈ 315 K tokens.
+    for _ in 0..45_000 {
+        css.push_str(".a{x:y}");
+    }
+    css.push_str(".probe{visibility:hidden}");
+    let mut e = StyleEngine::new();
+    e.add_css(&css, Origin::Author);
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let b = dom.create_element("body").unwrap();
+    dom.append_child(doc, b).unwrap();
+    let d = dom.create_element("div").unwrap();
+    dom.set_attribute(d, "class", "probe").unwrap();
+    dom.append_child(b, d).unwrap();
+    assert_eq!(e.compute(&dom, d, &env()).get("visibility"), Some("hidden"));
+}
+
 // ── font-size : valeur calculée absolue (R-17) ────────────
 
 #[test]

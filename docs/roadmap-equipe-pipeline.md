@@ -1668,6 +1668,34 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `BlockCtx` (single-writer).
   Précédent : `Arc` retenu pour les
   `--*` en R-57 — même raison.
+- [x] **R-68. `MAX_TOKENS` 256 K → 1 M**
+  (trigger vol humain `dab313b` —
+  nav mobile GitHub peinte dépliée) —
+  **livré** : attribution mesurée —
+  suspects éliminés un à un (fetch
+  20/20 feuilles OK, cascade isolée
+  sur DOM réel = `hidden`, paint
+  `visibility` sain) jusqu'à la
+  reproduction minimale : le blob
+  concaténé (2,45 Mo / **384 K
+  tokens**) dépassait la borne
+  tokenizer ADR-0011 (256 K) →
+  troncature silencieuse tuant la
+  19ᵉ feuille sur 20 —
+  `marketing-header.module.css` et
+  sa règle `visibility:hidden` sur
+  `.dropdown__jv_u56` absentes.
+  Plafond relevé à 1 M tokens
+  (marge ×2,7, ~40 Mo `Vec<Token>`
+  au pire — borne conservée). Test
+  `blob_geant_regle_apres_borne` +
+  shot github.com : menu fermé.
+  Note : la concaténation multi-
+  feuilles est un choix session —
+  le parsing par feuille garderait
+  chaque feuille sous borne (max
+  mesuré : 85 K tokens) — décision
+  NAV si reprise.
 - [x] **R-59. `prefers-color-scheme` +
   défauts UA sombres** (moitié PIPE du
   thème sombre — journal d'abord,

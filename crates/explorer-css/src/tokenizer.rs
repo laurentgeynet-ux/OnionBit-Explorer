@@ -9,7 +9,13 @@
 use crate::token::Token;
 
 /// Nombre max de tokens émis (borne contenu hostile — ADR-0011).
-const MAX_TOKENS: usize = 256 * 1024;
+/// R-68 : relevé de 256 K à 1 M — les feuilles liées sont
+/// concaténées en UN blob en amont (session) ; le corpus réel
+/// dépasse 256 K (github.com ≈ 384 K tokens / 2,4 Mo CSS), la
+/// troncature silencieuse tuait la fin de la cascade (règles
+/// absentes → éléments non masqués peints). 1 M tokens ≈ 40 Mo
+/// de `Vec<Token>` au pire — borne mémoire conservée.
+const MAX_TOKENS: usize = 1024 * 1024;
 
 /// Tokenize tout le flux — retourne sans `Eof` final (le parser
 /// traite la fin par épuisement).

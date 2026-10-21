@@ -73,6 +73,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `keyboard_event_ctor_copies_init_keys`. Mécanisme
   réutilisable pour `MouseEvent.clientX`…
 
+- **R-68 — `MAX_TOKENS` 256 K → 1 M** (`explorer-css`,
+  trigger vol humain « nav GitHub dépliée ») : la borne
+  du tokenizer (ADR-0011) tronquait **silencieusement**
+  le blob CSS concaténé — la session empile les feuilles
+  `<link>` en un seul `add_css` ; github.com = 20 feuilles
+  ≈ 2,45 Mo / **384 K tokens**, la coupure tombait au
+  milieu du flux : la feuille header (19ᵉ/20) n'était
+  jamais tokenisée → `.dropdown__jv_u56{visibility:hidden}`
+  absent → menu mobile peint déplié. Reproduit en
+  isolant : même cascade en 20 `add_css` séparés = masqué,
+  blob concaténé = règle perdue ; la fenêtre minimale
+  coupable croise la borne à l'ajout du 13ᵉ fichier.
+  Nouveau plafond : 1 M tokens (~×2,7 le corpus mesuré,
+  ≈40 Mo de `Vec<Token>` au pire — borne hostile
+  conservée). Test : `blob_geant_regle_apres_borne`
+  (~315 K tokens, règle cible en queue). Validé terrain :
+  shot github.com 800×1600 — le menu ne se peint plus.
 - **R-67 — `FontCache` `Send`** (`explorer-layout`) :
   `data` `Rc<Vec<u8>>` → `Arc<Vec<u8>>` (tampons immuables
   — `Arc::as_ptr` conserve l'identité des clés
