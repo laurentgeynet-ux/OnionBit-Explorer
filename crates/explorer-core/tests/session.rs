@@ -1839,6 +1839,90 @@ async fn img_count_is_bounded() {
 }
 
 // ------------------------------------------------------------------
+// Étape 98 — background-image HTTP
+// ------------------------------------------------------------------
+
+#[tokio::test]
+async fn background_image_fetched_and_rendered() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><head><link rel=\"stylesheet\" href=\"/css/s.css\"></head>\
+        <body><div id=\"b\"></div></body></html>",
+    );
+    // `url("bg.png")` relative à la FEUILLE → `/css/bg.png` :
+    // la résolution contre la base feuille est le test.
+    t.route(
+        "/css/s.css",
+        200,
+        "#b{display:inline-block;background-image:url(\"bg.png\");\
+         width:2px;height:2px}",
+    );
+    t.route_bin("/css/bg.png", 200, red_png());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    // Le bitmap fetché s'est blitté — ≥ 1 pixel rouge plein
+    // peint (l'image 2×2 couvre sa boîte en tile).
+    let (_, _, px) = s.frame_pixels(a).unwrap();
+    let red = px
+        .chunks_exact(4)
+        .filter(|p| p[0] > 230 && p[1] < 40 && p[2] < 40)
+        .count();
+    assert!(red > 0, "fond rouge attendu — paths={:?}", t.paths());
+}
+
+#[tokio::test]
+async fn background_image_missed_fetch_is_silent() {
+    let (mut s, t) = test_session();
+    // Corps absent (404) : dégradation gracieuse — pas de
+    // fond, pas d'échec, la page se peint.
+    t.route(
+        "/i",
+        200,
+        "<html><head><link rel=\"stylesheet\" href=\"/s.css\"></head>\
+        <body><div id=\"b\"></div></body></html>",
+    );
+    t.route(
+        "/s.css",
+        200,
+        "#b{background-image:url(/gone.png);width:2px;height:2px}",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/i").await.unwrap();
+    assert!(s.frame_png(id).is_some());
+}
+
+#[tokio::test]
+async fn background_image_count_is_bounded() {
+    let (mut s, t) = test_session();
+    // 40 fonds distincts — le budget `max_images` (32) est
+    // partagé avec `<img>` : fetchs bg bornés à 32.
+    let mut css = String::new();
+    for i in 0..40 {
+        let _ = std::fmt::Write::write_fmt(
+            &mut css,
+            format_args!("#b{i}{{background-image:url(/bg.png?id={i})}}"),
+        );
+    }
+    let mut page =
+        String::from("<html><head><link rel=\"stylesheet\" href=\"/s.css\"></head><body>");
+    for i in 0..40 {
+        let _ = std::fmt::Write::write_fmt(&mut page, format_args!("<div id=\"b{i}\"></div>"));
+    }
+    page.push_str("</body></html>");
+    t.route("/", 200, Box::leak(page.into_boxed_str()));
+    t.route("/s.css", 200, Box::leak(css.into_boxed_str()));
+    t.route_bin("/bg.png", 200, red_png());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    // 1 document + 1 feuille + ≤ 32 fonds — jamais 42.
+    assert!(t.calls() <= 34, "fetchs bg non bornés : {}", t.calls());
+    assert!(s.frame_png(id).is_some());
+}
+
+// ------------------------------------------------------------------
 // Étape 38 — formulaires
 // ------------------------------------------------------------------
 

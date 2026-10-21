@@ -408,6 +408,15 @@ pub(crate) struct SubJob {
     pub(crate) css_slots: Vec<Option<String>>,
     pub(crate) script_srcs: Vec<Option<String>>,
     pub(crate) img_bodies: HashMap<String, Vec<u8>>,
+    /// Fonds `url(http…)` fetchés (étape 98) : `bg_aliases`
+    /// relie le texte `url(...)` brut (déséchappé — la forme
+    /// conservée en valeur calculée) à l'URL résolue, les
+    /// corps vivent sous `bg_bodies` indexés par résolue.
+    /// Le `NodeId` propriétaire est inconnu ici (le DOM est
+    /// hors portée) : il sera retrouvé au relayout par la
+    /// valeur `background-image` calculée.
+    pub(crate) bg_aliases: HashMap<String, String>,
+    pub(crate) bg_bodies: HashMap<String, Vec<u8>>,
     /// Corps des modules `async` arrivés (ordre d'arrivée).
     pub(crate) async_mods: Vec<(Url, String)>,
     /// Faces `@font-face` téléchargées et décodées —
@@ -425,6 +434,10 @@ pub(crate) struct SubJob {
     pub(crate) max_modules: usize,
     pub(crate) font_budget: usize,
     pub(crate) max_imports: usize,
+    /// Budget fetchs d'images — partagé `<img>`/fonds CSS
+    /// (étape 98) ; `img_urls` est déjà tronqué à cette
+    /// borne au planning.
+    pub(crate) max_images: usize,
 }
 
 /// Reliquat du commit de navigation entre la tête (sous
@@ -446,6 +459,10 @@ pub(crate) struct SubCommitTail {
     pub(crate) title: Option<String>,
     /// Corps `<img>` de la vague — décodés pendant le rendu.
     pub(crate) img_bodies: HashMap<String, Vec<u8>>,
+    /// Fonds `url(http…)` de la vague (étape 98) — posés sur
+    /// la payload avant le relayout, insérés à la cascade.
+    pub(crate) bg_aliases: HashMap<String, String>,
+    pub(crate) bg_bodies: HashMap<String, Vec<u8>>,
 }
 
 impl SubJob {
@@ -518,6 +535,7 @@ impl SubJob {
         self.eng = eng;
         self.async_mods = async_mods;
         self.fetch_imports().await;
+        self.fetch_backgrounds().await;
         self.fetch_fonts().await;
         self.prefetch_modules().await;
     }
@@ -599,6 +617,68 @@ impl SubJob {
             ctx.out.push_str(&text);
             ctx.out.push('\n');
         })
+    }
+
+    /// Fetch des `url(http…)` d'arrière-plan (étape 98) :
+    /// les déclarations `background`/`background-image` des
+    /// feuilles liées (imports expansés compris — leur texte
+    /// a rejoint le slot de la parente et se résout contre
+    /// sa base) et du `<style>` inline sont re-parcourues ;
+    /// chaque `url(…)` est résolu sur **sa** feuille, déduplé
+    /// par URL résolue et fetché dans le budget `max_images`
+    /// restant après `<img>`. `bg_aliases` conserve le lien
+    /// texte-brut → résolue que la valeur calculée a perdu
+    /// (la feuille d'origine n'y survit pas) ; le `NodeId`
+    /// propriétaire sera retrouvé au relayout. Séquentiel —
+    /// toute anomalie (URL irrésolvable, schéma non-http,
+    /// fetch/status en échec, budget épuisé) → fond sauté,
+    /// jamais d'échec propagé.
+    pub(crate) async fn fetch_backgrounds(&mut self) {
+        let env = super::apply::viewport_env(self.viewport);
+        let mut left = self.max_images.saturating_sub(self.img_urls.len());
+        let mut seen = HashSet::new();
+        let mut decl_urls = Vec::new();
+        for (i, slot) in self.css_slots.iter().enumerate() {
+            let Some(text) = slot else { continue };
+            let base = self
+                .sheet_urls
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| self.url.clone());
+            let mut urls = Vec::new();
+            collect_bg_urls(&parse_stylesheet(text).rules, &env, &mut urls);
+            decl_urls.push((base, urls));
+        }
+        {
+            let mut urls = Vec::new();
+            collect_bg_urls(&parse_stylesheet(&self.doc_css).rules, &env, &mut urls);
+            decl_urls.push((self.url.clone(), urls));
+        }
+        'slots: for (base, urls) in decl_urls {
+            for raw in urls {
+                if left == 0 {
+                    break 'slots;
+                }
+                if raw.starts_with("data:") {
+                    continue;
+                }
+                let Ok(url) = Url::resolve(&base, &raw) else {
+                    continue;
+                };
+                if !matches!(url.scheme(), "http" | "https") || !seen.insert(url.to_string()) {
+                    continue;
+                }
+                left -= 1;
+                let Ok(resp) = self.transport.fetch(&sub_request(&self.url, &url)).await else {
+                    continue;
+                };
+                if !(200..300).contains(&resp.status) {
+                    continue;
+                }
+                self.bg_aliases.insert(raw, url.to_string());
+                self.bg_bodies.insert(url.to_string(), resp.body);
+            }
+        }
     }
 
     /// Fetch + décode des `@font-face` hors session (étape
@@ -934,4 +1014,30 @@ pub(crate) fn module_deps(src: &str, referrer: &Url) -> Vec<(String, Url)> {
         .into_iter()
         .filter_map(|spec| Url::resolve(referrer, &spec).ok().map(|u| (spec, u)))
         .collect()
+}
+
+/// `url(…)` des déclarations `background`/`background-image`
+/// d'un jeu de règles, `@media` imbriqués évalués contre
+/// `env` (étape 98 — une feuille hors-media ne fetch pas de
+/// fonds). `@keyframes` ignorés : un `url()` dedans serait
+/// une animation de fond, hors périmètre raster mono-image.
+fn collect_bg_urls(rules: &[Rule], env: &StyleEnv, out: &mut Vec<String>) {
+    for r in rules {
+        match r {
+            Rule::Qualified(q) => {
+                for d in &q.declarations {
+                    if matches!(d.name.as_str(), "background" | "background-image") {
+                        css_url_args(&d.value, out);
+                    }
+                }
+            }
+            Rule::At(a) => {
+                if let AtKind::Media { queries, rules } = &a.kind {
+                    if media_matches(env, queries) {
+                        collect_bg_urls(rules, env, out);
+                    }
+                }
+            }
+        }
+    }
 }

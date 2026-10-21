@@ -1547,6 +1547,35 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ~7 hrefs dans ses blocs de
   liens générés).
 
+- [x] **Étape 98. `background-image`
+  HTTP fetchés** — les `url(http…)`
+  de fond n'étaient jamais fetchés
+  (`collect_data_images` ne couvrait
+  que `data:`) : logo lobste.rs,
+  icônes CSS du corpus.
+  `SubJob::fetch_backgrounds` scanne
+  `background`/`background-image`
+  des feuilles (imports expansées
+  comprises, `@media` imbriqués
+  filtrés sur l'env viewport) +
+  `<style>` inline, résout contre
+  la base de **sa** feuille, dédupe
+  par URL résolue, fetches sous
+  `max_images` partagé avec `<img>`.
+  `bg_aliases` conserve le lien
+  texte-brut→résolue perdu à la
+  cascade ; `insert_fetched_backgrounds`
+  (relayout, les deux chemins sync
+  et détaché) retrouve le `NodeId`
+  par la valeur calculée, décode
+  dédupliqué → `images.backgrounds`
+  (canal existant). Tests : fetch
+  + base feuille + pixels rouges
+  peints, 404 silencieux, borne
+  partagée (32/40 fetchés). Limite
+  documentée : `style=` inline non
+  collecté (pas de DOM dans `SubJob`).
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY

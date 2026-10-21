@@ -228,6 +228,13 @@ pub(crate) struct Tab {
     /// navigation — concaténées, vidées à chaque re-parse
     /// (étape 46 : premières sous-ressources CSS).
     linked_css: String,
+    /// Tampon des fonds `url(http…)` fetchés pendant la vague
+    /// (étape 98) — posés entre `sub_commit` et le relayout,
+    /// consommés à la cascade par `insert_fetched_backgrounds`
+    /// (le `NodeId` propriétaire n'existe qu'au style
+    /// calculé). Vidés à chaque navigation.
+    bg_aliases: HashMap<String, String>,
+    bg_bodies: HashMap<String, Vec<u8>>,
     /// Styles calculés de la dernière mise en page, indexés
     /// par **ordinal d'élément** (ordre document) — la clé
     /// survit au re-parse des synchronisations DOM, là où un
@@ -697,6 +704,8 @@ impl Session {
                 js: None,
                 images: PaintImages::default(),
                 linked_css: String::new(),
+                bg_aliases: HashMap::new(),
+                bg_bodies: HashMap::new(),
                 prev_styles: HashMap::new(),
                 transitions: Vec::new(),
                 animations: Vec::new(),

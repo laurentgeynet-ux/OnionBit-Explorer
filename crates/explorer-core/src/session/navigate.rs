@@ -647,6 +647,8 @@ impl Session {
             entry.find = None;
             entry.js = None;
             entry.images = PaintImages::default();
+            entry.bg_aliases.clear();
+            entry.bg_bodies.clear();
             entry.linked_css.clear();
             entry.prev_styles = HashMap::new();
             entry.transitions.clear();
@@ -676,6 +678,8 @@ impl Session {
             css_slots: Vec::new(),
             script_srcs: Vec::new(),
             img_bodies: HashMap::new(),
+            bg_aliases: HashMap::new(),
+            bg_bodies: HashMap::new(),
             async_mods: Vec::new(),
             fonts: Vec::new(),
             arrival_evals: Vec::new(),
@@ -685,6 +689,7 @@ impl Session {
             max_modules: self.max_modules,
             font_budget: self.max_fonts,
             max_imports: self.max_imports,
+            max_images: self.max_images,
         }))
     }
 

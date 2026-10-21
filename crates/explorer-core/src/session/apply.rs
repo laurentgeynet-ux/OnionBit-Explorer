@@ -41,6 +41,7 @@
 
 use super::*;
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::time::Instant;
 
 use explorer_css::value::Color;
@@ -54,7 +55,8 @@ use explorer_layout::{
 };
 use explorer_render::canvas::CanvasTable;
 use explorer_render::{
-    collect_data_images, DisplayItem, DisplayList, Frame, PaintImages, WebFontSource,
+    collect_data_images, decode_image, DecodedImage, DisplayItem, DisplayList, Frame, PaintImages,
+    WebFontSource,
 };
 
 /// Complément de feuille UA pour `<video>`/`<audio>` sans
@@ -163,6 +165,13 @@ pub(crate) struct PaintPayload {
     pub dirty: Vec<Rect>,
     /// Watermark des régions déjà rapportées.
     pub emitted: usize,
+    /// Tampon des fonds `url(http…)` fetchés pendant la vague
+    /// (étape 98) — posés sur la payload entre commit et
+    /// relayout : `bg_aliases` relie le texte `url(...)` brut
+    /// à l'URL résolue, `bg_bodies` les corps par résolue ;
+    /// `relayout_dom_payload` les consomme après cascade.
+    pub bg_aliases: HashMap<String, String>,
+    pub bg_bodies: HashMap<String, Vec<u8>>,
 }
 
 /// Titre courant de l'onglet — lu au début d'apply pour
@@ -233,6 +242,8 @@ impl Tab {
             spec_paint: std::mem::take(&mut self.spec_paint),
             dirty: std::mem::take(&mut self.dirty),
             emitted: self.emitted,
+            bg_aliases: std::mem::take(&mut self.bg_aliases),
+            bg_bodies: std::mem::take(&mut self.bg_bodies),
         }
     }
 
@@ -259,6 +270,10 @@ impl Tab {
         self.spec_paint = p.spec_paint;
         self.dirty = p.dirty;
         self.emitted = p.emitted;
+        // Tampon étape 98 non consommé (relayout sauté) :
+        // restitué — un apply ultérieur le re-prendra.
+        self.bg_aliases = p.bg_aliases;
+        self.bg_bodies = p.bg_bodies;
     }
 }
 
@@ -450,6 +465,7 @@ pub(crate) fn relayout_dom_payload(
     let data_imgs = collect_data_images(dom, &styles, ctx.image_max_px);
     p.images.replaced.extend(data_imgs.replaced);
     p.images.backgrounds.extend(data_imgs.backgrounds);
+    insert_fetched_backgrounds(p, &styles, ctx.image_max_px);
     let mut sizes = image_sizes(dom, &p.images.replaced);
     sizes.extend(explorer_render::svg::svg_sizes(dom, root_el));
     let svgs = explorer_render::svg::collect_svg(dom, root_el, ctx.image_max_px);
@@ -936,3 +952,40 @@ impl Session {
 /// File des applies en attente — sur `Session` (une entrée
 /// par onglet maximum, coalescée à `queue_apply`).
 pub(crate) type ApplyQueue = VecDeque<PendingApply>;
+
+/// Fonds `url(http…)` fetchés pendant la vague (étape 98) :
+/// les corps posés sur `p` par `stage_backgrounds`/l'apply
+/// détachée sont insérés dans `images.backgrounds` — le
+/// `NodeId` propriétaire est retrouvé par la valeur
+/// `background-image` calculée, via `bg_aliases`
+/// (texte `url(...)` brut → URL résolue ; la feuille
+/// d'origine ne survit pas à la cascade). Un décodage par
+/// URL résolue (`decoded` déduplique — même `Arc` partagé
+/// entre boîtes, comme `data_imgs`). Fond `data:` ou non
+/// fetché → pas d'alias → ignoré, jamais d'échec.
+fn insert_fetched_backgrounds(p: &mut PaintPayload, styles: &StyleMap, max_px: u32) {
+    if p.bg_bodies.is_empty() {
+        p.bg_aliases.clear();
+        return;
+    }
+    let bodies = std::mem::take(&mut p.bg_bodies);
+    let aliases = std::mem::take(&mut p.bg_aliases);
+    let mut decoded: HashMap<&str, Option<Arc<DecodedImage>>> = HashMap::new();
+    for (node, st) in styles.iter() {
+        let Some(raw) = st.get("background-image").and_then(css_url_arg) else {
+            continue;
+        };
+        let Some(resolved) = aliases.get(raw.as_str()) else {
+            continue;
+        };
+        let Some(body) = bodies.get(resolved.as_str()) else {
+            continue;
+        };
+        let img = decoded
+            .entry(resolved.as_str())
+            .or_insert_with(|| decode_image(body, max_px).map(Arc::new));
+        if let Some(img) = img {
+            p.images.backgrounds.insert(node, img.clone());
+        }
+    }
+}

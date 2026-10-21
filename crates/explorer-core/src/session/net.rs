@@ -27,12 +27,29 @@ impl Session {
         tab: TabId,
         job: SubJob,
     ) -> Result<Option<String>, CoreError> {
-        let Some(tail) = self.sub_commit_head(tab, job).await? else {
+        let Some(mut tail) = self.sub_commit_head(tab, job).await? else {
             return Ok(None);
         };
         self.insert_images(tab, &tail.url, &tail.img_bodies);
+        self.stage_backgrounds(tab, &mut tail);
         self.relayout(tab)?;
         Ok(self.sub_commit_tail(tab, tail))
+    }
+
+    /// Fonds `url(http…)` fetchés pendant la vague (étape 98)
+    /// posés sur l'onglet avant le relayout — l'insertion
+    /// dans `images.backgrounds` attend la cascade (le
+    /// `NodeId` propriétaire n'est connu qu'au style calculé).
+    /// `take_paint` les fera voyager avec la payload.
+    fn stage_backgrounds(&mut self, tab: TabId, tail: &mut SubCommitTail) {
+        if tail.bg_bodies.is_empty() {
+            return;
+        }
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        entry.bg_aliases = std::mem::take(&mut tail.bg_aliases);
+        entry.bg_bodies = std::mem::take(&mut tail.bg_bodies);
     }
 
     /// Tête du commit — sous `&mut self` : garde epoch,
@@ -65,6 +82,8 @@ impl Session {
             scripts,
             script_srcs,
             img_bodies,
+            bg_aliases,
+            bg_bodies,
             mut eng,
             fonts,
             arrival_evals,
@@ -130,6 +149,8 @@ impl Session {
             req,
             title,
             img_bodies,
+            bg_aliases,
+            bg_bodies,
         }))
     }
 

@@ -256,6 +256,80 @@ pub(crate) fn collect_images(dom: &Dom) -> Vec<(NodeId, String)> {
     out
 }
 
+/// Extrait tous les `url(…)` d'une valeur CSS — même forme
+/// en déclaration de feuille et en valeur calculée (la
+/// cascade conserve `url("…")` tel quel). Guillemets
+/// optionnels, séquences `\` résolues. Doublon assumé de
+/// `dataurl::url_arg` (privée à `explorer-render`) : le
+/// fetch NAV des fonds HTTP (étape 98) indexe ses corps par
+/// le texte brut extrait ici — le même extracteur relu à
+/// l'insertion garantit la coïncidence des clés.
+pub(crate) fn css_url_args(value: &str, out: &mut Vec<String>) {
+    let b = value.as_bytes();
+    let mut i = 0usize;
+    while i + 4 <= b.len() {
+        if !b[i..i + 4].eq_ignore_ascii_case(b"url(") {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 4;
+        while j < b.len() && b[j] != b')' {
+            j += 1;
+        }
+        let raw = value[i + 4..j]
+            .trim()
+            .trim_matches(|c| c == '"' || c == '\'');
+        if !raw.is_empty() {
+            out.push(css_unescape(raw));
+        }
+        i = j.max(i + 4);
+    }
+}
+
+/// Premier `url(…)` de la valeur — le raster ne peint qu'un
+/// fond par boîte (`backgrounds: NodeId → image`).
+pub(crate) fn css_url_arg(value: &str) -> Option<String> {
+    let mut urls = Vec::with_capacity(1);
+    css_url_args(value, &mut urls);
+    urls.into_iter().next()
+}
+
+/// Échappements CSS chaîne/url : `\`+autre → l'autre char ;
+/// `\`+1-6 hexdigits (+espaces absorbés) → codepoint si
+/// valide. Doublon du `css_unescape` privé de
+/// `explorer-render::dataurl` — mêmes règles, clés alignées.
+fn css_unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        let mut hex = String::new();
+        while hex.len() < 6 && it.peek().is_some_and(char::is_ascii_hexdigit) {
+            hex.push(it.next().unwrap_or_default());
+        }
+        if hex.is_empty() {
+            if let Some(p) = it.next() {
+                out.push(p);
+            }
+        } else {
+            if it.peek().is_some_and(char::is_ascii_whitespace) {
+                it.next();
+            }
+            if let Some(ch) = u32::from_str_radix(&hex, 16)
+                .ok()
+                .and_then(char::from_u32)
+                .filter(|ch| *ch != '\0')
+            {
+                out.push(ch);
+            }
+        }
+    }
+    out
+}
+
 /// Taille préférée `(w, h)` par élément remplacé décodé
 /// (`<img>`, `<object>`, affiche `<video poster>` — R-34) :
 /// attribut `width`/`height` sain s'il existe, sinon

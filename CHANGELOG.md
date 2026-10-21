@@ -345,6 +345,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   lobste.rs venant d'un `@import` non résolu). Complément
   terrain : dédup des `<link>` par URL résolue (GitHub
   répète ~7 hrefs — un doublon brûlait quota + fetch).
+- **Étape 98 — `background-image` HTTP fetchés**
+  (`explorer-core`) : les `url(http…)` des déclarations
+  `background`/`background-image` de feuilles liées —
+  `@import` expansées comprises — et du `<style>` inline
+  étaient collectés par `collect_data_images` seulement en
+  `data:` ; les HTTP n'étaient jamais fetchés (logo
+  lobste.rs, icônes CSS du corpus). `SubJob::fetch_backgrounds`
+  re-parcourt les règles (avec `@media` imbriqués évalués
+  contre l'env viewport), résout chaque `url()` contre la
+  base de **sa** feuille, déduplique par URL résolue et
+  fetches dans le budget `max_images` partagé avec `<img>`
+  — borné, jamais de panic sur contenu hostile. Lien
+  texte-brut → URL résolue conservé dans `bg_aliases`
+  (la feuille d'origine ne survit pas à la cascade) ; les
+  corps transitent `SubCommitTail` → tampon `Tab`
+  (`bg_bodies`) → payload → `insert_fetched_backgrounds`
+  les insère dans `images.backgrounds` à la cascade, quand
+  le `NodeId` propriétaire est connu — décodage dédupliqué
+  par URL, `Arc` partagé entre boîtes. Deux chemins
+  couverts : `sub_commit` synchrone (FFI) et rendu détaché
+  `nav_commit_shared` (daemon). Tests : fetch + résolution
+  feuille-relative + peinture prouvée par pixels, 404
+  tolérée, borne `max_images` partagée respectée.
 - **R-52 — `mask-image` borne le fond** (`explorer-render`) :
   le motif icône universel `mask-image:url(svg)` +
   `background-color` (Codex/Primer/Material) peignait un
