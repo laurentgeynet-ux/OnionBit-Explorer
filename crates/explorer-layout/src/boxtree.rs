@@ -623,11 +623,26 @@ fn wrap_items(children: Vec<LayoutBox>, parent_style: &ComputedStyle) -> Vec<Lay
 /// une ligne pleine au flux bloc — R-22 : `details.caches`
 /// de lobste.rs, hauteur 4× la ligne).
 fn wrap_children(children: Vec<LayoutBox>, style: &ComputedStyle, kind: BoxKind) -> Vec<LayoutBox> {
-    // §9.2.1.1 (2ᵉ moitié) : un bloc en flux niché dans une
-    // boîte inline éclate celle-ci — hissage récursif au niveau
-    // du conteneur AVANT anonymisation, pour que le bloc
-    // coupe proprement la suite en-ligne (R-22).
-    let children: Vec<LayoutBox> = children.into_iter().flat_map(hoist_blocks).collect();
+    let fc = matches!(
+        style.get("display"),
+        Some("flex" | "inline-flex" | "grid" | "inline-grid")
+    );
+    let children: Vec<LayoutBox> = if fc {
+        // §9.7 / CSS Display §2.7 : blockification — chaque
+        // enfant en-ligne d'un conteneur flex/grid devient un
+        // item de niveau bloc ; le split block-in-inline ne
+        // s'applique PAS à un item (sinon un
+        // `display:initial` contenant un bloc — le motif
+        // styled-components de bbc.com — verrait son contenu
+        // hissé comme item auto-placé à 1 piste).
+        children.into_iter().map(blockify_item).collect()
+    } else {
+        // §9.2.1.1 (2ᵉ moitié) : un bloc en flux niché dans une
+        // boîte inline éclate celle-ci — hissage récursif au niveau
+        // du conteneur AVANT anonymisation, pour que le bloc
+        // coupe proprement la suite en-ligne (R-22).
+        children.into_iter().flat_map(hoist_blocks).collect()
+    };
     let atomic_inline = kind == BoxKind::Inline
         && matches!(
             style.get("display"),
@@ -636,14 +651,27 @@ fn wrap_children(children: Vec<LayoutBox>, style: &ComputedStyle, kind: BoxKind)
     if kind.is_inline_level() && !atomic_inline {
         return children;
     }
-    if matches!(
-        style.get("display"),
-        Some("flex" | "inline-flex" | "grid" | "inline-grid")
-    ) {
+    if fc {
         wrap_items(children, style)
     } else {
         wrap_anonymous(children, style)
     }
+}
+
+/// §9.7 / CSS Display §2.7 : blockification d'un item
+/// flex/grid — un item `display:inline` (y compris
+/// `display:initial`, mot-clé CSS-wide résolu en `inline`)
+/// produit une boîte de niveau bloc dont les enfants passent
+/// par le chemin normal (`wrap_children` : hoist +
+/// anonymisation, ou blockification récursive si l'item est
+/// lui-même un conteneur `inline-flex`/`inline-grid`).
+fn blockify_item(mut bx: LayoutBox) -> LayoutBox {
+    if bx.kind == BoxKind::Inline {
+        bx.kind = BoxKind::Block;
+        let st = bx.style.clone();
+        bx.children = wrap_children(std::mem::take(&mut bx.children), &st, bx.kind);
+    }
+    bx
 }
 
 /// §9.2.1.1 : un enfant **bloc en flux** d'une boîte de flux

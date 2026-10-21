@@ -1120,6 +1120,62 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (carousel `auto-columns` ?) et
   `LondonMedia` 8.5px — causes
   distinctes à diagnostiquer.
+- [x] **R-50. Blockification des items
+  flex/grid (§9.7 / CSS Display
+  §2.7)** (résidu terrain BBC —
+  les deux « causes distinctes »
+  de R-49, même racine) —
+  **livré** : `styled-components`
+  émet `display:initial` sur ses
+  `GridItem` — la cascade résout
+  le mot-clé CSS-wide en `inline`
+  (valeur initiale de `display`),
+  puis `wrap_children` appliquait
+  `hoist_blocks` **avant** de
+  savoir que le parent est un
+  conteneur flex/grid : l'item
+  inline contenant un bloc était
+  scindé et son contenu hissé
+  comme item auto-placé à 1 piste
+  (`jqvHMb` LondonMedia = 15.5px
+  = 1 col de `repeat(24,1fr)`
+  sous `bKikLw` ; les 12 cartes
+  manchester à 49px = items
+  explosés). Livré : pour un
+  parent `flex`/`inline-flex`/
+  `grid`/`inline-grid`,
+  `wrap_children` blockifie
+  chaque enfant (`blockify_item`
+  — kind `Inline`→`Block`,
+  enfants repassés par
+  `wrap_children` : hoist +
+  anonymisation normale, ou
+  blockification récursive pour
+  `inline-flex`/`inline-grid`)
+  au lieu de hoister — l'item
+  garde sa cellule et son
+  contenu. Terrain : 48 → 5
+  boîtes étroites (les 5 restantes
+  = le dropdown `visibility:hidden`
+  à 1px, layout correct), carte
+  london 15.5→488px, rangée
+  manchester/hero/sections 4-col
+  conformes au shot. Tests
+  `modern.rs` : item inline→bloc
+  en grid (cellule + contenu
+  préservés) et en flex.
+  Reste noté (non promu) :
+  `display:contents` tombe encore
+  sur le fallback `Block` — BBC
+  s'en sort visuellement ici,
+  support complet = flatten des
+  enfants comme items (feature
+  propre si un site réel le
+  montre) ; léger débordement
+  du texte de la carte LIVE
+  sous le titre héros (overflow
+  non clippé — repro minimal à
+  isoler avant promotion).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

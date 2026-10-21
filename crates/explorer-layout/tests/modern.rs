@@ -791,3 +791,55 @@ fn flex_grow_border_box_cible_border_box() {
     let i = find(&bx, by_id(&dom, "i"));
     assert!(approx(i.rect.width, 200.0), "w={}", i.rect.width);
 }
+
+// ── R-50 : blockification §9.7 — un enfant `display:inline`
+// d'un conteneur grid/flex devient un item **bloc** (le
+// split block-in-inline ne s'applique pas à un item de
+// grille — bbc.com, cartes london : media rejeté à 15.5 px).
+
+#[test]
+fn item_grid_inline_devient_bloc() {
+    // `.i{display:initial}` (= inline) contenant un bloc :
+    // l'item garde sa cellule (span 12 de 24 = ~392 px) et le
+    // média interne s'étire dedans — au lieu d'être hissé
+    // comme item auto-placé à 1 colonne (~32 px).
+    let (dom, bx) = laid(
+        "<!doctype html><div id=g>\
+         <div id=i><div id=m>media</div></div></div>",
+        "#g{display:grid;grid-template-columns:repeat(24, 1fr);column-gap:16px;width:768px}\
+         #i{display:initial;grid-column:9/span 16}",
+    );
+    let i = find(&bx, by_id(&dom, "i"));
+    let m = find(&bx, by_id(&dom, "m"));
+    // 24 pistes : (768 − 23×16)/24 = 16.67 ; span 16 =
+    // 16×16.67 + 15×16 = 506.7, à partir de la colonne 9.
+    assert!(approx(i.rect.width, 506.7), "item w={}", i.rect.width);
+    // L'enfant bloc reste DANS l'item (même x, même largeur)
+    // — sans blockification il était hissé et auto-placé.
+    assert!(
+        approx(m.rect.width, i.rect.width),
+        "media w={}",
+        m.rect.width
+    );
+    assert!(
+        approx(m.rect.x, i.rect.x),
+        "media x={} i x={}",
+        m.rect.x,
+        i.rect.x
+    );
+}
+
+#[test]
+fn item_flex_inline_devient_bloc() {
+    // Même règle en flex : un item `display:inline` est
+    // blockifié — sa base flex se mesure comme un bloc.
+    let (dom, bx) = laid(
+        "<!doctype html><div id=f>\
+         <div id=i><div id=m style=\"width:100px;height:20px\">x</div></div></div>",
+        "#f{display:flex;width:400px}#i{display:initial;flex:1}",
+    );
+    let i = find(&bx, by_id(&dom, "i"));
+    let m = find(&bx, by_id(&dom, "m"));
+    assert!(approx(i.rect.width, 400.0), "item w={}", i.rect.width);
+    assert!(approx(m.rect.width, 100.0), "media w={}", m.rect.width);
+}
