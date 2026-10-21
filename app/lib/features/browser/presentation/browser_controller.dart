@@ -171,7 +171,10 @@ final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
 final browserRepositoryProvider = Provider<BrowserRepository>((ref) {
   final cfg = ref.watch(configProvider);
   final mode = ref.watch(effectiveEngineModeProvider);
-  final profile = ref.watch(settingsProvider).profileDir;
+  // `.select` : la re-création du moteur n'a lieu que si
+  // `profileDir` (ou `engine` en amont) change — un changement
+  // de thème ne doit pas rebâtir le dépôt.
+  final profile = ref.watch(settingsProvider.select((s) => s.profileDir));
   if (profile.isNotEmpty) setProcessEnv('EXPLORER_PROFILE', profile);
   final ffi = mode == 'rest' ? null : FfiEngine.tryLoad(cfg);
   ref.onDispose(() => ffi?.dispose());
@@ -373,13 +376,17 @@ class BrowserController extends Notifier<BrowserState> {
 
   /// Dépôt capturé dans `build` — `ref` est invalide après un
   /// `await`, les lectures post-build passent par ce champ.
-  late final BrowserRepository _repo;
+  /// Pas `final` : `build()` se ré-exécute quand
+  /// `browserRepositoryProvider` est recréé (changement de mode
+  /// moteur / `profileDir`) — un `late final` jetterait
+  /// `LateInitializationError` à la réassignation.
+  late BrowserRepository _repo;
 
   /// Config capturée dans `build` (cadence de re-bootstrap).
-  late final AppConfig _cfg;
+  late AppConfig _cfg;
 
   /// Fabrique de lecteurs natifs — injectable en test.
-  late final MediaPlayerFactory _playerFactory;
+  late MediaPlayerFactory _playerFactory;
 
   /// Lecteurs natifs par surface claimée : `{tab: {media: p}}`
   /// — hors `BrowserState` (objets à ressources, pas de l'état).
@@ -428,6 +435,7 @@ class BrowserController extends Notifier<BrowserState> {
       // Pas de SSE in-process : la sondage d'animations porte
       // l'invalidation ; les actions tirent leur frame au
       // retour (navigate/input).
+      _animTimer?.cancel(); // rebuild sans dispose (repo recréé)
       _animTimer = Timer.periodic(
         const Duration(milliseconds: 50),
         (_) => _tickFfi(),

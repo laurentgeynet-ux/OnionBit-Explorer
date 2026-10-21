@@ -30,7 +30,11 @@ final lightTokensProvider = FutureProvider<DesignTokens>(
 /// Mode moteur effectif — `AppSettings.engine` l'emporte ;
 /// `'auto'` défère à `AppConfig.engineMode` (env `EXPLORER_ENGINE`).
 final effectiveEngineModeProvider = Provider<String>((ref) {
-  final s = ref.watch(settingsProvider).engine;
+  // `.select` — seule la clé `engine` déclenche la re-création ;
+  // sans elle, tout réglage (thème…) reconstruisait le repo et
+  // ré-exécutait `BrowserController.build()` sur le même
+  // notifier (late final réassigné → LateInitializationError).
+  final s = ref.watch(settingsProvider.select((s) => s.engine));
   return s == 'auto' ? ref.watch(configProvider).engineMode : s;
 });
 

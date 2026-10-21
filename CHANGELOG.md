@@ -713,6 +713,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Vol humain — voile gris au choix de thème**
+  (`app/`) : bug bloquant du run du 21/10 — choisir
+  `system`/`clair`/`sombre` (ou tout autre réglage) figeait
+  l'app sur un voile gris, persistant au relance. Cause :
+  `browserRepositoryProvider` faisait `ref.watch(
+  settingsProvider)` sans `.select` → tout nouveau
+  `AppSettings` (chargement async du fichier inclus)
+  recréait le dépôt → `BrowserController.build()` se
+  ré-exécutait sur le même notifier → `late final _repo`
+  réassigné → `LateInitializationError` → provider en erreur
+  → `ErrorWidget` (gris en release). Fix : `.select` sur
+  `engine` (`providers.dart`) et `profileDir`
+  (`browser_controller.dart`) — la re-création du moteur ne
+  suit plus que ses clés réelles ; `late final` → `late`
+  sur `_repo`/`_cfg`/`_playerFactory` (un rebuild légitime
+  reste possible) ; `_animTimer?.cancel()` avant
+  ré-assignation (rebuild sans dispose). `flutter analyze`
+  propre, 34/34 tests.
 - **R-60 — position statique des absolus en-ligne**
   (`explorer-layout`) : bug site-réel trouvé en validant
   R-58 — les skip-links MDN (« Skip to main content » /
