@@ -1001,15 +1001,30 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   lieu d'aligner sous le titre (attribution
   de grille `colspan` sur la 2ᵉ rangée —
   candidat tables)~~ → **livré R-47** ;
-  (b) example.com —
+  (b) ~~example.com —
   le `<svg>` injecté par `insertAdjacent
   HTML` (`/s.js`, logo 44×44) n'est pas
   peint alors que les `<p>` injectés
-  oui — suspect chaîne miroir→sérialise
-  →re-parse (`href=#q` non-quoté ou
-  `<use/>`), en lien avec le trou NAV
-  `parse_fragment_into` ; statique
-  `<svg viewBox="0,0,20,20">` rend bien.
+  oui~~ → **trié : bug NAV, PIPE
+  exonéré** (re-triage 22/10).
+  `navigator.languages` est absent du
+  miroir → `undefined.some` → TypeError
+  tue `/s.js` entre les deux
+  `insertAdjacentHTML` : le premier
+  (`afterend`, `<p>` multilingues)
+  passe, le second (`afterbegin`,
+  style+logo) ne s'exécute jamais —
+  le svg n'entre pas dans le DOM.
+  Chaîne vérifiée bout-en-bout :
+  sérialisation miroir saine,
+  re-parse `explorer-html` ajuste
+  `viewbox`→`viewBox`, `collect_svg`
+  rasterise le markup exact (usvg
+  accepte `<use href>`), boxtree+
+  display list émettent l'`Image`.
+  Fix d'une ligne côté NAV
+  (`languages` = array gelé) —
+  entrée journal 2026-10-21.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
