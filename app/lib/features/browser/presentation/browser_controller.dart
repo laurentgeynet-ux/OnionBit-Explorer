@@ -1000,8 +1000,23 @@ class BrowserController extends Notifier<BrowserState> {
   /// (Enter/Escape, nœud supprimé) — sans ça chaque frappe
   /// suivante était envoyée dans le vide (`ignored`) avec
   /// un champ qui semblait focalisé.
-  Future<void> key(String key) async {
-    final res = await _sendInput({'type': 'key', 'key': key});
+  Future<void> key(
+    String key, {
+    bool ctrl = false,
+    bool shift = false,
+    bool alt = false,
+    bool meta = false,
+  }) async {
+    final res = await _sendInput({
+      'type': 'key',
+      'key': key,
+      // Ét.105 — état des modifieurs → props `ctrlKey`…
+      // du `KeyboardEvent` côté moteur.
+      if (ctrl) 'ctrl': true,
+      if (shift) 'shift': true,
+      if (alt) 'alt': true,
+      if (meta) 'meta': true,
+    });
     if (res == null || !ref.mounted) return;
     if (res['result'] == 'unfocused' || res['result'] == 'navigated') {
       state = state.copyWith(fieldFocused: false);

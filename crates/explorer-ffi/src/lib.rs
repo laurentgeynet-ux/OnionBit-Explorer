@@ -43,7 +43,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use explorer_core::{CoreEvent, InputEvent, InputOutcome as O, Session};
+use explorer_core::{CoreEvent, InputEvent, InputOutcome as O, KeyMods, Session};
 use explorer_net::decode::DecodingTransport;
 use explorer_net::h1::HttpConfig;
 use explorer_net::h2::AutoClient;
@@ -435,11 +435,13 @@ pub enum FfiInputKind {
     Key = 3,
 }
 
-/// Événement d'entrée. `kind` ∈ `0..=3` (`FfiInputKind`).
-/// Retour : `0` ignoré, `1` scrollé, `2` navigué, `3` hover,
-/// `4` champ focalisé, `5` champ édité, `6` aucun champ
-/// focalisé (frappe hors champ ou focus perdu) ; négatif =
-/// erreur.
+/// Événement d'entrée. `kind` ∈ `0..=4` (`FfiInputKind`,
+/// `4` = `keyup`). `mods` = bitmask modifieurs clavier
+/// (`1`=ctrl, `2`=shift, `4`=alt, `8`=meta — étape 105),
+/// ignoré hors `key`/`keyup`. Retour : `0` ignoré,
+/// `1` scrollé, `2` navigué, `3` hover, `4` champ focalisé,
+/// `5` champ édité, `6` aucun champ focalisé (frappe hors
+/// champ ou focus perdu) ; négatif = erreur.
 ///
 /// # Safety
 ///
@@ -454,6 +456,7 @@ pub unsafe extern "C" fn explorer_input(
     y: f32,
     key: *const u8,
     key_len: usize,
+    mods: u8,
 ) -> i32 {
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
@@ -463,11 +466,17 @@ pub unsafe extern "C" fn explorer_input(
         1 => InputEvent::MouseMove { x, y },
         2 => InputEvent::Scroll { dy: y },
         3 => match unsafe { read_str(key, key_len, MAX_KEY) } {
-            Some(k) => InputEvent::Key { key: k.to_owned() },
+            Some(k) => InputEvent::Key {
+                key: k.to_owned(),
+                mods: KeyMods::from_bits(mods),
+            },
             None => return -1,
         },
         4 => match unsafe { read_str(key, key_len, MAX_KEY) } {
-            Some(k) => InputEvent::KeyUp { key: k.to_owned() },
+            Some(k) => InputEvent::KeyUp {
+                key: k.to_owned(),
+                mods: KeyMods::from_bits(mods),
+            },
             None => return -1,
         },
         _ => {

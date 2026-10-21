@@ -1828,6 +1828,32 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `broken_sheet_does_not_swallow_
   next`.
 
+- [x] **Étape 105. Modifieurs
+  clavier** (ticket adjacent de
+  l'étape 103 — `ctrlKey`/
+  `shiftKey` lisaient
+  `undefined`) : `InputEvent::
+  Key`/`KeyUp` portent `mods:
+  KeyMods` (ctrl/shift/alt/meta)
+  → les quatre booleans du
+  `KeyboardEvent`. Un accord
+  Ctrl/Alt/Meta est livré à la
+  page mais saute l'action par
+  défaut (édition, submit
+  `Enter`) ; `shift` seul reste
+  de la frappe. REST
+  `key`/`keyup` : `ctrl`/`shift`/
+  `alt`/`meta` optionnels. FFI
+  `explorer_input` : `mods: u8`
+  (bitmask — ABI in-process avec
+  l'app) ; Dart envoie l'état
+  `HardwareKeyboard` réel.
+  Tests : `keydown_event_carries_
+  modifier_props` (frame),
+  `keydown_chord_suppresses_
+  default_edit` (`q=Ab`),
+  `keymods_from_bits_decode`.
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY

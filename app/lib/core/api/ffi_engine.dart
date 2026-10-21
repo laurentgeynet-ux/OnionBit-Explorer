@@ -62,6 +62,7 @@ typedef _InputN = ffi.Int32 Function(
   ffi.Float,
   ffi.Pointer<ffi.Uint8>,
   ffi.UintPtr,
+  ffi.Uint8,
 );
 typedef _InputD = int Function(
   _NativeHandle,
@@ -70,6 +71,7 @@ typedef _InputD = int Function(
   double,
   double,
   ffi.Pointer<ffi.Uint8>,
+  int,
   int,
 );
 typedef _FrameSizeN = ffi.Int32 Function(
@@ -435,16 +437,23 @@ class FfiEngine implements BrowserRepository {
       'mousemove' => 1,
       'scroll' => 2,
       'key' => 3,
+      'keyup' => 4,
       _ => -1,
     };
     if (kind < 0) return const {'result': 'ignored'};
     final x = (ev['x'] as num?)?.toDouble() ?? 0;
     final yOrDy = ev['type'] == 'scroll' ? ev['dy'] : ev['y'];
     final y = (yOrDy as num?)?.toDouble() ?? 0;
+    // Ét.105 — bitmask modifieurs : 1=ctrl, 2=shift, 4=alt,
+    // 8=meta (mêmes bits que `KeyMods::from_bits`).
+    final mods = (ev['ctrl'] == true ? 1 : 0) |
+        (ev['shift'] == true ? 2 : 0) |
+        (ev['alt'] == true ? 4 : 0) |
+        (ev['meta'] == true ? 8 : 0);
     ffi.Pointer<ffi.Uint8> key = ffi.nullptr;
     ffi.Pointer<Utf8> keyBuf = ffi.nullptr;
     try {
-      if (kind == 3) {
+      if (kind == 3 || kind == 4) {
         keyBuf = ('${ev['key'] ?? ''}').toNativeUtf8();
         key = keyBuf.cast<ffi.Uint8>();
       }
@@ -456,6 +465,7 @@ class FfiEngine implements BrowserRepository {
         y,
         key,
         key == ffi.nullptr ? 0 : keyBuf.length,
+        mods,
       );
       if (code < 0) _fail();
       return {

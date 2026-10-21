@@ -370,9 +370,10 @@ impl Session {
     /// `keydown`/`keyup` : cible = champ focalisé s'il vit
     /// encore dans `dom`, document sinon. `key` devient les
     /// props `KeyboardEvent` (`key`/`code`/`keyCode`/`which`,
-    /// étape 103). Retourne `defaultPrevented`.
-    pub(crate) fn dispatch_key(&mut self, tab: TabId, ty: &str, key: &str) -> bool {
-        let props = key_event_props(key);
+    /// étape 103 ; `ctrlKey`/`shiftKey`/`altKey`/`metaKey`
+    /// depuis `mods`, étape 105). Retourne `defaultPrevented`.
+    pub(crate) fn dispatch_key(&mut self, tab: TabId, ty: &str, key: &str, mods: KeyMods) -> bool {
+        let props = key_event_props(key, mods);
         let path = match self.focused_node(tab) {
             Some(n) => self
                 .tabs
@@ -463,13 +464,17 @@ impl Session {
 /// (lettres → ASCII majuscule, `Enter` 13, flèches 37-40…).
 /// Touche hors table → `code` "" / `keyCode` 0 — tolérant,
 /// jamais de panic.
-fn key_event_props(key: &str) -> Vec<(String, EventProp)> {
+fn key_event_props(key: &str, mods: KeyMods) -> Vec<(String, EventProp)> {
     let (code, key_code) = key_code_of(key);
     vec![
         ("key".to_string(), EventProp::Str(key.to_string())),
         ("code".to_string(), EventProp::Str(code)),
         ("keyCode".to_string(), EventProp::Num(f64::from(key_code))),
         ("which".to_string(), EventProp::Num(f64::from(key_code))),
+        ("ctrlKey".to_string(), EventProp::Bool(mods.ctrl)),
+        ("shiftKey".to_string(), EventProp::Bool(mods.shift)),
+        ("altKey".to_string(), EventProp::Bool(mods.alt)),
+        ("metaKey".to_string(), EventProp::Bool(mods.meta)),
     ]
 }
 

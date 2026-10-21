@@ -369,12 +369,62 @@ pub enum InputEvent {
     Key {
         /// Identifiant de touche (`"a"`, `"Enter"`…).
         key: String,
+        /// Modifieurs tenus à la frappe (étape 105).
+        mods: KeyMods,
     },
     /// Relâchement de touche — `keyup` dispatché (étape 52).
     KeyUp {
         /// Identifiant de touche.
         key: String,
+        /// Modifieurs tenus au relâchement (étape 105).
+        mods: KeyMods,
     },
+}
+
+/// État des modifieurs clavier au moment d'une frappe
+/// (étape 105) — alimente `ctrlKey`/`shiftKey`/`altKey`/
+/// `metaKey` sur le `KeyboardEvent` dispatché.
+#[allow(clippy::struct_excessive_bools)] // forme DOM `KeyboardEventInit`
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct KeyMods {
+    /// `Ctrl`.
+    pub ctrl: bool,
+    /// `Shift`.
+    pub shift: bool,
+    /// `Alt` (`AltGr` exclu — c'est du texte).
+    pub alt: bool,
+    /// `Meta` (⊞/⌘).
+    pub meta: bool,
+}
+
+impl KeyMods {
+    /// Aucun modifieur.
+    pub const NONE: Self = Self {
+        ctrl: false,
+        shift: false,
+        alt: false,
+        meta: false,
+    };
+
+    /// `true` si un modifieur de raccourci (Ctrl/Alt/Meta) est
+    /// tenu — l'édition par défaut est alors sautée : un accord
+    /// appartient à l'app ou à la page, pas à la frappe (le
+    /// `key` livré porte déjà la casse Shift).
+    pub(crate) fn chord(self) -> bool {
+        self.ctrl || self.alt || self.meta
+    }
+
+    /// Décode le bitmask FFI/REST (`1`=ctrl, `2`=shift,
+    /// `4`=alt, `8`=meta).
+    #[must_use]
+    pub fn from_bits(bits: u8) -> Self {
+        Self {
+            ctrl: bits & 1 != 0,
+            shift: bits & 2 != 0,
+            alt: bits & 4 != 0,
+            meta: bits & 8 != 0,
+        }
+    }
 }
 
 /// Résultat d'un événement d'entrée.

@@ -1239,10 +1239,16 @@ fn deferred_inputs_fifo_and_coalesce() {
 
     // Fenêtre détachée : tout s'enfile, rien ne traite.
     for ev in [
-        InputEvent::Key { key: "a".into() },
+        InputEvent::Key {
+            key: "a".into(),
+            mods: KeyMods::NONE,
+        },
         InputEvent::Scroll { dy: 10.0 },
         InputEvent::Scroll { dy: 5.0 },
-        InputEvent::Key { key: "b".into() },
+        InputEvent::Key {
+            key: "b".into(),
+            mods: KeyMods::NONE,
+        },
     ] {
         let r = s.handle_input_now(tab, ev).unwrap();
         assert_eq!(r, InputOutcome::Ignored, "détaché ⇒ différé");
@@ -1263,7 +1269,13 @@ fn deferred_inputs_fifo_and_coalesce() {
     // quand même — jamais devant les entrées plus anciennes.
     s.tabs.get_mut(&tab).unwrap().paint_detached = false;
     let r = s
-        .handle_input_now(tab, InputEvent::Key { key: "c".into() })
+        .handle_input_now(
+            tab,
+            InputEvent::Key {
+                key: "c".into(),
+                mods: KeyMods::NONE,
+            },
+        )
         .unwrap();
     assert_eq!(r, InputOutcome::Ignored, "file non vide ⇒ FIFO strict");
     assert_eq!(s.tabs.get(&tab).unwrap().deferred_inputs.len(), 4);
@@ -1666,8 +1678,20 @@ async fn lobste_pipeline_errors() {
     // un handler réel qui se trompe de prop lève un PipelineError
     // où `undefined` passait muet avant.
     for key in ["a", "Enter", "Escape", "ArrowDown", "j", "k"] {
-        let _ = s.handle_input_now(tab, InputEvent::Key { key: key.into() });
-        let _ = s.handle_input_now(tab, InputEvent::KeyUp { key: key.into() });
+        let _ = s.handle_input_now(
+            tab,
+            InputEvent::Key {
+                key: key.into(),
+                mods: KeyMods::NONE,
+            },
+        );
+        let _ = s.handle_input_now(
+            tab,
+            InputEvent::KeyUp {
+                key: key.into(),
+                mods: KeyMods::NONE,
+            },
+        );
         while let Ok(ev) = rx.try_recv() {
             if let CoreEvent::PipelineError { message, .. } = ev {
                 errors.push(message);
@@ -1723,4 +1747,28 @@ async fn lobste_pipeline_errors() {
             eprintln!("heap_stats: {st:?}");
         }
     }
+}
+
+/// Étape 105 — `KeyMods::from_bits` décode le bitmask
+/// FFI/REST (`1`=ctrl, `2`=shift, `4`=alt, `8`=meta) ;
+/// les bits inconnus sont ignorés, jamais de panic.
+#[test]
+fn keymods_from_bits_decode() {
+    assert_eq!(KeyMods::from_bits(0), KeyMods::NONE);
+    assert!(KeyMods::from_bits(1).ctrl);
+    assert!(KeyMods::from_bits(2).shift);
+    assert!(KeyMods::from_bits(4).alt);
+    assert!(KeyMods::from_bits(8).meta);
+    let all = KeyMods::from_bits(0xFF);
+    assert!(all.ctrl && all.shift && all.alt && all.meta);
+    assert!(KeyMods {
+        ctrl: true,
+        ..KeyMods::NONE
+    }
+    .chord());
+    assert!(!KeyMods {
+        shift: true,
+        ..KeyMods::NONE
+    }
+    .chord());
 }

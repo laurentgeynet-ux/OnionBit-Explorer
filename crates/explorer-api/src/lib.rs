@@ -37,7 +37,7 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use explorer_core::{
     drain_applies_shared, drain_navs_shared, history_move_shared, navigate_shared, CoreError,
-    CoreEvent, InputEvent, InputOutcome, Session, TabId,
+    CoreEvent, InputEvent, InputOutcome, KeyMods, Session, TabId,
 };
 use explorer_net::http::{Initiator, Method, Request};
 use explorer_net::url::Url;
@@ -433,6 +433,22 @@ async fn color_scheme(
     StatusCode::OK.into_response()
 }
 
+/// `ctrl`/`shift`/`alt`/`meta` optionnels d'une entrée clavier
+/// (étape 105) — absent = `false`.
+fn key_mods(body: &serde_json::Value) -> KeyMods {
+    let b = |k: &str| {
+        body.get(k)
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    };
+    KeyMods {
+        ctrl: b("ctrl"),
+        shift: b("shift"),
+        alt: b("alt"),
+        meta: b("meta"),
+    }
+}
+
 /// `POST …/input` : `{ "type": "click|mousemove|scroll|key", … }`.
 /// Les `mousemove` sont coalescés côté client (dernier état
 /// suffit — ADR-0003).
@@ -461,6 +477,7 @@ async fn input(
                 .and_then(|k| k.as_str())
                 .unwrap_or("")
                 .to_string(),
+            mods: key_mods(&body),
         },
         Some("keyup") => InputEvent::KeyUp {
             key: body
@@ -468,6 +485,7 @@ async fn input(
                 .and_then(|k| k.as_str())
                 .unwrap_or("")
                 .to_string(),
+            mods: key_mods(&body),
         },
         _ => {
             return err(

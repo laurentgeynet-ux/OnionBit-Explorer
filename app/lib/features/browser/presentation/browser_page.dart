@@ -1124,10 +1124,19 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                           // n'en ont pas → repli `keyLabel`
                           // (« Enter », « Backspace »).
                           final ch = e.character;
+                          // Ét.105 : état réel des modifieurs
+                          // (Shift sur une frappe de texte,
+                          // Meta non filtrée par _chordHeld)
+                          // → props du KeyboardEvent.
+                          final kb = HardwareKeyboard.instance;
                           widget.ctrl.key(
                             ch != null && ch.isNotEmpty
                                 ? ch
                                 : e.logicalKey.keyLabel,
+                            ctrl: kb.isControlPressed,
+                            shift: kb.isShiftPressed,
+                            alt: kb.isAltPressed,
+                            meta: kb.isMetaPressed,
                           );
                         },
                         child: Stack(

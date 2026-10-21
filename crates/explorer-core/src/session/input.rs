@@ -86,13 +86,20 @@ impl Session {
             return Ok(InputOutcome::Ignored);
         }
         match ev {
-            InputEvent::Key { key } => {
+            InputEvent::Key { key, mods } => {
                 // `keydown` sur le champ focalisé, sinon niveau
                 // document (étape 52) — `preventDefault`
                 // supprime l'édition et la soumission `Enter`.
                 // L'event porte `key`/`code`/`keyCode`/`which`
-                // (étape 103).
-                if self.dispatch_key(tab, "keydown", &key) {
+                // (étape 103) + les modifieurs (étape 105).
+                if self.dispatch_key(tab, "keydown", &key, mods) {
+                    return Ok(InputOutcome::Ignored);
+                }
+                // Un accord Ctrl/Alt/Meta n'édite pas : la
+                // frappe appartient à l'app ou à la page
+                // (raccourci) — l'event est livré, l'action
+                // par défaut est sautée (105).
+                if mods.chord() {
                     return Ok(InputOutcome::Ignored);
                 }
                 // Clavier du popup `<select>` ouvert : les
@@ -120,8 +127,8 @@ impl Session {
                 }
                 self.handle_key(tab, &key)
             }
-            InputEvent::KeyUp { key } => {
-                self.dispatch_key(tab, "keyup", &key);
+            InputEvent::KeyUp { key, mods } => {
+                self.dispatch_key(tab, "keyup", &key, mods);
                 Ok(InputOutcome::Ignored)
             }
             InputEvent::Scroll { dy } => {

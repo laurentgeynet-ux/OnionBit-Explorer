@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use explorer_core::{
-    Bookmark, CoreError, CoreEvent, InputEvent, InputOutcome, Session, SessionConfig,
+    Bookmark, CoreError, CoreEvent, InputEvent, InputOutcome, KeyMods, Session, SessionConfig,
 };
 use explorer_layout::font::{FontRequest, FontSource};
 use explorer_net::error::NetResult;
@@ -1289,6 +1289,7 @@ async fn key_input_is_unfocused() {
             id,
             InputEvent::Key {
                 key: "a".to_string(),
+                mods: KeyMods::NONE,
             },
         )
         .await
@@ -1391,7 +1392,13 @@ async fn click_input_focuses_then_keys_edit() {
     // Touche sans focus → « unfocused » (étape 86 — le
     // client resynchronise son drapeau de focus dessus).
     let out = s
-        .handle_input(id, InputEvent::Key { key: "a".into() })
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "a".into(),
+                mods: KeyMods::NONE,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Unfocused);
@@ -1406,7 +1413,13 @@ async fn click_input_focuses_then_keys_edit() {
     // Caractères → édités ; Backspace idem.
     for key in ["a", "b"] {
         let out = s
-            .handle_input(id, InputEvent::Key { key: key.into() })
+            .handle_input(
+                id,
+                InputEvent::Key {
+                    key: key.into(),
+                    mods: KeyMods::NONE,
+                },
+            )
             .await
             .unwrap();
         assert_eq!(out, InputOutcome::Edited);
@@ -1416,6 +1429,7 @@ async fn click_input_focuses_then_keys_edit() {
             id,
             InputEvent::Key {
                 key: "Backspace".into(),
+                mods: KeyMods::NONE,
             },
         )
         .await
@@ -1430,6 +1444,7 @@ async fn click_input_focuses_then_keys_edit() {
             id,
             InputEvent::Key {
                 key: "Enter".into(),
+                mods: KeyMods::NONE,
             },
         )
         .await
@@ -1440,7 +1455,13 @@ async fn click_input_focuses_then_keys_edit() {
     // La navigation a emporté le focus — la frappe suivante
     // rapporte « unfocused », pas `Ignored` muet (étape 86).
     let out = s
-        .handle_input(id, InputEvent::Key { key: "z".into() })
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "z".into(),
+                mods: KeyMods::NONE,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Unfocused);
@@ -1473,7 +1494,13 @@ async fn keydown_event_carries_key_code_props() {
     // Pas de champ focalisé : `keydown` document-level vers
     // `<body>` — les props sont posées par la session.
     let out = s
-        .handle_input(a, InputEvent::Key { key: "a".into() })
+        .handle_input(
+            a,
+            InputEvent::Key {
+                key: "a".into(),
+                mods: KeyMods::NONE,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Unfocused);
@@ -1502,10 +1529,137 @@ async fn keydown_prevent_default_suppresses_edit() {
     // `preventDefault` remonte par le même canal que les props
     // (étape 103) — l'édition est supprimée, `Ignored` rapporté.
     let out = s
-        .handle_input(id, InputEvent::Key { key: "a".into() })
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "a".into(),
+                mods: KeyMods::NONE,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Ignored);
+}
+
+/// Étape 105 — `keydown` porte aussi `ctrlKey`/`shiftKey`/
+/// `altKey`/`metaKey` (booleans DOM) depuis
+/// `InputEvent::Key.mods`. L'accord est livré à la page mais
+/// n'édite pas : `Ignored` après dispatch, frame = page
+/// statique équivalente.
+const PAGE_MODLOG: &str = "<!doctype html><html><body>\
+     <div id=\"k\"></div>\
+     <script>document.body.addEventListener('keydown',function(e){\
+     document.getElementById('k').textContent=e.ctrlKey+'/'+e.shiftKey+'/'+e.altKey+'/'+e.metaKey})</script>\
+     </body></html>";
+const PAGE_MODLOG_AFTER: &str = "<!doctype html><html><body>\
+     <div id=\"k\">true/true/false/false</div></body></html>";
+
+#[tokio::test]
+async fn keydown_event_carries_modifier_props() {
+    let (mut s, t) = test_session();
+    t.route("/ev", 200, PAGE_MODLOG);
+    t.route("/stat", 200, PAGE_MODLOG_AFTER);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // Ctrl+Shift+a : l'event est dispatché avec les mods,
+    // puis l'accord saute l'action par défaut (pas de champ
+    // focalisé de toute façon → `Ignored`).
+    let out = s
+        .handle_input(
+            a,
+            InputEvent::Key {
+                key: "a".into(),
+                mods: KeyMods {
+                    ctrl: true,
+                    shift: true,
+                    ..KeyMods::NONE
+                },
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// Étape 105 — un accord Ctrl/Alt/Meta n'édite pas le champ
+/// (l'event est dispatché, l'action par défaut est sautée) ;
+/// `Shift` seul reste de la frappe — la soumission `Enter`
+/// prouve le contenu final (« q=Ab », jamais « q=aAb »).
+#[tokio::test]
+async fn keydown_chord_suppresses_default_edit() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FORM);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 6.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Focused);
+
+    // Ctrl+a : raccourci — livré à la page, pas inséré.
+    let out = s
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "a".into(),
+                mods: KeyMods {
+                    ctrl: true,
+                    ..KeyMods::NONE
+                },
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+
+    // Shift+a : frappe normale — le `key` livré porte « A »,
+    // `shift` n'est pas un accord → édition.
+    let out = s
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "A".into(),
+                mods: KeyMods {
+                    shift: true,
+                    ..KeyMods::NONE
+                },
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+    let out = s
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "b".into(),
+                mods: KeyMods::NONE,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited);
+
+    let out = s
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "Enter".into(),
+                mods: KeyMods::NONE,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    let (_, pq, _) = t.last().unwrap();
+    assert_eq!(pq, "/?q=Ab");
 }
 
 /// M-H1 #1 — caret du champ focalisé : le clic dans un
@@ -1567,9 +1721,15 @@ async fn caret_paints_moves_and_clears_with_focus() {
     // départ — les glyphes tapés ne sont pas des barres
     // pleines, `bar_col` retrouve bien le caret).
     for k in ["a", "b", "c", "d"] {
-        s.handle_input(id, InputEvent::Key { key: k.into() })
-            .await
-            .unwrap();
+        s.handle_input(
+            id,
+            InputEvent::Key {
+                key: k.into(),
+                mods: KeyMods::NONE,
+            },
+        )
+        .await
+        .unwrap();
     }
     let col1 = bar_col(&s, id).expect("caret après frappe");
     assert!(col1 > col0 + 4, "caret avancé : {col0} → {col1}");
@@ -1579,6 +1739,7 @@ async fn caret_paints_moves_and_clears_with_focus() {
         id,
         InputEvent::Key {
             key: "Escape".into(),
+            mods: KeyMods::NONE,
         },
     )
     .await
@@ -1608,7 +1769,13 @@ async fn enter_escape_unfocus_reports_unfocused() {
         .unwrap();
     assert_eq!(out, InputOutcome::Focused);
     let out = s
-        .handle_input(id, InputEvent::Key { key: "a".into() })
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "a".into(),
+                mods: KeyMods::NONE,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Edited);
@@ -1621,13 +1788,25 @@ async fn enter_escape_unfocus_reports_unfocused() {
             .unwrap();
         assert_eq!(out, InputOutcome::Focused);
         let out = s
-            .handle_input(id, InputEvent::Key { key: key.into() })
+            .handle_input(
+                id,
+                InputEvent::Key {
+                    key: key.into(),
+                    mods: KeyMods::NONE,
+                },
+            )
             .await
             .unwrap();
         assert_eq!(out, InputOutcome::Unfocused, "{key}");
         // La frappe suivante confirme : plus de champ.
         let out = s
-            .handle_input(id, InputEvent::Key { key: "b".into() })
+            .handle_input(
+                id,
+                InputEvent::Key {
+                    key: "b".into(),
+                    mods: KeyMods::NONE,
+                },
+            )
             .await
             .unwrap();
         assert_eq!(out, InputOutcome::Unfocused, "après {key}");
@@ -1663,7 +1842,13 @@ async fn click_outside_blurs_and_mousemove_reports_editable() {
         .handle_input(id, InputEvent::Click { x: 5.0, y: 500.0 })
         .await;
     let out = s
-        .handle_input(id, InputEvent::Key { key: "x".into() })
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "x".into(),
+                mods: KeyMods::NONE,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Unfocused);
@@ -1683,7 +1868,13 @@ async fn textarea_is_editable() {
         .unwrap();
     assert_eq!(out, InputOutcome::Focused);
     let out = s
-        .handle_input(id, InputEvent::Key { key: "c".into() })
+        .handle_input(
+            id,
+            InputEvent::Key {
+                key: "c".into(),
+                mods: KeyMods::NONE,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Edited);
@@ -2333,9 +2524,15 @@ async fn select_popup_keyboard_navigates() {
         .unwrap();
     // Deux `ArrowDown` → 2e option, `Enter` la choisit.
     for k in ["ArrowDown", "ArrowDown", "Enter"] {
-        s.handle_input(id, InputEvent::Key { key: k.to_string() })
-            .await
-            .unwrap();
+        s.handle_input(
+            id,
+            InputEvent::Key {
+                key: k.to_string(),
+                mods: KeyMods::NONE,
+            },
+        )
+        .await
+        .unwrap();
     }
     let out = s
         .handle_input(id, InputEvent::Click { x: 6.0, y: 40.0 })
@@ -2386,6 +2583,7 @@ async fn select_popup_paints_option_text() {
         id,
         InputEvent::Key {
             key: "ArrowDown".to_string(),
+            mods: KeyMods::NONE,
         },
     )
     .await
@@ -2414,6 +2612,7 @@ async fn failed_submit_reports_edited_not_navigated() {
             id,
             InputEvent::Key {
                 key: "Enter".to_string(),
+                mods: KeyMods::NONE,
             },
         )
         .await
@@ -2489,6 +2688,7 @@ async fn select_popup_escape_keeps_default() {
         id,
         InputEvent::Key {
             key: "Escape".to_string(),
+            mods: KeyMods::NONE,
         },
     )
     .await
@@ -3468,14 +3668,26 @@ async fn key_and_focus_events_dispatch_in_order() {
     assert_eq!(out, InputOutcome::Focused);
     // 'x' → keydown 'D' puis édition + input 'I'.
     let out = s
-        .handle_input(a, InputEvent::Key { key: "x".into() })
+        .handle_input(
+            a,
+            InputEvent::Key {
+                key: "x".into(),
+                mods: KeyMods::NONE,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Edited);
     // Relâchement → keyup 'U'.
-    s.handle_input(a, InputEvent::KeyUp { key: "x".into() })
-        .await
-        .unwrap();
+    s.handle_input(
+        a,
+        InputEvent::KeyUp {
+            key: "x".into(),
+            mods: KeyMods::NONE,
+        },
+    )
+    .await
+    .unwrap();
     // Clic sur `c` → blur 'B' sur `a`, focus 'G' sur `c`.
     let out = s
         .handle_input(a, InputEvent::Click { x: 5.0, y: 35.0 })
@@ -3490,6 +3702,7 @@ async fn key_and_focus_events_dispatch_in_order() {
             a,
             InputEvent::Key {
                 key: "Escape".into(),
+                mods: KeyMods::NONE,
             },
         )
         .await
@@ -4157,15 +4370,22 @@ async fn valid_form_submits_on_enter() {
         .await
         .unwrap();
     for k in ["h", "i"] {
-        s.handle_input(id, InputEvent::Key { key: k.to_string() })
-            .await
-            .unwrap();
+        s.handle_input(
+            id,
+            InputEvent::Key {
+                key: k.to_string(),
+                mods: KeyMods::NONE,
+            },
+        )
+        .await
+        .unwrap();
     }
     let out = s
         .handle_input(
             id,
             InputEvent::Key {
                 key: "Enter".to_string(),
+                mods: KeyMods::NONE,
             },
         )
         .await
@@ -4306,9 +4526,15 @@ async fn typed_text_repaints_new_value() {
         .unwrap();
     let before = s.frame_png(id).unwrap();
     for key in ["x", "y", "z"] {
-        s.handle_input(id, InputEvent::Key { key: key.into() })
-            .await
-            .unwrap();
+        s.handle_input(
+            id,
+            InputEvent::Key {
+                key: key.into(),
+                mods: KeyMods::NONE,
+            },
+        )
+        .await
+        .unwrap();
     }
     let after = s.frame_png(id).unwrap();
     assert_ne!(before, after, "le texte tapé doit repeindre");

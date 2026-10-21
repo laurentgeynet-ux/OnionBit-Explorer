@@ -115,6 +115,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   par feuille. Test : `broken_sheet_does_not_
   swallow_next`.
 
+- **Étape 105 — modifieurs clavier**
+  (`explorer-core`, ticket adjacent de
+  l'étape 103 — `ctrlKey`/`shiftKey`
+  lisaient `undefined`) : `InputEvent::Key`/
+  `KeyUp` portent `mods: KeyMods`
+  (ctrl/shift/alt/meta) — `keydown`/`keyup`
+  dispatchés posent les quatre booleans du
+  `KeyboardEvent`. Un accord Ctrl/Alt/Meta
+  est livré à la page mais saute l'action
+  par défaut (édition, soumission `Enter`) :
+  le raccourci appartient à l'app ou au
+  site — `shift` seul reste de la frappe
+  (`key` porte déjà la casse). REST
+  `key`/`keyup` accepte `ctrl`/`shift`/
+  `alt`/`meta` optionnels ; FFI
+  `explorer_input` gagne `mods: u8`
+  (bitmask `1`=ctrl…`8`=meta, ABI
+  in-process livrée avec l'app) ; Dart
+  envoie l'état `HardwareKeyboard` réel
+  (AltGr exclu — c'est du texte). Tests :
+  `keydown_event_carries_modifier_props`
+  (frame), `keydown_chord_suppresses_
+  default_edit` (`q=Ab` jamais `q=aAb`),
+  `keymods_from_bits_decode`.
+
 - **R-67 — `FontCache` `Send`** (`explorer-layout`) :
   `data` `Rc<Vec<u8>>` → `Arc<Vec<u8>>` (tampons immuables
   — `Arc::as_ptr` conserve l'identité des clés

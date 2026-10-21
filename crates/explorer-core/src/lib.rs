@@ -22,6 +22,6 @@ pub use profile_store::JsonFileStore;
 pub use session::{
     drain_applies_shared, drain_navs_shared, history_move_shared, navigate_shared,
     pump_timers_shared, Bookmark, CoreError, CoreEvent, FrameRegion, InputEvent, InputOutcome,
-    MediaCmd, MediaError, MediaHostState, MediaKind, MediaOfferInfo, MediaRect, MediaReport,
-    ProfileStore, Session, SessionConfig, StoredCookie, TabId, TabInfo, Visit,
+    KeyMods, MediaCmd, MediaError, MediaHostState, MediaKind, MediaOfferInfo, MediaRect,
+    MediaReport, ProfileStore, Session, SessionConfig, StoredCookie, TabId, TabInfo, Visit,
 };
