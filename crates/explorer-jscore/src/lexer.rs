@@ -990,7 +990,11 @@ impl Lexer {
                         || self.template_expr_src().map(|_| ()),
                     )?;
                 }
-                Some('\'' | '"') => self.skip_quoted()?,
+                // Pas de `skip_quoted` ici : dans le texte brut d'un
+                // template imbriqué, `'`/`"` ne sont PAS des
+                // délimiteurs de chaîne (`don't` est du texte
+                // littéral). Mesuré sur bbc.com : styled-components
+                // avec apostrophe → « unterminated string ».
                 Some(_) => {
                     self.bump();
                 }

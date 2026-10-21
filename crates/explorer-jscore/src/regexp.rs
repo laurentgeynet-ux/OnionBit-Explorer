@@ -314,6 +314,7 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
         all_names,
         groups_open: 0,
         open_stack: Vec::new(),
+        look_pos: Vec::new(),
         closed: std::collections::BTreeSet::new(),
     };
     let mut out = String::with_capacity(src.len() + 8);
@@ -523,6 +524,7 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
             '(' if !in_class => {
                 t.groups_open += 1;
                 t.open_stack.push(Some(t.groups_open));
+                t.look_pos.push(None);
                 last_atom = false;
                 out.push('(');
             }
@@ -532,6 +534,40 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                 }
                 last_atom = true;
                 out.push(')');
+                if let Some(pos) = t.look_pos.pop().flatten() {
+                    // Lookahead quantifié (Annex B) : `(?=x)?` —
+                    // le backend refuse le quantificateur sur
+                    // assertion ; réécriture équivalente. Une
+                    // assertion zéro-largeur est idempotente :
+                    // min=0 → optionnelle, min≥1 → forme nue. Le
+                    // quantificateur (et un `?` lazy) est absorbé.
+                    let q = match cs.get(i + 1) {
+                        Some('*' | '?') => Some((0usize, i + 2)),
+                        Some('+') => Some((1, i + 2)),
+                        Some('{') => {
+                            parse_quantifier(&cs, i + 1).map(|(lo, _hi, next)| (lo as usize, next))
+                        }
+                        _ => None,
+                    };
+                    if let Some((lo, mut qend)) = q {
+                        // Annex B — non-`u` uniquement ; `u` exige
+                        // SyntaxError (test262 `u-invalid-*-lookahead`).
+                        if t.unicode {
+                            return Err(format!("quantifiable lookahead in `u` regex /{src}/"));
+                        }
+                        if cs.get(qend) == Some(&'?') {
+                            qend += 1;
+                        }
+                        if lo == 0 {
+                            let g = out[pos..].to_string();
+                            out.truncate(pos);
+                            out.push_str("(?:");
+                            out.push_str(&g);
+                            out.push_str("|)");
+                        }
+                        i = qend - 1;
+                    }
+                }
             }
             '{' | '}' if !in_class => {
                 // `{n,m}` quantifier → atome précédent requis ; la
@@ -644,6 +680,13 @@ struct Trans {
     /// Pile des groupes ouverts — `Some(n)` capturant, `None`
     /// sinon ; un `)` pop et clôt le numéro.
     open_stack: Vec<Option<usize>>,
+    /// Parallèle à `open_stack` : `Some(pos_out)` pour les
+    /// groupes *lookahead* (`(?=`/`(?!`) — position de `(?` dans
+    /// `out`. Annex B autorise leur quantification (`(?=x)?`) que
+    /// le backend refuse — le quantificateur est absorbé à la
+    /// fermeture : min=0 → `(?:(?=…)|)`, min≥1 → forme nue
+    /// (assertion idempotente) ; mesuré sur bbc.com (JS-C56).
+    look_pos: Vec<Option<usize>>,
     /// Numéros de groupes **fermés** avant la position courante —
     /// seule une backref vers un groupe clos peut réellement
     /// capturer (`\3` dans `(\3)…(…)` matche vide, spec 21.2.2.9).
@@ -964,12 +1007,19 @@ fn translate_group(
     match cs.get(i + 2) {
         Some(':' | '=' | '!') => {
             t.open_stack.push(None);
+            // `=`/`!` → lookahead quantifiable (Annex B) ; `:` non.
+            t.look_pos.push(if cs[i + 2] == ':' {
+                None
+            } else {
+                Some(out.len())
+            });
             out.push_str("(?");
             out.push(cs[i + 2]);
             Ok(i + 3)
         }
         Some('<') if matches!(cs.get(i + 3), Some('=' | '!')) => {
             t.open_stack.push(None);
+            t.look_pos.push(None);
             out.push_str("(?<");
             out.push(cs[i + 3]);
             Ok(i + 4)
@@ -996,6 +1046,7 @@ fn translate_group(
             }
             t.groups_open += 1;
             t.open_stack.push(Some(t.groups_open));
+            t.look_pos.push(None);
             out.push_str("(?P<");
             out.push_str(&name);
             out.push('>');
@@ -1038,6 +1089,7 @@ fn translate_group(
             }
             // Fragment validé → émis tel quel (fancy le comprend).
             t.open_stack.push(None);
+            t.look_pos.push(None);
             out.push_str(&cs[i..=j].iter().collect::<String>());
             Ok(j + 1)
         }

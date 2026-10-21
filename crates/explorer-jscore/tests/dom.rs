@@ -1371,6 +1371,215 @@ fn mutation_observer_survives_gc() {
     }
 }
 
+#[test]
+fn mutation_observer_document_target() {
+    // `observe(document)` : `document` est un DocumentHost, pas un
+    // NodeHost — il résout sur la racine du miroir. Mesuré sur
+    // github.com (JS-C56).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var log=[];\
+             var mo=new MutationObserver(function(rs){\
+               log.push(rs[0].type+'|'+(rs[0].target===document.body));\
+             });\
+             mo.observe(document,{childList:true,subtree:true});\
+             document.body.appendChild(document.createElement('i'));",
+            "log.join(',')"
+        ),
+        "childList|true"
+    );
+    // Options inférées : attributeFilter implique attributes.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var n=0;\
+             var mo=new MutationObserver(function(){n++});\
+             mo.observe(document,{attributeFilter:['class'],subtree:true});\
+             document.getElementById('main').setAttribute('class','z');",
+            "n"
+        ),
+        "1"
+    );
+    // Config sans type d'observation → TypeError (spec).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';try{new MutationObserver(function(){}).observe(document,{})}\
+             catch(e){r=e.name}",
+            "r"
+        ),
+        "TypeError"
+    );
+}
+
+#[test]
+fn dom_interface_constructors() {
+    // Interfaces DOM standard : présentes pour la détection
+    // (`typeof`, `in prototype`, `instanceof`) — stubs
+    // inconstructibles sauf `Event` et sa famille. Mesuré sur
+    // github.com : ReferenceError `HTMLElement`/`Event` (JS-C56).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r=['Element','HTMLElement','SVGElement','Document',\
+              'DocumentFragment','ShadowRoot','Text','Comment',\
+              'NodeList','HTMLCollection','DOMTokenList','Range',\
+              'DOMParser','IntersectionObserver','ResizeObserver',\
+              'DOMException','AbortSignal','EventTarget'].map(function(n){\
+               return typeof globalThis[n]}).join(',')",
+            "r"
+        ),
+        "function,function,function,function,function,function,function,function,function,function,function,function,function,function,function,function,function,function"
+    );
+    // Inconstructibles → TypeError.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';try{new HTMLElement()}catch(e){r=e.name}\
+             r+='|';try{new Document()}catch(e){r+=e.name}",
+            "r"
+        ),
+        "TypeError|TypeError"
+    );
+    // `Event` constructible, dispatchable, `instanceof` honnête.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var e=new Event('click',{bubbles:true});\
+             var r=e.type+'|'+e.bubbles+'|'+e.cancelable+'|'+\
+             (e instanceof Event)+'|'+e.defaultPrevented+'|'+e.isTrusted",
+            "r"
+        ),
+        "click|true|false|true|false|false"
+    );
+    // Sous-classes : proto chaîné sur Event.prototype, payload
+    // d'init copié (CustomEvent.detail).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var ce=new CustomEvent('load',{detail:{a:7}});\
+             var r=(ce instanceof Event)+'|'+(ce instanceof CustomEvent)+'|'+ce.detail.a+'|'+\
+             (new MouseEvent('m') instanceof Event)",
+            "r"
+        ),
+        "true|true|7|true"
+    );
+    // Méthodes du prototype Event.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var e=new Event('x');e.preventDefault();e.stopPropagation();\
+             var r=e.defaultPrevented+'|'+e.cancelBubble+'|'+e.returnValue+'|'+\
+             e.composedPath().length+'|'+Event.BUBBLING_PHASE",
+            "r"
+        ),
+        "true|true|false|0|3"
+    );
+    // dispatchEvent accepte un event script-créé.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var seen='';\
+             document.body.addEventListener('ping',function(ev){seen=ev.type+'|'+ev.bubbles});\
+             document.body.dispatchEvent(new Event('ping',{bubbles:true}))",
+            "seen"
+        ),
+        "ping|true"
+    );
+    // AbortController minimal : signal.aborted + abort().
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var c=new AbortController();var s=c.signal;\
+             var r=s.aborted+'|'+typeof c.abort",
+            "r"
+        ),
+        "false|function"
+    );
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var c=new AbortController();c.abort();var r=c.signal.aborted",
+            "r"
+        ),
+        "true"
+    );
+    // `IntersectionObserver`/`ResizeObserver` — constructibles,
+    // callback requis, méthodes no-op honnêtes (le miroir ne
+    // génère ni intersection ni resize).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var io=new IntersectionObserver(function(){});\
+             var ro=new ResizeObserver(function(){});\
+             io.observe(document.body);ro.observe(document.body);\
+             io.unobserve(document.body);ro.disconnect();\
+             var r=io.takeRecords().length+'|'+typeof io",
+            "r"
+        ),
+        "0|object"
+    );
+    // Sans callback → TypeError.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';try{new IntersectionObserver()}catch(e){r=e.name}\
+             r+='|';try{new ResizeObserver(42)}catch(e){r+=e.name}",
+            "r"
+        ),
+        "TypeError|TypeError"
+    );
+}
+
+#[test]
+fn custom_elements_registry() {
+    // `customElements` — registre minimal (JS-C56, github.com).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "class MyEl extends HTMLElement {};\
+             var r=''+typeof customElements;\
+             r+='|'+customElements.get('my-el');\
+             customElements.define('my-el',MyEl);\
+             r+='|'+(customElements.get('my-el')===MyEl)",
+            "r"
+        ),
+        "object|undefined|true"
+    );
+    // ctor non-fonction → TypeError ; nom déjà pris → TypeError.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "customElements.define('x-el',class{});\
+             var r='';try{customElements.define('x-el',class{})}catch(e){r=e.name}\
+             r+='|';try{customElements.define('y-el',42)}catch(e){r+=e.name}",
+            "r"
+        ),
+        "TypeError|TypeError"
+    );
+    // `whenDefined` — promesse tenue pour un nom enregistré.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "customElements.define('w-el',class{});\
+             var r='pending';\
+             customElements.whenDefined('w-el').then(function(c){r=c===customElements.get('w-el')})",
+            "r"
+        ),
+        "true"
+    );
+    // `upgrade` no-op honnête — pas de throw.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "customElements.upgrade(document.body);var r='ok'",
+            "r"
+        ),
+        "ok"
+    );
+}
+
 // -- constraint validation (étape 54) -----------------------------------
 
 const FORM_PAGE: &str = r#"

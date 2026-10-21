@@ -2320,6 +2320,12 @@ impl Parser {
         self.priv_scopes.push((seq, decls));
         let mut members = Vec::new();
         while !self.at_eof() && !self.check_p(P::RBrace) {
+            // `;` — élément de classe vide (ClassElement de la
+            // grammaire), fréquent dans les bundles minifiés
+            // (`m(){};n(){}`). Mesuré sur github.com (JS-C56).
+            if self.eat_p(P::Semi) {
+                continue;
+            }
             let mpos = self.pos_here();
             let mut static_ = false;
             // `static m()` vs a method literally named `static`.

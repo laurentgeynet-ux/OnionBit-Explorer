@@ -524,6 +524,153 @@ impl Engine {
             }
         }
         self.set_own(g, "Node", node_f, false);
+        // Interfaces DOM standard — constructeurs-stubs pour la
+        // détection (`typeof Element`, `"x" in Element.prototype`,
+        // `instanceof`), inconstructibles comme `Node`. Mesuré sur
+        // github.com : `HTMLElement`/`Event` manquants →
+        // ReferenceError (JS-C56).
+        for name in [
+            "EventTarget",
+            "Element",
+            "HTMLElement",
+            "SVGElement",
+            "Document",
+            "DocumentFragment",
+            "ShadowRoot",
+            "CharacterData",
+            "Text",
+            "Comment",
+            "Attr",
+            "CDATASection",
+            "ProcessingInstruction",
+            "DocumentType",
+            "DOMTokenList",
+            "NodeList",
+            "HTMLCollection",
+            "NamedNodeMap",
+            "DOMRect",
+            "DOMRectReadOnly",
+            "CSSStyleDeclaration",
+            "CSSRule",
+            "StyleSheet",
+            "CSSStyleSheet",
+            "Range",
+            "DOMParser",
+            "XMLSerializer",
+            "AbortSignal",
+            "DOMException",
+        ] {
+            let f = self.native_fn(name, illegal_ctor);
+            if let Value::Obj(fid) = f {
+                let p = self.new_object();
+                self.set_own(fid, "prototype", Value::Obj(p), false);
+            }
+            self.set_own(g, name, f, false);
+        }
+        // `Event` + famille — constructibles : l'objet produit est
+        // dispatchable (`type`/`bubbles` lus par `dispatchEvent`).
+        // Les proto des sous-classes héritent de `Event.prototype`.
+        let event_f = self.native_fn("Event", event_ctor);
+        let mut event_proto = Value::Undefined;
+        if let Value::Obj(fid) = event_f {
+            let p = Value::Obj(self.new_object());
+            for (k, f2) in [
+                (
+                    "preventDefault",
+                    event_prevent_default as crate::heap::NativeFn,
+                ),
+                ("stopPropagation", event_stop_propagation),
+                ("stopImmediatePropagation", event_stop_propagation),
+                ("composedPath", event_composed_path),
+                ("initEvent", event_init),
+            ] {
+                let m = self.native_fn(k, f2);
+                if let Value::Obj(pid) = p {
+                    self.set_own(pid, k, m, true);
+                }
+            }
+            for (k, v) in [
+                ("NONE", 0),
+                ("CAPTURING_PHASE", 1),
+                ("AT_TARGET", 2),
+                ("BUBBLING_PHASE", 3),
+            ] {
+                self.set_own(fid, k, Value::Num(f64::from(v)), false);
+                if let Value::Obj(pid) = p {
+                    self.set_own(pid, k, Value::Num(f64::from(v)), false);
+                }
+            }
+            self.set_own(fid, "prototype", p, false);
+            event_proto = p;
+        }
+        self.set_own(g, "Event", event_f, false);
+        for name in [
+            "CustomEvent",
+            "UIEvent",
+            "MouseEvent",
+            "KeyboardEvent",
+            "PointerEvent",
+            "FocusEvent",
+            "InputEvent",
+            "WheelEvent",
+            "TouchEvent",
+            "DragEvent",
+            "SubmitEvent",
+            "ErrorEvent",
+            "CompositionEvent",
+            "AnimationEvent",
+            "TransitionEvent",
+            "ClipboardEvent",
+            "HashChangeEvent",
+            "PopStateEvent",
+            "PromiseRejectionEvent",
+        ] {
+            let f = self.native_fn(name, event_ctor);
+            if let Value::Obj(fid) = f {
+                let p = Value::Obj(self.new_object());
+                if let Value::Obj(pid) = p {
+                    if let Some(o) = self.heap.obj_mut(pid) {
+                        o.proto = event_proto;
+                    }
+                }
+                self.set_own(fid, "prototype", p, false);
+            }
+            self.set_own(g, name, f, false);
+        }
+        // `AbortController` minimal : `signal.aborted` + `abort()`.
+        let ac_f = self.native_fn("AbortController", abort_controller_ctor);
+        if let Value::Obj(fid) = ac_f {
+            let p = self.new_object();
+            let m = self.native_fn("abort", abort_signal_abort);
+            self.set_own(p, "abort", m, true);
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "AbortController", ac_f, false);
+        // `IntersectionObserver`/`ResizeObserver` — constructibles,
+        // callback requis ; `observe`/`unobserve`/`disconnect`
+        // no-op honnêtes (le miroir ne génère ni intersection ni
+        // resize — le callback n'est jamais appelé). Mesuré
+        // github.com : `new IntersectionObserver(cb)` (JS-C56).
+        for (name, f) in [
+            (
+                "IntersectionObserver",
+                intersection_observer_ctor as crate::heap::NativeFn,
+            ),
+            ("ResizeObserver", resize_observer_ctor),
+        ] {
+            let fv = self.native_fn(name, f);
+            if let Value::Obj(fid) = fv {
+                let p = self.new_object();
+                self.set_own(fid, "prototype", Value::Obj(p), false);
+            }
+            self.set_own(g, name, fv, false);
+        }
+        // `customElements` — registre honnête : `define`/`get`/
+        // `whenDefined`/`upgrade`. Mesuré github.com (JS-C56).
+        let ce = self.new_host_object(Rc::new(CustomElementsHost {
+            registry: RefCell::new(HashMap::new()),
+        }));
+        self.set_own(g, "customElements", ce, false);
         let screen = self.new_object();
         let (w, h) = self.hooks.viewport;
         for (k, v) in [
@@ -2453,7 +2600,17 @@ pub(crate) fn node_for(e: &mut Engine, v: Value) -> Option<NodeId> {
         Some(ObjKind::Host(h)) => h.clone(),
         _ => return None,
     };
-    h.as_any().downcast_ref::<NodeHost>().map(|n| n.node)
+    if let Some(n) = h.as_any().downcast_ref::<NodeHost>() {
+        return Some(n.node);
+    }
+    // `document` est un nœud cible valide (`observe(document)`,
+    // `contains`…) — il se résout sur la racine `#document`.
+    // Mesuré sur github.com : element-registry observe le
+    // document (JS-C56).
+    if let Some(dh) = h.as_any().downcast_ref::<DocumentHost>() {
+        return Some(dh.dom.borrow().root);
+    }
+    None
 }
 
 /// Resolve a `dispatchEvent` argument to event state: an `Event`
@@ -2750,6 +2907,137 @@ impl Host for ClassListHost {
 /// `location` — getters read `hooks.page_url` (parsed with no URL
 /// dep: scheme `//` authority `/` path `?` query `#` fragment);
 /// setters/`assign`/`replace`/`reload` go through `hooks.navigate`.
+/// `customElements` — `CustomElementRegistry` minimal : nom → ctor.
+/// `define` exige un ctor appelable et un nom libre (`TypeError` —
+/// approche `NotSupportedError`/`SyntaxError` de la spec) ;
+/// `whenDefined` rend une promesse tenue pour un nom enregistré,
+/// pendante sinon (spec) ; `upgrade` est no-op honnête — le
+/// miroir ne relie pas le constructeur aux nœuds existants.
+/// Mesuré github.com : `customElements.define(name, class)`
+/// (JS-C56).
+struct CustomElementsHost {
+    registry: RefCell<HashMap<String, Value>>,
+}
+
+impl Host for CustomElementsHost {
+    fn class_name(&self) -> &'static str {
+        "CustomElementRegistry"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _t: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        match name {
+            "define" => {
+                let n = e.to_js_string(arg(args, 0))?;
+                let ctor = arg(args, 1);
+                if !e.is_callable(ctor) {
+                    return Err(e.type_error("customElements.define: ctor is not a constructor"));
+                }
+                if self.registry.borrow().contains_key(&n) {
+                    return Err(e.type_error("custom element already defined"));
+                }
+                self.registry.borrow_mut().insert(n, ctor);
+                Ok(Some(Value::Undefined))
+            }
+            "get" => {
+                let n = e.to_js_string(arg(args, 0))?;
+                Ok(Some(
+                    self.registry
+                        .borrow()
+                        .get(&n)
+                        .copied()
+                        .unwrap_or(Value::Undefined),
+                ))
+            }
+            "whenDefined" => {
+                let n = e.to_js_string(arg(args, 0))?;
+                let p = e.new_promise();
+                if let Some(&ctor) = self.registry.borrow().get(&n) {
+                    e.resolve_promise(p, ctor);
+                }
+                Ok(Some(Value::Obj(p)))
+            }
+            "upgrade" => Ok(Some(Value::Undefined)),
+            _ => Ok(None),
+        }
+    }
+
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        for v in self.registry.borrow().values() {
+            if let Value::Obj(id) = v {
+                out.push(*id);
+            }
+        }
+    }
+}
+
+/// `IntersectionObserver`/`ResizeObserver` — passifs : le
+/// callback est validé/retenu mais jamais appelé (le miroir ne
+/// produit ni intersection ni resize — honnête, pas un feu
+/// artificiel). `observe`/`unobserve`/`disconnect` no-op,
+/// `takeRecords` → `[]`.
+struct PassiveObserverHost {
+    kind: &'static str,
+    cb: Value,
+}
+
+impl Host for PassiveObserverHost {
+    fn class_name(&self) -> &'static str {
+        self.kind
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _t: Value,
+        name: &str,
+        _args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        match name {
+            "observe" | "unobserve" | "disconnect" => Ok(Some(Value::Undefined)),
+            "takeRecords" => Ok(Some(e.new_array(Vec::new()))),
+            _ => Ok(None),
+        }
+    }
+
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        if let Value::Obj(id) = self.cb {
+            out.push(id);
+        }
+    }
+}
+
+/// `new IntersectionObserver(cb[, options])` — callback requis.
+fn intersection_observer_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    passive_observer(e, args, "IntersectionObserver")
+}
+
+/// `new ResizeObserver(cb)` — callback requis.
+fn resize_observer_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    passive_observer(e, args, "ResizeObserver")
+}
+
+fn passive_observer(e: &mut Engine, args: &[Value], kind: &'static str) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    if !e.is_callable(cb) {
+        return Err(e.type_error(format!("{kind}: callback is not a function")));
+    }
+    Ok(e.new_host_object(Rc::new(PassiveObserverHost { kind, cb })))
+}
+
 struct LocationHost;
 
 /// `(protocol, host, hostname, port, pathname, search, hash)` of `u`.
@@ -3055,6 +3343,123 @@ fn css_supports(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 /// `new Node()` — inconstructible ("illegal constructor" per spec).
 fn node_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Err(e.type_error("Node: illegal constructor"))
+}
+
+/// Constructeur-stub des interfaces DOM sans implémentation
+/// (`HTMLElement`, `IntersectionObserver`…) — « illegal
+/// constructor » comme `Node`, la détection `typeof`/`in` suffit.
+fn illegal_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Err(e.type_error("illegal constructor"))
+}
+
+/// `new Event(type, init)` — objet ordinaire dispatchable
+/// (`dispatchEvent` lit `type`/`bubbles` sur l'objet) : props
+/// standard posées sur `this`, proto `Event.prototype` assuré par
+/// le chemin `[[Construct]]` générique (JS-C56).
+fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let ty = e.to_js_string(arg(args, 0))?;
+    let init = arg(args, 1);
+    // `init` est un dictionnaire IDL : `undefined`/`null` → vide,
+    // objet → lu, autre primitif → TypeError (spec WebIDL).
+    match init {
+        Value::Undefined | Value::Null | Value::Obj(_) => {}
+        _ => return Err(e.type_error("event init is not an object")),
+    }
+    let tv = e.str_val(ty);
+    e.set_prop_value(this, "type", tv)?;
+    if matches!(init, Value::Obj(_)) {
+        for k in ["bubbles", "cancelable", "composed"] {
+            let v = e.get_prop_value(init, k)?;
+            e.set_prop_value(this, k, Value::Bool(e.to_boolean(v)))?;
+        }
+    } else {
+        for (k, v) in [
+            ("bubbles", Value::Bool(false)),
+            ("cancelable", Value::Bool(false)),
+            ("composed", Value::Bool(false)),
+        ] {
+            e.set_prop_value(this, k, v)?;
+        }
+    }
+    // `CustomEvent`/`ErrorEvent`/`PromiseRejectionEvent` portent
+    // des payloads d'init — copiés tels quels.
+    if matches!(init, Value::Obj(_)) {
+        for k in [
+            "detail", "message", "error", "filename", "lineno", "colno", "promise", "reason",
+        ] {
+            let v = e.get_prop_value(init, k)?;
+            if !matches!(v, Value::Undefined) {
+                e.set_prop_value(this, k, v)?;
+            }
+        }
+    }
+    for (k, v) in [
+        ("target", Value::Null),
+        ("srcElement", Value::Null),
+        ("currentTarget", Value::Null),
+        ("relatedTarget", Value::Null),
+        ("isTrusted", Value::Bool(false)),
+        ("defaultPrevented", Value::Bool(false)),
+        ("cancelBubble", Value::Bool(false)),
+        ("returnValue", Value::Bool(true)),
+        ("eventPhase", Value::Num(0.0)),
+        ("timeStamp", Value::Num(0.0)),
+    ] {
+        e.set_prop_value(this, k, v)?;
+    }
+    Ok(Value::Undefined)
+}
+
+/// `ev.preventDefault()` — sur un event script-créé : flag posé
+/// (`defaultPrevented`/`returnValue`), pas d'effet sur un event
+/// de dispatch (ceux-ci passent par `EventHost`).
+fn event_prevent_default(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    e.set_prop_value(this, "defaultPrevented", Value::Bool(true))?;
+    e.set_prop_value(this, "returnValue", Value::Bool(false))?;
+    Ok(Value::Undefined)
+}
+
+/// `ev.stopPropagation()`/`stopImmediatePropagation()` — flag
+/// `cancelBubble` posé (best-effort hors dispatch).
+fn event_stop_propagation(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    e.set_prop_value(this, "cancelBubble", Value::Bool(true))?;
+    Ok(Value::Undefined)
+}
+
+/// `ev.composedPath()` — `[]` honnête hors dispatch.
+fn event_composed_path(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(e.new_array(Vec::new()))
+}
+
+/// `ev.initEvent(type, bubbles, cancelable)` — héritage DOM Level 2.
+fn event_init(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let ty = e.to_js_string(arg(args, 0))?;
+    let tv = e.str_val(ty);
+    e.set_prop_value(this, "type", tv)?;
+    e.set_prop_value(this, "bubbles", Value::Bool(e.to_boolean(arg(args, 1))))?;
+    e.set_prop_value(this, "cancelable", Value::Bool(e.to_boolean(arg(args, 2))))?;
+    Ok(Value::Undefined)
+}
+
+/// `new AbortController()` — `{signal: {aborted:false}}` minimal ;
+/// `abort()` (sur le prototype) bascule `signal.aborted`.
+fn abort_controller_ctor(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let sig = e.new_object();
+    e.set_own(sig, "aborted", Value::Bool(false), true);
+    e.set_own(sig, "onabort", Value::Null, true);
+    e.set_prop_value(this, "signal", Value::Obj(sig))?;
+    Ok(Value::Undefined)
+}
+
+/// `controller.abort()` — `signal.aborted = true`, `onabort` appelé.
+fn abort_signal_abort(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let sig = e.get_prop_value(this, "signal")?;
+    e.set_prop_value(sig, "aborted", Value::Bool(true))?;
+    let cb = e.get_prop_value(sig, "onabort")?;
+    if e.is_callable(cb) {
+        e.call_value(cb, sig, &[])?;
+    }
+    Ok(Value::Undefined)
 }
 
 /// `CSS.escape(s)` — algorithme « serialize an identifier »

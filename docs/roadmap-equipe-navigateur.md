@@ -2136,6 +2136,72 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   temporal/intl, bigint/math, proxy, async, DOM, profondeur)
   × appels pathologiques — contrat unique « Ok ou Err,
   jamais panic ».
+- [x] **JS-C56. Census terrain github.com / bbc.com — les gaps
+  réels** (`explorer-jscore`, sonde `LOBSTE_PROBE_URL`) — la
+  vague census a produit des erreurs mesurées, chacune
+  reproduite en isolé puis fixée :
+  - **BBC** : « unterminated string in template » sur les
+    chunks Turbopack/styled-components — `skip_nested_template`
+    traitait les `'`/`"` du *texte brut* d'un template
+    imbriqué comme des délimiteurs de chaîne (`don't` en CSS
+    injecté) → scan jusqu'à EOF. Fix : `skip_quoted` réservé
+    au contenu `${…}` ; le texte brut n'est plus quoté.
+    4/4 chunks fautifs passent.
+  - **BBC** : `invalid regex … Target of repeat operator` —
+    lookahead **quantifié** `(?=comodo_)?dragon` (détection
+    UA) : JS légal (Annex B), fancy-regex refuse. Fix :
+    pile `look_pos` parallèle à `open_stack` dans
+    `translate_pattern` — à la fermeture d'un lookahead
+    quantifié, le quantificateur est absorbé : min=0 →
+    `(?:(?=…)|)`, min≥1 → forme nue (assertion zéro-largeur
+    idempotente — `(?:(?=a)|)+` aurait tort de matcher sur
+    'b'). Mode `u` : SyntaxError, conforme Annex B — cliquet
+    test262 `u-invalid-*-lookahead` intact.
+  - **GitHub** : `ReferenceError: HTMLElement/Event` puis
+    `TypeError: illegal constructor` — les interfaces DOM
+    n'existaient pas (`ariaNotify` polyfill) ou n'étaient
+    pas constructibles. Fix : constructeurs-stubs
+    inconstructibles (`Element`, `HTMLElement`, `Document`,
+    `DOMException`… — « illegal constructor » comme `Node`)
+    pour la détection `typeof`/`in`/`instanceof` ; `Event` +
+    famille (`CustomEvent`/`UIEvent`/`MouseEvent`/
+    `KeyboardEvent`…) **constructibles** — objets ordinaires
+    dispatchables (`type`/`bubbles`/`cancelable`/`composed`,
+    payload `detail`/`error`/`promise` copiés, proto chaîné
+    sur `Event.prototype`, `preventDefault`/`stopPropagation`/
+    `initEvent`/`composedPath`, constantes `*_PHASE`) ;
+    `AbortController` minimal (`signal.aborted`, `abort()`,
+    `onabort`) ; `IntersectionObserver`/`ResizeObserver`
+    constructibles — callback requis, `observe`/`unobserve`/
+    `disconnect`/`takeRecords` no-op honnêtes (le miroir ne
+    génère ni intersection ni resize — jamais de tir
+    artificiel du callback).
+  - **GitHub** : `TypeError: observe: nœud requis` —
+    `MutationObserver.observe(document)` rejeté : `node_for`
+    ne reconnaissait que `NodeHost`. Fix : `DocumentHost`
+    résout sur la racine du miroir.
+  - **GitHub** : `customElements is not defined` (bloc
+    polyfill rejoué en isolé) — `CustomElementsHost` :
+    `define` (TypeError si ctor non-appelable ou nom pris),
+    `get`, `whenDefined` (promesse tenue pour nom
+    enregistré, pendante sinon — spec), `upgrade` no-op ;
+    `trace` GC sur les ctors retenus.
+  - **GitHub** : `syntax error — expected property name` —
+    `class X { a(){};b(){} }` rejeté : l'élément de classe
+    vide `;` (ClassElement de la grammaire) n'était pas
+    accepté. Fix : consommé dans la boucle de membres.
+  - **Résidu honnête** : `TypeError: cannot convert a
+    Symbol to string` (bundle `environment-*.js` —
+    conversion interdite par la spec, le chemin exact reste
+    à isoler dans le graphe webpack) ; `cannot read 'get'
+    of Undefined` et `value is not a function` sur les
+    modules suivants — le code progresse plus loin, les
+    erreurs se déplacent ; `react` bare specifier = import
+    map absente (hors périmètre miroir).
+  Tests : `mutation_observer_document_target`,
+  `dom_interface_constructors`, `custom_elements_registry`,
+  `regexp_quantified_lookahead`, `class_empty_elements`,
+  `template_literals` (quotes en texte brut).
 
 ## Tâches continues
 

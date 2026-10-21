@@ -450,6 +450,12 @@ fn template_literals() {
     assert_eq!(ev_str("`a${1+1}b${`c${2}`}d`"), "a2bc2d");
     assert_eq!(ev_str("`line1\nline2`"), "line1\nline2");
     assert_eq!(ev_str("`esc \\` tick \\${no}`"), "esc ` tick ${no}");
+    // Texte brut d'un template imbriqué : les quotes y sont du
+    // texte, pas des délimiteurs de chaîne — styled-components CSS
+    // mesuré sur bbc.com (JS-C56).
+    assert_eq!(ev_str("`a${`b'\"c`}d`"), "ab'\"cd");
+    assert_eq!(ev_str("`css${`don't`}end`"), "cssdon'tend");
+    assert_eq!(ev_str("`x${`y${1}z`}w`"), "xy1zw");
 }
 
 #[test]
@@ -3647,6 +3653,42 @@ fn regexp_lookbehind_has_indices() {
 }
 
 #[test]
+fn regexp_quantified_lookahead() {
+    // `(?=…)?` — lookahead quantifié : JS légal (groupe optionnel
+    // vide), fancy-regex refuse la forme brute. Réécrit en
+    // `(?:(?=…)|)` à la traduction. Mesuré sur bbc.com :
+    // détection UA `whale|dragon` (JS-C56).
+    assert_eq!(ev_str("/(?=x)?/.test('')"), "true");
+    assert_eq!(ev_str("/(?=a)?b/.test('b')"), "true");
+    assert_eq!(
+        ev_str("/whale(?!.+naver)|(?=comodo_)?dragon/.test('comodo_dragon')"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("/whale(?!.+naver)|(?=comodo_)?dragon/.test('dragon')"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("/whale(?!.+naver)|(?=comodo_)?dragon/.test('xwhale ynaver dragon')"),
+        "true"
+    );
+    // `*` (min=0) → assertion optionnelle ; `+` (min≥1) →
+    // assertion requise (zéro-largeur idempotente).
+    assert_eq!(ev_str("/(?=a)*b/.test('b')"), "true");
+    assert_eq!(ev_str("/(?=a)+b/.test('b')"), "false");
+    // `+` échoue où l'assertion échoue — la forme optionalisée
+    // `(?:…|)+` aurait tort de matcher.
+    assert_eq!(ev_str("/(?=c)+ab/.test('ab')"), "false");
+    assert_eq!(ev_str("/(?=a)+ab/.test('ab')"), "true");
+    // Lookbehind quantifié : SyntaxError (Annex B — lookahead
+    // uniquement) — le backend rejette la forme nue.
+    assert_eq!(
+        ev_str("try { new RegExp('(?<=a)?b') } catch(e) { e.name }"),
+        "SyntaxError"
+    );
+}
+
+#[test]
 fn array_from_async() {
     // Éléments synchrones.
     assert_eq!(
@@ -4135,6 +4177,26 @@ fn class_private_fields() {
     assert!(Engine::new()
         .eval("class C { m() { return this.#y; } }")
         .is_err());
+}
+
+#[test]
+fn class_empty_elements() {
+    // `;` — élément de classe vide (ClassElement) : légal partout
+    // dans le corps, fréquent dans les bundles minifiés. Mesuré
+    // sur github.com — le polyfill `environment-*.js` (JS-C56).
+    assert_eq!(
+        ev_str("class C { a() { return 1; }; b() { return 2; } ; c() { return 3; } }; new C().a() + new C().b() + new C().c()"),
+        "6"
+    );
+    assert_eq!(
+        ev_str("class C { ; ; x = 5 ; ; get() { return this.x; } ; }; new C().get()"),
+        "5"
+    );
+    // Classe anonyme + `extends` : le `;` reste toléré.
+    assert_eq!(
+        ev_str("var o = new class { #s; ; en(e) { this.#s = e; } ; n() { return this.#s; } } ; o.en(9); o.n()"),
+        "9"
+    );
 }
 
 #[test]
