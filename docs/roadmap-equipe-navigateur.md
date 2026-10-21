@@ -1656,6 +1656,18 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   ne change **pas** la sémantique, elle rend le code revoyable
   à plusieurs. Écarts sémantiques assumés (générateurs eager,
   `await` pending) = JS-C34, déclenché site réel — pas ici.
+  Livré : `builtins.rs` (7 528 lignes) → `builtins/` 20 fichiers
+  par domaine (`mod.rs` garde l'installation et les helpers
+  `arg`/`ctor`/`c_id` ; `object.rs`, `array.rs`, `string.rs`,
+  `date.rs`, `url.rs`, `clone.rs`… ≤ 1 047 lignes) ; `interp.rs`
+  (5 718 lignes) → `interp/` 4 fichiers (`mod.rs` : état Engine,
+  envs, classes, accès props, coercions, appels, hoisting ;
+  `exec.rs` : exécution de statements ; `eval.rs` : évaluation
+  d'expressions et opérateurs ; `ops.rs` : fonctions libres
+  `strict_eq`/`typeof_str`/`expr_to_pat`…). Méthodes d'`impl
+  Engine` réparties passées `pub(crate)` — visibilité API externe
+  inchangée, sémantique strictement identique (251 tests `lang`
+  + test262 intacts au vert).
 - [x] **JS-C39. Sync DOM incrémentale — instrumenter puis
   drainer les records** (dette ADR-0013 budgétisée tôt ; le
   pont `dom_host.rs` = 69 Ko, son empreinte se mesure ici).

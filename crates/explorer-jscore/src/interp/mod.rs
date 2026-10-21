@@ -10,8 +10,8 @@
 //! recursion, `expr_depth` bounds nested expressions.
 
 use crate::ast::{
-    AssignOp, BinOp, ChainStep, ClassLit, ClassMemberKind, ExportDecl, Expr, FnLit, ForInit,
-    ForTarget, ObjProp, Param, Pat, Program, PropKey, Stmt, UnOp,
+    ClassLit, ClassMemberKind, ExportDecl, Expr, FnLit, ForInit, ForTarget, Param, Pat, PropKey,
+    Stmt,
 };
 use crate::error::{Error, Result};
 use crate::heap::{
@@ -19,7 +19,7 @@ use crate::heap::{
     Thrown,
 };
 use crate::parser;
-use crate::value::{num_to_js_string, to_int32, to_uint32, ObjId, Value};
+use crate::value::{num_to_js_string, to_uint32, ObjId, Value};
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
@@ -140,7 +140,7 @@ pub(crate) enum PrimHint {
 
 /// How a destructuring pattern binds its targets.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum BindMode {
+pub(crate) enum BindMode {
     /// `var` / parameter — function-scoped, declared if absent.
     Var,
     /// `let`/`const` — current-scope declarative binding.
@@ -157,7 +157,7 @@ enum BindMode {
 /// respecte l'ordre spec (LHS avant RHS) et évite de réévaluer les
 /// expressions cibles dans `op=` (`a[i()] += x` appelle `i()` une
 /// seule fois).
-enum LValueRef {
+pub(crate) enum LValueRef {
     /// Liaison de variable — l'`EnvRef` vit côté appelant.
     Ident(String),
     /// Propriété `base[key]` — `base` déjà évaluée.
@@ -388,7 +388,7 @@ pub(crate) struct Protos {
 
 impl Protos {
     /// Tous les prototypes — racines GC permanentes.
-    fn all(&self) -> [ObjId; 27] {
+    pub(crate) fn all(&self) -> [ObjId; 27] {
         [
             self.object,
             self.function,
@@ -861,7 +861,7 @@ impl Engine {
             .unwrap_or_else(|_| "<exception>".into())
     }
 
-    fn heap_string_of(&self, v: Value) -> Option<String> {
+    pub(crate) fn heap_string_of(&self, v: Value) -> Option<String> {
         match v {
             Value::Str(id) => self.heap.string(id),
             _ => None,
@@ -1166,7 +1166,7 @@ impl Engine {
         self.env_get_seen(env, name, &mut HashSet::new())
     }
 
-    fn env_get_seen(
+    pub(crate) fn env_get_seen(
         &mut self,
         env: &EnvRef,
         name: &str,
@@ -1251,7 +1251,7 @@ impl Engine {
     /// primitive est enrobée dans un objet-wrapper jetable (les
     /// écritures `with` vont au wrapper, spec `ToObject`).
     /// `null`/`undefined` → `TypeError`.
-    fn with_object_of(&mut self, v: Value) -> Option<ObjId> {
+    pub(crate) fn with_object_of(&mut self, v: Value) -> Option<ObjId> {
         let (proto, own_len, chars): (ObjId, Option<usize>, Option<Vec<String>>) = match v {
             Value::Obj(id) => return Some(id),
             Value::Str(sid) => {
@@ -1287,7 +1287,7 @@ impl Engine {
     /// `ObjectEnvironmentRecord.HasBinding` : `name` doit être une
     /// prop de `o` (proto chaine incluse) **et** ne pas être marqué
     /// `@@unscopables[name] === true`.
-    fn with_has(&mut self, oid: ObjId, name: &str) -> JsResult<bool> {
+    pub(crate) fn with_has(&mut self, oid: ObjId, name: &str) -> JsResult<bool> {
         if !self.has_prop(oid, name)? {
             return Ok(false);
         }
@@ -1302,7 +1302,7 @@ impl Engine {
     /// `true` si `name` est une liaison d'un env record (local ou
     /// global declarative) — les props de l'objet global ne
     /// comptent pas (elles passent par `[[Delete]]`).
-    fn env_has_binding(env: &EnvRef, name: &str) -> bool {
+    pub(crate) fn env_has_binding(env: &EnvRef, name: &str) -> bool {
         let mut cur = Some(env.clone());
         while let Some(e) = cur {
             let next = {
@@ -1436,7 +1436,7 @@ impl Engine {
 
     /// Écriture d'une prop de l'objet global — erreurs strict vs
     /// silence sloppy sur refus (`undefined = 1`, prop gelée…).
-    fn set_global_prop(&mut self, name: &str, v: Value) -> JsResult<()> {
+    pub(crate) fn set_global_prop(&mut self, name: &str, v: Value) -> JsResult<()> {
         let g = self.global;
         match self.write_prop(g, Value::Obj(g), name, v) {
             Ok(()) => Ok(()),
@@ -1444,7 +1444,7 @@ impl Engine {
         }
     }
 
-    fn env_declare(&mut self, env: &EnvRef, name: &str) {
+    pub(crate) fn env_declare(&mut self, env: &EnvRef, name: &str) {
         let parent = {
             let mut b = env.borrow_mut();
             match &mut b.kind {
@@ -1588,7 +1588,7 @@ impl Engine {
     }
 
     /// `let`/`const`-declare every `Ident` inside `pat`.
-    fn declare_pat_lex(env: &EnvRef, pat: &Pat, mutable: bool) {
+    pub(crate) fn declare_pat_lex(env: &EnvRef, pat: &Pat, mutable: bool) {
         match pat {
             Pat::Ident(n) => Self::env_declare_lex(env, n, mutable),
             Pat::Lvalue(_) => {}
@@ -1614,7 +1614,7 @@ impl Engine {
     /// # Errors
     /// Propagates evaluation errors from defaults/computed keys and
     /// the not-iterable error of array patterns.
-    fn bind_pat(
+    pub(crate) fn bind_pat(
         &mut self,
         env: &EnvRef,
         this: Value,
@@ -1702,7 +1702,12 @@ impl Engine {
     }
 
     /// Evaluate a `PropKey` to its string form.
-    fn eval_prop_key(&mut self, env: &EnvRef, this: Value, k: &PropKey) -> JsResult<String> {
+    pub(crate) fn eval_prop_key(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        k: &PropKey,
+    ) -> JsResult<String> {
         match k {
             PropKey::Name(n) => Ok(n.clone()),
             PropKey::Computed(e) => {
@@ -1841,7 +1846,12 @@ impl Engine {
     }
 
     /// Argument-list evaluation with `...spread` expansion.
-    fn eval_args(&mut self, env: &EnvRef, this: Value, arg_exprs: &[Expr]) -> JsResult<Vec<Value>> {
+    pub(crate) fn eval_args(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        arg_exprs: &[Expr],
+    ) -> JsResult<Vec<Value>> {
         let mut out = Vec::with_capacity(arg_exprs.len());
         for a in arg_exprs {
             match a {
@@ -1860,7 +1870,7 @@ impl Engine {
     /// `super.x` base: the `home` hidden binding's prototype —
     /// parent-ctor for the ctor, parent prototype for methods,
     /// the ctor object for statics.
-    fn super_base(&mut self, env: &EnvRef) -> JsResult<Value> {
+    pub(crate) fn super_base(&mut self, env: &EnvRef) -> JsResult<Value> {
         match self.env_get(env, HOME_BIND) {
             Some(Value::Obj(home)) => Ok(self.heap.obj(home).map_or(Value::Undefined, |o| o.proto)),
             _ => Err(self.type_error("`super` outside a class member")),
@@ -1873,7 +1883,12 @@ impl Engine {
     /// ordinary object whose proto is `Super.prototype` (or
     /// `Object.prototype`). Hidden env bindings (`SUPER_BIND`,
     /// `HOME_BIND`) give the members' closures access to `super`.
-    fn eval_class(&mut self, env: &EnvRef, this: Value, cl: &ClassLit) -> JsResult<Value> {
+    pub(crate) fn eval_class(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        cl: &ClassLit,
+    ) -> JsResult<Value> {
         // Parent ctor + prototype object for `extends`.
         let (parent, parent_proto) = match &cl.super_ {
             Some(e) => {
@@ -2014,7 +2029,7 @@ impl Engine {
     /// on the constructor and installs each field on `this`.
     /// Private-name keys stay non-enumerable; thunks close over
     /// the class scope.
-    fn install_class_fields(
+    pub(crate) fn install_class_fields(
         &mut self,
         ctor_id: ObjId,
         marker: &str,
@@ -2240,7 +2255,7 @@ impl Engine {
     /// Propriété synthétisée d'un `ArrayBuffer`/`DataView`/view
     /// typée — `None` si `kind` n'est pas une vue binaire ou `key`
     /// n'est pas une prop dérivée/index valide.
-    fn ta_prop(&self, kind: &ObjKind, key: &str) -> Option<Prop> {
+    pub(crate) fn ta_prop(&self, kind: &ObjKind, key: &str) -> Option<Prop> {
         use crate::heap::PropAttrs;
         let fixed = |value| Prop::Data {
             value,
@@ -2332,7 +2347,7 @@ impl Engine {
     }
 
     /// First `Prop` found on `id`'s prototype chain.
-    fn find_prop(&mut self, id: ObjId, key: &str) -> Option<Prop> {
+    pub(crate) fn find_prop(&mut self, id: ObjId, key: &str) -> Option<Prop> {
         let mut cur = Some(id);
         let mut depth = 0;
         while let Some(cid) = cur {
@@ -2362,7 +2377,7 @@ impl Engine {
     /// Property read with accessor invocation — `o.x` where `x` has a
     /// getter calls it with `this = recv` (differs from `base` only
     /// for `super.x` reads).
-    fn read_prop(&mut self, base: Value, recv: Value, key: &str) -> JsResult<Value> {
+    pub(crate) fn read_prop(&mut self, base: Value, recv: Value, key: &str) -> JsResult<Value> {
         let Value::Obj(id) = base else {
             return self.get_prop_value(base, key);
         };
@@ -2413,7 +2428,13 @@ impl Engine {
     /// Property write with setter invocation — `o.x = v` where `x`
     /// is an accessor on the chain calls the setter instead of
     /// shadowing it.
-    fn write_prop(&mut self, id: ObjId, recv: Value, key: &str, v: Value) -> JsResult<()> {
+    pub(crate) fn write_prop(
+        &mut self,
+        id: ObjId,
+        recv: Value,
+        key: &str,
+        v: Value,
+    ) -> JsResult<()> {
         if let Some((tid, target, handler)) = self.proxy_th(id)? {
             let trap = self.proxy_trap(handler, "set")?;
             if matches!(trap, Value::Obj(_)) {
@@ -2489,7 +2510,7 @@ impl Engine {
 
     /// Écriture refusée (`[[Set]]` → `false`) — `TypeError` en
     /// strict, silence en sloppy.
-    fn write_refused(&mut self, key: &str) -> JsResult<()> {
+    pub(crate) fn write_refused(&mut self, key: &str) -> JsResult<()> {
         if self.strict {
             Err(self.type_error(format!("cannot write `{key}`")))
         } else {
@@ -2500,7 +2521,7 @@ impl Engine {
     /// Annex B — statiques du ctor `RegExp`. `None` si `key` n'est
     /// pas une statique ; `Some("")` quand la statique est vide
     /// (aucun match enregistré — V8 rend `""`, pas `undefined`).
-    fn re_static_get(&self, key: &str) -> Option<String> {
+    pub(crate) fn re_static_get(&self, key: &str) -> Option<String> {
         let st = self.re_static.as_ref();
         let v = match key {
             "input" | "$_" => st.map(|r| r.input.clone()),
@@ -2545,7 +2566,7 @@ impl Engine {
 
     /// `key` est-elle une prop propre **non configurable** de `id` ?
     /// (`None` = prop absente — utilisé par les invariants proxy.)
-    fn non_config_own(&mut self, id: ObjId, key: &str) -> Option<bool> {
+    pub(crate) fn non_config_own(&mut self, id: ObjId, key: &str) -> Option<bool> {
         self.find_own(id, key).map(|p| match &p {
             Prop::Data { attrs, .. } | Prop::Acc { attrs, .. } => !attrs.configurable,
         })
@@ -2557,7 +2578,7 @@ impl Engine {
     }
 
     /// Extract the host delegate of an object, if any.
-    fn host_of(&self, id: ObjId) -> Option<Rc<dyn crate::heap::Host>> {
+    pub(crate) fn host_of(&self, id: ObjId) -> Option<Rc<dyn crate::heap::Host>> {
         match self.heap.obj(id).map(|o| &o.kind) {
             Some(ObjKind::Host(h)) => Some(h.clone()),
             _ => None,
@@ -2847,7 +2868,7 @@ impl Engine {
         Ok(self.find_prop(id, key).is_some())
     }
 
-    fn delete_prop(&mut self, id: ObjId, key: &str) -> bool {
+    pub(crate) fn delete_prop(&mut self, id: ObjId, key: &str) -> bool {
         // Élément de vue typée — non configurable dans la plage
         // (spec : `delete ta[i]` → `false`, hors-bornes → `true`).
         if let Some(ObjKind::TypedArray { len, .. }) = self.heap.obj(id).map(|o| &o.kind) {
@@ -3099,7 +3120,7 @@ impl Engine {
     /// Objet descripteur `{value,writable,enumerable,configurable}`
     /// ou `{get,set,…}` → `Prop` (résultat de la trap
     /// `getOwnPropertyDescriptor`).
-    fn prop_from_desc_obj(&mut self, d: ObjId) -> JsResult<Option<Prop>> {
+    pub(crate) fn prop_from_desc_obj(&mut self, d: ObjId) -> JsResult<Option<Prop>> {
         let dv = Value::Obj(d);
         let enumerable = {
             let v = self.get_prop_value(dv, "enumerable")?;
@@ -3153,7 +3174,7 @@ impl Engine {
     /// Enumerable keys for `for-in`: host keys, array indices, then
     /// enumerable own props, then enumerable proto-chain props
     /// (deduplicated).
-    fn enum_keys(&mut self, id: ObjId) -> JsResult<Vec<String>> {
+    pub(crate) fn enum_keys(&mut self, id: ObjId) -> JsResult<Vec<String>> {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
         if let Some(h) = self.host_of(id) {
@@ -3472,7 +3493,7 @@ impl Engine {
 
     /// Appel en contexte de construction (`new`, `super(...)`) —
     /// la marque de constructeur de classe y est attendue.
-    fn call_value_ctor(
+    pub(crate) fn call_value_ctor(
         &mut self,
         f: Value,
         this: Value,
@@ -3482,7 +3503,7 @@ impl Engine {
         self.call_value_impl(f, this, args, nt)
     }
 
-    fn call_value_impl(
+    pub(crate) fn call_value_impl(
         &mut self,
         f: Value,
         this: Value,
@@ -3822,7 +3843,7 @@ impl Engine {
     }
 
     /// `var` hoisting is function-scoped: walk nested statements too.
-    fn hoist_vars_only(&mut self, body: &[Stmt], env: &EnvRef) {
+    pub(crate) fn hoist_vars_only(&mut self, body: &[Stmt], env: &EnvRef) {
         for s in body {
             match s {
                 Stmt::Var(decls) => {
@@ -3889,1830 +3910,16 @@ impl Engine {
             }
         }
     }
-
-    // -- statement execution -----------------------------------------------
-
-    /// Parse + run `src` in the **global** scope, returning the
-    /// thrown `Value` intact (unlike [`Engine::eval`] which formats
-    /// it). Used by the `eval` builtin, `Function()`, and string
-    /// timer callbacks — all global-scope (indirect `eval`
-    /// semantics; direct-eval scoping is a documented deviation).
-    /// Microtasks are *not* drained here — the enclosing job does.
-    pub(crate) fn eval_source(&mut self, src: &str) -> JsResult<Value> {
-        // `eval` direct : le texte hérite du strict appelant —
-        // early errors (`01`, `delete x`) et effets runtime.
-        if let Some(h) = &self.eval_hook {
-            h(src);
-        }
-        let prog = crate::parser::parse_in(src, self.strict, self.nest_limit).map_err(|err| {
-            Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
-        })?;
-        self.exec_program(&prog)
-    }
-
-    pub(crate) fn exec_program(&mut self, prog: &Program) -> JsResult<Value> {
-        let outer_strict = self.strict;
-        self.strict |= prog.strict;
-        let r = self.exec_program_inner(prog);
-        self.strict = outer_strict;
-        r
-    }
-
-    fn exec_program_inner(&mut self, prog: &Program) -> JsResult<Value> {
-        let env = self.global_env.clone();
-        self.exec_program_in(&env, Value::Obj(self.global), prog)
-    }
-
-    /// `eval(src)` **direct** (spec `PerformEval`, chemin local) :
-    /// le programme tourne dans l'env et le `this` de l'appelant —
-    /// les `var`/fonctions y persistent, `x`/`let` de l'appelant y
-    /// sont visibles. Déviation documentée : la spec isole les
-    /// `let`/`const` de l'eval dans un env déclaratif dédié ; notre
-    /// approximation bloc-scope les rend déjà fonction-scope, ils
-    /// vivent donc dans l'env appelant aussi.
-    pub(crate) fn eval_source_in(
-        &mut self,
-        env: &EnvRef,
-        this: Value,
-        src: &str,
-    ) -> JsResult<Value> {
-        if let Some(h) = &self.eval_hook {
-            h(src);
-        }
-        let prog = crate::parser::parse_in(src, self.strict, self.nest_limit).map_err(|err| {
-            Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
-        })?;
-        let outer_strict = self.strict;
-        self.strict |= prog.strict;
-        let r = self.exec_program_in(env, this, &prog);
-        self.strict = outer_strict;
-        r
-    }
-
-    /// Corps de programme dans un couple env/`this` arbitraires —
-    /// partagé entre `exec_program_inner` (global) et
-    /// `eval_source_in` (direct eval, env appelant).
-    fn exec_program_in(&mut self, env: &EnvRef, this: Value, prog: &Program) -> JsResult<Value> {
-        self.hoist(&prog.body, env);
-        self.completion = Value::Undefined;
-        // `using` au niveau programme/module : frame racine dépilée
-        // en fin de script (spec).
-        let has_using = prog.body.iter().any(|s| matches!(s, Stmt::Using { .. }));
-        if has_using {
-            self.using_stack.push(Vec::new());
-        }
-        let mut r = Ok(Flow::Normal);
-        for s in &prog.body {
-            match self.exec_stmt(env, this, s) {
-                Ok(Flow::Normal | Flow::Break(_) | Flow::Continue(_)) => {}
-                other => {
-                    r = other;
-                    break;
-                }
-            }
-        }
-        if has_using {
-            r = self.drain_using(r);
-        }
-        match r {
-            Ok(Flow::Return(v)) => Ok(v),
-            Ok(_) => Ok(self.completion),
-            Err(e) => Err(e),
-        }
-    }
-
-    pub(crate) fn exec_body(&mut self, env: &EnvRef, this: Value, body: &[Stmt]) -> JsResult<Flow> {
-        // `using` (ES2026) : chaque décl pousse un disposeur sur la
-        // frame courante, dépilée LIFO à TOUTE sortie du corps —
-        // normal, break, return et throw (spec `DisposeResources`).
-        let has_using = body.iter().any(|s| matches!(s, Stmt::Using { .. }));
-        if has_using {
-            self.using_stack.push(Vec::new());
-        }
-        let mut r = Ok(Flow::Normal);
-        for s in body {
-            match self.exec_stmt(env, this, s) {
-                Ok(Flow::Normal) => {}
-                other => {
-                    r = other;
-                    break;
-                }
-            }
-        }
-        if has_using {
-            r = self.drain_using(r);
-        }
-        r
-    }
-
-    /// Dépile la frame `using` courante, appelant chaque disposeur
-    /// LIFO (`v[@@dispose]()` / `v[@@asyncDispose]()` + await eager).
-    /// Une erreur de disposeur se substitue au résultat courant ;
-    /// une erreur déjà en cours est enroulée en `SuppressedError`
-    /// (spec `DisposeResources` step `AddSuppressedError`).
-    fn drain_using(&mut self, mut r: JsResult<Flow>) -> JsResult<Flow> {
-        let Some(frame) = self.using_stack.pop() else {
-            return r;
-        };
-        for (f, v, is_async) in frame.into_iter().rev() {
-            let res = self.call_value(f, v, &[]).and_then(|out| {
-                if is_async {
-                    self.await_value(out).map(|_| ())
-                } else {
-                    Ok(())
-                }
-            });
-            if let Err(Thrown(err)) = res {
-                r = match r {
-                    Err(Thrown(prev)) => {
-                        Err(Thrown(crate::builtins::make_suppressed(self, err, prev)))
-                    }
-                    _ => Err(Thrown(err)),
-                };
-            }
-        }
-        r
-    }
-
-    /// `using x = v` — enregistre `v[@@dispose]` (ou
-    /// `v[@@asyncDispose] ?? v[@@dispose]` pour `await using`) sur la
-    /// frame courante. `null`/`undefined` passent ; un objet sans
-    /// méthode ou une primitive → `TypeError` (spec
-    /// `AddDisposableResource`).
-    fn register_using(&mut self, v: Value, is_await: bool) -> JsResult<()> {
-        match v {
-            Value::Undefined | Value::Null => Ok(()),
-            Value::Obj(id) => {
-                let m = if is_await {
-                    self.get_prop(id, crate::interp::SYM_ASYNC_DISPOSE)
-                        .or_else(|| self.get_prop(id, crate::interp::SYM_DISPOSE))
-                } else {
-                    self.get_prop(id, crate::interp::SYM_DISPOSE)
-                };
-                match m {
-                    Some(f) if self.is_callable(f) => {
-                        if let Some(frame) = self.using_stack.last_mut() {
-                            frame.push((f, v, is_await));
-                        }
-                        // Hors frame (décl hors corps) : la ressource
-                        // n'est jamais dépilée — déviation vs spec.
-                        Ok(())
-                    }
-                    _ => Err(self.type_error("object is not disposable")),
-                }
-            }
-            _ => Err(self.type_error("using declaration requires an object or null/undefined")),
-        }
-    }
-
-    pub(crate) fn exec_stmt(&mut self, env: &EnvRef, this: Value, s: &Stmt) -> JsResult<Flow> {
-        self.tick()?;
-        // JS-C41 : `if`/`try`/`for` s'exécutent en récursion
-        // native — segment tas de secours avant débordement.
-        stacker::maybe_grow(
-            crate::parser::STACK_RED_ZONE,
-            crate::parser::STACK_GROW,
-            || self.exec_stmt_inner(env, this, s),
-        )
-    }
-
-    fn exec_stmt_inner(&mut self, env: &EnvRef, this: Value, s: &Stmt) -> JsResult<Flow> {
-        match s {
-            // `import …` — liaisons câblées à l'instanciation ;
-            // l'exécution n'a rien à faire (idem `;`).
-            Stmt::Empty | Stmt::Import { .. } => Ok(Flow::Normal),
-            Stmt::Export(d) => match d {
-                // `export <decl>` — la déclaration s'exécute
-                // normalement (les noms sont déjà exportés).
-                ExportDecl::Decl(inner) => self.exec_stmt(env, this, inner),
-                // `export default <expr|function|class>` — lie le
-                // slot `default` (déclaré à l'instanciation) ; une
-                // fonction/classe nommée lie aussi son propre nom.
-                ExportDecl::Default(e) => {
-                    let v = self.eval_expr(env, this, e)?;
-                    self.env_set(env, "default", v)?;
-                    let own = match &**e {
-                        Expr::Function(lit) => lit.name.clone(),
-                        Expr::Class(lit) => lit.name.clone(),
-                        _ => None,
-                    };
-                    if let Some(n) = own {
-                        Self::env_declare_lex(env, &n, true);
-                        self.env_set(env, &n, v)?;
-                    }
-                    Ok(Flow::Normal)
-                }
-                // `export {…}` / `export * …` — pure liaison, déjà
-                // résolue à l'instanciation.
-                _ => Ok(Flow::Normal),
-            },
-            Stmt::Expr(e) => {
-                self.completion = self.eval_expr(env, this, e)?;
-                Ok(Flow::Normal)
-            }
-            Stmt::Var(decls) => {
-                for d in decls {
-                    match &d.init {
-                        Some(init) => {
-                            let v = self.eval_expr(env, this, init)?;
-                            self.bind_pat(env, this, &d.pat, v, BindMode::Var)?;
-                        }
-                        // `var a;` — declare without clobbering.
-                        None => self.declare_pat_names(env, &d.pat),
-                    }
-                }
-                Ok(Flow::Normal)
-            }
-            Stmt::Lexical { decls, constant } => {
-                for d in decls {
-                    Self::declare_pat_lex(env, &d.pat, !constant);
-                    if let Some(init) = &d.init {
-                        let v = self.eval_expr(env, this, init)?;
-                        self.bind_pat(env, this, &d.pat, v, BindMode::Lex { mutable: !constant })?;
-                    }
-                }
-                Ok(Flow::Normal)
-            }
-            // Function decls were installed by hoisting; re-installing
-            // keeps block-level decls working (Annex-B-ish tolerance).
-            Stmt::FunctionDecl(f) => {
-                if let Some(name) = &f.name {
-                    let fv = self.make_function(f, env, Value::Undefined);
-                    self.env_set(env, name, fv)?;
-                }
-                Ok(Flow::Normal)
-            }
-            // Class decls are `let`-like (no hoist — a use before the
-            // decl is a ReferenceError, closest to spec TDZ).
-            Stmt::ClassDecl(cl) => {
-                let v = self.eval_class(env, this, cl)?;
-                if let Some(name) = &cl.name {
-                    Self::env_declare_lex(env, name, true);
-                    self.env_set(env, name, v)?;
-                }
-                Ok(Flow::Normal)
-            }
-            Stmt::Block(stmts) => self.exec_body(env, this, stmts),
-            // `using x = e` (ES2026) — binding const + disposeur
-            // enregistré sur la frame du corps courant.
-            Stmt::Using { decls, is_await } => {
-                for d in decls {
-                    let v = match &d.init {
-                        Some(i) => self.eval_expr(env, this, i)?,
-                        None => Value::Undefined,
-                    };
-                    self.bind_pat(env, this, &d.pat, v, BindMode::Lex { mutable: false })?;
-                    self.register_using(v, *is_await)?;
-                }
-                Ok(Flow::Normal)
-            }
-            Stmt::If { cond, then, else_ } => {
-                let c = self.eval_expr(env, this, cond)?;
-                if self.to_boolean(c) {
-                    self.exec_stmt(env, this, then)
-                } else if let Some(e) = else_ {
-                    self.exec_stmt(env, this, e)
-                } else {
-                    Ok(Flow::Normal)
-                }
-            }
-            // `with (o) b` — les noms se résolvent d'abord dans les
-            // props de `o` (sauf `@@unscopables`), puis le scope
-            // englobant. Sloppy uniquement (early-error du parseur).
-            Stmt::With { obj, body } => {
-                let v = self.eval_expr(env, this, obj)?;
-                let Some(oid) = self.with_object_of(v) else {
-                    return Err(self.type_error("cannot use `with` on `null` or `undefined`"));
-                };
-                let with_env = Env::with(env.clone(), oid);
-                self.exec_stmt(&with_env, this, body)
-            }
-            Stmt::While { cond, body } => {
-                let labels = std::mem::take(&mut self.pending_labels);
-                loop {
-                    self.tick()?;
-                    let c = self.eval_expr(env, this, cond)?;
-                    if !self.to_boolean(c) {
-                        return Ok(Flow::Normal);
-                    }
-                    let f = self.exec_stmt(env, this, body)?;
-                    if let Some(f) = Self::loop_flow(f, &labels) {
-                        return Ok(f);
-                    }
-                }
-            }
-            Stmt::DoWhile { body, cond } => {
-                let labels = std::mem::take(&mut self.pending_labels);
-                loop {
-                    self.tick()?;
-                    let f = self.exec_stmt(env, this, body)?;
-                    if let Some(f) = Self::loop_flow(f, &labels) {
-                        return Ok(f);
-                    }
-                    let c = self.eval_expr(env, this, cond)?;
-                    if !self.to_boolean(c) {
-                        return Ok(Flow::Normal);
-                    }
-                }
-            }
-            Stmt::For {
-                init,
-                test,
-                update,
-                body,
-            } => {
-                let labels = std::mem::take(&mut self.pending_labels);
-                if let Some(init) = init {
-                    match init {
-                        ForInit::Var(decls) => {
-                            for d in decls {
-                                if let Some(i) = &d.init {
-                                    let v = self.eval_expr(env, this, i)?;
-                                    self.bind_pat(env, this, &d.pat, v, BindMode::Var)?;
-                                }
-                            }
-                        }
-                        ForInit::Lexical { decls, constant } => {
-                            for d in decls {
-                                Self::declare_pat_lex(env, &d.pat, !constant);
-                                if let Some(i) = &d.init {
-                                    let v = self.eval_expr(env, this, i)?;
-                                    self.bind_pat(
-                                        env,
-                                        this,
-                                        &d.pat,
-                                        v,
-                                        BindMode::Lex { mutable: !constant },
-                                    )?;
-                                }
-                            }
-                        }
-                        ForInit::Expr(e) => {
-                            self.eval_expr(env, this, e)?;
-                        }
-                    }
-                }
-                loop {
-                    self.tick()?;
-                    if let Some(t) = test {
-                        let c = self.eval_expr(env, this, t)?;
-                        if !self.to_boolean(c) {
-                            return Ok(Flow::Normal);
-                        }
-                    }
-                    let f = self.exec_stmt(env, this, body)?;
-                    if let Some(f) = Self::loop_flow(f, &labels) {
-                        return Ok(f);
-                    }
-                    if let Some(u) = update {
-                        self.eval_expr(env, this, u)?;
-                    }
-                }
-            }
-            Stmt::ForIn {
-                target,
-                obj,
-                var_init,
-                body,
-            } => {
-                let labels = std::mem::take(&mut self.pending_labels);
-                let ov = self.eval_expr(env, this, obj)?;
-                if let Some(init) = var_init {
-                    let v = self.eval_expr(env, this, init)?;
-                    self.assign_target(env, this, target, v)?;
-                }
-                let Value::Obj(id) = ov else {
-                    return Ok(Flow::Normal); // for-in over primitives: skip
-                };
-                for key in self.enum_keys(id)? {
-                    let kv = self.str_val(key);
-                    self.assign_target(env, this, target, kv)?;
-                    let f = self.exec_stmt(env, this, body)?;
-                    if let Some(f) = Self::loop_flow(f, &labels) {
-                        return Ok(f);
-                    }
-                }
-                Ok(Flow::Normal)
-            }
-            Stmt::ForOf {
-                target,
-                iter,
-                body,
-                is_await,
-            } => {
-                let labels = std::mem::take(&mut self.pending_labels);
-                let v = self.eval_expr(env, this, iter)?;
-                let items = if *is_await {
-                    self.iter_values_await(v)?
-                } else {
-                    self.iter_values(v)?
-                };
-                // `for (using x of y)` : frame par itération (spec —
-                // la ressource est dépilée à chaque tour).
-                let per_iter = matches!(target, ForTarget::Using { .. });
-                for item in items {
-                    if per_iter {
-                        self.using_stack.push(Vec::new());
-                    }
-                    let mut r = self
-                        .assign_target(env, this, target, item)
-                        .and_then(|()| self.exec_stmt(env, this, body));
-                    if per_iter {
-                        r = self.drain_using(r);
-                    }
-                    if let Some(f) = Self::loop_flow(r?, &labels) {
-                        return Ok(f);
-                    }
-                }
-                Ok(Flow::Normal)
-            }
-            // `lbl : stmt` — les labels de boucle sont consommés par
-            // la boucle enfant via `pending_labels` ; `break lbl`
-            // (même sur bloc) est avalé ici, tout le reste remonte.
-            Stmt::Labeled { name, body } => {
-                if matches!(
-                    &**body,
-                    Stmt::While { .. }
-                        | Stmt::DoWhile { .. }
-                        | Stmt::For { .. }
-                        | Stmt::ForIn { .. }
-                        | Stmt::ForOf { .. }
-                ) {
-                    self.pending_labels.push(name.clone());
-                }
-                let r = self.exec_stmt(env, this, body);
-                // Défensif : nettoie le label si la boucle ne l'a
-                // pas consommé (corps non exécuté, erreur précoce).
-                if let Some(pos) = self.pending_labels.iter().rposition(|l| l == name) {
-                    self.pending_labels.remove(pos);
-                }
-                match r? {
-                    Flow::Break(Some(l)) if l == *name => Ok(Flow::Normal),
-                    f => Ok(f),
-                }
-            }
-            Stmt::Break(l) => Ok(Flow::Break(l.clone())),
-            Stmt::Continue(l) => Ok(Flow::Continue(l.clone())),
-            Stmt::Return(e) => {
-                let v = match e {
-                    Some(e) => self.eval_expr(env, this, e)?,
-                    None => Value::Undefined,
-                };
-                Ok(Flow::Return(v))
-            }
-            Stmt::Throw(e) => {
-                let v = self.eval_expr(env, this, e)?;
-                Err(Thrown(v))
-            }
-            Stmt::Try {
-                block,
-                catch,
-                finally,
-            } => {
-                let mut r = self.exec_body(env, this, block);
-                if let Err(Thrown(v)) = r {
-                    if let Some((pat, cbody)) = catch {
-                        let cenv = Env::local(env.clone());
-                        if let Err(e) = self.bind_pat(&cenv, this, pat, v, BindMode::Var) {
-                            r = Err(e);
-                        } else {
-                            r = self.exec_body(&cenv, this, cbody);
-                        }
-                    }
-                }
-                if let Some(fbody) = finally {
-                    let fr = self.exec_body(env, this, fbody)?;
-                    if !matches!(fr, Flow::Normal) {
-                        return Ok(fr);
-                    }
-                }
-                r
-            }
-            Stmt::Switch { disc, cases } => {
-                let dv = self.eval_expr(env, this, disc)?;
-                let mut matched = None;
-                let mut default = None;
-                for (i, c) in cases.iter().enumerate() {
-                    match &c.test {
-                        Some(t) => {
-                            let tv = self.eval_expr(env, this, t)?;
-                            if strict_eq(dv, tv, &self.heap) {
-                                matched = Some(i);
-                                break;
-                            }
-                        }
-                        None => default = Some(i),
-                    }
-                }
-                let Some(start) = matched.or(default) else {
-                    return Ok(Flow::Normal);
-                };
-                for c in &cases[start..] {
-                    match self.exec_body(env, this, &c.body)? {
-                        Flow::Normal => {}
-                        // `break` seul sort du switch ; `break lbl`
-                        // remonte jusqu'au statement étiqueté.
-                        Flow::Break(None) => return Ok(Flow::Normal),
-                        f => return Ok(f),
-                    }
-                }
-                Ok(Flow::Normal)
-            }
-        }
-    }
-
-    /// Consomme le `Flow` produit par un corps de boucle —
-    /// `None` = itération suivante, `Some(f)` = quitter la boucle
-    /// en propageant `f`. `labels` = labels de boucle captés via
-    /// `pending_labels` (`continue lbl` ne les avale que si `lbl`
-    /// y figure ; `break lbl` n'est jamais avalé par une boucle).
-    fn loop_flow(f: Flow, labels: &[String]) -> Option<Flow> {
-        match f {
-            Flow::Normal | Flow::Continue(None) => None,
-            Flow::Continue(Some(l)) => {
-                if labels.contains(&l) {
-                    None
-                } else {
-                    Some(Flow::Continue(Some(l)))
-                }
-            }
-            Flow::Break(None) => Some(Flow::Normal),
-            f => Some(f),
-        }
-    }
-
-    fn assign_target(
-        &mut self,
-        env: &EnvRef,
-        this: Value,
-        target: &ForTarget,
-        v: Value,
-    ) -> JsResult<()> {
-        match target {
-            ForTarget::Var(pat) => self.bind_pat(env, this, pat, v, BindMode::Var)?,
-            // `for (let k in …)`: (re)declare in scope then assign —
-            // fresh binding per iteration is approximated by reuse.
-            ForTarget::Lexical { pat, constant } => {
-                self.bind_pat(env, this, pat, v, BindMode::Lex { mutable: !constant })?;
-            }
-            ForTarget::Expr(e) => {
-                // `[a, b] of …` / `{k} of …` — pattern assignment.
-                if let Some(pat) = expr_to_pat(e) {
-                    self.bind_pat(env, this, &pat, v, BindMode::Assign)?;
-                } else {
-                    self.write_lvalue(env, this, e, v)?;
-                }
-            }
-            // `for (using x of y)` — binding const + disposeur.
-            ForTarget::Using { pat, is_await } => {
-                self.bind_pat(env, this, pat, v, BindMode::Lex { mutable: false })?;
-                self.register_using(v, *is_await)?;
-            }
-        }
-        Ok(())
-    }
-
-    // -- expression evaluation ---------------------------------------------
-
-    fn eval_expr(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
-        self.expr_depth += 1;
-        if self.expr_depth > self.nest_limit {
-            self.expr_depth -= 1;
-            return Err(self.range_error("expression too deeply nested"));
-        }
-        // JS-C41 : la descente d'expressions imbriquées croît sur
-        // un segment tas avant d'épuiser la pile native.
-        let r = stacker::maybe_grow(
-            crate::parser::STACK_RED_ZONE,
-            crate::parser::STACK_GROW,
-            || self.eval_inner(env, this, e),
-        );
-        self.expr_depth -= 1;
-        r
-    }
-
-    #[allow(clippy::too_many_lines)]
-    fn eval_inner(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
-        match e {
-            Expr::Num(n) => Ok(Value::Num(*n)),
-            Expr::BigInt(s) => {
-                Ok(self
-                    .big_val(num_bigint::BigInt::parse_bytes(s.as_bytes(), 10).unwrap_or_default()))
-            }
-            Expr::Str(s) => Ok(self.str_val(s.clone())),
-            Expr::Bool(b) => Ok(Value::Bool(*b)),
-            Expr::Null => Ok(Value::Null),
-            Expr::This => Ok(this),
-            Expr::Ident(name) => self
-                .env_get(env, name)
-                .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
-            Expr::Array(elems) => {
-                let mut v = Vec::with_capacity(elems.len());
-                for el in elems {
-                    match el {
-                        // `[...a]` — iterate the source.
-                        Some(Expr::Spread(e)) => {
-                            let sv = self.eval_expr(env, this, e)?;
-                            v.extend(self.iter_values(sv)?);
-                        }
-                        Some(e) => v.push(self.eval_expr(env, this, e)?),
-                        None => v.push(Value::Hole),
-                    }
-                }
-                Ok(self.new_array(v))
-            }
-            Expr::Object(props) => {
-                let id = self.new_object();
-                for p in props {
-                    match p {
-                        ObjProp::Prop(k, ve) => {
-                            let ks = self.eval_prop_key(env, this, k)?;
-                            let v = self.eval_expr(env, this, ve)?;
-                            self.set_own(id, &ks, v, true);
-                        }
-                        ObjProp::Spread(e) => {
-                            // `{...o}` — enumerable own props only.
-                            let v = self.eval_expr(env, this, e)?;
-                            if let Value::Obj(sid) = v {
-                                for k in self.own_enum_keys_trapped(sid)? {
-                                    let sv = self.get_prop_value(v, &k)?;
-                                    self.set_own(id, &k, sv, true);
-                                }
-                            }
-                        }
-                        ObjProp::Getter(k, f) | ObjProp::Setter(k, f) => {
-                            let ks = self.eval_prop_key(env, this, k)?;
-                            let fv = self.make_function(f, env, this);
-                            let (get, set) = if matches!(p, ObjProp::Getter(..)) {
-                                (fv, Value::Undefined)
-                            } else {
-                                (Value::Undefined, fv)
-                            };
-                            if let Some(o) = self.heap.obj_mut(id) {
-                                o.set_accessor(&ks, get, set, true);
-                            }
-                        }
-                    }
-                }
-                Ok(Value::Obj(id))
-            }
-            Expr::Function(lit) => {
-                if let Some(name) = &lit.name {
-                    // Named function expression: name binds inside only.
-                    let scope = Env::local(env.clone());
-                    let fv = self.make_function(lit, &scope, this);
-                    if let EnvKind::Local(m) = &mut scope.borrow_mut().kind {
-                        // ES3 §13 / ES5 : le nom d'une
-                        // FunctionExpression est ReadOnly dans son
-                        // propre scope — écriture sloppy ignorée
-                        // silencieusement (`sloppy_silent`), strict
-                        // garde le `TypeError`.
-                        m.insert(
-                            name.clone(),
-                            EnvCell::Bind(Binding {
-                                value: fv,
-                                mutable: false,
-                                sloppy_silent: true,
-                            }),
-                        );
-                    }
-                    Ok(fv)
-                } else {
-                    Ok(self.make_function(lit, env, this))
-                }
-            }
-            Expr::Template { parts, exprs } => {
-                let mut out = String::new();
-                for (i, part) in parts.iter().enumerate() {
-                    out.push_str(part);
-                    if let Some(e) = exprs.get(i) {
-                        let v = self.eval_expr(env, this, e)?;
-                        out.push_str(&self.to_js_string(v)?);
-                    }
-                }
-                Ok(self.str_val(out))
-            }
-            // `` tag`…` `` — même résolution de callee qu'un appel
-            // (`o.m`tpl`` passe `o` en `this`). `strings` porte le
-            // tableau `raw` des chunks bruts (spec : les deux sont
-            // non extensibles — le cache par site n'est pas fait,
-            // déviation bénigne).
-            Expr::TaggedTemplate {
-                tag,
-                parts,
-                raws,
-                exprs,
-            } => {
-                let (f, recv) = match &**tag {
-                    Expr::Member(base, name) => {
-                        let b = self.eval_expr(env, this, base)?;
-                        (self.get_prop_value(b, name)?, b)
-                    }
-                    Expr::Index(base, key) => {
-                        let b = self.eval_expr(env, this, base)?;
-                        let kv = self.eval_expr(env, this, key)?;
-                        let k = self.prop_key(kv)?;
-                        (self.get_prop_value(b, &k)?, b)
-                    }
-                    _ => (self.eval_expr(env, this, tag)?, Value::Undefined),
-                };
-                let raw_vals: Vec<Value> = raws.iter().map(|s| self.str_val(s.clone())).collect();
-                let raw = self.new_array(raw_vals);
-                if let Value::Obj(rid) = raw {
-                    if let Some(o) = self.heap.obj_mut(rid) {
-                        o.extensible = false;
-                    }
-                }
-                let cooked: Vec<Value> = parts.iter().map(|s| self.str_val(s.clone())).collect();
-                let strings = self.new_array(cooked);
-                if let Value::Obj(soid) = strings {
-                    self.set_own(soid, "raw", raw, false);
-                    if let Some(o) = self.heap.obj_mut(soid) {
-                        o.extensible = false;
-                    }
-                }
-                let mut args = vec![strings];
-                for e in exprs {
-                    args.push(self.eval_expr(env, this, e)?);
-                }
-                self.call_value(f, recv, &args)
-            }
-            Expr::Chain { head, steps } => self.eval_chain(env, this, head, steps),
-            Expr::Regex { pattern, flags } => self.make_regexp(pattern, flags),
-            Expr::Class(cl) => self.eval_class(env, this, cl),
-            Expr::Spread(_) => Err(self.type_error("`...` outside a call or array literal")),
-            Expr::Await(e) => {
-                let v = self.eval_expr(env, this, e)?;
-                self.await_value(v)
-            }
-            Expr::Yield { arg, delegate } => {
-                if self.gen_collect.is_empty() {
-                    // `yield` hors générateur — le parseur le
-                    // refuse, garde-fou pour les chemins détournés.
-                    return Err(self.syntax_error("yield outside a generator"));
-                }
-                if *delegate {
-                    let Some(ae) = arg else {
-                        return Err(self.syntax_error("yield* needs an operand"));
-                    };
-                    let v = self.eval_expr(env, this, ae)?;
-                    let items = self.iter_values_await(v)?;
-                    if let Some(c) = self.gen_collect.last_mut() {
-                        c.extend(items);
-                    }
-                } else {
-                    let v = match arg {
-                        Some(e) => self.eval_expr(env, this, e)?,
-                        None => Value::Undefined,
-                    };
-                    if let Some(c) = self.gen_collect.last_mut() {
-                        c.push(v);
-                    }
-                }
-                // `next(v)` est indisponible en mode eager — le
-                // résultat de l'expression `yield` est `undefined`.
-                Ok(Value::Undefined)
-            }
-            // `import(spec)` — dynamic import: loads, instantiates
-            // and evaluates the module, then resolves with its
-            // namespace object. Errors reject the promise.
-            Expr::ImportCall(e) => {
-                let sv = self.eval_expr(env, this, e)?;
-                let spec = self.to_js_string(sv)?;
-                let pid = self.new_promise();
-                match self.dynamic_import(&spec) {
-                    Ok(ns) => self.resolve_promise(pid, ns),
-                    Err(Thrown(t)) => self.reject_promise(pid, t),
-                }
-                Ok(Value::Obj(pid))
-            }
-            // `import.meta` — `{url: <specifier courant>}`.
-            Expr::ImportMeta => {
-                let obj = self.new_object();
-                let url = self.str_val(self.current_module.clone());
-                self.set_own(obj, "url", url, false);
-                Ok(Value::Obj(obj))
-            }
-            Expr::SuperCall(arg_exprs) => {
-                let parent = self.env_get(env, SUPER_BIND);
-                let Some(parent) = parent else {
-                    return Err(self.type_error("`super()` outside a constructor"));
-                };
-                if !self.is_callable(parent) {
-                    return Err(self.type_error("superclass is not a constructor"));
-                }
-                // Double `super()` → TypeError (spec, `this` déjà lié).
-                let Value::Obj(tid) = this else {
-                    return Err(self.type_error("`super()` requires an object `this`"));
-                };
-                if self.find_own(tid, FLD_DONE).is_some() {
-                    return Err(self.type_error("super() may only be called once"));
-                }
-                // `new.target` de l'englobant se propage (spec :
-                // il reste lié au constructeur d'origine toute la
-                // chaîne `super`).
-                let nt = self.env_get(env, NEW_TARGET).unwrap_or(Value::Undefined);
-                // Champs d'instance du parent base : installés à
-                // l'entrée de son corps — `super()` l'appelle comme
-                // fonction ordinaire, on pose la liste avant.
-                if let Value::Obj(pid) = parent {
-                    self.install_class_fields(pid, FLD_FIELDS, this, nt)?;
-                }
-                let args = self.eval_args(env, this, arg_exprs)?;
-                self.call_value_ctor(parent, this, &args, nt)?;
-                self.set_own(tid, FLD_DONE, Value::Bool(true), false);
-                // Nos champs de classe dérivée : installés juste
-                // après `super()` — le constructeur de *cette*
-                // classe est la fermeture courante (`HOME_BIND`).
-                let own_ctor = self.env_get(env, HOME_BIND);
-                if let Some(Value::Obj(cid)) = own_ctor {
-                    self.install_class_fields(cid, FLD_FIELDS_D, this, nt)?;
-                }
-                Ok(this)
-            }
-            // `new.target` — liaison posée par `call_value_impl` :
-            // undefined en appel ordinaire, ctor cible sous `new`.
-            Expr::NewTarget => Ok(self.env_get(env, NEW_TARGET).unwrap_or(Value::Undefined)),
-            Expr::SuperMember(name) => {
-                let base = self.super_base(env)?;
-                self.read_prop(base, this, name)
-            }
-            Expr::SuperIndex(k) => {
-                let base = self.super_base(env)?;
-                let kv = self.eval_expr(env, this, k)?;
-                let key = self.prop_key(kv)?;
-                self.read_prop(base, this, &key)
-            }
-            Expr::Member(base, name) => {
-                let b = self.eval_expr(env, this, base)?;
-                self.get_prop_value(b, name)
-            }
-            Expr::Index(base, key) => {
-                let b = self.eval_expr(env, this, base)?;
-                let k = self.eval_expr(env, this, key)?;
-                let k = self.prop_key(k)?;
-                self.get_prop_value(b, &k)
-            }
-            Expr::Call(callee, arg_exprs) => {
-                enum Callee {
-                    /// `expr(…)` — f pre-evaluated, global receiver.
-                    Bare(Value),
-                    /// `o.m(…)`/`o[k](…)` — receiver is the base.
-                    Member(Value, String),
-                    /// `super.m(…)`/`super[k](…)` — home-object proto
-                    /// lookup, receiver stays `this`.
-                    Super(String),
-                }
-                // `eval(…)` écrit tel quel → appel direct (spec
-                // `PerformEval`) : la callee résolue doit être *le*
-                // builtin `eval` global, pas un homonyme local.
-                let direct_eval = matches!(&**callee, Expr::Ident(n) if n == "eval");
-                let callee = match &**callee {
-                    Expr::Member(base, name) => {
-                        let b = self.eval_expr(env, this, base)?;
-                        Callee::Member(b, name.clone())
-                    }
-                    Expr::Index(base, key) => {
-                        let b = self.eval_expr(env, this, base)?;
-                        let k = self.eval_expr(env, this, key)?;
-                        Callee::Member(b, self.prop_key(k)?)
-                    }
-                    Expr::SuperMember(name) => Callee::Super(name.clone()),
-                    Expr::SuperIndex(key) => {
-                        let k = self.eval_expr(env, this, key)?;
-                        Callee::Super(self.prop_key(k)?)
-                    }
-                    _ => Callee::Bare(self.eval_expr(env, this, callee)?),
-                };
-                let args = self.eval_args(env, this, arg_exprs)?;
-                match callee {
-                    // Receiver `undefined` — le callee sloppy le
-                    // coercera vers l'objet global, le strict le
-                    // garde (spec `OrdinaryCallBindThis`).
-                    Callee::Bare(f) => {
-                        if direct_eval
-                            && matches!((f, self.eval_fn), (Value::Obj(a), Value::Obj(b)) if a == b)
-                        {
-                            return match args.first() {
-                                Some(Value::Str(sid)) => {
-                                    let src = self.heap.string(*sid).unwrap_or_default();
-                                    self.eval_source_in(env, this, &src)
-                                }
-                                // Non-string → rendu tel quel (spec).
-                                Some(v) => Ok(*v),
-                                None => Ok(Value::Undefined),
-                            };
-                        }
-                        self.call_value(f, Value::Undefined, &args)
-                    }
-                    Callee::Member(recv, name) => {
-                        // Host method dispatch first: `hostObj.m(…)`
-                        // hits the host's `invoke` before prop lookup.
-                        if let Value::Obj(bid) = recv {
-                            if let Some(h) = self.host_of(bid) {
-                                if let Some(v) = h.invoke(self, recv, &name, &args)? {
-                                    return Ok(v);
-                                }
-                            }
-                        }
-                        let f = self.get_prop_value(recv, &name)?;
-                        if !self.is_callable(f) {
-                            // Diagnostic : nommer la méthode + le
-                            // receveur — les erreurs de pages
-                            // réelles pointent l'API manquante. Pour
-                            // un objet JS ordinaire, le nom de son
-                            // constructeur (`D7`…) identifie la
-                            // classe fautive dans du code minifié.
-                            let recv_desc = match recv {
-                                Value::Obj(rid) => match self.heap.obj(rid).map(|o| &o.kind) {
-                                    Some(ObjKind::Host(h)) => h.class_name().to_string(),
-                                    // Un callable receveur : le nom du
-                                    // FnLit identifie la fonction dont
-                                    // l'accesseur manque (`kW.vG`).
-                                    Some(ObjKind::Fun(Fun::Script { lit, .. })) => format!(
-                                        "function {}@{}:{}",
-                                        lit.name.as_deref().unwrap_or("<anon>"),
-                                        lit.pos.0,
-                                        lit.pos.1
-                                    ),
-                                    Some(ObjKind::Fun(
-                                        Fun::Native { name, .. } | Fun::BoundNative { name, .. },
-                                    )) => {
-                                        format!("native {name}")
-                                    }
-                                    Some(_) if self.is_callable(recv) => self
-                                        .get_prop(rid, "name")
-                                        .and_then(|n| self.heap_string_of(n))
-                                        .filter(|n| !n.is_empty())
-                                        .unwrap_or_else(|| "Function".to_string()),
-                                    Some(_) => self
-                                        .get_prop(rid, "constructor")
-                                        .and_then(|c| self.get_prop_value(c, "name").ok())
-                                        .and_then(|n| self.heap_string_of(n))
-                                        .filter(|n| !n.is_empty())
-                                        .unwrap_or_else(|| "Object".to_string()),
-                                    None => "?".to_string(),
-                                },
-                                _ => format!("{recv:?}"),
-                            };
-                            return Err(self.type_error(format!(
-                                "`{name}` is not a function (on {recv_desc})"
-                            )));
-                        }
-                        self.call_value(f, recv, &args)
-                    }
-                    Callee::Super(name) => {
-                        let base = self.super_base(env)?;
-                        let f = self.read_prop(base, this, &name)?;
-                        self.call_value(f, this, &args)
-                    }
-                }
-            }
-            Expr::New(callee, arg_exprs) => {
-                let f = self.eval_expr(env, this, callee)?;
-                let args = self.eval_args(env, this, arg_exprs)?;
-                self.construct(f, &args)
-            }
-            Expr::Seq(parts) => {
-                let mut last = Value::Undefined;
-                for p in parts {
-                    last = self.eval_expr(env, this, p)?;
-                }
-                Ok(last)
-            }
-            Expr::Cond(c, t, f) => {
-                let c = self.eval_expr(env, this, c)?;
-                if self.to_boolean(c) {
-                    self.eval_expr(env, this, t)
-                } else {
-                    self.eval_expr(env, this, f)
-                }
-            }
-            Expr::Assign(lhs, op, rhs) => {
-                if *op == AssignOp::Set {
-                    // Spec order : la référence LHS (et les effets de
-                    // bord de `base`/`key`) s'évalue AVANT le RHS —
-                    // `(..., install(), K).Wn = rhs()` sur du code
-                    // réel (Google Closure) en dépend.
-                    if let Some(lv) = self.resolve_lvalue(env, this, lhs)? {
-                        let v = self.eval_expr(env, this, rhs)?;
-                        self.store_lvalue(env, lv, v)?;
-                        return Ok(v);
-                    }
-                    let v = self.eval_expr(env, this, rhs)?;
-                    self.write_lvalue(env, this, lhs, v)?;
-                    return Ok(v);
-                }
-                // Logical assignment: rhs evaluated only when needed.
-                if let Some(lv) = self.resolve_lvalue(env, this, lhs)? {
-                    let cur = self.read_lvalue_ref(env, &lv)?;
-                    match op {
-                        AssignOp::Nullish if !matches!(cur, Value::Null | Value::Undefined) => {
-                            return Ok(cur)
-                        }
-                        AssignOp::LogAnd if !self.to_boolean(cur) => return Ok(cur),
-                        AssignOp::LogOr if self.to_boolean(cur) => return Ok(cur),
-                        AssignOp::Nullish | AssignOp::LogAnd | AssignOp::LogOr => {
-                            let v = self.eval_expr(env, this, rhs)?;
-                            self.store_lvalue(env, lv, v)?;
-                            return Ok(v);
-                        }
-                        _ => {}
-                    }
-                    let rv = self.eval_expr(env, this, rhs)?;
-                    let bin = match op {
-                        AssignOp::Add => BinOp::Add,
-                        AssignOp::Sub => BinOp::Sub,
-                        AssignOp::Mul => BinOp::Mul,
-                        AssignOp::Div => BinOp::Div,
-                        AssignOp::Mod => BinOp::Mod,
-                        AssignOp::Shl => BinOp::Shl,
-                        AssignOp::Shr => BinOp::Shr,
-                        AssignOp::ShrU => BinOp::ShrU,
-                        AssignOp::BitAnd => BinOp::BitAnd,
-                        AssignOp::BitOr => BinOp::BitOr,
-                        AssignOp::BitXor => BinOp::BitXor,
-                        AssignOp::Pow => BinOp::Pow,
-                        AssignOp::Set | AssignOp::Nullish | AssignOp::LogAnd | AssignOp::LogOr => {
-                            return Err(self.type_error("invalid assignment"))
-                        }
-                    };
-                    let v = self.binary_op(bin, cur, rv)?;
-                    self.store_lvalue(env, lv, v)?;
-                    return Ok(v);
-                }
-                let cur = self.read_lvalue(env, this, lhs)?;
-                match op {
-                    AssignOp::Nullish if !matches!(cur, Value::Null | Value::Undefined) => {
-                        return Ok(cur)
-                    }
-                    AssignOp::LogAnd if !self.to_boolean(cur) => return Ok(cur),
-                    AssignOp::LogOr if self.to_boolean(cur) => return Ok(cur),
-                    AssignOp::Nullish | AssignOp::LogAnd | AssignOp::LogOr => {
-                        let v = self.eval_expr(env, this, rhs)?;
-                        self.write_lvalue(env, this, lhs, v)?;
-                        return Ok(v);
-                    }
-                    _ => {}
-                }
-                let rv = self.eval_expr(env, this, rhs)?;
-                let bin = match op {
-                    AssignOp::Add => BinOp::Add,
-                    AssignOp::Sub => BinOp::Sub,
-                    AssignOp::Mul => BinOp::Mul,
-                    AssignOp::Div => BinOp::Div,
-                    AssignOp::Mod => BinOp::Mod,
-                    AssignOp::Shl => BinOp::Shl,
-                    AssignOp::Shr => BinOp::Shr,
-                    AssignOp::ShrU => BinOp::ShrU,
-                    AssignOp::BitAnd => BinOp::BitAnd,
-                    AssignOp::BitOr => BinOp::BitOr,
-                    AssignOp::BitXor => BinOp::BitXor,
-                    AssignOp::Pow => BinOp::Pow,
-                    AssignOp::Set | AssignOp::Nullish | AssignOp::LogAnd | AssignOp::LogOr => {
-                        return Err(self.type_error("invalid assignment"))
-                    }
-                };
-                let v = self.binary_op(bin, cur, rv)?;
-                self.write_lvalue(env, this, lhs, v)?;
-                Ok(v)
-            }
-            Expr::Unary(op, operand) => self.unary_op(*op, env, this, operand),
-            Expr::Binary(op, l, r) => {
-                match op {
-                    BinOp::And => {
-                        let lv = self.eval_expr(env, this, l)?;
-                        if !self.to_boolean(lv) {
-                            return Ok(lv);
-                        }
-                        return self.eval_expr(env, this, r);
-                    }
-                    BinOp::Or => {
-                        let lv = self.eval_expr(env, this, l)?;
-                        if self.to_boolean(lv) {
-                            return Ok(lv);
-                        }
-                        return self.eval_expr(env, this, r);
-                    }
-                    BinOp::Nullish => {
-                        let lv = self.eval_expr(env, this, l)?;
-                        if matches!(lv, Value::Null | Value::Undefined) {
-                            return self.eval_expr(env, this, r);
-                        }
-                        return Ok(lv);
-                    }
-                    _ => {}
-                }
-                let lv = self.eval_expr(env, this, l)?;
-                let rv = self.eval_expr(env, this, r)?;
-                self.binary_op(*op, lv, rv)
-            }
-        }
-    }
-
-    fn read_lvalue(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
-        match e {
-            Expr::Ident(name) => self
-                .env_get(env, name)
-                .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
-            Expr::Member(base, name) => {
-                let b = self.eval_expr(env, this, base)?;
-                self.get_prop_value(b, name)
-            }
-            Expr::Index(base, key) => {
-                let b = self.eval_expr(env, this, base)?;
-                let k = self.eval_expr(env, this, key)?;
-                let k = self.prop_key(k)?;
-                self.get_prop_value(b, &k)
-            }
-            _ => Err(self.type_error("invalid assignment target")),
-        }
-    }
-
-    fn write_lvalue(&mut self, env: &EnvRef, this: Value, e: &Expr, v: Value) -> JsResult<()> {
-        match e {
-            Expr::Ident(name) => self.env_set(env, name, v),
-            Expr::Member(base, name) => {
-                let b = self.eval_expr(env, this, base)?;
-                self.set_prop_value(b, name, v)
-            }
-            Expr::Index(base, key) => {
-                let b = self.eval_expr(env, this, base)?;
-                let k = self.eval_expr(env, this, key)?;
-                let k = self.prop_key(k)?;
-                self.set_prop_value(b, &k, v)
-            }
-            // `({a, b} = o)` / `[x, y] = arr` — destructuring.
-            Expr::Object(_) | Expr::Array(_) => {
-                let pat = expr_to_pat(e)
-                    .ok_or_else(|| self.type_error("invalid destructuring target"))?;
-                self.bind_pat(env, this, &pat, v, BindMode::Assign)
-            }
-            _ => Err(self.type_error("invalid assignment target")),
-        }
-    }
-
-    /// Évalue une cible d'affectation en une référence réifiée —
-    /// les expressions `base`/`key` courent ici (ordre spec : le LHS
-    /// avant le RHS de `=`/`op=`). `None` pour les cibles non
-    /// réifiables (déstructuration), qui gardent le chemin
-    /// [`Self::write_lvalue`].
-    fn resolve_lvalue(
-        &mut self,
-        env: &EnvRef,
-        this: Value,
-        e: &Expr,
-    ) -> JsResult<Option<LValueRef>> {
-        Ok(match e {
-            Expr::Ident(name) => Some(LValueRef::Ident(name.clone())),
-            Expr::Member(base, name) => {
-                let b = self.eval_expr(env, this, base)?;
-                Some(LValueRef::Prop(b, name.clone()))
-            }
-            Expr::Index(base, key) => {
-                let b = self.eval_expr(env, this, base)?;
-                let k = self.eval_expr(env, this, key)?;
-                Some(LValueRef::Prop(b, self.prop_key(k)?))
-            }
-            _ => None,
-        })
-    }
-
-    fn read_lvalue_ref(&mut self, env: &EnvRef, lv: &LValueRef) -> JsResult<Value> {
-        match lv {
-            LValueRef::Ident(name) => self
-                .env_get(env, name)
-                .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
-            LValueRef::Prop(b, k) => self.get_prop_value(*b, k),
-        }
-    }
-
-    fn store_lvalue(&mut self, env: &EnvRef, lv: LValueRef, v: Value) -> JsResult<()> {
-        match lv {
-            LValueRef::Ident(name) => self.env_set(env, &name, v),
-            LValueRef::Prop(b, k) => self.set_prop_value(b, &k, v),
-        }
-    }
-
-    fn unary_op(&mut self, op: UnOp, env: &EnvRef, this: Value, operand: &Expr) -> JsResult<Value> {
-        match op {
-            UnOp::Not => {
-                let v = self.eval_expr(env, this, operand)?;
-                Ok(Value::Bool(!self.to_boolean(v)))
-            }
-            UnOp::BitNot => {
-                let v = self.eval_expr(env, this, operand)?;
-                if let Value::Big(_) = v {
-                    let b = self.to_bigint(v)?;
-                    return Ok(self.big_val(-(b + num_bigint::BigInt::from(1))));
-                }
-                Ok(Value::Num(f64::from(!to_int32(self.to_number(v)?))))
-            }
-            UnOp::Pos => {
-                let v = self.eval_expr(env, this, operand)?;
-                // `+1n` → TypeError (spec `ToNumeric` ≠ `ToNumber` :
-                // le `+` unaire refuse explicitement les BigInt).
-                if matches!(v, Value::Big(_)) {
-                    return Err(self.type_error("cannot convert a BigInt to number"));
-                }
-                Ok(Value::Num(self.to_number(v)?))
-            }
-            UnOp::Neg => {
-                let v = self.eval_expr(env, this, operand)?;
-                if let Value::Big(_) = v {
-                    let b = self.to_bigint(v)?;
-                    return Ok(self.big_val(-b));
-                }
-                Ok(Value::Num(-self.to_number(v)?))
-            }
-            UnOp::Void => {
-                self.eval_expr(env, this, operand)?;
-                Ok(Value::Undefined)
-            }
-            UnOp::Typeof => {
-                // `typeof x` must not throw on undeclared x.
-                if let Expr::Ident(name) = operand {
-                    if let Some(v) = self.env_get(env, name) {
-                        return Ok(self.str_val(typeof_str(v, &self.heap)));
-                    }
-                    return Ok(self.str_val("undefined"));
-                }
-                let v = self.eval_expr(env, this, operand)?;
-                Ok(self.str_val(typeof_str(v, &self.heap)))
-            }
-            UnOp::Delete => match operand {
-                Expr::Member(base, name) => {
-                    let b = self.eval_expr(env, this, base)?;
-                    if let Value::Obj(id) = b {
-                        self.delete_result(id, name)
-                    } else {
-                        Ok(Value::Bool(true))
-                    }
-                }
-                Expr::Index(base, key) => {
-                    let b = self.eval_expr(env, this, base)?;
-                    let k = self.eval_expr(env, this, key)?;
-                    let k = self.prop_key(k)?;
-                    if let Value::Obj(id) = b {
-                        self.delete_result(id, &k)
-                    } else {
-                        Ok(Value::Bool(true))
-                    }
-                }
-                // `delete x` : une liaison d'env (var/let/fn) est
-                // non-supprimable → `false`; sinon la prop de
-                // l'objet global — configurable incluse
-                // (global implicite sloppy → `true`).
-                Expr::Ident(name) => {
-                    if Self::env_has_binding(env, name) {
-                        if self.strict {
-                            return Err(self.type_error(format!("cannot delete `{name}`")));
-                        }
-                        Ok(Value::Bool(false))
-                    } else {
-                        let g = self.global;
-                        self.delete_result(g, name)
-                    }
-                }
-                _ => {
-                    self.eval_expr(env, this, operand).ok();
-                    Ok(Value::Bool(true))
-                }
-            },
-            UnOp::PreInc | UnOp::PreDec | UnOp::PostInc | UnOp::PostDec => {
-                let cur = self.read_lvalue(env, this, operand)?;
-                // `++`/`--` sur un bigint : ±1n, sans passer par
-                // `ToNumber` (spec `Increment`/`Decrement`).
-                if let Value::Big(_) = cur {
-                    let b = self.to_bigint(cur)?;
-                    let d = if matches!(op, UnOp::PreInc | UnOp::PostInc) {
-                        num_bigint::BigInt::from(1)
-                    } else {
-                        num_bigint::BigInt::from(-1)
-                    };
-                    let new = self.big_val(b + d);
-                    self.write_lvalue(env, this, operand, new)?;
-                    return Ok(if matches!(op, UnOp::PostInc | UnOp::PostDec) {
-                        cur
-                    } else {
-                        new
-                    });
-                }
-                let n = self.to_number(cur)?;
-                let d = if matches!(op, UnOp::PreInc | UnOp::PostInc) {
-                    1.0
-                } else {
-                    -1.0
-                };
-                let new = n + d;
-                self.write_lvalue(env, this, operand, Value::Num(new))?;
-                Ok(Value::Num(if matches!(op, UnOp::PostInc | UnOp::PostDec) {
-                    n
-                } else {
-                    new
-                }))
-            }
-        }
-    }
-
-    fn binary_op(&mut self, op: BinOp, l: Value, r: Value) -> JsResult<Value> {
-        use BinOp::{
-            Add, And, BitAnd, BitOr, BitXor, Div, Eq, Ge, Gt, In, Instanceof, Le, Lt, Mod, Mul, Ne,
-            Or, Pow, Shl, Shr, ShrU, StrictEq, StrictNe, Sub,
-        };
-        Ok(match op {
-            Add => {
-                let lp = self.to_primitive(l, PrimHint::Default)?;
-                let rp = self.to_primitive(r, PrimHint::Default)?;
-                if matches!(lp, Value::Str(_)) || matches!(rp, Value::Str(_)) {
-                    let ls = self.to_js_string(lp)?;
-                    let rs = self.to_js_string(rp)?;
-                    self.str_val(format!("{ls}{rs}"))
-                } else if matches!(lp, Value::Big(_)) || matches!(rp, Value::Big(_)) {
-                    // `1n + 2n` → `3n` ; mixte Num/Big → `TypeError`
-                    // via `to_bigint`.
-                    let a = self.to_bigint(lp)?;
-                    let b = self.to_bigint(rp)?;
-                    self.big_val(a + b)
-                } else {
-                    Value::Num(self.to_number(lp)? + self.to_number(rp)?)
-                }
-            }
-            Sub | Mul | Div | Mod | Pow | Shl | Shr | ShrU | BitAnd | BitOr | BitXor => {
-                let lp = self.to_primitive(l, PrimHint::Number)?;
-                let rp = self.to_primitive(r, PrimHint::Number)?;
-                if matches!(lp, Value::Big(_)) || matches!(rp, Value::Big(_)) {
-                    return self.big_binary(op, lp, rp);
-                }
-                match op {
-                    Sub => Value::Num(self.to_number(lp)? - self.to_number(rp)?),
-                    Mul => Value::Num(self.to_number(lp)? * self.to_number(rp)?),
-                    Div => Value::Num(self.to_number(lp)? / self.to_number(rp)?),
-                    Mod => Value::Num(self.to_number(lp)? % self.to_number(rp)?),
-                    Pow => Value::Num(self.to_number(lp)?.powf(self.to_number(rp)?)),
-                    Shl => Value::Num(f64::from(
-                        to_int32(self.to_number(lp)?) << (to_uint32(self.to_number(rp)?) & 31),
-                    )),
-                    Shr => Value::Num(f64::from(
-                        to_int32(self.to_number(lp)?) >> (to_uint32(self.to_number(rp)?) & 31),
-                    )),
-                    ShrU => Value::Num(f64::from(
-                        to_uint32(self.to_number(lp)?) >> (to_uint32(self.to_number(rp)?) & 31),
-                    )),
-                    BitAnd => Value::Num(f64::from(
-                        to_int32(self.to_number(lp)?) & to_int32(self.to_number(rp)?),
-                    )),
-                    BitOr => Value::Num(f64::from(
-                        to_int32(self.to_number(lp)?) | to_int32(self.to_number(rp)?),
-                    )),
-                    _ => Value::Num(f64::from(
-                        to_int32(self.to_number(lp)?) ^ to_int32(self.to_number(rp)?),
-                    )),
-                }
-            }
-            Lt | Le | Gt | Ge => {
-                let lp = self.to_primitive(l, PrimHint::Number)?;
-                let rp = self.to_primitive(r, PrimHint::Number)?;
-                let ord = if matches!(lp, Value::Big(_)) || matches!(rp, Value::Big(_)) {
-                    self.big_rel(lp, rp)?
-                } else if let (Value::Str(a), Value::Str(b)) = (lp, rp) {
-                    let a = self.heap.string(a).unwrap_or_default();
-                    let b = self.heap.string(b).unwrap_or_default();
-                    Some(a.cmp(&b))
-                } else {
-                    let a = self.to_number(lp)?;
-                    let b = self.to_number(rp)?;
-                    a.partial_cmp(&b)
-                };
-                let b = matches!(
-                    (ord, op),
-                    (Some(std::cmp::Ordering::Less), Lt | Le)
-                        | (Some(std::cmp::Ordering::Equal), Le | Ge)
-                        | (Some(std::cmp::Ordering::Greater), Gt | Ge)
-                );
-                Value::Bool(b)
-            }
-            Eq => Value::Bool(self.loose_eq(l, r)?),
-            Ne => Value::Bool(!self.loose_eq(l, r)?),
-            StrictEq => Value::Bool(strict_eq(l, r, &self.heap)),
-            StrictNe => Value::Bool(!strict_eq(l, r, &self.heap)),
-            In => {
-                let Value::Obj(id) = r else {
-                    return Err(self.type_error("`in` requires an object"));
-                };
-                let k = self.prop_key(l)?;
-                Value::Bool(self.has_prop(id, &k)?)
-            }
-            Instanceof => Value::Bool(self.instance_of(l, r)?),
-            // `&&`/`||`/`??` short-circuit in eval — never reach here.
-            And | Or | BinOp::Nullish => return Err(self.type_error("invalid operator")),
-        })
-    }
-
-    /// `a?.b.c(…)` — optional-chaining evaluation. Plain steps run
-    /// normally; a `?.` step short-circuits the whole rest of the
-    /// chain to `undefined` on a nullish base.
-    fn eval_chain(
-        &mut self,
-        env: &EnvRef,
-        this: Value,
-        head: &Expr,
-        steps: &[ChainStep],
-    ) -> JsResult<Value> {
-        let mut cur = self.eval_expr(env, this, head)?;
-        // Receiver for `.m()`-style calls: the object the callee was
-        // read from (plain calls get the global, per dynamic `this`).
-        let mut recv = Value::Obj(self.global);
-        for step in steps {
-            match step {
-                ChainStep::Member(name) => {
-                    recv = cur;
-                    cur = self.get_prop_value(cur, name)?;
-                }
-                ChainStep::Index(k) => {
-                    let kv = self.eval_expr(env, this, k)?;
-                    let key = self.prop_key(kv)?;
-                    recv = cur;
-                    cur = self.get_prop_value(cur, &key)?;
-                }
-                ChainStep::OptMember(name) => {
-                    if matches!(cur, Value::Null | Value::Undefined) {
-                        return Ok(Value::Undefined);
-                    }
-                    recv = cur;
-                    cur = self.get_prop_value(cur, name)?;
-                }
-                ChainStep::OptIndex(k) => {
-                    if matches!(cur, Value::Null | Value::Undefined) {
-                        return Ok(Value::Undefined);
-                    }
-                    let kv = self.eval_expr(env, this, k)?;
-                    let key = self.prop_key(kv)?;
-                    recv = cur;
-                    cur = self.get_prop_value(cur, &key)?;
-                }
-                ChainStep::Call(arg_exprs) | ChainStep::OptCall(arg_exprs) => {
-                    if matches!(step, ChainStep::OptCall(_))
-                        && matches!(cur, Value::Null | Value::Undefined)
-                    {
-                        return Ok(Value::Undefined);
-                    }
-                    let mut args = Vec::with_capacity(arg_exprs.len());
-                    for a in arg_exprs {
-                        args.push(self.eval_expr(env, this, a)?);
-                    }
-                    // Host method dispatch isn't reachable here (the
-                    // callee was already read); fall through to
-                    // ordinary `call_value` with the tracked receiver.
-                    cur = self.call_value(cur, recv, &args)?;
-                    recv = Value::Obj(self.global);
-                }
-            }
-        }
-        Ok(cur)
-    }
-
-    /// `==` per ES5 §11.9.3.
-    fn loose_eq(&mut self, l: Value, r: Value) -> JsResult<bool> {
-        let (l, r) = (l.unhole(), r.unhole());
-        if strict_eq(l, r, &self.heap) {
-            return Ok(true);
-        }
-        match (l, r) {
-            (Value::Null, Value::Undefined) | (Value::Undefined, Value::Null) => Ok(true),
-            // BigInt loose-eq (spec `IsLooselyEqual`) : Num →
-            // égalité mathématique, Str → `StringToBigInt`,
-            // Bool → 0n/1n, objet → `ToPrimitive` puis re-tour.
-            // Ces bras passent avant `(Bool, _)` pour capter
-            // `(BigInt, Bool)`.
-            (Value::Big(_), Value::Num(n)) | (Value::Num(n), Value::Big(_)) => {
-                let bv = if matches!(l, Value::Big(_)) { l } else { r };
-                Ok(self.bigint_of(bv).is_some_and(|b| big_eq_num(&b, n)))
-            }
-            (Value::Big(_), Value::Str(_)) | (Value::Str(_), Value::Big(_)) => {
-                let bv = if matches!(l, Value::Big(_)) { l } else { r };
-                let sv = if matches!(l, Value::Str(_)) { l } else { r };
-                match self.to_bigint(sv) {
-                    Ok(sb) => Ok(self.bigint_of(bv).is_some_and(|b| b == sb)),
-                    Err(_) => Ok(false), // `StringToBigInt` invalide → pas égal.
-                }
-            }
-            (Value::Big(_), Value::Bool(b)) | (Value::Bool(b), Value::Big(_)) => {
-                let bv = if matches!(l, Value::Big(_)) { l } else { r };
-                Ok(self
-                    .bigint_of(bv)
-                    .is_some_and(|v| v == num_bigint::BigInt::from(u8::from(b))))
-            }
-            (Value::Num(_), Value::Str(_))
-            | (Value::Str(_), Value::Num(_))
-            | (Value::Bool(_), _)
-            | (_, Value::Bool(_)) => {
-                let ln = self.to_number(l)?;
-                let rn = self.to_number(r)?;
-                Ok(ln == rn)
-            }
-            (Value::Obj(_), Value::Num(_) | Value::Str(_) | Value::Big(_)) => {
-                let p = self.to_primitive(l, PrimHint::Default)?;
-                self.loose_eq(p, r)
-            }
-            (Value::Num(_) | Value::Str(_) | Value::Big(_), Value::Obj(_)) => {
-                let p = self.to_primitive(r, PrimHint::Default)?;
-                self.loose_eq(l, p)
-            }
-            _ => Ok(false),
-        }
-    }
-
-    /// Arithmétique/bitwise sur opérandes dont au moins une est
-    /// `BigInt` — `TypeError` si l'autre n'est pas `ToBigInt`-able
-    /// (mixte `Number`/`BigInt` interdit par la spec).
-    fn big_binary(&mut self, op: BinOp, l: Value, r: Value) -> JsResult<Value> {
-        use num_traits::{Signed, Zero};
-        let a = self.to_bigint(l)?;
-        let b = self.to_bigint(r)?;
-        let one = num_bigint::BigInt::from(1);
-        let v = match op {
-            BinOp::Sub => a - b,
-            BinOp::Mul => a * b,
-            BinOp::Div => {
-                if b.is_zero() {
-                    return Err(self.range_error("BigInt division by zero"));
-                }
-                a / b // num-bigint `/` tronque vers 0 — sémantique spec.
-            }
-            BinOp::Mod => {
-                if b.is_zero() {
-                    return Err(self.range_error("BigInt division by zero"));
-                }
-                a % b // reste signe-dividende — sémantique spec.
-            }
-            BinOp::Pow => {
-                if b.is_negative() {
-                    return Err(self.range_error("BigInt negative exponent"));
-                }
-                let Ok(e) = u32::try_from(&b) else {
-                    return Err(self.range_error("BigInt exponent too large"));
-                };
-                a.pow(e)
-            }
-            BinOp::Shl | BinOp::Shr => {
-                // Décalage signé (négatif = sens inverse). Borné à
-                // 1 M de bits — au-delà la valeur exploserait la
-                // mémoire (deviation documentée, spec n'borne pas).
-                let shift = b.abs();
-                if shift > num_bigint::BigInt::from(1_000_000u32) {
-                    return Err(self.range_error("BigInt shift too large"));
-                }
-                let Ok(s) = usize::try_from(&shift) else {
-                    return Err(self.range_error("BigInt shift too large"));
-                };
-                match (op, b.is_negative()) {
-                    (BinOp::Shl, false) | (BinOp::Shr, true) => a << s,
-                    _ => a >> s,
-                }
-            }
-            BinOp::BitAnd => a & b,
-            BinOp::BitOr => a | b,
-            BinOp::BitXor => a ^ b,
-            BinOp::ShrU => {
-                return Err(self.type_error("BigInts have no unsigned right shift"));
-            }
-            _ => return Err(self.type_error("invalid BigInt operator")),
-        };
-        let _ = one;
-        Ok(self.big_val(v))
-    }
-
-    /// `bigint <rel> x` — `Ordering` mathématique (`None` → `false`,
-    /// ex. comparaison contre `NaN` ou chaîne non-entière).
-    fn big_rel(&mut self, l: Value, r: Value) -> JsResult<Option<std::cmp::Ordering>> {
-        // `StringToBigInt` d'un côté si chaîne, numérique sinon.
-        let cmp_num = |e: &mut Self,
-                       bv: num_bigint::BigInt,
-                       o: Value|
-         -> JsResult<Option<std::cmp::Ordering>> {
-            if let Value::Num(n) = o {
-                return Ok(big_cmp_num(&bv, n));
-            }
-            let n = e.to_number(o)?;
-            Ok(big_cmp_num(&bv, n))
-        };
-        match (l, r) {
-            (Value::Big(_), Value::Big(_)) => {
-                let a = self.bigint_of(l).unwrap_or_default();
-                let b = self.bigint_of(r).unwrap_or_default();
-                Ok(Some(a.cmp(&b)))
-            }
-            (Value::Big(_), Value::Str(_)) => {
-                let a = self.bigint_of(l).unwrap_or_default();
-                match self.to_bigint(r) {
-                    Ok(b) => Ok(Some(a.cmp(&b))),
-                    Err(_) => Ok(None),
-                }
-            }
-            (Value::Str(_), Value::Big(_)) => {
-                let b = self.bigint_of(r).unwrap_or_default();
-                match self.to_bigint(l) {
-                    Ok(a) => Ok(Some(a.cmp(&b))),
-                    Err(_) => Ok(None),
-                }
-            }
-            (Value::Big(_), o) => {
-                let a = self.bigint_of(l).unwrap_or_default();
-                cmp_num(self, a, o)
-            }
-            (o, Value::Big(_)) => {
-                let b = self.bigint_of(r).unwrap_or_default();
-                match cmp_num(self, b, o)? {
-                    Some(ord) => Ok(Some(ord.reverse())),
-                    None => Ok(None),
-                }
-            }
-            _ => Ok(None),
-        }
-    }
 }
+// ------------------------------------------------------------------
+// JS-C40 — découpage interne (mécanique, sémantique inchangée) :
+// `exec` = exécution de statements/programmes, `eval` = évaluation
+// d'expressions et opérateurs, `ops` = fonctions libres partagées.
+// `impl Engine` réparti sur les fichiers — méthodes `pub(crate)`.
+// ------------------------------------------------------------------
 
-/// `bigint == number` — égalité mathématique (spec `IsLooselyEqual`
-/// étape : le `number` doit être fini et entier).
-fn big_eq_num(b: &num_bigint::BigInt, n: f64) -> bool {
-    if !n.is_finite() || n.fract() != 0.0 {
-        return false;
-    }
-    num_traits::FromPrimitive::from_f64(n).is_some_and(|nb| b == &nb)
-}
+mod eval;
+mod exec;
+mod ops;
 
-/// `bigint <op> number` — comparaison mathématique exacte :
-/// `None` si `n` est `NaN`. Pour `n` fractionnaire, le bigint
-/// (entier) est `Less` ssi `b <= floor(n)`, `Greater` ssi
-/// `b >= ceil(n)` — il ne peut jamais égaler.
-fn big_cmp_num(b: &num_bigint::BigInt, n: f64) -> Option<std::cmp::Ordering> {
-    if n.is_nan() {
-        return None;
-    }
-    if n.is_infinite() {
-        return Some(if n < 0.0 {
-            std::cmp::Ordering::Greater
-        } else {
-            std::cmp::Ordering::Less
-        });
-    }
-    let f = n.floor();
-    let lo: num_bigint::BigInt = num_traits::FromPrimitive::from_f64(f)?;
-    match b.cmp(&lo) {
-        std::cmp::Ordering::Less => Some(std::cmp::Ordering::Less),
-        std::cmp::Ordering::Greater => Some(std::cmp::Ordering::Greater),
-        std::cmp::Ordering::Equal => {
-            if n.fract() == 0.0 {
-                Some(std::cmp::Ordering::Equal)
-            } else {
-                Some(std::cmp::Ordering::Greater) // b == floor(n) < n
-            }
-        }
-    }
-}
-
-/// `===` (no user code runs).
-pub(crate) fn strict_eq(l: Value, r: Value, heap: &Heap) -> bool {
-    let (l, r) = (l.unhole(), r.unhole());
-    match (l, r) {
-        (Value::Num(a), Value::Num(b)) => a == b, // NaN != NaN via f64 ==
-        (Value::Str(a), Value::Str(b)) => {
-            if a == b {
-                true
-            } else {
-                heap.string(a) == heap.string(b)
-            }
-        }
-        (Value::Big(a), Value::Big(b)) => {
-            if a == b {
-                true
-            } else {
-                matches!(
-                    (heap.obj(a).map(|o| &o.kind), heap.obj(b).map(|o| &o.kind)),
-                    (Some(ObjKind::BigInt(x)), Some(ObjKind::BigInt(y))) if x == y
-                )
-            }
-        }
-        _ => l == r,
-    }
-}
-
-/// `[[OwnPropertyKeys]]` order : indices-entiers croissants, puis
-/// strings par ordre d'insertion, puis symboles (clés sentinelle
-/// privée) par insertion. Les `props` du heap gardant l'ordre
-/// d'insertion brut, on partitionne ici.
-fn spec_key_order(keys: Vec<String>) -> Vec<String> {
-    let mut ints: Vec<(usize, String)> = Vec::new();
-    let mut strs = Vec::new();
-    let mut syms = Vec::new();
-    for k in keys {
-        if let Some(i) = array_index(&k) {
-            ints.push((i, k));
-        } else if k.starts_with(SYM_PREFIX) {
-            syms.push(k);
-        } else {
-            strs.push(k);
-        }
-    }
-    ints.sort_by_key(|(i, _)| *i);
-    ints.into_iter()
-        .map(|(_, k)| k)
-        .chain(strs)
-        .chain(syms)
-        .collect()
-}
-
-fn typeof_str(v: Value, heap: &Heap) -> &'static str {
-    match v {
-        Value::Undefined | Value::Hole => "undefined",
-        Value::Null => "object",
-        Value::Bool(_) => "boolean",
-        Value::Num(_) => "number",
-        Value::Str(_) => "string",
-        Value::Big(_) => "bigint",
-        Value::Obj(mut id) => loop {
-            match heap.obj(id).map(|o| &o.kind) {
-                Some(ObjKind::Fun(_)) => break "function",
-                Some(ObjKind::Symbol { .. }) => break "symbol",
-                // `typeof proxy` = `typeof target` (révoqué → object :
-                // la spec lève TypeError — approximation documentée).
-                Some(ObjKind::Proxy { target, handler }) => match (handler.is_some(), target) {
-                    (true, Value::Obj(tid)) => id = *tid,
-                    _ => break "object",
-                },
-                _ => break "object",
-            }
-        },
-    }
-}
-
-/// `ToNumber` on strings: trim, hex, `Infinity`, decimal.
-fn parse_js_number(s: &str) -> f64 {
-    let t = s.trim();
-    if t.is_empty() {
-        return 0.0;
-    }
-    let (sign, rest) = match t.strip_prefix('-') {
-        Some(r) => (-1.0, r),
-        None => (1.0, t.strip_prefix('+').unwrap_or(t)),
-    };
-    if rest.eq_ignore_ascii_case("infinity") {
-        return sign * f64::INFINITY;
-    }
-    if let Some(h) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
-        return u64::from_str_radix(h, 16).map_or(f64::NAN, |v| sign * v as f64);
-    }
-    rest.parse::<f64>().map_or(f64::NAN, |v| sign * v)
-}
-
-/// Is `key` a canonical array index (`"0"`, `"1"`, … no leading zeros)?
-pub(crate) fn array_index(key: &str) -> Option<usize> {
-    if key.is_empty() || !key.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    if key.len() > 1 && key.starts_with('0') {
-        return None;
-    }
-    key.parse::<usize>().ok()
-}
-
-/// Convert an lhs expression to a [`Pat`] for destructuring
-/// assignments (`[a] = x`, `({p: q} = o)`). `None` when the
-/// expression isn't a valid pattern — the caller falls back to a
-/// plain-lvalue error.
-pub(crate) fn expr_to_pat(e: &Expr) -> Option<Pat> {
-    match e {
-        Expr::Ident(name) => Some(Pat::Ident(name.clone())),
-        // `o.p`/`a[i]` destructuring targets assign through the
-        // existing lvalue path.
-        Expr::Member(..) | Expr::Index(..) => Some(Pat::Lvalue(e.clone())),
-        Expr::Spread(inner) => expr_to_pat(inner).map(|p| Pat::Rest(Box::new(p))),
-        Expr::Assign(l, AssignOp::Set, d) => {
-            expr_to_pat(l).map(|p| Pat::Default(Box::new(p), d.clone()))
-        }
-        Expr::Array(elems) => {
-            let mut out = Vec::with_capacity(elems.len());
-            for el in elems {
-                match el {
-                    None => out.push(None),
-                    Some(e) => out.push(Some(expr_to_pat(e)?)),
-                }
-            }
-            Some(Pat::Array(out))
-        }
-        Expr::Object(props) => {
-            let mut pats = Vec::with_capacity(props.len());
-            let mut rest = None;
-            for p in props {
-                match p {
-                    ObjProp::Prop(k, ve) => pats.push((k.clone(), expr_to_pat(ve)?)),
-                    ObjProp::Spread(e) => rest = Some(Box::new(expr_to_pat(e)?)),
-                    ObjProp::Getter(..) | ObjProp::Setter(..) => return None,
-                }
-            }
-            Some(Pat::Object { props: pats, rest })
-        }
-        _ => None,
-    }
-}
+pub(crate) use ops::*;

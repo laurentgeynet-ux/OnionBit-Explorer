@@ -288,6 +288,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `serialize_document`, escalade `drain_dom_mutations`
   conditionnée au dépassement mesuré (~10 % frame budget ou
   churn DoS démontré).
+- **JS-C40 — découpage interne `explorer-jscore`** : `builtins.rs`
+  (7 528 lignes) éclaté en `builtins/` 20 modules par domaine
+  (`mod.rs` conserve l'installation des natives et les helpers
+  communs) ; `interp.rs` (5 718 lignes) éclaté en `interp/`
+  (`mod.rs` moteur/envs/props/coercions, `exec.rs` statements,
+  `eval.rs` expressions, `ops.rs` fonctions libres). Refactor
+  purement mécanique : zéro changement sémantique, méthodes
+  d'`impl Engine` réparties promues `pub(crate)` — surface
+  publique intacte, suite complète inchangée au vert.
 
 ### Fixed
 
