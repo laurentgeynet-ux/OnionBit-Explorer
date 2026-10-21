@@ -1695,7 +1695,20 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   le parsing par feuille garderait
   chaque feuille sous borne (max
   mesuré : 85 K tokens) — décision
-  NAV si reprise.
+  NAV si reprise. **Même vol,
+  trigger (2) dev.to colonne ~15 % :
+  vérifié sain** — irréproduit au
+  commit du vol `f0ba062` comme à
+  `main` sur les 5 breakpoints
+  (768→1600, pipeline complet
+  JS+net, shots byte-identiques) ;
+  blob CSS 188 K tokens sous borne ;
+  la chaîne `grid-template-columns:
+  var(--layout)` → var() imbriquées
+  résout. Suspect résiduel : frame
+  transitoire avant `crayons.css`
+  (406 Ko) sur le chemin série
+  pré-102 — sous surveillance.
 - [x] **R-59. `prefers-color-scheme` +
   défauts UA sombres** (moitié PIPE du
   thème sombre — journal d'abord,
