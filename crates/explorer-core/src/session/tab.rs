@@ -37,6 +37,7 @@ impl Tab {
             frame: self.frame.take(),
             png: self.png.take(),
             focused: self.focused.take(),
+            focused_key: self.focused_key.take(),
             hovered: self.hovered.take(),
             popup: self.popup.take(),
             find: self.find.take(),
@@ -82,6 +83,7 @@ impl Tab {
         self.frame = snap.frame;
         self.png = snap.png;
         self.focused = snap.focused;
+        self.focused_key = snap.focused_key;
         self.hovered = snap.hovered;
         self.popup = snap.popup;
         self.find = snap.find;

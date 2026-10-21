@@ -1410,6 +1410,36 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   différées d'une frappe google
   rejouent à la livraison.
 
+- [x] **Étape 92. Focus ré-ancré par
+  identité quand le chemin meurt**
+  (core) — suite du triage jonglerie
+  google : après Étape 91 les touches
+  rejouaient mais tombaient encore
+  — le listener `input` (suggest)
+  mute le DOM, l'apply re-parse et
+  le chemin `(tag, index)` du champ
+  focalisé meurt ou résout sur un
+  voisin (un sibling de même tag
+  inséré avant). Livré :
+  `focused_key = (attr, value)` —
+  `id` puis `name` — capturée à
+  `set_focus` ; `focused_node`
+  vérifie l'ancre sur le nœud
+  résolu et, mort ou usurpé,
+  retrouve l'élément par
+  `find_by_attr` puis ré-écrit le
+  chemin — le focus survit au
+  déplacement, comme un vrai
+  navigateur ; l'ancre voyage dans
+  le `PageSnapshot` (bfcache).
+  Terrain : « explorer » tapé dans
+  la recherche google rend
+  « explorer| » exact, Enter
+  soumet le formulaire. Test :
+  `focus_reattaches_by_identity`
+  (chemin mort, chemin usurpé,
+  élément réellement supprimé).
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY

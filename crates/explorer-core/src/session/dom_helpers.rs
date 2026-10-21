@@ -337,10 +337,52 @@ pub(crate) fn dom_path_node(dom: &Dom, path: &[(String, u32)]) -> Option<NodeId>
     Some(cur)
 }
 
+/// Diagnostic d'un chemin mort (M-H1 — jonglerie focus
+/// google) : niveau du premier segment `(tag, index)`
+/// irrésolu + les tags des enfants présents à ce niveau —
+/// dit *où* une mutation a déplacé la cible, pas seulement
+/// qu'elle est morte. `None` = le chemin résout.
+pub(crate) fn dom_path_dead_end(dom: &Dom, path: &[(String, u32)]) -> Option<(usize, Vec<String>)> {
+    let mut cur = dom.document();
+    for (i, (tag, k)) in path.iter().enumerate() {
+        let children = dom.children(cur).ok()?;
+        let mut seen = 0u32;
+        let mut next = None;
+        for &c in &children {
+            if dom.tag_name(c).is_ok_and(|t| t == *tag) {
+                if seen == *k {
+                    next = Some(c);
+                    break;
+                }
+                seen += 1;
+            }
+        }
+        let Some(n) = next else {
+            let tags = children
+                .iter()
+                .filter_map(|&c| dom.tag_name(c).ok().map(str::to_string))
+                .collect();
+            return Some((i, tags));
+        };
+        cur = n;
+    }
+    None
+}
+
 pub(crate) fn find_by_id(dom: &Dom, id: &str) -> Option<NodeId> {
+    find_by_attr(dom, "id", id)
+}
+
+/// Premier élément dont l'attribut `attr` vaut `value`,
+/// parcours préfixe — même itératif que `find_by_id`
+/// historique. Sert au re-ancrage du focus par identité
+/// (`id`/`name`) quand le chemin `(tag, index)` a été
+/// déplacé par une mutation (étape 92).
+pub(crate) fn find_by_attr(dom: &Dom, attr: &str, value: &str) -> Option<NodeId> {
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
-        if dom.element(n).is_ok() && dom.attribute(n, "id").ok().flatten().as_deref() == Some(id) {
+        if dom.element(n).is_ok() && dom.attribute(n, attr).ok().flatten().as_deref() == Some(value)
+        {
             return Some(n);
         }
         if let Ok(ch) = dom.children(n) {

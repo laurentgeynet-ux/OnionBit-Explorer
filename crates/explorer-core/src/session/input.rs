@@ -653,8 +653,51 @@ impl Session {
     /// le chemin stocké ne mène plus à un élément (le nœud a
     /// été supprimé par un handler ou un re-parse l'a
     /// déplacé).
-    pub(crate) fn focused_node(&self, tab: TabId) -> Option<NodeId> {
-        self.resolve_path(tab, self.tabs.get(&tab)?.focused.as_deref())
+    pub(crate) fn focused_node(&mut self, tab: TabId) -> Option<NodeId> {
+        let (path, key) = {
+            let entry = self.tabs.get(&tab)?;
+            (entry.focused.clone()?, entry.focused_key.clone())
+        };
+        let entry = self.tabs.get(&tab)?;
+        let dom = entry.dom.as_ref()?;
+        // Chemin résolu — mais vers le BON élément ? Une
+        // mutation peut déplacer le champ sans tuer le
+        // chemin (un sibling de même tag inséré avant le
+        // fait résoudre sur un voisin) : quand l'ancre
+        // `id`/`name` existe, elle est vérifiée sur le nœud
+        // résolu (étape 92).
+        if let Some(n) = dom_path_node(dom, &path) {
+            let ok = key
+                .as_ref()
+                .is_none_or(|(a, v)| dom.attribute(n, a).ok().flatten().as_deref() == Some(v));
+            if ok {
+                return Some(n);
+            }
+        }
+        // Diagnostic jonglerie focus (M-H1 — un `key` sur deux
+        // `unfocused` sur google) : le niveau mort du chemin
+        // dit quelle mutation a déplacé le champ.
+        let dead = dom_path_dead_end(dom, &path);
+        tracing::debug!(tab, ?path, ?dead, "focus : chemin mort ou déplacé");
+        // Ré-ancrage par identité : l'élément vit toujours —
+        // on le retrouve par `id`/`name` et on ré-écrit le
+        // chemin au lieu de rendre `unfocused` — le focus
+        // survit au déplacement, comme un vrai navigateur.
+        let (attr, value) = key?;
+        let n = find_by_attr(dom, &attr, &value)?;
+        let new_path = element_path(dom, n)?;
+        tracing::debug!(
+            tab,
+            ?path,
+            ?new_path,
+            attr,
+            value,
+            "focus : ré-ancré par identité"
+        );
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.focused = Some(new_path);
+        }
+        Some(n)
     }
 
     /// Enfile une entrée pendant la peinture détachée — la
@@ -696,6 +739,7 @@ impl Session {
             let _ = self.handle_input_now(tab, ev);
         }
     }
+
     /// Focus champ (étape 52) : `blur` sur l'ancien nœud puis
     /// `focus` sur le nouveau — ordre navigateur. `None` =
     /// perte de focus seule. Les événements sont dispatchés
@@ -709,6 +753,20 @@ impl Session {
                 .and_then(|e| e.dom.as_ref())
                 .and_then(|d| element_path(d, f))
         });
+        let new_key = field.and_then(|f| {
+            entry.and_then(|e| e.dom.as_ref()).and_then(|d| {
+                d.attribute(f, "id")
+                    .ok()
+                    .flatten()
+                    .map(|v| ("id".to_string(), v))
+                    .or_else(|| {
+                        d.attribute(f, "name")
+                            .ok()
+                            .flatten()
+                            .map(|v| ("name".to_string(), v))
+                    })
+            })
+        });
         let old_path = entry.and_then(|e| e.focused.clone());
         if old_path == new_path {
             return;
@@ -718,6 +776,7 @@ impl Session {
         }
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.focused.clone_from(&new_path);
+            entry.focused_key.clone_from(&new_key);
         }
         if let Some(p) = new_path {
             self.dispatch_path_event(tab, "focus", &p);

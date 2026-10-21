@@ -196,6 +196,13 @@ pub(crate) struct Tab {
     /// re-résout à chaque usage (`dom_path_node`, étape 52).
     /// Invalidé à la navigation.
     focused: Option<Vec<(String, u32)>>,
+    /// Ancre d'identité du champ focalisé — `(attr, value)`
+    /// avec `attr` ∈ `id`|`name`, capturée à `set_focus`
+    /// (étape 92) : quand une mutation déplace le champ et
+    /// tue le chemin, `focused_node` le retrouve par
+    /// identité et ré-écrit le chemin au lieu de rendre
+    /// `unfocused`.
+    focused_key: Option<(String, String)>,
     /// Nœud sous le curseur au dernier `mousemove` (étape 52)
     /// — sert de cible à `mouseout`/`mouseover`/`wheel` ;
     /// chemin `(tag, index)`, même raisonnement que `focused`.
@@ -363,6 +370,10 @@ pub(crate) struct PageSnapshot {
     png: Option<Vec<u8>>,
     /// Champ focalisé (chemin `(tag, index)`).
     focused: Option<Vec<(String, u32)>>,
+    /// Ancre d'identité du champ focalisé (étape 92) —
+    /// voyage avec le chemin pour ré-ancrer après
+    /// restauration.
+    focused_key: Option<(String, String)>,
     /// Nœud survolé (chemin).
     hovered: Option<Vec<(String, u32)>>,
     /// Popup `<select>` ouvert (retrouvé tel quel).
@@ -676,6 +687,7 @@ impl Session {
                 font_cache: explorer_render::GlyphCache::new(),
                 png: None,
                 focused: None,
+                focused_key: None,
                 hovered: None,
                 popup: None,
                 find: None,

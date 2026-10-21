@@ -119,6 +119,7 @@ impl Session {
             e.popup = None;
             e.find = None;
             e.focused = None;
+            e.focused_key = None;
             e.hovered = None;
             e.deferred_inputs.clear();
             e.spec_paint = false;

@@ -710,6 +710,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   nav/erreur/rearm. Terrain : les touches différées
   d'une frappe google rejouent à la livraison. Test :
   `deferred_inputs_fifo_and_coalesce`.
+- **Étape 92 — focus ré-ancré par identité quand le
+  chemin meurt** (`explorer-core`) : suite du triage
+  jonglerie google — le listener `input` (suggest) mute
+  le DOM, l'apply re-parse et le chemin `(tag, index)`
+  du champ meurt ou résout sur un voisin. Livré :
+  `focused_key = (id|name, value)` capturée à
+  `set_focus` ; `focused_node` vérifie l'ancre sur le
+  nœud résolu et, mort ou usurpé, retrouve l'élément
+  par `find_by_attr` puis ré-écrit le chemin — le
+  focus survit au déplacement ; l'ancre voyage dans le
+  `PageSnapshot` (bfcache). Terrain : « explorer »
+  tapé sur google rend « explorer| » exact, Enter
+  soumet. Test : `focus_reattaches_by_identity`.
 
 ## [0.2.0] - 2026-10-20
 

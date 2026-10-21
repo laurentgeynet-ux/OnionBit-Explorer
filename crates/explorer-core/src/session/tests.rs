@@ -101,6 +101,7 @@ fn paintless_snapshot_repairs_on_restore() {
             frame: None,
             png: None,
             focused: None,
+            focused_key: None,
             hovered: None,
             popup: None,
             find: None,
@@ -182,6 +183,7 @@ async fn back_during_inflight_nav_restores_previous() {
             }),
             png: None,
             focused: None,
+            focused_key: None,
             hovered: None,
             popup: None,
             find: None,
@@ -1087,6 +1089,61 @@ fn media_js_report_resolves_play_and_reflects_props() {
     assert_eq!(media_js_eval(&mut s, tab, "window.__r2"), "ko");
 }
 
+/// Étape 92 — le focus survit au déplacement : une mutation
+/// (suggest google…) insère des siblings de même tag avant
+/// le champ — le chemin `(tag, index)` meurt ou résoudrait
+/// sur un voisin. `focused_node` vérifie l'ancre
+/// `id`/`name`, retrouve l'élément déplacé et ré-écrit le
+/// chemin au lieu de rendre `unfocused`.
+#[test]
+fn focus_reattaches_by_identity() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    s.tabs.get_mut(&tab).unwrap().dom = Some(test_dom("<input name=\"q\"><p>x</p>"));
+    // Focus par le vrai `set_focus` (chemin + ancre).
+    let input = {
+        let e = s.tabs.get(&tab).unwrap();
+        find_by_attr(e.dom.as_ref().unwrap(), "name", "q").unwrap()
+    };
+    s.set_focus(tab, Some(input));
+    let e = s.tabs.get(&tab).unwrap();
+    assert_eq!(
+        e.focused_key.as_ref().map(|(a, _)| a.as_str()),
+        Some("name")
+    );
+
+    // (a) Mutation : un `<input>` inséré AVANT → le chemin
+    // résoudrait sur le voisin — la vérification d'ancre
+    // le détecte et ré-ancre sur le vrai champ.
+    s.tabs.get_mut(&tab).unwrap().dom =
+        Some(test_dom("<input name=\"dummy\"><input name=\"q\"><p>x</p>"));
+    let n = s.focused_node(tab).expect("focus ré-ancré");
+    let e = s.tabs.get(&tab).unwrap();
+    let dom = e.dom.as_ref().unwrap();
+    assert_eq!(
+        dom.attribute(n, "name").unwrap().as_deref(),
+        Some("q"),
+        "le chemin ne doit pas résoudre sur le voisin"
+    );
+    // Le chemin est ré-écrit : il résout à nouveau, seul.
+    assert_eq!(dom_path_node(dom, e.focused.as_ref().unwrap()), Some(n));
+
+    // (b) Chemin complètement mort (le parent a disparu) :
+    // l'ancre seule suffit au ré-ancrage.
+    s.tabs.get_mut(&tab).unwrap().dom =
+        Some(test_dom("<div><span><input name=\"q\"></span></div>"));
+    let n = s.focused_node(tab).expect("focus ré-ancré sur chemin mort");
+    let e = s.tabs.get(&tab).unwrap();
+    let dom = e.dom.as_ref().unwrap();
+    assert_eq!(dom.attribute(n, "name").unwrap().as_deref(), Some("q"));
+    assert_eq!(dom_path_node(dom, e.focused.as_ref().unwrap()), Some(n));
+
+    // (c) Élément réellement supprimé → `None` honnête,
+    // pas de fausse cible.
+    s.tabs.get_mut(&tab).unwrap().dom = Some(test_dom("<p>rien</p>"));
+    assert!(s.focused_node(tab).is_none());
+}
+
 /// Étape 91 — peinture détachée : `dom`/`tree` vivent chez la
 /// tâche d'apply — les entrées s'enfilent (`Ignored`, jamais
 /// `unfocused` mensonger) ; une file non vide impose
@@ -1146,4 +1203,3 @@ fn deferred_inputs_fifo_and_coalesce() {
     let v = e.dom.as_ref().unwrap().attribute(input, "value").unwrap();
     assert_eq!(v.as_deref(), Some("abc"));
 }
-

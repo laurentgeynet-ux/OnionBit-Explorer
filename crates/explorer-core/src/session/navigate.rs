@@ -621,6 +621,7 @@ impl Session {
             entry.title.clone_from(&title);
             entry.scroll_y = 0.0;
             entry.focused = None;
+            entry.focused_key = None;
             entry.hovered = None;
             entry.deferred_inputs.clear();
             entry.popup = None;
