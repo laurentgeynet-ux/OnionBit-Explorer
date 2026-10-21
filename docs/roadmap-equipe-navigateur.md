@@ -1646,15 +1646,28 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Bonus diagnostic (même commit) : `PipelineError` porte
   l'en-tête de la source/module fautif — « Error: b »
   localise enfin son `<script>`.
-- [ ] **JS-C47. Diagnostic d'exception — pile d'appel** :
-  `error.stack` est stubbé à `Name: message` (déviation
-  documentée interp) et `JsError::Uncaught` ne porte ni
-  position ni frames — `Error: b` reste non localisable
-  *dans* le script coupable (le src est désormais cité).
-  Travail : pister une pile d'appels minimale dans l'interp
-  et la rendre dans `stack`/`Uncaught`. Prochain vol google
-  attendu pour confirmer si l'exception tue la redirection
-  consent.
+- [x] **JS-C47. Diagnostic d'exception — pile d'appel** :
+  **livré**. `Engine.call_stack` pousse le `Rc<FnLit>` à
+  l'entrée de chaque appel `Fun::Script` (après la borne
+  `call_depth`, dépilé sur les trois sorties : bind params,
+  corps, fin) — natives absentes par construction.
+  `FnLit.pos` = `(ligne, colonne)` 1-based du jeton ouvrant
+  le littéral, capturée aux 10 sites du parseur (fonctions,
+  flèches, `async`, méthodes objet/classe, blocs `static`) ;
+  `(0,0)` pour les synthèses (ctor de classe par défaut).
+  `stack_text` rend le format V8 `Name: msg\n    at f
+  (l:c)` borné à 10 frames (`stackTraceLimit`) — utilisé par
+  `error_value` (capture à la construction, spec) et
+  `Error.captureStackTrace` (l'élision `ctor` n'est pas
+  honorée, déviation). `describe` préfère la prop `stack` →
+  `JsError::Uncaught` hérite les frames : `Error: b` cite
+  désormais la fonction fautive + son site de définition.
+  Écart résiduel : position du **site d'appel** inconnue
+  (l'AST ne porte pas de span par statement — la définition
+  suffit à localiser dans le script cité par JS-C46).
+  Prochain vol google pour confirmation consent.
+  Tests : 6 cas `lang` (ordre frames, anonymes, capture à
+  la construction, `captureStackTrace`, natives, Uncaught).
 - [x] **JS-C48. Rapatriement des avancées Dillo `dillo-js`** :
   la copie vendored avait dérivé (~1 200 lignes de delta
   bidirectionnel sur 6 fichiers). Port-back complet dans le

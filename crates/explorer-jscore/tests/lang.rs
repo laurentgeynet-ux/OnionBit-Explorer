@@ -292,6 +292,88 @@ fn uncaught_error_is_host_error() {
     }
 }
 
+// -- JS-C47: error.stack = pile d'appels réelle ------------------------------
+
+#[test]
+fn stack_rend_les_frames_d_appel() {
+    // `f` appelée par `g` — la frame la plus récente d'abord.
+    let s = ev_str(
+        "function f() { return new Error('b').stack } \
+         function g() { return f() } g()",
+    );
+    let f_at = s.find("at f (").unwrap_or_else(|| panic!("frame f : {s}"));
+    let g_at = s.find("at g (").unwrap_or_else(|| panic!("frame g : {s}"));
+    assert!(f_at < g_at, "f avant g : {s}");
+    assert!(s.starts_with("Error: b\n"), "en-tête V8 : {s}");
+    // Position de définition : `f` ouvre à la ligne 1.
+    assert!(s.contains("at f (1:"), "site de f : {s}");
+}
+
+#[test]
+fn stack_fonction_anonyme_et_position() {
+    let s = ev_str(
+        "var f;\n\
+         f = function() { return new Error('x').stack };\n\
+         f()",
+    );
+    assert!(s.contains("at <anonymous> (2:"), "frame anonyme : {s}");
+}
+
+#[test]
+fn uncaught_porte_la_pile() {
+    // `Error: b` google — l'exception non rattrapée cite la
+    // fonction fautive et son site de définition.
+    let mut e = Engine::new();
+    let src = "function g() { return f() }\nfunction f() { throw new TypeError('b') }\ng()";
+    match e.eval(src) {
+        Err(explorer_jscore::Error::Uncaught(m)) => {
+            assert!(m.starts_with("TypeError: b\n"), "en-tête : {m}");
+            let f_at = m.find("at f (").unwrap_or_else(|| panic!("frame f : {m}"));
+            let g_at = m.find("at g (").unwrap_or_else(|| panic!("frame g : {m}"));
+            assert!(f_at < g_at, "f avant g : {m}");
+            // `f` est définie à la ligne 2 — la position suit.
+            assert!(m.contains("at f (2:"), "site : {m}");
+        }
+        other => panic!("expected Uncaught, got {other:?}"),
+    }
+}
+
+#[test]
+fn stack_capturee_a_la_construction() {
+    // La pile est figée à `new Error`, pas au `throw` : capturer
+    // en dehors de tout appelant puis relancer garde la trace.
+    let s = ev_str(
+        "var e; function make() { e = new Error('m') } \
+         make(); function boom() { try { throw e } \
+         catch (x) { return x.stack } } boom()",
+    );
+    assert!(s.contains("at make ("), "frame au new : {s}");
+}
+
+#[test]
+fn capture_stack_trace_a_des_frames() {
+    assert_eq!(
+        ev_str(
+            "function h() { var o = {}; Error.captureStackTrace(o); \
+             return o.stack.indexOf('at h') >= 0 } h()"
+        ),
+        "true"
+    );
+}
+
+#[test]
+fn stack_native_ne_laissent_pas_de_frame_orpheline() {
+    // Les natives n'empilent pas : `map` invisible, mais la cb
+    // script et son appelant encadrent correctement.
+    let s = ev_str(
+        "function cb() { return new Error('z').stack } \
+         function run() { return [0].map(cb)[0] } run()",
+    );
+    assert!(s.contains("at cb ("), "cb : {s}");
+    assert!(s.contains("at run ("), "run : {s}");
+    assert!(!s.contains("at map"), "native absente : {s}");
+}
+
 #[test]
 fn syntax_error() {
     let mut e = Engine::new();
@@ -4127,7 +4209,9 @@ fn c14_json_reviver() {
 #[test]
 fn c14_error_stack() {
     // Own prop non-énumérable, format première ligne V8-style
-    // (déviation : pas de frames d'appel).
+    // (JS-C47 : les frames d'appel suivent — pile vide au niveau
+    // top, donc seule l'en-tête ici ; couvert frames dans les
+    // tests `stack_*`).
     assert_eq!(ev_str("new Error('x').stack"), "Error: x");
     assert_eq!(ev_str("new TypeError('m').stack"), "TypeError: m");
     assert_eq!(ev_str("Object.keys(new Error('x')).join()"), "");

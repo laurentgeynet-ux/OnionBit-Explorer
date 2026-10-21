@@ -315,6 +315,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Réserve honnête : la durée de la cascade est inchangée
   — c'est le chantier perf PIPE ; l'API reste serviable
   pendant le rendu, c'est la famine qui disparaît.
+- **JS-C47 — `error.stack` = pile d'appels réelle**
+  (`explorer-jscore`) : le stub `Name: message` est remplacé
+  — `Engine.call_stack` empile le `Rc<FnLit>` à chaque appel
+  script (natives exclues), `FnLit.pos` = `(ligne, colonne)`
+  du jeton ouvrant le littéral, capturée aux 10 sites du
+  parseur. `stack` se capture à la construction (spec) au
+  format V8 `at f (l:c)` borné à 10 frames ;
+  `Error.captureStackTrace` rend les mêmes frames ;
+  `describe` préfère la prop `stack` → `JsError::Uncaught`
+  cite désormais la fonction fautive et son site — `Error: b`
+  est localisable *dans* le script (le src vient de JS-C46).
+  Écart : position du site d'appel (l'AST n'a pas de span
+  par statement — la définition y supplée).
 
 ### Added
 

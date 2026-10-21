@@ -328,6 +328,11 @@ pub struct FnLit {
     /// d'échecs silencieux (écriture non-writable, delete
     /// non-configurable, identifiant non déclaré).
     pub strict: bool,
+    /// Position 1-based `(ligne, colonne)` du jeton qui ouvre le
+    /// littéral (JS-C47) — rendue dans les frames de `error.stack`.
+    /// `(0, 0)` pour les fonctions synthétisées par le moteur
+    /// (ctor de classe par défaut).
+    pub pos: (usize, usize),
 }
 
 /// One formal parameter.

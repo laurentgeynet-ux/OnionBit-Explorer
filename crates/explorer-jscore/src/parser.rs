@@ -148,6 +148,12 @@ impl Parser {
         &self.toks[self.pos]
     }
 
+    /// `(ligne, colonne)` 1-based du jeton courant — ouverture
+    /// d'un `FnLit` (JS-C47, rendue dans `error.stack`).
+    fn pos_here(&self) -> (usize, usize) {
+        (self.cur().line, self.cur().col)
+    }
+
     fn next(&mut self) -> &Token {
         let t = &self.toks[self.pos];
         if self.pos + 1 < self.toks.len() {
@@ -1408,6 +1414,7 @@ impl Parser {
                 .get(self.pos + 1)
                 .is_some_and(|t| t.tok == Tok::P(P::Arrow))
             {
+                let pos = self.pos_here();
                 self.next();
                 self.next();
                 let (body, strict) = self.arrow_body(no_in)?;
@@ -1422,12 +1429,14 @@ impl Parser {
                     is_async: false,
                     is_gen: false,
                     strict,
+                    pos,
                 }))));
             }
         }
         // `(params) => body` — speculative scan of a param list.
         if self.check_p(P::LParen) {
             let save = self.pos;
+            let pos = self.pos_here();
             if let Some(params) = self.scan_arrow_params() {
                 // cursor is on `=>`
                 self.next();
@@ -1440,6 +1449,7 @@ impl Parser {
                     is_async: false,
                     is_gen: false,
                     strict,
+                    pos,
                 }))));
             }
             self.pos = save;
@@ -1451,6 +1461,7 @@ impl Parser {
     /// the `=>` isn't there (then `async` is just an identifier).
     fn try_async_arrow(&mut self, no_in: bool) -> Result<Option<Expr>> {
         let save = self.pos;
+        let pos = self.pos_here();
         self.next(); // `async`
                      // `async x => e`
         if let Tok::Ident(name) = self.peek().clone() {
@@ -1473,6 +1484,7 @@ impl Parser {
                     is_async: true,
                     is_gen: false,
                     strict,
+                    pos,
                 }))));
             }
             self.pos = save;
@@ -1492,6 +1504,7 @@ impl Parser {
                         is_async: true,
                         is_gen: false,
                         strict,
+                        pos,
                     }))));
                 }
             }
@@ -1999,6 +2012,7 @@ impl Parser {
             if self.eat_p(P::Ellipsis) {
                 props.push(ObjProp::Spread(self.assign(no_in)?));
             } else {
+                let kpos = self.pos_here();
                 // `*m(){}` generator method / `async *m(){}`.
                 let mut gen = self.eat_p(P::Star);
                 // `async m(){}` method.
@@ -2054,6 +2068,7 @@ impl Parser {
                             is_async: false,
                             is_gen: false,
                             strict: body.1,
+                            pos: kpos,
                         });
                         props.push(if kind == ClassMemberKind::Getter {
                             ObjProp::Getter(key, fun)
@@ -2078,6 +2093,7 @@ impl Parser {
                                 is_async: async_,
                                 is_gen: gen,
                                 strict: body.1,
+                                pos: kpos,
                             })),
                         ));
                     }
@@ -2191,6 +2207,7 @@ impl Parser {
     /// `async` marks `FnLit::is_async` (call wraps the result in a
     /// resolved promise — see ast.rs).
     fn function(&mut self, decl: bool, async_: bool) -> Result<Rc<FnLit>> {
+        let pos = self.pos_here();
         self.expect_kw(Kw::Function, "`function`")?;
         // `function*` / `async function*`.
         let gen = self.eat_p(P::Star);
@@ -2222,6 +2239,7 @@ impl Parser {
             is_async: async_,
             is_gen: gen,
             strict,
+            pos,
         }))
     }
 
@@ -2302,6 +2320,7 @@ impl Parser {
         self.priv_scopes.push((seq, decls));
         let mut members = Vec::new();
         while !self.at_eof() && !self.check_p(P::RBrace) {
+            let mpos = self.pos_here();
             let mut static_ = false;
             // `static m()` vs a method literally named `static`.
             if matches!(self.peek(), Tok::Ident(s) if s == "static")
@@ -2334,6 +2353,7 @@ impl Parser {
                         is_async: false,
                         is_gen: false,
                         strict: true,
+                        pos: mpos,
                     }),
                 });
                 continue;
@@ -2408,6 +2428,7 @@ impl Parser {
                         is_async: false,
                         is_gen: false,
                         strict: true,
+                        pos: mpos,
                     }),
                 });
                 continue;
@@ -2438,6 +2459,7 @@ impl Parser {
                     is_async: async_,
                     is_gen,
                     strict: true,
+                    pos: mpos,
                 }),
             });
         }

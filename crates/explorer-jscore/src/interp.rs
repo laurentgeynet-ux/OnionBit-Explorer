@@ -32,6 +32,10 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 const DEFAULT_CALL_DEPTH: u32 = 256;
 const MAX_PROTO_DEPTH: u32 = 512;
 const DEFAULT_OP_LIMIT: u64 = 10_000_000;
+/// Frames rendues dans `error.stack`/`Uncaught` (JS-C47) —
+/// même borne que V8 (`Error.stackTraceLimit` = 10) : les
+/// frames utiles au diagnostic sont en tête de pile.
+const STACK_TRACE_LIMIT: usize = 10;
 
 /// Hidden env bindings installed in class member scopes — the names
 /// use private-use code points so no source identifier can collide
@@ -184,6 +188,11 @@ pub struct Engine {
     pub(crate) symbol_reg: std::collections::BTreeMap<String, Value>,
     call_depth: u32,
     call_depth_limit: u32,
+    /// Pile d'appels des fonctions **script** en cours (JS-C47) —
+    /// un `Rc<FnLit>` poussé à l'entrée, dépilé à la sortie ;
+    /// rendue dans `error.stack` et `Error::Uncaught`. Les
+    /// natives n'y figurent pas (déviation documentée).
+    call_stack: Vec<Rc<crate::ast::FnLit>>,
     expr_depth: u32,
     /// Borne d'emboîtement du parseur et de l'évaluateur
     /// d'expressions (JS-C41) — relevable par l'embeddeur sur un
@@ -461,6 +470,7 @@ impl Engine {
             async_gen_proto: Value::Undefined,
             call_depth: 0,
             call_depth_limit: DEFAULT_CALL_DEPTH,
+            call_stack: Vec::new(),
             expr_depth: 0,
             nest_limit: crate::parser::DEFAULT_NEST_LIMIT,
             ops_left: DEFAULT_OP_LIMIT,
@@ -714,9 +724,19 @@ impl Engine {
         r
     }
 
-    /// Human-readable rendering of a thrown value.
+    /// Human-readable rendering of a thrown value — les objets
+    /// `Error` se décrivent par leur `stack` (JS-C47 : en-tête +
+    /// frames), le reste par `Name: message` ou la coercition.
     pub fn describe(&mut self, v: Value) -> String {
         if let Value::Obj(id) = v {
+            if let Some(s) = self
+                .get_prop(id, "stack")
+                .and_then(|s| self.heap_string_of(s))
+            {
+                if !s.is_empty() {
+                    return s;
+                }
+            }
             let name = self
                 .get_prop(id, "name")
                 .and_then(|n| self.heap_string_of(n));
@@ -880,6 +900,32 @@ impl Engine {
         }
     }
 
+    /// Rendu `stack` V8-style (JS-C47) : en-tête `Name: message`
+    /// puis une ligne `    at <fn> (l:c)` par frame de la pile
+    /// d'appels, appelant le plus récent d'abord — borné à
+    /// [`STACK_TRACE_LIMIT`] (V8 `stackTraceLimit` = 10 : une
+    /// récursion saturée ne rend pas mille lignes). La position
+    /// est celle de la **définition** de la fonction (l'AST ne
+    /// porte pas de span par statement — déviation documentée vs
+    /// le site d'appel de V8) ; `(0,0)` = fonction synthétique,
+    /// non rendue. Les natives n'empilent pas de frame.
+    pub(crate) fn stack_text(&self, name: &str, msg: &str) -> String {
+        let mut s = if msg.is_empty() {
+            name.to_string()
+        } else {
+            format!("{name}: {msg}")
+        };
+        for lit in self.call_stack.iter().rev().take(STACK_TRACE_LIMIT) {
+            let n = lit.name.as_deref().unwrap_or("<anonymous>");
+            s.push_str("\n    at ");
+            s.push_str(n);
+            if lit.pos.0 > 0 {
+                s.push_str(&format!(" ({}:{})", lit.pos.0, lit.pos.1));
+            }
+        }
+        s
+    }
+
     /// New `Error`-family object value (`{name, message}` on `proto`).
     pub(crate) fn error_value(&mut self, proto: ObjId, name: &str, msg: &str) -> Value {
         let id = self.heap.alloc_obj(Object::ordinary(Value::Obj(proto)));
@@ -887,15 +933,10 @@ impl Engine {
         let m = self.str_val(msg);
         self.set_own(id, "name", n, false);
         self.set_own(id, "message", m, false);
-        //  (own, non-enum). Deviation documentee : pas
-        // d introspection de la pile d appel — on ne rend que la
-        // premiere ligne V8-style Name: message.
-        let head = if msg.is_empty() {
-            name.to_string()
-        } else {
-            format!("{name}: {msg}")
-        };
-        let s = self.str_val(head);
+        // `stack` (own, non-enum) capture la pile d'appels à la
+        // construction (JS-C47) — la spécification fige les frames
+        // ici, pas au `throw`.
+        let s = self.str_val(self.stack_text(name, msg));
         self.set_own(id, "stack", s, false);
         Value::Obj(id)
     }
@@ -1739,6 +1780,7 @@ impl Engine {
                         is_async: false,
                         is_gen: false,
                         strict: true, // corps de classe
+                        pos: (0, 0),  // synthétisée — pas de site source
                     })
                 },
                 |m| m.fun.clone(),
@@ -3346,6 +3388,10 @@ impl Engine {
                     self.call_depth -= 1;
                     return Err(self.range_error("maximum call stack exceeded"));
                 }
+                // JS-C47 : la frame est empilée APRÈS la borne —
+                // un appel refusé ne laisse pas de résidu dans
+                // `error.stack`/`Uncaught`.
+                self.call_stack.push(lit.clone());
                 // Arrow functions ignore the caller's receiver —
                 // `this` was captured at creation time. En sloppy,
                 // `this` null/undefined est coercé vers l'objet
@@ -3370,6 +3416,7 @@ impl Engine {
                     // destructuring/throwing default aborts the call.
                     if let Err(t) = self.bind_pat(&local, this, &p.pat, v, BindMode::Var) {
                         self.call_depth -= 1;
+                        self.call_stack.pop();
                         return Err(t);
                     }
                 }
@@ -3446,6 +3493,7 @@ impl Engine {
                     || self.exec_body(&local, this, &lit.body),
                 );
                 self.call_depth -= 1;
+                self.call_stack.pop();
                 self.strict = outer_strict;
                 if lit.is_gen {
                     let items = self.gen_collect.pop().unwrap_or_default();

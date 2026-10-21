@@ -6122,8 +6122,9 @@ fn re_sym_split(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
 }
 
 /// `Error.captureStackTrace(obj, ctor?)` — extension V8 : pose la
-/// own prop `stack` non-énumérable (même contenu `Name: message`
-/// que les erreurs moteur — pas de frames, déviation documentée).
+/// own prop `stack` non-énumérable (en-tête + frames réelles,
+/// JS-C47 — l'argument `ctor` d'élision de frames n'est pas
+/// honoré : toute la pile est rendue, déviation documentée).
 fn error_capture_stack(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = arg(args, 0) else {
         return Err(e.type_error("captureStackTrace target must be an object"));
@@ -6137,12 +6138,7 @@ fn error_capture_stack(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
         .get_prop(id, "message")
         .and_then(|v| e.to_js_string(v).ok())
         .unwrap_or_default();
-    let head = if msg.is_empty() {
-        name
-    } else {
-        format!("{name}: {msg}")
-    };
-    let s = e.str_val(head);
+    let s = e.str_val(e.stack_text(&name, &msg));
     e.set_own(id, "stack", s, false);
     Ok(Value::Undefined)
 }
