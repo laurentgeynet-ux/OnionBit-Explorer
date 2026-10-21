@@ -158,6 +158,13 @@ pub struct Node {
     /// Même cycle de vie que `listeners` (ni clonés ni
     /// sérialisés — morts avec le miroir).
     pub inline_handlers: Vec<(String, String, Value)>,
+    /// Rattaché au document (`root` accessible) — drapeau
+    /// maintenu par [`Dom::set_attached`] aux re-parentages
+    /// (append/detach/insert/replace). Lecture O(1) pour
+    /// `is_attached`/`mark_dirty_at` : la remontée `parent`
+    /// par mutation rendait le parsing profond quadratique
+    /// (JS-C55).
+    pub attached: bool,
 }
 
 /// Opération `CanvasRenderingContext2D` enregistrée sur le
@@ -527,6 +534,7 @@ impl Dom {
             serialize_micros: Cell::new(0),
         };
         d.root = d.alloc(NodeKind::Element, "#document");
+        d.nodes[d.root as usize].attached = true;
         d
     }
 
@@ -621,6 +629,7 @@ impl Dom {
             text: String::new(),
             listeners: Vec::new(),
             inline_handlers: Vec::new(),
+            attached: false,
         });
         (self.nodes.len() - 1) as NodeId
     }
@@ -673,7 +682,7 @@ impl Dom {
     /// à la racine).
     pub fn mark_dirty_at(&self, node: NodeId) {
         self.dirty.set(true);
-        if node != self.root && !self.is_ancestor(self.root, node) {
+        if !self.is_attached(node) {
             return;
         }
         let next = match self.dirty_node.get() {
@@ -685,28 +694,50 @@ impl Dom {
     }
 
     /// Plus proche ancêtre commun de `a` et `b` (racine
-    /// `#document` en dernier recours).
+    /// `#document` en dernier recours). Linéaire en
+    /// `profondeur(a)+profondeur(b)` — la formulation
+    /// « monter `a` jusqu'à être ancêtre de `b` » payait une
+    /// remontée complète de `b` par niveau (O(prof²) —
+    /// JS-C55).
     fn common_ancestor(&self, a: NodeId, b: NodeId) -> NodeId {
-        let mut x = a;
-        while !self.is_ancestor(x, b) {
-            match self.parent(x) {
-                Some(p) => x = p,
-                None => return self.root,
-            }
-        }
-        x
-    }
-
-    /// `a` est un ancêtre strict de `b` (ou `a == b`).
-    fn is_ancestor(&self, a: NodeId, b: NodeId) -> bool {
-        let mut cur = Some(b);
+        let mut seen = std::collections::HashSet::new();
+        let mut cur = Some(a);
         while let Some(n) = cur {
-            if n == a {
-                return true;
+            if !seen.insert(n) {
+                break;
             }
             cur = self.parent(n);
         }
-        false
+        let mut cur = Some(b);
+        while let Some(n) = cur {
+            if seen.contains(&n) {
+                return n;
+            }
+            cur = self.parent(n);
+        }
+        self.root
+    }
+
+    /// Propage le drapeau « rattaché au document » au sous-arbre
+    /// de `node` — DFS itératif (JS-C55 : profondeur contrôlée
+    /// par le script). Les sous-arbres déjà uniformes sont
+    /// sautés : un append de nœud frais coûte O(1).
+    fn set_attached(&mut self, node: NodeId, flag: bool) {
+        if self
+            .nodes
+            .get(node as usize)
+            .is_none_or(|n| n.attached == flag)
+        {
+            return;
+        }
+        let mut stack = vec![node];
+        while let Some(c) = stack.pop() {
+            if self.nodes[c as usize].attached == flag {
+                continue;
+            }
+            self.nodes[c as usize].attached = flag;
+            stack.extend(self.nodes[c as usize].children.iter().copied());
+        }
     }
 
     /// Lit et efface le flag de mutation (≙ « dirty bit » des toolkits).
@@ -869,6 +900,8 @@ impl Dom {
     pub fn append(&mut self, parent: NodeId, child: NodeId) {
         self.detach(child);
         self.nodes[child as usize].parent = Some(parent);
+        let a = self.nodes[parent as usize].attached;
+        self.set_attached(child, a);
         self.nodes[parent as usize].children.push(child);
         self.mark_dirty_at(parent);
         let prev = {
@@ -902,6 +935,7 @@ impl Dom {
             self.nodes[p as usize].children.retain(|&c| c != node);
             self.mark_dirty_at(p);
             self.nodes[node as usize].parent = None;
+            self.set_attached(node, false);
             self.queue_mutation(&MutationRecord::child_list(
                 p,
                 Vec::new(),
@@ -920,10 +954,13 @@ impl Dom {
         let old = std::mem::take(&mut self.nodes[node as usize].children);
         for c in &old {
             self.nodes[*c as usize].parent = None;
+            self.set_attached(*c, false);
         }
+        let a = self.nodes[node as usize].attached;
         for &k in kids {
             self.detach(k);
             self.nodes[k as usize].parent = Some(node);
+            self.set_attached(k, a);
         }
         self.nodes[node as usize].children = kids.to_vec();
         self.mark_dirty_at(node);
@@ -976,6 +1013,8 @@ impl Dom {
             None => self.nodes[parent as usize].children.push(child),
         }
         self.nodes[child as usize].parent = Some(parent);
+        let a = self.nodes[parent as usize].attached;
+        self.set_attached(child, a);
         self.mark_dirty_at(parent);
         let (prev, next) = {
             let kids = &self.nodes[parent as usize].children;
@@ -1016,6 +1055,9 @@ impl Dom {
             self.nodes[parent as usize].children[i] = new;
             self.nodes[new as usize].parent = Some(parent);
             self.nodes[old as usize].parent = None;
+            let a = self.nodes[parent as usize].attached;
+            self.set_attached(new, a);
+            self.set_attached(old, false);
             self.mark_dirty_at(parent);
             self.queue_mutation(&MutationRecord::child_list(
                 parent,
@@ -1044,9 +1086,26 @@ impl Dom {
         self.nodes[id as usize].attrs = attrs;
         self.nodes[id as usize].text = text;
         if deep {
-            for c in kids {
-                let cc = self.clone_node(c, true);
-                self.append(id, cc);
+            // Itératif : la profondeur DOM est contrôlée par le
+            // script — une descente récursive déborderait la pile
+            // Rust (JS-C55).
+            let mut work: Vec<(NodeId, NodeId)> = kids.iter().rev().map(|&c| (c, id)).collect();
+            while let Some((src, dst_parent)) = work.pop() {
+                let (k2, t2, a2, x2, kids2) = {
+                    let n = &self.nodes[src as usize];
+                    (
+                        n.kind,
+                        n.tag.clone(),
+                        n.attrs.clone(),
+                        n.text.clone(),
+                        n.children.clone(),
+                    )
+                };
+                let cid = self.alloc(k2, &t2);
+                self.nodes[cid as usize].attrs = a2;
+                self.nodes[cid as usize].text = x2;
+                self.append(dst_parent, cid);
+                work.extend(kids2.iter().rev().map(|&g| (g, cid)));
             }
         }
         id
@@ -1218,18 +1277,11 @@ impl Dom {
 
     /// Le nœud remonte à `root` — les nœuds détachés
     /// (`remove`, effacement `document.open`) sont invisibles
-    /// aux requêtes au niveau document.
+    /// aux requêtes au niveau document. Lecture du drapeau
+    /// `attached` — O(1) ; la remontée `parent` était
+    /// O(profondeur) par requête (JS-C55).
     fn is_attached(&self, node: NodeId) -> bool {
-        let mut cur = node;
-        loop {
-            if cur == self.root {
-                return true;
-            }
-            match self.nodes.get(cur as usize).and_then(|n| n.parent) {
-                Some(p) => cur = p,
-                None => return false,
-            }
-        }
+        self.nodes.get(node as usize).is_some_and(|n| n.attached)
     }
 
     fn attr_val<'a>(n: &'a Node, name: &str) -> Option<&'a str> {
@@ -1249,12 +1301,20 @@ impl Dom {
     }
 
     fn collect_tag(&self, node: NodeId, tag: &str, out: &mut Vec<NodeId>) {
-        for &c in &self.nodes[node as usize].children {
+        // DFS itératif (JS-C55) : la profondeur DOM est contrôlée
+        // par le script, la récursion déborderait la pile Rust.
+        let mut stack: Vec<NodeId> = self.nodes[node as usize]
+            .children
+            .iter()
+            .rev()
+            .copied()
+            .collect();
+        while let Some(c) = stack.pop() {
             let n = &self.nodes[c as usize];
             if n.kind == NodeKind::Element && (tag == "*" || n.tag == tag) {
                 out.push(c);
             }
-            self.collect_tag(c, tag, out);
+            stack.extend(n.children.iter().rev());
         }
     }
 
@@ -1267,7 +1327,13 @@ impl Dom {
     }
 
     fn collect_class(&self, node: NodeId, class: &str, out: &mut Vec<NodeId>) {
-        for &c in &self.nodes[node as usize].children {
+        let mut stack: Vec<NodeId> = self.nodes[node as usize]
+            .children
+            .iter()
+            .rev()
+            .copied()
+            .collect();
+        while let Some(c) = stack.pop() {
             let n = &self.nodes[c as usize];
             if n.kind == NodeKind::Element
                 && Self::attr_val(n, "class")
@@ -1275,7 +1341,7 @@ impl Dom {
             {
                 out.push(c);
             }
-            self.collect_class(c, class, out);
+            stack.extend(n.children.iter().rev());
         }
     }
 
@@ -1308,7 +1374,13 @@ impl Dom {
     /// Does some ancestor chain of `node` (within `from`) match the
     /// selector `parts` right-to-left? Used by the descendant
     /// combinator and by `closest` on compound selectors.
+    /// Recursion bounded by `parts.len()` ≤ [`MAX_SELECTOR_PARTS`]
+    /// — a longer compound selector is outside the documented
+    /// subset and simply fails to match (JS-C55).
     fn ancestor_matches(&self, bound: NodeId, node: NodeId, parts: &[&str]) -> bool {
+        if parts.len() > MAX_SELECTOR_PARTS {
+            return false;
+        }
         let Some((&last, rest)) = parts.split_last() else {
             return true;
         };
@@ -1329,11 +1401,17 @@ impl Dom {
     }
 
     fn collect_query(&self, node: NodeId, sel: &SimpleSel, out: &mut Vec<NodeId>) {
-        for &c in &self.nodes[node as usize].children {
+        let mut stack: Vec<NodeId> = self.nodes[node as usize]
+            .children
+            .iter()
+            .rev()
+            .copied()
+            .collect();
+        while let Some(c) = stack.pop() {
             if self.node_matches(c, sel) {
                 out.push(c);
             }
-            self.collect_query(c, sel, out);
+            stack.extend(self.nodes[c as usize].children.iter().rev());
         }
     }
 
@@ -1372,12 +1450,14 @@ impl Dom {
     }
 
     fn collect_text(&self, node: NodeId, out: &mut String) {
-        let n = &self.nodes[node as usize];
-        if n.kind == NodeKind::Text {
-            out.push_str(&n.text);
-        }
-        for &c in &n.children {
-            self.collect_text(c, out);
+        // DFS itératif (JS-C55) — même raison que `collect_tag`.
+        let mut stack = vec![node];
+        while let Some(c) = stack.pop() {
+            let n = &self.nodes[c as usize];
+            if n.kind == NodeKind::Text {
+                out.push_str(&n.text);
+            }
+            stack.extend(n.children.iter().rev());
         }
     }
 
@@ -1392,51 +1472,79 @@ impl Dom {
     }
 
     fn serialize(&self, node: NodeId, out: &mut String) {
-        let n = &self.nodes[node as usize];
-        if n.kind == NodeKind::Text {
-            out.push_str(&escape_text(&n.text));
-            return;
+        // Itératif (JS-C55) : Enter ouvre l'élément, Exit le ferme,
+        // Rawtext émet un nœud texte verbatim (commentaire rawtext
+        // ci-dessous). Pile explicite — la profondeur DOM est
+        // contrôlée par le script.
+        enum Ser {
+            Enter(NodeId),
+            Exit(NodeId),
+            Rawtext(NodeId),
         }
-        out.push('<');
-        out.push_str(&n.tag);
-        for (k, v) in &n.attrs {
-            out.push(' ');
-            out.push_str(k);
-            out.push_str("=\"");
-            out.push_str(&escape_attr(v));
-            out.push('"');
-        }
-        out.push('>');
-        if VOID_TAGS.contains(&n.tag.as_str()) {
-            return;
-        }
-        // Texte brut des éléments rawtext (étape 55c) : la
-        // re-sérialisation canal miroir→Dom doit émettre le
-        // contenu **verbatim** — l'échappement `&`/`<` n'est
-        // pas décodé au re-parse rawtext et corrompt la
-        // source à chaque resynchronisation (`&lt;` →
-        // `&amp;lt;`). Repli échappé si la source contient
-        // son propre `</tag` (sans lui la frontière casse et
-        // le reste fuirait en nœud texte visible).
-        // `title`/`textarea` sont RCDATA — l'échappement
-        // normal est décodé fidèlement au re-parse.
-        let verbatim = RAW_VERBATIM.contains(&n.tag.as_str());
-        for &c in &n.children {
-            let child = &self.nodes[c as usize];
-            if verbatim && child.kind == NodeKind::Text {
-                let marker = format!("</{}", n.tag);
-                if contains_ci(&child.text, &marker) {
-                    out.push_str(&escape_text(&child.text));
-                } else {
-                    out.push_str(&child.text);
+        let mut stack = vec![Ser::Enter(node)];
+        while let Some(ev) = stack.pop() {
+            match ev {
+                Ser::Exit(id) => {
+                    let n = &self.nodes[id as usize];
+                    out.push_str("</");
+                    out.push_str(&n.tag);
+                    out.push('>');
                 }
-            } else {
-                self.serialize(c, out);
+                Ser::Rawtext(id) => {
+                    let child = &self.nodes[id as usize];
+                    let parent = &self.nodes[child.parent.unwrap_or(id) as usize];
+                    let marker = format!("</{}", parent.tag);
+                    if contains_ci(&child.text, &marker) {
+                        out.push_str(&escape_text(&child.text));
+                    } else {
+                        out.push_str(&child.text);
+                    }
+                }
+                Ser::Enter(id) => {
+                    let n = &self.nodes[id as usize];
+                    if n.kind == NodeKind::Text {
+                        out.push_str(&escape_text(&n.text));
+                        continue;
+                    }
+                    out.push('<');
+                    out.push_str(&n.tag);
+                    for (k, v) in &n.attrs {
+                        out.push(' ');
+                        out.push_str(k);
+                        out.push_str("=\"");
+                        out.push_str(&escape_attr(v));
+                        out.push('"');
+                    }
+                    out.push('>');
+                    if VOID_TAGS.contains(&n.tag.as_str()) {
+                        continue;
+                    }
+                    stack.push(Ser::Exit(id));
+                    // Texte brut des éléments rawtext (étape 55c) :
+                    // la re-sérialisation canal miroir→Dom doit
+                    // émettre le contenu **verbatim** —
+                    // l'échappement `&`/`<` n'est pas décodé au
+                    // re-parse rawtext et corrompt la source à
+                    // chaque resynchronisation (`&lt;` →
+                    // `&amp;lt;`). Repli échappé si la source
+                    // contient son propre `</tag` (sans lui la
+                    // frontière casse et le reste fuirait en nœud
+                    // texte visible).
+                    // `title`/`textarea` sont RCDATA —
+                    // l'échappement normal est décodé fidèlement
+                    // au re-parse.
+                    let verbatim = RAW_VERBATIM.contains(&n.tag.as_str());
+                    for &c in n.children.iter().rev() {
+                        let child = &self.nodes[c as usize];
+                        if verbatim && child.kind == NodeKind::Text {
+                            stack.push(Ser::Rawtext(c));
+                        } else {
+                            stack.push(Ser::Enter(c));
+                        }
+                    }
+                }
             }
         }
-        out.push_str("</");
-        out.push_str(&n.tag);
-        out.push('>');
     }
 
     // -- fragment parsing ---------------------------------------------------
@@ -1727,6 +1835,11 @@ enum AttrOp {
 /// Caractère admis dans un identifiant de sélecteur (subset —
 /// pas d'échappes `\` : un sélecteur qui en contient sort du
 /// sous-ensemble et ne matche rien).
+/// Borne du combinatoire descendant : un sélecteur à plus de
+/// parties sort du sous-ensemble documenté (la remontée
+/// `ancestor_matches` est récursive sur `parts` — JS-C55).
+const MAX_SELECTOR_PARTS: usize = 64;
+
 fn is_sel_ident(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c >= 0x80
 }

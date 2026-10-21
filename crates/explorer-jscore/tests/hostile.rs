@@ -10,7 +10,10 @@
 //! honnêtes). Les budgets ops/heap sont serrés pour que les cas
 //! « allocations astronomiques » se résolvent en `Err` rapidement.
 
-use explorer_jscore::Engine;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use explorer_jscore::{Dom, Engine};
 
 /// Évalue `src` dans un moteur borné — le test échoue sur panic
 /// (le runtime Rust le laisse propager).
@@ -23,6 +26,35 @@ fn ev(src: &str) -> Option<String> {
         Ok(v) => Some(e.describe(v)),
         Err(_) => None,
     }
+}
+
+/// Variante avec le mini-DOM installé — `document.*` doit réellement
+/// s'exécuter (sans DOM l'éval refuse tôt et la batterie serait
+/// vacuante).
+#[track_caller]
+fn ev_dom(src: &str) -> Option<String> {
+    let mut e = Engine::new();
+    e.set_op_limit(200_000);
+    e.set_mem_limit(16 * 1024 * 1024);
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        "<html><body><p id=p>x</p></body></html>",
+    ))));
+    match e.eval(src) {
+        Ok(v) => Some(e.describe(v)),
+        Err(_) => None,
+    }
+}
+
+/// Batterie DOM : chaque appel doit **réussir ou refuser**, jamais
+/// paniquer — on exige `Ok` ou `Err` mais l'évaluation doit avoir
+/// touché `document` (sanity check sur la dernière expression).
+fn battery_dom(name: &str, srcs: &[&str]) {
+    let _ = name;
+    for src in srcs {
+        let _ = ev_dom(src);
+    }
+    // Le harnais DOM fonctionne : `document` est bien installé.
+    assert!(ev_dom("typeof document").is_some());
 }
 
 /// Batterie : chaque expression hostile — le seul contrat est
@@ -283,7 +315,7 @@ fn hostile_promise_async() {
 
 #[test]
 fn hostile_dom_mirror() {
-    battery(
+    battery_dom(
         "dom",
         &[
             "document.querySelector('[')",
@@ -296,6 +328,29 @@ fn hostile_dom_mirror() {
             "document.body.closest('[[')",
             "var d=document.createElement('div'); d.innerHTML='<p>'.repeat(1e4)",
             "document.body.setAttribute('x'.repeat(1e5),'y')",
+        ],
+    );
+}
+
+#[test]
+fn hostile_dom_depth() {
+    // Profondeur DOM script-contrôlée — JS-C55 : les descentes
+    // (sérialisation, textContent, sélecteurs, cloneNode) sont
+    // itératives ; la récursion déborderait la pile Rust.
+    battery_dom(
+        "dom-depth",
+        &[
+            // 200 k niveaux d'imbrication — parse (itératif) puis
+            // re-sérialisation `innerHTML` (autrefois récursive).
+            "var d=document.createElement('div'); d.innerHTML='<div>'.repeat(2e5); d.innerHTML.length",
+            "var d=document.createElement('div'); d.innerHTML='<div>'.repeat(2e5); d.textContent.length",
+            "var d=document.createElement('div'); d.innerHTML='<div>'.repeat(2e5); d.cloneNode(true).innerHTML.length",
+            "var d=document.createElement('div'); d.innerHTML='<div>'.repeat(2e5); document.body.appendChild(d); document.body.innerHTML.length",
+            "var d=document.createElement('div'); d.innerHTML='<div>'.repeat(2e5); document.body.appendChild(d); document.body.getElementsByTagName('div').length",
+            "var d=document.createElement('div'); d.innerHTML='<div>'.repeat(2e5); document.body.appendChild(d); d.querySelectorAll('div').length",
+            // Sélecteur composé surdimensionné — remontée
+            // `ancestor_matches` bornée à MAX_SELECTOR_PARTS.
+            "var d=document.createElement('div'); d.innerHTML='<div>'.repeat(1e4); document.body.appendChild(d); d.matches('div '.repeat(1e4)+'div')",
         ],
     );
 }

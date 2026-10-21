@@ -2121,7 +2121,13 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   borne les natifs comme les appels Script ; `flat_into`
   devient itératif (worklist + tick + alloc_guard) ;
   `clone_deep` plafonne à 256 niveaux (`DataCloneError` typé).
-  Tests : `tests/hostile.rs` — 11 batteries par module
+  Passe DOM : descentes `collect_*`/`serialize`/`clone_node`
+  itératives (pile Rust épargnée) ; **parse profond O(d²)**
+  corrigé — drapeau `attached` par nœud (O(1) pour
+  `is_attached`/`mark_dirty_at`) et `common_ancestor` en
+  HashSet (le 200 k niveaux `innerHTML` pendait >60 s,
+  maintenant ~4 s) ; combinatoire descendant plafonné à
+  64 parties. Tests : `tests/hostile.rs` — 12 batteries par module
   (string, array, regexp, typed array, json/eval,
   temporal/intl, bigint/math, proxy, async, DOM, profondeur)
   × appels pathologiques — contrat unique « Ok ou Err,
