@@ -120,6 +120,89 @@ impl Engine {
         self.module_loader = Some(loader);
     }
 
+    /// Enregistre une import map (JS-C44) : `json` est le contenu
+    /// texte d'un `<script type="importmap">`. Minimal — seule la
+    /// clé `imports` est lue (`scopes` ignoré, les valeurs non
+    /// string sont sautées, une map invalide est ignorée sans
+    /// erreur — tolérance miroir). Fusion additive : une clé déjà
+    /// enregistrée garde sa première cible (spec « merge » des
+    /// maps multiples). Les bare specifiers sont ensuite réécrits
+    /// dans `load_source` avant l'appel au `ModuleLoader`.
+    pub fn set_import_map(&mut self, json: &str) {
+        let text = self.str_val(json);
+        let Ok(v) = crate::json::json_parse(self, Value::Undefined, &[text]) else {
+            return;
+        };
+        // Lecture directe de `props` — `JSON.parse` ne produit que
+        // des props data, aucun getter à déclencher.
+        let Value::Obj(root) = v else { return };
+        let Some(imports) = self
+            .heap
+            .obj(root)
+            .and_then(|o| o.props.iter().find(|(k, _)| k == "imports"))
+            .and_then(|(_, p)| p.data_value())
+        else {
+            return;
+        };
+        let Value::Obj(oidx) = imports else { return };
+        // Les paires sont collectées sous le borrow puis relâché —
+        // `heap.string` re-emprunte.
+        let pairs: Vec<(String, Value)> = self
+            .heap
+            .obj(oidx)
+            .map(|o| {
+                o.props
+                    .iter()
+                    .filter_map(|(k, p)| p.data_value().map(|val| (k.clone(), val)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (key, val) in pairs {
+            let Value::Str(id) = val else { continue };
+            let Some(target) = self.heap.string(id) else {
+                continue;
+            };
+            if self.import_map.iter().all(|(k, _)| *k != key) {
+                self.import_map.push((key, target));
+            }
+        }
+    }
+
+    /// Traduction d'un spécificateur bare via l'import map —
+    /// correspondance exacte puis préfixe le plus long dont la clé
+    /// finit par `/` (spec « resolve a module specifier » : le
+    /// préfixe consommé est remplacé, le reste du spécificateur
+    /// est conservé). `None` hors map : le `ModuleLoader` garde
+    /// son message d'erreur actuel.
+    fn resolve_bare(&self, spec: &str) -> Option<String> {
+        if !is_bare_specifier(spec) {
+            return None;
+        }
+        let mut best: Option<&(String, String)> = None;
+        for entry in &self.import_map {
+            let (key, _) = &entry;
+            if (key == spec || (key.ends_with('/') && spec.starts_with(key.as_str())))
+                && best.is_none_or(|(bk, _)| key.len() > bk.len())
+            {
+                best = Some(entry);
+            }
+        }
+        best.map(|(key, t)| format!("{t}{}", &spec[key.len()..]))
+    }
+
+    /// Fetch a dependency's source through the injected loader.
+    fn load_source(&mut self, spec: &str, referrer: &str) -> JsResult<String> {
+        let Some(loader) = self.module_loader.clone() else {
+            return Err(self.type_error(format!("no module loader for `{spec}`")));
+        };
+        let resolved = self.resolve_bare(spec).unwrap_or_else(|| spec.to_string());
+        let r = loader.borrow_mut().load(&resolved, referrer);
+        match r {
+            Ok(src) => Ok(src),
+            Err(msg) => Err(self.type_error(format!("cannot load module `{spec}`: {msg}"))),
+        }
+    }
+
     /// Instantiate and evaluate a whole module program; returns its
     /// namespace object (`{export: value}` with live getters).
     ///
@@ -154,18 +237,6 @@ impl Engine {
         let idx = self.instantiate(spec, &src, 0)?;
         self.evaluate_module(idx)?;
         Ok(self.module_ns_object(idx))
-    }
-
-    /// Fetch a dependency's source through the injected loader.
-    fn load_source(&mut self, spec: &str, referrer: &str) -> JsResult<String> {
-        let Some(loader) = self.module_loader.clone() else {
-            return Err(self.type_error(format!("no module loader for `{spec}`")));
-        };
-        let r = loader.borrow_mut().load(spec, referrer);
-        match r {
-            Ok(src) => Ok(src),
-            Err(msg) => Err(self.type_error(format!("cannot load module `{spec}`: {msg}"))),
-        }
     }
 
     /// `InnerModuleInstantiation` — registers the module in the
@@ -423,6 +494,27 @@ impl Engine {
         self.module_envs.push(env.clone());
         self.module_envs.len() - 1
     }
+}
+
+/// Spécificateur « bare » au sens de la spec import map : ni
+/// URL absolue (`scheme:` — `https:`, `data:`, `node:`…), ni
+/// chemin `/…`, `./…`, `../…`. Seuls les bare passent par la map.
+fn is_bare_specifier(spec: &str) -> bool {
+    if spec.starts_with('/') || spec.starts_with("./") || spec.starts_with("../") {
+        return false;
+    }
+    let Some(colon) = spec.find(':') else {
+        return true;
+    };
+    // Un scheme valide → URL-like, jamais bare (`react:dom` inclus,
+    // conforme à l'ordre « URL d'abord » de la spec).
+    !spec[..colon].bytes().enumerate().all(|(i, b)| {
+        if i == 0 {
+            b.is_ascii_alphabetic()
+        } else {
+            b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.')
+        }
+    })
 }
 
 /// Insert an `import` alias cell — `local` reads (and refuses

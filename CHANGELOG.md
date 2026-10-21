@@ -209,6 +209,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   documenté : les `<script>` écrits restent inertes dans le
   miroir — l'ordonnancement revient au scheduler amont
   (étape 50), qui les découvre à la re-sérialisation.
+- **JS-C44 — import maps minimales** (`explorer-jscore` +
+  `explorer-js`) : les bare specifiers (`import 'react'`)
+  sont réécrits avant l'appel au `ModuleLoader` —
+  correspondance exacte puis préfixe le plus long en `/`
+  (le reste du spécificateur est conservé, spec « resolve a
+  module specifier »). `Engine::set_import_map(json)` lit la
+  clé `imports` d'un `<script type="importmap">` (JSON parsé
+  par le moteur ; map invalide ignorée, valeurs non-string
+  sautées, `scopes` non lu — minimal documenté) ; fusion
+  additive, première clé gagnante en conflit. Exposé côté
+  couture par `JsEngine::set_import_map` (défaut noop —
+  contrat additif, la session pousse le JSON avant son
+  premier `eval_module`). `census` enregistre les
+  `type="importmap"` dans l'ordre du document. Un bare hors
+  map garde l'erreur `cannot load module` typée.
 
 ### Fixed
 

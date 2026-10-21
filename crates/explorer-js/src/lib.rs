@@ -321,6 +321,14 @@ pub trait JsEngine: Send {
         Vec::new()
     }
 
+    /// Enregistre une import map (JS-C44) — `json` = contenu
+    /// d'un `<script type="importmap">`, à pousser **avant** le
+    /// premier `eval_module` de la page. Les bare specifiers
+    /// (`import 'react'`) sont alors réécrits avant d'atteindre
+    /// le `resolve` de [`Self::eval_module`]. Défaut : noop
+    /// (moteur sans modules).
+    fn set_import_map(&mut self, _json: &str) {}
+
     /// Évalue un module ES (étape 50) : `entry` est le nom
     /// canonique du module d'entrée (URL résolue — ou nom
     /// synthétique aliasé pour un module inline), `sources` la
@@ -517,6 +525,9 @@ enum Cmd {
         resolve: UrlResolver,
         tx: Sender<Result<String, JsError>>,
     },
+    SetImportMap {
+        json: String,
+    },
     Dispatch {
         ty: String,
         path: Vec<(String, u32)>,
@@ -690,6 +701,7 @@ impl JscoreEngine {
                         return;
                     }
                 }
+                Cmd::SetImportMap { json } => eng.set_import_map(&json),
                 Cmd::Dispatch { ty, path, tx } => {
                     let out = dispatch_event(&mut eng, jsd.as_ref(), &ty, &path);
                     if tx.send(out).is_err() {
@@ -837,6 +849,13 @@ impl JsEngine for JscoreEngine {
             return Err(JsError::Dead);
         }
         rx.recv().map_err(|_| JsError::Dead)?
+    }
+
+    fn set_import_map(&mut self, json: &str) {
+        // Feu-et-oublie : la map s'applique aux prochains modules.
+        let _ = self.tx.send(Cmd::SetImportMap {
+            json: json.to_string(),
+        });
     }
 
     fn set_budget(&mut self, ops: u64) {

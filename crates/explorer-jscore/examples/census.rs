@@ -214,6 +214,13 @@ fn main() {
             )
         };
         let module = ty == "module";
+        if ty == "importmap" {
+            // JS-C44 : enregistrée dans l'ordre du document — un
+            // module qui la précède ne la verra pas (spec).
+            engine.set_import_map(&body);
+            println!("[{i}] importmap enregistrée ({}B)", body.len());
+            continue;
+        }
         if !(module || CLASSIC_TYPES.contains(&ty.as_str())) {
             println!("[{i}] SKIP type=\"{ty}\"");
             *skipped.entry(ty).or_default() += 1;

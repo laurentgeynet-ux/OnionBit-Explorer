@@ -2565,6 +2565,125 @@ fn mod_import_meta_url() {
     assert_eq!(global(&mut e, "__r"), "main.js");
 }
 
+// -- JS-C44 : import map minimale ---------------------------------
+
+/// Eval `main` comme module après enregistrement de `map_json`
+/// (`<script type="importmap">`) — les bare specifiers sont
+/// réécrits par la map avant l'appel au loader.
+#[track_caller]
+fn mod_ev_map(main: &str, deps: &[(&'static str, &'static str)], map_json: &str) -> Engine {
+    let mut e = Engine::new();
+    e.set_import_map(map_json);
+    let loader = MapLoader(deps.iter().copied().collect());
+    e.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
+    e.eval_module(main, "main.js")
+        .unwrap_or_else(|err| panic!("{main} -> {err}"));
+    e
+}
+
+#[test]
+fn import_map_exact() {
+    let mut e = mod_ev_map(
+        "import r from 'react'; globalThis.__r = r;",
+        &[("/vendor/react.js", "export default 'react-ok';")],
+        r#"{"imports":{"react":"/vendor/react.js"}}"#,
+    );
+    assert_eq!(global(&mut e, "__r"), "react-ok");
+}
+
+#[test]
+fn import_map_prefix_keeps_remainder() {
+    // `react/` matche `react/dom` → cible + reste `dom`.
+    let mut e = mod_ev_map(
+        "import d from 'react/dom'; globalThis.__r = d;",
+        &[("/vendor/react/dom", "export default 'dom-ok';")],
+        r#"{"imports":{"react/":"/vendor/react/"}}"#,
+    );
+    assert_eq!(global(&mut e, "__r"), "dom-ok");
+}
+
+#[test]
+fn import_map_longest_prefix_wins() {
+    let mut e = mod_ev_map(
+        "import a from 'pkg/x'; import b from 'pkg/sub/y'; globalThis.__r = a + '/' + b;",
+        &[
+            ("/p/x", "export default 'short';"),
+            ("/p/deep/y", "export default 'deep';"),
+        ],
+        r#"{"imports":{"pkg/":"/p/","pkg/sub/":"/p/deep/"}}"#,
+    );
+    assert_eq!(global(&mut e, "__r"), "short/deep");
+}
+
+#[test]
+fn import_map_unmapped_bare_still_errors() {
+    let mut e = Engine::new();
+    e.set_import_map(r#"{"imports":{"react":"/vendor/react.js"}}"#);
+    let loader = MapLoader(std::collections::BTreeMap::new());
+    e.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
+    let err = e
+        .eval_module("import x from 'lodash';", "main.js")
+        .unwrap_err();
+    assert!(err.to_string().contains("cannot load module"), "{err}");
+}
+
+#[test]
+fn import_map_url_like_specifiers_untouched() {
+    // `./dep` et les URLs absolues ne passent pas par la map.
+    let mut e = mod_ev_map(
+        "import {x} from './dep'; globalThis.__r = x;",
+        &[("./dep", "export const x = 'rel';")],
+        r#"{"imports":{"dep":"/vendor/dep.js","./dep":"/WRONG.js"}}"#,
+    );
+    assert_eq!(global(&mut e, "__r"), "rel");
+}
+
+#[test]
+fn import_map_first_registration_wins() {
+    let mut e = Engine::new();
+    e.set_import_map(r#"{"imports":{"m":"/first.js"}}"#);
+    e.set_import_map(r#"{"imports":{"m":"/second.js"}}"#);
+    let loader = MapLoader(
+        [("/first.js", "export default 'F';")]
+            .iter()
+            .copied()
+            .collect(),
+    );
+    e.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
+    e.eval_module("import v from 'm'; globalThis.__r = v;", "main.js")
+        .unwrap_or_else(|err| panic!("{err}"));
+    assert_eq!(global(&mut e, "__r"), "F");
+}
+
+#[test]
+fn import_map_invalid_ignored() {
+    // JSON cassé ou sans `imports` : ignoré sans erreur, le bare
+    // retombe sur le loader (qui rapporte son erreur normale).
+    let mut e = Engine::new();
+    e.set_import_map("not json {{{");
+    e.set_import_map(r#"{"scopes":{}}"#);
+    e.set_import_map(r#"{"imports":{"a":42}}"#); // valeurs non-string sautées
+    let loader = MapLoader(std::collections::BTreeMap::new());
+    e.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
+    assert!(e.eval_module("import 'a';", "main.js").is_err());
+}
+
+#[test]
+fn import_map_dynamic_import() {
+    let mut e = Engine::new();
+    e.set_import_map(r#"{"imports":{"lazy":"/vendor/lazy.js"}}"#);
+    let loader = MapLoader(
+        [("/vendor/lazy.js", "export const v = 7;")]
+            .iter()
+            .copied()
+            .collect(),
+    );
+    e.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
+    e.eval("import('lazy').then(function (ns) { globalThis.__r = ns.v; })")
+        .unwrap_or_else(|err| panic!("{err}"));
+    assert_eq!(global(&mut e, "__r"), "7");
+}
+
 // -- TypedArrays / ArrayBuffer / DataView (JS-C6) --------------------
 
 #[test]

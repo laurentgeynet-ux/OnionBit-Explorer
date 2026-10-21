@@ -1620,12 +1620,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `[\0-\x1f]` → `empty class range` ; `\uD800` →
   `Invalid codepoint`. Chaque motif = un cas `corpus.rs`
   minimal avant fix — l'ordre est celui du site réel.
-- [ ] **JS-C44. Specificateurs « bare » non résolus**
+- [x] **JS-C44. Specificateurs « bare » non résolus**
   (déclencheur terrain mission 6 : `cannot load module
-  'react'`) : `import 'react'` hors import map — arbitrer :
-  import maps minimal vs écart documenté (les bundlers
-  résolvent normalement, mais des sites servent du bare en
-  prod). Les `ReferenceError` `hljs`/`$`/`Event`/`SP`
+  'react'`) : arbitrage = **import maps minimales** —
+  `Engine::set_import_map` lit la clé `imports` du JSON
+  (`scopes` non lu, valeurs non-string sautées, map
+  invalide ignorée — tolérance), `load_source` réécrit les
+  bare specifiers (exact puis préfixe le plus long en `/`,
+  reste conservé) avant le `ModuleLoader` ; première clé
+  gagnante sur fusion. Trait `JsEngine::set_import_map`
+  (défaut noop) — la session pousse le contenu des
+  `<script type="importmap">` avant le premier module ;
+  `census` le fait déjà. Bare hors map = erreur typée
+  inchangée. Les `ReferenceError` `hljs`/`$`/`Event`/`SP`
   observés sont des **conséquences** (scripts amont morts),
   pas des tickets.
 - [x] **JS-C45. Attributs `on*` jamais compilés**

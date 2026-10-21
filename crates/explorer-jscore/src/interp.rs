@@ -244,6 +244,12 @@ pub struct Engine {
     /// Specifier du module en cours d'exécution (`import.meta.url`
     /// et referrer de `import()`).
     pub(crate) current_module: String,
+    /// Import map minimale (JS-C44) — paires `(specifier, target)`
+    /// issues des clés `imports`, en ordre d'enregistrement (le
+    /// premier gagnant garde sa clé en cas de conflit entre maps,
+    /// spec « merge »). Consultée par `load_source` pour les
+    /// spécificateurs bare avant d'appeler le `ModuleLoader`.
+    pub(crate) import_map: Vec<(String, String)>,
     /// Pile de collecteurs `yield` des générateurs en cours
     /// (générateur eager : le corps tourne à l'appel et chaque
     /// `yield` pousse sur le collecteur du sommet — déviation
@@ -488,6 +494,7 @@ impl Engine {
             module_envs: Vec::new(),
             module_loader: None,
             current_module: String::new(),
+            import_map: Vec::new(),
             gen_collect: Vec::new(),
             pending_labels: Vec::new(),
             using_stack: Vec::new(),

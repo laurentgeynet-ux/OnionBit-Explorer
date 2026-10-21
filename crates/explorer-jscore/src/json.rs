@@ -255,7 +255,7 @@ pub(crate) fn parse(e: &mut Engine, v: Value) -> JsResult<Value> {
     Ok(v)
 }
 
-fn json_parse(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn json_parse(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let v = parse(e, arg(args, 0))?;
     let reviver = arg(args, 1);
     if !e.is_callable(reviver) {
