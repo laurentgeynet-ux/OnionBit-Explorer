@@ -117,7 +117,7 @@ fn visibility_hidden_supprime_emission() {
     // le sous-arbre (fond + texte) — motif « visually hidden »
     // des dropdowns/sr-only (BBC `LanguageDropdown` se peignait
     // en rivières de 1px de large).
-    let (_dom, bx, items) = dl(
+    let (dom, bx, items) = dl(
         "<div id=h><p>secret</p></div>",
         "#h{visibility:hidden;width:10px;height:10px}",
     );
@@ -132,7 +132,7 @@ fn visibility_hidden_supprime_emission() {
         "ni fond ni bordure émis"
     );
     // La place en layout est conservée (≠ display:none).
-    let h = find(&bx, by_id(&_dom, "h")).expect("boîte #h");
+    let h = find(&bx, by_id(&dom, "h")).expect("boîte #h");
     assert!(h.rect.height > 0.0, "la boîte garde sa hauteur");
 }
 
