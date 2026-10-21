@@ -1086,3 +1086,64 @@ fn media_js_report_resolves_play_and_reflects_props() {
     );
     assert_eq!(media_js_eval(&mut s, tab, "window.__r2"), "ko");
 }
+
+/// Étape 91 — peinture détachée : `dom`/`tree` vivent chez la
+/// tâche d'apply — les entrées s'enfilent (`Ignored`, jamais
+/// `unfocused` mensonger) ; une file non vide impose
+/// l'enfilement même fenêtre retombée (FIFO strict, sinon une
+/// frappe dépasserait le replay) ; `Scroll` consécutifs
+/// coalescent ; le drain rejoue l'ordre à la réinsertion.
+#[test]
+fn deferred_inputs_fifo_and_coalesce() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<input id=\"q\" name=\"q\">"));
+        e.paint_detached = true;
+    }
+    let input = {
+        let e = s.tabs.get(&tab).unwrap();
+        find_by_id(e.dom.as_ref().unwrap(), "q").unwrap()
+    };
+    s.set_focus(tab, Some(input));
+
+    // Fenêtre détachée : tout s'enfile, rien ne traite.
+    for ev in [
+        InputEvent::Key { key: "a".into() },
+        InputEvent::Scroll { dy: 10.0 },
+        InputEvent::Scroll { dy: 5.0 },
+        InputEvent::Key { key: "b".into() },
+    ] {
+        let r = s.handle_input_now(tab, ev).unwrap();
+        assert_eq!(r, InputOutcome::Ignored, "détaché ⇒ différé");
+    }
+    {
+        let e = s.tabs.get(&tab).unwrap();
+        assert_eq!(
+            e.deferred_inputs.len(),
+            3,
+            "les deux scrolls consécutifs coalescent"
+        );
+        assert!(matches!(
+            e.deferred_inputs[1],
+            InputEvent::Scroll { dy } if (dy - 15.0).abs() < f32::EPSILON
+        ));
+    }
+    // Fenêtre retombée mais file non vide : la touche s'enfile
+    // quand même — jamais devant les entrées plus anciennes.
+    s.tabs.get_mut(&tab).unwrap().paint_detached = false;
+    let r = s
+        .handle_input_now(tab, InputEvent::Key { key: "c".into() })
+        .unwrap();
+    assert_eq!(r, InputOutcome::Ignored, "file non vide ⇒ FIFO strict");
+    assert_eq!(s.tabs.get(&tab).unwrap().deferred_inputs.len(), 4);
+
+    // Drain à la réinsertion : rejoue FIFO dans l'ordre.
+    s.drain_deferred_inputs(tab);
+    let e = s.tabs.get(&tab).unwrap();
+    assert!(e.deferred_inputs.is_empty());
+    let v = e.dom.as_ref().unwrap().attribute(input, "value").unwrap();
+    assert_eq!(v.as_deref(), Some("abc"));
+}
+

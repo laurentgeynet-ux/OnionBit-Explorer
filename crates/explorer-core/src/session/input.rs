@@ -67,6 +67,24 @@ impl Session {
         // (56b) repart d'une frame nulle : hit-test mort
         // sinon — auto-réparation avant tout dispatch.
         self.ensure_painted(tab);
+        // Peinture détachée (étape 91) : `dom`/`tree` sont chez
+        // la tâche d'apply — hit-test et édition impossibles,
+        // et un `unfocused` serait un mensonge (le focus vit
+        // sur `Tab`, il se résoudra à la réinsertion). Les
+        // entrées sont différées puis rejouées à la livraison
+        // — jonglerie focus observée sur google (M-H1). Une
+        // file non vide impose aussi l'enfilement : passer en
+        // direct devant des entrées en attente brouillerait
+        // l'ordre (frappe reçue avant le replay d'une touche
+        // plus ancienne → texte interverti).
+        if self
+            .tabs
+            .get(&tab)
+            .is_some_and(|e| e.paint_detached || !e.deferred_inputs.is_empty())
+        {
+            self.defer_input(tab, ev);
+            return Ok(InputOutcome::Ignored);
+        }
         match ev {
             InputEvent::Key { key } => {
                 // `keydown` sur le champ focalisé, sinon niveau
@@ -639,6 +657,45 @@ impl Session {
         self.resolve_path(tab, self.tabs.get(&tab)?.focused.as_deref())
     }
 
+    /// Enfile une entrée pendant la peinture détachée — la
+    /// tâche d'apply détient `dom`/`tree` (étape 91). Les
+    /// deltas `Scroll` s'additionnent et le dernier
+    /// `MouseMove` l'emporte (même coalescence que le client,
+    /// ADR-0003) ; au-delà de [`MAX_DEFERRED_INPUTS`]
+    /// l'entrée est abandonnée — jamais de mémoire sans
+    /// borne sur du contenu hostile.
+    fn defer_input(&mut self, tab: TabId, ev: InputEvent) {
+        const MAX_DEFERRED_INPUTS: usize = 32;
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        let q = &mut entry.deferred_inputs;
+        match (&ev, q.back_mut()) {
+            (InputEvent::Scroll { dy }, Some(InputEvent::Scroll { dy: acc })) => *acc += dy,
+            (InputEvent::MouseMove { .. }, Some(back @ InputEvent::MouseMove { .. })) => *back = ev,
+            _ => {
+                if q.len() < MAX_DEFERRED_INPUTS {
+                    q.push_back(ev);
+                }
+            }
+        }
+    }
+
+    /// Rejoue les entrées différées — appelé dès que
+    /// `paint_detached` retombe et que la payload est
+    /// réinsérée (`put_paint` fait revenir `dom`/`tree`).
+    /// La file est vidée d'un coup : une entrée qui
+    /// re-détache (apply enchaîné) réenfile sur la file
+    /// fraîche, reprise à la livraison suivante.
+    pub(crate) fn drain_deferred_inputs(&mut self, tab: TabId) {
+        let mut q = match self.tabs.get_mut(&tab) {
+            Some(e) => std::mem::take(&mut e.deferred_inputs),
+            None => return,
+        };
+        while let Some(ev) = q.pop_front() {
+            let _ = self.handle_input_now(tab, ev);
+        }
+    }
     /// Focus champ (étape 52) : `blur` sur l'ancien nœud puis
     /// `focus` sur le nouveau — ordre navigateur. `None` =
     /// perte de focus seule. Les événements sont dispatchés

@@ -622,6 +622,7 @@ impl Session {
             entry.scroll_y = 0.0;
             entry.focused = None;
             entry.hovered = None;
+            entry.deferred_inputs.clear();
             entry.popup = None;
             entry.find = None;
             entry.js = None;

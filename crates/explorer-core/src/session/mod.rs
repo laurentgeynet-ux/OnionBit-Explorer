@@ -289,6 +289,14 @@ pub(crate) struct Tab {
     /// hit-test inerte). Une navigation supplantant l'epoch
     /// jette la payload à la réinsertion.
     paint_detached: bool,
+    /// Entrées différées pendant la peinture détachée
+    /// (étape 91) — `dom`/`tree` absents ⇒ hit-test et
+    /// édition impossibles, un `unfocused` serait un mensonge
+    /// (le focus survit : il vit sur `Tab`). Rejouées à la
+    /// réinsertion de la payload ; `Scroll`/`MouseMove`
+    /// consécutifs sont coalescés, file bornée par
+    /// [`MAX_DEFERRED_INPUTS`].
+    deferred_inputs: VecDeque<InputEvent>,
     /// Réponses script-net arrivées pendant le détachement
     /// JS (53f) — livrées au moteur à sa réinsertion, leurs
     /// callbacks tournent à la pompe suivante.
@@ -685,6 +693,7 @@ impl Session {
                 spec_paint: false,
                 js_detached: None,
                 paint_detached: false,
+                deferred_inputs: VecDeque::new(),
                 js_pending_net: Vec::new(),
                 js_pending_attrs: Vec::new(),
                 sync_floor: None,

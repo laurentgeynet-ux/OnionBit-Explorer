@@ -328,6 +328,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   dans `box_sig`). Terrain : le dropdown BBC n'émet plus
   d'item. Limite : le hit-test ne filtre pas `visibility` ;
   `collapse` sur ligne de table non retirée.
+- **R-50 — blockification des items flex/grid** (§9.7 /
+  CSS Display §2.7) (`explorer-layout`) : bug site-réel —
+  `styled-components` émet `display:initial` (→ `inline`)
+  sur ses `GridItem` ; `wrap_children` hoisait les blocs
+  **avant** de savoir que le parent est flex/grid, donc
+  l'item inline était scindé et son contenu hissé comme
+  item auto-placé à 1 piste (`LondonMedia` BBC = 15.5px,
+  12 cartes manchester à 49px). Livré : `blockify_item` —
+  kind `Inline`→`Block`, contenu repassé par le chemin
+  normal au lieu de hoister. Terrain : 48 → 5 boîtes
+  étroites sur bbc.com (les 5 restantes = le dropdown
+  caché à 1px, correct), LondonMedia 15.5→488px, héros
+  3 colonnes et sections 4 colonnes conformes. Tests
+  `modern.rs` : item `display:initial` en grid (cellule
+  et contenu préservés) et en flex.
 - **`scripts/spawn_daemon.ps1` — spawn WMI durci** :
   les morts silencieuses du daemon (3 occurrences
   non reproductibles, zéro stderr, zéro event) sont
@@ -679,6 +694,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   inchangé = preuve du non-fetch, frame PNG, back) ;
   contrôleur : purge `lastError` à la reconnexion,
   `about:blank` non préfixé.
+- **Étape 91 — entrées différées pendant la peinture
+  détachée** (`explorer-core`) : triage jonglerie focus
+  google (M-H1) — la fenêtre `paint_detached` d'Étape 90
+  laisse l'onglet sans `dom`/`tree` (chez la tâche
+  d'apply) : chaque entrée y tombait `unfocused`
+  mensonger ou tuait le chemin de focus. Livré :
+  `deferred_inputs` bornée (32) sur `Tab`, coalescence
+  `Scroll`/`MouseMove` comme le client (ADR-0003) ;
+  `handle_input_now` diffère quand la fenêtre est
+  ouverte **ou la file non vide** — FIFO strict, sinon
+  une frappe directe dépasse le replay (« explorer »
+  rendait « erx ») ; drain à la réinsertion de payload
+  (apply synchrone/détachée, commit nav), purge à la
+  nav/erreur/rearm. Terrain : les touches différées
+  d'une frappe google rejouent à la livraison. Test :
+  `deferred_inputs_fifo_and_coalesce`.
 
 ## [0.2.0] - 2026-10-20
 

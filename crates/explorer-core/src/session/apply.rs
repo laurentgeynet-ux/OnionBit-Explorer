@@ -791,6 +791,10 @@ impl Session {
                 self.emit_invalidated(tab);
             }
             self.commit_apply(tab, out);
+            // Étape 91 : les entrées différées pendant
+            // l'apply rejouent maintenant que `dom`/`tree`
+            // sont de retour (focus/édition restaurés).
+            self.drain_deferred_inputs(tab);
         }
         // Epoch changée : la page a été supplantée — la
         // payload est abandonnée (sa propre nav repeint).
@@ -849,15 +853,19 @@ impl Session {
         if scrolled && self.repaint(tab).is_ok() {
             self.emit_invalidated(tab);
         }
+        self.drain_deferred_inputs(tab);
         true
     }
 
     /// Réarme `paint_detached` après une panique du worker de
     /// rendu de nav — la payload est perdue avec lui : l'état
     /// vide dégrade en lazy-heal (comme après apply, 55h).
+    /// Les entrées différées sont jetées aussi — le `dom`
+    /// sur lequel elles visaient n'existe plus.
     pub(crate) fn rearm_nav_paint(&mut self, tab: TabId) {
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.paint_detached = false;
+            entry.deferred_inputs.clear();
         }
     }
 
@@ -889,6 +897,7 @@ impl Session {
             entry.put_paint(p);
         }
         self.commit_apply(tab, &out);
+        self.drain_deferred_inputs(tab);
     }
 
     /// Vide la file d'applies sous `&mut self` — drain de

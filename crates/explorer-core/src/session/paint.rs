@@ -120,6 +120,7 @@ impl Session {
             e.find = None;
             e.focused = None;
             e.hovered = None;
+            e.deferred_inputs.clear();
             e.spec_paint = false;
             // Étape 76 : la page quittée gèle à son index
             // avant que l'erreur ne la remplace — `back` la

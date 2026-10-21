@@ -1377,6 +1377,39 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `pump_net` drainent encore sous
   verrou (livraisons bornées).
 
+- [x] **Étape 91. Entrées différées
+  pendant la peinture détachée**
+  (core) — triage jonglerie focus
+  google (M-H1) : Étape 90 a rendu
+  la fenêtre `paint_detached`
+  possible — la tâche d'apply
+  détient `dom`/`tree`/`frame`
+  (`take_paint`), donc toute entrée
+  pendant la fenêtre se résolvait
+  sur un onglet sans DOM : `unfocused`
+  mensonger (le focus vit sur `Tab`)
+  et un clic y tuait le chemin de
+  focus pour de bon. Livré : file
+  `deferred_inputs` sur `Tab`
+  (bornée 32, `Scroll` additionnés
+  et `MouseMove` dernière l'emporte
+  — même coalescence client
+  ADR-0003) ; `handle_input_now`
+  renvoie `Ignored` quand la
+  fenêtre est ouverte **ou la file
+  non vide** (FIFO strict — une
+  entrée directe ne dépasse jamais
+  une différée, sinon texte
+  interverti, mesuré terrain :
+  « explorer » tapé rendait
+  « erx ») ; drain à la
+  réinsertion de payload (apply
+  synchrone et détachée, commit
+  nav) ; purge à la nav/erreur/
+  rearm. Terrain : les 6 touches
+  différées d'une frappe google
+  rejouent à la livraison.
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY
