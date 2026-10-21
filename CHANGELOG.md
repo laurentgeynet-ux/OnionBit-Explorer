@@ -9,6 +9,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-58 — `clip-path: inset()` minimal**
+  (`explorer-render`) : la propriété est reconnue par le
+  parser/cascade et `paint_box` enveloppe `paint_self` +
+  sous-arbre d'un `PushClip`/`PopClip` quand la valeur est
+  `inset(<length-percentage>{1,4})` (syntaxe margin 1→4
+  côtés, `%` sur la border box, transform appliquée comme
+  l'overflow). Motif `.visuallyHidden` (`clip-path:inset(50%)`
+  = clip 0×0) couvert pour les variantes sans 1×1+overflow.
+  Hors scope : `circle()`/`polygon()`/`path()`/`url()` —
+  ignorés tolérants. Tests display-list + raster pixel.
+- **JS-C54 — sélecteurs d'attribut au mini-DOM** : `querySelector(All)`/`matches`/`closest` acceptent `[attr]`, `[attr=v]`, `~=`/`|=`/`^=`/`$=`/`*=` (valeurs nues ou quotées, flag `i`/`s`, filtres et classes répétables). Déclencheur terrain : le module lobste.rs itère `time[data-at-unix]` au `DOMContentLoaded` — la liste vide masquait le listener (les TypeError ×4 historiques ne se reproduisent plus : `dataset`/`innerText`/`addEventListener`/NodeList itérable fonctionnent, timestamps désormais réécrits en texte relatif). Bonus outillage : `explorer-cli` initialise `tracing-subscriber` (`RUST_LOG` rend visibles les `debug!` session — scripts en échec, etc.).
 - **JS-C53 — test262 re-baseliné : 1046/1046 exécutés,
   31 skips, 0 échec** (sous-ensemble extrait d53ebc8, 1077
   fichiers) : la référence 1007/1046 datait d'avant la vague

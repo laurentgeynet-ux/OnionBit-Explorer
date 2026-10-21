@@ -363,3 +363,34 @@ fn mask_image_indecodable_repli_fond_plein() {
         "mask indécodable → fond plein conservé"
     );
 }
+
+// ── R-58 : clip-path inset borne les pixels ─────────────────
+
+#[test]
+fn clip_path_inset_ne_peint_que_le_centre() {
+    // `clip-path:inset(25%)` sur une boîte 20×20 fond rouge →
+    // seul le carré central 10×10 peint ; les coins restent au
+    // fond de page (blanc). (`inset(50%)` = clip 0×0 — le
+    // motif `.visuallyHidden` GitHub masque tout.)
+    let f = frame(
+        "<div id=s></div>",
+        "#s{position:absolute;left:0;top:0;width:20px;height:20px;\
+         background:#ff0000;clip-path:inset(25%)}",
+    );
+    assert_eq!(px(&f, 10, 10), [255, 0, 0, 255], "centre = rouge");
+    assert_eq!(px(&f, 2, 2), [255, 255, 255, 255], "coin = blanc");
+    assert_eq!(px(&f, 18, 18), [255, 255, 255, 255], "coin opposé");
+}
+
+#[test]
+fn clip_rect_zero_ne_peint_rien() {
+    // `clip:rect(0,0,0,0)` : clip 0×0 → aucun pixel du fond.
+    let f = frame(
+        "<div id=s></div>",
+        "#s{position:absolute;left:0;top:0;width:20px;height:20px;\
+         background:#ff0000;clip:rect(0,0,0,0)}",
+    );
+    for (x, y) in [(0, 0), (10, 10), (19, 19)] {
+        assert_eq!(px(&f, x, y), [255, 255, 255, 255], "({x},{y}) blanc");
+    }
+}

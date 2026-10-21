@@ -1308,9 +1308,11 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
     n'existe que sous 480px) ; MDN
     lisible. Limite connue :
     `display:contents` reste repli
-    `Block` (R-50) ; `clip-path`
-    non implémenté (candidat
-    mineur).
+    `Block` (R-50) ; `clip-path:
+    inset()` livré en R-58 (le
+    skip-link MDN relevait en fait
+    d'un bug de position statique
+    absolue — R-60).
 - [x] **R-52. `mask-image` borne le
   fond (motif icône)** (issu du
   triage — loupe Wikipedia, avatar
@@ -1470,6 +1472,32 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   internes `ptr_eq` (chaîne sans déclaration
   = une seule allocation, déclaration =
   divergence CoW).
+- [x] **R-58. `clip-path: inset()` minimal**
+  (motif `.visuallyHidden` moderne — GitHub,
+  skip-links MDN/Wikipedia) — **livré** :
+  `clip-path` est parsé en cascade (propriété
+  connue) et `paint_box` enveloppe désormais
+  `paint_self` + tout le sous-arbre d'un
+  `PushClip`/`PopClip` quand la valeur est
+  `inset(<length-percentage>{1,4})` — syntaxe
+  1→4 côtés façon margin, `%` contre la
+  border box. Réutilise la mécanique
+  `Mask` du raster (tiny-skia) — transform
+  appliquée au clip comme à l'overflow.
+  `inset(50%)` sur une boîte 20 px = clip
+  0×0 (10 px retirés par côté). Hors scope
+  v1 : `circle()`, `polygon()`, `path()`,
+  `url()` — valeurs inconnues ignorées
+  tolérantes, jamais de clip. Tests :
+  display-list (`inset(25%)` → clip
+  centré 10×10, `inset(50%)` → 0×0,
+  tolérance `circle()`/`url()`),
+  raster pixel (encre confinée, fond
+  opaque intact hors clip). Terrain :
+  le skip-link MDN n'était en fait **pas**
+  un cas `clip-path` — voir R-60 ; le
+  motif `.visuallyHidden` reste couvert
+  pour les variantes sans 1×1+overflow.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

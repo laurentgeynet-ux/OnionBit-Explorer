@@ -23,7 +23,7 @@
 //! arrondis). `display: none` ne produit déjà pas de boîte.
 
 use explorer_css::value::Color;
-use explorer_css::value::{parse_color, parse_length};
+use explorer_css::value::{parse_color, parse_length, Unit};
 use explorer_layout::font::ShapedRun;
 use explorer_layout::{BoxKind, Float, Fragment, LayoutBox, Overflow, Position, Rect};
 
@@ -2281,6 +2281,158 @@ fn push_z<'a>(q: &mut Vec<(Vec<u16>, &'a LayoutBox)>, path: Vec<u16>, bx: &'a La
     q.insert(at, (path, bx));
 }
 
+/// R-58 — clip géométrique `clip-path: inset(…)` /
+/// `clip: rect(…)` sur la border box (boîte de référence par
+/// défaut, spec CSS Masking). v1 : `circle()`/`ellipse()`/
+/// `polygon()`, la clause `round <radius>`, `url()` et les
+/// `<geometry-box>` explicites retombent sur « pas de clip »
+/// (tolérance — jamais de clip faux). `clip` ne s'applique
+/// qu'aux boîtes absolument positionnées (CSS2 §11.1.2 —
+/// le champ `position` peut rester `Static` sur un inline
+/// positionné → lecture au style calculé). Les deux
+/// propriétés se combinent par intersection.
+#[allow(clippy::cast_possible_truncation)]
+fn clip_geo_rect(bx: &LayoutBox, r: Rect, vp: (f32, f32)) -> Option<Rect> {
+    let fs = bx
+        .style
+        .length("font-size")
+        .map_or(16.0, |l| l.value as f32);
+    let px = |tok: &str, base: f32| -> Option<f32> {
+        let t = tok.trim();
+        if t.eq_ignore_ascii_case("auto") {
+            return None;
+        }
+        if let Some(p) = t.strip_suffix('%') {
+            return p
+                .trim()
+                .parse::<f64>()
+                .ok()
+                .map(|n| (n as f32) * base / 100.0);
+        }
+        let l = parse_length(t)?;
+        Some(match l.unit {
+            Unit::Em | Unit::Rem => l.value as f32 * fs,
+            Unit::Ex | Unit::Ch => l.value as f32 * fs * 0.5,
+            Unit::Vw => l.value as f32 * vp.0 / 100.0,
+            Unit::Vh => l.value as f32 * vp.1 / 100.0,
+            Unit::Vmin => l.value as f32 * vp.0.min(vp.1) / 100.0,
+            Unit::Vmax => l.value as f32 * vp.0.max(vp.1) / 100.0,
+            u => (l.value * u.px_factor()?) as f32,
+        })
+    };
+    let mut out: Option<Rect> = None;
+    let mut and = |c: Rect| {
+        out = Some(match out {
+            None => c,
+            // Intersection : le plus restrictif des deux clips.
+            Some(a) => Rect {
+                x: a.x.max(c.x),
+                y: a.y.max(c.y),
+                width: (a.x + a.width).min(c.x + c.width) - a.x.max(c.x),
+                height: (a.y + a.height).min(c.y + c.height) - a.y.max(c.y),
+            },
+        });
+        if let Some(o) = out {
+            if o.width < 0.0 || o.height < 0.0 {
+                out = Some(Rect {
+                    width: 0.0,
+                    height: 0.0,
+                    ..o
+                });
+            }
+        }
+    };
+    if let Some(v) = bx.style.get("clip-path") {
+        if let Some(r2) = clip_path_inset(v.trim(), r, &px) {
+            and(r2);
+        }
+    }
+    let pos = bx.style.get("position").unwrap_or("static");
+    if matches!(pos, "absolute" | "fixed") {
+        if let Some(v) = bx.style.get("clip") {
+            if let Some(r2) = legacy_clip_rect(v.trim(), r, &px) {
+                and(r2);
+            }
+        }
+    }
+    out
+}
+
+/// `inset(t r b l [round …])` — 1 à 4 retraits depuis les
+/// bords (top/right/bottom/left, raccourci façon `margin`) ;
+/// la clause `round` est acceptée mais ignorée en v1
+/// (coins carrés). `None` si la forme n'est pas un `inset()`
+/// ou si un côté est inclassable (tolérance : pas de clip).
+fn clip_path_inset(
+    raw: &str,
+    bounds: Rect,
+    to_px: &dyn Fn(&str, f32) -> Option<f32>,
+) -> Option<Rect> {
+    let inner = raw
+        .strip_prefix("inset")?
+        .trim_start()
+        .strip_prefix('(')?
+        .strip_suffix(')')?;
+    // Coupe la clause `round` éventuelle — les coins restent
+    // carrés en v1.
+    let inner = inner.split_once("round").map_or(inner, |(a, _)| a).trim();
+    let toks: Vec<&str> = inner.split_whitespace().collect();
+    if toks.is_empty() || toks.len() > 4 {
+        return None;
+    }
+    let top = to_px(toks[0], bounds.height)?;
+    let right = to_px(toks.get(1).unwrap_or(&toks[0]), bounds.width)?;
+    let bottom = to_px(toks.get(2).unwrap_or(&toks[0]), bounds.height)?;
+    let left = to_px(
+        toks.get(3).unwrap_or(toks.get(1).unwrap_or(&toks[0])),
+        bounds.width,
+    )?;
+    Some(Rect {
+        x: bounds.x + left,
+        y: bounds.y + top,
+        width: (bounds.width - left - right).max(0.0),
+        height: (bounds.height - top - bottom).max(0.0),
+    })
+}
+
+/// `clip: rect(t, r, b, l)` (CSS2 §11.1.2 — virgules
+/// facultatives) : bords mesurés depuis le coin haut-gauche
+/// — `top`/`bottom` depuis le haut, `left`/`right` depuis la
+/// gauche ; `auto` = bord de la boîte. `None` si la forme
+/// n'est pas `rect()` ou le compte ≠ 4.
+fn legacy_clip_rect(v: &str, r: Rect, px: &dyn Fn(&str, f32) -> Option<f32>) -> Option<Rect> {
+    let inner = v
+        .strip_prefix("rect")?
+        .trim_start()
+        .strip_prefix('(')?
+        .strip_suffix(')')?;
+    let toks: Vec<&str> = inner.split([',', ' ']).filter(|s| !s.is_empty()).collect();
+    if toks.len() != 4 {
+        return None;
+    }
+    // `auto` = le bord correspondant de la boîte.
+    let side = |tok: &str, base: f32, dft: f32| -> Option<f32> {
+        if tok.trim().eq_ignore_ascii_case("auto") {
+            Some(dft)
+        } else {
+            px(tok, base)
+        }
+    };
+    let top = side(toks[0], r.height, 0.0)?;
+    let right = side(toks[1], r.width, r.width)?;
+    let bottom = side(toks[2], r.height, r.height)?;
+    let left = side(toks[3], r.width, 0.0)?;
+    let x = r.x + left;
+    let y = r.y + top;
+    Some(Rect {
+        x,
+        y,
+        width: (r.x + right - x).max(0.0),
+        height: (r.y + bottom - y).max(0.0),
+    })
+}
+
+#[allow(clippy::too_many_lines)]
 fn paint_box<'a>(
     bx: &'a LayoutBox,
     items: &mut Vec<DisplayItem>,
@@ -2302,6 +2454,17 @@ fn paint_box<'a>(
     let tf = box_transform(bx, &shifted(bx.rect, off));
     if let Some(m) = tf {
         items.push(DisplayItem::PushTransform(m));
+    }
+    // R-58 — `clip-path`/`clip` : clip géométrique sur la
+    // border box — il borne TOUT le rendu de la boîte (fond,
+    // bordures, lignes, enfants) contrairement au clip
+    // `overflow` qui n'englobe que le contenu. Émis dans la
+    // portée transform : le raster transforme le rect comme
+    // le clip `overflow`. Limite v1 : les descendants
+    // positionnés reportés au contexte ancêtre en sortent.
+    let geo_clip = clip_geo_rect(bx, shifted(bx.rect, off), cx.vp);
+    if let Some(gc) = geo_clip {
+        items.push(DisplayItem::PushClip(gc));
     }
     // `visibility` (§11.2) : `hidden`/`collapse` interdit
     // l'émission PROPRE mais la boîte garde sa place en
@@ -2431,6 +2594,9 @@ fn paint_box<'a>(
         if clipped {
             items.push(DisplayItem::PopClip);
         }
+    }
+    if geo_clip.is_some() {
+        items.push(DisplayItem::PopClip);
     }
     if tf.is_some() {
         items.push(DisplayItem::PopTransform);

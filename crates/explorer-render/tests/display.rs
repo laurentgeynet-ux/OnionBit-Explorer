@@ -251,6 +251,88 @@ fn overflow_clip_couvre_lignes_inline_block() {
     );
 }
 
+// ── R-58 : clip géométrique `clip-path` / `clip` ─────────────
+
+#[test]
+fn clip_path_inset_clippe_toute_la_boite() {
+    // Motif `.visuallyHidden` GitHub : `clip-path:inset(25%)`
+    // borne la border box à son carré central 10×10 (retrait
+    // de 5px par côté) — le clip enveloppe la boîte ENTIÈRE
+    // (fond + contenu), pas seulement les enfants comme
+    // `overflow`. (À `inset(50%)` le clip est 0×0.)
+    let (_dom, _bx, items) = dl(
+        "<div id=s>x</div>",
+        "#s{position:absolute;left:0;top:0;width:20px;height:20px;\
+         clip-path:inset(25%)}",
+    );
+    let push = items
+        .iter()
+        .position(|i| {
+            matches!(i, DisplayItem::PushClip(r) if
+            (r.x - 5.0).abs() < 0.6 && (r.width - 10.0).abs() < 0.6
+            && (r.height - 10.0).abs() < 0.6)
+        })
+        .expect("PushClip inset(25%) = 10×10 centré en (5,5)");
+    // Tout ce que la boîte peint (texte « x ») suit le push.
+    let txt = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::Text { .. }))
+        .expect("texte");
+    assert!(push < txt, "contenu enveloppé : {txt} après {push}");
+}
+
+#[test]
+fn clip_rect_zero_masque_tout() {
+    // `clip:rect(0,0,0,0)` (motif sr-only WordPress/lobste.rs) :
+    // clip 0×0 — la boîte ne peint rien, clip émis puis fermé.
+    let (_dom, _bx, items) = dl(
+        "<div id=s>x</div>",
+        "#s{position:absolute;width:20px;height:20px;clip:rect(0,0,0,0)}",
+    );
+    let push = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::PushClip(r) if r.width < 0.5 && r.height < 0.5))
+        .expect("PushClip 0×0");
+    assert!(
+        items[push..]
+            .iter()
+            .any(|i| matches!(i, DisplayItem::PopClip)),
+        "clip refermé"
+    );
+}
+
+#[test]
+fn clip_sans_positionnement_n_est_pas_applique() {
+    // CSS2 §11.1.2 : `clip` ne s'applique qu'aux éléments
+    // absolument positionnés — un bloc statique ne doit pas
+    // être clippé (un `clip` décoratif en flux ne doit pas
+    // faire disparaître du contenu réel).
+    let (_dom, _bx, items) = dl("<div id=s>x</div>", "#s{clip:rect(0,0,0,0)}");
+    assert!(
+        !items
+            .iter()
+            .any(|i| matches!(i, DisplayItem::PushClip(r) if r.width < 0.5)),
+        "clip ignoré sur boîte en flux"
+    );
+}
+
+#[test]
+fn clip_path_inconnu_tolerant_pas_de_clip() {
+    // `circle()`/`polygon()`/`url()` hors v1 — retombent sur
+    // « pas de clip » plutôt qu'un clip faux.
+    let (_dom, _bx, items) = dl(
+        "<div id=s>x</div>",
+        "#s{position:absolute;width:20px;height:20px;\
+         clip-path:circle(50%)}",
+    );
+    assert!(
+        !items
+            .iter()
+            .any(|i| matches!(i, DisplayItem::PushClip(r) if r.width <= 10.6)),
+        "fonction non supportée → pas de clip"
+    );
+}
+
 #[test]
 fn zindex_trie_les_positionnes() {
     // Deux positionnés : z=5 doit passer après z=1.
