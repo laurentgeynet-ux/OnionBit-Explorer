@@ -17,8 +17,15 @@ use super::*;
 /// `Symbol`/`Iter` non-clonables → `TypeError` (`DataCloneError`).
 pub(crate) fn structured_clone(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let mut seen: Vec<(ObjId, ObjId)> = Vec::new();
-    clone_deep(e, arg(args, 0), &mut seen)
+    clone_deep(e, arg(args, 0), &mut seen, 0)
 }
+
+/// Profondeur max de descente `structuredClone` — borne pile Rust
+/// (JS-C55). Cohérente avec `MAX_PROTO_DEPTH` (512) : les threads
+/// Windows n'ont qu'~1-2 Mio de pile par défaut et chaque frame
+/// `clone_deep` coûte ~0,5 Kio — 512 reste largement au-delà des
+/// graphes de données réels.
+const MAX_CLONE_DEPTH: u32 = 256;
 
 /// Forme extraite du `ObjKind` (champs Copy — le borrow du heap
 /// s'arrête avant toute allocation).
@@ -38,8 +45,14 @@ pub(crate) fn clone_deep(
     e: &mut Engine,
     v: Value,
     seen: &mut Vec<(ObjId, ObjId)>,
+    depth: u32,
 ) -> JsResult<Value> {
     let Value::Obj(id) = v else { return Ok(v) };
+    if depth >= MAX_CLONE_DEPTH {
+        // Tolérance : `DataCloneError` typé plutôt que débordement
+        // de pile sur graphe hyper-profond (JS-C55).
+        return Err(e.type_error("structuredClone: depth limit exceeded"));
+    }
     if let Some((_, c)) = seen.iter().find(|(s, _)| *s == id) {
         return Ok(Value::Obj(*c));
     }
@@ -80,7 +93,7 @@ pub(crate) fn clone_deep(
             args_map: None,
         }))),
         CloneShape::Dv(bid, offset, len) => {
-            let nb = clone_deep(e, Value::Obj(bid), seen)?;
+            let nb = clone_deep(e, Value::Obj(bid), seen, depth + 1)?;
             Ok(Value::Obj(e.heap.alloc_obj(Object {
                 proto: Value::Obj(e.protos.data_view),
                 props: Vec::new(),
@@ -95,7 +108,7 @@ pub(crate) fn clone_deep(
             })))
         }
         CloneShape::Ta(ta, bid, offset, len) => {
-            let nb = clone_deep(e, Value::Obj(bid), seen)?;
+            let nb = clone_deep(e, Value::Obj(bid), seen, depth + 1)?;
             let Value::Obj(nbid) = nb else {
                 return Err(e.type_error("structuredClone: bad buffer"));
             };
@@ -114,7 +127,7 @@ pub(crate) fn clone_deep(
             };
             let mut out = Vec::with_capacity(elems.len());
             for v in elems {
-                out.push(clone_deep(e, v, seen)?);
+                out.push(clone_deep(e, v, seen, depth + 1)?);
             }
             if let Some(o) = e.heap.obj_mut(cid) {
                 if let ObjKind::Array(el) = &mut o.kind {
@@ -138,8 +151,8 @@ pub(crate) fn clone_deep(
                 _ => Vec::new(),
             };
             for (k, v) in pairs {
-                let kc = clone_deep(e, k, seen)?;
-                let vc = clone_deep(e, v, seen)?;
+                let kc = clone_deep(e, k, seen, depth + 1)?;
+                let vc = clone_deep(e, v, seen, depth + 1)?;
                 crate::collections::map_set_entry(e, cid, kc, vc);
             }
             Ok(Value::Obj(cid))
@@ -159,7 +172,7 @@ pub(crate) fn clone_deep(
                 _ => Vec::new(),
             };
             for v in items {
-                let vc = clone_deep(e, v, seen)?;
+                let vc = clone_deep(e, v, seen, depth + 1)?;
                 crate::collections::set_add(e, cid, vc);
             }
             Ok(Value::Obj(cid))
@@ -179,7 +192,7 @@ pub(crate) fn clone_deep(
                 if !attrs.enumerable {
                     continue;
                 }
-                let cv = clone_deep(e, value, seen)?;
+                let cv = clone_deep(e, value, seen, depth + 1)?;
                 e.set_own(cid, &key, cv, true);
             }
             Ok(Value::Obj(cid))

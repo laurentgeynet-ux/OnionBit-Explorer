@@ -95,6 +95,30 @@ fn hostile_array() {
             "Array.of.call(null)",
             "[1,2].at(-1e30)",
             "[1,,3].map(String).join('|')",
+            // Cycles — `take_elems` vide la source (dégradation).
+            "var a=[]; a.push(a); ''+a",
+            "var a=[]; a.push(a); a.join(',')",
+            "var a=[]; a.push(a); a.flat(Infinity)",
+            "var a=[]; a.push(a); structuredClone(a).length",
+            "var a=[]; a.push(a); JSON.stringify(a)",
+            "var a=[]; a.push(a); a.includes(a)",
+        ],
+    );
+}
+
+#[test]
+fn hostile_deep_nesting() {
+    // Profondeurs structurelles — JS-C55 : récursions natives et
+    // `clone_deep` bornées, `flat` itératif. Contrat identique.
+    battery(
+        "depth",
+        &[
+            "var a=[]; for(var i=0;i<3e5;i++)a=[a]; a.flat(Infinity)",
+            "var a=[]; for(var i=0;i<3e5;i++)a=[a]; a.join('')",
+            "var a=[]; for(var i=0;i<3e5;i++)a=[a]; Math.max(...a)",
+            "var a=[]; for(var i=0;i<3e5;i++)a=[a]; structuredClone(a)",
+            "var a=[]; for(var i=0;i<3e5;i++)a=[a]; JSON.stringify(a)",
+            "var o={}; var c=o; for(var i=0;i<1e5;i++){c.x={};c=c.x} c.x",
         ],
     );
 }

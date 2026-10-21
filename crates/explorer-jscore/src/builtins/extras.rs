@@ -131,20 +131,30 @@ pub(crate) fn flat_into(
     depth: u32,
     out: &mut Vec<Value>,
 ) -> JsResult<()> {
-    if v.is_hole() {
-        return Ok(()); // les trous disparaissent à l'aplatissement.
-    }
-    if depth > 0 {
-        if let Value::Obj(id) = v {
-            if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_))) {
-                for el in take_elems(e, id) {
-                    flat_into(e, el, depth - 1, out)?;
+    // Itératif (worklist) : la récursion Rust débordait la pile sur
+    // `a.flat(Infinity)` avec ~300 k niveaux d'imbrication — JS-C55.
+    // Chaque élément porte la profondeur restante ; les enfants d'un
+    // niveau sont empilés en ordre inverse pour préserver l'ordre.
+    let mut stack = vec![(v, depth)];
+    while let Some((v, depth)) = stack.pop() {
+        e.tick()?; // borne ops — un nœud géant ne doit pas boucler.
+        if v.is_hole() {
+            continue; // les trous disparaissent à l'aplatissement.
+        }
+        if depth > 0 {
+            if let Value::Obj(id) = v {
+                if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_))) {
+                    let kids = take_elems(e, id);
+                    e.alloc_guard(kids.len().saturating_mul(std::mem::size_of::<Value>()))?;
+                    for el in kids.into_iter().rev() {
+                        stack.push((el, depth - 1));
+                    }
+                    continue;
                 }
-                return Ok(());
             }
         }
+        out.push(v);
     }
-    out.push(v);
     Ok(())
 }
 

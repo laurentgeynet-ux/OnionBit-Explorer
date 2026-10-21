@@ -3647,6 +3647,30 @@ impl Engine {
         self.call_value_impl(f, this, args, nt)
     }
 
+    /// Dispatch d'une builtin native : compte dans `call_depth`
+    /// (la récursion native `join → to_primitive → join` n'était
+    /// pas bornée → débordement de pile, JS-C55) et protège la
+    /// pile native via `maybe_grow` comme le corps Script.
+    pub(crate) fn call_native(
+        &mut self,
+        f: crate::heap::NativeFn,
+        this: Value,
+        args: &[Value],
+    ) -> JsResult<Value> {
+        self.call_depth += 1;
+        if self.call_depth > self.call_depth_limit {
+            self.call_depth -= 1;
+            return Err(self.range_error("maximum call stack exceeded"));
+        }
+        let r = stacker::maybe_grow(
+            crate::parser::STACK_RED_ZONE,
+            crate::parser::STACK_GROW,
+            || f(self, this, args),
+        );
+        self.call_depth -= 1;
+        r
+    }
+
     pub(crate) fn call_value_impl(
         &mut self,
         f: Value,
@@ -3674,12 +3698,12 @@ impl Engine {
             None => return Err(self.type_error("value is not a function")),
         };
         match fun {
-            Fun::Native { f, .. } => f(self, this, args),
+            Fun::Native { f, .. } => self.call_native(f, this, args),
             Fun::BoundNative { f, bound, .. } => {
                 let mut a = Vec::with_capacity(bound.len() + args.len());
                 a.extend_from_slice(&bound);
                 a.extend_from_slice(args);
-                f(self, this, &a)
+                self.call_native(f, this, &a)
             }
             Fun::Bound {
                 target,

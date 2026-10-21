@@ -2112,11 +2112,20 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `String.repeat`, `padStart/End`, ctors `TA(n)`/array-like.
   Bonus borne : `big_binary` pow et `to_bits` (`asIntN`)
   plafonnés à 1 M de bits — `10n ** 1e9n`/`asIntN(1e30)`
-  refusent au lieu d'allouer des Gio de limbs. Tests :
-  `tests/hostile.rs` — 10 batteries par module (string,
-  array, regexp, typed array, json/eval, temporal/intl,
-  bigint/math, proxy, async, DOM) × appels pathologiques —
-  contrat unique « Ok ou Err, jamais panic ».
+  refusent au lieu d'allouer des Gio de limbs. Suite audit :
+  la pile Rust débordait sur récursion **native** —
+  `join`/`toString`/`to_primitive` chaînés traversaient
+  `call_value` sans compter `call_depth` ni passer par
+  `stacker::maybe_grow` (`a.join('')` sur 300 k niveaux →
+  `STATUS_STACK_OVERFLOW`, mesuré). Fix : `Engine::call_native`
+  borne les natifs comme les appels Script ; `flat_into`
+  devient itératif (worklist + tick + alloc_guard) ;
+  `clone_deep` plafonne à 256 niveaux (`DataCloneError` typé).
+  Tests : `tests/hostile.rs` — 11 batteries par module
+  (string, array, regexp, typed array, json/eval,
+  temporal/intl, bigint/math, proxy, async, DOM, profondeur)
+  × appels pathologiques — contrat unique « Ok ou Err,
+  jamais panic ».
 
 ## Tâches continues
 
