@@ -2131,6 +2131,23 @@ fn malformed_numbers_rejected() {
 }
 
 #[test]
+fn hex_literals_geants_convertissent_en_f64() {
+    // Trigger réel : l'obfuscateur AWS WAF émet des littéraux
+    // `0x` de ~100 chiffres — `u64` débordait en « malformed
+    // numeric literal » ; JS convertit vers IEEE-754.
+    assert_eq!(
+        ev_str("typeof 0x17e43c8800759c00000000000000000000000000000000000000000000"),
+        "number"
+    );
+    assert_eq!(
+        ev_str("0xf00000000000000000 > 0"),
+        "true" // 17 chiffres — au-delà d'u64
+    );
+    // Précision conservée dans le domaine u64.
+    assert_eq!(ev_str("0x7fffffffffffffff"), "9223372036854775808");
+}
+
+#[test]
 fn regex_literal_eager_validation() {
     // Pattern invalide → SyntaxError au parse, pas d'objet RegExp.
     for src in ["var r = /[/", r"var r = /x\y/u", "var r = /a/zz"] {

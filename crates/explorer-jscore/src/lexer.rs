@@ -675,10 +675,19 @@ impl Lexer {
                     if self.peek().is_some_and(is_ident_start) {
                         return Err(self.err("identifier directly after number"));
                     }
-                    return match u64::from_str_radix(&s, radix) {
-                        Ok(v) => Ok(Tok::Num(v as f64)),
-                        Err(_) => Err(self.err("malformed numeric literal")),
-                    };
+                    // `u64` déborde sur les littéraux géants
+                    // (`0x`+ ~100 chiffres, code obfusqué WAF) —
+                    // JS convertit vers IEEE-754 : repli f64,
+                    // jamais d'erreur (→ Infinity si immense).
+                    let v = u64::from_str_radix(&s, radix).map_or_else(
+                        |_| {
+                            s.chars().fold(0f64, |a, c| {
+                                a * f64::from(radix) + c.to_digit(radix).map_or(0.0, f64::from)
+                            })
+                        },
+                        |v| v as f64,
+                    );
+                    return Ok(Tok::Num(v));
                 }
             }
             // `0[0-7]+` legacy octal et `0[89]` NonOctalDecimal :

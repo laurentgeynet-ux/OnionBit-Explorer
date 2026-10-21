@@ -131,6 +131,12 @@ pub enum NodeKind {
     Element,
     /// Text run — payload in `text`, `tag` is `"#text"`.
     Text,
+    /// `DocumentFragment` (`nodeType` 11) — `tag` is
+    /// `"#document-fragment"`. Spec insertion : appending a
+    /// fragment splices its children into the parent and leaves
+    /// the fragment empty (trigger réel : jQuery
+    /// `createDocumentFragment`).
+    Fragment,
 }
 
 /// One node in the arena.
@@ -646,6 +652,11 @@ impl Dom {
         id
     }
 
+    /// Detached `DocumentFragment` (`document.createDocumentFragment`).
+    pub fn create_fragment(&mut self) -> NodeId {
+        self.alloc(NodeKind::Fragment, "#document-fragment")
+    }
+
     /// `CharacterData.data`/`nodeValue` sur un nœud texte —
     /// émet un record `characterData` (JS-C26).
     pub fn set_text(&mut self, node: NodeId, text: &str) {
@@ -898,6 +909,10 @@ impl Dom {
 
     /// Attach `child` under `parent` (re-parents if attached).
     pub fn append(&mut self, parent: NodeId, child: NodeId) {
+        if self.nodes[child as usize].kind == NodeKind::Fragment {
+            self.splice_fragment(parent, child, None);
+            return;
+        }
         self.detach(child);
         self.nodes[child as usize].parent = Some(parent);
         let a = self.nodes[parent as usize].attached;
@@ -1001,6 +1016,10 @@ impl Dom {
     /// isn't a child of `parent` the insert degrades to append
     /// (tolerant — Dillo never throws on malformed trees either).
     pub fn insert_before(&mut self, parent: NodeId, child: NodeId, ref_node: Option<NodeId>) {
+        if self.nodes[child as usize].kind == NodeKind::Fragment {
+            self.splice_fragment(parent, child, ref_node);
+            return;
+        }
         self.detach(child);
         let idx = ref_node.and_then(|r| {
             self.nodes[parent as usize]
@@ -1030,6 +1049,55 @@ impl Dom {
         self.queue_mutation(&MutationRecord::child_list(
             parent,
             vec![child],
+            Vec::new(),
+            prev,
+            next,
+        ));
+    }
+
+    /// Insertion d'un `DocumentFragment` : ses enfants sont
+    /// déplacés dans `parent` (devant `ref_node`, fin sinon) et
+    /// le fragment reste vide — spec `insert` des fragments.
+    /// Un seul record `childList` pour le groupe.
+    fn splice_fragment(&mut self, parent: NodeId, frag: NodeId, ref_node: Option<NodeId>) {
+        self.detach(frag);
+        let kids = std::mem::take(&mut self.nodes[frag as usize].children);
+        for &k in &kids {
+            self.nodes[k as usize].parent = None;
+        }
+        if kids.is_empty() {
+            return;
+        }
+        // Index d'insertion : devant `ref_node` s'il est enfant
+        // de `parent`, fin sinon (dégradé tolérant, cf.
+        // `insert_before`).
+        let at = ref_node
+            .and_then(|r| {
+                self.nodes[parent as usize]
+                    .children
+                    .iter()
+                    .position(|&c| c == r)
+            })
+            .unwrap_or_else(|| self.nodes[parent as usize].children.len());
+        let a = self.nodes[parent as usize].attached;
+        for &k in &kids {
+            self.nodes[k as usize].parent = Some(parent);
+            self.set_attached(k, a);
+        }
+        self.nodes[parent as usize]
+            .children
+            .splice(at..at, kids.iter().copied());
+        self.mark_dirty_at(parent);
+        let (prev, next) = {
+            let kids_p = &self.nodes[parent as usize].children;
+            (
+                at.checked_sub(1).and_then(|i| kids_p.get(i).copied()),
+                kids_p.get(at + kids.len()).copied(),
+            )
+        };
+        self.queue_mutation(&MutationRecord::child_list(
+            parent,
+            kids,
             Vec::new(),
             prev,
             next,
@@ -1504,6 +1572,15 @@ impl Dom {
                     let n = &self.nodes[id as usize];
                     if n.kind == NodeKind::Text {
                         out.push_str(&escape_text(&n.text));
+                        continue;
+                    }
+                    // Fragment : pas de balise englobante —
+                    // `innerHTML` d'un `DocumentFragment` =
+                    // ses enfants (spec sérialisation).
+                    if n.kind == NodeKind::Fragment {
+                        for &c in n.children.iter().rev() {
+                            stack.push(Ser::Enter(c));
+                        }
                         continue;
                     }
                     out.push('<');

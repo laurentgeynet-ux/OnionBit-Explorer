@@ -1372,6 +1372,61 @@ fn mutation_observer_survives_gc() {
 }
 
 #[test]
+fn document_fragment_splice_et_serialise() {
+    // Trigger réel : jQuery (`document.createDocumentFragment`
+    // manquait — arstechnica.com, census terrain). Spec : un
+    // fragment inséré éclate ses enfants dans le parent et se
+    // vide ; `innerHTML` d'un fragment = ses enfants.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var f=document.createDocumentFragment();\
+             f.appendChild(document.createElement('b'));\
+             f.appendChild(document.createTextNode('x'));\
+             document.getElementById('main').appendChild(f);",
+            "f.childNodes.length+'|'+f.nodeType+'|'+document.getElementById('main').innerHTML"
+        ),
+        "0|11|<p>Hello <b>world</b></p><b></b>x"
+    );
+    // `insertBefore` au milieu : les enfants prennent le slot.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var f=document.createDocumentFragment();\
+             var a=document.createElement('a'),b=document.createElement('b');\
+             f.appendChild(a);f.appendChild(b);\
+             var m=document.getElementById('main');\
+             m.insertBefore(f,m.firstChild);",
+            "document.getElementById('main').innerHTML"
+        ),
+        "<a></a><b></b><p>Hello <b>world</b></p>"
+    );
+    // `innerHTML` d'un fragment rempli = ses enfants, sans
+    // balise englobante (sérialisation spec).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var f=document.createDocumentFragment();\
+             f.appendChild(document.createElement('i'));\
+             window.__h=f.innerHTML;",
+            "window.__h"
+        ),
+        "<i></i>"
+    );
+}
+
+#[test]
+fn document_location_egale_window() {
+    // `document.location === window.location` — trigger réel :
+    // scripts lisant `document.location.search` (arstechnica).
+    assert_eq!(
+        ev2(PAGE, "", "document.location === window.location"),
+        "true"
+    );
+    assert_eq!(ev2(PAGE, "", "typeof document.location.search"), "string");
+}
+
+#[test]
 fn mutation_observer_document_target() {
     // `observe(document)` : `document` est un DocumentHost, pas un
     // NodeHost — il résout sur la racine du miroir. Mesuré sur

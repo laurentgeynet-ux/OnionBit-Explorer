@@ -182,6 +182,9 @@ pub(crate) type NodeCache = Rc<RefCell<HashMap<NodeId, ObjId>>>;
 struct DocumentHost {
     dom: DomRef,
     cache: NodeCache,
+    /// `document.implementation` — objet unique par document
+    /// (spec), paresseusement construit.
+    implementation: RefCell<Option<Value>>,
 }
 
 /// Element/text node object (`this` carries the node id).
@@ -392,6 +395,7 @@ pub(crate) fn document_value(e: &mut Engine, dom: &DomRef) -> Value {
     e.new_host_object(Rc::new(DocumentHost {
         dom: dom.clone(),
         cache: Rc::new(RefCell::new(HashMap::new())),
+        implementation: RefCell::new(None),
     }))
 }
 
@@ -405,6 +409,7 @@ impl Engine {
         let doc = self.new_host_object(Rc::new(DocumentHost {
             dom: dom.clone(),
             cache: cache.clone(),
+            implementation: RefCell::new(None),
         }));
         // `#document` == `document` : listeners/`this`/`on*` au
         // sommet de la propagation résolvent sur l'objet document
@@ -1098,6 +1103,20 @@ impl Host for DocumentHost {
             // `document.defaultView` — la fenêtre du document ≙ le
             // global (single-window model).
             "defaultView" => Ok(Some(Value::Obj(e.global))),
+            // `document.location` ≙ `window.location` — même
+            // objet hôte (trigger réel : scripts lisant
+            // `document.location.search`, census arstechnica).
+            "location" => Ok(e.get_prop(e.global, "location")),
+            // `document.implementation` — unique par document
+            // (spec) ; `createHTMLDocument` sert le DOM de
+            // parsing détaché de jQuery.
+            "implementation" => {
+                let v = *self
+                    .implementation
+                    .borrow_mut()
+                    .get_or_insert_with(|| e.new_host_object(Rc::new(DomImplementationHost)));
+                Ok(Some(v))
+            }
             "title" => {
                 let t = {
                     let d = self.dom.borrow();
@@ -1299,6 +1318,13 @@ impl Host for DocumentHost {
             "createTextNode" => {
                 let t = e.to_js_string(arg(args, 0))?;
                 let n = self.dom.borrow_mut().create_text(&t);
+                Ok(Some(node_value(e, &self.dom, &self.cache, n)))
+            }
+            // `document.createDocumentFragment()` — nœud
+            // `Fragment` détaché ; son insertion dans un parent
+            // éclate ses enfants (spec — jQuery l'exige).
+            "createDocumentFragment" => {
+                let n = self.dom.borrow_mut().create_fragment();
                 Ok(Some(node_value(e, &self.dom, &self.cache, n)))
             }
             // `document.createEvent('HTMLEvents')` + `initEvent` —
@@ -2003,6 +2029,7 @@ impl Host for NodeHost {
                 return Ok(Some(Value::Num(match k {
                     NodeKind::Element => 1.0,
                     NodeKind::Text => 3.0,
+                    NodeKind::Fragment => 11.0,
                 })));
             }
             // `textarea.value` ≙ le contenu texte, `select.value`
@@ -3036,6 +3063,57 @@ fn passive_observer(e: &mut Engine, args: &[Value], kind: &'static str) -> JsRes
         return Err(e.type_error(format!("{kind}: callback is not a function")));
     }
     Ok(e.new_host_object(Rc::new(PassiveObserverHost { kind, cb })))
+}
+
+/// `document.implementation` — `createHTMLDocument` produit un
+/// document détaché complet (`html`/`head`/`title`/`body`) que
+/// les scripts utilisent comme zone de parsing sûre — jQuery
+/// l'exige (`implementation.createHTMLDocument`, trigger réel
+/// arstechnica/wordpress).
+struct DomImplementationHost;
+
+impl Host for DomImplementationHost {
+    fn class_name(&self) -> &'static str {
+        "DOMImplementation"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _t: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        match name {
+            "createHTMLDocument" => {
+                let mut d = Dom::new();
+                d.parse_fragment_into(
+                    d.root,
+                    "<html><head><title></title></head><body></body></html>",
+                );
+                let title = e.to_js_string(arg(args, 0)).unwrap_or_default();
+                if !title.is_empty() {
+                    if let Some(&tn) = d.by_tag(d.root, "title").first() {
+                        let t = d.create_text(&title);
+                        d.append(tn, t);
+                    }
+                }
+                Ok(Some(e.new_host_object(Rc::new(DocumentHost {
+                    dom: Rc::new(RefCell::new(d)),
+                    cache: Rc::new(RefCell::new(HashMap::new())),
+                    implementation: RefCell::new(None),
+                }))))
+            }
+            // `hasFeature()` — spec : retourne toujours `true`
+            // (API historique sans substance).
+            "hasFeature" => Ok(Some(Value::Bool(true))),
+            _ => Ok(None),
+        }
+    }
 }
 
 struct LocationHost;

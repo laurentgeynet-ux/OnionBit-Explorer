@@ -2208,19 +2208,34 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
     `eval`) + `Cmd::Eval.name` : la session passe l'URL du
     `<script src>` classique — les frames citent aussi les
     scripts non-module.
+  - **arstechnica.com (vague 2)** : `DocumentFragment`
+    implémenté — `NodeKind::Fragment` (nodeType 11),
+    insertion = splice des enfants + vidage du fragment
+    (spec), sérialisation sans balise englobante ;
+    `document.location` ≙ `window.location` ;
+    `document.implementation` — `createHTMLDocument(title)`
+    construit un document détaché complet (html/head/title/
+    body) — **jQuery 3.7.1 tourne en entier**
+    (`jQuery.fn.jquery` vérifié) ; littéraux `0x` géants
+    (obfuscateur AWS WAF, ~100 chiffres) — `u64` débordait
+    en « malformed numeric literal », repli f64.
   - **Résidu honnête** : `react` bare specifier — le
     registry GitHub résout `react` vers
     `assets/react` (React réel, hors périmètre miroir) ;
     `value is not a function` à
     `app-foundation` (`useSyncExternalStore` — aval du
-    `react` manquant). Les autres erreurs census ont
-    disparu.
+    `react` manquant) ; dev.to : sonde pendue >10 min
+    (tempête de timers ou fetch gelé — à investiguer) ;
+    `/keys` : 404 hors session authentifiée.
   Tests : `mutation_observer_document_target`,
   `dom_interface_constructors`, `custom_elements_registry`,
   `regexp_quantified_lookahead`, `class_empty_elements`,
   `template_literals` (quotes en texte brut),
   `symbol_cles_propres_to_property_key`,
-  `stack_attribue_la_source_par_frame`.
+  `stack_attribue_la_source_par_frame`,
+  `document_fragment_splice_et_serialise`,
+  `document_location_egale_window`,
+  `hex_literals_geants_convertissent_en_f64`.
 
 ## Tâches continues
 
