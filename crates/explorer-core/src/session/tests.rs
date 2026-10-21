@@ -1619,6 +1619,19 @@ async fn lobste_pipeline_errors() {
         }
         y += 48.0;
     }
+    // Rafale clavier (étape 103) : les listeners `keydown`/
+    // `keyup` lisent désormais `key`/`code`/`keyCode`/`which` —
+    // un handler réel qui se trompe de prop lève un PipelineError
+    // où `undefined` passait muet avant.
+    for key in ["a", "Enter", "Escape", "ArrowDown", "j", "k"] {
+        let _ = s.handle_input_now(tab, InputEvent::Key { key: key.into() });
+        let _ = s.handle_input_now(tab, InputEvent::KeyUp { key: key.into() });
+        while let Ok(ev) = rx.try_recv() {
+            if let CoreEvent::PipelineError { message, .. } = ev {
+                errors.push(message);
+            }
+        }
+    }
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         s.pump_net().await;
