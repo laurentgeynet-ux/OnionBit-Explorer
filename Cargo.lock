@@ -580,6 +580,7 @@ name = "explorer-js"
 version = "0.2.0"
 dependencies = [
  "explorer-dom",
+ "explorer-html",
  "explorer-jscore",
  "thiserror",
 ]

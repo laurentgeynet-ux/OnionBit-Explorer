@@ -276,6 +276,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   « dégrader, jamais paniquer » est fuzzé sur lexer, parser
   et évaluateur (ADR-0019). Smoke déterministe sans nightly :
   `c38_fuzz_smoke_no_panic` (128 sources hostiles par LCG).
+- **JS-C39 — synchro DOM instrumentée + test croisé miroir**
+  (`explorer-js`, `explorer-jscore`) :
+  `Dom::serialize_stats` rapporte appels/octets/micros cumulés
+  de `serialize_document` ; `JsEngine::dom_sync_stats`
+  (additif, défaut `None`) expose `DomSyncStats` à la session
+  — la mesure par synchro exigée par le point de décision.
+  Test croisé `dom_sync.rs` : le HTML du miroir re-parsé par
+  `explorer_html::TreeBuilder` porte fidèlement les mutations
+  JS dans `explorer-dom`. Décision : statu quo
+  `serialize_document`, escalade `drain_dom_mutations`
+  conditionnée au dépassement mesuré (~10 % frame budget ou
+  churn DoS démontré).
 
 ### Fixed
 

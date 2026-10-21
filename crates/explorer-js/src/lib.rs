@@ -145,6 +145,23 @@ pub type DomPath = Vec<(String, u32)>;
 /// granulaire → l'appelant refait un reflow global).
 pub type DomSyncPayload = (String, Option<DomPath>);
 
+/// Compteurs cumulés de la synchro miroir → session (JS-C39) —
+/// l'instrument du critère d'escalade « la synchro DOM
+/// domine-t-elle le frame budget ? » : si `micros`/`bytes` par
+/// `syncs` dépassent ~10 % d'un frame ou qu'un churn `DoS` est
+/// démontré, un `drain_dom_mutations` additif prend le relais
+/// (records JS-C26 déjà mécanisés côté moteur).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DomSyncStats {
+    /// Synchros ayant produit un payload (sérialisations
+    /// réellement effectuées).
+    pub syncs: u64,
+    /// Octets HTML transférés (cumulés).
+    pub bytes: u64,
+    /// Microsecondes cumulées dans la sérialisation miroir.
+    pub micros: u64,
+}
+
 /// Op-list `<canvas>` enregistrée par un contexte 2D du
 /// miroir (JS-C28, couture R-11) — `explorer_jscore::CanvasOpRecord`
 /// est le miroir sérialisable de
@@ -309,6 +326,13 @@ pub trait JsEngine: Send {
     /// Défaut : délègue à [`Self::sync_dom`] sans chemin.
     fn sync_dom_path(&mut self) -> Option<DomSyncPayload> {
         self.sync_dom().map(|h| (h, None))
+    }
+
+    /// Compteurs cumulés de la synchro DOM (JS-C39) — à lire
+    /// après `sync_dom_path` pour mesurer octets/temps par
+    /// synchro. `None` = moteur sans miroir instrumenté.
+    fn dom_sync_stats(&mut self) -> Option<DomSyncStats> {
+        None
     }
 
     /// Snapshot « chemin élément → op-list » des `<canvas>`
@@ -516,6 +540,9 @@ enum Cmd {
     DomSync {
         tx: Sender<Option<DomSyncPayload>>,
     },
+    DomSyncStats {
+        tx: Sender<Option<DomSyncStats>>,
+    },
     CanvasOps {
         tx: Sender<CanvasOpsTable>,
     },
@@ -602,6 +629,7 @@ impl JscoreEngine {
     /// Boucle du thread : possède le `explorer_jscore::Engine` (`!Send`)
     /// et sert les commandes jusqu'à `Shutdown` ou fermeture du
     /// canal (le `Sender` meurt avec le proxy).
+    #[allow(clippy::too_many_lines)] // dispatch de commandes — grandir ne gagne rien
     fn worker(rx: &Receiver<Cmd>) {
         let mut eng = explorer_jscore::Engine::new();
         // Plafonds logiques relevés pour la pile de 32 Mio du
@@ -687,6 +715,22 @@ impl JscoreEngine {
                             .then(|| (d.serialize_document(), d.take_dirty_path()))
                     });
                     if tx.send(out).is_err() {
+                        return;
+                    }
+                }
+                // JS-C39 : les compteurs miroir (appels/octets/
+                // micros de `serialize_document`) sont la mesure
+                // par synchro — `syncs` = sérialisations produites.
+                Cmd::DomSyncStats { tx } => {
+                    let st = jsd.as_ref().map(|d| {
+                        let s = d.borrow().serialize_stats();
+                        DomSyncStats {
+                            syncs: s.calls,
+                            bytes: s.bytes,
+                            micros: s.micros,
+                        }
+                    });
+                    if tx.send(st).is_err() {
                         return;
                     }
                 }
@@ -800,6 +844,14 @@ impl JsEngine for JscoreEngine {
     fn sync_dom_path(&mut self) -> Option<DomSyncPayload> {
         let (tx, rx) = channel();
         if self.tx.send(Cmd::DomSync { tx }).is_err() {
+            return None;
+        }
+        rx.recv().ok().flatten()
+    }
+
+    fn dom_sync_stats(&mut self) -> Option<DomSyncStats> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DomSyncStats { tx }).is_err() {
             return None;
         }
         rx.recv().ok().flatten()

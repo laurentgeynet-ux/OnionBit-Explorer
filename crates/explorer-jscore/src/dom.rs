@@ -477,18 +477,33 @@ pub struct Dom {
     /// `write` sur document fermé rouvre implicitement en
     /// effaçant le contenu d'abord (spec `document open steps`).
     pub doc_open: bool,
-    /// Compteurs `serialize_document` (JS-C37) — appels et octets
-    /// produits, cumulés depuis la création. `Cell` : la
-    /// sérialisation est `&self`.
+    /// Compteurs `serialize_document` (JS-C37/C39) — appels,
+    /// octets et micros produits, cumulés depuis la création.
+    /// `Cell` : la sérialisation est `&self`.
     serialize_calls: Cell<u64>,
     /// Octets cumulés produits par `serialize_document`.
     serialize_bytes: Cell<u64>,
+    /// Microsecondes cumulées dans `serialize_document` (JS-C39).
+    serialize_micros: Cell<u64>,
 }
 
 impl Default for Dom {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Compteurs cumulés de `serialize_document` (JS-C39) —
+/// instrument du critère d'escalade « la synchro DOM domine-t-elle
+/// le frame budget ? » (octets et temps par synchro).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SerializeStats {
+    /// Sérialisations réellement produites.
+    pub calls: u64,
+    /// Octets HTML cumulés.
+    pub bytes: u64,
+    /// Microsecondes cumulées dans la sérialisation.
+    pub micros: u64,
 }
 
 impl Dom {
@@ -509,6 +524,7 @@ impl Dom {
             doc_open: true,
             serialize_calls: Cell::new(0),
             serialize_bytes: Cell::new(0),
+            serialize_micros: Cell::new(0),
         };
         d.root = d.alloc(NodeKind::Element, "#document");
         d
@@ -823,20 +839,30 @@ impl Dom {
     /// Sérialisation du document entier (source de re-rendu, JS-5b).
     #[must_use]
     pub fn serialize_document(&self) -> String {
+        let t0 = std::time::Instant::now();
         let s = self.inner_html(self.root);
-        // JS-C37 : coût de la resynchro DOM → host instrumenté
-        // (appels + octets cumulés, lus par `serialize_stats`).
+        // JS-C37/C39 : coût de la resynchro DOM → host instrumenté
+        // (appels + octets + micros cumulés, lus par
+        // `serialize_stats`).
         self.serialize_calls.set(self.serialize_calls.get() + 1);
         self.serialize_bytes
             .set(self.serialize_bytes.get() + s.len() as u64);
+        self.serialize_micros
+            .set(self.serialize_micros.get() + t0.elapsed().as_micros() as u64);
         s
     }
 
-    /// `(appels, octets cumulés)` de `serialize_document` —
-    /// instrumentation du coût de resynchronisation DOM (JS-C37).
+    /// Compteurs cumulés de `serialize_document` —
+    /// instrumentation du coût de resynchronisation DOM
+    /// (JS-C37 appels/octets, JS-C39 micros — l'instrument du
+    /// critère « la synchro domine-t-elle le frame budget ? »).
     #[must_use]
-    pub fn serialize_stats(&self) -> (u64, u64) {
-        (self.serialize_calls.get(), self.serialize_bytes.get())
+    pub fn serialize_stats(&self) -> SerializeStats {
+        SerializeStats {
+            calls: self.serialize_calls.get(),
+            bytes: self.serialize_bytes.get(),
+            micros: self.serialize_micros.get(),
+        }
     }
 
     /// Attach `child` under `parent` (re-parents if attached).

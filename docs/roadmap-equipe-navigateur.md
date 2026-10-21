@@ -1656,7 +1656,7 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   ne change **pas** la sémantique, elle rend le code revoyable
   à plusieurs. Écarts sémantiques assumés (générateurs eager,
   `await` pending) = JS-C34, déclenché site réel — pas ici.
-- [ ] **JS-C39. Sync DOM incrémentale — instrumenter puis
+- [x] **JS-C39. Sync DOM incrémentale — instrumenter puis
   drainer les records** (dette ADR-0013 budgétisée tôt ; le
   pont `dom_host.rs` = 69 Ko, son empreinte se mesure ici).
   **Point de décision, pas juste mesure** — trois issues
@@ -1682,6 +1682,20 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Nouveau point de cohérence → tests croisés miroir ↔
   `explorer-dom` exigés (règle de tri « corrige le côté
   fautif »).
+  Livré (branche 1, mesure) : `Dom::serialize_stats`
+  (`SerializeStats { calls, bytes, micros }`) instrumente
+  `serialize_document` côté moteur ; `JsEngine::dom_sync_stats`
+  (additif, défaut `None`) expose `DomSyncStats
+  { syncs, bytes, micros }` à la session — octets/micros par
+  synchro mesurables sans bench dédié. Tests croisés :
+  `dom_sync.rs` re-parse le HTML du miroir via
+  `explorer_html::TreeBuilder` et vérifie la fidélité des
+  mutations dans `explorer-dom`.
+  **Décision écrite** : statu quo `serialize_document` — la
+  synchro n'a jamais été mesurée dominante ; les compteurs
+  existent désormais pour détecter le seuil (~10 % frame
+  budget) ou un churn DoS → escalader alors vers
+  `drain_dom_mutations` (records JS-C26 déjà produits).
 - [x] **JS-C41. Récursion bornée — stack overflow site réel**
   (bug terrain, repro : github.com) : `explorer-jscore` fait un
   stack overflow sur le bundle réel de github (`dump`/`layout`

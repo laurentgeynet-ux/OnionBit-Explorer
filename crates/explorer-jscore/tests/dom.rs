@@ -1585,17 +1585,22 @@ fn rawtext_close_survives_length_shifting_runes() {
     assert!(d3.serialize_document().contains("<b>z</b>"));
 }
 
-/// JS-C37 — le coût de resynchronisation `serialize_document`
-/// est instrumenté : appels + octets produits cumulés.
+/// JS-C37/C39 — le coût de resynchronisation `serialize_document`
+/// est instrumenté : appels + octets + micros produits cumulés.
 #[test]
 fn serialize_stats_counts_calls_and_bytes() {
     let d = Dom::from_html("<div><p>hello</p></div>");
-    assert_eq!(d.serialize_stats(), (0, 0));
+    let st0 = d.serialize_stats();
+    assert_eq!(st0.calls, 0);
+    assert_eq!(st0.bytes, 0);
     let s1 = d.serialize_document();
     let s2 = d.serialize_document();
-    let (calls, bytes) = d.serialize_stats();
-    assert_eq!(calls, 2);
-    assert_eq!(bytes, (s1.len() + s2.len()) as u64);
+    let st = d.serialize_stats();
+    assert_eq!(st.calls, 2);
+    assert_eq!(st.bytes, (s1.len() + s2.len()) as u64);
+    // micros mesuré (peut valoir 0 sur une horloge grossière —
+    // seul le cumul monotone est contractualisé).
+    assert!(st.micros < 60_000_000);
 }
 
 /// 55c — fidélité round-trip : le contenu rawtext (`script`,
