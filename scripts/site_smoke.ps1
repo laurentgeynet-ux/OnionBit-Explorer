@@ -144,6 +144,49 @@ if (-not $SkipFunctional -and $ok -gt 0) {
         -ArgumentList '--port', "$FuncPort", '--profile', $profDir `
         -RedirectStandardError $daemonErr
 
+    # Client HTTP poolé (keep-alive) : les sondes se comptent en
+    # milliers par run et `Invoke-RestMethod` ouvrait une connexion
+    # TCP à chaque appel — ~16 000 sockets TIME_WAIT épuisaient les
+    # ports éphémères Windows en cours de phase et les sites restants
+    # tombaient en WSAEADDRINUSE (faux échecs mesurés).
+    $script:http = [System.Net.Http.HttpClient]::new()
+    $script:http.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
+
+    function Send-Api {
+        param(
+            [Parameter(Mandatory)][string]$Method,
+            [Parameter(Mandatory)][string]$Uri,
+            [hashtable]$Body,
+            [int]$TimeoutSec = 30,
+            [switch]$Raw)
+        $cts = [System.Threading.CancellationTokenSource]::new()
+        $cts.CancelAfter([TimeSpan]::FromSeconds($TimeoutSec))
+        try {
+            $req = [System.Net.Http.HttpRequestMessage]::new(
+                [System.Net.Http.HttpMethod]::new($Method), $Uri)
+            if ($null -ne $Body) {
+                $req.Content = [System.Net.Http.StringContent]::new(
+                    ($Body | ConvertTo-Json -Compress),
+                    [System.Text.Encoding]::UTF8, 'application/json')
+            }
+            $res = $script:http.SendAsync(
+                $req, $cts.Token).GetAwaiter().GetResult()
+            try {
+                if ($Raw) {
+                    return @{
+                        Status = [int]$res.StatusCode
+                        Bytes  = $res.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+                    }
+                }
+                if (-not $res.IsSuccessStatusCode) { return $null }
+                $text = $res.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                if ([string]::IsNullOrWhiteSpace($text)) { return $true }
+                return ($text | ConvertFrom-Json)
+            } finally { $res.Dispose(); $req.Dispose() }
+        } catch { return $null }
+        finally { $cts.Dispose() }
+    }
+
     function Wait-Func([scriptblock]$Probe, [int]$Tries = 300) {
         foreach ($i in 1..$Tries) {
             $r = & $Probe
@@ -153,20 +196,14 @@ if (-not $SkipFunctional -and $ok -gt 0) {
         return $null
     }
     function Send-Input($Id, [hashtable]$Ev) {
-        try {
-            # 30 s : l'input attend le verrou session — une
-            # page lourde en apply (wikipedia 10 Mo) le tient
-            # plusieurs secondes ; 10 s = timeout mensonger.
-            Invoke-RestMethod -Method Post -Uri "$FuncBase/tabs/$Id/input" `
-                -ContentType 'application/json' -Body ($Ev | ConvertTo-Json) `
-                -TimeoutSec 30
-        } catch { $null }
+        # 30 s : l'input attend le verrou session — une
+        # page lourde en apply (wikipedia 10 Mo) le tient
+        # plusieurs secondes ; 10 s = timeout mensonger.
+        Send-Api Post "$FuncBase/tabs/$Id/input" $Ev 30
     }
     function Get-TabUrl($Id) {
-        try {
-            ((Invoke-RestMethod -Uri "$FuncBase/tabs" -TimeoutSec 20).tabs |
-                Where-Object { $_.id -eq $Id }).url
-        } catch { $null }
+        $r = Send-Api Get "$FuncBase/tabs" $null 20
+        if ($r) { ($r.tabs | Where-Object { $_.id -eq $Id }).url }
     }
     function Get-Scroll($Id) {
         # `scroll dy=0` est un no-op qui rapporte la position
@@ -184,16 +221,14 @@ if (-not $SkipFunctional -and $ok -gt 0) {
         # que la nav d'arrivée peint — back posté alors bloquait
         # le verrou session (mesuré : back-POST-TIMEOUT sur
         # iana.org alors que back vaut ~1 ms une fois peint).
-        try {
-            $r = Invoke-WebRequest -Uri "$FuncBase/tabs/$Id/frame" `
-                -TimeoutSec 30
-            if ($r.StatusCode -eq 204 -or $r.Content.Length -eq 0) {
-                return $null
-            }
-            (Get-FileHash -InputStream `
-                ([System.IO.MemoryStream]::new([byte[]]$r.Content)) `
-                -Algorithm SHA256).Hash
-        } catch { $null }
+        $r = Send-Api Get "$FuncBase/tabs/$Id/frame" $null 30 -Raw
+        if ($null -eq $r -or $r.Status -eq 204 -or
+            $r.Bytes.Length -eq 0) {
+            return $null
+        }
+        (Get-FileHash -InputStream `
+            ([System.IO.MemoryStream]::new([byte[]]$r.Bytes)) `
+            -Algorithm SHA256).Hash
     }
     function Wait-DestFrame($Id, [string]$PrevHash, [int]$BudgetSec = 90) {
         # Une frame « nouvelle » = hash différent de celui d'avant
@@ -219,11 +254,8 @@ if (-not $SkipFunctional -and $ok -gt 0) {
 
     try {
         $up = Wait-Func {
-            try {
-                Invoke-RestMethod -Uri "$FuncBase/status" -TimeoutSec 2 |
-                    Out-Null
-                $true
-            } catch { $false }
+            if (Send-Api Get "$FuncBase/status" $null 2) { $true }
+            else { $false }
         } 60
         if (-not $up) {
             Write-Output '  daemon indisponible — phase fonctionnelle sautée'
@@ -238,27 +270,25 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                 $verdict = 'nav:TIMEOUT'
                 $id = $null
                 try {
-                    $tab = Invoke-RestMethod -Method Post `
-                        -Uri "$FuncBase/tabs" -TimeoutSec 60
+                    $tab = Send-Api Post "$FuncBase/tabs" $null 60
+                    if (-not $tab) { throw 'POST /tabs' }
                     $id = $tab.id
                     # `/navigate` est synchrone jusqu'au commit —
                     # le pipeline complet d'un document géant
                     # (github = frame 49 Mo) dépasse 30 s ; mesuré
                     # ~124 s au commit réel → 240 s de fenêtre.
-                    Invoke-RestMethod -Method Post `
-                        -Uri "$FuncBase/tabs/$id/navigate" `
-                        -ContentType 'application/json' `
-                        -Body (@{ url = $site } | ConvertTo-Json) `
-                        -TimeoutSec 240 | Out-Null
+                    if (-not (Send-Api Post `
+                            "$FuncBase/tabs/$id/navigate" `
+                            @{ url = $site } 240)) {
+                        throw 'navigate'
+                    }
                     # Frame produite (~60 s de grâce pour les
                     # gros documents — github a pris ~30 s).
                     $framed = Wait-Func {
-                        try {
-                            $r = Invoke-WebRequest `
-                                -Uri "$FuncBase/tabs/$id/frame" `
-                                -TimeoutSec 30
-                            if ($r.Content.Length -gt 0) { $true } else { $false }
-                        } catch { $false }
+                        $r = Send-Api Get "$FuncBase/tabs/$id/frame" `
+                            $null 30 -Raw
+                        if ($r -and $r.Bytes.Length -gt 0) { $true }
+                        else { $false }
                     } 300
                     if (-not $framed) { Write-Output "  $tag  $verdict"; continue }
                     $url0 = Get-TabUrl $id
@@ -360,12 +390,8 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                             # verrou session : attendre la frame de la
                             # page d'arrivée d'abord.
                             $null = Wait-DestFrame $id $hash0
-                            $backSent = $true
-                            try {
-                                Invoke-RestMethod -Method Post `
-                                    -Uri "$FuncBase/tabs/$id/back" `
-                                    -TimeoutSec 120 | Out-Null
-                            } catch { $backSent = $false }
+                            $backSent = $null -ne (Send-Api Post `
+                                "$FuncBase/tabs/$id/back" $null 120)
                             $restored = Wait-Func {
                                 $u = Get-TabUrl $id
                                 if ($u -eq $url0) { $true } else { $false }
@@ -400,12 +426,8 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                             # Idem : attendre la frame de la page
                             # d'arrivée avant `back` (verrou session).
                             $null = Wait-DestFrame $id $hash0
-                            $backSent = $true
-                            try {
-                                Invoke-RestMethod -Method Post `
-                                    -Uri "$FuncBase/tabs/$id/back" `
-                                    -TimeoutSec 120 | Out-Null
-                            } catch { $backSent = $false }
+                            $backSent = $null -ne (Send-Api Post `
+                                "$FuncBase/tabs/$id/back" $null 120)
                             $restored = Wait-Func {
                                 $u = Get-TabUrl $id
                                 if ($u -eq $url0) { $true } else { $false }
@@ -450,17 +472,14 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                     $verdict = "ERREUR: $_"
                 } finally {
                     if ($null -ne $id) {
-                        try {
-                            Invoke-RestMethod -Method Delete `
-                                -Uri "$FuncBase/tabs/$id" `
-                                -TimeoutSec 30 | Out-Null
-                        } catch {}
+                        $null = Send-Api Delete "$FuncBase/tabs/$id" $null 30
                     }
                 }
                 Write-Output "  $tag  $verdict"
             }
         }
     } finally {
+        $script:http.Dispose()
         if ($proc -and -not $proc.HasExited) {
             Stop-Process -Id $proc.Id -Force
         }

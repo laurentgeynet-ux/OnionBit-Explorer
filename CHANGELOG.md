@@ -898,6 +898,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   REST). Tests : `reload_request_on_failed_post_replays_request`,
   `post_reload_requires_confirm`, contrôleur
   `resubmit_confirm`.
+- **`scripts/site_smoke.ps1` — sondes sur client HTTP
+  poolé** : chaque sonde `Invoke-RestMethod`
+  ouvrait une connexion TCP neuve ; ~16 000 sockets
+  TIME_WAIT épuisaient les ports éphémères Windows en cours
+  de phase 2 → les 4 derniers sites tombaient en
+  `WSAEADDRINUSE`, faux échecs. `Send-Api` mutualise un
+  `HttpClient` keep-alive (timeouts par
+  `CancellationTokenSource`, mode `-Raw` pour `/frame`).
+  Re-mesure complète après le lot JS-C36→C52 / R-43→R-53 /
+  étapes 91-94 : **10/10 rendus, 10/10 fonctionnels**
+  (nav + lien + back + dispatch), 3 TIME_WAIT résiduels.
 
 ## [0.2.0] - 2026-10-20
 

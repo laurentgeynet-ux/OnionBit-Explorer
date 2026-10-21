@@ -42,7 +42,12 @@ Objectif : les blocages du web réel sautent. Sortie de palier :
 réel cliqué par hit-test moteur, back restauré, dispatch de
 scripts OK ; `form:absent` honnête partout (aucun champ
 éditable dans les bandes sondées — corpus quasi sans
-formulaires en premier viewport).
+formulaires en premier viewport). **Re-mesuré : 10/10 à
+`76e3f34`** après la vague JS-C36→C52 / R-43→R-53 /
+étapes 91-94 — la mesure a d'abord lu 5/10 par épuisement
+des ports éphémères Windows côté sondes (~16 000 TIME_WAIT,
+`WSAEADDRINUSE`) ; `site_smoke` passe alors sur client HTTP
+poolé keep-alive, la valeur réelle remonte.
 
 Shortlist candidate (reconnaissance terrain @ `2693959`,
 panel de 8) : **mesurables** lobste.rs, wikipedia ·
