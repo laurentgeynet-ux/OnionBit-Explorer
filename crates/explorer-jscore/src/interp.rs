@@ -1323,6 +1323,13 @@ impl Engine {
                             }
                             EnvCell::Bind(bnd) => {
                                 if !bnd.mutable {
+                                    // Nom de FunctionExpression :
+                                    // ReadOnly ES3 — l'écriture
+                                    // sloppy est silencieuse, le
+                                    // strict jette.
+                                    if bnd.sloppy_silent && !self.strict {
+                                        return Ok(());
+                                    }
                                     return Err(
                                         self.type_error(format!("assignment to constant `{name}`"))
                                     );
@@ -1378,6 +1385,7 @@ impl Engine {
                     m.entry(name.to_string()).or_insert(EnvCell::Bind(Binding {
                         value: Value::Undefined,
                         mutable: true,
+                        sloppy_silent: false,
                     }));
                     return;
                 }
@@ -1420,7 +1428,11 @@ impl Engine {
                 EnvKind::Local(m) | EnvKind::Global(m) => {
                     m.insert(
                         name.to_string(),
-                        EnvCell::Bind(Binding { value: v, mutable }),
+                        EnvCell::Bind(Binding {
+                            value: v,
+                            mutable,
+                            sloppy_silent: false,
+                        }),
                     );
                     return;
                 }
@@ -1449,6 +1461,7 @@ impl Engine {
                         EnvCell::Bind(Binding {
                             value: Value::Undefined,
                             mutable,
+                            sloppy_silent: false,
                         }),
                     );
                     return;
@@ -3531,6 +3544,7 @@ impl Engine {
                             EnvCell::Bind(Binding {
                                 value: argv,
                                 mutable: true,
+                                sloppy_silent: false,
                             }),
                         );
                     }
@@ -4481,11 +4495,17 @@ impl Engine {
                     let scope = Env::local(env.clone());
                     let fv = self.make_function(lit, &scope, this);
                     if let EnvKind::Local(m) = &mut scope.borrow_mut().kind {
+                        // ES3 §13 / ES5 : le nom d'une
+                        // FunctionExpression est ReadOnly dans son
+                        // propre scope — écriture sloppy ignorée
+                        // silencieusement (`sloppy_silent`), strict
+                        // garde le `TypeError`.
                         m.insert(
                             name.clone(),
                             EnvCell::Bind(Binding {
                                 value: fv,
-                                mutable: true,
+                                mutable: false,
+                                sloppy_silent: true,
                             }),
                         );
                     }

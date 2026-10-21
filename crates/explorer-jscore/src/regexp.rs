@@ -312,6 +312,9 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
         n_groups,
         names: std::collections::BTreeSet::new(),
         all_names,
+        groups_open: 0,
+        open_stack: Vec::new(),
+        closed: std::collections::BTreeSet::new(),
     };
     let mut out = String::with_capacity(src.len() + 8);
     let mut i = 0;
@@ -468,7 +471,8 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                             } else if cs[i + 1] != '\\' {
                                 // Borne haute brute — `class_char`
                                 // échappe la syntaxe de classe
-                                // backend (`[`/`&`/`~`).
+                                // backend (`[`/`&`/`~`) et uniformise
+                                // la sortie (`\x{…}`).
                                 class_char(&mut out, u32::from(cs[i + 1]));
                             } else {
                                 out.push_str(&hfrag);
@@ -517,10 +521,15 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                 continue;
             }
             '(' if !in_class => {
+                t.groups_open += 1;
+                t.open_stack.push(Some(t.groups_open));
                 last_atom = false;
                 out.push('(');
             }
             ')' if !in_class => {
+                if let Some(Some(n)) = t.open_stack.pop() {
+                    t.closed.insert(n);
+                }
                 last_atom = true;
                 out.push(')');
             }
@@ -589,7 +598,8 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                     // `[`/`&`/`~` ont une syntaxe en classe côté
                     // backend (set/intersection/diff) — le brut
                     // `[.*+?^${}()|[\]\\]` du web réel rejetait
-                    // « Invalid character class » (JS-C43).
+                    // « Invalid character class » (JS-C43). La
+                    // sortie est uniformisée en `\x{…}`.
                     class_char(&mut out, u32::from(c));
                     class_emitted = true;
                     if t.fold {
@@ -629,6 +639,15 @@ struct Trans {
     names: std::collections::BTreeSet<String>,
     /// Tous les noms du pattern (backref avant déclaration).
     all_names: std::collections::BTreeSet<String>,
+    /// Groupes capturants ouverts jusqu'ici (numérotation des `(`).
+    groups_open: usize,
+    /// Pile des groupes ouverts — `Some(n)` capturant, `None`
+    /// sinon ; un `)` pop et clôt le numéro.
+    open_stack: Vec<Option<usize>>,
+    /// Numéros de groupes **fermés** avant la position courante —
+    /// seule une backref vers un groupe clos peut réellement
+    /// capturer (`\3` dans `(\3)…(…)` matche vide, spec 21.2.2.9).
+    closed: std::collections::BTreeSet<usize>,
 }
 
 /// Premier passage : tous les noms de groupes capturants + leur
@@ -944,11 +963,13 @@ fn translate_group(
     let err = || format!("invalid group in /{src}/");
     match cs.get(i + 2) {
         Some(':' | '=' | '!') => {
+            t.open_stack.push(None);
             out.push_str("(?");
             out.push(cs[i + 2]);
             Ok(i + 3)
         }
         Some('<') if matches!(cs.get(i + 3), Some('=' | '!')) => {
+            t.open_stack.push(None);
             out.push_str("(?<");
             out.push(cs[i + 3]);
             Ok(i + 4)
@@ -973,6 +994,8 @@ fn translate_group(
             if !t.names.insert(name.clone()) {
                 return Err(format!("duplicate group name `{name}` in /{src}/"));
             }
+            t.groups_open += 1;
+            t.open_stack.push(Some(t.groups_open));
             out.push_str("(?P<");
             out.push_str(&name);
             out.push('>');
@@ -1014,6 +1037,7 @@ fn translate_group(
                 return Err(err());
             }
             // Fragment validé → émis tel quel (fancy le comprend).
+            t.open_stack.push(None);
             out.push_str(&cs[i..=j].iter().collect::<String>());
             Ok(j + 1)
         }
@@ -1234,7 +1258,15 @@ impl Trans {
             j += 1;
         }
         if n >= 1 && n <= self.n_groups {
-            return Ok((format!("\\{n}"), j));
+            if self.closed.contains(&n) {
+                return Ok((format!("\\{n}"), j));
+            }
+            // Backref « vers l'avant » : le groupe n'a pas encore
+            // fermé — il ne peut pas avoir capturé → la référence
+            // matche la chaîne vide (spec 21.2.2.9, même traitement
+            // que les `\k<…>` prédéclarées). `/(\3)(\1)(a)/` sur
+            // « cat » doit matcher « a » (Acid3 t90).
+            return Ok(("(?:)".into(), j));
         }
         if self.unicode {
             return Err(format!("invalid backref \\{n} in /{src}/"));
@@ -1255,8 +1287,15 @@ impl Trans {
             let prefix: String = cs[i + 1..k].iter().collect();
             let rest: String = cs[k..j].iter().collect();
             // `(?:rest)` après la backref : `\1` + `23` écrit `\123`
-            // serait relu comme la backref 123.
-            return Ok((format!("\\{prefix}(?:{rest})"), j));
+            // serait relu comme la backref 123. Préfixe « vers
+            // l'avant » → match vide, comme la branche au-dessus.
+            let pn: usize = prefix.parse().unwrap_or(0);
+            let head = if self.closed.contains(&pn) {
+                format!("\\{prefix}")
+            } else {
+                "(?:)".to_string()
+            };
+            return Ok((format!("{head}(?:{rest})"), j));
         }
         let d0 = cs[i + 1];
         if matches!(d0, '8' | '9') {
@@ -1351,7 +1390,7 @@ mod tests {
     /// sur `/[\x00- ]/` (pattern réel d'un bundle Google).
     #[test]
     fn class_escape_bounds_decode() {
-        assert_eq!(tr(r"[\x00- ]"), "[\\x{0}- ]");
+        assert_eq!(tr(r"[\x00- ]"), "[\\x{0}-\\x{20}]");
         assert_eq!(tr(r"[\x20-\x30]"), "[\\x{20}-\\x{30}]");
         assert_eq!(tr(r"[\u2020-\u2030]"), "[\\x{2020}-\\x{2030}]");
         assert_eq!(tr(r"[\u{1F600}-\u{1F64F}]"), "[\\x{1f600}-\\x{1f64f}]");
@@ -1360,7 +1399,7 @@ mod tests {
         assert_eq!(tr(r"[\101-\103]"), "[\\x{41}-\\x{43}]");
         assert_eq!(
             tr(r"[\x00- \x22\x27-\x29\x3c\x3e\\\x7b\x7d\x7f\x85\xa0\u2028\u2029\uff01\uff03\uff04\uff06-\uff0c\uff0f\uff1a\uff1b\uff1d\uff1f\uff20\uff3b\uff3d]"),
-            "[\\x{0}- \\x{22}\\x{27}-\\x{29}\\x{3c}\\x{3e}\\\\\\x{7b}\\x{7d}\\x{7f}\\x{85}\\x{a0}\\x{2028}\\x{2029}\\x{ff01}\\x{ff03}\\x{ff04}\\x{ff06}-\\x{ff0c}\\x{ff0f}\\x{ff1a}\\x{ff1b}\\x{ff1d}\\x{ff1f}\\x{ff20}\\x{ff3b}\\x{ff3d}]"
+            "[\\x{0}-\\x{20}\\x{22}\\x{27}-\\x{29}\\x{3c}\\x{3e}\\\\\\x{7b}\\x{7d}\\x{7f}\\x{85}\\x{a0}\\x{2028}\\x{2029}\\x{ff01}\\x{ff03}\\x{ff04}\\x{ff06}-\\x{ff0c}\\x{ff0f}\\x{ff1a}\\x{ff1b}\\x{ff1d}\\x{ff1f}\\x{ff20}\\x{ff3b}\\x{ff3d}]"
         );
     }
 

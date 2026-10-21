@@ -1317,14 +1317,18 @@ pub enum EnvCell {
 }
 
 /// A local-scope binding. `var`/`let` are mutable; `const` writes
-/// after initialisation are silently ignored (documented sloppy
-/// tolerance — strict engines throw `TypeError`).
+/// after initialisation throw `TypeError` (ES2015+, strict comme
+/// sloppy) — sauf `sloppy_silent` (nom de `FunctionExpression`,
+/// `ReadOnly` ES3 §13 : échec silencieux en sloppy, `TypeError` en
+/// strict).
 #[derive(Debug, Clone, Copy)]
 pub struct Binding {
     /// Stored value.
     pub value: Value,
     /// `false` for `const`.
     pub mutable: bool,
+    /// Écriture sloppy silencieuse (nom de `FunctionExpression`).
+    pub sloppy_silent: bool,
 }
 
 /// Shared env handle.
