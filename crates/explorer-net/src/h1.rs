@@ -174,6 +174,15 @@ pub struct HttpConfig {
     pub connect_timeout: Duration,
     /// Timeout par opération de lecture/écriture.
     pub io_timeout: Duration,
+    /// Deadline **total** d'une phase d'échange — borne les
+    /// serveurs « tarpit » (anti-bot) qui gouttent la réponse
+    /// sous le seuil par-opération : chaque lecture respecte
+    /// `io_timeout`, le total ne s'accumule jamais. Couvre
+    /// écriture + en-têtes + corps bufferisé ; le corps
+    /// **streamé** reçoit son propre budget de même taille
+    /// dans sa tâche détachée. L'établissement de connexion
+    /// reste borné par `connect_timeout` en amont.
+    pub request_timeout: Duration,
     /// Taille max de l'en-tête de réponse (octets).
     pub max_head_bytes: usize,
     /// Taille max du corps déframé (octets).
@@ -189,6 +198,7 @@ impl Default for HttpConfig {
         Self {
             connect_timeout: Duration::from_secs(10),
             io_timeout: Duration::from_secs(30),
+            request_timeout: Duration::from_secs(45),
             max_head_bytes: 64 * 1024,
             max_body_bytes: 64 * 1024 * 1024,
             user_agent: "Explorer/0.1".to_string(),
@@ -390,6 +400,8 @@ impl H1Client {
     }
 
     /// Un aller-retour + gestion de pool — corps de `fetch`.
+    /// Borné en total par `request_timeout` (le per-op
+    /// `io_timeout` ne voit pas un serveur qui goutte).
     async fn exchange(
         &self,
         req: &Request,
@@ -397,13 +409,21 @@ impl H1Client {
         conn: Pooled,
         reused: bool,
     ) -> NetResult<Response> {
-        let (mut conn, mut resp) = self.open_response(req, key, conn, reused).await?;
-        resp.body = self.read_body(req, &resp, &mut conn).await?;
-        resp.reused_connection = reused;
-        if is_reusable(&resp, req) {
-            self.put_back(key, conn);
-        }
-        Ok(resp)
+        timeout(self.cfg.request_timeout, async {
+            let (mut conn, mut resp) = self.open_response(req, key, conn, reused).await?;
+            resp.body = self.read_body(req, &resp, &mut conn).await?;
+            resp.reused_connection = reused;
+            if is_reusable(&resp, req) {
+                self.put_back(key, conn);
+            }
+            Ok(resp)
+        })
+        .await
+        .map_err(|_| NetError::Timeout {
+            phase: "request",
+            ms: u64::try_from(self.cfg.request_timeout.as_millis()).unwrap_or(u64::MAX),
+            target: target_of(req),
+        })?
     }
 
     /// Réponse streamée (étape 53) : en-têtes lues ici, corps
@@ -416,7 +436,20 @@ impl H1Client {
         conn: Pooled,
         reused: bool,
     ) -> NetResult<StreamedResponse> {
-        let (conn, resp) = self.open_response(req, key, conn, reused).await?;
+        // La phase en-têtes est bornée en total (tarpit) ; le
+        // corps détaché reçoit un budget neuf de même taille —
+        // des en-têtes lents ne doivent pas affamer un corps
+        // légitime.
+        let (conn, resp) = timeout(
+            self.cfg.request_timeout,
+            self.open_response(req, key, conn, reused),
+        )
+        .await
+        .map_err(|_| NetError::Timeout {
+            phase: "request",
+            ms: u64::try_from(self.cfg.request_timeout.as_millis()).unwrap_or(u64::MAX),
+            target: target_of(req),
+        })??;
         let (tx, rx) = tokio::sync::mpsc::channel(4);
         // La tâche possède la connexion jusqu'à fin de corps —
         // remise au pool par `pool` si la réponse est réutilisable.
@@ -425,6 +458,7 @@ impl H1Client {
                 io_timeout: self.cfg.io_timeout,
                 target: target_of(req),
                 max_body: self.cfg.max_body_bytes,
+                deadline: std::time::Instant::now() + self.cfg.request_timeout,
             },
             method: req.method,
             status: resp.status,
@@ -760,20 +794,33 @@ struct IoCtx {
     io_timeout: std::time::Duration,
     target: String,
     max_body: usize,
+    /// Borne totale du corps streamé (`request_timeout` ouvert
+    /// au lancement de la tâche) — un serveur qui goutte sous
+    /// `io_timeout` par lecture est quand même coupé au budget.
+    deadline: std::time::Instant,
 }
 
 impl IoCtx {
-    /// Timeout par opération + aplatissement `io::Result` —
-    /// même facteur que `H1Client::io`.
+    /// Timeout au plus petit de `io_timeout` (par opération)
+    /// et du reste jusqu'à `deadline` (total) + aplatissement
+    /// `io::Result` — même facteur que `H1Client::io`.
     async fn io<T>(
         &self,
         fut: impl std::future::Future<Output = std::io::Result<T>>,
     ) -> NetResult<T> {
-        timeout(self.io_timeout, fut)
+        let left = self
+            .deadline
+            .saturating_duration_since(std::time::Instant::now());
+        let budget = self.io_timeout.min(left);
+        timeout(budget, fut)
             .await
             .map_err(|_| NetError::Timeout {
-                phase: "io",
-                ms: u64::try_from(self.io_timeout.as_millis()).unwrap_or(u64::MAX),
+                phase: if left <= self.io_timeout {
+                    "request"
+                } else {
+                    "io"
+                },
+                ms: u64::try_from(budget.as_millis()).unwrap_or(u64::MAX),
                 target: self.target.clone(),
             })?
             .map_err(NetError::Io)

@@ -9,6 +9,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 101 — deadline total de requête**
+  (`explorer-net`, trigger vol humain fnac.fr) :
+  `io_timeout` ne borne que chaque lecture — un serveur
+  « tarpit » (anti-bot) qui goutte sa réponse sous le
+  seuil par-opération n'était jamais coupé (~60 s avant
+  la page d'erreur 403). `HttpConfig.request_timeout`
+  (45 s) borne l'échange en total : en-têtes + corps
+  bufferisé h1/h2 ; les corps streamés reçoivent un
+  budget neuf de même taille dans leur tâche détachée
+  (des en-têtes lents n'affament pas un corps légitime).
+  `NetError::Timeout` gagne la phase `request`. Tests :
+  `tarpit_headers_hit_request_timeout`,
+  `tarpit_stream_body_hit_request_timeout`.
+
 - **R-67 — `FontCache` `Send`** (`explorer-layout`) :
   `data` `Rc<Vec<u8>>` → `Arc<Vec<u8>>` (tampons immuables
   — `Arc::as_ptr` conserve l'identité des clés

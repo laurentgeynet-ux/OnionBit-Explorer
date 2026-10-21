@@ -311,6 +311,84 @@ async fn io_timeout() {
 }
 
 #[tokio::test]
+async fn tarpit_headers_hit_request_timeout() {
+    // Serveur « tarpit » (anti-bot) : chaque goutte respecte
+    // `io_timeout` mais le total excède `request_timeout` —
+    // sans deadline globale, la requête pend sans fin.
+    let srv = serve_slow(
+        (0..10)
+            .map(|_| b"X-Tarpit: drip\r\n".to_vec())
+            .collect::<Vec<_>>(),
+        Duration::from_millis(80),
+    )
+    .await;
+    let cfg = HttpConfig {
+        io_timeout: Duration::from_secs(2),
+        request_timeout: Duration::from_millis(300),
+        ..HttpConfig::default()
+    };
+    let c = H1Client::new(Arc::new(TcpConnector), cfg);
+    let t0 = std::time::Instant::now();
+    let err = c
+        .fetch(&Request::get(url(srv.port, "/")))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            NetError::Timeout {
+                phase: "request",
+                ..
+            }
+        ),
+        "{err}"
+    );
+    assert!(
+        t0.elapsed() < Duration::from_secs(2),
+        "coupé au deadline total, pas à l'io_timeout : {:?}",
+        t0.elapsed()
+    );
+    let _ = srv;
+}
+
+#[tokio::test]
+async fn tarpit_stream_body_hit_request_timeout() {
+    // En-têtes servis vite, corps goutté : la tâche streamée
+    // est coupée à son deadline — le canal livre un Timeout.
+    let srv = serve_slow(
+        vec![
+            b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nmorceau-1 ".to_vec(),
+            b"morceau-2 ".to_vec(),
+            b"morceau-3 ".to_vec(),
+        ],
+        Duration::from_millis(250),
+    )
+    .await;
+    let cfg = HttpConfig {
+        io_timeout: Duration::from_secs(2),
+        request_timeout: Duration::from_millis(300),
+        ..HttpConfig::default()
+    };
+    let c = H1Client::new(Arc::new(TcpConnector), cfg);
+    let mut resp = c
+        .fetch_stream(&Request::get(url(srv.port, "/")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status, 200);
+    // Les premiers morceaux arrivent, puis la borne coupe.
+    let mut got_timeout = false;
+    while let Some(item) = resp.body.recv().await {
+        if matches!(item, Err(NetError::Timeout { .. })) {
+            got_timeout = true;
+            break;
+        }
+        item.unwrap();
+    }
+    assert!(got_timeout, "corps goutté non borné");
+    let _ = srv;
+}
+
+#[tokio::test]
 async fn unsupported_scheme() {
     let req = Request::get(Url::parse("data:text/plain,x").unwrap());
     let err = client().fetch(&req).await.unwrap_err();

@@ -183,7 +183,20 @@ impl AutoClient {
 
     /// Une requête sur connexion h2 — corps borné par
     /// `max_body_bytes` (défense anti-mémoire identique à h1).
+    /// Bornée en total par `request_timeout` : le `io_timeout`
+    /// par opération ne voit pas un serveur qui goutte.
     async fn h2_send(&self, sr: SendRequest, req: &Request) -> NetResult<Response> {
+        timeout(self.cfg.request_timeout, self.h2_send_inner(sr, req))
+            .await
+            .map_err(|_| NetError::Timeout {
+                phase: "request",
+                ms: u64::try_from(self.cfg.request_timeout.as_millis()).unwrap_or(u64::MAX),
+                target: target_of(req),
+            })?
+    }
+
+    /// Corps de [`Self::h2_send`] hors du wrap de deadline.
+    async fn h2_send_inner(&self, sr: SendRequest, req: &Request) -> NetResult<Response> {
         let mut resp = self.h2_request(sr, req).await?;
 
         let headers: Vec<(String, String)> = resp
@@ -217,8 +230,17 @@ impl AutoClient {
     /// Variante streamée de [`Self::h2_send`] (étape 53) : la
     /// réception tourne en tâche — chaque `DATA` part sur le
     /// canal et libère sa fenêtre de flow-control aussitôt.
+    /// En-têtes bornées par `request_timeout` ; le corps
+    /// détaché reçoit un budget neuf de même taille (des
+    /// en-têtes lents n'affament pas un corps légitime).
     async fn h2_send_stream(&self, sr: SendRequest, req: &Request) -> NetResult<StreamedResponse> {
-        let mut resp = self.h2_request(sr, req).await?;
+        let mut resp = timeout(self.cfg.request_timeout, self.h2_request(sr, req))
+            .await
+            .map_err(|_| NetError::Timeout {
+                phase: "request",
+                ms: u64::try_from(self.cfg.request_timeout.as_millis()).unwrap_or(u64::MAX),
+                target: target_of(req),
+            })??;
         let headers: Vec<(String, String)> = resp
             .headers()
             .iter()
@@ -229,14 +251,19 @@ impl AutoClient {
         let io_timeout = self.cfg.io_timeout;
         let max_body = self.cfg.max_body_bytes;
         let target = target_of(req);
+        // Budget total du corps streamé (tarpit : gouttes sous
+        // `io_timeout` par lecture, jamais coupées sans borne).
+        let deadline = std::time::Instant::now() + self.cfg.request_timeout;
         tokio::spawn(async move {
             let mut total = 0usize;
             loop {
-                let Ok(next) = timeout(io_timeout, resp.body_mut().data()).await else {
+                let left = deadline.saturating_duration_since(std::time::Instant::now());
+                let budget = io_timeout.min(left);
+                let Ok(next) = timeout(budget, resp.body_mut().data()).await else {
                     let _ = tx
                         .send(Err(NetError::Timeout {
-                            phase: "io",
-                            ms: u64::try_from(io_timeout.as_millis()).unwrap_or(u64::MAX),
+                            phase: if left <= io_timeout { "request" } else { "io" },
+                            ms: u64::try_from(budget.as_millis()).unwrap_or(u64::MAX),
                             target: target.clone(),
                         }))
                         .await;

@@ -1663,6 +1663,34 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   font_cache` — compteur `font_data`,
   2e relayout = 0 résolution.
 
+- [x] **Étape 101. Deadline total de
+  requête** (trigger vol humain —
+  fnac.fr : 403 anti-bot affiché
+  après ~60 s) : `connect_timeout`
+  et `io_timeout` ne bornent que
+  l'établissement et chaque lecture
+  — un serveur « tarpit » gouttant
+  sa réponse sous le seuil par-ops
+  n'était jamais coupé. `HttpConfig.
+  request_timeout` (45 s) borne la
+  phase en-têtes (et le corps
+  bufferisé) h1 **et** h2 ; le corps
+  streamé reçoit un budget neuf de
+  même taille dans sa tâche détachée
+  (`IoCtx.deadline` / idem h2) — un
+  serveur lent sur les en-têtes
+  n'affame pas un corps légitime.
+  `NetError::Timeout` phase
+  `request`. Repros :
+  `tarpit_headers_hit_request_
+  timeout` (gouttes < `io_timeout`,
+  total coupé à la borne) et
+  `tarpit_stream_body_hit_request_
+  timeout` (Timeout livré sur le
+  canal corps). Le 403 reste le
+  serveur — c'est sa latence qui
+  est désormais bornée.
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY
