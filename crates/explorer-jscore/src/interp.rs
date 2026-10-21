@@ -149,6 +149,18 @@ enum BindMode {
     Assign,
 }
 
+/// Référence d'affectation réifiée — produit de
+/// [`Engine::resolve_lvalue`]. Capturer `base`/`key` une seule fois
+/// respecte l'ordre spec (LHS avant RHS) et évite de réévaluer les
+/// expressions cibles dans `op=` (`a[i()] += x` appelle `i()` une
+/// seule fois).
+enum LValueRef {
+    /// Liaison de variable — l'`EnvRef` vit côté appelant.
+    Ident(String),
+    /// Propriété `base[key]` — `base` déjà évaluée.
+    Prop(Value, String),
+}
+
 /// Hook d'observabilité des sources évaluées dynamiquement
 /// (`eval`, `Function`, timer-string) — voir
 /// [`Engine::set_eval_hook`] (JS-C50).
@@ -4720,11 +4732,38 @@ impl Engine {
                         if !self.is_callable(f) {
                             // Diagnostic : nommer la méthode + le
                             // receveur — les erreurs de pages
-                            // réelles pointent l'API manquante.
+                            // réelles pointent l'API manquante. Pour
+                            // un objet JS ordinaire, le nom de son
+                            // constructeur (`D7`…) identifie la
+                            // classe fautive dans du code minifié.
                             let recv_desc = match recv {
                                 Value::Obj(rid) => match self.heap.obj(rid).map(|o| &o.kind) {
                                     Some(ObjKind::Host(h)) => h.class_name().to_string(),
-                                    Some(_) => "Object".to_string(),
+                                    // Un callable receveur : le nom du
+                                    // FnLit identifie la fonction dont
+                                    // l'accesseur manque (`kW.vG`).
+                                    Some(ObjKind::Fun(Fun::Script { lit, .. })) => format!(
+                                        "function {}@{}:{}",
+                                        lit.name.as_deref().unwrap_or("<anon>"),
+                                        lit.pos.0,
+                                        lit.pos.1
+                                    ),
+                                    Some(ObjKind::Fun(
+                                        Fun::Native { name, .. } | Fun::BoundNative { name, .. },
+                                    )) => {
+                                        format!("native {name}")
+                                    }
+                                    Some(_) if self.is_callable(recv) => self
+                                        .get_prop(rid, "name")
+                                        .and_then(|n| self.heap_string_of(n))
+                                        .filter(|n| !n.is_empty())
+                                        .unwrap_or_else(|| "Function".to_string()),
+                                    Some(_) => self
+                                        .get_prop(rid, "constructor")
+                                        .and_then(|c| self.get_prop_value(c, "name").ok())
+                                        .and_then(|n| self.heap_string_of(n))
+                                        .filter(|n| !n.is_empty())
+                                        .unwrap_or_else(|| "Object".to_string()),
                                     None => "?".to_string(),
                                 },
                                 _ => format!("{recv:?}"),
@@ -4764,11 +4803,57 @@ impl Engine {
             }
             Expr::Assign(lhs, op, rhs) => {
                 if *op == AssignOp::Set {
+                    // Spec order : la référence LHS (et les effets de
+                    // bord de `base`/`key`) s'évalue AVANT le RHS —
+                    // `(..., install(), K).Wn = rhs()` sur du code
+                    // réel (Google Closure) en dépend.
+                    if let Some(lv) = self.resolve_lvalue(env, this, lhs)? {
+                        let v = self.eval_expr(env, this, rhs)?;
+                        self.store_lvalue(env, lv, v)?;
+                        return Ok(v);
+                    }
                     let v = self.eval_expr(env, this, rhs)?;
                     self.write_lvalue(env, this, lhs, v)?;
                     return Ok(v);
                 }
                 // Logical assignment: rhs evaluated only when needed.
+                if let Some(lv) = self.resolve_lvalue(env, this, lhs)? {
+                    let cur = self.read_lvalue_ref(env, &lv)?;
+                    match op {
+                        AssignOp::Nullish if !matches!(cur, Value::Null | Value::Undefined) => {
+                            return Ok(cur)
+                        }
+                        AssignOp::LogAnd if !self.to_boolean(cur) => return Ok(cur),
+                        AssignOp::LogOr if self.to_boolean(cur) => return Ok(cur),
+                        AssignOp::Nullish | AssignOp::LogAnd | AssignOp::LogOr => {
+                            let v = self.eval_expr(env, this, rhs)?;
+                            self.store_lvalue(env, lv, v)?;
+                            return Ok(v);
+                        }
+                        _ => {}
+                    }
+                    let rv = self.eval_expr(env, this, rhs)?;
+                    let bin = match op {
+                        AssignOp::Add => BinOp::Add,
+                        AssignOp::Sub => BinOp::Sub,
+                        AssignOp::Mul => BinOp::Mul,
+                        AssignOp::Div => BinOp::Div,
+                        AssignOp::Mod => BinOp::Mod,
+                        AssignOp::Shl => BinOp::Shl,
+                        AssignOp::Shr => BinOp::Shr,
+                        AssignOp::ShrU => BinOp::ShrU,
+                        AssignOp::BitAnd => BinOp::BitAnd,
+                        AssignOp::BitOr => BinOp::BitOr,
+                        AssignOp::BitXor => BinOp::BitXor,
+                        AssignOp::Pow => BinOp::Pow,
+                        AssignOp::Set | AssignOp::Nullish | AssignOp::LogAnd | AssignOp::LogOr => {
+                            return Err(self.type_error("invalid assignment"))
+                        }
+                    };
+                    let v = self.binary_op(bin, cur, rv)?;
+                    self.store_lvalue(env, lv, v)?;
+                    return Ok(v);
+                }
                 let cur = self.read_lvalue(env, this, lhs)?;
                 match op {
                     AssignOp::Nullish if !matches!(cur, Value::Null | Value::Undefined) => {
@@ -4877,6 +4962,48 @@ impl Engine {
                 self.bind_pat(env, this, &pat, v, BindMode::Assign)
             }
             _ => Err(self.type_error("invalid assignment target")),
+        }
+    }
+
+    /// Évalue une cible d'affectation en une référence réifiée —
+    /// les expressions `base`/`key` courent ici (ordre spec : le LHS
+    /// avant le RHS de `=`/`op=`). `None` pour les cibles non
+    /// réifiables (déstructuration), qui gardent le chemin
+    /// [`Self::write_lvalue`].
+    fn resolve_lvalue(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        e: &Expr,
+    ) -> JsResult<Option<LValueRef>> {
+        Ok(match e {
+            Expr::Ident(name) => Some(LValueRef::Ident(name.clone())),
+            Expr::Member(base, name) => {
+                let b = self.eval_expr(env, this, base)?;
+                Some(LValueRef::Prop(b, name.clone()))
+            }
+            Expr::Index(base, key) => {
+                let b = self.eval_expr(env, this, base)?;
+                let k = self.eval_expr(env, this, key)?;
+                Some(LValueRef::Prop(b, self.prop_key(k)?))
+            }
+            _ => None,
+        })
+    }
+
+    fn read_lvalue_ref(&mut self, env: &EnvRef, lv: &LValueRef) -> JsResult<Value> {
+        match lv {
+            LValueRef::Ident(name) => self
+                .env_get(env, name)
+                .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
+            LValueRef::Prop(b, k) => self.get_prop_value(*b, k),
+        }
+    }
+
+    fn store_lvalue(&mut self, env: &EnvRef, lv: LValueRef, v: Value) -> JsResult<()> {
+        match lv {
+            LValueRef::Ident(name) => self.env_set(env, &name, v),
+            LValueRef::Prop(b, k) => self.set_prop_value(b, &k, v),
         }
     }
 

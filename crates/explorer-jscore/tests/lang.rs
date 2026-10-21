@@ -6774,3 +6774,43 @@ fn c41_deep_operand_chain_drops_iteratively() {
         assert!(e.eval(&src).is_err(), "chaîne bornée attendue");
     }
 }
+
+// -- Ordre d'évaluation des affectations (bug réel google) -----------
+
+/// `LHS = RHS` : la référence LHS (`base`/`key`) s'évalue AVANT le
+/// RHS — le code Closure de Google pose l'accesseur singleton dans
+/// le LHS puis l'appelle dans le RHS du même `=`:
+/// `(install(), K).Wn = K.vG()`.
+#[test]
+fn assign_lhs_evalue_avant_rhs() {
+    let v = ev_str(
+        "var K = {}, log = [];\
+         function install() { K.vG = function () { return 42; }; log.push('lhs'); return K; }\
+         (install(), K).Wn = (log.push('rhs'), K.vG)();\
+         log.join(',') + ':' + K.Wn",
+    );
+    assert_eq!(v, "lhs,rhs:42");
+}
+
+/// La clé `key` de `base[key] = rhs` s'évalue avant le RHS aussi.
+#[test]
+fn assign_index_key_evalue_avant_rhs() {
+    let v = ev_str(
+        "var o = {}, log = [];\
+         o[(log.push('key'), 'p')] = (log.push('rhs'), 9);\
+         log.join(',') + ':' + o.p",
+    );
+    assert_eq!(v, "key,rhs:9");
+}
+
+/// `a[i()] op= x` : `i()` n'est évalué qu'une fois (la référence est
+/// réifiée avant lecture+écriture, jamais deux).
+#[test]
+fn assign_compound_key_evaluee_une_fois() {
+    let v = ev_str(
+        "var a = [0, 0, 0], n = 0;\
+         a[(n += 1, 1)] += 5;\
+         n + ':' + a.join(',')",
+    );
+    assert_eq!(v, "1:0,5,0");
+}

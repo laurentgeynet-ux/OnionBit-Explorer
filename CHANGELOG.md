@@ -466,6 +466,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (lazy `*?`, `[\0-\x1f]`, `\uD800`) étaient déjà colmatés
   par le rapatriement JS-C48. Test :
   `regexp_class_syntax_chars_escaped`.
+- **JS-C36 — harnais Acid3 + 3 fixes mesurés**
+  (`explorer-jscore`) : `tests/acid3.rs` exécute les 16
+  sous-tests ECMAScript purs d'Acid3 (81-96, extraits
+  verbatim de `wpt/acid/acid3/test.html` vers
+  `tests/conformance/acid3-js-subset.js`) — **16/16, 0 skip**
+  sur ce sous-ensemble, cliquet anti-régression. Écarts
+  colmatés : `-0` rendu sans signe par `toFixed`/
+  `toExponential`/`toPrecision` ; `\N` backref vers un
+  groupe pas encore fermé → match vide (spec 21.2.2.9,
+  suivi `open_stack`/`closed` dans le traducteur) ; le nom
+  d'une `FunctionExpression` est désormais ReadOnly dans son
+  propre scope (`Binding.sloppy_silent` — silencieux en
+  sloppy, `TypeError` en strict).
 
 ### Added
 
@@ -734,6 +747,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `eval_<n>.js` — le bundle Closure complet de Google
   (`eval_0.js`) est devenu rejouable en isolation,
   permettant la bissection du bug corrigé en JS-C52.
+- **JS-C52 — ordre d'évaluation des affectations :
+  LHS avant RHS** (`explorer-jscore`) : le bootstrap
+  Google mourait `TypeError: vG is not a function` —
+  `Expr::Assign` évaluait le RHS avant la référence
+  LHS, alors que le code Closure installe l'accesseur
+  dans le LHS : `(..., SL(kW,…), K).Wn = kW.vG()`.
+  Livré : `LValueRef` réifiée — `resolve_lvalue`
+  évalue `base`/`key` avant le RHS,
+  `read_lvalue_ref`/`store_lvalue` la consomment ;
+  bonus spec : `a[i()] op= x` n'évalue plus `i()`
+  deux fois. Bonus diagnostic : `recv_desc` affine —
+  callable → `function <anon>@l:c` ou `.name`, objet
+  → `constructor.name` (« `x` is not a function (on
+  `D7`) » en minifié). Terrain : `eval_0.js` rejoue
+  `ok` ; la page résultats google émet `[navigate]
+  https://www.google.com/?sei=…` — le redirect
+  `location.replace` tire. Tests :
+  `assign_lhs_evalue_avant_rhs`,
+  `assign_index_key_evalue_avant_rhs`,
+  `assign_compound_key_evaluee_une_fois`.
 
 ## [0.2.0] - 2026-10-20
 

@@ -1618,7 +1618,16 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
 
 ### J-C — Mesure, perf, robustesse
 
-- [ ] **JS-C36. Acid3 subset JS mesuré** (harnais informatif).
+- [x] **JS-C36. Acid3 subset JS mesuré** (harnais informatif) :
+  `tests/conformance/acid3-js-subset.js` extrait les 16
+  sous-tests ECMAScript purs (81-96) de `wpt/acid/acid3/test.html`
+  (corps verbatim, DOM/CSS/HTTP exclus) ; `tests/acid3.rs`
+  rapporte le score et cliquette la régression. Mesure
+  initiale **16/16** — les 3 écarts trouvés sont fixés dans le
+  même commit : `-0` sans signe dans `toFixed`/`toExponential`/
+  `toPrecision`, backref `\N` vers un groupe pas encore fermé =
+  match vide (spec 21.2.2.9), nom de `FunctionExpression`
+  ReadOnly sloppy-silencieux (Binding.sloppy_silent).
 - [ ] **JS-C37. Perf + borne mémoire heap** : compteurs d'ops,
   seuils GC, **borne mémoire par contexte** (exigence ADR-0019),
   coût `serialize_document` instrumenté.
@@ -1828,6 +1837,28 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   dans le miroir) : tableau **gelé** `["en-US","en"]`
   dérivé de `language` installé dans `install_dom`
   (low-fingerprint, même instance à chaque lecture).
+- [x] **JS-C52. Ordre d'évaluation des affectations —
+  LHS avant RHS** (`explorer-jscore`) : le bootstrap
+  Google mourait `TypeError: vG is not a function` —
+  `Expr::Assign` évaluait le RHS **avant** la référence
+  LHS, alors que le code Closure installe l'accesseur
+  dans le LHS : `(..., SL(kW,…), K).Wn = kW.vG()`.
+  Livré : `LValueRef` réifiée — `resolve_lvalue`
+  évalue `base`/`key` (effets de bord inclus) avant le
+  RHS, `read_lvalue_ref`/`store_lvalue` consomment la
+  référence ; bonus spec : `a[i()] op= x` n'évalue
+  plus `i()` deux fois. Bonus diagnostic : `recv_desc`
+  affine — receveur callable → `function
+  <anon>@l:c` (pos JS-C47) ou `.name`, objet
+  ordinaire → `constructor.name` — « `x` is not a
+  function (on `D7`) » localise la classe dans du
+  minifié. Terrain : `eval_0.js` rejoue `ok`, la page
+  résultats google complète émet
+  `[navigate] https://www.google.com/?sei=…` — le
+  redirect `location.replace` tire. Tests :
+  `assign_lhs_evalue_avant_rhs`,
+  `assign_index_key_evalue_avant_rhs`,
+  `assign_compound_key_evaluee_une_fois`.
 
 ## Tâches continues
 
