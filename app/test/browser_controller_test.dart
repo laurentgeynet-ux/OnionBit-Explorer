@@ -15,6 +15,7 @@ import 'package:explorer_app/features/browser/data/media_player.dart';
 import 'package:explorer_app/features/browser/domain/find_result.dart';
 import 'package:explorer_app/features/browser/domain/history_entry.dart';
 import 'package:explorer_app/features/browser/domain/media_offer.dart';
+import 'package:explorer_app/features/browser/domain/reload_result.dart';
 import 'package:explorer_app/features/browser/presentation/browser_controller.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -50,9 +51,19 @@ class FakeRepo implements BrowserRepository {
     return BrowserTab(id: tabId, url: url, title: 'T', canBack: true);
   }
 
+  /// Résultat injectable du prochain `reload` — `needsConfirm`
+  /// simule une page POST (étape 93).
+  ReloadResult? nextReload;
+
+  /// Onglets rechargés avec `confirm:true`.
+  final List<String> confirmedReloads = [];
+
   @override
-  Future<BrowserTab?> reload(String tabId) async =>
-      BrowserTab(id: tabId, url: 'http://h/');
+  Future<ReloadResult> reload(String tabId, {bool confirm = false}) async {
+    if (confirm) confirmedReloads.add(tabId);
+    return nextReload ??
+        ReloadResult.tab(BrowserTab(id: tabId, url: 'http://h/'));
+  }
 
   @override
   Future<BrowserTab?> back(String tabId) async =>
@@ -854,6 +865,48 @@ void main() {
     },
   );
 
+  test(
+    'reload POST : resubmit_confirm pose le pending, confirm rejoue (étape 93)',
+    () async {
+      final repo = FakeRepo();
+      final c = makeContainer(repo, FakeEvents());
+      addTearDown(c.dispose);
+      await c.read(browserProvider.notifier).retry();
+      final ctrl = c.read(browserProvider.notifier);
+      final id = c.read(browserProvider).activeId!;
+
+      // Page servie par POST → resubmit_confirm en attente.
+      repo.nextReload = const ReloadResult.needsConfirm(
+        method: 'POST',
+        url: 'http://h/doit',
+      );
+      await ctrl.reload();
+      var st = c.read(browserProvider);
+      expect(st.resubmit?.tabId, id);
+      expect(st.resubmit?.method, 'POST');
+      expect(st.tabs.first.loading, isFalse);
+
+      // Accord → rejoue avec confirm:true, pending effacé.
+      repo.nextReload = ReloadResult.tab(
+        BrowserTab(id: id, url: 'http://h/doit'),
+      );
+      await ctrl.reloadConfirmed();
+      st = c.read(browserProvider);
+      expect(st.resubmit, isNull);
+      expect(repo.confirmedReloads, [id]);
+
+      // Refus → pending effacé, rien d'autre.
+      repo.nextReload = const ReloadResult.needsConfirm(
+        method: 'POST',
+        url: 'http://h/doit',
+      );
+      await ctrl.reload();
+      ctrl.dismissResubmit();
+      expect(c.read(browserProvider).resubmit, isNull);
+      expect(repo.confirmedReloads, hasLength(1));
+    },
+  );
+
   test('find : pas d’onglet actif → no-op sans exception', () async {
     final repo = FakeRepo();
     final c = ProviderContainer(
@@ -898,38 +951,44 @@ void main() {
     expect(c.read(browserProvider).activeId, '2');
   });
 
-  test('openInNewTab : nouvel onglet chargé en arrière-plan (étape 85)', () async {
-    final repo = FakeRepo();
-    final events = FakeEvents();
-    final c = makeContainer(repo, events);
-    addTearDown(c.dispose);
-    await settle(c);
-    final ctrl = c.read(browserProvider.notifier);
+  test(
+    'openInNewTab : nouvel onglet chargé en arrière-plan (étape 85)',
+    () async {
+      final repo = FakeRepo();
+      final events = FakeEvents();
+      final c = makeContainer(repo, events);
+      addTearDown(c.dispose);
+      await settle(c);
+      final ctrl = c.read(browserProvider.notifier);
 
-    // Clic-molette : l'onglet neuf charge l'URL mais l'onglet
-    // d'origine garde le premier plan (sémantique Chrome).
-    await ctrl.openInNewTab('http://lien.test/');
-    expect(c.read(browserProvider).tabs, hasLength(2));
-    expect(repo.navigations, ['2:http://lien.test/']);
-    expect(c.read(browserProvider).activeId, '1');
-  });
+      // Clic-molette : l'onglet neuf charge l'URL mais l'onglet
+      // d'origine garde le premier plan (sémantique Chrome).
+      await ctrl.openInNewTab('http://lien.test/');
+      expect(c.read(browserProvider).tabs, hasLength(2));
+      expect(repo.navigations, ['2:http://lien.test/']);
+      expect(c.read(browserProvider).activeId, '1');
+    },
+  );
 
-  test('openInNewTab : échec de création → aucune navigation (étape 85)', () async {
-    final repo = FakeRepo()..online = false;
-    final events = FakeEvents();
-    final c = makeContainer(repo, events);
-    addTearDown(c.dispose);
-    await settle(c);
-    repo.online = true;
-    await c.read(browserProvider.notifier).retry();
+  test(
+    'openInNewTab : échec de création → aucune navigation (étape 85)',
+    () async {
+      final repo = FakeRepo()..online = false;
+      final events = FakeEvents();
+      final c = makeContainer(repo, events);
+      addTearDown(c.dispose);
+      await settle(c);
+      repo.online = true;
+      await c.read(browserProvider.notifier).retry();
 
-    // Le daemon retombe entre-temps : createTab jette → pas
-    // de navigation vers l'onglet courant, activeId inchangé.
-    repo.online = false;
-    await c.read(browserProvider.notifier).openInNewTab('http://x.test/');
-    expect(repo.navigations, isEmpty);
-    expect(c.read(browserProvider).activeId, '1');
-  });
+      // Le daemon retombe entre-temps : createTab jette → pas
+      // de navigation vers l'onglet courant, activeId inchangé.
+      repo.online = false;
+      await c.read(browserProvider.notifier).openInNewTab('http://x.test/');
+      expect(repo.navigations, isEmpty);
+      expect(c.read(browserProvider).activeId, '1');
+    },
+  );
 
   test('key unfocused resynchronise fieldFocused (étape 86)', () async {
     final repo = FakeRepo()..keyResult = 'unfocused';

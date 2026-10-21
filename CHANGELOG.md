@@ -826,6 +826,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `assign_lhs_evalue_avant_rhs`,
   `assign_index_key_evalue_avant_rhs`,
   `assign_compound_key_evaluee_une_fois`.
+- **Étape 93 — reload POST : verrou `resubmit_confirm`**
+  (`explorer-core`, `explorer-api`, `app/`) : le endpoint
+  REST `…/reload` court-circuitait `Session::reload` —
+  il reconstruisait un `GET` nu sur l'URL, si bien que
+  **tout** reload applicatif était un GET vide, même sur
+  une page servie par POST avec `last_req` présent
+  (constat M-H1). Livré : `Session::reload_request`
+  expose la requête de rejeu — `last_req` (méthode +
+  corps, étape 56), la requête `failed` de l'entrée
+  courante (page d'erreur : retenter la requête tombée
+  au lieu du `GET` vide), sinon `GET` top-level ; le
+  endpoint rejoue cette requête, mais une méthode non
+  sûre (≠ `GET`/`HEAD`) exige le corps `{"confirm":true}`
+  — sinon statut typé `resubmit_confirm`, aucune
+  resoumission silencieuse (effet de bord : commande,
+  paiement). L'app affiche le dialogue navigateur
+  « Renvoyer le formulaire ? » : « Renvoyer » rappelle
+  confirmé, « Annuler » n'émet rien ; le chemin FFI
+  in-process rejoue directement (le verrou vit dans
+  REST). Tests : `reload_request_on_failed_post_replays_request`,
+  `post_reload_requires_confirm`, contrôleur
+  `resubmit_confirm`.
 
 ## [0.2.0] - 2026-10-20
 

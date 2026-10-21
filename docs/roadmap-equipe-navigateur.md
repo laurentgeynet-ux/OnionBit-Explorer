@@ -1440,6 +1440,35 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (chemin mort, chemin usurpé,
   élément réellement supprimé).
 
+- [x] **Étape 93. Reload POST : verrou
+  `resubmit_confirm`** (core, api,
+  app) — le endpoint REST `…/reload`
+  court-circuitait `Session::reload`
+  en reconstruisant un `GET` nu :
+  tout reload applicatif était un
+  GET vide, y compris sur une page
+  POST avec `last_req` présent
+  (constat M-H1). Livré :
+  `Session::reload_request` expose
+  la requête de rejeu — `last_req`
+  (méthode + corps), la requête
+  `failed` de l'entrée courante
+  (page d'erreur : retenter la
+  requête tombée, plus de GET vide),
+  sinon `GET` top-level ; le
+  endpoint la rejoue, mais une
+  méthode ≠ `GET`/`HEAD` exige
+  `{"confirm":true}` — sinon statut
+  typé `resubmit_confirm`, zéro
+  resoumission silencieuse. L'app
+  affiche le dialogue « Renvoyer le
+  formulaire ? » (Renvoyer →
+  `confirm`, Annuler → rien) ; FFI
+  in-process rejoue directement.
+  Tests : `reload_request_on_failed_post_replays_request`,
+  `post_reload_requires_confirm`,
+  contrôleur `resubmit_confirm`.
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY
@@ -1469,18 +1498,22 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     `⌂` + entrée ⋮ → `about:blank`,
     servi sans fetch par le moteur
     (`NavJob::run`).
-  - **RSS `explorer_app` 3,7→4,5 Go
-    en ~10 min** : croissance côté
-    **app Flutter**, pas le daemon —
-    suspect n°1 : cache de frames PNG
-    non borné. Joint la veille mémoire
-    ci-dessus : le protocole doit
-    mesurer les DEUX processus.
-    **Borné, Étape 89** : pulls
-    coalescés + `ui.Image` décodée
-    une fois par frame — mesure
-    terrain `-AppPid` pour confirmer
-    la courbe aplatie.
+  - ~~**RSS `explorer_app` 3,7→4,5 Go
+    en ~10 min**~~ → **résolu, mesuré
+    Étape 89+93** : pulls coalescés +
+    `ui.Image` décodée une fois —
+    veille 10 min pilotant l'onglet
+    de l'app (4 sites réels, tempêtes
+    mousemove+scroll, back) : app
+    **plate 288→290 Mio** (`priv`
+    324→326), daemon borné
+    ~370-450 Mio — mais pic transitoire
+    **~1,9 Go + nav >120 s** reproductible
+    sur l'article Wikipédia « Rust »
+    (retombe après — transitoire,
+    pas fuite : à isoler, probable
+    tampon de flux lourd pendant le
+    fetch/décodage).
   - **daemon injoignable sous charge
     machine, retour seul** : pas un
     crash (reconnexion auto OK) —
@@ -1491,36 +1524,32 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     serviable pendant la cascade.
     La durée reste au chantier
     perf cache-cascade (PIPE).
-  - **google « oignon » → page stub
+  - ~~**google « oignon » → page stub
     « Cliquez ici si… pas été
     redirigé » + `exception js :
-    Error: b`** : interstitiel à
-    redirect JS (`location.replace`/
-    `assign`) — même famille que le
-    tunnel consentement T2 (boutons
-    JS-driven, `addEventListener` +
-    `location`/`fetch`). Avancées :
-    `location.assign`/`replace`/
-    `href=`/`reload` vérifiés complets
-    (hook → `Url::resolve`) — le mur
-    était ailleurs : quantifieurs lazy
-    inconnus tuaient le `<script>` du
-    consent (**JS-C48**, vol live :
-    consent → `location` → google.fr
-    rendu de bout en bout) ; entités
-    du miroir corrigées (**JS-C46**) ;
-    `PipelineError` cite désormais la
-    source fautive. Reste la pile
-    d'appel — **JS-C47** ouvert ; et la
-    jonglerie focus `keydown` google
-    (un `key` sur deux `unfocused`)
-    constatée au vol.
-  - **reload sur page résultats POST
-    → formulaire vide** : re-navigation
-    GET sans re-soumission du corps —
-    sémantiquement défendable mais
-    Chrome re-prompte ; trancher
-    re-POST vs avertissement.
+    Error: b`**~~ → **résolu, chaîne
+    JS-C46→C52 + Étapes 91-92** :
+    quantifieurs lazy (JS-C48), entités
+    miroir (JS-C46), pile d'appel
+    réelle (JS-C47), `eval_hook`
+    (JS-C50), ordre LHS/RHS
+    (JS-C52 — la cause racine du
+    `vG is not a function`), entrées
+    différées pendant paint détachée
+    (91) + focus ré-ancré par identité
+    (92). Vol de bout en bout :
+    consent → homepage → « explorer »
+    8/8 ordonné → Enter → navigated.
+  - ~~**reload sur page résultats POST
+    → formulaire vide**~~ → **résolu,
+    Étape 93** : l'endpoint REST
+    court-circuitait `Session::reload`
+    (GET nu) ; `reload_request`
+    rejoue la requête d'origine,
+    méthode non sûre gated par
+    `{"confirm":true}` — dialogue
+    « Renvoyer le formulaire ? »
+    côté app.
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 
@@ -1648,7 +1677,7 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   contrat « dégrader, jamais paniquer » sous contenu hostile.
   Smoke déterministe hors nightly : `c38_fuzz_smoke_no_panic`
   (128 sources hostiles générées par LCG).
-- [ ] **JS-C40. Découpage interne `explorer-jscore`** (audit externe) :
+- [x] **JS-C40. Découpage interne `explorer-jscore`** (audit externe) :
   `builtins.rs` 269 Ko / `interp.rs` 222 Ko — extraire par
   domaine (builtins → `builtins/{object,array,string,…}.rs`,
   interp → dispatch + groupes d'opcodes). Pur reformatage

@@ -4132,6 +4132,41 @@ async fn post_history_entry_replays_request() {
     assert_eq!(t.last().unwrap().0, "Post", "reload réémet le POST");
 }
 
+/// Étape 93 — `reload_request` sur une page d'erreur retente
+/// la requête **tombée** (méthode + corps de l'entrée
+/// `failed`) : un POST échoué se re-émet en POST, pas en
+/// `GET` vide. La confirmation de resoumission est une
+/// décision du client — l'API l'exige (`resubmit_confirm`),
+/// la session rejoue.
+#[tokio::test]
+async fn reload_request_on_failed_post_replays_request() {
+    use explorer_net::url::Url;
+    let (s, t) = test_session();
+    t.route("/doit", 500, "boom");
+    let sess = std::sync::Arc::new(tokio::sync::Mutex::new(s));
+    let id = sess.lock().await.open_tab();
+    let mut req = Request::get(Url::parse("http://h.test/doit").unwrap());
+    req.method = explorer_net::http::Method::Post;
+    req.body = Some(b"a=1".to_vec());
+    assert!(matches!(
+        explorer_core::navigate_shared(&sess, id, req, true).await,
+        Err(CoreError::HttpStatus(500))
+    ));
+    // Page d'erreur commise : `last_req` est purgé, la
+    // requête `failed` de l'entrée est la source de rejeu.
+    let req = sess.lock().await.reload_request(id).unwrap();
+    assert_eq!(req.method.as_str(), "POST", "retente la méthode tombée");
+    assert_eq!(req.body.as_deref(), Some(b"a=1".as_slice()));
+    assert_eq!(req.url.to_string(), "http://h.test/doit");
+    // Le rejeu émet le POST (il retombe 500 — c'est la
+    // retente qui compte, pas le résultat).
+    assert!(matches!(
+        explorer_core::navigate_shared(&sess, id, req, true).await,
+        Err(CoreError::HttpStatus(500))
+    ));
+    assert_eq!(t.last().unwrap().0, "Post", "le rejeu est un POST");
+}
+
 /// Étape 55b — `<svg>` inline câblé en session : tailles
 /// intrinsèques (`svg_sizes` → `build_box_tree_sized`) et
 /// bitmap rasterisé (`collect_svg` → `PaintImages.svgs`)

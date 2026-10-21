@@ -143,8 +143,9 @@ impl Session {
             };
             e.title.clone_from(&title);
             e.url = Some(url.clone());
-            // `last_req = None` → reload = `GET` sur l'URL
-            // tentée (retente honnête).
+            // `last_req = None` → reload retombe sur la
+            // requête `failed` de l'entrée — retente de la
+            // requête tombée, pas d'un `GET` vide (étape 93).
             e.last_req = None;
             // Étape 76 : la navigation en échec prend son
             // entrée d'historique (Chrome/Firefox) — `back`

@@ -42,6 +42,7 @@ class BrowserState {
     this.downloadOffer,
     this.media = const {},
     this.scrollY = const {},
+    this.resubmit,
   });
 
   final List<BrowserTab> tabs;
@@ -104,6 +105,12 @@ class BrowserState {
   /// `scroll_x` n'existe pas : le moteur est vertical-seul.
   final Map<String, double> scrollY;
 
+  /// Resoumission en attente d'accord (étape 93) : le reload
+  /// a répondu `resubmit_confirm` — l'UI affiche le dialogue
+  /// « renvoyer le formulaire ? », `reloadConfirmed` rejoue
+  /// avec `{"confirm":true}`. `null` dès décision prise.
+  final ({String tabId, String method, String url})? resubmit;
+
   /// Onglet actif, ou `null`.
   BrowserTab? get active {
     for (final t in tabs) {
@@ -127,6 +134,7 @@ class BrowserState {
     DownloadOffer? Function()? downloadOffer,
     Map<String, Map<int, MediaOffer>>? media,
     Map<String, double>? scrollY,
+    ({String tabId, String method, String url})? Function()? resubmit,
   }) => BrowserState(
     tabs: tabs ?? this.tabs,
     activeId: activeId ?? this.activeId,
@@ -142,6 +150,7 @@ class BrowserState {
     downloadOffer: downloadOffer != null ? downloadOffer() : this.downloadOffer,
     media: media ?? this.media,
     scrollY: scrollY ?? this.scrollY,
+    resubmit: resubmit != null ? resubmit() : this.resubmit,
   );
 }
 
@@ -838,9 +847,7 @@ class BrowserController extends Notifier<BrowserState> {
     final n = state.tabs.length;
     if (n == 0) return;
     final i = state.tabs.indexWhere((t) => t.id == state.activeId);
-    final next = i < 0
-        ? (dir >= 0 ? 0 : n - 1)
-        : (((i + dir) % n) + n) % n;
+    final next = i < 0 ? (dir >= 0 ? 0 : n - 1) : (((i + dir) % n) + n) % n;
     selectTab(state.tabs[next].id);
   }
 
@@ -913,9 +920,7 @@ class BrowserController extends Notifier<BrowserState> {
     try {
       final bytes = await _repo.fetchFrame(tabId);
       if (bytes == null || !ref.mounted) return;
-      final codec = await ui.instantiateImageCodec(
-        Uint8List.fromList(bytes),
-      );
+      final codec = await ui.instantiateImageCodec(Uint8List.fromList(bytes));
       final frame = await codec.getNextFrame();
       codec.dispose();
       final img = frame.image;
@@ -1040,7 +1045,55 @@ class BrowserController extends Notifier<BrowserState> {
   /// `back`/`forward`/`reload` sur l'onglet actif.
   Future<void> goBack() => _doAction((r, id) => r.back(id));
   Future<void> goForward() => _doAction((r, id) => r.forward(id));
-  Future<void> reload() => _doAction((r, id) => r.reload(id));
+
+  /// Recharge l'onglet actif (étape 93) : une page servie
+  /// par méthode non sûre répond `resubmit_confirm` — la
+  /// resoumission attend l'accord explicite (`reloadConfirmed`
+  /// rejoue, `dismissResubmit` abandonne).
+  Future<void> reload() async {
+    final id = state.activeId;
+    if (id == null) return;
+    _patch(id, (t) => t.copyWith(loading: true));
+    try {
+      final r = await _repo.reload(id);
+      _patch(id, (t) => t.copyWith(loading: false));
+      if (r.needsConfirm) {
+        state = state.copyWith(
+          resubmit: () =>
+              (tabId: id, method: r.resubmitMethod!, url: r.resubmitUrl!),
+        );
+      } else if (r.tab != null) {
+        _patch(id, (_) => r.tab!);
+      }
+    } on ApiException catch (e) {
+      _patch(id, (t) => t.copyWith(loading: false));
+      state = state.copyWith(lastError: () => e.message);
+      _markOfflineIfUnreachable(e);
+    }
+  }
+
+  /// L'utilisateur accepte la resoumission → rejoue la
+  /// requête non sûre avec `{"confirm":true}`.
+  Future<void> reloadConfirmed() async {
+    final pending = state.resubmit;
+    if (pending == null) return;
+    state = state.copyWith(resubmit: () => null);
+    final id = pending.tabId;
+    _patch(id, (t) => t.copyWith(loading: true));
+    try {
+      final r = await _repo.reload(id, confirm: true);
+      _patch(id, (t) => t.copyWith(loading: false));
+      if (r.tab != null) _patch(id, (_) => r.tab!);
+    } on ApiException catch (e) {
+      _patch(id, (t) => t.copyWith(loading: false));
+      state = state.copyWith(lastError: () => e.message);
+      _markOfflineIfUnreachable(e);
+    }
+  }
+
+  /// L'utilisateur refuse la resoumission — rien n'est
+  /// rejoué (comportement « Annuler » du dialogue navigateur).
+  void dismissResubmit() => state = state.copyWith(resubmit: () => null);
 
   Future<void> _doAction(
     Future<BrowserTab?> Function(BrowserRepository, String) act,

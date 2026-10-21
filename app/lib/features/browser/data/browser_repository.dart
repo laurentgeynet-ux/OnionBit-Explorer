@@ -8,6 +8,7 @@ import '../domain/browser_tab.dart';
 import '../domain/find_result.dart';
 import '../domain/history_entry.dart';
 import '../domain/media_offer.dart';
+import '../domain/reload_result.dart';
 
 /// Accès aux onglets via le contrat REST du daemon (ADR-0003) :
 /// `GET/POST /api/tabs`, `…/navigate`, `…/reload`, `…/back`,
@@ -49,14 +50,25 @@ class BrowserRepository {
     return res is Map<String, dynamic> ? BrowserTab.fromJson(res) : null;
   }
 
-  /// `POST …/reload|back|forward` → état résultant.
+  /// `POST …/back|forward` → état résultant.
   Future<BrowserTab?> _action(String tabId, String route) async {
     final res = await _api.postJson('/api/tabs/$tabId/$route');
     return res is Map<String, dynamic> ? BrowserTab.fromJson(res) : null;
   }
 
-  /// Recharge la page courante.
-  Future<BrowserTab?> reload(String tabId) => _action(tabId, 'reload');
+  /// Recharge la page courante (étape 93) : `confirm` lève le
+  /// verrou de resoumission d'une méthode non sûre — sans lui
+  /// le daemon répond `resubmit_confirm` au lieu de rejouer.
+  Future<ReloadResult> reload(String tabId, {bool confirm = false}) async {
+    final res = await _api.postJson(
+      '/api/tabs/$tabId/reload',
+      body: {'confirm': confirm},
+    );
+    if (res is Map<String, dynamic>) {
+      return ReloadResult.fromJson(res);
+    }
+    throw const ApiException('POST /reload : réponse inattendue');
+  }
 
   /// Page précédente de l'historique local.
   Future<BrowserTab?> back(String tabId) => _action(tabId, 'back');

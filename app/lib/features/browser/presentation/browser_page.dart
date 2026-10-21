@@ -110,6 +110,40 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
         ),
       );
     });
+    // Resoumission POST (étape 93) : le reload demande
+    // l'accord explicite — « Renvoyer » rejoue la requête
+    // d'origine, « Annuler » n'émet rien.
+    ref.listen(browserProvider.select((s) => s.resubmit), (_, pending) {
+      if (pending == null || !mounted) return;
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Renvoyer le formulaire ?'),
+          content: Text(
+            'La page a été obtenue par ${pending.method}.\n'
+            '${pending.url}\n\n'
+            'Recharger renverra les données — un effet de bord\n'
+            '(commande, paiement) peut être répété.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                ctrl.dismissResubmit();
+              },
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                ctrl.reloadConfirmed();
+              },
+              child: const Text('Renvoyer'),
+            ),
+          ],
+        ),
+      );
+    });
 
     final active = st.active;
     final muted = t.color('onSurface', 'muted');
@@ -142,39 +176,59 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
             const SingleActivator(LogicalKeyboardKey.browserBack): ctrl.goBack,
             const SingleActivator(LogicalKeyboardKey.browserForward):
                 ctrl.goForward,
-            const SingleActivator(LogicalKeyboardKey.tab, control: true):
-                () => ctrl.cycleTab(1),
+            const SingleActivator(LogicalKeyboardKey.tab, control: true): () =>
+                ctrl.cycleTab(1),
             const SingleActivator(
               LogicalKeyboardKey.tab,
               control: true,
               shift: true,
-            ): () => ctrl.cycleTab(-1),
+            ): () =>
+                ctrl.cycleTab(-1),
             // Ctrl+1..8 → l'onglet n ; Ctrl+9 → le dernier.
             for (var i = 0; i < _tabDigitKeys.length; i++)
-              SingleActivator(_tabDigitKeys[i], control: true):
-                  () => ctrl.selectTabAt(i),
-            const SingleActivator(LogicalKeyboardKey.digit9, control: true): () {
+              SingleActivator(_tabDigitKeys[i], control: true): () =>
+                  ctrl.selectTabAt(i),
+            const SingleActivator(
+              LogicalKeyboardKey.digit9,
+              control: true,
+            ): () {
               final n = ref.read(browserProvider).tabs.length;
               if (n > 0) ctrl.selectTabAt(n - 1);
             },
-            const SingleActivator(LogicalKeyboardKey.equal, control: true):
-                () => ref.read(zoomProvider.notifier).zoomIn(),
-            const SingleActivator(LogicalKeyboardKey.add, control: true):
-                () => ref.read(zoomProvider.notifier).zoomIn(),
-            const SingleActivator(LogicalKeyboardKey.numpadAdd, control: true):
-                () => ref.read(zoomProvider.notifier).zoomIn(),
-            const SingleActivator(LogicalKeyboardKey.minus, control: true):
-                () => ref.read(zoomProvider.notifier).zoomOut(),
+            const SingleActivator(
+              LogicalKeyboardKey.equal,
+              control: true,
+            ): () =>
+                ref.read(zoomProvider.notifier).zoomIn(),
+            const SingleActivator(LogicalKeyboardKey.add, control: true): () =>
+                ref.read(zoomProvider.notifier).zoomIn(),
+            const SingleActivator(
+              LogicalKeyboardKey.numpadAdd,
+              control: true,
+            ): () =>
+                ref.read(zoomProvider.notifier).zoomIn(),
+            const SingleActivator(
+              LogicalKeyboardKey.minus,
+              control: true,
+            ): () =>
+                ref.read(zoomProvider.notifier).zoomOut(),
             const SingleActivator(
               LogicalKeyboardKey.numpadSubtract,
               control: true,
-            ): () => ref.read(zoomProvider.notifier).zoomOut(),
-            const SingleActivator(LogicalKeyboardKey.digit0, control: true):
-                () => ref.read(zoomProvider.notifier).reset(),
-            const SingleActivator(LogicalKeyboardKey.numpad0, control: true):
-                () => ref.read(zoomProvider.notifier).reset(),
-            const SingleActivator(LogicalKeyboardKey.keyF, control: true):
-                () => ref.read(findProvider.notifier).open(),
+            ): () =>
+                ref.read(zoomProvider.notifier).zoomOut(),
+            const SingleActivator(
+              LogicalKeyboardKey.digit0,
+              control: true,
+            ): () =>
+                ref.read(zoomProvider.notifier).reset(),
+            const SingleActivator(
+              LogicalKeyboardKey.numpad0,
+              control: true,
+            ): () =>
+                ref.read(zoomProvider.notifier).reset(),
+            const SingleActivator(LogicalKeyboardKey.keyF, control: true): () =>
+                ref.read(findProvider.notifier).open(),
             const SingleActivator(LogicalKeyboardKey.escape): () {
               if (ref.read(findProvider).visible) {
                 ref.read(findProvider.notifier).close();
@@ -856,12 +910,7 @@ class _NavBar extends ConsumerWidget {
             }
           },
           itemBuilder: (_) => [
-            item(
-              'home',
-              Icons.home_outlined,
-              'Accueil',
-              enabled: enabled,
-            ),
+            item('home', Icons.home_outlined, 'Accueil', enabled: enabled),
             item(
               'mark',
               marked ? Icons.star : Icons.star_border,

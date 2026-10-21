@@ -16,6 +16,7 @@ import '../../features/browser/domain/browser_tab.dart';
 import '../../features/browser/domain/find_result.dart';
 import '../../features/browser/domain/media_offer.dart';
 import '../../features/browser/domain/history_entry.dart';
+import '../../features/browser/domain/reload_result.dart';
 import '../config/app_config.dart';
 
 // ---------------------------------------------------------------------------
@@ -336,8 +337,14 @@ class FfiEngine implements BrowserRepository {
     }
   }
 
+  /// Chemin in-process : `Session::reload` rejoue la requête
+  /// d'origine directement (le verrou `resubmit_confirm` vit
+  /// dans l'API REST — étape 93) ; `confirm` est sans effet.
   @override
-  Future<BrowserTab?> reload(String tabId) => _action(tabId, _reload);
+  Future<ReloadResult> reload(String tabId, {bool confirm = false}) async {
+    final tab = await _action(tabId, _reload);
+    return ReloadResult.tab(tab);
+  }
 
   @override
   Future<BrowserTab?> back(String tabId) => _action(tabId, _goBack);

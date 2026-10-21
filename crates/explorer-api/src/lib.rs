@@ -39,7 +39,7 @@ use explorer_core::{
     drain_applies_shared, drain_navs_shared, history_move_shared, navigate_shared, CoreError,
     CoreEvent, InputEvent, InputOutcome, Session, TabId,
 };
-use explorer_net::http::{Initiator, Request};
+use explorer_net::http::{Initiator, Method, Request};
 use explorer_net::url::Url;
 use futures_util::Stream;
 
@@ -295,31 +295,41 @@ async fn navigate(
     }
 }
 
-/// `POST …/reload` — re-fetch de l'URL courante.
-async fn reload(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
-    let url = {
+/// `POST …/reload` — réémet la requête courante (méthode
+/// d'origine, corps compris — étape 93 : l'endpoint émettait
+/// un `GET` vide, court-circuitant `Session::reload` et son
+/// `last_req`). Corps optionnel `{ "confirm": true }` :
+/// requis pour rejouer une méthode non sûre — sinon statut
+/// typé `resubmit_confirm` (l'app affiche le dialogue
+/// « renvoyer le formulaire ? » des navigateurs).
+async fn reload(
+    State(st): State<ApiState>,
+    Path(id): Path<TabId>,
+    body: axum::body::Bytes,
+) -> Response {
+    let confirm = serde_json::from_slice::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("confirm")?.as_bool())
+        .unwrap_or_default();
+    let req = {
         let session = st.session.lock().await;
-        match session.tab_info(id) {
-            Some(t) => t.url,
-            None => {
-                return err(StatusCode::NOT_FOUND, &CoreError::UnknownTab(id));
-            }
+        match session.reload_request(id) {
+            Ok(r) => r,
+            Err(e) => return err(err_status(&e), &e),
         }
     };
-    let Some(url) = url else {
-        // Onglet jamais navigué — même code que le chemin
-        // `&mut self` (`EmptyDocument` → 502 via `err_status`).
-        return err(
-            err_status(&CoreError::EmptyDocument),
-            &CoreError::EmptyDocument,
-        );
-    };
-    let url = match Url::parse(&url) {
-        Ok(u) => u,
-        Err(e) => return err(StatusCode::BAD_REQUEST, &CoreError::Url(e.to_string())),
-    };
-    let mut req = Request::get(url);
-    req.initiator = Some(Initiator::TopLevelNav);
+    if !confirm && !matches!(req.method, Method::Get | Method::Head) {
+        // Page servie par une méthode non sûre (POST…) : la
+        // resoumission silencieuse peut doubler un effet de
+        // bord (commande, paiement). Le client rappelle avec
+        // `{"confirm":true}` après accord explicite.
+        return Json(serde_json::json!({
+            "result": "resubmit_confirm",
+            "method": req.method.as_str(),
+            "url": req.url.to_string(),
+        }))
+        .into_response();
+    }
     match navigate_shared(&st.session, id, req, false).await {
         Ok(()) => {
             drain_navs_shared(&st.session, id).await;

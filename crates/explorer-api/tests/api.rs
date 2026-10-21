@@ -28,12 +28,25 @@ impl FontSource for FixtureFont {
 
 struct FakeTransport {
     body: &'static str,
+    /// Journal `(méthode chemin)` — la suite reload POST
+    /// vérifie qu'aucune resoumission silencieuse n'a fuité.
+    log: std::sync::Mutex<Vec<String>>,
 }
 
 #[async_trait]
 impl HttpTransport for FakeTransport {
     async fn fetch(&self, req: &Request) -> NetResult<Response> {
+        self.log
+            .lock()
+            .unwrap()
+            .push(format!("{} {}", req.method.as_str(), req.url.path()));
         let body = match req.url.path() {
+            "/form" => {
+                "<!doctype html><html><body>\
+             <form method=\"post\" action=\"/doit\">\
+             <button name=\"b\" value=\"1\">Go</button>\
+             </form></body></html>"
+            }
             "/link" => {
                 "<!doctype html><html><body>\
              <a href=\"/b\">lien</a></body></html>"
@@ -60,6 +73,7 @@ impl HttpTransport for FakeTransport {
 fn test_app() -> axum::Router {
     let t: Arc<dyn HttpTransport> = Arc::new(FakeTransport {
         body: "<!doctype html><html><body><div>api</div></body></html>",
+        log: std::sync::Mutex::new(Vec::new()),
     });
     let session = Arc::new(tokio::sync::Mutex::new(Session::new(
         t,
@@ -330,6 +344,121 @@ async fn navigate_then_back_forward_reload() {
     }
 }
 
+/// Étape 93 — `reload` réémet la requête d'origine (méthode
+/// + corps), pas un `GET` vide ; une méthode non sûre exige
+/// `{"confirm":true}` — sinon statut typé `resubmit_confirm`
+/// sans qu'aucune resoumission ne parte.
+#[tokio::test]
+async fn post_reload_requires_confirm() {
+    let transport = Arc::new(FakeTransport {
+        body: "<!doctype html><html><body><div>api</div></body></html>",
+        log: std::sync::Mutex::new(Vec::new()),
+    });
+    let session = Arc::new(tokio::sync::Mutex::new(Session::new(
+        transport.clone(),
+        Arc::new(FixtureFont),
+    )));
+    let app = explorer_api::router(session);
+
+    let resp = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let id = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+
+    // Page formulaire → clic sur le bouton → POST /doit.
+    app.clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/navigate"),
+            r#"{"url":"http://h.test/form"}"#,
+        ))
+        .await
+        .unwrap();
+    let r = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/input"),
+            r#"{"type":"click","x":15,"y":15}"#,
+        ))
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["result"], "navigated", "{v}");
+    // Le endpoint `input` est feu-et-oublie (étape 73) : la
+    // nav de soumission tourne en tâche détachée — attendre
+    // le POST dans le journal transport.
+    for _ in 0..50 {
+        if transport
+            .log
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l == "POST /doit")
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        transport.log.lock().unwrap().last().unwrap(),
+        "POST /doit",
+        "le submit émet le POST"
+    );
+
+    // reload sans confirm → resubmit_confirm, RIEN ne repart.
+    let r = app
+        .clone()
+        .oneshot(json_post(&format!("/api/tabs/{id}/reload"), "{}"))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["result"], "resubmit_confirm", "{v}");
+    assert_eq!(v["method"], "POST");
+    assert_eq!(
+        transport
+            .log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|l| *l == "POST /doit")
+            .count(),
+        1,
+        "aucune resoumission silencieuse"
+    );
+
+    // reload {"confirm":true} → le POST repart.
+    let r = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/reload"),
+            r#"{"confirm":true}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["url"], "http://h.test/doit", "{v}");
+    assert_eq!(
+        transport
+            .log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|l| *l == "POST /doit")
+            .count(),
+        2,
+        "le POST confirmé repart"
+    );
+}
+
 #[tokio::test]
 async fn input_click_link_navigates() {
     let app = test_app();
@@ -384,7 +513,10 @@ async fn input_click_link_navigates() {
 
 #[tokio::test]
 async fn api_key_gates_routes() {
-    let t: Arc<dyn HttpTransport> = Arc::new(FakeTransport { body: "x" });
+    let t: Arc<dyn HttpTransport> = Arc::new(FakeTransport {
+        body: "x",
+        log: std::sync::Mutex::new(Vec::new()),
+    });
     let session = Arc::new(tokio::sync::Mutex::new(Session::new(
         t,
         Arc::new(FixtureFont),

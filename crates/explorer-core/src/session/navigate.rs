@@ -50,32 +50,51 @@ impl Session {
         }
     }
 
+    /// Requête qu'émettrait [`Self::reload`] — la dernière
+    /// requête servie (`last_req`, un POST rejoue le POST,
+    /// étape 56), la requête `failed` de la position
+    /// courante (page d'erreur : retenter la requête tombée
+    /// plutôt qu'un `GET` vide — étape 93), sinon un `GET`
+    /// top-level sur l'URL courante. L'API s'en sert pour
+    /// exiger un `confirm` avant de rejouer une méthode non
+    /// sûre.
+    ///
+    /// # Errors
+    /// [`CoreError::UnknownTab`], [`CoreError::EmptyDocument`]
+    /// si l'onglet n'a jamais été navigué.
+    pub fn reload_request(&self, tab: TabId) -> Result<Request, CoreError> {
+        let Some(t) = self.tabs.get(&tab) else {
+            return Err(CoreError::UnknownTab(tab));
+        };
+        if let Some(req) = t.last_req.clone().or_else(|| {
+            t.hist
+                .get(t.hist_idx)
+                .filter(|h| h.failed)
+                .map(|h| h.req.clone())
+        }) {
+            return Ok(req);
+        }
+        let Some(u) = &t.url else {
+            return Err(CoreError::EmptyDocument);
+        };
+        // Reload direct = navigation top-level (66).
+        let mut r = Request::get(u.clone());
+        r.initiator = Some(Initiator::TopLevelNav);
+        Ok(r)
+    }
+
     /// Recharge la page courante (re-fetch complet,
     /// historique inchangé) — réémet la requête d'origine
     /// `last_req` : une page servie par POST est re-POSTée
     /// (étape 56 — les navigateurs réémettent la requête,
-    /// quitte à confirmer la resoumission côté UI).
+    /// quitte à confirmer la resoumission côté UI — l'API
+    /// exige `confirm`, étape 93).
     ///
     /// # Errors
     /// [`CoreError::UnknownTab`], [`CoreError::EmptyDocument`]
     /// si l'onglet n'a jamais été navigué, ou erreur de fetch.
     pub async fn reload(&mut self, tab: TabId) -> Result<(), CoreError> {
-        let Some(req) = self.tabs.get(&tab).and_then(|t| {
-            t.last_req.clone().or_else(|| {
-                t.url.clone().map(|u| {
-                    // Reload direct = navigation top-level (66).
-                    let mut r = Request::get(u);
-                    r.initiator = Some(Initiator::TopLevelNav);
-                    r
-                })
-            })
-        }) else {
-            return Err(if self.tabs.contains_key(&tab) {
-                CoreError::EmptyDocument
-            } else {
-                CoreError::UnknownTab(tab)
-            });
-        };
+        let req = self.reload_request(tab)?;
         match self.navigate_request(tab, req, false).await {
             Ok(_) => {
                 // Reload réussi sur une page d'erreur : la
