@@ -9,6 +9,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-63 — cascade scopée au sous-arbre** (`explorer-css`) :
+  `StyleEngine::compute_scoped(dom, root, env, parent)` +
+  `compute_scoped_with_state` re-stylent le seul sous-arbre
+  de `root` semé sur le style du parent — héritage et `--*`
+  traversent la frontière, les sélecteurs matchent le DOM
+  réel complet (ancêtres/frères visibles aux combinators).
+  `StyleMap::apply_scoped` fusionne dans la map stockée
+  (pseudos non reproduits purgés par nœud couvert) ;
+  `StyleMap::remove` pour les nœuds détachés. Réponse à la
+  dette journal NAV 55g-suite (coût unitaire de l'apply —
+  `relayout_subtree` restait précédé d'une cascade globale) ;
+  la portée du `root` reste au contrat de l'appelant.
 - **R-62 — `rasterize_window` / `rasterize_window_cached`**
   (`explorer-render`) : tranche verticale `[y_css,
   y_css+height_css[` d'une display list → frame

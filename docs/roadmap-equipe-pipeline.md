@@ -1557,6 +1557,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   ligne avec le plein cadre, tranche
   peinte sous un document 20 000 px que
   `rasterize` refuse.
+- [x] **R-63. Cascade scopée au sous-arbre**
+  (dette journal NAV 55g-suite — le coût
+  unitaire d'un apply re-stylait tout le
+  document) — **livré** :
+  `compute_scoped(dom, root, env, parent)`
+  + variante `_with_state` re-stylent le
+  seul sous-arbre de `root`, semé sur le
+  `ComputedStyle` du parent (héritage et
+  `--*` traversent la frontière) ; les
+  sélecteurs matchent contre le DOM réel
+  complet (ancêtres/frères hors scope
+  restent visibles aux `descendant`, `~`,
+  `+`, `:nth-*`). `StyleMap::apply_scoped`
+  fusionne dans la map stockée (autorité
+  par nœud couvert — pseudos non reproduits
+  purgés) ; `StyleMap::remove` pour les
+  nœuds détachés. Contrat documenté : la
+  portée du `root` est au choix de
+  l'appelant (frères `:nth-*`/`~` touchés
+  → root élargi). Tests : scoped ≡ global
+  sur le sous-arbre, `--*` + sélecteur
+  ancêtre traversant le scope, splice +
+  purge pseudo + `remove`.
   Test : `a` abs sans `top` dans `ul` abs à
   `top:-100px` → suit le conteneur (y≈−100),
   plus jamais 0. Terrain : les deux liens

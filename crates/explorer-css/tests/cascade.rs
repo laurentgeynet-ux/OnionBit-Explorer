@@ -1064,3 +1064,102 @@ fn vars_propagent_les_propres_de_la_mere() {
     assert_eq!(gc.get("--theme"), Some("dark"), "transmis via la mère");
     assert_eq!(gc.get("--pad"), Some("2px"), "propre de la mère");
 }
+
+// ── R-63 : cascade scopée au sous-arbre ──────────────────────
+
+#[test]
+fn scoped_equivaut_a_la_map_globale_sur_le_sous_arbre() {
+    // compute_scoped(dom, div, env, parent=style(body)) doit
+    // produire les mêmes styles que compute_tree pour div et
+    // sa descendance — sélecteurs matchent le DOM entier.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div#a { color: red } div p { font-weight: bold } \
+         body div ~ p { color: blue } p.b { margin-top: 7px }",
+        Origin::Author,
+    );
+    let global = e.compute_tree(&f.dom, f.dom.document(), &env());
+    let parent = global.get(f.body);
+    let scoped = e.compute_scoped(&f.dom, f.div, &env(), parent);
+    for node in [f.div, f.p] {
+        let (a, b) = (global.get(node), scoped.get(node));
+        assert!(a.is_some() && b.is_some());
+        for prop in ["color", "font-weight", "margin-top", "display"] {
+            assert_eq!(
+                a.unwrap().get(prop),
+                b.unwrap().get(prop),
+                "{prop} diverge sur {node:?}"
+            );
+        }
+    }
+    // Le frère hors sous-arbre n'y figure pas.
+    assert!(scoped.get(f.body).is_none());
+}
+
+#[test]
+fn scoped_herite_custom_properties_et_selecteurs_contextuels() {
+    // Héritage --* + sélecteur ancêtre hors sous-arbre : les
+    // deux doivent traverser la frontière du scope.
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let outer = dom.create_element("div").unwrap();
+    dom.append_child(doc, outer).unwrap();
+    dom.set_attribute(outer, "class", "ctx").unwrap();
+    let mid = dom.create_element("section").unwrap();
+    dom.append_child(outer, mid).unwrap();
+    let leaf = dom.create_element("p").unwrap();
+    dom.append_child(mid, leaf).unwrap();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        ".ctx { --theme: dark; color: green } .ctx p { color: red } \
+         p { background: var(--theme) }",
+        Origin::Author,
+    );
+    let global = e.compute_tree(&dom, doc, &env());
+    let scoped = e.compute_scoped(&dom, mid, &env(), global.get(outer));
+    let leaf_style = scoped.get(leaf).expect("style p scopé");
+    assert_eq!(
+        leaf_style.get("color"),
+        Some("red"),
+        "sélecteur ancêtre hors scope"
+    );
+    assert_eq!(
+        leaf_style.get("background"),
+        Some("dark"),
+        "--* héritée via le parent semé"
+    );
+}
+
+#[test]
+fn apply_scoped_remplace_et_purge_les_pseudos() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let div = dom.create_element("div").unwrap();
+    dom.append_child(doc, div).unwrap();
+    let p = dom.create_element("p").unwrap();
+    dom.append_child(div, p).unwrap();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div::before { content: 'x' } div { color: red } p { color: blue }",
+        Origin::Author,
+    );
+    let mut map = e.compute_tree(&dom, doc, &env());
+    assert!(map
+        .pseudo(div, explorer_css::PseudoElement::Before)
+        .is_some());
+    // La feuille perd ::before → la map scopée fait autorité.
+    let mut e2 = StyleEngine::new();
+    e2.add_css("div { color: red } p { color: blue }", Origin::Author);
+    let scoped = e2.compute_scoped(&dom, div, &env(), map.get(doc));
+    map.apply_scoped(scoped);
+    assert!(
+        map.pseudo(div, explorer_css::PseudoElement::Before)
+            .is_none(),
+        "pseudo disparu purgé"
+    );
+    assert_eq!(map.get(p).unwrap().get("color"), Some("blue"));
+    // remove : nœud détaché.
+    map.remove(p);
+    assert!(map.get(p).is_none());
+}

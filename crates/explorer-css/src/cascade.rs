@@ -352,6 +352,36 @@ impl StyleMap {
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &ComputedStyle)> {
         self.map.iter().map(|(n, c)| (*n, c))
     }
+
+    /// Fusionne une map scopée (issue de
+    /// [`StyleEngine::compute_scoped`]) dans `self` : chaque
+    /// nœud du sous-arbre recalculé écrase l'entrée stockée,
+    /// pseudo-styles compris (`::before`/`::after` non
+    /// reproduits sont purgés — la map scopée fait autorité
+    /// sur son sous-arbre). Les nœuds hors du sous-arbre
+    /// recalculé sont inchangés.
+    pub fn apply_scoped(&mut self, scoped: StyleMap) {
+        for (node, style) in scoped.map {
+            self.map.insert(node, style);
+            // La map scopée fait autorité par nœud couvert :
+            // un `::before`/`::after` non reproduit est purgé.
+            match scoped.pseudos.get(&node) {
+                Some(ps) => {
+                    self.pseudos.insert(node, ps.clone());
+                }
+                None => {
+                    self.pseudos.remove(&node);
+                }
+            }
+        }
+    }
+
+    /// Retire style et pseudo-styles de `node` — sous-arbre
+    /// détaché, nœud supprimé du DOM.
+    pub fn remove(&mut self, node: NodeId) {
+        self.map.remove(&node);
+        self.pseudos.remove(&node);
+    }
 }
 
 impl StyleEngine {
@@ -492,6 +522,52 @@ impl StyleEngine {
         let mut map = HashMap::new();
         let mut pseudos = HashMap::new();
         self.compute_subtree(dom, root, env, None, &mut map, &mut pseudos, state);
+        StyleMap { map, pseudos }
+    }
+
+    /// Re-style le sous-arbre de `root` semé sur le style
+    /// `parent` déjà calculé — les sélecteurs matchent contre
+    /// le DOM réel (ancêtres et frères au-dessus du sous-arbre
+    /// restent visibles : `descendant`, `~`, `+`, `:nth-*`),
+    /// seule l'écriture est bornée au sous-arbre.
+    /// Contrepartie incrémentale de
+    /// [`compute_tree`](Self::compute_tree) — demande NAV
+    /// (55g-suite : coût unitaire de l'apply sur DOM muté).
+    ///
+    /// La map produite ne contient que les nœuds du
+    /// sous-arbre ; le consommateur la fusionne dans sa map
+    /// stockée via [`StyleMap::apply_scoped`]. Le `root`
+    /// est au contrat de l'appelant : tout nœud dont le
+    /// style peut dépendre des nœuds modifiés doit s'y
+    /// trouver — un `appendChild` couvre le sous-arbre
+    /// inséré, mais des frères ciblés par `~`/`+`/`:nth-*`
+    /// ou des descendants d'un ancêtre dont les propres
+    /// styles changent relèvent d'un `root` élargi (la
+    /// cascade scopée ne devine pas la portée).
+    #[must_use]
+    pub fn compute_scoped(
+        &self,
+        dom: &Dom,
+        root: NodeId,
+        env: &StyleEnv,
+        parent: Option<&ComputedStyle>,
+    ) -> StyleMap {
+        self.compute_scoped_with_state(dom, root, env, parent, &|_| false)
+    }
+
+    /// Variante étatée de [`StyleEngine::compute_scoped`].
+    #[must_use]
+    pub fn compute_scoped_with_state(
+        &self,
+        dom: &Dom,
+        root: NodeId,
+        env: &StyleEnv,
+        parent: Option<&ComputedStyle>,
+        state: &dyn Fn(&str) -> bool,
+    ) -> StyleMap {
+        let mut map = HashMap::new();
+        let mut pseudos = HashMap::new();
+        self.compute_subtree(dom, root, env, parent, &mut map, &mut pseudos, state);
         StyleMap { map, pseudos }
     }
 
