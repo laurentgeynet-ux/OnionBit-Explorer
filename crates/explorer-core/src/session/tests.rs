@@ -1245,7 +1245,6 @@ fn box_deep_bytes(bx: &explorer_layout::LayoutBox) -> usize {
     b
 }
 
-
 /// Entrées+octets des custom properties `--*` d'un style de
 /// boîte (sonde M-H1 — inflation par héritage plat).
 fn style_vars(bx: &explorer_layout::LayoutBox, acc: &mut (usize, usize)) {

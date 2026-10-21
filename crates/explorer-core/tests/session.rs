@@ -46,6 +46,10 @@ struct FakeTransport {
     /// les routes ordinaires passent par le corps unique de
     /// `routes` via le défaut du trait).
     chunks: Mutex<HashMap<String, Vec<Vec<u8>>>>,
+    /// Journal des `path?query` requis (étape 96 — prouver
+    /// qu'une feuille hors-media/`@import` n'a *pas* été
+    /// fetchée, pas seulement qu'elle n'est pas appliquée).
+    paths: Mutex<Vec<String>>,
 }
 
 /// R-32 : la feuille UA pose `body { margin: 8px }` (compat
@@ -86,6 +90,7 @@ impl FakeTransport {
             last_headers: Mutex::new(Vec::new()),
             resp_headers: Mutex::new(HashMap::new()),
             chunks: Mutex::new(HashMap::new()),
+            paths: Mutex::new(Vec::new()),
         }
     }
 
@@ -136,6 +141,11 @@ impl FakeTransport {
         self.last.lock().ok().and_then(|l| l.clone())
     }
 
+    /// `path?query` de toutes les requêtes, dans l'ordre.
+    fn paths(&self) -> Vec<String> {
+        self.paths.lock().map_or_else(|_| Vec::new(), |p| p.clone())
+    }
+
     /// Valeur d'un en-tête de la dernière requête.
     fn last_header(&self, name: &str) -> Option<String> {
         self.last_headers.lock().ok().and_then(|h| {
@@ -159,6 +169,9 @@ impl FakeTransport {
         }
         if let Ok(mut h) = self.last_headers.lock() {
             h.clone_from(&req.headers);
+        }
+        if let Ok(mut p) = self.paths.lock() {
+            p.push(req.url.path_query());
         }
     }
 
@@ -237,6 +250,7 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
             max_images: 32,
             image_max_px: 16_000_000,
             max_sheets: 8,
+            max_imports: 8,
             max_fonts: 16,
             max_scripts: 32,
             max_modules: 64,
@@ -672,6 +686,238 @@ async fn media_query_uses_session_viewport() {
         "viewport réel 800px : la règle max-width:900 s'applique"
     );
     assert!(green > 0, "le bloc hors media query reste peint");
+}
+
+/// Compte les pixels d'une teinte dans la frame `px`.
+fn count_color(fw: usize, fh: usize, px: &[u8], target: [u8; 3]) -> usize {
+    let mut n = 0;
+    for i in 0..fw * fh {
+        let p = &px[i * 4..][..3];
+        let [tr, tg, tb] = target.map(i32::from);
+        let d = |c: u8, t: i32| (i32::from(c) - t).abs() < 30;
+        if d(p[0], tr) && d(p[1], tg) && d(p[2], tb) {
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Étape 96 : `<link media>` est évalué contre le viewport
+/// réel **avant** la borne `max_sheets` — une feuille
+/// hors-media n'est ni fetchée ni appliquée, une feuille à
+/// media conforme l'est.
+#[tokio::test]
+async fn link_media_filtered_against_viewport() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <link rel=stylesheet href=/keep.css>\
+         <link rel=stylesheet href=/print.css media=print>\
+         <link rel=stylesheet href=\"/wide.css\" media=\"(min-width:2000px)\">\
+         <link rel=stylesheet href=\"/mq.css\" media=\"screen and (max-width:900px)\">\
+         </head><body>\
+         <div id=k style=\"width:50px;height:50px\"></div>\
+         <div id=p style=\"width:50px;height:50px\"></div>\
+         <div id=w style=\"width:50px;height:50px\"></div>\
+         <div id=m style=\"width:50px;height:50px\"></div>\
+         </body></html>",
+    );
+    t.route_bin("/keep.css", 200, b"#k{background:#00ff00}".to_vec());
+    t.route_bin("/print.css", 200, b"#p{background:#ff0000}".to_vec());
+    t.route_bin("/wide.css", 200, b"#w{background:#ff0000}".to_vec());
+    t.route_bin("/mq.css", 200, b"#m{background:#0000ff}".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    let (fw, fh) = (fw as usize, fh as usize);
+    assert!(
+        count_color(fw, fh, px, [0, 255, 0]) > 0,
+        "keep.css appliquée"
+    );
+    assert!(
+        count_color(fw, fh, px, [0, 0, 255]) > 0,
+        "mq.css (max-width:900) appliquée à 800px"
+    );
+    assert_eq!(
+        count_color(fw, fh, px, [255, 0, 0]),
+        0,
+        "feuilles hors-media non appliquées"
+    );
+    let paths = t.paths();
+    assert!(
+        paths.iter().any(|p| p == "/keep.css"),
+        "keep fetchée : {paths:?}"
+    );
+    assert!(
+        paths.iter().any(|p| p == "/mq.css"),
+        "mq fetchée : {paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p == "/print.css"),
+        "print non fetchée : {paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p == "/wide.css"),
+        "wide non fetchée : {paths:?}"
+    );
+}
+
+/// Étape 96 : media inclassable/malformée → tolérance — la
+/// feuille est conservée (on ne masque jamais par doute).
+#[tokio::test]
+async fn link_media_malformed_is_tolerant() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <link rel=stylesheet href=\"/odd.css\" media=\"(((\">\
+         </head><body><div id=d style=\"width:50px;height:50px\"></div></body></html>",
+    );
+    t.route_bin("/odd.css", 200, b"#d{background:#00ff00}".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]) > 0,
+        "media malformée → feuille gardée et appliquée"
+    );
+}
+
+/// Étape 96 : la borne `max_sheets` s'applique APRÈS le
+/// filtre media — les liens `print` en tête ne peuvent plus
+/// affamer les feuilles effectives.
+#[tokio::test]
+async fn max_sheets_counts_after_media_filter() {
+    let t = Arc::new(FakeTransport::new());
+    let mut s = Session::with_config(
+        t.clone(),
+        Arc::new(FixtureFont),
+        SessionConfig {
+            viewport: (800.0, 600.0),
+            max_sheets: 2,
+            ..SessionConfig::default()
+        },
+    );
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <link rel=stylesheet href=/p1.css media=print><link rel=stylesheet href=/p2.css media=print>\
+         <link rel=stylesheet href=/a.css><link rel=stylesheet href=/b.css>\
+         </head><body>\
+         <div id=a style=\"width:50px;height:50px\"></div>\
+         <div id=b style=\"width:50px;height:50px\"></div>\
+         </body></html>",
+    );
+    t.route_bin("/a.css", 200, b"#a{background:#00ff00}".to_vec());
+    t.route_bin("/b.css", 200, b"#b{background:#0000ff}".to_vec());
+    t.route_bin("/p1.css", 200, b"#a{background:#ff0000}".to_vec());
+    t.route_bin("/p2.css", 200, b"#b{background:#ff0000}".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    let (fw, fh) = (fw as usize, fh as usize);
+    assert!(count_color(fw, fh, px, [0, 255, 0]) > 0);
+    assert!(count_color(fw, fh, px, [0, 0, 255]) > 0);
+    let paths = t.paths();
+    assert!(
+        !paths.iter().any(|p| p == "/p1.css" || p == "/p2.css"),
+        "{paths:?}"
+    );
+}
+
+/// Étape 96 : `@import` fetché et expansé — le contenu de la
+/// feuille importée participe à la cascade ; l'import à media
+/// hors env est sauté (non fetché).
+#[tokio::test]
+async fn import_expands_and_filters_media() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head><link rel=stylesheet href=/a.css></head><body>\
+         <div id=x style=\"width:50px;height:50px\"></div>\
+         <div id=y style=\"width:50px;height:50px\"></div>\
+         </body></html>",
+    );
+    t.route_bin(
+        "/a.css",
+        200,
+        b"@import \"/b.css\"; @import \"/dead.css\" print; #x{background:#00ff00}".to_vec(),
+    );
+    t.route_bin("/b.css", 200, b"#y{background:#0000ff}".to_vec());
+    t.route_bin("/dead.css", 200, b"#x,#y{background:#ff0000}".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    let (fw, fh) = (fw as usize, fh as usize);
+    assert!(
+        count_color(fw, fh, px, [0, 255, 0]) > 0,
+        "règle propre de a.css"
+    );
+    assert!(
+        count_color(fw, fh, px, [0, 0, 255]) > 0,
+        "règle de b.css importée"
+    );
+    let paths = t.paths();
+    assert!(
+        paths.iter().any(|p| p == "/b.css"),
+        "b importée : {paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p == "/dead.css"),
+        "import print sauté : {paths:?}"
+    );
+}
+
+/// Étape 96 : chaîne `@import` bornée — `max_imports` feuilles
+/// total, le surplus est sauté ; les boucles ne bouclent pas
+/// (dédup par URL).
+#[tokio::test]
+async fn import_bounded_and_acyclic() {
+    let t = Arc::new(FakeTransport::new());
+    let mut s = Session::with_config(
+        t.clone(),
+        Arc::new(FixtureFont),
+        SessionConfig {
+            max_imports: 1,
+            ..SessionConfig::default()
+        },
+    );
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head><link rel=stylesheet href=/a.css></head><body>\
+         <div id=x style=\"width:50px;height:50px\"></div></body></html>",
+    );
+    // b s'importe elle-même (boucle) puis c — borne + dédup.
+    t.route_bin(
+        "/a.css",
+        200,
+        b"@import \"/b.css\"; @import \"/c.css\"; #x{background:#00ff00}".to_vec(),
+    );
+    t.route_bin(
+        "/b.css",
+        200,
+        b"@import \"/b.css\"; @import \"/a.css\";".to_vec(),
+    );
+    t.route_bin("/c.css", 200, b"#x{background:#ff0000}".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let paths = t.paths();
+    assert!(paths.iter().any(|p| p == "/b.css"), "{paths:?}");
+    assert!(
+        !paths.iter().any(|p| p == "/c.css"),
+        "borne 1 → c jamais fetchée : {paths:?}"
+    );
+    let b_fetches = paths.iter().filter(|p| *p == "/b.css").count();
+    assert_eq!(
+        b_fetches, 1,
+        "boucle b→b neutralisée par la dédup : {paths:?}"
+    );
 }
 
 #[tokio::test]
@@ -5176,6 +5422,7 @@ async fn redirect_commits_final_url_and_fragment() {
             max_images: 32,
             image_max_px: 16_000_000,
             max_sheets: 8,
+            max_imports: 8,
             max_fonts: 16,
             max_scripts: 32,
             max_modules: 64,

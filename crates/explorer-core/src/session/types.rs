@@ -620,8 +620,16 @@ pub struct SessionConfig {
     pub image_max_px: u32,
     /// Nombre max de feuilles `<link>` fetchées par document
     /// (bornes sous-ressources — une page peut en chaîner
-    /// des centaines).
+    /// des centaines). La borne s'applique **après** le
+    /// filtre `media=` (étape 96) : une variante
+    /// `print`/`(prefers-color-scheme: dark)` hors viewport
+    /// ne dépense pas le quota. Défaut 32 — corpus
+    /// `site_smoke` : GitHub ~22 feuilles effectives, MDN ~20.
     pub max_sheets: usize,
+    /// Nombre max de feuilles `@import` fetchées par document
+    /// (chaîne bornée — dédup par URL et profondeur
+    /// `MAX_IMPORT_DEPTH` neutralisent les boucles).
+    pub max_imports: usize,
     /// Capacité du registre `@font-face` par session
     /// (règle budgets — les faces sont par document, le
     /// registre est purgé à chaque navigation).
@@ -685,7 +693,8 @@ impl Default for SessionConfig {
             js_ops: 5_000_000,
             max_images: 32,
             image_max_px: 16_000_000,
-            max_sheets: 8,
+            max_sheets: 32,
+            max_imports: 16,
             max_fonts: 16,
             max_scripts: 32,
             max_modules: 64,

@@ -196,10 +196,13 @@ pub(crate) fn collect_style_css(dom: &Dom) -> String {
     css
 }
 
-/// `href` des `<link rel=stylesheet>` dans l'ordre — `rel`
-/// case-insensitive à tokens (la spec admet `rel="stylesheet
-/// alternate"` et cie) ; `href` vide sauté.
-pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<String> {
+/// `(href, media)` des `<link rel=stylesheet>` dans l'ordre
+/// — `rel` case-insensitive à tokens (la spec admet
+/// `rel="stylesheet alternate"` et cie) ; `href` vide sauté.
+/// `media` est conservé pour le filtre viewport de
+/// `plan_subresources` (étape 96 : un `<link media="print">`
+/// ne consomme pas la borne `max_sheets`).
+pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<(String, Option<String>)> {
     let mut out = Vec::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
@@ -213,7 +216,8 @@ pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<String> {
             if rel.split_whitespace().any(|w| w == "stylesheet") {
                 if let Ok(Some(href)) = dom.attribute(n, "href") {
                     if !href.is_empty() {
-                        out.push(href);
+                        let media = dom.attribute(n, "media").ok().flatten();
+                        out.push((href, media));
                     }
                 }
             }

@@ -433,11 +433,17 @@ impl Session {
         base: &Url,
         scripting: bool,
     ) -> (Vec<Url>, Vec<ScriptItem>, Vec<Url>) {
+        // Étape 96 : `media=` évalué contre l'env viewport
+        // AVANT la borne — une feuille hors-media (variante
+        // `print`, `(prefers-color-scheme: …)`) n'est ni
+        // fetchée ni comptée dans `max_sheets`.
+        let env = super::apply::viewport_env(self.viewport);
         let sheets: Vec<Url> = collect_stylesheet_links(dom)
             .into_iter()
-            .take(self.max_sheets)
-            .filter_map(|h| Url::resolve(base, &h).ok())
+            .filter(|(_, m)| media_attr_matches(&env, m.as_deref().unwrap_or_default()))
+            .filter_map(|(h, _)| Url::resolve(base, &h).ok())
             .filter(|u| !is_mixed_content(base, u))
+            .take(self.max_sheets)
             .collect();
         let scripts = collect_scripts(dom, base, scripting, self.max_scripts);
         let mut seen_img = std::collections::HashSet::new();

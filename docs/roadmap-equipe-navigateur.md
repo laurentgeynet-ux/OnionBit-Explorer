@@ -1514,6 +1514,34 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `ComputedStyle` = demande PIPE
   déposée au journal (partage `Rc`
   des vars héritées).
+- [x] **Étape 96. Sous-ressources CSS :
+  `<link media>` + `@import` + borne
+  revue** (demande triage `site_smoke`
+  PIPE→NAV, journal) —
+  `plan_subresources` évalue `media=`
+  contre `viewport_env(self.viewport)`
+  **avant** la borne : hors-media →
+  ni fetchée ni comptée ; `max_sheets`
+  8→32 (corpus : GitHub ~22
+  effectives, MDN ~20).
+  `SubJob::fetch_imports` résout la
+  chaîne `@import` : re-parse des
+  feuilles reçues, imports expansés
+  récursivement et préfixés au slot
+  (ordre cascade) ; dédup URL +
+  `MAX_IMPORT_DEPTH` + `max_imports`
+  bornent boucles/dégénérescence ;
+  avant `fetch_fonts` → `@font-face`
+  des importées éligible.
+  `media_attr_matches` = shim
+  `@media` synthétique via
+  `parse_stylesheet` (aucune API PIPE
+  nouvelle ; inclassable → conservé).
+  Tests : filtre media + non-fetch,
+  tolérance `(((`, borne post-filtre,
+  expansion + media d'import,
+  borne/dédup. Solde aussi la
+  demande R-22 (`@import` lobste.rs).
 
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur

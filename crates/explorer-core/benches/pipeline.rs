@@ -105,6 +105,7 @@ fn bench_session() -> (Session, Arc<FakeTransport>) {
             max_images: 32,
             image_max_px: 16_000_000,
             max_sheets: 8,
+            max_imports: 8,
             max_fonts: 16,
             max_scripts: 32,
             max_modules: 64,

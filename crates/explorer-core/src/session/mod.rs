@@ -432,8 +432,10 @@ pub struct Session {
     /// et pixels décodés).
     max_images: usize,
     image_max_px: u32,
-    /// Bornes sous-ressources (`max_sheets` feuilles liées).
+    /// Bornes sous-ressources (`max_sheets` feuilles liées,
+    /// `max_imports` chaîne `@import` — étape 96).
     max_sheets: usize,
+    max_imports: usize,
     /// Budget `@font-face` par document — recopié de
     /// `cfg.max_fonts` pour les phases détachées (53d, le
     /// registre `WebFontSource` borne aussi à l'inscription).
@@ -550,6 +552,7 @@ impl Session {
             max_images: cfg.max_images,
             image_max_px: cfg.image_max_px,
             max_sheets: cfg.max_sheets,
+            max_imports: cfg.max_imports,
             max_fonts: cfg.max_fonts,
             max_scripts: cfg.max_scripts,
             max_modules: cfg.max_modules,

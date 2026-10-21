@@ -684,6 +684,7 @@ impl Session {
             max_inflight: self.max_inflight,
             max_modules: self.max_modules,
             font_budget: self.max_fonts,
+            max_imports: self.max_imports,
         }))
     }
 

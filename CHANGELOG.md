@@ -327,6 +327,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `tab_mem_inventory` (`#[ignore]`, inventaire par champ +
   bissection RSS). Le correctif (partage `Rc` des vars
   héritées) relève de `explorer-css` — demande journal.
+- **Étape 96 — `<link media>` filtré + `@import` expansé +
+  `max_sheets` revu** (`explorer-core`) : `plan_subresources`
+  évalue l'attribut `media` contre `viewport_env(viewport)`
+  **avant** la borne — les variantes `print`/thème hors
+  viewport ne sont ni fetchées ni comptées ; `max_sheets`
+  passe à 32 (corpus site_smoke : GitHub ~22 feuilles
+  effectives, MDN ~20). Nouveau `SubJob::fetch_imports` :
+  chaîne `@import` fetchée récursivement, contenu préfixé au
+  slot (ordre de cascade), bornes `max_imports` (16) +
+  profondeur 8 + dédup par URL — media d'import respectée,
+  `@font-face` des feuilles importées éligible (expansion
+  avant `fetch_fonts`). Évaluation via `media_attr_matches`
+  (shim `@media` synthétique sur `parse_stylesheet` —
+  aucune API `explorer-css` nouvelle). Soldé la demande
+  `site_smoke` et la demande R-22 (`var(--color-*)`
+  lobste.rs venant d'un `@import` non résolu).
 - **R-52 — `mask-image` borne le fond** (`explorer-render`) :
   le motif icône universel `mask-image:url(svg)` +
   `background-color` (Codex/Primer/Material) peignait un

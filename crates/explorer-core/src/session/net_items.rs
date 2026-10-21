@@ -5,11 +5,16 @@
 //! Types du scheduler de sous-ressources : jobs de fetch,
 //! graphe de modules, livraisons, requêtes CORS/cookies.
 use super::*;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
-use explorer_css::{FontSrc, Origin, StyleEngine};
+use explorer_css::{
+    media_matches, parse_stylesheet, AtKind, AtRule, FontSrc, ImportRule, Origin, Rule,
+    StyleEngine, StyleEnv,
+};
 use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
 use explorer_js::JsEngine;
@@ -419,6 +424,7 @@ pub(crate) struct SubJob {
     pub(crate) max_inflight: usize,
     pub(crate) max_modules: usize,
     pub(crate) font_budget: usize,
+    pub(crate) max_imports: usize,
 }
 
 /// Reliquat du commit de navigation entre la tête (sous
@@ -511,8 +517,88 @@ impl SubJob {
         .await;
         self.eng = eng;
         self.async_mods = async_mods;
+        self.fetch_imports().await;
         self.fetch_fonts().await;
         self.prefetch_modules().await;
+    }
+
+    /// Expansion des `@import` des feuilles liées (étape 96) :
+    /// chaque feuille reçue est re-parsée, ses imports dont
+    /// la media matche l'env viewport sont fetchés
+    /// récursivement et **préfixés** au slot — le contenu
+    /// importé prend la place de la règle `@import`, c.-à-d.
+    /// *avant* les règles propres de la feuille. Bornes :
+    /// `max_imports` feuilles total, `MAX_IMPORT_DEPTH` de
+    /// profondeur, dédup par URL (`seen` neutralise les
+    /// boucles). Avant `fetch_fonts` : un `@font-face`
+    /// déclaré par une feuille importée est ainsi éligible.
+    pub(crate) async fn fetch_imports(&mut self) {
+        let mut ctx = ImportCtx {
+            env: super::apply::viewport_env(self.viewport),
+            seen: HashSet::new(),
+            left: self.max_imports,
+            out: String::new(),
+        };
+        for i in 0..self.css_slots.len() {
+            if ctx.left == 0 {
+                break;
+            }
+            let Some(text) = self.css_slots[i].take() else {
+                continue;
+            };
+            let Some(base) = self.sheet_urls.get(i).cloned() else {
+                self.css_slots[i] = Some(text);
+                continue;
+            };
+            for imp in parse_stylesheet(&text).imports {
+                self.expand_import(&imp, &base, 1, &mut ctx).await;
+            }
+            let prefix = std::mem::take(&mut ctx.out);
+            self.css_slots[i] = Some(prefix + &text);
+        }
+    }
+
+    /// Fetch + expansion récursive d'un `@import` — l'async
+    /// récursif exige un future épinglé (`Box::pin`).
+    /// Les imports *de l'importée* sont expansés avant son
+    /// propre texte (ordre de cascade). Toute anomalie
+    /// (media hors env, URL irrésolvable, schéma non-http,
+    /// fetch/status non-2xx, borne atteinte) → import sauté,
+    /// jamais d'échec propagé.
+    fn expand_import<'a>(
+        &'a mut self,
+        imp: &'a ImportRule,
+        base: &'a Url,
+        depth: usize,
+        ctx: &'a mut ImportCtx,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            if depth > MAX_IMPORT_DEPTH
+                || ctx.left == 0
+                || !media_attr_matches(&ctx.env, &imp.media)
+            {
+                return;
+            }
+            let Ok(url) = Url::resolve(base, &imp.url) else {
+                return;
+            };
+            if !matches!(url.scheme(), "http" | "https") || !ctx.seen.insert(url.to_string()) {
+                return;
+            }
+            ctx.left -= 1;
+            let Ok(resp) = self.transport.fetch(&sub_request(&self.url, &url)).await else {
+                return;
+            };
+            if !(200..300).contains(&resp.status) {
+                return;
+            }
+            let text = decode_stylesheet(&resp.body, &resp.headers);
+            for sub in parse_stylesheet(&text).imports {
+                self.expand_import(&sub, &url, depth + 1, ctx).await;
+            }
+            ctx.out.push_str(&text);
+            ctx.out.push('\n');
+        })
     }
 
     /// Fetch + décode des `@font-face` hors session (étape
@@ -766,6 +852,44 @@ pub(crate) fn sub_request(base: &Url, url: &Url) -> Request {
         req.headers.push((n, v));
     }
     req
+}
+
+/// Profondeur max d'une chaîne `@import` (étape 96) —
+/// complément de la dédup par URL : borne la descente sur
+/// graphes dégénérés longs-sans-cycle.
+pub(crate) const MAX_IMPORT_DEPTH: usize = 8;
+
+/// Contexte d'expansion `@import` partagé par la descente
+/// récursive : env d'évaluation media, URLs déjà vues
+/// (dédup = anti-boucle), budget restant, tampon de
+/// préfixe collecté.
+struct ImportCtx {
+    env: StyleEnv,
+    seen: HashSet<String>,
+    left: usize,
+    out: String,
+}
+
+/// Évalue un prélude media brut (`media=` de `<link>`,
+/// prélude d'`@import`) contre l'env de session. Shim : le
+/// texte est reparsé comme prélude d'une règle `@media`
+/// synthétique — réutilise le parseur `explorer-css`, aucune
+/// API nouvelle côté PIPE. Vide ou inclassable → `true` :
+/// on ne masque jamais une feuille par doute (tolérance).
+pub(crate) fn media_attr_matches(env: &StyleEnv, media: &str) -> bool {
+    let media = media.trim();
+    if media.is_empty() {
+        return true;
+    }
+    let shim = parse_stylesheet(&format!("@media {media} {{a{{b:c}}}}"));
+    let queries = shim.rules.iter().find_map(|r| match r {
+        Rule::At(AtRule {
+            name,
+            kind: AtKind::Media { queries, .. },
+        }) if name == "media" => Some(queries),
+        _ => None,
+    });
+    queries.is_none_or(|q| media_matches(env, q))
 }
 
 /// Vague de fetches parallèle bornée (étape 50, scheduler
