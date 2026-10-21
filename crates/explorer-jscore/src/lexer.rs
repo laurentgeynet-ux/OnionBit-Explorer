@@ -565,16 +565,38 @@ impl Lexer {
     }
 
     /// `#name` — nom privé de classe. `#` seul ou suivi d'un
-    /// non-identifiant est une erreur de syntaxe.
+    /// non-identifiant est une erreur de syntaxe. Les échappes
+    /// `\uXXXX`/`\u{…}` sont admises (spec `PrivateIdentifier`
+    /// = `#` + `IdentifierName` — les réservés y sont permis).
     fn private_name(&mut self) -> Result<Tok> {
         self.bump(); // `#`
         let mut s = String::new();
-        while let Some(c) = self.peek() {
-            if (s.is_empty() && is_ident_start(c)) || (!s.is_empty() && is_ident_part(c)) {
-                s.push(c);
-                self.bump();
-            } else {
-                break;
+        loop {
+            match self.peek() {
+                Some('\\') => {
+                    if self.peek_at(1) != Some('u') {
+                        return Err(self.err("unexpected `\\` after `#`"));
+                    }
+                    let c = self.unicode_escape()?;
+                    let ok = if s.is_empty() {
+                        is_ident_start(c)
+                    } else {
+                        is_ident_part(c)
+                    };
+                    if !ok {
+                        return Err(self.err(format!("invalid escape `{c}` in identifier")));
+                    }
+                    s.push(c);
+                }
+                Some(c) if s.is_empty() && is_ident_start(c) => {
+                    s.push(c);
+                    self.bump();
+                }
+                Some(c) if !s.is_empty() && is_ident_part(c) => {
+                    s.push(c);
+                    self.bump();
+                }
+                _ => break,
             }
         }
         if s.is_empty() {
@@ -661,6 +683,27 @@ impl Lexer {
             }
             // `0[0-7]+` legacy octal et `0[89]` NonOctalDecimal :
             // flaggés pour le rejet strict côté parseur.
+            if self
+                .peek_at(1)
+                .is_some_and(|c| c.is_ascii_digit() || c == '_')
+            {
+                // ES2021 : le séparateur `_` est interdit dans TOUTE
+                // forme à tête `0` — `NonOctalDecimalIntegerLiteral`
+                // et `LegacyOctalLikeDecimalIntegerLiteral` ne le
+                // contiennent pas (`0_0`, `0_8`, `08_0`,
+                // `0_0123456789` → SyntaxError, y compris sloppy).
+                let mut i = 1;
+                while let Some(c) = self.peek_at(i) {
+                    if c == '_' {
+                        return Err(self.err("invalid `_` separator in numeric literal"));
+                    }
+                    if c.is_ascii_digit() {
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
             if self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) {
                 let mut i = 1;
                 let mut all_octal = true;

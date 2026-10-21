@@ -2436,38 +2436,11 @@ impl Engine {
         v: Value,
     ) -> JsResult<()> {
         if let Some((tid, target, handler)) = self.proxy_th(id)? {
-            let trap = self.proxy_trap(handler, "set")?;
-            if matches!(trap, Value::Obj(_)) {
-                let kv = self.str_val(key);
-                let ok = self.call_value(trap, handler, &[target, kv, v, recv])?;
-                return if self.to_boolean(ok) {
-                    // Invariants spec `[[Set]]` : data non-config
-                    // non-writable → écrire la *même* valeur seulement ;
-                    // accesseur non-config sans setter → jamais de
-                    // succès.
-                    match self.find_own(tid, key) {
-                        Some(Prop::Data { value, attrs })
-                            if !attrs.configurable && !attrs.writable =>
-                        {
-                            if !self.strict_eq(v, value) {
-                                return Err(self.type_error(
-                                    "proxy set: cannot report success on non-configurable non-writable prop",
-                                ));
-                            }
-                        }
-                        Some(Prop::Acc { set, attrs, .. })
-                            if !attrs.configurable && matches!(set, Value::Undefined) =>
-                        {
-                            return Err(self.type_error(
-                                "proxy set: non-configurable accessor without setter",
-                            ));
-                        }
-                        _ => {}
-                    }
-                    Ok(())
-                } else {
-                    self.write_refused(key)
-                };
+            if self
+                .proxy_set_step(tid, target, handler, recv, key, v)?
+                .is_some()
+            {
+                return Ok(());
             }
             return self.write_prop(tid, recv, key, v);
         }
@@ -2475,6 +2448,25 @@ impl Engine {
         let mut cur = Some(id);
         let mut depth = 0;
         while let Some(cid) = cur {
+            // Un proxy *au milieu* de la chaîne intercepte aussi
+            // — même logique qu'en tête (`Object.setPrototypeOf(
+            // Symbol.prototype, spy)` suivi de `Symbol().x = v`
+            // atteint la trap, spec `OrdinarySet` : chaque
+            // maillon applique son propre `[[Set]]`).
+            if let Some((tid, target, handler)) = self.proxy_th(cid)? {
+                if self
+                    .proxy_set_step(tid, target, handler, recv, key, v)?
+                    .is_some()
+                {
+                    return Ok(());
+                }
+                cur = Some(tid);
+                depth += 1;
+                if depth > MAX_PROTO_DEPTH {
+                    break;
+                }
+                continue;
+            }
             match self.find_own(cid, key) {
                 Some(Prop::Acc { set, .. }) => {
                     if self.is_callable(set) {
@@ -2506,6 +2498,50 @@ impl Engine {
         } else {
             self.write_refused(key)
         }
+    }
+
+    /// Étape `[[Set]]` d'un maillon proxy : invoque la trap
+    /// `set` (`receiver` = `recv`) puis vérifie les invariants
+    /// spec — data non-config non-writable → seule la *même*
+    /// valeur rapporte succès ; accesseur non-config sans
+    /// setter → jamais de succès. Retourne `Some(())` quand le
+    /// sort est tranché (trap appliquée ou refus enregistré
+    /// via `write_refused`), `None` sans trap — l'appelant
+    /// poursuit alors sur la cible `tid`.
+    fn proxy_set_step(
+        &mut self,
+        tid: ObjId,
+        target: Value,
+        handler: Value,
+        recv: Value,
+        key: &str,
+        v: Value,
+    ) -> JsResult<Option<()>> {
+        let trap = self.proxy_trap(handler, "set")?;
+        if !matches!(trap, Value::Obj(_)) {
+            return Ok(None);
+        }
+        let kv = self.str_val(key);
+        let ok = self.call_value(trap, handler, &[target, kv, v, recv])?;
+        if !self.to_boolean(ok) {
+            return self.write_refused(key).map(Some);
+        }
+        match self.find_own(tid, key) {
+            Some(Prop::Data { value, attrs })
+                if !attrs.configurable && !attrs.writable && !self.strict_eq(v, value) =>
+            {
+                return Err(self.type_error(
+                    "proxy set: cannot report success on non-configurable non-writable prop",
+                ));
+            }
+            Some(Prop::Acc { set, attrs, .. })
+                if !attrs.configurable && matches!(set, Value::Undefined) =>
+            {
+                return Err(self.type_error("proxy set: non-configurable accessor without setter"));
+            }
+            _ => {}
+        }
+        Ok(Some(()))
     }
 
     /// Écriture refusée (`[[Set]]` → `false`) — `TypeError` en
@@ -2695,14 +2731,79 @@ impl Engine {
                 }
                 self.write_prop(id, base, key, v)
             }
-            // Sloppy mode: writes to primitives are silently ignored;
-            // strict: `TypeError` (spec `PutValue` on a primitive base).
+            // `[[Set]]` sur base primitive (spec `PutValue` →
+            // `OrdinarySet` du wrapper éphémère) : la chaîne
+            // proto de la primitive peut intercepter l'écriture
+            // — setter hérité ou proxy `set` amarré via
+            // `Object.setPrototypeOf(String.prototype, p)` —
+            // invoquée avec `receiver` = la primitive. Sans
+            // interception l'écriture est refusée (une
+            // primitive ne porte jamais de prop propre) :
+            // silence sloppy, `TypeError` strict.
             _ => {
-                if self.strict {
-                    Err(self.type_error(format!("cannot write `{key}`")))
-                } else {
-                    Ok(())
+                let proto = match base {
+                    Value::Str(_) => Some(self.protos.string),
+                    Value::Num(_) => Some(self.protos.number),
+                    Value::Bool(_) => Some(self.protos.boolean),
+                    Value::Big(_) => Some(self.protos.bigint),
+                    _ => None,
+                };
+                if let Some(p) = proto {
+                    if self.prim_set_intercept(p, base, key, v)? {
+                        return Ok(());
+                    }
                 }
+                self.write_refused(key)
+            }
+        }
+    }
+
+    /// Chaîne proto d'un receiver primitif pour `[[Set]]` :
+    /// seuls les intercepteurs jouent (accesseur avec setter,
+    /// proxy `set`) — jamais de shadowing propre (une
+    /// primitive ne crée pas de prop). `true` = écriture
+    /// prise en charge ; `false` = à refuser.
+    fn prim_set_intercept(
+        &mut self,
+        mut cur: ObjId,
+        recv: Value,
+        key: &str,
+        v: Value,
+    ) -> JsResult<bool> {
+        let mut depth = 0;
+        loop {
+            if let Some((tid, target, handler)) = self.proxy_th(cur)? {
+                if self
+                    .proxy_set_step(tid, target, handler, recv, key, v)?
+                    .is_some()
+                {
+                    return Ok(true);
+                }
+                // Sans trap `set`, la cible poursuit la marche
+                // (ses props propres puis sa chaîne).
+                cur = tid;
+            } else {
+                match self.find_own(cur, key) {
+                    Some(Prop::Acc { set, .. }) => {
+                        if self.is_callable(set) {
+                            self.call_value(set, recv, &[v])?;
+                            return Ok(true);
+                        }
+                        return Ok(false);
+                    }
+                    // Data prop trouvée sur la chaîne → le receiver
+                    // primitif ne peut créer d'own → refus.
+                    Some(Prop::Data { .. }) => return Ok(false),
+                    None => {}
+                }
+                cur = match self.heap.obj(cur).map(|o| o.proto) {
+                    Some(Value::Obj(p)) => p,
+                    _ => return Ok(false),
+                };
+            }
+            depth += 1;
+            if depth > MAX_PROTO_DEPTH {
+                return Ok(false);
             }
         }
     }

@@ -30,16 +30,17 @@ use explorer_jscore::{Engine, Error};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Cliquet de régression — **re-mesuré après la vague JS-8+** (la
-/// whitelist `UNSUPPORTED` était périmée : TypedArray/Proxy/Intl/
-/// Temporal/BigInt/générateurs/async/modules/privés/etc. étaient
-/// implémentés mais skippés). Score @ extraction d53ebc8 :
-/// **1007/1046 exécutés (96 %), 31 skips, 39 échecs** — concentrés
-/// sur `\uXXXX` dans les identifiants Unicode (`ID_Start`/`ID_Continue`
-/// incomplets, 30 cas), négatifs de séparateurs numériques à zéro
-/// en tête (`08`/`0_8`/`0_0` acceptés au lieu de `SyntaxError`, 8 cas),
-/// `put-value-prop-base-primitive` (1 cas).
-const BASELINE_PASSED: usize = 1007;
+/// Cliquet de régression — **re-mesuré après la vague regexp
+/// (JS-C43/C48/C36) puis trois fixes de conformité**. Score @
+/// extraction d53ebc8 : **1046/1046 exécutés, 31 skips, 0 échec**.
+/// Les 39 échecs de la re-mesure regexp (1007/1046, 31 skips)
+/// ont tous été soldés : négatifs de séparateurs numériques à
+/// zéro en tête (`08`/`0_8`/`0_0` → `SyntaxError`, 8 cas),
+/// `put-value-prop-base-primitive` (proxy/setter amarré sur la
+/// chaîne proto d'un receiver primitif, 1 cas), et noms privés
+/// `#\uXXXX` — le lexer privé ignorait les échappes Unicode
+/// (30 cas, un seul mécanisme).
+const BASELINE_PASSED: usize = 1046;
 /// Plafond de skips toléré — monte seulement si le corpus grossit.
 const BASELINE_SKIPPED_MAX: usize = 31;
 

@@ -2047,6 +2047,41 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `assign_lhs_evalue_avant_rhs`,
   `assign_index_key_evalue_avant_rhs`,
   `assign_compound_key_evaluee_une_fois`.
+- [x] **JS-C53. Re-baseline test262 + solde des 39 échecs**
+  (`explorer-jscore`, piste JS-Cxx post-vague regexp) : la
+  référence 1007/1046 datait d'avant C43/C48/C36 —
+  re-mesurée **inchangée** (la vague n'a rien régressé ni
+  débloqué dans l'extrait), puis les trois familles
+  résiduelles soldées — score final **1046/1046 exécutés,
+  31 skips, 0 échec** sur le sous-ensemble extrait (1077
+  fichiers) :
+  - *Séparateurs numériques à zéro en tête* (8 négatifs) :
+    `0_0`, `08_0`, `0_8`, `0_0123456789`… — ES2021 interdit
+    `_` dans `LegacyOctalLikeDecimalIntegerLiteral` et
+    `NonOctalDecimalIntegerLiteral` ; `Lexer::number`
+    rejette désormais `_` dans toute forme `0…` (les
+    préfixes `0x`/`0o`/`0b` gardent le séparateur).
+  - *`put-value-prop-base-primitive`* : `[[Set]]` dont la
+    base est primitive — la chaîne proto doit intercepter
+    (setter hérité, proxy `set` amarré par
+    `Object.setPrototypeOf`). `set_prop_value` route les
+    vraies primitives (`prim_set_intercept`, refus sans
+    interception — jamais de prop propre) ; et `write_prop`
+    consultait la trap `set` des proxies **uniquement en
+    tête** — les maillons intermédiaires étaient ignorés
+    (cas `Symbol().x`, cellule-objet). `proxy_set_step`
+    factorise trap + invariants spec, appelé en tête *et*
+    à chaque maillon.
+  - *`#\uXXXX` — noms privés échappés* (30 cas, un seul
+    mécanisme) : `private_name` n'acceptait pas
+    `\uXXXX`/`\u{…}` — les tests « Unicode identifiers » du
+    corpus sont tous des `#…` échappés (les tables
+    `unicode-ident` suffisaient).
+  Tests : `primitive_base_write_reaches_chain_interceptors`,
+  `mid_chain_proxy_set_trap` ; cliquet `BASELINE_PASSED`
+  remonté à 1046. Terrain restant : TypeError lobste.rs
+  ×4 → rejouer `eval_hook` (JS-C50) quand les pages
+  sauvegardées arrivent.
 
 ## Tâches continues
 

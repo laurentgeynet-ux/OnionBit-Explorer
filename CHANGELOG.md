@@ -9,6 +9,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C53 — test262 re-baseliné : 1046/1046 exécutés,
+  31 skips, 0 échec** (sous-ensemble extrait d53ebc8, 1077
+  fichiers) : la référence 1007/1046 datait d'avant la vague
+  regexp — re-mesurée identique, puis les 39 échecs soldés.
+  `Lexer::number` rejette `_` dans les formes à zéro en tête
+  (ES2021 : séparateur interdit dans
+  `LegacyOctalLike`/`NonOctalDecimal` — 8 négatifs) ;
+  `set_prop_value` route le `[[Set]]` des bases primitives
+  vers les intercepteurs de la chaîne proto (`prim_set_intercept`)
+  et `write_prop` consulte désormais la trap `set` des proxies
+  **à chaque maillon** de la chaîne, pas seulement en tête
+  (`proxy_set_step` factorisé — cas `Symbol().x = v`, 1 test) ;
+  `Lexer::private_name` accepte `\uXXXX`/`\u{…}` — les 30 cas
+  « Unicode identifiers » du corpus étaient tous des noms
+  privés échappés. Cliquet `BASELINE_PASSED` remonté à 1046.
 - **R-32 — corpus WPT élargi : margin-collapse** : tranche
   `margin-padding-clear` + `floats-clear` + `normal-flow`
   extraite par `fetch_wpt.ps1` — 154 fichiers (36 sans

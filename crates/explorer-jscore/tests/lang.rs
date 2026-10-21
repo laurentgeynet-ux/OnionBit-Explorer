@@ -2389,6 +2389,93 @@ fn proxy_traps() {
     );
 }
 
+/// `[[Set]]` dont le receiver est une primitive : la chaîne
+/// proto intercepte (setter hérité, proxy `set` amarré sous le
+/// proto via `setPrototypeOf`) — fixture test262
+/// `types/reference/put-value-prop-base-primitive`.
+#[test]
+fn primitive_base_write_reaches_chain_interceptors() {
+    // Proxy `set` sous `String.prototype` — la primitive
+    // receiver doit atteindre la trap.
+    assert_eq!(
+        num(ev("var n = 0;\
+             var spy = new Proxy({}, {set: function (o, k, v, r) {\
+                 if (typeof r === 'string') { n += 1; }\
+                 return true;\
+             }});\
+             Object.setPrototypeOf(String.prototype, spy);\
+             ''.test262 = null;\
+             n")),
+        1.0
+    );
+    // Setter hérité ordinaire — atteint, et `this` sloppy est
+    // la primitive (boxée à l'appel → `typeof` = `object`).
+    assert_eq!(
+        ev_str(
+            "var seen, seenT;\
+             var p = {set test262(v) { seen = v; seenT = typeof this; }};\
+             Object.setPrototypeOf(String.prototype, p);\
+             'x'.test262 = 7;\
+             seen + '/' + seenT"
+        ),
+        "7/object"
+    );
+    // Sans interception : écriture refusée — silence sloppy,
+    // aucune prop ne fuit sur le proto.
+    assert_eq!(
+        ev_str("'x'.leak = 9; typeof String.prototype.leak"),
+        "undefined"
+    );
+    // Une data prop sur la chaîne → refus (pas de shadowing
+    // possible sur une primitive).
+    assert_eq!(
+        ev_str("String.prototype.fixed = 1; 'x'.fixed = 2; String.prototype.fixed"),
+        "1"
+    );
+    // Strict : `TypeError`.
+    assert!(Engine::new()
+        .eval("function f() { 'use strict'; 'x'.z = 1; } f()")
+        .is_err());
+}
+
+/// Proxy amarré *au milieu* de la chaîne proto : `write_prop`
+/// doit consulter la trap `set` à chaque maillon, pas
+/// seulement sur le receiver — `Symbol().x` y passe par le
+/// bras `Obj` (les symboles sont des cellules-objets chez
+/// nous). Fixture test262 `put-value-prop-base-primitive`.
+#[test]
+fn mid_chain_proxy_set_trap() {
+    assert_eq!(
+        num(ev("var n = 0;\
+             var spy = new Proxy({}, {set: function () { n += 1; return true; }});\
+             Object.setPrototypeOf(Symbol.prototype, spy);\
+             Symbol().test262 = null;\
+             n")),
+        1.0
+    );
+    // Receiver objet ordinaire : même interception milieu de
+    // chaîne.
+    assert_eq!(
+        num(ev("var n = 0;\
+             var spy = new Proxy({}, {set: function () { n += 1; return true; }});\
+             var mid = {}; Object.setPrototypeOf(mid, spy);\
+             var o = {}; Object.setPrototypeOf(o, mid);\
+             o.test262 = null;\
+             n")),
+        1.0
+    );
+    // Trap absente → la chaîne continue sous la cible du
+    // proxy (setter amarré sous la cible invoqué).
+    assert_eq!(
+        num(ev("var t = {}; var p = new Proxy(t, {});\
+             var o = {}; Object.setPrototypeOf(o, p);\
+             Object.setPrototypeOf(t, {set test262(v) { t.hit = 9; }});\
+             o.test262 = 1;\
+             t.hit")),
+        9.0
+    );
+}
+
 // -- ES modules (JS-C5) ---------------------------------------------
 
 /// In-memory module loader for tests.
