@@ -1029,6 +1029,48 @@ fn float_left_inchange() {
     assert!(approx(inner.rect.x, 0.0), "inner.x={}", inner.rect.x);
 }
 
+// ── R-53 : `width:%` d'un flottant se résout sur le bloc
+// conteneur, jamais sur la bande libre (§10.3 : la base d'un
+// % est la largeur du bloc contenant — la bande ne borne que
+// le shrink-to-fit `width:auto`, §10.3.5). Terrain : le
+// squelette colonnes de weather.gov (`float:left;width:100%`
+// sur `.div-full`/`.full-width-*`) s'effondrait à la bande
+// résiduelle — colonne de ~1 caractère/ligne.
+
+#[test]
+fn float_width_pourcentage_base_bloc_conteneur() {
+    let html = concat!(
+        "<!doctype html><div style=\"width:400px\">",
+        "<aside class=\"l\"><section style=\"width:100px;height:50px\"></section></aside>",
+        "<nav class=\"w\"><section style=\"height:30px\"></section></nav>",
+        "</div>"
+    );
+    let (dom, bx) = laid(html, ".l{float:left} .w{float:left;width:100%}");
+    let w = find(&bx, by_tag(&dom, "nav"));
+    // 100 % du conteneur (400), pas de la bande (300) — et le
+    // flottant descend sous le voisin qu'il ne peut doubler.
+    assert!(approx(w.rect.width, 400.0), "w={}", w.rect.width);
+    assert!(w.rect.y >= 50.0, "y={} (pas descendu)", w.rect.y);
+    assert!(approx(w.rect.x, 0.0), "x={}", w.rect.x);
+}
+
+#[test]
+fn float_width_pourcentage_partiel_base_bloc_conteneur() {
+    // Contrôle partiel : 50 % = 200 du conteneur, pas 150 de
+    // la bande ; la bande de 300 peut l'accueillir → reste
+    // en ligne à droite du voisin.
+    let html = concat!(
+        "<!doctype html><div style=\"width:400px\">",
+        "<aside class=\"l\"><section style=\"width:100px;height:50px\"></section></aside>",
+        "<nav class=\"w\"><section style=\"height:30px\"></section></nav>",
+        "</div>"
+    );
+    let (dom, bx) = laid(html, ".l{float:left} .w{float:left;width:50%}");
+    let w = find(&bx, by_tag(&dom, "nav"));
+    assert!(approx(w.rect.width, 200.0), "w={}", w.rect.width);
+    assert!(approx(w.rect.x, 100.0), "x={}", w.rect.x);
+}
+
 // ── R-46 : un item flex/grid établit un contexte de
 // formatage indépendant (Flexbox §4.1 / Grid §6) — les
 // marges de ses descendants ne s'échappent jamais de

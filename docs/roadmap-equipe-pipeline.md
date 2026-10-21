@@ -1342,6 +1342,30 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   borne le fond (pixels dedans/
   dehors), repli fond plein sur
   SVG indécodable.
+- [x] **R-53. `width:%` d'un flottant
+  résolu sur le bloc conteneur** (§10.3,
+  §10.3.5) (triage weather.gov — colonne
+  droite à ~1 car/ligne) — **livré** :
+  `place_float` passait la **bande**
+  résiduelle (`fl.band`) comme base `cb_w`
+  à `layout_block` — un `float; width:100%`
+  résolvait son % sur l'espace laissé par
+  les voisins au lieu du bloc contenant
+  (squelette `.div-full`/`.full-width-*`
+  de weather.gov effondré à 0/300px).
+  Livré : `layout_block_in_band` — `cb_w`
+  = conteneur (base %, marges, bornes
+  `min|max-width`, cohérent avec les
+  marges pré-résolues de `place_float`),
+  `band_w` ne borne que le shrink-to-fit
+  `width:auto`. Terrain : carte d'alertes
+  US pleine largeur, légende en 4
+  colonnes lisibles, insets Alaska/
+  Hawaï — la colonne écrasée disparaît.
+  Tests `block.rs` : `width:100%` = 400
+  du conteneur (pas 300 de bande) et
+  descente sous le voisin ; `width:50%`
+  = 200, reste en ligne à x=100.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

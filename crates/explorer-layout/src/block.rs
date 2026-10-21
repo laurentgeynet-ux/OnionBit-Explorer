@@ -286,6 +286,7 @@ pub fn layout_tree(root: &mut LayoutBox, viewport_w: f32, ctx: &BlockCtx) {
             viewport,
             &mut floats,
             true,
+            None,
         )
     });
     let deep = FloatCtx::bottom_of(&floats.left)
@@ -853,7 +854,47 @@ pub(crate) fn layout_block(
     fl: &mut FloatCtx,
 ) -> f32 {
     explorer_common::deep(|| {
-        layout_block_inner(bx, x, y, cb_w, cb_h, ctx, parent_fs, abs_cb, fl, false)
+        layout_block_inner(
+            bx, x, y, cb_w, cb_h, ctx, parent_fs, abs_cb, fl, false, None,
+        )
+    })
+}
+
+/// Pose d'un flottant dans sa bande : identique à
+/// [`layout_block`] mais `cb_w` reste la largeur du bloc
+/// conteneur (base des `%`, marges, `min|max-width` — §10.3)
+/// pendant que `band_w` borne le seul shrink-to-fit
+/// `width:auto` (§10.3.5). Sans cette distinction, un
+/// `float; width:100%` résolvait son % sur la bande résiduelle
+/// laissée par les flottants voisins (squelette
+/// `float;width:100%` de weather.gov → colonne à ~1 car).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn layout_block_in_band(
+    bx: &mut LayoutBox,
+    x: f32,
+    y: f32,
+    cb_w: f32,
+    cb_h: Option<f32>,
+    ctx: &BlockCtx,
+    parent_fs: f32,
+    abs_cb: Rect,
+    fl: &mut FloatCtx,
+    band_w: f32,
+) -> f32 {
+    explorer_common::deep(|| {
+        layout_block_inner(
+            bx,
+            x,
+            y,
+            cb_w,
+            cb_h,
+            ctx,
+            parent_fs,
+            abs_cb,
+            fl,
+            false,
+            Some(band_w),
+        )
     })
 }
 
@@ -869,6 +910,7 @@ fn layout_block_inner(
     abs_cb: Rect,
     fl: &mut FloatCtx,
     is_root: bool,
+    band_w: Option<f32>,
 ) -> f32 {
     let st = bx.style.clone();
     let fs = font_size_px(&st, parent_fs, ctx);
@@ -963,11 +1005,13 @@ fn layout_block_inner(
             // §10.3.5 : flottant à `width:auto` →
             // shrink-to-fit = clamp(dispo, min-content,
             // max-content). La dispo = bande du flottant
-            // moins marges et châssis propres.
+            // (`band_w` fournie par `place_float`) moins
+            // marges et châssis propres — le bloc conteneur
+            // `cb_w` sinon.
             if bx.float == Float::None {
                 return None;
             }
-            let avail = (cb_w - ml - mr - bl - br - pl - pr).max(0.0);
+            let avail = (band_w.unwrap_or(cb_w) - ml - mr - bl - br - pl - pr).max(0.0);
             Some(
                 avail
                     .min(crate::intrinsic::max_content_px(bx, fs, ctx))
@@ -1239,7 +1283,18 @@ fn place_float(
         // propres descendants (§9.4.1).
         let mut inner = FloatCtx::default();
         let child = &mut parent.children[i];
-        layout_block(child, bx0, my + mt, bw, cb_h, ctx, fs, pos_cb, &mut inner);
+        layout_block_in_band(
+            child,
+            bx0,
+            my + mt,
+            content_w,
+            cb_h,
+            ctx,
+            fs,
+            pos_cb,
+            &mut inner,
+            bw,
+        );
         let r = child.rect;
         if right_side {
             let corrected = bx0 + bw - r.width;

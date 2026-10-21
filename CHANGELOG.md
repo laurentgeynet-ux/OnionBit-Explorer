@@ -574,6 +574,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   d'une `FunctionExpression` est désormais ReadOnly dans son
   propre scope (`Binding.sloppy_silent` — silencieux en
   sloppy, `TypeError` en strict).
+- **R-53 — `width:%` d'un flottant résolu sur le bloc
+  conteneur** (`explorer-layout`) : `place_float` passait la
+  bande résiduelle comme base `cb_w` — un `float; width:100%`
+  résolvait son % sur l'espace laissé par les flottants
+  voisins au lieu du bloc contenant (§10.3). Bug site-réel :
+  le squelette `float:left; width:100%` de weather.gov
+  (`.div-full`, `.full-width-*`) s'effondrait en colonne de
+  ~1 caractère/ligne. Livré : `layout_block_in_band` — la
+  bande ne borne plus que le shrink-to-fit `width:auto`
+  (§10.3.5) ; marges pré-résolues et `min|max-width` alignés
+  sur la même base. Terrain : carte d'alertes US pleine
+  largeur, légende 4 colonnes lisible. Tests `block.rs` :
+  `width:100%` = 400 du conteneur + descente sous le voisin,
+  `width:50%` = 200 en ligne.
 
 ### Added
 
