@@ -1503,7 +1503,49 @@ async fn lobste_pipeline_errors() {
             errors.push(message);
         }
     }
-    eprintln!("-- {url} : {} PipelineError", errors.len());
+    let nav_errors = errors.len();
+    // Grille de survol du harnais `site_smoke` : les listeners
+    // `mouseover`/`mousemove` sont le déclencheur des TypeErrors
+    // observés en vol — l'évaluation top-level seule est propre.
+    let mut y = 40.0f32;
+    while y <= 704.0 {
+        let mut x = 40.0f32;
+        while x <= 968.0 {
+            let _ = s
+                .handle_input_now(tab, InputEvent::MouseMove { x, y });
+            while let Ok(ev) = rx.try_recv() {
+                if let CoreEvent::PipelineError { message, .. } = ev {
+                    errors.push(message);
+                }
+            }
+            x += 64.0;
+        }
+        y += 48.0;
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        s.pump_net().await;
+        s.pump_timers(tab);
+        while let Ok(ev) = rx.try_recv() {
+            if let CoreEvent::PipelineError { message, .. } = ev {
+                errors.push(message);
+            }
+        }
+        let idle = s.net_pending() == 0 && s.next_timer_deadline().is_none();
+        if idle || std::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    while let Ok(ev) = rx.try_recv() {
+        if let CoreEvent::PipelineError { message, .. } = ev {
+            errors.push(message);
+        }
+    }
+    eprintln!(
+        "-- {url} : {nav_errors} PipelineError nav + {} survol",
+        errors.len() - nav_errors
+    );
     for (i, m) in errors.iter().enumerate() {
         eprintln!("  [{i}] {m}");
     }
