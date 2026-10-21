@@ -258,3 +258,66 @@ fn texte_mute_via_noeud_texte_normalise_a_lelement() {
     let r = relayout_subtree(&mut bx, &dom, &styles, &HashMap::new(), txt, &ctx());
     assert_eq!(r, Relayout::Done);
 }
+
+/// R-65 : source comptant ses résolutions — prouve que le
+/// cache transplanté n'a pas re-facturé `font_data`.
+struct CountingFixture {
+    ttf: Vec<u8>,
+    calls: std::cell::Cell<usize>,
+}
+impl FontSource for CountingFixture {
+    fn font_data(&self, _req: &FontRequest) -> Option<Vec<u8>> {
+        self.calls.set(self.calls.get() + 1);
+        Some(self.ttf.clone())
+    }
+}
+
+/// R-65 : le mur apply NAV (~14 s pour ~3 000 nœuds, journal
+/// 55g-suite) = `BlockCtx::default()` reconstruit à chaque
+/// apply → `FontCache` froid → tout le document re-shapé
+/// (~5 ms/nœud texte). La couture : `take_font_cache` en fin
+/// de passe, `with_font_cache` au début de la suivante.
+#[test]
+fn cache_fonte_transplante_ne_refacture_pas() {
+    let src: &'static CountingFixture = Box::leak(Box::new(CountingFixture {
+        ttf: explorer_test_support::fixture_ttf(),
+        calls: std::cell::Cell::new(0),
+    }));
+    let dom =
+        TreeBuilder::parse("<html><body><p>aaaa bbbb cccc</p><p>dddd eeee ffff</p></body></html>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body { margin: 0 }", Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root = dom.document_element().expect("documentElement");
+    // Passe 1 : ctx neuf — la fonte se résout (≥1 appel).
+    let ctx1 = BlockCtx {
+        fonts: Some(src),
+        ..BlockCtx::default()
+    };
+    let mut bx1 = build_box_tree_sized(&dom, root, &styles, &HashMap::new()).expect("arbre");
+    layout_tree(&mut bx1, 400.0, &ctx1);
+    let n1 = src.calls.get();
+    assert!(n1 >= 1, "la première passe résout la fonte");
+    // Transplant : le cache part dans le ctx suivant.
+    let fc = ctx1.take_font_cache();
+    let ctx2 = BlockCtx {
+        fonts: Some(src),
+        ..BlockCtx::default()
+    }
+    .with_font_cache(fc);
+    let mut bx2 = build_box_tree_sized(&dom, root, &styles, &HashMap::new()).expect("arbre");
+    layout_tree(&mut bx2, 400.0, &ctx2);
+    assert_eq!(
+        src.calls.get(),
+        n1,
+        "seconde passe à cache chaud : zéro résolution de fonte"
+    );
+    // Contre-feu : un ctx NON transplanté re-facture.
+    let ctx3 = BlockCtx {
+        fonts: Some(src),
+        ..BlockCtx::default()
+    };
+    let mut bx3 = build_box_tree_sized(&dom, root, &styles, &HashMap::new()).expect("arbre");
+    layout_tree(&mut bx3, 400.0, &ctx3);
+    assert!(src.calls.get() > n1, "cache froid : la fonte se re-résout");
+}

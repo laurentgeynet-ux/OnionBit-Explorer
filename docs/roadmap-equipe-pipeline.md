@@ -1606,6 +1606,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   « Skip to main content »/« Skip to
   search » du MDN réel ont disparu du shot
   (diff pixel localisé y18-33).
+- [x] **R-65. `FontCache` persistant
+  entre passes** (attribution du mur apply
+  55g-suite — `relayout_subtree` ~14 s /
+  150 s mesurés NAV) — **livré** :
+  `apply.rs` reconstruisait
+  `BlockCtx::default()` par apply →
+  `font_cache` froid → re-shaping de tout
+  le texte posé à chaque tick (~5 ms/nœud
+  texte debug — R-33b mesurait ~28 s/
+  9 000 nœuds à froid, même magnitude).
+  Couture : `BlockCtx::with_font_cache`/
+  `take_font_cache` (transplant du cache,
+  analogue au `GlyphCache` persisté dans
+  le payload paint côté NAV). `FontCache`
+  gagne la synchro `FontSource::revision`
+  (contrat `GlyphCache` R-36) — un
+  `@font-face` inscrit entre passes
+  invalide octets+métriques+runs au lieu
+  de figer la famille « inconnue ».
+  Tests : compteur de résolutions —
+  transplant = 0 appel supplémentaire,
+  ctx froid = re-facture ; bump de
+  révision invalide puis re-fige.
 - [x] **R-59. `prefers-color-scheme` +
   défauts UA sombres** (moitié PIPE du
   thème sombre — journal d'abord,

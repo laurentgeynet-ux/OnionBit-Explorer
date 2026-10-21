@@ -228,6 +228,63 @@ fn cache_metrics_et_shape_coherents() {
     assert_eq!(src.calls.get(), 1);
 }
 
+/// R-65 : source à révision — un `None` figé doit être
+/// invalidé quand la source mute (`@font-face` inscrit entre
+/// deux passes d'un cache persistant, sinon la famille
+/// resterait « inconnue » pour toujours).
+struct MutableSource {
+    ttf: Vec<u8>,
+    rev: std::cell::Cell<u64>,
+    live: std::cell::Cell<bool>,
+    calls: std::cell::Cell<usize>,
+}
+impl FontSource for MutableSource {
+    fn font_data(&self, req: &FontRequest) -> Option<Vec<u8>> {
+        self.calls.set(self.calls.get() + 1);
+        if self.live.get() && req.families.iter().any(|f| f == "Fixture") {
+            Some(self.ttf.clone())
+        } else {
+            None
+        }
+    }
+    fn revision(&self) -> u64 {
+        self.rev.get()
+    }
+}
+
+#[test]
+fn cache_suit_la_revision_de_la_source() {
+    let src = MutableSource {
+        ttf: common::fixture_ttf(),
+        rev: std::cell::Cell::new(0),
+        live: std::cell::Cell::new(false),
+        calls: std::cell::Cell::new(0),
+    };
+    let mut fc = FontCache::new();
+    let req = fixture_req();
+    // Révision 0, famille absente : miss figé, 1 appel.
+    for _ in 0..3 {
+        assert!(fc.data(&src, &req).is_none());
+    }
+    assert_eq!(src.calls.get(), 1);
+    // La face arrive → revision bump : le cache se vide et
+    // re-résout (plus de `None` périmé).
+    src.live.set(true);
+    src.rev.set(1);
+    assert!(fc.data(&src, &req).is_some());
+    assert_eq!(src.calls.get(), 2);
+    // Révision stable : à nouveau mémoïsé, zéro appel.
+    for _ in 0..3 {
+        assert!(fc.data(&src, &req).is_some());
+    }
+    assert_eq!(src.calls.get(), 2);
+    // Révocation (source vidée) : retour au miss.
+    src.live.set(false);
+    src.rev.set(2);
+    assert!(fc.data(&src, &req).is_none());
+    assert_eq!(src.calls.get(), 3);
+}
+
 #[test]
 fn cache_tolere_fonte_invalide() {
     // Octets hostiles : ni métriques ni shape ne paniquent.

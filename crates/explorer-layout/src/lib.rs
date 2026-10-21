@@ -34,7 +34,7 @@ pub use boxtree::{
     build_box_tree, build_box_tree_sized, BoxKind, BoxSlot, Float, LayoutBox, Overflow, Position,
     Rect,
 };
-pub use font::{FontMetrics, FontRequest, FontSource, Glyph, ShapedRun};
+pub use font::{FontCache, FontMetrics, FontRequest, FontSource, Glyph, ShapedRun};
 pub use hit::hit_test;
 pub use inline::{fragment_sub_rect, Fragment, LineBox};
 pub use relayout::{relayout_subtree, Relayout};

@@ -126,6 +126,14 @@ pub struct ShapedRun {
 /// [`crate::BlockCtx::font_cache`] ou dans la passe raster.
 #[derive(Debug, Default)]
 pub struct FontCache {
+    /// Révision de la source vue à la dernière requête —
+    /// sync `FontSource::revision` (même contrat que le
+    /// `GlyphCache` render, R-36) : indispensable maintenant
+    /// que le cache peut vivre entre passes
+    /// (`BlockCtx::with_font_cache`) — un `@font-face`
+    /// inscrit entre deux applys doit invalider les `None`
+    /// figés, sinon la famille resterait « inconnue ».
+    rev: Option<u64>,
     /// `FontRequest` → octets résolus (`None` = miss figé).
     data: HashMap<FontRequest, Option<Rc<Vec<u8>>>>,
     /// (identité de fonte, taille px en bits) → métriques
@@ -149,9 +157,27 @@ impl FontCache {
         Self::default()
     }
 
+    /// Réaligne le cache sur la révision courante de la
+    /// source : registre muté → tout est vidé (octets,
+    /// métriques et runs meurent ensemble — les clés de
+    /// `metrics`/`shape` sont des pointeurs dans `data`).
+    /// Re-lu à chaque requête : source figée (`0`) = un
+    /// `Option<u64>` comparé, quasi gratuit.
+    fn sync(&mut self, src: &dyn FontSource) {
+        let rev = src.revision();
+        if self.rev != Some(rev) {
+            self.data.clear();
+            self.metrics.clear();
+            self.shape.clear();
+            self.rev = Some(rev);
+        }
+    }
+
     /// Octets de la fonte — mémoïsés par requête ; `None`
-    /// figé (une famille absente ne re-coûte rien).
+    /// figé (une famille absente ne re-coûte rien) **pour la
+    /// révision courante** — voir `rev`.
     pub fn data(&mut self, src: &dyn FontSource, req: &FontRequest) -> Option<Rc<Vec<u8>>> {
+        self.sync(src);
         self.data
             .entry(req.clone())
             .or_insert_with(|| src.font_data(req).map(Rc::new))

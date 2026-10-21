@@ -46,6 +46,11 @@ pub struct BlockCtx<'a> {
     /// Cache de la pipeline fonte pour la passe (R-33b) :
     /// `font_data`/métriques/shaping ne sont facturés qu'une
     /// fois par requête, pas par run de texte.
+    /// **Incrémental** : un ctx reconstruit par apply repart
+    /// froid — persister le cache entre mutations (voir
+    /// [`BlockCtx::with_font_cache`]/`take_font_cache`) sinon
+    /// chaque tick re-shape tout le document (mesuré ~5 ms/
+    /// nœud texte en debug — le mur relayout journalisé 55g).
     pub font_cache: std::cell::RefCell<font::FontCache>,
 }
 
@@ -59,6 +64,26 @@ impl Default for BlockCtx<'_> {
             viewport_w: 800.0,
             font_cache: std::cell::RefCell::new(font::FontCache::new()),
         }
+    }
+}
+
+impl BlockCtx<'_> {
+    /// Injecte un cache fonte persistant (session incrémen-
+    /// tale) : `default()` repart froid par passe — l'appelant
+    /// conserve un `FontCache` entre mutations et le
+    /// transplante ici à chaque apply (évite de re-shaper tout
+    /// le document — mur ~5 ms/nœud journalisé 55g-suite).
+    #[must_use]
+    pub fn with_font_cache(mut self, cache: font::FontCache) -> Self {
+        self.font_cache = std::cell::RefCell::new(cache);
+        self
+    }
+
+    /// Reprend le cache en fin de passe pour re-stockage
+    /// (symétrique de `with_font_cache` — NAV : déplacer dans
+    /// le ctx persistant avant de détruire le `BlockCtx`).
+    pub fn take_font_cache(&self) -> font::FontCache {
+        std::mem::take(&mut self.font_cache.borrow_mut())
     }
 }
 
