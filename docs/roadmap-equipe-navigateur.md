@@ -2252,8 +2252,14 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
     `assets/react` (React réel, hors périmètre miroir) ;
     `value is not a function` à
     `app-foundation` (`useSyncExternalStore` — aval du
-    `react` manquant) ; dev.to : sonde pendue >10 min
-    (tempête de timers ou fetch gelé — à investiguer) ;
+    `react` manquant) ; dev.to : hang diagnostiqué —
+    **eval JS synchrone**, pas réseau ni timers
+    (fetches finis +4 s, `navigate()` jamais rendu ;
+    repro census sans DOM : `base.js` 162 Kio et
+    `baseInitializers.js` 85 Kio pendent chacun >30 s
+    malgré `js_ops=5M`, `baseTracking.js` propre) —
+    un chemin eval échappe à la borne, chantier
+    spécialiste JS ;
     `/keys` : 404 hors session authentifiée.
   Tests : `mutation_observer_document_target`,
   `dom_interface_constructors`, `custom_elements_registry`,
