@@ -10,12 +10,22 @@ mod common;
 use explorer_css::{Origin, StyleEngine, StyleEnv};
 use explorer_dom::{Dom, NodeId};
 use explorer_html::TreeBuilder;
-use explorer_layout::{build_box_tree, layout_tree, BlockCtx, LayoutBox};
+use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, LayoutBox};
 
 const VIEW: f32 = 800.0;
 
 /// Pipeline complet : html + css → arbre de boîtes posé.
 fn laid(html: &str, css: &str) -> (Dom, LayoutBox) {
+    laid_sized(html, css, |_| std::collections::HashMap::new())
+}
+
+/// Variante avec tailles intrinsèques connues — le chemin
+/// session (`build_box_tree_sized`) des images chargées.
+fn laid_sized(
+    html: &str,
+    css: &str,
+    sizes_of: impl Fn(&Dom) -> std::collections::HashMap<NodeId, (f32, f32)>,
+) -> (Dom, LayoutBox) {
     let dom = TreeBuilder::parse(html);
     let mut eng = StyleEngine::new();
     // R-32 : marge UA `body { margin: 8px }` neutralisée —
@@ -29,7 +39,7 @@ fn laid(html: &str, css: &str) -> (Dom, LayoutBox) {
         .flatten()
         .find(|&c| dom.element(c).is_ok())
         .expect("élément racine");
-    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    let mut bx = build_box_tree_sized(&dom, root_el, &styles, &sizes_of(&dom)).expect("arbre");
     layout_tree(&mut bx, VIEW, &BlockCtx::default());
     (dom, bx)
 }
@@ -842,4 +852,44 @@ fn item_flex_inline_devient_bloc() {
     let m = find(&bx, by_id(&dom, "m"));
     assert!(approx(i.rect.width, 400.0), "item w={}", i.rect.width);
     assert!(approx(m.rect.width, 100.0), "media w={}", m.rect.width);
+}
+
+/// R-51 : un remplacé à `width:%` ne contribue pas son
+/// intrinsèque à la mesure intrinsèque de ses ancêtres — la
+/// taille dépend du bloc contenant, indéfini en mesure
+/// (contribution 0, pas repli sur `intrinsic`). Terrain : la
+/// carte BBC `min-width:fit-content` gonflait à 480px dès que
+/// le bitmap `<img width:100%>` arrivait, débordant sa piste
+/// de grille de 236px et déployant le titre à ~430px.
+#[test]
+fn img_pct_ne_gonfle_pas_min_width_fit_content() {
+    let (dom, bx) = laid_sized(
+        "<!doctype html><div id=item><div id=card><img id=i><h2>mot</h2></div></div>",
+        "#item{width:236px}#card{min-width:fit-content}#i{width:100%}h2{margin:0}",
+        |dom| [(by_id(dom, "i"), (480.0, 270.0))].into_iter().collect(),
+    );
+    let card = find(&bx, by_id(&dom, "card"));
+    assert!(
+        card.rect.width <= 237.0,
+        "min-width:fit-content ne doit pas gonfler à l'intrinsèque \
+         de l'img `width:100%` (480px) : card w={:.1}",
+        card.rect.width
+    );
+}
+
+/// Pendant non-régressif : l'intrinsèque reste la source de
+/// mesure quand `width` n'est **pas** un pourcentage.
+#[test]
+fn img_auto_contribue_intrinseque() {
+    let (dom, bx) = laid_sized(
+        "<!doctype html><div id=item><div id=card><img id=i></div></div>",
+        "#item{width:236px}#card{min-width:fit-content}#i{width:auto}",
+        |dom| [(by_id(dom, "i"), (480.0, 270.0))].into_iter().collect(),
+    );
+    let card = find(&bx, by_id(&dom, "card"));
+    assert!(
+        card.rect.width > 237.0,
+        "img `width:auto` : l'intrinsèque mesure toujours : card w={:.1}",
+        card.rect.width
+    );
 }

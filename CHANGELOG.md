@@ -343,6 +343,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   3 colonnes et sections 4 colonnes conformes. Tests
   `modern.rs` : item `display:initial` en grid (cellule
   et contenu préservés) et en flex.
+- **R-51 — remplacé `width:%` hors mesure intrinsèque**
+  (§4.1/§5.1) (`explorer-layout`) : `content_px` retombait
+  sur `bx.intrinsic` quand `width` était un pourcentage —
+  en mesure min/max-content le bloc contenant est indéfini,
+  donc un `img{width:100%}` imposait son bitmap entier aux
+  ancêtres shrink-to-fit. Latent jusqu'à l'arrivée du
+  bitmap : carte BBC `min-width:fit-content` gonflée à
+  480px (intrinsèque du `src 480w`), débordant sa piste de
+  grille 236px — titre LIVE déployé sur ~430px chevauchant
+  le héros. Livré : un remplacé à `width:%` contribue 0 à
+  la mesure intrinsèque ; `min|max-width` non-% bornent
+  toujours ; non-remplacé inchangé (retombe sur le contenu).
+  Terrain : titre LIVE + description wrappés dans la piste,
+  héros propre. Tests `modern.rs` : `img{width:100%}` ne
+  gonfle plus `min-width:fit-content` (contrôle
+  `width:auto` : l'intrinsèque mesure toujours).
 - **`scripts/spawn_daemon.ps1` — spawn WMI durci** :
   les morts silencieuses du daemon (3 occurrences
   non reproductibles, zéro stderr, zéro event) sont

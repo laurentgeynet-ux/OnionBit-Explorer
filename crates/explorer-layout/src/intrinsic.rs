@@ -97,7 +97,22 @@ fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
         }
         css_px(st, p, 0.0, fs, ctx).map(conv)
     };
-    if let Some(mut w) = bound("width").or(bx.intrinsic.map(|i| i.0)) {
+    // §4.1 : un `width:%` en mesure intrinsèque est indéfini
+    // (le bloc contenant dépend de cette mesure) — un
+    // remplacé n'impose alors **pas** son intrinsèque : sa
+    // contribution est nulle, sans quoi un `img{width:100%}`
+    // gonflerait tout ancêtre shrink-to-fit à la taille du
+    // bitmap (terrain : carte BBC `min-width:fit-content` à
+    // 480px dès l'arrivée du bitmap, débordant sa piste de
+    // grille 236px). Un non-remplacé retombe sur son contenu
+    // (`bx.intrinsic` absent → `None` → mesure des enfants).
+    let pct = st.get("width").is_some_and(|v| v.contains('%'));
+    let base = if pct && bx.intrinsic.is_some() {
+        Some(0.0)
+    } else {
+        bound("width").or(bx.intrinsic.map(|i| i.0))
+    };
+    if let Some(mut w) = base {
         if let Some(mx) = bound("max-width") {
             w = w.min(mx);
         }

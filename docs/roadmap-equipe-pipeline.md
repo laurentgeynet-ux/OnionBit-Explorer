@@ -1171,11 +1171,57 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   support complet = flatten des
   enfants comme items (feature
   propre si un site réel le
-  montre) ; léger débordement
-  du texte de la carte LIVE
-  sous le titre héros (overflow
-  non clippé — repro minimal à
-  isoler avant promotion).
+  montre).
+- [x] **R-51. Remplacé `width:%`
+  hors mesure intrinsèque
+  (§4.1/§5.1)** (résidu BBC —
+  le « débordement carte LIVE
+  sous le titre héros » noté en
+  R-50, racine trouvée par
+  instrumentation session) —
+  **livré** : `content_px`
+  retombait sur `bx.intrinsic`
+  quand `width` était un
+  pourcentage ; en mesure
+  min/max-content le bloc
+  contenant est indéfini (§4.1),
+  donc un `img{width:100%}`
+  imposait son bitmap entier aux
+  ancêtres shrink-to-fit —
+  `min-width:fit-content`
+  d'`entAKy` = 480px dès
+  l'arrivée du bitmap `src 480w`,
+  débordant sa piste 236px et
+  déployant le titre h2 sur
+  ~430px par-dessus le héros.
+  Latent : invisible sans tailles
+  intrinsèques réelles (scratch
+  propre, session cassée —
+  d'où diagnostic par
+  instrumentation
+  `build_display_list` + chaîne
+  d'ancêtres). Livré : un
+  remplacé à `width:%`
+  contribue 0 à la mesure
+  intrinsèque ; bornes
+  `min|max-width` non-%
+  préservées ; non-remplacé
+  inchangé (retombe sur la
+  mesure du contenu).
+  Terrain : titre LIVE et
+  description wrappés dans la
+  piste, héros propre au shot.
+  Tests `modern.rs` :
+  `img{width:100%}` ne gonfle
+  plus `min-width:fit-content`,
+  contrôle `width:auto` =
+  l'intrinsèque mesure toujours.
+  Reste noté : le premier mot
+  du h2 est masqué par l'icône
+  `InlineIconWrapper` (badge
+  LIVE) — arrangement inline
+  icon+titre à affiner (petit,
+  non promu sans repro).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
