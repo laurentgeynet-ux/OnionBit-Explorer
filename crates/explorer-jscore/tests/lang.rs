@@ -6943,3 +6943,54 @@ fn assign_compound_key_evaluee_une_fois() {
     );
     assert_eq!(v, "1:0,5,0");
 }
+
+// -- JS-C34 — déclencheurs observables (fixtures en échec documentés) --
+//
+// Déviations structurelles assumées, à ne débloquer QUE si un site
+// réel en dépend (roadmap JS-C34) : générateurs **eager** (le corps
+// tourne à l'appel, `yield` collecté — `Engine::gen_collect`) et
+// `await` sur promesse *pending* rejeté (`await_value` → TypeError,
+// pas de suspension de continuation). Ces deux tests encodent le
+// comportement **spec** et échouent donc aujourd'hui — `#[ignore]`
+// : dé-ignorer le jour où un site réel casse dessus, le fix est la
+// refacto complète, pas le test.
+
+/// Spec : `g()` renvoie un générateur **sans** exécuter le corps —
+/// le premier `next()` démarre l'exécution. Ici le corps tourne à
+/// l'appel (eager) : `log` vaut `["body","call"]` au lieu de
+/// `["call"]`.
+#[test]
+#[ignore = "JS-C34 — générateur eager : déclenché par site réel uniquement"]
+fn c34_generator_lazy_spec_fixture() {
+    let v = ev_str(
+        "var log = [];\
+         function* g() { log.push('body'); yield 1; }\
+         var it = g();\
+         log.push('call');\
+         log.join(',')",
+    );
+    assert_eq!(v, "call", "spec : corps inerte jusqu'au 1er next()");
+}
+
+/// Spec : `await p` sur `p` *pending* suspend la fonction — `f()`
+/// rend une promesse pending qui se résout quand `p` se résout. Ici
+/// `await` sur pending jette `TypeError` — le plus petit programme
+/// observable : promesse résolue en microtâche différée.
+#[test]
+#[ignore = "JS-C34 — await pending : déclenché par site réel uniquement"]
+fn c34_await_pending_spec_fixture() {
+    // `eval` draine les microtâches en fin de job — `p` est
+    // résolue quand `out` est lu. Spec : `await p` suspend `f`
+    // jusqu'à la résolution → `out = 7`. Moteur : `await` sur
+    // pending jette → `f()` rejette → `"unset"`.
+    let v = ev_str(
+        "var out = 'unset';\
+         var p = new Promise(function (res) {\
+             Promise.resolve().then(function () { res(7); });\
+         });\
+         async function f() { return await p; }\
+         f().then(function (v) { out = v; });\
+         out",
+    );
+    assert_eq!(v, "7", "spec : await pending suspend, ne jette pas");
+}

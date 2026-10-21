@@ -1629,6 +1629,13 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `#[ignore]` documenté) — sinon la panne silencieuse sur un
   site n'est pas attribuable à cet écart et le trigger ne
   peut pas tirer.
+  Déclencheur rendu observable (livrable partiel) :
+  `c34_generator_lazy_spec_fixture` et
+  `c34_await_pending_spec_fixture` dans `tests/lang.rs` —
+  encodent le comportement spec, échouent aujourd'hui
+  (`"body,call"` vs `"call"` ; `"unset"` vs `"7"`),
+  `#[ignore]` documentés. La case reste ouverte : la refacto
+  lazy/pending n'est pas engagée, en attente du site réel.
 - [x] **JS-C35. `document.write` complet + insertion dynamique**
   (miroir) — **livré** : `write`/`writeln` variadiques
   (concat de tous les args, `\n` pour `writeln`),

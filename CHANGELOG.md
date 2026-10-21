@@ -297,6 +297,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   purement mécanique : zéro changement sémantique, méthodes
   d'`impl Engine` réparties promues `pub(crate)` — surface
   publique intacte, suite complète inchangée au vert.
+- **JS-C34 — déclencheur rendu observable** (`explorer-jscore`,
+  livrable partiel) : fixtures `#[ignore]` encodant le
+  comportement spec — `c34_generator_lazy_spec_fixture`
+  (corps de générateur inerte jusqu'au 1er `next()`) et
+  `c34_await_pending_spec_fixture` (`await` sur promesse
+  pending suspend au lieu de jeter). Échec volontaire
+  documenté : la refacto générateurs lazy / continuations
+  d'`await` reste conditionnée à un site réel bloquant — une
+  panne silencieuse devient attribuable à cet écart.
 
 ### Fixed
 
