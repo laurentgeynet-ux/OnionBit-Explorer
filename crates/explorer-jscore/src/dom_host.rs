@@ -345,6 +345,20 @@ struct ClassListHost {
     node: NodeId,
 }
 
+/// Propriété d'événement plateforme portée par l'embedder
+/// (étape 103 — `KeyboardEvent.key`/`code`/`keyCode`/`which`,
+/// réutilisable `MouseEvent.clientX`…) : la session calcule,
+/// le moteur expose tel quel sur l'objet event.
+#[derive(Debug, Clone)]
+pub enum EventProp {
+    /// Chaîne (`key`, `code`…).
+    Str(String),
+    /// Nombre (`keyCode`, `which`…).
+    Num(f64),
+    /// Booléen (`ctrlKey`…).
+    Bool(bool),
+}
+
 /// Mutable DOM `Event` state — shared between the `Event` host
 /// wrapper and the dispatcher so `stopPropagation`/`preventDefault`
 /// take effect mid-walk.
@@ -355,6 +369,9 @@ pub(crate) struct EventState {
     bubbles: Cell<bool>,
     stopped: Cell<bool>,
     prevented: Cell<bool>,
+    /// Props plateforme (`key`, `code`, `keyCode`…) — résolues
+    /// par l'`EventHost` après les champs du cœur.
+    props: Vec<(String, Value)>,
 }
 
 /// DOM `Event` host object (from `document.createEvent` +
@@ -737,7 +754,21 @@ impl Engine {
             dom.borrow_mut().doc_open = false;
         }
         let target = dom.borrow().body();
-        self.dom_event_on(ty, target)
+        self.dom_event_on_props(ty, target, &[])
+    }
+
+    /// [`Self::dom_event`] à props (étape 103) — `keydown`/`keyup`
+    /// portent `key`/`code`/`keyCode`/`which` calculés par
+    /// l'embedder.
+    ///
+    /// # Errors
+    /// Returns the first thrown exception value (listener error).
+    pub fn dom_event_props(&mut self, ty: &str, props: &[(String, EventProp)]) -> JsResult<bool> {
+        let Some((dom, _)) = self.dom_ctx.clone() else {
+            return Ok(false);
+        };
+        let target = dom.borrow().body();
+        self.dom_event_on_props(ty, target, props)
     }
 
     /// Element-targeted platform event (JS-5c): dispatches `ty` on
@@ -748,9 +779,36 @@ impl Engine {
     /// # Errors
     /// Returns the first thrown exception value (listener error).
     pub fn dom_event_on(&mut self, ty: &str, node: NodeId) -> JsResult<bool> {
+        self.dom_event_on_props(ty, node, &[])
+    }
+
+    /// [`Self::dom_event_on`] à props (étape 103) — les entrées
+    /// `props` deviennent des propriétés de l'objet event
+    /// (`KeyboardEvent.key`/`code`/`keyCode`/`which`…), résolues
+    /// par l'`EventHost` après les champs du cœur.
+    ///
+    /// # Errors
+    /// Returns the first thrown exception value (listener error).
+    pub fn dom_event_on_props(
+        &mut self,
+        ty: &str,
+        node: NodeId,
+        props: &[(String, EventProp)],
+    ) -> JsResult<bool> {
         let Some((dom, cache)) = self.dom_ctx.clone() else {
             return Ok(false);
         };
+        let props: Vec<(String, Value)> = props
+            .iter()
+            .map(|(k, v)| {
+                let v = match v {
+                    EventProp::Str(s) => self.str_val(s.clone()),
+                    EventProp::Num(n) => Value::Num(*n),
+                    EventProp::Bool(b) => Value::Bool(*b),
+                };
+                (k.clone(), v)
+            })
+            .collect();
         let state = Rc::new(EventState {
             ty: RefCell::new(ty.to_string()),
             target: Cell::new(node),
@@ -758,6 +816,7 @@ impl Engine {
             bubbles: Cell::new(true),
             stopped: Cell::new(false),
             prevented: Cell::new(false),
+            props,
         });
         self.propagate_event(&dom, &cache, &state)?;
         // Event dispatch is a job boundary — drain queued reactions.
@@ -904,6 +963,7 @@ impl Engine {
             bubbles: Cell::new(false),
             stopped: Cell::new(false),
             prevented: Cell::new(false),
+            props: Vec::new(),
         });
         self.propagate_event(dom, cache, &state)
     }
@@ -924,6 +984,7 @@ impl Engine {
             bubbles: Cell::new(true),
             stopped: Cell::new(false),
             prevented: Cell::new(false),
+            props: Vec::new(),
         });
         self.propagate_event(dom, cache, &state)
     }
@@ -1340,6 +1401,7 @@ impl Host for DocumentHost {
                     bubbles: Cell::new(false),
                     stopped: Cell::new(false),
                     prevented: Cell::new(false),
+                    props: Vec::new(),
                 });
                 Ok(Some(e.new_host_object(Rc::new(EventHost {
                     dom: self.dom.clone(),
@@ -2424,6 +2486,7 @@ impl Host for NodeHost {
                     bubbles: Cell::new(true),
                     stopped: Cell::new(false),
                     prevented: Cell::new(false),
+                    props: Vec::new(),
                 });
                 e.propagate_event(&self.dom, &self.cache, &state)?;
                 if !state.prevented.get() {
@@ -2672,6 +2735,15 @@ fn event_state_of(
         return Ok(None);
     }
     let bubbles = e.get_prop(id, "bubbles").is_some_and(|b| e.to_boolean(b));
+    // Props portées par l'objet literal (`key`, `code`…) —
+    // recopiées sur le state pour que `e.key` resolve au
+    // dispatch (`el.dispatchEvent({type:'keydown',key:'a'})`).
+    let props: Vec<(String, Value)> = [
+        "key", "code", "keyCode", "which", "charCode", "ctrlKey", "shiftKey", "altKey", "metaKey",
+    ]
+    .into_iter()
+    .filter_map(|k| e.get_prop(id, k).map(|v| (k.to_string(), v)))
+    .collect();
     Ok(Some(Rc::new(EventState {
         ty: RefCell::new(ty),
         target: Cell::new(node),
@@ -2679,6 +2751,7 @@ fn event_state_of(
         bubbles: Cell::new(bubbles),
         stopped: Cell::new(false),
         prevented: Cell::new(false),
+        props,
     })))
 }
 
@@ -2708,7 +2781,10 @@ impl Host for EventHost {
             "bubbles" => Value::Bool(self.state.bubbles.get()),
             "defaultPrevented" => Value::Bool(self.state.prevented.get()),
             "cancelBubble" => Value::Bool(self.state.stopped.get()),
-            _ => return Ok(None),
+            _ => match self.state.props.iter().find(|(k, _)| k == key) {
+                Some((_, v)) => *v,
+                None => return Ok(None),
+            },
         }))
     }
 
@@ -3462,11 +3538,14 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             e.set_prop_value(this, k, v)?;
         }
     }
-    // `CustomEvent`/`ErrorEvent`/`PromiseRejectionEvent` portent
-    // des payloads d'init — copiés tels quels.
+    // `CustomEvent`/`ErrorEvent`/`PromiseRejectionEvent`/
+    // `KeyboardEvent` portent des payloads d'init — copiés
+    // tels quels.
     if matches!(init, Value::Obj(_)) {
         for k in [
             "detail", "message", "error", "filename", "lineno", "colno", "promise", "reason",
+            "key", "code", "keyCode", "which", "charCode", "ctrlKey", "shiftKey", "altKey",
+            "metaKey",
         ] {
             let v = e.get_prop_value(init, k)?;
             if !matches!(v, Value::Undefined) {

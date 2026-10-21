@@ -1446,6 +1446,68 @@ async fn click_input_focuses_then_keys_edit() {
     assert_eq!(out, InputOutcome::Unfocused);
 }
 
+/// Étape 103 — `keydown` porte `key`/`code`/`keyCode`/`which`
+/// (table UI Events côté session) : le listener lit les props
+/// et mute le miroir → le rendu joint la page statique
+/// équivalente.
+const PAGE_KEYLOG: &str = "<!doctype html><html><body>\
+     <div id=\"k\"></div>\
+     <script>document.body.addEventListener('keydown',function(e){\
+     document.getElementById('k').textContent=e.key+'/'+e.code+'/'+e.keyCode+'/'+e.which})</script>\
+     </body></html>";
+const PAGE_KEYLOG_AFTER: &str = "<!doctype html><html><body>\
+     <div id=\"k\">a/KeyA/65/65</div></body></html>";
+
+#[tokio::test]
+async fn keydown_event_carries_key_code_props() {
+    let (mut s, t) = test_session();
+    t.route("/ev", 200, PAGE_KEYLOG);
+    t.route("/stat", 200, PAGE_KEYLOG_AFTER);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/ev").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // Pas de champ focalisé : `keydown` document-level vers
+    // `<body>` — les props sont posées par la session.
+    let out = s
+        .handle_input(a, InputEvent::Key { key: "a".into() })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Unfocused);
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+#[tokio::test]
+async fn keydown_prevent_default_suppresses_edit() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><input name=q>\
+         <script>document.addEventListener('keydown',\
+         function(e){e.preventDefault()})</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Focused);
+    // `preventDefault` remonte par le même canal que les props
+    // (étape 103) — l'édition est supprimée, `Ignored` rapporté.
+    let out = s
+        .handle_input(id, InputEvent::Key { key: "a".into() })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Ignored);
+}
+
 /// M-H1 #1 — caret du champ focalisé : le clic dans un
 /// `input` peint une barre verticale pleine (≈1 px ×
 /// interligne) à l'origine du contenu ; une frappe la décale

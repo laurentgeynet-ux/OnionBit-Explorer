@@ -1754,6 +1754,49 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   celle du vol humain ; la repro
   in-process prouve le mécanisme.
 
+- [x] **Étape 103. Props
+  `KeyboardEvent` plateforme**
+  (trigger JS nommé — `key`/`code`/
+  `keyCode`/`which` absents des
+  events dispatchés, les handlers
+  clavier réels lisaient
+  `undefined`) : `EventProp`
+  (`Str`/`Num`/`Bool`) transporte
+  les props plateforme de
+  `dispatch_key` → `dispatch_
+  path_event_props` →
+  `JsEngine::dispatch_event_props`
+  → `Cmd::Dispatch.props` →
+  `dom_event(_on)_props` →
+  `EventState.props`, résolus par
+  `EventHost::get` après les
+  champs natifs (type/target/
+  bubbles/defaultPrevented…).
+  Table `key_code_of` (UI Events) :
+  lettres ASCII → `KeyX` +
+  keyCode ASCII majuscule,
+  chiffres → `DigitN`, touches
+  nommées (Enter 13, flèches
+  37-40, modifieurs, F1-F12),
+  ponctuation OEM US ; inconnue →
+  `code` "" / keyCode 0, jamais
+  de panic. `which` = `keyCode`
+  (alias hérité jQuery). Le ctor
+  `KeyboardEvent` copie aussi
+  `key`/`code`/`keyCode`/`which`/
+  `charCode` + modifieurs depuis
+  l'init dict (events synthétiques
+  couverts). Trait défaillant par
+  défaut → props perdues sans
+  casse. Repros jscore :
+  `dom_event_props_reach_
+  listeners` (élément ciblé),
+  `dom_event_props_on_document_
+  level` (document sans focus),
+  `keyboard_event_ctor_copies_
+  init_keys`. Réutilisable tel
+  quel pour `MouseEvent.clientX`…
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY

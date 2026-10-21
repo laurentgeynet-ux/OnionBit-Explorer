@@ -142,6 +142,79 @@ fn document_written_script_stays_inert() {
     );
 }
 
+// -- Étape 103 : props KeyboardEvent ------------------------------------
+
+#[test]
+fn dom_event_props_reach_listeners() {
+    // Props plateforme sur l'event dispatché : `key`/`code`/
+    // `keyCode`/`which` calculés par l'embedder arrivent au
+    // listener.
+    let dom = Rc::new(RefCell::new(Dom::from_html(PAGE)));
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    let body = dom.borrow().body();
+    e.eval("var __log = ''; document.body.addEventListener('keydown', function(ev) { __log = ev.key+'/'+ev.code+'/'+ev.keyCode+'/'+ev.which })")
+        .expect("listener");
+    e.dom_event_on_props(
+        "keydown",
+        body,
+        &[
+            ("key".into(), explorer_jscore::EventProp::Str("a".into())),
+            (
+                "code".into(),
+                explorer_jscore::EventProp::Str("KeyA".into()),
+            ),
+            ("keyCode".into(), explorer_jscore::EventProp::Num(65.0)),
+            ("which".into(), explorer_jscore::EventProp::Num(65.0)),
+        ],
+    )
+    .expect("dispatch");
+    let v = e.eval("__log").expect("probe");
+    assert_eq!(e.describe(v), "a/KeyA/65/65");
+}
+
+#[test]
+fn dom_event_props_on_document_level() {
+    // Chemin document (pas de nœud cible) : `dom_event_props`
+    // vise `<body>`.
+    let mut e = engine_with(PAGE);
+    e.eval(
+        "var __log = ''; document.body.addEventListener('keyup', function(ev) { __log = ev.key })",
+    )
+    .expect("listener");
+    e.dom_event_props(
+        "keyup",
+        &[(
+            "key".into(),
+            explorer_jscore::EventProp::Str("Enter".into()),
+        )],
+    )
+    .expect("dispatch");
+    let v = e.eval("__log").expect("probe");
+    assert_eq!(e.describe(v), "Enter");
+}
+
+#[test]
+fn keyboard_event_ctor_copies_init_keys() {
+    // `new KeyboardEvent('k', {key:'a', code:'KeyA', keyCode:65})`
+    // — les clés d'init survivent à la lecture.
+    assert_eq!(
+        ev("var k = new KeyboardEvent('keydown', {key:'a', code:'KeyA', keyCode:65, which:65}); k.key+'/'+k.code+'/'+k.keyCode+'/'+k.which"),
+        "a/KeyA/65/65"
+    );
+}
+
+#[test]
+fn dispatched_literal_event_exposes_key() {
+    // `dispatchEvent({type:'keydown', key:'a'})` — le literal
+    // porte ses props à l'EventHost.
+    assert_eq!(
+        ev("var __k = ''; document.body.addEventListener('keydown', function(ev) { __k = ev.key }); \
+            document.body.dispatchEvent({type:'keydown', key:'z'}); __k"),
+        "z"
+    );
+}
+
 #[test]
 fn navigator_is_fixed_and_poor() {
     assert_eq!(ev("navigator.userAgent"), "Explorer/0.1 (explorer-jscore)");

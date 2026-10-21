@@ -90,7 +90,9 @@ impl Session {
                 // `keydown` sur le champ focalisé, sinon niveau
                 // document (étape 52) — `preventDefault`
                 // supprime l'édition et la soumission `Enter`.
-                if self.dispatch_key(tab, "keydown") {
+                // L'event porte `key`/`code`/`keyCode`/`which`
+                // (étape 103).
+                if self.dispatch_key(tab, "keydown", &key) {
                     return Ok(InputOutcome::Ignored);
                 }
                 // Clavier du popup `<select>` ouvert : les
@@ -118,8 +120,8 @@ impl Session {
                 }
                 self.handle_key(tab, &key)
             }
-            InputEvent::KeyUp { key: _ } => {
-                self.dispatch_key(tab, "keyup");
+            InputEvent::KeyUp { key } => {
+                self.dispatch_key(tab, "keyup", &key);
                 Ok(InputOutcome::Ignored)
             }
             InputEvent::Scroll { dy } => {

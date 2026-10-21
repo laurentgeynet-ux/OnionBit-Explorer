@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use explorer_dom::NodeId;
-use explorer_js::{DomSyncPayload, JsEngine, UrlResolver};
+use explorer_js::{DomSyncPayload, EventProp, JsEngine, UrlResolver};
 use explorer_net::url::Url;
 
 impl Session {
@@ -310,6 +310,19 @@ impl Session {
         ty: &str,
         path: &[(String, u32)],
     ) -> bool {
+        self.dispatch_path_event_props(tab, ty, path, &[])
+    }
+
+    /// Variante à props de [`Self::dispatch_path_event`]
+    /// (étape 103) — `props` devient les propriétés de
+    /// l'événement (`KeyboardEvent.key`/`code`/`keyCode`…).
+    pub(crate) fn dispatch_path_event_props(
+        &mut self,
+        tab: TabId,
+        ty: &str,
+        path: &[(String, u32)],
+        props: &[(String, EventProp)],
+    ) -> bool {
         let t0 = Instant::now();
         let (prevented, mut t, mutated) = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
@@ -318,7 +331,7 @@ impl Session {
             let Some(eng) = entry.js.as_mut() else {
                 return false;
             };
-            let p = match eng.dispatch_event(ty, path) {
+            let p = match eng.dispatch_event_props(ty, path, props) {
                 Ok(p) => p,
                 Err(e) => {
                     tracing::debug!(tab, ty, error = %e, "listener dom en échec");
@@ -355,12 +368,21 @@ impl Session {
     }
 
     /// `keydown`/`keyup` : cible = champ focalisé s'il vit
-    /// encore dans `dom`, document sinon. Retourne
-    /// `defaultPrevented`.
-    pub(crate) fn dispatch_key(&mut self, tab: TabId, ty: &str) -> bool {
-        match self.focused_node(tab) {
-            Some(n) => self.dispatch_dom_event(tab, ty, n),
-            None => self.dispatch_doc_event(tab, ty),
+    /// encore dans `dom`, document sinon. `key` devient les
+    /// props `KeyboardEvent` (`key`/`code`/`keyCode`/`which`,
+    /// étape 103). Retourne `defaultPrevented`.
+    pub(crate) fn dispatch_key(&mut self, tab: TabId, ty: &str, key: &str) -> bool {
+        let props = key_event_props(key);
+        let path = match self.focused_node(tab) {
+            Some(n) => self
+                .tabs
+                .get(&tab)
+                .and_then(|entry| entry.dom.as_ref().and_then(|d| element_path(d, n))),
+            None => Some(Vec::new()),
+        };
+        match path {
+            Some(p) => self.dispatch_path_event_props(tab, ty, &p, &props),
+            None => false,
         }
     }
 
@@ -432,6 +454,85 @@ impl Session {
         if let Some(eng) = entry.js.as_mut() {
             eng.sync_mirror_attr(&path, attr, value);
         }
+    }
+}
+
+/// Props `KeyboardEvent` d'une touche DOM `key` (étape 103) :
+/// `key` tel quel, `code` = code physique UI Events
+/// (`KeyA`/`Digit1`/`Space`…), `keyCode`/`which` = codes hérités
+/// (lettres → ASCII majuscule, `Enter` 13, flèches 37-40…).
+/// Touche hors table → `code` "" / `keyCode` 0 — tolérant,
+/// jamais de panic.
+fn key_event_props(key: &str) -> Vec<(String, EventProp)> {
+    let (code, key_code) = key_code_of(key);
+    vec![
+        ("key".to_string(), EventProp::Str(key.to_string())),
+        ("code".to_string(), EventProp::Str(code)),
+        ("keyCode".to_string(), EventProp::Num(f64::from(key_code))),
+        ("which".to_string(), EventProp::Num(f64::from(key_code))),
+    ]
+}
+
+/// `(code, keyCode)` d'une valeur DOM `key` — table UI Events
+/// réduite aux touches livrées par le client (lettre ASCII,
+/// chiffre, ponctuation US, touches nommées courantes, F1-F12).
+/// `""` en code = touche hors table (comportement navigateur
+/// pour les touches non identifiées).
+fn key_code_of(key: &str) -> (String, u16) {
+    match key {
+        "Enter" => ("Enter".into(), 13),
+        "Escape" | "Esc" => ("Escape".into(), 27),
+        " " | "Spacebar" => ("Space".into(), 32),
+        "Tab" => ("Tab".into(), 9),
+        "Backspace" => ("Backspace".into(), 8),
+        "Delete" => ("Delete".into(), 46),
+        "Insert" => ("Insert".into(), 45),
+        "Home" => ("Home".into(), 36),
+        "End" => ("End".into(), 35),
+        "PageUp" => ("PageUp".into(), 33),
+        "PageDown" => ("PageDown".into(), 34),
+        "ArrowUp" => ("ArrowUp".into(), 38),
+        "ArrowDown" => ("ArrowDown".into(), 40),
+        "ArrowLeft" => ("ArrowLeft".into(), 37),
+        "ArrowRight" => ("ArrowRight".into(), 39),
+        "Shift" => ("ShiftLeft".into(), 16),
+        "Control" => ("ControlLeft".into(), 17),
+        "Alt" => ("AltLeft".into(), 18),
+        "Meta" => ("MetaLeft".into(), 91),
+        "CapsLock" => ("CapsLock".into(), 20),
+        "," => ("Comma".into(), 188),
+        "." => ("Period".into(), 190),
+        "/" => ("Slash".into(), 191),
+        ";" => ("Semicolon".into(), 186),
+        "=" => ("Equal".into(), 187),
+        "-" => ("Minus".into(), 189),
+        "[" => ("BracketLeft".into(), 219),
+        "]" => ("BracketRight".into(), 221),
+        "\\" => ("Backslash".into(), 220),
+        "'" => ("Quote".into(), 222),
+        "`" => ("Backquote".into(), 192),
+        "F1" => ("F1".into(), 112),
+        "F2" => ("F2".into(), 113),
+        "F3" => ("F3".into(), 114),
+        "F4" => ("F4".into(), 115),
+        "F5" => ("F5".into(), 116),
+        "F6" => ("F6".into(), 117),
+        "F7" => ("F7".into(), 118),
+        "F8" => ("F8".into(), 119),
+        "F9" => ("F9".into(), 120),
+        "F10" => ("F10".into(), 121),
+        "F11" => ("F11".into(), 122),
+        "F12" => ("F12".into(), 123),
+        k if k.len() == 1 => match k.chars().next() {
+            Some(c) if c.is_ascii_alphabetic() => {
+                let u = c.to_ascii_uppercase();
+                (format!("Key{u}"), u16::from(u as u8))
+            }
+            Some(c) if c.is_ascii_digit() => (format!("Digit{c}"), u16::from(c as u8)),
+            // Ponctuation hors table OEM → repli `key`, keyCode 0.
+            _ => (String::new(), 0),
+        },
+        _ => (String::new(), 0),
     }
 }
 

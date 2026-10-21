@@ -174,6 +174,13 @@ pub use explorer_jscore::CanvasOpRecord;
 /// trait `JsEngine` n'aient pas à dépendre du moteur.
 pub use explorer_jscore::HeapStats;
 
+/// Propriété d'événement plateforme (étape 103 —
+/// `KeyboardEvent.key`/`code`/`keyCode`/`which`) — réexport de
+/// [`explorer_jscore::EventProp`] pour le même motif que
+/// `HeapStats` : le payload traverse le trait `JsEngine`
+/// (`dispatch_event_props`), la session le calcule.
+pub use explorer_jscore::EventProp;
+
 /// Table « chemin élément → op-list **cumulée** » lue sur le
 /// moteur — mêmes chemins que [`DomSyncPayload`] (ils
 /// survivent au re-parse). La liste n'est pas drainée : la
@@ -423,6 +430,23 @@ pub trait JsEngine: Send {
         Ok(false)
     }
 
+    /// Variante à props de [`Self::dispatch_event`] (étape 103) :
+    /// l'événement porte `props` (`KeyboardEvent` : `key`/`code`/
+    /// `keyCode`/`which` calculés par la session). Défaut :
+    /// délègue à `dispatch_event` — les props sont perdues sur
+    /// un moteur qui ne les implémente pas, jamais de casse.
+    ///
+    /// # Errors
+    /// Erreur de listener JS propagée en [`JsError::Uncaught`].
+    fn dispatch_event_props(
+        &mut self,
+        ty: &str,
+        path: &[(String, u32)],
+        _props: &[(String, EventProp)],
+    ) -> Result<bool, JsError> {
+        self.dispatch_event(ty, path)
+    }
+
     /// Borne le budget d'opérations de la prochaine évaluation
     /// (protection anti-script-infini — règle « budgets »).
     fn set_budget(&mut self, ops: u64);
@@ -589,6 +613,9 @@ enum Cmd {
     Dispatch {
         ty: String,
         path: Vec<(String, u32)>,
+        /// Props plateforme de l'event (`key`, `code`, `keyCode`…)
+        /// — vide hors événements à payload (étape 103).
+        props: Vec<(String, EventProp)>,
         tx: Sender<Result<bool, JsError>>,
     },
     SetMediaClaim {
@@ -804,8 +831,13 @@ impl JscoreEngine {
                     }
                 }
                 Cmd::SetImportMap { json } => eng.set_import_map(&json),
-                Cmd::Dispatch { ty, path, tx } => {
-                    let out = dispatch_event(&mut eng, jsd.as_ref(), &ty, &path);
+                Cmd::Dispatch {
+                    ty,
+                    path,
+                    props,
+                    tx,
+                } => {
+                    let out = dispatch_event(&mut eng, jsd.as_ref(), &ty, &path, &props);
                     if tx.send(out).is_err() {
                         return;
                     }
@@ -947,12 +979,22 @@ impl JsEngine for JscoreEngine {
     }
 
     fn dispatch_event(&mut self, ty: &str, path: &[(String, u32)]) -> Result<bool, JsError> {
+        self.dispatch_event_props(ty, path, &[])
+    }
+
+    fn dispatch_event_props(
+        &mut self,
+        ty: &str,
+        path: &[(String, u32)],
+        props: &[(String, EventProp)],
+    ) -> Result<bool, JsError> {
         let (tx, rx) = channel();
         if self
             .tx
             .send(Cmd::Dispatch {
                 ty: ty.to_string(),
                 path: path.to_vec(),
+                props: props.to_vec(),
                 tx,
             })
             .is_err()
@@ -1113,16 +1155,17 @@ fn dispatch_event(
     jsd: Option<&explorer_jscore::DomRef>,
     ty: &str,
     path: &[(String, u32)],
+    props: &[(String, EventProp)],
 ) -> Result<bool, JsError> {
     if path.is_empty() {
         return eng
-            .dom_event(ty)
+            .dom_event_props(ty, props)
             .map_err(|t| JsError::Uncaught(eng.describe(t.0)));
     }
     let node = jsd.and_then(|d| mirror_node(&d.borrow(), path));
     match node {
         Some(n) => eng
-            .dom_event_on(ty, n)
+            .dom_event_on_props(ty, n, props)
             .map_err(|t| JsError::Uncaught(eng.describe(t.0))),
         None => Ok(false),
     }

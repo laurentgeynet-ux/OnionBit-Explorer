@@ -47,6 +47,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `stream_raw_deflate_decoded`, `stream_identity_
   passthrough`.
 
+- **Étape 103 — props `KeyboardEvent` plateforme**
+  (`explorer-jscore`/`explorer-js`/`explorer-core`,
+  trigger JS nommé) : les `keydown`/`keyup` dispatchés
+  portaient un objet `Event` nu — `key`/`code`/
+  `keyCode`/`which` lisaient `undefined` pour les
+  handlers clavier réels. `EventProp`
+  (`Str`/`Num`/`Bool`) traverse désormais toute la
+  chaîne : `dispatch_key` (cible = champ focalisé ou
+  document) → `dispatch_path_event_props` →
+  `JsEngine::dispatch_event_props` (défaut :
+  délègue, props perdues sans casse) →
+  `Cmd::Dispatch.props` → `dom_event(_on)_props` →
+  `EventState.props`, servis par `EventHost::get`
+  après les champs natifs. Table `key_code_of` (UI
+  Events) : lettres → `KeyX` + ASCII majuscule,
+  chiffres → `DigitN`, touches nommées (Enter 13,
+  flèches 37-40, F1-F12, modifieurs), ponctuation
+  OEM US ; inconnue → `code` "" / keyCode 0, jamais
+  de panic. `which` = `keyCode`. Le ctor
+  `KeyboardEvent` copie aussi les clés d'init
+  (`key`/`code`/`keyCode`/`which`/`charCode` +
+  modifieurs). Tests : `dom_event_props_reach_
+  listeners`, `dom_event_props_on_document_level`,
+  `keyboard_event_ctor_copies_init_keys`. Mécanisme
+  réutilisable pour `MouseEvent.clientX`…
+
 - **R-67 — `FontCache` `Send`** (`explorer-layout`) :
   `data` `Rc<Vec<u8>>` → `Arc<Vec<u8>>` (tampons immuables
   — `Arc::as_ptr` conserve l'identité des clés
