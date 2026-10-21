@@ -1640,8 +1640,14 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `ops_used()` exposent les compteurs, `Dom::serialize_stats`
   compte appels/octets de `serialize_document`. Tests `c37_*`
   + `serialize_stats_counts_calls_and_bytes`.
-- [ ] **JS-C38. Fuzz lexer/parser `explorer-jscore`** : cible
+- [x] **JS-C38. Fuzz lexer/parser `explorer-jscore`** : cible
   cargo-fuzz (extension de `fuzz/` — périmètre équipe).
+  Livré : `fuzz/fuzz_targets/js.rs` (`cargo fuzz run js`)
+  alimente `eval`/`eval_module`/`module_specifiers` en octets
+  arbitraires, budgets serrés (50 K ops, 32 Mio heap) —
+  contrat « dégrader, jamais paniquer » sous contenu hostile.
+  Smoke déterministe hors nightly : `c38_fuzz_smoke_no_panic`
+  (128 sources hostiles générées par LCG).
 - [ ] **JS-C40. Découpage interne `explorer-jscore`** (audit externe) :
   `builtins.rs` 269 Ko / `interp.rs` 222 Ko — extraire par
   domaine (builtins → `builtins/{object,array,string,…}.rs`,

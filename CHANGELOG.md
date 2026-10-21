@@ -269,6 +269,13 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `Dom::serialize_stats` instrumente le coût de
   resynchronisation `serialize_document` (appels/octets).
   Tests : `c37_*`, `serialize_stats_counts_calls_and_bytes`.
+- **JS-C38 — cible cargo-fuzz du moteur JS** (`fuzz/`) :
+  `fuzz/fuzz_targets/js.rs` alimente `Engine::eval`,
+  `eval_module` et `module_specifiers` en octets arbitraires
+  avec budgets serrés (50 K ops, 32 Mio heap) — le contrat
+  « dégrader, jamais paniquer » est fuzzé sur lexer, parser
+  et évaluateur (ADR-0019). Smoke déterministe sans nightly :
+  `c38_fuzz_smoke_no_panic` (128 sources hostiles par LCG).
 
 ### Fixed
 

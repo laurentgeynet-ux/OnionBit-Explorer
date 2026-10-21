@@ -3122,6 +3122,67 @@ fn c37_mem_limit_zero_is_unlimited() {
         .unwrap_or_else(|err| panic!("{err}"));
 }
 
+// -- JS-C38 : smoke fuzz lexer/parser (la cible cargo-fuzz vit
+// dans `fuzz/fuzz_targets/js.rs` — ici un réducteur déterministe
+// sans nightly) -------------------------------------------------
+
+#[test]
+fn c38_fuzz_smoke_no_panic() {
+    // Fragments syntaxiquement hostiles concaténés par LCG —
+    // le contrat est « dégrader » : `eval`/`eval_module` renvoient
+    // `Err`, jamais de panic.
+    const FRAGS: &[&str] = &[
+        "function f(",
+        "){",
+        "}",
+        "([",
+        "]=>",
+        "'\\u{",
+        "',`",
+        "${",
+        "0x",
+        "1e",
+        "n;",
+        "==",
+        "?.[",
+        "??",
+        "/[a-\\uD800]/",
+        "g;",
+        "for(",
+        ";;){",
+        "class ",
+        "extends{",
+        "static{",
+        "import(",
+        "'m')",
+        "export ",
+        "default",
+        "async*",
+        "yield*",
+        "await",
+        "\\u{110000}",
+        "\\k<x>",
+        "(?<n>a)\\k<n>",
+        "\\8\\9",
+        ")",
+    ];
+    let mut seed: u64 = 0x9E37_79B9;
+    for _ in 0..128 {
+        let mut src = String::new();
+        for _ in 0..8 {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            src.push_str(FRAGS[(seed >> 33) as usize % FRAGS.len()]);
+        }
+        let mut e = Engine::new();
+        e.set_op_limit(20_000);
+        let _ = e.eval(&src);
+        let _ = e.eval_module(&src, "fuzz.js");
+        let _ = explorer_jscore::module_specifiers(&src);
+    }
+}
+
 // -- BigInt (JS-C7) ---------------------------------------------------
 
 /// `ev` renvoyant le bigint affiché en décimal (`describe`).

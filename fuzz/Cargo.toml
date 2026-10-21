@@ -14,6 +14,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 explorer-css = { path = "../crates/explorer-css" }
 explorer-html = { path = "../crates/explorer-html" }
+explorer-jscore = { path = "../crates/explorer-jscore" }
 explorer-net = { path = "../crates/explorer-net" }
 
 [[bin]]
@@ -31,5 +32,11 @@ doc = false
 [[bin]]
 name = "url"
 path = "fuzz_targets/url.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "js"
+path = "fuzz_targets/js.rs"
 test = false
 doc = false
