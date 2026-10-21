@@ -82,10 +82,15 @@ pub(crate) fn bigint_value_of(e: &mut Engine, this: Value, _a: &[Value]) -> JsRe
 }
 
 /// `ToIndex` simplifié : entier ≥ 0 (borné à 2^53-1 implicite f64).
+/// Plafond 1 M de bits — cohérent avec la borne `<<` de `big_binary` ;
+/// sans lui `asIntN(1e30)` allouerait des gigaoctets de limbs (JS-C55).
 pub(crate) fn to_bits(e: &mut Engine, v: Value) -> JsResult<u32> {
     let n = e.to_number(v)?;
     if !n.is_finite() || n < 0.0 || n.fract() != 0.0 {
         return Err(e.range_error("invalid bigint bit width"));
+    }
+    if n > 1_000_000.0 {
+        return Err(e.range_error("bigint bit width too large"));
     }
     Ok(n as u32)
 }
@@ -673,6 +678,9 @@ pub(crate) fn string_repeat(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
     if n < 0.0 || !n.is_finite() {
         return Err(e.range_error("repeat count out of range"));
     }
+    // Garde d'alloc : `'x'.repeat(1e9)` doit refuser, pas avorter
+    // le processus dans l'allocateur (JS-C55).
+    e.alloc_guard(s.len().saturating_mul(n as usize))?;
     Ok(e.str_val(s.repeat(n as usize)))
 }
 
@@ -689,6 +697,9 @@ pub(crate) fn pad(e: &mut Engine, s: &str, args: &[Value], right: bool) -> JsRes
     }
     let need = target - cur;
     let fill_u = u16_view(&fill);
+    // Garde d'alloc : `padStart(2**31)` doit refuser proprement
+    // (JS-C55) — `need` units u16 = 2 octets pièce.
+    e.alloc_guard(need.saturating_mul(2))?;
     let mut pad_units: Vec<u16> = Vec::with_capacity(need);
     while pad_units.len() < need {
         let take = (need - pad_units.len()).min(fill_u.len());

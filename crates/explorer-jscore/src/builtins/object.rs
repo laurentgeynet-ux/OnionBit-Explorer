@@ -420,6 +420,10 @@ pub(crate) fn define_one_prop(
                 if integ & 3 != 0 && n < len {
                     return Err(e.type_error("cannot shrink a sealed array"));
                 }
+                // Garde d'alloc avant densification (JS-C55).
+                if n > len {
+                    e.alloc_guard((n - len).saturating_mul(std::mem::size_of::<Value>()))?;
+                }
                 if let Some(ObjKind::Array(elems)) = e.heap.obj_mut(id).map(|o| &mut o.kind) {
                     elems.resize(n, Value::Hole);
                 }

@@ -76,7 +76,10 @@ fn ab_this(e: &mut Engine, this: Value) -> JsResult<ObjId> {
 /// New `ByteBuf` object of `n` zeroed bytes — les flags spec
 /// `resizable`/`maxByteLength`/`detached` sont portés par des
 /// props propres non énumérables.
-fn new_buffer(e: &mut Engine, n: usize) -> ObjId {
+fn new_buffer(e: &mut Engine, n: usize) -> JsResult<ObjId> {
+    // Garde d'alloc avant `vec![0; n]` : sans elle un `n` hostile
+    // avorte le processus dans l'allocateur (JS-C55).
+    e.alloc_guard(n)?;
     let proto = Value::Obj(e.protos.array_buffer);
     let id = e.heap.alloc_obj(Object {
         proto,
@@ -87,7 +90,7 @@ fn new_buffer(e: &mut Engine, n: usize) -> ObjId {
         args_map: None,
     });
     mark_buffer(e, id, false, n);
-    id
+    Ok(id)
 }
 
 /// Installe les props `resizable`/`maxByteLength`/`detached`
@@ -198,7 +201,7 @@ fn ta_vals(e: &mut Engine, this: Value) -> JsResult<(TaKind, Vec<Value>)> {
 /// Alloue un buffer + view `ta` et écrit `vals` (conversions
 /// `ToNumber`/`ToBigInt` selon le kind — les échecs se propagent).
 fn ta_from_vals(e: &mut Engine, ta: TaKind, vals: &[Value]) -> JsResult<Value> {
-    let bid = new_buffer(e, vals.len() * ta.size());
+    let bid = new_buffer(e, vals.len().saturating_mul(ta.size()))?;
     // Conversion d'abord (le `&mut` du buffer interdit `to_number`).
     let conv = conv_vals(e, ta, vals)?;
     if let Some(b) = e.heap.obj_mut(bid) {
@@ -286,14 +289,17 @@ pub(crate) fn src_vals(e: &mut Engine, src: Value) -> JsResult<Vec<Value>> {
             return Ok(items);
         }
         if let Some(Value::Num(n)) = e.get_prop(id, "length") {
+            e.alloc_guard((n as usize).saturating_mul(std::mem::size_of::<Value>()))?;
             let mut out = Vec::with_capacity(n as usize);
             for i in 0..(n as usize) {
+                e.tick()?;
                 out.push(e.get_prop(id, &i.to_string()).unwrap_or(Value::Undefined));
             }
             return Ok(out);
         }
     }
     if let Value::Num(n) = src {
+        e.alloc_guard((n as usize).saturating_mul(std::mem::size_of::<Value>()))?;
         return Ok(vec![Value::Num(0.0); if n >= 0.0 { n as usize } else { 0 }]);
     }
     Ok(Vec::new())
@@ -523,7 +529,7 @@ fn ab_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         Value::Undefined => 0,
         v => to_index(e, v)?,
     };
-    let id = new_buffer(e, n);
+    let id = new_buffer(e, n)?;
     if let Value::Obj(opts) = arg(args, 1) {
         if let Some(mv) = e.get_prop(opts, "maxByteLength") {
             if !matches!(mv, Value::Undefined) {
@@ -557,6 +563,7 @@ fn ab_resize(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     if n > max {
         return Err(e.range_error("new length exceeds maxByteLength"));
     }
+    e.alloc_guard(n)?;
     if let Some(b) = e.heap.obj_mut(id) {
         if let ObjKind::ByteBuf(bytes) = &mut b.kind {
             bytes.resize(n, 0);
@@ -588,7 +595,7 @@ fn ab_transfer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     } else {
         to_index(e, arg(args, 0))?
     };
-    let nid = new_buffer(e, n.min(bytes.len()));
+    let nid = new_buffer(e, n.min(bytes.len()))?;
     if let Some(b) = e.heap.obj_mut(nid) {
         if let ObjKind::ByteBuf(nb) = &mut b.kind {
             *nb = bytes[..n.min(bytes.len())].to_vec();
@@ -620,7 +627,7 @@ fn ab_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         Some(ObjKind::ByteBuf(b)) => b[s..en].to_vec(),
         _ => Vec::new(),
     };
-    let out = new_buffer(e, data.len());
+    let out = new_buffer(e, data.len())?;
     if let Some(o) = e.heap.obj_mut(out) {
         if let ObjKind::ByteBuf(b) = &mut o.kind {
             *b = data;
@@ -930,7 +937,7 @@ fn ta_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             } else {
                 return Err(e.range_error("invalid typed array length"));
             };
-            let bid = new_buffer(e, len * size);
+            let bid = new_buffer(e, len.saturating_mul(size))?;
             Ok(new_ta(e, ta, bid, 0, len))
         }
         // `new TA(buffer, byteOffset?, length?)` — vue sur buffer.
@@ -1648,6 +1655,7 @@ fn sab_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             _ => None,
         })
         .unwrap_or(Value::Obj(e.protos.array_buffer));
+    e.alloc_guard(n)?; // Garde d'alloc — JS-C55.
     let id = e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
@@ -1689,6 +1697,7 @@ fn sab_grow(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     if n > max {
         return Err(e.range_error("new length exceeds maxByteLength"));
     }
+    e.alloc_guard(n)?;
     if let Some(b) = e.heap.obj_mut(id) {
         if let ObjKind::ByteBuf(bytes) = &mut b.kind {
             bytes.resize(n, 0);

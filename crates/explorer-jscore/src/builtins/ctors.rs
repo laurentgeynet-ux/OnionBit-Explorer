@@ -24,7 +24,10 @@ pub(crate) fn array_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
         if let Value::Num(n) = args[0] {
             if n >= 0.0 && n.fract() == 0.0 {
                 // `Array(n)` crée un tableau *épars* (n trous —
-                // spec `ArrayCreate`), pas n `undefined`.
+                // spec `ArrayCreate`), pas n `undefined`. Garde
+                // d'alloc : `n` hostile doit refuser, pas avorter
+                // le processus (JS-C55).
+                e.alloc_guard((n as usize).saturating_mul(std::mem::size_of::<Value>()))?;
                 return Ok(arr_of(e, vec![Value::Hole; n as usize]));
             }
             return Err(e.range_error("invalid array length"));

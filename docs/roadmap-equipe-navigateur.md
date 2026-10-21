@@ -2097,6 +2097,26 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   masqués par le no-op, les APIs (`dataset`, `innerText`,
   `addEventListener`, NodeList itérable) fonctionnent.
   Test : `query_selector_attr_operators`.
+- [x] **JS-C55. Garde d'allocation hostile `alloc_guard`**
+  (`explorer-jscore`, audit borne/panic) — **livré** :
+  l'audit a mesuré que `vec![x; n]`/`repeat`/`resize` sur un
+  `n` tiré du script **aborte le processus** dans l'allocateur
+  Rust — le `mem_limit` soft n'est relu qu'au `tick` suivant,
+  trop tard (mesure : `new Float64Array(1e10)` ≈ 160 Gio →
+  `STATUS_STACK_BUFFER_OVERRUN` ; `a[4294967295]=1` densifie
+  ~4 Gio×16 ≈ 68 Gio → station saturée). Fix : `Engine::
+  alloc_guard(bytes)` refuse en `RangeError` au-delà de
+  `min(mem_limit, 256 Mio)` — appliqué à `Array(n)`,
+  écriture index/`length` (chemin `[[Set]]` + `defineProperty`),
+  `ArrayBuffer`/`SharedArrayBuffer` (ctor, `resize`, `grow`),
+  `String.repeat`, `padStart/End`, ctors `TA(n)`/array-like.
+  Bonus borne : `big_binary` pow et `to_bits` (`asIntN`)
+  plafonnés à 1 M de bits — `10n ** 1e9n`/`asIntN(1e30)`
+  refusent au lieu d'allouer des Gio de limbs. Tests :
+  `tests/hostile.rs` — 10 batteries par module (string,
+  array, regexp, typed array, json/eval, temporal/intl,
+  bigint/math, proxy, async, DOM) × appels pathologiques —
+  contrat unique « Ok ou Err, jamais panic ».
 
 ## Tâches continues
 

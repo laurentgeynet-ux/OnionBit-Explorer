@@ -1000,6 +1000,12 @@ impl Engine {
                 let Ok(e) = u32::try_from(&b) else {
                     return Err(self.range_error("BigInt exponent too large"));
                 };
+                // Borne le résultat à 1 M de bits (comme `<<`
+                // ci-dessous) — `10n ** 1e9n` produirait des
+                // gigaoctets de limbs sans ce plafond (JS-C55).
+                if e > 0 && a.bits().saturating_mul(u64::from(e)) > 1_000_000 {
+                    return Err(self.range_error("BigInt result too large"));
+                }
                 a.pow(e)
             }
             BinOp::Shl | BinOp::Shr => {

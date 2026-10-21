@@ -1139,6 +1139,29 @@ impl Engine {
         Ok(())
     }
 
+    /// Borne absolue d'une allocation matérialisée (`vec![x; n]`,
+    /// `repeat`, `pad`, `ArrayBuffer`…) — JS-C55. Le `mem_limit`
+    /// soft n'est relu qu'au `tick` : sans garde préalable, un
+    /// `n` hostile (`new Float64Array(1e10)`) ferait avorter le
+    /// processus dans l'allocateur Rust avant tout kill doux.
+    /// 256 Mio couvre tout usage réaliste d'un builtin unique.
+    pub(crate) const MAX_SINGLE_ALLOC: usize = 256 * 1024 * 1024;
+
+    /// Refuse (`RangeError`) une matérialisation de `bytes` octets
+    /// dépassant `min(mem_limit, MAX_SINGLE_ALLOC)` — à appeler
+    /// avant tout `vec![…; n]`/`resize`/`repeat` sur un `n` tiré
+    /// du script. La multiplication est saturante en amont.
+    pub(crate) fn alloc_guard(&mut self, bytes: usize) -> JsResult<()> {
+        let lim = match self.heap.mem_limit() {
+            0 => Self::MAX_SINGLE_ALLOC,
+            m => m.min(Self::MAX_SINGLE_ALLOC),
+        };
+        if bytes > lim {
+            return Err(self.range_error("allocation exceeds engine limits"));
+        }
+        Ok(())
+    }
+
     /// GC opportuniste aux frontières de jobs (JS-C37) : si le
     /// nombre de cellules vivantes dépasse `gc_threshold`, lance
     /// une passe mark-sweep. Jamais appelé pendant une évaluation
@@ -2867,6 +2890,26 @@ impl Engine {
                 self.env_set(&env, &name, v)?;
                 return Ok(true);
             }
+        }
+        // Garde d'alloc AVANT le `&mut` heap : écrire `a[2^32-1]=x`
+        // ou `a.length = 4e9` densifierait le Vec d'éléments (~64
+        // Gio) — `alloc_guard` refuse avant l'allocateur (JS-C55).
+        let grow = match self.heap.obj(id).map(|o| &o.kind) {
+            Some(ObjKind::Array(elems)) => {
+                let need = if key == "length" {
+                    match v {
+                        Value::Num(n) if n >= 0.0 => Some(to_uint32(n) as usize),
+                        _ => None,
+                    }
+                } else {
+                    array_index(key).map(|i| i + 1)
+                };
+                need.and_then(|n| n.checked_sub(elems.len()))
+            }
+            _ => None,
+        };
+        if let Some(d) = grow.filter(|d| *d > 0) {
+            self.alloc_guard(d.saturating_mul(std::mem::size_of::<Value>()))?;
         }
         let Some(o) = self.heap.obj_mut(id) else {
             return Ok(false);

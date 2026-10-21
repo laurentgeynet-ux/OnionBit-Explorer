@@ -416,6 +416,13 @@ impl Heap {
         self.over_mem
     }
 
+    /// Borne mémoire configurée (`0` = illimité) — relue par la
+    /// garde d'allocation `Engine::alloc_guard` pour refuser les
+    /// matérialisations hostiles avant l'allocateur (JS-C55).
+    pub fn mem_limit(&self) -> usize {
+        self.mem_limit
+    }
+
     /// Métriques heap pour embedders/tests (JS-C37).
     pub fn stats(&self) -> HeapStats {
         HeapStats {
