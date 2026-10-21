@@ -1005,13 +1005,34 @@ fn align_lines(st: &ComputedStyle, lines: &mut [LineBox], x: f32, w: f32, fl: &F
 /// (récursif pour les inline imbriqués).
 fn assign_child_rects(bx: &mut LayoutBox, lines: &[LineBox]) {
     for (i, child) in bx.children.iter_mut().enumerate() {
+        // Hors-flux (`absolute`/`fixed`) : aucun fragment émis
+        // — mais `resolve_absolutes` lit `rect` comme position
+        // STATIQUE quand `top`/`left` sont `auto` (§10.6.4 ;
+        // le motif `.a11y-menu` de MDN : `a` absolu seul dans
+        // un `ul` absolu hors-champ ancrait à y=0). Place
+        // hypothétique = fin du dernier fragment d'un enfant
+        // précédent, sinon début de la première ligne, sinon
+        // l'origine du conteneur (aucune ligne en flux).
+        if child.out_of_flow() {
+            let mut pos = None;
+            for line in lines {
+                for f in &line.fragments {
+                    if f.owner < i {
+                        pos = Some((f.rect.x + f.rect.width, line.rect.y));
+                    }
+                }
+            }
+            let (sx, sy) = pos
+                .or_else(|| lines.first().map(|l| (l.rect.x, l.rect.y)))
+                .unwrap_or((bx.rect.x, bx.rect.y));
+            child.rect.x = sx;
+            child.rect.y = sy;
+            continue;
+        }
         // Atome : rect et sous-arbre déjà posés par
         // `assign_atomic_rects` — les indices `owner` de ces
-        // lignes ne parlent pas de son intérieur. Hors-flux
-        // (`absolute`/`fixed`) : aucun fragment émis → union
-        // vide, et sa descendance garde la pose de
-        // `resolve_absolutes`.
-        if is_atomic(child) || child.out_of_flow() {
+        // lignes ne parlent pas de son intérieur.
+        if is_atomic(child) {
             continue;
         }
         let mut union: Option<Rect> = None;

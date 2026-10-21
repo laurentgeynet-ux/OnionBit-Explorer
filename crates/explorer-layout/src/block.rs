@@ -1481,6 +1481,26 @@ fn flow_children(
         }
 
         if kind.is_inline_level() {
+            // Hors-flux d'abord : un enfant en-ligne absolu ne
+            // consomme PAS de ligne — placeholder de position
+            // statique comme les blocs ci-dessous (§10.6.4).
+            if matches!(cst.get("position"), Some("absolute" | "fixed")) {
+                let mut run = prev_margin.unwrap_or_default();
+                run.fold(collapsed_top_margin(
+                    &bx.children[i],
+                    content_w,
+                    cb_h,
+                    fs,
+                    ctx,
+                ));
+                bx.children[i].rect = Rect {
+                    x: content_x,
+                    y: flow_bottom + run.value(),
+                    width: content_w,
+                    height: 0.0,
+                };
+                continue;
+            }
             // Enfant en-ligne direct (hors enveloppe) : une
             // ligne de `line_h` — son haut est l'ancre. La
             // marge en attente est un simple écart (les lignes

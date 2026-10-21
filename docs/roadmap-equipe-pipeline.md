@@ -1498,6 +1498,32 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   un cas `clip-path` — voir R-60 ; le
   motif `.visuallyHidden` reste couvert
   pour les variantes sans 1×1+overflow.
+- [x] **R-60. Position statique des absolus
+  en-ligne** (trouvé en validation terrain
+  R-58 — skip-link MDN visible) — **livré** :
+  un enfant inline `position:absolute|fixed`
+  n'émettait aucun fragment dans le flux
+  en-ligne → `assign_child_rects` ne lui
+  écrivait jamais de rect → `resolve_
+  absolutes` lisait `rect.y=0` et `top:auto`
+  ancrait en haut de page (§10.6.4 violé :
+  sur MDN, les deux `<a>` de `.a11y-menu`
+  peignaient superposés à y≈0 alors que le
+  `ul` absolu vivait à −304 px). Livré :
+  `assign_child_rects` pose désormais le
+  rect hypothétique des enfants hors-flux —
+  fin du dernier fragment d'un owner
+  précédent, sinon début de première ligne,
+  sinon origine du conteneur ; et dans
+  `layout_block`, un enfant inline-level
+  direct hors-flux ne consomme plus de ligne
+  (placeholder statique comme les blocs).
+  Test : `a` abs sans `top` dans `ul` abs à
+  `top:-100px` → suit le conteneur (y≈−100),
+  plus jamais 0. Terrain : les deux liens
+  « Skip to main content »/« Skip to
+  search » du MDN réel ont disparu du shot
+  (diff pixel localisé y18-33).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

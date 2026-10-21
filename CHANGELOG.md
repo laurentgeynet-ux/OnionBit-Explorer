@@ -415,6 +415,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-60 — position statique des absolus en-ligne**
+  (`explorer-layout`) : bug site-réel trouvé en validant
+  R-58 — les skip-links MDN (« Skip to main content » /
+  « Skip to search ») peignaient superposés en haut de page.
+  Un enfant inline `position:absolute|fixed` n'émet aucun
+  fragment en flux → aucun rect écrit → `top:auto` ancrait
+  à y=0 au lieu du haut de son bloc conteneur (§10.6.4).
+  `assign_child_rects` pose désormais le rect hypothétique
+  (fin du fragment d'un owner précédent, sinon première
+  ligne, sinon origine du conteneur) ; `layout_block` ne
+  consomme plus de ligne pour un enfant inline-level
+  hors-flux direct. Terrain : les deux liens du
+  `.a11y-menu` MDN ont disparu du shot.
 - **R-44 — `width` explicite d'un remplacé dans la mesure
   intrinsèque** (`explorer-layout`) : bug site-réel au triage
   `site_smoke` — les 4 icônes sociales de rust-lang.org

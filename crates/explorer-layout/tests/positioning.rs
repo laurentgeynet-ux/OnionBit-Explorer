@@ -384,6 +384,31 @@ fn absolute_bottom_dans_parent_positionne() {
     );
 }
 
+#[test]
+fn absolu_inline_position_statique_du_conteneur() {
+    // R-60 — motif `.a11y-menu` de MDN : un `<a>` inline
+    // `position:absolute` (sans `top`) seul contenu d'un `ul`
+    // absolu placé hors-champ. La position statique de
+    // l'enfant doit suivre son bloc conteneur — avant le
+    // correctif, le flux inline ne lui écrivait aucun rect
+    // → `top:auto` ancrait à y=0 (skip-link peint en haut).
+    let (dom, bx) = laid(
+        "<ul id=m><li><a id=sk href=#x>Skip</a></li></ul><p id=v>vu</p>",
+        "#m{position:absolute;top:-100px;width:100%}
+         #sk{position:absolute;left:0;right:0}",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let sk = find(&bx, by_id(&dom, "sk"));
+    assert!(m.rect.y < -50.0, "conteneur hors-champ : {:?}", m.rect);
+    // `top:auto` → bord haut du contenu du conteneur.
+    assert!(
+        (sk.rect.y - m.rect.y).abs() < 1.0,
+        "l'enfant absolu suit son conteneur : m={:?} sk={:?}",
+        m.rect,
+        sk.rect
+    );
+}
+
 // ---------- métadonnées usées ----------
 
 #[test]
