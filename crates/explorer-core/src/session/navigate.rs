@@ -680,6 +680,7 @@ impl Session {
             fonts: Vec::new(),
             arrival_evals: Vec::new(),
             post_evals: Vec::new(),
+            viewport: self.viewport,
             max_inflight: self.max_inflight,
             max_modules: self.max_modules,
             font_budget: self.max_fonts,

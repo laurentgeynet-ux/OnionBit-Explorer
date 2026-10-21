@@ -631,6 +631,49 @@ async fn invalid_viewport_is_ignored() {
     assert_eq!(s.viewport(), (800.0, 600.0));
 }
 
+/// Étape 94 (demande PIPE→NAV) — les media queries sont
+/// évaluées contre le viewport RÉEL de la session (800×600
+/// ici), pas le `StyleEnv::default()` 1024×768 :
+/// `@media (max-width:900px)` doit matcher à 800px — le bloc
+/// rouge `display:none`'d n'apparaît nulle part au raster.
+#[tokio::test]
+async fn media_query_uses_session_viewport() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head><style>\
+         div { height: 300px; }\
+         #gone { background: #ff0000; }\
+         #stay { background: #00ff00; }\
+         @media (max-width: 900px) { #gone { display: none; } }\
+         </style></head><body>\
+         <div id=gone></div><div id=stay></div>\
+         </body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    let (fw, fh) = (fw as usize, fh as usize);
+    let mut red = 0usize;
+    let mut green = 0usize;
+    for i in 0..fw * fh {
+        let p = &px[i * 4..][..4];
+        if p[0] > 200 && p[1] < 60 && p[2] < 60 {
+            red += 1;
+        }
+        if p[1] > 200 && p[0] < 60 && p[2] < 60 {
+            green += 1;
+        }
+    }
+    // Viewport 800 ≤ 900 : `#gone` masqué, `#stay` visible.
+    assert_eq!(
+        red, 0,
+        "viewport réel 800px : la règle max-width:900 s'applique"
+    );
+    assert!(green > 0, "le bloc hors media query reste peint");
+}
+
 #[tokio::test]
 async fn title_is_extracted_and_title_changed_emitted() {
     let (mut s, t) = test_session();

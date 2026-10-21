@@ -183,7 +183,13 @@ async fn layout(src: &str) -> ExitCode {
             let dom = TreeBuilder::parse(&html);
             let mut eng = explorer_css::StyleEngine::new();
             eng.add_css(&collect_style_css(&dom), explorer_css::Origin::Author);
-            let styles = eng.compute_tree(&dom, dom.document(), &explorer_css::StyleEnv::default());
+            // Media queries évaluées contre le viewport réel
+            // du layout (800px, même constante que plus bas).
+            let env = explorer_css::StyleEnv {
+                width_px: 800,
+                ..explorer_css::StyleEnv::default()
+            };
+            let styles = eng.compute_tree(&dom, dom.document(), &env);
             let Some(root_el) = dom
                 .children(dom.document())
                 .into_iter()

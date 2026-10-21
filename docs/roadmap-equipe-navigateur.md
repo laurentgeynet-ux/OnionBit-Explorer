@@ -1468,6 +1468,25 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Tests : `reload_request_on_failed_post_replays_request`,
   `post_reload_requires_confirm`,
   contrôleur `resubmit_confirm`.
+- [x] **Étape 94. Media queries sur le
+  viewport réel** (demande PIPE→NAV,
+  journal) — `styles_payload`
+  évaluait la cascade avec
+  `StyleEnv::default()` = 1024×768
+  fixe quel que soit le viewport
+  session : à 800px, `max-width:1007`
+  restait faux (BBC `span 8` perdu).
+  Livré : `styles_payload` reçoit
+  `ctx.viewport` → `StyleEnv` réel
+  (reflow complet + relayout
+  incrémental + helper test) ;
+  `SubJob.viewport` recopié à la
+  construction → `@font-face`/`media=`
+  évalués sur le même env ;
+  `cli layout` aligné sur son 800px.
+  Test : `media_query_uses_session_viewport`
+  (raster : le bloc `max-width:900`
+  masqué à 800px).
 
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur

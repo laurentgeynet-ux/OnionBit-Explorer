@@ -9,7 +9,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
-use explorer_css::{FontSrc, Origin, StyleEngine, StyleEnv};
+use explorer_css::{FontSrc, Origin, StyleEngine};
 use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
 use explorer_js::JsEngine;
@@ -411,6 +411,10 @@ pub(crate) struct SubJob {
     /// Modules à évaluer au commit — arrival puis post.
     pub(crate) arrival_evals: Vec<ModEval>,
     pub(crate) post_evals: Vec<ModEval>,
+    /// Viewport session recopié — les media queries
+    /// (`@font-face`/`media=`) s'évaluent contre lui, pas
+    /// le 1024×768 par défaut.
+    pub(crate) viewport: (f32, f32),
     /// Bornes recopiées de la config session.
     pub(crate) max_inflight: usize,
     pub(crate) max_modules: usize,
@@ -526,7 +530,8 @@ impl SubJob {
             linked.push('\n');
         }
         eng.add_css(&linked, Origin::Author);
-        'faces: for face in eng.font_faces(&StyleEnv::default()) {
+        let env = super::apply::viewport_env(self.viewport);
+        'faces: for face in eng.font_faces(&env) {
             if self.fonts.len() >= self.font_budget {
                 break;
             }

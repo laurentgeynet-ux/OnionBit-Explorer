@@ -306,6 +306,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   documenté : la refacto générateurs lazy / continuations
   d'`await` reste conditionnée à un site réel bloquant — une
   panne silencieuse devient attribuable à cet écart.
+- **Étape 94 — media queries évaluées sur le viewport réel**
+  (`explorer-core`, `explorer-cli`) : la cascade de session
+  (`styles_payload`) et la résolution `@font-face`/`media=`
+  (`SubJob::fetch_fonts`) lisaient `StyleEnv::default()` =
+  1024×768 fixe — `max-width`/`min-width` étaient faux dès
+  que le viewport différait (constat PIPE : BBC `span 8`
+  perdu à 800px). Le `StyleEnv` est désormais construit
+  depuis `ctx.viewport`/`SubJob.viewport` ; `cli layout`
+  aligné sur sa largeur de pose (800px).
 
 ### Fixed
 

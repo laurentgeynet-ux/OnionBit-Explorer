@@ -358,7 +358,7 @@ fn try_incr_payload(
         return false;
     };
     let mut sizes = image_sizes(new_dom, &p.images.replaced);
-    let styles = styles_payload(p, new_dom);
+    let styles = styles_payload(p, new_dom, ctx.viewport);
     sizes.extend(explorer_render::svg::svg_sizes(new_dom, root_el));
     let svgs = explorer_render::svg::collect_svg(new_dom, root_el, ctx.image_max_px);
     let block = BlockCtx {
@@ -387,16 +387,33 @@ fn try_incr_payload(
     repaint_payload(p, ctx, None).is_ok()
 }
 
+/// `StyleEnv` dérivé du viewport session (f32 → px entiers,
+/// saturé à `[0, u32::MAX]` — un viewport invalide ne peut
+/// pas produire un env négatif ou absurdement grand).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+// px CSS ≪ 2^32 en pratique — `as` sature déjà.
+pub(crate) fn viewport_env(viewport: (f32, f32)) -> StyleEnv {
+    StyleEnv {
+        width_px: viewport.0.max(0.0).round() as u32,
+        height_px: viewport.1.max(0.0).round() as u32,
+        ..StyleEnv::default()
+    }
+}
+
 /// Cascade + transitions/animations sur payload — la passe
 /// de styles partagée par reflow complet et relayout
 /// incrémental. Écrit `prev_styles`/`transitions`/
 /// `animations` de la payload.
-pub(crate) fn styles_payload(p: &mut PaintPayload, dom: &Dom) -> StyleMap {
+pub(crate) fn styles_payload(p: &mut PaintPayload, dom: &Dom, viewport: (f32, f32)) -> StyleMap {
     let mut eng = StyleEngine::new();
     eng.add_css(MEDIA_UA_CSS, Origin::UserAgent);
     eng.add_css(&collect_style_css(dom), Origin::Author);
     eng.add_css(&p.linked_css, Origin::Author);
-    let mut styles = eng.compute_tree(dom, dom.document(), &StyleEnv::default());
+    // Media queries évaluées contre le viewport RÉEL de la
+    // session (demande PIPE→NAV : `max-width:1007` doit être
+    // vrai à 800px, pas lue sur le 1024×768 par défaut).
+    let env = viewport_env(viewport);
+    let mut styles = eng.compute_tree(dom, dom.document(), &env);
     let ord_of = element_ordinals(dom);
     let raw: HashMap<usize, ComputedStyle> = styles
         .iter()
@@ -426,7 +443,7 @@ pub(crate) fn relayout_dom_payload(
     dom: &Dom,
     canvas_ops: &CanvasOpsTable,
 ) -> Result<(), CoreError> {
-    let styles = styles_payload(p, dom);
+    let styles = styles_payload(p, dom, ctx.viewport);
     let Some(root_el) = dom.document_element() else {
         return Err(CoreError::EmptyDocument);
     };
