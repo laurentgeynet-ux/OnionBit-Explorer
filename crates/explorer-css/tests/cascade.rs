@@ -252,6 +252,74 @@ fn media_query_em_rem_resolus() {
 }
 
 #[test]
+fn media_query_range_mq4() {
+    // R-56 : syntaxe range MQ4 `(width <= N)` — MDN porte tout
+    // son habillage conditionnel en range moderne ; avant, le
+    // `(width <= 1044px)` sans `:` devenait un NOM de condition
+    // inconnu → query fausse → le `display:none` du popup nav
+    // ne s'appliquait pas (menu brut visible) et tout le
+    // styling conditionnel tombait.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@media (width <= 1044px) { div { display: none } } \
+         @media (width > 1044px) { div { margin-top: 9px } }",
+        Origin::Author,
+    );
+    // env par défaut 1024 ≤ 1044 : `none`, pas de marge.
+    let s = e.compute(&f.dom, f.div, &env());
+    assert_eq!(s.get("display"), Some("none"), "1024 ≤ 1044");
+    assert_eq!(s.get("margin-top"), None, "1024 ≯ 1044");
+    // À 1200 > 1044 : inverse.
+    let wide = StyleEnv {
+        width_px: 1200,
+        ..env()
+    };
+    let s = e.compute(&f.dom, f.div, &wide);
+    assert_eq!(s.get("display"), Some("block"));
+    assert_eq!(s.get("margin-top"), Some("9px"));
+    // Bordure stricte : à 1044 exactement — `<=` vrai, `>` faux.
+    let edge = StyleEnv {
+        width_px: 1044,
+        ..env()
+    };
+    let s = e.compute(&f.dom, f.div, &edge);
+    assert_eq!(s.get("display"), Some("none"));
+    assert_eq!(s.get("margin-top"), None);
+}
+
+#[test]
+fn media_query_range_formes_et_collage() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        // Collé (sans espaces) + double borne + `and` + >=.
+        "@media (width<=1044px) { div { color: red } } \
+         @media (400px <= width <= 700px) { p { margin-top: 9px } } \
+         @media (min-width: 600px) and (width >= 900px) { div { display: none } }",
+        Origin::Author,
+    );
+    // env 1024 : collé ✓, borne haute 700 ✗, `and` ≥900 ✓.
+    let s = e.compute(&f.dom, f.div, &env());
+    assert_eq!(s.get("color"), Some("red"), "(width<=1044px) collé");
+    assert_eq!(s.get("display"), Some("none"), "and + >=");
+    assert_eq!(
+        e.compute(&f.dom, f.p, &env()).get("margin-top"),
+        Some("1em"), // retombe sur la feuille UA
+        "1024 > 700 → borne double fausse"
+    );
+    let mid = StyleEnv {
+        width_px: 500,
+        ..env()
+    };
+    assert_eq!(
+        e.compute(&f.dom, f.p, &mid).get("margin-top"),
+        Some("9px"),
+        "500 ∈ [400,700]"
+    );
+}
+
+#[test]
 fn media_negation_et_type() {
     let f = fixture();
     let mut eng = StyleEngine::new();

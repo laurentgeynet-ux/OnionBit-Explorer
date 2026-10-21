@@ -122,6 +122,13 @@ fn condition_matches(env: &StyleEnv, name: &str, value: &str) -> bool {
         "width" => px().is_some_and(|v| (f64::from(env.width_px) - v).abs() < 0.5),
         "min-height" => px().is_some_and(|v| f64::from(env.height_px) >= v),
         "max-height" => px().is_some_and(|v| f64::from(env.height_px) <= v),
+        // R-56 — bornes strictes des ranges MQ4 normalisées
+        // (`(width > N)` / `(width < N)` — la valeur exacte ne
+        // match pas).
+        "gt-width" => px().is_some_and(|v| f64::from(env.width_px) > v),
+        "lt-width" => px().is_some_and(|v| f64::from(env.width_px) < v),
+        "gt-height" => px().is_some_and(|v| f64::from(env.height_px) > v),
+        "lt-height" => px().is_some_and(|v| f64::from(env.height_px) < v),
         "height" => px().is_some_and(|v| (f64::from(env.height_px) - v).abs() < 0.5),
         "orientation" => match value {
             "landscape" => env.width_px >= env.height_px,

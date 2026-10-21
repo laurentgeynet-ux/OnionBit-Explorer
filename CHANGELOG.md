@@ -644,6 +644,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   masqué, seul le carré logo 1rem reste. Tests
   `display.rs` : texte d'inline absolu entre `PushClip` 1px
   et `PopClip` ; `inline-block` déjà juste, verrouillé.
+- **R-56 — media queries range MQ4 `(width <= N)`**
+  (`explorer-css`) : les conditions range sans `:` —
+  `(width <= 1044px)`, `(width > N)`, `(v1 <= width <= v2)`
+  — devenaient un nom de condition inconnu → query fausse.
+  Bug site-réel : tout l'habillage conditionnel de MDN est
+  en syntaxe range — le `display:none` du popup nav sauté
+  (menu brut peint), styles mobile/desktop absents. Livré :
+  `parse_range_condition` normalise en `min-`/`max-`/`gt-`/
+  `lt-` (`>=`≡min, `<=`≡max, stricts exclusifs) — formes
+  `(name op val)`, `(val op name)`, double borne, ops
+  espacés ou collés ; `condition_matches` gagne les bornes
+  strictes `gt-|lt-width|height`. Terrain : shot MDN —
+  popup masqué, cartes grille 2 colonnes, footer 4
+  colonnes. Tests `cascade.rs` : `<=`/`>`/borne exacte,
+  collage, double borne, `and`.
 
 ### Added
 

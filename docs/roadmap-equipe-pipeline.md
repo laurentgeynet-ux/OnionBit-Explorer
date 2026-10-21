@@ -1294,12 +1294,23 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
     le rendu que sur les variantes
     sans dimensionnement+overflow.
     Candidat mineur.
-  - **Reste à diagnostiquer** :
-    titre héros weather.gov
-    débordant (l'écrasement colonne
-    = R-53, livré ; l'étroit MDN =
-    R-54, livré ; le wordmark
-    lobste.rs = R-55, livré).
+  - **Triage soldé** (re-shots
+    post-R-53/54/55 + Étape 96 NAV
+    `<link media>`/`@import`/`max_
+    sheets`) : weather.gov rendu
+    quasi juste (héros, carte
+    alertes, légende, mosaïque —
+    le débord du titre était une
+    conséquence des défauts
+    corrigés) ; lobste.rs header
+    correct (le « carré rouge » est
+    le vrai logo — la barre ombrée
+    n'existe que sous 480px) ; MDN
+    lisible. Limite connue :
+    `display:contents` reste repli
+    `Block` (R-50) ; `clip-path`
+    non implémenté (candidat
+    mineur).
 - [x] **R-52. `mask-image` borne le
   fond (motif icône)** (issu du
   triage — loupe Wikipedia, avatar
@@ -1408,6 +1419,27 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   inline absolu `overflow:hidden` entre `PushClip`
   1px et `PopClip` ; variante `inline-block`
   (contraire — déjà juste, verrouillée).
+- [x] **R-56. Media queries range MQ4
+  `(width <= N)`** (Media Queries §6.4)
+  (triage MDN — nav brut visible, tout le
+  conditionnel tombé) — **livré** : une condition
+  sans `:` comme `(width <= 1044px)` devenait un
+  NOM de condition inconnu → query fausse — tout
+  l'habillage range de MDN sautait (`display:none`
+  du popup nav ignoré → menu brut peint ; styles
+  mobile/desktop absents). Livré :
+  `parse_range_condition` normalise en conditions
+  `min-`/`max-`/`gt-`/`lt-` (`width >= N` ≡
+  `min-width`, `width <= N` ≡ `max-width`,
+  stricts `>`/`<` = bornes exclusives) — formes
+  `(name op val)`, `(val op name)`, double borne
+  `(v1 <= name <= v2)`, ops espacés ou collés.
+  `condition_matches` gagne `gt-|lt-width|height`.
+  Terrain : shot MDN — popup nav masqué
+  (`data-open=false`), cartes en grille 2
+  colonnes, footer 4 colonnes. Tests `cascade.rs` :
+  `<=`/`>`/borne exacte, collage sans espaces,
+  double borne, `and`.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

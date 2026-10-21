@@ -810,9 +810,12 @@ fn parse_one_media(q: &str) -> MediaQuery {
                 Some((n, v)) => mq
                     .conditions
                     .push((n.trim().to_ascii_lowercase(), v.trim().to_string())),
-                None => mq
-                    .conditions
-                    .push((inner_trim.to_ascii_lowercase(), String::new())),
+                None => match parse_range_condition(inner_trim) {
+                    Some(conds) => mq.conditions.extend(conds),
+                    None => mq
+                        .conditions
+                        .push((inner_trim.to_ascii_lowercase(), String::new())),
+                },
             }
             rest = rest[depth_end + 1..].trim_start();
         } else {
@@ -830,6 +833,82 @@ fn parse_one_media(q: &str) -> MediaQuery {
         }
     }
     mq
+}
+
+/// Forme range MQ4 `(feature <op> valeur)` ou
+/// `(valeur <op> feature <op> valeur)` — normalisée en
+/// conditions `(min-/max-/gt-/lt-)` que `condition_matches`
+/// évalue. `width >= N` ≡ `min-width`, `width <= N` ≡
+/// `max-width` ; `>`/`<` stricts ont leurs noms propres
+/// (`gt-*`/`lt-*` — la borne exacte ne match pas).
+/// `None` = pas une range → le texte brut reste un nom de
+/// condition inconnu (évalué faux — tolérance existante).
+fn parse_range_condition(inner: &str) -> Option<Vec<(String, String)>> {
+    // Découpe en morceaux non-espace, chacun tranché sur les
+    // transitions opérateur/valeur (`width<=1044px` collé est
+    // légal), puis fusionne les runs d'opérateurs adjacents
+    // (`<` `=` espacés → `<=`).
+    let is_op = |s: &str| s.chars().all(|c| matches!(c, '<' | '>' | '='));
+    let mut toks: Vec<String> = Vec::new();
+    let drain = |toks: &mut Vec<String>, cur: &mut String| {
+        if cur.is_empty() {
+            return;
+        }
+        if is_op(cur) && toks.last().is_some_and(|p| is_op(p)) {
+            toks.last_mut().unwrap().push_str(cur);
+        } else {
+            toks.push(std::mem::take(cur));
+        }
+        cur.clear();
+    };
+    for piece in inner.split_whitespace() {
+        let mut cur = String::new();
+        let mut in_operator = piece
+            .chars()
+            .next()
+            .is_some_and(|c| matches!(c, '<' | '>' | '='));
+        for c in piece.chars() {
+            if matches!(c, '<' | '>' | '=') != in_operator {
+                drain(&mut toks, &mut cur);
+                in_operator = !in_operator;
+            }
+            cur.push(c);
+        }
+        drain(&mut toks, &mut cur);
+    }
+    let is_name = |t: &String| t.chars().next().is_some_and(char::is_alphabetic);
+    let rev = |op: &str| -> &'static str {
+        match op {
+            ">" => "<",
+            "<" => ">",
+            ">=" => "<=",
+            "<=" => ">=",
+            _ => "",
+        }
+    };
+    let cond_of = |name: &str, op: &str, val: &str| -> Option<(String, String)> {
+        let n = name.to_ascii_lowercase();
+        let v = val.trim().to_string();
+        match op {
+            ">=" => Some((format!("min-{n}"), v)),
+            "<=" => Some((format!("max-{n}"), v)),
+            ">" => Some((format!("gt-{n}"), v)),
+            "<" => Some((format!("lt-{n}"), v)),
+            "=" => Some((n, v)),
+            _ => None,
+        }
+    };
+    match toks.as_slice() {
+        // `(width >= 1044px)` / `(width = x)` / `(1044px <= width)`
+        [a, op, b] if is_name(a) => cond_of(a, op, b).map(|c| vec![c]),
+        [a, op, b] if is_name(b) => cond_of(b, rev(op), a).map(|c| vec![c]),
+        // `(400px <= width <= 1044px)` — les deux bornes.
+        [v1, o1, n, o2, v2] if is_name(n) => match (cond_of(n, rev(o1), v1), cond_of(n, o2, v2)) {
+            (Some(a), Some(b)) => Some(vec![a, b]),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Index de la `)` qui ferme la `(` en tête de `s` (`s[0]` == '(').
