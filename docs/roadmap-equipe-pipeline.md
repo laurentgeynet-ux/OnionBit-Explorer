@@ -1518,6 +1518,25 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `layout_block`, un enfant inline-level
   direct hors-flux ne consomme plus de ligne
   (placeholder statique comme les blocs).
+- [x] **R-61. `merge_rects` linéaire**
+  (dette journal NAV 55g — diff dégénéré
+  ~8 500 rects ≈ 2 s) — **livré** : balayage
+  trié par `x` — un rect ne se compare
+  qu'aux composantes encore ouvertes
+  horizontalement (compaction amortie des
+  fermées) — puis consolidation bornée en
+  point fixe sur les C ≪ k survivantes
+  (une union qui a grossi vers la gauche
+  peut rejoindre une voisine déjà fermée).
+  O(k log k + k·ouvertes) typique vs O(k²)
+  avant ; 5 000 rects chaînés < 1 s en
+  debug. Bonus corrigé : l'ancienne passe
+  unique n'atteignait jamais le point fixe
+  qu'elle annonçait (union tardive pouvant
+  rejoindre un rect déjà passé) — la
+  consolidation le réalise désormais
+  vraiment ; couverture identique, la
+  partition rapportée peut fusionner plus.
   Test : `a` abs sans `top` dans `ul` abs à
   `top:-100px` → suit le conteneur (y≈−100),
   plus jamais 0. Terrain : les deux liens

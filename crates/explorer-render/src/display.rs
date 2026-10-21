@@ -537,22 +537,81 @@ fn rect_union(a: Rect, b: Rect) -> Rect {
     }
 }
 
-/// Fusionne les rects qui se chevauchent (point fixe) — borne
-/// le nombre de zones rapportées sans perdre de couverture.
+/// Fusionne les rects qui se chevauchent — balayage trié
+/// par `x` (un rect ne se compare qu'aux composantes encore
+/// ouvertes horizontalement) puis consolidation bornée en
+/// point fixe. O(k log k + k·ouvertes + C²·passes) avec
+/// C ≪ k, au lieu du O(k²) historique (mesuré ~2 s sur
+/// ~8 500 rects d'un diff dégénéré, dette journal NAV 55g).
+/// Couverture identique ; la partition peut fusionner
+/// davantage que la passe unique d'avant (qui n'atteignait
+/// pas le point fixe qu'elle annonçait).
 fn merge_rects(rects: &mut Vec<Rect>) {
-    let mut i = 0;
-    while i < rects.len() {
-        let mut j = i + 1;
-        while j < rects.len() {
-            if rect_intersect(rects[i], rects[j]).is_some() {
-                rects[i] = rect_union(rects[i], rects[j]);
-                rects.swap_remove(j);
-            } else {
-                j += 1;
+    if rects.len() < 2 {
+        return;
+    }
+    let mut order = std::mem::take(rects);
+    order.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+    let mut comps: Vec<Rect> = Vec::new();
+    for r in order {
+        let mut hits: Vec<usize> = Vec::new();
+        let mut dead = 0usize;
+        for (i, c) in comps.iter().enumerate() {
+            if c.x + c.width < r.x {
+                // Fermée : aucun rect futur (triés par x) ne
+                // peut la toucher — marquée pour compaction.
+                dead += 1;
+                continue;
+            }
+            if r.y < c.y + c.height && c.y < r.y + r.height {
+                hits.push(i);
             }
         }
-        i += 1;
+        match hits.split_first() {
+            None => comps.push(r),
+            Some((&first, rest)) => {
+                let mut bb = rect_union(comps[first], r);
+                // `r` relie plusieurs composantes → elles
+                // fusionnent dans `first` (retrait en index
+                // décroissant : les suivants restent valides).
+                for &i in rest.iter().rev() {
+                    bb = rect_union(bb, comps[i]);
+                    comps[i] = comps[comps.len() - 1];
+                    comps.pop();
+                }
+                comps[first] = bb;
+            }
+        }
+        // Compaction amortie : purge les composantes fermées
+        // quand elles dominent — borne le balayage courant.
+        if comps.len() > 64 && dead * 2 >= comps.len() {
+            comps.retain(|c| c.x + c.width >= r.x);
+        }
     }
+    // Consolidation : une composante qui a grossi vers la
+    // gauche peut encore chevaucher une voisine fermée.
+    // Point fixe borné sur les C ≪ k survivantes.
+    for _ in 0..4 {
+        let mut merged = false;
+        let mut i = 0;
+        while i < comps.len() {
+            let mut j = i + 1;
+            while j < comps.len() {
+                if rect_intersect(comps[i], comps[j]).is_some() {
+                    comps[i] = rect_union(comps[i], comps[j]);
+                    comps.swap_remove(j);
+                    merged = true;
+                } else {
+                    j += 1;
+                }
+            }
+            i += 1;
+        }
+        if !merged {
+            break;
+        }
+    }
+    *rects = comps;
 }
 
 /// Construit la display list d'un arbre posé — pur,
@@ -2600,5 +2659,72 @@ fn paint_box<'a>(
     }
     if tf.is_some() {
         items.push(DisplayItem::PopTransform);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{merge_rects, rect_union};
+    use explorer_layout::Rect;
+    use std::time::Instant;
+
+    fn r(x: f32, y: f32, w: f32, h: f32) -> Rect {
+        Rect {
+            x,
+            y,
+            width: w,
+            height: h,
+        }
+    }
+
+    /// Aucun rect ne chevauche `a` directement, mais `b ∪ c`
+    /// le couvre — l'ancienne passe unique laissait `a`
+    /// séparé (jamais de point fixe).
+    #[test]
+    fn merge_point_fixe_pont_bbox() {
+        let mut v = vec![
+            r(0.0, 0.0, 10.0, 10.0),
+            r(0.0, 15.0, 30.0, 5.0),
+            r(20.0, 0.0, 10.0, 16.0),
+        ];
+        merge_rects(&mut v);
+        assert_eq!(v.len(), 1);
+        let u = v[0];
+        assert_eq!((u.x, u.y, u.width, u.height), (0.0, 0.0, 30.0, 20.0));
+    }
+
+    #[test]
+    fn merge_preserve_la_couverture() {
+        let src = [
+            r(0.0, 0.0, 5.0, 5.0),
+            r(4.0, 4.0, 5.0, 5.0),
+            r(40.0, 0.0, 8.0, 8.0),
+            r(40.0, 8.0, 8.0, 8.0),
+            r(0.0, 40.0, 4.0, 4.0),
+        ];
+        let total = src.iter().copied().reduce(rect_union);
+        let mut v = src.to_vec();
+        merge_rects(&mut v);
+        let merged = v.iter().copied().reduce(rect_union);
+        assert_eq!(merged, total);
+        // Disjoints non chaînés : jamais de fusion abusive.
+        assert!(v.len() <= src.len());
+    }
+
+    /// Le diff dégénéré journalisé par NAV : ~5 000 rects en
+    /// chaîne diagonale — l'ancien O(k²) coûtait ~2 s sur
+    /// ~8 500 ; le balayage doit rester très en deçà.
+    #[test]
+    fn merge_degenere_reste_rapide() {
+        let mut v: Vec<Rect> = (0..5_000_u16)
+            .map(|i| r(f32::from(i) * 8.0, (f32::from(i) * 8.0) % 600.0, 20.0, 20.0))
+            .collect();
+        let t0 = Instant::now();
+        merge_rects(&mut v);
+        assert!(
+            t0.elapsed().as_secs() < 2,
+            "merge_rects trop lent : {:?}",
+            t0.elapsed()
+        );
     }
 }
