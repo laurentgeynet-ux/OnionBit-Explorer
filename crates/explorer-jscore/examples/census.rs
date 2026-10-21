@@ -4,7 +4,7 @@
 //! couverture — jamais un test : la sortie est un rapport, le code
 //! de sortie reste 0.
 //!
-//! Usage : `cargo run -p explorer-jscore --example census -- <page.html> [--extra x.js …] [--dump-scripts dir]`
+//! Usage : `cargo run -p explorer-jscore --example census -- <page.html> [--extra x.js …] [--module m.js …] [--dump-scripts dir]`
 //!
 //! - `<script src>` sont listés (pas fetchés — le crate est
 //!   autonome) ; `--extra` évalue un fichier JS local à la fin,
@@ -108,6 +108,7 @@ fn main() {
     let mut path = None;
     let mut dump_dir = None;
     let mut extras = Vec::new();
+    let mut module_extras = Vec::new();
     let mut probes = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -116,6 +117,15 @@ fn main() {
             "--extra" => {
                 if let Some(p) = args.next() {
                     extras.push(p);
+                }
+            }
+            // Bundle ES module sauvegardé — les `<script
+            // type=module src>` ne sont jamais fetchés ici ;
+            // ce flag les rejoue via `eval_module` (lobste.rs
+            // `application.js` en est un).
+            "--module" => {
+                if let Some(p) = args.next() {
+                    module_extras.push(p);
                 }
             }
             "--probe" => {
@@ -128,7 +138,7 @@ fn main() {
         }
     }
     let Some(path) = path else {
-        eprintln!("usage: census <page.html> [--extra x.js] [--dump-scripts dir]");
+        eprintln!("usage: census <page.html> [--extra x.js] [--module m.js] [--dump-scripts dir]");
         std::process::exit(2);
     };
 
@@ -280,6 +290,23 @@ fn main() {
             Ok(code) => {
                 let label = format!("[extra {path}] {}B", code.len());
                 eval(&mut engine, &code, &label, &mut counts);
+            }
+            Err(e) => eprintln!("census: cannot read {path}: {e}"),
+        }
+    }
+
+    for path in &module_extras {
+        match std::fs::read_to_string(path) {
+            Ok(code) => {
+                let label = format!("[module {path}] {}B", code.len());
+                match engine.eval_module(&code, path) {
+                    Ok(_) => println!("{label}: ok"),
+                    Err(e) => {
+                        let s = e.to_string();
+                        *counts.entry(signature(&s)).or_default() += 1;
+                        println!("{label}: {s}");
+                    }
+                }
             }
             Err(e) => eprintln!("census: cannot read {path}: {e}"),
         }

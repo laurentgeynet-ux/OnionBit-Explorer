@@ -1445,3 +1445,68 @@ async fn tab_mem_inventory() {
     });
     eprintln!("-- fin");
 }
+
+/// Sonde JS terrain (plan NAV) — reproduit les `TypeError`
+/// observés sur lobste.rs réel et attache chaque
+/// `PipelineError` à l'API manquante ; mesure au passage
+/// `dom_sync_stats`/`heap_stats` (JS-C37/39) en conditions
+/// réelles — les instruments n'ont pas encore servi en vol.
+///
+/// `LOBSTE_PROBE_URL=https://lobste.rs/ cargo test -p
+/// explorer-core --lib lobste_pipeline_errors -- --ignored
+/// --nocapture`
+#[tokio::test]
+#[ignore = "sonde réseau réel — diagnostic JS terrain manuel"]
+async fn lobste_pipeline_errors() {
+    use explorer_net::{
+        decode::DecodingTransport, h1::HttpConfig, h2::AutoClient, policy::RedirectTransport,
+        tls::TlsConnector,
+    };
+    let tls = Arc::new(TlsConnector::web_roots());
+    let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
+    let decoded: Arc<dyn HttpTransport> = Arc::new(DecodingTransport::wrap(h1, 16 * 1024 * 1024));
+    let transport: Arc<dyn HttpTransport> = Arc::new(RedirectTransport::wrap(decoded, 8));
+    let mut s = Session::new(transport, Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let mut rx = s.subscribe();
+    let tab = s.open_tab();
+    let url = std::env::var("LOBSTE_PROBE_URL").unwrap_or_else(|_| "https://lobste.rs/".into());
+    s.navigate(tab, &url).await.unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let mut errors = Vec::new();
+    loop {
+        while let Ok(ev) = rx.try_recv() {
+            if let CoreEvent::PipelineError { message, .. } = ev {
+                errors.push(message);
+            }
+        }
+        s.pump_net().await;
+        s.pump_timers(tab);
+        if s.drain_script_nav(tab).await > 0 {
+            continue;
+        }
+        let idle = s.net_pending() == 0 && s.next_timer_deadline().is_none();
+        if idle || std::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    while let Ok(ev) = rx.try_recv() {
+        if let CoreEvent::PipelineError { message, .. } = ev {
+            errors.push(message);
+        }
+    }
+    eprintln!("-- {url} : {} PipelineError", errors.len());
+    for (i, m) in errors.iter().enumerate() {
+        eprintln!("  [{i}] {m}");
+    }
+    let e = s.tabs.get_mut(&tab).unwrap();
+    if let Some(eng) = e.js.as_mut() {
+        if let Some(st) = eng.dom_sync_stats() {
+            eprintln!("dom_sync_stats: {st:?}");
+        }
+        if let Some(st) = eng.heap_stats() {
+            eprintln!("heap_stats: {st:?}");
+        }
+    }
+}
