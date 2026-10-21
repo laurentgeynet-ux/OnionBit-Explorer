@@ -1386,6 +1386,9 @@ async fn tab_mem_inventory() {
     );
     // Quantification `--*` : le part soupçonné de l'inflation
     // ComputedStyle (héritage par copie plate des custom props).
+    // R-57 : la table est `Arc`-partagée — les chiffres
+    // ci-dessous sont **logiques** (entrées itérées × taille),
+    // le physique est lu sur les drops RSS plus bas.
     let (mut var_entries, mut var_bytes, mut all_entries, mut all_bytes) =
         (0usize, 0usize, 0usize, 0usize);
     for st in e.prev_styles.values() {
@@ -1400,7 +1403,7 @@ async fn tab_mem_inventory() {
     }
     let (te, tb, ve, vb) = (all_entries, all_bytes, var_entries, var_bytes);
     eprintln!(
-        "prev_styles props: {te} entrées / {} Mio dont --* : {ve} / {} Mio",
+        "prev_styles props: {te} entrées / {} Mio dont --* : {ve} / {} Mio (logique — Arc-partagé)",
         tb / 1_048_576,
         vb / 1_048_576
     );
@@ -1408,7 +1411,11 @@ async fn tab_mem_inventory() {
     if let Some(t) = e.tree.as_ref() {
         style_vars(t, &mut acc);
     }
-    eprintln!("tree --* : {} entrées / {} Mio", acc.0, acc.1 / 1_048_576);
+    eprintln!(
+        "tree --* : {} entrées / {} Mio (logique — Arc-partagé)",
+        acc.0,
+        acc.1 / 1_048_576
+    );
     // Bissection par champs — RSS auto-mesuré à chaque drop
     // (Windows rend les gros blocs VirtualAlloc → la chute
     // désigne le coupable ; les petits blocs restent dans le tas).
