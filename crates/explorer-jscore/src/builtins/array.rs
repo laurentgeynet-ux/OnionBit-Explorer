@@ -74,12 +74,22 @@ pub(crate) fn array_join(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
     };
     let elems = take_elems(e, id);
     let mut parts = Vec::with_capacity(elems.len());
-    for v in &elems {
+    // `parts` et la sortie `join` sont des String natifs hors
+    // compteur du heap — la taille cumulée est gardée en cours
+    // de route (JS-C55 : `Array(1e6).fill('x'.repeat(100)).join()`
+    // materialiserait ~200 Mio d'un coup).
+    let mut total = sep.len().saturating_mul(elems.len().saturating_sub(1));
+    for (i, v) in elems.iter().enumerate() {
         parts.push(match v {
             Value::Undefined | Value::Null | Value::Hole => String::new(),
             _ => e.to_js_string(*v)?,
         });
+        total = total.saturating_add(parts.last().map_or(0, String::len));
+        if i % 4096 == 0 {
+            e.alloc_guard(total)?;
+        }
     }
+    e.alloc_guard(total)?;
     put_elems(e, id, elems);
     Ok(e.str_val(parts.join(&sep)))
 }
@@ -172,14 +182,20 @@ pub(crate) fn array_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
         };
         if spread {
             // Lecture via `length` + `Get` par indice (sous-classes,
-            // array-likes et proxies traversés, spec).
+            // array-likes et proxies traversés, spec). `length`
+            // hostile d'un array-like (`{length:1e9}`) : plafond
+            // cohérent avec `array_from` + tick périodique — la
+            // boucle de `Get` tourne sinon sans borne (JS-C55).
             let len = match e.get_prop_value(*a, "length")? {
-                Value::Num(n) => n.max(0.0) as usize,
+                Value::Num(n) => (n.max(0.0) as usize).min(1_000_000),
                 _ => 0,
             };
             for i in 0..len {
                 let v = e.get_prop_value(*a, &i.to_string())?;
                 out.push(v);
+                if i % 8192 == 0 {
+                    e.tick()?;
+                }
             }
         } else {
             out.push(*a);
@@ -219,25 +235,56 @@ pub(crate) fn array_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         put_elems(e, id, elems);
         return Err(e.type_error("cannot sort a frozen array"));
     }
-    // Insertion sort — page scripts sort small arrays, and this keeps
-    // the fallible comparator simple.
-    for i in 1..elems.len() {
-        let mut j = i;
-        while j > 0 {
-            let swap = if use_cmp {
-                let r = e.call_value(cmp, Value::Undefined, &[elems[j - 1], elems[j]])?;
-                e.to_number(r)? > 0.0
-            } else {
-                let a = e.to_js_string(elems[j - 1])?;
-                let b = e.to_js_string(elems[j])?;
-                a > b
-            };
-            if !swap {
-                break;
+    if use_cmp {
+        // Merge sort itératif, stable — comparateur script faillible.
+        // L'insertion sort O(n²) gelait le moteur dès ~10^5 éléments
+        // hostiles (JS-C55).
+        let n = elems.len();
+        let mut buf = elems.clone();
+        let mut width = 1;
+        while width < n {
+            let mut i = 0;
+            while i < n {
+                let m = (i + width).min(n);
+                let r = (i + 2 * width).min(n);
+                let (mut a, mut b, mut k) = (i, m, i);
+                while a < m && b < r {
+                    let cr = e.call_value(cmp, Value::Undefined, &[elems[a], elems[b]])?;
+                    let take_right = e.to_number(cr)? > 0.0;
+                    if take_right {
+                        buf[k] = elems[b];
+                        b += 1;
+                    } else {
+                        buf[k] = elems[a];
+                        a += 1;
+                    }
+                    k += 1;
+                }
+                while a < m {
+                    buf[k] = elems[a];
+                    a += 1;
+                    k += 1;
+                }
+                while b < r {
+                    buf[k] = elems[b];
+                    b += 1;
+                    k += 1;
+                }
+                i += 2 * width;
             }
-            elems.swap(j - 1, j);
-            j -= 1;
+            std::mem::swap(&mut elems, &mut buf);
+            width *= 2;
         }
+    } else {
+        // Clés string matérialisées une fois par élément (spec
+        // ToString-une-fois) puis tri Rust O(n log n) — l'insertion
+        // sort O(n²) appelait `to_js_string` par comparaison (JS-C55).
+        let mut keyed: Vec<(String, Value)> = Vec::with_capacity(elems.len());
+        for &v in &elems {
+            keyed.push((e.to_js_string(v)?, v));
+        }
+        keyed.sort_by(|a, b| a.0.cmp(&b.0));
+        elems = keyed.into_iter().map(|(_, v)| v).collect();
     }
     put_elems(e, id, elems);
     Ok(this)
@@ -256,6 +303,9 @@ pub(crate) fn array_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsR
             continue; // `forEach` saute les trous (spec).
         }
         e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?;
+        if i % 8192 == 0 {
+            e.tick()?; // cb native : ops-limit relu ici (JS-C55)
+        }
     }
     put_elems(e, id, elems);
     Ok(Value::Undefined)
@@ -278,6 +328,9 @@ pub(crate) fn array_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         } else {
             e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?
         });
+        if i % 8192 == 0 {
+            e.tick()?;
+        }
     }
     put_elems(e, id, elems);
     let a_v = species_array(e, this, out.len())?;
@@ -303,6 +356,9 @@ pub(crate) fn array_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
         let keep = e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?;
         if e.to_boolean(keep) {
             out.push(*v);
+        }
+        if i % 8192 == 0 {
+            e.tick()?;
         }
     }
     put_elems(e, id, elems);
@@ -338,6 +394,9 @@ pub(crate) fn array_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
             continue;
         }
         acc = e.call_value(cb, Value::Undefined, &[acc, *v, Value::Num(i as f64), this])?;
+        if i % 8192 == 0 {
+            e.tick()?;
+        }
     }
     put_elems(e, id, elems);
     Ok(acc)

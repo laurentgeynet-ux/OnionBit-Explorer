@@ -2127,7 +2127,11 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `is_attached`/`mark_dirty_at`) et `common_ancestor` en
   HashSet (le 200 k niveaux `innerHTML` pendait >60 s,
   maintenant ~4 s) ; combinatoire descendant plafonné à
-  64 parties. Tests : `tests/hostile.rs` — 12 batteries par module
+  64 parties. Passe `builtins/array` : `sort` O(n²)→O(n log n)
+  (merge itératif + clés matérialisées), `join` gardé sur
+  taille cumulée native, `concat`/`forEach`/`map`/`filter`/
+  `reduce` bornés (cap `length` 1e6 + tick). Tests :
+  `tests/hostile.rs` — 12 batteries par module
   (string, array, regexp, typed array, json/eval,
   temporal/intl, bigint/math, proxy, async, DOM, profondeur)
   × appels pathologiques — contrat unique « Ok ou Err,

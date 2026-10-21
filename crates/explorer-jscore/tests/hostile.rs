@@ -134,6 +134,14 @@ fn hostile_array() {
             "var a=[]; a.push(a); structuredClone(a).length",
             "var a=[]; a.push(a); JSON.stringify(a)",
             "var a=[]; a.push(a); a.includes(a)",
+            // Matérialisations massives / boucles non bornées (JS-C55).
+            "var a=[]; for(var i=0;i<1e5;i++)a.push(i); a.sort()",
+            "var a=[]; for(var i=0;i<5e4;i++)a.push(i); a.sort(function(x,y){return y-x})",
+            "[].concat({length: 1e9, 0: 1})",
+            "[].concat({length: 5e5}).length",
+            "var a=[]; for(var i=0;i<1e4;i++)a.push('x'.repeat(50)); a.join('')",
+            "var a=[]; for(var i=0;i<2e4;i++)a.push(i); a.map(String).join('|')",
+            "var a=[]; for(var i=0;i<1e5;i++)a.push(i); a.filter(function(x){return x%3==0}).length",
         ],
     );
 }
