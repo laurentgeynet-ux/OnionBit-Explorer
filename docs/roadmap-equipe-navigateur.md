@@ -407,11 +407,15 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   respire entre deux peintures. Les synchros d'événements
   restent immédiates ; la saisie (pushes d'attributs) est
   toujours rejouée. Régression :
-  `pump_resync_coalesced_under_floor`. Reste PIPE : coût
-  unitaire de l'apply (`relayout_subtree` dominant) —
-  chaque fenêtre de coalescence agrandit le delta
-  accumulé, mais la cadence reste bornée par le coût
-  unitaire (journal `interface-equipes.md`).
+  `pump_resync_coalesced_under_floor`. Coût unitaire
+  **attribué → R-65** (`FontCache` froid par apply —
+  `with_font_cache`/`take_font_cache` livrés). Reste :
+  transplantation NAV bloquée — `FontCache` est `!Send`
+  (`Rc` dans `data`) et `PaintPayload` migre en
+  `spawn_blocking` ; demande `Rc`→`Arc` au journal
+  (précédent `GlyphCache`/`Arc<OwnedFace>`). Re-mesure
+  `sync_profile` à l'atterrissage ; reliquat éventuel :
+  `abs_geometry`→`shrink`.
 - [x] **Étape 56. Profil persisté complet** (ex-64) : cookies
   (`cookies.json` via `ProfileStore`, session exclus),
   localStorage (cf. 51), **cache disque borné**
