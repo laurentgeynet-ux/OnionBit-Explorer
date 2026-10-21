@@ -802,20 +802,36 @@ fn parse_one_media(q: &str) -> MediaQuery {
             break;
         }
         if let Some(inner) = rest.strip_prefix('(') {
-            // Condition `(name : value)` ou `(name)`.
+            // Condition `(name : value)` ou `(name)` — ou
+            // `(not (…))`, facteur nié MQ4 (R-64, corpus
+            // lobste.rs `dark-normal`).
             let depth_end = find_matching_paren(rest);
             let inner = &inner[..depth_end.min(inner.len())];
             let inner_trim = inner.trim_end_matches(')').trim();
-            match inner_trim.split_once(':') {
-                Some((n, v)) => mq
-                    .conditions
-                    .push((n.trim().to_ascii_lowercase(), v.trim().to_string())),
-                None => match parse_range_condition(inner_trim) {
-                    Some(conds) => mq.conditions.extend(conds),
-                    None => mq
-                        .conditions
-                        .push((inner_trim.to_ascii_lowercase(), String::new())),
-                },
+            let negated = inner_trim
+                .get(..3)
+                .is_some_and(|w| w.eq_ignore_ascii_case("not"))
+                && inner_trim.get(3..4).is_some_and(|c| c == " " || c == "(");
+            if negated {
+                // `(not (f:v))` ou `(not f:v)` toléré — le
+                // `not` interne est porté par le nom de
+                // condition (`not-<feature>`, évalué nié).
+                let n_inner = inner_trim[3..].trim();
+                let n_trim = n_inner
+                    .strip_prefix('(')
+                    .map_or(n_inner, |s| s.trim_end_matches(')'))
+                    .trim();
+                match parse_media_condition(n_trim).as_slice() {
+                    [(n, v)] => mq.conditions.push((format!("not-{n}"), v.clone())),
+                    // Corps multi-conditions (double borne
+                    // range, `and` interne) : non exprimable
+                    // en conditions jointes par AND — nom
+                    // inconnu → « feature absente » → nié vrai
+                    // (tolérance documentée, cas rare).
+                    _ => mq.conditions.push((format!("not-{n_trim}"), String::new())),
+                }
+            } else {
+                mq.conditions.extend(parse_media_condition(inner_trim));
             }
             rest = rest[depth_end + 1..].trim_start();
         } else {
@@ -833,6 +849,19 @@ fn parse_one_media(q: &str) -> MediaQuery {
         }
     }
     mq
+}
+
+/// Une condition `(name : value)`, `(name)` ou forme range
+/// MQ4 — normalisée en paires `(name, value)` que
+/// `condition_matches` évalue (ranges → `min-/max-/gt-/lt-`).
+fn parse_media_condition(inner_trim: &str) -> Vec<(String, String)> {
+    match inner_trim.split_once(':') {
+        Some((n, v)) => vec![(n.trim().to_ascii_lowercase(), v.trim().to_string())],
+        None => match parse_range_condition(inner_trim) {
+            Some(conds) => conds,
+            None => vec![(inner_trim.to_ascii_lowercase(), String::new())],
+        },
+    }
 }
 
 /// Forme range MQ4 `(feature <op> valeur)` ou

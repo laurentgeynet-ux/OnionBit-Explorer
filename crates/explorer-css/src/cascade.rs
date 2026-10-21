@@ -105,6 +105,13 @@ fn query_matches(env: &StyleEnv, q: &MediaQuery) -> bool {
 /// `em`/`rem` y sont résolus contre la font-size INITIALE
 /// (spec MQ4 — jamais le `:root` calculé) : `env.font_size_base`.
 fn condition_matches(env: &StyleEnv, name: &str, value: &str) -> bool {
+    // Facteur nié `(not (f:v))` — encodé `not-<feature>` au
+    // parsing (R-64). Un corps `not` non résoluble en une
+    // seule condition reste une feature inconnue → fausse →
+    // niée vraie (tolérance « absente de cet env »).
+    if let Some(pos) = name.strip_prefix("not-") {
+        return !condition_matches(env, pos, value);
+    }
     let px = || -> Option<f64> {
         let v = value.trim();
         // Ordre : `rem` avant `em`, `vmin`/`vmax` avant

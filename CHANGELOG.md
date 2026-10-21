@@ -9,6 +9,46 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-64 — `not` en parens MQ4** (`explorer-css`) :
+  `(not (f:v))` et `(not f:v)` sont normalisés en condition
+  `not-<feature>` évaluée niée — trigger terrain Étape 97 :
+  lobste.rs chaîne `(prefers-color-scheme: dark) and
+  (not (prefers-contrast: more))` sur `dark-normal.css`,
+  le `not` interne devenait un nom inconnu qui tuait toute
+  la query même en env Dark. Corps `not` multi-conditions
+  (double borne, `and` interne) → « feature absente » →
+  nié vrai (tolérance documentée) ; `or` imbriqué reste
+  conditionné. Le shim NAV `media_attr_matches` hérite du
+  fix via `media_matches`.
+- **Étape 97 — moitié NAV du thème sombre**
+  (`explorer-core`/`explorer-api`/`explorer-daemon`/
+  `explorer-ffi`/app) : `SessionConfig.color_scheme`
+  (`ColorScheme` R-59 — `Light` défaut, `Dark`) recopié
+  sur `Session`, propagé à `viewport_env` (media queries,
+  filtre `media=` des `<link>`/`@import`, défauts UA
+  sombres de la cascade) via `SubJob`/`ApplyCtx`.
+  `Session::set_color_scheme` bascule en vol — le
+  `rerender` re-cascade sur le nouvel env (même modèle que
+  `set_viewport`). REST `POST /api/tabs/{id}/color-scheme`
+  `{scheme: "dark"|"light"}` + re-render immédiat ; daemon
+  `EXPLORER_COLOR_SCHEME` ; FFI `explorer_set_color_scheme`
+  (export additif — dll ancienne : no-op) ; app :
+  `AppSettings.theme` (`dark`/`light`/`system` résolu sur
+  `PlatformDispatcher.platformBrightness`, changements OS
+  suivis via `onPlatformBrightnessChanged`) poussé au
+  bootstrap et au changement de réglage. Tests :
+  `color_scheme_dark_active_prefers_dark` (bascule runtime
+  → `prefers-color-scheme:dark` peint),
+  `link_prefers_color_scheme_dark_selects_variant`
+  (variante lobste.rs : `dark-normal` fetchée,
+  `light-normal` filtrée en env dark),
+  `color_scheme_accepts_dark_rejects_junk` (REST).
+  **Gap révélé par la validation terrain** : les
+  `@import (cond) and (not (cond2))` de `system-system.css`
+  — `not` imbriqué MQ4 non géré par `parse_one_media`
+  (journal → PIPE) ; `dark-normal.css` de lobste.rs reste
+  donc filtrée à tort, en attente du fix parseur.
+
 - **R-63 — cascade scopée au sous-arbre** (`explorer-css`) :
   `StyleEngine::compute_scoped(dom, root, env, parent)` +
   `compute_scoped_with_state` re-stylent le seul sous-arbre

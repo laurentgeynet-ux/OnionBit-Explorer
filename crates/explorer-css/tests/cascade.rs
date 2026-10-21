@@ -1163,3 +1163,59 @@ fn apply_scoped_remplace_et_purge_les_pseudos() {
     map.remove(p);
     assert!(map.get(p).is_none());
 }
+
+// ── R-64 : `(not (f:v))` facteur nié en parens MQ4 ───────────
+
+#[test]
+fn media_not_parens_lobste_dark_normal() {
+    // Repro terrain Étape 97 : lobste.rs chaîne
+    // `(prefers-color-scheme: dark) and
+    //  (not (prefers-contrast: more))` sur `dark-normal.css`
+    // — l'intérieur `not (…)` devenait un nom inconnu → la
+    // query entière échouait même en env Dark.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@media (prefers-color-scheme: dark) and (not (prefers-contrast: more)) \
+         { div { color: red } }",
+        Origin::Author,
+    );
+    let dark = StyleEnv {
+        color_scheme: explorer_css::ColorScheme::Dark,
+        ..env()
+    };
+    assert_eq!(
+        e.compute(&f.dom, f.div, &dark).get("color"),
+        Some("red"),
+        "env dark → dark-normal s'applique"
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("color"),
+        None,
+        "env light → query sautée"
+    );
+}
+
+#[test]
+fn media_not_parens_formes() {
+    let f = fixture();
+    // Feature connue niée : `(not (min-width:400px))` à
+    // 1024 px de large (env()) → faux → rien.
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@media (not (min-width:400px)) { div { color: red } } \
+         @media (not (min-width:2000px)) { div { margin-top: 9px } } \
+         @media (not (400px <= width <= 700px)) { div { display: none } }",
+        Origin::Author,
+    );
+    let s = e.compute(&f.dom, f.div, &env());
+    assert_eq!(s.get("color"), None, "min-width:400 nié à 1024");
+    assert_eq!(
+        s.get("margin-top"),
+        Some("9px"),
+        "min-width:2000 nié à 1024 → vrai"
+    );
+    // Corps non résoluble (double borne) → « feature
+    // absente » → nié vrai (tolérance documentée).
+    assert_eq!(s.get("display"), Some("none"), "double borne niée → vrai");
+}

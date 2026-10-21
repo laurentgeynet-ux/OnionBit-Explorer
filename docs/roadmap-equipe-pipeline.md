@@ -1580,6 +1580,26 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   sur le sous-arbre, `--*` + sélecteur
   ancêtre traversant le scope, splice +
   purge pseudo + `remove`.
+- [x] **R-64. `not` en parens MQ4**
+  (trigger terrain Étape 97 — lobste.rs
+  `dark-normal.css` filtrée à tort) —
+  **livré** : `(not (f:v))`/`(not f:v)`
+  → condition `not-<feature>` évaluée
+  niée dans `condition_matches` ; le
+  parse est factorisé en
+  `parse_media_condition` partagé. Corps
+  `not` multi-conditions (double borne
+  range, `and` interne) non exprimable en
+  AND joint → nom inconnu → « feature
+  absente » → nié vrai (tolérance
+  documentée) ; `or` imbriqué reste
+  conditionné, jamais panic. Le shim NAV
+  `media_attr_matches` hérite du fix via
+  `media_matches` — `dark-normal.css`
+  se charge désormais en env Dark.
+  Tests : repro lobste.rs (dark applique,
+  light saute), feature connue niée dans
+  les deux sens, double borne tolérante.
   Test : `a` abs sans `top` dans `ul` abs à
   `top:-100px` → suit le conteneur (y≈−100),
   plus jamais 0. Terrain : les deux liens
