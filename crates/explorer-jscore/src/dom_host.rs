@@ -559,6 +559,13 @@ impl Engine {
         let Some((dom, _)) = self.dom_ctx.clone() else {
             return Ok(false);
         };
+        // JS-C35 : ces événements marquent la fin du chargement —
+        // le document se ferme avant que les listeners ne courent,
+        // un `document.write` dedans rouvrira donc en effaçant la
+        // page (spec `document open steps`).
+        if matches!(ty, "DOMContentLoaded" | "load") {
+            dom.borrow_mut().doc_open = false;
+        }
         let target = dom.borrow().body();
         self.dom_event_on(ty, target)
     }
@@ -1149,11 +1156,49 @@ impl Host for DocumentHost {
                     state: st,
                 }))))
             }
-            // document.write during parse is upstream's semantic;
-            // here it appends a fragment to <body>.
-            "write" | "writeln" => {
-                let s = e.to_js_string(arg(args, 0))?;
+            // `document.open()` — spec `document open steps` :
+            // le contenu est effacé et le document redevient
+            // « ouvert » aux `write` suivants. Valeur de retour
+            // spec : `undefined` (V8 rend le document — le nôtre
+            // reste simple).
+            "open" => {
                 let mut d = self.dom.borrow_mut();
+                let root = d.root;
+                d.replace_children(root, &[]);
+                d.doc_open = true;
+                Ok(Some(Value::Undefined))
+            }
+            // `document.close()` — ferme le flux d'écriture ; un
+            // `write` ultérieur rouvrira implicitement (effacement
+            // du contenu — spec).
+            "close" => {
+                self.dom.borrow_mut().doc_open = false;
+                Ok(Some(Value::Undefined))
+            }
+            // `document.write(…)`/`writeln(…)` — variadique (tous
+            // les arguments concaténés, spec), `writeln` ajoute le
+            // `\n`. Pendant le chargement (`doc_open`) le fragment
+            // s'ajoute à `<body>` — l'insertion au point du parseur
+            // relève de l'amont ; sur document fermé l'`open()`
+            // implicite efface d'abord le contenu (spec) — le
+            // `document.write` post-`load` qui remplace la page.
+            // Les `<script>` écrits restent inertes dans le miroir :
+            // l'ordonnancement est celui de l'étape 50 (la
+            // re-sérialisation les fait découvrir côté hôte).
+            "write" | "writeln" => {
+                let mut s = String::new();
+                for a in args {
+                    s.push_str(&e.to_js_string(*a)?);
+                }
+                if name == "writeln" {
+                    s.push('\n');
+                }
+                let mut d = self.dom.borrow_mut();
+                if !d.doc_open {
+                    let root = d.root;
+                    d.replace_children(root, &[]);
+                    d.doc_open = true;
+                }
                 let body = d.body();
                 d.parse_fragment_into(body, &s);
                 Ok(Some(Value::Undefined))

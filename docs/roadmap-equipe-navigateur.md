@@ -1536,8 +1536,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `#[ignore]` documenté) — sinon la panne silencieuse sur un
   site n'est pas attribuable à cet écart et le trigger ne
   peut pas tirer.
-- [ ] **JS-C35. `document.write` complet + insertion dynamique**
-  — ordre cohérent avec le scheduler de l'étape 50.
+- [x] **JS-C35. `document.write` complet + insertion dynamique**
+  (miroir) — **livré** : `write`/`writeln` variadiques
+  (concat de tous les args, `\n` pour `writeln`),
+  `document.open()`/`close()` et le flag `Dom.doc_open` —
+  ouvert pendant le chargement, fermé par `close()` ou la
+  distribution de `DOMContentLoaded`/`load` ; `write` sur
+  document fermé = `open()` implicite (contenu effacé
+  d'abord — spec `document open steps`). Correctif en
+  route : `Dom::by_id` n'accepte que les nœuds rattachés —
+  `remove`/`open` ne ressortent plus par `getElementById`.
+  Écart : `<script>` écrits inertes dans le miroir —
+  l'ordonnancement revient au scheduler amont (étape 50),
+  qui les découvre à la re-sérialisation.
   *Déclencheur : insertion dynamique constatée sur sites
   réels.*
 

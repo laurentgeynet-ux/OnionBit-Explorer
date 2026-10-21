@@ -470,6 +470,13 @@ pub struct Dom {
     /// `oldValue` est déjà filtrée par observer à l'enfilage ;
     /// drainée au microtask checkpoint.
     mutations: Vec<(u64, MutationRecord)>,
+    /// « Document ouvert à l'écriture » (JS-C35) — `true` tant
+    /// que la page se charge : `document.write`/`writeln` y
+    /// ajoutent à `<body>`. `document.close()` ou la
+    /// distribution de `DOMContentLoaded`/`load` le ferme ; un
+    /// `write` sur document fermé rouvre implicitement en
+    /// effaçant le contenu d'abord (spec `document open steps`).
+    pub doc_open: bool,
 }
 
 impl Default for Dom {
@@ -493,6 +500,7 @@ impl Dom {
             media: HashMap::new(),
             media_cmds: Vec::new(),
             canvas_op_limit: DEFAULT_CANVAS_OP_LIMIT,
+            doc_open: true,
         };
         d.root = d.alloc(NodeKind::Element, "#document");
         d
@@ -1143,13 +1151,38 @@ impl Dom {
             .collect()
     }
 
-    /// `getElementById` — first match, document order.
+    /// `getElementById` — first match, document order. Seuls les
+    /// nœuds **rattachés** au document comptent (JS-C35) : un
+    /// élément `remove()`d ou effacé par `document.open()` n'est
+    /// plus trouvable (spec — la recherche couvre l'arbre du
+    /// document, pas l'arène).
     #[must_use]
     pub fn by_id(&self, id: &str) -> Option<NodeId> {
         self.nodes
             .iter()
-            .position(|n| n.kind == NodeKind::Element && Self::attr_val(n, "id") == Some(id))
-            .map(|i| i as NodeId)
+            .enumerate()
+            .find(|(i, n)| {
+                n.kind == NodeKind::Element
+                    && Self::attr_val(n, "id") == Some(id)
+                    && self.is_attached(*i as NodeId)
+            })
+            .map(|(i, _)| i as NodeId)
+    }
+
+    /// Le nœud remonte à `root` — les nœuds détachés
+    /// (`remove`, effacement `document.open`) sont invisibles
+    /// aux requêtes au niveau document.
+    fn is_attached(&self, node: NodeId) -> bool {
+        let mut cur = node;
+        loop {
+            if cur == self.root {
+                return true;
+            }
+            match self.nodes.get(cur as usize).and_then(|n| n.parent) {
+                Some(p) => cur = p,
+                None => return false,
+            }
+        }
     }
 
     fn attr_val<'a>(n: &'a Node, name: &str) -> Option<&'a str> {

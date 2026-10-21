@@ -72,6 +72,76 @@ fn document_write_appends_to_body() {
     );
 }
 
+// -- JS-C35 : document.write complet ---------------------------------
+
+#[test]
+fn document_write_is_variadic() {
+    // Spec : tous les arguments sont concaténés — auparavant seul
+    // le premier était écrit.
+    assert_eq!(
+        ev("document.write('<i>a</i>', '<i>b</i>'); document.getElementsByTagName('i').length"),
+        "2"
+    );
+}
+
+#[test]
+fn document_writeln_appends_newline() {
+    assert_eq!(
+        ev("document.writeln('<p>w</p>'); document.body.innerHTML.indexOf('\\n') >= 0"),
+        "true"
+    );
+}
+
+#[test]
+fn document_open_erases_then_writes() {
+    // open() efface le document (spec `document open steps`) —
+    // les `write` suivants reconstruisent.
+    assert_eq!(
+        ev("document.open(); document.write('<p>n</p>'); \
+            String(document.getElementById('main')) + ',' + \
+            document.querySelector('p').textContent"),
+        "null,n"
+    );
+}
+
+#[test]
+fn document_write_on_closed_replaces_page() {
+    // `write` sur document fermé = open() implicite : le contenu
+    // existant est effacé d'abord (spec — le piège classique
+    // post-load).
+    assert_eq!(
+        ev("document.close(); document.write('<div id=n>x</div>'); \
+            String(document.getElementById('main')) + ',' + \
+            document.getElementById('n').textContent"),
+        "null,x"
+    );
+}
+
+#[test]
+fn document_write_inside_load_listener_replaces() {
+    // `load` ferme le flux avant que les listeners ne courent :
+    // un `write` dedans efface la page (spec).
+    let mut e = engine_with(PAGE);
+    e.eval("document.addEventListener('load', function() { document.write('<i>post</i>') })")
+        .expect("listener install");
+    e.dom_event("load").expect("dispatch");
+    let v = e
+        .eval("String(document.getElementById('main')) + ',' + document.getElementsByTagName('i').length")
+        .expect("probe");
+    assert_eq!(e.describe(v), "null,1");
+}
+
+#[test]
+fn document_written_script_stays_inert() {
+    // Un `<script>` écrit n'exécute pas dans le miroir —
+    // l'ordonnancement revient à l'amont (étape 50), qui le
+    // découvre à la re-sérialisation.
+    assert_eq!(
+        ev("document.write('<script>window.__t = 1</' + 'script>'); typeof window.__t"),
+        "undefined"
+    );
+}
+
 #[test]
 fn navigator_is_fixed_and_poor() {
     assert_eq!(ev("navigator.userAgent"), "Explorer/0.1 (explorer-jscore)");

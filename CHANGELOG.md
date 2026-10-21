@@ -193,6 +193,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   census.rs` porté (compte-rendu d'erreurs de pages réelles).
   Sens inverse vérifié : JS-C46, JS-C45 et la vague JS-C26+
   étaient déjà Explorer-only — `src/dom.rs` reste canonique.
+- **JS-C35 — `document.write` complet + insertion dynamique**
+  (`explorer-jscore`, miroir) : `write`/`writeln` deviennent
+  variadiques (concaténation de tous les arguments, `\n`
+  terminal pour `writeln` — spec) ; `document.open()`/
+  `close()` existent et pilotent le flag `Dom.doc_open`
+  — ouvert pendant le chargement, fermé par `close()` ou
+  la distribution de `DOMContentLoaded`/`load` ; un `write`
+  sur document fermé fait l'`open()` implicite : le contenu
+  est effacé puis reconstruit (spec `document open steps` —
+  le `document.write` post-`load` qui remplace la page).
+  Correctif découvert en route : `Dom::by_id` exclut les
+  nœuds détachés — un élément `remove()`d ou effacé par
+  `open()` ne ressort plus par `getElementById`. Écart
+  documenté : les `<script>` écrits restent inertes dans le
+  miroir — l'ordonnancement revient au scheduler amont
+  (étape 50), qui les découvre à la re-sérialisation.
 
 ### Fixed
 
