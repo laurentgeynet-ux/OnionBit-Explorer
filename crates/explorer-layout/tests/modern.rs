@@ -534,6 +534,44 @@ fn grid_lignes_nommees() {
 }
 
 #[test]
+fn grid_ident_nu_resout_start_end() {
+    // R-54 : `grid-column: content` (ident nu, §8.5) résout
+    // vers les lignes implicites `[content-start]`/
+    // `[content-end]` — le squelette de page MDN
+    // (`grid-template-columns: var(--layout-*)` +
+    // `.homepage > * { grid-column: content }`) retombait en
+    // auto-placement → contenu écrasé à ~une piste.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div>X</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: [a] 32px [full-start] 1fr [content-start] \
+         minmax(0,300px) [content-end] 1fr [z] 32px } \
+         section > div { grid-column: content; height: 10px }",
+    );
+    let d = find(&bx, by_tag(&dom, "section")).children[0].clone();
+    // Piste content = minmax(0,300px) → x = 32 + (800-364)/2
+    // = 250, largeur 300.
+    assert!(approx(d.rect.x, 250.0), "x={}", d.rect.x);
+    assert!(approx(d.rect.width, 300.0), "w={}", d.rect.width);
+}
+
+#[test]
+fn grid_ident_nu_forme_deux_idents() {
+    // `content / z` : début `-start`, fin `-end` implicites.
+    let (dom, bx) = laid(
+        "<!doctype html><section><div>X</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: [a-start] 100px [a-end] 50px \
+         [b-start] 100px [b-end] } \
+         section > div { grid-column: a / b; height: 10px }",
+    );
+    let d = find(&bx, by_tag(&dom, "section")).children[0].clone();
+    // a-start→b-end : de 0 à 250 (ident nu → span entière).
+    assert!(approx(d.rect.x, 0.0), "x={}", d.rect.x);
+    assert!(approx(d.rect.width, 250.0), "w={}", d.rect.width);
+}
+
+#[test]
 fn grid_auto_flow_column() {
     // `column` : remplit les lignes d'une colonne avant de
     // passer à la suivante (ici 2 lignes → items 0,1 en col 0).

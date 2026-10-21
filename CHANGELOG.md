@@ -588,6 +588,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   largeur, légende 4 colonnes lisible. Tests `block.rs` :
   `width:100%` = 400 du conteneur + descente sous le voisin,
   `width:50%` = 200 en ligne.
+- **R-54 — `grid-column:<ident>` résout `-start`/`-end`
+  implicites** (`explorer-layout`) : CSS Grid §8.5 — le match
+  des noms de lignes était exact ; un ident nu comme
+  `grid-column: content` avec `[content-start]`/`[content-end]`
+  définis retombait en auto-placement (squelette MDN
+  `var(--layout-*)` + `.homepage > *{grid-column:content}` →
+  cartes écrasées à ~115px). Livré : repli `<ident>-start`
+  côté début / `<ident>-end` côté fin ; ident seul → span
+  bornée par `<ident>-end` quand elle existe. Terrain :
+  cartes featured/latest-news/contributions en pleine
+  colonne `content`. Tests `modern.rs` : ident nu sur piste
+  minmax, forme `a / b` sur lignes implicites.
 
 ### Added
 

@@ -150,13 +150,28 @@ fn parse_tracks(raw: &str, fs: f32, ctx: &BlockCtx, cb: f32) -> (Vec<Track>, Lin
 /// `grid-column`/`grid-row` → `(début 0-based, span)` —
 /// `a`, `a / b`, `a / span n`, `span n`, **noms de lignes**
 /// (`mid / end` via `[mid]`… dans le template). `None` =
-/// auto.
+/// auto. §8.5 : un ident nu hors correspondance exacte
+/// résout `<ident>-start` côté début / `<ident>-end` côté
+/// fin (`grid-column: content` couvre ainsi la piste
+/// `[content-start]…[content-end]` — squelette MDN).
 fn placement(raw: Option<&str>, names: &[(String, usize)]) -> (Option<usize>, usize) {
     let Some(raw) = raw else {
         return (None, 1);
     };
     let parts: Vec<&str> = raw.split('/').map(str::trim).collect();
-    let one = |s: &str| -> (Option<usize>, Option<usize>) {
+    // Nom de ligne déclaré via `[name]` dans le template,
+    // avec repli `<name>-start`/`<name>-end` implicite.
+    let named_line = |s: &str, suffix: &str| -> Option<usize> {
+        names
+            .iter()
+            .find(|(n, _)| n == s)
+            .or_else(|| {
+                let suffixed = format!("{s}{suffix}");
+                names.iter().find(|(n, _)| *n == suffixed)
+            })
+            .map(|(_, line)| *line)
+    };
+    let one = |s: &str, suffix: &str| -> (Option<usize>, Option<usize>) {
         let s = s.trim();
         if let Some(n) = s.strip_prefix("span ").and_then(|v| v.trim().parse().ok()) {
             return (None, Some(n));
@@ -164,15 +179,27 @@ fn placement(raw: Option<&str>, names: &[(String, usize)]) -> (Option<usize>, us
         if let Ok(v) = s.parse::<usize>() {
             return (v.checked_sub(1), None);
         }
-        // Nom de ligne déclaré via `[name]` dans le template.
-        let by_name = names.iter().find(|(n, _)| n == s).map(|(_, line)| *line);
-        (by_name, None)
+        (named_line(s, suffix), None)
     };
-    let (a0, s0) = one(parts.first().copied().unwrap_or(""));
+    let (a0, s0) = one(parts.first().copied().unwrap_or(""), "-start");
     if parts.len() == 1 {
+        // Ident nu résolu : `<ident>-end` borne la span si
+        // la ligne existe (sinon span 1 — comportement inchangé).
+        if let (Some(start), None) = (a0, s0) {
+            if parts[0].chars().next().is_some_and(|c| !c.is_ascii_digit())
+                && !parts[0].starts_with("span ")
+            {
+                let end_key = format!("{}-end", parts[0].trim());
+                if let Some(end) = names.iter().find(|(n, _)| *n == end_key) {
+                    if end.1 > start {
+                        return (Some(start), end.1 - start);
+                    }
+                }
+            }
+        }
         return (a0, s0.unwrap_or(1));
     }
-    let (b0, s1) = one(parts[1]);
+    let (b0, s1) = one(parts[1], "-end");
     let span = s1.or(s0).unwrap_or_else(|| match (a0, b0) {
         (Some(a), Some(b)) if b > a => b - a,
         _ => 1,

@@ -1366,6 +1366,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   du conteneur (pas 300 de bande) et
   descente sous le voisin ; `width:50%`
   = 200, reste en ligne à x=100.
+- [x] **R-54. `grid-column:<ident>`
+  résout `-start`/`-end` implicites**
+  (CSS Grid §8.5) (triage MDN — cartes
+  featured à ~115px) — **livré** :
+  `placement` faisait un match exact
+  des noms de lignes — `grid-column:
+  content` avec `[content-start]`/
+  `[content-end]` définis retombait en
+  auto-placement (le squelette MDN
+  `grid-template-columns:var(--layout-*)`
+  + `.homepage > *{grid-column:content}`
+  plaçait chaque enfant en piste 0).
+  Livré : ident nu → repli `<ident>
+  -start` côté début / `<ident>-end`
+  côté fin ; ident seul → span bornée
+  par `<ident>-end` si présente.
+  Terrain : cartes featured + latest
+  news + contributions en pleine
+  colonne `content` (minmax(0,72rem))
+  — lisibles. Tests `modern.rs` :
+  ident nu `content` couvre la piste
+  minmax, forme `a / b` sur
+  `a-start`/`b-end`.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
