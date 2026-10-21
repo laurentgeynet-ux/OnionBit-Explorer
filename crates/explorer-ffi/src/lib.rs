@@ -397,6 +397,30 @@ pub unsafe extern "C" fn explorer_set_viewport(
     }
 }
 
+/// Bascule le schéma de couleurs propagé à `StyleEnv`
+/// (étape 97) : `0` = `light`, `1` = `dark`. Le re-render
+/// des onglets chargés suit le même modèle que
+/// [`explorer_set_viewport`] — `explorer_tick` le produit
+/// à la prochaine sonde.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_set_color_scheme(h: *mut ExplorerHandle, dark: i32) -> i32 {
+    match unsafe { handle(h) } {
+        Some(h) => {
+            h.session.set_color_scheme(if dark == 0 {
+                explorer_core::ColorScheme::Light
+            } else {
+                explorer_core::ColorScheme::Dark
+            });
+            0
+        }
+        None => -1,
+    }
+}
+
 /// Genre d'entrée pour [`explorer_input`].
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]

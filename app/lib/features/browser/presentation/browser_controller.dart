@@ -367,6 +367,10 @@ class BrowserController extends Notifier<BrowserState> {
   /// que la bannière affirmait « daemon absent ».
   Timer? _daemonRetry;
 
+  /// Callback brightness OS pour `theme: 'system'` (étape 97)
+  /// — désenregistré au dispose.
+  VoidCallback? _brightnessListener;
+
   /// Dépôt capturé dans `build` — `ref` est invalide après un
   /// `await`, les lectures post-build passent par ce champ.
   late final BrowserRepository _repo;
@@ -399,6 +403,27 @@ class BrowserController extends Notifier<BrowserState> {
     _playerFactory = ref.read(mediaPlayerFactoryProvider);
     ref.onDispose(() => _daemonRetry?.cancel());
     ref.onDispose(_releaseAllPlayers);
+    // Étape 97 — `AppSettings.theme` propagé au moteur :
+    // `dark`/`light` directs, `system` suit la brightness OS
+    // (changements inclus via `onPlatformBrightnessChanged`).
+    ref.listen(settingsProvider.select((s) => s.theme), (_, _) {
+      unawaited(_pushColorScheme());
+    });
+    // `PlatformDispatcher.instance` (dart:ui) est accessible
+    // sans `WidgetsBinding` — le notifier vit aussi dans les
+    // tests unitaires purs (ProviderContainer seul).
+    final dispatcher = ui.PlatformDispatcher.instance;
+    _brightnessListener = () {
+      if (ref.read(settingsProvider).theme == 'system') {
+        unawaited(_pushColorScheme());
+      }
+    };
+    dispatcher.onPlatformBrightnessChanged = _brightnessListener;
+    ref.onDispose(() {
+      if (dispatcher.onPlatformBrightnessChanged == _brightnessListener) {
+        dispatcher.onPlatformBrightnessChanged = null;
+      }
+    });
     if (_repo is FfiEngine) {
       // Pas de SSE in-process : la sondage d'animations porte
       // l'invalidation ; les actions tirent leur frame au
@@ -453,6 +478,9 @@ class BrowserController extends Notifier<BrowserState> {
         // l'erreur persistante est purgée (étape 88).
         lastError: () => null,
       );
+      // Réglage courant poussé au moteur neuf (étape 97 —
+      // l'env session démarre `light` sinon).
+      unawaited(_pushColorScheme());
       // Réconciliation à froid : les offres émises avant la
       // reconnexion SSE sont récupérées par `GET …/media`.
       for (final t in tabs) {
@@ -1010,6 +1038,29 @@ class BrowserController extends Notifier<BrowserState> {
       await _repo.setViewport(id, w, h, scale);
     } on ApiException catch (e) {
       state = state.copyWith(lastError: () => e.message);
+    }
+  }
+
+  /// Schéma de couleurs effectif (`'dark'`/`'light'`) —
+  /// `system` résolu sur la brightness OS courante (étape 97).
+  String _effectiveScheme() {
+    final theme = ref.read(settingsProvider).theme;
+    if (theme == 'dark' || theme == 'light') return theme;
+    final b = ui.PlatformDispatcher.instance.platformBrightness;
+    return b == Brightness.dark ? 'dark' : 'light';
+  }
+
+  /// Pousse le schéma effectif au moteur puis retire la
+  /// frame de l'onglet actif (le backend re-render déjà,
+  /// REST ; en FFI la re-peinture arrive au prochain tick).
+  Future<void> _pushColorScheme() async {
+    final id = state.activeId;
+    if (id == null) return;
+    try {
+      await _repo.setColorScheme(id, _effectiveScheme());
+      unawaited(_pullFrame(id));
+    } on Object {
+      // Daemon injoignable → prochain appui/nav réessaie.
     }
   }
 

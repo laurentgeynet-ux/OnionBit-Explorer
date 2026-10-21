@@ -118,6 +118,10 @@ class FakeRepo implements BrowserRepository {
   ) async => actions.add('viewport:${w.toInt()}x${h.toInt()}');
 
   @override
+  Future<void> setColorScheme(String tabId, String scheme) async =>
+      actions.add('scheme:$tabId:$scheme');
+
+  @override
   Future<List<Bookmark>> bookmarks() async => List.of(marks);
 
   @override

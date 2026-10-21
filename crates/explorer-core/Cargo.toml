@@ -36,6 +36,9 @@ image.workspace = true
 async-trait.workspace = true
 criterion.workspace = true
 explorer-test-support.workspace = true
+# Sondes terrain `lobste_pipeline_errors` : `sync_profile` par
+# stderr pour localiser les phases lentes sur sites réels.
+tracing-subscriber.workspace = true
 
 [[bench]]
 name = "pipeline"

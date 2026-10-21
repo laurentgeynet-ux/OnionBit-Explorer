@@ -109,6 +109,16 @@ class BrowserRepository {
         body: {'w': w, 'h': h, 'scale': scale},
       );
 
+  /// Schéma de couleurs préféré (`POST …/color-scheme`,
+  /// étape 97) — `'dark'`/`'light'` propagé à `StyleEnv`
+  /// (`prefers-color-scheme` + défauts UA). Réglage
+  /// session-level : le serveur repeint l'onglet nommé.
+  Future<void> setColorScheme(String tabId, String scheme) =>
+      _api.postJson(
+        '/api/tabs/$tabId/color-scheme',
+        body: {'scheme': scheme},
+      );
+
   // ------------------------------------------------------------------
   // Bibliothèque — signets + historique du store moteur (étape 57).
   // ------------------------------------------------------------------

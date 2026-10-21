@@ -1464,40 +1464,107 @@ async fn tab_mem_inventory() {
 /// --nocapture`
 #[tokio::test]
 #[ignore = "sonde réseau réel — diagnostic JS terrain manuel"]
+#[allow(clippy::too_many_lines)]
 async fn lobste_pipeline_errors() {
     use explorer_net::{
         decode::DecodingTransport, h1::HttpConfig, h2::AutoClient, policy::RedirectTransport,
         tls::TlsConnector,
     };
+    // Espion des URLs réellement demandées — la preuve
+    // terrain du filtre `media=` (étape 96/97) : avec
+    // `LOBSTE_PROBE_SCHEME=dark`, `dark-normal.css` doit
+    // apparaître au lieu de `light-normal.css`.
+    struct UrlSpy {
+        inner: Arc<dyn HttpTransport>,
+        seen: std::sync::Mutex<Vec<String>>,
+        t0: std::time::Instant,
+    }
+    #[async_trait::async_trait]
+    impl HttpTransport for UrlSpy {
+        async fn fetch(&self, req: &Request) -> NetResult<Response> {
+            if let Ok(mut v) = self.seen.lock() {
+                v.push(req.url.to_string());
+            }
+            eprintln!("[fetch +{}s] {}", self.t0.elapsed().as_secs(), req.url);
+            let r = self.inner.fetch(req).await;
+            eprintln!(
+                "[done  +{}s] {}",
+                self.t0.elapsed().as_secs(),
+                r.as_ref().map_or(0, |resp| resp.status)
+            );
+            r
+        }
+    }
     let tls = Arc::new(TlsConnector::web_roots());
     let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
     let decoded: Arc<dyn HttpTransport> = Arc::new(DecodingTransport::wrap(h1, 16 * 1024 * 1024));
-    let transport: Arc<dyn HttpTransport> = Arc::new(RedirectTransport::wrap(decoded, 8));
+    let redirect: Arc<dyn HttpTransport> = Arc::new(RedirectTransport::wrap(decoded, 8));
+    let t_start = std::time::Instant::now();
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "sync_profile=info".into()),
+        )
+        .with_writer(std::io::stderr)
+        .try_init();
+    let spy = Arc::new(UrlSpy {
+        inner: redirect,
+        seen: std::sync::Mutex::new(Vec::new()),
+        t0: t_start,
+    });
+    let transport: Arc<dyn HttpTransport> = spy.clone();
     let mut s = Session::new(transport, Arc::new(TestFont));
     s.set_js_factory(explorer_js::JscoreEngine::factory());
+    // `LOBSTE_PROBE_SCHEME=dark` → env sombre (étape 97) :
+    // lobste.rs doit fetcher `dark-normal.css` au lieu de
+    // `light-normal.css` via `<link media>` filtré.
+    if std::env::var("LOBSTE_PROBE_SCHEME").as_deref() == Ok("dark") {
+        s.set_color_scheme(explorer_css::ColorScheme::Dark);
+    }
     let mut rx = s.subscribe();
     let tab = s.open_tab();
     let url = std::env::var("LOBSTE_PROBE_URL").unwrap_or_else(|_| "https://lobste.rs/".into());
+    eprintln!("[+{}s] navigate…", t_start.elapsed().as_secs());
     s.navigate(tab, &url).await.unwrap();
+    eprintln!("[+{}s] navigate rendu", t_start.elapsed().as_secs());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let mut errors = Vec::new();
+    let mut navs = 0usize;
     loop {
+        // Deadline en TÊTE de boucle : un `continue`
+        // (navs script en file — hang dev.to mesuré >10 min)
+        // sautait le check en fin de boucle et tournait sans
+        // fin.
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
         while let Ok(ev) = rx.try_recv() {
             if let CoreEvent::PipelineError { message, .. } = ev {
                 errors.push(message);
             }
         }
+        eprintln!("[+{}s] pump iter", t_start.elapsed().as_secs());
         s.pump_net().await;
+        eprintln!("[+{}s] pump_net ok", t_start.elapsed().as_secs());
         s.pump_timers(tab);
-        if s.drain_script_nav(tab).await > 0 {
+        eprintln!("[+{}s] pump_timers ok", t_start.elapsed().as_secs());
+        let n = s.drain_script_nav(tab).await;
+        if n > 0 {
+            navs += n;
             continue;
         }
         let idle = s.net_pending() == 0 && s.next_timer_deadline().is_none();
-        if idle || std::time::Instant::now() >= deadline {
+        if idle {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
+    eprintln!(
+        "diagnostic pompe : {navs} navs script drainées, \
+         net_pending={}, timer_armé={}",
+        s.net_pending(),
+        s.next_timer_deadline().is_some()
+    );
     while let Ok(ev) = rx.try_recv() {
         if let CoreEvent::PipelineError { message, .. } = ev {
             errors.push(message);
@@ -1511,8 +1578,7 @@ async fn lobste_pipeline_errors() {
     while y <= 704.0 {
         let mut x = 40.0f32;
         while x <= 968.0 {
-            let _ = s
-                .handle_input_now(tab, InputEvent::MouseMove { x, y });
+            let _ = s.handle_input_now(tab, InputEvent::MouseMove { x, y });
             while let Ok(ev) = rx.try_recv() {
                 if let CoreEvent::PipelineError { message, .. } = ev {
                     errors.push(message);
@@ -1548,6 +1614,19 @@ async fn lobste_pipeline_errors() {
     );
     for (i, m) in errors.iter().enumerate() {
         eprintln!("  [{i}] {m}");
+    }
+    // Feuilles réellement demandées (preuve du filtre
+    // `media=`/`prefers-color-scheme` en vol).
+    if let Ok(v) = spy.seen.lock() {
+        let css: Vec<&str> = v
+            .iter()
+            .filter(|u| u.contains(".css"))
+            .map(String::as_str)
+            .collect();
+        eprintln!("feuilles fetchées ({}):", css.len());
+        for u in css {
+            eprintln!("  {u}");
+        }
     }
     let e = s.tabs.get_mut(&tab).unwrap();
     if let Some(eng) = e.js.as_mut() {

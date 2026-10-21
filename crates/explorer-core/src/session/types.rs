@@ -682,6 +682,12 @@ pub struct SessionConfig {
     /// est rejeté en `Fetch` (page d'erreur, étape 69)
     /// plutôt que de gonfler la mémoire.
     pub max_download_bytes: usize,
+    /// Schéma de couleurs préféré propagé à `StyleEnv`
+    /// (étape 97) : `prefers-color-scheme` dans les media
+    /// queries, filtre `media=` des `<link>` (étape 96) et
+    /// défauts UA sombres de la cascade (R-59). Défaut
+    /// `Light`.
+    pub color_scheme: explorer_css::ColorScheme,
 }
 
 impl Default for SessionConfig {
@@ -706,6 +712,7 @@ impl Default for SessionConfig {
             resync_gap_max_ms: 4_000,
             max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
+            color_scheme: explorer_css::ColorScheme::default(),
         }
     }
 }

@@ -54,6 +54,10 @@ struct DaemonConfig {
     /// Timeout d'une requête `DoH` (`EXPLORER_DOH_TIMEOUT_MS`,
     /// étape 72 — règle 13).
     doh_timeout: std::time::Duration,
+    /// Schéma de couleurs propagé à `StyleEnv` (étape 97 —
+    /// `EXPLORER_COLOR_SCHEME` `dark`/`light`, défaut
+    /// `light`).
+    color_scheme: explorer_core::ColorScheme,
 }
 
 impl DaemonConfig {
@@ -85,6 +89,10 @@ impl DaemonConfig {
                     std::time::Duration::from_secs(5),
                     std::time::Duration::from_millis,
                 ),
+            color_scheme: match std::env::var("EXPLORER_COLOR_SCHEME").as_deref() {
+                Ok("dark") => explorer_core::ColorScheme::Dark,
+                _ => explorer_core::ColorScheme::Light,
+            },
         }
     }
 }
@@ -125,7 +133,8 @@ fn print_usage() {
          \x20 --help              affiche cette aide\n\
          variables : EXPLORER_PORT, EXPLORER_PROFILE, EXPLORER_FONT_DIR,\n\
          \x20            EXPLORER_MAX_BODY, EXPLORER_API_KEY, EXPLORER_DOWNLOAD_DIR,\n\
-         \x20            EXPLORER_DOH, EXPLORER_DOH_TIMEOUT_MS"
+         \x20            EXPLORER_DOH, EXPLORER_DOH_TIMEOUT_MS,\n\
+         \x20            EXPLORER_COLOR_SCHEME (dark|light)"
     );
 }
 
@@ -280,9 +289,13 @@ async fn main() {
         },
         None => (None, "system".to_string()),
     };
-    let mut session = Session::new(
+    let mut session = Session::with_config(
         http_stack(&cfg, jar.clone(), &profile_dir, resolver),
         Arc::new(fonts),
+        explorer_core::SessionConfig {
+            color_scheme: cfg.color_scheme,
+            ..explorer_core::SessionConfig::default()
+        },
     );
     session.set_cookie_jar(jar);
     session.set_store(store);

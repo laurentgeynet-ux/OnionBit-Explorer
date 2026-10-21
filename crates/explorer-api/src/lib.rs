@@ -87,6 +87,7 @@ pub fn router_with_egress(
         .route("/api/tabs/{id}/back", post(back))
         .route("/api/tabs/{id}/forward", post(forward))
         .route("/api/tabs/{id}/viewport", post(viewport))
+        .route("/api/tabs/{id}/color-scheme", post(color_scheme))
         .route("/api/tabs/{id}/input", post(input))
         .route("/api/tabs/{id}/find", post(find))
         .route("/api/tabs/{id}/media", get(list_media))
@@ -401,6 +402,33 @@ async fn viewport(
     #[allow(clippy::cast_possible_truncation)]
     session.set_viewport(w as f32, h as f32, scale as f32);
     // Re-render immédiat de l'onglet courant (resize live).
+    let _ = session.rerender(id);
+    StatusCode::OK.into_response()
+}
+
+/// `POST …/color-scheme` : `{ "scheme": "dark"|"light" }` —
+/// bascule `prefers-color-scheme` + défauts UA (étape 97).
+/// Le réglage est session-level (comme `set_viewport`, la
+/// route par-onglet ne fait que nommer l'onglet à repeindre).
+async fn color_scheme(
+    State(st): State<ApiState>,
+    Path(id): Path<TabId>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let scheme = match body.get("scheme").and_then(serde_json::Value::as_str) {
+        Some("dark") => explorer_core::ColorScheme::Dark,
+        Some("light") => explorer_core::ColorScheme::Light,
+        _ => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                &CoreError::Url("champ « scheme » « dark »|« light » attendu".to_string()),
+            );
+        }
+    };
+    let mut session = st.session.lock().await;
+    session.set_color_scheme(scheme);
+    // Re-render immédiat : la cascade réévalue les media
+    // queries et les défauts UA sur le nouvel env.
     let _ = session.rerender(id);
     StatusCode::OK.into_response()
 }

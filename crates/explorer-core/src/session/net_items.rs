@@ -429,6 +429,11 @@ pub(crate) struct SubJob {
     /// (`@font-face`/`media=`) s'évaluent contre lui, pas
     /// le 1024×768 par défaut.
     pub(crate) viewport: (f32, f32),
+    /// Schéma de couleurs réglé recopié (étape 97) — le
+    /// filtre `media=`/`prefers-color-scheme` s'évalue
+    /// contre le réglage session pendant la vague, hors
+    /// verrou.
+    pub(crate) color_scheme: explorer_css::ColorScheme,
     /// Bornes recopiées de la config session.
     pub(crate) max_inflight: usize,
     pub(crate) max_modules: usize,
@@ -552,7 +557,7 @@ impl SubJob {
     /// déclaré par une feuille importée est ainsi éligible.
     pub(crate) async fn fetch_imports(&mut self) {
         let mut ctx = ImportCtx {
-            env: super::apply::viewport_env(self.viewport),
+            env: super::apply::viewport_env(self.viewport, self.color_scheme),
             seen: HashSet::new(),
             left: self.max_imports,
             out: String::new(),
@@ -634,7 +639,7 @@ impl SubJob {
     /// fetch/status en échec, budget épuisé) → fond sauté,
     /// jamais d'échec propagé.
     pub(crate) async fn fetch_backgrounds(&mut self) {
-        let env = super::apply::viewport_env(self.viewport);
+        let env = super::apply::viewport_env(self.viewport, self.color_scheme);
         let mut left = self.max_images.saturating_sub(self.img_urls.len());
         let mut seen = HashSet::new();
         let mut decl_urls = Vec::new();
@@ -696,7 +701,7 @@ impl SubJob {
             linked.push('\n');
         }
         eng.add_css(&linked, Origin::Author);
-        let env = super::apply::viewport_env(self.viewport);
+        let env = super::apply::viewport_env(self.viewport, self.color_scheme);
         'faces: for face in eng.font_faces(&env) {
             if self.fonts.len() >= self.font_budget {
                 break;

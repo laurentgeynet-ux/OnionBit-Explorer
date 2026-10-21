@@ -17,6 +17,7 @@
 pub mod profile_store;
 pub mod session;
 
+pub use explorer_css::ColorScheme;
 pub use profile_store::JsonFileStore;
 pub use session::{
     drain_applies_shared, drain_navs_shared, history_move_shared, navigate_shared,

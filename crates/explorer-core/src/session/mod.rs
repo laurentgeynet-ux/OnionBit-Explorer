@@ -489,6 +489,10 @@ pub struct Session {
     /// Borne du corps bufferisé d'un téléchargement
     /// (`SessionConfig::max_download_bytes`).
     max_download_bytes: usize,
+    /// Schéma de couleurs préféré propagé à `StyleEnv`
+    /// (étape 97) — media queries, filtre `media=` des
+    /// sous-ressources, défauts UA de la cascade.
+    color_scheme: explorer_css::ColorScheme,
     /// Quota de requêtes script-initiées simultanées par
     /// onglet (`max_script_net` de config, ADR-0019).
     max_script_net: usize,
@@ -582,6 +586,7 @@ impl Session {
             next_media_id: 1,
             download_dir: None,
             max_download_bytes: cfg.max_download_bytes,
+            color_scheme: cfg.color_scheme,
         }
     }
 
@@ -672,6 +677,22 @@ impl Session {
             self.viewport = (w, h);
             self.scale = scale;
         }
+    }
+
+    /// Schéma de couleurs préféré propagé à `StyleEnv`
+    /// (étape 97) — `prefers-color-scheme` des media queries,
+    /// filtre `media=` des sous-ressources futures, défauts
+    /// UA sombres de la cascade (R-59).
+    #[must_use]
+    pub fn color_scheme(&self) -> explorer_css::ColorScheme {
+        self.color_scheme
+    }
+
+    /// Bascule le schéma de couleurs (réglage OS/app — étape
+    /// 97). Comme `set_viewport`, le re-render des onglets
+    /// chargés est différé à `rerender`.
+    pub fn set_color_scheme(&mut self, scheme: explorer_css::ColorScheme) {
+        self.color_scheme = scheme;
     }
 
     /// Ouvre un onglet vide.

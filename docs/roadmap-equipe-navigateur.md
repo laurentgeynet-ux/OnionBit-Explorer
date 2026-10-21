@@ -1576,6 +1576,34 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   documentée : `style=` inline non
   collecté (pas de DOM dans `SubJob`).
 
+- [x] **Étape 97. Moitié NAV du thème
+  sombre** (débloquée par R-59 —
+  `StyleEnv.color_scheme` livré) :
+  `SessionConfig.color_scheme` →
+  `Session` → `viewport_env` →
+  `SubJob`/`ApplyCtx` — media queries
+  `prefers-color-scheme`, filtre
+  `media=` des sous-ressources,
+  défauts UA sombres de la cascade.
+  `set_color_scheme` bascule en vol
+  (re-render re-cascade). Canaux :
+  REST `POST …/color-scheme`,
+  daemon `EXPLORER_COLOR_SCHEME`,
+  FFI `explorer_set_color_scheme`
+  (additif), app `AppSettings.theme`
+  (`system` résolu brightness OS +
+  suivi des changements). Validé :
+  lobste.rs simulé fetch
+  `dark-normal`/filtre `light-normal`
+  en env dark ; bascule runtime peint
+  `prefers-color-scheme:dark`.
+  **Gap révélé puis comblé** : `not`
+  imbriqué MQ4 (`(cond) and (not (c2))`
+  des `@import` lobste.rs) — journal →
+  PIPE, livré R-64 ; sonde réelle dark
+  à rejouer pour voir `dark-normal`
+  fetchée en vol.
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY

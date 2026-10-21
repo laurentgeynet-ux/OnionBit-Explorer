@@ -262,6 +262,7 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
             resync_gap_max_ms: 4_000,
             max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
+            color_scheme: explorer_css::ColorScheme::default(),
         },
     );
     (s, t)
@@ -688,6 +689,43 @@ async fn media_query_uses_session_viewport() {
     assert!(green > 0, "le bloc hors media query reste peint");
 }
 
+/// Étape 97 — `SessionConfig.color_scheme` propagé à
+/// `StyleEnv` : `@media (prefers-color-scheme: dark)` est
+/// inerte sous l'env `light` par défaut, active après
+/// `set_color_scheme(Dark)` + `rerender` (réglage OS/app
+/// basculé en vol — même mécanisme que le resize).
+#[tokio::test]
+async fn color_scheme_dark_active_prefers_dark() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head><style>\
+         div { height: 300px; }\
+         @media (prefers-color-scheme: dark) {\
+         #d { background: #00ff00; }\
+         }\
+         </style></head><body><div id=d></div></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    // Env `light` (défaut) : la variante sombre est absente.
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]),
+        0,
+        "env light : la règle prefers-color-scheme:dark reste inactive"
+    );
+    // Bascule runtime (réglage app) → le re-render applique.
+    s.set_color_scheme(explorer_core::ColorScheme::Dark);
+    s.rerender(id).unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]) > 0,
+        "env dark : la règle prefers-color-scheme:dark s'applique"
+    );
+}
+
 /// Compte les pixels d'une teinte dans la frame `px`.
 fn count_color(fw: usize, fh: usize, px: &[u8], target: [u8; 3]) -> usize {
     let mut n = 0;
@@ -761,6 +799,55 @@ async fn link_media_filtered_against_viewport() {
     assert!(
         !paths.iter().any(|p| p == "/wide.css"),
         "wide non fetchée : {paths:?}"
+    );
+}
+
+/// Étape 97 — variante lobste.rs : `<link media=
+/// "(prefers-color-scheme: dark)">` est fetchée **uniquement**
+/// en env sombre (le shim `media_attr_matches` de l'étape 96
+/// hérite `color_scheme` via `StyleEnv` — R-59 gratuite
+/// côté NAV). En `dark`, c'est `dark-normal` qui arrive,
+/// pas `light-normal`.
+#[tokio::test]
+async fn link_prefers_color_scheme_dark_selects_variant() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <link rel=stylesheet href=/light-normal.css \
+         media=\"(prefers-color-scheme: light)\">\
+         <link rel=stylesheet href=/dark-normal.css \
+         media=\"(prefers-color-scheme: dark)\">\
+         </head><body>\
+         <div id=v style=\"width:50px;height:50px\"></div>\
+         </body></html>",
+    );
+    t.route_bin("/light-normal.css", 200, b"#v{background:#ff0000}".to_vec());
+    t.route_bin("/dark-normal.css", 200, b"#v{background:#00ff00}".to_vec());
+    let id = s.open_tab();
+    // Env sombre avant la navigation : la variante dark est
+    // planifiée, la light filtrée.
+    s.set_color_scheme(explorer_core::ColorScheme::Dark);
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let paths = t.paths();
+    assert!(
+        paths.iter().any(|p| p == "/dark-normal.css"),
+        "dark-normal fetchée en env dark : {paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p == "/light-normal.css"),
+        "light-normal filtrée en env dark : {paths:?}"
+    );
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]) > 0,
+        "dark-normal appliquée"
+    );
+    assert_eq!(
+        count_color(fw as usize, fh as usize, px, [255, 0, 0]),
+        0,
+        "light-normal absente"
     );
 }
 
@@ -5545,6 +5632,7 @@ async fn redirect_commits_final_url_and_fragment() {
             resync_gap_max_ms: 4_000,
             max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
+            color_scheme: explorer_css::ColorScheme::default(),
         },
     );
 

@@ -137,6 +137,41 @@ async fn open_tab_then_frame_is_png() {
     assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
 }
 
+/// Étape 97 — `POST …/color-scheme` propage le réglage
+/// `dark`/`light` à la session (`prefers-color-scheme` +
+/// défauts UA) ; valeur hors contrat → 400.
+#[tokio::test]
+async fn color_scheme_accepts_dark_rejects_junk() {
+    let app = test_app();
+    let resp = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let id = v["id"].as_u64().unwrap();
+
+    let dark = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/color-scheme"),
+            r#"{"scheme":"dark"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(dark.status(), StatusCode::OK);
+
+    let junk = app
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/color-scheme"),
+            r#"{"scheme":"solarized"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(junk.status(), StatusCode::BAD_REQUEST);
+}
+
 #[tokio::test]
 async fn frame_before_navigate_is_no_content() {
     let app = test_app();

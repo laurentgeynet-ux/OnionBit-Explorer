@@ -233,7 +233,7 @@ impl Session {
             return StyleMap::default();
         };
         let mut p = entry.take_paint();
-        let styles = apply::styles_payload(&mut p, dom, self.viewport);
+        let styles = apply::styles_payload(&mut p, dom, self.viewport, self.color_scheme);
         entry.put_paint(p);
         styles
     }

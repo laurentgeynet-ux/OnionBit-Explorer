@@ -117,6 +117,7 @@ fn bench_session() -> (Session, Arc<FakeTransport>) {
             resync_gap_max_ms: 4_000,
             max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
+            color_scheme: explorer_css::ColorScheme::default(),
         },
     );
     (s, t)

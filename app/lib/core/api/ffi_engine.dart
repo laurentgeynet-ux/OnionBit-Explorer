@@ -52,6 +52,8 @@ typedef _ViewportN = ffi.Int32 Function(
   ffi.Float,
 );
 typedef _ViewportD = int Function(_NativeHandle, double, double, double);
+typedef _ColorSchemeN = ffi.Int32 Function(_NativeHandle, ffi.Int32);
+typedef _ColorSchemeD = int Function(_NativeHandle, int);
 typedef _InputN = ffi.Int32 Function(
   _NativeHandle,
   ffi.Uint64,
@@ -170,6 +172,13 @@ class FfiEngine implements BrowserRepository {
       _tabScroll = lib.providesSymbol('explorer_tab_scroll')
           ? lib.lookupFunction<_TabScrollN, _TabScrollD>('explorer_tab_scroll')
           : null,
+      // Étape 97 — ABI additive : une dll antérieure garde
+      // `light` (comportement inchangé).
+      _setColorScheme = lib.providesSymbol('explorer_set_color_scheme')
+          ? lib.lookupFunction<_ColorSchemeN, _ColorSchemeD>(
+              'explorer_set_color_scheme',
+            )
+          : null,
       _lastError = lib.lookupFunction<_BufReadN, _BufReadD>(
         'explorer_last_error',
       ) {
@@ -230,6 +239,7 @@ class FfiEngine implements BrowserRepository {
   final _FrameCopyD _frameCopy;
   final _TabUrlD _tabUrl;
   final _TabUrlD? _tabTitle;
+  final _ColorSchemeD? _setColorScheme;
   final _TabScrollD? _tabScroll;
   final _BufReadD _lastError;
 
@@ -478,6 +488,13 @@ class FfiEngine implements BrowserRepository {
     double scale,
   ) async {
     if (_setViewport(_handle, w, h, scale) != 0) _fail();
+  }
+
+  @override
+  Future<void> setColorScheme(String tabId, String scheme) async {
+    // Export additif étape 97 — dll antérieure : no-op
+    // (l'env reste `light`, comportement inchangé).
+    _setColorScheme?.call(_handle, scheme == 'dark' ? 1 : 0);
   }
 
   // ------------------------------------------------------------------
