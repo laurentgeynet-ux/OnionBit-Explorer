@@ -358,6 +358,86 @@ pub fn rasterize_cached(
     })
 }
 
+/// Rasterise la tranche verticale `[y_css, y_css + height_css[`
+/// de `list` dans une frame `list.width × height_css`.
+///
+/// La hauteur du **document** n'est plus bornée ici : le cap
+/// 16 384 px s'applique à la fenêtre demandée, pas à la page —
+/// les documents plus hauts que le cap deviennent rasterisables
+/// par tranches (demande NAV repriorisée — scroll github/MDN/
+/// stallman, `site_smoke`). `y_css` négatif est clampé à 0 ;
+/// la portion de fenêtre sous le document reste blanche.
+/// Équivalent de [`rasterize_window_cached`] à cache jetable.
+#[must_use]
+pub fn rasterize_window(
+    list: &DisplayList,
+    fonts: &dyn FontSource,
+    scale: f32,
+    y_css: f32,
+    height_css: f32,
+) -> Option<Frame> {
+    rasterize_window_cached(
+        list,
+        fonts,
+        scale,
+        y_css,
+        height_css,
+        &mut GlyphCache::new(),
+    )
+}
+
+/// [`rasterize_window`] avec un [`GlyphCache`] persistant
+/// (R-36) — même sync `FontSource::revision` que
+/// [`rasterize_cached`].
+#[must_use]
+pub fn rasterize_window_cached(
+    list: &DisplayList,
+    fonts: &dyn FontSource,
+    scale: f32,
+    y_css: f32,
+    height_css: f32,
+    gc: &mut GlyphCache,
+) -> Option<Frame> {
+    let y_css = y_css.max(0.0);
+    let w_px = (list.width * scale).round().max(1.0);
+    let h_px = (height_css * scale).round().max(1.0);
+    if !(w_px.is_finite() && h_px.is_finite() && y_css.is_finite())
+        || w_px > 16384.0
+        || h_px > 16384.0
+    {
+        return None; // borne hostile — fenêtre géante.
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let (w, h) = (w_px as u32, h_px as u32);
+    let mut pixmap = Pixmap::new(w, h)?;
+    pixmap.fill(tiny_skia::Color::WHITE);
+    // p_local = p_css·scale − y0px : la tranche se peint dans
+    // son propre repère, pile transform/clip inchangée.
+    let base = Transform::from_row(scale, 0.0, 0.0, scale, 0.0, -(y_css * scale));
+    let win_css = explorer_layout::Rect {
+        x: 0.0,
+        y: y_css,
+        width: list.width,
+        height: h_px / scale,
+    };
+    let bounds = crate::display::resolved_bounds(&list.items);
+    gc.sync(fonts);
+    replay_items(
+        &mut pixmap,
+        &list.items,
+        base,
+        fonts,
+        gc,
+        Some((&bounds, win_css)),
+    );
+    Some(Frame {
+        width: w,
+        height: h,
+        pixels: pixmap.data().to_vec(),
+        scale,
+    })
+}
+
 /// Inflation des fenêtres sales (px CSS) — couvre le débord
 /// AA (~1 px physique) et l'overhang modeste des glyphes
 /// hors de leur boîte de métriques. Le harnais d'équivalence

@@ -9,6 +9,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-62 — `rasterize_window` / `rasterize_window_cached`**
+  (`explorer-render`) : tranche verticale `[y_css,
+  y_css+height_css[` d'une display list → frame
+  `list.width × height_css`. Le cap 16 384 px s'applique
+  à la fenêtre et non plus au document — les pages plus
+  hautes deviennent rasterisables par tranches (demande
+  NAV repriorisée : scroll sur github/MDN/stallman du
+  corpus `site_smoke`). Même mécanique que
+  `rasterize_dirty` : pixmap bornée, transform
+  `p_css·scale − y0`, filtre « item × fenêtre » sur
+  `resolved_bounds`, pile clip/transform rejouée entière.
+  `y_css` négatif clampé, hors document → blanc. Variante
+  `_cached` = `GlyphCache` persistant (R-36). Tests :
+  équivalence ligne-à-ligne plein cadre, tranche peinte
+  sous un document 20 000 px hors cap.
 - **R-61 — `merge_rects` linéaire** (`explorer-render`) : la
   fusion des dirty rects était O(k²) en passe unique (dettes
   journal NAV 55g — ~2 s mesurés sur ~8 500 rects d'un diff

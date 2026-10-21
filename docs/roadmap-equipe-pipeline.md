@@ -1537,6 +1537,26 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   consolidation le réalise désormais
   vraiment ; couverture identique, la
   partition rapportée peut fusionner plus.
+- [x] **R-62. `rasterize_window`** (demande
+  NAV repriorisée — cap 16 384 px bloquait
+  le scroll sur github/MDN/stallman) —
+  **livré** : `rasterize_window(list,
+  fonts, scale, y_css, height_css)` et sa
+  variante `_cached` (GlyphCache R-36)
+  rasterisent la tranche verticale dans
+  une frame `list.width × height_css` —
+  le cap s'applique à la fenêtre, plus à
+  la hauteur du document. Réutilise la
+  mécanique `rasterize_dirty` : pixmap
+  bornée, transform `p_css·scale − y0`,
+  filtre « item × fenêtre » sur
+  `resolved_bounds` (pile clip/transform
+  intégrale rejouée). `y_css` négatif
+  clampé à 0 ; hors document → blanc.
+  Tests raster : équivalence ligne-à-
+  ligne avec le plein cadre, tranche
+  peinte sous un document 20 000 px que
+  `rasterize` refuse.
   Test : `a` abs sans `top` dans `ul` abs à
   `top:-100px` → suit le conteneur (y≈−100),
   plus jamais 0. Terrain : les deux liens

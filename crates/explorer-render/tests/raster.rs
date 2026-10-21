@@ -394,3 +394,63 @@ fn clip_rect_zero_ne_peint_rien() {
         assert_eq!(px(&f, x, y), [255, 255, 255, 255], "({x},{y}) blanc");
     }
 }
+
+// ── R-62 : rasterize_window — tranche verticale ─────────────
+
+fn list_of(html: &str, css: &str, doc_h: f32) -> explorer_render::DisplayList {
+    let dom: Dom = TreeBuilder::parse(html);
+    let mut eng = StyleEngine::new();
+    eng.add_css("body { margin: 0 }", Origin::Author);
+    eng.add_css(css, Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    build_display_list(&bx, VIEW, doc_h, 0.0)
+}
+
+#[test]
+fn fenetre_raster_equivaut_aux_lignes_du_plein_cadre() {
+    // Fenêtre [30,50) ≡ lignes 30..50 du plein cadre — même
+    // mécanique de filtre/translation que rasterize_dirty.
+    let html = "<div id=a></div><div id=b></div>";
+    let css = "#a{background:#ff0000;width:200px;height:50px}\
+               #b{background:#0000ff;width:200px;height:50px}";
+    let list = list_of(html, css, 200.0);
+    let full = rasterize(&list, font_src(), 1.0).expect("plein cadre");
+    let win =
+        explorer_render::rasterize_window(&list, font_src(), 1.0, 30.0, 50.0).expect("fenêtre");
+    assert_eq!((win.width, win.height), (full.width, 50));
+    for y in 0..50 {
+        for x in [0, 100, 199] {
+            assert_eq!(px(&win, x, y), px(&full, x, y + 30), "ligne {y}");
+        }
+    }
+}
+
+#[test]
+fn fenetre_raster_rasterise_sous_le_cap_document() {
+    // Document 20 000 px : `rasterize` refuse (borne), la
+    // fenêtre [19 900, +100) peint quand même la tranche.
+    let list = list_of(
+        "<div id=d></div>",
+        "#d{background:#00ff00;width:200px;height:20000px}",
+        20_000.0,
+    );
+    assert!(
+        rasterize(&list, font_src(), 1.0).is_none(),
+        "document sous cap"
+    );
+    let win = explorer_render::rasterize_window(&list, font_src(), 1.0, 19_900.0, 100.0)
+        .expect("fenêtre sous le cap");
+    assert_eq!(px(&win, 10, 10), [0, 255, 0, 255], "tranche peinte");
+    // Fenêtre hors document → blanc (scroll de fin de page).
+    let off = explorer_render::rasterize_window(&list, font_src(), 1.0, 30_000.0, 50.0)
+        .expect("fenêtre hors doc");
+    assert_eq!(px(&off, 10, 10), [255, 255, 255, 255], "blanc");
+}
