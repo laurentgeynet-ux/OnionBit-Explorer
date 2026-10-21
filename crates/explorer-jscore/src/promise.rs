@@ -287,9 +287,13 @@ impl Engine {
             // JS-C29 : même couture pour les messages workers —
             // un handler `onmessage` qui enqueue des microtasks
             // est vidé au tour suivant.
+            // JS-C37 : frontière de jobs = point sûr GC — seuil de
+            // cellules vivantes dépassé → passe mark-sweep.
             if !self.deliver_mutations()? && self.pump_workers()? == 0 {
+                self.maybe_collect();
                 return Ok(ran);
             }
+            self.maybe_collect();
         }
     }
 }

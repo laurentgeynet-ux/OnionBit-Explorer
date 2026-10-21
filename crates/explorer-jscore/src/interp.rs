@@ -35,6 +35,9 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 const DEFAULT_CALL_DEPTH: u32 = 256;
 const MAX_PROTO_DEPTH: u32 = 512;
 const DEFAULT_OP_LIMIT: u64 = 10_000_000;
+/// Seuil GC par défaut (JS-C37) — ~130 K cellules vivantes
+/// déclenchent une passe à la frontière de job suivante.
+const DEFAULT_GC_THRESHOLD: usize = 131_072;
 /// Frames rendues dans `error.stack`/`Uncaught` (JS-C47) —
 /// même borne que V8 (`Error.stackTraceLimit` = 10) : les
 /// frames utiles au diagnostic sont en tête de pile.
@@ -225,6 +228,14 @@ pub struct Engine {
     pub(crate) nest_limit: u32,
     pub(crate) ops_left: u64,
     pub(crate) op_limit: u64,
+    /// Seuil de GC automatique en cellules vivantes (JS-C37) —
+    /// `0` = jamais. La passe est déclenchée aux frontières de
+    /// jobs (`run_microtasks`), jamais pendant une évaluation
+    /// (la pile d'appel n'est pas une racine).
+    gc_threshold: usize,
+    /// Total cumulé des `tick` — compteur d'ops exposé par
+    /// [`Engine::heap_stats`]/[`Engine::ops_used`] (métriques).
+    ops_total: u64,
     /// Host-side timer queue (JS-3) — pumped by the embedder's event
     /// loop via [`Engine::run_due_timers`].
     pub(crate) timers: crate::timers::TimerQueue,
@@ -524,6 +535,8 @@ impl Engine {
             nest_limit: crate::parser::DEFAULT_NEST_LIMIT,
             ops_left: DEFAULT_OP_LIMIT,
             op_limit: DEFAULT_OP_LIMIT,
+            gc_threshold: DEFAULT_GC_THRESHOLD,
+            ops_total: 0,
             timers: crate::timers::TimerQueue::default(),
             xhr: crate::xhr::XhrEngineState::default(),
             dom_ctx: None,
@@ -588,6 +601,37 @@ impl Engine {
     /// `None` = aucun coût. Additif, aucune casse d'API.
     pub fn set_eval_hook(&mut self, f: Option<EvalHook>) {
         self.eval_hook = f;
+    }
+
+    /// Borne mémoire du heap JS en octets estimés (JS-C37,
+    /// ADR-0019) — `0` = illimité. Le dépassement produit un kill
+    /// doux : `RangeError` (« heap memory limit exceeded ») au
+    /// `tick` suivant, propagé comme une exception JS ordinaire.
+    /// L'estimation est approximative entre deux sweeps (les props
+    /// ajoutées à un objet vivant n'entrent qu'au GC).
+    pub fn set_mem_limit(&mut self, bytes: usize) {
+        self.heap.set_mem_limit(bytes);
+    }
+
+    /// Seuil de GC automatique en cellules vivantes (JS-C37) —
+    /// `0` = jamais. La passe ne peut partir qu'entre deux jobs.
+    pub fn set_gc_threshold(&mut self, cells: usize) {
+        self.gc_threshold = cells;
+    }
+
+    /// Instantané des compteurs heap (cellules vivantes, octets
+    /// estimés, pics, nombre de passes GC) — instrumentation
+    /// JS-C37 pour embedders et tests.
+    #[must_use]
+    pub fn heap_stats(&self) -> crate::heap::HeapStats {
+        self.heap.stats()
+    }
+
+    /// Nombre cumulé de ticks d'exécution depuis la création —
+    /// compteur d'ops brut (métrique, non remis à zéro par `eval`).
+    #[must_use]
+    pub fn ops_used(&self) -> u64 {
+        self.ops_total
     }
 
     /// Roote `id` jusqu'au [`Engine::remove_root`] correspondant —
@@ -1081,12 +1125,35 @@ impl Engine {
 
     /// Operation budget tick — also counts microtasks so a
     /// self-feeding reaction loop dies like an infinite `while`.
+    /// La borne mémoire heap (JS-C37, ADR-0019) est relue ici :
+    /// l'alloc lève le drapeau, le `tick` transforme en kill doux.
     pub(crate) fn tick(&mut self) -> JsResult<()> {
         if self.ops_left == 0 {
             return Err(self.range_error("script execution limit exceeded"));
         }
+        if self.heap.over_limit() {
+            return Err(self.range_error("heap memory limit exceeded"));
+        }
         self.ops_left -= 1;
+        self.ops_total += 1;
         Ok(())
+    }
+
+    /// GC opportuniste aux frontières de jobs (JS-C37) : si le
+    /// nombre de cellules vivantes dépasse `gc_threshold`, lance
+    /// une passe mark-sweep. Jamais appelé pendant une évaluation
+    /// — la pile d'appel n'est pas une racine.
+    pub(crate) fn maybe_collect(&mut self) -> usize {
+        // `over_limit` aussi : la frontière de job est la première
+        // occasion sûre de recalculer `bytes` — si le sweep repasse
+        // sous la borne, le drapeau retombe et le job suivant vit.
+        if self.heap.over_limit()
+            || (self.gc_threshold > 0 && self.heap.live_count() > self.gc_threshold)
+        {
+            self.collect()
+        } else {
+            0
+        }
     }
 
     // -- environments --------------------------------------------------

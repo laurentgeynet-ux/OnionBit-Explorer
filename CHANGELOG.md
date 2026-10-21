@@ -254,6 +254,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `Drop`. Ni `eval` (borne `expr_depth`, erreur typée) ni
   `module_specifiers` (parse + drop immédiat) ne débordent
   la pile. Test : `c41_deep_operand_chain_drops_iteratively`.
+- **JS-C37 — borne mémoire heap + compteurs**
+  (`explorer-jscore`, exigence ADR-0019) : `Heap` suit les
+  octets estimés des cellules vivantes (coût à l'alloc,
+  recalcul exact au sweep — la croissance des props entre
+  dans le compte) ; `Engine::set_mem_limit` borne le heap
+  par contexte avec kill doux — `RangeError` « heap memory
+  limit exceeded » au `tick` suivant, le `maybe_collect`
+  de frontière de jobs offre un sweep avant de re-tuer ;
+  `Engine::set_gc_threshold` (défaut 131 072 cellules)
+  déclenche une passe mark-sweep automatique aux
+  frontières de jobs ; `heap_stats()` (vivantes, octets,
+  pics, passes) et `ops_used()` exposent les compteurs ;
+  `Dom::serialize_stats` instrumente le coût de
+  resynchronisation `serialize_document` (appels/octets).
+  Tests : `c37_*`, `serialize_stats_counts_calls_and_bytes`.
 
 ### Fixed
 

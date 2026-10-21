@@ -70,7 +70,7 @@ pub use dom::{
 };
 pub use dom_host::{CookieJar, DomRef, FormSubmit};
 pub use error::{Error, Result};
-pub use heap::Host;
+pub use heap::{HeapStats, Host};
 pub use interp::Engine;
 pub use module::{module_specifiers, ModuleLoader};
 pub use storage::Storage;

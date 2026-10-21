@@ -1628,9 +1628,18 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `toPrecision`, backref `\N` vers un groupe pas encore fermé =
   match vide (spec 21.2.2.9), nom de `FunctionExpression`
   ReadOnly sloppy-silencieux (Binding.sloppy_silent).
-- [ ] **JS-C37. Perf + borne mémoire heap** : compteurs d'ops,
+- [x] **JS-C37. Perf + borne mémoire heap** : compteurs d'ops,
   seuils GC, **borne mémoire par contexte** (exigence ADR-0019),
   coût `serialize_document` instrumenté.
+  Livré : `Heap` compte les octets estimés (`cell_bytes` à
+  l'alloc, recal exact au sweep — croissance des props incluse),
+  `Engine::set_mem_limit` borne par contexte avec kill doux
+  (`RangeError` au `tick` suivant, `maybe_collect` offre un
+  sweep avant de re-tuer), `set_gc_threshold` déclenche le GC
+  aux frontières de jobs (`run_microtasks`), `heap_stats()` +
+  `ops_used()` exposent les compteurs, `Dom::serialize_stats`
+  compte appels/octets de `serialize_document`. Tests `c37_*`
+  + `serialize_stats_counts_calls_and_bytes`.
 - [ ] **JS-C38. Fuzz lexer/parser `explorer-jscore`** : cible
   cargo-fuzz (extension de `fuzz/` — périmètre équipe).
 - [ ] **JS-C40. Découpage interne `explorer-jscore`** (audit externe) :

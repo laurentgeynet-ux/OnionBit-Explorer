@@ -477,6 +477,12 @@ pub struct Dom {
     /// `write` sur document fermé rouvre implicitement en
     /// effaçant le contenu d'abord (spec `document open steps`).
     pub doc_open: bool,
+    /// Compteurs `serialize_document` (JS-C37) — appels et octets
+    /// produits, cumulés depuis la création. `Cell` : la
+    /// sérialisation est `&self`.
+    serialize_calls: Cell<u64>,
+    /// Octets cumulés produits par `serialize_document`.
+    serialize_bytes: Cell<u64>,
 }
 
 impl Default for Dom {
@@ -501,6 +507,8 @@ impl Dom {
             media_cmds: Vec::new(),
             canvas_op_limit: DEFAULT_CANVAS_OP_LIMIT,
             doc_open: true,
+            serialize_calls: Cell::new(0),
+            serialize_bytes: Cell::new(0),
         };
         d.root = d.alloc(NodeKind::Element, "#document");
         d
@@ -815,7 +823,20 @@ impl Dom {
     /// Sérialisation du document entier (source de re-rendu, JS-5b).
     #[must_use]
     pub fn serialize_document(&self) -> String {
-        self.inner_html(self.root)
+        let s = self.inner_html(self.root);
+        // JS-C37 : coût de la resynchro DOM → host instrumenté
+        // (appels + octets cumulés, lus par `serialize_stats`).
+        self.serialize_calls.set(self.serialize_calls.get() + 1);
+        self.serialize_bytes
+            .set(self.serialize_bytes.get() + s.len() as u64);
+        s
+    }
+
+    /// `(appels, octets cumulés)` de `serialize_document` —
+    /// instrumentation du coût de resynchronisation DOM (JS-C37).
+    #[must_use]
+    pub fn serialize_stats(&self) -> (u64, u64) {
+        (self.serialize_calls.get(), self.serialize_bytes.get())
     }
 
     /// Attach `child` under `parent` (re-parents if attached).

@@ -3054,6 +3054,74 @@ fn ta_gc_retention() {
     );
 }
 
+// -- JS-C37 : borne mémoire heap + seuils GC + compteurs --------------
+
+#[test]
+fn c37_mem_limit_soft_kill() {
+    // Borne mémoire par contexte (ADR-0019) : l'alloc lève le
+    // drapeau, le tick suivant émet une RangeError — kill doux,
+    // jamais de panic ni de borne franchie de façon illimitée.
+    // Ici le volume alloué est du **garbage** transitoire : le
+    // sweep à la frontière de job le réclame et le drapeau
+    // retombe — le moteur reste utilisable après le kill.
+    let mut e = Engine::new();
+    // La borne doit excéder le coût des builtins déjà alloués —
+    // mesuré post-sweep (l'estimation d'alloc ignore la croissance
+    // des props ; le sweep recalcule exactement).
+    e.collect();
+    let base = e.heap_stats().estimated_bytes;
+    e.set_mem_limit(base + 128 * 1024);
+    let err = e
+        .eval(
+            "var s = 'x'; for (var i = 0; i < 200000; i++) { var t = s + i + 'aaaaaaaaaaaaaaaa'; }",
+        )
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("heap memory limit"),
+        "attendu kill doux mémoire, eu {err}"
+    );
+    // Le moteur reste utilisable après le kill (le garbage est
+    // réclamé, l'estimation repasse sous la borne).
+    match e.eval("1 + 1") {
+        Ok(v) => assert_eq!(e.describe(v), "2"),
+        Err(err) => panic!("engine dead after soft kill: {err}"),
+    }
+}
+
+#[test]
+fn c37_gc_threshold_auto_collect() {
+    // Seuil de cellules vivantes → passe GC à la frontière de job
+    // (fin d'eval / drain microtasks), jamais pendant l'éval.
+    let mut e = Engine::new();
+    e.set_gc_threshold(64);
+    e.eval("var a = []; for (var i = 0; i < 500; i++) a.push({x: i});")
+        .unwrap_or_else(|err| panic!("{err}"));
+    let st = e.heap_stats();
+    assert!(st.gc_runs >= 1, "au moins une passe auto : {st:?}");
+    assert!(st.live_cells > 0);
+    assert!(st.estimated_bytes > 0);
+}
+
+#[test]
+fn c37_heap_stats_and_ops_counters() {
+    let mut e = Engine::new();
+    e.eval("var o = {a: 1}; globalThis.__s = 'hello';")
+        .unwrap_or_else(|err| panic!("{err}"));
+    let st = e.heap_stats();
+    assert!(st.live_cells > 0);
+    assert!(st.estimated_bytes > 0);
+    assert!(st.peak_live_cells >= st.live_cells);
+    assert!(e.ops_used() > 0, "compteur d'ops cumulé exposé");
+}
+
+#[test]
+fn c37_mem_limit_zero_is_unlimited() {
+    let mut e = Engine::new();
+    e.set_mem_limit(0);
+    e.eval("var s = 'x'; for (var i = 0; i < 1000; i++) s += 'ab';")
+        .unwrap_or_else(|err| panic!("{err}"));
+}
+
 // -- BigInt (JS-C7) ---------------------------------------------------
 
 /// `ev` renvoyant le bigint affiché en décimal (`describe`).

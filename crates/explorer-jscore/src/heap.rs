@@ -70,6 +70,23 @@ pub struct Heap {
     roots: HashMap<ObjId, u32>,
     /// Live-object counter for tests/embedder metrics.
     pub(crate) allocated: usize,
+    /// Estimation des octets vivants (JS-C37, ADR-0019) : augmentée
+    /// à chaque `alloc`, recalculée exactement à chaque sweep. Les
+    /// mutations post-alloc (props ajoutées) ne sont comptées
+    /// qu'après une passe GC — borne approximative, documentée.
+    bytes: usize,
+    /// Borne mémoire par contexte en octets — `0` = illimité.
+    /// Le dépassement lève `over_mem` ; le kill doux est émis au
+    /// `tick` suivant (l'alloc elle-même ne peut pas échouer).
+    mem_limit: usize,
+    /// `true` tant que `bytes > mem_limit` (borne non nulle).
+    over_mem: bool,
+    /// Passes GC effectuées — métrique `heap_stats`.
+    gc_runs: u64,
+    /// Pic de cellules vivantes observé (post-sweep/alloc).
+    peak_live: usize,
+    /// Pic d'octets estimés.
+    peak_bytes: usize,
 }
 
 impl Heap {
@@ -81,10 +98,27 @@ impl Heap {
             marks: Vec::new(),
             roots: HashMap::new(),
             allocated: 0,
+            bytes: 0,
+            mem_limit: 0,
+            over_mem: false,
+            gc_runs: 0,
+            peak_live: 0,
+            peak_bytes: 0,
         }
     }
 
     fn alloc(&mut self, data: CellData) -> ObjId {
+        self.bytes += cell_bytes(&data);
+        let live = self.cells.len() - self.free.len() + 1;
+        if live > self.peak_live {
+            self.peak_live = live;
+        }
+        if self.bytes > self.peak_bytes {
+            self.peak_bytes = self.bytes;
+        }
+        if self.mem_limit > 0 && self.bytes > self.mem_limit {
+            self.over_mem = true;
+        }
         if let Some(idx) = self.free.pop() {
             self.cells[idx as usize] = Some(Cell { data });
             return idx;
@@ -334,6 +368,7 @@ impl Heap {
         }
         // -- Sweep --
         let mut swept = 0usize;
+        let mut live_bytes = 0usize;
         for (i, slot) in self.cells.iter_mut().enumerate() {
             if slot.is_some() && !self.marks[i] {
                 if let Some(Cell {
@@ -347,10 +382,81 @@ impl Heap {
                 *slot = None;
                 self.free.push(i as u32);
                 swept += 1;
+            } else if let Some(c) = slot.as_ref() {
+                live_bytes += cell_bytes(&c.data);
             }
             self.marks[i] = false;
         }
+        // Recal exact post-sweep : les props ajoutées depuis l'alloc
+        // entrent dans le compte, l'estimation repart de zéro dérive.
+        self.bytes = live_bytes;
+        self.gc_runs += 1;
+        let live = self.live_count();
+        if live > self.peak_live {
+            self.peak_live = live;
+        }
+        if self.bytes > self.peak_bytes {
+            self.peak_bytes = self.bytes;
+        }
+        self.over_mem = self.mem_limit > 0 && self.bytes > self.mem_limit;
         swept
+    }
+
+    /// Borne mémoire par contexte (ADR-0019) — `0` = illimité.
+    /// Le dépassement n'empêche pas l'alloc (signature non
+    /// faillible) : il lève le drapeau `over_limit`, lu au `tick`
+    /// par l'interp pour un kill doux borné.
+    pub fn set_mem_limit(&mut self, bytes: usize) {
+        self.mem_limit = bytes;
+        self.over_mem = bytes > 0 && self.bytes > bytes;
+    }
+
+    /// `true` tant que l'estimation dépasse la borne configurée.
+    pub fn over_limit(&self) -> bool {
+        self.over_mem
+    }
+
+    /// Métriques heap pour embedders/tests (JS-C37).
+    pub fn stats(&self) -> HeapStats {
+        HeapStats {
+            live_cells: self.live_count(),
+            estimated_bytes: self.bytes,
+            peak_live_cells: self.peak_live,
+            peak_bytes: self.peak_bytes,
+            gc_runs: self.gc_runs,
+        }
+    }
+}
+
+/// Instantané des compteurs du heap (JS-C37).
+#[derive(Debug, Clone, Copy)]
+pub struct HeapStats {
+    /// Cellules vivantes (objets + chaînes).
+    pub live_cells: usize,
+    /// Estimation des octets vivants (approximative hors sweep).
+    pub estimated_bytes: usize,
+    /// Pic de cellules vivantes.
+    pub peak_live_cells: usize,
+    /// Pic d'octets estimés.
+    pub peak_bytes: usize,
+    /// Nombre de passes mark-sweep exécutées.
+    pub gc_runs: u64,
+}
+
+/// Coût estimé d'une cellule — approximation documentée : le
+/// `String` compte sa longueur, l'`Object` son empreinte fixe plus
+/// la capacité de sa table de props et la taille de ses clés (les
+/// payloads `ObjKind` internes — `Vec` d'éléments, etc. — restent
+/// hors compte : borne grossière, pas mesure exacte).
+fn cell_bytes(data: &CellData) -> usize {
+    let base = std::mem::size_of::<Cell>();
+    match data {
+        CellData::Str(s) => base + s.len(),
+        CellData::Obj(o) => {
+            base + std::mem::size_of::<Object>()
+                + o.props.capacity() * std::mem::size_of::<(String, Prop)>()
+                + o.props.iter().map(|(k, _)| k.len()).sum::<usize>()
+        }
     }
 }
 
