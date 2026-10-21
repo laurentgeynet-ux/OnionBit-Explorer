@@ -286,6 +286,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   plancher `lo` d'un `minmax(lo, auto)`. Terrain : `h2`
   60×308 → 180×132, descriptions et métadonnées BBC en
   ligne normale. Test : `grid_colonne_auto_multi_items`.
+- **R-49 — `visibility:hidden`/`collapse` honoré à
+  l'émission** (`explorer-render`) : la propriété était en
+  cascade (héritée, init `visible`) mais jamais consommée —
+  le motif « visually hidden » (accordéon `LanguageDropdown`
+  BBC, contenus sr-only) se peignait en rivières de 1px.
+  `paint_box` saute `paint_self`/`paint_replaced` des boîtes
+  `hidden`/`collapse` sans court-circuiter transform/clip/
+  descente — §11.2, un descendant `visibility:visible`
+  explicite se repeint. Incrémental couvert (`visibility`
+  dans `box_sig`). Terrain : le dropdown BBC n'émet plus
+  d'item. Limite : le hit-test ne filtre pas `visibility` ;
+  `collapse` sur ligne de table non retirée.
 - **`scripts/spawn_daemon.ps1` — spawn WMI durci** :
   les morts silencieuses du daemon (3 occurrences
   non reproductibles, zéro stderr, zéro event) sont

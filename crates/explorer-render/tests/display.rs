@@ -112,6 +112,62 @@ fn texte_emis_depuis_fragments_shapes() {
 }
 
 #[test]
+fn visibility_hidden_supprime_emission() {
+    // R-49 : `visibility:hidden` supprime l'émission de tout
+    // le sous-arbre (fond + texte) — motif « visually hidden »
+    // des dropdowns/sr-only (BBC `LanguageDropdown` se peignait
+    // en rivières de 1px de large).
+    let (_dom, bx, items) = dl(
+        "<div id=h><p>secret</p></div>",
+        "#h{visibility:hidden;width:10px;height:10px}",
+    );
+    assert!(
+        !items.iter().any(|i| matches!(i, DisplayItem::Text { .. })),
+        "aucun item texte sous visibility:hidden"
+    );
+    assert!(
+        !items
+            .iter()
+            .any(|i| matches!(i, DisplayItem::FillRect { .. } | DisplayItem::Border { .. })),
+        "ni fond ni bordure émis"
+    );
+    // La place en layout est conservée (≠ display:none).
+    let h = find(&bx, by_id(&_dom, "h")).expect("boîte #h");
+    assert!(h.rect.height > 0.0, "la boîte garde sa hauteur");
+}
+
+#[test]
+fn visibility_visible_reapparait_sous_parent_hidden() {
+    // §11.2 : un descendant `visibility:visible` explicite
+    // se repeint sous un parent `hidden` — la vérification
+    // est par boîte (le style calculé porte déjà l'héritage).
+    let (_dom, _bx, items) = dl(
+        "<div id=h><p>secret</p><p id=k>shown</p></div>",
+        "#h{visibility:hidden} #k{visibility:visible}",
+    );
+    let texts = items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::Text { .. }))
+        .count();
+    assert_eq!(texts, 1, "seul le descendant visible émet");
+}
+
+#[test]
+fn visibility_collapse_equivaut_hidden() {
+    // `collapse` hors table ≡ `hidden` (spec) ; sur lignes de
+    // table le retrait de rangée est hors périmètre — hidden
+    // est la dégradation correcte.
+    let (_dom, _bx, items) = dl(
+        "<div id=h><p>secret</p></div>",
+        "#h{visibility:collapse;width:10px;height:10px}",
+    );
+    assert!(
+        !items.iter().any(|i| matches!(i, DisplayItem::Text { .. })),
+        "collapse n'émet rien"
+    );
+}
+
+#[test]
 fn overflow_clip_encadre_les_enfants() {
     let (_dom, _bx, items) = dl(
         "<div id=o><div id=in></div></div>",

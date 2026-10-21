@@ -1074,6 +1074,52 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (`styles_payload` évalue les
   media à 1024×768 fixe —
   entrée journal NAV).
+- [x] **R-49. `visibility:hidden`/`collapse`
+  honoré à l'émission** (résidu
+  terrain, second palier BBC) —
+  **livré** : la propriété était
+  en cascade (héritée, init
+  `visible`) mais jamais
+  consommée — le motif
+  « visually hidden »
+  (`visibility:hidden` + `width:1px`
+  + `overflow:hidden` — accordéon
+  `LanguageDropdown` BBC, sr-only)
+  se peignait en rivières de 1px.
+  Livré : `paint_box` interdit
+  l'émission propre (`paint_self` +
+  `paint_replaced`) aux boîtes
+  `hidden`/`collapse`, **sans
+  court-circuiter** transform/
+  clip/descente — §11.2, un
+  descendant `visibility:visible`
+  explicite se repeint (le style
+  calculé porte l'héritage →
+  vérification locale par boîte).
+  Incrémental couvert sans
+  travail : `visibility` est
+  déjà dans `box_sig` → un flip
+  invalide le ré-usage. `collapse`
+  ≡ `hidden` partout (le retrait
+  de rangée de table reste hors
+  périmètre). Terrain : le
+  contenu du dropdown BBC
+  (h3/h4 + ~50 liens langues)
+  n'émet plus d'item ; tests
+  `display.rs` — hidden supprime
+  texte+fond en gardant la place,
+  re-show descendant, collapse.
+  Reste noté (non promu) : le
+  hit-test ne filtre pas
+  `visibility` (éléments cachés
+  restent ciblables — inertes
+  dans le cas BBC
+  `pointer-events:none`) ;
+  rivières résiduelles BBC =
+  rangée de 12 IndexCards à 49px
+  (carousel `auto-columns` ?) et
+  `LondonMedia` 8.5px — causes
+  distinctes à diagnostiquer.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

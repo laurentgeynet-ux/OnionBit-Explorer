@@ -2241,8 +2241,19 @@ fn paint_box<'a>(
     if let Some(m) = tf {
         items.push(DisplayItem::PushTransform(m));
     }
-    paint_self(bx, items, off, cx.vp, cx.images, cx.canvas_bg_src);
-    paint_replaced(bx, items, off, cx.images);
+    // `visibility` (§11.2) : `hidden`/`collapse` interdit
+    // l'émission PROPRE mais la boîte garde sa place en
+    // layout et la descente continue — un descendant
+    // `visibility:visible` explicite se repeint (son style
+    // calculé porte déjà l'héritage → vérification locale).
+    // Transform/clip/enfants non court-circuités : le
+    // sous-arbre visible s'il existe doit garder sa matrice
+    // et son clip.
+    let hidden = matches!(bx.style.get("visibility"), Some("hidden" | "collapse"));
+    if !hidden {
+        paint_self(bx, items, off, cx.vp, cx.images, cx.canvas_bg_src);
+        paint_replaced(bx, items, off, cx.images);
+    }
     if !bx.children.is_empty() {
         // Clip sur le padding box (approx : border box moins les
         // bordures — on garde le rect entier, documenté).
