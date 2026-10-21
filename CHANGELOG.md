@@ -659,6 +659,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   popup masqué, cartes grille 2 colonnes, footer 4
   colonnes. Tests `cascade.rs` : `<=`/`>`/borne exacte,
   collage, double borne, `and`.
+- **R-57 — custom properties `--*` en table `Arc`
+  partagée** (`explorer-css`) : `ComputedStyle` copiait
+  chaque `--*` héritée dans chaque nœud — mesuré
+  3,26 M d'entrées dans le boxtree + 1,89 M dans
+  `prev_styles` sur Wikipedia « Rust » (~1,1 Go de
+  rétention commise). `vars: Arc<HashMap>` : un nœud
+  sans `--*` propre partage la table du parent
+  (héritage O(1)) ; déclaration = clone-on-write
+  `Arc::make_mut` unique. `Arc` requis par `Send`
+  (`spawn_blocking` du payload). `var()` résout
+  propres-puis-héritées, `set("--x")` en CoW isolé ;
+  `get`/`iter`/`PartialEq` inchangés. Sonde
+  `tab_mem_inventory` : **RSS 1249 → 205 Mio**,
+  drop tree 850→58 Mio, prev_styles 244→21 Mio.
+  Tests : sémantiques externes + `ptr_eq` internes.
 
 ### Added
 

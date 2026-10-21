@@ -1440,6 +1440,36 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   colonnes, footer 4 colonnes. Tests `cascade.rs` :
   `<=`/`>`/borne exacte, collage sans espaces,
   double borne, `and`.
+- [x] **R-57. Custom properties `--*` en table
+  `Arc` partagée** (demande NAV→PIPE au journal —
+  ~1,1 Go de rétention commise mesurés Étape 95)
+  — **livré** : `ComputedStyle` porte désormais
+  `props` (HashMap plat, inchangé) + `vars:
+  Arc<HashMap>` — un nœud sans `--*` propre
+  référence la table effective du parent
+  (héritage O(1) par bump refcount au lieu
+  d'une copie O(vars) : ~200 tokens `:root` ×
+  19k nœuds Wikipedia) ; un nœud qui déclare
+  paie un clone-on-write unique
+  (`Arc::make_mut` — la table parente est
+  intouchée). `Arc` et non `Rc` : le payload
+  de peinture traverse `spawn_blocking` —
+  `Send` exigé. La substitution `var()`
+  résout via un lookup « propres puis
+  héritées » — plus de snapshot complet des
+  vars par nœud. `set("--x")` = CoW isolé.
+  Sémantique identique : `get`/`iter`/
+  `PartialEq` exposent l'ensemble effectif.
+  Mesure sonde `tab_mem_inventory`
+  (Wikipedia « Rust », même page avant/après)
+  : **RSS live 1249 → 205 Mio (−1,04 Go)**,
+  drop tree 850→58 Mio, drop prev_styles
+  244→21 Mio ; tailles `LayoutBox`/`Computed
+  Style` +8 o. Tests : externes sémantiques
+  (héritage/masquage/isolation `set`) +
+  internes `ptr_eq` (chaîne sans déclaration
+  = une seule allocation, déclaration =
+  divergence CoW).
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

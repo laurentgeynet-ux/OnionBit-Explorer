@@ -891,3 +891,69 @@ fn font_size_unites_viewport() {
         "1vmax de max(1024,768)"
     );
 }
+
+// ── R-57 : `--*` partagées — sémantique préservée ────────────
+
+/// L'enfant sans déclaration `--*` hérite la table du parent ;
+/// sa propre déclaration masque l'héritée du même nom.
+#[test]
+fn vars_heritees_et_masquees() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { --accent: red; --gap: 4px } p { --accent: blue; color: var(--accent) }",
+        Origin::Author,
+    );
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    let p = map.get(f.p).expect("style p");
+    // Héritage : `--gap` remonte, `--accent` masquée par la
+    // déclaration propre.
+    assert_eq!(p.get("--gap"), Some("4px"), "héritée du parent");
+    assert_eq!(p.get("--accent"), Some("blue"), "propre > héritée");
+    // `var()` résolue contre la valeur effective (masquée).
+    assert_eq!(p.get("color"), Some("blue"));
+    // `iter()` expose les `--*` comme avant.
+    let names: Vec<&str> = p.iter().map(|(k, _)| k).collect();
+    assert!(names.contains(&"--accent") && names.contains(&"--gap"));
+}
+
+/// `set("--x")` sur l'enfant ne fuit pas dans le parent —
+/// clone-on-write de la table partagée.
+#[test]
+fn vars_set_isole_le_parent() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("div { --a: 1px }", Origin::Author);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    let mut child = map.get(f.p).expect("style p").clone();
+    child.set("--a", "9px");
+    child.set("--b", "2px");
+    assert_eq!(child.get("--a"), Some("9px"));
+    assert_eq!(child.get("--b"), Some("2px"));
+    let parent = map.get(f.div).expect("style div");
+    assert_eq!(parent.get("--a"), Some("1px"), "parent intact");
+    assert_eq!(parent.get("--b"), None, "pas de fuite");
+}
+
+/// Trois générations : la petite-fille hérite la table effective
+/// de la mère (propres de la mère comprises).
+#[test]
+fn vars_propagent_les_propres_de_la_mere() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let a = dom.create_element("div").unwrap();
+    dom.append_child(doc, a).unwrap();
+    let b = dom.create_element("div").unwrap();
+    dom.append_child(a, b).unwrap();
+    let c = dom.create_element("p").unwrap();
+    dom.append_child(b, c).unwrap();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { --theme: dark } div div { --pad: 2px }",
+        Origin::Author,
+    );
+    let map = e.compute_tree(&dom, doc, &env());
+    let gc = map.get(c).expect("style p");
+    assert_eq!(gc.get("--theme"), Some("dark"), "transmis via la mère");
+    assert_eq!(gc.get("--pad"), Some("2px"), "propre de la mère");
+}

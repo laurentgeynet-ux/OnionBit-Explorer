@@ -24,6 +24,7 @@ use crate::value::{
 };
 use explorer_dom::{Dom, NodeId};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Environnement d'évaluation des media queries.
 #[derive(Debug, Clone, PartialEq)]
@@ -193,9 +194,21 @@ pub struct StyleEngine {
 /// Computed style d'un nœud : propriété (minuscules) → valeur
 /// texte résolue (mot-clés `inherit`/`initial`/`unset` déjà
 /// réduits ; le *typage* est l'affaire de l'étape 16).
+///
+/// R-57 — les propriétés custom `--*` vivent dans une table
+/// effective **partagée** (`Arc`) : un nœud sans déclaration
+/// `--*` propre référence la table du parent (héritage O(1)
+/// par bump de refcount au lieu d'une copie O(vars) — mesuré
+/// ~3,2 M d'entrées dupliquées sur Wikipedia, ~1 Go de
+/// rétention commise). Un nœud qui en déclare paie un
+/// clone-on-write une fois (`Arc::make_mut`). `Arc` et non
+/// `Rc` : le payload de peinture traverse `spawn_blocking`
+/// (`Send` requis). Props normales : `HashMap` plat inchangé.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ComputedStyle {
     props: HashMap<String, String>,
+    /// Table `--*` effective (héritées ∪ déclarées propres).
+    vars: Arc<HashMap<String, String>>,
 }
 
 impl ComputedStyle {
@@ -203,12 +216,18 @@ impl ComputedStyle {
     /// (→ valeur initiale ou héritée selon la propriété).
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&str> {
+        if name.starts_with("--") {
+            return self.vars.get(name).map(String::as_str);
+        }
         self.props.get(name).map(String::as_str)
     }
 
     /// Itère les propriétés présentes (ordre indéfini).
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.props.iter().map(|(k, v)| (k.as_str(), v.as_str()))
+        self.props
+            .iter()
+            .chain(self.vars.iter())
+            .map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
     /// Valeur calculée ou repli explicite.
@@ -247,8 +266,14 @@ impl ComputedStyle {
     /// Pose `name = value` — réservé aux surcharges
     /// post-cascade (transitions, étape 45 : la valeur
     /// interpolée l'emporte sur toute déclaration).
+    /// R-57 : une `--*` écrit dans la table partagée par
+    /// clone-on-write — la surcharge ne touche pas le parent.
     pub fn set(&mut self, name: &str, value: &str) {
-        self.props.insert(name.to_string(), value.to_string());
+        if name.starts_with("--") {
+            Arc::make_mut(&mut self.vars).insert(name.to_string(), value.to_string());
+        } else {
+            self.props.insert(name.to_string(), value.to_string());
+        }
     }
 }
 
@@ -524,7 +549,7 @@ impl StyleEngine {
     ) -> ComputedStyle {
         let mut props: HashMap<String, String> = HashMap::new();
         if dom.element(node).is_err() {
-            return ComputedStyle { props };
+            return ComputedStyle::default();
         }
         // 1-2. Collecte ordonnée (rang, spécificité, ordre) :
         // règles + attribut `style` (rang auteur inline,
@@ -588,13 +613,15 @@ impl StyleEngine {
                     }
                 }
             }
-            // Propriétés custom `--*` : héritées par défaut (spec).
-            for (k, v) in p.iter() {
-                if k.starts_with("--") && !props.contains_key(k) {
-                    props.insert(k.to_string(), v.to_string());
-                }
-            }
         }
+        // Propriétés custom `--*` : héritées par défaut (spec)
+        // — R-57 : la table effective du parent est PARTAGÉE
+        // (bump `Arc` O(1)) au lieu de recopier chaque entrée ;
+        // les `--*` déclarées par ce nœud vivent dans `props`
+        // jusqu'à l'extraction finale (mots-clés/var() ci-dessous
+        // les traitent comme avant).
+        let mut vars: Arc<HashMap<String, String>> =
+            parent.map_or_else(|| Arc::new(HashMap::new()), |p| Arc::clone(&p.vars));
         // 4. Mots-clés CSS-wide sur les valeurs déclarées.
         for (k, v) in &mut props {
             let kw = v.trim().to_ascii_lowercase();
@@ -620,10 +647,17 @@ impl StyleEngine {
         //    invalide (spec « invalid at computed-value time »
         //    → on retire la propriété ; pour une héritée, la
         //    valeur du parent est restaurée).
+        //    R-57 : `snap` = props propres + `--*` déclarées
+        //    (petit — plus les ~200 héritées) ; les héritées
+        //    sont lues dans la table `vars` partagée — lookup
+        //    : propres d'abord (elles masquent l'héritage).
         let snap = props.clone();
+        let lookup = |name: &str| -> Option<String> {
+            snap.get(name).cloned().or_else(|| vars.get(name).cloned())
+        };
         for (k, v) in &mut props {
             if !k.starts_with("--") && v.contains("var(") {
-                if let Some(resolved) = substitute_vars(v, &snap, 0) {
+                if let Some(resolved) = substitute_vars(v, &lookup, 0) {
                     *v = resolved;
                 } else {
                     if is_inherited(k) {
@@ -638,10 +672,28 @@ impl StyleEngine {
             }
         }
         props.retain(|_, v| v != "\u{0}");
+        // R-57 — les `--*` déclarées rejoignent la table
+        // partagée : clone-on-write seulement si le nœud en
+        // possède (une `--*` propre masque l'héritée du même
+        // nom — insertion après héritage partagé = sémantique
+        // identique à la copie plate conditionnelle).
+        if props.keys().any(|k| k.starts_with("--")) {
+            let own: Vec<String> = props
+                .keys()
+                .filter(|k| k.starts_with("--"))
+                .cloned()
+                .collect();
+            let m = Arc::make_mut(&mut vars);
+            for k in own {
+                if let Some(v) = props.remove(&k) {
+                    m.insert(k, v);
+                }
+            }
+        }
         // 6. `font-size` → valeur calculée absolue (R-17 —
         //    détail dans `normalize_font_size`).
         normalize_font_size(&mut props, parent, env);
-        ComputedStyle { props }
+        ComputedStyle { props, vars }
     }
 
     /// Candidats de déclaration des **règles** triés (rang,
@@ -972,7 +1024,11 @@ fn legacy_presentational_hints(
 /// `props` — `None` si une référence est irrésoluble (pas de
 /// `--name` ni de fallback). Récursion bornée (var dans var,
 /// cycles → échec tolérant).
-fn substitute_vars(text: &str, props: &HashMap<String, String>, depth: u32) -> Option<String> {
+fn substitute_vars(
+    text: &str,
+    lookup: &dyn Fn(&str) -> Option<String>,
+    depth: u32,
+) -> Option<String> {
     if depth > 8 {
         return None;
     }
@@ -1003,16 +1059,14 @@ fn substitute_vars(text: &str, props: &HashMap<String, String>, depth: u32) -> O
         rest = &inner[end + 1..];
         // `--name` + virgule de premier niveau → fallback.
         let (name, fallback) = split_top_comma(body);
-        let resolved = props
-            .get(name.trim())
-            .and_then(|v| substitute_vars(v, props, depth + 1));
+        let resolved = lookup(name.trim()).and_then(|v| substitute_vars(&v, lookup, depth + 1));
         // --x résolue (sa propre chaîne var() comprise) →
         // substitution ; invalide ou absente → fallback.
         if let Some(v) = resolved {
             out.push_str(&v);
         } else {
             let fb = fallback?;
-            out.push_str(&substitute_vars(fb.trim(), props, depth + 1)?);
+            out.push_str(&substitute_vars(fb.trim(), lookup, depth + 1)?);
         }
     }
     out.push_str(rest);
@@ -1231,3 +1285,83 @@ table {
   text-align: initial
 }
 ";
+
+#[cfg(test)]
+mod tests {
+    //! R-57 — mécanisme interne : la table `--*` est partagée
+    //! entre parent et enfants (`Arc`), pas copiée.
+    use super::{StyleEngine, StyleEnv};
+    use crate::Origin;
+    use explorer_dom::Dom;
+    use std::sync::Arc;
+
+    /// Arbre `div > div > p` + CSS arbitraire → styles calculés.
+    fn three_gen(
+        css: &str,
+    ) -> (
+        Dom,
+        explorer_dom::NodeId,
+        explorer_dom::NodeId,
+        explorer_dom::NodeId,
+        crate::StyleMap,
+    ) {
+        let mut dom = Dom::new();
+        let doc = dom.document();
+        let a = dom.create_element("div").unwrap();
+        dom.append_child(doc, a).unwrap();
+        let b = dom.create_element("div").unwrap();
+        dom.append_child(a, b).unwrap();
+        let c = dom.create_element("p").unwrap();
+        dom.append_child(b, c).unwrap();
+        let mut e = StyleEngine::new();
+        e.add_css(css, Origin::Author);
+        let map = e.compute_tree(&dom, doc, &StyleEnv::default());
+        (dom, a, b, c, map)
+    }
+
+    /// Enfant sans `--*` propre : même allocation que le parent
+    /// (l'héritage ne duplique plus les ~200 entrées `:root`).
+    /// NB : `div {…}` cible `a` ET `b` — chacun déclare donc ;
+    /// le partage se mesure sur le `p` feuille.
+    #[test]
+    fn vars_partage_arc_sans_declaration() {
+        let (_dom, _a, b, c, map) = three_gen("div { --a: 1px; --b: 2px }");
+        let parent = map.get(b).unwrap();
+        let child = map.get(c).unwrap();
+        assert!(
+            Arc::ptr_eq(&parent.vars, &child.vars),
+            "table `--*` partagée entre générations"
+        );
+    }
+
+    /// Enfant avec `--*` propre : clone-on-write — sa table
+    /// diverge ; sans déclaration, le `p` partage celle de `b`.
+    #[test]
+    fn vars_clone_on_write_si_declaree() {
+        let (_dom, a, b, c, map) = three_gen("div { --a: 1px } p { --c: 3px }");
+        let sa = map.get(a).unwrap();
+        let sb = map.get(b).unwrap();
+        let sc = map.get(c).unwrap();
+        // `b` (div) déclare `--a` → table dérivée de `a`.
+        assert!(!Arc::ptr_eq(&sa.vars, &sb.vars));
+        // `p` déclare aussi (`--c`) → dérivée de `b`.
+        assert!(!Arc::ptr_eq(&sb.vars, &sc.vars));
+        assert_eq!(sc.get("--a"), Some("1px"));
+        assert_eq!(sc.get("--c"), Some("3px"));
+    }
+
+    /// Chaîne pure : deux générations sans `--*` → un seul
+    /// bloc partagé de la racine à la feuille.
+    #[test]
+    fn vars_partage_sur_toute_la_chaine() {
+        let (_dom, a, b, c, map) = three_gen(":root { --t: dark }");
+        let _ = (b, c);
+        // `:root` = document : tous les descendants partagent
+        // la même allocation.
+        let sa = map.get(a).unwrap();
+        let sb = map.get(b).unwrap();
+        let sc = map.get(c).unwrap();
+        assert!(Arc::ptr_eq(&sa.vars, &sb.vars));
+        assert!(Arc::ptr_eq(&sb.vars, &sc.vars));
+    }
+}
