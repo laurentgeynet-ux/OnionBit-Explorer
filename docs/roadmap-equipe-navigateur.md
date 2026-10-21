@@ -1735,6 +1735,14 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   focus sur `keydown` (un `key` sur deux rapporte
   `unfocused` — la machinerie suggest re-focus entre les
   events ; constat consigné, à trier côté miroir).
+- [x] **JS-C51. `navigator.languages` absent** (demande
+  PIPE→NAV au journal 2026-10-21 — triage résidu
+  example.com : `navigator.languages.some(...)` →
+  `TypeError` tuait `/s.js` entre ses deux
+  `insertAdjacentHTML`, le `<svg>` logo n'entrait jamais
+  dans le miroir) : tableau **gelé** `["en-US","en"]`
+  dérivé de `language` installé dans `install_dom`
+  (low-fingerprint, même instance à chaque lecture).
 
 ## Tâches continues
 

@@ -428,6 +428,17 @@ impl Engine {
             let s = self.str_val(v);
             self.set_own(nav, k, s, true);
         }
+        // `navigator.languages` — tableau gelé dérivé de
+        // `language` (spec, low-fingerprint). Sans lui,
+        // `navigator.languages.some(...)` des scripts réels
+        // jette `TypeError` (triage example.com, journal
+        // PIPE→NAV 2026-10-21) — le script meurt avant ses
+        // insertions suivantes.
+        let en = self.str_val("en-US");
+        let en2 = self.str_val("en");
+        let langs = self.new_array(vec![en, en2]);
+        let _ = crate::builtins::object_freeze(self, Value::Undefined, &[langs]);
+        self.set_own(nav, "languages", langs, true);
         // `navigator.sendBeacon(url, data?)` — POST fire-and-forget
         // via le transport XHR (staple de télémétrie des pages
         // réelles ; `false` sans connecteur, comme la spec).

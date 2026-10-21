@@ -373,6 +373,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   est localisable *dans* le script (le src vient de JS-C46).
   Écart : position du site d'appel (l'AST n'a pas de span
   par statement — la définition y supplée).
+- **JS-C51 — `navigator.languages`** (`explorer-jscore`) :
+  demande PIPE→NAV au journal — sur example.com,
+  `navigator.languages.some(...)` jetait `TypeError` et
+  tuait `/s.js` entre ses deux `insertAdjacentHTML` : le
+  `<svg>` logo (style inclus, `"afterbegin"`) n'entrait
+  jamais dans le miroir alors que la chaîne PIPE
+  (sérialisation → re-parse → `collect_svg`) était saine.
+  Livré : tableau **gelé** `["en-US","en"]` dérivé de
+  `language`, même instance à chaque lecture (spec),
+  low-fingerprint — la seconde injection s'exécute et le
+  svg atteint le DOM.
 
 ### Added
 

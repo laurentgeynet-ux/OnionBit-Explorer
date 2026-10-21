@@ -4362,7 +4362,7 @@ fn object_is_sealed(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
 /// `Object.freeze` — seal + toutes data props non-writable.
 /// Sur un proxy : même approximation que `seal` (trap
 /// `preventExtensions` ou cible).
-fn object_freeze(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn object_freeze(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     if let Value::Obj(id) = arg(args, 0) {
         if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) {
             return object_prevent_extensions(e, Value::Undefined, &[arg(args, 0)]);
