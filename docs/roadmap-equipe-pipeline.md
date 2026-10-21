@@ -1652,6 +1652,22 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (attr, défauts, priorité règle UA,
   écrasement auteur) ; sonde HN :
   textarea ~540×130 px conforme.
+- [x] **R-67. `FontCache` `Send`**
+  (demande NAV journal 2026-11-08 —
+  la recette R-65 bute sur le
+  transport `PaintPayload` en
+  `spawn_blocking`) — **livré** :
+  `FontCache.data` `Rc<Vec<u8>>` →
+  `Arc<Vec<u8>>` (tampons immuables,
+  `Arc::as_ptr` conserve l'identité
+  des clés `metrics`/`shape`) ;
+  `font_data_of` idem. Le cache
+  devient `Send`+`Sync` — stockable
+  dans la payload migrée ; sert
+  toujours sous `RefCell` dans
+  `BlockCtx` (single-writer).
+  Précédent : `Arc` retenu pour les
+  `--*` en R-57 — même raison.
 - [x] **R-59. `prefers-color-scheme` +
   défauts UA sombres** (moitié PIPE du
   thème sombre — journal d'abord,

@@ -9,6 +9,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-67 — `FontCache` `Send`** (`explorer-layout`) :
+  `data` `Rc<Vec<u8>>` → `Arc<Vec<u8>>` (tampons immuables
+  — `Arc::as_ptr` conserve l'identité des clés
+  `metrics`/`shape`) ; `font_data_of` idem. Demande NAV :
+  la persistance R-65 transitait par `PaintPayload` migrée
+  `spawn_blocking` — `Send` exigé ; précédent `Arc` des
+  `--*` (R-57). Le cache peut désormais vivre dans la
+  payload ; il sert toujours sous `RefCell` dans
+  `BlockCtx` (domaine single-writer).
 - **R-66 — `cols`/`rows`/`size` en caractères**
   (`explorer-css`) : hints présentationnels — `cols` →
   `width` en `ch`, `rows` → `height` ≈ lignes ×1.2em

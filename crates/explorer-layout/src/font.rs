@@ -17,7 +17,7 @@
 //! invariant du domaine.
 
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// Port : source de données de fontes (ADR-0009).
 ///
@@ -121,9 +121,11 @@ pub struct ShapedRun {
 /// un parse de métriques par (fonte, taille), un shaping par
 /// (fonte, taille, texte, direction).
 ///
-/// `!Send`/`!Sync` (Rc + sert sous `RefCell`) : le domaine est
-/// single-writer par contrat — le cache vit dans
-/// [`crate::BlockCtx::font_cache`] ou dans la passe raster.
+/// `Send`/`Sync` (R-67 : `Arc` — la demande NAV 2026-11-08 le
+/// fait transiter dans `PaintPayload` sous `spawn_blocking` pour
+/// persister entre applys) ; sert sous `RefCell` dans
+/// [`crate::BlockCtx::font_cache`] — le domaine reste
+/// single-writer par contrat.
 #[derive(Debug, Default)]
 pub struct FontCache {
     /// Révision de la source vue à la dernière requête —
@@ -135,7 +137,7 @@ pub struct FontCache {
     /// figés, sinon la famille resterait « inconnue ».
     rev: Option<u64>,
     /// `FontRequest` → octets résolus (`None` = miss figé).
-    data: HashMap<FontRequest, Option<Rc<Vec<u8>>>>,
+    data: HashMap<FontRequest, Option<Arc<Vec<u8>>>>,
     /// (identité de fonte, taille px en bits) → métriques
     /// verticales. L'identité = l'adresse des octets cachés —
     /// stable tant que `data` vit.
@@ -176,18 +178,18 @@ impl FontCache {
     /// Octets de la fonte — mémoïsés par requête ; `None`
     /// figé (une famille absente ne re-coûte rien) **pour la
     /// révision courante** — voir `rev`.
-    pub fn data(&mut self, src: &dyn FontSource, req: &FontRequest) -> Option<Rc<Vec<u8>>> {
+    pub fn data(&mut self, src: &dyn FontSource, req: &FontRequest) -> Option<Arc<Vec<u8>>> {
         self.sync(src);
         self.data
             .entry(req.clone())
-            .or_insert_with(|| src.font_data(req).map(Rc::new))
+            .or_insert_with(|| src.font_data(req).map(Arc::new))
             .clone()
     }
 
     /// Adresse d'identité des octets cachés (clé des cartes
     /// `metrics`/`shape`) — `None` si la fonte est absente.
     fn key(&mut self, src: &dyn FontSource, req: &FontRequest) -> Option<usize> {
-        self.data(src, req).map(|d| Rc::as_ptr(&d) as usize)
+        self.data(src, req).map(|d| Arc::as_ptr(&d) as usize)
     }
 
     /// Métriques verticales à `size_px` — un parse `hhea`
@@ -399,7 +401,7 @@ pub fn natural_line_height(
 pub fn font_data_of(
     style: &explorer_css::ComputedStyle,
     ctx: &crate::BlockCtx<'_>,
-) -> Option<Rc<Vec<u8>>> {
+) -> Option<Arc<Vec<u8>>> {
     let src = ctx.fonts?;
     let req = request_of(style, ctx);
     ctx.font_cache.borrow_mut().data(src, &req)
