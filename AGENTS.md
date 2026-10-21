@@ -281,6 +281,16 @@ Règles de la coexistence :
    au vert. En interne d'équipe, liberté totale (branches
    partagées, worktrees) — les règles ne gouvernent que ce
    qui atterrit sur `main`.
+   - **Worktrees parallèles — `target-dir` distinct** :
+     `.cargo/config.toml` épingle `D:/cargo-target/
+     OnionBit-Explorer` pour tous les worktrees — les
+     binaires de test d'un autre worktree (autre
+     `CARGO_MANIFEST_DIR`, fixtures absentes) peuvent
+     s'exécuter à la place des vôtres (ex. réel :
+     `tree_construction` « corpus dir NotFound » — race
+     environnementale, pas un flake). Deux sessions
+     simultanées → `CARGO_TARGET_DIR=<worktree>/target`
+     par worktree, ou gate sur `main` uniquement.
    - **Gate entier avant push** : `verify_all` complet, pas
      seulement son crate — le couplage est asymétrique :
      PIPELINE (amont) peut casser des tests `explorer-core`
