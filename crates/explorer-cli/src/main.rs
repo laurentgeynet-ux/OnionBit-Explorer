@@ -28,6 +28,16 @@ use explorer_net::tls::TlsConnector;
 use explorer_net::url::Url;
 
 fn main() -> ExitCode {
+    // Journal `tracing` actif — binaire de debug : `RUST_LOG`
+    // pilote le niveau (défaut `warn`), les `debug!` session
+    // (scripts en échec, etc.) deviennent visibles.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .with_writer(std::io::stderr)
+        .init();
     let args: Vec<String> = std::env::args().collect();
     match args.as_slice() {
         [_, cmd, arg] if cmd == "dump" => dump(arg),

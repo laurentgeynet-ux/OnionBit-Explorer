@@ -1066,10 +1066,10 @@ impl Dom {
         let Some((&last, prefix)) = parts.split_last() else {
             return false;
         };
-        let Some((tag, id, class)) = parse_simple_selector(last) else {
+        let Some(simple) = parse_simple_selector(last) else {
             return false;
         };
-        self.node_matches(node, tag.as_deref(), id.as_deref(), class.as_deref())
+        self.node_matches(node, &simple)
             && (prefix.is_empty() || self.ancestor_matches(self.root, node, prefix))
     }
 
@@ -1279,27 +1279,23 @@ impl Dom {
         }
     }
 
-    /// Minimal `querySelector(All)`: single-token selectors —
-    /// `tag`, `#id`, `.class`, `tag.class`, `tag#id`, `*`, plus the
-    /// descendant combinator (`a b`). `None`/`empty` for anything
-    /// more complex (documented subset).
+    /// Minimal `querySelector(All)`: compound selectors —
+    /// `tag`, `#id`, `.class` (répétable), `[attr]`/`[attr=v]`/
+    /// `[attr~=v]`/`[attr|=v]`/`[attr^=v]`/`[attr$=v]`/`[attr*=v]`
+    /// (répétables, valeur nue ou quotée, flag `i`/`s`), `*`,
+    /// plus the descendant combinator (`a b`). `None`/`empty`
+    /// for anything more complex (documented subset).
     #[must_use]
     pub fn query(&self, from: NodeId, sel: &str) -> Vec<NodeId> {
         let parts: Vec<&str> = sel.split_whitespace().collect();
         let Some(last) = parts.last() else {
             return Vec::new();
         };
-        let Some((tag, id, class)) = parse_simple_selector(last) else {
+        let Some(simple) = parse_simple_selector(last) else {
             return Vec::new();
         };
         let mut out = Vec::new();
-        self.collect_query(
-            from,
-            tag.as_deref(),
-            id.as_deref(),
-            class.as_deref(),
-            &mut out,
-        );
+        self.collect_query(from, &simple, &mut out);
         // Descendant combinator: keep only nodes whose ancestors match
         // the left-to-right selector chain (bounded by `from`).
         if parts.len() > 1 {
@@ -1316,7 +1312,7 @@ impl Dom {
         let Some((&last, rest)) = parts.split_last() else {
             return true;
         };
-        let Some((tag, id, class)) = parse_simple_selector(last) else {
+        let Some(simple) = parse_simple_selector(last) else {
             return false;
         };
         let mut cur = self.parent(node);
@@ -1324,9 +1320,7 @@ impl Dom {
             if a == bound {
                 break;
             }
-            if self.node_matches(a, tag.as_deref(), id.as_deref(), class.as_deref())
-                && self.ancestor_matches(bound, a, rest)
-            {
+            if self.node_matches(a, &simple) && self.ancestor_matches(bound, a, rest) {
                 return true;
             }
             cur = self.parent(a);
@@ -1334,41 +1328,37 @@ impl Dom {
         false
     }
 
-    fn collect_query(
-        &self,
-        node: NodeId,
-        tag: Option<&str>,
-        id: Option<&str>,
-        class: Option<&str>,
-        out: &mut Vec<NodeId>,
-    ) {
+    fn collect_query(&self, node: NodeId, sel: &SimpleSel, out: &mut Vec<NodeId>) {
         for &c in &self.nodes[node as usize].children {
-            if self.node_matches(c, tag, id, class) {
+            if self.node_matches(c, sel) {
                 out.push(c);
             }
-            self.collect_query(c, tag, id, class, out);
+            self.collect_query(c, sel, out);
         }
     }
 
     /// Single-node selector test — `matches()` and `collect_query`
     /// share the same simple-selector subset.
-    fn node_matches(
-        &self,
-        node: NodeId,
-        tag: Option<&str>,
-        id: Option<&str>,
-        class: Option<&str>,
-    ) -> bool {
+    fn node_matches(&self, node: NodeId, sel: &SimpleSel) -> bool {
         let n = &self.nodes[node as usize];
         if n.kind != NodeKind::Element {
             return false;
         }
-        let tag_ok = tag.is_none_or(|t| n.tag == t);
-        let id_ok = id.is_none_or(|i| Self::attr_val(n, "id") == Some(i));
-        let class_ok = class.is_none_or(|cls| {
+        if let Some(t) = &sel.tag {
+            if n.tag != *t {
+                return false;
+            }
+        }
+        if let Some(i) = &sel.id {
+            if Self::attr_val(n, "id") != Some(i.as_str()) {
+                return false;
+            }
+        }
+        sel.classes.iter().all(|cls| {
             Self::attr_val(n, "class").is_some_and(|v| v.split_whitespace().any(|t| t == cls))
-        });
-        tag_ok && id_ok && class_ok
+        }) && sel.attrs.iter().all(|a| {
+            Self::attr_val(n, &a.name).is_some_and(|v| attr_op_matches(&a.op, v, &a.value, a.ci))
+        })
     }
 
     // -- text & serialization ---------------------------------------------
@@ -1702,48 +1692,225 @@ fn contains_ci(hay: &str, needle: &str) -> bool {
 const IMPLICIT_CLOSE: &[&str] = &["li", "p", "tr", "td", "th", "option", "dt", "dd"];
 
 /// `tag` / `#id` / `.class` / `tag.class` / `tag#id` / `*` → parts.
-fn parse_simple_selector(sel: &str) -> Option<(Option<String>, Option<String>, Option<String>)> {
+/// Sélecteur simple du sous-ensemble `Dom::query` — un
+/// « compound selector » CSS : tag (ou `*`), `#id`, `.class`
+/// (répétables) et filtres `[attr]` (répétables, opérateurs
+/// `=`/`~=`/`|=`/`^=`/`$=`/`*=`, valeurs nues ou quotées, flag
+/// `i`/`s` en fin).
+#[derive(Default)]
+struct SimpleSel {
+    tag: Option<String>,
+    id: Option<String>,
+    classes: Vec<String>,
+    attrs: Vec<AttrSel>,
+}
+
+/// Filtre `[name op value]` — `Exists` = présence seule.
+struct AttrSel {
+    name: String,
+    op: AttrOp,
+    value: String,
+    ci: bool,
+}
+
+/// Opérateurs de sélecteur d'attribut (CSS §6.3).
+enum AttrOp {
+    Exists,
+    Eq,
+    Includes,
+    DashMatch,
+    Prefix,
+    Suffix,
+    Substring,
+}
+
+/// Caractère admis dans un identifiant de sélecteur (subset —
+/// pas d'échappes `\` : un sélecteur qui en contient sort du
+/// sous-ensemble et ne matche rien).
+fn is_sel_ident(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c >= 0x80
+}
+
+fn parse_simple_selector(sel: &str) -> Option<SimpleSel> {
     if sel.is_empty() || sel.contains(' ') || sel.contains(',') || sel.contains('>') {
         return None;
     }
-    let (mut tag, mut id, mut class) = (None, None, None);
-    let mut rest = sel;
-    if let Some((h, r)) = rest.split_once('#') {
-        if !h.is_empty() {
-            tag = Some(h.to_lowercase());
-        }
-        rest = r;
-        let (i, r2) = match rest.split_once('.') {
-            Some((a, b)) => (a, b),
-            None => (rest, ""),
-        };
-        if !i.is_empty() {
-            id = Some(i.to_string());
-        }
-        rest = r2;
-        if !rest.is_empty() {
-            class = Some(rest.to_string());
-            rest = "";
-        }
-    } else if let Some((h, r)) = rest.split_once('.') {
-        if !h.is_empty() {
-            tag = Some(h.to_lowercase());
-        }
-        if !r.is_empty() {
-            class = Some(r.to_string());
-        }
-        rest = "";
+    let b = sel.as_bytes();
+    let mut i = 0;
+    let mut out = SimpleSel::default();
+    let start = i;
+    while i < b.len() && is_sel_ident(b[i]) {
+        i += 1;
     }
-    if !rest.is_empty() {
-        tag = Some(rest.to_lowercase());
+    if i > start {
+        out.tag = Some(sel[start..i].to_lowercase());
     }
-    if tag.is_none() && id.is_none() && class.is_none() {
+    while i < b.len() {
+        match b[i] {
+            b'#' | b'.' => {
+                let marker = b[i];
+                i += 1;
+                let s = i;
+                while i < b.len() && is_sel_ident(b[i]) {
+                    i += 1;
+                }
+                if i == s {
+                    return None;
+                }
+                if marker == b'#' {
+                    if out.id.is_some() {
+                        return None;
+                    }
+                    out.id = Some(sel[s..i].to_string());
+                } else {
+                    out.classes.push(sel[s..i].to_string());
+                }
+            }
+            b'[' => {
+                let (a, next) = parse_attr_sel(&sel[i..])?;
+                out.attrs.push(a);
+                i += next;
+            }
+            _ => return None,
+        }
+    }
+    if out.tag.is_none() && out.id.is_none() && out.classes.is_empty() && out.attrs.is_empty() {
         return None;
     }
-    if tag.as_deref() == Some("*") {
-        tag = None;
+    if out.tag.as_deref() == Some("*") {
+        out.tag = None;
     }
-    Some((tag, id, class))
+    Some(out)
+}
+
+/// `[…]` en tête de `s` — retourne le filtre + la longueur
+/// consommée (jusqu'au `]` inclus). Espaces internes tolérés.
+fn parse_attr_sel(s: &str) -> Option<(AttrSel, usize)> {
+    let b = s.as_bytes();
+    let mut i = 1;
+    let skip_ws = |mut i: usize| {
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        i
+    };
+    i = skip_ws(i);
+    let st = i;
+    while i < b.len() && is_sel_ident(b[i]) {
+        i += 1;
+    }
+    if i == st {
+        return None;
+    }
+    let name = s[st..i].to_ascii_lowercase();
+    i = skip_ws(i);
+    let op = match b.get(i) {
+        Some(b'~') if b.get(i + 1) == Some(&b'=') => {
+            i += 2;
+            AttrOp::Includes
+        }
+        Some(b'|') if b.get(i + 1) == Some(&b'=') => {
+            i += 2;
+            AttrOp::DashMatch
+        }
+        Some(b'^') if b.get(i + 1) == Some(&b'=') => {
+            i += 2;
+            AttrOp::Prefix
+        }
+        Some(b'$') if b.get(i + 1) == Some(&b'=') => {
+            i += 2;
+            AttrOp::Suffix
+        }
+        Some(b'*') if b.get(i + 1) == Some(&b'=') => {
+            i += 2;
+            AttrOp::Substring
+        }
+        Some(b'=') => {
+            i += 1;
+            AttrOp::Eq
+        }
+        Some(b']') => {
+            return Some((
+                AttrSel {
+                    name,
+                    op: AttrOp::Exists,
+                    value: String::new(),
+                    ci: false,
+                },
+                i + 1,
+            ));
+        }
+        _ => return None,
+    };
+    i = skip_ws(i);
+    let value = if let Some(&q @ (b'"' | b'\'')) = b.get(i) {
+        i += 1;
+        let st = i;
+        while i < b.len() && b[i] != q {
+            i += 1;
+        }
+        if i >= b.len() {
+            return None;
+        }
+        let v = s[st..i].to_string();
+        i += 1;
+        v
+    } else {
+        let st = i;
+        while i < b.len() && is_sel_ident(b[i]) {
+            i += 1;
+        }
+        if i == st {
+            return None;
+        }
+        s[st..i].to_string()
+    };
+    i = skip_ws(i);
+    let mut ci = false;
+    if let Some(&f) = b.get(i) {
+        if f.eq_ignore_ascii_case(&b'i') {
+            ci = true;
+            i += 1;
+        } else if f.eq_ignore_ascii_case(&b's') {
+            i += 1;
+        }
+    }
+    i = skip_ws(i);
+    if b.get(i) != Some(&b']') {
+        return None;
+    }
+    Some((
+        AttrSel {
+            name,
+            op,
+            value,
+            ci,
+        },
+        i + 1,
+    ))
+}
+
+/// `attr_val op expected` — sémantique CSS §6.3 (valeur vide
+/// jamais matchée par les opérateurs de contenu).
+fn attr_op_matches(op: &AttrOp, actual: &str, expected: &str, ci: bool) -> bool {
+    let (a, e) = if ci {
+        (actual.to_lowercase(), expected.to_lowercase())
+    } else {
+        (actual.to_string(), expected.to_string())
+    };
+    let (a, e) = (a.as_str(), e.as_str());
+    match op {
+        AttrOp::Exists => true,
+        AttrOp::Eq => a == e,
+        AttrOp::Includes => !e.is_empty() && a.split_whitespace().any(|w| w == e),
+        AttrOp::DashMatch => {
+            !e.is_empty()
+                && (a == e || (a.starts_with(e) && a.as_bytes().get(e.len()) == Some(&b'-')))
+        }
+        AttrOp::Prefix => !e.is_empty() && a.starts_with(e),
+        AttrOp::Suffix => !e.is_empty() && a.ends_with(e),
+        AttrOp::Substring => !e.is_empty() && a.contains(e),
+    }
 }
 
 fn escape_text(s: &str) -> String {

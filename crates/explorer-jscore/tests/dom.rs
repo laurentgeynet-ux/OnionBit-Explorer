@@ -283,6 +283,63 @@ fn query_selector_subset() {
     assert_eq!(ev("document.querySelector('div > p')"), "null");
 }
 
+/// Sélecteurs d'attribut `[a]`/`[a=v]`/`~=`/`|=`/`^=`/`$=`/`*=` —
+/// le motif terrain qui les a motivés : lobste.rs itère
+/// `qSA('time[data-at-unix]')` au `DOMContentLoaded`.
+#[test]
+fn query_selector_attr_operators() {
+    // Présence + valeur exacte (nue ou quotée).
+    assert_eq!(
+        ev("document.querySelector('input[type=checkbox]').id"),
+        "cb"
+    );
+    assert_eq!(
+        ev("document.querySelector('input[type=\"text\"]').id"),
+        "inp"
+    );
+    assert_eq!(ev("document.querySelector('[checked]').id"), "cb");
+    assert_eq!(ev("document.querySelectorAll('input[type]').length"), "2");
+    // `~=` mot dans une liste ; `|=` préfixe de tiret.
+    assert_eq!(
+        ev_in(
+            "<div id=a class='x y z'></div><div id=b class='xy'></div><i id=c lang='fr-FR'></i>",
+            "document.querySelectorAll('[class~=y]').length + '/' + \
+             document.querySelector('[lang|=fr]').id"
+        ),
+        "1/c"
+    );
+    // `^=`/`$=`/`*=` préfixe/suffixe/sous-chaîne.
+    assert_eq!(
+        ev("document.querySelector('input[id^=\"in\"]').id + '/' + \
+            document.querySelector('input[id$=\"b\"]').id + '/' + \
+            document.querySelectorAll('input[id*=n]').length"),
+        "inp/cb/1"
+    );
+    // Compound : tag + classe + attribut.
+    assert_eq!(
+        ev("document.querySelector('input[type=checkbox][checked]').id"),
+        "cb"
+    );
+    // Absent ou valeur différente → null.
+    assert_eq!(ev("document.querySelector('[data-nope]')"), "null");
+    assert_eq!(ev("document.querySelector('input[type=radio]')"), "null");
+    // Hors sous-ensemble (`,`, `>`, pseudo) → null, jamais d'erreur.
+    assert_eq!(
+        ev("document.querySelector('[type=text],[checked]')"),
+        "null"
+    );
+    assert_eq!(ev("document.querySelector('input:hover')"), "null");
+    // `matches`/`closest` partagent le même sous-ensemble.
+    assert_eq!(
+        ev("document.getElementById('cb').matches('input[checked]')"),
+        "true"
+    );
+    assert_eq!(
+        ev("document.getElementById('inp').matches('[checked]')"),
+        "false"
+    );
+}
+
 #[test]
 fn create_and_attach() {
     assert_eq!(

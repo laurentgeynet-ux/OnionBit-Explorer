@@ -19,3 +19,4 @@ explorer-css.workspace = true
 explorer-layout.workspace = true
 explorer-js.workspace = true
 explorer-render.workspace = true
+tracing-subscriber.workspace = true

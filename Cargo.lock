@@ -487,6 +487,7 @@ dependencies = [
  "explorer-net",
  "explorer-render",
  "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]

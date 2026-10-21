@@ -2082,6 +2082,21 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   remonté à 1046. Terrain restant : TypeError lobste.rs
   ×4 → rejouer `eval_hook` (JS-C50) quand les pages
   sauvegardées arrivent.
+- [x] **JS-C54. Sélecteurs d'attribut `[a]`/`[a=v]` au
+  mini-DOM** (`explorer-jscore`, re-mesure terrain) : le
+  replay lobste.rs montrait le module `application.js`
+  propre — les TypeError ×4 historiques ne se reproduisent
+  plus — mais `qSA('time[data-at-unix]')` retournait une
+  liste **vide** : le sous-ensemble `querySelector` ne
+  connaissait que tag/`#id`/`.class`. Fix : `SimpleSel`
+  étendu aux filtres attribut (`=`/`~=`/`|=`/`^=`/`$=`/`*=`,
+  valeurs nues ou quotées, flag `i`/`s`, multi-classe
+  `.a.b` au passage). Résultat mesuré : le listener
+  `DOMContentLoaded` réécrit désormais les `<time>` en
+  texte relatif (« 12 hours ago ») — les ×4 étaient
+  masqués par le no-op, les APIs (`dataset`, `innerText`,
+  `addEventListener`, NodeList itérable) fonctionnent.
+  Test : `query_selector_attr_operators`.
 
 ## Tâches continues
 
