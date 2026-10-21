@@ -1542,6 +1542,10 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   expansion + media d'import,
   borne/dédup. Solde aussi la
   demande R-22 (`@import` lobste.rs).
+  Suite terrain : dédup des `<link>`
+  par URL résolue (GitHub répète
+  ~7 hrefs dans ses blocs de
+  liens générés).
 
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur

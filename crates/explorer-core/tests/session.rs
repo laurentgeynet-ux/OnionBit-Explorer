@@ -829,6 +829,33 @@ async fn max_sheets_counts_after_media_filter() {
     );
 }
 
+/// Étape 96 : `<link>` en doublon (même URL résolue) → un
+/// seul fetch et un seul slot — les pages à liens générés
+/// (GitHub ~7 doublons) ne brûlent plus ni quota ni
+/// requête.
+#[tokio::test]
+async fn stylesheet_href_dedup() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <link rel=stylesheet href=/a.css>\
+         <link rel=stylesheet href=/a.css>\
+         <link rel=stylesheet href=\"./a.css\">\
+         <link rel=stylesheet href=/b.css>\
+         </head><body><div id=d style=\"width:50px;height:50px\"></div></body></html>",
+    );
+    t.route_bin("/a.css", 200, b"#d{background:#00ff00}".to_vec());
+    t.route_bin("/b.css", 200, b"".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let paths = t.paths();
+    let a = paths.iter().filter(|p| *p == "/a.css").count();
+    assert_eq!(a, 1, "même URL résolue → un seul fetch : {paths:?}");
+    assert!(paths.iter().any(|p| p == "/b.css"), "{paths:?}");
+}
+
 /// Étape 96 : `@import` fetché et expansé — le contenu de la
 /// feuille importée participe à la cascade ; l'import à media
 /// hors env est sauté (non fetché).

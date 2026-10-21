@@ -436,13 +436,18 @@ impl Session {
         // Étape 96 : `media=` évalué contre l'env viewport
         // AVANT la borne — une feuille hors-media (variante
         // `print`, `(prefers-color-scheme: …)`) n'est ni
-        // fetchée ni comptée dans `max_sheets`.
+        // fetchée ni comptée dans `max_sheets`. Dédup sur
+        // l'URL résolue (ordre conservé — les pages à blocs
+        // de liens générés répètent le même `href`, GitHub
+        // ~7 doublons : un doublon brûle quota + fetch pour
+        // un contenu identique en cascade).
         let env = super::apply::viewport_env(self.viewport);
+        let mut seen_sheets = std::collections::HashSet::new();
         let sheets: Vec<Url> = collect_stylesheet_links(dom)
             .into_iter()
             .filter(|(_, m)| media_attr_matches(&env, m.as_deref().unwrap_or_default()))
             .filter_map(|(h, _)| Url::resolve(base, &h).ok())
-            .filter(|u| !is_mixed_content(base, u))
+            .filter(|u| !is_mixed_content(base, u) && seen_sheets.insert(u.to_string()))
             .take(self.max_sheets)
             .collect();
         let scripts = collect_scripts(dom, base, scripting, self.max_scripts);

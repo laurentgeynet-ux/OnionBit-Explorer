@@ -342,7 +342,9 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (shim `@media` synthétique sur `parse_stylesheet` —
   aucune API `explorer-css` nouvelle). Soldé la demande
   `site_smoke` et la demande R-22 (`var(--color-*)`
-  lobste.rs venant d'un `@import` non résolu).
+  lobste.rs venant d'un `@import` non résolu). Complément
+  terrain : dédup des `<link>` par URL résolue (GitHub
+  répète ~7 hrefs — un doublon brûlait quota + fetch).
 - **R-52 — `mask-image` borne le fond** (`explorer-render`) :
   le motif icône universel `mask-image:url(svg)` +
   `background-color` (Codex/Primer/Material) peignait un
