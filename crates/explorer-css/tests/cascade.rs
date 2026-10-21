@@ -320,6 +320,113 @@ fn media_query_range_formes_et_collage() {
 }
 
 #[test]
+fn media_query_prefers_color_scheme() {
+    // R-59 — MQ5 `prefers-color-scheme` : `dark`/`light`
+    // contre l'env, feature nue (booléen) toujours vraie.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@media (prefers-color-scheme: dark) { div { color: red } } \
+         @media (prefers-color-scheme: light) { p { margin-top: 9px } } \
+         @media (prefers-color-scheme) { div { display: none } }",
+        Origin::Author,
+    );
+    // env Light (défaut) : dark faux, light vrai, nue vraie.
+    let s = e.compute(&f.dom, f.div, &env());
+    assert_eq!(s.get("color"), None, "env light : dark faux");
+    assert_eq!(s.get("display"), Some("none"), "feature nue → vrai");
+    assert_eq!(
+        e.compute(&f.dom, f.p, &env()).get("margin-top"),
+        Some("9px"),
+        "env light : light vrai"
+    );
+    let dark = StyleEnv {
+        color_scheme: explorer_css::ColorScheme::Dark,
+        ..env()
+    };
+    let s = e.compute(&f.dom, f.div, &dark);
+    assert_eq!(s.get("color"), Some("red"), "env dark : dark vrai");
+    assert_eq!(
+        e.compute(&f.dom, f.p, &dark).get("margin-top"),
+        Some("1em"),
+        "env dark : light retombe sur l'UA"
+    );
+}
+
+#[test]
+fn color_scheme_dark_defauts_ua() {
+    // R-59 — `color-scheme` sur la racine arbitre les défauts
+    // UA sombres (canvas + texte) : `dark` utilisé quand env
+    // dark OU qu'aucun `light` n'est déclaré ; `light`
+    // explicite = opt-out ; les déclarations auteur gardent
+    // la main (rang UA).
+    let dom = TreeBuilder::parse("<p>vu</p>");
+    let root = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let dark_env = StyleEnv {
+        color_scheme: explorer_css::ColorScheme::Dark,
+        ..env()
+    };
+    let styled = |css: &str, e: &StyleEnv| {
+        let mut eng = StyleEngine::new();
+        eng.add_css(css, Origin::Author);
+        eng.compute_tree(&dom, root, e)
+    };
+    // `dark` déclaré + env dark → canvas/texte inversés.
+    let m = styled("html { color-scheme: dark }", &dark_env);
+    let html = m.get(root).unwrap();
+    assert_eq!(html.get("background-color"), Some("#141414"));
+    assert_eq!(html.get("color"), Some("#e6e6e6"));
+    // Rang UA : l'auteur garde la main où il déclare.
+    let m = styled(
+        "html { color-scheme: dark; background-color: white }",
+        &dark_env,
+    );
+    let html = m.get(root).unwrap();
+    assert_eq!(html.get("background-color"), Some("white"));
+    assert_eq!(html.get("color"), Some("#e6e6e6"));
+    // Opt-out : `light` explicite sous env dark → rien.
+    let m = styled("html { color-scheme: light }", &dark_env);
+    assert_eq!(m.get(root).unwrap().get("background-color"), None);
+    // Sans déclaration : rien même en env dark.
+    let m = styled("", &dark_env);
+    assert_eq!(m.get(root).unwrap().get("background-color"), None);
+    // `dark` seul déclaré sous env light → sombre utilisé
+    // (la page force le schéma).
+    let m = styled("html { color-scheme: dark }", &env());
+    assert_eq!(
+        m.get(root).unwrap().get("background-color"),
+        Some("#141414")
+    );
+    // `light dark` sous env light → light gagne → rien.
+    let m = styled("html { color-scheme: light dark }", &env());
+    assert_eq!(m.get(root).unwrap().get("background-color"), None);
+    // Le texte des descendants hérite la couleur sombre.
+    let m = styled("html { color-scheme: dark }", &dark_env);
+    let body = dom
+        .children(root)
+        .unwrap()
+        .into_iter()
+        .find(|&c| dom.tag_name(c).is_ok_and(|t| t == "body"))
+        .unwrap();
+    let p = dom
+        .children(body)
+        .unwrap()
+        .into_iter()
+        .find(|&c| dom.tag_name(c).is_ok_and(|t| t == "p"))
+        .unwrap();
+    assert_eq!(
+        m.get(p).unwrap().get("color"),
+        Some("#e6e6e6"),
+        "color héritée du défaut sombre"
+    );
+}
+
+#[test]
 fn media_negation_et_type() {
     let f = fixture();
     let mut eng = StyleEngine::new();

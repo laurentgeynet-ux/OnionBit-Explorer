@@ -26,6 +26,18 @@ use explorer_dom::{Dom, NodeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Schéma de couleurs préféré de l'utilisateur (MQ5
+/// `prefers-color-scheme`) — fourni par la session (réglage
+/// OS/app) ; `Light` par défaut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColorScheme {
+    /// Clair (défaut navigateur).
+    #[default]
+    Light,
+    /// Sombre — `(prefers-color-scheme: dark)` matche.
+    Dark,
+}
+
 /// Environnement d'évaluation des media queries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StyleEnv {
@@ -39,6 +51,8 @@ pub struct StyleEnv {
     /// `medium` et de la valeur initiale de `font-size` à
     /// la racine. Convention navigateur : 16.
     pub font_size_base: f32,
+    /// Schéma de couleurs préféré (R-59).
+    pub color_scheme: ColorScheme,
 }
 
 impl Default for StyleEnv {
@@ -48,6 +62,7 @@ impl Default for StyleEnv {
             width_px: 1024,
             height_px: 768,
             font_size_base: 16.0,
+            color_scheme: ColorScheme::default(),
         }
     }
 }
@@ -134,6 +149,15 @@ fn condition_matches(env: &StyleEnv, name: &str, value: &str) -> bool {
         "orientation" => match value {
             "landscape" => env.width_px >= env.height_px,
             "portrait" => env.width_px < env.height_px,
+            _ => false,
+        },
+        // R-59 — MQ5 `prefers-color-scheme` : `light`/`dark`
+        // contre l'env ; feature nue (contexte booléen) →
+        // vrai quel que soit le schéma.
+        "prefers-color-scheme" => match value.trim() {
+            "" => true,
+            "light" => env.color_scheme == ColorScheme::Light,
+            "dark" => env.color_scheme == ColorScheme::Dark,
             _ => false,
         },
         // Feature inconnue → query fausse (spec : `not all`).
@@ -538,6 +562,7 @@ impl StyleEngine {
     /// Calcul d'un nœud connaissant le style de son parent.
     /// `pseudo` = `Some(pe)` → style du pseudo-élément `pe` du
     /// nœud (R-13) ; `None` → style de l'élément lui-même.
+    #[allow(clippy::too_many_lines)]
     fn compute_with_parent(
         &self,
         dom: &Dom,
@@ -693,7 +718,42 @@ impl StyleEngine {
         // 6. `font-size` → valeur calculée absolue (R-17 —
         //    détail dans `normalize_font_size`).
         normalize_font_size(&mut props, parent, env);
+        // 7. `color-scheme` sur la racine (R-59) : schéma
+        //    `dark` utilisé → défauts UA sombres sur les
+        //    propriétés restées initiales.
+        if parent.is_none() && pseudo.is_none() {
+            Self::apply_scheme_defaults(&mut props, env);
+        }
         ComputedStyle { props, vars }
+    }
+
+    /// R-59 — défauts UA sombres (§ css-color-adjust-1) : le
+    /// `color-scheme` déclaré sur la racine arbitre le schéma
+    /// utilisé — `dark` s'applique quand l'env préfère le
+    /// sombre **ou** qu'aucun `light` n'est déclaré (un
+    /// `light` explicite est un opt-out même sous env sombre ;
+    /// `only light` = opt-out par construction). Les défauts
+    /// ne remplissent que les propriétés encore initiales —
+    /// équivalent rang UA : l'auteur garde la main.
+    fn apply_scheme_defaults(props: &mut HashMap<String, String>, env: &StyleEnv) {
+        let Some(scheme) = props.get("color-scheme") else {
+            return;
+        };
+        let dark = scheme
+            .split_ascii_whitespace()
+            .any(|t| t.eq_ignore_ascii_case("dark"))
+            && (env.color_scheme == ColorScheme::Dark
+                || !scheme
+                    .split_ascii_whitespace()
+                    .any(|t| t.eq_ignore_ascii_case("light")));
+        if !dark {
+            return;
+        }
+        for (name, v) in [("background-color", "#141414"), ("color", "#e6e6e6")] {
+            props
+                .entry(name.to_string())
+                .or_insert_with(|| v.to_string());
+        }
     }
 
     /// Candidats de déclaration des **règles** triés (rang,
@@ -1116,6 +1176,7 @@ const INHERITED_PROPS: &[&str] = &[
     "border-spacing",
     "caption-side",
     "color",
+    "color-scheme",
     "cursor",
     "direction",
     "empty-cells",

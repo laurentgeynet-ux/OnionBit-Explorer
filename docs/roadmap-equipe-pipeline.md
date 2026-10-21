@@ -1524,6 +1524,37 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   « Skip to main content »/« Skip to
   search » du MDN réel ont disparu du shot
   (diff pixel localisé y18-33).
+- [x] **R-59. `prefers-color-scheme` +
+  défauts UA sombres** (moitié PIPE du
+  thème sombre — journal d'abord,
+  `StyleEnv` est le contrat NAV) —
+  **livré** : `StyleEnv` gagne
+  `color_scheme: ColorScheme` (énum
+  publique — `Light` défaut, `Dark`,
+  champ additif non cassant ; NAV
+  branchera le réglage OS/app dans
+  `viewport_env`). `condition_matches`
+  évalue `prefers-color-scheme`
+  (`light`/`dark`, feature nue → vrai)
+  — le shim `media_attr_matches` NAV
+  (étape 96) en hérite gratuitement
+  pour `<link media>`/`@import`.
+  `color-scheme` sur la racine
+  (propriété héritée, valeur libre
+  tolérée) arbitre les défauts UA
+  sombres : schéma `dark` utilisé
+  (env dark OU page qui force sans
+  `light` déclaré ; `light`/`only
+  light` = opt-out) → `background-color:
+  #141414` + `color: #e6e6e6` posés à
+  rang UA là où la page n'a rien
+  déclaré — canvas propagé §14.2,
+  texte hérité. Hors scope v1 :
+  `light-dark()`, `<meta name="color-
+  scheme">`, couleurs de liens dark.
+  Tests cascade : MQ light/dark/nue,
+  défauts posés/masqués/opt-out,
+  héritage descendant.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,
