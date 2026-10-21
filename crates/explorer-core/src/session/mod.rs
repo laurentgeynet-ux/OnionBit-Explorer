@@ -185,6 +185,12 @@ pub(crate) struct Tab {
     /// (R-36) — faces `OwnedFace` + contours en unités
     /// fonte ; invalidé par `FontSource::revision`.
     font_cache: explorer_render::GlyphCache,
+    /// Cache fonte du **layout** persisté entre applys
+    /// (R-65/R-67 — `Send` depuis R-67) : résolutions
+    /// `font_data`, métriques et runs shapés réutilisés
+    /// d'une passe à l'autre — sans lui, `BlockCtx`
+    /// repart froid et re-shape tout le document posé.
+    layout_font_cache: explorer_layout::FontCache,
     /// PNG encodé — **cache paresseux** invalidé à chaque
     /// repaint, rempli par [`Session::frame_png`] (étape
     /// 55g : l'encodage n'est plus payé qu'une fois par
@@ -716,6 +722,7 @@ impl Session {
                 list: None,
                 frame: None,
                 font_cache: explorer_render::GlyphCache::new(),
+                layout_font_cache: explorer_layout::FontCache::new(),
                 png: None,
                 focused: None,
                 focused_key: None,

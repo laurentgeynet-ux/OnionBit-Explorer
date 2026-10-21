@@ -1632,6 +1632,37 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Dernier blocage fonctionnel connu
   du corpus levé.
 
+- [x] **Étape 100. `FontCache` layout
+  persistant entre applys** (consom-
+  mation R-65 + **R-67** — le type
+  est `Send` depuis la conversion
+  `Rc`→`Arc` de `data`, demande
+  journalisée) : le cache vit dans
+  `PaintPayload`/`Tab` (`layout_font_
+  cache`, analogue `font_cache`
+  `GlyphCache` R-36) et voyage en
+  `spawn_blocking` avec la payload
+  détachée — le chemin dominant
+  `drain_applies_shared` est couvert.
+  `layout_ctx` amorce chaque
+  `BlockCtx` sur le cache sorti,
+  `restitute_font_cache` le reprend
+  sur tous les chemins — succès
+  comme repli incrémental. Re-mesure
+  `sync_profile` (repro mission 13,
+  `profile_click_sync_heavy` ~3 000
+  nœuds) : **dispatch total ~21 s →
+  0,53 s** — le mur `relayout_subtree`
+  était le shaping re-facturé, pas la
+  structure ; verdict conforme à
+  l'attribution PIPE (le suspect
+  suivant `abs_geometry`→`shrink`
+  n'est pas atteint). Zéro casse :
+  cache froid = même passe qu'avant.
+  Test : `relayout_reuses_persistent_
+  font_cache` — compteur `font_data`,
+  2e relayout = 0 résolution.
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY

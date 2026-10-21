@@ -97,6 +97,28 @@ impl FontSource for SharedFonts {
     }
 }
 
+/// `BlockCtx` de la passe, amorcé sur le `FontCache`
+/// persistant de la payload (R-65 — transplantation : le
+/// cache voyage avec [`PaintPayload`] comme le `GlyphCache`
+/// raster R-36) — symétrique de [`restitute_font_cache`].
+fn layout_ctx<'a>(ctx: &'a ApplyCtx, p: &mut PaintPayload) -> BlockCtx<'a> {
+    BlockCtx {
+        fonts: Some(&ctx.fonts as &dyn FontSource),
+        viewport_w: ctx.viewport.0,
+        viewport_h: ctx.viewport.1,
+        ..BlockCtx::default()
+    }
+    .with_font_cache(std::mem::take(&mut p.layout_font_cache))
+}
+
+/// Restitue le cache en fin de passe — un oubli n'est pas
+/// un bug (le `BlockCtx` l'emporterait en le détruisant,
+/// la passe suivante repartirait froide), juste du shaping
+/// re-facturé.
+fn restitute_font_cache(p: &mut PaintPayload, block: &BlockCtx) {
+    p.layout_font_cache = block.take_font_cache();
+}
+
 /// Contexte d'apply cloné sous verrou court — tout ce que
 /// les phases lisent hors de l'onglet. `Send` : la payload
 /// + ce contexte migrent vers `spawn_blocking`.
@@ -135,6 +157,11 @@ pub(crate) struct PaintPayload {
     /// Cache glyphes cross-passe du raster (R-36) — `Send`,
     /// voyage avec la payload détachée.
     pub font_cache: explorer_render::GlyphCache,
+    /// Cache fonte du layout persisté entre applys (R-65,
+    /// `Send` depuis R-67) — résolutions/métriques/runs
+    /// shapés réutilisés d'une passe à l'autre ; transplanté
+    /// dans le `BlockCtx` de chaque passe (`layout_ctx`).
+    pub layout_font_cache: explorer_layout::FontCache,
     /// PNG paresseux (cache de `frame_png`).
     pub png: Option<Vec<u8>>,
     /// Popup `<select>` ouvert.
@@ -231,6 +258,7 @@ impl Tab {
             list: self.list.take(),
             frame: self.frame.take(),
             font_cache: std::mem::take(&mut self.font_cache),
+            layout_font_cache: std::mem::take(&mut self.layout_font_cache),
             png: self.png.take(),
             popup: self.popup.take(),
             find: self.find.take(),
@@ -261,6 +289,7 @@ impl Tab {
         self.list = p.list;
         self.frame = p.frame;
         self.font_cache = p.font_cache;
+        self.layout_font_cache = p.layout_font_cache;
         self.png = p.png;
         self.popup = p.popup;
         self.find = p.find;
@@ -379,26 +408,28 @@ fn try_incr_payload(
     let styles = styles_payload(p, new_dom, ctx.viewport, ctx.color_scheme);
     sizes.extend(explorer_render::svg::svg_sizes(new_dom, root_el));
     let svgs = explorer_render::svg::collect_svg(new_dom, root_el, ctx.image_max_px);
-    let block = BlockCtx {
-        fonts: Some(&ctx.fonts as &dyn FontSource),
-        viewport_w: ctx.viewport.0,
-        viewport_h: ctx.viewport.1,
-        ..BlockCtx::default()
-    };
+    let block = layout_ctx(ctx, p);
     // Phase 2 — remap + relayout local (le remap précède :
     // `bx.node == target` compare des ids du nouveau DOM).
+    // Le cache fonte est restitué sur tous les chemins —
+    // succès comme repli : les entrées déjà chaudes restent
+    // utiles à la passe suivante.
     let doc_h = {
         let (Some(old_dom), Some(tree)) = (p.dom.as_ref(), p.tree.as_mut()) else {
+            restitute_font_cache(p, &block);
             return false;
         };
         if !remap_box_nodes(old_dom, new_dom, tree, target_old, target_new) {
+            restitute_font_cache(p, &block);
             return false;
         }
         if relayout_subtree(tree, new_dom, &styles, &sizes, target_new, &block) != Relayout::Done {
+            restitute_font_cache(p, &block);
             return false;
         }
         tree.rect.height
     };
+    restitute_font_cache(p, &block);
     p.doc_h = doc_h;
     p.images.svgs = svgs;
     p.images.canvases = canvas_table_from_ops(canvas_ops, new_dom);
@@ -487,14 +518,10 @@ pub(crate) fn relayout_dom_payload(
     let Some(mut bx) = build_box_tree_sized(dom, root_el, &styles, &sizes) else {
         return Err(CoreError::NothingToPaint);
     };
-    let (vw, vh) = ctx.viewport;
-    let block = BlockCtx {
-        fonts: Some(&ctx.fonts as &dyn FontSource),
-        viewport_w: vw,
-        viewport_h: vh,
-        ..BlockCtx::default()
-    };
+    let vw = ctx.viewport.0;
+    let block = layout_ctx(ctx, p);
     layout_tree(&mut bx, vw, &block);
+    restitute_font_cache(p, &block);
     p.doc_h = bx.rect.height;
     p.tree = Some(bx);
     p.tree_epoch = p.tree_epoch.wrapping_add(1);

@@ -534,6 +534,40 @@ fn profile_click_sync_heavy() {
     );
 }
 
+/// Étape 100 — le `FontCache` de layout persiste entre
+/// passes (R-65/R-67 — transplanté dans `PaintPayload`
+/// via `layout_ctx`/`restitute_font_cache`) : le second
+/// `relayout` ne re-facture **aucune** résolution
+/// `font_data` — avant la couture, `BlockCtx::default()`
+/// repartait froid et re-shapait tout le document.
+#[test]
+fn relayout_reuses_persistent_font_cache() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct CountingFont(AtomicUsize);
+    impl FontSource for CountingFont {
+        fn font_data(&self, _req: &explorer_layout::font::FontRequest) -> Option<Vec<u8>> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Some(explorer_test_support::fixture_ttf())
+        }
+    }
+    let font = Arc::new(CountingFont(AtomicUsize::new(0)));
+    let mut s = Session::new(Arc::new(FailTransport), font.clone());
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<p>du texte à shaper</p>"));
+        e.url = Some(Url::parse("http://h.test/fc").unwrap());
+    }
+    s.relayout(tab).unwrap();
+    let first = font.0.load(Ordering::Relaxed);
+    assert!(first > 0, "première passe : fontes résolues");
+    // Seconde passe : le cache transplante — aucune
+    // nouvelle résolution ne doit toucher la source.
+    s.relayout(tab).unwrap();
+    let delta = font.0.load(Ordering::Relaxed) - first;
+    assert_eq!(delta, 0, "relayout : {delta} font_data re-facturées");
+}
+
 /// 55g-suite — la coalescence borne les resyncs pilotés
 /// par la pompe : après un apply, `sync_floor` saute la
 /// sérialisation tant que la fenêtre n'est pas échue —

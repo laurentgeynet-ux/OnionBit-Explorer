@@ -91,18 +91,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 - **Étape 100 — `FontCache` layout persistant entre applys**
   (`explorer-core`, consommation R-65 `with_font_cache`/
-  `take_font_cache`) : `BlockCtx::default()` repartait froid
-  à chaque apply → tout le texte posé se re-shapait par tick
-  (attribution PIPE du mur `relayout_subtree` ~14 s). Le type
-  est `!Send` (`Rc`) — impossible dans `PaintPayload` migrée
-  `spawn_blocking` : persistance par `thread_local` sur les
-  workers du pool blocking et le thread des hôtes synchrones ;
-  `layout_ctx`/`restitute_font_cache` encadrent les deux sites
-  `BlockCtx`, cache restitué sur tous les chemins (succès et
-  repli incrémental). Re-mesure `profile_click_sync_heavy`
-  (repro mission 13, ~3 000 nœuds) : **dispatch ~21 s →
-  0,53 s** — verdict conforme, le shaping était le mur ;
-  zéro casse (cache froid = même passe).
+  `take_font_cache` + **R-67** `Rc`→`Arc` rendant le type
+  `Send`) : `BlockCtx::default()` repartait froid à chaque
+  apply → tout le texte posé se re-shapait par tick
+  (attribution PIPE du mur `relayout_subtree` ~14 s). Le
+  cache vit dans `PaintPayload`/`Tab` (`layout_font_cache`,
+  analogue `GlyphCache` R-36) et voyage en `spawn_blocking`
+  — le chemin détaché dominant est couvert ; `layout_ctx`/
+  `restitute_font_cache` encadrent les deux sites `BlockCtx`,
+  cache restitué sur tous les chemins (succès et repli
+  incrémental). Re-mesure `profile_click_sync_heavy` (repro
+  mission 13, ~3 000 nœuds) : **dispatch ~21 s → 0,53 s** —
+  verdict conforme, le shaping était le mur ; zéro casse
+  (cache froid = même passe). Test :
+  `relayout_reuses_persistent_font_cache` (compteur
+  `font_data`, 2e relayout = 0 résolution).
 
 - **Étape 99 — fenêtre raster au scroll** (`explorer-core`,
   consommation R-62 `rasterize_window_cached`) : document
