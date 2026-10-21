@@ -693,6 +693,49 @@ fn hint_body_text_et_valign() {
     );
 }
 
+/// `cols`/`rows`/`size` → dimensions en caractères (HTML
+/// Rendering, présentational hints) — trigger terrain : le
+/// `<textarea rows=6 cols=60>` de la page commentaire HN
+/// rendu ~135×64 px génériques au lieu de ~480×115 px.
+#[test]
+fn hint_cols_rows_size_en_caracteres() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let ta = el(
+        &mut dom,
+        f.body,
+        "textarea",
+        &[("rows", "6"), ("cols", "60")],
+    );
+    let s = e.compute(&dom, ta, &env());
+    assert_eq!(s.get("width"), Some("60ch"), "cols=60 → width:60ch");
+    assert_eq!(s.get("height"), Some("7.2em"), "rows=6 → height ≈ 6 lignes");
+    // Sans attribut : les défauts ex-UA (10em/4em) sont émis
+    // en hint — comportement visuel par défaut inchangé.
+    let ta2 = el(&mut dom, f.body, "textarea", &[]);
+    let s2 = e.compute(&dom, ta2, &env());
+    assert_eq!(s2.get("width"), Some("10em"));
+    assert_eq!(s2.get("height"), Some("4em"));
+    // `size` → ch ; input sans type = texte par défaut.
+    let inp = el(&mut dom, f.body, "input", &[("size", "30")]);
+    assert_eq!(e.compute(&dom, inp, &env()).get("width"), Some("30ch"));
+    // `size` sur checkbox : la règle UA 13px (vraie règle)
+    // prime le hint — présentational hints = rang auteur 0.
+    let cb = el(
+        &mut dom,
+        f.body,
+        "input",
+        &[("type", "checkbox"), ("size", "40")],
+    );
+    assert_eq!(e.compute(&dom, cb, &env()).get("width"), Some("13px"));
+    // La CSS auteur écrase le hint.
+    let mut e2 = StyleEngine::new();
+    e2.add_css("textarea { width: 500px }", Origin::Author);
+    let ta3 = el(&mut dom, f.body, "textarea", &[("cols", "60")]);
+    assert_eq!(e2.compute(&dom, ta3, &env()).get("width"), Some("500px"));
+}
+
 // ── font-size : valeur calculée absolue (R-17) ────────────
 
 #[test]

@@ -1629,6 +1629,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   transplant = 0 appel supplémentaire,
   ctx froid = re-facture ; bump de
   révision invalide puis re-fige.
+- [x] **R-66. `cols`/`rows`/`size` →
+  dimensions en caractères** (trigger
+  terrain — sonde thread HN : le
+  `<textarea rows=6 cols=60>` de la
+  page commentaire rendu ~135×64 px
+  génériques) — **livré** : hints
+  présentationnels `cols` → `width`
+  en `ch`, `rows` → `height` ≈
+  lignes ×1.2em, `size` → `width` en
+  `ch` (input). Le dimensionnement
+  sort de la feuille UA (`10em`/`4em`)
+  vers les hints : une règle UA
+  primerait l'attribut (hints =
+  `or_insert` après les règles) —
+  défauts émis en hint, visuel par
+  défaut identique (10em ≈ 20ch).
+  `input[type=checkbox]` 13px et
+  `submit` `auto` restent des règles
+  UA qui priment le hint. Test :
+  `hint_cols_rows_size_en_caracteres`
+  (attr, défauts, priorité règle UA,
+  écrasement auteur) ; sonde HN :
+  textarea ~540×130 px conforme.
 - [x] **R-59. `prefers-color-scheme` +
   défauts UA sombres** (moitié PIPE du
   thème sombre — journal d'abord,

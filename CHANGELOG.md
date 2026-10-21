@@ -9,6 +9,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-66 — `cols`/`rows`/`size` en caractères**
+  (`explorer-css`) : hints présentationnels — `cols` →
+  `width` en `ch`, `rows` → `height` ≈ lignes ×1.2em
+  (`textarea`), `size` → `width` en `ch` (`input`).
+  Trigger terrain : sonde page commentaire HN — le
+  `textarea rows=6 cols=60` rendu ~135×64 px génériques,
+  désormais ~540×130 px. Le dimensionnement sort de la
+  feuille UA vers les hints : une règle UA primerait
+  l'attribut (hints appliqués par `or_insert` après les
+  règles) — défauts identiques émis en hint (10em/4em,
+  soit ≈20ch), comportement visuel par défaut inchangé ;
+  `input[type=checkbox]`/`submit` gardent leurs règles UA.
 - **R-65 — `FontCache` persistant entre passes**
   (`explorer-layout`) : attribution du mur apply journalisé
   55g-suite (`relayout_subtree` ~14 s/150 s) — NAV
@@ -67,6 +79,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `parse_one_media` (journal → PIPE, livré **R-64**) ;
   sonde `lobste_pipeline_errors` en env dark : **`dark-
   normal-b6128952.css` fetchée en vol** (0 erreur).
+
+- **Étape 100 — `FontCache` layout persistant entre applys**
+  (`explorer-core`, consommation R-65 `with_font_cache`/
+  `take_font_cache`) : `BlockCtx::default()` repartait froid
+  à chaque apply → tout le texte posé se re-shapait par tick
+  (attribution PIPE du mur `relayout_subtree` ~14 s). Le type
+  est `!Send` (`Rc`) — impossible dans `PaintPayload` migrée
+  `spawn_blocking` : persistance par `thread_local` sur les
+  workers du pool blocking et le thread des hôtes synchrones ;
+  `layout_ctx`/`restitute_font_cache` encadrent les deux sites
+  `BlockCtx`, cache restitué sur tous les chemins (succès et
+  repli incrémental). Re-mesure `profile_click_sync_heavy`
+  (repro mission 13, ~3 000 nœuds) : **dispatch ~21 s →
+  0,53 s** — verdict conforme, le shaping était le mur ;
+  zéro casse (cache froid = même passe).
 
 - **Étape 99 — fenêtre raster au scroll** (`explorer-core`,
   consommation R-62 `rasterize_window_cached`) : document

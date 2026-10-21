@@ -992,6 +992,38 @@ fn apply_presentational_hints(dom: &Dom, node: NodeId, props: &mut HashMap<Strin
             // exclus (approximation documentée).
             hint(props, "height", dim(hint_attr(dom, node, "size")));
         }
+        "textarea" => {
+            // `cols`/`rows` → taille en caractères (HTML
+            // Rendering) : `cols` → `width` en `ch`,
+            // `rows` → `height` ≈ rows × hauteur de ligne.
+            // Les défauts (10em/4em, ex-règles UA) sont
+            // émis ici : une règle UA primant le hint, la
+            // feuille ne déclare plus ces dimensions —
+            // terrain : `<textarea rows=6 cols=60>` HN
+            // rendu 10em×4em générique au lieu de
+            // ~60ch×7.2em.
+            hint(
+                props,
+                "width",
+                chars(hint_attr(dom, node, "cols")).or_else(|| Some("10em".to_string())),
+            );
+            hint(
+                props,
+                "height",
+                lines(hint_attr(dom, node, "rows")).or_else(|| Some("4em".to_string())),
+            );
+        }
+        "input" => {
+            // `size` → `width` en `ch` — ignoré sur les
+            // états à contrôle propre (checkbox/radio/
+            // submit : leur `width` UA est une vraie règle,
+            // elle prime le hint sans filtrage ici).
+            hint(
+                props,
+                "width",
+                chars(hint_attr(dom, node, "size")).or_else(|| Some("10em".to_string())),
+            );
+        }
         _ => {}
     }
     legacy_presentational_hints(dom, node, tag, props);
@@ -1031,6 +1063,28 @@ fn dim(a: Option<String>) -> Option<String> {
         .ok()
         .filter(|f| *f >= 0.0)
         .map(|f| format!("{f}px"))
+}
+
+/// `N` → "Nch" — attributs `cols`/`size` des champs de
+/// saisie : largeur en caractères (HTML Rendering). Entier
+/// ≥ 1 requis ; borne 1000 défensive comme `span`.
+fn chars(a: Option<String>) -> Option<String> {
+    a?.trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|n| *n >= 1)
+        .map(|n| n.min(1000).to_string() + "ch")
+}
+
+/// `N` lignes → "N×1.2em" — `rows` de `textarea` : hauteur
+/// = N × hauteur de ligne normale (approx 1.2em — le hint
+/// reste rang UA, la CSS auteur prime).
+fn lines(a: Option<String>) -> Option<String> {
+    a?.trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|n| *n >= 1)
+        .map(|n| format!("{:.1}em", f64::from(n.min(1000)) * 1.2))
 }
 
 /// `colspan`/`rowspan` (R-47) : entier ≥ 1 ; `0` et les
@@ -1405,9 +1459,12 @@ table { border-collapse: separate }
 th { font-weight: bold; text-align: center }
 input, textarea, select, button, img, svg, canvas { display: inline-block }
 input, textarea {
-  border: 1px solid #767676; padding: 1px; width: 10em; height: 1.2em
+  border: 1px solid #767676; padding: 1px
 }
-textarea { height: 4em }
+/* Les dimensions input/textarea vivent en hints
+   (cols/rows/size — HTML Rendering) : une règle UA
+   primerait les attributs de présentation. */
+input { height: 1.2em }
 select { border: 1px solid #767676; padding: 1px 4px }
 button { border: 1px solid #767676; padding: 1px 6px; background-color: #eee }
 input[type=submit], input[type=button], input[type=reset] {
