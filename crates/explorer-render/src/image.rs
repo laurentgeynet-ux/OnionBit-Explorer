@@ -44,6 +44,12 @@ pub struct PaintImages {
     /// `<svg>` inline rasterisés (`NodeId` → bitmap) — R-9,
     /// produits par [`crate::svg::collect_svg`].
     pub svgs: ImageTable,
+    /// `mask-image: url(...)` décodés (`NodeId` de l'élément
+    /// masqué → bitmap dont l'**alpha** sert de mask — R-52,
+    /// motif « icône colorée » : `background-color` ne doit
+    /// passer que là où le mask est opaque). Canal luminance
+    /// ignoré — alpha seul, per spec `mask-mode` initial.
+    pub masks: ImageTable,
     /// `<canvas>` : op-list 2D enregistrée par `explorer-jscore`
     /// (`NodeId` → `Vec<CanvasOp>` — R-11, contrat
     /// [`crate::canvas`]) ; rejouée vers un bitmap au moment
@@ -59,6 +65,7 @@ impl PaintImages {
             replaced,
             backgrounds: ImageTable::new(),
             svgs: ImageTable::new(),
+            masks: ImageTable::new(),
             canvases: crate::canvas::CanvasTable::new(),
         }
     }

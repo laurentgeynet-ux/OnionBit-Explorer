@@ -315,6 +315,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   perdu à 800px). Le `StyleEnv` est désormais construit
   depuis `ctx.viewport`/`SubJob.viewport` ; `cli layout`
   aligné sur sa largeur de pose (800px).
+- **R-52 — `mask-image` borne le fond** (`explorer-render`) :
+  le motif icône universel `mask-image:url(svg)` +
+  `background-color` (Codex/Primer/Material) peignait un
+  carré plein — la loupe des recherches Wikipedia, l'avatar
+  avant « Donate ». Chaîne additive : `PaintImages.masks`
+  (déjà couverte par `box_sig` via le style haché),
+  `collect_data_images` lit `mask-image`/`mask` en
+  `url(data:)`, nouveau `DisplayItem::MaskedFill` émis par
+  `paint_self` quand un mask décodé existe ; raster = mask
+  d'alpha tiny-skia échantillonné nearest dans la zone
+  device, composé `min` avec le clip `overflow` actif.
+  Repli tolérant : mask absent/indécodable → `FillRect`
+  plein conservé. `url_arg` décode les échappements CSS
+  (`\"` des data-URL `utf8` sérialisées) — répare aussi les
+  `background-image` échappées. Hors portée :
+  `mask-size`/`mask-position`, multi-couches,
+  `mask-mode:luminance`. Tests `raster.rs` : alpha bornant
+  le fond (dedans/dehors), repli sur SVG indécodable.
 
 ### Fixed
 

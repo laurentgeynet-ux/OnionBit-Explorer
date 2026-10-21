@@ -91,18 +91,78 @@ pub fn collect_data_images(dom: &Dom, styles: &StyleMap, max_px: u32) -> PaintIm
             .and_then(url_arg)
             .filter(|u| u.starts_with("data:"))
         {
-            if let Some(img) = decode_data_url(url, max_px) {
+            if let Some(img) = decode_data_url(&url, max_px) {
                 out.backgrounds.insert(node, Arc::new(img));
+            }
+        }
+        // R-52 — motif « icône colorée » : `mask-image` +
+        // `background-color` (Codex/Primer/Material). Le mask
+        // est quasi-systématiquement un `data:` SVG inline ;
+        // `-webkit-mask-image` est l'orthographe historique,
+        // encore fréquente dans le CSS minifié.
+        for prop in ["mask-image", "-webkit-mask-image"] {
+            if let Some(url) = style
+                .get(prop)
+                .and_then(url_arg)
+                .filter(|u| u.starts_with("data:"))
+            {
+                if let Some(img) = decode_data_url(&url, max_px) {
+                    out.masks.insert(node, Arc::new(img));
+                    break;
+                }
             }
         }
     }
     out
 }
 
-/// `url(<x>)` → `<x>` déballé (guillemets optionnels).
-fn url_arg(value: &str) -> Option<&str> {
+/// `url(<x>)` → `<x>` déballé : guillemets optionnels ôtés,
+/// puis échappements CSS résolus (`\"`→`"`, `\'`→`'`,
+/// `\\`→`\`, `\XXXX`→codepoint) — la valeur calculée
+/// sérialise `url("…")` en échappant les `"` internes, et
+/// sans dééchappement la payload arrive avec des `\`
+/// littéraux (un `data:` SVG devient du XML invalide —
+/// R-52, motif icône Wikipedia).
+fn url_arg(value: &str) -> Option<String> {
     let inner = value.trim().strip_prefix("url(")?.strip_suffix(')')?.trim();
-    Some(inner.trim_matches(|c| c == '"' || c == '\''))
+    let inner = inner.trim_matches(|c| c == '"' || c == '\'');
+    Some(css_unescape(inner))
+}
+
+/// Échappements CSS chaîne/url : `\`+autre → l'autre char ;
+/// `\`+1-6 hexdigits (+espaces absorbés) → codepoint si
+/// valide. Tolérant : un `\` orphelin en fin disparaît.
+fn css_unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        let mut hex = String::new();
+        while hex.len() < 6 && it.peek().is_some_and(char::is_ascii_hexdigit) {
+            hex.push(it.next().unwrap_or_default());
+        }
+        if hex.is_empty() {
+            if let Some(p) = it.next() {
+                out.push(p);
+            }
+        } else {
+            // Espaces absorbés après une séquence hex.
+            if it.peek().is_some_and(char::is_ascii_whitespace) {
+                it.next();
+            }
+            if let Some(ch) = u32::from_str_radix(&hex, 16)
+                .ok()
+                .and_then(char::from_u32)
+                .filter(|ch| *ch != '\0')
+            {
+                out.push(ch);
+            }
+        }
+    }
+    out
 }
 
 /// `%XX` → octet, in-place sur le reste.

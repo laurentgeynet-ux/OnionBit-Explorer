@@ -1222,6 +1222,126 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   LIVE) — arrangement inline
   icon+titre à affiner (petit,
   non promu sans repro).
+- [x] **Triage `site_smoke` post-R-48→R-51
+  (batch BBC livré)** — corpus 10 sites
+  re-tiré, défauts classés par famille
+  avec mécanisme confirmé :
+  - **`max_sheets: 8` (borne NAV) =
+    défaut dominant du corpus** —
+    GitHub : `marketing-header.*.module
+    .css` est la 28ᵉ/30 feuilles liées
+    (les 8 premières = variantes de
+    thème `prefers-color-scheme`,
+    filtrables par `media`) → nav
+    mobile peinte dépliée, h2
+    `.visuallyHidden` visible ;
+    MDN : `styles-a11y-menu` (13ᵉ/20),
+    `styles-navigation` (14ᵉ),
+    `styles-menu` (16ᵉ) non fetchées
+    → skip-links visibles, nav en
+    colonne, boutons bordés. Repro
+    hors-doute : index des feuilles
+    dans le HTML servi. PIPE exonéré —
+    entrée `interface-equipes.md`
+    (filtrer `<link media>` via
+    l'éval mq existante + revoir la
+    borne). Lobste.rs : la barre rouge
+    `var(--color-bg-accent)` vit dans
+    `system-system.css` via `@import`
+    — non résolu (couture fetch NAV) —
+    même famille « complétude des
+    sous-ressources CSS ».
+  - **`mask-image` → fond plein =
+    candidat R-52** : l'icône loupe
+    Wikipedia (`cdx-text-input__start
+    -icon`) = `mask-image:url(svg)` +
+    `background-color:#202122` — la
+    couleur devait passer par le mask
+    ; sans support du mask le fond
+    remplit la boîte entière → carrés
+    noirs (loupe des deux recherches,
+    avatar avant « Donate »). Motif
+    universel des icon systems
+    (Codex/Primer/Material) — la
+    chaîne mask est absente du code
+    (`mask-image`, `-webkit-mask-*`
+    jamais lus). Réversible par un
+    mask d'alpha tiny-skia au paint.
+  - **« Appearance » Wikipedia =
+    PIPE exonéré** : sur le DOM
+    statique + vector.css réel, le
+    landmark calcule `display:none`
+    (unit-test scratch supprimé —
+    règle `.vector-feature-appearance
+    -pinned-clientpref-1 .vector-user
+    -links .vector-appearance
+    -landmark` + `.client-nojs`).
+    Divergence session probable :
+    `client-nojs`→`client-js` par le
+    script startup MediaWiki et/ou
+    relocation du menu « pinned »
+    par JS — à confirmer par dump
+    DOM de session si repro.
+  - **`clip-path`/`clip` absents,
+    impact borné** : le motif
+    `.visuallyHidden` moderne
+    (`clip-path:inset(50%)` + 1×1
+    `overflow:hidden`) est déjà
+    masqué par notre clip overflow
+    (repro : PushClip 1×1 entoure
+    bien le texte, raster honore les
+    `Mask`) — `clip-path` ne change
+    le rendu que sur les variantes
+    sans dimensionnement+overflow.
+    Candidat mineur.
+  - **Reste à diagnostiquer** :
+    colonne droite weather.gov
+    écrasée à ~1 car/ligne (squeeze
+    min-content), titre héros
+    débordant ; carte « featured
+    articles » MDN étroite (sa
+    feuille 6ᵉ EST fetchée → vrai
+    suspect PIPE) ; logo lobste.rs
+    chevauchant la nav.
+- [x] **R-52. `mask-image` borne le
+  fond (motif icône)** (issu du
+  triage — loupe Wikipedia, avatar
+  « Donate », carrés noirs) —
+  **livré** : le motif universel
+  `mask-image:url(svg)` +
+  `background-color` (Codex/Primer/
+  Material) peignait un carré plein
+  sans mask. Chaîne additive :
+  `PaintImages.masks` (table
+  additive, `box_sig` déjà couvrant
+  via le style haché),
+  `collect_data_images` lit
+  `mask-image`/`mask` en `url(data:)`,
+  nouveau `DisplayItem::MaskedFill`
+  (fill rect + couleur + bitmap
+  mask) émis par `paint_self` à la
+  place du `FillRect` quand un mask
+  décodé existe, raster = mask
+  d'alpha tiny-skia échantillonné
+  nearest dans la zone device,
+  composé `min` avec le clip
+  `overflow` actif. Repli tolérant :
+  mask absent/indécodable →
+  `FillRect` plein conservé.
+  **`url_arg` décode désormais les
+  échappements CSS** (`\"` dans les
+  data-URL `utf8` sérialisées) —
+  répare aussi les
+  `background-image` échappées.
+  Hors portée documentée :
+  `mask-size`/`mask-position`
+  (le motif icône dimensionne la
+  boîte à l'icône), masks multi-
+  couches, `mask-mode:luminance`.
+  Tests `raster.rs` : alpha du mask
+  borne le fond (pixels dedans/
+  dehors), repli fond plein sur
+  SVG indécodable.
 - [x] **R-2. WPT floats/block-formatting — finir les 13 cas**
   (ex-54). Échecs listés après l'étape 49 : placement
   `004/006/007/008`, `wrap-top-below-inline-001r`, `bfc-overflow`,

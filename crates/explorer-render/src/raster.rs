@@ -662,11 +662,94 @@ fn paint_item(
         } => {
             paint_tiled(pixmap, rect, img, *repeat, *origin, dpi, clip);
         }
+        DisplayItem::MaskedFill { rect, color, mask } => {
+            paint_masked_fill(pixmap, rect, *color, mask, dpi, clip);
+        }
         DisplayItem::PushClip(_)
         | DisplayItem::PopClip
         | DisplayItem::PushTransform(_)
         | DisplayItem::PopTransform => {}
     }
+}
+
+/// `background-color` passé par l'alpha d'un `mask-image`
+/// (R-52) : la couleur n'apparaît que là où le mask est
+/// opaque. Le bitmap est échantillonné en nearest dans la
+/// zone device de `rect` — `mask-size`/`mask-position` hors
+/// portée (le motif icône dimensionne la boîte à l'icône, la
+/// zone est donc déjà la bonne). Un `clip` (`overflow`)
+/// actif est composé par `min` des couvertures ≈ intersection
+/// (les masks sont quasi binaires dans le motif).
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+fn paint_masked_fill(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    color: Color,
+    img: &crate::DecodedImage,
+    cur: Transform,
+    clip: Option<&Mask>,
+) {
+    let Some(local) = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height) else {
+        return;
+    };
+    let Some(phys) = local.transform(cur) else {
+        return;
+    };
+    // Bords arrêtés sous transform axis-aligned — cohérent
+    // avec les fills et clips voisins.
+    let phys = if cur.kx == 0.0 && cur.ky == 0.0 {
+        Rect::from_ltrb(
+            phys.left().round(),
+            phys.top().round(),
+            phys.right().round(),
+            phys.bottom().round(),
+        )
+        .unwrap_or(phys)
+    } else {
+        phys
+    };
+    let (iw, ih) = (img.width, img.height);
+    if iw == 0 || ih == 0 || phys.width() <= 0.0 || phys.height() <= 0.0 {
+        return;
+    }
+    let (pw, ph) = (pixmap.width(), pixmap.height());
+    let dom = Rect::from_ltrb(0.0, 0.0, pw as f32, ph as f32);
+    let Some(zone) = dom.and_then(|d| phys.intersect(&d)) else {
+        return;
+    };
+    let Some(mut m) = Mask::new(pw, ph) else {
+        return;
+    };
+    let (x0, y0) = (zone.left().max(0.0) as i32, zone.top().max(0.0) as i32);
+    let (x1, y1) = (zone.right().ceil() as i32, zone.bottom().ceil() as i32);
+    let w = pw as usize;
+    let data = m.data_mut();
+    for py in y0..y1 {
+        let fy = (py as f32 - phys.top()) / phys.height();
+        let sy = ((fy.max(0.0) * ih as f32) as usize).min(ih as usize - 1);
+        for px in x0..x1 {
+            let fx = (px as f32 - phys.left()) / phys.width();
+            let sx = ((fx.max(0.0) * iw as f32) as usize).min(iw as usize - 1);
+            data[py as usize * w + px as usize] = img.rgba[(sy * iw as usize + sx) * 4 + 3];
+        }
+    }
+    // Compose avec le clip actif (`overflow`) — min des
+    // couvertures ≈ intersection des zones.
+    if let Some(c) = clip {
+        for (d, e) in m.data_mut().iter_mut().zip(c.data().iter()) {
+            *d = (*d).min(*e);
+        }
+    }
+    let mut paint = Paint {
+        anti_alias: true,
+        ..Paint::default()
+    };
+    paint.set_color(skia_color(color));
+    pixmap.fill_rect(phys, &paint, Transform::default(), Some(&m));
 }
 
 /// Bitmap `img` blittée dans `rect` sous la transform `cur`.

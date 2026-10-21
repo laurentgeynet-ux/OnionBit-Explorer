@@ -11,7 +11,9 @@ use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
 use explorer_layout::font::{FontRequest, FontSource};
 use explorer_layout::{build_box_tree, layout_tree, BlockCtx};
-use explorer_render::{build_display_list, rasterize, Frame};
+use explorer_render::{
+    build_display_list, build_display_list_full, collect_data_images, rasterize, Frame,
+};
 
 const VIEW: f32 = 200.0;
 
@@ -285,4 +287,79 @@ fn transform_rotate_peint_hors_bbox_alignee() {
          transform:rotate(90deg)}",
     );
     assert_eq!(px(&f, 20, 15)[0], 255, "rotation peinte");
+}
+
+/// R-52 — motif « icône colorée » : `mask-image` + `background-color`
+/// ne peint la couleur que dans l'alpha du mask (sinon carré plein).
+#[test]
+fn mask_image_borne_le_fond() {
+    let dom: Dom = TreeBuilder::parse("<span class=icon></span>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    // Mask = svg 20×20 dont seule la moitié gauche est opaque :
+    // le fond rouge ne doit couvrir que x∈[0,10).
+    eng.add_css(
+        ".icon{display:inline-block;width:20px;height:20px;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>');\
+         background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    // Le fill plein a disparu de la liste au profit du masked.
+    assert!(
+        list.items
+            .iter()
+            .any(|i| matches!(i, explorer_render::DisplayItem::MaskedFill { .. })),
+        "MaskedFill attendu, got {}",
+        list.dump()
+    );
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(px(&f, 5, 10)[0], 255, "zone masquée opaque = rouge");
+    assert_eq!(
+        px(&f, 15, 10),
+        [255, 255, 255, 255],
+        "hors mask = canvas, pas de fuite du fond"
+    );
+}
+
+/// Contrôle : `mask-image` déclaré mais bitmap indécodable →
+/// le `background-color` se peint plein (repli tolérant).
+#[test]
+fn mask_image_indecodable_repli_fond_plein() {
+    let dom: Dom = TreeBuilder::parse("<span class=icon></span>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        ".icon{display:inline-block;width:20px;height:20px;\
+         mask-image:url('data:image/svg+xml;utf8,<not-svg>');\
+         background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(
+        px(&f, 15, 10)[0],
+        255,
+        "mask indécodable → fond plein conservé"
+    );
 }

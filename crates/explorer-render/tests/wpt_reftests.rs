@@ -317,6 +317,7 @@ fn render(src: &str, file_dir: &Path, tag: &str) -> Option<Frame> {
         replaced,
         backgrounds: collect_backgrounds(&dom, &styles, file_dir),
         svgs: explorer_render::ImageTable::new(),
+        masks: explorer_render::ImageTable::new(),
         canvases: explorer_render::CanvasTable::new(),
     };
     let mut bx = build_box_tree_sized(&dom, root, &styles, &sizes)?;

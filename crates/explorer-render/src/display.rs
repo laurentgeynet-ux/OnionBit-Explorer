@@ -98,6 +98,23 @@ pub enum DisplayItem {
         /// positionnement est le viewport (R-13d).
         origin: (f32, f32),
     },
+    /// `background-color` passé par l'alpha d'un `mask-image`
+    /// (R-52) : la couleur n'apparaît que là où le mask est
+    /// opaque — motif « icône colorée » des design systems
+    /// (`mask-image:url(icon.svg)` + `background-color` ; sans
+    /// le mask la couleur remplirait la boîte entière → carré
+    /// plein). `mask-size`/`mask-position` hors portée : le
+    /// mask est échantillonné à la taille de `rect`, ce qui
+    /// couvre le motif (la boîte est dimensionnée à l'icône).
+    MaskedFill {
+        /// Boîte de destination (border box) — le mask y est
+        /// mis à l'échelle en nearest.
+        rect: Rect,
+        /// `background-color` résolue.
+        color: Color,
+        /// Bitmap du mask — seul l'alpha est lu.
+        mask: std::sync::Arc<crate::image::DecodedImage>,
+    },
     /// Entrée de zone de clipping (`overflow` ≠ `visible`).
     PushClip(Rect),
     /// Sortie de la zone de clipping correspondante.
@@ -239,6 +256,9 @@ impl DisplayList {
                 DisplayItem::BackgroundImage { rect, img, .. } => {
                     let _ = writeln!(out, "bg-image {}x{} {rect:?}", img.width, img.height);
                 }
+                DisplayItem::MaskedFill { rect, mask, .. } => {
+                    let _ = writeln!(out, "masked-fill {}x{} {rect:?}", mask.width, mask.height);
+                }
                 DisplayItem::PushClip(r) => {
                     let _ = writeln!(out, "push-clip {r:?}");
                 }
@@ -338,6 +358,7 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::Border { rect, .. }
         | DisplayItem::Placeholder { rect, .. }
         | DisplayItem::Image { rect, .. }
+        | DisplayItem::MaskedFill { rect, .. }
         | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
         DisplayItem::Text { origin, run, .. } => Some(match run.ink {
             // R-37 : bbox d'encre réelle (glyphes) plutôt que
@@ -466,6 +487,18 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 origin: o2,
             },
         ) => r1 == r2 && p1 == p2 && o1 == o2 && std::sync::Arc::ptr_eq(i1, i2),
+        (
+            D::MaskedFill {
+                rect: r1,
+                color: c1,
+                mask: m1,
+            },
+            D::MaskedFill {
+                rect: r2,
+                color: c2,
+                mask: m2,
+            },
+        ) => r1 == r2 && c1 == c2 && std::sync::Arc::ptr_eq(m1, m2),
         (D::PushClip(r1), D::PushClip(r2)) => r1 == r2,
         (D::PushTransform(m1), D::PushTransform(m2)) => {
             (m1.sx, m1.ky, m1.kx, m1.sy, m1.tx, m1.ty) == (m2.sx, m2.ky, m2.kx, m2.sy, m2.tx, m2.ty)
@@ -1127,7 +1160,20 @@ fn paint_self(
     if !anonymous && !inline_flow && canvas_bg_src != bx.node {
         if let Some(c) = bx.style.get("background-color").and_then(parse_color) {
             if c.a > 0 {
-                items.push(DisplayItem::FillRect { rect, color: c });
+                // R-52 — `mask-image` présent : la couleur ne
+                // passe que par l'alpha du mask (icônes des
+                // design systems). Mask absent des tables
+                // (non décodé/réseau) → repli fond plein,
+                // comportement antérieur.
+                if let Some(mask) = bx.node.and_then(|n| images.masks.get(&n)) {
+                    items.push(DisplayItem::MaskedFill {
+                        rect,
+                        color: c,
+                        mask: mask.clone(),
+                    });
+                } else {
+                    items.push(DisplayItem::FillRect { rect, color: c });
+                }
             }
         }
         if bx
@@ -2048,6 +2094,11 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             img: img.clone(),
             repeat: *repeat,
             origin: (origin.0 + d.0, origin.1 + d.1),
+        },
+        D::MaskedFill { rect, color, mask } => D::MaskedFill {
+            rect: shifted(*rect, d),
+            color: *color,
+            mask: mask.clone(),
         },
         D::PushClip(r) => D::PushClip(shifted(*r, d)),
         D::PushTransform(m) => {
