@@ -3221,6 +3221,9 @@ fn number_to_fixed(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
     if !n.is_finite() {
         return Ok(e.str_val(num_to_js_string(n)));
     }
+    // `-0` ne porte pas de signe (spec Number.prototype.toFixed
+    // — Acid3 t84) ; Rust formate `-0.0` avec un `-`.
+    let n = if n == 0.0 { 0.0 } else { n };
     Ok(e.str_val(format!("{n:.d$}")))
 }
 
@@ -3373,6 +3376,9 @@ fn function_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         params.push_str(&e.to_js_string(*p)?);
     }
     let src = format!("function anonymous({params}) {{\n{body}\n}}");
+    if let Some(h) = &e.eval_hook {
+        h(&src);
+    }
     let prog = crate::parser::parse_in(&src, false, e.nest_limit).map_err(|err| {
         crate::heap::Thrown(e.error_value(
             e.protos.syntax_error,
@@ -4956,6 +4962,7 @@ fn js_exp(mut s: String) -> String {
 
 fn number_to_precision(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let n = this_num(e, this)?;
+    let n = if n == 0.0 { 0.0 } else { n }; // -0 → 0, cf. toFixed
     let p = match arg(args, 0) {
         Value::Undefined => return Ok(e.str_val(num_to_js_string(n))),
         v => e.to_number(v)? as usize,
@@ -4984,6 +4991,7 @@ fn number_to_precision(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<
 
 fn number_to_exponential(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let n = this_num(e, this)?;
+    let n = if n == 0.0 { 0.0 } else { n }; // -0 → 0, cf. toFixed
     let d = match arg(args, 0) {
         Value::Undefined => {
             // As many digits as needed to represent uniquely — Rust's

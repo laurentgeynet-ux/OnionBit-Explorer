@@ -155,7 +155,10 @@ fn navigator_languages_frozen_array() {
     // JS-C51 — le `<svg>` d'example.com mourait sur
     // `navigator.languages.some` (TypeError → script stoppé).
     assert_eq!(ev("navigator.languages.join(',')"), "en-US,en");
-    assert_eq!(ev("navigator.languages.some(function(l){return l.indexOf('en') === 0})"), "true");
+    assert_eq!(
+        ev("navigator.languages.some(function(l){return l.indexOf('en') === 0})"),
+        "true"
+    );
     // Spec : gelé, même instance à chaque lecture.
     assert_eq!(ev("Object.isFrozen(navigator.languages)"), "true");
     assert_eq!(ev("navigator.languages === navigator.languages"), "true");

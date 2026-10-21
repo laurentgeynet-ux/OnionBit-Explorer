@@ -149,6 +149,11 @@ enum BindMode {
     Assign,
 }
 
+/// Hook d'observabilité des sources évaluées dynamiquement
+/// (`eval`, `Function`, timer-string) — voir
+/// [`Engine::set_eval_hook`] (JS-C50).
+pub type EvalHook = Rc<dyn Fn(&str)>;
+
 /// The script engine. One `Engine` per browsing context (page):
 /// the heap, global object and scope chain all die together.
 pub struct Engine {
@@ -196,6 +201,11 @@ pub struct Engine {
     /// rendue dans `error.stack` et `Error::Uncaught`. Les
     /// natives n'y figurent pas (déviation documentée).
     call_stack: Vec<Rc<crate::ast::FnLit>>,
+    /// Hook d'observabilité des sources `eval`/`Function`/
+    /// timer-string (JS-C50) — le code obfusqué des pages réelles
+    /// vit dans ces sources, pas dans le `<script>` parent ; le
+    /// hook les voit avant parse (diagnostic, jamais modifié).
+    pub(crate) eval_hook: Option<EvalHook>,
     expr_depth: u32,
     /// Borne d'emboîtement du parseur et de l'évaluateur
     /// d'expressions (JS-C41) — relevable par l'embeddeur sur un
@@ -497,6 +507,7 @@ impl Engine {
             call_depth: 0,
             call_depth_limit: DEFAULT_CALL_DEPTH,
             call_stack: Vec::new(),
+            eval_hook: None,
             expr_depth: 0,
             nest_limit: crate::parser::DEFAULT_NEST_LIMIT,
             ops_left: DEFAULT_OP_LIMIT,
@@ -556,6 +567,15 @@ impl Engine {
     /// (jusqu'à ~19 Kio/niveau de parse mesuré, JS-C41).
     pub fn set_nest_limit(&mut self, limit: u32) {
         self.nest_limit = limit;
+    }
+
+    /// Hook d'observabilité `eval` (diagnostic) : appelé avec la
+    /// source de chaque `eval()`/`Function()`/timer-string **avant
+    /// parse** — les frames d'erreur de code évalué ne pointent que
+    /// dans cette source (le `<script>` parent n'y est pas).
+    /// `None` = aucun coût. Additif, aucune casse d'API.
+    pub fn set_eval_hook(&mut self, f: Option<EvalHook>) {
+        self.eval_hook = f;
     }
 
     /// Roote `id` jusqu'au [`Engine::remove_root`] correspondant —
@@ -3788,6 +3808,9 @@ impl Engine {
     pub(crate) fn eval_source(&mut self, src: &str) -> JsResult<Value> {
         // `eval` direct : le texte hérite du strict appelant —
         // early errors (`01`, `delete x`) et effets runtime.
+        if let Some(h) = &self.eval_hook {
+            h(src);
+        }
         let prog = crate::parser::parse_in(src, self.strict, self.nest_limit).map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
         })?;
@@ -3820,6 +3843,9 @@ impl Engine {
         this: Value,
         src: &str,
     ) -> JsResult<Value> {
+        if let Some(h) = &self.eval_hook {
+            h(src);
+        }
         let prog = crate::parser::parse_in(src, self.strict, self.nest_limit).map_err(|err| {
             Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
         })?;

@@ -723,6 +723,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `PageSnapshot` (bfcache). Terrain : « explorer »
   tapé sur google rend « explorer| » exact, Enter
   soumet. Test : `focus_reattaches_by_identity`.
+- **JS-C50 — `eval_hook`, observabilité des sources
+  évaluées dynamiquement** (`explorer-jscore`) : le code
+  obfusqué des pages réelles (bootstrap Google) vit dans
+  `eval`/`Function`/timer-string — les frames JS-C47
+  pointaient des positions dans des sources invisibles.
+  Livré : `Engine::set_eval_hook` additif, invoqué avant
+  parse sur `eval_source`, `eval_source_in` et
+  `Function(...)` ; `census --dump-scripts` écrit
+  `eval_<n>.js` — le bundle Closure complet de Google
+  (`eval_0.js`) est devenu rejouable en isolation,
+  permettant la bissection du bug corrigé en JS-C52.
 
 ## [0.2.0] - 2026-10-20
 

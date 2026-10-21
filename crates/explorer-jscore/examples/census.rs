@@ -186,6 +186,21 @@ fn main() {
     engine.install_fetch();
     engine.install_dom(&dom);
 
+    // Sources eval()ée/`Function` — le code obfusqué réel vit là
+    // (positions des frames d'erreur). Dump vers <dir>/eval_<n>.js.
+    if let Some(dir) = &dump_dir {
+        let dir = dir.clone();
+        let n = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        engine.set_eval_hook(Some(std::rc::Rc::new(move |src| {
+            let i = n.get();
+            n.set(i + 1);
+            let file = format!("{dir}/eval_{i}.js");
+            if let Err(e) = std::fs::write(&file, src) {
+                eprintln!("census: cannot write {file}: {e}");
+            }
+        })));
+    }
+
     // -- scripts dans l'ordre du document ------------------------
     if let Some(dir) = &dump_dir {
         if let Err(e) = std::fs::create_dir_all(dir) {

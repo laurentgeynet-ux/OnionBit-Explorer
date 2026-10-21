@@ -1806,6 +1806,20 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   focus sur `keydown` (un `key` sur deux rapporte
   `unfocused` — la machinerie suggest re-focus entre les
   events ; constat consigné, à trier côté miroir).
+- [x] **JS-C50. `eval_hook` — observabilité des sources
+  évaluées dynamiquement** (`explorer-jscore`) : le code
+  obfusqué des pages réelles (bootstrap Google) vit dans
+  `eval`/`Function`/timer-string, pas dans le `<script>`
+  parent — les frames d'erreur (JS-C47) pointaient des
+  positions dans des sources invisibles. Livré : hook
+  `Engine::set_eval_hook(Option<EvalHook>)` additif,
+  invoqué **avant parse** sur `eval_source`,
+  `eval_source_in` et le constructeur `Function` ;
+  `census.rs --dump-scripts` l'exploite pour écrire
+  `eval_<n>.js` — le bundle Closure complet de Google
+  (`eval_0.js`, 1861 lignes) est devenu rejouable en
+  isolation, ce qui a permis de bissecter le bug
+  d'ordre d'évaluation corrigé en JS-C52.
 - [x] **JS-C51. `navigator.languages` absent** (demande
   PIPE→NAV au journal 2026-10-21 — triage résidu
   example.com : `navigator.languages.some(...)` →
