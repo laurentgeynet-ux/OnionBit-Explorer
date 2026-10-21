@@ -1495,10 +1495,11 @@ Priorité terrain (lead, mission 14/16) : **JS-C45** en tête
   séquence. Contexte raciné GC, borne `canvas_op_limit`,
   dessin = mutation de rendu → relayout ciblé du sous-arbre.
   Raster = PIPE **R-11** (livré).
-- [ ] **JS-C29. `Worker` bornés** : Engine par thread (patron
-  `DilloEngine`), `postMessage` structuredClone (livré),
-  `onmessage`, `importScripts` minimal, `terminate`, pool
-  borné (`max_workers`, budget ops/worker). Documenté : pas de
+- [x] **JS-C29. `Worker` bornés** : Engine par thread (patron
+  `JscoreEngine`), `postMessage` structuredClone fil (livré),
+  `onmessage`/`onerror`, `importScripts` minimal,
+  `terminate`/`close()`, pool borné (`max_workers`,
+  `queue_len`, budget ops/worker hérité). Documenté : pas de
   `SharedArrayBuffer` inter-thread réel.
 
 ### J-B — Couverture langue par besoin (réactive)

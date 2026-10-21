@@ -22,6 +22,9 @@ use crate::parser;
 use crate::value::{num_to_js_string, to_int32, to_uint32, ObjId, Value};
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::SyncSender;
+use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 // Plafonds logiques anti-contenu hostile (JS-C41) — la pile
@@ -250,6 +253,23 @@ pub struct Engine {
     /// spec « merge »). Consultée par `load_source` pour les
     /// spécificateurs bare avant d'appeler le `ModuleLoader`.
     pub(crate) import_map: Vec<(String, String)>,
+    /// Slots des workers spawnés (JS-C29) — index stables, le
+    /// `WorkerHost` y retrouve son slot au pump.
+    pub(crate) workers: Vec<crate::worker::WorkerSlot>,
+    /// Fabrique de loaders worker — chaque worker reçoit la
+    /// sienne (elle vit dans son thread).
+    pub(crate) worker_factory: Option<crate::worker::WorkerFactory>,
+    /// Bornes du pool (`max_workers`, `queue_len`).
+    pub(crate) worker_cfg: crate::worker::WorkerConfig,
+    /// Côté WORKER : canal de sortie vers le main (`postMessage`).
+    pub(crate) worker_out: Option<SyncSender<crate::worker::WorkerEvent>>,
+    /// Côté WORKER : loader d'`importScripts`.
+    pub(crate) worker_loader: Option<Box<dyn crate::worker::WorkerLoader>>,
+    /// Côté WORKER : `close()` appelé dans le script.
+    pub(crate) worker_close: bool,
+    /// Côté WORKER : flag partagé vivant (le `WorkerHost` du
+    /// parent le coupe à `terminate()`/GC).
+    pub(crate) worker_alive: Arc<AtomicBool>,
     /// Pile de collecteurs `yield` des générateurs en cours
     /// (générateur eager : le corps tourne à l'appel et chaque
     /// `yield` pousse sur le collecteur du sommet — déviation
@@ -495,6 +515,13 @@ impl Engine {
             module_loader: None,
             current_module: String::new(),
             import_map: Vec::new(),
+            workers: Vec::new(),
+            worker_factory: None,
+            worker_cfg: crate::worker::WorkerConfig::default(),
+            worker_out: None,
+            worker_loader: None,
+            worker_close: false,
+            worker_alive: Arc::new(AtomicBool::new(true)),
             gen_collect: Vec::new(),
             pending_labels: Vec::new(),
             using_stack: Vec::new(),

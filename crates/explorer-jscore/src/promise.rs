@@ -284,7 +284,10 @@ impl Engine {
             // JS-C26 : livraison MutationObserver en fin de
             // checkpoint — leurs callbacks peuvent enqueuer de
             // nouveaux jobs → reboucle (budget ops borne).
-            if !self.deliver_mutations()? {
+            // JS-C29 : même couture pour les messages workers —
+            // un handler `onmessage` qui enqueue des microtasks
+            // est vidé au tour suivant.
+            if !self.deliver_mutations()? && self.pump_workers()? == 0 {
                 return Ok(ran);
             }
         }

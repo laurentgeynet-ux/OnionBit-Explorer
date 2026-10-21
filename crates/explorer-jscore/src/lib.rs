@@ -62,6 +62,7 @@ mod temporal;
 mod timers;
 mod typed_array;
 mod value;
+mod worker;
 mod xhr;
 
 pub use dom::{
@@ -74,4 +75,5 @@ pub use interp::Engine;
 pub use module::{module_specifiers, ModuleLoader};
 pub use storage::Storage;
 pub use value::{ObjId, Value};
+pub use worker::{WorkerConfig, WorkerFactory, WorkerLoader};
 pub use xhr::{XhrRequest, XhrResponse, XhrTransport};

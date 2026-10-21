@@ -445,6 +445,10 @@ impl Engine {
         self.add_method(nav, "sendBeacon", nav_send_beacon);
         self.set_own(g, "navigator", Value::Obj(nav), false);
 
+        // `Worker` borné (JS-C29) — le constructeur est présent
+        // pour la détection de feature ; sans `set_worker_factory`
+        // il jette un TypeError honnête.
+        self.install_worker_ctor();
         // `window`/`self`/`globalThis` — the global object itself.
         let gv = Value::Obj(g);
         self.set_own(g, "window", gv, false);

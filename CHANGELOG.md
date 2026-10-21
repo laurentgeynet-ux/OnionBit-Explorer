@@ -225,6 +225,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `type="importmap"` dans l'ordre du document. Un bare hors
   map garde l'erreur `cannot load module` typée.
 
+- **JS-C29 — `Worker` bornés** (`explorer-jscore`) : un
+  `Engine` par thread (patron `JscoreEngine` — le moteur ne
+  quitte jamais son thread), `postMessage`/`onmessage`/
+  `onerror` des deux côtés, valeurs clonées en forme fil
+  `WireValue` (aucun handle de heap ne traverse ; cycles
+  préservés par `Ref`, fonctions/Promise/Symbol/Proxy/host
+  rejetées en `TypeError` DataCloneError). `importScripts`
+  synchrone via `WorkerLoader`/`WorkerFactory` (résolution
+  et fetch à l'embeddeur, jamais de socket ici),
+  `terminate()` côté parent et `close()` côté worker,
+  files `mpsc` bornées (`WorkerConfig.queue_len` =
+  back-pressure), pool borné (`max_workers`, défaut 8),
+  budget ops du parent propagé à chaque worker. Le wrapper
+  GC'd termine son worker via `Host::finalize` ; les
+  messages sont livrés à la pompe (`run_microtasks` →
+  `pump_workers`). Sans fabrique, `new Worker` jette un
+  `TypeError` honnête (`typeof Worker` reste `"function"`).
+  Déviation documentée : pas de `SharedArrayBuffer`
+  inter-thread — un buffer posté est **copié**.
+
 ### Fixed
 
 - **R-44 — `width` explicite d'un remplacé dans la mesure
