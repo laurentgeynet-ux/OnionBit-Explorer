@@ -1797,6 +1797,37 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   init_keys`. Réutilisable tel
   quel pour `MouseEvent.clientX`…
 
+- [x] **Étape 104. CSS parsé par
+  feuille** (suite de R-68 — option
+  structurelle notée par PIPE au
+  journal, reprise) : la session
+  concaténait toutes les feuilles
+  en un blob avant `add_css` —
+  chaque `<style>` inline et
+  chaque `<link>` est désormais
+  parsé isolément. Gains :
+  isolation d'erreur (une accolade
+  non fermée n'avale plus la
+  feuille suivante), chaque
+  feuille reste sous `MAX_TOKENS`
+  (85 K max mesuré sur github.com
+  vs 384 K le blob), `@import`/
+  `@charset` en tête de feuille
+  redeviennent valides (au milieu
+  du blob : rejetés). `linked_css:
+  String` → `linked_sheets:
+  Vec<String>` sur `Tab`,
+  `PaintPayload`, snapshot
+  bfcache ; `doc_css` →
+  `doc_sheets` (SubJob) ;
+  `collect_style_css` →
+  `collect_style_sheets`. Ordre de
+  cascade inchangé. Scans
+  `@font-face`/backgrounds `url()`
+  par feuille. Test :
+  `broken_sheet_does_not_swallow_
+  next`.
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY

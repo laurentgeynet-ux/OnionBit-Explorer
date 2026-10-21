@@ -91,14 +91,11 @@ impl Session {
             ..
         } = job;
         // Feuilles liées dans l'ordre document (slot vide =
-        // feuille en échec → absente de la cascade).
-        let mut css = String::new();
-        for t in css_slots.iter().flatten() {
-            css.push_str(t);
-            css.push('\n');
-        }
+        // feuille en échec → absente de la cascade). Une
+        // entrée par feuille (étape 104) : chaque feuille est
+        // parsée isolément à la cascade.
         if let Some(entry) = self.tabs.get_mut(&tab) {
-            entry.linked_css = css;
+            entry.linked_sheets = css_slots.into_iter().flatten().collect();
         }
         if let Ok(mut wf) = self.webfonts.lock() {
             for (family, weight, italic, data) in fonts {

@@ -107,7 +107,7 @@ fn paintless_snapshot_repairs_on_restore() {
             find: None,
             js: None,
             images: PaintImages::default(),
-            linked_css: String::new(),
+            linked_sheets: Vec::new(),
             prev_styles: HashMap::new(),
             dirty: Vec::new(),
             emitted: 0,
@@ -189,7 +189,7 @@ async fn back_during_inflight_nav_restores_previous() {
             find: None,
             js: None,
             images: PaintImages::default(),
-            linked_css: String::new(),
+            linked_sheets: Vec::new(),
             prev_styles: HashMap::new(),
             dirty: Vec::new(),
             emitted: 0,
@@ -444,6 +444,44 @@ fn stylesheet_utf8_default() {
 fn stylesheet_at_charset_late_ignored() {
     let body = b".a{color:red}@charset 'iso-8859-1';.x{content:'caf\xE9'}".as_slice();
     assert_eq!(css_charset(body), None);
+}
+
+/// Étape 104 — chaque feuille est parsée isolément : un
+/// défaut de fermeture (accolade) dans une feuille ne peut
+/// plus absorber la suivante. Avant, `<style>` inline et
+/// `<link>` étaient concaténés en un blob — la règle
+/// survivante était avalée dans le bloc non fermé (R-68 a
+/// relevé `MAX_TOKENS`, l'isolation reste nécessaire).
+#[test]
+fn broken_sheet_does_not_swallow_next() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    // `<style>` inline : la première feuille n'est pas
+    // fermée — son reste avale la seconde en mode blob.
+    let dom = test_dom(
+        "<style>.x{color:red</style>\
+         <style>#victim{position:fixed}</style>\
+         <div id=victim></div>",
+    );
+    let victim = find_by_id(&dom, "victim").unwrap();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.url = Some(Url::parse("http://h.test/x").unwrap());
+        // Feuilles liées : même motif — la première est
+        // tronquée, la seconde doit survivre.
+        e.linked_sheets = vec![
+            ".y{color:blue".to_string(),
+            "#victim{visibility:hidden}".to_string(),
+        ];
+        e.dom = Some(dom);
+    }
+    // `Dom` n'est pas Clone — take/restore comme `relayout`.
+    let dom_c = s.tabs.get_mut(&tab).unwrap().dom.take().unwrap();
+    let styles = s.compute_styles(tab, &dom_c);
+    s.tabs.get_mut(&tab).unwrap().dom = Some(dom_c);
+    let st = styles.get(victim).expect("style du div");
+    assert_eq!(st.get("position"), Some("fixed"), "style inline avalé");
+    assert_eq!(st.get("visibility"), Some("hidden"), "feuille liée avalée");
 }
 
 /// Étape 56b (rouvert, terrain mission 13) — un DOM
@@ -1393,7 +1431,11 @@ async fn tab_mem_inventory() {
         .map(|i| i.rgba.len())
         .sum();
     eprintln!("png {} Mio, images {} Mio", mib(png_b), mib(img_b));
-    eprintln!("linked_css {} o", e.linked_css.len());
+    eprintln!(
+        "linked_sheets {} o / {} feuilles",
+        e.linked_sheets.iter().map(String::len).sum::<usize>(),
+        e.linked_sheets.len()
+    );
     let cs = std::mem::size_of::<explorer_css::ComputedStyle>();
     eprintln!(
         "prev_styles: {} entrées × ComputedStyle({} o) ≈ {} Mio (cap {})",
@@ -1473,7 +1515,7 @@ async fn tab_mem_inventory() {
         e.images = explorer_render::PaintImages::from_replaced(explorer_render::ImageTable::new())
     );
     drop_probe!("drop prev_styles", e.prev_styles.clear());
-    drop_probe!("drop linked_css", e.linked_css.clear());
+    drop_probe!("drop linked_sheets", e.linked_sheets.clear());
     drop_probe!("drop js", e.js = None);
     drop_probe!("drop pending_nav/hist/net", {
         e.pending_nav.clear();

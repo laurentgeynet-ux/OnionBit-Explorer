@@ -90,6 +90,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   conservée). Test : `blob_geant_regle_apres_borne`
   (~315 K tokens, règle cible en queue). Validé terrain :
   shot github.com 800×1600 — le menu ne se peint plus.
+- **Étape 104 — CSS parsé par feuille**
+  (`explorer-core`, suite de R-68 — option
+  structurelle notée par PIPE au journal) :
+  les feuilles n'étaient plus concaténées en
+  un blob avant `add_css` — chaque `<style>`
+  inline et chaque `<link>` fetché est parsé
+  isolément. Isolation d'erreur : une accolade
+  ou un commentaire non fermé dans une feuille
+  ne peut plus absorber la suivante ; chaque
+  feuille reste sous `MAX_TOKENS` (85 K max
+  mesuré sur github.com vs 384 K pour le
+  blob) ; `@import`/`@charset` en tête de
+  feuille redeviennent valides (un `@import`
+  au milieu du blob était rejeté par la
+  grammaire). `linked_css: String` devient
+  `linked_sheets: Vec<String>` sur `Tab`,
+  `PaintPayload` et le snapshot bfcache ;
+  `doc_css` devient `doc_sheets` sur `SubJob` ;
+  `collect_style_css` → `collect_style_sheets`
+  (une entrée par `<style>`). Ordre de cascade
+  inchangé (insertion = ordre document).
+  Scans `@font-face`/fonds `url()` repassés
+  par feuille. Test : `broken_sheet_does_not_
+  swallow_next`.
+
 - **R-67 — `FontCache` `Send`** (`explorer-layout`) :
   `data` `Rc<Vec<u8>>` → `Arc<Vec<u8>>` (tampons immuables
   — `Arc::as_ptr` conserve l'identité des clés

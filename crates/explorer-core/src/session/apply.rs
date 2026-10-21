@@ -175,8 +175,9 @@ pub(crate) struct PaintPayload {
     pub focused: Option<Vec<(String, u32)>>,
     /// Bitmaps indexés par `NodeId`.
     pub images: PaintImages,
-    /// Feuilles `<link>` concaténées (cascade).
-    pub linked_css: String,
+    /// Feuilles `<link>` — une entrée par feuille, parsées
+    /// isolément à la cascade (étape 104, cf. R-68).
+    pub linked_sheets: Vec<String>,
     /// Styles bruts de la dernière cascade (transitions).
     pub prev_styles: HashMap<usize, ComputedStyle>,
     /// Transitions en vol.
@@ -264,7 +265,7 @@ impl Tab {
             find: self.find.take(),
             focused: self.focused.clone(),
             images: std::mem::take(&mut self.images),
-            linked_css: std::mem::take(&mut self.linked_css),
+            linked_sheets: std::mem::take(&mut self.linked_sheets),
             prev_styles: std::mem::take(&mut self.prev_styles),
             transitions: std::mem::take(&mut self.transitions),
             animations: std::mem::take(&mut self.animations),
@@ -294,7 +295,7 @@ impl Tab {
         self.popup = p.popup;
         self.find = p.find;
         self.images = p.images;
-        self.linked_css = p.linked_css;
+        self.linked_sheets = p.linked_sheets;
         self.prev_styles = p.prev_styles;
         self.transitions = p.transitions;
         self.animations = p.animations;
@@ -467,8 +468,17 @@ pub(crate) fn styles_payload(
 ) -> StyleMap {
     let mut eng = StyleEngine::new();
     eng.add_css(MEDIA_UA_CSS, Origin::UserAgent);
-    eng.add_css(&collect_style_css(dom), Origin::Author);
-    eng.add_css(&p.linked_css, Origin::Author);
+    // Une passe de parse par feuille (étape 104) : l'ordre de
+    // cascade est l'ordre d'insertion, donc inchangé — mais un
+    // défaut de fermeture (accolade, commentaire) ne peut plus
+    // absorber la feuille suivante, et `@import`/`@charset`
+    // en tête de feuille redeviennent valides (cf. R-68).
+    for css in collect_style_sheets(dom) {
+        eng.add_css(&css, Origin::Author);
+    }
+    for css in &p.linked_sheets {
+        eng.add_css(css, Origin::Author);
+    }
     // Media queries évaluées contre le viewport RÉEL de la
     // session (demande PIPE→NAV : `max-width:1007` doit être
     // vrai à 800px, pas lue sur le 1024×768 par défaut) et

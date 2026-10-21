@@ -397,10 +397,11 @@ pub(crate) struct SubJob {
     pub(crate) sheet_urls: Vec<Url>,
     pub(crate) scripts: Vec<ScriptItem>,
     pub(crate) img_urls: Vec<Url>,
-    /// CSS inline du document — nourrit la résolution
+    /// `<style>` inline du document — une entrée par
+    /// élément (étape 104) — nourrit la résolution
     /// `@font-face` (le DOM n'est pas accessible hors
     /// session).
-    pub(crate) doc_css: String,
+    pub(crate) doc_sheets: Vec<String>,
     /// Moteur du document — les `async` classiques sont
     /// évalués en ligne à réception pendant la vague.
     pub(crate) eng: Option<Box<dyn JsEngine>>,
@@ -656,7 +657,9 @@ impl SubJob {
         }
         {
             let mut urls = Vec::new();
-            collect_bg_urls(&parse_stylesheet(&self.doc_css).rules, &env, &mut urls);
+            for sheet in &self.doc_sheets {
+                collect_bg_urls(&parse_stylesheet(sheet).rules, &env, &mut urls);
+            }
             decl_urls.push((self.url.clone(), urls));
         }
         'slots: for (base, urls) in decl_urls {
@@ -688,19 +691,20 @@ impl SubJob {
 
     /// Fetch + décode des `@font-face` hors session (étape
     /// 53d — ex-`fetch_webfonts` déplacé) : faces résolues
-    /// sur `doc_css` + feuilles liées téléchargées, chaque
+    /// sur `doc_sheets` + feuilles liées téléchargées, chaque
     /// source `url()` essayée dans l'ordre (première qui
     /// décode gagne) ; `register` au commit borne le
     /// registre. Séquentiel — `font_budget` vus.
     pub(crate) async fn fetch_fonts(&mut self) {
         let mut eng = StyleEngine::new();
-        eng.add_css(&self.doc_css.clone(), Origin::Author);
-        let mut linked = String::new();
-        for t in self.css_slots.iter().flatten() {
-            linked.push_str(t);
-            linked.push('\n');
+        // Une passe par feuille (étape 104) — même ordre
+        // document que la cascade appliquée.
+        for sheet in &self.doc_sheets {
+            eng.add_css(sheet, Origin::Author);
         }
-        eng.add_css(&linked, Origin::Author);
+        for sheet in self.css_slots.iter().flatten() {
+            eng.add_css(sheet, Origin::Author);
+        }
         let env = super::apply::viewport_env(self.viewport, self.color_scheme);
         'faces: for face in eng.font_faces(&env) {
             if self.fonts.len() >= self.font_budget {

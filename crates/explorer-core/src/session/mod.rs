@@ -231,9 +231,11 @@ pub(crate) struct Tab {
     /// texte `alt`.
     images: PaintImages,
     /// Feuilles `<link rel=stylesheet>` fetchées à la
-    /// navigation — concaténées, vidées à chaque re-parse
-    /// (étape 46 : premières sous-ressources CSS).
-    linked_css: String,
+    /// navigation — une entrée par feuille, ordre document
+    /// (étape 104 : chaque feuille est parsée isolément —
+    /// isolation d'erreur par `<link>`, cf. R-68), vidées à
+    /// chaque re-parse.
+    linked_sheets: Vec<String>,
     /// Tampon des fonds `url(http…)` fetchés pendant la vague
     /// (étape 98) — posés entre `sub_commit` et le relayout,
     /// consommés à la cascade par `insert_fetched_backgrounds`
@@ -399,8 +401,8 @@ pub(crate) struct PageSnapshot {
     js: Option<Box<dyn JsEngine>>,
     /// Bitmaps de peinture (`<img>` + `<svg>` inline).
     images: PaintImages,
-    /// Feuilles `<link>` concaténées.
-    linked_css: String,
+    /// Feuilles `<link>` — une entrée par feuille (104).
+    linked_sheets: Vec<String>,
     /// Styles calculés (transitions — vidées au gel).
     prev_styles: HashMap<usize, ComputedStyle>,
     /// Régions invalides en vol (+ tête déjà émise).
@@ -731,7 +733,7 @@ impl Session {
                 find: None,
                 js: None,
                 images: PaintImages::default(),
-                linked_css: String::new(),
+                linked_sheets: Vec::new(),
                 bg_aliases: HashMap::new(),
                 bg_bodies: HashMap::new(),
                 prev_styles: HashMap::new(),

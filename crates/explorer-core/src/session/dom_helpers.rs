@@ -176,24 +176,24 @@ pub(crate) fn extract_title(dom: &Dom) -> Option<String> {
     None
 }
 
-/// Concatène le contenu des `<style>` du document —
-/// identique au helper du CLI (dupliqué tant que le pipeline
-/// sous-ressources n'existe pas, étape 12).
-pub(crate) fn collect_style_css(dom: &Dom) -> String {
-    let mut css = String::new();
+/// Contenu de chaque `<style>` du document, ordre document
+/// — une entrée par élément (étape 104 : chaque feuille est
+/// parsée isolément — une accolade non fermée ne peut plus
+/// absorber la feuille suivante, cf. R-68).
+pub(crate) fn collect_style_sheets(dom: &Dom) -> Vec<String> {
+    let mut sheets = Vec::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "style") {
             if let Ok(t) = dom.text_content(n) {
-                css.push_str(&t);
-                css.push('\n');
+                sheets.push(t);
             }
         }
         if let Ok(ch) = dom.children(n) {
             queue.extend(ch.iter().rev());
         }
     }
-    css
+    sheets
 }
 
 /// `(href, media)` des `<link rel=stylesheet>` dans l'ordre

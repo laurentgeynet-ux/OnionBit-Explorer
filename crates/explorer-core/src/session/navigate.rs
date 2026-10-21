@@ -602,7 +602,7 @@ impl Session {
         }
         let scripting = self.js_factory.is_some();
         let (sheet_urls, scripts, img_urls) = self.plan_subresources(&dom, &url, scripting);
-        let doc_css = collect_style_css(&dom);
+        let doc_sheets = collect_style_sheets(&dom);
         // JS-C45 : les handlers inline `on*` exigent un moteur
         // même sans `<script>` — sinon clic muet (page à
         // `onclick=` seul : premier bug site-réel mesuré M24).
@@ -649,7 +649,7 @@ impl Session {
             entry.images = PaintImages::default();
             entry.bg_aliases.clear();
             entry.bg_bodies.clear();
-            entry.linked_css.clear();
+            entry.linked_sheets.clear();
             entry.prev_styles = HashMap::new();
             entry.transitions.clear();
             entry.sync_floor = None;
@@ -673,7 +673,7 @@ impl Session {
             sheet_urls,
             scripts,
             img_urls,
-            doc_css,
+            doc_sheets,
             eng,
             css_slots: Vec::new(),
             script_srcs: Vec::new(),

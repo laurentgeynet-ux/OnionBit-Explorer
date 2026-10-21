@@ -43,7 +43,7 @@ impl Tab {
             find: self.find.take(),
             js: self.js.take(),
             images: std::mem::take(&mut self.images),
-            linked_css: std::mem::take(&mut self.linked_css),
+            linked_sheets: std::mem::take(&mut self.linked_sheets),
             prev_styles: std::mem::take(&mut self.prev_styles),
             dirty: std::mem::take(&mut self.dirty),
             emitted: self.emitted,
@@ -89,7 +89,7 @@ impl Tab {
         self.find = snap.find;
         self.js = snap.js;
         self.images = snap.images;
-        self.linked_css = snap.linked_css;
+        self.linked_sheets = snap.linked_sheets;
         self.prev_styles = snap.prev_styles;
         self.dirty = snap.dirty;
         self.emitted = snap.emitted;
