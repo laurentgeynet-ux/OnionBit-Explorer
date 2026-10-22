@@ -9,6 +9,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **`fit:width` transitoire au resize**
+  (`app/`) : pendant le cycle
+  `set_viewport`→relayout→pull (~0,8 s
+  release mesuré vol 22/10), la frame
+  retenue n'est plus figée à sa taille
+  intrinsèque (`BoxFit.none`) mais tirée
+  à la largeur fenêtre —
+  `Transform.scale(size.width×dpr/
+  raw.width)`, flou mais dimensionné, qui
+  s'annule seul à l'arrivée de la frame
+  fraîche. `frameShift` et overlays
+  `MediaSurface` suivent l'échelle
+  effective (`fZoom`) pour rester collés
+  au contenu étiré. À re-valider en vol
+  humain release.
 - **`jprobe` élargi — sonde de vol terrain
   consolidée** (`explorer-cli`) : la sonde
   interactive rapporte désormais, au-delà des

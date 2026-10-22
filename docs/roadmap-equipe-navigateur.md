@@ -2148,9 +2148,17 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     (`fit:none`) pendant le cycle
     `set_viewport`→relayout→pull —
     mesuré ~0,8 s release / ~10 s
-    debug sur wikipedia. Amélioration
-    possible : `fit:width` pendant le
-    transit. À re-valider en release.
+    debug sur wikipedia.
+    **`fit:width` implémenté** : la frame
+    retenue est tirée à la largeur
+    fenêtre pendant le transit
+    (`Transform.scale` sur
+    `size.width×dpr/raw.width`, s'annule
+    seul à la frame fraîche ;
+    `frameShift` + overlays média
+    suivent `fZoom`). À re-valider en
+    vol humain release (ressenti
+    resize).
   - **`Image`/`HTMLImageElement`
     manquant** (wikipedia.org) →
     file JS.

@@ -1053,6 +1053,21 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                 // `zoom` px logiques à l'écran. Les coordonnées
                 // d'entrée se divisent par ce facteur.
                 final cssPerLogical = zoom;
+                // fit:width transitoire : pendant le cycle
+                // `set_viewport`→relayout→pull (~0,8 s release
+                // mesuré vol 22/10), la frame retenue est à la
+                // taille de l'ancien viewport — `BoxFit.none` la
+                // figeait. On la tire à la largeur fenêtre
+                // (flou mais dimensionné) ; `raw.width` px image
+                // = `cssW×zoom×dpr` → attendu `size.width×dpr`,
+                // le facteur retombe à 1 seul à l'arrivée de la
+                // frame fraîche. `fZoom` = échelle d'affichage
+                // effective (translation locale + overlays média
+                // suivent la frame étirée).
+                final fitW = size.width > 0 && raw.width > 0
+                    ? size.width * dpr / raw.width
+                    : 1.0;
+                final fZoom = zoom * fitW;
                 return MouseRegion(
                   cursor: st.hoverEditable
                       ? SystemMouseCursors.text
@@ -1158,18 +1173,22 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                                   -widget.ctrl.frameShiftCss(
                                         widget.state.active?.id ?? '',
                                       ) *
-                                      zoom,
+                                      fZoom,
                                 ),
                                 // `ui.Image` décodée côté
                                 // contrôleur (REST : codec PNG ;
                                 // FFI : pixels bruts ADR-0018) —
                                 // `RawImage` direct.
-                                child: RawImage(
-                                  image: raw,
-                                  fit: BoxFit.none,
-                                  // 1 px image = 1 px physique :
-                                  // taille logique = px/dpr.
-                                  scale: dpr,
+                                child: Transform.scale(
+                                  scale: fitW,
+                                  alignment: Alignment.topLeft,
+                                  child: RawImage(
+                                    image: raw,
+                                    fit: BoxFit.none,
+                                    // 1 px image = 1 px physique :
+                                    // taille logique = px/dpr.
+                                    scale: dpr,
+                                  ),
                                 ),
                               ),
                             ),
@@ -1177,8 +1196,9 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                             // en px CSS document → position =
                             // (x, y − scroll_y) × zoom, la frame
                             // étant affichée à 1 px CSS = `zoom`
-                            // px logiques (étape 82).
-                            ..._mediaOverlays(st, active!.id, zoom),
+                            // px logiques (étape 82) — `fZoom`
+                            // pendant le transit fit:width.
+                            ..._mediaOverlays(st, active!.id, fZoom),
                           ],
                         ),
                       ),
