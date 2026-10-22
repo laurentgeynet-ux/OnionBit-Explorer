@@ -130,30 +130,39 @@ if (-not $SkipFunctional -and $ok -gt 0) {
         Write-Error "explorer-daemon introuvable : $daemon"
         exit 1
     }
-    $FuncPort = 9379
+    # Port libre plutôt que port fixe + kill : la rustine
+    # précédente tuait « chirurgicalement » le titulaire de
+    # 9379 — elle pouvait abattre le daemon d'un run PARALLÈLE
+    # légitime (vol post-109 : FAILs transitoires pendant un
+    # taskkill PIPE). On ne touche jamais un processus qu'on
+    # n'a pas spawné — balayage d'une plage, premier port
+    # sans écoute gagne. Fenêtre TOCTOU minime entre le test
+    # et le bind daemon ; en échec, le readiness check
+    # l'attribue proprement (sait distinguer mort vs stale).
+    $FuncPort = 0
+    foreach ($p in 9379..9399) {
+        $l = [System.Net.Sockets.TcpListener]::new(
+            [System.Net.IPAddress]::Loopback, $p)
+        try {
+            $l.Start()
+            $FuncPort = $p
+            break
+        } catch {
+            # port occupé — candidat suivant
+        } finally {
+            try { $l.Stop() } catch { }
+        }
+    }
+    if ($FuncPort -eq 0) {
+        Write-Error 'aucun port libre dans 9379..9399 pour le daemon smoke'
+        exit 1
+    }
+    Write-Output "  port smoke choisi : $FuncPort"
     $FuncBase = "http://127.0.0.1:$FuncPort/api"
     # Profil jetable : le smoke ne pollue ni le cache ni
     # l'historique du profil utilisateur.
-    $profDir = Join-Path $env:TEMP 'explorer-site-smoke'
+    $profDir = Join-Path $env:TEMP "explorer-site-smoke-$FuncPort"
     New-Item -ItemType Directory -Force -Path $profDir | Out-Null
-    # Port encombré ? Un daemon smoke d'un run précédent (mort
-    # anormale du script, run parallèle) peut encore le tenir —
-    # le bind échoue alors et TOUTES les sondes parlent à un
-    # moteur possiblement obsolète (veille 22/10 : `os error
-    # 10048` — fonctionnels mesurés 1/9 sur moteur stale). On
-    # libère le port, mais chirurgicalement : seulement si le
-    # titulaire est bien un `explorer-daemon` (jamais un
-    # processus étranger qui occuperait 9379 par hasard).
-    Get-NetTCPConnection -LocalPort $FuncPort -State Listen `
-        -ErrorAction SilentlyContinue |
-        ForEach-Object { $_.OwningProcess } | Sort-Object -Unique |
-        ForEach-Object {
-            $p = Get-Process -Id $_ -ErrorAction SilentlyContinue
-            if ($p -and $p.ProcessName -like 'explorer-daemon*') {
-                Write-Output "  port $FuncPort libéré (PID $_ = daemon stale)"
-                Stop-Process -Id $_ -Force
-            }
-        }
     # stderr capturé : une mort du daemon en cours de sondage
     # (observée une fois — cause non attribuée) doit laisser
     # une trace, pas disparaître dans le silence.
