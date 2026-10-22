@@ -1808,6 +1808,26 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   raster), zones ancienne+nouvelle rapportées, fusion par
   intersection, `[]` si frame identique. API additive, aucun
   changement de signature — débloque NAV-55.
+- [ ] **R-69. Fallback de fonte par glyphe** (trigger
+  terrain vol 22/10 — tofus `□□□` sur les labels CJK du
+  portail Wikipedia : 日本語/記事 → carrés). Mesuré —
+  **deux gaps dans la chaîne** : (1) le scan fontdb
+  (`explorer-render/src/fonts.rs:54`) ne retient que
+  `ttf|otf` — quasi toutes les fontes CJK Windows sont des
+  collections `.ttc` (`msjh.ttc`, `YuGoth*.ttc`,
+  `simsun.ttc`, `msgothic.ttc`) → invisibles à la fontdb ;
+  (2) `resolve` choisit **une** fonte par requête — glyphe
+  absent → `glyph_id 0` → `.notdef` → carré : aucune
+  tentative de repli sur une autre fonte de la db.
+  Direction : étendre le scan aux `.ttc` (fontdb sait les
+  ouvrir — `Face` indexée) puis fallback par glyphe le
+  long de la chaîne `font-family`→fontdb (`char`→face
+  candidates par couverture cmap), segmentation du run
+  par fonte à l'émission des items `DisplayItem::Text`
+  (un item par segment — la structure le permet déjà).
+  Pré-requis mesurés : glyphes latins OK sur les familles
+  courantes, seuls manquent les segments hors coverage
+  de la première fonte résolue.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
