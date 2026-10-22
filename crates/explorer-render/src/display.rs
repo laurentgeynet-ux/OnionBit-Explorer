@@ -731,47 +731,26 @@ fn emit_canvas_bg(
             });
         }
     }
-    if src.style.get("background-image").is_some_and(bg_has_url) {
-        if let Some(img) = src.node.and_then(|n| images.backgrounds.get(&n)).cloned() {
-            let repeat = match src.style.get("background-repeat") {
-                Some("no-repeat") => (false, false),
-                Some("repeat-x") => (true, false),
-                Some("repeat-y") => (false, true),
-                _ => (true, true),
-            };
-            // Origine de la tuile : padding box de la racine
-            // pour SON fond (le `0 -1em` de `margin-collapse-020`
-            // se mesure depuis son propre bord) ; canvas pour
-            // le fond propagé de `body`.
-            let (area, base) = if canvas_from_root {
-                let bl = border_side_w(&src.style, "left");
-                let bt = border_side_w(&src.style, "top");
-                let br = border_side_w(&src.style, "right");
-                let bb = border_side_w(&src.style, "bottom");
-                (
-                    (
-                        (src.rect.width - bl - br).max(0.0),
-                        (src.rect.height - bt - bb).max(0.0),
-                    ),
-                    (src.rect.x + bl, src.rect.y + bt),
-                )
-            } else {
-                ((viewport_w, viewport_h), (0.0, 0.0))
-            };
-            let (px, py) = bg_position(
-                src.style.get("background-position"),
-                area,
-                (img.width as f32, img.height as f32),
-                font_size_of(&src.style),
-            );
-            items.push(DisplayItem::BackgroundImage {
-                rect: canvas,
-                img,
-                repeat,
-                origin: (base.0 + px, base.1 + py),
-            });
-        }
-    }
+    // Origine des tuiles : padding box de la racine pour SON
+    // fond (le `0 -1em` de `margin-collapse-020` se mesure
+    // depuis son propre bord) ; canvas pour le fond propagé
+    // de `body`.
+    let (area, base) = if canvas_from_root {
+        let bl = border_side_w(&src.style, "left");
+        let bt = border_side_w(&src.style, "top");
+        let br = border_side_w(&src.style, "right");
+        let bb = border_side_w(&src.style, "bottom");
+        (
+            (
+                (src.rect.width - bl - br).max(0.0),
+                (src.rect.height - bt - bb).max(0.0),
+            ),
+            (src.rect.x + bl, src.rect.y + bt),
+        )
+    } else {
+        ((viewport_w, viewport_h), (0.0, 0.0))
+    };
+    emit_bg_layers(items, &src.style, src.node, images, canvas, area, base);
     src.node
 }
 
@@ -1059,14 +1038,116 @@ fn bg_has_url(v: &str) -> bool {
         .any(|w| w.eq_ignore_ascii_case(b"url("))
 }
 
+/// La valeur contient une fonction dégradé (`linear-gradient(`
+/// et variantes — repérées par leur suffixe `gradient(`,
+/// insensible à la casse). Seul le dégradé **linéaire** se
+/// peint aujourd'hui ; `radial`/`conic` sont acceptés au parse
+/// (déclaration préservée) mais non rasterisés.
+fn bg_has_gradient(v: &str) -> bool {
+    v.as_bytes()
+        .windows(9)
+        .any(|w| w.eq_ignore_ascii_case(b"gradient("))
+}
+
+/// La valeur `background-image` porte une couche potentiellement
+/// peignable (`url(…)` ou dégradé) — issue #10.
+fn bg_has_image(v: &str) -> bool {
+    bg_has_url(v) || bg_has_gradient(v)
+}
+
+/// Couches d'une valeur `background-image` — éclatées sur les
+/// virgules hors parenthèses (`linear-gradient(…),url(…)`).
+fn bg_layers(v: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0u32;
+    let mut start = 0usize;
+    for (i, ch) in v.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(&v[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&v[start..]);
+    out
+}
+
+/// Émet les couches `background-image` de la boîte, **de la
+/// dernière déclarée (fond) vers la première (dessus)** —
+/// ordre de peinture des couches multiples CSS. Chaque couche
+/// `url(…)` puise son bitmap décodé dans `images` ; chaque
+/// couche `linear-gradient(…)` est rasterisée à la taille de
+/// la zone de positionnement (un dégradé n'a pas de taille
+/// intrinsèque — il couvre l'aire, §images-3). Une couche dont
+/// la source manque (url non décodée, dégradé non supporté)
+/// est simplement sautée, les autres peignent.
+#[allow(clippy::cast_precision_loss)]
+fn emit_bg_layers(
+    items: &mut Vec<DisplayItem>,
+    style: &explorer_css::ComputedStyle,
+    node: Option<explorer_dom::NodeId>,
+    images: &crate::PaintImages,
+    rect: Rect,
+    area: (f32, f32),
+    base: (f32, f32),
+) {
+    let Some(v) = style.get("background-image") else {
+        return;
+    };
+    if v.is_empty() || v == "none" || !bg_has_image(v) {
+        return;
+    }
+    let repeat = match style.get("background-repeat") {
+        Some("no-repeat") => (false, false),
+        Some("repeat-x") => (true, false),
+        Some("repeat-y") => (false, true),
+        _ => (true, true), // `repeat` = défaut.
+    };
+    let fs = font_size_of(style);
+    for layer in bg_layers(v).iter().rev() {
+        let img = if bg_has_url(layer) {
+            node.and_then(|n| images.backgrounds.get(&n)).cloned()
+        } else if bg_has_gradient(layer) {
+            crate::gradient::decode_linear_gradient(layer, area.0, area.1, fs)
+                .map(std::sync::Arc::new)
+        } else {
+            None
+        };
+        if let Some(img) = img {
+            // `%` de `background-position` mesure
+            // `(zone − image)` : un dégradé calibré à la zone
+            // rend donc les positions relatives neutres, les
+            // offsets absolus (`0 -667px` sprites) actifs —
+            // conforme §14.2.1.
+            let (px, py) = bg_position(
+                style.get("background-position"),
+                area,
+                (img.width as f32, img.height as f32),
+                fs,
+            );
+            items.push(DisplayItem::BackgroundImage {
+                rect,
+                img,
+                repeat,
+                origin: (base.0 + px, base.1 + py),
+            });
+        }
+    }
+}
+
 /// La boîte déclare un fond : `background-color` non
-/// transparente ou `background-image: url()` (§14.2 —
-/// sélection de la source du fond de canvas).
+/// transparente ou `background-image` avec une couche
+/// `url()`/dégradé (§14.2 — sélection de la source du fond de
+/// canvas).
 fn has_bg(st: &explorer_css::ComputedStyle) -> bool {
     st.get("background-color")
         .and_then(parse_color)
         .is_some_and(|c| c.a > 0)
-        || st.get("background-image").is_some_and(bg_has_url)
+        || st.get("background-image").is_some_and(bg_has_image)
 }
 
 /// `font-size` calculée de la boîte en px (16 par défaut).
@@ -1236,53 +1317,31 @@ fn paint_self(
                 }
             }
         }
-        if bx.style.get("background-image").is_some_and(bg_has_url) {
-            if let Some(img) = bx.node.and_then(|n| images.backgrounds.get(&n)).cloned() {
-                let repeat = match bx.style.get("background-repeat") {
-                    Some("no-repeat") => (false, false),
-                    Some("repeat-x") => (true, false),
-                    Some("repeat-y") => (false, true),
-                    _ => (true, true), // `repeat` = défaut.
-                };
-                // Zone de positionnement : **padding box** (bord
-                // interne des bordures — `background-position`
-                // s'y réfère, §14.2.1) pour `scroll`, viewport
-                // pour `fixed` (le fond reste calé à l'écran).
-                // L'origine est en coords FRAME : le viewport
-                // y démarre en (0,0) — ancrer au scroll
-                // déphaserait la tuile de `scroll mod taille`.
-                // La zone PEINTE reste la border box (clip par
-                // défaut) — seule l'ancre de la tuile bouge.
-                let fixed = bx.style.get("background-attachment") == Some("fixed");
-                let (area, base) = if fixed {
-                    ((vp.0, vp.1), (0.0, 0.0))
-                } else {
-                    let bl = border_side_w(&bx.style, "left");
-                    let bt = border_side_w(&bx.style, "top");
-                    let br = border_side_w(&bx.style, "right");
-                    let bb = border_side_w(&bx.style, "bottom");
-                    (
-                        (
-                            (rect.width - bl - br).max(0.0),
-                            (rect.height - bt - bb).max(0.0),
-                        ),
-                        (rect.x + bl, rect.y + bt),
-                    )
-                };
-                let (px, py) = bg_position(
-                    bx.style.get("background-position"),
-                    area,
-                    (img.width as f32, img.height as f32),
-                    font_size_of(&bx.style),
-                );
-                items.push(DisplayItem::BackgroundImage {
-                    rect,
-                    img,
-                    repeat,
-                    origin: (base.0 + px, base.1 + py),
-                });
-            }
-        }
+        // Zone de positionnement : **padding box** (bord interne
+        // des bordures — `background-position` s'y réfère,
+        // §14.2.1) pour `scroll`, viewport pour `fixed` (le
+        // fond reste calé à l'écran). L'origine est en coords
+        // FRAME : le viewport y démarre en (0,0) — ancrer au
+        // scroll déphaserait la tuile de `scroll mod taille`.
+        // La zone PEINTE reste la border box (clip par défaut)
+        // — seule l'ancre de la tuile bouge.
+        let fixed = bx.style.get("background-attachment") == Some("fixed");
+        let (area, base) = if fixed {
+            ((vp.0, vp.1), (0.0, 0.0))
+        } else {
+            let bl = border_side_w(&bx.style, "left");
+            let bt = border_side_w(&bx.style, "top");
+            let br = border_side_w(&bx.style, "right");
+            let bb = border_side_w(&bx.style, "bottom");
+            (
+                (
+                    (rect.width - bl - br).max(0.0),
+                    (rect.height - bt - bb).max(0.0),
+                ),
+                (rect.x + bl, rect.y + bt),
+            )
+        };
+        emit_bg_layers(items, &bx.style, bx.node, images, rect, area, base);
     }
     // Bordures : 4 côtés, épaisseur > 0 et style non `none`.
     // Sémantique de `border_side_w` : la largeur ne compte que

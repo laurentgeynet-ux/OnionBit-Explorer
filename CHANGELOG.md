@@ -9,6 +9,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-73 — `linear-gradient` non
+  peint + shorthand `background /size`
+  droppé** (`explorer-css`,
+  `explorer-render`, issue #10) : la
+  barre tricolore NPR et le bandeau
+  lobste.rs étaient absents — deux
+  trous dans `expand_background` :
+  - tokenisation naïve qui éclatait
+    `linear-gradient(to right, …)` sur
+    ses espaces → déclaration rejetée
+    (tokenizer paren-conscient +
+    fonctions `<image>` admises) ;
+  - grammaire `<bg-size>` absente :
+    `background:red 50% / contain
+    no-repeat` tombait entière, la
+    couleur déclarée perdue (`/` collé
+    ou séparé, `auto|cover|contain|
+    length|%` ≤ 2 valeurs →
+    `background-size` émis).
+  - Peinture : nouveau module
+    `gradient` — `linear-gradient` est
+    rasterisé en bitmap à la taille de
+    la zone de positionnement puis
+    emprunte la machinerie
+    `BackgroundImage` (directions
+    `to <side>`/coins, `<angle>`
+    deg/grad/rad/turn, stops avec
+    positions explicites ou
+    distribuées, `repeating-` couvert,
+    borne 4096 px). `emit_bg_layers`
+    peint les couches dans l'ordre
+    spec (dernière déclarée = fond).
+    Résidus : `radial`/`conic` parsés
+    non peints ; `background-size`
+    cascadé, non appliqué au bitmap.
+
 - **Étape 113 — `DOMContentLoaded`/
   `load` jamais dispatchés**
   (`explorer-core`, issue #11) :

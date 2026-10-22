@@ -18,6 +18,7 @@ pub mod dataurl;
 pub mod display;
 pub mod fonts;
 pub mod glyph_cache;
+mod gradient;
 pub mod image;
 pub mod raster;
 pub mod svg;

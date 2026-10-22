@@ -1904,6 +1904,46 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   reste hors portée (atlas scalé ≠ 1:1 non géré) ; le shot
   PNG terrain attend que `explorer-core` recompile (WIP NAV
   `PendingApply.ids/journal` en vol au moment du fix).
+- [x] **R-73. `linear-gradient` peint + shorthand `/size`**
+  (issue #10 — vol comparatif : barre tricolore NPR et
+  bandeau lobste.rs absents ; fixture lead confirmant deux
+  trous : `background:linear-gradient(…)` et `background:red
+  50% / contain no-repeat` **entièrement droppés** au parse).
+  Deux causes au même endroit (`expand_background`) :
+  (a) tokenisation `split_whitespace` éclatait
+  `linear-gradient(to right, red, blue)` sur ses espaces
+  internes → token inconnu → déclaration rejetée ; seul
+  `url(`/`none` était admis en slot image — **fix** :
+  tokenisation paren-consciente `bg_tokens` + slot
+  `<bg-image>` élargi aux fonctions image (`*gradient(`,
+  `image(`, `image-set(`) ;
+  (b) aucune grammaire `<bg-size>` : `/` tombait en token
+  inconnu → la déclaration `pos / size` était droppée, la
+  couleur déclarée perdue — **fix** : `split_top_slash`
+  (`/` collé ou séparé) + `bg_size_token`
+  (`auto|cover|contain|length|%`, ≤2 valeurs), émission
+  `background-size` + `background-origin`/`-clip` (slots
+  `<box>`). Peinture : module `gradient` —
+  `decode_linear_gradient` rasterise le dégradé à la taille
+  de la zone de positionnement (pas de taille intrinsèque,
+  §images-3) en un `DecodedImage` empruntant la machinerie
+  `BackgroundImage` (position/repeat/clip) ; directions
+  `to <side>`/coins, `<angle>` (deg/grad/rad/turn), stops
+  `<color> [pos]` avec distribution spec des positions
+  absentes + monotonie, `repeating-linear-gradient` par
+  repliement du paramètre, borne 4096 px (hospitalité).
+  `emit_bg_layers` mutualise l'émission par couches — ordre
+  spec : la dernière couche déclarée peint d'abord (fond),
+  la première en dernier (dessus). Tests : expand
+  (`/size` séparé+collé, gradient à espaces, taille→reclasse
+  normal, rejets préservés) + display (gradient `to right`
+  pixels rouge→bleu, `to bottom` défaut via shorthand,
+  `/size` → fond rouge peint, ordre multi-couches).
+  Résidus documentés : `radial-`/`conic-gradient` parsés
+  non peints ; `background-size` cascadé mais non appliqué
+  au bitmap (déclaration préservée, image taille naturelle) ;
+  `background-origin`/`-clip` émis non consommés ; stops à
+  transitions dures (`color pos pos`) non gérés.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

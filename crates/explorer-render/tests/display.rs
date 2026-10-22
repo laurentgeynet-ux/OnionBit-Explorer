@@ -1036,6 +1036,91 @@ fn background_image_multicouche_peint_la_couche_url() {
 }
 
 #[test]
+fn linear_gradient_peint_un_degrade_reel() {
+    // Issue #10 : la couche `linear-gradient` est rasterisée
+    // à la taille de la zone de positionnement puis peinte —
+    // `to right` → bord gauche rouge, bord droit bleu.
+    let list = bg_div("background-image:linear-gradient(to right, red, blue)");
+    let img = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { img, .. } => Some(img.clone()),
+            _ => None,
+        })
+        .expect("l'item dégradé doit être émis");
+    assert_eq!((img.width, img.height), (40, 20), "bitmap = zone padding");
+    let px = |x: usize| &img.rgba[x * 4..x * 4 + 4];
+    assert!(
+        px(0)[0] > 200 && px(0)[2] < 60,
+        "gauche rouge : {:?}",
+        px(0)
+    );
+    assert!(
+        px(39)[2] > 200 && px(39)[0] < 60,
+        "droite bleue : {:?}",
+        px(39)
+    );
+}
+
+#[test]
+fn linear_gradient_direction_et_shorthand() {
+    // Direction par défaut `to bottom` via le shorthand
+    // `background:` (tokenisation paren-consciente — le
+    // dégradé à espaces reste un atome, issue #10).
+    let list = bg_div("background:linear-gradient(red, blue)");
+    let img = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { img, .. } => Some(img.clone()),
+            _ => None,
+        })
+        .expect("item dégradé via shorthand");
+    let top = &img.rgba[0..4];
+    let bottom = &img.rgba[(img.height as usize - 1) * img.width as usize * 4..];
+    assert!(top[0] > 200 && top[2] < 60, "haut rouge : {top:?}");
+    assert!(bottom[2] > 200 && bottom[0] < 60, "bas bleu : {bottom:?}");
+}
+
+#[test]
+fn shorthand_size_preserve_la_declaration() {
+    // Issue #10 (bonus) : `50% / contain` ne doit plus faire
+    // tomber la déclaration entière — la couleur survit et
+    // peint ; la couche image est `none` → aucun item image.
+    let list = bg_div("background:red 50% / contain no-repeat");
+    assert!(
+        list.items.iter().any(|i| matches!(
+            i,
+            DisplayItem::FillRect { color, .. } if color.r > 200 && color.g < 60
+        )),
+        "le fond rouge doit peindre"
+    );
+    assert!(
+        !list
+            .items
+            .iter()
+            .any(|i| matches!(i, DisplayItem::BackgroundImage { .. })),
+        "background-image:none → pas d'item image"
+    );
+}
+
+#[test]
+fn couches_multiples_ordre_spec() {
+    // `gradient,url` : la DERNIÈRE couche se peint en premier
+    // (fond) puis la première (dessus) — l'item url doit
+    // précéder l'item dégradé dans la display list.
+    let list = bg_div("background-image:linear-gradient(red,blue),url(x)");
+    let mut kinds = Vec::new();
+    for i in &list.items {
+        if let DisplayItem::BackgroundImage { img, .. } = i {
+            kinds.push(img.width); // url injectée = 4 px, dégradé = 40 px.
+        }
+    }
+    assert_eq!(kinds, vec![4, 40], "url (dessous) puis dégradé (dessus)");
+}
+
+#[test]
 fn background_fixed_ancre_au_viewport() {
     // Attachment fixed : la zone de positionnement est le
     // viewport — à scroll 0, origine = coin écran + position.

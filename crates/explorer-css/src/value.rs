@@ -611,74 +611,235 @@ fn expand_overflow(value: &str) -> Option<Vec<(String, String)>> {
     }
 }
 
-/// `background` complet (CSS2 §14.2.1) : le shorthand
-/// **réinitialise** tous les longhands — les non mentionnés
-/// repassent à leur valeur initiale (sinon `background: none`
-/// laisserait une couleur déclarée avant survivre).
+/// `background` complet (CSS2 §14.2.1, étendu aux composantes
+/// CSS3 `<bg-image>` fonctions et `<bg-size>` derrière `/`) :
+/// le shorthand **réinitialise** tous les longhands — les non
+/// mentionnés repassent à leur valeur initiale (sinon
+/// `background: none` laisserait une couleur déclarée avant
+/// survivre).
+///
+/// La tokenisation est **paren-consciente** : `linear-gradient(
+/// to right, red, blue)` reste un seul atome malgré ses
+/// espaces — un `split_whitespace` naïf l'éclatait et la
+/// déclaration tombait entière (issue #10). `<bg-size>` ne se
+/// déclare que derrière un `/` (`url(x) 50% / cover`) ; un `/`
+/// collé (`50%/cover`) est accepté comme le font les
+/// navigateurs.
 fn expand_background(value: &str) -> Option<Vec<(String, String)>> {
-    let (mut color, mut image, mut repeat, mut attachment) = (None, None, None, None);
-    let mut position = Vec::new();
-    let mut recognized = false;
-    for part in value.split_whitespace() {
-        // La grammaire du raccourci exige une seule valeur par
-        // composante ; un doublon ou un token inconnu invalide
-        // la déclaration entière (`background: red pink` → drop).
-        if parse_color(part).is_some() {
-            if color.replace(part.to_string()).is_some() {
-                return None;
-            }
-        } else if part == "none" || part.starts_with("url(") {
-            if image.replace(part.to_string()).is_some() {
-                return None;
-            }
-        } else if matches!(part, "repeat" | "repeat-x" | "repeat-y" | "no-repeat") {
-            if repeat.replace(part.to_string()).is_some() {
-                return None;
-            }
-        } else if matches!(part, "fixed" | "scroll" | "local") {
-            if attachment.replace(part.to_string()).is_some() {
-                return None;
-            }
-        } else if (matches!(part, "left" | "right" | "top" | "bottom" | "center")
-            || parse_length(part).is_some()
-            || part.ends_with('%'))
-            && position.len() < 4
-        {
-            position.push(part.to_string());
-        } else {
+    let mut acc = BgParts::default();
+    for raw in bg_tokens(value) {
+        let segs = split_top_slash(raw);
+        // `pos / w h` au plus : `a/b/c/d` est malformé.
+        if segs.len() > 3 {
             return None;
         }
-        recognized = true;
+        for (i, part) in segs.iter().enumerate() {
+            if i > 0 {
+                acc.in_size = true;
+            }
+            if part.is_empty() {
+                continue; // `/` seul ou `a/` — toléré.
+            }
+            if !acc.push_part(part) {
+                return None;
+            }
+        }
     }
-    if !recognized {
+    if !acc.recognized {
         return None;
     }
-    Some(vec![
-        (
-            "background-color".to_string(),
-            color.unwrap_or_else(|| "transparent".to_string()),
-        ),
-        (
-            "background-image".to_string(),
-            image.unwrap_or_else(|| "none".to_string()),
-        ),
-        (
-            "background-repeat".to_string(),
-            repeat.unwrap_or_else(|| "repeat".to_string()),
-        ),
-        (
-            "background-attachment".to_string(),
-            attachment.unwrap_or_else(|| "scroll".to_string()),
-        ),
-        (
-            "background-position".to_string(),
-            if position.is_empty() {
-                "0px 0px".to_string()
-            } else {
-                position.join(" ")
-            },
-        ),
-    ])
+    Some(acc.into_longhands())
+}
+
+/// Accumulateur du shorthand `background` — un slot par
+/// composante ; la grammaire exige une seule valeur par
+/// composante (doublon ou token inconnu → déclaration
+/// entière droppée, `background: red pink`).
+#[derive(Default)]
+struct BgParts {
+    color: Option<String>,
+    image: Option<String>,
+    repeat: Option<String>,
+    attachment: Option<String>,
+    position: Vec<String>,
+    size: Vec<String>,
+    boxes: Vec<String>,
+    /// Les segments qui suivent immédiatement un `/` sont des
+    /// valeurs `background-size` — jusqu'au premier token qui
+    /// n'en est pas une (`center/cover no-repeat` :
+    /// `no-repeat` ressort du mode taille et reclasse normal).
+    in_size: bool,
+    recognized: bool,
+}
+
+impl BgParts {
+    /// Classe un atome dans son slot ; `false` = déclaration
+    /// invalide.
+    fn push_part(&mut self, part: &str) -> bool {
+        if self.in_size && self.size.len() < 2 && bg_size_token(part) {
+            self.size.push(part.to_string());
+            self.recognized = true;
+            return true;
+        }
+        self.in_size = false;
+        self.recognized = true;
+        if parse_color(part).is_some() {
+            return self.color.replace(part.to_string()).is_none();
+        }
+        if bg_image_token(part) {
+            return self.image.replace(part.to_string()).is_none();
+        }
+        if matches!(part, "repeat" | "repeat-x" | "repeat-y" | "no-repeat") {
+            return self.repeat.replace(part.to_string()).is_none();
+        }
+        if matches!(part, "fixed" | "scroll" | "local") {
+            return self.attachment.replace(part.to_string()).is_none();
+        }
+        if matches!(part, "border-box" | "padding-box" | "content-box") && self.boxes.len() < 2 {
+            self.boxes.push(part.to_string());
+            return true;
+        }
+        if (matches!(part, "left" | "right" | "top" | "bottom" | "center")
+            || parse_length(part).is_some()
+            || part.ends_with('%'))
+            && self.position.len() < 4
+        {
+            self.position.push(part.to_string());
+            return true;
+        }
+        false
+    }
+
+    /// Émet les longhands — les absents repassent à leur
+    /// valeur initiale (le shorthand réinitialise tout).
+    fn into_longhands(self) -> Vec<(String, String)> {
+        vec![
+            (
+                "background-color".to_string(),
+                self.color.unwrap_or_else(|| "transparent".to_string()),
+            ),
+            (
+                "background-image".to_string(),
+                self.image.unwrap_or_else(|| "none".to_string()),
+            ),
+            (
+                "background-repeat".to_string(),
+                self.repeat.unwrap_or_else(|| "repeat".to_string()),
+            ),
+            (
+                "background-attachment".to_string(),
+                self.attachment.unwrap_or_else(|| "scroll".to_string()),
+            ),
+            (
+                "background-position".to_string(),
+                if self.position.is_empty() {
+                    "0px 0px".to_string()
+                } else {
+                    self.position.join(" ")
+                },
+            ),
+            (
+                "background-size".to_string(),
+                if self.size.is_empty() {
+                    "auto".to_string()
+                } else {
+                    self.size.join(" ")
+                },
+            ),
+            // Une `<box>` seule couvre origin + clip (spec) ;
+            // deux → origin puis clip. La peinture les ignore
+            // encore — émis pour complétude de la cascade.
+            (
+                "background-origin".to_string(),
+                self.boxes
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "padding-box".to_string()),
+            ),
+            (
+                "background-clip".to_string(),
+                self.boxes
+                    .last()
+                    .cloned()
+                    .unwrap_or_else(|| "border-box".to_string()),
+            ),
+        ]
+    }
+}
+
+/// Tokenisation du shorthand `background` : espaces hors
+/// parenthèses seulement — `linear-gradient(to right, red,
+/// blue)` demeure un atome unique.
+fn bg_tokens(value: &str) -> Vec<&str> {
+    let mut toks = Vec::new();
+    let mut depth = 0u32;
+    let mut start = 0usize;
+    let mut in_tok = false;
+    for (i, ch) in value.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if ch.is_whitespace() && depth == 0 {
+            if in_tok {
+                toks.push(&value[start..i]);
+                in_tok = false;
+            }
+        } else if !in_tok {
+            start = i;
+            in_tok = true;
+        }
+    }
+    if in_tok {
+        toks.push(&value[start..]);
+    }
+    toks
+}
+
+/// Éclate un atome du shorthand sur les `/` hors parenthèses —
+/// `50%/cover` → `["50%", "cover"]`, `/` seul → `["", ""]`.
+fn split_top_slash(tok: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0u32;
+    let mut start = 0usize;
+    for (i, ch) in tok.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            '/' if depth == 0 => {
+                out.push(&tok[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&tok[start..]);
+    out
+}
+
+/// Valeur `<bg-image>` du shorthand : `none`, `url(…)` ou une
+/// fonction image CSS3 — dégradés (`linear-gradient` et ses
+/// variantes `radial-`/`conic-`/`repeating-`/préfixées vendeur,
+/// toutes repérées par leur suffixe `gradient(`),
+/// `image()`/`image-set()`. La couche multi-fonds
+/// (`url(a),url(b)`) n'est pas supportée en shorthand : le
+/// second `url(` percute la règle « une seule image » →
+/// déclaration droppée comme avant.
+fn bg_image_token(part: &str) -> bool {
+    part == "none"
+        || part.starts_with("url(")
+        || part.contains("gradient(")
+        || part.starts_with("image(")
+        || part.starts_with("image-set(")
+}
+
+/// Valeur `<bg-size>` après `/` : `auto`, `cover`, `contain`,
+/// longueur ou pourcentage (1 ou 2 valeurs).
+fn bg_size_token(part: &str) -> bool {
+    matches!(part, "auto" | "cover" | "contain")
+        || parse_length(part).is_some()
+        || part.ends_with('%')
 }
 
 /// `font: [style]? [variant]? [weight]? size[/line-height] family`.

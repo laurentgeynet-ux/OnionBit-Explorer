@@ -224,3 +224,53 @@ fn link_structurel() {
     let sels = parse_selector_list("a:visited").unwrap();
     assert!(!matches_with_state(&dom, a, &sels[0], &|_| true));
 }
+
+#[test]
+fn shorthand_background_size_et_gradient() {
+    // Issue #10 — `pos / size` ne doit plus dropper la
+    // déclaration : couleur, position, repeat ET size émis.
+    let e = expand_shorthand("background", "red 50% / contain no-repeat").unwrap();
+    let get = |n: &str| e.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+    assert_eq!(get("background-color"), Some("red"));
+    assert_eq!(get("background-position"), Some("50%"));
+    assert_eq!(get("background-size"), Some("contain"));
+    assert_eq!(get("background-repeat"), Some("no-repeat"));
+    assert_eq!(get("background-image"), Some("none"));
+
+    // `/` collé ou séparé, size à 2 valeurs.
+    let e = expand_shorthand("background", "url(a.png) center/cover").unwrap();
+    let get = |n: &str| e.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+    assert_eq!(get("background-image"), Some("url(a.png)"));
+    assert_eq!(get("background-position"), Some("center"));
+    assert_eq!(get("background-size"), Some("cover"));
+
+    // Fonction image : le gradient, espaces internes compris,
+    // est UN atome du shorthand.
+    let e = expand_shorthand(
+        "background",
+        "linear-gradient(to right, red, blue) no-repeat",
+    )
+    .unwrap();
+    let get = |n: &str| e.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+    assert_eq!(
+        get("background-image"),
+        Some("linear-gradient(to right, red, blue)")
+    );
+    assert_eq!(get("background-repeat"), Some("no-repeat"));
+    assert_eq!(get("background-size"), Some("auto"));
+
+    // Composantes après la taille : `repeat` ressort du mode
+    // size, la déclaration survit.
+    let e = expand_shorthand("background", "url(a.png) center / cover no-repeat fixed").unwrap();
+    let get = |n: &str| e.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+    assert_eq!(get("background-size"), Some("cover"));
+    assert_eq!(get("background-repeat"), Some("no-repeat"));
+    assert_eq!(get("background-attachment"), Some("fixed"));
+
+    // Rejets préservés : doublon de couleur, token inconnu,
+    // taille non déclarée derrière `/`, trop de segments.
+    assert!(expand_shorthand("background", "red pink").is_none());
+    assert!(expand_shorthand("background", "frobnicate").is_none());
+    assert!(expand_shorthand("background", "url(a.png) cover").is_none());
+    assert!(expand_shorthand("background", "url(a.png) /cover/x/y").is_none());
+}
