@@ -10,3 +10,9 @@ CHANGELOG.md merge=union
 # NB : Cargo.lock reste en merge normal — en cas de conflit, on ne
 # fusionne JAMAIS à la main : `cargo update`/`cargo check`
 # régénère un lockfile cohérent (AGENTS.md §10.3).
+
+# GitHub Linguist : les corpus de conformité publics (test262,
+# html5lib, WPT…) sont extraits par script et jamais édités
+# (AGENTS.md §5.3) — hors des stats de langage.
+**/tests/conformance/** linguist-vendored
+**/tests/data/** linguist-vendored
