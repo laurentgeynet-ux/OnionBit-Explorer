@@ -23,7 +23,11 @@ use explorer_layout::font::{FontRequest, FontSource};
 
 /// Fonte découverte : familles extraites de la table `name`,
 /// octets du fichier, index de face dans une collection
-/// `.ttc` (`0` pour un fichier simple — R-69).
+/// `.ttc` (`0` pour un fichier simple — R-69), graisse et
+/// style de la face (`OS/2` — R-74 : la requête
+/// `font-weight`/`font-style` participe au choix, sinon le
+/// premier fichier de la famille scanné gagnait et `h1`
+/// restait maigre — issue #9).
 struct FoundFont {
     families: Vec<String>,
     /// Octets chargés au scan (répertoire borné, MVP) —
@@ -34,13 +38,20 @@ struct FoundFont {
     /// Index de la face dans le fichier (`fonts_in_collection`
     /// > 1 → `.ttc`).
     face_index: u32,
+    /// Graisse `usWeightClass` (400 normal, 700 bold).
+    weight: u16,
+    /// Italique ou oblique de la face.
+    italic: bool,
 }
 
 /// Source de fontes adossée à un répertoire local.
 pub struct DirFontSource {
     fonts: Vec<FoundFont>,
-    /// Générique CSS → chemin résolu à la construction.
-    generics: HashMap<String, usize>,
+    /// Générique CSS → **nom de famille** résolu à la
+    /// construction (toutes les faces de cette famille — y
+    /// compris ses variantes de graisse — participent ensuite
+    /// au score de la requête).
+    generics: HashMap<String, String>,
     /// Famille de repli (première fonte trouvée).
     fallback: Option<usize>,
 }
@@ -74,13 +85,15 @@ impl DirFontSource {
                 // `ttf-parser` — le fichier est sauté (R-69).
                 let count = collection_len(&data).unwrap_or(1).min(MAX_TTC_FACES);
                 for index in 0..count {
-                    let Some(families) = face_families(&data, index) else {
+                    let Some((families, weight, italic)) = face_meta(&data, index) else {
                         continue;
                     };
                     fonts.push(FoundFont {
                         families,
                         data: data.clone(),
                         face_index: index,
+                        weight,
+                        italic,
                     });
                 }
             }
@@ -96,7 +109,10 @@ impl DirFontSource {
     }
 
     /// Mappe les génériques CSS sur la première famille
-    /// candidate trouvée (heuristique de plateforme).
+    /// candidate trouvée (heuristique de plateforme). La
+    /// table retient le **nom** de famille : les variantes de
+    /// graisse/style sont choisies ensuite par `score` selon
+    /// la requête (`serif` + `bold` → `Times New Roman Bold`).
     fn map_generics(&mut self) {
         let candidates: &[(&str, &[&str])] = &[
             (
@@ -105,6 +121,8 @@ impl DirFontSource {
                     "arial",
                     "segoe ui",
                     "helvetica",
+                    "verdana",
+                    "tahoma",
                     "dejavu sans",
                     "liberation sans",
                 ],
@@ -114,6 +132,11 @@ impl DirFontSource {
                 &[
                     "times new roman",
                     "georgia",
+                    "cambria",
+                    "constantia",
+                    "palatino linotype",
+                    "book antiqua",
+                    "garamond",
                     "dejavu serif",
                     "liberation serif",
                 ],
@@ -123,6 +146,8 @@ impl DirFontSource {
                 &[
                     "consolas",
                     "courier new",
+                    "cascadia mono",
+                    "lucida console",
                     "dejavu sans mono",
                     "liberation mono",
                 ],
@@ -130,8 +155,9 @@ impl DirFontSource {
         ];
         for (generic, prefs) in candidates {
             for pref in *prefs {
-                if let Some(i) = self.index_of(pref) {
-                    self.generics.insert((*generic).to_string(), i);
+                if self.index_of(pref).is_some() {
+                    self.generics
+                        .insert((*generic).to_string(), (*pref).to_string());
                     break;
                 }
             }
@@ -139,8 +165,11 @@ impl DirFontSource {
         // `cursive`/`fantasy` → repli sur le premier trouvé.
         for g in ["cursive", "fantasy"] {
             if !self.generics.contains_key(g) {
-                if let Some(i) = self.fallback {
-                    self.generics.insert(g.to_string(), i);
+                if let Some(fam) = self
+                    .fallback
+                    .and_then(|i| self.fonts[i].families.first().cloned())
+                {
+                    self.generics.insert(g.to_string(), fam);
                 }
             }
         }
@@ -154,18 +183,32 @@ impl DirFontSource {
 
     /// Résout la requête : première famille trouvée, sinon
     /// repli (une famille est toujours tentée — le domaine
-    /// suppose `sans-serif` en dernier).
+    /// suppose `sans-serif` en dernier). Parmi les faces de la
+    /// famille, la **meilleure** selon la requête — italique
+    /// d'abord puis distance de graisse (R-74 : `font-weight:
+    /// bold` sélectionne la face grasse quand elle existe).
     fn resolve(&self, req: &FontRequest) -> Option<&FoundFont> {
         for fam in &req.families {
             let n = norm(fam);
-            if let Some(&i) = self.generics.get(&n) {
-                return Some(&self.fonts[i]);
-            }
-            if let Some(i) = self.index_of(fam) {
-                return Some(&self.fonts[i]);
+            let want: &str = self.generics.get(&n).map_or(n.as_str(), String::as_str);
+            let best = self
+                .fonts
+                .iter()
+                .filter(|f| f.families.iter().any(|x| x == want))
+                .min_by_key(|f| Self::score(f, req));
+            if let Some(f) = best {
+                return Some(f);
             }
         }
         self.fallback.map(|i| &self.fonts[i])
+    }
+
+    /// Score d'appariement face ↔ requête : italique d'abord
+    /// (+2000), distance de graisse ensuite — même formule que
+    /// [`WebFontSource::score`].
+    fn score(f: &FoundFont, req: &FontRequest) -> u32 {
+        let style_pen = u32::from(f.italic != req.italic) * 2000;
+        style_pen + u32::from(f.weight.abs_diff(req.weight))
     }
 }
 
@@ -186,15 +229,21 @@ impl FontSource for DirFontSource {
 
     /// Repli par glyphe (R-69) : familles de la requête
     /// d'abord (ordre `font-family` CSS — la fonte nommée
-    /// gagne quand elle couvre), puis tout le registre dans
-    /// l'ordre du scan. Première face couvrant `c` retenue.
+    /// gagne quand elle couvre, génériques résolus comme
+    /// `resolve`), puis tout le registre dans l'ordre du
+    /// scan. Parmi les faces couvrant `c`, la mieux scorée
+    /// (graisse/style — R-74).
     fn fallback_for(&self, c: char, req: &FontRequest) -> Option<(Arc<Vec<u8>>, u32)> {
         for fam in &req.families {
             let n = norm(fam);
-            for f in &self.fonts {
-                if f.families.contains(&n) && covers(f, c) {
-                    return Some((f.data.clone(), f.face_index));
-                }
+            let want: &str = self.generics.get(&n).map_or(n.as_str(), String::as_str);
+            let best = self
+                .fonts
+                .iter()
+                .filter(|f| f.families.iter().any(|x| x == want) && covers(f, c))
+                .min_by_key(|f| Self::score(f, req));
+            if let Some(f) = best {
+                return Some((f.data.clone(), f.face_index));
             }
         }
         self.fonts
@@ -221,11 +270,12 @@ fn collection_len(data: &[u8]) -> Option<u32> {
     .flatten()
 }
 
-/// Familles `name` (1 = family, 16 = typographic family)
-/// normalisées de la face `index` — `None` si la face est
+/// Métadonnées de la face `index` : familles `name` (1 =
+/// family, 16 = typographic family) normalisées, graisse
+/// `usWeightClass` et italique/oblique — `None` si la face est
 /// illisible ou si `ttf-parser` panique (même garde que
-/// [`collection_len`]).
-fn face_families(data: &[u8], index: u32) -> Option<Vec<String>> {
+/// [`collection_len`]). Graisse illisible → 400 (normal).
+fn face_meta(data: &[u8], index: u32) -> Option<(Vec<String>, u16, bool)> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let face = ttf_parser::Face::parse(data, index).ok()?;
         let mut v = Vec::new();
@@ -236,7 +286,12 @@ fn face_families(data: &[u8], index: u32) -> Option<Vec<String>> {
                 }
             }
         }
-        (!v.is_empty()).then_some(v)
+        let italic = face.is_italic()
+            || matches!(
+                face.style(),
+                ttf_parser::Style::Italic | ttf_parser::Style::Oblique
+            );
+        (!v.is_empty()).then_some((v, face.weight().to_number(), italic))
     }))
     .ok()
     .flatten()
@@ -553,6 +608,35 @@ mod tests {
         assert!(src
             .fallback_for('A', &req(&["Nimporte"], 400, false))
             .is_none());
+        drop(std::fs::remove_dir_all(&dir));
+    }
+
+    /// R-74 (issue #9) : la requête `font-weight`/`font-style`
+    /// choisit la face — trois faces d'une même famille
+    /// (romaine 400, grasse 700, italique 400) dans un
+    /// répertoire : chaque requête sert les octets de **sa**
+    /// face, pas la première scannée.
+    #[test]
+    fn dir_choisit_la_face_par_graisse_et_style() {
+        use explorer_test_support::fixture_ttf_face;
+        let dir = std::env::temp_dir().join(format!("explorer-r74-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let regular = fixture_ttf_face("Fam", 400, false, 0x0020, 0x00FF);
+        let bold = fixture_ttf_face("Fam", 700, false, 0x0020, 0x00FF);
+        let ital = fixture_ttf_face("Fam", 400, true, 0x0020, 0x00FF);
+        std::fs::write(dir.join("fam.ttf"), &regular).expect("w");
+        std::fs::write(dir.join("famb.ttf"), &bold).expect("w");
+        std::fs::write(dir.join("fami.ttf"), &ital).expect("w");
+        let src = DirFontSource::new(&dir);
+        assert_eq!(src.font_data(&req(&["Fam"], 400, false)), Some(regular));
+        assert_eq!(src.font_data(&req(&["fam"], 700, false)), Some(bold));
+        assert_eq!(src.font_data(&req(&["Fam"], 400, true)), Some(ital));
+        // Graisse intermédiaire : 600 → plus proche = 700
+        // (spec §font-matching), 500 → 400.
+        assert_eq!(
+            src.font_data(&req(&["Fam"], 600, false)),
+            Some(fixture_ttf_face("Fam", 700, false, 0x0020, 0x00FF))
+        );
         drop(std::fs::remove_dir_all(&dir));
     }
 }

@@ -9,6 +9,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-74 — puces `ul` absentes,
+  `h1` non gras, corps sans-serif**
+  (`explorer-css`, `explorer-render`,
+  `explorer-test-support`, issue #9) :
+  - Marqueurs `list-item` jamais
+    implémentés : nouveau variant
+    `DisplayItem::Marker` + émission
+    (glyphe ≈ em/3 en gouttière,
+    baseline 1ʳᵉ ligne) ;
+    `disc`/`circle`/`square` rasterisés
+    en primitives tiny-skia — marqueurs
+    textuels (`decimal`, roman…) hors
+    portée (display list ne shape pas).
+    Feuille UA complétée des défauts
+    spec §lists (`ul`→disc, nested
+    →circle/square, `ol`→decimal).
+  - `font-weight`/`font-style` étaient
+    cascadés mais ignorés à la
+    sélection : `DirFontSource` lit
+    désormais `usWeightClass`+italique
+    (OS/2/fsSelection) par face et
+    choisit la mieux appariée
+    (style puis distance de graisse —
+    `h1` sert la face grasse).
+    Fixture partagée `fixture_ttf_face`
+    = TTF + table OS/2 v0 (78 octets).
+
 - **R-73 — `linear-gradient` non
   peint + shorthand `background /size`
   droppé** (`explorer-css`,

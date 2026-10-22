@@ -36,6 +36,22 @@ pub fn fixture_ttf_custom(name: &str, first: u16, last: u16) -> Vec<u8> {
     build_ttf_custom(name, (50, -50, 450, 700), first, last)
 }
 
+/// Variante avec table `OS/2` (R-74) : `weight` =
+/// `usWeightClass` (400 normal / 700 gras…), `italic` pose
+/// le bit `fsSelection`. Deux faces d'une même famille ne
+/// se distinguent que par là — le sélecteur de graisse/
+/// style (issue #9) en a besoin pour être éprouvé.
+#[must_use]
+pub fn fixture_ttf_face(name: &str, weight: u16, italic: bool, first: u16, last: u16) -> Vec<u8> {
+    build_ttf_full(
+        name,
+        (50, -50, 450, 700),
+        first,
+        last,
+        Some((weight, italic)),
+    )
+}
+
 /// Collection `.ttc` paramétrée (R-69) : chaque entrée est
 /// une face complète — `ttcf` + N répertoires sfnt
 /// pointant vers des copies de tables propres à la face.
@@ -94,7 +110,26 @@ fn build_ttf(bbox: (i16, i16, i16, i16)) -> Vec<u8> {
 /// tenir dans `NUM_GLYPHS - 1` glyphes (sinon ids hors
 /// `glyf`/`loca` — la fixture reste à 256 glyphes).
 fn build_ttf_custom(name: &str, bbox: (i16, i16, i16, i16), first: u16, last: u16) -> Vec<u8> {
-    let tables: Vec<(&'static str, Vec<u8>)> = vec![
+    build_ttf_full(name, bbox, first, last, None)
+}
+
+/// Constructeur complet : `os2` = `(usWeightClass, italic)`
+/// ajoute la table `OS/2` — absente des fixtures de base
+/// (graisse/style y sont illisibles → repli 400/romain).
+fn build_ttf_full(
+    name: &str,
+    bbox: (i16, i16, i16, i16),
+    first: u16,
+    last: u16,
+    os2: Option<(u16, bool)>,
+) -> Vec<u8> {
+    let mut tables: Vec<(&'static str, Vec<u8>)> = Vec::new();
+    // Répertoire trié par tag : « OS/2 » (0x4F…) précède
+    // tous les tags à capitale minuscule.
+    if let Some((weight, italic)) = os2 {
+        tables.push(("OS/2", t_os2(weight, italic)));
+    }
+    tables.extend([
         ("cmap", t_cmap(first, last)),
         ("glyf", t_glyf(bbox)),
         ("head", t_head(bbox)),
@@ -104,7 +139,7 @@ fn build_ttf_custom(name: &str, bbox: (i16, i16, i16, i16), first: u16, last: u1
         ("maxp", t_maxp()),
         ("name", t_name(name)),
         ("post", t_post()),
-    ];
+    ]);
     let n = tables.len() as u16;
     let mut header = Vec::new();
     push_u32(&mut header, 0x0001_0000); // sfnt TrueType
@@ -313,6 +348,33 @@ fn t_cmap(first: u16, last: u16) -> Vec<u8> {
     push_u16(&mut s, 0); // idRangeOffset[0]
     push_u16(&mut s, 0); // idRangeOffset[1]
     v.extend_from_slice(&s);
+    v
+}
+
+/// Table `OS/2` v0 minimale (78 octets — R-74) : seuls
+/// `usWeightClass` et `fsSelection` portent des valeurs.
+/// `fsSelection` : bit 0 italique, bit 5 gras, bit 6
+/// « regular » (mutuellement exclusif avec le bit gras).
+fn t_os2(weight: u16, italic: bool) -> Vec<u8> {
+    let mut v = Vec::with_capacity(78);
+    push_u16(&mut v, 0); // version 0
+    push_i16(&mut v, 0); // xAvgCharWidth
+    push_u16(&mut v, weight); // usWeightClass
+    push_u16(&mut v, 5); // usWidthClass : medium
+    push_u16(&mut v, 0); // fsType
+    for _ in 0..11 {
+        push_i16(&mut v, 0); // sub/superscript, strikeout, familyClass
+    }
+    v.extend_from_slice(&[0; 30]); // panose + unicodeRange + vendID
+    let sel = u16::from(italic) | if weight >= 600 { 0x20 } else { 0x40 };
+    push_u16(&mut v, sel); // fsSelection
+    push_u16(&mut v, 0x0020); // usFirstCharIndex
+    push_u16(&mut v, 0x00FF); // usLastCharIndex
+    push_i16(&mut v, 800); // sTypoAscender
+    push_i16(&mut v, -200); // sTypoDescender
+    push_i16(&mut v, 0); // sTypoLineGap
+    push_u16(&mut v, 800); // usWinAscent
+    push_u16(&mut v, 200); // usWinDescent
     v
 }
 

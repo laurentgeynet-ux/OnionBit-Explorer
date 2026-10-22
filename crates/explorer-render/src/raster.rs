@@ -19,9 +19,9 @@
 
 use explorer_css::value::Color;
 use explorer_layout::font::{FontRequest, FontSource, Glyph, ShapedRun};
-use tiny_skia::{FillRule, Mask, Paint, PathBuilder, Pixmap, Point, Rect, Transform};
+use tiny_skia::{FillRule, Mask, Paint, PathBuilder, Pixmap, Point, Rect, Stroke, Transform};
 
-use crate::display::{BorderStyle, DisplayItem, DisplayList};
+use crate::display::{BorderStyle, DisplayItem, DisplayList, MarkerKind};
 use crate::glyph_cache::GlyphCache;
 use owned_ttf_parser::{AsFaceRef, OwnedFace};
 
@@ -765,10 +765,66 @@ fn paint_item(
         DisplayItem::MaskedFill { rect, color, mask } => {
             paint_masked_fill(pixmap, rect, *color, mask, dpi, clip);
         }
+        DisplayItem::Marker { rect, kind, color } => {
+            paint_marker(pixmap, rect, *kind, *color, dpi, clip);
+        }
         DisplayItem::PushClip(_)
         | DisplayItem::PopClip
         | DisplayItem::PushTransform(_)
         | DisplayItem::PopTransform => {}
+    }
+}
+
+/// Marqueur `list-item` (issue #9) — forme primitive inscrite
+/// dans `rect` : `disc`/`square` pleins, `circle` en anneau.
+/// `fill_guarded` couvre le carré ; le disque passe par un
+/// chemin ovale (même garde de domaine via `device_bbox`).
+fn paint_marker(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    kind: crate::display::MarkerKind,
+    color: Color,
+    dpi: Transform,
+    clip: Option<&Mask>,
+) {
+    let mut paint = Paint {
+        anti_alias: true,
+        ..Paint::default()
+    };
+    paint.set_color(skia_color(color));
+    let Some(r) = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height) else {
+        return;
+    };
+    match kind {
+        MarkerKind::Square => fill_guarded(pixmap, &r, &paint, dpi, clip),
+        MarkerKind::Disc | MarkerKind::Circle => {
+            // Le disque est un chemin : la garde de domaine
+            // des fills rectangulaires est rejouée sur la
+            // bbox transformée avant d'entrer dans le raster.
+            let domain = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
+            let ok = device_bbox(&r, dpi)
+                .zip(domain)
+                .is_some_and(|(b, d)| b.intersect(&d).is_some());
+            if !ok {
+                return;
+            }
+            let mut pb = PathBuilder::new();
+            pb.push_oval(r);
+            let Some(path) = pb.finish() else {
+                return;
+            };
+            if kind == MarkerKind::Disc {
+                pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
+            } else {
+                // Anneau ~8 % du diamètre, ≥ 1 px — l'épaisseur
+                // est en coords locales (la transform l'échelle).
+                let stroke = Stroke {
+                    width: (rect.width * 0.08).max(1.0),
+                    ..Stroke::default()
+                };
+                pixmap.stroke_path(&path, &paint, &stroke, dpi, clip);
+            }
+        }
     }
 }
 

@@ -1432,6 +1432,10 @@ details:not([open]) > :not(summary) { display: none }
 dialog:not([open]) { display: none }
 audio:not([controls]) { display: none }
 li { display: list-item }
+ul, menu, dir { list-style-type: disc }
+ul ul, ol ul, menu ul, dir ul { list-style-type: circle }
+ul ul ul, ol ul ul, menu ul ul, dir ul ul { list-style-type: square }
+ol { list-style-type: decimal }
 td, th { display: table-cell }
 center { text-align: -webkit-center }
 b, strong { font-weight: bold }

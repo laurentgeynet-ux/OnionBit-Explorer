@@ -133,6 +133,7 @@ pub(crate) fn display_item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::Placeholder { rect, .. }
         | DisplayItem::Image { rect, .. }
         | DisplayItem::MaskedFill { rect, .. }
+        | DisplayItem::Marker { rect, .. }
         | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
         DisplayItem::Text { origin, run, .. } => Some(Rect {
             x: origin.0,

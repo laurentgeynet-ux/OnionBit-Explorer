@@ -11,7 +11,7 @@ use explorer_html::TreeBuilder;
 use explorer_layout::font::{FontRequest, FontSource};
 use explorer_layout::{build_box_tree, build_box_tree_sized, layout_tree, BlockCtx, LayoutBox};
 use explorer_render::{
-    build_display_list, build_display_list_full, rasterize, BorderStyle, DisplayItem,
+    build_display_list, build_display_list_full, rasterize, BorderStyle, DisplayItem, MarkerKind,
 };
 
 const VIEW: f32 = 400.0;
@@ -1307,5 +1307,127 @@ fn deco_inline_peint_sous_le_texte_de_la_ligne() {
     assert!(
         dernier_deco < premier_texte,
         "déco émise après un texte de la ligne : {items:?}"
+    );
+}
+
+// ── Issue #9 : marqueurs de list-item (puces UA) ──────────
+
+fn marker(items: &[DisplayItem]) -> Option<(explorer_layout::Rect, MarkerKind)> {
+    items.iter().find_map(|i| match i {
+        DisplayItem::Marker { rect, kind, .. } => Some((*rect, *kind)),
+        _ => None,
+    })
+}
+
+#[test]
+fn list_item_ul_emet_une_puce_disc() {
+    // `ul` → `list-style-type: disc` (défaut UA + initiale) :
+    // la puce se peint dans la gouttière avant le contenu,
+    // centrée sur la première ligne.
+    let (dom, bx, items) = dl("<ul><li id=i>item</li></ul>", "");
+    let (rect, kind) = marker(&items).expect("puce disc attendue");
+    assert_eq!(kind, MarkerKind::Disc);
+    let li = find(&bx, by_id(&dom, "i")).expect("li");
+    let content_x = li.rect.x
+        + li.style
+            .get("border-left-width")
+            .and_then(|v| v.trim().strip_suffix("px"))
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(0.0)
+        + li.style
+            .get("padding-left")
+            .and_then(|v| v.trim().strip_suffix("px"))
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(0.0);
+    assert!(
+        rect.x + rect.width <= content_x + 0.5,
+        "puce à gauche du contenu : {rect:?} vs content_x={content_x}"
+    );
+    assert!(rect.width > 2.0 && rect.width < 16.0, "d ≈ em/3 : {rect:?}");
+}
+
+#[test]
+fn list_item_styles_circle_square_none() {
+    let (_d, _b, items) = dl(
+        "<ul><li>a</li></ul><ul id=c><li>b</li></ul><ul id=s><li>c</li></ul><ul id=n><li>d</li></ul>",
+        "#c{list-style-type:circle}#s{list-style-type:square}#n{list-style-type:none}",
+    );
+    let kinds: Vec<MarkerKind> = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::Marker { kind, .. } => Some(*kind),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![MarkerKind::Disc, MarkerKind::Circle, MarkerKind::Square],
+        "4 listes → 3 puces (none n'en émet pas) : {kinds:?}"
+    );
+}
+
+#[test]
+fn list_item_ol_decimal_ne_peint_pas_de_disc_trompeur() {
+    // `ol` → `list-style-type: decimal` (UA, spec §lists) :
+    // la puce textuelle n'est pas encore shapée — aucune
+    // puce plutôt qu'un disc faux.
+    let (_d, _b, items) = dl("<ol><li>a</li></ol>", "");
+    assert!(
+        marker(&items).is_none(),
+        "decimal hors portée → pas de puce, pas de disc : {items:?}"
+    );
+}
+
+#[test]
+fn list_item_ul_imbrique_circle() {
+    // Spec §lists : `ul ul` → `circle` — le fils hérite du
+    // type du conteneur.
+    let (_d, _b, items) = dl("<ul><li>a<ul><li>b</li></ul></li></ul>", "");
+    let kinds: Vec<MarkerKind> = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::Marker { kind, .. } => Some(*kind),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![MarkerKind::Disc, MarkerKind::Circle],
+        "niveau 1 disc, niveau 2 circle : {kinds:?}"
+    );
+}
+
+#[test]
+fn list_item_vide_peint_quand_meme_sa_puce() {
+    // `<li></li>` sans ligne ni enfant : la puce reste du
+    // contenu de la boîte (baseline de repli sur font-size).
+    let (_d, _b, items) = dl("<ul><li></li></ul>", "");
+    let (_rect, kind) = marker(&items).expect("li vide → puce quand même");
+    assert_eq!(kind, MarkerKind::Disc);
+}
+
+#[test]
+fn list_item_marqueur_rasterise_des_pixels() {
+    // La puce n'est pas qu'un item — elle peint des pixels
+    // de la couleur du texte à sa place.
+    let (_d, bx, items) = dl(
+        "<ul><li style=\"color:#ff0000\">item</li></ul>",
+        "body{color:#000}",
+    );
+    let (rect, _kind) = marker(&items).expect("puce");
+    let fonts = ctx().fonts.expect("fixture fonte");
+    let list = build_display_list(&bx, VIEW, 200.0, 0.0);
+    let frame = rasterize(&list, fonts, 1.0).expect("frame");
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let px_idx = |v: f32| v.round() as usize;
+    let (cx, cy) = (
+        px_idx(rect.x + rect.width / 2.0),
+        px_idx(rect.y + rect.height / 2.0),
+    );
+    let idx = (cy * frame.width as usize + cx) * 4;
+    let px = &frame.pixels[idx..idx + 4];
+    assert!(
+        px[0] > 200 && px[1] < 60,
+        "pixel de puce rouge (couleur du li) attendu à ({cx},{cy}), got {px:?}"
     );
 }

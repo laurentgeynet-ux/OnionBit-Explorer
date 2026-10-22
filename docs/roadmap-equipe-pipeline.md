@@ -1944,6 +1944,41 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   au bitmap (déclaration préservée, image taille naturelle) ;
   `background-origin`/`-clip` émis non consommés ; stops à
   transitions dures (`color pos pos`) non gérés.
+- [x] **R-74. Feuille UA listes + sélection de graisse**
+  (issue #9 — vol comparatif : puces `ul` absentes, `h1` non
+  gras, corps sans-serif au lieu de serif). Trois trous :
+  (a) les puces n'étaient **jamais implémentées** — nouveau
+  variant `DisplayItem::Marker { rect, kind, color }` +
+  `emit_list_marker` (glyphe ≈ em/3 dans la gouttière,
+  baseline de la première ligne ou repli font-size) ;
+  `disc`/`circle`/`square` rasterisés en primitives
+  tiny-skia (ovale plein/anneau 8 %, carré via
+  `fill_guarded`) — les marqueurs textuels (`decimal`,
+  alpha, roman) restent hors portée : la display list ne
+  shape pas. Feuille UA : défauts spec §lists (`ul`→`disc`,
+  `ul ul`→`circle`, `ul³`→`square`, `ol`→`decimal` — qui
+  évite un disc trompeur sur listes numérotées) ;
+  (b) `h1 { font-weight:bold }` était cascadé **mais
+  ignoré** : `DirFontSource::resolve` matchait par famille
+  seule, première face scannée. `face_meta` extrait
+  désormais `usWeightClass` (OS/2) + italique
+  (fsSelection/macStyle), `resolve`/`fallback_for` scorent
+  style-puis-graisse (même formule que `WebFontSource`) ;
+  `map_generics` retient le **nom** de famille (ses variantes
+  de graisse restent candidates — `serif`+bold → Times Bold).
+  Fixture `fixture_ttf_face` (test-support, additif) pose
+  une table OS/2 v0 minimale (78 octets) ;
+  (c) corps sans-serif : les prefs génériques élargies
+  (times/georgia/cambria/dejavu…). Tests : faces par graisse
+  (600→700, 500→400, italique), 6 tests marqueurs display
+  (disc positionné gouttière, circle/square/none, ol sans
+  disc trompeur, nested `ul ul`→circle, li vide → puce,
+  pixels rouges à la couleur du li). Carve-out : bras
+  `Marker` ajouté à `display_item_bounds` (explorer-core,
+  match exhaustif — même commit).
+  Résidus documentés : marqueurs textuels (`decimal`…) non
+  peints (shaping requis) ; `list-style-position: inside`
+  ne décale pas le texte.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

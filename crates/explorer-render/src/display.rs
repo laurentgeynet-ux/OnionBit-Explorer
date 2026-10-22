@@ -125,6 +125,32 @@ pub enum DisplayItem {
     PushTransform(tiny_skia::Transform),
     /// Fin de portée du dernier `PushTransform`.
     PopTransform,
+    /// Marqueur d'une boîte `display: list-item`
+    /// (`list-style-type` ≠ `none`, issue #9) — forme
+    /// primitive rasterisée directement (pas de shaping :
+    /// `disc`/`circle`/`square`). Les marqueurs textuels
+    /// (`decimal`, alpha, roman) sont hors portée — la
+    /// display list ne résout pas les octets de fonte.
+    Marker {
+        /// Boîte englobante du glyphe de marqueur (zone dans
+        /// laquelle la forme est inscrite).
+        rect: Rect,
+        /// Forme du marqueur.
+        kind: MarkerKind,
+        /// Encre (`color` hérité de l'élément `li`).
+        color: Color,
+    },
+}
+
+/// Forme d'un marqueur de liste peint sans fonte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkerKind {
+    /// `list-style-type: disc` — disque plein (défaut `ul`).
+    Disc,
+    /// `list-style-type: circle` — anneau.
+    Circle,
+    /// `list-style-type: square` — carré plein.
+    Square,
 }
 
 /// Style de trait de bordure (sous-ensemble rasterisable).
@@ -259,6 +285,9 @@ impl DisplayList {
                 DisplayItem::MaskedFill { rect, mask, .. } => {
                     let _ = writeln!(out, "masked-fill {}x{} {rect:?}", mask.width, mask.height);
                 }
+                DisplayItem::Marker { rect, kind, .. } => {
+                    let _ = writeln!(out, "marker {kind:?} {rect:?}");
+                }
                 DisplayItem::PushClip(r) => {
                     let _ = writeln!(out, "push-clip {r:?}");
                 }
@@ -359,6 +388,7 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::Placeholder { rect, .. }
         | DisplayItem::Image { rect, .. }
         | DisplayItem::MaskedFill { rect, .. }
+        | DisplayItem::Marker { rect, .. }
         | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
         DisplayItem::Text { origin, run, .. } => Some(match run.ink {
             // R-37 : bbox d'encre réelle (glyphes) plutôt que
@@ -499,6 +529,18 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 mask: m2,
             },
         ) => r1 == r2 && c1 == c2 && std::sync::Arc::ptr_eq(m1, m2),
+        (
+            D::Marker {
+                rect: r1,
+                kind: k1,
+                color: c1,
+            },
+            D::Marker {
+                rect: r2,
+                kind: k2,
+                color: c2,
+            },
+        ) => r1 == r2 && k1 == k2 && c1 == c2,
         (D::PushClip(r1), D::PushClip(r2)) => r1 == r2,
         (D::PushTransform(m1), D::PushTransform(m2)) => {
             (m1.sx, m1.ky, m1.kx, m1.sy, m1.tx, m1.ty) == (m2.sx, m2.ky, m2.kx, m2.sy, m2.tx, m2.ty)
@@ -1137,6 +1179,73 @@ fn emit_bg_layers(
             });
         }
     }
+}
+
+/// Marqueur de `display: list-item` (issue #9) : la puce se
+/// peint dans la gouttière avant la content box
+/// (`list-style-position: outside` — l'espace est laissé par
+/// `ul { padding-left: 40px }`), alignée verticalement sur la
+/// ligne de base de la première ligne de contenu (spec
+/// §marker). Émise après le fond de la boîte et avant ses
+/// lignes → sous le texte. `inside` dessine au début du
+/// contenu (le texte n'est pas décalé — résidu).
+fn emit_list_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
+    if bx.kind != BoxKind::ListItem {
+        return;
+    }
+    let kind = match bx.style.get("list-style-type").map(str::trim) {
+        // Initiale spec = `disc` (absence ou `initial`).
+        None | Some("disc" | "initial" | "inherit") => MarkerKind::Disc,
+        Some("circle") => MarkerKind::Circle,
+        Some("square") => MarkerKind::Square,
+        // `none` + marqueurs textuels (`decimal`, alpha,
+        // roman…) — hors portée : la display list ne shape pas.
+        Some(_) => return,
+    };
+    #[allow(clippy::cast_possible_truncation)]
+    let fs = font_size_of(&bx.style) as f32;
+    if !fs.is_finite() || fs <= 0.0 {
+        return;
+    }
+    // Glyphe ≈ 1/3 em, gouttière ≈ 1/3 em avant le contenu —
+    // les métriques des moteurs établis tournent autour.
+    let d = (fs * 0.34).max(1.0);
+    let gap = (fs * 0.34).max(1.0);
+    let baseline_y = bx.lines.first().map_or_else(
+        || {
+            bx.rect.y
+                + border_side_w(&bx.style, "top")
+                + prop_px(&bx.style, "padding-top", 0.0)
+                + fs
+        },
+        |l| l.rect.y + l.baseline,
+    );
+    let cy = baseline_y - fs * 0.3;
+    let content_x = content_rect(bx).x;
+    let inside = bx
+        .style
+        .get("list-style-position")
+        .is_some_and(|p| p.trim() == "inside");
+    let cx = if inside {
+        content_x + d / 2.0
+    } else {
+        content_x - gap - d / 2.0
+    };
+    let color = bx
+        .style
+        .get("color")
+        .and_then(parse_color)
+        .unwrap_or(Color::BLACK);
+    items.push(DisplayItem::Marker {
+        rect: Rect {
+            x: cx - d / 2.0 + off.0,
+            y: cy - d / 2.0 + off.1,
+            width: d,
+            height: d,
+        },
+        kind,
+        color,
+    });
 }
 
 /// La boîte déclare un fond : `background-color` non
@@ -2284,6 +2393,11 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             color: *color,
             mask: mask.clone(),
         },
+        D::Marker { rect, kind, color } => D::Marker {
+            rect: shifted(*rect, d),
+            kind: *kind,
+            color: *color,
+        },
         D::PushClip(r) => D::PushClip(shifted(*r, d)),
         D::PushTransform(m) => {
             let mut m = *m;
@@ -2652,7 +2766,9 @@ fn paint_box<'a>(
         paint_self(bx, items, off, cx.vp, cx.images, cx.canvas_bg_src);
         paint_replaced(bx, items, off, cx.images);
     }
-    if !bx.children.is_empty() || !bx.lines.is_empty() {
+    // `ListItem` ouvre aussi : sa puce est du contenu même
+    // sans ligne ni enfant (`<li></li>` peint son disc).
+    if !bx.children.is_empty() || !bx.lines.is_empty() || bx.kind == BoxKind::ListItem {
         // Clip sur le padding box (approx : border box moins les
         // bordures — on garde le rect entier, documenté).
         // `bx.lines` compte pour l'ouverture : les lignes
@@ -2666,6 +2782,7 @@ fn paint_box<'a>(
         // contenu → DANS le clip, pas avec les décorations de
         // `paint_self` émises avant (R-55).
         if !hidden {
+            emit_list_marker(bx, items, off);
             paint_lines(bx, items, off);
         }
         // Ordre App. E au sein des non positionnés : (a)
