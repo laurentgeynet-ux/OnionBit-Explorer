@@ -770,6 +770,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (zéro copie de 30 Mo par rebuild). Mesure : 339→353 Mo
   après 110 changements de viewport forcés, plateau stable
   (avant : +~270 Mo **par pull**, sans plafond).
+- **Étape 107 — worker isolate FFI** (`app/`,
+  vol humain 22/10 constat (1) — « FFI
+  inutilisable sous charge », freezes
+  francs sur wikipedia.org) : les appels
+  natifs `explorer_*` sont synchrones et
+  bloquants (`block_on` Rust — `navigate`
+  peut tenir des dizaines de secondes sous
+  `request_timeout`) et tournaient dans
+  l'isolate UI. Un isolate worker dédié
+  possède désormais `DynamicLibrary` +
+  handle — RPC `[seq,op,arg]` →
+  `{ok,data|err}` par ports, séquentialité
+  préservée (ABI non thread-safe), l'UI
+  ne gèle plus. `tryLoad` inchangé :
+  sonde `DynamicLibrary.open`+`lookup`
+  synchrone légère, repli REST intact ;
+  `navigate`/`back`/`forward`/`reload`
+  retournent `{url,title}` relus dans le
+  même aller-retour (redirections vues) ;
+  frames en `TransferableTypedData`
+  (zéro-copie de port, `decodeImageFrom
+  Pixels` resté UI) ; `tick` →
+  `Future<bool>` (seul call-site
+  retouché). Erreurs : `explorer_last_
+  error` lu sur le thread worker (TLS
+  valide) → `FfiException` sérialisée.
+  Dispose : shutdown RPC puis kill
+  `beforeNextEvent` (le handle Rust est
+  détruit avant la mort). Limite honnête :
+  un appel natif coincé n'est pas
+  interruptible — l'UI reste responsive.
+  Sonde live vs DLL release : ready →
+  openTab → navigate → frame 1024×768 →
+  input mods → shutdown. Fichiers :
+  `ffi_worker.dart` (nouveau), client
+  RPC réécrit dans `ffi_engine.dart`.
 - **R-60 — position statique des absolus en-ligne**
   (`explorer-layout`) : bug site-réel trouvé en validant
   R-58 — les skip-links MDN (« Skip to main content » /

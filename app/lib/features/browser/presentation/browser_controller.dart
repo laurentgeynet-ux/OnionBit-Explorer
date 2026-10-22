@@ -435,7 +435,7 @@ class BrowserController extends Notifier<BrowserState> {
       _animTimer?.cancel(); // rebuild sans dispose (repo recréé)
       _animTimer = Timer.periodic(
         const Duration(milliseconds: 50),
-        (_) => _tickFfi(),
+        (_) => unawaited(_tickFfi()),
       );
       ref.onDispose(() => _animTimer?.cancel());
     } else {
@@ -453,12 +453,14 @@ class BrowserController extends Notifier<BrowserState> {
 
   /// Sondage `explorer_tick` — avance transitions/animations
   /// et retire la frame de l'onglet actif si invalidée.
-  void _tickFfi() {
+  /// Asynchrone (étape 107 : le tick tourne sur l'isolate
+  /// worker FFI — la boucle 50 ms ne bloque plus l'UI).
+  Future<void> _tickFfi() async {
     final engine = _repo;
     final id = state.activeId;
     if (engine is! FfiEngine || id == null) return;
     try {
-      if (engine.tick(id)) unawaited(_pullFrame(id));
+      if (await engine.tick(id)) unawaited(_pullFrame(id));
     } on Object {
       // Moteur in-process indisponible → prochain tick.
     }

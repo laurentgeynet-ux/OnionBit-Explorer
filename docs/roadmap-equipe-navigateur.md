@@ -1887,6 +1887,45 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Mesure : 339→353 Mo après 110
   changements de viewport forcés.
 
+- [x] **Étape 107. Worker isolate
+  FFI** (vol 22/10 constat (1) —
+  « FFI inutilisable sous charge ») :
+  les appels natifs `explorer_*` sont
+  synchrones et bloquants (`block_on`
+  Rust — `navigate` peut tenir des
+  dizaines de secondes sous
+  `request_timeout`) et tournaient
+  dans l'isolate UI → latences +
+  freezes francs. Un isolate dédié
+  possède désormais `DynamicLibrary`
+  + le handle — séquentialité
+  préservée (ABI non thread-safe),
+  UI jamais bloquée. RPC
+  `[seq,op,arg]` → `{ok,data|err}`
+  par ports ; `navigate`/`back`/
+  `forward`/`reload` retournent
+  `{url,title}` relus dans le même
+  aller-retour (redirects vus) ;
+  frames en `TransferableTypedData`
+  (zéro-copie de port) ;
+  `tryLoad` reste synchrone — sonde
+  `open`+`lookup` légère, repli REST
+  inchangé ; `tick` devient
+  `Future<bool>` (seul call-site
+  retouché). Limite honnête : un
+  appel natif coincé n'est pas
+  interruptible — le kill de
+  l'isolate diffère à la sortie du
+  code natif ; l'UI reste
+  responsive (le contrat). Sonde
+  live vs DLL release : ready →
+  openTab → navigate → frame
+  1024×768 → input mods → shutdown.
+  Fichiers : `ffi_worker.dart`
+  (nouveau — typedefs + dispatch),
+  `ffi_engine.dart` réécrit en
+  client RPC.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
@@ -1897,14 +1936,16 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     changelog — pas `dispose()` :
     `BrowserState` épinglés +
     `ImageCache` sources).
-  - **FFI inutilisable sous charge**
-    (latences + freezes francs —
-    appels synchrones dans l'isolate
-    UI, ADR-0018 sans worker) :
-    structurel, ouvert — traiter par
-    worker isolate dédié ou retrait
-    du défaut `auto`→FFI ; REST est
-    le chemin fluide mesuré.
+  - ~~**FFI inutilisable sous charge**~~
+    → **résolu, Étape 107** : worker
+    isolate dédié possède lib+handle —
+    les appels natifs synchrones
+    (`navigate` jusqu'aux timeouts)
+    sortent de l'isolate UI. RPC par
+    ports, frames zéro-copie
+    (`TransferableTypedData`),
+    `tryLoad` inchangé (sonde sync
+    + repli REST).
   - ~~**frame ≠ fenêtre**~~ →
     **attribué transitoire** : frame
     figée à sa taille intrinsèque
