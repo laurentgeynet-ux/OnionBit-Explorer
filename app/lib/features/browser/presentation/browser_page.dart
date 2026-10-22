@@ -1023,8 +1023,10 @@ class _FrameViewState extends ConsumerState<_FrameView> {
     final t = widget.tokens;
     final zoom = ref.watch(zoomProvider);
     final active = widget.state.active;
-    final bytes = active == null ? null : widget.state.frames[active.id];
-    final raw = active == null ? null : widget.state.rawFrames[active.id];
+    // Frame décodée hors `BrowserState` (fuite corrigée 22/10 :
+    // les états obsolètes épinglés par l'arbre retenaient les
+    // payloads) — `frameTick` dans l'état pilote le rebuild.
+    final raw = active == null ? null : widget.ctrl.frameImage(active.id);
     final muted = t.color('onSurface', 'muted');
     return Container(
       margin: EdgeInsets.all(t.dim('spacing', 'lg', fallback: 24)),
@@ -1035,7 +1037,7 @@ class _FrameViewState extends ConsumerState<_FrameView> {
         ),
       ),
       clipBehavior: Clip.hardEdge,
-      child: bytes == null && raw == null
+      child: raw == null
           ? _empty(t, active, muted)
           : LayoutBuilder(
               builder: (context, c) {
@@ -1143,23 +1145,16 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                           children: [
                             Align(
                               alignment: Alignment.topLeft,
-                              // Canal FFI (ADR-0018) : `ui.Image`
-                              // brute, sinon PNG mémoire (ADR-0004).
-                              child: raw != null
-                                  ? RawImage(
-                                      image: raw,
-                                      fit: BoxFit.none,
-                                      // 1 px image = 1 px physique :
-                                      // taille logique = px/dpr.
-                                      scale: dpr,
-                                    )
-                                  : Image.memory(
-                                      Uint8List.fromList(bytes!),
-                                      gaplessPlayback:
-                                          true, // pas de flash entre frames
-                                      fit: BoxFit.none,
-                                      scale: dpr, // idem : px → px physiques
-                                    ),
+                              // `ui.Image` décodée côté contrôleur
+                              // (REST : codec PNG ; FFI : pixels
+                              // bruts ADR-0018) — `RawImage` direct.
+                              child: RawImage(
+                                image: raw,
+                                fit: BoxFit.none,
+                                // 1 px image = 1 px physique :
+                                // taille logique = px/dpr.
+                                scale: dpr,
+                              ),
                             ),
                             // Overlay MediaSurface (71d) : rects
                             // en px CSS document → position =

@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../config/app_config.dart';
 
@@ -61,14 +62,21 @@ class ApiClient {
       _send('DELETE', path, body: body);
 
   /// `GET` → octets bruts (frame PNG — `GET /api/tabs/{id}/frame`).
-  Future<List<int>> getBytes(String path) async {
+  ///
+  /// `BytesBuilder` et non `expand().toList()` : une `List<int>`
+  /// growable facture ~8 octets par élément — une frame de 25 Mo
+  /// devenait ~250 Mo de heap (terrain 22/10). Ici : les chunks
+  /// ne sont pas recopiés, un seul `Uint8List` sort.
+  Future<Uint8List> getBytes(String path) async {
     try {
       final req = await _http
           .getUrl(_uri(path))
           .timeout(config.requestTimeout);
       _sign(req);
       final res = await req.close().timeout(config.requestTimeout);
-      final bytes = await res.expand((c) => c).toList();
+      final builder = BytesBuilder(copy: false);
+      await res.forEach(builder.add);
+      final bytes = builder.takeBytes();
       if (res.statusCode >= 400) {
         throw ApiException(_extractError(bytes), statusCode: res.statusCode);
       }

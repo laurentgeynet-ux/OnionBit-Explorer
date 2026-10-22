@@ -1854,6 +1854,70 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   default_edit` (`q=Ab`),
   `keymods_from_bits_decode`.
 
+- [x] **Étape 106. Fuite mémoire
+  frames (~10 Go, vol humain
+  22/10)** : l'app grossissait sans
+  plafond (~270 Mo retenus **par
+  pull de frame**). Bissection par
+  sondes live (fetch seul /
+  décode+dispose / stockage) +
+  profil heap via la VM service :
+  cause racine = **payloads dans
+  `BrowserState` épinglés par
+  l'arbre de widgets** (états
+  obsolètes retenus via
+  `DebugCreator`/listeners
+  d'animations — `widget.state`
+  gardait ~20-250 Mo chacun) +
+  **`ImageCache` accumulant les
+  octets sources** (`MemoryImage`
+  à clé-identité unique par pull).
+  `ui.Image.dispose()` était
+  innocent. Correctif : frames
+  hors état → `_frameImages` map
+  privée mutée en place
+  (`frameTick` pilote le rebuild),
+  chemin unique `ui.Image` +
+  `RawImage` REST/FFI, purge à
+  `tab_closed` ;
+  `getBytes` : `BytesBuilder`
+  (`Uint8List` unique ~25 Mo au
+  lieu d'une `List<int>` growable
+  ~256 Mo) typé jusqu'au widget.
+  Mesure : 339→353 Mo après 110
+  changements de viewport forcés.
+
+- [ ] **Écarts terrain — vol humain
+  22/10 (release `39ab821`, FFI)** :
+  second run humain — trois constats
+  au journal `interface-equipes`
+  (22/10) :
+  - ~~**RSS ~10 Go**~~ → **résolu,
+    Étape 106** (cause racine au
+    changelog — pas `dispose()` :
+    `BrowserState` épinglés +
+    `ImageCache` sources).
+  - **FFI inutilisable sous charge**
+    (latences + freezes francs —
+    appels synchrones dans l'isolate
+    UI, ADR-0018 sans worker) :
+    structurel, ouvert — traiter par
+    worker isolate dédié ou retrait
+    du défaut `auto`→FFI ; REST est
+    le chemin fluide mesuré.
+  - ~~**frame ≠ fenêtre**~~ →
+    **attribué transitoire** : frame
+    figée à sa taille intrinsèque
+    (`fit:none`) pendant le cycle
+    `set_viewport`→relayout→pull —
+    mesuré ~0,8 s release / ~10 s
+    debug sur wikipedia. Amélioration
+    possible : `fit:width` pendant le
+    transit. À re-valider en release.
+  - **`Image`/`HTMLImageElement`
+    manquant** (wikipedia.org) →
+    file JS.
+
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
   daemon `99782ac`. Validé : AZERTY

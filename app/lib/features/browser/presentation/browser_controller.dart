@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
@@ -30,7 +29,6 @@ class BrowserState {
   const BrowserState({
     this.tabs = const [],
     this.activeId,
-    this.frames = const {},
     this.daemonOnline = false,
     this.lastError,
     this.frameTick = 0,
@@ -38,7 +36,6 @@ class BrowserState {
     this.hoverEditable = false,
     this.fieldFocused = false,
     this.pageErrors = const {},
-    this.rawFrames = const {},
     this.downloadOffer,
     this.media = const {},
     this.scrollY = const {},
@@ -47,15 +44,6 @@ class BrowserState {
 
   final List<BrowserTab> tabs;
   final String? activeId;
-
-  /// Frames PNG par onglet (octets bruts) — tirées sur
-  /// `frame_invalidated` (ADR-0004 : pull, pas push).
-  final Map<String, List<int>> frames;
-
-  /// Frames décodées `ui.Image` par onglet — canal FFI
-  /// in-process (ADR-0018) : pixels RGBA bruts, aucun codec
-  /// PNG sur le chemin de rendu.
-  final Map<String, ui.Image> rawFrames;
 
   /// `false` tant que le daemon n'a pas répondu — l'UI affiche
   /// l'état dégradé (omnibox désactivée, bouton réessayer).
@@ -122,7 +110,6 @@ class BrowserState {
   BrowserState copyWith({
     List<BrowserTab>? tabs,
     String? activeId,
-    Map<String, List<int>>? frames,
     bool? daemonOnline,
     String? Function()? lastError,
     int? frameTick,
@@ -130,7 +117,6 @@ class BrowserState {
     bool? hoverEditable,
     bool? fieldFocused,
     Map<String, String>? pageErrors,
-    Map<String, ui.Image>? rawFrames,
     DownloadOffer? Function()? downloadOffer,
     Map<String, Map<int, MediaOffer>>? media,
     Map<String, double>? scrollY,
@@ -138,8 +124,6 @@ class BrowserState {
   }) => BrowserState(
     tabs: tabs ?? this.tabs,
     activeId: activeId ?? this.activeId,
-    frames: frames ?? this.frames,
-    rawFrames: rawFrames ?? this.rawFrames,
     daemonOnline: daemonOnline ?? this.daemonOnline,
     lastError: lastError != null ? lastError() : this.lastError,
     frameTick: frameTick ?? this.frameTick,
@@ -392,6 +376,19 @@ class BrowserController extends Notifier<BrowserState> {
   /// — hors `BrowserState` (objets à ressources, pas de l'état).
   final Map<String, Map<int, MediaPlayer>> _players = {};
 
+  /// Frames décodées par onglet — **hors `BrowserState`
+  /// volontairement** (terrain 22/10) : les `copyWith` donnent
+  /// naissance à des états obsolètes qui restent épinglés par
+  /// l'arbre de widgets (DebugCreator, listeners d'animations)
+  /// — une frame de ~20-250 Mo par état retenu, ~10 Go en
+  /// quelques minutes. La map est mutée en place ; `frameTick`
+  /// dans l'état pilote les rebuilds d'affichage.
+  final Map<String, ui.Image> _frameImages = {};
+
+  /// Frame décodée courante d'un onglet (`null` jamais rendue)
+  /// — affichée par `RawImage` dans le widget frame.
+  ui.Image? frameImage(String tabId) => _frameImages[tabId];
+
   /// Écouteurs posés sur chaque lecteur — clés `tab/media`
   /// pour `removeListener` au dispose.
   final Map<String, void Function()> _playerListeners = {};
@@ -622,6 +619,10 @@ class BrowserController extends Notifier<BrowserState> {
           scrollY: {...state.scrollY}..remove(tabId),
           media: {...state.media}..remove(tabId),
         );
+        // Raster de l'onglet mort — `dispose()` décrémente la
+        // référence ; le rasteriseur libère les pixels quand sa
+        // frame en cours finit de peindre.
+        _frameImages.remove(tabId)?.dispose();
     }
   }
 
@@ -870,7 +871,7 @@ class BrowserController extends Notifier<BrowserState> {
   /// l'onglet entrant sera re-appris au prochain clic).
   void selectTab(String id) {
     state = state.copyWith(activeId: id, fieldFocused: false);
-    if (!state.frames.containsKey(id) && !state.rawFrames.containsKey(id)) {
+    if (!_frameImages.containsKey(id)) {
       unawaited(_pullFrame(id));
     }
   }
@@ -940,39 +941,38 @@ class BrowserController extends Notifier<BrowserState> {
   }
 
   Future<void> _pullFrameOnce(String tabId) async {
-    final engine = _repo;
-    if (engine is FfiEngine) {
-      try {
-        final img = await engine.fetchFrameImage(tabId);
-        if (img == null || !ref.mounted) return;
-        final old = state.rawFrames[tabId];
-        state = state.copyWith(rawFrames: {...state.rawFrames, tabId: img});
-        old?.dispose();
-      } on Object {
-        // Moteur indisponible → le prochain tick retentera.
-      }
-      return;
-    }
+    // `ui.Image` décodée + `RawImage` — chemin unique REST/FFI
+    // (FFI livre les pixels bruts, ADR-0018). L'image vit hors
+    // `BrowserState` : les états obsolètes épinglés par
+    // l'arbre de widgets ne retiennent plus de raster (fuite
+    // ~300 Mo/frame mesurée 22/10).
     try {
-      final bytes = await _repo.fetchFrame(tabId);
-      if (bytes == null || !ref.mounted) return;
-      final codec = await ui.instantiateImageCodec(Uint8List.fromList(bytes));
-      final frame = await codec.getNextFrame();
-      codec.dispose();
-      final img = frame.image;
+      final ui.Image img;
+      final engine = _repo;
+      if (engine is FfiEngine) {
+        final i = await engine.fetchFrameImage(tabId);
+        if (i == null) return;
+        img = i;
+      } else {
+        final bytes = await _repo.fetchFrame(tabId);
+        if (bytes == null || bytes.isEmpty) return;
+        final codec = await ui.instantiateImageCodec(bytes);
+        try {
+          img = (await codec.getNextFrame()).image;
+        } finally {
+          codec.dispose();
+        }
+      }
       if (!ref.mounted) {
         img.dispose();
         return;
       }
-      final old = state.rawFrames[tabId];
-      state = state.copyWith(
-        frames: {...state.frames, tabId: bytes},
-        rawFrames: {...state.rawFrames, tabId: img},
-      );
-      old?.dispose();
+      _frameImages[tabId]?.dispose();
+      _frameImages[tabId] = img;
+      state = state.copyWith(frameTick: state.frameTick + 1);
     } on Object {
-      // Daemon coupé ou PNG indécodable → le prochain tick
-      // retentera.
+      // Moteur/daemon indisponible ou PNG indécodable → le
+      // prochain tick retentera.
     }
   }
 
@@ -1058,6 +1058,7 @@ class BrowserController extends Notifier<BrowserState> {
     final id = state.activeId;
     if (id == null) return;
     try {
+      // ignore: avoid_print — sonde terrain 22/10 (frame ≠ fenêtre)
       await _repo.setViewport(id, w, h, scale);
     } on ApiException catch (e) {
       state = state.copyWith(lastError: () => e.message);

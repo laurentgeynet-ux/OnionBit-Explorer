@@ -378,7 +378,7 @@ class FfiEngine implements BrowserRepository {
   }
 
   @override
-  Future<List<int>?> fetchFrame(String tabId) async {
+  Future<Uint8List?> fetchFrame(String tabId) async {
     final img = await fetchFrameImage(tabId);
     if (img == null) return null;
     try {

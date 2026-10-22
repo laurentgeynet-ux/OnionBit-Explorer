@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+import 'dart:typed_data';
+
 import '../../../core/api/api_client.dart';
 import '../domain/bookmark.dart';
 import '../domain/browser_tab.dart';
@@ -81,7 +83,7 @@ class BrowserRepository {
 
   /// Frame PNG courante de l'onglet (`GET …/frame`) — `null`
   /// si l'onglet n'a jamais rendu (204).
-  Future<List<int>?> fetchFrame(String tabId) async {
+  Future<Uint8List?> fetchFrame(String tabId) async {
     try {
       final bytes = await _api.getBytes('/api/tabs/$tabId/frame');
       return bytes.isEmpty ? null : bytes;

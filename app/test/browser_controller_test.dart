@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:explorer_app/core/api/api_client.dart';
 import 'package:explorer_app/core/api/events_client.dart';
@@ -83,11 +84,11 @@ class FakeRepo implements BrowserRepository {
   int frameFetches = 0;
 
   @override
-  Future<List<int>?> fetchFrame(String tabId) async {
+  Future<Uint8List?> fetchFrame(String tabId) async {
     frameFetches++;
     final gate = frameGate;
     if (gate != null) await gate.future;
-    return [1, 2, 3];
+    return Uint8List.fromList([1, 2, 3]);
   }
 
   /// Résultat scripté pour les événements `key` (étape 86 —

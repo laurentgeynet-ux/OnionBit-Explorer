@@ -731,6 +731,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   reste possible) ; `_animTimer?.cancel()` avant
   ré-assignation (rebuild sans dispose). `flutter analyze`
   propre, 34/34 tests.
+
+- **Étape 106 — fuite mémoire frames (~10 Go, vol humain
+  22/10)** (`app/`) : `explorer_app` montait à ~10 Go en
+  quelques minutes de navigation/redimensionnement. La
+  bissection par sondes live (fetch seul / décode+dispose /
+  stockage) + profil heap VM a nommé la vraie cause — *pas*
+  `ui.Image.dispose()` : **les `BrowserState` obsolètes
+  épinglés par l'arbre de widgets** (DebugCreator, listeners
+  d'animations — `widget.state` garde la frame de
+  ~20-250 Mo) **+ `ImageCache` retenant les octets sources
+  par `MemoryImage` à clé unique** (~30 Mo par pull).
+  Correctif : le payload quitte `BrowserState` —
+  `_frameImages: Map<String, ui.Image>` privé du contrôleur,
+  muté en place, `frameTick` pilote le rebuild ; chemin
+  unique `ui.Image` + `RawImage` REST/FFI (le canal pixels
+  bruts ADR-0018 est préservé) ; `tab_closed` purge et
+  dispose l'entrée ; `ApiClient.getBytes` passe de
+  `expand().toList()` (List<int> growable ~8 o/élément —
+  25 Mo utiles = 256 Mo de heap) à `BytesBuilder` → un seul
+  `Uint8List`, typé bout-en-bout jusqu'à `Image.memory`
+  (zéro copie de 30 Mo par rebuild). Mesure : 339→353 Mo
+  après 110 changements de viewport forcés, plateau stable
+  (avant : +~270 Mo **par pull**, sans plafond).
 - **R-60 — position statique des absolus en-ligne**
   (`explorer-layout`) : bug site-réel trouvé en validant
   R-58 — les skip-links MDN (« Skip to main content » /
