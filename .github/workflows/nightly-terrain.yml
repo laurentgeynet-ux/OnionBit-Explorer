@@ -1,0 +1,48 @@
+name: nightly-terrain
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # chaque nuit 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  terrain:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RADAR_ISSUE: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: site_smoke (10 sites étalons + probes fonctionnelles)
+        shell: pwsh
+        run: |
+          pwsh -File scripts/site_smoke.ps1 |
+            Tee-Object -FilePath target/site_smoke/report.txt
+      - name: résumé du run
+        if: always()
+        shell: pwsh
+        run: Get-Content target/site_smoke/report.txt >> $env:GITHUB_STEP_SUMMARY
+      - name: rapport sur l'issue radar #2
+        if: always()
+        shell: pwsh
+        run: |
+          $report = Get-Content target/site_smoke/report.txt -Raw
+          $fails = ([regex]::Matches($report, 'FAIL ')).Count
+          $title = if ($fails -gt 0) { "⚠️ $fails FAIL" } else { 'vert' }
+          $body = "### $(Get-Date -Format 'yyyy-MM-dd HH:mm') UTC — $title`n`n" +
+                  '```' + "`n$report`n" + '```' + "`n`n" +
+                  "run : ${{ github.server_url }}/${{ github.repository }}" +
+                  "/actions/runs/${{ github.run_id }}"
+          $body | gh issue comment $env:RADAR_ISSUE --body-file -
+      - name: artefacts PNG
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-smoke-${{ github.run_number }}
+          path: target/site_smoke/*.png
+          retention-days: 30

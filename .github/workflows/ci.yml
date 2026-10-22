@@ -42,3 +42,12 @@ jobs:
       - name: test
         working-directory: app
         run: flutter test
+
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@cargo-audit
+      - name: cargo audit (CVE sur le graphe de deps)
+        run: cargo audit

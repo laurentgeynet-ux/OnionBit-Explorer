@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Règle AGENTS §4.2 : crates publiées ≥ 7 jours — `cooldown`
+  # retarde chaque proposition de 7 jours après sa publication.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    labels: [deps]
+    versioning-strategy: lockfile-only
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    labels: [deps, infra]

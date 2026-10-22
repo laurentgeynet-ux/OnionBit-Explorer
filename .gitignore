@@ -28,3 +28,4 @@ fuzz/artifacts/
 **/tests/scratch*.rs
 **/tests/probe*.rs
 test-run/
+.playwright-mcp/

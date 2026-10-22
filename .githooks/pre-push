@@ -1,0 +1,8 @@
+#!/bin/sh
+# Gate rapide pré-push : fmt doit passer avant tout envoi.
+# La gate complète reste verify_all.ps1 + CI (AGENTS.md §3).
+# Activation : git config core.hooksPath .githooks
+if ! cargo fmt --all -- --check; then
+    echo "pre-push: fmt échoue — cargo fmt --all d'abord" >&2
+    exit 1
+fi
