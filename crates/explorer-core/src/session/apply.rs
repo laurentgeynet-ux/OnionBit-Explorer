@@ -296,6 +296,11 @@ pub(crate) struct PendingApply {
     /// pour les moteurs sans journal ou les parsings hors
     /// synchro (navigation initiale : pas de baseline).
     pub ids: Vec<u64>,
+    /// Tags parallèles à `ids` (`"#text\x00{fnv64}"` pour
+    /// les textes) — l'alignement de la table se fait **par
+    /// tag**, les nœuds synthétisés par le parse moteur
+    /// (`<tbody>`…) étant ignorés plutôt que décalés.
+    pub tags: Vec<String>,
 }
 
 /// Produit d'un point de synchro DOM (ADR-0025, étape 111)
@@ -440,7 +445,7 @@ pub(crate) fn apply_payload(
     // suit le DOM frais (vide hors synchro cléée → le journal
     // suivant tombera en `NoBaseline` → re-parse, jamais à
     // faux).
-    build_keymap(&mut p.keymap, &new_dom, &job.ids);
+    build_keymap(&mut p.keymap, &new_dom, &job.ids, &job.tags);
     p.dom = Some(new_dom);
     p.images = PaintImages::default();
     p.images.canvases = canvases;
@@ -573,11 +578,19 @@ fn engine_preorder_subtree(
 /// pré-ordre sérialisation (contenu `<template>` compris,
 /// texte exclu), **casse normalisée** — le moteur garde la
 /// casse SVG (`clipPath`, `feGaussianBlur`) là où le miroir
-/// sérialise en minuscules : l'empreinte mesure la structure,
-/// pas la représentation.
-fn engine_fingerprint(dom: &Dom) -> u64 {
+/// sérialise en minuscules. Restreinte aux nœuds **mappés**
+/// (`keymap` — univers miroir) : les éléments synthétisés
+/// par le parse moteur (`<tbody>` sous un `<table>`…) n'ont
+/// pas de correspondant miroir et ne doivent pas diverger
+/// l'empreinte.
+fn engine_fingerprint(dom: &Dom, keymap: &HashMap<u64, explorer_dom::NodeId>) -> u64 {
+    let mapped: std::collections::HashSet<explorer_dom::NodeId> =
+        keymap.values().copied().collect();
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for id in engine_preorder(dom) {
+        if !mapped.contains(&id) {
+            continue;
+        }
         if let Ok(tag) = dom.tag_name(id) {
             for b in tag.bytes().map(|b| b.to_ascii_lowercase()) {
                 h ^= u64::from(b);
@@ -591,15 +604,76 @@ fn engine_fingerprint(dom: &Dom) -> u64 {
 }
 
 /// (Re)monte la table `miroir → NodeId` après une baseline
-/// cléée — zip positionnel `engine_preorder` ↔ `ids`
-/// (même ordre par construction). Longueurs divergentes →
-/// appariement tronqué : les clés absentes retomberont en
+/// cléée — alignement **par tag** `engine_preorder` ↔
+/// `(ids, tags)` : le parse moteur peut synthétiser des
+/// éléments absents du miroir (`<tbody>` sous un `<table>`
+/// aux `<tr>` directs) ou perdre des textes — le zip
+/// positionnel décalerait alors **tout** l'appariement.
+/// Monotone : les nœuds moteur sans correspondant miroir
+/// sont sautés ; les clés miroir restantes retombent en
 /// `UnmappedKey` au rejeu (repli, jamais faux positif).
-fn build_keymap(keymap: &mut HashMap<u64, explorer_dom::NodeId>, dom: &Dom, ids: &[u64]) {
+/// Textes miroir (`"#text\x00{fnv64}"`) : mappés uniquement
+/// par **adjacence stricte à hash de contenu égal** — sauter
+/// un texte moteur hors-place risquerait un `SetText` sur le
+/// mauvais nœud, invisible à l'empreinte (texte exclu) ;
+/// un texte miroir sans concordant reste non mappé →
+/// `UnmappedKey` → repli sûr.
+/// Sans `tags` (moteur ancien) : repli zip positionnel.
+fn build_keymap(
+    keymap: &mut HashMap<u64, explorer_dom::NodeId>,
+    dom: &Dom,
+    ids: &[u64],
+    tags: &[String],
+) {
     keymap.clear();
-    for (e, m) in engine_preorder(dom).into_iter().zip(ids.iter().copied()) {
+    let engine = engine_preorder(dom);
+    if tags.len() == ids.len() && !ids.is_empty() {
+        let mut j = 0usize;
+        'outer: for (i, &m) in ids.iter().enumerate() {
+            if let Some(hex) = tags[i].strip_prefix("#text\x00") {
+                // Texte : concordance exacte du contenu à
+                // la position courante, sinon non mappé.
+                let Some(e) = engine.get(j) else { break };
+                let Ok(h) = u64::from_str_radix(hex, 16) else {
+                    break;
+                };
+                if let Ok(explorer_dom::NodeData::Text(t)) = dom.data(*e) {
+                    if fnv64(t.as_str()) == h {
+                        keymap.insert(m, *e);
+                        j += 1;
+                    }
+                }
+                continue;
+            }
+            while j < engine.len() {
+                let e = engine[j];
+                j += 1;
+                if dom
+                    .tag_name(e)
+                    .is_ok_and(|t| t.eq_ignore_ascii_case(&tags[i]))
+                {
+                    keymap.insert(m, e);
+                    continue 'outer;
+                }
+            }
+            break; // plus de moteur : le reste reste non mappé
+        }
+        return;
+    }
+    for (e, m) in engine.into_iter().zip(ids.iter().copied()) {
         keymap.insert(m, e);
     }
+}
+
+/// FNV-1a 64 — même fonction que `fnv` miroir (marqueurs
+/// `#text` des séries cléées).
+fn fnv64(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in s.as_bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
 }
 
 /// Greffe un sous-arbre `src_id` (arène `src`, fragment
@@ -774,7 +848,7 @@ fn apply_journal(
     // Garde de cohérence ADR-0025 : l'empreinte structurelle
     // du DOM rejoué doit égaler celle du miroir post-journal.
     let dom = p.dom.as_ref().ok_or(JournalReject::NoDom)?;
-    if engine_fingerprint(dom) != journal.fingerprint {
+    if engine_fingerprint(dom, &p.keymap) != journal.fingerprint {
         return Err(JournalReject::Fingerprint);
     }
     // Les op-lists `<canvas>` sont chemins→NodeId : rejouées
@@ -1248,6 +1322,7 @@ impl Session {
             relayout: true,
             journal: None,
             ids: keyed.ids,
+            tags: keyed.tags,
         });
     }
 
@@ -1275,6 +1350,7 @@ impl Session {
             relayout: true,
             journal: Some(journal),
             ids: Vec::new(),
+            tags: Vec::new(),
         });
     }
 
@@ -1350,6 +1426,7 @@ impl Session {
                 job.html = k.html;
                 job.dirty = k.dirty;
                 job.ids = k.ids;
+                job.tags = k.tags;
                 job.canvas_ops = eng.canvas_ops();
             }
         }
@@ -1508,6 +1585,7 @@ impl Session {
         job.journal = None;
         job.html.clear();
         job.ids.clear();
+        job.tags.clear();
         self.pending_applies.push_front(job);
     }
 

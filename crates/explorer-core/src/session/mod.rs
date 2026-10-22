@@ -658,6 +658,23 @@ impl Session {
         self.journal_applies
     }
 
+    /// Ops de journal classées « re-parse » au drain par les
+    /// moteurs (ADR-0025) — classes hors pilote (foster
+    /// parenting `<table>`/`<select>`, `<template>`,
+    /// `<script>` inséré, journal empoisonné) **et** rejets de
+    /// traduction. Distinct de `journal_fallbacks` (rejets
+    /// **post-drain**) : mesure du périmètre à étendre.
+    /// `&mut` — la lecture passe par le canal moteur.
+    #[doc(hidden)]
+    pub fn journal_classified(&mut self) -> u64 {
+        self.tabs
+            .values_mut()
+            .filter_map(|t| t.js.as_deref_mut())
+            .filter_map(explorer_js::JsEngine::dom_sync_stats)
+            .map(|s| s.journal_classified)
+            .sum()
+    }
+
     /// Branche la fabrique de moteurs JS (`JscoreEngine::factory()`
     /// côté infra, `null_factory()` pour un no-op, `None` par
     /// défaut = scripts ignorés). Un contexte neuf est créé à

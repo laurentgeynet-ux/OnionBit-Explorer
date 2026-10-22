@@ -130,9 +130,9 @@ impl Session {
             // rend les modifications (dirty bit consommé côté
             // moteur).
             if let Some(k) = eng.sync_dom_keyed() {
-                self.apply_dom_sync(tab, &k.html, None, false, Some(k.ids));
+                self.apply_dom_sync(tab, &k.html, None, false, Some(k.ids), Some(k.tags));
             } else if let Some((mutated, _)) = eng.sync_dom_path() {
-                self.apply_dom_sync(tab, &mutated, None, false, None);
+                self.apply_dom_sync(tab, &mutated, None, false, None, None);
             }
         }
         if let Some(entry) = self.tabs.get_mut(&tab) {

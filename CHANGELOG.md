@@ -895,6 +895,36 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Étape 111 — alignement keymap par tag +
+  compteur `journal_classified` (mesure
+  fixture classes hors-pilote)** (`explorer-
+  jscore`, `explorer-js`, `explorer-core`,
+  `explorer-cli`) : la fixture `FakeTransport`
+  à mutations exotiques a révélé que le zip
+  positionnel `engine_preorder ↔ ids`
+  **désalignait la baseline** dès que le parse
+  moteur normalise (`<tbody>` synthétisé sous
+  `<table>` aux `<tr>` directs, texte perdu) —
+  rejets `Fingerprint`/`UnmappedKey` permanents.
+  `serialize_keyed` émet désormais `tags`
+  parallèles à `ids` (tag ou `"#text\x00fnv64"`
+  pour les textes) : la table s'aligne par tag
+  en sautant les nœuds moteur sans
+  correspondant miroir ; les textes se mappent
+  par adjacence stricte à hash de contenu égal
+  (jamais de saut — un `SetText` sur mauvais
+  nœud serait invisible à l'empreinte).
+  L'empreinte se calcule sur les **nœuds
+  mappés** (univers miroir). Les ops classées
+  « re-parse » au drain (foster `<table>`/
+  `<select>`, `<script>` inséré, journal
+  empoisonné) étaient invisibles : compteur
+  `journal_classified` (`Dom.journal_dropped`,
+  `DomSyncStats.journal_classified`,
+  `Session::journal_classified`, affiché par
+  `jprobe`/`shot`). Mesure : fixture table/
+  select/innerHTML → classées=2 + appliqué ;
+  dev.to 3/0/3, zéro rejet.
 - **Étape 111 — vol de mesure ADR-0025 :
   empreinte divergente de baseline + index
   d'insertion hors espace miroir**

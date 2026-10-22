@@ -160,6 +160,11 @@ pub struct DomSyncStats {
     pub bytes: u64,
     /// Microsecondes cumulées dans la sérialisation miroir.
     pub micros: u64,
+    /// Ops de journal drainées mais **classées re-parse**
+    /// (empoisonné ou contenu/parent hors pilote, cumulé —
+    /// ADR-0025 : le périmètre du pilote se mesure ici ; un
+    /// taux élevé signale des classes à ouvrir au rejeu).
+    pub journal_classified: u64,
 }
 
 /// Une opération de mutation différentielle du miroir,
@@ -243,6 +248,13 @@ pub struct DomSyncKeyed {
     /// `NodeId` miroir en pré-ordre de sérialisation —
     /// vide = moteur sans identité (repli `sync_dom_path`).
     pub ids: Vec<u64>,
+    /// Tag de chaque `ids[i]` (`"#text\x00{fnv64(contenu)}"`
+    /// pour un nœud texte) — permet l'alignement **par tag**
+    /// de la table miroir→moteur, robuste aux normalisations
+    /// du parse moteur (`<tbody>` synthétisé, texte
+    /// d'espaces perdu) : les `NodeId` moteur sans
+    /// correspondant miroir sont ignorés plutôt que décalés.
+    pub tags: Vec<String>,
 }
 
 /// Op-list `<canvas>` enregistrée par un contexte 2D du
@@ -450,6 +462,7 @@ pub trait JsEngine: Send {
             html,
             dirty,
             ids: Vec::new(),
+            tags: Vec::new(),
         })
     }
 
@@ -1041,10 +1054,15 @@ impl JscoreEngine {
                     let out = jsd.as_ref().and_then(|d| {
                         let mut d = d.borrow_mut();
                         (force || d.take_dirty()).then(|| {
-                            let (html, ids) = d.serialize_keyed();
+                            let (html, ids, tags) = d.serialize_keyed();
                             let dirty = d.take_dirty_path();
                             d.clear_journal();
-                            DomSyncKeyed { html, dirty, ids }
+                            DomSyncKeyed {
+                                html,
+                                dirty,
+                                ids,
+                                tags,
+                            }
                         })
                     });
                     if tx.send(out).is_err() {
@@ -1070,8 +1088,15 @@ impl JscoreEngine {
                             d.take_dirty_path();
                             return None;
                         }
+                        let n = ops.len() as u64;
                         match journal_ops_to_seam(&d, ops) {
-                            None => None, // classé re-parse : dirty intact
+                            None => {
+                                // Classé re-parse : dirty intact
+                                // — comptabilisé (mesure du
+                                // périmètre du pilote).
+                                d.note_journal_classified(n);
+                                None
+                            }
                             Some(ops) => {
                                 d.take_dirty();
                                 d.take_dirty_path();
@@ -1091,11 +1116,13 @@ impl JscoreEngine {
                 // par synchro — `syncs` = sérialisations produites.
                 Cmd::DomSyncStats { tx } => {
                     let st = jsd.as_ref().map(|d| {
-                        let s = d.borrow().serialize_stats();
+                        let d = d.borrow();
+                        let s = d.serialize_stats();
                         DomSyncStats {
                             syncs: s.calls,
                             bytes: s.bytes,
                             micros: s.micros,
+                            journal_classified: d.journal_dropped(),
                         }
                     });
                     if tx.send(st).is_err() {

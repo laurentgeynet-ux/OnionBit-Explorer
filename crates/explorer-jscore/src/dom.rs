@@ -501,6 +501,11 @@ pub struct Dom {
     /// par `document.write`, chemin non tracé) — le prochain
     /// drain déclare « re-parse » plutôt que rejouer à faux.
     journal_poisoned: bool,
+    /// Ops drainées mais **non rejouées** — empoisonnement ou
+    /// classement « re-parse » côté adaptateur (ADR-0025 :
+    /// mesure du périmètre du pilote — un taux élevé signale
+    /// des classes de mutations à ouvrir au rejeu).
+    journal_dropped: u64,
     /// « Document ouvert à l'écriture » (JS-C35) — `true` tant
     /// que la page se charge : `document.write`/`writeln` y
     /// ajoutent à `<body>`. `document.close()` ou la
@@ -589,6 +594,7 @@ impl Dom {
             mutations: Vec::new(),
             journal: Vec::new(),
             journal_poisoned: false,
+            journal_dropped: 0,
             canvases: HashMap::new(),
             media: HashMap::new(),
             template_contents: HashMap::new(),
@@ -658,11 +664,26 @@ impl Dom {
     /// `pub` pour `explorer-js` (adaptateur `JsEngine`).
     pub fn take_journal(&mut self) -> Option<Vec<JournalOp>> {
         if self.journal_poisoned {
+            self.journal_dropped += self.journal.len() as u64;
             self.journal.clear();
             self.journal_poisoned = false;
             return None;
         }
         Some(std::mem::take(&mut self.journal))
+    }
+
+    /// Comptabilise `n` ops drainées mais classées « re-parse »
+    /// par l'adaptateur — même cumul que le drain empoisonné.
+    /// `pub` pour `explorer-js` (adaptateur `JsEngine`).
+    pub fn note_journal_classified(&mut self, n: u64) {
+        self.journal_dropped += n;
+    }
+
+    /// Ops du journal tombées en « re-parse » (empoisonné +
+    /// classé), cumulées — mesure d'adoption ADR-0025.
+    #[must_use]
+    pub fn journal_dropped(&self) -> u64 {
+        self.journal_dropped
     }
 
     /// Vide le journal sans le consommer — appelé quand une
@@ -714,19 +735,25 @@ impl Dom {
     }
 
     /// Sérialisation cléée du document (ADR-0025) : `(html,
-    /// ids)` — `ids` = `NodeId` miroir de chaque nœud dans
-    /// l'ordre d'émission (pré-ordre de `serialize`,
-    /// fragments aplatis sans entrée propre). La session
-    /// apparie les `NodeId` frais de son re-parse pour
-    /// monter la table d'identité.
+    /// ids, tags)` — `ids` = `NodeId` miroir de chaque nœud
+    /// dans l'ordre d'émission (pré-ordre de `serialize`,
+    /// fragments aplatis sans entrée propre) ; `tags` est
+    /// parallèle à `ids` : tag pour un élément,
+    /// `"#text\x00{fnv64(contenu)}"` pour un texte (le hash
+    /// rend l'alignement par contenu possible sans
+    /// dupliquer le texte). La session apparie les `NodeId`
+    /// frais de son re-parse **par tag** pour monter la
+    /// table d'identité — robuste aux normalisations du
+    /// parse moteur (`<tbody>` synthétisé…).
     #[must_use]
-    pub fn serialize_keyed(&self) -> (String, Vec<u64>) {
+    pub fn serialize_keyed(&self) -> (String, Vec<u64>, Vec<String>) {
         let mut out = String::new();
         let mut ids = Vec::new();
+        let mut tags = Vec::new();
         for &c in self.serial_children(self.root) {
-            self.serialize_keyed_node(c, &mut out, &mut ids);
+            self.serialize_keyed_node(c, &mut out, &mut ids, &mut tags);
         }
-        (out, ids)
+        (out, ids, tags)
     }
 
     /// Variante sous-arbre de [`Self::serialize_keyed`] —
@@ -736,13 +763,21 @@ impl Dom {
     pub fn serialize_subtree_keyed(&self, node: NodeId) -> (String, Vec<u64>) {
         let mut out = String::new();
         let mut ids = Vec::new();
-        self.serialize_keyed_node(node, &mut out, &mut ids);
+        let mut tags = Vec::new();
+        self.serialize_keyed_node(node, &mut out, &mut ids, &mut tags);
         (out, ids)
     }
 
     /// Traversée unique `serialize` + collecte d'ids — mêmes
     /// événements `Enter` que [`Self::serialize`], enregistrés.
-    fn serialize_keyed_node(&self, node: NodeId, out: &mut String, ids: &mut Vec<u64>) {
+    /// `tags` est poussé en parallèle de `ids`.
+    fn serialize_keyed_node(
+        &self,
+        node: NodeId,
+        out: &mut String,
+        ids: &mut Vec<u64>,
+        tags: &mut Vec<String>,
+    ) {
         enum Ser {
             Enter(NodeId),
             Exit(NodeId),
@@ -760,6 +795,8 @@ impl Dom {
                 Ser::Rawtext(id) => {
                     ids.push(u64::from(id));
                     let child = &self.nodes[id as usize];
+                    tags.push(format!("#text\x00{:016x}", fnv(&child.text)));
+                    let child = &self.nodes[id as usize];
                     let parent = &self.nodes[child.parent.unwrap_or(id) as usize];
                     let marker = format!("</{}", parent.tag);
                     if contains_ci(&child.text, &marker) {
@@ -772,6 +809,7 @@ impl Dom {
                     let n = &self.nodes[id as usize];
                     if n.kind == NodeKind::Text {
                         ids.push(u64::from(id));
+                        tags.push(format!("#text\x00{:016x}", fnv(&n.text)));
                         out.push_str(&escape_text(&n.text));
                         continue;
                     }
@@ -784,6 +822,7 @@ impl Dom {
                         continue;
                     }
                     ids.push(u64::from(id));
+                    tags.push(n.tag.clone());
                     out.push('<');
                     out.push_str(&n.tag);
                     for (k, v) in &n.attrs {
@@ -2427,6 +2466,18 @@ fn attr_op_matches(op: &AttrOp, actual: &str, expected: &str, ci: bool) -> bool 
         AttrOp::Suffix => !e.is_empty() && a.ends_with(e),
         AttrOp::Substring => !e.is_empty() && a.contains(e),
     }
+}
+
+/// FNV-1a 64 — hachage des contenus texte pour les marqueurs
+/// `#text` des séries cléées (alignement keymap côté session :
+/// borne mémoire + fidélité pleine longueur).
+fn fnv(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in s.as_bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
 }
 
 fn escape_text(s: &str) -> String {

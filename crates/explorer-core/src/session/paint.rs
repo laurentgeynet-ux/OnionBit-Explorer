@@ -35,6 +35,7 @@ impl Session {
         dirty_path: Option<&[(String, u32)]>,
         relayout: bool,
         ids: Option<Vec<u64>>,
+        tags: Option<Vec<String>>,
     ) {
         let ctx = self.apply_ctx();
         let Some(entry) = self.tabs.get_mut(&tab) else {
@@ -55,6 +56,7 @@ impl Session {
             relayout,
             journal: None,
             ids: ids.unwrap_or_default(),
+            tags: tags.unwrap_or_default(),
         };
         let out = apply::apply_payload(&mut p, &ctx, &job, old_title.as_deref());
         if let Some(entry) = self.tabs.get_mut(&tab) {

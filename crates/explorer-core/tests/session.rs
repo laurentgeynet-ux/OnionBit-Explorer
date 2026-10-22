@@ -6246,3 +6246,105 @@ async fn journal_survives_svg_case_divergence() {
         s.journal_fallbacks()
     );
 }
+
+/// Mesure du périmètre du pilote (ADR-0025) — fixture des
+/// classes classées « re-parse » : `<table>`/`select` (foster
+/// parenting), `<script>` dans un fragment inséré. Chaque
+/// classe doit être **comptée** par `journal_classified`
+/// (repli cléé pré-drain — invisible à `journal_fallbacks`),
+/// la page reste correcte (le repli est transparent), et la
+/// mutation banale suivante rejoue par journal — auto-
+/// réparation de la voie différentielle après chaque repli.
+#[tokio::test]
+async fn journal_classified_measures_exotic_classes() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><div id=\"x\">avant</div>\
+         <table id=\"tb\"><tr><td>1</td></tr></table>\
+         <select id=\"sel\"></select>\
+         <script>\
+         setTimeout(function(){\
+         document.getElementById('x').setAttribute('data-b','1')},40);\
+         setTimeout(function(){\
+         var tr=document.createElement('tr');\
+         tr.appendChild(document.createElement('td'));\
+         document.getElementById('tb').appendChild(tr)},250);\
+         setTimeout(function(){\
+         var o=document.createElement('option');o.text='o2';\
+         document.getElementById('sel').appendChild(o)},400);\
+         setTimeout(function(){\
+         document.getElementById('x').innerHTML='<i>s<\\/i>'},550);\
+         setTimeout(function(){\
+         document.getElementById('x').setAttribute('data-c','1')},700)\
+         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/m").await.unwrap();
+    // Rafale 1 (bénigne) : NoBaseline → baseline cléée montée.
+    std::thread::sleep(std::time::Duration::from_millis(90));
+    s.pump_timers(a);
+    let classified_baseline = s.journal_classified();
+
+    // Rafale 2 : insert <tr> sous <table> — parent risqué.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    s.pump_timers(a);
+    let c_table = s.journal_classified();
+    assert!(
+        c_table > classified_baseline,
+        "insert sous <table> classé re-parse : {classified_baseline} -> {c_table}"
+    );
+
+    // Rafale 3 : <option> sous <select>.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    s.pump_timers(a);
+    let c_select = s.journal_classified();
+    assert!(
+        c_select > c_table,
+        "insert sous <select> classé re-parse : {c_table} -> {c_select}"
+    );
+
+    // Rafale 4 : innerHTML banal — NON classé (contrôle :
+    // seules les classes risquées tombent).
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    s.pump_timers(a);
+    let c_inner = s.journal_classified();
+    assert_eq!(
+        c_inner, c_select,
+        "innerHTML banal ne doit pas être classé : {c_select} -> {c_inner}"
+    );
+
+    // Rafale 5 : SetAttr bénigne — le journal rejoue à
+    // nouveau (auto-réparation post-repli).
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    s.pump_timers(a);
+    assert!(
+        s.journal_applies() >= 1,
+        "la voie différentielle doit se réparer après les replis : \
+         applies={} classées={} replis={}",
+        s.journal_applies(),
+        s.journal_classified(),
+        s.journal_fallbacks()
+    );
+    // Et la page commise reflète tout : le <tr> greffé.
+    let png = s.frame_png(a);
+    assert!(png.is_some(), "frame produite après les replis");
+
+    // `document.write` post-load — peu importe la voie
+    // (classée/repli/appliquée), la page reste cohérente.
+    t.route(
+        "/w",
+        200,
+        "<html><body><div>vieux</div><script>\
+         setTimeout(function(){\
+         document.write('<div>neuf<\\/div>')},60)</script></body></html>",
+    );
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/w").await.unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    s.pump_timers(b);
+    assert!(s.frame_png(b).is_some(), "document.write sans crash");
+}

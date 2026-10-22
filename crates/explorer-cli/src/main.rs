@@ -136,9 +136,10 @@ async fn shot(url: &str, out: &str, size: Option<&str>) -> ExitCode {
     // différentielle (`warn!` de chaque rejet est déjà
     // visible via RUST_LOG).
     eprintln!(
-        "[journal : {} appliqués / {} replis]",
+        "[journal : {} appliqués / {} replis / {} classées]",
         session.journal_applies(),
-        session.journal_fallbacks()
+        session.journal_fallbacks(),
+        session.journal_classified()
     );
     if let Some(png) = session.frame_png(tab) {
         match std::fs::write(out, &png) {
@@ -205,9 +206,10 @@ async fn jprobe(url: &str) -> ExitCode {
         eprintln!("[round {round}]");
     }
     eprintln!(
-        "[journal : {} appliqués / {} replis]",
+        "[journal : {} appliqués / {} replis / {} classées]",
         session.journal_applies(),
-        session.journal_fallbacks()
+        session.journal_fallbacks(),
+        session.journal_classified()
     );
     ExitCode::SUCCESS
 }
