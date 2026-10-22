@@ -2178,6 +2178,57 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     `Timeout{phase:"request",ms:0}`
     exact sans le fix, vert avec.
 
+- [x] **Étape 113. Cycle de vie
+  document : `DOMContentLoaded` +
+  `load` dispatchés au commit**
+  (issue #11 — lobste.rs : timestamps
+  ISO bruts, journal `0/0/0`).
+  Qualification mesurée : le script
+  `application.js` (`type="module"`)
+  s'évaluait **proprement** — son
+  transform `time[data-at-unix]` vit
+  entier dans
+  `document.addEventListener
+  ("DOMContentLoaded",…)`, et la
+  session ne dispatchait **jamais**
+  `DOMContentLoaded`/`load` (seuls
+  les événements d'input :
+  click/submit/input/scroll/wheel).
+  Listener enregistré, jamais
+  invoqué → aucune mutation →
+  journal `0/0/0` = signature exacte
+  du constat.
+  - *Fix* (`sub_commit_tail`) :
+    `DOMContentLoaded` dispatché au
+    commit (scripts différés/modules
+    déjà évalués en
+    `sub_commit_head`), `load` en fin
+    de queue (sous-ressources +
+    historique commis). Mutations des
+    listeners enfilées → appliquées
+    au prochain drain comme toute
+    mutation script — pas de drain
+    forcé sous verrou hôte partagé.
+    Listeners `document`/`window`
+    stockés sur la racine du miroir :
+    la propagation depuis `<body>`
+    les atteint sans travail moteur.
+  - *Test* :
+    `lifecycle_domcontentloaded_and_
+    load_dispatch` — titre chaîné
+    `dcl+loaded` (le listener `load`
+    relit le titre posé par DCL —
+    la coalescence d'applies rend le
+    passage de DCL observable) +
+    `Navigated` titre `'orig'`
+    inchangé.
+  - *Couverture héritée* :
+    `dataset`/`innerText`/sélecteurs
+    d'attribut (`JS-C54`) — les
+    primitives du handler lobste.rs
+    étaient déjà là, il ne manquait
+    que le déclenchement.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

@@ -6348,3 +6348,54 @@ async fn journal_classified_measures_exotic_classes() {
     s.pump_timers(b);
     assert!(s.frame_png(b).is_some(), "document.write sans crash");
 }
+
+/// Issue #11 — le cycle de vie document est dispatché au
+/// commit de navigation : `DOMContentLoaded` puis `load`.
+/// Avant le fix, les listeners s'enregistraient mais ne
+/// couraient jamais (lobste.rs : timestamps ISO bruts,
+/// journal 0/0/0 — le script `application.js` s'évaluait
+/// proprement, seul le déclenchement manquait).
+#[tokio::test]
+async fn lifecycle_domcontentloaded_and_load_dispatch() {
+    let (mut s, t) = test_session();
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    // Le listener `load` RELIT le titre posé par
+    // `DOMContentLoaded` : la mutation DCL est coalescée
+    // (un seul apply en attente par onglet — seul l'état
+    // final s'applique), le chaînage rend le passage de
+    // DCL observable dans le titre commis.
+    t.route(
+        "/p",
+        200,
+        "<html><head><title>orig</title></head><body><script>\
+         document.addEventListener('DOMContentLoaded',\
+         function(){document.title='dcl'});\
+         window.addEventListener('load',\
+         function(){document.title=document.title+'+loaded'});\
+         </script><div>x</div></body></html>",
+    );
+    let mut rx = s.subscribe();
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    // Les mutations des listeners sont enfilées — un drain
+    // les applique (voie identique aux mutations script).
+    s.pump_net().await;
+    let mut changed = Vec::new();
+    let mut nav_title = None;
+    while let Ok(ev) = rx.try_recv() {
+        match ev {
+            CoreEvent::TitleChanged { tab, title } if tab == a => changed.push(title),
+            CoreEvent::Navigated { tab, title, .. } if tab == a => nav_title = title,
+            _ => {}
+        }
+    }
+    assert!(
+        changed.iter().any(|t| t == "dcl+loaded"),
+        "le titre chaîné prouve DCL puis load : {changed:?}"
+    );
+    assert_eq!(nav_title.as_deref(), Some("orig"));
+    assert_eq!(
+        s.tab_info(a).and_then(|i| i.title).as_deref(),
+        Some("dcl+loaded")
+    );
+}

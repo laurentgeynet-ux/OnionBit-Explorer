@@ -9,6 +9,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Étape 113 — `DOMContentLoaded`/
+  `load` jamais dispatchés**
+  (`explorer-core`, issue #11) :
+  lobste.rs gardait ses timestamps en
+  ISO brut — le script
+  `application.js` (`type="module"`)
+  s'évaluait mais son handler vivait
+  dans un listener `DOMContentLoaded`
+  que la session ne déclenchait
+  jamais (seuls les événements
+  d'input étaient dispatchés →
+  journal `0/0/0`). `sub_commit_tail`
+  dispatche désormais
+  `DOMContentLoaded` au commit puis
+  `load` en fin de queue ; les
+  mutations des listeners passent par
+  la voie apply normale (enfilées,
+  drainées à la pompe — pas de drain
+  forcé sous verrou partagé).
+  Régression `lifecycle_domcontent
+  loaded_and_load_dispatch` : titre
+  chaîné `dcl+loaded` prouve
+  l'exécution ordonnée des deux
+  événements.
+
 - **Étape 112 — mort silencieuse sur
   articles géants** (`explorer-net`,
   `explorer-core`) : `jprobe`/`shot`

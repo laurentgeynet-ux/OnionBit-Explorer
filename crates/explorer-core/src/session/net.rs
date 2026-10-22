@@ -189,6 +189,15 @@ impl Session {
                 entry.hist_pending = false;
             }
         }
+        // Cycle de vie document (issue #11) : les scripts
+        // différés/modules ont couru dans `sub_commit_head` —
+        // `DOMContentLoaded` se dispatche au commit, avant
+        // `Navigated`. Les mutations de ses listeners sont
+        // enfilées puis appliquées au prochain drain — même
+        // voie que toute mutation script (le drain n'est pas
+        // forcé ici : sous hôte partagé il tournerait sous
+        // verrou, exactement ce que l'étape 55h a retiré).
+        self.dispatch_doc_event(tab, "DOMContentLoaded");
         // `Navigated` seulement si le document final est bien
         // celui demandé : une redirection script a déjà émis
         // pour sa cible. Le titre annoncé = `entry.title` —
@@ -212,6 +221,9 @@ impl Session {
             let frag = frag.to_string();
             self.scroll_to_fragment(tab, &frag);
         }
+        // `load` : tout est commis (sous-ressources, peinture,
+        // historique) — dernier événement du cycle de vie.
+        self.dispatch_doc_event(tab, "load");
         title
     }
 
