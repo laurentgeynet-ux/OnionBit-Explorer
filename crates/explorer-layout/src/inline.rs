@@ -167,8 +167,13 @@ pub(crate) fn layout_inline(
     // `line-height:1em` tient la rangée à 12 px même si le
     // texte dedans fait 4 px).
     let strut_lh = line_height_of(&st, fs, ctx);
-    let mut lines = break_into_lines(&items, &atomics, x, y, w, ctx, fs, fl, strut_lh);
-    align_lines(&st, &mut lines, x, w, fl);
+    // `text-indent` (R-70) : décalage de la première ligne
+    // formatée — négatif = sortie d'écran, la technique
+    // image-remplacement (`text-indent:-9999px` + sprite en
+    // `background-image`, portail Wikipedia `.sprite`).
+    let indent = side_px(&st, "text-indent", w, fs, ctx, 0.0);
+    let mut lines = break_into_lines(&items, &atomics, x, y, w, ctx, fs, fl, strut_lh, indent);
+    align_lines(&st, &mut lines, x, w, fl, indent);
     // Atomes d'abord : leur sous-arbre a été posé en (0,0)
     // par `size_atomics` — translation au rect du fragment
     // (R-23 : sans elle, les enfants d'un atome — valeur d'un
@@ -646,6 +651,7 @@ fn break_into_lines(
     parent_fs: f32,
     fl: &FloatCtx,
     strut_lh: f32,
+    indent: f32,
 ) -> Vec<LineBox> {
     /// Requêtes de bande bornées (contenu hostile : les
     /// flottants sont finis, chaque descente en franchit un).
@@ -659,7 +665,11 @@ fn break_into_lines(
     let strut_base = (strut_lh - parent_fs).mul_add(0.5, parent_fs * 0.8);
     let mut acc = LineAcc::new(strut_lh, strut_base);
     let (mut line_x, mut line_w) = fl.band(y, x, w);
-    let mut cursor_x = line_x;
+    // `text-indent` décale le départ de la première ligne
+    // seulement (`new_line!` repart de `line_x` brut) ; les
+    // tests de fit soustraient déjà `cursor_x - line_x`, la
+    // largeur de bande reste la référence.
+    let mut cursor_x = line_x + indent;
     let mut cursor_y = y;
 
     // Descend la ligne tant que la bande est vide ou trop
@@ -931,7 +941,14 @@ fn break_into_lines(
 /// ligne (§9.5 : une line box est raccourcie par TOUT
 /// flottant qu'elle touche, pas seulement à son haut).
 /// `start`/`end` suivent `direction` (rtl → start = right).
-fn align_lines(st: &ComputedStyle, lines: &mut [LineBox], x: f32, w: f32, fl: &FloatCtx) {
+fn align_lines(
+    st: &ComputedStyle,
+    lines: &mut [LineBox],
+    x: f32,
+    w: f32,
+    fl: &FloatCtx,
+    indent: f32,
+) {
     let rtl = st.get("direction").is_some_and(|d| d.trim() == "rtl");
     let align = match st.get_or("text-align", "start") {
         "start" => {
@@ -979,7 +996,12 @@ fn align_lines(st: &ComputedStyle, lines: &mut [LineBox], x: f32, w: f32, fl: &F
         // commençant au milieu de la ligne) : on y recale
         // d'abord, puis l'alignement consomme le slack restant.
         // Jamais de tirage vers la gauche (max 0).
-        let recale = (ebx - mleft).max(0.0);
+        // R-70 : la première ligne recale sur le bord **indenté**
+        // (`ebx + indent`) — `text-indent` négatif n'est pas
+        // annulé par le recalage (image-remplacement des
+        // sprites, `.sprite{text-indent:-9999px}` Wikipedia).
+        let edge = if i == 0 { ebx + indent } else { ebx };
+        let recale = (edge - mleft).max(0.0);
         #[allow(clippy::cast_precision_loss)]
         let (dx, space) = match align {
             "right" => ((ebx + ebw) - mright, 0.0),

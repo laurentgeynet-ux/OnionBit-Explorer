@@ -25,7 +25,7 @@
 use explorer_css::value::Color;
 use explorer_css::value::{parse_color, parse_length, Unit};
 use explorer_layout::font::ShapedRun;
-use explorer_layout::{BoxKind, Float, Fragment, LayoutBox, Overflow, Position, Rect};
+use explorer_layout::{BoxKind, Float, LayoutBox, Overflow, Position, Rect};
 
 /// Une primitive de dessin, dans l'ordre de peinture.
 #[derive(Debug, Clone)]
@@ -1205,11 +1205,7 @@ fn paint_self(
     // déclaration — le discriminant fiable est `kind` : une
     // boîte `Inline` non atomique (pas `inline-block`, pas
     // remplacée) est un pur conteneur de flux en-ligne.
-    let inline_flow = bx.kind == BoxKind::Inline
-        && bx.intrinsic.is_none()
-        && bx.display() != "inline-block"
-        && bx.display() != "inline-flex"
-        && bx.display() != "inline-table";
+    let inline_flow = is_inline_flow(bx);
     // Fond : `background-color` non transparente, puis
     // `background-image` décodée (au-dessus de la couleur,
     // sous la bordure — App. E ; origine padding box ≈ bord
@@ -1359,22 +1355,75 @@ fn paint_self(
 /// `frag.style` = style de l'élément inline propriétaire
 /// (le plus proche du texte) — `a{color}`/`span{color}`
 /// colorent leurs runs, pas seulement la boîte (R-18).
+/// `true` = boîte `display:inline` pure (ni atomique ni
+/// remplacée) : son `rect` n'est que l'union de fragments —
+/// sa décoration s'émet par pièce de ligne, pas sur la boîte.
+fn is_inline_flow(bx: &LayoutBox) -> bool {
+    bx.kind == BoxKind::Inline
+        && bx.intrinsic.is_none()
+        && bx.display() != "inline-block"
+        && bx.display() != "inline-flex"
+        && bx.display() != "inline-table"
+}
+
 fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
+    // Deux passes (R-70) : TOUTES les décorations inline
+    // d'abord, TOUS les textes ensuite — un fond émis entre
+    // deux textes couvrirait l'encre du premier (le fond du
+    // bouton-langue Wikipedia mangeait la queue de
+    // « language »).
     for line in &bx.lines {
-        for frag in &line.fragments {
-            // Les atomes (enfants inline-block) sont peints à
-            // leur place en récursion.
-            if frag.atomic {
+        // Décos — une pièce par élément et par ligne (approx.
+        // `box-decoration-break: slice`, R-70) : l'union des
+        // fragments de l'élément SUR LA LIGNE, padding aux
+        // bords de la pièce seulement. `frag.owner` = indice
+        // de l'enfant direct de `bx` (même convention que
+        // `assign_child_rects`) → tous les fragments d'un
+        // élément, descendants compris.
+        for (o, child) in bx.children.iter().enumerate() {
+            if !is_inline_flow(child) {
                 continue;
             }
-            // R-22 : fond + bordure de l'élément INLINE
-            // propriétaire, tranchés par fragment. Le texte
-            // direct du conteneur porte `bx.style` (déjà
-            // peint sur la boîte entière) → sauté ; un
-            // fragment de style différent appartient à un
-            // élément inline avec ses propres déclarations.
-            if frag.style != bx.style {
-                paint_inline_deco(frag, items, off);
+            let mut union: Option<Rect> = None;
+            for f in &line.fragments {
+                if f.owner == o {
+                    union = Some(match union {
+                        None => f.rect,
+                        Some(u) => rect_union(u, f.rect),
+                    });
+                }
+            }
+            if let Some(u) = union {
+                paint_inline_deco(&child.style, u, items, off);
+            }
+        }
+        // Éléments imbriqués (leur fragment porte le style le
+        // plus profond — `frag.style` ≠ style de l'enfant
+        // direct `owner` et ≠ `bx.style`) : pièce par run
+        // contigu de même style, union y comprise.
+        let mut run: Option<(Rect, usize)> = None;
+        for (i, f) in line.fragments.iter().enumerate() {
+            let nested = !f.atomic
+                && f.style != bx.style
+                && bx.children.get(f.owner).is_some_and(|c| f.style != c.style);
+            if !run.is_some_and(|(_, first)| line.fragments[first].style == f.style) {
+                if let Some((u, first)) = run.take() {
+                    paint_inline_deco(&line.fragments[first].style, u, items, off);
+                }
+            }
+            if nested {
+                match &mut run {
+                    Some((u, _)) => *u = rect_union(*u, f.rect),
+                    r => *r = Some((f.rect, i)),
+                }
+            }
+        }
+        if let Some((u, first)) = run {
+            paint_inline_deco(&line.fragments[first].style, u, items, off);
+        }
+        for frag in &line.fragments {
+            if frag.atomic {
+                continue;
             }
             if let Some(run) = &frag.shaped {
                 let ink = frag
@@ -1394,16 +1443,21 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
     }
 }
 
-/// Décorations d'un fragment d'élément inline (R-22) : fond et
-/// bordure sur le rect du fragment étendu de son padding et des
-/// épaisseurs de bordure.
+/// Décorations d'une pièce d'élément inline (R-22) : fond et
+/// bordure sur `rect` — union des fragments de l'élément sur
+/// la ligne — étendue de son padding et des épaisseurs de
+/// bordure.
 ///
-/// Approximation « `box-decoration-break: clone` » documentée :
-/// chaque fragment porte les 4 côtés — la spec `slice` ouvre
-/// les bords verticaux aux coupures de ligne ; et `em`/`rem`
-/// ≈ font-size du fragment (pas de contexte racine ici).
-fn paint_inline_deco(frag: &Fragment, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
-    let st = &frag.style;
+/// Approximation « `box-decoration-break: slice` » documentée :
+/// une pièce par élément et par ligne, padding aux bords de
+/// la pièce ; et `em`/`rem` ≈ font-size de l'élément (pas de
+/// contexte racine ici).
+fn paint_inline_deco(
+    st: &explorer_css::ComputedStyle,
+    rect: Rect,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+) {
     let fs = prop_px(st, "font-size", 16.0);
     #[allow(clippy::cast_possible_truncation)]
     let pad = |name: &str| -> f32 {
@@ -1421,10 +1475,10 @@ fn paint_inline_deco(frag: &Fragment, items: &mut Vec<DisplayItem>, off: (f32, f
     let b = pad("padding-bottom") + border_side_w(st, "bottom");
     let outer = shifted(
         Rect {
-            x: frag.rect.x - l,
-            y: frag.rect.y - t,
-            width: frag.rect.width + l + r,
-            height: frag.rect.height + t + b,
+            x: rect.x - l,
+            y: rect.y - t,
+            width: rect.width + l + r,
+            height: rect.height + t + b,
         },
         off,
     );

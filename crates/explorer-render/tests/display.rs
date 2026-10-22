@@ -1167,3 +1167,36 @@ fn repro_social() {
     eprintln!("img i = {:?}", find(&bx, by_id(&dom, "i")).unwrap().rect);
     eprintln!("img j = {:?}", find(&bx, by_id(&dom, "j")).unwrap().rect);
 }
+
+// ── R-70 : décorations inline SOUS le texte de la ligne ────
+
+#[test]
+fn deco_inline_peint_sous_le_texte_de_la_ligne() {
+    // Wikipedia portail : le fond+bordure `.lang-list-button`
+    // tranchés par fragment (`box-decoration-break: clone`,
+    // approx. R-22) se peignaient entrelacés avec les textes —
+    // le rect du fragment espace, gonflé de `padding`,
+    // couvrait la queue de « language » (encre du frère).
+    // Les décos d'une ligne doivent précéder tous ses textes.
+    let (_dom, _bx, items) = dl(
+        "<p><a id=a>x <span id=t>language</span> y</a></p>",
+        "p{margin:0}\
+         #a{background-color:#f8f9fa;border:3px solid #767676;\
+            padding:.6rem 1.2rem}",
+    );
+    let deco =
+        |i: &DisplayItem| matches!(i, DisplayItem::FillRect { .. } | DisplayItem::Border { .. });
+    let texte = |i: &DisplayItem| matches!(i, DisplayItem::Text { .. });
+    let n_deco = items.iter().filter(|i| deco(i)).count();
+    assert!(
+        n_deco >= 2,
+        "décos des fragments espace attendues : {items:?}"
+    );
+    assert!(items.iter().any(&texte), "textes attendus : {items:?}");
+    let dernier_deco = items.iter().rposition(deco).unwrap();
+    let premier_texte = items.iter().position(texte).unwrap();
+    assert!(
+        dernier_deco < premier_texte,
+        "déco émise après un texte de la ligne : {items:?}"
+    );
+}

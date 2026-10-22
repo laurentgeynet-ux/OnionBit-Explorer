@@ -366,3 +366,32 @@ fn no_quirks_table_cellule_herite_centre() {
     let off = frag.rect.x - td.children[0].rect.x;
     assert!(off > 40.0, "no-quirks : texte centré, off={off}");
 }
+
+#[test]
+fn text_indent_premiere_ligne_seule() {
+    // R-70 : `text-indent` ne décale que la première ligne
+    // formatée (les suivantes repartent au bord) ; négatif,
+    // il sort le texte de l'écran — technique
+    // image-remplacement des sprites (`text-indent:-9999px`,
+    // portail Wikipedia).
+    let (dom, bx) = laid(
+        "<!doctype html><p>aaaa bbbb cccc dddd eeee ffff</p>",
+        "p{font-size:10px;width:100px;text-indent:20px}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let anon = &p.children[0];
+    assert!(anon.lines.len() >= 2, "{:?}", anon.lines.len());
+    let first_x = anon.lines[0].fragments[0].rect.x;
+    let second_x = anon.lines[1].fragments[0].rect.x;
+    assert!((first_x - 20.0).abs() < 1.0, "1re ligne x={first_x}");
+    assert!(second_x.abs() < 1.0, "lignes suivantes x={second_x}");
+
+    // Négatif : le texte démarre hors écran.
+    let (d2, bx2) = laid(
+        "<!doctype html><p>hidden</p>",
+        "p{font-size:10px;text-indent:-9999px}",
+    );
+    let p2 = find(&bx2, by_tag(&d2, "p"));
+    let fx = p2.children[0].lines[0].fragments[0].rect.x;
+    assert!(fx <= -9990.0, "indent négatif x={fx}");
+}

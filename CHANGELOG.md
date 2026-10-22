@@ -873,6 +873,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   inchangée). Test : `match_attributs_utf8_ne_panique_pas`
   (16 combinaisons d'ops sur `çbõ`/`pt-BR`). Validé
   terrain : le shot produit la frame complète.
+- **R-70 — texte coupé au bord droit de la frame**
+  (`explorer-render` + `explorer-layout`, trigger portail
+  `www.wikipedia.org` post-Étape 108 — « langua[ge] »
+  mangé à mi-glyphe, « Sear[ch] » blanc-sur-blanc) :
+  **deux défauts**. (a) `paint_lines` émettait
+  `paint_inline_deco` entrelacé avec les textes — le rect
+  d'un fragment tardif, gonflé de `padding`, recouvrait
+  l'encre du frère précédent ; refait en deux passes
+  (toutes les décos de la ligne puis tous les textes) et
+  pièce **par élément par ligne** (union `frag.owner`,
+  modèle `slice` — un fond + une bordure continus au lieu
+  de carrés par fragment). (b) `text-indent` cascadait
+  mais n'était consommé nulle part — la technique
+  image-remplacement (`text-indent:-9999px` sur les
+  sprites) laissait le texte blanc déborder son bouton
+  bleu ; implémenté première ligne seule, négatif admis,
+  `align_lines` recale sur le bord indenté (sinon le
+  recalage flottant annulait les indents négatifs).
+  Tests : `deco_inline_peint_sous_le_texte_de_la_ligne`
+  (display), `text_indent_premiere_ligne_seule` (layout).
+  Validé terrain : shot portail — bouton unique bordé,
+  texte complet, « Search » hors-écran.
 - **Vol humain — voile gris au choix de thème**
   (`app/`) : bug bloquant du run du 21/10 — choisir
   `system`/`clair`/`sombre` (ou tout autre réglage) figeait

@@ -1845,7 +1845,7 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `^=`/`$=`/`|=`/`~=`/`*=`/`=` sur valeurs `ç…õ`). Validé
   terrain : shot en.wikipedia.org/wiki/Main_Page produit
   la frame complète (9,6 Mo) au lieu du panic.
-- [ ] **R-70. Texte coupé au bord droit de la frame**
+- [x] **R-70. Texte coupé au bord droit de la frame**
   (trigger shot `cli shot www.wikipedia.org` post-Étape 108,
   1024 px — « Sear[ch] » tronqué en plein glyphe, « Read
   Wikipedia in your langua[ge] » poursuit hors viewport ;
@@ -1856,6 +1856,30 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   — `white-space`/`text-overflow`/`overflow:hidden` non
   honoré). Promouvoir en étape nommée après attribution
   boxtree vs display.
+  **Livré** — deux défauts distincts attribués :
+  (a) `paint_lines` émettait déco+texte entrelacés par
+  fragment — le rect d'un fragment tardif, gonflé de
+  `padding`, recouvrait l'encre du texte d'un frère
+  (« langua[ge] » sous le fond du fragment espace du
+  bouton). Deux passes : toutes les décos de la ligne
+  puis tous les textes, et pièce **par élément** (union
+  des fragments par `owner` — modèle `slice`, un fond +
+  une bordure continus au lieu de carrés par fragment).
+  (b) `text-indent` cascadait mais n'était jamais
+  consommé — la technique image-remplacement
+  (`.sprite{text-indent:-9999px}`) laissait le texte
+  blanc peindre sous/hors son bouton bleu (« Sear[ch] »
+  blanc-sur-blanc). Implémenté : première ligne seule,
+  négatif admis ; `align_lines` recale sur le bord
+  indenté (`ebx + indent`) pour ne pas neutraliser les
+  valeurs négatives. Régressions
+  `deco_inline_peint_sous_le_texte_de_la_ligne` (render)
+  et `text_indent_premiere_ligne_seule` (layout).
+  Validé terrain : shot portail — bouton unique bordé,
+  texte complet, « Search » hors-écran. Résidus
+  documentés : `em`/`rem` du padding inline ≈ font-size
+  de l'élément (pas de base racine), pièces multi-ligne
+  par union de ligne (pas par fragment).
 - [ ] **R-71. Sprites `background-image` non peints**
   (même trigger — les deux cases autour de « Read Wikipedia
   in your language » sont des rectangles vides sur le portail
