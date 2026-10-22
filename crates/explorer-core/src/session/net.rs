@@ -567,19 +567,31 @@ impl Session {
         let Some(dom) = entry.dom.as_ref() else {
             return;
         };
-        insert_images_into(dom, &mut entry.images, base, bodies, max_px);
+        insert_images_into(
+            dom,
+            &mut entry.images,
+            base,
+            bodies,
+            max_px,
+            &mut entry.img_decoded,
+        );
     }
 }
 
 /// Boucle `insert_images` partagée — `dom` et `images`
 /// proviennent de l'onglet (chemin synchrone) ou de la
-/// payload détachée (étape 90).
+/// payload détachée (étape 90). `decoded_cache` = cache
+/// persistant `src`/`poster` → image (étape 108) : la table
+/// `replaced` indexée `NodeId` meurt à chaque re-parse, le
+/// cache survit et permet la ré-insertion sans re-fetch ni
+/// re-décodage.
 fn insert_images_into(
     dom: &Dom,
     images: &mut PaintImages,
     base: &Url,
     bodies: &HashMap<String, Vec<u8>>,
     max_px: u32,
+    decoded_cache: &mut HashMap<String, Arc<DecodedImage>>,
 ) {
     let items = collect_images(dom);
     let mut decoded: HashMap<String, Option<Arc<DecodedImage>>> = HashMap::new();
@@ -594,6 +606,27 @@ fn insert_images_into(
             .entry(u.as_str())
             .or_insert_with(|| decode_image(body, max_px).map(Arc::new));
         if let Some(img) = img {
+            images.replaced.insert(node, img.clone());
+            decoded_cache.insert(src, img.clone());
+        }
+    }
+}
+
+/// `<img>`/affiches fetchés ré-insérés sur le DOM re-parsé
+/// (étape 108) — miroir des fonds `bg_decoded`. Les `NodeId`
+/// changent au re-parse mais l'attribut `src`/`poster`
+/// survit : la table `replaced` se reconstruit par clé,
+/// zéro fetch ni décodage.
+pub(crate) fn reinsert_imgs_by_src(
+    dom: &Dom,
+    images: &mut PaintImages,
+    decoded_cache: &HashMap<String, Arc<DecodedImage>>,
+) {
+    if decoded_cache.is_empty() {
+        return;
+    }
+    for (node, src) in collect_images(dom) {
+        if let Some(img) = decoded_cache.get(&src) {
             images.replaced.insert(node, img.clone());
         }
     }
@@ -611,9 +644,14 @@ pub(crate) fn insert_images_payload(
     if bodies.is_empty() {
         return;
     }
-    let PaintPayload { dom, images, .. } = p;
+    let PaintPayload {
+        dom,
+        images,
+        img_decoded,
+        ..
+    } = p;
     let Some(dom) = dom.as_ref() else {
         return;
     };
-    insert_images_into(dom, images, base, bodies, max_px);
+    insert_images_into(dom, images, base, bodies, max_px, img_decoded);
 }

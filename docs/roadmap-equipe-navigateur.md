@@ -1926,6 +1926,38 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `ffi_engine.dart` réécrit en
   client RPC.
 
+- [x] **Étape 108. `<img>`/fonds
+  fetchés survivent aux synchros JS**
+  (attribution PIPE mesurée vol 22/10,
+  journal 22/10 — logo central du
+  portail Wikipedia absent) :
+  `apply_payload` RAZ `p.images` à
+  chaque apply — `NodeId` régénérés
+  au re-parse, corps `<img>`/`poster`
+  consommés une fois, `bg_bodies`
+  drainé sans restitution → tout
+  média http(s) mourait au premier
+  apply post-fetch. Caches décodés
+  persistants `img_decoded`
+  (`src`/`poster` → image) et
+  `bg_decoded` (URL résolue → image)
+  sur `Tab` + `PaintPayload`
+  (take/put, purgés à la nav) ;
+  `reinsert_imgs_by_src` re-matche
+  `collect_images(new_dom)` à chaque
+  apply (reflow + incrémental) ;
+  `insert_fetched_backgrounds`
+  idempotent. Tests
+  `img_survives_js_dom_resync` +
+  `fetched_background_survives_js_dom_
+  resync` (mutation `setTimeout`
+  post-nav, page flottante → reflow
+  complet ; contrôle négatif : le
+  premier échoue sans le fix).
+  Terrain : globe du portail
+  Wikipedia peint après synchro
+  `jsl10n`.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

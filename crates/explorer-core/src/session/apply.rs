@@ -201,8 +201,22 @@ pub(crate) struct PaintPayload {
     /// relayout : `bg_aliases` relie le texte `url(...)` brut
     /// à l'URL résolue, `bg_bodies` les corps par résolue ;
     /// `relayout_dom_payload` les consomme après cascade.
+    /// `bg_aliases` est **persistant** (les URL résolues ne
+    /// changent pas au re-parse) ; `bg_bodies` est drainé une
+    /// fois vers `bg_decoded`.
     pub bg_aliases: HashMap<String, String>,
     pub bg_bodies: HashMap<String, Vec<u8>>,
+    /// Caches décodés persistants (étape 108) — les tables
+    /// `images.*` sont indexées `NodeId` et RAZ à chaque apply
+    /// (re-parse → ids régénérés) ; les bitmaps vivent ici
+    /// sous une clé stable. `img_decoded` : valeur d'attribut
+    /// `src`/`poster` → image ; `bg_decoded` : URL résolue →
+    /// image (`None` = décodage échoué, jamais retenté). Sans
+    /// eux tout `<img>`/fond fetché disparaît à la première
+    /// synchro JS post-fetch (trigger : logo du portail
+    /// Wikipedia, vol 22/10).
+    pub img_decoded: HashMap<String, Arc<DecodedImage>>,
+    pub bg_decoded: HashMap<String, Option<Arc<DecodedImage>>>,
 }
 
 /// Titre courant de l'onglet — lu au début d'apply pour
@@ -276,6 +290,8 @@ impl Tab {
             emitted: self.emitted,
             bg_aliases: std::mem::take(&mut self.bg_aliases),
             bg_bodies: std::mem::take(&mut self.bg_bodies),
+            img_decoded: std::mem::take(&mut self.img_decoded),
+            bg_decoded: std::mem::take(&mut self.bg_decoded),
         }
     }
 
@@ -307,6 +323,8 @@ impl Tab {
         // restitué — un apply ultérieur le re-prendra.
         self.bg_aliases = p.bg_aliases;
         self.bg_bodies = p.bg_bodies;
+        self.img_decoded = p.img_decoded;
+        self.bg_decoded = p.bg_decoded;
     }
 }
 
@@ -352,6 +370,14 @@ pub(crate) fn apply_payload(
     p.dom = Some(new_dom);
     p.images = PaintImages::default();
     p.images.canvases = canvases;
+    // `<img>`/affiches fetchés : re-match par `src`/`poster`
+    // d'attribut — les `NodeId` viennent d'être régénérés au
+    // re-parse et la table a été RAZ juste au-dessus (étape
+    // 108 ; avant ce cache, tout `<img>` http(s) mourait à la
+    // première synchro JS post-fetch).
+    if let Some(dom) = p.dom.as_ref() {
+        net::reinsert_imgs_by_src(dom, &mut p.images, &p.img_decoded);
+    }
     // Un re-parse de synchro rend obsolètes les options
     // figées du popup `<select>` — il se referme (étape 54) ;
     // les `NodeId` du find meurent de même → effacé (57bis).
@@ -405,8 +431,22 @@ fn try_incr_payload(
     let Some(root_el) = new_dom.document_element() else {
         return false;
     };
-    let mut sizes = image_sizes(new_dom, &p.images.replaced);
+    // Tables `images.*` indexées par `NodeId` de l'ANCIEN DOM —
+    // re-key par `src`/styles AVANT la mesure intrinsèque
+    // (étape 108) : `<img>` fetchés, `data:` et fonds
+    // `url(http…)` seraient sinon perdus dans le relayout
+    // incrémental (même trou que le RAZ `apply_payload`,
+    // en silencieux — les entrées obsolètes survivent
+    // indexées sur des ids morts).
+    p.images.replaced.clear();
+    p.images.backgrounds.clear();
+    net::reinsert_imgs_by_src(new_dom, &mut p.images, &p.img_decoded);
     let styles = styles_payload(p, new_dom, ctx.viewport, ctx.color_scheme);
+    let data_imgs = collect_data_images(new_dom, &styles, ctx.image_max_px);
+    p.images.replaced.extend(data_imgs.replaced);
+    p.images.backgrounds.extend(data_imgs.backgrounds);
+    insert_fetched_backgrounds(p, &styles, ctx.image_max_px);
+    let mut sizes = image_sizes(new_dom, &p.images.replaced);
     sizes.extend(explorer_render::svg::svg_sizes(new_dom, root_el));
     let svgs = explorer_render::svg::collect_svg(new_dom, root_el, ctx.image_max_px);
     let block = layout_ctx(ctx, p);
@@ -1053,32 +1093,35 @@ pub(crate) type ApplyQueue = VecDeque<PendingApply>;
 /// `NodeId` propriétaire est retrouvé par la valeur
 /// `background-image` calculée, via `bg_aliases`
 /// (texte `url(...)` brut → URL résolue ; la feuille
-/// d'origine ne survit pas à la cascade). Un décodage par
-/// URL résolue (`decoded` déduplique — même `Arc` partagé
-/// entre boîtes, comme `data_imgs`). Fond `data:` ou non
+/// d'origine ne survit pas à la cascade). Fond `data:` ou non
 /// fetché → pas d'alias → ignoré, jamais d'échec.
+///
+/// **Idempotent** (étape 108) : les corps `bg_bodies` sont
+/// drainés une fois vers le cache persistant `bg_decoded`
+/// (URL résolue → image), `bg_aliases` reste — chaque apply
+/// peut ainsi ré-insérer les fonds sur les `NodeId` régénérés
+/// au re-parse, symétrique de `reinsert_imgs_by_src`. Avant
+/// ce cache, les fonds fetchés mouraient au second apply.
 fn insert_fetched_backgrounds(p: &mut PaintPayload, styles: &StyleMap, max_px: u32) {
-    if p.bg_bodies.is_empty() {
-        p.bg_aliases.clear();
+    if p.bg_aliases.is_empty() {
         return;
     }
-    let bodies = std::mem::take(&mut p.bg_bodies);
-    let aliases = std::mem::take(&mut p.bg_aliases);
-    let mut decoded: HashMap<&str, Option<Arc<DecodedImage>>> = HashMap::new();
+    // Drain unique : corps → cache décodé. Les applys
+    // suivants trouvent `bg_bodies` vide et ne coûtent que
+    // la boucle de correspondance styles → cache.
+    for (resolved, body) in std::mem::take(&mut p.bg_bodies) {
+        p.bg_decoded
+            .entry(resolved)
+            .or_insert_with(|| decode_image(&body, max_px).map(Arc::new));
+    }
     for (node, st) in styles.iter() {
         let Some(raw) = st.get("background-image").and_then(css_url_arg) else {
             continue;
         };
-        let Some(resolved) = aliases.get(raw.as_str()) else {
+        let Some(resolved) = p.bg_aliases.get(raw.as_str()) else {
             continue;
         };
-        let Some(body) = bodies.get(resolved.as_str()) else {
-            continue;
-        };
-        let img = decoded
-            .entry(resolved.as_str())
-            .or_insert_with(|| decode_image(body, max_px).map(Arc::new));
-        if let Some(img) = img {
+        if let Some(Some(img)) = p.bg_decoded.get(resolved.as_str()) {
             p.images.backgrounds.insert(node, img.clone());
         }
     }

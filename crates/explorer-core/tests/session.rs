@@ -2172,6 +2172,96 @@ async fn img_renders_decoded_bitmap() {
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
 
+/// Étape 108 — un apply de synchro JS re-parse le document :
+/// les `<img>` fetchés doivent survivre (le cache persistant
+/// `img_decoded` re-matche par `src` — avant, la table
+/// `images.replaced` était RAZ à `PaintImages::default()` et
+/// le bitmap mourait à la première mutation post-fetch —
+/// trigger : logo central de www.wikipedia.org, vol 22/10).
+#[tokio::test]
+async fn img_survives_js_dom_resync() {
+    let (mut s, t) = test_session();
+    // Le flottant 0×0 force `Relayout::NeedsFullLayout` à la
+    // synchro JS — le reflow complet reconstruit le boxtree
+    // entier (l'incrémental retiendrait la boîte image et
+    // masquerait la perte de `images.replaced`).
+    // La mutation est différée par `setTimeout` à délai réel :
+    // les timers à 0 ms tirent pendant `navigate` (synchro
+    // `relayout:false` avant `insert_images` — ne peut pas
+    // perdre les images). 80 ms + `sleep` le fait tirer
+    // post-nav → apply `relayout:true` — le vrai chemin du
+    // wipe (wikipedia : `jsl10n` mute après le fetch).
+    t.route(
+        "/m",
+        200,
+        "<html><body><div style=\"float:left;width:0;height:0\"></div>\
+         <img src=\"/i.png\"><div id=\"x\">avant</div>\
+         <script>setTimeout(function(){\
+         document.getElementById('x').textContent='APRES'},80)</script>\
+         </body></html>",
+    );
+    t.route_bin("/i.png", 200, red_png());
+    // DOM final équivalent, statique.
+    t.route(
+        "/s",
+        200,
+        "<html><body><div style=\"float:left;width:0;height:0\"></div>\
+         <img src=\"/i.png\"><div id=\"x\">APRES</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/m").await.unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    s.pump_timers(a);
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    let (pa, pb) = (s.frame_png(a), s.frame_png(b));
+    assert!(pa.is_some() && pb.is_some());
+    assert_eq!(pa, pb, "l'<img> fetché doit survivre à la synchro JS");
+}
+
+/// Étape 108 — même classe de bug côté `background-image:
+/// url(http…)` : `bg_bodies` était consommé une fois puis
+/// `images.backgrounds` RAZ à l'apply suivant. Le cache
+/// `bg_decoded` rend l'insertion idempotente.
+#[tokio::test]
+async fn fetched_background_survives_js_dom_resync() {
+    let (mut s, t) = test_session();
+    // Flottant 0×0 : reflow complet à la synchro (voir
+    // `img_survives_js_dom_resync`).
+    t.route(
+        "/m",
+        200,
+        "<html><head><style>#b{background-image:url(/i.png);width:2px;height:2px}\
+         </style></head><body><div style=\"float:left;width:0;height:0\"></div>\
+         <div id=\"b\"></div><div id=\"x\">avant</div>\
+         <script>setTimeout(function(){\
+         document.getElementById('x').textContent='APRES'},80)</script>\
+         </body></html>",
+    );
+    t.route_bin("/i.png", 200, red_png());
+    // Équivalent statique : même box, fond rouge uni.
+    t.route(
+        "/s",
+        200,
+        "<html><head><style>#b{background-color:#ff0000;width:2px;height:2px}\
+         </style></head><body><div style=\"float:left;width:0;height:0\"></div>\
+         <div id=\"b\"></div><div id=\"x\">APRES</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/m").await.unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    s.pump_timers(a);
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    let (pa, pb) = (s.frame_png(a), s.frame_png(b));
+    assert!(pa.is_some() && pb.is_some());
+    assert_eq!(pa, pb, "le fond fetché doit survivre à la synchro JS");
+}
+
 #[tokio::test]
 #[allow(clippy::many_single_char_names)]
 async fn broken_img_falls_back_to_alt() {

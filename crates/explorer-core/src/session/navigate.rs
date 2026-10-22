@@ -649,6 +649,8 @@ impl Session {
             entry.images = PaintImages::default();
             entry.bg_aliases.clear();
             entry.bg_bodies.clear();
+            entry.img_decoded.clear();
+            entry.bg_decoded.clear();
             entry.linked_sheets.clear();
             entry.prev_styles = HashMap::new();
             entry.transitions.clear();

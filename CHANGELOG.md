@@ -806,6 +806,46 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   input mods → shutdown. Fichiers :
   `ffi_worker.dart` (nouveau), client
   RPC réécrit dans `ffi_engine.dart`.
+- **Étape 108 — `<img>`/fonds fetchés survivent
+  aux synchros JS** (`explorer-core`, attribution
+  PIPE mesurée vol 22/10 — logo central du
+  portail Wikipedia absent) : `apply_payload`
+  faisait `p.images = PaintImages::default()` à
+  chaque apply (toute synchro miroir JS porte
+  `html` → re-parse, `NodeId` régénérés) — les
+  corps `<img>`/`video[poster]` étaient décodés
+  une fois puis jetés, et `insert_fetched_
+  backgrounds` consommait `bg_bodies` par `take`
+  sans restitution : tout média http(s) mourait
+  au premier apply post-fetch (les data-URI,
+  re-collectés, survivaient). Livré — caches
+  décodés persistants sur `Tab` + `PaintPayload`
+  (clé stable, transférés au take/put, purgés à
+  la navigation) : `img_decoded` (`src`/`poster`
+  brut → `Arc<DecodedImage>`) et `bg_decoded`
+  (URL résolue → `Option<Arc<DecodedImage>>`,
+  `None` = échec jamais retenté). `insert_
+  images_into` alimente le cache au décodage ;
+  `reinsert_imgs_by_src` re-matche
+  `collect_images(new_dom)` à chaque apply —
+  reflow complet (`apply_payload`) et
+  incrémental (`try_incr_payload`, re-key avant
+  `image_sizes`). `insert_fetched_backgrounds`
+  est devenu idempotent : `bg_bodies` drainé
+  une fois vers `bg_decoded`, `bg_aliases`
+  persistant — la boucle styles → cache seule
+  à chaque relayout. Tests :
+  `img_survives_js_dom_resync` et
+  `fetched_background_survives_js_dom_resync` —
+  mutation `setTimeout` post-nav (apply
+  `relayout:true`) sur page flottante (force le
+  reflow complet ; l'incrémental retenait la
+  boîte et masquait la perte) — contrôle
+  négatif : le premier **échoue** sans la
+  réinsertion. Terrain : `cli shot` sur
+  www.wikipedia.org — le globe central est
+  peint et survit à la synchro `jsl10n`
+  (espace vide en vol précédent).
 - **R-60 — position statique des absolus en-ligne**
   (`explorer-layout`) : bug site-réel trouvé en validant
   R-58 — les skip-links MDN (« Skip to main content » /

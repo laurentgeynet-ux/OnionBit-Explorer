@@ -33,7 +33,7 @@ use explorer_layout::{LayoutBox, Rect};
 use explorer_net::cookies::CookieJar;
 use explorer_net::http::{HttpTransport, Request};
 use explorer_net::url::Url;
-use explorer_render::{DisplayList, Frame, PaintImages, WebFontSource};
+use explorer_render::{DecodedImage, DisplayList, Frame, PaintImages, WebFontSource};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
@@ -243,6 +243,18 @@ pub(crate) struct Tab {
     /// calculé). Vidés à chaque navigation.
     bg_aliases: HashMap<String, String>,
     bg_bodies: HashMap<String, Vec<u8>>,
+    /// Caches décodés persistants (étape 108) — survivent au
+    /// re-parse de chaque apply : les tables `images.*` sont
+    /// indexées `NodeId` (régénérés au re-parse) et reconstruites
+    /// à chaque relayout, donc les bitmaps vivent ici sous une
+    /// clé stable. `img_decoded` : valeur d'attribut `src`/`poster`
+    /// → image décodée ; `bg_decoded` : URL résolue → image
+    /// décodée (`None` = décodage échoué, jamais retenté). Les
+    /// corps bruts `bg_bodies` sont drainés vers `bg_decoded` à
+    /// leur première cascade — `insert_fetched_backgrounds`
+    /// devient idempotent.
+    img_decoded: HashMap<String, Arc<DecodedImage>>,
+    bg_decoded: HashMap<String, Option<Arc<DecodedImage>>>,
     /// Styles calculés de la dernière mise en page, indexés
     /// par **ordinal d'élément** (ordre document) — la clé
     /// survit au re-parse des synchronisations DOM, là où un
@@ -736,6 +748,8 @@ impl Session {
                 linked_sheets: Vec::new(),
                 bg_aliases: HashMap::new(),
                 bg_bodies: HashMap::new(),
+                img_decoded: HashMap::new(),
+                bg_decoded: HashMap::new(),
                 prev_styles: HashMap::new(),
                 transitions: Vec::new(),
                 animations: Vec::new(),
