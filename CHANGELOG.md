@@ -9,6 +9,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-76 — `merge_rects` jetait les
+  composantes fermées** (`explorer-render`,
+  couture NAV issue #11 bis) : la
+  compaction amortie `comps.retain`
+  supprimait les composantes « fermées »
+  (plus aucun rect futur ne peut les
+  toucher, tri par `x`) **sans les
+  émettre** — sur un diff massif (~2 060
+  rects post re-parse lobste.rs), ~466
+  zones de damage disparaissaient →
+  pixels modifiés jamais repeints
+  (résidu `…:45:58` peint sous le
+  timestamp relatif). Les fermées sont
+  désormais accumulées dans `done` puis
+  réinjectées avant consolidation —
+  aucun changement d'API.
+  Régression `merge_compaction_reemet_
+  les_fermees` (70 fermées réémises).
+  Mesure NAV : out 39 → 505, diff
+  raster 178737 px → 0.
+
 - **R-75 — texte étranglé autour des
   flottants + `margin:auto` non
   appliqué** (`explorer-layout`,

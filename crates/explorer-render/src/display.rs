@@ -595,6 +595,15 @@ fn merge_rects(rects: &mut Vec<Rect>) {
     let mut order = std::mem::take(rects);
     order.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
     let mut comps: Vec<Rect> = Vec::new();
+    // Composantes **fermées** (`c.x + c.width < r.x` — aucun
+    // rect futur ne peut les toucher, le tri par x le
+    // garantit) : la compaction les sort du balayage mais
+    // elles doivent rejoindre la SORTIE — avant, `retain`
+    // les supprimait purement, leurs zones n'entraient
+    // jamais dans le damage → pixels changés jamais
+    // repeints (issue #11 bis, couture NAV : diff
+    // quasi-total lobste.rs, in=2060 out=39 au lieu de ~505).
+    let mut done: Vec<Rect> = Vec::new();
     for r in order {
         let mut hits: Vec<usize> = Vec::new();
         let mut dead = 0usize;
@@ -624,12 +633,26 @@ fn merge_rects(rects: &mut Vec<Rect>) {
                 comps[first] = bb;
             }
         }
-        // Compaction amortie : purge les composantes fermées
-        // quand elles dominent — borne le balayage courant.
+        // Compaction amortie : sort du balayage les
+        // composantes fermées quand elles dominent — borne
+        // le travail courant. Elles rejoignent `done`
+        // (réémises en sortie), pas le néant.
         if comps.len() > 64 && dead * 2 >= comps.len() {
-            comps.retain(|c| c.x + c.width >= r.x);
+            comps.retain(|c| {
+                if c.x + c.width >= r.x {
+                    true
+                } else {
+                    done.push(*c);
+                    false
+                }
+            });
         }
     }
+    // Les fermées ne peuvent plus fusionner entre elles (le
+    // tri le garantissait déjà) mais une composante vivante
+    // peut avoir grossi jusque dans leur zone : réinjectées
+    // avant la consolidation, le point fixe les absorbe.
+    comps.extend(done);
     // Consolidation : une composante qui a grossi vers la
     // gauche peut encore chevaucher une voisine fermée.
     // Point fixe borné sur les C ≪ k survivantes.
@@ -2945,6 +2968,28 @@ mod tests {
         assert_eq!(merged, total);
         // Disjoints non chaînés : jamais de fusion abusive.
         assert!(v.len() <= src.len());
+    }
+
+    /// R-76 — les composantes fermées par la compaction
+    /// rejoignent la sortie : avant, `retain` les jetait →
+    /// leurs zones n'entraient jamais dans le damage
+    /// (pixels changés jamais repeints — issue #11 bis,
+    /// lobste.rs : in=2060 out=39 au lieu de ~505).
+    #[test]
+    fn merge_compaction_reemet_les_fermees() {
+        // 70 rects disjoints à gauche → 70 composantes
+        // ouvertes ; un rect loin à droite les ferme toutes
+        // d'un coup → compaction (mortes majoritaires, >64).
+        let mut v: Vec<Rect> = (0..70_u16)
+            .map(|i| r(0.0, f32::from(i) * 20.0, 10.0, 10.0))
+            .collect();
+        v.push(r(500.0, 0.0, 10.0, 10.0));
+        let area: f32 = v.iter().map(|q| q.width * q.height).sum();
+        merge_rects(&mut v);
+        // Avant le fix : un seul rect survivait.
+        assert_eq!(v.len(), 71, "composantes fermées jetées");
+        let covered: f32 = v.iter().map(|q| q.width * q.height).sum();
+        assert_eq!(covered, area, "couverture perdue");
     }
 
     /// Le diff dégénéré journalisé par NAV : ~5 000 rects en

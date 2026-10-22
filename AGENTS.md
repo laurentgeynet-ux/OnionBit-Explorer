@@ -204,6 +204,11 @@ Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
   « x/y exécutés (z skips) sur sous-ensemble S » — test262 extrait
   ≠ test262, un dossier WPT ≠ WPT. Le cliquet verrouille une
   régression, il ne mesure pas une couverture globale.
+- **Verdict terrain = binaire frais** : un `cargo build` relu
+  avant `Finished` laisse un `.exe` périmé — tout shot/layout
+  qui suit « valide » l'ancien code. Attendre `Finished`
+  (ou le timestamp du binaire) avant tout verdict visuel —
+  deux fausses validations observées en session (R-75).
 
 ## 9. Ce qui n'est PAS ce projet
 

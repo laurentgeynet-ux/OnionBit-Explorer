@@ -2027,6 +2027,28 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `BlockCtx::default_family` = `serif` (cohérent avec
   l'initiale cascade).
 
+- [x] **R-76. `merge_rects` jetait les composantes
+  fermées** (couture NAV, issue #11 bis — diagnostic
+  complet et fix éprouvé fournis par NAV, re-numéroté
+  R-76 après collision avec R-75). La compaction amortie
+  `comps.retain` supprimait les composantes « fermées »
+  — celles qu'aucun rect futur ne peut toucher (tri par
+  `x`) — **sans les émettre** : sur un diff massif
+  (~2 060 rects post re-parse lobste.rs), ~466 zones de
+  damage disparaissaient → pixels modifiés jamais
+  repeints, résidu `…:45:58` sous le timestamp relatif.
+  Fix : accumulation dans `done: Vec<Rect>` puis
+  réinjection avant la consolidation en point fixe
+  (elles peuvent encore chevaucher une composante ayant
+  grossi après leur fermeture — le point fixe les
+  absorbe). Aucune API changée. Régression
+  `merge_compaction_reemet_les_fermees` (70 fermées
+  réémises, couverture préservée). Mesure NAV :
+  `out` 39 → 505, `diff_px` raster 178737 → 0.
+  Journal `AGENTS.md` §8 : nouveau piège noté — verdict
+  terrain seulement après `Finished` de cargo build
+  (binaire périmé = validation fantôme).
+
 ## Palier R-B — Contenu étranger, animation, canvas
 
 - [x] **R-8. Foreign-content dans `explorer-html`** (ex-60a) :
