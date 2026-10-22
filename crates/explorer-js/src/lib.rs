@@ -751,7 +751,9 @@ fn journal_ops_to_seam(
                 });
             }
             explorer_jscore::JournalOp::Remove { key } => {
-                out.push(DomMutation::Remove { key: u64::from(key) });
+                out.push(DomMutation::Remove {
+                    key: u64::from(key),
+                });
             }
             explorer_jscore::JournalOp::SetAttr { key, name } => {
                 if RISKY_PARENT.contains(&tag_of(key)) {
