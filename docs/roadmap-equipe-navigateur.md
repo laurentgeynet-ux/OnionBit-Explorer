@@ -1958,6 +1958,48 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Wikipedia peint après synchro
   `jsl10n`.
 
+- [x] **Étape 109. Consommateur
+  `rects` + traduction locale de
+  frame** (audit 2 — la plomberie
+  `frame?x&y&w&h` + `rects`/
+  `frame_copy_region`/`dirty_rects`
+  existait côté moteur depuis
+  l'étape 55, personne ne la
+  lisait) : `scroll` lit le
+  `scroll_y` autoritaire de la
+  réponse `input` (REST JSON +
+  FFI joint par le worker) →
+  `paintedScrollY` vs `scrollY`
+  pilote `Transform.translate` de
+  la `RawImage` retenue — retour
+  visuel molette immédiat, la
+  bande exposée attend le pull.
+  `frame_invalidated` parse
+  `rects` (px physiques) + plan :
+  même position → accumulation →
+  pull **partiel** (`fetchFrame`
+  région → `PictureRecorder`
+  composite sur l'image retenue) ;
+  scroll, `rects` vide/absent
+  (contrat 55), volume borné
+  (`frameRegionMaxRects`×16,
+  `frameRegionMaxArea`×½) ou
+  échec → plein auto-réparateur.
+  FFI : `tick` enrichi rend
+  `scroll_y` + `dirty_rects`
+  drainés dans le même RPC —
+  même plan, exports absents →
+  `null` → plein (dll antérieure
+  tolérée). `paintedScrollY` posé
+  à l'**install** (conservateur :
+  retarde plutôt que survole),
+  purgé à `navigated`/`tab_closed`.
+  Tests : traduction locale
+  scroll → zéro au pull livré,
+  pull partiel rects, `rects: []`
+  → plein, coalescence étape 89
+  intacte.
+
 - [x] **Étape 110. `SharedFonts`
   délègue `font_face` +
   `fallback_for`** (demande PIPE
