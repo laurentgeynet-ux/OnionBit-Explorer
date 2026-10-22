@@ -2606,6 +2606,26 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `sous_classes_erreur_completes`,
   `string_symbol_iterator_appel_direct`.
 
+- [x] **JS-C57. `Image`/`HTMLImageElement`** (trigger vol
+  humain 22/10 — `ReferenceError: Image is not defined` sur
+  `www.wikipedia.org`, `index-*.js` `doWhenReady` qui
+  précharge via `new Image()`) : `Image` devient un
+  constructeur réel — alias de `document.createElement
+  ('img')` (nœud détaché du miroir, insertable,
+  `parentNode` `null`) + attributs `width`/`height`
+  posés depuis les args optionnels (numériques ou
+  chaînes) ; `HTMLImageElement` rejoint le registre de
+  stubs inconstructibles pour la détection. Sans
+  `document` installé : `TypeError` honnête. Mesure
+  terrain : sonde `LOBSTE_PROBE_URL` sur
+  `www.wikipedia.org` — **0 PipelineError** (nav +
+  survol + clavier, le bundle `index-*.js` évalue
+  `doWhenReady` en entier, 2 syncs miroir 244 Kio)
+  vs `ReferenceError` observé en vol. Test :
+  `image_constructor_creates_detached_img` (tagName
+  IMG, parent null, attrs 100x50, insertable, stub
+  inconstructible).
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

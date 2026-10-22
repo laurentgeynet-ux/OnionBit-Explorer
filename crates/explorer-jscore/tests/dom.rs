@@ -215,6 +215,32 @@ fn dispatched_literal_event_exposes_key() {
     );
 }
 
+// -- JS-C57 : `Image`/`HTMLImageElement` --------------------------------
+
+#[test]
+fn image_constructor_creates_detached_img() {
+    // wikipedia.org (vol 22/10) : `new Image()` dans `doWhenReady`
+    // mourait en ReferenceError — alias `createElement('img')`
+    // détaché + attrs width/height optionnels.
+    assert_eq!(
+        ev("var i = new Image(); i.tagName + '|' + String(i.parentNode)"),
+        "IMG|null"
+    );
+    assert_eq!(
+        ev("var i = new Image(100, 50); i.getAttribute('width') + 'x' + i.getAttribute('height')"),
+        "100x50"
+    );
+    // Insertable comme tout élément — le pattern preload
+    // (`i.src = …`, listener `onload`) n'a plus d'obstacle au ctor.
+    assert_eq!(ev("document.body.appendChild(new Image()).tagName"), "IMG");
+    // `HTMLImageElement` = stub de détection, inconstructible.
+    assert_eq!(ev("typeof HTMLImageElement"), "function");
+    assert_eq!(
+        ev("var r=''; try{new HTMLImageElement()}catch(e){r=e.name} r"),
+        "TypeError"
+    );
+}
+
 #[test]
 fn navigator_is_fixed_and_poor() {
     assert_eq!(ev("navigator.userAgent"), "Explorer/0.1 (explorer-jscore)");

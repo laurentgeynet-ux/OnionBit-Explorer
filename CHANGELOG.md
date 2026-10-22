@@ -73,6 +73,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `keyboard_event_ctor_copies_init_keys`. Mécanisme
   réutilisable pour `MouseEvent.clientX`…
 
+- **JS-C57 — `Image`/`HTMLImageElement`**
+  (`explorer-jscore`, trigger vol humain 22/10) :
+  `ReferenceError: Image is not defined` sur
+  `www.wikipedia.org` (`index-*.js` → `doWhenReady`
+  précharge via `new Image()`). `Image` devient un
+  constructeur réel — alias de
+  `document.createElement('img')` (nœud détaché du
+  miroir, insertable, `parentNode` `null`) +
+  attributs `width`/`height` posés depuis les args
+  optionnels ; `HTMLImageElement` rejoint les stubs
+  de détection inconstructibles. Sans `document` :
+  `TypeError` honnête. Mesure : sonde terrain sur
+  `www.wikipedia.org` — **0 PipelineError** (nav +
+  survol + clavier) vs `ReferenceError` en vol.
+  Test : `image_constructor_creates_detached_img`.
+
 - **R-68 — `MAX_TOKENS` 256 K → 1 M** (`explorer-css`,
   trigger vol humain « nav GitHub dépliée ») : la borne
   du tokenizer (ADR-0011) tronquait **silencieusement**

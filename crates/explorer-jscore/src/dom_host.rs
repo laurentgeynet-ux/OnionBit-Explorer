@@ -555,6 +555,7 @@ impl Engine {
             "EventTarget",
             "Element",
             "HTMLElement",
+            "HTMLImageElement",
             "SVGElement",
             "Document",
             "DocumentFragment",
@@ -662,6 +663,15 @@ impl Engine {
             }
             self.set_own(g, name, f, false);
         }
+        // `Image` — constructible (alias `createElement('img')` ;
+        // `HTMLImageElement` reste le stub de détection au-dessus).
+        // Mesuré wikipedia.org vol 22/10 (JS-C57).
+        let img_f = self.native_fn("Image", image_ctor);
+        if let Value::Obj(fid) = img_f {
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "Image", img_f, false);
         // `AbortController` minimal : `signal.aborted` + `abort()`.
         let ac_f = self.native_fn("AbortController", abort_controller_ctor);
         if let Value::Obj(fid) = ac_f {
@@ -3507,6 +3517,26 @@ fn node_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 /// constructor » comme `Node`, la détection `typeof`/`in` suffit.
 fn illegal_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Err(e.type_error("illegal constructor"))
+}
+
+/// `new Image(width?, height?)` — alias constructeur de
+/// `document.createElement('img')` (nœud détaché du miroir) +
+/// attributs `width`/`height` optionnels, args numériques ou
+/// chaînes. Mesuré wikipedia.org (vol 22/10) : `doWhenReady`
+/// précharge via `new Image()` → `ReferenceError` (JS-C57).
+/// Sans `document` installé : `TypeError` honnête, jamais panic.
+fn image_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((dom, cache)) = e.dom_ctx.clone() else {
+        return Err(e.type_error("Image: no document"));
+    };
+    let n = dom.borrow_mut().create_element("img");
+    for (i, attr) in ["width", "height"].into_iter().enumerate() {
+        if let Some(v) = args.get(i).filter(|v| !matches!(v, Value::Undefined)) {
+            let s = e.to_js_string(*v)?;
+            dom.borrow_mut().set_attr(n, attr, &s);
+        }
+    }
+    Ok(node_value(e, &dom, &cache, n))
 }
 
 /// `new Event(type, init)` — objet ordinaire dispatchable
