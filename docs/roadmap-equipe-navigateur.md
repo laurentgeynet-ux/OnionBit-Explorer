@@ -1994,11 +1994,16 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   à l'**install** (conservateur :
   retarde plutôt que survole),
   purgé à `navigated`/`tab_closed`.
+  Clip aux bornes frame (sonde
+  live : lobste.rs émet `y:-375`
+  — un rect hors-fenêtre ferait
+  400 REST et coulerait le
+  partiel ; tout-dehors → skip).
   Tests : traduction locale
   scroll → zéro au pull livré,
   pull partiel rects, `rects: []`
-  → plein, coalescence étape 89
-  intacte.
+  → plein, hors-frame → clip/skip,
+  coalescence étape 89 intacte.
 
 - [x] **Étape 110. `SharedFonts`
   délègue `font_face` +

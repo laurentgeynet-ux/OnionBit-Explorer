@@ -32,9 +32,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `opFrameRegion` borne x/y ≥ 0 et tailles à la
   frame — exports absents → `null` → plein.
   `paintedScrollY` posé à l'install, purgé à
-  `navigated`/`tab_closed`. Tests : traduction
-  locale → zéro au pull livré, pull partiel,
-  `rects: []` → plein, coalescence 89 intacte.
+  `navigated`/`tab_closed`. **Clip aux bornes**
+  ajouté après sonde live : le moteur rapporte
+  les dégâts ancienne+nouvelle position —
+  lobste.rs émet `y:-375` ; non clippé → 400
+  REST → repli plein généralisé ; tout-dehors
+  → invalidation sautée (frame encore exacte).
+  Tests : traduction locale → zéro au pull
+  livré, pull partiel, `rects: []` → plein,
+  hors-frame → clip/skip, coalescence 89
+  intacte.
 
 - **Étape 110 — `SharedFonts` délègue `font_face`
   + `fallback_for`** (`explorer-core`, demande

@@ -497,8 +497,9 @@ class BrowserController extends Notifier<BrowserState> {
         state = state.copyWith(scrollY: {...state.scrollY, id: y});
       }
       if (inv.invalidated || (inv.rects?.isNotEmpty ?? false)) {
-        _planInvalidation(id, inv.rects, y);
-        unawaited(_pullFrame(id));
+        if (_planInvalidation(id, inv.rects, y)) {
+          unawaited(_pullFrame(id));
+        }
       }
     } on Object {
       // Moteur in-process indisponible → prochain tick.
@@ -605,12 +606,17 @@ class BrowserController extends Notifier<BrowserState> {
         }
         // Ét.109 — `rects` dirty (px physiques) consommées :
         // plan partiel quand la frame retenue reste à la même
-        // position, plein sinon.
-        _planInvalidation(tabId, _parseRects(ev.data['rects']), y);
+        // position, plein sinon, skip si tout dégât hors-frame.
+        if (_planInvalidation(
+          tabId,
+          _parseRects(ev.data['rects']),
+          y,
+        )) {
+          unawaited(_pullFrame(tabId));
+        }
         if (tabId == state.activeId) {
           state = state.copyWith(frameTick: state.frameTick + 1);
         }
-        unawaited(_pullFrame(tabId));
       case 'media_offered':
         final offer = MediaOffer.fromJson(ev.data);
         _putMedia(tabId, offer);
@@ -907,7 +913,13 @@ class BrowserController extends Notifier<BrowserState> {
   /// vide = repeindre entièrement), ou si le volume dépasse
   /// les bornes config. Sinon les régions s'accumulent —
   /// le pull n'en cherchera que les morceaux.
-  void _planInvalidation(String tabId, List<ui.Rect>? rects, double? scrollY) {
+  /// Retourne `false` quand aucun pull n'est requis (toutes
+  /// les `rects` clippées hors-fenêtre — la frame peinte
+  /// reste exacte). Les appelants sautent alors `_pullFrame`
+  /// : un pull inconditionnel ferait un fetch plein pour
+  /// rien (terrain : lobste.rs émet `y:-375` — ancienne+
+  /// nouvelle position du texte scrollé).
+  bool _planInvalidation(String tabId, List<ui.Rect>? rects, double? scrollY) {
     final painted = _paintedScrollY[tabId];
     final scrolled =
         scrollY != null &&
@@ -919,20 +931,43 @@ class BrowserController extends Notifier<BrowserState> {
         rects.isEmpty) {
       _pendingFull.add(tabId);
       _pendingRects.remove(tabId);
-      return;
+      return true;
     }
-    final list = (_pendingRects[tabId] ??= [])..addAll(rects);
+    // Intersection aux bornes de la frame — un rect non
+    // clippé ferait 400 au REST et coulerait tout le pull
+    // partiel ; tous dehors = rien de visible à repeindre.
+    final img = _frameImages[tabId];
+    if (img == null) {
+      _pendingFull.add(tabId);
+      _pendingRects.remove(tabId);
+      return true;
+    }
+    final bounds = ui.Rect.fromLTWH(
+      0,
+      0,
+      img.width.toDouble(),
+      img.height.toDouble(),
+    );
+    final list = _pendingRects[tabId] ??= [];
+    for (final r in rects) {
+      final c = r.intersect(bounds);
+      if (!c.isEmpty) list.add(c);
+    }
+    if (list.isEmpty) {
+      _pendingRects.remove(tabId);
+      return false;
+    }
     var area = 0.0;
     for (final r in list) {
       area += r.width * r.height;
     }
-    final img = _frameImages[tabId];
-    final frameArea = (img?.width ?? 0) * (img?.height ?? 0);
+    final frameArea = img.width * img.height;
     if (list.length > _cfg.frameRegionMaxRects ||
         area > frameArea * _cfg.frameRegionMaxArea) {
       _pendingFull.add(tabId);
       _pendingRects.remove(tabId);
     }
+    return true;
   }
 
   void _patch(String tabId, BrowserTab Function(BrowserTab) f) {

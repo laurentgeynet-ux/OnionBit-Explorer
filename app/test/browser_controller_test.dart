@@ -1173,6 +1173,47 @@ void main() {
     expect(repo.frameFetches, before);
   });
 
+  test('frame_invalidated rects hors-frame → clippées/skippées (étape 109)',
+      () async {
+    final repo = FakeRepo()..realPng = true;
+    final events = FakeEvents();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+    final ctrl = c.read(browserProvider.notifier);
+
+    await waitFor(
+      () => ctrl.frameImage('1') != null && repo.frameFetches >= 2,
+    );
+    final before = repo.frameFetches;
+
+    // Terrain : le moteur rapporte les dégâts ancienne+
+    // nouvelle position — un scroll sort du texte par le
+    // haut → rect à `y` négatif (lobste.rs : `y:-375`).
+    // Sans clip : 400 REST → tout le partiel en plein.
+    final prev = ctrl.frameImage('1');
+    events.ctrl.add(
+      invalidation(0, rects: [
+        {'x': 4, 'y': -3, 'w': 2, 'h': 5}, // partielle → 4,0,2x2
+        {'x': 20, 'y': 20, 'w': 4, 'h': 4}, // dehors → sautée
+      ]),
+    );
+    await waitFor(() => ctrl.frameImage('1') != prev);
+    expect(repo.regionFetches, ['4,0,2x2']);
+    expect(repo.frameFetches, before);
+
+    // Toutes les rects hors-frame → rien de visible à
+    // repeindre : l'invalidation se saute, aucun pull.
+    events.ctrl.add(
+      invalidation(0, rects: [
+        {'x': 0, 'y': -50, 'w': 8, 'h': 20},
+      ]),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    expect(repo.regionFetches, ['4,0,2x2']);
+    expect(repo.frameFetches, before);
+  });
+
   test('frame_invalidated rects vides → pull plein (contrat 55)', () async {
     final repo = FakeRepo()..realPng = true;
     final events = FakeEvents();
