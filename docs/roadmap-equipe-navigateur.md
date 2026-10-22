@@ -2122,6 +2122,62 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     place avec bootstrap NoBaseline,
     borne d'ops → repli) ; verts.
 
+- [x] **Étape 112. Mort silencieuse
+  sur articles géants — deux bugs de
+  classe mesurés, fixés, prouvés**
+  (constat vol élargi — `jprobe`/
+  `shot` sur wikipedia/{France,
+  Brasil} exit 1, zéro stderr après
+  ~300-900 s CPU). Instrumentation
+  `info!` aux frontières (nav,
+  apply, phases pipeline, evals) —
+  la mort localisée au run suivant :
+  **`fetch : timeout request après
+  0 ms`**, pas un crash.
+  - *Cause racine* (`explorer-net`) :
+    `BodyTask.deadline` absolue
+    (`now + request_timeout`) —
+    pendant qu'une peinture
+    progressive synchrone (jusqu'à
+    ~40 s/passe) monopolise le
+    runtime `current_thread`,
+    l'attente consommateur sur
+    `tx.send` consommait la borne →
+    timeout à budget nul. **Fix** :
+    l'attente `send` est recréditée
+    dans `deadline` (`IoCtx::credit`,
+    `send_piece`) — l'attente
+    consommateur n'est pas un stall
+    serveur ; la borne anti-trickle
+    est préservée (test tarpit
+    intact).
+  - *Amplificateur* (`explorer-core`) :
+    peinture progressive = pipeline
+    complet par chunk → coût
+    quadratique sur DOM croissant
+    (31+ passes, ~600 s). **Fix** :
+    plancher adaptatif — une passe
+    coûtant T exige ≥ T
+    d'accumulation avant la suivante
+    (`paint_floor` = max(intervalle,
+    coût), duty ≤ ~50 %) — inchangé
+    sur petites pages, ~2 passes sur
+    Brasil.
+  - *Validation terrain* : `shot`
+    Brasil **complet** — nav commit
+    à 11,7 s, frame 1,26 Mo écrite
+    (avant : mort à ~10 min, zéro
+    sortie). La lourdeur restante
+    (apply post-script ~250 s :
+    cascade + layout géant) est le
+    coût unitaire PIPE documenté,
+    pas une régression.
+  - Tests : régression
+    `consumer_wait_is_credited_
+    against_body_deadline` — reproduit
+    `Timeout{phase:"request",ms:0}`
+    exact sans le fix, vert avec.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

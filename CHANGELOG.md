@@ -7,6 +7,46 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Étape 112 — mort silencieuse sur
+  articles géants** (`explorer-net`,
+  `explorer-core`) : `jprobe`/`shot`
+  mouraient après ~300-900 s CPU avec
+  `fetch : timeout request après 0 ms`
+  sur les articles lourds (wikipedia
+  ~2 Mo+). Deux bugs de classe :
+  - `BodyTask.deadline` absolue —
+    pendant qu'une peinture progressive
+    synchrone monopolise le runtime
+    `current_thread`, l'attente
+    consommateur sur `tx.send`
+    consommait la borne murale du corps
+    streamé → timeout à budget nul.
+    L'attente `send` est désormais
+    **recréditée** dans `deadline`
+    (l'attente consommateur n'est pas
+    un stall serveur ; la borne
+    anti-trickle serveur préservée).
+  - Peinture progressive = pipeline
+    complet par chunk → coût
+    quadratique sur DOM croissant.
+    Plancher adaptatif : une passe
+    coûtant T exige ≥ T d'accumulation
+    avant la suivante (duty ≤ ~50 %) —
+    cadence inchangée sur petites
+    pages.
+  - Instrumentation `info!` aux
+    frontières (nav, apply, phases
+    pipeline, eval script) conservée —
+    c'est l'observabilité qui a
+    localisé la mort. Validation :
+    `shot` Brasil complet (nav 11,7 s,
+    frame 1,26 Mo) ; régression
+    `consumer_wait_is_credited_
+    against_body_deadline` reproduit
+    `Timeout{ms:0}` exact sans fix.
+
 ### Added
 
 - **`fit:width` transitoire au resize**

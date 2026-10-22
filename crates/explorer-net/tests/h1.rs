@@ -389,6 +389,48 @@ async fn tarpit_stream_body_hit_request_timeout() {
 }
 
 #[tokio::test]
+async fn consumer_wait_is_credited_against_body_deadline() {
+    // Régression — mort silencieuse articles géants : un
+    // consommateur en calcul synchrone long (peinture
+    // progressive sur runtime `current_thread`) remplit le
+    // canal et fait attendre `BodyTask::send` ; cette attente
+    // est du temps *consommateur*, pas un stall réseau — elle
+    // doit être recréditée dans la borne totale du corps.
+    // Scénario : serveur prompt sur tout sauf le dernier
+    // morceau (600 ms, sous `io_timeout`), consommateur qui
+    // « peint » 450 ms (> request_timeout 300 ms) avant de
+    // drainer — sans le crédit, la deadline murale expire
+    // pendant l'attente et le stream livre `Err(Timeout)`.
+    let last = b"FIN".to_vec();
+    let body_len = 32 * 1024 + last.len();
+    let head_and_start = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {body_len}\r\n\r\n{}",
+        "x".repeat(32 * 1024)
+    )
+    .into_bytes();
+    let srv = serve_slow(vec![head_and_start, last], Duration::from_millis(600)).await;
+    let cfg = HttpConfig {
+        io_timeout: Duration::from_secs(2),
+        request_timeout: Duration::from_millis(300),
+        ..HttpConfig::default()
+    };
+    let c = H1Client::new(Arc::new(TcpConnector), cfg);
+    let mut resp = c
+        .fetch_stream(&Request::get(url(srv.port, "/")))
+        .await
+        .unwrap();
+    // Le consommateur « peint » — le canal se remplit, la
+    // tâche attend sur `send` au-delà de la deadline.
+    tokio::time::sleep(Duration::from_millis(450)).await;
+    let mut got = 0usize;
+    while let Some(item) = resp.body.recv().await {
+        got += item.unwrap().len();
+    }
+    assert_eq!(got, body_len, "corps complet malgré l'attente");
+    let _ = srv;
+}
+
+#[tokio::test]
 async fn unsupported_scheme() {
     let req = Request::get(Url::parse("data:text/plain,x").unwrap());
     let err = client().fetch(&req).await.unwrap_err();

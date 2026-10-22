@@ -271,10 +271,18 @@ impl Session {
         src: &str,
         url: Option<&str>,
     ) {
+        let t_eval = std::time::Instant::now();
+        tracing::info!(tab, bytes = src.len(), "script: eval…");
         let r = match url {
             Some(u) => eng.eval_named(src, u),
             None => eng.eval(src),
         };
+        tracing::info!(
+            tab,
+            ms = u64::try_from(t_eval.elapsed().as_millis()).unwrap_or(u64::MAX),
+            ok = r.is_ok(),
+            "script: eval fin"
+        );
         if let Err(e) = r {
             tracing::debug!(tab, error = %e, "script en échec");
             let origin = url.map(|u| format!("{u} — ")).unwrap_or_default();

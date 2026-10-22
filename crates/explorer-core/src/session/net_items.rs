@@ -283,6 +283,18 @@ impl NavJob {
         let mut html = String::new();
         let mut since_paint = 0usize;
         let mut last_paint = Instant::now();
+        // Plancher adaptatif : chaque passe rejoue le pipeline
+        // **complet** sur le DOM courant — sur un document
+        // géant le coût grandit avec l'arbre (mesuré : jusqu'à
+        // ~40 s/passe → burn quadratique de plusieurs minutes
+        // qui affame le fetch en vol sur le runtime
+        // `current_thread`). Une passe coûtant T exige désormais
+        // ≥ T d'accumulation avant la suivante : sur petite
+        // page les deux déclencheurs d'origine (chunk +
+        // intervalle) restent libres (plancher = intervalle,
+        // coût < intervalle), sur gros document le duty
+        // cycle est borné (~50 %) — fin du burn O(n²).
+        let mut paint_floor = self.paint_interval;
         while let Some(chunk) = resp.body.recv().await {
             let bytes = chunk.map_err(|e| CoreError::Fetch(e.to_string()))?;
             let text = dec.feed(&bytes);
@@ -296,8 +308,11 @@ impl NavJob {
             if !text.is_empty()
                 && (since_paint >= self.paint_chunk_bytes
                     || last_paint.elapsed() >= self.paint_interval)
+                && last_paint.elapsed() >= paint_floor
             {
+                let t = Instant::now();
                 paint(tb.dom()).await;
+                paint_floor = self.paint_interval.max(t.elapsed());
                 since_paint = 0;
                 last_paint = Instant::now();
             }

@@ -797,6 +797,8 @@ struct IoCtx {
     /// Borne totale du corps streamé (`request_timeout` ouvert
     /// au lancement de la tâche) — un serveur qui goutte sous
     /// `io_timeout` par lecture est quand même coupé au budget.
+    /// L'attente consommateur sur `tx.send` y est recréditée —
+    /// voir [`BodyTask::send_piece`].
     deadline: std::time::Instant,
 }
 
@@ -805,7 +807,7 @@ impl IoCtx {
     /// et du reste jusqu'à `deadline` (total) + aplatissement
     /// `io::Result` — même facteur que `H1Client::io`.
     async fn io<T>(
-        &self,
+        &mut self,
         fut: impl std::future::Future<Output = std::io::Result<T>>,
     ) -> NetResult<T> {
         let left = self
@@ -824,6 +826,17 @@ impl IoCtx {
                 target: self.target.clone(),
             })?
             .map_err(NetError::Io)
+    }
+
+    /// Recrédite `waited` dans la borne totale : le temps
+    /// passé à attendre le consommateur sur `tx.send` (canal
+    /// plein = peintre occupé) est du temps *consommateur*,
+    /// pas un stall réseau — sans ce crédit, un consommateur
+    /// en calcul synchrone long (peinture progressive d'un
+    /// document géant) épuise la deadline murale et tue la
+    /// requête, alors que le serveur livre normalement.
+    fn credit(&mut self, waited: std::time::Duration) {
+        self.deadline += waited;
     }
 }
 
@@ -868,6 +881,16 @@ impl BodyTask {
         }
     }
 
+    /// `tx.send(Ok(piece))` instrumenté : l'attente sur canal
+    /// plein est recréditée dans la borne totale (`credit`) —
+    /// `false` = receveur parti.
+    async fn send_piece(&mut self, piece: Vec<u8>) -> bool {
+        let t = std::time::Instant::now();
+        let ok = self.tx.send(Ok(piece)).await.is_ok();
+        self.ctx.credit(t.elapsed());
+        ok
+    }
+
     /// Le corps déframé, morceau par morceau — même découpage
     /// que `read_body` (`Content-Length` / `chunked` / EOF),
     /// chaque segment part immédiatement sur le canal.
@@ -910,7 +933,7 @@ impl BodyTask {
                 let take = self.conn.buf.len().min(len - sent);
                 let piece: Vec<u8> = self.conn.buf.drain(..take).collect();
                 sent += take;
-                if self.tx.send(Ok(piece)).await.is_err() {
+                if !self.send_piece(piece).await {
                     return Ok(()); // receveur parti — connexion consumée.
                 }
             }
@@ -921,7 +944,7 @@ impl BodyTask {
         let mut total = self.conn.buf.len();
         if !self.conn.buf.is_empty() {
             let piece = std::mem::take(&mut self.conn.buf);
-            if self.tx.send(Ok(piece)).await.is_err() {
+            if !self.send_piece(piece).await {
                 return Ok(());
             }
         }
@@ -935,7 +958,7 @@ impl BodyTask {
             if total > self.ctx.max_body {
                 return Err(NetError::BodyTooLarge(total));
             }
-            if self.tx.send(Ok(chunk[..n].to_vec())).await.is_err() {
+            if !self.send_piece(chunk[..n].to_vec()).await {
                 return Ok(());
             }
         }
@@ -988,7 +1011,7 @@ impl BodyTask {
                 let piece: Vec<u8> = self.conn.buf.drain(..data).collect();
                 self.conn.buf.drain(..take - data);
                 read += take;
-                if !piece.is_empty() && self.tx.send(Ok(piece)).await.is_err() {
+                if !piece.is_empty() && !self.send_piece(piece).await {
                     return Ok(());
                 }
             }

@@ -429,6 +429,8 @@ impl Session {
         }
         let mut job = self.nav_begin(tab, req, push)?;
         let epoch = job.epoch;
+        let t_nav = std::time::Instant::now();
+        tracing::info!(tab, "nav: fetch+parse…");
         let (done, tail) = match job
             .run(|dom: &Dom| -> PaintFut<'_> {
                 self.nav_paint(tab, epoch, dom);
@@ -466,6 +468,11 @@ impl Session {
             r
         };
         let push = tail.push;
+        tracing::info!(
+            tab,
+            ms = u64::try_from(t_nav.elapsed().as_millis()).unwrap_or(u64::MAX),
+            "nav: fetch+parse ok → peinture"
+        );
         let mut sub = match self.nav_apply(tab, tail, done) {
             Ok(Some(s)) => s,
             Ok(None) => return Ok(None),
@@ -474,7 +481,17 @@ impl Session {
                 return Err(e);
             }
         };
+        tracing::info!(
+            tab,
+            ms = u64::try_from(t_nav.elapsed().as_millis()).unwrap_or(u64::MAX),
+            "nav: peinture ok → sous-ressources"
+        );
         sub.run().await;
+        tracing::info!(
+            tab,
+            ms = u64::try_from(t_nav.elapsed().as_millis()).unwrap_or(u64::MAX),
+            "nav: sous-ressources ok → commit"
+        );
         match self.sub_commit(tab, sub).await {
             Ok(t) => Ok(t),
             Err(e) => {

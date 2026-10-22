@@ -1024,7 +1024,12 @@ pub(crate) fn relayout_dom_payload(
     dom: &Dom,
     canvas_ops: &CanvasOpsTable,
 ) -> Result<(), CoreError> {
+    let t0 = Instant::now();
     let styles = styles_payload(p, dom, ctx.viewport, ctx.color_scheme);
+    tracing::info!(
+        ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "apply: cascade"
+    );
     let Some(root_el) = dom.document_element() else {
         return Err(CoreError::EmptyDocument);
     };
@@ -1038,9 +1043,17 @@ pub(crate) fn relayout_dom_payload(
     let Some(mut bx) = build_box_tree_sized(dom, root_el, &styles, &sizes) else {
         return Err(CoreError::NothingToPaint);
     };
+    tracing::info!(
+        ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "apply: boxtree"
+    );
     let vw = ctx.viewport.0;
     let block = layout_ctx(ctx, p);
     layout_tree(&mut bx, vw, &block);
+    tracing::info!(
+        ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "apply: layout"
+    );
     restitute_font_cache(p, &block);
     p.doc_h = bx.rect.height;
     p.tree = Some(bx);
@@ -1049,7 +1062,12 @@ pub(crate) fn relayout_dom_payload(
     // `<canvas>` 2D (JS-C28) : op-lists cumulées du miroir,
     // re-résolues par chemin d'élément dans `dom`.
     p.images.canvases = canvas_table_from_ops(canvas_ops, dom);
-    repaint_payload(p, ctx, Some(dom))
+    repaint_payload(p, ctx, Some(dom))?;
+    tracing::info!(
+        ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "apply: repaint"
+    );
+    Ok(())
 }
 
 /// `repaint` sur payload — display list + raster + diff
@@ -1618,6 +1636,8 @@ impl Session {
                 return;
             }
         }
+        let t_apply = Instant::now();
+        tracing::info!(tab, journal = job.journal.is_some(), "apply: début");
         self.freshen_apply(tab, job);
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
@@ -1640,6 +1660,11 @@ impl Session {
                 }
                 self.commit_apply(tab, &out);
                 self.drain_deferred_inputs(tab);
+                tracing::info!(
+                    tab,
+                    ms = u64::try_from(t_apply.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    "apply: fin"
+                );
             }
             Err(why) => {
                 let job = std::mem::take(job);
