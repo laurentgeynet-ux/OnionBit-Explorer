@@ -61,16 +61,20 @@ class ApiClient {
   Future<dynamic> deleteJson(String path, {Map<String, dynamic>? body}) =>
       _send('DELETE', path, body: body);
 
-  /// `GET` → octets bruts (frame PNG — `GET /api/tabs/{id}/frame`).
+  /// `GET` → octets bruts (frame PNG — `GET /api/tabs/{id}/frame`,
+  /// régions via `?x=&y=&w=&h=` étape 55).
   ///
   /// `BytesBuilder` et non `expand().toList()` : une `List<int>`
   /// growable facture ~8 octets par élément — une frame de 25 Mo
   /// devenait ~250 Mo de heap (terrain 22/10). Ici : les chunks
   /// ne sont pas recopiés, un seul `Uint8List` sort.
-  Future<Uint8List> getBytes(String path) async {
+  Future<Uint8List> getBytes(
+    String path, {
+    Map<String, String>? query,
+  }) async {
     try {
       final req = await _http
-          .getUrl(_uri(path))
+          .getUrl(_uri(path, query))
           .timeout(config.requestTimeout);
       _sign(req);
       final res = await req.close().timeout(config.requestTimeout);

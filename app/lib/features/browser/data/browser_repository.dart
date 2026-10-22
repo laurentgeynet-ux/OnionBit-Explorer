@@ -92,6 +92,30 @@ class BrowserRepository {
     }
   }
 
+  /// PNG d'une région de frame (`GET …/frame?x&y&w&h`, étape
+  /// 55 — pixels **physiques**, mêmes unités que les `rects`
+  /// de `frame_invalidated`). `null` si région vide/hors
+  /// frame (204) ou daemon antérieur sans la route (il sert
+  /// alors la frame entière — l'appelant détecte à la taille
+  /// décodée et retombe en pull plein).
+  Future<Uint8List?> fetchFrameRegion(
+    String tabId,
+    int x,
+    int y,
+    int w,
+    int h,
+  ) async {
+    try {
+      final bytes = await _api.getBytes(
+        '/api/tabs/$tabId/frame',
+        query: {'x': '$x', 'y': '$y', 'w': '$w', 'h': '$h'},
+      );
+      return bytes.isEmpty ? null : bytes;
+    } on ApiException {
+      return null;
+    }
+  }
+
   /// Événement d'entrée (`POST …/input`) — `click`,
   /// `mousemove`, `scroll`, `key` (étape 26). Retourne le
   /// résultat (`{"result":"hover","url":…,"editable":…}`…).

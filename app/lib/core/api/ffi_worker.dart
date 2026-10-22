@@ -119,6 +119,38 @@ typedef _TabUrlD = int Function(
 );
 typedef _TabScrollN = ffi.Double Function(_NativeHandle, ffi.Uint64);
 typedef _TabScrollD = double Function(_NativeHandle, int);
+typedef _FrameCopyRegionN = ffi.IntPtr Function(
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Uint32,
+  ffi.Uint32,
+  ffi.Uint32,
+  ffi.Uint32,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
+typedef _FrameCopyRegionD = int Function(
+  _NativeHandle,
+  int,
+  int,
+  int,
+  int,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
+typedef _DirtyRectsN = ffi.IntPtr Function(
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Pointer<ffi.Float>,
+  ffi.UintPtr,
+);
+typedef _DirtyRectsD = int Function(
+  _NativeHandle,
+  int,
+  ffi.Pointer<ffi.Float>,
+  int,
+);
 
 // ---------------------------------------------------------------------------
 // Ops RPC — les entiers sont le contrat wire, ne pas réordonner.
@@ -136,6 +168,7 @@ const opTick = 8;
 const opFrame = 9;
 const opSetColorScheme = 10;
 const opShutdown = 11;
+const opFrameRegion = 12;
 
 /// Point d'entrée de l'isolate — `args` = `{'reply': SendPort,
 /// 'path': String}`. Envoie `{'port': SendPort}` puis
@@ -190,6 +223,8 @@ class _WorkerImpl {
     this._tick,
     this._frameSize,
     this._frameCopy,
+    this._frameCopyRegion,
+    this._dirtyRects,
     this._tabUrl,
     this._tabTitle,
     this._tabScroll,
@@ -211,6 +246,8 @@ class _WorkerImpl {
   final _TabCodeD _tick;
   final _FrameSizeD _frameSize;
   final _FrameCopyD _frameCopy;
+  final _FrameCopyRegionD? _frameCopyRegion;
+  final _DirtyRectsD? _dirtyRects;
   final _TabUrlD _tabUrl;
   final _TabUrlD? _tabTitle;
   final _TabScrollD? _tabScroll;
@@ -248,6 +285,23 @@ class _WorkerImpl {
       } on Object {
         /* export absent */
       }
+      // Exports pull partiel (étape 55, câblés UI en 109) —
+      // absents d'une dll antérieure → pull plein en repli.
+      _FrameCopyRegionD? frameCopyRegion;
+      try {
+        frameCopyRegion = lib.lookupFunction<_FrameCopyRegionN,
+            _FrameCopyRegionD>('explorer_frame_copy_region');
+      } on Object {
+        /* export absent */
+      }
+      _DirtyRectsD? dirtyRects;
+      try {
+        dirtyRects = lib.lookupFunction<_DirtyRectsN, _DirtyRectsD>(
+          'explorer_dirty_rects',
+        );
+      } on Object {
+        /* export absent */
+      }
       final handle = create();
       if (handle == ffi.nullptr) {
         throw _LastError.read(lastError);
@@ -267,6 +321,8 @@ class _WorkerImpl {
         lib.lookupFunction<_TabCodeN, _TabCodeD>('explorer_tick'),
         lib.lookupFunction<_FrameSizeN, _FrameSizeD>('explorer_frame_size'),
         lib.lookupFunction<_FrameCopyN, _FrameCopyD>('explorer_frame_copy'),
+        frameCopyRegion,
+        dirtyRects,
         lib.lookupFunction<_TabUrlN, _TabUrlD>('explorer_tab_url'),
         tabTitle,
         tabScroll,
@@ -319,9 +375,20 @@ class _WorkerImpl {
       case opInput:
         return _inputOp(m);
       case opTick:
-        return {'invalidated': _tick(_handle, _tab(m)) == 1};
+        // Ét.109 — le tick drain aussi `scroll_y` + dirty
+        // rects dans le même RPC : l'UI consomme les régions
+        // (pull partiel) et la position pour la traduction
+        // locale. Exports absents → `null` → pull plein.
+        final tab = _tab(m);
+        return {
+          'invalidated': _tick(_handle, tab) == 1,
+          'scroll_y': _tabScroll?.call(_handle, tab),
+          'rects': _drainDirty(tab),
+        };
       case opFrame:
         return _frameOp(m);
+      case opFrameRegion:
+        return _frameRegionOp(m);
       case opSetColorScheme:
         // Export additif étape 97 — dll antérieure : no-op.
         _setColorScheme?.call(_handle, m['dark'] == true ? 1 : 0);
@@ -464,6 +531,75 @@ class _WorkerImpl {
       calloc
         ..free(w)
         ..free(h);
+    }
+  }
+
+  /// `frame_copy_region` (étape 55, câblé en 109) — la taille
+  /// effective est bornée côté appelant (`x+w ≤ fw`) : le
+  /// retour natif ne porte que le nombre d'octets écrits.
+  /// `{'none':true}` si région hors frame ou export absent.
+  Map<String, Object?> _frameRegionOp(Map m) {
+    final f = _frameCopyRegion;
+    if (f == null) return const {'none': true};
+    final tab = _tab(m);
+    final w = calloc<ffi.Uint32>(1);
+    final h = calloc<ffi.Uint32>(1);
+    try {
+      if (_frameSize(_handle, tab, w, h) != 0) {
+        return const {'none': true};
+      }
+      final x = ((m['x'] as num?)?.toInt() ?? 0).clamp(0, w.value).toInt();
+      final y = ((m['y'] as num?)?.toInt() ?? 0).clamp(0, h.value).toInt();
+      final rw = ((m['w'] as num?)?.toInt() ?? 0)
+          .clamp(0, w.value - x)
+          .toInt();
+      final rh = ((m['h'] as num?)?.toInt() ?? 0)
+          .clamp(0, h.value - y)
+          .toInt();
+      final len = rw * rh * 4;
+      if (len <= 0) return const {'none': true};
+      final px = calloc<ffi.Uint8>(len);
+      try {
+        final n = f(_handle, tab, x, y, rw, rh, px, len);
+        if (n <= 0) return const {'none': true};
+        final list = Uint8List(n)..setAll(0, px.asTypedList(n));
+        return {
+          'w': rw,
+          'h': rh,
+          'px': TransferableTypedData.fromList([list]),
+        };
+      } finally {
+        calloc.free(px);
+      }
+    } finally {
+      calloc
+        ..free(w)
+        ..free(h);
+    }
+  }
+
+  /// `dirty_rects` (étape 55) — vide l'accumulateur natif et
+  /// rend les quadruplets `(x,y,w,h)` px physiques. Le buffer
+  /// est large (un scroll y peint la fenêtre entière — le
+  /// drain suffit rarement) ; natif en échec → `null`, l'UI
+  /// bascule en pull plein (l'export draine quand même, rien
+  /// n'est perdu : le plein couvre toujours).
+  static const _maxDirty = 512;
+
+  List<List<double>>? _drainDirty(int tab) {
+    final f = _dirtyRects;
+    if (f == null) return null;
+    final buf = calloc<ffi.Float>(_maxDirty * 4);
+    try {
+      final n = f(_handle, tab, buf, _maxDirty * 4);
+      if (n <= 0) return n == 0 ? const [] : null;
+      final flat = buf.asTypedList(n * 4);
+      return [
+        for (var i = 0; i < n; i++)
+          [flat[i * 4], flat[i * 4 + 1], flat[i * 4 + 2], flat[i * 4 + 3]],
+      ];
+    } finally {
+      calloc.free(buf);
     }
   }
 

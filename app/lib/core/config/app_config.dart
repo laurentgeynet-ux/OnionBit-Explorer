@@ -13,6 +13,9 @@ class AppConfig {
     this.sseReconnectDelay = const Duration(seconds: 2),
     this.daemonRetryDelay = const Duration(seconds: 3),
     this.mediaReportInterval = const Duration(milliseconds: 250),
+    this.frameRegionMaxRects = 16,
+    this.frameRegionMaxArea = 0.5,
+    this.scrollSyncEpsilon = 0.5,
     this.mediaCodecs = const [
       'video/mp4',
       'video/webm',
@@ -68,6 +71,21 @@ class AppConfig {
   /// Borne basse entre deux `POST …/media/{id}/state` par
   /// surface (contrat : battement ≤ 4 Hz, étape 71d).
   final Duration mediaReportInterval;
+
+  /// Pull partiel (étape 109) : nombre maximal de `rects`
+  /// cumulées avant de basculer en pull plein — au-delà,
+  /// N requêtes + N composites coûtent plus qu'une frame.
+  final int frameRegionMaxRects;
+
+  /// Pull partiel (étape 109) : fraction de l'aire de frame
+  /// couverte par les `rects` au-delà de laquelle le pull
+  /// plein gagne (post-scroll, dirty = fenêtre entière).
+  final double frameRegionMaxArea;
+
+  /// Tolérance px CSS sur `scroll_y` moteur vs frame peinte
+  /// (étape 109) : en dessous, l'invalidation est traitée
+  /// comme non-scrollée (les `rects` restent composables).
+  final double scrollSyncEpsilon;
 
   /// Types média déclarés dans `POST …/media/{id}/claim` —
   /// containers/codecs que le backend MDK (`fvp`) sait jouer ;

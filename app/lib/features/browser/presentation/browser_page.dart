@@ -1145,15 +1145,32 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                           children: [
                             Align(
                               alignment: Alignment.topLeft,
-                              // `ui.Image` décodée côté contrôleur
-                              // (REST : codec PNG ; FFI : pixels
-                              // bruts ADR-0018) — `RawImage` direct.
-                              child: RawImage(
-                                image: raw,
-                                fit: BoxFit.none,
-                                // 1 px image = 1 px physique :
-                                // taille logique = px/dpr.
-                                scale: dpr,
+                              // Traduction locale (étape 109) :
+                              // scroll demandé pas encore peint →
+                              // la frame retenue glisse de
+                              // `-shift` px logiques — retour
+                              // visuel immédiat, la bande exposée
+                              // attend le pull (fond du conteneur
+                              // en attendant, clipé hardEdge).
+                              child: Transform.translate(
+                                offset: Offset(
+                                  0,
+                                  -widget.ctrl.frameShiftCss(
+                                        widget.state.active?.id ?? '',
+                                      ) *
+                                      zoom,
+                                ),
+                                // `ui.Image` décodée côté
+                                // contrôleur (REST : codec PNG ;
+                                // FFI : pixels bruts ADR-0018) —
+                                // `RawImage` direct.
+                                child: RawImage(
+                                  image: raw,
+                                  fit: BoxFit.none,
+                                  // 1 px image = 1 px physique :
+                                  // taille logique = px/dpr.
+                                  scale: dpr,
+                                ),
                               ),
                             ),
                             // Overlay MediaSurface (71d) : rects

@@ -29,6 +29,23 @@ class FfiException implements Exception {
   String toString() => 'FfiException: $message';
 }
 
+/// Rapport d'invalidation FFI (étape 109) — l'équivalent du
+/// SSE `frame_invalidated` : `rects` en px physiques (delta
+/// drainé par `explorer_dirty_rects`), `scrollY` en px CSS.
+/// `rects == null` → dll antérieure sans l'export (pull
+/// plein de repli, comme un `rects` vide contrat REST).
+class FfiInvalidation {
+  const FfiInvalidation({
+    required this.invalidated,
+    this.scrollY,
+    this.rects,
+  });
+
+  final bool invalidated;
+  final double? scrollY;
+  final List<ui.Rect>? rects;
+}
+
 /// Backend moteur **in-process** : charge `explorer_ffi.dll`
 /// dans un **isolate worker dédié** (étape 107 — vol 22/10 :
 /// les appels natifs synchrones gelaient l'UI, `navigate`
@@ -193,6 +210,27 @@ class FfiEngine implements BrowserRepository {
     }
   }
 
+  /// Forme PNG du pull partiel (compat interface REST —
+  /// ré-encode l'`ui.Image` de région). Le chemin rapide est
+  /// [fetchFrameRegionImage], utilisé par le contrôleur.
+  @override
+  Future<Uint8List?> fetchFrameRegion(
+    String tabId,
+    int x,
+    int y,
+    int w,
+    int h,
+  ) async {
+    final img = await fetchFrameRegionImage(tabId, x, y, w, h);
+    if (img == null) return null;
+    try {
+      final data = await img.toByteData(format: ui.ImageByteFormat.png);
+      return data?.buffer.asUint8List();
+    } finally {
+      img.dispose();
+    }
+  }
+
   /// Frame brute → `ui.Image` RGBA8888 — **le** gain de
   /// l'étape 47 : aucun encode/décode PNG, aucune socket.
   /// Les pixels arrivent par `TransferableTypedData` (zéro-
@@ -207,6 +245,34 @@ class FfiEngine implements BrowserRepository {
     final px = (r['px']! as TransferableTypedData).materialize().asUint8List();
     final done = Completer<ui.Image>();
     ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, done.complete);
+    return done.future;
+  }
+
+  /// Région de frame `(x,y,w,h)` en px physiques → `ui.Image`
+  /// (étape 55, câblée UI en 109 — pull partiel piloté par les
+  /// `rects` de l'invalidation). `null` si région hors frame
+  /// ou dll antérieure sans `explorer_frame_copy_region` —
+  /// l'appelant retombe alors en pull plein.
+  Future<ui.Image?> fetchFrameRegionImage(
+    String tabId,
+    int x,
+    int y,
+    int w,
+    int h,
+  ) async {
+    final r = await _worker.call(opFrameRegion, {
+      'tab': _idOf(tabId),
+      'x': x,
+      'y': y,
+      'w': w,
+      'h': h,
+    });
+    if (r == null || r['none'] == true) return null;
+    final rw = (r['w'] as num).toInt();
+    final rh = (r['h'] as num).toInt();
+    final px = (r['px']! as TransferableTypedData).materialize().asUint8List();
+    final done = Completer<ui.Image>();
+    ui.decodeImageFromPixels(px, rw, rh, ui.PixelFormat.rgba8888, done.complete);
     return done.future;
   }
 
@@ -304,14 +370,30 @@ class FfiEngine implements BrowserRepository {
     Map<String, dynamic> report,
   ) => throw UnsupportedError('media : non exposé en FFI (étape 71)');
 
-  /// Avance les animations moteur — `true` si la frame a été
-  /// invalidée (le contrôleur la retire). Remplace le SSE
-  /// `frame_invalidated` absent du canal FFI. Asynchrone
-  /// depuis l'étape 107 (le `explorer_tick` tourne sur le
-  /// worker — la boucle UI ne bloque plus dessus).
-  Future<bool> tick(String tabId) async =>
-      (await _worker.call(opTick, {'tab': _idOf(tabId)}))?['invalidated'] ==
-      true;
+  /// Avance les animations moteur et rapporte l'invalidation
+  /// enrichie (étape 109) : `invalidated`, `scroll_y` (px CSS)
+  /// et `rects` dirty (px physiques, drainées dans le même
+  /// RPC — `null` sur dll antérieure → pull plein). Remplace
+  /// le SSE `frame_invalidated` absent du canal FFI.
+  /// Asynchrone depuis l'étape 107 (le `explorer_tick` tourne
+  /// sur le worker — la boucle UI ne bloque plus dessus).
+  Future<FfiInvalidation> tick(String tabId) async {
+    final r = await _worker.call(opTick, {'tab': _idOf(tabId)});
+    return FfiInvalidation(
+      invalidated: r?['invalidated'] == true,
+      scrollY: (r?['scroll_y'] as num?)?.toDouble(),
+      rects: (r?['rects'] as List?)
+          ?.map(
+            (q) => ui.Rect.fromLTWH(
+              (q[0] as num).toDouble(),
+              (q[1] as num).toDouble(),
+              (q[2] as num).toDouble(),
+              (q[3] as num).toDouble(),
+            ),
+          )
+          .toList(),
+    );
+  }
 
   /// Marqueur de test : `true` quand le backend est chargé —
   /// sert aussi d'identifiant de mode pour le contrôleur.

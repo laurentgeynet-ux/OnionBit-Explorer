@@ -385,9 +385,37 @@ class BrowserController extends Notifier<BrowserState> {
   /// dans l'état pilote les rebuilds d'affichage.
   final Map<String, ui.Image> _frameImages = {};
 
+  /// `scroll_y` (px CSS) **de la frame actuellement affichée**
+  /// par onglet — posé à l'installation de l'image. Sert à la
+  /// traduction locale (étape 109) : entre le scroll et le
+  /// pull suivant, l'écart `scrollY − peint` se rend en
+  /// translatant la frame retenue — retour visuel immédiat,
+  /// converge à la frame livrée.
+  final Map<String, double> _paintedScrollY = {};
+
+  /// Plan de pull par onglet (étape 109) : `rects` dirty
+  /// accumulées (px physiques) → pull partiel + composite ;
+  /// `full` → pull plein (scroll, `rects` vides/absentes,
+  /// volume borné dépassé — la région post-scroll ne se
+  /// compose pas sur une frame pré-scroll).
+  final Map<String, List<ui.Rect>> _pendingRects = {};
+  final Set<String> _pendingFull = {};
+
   /// Frame décodée courante d'un onglet (`null` jamais rendue)
   /// — affichée par `RawImage` dans le widget frame.
   ui.Image? frameImage(String tabId) => _frameImages[tabId];
+
+  /// Scroll demandé mais pas encore peint, en px CSS —
+  /// `scrollY moteur − scroll_y de la frame affichée`. Le
+  /// `_FrameView` translate la frame retenue de `-shift` px
+  /// logiques·zoom (étape 109) : la molette répond sans
+  /// attendre l'aller-retour moteur ; le pull livré remet
+  /// l'écart à zéro.
+  double frameShiftCss(String tabId) {
+    final painted = _paintedScrollY[tabId];
+    if (painted == null || _frameImages[tabId] == null) return 0;
+    return (state.scrollY[tabId] ?? painted) - painted;
+  }
 
   /// Écouteurs posés sur chaque lecteur — clés `tab/media`
   /// pour `removeListener` au dispose.
@@ -455,12 +483,23 @@ class BrowserController extends Notifier<BrowserState> {
   /// et retire la frame de l'onglet actif si invalidée.
   /// Asynchrone (étape 107 : le tick tourne sur l'isolate
   /// worker FFI — la boucle 50 ms ne bloque plus l'UI).
+  /// Ét.109 : le tick rapporte `scroll_y` + dirty-rects —
+  /// même plan de pull que le SSE `frame_invalidated`.
   Future<void> _tickFfi() async {
     final engine = _repo;
     final id = state.activeId;
     if (engine is! FfiEngine || id == null) return;
     try {
-      if (await engine.tick(id)) unawaited(_pullFrame(id));
+      final inv = await engine.tick(id);
+      if (!ref.mounted) return;
+      final y = inv.scrollY;
+      if (y != null && state.scrollY[id] != y) {
+        state = state.copyWith(scrollY: {...state.scrollY, id: y});
+      }
+      if (inv.invalidated || (inv.rects?.isNotEmpty ?? false)) {
+        _planInvalidation(id, inv.rects, y);
+        unawaited(_pullFrame(id));
+      }
     } on Object {
       // Moteur in-process indisponible → prochain tick.
     }
@@ -531,6 +570,11 @@ class BrowserController extends Notifier<BrowserState> {
             loading: false,
           ),
         );
+        // Page neuve : la frame retenue n'a plus de `scroll_y`
+        // valide — la traduction locale se désarme jusqu'à la
+        // première peinture (étape 109 : translaterait une
+        // page différente pendant le chargement).
+        _paintedScrollY.remove(tabId);
         // La nouvelle page n'a aucun champ focalisé — le
         // flag global repart à zéro si c'est l'onglet actif.
         if (tabId == state.activeId && state.fieldFocused) {
@@ -559,6 +603,10 @@ class BrowserController extends Notifier<BrowserState> {
         if (y != null && state.scrollY[tabId] != y) {
           state = state.copyWith(scrollY: {...state.scrollY, tabId: y});
         }
+        // Ét.109 — `rects` dirty (px physiques) consommées :
+        // plan partiel quand la frame retenue reste à la même
+        // position, plein sinon.
+        _planInvalidation(tabId, _parseRects(ev.data['rects']), y);
         if (tabId == state.activeId) {
           state = state.copyWith(frameTick: state.frameTick + 1);
         }
@@ -625,6 +673,9 @@ class BrowserController extends Notifier<BrowserState> {
         // référence ; le rasteriseur libère les pixels quand sa
         // frame en cours finit de peindre.
         _frameImages.remove(tabId)?.dispose();
+        _paintedScrollY.remove(tabId);
+        _pendingRects.remove(tabId);
+        _pendingFull.remove(tabId);
     }
   }
 
@@ -830,6 +881,60 @@ class BrowserController extends Notifier<BrowserState> {
     _reportStates.clear();
   }
 
+  /// `rects` du `frame_invalidated` REST → `ui.Rect` (px
+  /// physiques, même unité que `frame?x&y&w&h`).
+  /// `null` = champ absent (daemon antérieur — pull plein,
+  /// comme avant le contrat 55).
+  List<ui.Rect>? _parseRects(Object? raw) {
+    if (raw is! List) return null;
+    return [
+      for (final r in raw)
+        if (r is Map)
+          ui.Rect.fromLTWH(
+            (r['x'] as num?)?.toDouble() ?? 0,
+            (r['y'] as num?)?.toDouble() ?? 0,
+            (r['w'] as num?)?.toDouble() ?? 0,
+            (r['h'] as num?)?.toDouble() ?? 0,
+          ),
+    ];
+  }
+
+  /// Décide du prochain pull (étape 109) : **plein** si la
+  /// frame retenue n'est plus à la même position (scroll —
+  /// les `rects` post-scroll vivent dans les coordonnées
+  /// raster du *nouveau* window, incompatibles avec l'image
+  /// pré-scroll), si `rects` est vide/absent (contrat 55 :
+  /// vide = repeindre entièrement), ou si le volume dépasse
+  /// les bornes config. Sinon les régions s'accumulent —
+  /// le pull n'en cherchera que les morceaux.
+  void _planInvalidation(String tabId, List<ui.Rect>? rects, double? scrollY) {
+    final painted = _paintedScrollY[tabId];
+    final scrolled =
+        scrollY != null &&
+        painted != null &&
+        (scrollY - painted).abs() > _cfg.scrollSyncEpsilon;
+    if (painted == null ||
+        scrolled ||
+        rects == null ||
+        rects.isEmpty) {
+      _pendingFull.add(tabId);
+      _pendingRects.remove(tabId);
+      return;
+    }
+    final list = (_pendingRects[tabId] ??= [])..addAll(rects);
+    var area = 0.0;
+    for (final r in list) {
+      area += r.width * r.height;
+    }
+    final img = _frameImages[tabId];
+    final frameArea = (img?.width ?? 0) * (img?.height ?? 0);
+    if (list.length > _cfg.frameRegionMaxRects ||
+        area > frameArea * _cfg.frameRegionMaxArea) {
+      _pendingFull.add(tabId);
+      _pendingRects.remove(tabId);
+    }
+  }
+
   void _patch(String tabId, BrowserTab Function(BrowserTab) f) {
     state = state.copyWith(
       tabs: [for (final t in state.tabs) t.id == tabId ? f(t) : t],
@@ -942,12 +1047,28 @@ class BrowserController extends Notifier<BrowserState> {
     }
   }
 
+  /// Une itération de pull : vide le plan accumulé puis
+  /// pull **partiel** (régions → composite sur la frame
+  /// retenue) ou **plein** en repli (étape 109). Le plan
+  /// est drainé en tête — les invalidations arrivées pendant
+  /// l'itération s'accumulent pour le tour suivant.
   Future<void> _pullFrameOnce(String tabId) async {
-    // `ui.Image` décodée + `RawImage` — chemin unique REST/FFI
-    // (FFI livre les pixels bruts, ADR-0018). L'image vit hors
-    // `BrowserState` : les états obsolètes épinglés par
-    // l'arbre de widgets ne retiennent plus de raster (fuite
-    // ~300 Mo/frame mesurée 22/10).
+    final rects = _pendingRects.remove(tabId);
+    final full =
+        _pendingFull.remove(tabId) || rects == null || rects.isEmpty;
+    if (!full && _frameImages[tabId] != null) {
+      if (await _pullRegions(tabId, rects)) return;
+      // Région indisponible/décodage → plein honnête.
+    }
+    await _pullFullFrame(tabId);
+  }
+
+  /// Pull plein — `ui.Image` décodée par chemin unique
+  /// REST/FFI (FFI livre les pixels bruts, ADR-0018). L'image
+  /// vit hors `BrowserState` : les états obsolètes épinglés
+  /// par l'arbre de widgets ne retiennent plus de raster
+  /// (fuite ~300 Mo/frame mesurée 22/10).
+  Future<void> _pullFullFrame(String tabId) async {
     try {
       final ui.Image img;
       final engine = _repo;
@@ -969,18 +1090,111 @@ class BrowserController extends Notifier<BrowserState> {
         img.dispose();
         return;
       }
-      _frameImages[tabId]?.dispose();
-      _frameImages[tabId] = img;
-      state = state.copyWith(frameTick: state.frameTick + 1);
+      _installFrame(tabId, img);
     } on Object {
       // Moteur/daemon indisponible ou PNG indécodable → le
       // prochain tick retentera.
     }
   }
 
+  /// Pull partiel (étape 109) : chaque `rect` dirty devient
+  /// un fetch `frame?x&y&w&h` (REST) ou `frame_copy_region`
+  /// (FFI), puis le tout se **compose** sur l'image retenue
+  /// par `PictureRecorder` — transport et décodage ramenés
+  /// à la surface réellement repeinte. `false` → l'appelant
+  /// bascule en pull plein (région hors frame, dll
+  /// antérieure, decode impossible).
+  Future<bool> _pullRegions(String tabId, List<ui.Rect> rects) async {
+    final base = _frameImages[tabId];
+    if (base == null) return false;
+    final engine = _repo;
+    final patches = <(ui.Rect, ui.Image)>[];
+    try {
+      for (final r in rects) {
+        final x = r.left.round();
+        final y = r.top.round();
+        final w = r.width.round();
+        final h = r.height.round();
+        if (w <= 0 || h <= 0) continue;
+        final ui.Image? patch = engine is FfiEngine
+            ? await engine.fetchFrameRegionImage(tabId, x, y, w, h)
+            : await _pullRegionPng(tabId, x, y, w, h);
+        if (patch == null) return false;
+        // Daemon sans la route région (pré-étape 55) : il
+        // répond la frame entière — la taille décodée déborde
+        // la région → composer à (x,y) serait faux → plein.
+        if (patch.width > w || patch.height > h) {
+          patch.dispose();
+          return false;
+        }
+        patches.add((r, patch));
+      }
+      final rec = ui.PictureRecorder();
+      final c = ui.Canvas(rec);
+      c.drawImage(base, ui.Offset.zero, ui.Paint());
+      for (final (r, img) in patches) {
+        c.drawImage(img, ui.Offset(r.left, r.top), ui.Paint());
+      }
+      final img = await rec.endRecording().toImage(base.width, base.height);
+      if (!ref.mounted) {
+        img.dispose();
+        return false;
+      }
+      _installFrame(tabId, img);
+      return true;
+    } on Object {
+      return false;
+    } finally {
+      for (final (_, img) in patches) {
+        img.dispose();
+      }
+    }
+  }
+
+  /// PNG d'une région → `ui.Image` décodée (REST étape 55).
+  Future<ui.Image?> _pullRegionPng(
+    String tabId,
+    int x,
+    int y,
+    int w,
+    int h,
+  ) async {
+    final bytes = await _repo.fetchFrameRegion(tabId, x, y, w, h);
+    if (bytes == null || bytes.isEmpty) return null;
+    final codec = await ui.instantiateImageCodec(bytes);
+    try {
+      return (await codec.getNextFrame()).image;
+    } finally {
+      codec.dispose();
+    }
+  }
+
+  /// Installe l'image composée/livrée : remplace l'ancienne
+  /// (dispose), mémorise son `scroll_y` de peinture — la
+  /// traduction locale retombe à zéro jusqu'au prochain
+  /// scroll (étape 109) — et réveille l'affichage.
+  void _installFrame(String tabId, ui.Image img) {
+    _frameImages[tabId]?.dispose();
+    _frameImages[tabId] = img;
+    _paintedScrollY[tabId] = state.scrollY[tabId] ?? 0.0;
+    state = state.copyWith(frameTick: state.frameTick + 1);
+  }
+
   /// Scroll molette → `POST …/input {scroll,dy}` — le moteur
-  /// borne et repeint, `frame_invalidated` suit.
-  Future<void> scroll(double dy) => _sendInput({'type': 'scroll', 'dy': dy});
+  /// borne et repeint, `frame_invalidated` suit. La réponse
+  /// porte `scroll_y` **autoritaire** (REST JSON + FFI joint
+  /// par le worker) : posé tout de suite, il déclenche la
+  /// traduction locale de la frame retenue (étape 109) avant
+  /// même l'événement — retour visuel sans attente réseau.
+  Future<void> scroll(double dy) async {
+    final res = await _sendInput({'type': 'scroll', 'dy': dy});
+    final y = (res?['scroll_y'] as num?)?.toDouble();
+    if (y == null || !ref.mounted) return;
+    final id = state.activeId;
+    if (id != null && state.scrollY[id] != y) {
+      state = state.copyWith(scrollY: {...state.scrollY, id: y});
+    }
+  }
 
   /// Survol → `mousemove` (coalescé : dernier état suffit) —
   /// le résultat `hover` pilote le curseur + la barre de

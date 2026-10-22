@@ -4,6 +4,7 @@
 
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:explorer_app/core/api/api_client.dart';
 import 'package:explorer_app/core/api/events_client.dart';
@@ -83,17 +84,50 @@ class FakeRepo implements BrowserRepository {
   Completer<void>? frameGate;
   int frameFetches = 0;
 
+  /// `realPng = true` → un vrai PNG 8×8 sert le pull (étape
+  /// 109 : `paintedScrollY` + plan région exigent une frame
+  /// installée). `false` (défaut) = octets invalides — le
+  /// codec jette vite, comme avant : les tests historiques
+  /// mesurent des compteurs, pas des pixels.
+  bool realPng = false;
+  Uint8List? _png;
+
+  Future<Uint8List> _framePng() async =>
+      _png ??= await _encodePng(8, 8, 255, 0, 0);
+
   @override
   Future<Uint8List?> fetchFrame(String tabId) async {
     frameFetches++;
     final gate = frameGate;
     if (gate != null) await gate.future;
-    return Uint8List.fromList([1, 2, 3]);
+    return realPng ? _framePng() : Uint8List.fromList([1, 2, 3]);
+  }
+
+  /// Régions demandées par le pull partiel (étape 109) —
+  /// `'x,y,WxH'` enregistrées pour les assertions.
+  final List<String> regionFetches = [];
+
+  @override
+  Future<Uint8List?> fetchFrameRegion(
+    String tabId,
+    int x,
+    int y,
+    int w,
+    int h,
+  ) async {
+    regionFetches.add('$x,$y,${w}x$h');
+    return realPng
+        ? _encodePng(w.clamp(1, 4096), h.clamp(1, 4096), 0, 255, 0)
+        : Uint8List.fromList([1, 2, 3]);
   }
 
   /// Résultat scripté pour les événements `key` (étape 86 —
   /// « unfocused » doit resynchroniser `fieldFocused`).
   String keyResult = 'ignored';
+
+  /// `scroll_y` renvoyé par `input scroll` (étape 109 — la
+  /// traduction locale part de cette valeur autoritaire).
+  double scrollResult = 0;
 
   @override
   Future<Map<String, dynamic>> sendInput(
@@ -105,8 +139,10 @@ class FakeRepo implements BrowserRepository {
       'result': switch (ev['type']) {
         'click' => 'focused',
         'key' => keyResult,
+        'scroll' => 'scrolled',
         _ => 'ignored',
       },
+      if (ev['type'] == 'scroll') 'scroll_y': scrollResult,
     };
   }
 
@@ -281,6 +317,29 @@ Future<MediaPlayer> fakeFactory(String url) async {
   final p = FakePlayer(url);
   FakePlayer.instances.add(p);
   return p;
+}
+
+/// Encode un PNG `w×h` monochrome — les pulls partiels ont
+/// besoin de vraies images pour mesurer le plan (étape 109) ;
+/// `toByteData(png)` est le chemin de prod, déjà vérifié en
+/// test (rasterizer logiciel du binding).
+Future<Uint8List> _encodePng(int w, int h, int r, int g, int b) async {
+  final px = Uint8List(w * h * 4);
+  for (var i = 0; i < px.length; i += 4) {
+    px[i] = r;
+    px[i + 1] = g;
+    px[i + 2] = b;
+    px[i + 3] = 255;
+  }
+  final c = Completer<ui.Image>();
+  ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, c.complete);
+  final img = await c.future;
+  try {
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    return data!.buffer.asUint8List();
+  } finally {
+    img.dispose();
+  }
 }
 
 /// Client SSE simulé — événements injectés à la main.
@@ -1031,6 +1090,112 @@ void main() {
     // entrant sera ré-appris au prochain clic).
     ctrl.selectTab('1');
     expect(c.read(browserProvider).fieldFocused, isFalse);
+  });
+
+  /// Attend une condition — le pipeline PNG réel (codec +
+  /// `toImage`) se mesure en temps réel, pas en `Duration.zero`.
+  Future<void> waitFor(bool Function() ok, {int tries = 300}) async {
+    for (var i = 0; i < tries && !ok(); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+  }
+
+  ServerEvent invalidation(double scrollY, {List<Map<String, num>>? rects}) =>
+      ServerEvent('frame_invalidated', {
+        'tab': 1,
+        'scroll_y': scrollY,
+        'rects': ?rects,
+      });
+
+  test('scroll → traduction locale jusqu’au pull (étape 109)', () async {
+    final repo = FakeRepo()..realPng = true;
+    final events = FakeEvents();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+    final ctrl = c.read(browserProvider.notifier);
+
+    // Le pull bootstrap (`_pushColorScheme`) installe une
+    // frame à scroll 0 — attendre l'image **installée**, pas
+    // seulement le fetch parti (le PNG réel se décode en
+    // temps réel).
+    await waitFor(() => ctrl.frameImage('1') != null);
+    expect(ctrl.frameShiftCss('1'), 0);
+
+    // Scroll : la réponse `input` porte `scroll_y` — l'écart
+    // est visible **avant** l'événement (traduction locale).
+    repo.scrollResult = 100;
+    await ctrl.scroll(100);
+    expect(c.read(browserProvider).scrollY['1'], 100);
+    expect(ctrl.frameShiftCss('1'), 100);
+
+    // Invalidation scrollée → plein (les rects post-scroll
+    // ne se composent pas sur une frame pré-scroll) → le
+    // pull livré remet l'écart à zéro.
+    final before = repo.frameFetches;
+    events.ctrl.add(
+      invalidation(100, rects: [{'x': 0, 'y': 0, 'w': 8, 'h': 8}]),
+    );
+    await waitFor(() => repo.frameFetches > before);
+    expect(repo.regionFetches, isEmpty);
+    // L'install remet l'écart à zéro (fetch parti ≠ install).
+    await waitFor(() => ctrl.frameShiftCss('1') == 0);
+    expect(ctrl.frameShiftCss('1'), 0);
+  });
+
+  test('frame_invalidated rects → pull partiel (étape 109)', () async {
+    final repo = FakeRepo()..realPng = true;
+    final events = FakeEvents();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+    final ctrl = c.read(browserProvider.notifier);
+
+    // Quiescence bootstrap : `selectTab` (frame absente) +
+    // `_pushColorScheme` livrent chacun un pull plein —
+    // `frameImage` posé ne suffit pas, le 2ᵉ pullOnce peut
+    // encore voler quand le 1ᵉr installe.
+    await waitFor(
+      () => ctrl.frameImage('1') != null && repo.frameFetches >= 2,
+    );
+    final before = repo.frameFetches;
+
+    // Petite région à même position → pull région + composite
+    // sur la frame retenue ; aucun second pull plein. Attendre
+    // l'install (identité image) — un repli plein en vol
+    // gonflerait `frameFetches` avant qu'on ne le mesure.
+    final prev = ctrl.frameImage('1');
+    events.ctrl.add(
+      invalidation(0, rects: [{'x': 1, 'y': 1, 'w': 2, 'h': 2}]),
+    );
+    await waitFor(() => ctrl.frameImage('1') != prev);
+    expect(repo.regionFetches, ['1,1,2x2']);
+    expect(repo.frameFetches, before);
+  });
+
+  test('frame_invalidated rects vides → pull plein (contrat 55)', () async {
+    final repo = FakeRepo()..realPng = true;
+    final events = FakeEvents();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+    final ctrl = c.read(browserProvider.notifier);
+
+    await waitFor(
+      () => ctrl.frameImage('1') != null && repo.frameFetches >= 2,
+    );
+    var before = repo.frameFetches;
+
+    // `rects: []` = repeindre entièrement — le plein reste le
+    // contrat (daemon ancien sans le champ : absent → plein).
+    events.ctrl.add(invalidation(0, rects: []));
+    await waitFor(() => repo.frameFetches > before);
+    expect(repo.regionFetches, isEmpty);
+
+    before = repo.frameFetches;
+    events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+    await waitFor(() => repo.frameFetches > before);
+    expect(repo.regionFetches, isEmpty);
   });
 }
 
