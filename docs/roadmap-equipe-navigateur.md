@@ -2128,9 +2128,11 @@ réel, ou besoin d'une étape produit. Le % de couverture n'est
 jamais un déclencheur (état des lieux §2 — limites des
 mesures).
 
-**Déclencheurs accumulés** : lobste.rs — `TypeError: value is
-not a function` ×4 (mission 5, API manquante à identifier) ;
-example.com — `TypeError` sur `s.js` (injection partielle) ;
+**Déclencheurs accumulés** : ~~lobste.rs — `TypeError: value
+is not a function` ×4~~ — **soldé** (JS-C54, reproduit propre
+par sonde le 22/10 : 0 PipelineError) ; ~~example.com —
+`TypeError` sur `s.js`~~ — **soldé** (JS-C51, sonde 22/10 :
+0 erreur, 1 sync miroir = injection svg réussie) ;
 github.com — bundle > plafonds (JS-C41 livré le cadre).
 
 - [ ] **JS-C30. Extension corpus test262** : extraire les
