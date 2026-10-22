@@ -814,6 +814,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-72 — panic sélecteur sur attributs UTF-8**
+  (`explorer-css`, vol terrain post-Étape 108 — crash
+  réel `en.wikipedia.org/wiki/Main_Page`) :
+  `attr_matches` découpait les valeurs en **octets** —
+  `&actual[..n]` (`|=`, `^=`) et `&actual[len-n..]`
+  (`$=`) tombaient hors frontière de char dès que
+  l'attribut bordait un caractère multi-octets
+  (`selector.rs:869`, 'õ'). `actual.get(..)` aux trois
+  sites : hors frontière → `None` → `false` (la tranche
+  ne pouvait de toute façon pas égaler — sémantique
+  inchangée). Test : `match_attributs_utf8_ne_panique_pas`
+  (16 combinaisons d'ops sur `çbõ`/`pt-BR`). Validé
+  terrain : le shot produit la frame complète.
 - **Vol humain — voile gris au choix de thème**
   (`app/`) : bug bloquant du run du 21/10 — choisir
   `system`/`clair`/`sombre` (ou tout autre réglage) figeait

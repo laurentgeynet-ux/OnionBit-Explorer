@@ -261,6 +261,46 @@ fn match_attributs() {
     assert!(!matches(&f.dom, f.p1, &sel("[lang]")));
 }
 
+/// R-72 — valeurs d'attribut multi-octets : les découpes
+/// `^=`/`$=`/`|=` en octets tombaient hors frontière de
+/// char → panic (vol terrain, en.wikipedia.org 'õ').
+/// `get()` → `None` = `false` : une coupe hors frontière
+/// ne peut de toute façon pas égaler `expected`.
+#[test]
+fn match_attributs_utf8_ne_panique_pas() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let el = dom.create_element("div").unwrap();
+    // 'ç'/'õ' = 2 octets UTF-8 — une coupe à 1 octet tombe
+    // en plein char, aux deux bouts.
+    dom.set_attribute(el, "data-x", "çbõ").unwrap();
+    dom.set_attribute(el, "lang", "pt-BR").unwrap();
+    dom.append_child(doc, el).unwrap();
+    // Panics pré-fix sur chacun de ces sélecteurs — tous
+    // doivent répondre sans planter.
+    let checks: &[(&str, bool)] = &[
+        ("[data-x^=x]", false), // coupe à 1 → milieu de 'ç'
+        ("[data-x^=ç]", true),  // frontière valide
+        ("[data-x^=çb]", true),
+        ("[data-x$=x]", false), // coupe à 1 → milieu de 'õ'
+        ("[data-x$=õ]", true),
+        ("[data-x$=bõ]", true),
+        ("[data-x|=x]", false), // préfixe + '-' — milieu 'ç'
+        ("[data-x|=çbõ]", true),
+        ("[lang|=pt]", true),
+        ("[lang|=fr]", false),
+        ("[data-x~=çbõ]", true),
+        ("[data-x*=õ]", true),
+        ("[data-x*=çb]", true),
+        ("[data-x*=x]", false),
+        ("[data-x=çbõ]", true),
+        ("[data-x^=\"\"]", true), // vide = préfixe universel
+    ];
+    for (s, want) in checks {
+        assert_eq!(matches(&dom, el, &sel(s)), *want, "sélecteur {s}");
+    }
+}
+
 #[test]
 fn match_descendant_et_enfant() {
     let f = fixture();

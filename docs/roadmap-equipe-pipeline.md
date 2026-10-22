@@ -1828,7 +1828,7 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   réelles. **Activation session** : `SharedFonts` doit
   déléguer `font_face`+`fallback_for` (6 lignes, demande
   journalisée → NAV).
-- [ ] **R-72. Panic `selector` — découpe byte-index sur UTF-8**
+- [x] **R-72. Panic `selector` — découpe byte-index sur UTF-8**
   (priorité lead — **crash site réel**, dépasse R-69 ;
   repro mesurée vol terrain post-108 : `cli shot
   https://en.wikipedia.org/wiki/Main_Page` → panic
@@ -1839,12 +1839,12 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `Prefix` :865) et `&actual[len - expected.len()..]`
   (`Suffix` :869) — un attribut commençant/finissant par
   un caractère multi-octets fait paniquer le matching.
-  Recette : `actual.get(..)` → `None` = `false` (la
-  tranche hors frontière de char ne peut pas égaler) —
-  trois sites, zéro changement de sémantique. Régression
-  : valeur UTF-8 (`…õ`, `ç`) contre `[a$=x]`/`[a^=x]`/
-  `[a|=x]` dans `tests/selector.rs` — « tolérant, jamais
-  crash » violé ici.
+  **Livré** — `actual.get(..)` aux trois sites (`None` =
+  `false`, sémantique inchangée) ; régression
+  `match_attributs_utf8_ne_panique_pas` (16 combinaisons
+  `^=`/`$=`/`|=`/`~=`/`*=`/`=` sur valeurs `ç…õ`). Validé
+  terrain : shot en.wikipedia.org/wiki/Main_Page produit
+  la frame complète (9,6 Mo) au lieu du panic.
 - [ ] **R-70. Texte coupé au bord droit de la frame**
   (trigger shot `cli shot www.wikipedia.org` post-Étape 108,
   1024 px — « Sear[ch] » tronqué en plein glyphe, « Read

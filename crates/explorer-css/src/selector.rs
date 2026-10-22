@@ -858,15 +858,26 @@ fn attr_matches(actual: &str, op: AttrOp, expected: &str, ci: bool) -> bool {
         AttrOp::DashMatch => {
             cmp(actual, expected)
                 || (actual.len() > expected.len()
-                    && cmp(&actual[..expected.len()], expected)
+                    // `get` : une coupe hors frontière de
+                    // char (UTF-8 multi-octets) ne peut pas
+                    // égaler `expected` — `None` = `false`,
+                    // jamais de panic (R-72).
+                    && actual
+                        .get(..expected.len())
+                        .is_some_and(|p| cmp(p, expected))
                     && actual.as_bytes()[expected.len()] == b'-')
         }
         AttrOp::Prefix => {
-            actual.len() >= expected.len() && cmp(&actual[..expected.len()], expected)
+            actual.len() >= expected.len()
+                && actual
+                    .get(..expected.len())
+                    .is_some_and(|p| cmp(p, expected))
         }
         AttrOp::Suffix => {
             actual.len() >= expected.len()
-                && cmp(&actual[actual.len() - expected.len()..], expected)
+                && actual
+                    .get(actual.len() - expected.len()..)
+                    .is_some_and(|p| cmp(p, expected))
         }
         AttrOp::Substring => {
             if ci {
