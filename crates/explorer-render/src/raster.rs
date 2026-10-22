@@ -23,7 +23,7 @@ use tiny_skia::{FillRule, Mask, Paint, PathBuilder, Pixmap, Point, Rect, Transfo
 
 use crate::display::{BorderStyle, DisplayItem, DisplayList};
 use crate::glyph_cache::GlyphCache;
-use owned_ttf_parser::AsFaceRef;
+use owned_ttf_parser::{AsFaceRef, OwnedFace};
 
 /// Framebuffer RGBA prémultiplié (format natif tiny-skia).
 #[derive(Debug, Clone)]
@@ -226,17 +226,37 @@ fn paint_text(
     let Some(oface) = gc.face(fonts, font) else {
         return;
     };
-    let face = oface.as_face_ref();
-    let face_key = std::sync::Arc::as_ptr(&oface) as usize;
-    let upem = f32::from(face.units_per_em()).max(1.0);
-    let gscale = size_px / upem;
     let mut paint = Paint {
         anti_alias: true,
         ..Paint::default()
     };
     paint.set_color(color);
+    // Faces de repli par span (R-69) — résolues une fois par
+    // run ; `span_i` avance à mesure que l'index glyphe entre
+    // dans [start, end). `None` = octets illisibles → glyphes
+    // sautés (dégradation, le `.notdef` principal ferait
+    // double emploi).
+    let spans = &run.fallback_spans;
+    let mut fb_faces: Vec<Option<std::sync::Arc<OwnedFace>>> = Vec::new();
+    if !spans.is_empty() {
+        fb_faces = spans.iter().map(|s| gc.face_at(&s.data, s.face)).collect();
+    }
     let mut pen = ox;
-    for g in &run.glyphs {
+    let mut span_i = 0usize;
+    for (gi, g) in run.glyphs.iter().enumerate() {
+        let gi32 = u32::try_from(gi).unwrap_or(u32::MAX);
+        while span_i < spans.len() && gi32 >= spans[span_i].end {
+            span_i += 1;
+        }
+        let fb = spans
+            .get(span_i)
+            .filter(|s| gi32 >= s.start)
+            .and_then(|_| fb_faces.get(span_i).and_then(Clone::clone));
+        let (face, face_key) = match &fb {
+            Some(f) => (f.as_face_ref(), std::sync::Arc::as_ptr(f) as usize),
+            None => (oface.as_face_ref(), std::sync::Arc::as_ptr(&oface) as usize),
+        };
+        let gscale = size_px / f32::from(face.units_per_em()).max(1.0);
         draw_glyph(
             pixmap, gc, face, face_key, g, pen, oy, gscale, size_px, cur, &paint, clip,
         );

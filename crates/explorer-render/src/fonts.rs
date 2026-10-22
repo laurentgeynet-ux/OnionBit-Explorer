@@ -22,11 +22,18 @@ use std::sync::Arc;
 use explorer_layout::font::{FontRequest, FontSource};
 
 /// Fonte découverte : familles extraites de la table `name`,
-/// chemin vers le fichier.
+/// octets du fichier, index de face dans une collection
+/// `.ttc` (`0` pour un fichier simple — R-69).
 struct FoundFont {
     families: Vec<String>,
-    /// Octets chargés au scan (répertoire borné, MVP).
-    data: Vec<u8>,
+    /// Octets chargés au scan (répertoire borné, MVP) —
+    /// `Arc` : plusieurs faces d'une même collection et les
+    /// réponses `font_face`/`fallback_for` partagent le
+    /// tampon sans re-cloner des Mo.
+    data: Arc<Vec<u8>>,
+    /// Index de la face dans le fichier (`fonts_in_collection`
+    /// > 1 → `.ttc`).
+    face_index: u32,
 }
 
 /// Source de fontes adossée à un répertoire local.
@@ -39,39 +46,42 @@ pub struct DirFontSource {
 }
 
 impl DirFontSource {
-    /// Scanne `dir` (non récursif) : `.ttf`/`.otf` lisibles
-    /// par `ttf-parser`. Répertoire absent → source vide
-    /// (dégradation, pas d'erreur).
+    /// Scanne `dir` (non récursif) : `.ttf`/`.otf` **et
+    /// `.ttc`** (R-69 — quasi toutes les fontes CJK Windows
+    /// sont des collections) lisibles par `ttf-parser`.
+    /// Chaque face d'une collection est une entrée propre
+    /// (familles lues à son index). Répertoire absent →
+    /// source vide (dégradation, pas d'erreur).
     #[must_use]
     pub fn new(dir: &Path) -> Self {
         let mut fonts = Vec::new();
         if let Ok(entries) = std::fs::read_dir(dir) {
             for e in entries.flatten() {
                 let path = e.path();
-                let is_font = path
-                    .extension()
-                    .and_then(|x| x.to_str())
-                    .is_some_and(|x| matches!(x.to_ascii_lowercase().as_str(), "ttf" | "otf"));
+                let is_font = path.extension().and_then(|x| x.to_str()).is_some_and(|x| {
+                    matches!(x.to_ascii_lowercase().as_str(), "ttf" | "otf" | "ttc")
+                });
                 if !is_font {
                     continue;
                 }
                 let Ok(data) = std::fs::read(&path) else {
                     continue;
                 };
-                let Ok(face) = ttf_parser::Face::parse(&data, 0) else {
-                    continue;
-                };
-                let mut families = Vec::new();
-                for n in face.names() {
-                    // 1 = family, 16 = typographic family.
-                    if matches!(n.name_id, 1 | 16) {
-                        if let Some(s) = n.to_string() {
-                            families.push(norm(&s));
-                        }
-                    }
-                }
-                if !families.is_empty() {
-                    fonts.push(FoundFont { families, data });
+                let data = Arc::new(data);
+                // `fonts_in_collection` sous garde : un `.ttc`
+                // tronqué peut déclarer un `numFonts` démesuré
+                // et faire paniquer une assertion interne de
+                // `ttf-parser` — le fichier est sauté (R-69).
+                let count = collection_len(&data).unwrap_or(1).min(MAX_TTC_FACES);
+                for index in 0..count {
+                    let Some(families) = face_families(&data, index) else {
+                        continue;
+                    };
+                    fonts.push(FoundFont {
+                        families,
+                        data: data.clone(),
+                        face_index: index,
+                    });
                 }
             }
         }
@@ -160,9 +170,96 @@ impl DirFontSource {
 }
 
 impl FontSource for DirFontSource {
+    /// `font_data` conserve la sémantique pré-R-69 : seules
+    /// les faces **à l'index 0** sont servies — un appelant
+    /// qui parse à l'index 0 sur une collection prendrait
+    /// la mauvaise face (`font_face` pour l'index réel).
     fn font_data(&self, req: &FontRequest) -> Option<Vec<u8>> {
-        self.resolve(req).map(|f| f.data.clone())
+        self.resolve(req)
+            .filter(|f| f.face_index == 0)
+            .map(|f| (*f.data).clone())
     }
+
+    fn font_face(&self, req: &FontRequest) -> Option<(Arc<Vec<u8>>, u32)> {
+        self.resolve(req).map(|f| (f.data.clone(), f.face_index))
+    }
+
+    /// Repli par glyphe (R-69) : familles de la requête
+    /// d'abord (ordre `font-family` CSS — la fonte nommée
+    /// gagne quand elle couvre), puis tout le registre dans
+    /// l'ordre du scan. Première face couvrant `c` retenue.
+    fn fallback_for(&self, c: char, req: &FontRequest) -> Option<(Arc<Vec<u8>>, u32)> {
+        for fam in &req.families {
+            let n = norm(fam);
+            for f in &self.fonts {
+                if f.families.contains(&n) && covers(f, c) {
+                    return Some((f.data.clone(), f.face_index));
+                }
+            }
+        }
+        self.fonts
+            .iter()
+            .find(|f| covers(f, c))
+            .map(|f| (f.data.clone(), f.face_index))
+    }
+}
+
+/// Plafond de faces sondées par collection — un `numFonts`
+/// hostile est borné avant l'itération (R-69).
+const MAX_TTC_FACES: u32 = 1024;
+
+/// Nombre de faces déclaré dans `data` (`> 1` → `.ttc`),
+/// `None` si l'en-tête est illisible **ou panique** :
+/// `ttf-parser` affirme ses bornes en interne sur certaines
+/// tables hostiles — un fichier fautif dégrade, ne plante
+/// pas.
+fn collection_len(data: &[u8]) -> Option<u32> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ttf_parser::fonts_in_collection(data)
+    }))
+    .ok()
+    .flatten()
+}
+
+/// Familles `name` (1 = family, 16 = typographic family)
+/// normalisées de la face `index` — `None` si la face est
+/// illisible ou si `ttf-parser` panique (même garde que
+/// [`collection_len`]).
+fn face_families(data: &[u8], index: u32) -> Option<Vec<String>> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let face = ttf_parser::Face::parse(data, index).ok()?;
+        let mut v = Vec::new();
+        for n in face.names() {
+            if matches!(n.name_id, 1 | 16) {
+                if let Some(s) = n.to_string() {
+                    v.push(norm(&s));
+                }
+            }
+        }
+        (!v.is_empty()).then_some(v)
+    }))
+    .ok()
+    .flatten()
+}
+
+/// `c` a-t-il un vrai glyphe dans la face (cmap →
+/// id ≠ 0) — le `.notdef` compte comme « non couvert ».
+/// Gardée : `glyph_index` lit des tables potentiellement
+/// hostiles (R-69).
+fn covers_bytes(data: &[u8], index: u32, c: char) -> bool {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ttf_parser::Face::parse(data, index)
+            .ok()
+            .and_then(|t| t.glyph_index(c))
+            .is_some_and(|g| g.0 != 0)
+    }))
+    .unwrap_or(false)
+}
+
+/// `c` a-t-il un vrai glyphe dans `f` (cmap → id ≠ 0) —
+/// le `.notdef` compte comme « non couvert ».
+fn covers(f: &FoundFont, c: char) -> bool {
+    covers_bytes(&f.data, f.face_index, c)
 }
 
 /// Une face web enregistrée (issues de `@font-face`,
@@ -232,7 +329,14 @@ impl WebFontSource {
         if self.faces.len() >= self.cap || norm(family).is_empty() {
             return false;
         }
-        if ttf_parser::Face::parse(&data, 0).is_err() {
+        // Garde `catch_unwind` : une fonte `@font-face`
+        // hostile peut faire paniquer `ttf-parser` — refus,
+        // pas crash (R-69).
+        let valid = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ttf_parser::Face::parse(&data, 0).is_ok()
+        }))
+        .unwrap_or(false);
+        if !valid {
             return false;
         }
         self.faces.push(WebFace {
@@ -273,6 +377,39 @@ impl FontSource for WebFontSource {
             }
         }
         self.inner.font_data(req)
+    }
+
+    /// Faces web = fichiers simples (index 0 — WOFF décodé
+    /// amont) ; le reste délègue à la source interne.
+    fn font_face(&self, req: &FontRequest) -> Option<(Arc<Vec<u8>>, u32)> {
+        for fam in &req.families {
+            let n = norm(fam);
+            if let Some(f) = self
+                .faces
+                .iter()
+                .filter(|f| f.family == n)
+                .min_by_key(|f| Self::score(f, req))
+            {
+                return Some((f.data.clone(), 0));
+            }
+        }
+        self.inner.font_face(req)
+    }
+
+    /// Repli par glyphe (R-69) : une face web **de la
+    /// famille demandée** qui couvre `c` gagne (une page
+    /// peut charger son CJK en `@font-face`), sinon la
+    /// source interne (fontes système).
+    fn fallback_for(&self, c: char, req: &FontRequest) -> Option<(Arc<Vec<u8>>, u32)> {
+        for fam in &req.families {
+            let n = norm(fam);
+            for f in self.faces.iter().filter(|f| f.family == n) {
+                if covers_bytes(&f.data, 0, c) {
+                    return Some((f.data.clone(), 0));
+                }
+            }
+        }
+        self.inner.fallback_for(c, req)
     }
 
     /// Le registre mute : `register`/`clear` la bumpent —
@@ -354,5 +491,68 @@ mod tests {
         assert!(!w.register("Plein", 400, false, fixture_ttf()));
         assert!(!w.register("", 400, false, fixture_ttf()));
         assert_eq!(w.len(), 1);
+    }
+
+    /// R-69 : le scan ouvre les collections `.ttc` — chaque
+    /// face y a sa famille et son index ; `fallback_for`
+    /// trouve la couverture par glyphe à travers les
+    /// registres. `font_data` reste filtrée aux index 0
+    /// (octets ambigus sinon).
+    #[test]
+    fn ttc_faces_scannes_et_fallback() {
+        use explorer_test_support::{fixture_ttc, fixture_ttf_custom};
+        let dir = std::env::temp_dir().join(format!("explorer-r69-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(
+            dir.join("latin.ttf"),
+            fixture_ttf_custom("Latin", 0x0020, 0x00FF),
+        )
+        .expect("write ttf");
+        // Collection deux faces : leurre à l'index 0, CJK
+        // (0x65E0-0x65FF — couvre 日 0x65E5, 旦 0x65E6) à 1.
+        std::fs::write(
+            dir.join("cjk.ttc"),
+            fixture_ttc(&[
+                fixture_ttf_custom("Decoy", 0x0020, 0x00FF),
+                fixture_ttf_custom("Cjk", 0x65E0, 0x65FF),
+            ]),
+        )
+        .expect("write ttc");
+        let src = DirFontSource::new(&dir);
+        let latin = req(&["Latin"], 400, false);
+        // `font_face` résout la famille dans la collection,
+        // avec l'index réel — pas le leurre de l'index 0.
+        let (_, i) = src.font_face(&req(&["Cjk"], 400, false)).expect("cjk face");
+        assert_eq!(i, 1);
+        // '日' absente de Latin → repli sert la face CJK
+        // de la collection (index 1).
+        let (_, fi) = src.fallback_for('日', &latin).expect("fallback");
+        assert_eq!(fi, 1);
+        // Hors portée totale → `None` honnête.
+        assert!(src.fallback_for('\u{1F600}', &latin).is_none());
+        // `font_data` compat : index > 0 → `None` (les
+        // octets seuls ne porteraient pas la bonne face),
+        // index 0 → `Some`.
+        assert!(src.font_data(&req(&["Cjk"], 400, false)).is_none());
+        assert!(src.font_data(&latin).is_some());
+        drop(std::fs::remove_dir_all(&dir));
+    }
+
+    /// Le scan tolère les fichiers illisibles : ni le
+    /// `.ttc` corrompu ni le `.ttf` bidon n'interrompent la
+    /// source ni ne paniquent.
+    #[test]
+    fn scan_tolerant_aux_fichiers_bidon() {
+        let dir = std::env::temp_dir().join(format!("explorer-r69b-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(dir.join("bad.ttc"), b"ttcf\x00\x01pas une collection").expect("w");
+        std::fs::write(dir.join("bad.ttf"), b"pas une fonte").expect("w");
+        std::fs::write(dir.join("note.txt"), b"pas une fonte").expect("w");
+        let src = DirFontSource::new(&dir);
+        assert!(src.font_face(&req(&["Nimporte"], 400, false)).is_none());
+        assert!(src
+            .fallback_for('A', &req(&["Nimporte"], 400, false))
+            .is_none());
+        drop(std::fs::remove_dir_all(&dir));
     }
 }

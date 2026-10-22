@@ -73,6 +73,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `keyboard_event_ctor_copies_init_keys`. Mécanisme
   réutilisable pour `MouseEvent.clientX`…
 
+- **JS-C58 — census post-Étape 108 : trois trous
+  mini-DOM mesurés** (`explorer-jscore`, sonde
+  `LOBSTE_PROBE_URL` sur la batterie
+  wikipedia/github/dev.to/bbc) :
+  - **`?.` → `Host::invoke`** — `eval_chain` lisait la
+    prop membre sans jamais consulter `invoke` :
+    `h?.m()` sur un host → `undefined` →
+    `TypeError: value is not a function`. Mesuré
+    dev.to `paginate` (`localStorage?.getItem`). Le
+    step `Call` suit désormais l'ordre de
+    `Callee::Member` (invoke d'abord, valeur lue
+    ensuite) — toutes les méthodes host derrière
+    `?.`/`?.[]` sont réparées d'un coup.
+  - **`document` hérite `Document.prototype`** —
+    dev.to pose `Document.prototype.ready =
+    new Promise(…)` ; le proto du host pointait
+    `Object.prototype` → `document.ready` undefined
+    → `cannot read 'then' of Undefined` en fin
+    d'init `application.js`. Bonus spec :
+    `document instanceof Document` → true.
+  - **Famille `HTML*Element` complète** —
+    `ReferenceError: HTMLButtonElement is not
+    defined` (github.com `t2-*.js`) ; les ~70
+    interfaces spec rejoignent les stubs
+    inconstructibles — fin du whack-a-mole
+    interface par interface.
+  Mesure : dev.to **3 → 1 PipelineError** (résidu
+  `U8` = shim `createContext` react-dom — aval
+  React réel, backlog documenté) ; wikipedia 0 ;
+  bbc quasi-propre (1 throw défensif du site, pas
+  un gap) ; census offline : `application.js`
+  678 Kio évalué en entier. Tests :
+  `storage_opt_chain_method_dispatch`,
+  `document_inherits_document_prototype`,
+  `html_element_interfaces_detectable`.
+
 - **JS-C57 — `Image`/`HTMLImageElement`**
   (`explorer-jscore`, trigger vol humain 22/10) :
   `ReferenceError: Image is not defined` sur
@@ -726,6 +762,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `mask-size`/`mask-position`, multi-couches,
   `mask-mode:luminance`. Tests `raster.rs` : alpha bornant
   le fond (dedans/dehors), repli sur SVG indécodable.
+- **R-69 — fallback de fonte par glyphe + collections
+  `.ttc`** (`explorer-layout`/`explorer-render`, trigger
+  vol 22/10 — tofus CJK du portail Wikipedia) : les deux
+  gaps mesurés comblés. (1) `DirFontSource` ouvre les
+  `.ttc` (`ttf_parser::fonts_in_collection` — chaque face
+  scannée à son index : familles `name` propres) — quasi
+  toutes les fontes CJK Windows sont des collections,
+  invisibles avant. (2) Le shaping segmente le texte par
+  couverture cmap : `FontSource::fallback_for(c, req)`
+  (familles demandées d'abord, registre ensuite) sert une
+  face par plage contiguë de manquants ; `ShapedRun.
+  fallback_spans` balise les plages `(octets, index)` —
+  le raster les peint via `GlyphCache::face_at` (clé
+  ptr+index, invalidée par `revision`). Clés `metrics`/
+  `shape` indexées par face ; `font_data` conserve sa
+  sémantique index-0 (`font_face` pour l'index réel).
+  Port **additif** (défauts sûrs : pas de repli =
+  `.notdef` inchangé) — demande `SharedFonts` journalisée
+  pour activer en session. Bonus robustesse trouvé en
+  test : `ttf-parser` panique en interne sur certaines
+  collections hostiles (`numFonts` démesuré) — ingestion
+  sous `catch_unwind`, fichier fautif sauté. Tests :
+  segmentation/span/clusters/notdef (6, `font.rs`),
+  `.ttc` multi-face + tolérance (2, `fonts.rs`), pixels
+  de repli vs `.notdef` vide (2, `raster.rs`) ; sonde
+  terrain fontes Windows réelles : 日本語/Русский/
+  العربية peints.
 
 ### Fixed
 

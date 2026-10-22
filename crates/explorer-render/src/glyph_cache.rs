@@ -63,6 +63,12 @@ pub struct GlyphCache {
     /// `rev` stable — une famille absente ne re-coûte pas
     /// une résolution par item).
     faces: HashMap<FontRequest, Option<Arc<OwnedFace>>>,
+    /// `(ptr d'octets partagés, index de face) → face` —
+    /// faces de **repli** (R-69) : les spans d'un
+    /// [`ShapedRun`] portent leurs octets en `Arc` plutôt
+    /// qu'une requête — identité `Arc::as_ptr`, même
+    /// borne `FACE_CAP` partagée.
+    faces_fb: HashMap<(usize, u32), Option<Arc<OwnedFace>>>,
     /// `(ptr de face, index glyphe) → contour en unités
     /// fonte` (`None` figé = glyphe sans contour — espace,
     /// `.notdef` absent…).
@@ -87,6 +93,7 @@ impl GlyphCache {
             Some(prev) if prev == rev => {}
             _ => {
                 self.faces.clear();
+                self.faces_fb.clear();
                 self.paths.clear();
                 self.rev = Some(rev);
             }
@@ -96,17 +103,37 @@ impl GlyphCache {
     /// Face parsée pour `req` — `Arc` clonée pour libérer
     /// l'emprunt du cache (le `&mut self` reste disponible
     /// pour les contours). `None` figé = fonte inconnue ou
-    /// illisible pour la révision courante.
+    /// illisible pour la révision courante. Résolution
+    /// `font_face` (index `.ttc` réel, R-69) — la même que
+    /// le shaping du layout, jamais `font_data` à index 0.
     pub fn face(&mut self, src: &dyn FontSource, req: &FontRequest) -> Option<Arc<OwnedFace>> {
         if let Some(hit) = self.faces.get(req) {
             return hit.clone();
         }
         let face = src
-            .font_data(req)
-            .and_then(|d| OwnedFace::from_vec(d, 0).ok())
+            .font_face(req)
+            .and_then(|(d, i)| OwnedFace::from_vec((*d).clone(), i).ok())
             .map(Arc::new);
         if self.faces.len() < FACE_CAP {
             self.faces.insert(req.clone(), face.clone());
+        }
+        face
+    }
+
+    /// Face de **repli** (R-69) — clé `(ptr des octets
+    /// partagés, index de face)` : les `FallbackSpan` d'un
+    /// run portent leur fonte directement, zéro requête.
+    /// `None` figé = octets illisibles.
+    pub fn face_at(&mut self, data: &Arc<Vec<u8>>, face_index: u32) -> Option<Arc<OwnedFace>> {
+        let k = (Arc::as_ptr(data) as usize, face_index);
+        if let Some(hit) = self.faces_fb.get(&k) {
+            return hit.clone();
+        }
+        let face = OwnedFace::from_vec((**data).clone(), face_index)
+            .ok()
+            .map(Arc::new);
+        if self.faces.len() + self.faces_fb.len() < FACE_CAP {
+            self.faces_fb.insert(k, face.clone());
         }
         face
     }
@@ -157,6 +184,7 @@ impl GlyphCache {
     /// même révision ne re-vide pas).
     pub fn clear(&mut self) {
         self.faces.clear();
+        self.faces_fb.clear();
         self.paths.clear();
     }
 }

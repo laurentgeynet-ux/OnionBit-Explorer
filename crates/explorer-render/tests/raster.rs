@@ -24,6 +24,60 @@ impl FontSource for Fixture {
     }
 }
 
+/// Source deux fontes (R-69) : latin primaire + CJK servie
+/// par `fallback_for` — la plage `0x65E0-0x65FF` couvre 日.
+struct TwoFonts {
+    latin: std::sync::Arc<Vec<u8>>,
+    cjk: std::sync::Arc<Vec<u8>>,
+    with_fb: bool,
+}
+impl FontSource for TwoFonts {
+    fn font_data(&self, _req: &FontRequest) -> Option<Vec<u8>> {
+        Some((*self.latin).clone())
+    }
+    fn font_face(&self, _req: &FontRequest) -> Option<(std::sync::Arc<Vec<u8>>, u32)> {
+        Some((self.latin.clone(), 0))
+    }
+    fn fallback_for(&self, c: char, _req: &FontRequest) -> Option<(std::sync::Arc<Vec<u8>>, u32)> {
+        (self.with_fb && (0x65E0..=0x65FF).contains(&(c as u32))).then(|| (self.cjk.clone(), 0))
+    }
+}
+
+fn two_fonts(with_fb: bool) -> &'static TwoFonts {
+    Box::leak(Box::new(TwoFonts {
+        latin: std::sync::Arc::new(explorer_test_support::fixture_ttf()),
+        cjk: std::sync::Arc::new(explorer_test_support::fixture_ttf_custom(
+            "Cjk", 0x65E0, 0x65FF,
+        )),
+        with_fb,
+    }))
+}
+
+fn frame_fonts(html: &str, css: &str, fonts: &'static dyn FontSource) -> Frame {
+    let dom: Dom = TreeBuilder::parse(html);
+    let mut eng = StyleEngine::new();
+    eng.add_css("body { margin: 0 }", Origin::Author);
+    eng.add_css(css, Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(
+        &mut bx,
+        VIEW,
+        &BlockCtx {
+            fonts: Some(fonts),
+            ..BlockCtx::default()
+        },
+    );
+    let list = build_display_list(&bx, VIEW, 200.0, 0.0);
+    rasterize(&list, fonts, 1.0).expect("frame allouée")
+}
+
 fn ctx() -> BlockCtx<'static> {
     let data = explorer_test_support::fixture_ttf();
     let src: &'static Fixture = Box::leak(Box::new(Fixture(data)));
@@ -453,4 +507,38 @@ fn fenetre_raster_rasterise_sous_le_cap_document() {
     let off = explorer_render::rasterize_window(&list, font_src(), 1.0, 30_000.0, 50.0)
         .expect("fenêtre hors doc");
     assert_eq!(px(&off, 10, 10), [255, 255, 255, 255], "blanc");
+}
+
+// ── R-69 : repli par glyphe jusqu'aux pixels ────────────────
+
+#[test]
+fn fallback_peint_le_glyphe_de_repli() {
+    // "A日" : '日' absent de la fixture latine → span de
+    // repli dans le run → contour de la face CJK → encre à
+    // la position du deuxième glyphe (avance 10 px à 20 px).
+    let f = frame_fonts(
+        "<p>A日</p>",
+        "p{margin:0;font-size:20px;color:#000000}",
+        two_fonts(true),
+    );
+    let p = px(&f, 15, 10);
+    assert!(p[0] < 128 && p[3] > 128, "repli peint, got {p:?}");
+    // Contrôle : le 'A' latin peint pareil en tête.
+    let a = px(&f, 5, 10);
+    assert!(a[0] < 128 && a[3] > 128, "'A' peint, got {a:?}");
+}
+
+#[test]
+fn sans_fallback_notdef_ne_peint_rien() {
+    // Même scène, `fallback_for` → `None` : '日' reste
+    // `.notdef` (contour vide de la fixture) → blanc à la
+    // position du glyphe — le premier reste peint.
+    let f = frame_fonts(
+        "<p>A日</p>",
+        "p{margin:0;font-size:20px;color:#000000}",
+        two_fonts(false),
+    );
+    let a = px(&f, 5, 10);
+    assert!(a[0] < 128 && a[3] > 128, "'A' peint, got {a:?}");
+    assert_eq!(px(&f, 15, 10), [255, 255, 255, 255], "notdef vide");
 }

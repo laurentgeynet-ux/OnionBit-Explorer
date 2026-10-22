@@ -27,6 +27,49 @@ pub fn fixture_ttf() -> Vec<u8> {
     build_ttf((50, -50, 450, 700))
 }
 
+/// Variante paramétrée (R-69) : famille `name` et cmap
+/// `[first, last]` → glyphes `cp - first + 1` — les tests
+/// de fallback multi-fontes fabriquent leurs plages
+/// (ex. `(0x4E00, 0x4FFF)` pour un pseudo-CJK).
+#[must_use]
+pub fn fixture_ttf_custom(name: &str, first: u16, last: u16) -> Vec<u8> {
+    build_ttf_custom(name, (50, -50, 450, 700), first, last)
+}
+
+/// Collection `.ttc` paramétrée (R-69) : chaque entrée est
+/// une face complète — `ttcf` + N répertoires sfnt
+/// pointant vers des copies de tables propres à la face.
+/// `faces[i]` = TTF produit par [`fixture_ttf_custom`] —
+/// les offsets de tables, relatifs au début de chaque
+/// sfnt, sont décalés de sa position dans la collection.
+#[must_use]
+pub fn fixture_ttc(faces: &[Vec<u8>]) -> Vec<u8> {
+    let n = faces.len() as u32;
+    let mut out = Vec::new();
+    out.extend_from_slice(b"ttcf");
+    push_u32(&mut out, 0x0001_0000);
+    push_u32(&mut out, n);
+    for _ in 0..n {
+        push_u32(&mut out, 0); // offsets — patchés ensuite
+    }
+    for (i, face) in faces.iter().enumerate() {
+        let base = out.len() as u32;
+        out[12 + i * 4..16 + i * 4].copy_from_slice(&base.to_be_bytes());
+        let mut f = face.clone();
+        // Re-base les offsets de tables du répertoire sfnt
+        // (relatifs au début du fichier embarqué → absolus
+        // dans la collection).
+        let tables = u16::from_be_bytes([f[4], f[5]]) as usize;
+        for t in 0..tables {
+            let rec = 12 + t * 16;
+            let rel = u32::from_be_bytes([f[rec + 8], f[rec + 9], f[rec + 10], f[rec + 11]]);
+            f[rec + 8..rec + 12].copy_from_slice(&(base + rel).to_be_bytes());
+        }
+        out.extend_from_slice(&f);
+    }
+    out
+}
+
 /// Variante à **overhang mesuré** (R-37) : chaque glyphe
 /// dessine x∈[−100,950] / y∈[−50,1050] en unités fonte —
 /// l'encre déborde la boîte de métriques (avance 500,
@@ -43,15 +86,23 @@ pub fn fixture_ttf_overhang() -> Vec<u8> {
 /// `bbox` = (xMin, yMin, xMax, yMax) en unités fonte,
 /// appliquée à chaque glyphe et à l'en-tête `head`.
 fn build_ttf(bbox: (i16, i16, i16, i16)) -> Vec<u8> {
+    build_ttf_custom("Fixture", bbox, 0x0020, 0x00FF)
+}
+
+/// Variante paramétrée : famille `name` (`name` table) et
+/// cmap `[first, last]` → `cp - first + 1` — la plage doit
+/// tenir dans `NUM_GLYPHS - 1` glyphes (sinon ids hors
+/// `glyf`/`loca` — la fixture reste à 256 glyphes).
+fn build_ttf_custom(name: &str, bbox: (i16, i16, i16, i16), first: u16, last: u16) -> Vec<u8> {
     let tables: Vec<(&'static str, Vec<u8>)> = vec![
-        ("cmap", t_cmap()),
+        ("cmap", t_cmap(first, last)),
         ("glyf", t_glyf(bbox)),
         ("head", t_head(bbox)),
         ("hhea", t_hhea()),
         ("hmtx", t_hmtx()),
         ("loca", t_loca()),
         ("maxp", t_maxp()),
-        ("name", t_name()),
+        ("name", t_name(name)),
         ("post", t_post()),
     ];
     let n = tables.len() as u16;
@@ -236,14 +287,14 @@ fn t_loca() -> Vec<u8> {
     v
 }
 
-fn t_cmap() -> Vec<u8> {
+fn t_cmap(first: u16, last: u16) -> Vec<u8> {
     let mut v = Vec::new();
     push_u16(&mut v, 0); // version
     push_u16(&mut v, 1); // numTables
     push_u16(&mut v, 3); // platformID Windows
     push_u16(&mut v, 1); // encodingID Unicode BMP
     push_u32(&mut v, 12); // offset du sous-tableau
-                          // Format 4 : deux segments — [0x20,0xFF] → cp-31, sentinelle.
+                          // Format 4 : deux segments — [first,last] → cp-first+1, sentinelle.
     let mut s = Vec::new();
     push_u16(&mut s, 4);
     push_u16(&mut s, 32); // length
@@ -252,12 +303,12 @@ fn t_cmap() -> Vec<u8> {
     push_u16(&mut s, 4); // searchRange
     push_u16(&mut s, 1); // entrySelector
     push_u16(&mut s, 0); // rangeShift
-    push_u16(&mut s, 0x00FF); // endCode[0]
+    push_u16(&mut s, last); // endCode[0]
     push_u16(&mut s, 0xFFFF); // endCode[1] sentinelle
     push_u16(&mut s, 0); // reservedPad
-    push_u16(&mut s, 0x0020); // startCode[0]
+    push_u16(&mut s, first); // startCode[0]
     push_u16(&mut s, 0xFFFF); // startCode[1]
-    push_u16(&mut s, 0xFFE1); // idDelta[0] = -31
+    push_u16(&mut s, first.wrapping_neg().wrapping_add(1)); // idDelta[0] = 1-first
     push_u16(&mut s, 1); // idDelta[1]
     push_u16(&mut s, 0); // idRangeOffset[0]
     push_u16(&mut s, 0); // idRangeOffset[1]
@@ -265,12 +316,9 @@ fn t_cmap() -> Vec<u8> {
     v
 }
 
-fn t_name() -> Vec<u8> {
+fn t_name(family: &str) -> Vec<u8> {
     let mut v = Vec::new();
-    let name: Vec<u8> = "Fixture"
-        .encode_utf16()
-        .flat_map(u16::to_be_bytes)
-        .collect();
+    let name: Vec<u8> = family.encode_utf16().flat_map(u16::to_be_bytes).collect();
     push_u16(&mut v, 0); // format
     push_u16(&mut v, 1); // count
     push_u16(&mut v, 6 + 12); // stringOffset

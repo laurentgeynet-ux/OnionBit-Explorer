@@ -1808,7 +1808,7 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   raster), zones ancienne+nouvelle rapportées, fusion par
   intersection, `[]` si frame identique. API additive, aucun
   changement de signature — débloque NAV-55.
-- [ ] **R-69. Fallback de fonte par glyphe** (trigger
+- [x] **R-69. Fallback de fonte par glyphe** (trigger
   terrain vol 22/10 — tofus `□□□` sur les labels CJK du
   portail Wikipedia : 日本語/記事 → carrés). Mesuré —
   **deux gaps dans la chaîne** : (1) le scan fontdb
@@ -1819,15 +1819,15 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (2) `resolve` choisit **une** fonte par requête — glyphe
   absent → `glyph_id 0` → `.notdef` → carré : aucune
   tentative de repli sur une autre fonte de la db.
-  Direction : étendre le scan aux `.ttc` (fontdb sait les
-  ouvrir — `Face` indexée) puis fallback par glyphe le
-  long de la chaîne `font-family`→fontdb (`char`→face
-  candidates par couverture cmap), segmentation du run
-  par fonte à l'émission des items `DisplayItem::Text`
-  (un item par segment — la structure le permet déjà).
-  Pré-requis mesurés : glyphes latins OK sur les familles
-  courantes, seuls manquent les segments hors coverage
-  de la première fonte résolue.
+  **Livré** — segmentation au *shaping* (mieux que la
+  piste « un item par segment » : les mesures restent
+  cohérentes) : `.ttc` multi-face scannées à leur index,
+  `FontSource::fallback_for` + `ShapedRun.fallback_spans`,
+  raster via `GlyphCache::face_at` — sonde terrain :
+  日本語/Русский/العربية peints sous fontes Windows
+  réelles. **Activation session** : `SharedFonts` doit
+  déléguer `font_face`+`fallback_for` (6 lignes, demande
+  journalisée → NAV).
 - [ ] **R-72. Panic `selector` — découpe byte-index sur UTF-8**
   (priorité lead — **crash site réel**, dépasse R-69 ;
   repro mesurée vol terrain post-108 : `cli shot
