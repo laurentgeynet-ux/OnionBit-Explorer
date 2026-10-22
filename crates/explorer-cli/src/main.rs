@@ -45,11 +45,13 @@ fn main() -> ExitCode {
         [_, cmd, arg] if cmd == "layout" => layout(arg),
         [_, cmd, url, out] if cmd == "shot" => shot(url, out, None),
         [_, cmd, url, out, size] if cmd == "shot" => shot(url, out, Some(size)),
+        [_, cmd, url] if cmd == "jprobe" => jprobe(url),
         _ => {
             eprintln!("usage : explorer-cli dump <fichier|url>");
             eprintln!("        explorer-cli fetch <url>");
             eprintln!("        explorer-cli layout <fichier|url>");
             eprintln!("        explorer-cli shot <url> <sortie.png> [LxH]");
+            eprintln!("        explorer-cli jprobe <url>");
             ExitCode::FAILURE
         }
     }
@@ -129,6 +131,15 @@ async fn shot(url: &str, out: &str, size: Option<&str>) -> ExitCode {
             });
         tokio::time::sleep(nap).await;
     }
+    // ADR-0025 : mesure du pilote — le taux de repli du
+    // journal est le verdict fiabilité de la voie
+    // différentielle (`warn!` de chaque rejet est déjà
+    // visible via RUST_LOG).
+    eprintln!(
+        "[journal : {} appliqués / {} replis]",
+        session.journal_applies(),
+        session.journal_fallbacks()
+    );
     if let Some(png) = session.frame_png(tab) {
         match std::fs::write(out, &png) {
             Ok(()) => {
@@ -144,6 +155,61 @@ async fn shot(url: &str, out: &str, size: Option<&str>) -> ExitCode {
         eprintln!("pas de frame produite");
         ExitCode::FAILURE
     }
+}
+
+/// `jprobe <url>` : sonde du pilote ADR-0025 — navigation
+/// réelle puis **interactions synthétiques** (scrolls +
+/// clics en grille) pour déclencher les points de synchro
+/// DOM interactifs ; rapporte `journal_applies`/
+/// `journal_fallbacks` (fiabilité de la voie différentielle)
+/// + octets de sérialisation JS-C39 (ce que le journal
+/// économise en re-parse).
+#[tokio::main(flavor = "current_thread")]
+async fn jprobe(url: &str) -> ExitCode {
+    let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
+    let mut session = explorer_core::Session::new(client_stack(), Arc::new(fonts));
+    session.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = session.open_tab();
+    if let Err(e) = session.navigate(tab, url).await {
+        eprintln!("erreur : {e}");
+        return ExitCode::FAILURE;
+    }
+    // Grâce post-nav élargie (hydratation réelle : timers +
+    // XHR tardifs) puis des entrées pour déclencher
+    // dispatch→synchro→journal.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2_000);
+    while std::time::Instant::now() < deadline {
+        session.pump_net().await;
+        session.pump_timers(tab);
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    for round in 0..3 {
+        let _ = session
+            .handle_input(tab, explorer_core::InputEvent::Scroll { dy: 120.0 })
+            .await;
+        for y in [80.0, 240.0, 400.0] {
+            let _ = session
+                .handle_input(tab, explorer_core::InputEvent::MouseMove { x: 100.0, y })
+                .await;
+        }
+        let _ = session
+            .handle_input(tab, explorer_core::InputEvent::Click { x: 100.0, y: 200.0 })
+            .await;
+        session.pump_net().await;
+        session.pump_timers(tab);
+        let nap = session
+            .next_timer_deadline()
+            .unwrap_or(std::time::Duration::from_millis(80));
+        tokio::time::sleep(nap.min(std::time::Duration::from_millis(200))).await;
+        session.pump_timers(tab);
+        eprintln!("[round {round}]");
+    }
+    eprintln!(
+        "[journal : {} appliqués / {} replis]",
+        session.journal_applies(),
+        session.journal_fallbacks()
+    );
+    ExitCode::SUCCESS
 }
 
 /// Lit une source : fichier local (chemin ou `file:`) ou URL
