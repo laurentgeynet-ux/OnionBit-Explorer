@@ -821,7 +821,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `decline_download_replays_as_document`,
   `document_types_never_download`, REST
   `download_accept_writes_body`.
-- [ ] **Étape 71. Seam `MediaSurface` — lecture média par
+- [x] **Étape 71. Seam `MediaSurface` — lecture média par
   l'hôte** (lead + ADR-0024 — le moteur ne décode pas, la
   lecture est un service d'hôte contracté) : les stubs
   honnêtes de l'étape 58 restent la norme *sans* hôte ;
@@ -908,6 +908,26 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     `media_command route vers le lecteur`,
     `rapport state borné à 4 Hz`, `tab_closed dispose`,
     `frame_invalidated porte scroll_y`.
+  - [x] **71e — variante FFI spécifiée + câblée** : le
+    mode in-process (premier rang P4) porte le cycle
+    complet. Sérialisation du contrat descendue dans
+    `explorer_core` (`media_event_json`, `media_offer_json`,
+    `media_report_from_json`, `media_codecs_from_json` —
+    api et ffi la partagent, charges identiques SSE/FFI).
+    ABI pull : `explorer_media_events` (NDJSON
+    `{event,data}`, jamais de ligne tronquée —
+    `media_pending` retient le reliquat),
+    `explorer_media_list` (fiches = DTO `GET …/media`),
+    `claim`/`release`/`state` (corps JSON du REST, codes
+    `0`/`-400`/`-409`/`-410` = statuts du contrat). App :
+    ops worker 13-17, `listMedia`/`claimMedia`/
+    `releaseMedia`/`mediaState` réels (fin des
+    `UnsupportedError`), drain média dans le RPC `tick`
+    → `_onEvent` (même dispatch que le SSE : claim →
+    lecteur → commandes JS → rapports ≤ 4 Hz) ; dll
+    antérieure → stubs honnêtes. Test
+    `media_surface_ffi_cycle` (offered → claim → -409 →
+    state → -400/-409 → release → media_gone à close).
 - [x] **Étape 72. Résolveur sécurisé (DoH) — capacité
   d'égress optionnelle** (lead — anti-blocage FAI « DNS
   menteur », même patron que le resolver custom de l'app

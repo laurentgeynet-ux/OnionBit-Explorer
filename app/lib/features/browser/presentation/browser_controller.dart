@@ -501,6 +501,15 @@ class BrowserController extends Notifier<BrowserState> {
           unawaited(_pullFrame(id));
         }
       }
+      // Ét.71e — events `MediaSurface` drainés dans le tick :
+      // même `ServerEvent`/dispatch que le SSE (`media_*`).
+      for (final e in inv.mediaEvents) {
+        final name = e['event'] as String?;
+        final data = e['data'];
+        if (name != null && data is Map) {
+          _onEvent(ServerEvent(name, Map<String, dynamic>.from(data)));
+        }
+      }
     } on Object {
       // Moteur in-process indisponible → prochain tick.
     }

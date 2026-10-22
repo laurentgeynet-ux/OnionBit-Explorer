@@ -17,6 +17,7 @@
 /// valide — c'est le seul endroit où il l'est).
 library;
 
+import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:isolate';
 import 'dart:typed_data';
@@ -151,6 +152,39 @@ typedef _DirtyRectsD = int Function(
   ffi.Pointer<ffi.Float>,
   int,
 );
+// Seam MediaSurface (étape 71e) — drain NDJSON + fiches +
+// claim/release/state, mêmes formes que les accesseurs
+// chaîne existants.
+typedef _MediaEventsN = ffi.IntPtr Function(
+  _NativeHandle,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
+typedef _MediaEventsD = int Function(
+  _NativeHandle,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
+typedef _MediaReleaseN = ffi.Int32 Function(
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Uint64,
+);
+typedef _MediaReleaseD = int Function(_NativeHandle, int, int);
+typedef _MediaClaimN = ffi.Int32 Function(
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Uint64,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
+typedef _MediaClaimD = int Function(
+  _NativeHandle,
+  int,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
 
 // ---------------------------------------------------------------------------
 // Ops RPC — les entiers sont le contrat wire, ne pas réordonner.
@@ -169,6 +203,11 @@ const opFrame = 9;
 const opSetColorScheme = 10;
 const opShutdown = 11;
 const opFrameRegion = 12;
+const opMediaEvents = 13;
+const opMediaList = 14;
+const opMediaClaim = 15;
+const opMediaRelease = 16;
+const opMediaState = 17;
 
 /// Point d'entrée de l'isolate — `args` = `{'reply': SendPort,
 /// 'path': String}`. Envoie `{'port': SendPort}` puis
@@ -230,6 +269,11 @@ class _WorkerImpl {
     this._tabScroll,
     this._setColorScheme,
     this._lastError,
+    this._mediaEvents,
+    this._mediaList,
+    this._mediaClaim,
+    this._mediaRelease,
+    this._mediaState,
   );
 
   final ffi.DynamicLibrary _lib;
@@ -253,6 +297,13 @@ class _WorkerImpl {
   final _TabScrollD? _tabScroll;
   final _ColorSchemeD? _setColorScheme;
   final _BufReadD _lastError;
+  // Seam MediaSurface (étape 71e) — `null` sur une dll
+  // antérieure → stubs honnêtes côté appelant.
+  final _MediaEventsD? _mediaEvents;
+  final _TabUrlD? _mediaList;
+  final _MediaClaimD? _mediaClaim;
+  final _MediaReleaseD? _mediaRelease;
+  final _MediaClaimD? _mediaState;
 
   static _WorkerImpl open(String path) {
     final lib = ffi.DynamicLibrary.open(path);
@@ -302,6 +353,48 @@ class _WorkerImpl {
       } on Object {
         /* export absent */
       }
+      // Exports `MediaSurface` (étape 71e) — dll antérieure
+      // → `null` → l'hôte retombe sur les stubs honnêtes.
+      _MediaEventsD? mediaEvents;
+      try {
+        mediaEvents = lib.lookupFunction<_MediaEventsN, _MediaEventsD>(
+          'explorer_media_events',
+        );
+      } on Object {
+        /* export absent */
+      }
+      _TabUrlD? mediaList;
+      try {
+        mediaList = lib.lookupFunction<_TabUrlN, _TabUrlD>(
+          'explorer_media_list',
+        );
+      } on Object {
+        /* export absent */
+      }
+      _MediaClaimD? mediaClaim;
+      try {
+        mediaClaim = lib.lookupFunction<_MediaClaimN, _MediaClaimD>(
+          'explorer_media_claim',
+        );
+      } on Object {
+        /* export absent */
+      }
+      _MediaReleaseD? mediaRelease;
+      try {
+        mediaRelease = lib.lookupFunction<_MediaReleaseN, _MediaReleaseD>(
+          'explorer_media_release',
+        );
+      } on Object {
+        /* export absent */
+      }
+      _MediaClaimD? mediaState;
+      try {
+        mediaState = lib.lookupFunction<_MediaClaimN, _MediaClaimD>(
+          'explorer_media_state',
+        );
+      } on Object {
+        /* export absent */
+      }
       final handle = create();
       if (handle == ffi.nullptr) {
         throw _LastError.read(lastError);
@@ -328,6 +421,11 @@ class _WorkerImpl {
         tabScroll,
         setColorScheme,
         lastError,
+        mediaEvents,
+        mediaList,
+        mediaClaim,
+        mediaRelease,
+        mediaState,
       );
     } on Object {
       lib.close();
@@ -379,12 +477,29 @@ class _WorkerImpl {
         // rects dans le même RPC : l'UI consomme les régions
         // (pull partiel) et la position pour la traduction
         // locale. Exports absents → `null` → pull plein.
+        // Ét.71e — et les events `MediaSurface` accumulés
+        // (NDJSON → même dispatch que le SSE côté UI).
         final tab = _tab(m);
         return {
           'invalidated': _tick(_handle, tab) == 1,
           'scroll_y': _tabScroll?.call(_handle, tab),
           'rects': _drainDirty(tab),
+          'media': _drainMediaEvents(),
         };
+      case opMediaEvents:
+        return {'events': _drainMediaEvents()};
+      case opMediaList:
+        return {'media': _readMediaList(_tab(m))};
+      case opMediaClaim:
+        return {'code': _mediaCall(m, _mediaClaim)};
+      case opMediaRelease:
+        final f = _mediaRelease;
+        if (f == null) return const {'code': -1};
+        return {
+          'code': f(_handle, _tab(m), (m['media'] as num?)?.toInt() ?? 0),
+        };
+      case opMediaState:
+        return {'code': _mediaCall(m, _mediaState)};
       case opFrame:
         return _frameOp(m);
       case opFrameRegion:
@@ -584,6 +699,74 @@ class _WorkerImpl {
   /// drain suffit rarement) ; natif en échec → `null`, l'UI
   /// bascule en pull plein (l'export draine quand même, rien
   /// n'est perdu : le plein couvre toujours).
+  /// `media_claim`/`media_state` — corps JSON commun
+  /// (`{"codecs":…}` ou le rapport tel quel) → code retour
+  /// natif (`0`/`-400`/`-409`/`-410`). Export absent → `-1`
+  /// (l'hôte retombe sur la dégradation non claimée).
+  int _mediaCall(Map m, _MediaClaimD? f) {
+    if (f == null) return -1;
+    final body = m['codecs'] is List
+        ? jsonEncode({'codecs': m['codecs']})
+        : jsonEncode(m['report'] ?? const {});
+    final bytes = body.toNativeUtf8();
+    try {
+      return f(
+        _handle,
+        _tab(m),
+        (m['media'] as num?)?.toInt() ?? 0,
+        bytes.cast<ffi.Uint8>(),
+        bytes.length,
+      );
+    } finally {
+      calloc.free(bytes);
+    }
+  }
+
+  /// `media_list` → fiches `{"media":[…]}` décodées — `[]`
+  /// si l'export manque ou si aucune surface ne vit.
+  List<Object?> _readMediaList(int tab) {
+    final f = _mediaList;
+    if (f == null) return const [];
+    const cap = 64 * 1024;
+    final buf = calloc<ffi.Uint8>(cap);
+    try {
+      final n = f(_handle, tab, buf, cap);
+      if (n <= 0) return const [];
+      final v = jsonDecode(utf8.decode(buf.asTypedList(n)));
+      return v is Map && v['media'] is List ? v['media'] as List : const [];
+    } on Object {
+      return const [];
+    } finally {
+      calloc.free(buf);
+    }
+  }
+
+  /// `media_events` → lignes NDJSON décodées en
+  /// `[{event, data}]` — le dispatch UI est le même que le
+  /// SSE (`ServerEvent(name, data)`). Export absent → `[]`.
+  static const _maxMediaEvents = 64 * 1024;
+
+  List<Object?> _drainMediaEvents() {
+    final f = _mediaEvents;
+    if (f == null) return const [];
+    final buf = calloc<ffi.Uint8>(_maxMediaEvents);
+    try {
+      final n = f(_handle, buf, _maxMediaEvents);
+      if (n <= 0) return const [];
+      return [
+        for (final line in utf8.decode(buf.asTypedList(n)).split('\n'))
+          if (line.isNotEmpty)
+            jsonDecode(line) as Object?,
+      ];
+    } on Object {
+      // Une ligne invalide ne doit pas perdre le lot —
+      // le drain a déjà consommé côté natif.
+      return const [];
+    } finally {
+      calloc.free(buf);
+    }
+  }
+
   static const _maxDirty = 512;
 
   List<List<double>>? _drainDirty(int tab) {

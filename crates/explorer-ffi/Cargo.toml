@@ -29,6 +29,7 @@ explorer-js.workspace = true
 explorer-net.workspace = true
 explorer-render.workspace = true
 tokio.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 explorer-layout.workspace = true

@@ -100,6 +100,10 @@ pub(crate) use find::*;
 pub(crate) use forms::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use media::*;
+pub use media::{
+    media_codecs_from_json, media_event_json, media_host_state_str, media_offer_json,
+    media_report_from_json,
+};
 #[allow(clippy::wildcard_imports)]
 pub(crate) use nav_types::*;
 #[allow(clippy::wildcard_imports)]

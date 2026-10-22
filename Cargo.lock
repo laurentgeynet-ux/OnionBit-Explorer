@@ -567,6 +567,7 @@ dependencies = [
  "explorer-net",
  "explorer-render",
  "explorer-test-support",
+ "serde_json",
  "tokio",
 ]
 

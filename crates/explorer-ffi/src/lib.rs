@@ -78,10 +78,15 @@ fn set_err(msg: impl std::fmt::Display) {
 pub struct ExplorerHandle {
     rt: tokio::runtime::Runtime,
     session: Session,
-    /// Dernier `CoreEvent` lu — non utilisé pour l'instant
-    /// (polling de frames côté client), conservé pour la
-    /// souscription d'événements d'un prochain incrément.
-    _events: tokio::sync::broadcast::Receiver<CoreEvent>,
+    /// Canal d'événements de session — drainé par
+    /// [`explorer_media_events`] (filtré sur le bras
+    /// `MediaSurface`, étape 71e ; le pull des frames reste
+    /// le modèle de l'ABI).
+    events: tokio::sync::broadcast::Receiver<CoreEvent>,
+    /// Lignes NDJSON média déjà sérialisées mais non copiées
+    /// faute de place dans le buffer appelant — réémises à
+    /// l'appel suivant (jamais tronquées à mi-ligne).
+    media_pending: String,
 }
 
 /// Répertoire de fontes par défaut — `EXPLORER_FONT_DIR` en
@@ -173,7 +178,8 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
     Box::into_raw(Box::new(ExplorerHandle {
         rt,
         session,
-        _events: events,
+        events,
+        media_pending: String::new(),
     }))
 }
 
@@ -750,6 +756,220 @@ pub unsafe extern "C" fn explorer_tab_scroll(h: *mut ExplorerHandle, tab: u64) -
         .map_or(-1.0, |t| f64::from(t.scroll_y))
 }
 
+/// Taille maximale d'un corps JSON média (`claim`/`state`)
+/// passé à l'ABI (étape 71e).
+const MAX_MEDIA_JSON: usize = 64 * 1024;
+
+/// `MediaError` → code négatif FFI : `-410` surface morte,
+/// `-409` conflit (déjà claimée / `state` sans claim) —
+/// mêmes statuts que le REST (`410`/`409`).
+fn media_err_code(e: explorer_core::MediaError) -> i32 {
+    match e {
+        explorer_core::MediaError::Dead => -410,
+        explorer_core::MediaError::Taken | explorer_core::MediaError::NotClaimed => -409,
+    }
+}
+
+/// Draine les événements `MediaSurface` accumulés vers
+/// `buf` — une ligne NDJSON `{"event": "<nom_sse>", "data":
+/// <charge>}` par événement, charges **identiques** au SSE
+/// (contrat § `MediaSurface`, variante in-process étape
+/// 71e). Seules des lignes complètes sont écrites : si le
+/// dernier `\n` excède `cap`, le reste est conservé dans le
+/// handle et ressorti à l'appel suivant. Retourne le nombre
+/// d'octets écrits (`0` = rien en attente), `-1` argument
+/// invalide.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `buf..buf+cap`
+/// inscriptible si `cap > 0` (`buf` peut être nul quand
+/// `cap == 0` : les lignes restent en attente).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_media_events(
+    h: *mut ExplorerHandle,
+    buf: *mut u8,
+    cap: usize,
+) -> isize {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    // Vide le canal dans `media_pending` (filtré média —
+    // les autres events n'ont pas d'ABI aujourd'hui).
+    loop {
+        match h.events.try_recv() {
+            Ok(ev) => {
+                if let Some((name, data)) = explorer_core::media_event_json(&ev) {
+                    use std::fmt::Write;
+                    let _ = writeln!(
+                        h.media_pending,
+                        "{{\"event\":\"{name}\",\"data\":{data}}}"
+                    );
+                }
+            }
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
+            Err(
+                tokio::sync::broadcast::error::TryRecvError::Empty
+                | tokio::sync::broadcast::error::TryRecvError::Closed,
+            ) => break,
+        }
+    }
+    if cap == 0 {
+        return 0;
+    }
+    if buf.is_null() {
+        set_err("buffer nul");
+        return -1;
+    }
+    // Jamais de ligne tronquée : borne au dernier `\n`
+    // contenu dans `cap`.
+    let Some(end) = h.media_pending[..h.media_pending.len().min(cap)].rfind('\n') else {
+        return 0;
+    };
+    let n = end + 1;
+    // SAFETY : `buf..buf+n` inscriptible (`n ≤ cap`), source
+    // détenue par le handle.
+    unsafe {
+        std::ptr::copy_nonoverlapping(h.media_pending.as_ptr(), buf, n);
+    }
+    h.media_pending.drain(..n);
+    isize::try_from(n).unwrap_or(isize::MAX)
+}
+
+/// Liste des surfaces média vivantes de l'onglet → `buf`
+/// (JSON `{"media": [ … ]}` — même DTO que `GET
+/// /api/tabs/{id}/media`, étape 71e). Retourne la longueur
+/// écrite, `0` si aucune surface, `-1` buffer invalide ou
+/// trop petit.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `buf..buf+cap`
+/// inscriptible.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_media_list(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    buf: *mut u8,
+    cap: usize,
+) -> isize {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let list: Vec<serde_json::Value> = h
+        .session
+        .media_list(tab)
+        .iter()
+        .map(explorer_core::media_offer_json)
+        .collect();
+    if list.is_empty() {
+        return 0;
+    }
+    let s = serde_json::json!({ "media": list }).to_string();
+    if s.len() > cap {
+        set_err("buffer trop petit");
+        return -1;
+    }
+    unsafe { write_str(&s, buf, cap) }
+}
+
+/// Claim d'une surface par l'hôte — `json` porte le corps
+/// `{"codecs": ["video/mp4", …]}` (UTF-8, ≤ 64 Kio ; corps
+/// vide ou non-JSON = `[]` toléré). Retour : `0` claim
+/// acquis, `-409` déjà claimée, `-410` surface morte,
+/// `-1` argument invalide.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `json..json+len`
+/// lisible si `len > 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_media_claim(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    media: u64,
+    json: *const u8,
+    len: usize,
+) -> i32 {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let codecs = if len == 0 {
+        Vec::new()
+    } else {
+        let Some(s) = (unsafe { read_str(json, len, MAX_MEDIA_JSON) }) else {
+            return -1;
+        };
+        serde_json::from_str(s)
+            .map(|v: serde_json::Value| explorer_core::media_codecs_from_json(&v))
+            .unwrap_or_default()
+    };
+    match h.session.media_claim(tab, media, codecs) {
+        Ok(()) => 0,
+        Err(e) => media_err_code(e),
+    }
+}
+
+/// Release d'une surface claimée — l'hôte se détache, la
+/// surface retombe sur les stubs ADR-0023. Retour : `0`,
+/// `-410` surface morte, `-1` handle invalide.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_media_release(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    media: u64,
+) -> i32 {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    match h.session.media_release(tab, media) {
+        Ok(()) => 0,
+        Err(e) => media_err_code(e),
+    }
+}
+
+/// Rapport d'état de lecture hôte → moteur (battement ≤
+/// 4 Hz côté hôte — contrat § `MediaSurface`). `json`
+/// porte `{position_ms, duration_ms, buffered_ms, state,
+/// error?}` avec `state ∈ "playing"|"paused"|"ended"|
+/// "error"`. Retour : `0`, `-400` JSON/état invalide,
+/// `-409` non claimée, `-410` morte, `-1` argument.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `json..json+len`
+/// lisible.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_media_state(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    media: u64,
+    json: *const u8,
+    len: usize,
+) -> i32 {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let Some(s) = (unsafe { read_str(json, len, MAX_MEDIA_JSON) }) else {
+        return -1;
+    };
+    let report = serde_json::from_str(s)
+        .ok()
+        .and_then(|v: serde_json::Value| explorer_core::media_report_from_json(&v));
+    let Some(report) = report else {
+        set_err("state invalide (∈ playing|paused|ended|error requis)");
+        return -400;
+    };
+    match h.session.media_report(tab, media, report) {
+        Ok(()) => 0,
+        Err(e) => media_err_code(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -834,6 +1054,11 @@ mod tests {
             200,
             "<html><head><title>ma page</title></head><body><h1>t</h1></body></html>",
         );
+        t.route(
+            "/v",
+            200,
+            "<html><body><video src=\"v.mp4\" controls></video></body></html>",
+        );
         let tr: Arc<dyn HttpTransport> = t;
         let mut session = Session::new(tr, Arc::new(FixtureFont));
         if let Some(d) = profile_dir {
@@ -848,7 +1073,8 @@ mod tests {
         Box::into_raw(Box::new(ExplorerHandle {
             rt,
             session,
-            _events: events,
+            events,
+            media_pending: String::new(),
         }))
     }
 
@@ -990,5 +1216,97 @@ mod tests {
         // SAFETY : le buffer est lisible ; rejet attendu.
         assert!(unsafe { explorer_create_with_profile(bad.as_ptr(), 2) }.is_null());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Étape 71e — variante FFI `MediaSurface` : drain
+    /// NDJSON des events, `claim`/`release`/`state`, codes
+    /// `-409`/`-410`, `media_gone` à la fermeture.
+    #[test]
+    fn media_surface_ffi_cycle() {
+        let h = test_handle();
+        // SAFETY : handle frais, appels sérialisés.
+        unsafe {
+            let tab = explorer_open_tab(h);
+            let url = b"http://test/v";
+            assert_eq!(explorer_navigate(h, tab, url.as_ptr(), url.len()), 0);
+
+            // `media_offered` drainé (les events hors média
+            // — navigated, invalidated — sont filtrés).
+            let mut evbuf = vec![0u8; 8192];
+            let n = explorer_media_events(h, evbuf.as_mut_ptr(), evbuf.len());
+            assert!(n > 0);
+            let nd = String::from_utf8_lossy(&evbuf[..usize::try_from(n).unwrap_or(0)]);
+            let offered = nd
+                .lines()
+                .find(|l| l.contains("media_offered"))
+                .expect("media_offered drainé");
+            assert!(nd.lines().all(|l| {
+                let v: serde_json::Value = serde_json::from_str(l).unwrap();
+                v.get("event").is_some() && v.get("data").is_some()
+            }));
+            let offered: serde_json::Value = serde_json::from_str(offered).unwrap();
+            let mid = offered["data"]["media"].as_u64().unwrap();
+            assert_eq!(offered["data"]["kind"].as_str(), Some("video"));
+            assert_eq!(offered["data"]["url"].as_str(), Some("http://test/v.mp4"));
+            assert_eq!(offered["data"]["controls"].as_bool(), Some(true));
+
+            // `media_list` : une surface vivante, même DTO.
+            let mut lbuf = vec![0u8; 8192];
+            let n = explorer_media_list(h, tab, lbuf.as_mut_ptr(), lbuf.len());
+            assert!(n > 0);
+            let list: serde_json::Value =
+                serde_json::from_slice(&lbuf[..usize::try_from(n).unwrap_or(0)]).unwrap();
+            assert_eq!(list["media"][0]["id"].as_u64(), Some(mid));
+            assert_eq!(list["media"][0]["claimed"].as_bool(), Some(false));
+
+            // Claim → 0 ; second claim → -409.
+            let claim = br#"{"codecs":["video/mp4"]}"#;
+            assert_eq!(
+                explorer_media_claim(h, tab, mid, claim.as_ptr(), claim.len()),
+                0
+            );
+            assert_eq!(
+                explorer_media_claim(h, tab, mid, claim.as_ptr(), claim.len()),
+                -409
+            );
+            // Id inconnu → -410.
+            assert_eq!(
+                explorer_media_claim(h, tab, 9999, claim.as_ptr(), claim.len()),
+                -410
+            );
+
+            // `state` → 0, refleté dans la fiche.
+            let rep = br#"{"position_ms":0,"duration_ms":1000,"buffered_ms":0,"state":"playing"}"#;
+            assert_eq!(
+                explorer_media_state(h, tab, mid, rep.as_ptr(), rep.len()),
+                0
+            );
+            // `state` invalide → -400.
+            let bad = br#"{"state":"weird"}"#;
+            assert_eq!(
+                explorer_media_state(h, tab, mid, bad.as_ptr(), bad.len()),
+                -400
+            );
+            let n = explorer_media_list(h, tab, lbuf.as_mut_ptr(), lbuf.len());
+            let list: serde_json::Value =
+                serde_json::from_slice(&lbuf[..usize::try_from(n).unwrap_or(0)]).unwrap();
+            assert_eq!(list["media"][0]["state"]["state"].as_str(), Some("playing"));
+
+            // Release → 0 ; `state` sans claim → -409.
+            assert_eq!(explorer_media_release(h, tab, mid), 0);
+            assert_eq!(
+                explorer_media_state(h, tab, mid, rep.as_ptr(), rep.len()),
+                -409
+            );
+
+            // Fermeture → `media_gone` drainé.
+            assert_eq!(explorer_close_tab(h, tab), 0);
+            let n = explorer_media_events(h, evbuf.as_mut_ptr(), evbuf.len());
+            assert!(n > 0);
+            let nd = String::from_utf8_lossy(&evbuf[..usize::try_from(n).unwrap_or(0)]);
+            assert!(nd.contains("media_gone"));
+            assert!(nd.contains(&format!("\"media\":{mid}")));
+            explorer_destroy(h);
+        }
     }
 }

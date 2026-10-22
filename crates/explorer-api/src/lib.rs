@@ -624,37 +624,11 @@ async fn decline_download(
 }
 
 /// Sérialise une surface média (DTO du contrat
-/// `MediaSurface` — rect en px CSS document).
+/// `MediaSurface` — rect en px CSS document). La forme
+/// appartient au contrat : déléguée à `explorer-core` pour
+/// rester identique au drain FFI (étape 71e).
 fn media_json(m: &explorer_core::MediaOfferInfo) -> serde_json::Value {
-    let kind = match m.kind {
-        explorer_core::MediaKind::Video => "video",
-        explorer_core::MediaKind::Audio => "audio",
-    };
-    serde_json::json!({
-        "id": m.id, "tab": m.tab, "kind": kind,
-        "rect": { "x": m.rect.x, "y": m.rect.y, "w": m.rect.w, "h": m.rect.h },
-        "url": m.url, "mime": m.mime,
-        "controls": m.controls, "autoplay": m.autoplay,
-        "claimed": m.claim.is_some(),
-        "codecs": m.claim,
-        "state": m.state.as_ref().map(|r| serde_json::json!({
-            "position_ms": r.position_ms,
-            "duration_ms": r.duration_ms,
-            "buffered_ms": r.buffered_ms,
-            "state": media_host_state(r.state),
-            "error": r.error,
-        })),
-    })
-}
-
-/// `MediaHostState` → chaîne du contrat REST.
-fn media_host_state(s: explorer_core::MediaHostState) -> &'static str {
-    match s {
-        explorer_core::MediaHostState::Playing => "playing",
-        explorer_core::MediaHostState::Paused => "paused",
-        explorer_core::MediaHostState::Ended => "ended",
-        explorer_core::MediaHostState::Error => "error",
-    }
+    explorer_core::media_offer_json(m)
 }
 
 /// `MediaError` → statut HTTP du contrat (`410` id mort,
@@ -696,13 +670,7 @@ async fn media_claim(
     body: Option<Json<serde_json::Value>>,
 ) -> Response {
     let codecs: Vec<String> = body
-        .and_then(|Json(v)| {
-            v.get("codecs").and_then(|c| c.as_array()).map(|a| {
-                a.iter()
-                    .filter_map(|c| c.as_str().map(String::from))
-                    .collect()
-            })
-        })
+        .map(|Json(v)| explorer_core::media_codecs_from_json(&v))
         .unwrap_or_default();
     let mut session = st.session.lock().await;
     match session.media_claim(id, mid, codecs) {
@@ -739,28 +707,11 @@ async fn media_state(
             &std::io::Error::other("corps JSON requis"),
         );
     };
-    let u64f = |k: &str| v.get(k).and_then(serde_json::Value::as_u64);
-    let state = match v.get("state").and_then(serde_json::Value::as_str) {
-        Some("playing") => explorer_core::MediaHostState::Playing,
-        Some("paused") => explorer_core::MediaHostState::Paused,
-        Some("ended") => explorer_core::MediaHostState::Ended,
-        Some("error") => explorer_core::MediaHostState::Error,
-        _ => {
-            return err(
-                StatusCode::BAD_REQUEST,
-                &std::io::Error::other("state ∈ playing|paused|ended|error"),
-            )
-        }
-    };
-    let report = explorer_core::MediaReport {
-        position_ms: u64f("position_ms").unwrap_or(0),
-        duration_ms: u64f("duration_ms"),
-        buffered_ms: u64f("buffered_ms").unwrap_or(0),
-        state,
-        error: v
-            .get("error")
-            .and_then(serde_json::Value::as_str)
-            .map(String::from),
+    let Some(report) = explorer_core::media_report_from_json(&v) else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            &std::io::Error::other("state ∈ playing|paused|ended|error"),
+        );
     };
     let mut session = st.session.lock().await;
     match session.media_report(id, mid, report) {
@@ -950,73 +901,10 @@ fn event_json(ev: &CoreEvent) -> (&'static str, String) {
 }
 
 /// Bras `MediaSurface` de [`event_json`] (étape 71b) —
-/// cycle de vie SSE et commandes JS → hôte.
+/// délégué au contrat `explorer-core` (étape 71e) : la
+/// charge JSON est la même en SSE et en drain FFI.
 fn media_event_json(ev: &CoreEvent) -> (&'static str, String) {
-    match ev {
-        CoreEvent::MediaOffered {
-            tab,
-            media,
-            kind,
-            rect,
-            url,
-            mime,
-            controls,
-            autoplay,
-        } => (
-            "media_offered",
-            serde_json::json!({
-                "tab": tab, "media": media,
-                "kind": match kind {
-                    explorer_core::MediaKind::Video => "video",
-                    explorer_core::MediaKind::Audio => "audio",
-                },
-                "rect": { "x": rect.x, "y": rect.y, "w": rect.w, "h": rect.h },
-                "url": url, "mime": mime,
-                "controls": controls, "autoplay": autoplay,
-            })
-            .to_string(),
-        ),
-        CoreEvent::MediaMoved { tab, media, rect } => (
-            "media_moved",
-            serde_json::json!({
-                "tab": tab, "media": media,
-                "rect": { "x": rect.x, "y": rect.y, "w": rect.w, "h": rect.h },
-            })
-            .to_string(),
-        ),
-        CoreEvent::MediaGone { tab, media } => (
-            "media_gone",
-            serde_json::json!({ "tab": tab, "media": media }).to_string(),
-        ),
-        CoreEvent::MediaCommand { tab, media, cmd } => (
-            "media_command",
-            serde_json::json!({
-                "tab": tab, "media": media,
-                "cmd": match cmd {
-                    explorer_core::MediaCmd::Play => serde_json::json!({ "type": "play" }),
-                    explorer_core::MediaCmd::Pause => serde_json::json!({ "type": "pause" }),
-                    explorer_core::MediaCmd::Seek { ms } => {
-                        serde_json::json!({ "type": "seek", "ms": ms })
-                    }
-                    explorer_core::MediaCmd::Volume { v } => {
-                        serde_json::json!({ "type": "volume", "v": v })
-                    }
-                    explorer_core::MediaCmd::Muted { on } => {
-                        serde_json::json!({ "type": "muted", "on": on })
-                    }
-                    explorer_core::MediaCmd::Rate { r } => {
-                        serde_json::json!({ "type": "rate", "r": r })
-                    }
-                },
-            })
-            .to_string(),
-        ),
-        // Bras non média — impossible depuis `event_json` ;
-        // un appel direct dégrade en event muet plutôt que
-        // de paniquer (tolérance).
-        _ => {
-            debug_assert!(false, "media_event_json hors bras média");
-            ("media", String::new())
-        }
-    }
+    // Le motif d'appel ne retient que les variantes média ;
+    // un appel direct hors bras dégrade en event muet.
+    explorer_core::media_event_json(ev).unwrap_or(("media", String::new()))
 }

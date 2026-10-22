@@ -528,3 +528,152 @@ impl Session {
         }
     }
 }
+
+/// `MediaHostState` → chaîne du contrat (`playing`/`paused`/
+/// `ended`/`error` — le même vocabulaire en SSE, REST et
+/// FFI ; étape 71e).
+#[must_use]
+pub fn media_host_state_str(s: MediaHostState) -> &'static str {
+    match s {
+        MediaHostState::Playing => "playing",
+        MediaHostState::Paused => "paused",
+        MediaHostState::Ended => "ended",
+        MediaHostState::Error => "error",
+    }
+}
+
+/// Sérialise une surface média (fiche `GET …/media` du
+/// contrat `MediaSurface`) — la forme JSON appartient au
+/// contrat, pas au transport : REST et FFI la partagent.
+#[must_use]
+pub fn media_offer_json(m: &MediaOfferInfo) -> serde_json::Value {
+    serde_json::json!({
+        "id": m.id, "tab": m.tab,
+        "kind": match m.kind {
+            MediaKind::Video => "video",
+            MediaKind::Audio => "audio",
+        },
+        "rect": { "x": m.rect.x, "y": m.rect.y, "w": m.rect.w, "h": m.rect.h },
+        "url": m.url, "mime": m.mime,
+        "controls": m.controls, "autoplay": m.autoplay,
+        "claimed": m.claim.is_some(),
+        "codecs": m.claim,
+        "state": m.state.as_ref().map(|r| serde_json::json!({
+            "position_ms": r.position_ms,
+            "duration_ms": r.duration_ms,
+            "buffered_ms": r.buffered_ms,
+            "state": media_host_state_str(r.state),
+            "error": r.error,
+        })),
+    })
+}
+
+/// `CoreEvent` média → `(nom SSE, charge JSON)` — les deux
+/// transposent à l'identique en SSE `data:` et en ligne
+/// NDJSON FFI. `None` pour toute variante hors média.
+#[must_use]
+pub fn media_event_json(ev: &CoreEvent) -> Option<(&'static str, String)> {
+    let out = match ev {
+        CoreEvent::MediaOffered {
+            tab,
+            media,
+            kind,
+            rect,
+            url,
+            mime,
+            controls,
+            autoplay,
+        } => (
+            "media_offered",
+            serde_json::json!({
+                "tab": tab, "media": media,
+                "kind": match kind {
+                    MediaKind::Video => "video",
+                    MediaKind::Audio => "audio",
+                },
+                "rect": { "x": rect.x, "y": rect.y, "w": rect.w, "h": rect.h },
+                "url": url, "mime": mime,
+                "controls": controls, "autoplay": autoplay,
+            })
+            .to_string(),
+        ),
+        CoreEvent::MediaMoved { tab, media, rect } => (
+            "media_moved",
+            serde_json::json!({
+                "tab": tab, "media": media,
+                "rect": { "x": rect.x, "y": rect.y, "w": rect.w, "h": rect.h },
+            })
+            .to_string(),
+        ),
+        CoreEvent::MediaGone { tab, media } => (
+            "media_gone",
+            serde_json::json!({ "tab": tab, "media": media }).to_string(),
+        ),
+        CoreEvent::MediaCommand { tab, media, cmd } => (
+            "media_command",
+            serde_json::json!({
+                "tab": tab, "media": media,
+                "cmd": match cmd {
+                    MediaCmd::Play => serde_json::json!({ "type": "play" }),
+                    MediaCmd::Pause => serde_json::json!({ "type": "pause" }),
+                    MediaCmd::Seek { ms } => {
+                        serde_json::json!({ "type": "seek", "ms": ms })
+                    }
+                    MediaCmd::Volume { v } => {
+                        serde_json::json!({ "type": "volume", "v": v })
+                    }
+                    MediaCmd::Muted { on } => {
+                        serde_json::json!({ "type": "muted", "on": on })
+                    }
+                    MediaCmd::Rate { r } => {
+                        serde_json::json!({ "type": "rate", "r": r })
+                    }
+                },
+            })
+            .to_string(),
+        ),
+        _ => return None,
+    };
+    Some(out)
+}
+
+/// Corps `{codecs: […]}` d'un `claim` → capacités déclarées
+/// par l'hôte (le JSON non-tableau tombe sur `[]`, comme le
+/// REST — tolérant, jamais de rejet pour un champ manquant).
+#[must_use]
+pub fn media_codecs_from_json(v: &serde_json::Value) -> Vec<String> {
+    v.get("codecs")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|c| c.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Corps `{position_ms, duration_ms, buffered_ms, state,
+/// error?}` d'un `state` → `MediaReport`. `None` si `state`
+/// est absent ou hors du vocabulaire (→ `400` côté REST,
+/// `-400` côté FFI).
+#[must_use]
+pub fn media_report_from_json(v: &serde_json::Value) -> Option<MediaReport> {
+    let u64f = |k: &str| v.get(k).and_then(serde_json::Value::as_u64);
+    let state = match v.get("state").and_then(serde_json::Value::as_str) {
+        Some("playing") => MediaHostState::Playing,
+        Some("paused") => MediaHostState::Paused,
+        Some("ended") => MediaHostState::Ended,
+        Some("error") => MediaHostState::Error,
+        _ => return None,
+    };
+    Some(MediaReport {
+        position_ms: u64f("position_ms").unwrap_or(0),
+        duration_ms: u64f("duration_ms"),
+        buffered_ms: u64f("buffered_ms").unwrap_or(0),
+        state,
+        error: v
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .map(String::from),
+    })
+}

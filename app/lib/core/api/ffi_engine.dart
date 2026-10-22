@@ -39,11 +39,17 @@ class FfiInvalidation {
     required this.invalidated,
     this.scrollY,
     this.rects,
+    this.mediaEvents = const [],
   });
 
   final bool invalidated;
   final double? scrollY;
   final List<ui.Rect>? rects;
+
+  /// Events `MediaSurface` drainés dans le même RPC (étape
+  /// 71e) — `{'event': <nom_sse>, 'data': <charge>}` ;
+  /// le dispatch UI est identique au SSE.
+  final List<Map<String, Object?>> mediaEvents;
 }
 
 /// Backend moteur **in-process** : charge `explorer_ffi.dll`
@@ -345,30 +351,59 @@ class FfiEngine implements BrowserRepository {
   Future<void> declineDownload(String tabId, int dlId) =>
       throw UnsupportedError('downloads : non exposé en FFI (étape 70)');
 
-  /// Seam MediaSurface (étape 71) : l'ABI n'exporte pas le
-  /// cycle claim/state — variante FFI à spécifier au premier
-  /// hôte in-process (journal d'interface). Dégradation honnête :
-  /// aucune offre listée, les appels tombent en UnsupportedError.
+  /// Seam MediaSurface (étape 71e) : l'ABI `explorer_media_*`
+  /// porte le cycle complet — fiches, claim/release/state
+  /// (codes `-409`/`-410` = le `409`/`410` REST) et drain
+  /// NDJSON des events (dans le tick). Une dll antérieure
+  /// retourne `null` → dégradation honnête (offres vides,
+  /// claims refusés — les stubs ADR-0023 continuent).
   @override
-  Future<List<MediaOffer>> listMedia(String tabId) async => const [];
+  Future<List<MediaOffer>> listMedia(String tabId) async {
+    final r = await _worker.call(opMediaList, {'tab': _idOf(tabId)});
+    final list = r?['media'] as List?;
+    return [
+      for (final m in list ?? const [])
+        if (m is Map) MediaOffer.fromJson(Map<String, dynamic>.from(m)),
+    ];
+  }
 
-  /// Voir [listMedia].
+  /// Claim `{codecs}` → `true` si acquis (`code == 0`) ;
+  /// `-409` déjà claimée / `-410` morte → `false` (le
+  /// contrôleur laisse alors l'offre non claimée).
   @override
-  Future<bool> claimMedia(String tabId, int mediaId, List<String> codecs) =>
-      throw UnsupportedError('media : non exposé en FFI (étape 71)');
+  Future<bool> claimMedia(
+    String tabId,
+    int mediaId,
+    List<String> codecs,
+  ) async {
+    final r = await _worker.call(opMediaClaim, {
+      'tab': _idOf(tabId),
+      'media': mediaId,
+      'codecs': codecs,
+    });
+    return r?['code'] == 0;
+  }
 
-  /// Voir [listMedia].
   @override
-  Future<void> releaseMedia(String tabId, int mediaId) =>
-      throw UnsupportedError('media : non exposé en FFI (étape 71)');
+  Future<void> releaseMedia(String tabId, int mediaId) async {
+    await _worker.call(opMediaRelease, {
+      'tab': _idOf(tabId),
+      'media': mediaId,
+    });
+  }
 
-  /// Voir [listMedia].
   @override
   Future<void> mediaState(
     String tabId,
     int mediaId,
     Map<String, dynamic> report,
-  ) => throw UnsupportedError('media : non exposé en FFI (étape 71)');
+  ) async {
+    await _worker.call(opMediaState, {
+      'tab': _idOf(tabId),
+      'media': mediaId,
+      'report': report,
+    });
+  }
 
   /// Avance les animations moteur et rapporte l'invalidation
   /// enrichie (étape 109) : `invalidated`, `scroll_y` (px CSS)
@@ -382,6 +417,10 @@ class FfiEngine implements BrowserRepository {
     return FfiInvalidation(
       invalidated: r?['invalidated'] == true,
       scrollY: (r?['scroll_y'] as num?)?.toDouble(),
+      mediaEvents: [
+        for (final e in (r?['media'] as List?) ?? const [])
+          if (e is Map) Map<String, Object?>.from(e),
+      ],
       rects: (r?['rects'] as List?)
           ?.map(
             (q) => ui.Rect.fromLTWH(

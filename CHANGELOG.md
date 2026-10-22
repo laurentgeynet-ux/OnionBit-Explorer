@@ -9,6 +9,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 71e — seam `MediaSurface` : variante
+  FFI spécifiée + câblée de bout en bout**
+  (`explorer-core`, `explorer-api`, `explorer-ffi`,
+  `app/`) : le mode in-process (premier rang depuis
+  le verdict P4) porte le cycle complet de lecture
+  média — fin des `UnsupportedError` côté app. La
+  sérialisation du contrat descend dans
+  `explorer-core` (`media_event_json`,
+  `media_offer_json`, `media_report_from_json`,
+  `media_codecs_from_json`) — REST/SSE et FFI
+  partagent la même charge JSON. ABI pull cohérente
+  avec l'existant : `explorer_media_events` draine
+  les événements en NDJSON `{event,data}` (jamais
+  de ligne tronquée — `media_pending` retient le
+  reliquat), `explorer_media_list` rend les fiches
+  au format `GET …/media`, `explorer_media_claim`/
+  `release`/`state` acceptent les corps JSON du
+  REST et codent les statuts du contrat (`-400`/
+  `-409`/`-410`). Côté app : ops worker 13-17,
+  `listMedia`/`claimMedia`/`releaseMedia`/
+  `mediaState` réels, drain média fusionné au RPC
+  `tick` → `_onEvent` — le même dispatch que le
+  SSE pilote claim → lecteur natif → commandes JS
+  → rapports ≤ 4 Hz. Dll antérieure → exports
+  optionnels `null` → stubs honnêtes.
 - **Étape 111 — pilote ADR-0025 : synchro
   miroir→DOM par journal de mutations**
   (`explorer-jscore`, `explorer-js`,
