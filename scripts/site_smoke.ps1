@@ -136,6 +136,24 @@ if (-not $SkipFunctional -and $ok -gt 0) {
     # l'historique du profil utilisateur.
     $profDir = Join-Path $env:TEMP 'explorer-site-smoke'
     New-Item -ItemType Directory -Force -Path $profDir | Out-Null
+    # Port encombré ? Un daemon smoke d'un run précédent (mort
+    # anormale du script, run parallèle) peut encore le tenir —
+    # le bind échoue alors et TOUTES les sondes parlent à un
+    # moteur possiblement obsolète (veille 22/10 : `os error
+    # 10048` — fonctionnels mesurés 1/9 sur moteur stale). On
+    # libère le port, mais chirurgicalement : seulement si le
+    # titulaire est bien un `explorer-daemon` (jamais un
+    # processus étranger qui occuperait 9379 par hasard).
+    Get-NetTCPConnection -LocalPort $FuncPort -State Listen `
+        -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.OwningProcess } | Sort-Object -Unique |
+        ForEach-Object {
+            $p = Get-Process -Id $_ -ErrorAction SilentlyContinue
+            if ($p -and $p.ProcessName -like 'explorer-daemon*') {
+                Write-Output "  port $FuncPort libéré (PID $_ = daemon stale)"
+                Stop-Process -Id $_ -Force
+            }
+        }
     # stderr capturé : une mort du daemon en cours de sondage
     # (observée une fois — cause non attribuée) doit laisser
     # une trace, pas disparaître dans le silence.
