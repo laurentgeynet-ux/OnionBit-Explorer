@@ -1828,6 +1828,23 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   Pré-requis mesurés : glyphes latins OK sur les familles
   courantes, seuls manquent les segments hors coverage
   de la première fonte résolue.
+- [ ] **R-72. Panic `selector` — découpe byte-index sur UTF-8**
+  (priorité lead — **crash site réel**, dépasse R-69 ;
+  repro mesurée vol terrain post-108 : `cli shot
+  https://en.wikipedia.org/wiki/Main_Page` → panic
+  `selector.rs:869` « start byte index 32 is not a char
+  boundary; it is inside 'õ' » → site_smoke 9 OK / 1 FAIL).
+  `attr_matches` découpe `actual` en **octets** :
+  `&actual[..expected.len()]` (`DashMatch` :861,
+  `Prefix` :865) et `&actual[len - expected.len()..]`
+  (`Suffix` :869) — un attribut commençant/finissant par
+  un caractère multi-octets fait paniquer le matching.
+  Recette : `actual.get(..)` → `None` = `false` (la
+  tranche hors frontière de char ne peut pas égaler) —
+  trois sites, zéro changement de sémantique. Régression
+  : valeur UTF-8 (`…õ`, `ç`) contre `[a$=x]`/`[a^=x]`/
+  `[a|=x]` dans `tests/selector.rs` — « tolérant, jamais
+  crash » violé ici.
 - [ ] **R-70. Texte coupé au bord droit de la frame**
   (trigger shot `cli shot www.wikipedia.org` post-Étape 108,
   1024 px — « Sear[ch] » tronqué en plein glyphe, « Read

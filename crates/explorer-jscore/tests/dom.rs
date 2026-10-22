@@ -242,6 +242,26 @@ fn image_constructor_creates_detached_img() {
 }
 
 #[test]
+fn html_element_interfaces_detectable() {
+    // github.com vol 22/10 : `ReferenceError: HTMLButtonElement`
+    // dans `t2-*.js` — la famille `HTML*Element` complète est
+    // installée en stubs de détection (inconstructibles).
+    assert_eq!(
+        ev("['HTMLButtonElement','HTMLInputElement','HTMLAnchorElement',\
+            'HTMLDivElement','HTMLFormElement','HTMLCanvasElement',\
+            'HTMLVideoElement','HTMLTemplateElement','HTMLSelectElement',\
+            'HTMLTableElement','HTMLSpanElement','HTMLMediaElement']\
+            .map(function(n){return typeof globalThis[n]}).join(',')"),
+        "function,function,function,function,function,function,function,function,function,function,function,function"
+    );
+    // Inconstructibles comme le reste du registre.
+    assert_eq!(
+        ev("var r=''; try{new HTMLButtonElement()}catch(e){r=e.name} r"),
+        "TypeError"
+    );
+}
+
+#[test]
 fn navigator_is_fixed_and_poor() {
     assert_eq!(ev("navigator.userAgent"), "Explorer/0.1 (explorer-jscore)");
     // Deliberately absent: plugins, geolocation, hardware APIs…
