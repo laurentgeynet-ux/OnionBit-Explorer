@@ -1828,6 +1828,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   Pré-requis mesurés : glyphes latins OK sur les familles
   courantes, seuls manquent les segments hors coverage
   de la première fonte résolue.
+- [ ] **R-70. Texte coupé au bord droit de la frame**
+  (trigger shot `cli shot www.wikipedia.org` post-Étape 108,
+  1024 px — « Sear[ch] » tronqué en plein glyphe, « Read
+  Wikipedia in your langua[ge] » poursuit hors viewport ;
+  même symptôme relevé en vol 21/10 sur github.com). Sonde
+  d'abord : mesurer si la boîte déborde le viewport (layout —
+  largeur intrinsèque du rang input+bouton+lien > conteneur,
+  overflow non clippé) ou si le texte déborde sa boîte (paint
+  — `white-space`/`text-overflow`/`overflow:hidden` non
+  honoré). Promouvoir en étape nommée après attribution
+  boxtree vs display.
+- [ ] **R-71. Sprites `background-image` non peints**
+  (même trigger — les deux cases autour de « Read Wikipedia
+  in your language » sont des rectangles vides sur le portail
+  Wikipedia). Contexte NAV : la rétention des fonds fetchés
+  est livrée (Étape 108 — `bg_decoded` survit aux synchros) ;
+  si le corps est bien dans `bg_decoded` et l'alias matche,
+  le trou est domaine : `background-position` (tranche
+  d'atlas), multi-couches (`linear-gradient(...),url(...)` —
+  `css_url_arg` prend-il la bonne couche ?), ou
+  `background-size` (hors portée documentée). Sonde :
+  `images.backgrounds` rempli → `DisplayItem::BackgroundImage`
+  émis → pixels ?
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
