@@ -42,6 +42,38 @@ fn test_dom(body: &str) -> Dom {
     tb.into_dom()
 }
 
+/// R-69 en session : `SharedFonts` délègue `font_face` +
+/// `fallback_for` sous verrou — sans elles, les défauts du
+/// trait re-servaient `font_data`@0 et `None` : le repli
+/// par glyphe (mesuré PIPE) restait dormant en session.
+#[test]
+fn shared_fonts_delegates_face_and_fallback() {
+    struct NoFont;
+    impl FontSource for NoFont {
+        fn font_data(&self, _req: &explorer_layout::font::FontRequest) -> Option<Vec<u8>> {
+            None
+        }
+    }
+    let mut w = explorer_render::WebFontSource::new(Arc::new(NoFont), 4);
+    assert!(w.register("Fbk", 400, false, explorer_test_support::fixture_ttf()));
+    let fonts = crate::session::apply::SharedFonts(Arc::new(std::sync::Mutex::new(w)));
+    let req = explorer_layout::font::FontRequest {
+        families: vec!["Fbk".to_string()],
+        weight: 400,
+        italic: false,
+    };
+    // `font_face` délégué (les faces web = index 0 — la
+    // preuve forte porte sur `fallback_for` ci-dessous).
+    assert!(fonts.font_face(&req).is_some());
+    // Repli par glyphe : la face web « Fbk » couvre 'A' —
+    // avant la délégation le défaut du trait rendait `None`.
+    let (bytes, idx) = fonts
+        .fallback_for('A', &req)
+        .expect("repli actif en session");
+    assert_eq!(idx, 0);
+    assert_eq!(*bytes, explorer_test_support::fixture_ttf());
+}
+
 /// Étape 56b — un snapshot gelé pendant la fenêtre
 /// `nav_apply` → `sub_commit` (DOM commis, produit
 /// jamais peint — `/frame` 204 persistant, hit-test

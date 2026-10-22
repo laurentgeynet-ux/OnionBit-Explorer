@@ -9,6 +9,45 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 109 — consommateur `rects` + traduction
+  locale de frame** (`app/`, audit 2) : la plomberie
+  `frame?x&y&w&h` + `rects`/`frame_copy_region`/
+  `dirty_rects` existait côté moteur depuis l'étape
+  55 — l'UI ne la lisait pas. `scroll()` lit le
+  `scroll_y` autoritaire de la réponse `input`
+  (REST JSON ; FFI joint par le worker) et
+  `Transform.translate` glisse la `RawImage`
+  retenue de `-(scrollY−peint)` — retour visuel
+  molette immédiat, la bande exposée attend le
+  pull. `frame_invalidated` parse `rects` (px
+  physiques) : même position → pull **partiel**
+  (`fetchFrameRegion` → `PictureRecorder`
+  composite) ; scroll, `rects` vide/absent
+  (contrat 55), volume borné
+  (`AppConfig.frameRegionMaxRects`×16,
+  `frameRegionMaxArea`×½, `scrollSyncEpsilon`
+  0,5 px) ou échec → pull plein auto-réparateur.
+  FFI : `tick` rend `scroll_y` + `dirty_rects`
+  drainés dans le même RPC (`FfiInvalidation`),
+  `opFrameRegion` borne x/y ≥ 0 et tailles à la
+  frame — exports absents → `null` → plein.
+  `paintedScrollY` posé à l'install, purgé à
+  `navigated`/`tab_closed`. Tests : traduction
+  locale → zéro au pull livré, pull partiel,
+  `rects: []` → plein, coalescence 89 intacte.
+
+- **Étape 110 — `SharedFonts` délègue `font_face`
+  + `fallback_for`** (`explorer-core`, demande
+  PIPE journalisée — activation session de R-69) :
+  le repli par glyphe était prouvé en sonde mais
+  **dormant en produit** — `SharedFonts` ne
+  déléguait que `font_data`+`revision`, les
+  défauts du trait rendaient `font_data`@0 (faces
+  `.ttc` >0 inaccessibles) et `None`. Deux
+  délégations sous verrou (recherche + clone
+  `Arc`, même borne que `font_data`). Test
+  `shared_fonts_delegates_face_and_fallback`.
+
 - **Étape 101 — deadline total de requête**
   (`explorer-net`, trigger vol humain fnac.fr) :
   `io_timeout` ne borne que chaque lecture — un serveur

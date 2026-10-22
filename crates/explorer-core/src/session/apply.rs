@@ -88,6 +88,25 @@ impl FontSource for SharedFonts {
         self.0.lock().ok()?.font_data(req)
     }
 
+    /// Octets + index de face (`.ttc`, R-69) — sans cette
+    /// délégation le défaut du trait reservait `font_data` à
+    /// l'index 0 : les faces de collection restaient
+    /// inaccessibles en session.
+    fn font_face(&self, req: &explorer_layout::font::FontRequest) -> Option<(Arc<Vec<u8>>, u32)> {
+        self.0.lock().ok()?.font_face(req)
+    }
+
+    /// Repli par glyphe (R-69) — sans cette délégation le
+    /// défaut du trait rendait `None` : le fallback mesuré
+    /// PIPE était dormant en session réelle.
+    fn fallback_for(
+        &self,
+        c: char,
+        req: &explorer_layout::font::FontRequest,
+    ) -> Option<(Arc<Vec<u8>>, u32)> {
+        self.0.lock().ok()?.fallback_for(c, req)
+    }
+
     /// Révision du registre `@font-face` — le `GlyphCache`
     /// persistant de la payload la lit par passe (R-36) :
     /// une face inscrite entre deux repaints vide le cache
