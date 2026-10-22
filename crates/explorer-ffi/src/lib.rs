@@ -801,10 +801,7 @@ pub unsafe extern "C" fn explorer_media_events(
             Ok(ev) => {
                 if let Some((name, data)) = explorer_core::media_event_json(&ev) {
                     use std::fmt::Write;
-                    let _ = writeln!(
-                        h.media_pending,
-                        "{{\"event\":\"{name}\",\"data\":{data}}}"
-                    );
+                    let _ = writeln!(h.media_pending, "{{\"event\":\"{name}\",\"data\":{data}}}");
                 }
             }
             Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}

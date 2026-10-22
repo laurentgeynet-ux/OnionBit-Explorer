@@ -158,18 +158,25 @@ async fn shot(url: &str, out: &str, size: Option<&str>) -> ExitCode {
     }
 }
 
-/// `jprobe <url>` : sonde du pilote ADR-0025 — navigation
-/// réelle puis **interactions synthétiques** (scrolls +
-/// clics en grille) pour déclencher les points de synchro
-/// DOM interactifs ; rapporte `journal_applies`/
-/// `journal_fallbacks` (fiabilité de la voie différentielle)
-/// + octets de sérialisation JS-C39 (ce que le journal
-/// économise en re-parse).
+/// `jprobe <url>` : sonde de vol terrain — navigation
+/// réelle puis **interactions synthétiques** (scrolls,
+/// balayage `mousemove` en grille, clics) pour déclencher
+/// les points de synchro DOM. Rapporte :
+/// - `journal` : fiabilité de la voie différentielle
+///   ADR-0025 (appliqués / replis / classées) ;
+/// - `editable` : hits `Hover.editable` du balayage
+///   (mesure `form:absent` — un champ réel et peint doit
+///   être désigné) ;
+/// - `media` : offres `MediaSurface` (`media_list`) +
+///   claim d'essai sur la première (cycle 71e en
+///   conditions réelles — la fixture couvre la mécanique,
+///   pas le terrain).
 #[tokio::main(flavor = "current_thread")]
 async fn jprobe(url: &str) -> ExitCode {
     let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
     let mut session = explorer_core::Session::new(client_stack(), Arc::new(fonts));
     session.set_js_factory(explorer_js::JscoreEngine::factory());
+    let mut events = session.subscribe();
     let tab = session.open_tab();
     if let Err(e) = session.navigate(tab, url).await {
         eprintln!("erreur : {e}");
@@ -184,14 +191,30 @@ async fn jprobe(url: &str) -> ExitCode {
         session.pump_timers(tab);
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
+    eprintln!(
+        "[media post-nav : {} offres]",
+        session.media_list(tab).len()
+    );
+    let mut editable_hits = 0u32;
     for round in 0..3 {
         let _ = session
             .handle_input(tab, explorer_core::InputEvent::Scroll { dy: 120.0 })
             .await;
-        for y in [80.0, 240.0, 400.0] {
-            let _ = session
-                .handle_input(tab, explorer_core::InputEvent::MouseMove { x: 100.0, y })
-                .await;
+        // Grille de survol (4×6) — couvre le header
+        // (form:absent searchInput y≈52) et la colonne
+        // principale ; chaque `Hover.editable` est un hit.
+        for x in [100.0, 400.0, 700.0, 950.0] {
+            for y in [50.0, 120.0, 200.0, 300.0, 420.0, 560.0] {
+                let out = session
+                    .handle_input(tab, explorer_core::InputEvent::MouseMove { x, y })
+                    .await;
+                if matches!(
+                    out,
+                    Ok(explorer_core::InputOutcome::Hover { editable: true, .. })
+                ) {
+                    editable_hits += 1;
+                }
+            }
         }
         let _ = session
             .handle_input(tab, explorer_core::InputEvent::Click { x: 100.0, y: 200.0 })
@@ -203,7 +226,7 @@ async fn jprobe(url: &str) -> ExitCode {
             .unwrap_or(std::time::Duration::from_millis(80));
         tokio::time::sleep(nap.min(std::time::Duration::from_millis(200))).await;
         session.pump_timers(tab);
-        eprintln!("[round {round}]");
+        eprintln!("[round {round} media={}]", session.media_list(tab).len());
     }
     eprintln!(
         "[journal : {} appliqués / {} replis / {} classées]",
@@ -211,6 +234,39 @@ async fn jprobe(url: &str) -> ExitCode {
         session.journal_fallbacks(),
         session.journal_classified()
     );
+    eprintln!("[editable : {editable_hits} points sur la grille]");
+    // Comptage des événements média émis pendant la sonde
+    // (offered vs gone tranche « jamais scanné » vs « tué »).
+    let mut n_off = 0u32;
+    let mut n_gone = 0u32;
+    let mut n_mov = 0u32;
+    let mut n_cmd = 0u32;
+    while let Ok(ev) = events.try_recv() {
+        match ev {
+            explorer_core::CoreEvent::MediaOffered { .. } => n_off += 1,
+            explorer_core::CoreEvent::MediaGone { .. } => n_gone += 1,
+            explorer_core::CoreEvent::MediaMoved { .. } => n_mov += 1,
+            explorer_core::CoreEvent::MediaCommand { .. } => n_cmd += 1,
+            _ => {}
+        }
+    }
+    eprintln!("[media events : {n_off} offered / {n_mov} moved / {n_gone} gone / {n_cmd} cmd]");
+    // Cycle MediaSurface réel : offres + claim d'essai.
+    let offers = session.media_list(tab);
+    eprintln!("[media : {} offres]", offers.len());
+    for m in &offers {
+        eprintln!(
+            "  - #{} {:?} {}×{} {} ({:?})",
+            m.id, m.kind, m.rect.w, m.rect.h, m.url, m.mime
+        );
+    }
+    if let Some(first) = offers.first() {
+        let claim = session.media_claim(tab, first.id, vec!["video/mp4".to_string()]);
+        eprintln!("  claim #{} → {:?}", first.id, claim.is_ok());
+        if claim.is_ok() {
+            let _ = session.media_release(tab, first.id);
+        }
+    }
     ExitCode::SUCCESS
 }
 

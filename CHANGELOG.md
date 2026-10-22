@@ -9,6 +9,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **`jprobe` élargi — sonde de vol terrain
+  consolidée** (`explorer-cli`) : la sonde
+  interactive rapporte désormais, au-delà des
+  compteurs journal ADR-0025, les hits
+  `Hover.editable` d'un balayage en grille
+  (mesure `form:absent` — un champ peint doit
+  être désigné) et le cycle `MediaSurface`
+  réel : comptage `offered`/`moved`/`gone`/
+  `cmd` sur le bus d'événements + `media_list`
+  par round + claim d'essai. Premier vol :
+  Wikipedia `editable=2` (`form:absent`
+  refermé post-R-70), Commons `2 offered →
+  2 gone` (le JS TMH retire les `<video>`
+  à l'hydratation — `MediaGone`
+  contractuel), page de test camendesign
+  `1 offered` survivant → `claim` réel
+  obtenu (cycle 71e complet en conditions
+  réelles).
 - **Étape 71e — seam `MediaSurface` : variante
   FFI spécifiée + câblée de bout en bout**
   (`explorer-core`, `explorer-api`, `explorer-ffi`,
