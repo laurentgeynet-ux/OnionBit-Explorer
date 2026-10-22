@@ -40,6 +40,10 @@ L'infrastructure différentielle existe déjà : JS-C26
 (`childList`/`attributes`/`characterData`) sur le miroir
 — le signal de diff est capturé, aujourd'hui consommé
 par les listeners JS puis perdu pour la synchro.
+**ADR-0013 §limites nomme déjà ce point d'extension** :
+« un diff d'arbre miroir→réel (même interface `sync_dom`,
+autre transport) » — cette ADR n'invente pas la
+direction, elle la met en œuvre.
 
 ## Décision
 
@@ -64,10 +68,14 @@ sens que dans son arène).
 (`appendChild`/`insertBefore`/`removeChild`) +
 `characterData`/`setAttribute` — les mutations qui
 alimentent >90 % des synchros réelles. Tout record non
-mappable (mutation exotique, `<script>` exécuté dans le
-fragment inséré, `innerHTML` massif) déclenche le
-**repli re-parse** — la vertu auto-réparante est
-conservée comme garde-fou, pas comme chemin nominal.
+mappable déclenche le **repli re-parse** — la vertu
+auto-réparante est conservée comme garde-fou, pas
+comme chemin nominal. Cas explicitement hors pilote
+(le re-parse leur offre les fixups HTML5 gratuitement) :
+**foster parenting** (`<table>` — insertion redirigée
+hors table), fragments `innerHTML` (parsing contextuel),
+`<script>` exécuté dans un fragment inséré, mutations
+massives (seuil à calibrer au pilote).
 
 **Garde de cohérence** : chaque journal porte le compte
 d'ops + une empreinte (hash structurel tag/ordre, pas de
