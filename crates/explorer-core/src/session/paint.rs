@@ -26,7 +26,7 @@ impl Session {
     /// incrémental au lieu du reflow global.
     ///
     /// Chemin synchrone `&mut self` — les hôtes partagés
-    /// enfilent via [`Self::queue_apply`] puis drainent hors
+    /// enfilent via [`Self::queue_apply_sync`] puis drainent hors
     /// verrou (étape 55h).
     pub(crate) fn apply_dom_sync(
         &mut self,
@@ -34,6 +34,7 @@ impl Session {
         html: &str,
         dirty_path: Option<&[(String, u32)]>,
         relayout: bool,
+        ids: Option<Vec<u64>>,
     ) {
         let ctx = self.apply_ctx();
         let Some(entry) = self.tabs.get_mut(&tab) else {
@@ -52,6 +53,8 @@ impl Session {
             dirty: dirty_path.map(<[_]>::to_vec),
             canvas_ops,
             relayout,
+            journal: None,
+            ids: ids.unwrap_or_default(),
         };
         let out = apply::apply_payload(&mut p, &ctx, &job, old_title.as_deref());
         if let Some(entry) = self.tabs.get_mut(&tab) {

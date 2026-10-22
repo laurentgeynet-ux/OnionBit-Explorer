@@ -491,6 +491,16 @@ pub struct Dom {
     /// `oldValue` est déjà filtrée par observer à l'enfilage ;
     /// drainée au microtask checkpoint.
     mutations: Vec<(u64, MutationRecord)>,
+    /// Journal de synchro différentielle (ADR-0025, étape 111)
+    /// — capture **inconditionnelle** des mutations sur nœuds
+    /// attachés, indépendante des `MutationObserver` (le journal
+    /// alimente la resynchro moteur, la file `mutations` les
+    /// listeners de la page).
+    journal: Vec<JournalOp>,
+    /// `true` = une mutation a échappé au journal (effacement
+    /// par `document.write`, chemin non tracé) — le prochain
+    /// drain déclare « re-parse » plutôt que rejouer à faux.
+    journal_poisoned: bool,
     /// « Document ouvert à l'écriture » (JS-C35) — `true` tant
     /// que la page se charge : `document.write`/`writeln` y
     /// ajoutent à `<body>`. `document.close()` ou la
@@ -506,6 +516,45 @@ pub struct Dom {
     serialize_bytes: Cell<u64>,
     /// Microsecondes cumulées dans `serialize_document` (JS-C39).
     serialize_micros: Cell<u64>,
+}
+
+/// Opération capturée pour la synchro différentielle
+/// (ADR-0025, étape 111). Capturée à l'enregistrement —
+/// `index` est la position de l'insert au moment de la
+/// mutation (les ops sont rejouées en séquence, les index
+/// restent valides) ; les payloads (`html`/`value`/`text`)
+/// sont matérialisés **au drain** — l'état le plus récent
+/// subsume les intermédiaires. `pub` : traduite en ops de
+/// couture par `explorer-js` (adattateur `JsEngine`).
+#[derive(Debug)]
+pub enum JournalOp {
+    /// `added` insérés sous `parent` à `index` (parmi tous
+    /// les enfants, texte compris).
+    Insert {
+        /// Parent cible (attaché).
+        parent: NodeId,
+        /// Position du premier inséré.
+        index: u32,
+        /// Racines insérées (contiguës).
+        added: Vec<NodeId>,
+    },
+    /// Sous-arbre `key` retiré du document.
+    Remove {
+        /// Racine retirée.
+        key: NodeId,
+    },
+    /// Attribut `name` muté — valeur relue au drain.
+    SetAttr {
+        /// Élément cible.
+        key: NodeId,
+        /// Nom d'attribut (minuscules).
+        name: String,
+    },
+    /// Texte muté — contenu relu au drain.
+    SetText {
+        /// Nœud texte cible.
+        key: NodeId,
+    },
 }
 
 impl Default for Dom {
@@ -538,6 +587,8 @@ impl Dom {
             dirty_node: Cell::new(None),
             observers: HashMap::new(),
             mutations: Vec::new(),
+            journal: Vec::new(),
+            journal_poisoned: false,
             canvases: HashMap::new(),
             media: HashMap::new(),
             template_contents: HashMap::new(),
@@ -598,12 +649,219 @@ impl Dom {
         std::mem::take(&mut self.mutations)
     }
 
+    // -- Journal de synchro (ADR-0025) ---------------------------------
+
+    /// Draine le journal de mutations — `None` si empoisonné
+    /// (un chemin non tracé a muté l'arbre : re-parse requis).
+    /// L'appelant (moteur) traduit les [`JournalOp`] en ops de
+    /// couture — il possède la sémantique de sérialisation.
+    /// `pub` pour `explorer-js` (adaptateur `JsEngine`).
+    pub fn take_journal(&mut self) -> Option<Vec<JournalOp>> {
+        if self.journal_poisoned {
+            self.journal.clear();
+            self.journal_poisoned = false;
+            return None;
+        }
+        Some(std::mem::take(&mut self.journal))
+    }
+
+    /// Vide le journal sans le consommer — appelé quand une
+    /// baseline complète (sérialisation cléée) subsume les
+    /// mutations antérieures.
+    /// `pub` pour `explorer-js` (adaptateur `JsEngine`).
+    pub fn clear_journal(&mut self) {
+        self.journal.clear();
+        self.journal_poisoned = false;
+    }
+
+    /// Marque le journal non rejouable — mutation par un chemin
+    /// non tracé (ex. effacement `document.write` post-`load`).
+    /// `pub` pour `explorer-js` (adaptateur `JsEngine`).
+    pub fn poison_journal(&mut self) {
+        self.journal_poisoned = true;
+    }
+
+    /// Empreinte structurelle du document : fold pré-ordre des
+    /// **tags d'éléments** (texte exclu — ADR-0025 : « tag/ordre,
+    /// pas de texte »). Suit `serial_children` — le contenu d'un
+    /// `<template>` est compté (le DOM moteur le descend via
+    /// `template_contents`, même ordre). Itératif (JS-C55).
+    #[must_use]
+    pub fn structural_fingerprint(&self) -> u64 {
+        // FNV-1a sur les octets de tag + un séparateur par nœud —
+        // l'ordre structure la valeur (insertion/rotation distinctes).
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut stack = self.serial_children(self.root).to_vec();
+        stack.reverse();
+        while let Some(id) = stack.pop() {
+            let n = &self.nodes[id as usize];
+            if n.kind == NodeKind::Element {
+                for &b in n.tag.as_bytes() {
+                    h ^= u64::from(b);
+                    h = h.wrapping_mul(0x0000_0100_0000_01b3);
+                }
+                h ^= 0xff;
+                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            for &c in self.serial_children(id).iter().rev() {
+                stack.push(c);
+            }
+        }
+        h
+    }
+
+    /// Sérialisation cléée du document (ADR-0025) : `(html,
+    /// ids)` — `ids` = `NodeId` miroir de chaque nœud dans
+    /// l'ordre d'émission (pré-ordre de `serialize`,
+    /// fragments aplatis sans entrée propre). La session
+    /// apparie les `NodeId` frais de son re-parse pour
+    /// monter la table d'identité.
+    #[must_use]
+    pub fn serialize_keyed(&self) -> (String, Vec<u64>) {
+        let mut out = String::new();
+        let mut ids = Vec::new();
+        for &c in self.serial_children(self.root) {
+            self.serialize_keyed_node(c, &mut out, &mut ids);
+        }
+        (out, ids)
+    }
+
+    /// Variante sous-arbre de [`Self::serialize_keyed`] —
+    /// utilisée par le drain de journal pour les `Insert`
+    /// (`outer_html` + ids de tout le sous-arbre).
+    #[must_use]
+    pub fn serialize_subtree_keyed(&self, node: NodeId) -> (String, Vec<u64>) {
+        let mut out = String::new();
+        let mut ids = Vec::new();
+        self.serialize_keyed_node(node, &mut out, &mut ids);
+        (out, ids)
+    }
+
+    /// Traversée unique `serialize` + collecte d'ids — mêmes
+    /// événements `Enter` que [`Self::serialize`], enregistrés.
+    fn serialize_keyed_node(&self, node: NodeId, out: &mut String, ids: &mut Vec<u64>) {
+        enum Ser {
+            Enter(NodeId),
+            Exit(NodeId),
+            Rawtext(NodeId),
+        }
+        let mut stack = vec![Ser::Enter(node)];
+        while let Some(ev) = stack.pop() {
+            match ev {
+                Ser::Exit(id) => {
+                    let n = &self.nodes[id as usize];
+                    out.push_str("</");
+                    out.push_str(&n.tag);
+                    out.push('>');
+                }
+                Ser::Rawtext(id) => {
+                    ids.push(u64::from(id));
+                    let child = &self.nodes[id as usize];
+                    let parent = &self.nodes[child.parent.unwrap_or(id) as usize];
+                    let marker = format!("</{}", parent.tag);
+                    if contains_ci(&child.text, &marker) {
+                        out.push_str(&escape_text(&child.text));
+                    } else {
+                        out.push_str(&child.text);
+                    }
+                }
+                Ser::Enter(id) => {
+                    let n = &self.nodes[id as usize];
+                    if n.kind == NodeKind::Text {
+                        ids.push(u64::from(id));
+                        out.push_str(&escape_text(&n.text));
+                        continue;
+                    }
+                    if n.kind == NodeKind::Fragment {
+                        // Aucun nœud moteur émis — id non listé
+                        // (les enfants le sont).
+                        for &c in n.children.iter().rev() {
+                            stack.push(Ser::Enter(c));
+                        }
+                        continue;
+                    }
+                    ids.push(u64::from(id));
+                    out.push('<');
+                    out.push_str(&n.tag);
+                    for (k, v) in &n.attrs {
+                        out.push(' ');
+                        out.push_str(k);
+                        out.push_str("=\"");
+                        out.push_str(&escape_attr(v));
+                        out.push('"');
+                    }
+                    out.push('>');
+                    if VOID_TAGS.contains(&n.tag.as_str()) {
+                        continue;
+                    }
+                    stack.push(Ser::Exit(id));
+                    let verbatim = RAW_VERBATIM.contains(&n.tag.as_str());
+                    for &c in self.serial_children(id).iter().rev() {
+                        let child = &self.nodes[c as usize];
+                        if verbatim && child.kind == NodeKind::Text {
+                            stack.push(Ser::Rawtext(c));
+                        } else {
+                            stack.push(Ser::Enter(c));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Capture journal ADR-0025 — **avant** le filtre observer
+    /// (le journal est inconditionnel : il alimente la
+    /// resynchro moteur, pas les listeners de la page).
+    /// Seules les mutations sur nœuds **attachés** sont
+    /// retenues : un sous-arbre détaché n'a pas de reflet
+    /// moteur — son attachement le sérialisera entier.
+    fn journal_record(&mut self, rec: &MutationRecord) {
+        if !self.is_attached(rec.target) {
+            return;
+        }
+        match rec.ty {
+            "childList" => {
+                for &key in &rec.removed {
+                    self.journal.push(JournalOp::Remove { key });
+                }
+                if let Some(&first) = rec.added.first() {
+                    // Position au moment de la mutation — les
+                    // ops rejouent en séquence, l'index reste
+                    // valide côté moteur.
+                    let index = self.nodes[rec.target as usize]
+                        .children
+                        .iter()
+                        .position(|&c| c == first)
+                        .map_or(0, |i| i as u32);
+                    self.journal.push(JournalOp::Insert {
+                        parent: rec.target,
+                        index,
+                        added: rec.added.clone(),
+                    });
+                }
+            }
+            "attributes" => {
+                if let Some(name) = &rec.attr_name {
+                    self.journal.push(JournalOp::SetAttr {
+                        key: rec.target,
+                        name: name.clone(),
+                    });
+                }
+            }
+            "characterData" => {
+                self.journal.push(JournalOp::SetText { key: rec.target });
+            }
+            _ => {}
+        }
+    }
+
     /// Dispatch d'un record aux observers correspondants :
     /// registrations propres de `target` + registrations
     /// `subtree` des ancêtres — un observer enregistré aux
     /// deux niveaux n'est notifié qu'**une** fois. La valeur
     /// d'avant est filtrée par observer (`*OldValue`).
     fn queue_mutation(&mut self, rec: &MutationRecord) {
+        self.journal_record(rec);
         if self.observers.is_empty() {
             return;
         }
@@ -1033,6 +1291,14 @@ impl Dom {
         self.nodes[frag as usize].children = kids;
         self.template_contents.insert(n, frag);
         self.mark_dirty_at(n);
+        // ADR-0025 : le déplacement vers le fragment détaché
+        // n'émet pas de record — les mutations ultérieures sur
+        // ces enfants seraient invisibles au journal (détachés)
+        // sans changer l'empreinte structurelle (attributs,
+        // texte) → repli re-parse, jamais de divergence silencieuse.
+        if self.is_attached(n) {
+            self.poison_journal();
+        }
         Some(frag)
     }
 

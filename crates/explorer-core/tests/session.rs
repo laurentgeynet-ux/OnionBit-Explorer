@@ -262,6 +262,7 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
             resync_gap_max_ms: 4_000,
             max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
+            dom_journal_max_ops: 512,
             color_scheme: explorer_css::ColorScheme::default(),
         },
     );
@@ -5195,19 +5196,25 @@ async fn dom_sync_uses_incremental_relayout() {
         "/stat",
         200,
         "<!doctype html><html><body><div id=\"h\">x</div>\
-         <div>AJOUT</div></body></html>",
+         <div>AJOUT</div><div>AJOUT</div></body></html>",
     );
     s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/").await.unwrap();
-    let before = s.incremental_syncs();
 
+    // ADR-0025 (étape 111) : le journal de mutations supplante
+    // le relayout incrémental 55f — la première mutation
+    // bootstrape la table d'identité via un repli cléé, la
+    // seconde est rejouée **en place** (NodeId stables).
+    s.handle_input(a, InputEvent::Click { x: 10.0, y: 10.0 })
+        .await
+        .unwrap();
     s.handle_input(a, InputEvent::Click { x: 10.0, y: 10.0 })
         .await
         .unwrap();
     assert!(
-        s.incremental_syncs() > before,
-        "la synchro DOM doit emprunter relayout_subtree (55f)"
+        s.journal_applies() >= 1,
+        "la seconde mutation doit rejouer par journal (in-place)"
     );
 
     let b = s.open_tab();
@@ -5215,7 +5222,7 @@ async fn dom_sync_uses_incremental_relayout() {
     assert_eq!(
         s.frame_png(a),
         s.frame_png(b),
-        "le rendu incrémental doit égaler la page statique"
+        "le rendu du journal doit égaler la page statique"
     );
 }
 
@@ -6062,6 +6069,7 @@ async fn redirect_commits_final_url_and_fragment() {
             resync_gap_max_ms: 4_000,
             max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
+            dom_journal_max_ops: 512,
             color_scheme: explorer_css::ColorScheme::default(),
         },
     );
@@ -6103,4 +6111,100 @@ async fn about_blank_navigates_sans_fetch() {
     assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
     s.go_back(id).await.unwrap();
     assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+}
+
+/// Étape 111 / ADR-0025 — le journal de mutations rejoue la
+/// synchro **en place** (`NodeId` stables : images, focus, find
+/// survivent sans re-key) au lieu du re-parse intégral. La
+/// première mutation tombe en `NoBaseline` (bootstrap : la
+/// table d'identité se monte à la baseline cléée servie en
+/// repli), les suivantes rejouent — `journal_applies` le
+/// mesure.
+#[tokio::test]
+async fn journal_apply_replays_in_place() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><div id=\"x\">avant</div>\
+         <script>setTimeout(function(){\
+         document.getElementById('x').textContent='APRES'},40);\
+         setTimeout(function(){\
+         document.getElementById('x').setAttribute('data-ok','1')},500)</script>\
+         </body></html>",
+    );
+    // DOM final équivalent, statique.
+    t.route(
+        "/s",
+        200,
+        "<html><body><div id=\"x\" data-ok=\"1\">APRES</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/m").await.unwrap();
+    // Rafale 1 : le timer 40 ms seul — journal → NoBaseline
+    // (pas encore de table d'identité) → repli cléé qui la
+    // monte.
+    std::thread::sleep(std::time::Duration::from_millis(90));
+    s.pump_timers(a);
+    assert_eq!(s.journal_fallbacks(), 1, "bootstrap NoBaseline attendu");
+    // Rafale 2 : le timer 500 ms — la baseline existe, le
+    // journal rejoue en place.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    s.pump_timers(a);
+    assert!(
+        s.journal_applies() >= 1,
+        "le second timer doit rejouer par journal (in-place)"
+    );
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    let (pa, pb) = (s.frame_png(a), s.frame_png(b));
+    assert!(pa.is_some() && pb.is_some());
+    assert_eq!(pa, pb, "le rejeu en place doit égaler le DOM statique");
+}
+
+/// `dom_journal_max_ops` dépassé → repli re-parse mesuré
+/// (`journal_fallbacks`) — la page reste correcte.
+#[tokio::test]
+async fn journal_ops_limit_falls_back() {
+    let t = Arc::new(FakeTransport::new());
+    let mut s = Session::with_config(
+        t.clone(),
+        Arc::new(FixtureFont),
+        SessionConfig {
+            dom_journal_max_ops: 1, // tout journal > 1 op → repli
+            ..SessionConfig::default()
+        },
+    );
+    t.route(
+        "/m",
+        200,
+        "<html><body><div id=\"x\">avant</div><div id=\"y\">0</div>\
+         <script>setTimeout(function(){\
+         document.getElementById('x').textContent='APRES';\
+         document.getElementById('y').textContent='1'},60)</script>\
+         </body></html>",
+    );
+    t.route(
+        "/s",
+        200,
+        "<html><body><div id=\"x\">APRES</div><div id=\"y\">1</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/m").await.unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    s.pump_timers(a);
+    assert!(
+        s.journal_fallbacks() >= 1,
+        "borne d'ops → repli : {}",
+        s.journal_fallbacks()
+    );
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    let (pa, pb) = (s.frame_png(a), s.frame_png(b));
+    assert!(pa.is_some() && pb.is_some());
+    assert_eq!(pa, pb, "le repli re-parse garde le DOM correct");
 }

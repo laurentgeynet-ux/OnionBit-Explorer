@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use explorer_dom::NodeId;
-use explorer_js::{DomSyncPayload, EventProp, JsEngine, UrlResolver};
+use explorer_js::{EventProp, JsEngine, UrlResolver};
 use explorer_net::url::Url;
 
 impl Session {
@@ -35,13 +35,17 @@ impl Session {
                 return 0;
             };
             let jobs = eng.run_pending_bounded(max);
-            let m = if sync_ok { eng.sync_dom_path() } else { None };
+            let m = if sync_ok {
+                Self::sync_for_apply(eng.as_mut())
+            } else {
+                None
+            };
             (jobs, m)
         };
         let mut t = sync_phase(tab, "pump.js_run_sync", t0);
-        if let Some((html, dirty)) = mutated {
+        if let Some(s) = mutated {
             let ta = Instant::now();
-            self.queue_apply(tab, html, dirty);
+            self.queue_apply_sync(tab, s);
             t = sync_phase(tab, "pump.apply_queued", ta);
         }
         if jobs > 0 {
@@ -111,7 +115,7 @@ impl Session {
         &mut self,
         tab: TabId,
         epoch: u64,
-        out: Option<(usize, Option<DomSyncPayload>, Box<dyn JsEngine>)>,
+        out: Option<(usize, Option<apply::ApplySync>, Box<dyn JsEngine>)>,
         sync_ok: bool,
     ) -> usize {
         let t0 = Instant::now();
@@ -146,7 +150,7 @@ impl Session {
                     eng.sync_mirror_attr(&path, &attr, value.as_deref());
                 }
                 if sync_ok {
-                    eng.sync_dom_path()
+                    Self::sync_for_apply(eng.as_mut())
                 } else {
                     None
                 }
@@ -156,12 +160,12 @@ impl Session {
         };
         let (jobs, mutated) = phase;
         let mut t = sync_phase(tab, "commit.deliver", t0);
-        if let Some((html, dirty)) = mutated {
+        if let Some(s) = mutated {
             let ta = Instant::now();
             // La mutation est enfilée — l'apply tournera hors
             // verrou via `drain_applies_shared` (étape 55h,
             // l'appelant pompe partagée draine juste après).
-            self.queue_apply(tab, html, dirty);
+            self.queue_apply_sync(tab, s);
             t = sync_phase(tab, "commit.apply_queued", ta);
         }
         if jobs > 0 {
@@ -345,16 +349,16 @@ impl Session {
             let t1 = sync_phase(tab, "event.dispatch", t0);
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après événement");
-            let m = eng.sync_dom_path();
+            let m = Self::sync_for_apply(eng.as_mut());
             (p, sync_phase(tab, "event.mirror_sync", t1), m)
         };
-        if let Some((html, dirty)) = mutated {
+        if let Some(s) = mutated {
             let ta = Instant::now();
             // Mutation enfilée — l'apply tourne hors verrou
             // chez les hôtes partagés (étape 55h) ; le drain
             // de compat `handle_input`/`drain_applies` garde
             // la sémantique synchrone.
-            self.queue_apply(tab, html, dirty);
+            self.queue_apply_sync(tab, s);
             t = sync_phase(tab, "event.apply_queued", ta);
         }
         // Les listeners ont pu émettre XHR/cookies/storage

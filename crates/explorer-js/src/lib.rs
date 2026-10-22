@@ -162,6 +162,89 @@ pub struct DomSyncStats {
     pub micros: u64,
 }
 
+/// Une opération de mutation différentielle du miroir,
+/// rejouable directement sur `explorer-dom` (ADR-0025,
+/// étape 111) — `key`/`parent` sont les **`NodeId` miroir**
+/// (identité stable côté JS) ; la session tient la table de
+/// correspondance `miroir → explorer-dom` reconstruite à
+/// chaque baseline [`DomSyncKeyed`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum DomMutation {
+    /// Insertion sous `parent` à la position `index` (parmi
+    /// les enfants, éléments et texte confondus). `html` =
+    /// sous-arbre sérialisé **au drain** (état courant —
+    /// les mutations post-enregistrement sont comprises) ;
+    /// `ids` = les `NodeId` miroir des nœuds du sous-arbre
+    /// dans l'ordre de sérialisation (pré-ordre) — la
+    /// session les apparie aux `NodeId` frais du parse.
+    Insert {
+        /// `NodeId` miroir du parent.
+        parent: u64,
+        /// Position d'insertion parmi les enfants.
+        index: u32,
+        /// Sous-arbre sérialisé (un ou plusieurs nœuds
+        /// racine concaténés).
+        html: String,
+        /// `NodeId` miroir des nœuds insérés (pré-ordre).
+        ids: Vec<u64>,
+    },
+    /// Retrait du nœud `key` (avec tout son sous-arbre).
+    Remove {
+        /// `NodeId` miroir de la racine retirée.
+        key: u64,
+    },
+    /// `setAttribute`/`removeAttribute`/`toggleAttribute` —
+    /// `value = None` = attribut retiré.
+    SetAttr {
+        /// `NodeId` miroir de l'élément.
+        key: u64,
+        /// Nom d'attribut (minuscules).
+        name: String,
+        /// Nouvelle valeur (`None` = retiré).
+        value: Option<String>,
+    },
+    /// Texte d'un nœud `Text` fixé (`characterData`).
+    SetText {
+        /// `NodeId` miroir du nœud texte.
+        key: u64,
+        /// Nouveau contenu.
+        text: String,
+    },
+}
+
+/// Journal de mutations drainé du miroir (ADR-0025) :
+/// ops ordonnées + empreinte structurelle (tags en
+/// pré-ordre, hors texte) du miroir **post-journal** — la
+/// session la recalcule sur le DOM rejoué ; divergence →
+/// repli re-parse. `None` de
+/// [`JsEngine::drain_dom_mutations`] = « synchro par
+/// sérialisation » (journal vide ou non rejouable — le
+/// moteur décide, l'appelant n'a pas à distinguer).
+#[derive(Debug, Clone)]
+pub struct DomJournal {
+    /// Ops ordonnées.
+    pub ops: Vec<DomMutation>,
+    /// Empreinte structurelle du miroir post-journal.
+    pub fingerprint: u64,
+}
+
+/// Charge de synchro **cléée** (baseline ADR-0025) : le
+/// HTML sérialisé + `ids` = `NodeId` miroir de chaque nœud
+/// dans l'ordre de sérialisation (pré-ordre). La session
+/// apparie les `NodeId` frais du re-parse pour (re)monter
+/// la table d'identité — les [`DomMutation`] suivantes
+/// adressent alors les nœuds par clé stable.
+#[derive(Debug, Clone)]
+pub struct DomSyncKeyed {
+    /// HTML sérialisé du miroir.
+    pub html: String,
+    /// Chemin du sous-arbre sale (comme [`DomSyncPayload`]).
+    pub dirty: Option<DomPath>,
+    /// `NodeId` miroir en pré-ordre de sérialisation —
+    /// vide = moteur sans identité (repli `sync_dom_path`).
+    pub ids: Vec<u64>,
+}
+
 /// Op-list `<canvas>` enregistrée par un contexte 2D du
 /// miroir (JS-C28, couture R-11) — `explorer_jscore::CanvasOpRecord`
 /// est le miroir sérialisable de
@@ -351,6 +434,46 @@ pub trait JsEngine: Send {
     /// Défaut : délègue à [`Self::sync_dom`] sans chemin.
     fn sync_dom_path(&mut self) -> Option<DomSyncPayload> {
         self.sync_dom().map(|h| (h, None))
+    }
+
+    /// Synchro **cléée** (ADR-0025, étape 111) — comme
+    /// [`Self::sync_dom_path`] mais avec les `NodeId` miroir en
+    /// pré-ordre : la session (re)monte la table d'identité
+    /// `miroir → explorer-dom` qui rend le journal
+    /// rejouable. Appeler cette méthode **clôt le journal** :
+    /// la sérialisation est la nouvelle baseline, les ops
+    /// antérieures sont subsumées. Défaut : délègue à
+    /// [`Self::sync_dom_path`], `ids` vide (moteur sans
+    /// journal — la session reste en mode re-parse).
+    fn sync_dom_keyed(&mut self) -> Option<DomSyncKeyed> {
+        self.sync_dom_path().map(|(html, dirty)| DomSyncKeyed {
+            html,
+            dirty,
+            ids: Vec::new(),
+        })
+    }
+
+    /// Variante **inconditionnelle** de [`Self::sync_dom_keyed`] —
+    /// sérialise même si le bit sale a déjà été consommé (repli
+    /// après rejet d'un journal : le drain avait pris `dirty`, la
+    /// baseline doit être re-livrée quand même). Défaut :
+    /// délègue à `sync_dom_keyed` (moteur sans journal — un
+    /// journal rejeté n'existe pas chez eux).
+    fn resync_dom_keyed(&mut self) -> Option<DomSyncKeyed> {
+        self.sync_dom_keyed()
+    }
+
+    /// Draine le **journal de mutations** depuis la dernière
+    /// baseline (ADR-0025, étape 111) : `Some(journal)` = ops
+    /// rejouables directement sur `explorer-dom` (`NodeId`
+    /// stables — plus de re-parse), `None` = « synchro par
+    /// sérialisation » (rien de neuf **ou** journal non
+    /// rejouable : mutations hors pilote, seuil dépassé… —
+    /// l'appelant enchaîne alors [`Self::sync_dom_keyed`]
+    /// sans distinction). Consomme le bit sale comme
+    /// `sync_dom_path`. Défaut : `None` (moteur sans journal).
+    fn drain_dom_mutations(&mut self) -> Option<DomJournal> {
+        None
     }
 
     /// Compteurs cumulés de la synchro DOM (JS-C39) — à lire
@@ -560,6 +683,98 @@ pub use explorer_jscore::module_specifiers;
 
 /// Commandes vers le thread moteur — valeurs sérialisables, aucun
 /// handle `Rc` ne traverse.
+/// Traduit les [`explorer_jscore::JournalOp`] miroir en
+/// [`DomMutation`] de couture (ADR-0025, étape 111) :
+/// payloads matérialisés **au drain** (sous-arbres
+/// sérialisés cléés, valeurs courantes d'attribut/texte).
+/// `None` = journal classé **non rejouable** — contextes
+/// dont le re-parse dépend du parent (foster parenting
+/// `<table>`, contenu `<select>`/`<template>`) ou contenu à
+/// re-parcours contextuel ; l'appelant retombe sur la
+/// synchro par sérialisation (garde-fou auto-réparant).
+fn journal_ops_to_seam(
+    d: &explorer_jscore::Dom,
+    ops: Vec<explorer_jscore::JournalOp>,
+) -> Option<Vec<DomMutation>> {
+    /// Tags parents dont le re-parse dépend du contexte
+    /// (foster parenting, groupes `<select>`, contenu
+    /// `<template>`, collections `head`/`html`).
+    const RISKY_PARENT: &[&str] = &[
+        "table", "thead", "tbody", "tfoot", "tr", "colgroup", "select", "template", "frameset",
+        "head", "html",
+    ];
+    /// Fragments de balisage dont la re-sérialisation se
+    /// re-parse différemment hors contexte.
+    const RISKY_CONTENT: &[&str] = &[
+        "<table",
+        "<thead",
+        "<tbody",
+        "<tfoot",
+        "<tr",
+        "<td",
+        "<th",
+        "<col",
+        "<select",
+        "<option",
+        "<template",
+        "<script",
+        "<frameset",
+        "<frame",
+    ];
+    let tag_of = |id: u32| -> &str { d.nodes.get(id as usize).map_or("", |n| n.tag.as_str()) };
+    let mut out = Vec::with_capacity(ops.len());
+    for op in ops {
+        match op {
+            explorer_jscore::JournalOp::Insert {
+                parent,
+                index,
+                added,
+            } => {
+                if RISKY_PARENT.contains(&tag_of(parent)) {
+                    return None;
+                }
+                let mut html = String::new();
+                let mut ids = Vec::new();
+                for &a in &added {
+                    let (h, i) = d.serialize_subtree_keyed(a);
+                    html.push_str(&h);
+                    ids.extend(i);
+                }
+                if RISKY_CONTENT.iter().any(|t| html.contains(t)) {
+                    return None;
+                }
+                out.push(DomMutation::Insert {
+                    parent: u64::from(parent),
+                    index,
+                    html,
+                    ids,
+                });
+            }
+            explorer_jscore::JournalOp::Remove { key } => {
+                out.push(DomMutation::Remove { key: u64::from(key) });
+            }
+            explorer_jscore::JournalOp::SetAttr { key, name } => {
+                if RISKY_PARENT.contains(&tag_of(key)) {
+                    return None;
+                }
+                out.push(DomMutation::SetAttr {
+                    key: u64::from(key),
+                    value: d.attr(key, &name).map(str::to_string),
+                    name,
+                });
+            }
+            explorer_jscore::JournalOp::SetText { key } => {
+                let n = d.nodes.get(key as usize)?;
+                out.push(DomMutation::SetText {
+                    key: u64::from(key),
+                    text: n.text.clone(),
+                });
+            }
+        }
+    }
+    Some(out)
+}
+
 enum Cmd {
     Eval {
         src: String,
@@ -591,6 +806,16 @@ enum Cmd {
     },
     DomSync {
         tx: Sender<Option<DomSyncPayload>>,
+    },
+    DomSyncKeyed {
+        /// `true` = sérialiser sans égard au bit sale (repli
+        /// post-rejet de journal : le dirty a été consommé par
+        /// le drain, la baseline doit être re-livrée quand même).
+        force: bool,
+        tx: Sender<Option<DomSyncKeyed>>,
+    },
+    DomJournal {
+        tx: Sender<Option<DomJournal>>,
     },
     DomSyncStats {
         tx: Sender<Option<DomSyncStats>>,
@@ -781,6 +1006,15 @@ impl JscoreEngine {
                         &page_url,
                         history_len,
                     ));
+                    // ADR-0025 : l'install est la baseline —
+                    // les records du parse initial n'ont rien à
+                    // rejouer (le DOM commis est déjà ce
+                    // document) ; sans ce clear, l'`Insert` de
+                    // `<html>` sous `#document` classifierait
+                    // chaque futur journal « parent risqué ».
+                    if let Some(d) = jsd.as_ref() {
+                        d.borrow_mut().clear_journal();
+                    }
                 }
                 Cmd::DrainNav { tx } => {
                     let out = std::mem::take(&mut *nav_q.borrow_mut());
@@ -793,6 +1027,58 @@ impl JscoreEngine {
                         let d = d.borrow();
                         d.take_dirty()
                             .then(|| (d.serialize_document(), d.take_dirty_path()))
+                    });
+                    if tx.send(out).is_err() {
+                        return;
+                    }
+                }
+                // ADR-0025 : baseline cléée = sérialisation +
+                // ids miroir en pré-ordre ; elle **clôt le
+                // journal** (les ops antérieures sont subsumées).
+                Cmd::DomSyncKeyed { force, tx } => {
+                    let out = jsd.as_ref().and_then(|d| {
+                        let mut d = d.borrow_mut();
+                        (force || d.take_dirty()).then(|| {
+                            let (html, ids) = d.serialize_keyed();
+                            let dirty = d.take_dirty_path();
+                            d.clear_journal();
+                            DomSyncKeyed { html, dirty, ids }
+                        })
+                    });
+                    if tx.send(out).is_err() {
+                        return;
+                    }
+                }
+                // ADR-0025 : drain du journal — `None` = « voie
+                // sérialisation » (journal vide **ou** classé
+                // non rejouable ; `dirty` n'est alors PAS
+                // consommé → l'appelant enchaîne
+                // `DomSyncKeyed`, la sérialisation complète
+                // subsume toutes les mutations).
+                Cmd::DomJournal { tx } => {
+                    let out = jsd.as_ref().and_then(|d| {
+                        let mut d = d.borrow_mut();
+                        let ops = d.take_journal()?; // poisonné → None
+                        if ops.is_empty() {
+                            // Mutations sur nœuds détachés
+                            // seulement — invisibles au rendu ;
+                            // consommer `dirty` tout de même
+                            // (l'attachement journalisera).
+                            d.take_dirty();
+                            d.take_dirty_path();
+                            return None;
+                        }
+                        match journal_ops_to_seam(&d, ops) {
+                            None => None, // classé re-parse : dirty intact
+                            Some(ops) => {
+                                d.take_dirty();
+                                d.take_dirty_path();
+                                Some(DomJournal {
+                                    ops,
+                                    fingerprint: d.structural_fingerprint(),
+                                })
+                            }
+                        }
                     });
                     if tx.send(out).is_err() {
                         return;
@@ -927,6 +1213,34 @@ impl JsEngine for JscoreEngine {
     fn sync_dom_path(&mut self) -> Option<DomSyncPayload> {
         let (tx, rx) = channel();
         if self.tx.send(Cmd::DomSync { tx }).is_err() {
+            return None;
+        }
+        rx.recv().ok().flatten()
+    }
+
+    fn sync_dom_keyed(&mut self) -> Option<DomSyncKeyed> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::DomSyncKeyed { force: false, tx })
+            .is_err()
+        {
+            return None;
+        }
+        rx.recv().ok().flatten()
+    }
+
+    fn resync_dom_keyed(&mut self) -> Option<DomSyncKeyed> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DomSyncKeyed { force: true, tx }).is_err() {
+            return None;
+        }
+        rx.recv().ok().flatten()
+    }
+
+    fn drain_dom_mutations(&mut self) -> Option<DomJournal> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DomJournal { tx }).is_err() {
             return None;
         }
         rx.recv().ok().flatten()

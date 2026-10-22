@@ -129,8 +129,10 @@ impl Session {
             // Miroir muté ? → re-parse : le relayout qui suit
             // rend les modifications (dirty bit consommé côté
             // moteur).
-            if let Some((mutated, _)) = eng.sync_dom_path() {
-                self.apply_dom_sync(tab, &mutated, None, false);
+            if let Some(k) = eng.sync_dom_keyed() {
+                self.apply_dom_sync(tab, &k.html, None, false, Some(k.ids));
+            } else if let Some((mutated, _)) = eng.sync_dom_path() {
+                self.apply_dom_sync(tab, &mutated, None, false, None);
             }
         }
         if let Some(entry) = self.tabs.get_mut(&tab) {
@@ -317,10 +319,10 @@ impl Session {
             }
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après réponse réseau");
-            eng.sync_dom_path()
+            Self::sync_for_apply(eng.as_mut())
         };
-        if let Some((html, dirty)) = mutated {
-            self.queue_apply(tab, html, dirty);
+        if let Some(s) = mutated {
+            self.queue_apply_sync(tab, s);
         }
         self.after_script(tab);
     }

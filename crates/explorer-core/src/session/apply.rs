@@ -153,6 +153,26 @@ pub(crate) struct ApplyCtx {
     /// Schéma de couleurs réglé — propagé à `StyleEnv`
     /// (étape 97).
     pub color_scheme: explorer_css::ColorScheme,
+    /// Borne d'ops du journal de mutations (ADR-0025 —
+    /// `SessionConfig::dom_journal_max_ops`, cloné pour le
+    /// worker détaché qui n'a pas la session).
+    pub dom_journal_max_ops: usize,
+}
+
+/// Lance l'apply du job — voie journal (rejeu en place,
+/// ADR-0025) ou re-parse ; `Err(reject)` = journal refusé,
+/// l'appelant re-enfile en mode baseline (`freshen_apply`
+/// tirera `sync_dom_keyed`).
+pub(crate) fn run_apply_job(
+    payload: &mut PaintPayload,
+    ctx: &ApplyCtx,
+    job: &PendingApply,
+    old_title: Option<&str>,
+) -> Result<ApplyOutcome, JournalReject> {
+    match &job.journal {
+        Some(j) => apply_journal(payload, ctx, job, j, old_title, ctx.dom_journal_max_ops),
+        None => Ok(apply_payload(payload, ctx, job, old_title)),
+    }
 }
 
 /// État de peinture d'un onglet sorti pour un apply
@@ -236,11 +256,19 @@ pub(crate) struct PaintPayload {
     /// Wikipedia, vol 22/10).
     pub img_decoded: HashMap<String, Arc<DecodedImage>>,
     pub bg_decoded: HashMap<String, Option<Arc<DecodedImage>>>,
+    /// Table d'identité `miroir → explorer-dom` (ADR-0025,
+    /// étape 111) : reconstruite à chaque baseline cléée
+    /// (`apply_payload`), étendue par les `Insert` du journal,
+    /// purgée par les `Remove`. Vide = pas de baseline —
+    /// tout journal tombe en `NoBaseline` → re-parse. Vit et
+    /// meurt avec `dom` (même granule de remplacement).
+    pub keymap: HashMap<u64, explorer_dom::NodeId>,
 }
 
 /// Titre courant de l'onglet — lu au début d'apply pour
 /// détecter le changement (le champ reste sur `Tab` ; la
 /// comparaison s'appuie sur ce snapshot).
+#[derive(Default)]
 pub(crate) struct PendingApply {
     /// Onglet cible.
     pub tab: TabId,
@@ -259,6 +287,26 @@ pub(crate) struct PendingApply {
     /// `true` = apply complet (relayout) ; `false` =
     /// re-parse + titre seulement (sous-ressource en vol).
     pub relayout: bool,
+    /// Journal de mutations à rejouer en place (ADR-0025,
+    /// étape 111) — `Some` = voie différentielle, le `html`
+    /// n'est alors rempli qu'au repli (rejet → re-parse).
+    pub journal: Option<explorer_js::DomJournal>,
+    /// `NodeId` miroir en pré-ordre accompagnant `html`
+    /// (baseline cléée [`explorer_js::DomSyncKeyed`]) — vide
+    /// pour les moteurs sans journal ou les parsings hors
+    /// synchro (navigation initiale : pas de baseline).
+    pub ids: Vec<u64>,
+}
+
+/// Produit d'un point de synchro DOM (ADR-0025, étape 111)
+/// — la voie différentielle est tentée d'abord ; la
+/// sérialisation **cléée** reste baseline + repli.
+pub(crate) enum ApplySync {
+    /// Journal de mutations rejouable en place (`NodeId`
+    /// stables — plus de re-parse).
+    Journal(explorer_js::DomJournal),
+    /// Baseline cléée : sérialisation + ids miroir.
+    Keyed(explorer_js::DomSyncKeyed),
 }
 
 /// Ce qu'un apply rapporte au commit (effets de bord
@@ -311,6 +359,7 @@ impl Tab {
             bg_bodies: std::mem::take(&mut self.bg_bodies),
             img_decoded: std::mem::take(&mut self.img_decoded),
             bg_decoded: std::mem::take(&mut self.bg_decoded),
+            keymap: std::mem::take(&mut self.dom_keymap),
         }
     }
 
@@ -344,6 +393,7 @@ impl Tab {
         self.bg_bodies = p.bg_bodies;
         self.img_decoded = p.img_decoded;
         self.bg_decoded = p.bg_decoded;
+        self.dom_keymap = p.keymap;
     }
 }
 
@@ -386,6 +436,11 @@ pub(crate) fn apply_payload(
     // construite sur `new_dom` depuis les ops capturées à
     // l'enfilement (chemins → `NodeId` du DOM commis).
     let canvases = canvas_table_from_ops(&job.canvas_ops, &new_dom);
+    // ADR-0025 : baseline cléée — la table `miroir → NodeId`
+    // suit le DOM frais (vide hors synchro cléée → le journal
+    // suivant tombera en `NoBaseline` → re-parse, jamais à
+    // faux).
+    build_keymap(&mut p.keymap, &new_dom, &job.ids);
     p.dom = Some(new_dom);
     p.images = PaintImages::default();
     p.images.canvases = canvases;
@@ -420,6 +475,318 @@ pub(crate) fn apply_payload(
     }
     out.cost = t0.elapsed();
     out
+}
+
+// ---------------------------------------------------------------------
+// Journal de mutations (ADR-0025, étape 111)
+// ---------------------------------------------------------------------
+
+/// Pourquoi un journal a été refusé — toute entrée renvoie au
+/// re-parse (garde-fou auto-réparant de l'ADR : la
+/// sérialisation complète subsume toujours l'état vrai).
+#[derive(Debug)]
+pub(crate) enum JournalReject {
+    /// Pas de baseline cléée (premier apply, moteur sans ids)
+    /// — la table d'identité n'existe pas.
+    NoBaseline,
+    /// Clé miroir absente de la table (nœud jamais vu ou
+    /// désaccord d'appariement — conservateur).
+    UnmappedKey,
+    /// `explorer-dom` a refusé l'opération (hiérarchie,
+    /// handle mort).
+    Dom,
+    /// Empreinte post-rejeu ≠ miroir — divergence structurelle.
+    Fingerprint,
+    /// Plus d'ops que `SessionConfig::dom_journal_max_ops` —
+    /// le re-parse coûte moins cher.
+    TooManyOps,
+    /// Pas de DOM posé (page jamais peinte).
+    NoDom,
+}
+
+/// Nœuds du DOM moteur **dans l'ordre de sérialisation
+/// miroir** (pré-ordre ; les enfants d'un `<template>` sont
+/// descendus via `template_contents` — le miroir les émet
+/// inline par `serial_children`). Apparié position par
+/// position à `DomSyncKeyed::ids` pour monter la table
+/// `miroir → NodeId`. Itératif — profondeur hostile.
+/// `true` = nœud présent dans le miroir JS (élément ou texte —
+/// le miroir n'a ni doctype ni commentaire : les sauter ici est
+/// ce qui garde le zip `engine_preorder` ↔ `ids` aligné sur les
+/// pages réelles, toutes porteuses de `<!-- -->`/`<!doctype>`).
+fn serializable_kind(dom: &Dom, id: explorer_dom::NodeId) -> bool {
+    use explorer_dom::NodeData;
+    matches!(dom.data(id), Ok(NodeData::Element(_) | NodeData::Text(_)))
+}
+
+fn engine_preorder(dom: &Dom) -> Vec<explorer_dom::NodeId> {
+    let mut out = Vec::new();
+    let Ok(mut stack) = dom
+        .children(dom.document())
+        .map(|c| c.into_iter().rev().collect::<Vec<_>>())
+    else {
+        return out;
+    };
+    while let Some(id) = stack.pop() {
+        if !serializable_kind(dom, id) {
+            continue;
+        }
+        out.push(id);
+        // Même ordre que `serial_children` miroir : contenu de
+        // `<template>` à la place des enfants ordinaires.
+        let kids = match dom.template_contents(id) {
+            Ok(Some(frag)) => dom.children(frag).unwrap_or_default(),
+            _ => dom.children(id).unwrap_or_default(),
+        };
+        for &c in kids.iter().rev() {
+            stack.push(c);
+        }
+    }
+    out
+}
+
+/// Variante sous-arbre de [`engine_preorder`] — collecte
+/// dans `out` (pré-ordre, `<template>` → `template_contents`).
+fn engine_preorder_subtree(
+    dom: &Dom,
+    root: explorer_dom::NodeId,
+    out: &mut Vec<explorer_dom::NodeId>,
+) {
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if !serializable_kind(dom, id) {
+            continue;
+        }
+        out.push(id);
+        let kids = match dom.template_contents(id) {
+            Ok(Some(frag)) => dom.children(frag).unwrap_or_default(),
+            _ => dom.children(id).unwrap_or_default(),
+        };
+        for &c in kids.iter().rev() {
+            stack.push(c);
+        }
+    }
+}
+
+/// Empreinte structurelle du DOM commis — mêmes règles que
+/// `Dom::structural_fingerprint` miroir : tags d'éléments en
+/// pré-ordre sérialisation (contenu `<template>` compris,
+/// texte exclu). Le divergent est attrapé par comparaison.
+fn engine_fingerprint(dom: &Dom) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for id in engine_preorder(dom) {
+        if let Ok(tag) = dom.tag_name(id) {
+            for &b in tag.as_bytes() {
+                h ^= u64::from(b);
+                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            h ^= 0xff;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    h
+}
+
+/// (Re)monte la table `miroir → NodeId` après une baseline
+/// cléée — zip positionnel `engine_preorder` ↔ `ids`
+/// (même ordre par construction). Longueurs divergentes →
+/// appariement tronqué : les clés absentes retomberont en
+/// `UnmappedKey` au rejeu (repli, jamais faux positif).
+fn build_keymap(keymap: &mut HashMap<u64, explorer_dom::NodeId>, dom: &Dom, ids: &[u64]) {
+    keymap.clear();
+    for (e, m) in engine_preorder(dom).into_iter().zip(ids.iter().copied()) {
+        keymap.insert(m, e);
+    }
+}
+
+/// Greffe un sous-arbre `src_id` (arène `src`, fragment
+/// fraîchement parsé) sous `dst_parent` à `index` — copie
+/// nœud à nœud (les arènes ne se partagent pas leurs ids).
+/// Retourne la racine greffée.
+fn graft_subtree(
+    dom: &mut Dom,
+    src: &Dom,
+    src_id: explorer_dom::NodeId,
+    dst_parent: explorer_dom::NodeId,
+    index: usize,
+) -> Result<explorer_dom::NodeId, JournalReject> {
+    use explorer_dom::NodeData;
+    let new = match src.data(src_id).map_err(|_| JournalReject::Dom)? {
+        NodeData::Element(_) => dom
+            .create_element(src.tag_name(src_id).map_err(|_| JournalReject::Dom)?)
+            .map_err(|_| JournalReject::Dom)?,
+        NodeData::Text(t) => dom
+            .create_text(t.as_str())
+            .map_err(|_| JournalReject::Dom)?,
+        NodeData::Comment(c) => dom
+            .create_comment(c.as_str())
+            .map_err(|_| JournalReject::Dom)?,
+        _ => return Err(JournalReject::Dom),
+    };
+    if let Ok(attrs) = src.attributes(src_id) {
+        for a in attrs {
+            dom.set_attribute(new, &a.name, &a.value)
+                .map_err(|_| JournalReject::Dom)?;
+        }
+    }
+    // Position : `index` dans les enfants **courants** (les
+    // ops antérieures ont déjà rejoué — invariant séquentiel).
+    let kids = dom.children(dst_parent).map_err(|_| JournalReject::Dom)?;
+    let refn = kids.get(index).copied();
+    dom.insert_before(dst_parent, new, refn)
+        .map_err(|_| JournalReject::Dom)?;
+    // Contenu `<template>` : arène à part des deux côtés.
+    if let Ok(Some(tfrag)) = src.template_contents(src_id) {
+        let tnew = dom.create_fragment().map_err(|_| JournalReject::Dom)?;
+        dom.set_template_contents(new, tnew)
+            .map_err(|_| JournalReject::Dom)?;
+        for (i, &c) in src.children(tfrag).unwrap_or_default().iter().enumerate() {
+            graft_subtree(dom, src, c, tnew, i)?;
+        }
+    }
+    for (i, &c) in src.children(src_id).unwrap_or_default().iter().enumerate() {
+        graft_subtree(dom, src, c, new, i)?;
+    }
+    Ok(new)
+}
+
+/// `NodeId` moteur d'une clé miroir — `Err` = non mappée.
+fn key_node(p: &PaintPayload, key: u64) -> Result<explorer_dom::NodeId, JournalReject> {
+    if p.keymap.is_empty() {
+        return Err(JournalReject::NoBaseline);
+    }
+    p.keymap
+        .get(&key)
+        .copied()
+        .ok_or(JournalReject::UnmappedKey)
+}
+
+/// Applique un journal de mutations **en place** sur le DOM
+/// commis (ADR-0025 — les `NodeId` survivent : `images`,
+/// `find`, `popup`, `focused` restent valides sans
+/// re-key). `Err` = repli re-parse par l'appelant.
+fn apply_journal(
+    p: &mut PaintPayload,
+    ctx: &ApplyCtx,
+    job: &PendingApply,
+    journal: &explorer_js::DomJournal,
+    old_title: Option<&str>,
+    max_ops: usize,
+) -> Result<ApplyOutcome, JournalReject> {
+    let t0 = Instant::now();
+    let mut out = ApplyOutcome::default();
+    if journal.ops.len() > max_ops {
+        return Err(JournalReject::TooManyOps);
+    }
+    if p.dom.is_none() {
+        return Err(JournalReject::NoDom);
+    }
+    if p.keymap.is_empty() && !journal.ops.is_empty() {
+        return Err(JournalReject::NoBaseline);
+    }
+    for op in &journal.ops {
+        match op {
+            explorer_js::DomMutation::Remove { key } => {
+                let id = key_node(p, *key)?;
+                // Purger les descendants de la table — les
+                // clés miroir meurent avec leur sous-arbre.
+                let mut gone = std::collections::HashSet::new();
+                let mut stack = vec![id];
+                let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
+                while let Some(n) = stack.pop() {
+                    gone.insert(n);
+                    stack.extend(dom.children(n).unwrap_or_default());
+                    if let Ok(Some(f)) = dom.template_contents(n) {
+                        stack.extend(dom.children(f).unwrap_or_default());
+                    }
+                }
+                dom.remove(id).map_err(|_| JournalReject::Dom)?;
+                p.keymap.retain(|_, v| !gone.contains(v));
+            }
+            explorer_js::DomMutation::SetAttr { key, name, value } => {
+                let id = key_node(p, *key)?;
+                let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
+                match value {
+                    Some(v) => dom.set_attribute(id, name, v),
+                    None => dom.remove_attribute(id, name).map(|_| ()),
+                }
+                .map_err(|_| JournalReject::Dom)?;
+            }
+            explorer_js::DomMutation::SetText { key, text } => {
+                let id = key_node(p, *key)?;
+                let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
+                dom.set_text(id, text).map_err(|_| JournalReject::Dom)?;
+            }
+            explorer_js::DomMutation::Insert {
+                parent,
+                index,
+                html,
+                ids,
+            } => {
+                let par = key_node(p, *parent)?;
+                // Pas de parse de fragment contextuel dans
+                // `explorer-html` : le fragment est parsé en
+                // document minimal et ses enfants de `<body>`
+                // greffés (le classifieur miroir a déjà écarté
+                // les contenus à parsing contextuel).
+                let frag = TreeBuilder::parse(html);
+                let Some(root_el) = frag.document_element() else {
+                    return Err(JournalReject::Dom);
+                };
+                let mut to_move = Vec::new();
+                // `<body>` (ou `<html>` à défaut) = porte-greffe.
+                let Ok(body) = frag.children(root_el).map(|c| {
+                    c.iter()
+                        .find(|&&n| frag.tag_name(n).is_ok_and(|t| t == "body"))
+                        .copied()
+                        .unwrap_or(root_el)
+                }) else {
+                    return Err(JournalReject::Dom);
+                };
+                to_move.extend(frag.children(body).unwrap_or_default());
+                let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
+                let base = *index as usize;
+                let mut created_all = Vec::new();
+                for (i, &src_root) in to_move.iter().enumerate() {
+                    let new_root = graft_subtree(dom, &frag, src_root, par, base + i)?;
+                    engine_preorder_subtree(dom, new_root, &mut created_all);
+                }
+                // Appariement `créés (pré-ordre)` ↔ `ids` — zip
+                // tronqué : le compte exact n'est pas garanti
+                // (round-trip), les orphelins retomberont en
+                // `UnmappedKey` → repli.
+                for (e, m) in created_all.into_iter().zip(ids.iter().copied()) {
+                    p.keymap.insert(m, e);
+                }
+            }
+        }
+    }
+    // Garde de cohérence ADR-0025 : l'empreinte structurelle
+    // du DOM rejoué doit égaler celle du miroir post-journal.
+    let dom = p.dom.as_ref().ok_or(JournalReject::NoDom)?;
+    if engine_fingerprint(dom) != journal.fingerprint {
+        return Err(JournalReject::Fingerprint);
+    }
+    // Les op-lists `<canvas>` sont chemins→NodeId : rejouées
+    // sur le DOM muté (un canvas inséré par journal peint
+    // dès cette frame — les ids stables gardent valides les
+    // entrées des canvas inchangés).
+    p.images.canvases = canvas_table_from_ops(&job.canvas_ops, dom);
+    let new_title = extract_title(dom);
+    if old_title != new_title.as_deref() {
+        out.title = Some(new_title);
+    }
+    if job.relayout {
+        let dom = p.dom.take().ok_or(JournalReject::NoDom)?;
+        if relayout_dom_payload(p, ctx, &dom, &job.canvas_ops).is_err() {
+            p.dom = Some(dom);
+            return Err(JournalReject::Dom);
+        }
+        p.dom = Some(dom);
+        out.repainted = true;
+    }
+    out.cost = t0.elapsed();
+    Ok(out)
 }
 
 /// `try_sync_incremental` sur payload — mêmes gardes que
@@ -826,20 +1193,33 @@ impl Session {
             scale: self.scale,
             image_max_px: self.image_max_px,
             color_scheme: self.color_scheme,
+            dom_journal_max_ops: self.dom_journal_max_ops,
         }
     }
 
-    /// Enfile une resynchro DOM pour l'onglet (étape 55h) :
-    /// une seule entrée par onglet — une sérialisation plus
-    /// récente subsume l'ancienne (document complet). Les
-    /// op-lists `<canvas>` sont capturées ici (le moteur
-    /// reste sur `Tab` pendant l'apply détaché).
-    pub(crate) fn queue_apply(
-        &mut self,
-        tab: TabId,
-        html: String,
-        dirty: Option<Vec<(String, u32)>>,
-    ) {
+    /// Point de synchro DOM unifié (ADR-0025) : **journal
+    /// d'abord**, baseline cléée sinon — `None` sans
+    /// nouveauté. Les moteurs sans journal répondent `None`
+    /// à `drain_dom_mutations` (défaut du trait) et livrent
+    /// `ids` vide — comportement historique conservé.
+    pub(crate) fn sync_for_apply(eng: &mut dyn JsEngine) -> Option<ApplySync> {
+        if let Some(j) = eng.drain_dom_mutations() {
+            return Some(ApplySync::Journal(j));
+        }
+        eng.sync_dom_keyed().map(ApplySync::Keyed)
+    }
+
+    /// Enfile le produit de [`Self::sync_for_apply`].
+    pub(crate) fn queue_apply_sync(&mut self, tab: TabId, s: ApplySync) {
+        match s {
+            ApplySync::Journal(j) => self.queue_apply_journal(tab, j),
+            ApplySync::Keyed(k) => self.queue_apply_keyed(tab, k),
+        }
+    }
+
+    /// Variante cléée de [`Self::queue_apply`] (ADR-0025) —
+    /// `keyed.ids` arme la table d'identité au re-parse.
+    pub(crate) fn queue_apply_keyed(&mut self, tab: TabId, keyed: explorer_js::DomSyncKeyed) {
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
         };
@@ -852,10 +1232,39 @@ impl Session {
         self.pending_applies.push_back(PendingApply {
             tab,
             epoch,
-            html,
-            dirty,
+            html: keyed.html,
+            dirty: keyed.dirty,
             canvas_ops,
             relayout: true,
+            journal: None,
+            ids: keyed.ids,
+        });
+    }
+
+    /// Enfile un **journal** de mutations (ADR-0025) — le
+    /// DOM commis est muté en place au drain (`NodeId`
+    /// stables), le re-parse n'intervient qu'au rejet.
+    /// `html` reste vide : le repli est re-alimenté par
+    /// `freshen_apply`/`sync_dom_keyed`.
+    pub(crate) fn queue_apply_journal(&mut self, tab: TabId, journal: explorer_js::DomJournal) {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        let canvas_ops = entry
+            .js
+            .as_deref_mut()
+            .map_or_else(CanvasOpsTable::new, explorer_js::JsEngine::canvas_ops);
+        let epoch = entry.nav_epoch;
+        self.pending_applies.retain(|p| p.tab != tab);
+        self.pending_applies.push_back(PendingApply {
+            tab,
+            epoch,
+            html: String::new(),
+            dirty: None,
+            canvas_ops,
+            relayout: true,
+            journal: Some(journal),
+            ids: Vec::new(),
         });
     }
 
@@ -907,10 +1316,32 @@ impl Session {
         let Some(eng) = entry.js.as_deref_mut() else {
             return;
         };
-        if let Some((html, dirty)) = eng.sync_dom_path() {
-            job.html = html;
-            job.dirty = dirty;
-            job.canvas_ops = eng.canvas_ops();
+        // ADR-0025 : un journal s'enchaîne — les ops
+        // produites après l'enfilement se soudent en
+        // queue (jamais de « périmé » : la séquence est
+        // l'état, pas un snapshot). L'empreinte la plus
+        // récente fait foi.
+        if let Some(j) = &mut job.journal {
+            if let Some(tail) = eng.drain_dom_mutations() {
+                j.ops.extend(tail.ops);
+                j.fingerprint = tail.fingerprint;
+            }
+        } else {
+            // `html` vide = rejet de journal re-enfilé —
+            // le dirty a été consommé au drain : forcer la
+            // re-sérialisation. Sinon rafraîchissement
+            // ordinaire, conditionné par le bit sale.
+            let k = if job.html.is_empty() {
+                eng.resync_dom_keyed()
+            } else {
+                eng.sync_dom_keyed()
+            };
+            if let Some(k) = k {
+                job.html = k.html;
+                job.dirty = k.dirty;
+                job.ids = k.ids;
+                job.canvas_ops = eng.canvas_ops();
+            }
         }
     }
 
@@ -1043,6 +1474,33 @@ impl Session {
         true
     }
 
+    /// Journal rejeté en apply détaché (ADR-0025) : restitue
+    /// la payload intacte (epoch gardée — une navigation
+    /// supplantée la jette) et re-enfile le job en mode
+    /// parse ; `freshen_apply` tirera `sync_dom_keyed` au
+    /// prochain drain — baseline cléée, table remontée.
+    pub(crate) fn journal_apply_rejected(
+        &mut self,
+        tab: TabId,
+        epoch: u64,
+        payload: PaintPayload,
+        mut job: PendingApply,
+        why: &JournalReject,
+    ) {
+        self.journal_fallbacks += 1;
+        tracing::warn!(tab, ?why, "journal DOM rejeté → repli re-parse (ADR-0025)");
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.paint_detached = false;
+            if entry.nav_epoch == epoch {
+                entry.put_paint(payload);
+            }
+        }
+        job.journal = None;
+        job.html.clear();
+        job.ids.clear();
+        self.pending_applies.push_front(job);
+    }
+
     /// Réarme `paint_detached` après une panique du worker de
     /// rendu de nav — la payload est perdue avec lui : l'état
     /// vide dégrade en lazy-heal (comme après apply, 55h).
@@ -1077,13 +1535,29 @@ impl Session {
             return;
         };
         let old_title = entry.title.clone();
+        let epoch = job.epoch;
         let mut p = entry.take_paint();
-        let out = apply_payload(&mut p, &ctx, job, old_title.as_deref());
-        if let Some(entry) = self.tabs.get_mut(&tab) {
-            entry.put_paint(p);
+        // ADR-0025 : rejeu du journal en place — `NodeId`
+        // stables, zéro re-parse. Tout rejet bascule sur la
+        // sérialisation complète (garde-fou auto-réparant :
+        // le job est re-enfilé en mode parse, `freshen_apply`
+        // tirera la baseline cléée la plus fraîche).
+        match run_apply_job(&mut p, &ctx, job, old_title.as_deref()) {
+            Ok(out) => {
+                if job.journal.is_some() {
+                    self.journal_applies += 1;
+                }
+                if let Some(entry) = self.tabs.get_mut(&tab) {
+                    entry.put_paint(p);
+                }
+                self.commit_apply(tab, &out);
+                self.drain_deferred_inputs(tab);
+            }
+            Err(why) => {
+                let job = std::mem::take(job);
+                self.journal_apply_rejected(tab, epoch, p, job, &why);
+            }
         }
-        self.commit_apply(tab, &out);
-        self.drain_deferred_inputs(tab);
     }
 
     /// Vide la file d'applies sous `&mut self` — drain de

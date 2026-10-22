@@ -9,6 +9,41 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 111 — pilote ADR-0025 : synchro
+  miroir→DOM par journal de mutations**
+  (`explorer-jscore`, `explorer-js`,
+  `explorer-core`) : chaque resynchro JS
+  re-parsait le HTML complet du miroir → tous
+  les `NodeId` régénérés → les tables indexées
+  (images, fonds, focus, find, popup `<select>`,
+  canvas) mouraient à chaque mutation — cause
+  racine d'Étape 108 et du mécanisme de survie
+  par `src`. Désormais la voie différentielle :
+  le miroir capture **inconditionnellement** un
+  journal d'ops (`Insert`/`Remove`/`SetAttr`/
+  `SetText` — avant le filtre `MutationObserver`,
+  nœuds attachés seuls) ; la session tient une
+  table `miroir → NodeId` (baseline cléée
+  `serialize_keyed` — ids en pré-ordre) et
+  rejoue les ops **en place** ; une empreinte
+  structurelle (tags pré-ordre, hors texte)
+  vérifie le DOM rejoué — divergence → repli
+  re-parse auto-réparant, jamais silencieux.
+  Hors-pilote classé côté moteur : foster
+  parenting `<table>`/`<select>`/`<template>`/
+  `html`, contenu `<script>`, journal empoisonné
+  (`template.content`), borne `SessionConfig::
+  dom_journal_max_ops` (512). Les `NodeId`
+  moteur survivent : les états indexés ne sont
+  plus reconstruits. Compteurs diagnostic
+  `journal_applies`/`journal_fallbacks`. Chemins
+  synchrone et `drain_applies_shared` identiques.
+  Tests : 6 couture (`dom_sync.rs`) + 2 session
+  (rejeu en place après bootstrap `NoBaseline`,
+  borne d'ops → repli). Supplante le relayout
+  incrémental 55f sur le chemin JS — le test
+  historique est porté sur `journal_applies`.
+
 - **Étape 109 — consommateur `rects` + traduction
   locale de frame** (`app/`, audit 2) : la plomberie
   `frame?x&y&w&h` + `rects`/`frame_copy_region`/

@@ -2031,6 +2031,77 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   for` la servent (avant : défaut
   `None` → l'`expect` paniquait).
 
+- [x] **Étape 111. Pilote ADR-0025 —
+  synchro miroir→DOM par journal de
+  mutations** (revue externe P1,
+  escalade JS-C39 actée) : chaque
+  `apply` de synchro JS re-parsait le
+  HTML complet → `NodeId` tous
+  régénérés → cause racine d'Étape
+  108 et des re-key images/focus/
+  find/canvas. Désormais :
+  - *Miroir* (`explorer-jscore`) :
+    `journal` capture **inconditionnelle**
+    des mutations attachées (avant le
+    filtre `MutationObserver`), `serialize_
+    keyed` livre `ids` pré-ordre, empreinte
+    structurelle FNV-1a (tags, hors
+    texte, `<template>` via `content`),
+    `poison_journal` sur chemins non
+    tracés (`template.content`), journal
+    clôt à `install_dom`/baseline.
+  - *Couture* (`explorer-js`) :
+    `DomMutation`/`DomJournal`/
+    `DomSyncKeyed`, `drain_dom_mutations`
+    (classifieur : parent `<table>`/
+    `<select>`/`<template>`/`html`,
+    contenu `<script>`/tableaux →
+    re-parse), `sync_dom_keyed`,
+    `resync_dom_keyed` (re-sérialise
+    même dirty consommé — repli post-
+    rejet).
+  - *Session* (`explorer-core`) :
+    `keymap` miroir→`NodeId` sur
+    `PaintPayload`, `apply_journal`
+    rejoue **en place** (inserts greffés
+    par parse de fragment + zip ids,
+    removes purgent la table, attrs/
+    texte en place), empreinte vérifiée
+    post-rejeu ; rejet → re-enfilage
+    baseline (`NoBaseline`/`UnmappedKey`/
+    `Fingerprint`/`TooManyOps`/`Dom`/
+    `NoDom`) — auto-réparant, jamais
+    de divergence silencieuse. Compteurs
+    `journal_applies`/`journal_fallbacks`
+    (observabilité du taux de succès).
+    Borne `SessionConfig::dom_journal_max_ops`
+    (512). Comportement identique chemin
+    synchrone et `drain_applies_shared`.
+  - *Bugs trouvés par les tests* :
+    records du parse initial restaient
+    dans le journal (`Insert` sous
+    `html` → tout classé risqué →
+    journal jamais engagé) — `clear_
+    journal` à l'install ; `resync_
+    dom_keyed` ajouté car le drain
+    consomme `dirty` (le repli aurait
+    re-parsé un document vide) ;
+    `engine_preorder` saute doctype/
+    commentaires (le miroir n'en a
+    pas — zip aligné sur pages réelles).
+  - *Supplanté* : le relayout
+    incrémental 55f sur le chemin JS
+    (le rejeu en place est la bonne
+    granulate ; 55f reste pour les
+    autres applis) — test 55f porté
+    sur `journal_applies`.
+  - Tests : 6 couture `dom_sync.rs`
+    (journal sans observer, ops,
+    baseline, parents risqués, poison
+    template) + 2 session (rejeu en
+    place avec bootstrap NoBaseline,
+    borne d'ops → repli) ; verts.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

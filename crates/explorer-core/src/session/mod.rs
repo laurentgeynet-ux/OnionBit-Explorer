@@ -255,6 +255,11 @@ pub(crate) struct Tab {
     /// devient idempotent.
     img_decoded: HashMap<String, Arc<DecodedImage>>,
     bg_decoded: HashMap<String, Option<Arc<DecodedImage>>>,
+    /// Table d'identité `miroir → NodeId` (ADR-0025, étape
+    /// 111) — montée à chaque baseline cléée (`DomSyncKeyed`),
+    /// voyage avec la payload (`take_paint`/`put_paint`).
+    /// Vide = journal non rejouable → repli re-parse.
+    dom_keymap: HashMap<u64, explorer_dom::NodeId>,
     /// Styles calculés de la dernière mise en page, indexés
     /// par **ordinal d'élément** (ordre document) — la clé
     /// survit au re-parse des synchronisations DOM, là où un
@@ -536,6 +541,16 @@ pub struct Session {
     /// Compteur de relayouts incrémentaux réussis (étape
     /// 55f) — diagnostic, lu par les tests de régression.
     incremental_syncs: u32,
+    /// Borne d'ops du journal de mutations rejoué (ADR-0025,
+    /// `dom_journal_max_ops` de config) — au-delà, re-parse.
+    dom_journal_max_ops: usize,
+    /// Rejets de journal → repli re-parse (ADR-0025) — la
+    /// fréquence de repli est la mesure de fiabilité du
+    /// journal (compteur `tracing`/diagnostic).
+    journal_fallbacks: u32,
+    /// Journals rejoués en place avec empreinte vérifiée
+    /// (ADR-0025) — le numérateur de la mesure de fiabilité.
+    journal_applies: u32,
     /// Applies de resynchro en file (étape 55h) — les points
     /// de synchro enfilent, les hôtes drainent (`drain_applies`
     /// synchrone ou `drain_applies_shared` hors verrou).
@@ -600,6 +615,9 @@ impl Session {
             resync_gap_max: std::time::Duration::from_millis(cfg.resync_gap_max_ms),
             bfcache_pages: cfg.bfcache_pages,
             incremental_syncs: 0,
+            dom_journal_max_ops: cfg.dom_journal_max_ops,
+            journal_fallbacks: 0,
+            journal_applies: 0,
             pending_applies: std::collections::VecDeque::new(),
             downloads: HashMap::new(),
             next_download_id: 1,
@@ -618,6 +636,26 @@ impl Session {
     #[must_use]
     pub fn incremental_syncs(&self) -> u32 {
         self.incremental_syncs
+    }
+
+    /// Nombre de rejets du journal de mutations DOM tombés en
+    /// repli re-parse (ADR-0025, étape 111) — la fréquence de
+    /// repli est la mesure de fiabilité du journal ; un ratio
+    /// élevé = journal à re-hausser en investigation.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn journal_fallbacks(&self) -> u32 {
+        self.journal_fallbacks
+    }
+
+    /// Nombre de journals de mutations rejoués en place
+    /// (ADR-0025 — `NodeId` stables, empreinte vérifiée).
+    /// `journal_applies`/`journal_fallbacks` = taux de succès
+    /// de la voie différentielle.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn journal_applies(&self) -> u32 {
+        self.journal_applies
     }
 
     /// Branche la fabrique de moteurs JS (`JscoreEngine::factory()`
@@ -750,6 +788,7 @@ impl Session {
                 bg_bodies: HashMap::new(),
                 img_decoded: HashMap::new(),
                 bg_decoded: HashMap::new(),
+                dom_keymap: HashMap::new(),
                 prev_styles: HashMap::new(),
                 transitions: Vec::new(),
                 animations: Vec::new(),

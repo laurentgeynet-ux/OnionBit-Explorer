@@ -346,7 +346,11 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     let tb = Instant::now();
     let out = tokio::task::spawn_blocking(move || {
         let jobs = eng.run_pending_bounded(max);
-        let mutated = if sync_ok { eng.sync_dom_path() } else { None };
+        let mutated = if sync_ok {
+            Session::sync_for_apply(&mut *eng)
+        } else {
+            None
+        };
         (jobs, mutated, eng)
     })
     .await;
@@ -391,13 +395,24 @@ pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, _tab: TabI
         // Hors verrou : les phases lourdes ne gèlent plus
         // ni l'API ni les autres onglets.
         let out = tokio::task::spawn_blocking(move || {
-            let o = apply::apply_payload(&mut payload, &ctx, &job, old_title.as_deref());
-            (payload, o)
+            // ADR-0025 : voie journal (rejeu en place) ou
+            // re-parse ; le rejet est remonté, la session
+            // re-enfile en mode baseline.
+            let r = apply::run_apply_job(&mut payload, &ctx, &job, old_title.as_deref());
+            (payload, r, job)
         })
         .await;
         let mut s = sess.lock().await;
         match out {
-            Ok((p, o)) => s.commit_apply_detached(tab, epoch, p, &o),
+            Ok((p, Ok(o), job)) => {
+                if job.journal.is_some() {
+                    s.journal_applies += 1;
+                }
+                s.commit_apply_detached(tab, epoch, p, &o);
+            }
+            Ok((p, Err(why), job)) => {
+                s.journal_apply_rejected(tab, epoch, p, job, &why);
+            }
             Err(_) => {
                 // Panic dans le worker : la payload est
                 // perdue avec la tâche — l'onglet redevient

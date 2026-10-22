@@ -66,8 +66,8 @@ mod worker;
 mod xhr;
 
 pub use dom::{
-    CanvasOpRecord, CanvasState, Dom, MediaCmd, MediaElState, MediaReport, MediaState, NodeId,
-    SerializeStats,
+    CanvasOpRecord, CanvasState, Dom, JournalOp, MediaCmd, MediaElState, MediaReport, MediaState,
+    NodeId, SerializeStats,
 };
 pub use dom_host::{CookieJar, DomRef, EventProp, FormSubmit};
 pub use error::{Error, Result};

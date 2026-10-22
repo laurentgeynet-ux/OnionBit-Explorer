@@ -738,6 +738,12 @@ pub struct SessionConfig {
     /// défauts UA sombres de la cascade (R-59). Défaut
     /// `Light`.
     pub color_scheme: explorer_css::ColorScheme,
+    /// Borne d'ops d'un journal de mutations rejoué tel quel
+    /// (ADR-0025, étape 111) — au-delà, le re-parse complet
+    /// coûte moins cher que le rejeu + la sérialisation des
+    /// sous-arbres insérés. Garde-fou « mutations massives »
+    /// de l'ADR, pas un seuil de fonctionnalité.
+    pub dom_journal_max_ops: usize,
 }
 
 impl Default for SessionConfig {
@@ -763,6 +769,7 @@ impl Default for SessionConfig {
             max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
             color_scheme: explorer_css::ColorScheme::default(),
+            dom_journal_max_ops: 512,
         }
     }
 }
