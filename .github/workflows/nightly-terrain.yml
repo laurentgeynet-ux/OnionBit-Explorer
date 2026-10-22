@@ -33,7 +33,9 @@ jobs:
         shell: pwsh
         run: |
           $report = Get-Content target/site_smoke/report.txt -Raw
-          $fails = ([regex]::Matches($report, 'FAIL ')).Count
+          # `FAIL ` seul matcherait la synthèse « 0 FAIL === »
+          # elle-même — exclure le marqueur de fin de section.
+          $fails = ([regex]::Matches($report, 'FAIL(?! ===)')).Count
           $title = if ($fails -gt 0) { "⚠️ $fails FAIL" } else { 'vert' }
           $body = "### $(Get-Date -Format 'yyyy-MM-dd HH:mm') UTC — $title`n`n" +
                   '```' + "`n$report`n" + '```' + "`n`n" +
