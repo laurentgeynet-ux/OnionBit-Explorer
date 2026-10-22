@@ -73,7 +73,7 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `keyboard_event_ctor_copies_init_keys`. Mécanisme
   réutilisable pour `MouseEvent.clientX`…
 
-- **JS-C58 — census post-Étape 108 : trois trous
+- **JS-C58 — census post-Étape 108 : six trous
   mini-DOM mesurés** (`explorer-jscore`, sonde
   `LOBSTE_PROBE_URL` sur la batterie
   wikipedia/github/dev.to/bbc) :
@@ -99,15 +99,37 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     interfaces spec rejoignent les stubs
     inconstructibles — fin du whack-a-mole
     interface par interface.
+  - **`createElementNS`** — `` `createElementNS`
+    is not a function (on HTMLDocument) ``
+    (github.com `z8-*.js`, bundles SVG) ; même
+    chemin que `createElement`, `localName`
+    minuscules conservé.
+  - **`Array.prototype` génériques** — github
+    `selector-observer` appelle `.slice(0)` sur un
+    objet héritant d'un vrai tableau (`Object.
+    create(proto.indexes)`) ; `this_array_like`
+    résout `length` + indices via la chaîne proto
+    (spec : méthodes génériques), `concat`
+    préserve les trous (`HasProperty`).
+  - **`<template>.content`** — github
+    `github-elements` `h.content.appendChild(m)` ;
+    fragment paresseux par template (spec
+    `template contents` : les enfants parsés
+    migrent dans le fragment), `innerHTML` et le
+    sérialiseur routés sur le contenu.
   Mesure : dev.to **3 → 1 PipelineError** (résidu
   `U8` = shim `createContext` react-dom — aval
-  React réel, backlog documenté) ; wikipedia 0 ;
-  bbc quasi-propre (1 throw défensif du site, pas
-  un gap) ; census offline : `application.js`
-  678 Kio évalué en entier. Tests :
-  `storage_opt_chain_method_dispatch`,
-  `document_inherits_document_prototype`,
-  `html_element_interfaces_detectable`.
+  React réel, backlog documenté) ; github **5 → 2**
+  (il ne reste que les deux `react` bare
+  specifier) ; wikipedia 0 ; bbc quasi-propre
+  (1 throw défensif du site, pas un gap) ; census
+  offline : `application.js` 678 Kio évalué en
+  entier. Tests : `storage_opt_chain_method_
+  dispatch`, `document_inherits_document_
+  prototype`, `html_element_interfaces_
+  detectable`, `create_element_ns_creates_local_
+  name`, `array_slice_concat_generic_on_array_like`,
+  `template_content_is_fragment`.
 
 - **JS-C57 — `Image`/`HTMLImageElement`**
   (`explorer-jscore`, trigger vol humain 22/10) :

@@ -2701,6 +2701,84 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   IMG, parent null, attrs 100x50, insertable, stub
   inconstructible).
 
+- [x] **JS-C58. Census post-Étape 108 — six trous mini-DOM
+  mesurés** (sonde `LOBSTE_PROBE_URL`, batterie
+  wikipedia/github/dev.to/bbc — wikipedia reste à 0,
+  bbc quasi-propre (1 throw défensif du site :
+  `Load full version of piano SDK`, détection
+  feature, pas un gap moteur)) :
+  - **`?.` → `Host::invoke`** (dev.to `paginate` :
+    `localStorage?.getItem("current_feed")` levait
+    `TypeError: value is not a function`) — `eval_chain`
+    lisait la prop membre sans consulter `invoke` ;
+    le step `Call` suit désormais l'ordre de
+    `Callee::Member` (host invoke d'abord, valeur
+    lue ensuite), clé membre suivie via `recv_key`.
+    Couvre `h?.m()`, `h?.x.m()`, `h?.[k]()` pour
+    *tous* les hosts (Storage, location, elements…).
+  - **`document` hérite `Document.prototype`** (dev.to
+    `application.js` : `Document.prototype.ready =
+    new Promise(…)` puis `document.ready.then` →
+    `cannot read 'then' of Undefined` — le patch du
+    proto tombait dans un objet orphelin) — le proto
+    du host `document` pointe le `prototype` du stub
+    ; `document instanceof Document` devient vrai.
+  - **Famille `HTML*Element` complète** (github.com :
+    `ReferenceError: HTMLButtonElement is not defined`
+    dans `t2-*.js`) — les ~70 interfaces spec rejoignent
+    le registre de stubs inconstructibles (fin du
+    whack-a-mole membre par membre).
+  - **`createElementNS`** (github.com `z8-*.js` :
+    `` `createElementNS` is not a function (on
+    HTMLDocument) `` — les bundles SVG l'atteignent
+    dès le déblocage des stubs) — même chemin que
+    `createElement`, `localName` conservé en
+    minuscules, `tagName` uppercase (convention moteur).
+  - **`Array.prototype` génériques** (github.com
+    `selector-observer` : `this.indexes =
+    Object.create(proto.indexes)` puis `.slice(0)`
+    sur un objet array-*like* héritant d'un vrai
+    tableau → `array method called on non-array`) —
+    `this_array_like` : `length` + `Get` par indice à
+    travers la chaîne proto (spec : `slice`/`concat`
+    sont intentionnellement génériques), borne
+    `length` 1 M alignée sur `array_concat`, `tick`
+    budgété. `concat` préserve les *trous* (spec
+    `FlattenIntoArray` via `HasProperty` — ne
+    densifie pas en `undefined`).
+  - **`<template>.content`** (github.com
+    `github-elements` : `h.content.appendChild(m)` →
+    `cannot read 'appendChild' of Undefined`) —
+    `Dom::template_contents` : fragment paresseux
+    par élément template ; la lecture `.content`
+    *déplace* les enfants parsés dans le fragment
+    (spec `template contents` — `childNodes` de
+    l'élément passe à 0), `innerHTML` lit/écrit le
+    fragment, le sérialiseur descend dans le
+    contenu. `NodeKind::Fragment` existant réutilisé
+    (splice `append`/`insertBefore` intact).
+  Mesure terrain : dev.to **3 → 1 PipelineError**
+  (`paginate` et `document.ready` morts, syncs miroir
+  2→3 — plus de JS s'exécute ; le résidu `U8` est le
+  shim `createContext` react-dom — aval React réel,
+  backlog documenté), github **5 → 2**
+  (`HTMLButtonElement`, `createElementNS`,
+  `selector-observer` et `template.content` morts ;
+  il ne reste que les deux `react` bare specifier —
+  résidu documenté, React réel hors périmètre).
+  Repro `census` offline : `application.js` 678 Kio
+  évalué **en entier** (vs échec d'init). Tests :
+  `storage_opt_chain_method_dispatch` (`?.` sur
+  méthodes host, chaînes mixtes, base nullish),
+  `document_inherits_document_prototype` (patch
+  visible, `instanceof`, priorité own > proto),
+  `html_element_interfaces_detectable` (famille,
+  inconstructibles), `create_element_ns_creates_
+  local_name`, `array_slice_concat_generic_on_array_
+  like` (héritage proto, `slice`/`concat`/`filter`),
+  `template_content_is_fragment` (fragment, déplace
+  enfants, identité stable, markup parsé).
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

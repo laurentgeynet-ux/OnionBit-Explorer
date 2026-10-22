@@ -140,8 +140,9 @@ pub(crate) fn norm_idx(i: i64, len: i64) -> usize {
 }
 
 pub(crate) fn array_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
-    let elems = take_elems(e, id);
+    // Méthode générique (spec) — array-likes via `length`+`Get`
+    // (`Object.create(array)` mesuré github selector-observer).
+    let elems = this_array_like(e, this)?;
     let len = elems.len() as i64;
     let start = match arg(args, 0) {
         Value::Undefined => 0,
@@ -157,7 +158,6 @@ pub(crate) fn array_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
     } else {
         Vec::new()
     };
-    put_elems(e, id, elems);
     // `ArraySpeciesCreate(this, out.len)` — sous-classes.
     let a_v = species_array(e, this, out.len())?;
     for (i, v) in out.iter().enumerate() {
@@ -167,10 +167,12 @@ pub(crate) fn array_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
 }
 
 pub(crate) fn array_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
-    let mut out = take_elems(e, id);
-    put_elems(e, id, out.clone());
-    for a in args {
+    // `this` est un élément comme les autres (spec) : spreadable
+    // → éclaté via `length`+`Get`, sinon posé tel quel. Couvre
+    // les array-likes (`Object.create(array)` github
+    // selector-observer : `idx.slice(0).concat(idx.default)`).
+    let mut out = Vec::new();
+    for a in std::iter::once(&this).chain(args.iter()) {
         // `IsConcatSpreadable` (spec) : `arg[@@isConcatSpreadable]`
         // prime, sinon le défaut est `Array.isArray(arg)`.
         let spread = match a {
@@ -191,7 +193,19 @@ pub(crate) fn array_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
                 _ => 0,
             };
             for i in 0..len {
-                let v = e.get_prop_value(*a, &i.to_string())?;
+                let k = i.to_string();
+                // `FlattenIntoArray` (spec) : `HasProperty` d'abord
+                // — les trous traversent comme des trous, jamais
+                // densifiés en `undefined`.
+                let v = if let Value::Obj(aid) = a {
+                    if e.has_prop(*aid, &k)? {
+                        e.get_prop_value(*a, &k)?
+                    } else {
+                        Value::Hole
+                    }
+                } else {
+                    e.get_prop_value(*a, &k)?
+                };
                 out.push(v);
                 if i % 8192 == 0 {
                     e.tick()?;

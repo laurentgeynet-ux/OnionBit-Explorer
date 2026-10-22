@@ -477,6 +477,75 @@ fn create_and_attach() {
     );
 }
 
+#[test]
+fn template_content_is_fragment() {
+    // github.com `z8-*.js` : `tpl.content.appendChild(row)` —
+    // `.content` matérialise le fragment de contenu et y
+    // *déplace* les enfants (spec `template contents`).
+    assert_eq!(
+        ev("var t = document.createElement('template');\
+            t.innerHTML = '<b>x</b><i>y</i>';\
+            t.content.nodeType"),
+        "11"
+    );
+    // `innerHTML` du template sérialise le contenu du fragment.
+    assert_eq!(
+        ev("var t = document.createElement('template');\
+            t.innerHTML = '<b>x</b><i>y</i>';\
+            t.content.appendChild(document.createElement('u'));\
+            t.innerHTML"),
+        "<b>x</b><i>y</i><u></u>"
+    );
+    // Les enfants déplacés : `childNodes` de l'élément est vide.
+    assert_eq!(
+        ev("var t = document.createElement('template');\
+            t.innerHTML = '<b>x</b>';\
+            t.content;\
+            t.childNodes.length"),
+        "0"
+    );
+    // Stabilité d'identité : deux lectures, même objet.
+    assert_eq!(
+        ev("var t = document.createElement('template');\
+            t.content === t.content"),
+        "true"
+    );
+    // `<template>` du markup : la lecture `.content` avale les
+    // enfants parsés.
+    assert_eq!(
+        ev_in(
+            "<html><body><template id='tpl'><b>m</b></template></body></html>",
+            "document.getElementById('tpl').content.children.length",
+        ),
+        "1"
+    );
+    // …et son `childNodes` propre passe à 0 après la matérialisation.
+    assert_eq!(
+        ev_in(
+            "<html><body><template id='tpl'><b>m</b></template></body></html>",
+            "document.getElementById('tpl').content;\
+             document.getElementById('tpl').childNodes.length",
+        ),
+        "0"
+    );
+}
+
+#[test]
+fn create_element_ns_creates_local_name() {
+    // github.com `z8-*.js` : svg inline via
+    // `document.createElementNS('http://www.w3.org/2000/svg',
+    // 'svg')` — l'URI est acceptée/ignorée, le nœud est créé
+    // par son nom local (préfixe `ns:tag` dépouillé).
+    assert_eq!(
+        ev("document.createElementNS('http://www.w3.org/2000/svg','svg').tagName"),
+        "SVG"
+    );
+    assert_eq!(
+        ev("document.createElementNS('http://www.w3.org/2000/svg','svg:circle').tagName"),
+        "CIRCLE"
+    );
+}
+
 // -- host semantics -----------------------------------------------------
 
 #[test]
@@ -946,6 +1015,48 @@ fn storage_set_get_remove() {
     evf(&mut e, "sessionStorage.setItem('s', '1');");
     assert_eq!(evf(&mut e, "sessionStorage.getItem('s')"), "1");
     assert_eq!(evf(&mut e, "localStorage.getItem('s')"), "null");
+}
+
+#[test]
+fn document_inherits_document_prototype() {
+    // dev.to : `Document.prototype.ready = new Promise(…)` puis
+    // `document.ready.then(…)` — les patches du proto DOM doivent
+    // être visibles via `document` (mesuré : TypeError `then` of
+    // Undefined en fin de bootstrap application.js).
+    let (mut e, _jar, _n) = engine_full(PAGE);
+    evf(&mut e, "Document.prototype.ready = Promise.resolve('ok');");
+    assert_eq!(evf(&mut e, "document.ready instanceof Promise"), "true");
+    // Propriétés propres du host prioritaires sur le proto.
+    assert_eq!(evf(&mut e, "typeof document.readyState"), "string");
+    assert_eq!(evf(&mut e, "document instanceof Document"), "true");
+}
+
+#[test]
+fn storage_opt_chain_method_dispatch() {
+    // dev.to `paginate` : `localStorage?.getItem(...)` levait
+    // `TypeError: value is not a function` — le chemin `?.` lisait
+    // la prop sans consulter `Host::invoke`.
+    let (mut e, _jar, _n) = engine_full(PAGE);
+    evf(&mut e, "localStorage.setItem('f', 'feed');");
+    assert_eq!(evf(&mut e, "localStorage?.getItem('f')"), "feed");
+    assert_eq!(evf(&mut e, "localStorage?.getItem('nope')"), "null");
+    assert_eq!(evf(&mut e, "localStorage?.key(0)"), "f");
+    // Chaîne mixte : méthode host après un `?.` amont.
+    assert_eq!(evf(&mut e, "globalThis?.localStorage.getItem('f')"), "feed");
+    assert_eq!(
+        evf(&mut e, "globalThis?.localStorage?.getItem('f')"),
+        "feed"
+    );
+    // Méthode absente du host → `value is not a function` honnête.
+    match e.eval("localStorage?.nope()") {
+        Err(err) => {
+            let s = format!("{err}");
+            assert!(s.contains("not a function"), "{s}");
+        }
+        Ok(v) => panic!("localStorage?.nope() -> {}", e.describe(v)),
+    }
+    // Base nullish → court-circuit `undefined` comme avant.
+    assert_eq!(evf(&mut e, "var u; u?.getItem('f')"), "undefined");
 }
 
 #[test]

@@ -868,18 +868,25 @@ impl Engine {
     ) -> JsResult<Value> {
         let mut cur = self.eval_expr(env, this, head)?;
         // Receiver for `.m()`-style calls: the object the callee was
-        // read from (plain calls get the global, per dynamic `this`).
+        // read from (plain calls get the global, per dynamic `this`),
+        // plus the member key — a `hostObj?.m()` call dispatches to
+        // `Host::invoke` like `hostObj.m()` does (dev.to `paginate` :
+        // `localStorage?.getItem(...)` levait `value is not a
+        // function`, la lecture de prop ne voyant pas `invoke`).
         let mut recv = Value::Obj(self.global);
+        let mut recv_key: Option<String> = None;
         for step in steps {
             match step {
                 ChainStep::Member(name) => {
                     recv = cur;
+                    recv_key = Some(name.clone());
                     cur = self.get_prop_value(cur, name)?;
                 }
                 ChainStep::Index(k) => {
                     let kv = self.eval_expr(env, this, k)?;
                     let key = self.prop_key(kv)?;
                     recv = cur;
+                    recv_key = Some(key.clone());
                     cur = self.get_prop_value(cur, &key)?;
                 }
                 ChainStep::OptMember(name) => {
@@ -887,6 +894,7 @@ impl Engine {
                         return Ok(Value::Undefined);
                     }
                     recv = cur;
+                    recv_key = Some(name.clone());
                     cur = self.get_prop_value(cur, name)?;
                 }
                 ChainStep::OptIndex(k) => {
@@ -896,6 +904,7 @@ impl Engine {
                     let kv = self.eval_expr(env, this, k)?;
                     let key = self.prop_key(kv)?;
                     recv = cur;
+                    recv_key = Some(key.clone());
                     cur = self.get_prop_value(cur, &key)?;
                 }
                 ChainStep::Call(arg_exprs) | ChainStep::OptCall(arg_exprs) => {
@@ -908,11 +917,23 @@ impl Engine {
                     for a in arg_exprs {
                         args.push(self.eval_expr(env, this, a)?);
                     }
-                    // Host method dispatch isn't reachable here (the
-                    // callee was already read); fall through to
-                    // ordinary `call_value` with the tracked receiver.
-                    cur = self.call_value(cur, recv, &args)?;
+                    // Même ordre que `Callee::Member` : `invoke` du
+                    // host d'abord, la valeur lue ensuite (un host
+                    // peut exposer les deux pour des noms distincts).
+                    let mut done = false;
+                    if let (Some(key), Value::Obj(bid)) = (&recv_key, recv) {
+                        if let Some(h) = self.host_of(bid) {
+                            if let Some(v) = h.invoke(self, recv, key, &args)? {
+                                cur = v;
+                                done = true;
+                            }
+                        }
+                    }
+                    if !done {
+                        cur = self.call_value(cur, recv, &args)?;
+                    }
                     recv = Value::Obj(self.global);
+                    recv_key = None;
                 }
             }
         }

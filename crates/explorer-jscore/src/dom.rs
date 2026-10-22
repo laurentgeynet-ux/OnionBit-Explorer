@@ -460,6 +460,14 @@ pub struct Dom {
     /// neufs). Vide tant que rien n'est claimé : les stubs
     /// honnêtes ADR-0023 s'appliquent.
     pub media: HashMap<NodeId, MediaElState>,
+    /// `<template>` → son `DocumentFragment` de contenu (spec
+    /// `template contents`), matérialisé paresseusement à la
+    /// première lecture de `.content`/`innerHTML` — les enfants
+    /// de l'élément y sont alors *déplacés* (mesuré github
+    /// `z8-*.js` : `tpl.content.appendChild(...)`). Un template
+    /// jamais touché garde ses enfants comme nœuds ordinaires —
+    /// sérialisation équivalente.
+    template_contents: HashMap<NodeId, NodeId>,
     /// Ordres média page → hôte en file (étape 71c) —
     /// `(media, cmd)`, drainés par l'adaptateur
     /// (`drain_media_commands`) qui les relaie vers l'hôte.
@@ -532,6 +540,7 @@ impl Dom {
             mutations: Vec::new(),
             canvases: HashMap::new(),
             media: HashMap::new(),
+            template_contents: HashMap::new(),
             media_cmds: Vec::new(),
             canvas_op_limit: DEFAULT_CANVAS_OP_LIMIT,
             doc_open: true,
@@ -999,6 +1008,53 @@ impl Dom {
     #[must_use]
     pub fn parent(&self, node: NodeId) -> Option<NodeId> {
         self.nodes[node as usize].parent
+    }
+
+    /// `<template>.content` — le `DocumentFragment` de contenu,
+    /// créé à la première demande : les enfants de l'élément y
+    /// sont *déplacés* (spec — ils cessent d'être des enfants
+    /// de l'élément ; `template.childNodes` devient vide). Le
+    /// fragment est détaché, comme chez un navigateur réel.
+    /// `None` pour un non-`<template>`.
+    pub fn template_content(&mut self, n: NodeId) -> Option<NodeId> {
+        let node = self.nodes.get(n as usize)?;
+        if node.kind != NodeKind::Element || node.tag != "template" {
+            return None;
+        }
+        if let Some(&f) = self.template_contents.get(&n) {
+            return Some(f);
+        }
+        let frag = self.create_fragment();
+        let kids = std::mem::take(&mut self.nodes[n as usize].children);
+        for &k in &kids {
+            self.set_attached(k, false);
+            self.nodes[k as usize].parent = Some(frag);
+        }
+        self.nodes[frag as usize].children = kids;
+        self.template_contents.insert(n, frag);
+        self.mark_dirty_at(n);
+        Some(frag)
+    }
+
+    /// Cible d'écriture `innerHTML`/`replace all` : le fragment
+    /// de contenu pour un `<template>` (le peupler revient à
+    /// remplir `content`), le nœud lui-même sinon.
+    pub fn content_target(&mut self, n: NodeId) -> NodeId {
+        self.template_content(n).unwrap_or(n)
+    }
+
+    /// Enfants *sérialisables* de `n` : ceux du fragment de
+    /// contenu pour un `<template>` matérialisé, sinon les
+    /// enfants ordinaires (un template jamais touché sérialise
+    /// ses enfants directs — le résultat est le même markup).
+    fn serial_children(&self, n: NodeId) -> &[NodeId] {
+        let node = &self.nodes[n as usize];
+        if node.tag == "template" {
+            if let Some(&f) = self.template_contents.get(&n) {
+                return &self.nodes[f as usize].children;
+            }
+        }
+        &node.children
     }
 
     /// Next (`true`) or previous (`false`) sibling, any kind —
@@ -1529,11 +1585,12 @@ impl Dom {
         }
     }
 
-    /// `innerHTML` getter — serialize children.
+    /// `innerHTML` getter — serialize children (`<template>` :
+    /// le contenu de son fragment — spec `template contents`).
     #[must_use]
     pub fn inner_html(&self, node: NodeId) -> String {
         let mut out = String::new();
-        for &c in &self.nodes[node as usize].children {
+        for &c in self.serial_children(node) {
             self.serialize(c, &mut out);
         }
         out
@@ -1611,7 +1668,7 @@ impl Dom {
                     // l'échappement normal est décodé fidèlement
                     // au re-parse.
                     let verbatim = RAW_VERBATIM.contains(&n.tag.as_str());
-                    for &c in n.children.iter().rev() {
+                    for &c in self.serial_children(id).iter().rev() {
                         let child = &self.nodes[c as usize];
                         if verbatim && child.kind == NodeKind::Text {
                             stack.push(Ser::Rawtext(c));

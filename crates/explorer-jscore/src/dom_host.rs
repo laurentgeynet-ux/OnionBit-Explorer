@@ -665,6 +665,18 @@ impl Engine {
             }
             self.set_own(g, name, f, false);
         }
+        // `document` hérite de `Document.prototype` — les sites
+        // monkey-patchent le proto DOM (mesuré dev.to :
+        // `Document.prototype.ready = new Promise(…)` puis
+        // `document.ready.then`); l'héritage rend aussi
+        // `document instanceof Document` vrai, comme la spec.
+        if let (Value::Obj(did), Some(Value::Obj(cid))) = (doc, self.get_prop(g, "Document")) {
+            if let Some(proto @ Value::Obj(_)) = self.get_prop(cid, "prototype") {
+                if let Some(o) = self.heap.obj_mut(did) {
+                    o.proto = proto;
+                }
+            }
+        }
         // `Event` + famille — constructibles : l'objet produit est
         // dispatchable (`type`/`bubbles` lus par `dispatchEvent`).
         // Les proto des sous-classes héritent de `Event.prototype`.
@@ -1461,6 +1473,16 @@ impl Host for DocumentHost {
                 let n = self.dom.borrow_mut().create_element(&tag);
                 Ok(Some(node_value(e, &self.dom, &self.cache, n)))
             }
+            // `createElementNS(ns, qualified)` — pas de
+            // namespaces dans le miroir : l'URI est acceptée et
+            // ignorée, le nœud est créé par son nom local
+            // (mesuré github.com `z8-*.js` — svg inline).
+            "createElementNS" => {
+                let tag = e.to_js_string(arg(args, 1))?;
+                let local = tag.rsplit(':').next().unwrap_or(&tag).to_string();
+                let n = self.dom.borrow_mut().create_element(&local);
+                Ok(Some(node_value(e, &self.dom, &self.cache, n)))
+            }
             "createTextNode" => {
                 let t = e.to_js_string(arg(args, 0))?;
                 let n = self.dom.borrow_mut().create_text(&t);
@@ -2167,6 +2189,18 @@ impl Host for NodeHost {
                 let s = self.dom.borrow().inner_html(node);
                 return Ok(Some(e.str_val(s)));
             }
+            // `<template>.content` — `DocumentFragment` de
+            // contenu (spec : ses enfants ne sont pas des
+            // enfants de l'élément). `undefined` ailleurs —
+            // la prop n'existe que sur `HTMLTemplateElement`.
+            // Mesuré github `z8-*.js` :
+            // `tpl.content.appendChild(row)`.
+            "content" => {
+                let frag = self.dom.borrow_mut().template_content(node);
+                if let Some(f) = frag {
+                    return Ok(Some(node_value(e, &self.dom, &self.cache, f)));
+                }
+            }
             "textContent" | "innerText" => {
                 let s = self.dom.borrow().text_content(node);
                 return Ok(Some(e.str_val(s)));
@@ -2301,6 +2335,10 @@ impl Host for NodeHost {
             "innerHTML" => {
                 let html = e.to_js_string(v)?;
                 let mut d = self.dom.borrow_mut();
+                // `<template>` : l'écriture cible son fragment de
+                // contenu (spec — `tpl.innerHTML` peuple
+                // `content`, pas les enfants de l'élément).
+                let target = d.content_target(node);
                 // Detach existing children, parse into a temp parent,
                 // move results over.
                 let tmp = d.create_element("#fragment");
@@ -2309,7 +2347,7 @@ impl Host for NodeHost {
                 for &k in &kids {
                     d.nodes[k as usize].parent = None;
                 }
-                d.replace_children(node, &kids);
+                d.replace_children(target, &kids);
                 Ok(true)
             }
             "textContent" | "innerText" => {

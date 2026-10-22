@@ -212,6 +212,40 @@ fn arrays() {
 }
 
 #[test]
+fn array_slice_concat_generic_on_array_like() {
+    // github.com `selector-observer` : `this.indexes =
+    // Object.create(this.indexes)` — un objet non-Array dont la
+    // chaîne proto porte `length` et les indices ; `slice`/
+    // `concat` sont génériques (spec `LengthOfArrayLike` +
+    // `Get`), le rejet « non-array » était un bug.
+    assert_eq!(
+        ev_str("var al = Object.create([10,20,30]); al.slice(1).join(',')"),
+        "20,30"
+    );
+    // `slice(0).concat(x)` — motif exact du bundle.
+    assert_eq!(
+        ev_str("var al = Object.create([1,2]); al.default = 9; al.slice(0).concat(al.default).join(',')"),
+        "1,2,9"
+    );
+    // Array-like littéral + `@@isConcatSpreadable` sur `this`.
+    assert_eq!(
+        ev_str("var al = {length:2, 0:'a', 1:'b'}; Array.prototype.slice.call(al).join('')"),
+        "ab"
+    );
+    assert_eq!(
+        ev_str("var al = {length:2, 0:'x', 1:'y'}; al[Symbol.isConcatSpreadable]=true; [].concat(al).join(',')"),
+        "x,y"
+    );
+    // `this` non-spreadable → élément unique, pas d'éclatement.
+    assert_eq!(
+        ev_str("var al = {length:2, 0:'x', 1:'y'}; Array.prototype.concat.call(al, 'z').length"),
+        "2"
+    );
+    // `concat` sur un `this` tableau : comportement inchangé.
+    assert_eq!(ev_str("var a=[1]; a.concat([2],[3]).join(',')"), "1,2,3");
+}
+
+#[test]
 fn for_in() {
     assert_eq!(
         ev_str("var o = {a:1, b:2}; var s=''; for (var k in o) { s += k } s"),

@@ -948,6 +948,40 @@ fn this_array(e: &mut Engine, this: Value) -> JsResult<ObjId> {
     }
 }
 
+/// `this` lu comme array-like (méthodes *génériques* spec —
+/// `slice`/`concat` & co n'exigent pas un vrai tableau) :
+/// vrais tableaux → chemin rapide ; autres objets → `length` +
+/// `Get` par indice à travers la chaîne proto (mesuré github
+/// `selector-observer` : `this.indexes = Object.create(proto
+/// .indexes)` puis `.slice(0)`). Borne `length` alignée sur
+/// `array_concat` (`{length:1e9}` hostile).
+fn this_array_like(e: &mut Engine, this: Value) -> JsResult<Vec<Value>> {
+    match this {
+        Value::Obj(id) if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_))) => {
+            let elems = take_elems(e, id);
+            put_elems(e, id, elems.clone());
+            Ok(elems)
+        }
+        Value::Undefined | Value::Null => {
+            Err(e.type_error("array method called on null/undefined"))
+        }
+        _ => {
+            let len = match e.get_prop_value(this, "length")? {
+                Value::Num(n) => (n.max(0.0) as usize).min(1_000_000),
+                _ => 0,
+            };
+            let mut out = Vec::with_capacity(len.min(65_536));
+            for i in 0..len {
+                out.push(e.get_prop_value(this, &i.to_string())?);
+                if i % 8192 == 0 {
+                    e.tick()?;
+                }
+            }
+            Ok(out)
+        }
+    }
+}
+
 fn take_elems(e: &mut Engine, id: ObjId) -> Vec<Value> {
     match e.heap.obj_mut(id) {
         Some(o) => match &mut o.kind {
