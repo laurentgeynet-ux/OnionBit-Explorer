@@ -1407,7 +1407,12 @@ fn paint_self(
     // interne de la bordure gauche/haute). Sautée quand le
     // fond de cette boîte a été propagé au canvas (§14.2) —
     // `canvas_bg_src` l'a déjà peint sur tout le viewport.
-    if !anonymous && !inline_flow && canvas_bg_src != bx.node {
+    // La comparaison porte sur le nœud : un `None` (boîte
+    // pseudo `::before`/`::after`, anonyme) n'est JAMAIS la
+    // source propagée — `None != None` sautait le fond de
+    // tout pseudo (`:after{…gradient}` text.npr.org, R-74).
+    let bg_propagated = bx.node.is_some_and(|n| canvas_bg_src == Some(n));
+    if !anonymous && !inline_flow && !bg_propagated {
         if let Some(c) = bx.style.get("background-color").and_then(parse_color) {
             if c.a > 0 {
                 // R-52 — `mask-image` présent : la couleur ne

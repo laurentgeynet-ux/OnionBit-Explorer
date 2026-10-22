@@ -1979,6 +1979,14 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   Résidus documentés : marqueurs textuels (`decimal`…) non
   peints (shaping requis) ; `list-style-position: inside`
   ne décale pas le texte.
+  **Suite (shot `text.npr.org` de validation)** — la barre
+  tricolore `.hr-line:after` absente : deux trous chaînés,
+  (a) `box_kind_of` sans blockification §9.7 —
+  `display:inline` + `position:absolute|fixed` → `Block`
+  (`list-item` épargné : absent de la table) ;
+  (b) garde `canvas_bg_src != bx.node` sautait le fond de
+  toute boîte sans nœud — `None != None` → faux pour les
+  pseudos. Shot : barre tricolore + puces `disc` visibles.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

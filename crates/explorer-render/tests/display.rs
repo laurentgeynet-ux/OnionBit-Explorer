@@ -1431,3 +1431,62 @@ fn list_item_marqueur_rasterise_des_pixels() {
         "pixel de puce rouge (couleur du li) attendu à ({cx},{cy}), got {px:?}"
     );
 }
+
+// ── R-74 bis : pseudo `::after` positionné + dégradé (NPR) ──
+
+#[test]
+fn pseudo_after_positionne_peint_son_fond() {
+    // text.npr.org : `.hr-line:after` = bandeau tricolore —
+    // `content:''` + `position:absolute` + `background:
+    // linear-gradient`. Deux trous chaînés :
+    // (a) `box_kind_of` ne blockifiait pas `display:inline` +
+    //     `position:absolute` (§9.7) — le pseudo dégénérait
+    //     en boîte inline vide ;
+    // (b) `canvas_bg_src != bx.node` sautait la section fond
+    //     de TOUTE boîte sans nœud (`None != None` → faux) —
+    //     un pseudo ne pouvait jamais peindre un fond.
+    let (_dom, _bx, items) = dl(
+        "<div class=\"hr-line\"></div>",
+        ".hr-line{position:relative;height:4px}\
+         .hr-line:after{background:linear-gradient(to right,\
+           #e60000 33%,#000 33%,#000 66%,#36c 66%);\
+           position:absolute;content:'';height:4px;right:0;left:0;top:0}",
+    );
+    let img = items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { img, .. } => Some(img.clone()),
+            _ => None,
+        })
+        .expect("couche dégradé du ::after attendue");
+    // Tricolore horizontal : rouge à gauche, noir au centre,
+    // bleu à droite.
+    let px = |x: usize| &img.rgba[x * 4..x * 4 + 4];
+    let (w, mid) = (img.width as usize, img.width as usize / 2);
+    assert!(px(0)[0] > 200, "gauche rouge : {:?}", px(0));
+    assert!(
+        px(mid)[0] < 60 && px(mid)[2] < 60,
+        "centre noir : {:?}",
+        px(mid)
+    );
+    assert!(px(w - 1)[2] > 150, "droite bleue : {:?}", px(w - 1));
+}
+
+#[test]
+fn pseudo_after_fond_peint_meme_sans_canvas() {
+    // Le cas limite exact du garde : pseudo avec fond alors
+    // qu'AUCUN canvas n'est propagé (`canvas_bg_src = None`
+    // ET `bx.node = None` — l'ancien `!=` rendait faux).
+    let (_d, _b, items) = dl(
+        "<div id=d><span id=s>x</span></div>",
+        "#s:after{content:'';display:block;height:6px;\
+           background-color:#ff0000}",
+    );
+    assert!(
+        items.iter().any(|i| matches!(
+            i,
+            DisplayItem::FillRect { color, .. } if color.r > 200 && color.g < 60
+        )),
+        "fond rouge du ::after attendu : {items:?}"
+    );
+}

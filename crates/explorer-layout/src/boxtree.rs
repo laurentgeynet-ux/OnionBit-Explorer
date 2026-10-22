@@ -429,7 +429,18 @@ fn box_kind_of(style: &ComputedStyle) -> BoxKind {
     if matches!(style.get("float"), Some("left" | "right")) {
         return BoxKind::Block;
     }
+    // §9.7 : `position: absolute|fixed` blockifie les
+    // valeurs de niveau inline — `display:inline` positionné
+    // hors flux devient un bloc (`.hr-line:after{
+    // position:absolute}` NPR : la bande tricolore).
+    // `list-item` n'est pas dans la table de blockification
+    // (sa puce survit au positionnement).
     match style.get_or("display", "inline") {
+        "inline" | "inline-block" | "inline-table" | "inline-flex"
+            if matches!(style.get("position"), Some("absolute" | "fixed")) =>
+        {
+            BoxKind::Block
+        }
         "inline" | "inline-block" | "inline-table" | "inline-flex" => BoxKind::Inline,
         "list-item" => BoxKind::ListItem,
         // block, table* et tout l'inconnu → bloc (repli).

@@ -35,6 +35,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     `h1` sert la face grasse).
     Fixture partagée `fixture_ttf_face`
     = TTF + table OS/2 v0 (78 octets).
+  - Suite terrain (`text.npr.org`,
+    shot de validation) — la barre
+    tricolore `.hr-line:after` restait
+    absente : deux trous chaînés
+    trouvés par fixture —
+    (a) `box_kind_of` ne blockifiait
+    pas `display:inline` +
+    `position:absolute|fixed` (§9.7) :
+    le pseudo `content:''` dégénérait
+    en boîte inline sans sortie ;
+    (b) le garde `canvas_bg_src !=
+    bx.node` sautait la section fond
+    de **toute** boîte sans nœud
+    (`None != None` → faux) : un
+    `::before`/`::after` ne peignait
+    jamais son fond.
 
 - **R-73 — `linear-gradient` non
   peint + shorthand `background /size`
