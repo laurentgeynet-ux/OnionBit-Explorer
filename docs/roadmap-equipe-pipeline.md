@@ -1988,6 +1988,45 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   toute boîte sans nœud — `None != None` → faux pour les
   pseudos. Shot : barre tricolore + puces `disc` visibles.
 
+- [x] **R-75. Flottants/`margin:auto` — §10.4 rejoue
+  §10.3.3** (issue #12 — vol comparatif : texte wikipedia
+  « étranglé » en colonne étroite autour de l'image,
+  colonne npr non centrée). Deux trous, même article de
+  spec :
+  (a) **intrinsèque non bornée** — `content_px` ne
+  bridaient `min|max-width` que sur la branche « taille
+  directe » (`width`/intrinsèque remplacé) ; la mesure
+  d'enfants (flex, table-row, agrégat bloc) rendait le
+  contenu brut. Sizing §5.1 : la contribution est bridée
+  par les bornes propres — `thumbinner{max-width:170px}`
+  du motif Wikipedia (`#mp-tfa-img` flottant shrink-to-fit,
+  img 170 + légende ~350px max-content) gonflait le
+  flottant père → bande résiduelle ~465px au lieu de ~615.
+  `content_px` = wrapper borné sur `content_px_unclamped`
+  (idempotent sur la branche directe) — boîtes `Text`
+  exemptes (borne = celle du parent, appliquée à
+  l'agrégat) ;
+  (b) **`margin:auto` pré-clamp** — le slack allait aux
+  marges `auto` sur la largeur tentative **avant**
+  `min|max-width` ; §10.4 rejoue §10.3.3 avec la largeur
+  bornée — `body{max-width:550px;margin:0 auto}` de
+  text.npr.org restait à `x=0`. Distribution déplacée
+  après bridage : partage égal / absorbante, slack
+  négatif = débordement centré (comportement navigateur),
+  `width:auto` sans borne → marges auto à 0.
+  Validation terrain : shot `en.wikipedia.org/Main_Page`
+  (texte coulant à pleine bande autour des 5 flottants
+  réels — Priestfield, Menéndez, Hôtel de Ville,
+  Metropolitan, candy store) + shot `text.npr.org`
+  (colonne centrée). Piège noté : un `cargo build -p
+  explorer-cli` interrompu avant link laisse un binaire
+  périmé qui fait « échouer » une validation — vérifier
+  `Finished` avant tout verdict terrain. 5 régressions
+  dans `tests/block.rs` (centrage, absorbante, auto→0,
+  bornes min/max du shrink). Résidu #9 soldé au passage :
+  `BlockCtx::default_family` = `serif` (cohérent avec
+  l'initiale cascade).
+
 ## Palier R-B — Contenu étranger, animation, canvas
 
 - [x] **R-8. Foreign-content dans `explorer-html`** (ex-60a) :

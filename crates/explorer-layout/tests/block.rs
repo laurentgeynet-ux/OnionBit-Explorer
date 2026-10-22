@@ -1128,3 +1128,98 @@ fn item_flex_row_marges_dans_le_cross() {
     let p = find(&bx, by_tag(&dom, "p"));
     assert!(approx(p.rect.y, 16.0), "p.y={}", p.rect.y);
 }
+
+// ── Issue #12 : `margin:auto` + `max-width` — §10.4 rejoue
+// §10.3.3 avec la largeur bornée : le slack résiduel va aux
+// marges `auto` (la boîte se centre). Avant le fix, la
+// distribution se faisait sur la largeur tentative AVANT le
+// bridage — les marges restaient à 0 (colonne collée à
+// gauche ; terrain : colonne `max-width` de text.npr.org).
+
+#[test]
+fn margin_auto_max_width_centre_la_boite() {
+    let html = concat!(
+        "<!doctype html><div style=\"width:800px\">",
+        "<article style=\"max-width:600px;margin:0 auto;height:50px\"></article>",
+        "</div>"
+    );
+    let (dom, bx) = laid(html, "");
+    let a = find(&bx, by_tag(&dom, "article"));
+    assert!(approx(a.rect.width, 600.0), "w={}", a.rect.width);
+    assert!(approx(a.rect.x, 100.0), "x={} (pas centré)", a.rect.x);
+}
+
+#[test]
+fn margin_auto_une_seule_absorbe() {
+    // `margin-left:auto` seul : tout le slack à gauche → la
+    // boîte est poussée au bord droit.
+    let html = concat!(
+        "<!doctype html><div style=\"width:800px\">",
+        "<article style=\"width:200px;margin-left:auto;height:50px\"></article>",
+        "</div>"
+    );
+    let (dom, bx) = laid(html, "");
+    let a = find(&bx, by_tag(&dom, "article"));
+    assert!(approx(a.rect.x, 600.0), "x={}", a.rect.x);
+}
+
+#[test]
+fn margin_auto_width_auto_reste_nulle() {
+    // `width:auto` sans borne : les marges `auto` valent 0
+    // (§10.3.3) — la boîte remplit le conteneur.
+    let html = concat!(
+        "<!doctype html><div style=\"width:800px\">",
+        "<article style=\"margin:0 auto;height:50px\"></article>",
+        "</div>"
+    );
+    let (dom, bx) = laid(html, "");
+    let a = find(&bx, by_tag(&dom, "article"));
+    assert!(approx(a.rect.x, 0.0), "x={}", a.rect.x);
+    assert!(approx(a.rect.width, 800.0), "w={}", a.rect.width);
+}
+
+// ── Issue #12 : mesure intrinsèque bornée par `max-width`
+// (Sizing §5.1 : la contribution est bridée par les bornes
+// de la boîte). Wikipedia `#mp-tfa-img` : flottant
+// shrink-to-fit contenant `thumbinner{max-width:170px}` —
+// la légende (~350px max-content) gonflait le flottant à
+// sa mesure brute → le texte voisin n'avait plus que la
+// bande résiduelle (« étranglé »).
+
+#[test]
+fn float_max_width_enfant_borne_le_shrink() {
+    let html = concat!(
+        "<!doctype html><div style=\"width:800px\">",
+        "<aside style=\"float:right;margin-left:20px\">",
+        "<section style=\"max-width:170px\">",
+        "<div>very long caption text that exceeds one hundred seventy pixels wide by far indeed</div>",
+        "</section></aside>",
+        "<p>body text beside the float</p></div>"
+    );
+    let (dom, bx) = laid(html, "");
+    let a = find(&bx, by_tag(&dom, "aside"));
+    assert!(
+        approx(a.rect.width, 170.0),
+        "flottant w={} (non borné)",
+        a.rect.width
+    );
+}
+
+#[test]
+fn float_min_width_enfant_etend_le_shrink() {
+    // Symétrique : `min-width` fait aussi foi en mesure
+    // intrinsèque — le flottant ne descend pas sous 200.
+    let html = concat!(
+        "<!doctype html><div style=\"width:800px\">",
+        "<aside style=\"float:left\">",
+        "<section style=\"min-width:200px\"><div>tiny</div></section>",
+        "</aside><p>x</p></div>"
+    );
+    let (dom, bx) = laid(html, "");
+    let a = find(&bx, by_tag(&dom, "aside"));
+    assert!(
+        a.rect.width >= 200.0 - 0.01,
+        "flottant w={} (min-width ignoré)",
+        a.rect.width
+    );
+}

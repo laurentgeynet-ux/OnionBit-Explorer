@@ -58,7 +58,10 @@ impl Default for BlockCtx<'_> {
     fn default() -> Self {
         Self {
             fonts: None,
-            default_family: "sans-serif",
+            // Famille de repli quand `font-family` est absent
+            // du style calculé — l'initiale cascade est
+            // `serif`, le repli la suit (issue #9 résiduel).
+            default_family: "serif",
             base_font_size: 16.0,
             viewport_h: 600.0,
             viewport_w: 800.0,
@@ -1046,20 +1049,16 @@ fn layout_block_inner(
     let auto_left = st.get("margin-left") == Some("auto");
     let auto_right = st.get("margin-right") == Some("auto");
     let fixed = bl + br + pl + pr;
-    let (ml_used, _mr_used, content_w) = match w_spec {
-        Some(w) => {
-            let slack = cb_w - fixed - w;
-            match (auto_left, auto_right) {
-                (true, true) => {
-                    let each = slack / 2.0;
-                    (each, slack - each, w)
-                }
-                (true, false) => (slack - mr, mr, w),
-                (false, true) => (ml, slack - ml, w),
-                (false, false) => (ml, slack - ml - mr, w),
-            }
-        }
-        None => (ml, mr, (cb_w - fixed - ml - mr).max(0.0)),
+    // §10.3.3 : tentative de largeur — `width` spécifié
+    // fait foi, `auto` remplit le bloc conteneur hors
+    // marges. Les marges `auto` ne se distribuent PAS ici :
+    // §10.4 rejoue la résolution avec la largeur bornée par
+    // `min|max-width` — sans quoi `max-width:600px;
+    // margin:0 auto` restait collé à gauche (issue #12,
+    // colonne npr non centrée).
+    let tentative_w = match w_spec {
+        Some(w) => w,
+        None => (cb_w - fixed - ml - mr).max(0.0),
     };
     // §10.4 : `min|max-width` bornent la boîte de CONTENU
     // (`box-sizing: content-box`) — avant la pose des
@@ -1073,7 +1072,7 @@ fn layout_block_inner(
                 .map(|v| box_size_to_content(&st, v, chassis_h))
                 .or_else(|| crate::intrinsic::intrinsic_size_px(&st, prop, bx, cb_w, fs, ctx))
         };
-        let mut w = content_w;
+        let mut w = tentative_w;
         // §10.4 : `max-width` avant `min-width` — le min
         // gagne les conflits (miroir de `min|max-height`).
         if let Some(mx) = bound_px("max-width") {
@@ -1083,6 +1082,20 @@ fn layout_block_inner(
             w = w.max(mn);
         }
         w
+    };
+    // §10.4 → §10.3.3 : la largeur utilisée bornée fait
+    // office de `width` spécifiée — le slack résiduel va
+    // aux marges `auto` (partage égal des deux côtés, une
+    // seule `auto` absorbe tout). Slack négatif = boîte
+    // trop large : les marges `auto` restent égales
+    // (débordement centré, comportement des navigateurs).
+    // `w_spec=None` sans borne : slack = marges déjà
+    // résolues → les `auto` retombent à 0 comme exigé.
+    let slack = cb_w - fixed - content_w;
+    let ml_used = match (auto_left, auto_right) {
+        (true, true) => slack / 2.0,
+        (true, false) => slack - mr,
+        (false, _) => ml,
     };
 
     // §10.6.2 : remplacé à `height:auto` — la hauteur dérive

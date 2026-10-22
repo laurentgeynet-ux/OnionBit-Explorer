@@ -63,10 +63,54 @@ pub(crate) fn min_content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx) -> f32 {
     content_px(bx, fs, ctx, false)
 }
 
+/// `min|max-width` non-% converties en contenu — les bornes
+/// de la contribution intrinsèque (Sizing §5.1 : toute
+/// taille intrinsèque utilisée est bridée par elles). Un `%`
+/// est indéfini en mesure intrinsèque → ignoré.
+fn width_bounds(st: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> (Option<f32>, Option<f32>) {
+    let chassis: f32 = [
+        "padding-left",
+        "padding-right",
+        "border-left-width",
+        "border-right-width",
+    ]
+    .iter()
+    .map(|p| side_px(st, p, 0.0, fs, ctx, 0.0))
+    .sum();
+    let bound = |p: &str| -> Option<f32> {
+        let v = st.get(p)?;
+        if v.contains('%') {
+            return None;
+        }
+        css_px(st, p, 0.0, fs, ctx).map(|v| box_size_to_content(st, v, chassis))
+    };
+    (bound("min-width"), bound("max-width"))
+}
+
 /// Mesure mutualisée : `max` = insécable complet, `min` =
 /// plus grand morceau insécable. `fs` = font-size **de bx**
-/// (résolu par l'appelant).
+/// (résolu par l'appelant). Le résultat — taille directe
+/// comme mesure des enfants — est borné par les
+/// `min|max-width` de `bx` : une boîte ne contribue jamais
+/// au-delà de son propre plafond (`thumbinner{
+/// max-width:170px}` de Wikipedia ne laisse pas sa légende
+/// gonfler le flottant père — issue #12, colonne étranglée).
+/// Les boîtes `Text` portent le style du parent : leur
+/// borne s'applique au niveau de l'agrégat parent.
 fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
+    let w = content_px_unclamped(bx, fs, ctx, max);
+    if bx.kind == BoxKind::Text {
+        return w;
+    }
+    let (mn, mx) = width_bounds(&bx.style, fs, ctx);
+    mx.map_or(w, |m| w.min(m)).max(mn.unwrap_or(0.0))
+}
+
+/// Mesure brute, avant bridage `min|max-width` (appliqué
+/// par [`content_px`]). La branche « taille directe »
+/// (`width`/intrinsèque remplacé) se borne déjà elle-même
+/// — le re-bridage du wrapper est idempotent.
+fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
     // Taille directe : `width` explicite (hors %) fait foi
     // AVANT l'intrinsèque remplacé (§5.1 : la contribution
     // d'un remplacé est sa taille utilisée — un
@@ -80,6 +124,7 @@ fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
     // du contenu (les marges restent hors — comptées par
     // `own_sides` côté appelant).
     let st = &bx.style;
+    let (min_b, max_b) = width_bounds(st, fs, ctx);
     let chassis: f32 = [
         "padding-left",
         "padding-right",
@@ -89,13 +134,12 @@ fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
     .iter()
     .map(|p| side_px(st, p, 0.0, fs, ctx, 0.0))
     .sum();
-    let conv = |v: f32| box_size_to_content(st, v, chassis);
     let bound = |p: &str| -> Option<f32> {
         let v = st.get(p)?;
         if v.contains('%') {
             return None;
         }
-        css_px(st, p, 0.0, fs, ctx).map(conv)
+        css_px(st, p, 0.0, fs, ctx).map(|v| box_size_to_content(st, v, chassis))
     };
     // §4.1 : un `width:%` en mesure intrinsèque est indéfini
     // (le bloc contenant dépend de cette mesure) — un
@@ -113,10 +157,10 @@ fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
         bound("width").or(bx.intrinsic.map(|i| i.0))
     };
     if let Some(mut w) = base {
-        if let Some(mx) = bound("max-width") {
+        if let Some(mx) = max_b {
             w = w.min(mx);
         }
-        if let Some(mn) = bound("min-width") {
+        if let Some(mn) = min_b {
             w = w.max(mn);
         }
         return w;

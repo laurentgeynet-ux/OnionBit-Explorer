@@ -9,6 +9,55 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-75 — texte étranglé autour des
+  flottants + `margin:auto` non
+  appliqué** (`explorer-layout`,
+  issue #12) — deux trous §10.4,
+  validés en terrain (wikipedia +
+  npr) :
+  - *Intrinsèque non bornée* : la
+    mesure `min|max-content` des
+    enfants ignorait les `min|max-width`
+    de la boîte (la borne n'était
+    appliquée qu'à la branche
+    « taille directe »). Sizing §5.1 :
+    toute contribution intrinsèque
+    est bridée par les bornes propres —
+    `thumbinner{max-width:170px}` de
+    Wikipedia (`#mp-tfa-img` flottant
+    shrink-to-fit) laissait sa
+    légende ~350px gonfler le
+    flottant → la bande voisine
+    n'offrait plus qu'une colonne
+    étroite au texte (« étranglé »).
+    `content_px` borne désormais
+    l'agrégat mesuré (wrapper
+    idempotent — la branche directe
+    se bornait déjà).
+  - *`margin:auto` avant bridage* :
+    le slack était distribué aux
+    marges `auto` sur la largeur
+    tentative, **avant** le clamp
+    `min|max-width` — §10.4 exige de
+    rejouer §10.3.3 avec la largeur
+    bornée. `body{max-width:550px;
+    margin:0 auto}` de text.npr.org
+    restait collé à gauche ; la
+    distribution se fait désormais
+    sur le slack post-bridage
+    (les deux marges `auto` se
+    partagent le slack, une seule
+    absorbe tout ; slack négatif =
+    débordement centré comme les
+    navigateurs). 5 régressions
+    posées (`tests/block.rs`).
+  - *Résidu #9* : `BlockCtx::
+    default_family` était
+    `sans-serif` alors que l'initiale
+    cascade de `font-family` est
+    `serif` — le repli suit
+    désormais l'initiale (une ligne).
+
 - **R-74 — puces `ul` absentes,
   `h1` non gras, corps sans-serif**
   (`explorer-css`, `explorer-render`,
