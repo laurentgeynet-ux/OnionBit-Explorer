@@ -686,6 +686,9 @@ impl Dom {
     /// pas de texte »). Suit `serial_children` — le contenu d'un
     /// `<template>` est compté (le DOM moteur le descend via
     /// `template_contents`, même ordre). Itératif (JS-C55).
+    /// Casse normalisée : le DOM moteur garde la casse SVG
+    /// (`clipPath`) là où le miroir stocke `clippath` —
+    /// l'empreinte mesure la structure, pas la représentation.
     #[must_use]
     pub fn structural_fingerprint(&self) -> u64 {
         // FNV-1a sur les octets de tag + un séparateur par nœud —
@@ -696,7 +699,7 @@ impl Dom {
         while let Some(id) = stack.pop() {
             let n = &self.nodes[id as usize];
             if n.kind == NodeKind::Element {
-                for &b in n.tag.as_bytes() {
+                for b in n.tag.bytes().map(|b| b.to_ascii_lowercase()) {
                     h ^= u64::from(b);
                     h = h.wrapping_mul(0x0000_0100_0000_01b3);
                 }

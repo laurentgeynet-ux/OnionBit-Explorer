@@ -571,12 +571,15 @@ fn engine_preorder_subtree(
 /// Empreinte structurelle du DOM commis — mêmes règles que
 /// `Dom::structural_fingerprint` miroir : tags d'éléments en
 /// pré-ordre sérialisation (contenu `<template>` compris,
-/// texte exclu). Le divergent est attrapé par comparaison.
+/// texte exclu), **casse normalisée** — le moteur garde la
+/// casse SVG (`clipPath`, `feGaussianBlur`) là où le miroir
+/// sérialise en minuscules : l'empreinte mesure la structure,
+/// pas la représentation.
 fn engine_fingerprint(dom: &Dom) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for id in engine_preorder(dom) {
         if let Ok(tag) = dom.tag_name(id) {
-            for &b in tag.as_bytes() {
+            for b in tag.bytes().map(|b| b.to_ascii_lowercase()) {
                 h ^= u64::from(b);
                 h = h.wrapping_mul(0x0000_0100_0000_01b3);
             }
@@ -629,10 +632,17 @@ fn graft_subtree(
                 .map_err(|_| JournalReject::Dom)?;
         }
     }
-    // Position : `index` dans les enfants **courants** (les
-    // ops antérieures ont déjà rejoué — invariant séquentiel).
+    // Position : `index` dans les enfants **sérialisables**
+    // courants (espace miroir — les commentaires n'y existent
+    // pas : indexer dessus décalerait l'insertion devant un
+    // `<!-- -->` → empreinte divergente). Les ops antérieures
+    // ont déjà rejoué — invariant séquentiel.
     let kids = dom.children(dst_parent).map_err(|_| JournalReject::Dom)?;
-    let refn = kids.get(index).copied();
+    let refn = kids
+        .iter()
+        .copied()
+        .filter(|&n| serializable_kind(dom, n))
+        .nth(index);
     dom.insert_before(dst_parent, new, refn)
         .map_err(|_| JournalReject::Dom)?;
     // Contenu `<template>` : arène à part des deux côtés.

@@ -6208,3 +6208,41 @@ async fn journal_ops_limit_falls_back() {
     assert!(pa.is_some() && pb.is_some());
     assert_eq!(pa, pb, "le repli re-parse garde le DOM correct");
 }
+
+/// Régression mesurée sur dev.to : le moteur garde la casse
+/// SVG (`clipPath`) là où le miroir sérialise `clippath` —
+/// avant la normalisation, l'empreinte divergeait à la
+/// baseline et **tout** journal tombait en `Fingerprint`.
+/// Une page à SVG inline + une mutation banale doit rejouer.
+#[tokio::test]
+async fn journal_survives_svg_case_divergence() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><div id=\"x\">avant</div>\
+         <svg><clipPath id=\"c\"><path d=\"M0 0\"/></clipPath>\
+         <linearGradient id=\"g\"/></svg>\
+         <script>setTimeout(function(){\
+         document.getElementById('x').textContent='UN'},40);\
+         setTimeout(function(){\
+         document.getElementById('x').setAttribute('data-ok','1')},500)</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/m").await.unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(90));
+    s.pump_timers(a);
+    // Bootstrap : NoBaseline → baseline cléée (repli normal).
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    s.pump_timers(a);
+    assert!(
+        s.journal_applies() >= 1,
+        "le journal doit rejouer malgré clipPath/linearGradient : \
+         applies={} replis={}",
+        s.journal_applies(),
+        s.journal_fallbacks()
+    );
+}

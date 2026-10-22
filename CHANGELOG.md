@@ -895,6 +895,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Étape 111 — vol de mesure ADR-0025 :
+  empreinte divergente de baseline + index
+  d'insertion hors espace miroir**
+  (`explorer-core`, `explorer-jscore`,
+  `explorer-cli`) : premier vol `jprobe`
+  (driver interactif : navigation + scroll/
+  clic synthétiques + compteurs) sur dev.to →
+  rejets `Fingerprint` systématiques. Le dump
+  comparatif moteur/miroir a isolé **deux**
+  divergences réelles. (a) Le moteur garde la
+  casse SVG (`clipPath`, `linearGradient`…)
+  là où le miroir sérialise en minuscules —
+  la baseline divergeait sur **toute page à
+  SVG inline** : empreintes normalisées en
+  casse des deux côtés (la structure, pas la
+  représentation). (b) `graft_subtree`
+  indexait `Insert.index` dans les enfants
+  moteur **commentaires compris**, hors de
+  l'espace miroir — insertion décalée devant
+  un `<!-- -->` : index traduit dans
+  l'espace **sérialisable**. Mesure dev.to
+  post-fix : **20 appliqués / 0 replis**
+  (lobste.rs, wikipedia : 0/0 — pages
+  statiques sous inputs synthétiques). Test
+  régression `journal_survives_svg_case_
+  divergence`. Sonde `EXPLORER_DUMP_SYNC`
+  retirée après diagnostic.
 - **R-72 — panic sélecteur sur attributs UTF-8**
   (`explorer-css`, vol terrain post-Étape 108 — crash
   réel `en.wikipedia.org/wiki/Main_Page`) :
