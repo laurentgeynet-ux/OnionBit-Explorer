@@ -1880,18 +1880,30 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   documentés : `em`/`rem` du padding inline ≈ font-size
   de l'élément (pas de base racine), pièces multi-ligne
   par union de ligne (pas par fragment).
-- [ ] **R-71. Sprites `background-image` non peints**
+- [x] **R-71. Sprites `background-image` non peints**
   (même trigger — les deux cases autour de « Read Wikipedia
   in your language » sont des rectangles vides sur le portail
-  Wikipedia). Contexte NAV : la rétention des fonds fetchés
-  est livrée (Étape 108 — `bg_decoded` survit aux synchros) ;
-  si le corps est bien dans `bg_decoded` et l'alias matche,
-  le trou est domaine : `background-position` (tranche
-  d'atlas), multi-couches (`linear-gradient(...),url(...)` —
-  `css_url_arg` prend-il la bonne couche ?), ou
-  `background-size` (hors portée documentée). Sonde :
-  `images.backgrounds` rempli → `DisplayItem::BackgroundImage`
-  émis → pixels ?
+  Wikipedia). **Cause** : les `.sprite` Wikipedia déclarent
+  `background-image:linear-gradient(…),url(…)` — le garde
+  `starts_with("url(")` de `paint_self` rejetait toute valeur
+  multi-couche → aucun `DisplayItem::BackgroundImage` émis.
+  Le reste de la chaîne était déjà sain : `css_url_args` NAV
+  extrait le `url()` où qu'il soit (fetch/alias OK depuis
+  l'Étape 98/108), `bg_position` accepte les offsets négatifs
+  et `paint_tiled` échantillonne à l'origine décalée → la
+  tranche d'atlas `0 -667px` est correcte dès l'émission.
+  **Fix** : `bg_has_url` (scan `url(` insensible à la casse,
+  même tolérance que l'extracteur de collecte) remplace
+  `starts_with` aux 3 sites (peinture boîte, propagation
+  canvas, `has_bg`). Sonde portail : 19 `BackgroundImage`
+  émis pour 21 nœuds `.sprite`, origines = rect − position
+  (`svg-search-icon` 957.92−747=210.92). Test régression :
+  `background_image_multicouche_peint_la_couche_url`.
+  Résidus : `linear-gradient` n'est pas rendu (couche
+  ignorée — ici transparente, sans effet) ; `background-size`
+  reste hors portée (atlas scalé ≠ 1:1 non géré) ; le shot
+  PNG terrain attend que `explorer-core` recompile (WIP NAV
+  `PendingApply.ids/journal` en vol au moment du fix).
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

@@ -731,11 +731,7 @@ fn emit_canvas_bg(
             });
         }
     }
-    if src
-        .style
-        .get("background-image")
-        .is_some_and(|v| v.starts_with("url("))
-    {
+    if src.style.get("background-image").is_some_and(bg_has_url) {
         if let Some(img) = src.node.and_then(|n| images.backgrounds.get(&n)).cloned() {
             let repeat = match src.style.get("background-repeat") {
                 Some("no-repeat") => (false, false),
@@ -1052,6 +1048,17 @@ fn prop_px(st: &explorer_css::ComputedStyle, prop: &str, fallback: f32) -> f32 {
     }
 }
 
+/// La valeur `background-image` contient une couche `url(…)`
+/// — n'importe où : `linear-gradient(…),url(…)` (sprites
+/// Wikipedia, R-71) est un `background-image` valide dont la
+/// couche image est en seconde position. Insensible à la
+/// casse, comme l'extracteur `url(…)` de la collecte.
+fn bg_has_url(v: &str) -> bool {
+    v.as_bytes()
+        .windows(4)
+        .any(|w| w.eq_ignore_ascii_case(b"url("))
+}
+
 /// La boîte déclare un fond : `background-color` non
 /// transparente ou `background-image: url()` (§14.2 —
 /// sélection de la source du fond de canvas).
@@ -1059,9 +1066,7 @@ fn has_bg(st: &explorer_css::ComputedStyle) -> bool {
     st.get("background-color")
         .and_then(parse_color)
         .is_some_and(|c| c.a > 0)
-        || st
-            .get("background-image")
-            .is_some_and(|v| v.starts_with("url("))
+        || st.get("background-image").is_some_and(bg_has_url)
 }
 
 /// `font-size` calculée de la boîte en px (16 par défaut).
@@ -1231,11 +1236,7 @@ fn paint_self(
                 }
             }
         }
-        if bx
-            .style
-            .get("background-image")
-            .is_some_and(|v| v.starts_with("url("))
-        {
+        if bx.style.get("background-image").is_some_and(bg_has_url) {
             if let Some(img) = bx.node.and_then(|n| images.backgrounds.get(&n)).cloned() {
                 let repeat = match bx.style.get("background-repeat") {
                     Some("no-repeat") => (false, false),

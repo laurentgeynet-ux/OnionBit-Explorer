@@ -1012,6 +1012,30 @@ fn background_position_decale_lorigine() {
 }
 
 #[test]
+fn background_image_multicouche_peint_la_couche_url() {
+    // R-71 : `linear-gradient(…),url(…)` (sprites Wikipedia
+    // `.sprite`) — la couche `url()` doit peindre même quand
+    // elle n'est pas en première position, avec tranche
+    // d'atlas par `background-position` négatif.
+    let list = bg_div(
+        "background-image:linear-gradient(transparent,transparent),url(a.svg);\
+         background-repeat:no-repeat;background-position:0 -5px",
+    );
+    let (origin, rect) = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { origin, rect, .. } => Some((*origin, *rect)),
+            _ => None,
+        })
+        .expect("l'item fond multi-couche doit être émis");
+    // `-5px` = tranche d'atlas : l'origine de la tuile
+    // remonte de 5 px pour dévoiler la rangée visée.
+    assert_eq!(origin.1, -5.0, "position négative = tranche d'atlas");
+    assert_eq!((rect.width, rect.height), (40.0, 20.0));
+}
+
+#[test]
 fn background_fixed_ancre_au_viewport() {
     // Attachment fixed : la zone de positionnement est le
     // viewport — à scroll 0, origine = coin écran + position.

@@ -1333,6 +1333,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `tab_mem_inventory` : **RSS 1249 → 205 Mio**,
   drop tree 850→58 Mio, prev_styles 244→21 Mio.
   Tests : sémantiques externes + `ptr_eq` internes.
+- **R-71 — sprites `background-image` multi-couches non
+  peints** (`explorer-render`, trigger portail
+  `www.wikipedia.org` — cases vides autour des boutons,
+  icônes `.sprite` absentes) : la valeur
+  `linear-gradient(…),url(…)` plaçait le `url()` en
+  seconde couche et le garde `starts_with("url(")` de
+  `paint_self`/`has_bg`/propagation canvas rejetait toute
+  la déclaration → zéro `DisplayItem::BackgroundImage`.
+  Le reste de la chaîne était déjà correct : extraction
+  NAV `url()` n'importe où (Étape 98/108),
+  `bg_position` aux offsets négatifs, `paint_tiled` à
+  l'origine décalée. Fix : `bg_has_url` (scan `url(`
+  insensible à la casse) aux 3 sites. Sonde portail
+  réel : 19 items image émis sur 21 nœuds `.sprite`,
+  origines = rect − `background-position` (tranches
+  d'atlas `0 -667px`… correctes). Test :
+  `background_image_multicouche_peint_la_couche_url`.
+  Résidus : `linear-gradient` ignoré (transparent ici) ;
+  `background-size` hors portée.
 
 ### Added
 
