@@ -167,14 +167,17 @@ async fn nav_commit_shared(
     };
     let base = tail.url.clone();
     let bodies = std::mem::take(&mut tail.img_bodies);
-    // Fonds `url(http…)` (étape 98) : posés sur la payload,
-    // insérés à la cascade dans `relayout_dom_payload`.
+    // Fonds `url(http…)` (étape 98) et masques `mask-image`
+    // (étape 121) : posés sur la payload, insérés à la
+    // cascade dans `relayout_dom_payload`.
     let bg_aliases = std::mem::take(&mut tail.bg_aliases);
     let bg_bodies = std::mem::take(&mut tail.bg_bodies);
+    let mask_aliases = std::mem::take(&mut tail.mask_aliases);
     let work = tokio::task::spawn_blocking(move || {
         net::insert_images_payload(&mut p, &base, &bodies, ctx.image_max_px);
         p.bg_aliases = bg_aliases;
         p.bg_bodies = bg_bodies;
+        p.mask_aliases = mask_aliases;
         let Some(dom) = p.dom.take() else {
             return (p, Err(CoreError::EmptyDocument));
         };

@@ -246,6 +246,13 @@ pub(crate) struct PaintPayload {
     /// fois vers `bg_decoded`.
     pub bg_aliases: HashMap<String, String>,
     pub bg_bodies: HashMap<String, Vec<u8>>,
+    /// Alias `mask-image: url(http…)` fetchés (étape 121) :
+    /// texte `url(...)` brut → URL résolue ; les corps sont
+    /// partagés avec `bg_bodies`, le décodage avec
+    /// `bg_decoded`. Persistant : `masks_url` meurt avec le
+    /// RAZ `PaintImages` de chaque apply — les masques sont
+    /// ré-enregistrés depuis cette table à chaque cascade.
+    pub mask_aliases: HashMap<String, String>,
     /// Caches décodés persistants (étape 108) — les tables
     /// `images.*` sont indexées `NodeId` et RAZ à chaque apply
     /// (re-parse → ids régénérés) ; les bitmaps vivent ici
@@ -363,6 +370,7 @@ impl Tab {
             emitted: self.emitted,
             bg_aliases: std::mem::take(&mut self.bg_aliases),
             bg_bodies: std::mem::take(&mut self.bg_bodies),
+            mask_aliases: std::mem::take(&mut self.mask_aliases),
             img_decoded: std::mem::take(&mut self.img_decoded),
             bg_decoded: std::mem::take(&mut self.bg_decoded),
             keymap: std::mem::take(&mut self.dom_keymap),
@@ -397,6 +405,7 @@ impl Tab {
         // restitué — un apply ultérieur le re-prendra.
         self.bg_aliases = p.bg_aliases;
         self.bg_bodies = p.bg_bodies;
+        self.mask_aliases = p.mask_aliases;
         self.img_decoded = p.img_decoded;
         self.bg_decoded = p.bg_decoded;
         self.dom_keymap = p.keymap;
@@ -911,12 +920,19 @@ fn try_incr_payload(
     // indexées sur des ids morts).
     p.images.replaced.clear();
     p.images.backgrounds.clear();
+    p.images.masks_url.clear();
     net::reinsert_imgs_by_src(new_dom, &mut p.images, &p.img_decoded);
     let styles = styles_payload(p, new_dom, ctx.viewport, ctx.color_scheme);
     let data_imgs = collect_data_images(new_dom, &styles, ctx.image_max_px);
     p.images.replaced.extend(data_imgs.replaced);
     p.images.backgrounds.extend(data_imgs.backgrounds);
-    insert_fetched_backgrounds(p, &styles, ctx.image_max_px);
+    // `masks_url` n'est pas indexée `NodeId` : les masques
+    // `data:` sont ré-étendus à chaque apply comme les
+    // fetchés sont ré-enregistrés via `mask_aliases` — sans
+    // ce merge la table (RAZ `PaintImages::default()`)
+    // rendait tout `mask-image` aveugle en session.
+    p.images.masks_url.extend(data_imgs.masks_url);
+    insert_fetched_images(p, &styles, ctx.image_max_px);
     let mut sizes = image_sizes(new_dom, &p.images.replaced);
     sizes.extend(explorer_render::svg::svg_sizes(new_dom, root_el));
     let svgs = explorer_render::svg::collect_svg(new_dom, root_el, ctx.image_max_px);
@@ -1037,7 +1053,11 @@ pub(crate) fn relayout_dom_payload(
     let data_imgs = collect_data_images(dom, &styles, ctx.image_max_px);
     p.images.replaced.extend(data_imgs.replaced);
     p.images.backgrounds.extend(data_imgs.backgrounds);
-    insert_fetched_backgrounds(p, &styles, ctx.image_max_px);
+    // Même merge `masks_url` que la voie incrémentale (voir
+    // plus haut) : masques `data:` sinon invisibles en
+    // session depuis R-52.
+    p.images.masks_url.extend(data_imgs.masks_url);
+    insert_fetched_images(p, &styles, ctx.image_max_px);
     let mut sizes = image_sizes(dom, &p.images.replaced);
     sizes.extend(explorer_render::svg::svg_sizes(dom, root_el));
     let svgs = explorer_render::svg::collect_svg(dom, root_el, ctx.image_max_px);
@@ -1697,23 +1717,31 @@ impl Session {
 /// par onglet maximum, coalescée à `queue_apply`).
 pub(crate) type ApplyQueue = VecDeque<PendingApply>;
 
-/// Fonds `url(http…)` fetchés pendant la vague (étape 98) :
+/// Fonds `url(http…)` et masques `mask-image` fetchés
+/// pendant la vague (étapes 98 et 121 — demande PIPE R-86) :
 /// les corps posés sur `p` par `stage_backgrounds`/l'apply
-/// détachée sont insérés dans `images.backgrounds` — le
-/// `NodeId` propriétaire est retrouvé par la valeur
-/// `background-image` calculée, via `bg_aliases`
-/// (texte `url(...)` brut → URL résolue ; la feuille
-/// d'origine ne survit pas à la cascade). Fond `data:` ou non
-/// fetché → pas d'alias → ignoré, jamais d'échec.
+/// détachée sont insérés dans `images.backgrounds` et
+/// `images.masks_url`. Pour les fonds, le `NodeId`
+/// propriétaire est retrouvé par la valeur
+/// `background-image` calculée, via `bg_aliases` (texte
+/// `url(...)` brut → URL résolue ; la feuille d'origine ne
+/// survit pas à la cascade). Pour les masques, la clé est le
+/// texte brut lui-même — `PaintImages::register_mask` indexe
+/// `masks_url` comme le fait `mask_url(style)` côté render,
+/// ce qui couvre les pseudo-boîtes dépourvues de `NodeId`.
+/// Fond/masque `data:` ou non fetché → pas d'alias → ignoré,
+/// jamais d'échec.
 ///
 /// **Idempotent** (étape 108) : les corps `bg_bodies` sont
 /// drainés une fois vers le cache persistant `bg_decoded`
-/// (URL résolue → image), `bg_aliases` reste — chaque apply
-/// peut ainsi ré-insérer les fonds sur les `NodeId` régénérés
-/// au re-parse, symétrique de `reinsert_imgs_by_src`. Avant
-/// ce cache, les fonds fetchés mouraient au second apply.
-fn insert_fetched_backgrounds(p: &mut PaintPayload, styles: &StyleMap, max_px: u32) {
-    if p.bg_aliases.is_empty() {
+/// (URL résolue → image, partagé entre les deux rôles),
+/// `bg_aliases`/`mask_aliases` restent — chaque apply
+/// ré-insère sur les `NodeId` régénérés au re-parse et
+/// ré-enregistre `masks_url`, RAZ avec `PaintImages::default()`.
+/// Symétrique de `reinsert_imgs_by_src` ; avant ce cache,
+/// les fonds fetchés mouraient au second apply.
+fn insert_fetched_images(p: &mut PaintPayload, styles: &StyleMap, max_px: u32) {
+    if p.bg_aliases.is_empty() && p.mask_aliases.is_empty() {
         return;
     }
     // Drain unique : corps → cache décodé. Les applys
@@ -1734,5 +1762,23 @@ fn insert_fetched_backgrounds(p: &mut PaintPayload, styles: &StyleMap, max_px: u
         if let Some(Some(img)) = p.bg_decoded.get(resolved.as_str()) {
             p.images.backgrounds.insert(node, img.clone());
         }
+    }
+    // Masques : la table `masks_url` est cléée par le texte
+    // `url(...)` brut (la forme relue par `mask_url(style)`
+    // au paint) — inutile de re-scanner `styles` : alias →
+    // cache décodé → enregistrement direct. Couvre de fait
+    // les pseudo-éléments, qui n'ont pas de `NodeId`.
+    for (raw, resolved) in &p.mask_aliases {
+        if let Some(Some(img)) = p.bg_decoded.get(resolved.as_str()) {
+            let img = img.clone();
+            p.images.register_mask(raw, img);
+        }
+    }
+    if !p.mask_aliases.is_empty() {
+        tracing::trace!(
+            declared = p.mask_aliases.len(),
+            registered = p.images.masks_url.len(),
+            "mask: masques enregistrés"
+        );
     }
 }

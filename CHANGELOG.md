@@ -63,10 +63,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `data_imgs.masks_url` n'était
   jamais étendu à l'apply — tout
   `mask-image` `data:` était aveugle
-  en session depuis R-52. Promesse
-  honnête : le motif devient
-  *possible* — l'icône MDN au shot
-  reste à mesurer en terrain.
+  en session depuis R-52. **Mesuré
+  MDN** (`mask-image`, 1366 px) :
+  24/24 masques `url(http…)` fetchés
+  et enregistrés — les spans vides
+  `icon icon-baseline` (étoile
+  badge) et `icon icon-chevron`
+  (chevron accordéon) peignent leurs
+  glyphes. Reliquats honnêtes :
+  `.external` hors frame capturée,
+  `.color-theme__button` absent du
+  DOM post-JS (hydratation). Les
+  icônes MDN ne sont plus
+  structurellement invisibles.
   Régressions `mask_image_*`,
   `data_mask_paints_in_session`,
   `fetched_mask_survives_js_dom_

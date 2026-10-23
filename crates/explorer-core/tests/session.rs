@@ -2468,6 +2468,227 @@ async fn background_image_count_is_bounded() {
 }
 
 // ------------------------------------------------------------------
+// Étape 121 — mask-image HTTP (demande PIPE R-86)
+// ------------------------------------------------------------------
+
+/// PNG 4×4 : moitié gauche opaque, moitié droite
+/// transparente — posé sur une boîte 4×4, un `mask-image`
+/// borne le `background-color` aux 8 px de gauche (16 = le
+/// repli « masque absent → fond plein »).
+fn half_mask_png() -> Vec<u8> {
+    use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
+    let mut rgba = Vec::new();
+    for _y in 0..4 {
+        for x in 0..4 {
+            rgba.extend_from_slice(&[0, 0, 0, if x < 2 { 255 } else { 0 }]);
+        }
+    }
+    let mut buf = Vec::new();
+    PngEncoder::new(&mut buf)
+        .write_image(&rgba, 4, 4, ExtendedColorType::Rgba8)
+        .expect("encode png");
+    buf
+}
+
+/// Compte les pixels rouges pleins de la frame — l'oracle
+/// pixel qui distingue masque appliqué (8) du repli fond
+/// plein (16) sur une boîte 4×4.
+fn red_px_count(s: &Session, id: explorer_core::TabId) -> usize {
+    let (_, _, px) = s.frame_pixels(id).unwrap();
+    px.chunks_exact(4)
+        .filter(|p| p[0] > 230 && p[1] < 40 && p[2] < 40)
+        .count()
+}
+
+/// Bout en bout : `mask-image: url(…)` relative à la feuille
+/// liée est fetchée, décodée (`image_max_px`) et enregistrée
+/// dans `masks_url` sous le texte `url(...)` brut — le
+/// `MaskedFill` borne le fond à la zone opaque.
+#[tokio::test]
+async fn mask_image_fetched_and_rendered() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><head><link rel=\"stylesheet\" href=\"/css/s.css\"></head>\
+        <body><div id=\"b\"></div></body></html>",
+    );
+    // `url("m.png")` relative à la FEUILLE → `/css/m.png` :
+    // la résolution contre la base feuille est le test.
+    t.route(
+        "/css/s.css",
+        200,
+        "#b{display:inline-block;mask-image:url(\"m.png\");\
+         background-color:#ff0000;width:4px;height:4px}",
+    );
+    t.route_bin("/css/m.png", 200, half_mask_png());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    assert_eq!(
+        red_px_count(&s, a),
+        8,
+        "masque fetché → moitié gauche seulement — paths={:?}",
+        t.paths()
+    );
+}
+
+/// Même rail côté `<style>` inline (base = document) et
+/// propriété préfixée `-webkit-mask-image` — le motif des
+/// icônes MDN.
+#[tokio::test]
+async fn webkit_mask_image_fetched_and_rendered() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><head><style>#b{display:inline-block;\
+         -webkit-mask-image:url(/m.png);background-color:#ff0000;\
+         width:4px;height:4px}</style></head>\
+        <body><div id=\"b\"></div></body></html>",
+    );
+    t.route_bin("/m.png", 200, half_mask_png());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    assert_eq!(
+        red_px_count(&s, a),
+        8,
+        "masque -webkit fetché attendu — paths={:?}",
+        t.paths()
+    );
+}
+
+/// Le motif MDN `.x::before` : la boîte pseudo n'a pas de
+/// `NodeId` — son masque ne passe QUE par `masks_url` cléée
+/// sur le texte `url(...)` brut. Le wiring fetch doit donc
+/// enregistrer sous cette clé (pas de re-scan par styles).
+#[tokio::test]
+async fn mask_on_pseudo_fetched() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><head><style>.x::before{content:\"\";\
+         display:inline-block;width:4px;height:4px;\
+         mask-image:url(/m.png);background-color:#ff0000}</style></head>\
+        <body><span class=\"x\"></span></body></html>",
+    );
+    t.route_bin("/m.png", 200, half_mask_png());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    assert_eq!(
+        red_px_count(&s, a),
+        8,
+        "masque pseudo fetché attendu — paths={:?}",
+        t.paths()
+    );
+}
+
+/// Corps absent (404) : dégradation gracieuse — pas de
+/// `MaskedFill`, le repli `background-color` plein peint
+/// les 16 px, la page vit.
+#[tokio::test]
+async fn mask_image_missed_fetch_is_silent() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><head><style>#b{display:inline-block;\
+         mask-image:url(/gone.png);background-color:#ff0000;\
+         width:4px;height:4px}</style></head>\
+        <body><div id=\"b\"></div></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/i").await.unwrap();
+    assert_eq!(
+        red_px_count(&s, id),
+        16,
+        "repli fond plein attendu (masque 404)"
+    );
+}
+
+/// Trou colateral mesuré : `data_imgs.masks_url` n'était
+/// jamais étendu à l'apply — un masque `data:` était aveugle
+/// en session dès la première frame (le merge n'existait
+/// pas, contrairement aux tests PIPE qui injectent le
+/// `PaintImages` complet). Le fetch http ne couvre que la
+/// moitié du contrat.
+#[tokio::test]
+async fn data_mask_paints_in_session() {
+    use std::fmt::Write;
+    let (mut s, t) = test_session();
+    let enc = half_mask_png().iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "%{byte:02X}");
+        out
+    });
+    t.route(
+        "/i",
+        200,
+        Box::leak(
+            format!(
+                "<html><head><style>#b{{display:inline-block;\
+                 mask-image:url(\"data:image/png,{enc}\");\
+                 background-color:#ff0000;width:4px;height:4px}}</style></head>\
+                <body><div id=\"b\"></div></body></html>"
+            )
+            .into_boxed_str(),
+        ),
+    );
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    assert_eq!(
+        red_px_count(&s, a),
+        8,
+        "masque data: peint — le merge masks_url est requis"
+    );
+}
+
+/// Régression RAZ : `apply_payload` repose
+/// `PaintImages::default()` à chaque re-parse — `masks_url`
+/// meurt avec. `mask_aliases` + `bg_decoded` doivent le
+/// ré-enregistrer à chaque cascade (symétrique de
+/// `fetched_background_survives_js_dom_resync`).
+#[tokio::test]
+async fn fetched_mask_survives_js_dom_resync() {
+    let (mut s, t) = test_session();
+    // Flottant 0×0 : reflow complet à la synchro (voir
+    // `img_survives_js_dom_resync`).
+    t.route(
+        "/m",
+        200,
+        "<html><head><style>#b{display:inline-block;mask-image:url(/i.png);\
+         background-color:#ff0000;width:4px;height:4px}\
+         </style></head><body><div style=\"float:left;width:0;height:0\"></div>\
+         <div id=\"b\"></div><div id=\"x\">avant</div>\
+         <script>setTimeout(function(){\
+         document.getElementById('x').textContent='APRES'},80)</script>\
+         </body></html>",
+    );
+    t.route_bin("/i.png", 200, half_mask_png());
+    // Équivalent statique : la moitié gauche (2×4) rouge
+    // pleine, le reste du motif transparent.
+    t.route(
+        "/s",
+        200,
+        "<html><head><style>#b{display:inline-block;background-color:#ff0000;\
+         width:2px;height:4px}\
+         </style></head><body><div style=\"float:left;width:0;height:0\"></div>\
+         <div id=\"b\"></div><div id=\"x\">APRES</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/m").await.unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    s.pump_timers(a);
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    let (pa, pb) = (s.frame_png(a), s.frame_png(b));
+    assert!(pa.is_some() && pb.is_some());
+    assert_eq!(pa, pb, "le masque fetché doit survivre à la synchro JS");
+}
+
+// ------------------------------------------------------------------
 // Étape 38 — formulaires
 // ------------------------------------------------------------------
 

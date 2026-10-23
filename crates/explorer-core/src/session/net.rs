@@ -40,7 +40,9 @@ impl Session {
     /// posés sur l'onglet avant le relayout — l'insertion
     /// dans `images.backgrounds` attend la cascade (le
     /// `NodeId` propriétaire n'est connu qu'au style calculé).
-    /// `take_paint` les fera voyager avec la payload.
+    /// `mask_aliases` suit le même rail (étape 121 — ses
+    /// corps sont partagés dans `bg_bodies`). `take_paint`
+    /// les fera voyager avec la payload.
     fn stage_backgrounds(&mut self, tab: TabId, tail: &mut SubCommitTail) {
         if tail.bg_bodies.is_empty() {
             return;
@@ -50,6 +52,7 @@ impl Session {
         };
         entry.bg_aliases = std::mem::take(&mut tail.bg_aliases);
         entry.bg_bodies = std::mem::take(&mut tail.bg_bodies);
+        entry.mask_aliases = std::mem::take(&mut tail.mask_aliases);
     }
 
     /// Tête du commit — sous `&mut self` : garde epoch,
@@ -84,6 +87,7 @@ impl Session {
             img_bodies,
             bg_aliases,
             bg_bodies,
+            mask_aliases,
             mut eng,
             fonts,
             arrival_evals,
@@ -160,6 +164,7 @@ impl Session {
             img_bodies,
             bg_aliases,
             bg_bodies,
+            mask_aliases,
         }))
     }
 

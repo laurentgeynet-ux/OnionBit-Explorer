@@ -682,6 +682,7 @@ impl Session {
             entry.images = PaintImages::default();
             entry.bg_aliases.clear();
             entry.bg_bodies.clear();
+            entry.mask_aliases.clear();
             entry.img_decoded.clear();
             entry.bg_decoded.clear();
             entry.linked_sheets.clear();
@@ -717,6 +718,7 @@ impl Session {
             img_bodies: HashMap::new(),
             bg_aliases: HashMap::new(),
             bg_bodies: HashMap::new(),
+            mask_aliases: HashMap::new(),
             async_mods: Vec::new(),
             fonts: Vec::new(),
             arrival_evals: Vec::new(),

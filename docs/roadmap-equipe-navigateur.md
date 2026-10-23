@@ -2501,12 +2501,20 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   colatéral réparé** : `data_imgs.
   masks_url` jamais étendu à l'apply
   → `mask-image` `data:` aveugle en
-  session depuis R-52. Promesse
-  tenue : le motif devient
-  *possible* — pixel MDN
-  (`.color-theme__button`/`.external`
-  visibles) à mesurer en terrain
-  avant de le clamer. Tests :
+  session depuis R-52. **Mesuré
+  MDN** (page `mask-image`, 1366 px)
+  : `declared=24 registered=24` —
+  les spans vides `icon icon-baseline`
+  (étoile badge) et `icon icon-chevron`
+  (chevron accordéon) peignent leurs
+  glyphes : le motif n'est plus
+  structurellement invisible.
+  Reliquats honnêtes : `.external`
+  hors frame capturée (fragment
+  scroll inerte au shot) ;
+  `.color-theme__button` absent du
+  DOM post-JS (hydratation — hors
+  scope mask). Tests :
   `mask_image_fetched_and_rendered`
   (base feuille), `webkit_mask_image_
   fetched_and_rendered` (style

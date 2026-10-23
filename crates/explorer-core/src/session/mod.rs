@@ -247,6 +247,16 @@ pub(crate) struct Tab {
     /// calculé). Vidés à chaque navigation.
     bg_aliases: HashMap<String, String>,
     bg_bodies: HashMap<String, Vec<u8>>,
+    /// Alias `mask-image: url(http…)` fetchés (étape 121,
+    /// demande PIPE R-86) : texte `url(...)` brut → URL
+    /// résolue — les corps sont les mêmes que `bg_bodies`
+    /// (magasin partagé, un corps sert fonds et masques) et
+    /// le cache `bg_decoded` commun. Persistant comme
+    /// `bg_aliases` : `masks_url` est RAZ avec
+    /// `PaintImages::default()` à chaque apply, les masques
+    /// sont ré-enregistrés depuis cette table — les
+    /// pseudo-boîtes (sans `NodeId`) dépendent d'elle.
+    mask_aliases: HashMap<String, String>,
     /// Caches décodés persistants (étape 108) — survivent au
     /// re-parse de chaque apply : les tables `images.*` sont
     /// indexées `NodeId` (régénérés au re-parse) et reconstruites
@@ -845,6 +855,7 @@ impl Session {
                 linked_sheets: Vec::new(),
                 bg_aliases: HashMap::new(),
                 bg_bodies: HashMap::new(),
+                mask_aliases: HashMap::new(),
                 img_decoded: HashMap::new(),
                 bg_decoded: HashMap::new(),
                 dom_keymap: HashMap::new(),

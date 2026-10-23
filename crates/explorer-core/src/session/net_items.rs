@@ -441,6 +441,15 @@ pub(crate) struct SubJob {
     /// valeur `background-image` calculée.
     pub(crate) bg_aliases: HashMap<String, String>,
     pub(crate) bg_bodies: HashMap<String, Vec<u8>>,
+    /// Masques `mask-image: url(http…)` fetchés (étape 121 —
+    /// réponse à la demande PIPE R-86) : même chaîne que les
+    /// fonds — texte `url(...)` brut → URL résolue. Les corps
+    /// vivent dans `bg_bodies` (magasin partagé par résolue :
+    /// une image servant de fond *et* de masque n'est
+    /// fetchée/décodée qu'une fois). Pas de `NodeId` à
+    /// retrouver : `PaintImages::register_mask` indexe par le
+    /// texte brut — les pseudo-boîtes sont couvertes de fait.
+    pub(crate) mask_aliases: HashMap<String, String>,
     /// Corps des modules `async` arrivés (ordre d'arrivée).
     pub(crate) async_mods: Vec<(Url, String)>,
     /// Faces `@font-face` téléchargées et décodées —
@@ -492,6 +501,9 @@ pub(crate) struct SubCommitTail {
     /// la payload avant le relayout, insérés à la cascade.
     pub(crate) bg_aliases: HashMap<String, String>,
     pub(crate) bg_bodies: HashMap<String, Vec<u8>>,
+    /// Masques `mask-image` de la vague (étape 121) — corps
+    /// partagés dans `bg_bodies`.
+    pub(crate) mask_aliases: HashMap<String, String>,
 }
 
 impl SubJob {
@@ -648,21 +660,25 @@ impl SubJob {
         })
     }
 
-    /// Fetch des `url(http…)` d'arrière-plan (étape 98) :
-    /// les déclarations `background`/`background-image` des
-    /// feuilles liées (imports expansés compris — leur texte
-    /// a rejoint le slot de la parente et se résout contre
-    /// sa base) et du `<style>` inline sont re-parcourues ;
-    /// chaque `url(…)` est résolu sur **sa** feuille, déduplé
-    /// par URL résolue et fetché dans le budget `max_images`
-    /// restant après `<img>`. `bg_aliases` conserve le lien
-    /// texte-brut → résolue que la valeur calculée a perdu
-    /// (la feuille d'origine n'y survit pas) ; le `NodeId`
-    /// propriétaire sera retrouvé au relayout. Séquentiel —
-    /// toute anomalie (URL irrésolvable, schéma non-http,
-    /// fetch/status en échec, budget épuisé) → fond sauté,
-    /// jamais d'échec propagé.
+    /// Fetch des `url(http…)` d'arrière-plan **et de masque**
+    /// (étapes 98 et 121 — `mask-image`/`-webkit-mask-image`,
+    /// demande PIPE R-86) : les déclarations des feuilles
+    /// liées (imports expansés compris — leur texte a rejoint
+    /// le slot de la parente et se résout contre sa base) et
+    /// du `<style>` inline sont re-parcourues ; chaque
+    /// `url(…)` est résolu sur **sa** feuille, déduplé par
+    /// URL résolue et fetché dans le budget `max_images`
+    /// restant après `<img>`. `bg_aliases`/`mask_aliases`
+    /// conservent le lien texte-brut → résolue que la valeur
+    /// calculée a perdu (la feuille d'origine n'y survit
+    /// pas). Séquentiel — toute anomalie (URL irrésolvable,
+    /// schéma non-http, fetch/status en échec, budget
+    /// épuisé) → ressource sautée, jamais d'échec propagé.
+    /// Fonds avant masques dans la même boucle : un même
+    /// corps `bg_bodies` sert les deux rôles.
     pub(crate) async fn fetch_backgrounds(&mut self) {
+        const BG_PROPS: &[&str] = &["background", "background-image"];
+        const MASK_PROPS: &[&str] = &["mask-image", "-webkit-mask-image"];
         let env = super::apply::viewport_env(self.viewport, self.color_scheme);
         let mut left = self.max_images.saturating_sub(self.img_urls.len());
         let mut seen = HashSet::new();
@@ -674,19 +690,29 @@ impl SubJob {
                 .get(i)
                 .cloned()
                 .unwrap_or_else(|| self.url.clone());
-            let mut urls = Vec::new();
-            collect_bg_urls(&parse_stylesheet(text).rules, &env, &mut urls);
-            decl_urls.push((base, urls));
+            let rules = parse_stylesheet(text).rules;
+            let mut bg = Vec::new();
+            collect_decl_urls(&rules, &env, BG_PROPS, &mut bg);
+            let mut mask = Vec::new();
+            collect_decl_urls(&rules, &env, MASK_PROPS, &mut mask);
+            decl_urls.push((base, bg, mask));
         }
         {
-            let mut urls = Vec::new();
+            let mut bg = Vec::new();
+            let mut mask = Vec::new();
             for sheet in &self.doc_sheets {
-                collect_bg_urls(&parse_stylesheet(sheet).rules, &env, &mut urls);
+                let rules = parse_stylesheet(sheet).rules;
+                collect_decl_urls(&rules, &env, BG_PROPS, &mut bg);
+                collect_decl_urls(&rules, &env, MASK_PROPS, &mut mask);
             }
-            decl_urls.push((self.url.clone(), urls));
+            decl_urls.push((self.url.clone(), bg, mask));
         }
-        'slots: for (base, urls) in decl_urls {
-            for raw in urls {
+        'slots: for (base, bg_urls, mask_urls) in decl_urls {
+            for (raw, is_mask) in bg_urls
+                .into_iter()
+                .map(|r| (r, false))
+                .chain(mask_urls.into_iter().map(|r| (r, true)))
+            {
                 if left == 0 {
                     break 'slots;
                 }
@@ -706,7 +732,11 @@ impl SubJob {
                 if !(200..300).contains(&resp.status) {
                     continue;
                 }
-                self.bg_aliases.insert(raw, url.to_string());
+                if is_mask {
+                    self.mask_aliases.insert(raw, url.to_string());
+                } else {
+                    self.bg_aliases.insert(raw, url.to_string());
+                }
                 self.bg_bodies.insert(url.to_string(), resp.body);
             }
         }
@@ -1069,17 +1099,18 @@ pub(crate) fn module_deps(
         .collect()
 }
 
-/// `url(…)` des déclarations `background`/`background-image`
-/// d'un jeu de règles, `@media` imbriqués évalués contre
-/// `env` (étape 98 — une feuille hors-media ne fetch pas de
-/// fonds). `@keyframes` ignorés : un `url()` dedans serait
-/// une animation de fond, hors périmètre raster mono-image.
-fn collect_bg_urls(rules: &[Rule], env: &StyleEnv, out: &mut Vec<String>) {
+/// `url(…)` des déclarations listées (`props`) d'un jeu de
+/// règles, `@media` imbriqués évalués contre `env` (étape
+/// 98, généralisé étape 121 pour `mask-image`) — une
+/// feuille hors-media ne fetch rien. `@keyframes` ignorés :
+/// un `url()` dedans serait animé, hors périmètre raster
+/// mono-image.
+fn collect_decl_urls(rules: &[Rule], env: &StyleEnv, props: &[&str], out: &mut Vec<String>) {
     for r in rules {
         match r {
             Rule::Qualified(q) => {
                 for d in &q.declarations {
-                    if matches!(d.name.as_str(), "background" | "background-image") {
+                    if props.contains(&d.name.as_str()) {
                         css_url_args(&d.value, out);
                     }
                 }
@@ -1087,7 +1118,7 @@ fn collect_bg_urls(rules: &[Rule], env: &StyleEnv, out: &mut Vec<String>) {
             Rule::At(a) => {
                 if let AtKind::Media { queries, rules } = &a.kind {
                     if media_matches(env, queries) {
-                        collect_bg_urls(rules, env, out);
+                        collect_decl_urls(rules, env, props, out);
                     }
                 }
             }
