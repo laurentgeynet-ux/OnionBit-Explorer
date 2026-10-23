@@ -4569,6 +4569,69 @@ fn class_static_fields_and_blocks() {
 }
 
 #[test]
+fn class_expr_self_name() {
+    // Nom propre de la *class expression* : liaison immuable dans
+    // le scope de classe, visible des méthodes/statiques/champs —
+    // spec `ClassDefinitionEvaluation`. Trigger réel : primer-react
+    // `var a = class e { static create() { return new e() } }` dans
+    // une factory webpack dont le param `e` (exports) devait être
+    // masqué — sinon `new e()` levait « constructor is not a
+    // function ».
+    assert_eq!(
+        ev_str("var e = {}; var a = class e { static m() { return e === a; } }; a.m()"),
+        "true"
+    );
+    // Motif webpack : le param `e` est masqué par le nom propre.
+    assert_eq!(
+        ev_str(
+            "function ZS(e) { var a = class e { static create() { return new e(); } };                 return typeof a.create(); } ZS({x: 1})"
+        ),
+        "object"
+    );
+    // Le nom ne fuit pas hors de l'expression.
+    assert_eq!(
+        ev_str("var a = class e { static m() { return e === a; } }; typeof e"),
+        "undefined"
+    );
+    // Liaison immuable : `e = …` dans une méthode = TypeError
+    // (corps de classe strict).
+    assert_eq!(
+        ev_str(
+            "var a = class e { static m() { e = 42; } };                 try { a.m(); 'pas-throw' } catch (x) { x instanceof TypeError }"
+        ),
+        "true"
+    );
+    // Champs d'instance et bloc statique voient le nom ; dans le
+    // bloc, `e` = la classe alors que `a` n'est pas encore lié
+    // (spec : le bloc court pendant l'évaluation de la classe).
+    assert_eq!(
+        ev_str("var a = class e { f = (e === a); }; new a().f"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("var a = class e { static { this.t = typeof e; } }; a.t"),
+        "function"
+    );
+    // Déclaration : le binding interne masque la réassignation
+    // externe du nom (spec — liaison de classe immuable et
+    // prioritaire). La méthode est capturée avant `E = 0` puisque
+    // `new E()`/`E.m()` ne sont plus appelables ensuite.
+    assert_eq!(
+        ev_str(
+            "var r, m; { class E { static m() { r = typeof E === 'function'; } }                 m = E.m; E = 0; m(); } r"
+        ),
+        "true"
+    );
+    // `e` cohabite avec `super`.
+    assert_eq!(
+        ev_str(
+            "var P = class { m() { return 1; } };                 var a = class e extends P { m() { return super.m() + (e === a ? 1 : 0); } };                 new a().m()"
+        ),
+        "2"
+    );
+}
+
+#[test]
 fn class_call_rules() {
     // `C()` sans new -> TypeError.
     assert!(Engine::new().eval("class C {} C()").is_err());

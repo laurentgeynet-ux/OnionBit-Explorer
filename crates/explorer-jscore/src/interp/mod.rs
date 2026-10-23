@@ -2095,6 +2095,20 @@ impl Engine {
         self.set_own(ctor_id, "prototype", Value::Obj(proto), false);
         self.set_own(proto, "constructor", ctor, false);
         Self::env_put(&cenv, HOME_BIND, ctor, false);
+        // Nom propre de la classe — liaison immuable dans le
+        // scope de classe (spec `ClassDefinitionEvaluation`),
+        // visible des méthodes/statiques/champs : `class e {
+        // static m() { return new e() } }` doit résoudre `e` =
+        // la classe, pas un binding externe — indispensable pour
+        // la *class expression* (trigger primer-react : `var a =
+        // class e { … new e() … }` masquant le param `e` des
+        // factories webpack). Pour la déclaration, l'environnement
+        // externe porte aussi `e` — mais il est mutable et peut
+        // être réassigné : le binding interne le masque et reste
+        // la classe.
+        if let Some(name) = &cl.name {
+            Self::env_put(&cenv, name, ctor, false);
+        }
         // Derived ctor's [[Prototype]] is the parent constructor —
         // statics inherit (`Parent.sm()` reachable via `C.sm()`,
         // `super.sm()` inside statics resolves through it).

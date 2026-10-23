@@ -3295,6 +3295,25 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   récepteur (lang + dom), `getPrototypeOf`
   `ToObject`.
 
+- [x] **JS-C63. Census github.com, nom propre
+  des class expressions** (`jprobe` réel, repro
+  isolé avant fix — 2 erreurs → 1) : la liaison
+  immuable `NomClasse → ctor` du scope de
+  classe (spec `ClassDefinitionEvaluation`)
+  n'existait pas — la déclaration survivait via
+  son binding externe, l'expression `var a =
+  class e {}` résolvait `e` ailleurs →
+  `constructor is not a function` mesuré dans
+  `primer-react-*.js` (param `e` exports des
+  factories webpack masqué). `env_put(&cenv,
+  name, ctor)` : visible des méthodes/
+  statiques/champs/blocs statiques, masque
+  toute réassignation externe, immuable
+  (`TypeError` strict), sans fuite. Résidu
+  honnête inchangé : `turbo-frame.delegate`
+  (machinery custom-elements, backlog).
+  Test : `class_expr_self_name`.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

@@ -37,6 +37,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `mask_fetchem_enregistre_via_
   register_mask`.
 
+- **JS-C63 — census github.com, nom propre des
+  class expressions** (`explorer-jscore`, `jprobe`
+  réel — repro isolé avant fix) : la liaison
+  immuable `NomClasse → ctor` du scope de classe
+  (spec `ClassDefinitionEvaluation`) n'était
+  jamais créée — la *déclaration* `class e {}`
+  survivait par accident via son binding externe,
+  mais l'*expression* `var a = class e {}`
+  résolvait `e` dans le scope englobant. Trigger
+  mesuré : `primer-react-*.js` — `var a = class
+  e { static create() { return new e() } }` dans
+  une factory webpack dont le param `e` (exports)
+  faisait lever « constructor is not a function ».
+  `env_put(&cenv, name, ctor, false)` : méthodes,
+  statiques, champs et blocs statiques voient le
+  nom ; il masque les bindings externes même
+  réassignés ; écriture dessus = `TypeError`
+  (corps strict) ; aucune fuite hors de
+  l'expression. Mesure terrain github.com :
+  **2 erreurs → 1** — reste le résidu honnête
+  `turbo-frame.delegate` (custom-elements,
+  backlog). Test : `class_expr_self_name`
+  (expression/déclaration, masquage param
+  webpack, immutabilité, non-fuite, champs,
+  bloc static, cohabitation `super`).
+
 - **JS-C62 — census github.com, reliquat aval :
   trois gaps mesurés** (`explorer-jscore`, `jprobe`
   réel — repro isolé avant fix) :
