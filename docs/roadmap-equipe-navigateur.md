@@ -2916,6 +2916,38 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-143. `<meta
+  http-equiv=refresh>`**
+  *(numéro officiel attribué
+  à l'intégration)* :
+  navigation **programmée par
+  le document**, hors-JS —
+  première méta valide en
+  ordre document gagne (une
+  morte n'occupe pas le
+  slot) ; grammaire `N[;,]
+  [url=]U` tolérante (casse,
+  espaces, quotes), cible
+  résolue sur la base, sans
+  `url` = rechargement.
+  `NavDone.refresh` porte
+  `(délai, cible)` →
+  `Tab.refresh_at` recalé au
+  commit ; le tick
+  (`pump_timers`, avant le
+  gate moteur) transforme
+  l'échéance échue en
+  `DrainAct::Req` — drain
+  habituel. bfcache : le gel
+  conserve le **délai
+  restant**, la restauration
+  recale l'échéance. Rejeu
+  download programmé idem.
+  Tests : `meta_refresh_*`
+  (5 : tir, rechargement,
+  non-échue, quotes/casse,
+  méta morte sautée).
+
 - [x] **CAP-142. `<iframe
   srcdoc>`** *(numéro officiel
   attribué à l'intégration —

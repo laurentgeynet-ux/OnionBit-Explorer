@@ -149,6 +149,7 @@ fn paintless_snapshot_repairs_on_restore() {
             referrer_policy: None,
             base_url: None,
             base_target: None,
+            refresh: None,
         });
     }
 
@@ -236,6 +237,7 @@ async fn back_during_inflight_nav_restores_previous() {
             referrer_policy: None,
             base_url: None,
             base_target: None,
+            refresh: None,
         });
     }
 

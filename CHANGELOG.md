@@ -987,6 +987,55 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   → cadre blanc opaque, dédup
   deux cadres homonymes.
 
+- **CAP-143 — `<meta
+  http-equiv=refresh>`**
+  (`explorer-core` — cap « web
+  réel sécurisé » ; numéro
+  officiel attribué à
+  l'intégration, compteur
+  gelé) : navigation
+  **programmée par le
+  document**, indépendante du
+  JS — `<meta http-equiv=
+  refresh content="N[;][url=]
+  U">` extrait à la réception
+  (la première méta valide en
+  ordre document gagne, une
+  `content` morte n'occupe
+  pas le slot), grammaire
+  tolérante (casse `URL=`,
+  espaces, quotes appariées,
+  `,`/`;`) ; la cible est
+  résolue sur la base
+  effective (`<base href>`
+  honoré), sans `url` la
+  méta recharge le document.
+  `NavDone.refresh` porte
+  `(délai, cible)` ; le commit
+  recale l'échéance en
+  `Instant` sur `Tab.
+  refresh_at` ; le tick
+  (`pump_timers`, **avant** le
+  gate moteur — tire sans
+  `JsEngine`) transforme une
+  échéance échue en
+  `DrainAct::Req` conduit par
+  le drain habituel (referrer
+  politique/cookies/`Sec-
+  Fetch-*` d'une vraie nav).
+  bfcache : le gel conserve le
+  **délai restant** — le
+  séjour gelé ne consomme pas
+  le compte à rebours. Le
+  rejeu « document » d'un
+  téléchargement programme la
+  même échéance. Régressions
+  `meta_refresh_*` (5) : tir
+  vers cible, rechargement
+  sans `url`, non-échue
+  silencieuse, casse/quotes,
+  méta morte sautée.
+
 ### Fixed
 
 - **Étape 122 — `root_font_size`

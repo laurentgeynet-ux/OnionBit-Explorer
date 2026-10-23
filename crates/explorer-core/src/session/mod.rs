@@ -172,6 +172,11 @@ pub(crate) struct Tab {
     /// `<base target>` brut (étape 135) — cible par défaut
     /// des `<a>`/`<form>` sans `target` propre.
     base_target: Option<String>,
+    /// Échéance `<meta refresh>` (CAP-143) — instant local +
+    /// cible résolue ; le tick (`pump_timers`) transforme
+    /// une échéance échue en intention de navigation. Gelée/
+    /// restaurée avec le bfcache (délai restant conservé).
+    refresh_at: Option<(std::time::Instant, Url)>,
     /// Position dans `hist`.
     hist_idx: usize,
     /// La page **affichée** provient d'une navigation `push`
@@ -493,6 +498,11 @@ pub(crate) struct PageSnapshot {
     /// résolution survit à un aller-retour bfcache.
     base_url: Option<Url>,
     base_target: Option<String>,
+    /// `<meta refresh>` gelée (CAP-143) — **délai restant**
+    /// au gel + cible ; la restauration recale l'échéance
+    /// sur l'instant présent (un gel ne consomme pas le
+    /// compte à rebours).
+    refresh: Option<(std::time::Duration, Url)>,
 }
 
 /// Session : transport + fontes injectés, onglets, viewport,
@@ -905,6 +915,7 @@ impl Session {
                 referrer_policy: None,
                 base_url: None,
                 base_target: None,
+                refresh_at: None,
                 hist_idx: 0,
                 hist_pending: false,
                 scroll_y: 0.0,

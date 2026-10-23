@@ -53,6 +53,14 @@ impl Tab {
             referrer_policy: self.referrer_policy.take(),
             base_url: self.base_url.take(),
             base_target: self.base_target.take(),
+            // `<meta refresh>` (CAP-143) : le gel conserve le
+            // **délai restant** — la restauration recale
+            // l'échéance, un séjour dans le bfcache ne
+            // consomme pas le compte à rebours.
+            refresh: self
+                .refresh_at
+                .take()
+                .map(|(t, u)| (t.saturating_duration_since(std::time::Instant::now()), u)),
         };
         self.scroll_y = 0.0;
         self.doc_h = 0.0;
@@ -112,6 +120,9 @@ impl Tab {
         self.referrer_policy = snap.referrer_policy;
         self.base_url = snap.base_url;
         self.base_target = snap.base_target;
+        self.refresh_at = snap
+            .refresh
+            .map(|(d, u)| (std::time::Instant::now() + d, u));
         self.transitions.clear();
         // Idem animations : la restauration repart sur les
         // déclarations — lecture réenregistrée au premier

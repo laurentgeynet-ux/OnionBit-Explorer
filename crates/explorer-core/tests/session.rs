@@ -8397,3 +8397,128 @@ async fn iframe_srcdoc_dedup_same_content() {
     assert_eq!(px_at(px, w, 20, 20), [0, 255, 0, 255], "cadre 1");
     assert_eq!(px_at(px, w, 80, 20), [0, 255, 0, 255], "cadre 2");
 }
+
+// ===== CAP-143 — `<meta http-equiv=refresh>` : navigation
+// programmée par le document (hors-JS, tir au battement) =====
+
+/// `content="0;url=/b"` : la méta programme une navigation
+/// — échue dès le premier tick, drainée en vraie nav.
+#[tokio::test]
+async fn meta_refresh_navigates_to_target() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <meta http-equiv=\"refresh\" content=\"0;url=/b\"></head>\
+         <body>a</body></html>",
+    );
+    t.route("/b", 200, "<!doctype html><html><body>b</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_timers(id);
+    s.drain_script_nav(id).await;
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/b"),
+        "la méta refresh a conduit la navigation"
+    );
+    assert!(t.paths().contains(&"/b".to_string()));
+}
+
+/// `content="0"` sans `url` = rechargement : le document
+/// se re-fetch lui-même (boucle de page attendue — la
+/// première valide reprogramme la même échéance).
+#[tokio::test]
+async fn meta_refresh_no_url_reloads() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <meta http-equiv=\"refresh\" content=\"0\"></head>\
+         <body>a</body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_timers(id);
+    s.drain_script_nav(id).await;
+    assert_eq!(
+        t.paths().iter().filter(|p| *p == "/").count(),
+        2,
+        "le document s'est rechargé"
+    );
+}
+
+/// Échéance non échue : `600s` ne tire pas au tick —
+/// aucune requête vers la cible n'est émise.
+#[tokio::test]
+async fn meta_refresh_not_due_yet() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <meta http-equiv=\"refresh\" content=\"600;url=/b\"></head>\
+         <body>a</body></html>",
+    );
+    t.route("/b", 200, "<!doctype html><html><body>b</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_timers(id);
+    s.drain_script_nav(id).await;
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/"),
+        "pas de navigation avant l'échéance"
+    );
+    assert!(!t.paths().contains(&"/b".to_string()));
+}
+
+/// Parsing tolérant : casse `URL=`, espaces et quotes
+/// appariées autour de la cible — extraite proprement.
+#[tokio::test]
+async fn meta_refresh_quoted_target() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <meta http-equiv=\"refresh\" content=\"0; URL=' /b '\"></head>\
+         <body>a</body></html>",
+    );
+    t.route("/b", 200, "<!doctype html><html><body>b</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_timers(id);
+    s.drain_script_nav(id).await;
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/b")
+    );
+}
+
+/// `content` non valide → méta ignorée, la première
+/// **valide** gagne (spec : les méta sont traitées à leur
+/// rencontre — une morte n'occupe pas le slot).
+#[tokio::test]
+async fn meta_refresh_invalid_skipped() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <meta http-equiv=\"refresh\" content=\"junk\">\
+         <meta http-equiv=\"refresh\" content=\"0;url=/b\"></head>\
+         <body>a</body></html>",
+    );
+    t.route("/b", 200, "<!doctype html><html><body>b</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_timers(id);
+    s.drain_script_nav(id).await;
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/b")
+    );
+}

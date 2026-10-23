@@ -683,6 +683,7 @@ impl Session {
             referrer_policy,
             base_url,
             base_target,
+            refresh,
         } = done;
         if let Some(s) = &self.store {
             s.record_visit(&url.to_string(), title.as_deref());
@@ -754,6 +755,12 @@ impl Session {
             // `fetch` relatifs ; `None` = l'URL reste base.
             entry.base_url = base_url;
             entry.base_target = base_target;
+            // `<meta refresh>` (CAP-143) : échéance recalée
+            // sur l'instant du commit — le tick
+            // (`pump_timers`) la transformera en intention
+            // de navigation ; `None` = le document n'en
+            // programme pas.
+            entry.refresh_at = refresh.map(|(d, u)| (std::time::Instant::now() + d, u));
             entry.scroll_y = 0.0;
             entry.focused = None;
             entry.focused_key = None;

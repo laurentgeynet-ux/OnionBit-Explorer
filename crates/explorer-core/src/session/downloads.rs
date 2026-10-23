@@ -23,8 +23,8 @@ use std::path::{Path, PathBuf};
 use explorer_net::url::Url;
 
 use super::{
-    document_base, extract_title, meta_referrer_policy, CoreError, CoreEvent, DownloadInfo,
-    NavDone, NavTail, Session, StreamDecoder, TabId,
+    document_base, extract_title, meta_referrer_policy, meta_refresh, CoreError, CoreEvent,
+    DownloadInfo, NavDone, NavTail, Session, StreamDecoder, TabId,
 };
 
 /// Téléchargement bufferisé en attente de décision —
@@ -185,6 +185,19 @@ impl Session {
         let dom = tb.into_dom();
         let title = extract_title(&dom);
         let (base_url, base_target) = document_base(&dom, &dl.url);
+        // Même calcul `meta refresh` que `NavJob::run`
+        // (CAP-143) : le rejeu « document » programme sa
+        // navigation comme une réception réseau.
+        let refresh_base = base_url.clone().unwrap_or_else(|| dl.url.clone());
+        let refresh = meta_refresh(&dom).and_then(|(secs, raw)| {
+            let target = match raw {
+                Some(r) => Url::resolve(&refresh_base, &r).ok()?,
+                None => dl.url.clone(),
+            };
+            std::time::Duration::try_from_secs_f64(secs.max(0.0))
+                .ok()
+                .map(|d| (d, target))
+        });
         let done = NavDone {
             // Rejeu « document » d'un corps bufferisé : les
             // en-têtes de la réponse d'origine ne sont pas
@@ -194,6 +207,7 @@ impl Session {
             referrer_policy: meta_referrer_policy(&dom),
             base_url,
             base_target,
+            refresh,
             url: dl.url,
             dom,
             html,

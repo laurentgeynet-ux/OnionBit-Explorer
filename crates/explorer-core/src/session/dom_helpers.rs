@@ -285,6 +285,89 @@ pub(crate) fn meta_referrer_policy(dom: &Dom) -> Option<explorer_net::http::Refe
     out
 }
 
+/// `<meta http-equiv=refresh>` du document (CAP-143) —
+/// la **première valide** en ordre document gagne (spec :
+/// les méta sont traitées à leur rencontre — une méta
+/// refresh syntaxiquement morte n'occupe pas le slot).
+/// Retourne `(délai secondes, URL brute)` ; `None` dans
+/// l'URL = rechargement du document courant.
+pub(crate) fn meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> {
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "meta")
+            && dom
+                .attribute(n, "http-equiv")
+                .ok()
+                .flatten()
+                .is_some_and(|v| v.trim().eq_ignore_ascii_case("refresh"))
+        {
+            if let Some(r) = dom
+                .attribute(n, "content")
+                .ok()
+                .flatten()
+                .and_then(|v| parse_refresh_content(&v))
+            {
+                return Some(r);
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    None
+}
+
+/// Grammaire `content` d'une méta refresh (spec HTML
+/// « pragmas », tolérante) : `N[;][url=]U` — nombre en
+/// tête (int ou décimal, un chiffre exigé), séparateur
+/// `;` ou `,`, token `url=` optionnel, URL verbatim
+/// (quotes appariées retirées). Sans séparateur, un
+/// suffixe non vide rend la méta inexploitable — jamais
+/// d'URL collée au délai. `None` = méta ignorée.
+fn parse_refresh_content(content: &str) -> Option<(f64, Option<String>)> {
+    let s = content.trim_start();
+    let digits = s.len()
+        - s.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.')
+            .len();
+    if digits == 0 || !s[..digits].bytes().any(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let secs: f64 = s[..digits].parse().ok().filter(|v: &f64| v.is_finite())?;
+    let rest = s[digits..].trim_start();
+    if rest.is_empty() {
+        return Some((secs, None));
+    }
+    let rest = match rest.as_bytes()[0] {
+        b';' | b',' => rest[1..].trim_start(),
+        _ => return None,
+    };
+    // `url=` optionnel : le token ne compte que suivi
+    // d'un `=` (sinon `url…` est le début de l'URL).
+    let rest = if rest.len() > 3 && rest[..3].eq_ignore_ascii_case("url") {
+        let after = rest[3..].trim_start();
+        after.strip_prefix('=').map_or(rest, |r| r.trim_start())
+    } else {
+        rest
+    };
+    let url = rest.trim();
+    if url.is_empty() {
+        return Some((secs, None));
+    }
+    let q = url.as_bytes()[0] as char;
+    let url = if q == '"' || q == '\'' {
+        url.strip_prefix(q)
+            .and_then(|r| r.strip_suffix(q))
+            .map_or(url, |r| r.trim())
+    } else {
+        url
+    };
+    if url.is_empty() {
+        Some((secs, None))
+    } else {
+        Some((secs, Some(url.to_string())))
+    }
+}
+
 /// Extrait le texte du premier `<title>` du document —
 /// `None` si absent ou vide.
 pub(crate) fn extract_title(dom: &Dom) -> Option<String> {

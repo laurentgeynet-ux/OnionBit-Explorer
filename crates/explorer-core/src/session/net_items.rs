@@ -154,6 +154,11 @@ pub(crate) struct NavDone {
     /// `<base target>` brut (étape 135) — cible par défaut
     /// des `<a>`/`<form>` sans `target` propre.
     pub(crate) base_target: Option<String>,
+    /// `<meta http-equiv=refresh>` (CAP-143) — `(délai,
+    /// cible résolue sur la base)` ; `None` = pas de
+    /// navigation programmée. L'échéance est posée au
+    /// commit (`Instant` recalé sur l'apply).
+    pub(crate) refresh: Option<(std::time::Duration, Url)>,
 }
 
 /// Issue de [`NavJob::run`] (étape 70) : document à commettre
@@ -347,6 +352,19 @@ impl NavJob {
         // 135) — la résolution des sous-ressources, liens et
         // formulaires suit la base déclarée.
         let (base_url, base_target) = document_base(&dom, &resolved);
+        // `<meta refresh>` (CAP-143) : cible résolue sur la
+        // base effective — sans `url` c'est un rechargement
+        // (la cible est l'URL du document).
+        let refresh_base = base_url.clone().unwrap_or_else(|| resolved.clone());
+        let refresh = meta_refresh(&dom).and_then(|(secs, raw)| {
+            let target = match raw {
+                Some(r) => Url::resolve(&refresh_base, &r).ok()?,
+                None => resolved.clone(),
+            };
+            std::time::Duration::try_from_secs_f64(secs.max(0.0))
+                .ok()
+                .map(|d| (d, target))
+        });
         let done = NavDone {
             url: resolved,
             // `<meta name=referrer>` l'emporte sur
@@ -354,6 +372,7 @@ impl NavJob {
             referrer_policy: meta_referrer_policy(&dom).or(header_policy),
             base_url,
             base_target,
+            refresh,
             dom,
             html,
             title,
@@ -438,6 +457,7 @@ impl NavJob {
                 referrer_policy: None,
                 base_url: None,
                 base_target: None,
+                refresh: None,
             }),
             Box::new(tail),
         ))

@@ -23,7 +23,25 @@ impl Session {
     /// Synchrone : les intentions de navigation émises par un
     /// timer sont à drainer ensuite via
     /// [`Self::drain_script_nav`] (async).
+    ///
+    /// Fait aussi office de tick `<meta http-equiv=refresh>`
+    /// (CAP-143) : l'échéance échue pousse une intention
+    /// `DrainAct::Req` — sans moteur JS, au même drain que
+    /// les intentions script.
     pub fn pump_timers(&mut self, tab: TabId) -> usize {
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            if entry
+                .refresh_at
+                .as_ref()
+                .is_some_and(|(t, _)| Instant::now() >= *t)
+            {
+                if let Some((_, target)) = entry.refresh_at.take() {
+                    entry
+                        .pending_nav
+                        .push_back(DrainAct::Req(Box::new(Request::get(target)), true));
+                }
+            }
+        }
         let max = self.max_timer_jobs;
         let t0 = Instant::now();
         let (jobs, mutated) = {
