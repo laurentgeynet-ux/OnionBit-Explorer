@@ -45,6 +45,8 @@ mod anim_items;
 mod apply;
 mod caret;
 #[allow(clippy::wildcard_imports)]
+mod composite;
+#[allow(clippy::wildcard_imports)]
 mod decode;
 #[allow(clippy::wildcard_imports)]
 mod dom_helpers;
@@ -242,9 +244,21 @@ pub(crate) struct Tab {
     linked_sheets: Vec<String>,
     /// Contextes de navigation imbriqués (étape 128) :
     /// `<iframe src>` fetchés sous l'initiateur de la page
-    /// et parsés en leur `Dom` propre — ordre document.
+    /// et parsés en leur `Dom` propre — ordre d'arrivée
+    /// réseau (le composite re-matche par URL, étape 129).
     /// Vidés à chaque navigation, restaurés via le bfcache.
     frames: Vec<SubFrame>,
+    /// `NodeId` des boîtes `<iframe>` dont le bitmap
+    /// composite vit dans `images.replaced` (étape 129) —
+    /// purgé puis rempli à chaque composite : les entrées
+    /// obsolètes (re-parse → ids morts) ne s'y accumulent
+    /// pas. Voyage avec la payload comme `images`.
+    frame_nodes: Vec<explorer_dom::NodeId>,
+    /// Surfaces de sous-contexte déjà rasterisées, clées
+    /// `(url, w, h)` — réutilisées entre relayouts (étape
+    /// 129). N'entre pas au snapshot : les `SubFrame`
+    /// permettent de régénérer à la restauration.
+    frame_bitmaps: composite::SubFrameBitmaps,
     /// Tampon des fonds `url(http…)` fetchés pendant la vague
     /// (étape 98) — posés entre `sub_commit` et le relayout,
     /// consommés à la cascade par `insert_fetched_backgrounds`
@@ -452,6 +466,10 @@ pub(crate) struct PageSnapshot {
     /// 128) — la restauration rétablit les DOM enfants sans
     /// re-fetch.
     frames: Vec<SubFrame>,
+    /// Clés `NodeId` des bitmaps de sous-contexte gelés
+    /// avec `images` (étape 129) — la purge composite les
+    /// retrouve après restauration.
+    frame_nodes: Vec<explorer_dom::NodeId>,
 }
 
 /// Session : transport + fontes injectés, onglets, viewport,
@@ -877,6 +895,8 @@ impl Session {
                 images: PaintImages::default(),
                 linked_sheets: Vec::new(),
                 frames: Vec::new(),
+                frame_nodes: Vec::new(),
+                frame_bitmaps: composite::SubFrameBitmaps::new(),
                 bg_aliases: HashMap::new(),
                 bg_bodies: HashMap::new(),
                 mask_aliases: HashMap::new(),

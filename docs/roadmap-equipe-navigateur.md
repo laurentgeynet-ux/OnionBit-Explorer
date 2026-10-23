@@ -2761,18 +2761,49 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Régressions `iframe_*`
   (6 tests session).
 
-- [ ] **Étape 129. Sous-contextes
-  `<iframe>` — rendu composite +
-  ponts JS** : blit du sous-DOM
-  dans sa boîte remplacée
-  (layout enfant + raster),
-  `window.parent`/`top` et
-  `postMessage` cross-contexte
-  borné — **dépend de la piste
-  JS** (couture `JsEngine`
-  par contexte — le contexte
-  enfant a besoin de son propre
-  moteur ; journal).
+- [x] **Étape 129. Sous-contextes
+  `<iframe>` — rendu
+  composite** : chaque
+  `SubFrame` est rasterisée
+  dans sa surface (pipeline
+  complète : styles → boîtes
+  → layout → display list →
+  `rasterize_window_cached`,
+  viewport = content box,
+  `image_max_px` borné) puis
+  blittée en `images.replaced`
+  à la clé `NodeId` de sa
+  boîte — `paint_replaced`
+  émet l'`Image` clippé sans
+  extension PIPE. La boîte
+  est atomique (gabarit
+  300×150 / attributs px —
+  `intrinsic` → pas de repli
+  RAWTEXT) même sans contexte
+  (`src` absent, 404, cadre
+  vide blanc). Surfaces
+  cachées `(url,w,h)` bornées
+  — jamais par `NodeId`
+  (réattribution au re-parse) ;
+  purge `images.replaced`
+  **avant** les inserts de la
+  passe pour la même raison.
+  Relayout/resize : réutilise
+  les surfaces inchangées ;
+  bfcache : DOM enfants
+  restaurés, surfaces
+  régénérées. 4 tests
+  `iframe_composite_*`.
+
+- [ ] **Étape 130. Ponts JS des
+  sous-contextes `<iframe>`** :
+  `JsEngine` par contexte
+  enfant, `window.parent`/
+  `top`/`self`, `postMessage`
+  cross-contexte borné —
+  **dépend de la piste JS**
+  (le contexte enfant exige
+  son propre moteur ; journal).
 
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :

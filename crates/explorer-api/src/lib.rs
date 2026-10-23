@@ -322,7 +322,7 @@ async fn navigate(
     // `SameSite` : tout passe (étape 66).
     let mut req = Request::get(url);
     req.initiator = Some(Initiator::TopLevelNav);
-    match navigate_shared(&st.session, id, req, true).await {
+    match Box::pin(navigate_shared(&st.session, id, req, true)).await {
         Ok(()) => {
             drain_navs_shared(&st.session, id).await;
             let session = st.session.lock().await;
@@ -367,7 +367,7 @@ async fn reload(
         }))
         .into_response();
     }
-    match navigate_shared(&st.session, id, req, false).await {
+    match Box::pin(navigate_shared(&st.session, id, req, false)).await {
         Ok(()) => {
             drain_navs_shared(&st.session, id).await;
             let session = st.session.lock().await;
