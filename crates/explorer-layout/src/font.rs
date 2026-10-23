@@ -229,6 +229,14 @@ pub struct FontCache {
     /// échoué → `None` = repli au chemin par octets
     /// (performances seules, jamais la couverture).
     buzz: HashMap<(usize, u32), Option<Arc<rustybuzz::Face<'static>>>>,
+    /// `(identité octets, index de face, glyphe)` → bbox
+    /// d'encre brute (R-84) — constante par glyphe : le
+    /// contour glyf/CFF était re-lu par `glyph_bounding_box`
+    /// à chaque run (~2,4 s mesurés sur un article géant ;
+    /// « e » re-parsé des milliers de fois). Clés =
+    /// pointeurs dans `faces` → vidée avec eux dans
+    /// `sync()`. Bornée à `INK_CAP`.
+    ink: HashMap<(usize, u32, u16), Option<ttf_parser::Rect>>,
 }
 
 /// `rustybuzz::Face` n'implémente pas `Debug` — résumé par
@@ -242,6 +250,7 @@ impl std::fmt::Debug for FontCache {
             .field("shape", &self.shape.len())
             .field("fb", &self.fb.len())
             .field("buzz", &self.buzz.len())
+            .field("ink", &self.ink.len())
             .finish()
     }
 }
@@ -281,6 +290,11 @@ const FB_CACHE_CAP: usize = 4096;
 /// des octets de la fonte).
 const BUZZ_FACE_CAP: usize = 64;
 
+/// Borne des bboxes d'encre mémorisées (R-84) — glyphes
+/// distincts plausibles par document (~20 k runs × alphabet
+/// réel ≪ borne ; au-delà, lecture directe sans insertion).
+const INK_CAP: usize = 65_536;
+
 impl FontCache {
     /// Cache vide pour une passe.
     #[must_use]
@@ -302,6 +316,7 @@ impl FontCache {
             self.shape.clear();
             self.fb.clear();
             self.buzz.clear();
+            self.ink.clear();
             self.rev = Some(rev);
         }
     }
@@ -425,7 +440,7 @@ impl FontCache {
             .face(src, req)
             .and_then(|(d, i)| {
                 let run = match self.buzz_face(&d, i) {
-                    Some(f) => shape_parsed(&f, text, size_px, rtl, ls),
+                    Some(f) => shape_parsed(&f, (k, i), text, size_px, rtl, ls, &mut self.ink),
                     None => shape_face_ls(&d, i, text, size_px, rtl, ls),
                 };
                 run.map(|r| (d, i, r))
@@ -544,10 +559,21 @@ impl FontCache {
                 Choice::Primary => (data.clone(), index),
                 Choice::Fallback(d, i) => (d.clone(), *i),
             };
+            let seg_key = (Arc::as_ptr(&bytes) as usize, idx);
             let seg_face = self.buzz_face(&bytes, idx);
             let Some(run) = seg_face
                 .as_deref()
-                .and_then(|f| shape_parsed(f, &text[*start..*end], size_px, rtl, ls))
+                .and_then(|f| {
+                    shape_parsed(
+                        f,
+                        seg_key,
+                        &text[*start..*end],
+                        size_px,
+                        rtl,
+                        ls,
+                        &mut self.ink,
+                    )
+                })
                 .or_else(|| shape_face_ls(&bytes, idx, &text[*start..*end], size_px, rtl, ls))
             else {
                 continue;
@@ -570,7 +596,7 @@ impl FontCache {
                     .cluster
                     .saturating_add(u32::try_from(*start).unwrap_or(u32::MAX));
                 if let Some(f) = tf {
-                    if let Some(b) = f.glyph_bounding_box(ttf_parser::GlyphId(g.id)) {
+                    if let Some(b) = ink_bbox(&mut self.ink, seg_key, f, g.id) {
                         let r = crate::Rect {
                             x: pen + g.offset_x + f32::from(b.x_min) * scale,
                             y: -g.offset_y - f32::from(b.y_max) * scale,
@@ -732,7 +758,19 @@ pub fn shape_face_ls(
 ) -> Option<ShapedRun> {
     let tface = ttf_parser::Face::parse(font_data, face_index).ok()?;
     let face = rustybuzz::Face::from_face(tface);
-    shape_parsed(&face, text, size_px, rtl, ls)
+    // Carte transitoire : hors `FontCache` la bbox est
+    // mémoïsée à l'intérieur du run seul (chemin de secours
+    // au-delà des bornes — l'allocation reste à zéro tant
+    // que la carte est vide).
+    shape_parsed(
+        &face,
+        (font_data.as_ptr() as usize, face_index),
+        text,
+        size_px,
+        rtl,
+        ls,
+        &mut HashMap::new(),
+    )
 }
 
 /// Cœur de [`shape_face_ls`] sur un `hb_font_t` **déjà
@@ -743,10 +781,12 @@ pub fn shape_face_ls(
 /// `ttf_parser::Face` du même objet.
 fn shape_parsed(
     face: &rustybuzz::Face<'_>,
+    font_key: (usize, u32),
     text: &str,
     size_px: f32,
     rtl: bool,
     ls: f32,
+    ink: &mut HashMap<(usize, u32, u16), Option<ttf_parser::Rect>>,
 ) -> Option<ShapedRun> {
     let met = metrics_of(face, size_px)?;
     // rustybuzz expose `units_per_em` en `i32` — clamp avant
@@ -795,16 +835,16 @@ fn shape_parsed(
     // y fonte monte → y CSS = −offset_y − y·scale. Un
     // glyphe peut sortir de la boîte de métriques.
     let mut pen = 0.0_f32;
-    let mut ink: Option<crate::Rect> = None;
+    let mut cumul: Option<crate::Rect> = None;
     for g in &glyphs {
-        if let Some(b) = face.glyph_bounding_box(ttf_parser::GlyphId(g.id)) {
+        if let Some(b) = ink_bbox(ink, font_key, face, g.id) {
             let r = crate::Rect {
                 x: pen + g.offset_x + f32::from(b.x_min) * scale,
                 y: -g.offset_y - f32::from(b.y_max) * scale,
                 width: f32::from(b.x_max - b.x_min) * scale,
                 height: f32::from(b.y_max - b.y_min) * scale,
             };
-            ink = Some(match ink {
+            cumul = Some(match cumul {
                 Some(i) => crate::inline::union_rect(i, r),
                 None => r,
             });
@@ -816,8 +856,30 @@ fn shape_parsed(
         advance,
         metrics: met,
         fallback_spans: Vec::new(),
-        ink,
+        ink: cumul,
     })
+}
+
+/// Bbox d'encre brute d'un glyphe (R-84) — constante par
+/// `(fonte, face, glyphe)`, mémoïsée dans `map` : sans elle
+/// chaque run re-lit le contour glyf/CFF (`glyph_bounding_box`
+/// parse la courbe à chaque appel — ~0,1 ms × ~200 glyphes ×
+/// ~20 k runs ≈ 2,4 s mesurés sur page géante). `font_key` =
+/// `(identité octets, index de face)` comme la carte `buzz`.
+fn ink_bbox(
+    map: &mut HashMap<(usize, u32, u16), Option<ttf_parser::Rect>>,
+    font_key: (usize, u32),
+    face: &ttf_parser::Face<'_>,
+    glyph: u16,
+) -> Option<ttf_parser::Rect> {
+    if let Some(&hit) = map.get(&(font_key.0, font_key.1, glyph)) {
+        return hit;
+    }
+    let b = face.glyph_bounding_box(ttf_parser::GlyphId(glyph));
+    if map.len() < INK_CAP {
+        map.insert((font_key.0, font_key.1, glyph), b);
+    }
+    b
 }
 
 /// Largeur d'une chaîne — raccourci `shape().advance`.

@@ -2190,6 +2190,25 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (interning des noms de propriétés), `raster` ~6,7 s,
   `encode_png` ~4,2 s, `layout_tree` ~14,3 s — prochains
   postes par ordre de mur.
+- [x] **R-84. Layout géant : bbox d'encre mémoïsée par
+  (fonte, glyphe)** (`explorer-layout`, reliure étape 112,
+  même sonde) : `glyph_bounding_box` re-parsait le contour
+  glyf/CFF à chaque glyphe de chaque run (~2,4 s mesurés —
+  « e » relu des milliers de fois) alors que la bbox est
+  constante par (fonte, face, glyphe). Livré : carte
+  `FontCache::ink` `(identité octets, face, glyphe) →
+  Rect` brute (le scale est appliqué au cumul, pas stocké)
+  bornée `INK_CAP=65 536`, vidée avec `faces` dans
+  `sync()` (clés = pointeurs), partagée par le chemin
+  primaire `shape_parsed` et les segments de repli
+  (clé par segment — les fontes de fallback couvrent
+  leurs glyphes sans re-parse). Hors borne → lecture
+  directe, jamais de couverture perdue. Mesuré :
+  `layout_tree` **14,3 s → 12,2 s**, pipeline ~35 s.
+  Reliquat : `rustybuzz::shape` ~10 s = plancher debug
+  séquentiel (la parallélisation exigerait l'ensemble des
+  clés avant itemisation — chantier architectural
+  séparé), `raster` ~6,4 s, `encode_png` ~4,0 s.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

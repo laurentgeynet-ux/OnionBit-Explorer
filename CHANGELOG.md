@@ -9,6 +9,73 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **JS-C59 — surface des events dispatchés :
+  la seconde implémentation d'`Event` alignée
+  sur le proto** (`explorer-jscore`, trou
+  remonté par github.com après Étape 114 :
+  `composedPath is not a function (on Event)`
+  ×3 dans `ser-*.js` — les events dispatchés
+  `EventHost` n'avaient que 3 méthodes là où
+  `Event.prototype` en a 5 ; les méthodes host
+  restent `invoke`-only, convention du moteur
+  mesurée : `typeof` est `undefined` partout,
+  l'appel est le discriminant) :
+  `composedPath` rend la chaîne réelle
+  `target → ancêtres → #document` (`[]` hors
+  dispatch) ; `eventPhase` réel (capture 1 /
+  at-target 2 / bubble 3 / 0 hors dispatch,
+  `currentTarget` remis à `null` en fin de
+  marche, spec) ; `isTrusted` distingué
+  (plateforme `dom_event*` vrai, script faux) ;
+  `timeStamp` = `Instant` depuis construction
+  ; **`stopPropagation` rectifié** — il tuait
+  les listeners frères du nœud courant, seul
+  le nouveau **`stopImmediatePropagation`** le
+  fait désormais (spec) ; **`preventDefault`
+  honoré par `cancelable`** (dict `EventInit`
+  relu à `event_state_of`, no-op spec sans
+  flag) ; `composed`/`cancelable` lisibles,
+  `detail` recopié ; `cancelBubble = true` ≡
+  `stopPropagation` et `returnValue = false` ≡
+  `preventDefault` (legacy DOM0, `Host::set`) ;
+  `initEvent` réarme les flags. Alias
+  `matchesSelector`/`msMatchesSelector`
+  (pré-standards, shims `selector-observer`
+  github : `el.matchesSelector||el.ms…` →
+  `call of Undefined` sans eux). Régression
+  `event_dispatche_surface_honnete` (chemin
+  `4|main`, frère épargné/tué selon la méthode,
+  gate `cancelable` `false|true`). Résidu :
+  proto `Event` script-créé ignore
+  `cancelable` (déviation pré-existante).
+
+- **R-84 — Layout géant : bbox
+  d'encre mémoïsée par (fonte,
+  glyphe)** (`explorer-layout`,
+  reliure « apply post-script
+  ~250 s » étape 112, même sonde)
+  : `glyph_bounding_box` re-parsait
+  le contour glyf/CFF par glyphe de
+  chaque run (~2,4 s mesurés — « e »
+  relu des milliers de fois) alors
+  que la bbox est constante par
+  (fonte, face, glyphe). Carte
+  `FontCache::ink` bornée
+  `INK_CAP=65 536`, vidée avec
+  `faces` dans `sync()` (clés =
+  pointeurs), partagée par le chemin
+  primaire et les segments de repli
+  (clé par segment). Hors borne →
+  lecture directe — perf seule,
+  jamais de couverture perdue.
+  `layout_tree` **14,3 s → 12,2 s**
+  sur l'article géant ; pipeline
+  ~35 s (~250 s documentés → ×7,1
+  cumulé R-82→R-84). Reliquat :
+  `rustybuzz::shape` ~10 s
+  (plancher debug séquentiel),
+  `raster` ~6,4 s, `encode_png`
+  ~4,0 s.
 - **R-83 — Styles géants : index de
   sélecteurs, filtre d'ancêtres Bloom
   et mémoïsation du matching**
