@@ -325,7 +325,7 @@ async fn navigate(
     req.initiator = Some(Initiator::TopLevelNav);
     match navigate_shared(&st.session, id, req, true).await {
         Ok(()) => {
-            drain_navs_shared(&st.session, id).await;
+            Box::pin(drain_navs_shared(&st.session, id)).await;
             let session = st.session.lock().await;
             tab_json(&session, id)
         }
@@ -370,7 +370,7 @@ async fn reload(
     }
     match navigate_shared(&st.session, id, req, false).await {
         Ok(()) => {
-            drain_navs_shared(&st.session, id).await;
+            Box::pin(drain_navs_shared(&st.session, id)).await;
             let session = st.session.lock().await;
             tab_json(&session, id)
         }
@@ -380,9 +380,9 @@ async fn reload(
 
 /// `POST …/back` — historique −1.
 async fn back(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
-    match history_move_shared(&st.session, id, -1).await {
+    match Box::pin(history_move_shared(&st.session, id, -1)).await {
         Ok(()) => {
-            drain_navs_shared(&st.session, id).await;
+            Box::pin(drain_navs_shared(&st.session, id)).await;
             let session = st.session.lock().await;
             tab_json(&session, id)
         }
@@ -392,9 +392,9 @@ async fn back(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
 
 /// `POST …/forward` — historique +1.
 async fn forward(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
-    match history_move_shared(&st.session, id, 1).await {
+    match Box::pin(history_move_shared(&st.session, id, 1)).await {
         Ok(()) => {
-            drain_navs_shared(&st.session, id).await;
+            Box::pin(drain_navs_shared(&st.session, id)).await;
             let session = st.session.lock().await;
             tab_json(&session, id)
         }
@@ -553,7 +553,7 @@ async fn input(
         let sess = st.session.clone();
         tokio::spawn(async move {
             drain_applies_shared(&sess, id).await;
-            drain_navs_shared(&sess, id).await;
+            Box::pin(drain_navs_shared(&sess, id)).await;
         });
     }
     Json(match outcome {

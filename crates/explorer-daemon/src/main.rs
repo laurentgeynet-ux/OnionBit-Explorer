@@ -412,7 +412,7 @@ async fn main() {
                 // les intentions sont honorées ici, hors
                 // verrou (la pompe reste à sens unique).
                 for tab in tabs {
-                    explorer_core::drain_navs_shared(&s, tab).await;
+                    Box::pin(explorer_core::drain_navs_shared(&s, tab)).await;
                 }
                 tokio::time::sleep(wait).await;
             }
