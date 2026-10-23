@@ -317,14 +317,15 @@ pub(crate) fn meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> {
     None
 }
 
-/// Grammaire `content` d'une méta refresh (spec HTML
-/// « pragmas », tolérante) : `N[;][url=]U` — nombre en
+/// Grammaire `content` d'une méta refresh **et de
+/// l'en-tête `Refresh:`** (spec HTML « pragmas »,
+/// tolérante — CAP-143/144) : `N[;][url=]U` — nombre en
 /// tête (int ou décimal, un chiffre exigé), séparateur
 /// `;` ou `,`, token `url=` optionnel, URL verbatim
 /// (quotes appariées retirées). Sans séparateur, un
-/// suffixe non vide rend la méta inexploitable — jamais
-/// d'URL collée au délai. `None` = méta ignorée.
-fn parse_refresh_content(content: &str) -> Option<(f64, Option<String>)> {
+/// suffixe non vide rend la valeur inexploitable —
+/// jamais d'URL collée au délai. `None` = ignorée.
+pub(crate) fn parse_refresh_content(content: &str) -> Option<(f64, Option<String>)> {
     let s = content.trim_start();
     let digits = s.len()
         - s.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.')

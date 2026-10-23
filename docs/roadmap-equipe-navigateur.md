@@ -2916,6 +2916,26 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-144. `Refresh:`
+  en-tête de réponse**
+  *(numéro officiel attribué
+  à l'intégration)* : le
+  pragma HTTP alimente la
+  même échéance que la méta
+  (`NavDone.refresh`) —
+  **traité avant le
+  document** (spec : la
+  réponse prime) ; première
+  valeur valide gagne, une
+  invalide retombe sur la
+  méta. Grammaire partagée
+  `parse_refresh_content`
+  passée `pub(crate)`.
+  Tests : `refresh_header_*`
+  (3 : tir, priorité sur la
+  méta, invalide → repli
+  méta).
+
 - [x] **CAP-143. `<meta
   http-equiv=refresh>`**
   *(numéro officiel attribué

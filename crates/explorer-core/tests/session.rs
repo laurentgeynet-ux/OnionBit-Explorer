@@ -8522,3 +8522,79 @@ async fn meta_refresh_invalid_skipped() {
         Some("http://h.test/b")
     );
 }
+
+// ===== CAP-144 — `Refresh:` en-tête de réponse : même
+// échéance que `<meta refresh>`, traitée avant elle =====
+
+/// `Refresh: 0;url=/b` en en-tête : même navigation
+/// programmée que la méta — tir au tick, vraie nav.
+#[tokio::test]
+async fn refresh_header_navigates_to_target() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body>a</body></html>",
+        &[("content-type", "text/html"), ("refresh", "0;url=/b")],
+    );
+    t.route("/b", 200, "<!doctype html><html><body>b</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_timers(id);
+    s.drain_script_nav(id).await;
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/b"),
+        "l'en-tête Refresh a conduit la navigation"
+    );
+}
+
+/// L'en-tête prime sur la `<meta>` (pragma HTTP traité
+/// avant le document) : `Refresh: /hdr` + méta `/meta`
+/// → destination `/hdr`.
+#[tokio::test]
+async fn refresh_header_wins_over_meta() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <meta http-equiv=\"refresh\" content=\"0;url=/meta\"></head>\
+         <body>a</body></html>",
+        &[("content-type", "text/html"), ("refresh", "0;url=/hdr")],
+    );
+    t.route("/hdr", 200, "<!doctype html><html><body>h</body></html>");
+    t.route("/meta", 200, "<!doctype html><html><body>m</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_timers(id);
+    s.drain_script_nav(id).await;
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/hdr")
+    );
+}
+
+/// En-tête `Refresh:` invalide → ignoré : la méta valide
+/// du document programme alors l'échéance.
+#[tokio::test]
+async fn refresh_header_invalid_falls_back_to_meta() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <meta http-equiv=\"refresh\" content=\"0;url=/meta\"></head>\
+         <body>a</body></html>",
+        &[("content-type", "text/html"), ("refresh", "junk")],
+    );
+    t.route("/meta", 200, "<!doctype html><html><body>m</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_timers(id);
+    s.drain_script_nav(id).await;
+    assert_eq!(
+        s.tab_info(id).unwrap().url.as_deref(),
+        Some("http://h.test/meta")
+    );
+}

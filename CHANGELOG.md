@@ -1036,6 +1036,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   silencieuse, casse/quotes,
   méta morte sautée.
 
+- **CAP-144 — `Refresh:`
+  en-tête de réponse**
+  (`explorer-core` — cap « web
+  réel sécurisé » ; numéro
+  officiel attribué à
+  l'intégration, compteur
+  gelé) : le pragma HTTP
+  `Refresh: N[;][url=]U`
+  alimente la même échéance
+  `NavDone.refresh` que la
+  méta — **traité avant le
+  document** (spec : la
+  réponse prime) ; première
+  valeur valide gagne, une
+  invalide retombe sur la
+  méta du document.
+  `parse_refresh_content`
+  (grammaire partagée) passe
+  `pub(crate)`. Régressions
+  `refresh_header_*` (3) :
+  tir vers cible, priorité
+  sur la méta, invalide →
+  repli méta.
+
 ### Fixed
 
 - **Étape 122 — `root_font_size`

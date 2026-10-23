@@ -293,6 +293,14 @@ impl NavJob {
             .filter(|(n, _)| n.eq_ignore_ascii_case("referrer-policy"))
             .filter_map(|(_, v)| ReferrerPolicy::parse(v))
             .next_back();
+        // `Refresh:` de la réponse (CAP-144) — pragma HTTP,
+        // traitée **avant** les `<meta>` du document (spec :
+        // l'en-tête prime) ; première valeur valide gagne.
+        let header_refresh = resp
+            .headers
+            .iter()
+            .filter(|(n, _)| n.eq_ignore_ascii_case("refresh"))
+            .find_map(|(_, v)| parse_refresh_content(v));
         // Corps non affichable (étape 70) : bufferisé avec
         // borne et progression — jamais décodé en mojibake.
         if let Some(meta) = download_meta(&resp.headers) {
@@ -352,19 +360,22 @@ impl NavJob {
         // 135) — la résolution des sous-ressources, liens et
         // formulaires suit la base déclarée.
         let (base_url, base_target) = document_base(&dom, &resolved);
-        // `<meta refresh>` (CAP-143) : cible résolue sur la
-        // base effective — sans `url` c'est un rechargement
-        // (la cible est l'URL du document).
+        // Refresh (CAP-143 + CAP-144) : l'en-tête `Refresh:`
+        // prime sur la `<meta>` du document — cible résolue
+        // sur la base effective ; sans `url` c'est un
+        // rechargement (la cible est l'URL du document).
         let refresh_base = base_url.clone().unwrap_or_else(|| resolved.clone());
-        let refresh = meta_refresh(&dom).and_then(|(secs, raw)| {
-            let target = match raw {
-                Some(r) => Url::resolve(&refresh_base, &r).ok()?,
-                None => resolved.clone(),
-            };
-            std::time::Duration::try_from_secs_f64(secs.max(0.0))
-                .ok()
-                .map(|d| (d, target))
-        });
+        let refresh = header_refresh
+            .or_else(|| meta_refresh(&dom))
+            .and_then(|(secs, raw)| {
+                let target = match raw {
+                    Some(r) => Url::resolve(&refresh_base, &r).ok()?,
+                    None => resolved.clone(),
+                };
+                std::time::Duration::try_from_secs_f64(secs.max(0.0))
+                    .ok()
+                    .map(|d| (d, target))
+            });
         let done = NavDone {
             url: resolved,
             // `<meta name=referrer>` l'emporte sur
