@@ -119,6 +119,11 @@ impl Session {
             }
         }
         if let Some(eng) = eng.as_mut() {
+            // Étape 134 : un realm JS par `<iframe>` fetché —
+            // créé avant les scripts du parent pour qu'un
+            // `frames[n]`/`contentWindow` lu en cours de
+            // parse résolve un vrai contexte.
+            self.wire_frame_contexts(tab, eng.as_mut());
             // Issue #6 : les import maps arment la résolution des
             // bare specifiers — la spec les veut enregistrées avant
             // le premier module évalué (le prefetch, lui, a déjà
@@ -245,6 +250,10 @@ impl Session {
             let frag = frag.to_string();
             self.scroll_to_fragment(tab, &frag);
         }
+        // Étape 134 : `load` des sous-contextes d'abord (spec :
+        // le `load` de la page attend ses `<iframe>`), puis
+        // `load`/`onload` sur chaque élément porteur.
+        self.frame_ctx_load_events(tab);
         // `load` : tout est commis (sous-ressources, peinture,
         // historique) — dernier événement du cycle de vie.
         self.dispatch_doc_event(tab, "load");
@@ -277,61 +286,25 @@ impl Session {
                     body,
                     mode,
                     credentials,
+                    ctx,
                 } => {
-                    let inflight = self.net_tasks.keys().filter(|(t, _)| *t == tab).count();
-                    let built = if inflight >= self.max_script_net {
-                        tracing::trace!(tab, handle, "quota requêtes script atteint");
-                        None
-                    } else {
-                        self.script_request(
+                    if self
+                        .spawn_script_fetch(
+                            tab,
                             &page,
+                            handle,
                             &method,
                             &url,
                             &headers,
                             body.as_deref(),
                             mode,
                             credentials,
+                            ctx,
                         )
-                    };
-                    let Some((req, cross)) = built else {
+                        .is_err()
+                    {
                         failed.push(handle);
-                        continue;
-                    };
-                    let tr = self.transport.clone();
-                    let tx = self.net_tx.clone();
-                    let page_origin = origin_header_value(&page);
-                    let req_url = req.url.clone();
-                    // `credentials` du script (JS-C77) — porté hors
-                    // `req.cors` : `no-cors`/`include` (`sendBeacon`
-                    // cross) capture aussi `Set-Cookie`.
-                    let credentials = match credentials {
-                        explorer_js::FetchCredentials::Omit => {
-                            explorer_net::http::FetchCredentials::Omit
-                        }
-                        explorer_js::FetchCredentials::SameOrigin => {
-                            explorer_net::http::FetchCredentials::SameOrigin
-                        }
-                        explorer_js::FetchCredentials::Include => {
-                            explorer_net::http::FetchCredentials::Include
-                        }
-                    };
-                    let partition = explorer_net::cookies::request_partition(&req);
-                    let fetch_mode = req.fetch_mode;
-                    let j = tokio::spawn(async move {
-                        let out = tr.fetch(&req).await;
-                        let _ = tx.send(NetDone {
-                            tab,
-                            handle,
-                            cross,
-                            mode: fetch_mode,
-                            credentials,
-                            page_origin,
-                            req_url,
-                            partition,
-                            out,
-                        });
-                    });
-                    self.net_tasks.insert((tab, handle), j);
+                    }
                 }
                 NetRequest::Abort { handle } => {
                     if let Some(j) = self.net_tasks.remove(&(tab, handle)) {
@@ -385,6 +358,86 @@ impl Session {
                 },
             );
         }
+    }
+
+    /// Branche `Fetch` de [`Self::drain_script_net`] (étape
+    /// 134 — extraite pour rester lisible) : la requête d'un
+    /// cadre est émise sous **son** initiateur — base de
+    /// résolution, `Origin`/`Referer` et site top-level
+    /// (cookies `Partitioned`) sont ceux du document enfant,
+    /// pas du parent. `ctx` inconnu (cadre mort entre
+    /// l'émission et le drain) → `Err` (échec livré, jamais
+    /// de requête sous la mauvaise identité).
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_script_fetch(
+        &mut self,
+        tab: TabId,
+        page: &Url,
+        handle: u64,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: Option<&str>,
+        mode: explorer_js::FetchMode,
+        credentials: explorer_js::FetchCredentials,
+        ctx: explorer_js::JsCtxId,
+    ) -> Result<(), ()> {
+        let req_page = if ctx == explorer_js::JS_CTX_TOP {
+            page.clone()
+        } else {
+            let Some(u) = self
+                .tabs
+                .get(&tab)
+                .and_then(|e| e.frame_ctxs.iter().find(|f| f.ctx == ctx))
+                .map(|f| f.url.clone())
+            else {
+                tracing::trace!(tab, handle, ctx, "fetch d'un contexte mort");
+                return Err(());
+            };
+            u
+        };
+        let inflight = self.net_tasks.keys().filter(|(t, _)| *t == tab).count();
+        if inflight >= self.max_script_net {
+            tracing::trace!(tab, handle, "quota requêtes script atteint");
+            return Err(());
+        }
+        let Some((req, cross)) =
+            self.script_request(&req_page, method, url, headers, body, mode, credentials)
+        else {
+            return Err(());
+        };
+        let tr = self.transport.clone();
+        let tx = self.net_tx.clone();
+        let page_origin = origin_header_value(&req_page);
+        let req_url = req.url.clone();
+        // `credentials` du script (JS-C77) — porté hors
+        // `req.cors` : `no-cors`/`include` (`sendBeacon`
+        // cross) capture aussi `Set-Cookie`.
+        let credentials = match credentials {
+            explorer_js::FetchCredentials::Omit => explorer_net::http::FetchCredentials::Omit,
+            explorer_js::FetchCredentials::SameOrigin => {
+                explorer_net::http::FetchCredentials::SameOrigin
+            }
+            explorer_js::FetchCredentials::Include => explorer_net::http::FetchCredentials::Include,
+        };
+        let partition = explorer_net::cookies::request_partition(&req);
+        let fetch_mode = req.fetch_mode;
+        let j = tokio::spawn(async move {
+            let out = tr.fetch(&req).await;
+            let _ = tx.send(NetDone {
+                tab,
+                handle,
+                cross,
+                mode: fetch_mode,
+                credentials,
+                page_origin,
+                req_url,
+                partition,
+                out,
+            });
+        });
+        self.net_tasks.insert((tab, handle), j);
+        Ok(())
     }
 
     /// Livre une `NetResponse` au moteur puis applique le
@@ -503,7 +556,56 @@ impl Session {
                 }
             }
         }
+        // Étape 134 : surfaces script des contextes enfants —
+        // cookies rangés sous l'URL **de l'enfant** (partition
+        // du site top-level, spec `Partitioned`) et
+        // `localStorage` sous l'origine enfant. Jamais sous
+        // l'identité du parent. **Avant** `drain_script_net` :
+        // un `document.cookie` suivi d'un `fetch` dans le même
+        // script doit émettre le cookie — comme le top-level.
+        let sinks: Vec<(Url, Vec<String>, std::collections::BTreeMap<String, String>)> = self
+            .tabs
+            .get_mut(&tab)
+            .map(|e| {
+                e.js.as_mut().map_or_else(Vec::new, |eng| {
+                    e.frame_ctxs
+                        .iter()
+                        .map(|f| {
+                            let (writes, map) = eng.drain_sinks_ctx(f.ctx);
+                            (f.url.clone(), writes, map)
+                        })
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+        if let Some(page) = self.tabs.get(&tab).and_then(|e| e.url.clone()) {
+            for (furl, writes, map) in sinks {
+                let partition = explorer_net::cookies::partition_key(&page);
+                for w in &writes {
+                    self.cookies
+                        .set_from_header_ctx(&furl, &strip_http_only(w), partition.clone());
+                }
+                if !writes.is_empty() {
+                    self.persist_cookies();
+                }
+                let key = furl.origin().to_string();
+                let changed = match self.local_storage.get(&key) {
+                    Some(prev) => *prev != map,
+                    None => !map.is_empty(),
+                };
+                if changed {
+                    self.local_storage.insert(key.clone(), map.clone());
+                    if let Some(s) = &self.store {
+                        s.save_storage(&key, &map);
+                    }
+                }
+            }
+        }
         self.drain_script_net(tab);
+        // Étape 134 : les miroirs des contextes `<iframe>`
+        // mutés par leurs scripts reviennent en
+        // `SubFrame.dom` (le composite re-rend au relayout).
+        self.sync_frame_mirrors(tab);
         self.drain_media_commands(tab);
     }
 

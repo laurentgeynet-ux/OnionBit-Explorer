@@ -251,6 +251,12 @@ pub(crate) struct Tab {
     /// réseau (le composite re-matche par URL, étape 129).
     /// Vidés à chaque navigation, restaurés via le bfcache.
     frames: Vec<SubFrame>,
+    /// Liaison `SubFrame` ↔ realm JS (étape 134) — un
+    /// contexte par `<iframe>` rattaché à un sous-document
+    /// fetché. Vit dans le moteur (`entry.js` gèle avec les
+    /// contextes dedans) ; la table sert au routage des
+    /// `NetRequest` tagués et aux événements adressés.
+    frame_ctxs: Vec<FrameCtx>,
     /// `NodeId` des boîtes `<iframe>` dont le bitmap
     /// composite vit dans `images.replaced` (étape 129) —
     /// purgé puis rempli à chaque composite : les entrées
@@ -480,6 +486,10 @@ pub(crate) struct PageSnapshot {
     /// 128) — la restauration rétablit les DOM enfants sans
     /// re-fetch.
     frames: Vec<SubFrame>,
+    /// Liaisons `SubFrame` ↔ contexte JS gelées avec le
+    /// moteur (étape 134) — les contextes vivent dans `js` ;
+    /// la table revient telle quelle pour le routage.
+    frame_ctxs: Vec<FrameCtx>,
     /// Corps compressés des images de la page gelée (étape
     /// 133) — les bitmaps `DecodedImage` sont libérés au
     /// freeze (`images` vidée, `list` lâchée : les deux
@@ -930,6 +940,7 @@ impl Session {
                 images: PaintImages::default(),
                 linked_sheets: Vec::new(),
                 frames: Vec::new(),
+                frame_ctxs: Vec::new(),
                 frame_nodes: Vec::new(),
                 frame_bitmaps: composite::SubFrameBitmaps::new(),
                 bg_aliases: HashMap::new(),

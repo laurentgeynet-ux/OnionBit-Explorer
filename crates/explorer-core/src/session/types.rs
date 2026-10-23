@@ -558,6 +558,31 @@ pub(crate) struct SubFrame {
     pub(crate) dom: Dom,
     /// `<title>` extrait, s'il existe.
     pub(crate) title: Option<String>,
+    /// Source HTML décodée du document enfant (étape 134) —
+    /// le miroir JS du contexte enfant est re-parsé depuis
+    /// elle (`install_dom_ctx`), comme `install_dom` pour
+    /// le document top-level.
+    pub(crate) html: String,
+}
+
+/// Lien `SubFrame` ↔ contexte JS (étape 134) : `ctx` est
+/// l'identifiant moteur ([`explorer_js::JsCtxId`]) du realm
+/// de l'`<iframe>` ; `sub` indexe `Tab::frames` ; `url`
+/// duplique celle du sous-document pour la résolution de
+/// base/initiateur des `NetRequest` tagués `ctx`.
+#[derive(Debug, Clone)]
+pub(crate) struct FrameCtx {
+    /// Contexte JS de l'enfant (`JS_CTX_TOP` jamais ici).
+    pub(crate) ctx: u32,
+    /// Index dans `Tab::frames` du `SubFrame` affiché.
+    pub(crate) sub: usize,
+    /// URL du document enfant — base de résolution et
+    /// initiateur de ses requêtes réseau.
+    pub(crate) url: Url,
+    /// `NodeId` de l'élément `<iframe>` porteur dans le DOM
+    /// parent — sert à émettre `load` sur l'élément ; mort
+    /// au re-parse (nettoyé, jamais déréférencé aveuglément).
+    pub(crate) node: explorer_dom::NodeId,
 }
 
 /// `Cookie` filaire → forme persistée (expiration → secs

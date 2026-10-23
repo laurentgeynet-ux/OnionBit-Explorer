@@ -446,6 +446,65 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   CLI `mem` affiché. Réduction
   attendue ≈ le poids bitmap
   de chaque page gelée.
+- **Étape 134 — câblage
+  `SubFrame` → contexte JS**
+  (`explorer-jscore`/`explorer-js`/
+  `explorer-core` — la soudure
+  entre 128/131 et JS-C78) : un
+  `<iframe>` fetché obtient un
+  realm au commit
+  (`context_new` →
+  `install_dom_ctx` → scripts
+  inline → `DCL` — avant les
+  scripts du parent, pour que
+  `frames[n]`/`contentWindow`
+  résolvent en cours de parse ;
+  `load` enfant puis `onload`
+  de l'élément au tail).
+  `JsEngine` gagne les méthodes
+  adressées `eval_ctx`/
+  `dispatch_event_ctx`/
+  `sync_dom_ctx`/
+  `drain_sinks_ctx` (+ defs
+  compat mono-contexte) ; le
+  worker conserve miroir, jar
+  cookie et backing
+  `localStorage` **par
+  contexte** (isolés —
+  jamais ceux du parent) et
+  restaure le contexte courant
+  après chaque commande.
+  `NetRequest::Fetch` porte
+  `ctx` : la requête de
+  l'enfant est construite sous
+  SON `page_url` (initiateur,
+  `Referer`/`Origin`,
+  résolution de base,
+  `SameSite`, partition
+  `Partitioned`) — un ctx mort
+  → échec livré, jamais la
+  mauvaise identité. Miroir
+  enfant sale → re-parse en
+  `SubFrame.dom`, bitmaps
+  cadre purgées, relayout.
+  `frame_ctxs` voyage dans
+  `PageSnapshot` (bfcache
+  conserve l'arbre entier) ;
+  `context_destroy` explicite
+  sur les documents quittés
+  hors cache. Reliquat
+  documenté : sous-ressources
+  *des cadres* (leurs
+  `src=`) non fetchées à cette
+  tranche — scripts inline
+  seuls. 9 tests adaptateur +
+  9 tests session
+  (`iframe_js_*`,
+  `iframe_fetch_uses_child_
+  initiator`, `iframe_cookie_`,
+  `iframe_storage_`,
+  `iframe_ctx_*`, `onload`,
+  timer).
 - **JS-C70 —
   `Blob`/`File`/`FileReader` +
   `URL.createObjectURL`**

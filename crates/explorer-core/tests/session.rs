@@ -7676,6 +7676,281 @@ async fn iframe_composite_survives_relayout() {
         "bitmap conservé au relayout"
     );
 }
+
+// ===== Étape 134 — câblage `SubFrame` → contexte JS :
+// l'enfant exécute ses scripts dans son propre realm =====
+
+/// Page parente : un cadre + un bloc marqueur que son script
+/// remplit de ce qu'il voit du realm enfant.
+const PAGE_IFRAME_JS: &str = "<!doctype html><html><body>\
+    <div id=\"p\">?</div>\
+    <iframe src=\"/f\"></iframe>\
+    <script>document.getElementById('p').textContent=\
+    'parent-voit:'+typeof marque_enfant</script>\
+    </body></html>";
+
+/// Document enfant : pose une globale puis mute SON
+/// document — si le realm est isolé, `typeof` côté parent
+/// reste `undefined`.
+const FRAME_JS_CHILD: &str = "<!doctype html><html><body>\
+    <p id=\"c\">avant</p>\
+    <script>var marque_enfant = 42;\
+    document.getElementById('c').textContent = 'enfant-js'\
+    </script></body></html>";
+
+/// Le `<script>` inline de l'enfant s'exécute dans son
+/// realm : la mutation est visible dans `frame_dom_dump`
+/// (synchro miroir → `SubFrame.dom`), jamais dans le parent.
+#[tokio::test]
+async fn iframe_js_mutates_own_document() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME_JS);
+    t.route("/f", 200, FRAME_JS_CHILD);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.frame_dom_dump(id, 0).unwrap_or_default();
+    assert!(dump.contains("enfant-js"), "dom enfant : {dump}");
+    assert!(!dump.contains(">avant<"), "{dump}");
+    // Le parent ne porte ni la mutation ni la globale.
+    let pdump = s.dom_dump(id).unwrap_or_default();
+    assert!(!pdump.contains("enfant-js"), "{pdump}");
+}
+
+/// Isolation des globals : `var` top-level de l'enfant
+/// n'existe pas dans le realm parent — le script du parent,
+/// évalué **après** le câblage des cadres, lit `undefined`.
+#[tokio::test]
+async fn iframe_js_globals_isolated() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME_JS);
+    t.route("/f", 200, FRAME_JS_CHILD);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let pdump = s.dom_dump(id).unwrap_or_default();
+    assert!(
+        pdump.contains("parent-voit:undefined"),
+        "realm enfant isolé : {pdump}"
+    );
+}
+
+/// `fetch` de l'enfant : émis sous **son** initiateur —
+/// `referer` = URL du cadre, pas celle du parent — puis la
+/// réponse livrée à SON contexte résout la promesse et la
+/// mutation atterrit dans `SubFrame.dom`.
+const FRAME_FETCH_CHILD: &str = "<!doctype html><html><body>\
+    <p id=\"c\">?</p>\
+    <script>fetch('/res')\
+    .then(function(r){return r.text()})\
+    .then(function(t){\
+    document.getElementById('c').textContent = 'got:'+t})\
+    </script></body></html>";
+
+#[tokio::test]
+async fn iframe_fetch_uses_child_initiator() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME_JS);
+    t.route("/f", 200, FRAME_FETCH_CHILD);
+    t.route("/res", 200, "RES-BODY");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(
+        t.paths().iter().any(|p| p == "/res"),
+        "fetch enfant émis : {:?}",
+        t.paths()
+    );
+    assert_eq!(
+        t.req_header("/res", "referer").as_deref(),
+        Some("http://h.test/f"),
+        "l'initiateur est le document enfant"
+    );
+    // Livraison à son contexte → `then` → miroir muté →
+    // `SubFrame.dom` synchronisé.
+    s.pump_net().await;
+    let dump = s.frame_dom_dump(id, 0).unwrap_or_default();
+    assert!(dump.contains("got:RES-BODY"), "chaîne fetch : {dump}");
+}
+
+/// Cookie écrit par l'enfant : drainé sous SON URL
+/// (partition du site top-level) — le `fetch` enfant
+/// suivant le renvoie, et le jar le connaît sous `h.test`.
+const FRAME_COOKIE: &str = "<!doctype html><html><body>\
+    <script>document.cookie = 'chip=1';\
+    fetch('/res2').then(function(){})</script></body></html>";
+
+#[tokio::test]
+async fn iframe_cookie_written_under_child_url() {
+    use explorer_net::http::{Initiator, Request};
+    use explorer_net::url::Url;
+
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME_JS);
+    t.route("/f", 200, FRAME_COOKIE);
+    t.route("/res2", 200, "ok");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    // Le fetch du même script doit déjà porter le cookie
+    // (drain des sinks enfant avant `drain_script_net`).
+    assert_eq!(
+        t.req_header("/res2", "cookie").as_deref(),
+        Some("chip=1"),
+        "document.cookie enfant → jar session sous h.test"
+    );
+    let jar = s.cookie_jar();
+    let mut req = Request::get(Url::parse("http://h.test/res2").unwrap());
+    req.initiator = Some(Initiator::Subresource(
+        Url::parse("http://h.test/").unwrap(),
+    ));
+    assert!(jar.header_for_ctx(&req, true).contains("chip=1"));
+}
+
+/// `localStorage` de l'enfant : backing isolé sous l'origine
+/// enfant — ré-écriture relue par le drain, un deuxième
+/// cadre de même origine la partage, l'hétéronyme non.
+#[tokio::test]
+async fn iframe_storage_isolated_by_origin() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <iframe src=\"/f\"></iframe>\
+         <iframe src=\"http://autre.test/g\"></iframe>\
+         </body></html>",
+    );
+    t.route(
+        "/f",
+        200,
+        "<!doctype html><html><body><p id=\"c\">?</p><script>\
+         localStorage.setItem('k', 'v-enfant');\
+         document.getElementById('c').textContent = \
+         localStorage.getItem('k')\
+         </script></body></html>",
+    );
+    t.route(
+        "/g",
+        200,
+        "<!doctype html><html><body><p id=\"g\">?</p><script>\
+         document.getElementById('g').textContent = \
+         'autre-voit:' + localStorage.getItem('k')\
+         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let f0 = s.frame_dom_dump(id, 0).unwrap_or_default();
+    assert!(f0.contains("v-enfant"), "{f0}");
+    let f1 = s.frame_dom_dump(id, 1).unwrap_or_default();
+    assert!(
+        f1.contains("autre-voit:null"),
+        "origine hétéronyme ne voit pas la clé : {f1}"
+    );
+}
+
+/// bfcache : les contextes enfants **gèlent** avec le
+/// moteur — au retour, le DOM muté par l'enfant est intact
+/// et sans re-fetch de `/f`.
+#[tokio::test]
+async fn iframe_ctx_rides_bfcache() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME_JS);
+    t.route("/f", 200, FRAME_JS_CHILD);
+    t.route("/next", 200, PAGE);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(s
+        .frame_dom_dump(id, 0)
+        .unwrap_or_default()
+        .contains("enfant-js"));
+    s.navigate(id, "http://h.test/next").await.unwrap();
+    s.go_back(id).await.unwrap();
+    let dump = s.frame_dom_dump(id, 0).unwrap_or_default();
+    assert!(
+        dump.contains("enfant-js"),
+        "snapshot bfcache : mutation enfant conservée : {dump}"
+    );
+    assert_eq!(
+        t.paths().iter().filter(|p| *p == "/f").count(),
+        1,
+        "pas de re-fetch du cadre au retour"
+    );
+}
+
+/// Navigation **hors** bfcache : l'arbre de contextes du
+/// document mort est détruit — le nouveau document repart
+/// d'un realm top-level propre (un `frames.length` lu après
+/// une nav qui a tout vidé répond 0).
+#[tokio::test]
+async fn iframe_ctx_destroyed_on_forward_nav() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME_JS);
+    t.route("/f", 200, FRAME_JS_CHILD);
+    // La page suivante lit `frames.length` — 0 prouve que
+    // l'ancien arbre de contextes n'a pas survécu.
+    t.route(
+        "/next",
+        200,
+        "<!doctype html><html><body><div id=\"n\">?</div><script>\
+         document.getElementById('n').textContent = \
+         'frames:' + frames.length</script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.navigate(id, "http://h.test/next").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(
+        dump.contains("frames:0"),
+        "contexte neuf — aucun héritage : {dump}"
+    );
+}
+
+/// `onload` sur l'élément `<iframe>` : tiré dans le realm
+/// **parent** au tail — le handler marque le DOM parent.
+#[tokio::test]
+async fn iframe_onload_fires_in_parent() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=\"m\">?</div>\
+         <iframe src=\"/f\" onload=\"document.getElementById('m')\
+         .textContent='cadre-charge'\"></iframe></body></html>",
+    );
+    t.route("/f", 200, FRAME_RED);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(dump.contains("cadre-charge"), "onload iframe : {dump}");
+}
+
+/// `setTimeout` de l'enfant : la pompe visite chaque
+/// contexte vivant (JS-C78) — le timer du cadre tire même
+/// quand le top-level est le contexte courant.
+const FRAME_TIMER: &str = "<!doctype html><html><body>\
+    <p id=\"c\">?</p>\
+    <script>setTimeout(function(){\
+    document.getElementById('c').textContent='tic-enfant'\
+    },0)</script></body></html>";
+
+#[tokio::test]
+async fn iframe_timer_fires_in_child_ctx() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME_JS);
+    t.route("/f", 200, FRAME_TIMER);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_timers(id);
+    let dump = s.frame_dom_dump(id, 0).unwrap_or_default();
+    assert!(dump.contains("tic-enfant"), "timer enfant : {dump}");
+}
+
 // ===== JS-C79 — `crypto.subtle` : couture embedder
 // (moteur → NetRequest::Crypto → `explorer_net::crypto` ring
 // → Promise résolue) =====

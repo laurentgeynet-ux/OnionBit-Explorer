@@ -2824,25 +2824,77 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   régénérées. 4 tests
   `iframe_composite_*`.
 
-- [ ] **Étape 134. Câblage
+- [x] **Étape 134. Câblage
   `SubFrame` → contexte JS**
   (renumérotée — la partie
   « ponts » de l'ex-131 ;
   JS-C78 a livré le moteur
-  multi-contextes) : instancier
-  `context_new` par `SubFrame`
-  au commit (`install_dom` +
-  transports de l'enfant),
-  `context_switch`/`dom_event`/
-  `eval` adressés par `CtxId`,
-  `context_destroy` hors
-  bfcache, **tag ctx sur
-  `NetRequest`** (initiator/
-  page_url de l'émetteur —
-  le fetch de l'enfant est une
-  émission du document enfant).
-  Journal : reliquat explicite
-  de l'entrée « JS-C78 livré ».
+  multi-contextes) : un realm
+  par `<iframe>` fetché, créé
+  au `sub_commit_head`
+  **avant** les scripts du
+  parent (`frames[n]`/
+  `contentWindow` résolvent un
+  vrai contexte en cours de
+  parse). Trait `JsEngine`
+  étendu additif : `context_new`
+  (`frame_ord` → `frame_node`
+  miroir résolu côté worker),
+  `context_destroy`,
+  `install_dom_ctx` (miroir
+  propre + timers + XHR/fetch +
+  `crypto.subtle` — **pas** de
+  hooks nav ni `form.submit` :
+  `location.href=` enfant est
+  inerte plutôt qu'une nav sous
+  identité parente),
+  `eval_ctx`/`dispatch_event_ctx`/
+  `sync_dom_ctx`/`drain_sinks_ctx`
+  — chaque commande adressée
+  fait `context_switch` puis
+  **restaure** le contexte
+  précédent. Worker : registres
+  `ctx_doms`/`ctx_jars`/
+  `ctx_stores`, compteurs de
+  handles XHR/crypto **partagés**
+  (Abort non ambigu sans tag).
+  `SubFrame.html` retenu pour
+  `install_dom_ctx`. Scripts
+  **inline** de l'enfant évalués
+  en ordre document + `DCL`
+  enfant au head, `load` enfant
+  puis `onload` de l'élément
+  `<iframe>` (realm parent) au
+  tail. `NetRequest::Fetch.ctx`
+  : `drain_script_net` émet sous
+  l'initiateur/`page_url`
+  **de l'enfant** (ctx inconnu
+  → échec livré, jamais la
+  mauvaise identité) ; sinks
+  enfant (cookies/storage)
+  drainés sous origine enfant,
+  partition du site top-level.
+  Synchro : miroir enfant sale
+  → re-parse en `SubFrame.dom`,
+  bitmaps `(url,*)` purgées,
+  relayout. Cycle de vie :
+  `frame_ctxs` voyage dans
+  `PageSnapshot` (bfcache
+  conserve tout l'arbre),
+  `context_destroy` explicite
+  hors bfcache. Timer enfant
+  tiré par la pompe cross-ctx
+  (C78). Reliquat : les
+  sous-ressources **du cadre**
+  (ses `src=` externes) ne sont
+  pas fetchées à cette tranche —
+  scripts inline seuls. 9 tests
+  adaptateur `frame_ctxs.rs` +
+  9 tests session `iframe_*`
+  (mutation, isolation, fetch
+  tagué, cookie/storage enfant,
+  bfcache, destroy, onload,
+  timer).
 
 - [x] **Étape 129. Radar corpus
   ≥1200 px — `doc_h`/`scroll_y`

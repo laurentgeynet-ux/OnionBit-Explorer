@@ -5029,6 +5029,7 @@ fn nav_send_beacon(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
         // réponse ignorée).
         mode: crate::xhr::FetchMode::NoCors,
         credentials: crate::xhr::FetchCredentials::Include,
+        ctx: e.cur_ctx,
     });
     Ok(Value::Bool(true))
 }

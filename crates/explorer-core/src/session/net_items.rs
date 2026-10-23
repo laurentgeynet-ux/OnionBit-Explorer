@@ -1123,6 +1123,10 @@ pub(crate) fn store_frame(page: &Url, cookies: &CookieJar, u: &Url, resp: &Respo
         url: u.clone(),
         dom,
         title,
+        // Source gardée : le miroir JS de l'enfant est
+        // re-parsé depuis elle au câblage du contexte
+        // (étape 134) — pas de re-fetch pour le realm.
+        html: text,
     }
 }
 

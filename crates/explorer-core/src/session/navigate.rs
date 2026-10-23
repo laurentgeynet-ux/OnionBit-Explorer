@@ -661,7 +661,12 @@ impl Session {
         // JS-C45 : les handlers inline `on*` exigent un moteur
         // même sans `<script>` — sinon clic muet (page à
         // `onclick=` seul : premier bug site-réel mesuré M24).
-        let want_js = !scripts.is_empty() || has_inline_handlers(&dom);
+        let want_js = !scripts.is_empty()
+            || has_inline_handlers(&dom)
+            // Étape 134 : un `<iframe>` fetché obtient un realm
+            // JS même sans script parent — sinon son propre
+            // `<script>` serait muet.
+            || !frame_urls.is_empty();
         // Le gel capture l'état affiché — une peinture
         // spéculative du document en vol ne doit pas être
         // embarquée dans le snapshot (étape 56c).
@@ -706,7 +711,18 @@ impl Session {
             // après le commit (terrain 23/10 : une intention
             // périmée rejouait une autre page au drain suivant).
             entry.pending_nav.clear();
+            // Étape 134 — `context_destroy` **hors bfcache** :
+            // la page quittée n'est pas gelée (échec, nav en
+            // vol) → ses realms enfants meurent explicitement
+            // avant le moteur (bfcache : le moteur gèle avec
+            // ses contextes dedans, rien à détruire).
+            if let Some(eng) = entry.js.as_mut() {
+                for f in entry.frame_ctxs.drain(..) {
+                    eng.context_destroy(f.ctx);
+                }
+            }
             entry.js = None;
+            entry.frame_ctxs.clear();
             entry.images = PaintImages::default();
             entry.bg_aliases.clear();
             entry.bg_bodies.clear();

@@ -76,6 +76,12 @@ pub struct XhrRequest {
     /// `Request.credentials` de l'appel (JS-C77) — `xhr.withCredentials`
     /// → `Include` ; `sendBeacon` → `Include` (spec).
     pub credentials: FetchCredentials,
+    /// Contexte émetteur (JS-C78/étape 134) — `0` = document
+    /// top-level, sinon le browsing context de l'`<iframe>`
+    /// dont le script a tiré. La session s'en sert pour
+    /// résoudre la base URL et l'initiateur **du cadre**
+    /// (jamais celui du parent).
+    pub ctx: crate::context::CtxId,
 }
 
 /// What the embedder got back — handed to `deliver_xhr_response`.
@@ -472,6 +478,7 @@ impl Host for XhrHost {
                         } else {
                             FetchCredentials::SameOrigin
                         },
+                        ctx: e.cur_ctx,
                     }
                 };
                 let handle = transport.send(&req);
@@ -1743,6 +1750,7 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
         body: None,
         mode: FetchMode::Cors,
         credentials: FetchCredentials::SameOrigin,
+        ctx: e.cur_ctx,
     };
     let mut signal = Value::Undefined;
     if is_request(e, input) {

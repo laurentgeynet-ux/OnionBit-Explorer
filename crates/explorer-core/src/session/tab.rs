@@ -49,6 +49,11 @@ impl Tab {
             emitted: self.emitted,
             last_req: self.last_req.take(),
             frames: std::mem::take(&mut self.frames),
+            // Les contextes JS des cadres gèlent **dans le
+            // moteur** (`js` emporté au-dessus) — la table de
+            // liaison suit pour garder le routage `ctx` à la
+            // restauration (étape 134).
+            frame_ctxs: std::mem::take(&mut self.frame_ctxs),
             img_bodies: std::mem::take(&mut self.img_bodies),
             bg_aliases: std::mem::take(&mut self.bg_aliases),
             mask_aliases: std::mem::take(&mut self.mask_aliases),
@@ -121,6 +126,7 @@ impl Tab {
         self.sync_floor = None;
         self.last_req = snap.last_req;
         self.frames = snap.frames;
+        self.frame_ctxs = snap.frame_ctxs;
         // Étape 133 : les corps compressés reviennent vivants
         // (re-gelables) — le re-décodage des bitmaps est fait
         // par l'appelant via `Session::restore_images`.

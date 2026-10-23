@@ -148,6 +148,7 @@ fn paintless_snapshot_repairs_on_restore() {
             img_bodies: HashMap::new(),
             bg_aliases: HashMap::new(),
             mask_aliases: HashMap::new(),
+            frame_ctxs: Vec::new(),
             frame_nodes: Vec::new(),
         });
     }
@@ -235,6 +236,7 @@ async fn back_during_inflight_nav_restores_previous() {
             img_bodies: HashMap::new(),
             bg_aliases: HashMap::new(),
             mask_aliases: HashMap::new(),
+            frame_ctxs: Vec::new(),
             frame_nodes: Vec::new(),
         });
     }
