@@ -63,6 +63,8 @@ mod js_glue;
 #[allow(clippy::wildcard_imports)]
 mod media;
 #[allow(clippy::wildcard_imports)]
+mod mem;
+#[allow(clippy::wildcard_imports)]
 mod nav_types;
 #[allow(clippy::wildcard_imports)]
 mod navigate;
@@ -104,6 +106,7 @@ pub use media::{
     media_codecs_from_json, media_event_json, media_host_state_str, media_offer_json,
     media_report_from_json,
 };
+pub use mem::MemReport;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use nav_types::*;
 #[allow(clippy::wildcard_imports)]

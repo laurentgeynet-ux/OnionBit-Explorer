@@ -48,6 +48,7 @@ fn main() -> ExitCode {
         [_, cmd, url, out, size] if cmd == "shot" => shot(url, out, Some(size)),
         [_, cmd, url] if cmd == "jprobe" => jprobe(url),
         [_, cmd, url] if cmd == "dom" => dom_live(url),
+        [_, cmd, url] if cmd == "mem" => mem_report(url),
         _ => {
             eprintln!("usage : explorer-cli dump <fichier|url>");
             eprintln!("        explorer-cli fetch <url>");
@@ -55,6 +56,7 @@ fn main() -> ExitCode {
             eprintln!("        explorer-cli shot <url> <sortie.png> [LxH]");
             eprintln!("        explorer-cli jprobe <url>");
             eprintln!("        explorer-cli dom <url>");
+            eprintln!("        explorer-cli mem <url>");
             ExitCode::FAILURE
         }
     }
@@ -247,6 +249,62 @@ async fn dom_live(url: &str) -> ExitCode {
         eprintln!("pas de DOM (détaché ?)");
         ExitCode::FAILURE
     }
+}
+
+/// `mem <url>` : attribution mémoire par réservoir après
+/// navigation + grâce (étape 130) — la page vivante ET les
+/// pages gelées bfcache (heaps JS gelés = premier réservoir
+/// suspecté du constat « station ~1,4 Gio »).
+/// Mio en décimale tronquée (`"12.3"`) — arithmétique
+/// entière, aucune conversion `usize`→`f64` (clippy).
+fn mib(b: usize) -> String {
+    let k = b / 1024;
+    format!("{}.{}", k / 1024, (k % 1024) * 10 / 1024)
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn mem_report(url: &str) -> ExitCode {
+    let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
+    let mut session = session_from_env(fonts);
+    session.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = session.open_tab();
+    if let Err(e) = session.navigate(tab, url).await {
+        eprintln!("erreur : {e}");
+        return ExitCode::FAILURE;
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1_500);
+    while std::time::Instant::now() < deadline {
+        session.pump_net().await;
+        session.pump_timers(tab);
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    eprintln!("[url : {}]", session.tab_url(tab).unwrap_or_default());
+    let Some(r) = session.mem_report(tab) else {
+        eprintln!("onglet introuvable");
+        return ExitCode::FAILURE;
+    };
+    println!("page vivante :");
+    println!("  dom        : {} nœuds", r.dom_nodes);
+    println!("  layout     : {} boîtes", r.layout_boxes);
+    println!("  display    : {} items", r.display_items);
+    println!("  frame      : {} Mio", mib(r.frame_bytes));
+    println!("  png        : {} Mio", mib(r.png_bytes));
+    println!("  images     : {} Mio (dédup onglet)", mib(r.images_bytes));
+    println!("  bg_bodies  : {} Mio", mib(r.bg_bodies_bytes));
+    println!("  js heap    : {} Mio", mib(r.js_heap_bytes));
+    println!("bfcache ({} pages gelées) :", r.bfcache_pages);
+    println!(
+        "  dom        : {} nœuds · layout {} · display {}",
+        r.bfcache_dom_nodes, r.bfcache_layout_boxes, r.bfcache_display_items
+    );
+    println!(
+        "  frame+png  : {} Mio",
+        mib(r.bfcache_frame_bytes + r.bfcache_png_bytes)
+    );
+    println!("  js heap    : {} Mio", mib(r.bfcache_js_heap_bytes));
+    println!("total octets attribués : {} Mio", mib(r.total_bytes));
+    println!("(non mesuré : caches fontes, prev_styles, miroir DOM jscore, registres idb/caches)");
+    ExitCode::SUCCESS
 }
 
 #[tokio::main(flavor = "current_thread")]

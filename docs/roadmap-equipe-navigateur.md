@@ -2812,6 +2812,48 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   mécanique est saine, le constat
   github serait page-spécifique.
 
+- [x] **Étape 130. Empreinte
+  mémoire par réservoir** (file
+  NAV — constat « station
+  ~1,4 Gio » sous sites réels).
+  `Session::mem_report(tab) →
+  Option<MemReport>` mesure la
+  page vivante **et les pages
+  gelées bfcache** : `dom_nodes`
+  (`live_count`), `layout_boxes`,
+  `display_items`, `frame`/`png`
+  octets exacts, bitmaps
+  `DecodedImage` **dé-dupliquées
+  par `Arc::as_ptr`** (même image
+  dans `images.*` + display list
+  + caches = une fois), corps
+  `bg_bodies`, et `heap_stats`
+  du moteur vivant **comme des
+  gelés** — le premier réservoir
+  suspecté : `bfcache_pages` = 4
+  → 5 états de page par onglet,
+  chaque snapshot gardant un
+  heap jusqu'à `js_mem_limit_mib`.
+  Surface : `GET /api/tabs/{id}/
+  mem` (JSON sérialisé) +
+  `explorer-cli mem <url>`
+  (tableau post-nav + grâce).
+  **Honnêteté** : `_bytes` =
+  mesuré, `_nodes`/`_boxes` =
+  comptes (pas d'accesseur de
+  capacité PIPE — aucune touche
+  domaine) ; non mesurés
+  documentés : caches de fontes,
+  `prev_styles`, miroir DOM
+  jscore, registres
+  `idb`/`caches` (C72 — `Rc`
+  injectables hors heap).
+  Régression
+  `mem_report_attributes_live_and
+  _bfcache` (rapport peuplé,
+  snapshot compté, onglet
+  inconnu → `None`).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

@@ -359,6 +359,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Vérifié terrain : Wikipedia
   `doc_h=4085` → `scroll_y=
   3185.29` exact, retour 0.
+- **Étape 130 — empreinte
+  mémoire par réservoir**
+  (`explorer-core/-api/-cli` —
+  constat « station ~1,4 Gio »
+  sous sites réels) :
+  `Session::mem_report(tab) →
+  Option<MemReport>` attribue la
+  page vivante (`dom_nodes`
+  `live_count`, `layout_boxes`,
+  `display_items`, octets exacts
+  `frame`/`png`, bitmaps
+  `DecodedImage` dé-dupliquées
+  par `Arc::as_ptr`, corps
+  `bg_bodies`, `heap_stats` du
+  moteur JS) **et les pages
+  gelées bfcache** — chaque
+  snapshot gèle un moteur JS
+  entier (jusqu'à
+  `js_mem_limit_mib`), premier
+  réservoir suspecté :
+  `bfcache_pages` = 4 → 5 états
+  de page par onglet. Surface :
+  `GET /api/tabs/{id}/mem` (JSON)
+  + `explorer-cli mem <url>`
+  (tableau post-nav). Honnêteté :
+  `_bytes` = octets mesurés,
+  `_nodes`/`_boxes` = comptes ;
+  non mesurés documentés (caches
+  fontes, `prev_styles`, miroir
+  DOM jscore, registres
+  `idb`/`caches` C72 hors heap).
+  Régression
+  `mem_report_attributes_live_and
+  _bfcache` (rapport peuplé,
+  snapshot compté, inconnu →
+  `None`).
 - **JS-C70 —
   `Blob`/`File`/`FileReader` +
   `URL.createObjectURL`**
