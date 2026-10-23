@@ -12,8 +12,8 @@ use explorer_net::error::NetError;
 use explorer_net::h1::{H1Client, HttpConfig};
 use explorer_net::http::{HttpTransport, Method, Request, Response};
 use explorer_net::policy::{
-    is_mixed_content, HstsStore, HstsTransport, PolicyTransport, RedirectTransport,
-    RefererTransport,
+    is_mixed_content, AcceptTransport, HstsStore, HstsTransport, PolicyTransport,
+    RedirectTransport, RefererTransport,
 };
 use explorer_net::proxy::{ProxyConfig, ProxyConnector};
 use explorer_net::url::Url;
@@ -1260,4 +1260,75 @@ fn frame_embedding_matrix() {
         &cross_res,
         &resp(200, &[], b"x")
     ));
+}
+
+// ---- CAP-141 : `Accept` par destination ----------------
+
+/// Table Fetch §4.4 : `document`/`iframe` → négociation HTML,
+/// `image` → formats peints honnêtement, `style` → `text/css`,
+/// le reste → `*/*`.
+#[test]
+fn accept_value_table() {
+    use explorer_net::http::FetchDest;
+    use explorer_net::policy::accept_value;
+    assert!(accept_value(FetchDest::Document).starts_with("text/html"));
+    assert_eq!(
+        accept_value(FetchDest::Iframe),
+        accept_value(FetchDest::Document)
+    );
+    assert!(accept_value(FetchDest::Image).starts_with("image/png"));
+    assert_eq!(accept_value(FetchDest::Style), "text/css,*/*;q=0.1");
+    assert_eq!(accept_value(FetchDest::Script), "*/*");
+    assert_eq!(accept_value(FetchDest::Font), "*/*");
+    assert_eq!(accept_value(FetchDest::Empty), "*/*");
+}
+
+/// `Accept` posé par destination quand absent — jamais écrasé
+/// quand l'émetteur (auteur/appelant) en a fourni un.
+#[tokio::test]
+async fn accept_stamped_per_dest_and_author_kept() {
+    use explorer_net::http::FetchDest;
+    fn accept_of(r: &Request) -> Option<&str> {
+        r.headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case("accept"))
+            .map(|(_, v)| v.as_str())
+    }
+    let inner = FakeTransport::new(vec![
+        resp(200, &[], b"x"),
+        resp(200, &[], b"x"),
+        resp(200, &[], b"x"),
+        resp(200, &[], b"x"),
+        resp(200, &[], b"x"),
+    ]);
+    let t = AcceptTransport::wrap(inner.clone());
+    // `Request::get` nu = dest `Empty` ; `nav_begin` pose
+    // `Document` — miroir du flux session réel.
+    let mut nav = Request::get(u("https://h.test/p"));
+    nav.fetch_dest = FetchDest::Document;
+    let mut style = Request::get(u("https://h.test/a.css"));
+    style.fetch_dest = FetchDest::Style;
+    let mut img = Request::get(u("https://h.test/i.png"));
+    img.fetch_dest = FetchDest::Image;
+    let mut xhr = Request::get(u("https://h.test/api"));
+    xhr.fetch_dest = FetchDest::Empty;
+    // `Accept` auteur préservé.
+    let mut author = Request::get(u("https://h.test/api2"));
+    author
+        .headers
+        .push(("accept".to_string(), "application/json".to_string()));
+    t.fetch(&nav).await.unwrap();
+    t.fetch(&style).await.unwrap();
+    t.fetch(&img).await.unwrap();
+    t.fetch(&xhr).await.unwrap();
+    t.fetch(&author).await.unwrap();
+    let seen = inner.seen();
+    assert!(accept_of(&seen[0]).is_some_and(|v| v.starts_with("text/html")));
+    assert_eq!(accept_of(&seen[1]), Some("text/css,*/*;q=0.1"));
+    assert_eq!(
+        accept_of(&seen[2]),
+        Some("image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5")
+    );
+    assert_eq!(accept_of(&seen[3]), Some("*/*"));
+    assert_eq!(accept_of(&seen[4]), Some("application/json"));
 }

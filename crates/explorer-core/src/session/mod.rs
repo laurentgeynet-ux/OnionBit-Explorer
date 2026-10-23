@@ -666,8 +666,13 @@ impl Session {
         // émet le preflight `OPTIONS` et vérifie `ACAO`/`ACAC`
         // sur les requêtes `mode:cors` portant `req.cors`
         // (posé par `script_request`), tout le reste passe.
+        // `AcceptTransport` tout au fond (CAP-141) : `Accept`
+        // par destination, posé seulement si absent — y compris
+        // sur les preflights `OPTIONS` (`*/*`, dest `Empty`).
         let transport: Arc<dyn HttpTransport> = Arc::new(explorer_net::lang::LangTransport::wrap(
-            Arc::new(explorer_net::policy::CorsTransport::wrap(transport)),
+            Arc::new(explorer_net::policy::CorsTransport::wrap(Arc::new(
+                explorer_net::policy::AcceptTransport::wrap(transport),
+            ))),
             accept_language.clone(),
         ));
         Self {

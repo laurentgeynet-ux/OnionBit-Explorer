@@ -901,6 +901,53 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   cible `_blank`, initiateur
   cross-origin.
 
+- **CAP-141 — `Accept` par
+  destination** (`explorer-net`,
+  `explorer-core` — cap « web
+  réel sécurisé » ; numéro
+  officiel attribué à
+  l'intégration, compteur
+  gelé) : Fetch §4.4 — la
+  requête sans `Accept` reçoit
+  la valeur de sa destination :
+  `document`/`iframe` →
+  `text/html,application/
+  xhtml+xml,application/xml;
+  q=0.9,*/*;q=0.8`, `style` →
+  `text/css,*/*;q=0.1`,
+  `image` → `image/png,image/
+  svg+xml,image/*;q=0.8,*/*;
+  q=0.5` (liste **honnête** :
+  les formats annoncés sont
+  ceux décodés — avif/webp
+  absents tant que non
+  supportés), script/font/
+  `empty` → `*/*`.
+  `policy::accept_value`
+  porte la table ;
+  `AcceptTransport`
+  (enveloppe session, tout au
+  fond sous `CorsTransport`)
+  la pose dans `fetch` et
+  `fetch_stream` —
+  `Accept` auteur jamais
+  écrasé, requêtes non-http
+  non stampées, preflights
+  `OPTIONS` recevant `*/*`.
+  Un `Accept` adapté débloque
+  les serveurs/CDN à
+  négociation de contenu qui
+  trient la réponse sur cet
+  en-tête. Régressions
+  `accept_value_table`,
+  `accept_stamped_per_dest_
+  and_author_kept` (policy) +
+  `accept_header_reaches_
+  wire_per_destination`
+  (session — nav/feuille/
+  image/iframe vérifiés sur
+  le fil).
+
 ### Fixed
 
 - **Étape 122 — `root_font_size`

@@ -8243,3 +8243,46 @@ async fn base_href_cross_origin_keeps_page_initiator() {
         Some("http://h.test/")
     );
 }
+
+/// CAP-141 : `Accept` par destination sur le fil — nav
+/// `text/html…`, feuille `text/css,*/*;q=0.1`, image
+/// `image/png…`, iframe identique à document, fetch `*/*`.
+#[tokio::test]
+async fn accept_header_reaches_wire_per_destination() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><head>\
+         <link rel=stylesheet href=\"/a.css\"></head>\
+         <body><img src=\"/i.png\"><iframe src=\"/f\"></iframe></body></html>",
+    );
+    t.route_bin("/a.css", 200, b"body{}".to_vec());
+    t.route_bin("/i.png", 200, b"notapng".to_vec());
+    t.route("/f", 200, "<html><body>in</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/p").await.unwrap();
+    let accept_of = |path: &str| t.req_header(path, "accept");
+    assert!(
+        accept_of("/p")
+            .as_deref()
+            .is_some_and(|v| v.starts_with("text/html")),
+        "nav : {:?}",
+        accept_of("/p")
+    );
+    assert_eq!(accept_of("/a.css").as_deref(), Some("text/css,*/*;q=0.1"));
+    assert!(
+        accept_of("/i.png")
+            .as_deref()
+            .is_some_and(|v| v.starts_with("image/png")),
+        "img : {:?}",
+        accept_of("/i.png")
+    );
+    assert!(
+        accept_of("/f")
+            .as_deref()
+            .is_some_and(|v| v.starts_with("text/html")),
+        "iframe : {:?}",
+        accept_of("/f")
+    );
+}

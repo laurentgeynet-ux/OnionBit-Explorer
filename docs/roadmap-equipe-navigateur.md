@@ -2916,6 +2916,42 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-141. `Accept` par
+  destination** *(numéro
+  officiel attribué à
+  l'intégration — compteur
+  gelé, convention CAP-xxx)* :
+  `AcceptTransport` (net,
+  pile session tout au fond —
+  preflights `OPTIONS`
+  inclus) pose `Accept` par
+  `fetch_dest` quand absent :
+  `document`/`iframe` →
+  `text/html,application/
+  xhtml+xml,application/
+  xml;q=0.9,*/*;q=0.8`,
+  `style` → `text/css,*/*;
+  q=0.1`, `image` →
+  `image/png,image/svg+xml,
+  image/*;q=0.8,*/*;q=0.5`
+  (liste **honnête** — pas
+  d'avif/webp non décodés),
+  reste → `*/*`. Jamais
+  d'écrasement d'un `Accept`
+  auteur (`fetch(...,
+  {headers:{Accept}})`) ;
+  hors http(s) rien posé.
+  Les CDN/serveurs à
+  négociation de contenu
+  répondent différemment sans
+  cet en-tête. Tests :
+  `accept_value_table` +
+  `accept_stamped_per_dest_
+  and_author_kept` (policy),
+  `accept_header_reaches_
+  wire_per_destination`
+  (session).
+
 - [x] **Étape 135. `<base
   href>`/`<base target>`** :
   premier `<base href>` en

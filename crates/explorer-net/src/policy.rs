@@ -1097,3 +1097,73 @@ fn fa_source_matches(src: &str, page: &Url, resp_url: &Url) -> bool {
     }
     true
 }
+
+/// Valeur `Accept` par destination (Fetch §4.4, CAP-141)
+/// — posée quand l'émetteur n'a pas fourni la sienne. Les
+/// tables WHATWG/Chrome annoncent aussi `avif`/`webp` :
+/// le moteur ne les décode pas — la liste reste **honnête**
+/// (annonce = formats réellement peints), sinon les CDN à
+/// négociation de contenu serviraient des octets inertes.
+#[must_use]
+pub fn accept_value(dest: FetchDest) -> &'static str {
+    match dest {
+        FetchDest::Document | FetchDest::Iframe => {
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        }
+        FetchDest::Image => "image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5",
+        FetchDest::Style => "text/css,*/*;q=0.1",
+        FetchDest::Script | FetchDest::Font | FetchDest::Empty => "*/*",
+    }
+}
+
+/// `Accept` par destination (CAP-141) — un navigateur
+/// négocie le contenu par type de ressource : serveurs/CDN
+/// réels répondent différemment (ou refusent) sans `Accept`
+/// adapté. Posé **seulement si absent** : un `Accept` auteur
+/// (`fetch(url, {headers:{Accept:…}})`, callers explicites)
+/// n'est jamais écrasé. Les requêtes non-http(s) ne reçoivent
+/// rien (jamais de socket — destructeur amont).
+pub struct AcceptTransport {
+    inner: Arc<dyn HttpTransport>,
+}
+
+impl AcceptTransport {
+    /// Enveloppe `inner`.
+    #[must_use]
+    pub fn wrap(inner: Arc<dyn HttpTransport>) -> Self {
+        Self { inner }
+    }
+
+    /// Stamp idempotent — n'écrase jamais un `Accept` posé
+    /// en amont (auteur ou transport plus externe).
+    fn stamp(req: &Request) -> Request {
+        if !matches!(req.url.scheme(), "http" | "https")
+            || req
+                .headers
+                .iter()
+                .any(|(n, _)| n.eq_ignore_ascii_case("accept"))
+        {
+            return req.clone();
+        }
+        let mut req = req.clone();
+        req.headers.push((
+            "Accept".to_string(),
+            accept_value(req.fetch_dest).to_string(),
+        ));
+        req
+    }
+}
+
+#[async_trait]
+impl HttpTransport for AcceptTransport {
+    async fn fetch(&self, req: &Request) -> NetResult<Response> {
+        self.inner.fetch(&Self::stamp(req)).await
+    }
+
+    /// Streamé : même stamp puis délégation — sans override le
+    /// défaut du trait bufferiserait via `fetch` (voir
+    /// `CorsTransport::fetch_stream`, étape 126).
+    async fn fetch_stream(&self, req: &Request) -> NetResult<StreamedResponse> {
+        self.inner.fetch_stream(&Self::stamp(req)).await
+    }
+}
