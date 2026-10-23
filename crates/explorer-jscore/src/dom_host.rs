@@ -651,7 +651,7 @@ impl Engine {
         if let Value::Obj(id) = doc {
             cache.borrow_mut().insert(dom.borrow().root, id);
         }
-        self.dom_ctx = Some((dom.clone(), cache));
+        self.dom_ctx = Some((dom.clone(), cache.clone()));
         let g = self.global;
         self.set_own(g, "document", doc, false);
 
@@ -768,10 +768,18 @@ impl Engine {
         // `instanceof`), inconstructibles comme `Node`. Mesuré sur
         // github.com : `HTMLElement`/`Event` manquants →
         // ReferenceError (JS-C56).
+        // `HTMLElement` est le seul constructible de la famille —
+        // son `super()` rend l'élément en cours d'upgrade CE
+        // (JS-C68) ; `new HTMLElement()` direct reste « Illegal ».
+        let he = self.native_fn("HTMLElement", html_element_ctor);
+        if let Value::Obj(fid) = he {
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "HTMLElement", he, false);
         for name in [
             "EventTarget",
             "Element",
-            "HTMLElement",
             "HTMLImageElement",
             // Famille `HTML*Element` au complet (mesuré github.com
             // vol 22/10 : `ReferenceError: HTMLButtonElement` dans
@@ -1024,10 +1032,13 @@ impl Engine {
             }
             self.set_own(g, name, fv, false);
         }
-        // `customElements` — registre honnête : `define`/`get`/
-        // `whenDefined`/`upgrade`. Mesuré github.com (JS-C56).
+        // `customElements` — registre adossé au `Dom` :
+        // `define`/`get`/`getName`/`whenDefined`/`upgrade` avec
+        // upgrade des éléments et callbacks de cycle de vie
+        // (JS-C56 → JS-C68).
         let ce = self.new_host_object(Rc::new(CustomElementsHost {
-            registry: RefCell::new(HashMap::new()),
+            dom: dom.clone(),
+            cache: cache.clone(),
         }));
         self.set_own(g, "customElements", ce, false);
         // `FormData` (JS-C67) — ctor + proto paresseux partagé
@@ -1739,6 +1750,9 @@ impl Host for DocumentHost {
             "createElement" => {
                 let tag = e.to_js_string(arg(args, 0))?;
                 let n = self.dom.borrow_mut().create_element(&tag);
+                // CE défini → upgrade immédiat (ctor + attrs ;
+                // pas de `connectedCallback` — détaché, JS-C68).
+                ce_upgrade_node(e, &self.dom, &self.cache, n)?;
                 Ok(Some(node_value(e, &self.dom, &self.cache, n)))
             }
             // `createElementNS(ns, qualified)` — pas de
@@ -1749,6 +1763,7 @@ impl Host for DocumentHost {
                 let tag = e.to_js_string(arg(args, 1))?;
                 let local = tag.rsplit(':').next().unwrap_or(&tag).to_string();
                 let n = self.dom.borrow_mut().create_element(&local);
+                ce_upgrade_node(e, &self.dom, &self.cache, n)?;
                 Ok(Some(node_value(e, &self.dom, &self.cache, n)))
             }
             "createTextNode" => {
@@ -3049,6 +3064,10 @@ impl Host for NodeHost {
             "cloneNode" => {
                 let deep = e.to_boolean(arg(args, 0));
                 let c = self.dom.borrow_mut().clone_node(node, deep);
+                // Clone CE : le clone (et ses descendants deep)
+                // matchant une définition s'upgrade — ctor
+                // rejoué sur le nœud frais, détaché (JS-C68).
+                ce_upgrade_subtree(e, &self.dom, &self.cache, c)?;
                 Ok(Some(node_value(e, &self.dom, &self.cache, c)))
             }
             "contains" => {
@@ -3894,16 +3913,42 @@ impl Host for AttributesHost {
 /// `location` — getters read `hooks.page_url` (parsed with no URL
 /// dep: scheme `//` authority `/` path `?` query `#` fragment);
 /// setters/`assign`/`replace`/`reload` go through `hooks.navigate`.
-/// `customElements` — `CustomElementRegistry` minimal : nom → ctor.
-/// `define` exige un ctor appelable et un nom libre (`TypeError` —
-/// approche `NotSupportedError`/`SyntaxError` de la spec) ;
-/// `whenDefined` rend une promesse tenue pour un nom enregistré,
-/// pendante sinon (spec) ; `upgrade` est no-op honnête — le
-/// miroir ne relie pas le constructeur aux nœuds existants.
-/// Mesuré github.com : `customElements.define(name, class)`
-/// (JS-C56).
+/// `customElements` — `CustomElementRegistry` (JS-C68) adossé
+/// au registre du `Dom` : `define` valide nom/ctor/proto, fige
+/// `observedAttributes`, résout les `whenDefined` pendantes et
+/// **upgrade les éléments attachés** déjà présents ; `upgrade`
+/// applique au sous-arbre ; `get`/`getName` interrogent le
+/// registre. Mesuré github.com : `customElements.define(name,
+/// class)` (JS-C56) — le résidu `turbo-frame.delegate` exigeait
+/// `whenDefined` tenue + callbacks.
 struct CustomElementsHost {
-    registry: RefCell<HashMap<String, Value>>,
+    dom: DomRef,
+    cache: NodeCache,
+}
+
+/// Nom de custom element valide (spec `PotentialCustomElementName`,
+/// réduit ASCII) : `[a-z][a-z0-9._-]*-[a-z0-9._-]*`, hors la
+/// liste réservée (`font-face*`…).
+fn ce_valid_name(n: &str) -> bool {
+    const RESERVED: &[&str] = &[
+        "annotation-xml",
+        "color-profile",
+        "font-face",
+        "font-face-src",
+        "font-face-uri",
+        "font-face-format",
+        "font-face-name",
+        "missing-glyph",
+    ];
+    let mut chars = n.chars();
+    if !chars.next().is_some_and(|c| c.is_ascii_lowercase()) {
+        return false;
+    }
+    if !n.contains('-') || RESERVED.contains(&n) {
+        return false;
+    }
+    n.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
 }
 
 impl Host for CustomElementsHost {
@@ -3926,42 +3971,311 @@ impl Host for CustomElementsHost {
             "define" => {
                 let n = e.to_js_string(arg(args, 0))?;
                 let ctor = arg(args, 1);
+                // Approche spec `SyntaxError`/`NotSupportedError`
+                // via TypeError (pas de DOMException typé ici).
+                if !ce_valid_name(&n) {
+                    return Err(e.type_error(format!("customElements.define: invalid name {n:?}")));
+                }
                 if !e.is_callable(ctor) {
                     return Err(e.type_error("customElements.define: ctor is not a constructor"));
                 }
-                if self.registry.borrow().contains_key(&n) {
-                    return Err(e.type_error("custom element already defined"));
+                let proto = e.get_prop_value(ctor, "prototype")?;
+                if !matches!(proto, Value::Obj(_)) {
+                    return Err(
+                        e.type_error("customElements.define: ctor.prototype is not an object")
+                    );
                 }
-                self.registry.borrow_mut().insert(n, ctor);
+                {
+                    let d = self.dom.borrow();
+                    if d.ce.defs.contains_key(&n) {
+                        return Err(e.type_error("custom element already defined"));
+                    }
+                    if d.ce.defs.values().any(|def| e.strict_eq(def.ctor, ctor)) {
+                        return Err(e.type_error("custom element ctor already registered"));
+                    }
+                }
+                // `observedAttributes` figé au define (spec).
+                let mut observed = Vec::new();
+                if let Value::Obj(oid) = e.get_prop_value(ctor, "observedAttributes")? {
+                    if let Some(ObjKind::Array(elems)) = e.heap.obj(oid).map(|o| &o.kind) {
+                        for el in elems.clone() {
+                            observed.push(e.to_js_string(el)?.to_lowercase());
+                        }
+                    }
+                }
+                {
+                    let mut d = self.dom.borrow_mut();
+                    d.ce.defs
+                        .insert(n.clone(), crate::dom::CeDef { ctor, observed });
+                    // `whenDefined` pendantes → résolues `undefined`.
+                    if let Some(ps) = d.ce.pending.remove(&n) {
+                        for p in ps {
+                            e.resolve_promise(p, Value::Undefined);
+                        }
+                    }
+                }
+                // Upgrade des éléments attachés déjà présents
+                // (ordre document via `by_tag`).
+                let targets = {
+                    let d = self.dom.borrow();
+                    d.by_tag(d.root, &n)
+                };
+                for node in targets {
+                    ce_upgrade_node(e, &self.dom, &self.cache, node)?;
+                }
                 Ok(Some(Value::Undefined))
             }
             "get" => {
                 let n = e.to_js_string(arg(args, 0))?;
                 Ok(Some(
-                    self.registry
+                    self.dom
                         .borrow()
+                        .ce
+                        .defs
                         .get(&n)
-                        .copied()
-                        .unwrap_or(Value::Undefined),
+                        .map_or(Value::Undefined, |d| d.ctor),
+                ))
+            }
+            "getName" => {
+                let ctor = arg(args, 0);
+                let d = self.dom.borrow();
+                Ok(Some(
+                    d.ce.defs
+                        .iter()
+                        .find(|(_, def)| e.strict_eq(def.ctor, ctor))
+                        .map_or(Value::Null, |(n, _)| e.str_val(n.clone())),
                 ))
             }
             "whenDefined" => {
                 let n = e.to_js_string(arg(args, 0))?;
                 let p = e.new_promise();
-                if let Some(&ctor) = self.registry.borrow().get(&n) {
-                    e.resolve_promise(p, ctor);
+                if !ce_valid_name(&n) {
+                    let err = e.str_val(format!("SyntaxError: invalid custom element name {n:?}"));
+                    e.reject_promise(p, err);
+                    return Ok(Some(Value::Obj(p)));
                 }
+                if !self.dom.borrow().ce.defs.contains_key(&n) {
+                    self.dom
+                        .borrow_mut()
+                        .ce
+                        .pending
+                        .entry(n)
+                        .or_default()
+                        .push(p);
+                    return Ok(Some(Value::Obj(p)));
+                }
+                e.resolve_promise(p, Value::Undefined);
                 Ok(Some(Value::Obj(p)))
             }
-            "upgrade" => Ok(Some(Value::Undefined)),
+            "upgrade" => {
+                let root = arg(args, 0);
+                let Some(node) = node_for(e, root) else {
+                    return Err(e.type_error("customElements.upgrade: not a node"));
+                };
+                ce_upgrade_subtree(e, &self.dom, &self.cache, node)?;
+                Ok(Some(Value::Undefined))
+            }
             _ => Ok(None),
         }
     }
+}
 
-    fn trace(&self, out: &mut Vec<ObjId>) {
-        for v in self.registry.borrow().values() {
-            if let Value::Obj(id) = v {
-                out.push(*id);
+/// Définition de `node` (si élément customisable) → `(nom,
+/// ctor, observed)` — `None` si non-élément, sans définition,
+/// déjà upgradé ou marqué failed.
+fn ce_def_of(dom: &DomRef, node: NodeId) -> Option<(String, Value, Vec<String>)> {
+    let d = dom.borrow();
+    let n = &d.nodes[node as usize];
+    if n.kind != crate::dom::NodeKind::Element
+        || d.ce.upgraded.contains_key(&node)
+        || d.ce.failed.contains(&node)
+    {
+        return None;
+    }
+    let def = d.ce.defs.get(&n.tag)?;
+    Some((n.tag.clone(), def.ctor, def.observed.clone()))
+}
+
+/// Upgrade d'un élément (JS-C68) : proto ← `Ctor.prototype`,
+/// constructeur exécuté avec `this` = l'élément (slot
+/// `ce_upgrade_slot` — le `super()` d'une classe
+/// `extends HTMLElement` le rend), puis réactions
+/// `attributeChangedCallback` (observés présents) et
+/// `connectedCallback` si attaché — ordre spec. Un ctor qui
+/// jette ou rend un autre objet → nœud « failed » (callbacks
+/// désarmés, erreur rapportée et non propagée — spec).
+fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId) -> JsResult<()> {
+    let Some((name, ctor, observed)) = ce_def_of(dom, node) else {
+        return Ok(());
+    };
+    dom.borrow_mut().ce.upgraded.insert(node, name);
+    let el = node_value(e, dom, cache, node);
+    // `el.__proto__ = Ctor.prototype` (validé objet à define).
+    if let Value::Obj(eid) = el {
+        if let Value::Obj(p) = e.get_prop_value(ctor, "prototype")? {
+            if let Some(o) = e.heap.obj_mut(eid) {
+                o.proto = Value::Obj(p);
+            }
+        }
+    }
+    // Constructeur : `call_value_ctor` avec `this` = l'élément —
+    // le `super()` d'une classe `extends …HTMLElement` atteint la
+    // native `HTMLElement` qui rend l'élément via `ce_upgrade_slot`
+    // (retour ignoré par `SuperCall`, `this` reste l'élément) ;
+    // `FLD_DONE` posé sur `this` après `super()` prouve la
+    // chaîne dérivée (une classe de base ou une `function` ne la
+    // pose jamais → « failed », comme la spec qui exige le
+    // résultat = l'élément). `new.target` = `ctor`.
+    let prev = e.ce_upgrade_slot.replace(el);
+    let r = e.call_value_ctor(ctor, el, &[], ctor);
+    e.ce_upgrade_slot = prev;
+    let ok = match r {
+        Ok(v) => {
+            let returned_other = v.is_object() && !e.strict_eq(v, el);
+            let derived =
+                matches!(el, Value::Obj(eid) if e.find_own(eid, crate::interp::FLD_DONE).is_some());
+            !returned_other && derived
+        }
+        Err(_) => false,
+    };
+    if !ok {
+        // Ctor throw, chaîne non-HTMLElement, ou retour étranger
+        // → état « failed » honnête (proto conservée, spec).
+        dom.borrow_mut().ce.failed.insert(node);
+        return Ok(());
+    }
+    // `attributeChangedCallback` initial : attributs observés
+    // présents, dans l'ordre de l'attribut list (spec).
+    let attr_hits: Vec<(String, String)> = {
+        let d = dom.borrow();
+        d.nodes[node as usize]
+            .attrs
+            .iter()
+            .filter(|(k, _)| observed.iter().any(|a| a == k))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    };
+    for (k, v) in attr_hits {
+        ce_fire(e, el, "attributeChangedCallback", k, None, Some(v))?;
+    }
+    if dom.borrow().is_attached(node) {
+        ce_fire0(e, el, "connectedCallback")?;
+    }
+    Ok(())
+}
+
+/// `cb` du proto de `el` → appelée si callable (props héritées
+/// de `Ctor.prototype` — `connectedCallback` & co n'ont pas de
+/// repli host).
+fn ce_call(e: &mut Engine, el: Value, cb_name: &str, args: &[Value]) -> JsResult<()> {
+    let cb = e.get_prop_value(el, cb_name)?;
+    if e.is_callable(cb) {
+        e.call_value(cb, el, args)?;
+    }
+    Ok(())
+}
+
+/// `connectedCallback`/`disconnectedCallback` (sans arguments).
+fn ce_fire0(e: &mut Engine, el: Value, cb: &str) -> JsResult<()> {
+    ce_call(e, el, cb, &[])
+}
+
+/// `attributeChangedCallback(name, old, new)` — `null` absent.
+fn ce_fire(
+    e: &mut Engine,
+    el: Value,
+    cb: &str,
+    name: String,
+    old: Option<String>,
+    new: Option<String>,
+) -> JsResult<()> {
+    let name = e.str_val(name);
+    let old = old.map_or(Value::Null, |v| e.str_val(v));
+    let new = new.map_or(Value::Null, |v| e.str_val(v));
+    ce_call(e, el, cb, &[name, old, new])
+}
+
+/// Upgrade récursif du sous-arbre de `root` (éléments matchant
+/// une définition — `customElements.upgrade`/`cloneNode`).
+fn ce_upgrade_subtree(
+    e: &mut Engine,
+    dom: &DomRef,
+    cache: &NodeCache,
+    root: NodeId,
+) -> JsResult<()> {
+    ce_upgrade_node(e, dom, cache, root)?;
+    let kids = dom.borrow().by_tag(root, "*");
+    for n in kids {
+        ce_upgrade_node(e, dom, cache, n)?;
+    }
+    Ok(())
+}
+
+impl Engine {
+    /// Drain synchrone des réactions custom elements (JS-C68) —
+    /// appelé après chaque `Host::invoke`/`Host::set` traité :
+    /// les callbacks courent *dans* l'opération (spec) et leurs
+    /// propres mutations ré-alimentent la file (boucle).
+    ///
+    /// # Errors
+    /// Propage l'exception d'un callback (même modèle que les
+    /// listeners d'événements du moteur).
+    pub(crate) fn drain_ce_reactions(&mut self) -> JsResult<()> {
+        let Some((dom, cache)) = self.dom_ctx.clone() else {
+            return Ok(());
+        };
+        loop {
+            let recs = std::mem::take(&mut dom.borrow_mut().ce_reactions);
+            if recs.is_empty() {
+                return Ok(());
+            }
+            for rec in recs {
+                match rec {
+                    crate::dom::CeReaction::Connected(n) => {
+                        let (upgraded, failed) = {
+                            let d = dom.borrow();
+                            (d.ce.upgraded.contains_key(&n), d.ce.failed.contains(&n))
+                        };
+                        if failed {
+                            continue;
+                        }
+                        if upgraded {
+                            let el = node_value(self, &dom, &cache, n);
+                            ce_fire0(self, el, "connectedCallback")?;
+                        } else {
+                            // Upgrade à l'insertion — `ce_upgrade_node`
+                            // tire ctor + attrChanged + connected.
+                            ce_upgrade_node(self, &dom, &cache, n)?;
+                        }
+                    }
+                    crate::dom::CeReaction::Disconnected(n) => {
+                        let live = {
+                            let d = dom.borrow();
+                            d.ce.upgraded.contains_key(&n) && !d.ce.failed.contains(&n)
+                        };
+                        if !live {
+                            continue;
+                        }
+                        let el = node_value(self, &dom, &cache, n);
+                        ce_fire0(self, el, "disconnectedCallback")?;
+                    }
+                    crate::dom::CeReaction::AttrChanged {
+                        node,
+                        name,
+                        old,
+                        new,
+                    } => {
+                        let live = {
+                            let d = dom.borrow();
+                            d.ce.upgraded.contains_key(&node) && !d.ce.failed.contains(&node)
+                        };
+                        if !live {
+                            continue;
+                        }
+                        let el = node_value(self, &dom, &cache, node);
+                        ce_fire(self, el, "attributeChangedCallback", name, old, new)?;
+                    }
+                }
             }
         }
     }
@@ -4426,6 +4740,19 @@ fn node_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 /// constructor » comme `Node`, la détection `typeof`/`in` suffit.
 fn illegal_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Err(e.type_error("illegal constructor"))
+}
+
+/// `HTMLElement` — inconstructible directement (« illegal
+/// constructor » spec) **sauf** quand `super()` d'une classe
+/// custom element l'atteint pendant un upgrade : le slot
+/// `ce_upgrade_slot` porte alors l'élément en cours de
+/// construction, rendu comme résultat (rôle du mécanisme spec
+/// où `super()` produit l'élément — JS-C68).
+fn html_element_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    if let Some(el) = e.ce_upgrade_slot {
+        return Ok(el);
+    }
+    Err(e.type_error("Illegal constructor"))
 }
 
 /// `new Image(width?, height?)` — alias constructeur de

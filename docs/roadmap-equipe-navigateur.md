@@ -2778,12 +2778,28 @@ ci-dessous (fréquence observée sur le corpus réel).
   sans DOM). Reliquats assumés : `multipart/form-data` hors
   scope transport `String` (déviation documentée), `File`/`Blob`
   à JS-C70. Régressions `c67_*` (7 tests).
-- [ ] **JS-C68. `customElements` machinery** : `define` avec
+- [x] **JS-C68. `customElements` machinery** : `define` avec
   upgrade des éléments existants, callbacks `connected
   Callback`/`disconnectedCallback`/`attributeChangedCallback`,
   `whenDefined` résolutrice. **Débloque le résidu github
   `turbo-frame.delegate`** (seule erreur honnête restante du
   census — la turbo-frame est un custom element).
+  **Livré** : registre `Dom.ce` (defs/upgraded/failed/
+  `whenDefined` pendantes) — `define` validé (nom réservé,
+  ctor, `prototype`, doublons), `observedAttributes` figé ;
+  upgrade préservant le wrapper (`call_value_ctor` sur
+  l'élément, slot `ce_upgrade_slot` pour le `super()` de
+  `extends HTMLElement` — `HTMLElement` = vraie classe de
+  base), état « failed » honnête. Réactions synchrones
+  drainées après chaque dispatch host : `connected`/
+  `disconnected`/`attributeChanged` (observés + tir initial),
+  upgrades à `define`, `createElement(NS)`, `cloneNode`,
+  insertion, `innerHTML`, `customElements.upgrade` ;
+  `whenDefined` → `undefined`, `get`/`getName` réels, tout
+  raciné GC. Reliquat assumé : chaîne `HTMLElement` non
+  vérifiée à `define` (échec « failed » à l'upgrade au
+  lieu du `NotSupportedError` spec). Régressions `c68_*`
+  (7 tests).
 - [ ] **JS-C69. `IntersectionObserver`/`ResizeObserver`
   fonctionnels** : les stubs actuels sont constructibles mais
   le callback n'est jamais livré (documenté « no-op honnête »

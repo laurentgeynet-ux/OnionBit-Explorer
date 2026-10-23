@@ -70,7 +70,7 @@ const FLD_FIELDS: &str = "\u{f131}fields";
 const FLD_FIELDS_D: &str = "\u{f131}fields.derived";
 /// Marqueur posé sur `this` après installation des champs dérivés
 /// — un second `super()` doit lever `TypeError` (spec).
-const FLD_DONE: &str = "\u{f131}fields.done";
+pub(crate) const FLD_DONE: &str = "\u{f131}fields.done";
 /// Marqueur « constructeur de classe » — `C()` sans `new` lève
 /// `TypeError` (spec `[[IsClassConstructor]]` implicite).
 const CLASS_CTOR: &str = "\u{f131}ctor";
@@ -259,6 +259,12 @@ pub struct Engine {
     /// `MutationObserver` bookkeeping (JS-C26) — callbacks par
     /// id d'observer ; les records vivent dans la file du `Dom`.
     pub(crate) mutobs: crate::mutation::MutObsState,
+    /// Élément en cours de construction par upgrade
+    /// `customElements` (JS-C68) — le `super()` d'une classe
+    /// `extends HTMLElement` le récupère comme `this` (rôle du
+    /// slot spec « element being upgraded »). `None` hors
+    /// upgrade → `new HTMLElement()` jette `Illegal constructor`.
+    pub(crate) ce_upgrade_slot: Option<Value>,
     /// Browser-surface hooks (JS-7e) — page URL, cookie jar,
     /// navigation/history callbacks injected by the embedder.
     pub(crate) hooks: crate::dom_host::BrowserHooks,
@@ -613,6 +619,7 @@ impl Engine {
             dom_ctx: None,
             microtasks: std::collections::VecDeque::new(),
             mutobs: crate::mutation::MutObsState::default(),
+            ce_upgrade_slot: None,
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,
             strict: false,
@@ -824,6 +831,19 @@ impl Engine {
             for v in dom.borrow().canvas_ctx_values() {
                 crate::heap::push_value(&mut ids, v);
             }
+            // `customElements` (JS-C68) — ctors des définitions,
+            // promesses `whenDefined` pendantes.
+            for def in dom.borrow().ce.defs.values() {
+                crate::heap::push_value(&mut ids, def.ctor);
+            }
+            for list in dom.borrow().ce.pending.values() {
+                ids.extend(list.iter().copied());
+            }
+        }
+        // Élément sous upgrade CE traversant `construct` — il
+        // n'est encore rattaché à rien de traçable côté JS.
+        if let Some(v) = self.ce_upgrade_slot {
+            crate::heap::push_value(&mut ids, v);
         }
         if let Some(s) = self.hooks.screen_obj {
             ids.push(s);
@@ -2916,6 +2936,10 @@ impl Engine {
             Value::Obj(id) => {
                 if let Some(h) = self.host_of(id) {
                     if h.set(self, base, key, v)? {
+                        // Réactions CE synchrones (JS-C68) — un
+                        // setter host a pu muter le miroir
+                        // (`innerHTML`, `className`…).
+                        self.drain_ce_reactions()?;
                         return Ok(());
                     }
                 }

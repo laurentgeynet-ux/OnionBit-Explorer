@@ -362,6 +362,10 @@ impl Engine {
                         if let Value::Obj(bid) = recv {
                             if let Some(h) = self.host_of(bid) {
                                 if let Some(v) = h.invoke(self, recv, &name, &args)? {
+                                    // Réactions CE synchrones
+                                    // (JS-C68) — la méthode host a
+                                    // pu muter le miroir.
+                                    self.drain_ce_reactions()?;
                                     return Ok(v);
                                 }
                             }
@@ -942,6 +946,8 @@ impl Engine {
                             if let Some(v) = h.invoke(self, recv, key, &args)? {
                                 cur = v;
                                 done = true;
+                                // Réactions CE synchrones (JS-C68).
+                                self.drain_ce_reactions()?;
                             }
                         }
                     }

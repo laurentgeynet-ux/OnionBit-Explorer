@@ -1951,18 +1951,19 @@ fn custom_elements_registry() {
         ),
         "TypeError|TypeError"
     );
-    // `whenDefined` — promesse tenue pour un nom enregistré.
+    // `whenDefined` — promesse tenue `undefined` pour un nom
+    // enregistré (spec — l'ancien stub résolvait le ctor).
     assert_eq!(
         ev2(
             PAGE,
             "customElements.define('w-el',class{});\
              var r='pending';\
-             customElements.whenDefined('w-el').then(function(c){r=c===customElements.get('w-el')})",
+             customElements.whenDefined('w-el').then(function(c){r=c===undefined})",
             "r"
         ),
         "true"
     );
-    // `upgrade` no-op honnête — pas de throw.
+    // `upgrade` — upgrade réel du sous-arbre (JS-C68), pas de throw.
     assert_eq!(
         ev2(
             PAGE,
@@ -2853,4 +2854,231 @@ fn c67_formdata_methods() {
         ev_in(PAGE_FD, "new URLSearchParams('?a=1&b=2').get('b')"),
         "2"
     );
+}
+
+// -- JS-C68 : customElements machinery --------------------------------
+
+const PAGE_CE: &str = r#"
+<html><body>
+<x-foo id="a" observed="v0" other="z"></x-foo>
+<div id="host"></div>
+</body></html>
+"#;
+
+#[test]
+fn c68_define_upgrades_existing() {
+    // Élément présent au `define` → proto `Ctor.prototype`,
+    // `instanceof`, ctor exécuté avec `this` = l'élément
+    // (super() → HTMLElement rend l'élément via le slot),
+    // `connectedCallback` tiré (attaché).
+    assert_eq!(
+        ev_in(
+            PAGE_CE,
+            "var log=[];\
+             class XFoo extends HTMLElement {\
+               constructor(){ super(); this.made=true; log.push('ctor:'+(this===document.getElementById('a'))); }\
+               connectedCallback(){ log.push('connected'); }\
+             }\
+             customElements.define('x-foo', XFoo);\
+             var a=document.getElementById('a');\
+             log.join(',')+'|'+(a instanceof XFoo)+'|'+(a instanceof HTMLElement)+'|'+a.made+'|'+(a.tagName==='X-FOO')"
+        ),
+        "ctor:true,connected|true|true|true|true"
+    );
+}
+
+#[test]
+fn c68_create_insert_remove_lifecycle() {
+    // `createElement` post-define → ctor (détaché : pas de
+    // connected) ; `appendChild` → connected ; `remove` →
+    // disconnected ; re-append → connected à nouveau.
+    assert_eq!(
+        ev_in(
+            PAGE_CE,
+            "var log=[];\
+             class XBar extends HTMLElement {\
+               constructor(){ super(); log.push('ctor'); }\
+               connectedCallback(){ log.push('con'); }\
+               disconnectedCallback(){ log.push('dis'); }\
+             }\
+             customElements.define('x-bar', XBar);\
+             var el=document.createElement('x-bar');\
+             log.push('created');\
+             document.getElementById('host').appendChild(el);\
+             el.remove();\
+             document.body.appendChild(el);\
+             log.join(',')"
+        ),
+        "ctor,created,con,dis,con"
+    );
+}
+
+#[test]
+fn c68_attribute_changed_observed_only() {
+    // `attributeChangedCallback` : observés seulement
+    // (name, old, new — `null` à l'ajout / au retrait).
+    assert_eq!(
+        ev_in(
+            PAGE_CE,
+            "var log=[];\
+             class XObs extends HTMLElement {\
+               static get observedAttributes(){ return ['observed']; }\
+               attributeChangedCallback(n,o,v){ log.push(n+'='+o+'>'+v); }\
+             }\
+             customElements.define('x-obs', XObs);\
+             var el=document.createElement('x-obs');\
+             el.setAttribute('observed','1');\
+             el.setAttribute('other','x');\
+             el.setAttribute('observed','2');\
+             el.removeAttribute('observed');\
+             log.join(',')"
+        ),
+        "observed=null>1,observed=1>2,observed=2>null"
+    );
+    // Attributs observés présents à l'upgrade → rappel initial.
+    assert_eq!(
+        ev_in(
+            PAGE_CE,
+            "var log=[];\
+             class XInit extends HTMLElement {\
+               static get observedAttributes(){ return ['observed']; }\
+               attributeChangedCallback(n,o,v){ log.push(n+':'+o+'>'+v); }\
+             }\
+             document.body.innerHTML='<x-init observed=\"v9\" other=\"q\"></x-init>';\
+             customElements.define('x-init', XInit);\
+             log.join(',')"
+        ),
+        "observed:null>v9"
+    );
+}
+
+#[test]
+fn c68_when_defined_and_get() {
+    // `whenDefined` : pendante avant define → résolue
+    // `undefined` au define ; définie → résolue immédiat.
+    // `get`/`getName` interrogent le registre.
+    assert_eq!(
+        ev_in(
+            PAGE_CE,
+            "var out='';\
+             var p1=customElements.whenDefined('x-later');\
+             p1.then(function(v){ out+='p1:'+v+';'; });\
+             class XLater extends HTMLElement {}\
+             customElements.define('x-later', XLater);\
+             customElements.whenDefined('x-later').then(function(v){ out+='p2:'+v+';'; });\
+             out+'|'+(customElements.get('x-later')===XLater)+'|'+customElements.get('nope')+'|'+customElements.getName(XLater)"
+        ),
+        "|true|undefined|x-later"
+    );
+    // Les promesses résolues ont livré après le checkpoint.
+    let mut e = engine_with(PAGE_CE);
+    describe_ev(
+        &mut e,
+        "var out='';\
+         customElements.whenDefined('x-w').then(function(v){ out+='A:'+v; });\
+         class XW extends HTMLElement {} customElements.define('x-w', XW);",
+    );
+    let _ = e.run_microtasks();
+    assert_eq!(describe_ev(&mut e, "out"), "A:undefined");
+}
+
+#[test]
+fn c68_define_validation() {
+    // Nom invalide / doublon / non-appelable / ctor déjà
+    // utilisé → TypeError (approche SyntaxError/NotSupportedError).
+    let try_def = |html: &str, src: &str| -> String {
+        let mut e = engine_with(html);
+        match e.eval(src) {
+            Ok(_) => "no throw".to_string(),
+            Err(err) => err.to_string(),
+        }
+    };
+    assert!(try_def(
+        PAGE_CE,
+        "customElements.define('nodash', class extends HTMLElement {})"
+    )
+    .contains("invalid name"));
+    assert!(try_def(
+        PAGE_CE,
+        "customElements.define('font-face', class extends HTMLElement {})"
+    )
+    .contains("invalid name"));
+    assert!(try_def(PAGE_CE, "customElements.define('x-a', 42)").contains("not a constructor"));
+    assert!(try_def(
+        PAGE_CE,
+        "class C extends HTMLElement {}\
+         customElements.define('x-b', C);\
+         customElements.define('x-b', C)"
+    )
+    .contains("already defined"));
+    assert!(try_def(
+        PAGE_CE,
+        "class C2 extends HTMLElement {}\
+         customElements.define('x-c', C2);\
+         customElements.define('x-c2', C2)"
+    )
+    .contains("already registered"));
+}
+
+#[test]
+fn c68_innerhtml_and_upgrade_method() {
+    // innerHTML parse un CE connu → upgrade + connected via le
+    // drain synchrone.
+    assert_eq!(
+        ev_in(
+            PAGE_CE,
+            "var log=[];\
+             class XIn extends HTMLElement {\
+               connectedCallback(){ log.push('con:'+this.id); }\
+             }\
+             customElements.define('x-in', XIn);\
+             document.getElementById('host').innerHTML='<x-in id=\"k1\"></x-in>';\
+             log.join(',')"
+        ),
+        "con:k1"
+    );
+    // `customElements.upgrade(root)` — sous-arbre détaché upgradé
+    // à la demande (ctor tiré, pas de connected).
+    assert_eq!(
+        ev_in(
+            PAGE_CE,
+            "var log=[];\
+             class XUp extends HTMLElement {\
+               constructor(){ super(); log.push('ctor:'+this.id); }\
+             }\
+             var d=document.createElement('div');\
+             d.innerHTML='<x-up id=\"u1\"></x-up>';\
+             customElements.define('x-up', XUp);\
+             customElements.upgrade(d);\
+             log.join(',')"
+        ),
+        "ctor:u1"
+    );
+}
+
+#[test]
+fn c68_failed_ctor_marks_failed() {
+    // Ctor dont `super()` n'atteint pas HTMLElement (classe
+    // sans extends) → l'élément garde son proto mais l'état
+    // « failed » désarme les callbacks (honnête spec).
+    assert_eq!(
+        ev_in(
+            PAGE_CE,
+            "var log=[];\
+             class Plain { constructor(){ this.x=1; } connectedCallback(){ log.push('con'); } }\
+             customElements.define('x-plain', Plain);\
+             var el=document.createElement('x-plain');\
+             document.getElementById('host').appendChild(el);\
+             log.length+'|'+(el instanceof Plain)"
+        ),
+        "0|true"
+    );
+}
+
+/// Eval via `describe` — multi-appels sur le même moteur.
+fn describe_ev(e: &mut Engine, src: &str) -> String {
+    match e.eval(src) {
+        Ok(v) => e.describe(v),
+        Err(err) => panic!("{src} -> {err}"),
+    }
 }

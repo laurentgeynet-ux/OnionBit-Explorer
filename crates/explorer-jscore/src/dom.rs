@@ -15,9 +15,9 @@
 //! n'a pas vocation à reproduire la récupération d'erreurs de
 //! `html.cc` — c'est un DOM de script, pas le moteur de rendu.
 
-use crate::value::Value;
+use crate::value::{ObjId, Value};
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Arena handle.
 pub type NodeId = u32;
@@ -121,6 +121,66 @@ impl MutationRecord {
             old_value: None,
         }
     }
+}
+
+/// Définition `customElements.define` (JS-C68) — figée à
+/// l'enregistrement : constructeur JS + `observedAttributes`
+/// lu une fois (spec).
+#[derive(Debug)]
+pub struct CeDef {
+    /// Constructeur enregistré (`function`/`class` JS) — racine
+    /// GC via `Engine::collect` (même traitement que
+    /// `Node.listeners`).
+    pub ctor: Value,
+    /// `Ctor.observedAttributes` figé — noms minuscules.
+    pub observed: Vec<String>,
+}
+
+/// Registre des custom elements du document (JS-C68) —
+/// `Dom`-local : les mutateurs de `Dom` y lisent les
+/// définitions pour émettre les [`CeReaction`].
+#[derive(Debug, Default)]
+pub struct CeRegistry {
+    /// Nom (`x-foo` minuscule) → définition.
+    pub defs: HashMap<String, CeDef>,
+    /// Nœud → nom de sa définition (état spec « custom » —
+    /// l'élément garde son proto/deps après détachement).
+    pub upgraded: HashMap<NodeId, String>,
+    /// Nœuds dont l'upgrade a échoué (ctor throw ou retour
+    /// ≠ élément) — état spec « failed » : callbacks désarmés.
+    pub failed: HashSet<NodeId>,
+    /// `customElements.whenDefined` pendantes : nom → ids de
+    /// promesses résolues au `define` correspondant.
+    pub pending: HashMap<String, Vec<ObjId>>,
+}
+
+/// Réaction custom element produite par une mutation `Dom`
+/// (JS-C68) — drainée **synchrone** par le moteur après
+/// chaque dispatch host (spec « custom element reactions » :
+/// les callbacks s'exécutent dans l'opération, pas en
+/// microtask).
+#[derive(Debug)]
+pub enum CeReaction {
+    /// `attached` a basculé → `connectedCallback` — et upgrade
+    /// à l'insertion si le nœud matche une définition encore
+    /// non appliquée (le drain décide).
+    Connected(NodeId),
+    /// Détachement → `disconnectedCallback` (nœud déjà
+    /// customisé seulement — les non-upgradés n'ont rien à
+    /// dire).
+    Disconnected(NodeId),
+    /// Attribut observé muté sur élément customisé →
+    /// `attributeChangedCallback(name, oldValue, newValue)`.
+    AttrChanged {
+        /// Élément customisé.
+        node: NodeId,
+        /// Nom d'attribut (minuscule).
+        name: String,
+        /// Valeur d'avant (`null` en callback).
+        old: Option<String>,
+        /// Valeur d'après (`null` = retrait).
+        new: Option<String>,
+    },
 }
 
 /// Kind of node.
@@ -472,6 +532,14 @@ pub struct Dom {
     /// `(media, cmd)`, drainés par l'adaptateur
     /// (`drain_media_commands`) qui les relaie vers l'hôte.
     pub media_cmds: Vec<(u64, MediaCmd)>,
+    /// Registre custom elements (JS-C68) — les définitions
+    /// pilotent l'émission des [`CeReaction`] par les
+    /// mutateurs ; les `Value`/`ObjId` qu'il porte sont
+    /// racines GC via `Engine::collect` (`dom_ctx`).
+    pub ce: CeRegistry,
+    /// Réactions CE en file — vidées par le moteur après
+    /// chaque dispatch host (`drain_ce_reactions`).
+    pub ce_reactions: Vec<CeReaction>,
     /// Borne d'ops par canvas (réglable `set_canvas_op_limit`).
     canvas_op_limit: usize,
     /// Marqué par toute mutation structurelle/attributaire — l'embedder
@@ -599,6 +667,8 @@ impl Dom {
             media: HashMap::new(),
             template_contents: HashMap::new(),
             media_cmds: Vec::new(),
+            ce: CeRegistry::default(),
+            ce_reactions: Vec::new(),
             canvas_op_limit: DEFAULT_CANVAS_OP_LIMIT,
             doc_open: true,
             serialize_calls: Cell::new(0),
@@ -1056,7 +1126,21 @@ impl Dom {
                 continue;
             }
             self.nodes[c as usize].attached = flag;
-            stack.extend(self.nodes[c as usize].children.iter().copied());
+            // Réaction CE (JS-C68) : attachement = upgrade à
+            // l'insertion ou `connectedCallback` ; détachement
+            // = `disconnectedCallback` (customisés seulement).
+            if flag {
+                if self.ce.upgraded.contains_key(&c)
+                    || self.ce.defs.contains_key(&self.nodes[c as usize].tag)
+                {
+                    self.ce_reactions.push(CeReaction::Connected(c));
+                }
+            } else if self.ce.upgraded.contains_key(&c) {
+                self.ce_reactions.push(CeReaction::Disconnected(c));
+            }
+            // `.rev()` : la pile LIFO restitue l'ordre document
+            // (les `CeReaction` se drainent en ordre d'arbre).
+            stack.extend(self.nodes[c as usize].children.iter().rev().copied());
         }
     }
 
@@ -1615,8 +1699,9 @@ impl Dom {
             prev_sibling: None,
             next_sibling: None,
             attr_name: Some(name.to_lowercase()),
-            old_value: old,
+            old_value: old.clone(),
         });
+        self.ce_attr_reaction(node, name, old, Some(value.to_string()));
     }
 
     /// `removeAttribute`. Returns whether it existed.
@@ -1636,10 +1721,40 @@ impl Dom {
                 prev_sibling: None,
                 next_sibling: None,
                 attr_name: Some(name.to_lowercase()),
-                old_value: old,
+                old_value: old.clone(),
             });
+            self.ce_attr_reaction(node, name, old, None);
         }
         removed
+    }
+
+    /// Émet une [`CeReaction::AttrChanged`] si `node` est un
+    /// élément customisé dont la définition observe `name`
+    /// (JS-C68 — comparaison minuscule, noms figés à `define`).
+    fn ce_attr_reaction(
+        &mut self,
+        node: NodeId,
+        name: &str,
+        old: Option<String>,
+        new: Option<String>,
+    ) {
+        let Some(def_name) = self.ce.upgraded.get(&node) else {
+            return;
+        };
+        let lname = name.to_lowercase();
+        let watched = self
+            .ce
+            .defs
+            .get(def_name)
+            .is_some_and(|d| d.observed.iter().any(|a| a == &lname));
+        if watched {
+            self.ce_reactions.push(CeReaction::AttrChanged {
+                node,
+                name: lname,
+                old,
+                new,
+            });
+        }
     }
 
     /// `hasAttribute`.
@@ -1712,7 +1827,7 @@ impl Dom {
     /// aux requêtes au niveau document. Lecture du drapeau
     /// `attached` — O(1) ; la remontée `parent` était
     /// O(profondeur) par requête (JS-C55).
-    fn is_attached(&self, node: NodeId) -> bool {
+    pub(crate) fn is_attached(&self, node: NodeId) -> bool {
         self.nodes.get(node as usize).is_some_and(|n| n.attached)
     }
 

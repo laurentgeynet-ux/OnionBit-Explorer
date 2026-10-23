@@ -173,6 +173,51 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   valeurs `File`/`Blob` à JS-C70.
   Régressions `c67_*` (7 tests).
 
+- **JS-C68 — `customElements`
+  machinery** (`explorer-jscore` —
+  débloque le résidu github
+  `turbo-frame.delegate`). Registre
+  DOM-backed (`Dom.ce` — fin du
+  `HashMap` isolé JS-C56) :
+  `define` validé (nom
+  `[a-z][a-z0-9._-]*-…` hors liste
+  réservée, ctor constructible,
+  `prototype` objet, doublon nom et
+  ctor rejetés — TypeError),
+  `observedAttributes` figé.
+  Upgrade `this` = élément existant
+  (proto ← `Ctor.prototype`,
+  wrapper conservé) :
+  `call_value_ctor` + slot
+  `ce_upgrade_slot` pour le
+  `super()` des `extends
+  HTMLElement` (`HTMLElement`
+  devient classe de base réelle) ;
+  `FLD_DONE` prouve la chaîne
+  dérivée — ctor throw ou retour
+  ≠ élément → état « failed » spec.
+  Déclencheurs : `define` (ordre
+  document), `createElement(NS)`,
+  `cloneNode`, insertion, `innerHTML`,
+  `customElements.upgrade`.
+  Réactions synchrones drainées
+  après chaque dispatch host :
+  `connectedCallback`,
+  `disconnectedCallback`,
+  `attributeChangedCallback` filtré
+  par `observedAttributes` (+ tir
+  initial des attributs présents).
+  `whenDefined` résolue `undefined`,
+  `get`/`getName` réels. GC :
+  ctors, promesses pendantes et
+  élément sous upgrade racinés.
+  Déviation assumée : la chaîne
+  `HTMLElement` n'est pas vérifiée
+  à `define` — une classe non
+  dérivée marque « failed » à
+  l'upgrade au lieu de jeter.
+  Régressions `c68_*` (7 tests).
+
 ### Fixed
 
 - **Étape 122 — `root_font_size`
