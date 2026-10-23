@@ -744,6 +744,18 @@ pub struct SessionConfig {
     /// sous-arbres insérés. Garde-fou « mutations massives »
     /// de l'ADR, pas un seuil de fonctionnalité.
     pub dom_journal_max_ops: usize,
+    /// Borne mémoire du heap JS par contexte, en Mio
+    /// (étape 123 — `Engine::set_mem_limit`, JS-C37/ADR-0019 ;
+    /// `0` = illimité explicite). Réglage d'**outillage
+    /// diagnostic** : il permet d'atteindre un espace
+    /// d'exécution masqué par la protection (ex. classer une
+    /// exception derrière le challenge `PoW` `SG_SS` de Google)
+    /// — il ne rend **pas** un tel site fonctionnel (`PoW`
+    /// hostile-by-design ~100× trop lent sous interpréteur,
+    /// mesuré hors de portée à 2 Gio d'ops). Défaut 512 Mio,
+    /// aligné sur `DEFAULT_MEM_LIMIT` du moteur : la
+    /// protection reste le comportement nominal.
+    pub js_mem_limit_mib: usize,
 }
 
 impl Default for SessionConfig {
@@ -770,6 +782,7 @@ impl Default for SessionConfig {
             bfcache_pages: 4,
             color_scheme: explorer_css::ColorScheme::default(),
             dom_journal_max_ops: 512,
+            js_mem_limit_mib: 512,
         }
     }
 }

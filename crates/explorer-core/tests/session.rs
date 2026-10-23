@@ -238,34 +238,38 @@ impl HttpTransport for FakeTransport {
 
 /// Session de test prête : transport + fixture.
 fn test_session() -> (Session, Arc<FakeTransport>) {
+    test_session_with(SessionConfig {
+        event_capacity: 16,
+        viewport: (800.0, 600.0),
+        scale: 1.0,
+        js_ops: 5_000_000,
+        max_images: 32,
+        image_max_px: 16_000_000,
+        max_sheets: 8,
+        max_imports: 8,
+        max_fonts: 16,
+        max_scripts: 32,
+        max_modules: 64,
+        max_inflight: 6,
+        max_script_net: 16,
+        max_timer_jobs: 64,
+        paint_chunk_bytes: 32 * 1024,
+        paint_interval_ms: 100,
+        resync_gap_max_ms: 4_000,
+        max_download_bytes: 64 * 1024 * 1024,
+        bfcache_pages: 4,
+        dom_journal_max_ops: 512,
+        js_mem_limit_mib: 512,
+        color_scheme: explorer_css::ColorScheme::default(),
+    })
+}
+
+/// `test_session` paramétrable — les tests de réglage
+/// (bornes heap…) surchargent la config sans dupliquer le
+/// transport/fixture (étape 123).
+fn test_session_with(cfg: SessionConfig) -> (Session, Arc<FakeTransport>) {
     let t = Arc::new(FakeTransport::new());
-    let s = Session::with_config(
-        t.clone(),
-        Arc::new(FixtureFont),
-        SessionConfig {
-            event_capacity: 16,
-            viewport: (800.0, 600.0),
-            scale: 1.0,
-            js_ops: 5_000_000,
-            max_images: 32,
-            image_max_px: 16_000_000,
-            max_sheets: 8,
-            max_imports: 8,
-            max_fonts: 16,
-            max_scripts: 32,
-            max_modules: 64,
-            max_inflight: 6,
-            max_script_net: 16,
-            max_timer_jobs: 64,
-            paint_chunk_bytes: 32 * 1024,
-            paint_interval_ms: 100,
-            resync_gap_max_ms: 4_000,
-            max_download_bytes: 64 * 1024 * 1024,
-            bfcache_pages: 4,
-            dom_journal_max_ops: 512,
-            color_scheme: explorer_css::ColorScheme::default(),
-        },
-    );
+    let s = Session::with_config(t.clone(), Arc::new(FixtureFont), cfg);
     (s, t)
 }
 
@@ -1984,6 +1988,68 @@ async fn no_factory_means_scripts_ignored() {
     // Pas de fabrique → scripts ignorés, navigation propre.
     s.navigate(id, "http://h.test/").await.unwrap();
     assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+}
+
+/// Étape 123 — allocation ~4 Mio tentée puis titre posé :
+/// « ok » si la borne laisse passer, « err:… » sinon.
+const PAGE_HEAP_PROBE: &str = "<!doctype html><html><body>\
+     <script>try{var s='x'.repeat(4000000);document.title='ok'}\
+     catch(e){document.title='err:'+e.message}</script>\
+     </body></html>";
+
+/// La borne `js_mem_limit_mib` arrive jusqu'au contexte JS :
+/// à 1 Mio, l'allocation de ~4 Mio est refusée (`RangeError`)
+/// et le titre rendu « err » — la couture
+/// `JsEngine::set_mem_limit` est bien appliquée à la
+/// création du contexte (réglage diagnostic, pas produit).
+#[tokio::test]
+async fn js_heap_limit_reaches_context() {
+    let (mut s, t) = test_session_with(SessionConfig {
+        js_mem_limit_mib: 1,
+        ..SessionConfig::default()
+    });
+    t.route("/", 200, PAGE_HEAP_PROBE);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let mut rx = s.subscribe();
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let mut title = None;
+    while let Ok(ev) = rx.try_recv() {
+        if let CoreEvent::TitleChanged { tab, title: t2 } = ev {
+            if tab == id {
+                title = Some(t2);
+            }
+        }
+    }
+    assert!(
+        title.as_deref().is_some_and(|t| t.starts_with("err:")),
+        "borne attendue : titre {title:?}"
+    );
+}
+
+/// `js_mem_limit_mib: 0` = illimité explicite : la même
+/// allocation passe et le titre rendu « ok » — le réglage
+/// est bien bidirectionnel (pas une borne câblée en dur).
+#[tokio::test]
+async fn js_heap_limit_zero_disarms() {
+    let (mut s, t) = test_session_with(SessionConfig {
+        js_mem_limit_mib: 0,
+        ..SessionConfig::default()
+    });
+    t.route("/", 200, PAGE_HEAP_PROBE);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let mut rx = s.subscribe();
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let mut title = None;
+    while let Ok(ev) = rx.try_recv() {
+        if let CoreEvent::TitleChanged { tab, title: t2 } = ev {
+            if tab == id {
+                title = Some(t2);
+            }
+        }
+    }
+    assert_eq!(title.as_deref(), Some("ok"));
 }
 
 /// Page dont un script mute le DOM miroir (`textContent`).
@@ -6470,6 +6536,7 @@ async fn redirect_commits_final_url_and_fragment() {
             max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
             dom_journal_max_ops: 512,
+            js_mem_limit_mib: 512,
             color_scheme: explorer_css::ColorScheme::default(),
         },
     );

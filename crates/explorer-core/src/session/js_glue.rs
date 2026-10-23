@@ -241,6 +241,7 @@ impl Session {
             );
             let mut e = f();
             e.set_budget(self.js_ops);
+            e.set_mem_limit(self.js_mem_bytes);
             e.install_dom(html, &page_url, hist_len);
             // Étape 51 : état d'origine injecté au contexte —
             // `localStorage` (map session > profil persisté)

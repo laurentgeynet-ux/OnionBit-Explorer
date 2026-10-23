@@ -262,6 +262,49 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   GC : callbacks et wrappers
   racinés. Régressions `c69_*`
   (7 tests).
+- **Étape 123 — borne heap JS
+  exposée (outillage
+  diagnostic)** (`explorer-js`,
+  `explorer-core`,
+  `explorer-daemon`,
+  `explorer-cli` — dispatch
+  post-census github : le
+  challenge PoW `SG_SS` de Google
+  consomme >512 Mio et la
+  protection JS-C65 le tue avant
+  l'espace d'exécution où
+  `Error: b` pourrait se
+  prononcer).
+  `JsEngine::set_mem_limit(bytes)`
+  ajouté au trait (défaut no-op,
+  `Cmd::SetMemLimit` feu-et-oublie
+  avant `install_dom` —
+  `Engine::set_mem_limit` JS-C37
+  existait déjà) ;
+  `SessionConfig.js_mem_limit_mib`
+  (défaut **512** aligné
+  `DEFAULT_MEM_LIMIT`, `0` =
+  illimité explicite) appliqué à
+  chaque contexte dans
+  `js_glue` ; `EXPLORER_JS_MEM_MIB`
+  lu par le daemon (valeur tracée
+  `info!` — borne citée, jamais
+  supposée) et le CLI.
+  **Réglage diagnostic, pas
+  produit** : il n'a pas pour but
+  de rendre la recherche Google
+  fonctionnelle — le PoW reste
+  ~100× trop lent sous
+  interpréteur (mesuré hors de
+  portée à 2 Gio d'ops) ; la
+  valeur est d'atteindre l'espace
+  où l'exception se prononce.
+  Régressions
+  `js_heap_limit_reaches_context`
+  (1 Mio → titre `err:`) /
+  `js_heap_limit_zero_disarms`
+  (`0` → titre `ok`) — couture
+  bidirectionnelle.
 - **JS-C70 —
   `Blob`/`File`/`FileReader` +
   `URL.createObjectURL`**

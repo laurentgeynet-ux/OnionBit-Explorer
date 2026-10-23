@@ -118,6 +118,7 @@ fn bench_session() -> (Session, Arc<FakeTransport>) {
             max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
             dom_journal_max_ops: 512,
+            js_mem_limit_mib: 512,
             color_scheme: explorer_css::ColorScheme::default(),
         },
     );

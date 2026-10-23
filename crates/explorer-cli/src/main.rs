@@ -85,6 +85,21 @@ fn default_fonts_dir() -> std::path::PathBuf {
     }
 }
 
+/// Session de vol CLI — `SessionConfig` par défaut surchargée
+/// de `EXPLORER_JS_MEM_MIB` (étape 123 : borne heap JS en Mio,
+/// `0` = illimité — outillage diagnostic, tracée à l'usage).
+fn session_from_env(fonts: explorer_render::DirFontSource) -> explorer_core::Session {
+    let mut cfg = explorer_core::SessionConfig::default();
+    if let Some(mib) = std::env::var("EXPLORER_JS_MEM_MIB")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        eprintln!("[EXPLORER_JS_MEM_MIB={mib} — borne heap JS par contexte]");
+        cfg.js_mem_limit_mib = mib;
+    }
+    explorer_core::Session::with_config(client_stack(), std::sync::Arc::new(fonts), cfg)
+}
+
 /// `shot <url> <sortie.png>` : navigation réelle complète
 /// (réseau, JS, images, webfonts) puis PNG du rendu —
 /// mesure interop sur sites réels (étape 48).
@@ -95,7 +110,7 @@ const XHR_GRACE_MS: u64 = 1_000;
 #[tokio::main(flavor = "current_thread")]
 async fn shot(url: &str, out: &str, size: Option<&str>) -> ExitCode {
     let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
-    let mut session = explorer_core::Session::new(client_stack(), Arc::new(fonts));
+    let mut session = session_from_env(fonts);
     session.set_js_factory(explorer_js::JscoreEngine::factory());
     if let Some(s) = size {
         // `LxH` optionnel — triage terrain à la taille de
@@ -181,7 +196,7 @@ async fn shot(url: &str, out: &str, size: Option<&str>) -> ExitCode {
 #[tokio::main(flavor = "current_thread")]
 async fn dom_live(url: &str) -> ExitCode {
     let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
-    let mut session = explorer_core::Session::new(client_stack(), Arc::new(fonts));
+    let mut session = session_from_env(fonts);
     session.set_js_factory(explorer_js::JscoreEngine::factory());
     let tab = session.open_tab();
     if let Err(e) = session.navigate(tab, url).await {
@@ -207,7 +222,7 @@ async fn dom_live(url: &str) -> ExitCode {
 #[tokio::main(flavor = "current_thread")]
 async fn jprobe(url: &str) -> ExitCode {
     let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
-    let mut session = explorer_core::Session::new(client_stack(), Arc::new(fonts));
+    let mut session = session_from_env(fonts);
     session.set_js_factory(explorer_js::JscoreEngine::factory());
     let mut events = session.subscribe();
     let tab = session.open_tab();

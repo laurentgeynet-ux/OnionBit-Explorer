@@ -474,6 +474,10 @@ pub struct Session {
     /// Budget d'ops appliqué à chaque contexte (`js_ops` de
     /// config — `set_op_limit` à la création).
     js_ops: u64,
+    /// Borne heap JS appliquée à chaque contexte, en octets
+    /// (`js_mem_limit_mib` de config × Mio, saturé — étape
+    /// 123 ; `0` = illimité explicite).
+    js_mem_bytes: usize,
     /// Bornes images (`SessionConfig` — nombre par document
     /// et pixels décodés).
     max_images: usize,
@@ -623,6 +627,7 @@ impl Session {
             bookmarks: Vec::new(),
             js_factory: None,
             js_ops: cfg.js_ops,
+            js_mem_bytes: cfg.js_mem_limit_mib.saturating_mul(1024 * 1024),
             max_images: cfg.max_images,
             image_max_px: cfg.image_max_px,
             max_sheets: cfg.max_sheets,

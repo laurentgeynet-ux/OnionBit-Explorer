@@ -58,6 +58,11 @@ struct DaemonConfig {
     /// `EXPLORER_COLOR_SCHEME` `dark`/`light`, défaut
     /// `light`).
     color_scheme: explorer_core::ColorScheme,
+    /// Borne heap JS par contexte en Mio (`EXPLORER_JS_MEM_MIB`,
+    /// étape 123) — `None` = défaut `SessionConfig` (512) ;
+    /// `0` = illimité explicite. Outillage diagnostic de vol,
+    /// pas une promesse produit.
+    js_mem_mib: Option<usize>,
 }
 
 impl DaemonConfig {
@@ -93,8 +98,29 @@ impl DaemonConfig {
                 Ok("dark") => explorer_core::ColorScheme::Dark,
                 _ => explorer_core::ColorScheme::Light,
             },
+            js_mem_mib: std::env::var("EXPLORER_JS_MEM_MIB")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok()),
         }
     }
+}
+
+/// `SessionConfig` dérivée du `DaemonConfig` — schéma de
+/// couleurs + surcharge de la borne heap JS
+/// (`EXPLORER_JS_MEM_MIB`, étape 123 : outillage diagnostic
+/// de vol, pas une promesse produit ; la valeur active est
+/// tracée pour que le rapport de terrain cite la borne en
+/// vigueur, jamais supposée).
+fn session_config(cfg: &DaemonConfig) -> explorer_core::SessionConfig {
+    let mut sc = explorer_core::SessionConfig {
+        color_scheme: cfg.color_scheme,
+        ..explorer_core::SessionConfig::default()
+    };
+    if let Some(mib) = cfg.js_mem_mib {
+        tracing::info!("EXPLORER_JS_MEM_MIB={mib} — borne heap JS par contexte");
+        sc.js_mem_limit_mib = mib;
+    }
+    sc
 }
 
 /// Période de la pompe réseau script-initiée (étape 51 —
@@ -134,7 +160,8 @@ fn print_usage() {
          variables : EXPLORER_PORT, EXPLORER_PROFILE, EXPLORER_FONT_DIR,\n\
          \x20            EXPLORER_MAX_BODY, EXPLORER_API_KEY, EXPLORER_DOWNLOAD_DIR,\n\
          \x20            EXPLORER_DOH, EXPLORER_DOH_TIMEOUT_MS,\n\
-         \x20            EXPLORER_COLOR_SCHEME (dark|light)"
+         \x20            EXPLORER_COLOR_SCHEME (dark|light),\n\
+         \x20            EXPLORER_JS_MEM_MIB (borne heap JS ; 0=illimité)"
     );
 }
 
@@ -292,10 +319,7 @@ async fn main() {
     let mut session = Session::with_config(
         http_stack(&cfg, jar.clone(), &profile_dir, resolver),
         Arc::new(fonts),
-        explorer_core::SessionConfig {
-            color_scheme: cfg.color_scheme,
-            ..explorer_core::SessionConfig::default()
-        },
+        session_config(&cfg),
     );
     session.set_cookie_jar(jar);
     session.set_store(store);

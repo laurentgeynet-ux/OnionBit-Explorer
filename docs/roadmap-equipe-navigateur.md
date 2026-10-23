@@ -2560,6 +2560,46 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   statique 40 px (32 px avant le
   fix — régression vérifiée par
   inversion).
+- [x] **Étape 123. Borne heap JS
+  exposée — outillage diagnostic**
+  (dispatch post-census github) :
+  le challenge PoW `SG_SS` de
+  Google consomme >512 Mio de
+  travail attendu — la protection
+  JS-C65 tue le script **avant**
+  d'atteindre l'espace d'exécution
+  où `Error: b` pourrait se
+  prononcer. Chaîne :
+  `JsEngine::set_mem_limit(bytes)`
+  (trait additif, défaut no-op —
+  `Cmd::SetMemLimit` feu-et-oublie
+  avant `install_dom`) →
+  `SessionConfig.js_mem_limit_mib`
+  (défaut **512**, `0` = illimité
+  explicite, saturé ×Mio) appliqué
+  à chaque contexte →
+  `EXPLORER_JS_MEM_MIB` lu par
+  daemon (`session_config`, valeur
+  tracée `info!` — la borne en
+  vigueur est citée, jamais
+  supposée) et CLI
+  (`session_from_env`, `eprintln`).
+  **Réglage diagnostic, pas
+  produit** : la borne relevée ne
+  rend pas la recherche Google
+  fonctionnelle — le PoW reste
+  ~100× trop lent sous
+  interpréteur (mesuré hors de
+  portée à 2 Gio d'ops) ; la
+  valeur est d'atteindre l'espace
+  où l'exception se prononce.
+  Tests :
+  `js_heap_limit_reaches_context`
+  (1 Mio → alloc ~4 Mio refusée,
+  titre `err:`) /
+  `js_heap_limit_zero_disarms`
+  (`0` → titre `ok`) — couture
+  bidirectionnelle prouvée.
 
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :

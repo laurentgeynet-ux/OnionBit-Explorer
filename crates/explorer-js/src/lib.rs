@@ -587,6 +587,16 @@ pub trait JsEngine: Send {
     /// (protection anti-script-infini — règle « budgets »).
     fn set_budget(&mut self, ops: u64);
 
+    /// Borne la mémoire du heap JS en octets estimés
+    /// (`Engine::set_mem_limit`, JS-C37/ADR-0019) — `0` =
+    /// illimité explicite. Appliquée avant `install_dom` à la
+    /// création du contexte (étape 123 : réglage de vol pour
+    /// l'outillage diagnostic, pas une promesse produit — un
+    /// `PoW` hostile-by-design reste hors de portée de
+    /// l'interpréteur quel que soit le plafond). Défaut :
+    /// no-op (moteur sans borne exposée).
+    fn set_mem_limit(&mut self, _bytes: usize) {}
+
     /// Draine les requêtes réseau émises depuis le dernier
     /// appel — `xhr.send()`, `fetch()`, `abort()` (JS-C27).
     /// À appeler aux mêmes points de synchro que
@@ -874,6 +884,9 @@ enum Cmd {
     SetBudget {
         ops: u64,
     },
+    SetMemLimit {
+        bytes: usize,
+    },
     DrainNet {
         tx: Sender<Vec<NetRequest>>,
     },
@@ -1159,6 +1172,7 @@ impl JscoreEngine {
                     }
                 }
                 Cmd::SetBudget { ops } => eng.set_op_limit(ops),
+                Cmd::SetMemLimit { bytes } => eng.set_mem_limit(bytes),
                 Cmd::Shutdown => return,
                 // Surfaces script-initiées (JS-C27/C28) déléguées.
                 net => {
@@ -1358,6 +1372,12 @@ impl JsEngine for JscoreEngine {
     fn set_budget(&mut self, ops: u64) {
         // Feu-et-oublie : le budget s'applique au prochain eval.
         let _ = self.tx.send(Cmd::SetBudget { ops });
+    }
+
+    fn set_mem_limit(&mut self, bytes: usize) {
+        // Feu-et-oublie : la borne s'applique dès réception —
+        // émise avant `install_dom`, donc avant tout eval.
+        let _ = self.tx.send(Cmd::SetMemLimit { bytes });
     }
 
     fn drain_net_requests(&mut self) -> Vec<NetRequest> {
