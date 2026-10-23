@@ -331,6 +331,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   seule — même cave
   « outillage diagnostic »
   qu'étape 123.
+- **Étape 129 — radar corpus
+  ≥1200 px** (`explorer-daemon`,
+  `explorer-cli`, `scripts/`).
+  `EXPLORER_VIEWPORT=WxH`
+  (ex. `1366x900`) règle le
+  viewport initial de session —
+  défaut 1024×768 inchangé,
+  valeur tracée (`info!`/
+  `eprintln`), invalide → repli
+  silencieux. `site_smoke.ps1`
+  phase 2 mesure désormais sous
+  viewport réel : `POST
+  /viewport` 1366×900 par onglet
+  (shots idem via l'env), `doc_h`/
+  `doc_h_clamped` lus sur la
+  réponse `navigate` (`!` au
+  verdict), grille de sondes
+  1366×900, et **scroll réel
+  prouvé** — `dy=doc_h` doit
+  atteindre `doc_h−900`, sinon
+  `scroll:<y>/<max>:FIGÉ` au
+  verdict (la suspicion
+  `scroll_y=0.0` du re-census
+  github devient une mesure
+  automatique site par site).
+  Vérifié terrain : Wikipedia
+  `doc_h=4085` → `scroll_y=
+  3185.29` exact, retour 0.
 - **JS-C70 —
   `Blob`/`File`/`FileReader` +
   `URL.createObjectURL`**

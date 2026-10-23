@@ -2701,6 +2701,47 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   borné — widgets de login,
   captchas, boutons tiers.
 
+- [x] **Étape 129. Radar corpus
+  ≥1200 px — `doc_h`/`scroll_y`
+  réels au nightly** (verdict
+  ordonné post-clôture
+  `Error: b` — la boucle a besoin
+  que chaque livraison soit
+  mesurée sous conditions réelles,
+  pas seulement en unitaire).
+  **`EXPLORER_VIEWPORT=WxH`**
+  (ex. `1366x900`) lu par daemon
+  (`DaemonConfig.viewport` →
+  `session_config`, `info!` de la
+  valeur active — borne citée,
+  jamais supposée) et CLI
+  (`session_from_env`,
+  `eprintln`) — même format
+  `WxH` que l'argument `LxH` de
+  `shot`, défaut inchangé
+  1024×768, invalide → repli
+  silencieux. **`site_smoke.ps1`
+  phase 2** : viewport 1366×900
+  posé par onglet (shots phase 1
+  idem via l'env), réponse
+  `navigate` lue pour `doc_h`/
+  `doc_h_clamped` (`!` au
+  verdict), grille de sondes
+  élargie à 1366×900 (x≤1300,
+  y≤864), et **mesure de scroll
+  réel** : `dy=doc_h` doit
+  atteindre `doc_h−900` sinon
+  `scroll:<y>/<max>:FIGÉ` — la
+  suspicion `scroll_y=0.0` du
+  re-census github se prouve ou
+  s'innocente site par site.
+  **Vérifié terrain** : Wikipedia
+  1366×900 → `doc_h=4085`,
+  `scroll_y=3185.29` (= doc_h−900
+  exact), retour 0 propre — la
+  mécanique est saine, le constat
+  github serait page-spécifique.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

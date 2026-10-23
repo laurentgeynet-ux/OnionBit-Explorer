@@ -68,6 +68,24 @@ struct DaemonConfig {
     /// `0` = illimité explicite (mappé `u64::MAX` — un `while(1)`
     /// gèle alors le contexte : réglage diagnostic uniquement).
     js_ops: Option<u64>,
+    /// Viewport initial `WxH` (`EXPLORER_VIEWPORT`, étape 129 —
+    /// ex. `1366x900` ; `None` = défaut `SessionConfig`
+    /// 1024×768). Même format que l'argument `LxH` de
+    /// `explorer-cli shot`.
+    viewport: Option<(f32, f32)>,
+}
+
+/// Parse `WxH` (`1366x900`) → `(w, h)` — vide/invalide → `None`
+/// (réglage d'env : on dégrade au défaut, jamais de panne).
+fn parse_viewport(v: &str) -> Option<(f32, f32)> {
+    let mut it = v.split('x');
+    match (it.next(), it.next()) {
+        (Some(w), Some(h)) => match (w.parse::<f32>(), h.parse::<f32>()) {
+            (Ok(w), Ok(h)) if w > 0.0 && h > 0.0 => Some((w, h)),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 impl DaemonConfig {
@@ -109,6 +127,9 @@ impl DaemonConfig {
             js_ops: std::env::var("EXPLORER_JS_OPS")
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok()),
+            viewport: std::env::var("EXPLORER_VIEWPORT")
+                .ok()
+                .and_then(|v| parse_viewport(&v)),
         }
     }
 }
@@ -134,6 +155,10 @@ fn session_config(cfg: &DaemonConfig) -> explorer_core::SessionConfig {
         let v = if ops == 0 { u64::MAX } else { ops };
         tracing::info!("EXPLORER_JS_OPS={ops} — budget d'ops JS par évaluation");
         sc.js_ops = v;
+    }
+    if let Some((w, h)) = cfg.viewport {
+        tracing::info!("EXPLORER_VIEWPORT={w}x{h} — viewport initial des onglets");
+        sc.viewport = (w, h);
     }
     sc
 }

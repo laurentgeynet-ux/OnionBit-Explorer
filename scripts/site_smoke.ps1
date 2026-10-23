@@ -91,6 +91,12 @@ if (-not (Test-Path $cli)) {
 Get-ChildItem -Path $outDir -Filter '*.png' -ErrorAction SilentlyContinue |
     Remove-Item -Force
 
+# Radar (étape 129) : shots sous un viewport réel ≥1200 px —
+# les PNG nightly mesurent les conditions du bureau, pas le
+# minimum 1024×768 de `SessionConfig::default`. La variable
+# est lue par `session_from_env` du CLI.
+$env:EXPLORER_VIEWPORT = '1366x900'
+
 $ok = 0
 $fail = 0
 $okSites = @()
@@ -300,15 +306,27 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                     $tab = Send-Api Post "$FuncBase/tabs" $null 60
                     if (-not $tab) { throw 'POST /tabs' }
                     $id = $tab.id
+                    # Radar (étape 129) : viewport réel ≥1200 px
+                    # — sondes et `doc_h` sous les conditions du
+                    # bureau (`layout_block` re-mesuré à 1366, la
+                    # grille couvre la largeur entière).
+                    $null = Send-Api Post "$FuncBase/tabs/$id/viewport" `
+                        @{ w = 1366; h = 900; scale = 1 } 30
                     # `/navigate` est synchrone jusqu'au commit —
                     # le pipeline complet d'un document géant
                     # (github = frame 49 Mo) dépasse 30 s ; mesuré
                     # ~124 s au commit réel → 240 s de fenêtre.
-                    if (-not (Send-Api Post `
-                            "$FuncBase/tabs/$id/navigate" `
-                            @{ url = $site } 240)) {
+                    $nav = Send-Api Post `
+                        "$FuncBase/tabs/$id/navigate" `
+                        @{ url = $site } 240
+                    if (-not $nav) {
                         throw 'navigate'
                     }
+                    # Radar : hauteur réelle du document posé
+                    # (`!` = raster plafonné, étape 65).
+                    $docH = if ($null -ne $nav.doc_h) {
+                        [double]$nav.doc_h } else { 0.0 }
+                    $docTag = "doc:$docH$(if ($nav.doc_h_clamped) { '!' })"
                     # Frame produite (~60 s de grâce pour les
                     # gros documents — github a pris ~30 s).
                     $framed = Wait-Func {
@@ -321,7 +339,7 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                     $url0 = Get-TabUrl $id
                     if (-not $url0) { $url0 = $site }
 
-                    # Sondage grille (viewport 1024×768, bandes de
+                    # Sondage grille (viewport 1366×900, bandes de
                     # 700 px de scroll) : premier lien + premier
                     # champ éditable désignés par le hit-test.
                     # Le lien préféré pointe AILLEURS que la page
@@ -353,9 +371,9 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                                 $scrollY = [double]$r.scroll_y
                             }
                         }
-                        for ($y = 40; $y -le 704 -and -not ($link2 -and $edit);
+                        for ($y = 40; $y -le 864 -and -not ($link2 -and $edit);
                              $y += 48) {
-                            for ($x = 40; $x -le 968 -and
+                            for ($x = 40; $x -le 1300 -and
                                  -not ($link2 -and $edit); $x += 64) {
                                 $r = Send-Input $id @{
                                     type = 'mousemove'; x = $x; y = $y }
@@ -489,9 +507,27 @@ if (-not $SkipFunctional -and $ok -gt 0) {
                             $formRes = "form:clic:$($out.result)"
                         }
                     }
+                    # Radar (étape 129) : scroll réel — `dy=doc_h`
+                    # doit atteindre `doc_h - viewport_h` ; un
+                    # `scroll_y` figé à 0 dénoncerait la rupture
+                    # suspectée au re-census github (inputs scroll
+                    # répondus sans déplacer la position).
+                    $scrollRes = 'scroll:n/a'
+                    if ($docH -gt 0) {
+                        $r = Send-Input $id @{ type = 'scroll'; dy = $docH }
+                        $maxS = [math]::Max(0.0, $docH - 900.0)
+                        $yEnd = if ($r -and $null -ne $r.scroll_y) {
+                            [double]$r.scroll_y } else { -1.0 }
+                        $scrollRes = if ([math]::Abs($yEnd - $maxS) -lt 1.0) {
+                            "scroll:$yEnd/$maxS"
+                        } else { "scroll:$yEnd/$maxS:FIGÉ" }
+                        # Retour en tête : la suite des sondes
+                        # repose sur les positions mesurées en haut.
+                        $null = Send-Input $id @{ type = 'scroll'; dy = -$docH }
+                    }
                     $jsRes = if ($jsErr -eq 0) { 'dispatch:OK' }
                              else { "dispatch:$jsErr timeouts" }
-                    $verdict = "nav:OK $lienRes $formRes $jsRes"
+                    $verdict = "$docTag nav:OK $lienRes $formRes $jsRes $scrollRes"
                     if ($lienRes -match '^lien:(OK\+back|script-nav\+back)') {
                         $funcOk++
                     }

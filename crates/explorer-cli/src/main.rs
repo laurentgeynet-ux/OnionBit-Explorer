@@ -86,10 +86,11 @@ fn default_fonts_dir() -> std::path::PathBuf {
 }
 
 /// Session de vol CLI — `SessionConfig` par défaut surchargée
-/// de `EXPLORER_JS_MEM_MIB` (étape 123 : borne heap JS en Mio)
-/// et `EXPLORER_JS_OPS` (étape 124 : budget d'ops par éval) —
-/// `0` = illimité explicite ; outillage diagnostic, tracé à
-/// l'usage.
+/// de `EXPLORER_JS_MEM_MIB` (étape 123 : borne heap JS en Mio),
+/// `EXPLORER_JS_OPS` (étape 124 : budget d'ops par éval —
+/// `0` = illimité explicite) et `EXPLORER_VIEWPORT` (étape 129 :
+/// `WxH`, ex. `1366x900` — viewport initial) ; outillage
+/// diagnostic, tracé à l'usage.
 fn session_from_env(fonts: explorer_render::DirFontSource) -> explorer_core::Session {
     let mut cfg = explorer_core::SessionConfig::default();
     if let Some(mib) = std::env::var("EXPLORER_JS_MEM_MIB")
@@ -106,7 +107,27 @@ fn session_from_env(fonts: explorer_render::DirFontSource) -> explorer_core::Ses
         eprintln!("[EXPLORER_JS_OPS={ops} — budget d'ops JS par évaluation]");
         cfg.js_ops = if ops == 0 { u64::MAX } else { ops };
     }
+    if let Some((w, h)) = std::env::var("EXPLORER_VIEWPORT")
+        .ok()
+        .and_then(|v| parse_viewport(&v))
+    {
+        eprintln!("[EXPLORER_VIEWPORT={w}x{h} — viewport initial]");
+        cfg.viewport = (w, h);
+    }
     explorer_core::Session::with_config(client_stack(), std::sync::Arc::new(fonts), cfg)
+}
+
+/// Parse `WxH` (`1366x900`) → `(w, h)` — vide/invalide → `None`
+/// (réglage d'env : on dégrade au défaut, jamais de panne).
+fn parse_viewport(v: &str) -> Option<(f32, f32)> {
+    let mut it = v.split('x');
+    match (it.next(), it.next()) {
+        (Some(w), Some(h)) => match (w.parse::<f32>(), h.parse::<f32>()) {
+            (Ok(w), Ok(h)) if w > 0.0 && h > 0.0 => Some((w, h)),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// `shot <url> <sortie.png>` : navigation réelle complète
