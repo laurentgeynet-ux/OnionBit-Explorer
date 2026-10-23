@@ -4230,6 +4230,71 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `same-origin` cross → bloquée.
   Régressions `c77_*` (10 tests
   jscore) + 4 session.
+- [ ] **JS-C78. `JsEngine` par
+  contexte — ponts `window.parent`/
+  `top`/`postMessage` borné** —
+  *déclenché : étape 131 produit
+  (renumérotée — ex-129 iframe,
+  journal « piste JS notifiée »
+  de l'étape 128 socle).* Le
+  socle 128 parse chaque
+  `<iframe src>` en `Dom` propre
+  (`SubFrame` sur `Tab`, bfcache
+  restauré) — la suite exige un
+  miroir par contexte : un
+  `Engine` = un document
+  aujourd'hui, l'enfant a besoin
+  du sien. Surface attendue
+  (spec + sites : login widgets,
+  captchas, boutons tiers) :
+  getters cross-contexte
+  `window.parent`/`top`/`frames[n]`,
+  `iframe.contentWindow`/
+  `contentDocument` (sous
+  same-origin), `postMessage`
+  structuré-cloné **borné par
+  origine** (`targetOrigin`
+  exigé, `*` dégrade honnête),
+  `MessageEvent` livré au
+  destinataire. Chantier
+  architectural (comme C75) —
+  pas un stub : isolation des
+  globals par contexte,
+  récursivité checkpoints GC,
+  ordre de livraison cross-
+  contexte. Couture côté
+  session : instanciation d'un
+  engine par `SubFrame` — à
+  arrêter avec l'étape 131 au
+  journal.
+- [ ] **JS-C79. `crypto.subtle`
+  (RustCrypto)** — *réservé à la
+  piste JS par l'annonce cap-g1
+  (journal 2026-10-23), reliquat
+  non consommé du cap « web réel
+  sécurisé ».* Déclencheur :
+  login OAuth2 réel — PKCE
+  `code_challenge` S256 exige
+  `crypto.subtle.digest('SHA-256',
+  …)` côté script (SPAs modernes),
+  `sign`/`verify`/`encrypt` pour
+  JWT et WebAuthn-adjacent.
+  `getRandomValues` existe déjà
+  (JS-C26, arc4random seedé —
+  vérifier borne `QuotaExceededError`
+  64 Kio). Surface : `crypto.subtle`
+  `CryptoKey`/`SubtleCrypto` —
+  digest SHA-256/384/512 minimum,
+  HMAC/AES-GCM/RSA-PSS selon
+  besoin site. Point d'architecture
+  : `explorer-jscore` est
+  autonome sans dépendance —
+  ajout `RustCrypto` (pur Rust
+  admis par mission) à justifier
+  au commit, ou couture embedder
+  si la politique crypto doit
+  rester plateforme. À arrêter
+  avant code.
 
 ## Tâches continues
 
