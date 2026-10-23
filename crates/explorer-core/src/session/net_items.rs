@@ -165,6 +165,11 @@ pub(crate) struct NavDone {
     /// ordre document (chacune doit autoriser — la plus
     /// restrictive réduit ; `Report-Only` ignoré).
     pub(crate) csp: Vec<explorer_net::csp::CspPolicy>,
+    /// `Clear-Site-Data: "cookies"` ou `"*"` reçu sur la
+    /// réponse (CAP-147) — le jar du site est vidé au
+    /// commit (après la navigation, comme la spec : la
+    /// page servie tourne déjà sans identifiants).
+    pub(crate) clear_cookies: bool,
 }
 
 /// Issue de [`NavJob::run`] (étape 70) : document à commettre
@@ -281,6 +286,18 @@ fn collect_response_csp(
     csp
 }
 
+/// `Clear-Site-Data` (CAP-147) — tokens quotés ; `"cookies"`
+/// et `"*"` demandent le vidage du jar du site au commit.
+/// `"cache"`/`"storage"`/`"executionContexts"` non
+/// implémentés (cache disque côté hôte, storage JS absent)
+/// — bornes documentées.
+fn wants_clear_cookies(headers: &[(String, String)]) -> bool {
+    headers.iter().any(|(n, v)| {
+        n.eq_ignore_ascii_case("clear-site-data")
+            && (v.contains("\"cookies\"") || v.contains("\"*\""))
+    })
+}
+
 impl NavJob {
     /// Fetch + parse incrémental hors session : chaque
     /// morceau décodé alimente le tree-builder —
@@ -386,6 +403,7 @@ impl NavJob {
         let dom = tb.into_dom();
         let title = extract_title(&dom);
         let csp = collect_response_csp(&resp.headers, &dom);
+        let clear_cookies = wants_clear_cookies(&resp.headers);
         // `<base>` résolu contre l'URL de la réponse (étape
         // 135) — la résolution des sous-ressources, liens et
         // formulaires suit la base déclarée. `base-uri`
@@ -418,6 +436,7 @@ impl NavJob {
             base_target,
             refresh,
             csp,
+            clear_cookies,
             dom,
             html,
             title,
@@ -504,6 +523,7 @@ impl NavJob {
                 base_target: None,
                 refresh: None,
                 csp: Vec::new(),
+                clear_cookies: false,
             }),
             Box::new(tail),
         ))

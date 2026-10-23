@@ -1115,6 +1115,36 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-147 — `Clear-Site-Data`
+  cookies** (`explorer-net` +
+  `explorer-core` — cap « web
+  réel sécurisé » ; numéro
+  officiel attribué à
+  l'intégration, compteur
+  gelé) : en-tête de réponse de
+  logout — `CookieJar::
+  clear_site(host)` (additif)
+  vide tous les cookies du
+  domaine registrable de l'URL
+  résolue : cookies host/
+  domaine **et** seaux CHIPS
+  (WICG §cookies — le site perd
+  ses identifiants dans tous
+  les contextes top-level).
+  `"cookies"` et `"*"` honnoris,
+  vidage au commit de
+  navigation (la page servie
+  tourne déjà déconnectée) ;
+  `Set-Cookie` de la même
+  réponse capturé puis effacé
+  comme le reste (spec : tout
+  part). Bornes : `"cache"`,
+  `"storage"`, `"execution-
+  Contexts"` ignorés (cache
+  disque hôte, storage JS
+  absents). Tests : 3 session
+  (`clear_site_data_*`).
+
 - **CAP-146 — Client Hints
   basse-entropie** (`explorer-net`
   + `explorer-core` — cap « web

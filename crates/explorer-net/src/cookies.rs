@@ -291,6 +291,23 @@ impl CookieJar {
             .collect()
     }
 
+    /// Vide tous les cookies du **site** de `host` (domaine
+    /// registrable — `Clear-Site-Data: "cookies"`/`"*"`,
+    /// CAP-147) : cookies host/domaine **et** seaux CHIPS —
+    /// le site perd ses identifiants quel que soit le
+    /// contexte top-level de la pose (WICG clear-site-data
+    /// §cookies). Retourne le nombre d'entrées supprimées.
+    pub fn clear_site(&self, host: &str) -> usize {
+        let target = registrable(&host.to_ascii_lowercase());
+        let mut map = self
+            .map
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let before = map.len();
+        map.retain(|_, c| registrable(&c.domain) != target);
+        before - map.len()
+    }
+
     /// Réinsère un cookie restauré (étape 56) — même traitement
     /// qu'une pose `Set-Cookie` : expiré ignoré, budgets
     /// `CookieConfig` honorés. `false` si déjà expiré.

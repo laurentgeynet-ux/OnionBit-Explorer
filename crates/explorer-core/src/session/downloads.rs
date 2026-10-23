@@ -215,6 +215,10 @@ impl Session {
                 .iter()
                 .map(|v| explorer_net::csp::CspPolicy::parse(v, true))
                 .collect(),
+            // `Clear-Site-Data` (CAP-147) : les en-têtes de
+            // la réponse ne sont pas conservés — même borne
+            // assumée que la politique Referer/CSP.
+            clear_cookies: false,
             url: dl.url,
             dom,
             html,

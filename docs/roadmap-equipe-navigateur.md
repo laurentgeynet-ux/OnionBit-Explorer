@@ -2916,6 +2916,37 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-147. `Clear-Site-Data`
+  — cookies** *(numéro officiel
+  attribué à l'intégration)* :
+  en-tête de réponse de logout —
+  `"cookies"` et `"*"` vident le
+  jar du **site** (domaine
+  registrable de l'URL résolue,
+  sous-domaines inclus) au
+  commit de navigation, après
+  le `Set-Cookie` éventuel de la
+  même réponse (spec : tout
+  part, même le fraîchement
+  posé). Nouveau `CookieJar::
+  clear_site(host)` : cookies
+  host/domaine **et** seaux
+  CHIPS — WICG §cookies. Le
+  `CookieTransport` capture les
+  `Set-Cookie` par hop avant le
+  vidage : la page de logout
+  tourne sans identifiants, les
+  fetches suivants (page servie)
+  n'envoient plus rien. Bornes
+  documentées : `"cache"`,
+  `"storage"`, `"execution-
+  Contexts"` non implémentés
+  (cache disque côté pile hôte,
+  storage JS absent — traités
+  comme inconnus = ignorés).
+  Tests : 3 session
+  (`clear_site_data_*`).
+
 - [x] **CAP-146. Client Hints
   basse-entropie** *(numéro
   officiel attribué à

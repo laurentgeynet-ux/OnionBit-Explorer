@@ -9020,3 +9020,73 @@ async fn client_hints_reach_wire_on_nav_and_subresources() {
         );
     }
 }
+
+// --- CAP-147 : `Clear-Site-Data` « cookies » ----------------------------
+
+#[tokio::test]
+async fn clear_site_data_empties_site_cookies() {
+    use explorer_net::url::Url;
+    let (mut s, t) = test_session();
+    let url = Url::parse("http://h.test/").unwrap();
+    s.cookie_jar().set_from_header(&url, "sid=abc;path=/");
+    let other = Url::parse("http://o.test/").unwrap();
+    s.cookie_jar().set_from_header(&other, "ok=1;path=/");
+    // `Set-Cookie` de la même réponse : la spec vide tout —
+    // le cookie fraîchement posé part avec le reste.
+    t.route_headers(
+        "/logout",
+        200,
+        PAGE,
+        &[
+            ("set-cookie", "fresh=1;path=/"),
+            ("clear-site-data", "\"cookies\""),
+        ],
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/logout").await.unwrap();
+    assert_eq!(
+        s.cookie_jar().header_for(&url, true),
+        "",
+        "cookies du site vidés (y compris le posé par la réponse)"
+    );
+    assert_eq!(
+        s.cookie_jar().header_for(&other, true),
+        "ok=1",
+        "autre site intact"
+    );
+}
+
+#[tokio::test]
+async fn clear_site_data_star_covers_whole_site() {
+    use explorer_net::url::Url;
+    let (mut s, t) = test_session();
+    // Cookie de domaine posé depuis un sous-domaine.
+    let sub = Url::parse("http://a.h.test/").unwrap();
+    s.cookie_jar()
+        .set_from_header(&sub, "deep=1;path=/;domain=h.test");
+    // `"*"` + autres types supportés/non supportés mélangés.
+    t.route_headers(
+        "/",
+        200,
+        PAGE,
+        &[("clear-site-data", "\"cache\", \"*\", \"storage\"")],
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://a.h.test/").await.unwrap();
+    // Réponse reçue sur `a.h.test` → le registrable `h.test`
+    // entier est vidé (spec : site, pas host).
+    assert_eq!(s.cookie_jar().len(), 0, "site entier vidé");
+}
+
+#[tokio::test]
+async fn no_clear_site_data_keeps_cookies() {
+    use explorer_net::url::Url;
+    let (mut s, t) = test_session();
+    let url = Url::parse("http://h.test/").unwrap();
+    s.cookie_jar().set_from_header(&url, "sid=abc;path=/");
+    // Type non implémenté seul → rien n'est vidé.
+    t.route_headers("/", 200, PAGE, &[("clear-site-data", "\"cache\"")]);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(s.cookie_jar().header_for(&url, true), "sid=abc");
+}

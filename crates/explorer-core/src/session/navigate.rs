@@ -685,6 +685,7 @@ impl Session {
             base_target,
             refresh,
             csp,
+            clear_cookies,
         } = done;
         if let Some(s) = &self.store {
             s.record_visit(&url.to_string(), title.as_deref());
@@ -766,6 +767,17 @@ impl Session {
             // tardifs (fonts, fonds, modules) et aux
             // intentions (formes, `fetch` JS).
             entry.csp.clone_from(&csp);
+            // `Clear-Site-Data` (CAP-147) : vidage au commit
+            // — la page servie tourne déjà sans identifiants
+            // (spec : l'effacement suit la réponse, avant que
+            // les sous-ressources de la nouvelle page ne
+            // partent avec des cookies survivants).
+            if clear_cookies {
+                let n = self.cookies.clear_site(&url.host());
+                if n > 0 {
+                    tracing::info!(site = %url.host(), cleared = n, "clear-site-data: cookies");
+                }
+            }
             entry.scroll_y = 0.0;
             entry.focused = None;
             entry.focused_key = None;
