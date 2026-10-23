@@ -157,6 +157,14 @@ impl FloatCtx {
                 xr = xr.min(f.x);
             }
         }
+        // Sans morsure effective (bords inchangés), `cw` est
+        // rendu intact : `(cx+cw) - cx` perd un ulp dès que
+        // `cx` a des bits fractionnaires (rangée de flottants
+        // depuis une origine négative — « PAST WEATHER »
+        // weather.gov coupé à 0.0001 px).
+        if xl <= cx && xr >= cx + cw {
+            return (cx, cw);
+        }
         (xl, (xr - xl).max(0.0))
     }
 
@@ -227,6 +235,9 @@ impl FloatCtx {
             if f.y < bottom && f.y + f.height > top {
                 xr = xr.min(f.x);
             }
+        }
+        if xl <= cx && xr >= cx + cw {
+            return (cx, cw);
         }
         (xl, (xr - xl).max(0.0))
     }
@@ -1040,11 +1051,11 @@ fn layout_block_inner(
                 return None;
             }
             let avail = (band_w.unwrap_or(cb_w) - ml - mr - bl - br - pl - pr).max(0.0);
-            Some(
-                avail
-                    .min(crate::intrinsic::max_content_px(bx, fs, ctx))
-                    .max(crate::intrinsic::min_content_px(bx, fs, ctx)),
-            )
+            let (mc, nc) = (
+                crate::intrinsic::max_content_px(bx, fs, ctx),
+                crate::intrinsic::min_content_px(bx, fs, ctx),
+            );
+            Some(avail.min(mc).max(nc))
         });
     let auto_left = st.get("margin-left") == Some("auto");
     let auto_right = st.get("margin-right") == Some("auto");

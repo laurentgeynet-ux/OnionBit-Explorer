@@ -2047,6 +2047,28 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `out` 39 → 505, `diff_px` raster 178737 → 0.
   Journal `AGENTS.md` §8 : nouveau piège noté — verdict
   terrain seulement après `Finished` de cargo build
+
+- [x] **R-77. Coupure fantôme dans un flottant
+  shrink-to-fit** (issue #13 — « PAST WEATHER » de la nav
+  weather.gov coupé en deux lignes). Deux mécanismes
+  d'ulp f32 chaînés : (a) la mesure par pièces du
+  line-break dépasse le max-content intrinsèque (chaîne
+  entière shapée une fois) de ~7e-6 → le flottant taillé
+  pile voyait son texte « déborder » → `new_line` fantôme
+  — tolérance `+ 0.01` aux tests de fit, déjà la convention
+  du chemin atomique ; (b) `FloatCtx::band/band_over`
+  rendaient `(cx+cw) - cx`, ulp perdu sur `cx`
+  fractionnaire (origine négative `margin:auto`) — sans
+  morsure effective, `cw` rendu intact. Régressions
+  `float_shrink_to_fit_tolere_ulp_mesure_intrinseque` +
+  `float_origine_negative_bande_rend_cw_exact`. Terrain :
+  nav weather.gov sur une ligne. Résidu documenté dans
+  l'issue : `letter-spacing` cascadé mais ignoré en
+  layout → « ABOUT » retombe (comportement flottant
+  conforme, support à faire). Les deux autres constats
+  de #13 soldés sans fix : panneau `#myfcst` =
+  `display:none` levé par jQuery (couture NAV/JS), logo
+  NOAA = déjà peint (fond `body`).
   (binaire périmé = validation fantôme).
 
 ## Palier R-B — Contenu étranger, animation, canvas

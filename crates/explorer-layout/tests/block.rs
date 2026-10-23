@@ -1223,3 +1223,53 @@ fn float_min_width_enfant_etend_le_shrink() {
         a.rect.width
     );
 }
+
+// ── R-77 : un flottant shrink-to-fit taillé pile à son
+// max-content ne doit pas couper son propre texte pour un
+// ulp de mesure (issue #13 — nav weather.gov « PAST
+// WEATHER »). Le max-content mesure la chaîne entière
+// (collapse_ws → un seul appel shaper) alors que le
+// line-break somme les pièces : deux ordres d'arrondi f32
+// distincts. `font-size:10.001px` rend la divergence
+// déterministe sans fonte : `mesure(13c) = 71.507148…`
+// < `mesure(6c)+mesure(7c) = 71.507156…` (~7.6e-6).
+
+#[test]
+fn float_shrink_to_fit_tolere_ulp_mesure_intrinseque() {
+    let html = concat!(
+        "<!doctype html><div style=\"width:800px\">",
+        "<a style=\"float:left;font-size:10.001px\">AAAAA BBBBBBB</a>",
+        "</div>"
+    );
+    let (dom, bx) = laid(html, "");
+    let a = find(&bx, by_tag(&dom, "a"));
+    let total: usize = a.lines.len() + a.children.iter().map(|c| c.lines.len()).sum::<usize>();
+    assert_eq!(total, 1, "texte coupé en {total} lignes (ulp)");
+}
+
+// ── R-77 bis : la bande `FloatCtx` sans morsure rend `cw`
+// intact — `(cx+cw)-cx` perd un ulp dès que `cx` a des bits
+// fractionnaires (rangée de flottants depuis une origine
+// négative, `.content{width:960px;margin:auto}` à 800px →
+// x=-80). Le flottant imbriqué `width:auto` shrink-to-fit
+// doit recevoir la bande exacte.
+
+#[test]
+fn float_origine_negative_bande_rend_cw_exact() {
+    let html = concat!(
+        "<!doctype html><div style=\"width:960px;margin:0 auto\">",
+        "<ul style=\"float:left\">",
+        "<li style=\"float:left;padding-right:40.25px\">",
+        "<a style=\"float:left\">AAAAA BBBBBBB</a></li>",
+        "<li style=\"float:left\"><a style=\"float:left\">CC</a></li>",
+        "</ul></div>"
+    );
+    let (dom, bx) = laid(html, "");
+    // Le div .content est centré : (800-960)/2 = -80 →
+    // coordonnées fractionnaires en cascade.
+    let cont = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(cont.rect.x, -80.0), "content x={}", cont.rect.x);
+    let a = find(&bx, by_tag(&dom, "a"));
+    let total: usize = a.lines.len() + a.children.iter().map(|c| c.lines.len()).sum::<usize>();
+    assert_eq!(total, 1, "texte coupé en {total} lignes (bande)");
+}

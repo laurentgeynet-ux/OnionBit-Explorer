@@ -9,6 +9,48 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-77 — coupure fantôme de texte
+  dans un flottant shrink-to-fit**
+  (`explorer-layout`, issue #13 —
+  « PAST WEATHER » de weather.gov
+  coupé en deux lignes) — deux
+  mécanismes d'ulp f32 chaînés :
+  - *Tolérance d'ajustement de ligne* :
+    le max-content mesure la chaîne
+    entière (`collapse_ws`, un appel
+    shaper) alors que le line-break
+    somme les pièces — deux ordres
+    d'arrondi f32 (~7e-6 mesurés).
+    Le flottant taillé pile à son
+    max-content voyait son propre
+    texte « déborder » de ~0.0001 px
+    → `new_line` fantôme. Les tests
+    de fit (`cursor + pw > line_w`
+    et `descend_band!`) reçoivent la
+    tolérance `+ 0.01` déjà en usage
+    sur le chemin atomique.
+  - *Bande `FloatCtx` exacte* :
+    `band()`/`band_over()` rendaient
+    `(xr - xl)` — `(cx+cw) - cx` perd
+    un ulp dès que `cx` a des bits
+    fractionnaires (rangée de
+    flottants depuis une origine
+    négative, `.content{width:960px;
+    margin:auto}` à 800 px → x=-80).
+    Sans morsure effective, `cw` est
+    désormais rendu intact.
+  Régressions :
+  `float_shrink_to_fit_tolere_ulp_
+  mesure_intrinseque` (divergence
+  déterministe à `font-size:10.001px`),
+  `float_origine_negative_bande_rend_
+  cw_exact` (chaîne complète x=-80).
+  Résidu documenté : la nav dépasse
+  960 px faute de `letter-spacing`
+  (cascadé, ignoré en layout) —
+  « ABOUT » retombe en ligne 2,
+  comportement flottant conforme.
+
 - **R-76 — `merge_rects` jetait les
   composantes fermées** (`explorer-render`,
   couture NAV issue #11 bis) : la

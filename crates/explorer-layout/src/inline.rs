@@ -674,11 +674,16 @@ fn break_into_lines(
 
     // Descend la ligne tant que la bande est vide ou trop
     // étroite pour un fragment **seul** de `pw` — borne dure.
+    // `+ 0.01` sur le fit : la mesure par pièces du line-break
+    // peut dépasser le max-content intrinsèque qui a taillé
+    // le flottant parent d'un ulp agrégé (~1e-5) — sans
+    // tolérance, un flottant shrink-to-fit voit son propre
+    // texte « déborder » et coupe (issue #13, nav weather.gov).
     macro_rules! descend_band {
         ($pw:expr) => {{
             let pw = $pw;
             let mut steps = 0u32;
-            while (line_w <= 0.01 || pw > line_w) && steps < MAX_BAND_STEPS {
+            while (line_w <= 0.01 || pw > line_w + 0.01) && steps < MAX_BAND_STEPS {
                 steps += 1;
                 match fl.next_band_change(cursor_y) {
                     Some(ny) if ny > cursor_y => {
@@ -880,7 +885,10 @@ fn break_into_lines(
                 continue;
             }
             let pw = measure(text);
-            if cursor_x > line_x && cursor_x - line_x + pw > line_w && !acc.is_empty() {
+            // Même tolérance `+ 0.01` que `descend_band!` :
+            // dépassement sub-ulp agrégé → la pièce tient,
+            // sinon `new_line!`.
+            if cursor_x > line_x && cursor_x - line_x + pw > line_w + 0.01 && !acc.is_empty() {
                 new_line!();
             }
             if acc.is_empty() {
