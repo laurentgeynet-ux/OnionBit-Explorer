@@ -1,5 +1,6 @@
-# Répertoire de build Cargo déporté sur D: — commité car les
-# postes de dev partagent cette machine. Sur une machine sans
-# D: ou en CI : CARGO_TARGET_DIR a priorité sur ce réglage.
+# Répertoire de build Cargo local au worktree (C:) — chaque
+# worktree parallèle a ainsi son propre target/, ce qui évite
+# les races de binaires de test entre sessions (cf. AGENTS.md
+# §10). CARGO_TARGET_DIR a priorité sur ce réglage.
 [build]
-target-dir = "D:/cargo-target/OnionBit-Explorer"
+target-dir = "target"
