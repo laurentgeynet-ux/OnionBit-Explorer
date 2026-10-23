@@ -395,6 +395,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   _bfcache` (rapport peuplé,
   snapshot compté, inconnu →
   `None`).
+- **Étape 132 — barre de scroll
+  interactive** (`app/` Flutter
+  — la piste/thumb posée en
+  diagnostic restait un
+  indicateur passif) : drag du
+  thumb → px CSS via la course
+  réelle `maxScroll/travel`
+  (`ctrl.scroll` relatif, clamp
+  moteur), tap sur la piste →
+  page ±`viewH`, curseur `grab`,
+  poignée assombrie pendant le
+  geste. Zéro canal nouveau —
+  `scroll` relatif + `scroll_y`
+  autoritaire + traduction
+  locale (étape 109) existants.
+  `flutter analyze`/`test` verts.
 - **JS-C70 —
   `Blob`/`File`/`FileReader` +
   `URL.createObjectURL`**

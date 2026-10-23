@@ -2885,6 +2885,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   snapshot compté, onglet
   inconnu → `None`).
 
+- [x] **Étape 132. Barre de scroll
+  interactive** (app Flutter —
+  la piste/thumb de l'étape ~115
+  était « indicateur pur »).
+  `_vScrollbar` gagne les gestes :
+  **drag du thumb** → delta px
+  logique → px CSS via la course
+  réelle (`maxScroll / travel`,
+  `ctrl.scroll` relatif, clamp
+  moteur) ; **tap sur la piste**
+  au-dessus/sous le thumb → page
+  ±`viewH` (convention
+  navigateur) ; curseur `grab`,
+  poignée assombrie pendant le
+  geste (`_scrollDrag`). Gestes
+  inertes si `doc_h ≤ viewH`.
+  Réutilise `ctrl.scroll` (input
+  `scroll` relatif → `scroll_y`
+  autoritaire → traduction
+  locale étape 109) — zéro
+  canal nouveau. `flutter
+  analyze`/`test` verts.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

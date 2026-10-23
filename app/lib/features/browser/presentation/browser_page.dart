@@ -1005,6 +1005,9 @@ class _FrameViewState extends ConsumerState<_FrameView> {
   Size? _lastSent;
   double _lastScale = 0;
   final FocusNode _keys = FocusNode();
+  /// Thumb de la barre de scroll en cours de drag (étape 132)
+  /// — assombrit la poignée pendant le geste.
+  bool _scrollDrag = false;
 
   @override
   void dispose() {
@@ -1251,8 +1254,8 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                             // Barre de scroll verticale
                             // (diagnostic terrain 23/10 : rend
                             // visible la scrollabilité détectée —
-                            // doc_h > viewport) — indicateur pur,
-                            // le drag viendra plus tard.
+                            // doc_h > viewport) — drag + tap
+                            // page up/down (étape 132).
                             _vScrollbar(t, size, raw, zoom, dpr, st),
                           ],
                         ),
@@ -1291,7 +1294,9 @@ class _FrameViewState extends ConsumerState<_FrameView> {
   /// (diagnostic), le thumb n'apparaît que si le document
   /// dépasse le viewport — `doc_h` vient de la hauteur image
   /// (`raw.height / (zoom·dpr)` px CSS), `scroll_y` de l'état
-  /// (déjà en px CSS moteur).
+  /// (déjà en px CSS moteur). Interactive (étape 132) : drag du
+  /// thumb → deltas relatifs convertis par la course réelle,
+  /// tap sur la piste → page ±`viewH`.
   Widget _vScrollbar(
     DesignTokens t,
     Size size,
@@ -1318,6 +1323,26 @@ class _FrameViewState extends ConsumerState<_FrameView> {
     final bottomFlex = k - thumbFlex - topFlex;
     final track = t.color('surface', 'sunken', fallback: Colors.black26);
     final thumb = t.color('onSurface', 'muted', fallback: Colors.grey);
+    // Drag du thumb (étape 132) : la course du thumb en px
+    // logiques couvre `maxScroll` px CSS — le ratio convertit
+    // un delta de pointeur en delta moteur (`ctrl.scroll` est
+    // relatif, le moteur clampe à [0, maxScroll]).
+    final trackLen = size.height - 12; // Positioned top:6/bottom:6
+    final thumbLen = trackLen * thumbFlex / k;
+    final travel = trackLen - thumbLen;
+    final dragRatio = travel > 0 ? maxScroll / travel : 0.0;
+    final thumbColor = _scrollDrag
+        ? t.color('onSurface', 'default', fallback: Colors.black54)
+        : thumb;
+    // Tap sur la piste = page haut/bas (convention
+    // navigateur) — `viewH` en px CSS.
+    Widget trackPart(int flex, double pageDy) => Flexible(
+      flex: flex,
+      child: GestureDetector(
+        onTapUp: scrollable ? (_) => widget.ctrl.scroll(pageDy) : null,
+        child: Container(color: track),
+      ),
+    );
     return Positioned(
       top: 6,
       right: 3,
@@ -1327,16 +1352,33 @@ class _FrameViewState extends ConsumerState<_FrameView> {
         borderRadius: BorderRadius.circular(3),
         child: Column(
           children: [
-            if (topFlex > 0)
-              Flexible(flex: topFlex, child: Container(color: track)),
+            if (topFlex > 0) trackPart(topFlex, -viewH),
             Flexible(
               flex: thumbFlex,
-              child: Container(
-                color: scrollable ? thumb : Colors.transparent,
+              child: MouseRegion(
+                cursor: scrollable
+                    ? SystemMouseCursors.grab
+                    : SystemMouseCursors.basic,
+                child: GestureDetector(
+                  onVerticalDragStart: scrollable
+                      ? (_) => setState(() => _scrollDrag = true)
+                      : null,
+                  onVerticalDragUpdate: scrollable
+                      ? (d) => widget.ctrl.scroll(d.delta.dy * dragRatio)
+                      : null,
+                  onVerticalDragEnd: scrollable
+                      ? (_) => setState(() => _scrollDrag = false)
+                      : null,
+                  onVerticalDragCancel: scrollable
+                      ? () => setState(() => _scrollDrag = false)
+                      : null,
+                  child: Container(
+                    color: scrollable ? thumbColor : Colors.transparent,
+                  ),
+                ),
               ),
             ),
-            if (bottomFlex > 0)
-              Flexible(flex: bottomFlex, child: Container(color: track)),
+            if (bottomFlex > 0) trackPart(bottomFlex, viewH),
           ],
         ),
       ),
