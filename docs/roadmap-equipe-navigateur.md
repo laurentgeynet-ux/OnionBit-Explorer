@@ -2836,6 +2836,40 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   session + 1 test
   `no_referer` policy.
 
+- [x] **Étape 132. `Referrer-Policy`
+  et émission du `Referer` de
+  navigation** : `ReferrerPolicy`
+  (net, 8 tokens, parse
+  insensible à la casse,
+  inconnu → défaut
+  `strict-origin-when-cross-origin`)
+  sur `Request::referrer_policy` —
+  `RefererTransport` calcule
+  URL/origine/rien selon politique
+  × same-origin × downgrade
+  (https→http interdit sauf
+  `unsafe-url`), normal **et**
+  stream, prévol CORS inclus.
+  Les **navigations émettent
+  désormais `Referer`** (trou
+  réel : seuls sub/XHR le
+  faisaient) via la politique
+  de la page **source**. Politique
+  de page : en-tête
+  `Referrer-Policy` (dernier
+  valide gagne) puis
+  `<meta name=referrer>` — vit
+  sur `Tab`/`PageSnapshot`
+  (bfcache la restaure).
+  Attribut `referrerpolicy` sur
+  `<a>`/`<form>`/`<iframe>` =
+  override par requête ;
+  sous-ressources/script/fetch/
+  XHR suivent la politique
+  courante. `Origin` toujours
+  indépendant du `Referer`.
+  6 tests session + 3 policy.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

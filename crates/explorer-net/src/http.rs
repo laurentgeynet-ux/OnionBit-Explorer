@@ -111,6 +111,69 @@ pub enum FetchCredentials {
     Include,
 }
 
+/// Politique `Referer` d'une requête (étape 132, spec
+/// *Referrer-Policy*) — le document la fixe par en-tête
+/// `Referrer-Policy:` ou `<meta name=referrer>`, un élément
+/// la redéfinit par `referrerpolicy=` ; la valeur `None`
+/// champ `Request::referrer_policy` = politique par défaut
+/// de la plateforme (`StrictOriginWhenCrossOrigin`,
+/// comportement antérieur à l'étape 132).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReferrerPolicy {
+    /// `no-referrer` — jamais d'en-tête `Referer`.
+    NoReferrer,
+    /// `no-referrer-when-downgrade` — URL complète sauf en
+    /// rétrogradation `https → http` (ancien défaut du web).
+    NoReferrerWhenDowngrade,
+    /// `same-origin` — URL complète en same-origin, rien
+    /// en cross-origin (rétrogradation incluse).
+    SameOrigin,
+    /// `origin` — l'origine seule, quel que soit le schéma
+    /// de la cible (rétrogradation incluse).
+    Origin,
+    /// `strict-origin` — l'origine seule, sauf en
+    /// rétrogradation `https → http` : rien.
+    StrictOrigin,
+    /// `origin-when-cross-origin` — URL complète en
+    /// same-origin, origine en cross-origin (rétrogradation
+    /// incluse).
+    OriginWhenCrossOrigin,
+    /// `strict-origin-when-cross-origin` — URL complète en
+    /// same-origin, origine en cross-origin, rien en
+    /// rétrogradation. **Défaut** = comportement d'avant
+    /// l'étape 132.
+    #[default]
+    StrictOriginWhenCrossOrigin,
+    /// `unsafe-url` — URL complète, y compris en
+    /// rétrogradation.
+    UnsafeUrl,
+}
+
+impl ReferrerPolicy {
+    /// Parse un jeton de politique (spec : liste de valeurs
+    /// séparées par des virgules — la **dernière valide**
+    /// gagne, une liste sans valeur reconnue → `None`).
+    /// `""`/`no-referrer-when-downgrade` non reconnu → ignoré
+    /// (le champ garde sa valeur précédente).
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        let mut out = None;
+        for tok in value.split(',') {
+            out = match tok.trim().to_ascii_lowercase().as_str() {
+                "no-referrer" | "never" => Some(Self::NoReferrer),
+                "origin" => Some(Self::Origin),
+                "origin-when-cross-origin" => Some(Self::OriginWhenCrossOrigin),
+                "same-origin" => Some(Self::SameOrigin),
+                "strict-origin" => Some(Self::StrictOrigin),
+                "strict-origin-when-cross-origin" => Some(Self::StrictOriginWhenCrossOrigin),
+                "unsafe-url" | "always" => Some(Self::UnsafeUrl),
+                _ => out,
+            };
+        }
+        out
+    }
+}
+
 /// Contexte CORS d'une requête `mode:cors` cross-origin
 /// (étape 126) — posé par la session à l'émission ; le
 /// transport de politique l'utilise pour le preflight
@@ -176,6 +239,13 @@ pub struct Request {
     /// `Origin` n'est **pas** concerné (il n'est pas une
     /// information de référent).
     pub no_referer: bool,
+    /// Politique `Referer` de la requête (étape 132) —
+    /// `None` = défaut plateforme
+    /// (`StrictOriginWhenCrossOrigin`). Raffinée par le
+    /// document (`Referrer-Policy:` / `<meta name=referrer>`)
+    /// ou l'élément (`referrerpolicy=`) à l'émission ;
+    /// `no_referer` reste prioritaire.
+    pub referrer_policy: Option<ReferrerPolicy>,
 }
 
 /// Qui a initié la requête — « site pour cookies » de la
@@ -213,6 +283,7 @@ impl Request {
             fetch_user: false,
             cors: None,
             no_referer: false,
+            referrer_policy: None,
         }
     }
 }

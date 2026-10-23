@@ -507,6 +507,140 @@ async fn no_referer_suppresses_injection() {
     );
 }
 
+// ---- Étape 132 : `Request::referrer_policy` ----
+
+use explorer_net::http::ReferrerPolicy;
+use explorer_net::policy::referer_value_for;
+
+/// `ReferrerPolicy::parse` : jetons reconnus, casse
+/// tolérée, dernière valeur valide d'une liste virgulée
+/// gagne, aucune reconnue → `None`.
+#[test]
+fn referrer_policy_parse_tokens() {
+    use ReferrerPolicy::*;
+    assert_eq!(ReferrerPolicy::parse("no-referrer"), Some(NoReferrer));
+    assert_eq!(ReferrerPolicy::parse("Origin"), Some(Origin));
+    assert_eq!(
+        ReferrerPolicy::parse("strict-origin-when-cross-origin"),
+        Some(StrictOriginWhenCrossOrigin)
+    );
+    assert_eq!(ReferrerPolicy::parse("always"), Some(UnsafeUrl));
+    assert_eq!(
+        ReferrerPolicy::parse("garbage, same-origin"),
+        Some(SameOrigin),
+        "dernière valide de la liste"
+    );
+    assert_eq!(ReferrerPolicy::parse("bogus"), None);
+    assert_eq!(ReferrerPolicy::parse(""), None);
+}
+
+/// Matrice `referer_value_for` : chaque politique ×
+/// (same-origin / cross-origin / rétrogradation).
+#[test]
+fn referrer_policy_matrix() {
+    use ReferrerPolicy::*;
+    let page = u("https://a.example/dir/page?x=1#frag");
+    let same = u("https://a.example/other");
+    let cross = u("https://b.example/x");
+    let down = u("http://a.example/x");
+    let f = |p, t: &Url| referer_value_for(&page, t, p);
+    // no-referrer : jamais.
+    assert_eq!(f(NoReferrer, &same), None);
+    assert_eq!(f(NoReferrer, &cross), None);
+    // no-referrer-when-downgrade : complet sauf rétrograd.
+    assert_eq!(
+        f(NoReferrerWhenDowngrade, &cross).as_deref(),
+        Some("https://a.example/dir/page?x=1")
+    );
+    assert_eq!(f(NoReferrerWhenDowngrade, &down), None);
+    // same-origin : complet same-origin seulement.
+    assert_eq!(
+        f(SameOrigin, &same).as_deref(),
+        Some("https://a.example/dir/page?x=1")
+    );
+    assert_eq!(f(SameOrigin, &cross), None);
+    // origin : origine seule même en rétrogradation.
+    assert_eq!(f(Origin, &cross).as_deref(), Some("https://a.example/"));
+    assert_eq!(f(Origin, &down).as_deref(), Some("https://a.example/"));
+    // strict-origin : origine sauf rétrogradation.
+    assert_eq!(
+        f(StrictOrigin, &cross).as_deref(),
+        Some("https://a.example/")
+    );
+    assert_eq!(f(StrictOrigin, &down), None);
+    // origin-when-cross-origin : complet ou origine, même
+    // en rétrogradation (`down` est cross — le schéma
+    // diffère — donc origine, pas de suppression).
+    assert_eq!(
+        f(OriginWhenCrossOrigin, &down).as_deref(),
+        Some("https://a.example/"),
+        "downgrade : cross → origine, pas de coupure"
+    );
+    assert_eq!(
+        f(OriginWhenCrossOrigin, &cross).as_deref(),
+        Some("https://a.example/")
+    );
+    // strict-origin-when-cross-origin : le défaut historique.
+    assert_eq!(
+        f(StrictOriginWhenCrossOrigin, &same).as_deref(),
+        Some("https://a.example/dir/page?x=1")
+    );
+    assert_eq!(
+        f(StrictOriginWhenCrossOrigin, &cross).as_deref(),
+        Some("https://a.example/")
+    );
+    assert_eq!(f(StrictOriginWhenCrossOrigin, &down), None);
+    // unsafe-url : complet toujours.
+    assert_eq!(
+        f(UnsafeUrl, &down).as_deref(),
+        Some("https://a.example/dir/page?x=1")
+    );
+}
+
+/// `RefererTransport` : `req.referrer_policy` gouverne
+/// l'en-tête émis ; `no_referer` reste prioritaire.
+#[tokio::test]
+async fn referrer_policy_governs_injection() {
+    let inner = FakeTransport::new(vec![resp(200, &[], b"x"); 4]);
+    let t = RefererTransport::wrap(inner.clone(), Some(u("https://a.example/dir/page?x=1")));
+    // same-origin : URL complète seulement.
+    let mut r1 = Request::get(u("https://b.example/x"));
+    r1.referrer_policy = Some(ReferrerPolicy::SameOrigin);
+    t.fetch(&r1).await.unwrap();
+    // unsafe-url : complet même cross-origin.
+    let mut r2 = Request::get(u("https://b.example/x"));
+    r2.referrer_policy = Some(ReferrerPolicy::UnsafeUrl);
+    t.fetch(&r2).await.unwrap();
+    // no_referer l'emporte sur une politique permissive.
+    let mut r3 = Request::get(u("https://b.example/x"));
+    r3.referrer_policy = Some(ReferrerPolicy::UnsafeUrl);
+    r3.no_referer = true;
+    t.fetch(&r3).await.unwrap();
+    // défaut : cross-origin → origine seule (contrôle).
+    t.fetch(&Request::get(u("https://b.example/x")))
+        .await
+        .unwrap();
+    let seen = inner.seen();
+    let refv = |r: &Request| {
+        r.headers
+            .iter()
+            .find(|(n, _)| n == "Referer")
+            .map(|(_, v)| v.clone())
+    };
+    assert_eq!(refv(&seen[0]), None, "same-origin cross → rien");
+    assert_eq!(
+        refv(&seen[1]).as_deref(),
+        Some("https://a.example/dir/page?x=1"),
+        "unsafe-url cross → complet"
+    );
+    assert_eq!(refv(&seen[2]), None, "no_referer prioritaire");
+    assert_eq!(
+        refv(&seen[3]).as_deref(),
+        Some("https://a.example/"),
+        "défaut cross → origine"
+    );
+}
+
 // -- Mixed-content ------------------------------------------------------------
 
 #[test]

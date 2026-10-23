@@ -189,6 +189,53 @@ pub(crate) fn rel_no_referrer(dom: &Dom, el: NodeId) -> bool {
     })
 }
 
+/// `referrerpolicy=` d'un élément liant (`<a>`, `<form>`,
+/// `<iframe>` — étape 132) — `None` si absent ou valeur
+/// non reconnue (le défaut document s'applique alors).
+/// `rel=noreferrer` reste traité à part (`no_referer`,
+/// étape 131) — il l'emporte, spec « noreferrer →
+/// no-referrer ».
+pub(crate) fn element_referrer_policy(
+    dom: &Dom,
+    el: NodeId,
+) -> Option<explorer_net::http::ReferrerPolicy> {
+    dom.attribute(el, "referrerpolicy")
+        .ok()
+        .flatten()
+        .and_then(|v| explorer_net::http::ReferrerPolicy::parse(&v))
+}
+
+/// Politique `Referer` du document via `<meta
+/// name=referrer>` (étape 132) — la **dernière valide**
+/// en ordre document gagne (spec : les méta sont
+/// traitées à leur rencontre ; aucune reconnue → `None`).
+pub(crate) fn meta_referrer_policy(dom: &Dom) -> Option<explorer_net::http::ReferrerPolicy> {
+    let mut out = None;
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "meta")
+            && dom
+                .attribute(n, "name")
+                .ok()
+                .flatten()
+                .is_some_and(|v| v.trim().eq_ignore_ascii_case("referrer"))
+        {
+            if let Some(p) = dom
+                .attribute(n, "content")
+                .ok()
+                .flatten()
+                .and_then(|v| explorer_net::http::ReferrerPolicy::parse(&v))
+            {
+                out = Some(p);
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    out
+}
+
 /// Extrait le texte du premier `<title>` du document —
 /// `None` si absent ou vide.
 pub(crate) fn extract_title(dom: &Dom) -> Option<String> {
@@ -289,19 +336,24 @@ pub(crate) fn collect_images(dom: &Dom) -> Vec<(NodeId, String)> {
     out
 }
 
-/// `src` des `<iframe>` du document dans l'ordre (étape
-/// 128) — absent ou vide sauté ; `srcdoc` (document inline)
-/// n'est pas une URL : l'iframe `srcdoc`-seul n'entre pas
-/// dans la file réseau. La résolution/dédup/mixed-content
-/// vit dans `plan_subresources`.
-pub(crate) fn collect_iframes(dom: &Dom) -> Vec<String> {
+/// `<iframe src>` du document dans l'ordre — `(src,
+/// referrerpolicy)` par élément (étape 128 + 132 : absent
+/// ou vide sauté ; `srcdoc` — document inline — n'est pas
+/// une URL et n'entre pas dans la file réseau ;
+/// l'attribut gouverne le `Referer` de la requête de
+/// sous-contexte, `None` = politique du document). La
+/// résolution/dédup/mixed-content vit dans
+/// `plan_subresources`.
+pub(crate) fn collect_iframes(
+    dom: &Dom,
+) -> Vec<(String, Option<explorer_net::http::ReferrerPolicy>)> {
     let mut out = Vec::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "iframe") {
             if let Ok(Some(src)) = dom.attribute(n, "src") {
                 if !src.is_empty() {
-                    out.push(src);
+                    out.push((src, element_referrer_policy(dom, n)));
                 }
             }
         }

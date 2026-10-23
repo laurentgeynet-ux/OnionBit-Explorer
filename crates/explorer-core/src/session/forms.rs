@@ -574,6 +574,10 @@ pub(crate) fn form_request(
             // `rel=noreferrer` du `<form>` est lu au dispatch
             // (`submit_form`) — la fabrique ne le connaît pas.
             no_referer: false,
+            // `referrerpolicy=` du `<form>` posé au dispatch
+            // (étape 132) ; `nav_begin` applique sinon la
+            // politique du document source.
+            referrer_policy: None,
         });
     }
     let qs = form_url_encode(entries);

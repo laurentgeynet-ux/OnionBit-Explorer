@@ -21,9 +21,10 @@ use explorer_js::JsEngine;
 use explorer_net::cookies::{partition_key, CookieJar};
 use explorer_net::error::NetResult;
 use explorer_net::http::{
-    FetchDest, FetchMode, HttpTransport, Initiator, Method, Request, Response,
+    FetchDest, FetchMode, HttpTransport, Initiator, Method, ReferrerPolicy, Request, Response,
+    StreamedResponse,
 };
-use explorer_net::policy::{initiator_headers, sec_fetch_headers};
+use explorer_net::policy::{initiator_headers_policy, sec_fetch_headers};
 use explorer_net::url::Url;
 use explorer_render::decode_font;
 use futures_util::stream::{FuturesUnordered, StreamExt};
@@ -40,8 +41,10 @@ pub(crate) struct SubPlan {
     /// `<img>`/`poster` résolus et dédupliqués.
     pub(crate) imgs: Vec<Url>,
     /// `<iframe src>` résolus — navigations de
-    /// sous-contexte (bornés `max_frames`).
-    pub(crate) frames: Vec<Url>,
+    /// sous-contexte (bornés `max_frames`) ; la
+    /// `referrerpolicy` de l'élément voyage avec l'URL
+    /// (étape 132).
+    pub(crate) frames: Vec<(Url, Option<ReferrerPolicy>)>,
 }
 
 /// Routage d'une complétion de sous-ressource (étape 50).
@@ -135,6 +138,11 @@ pub(crate) struct NavDone {
     pub(crate) html: String,
     /// Titre extrait.
     pub(crate) title: Option<String>,
+    /// Politique `Referer` du document (étape 132) —
+    /// en-tête `Referrer-Policy:` de la réponse puis
+    /// `<meta name=referrer>` (la meta, traitée après les
+    /// en-têtes, l'emporte) ; `None` = défaut plateforme.
+    pub(crate) referrer_policy: Option<ReferrerPolicy>,
 }
 
 /// Issue de [`NavJob::run`] (étape 70) : document à commettre
@@ -258,42 +266,19 @@ impl NavJob {
             .resolved_url
             .take()
             .unwrap_or_else(|| self.req.url.clone());
+        // `Referrer-Policy:` de la réponse (étape 132) —
+        // politique initiale du document ; une `<meta
+        // name=referrer>` reconnue l'écrasera après parse.
+        let header_policy = resp
+            .headers
+            .iter()
+            .filter(|(n, _)| n.eq_ignore_ascii_case("referrer-policy"))
+            .filter_map(|(_, v)| ReferrerPolicy::parse(v))
+            .next_back();
         // Corps non affichable (étape 70) : bufferisé avec
         // borne et progression — jamais décodé en mojibake.
-        // `DownloadOffered` n'est émis qu'au commit
-        // (`offer_download`) : un « accept » de l'UI avant
-        // l'enregistrement du pending ne peut pas échouer.
         if let Some(meta) = download_meta(&resp.headers) {
-            let dl_id = self.next_download_id;
-            let mut body = Vec::new();
-            while let Some(chunk) = resp.body.recv().await {
-                let bytes = chunk.map_err(|e| CoreError::Fetch(e.to_string()))?;
-                if body.len() + bytes.len() > self.max_download_bytes {
-                    return Err(CoreError::Fetch("téléchargement hors bornes".to_string()));
-                }
-                body.extend_from_slice(&bytes);
-                let _ = self.events.send(CoreEvent::DownloadProgress {
-                    tab: self.tab,
-                    id: dl_id,
-                    received: body.len() as u64,
-                    total: meta.total,
-                });
-            }
-            return Ok(NavOutcome::Download(super::downloads::PendingDownload {
-                tail: NavTail {
-                    epoch: self.epoch,
-                    push: self.push,
-                    prev_title: self.prev_title.take(),
-                    req: self.req.clone(),
-                },
-                id: dl_id,
-                tab: self.tab,
-                url: resolved,
-                filename_hint: meta.filename_hint,
-                mime: meta.mime,
-                size: meta.total,
-                body,
-            }));
+            return self.buffer_download(resp, resolved, meta).await;
         }
         let mut tb = TreeBuilder::new();
         // Charset du transport (`Content-Type`) en amorce du
@@ -347,6 +332,9 @@ impl NavJob {
         let title = extract_title(&dom);
         let done = NavDone {
             url: resolved,
+            // `<meta name=referrer>` l'emporte sur
+            // l'en-tête (traitée après lui, spec).
+            referrer_policy: meta_referrer_policy(&dom).or(header_policy),
             dom,
             html,
             title,
@@ -358,6 +346,49 @@ impl NavJob {
             req: self.req.clone(),
         };
         Ok(NavOutcome::Document(done, tail))
+    }
+
+    /// Corps non affichable (étape 70) : bufferisé avec
+    /// borne et progression — jamais décodé en mojibake.
+    /// `DownloadOffered` n'est émis qu'au commit
+    /// (`offer_download`) : un « accept » de l'UI avant
+    /// l'enregistrement du pending ne peut pas échouer.
+    async fn buffer_download(
+        &mut self,
+        mut resp: StreamedResponse,
+        resolved: Url,
+        meta: DownloadMeta,
+    ) -> Result<NavOutcome, CoreError> {
+        let dl_id = self.next_download_id;
+        let mut body = Vec::new();
+        while let Some(chunk) = resp.body.recv().await {
+            let bytes = chunk.map_err(|e| CoreError::Fetch(e.to_string()))?;
+            if body.len() + bytes.len() > self.max_download_bytes {
+                return Err(CoreError::Fetch("téléchargement hors bornes".to_string()));
+            }
+            body.extend_from_slice(&bytes);
+            let _ = self.events.send(CoreEvent::DownloadProgress {
+                tab: self.tab,
+                id: dl_id,
+                received: body.len() as u64,
+                total: meta.total,
+            });
+        }
+        Ok(NavOutcome::Download(super::downloads::PendingDownload {
+            tail: NavTail {
+                epoch: self.epoch,
+                push: self.push,
+                prev_title: self.prev_title.take(),
+                req: self.req.clone(),
+            },
+            id: dl_id,
+            tab: self.tab,
+            url: resolved,
+            filename_hint: meta.filename_hint,
+            mime: meta.mime,
+            size: meta.total,
+            body,
+        }))
     }
 
     /// `about:blank` (étape 88) : le document vide canonique
@@ -383,6 +414,7 @@ impl NavJob {
                 dom: tb.into_dom(),
                 html: String::new(),
                 title: None,
+                referrer_policy: None,
             },
             tail,
         ))
@@ -430,13 +462,21 @@ pub(crate) struct SubJob {
     /// URL de la page — politique mixed-content/`Referer`
     /// du prefetch modules.
     pub(crate) page: Url,
+    /// Politique `Referer` du document commis (étape 132 —
+    /// `Referrer-Policy:`/`<meta name=referrer>` connus à
+    /// `nav_apply`) — gouverne toutes les sous-ressources
+    /// sauf attribut `referrerpolicy=` par élément
+    /// (`<iframe>` seul honoré v1).
+    pub(crate) page_policy: Option<ReferrerPolicy>,
     /// Plan de collecte — URLs résolues à `nav_apply`.
     pub(crate) sheet_urls: Vec<Url>,
     pub(crate) scripts: Vec<ScriptItem>,
     pub(crate) img_urls: Vec<Url>,
     /// `<iframe src>` résolus à `nav_apply` (étape 128 —
-    /// déjà dédupliqués/mixed-content-filtrés/bornés).
-    pub(crate) frame_urls: Vec<Url>,
+    /// déjà dédupliqués/mixed-content-filtrés/bornés) ;
+    /// la `referrerpolicy` de l'élément voyage avec l'URL
+    /// (étape 132).
+    pub(crate) frame_urls: Vec<(Url, Option<ReferrerPolicy>)>,
     /// Jar partagé — les `Set-Cookie` des documents
     /// `<iframe>` sont capturés à réception (étape 128) :
     /// même partitionnement CHIPS que `CookieTransport`
@@ -578,6 +618,7 @@ impl SubJob {
             &self.scripts,
             &self.img_urls,
             &self.frame_urls,
+            self.page_policy,
         );
         let mut eng = self.eng.take();
         let mut async_mods = Vec::new();
@@ -613,7 +654,8 @@ impl SubJob {
                 }
                 SubTag::Frame(u) => {
                     frames.push(store_frame(&self.url, &self.cookies, &u, &resp));
-                }
+                } // SubTag reste inchangé — `referrerpolicy` vit
+                  // dans la `Request`, pas dans le routage.
             }
         })
         .await;
@@ -692,7 +734,12 @@ impl SubJob {
             ctx.left -= 1;
             let Ok(resp) = self
                 .transport
-                .fetch(&sub_request(&self.url, &url, FetchDest::Style))
+                .fetch(&sub_request(
+                    &self.url,
+                    &url,
+                    FetchDest::Style,
+                    self.page_policy,
+                ))
                 .await
             else {
                 return;
@@ -777,7 +824,12 @@ impl SubJob {
                 left -= 1;
                 let Ok(resp) = self
                     .transport
-                    .fetch(&sub_request(&self.url, &url, FetchDest::Image))
+                    .fetch(&sub_request(
+                        &self.url,
+                        &url,
+                        FetchDest::Image,
+                        self.page_policy,
+                    ))
                     .await
                 else {
                     continue;
@@ -826,6 +878,13 @@ impl SubJob {
                 let mut req = Request::get(url);
                 req.initiator = Some(Initiator::Subresource(self.url.clone()));
                 req.fetch_dest = FetchDest::Font;
+                req.referrer_policy = self.page_policy;
+                req.headers.extend(initiator_headers_policy(
+                    &self.url,
+                    &req.url,
+                    Method::Get,
+                    self.page_policy.unwrap_or_default(),
+                ));
                 req.headers.extend(sec_fetch_headers(&req));
                 let Ok(resp) = self.transport.fetch(&req).await else {
                     continue;
@@ -879,6 +938,7 @@ impl SubJob {
                 self.max_inflight,
                 self.max_modules,
                 &self.page,
+                self.page_policy,
                 &base,
                 &src,
                 &self.import_specs,
@@ -1027,42 +1087,56 @@ pub(crate) fn sub_jobs(
     sheet_urls: &[Url],
     scripts: &[ScriptItem],
     img_urls: &[Url],
-    frame_urls: &[Url],
+    frame_urls: &[(Url, Option<ReferrerPolicy>)],
+    page_policy: Option<ReferrerPolicy>,
 ) -> VecDeque<(SubTag, Request)> {
     let mut jobs = VecDeque::new();
     for (i, u) in sheet_urls.iter().enumerate() {
-        jobs.push_back((SubTag::Css(i), sub_request(base, u, FetchDest::Style)));
+        jobs.push_back((
+            SubTag::Css(i),
+            sub_request(base, u, FetchDest::Style, page_policy),
+        ));
     }
     for item in scripts {
         if let (Some(u), Some(slot)) = (&item.src, item.slot) {
             jobs.push_back((
                 SubTag::Script(slot),
-                sub_request(base, u, FetchDest::Script),
+                sub_request(base, u, FetchDest::Script, page_policy),
             ));
         }
     }
     for u in img_urls {
         jobs.push_back((
             SubTag::Img(u.clone()),
-            sub_request(base, u, FetchDest::Image),
+            sub_request(base, u, FetchDest::Image, page_policy),
         ));
     }
-    for u in frame_urls {
-        jobs.push_back((SubTag::Frame(u.clone()), frame_request(base, u)));
+    for (u, policy) in frame_urls {
+        jobs.push_back((
+            SubTag::Frame(u.clone()),
+            frame_request(base, u, policy.or(page_policy)),
+        ));
     }
     jobs
 }
 
 /// Requête GET de sous-ressource : `Referer`/`Origin` calculés
-/// à l'émission (`initiator_headers`, strict-origin-when-
-/// cross-origin) + métadonnées `Sec-Fetch-*` (étape 125 —
-/// `dest` posé par l'appelant, `mode` = `no-cors` classique)
-/// — le mixed-content est filtré en amont.
-pub(crate) fn sub_request(base: &Url, url: &Url, dest: FetchDest) -> Request {
+/// à l'émission (`initiator_headers_policy` sous la
+/// `policy` effective — attribut élément ou politique du
+/// document, étape 132) + métadonnées `Sec-Fetch-*` (étape
+/// 125 — `dest` posé par l'appelant, `mode` = `no-cors`
+/// classique) — le mixed-content est filtré en amont.
+pub(crate) fn sub_request(
+    base: &Url,
+    url: &Url,
+    dest: FetchDest,
+    policy: Option<ReferrerPolicy>,
+) -> Request {
     let mut req = Request::get(url.clone());
     req.initiator = Some(Initiator::Subresource(base.clone()));
     req.fetch_dest = dest;
-    for (n, v) in initiator_headers(base, url, Method::Get) {
+    req.referrer_policy = policy;
+    for (n, v) in initiator_headers_policy(base, url, Method::Get, policy.unwrap_or_default()) {
         req.headers.push((n, v));
     }
     req.headers.extend(sec_fetch_headers(&req));
@@ -1076,9 +1150,11 @@ pub(crate) fn sub_request(base: &Url, url: &Url, dest: FetchDest) -> Request {
 /// `Lax` cross-site ne l'est pas, spec cookies) mais mode
 /// `navigate` à l'émission — `sec-fetch-dest: iframe` +
 /// `sec-fetch-mode: navigate` comme une vraie navigation
-/// imbriquée (spec Fetch metadata).
-pub(crate) fn frame_request(base: &Url, url: &Url) -> Request {
-    let mut req = sub_request(base, url, FetchDest::Iframe);
+/// imbriquée (spec Fetch metadata). `policy` = politique
+/// effective (attribut `referrerpolicy=` de l'élément ou
+/// celle du document — étape 132).
+pub(crate) fn frame_request(base: &Url, url: &Url, policy: Option<ReferrerPolicy>) -> Request {
+    let mut req = sub_request(base, url, FetchDest::Iframe, policy);
     req.fetch_mode = FetchMode::Navigate;
     // `sec-fetch-*` recalculés après le changement de mode.
     req.headers.retain(|(n, _)| !n.starts_with("sec-fetch-"));

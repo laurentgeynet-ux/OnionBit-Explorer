@@ -50,6 +50,7 @@ impl Tab {
             last_req: self.last_req.take(),
             frames: std::mem::take(&mut self.frames),
             frame_nodes: std::mem::take(&mut self.frame_nodes),
+            referrer_policy: self.referrer_policy.take(),
         };
         self.scroll_y = 0.0;
         self.doc_h = 0.0;
@@ -106,6 +107,7 @@ impl Tab {
         self.last_req = snap.last_req;
         self.frames = snap.frames;
         self.frame_nodes = snap.frame_nodes;
+        self.referrer_policy = snap.referrer_policy;
         self.transitions.clear();
         // Idem animations : la restauration repart sur les
         // déclarations — lecture réenregistrée au premier

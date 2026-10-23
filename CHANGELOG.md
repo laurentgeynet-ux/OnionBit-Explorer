@@ -700,6 +700,64 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `no_referer_suppresses_
   injection` (policy).
 
+- **Étape 132 — `Referrer-Policy`
+  + émission du `Referer` de
+  navigation** (`explorer-net`,
+  `explorer-core` — cap « web
+  réel sécurisé »). Les
+  navigations n'émettaient
+  **aucun** `Referer` (seuls
+  sous-ressources/XHR le
+  stampaient) : `nav_begin`
+  applique désormais la politique
+  de la page **source** —
+  les flux auth OAuth (login →
+  callback) transportent le
+  référent attendu.
+  `ReferrerPolicy` (enum public,
+  8 tokens spec, parse insensible
+  à la casse, valeur inconnue →
+  `Default` =
+  `strict-origin-when-cross-origin`)
+  porté par `Request::
+  referrer_policy` (additif).
+  `RefererTransport` calcule
+  pleine-URL/origine/absence selon
+  politique × same-origin ×
+  downgrade https→http (referer
+  supprimé sauf `unsafe-url`) —
+  fetch et `fetch_stream` ; le
+  preflight CORS copie la
+  politique de sa requête.
+  Politique de page : en-tête
+  `Referrer-Policy` de la réponse
+  (dernier en-tête valide gagne,
+  valeurs invalides tolérées) puis
+  `<meta name=referrer>` —
+  stockée sur `Tab` et
+  `PageSnapshot` (le bfcache la
+  restaure). Attribut
+  `referrerpolicy` sur
+  `<a>`/`<form>`/`<iframe>` =
+  override par requête ;
+  sous-ressources, `script`,
+  `fetch`/XHR et iframes suivent
+  la politique courante de la
+  page. `Origin` reste
+  indépendant — réduire le
+  `Referer` ne supprime jamais
+  l'`Origin`. Régressions
+  `referrer_policy_*` (3 tests
+  policy) + session
+  `nav_emits_referer_default`,
+  `referrer_policy_response_
+  header_governs`,
+  `meta_referrer_suppresses_
+  nav_and_sub`,
+  `referrerpolicy_attr_overrides`,
+  `form_referrerpolicy_attr`,
+  `iframe_referrerpolicy_attr`.
+
 ### Fixed
 
 - **Étape 122 — `root_font_size`

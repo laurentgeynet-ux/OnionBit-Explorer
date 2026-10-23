@@ -281,7 +281,14 @@ impl Session {
                         tracing::trace!(tab, handle, "quota requêtes script atteint");
                         None
                     } else {
-                        self.script_request(&page, &method, &url, &headers, body.as_deref())
+                        self.script_request(
+                            &page,
+                            &method,
+                            &url,
+                            &headers,
+                            body.as_deref(),
+                            self.tabs.get(&tab).and_then(|e| e.referrer_policy),
+                        )
                     };
                     let Some((req, cross)) = built else {
                         failed.push(handle);
@@ -543,11 +550,11 @@ impl Session {
         // content filtré, dédup par URL résolue, borné
         // `max_frames` (`0` = désactivé — vide).
         let mut seen_frames = std::collections::HashSet::new();
-        let frames: Vec<Url> = collect_iframes(dom)
+        let frames: Vec<(Url, Option<explorer_net::http::ReferrerPolicy>)> = collect_iframes(dom)
             .into_iter()
-            .filter_map(|src| Url::resolve(base, &src).ok())
-            .filter(|u| matches!(u.scheme(), "http" | "https"))
-            .filter(|u| !is_mixed_content(base, u) && seen_frames.insert(u.as_str()))
+            .filter_map(|(src, policy)| Url::resolve(base, &src).ok().map(|u| (u, policy)))
+            .filter(|(u, _)| matches!(u.scheme(), "http" | "https"))
+            .filter(|(u, _)| !is_mixed_content(base, u) && seen_frames.insert(u.as_str()))
             .take(self.max_frames)
             .collect();
         SubPlan {
@@ -573,6 +580,7 @@ impl Session {
         max_inflight: usize,
         max_modules: usize,
         page: &Url,
+        page_policy: Option<explorer_net::http::ReferrerPolicy>,
         entry_base: &Url,
         entry_src: &str,
         import_specs: &[(String, String)],
@@ -596,7 +604,7 @@ impl Session {
             for (_, u) in frontier.drain(..room) {
                 jobs.push_back((
                     (u.as_str(), u.clone()),
-                    sub_request(page, &u, explorer_net::http::FetchDest::Script),
+                    sub_request(page, &u, explorer_net::http::FetchDest::Script, page_policy),
                 ));
             }
             let mut fetched = Vec::new();

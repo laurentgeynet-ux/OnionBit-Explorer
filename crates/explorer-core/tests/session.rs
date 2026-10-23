@@ -7548,3 +7548,162 @@ async fn form_target_blank_opens_new_tab() {
     let url = s.tab_url(t2).unwrap_or_default();
     assert!(url.starts_with("http://h.test/b"), "form GET → /b : {url}");
 }
+
+// ===== Étape 132 : `Referrer-Policy` — `Referer` de nav,
+// document (`Referrer-Policy:`/`<meta>`) et attribut =====
+
+/// Page à chemin parlant (`/dir/p`) : lien + image, pour
+/// distinguer « URL complète » et « origine seule ».
+const PAGE_REF_LINK: &str = "<!doctype html><html><body>\
+     <a href=\"/b\">suite</a><img src=\"/i.png\"></body></html>";
+
+/// Idem avec `<meta name=referrer>` — la politique du
+/// document gouverne nav ET sous-ressources.
+const PAGE_META_NOREF: &str = "<!doctype html><html><head>\
+     <meta name=\"referrer\" content=\"no-referrer\"></head><body>\
+     <a href=\"/b\">suite</a><img src=\"/i.png\"></body></html>";
+
+/// `referrerpolicy=` d'élément (unsafe-url) — écrase le
+/// défaut même en cross-origin.
+const PAGE_ATTR_UNSAFE: &str = "<!doctype html><html><body>\
+     <a href=\"http://cdn.test/b\" referrerpolicy=\"unsafe-url\">x</a>\
+     </body></html>";
+
+/// Une navigation initiée par la page émet `Referer` —
+/// strict-origin-when-cross-origin (défaut) : URL complète
+/// en same-origin.
+#[tokio::test]
+async fn nav_emits_referer_default() {
+    let (mut s, t) = test_session();
+    t.route("/dir/p", 200, PAGE_REF_LINK);
+    t.route("/b", 200, PAGE_T);
+    t.route_bin("/i.png", 200, vec![1]);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(
+        t.req_header("/b", "referer").as_deref(),
+        Some("http://h.test/dir/p"),
+        "nav initiée par la page : Referer complet same-origin"
+    );
+}
+
+/// `<meta name=referrer content=no-referrer>` : ni la
+/// navigation ni les sous-ressources n'émettent `Referer`.
+#[tokio::test]
+async fn meta_referrer_suppresses_nav_and_sub() {
+    let (mut s, t) = test_session();
+    t.route("/dir/p", 200, PAGE_META_NOREF);
+    t.route("/b", 200, PAGE_T);
+    t.route_bin("/i.png", 200, vec![1]);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    assert_eq!(
+        t.req_header("/i.png", "referer"),
+        None,
+        "meta no-referrer : sous-ressource sans Referer"
+    );
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(
+        t.req_header("/b", "referer"),
+        None,
+        "meta no-referrer : navigation sans Referer"
+    );
+}
+
+/// `Referrer-Policy:` en en-tête de réponse gouverne la
+/// politique du document (ici `no-referrer` sur l'image).
+#[tokio::test]
+async fn referrer_policy_response_header_governs() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/dir/p",
+        200,
+        PAGE_REF_LINK,
+        &[("referrer-policy", "no-referrer")],
+    );
+    t.route_bin("/i.png", 200, vec![1]);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    assert_eq!(
+        t.req_header("/i.png", "referer"),
+        None,
+        "en-tête no-referrer : l'image part sans Referer"
+    );
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(t.req_header("/b", "referer"), None);
+}
+
+/// `referrerpolicy="unsafe-url"` sur le lien : l'URL
+/// complète est envoyée même cross-origin (l'attribut
+/// écrase la politique du document).
+#[tokio::test]
+async fn referrerpolicy_attr_overrides() {
+    let (mut s, t) = test_session();
+    t.route("/dir/p", 200, PAGE_ATTR_UNSAFE);
+    t.route("/b", 200, PAGE_T);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(
+        t.req_header("/b", "referer").as_deref(),
+        Some("http://h.test/dir/p"),
+        "unsafe-url cross-origin : URL complète"
+    );
+}
+
+/// `referrerpolicy` d'un `<iframe>` : la requête de
+/// sous-contexte honore l'attribut de l'élément.
+#[tokio::test]
+async fn iframe_referrerpolicy_attr() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/dir/p",
+        200,
+        "<!doctype html><html><body>\
+         <iframe src=\"/f\" referrerpolicy=\"origin\"></iframe>\
+         </body></html>",
+    );
+    t.route("/f", 200, FRAME_DOC);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    assert_eq!(
+        t.req_header("/f", "referer").as_deref(),
+        Some("http://h.test/"),
+        "referrerpolicy=origin : origine seule même same-origin"
+    );
+}
+
+/// `referrerpolicy` sur un `<form>` : la soumission suit
+/// l'attribut de l'élément (ici `same-origin` : le POST
+/// cross-origin part sans `Referer`).
+#[tokio::test]
+async fn form_referrerpolicy_attr() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/dir/p",
+        200,
+        "<!doctype html><html><body>\
+         <form action=\"http://cdn.test/b\" referrerpolicy=\"same-origin\">\
+         <input type=\"submit\" value=\"go\"></form></body></html>",
+    );
+    t.route("/b", 200, PAGE_T);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    s.handle_input(id, InputEvent::Click { x: 10.0, y: 10.0 })
+        .await
+        .unwrap();
+    assert_eq!(
+        t.req_header("/b", "referer"),
+        None,
+        "form referrerpolicy=same-origin : cross → rien"
+    );
+}

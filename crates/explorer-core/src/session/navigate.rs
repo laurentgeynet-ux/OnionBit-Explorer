@@ -10,8 +10,10 @@ use std::sync::Arc;
 
 use explorer_dom::Dom;
 use explorer_js::NavRequest;
-use explorer_net::http::{FetchDest, FetchMode, Initiator, Method, Request};
-use explorer_net::policy::{initiator_headers, is_mixed_content, sec_fetch_headers};
+use explorer_net::http::{FetchDest, FetchMode, Initiator, Method, ReferrerPolicy, Request};
+use explorer_net::policy::{
+    initiator_headers_policy, is_mixed_content, referer_value_for, sec_fetch_headers,
+};
 use explorer_net::url::Url;
 use explorer_render::PaintImages;
 
@@ -543,6 +545,37 @@ impl Session {
         {
             req.headers.extend(sec_fetch_headers(&req));
         }
+        // `Referer` de navigation (étape 132) : la page
+        // initiatrice gouverne — politique du document
+        // source (`Referrer-Policy:`/`<meta name=referrer>`)
+        // sauf si l'émetteur a déjà posé la sienne
+        // (`referrerpolicy=` lu au dispatch, ou politique de
+        // la page source captée avant un `NewTab`). Le
+        // `no_referer` de `rel=noreferrer` reste prioritaire.
+        // Borne assumée : un `navigate()` API sur un onglet
+        // déjà servi est initié par sa page (même défaut
+        // `NavFrom` que la politique SameSite) — le `Referer`
+        // envoyé suit ce choix.
+        {
+            let page_policy = self.tabs.get(&tab).and_then(|e| e.referrer_policy);
+            if req.referrer_policy.is_none() {
+                req.referrer_policy = page_policy;
+            }
+        }
+        if let Some(Initiator::NavFrom(page)) = req.initiator.clone() {
+            if !req.no_referer
+                && !req
+                    .headers
+                    .iter()
+                    .any(|(n, _)| n.eq_ignore_ascii_case("referer"))
+            {
+                if let Some(r) =
+                    referer_value_for(&page, &req.url, req.referrer_policy.unwrap_or_default())
+                {
+                    req.headers.push(("referer".to_string(), r));
+                }
+            }
+        }
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
         entry.nav_epoch += 1;
         // Un id de téléchargement est réservé par navigation
@@ -632,6 +665,7 @@ impl Session {
             dom,
             html,
             title,
+            referrer_policy,
         } = done;
         if let Some(s) = &self.store {
             s.record_visit(&url.to_string(), title.as_deref());
@@ -689,6 +723,9 @@ impl Session {
             entry.last_req = Some(tail.req.clone());
             entry.url = Some(url.clone());
             entry.title.clone_from(&title);
+            // Politique `Referer` du nouveau document (étape
+            // 132) — gouverne les requêtes qu'il émettra.
+            entry.referrer_policy = referrer_policy;
             entry.scroll_y = 0.0;
             entry.focused = None;
             entry.focused_key = None;
@@ -732,6 +769,7 @@ impl Session {
             events: self.events.clone(),
             cookies: Arc::clone(&self.cookies),
             page: url,
+            page_policy: referrer_policy,
             sheet_urls,
             scripts,
             img_urls,
@@ -979,6 +1017,7 @@ impl Session {
         raw_url: &str,
         headers: &[(String, String)],
         body: Option<&str>,
+        policy: Option<ReferrerPolicy>,
     ) -> Option<(Request, bool)> {
         let url = Url::resolve(page, raw_url.trim()).ok()?;
         if is_mixed_content(page, &url) {
@@ -989,7 +1028,7 @@ impl Session {
         let mut req = Request {
             method: m,
             url: url.clone(),
-            headers: initiator_headers(page, &url, m),
+            headers: initiator_headers_policy(page, &url, m, policy.unwrap_or_default()),
             body: body.map(|b| b.as_bytes().to_vec()),
             // `fetch`/`XHR` = sous-ressource de la page —
             // `SameSite=Strict`/`Lax` exigent same-site (66).
@@ -1001,10 +1040,13 @@ impl Session {
             fetch_user: false,
             cors: None,
             // `Referer` du script est posé par
-            // `initiator_headers` ci-dessus — pas de
-            // suppression (la politique `referrer` JS
-            // reste à la piste JS).
+            // `initiator_headers_policy` ci-dessus — la
+            // politique `referrerPolicy` de l'appel JS
+            // reste à la piste JS ; `no_referer` n'est pas
+            // exposé côté script (étape 131 : `<a>`/`<form>`
+            // seulement).
             no_referer: false,
+            referrer_policy: policy,
         };
         if cross {
             // Enforcement CORS (étape 126) : les en-têtes

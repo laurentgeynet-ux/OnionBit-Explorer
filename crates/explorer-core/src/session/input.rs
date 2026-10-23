@@ -319,11 +319,12 @@ impl Session {
         match self.link_node_at(tab, x, y) {
             Some((anchor, url)) if !prevented => {
                 let u = Url::parse(&url).map_err(|e| CoreError::Url(e.to_string()))?;
-                let (new_ctx, no_referer) = {
+                let (new_ctx, no_referer, policy) = {
                     let dom = self.tabs.get(&tab).and_then(|e| e.dom.as_ref());
                     (
                         dom.is_some_and(|d| target_new_context(d, anchor)),
                         dom.is_some_and(|d| rel_no_referrer(d, anchor)),
+                        dom.and_then(|d| element_referrer_policy(d, anchor)),
                     )
                 };
                 let mut req = Request::get(u);
@@ -333,6 +334,10 @@ impl Session {
                 // (étape 131 — `noopener` implicite sans
                 // objet avant les ponts JS de l'étape 130).
                 req.no_referer = no_referer;
+                // `referrerpolicy=` de l'élément (étape 132)
+                // — sinon `nav_begin` posera la politique du
+                // document source.
+                req.referrer_policy = policy;
                 // `target=_blank`/nommé → nouveau contexte
                 // top-level (étape 131) ; `_self`/`_parent`/
                 // `_top`/absent → onglet courant.
@@ -622,7 +627,7 @@ impl Session {
         form: NodeId,
         submitter: Option<NodeId>,
     ) -> Result<(), CoreError> {
-        let (mut req, new_ctx, no_referer) = {
+        let (mut req, new_ctx, no_referer, form_policy) = {
             let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
             let (Some(dom), Some(base)) = (entry.dom.as_ref(), entry.url.as_ref()) else {
                 return Err(CoreError::EmptyDocument);
@@ -645,6 +650,7 @@ impl Session {
                 req,
                 target_new_context(dom, form),
                 rel_no_referrer(dom, form),
+                element_referrer_policy(dom, form),
             )
         };
         // Clic submit / Enter implicite = geste utilisateur —
@@ -652,6 +658,8 @@ impl Session {
         // `form.submit()` scripté reste non marqué.
         req.fetch_user = true;
         req.no_referer = no_referer;
+        // `referrerpolicy=` du `<form>` (étape 132).
+        req.referrer_policy = form_policy;
         // `form target=_blank`/nommé → nouveau contexte
         // (étape 131 — même règle que `<a target>`).
         let act = if new_ctx {

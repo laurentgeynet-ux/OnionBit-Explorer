@@ -69,6 +69,7 @@ fn req(url: &str) -> Request {
         fetch_user: false,
         cors: None,
         no_referer: false,
+        referrer_policy: None,
     }
 }
 

@@ -23,8 +23,8 @@ use std::path::{Path, PathBuf};
 use explorer_net::url::Url;
 
 use super::{
-    extract_title, CoreError, CoreEvent, DownloadInfo, NavDone, NavTail, Session, StreamDecoder,
-    TabId,
+    extract_title, meta_referrer_policy, CoreError, CoreEvent, DownloadInfo, NavDone, NavTail,
+    Session, StreamDecoder, TabId,
 };
 
 /// Téléchargement bufferisé en attente de décision —
@@ -185,6 +185,12 @@ impl Session {
         let dom = tb.into_dom();
         let title = extract_title(&dom);
         let done = NavDone {
+            // Rejeu « document » d'un corps bufferisé : les
+            // en-têtes de la réponse d'origine ne sont pas
+            // conservés par `PendingDownload` — la politique
+            // `Referer` vient des seules `<meta name=referrer>`
+            // (étape 132, borne assumée).
+            referrer_policy: meta_referrer_policy(&dom),
             url: dl.url,
             dom,
             html,

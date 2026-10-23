@@ -31,8 +31,8 @@ use async_trait::async_trait;
 
 use crate::error::{NetError, NetResult};
 use crate::http::{
-    CorsRequest, FetchCredentials, FetchDest, FetchMode, HttpTransport, Initiator, Method, Request,
-    Response, StreamedResponse,
+    CorsRequest, FetchCredentials, FetchDest, FetchMode, HttpTransport, Initiator, Method,
+    ReferrerPolicy, Request, Response, StreamedResponse,
 };
 use crate::url::Url;
 
@@ -319,7 +319,8 @@ impl HttpTransport for HstsTransport {
 // ---------------------------------------------------------------------
 
 /// Transport décorateur : calcule `Referer` et `Origin` par requête
-/// selon la politique *strict-origin-when-cross-origin*.
+/// sous `req.referrer_policy` — défaut
+/// *strict-origin-when-cross-origin* (étape 132).
 pub struct RefererTransport {
     inner: Arc<dyn HttpTransport>,
     /// URL de la page initiatrice — `None` = pas de Referer.
@@ -346,27 +347,53 @@ impl RefererTransport {
     }
 }
 
-/// `Referer:` calculé — strict-origin-when-cross-origin.
-fn referer_value(initiator: &Url, target: &Url) -> Option<String> {
-    // Pas de rétrogradation : page https → cible http = rien.
-    if initiator.scheme() == "https" && target.scheme() == "http" {
-        return None;
-    }
-    // Même origine → URL complète (sans fragment ni userinfo).
-    if initiator.origin() == target.origin() {
+/// `Referer:` calculé sous la `policy` de la requête
+/// (étape 132 — spec *Referrer-Policy* § « determine
+/// request's referrer »). « URL complète » = URL sans
+/// fragment ; « origine » = sérialisation `scheme://host
+/// [:port]/` ; « rétrogradation » = initiateur `https` →
+/// cible `http`.
+#[must_use]
+pub fn referer_value_for(initiator: &Url, target: &Url, policy: ReferrerPolicy) -> Option<String> {
+    let downgrade = initiator.scheme() == "https" && target.scheme() == "http";
+    let same_origin = initiator.origin() == target.origin();
+    let full = || {
         let mut s = initiator.as_str();
         if let Some(i) = s.find('#') {
             s.truncate(i);
         }
-        return Some(s);
-    }
-    // Cross-origin → origine seule.
-    match initiator.origin() {
+        s
+    };
+    let origin = || match initiator.origin() {
         crate::url::Origin::Tuple { scheme, host, port } => Some(match (scheme.as_str(), port) {
             ("http", 80) | ("https", 443) => format!("{scheme}://{host}/"),
             _ => format!("{scheme}://{host}:{port}/"),
         }),
         crate::url::Origin::Opaque => None,
+    };
+    match policy {
+        ReferrerPolicy::NoReferrer => None,
+        ReferrerPolicy::NoReferrerWhenDowngrade => (!downgrade).then(full),
+        ReferrerPolicy::SameOrigin => same_origin.then(full),
+        ReferrerPolicy::Origin => origin(),
+        ReferrerPolicy::StrictOrigin => (!downgrade).then(origin).flatten(),
+        ReferrerPolicy::OriginWhenCrossOrigin => {
+            if same_origin {
+                Some(full())
+            } else {
+                origin()
+            }
+        }
+        ReferrerPolicy::StrictOriginWhenCrossOrigin => {
+            if downgrade {
+                None
+            } else if same_origin {
+                Some(full())
+            } else {
+                origin()
+            }
+        }
+        ReferrerPolicy::UnsafeUrl => Some(full()),
     }
 }
 
@@ -400,8 +427,22 @@ fn referer_value_origin(u: &Url) -> Option<String> {
 /// décorateur. `GET` n'émet jamais `Origin` (méthode safe).
 #[must_use]
 pub fn initiator_headers(initiator: &Url, target: &Url, method: Method) -> Vec<(String, String)> {
+    initiator_headers_policy(initiator, target, method, ReferrerPolicy::default())
+}
+
+/// Variante d'[`initiator_headers`] sous une `policy`
+/// explicite (étape 132 — `Referrer-Policy:` de la page /
+/// `referrerpolicy=` de l'élément). `Origin:` n'est pas
+/// gouverné par la politique (pas une info de référent).
+#[must_use]
+pub fn initiator_headers_policy(
+    initiator: &Url,
+    target: &Url,
+    method: Method,
+    policy: ReferrerPolicy,
+) -> Vec<(String, String)> {
     let mut out = Vec::new();
-    if let Some(r) = referer_value(initiator, target) {
+    if let Some(r) = referer_value_for(initiator, target, policy) {
         out.push(("referer".to_string(), r));
     }
     if let Some(o) = origin_value(initiator, target, method) {
@@ -509,7 +550,8 @@ impl HttpTransport for RefererTransport {
                     .iter()
                     .any(|(n, _)| n.eq_ignore_ascii_case("referer"))
             {
-                if let Some(r) = referer_value(&i, &req.url) {
+                let policy = req.referrer_policy.unwrap_or_default();
+                if let Some(r) = referer_value_for(&i, &req.url, policy) {
                     req.headers.push(("Referer".to_string(), r));
                 }
             }
@@ -542,7 +584,8 @@ impl HttpTransport for RefererTransport {
                     .iter()
                     .any(|(n, _)| n.eq_ignore_ascii_case("referer"))
             {
-                if let Some(r) = referer_value(&i, &req.url) {
+                let policy = req.referrer_policy.unwrap_or_default();
+                if let Some(r) = referer_value_for(&i, &req.url, policy) {
                     req.headers.push(("Referer".to_string(), r));
                 }
             }
@@ -744,6 +787,7 @@ impl CorsTransport {
             // requête d'origine (Fetch : même referrer
             // policy sur l'`OPTIONS`).
             no_referer: req.no_referer,
+            referrer_policy: req.referrer_policy,
         };
         if !cors.unsafe_headers.is_empty() {
             p.headers.push((

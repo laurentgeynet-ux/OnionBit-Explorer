@@ -157,6 +157,12 @@ pub(crate) struct Tab {
     /// Requête qui a produit la page courante — `reload`
     /// réémet la vraie requête (un POST re-POSTe, étape 56).
     last_req: Option<Request>,
+    /// Politique `Referer` du document commis (étape 132)
+    /// — `Referrer-Policy:` de la réponse puis `<meta
+    /// name=referrer>` (décision prise à la nav, gouverne
+    /// toutes les requêtes émises par la page) ; `None` =
+    /// défaut plateforme. Gelée/restaurée avec le bfcache.
+    referrer_policy: Option<explorer_net::http::ReferrerPolicy>,
     /// Position dans `hist`.
     hist_idx: usize,
     /// La page **affichée** provient d'une navigation `push`
@@ -470,6 +476,10 @@ pub(crate) struct PageSnapshot {
     /// avec `images` (étape 129) — la purge composite les
     /// retrouve après restauration.
     frame_nodes: Vec<explorer_dom::NodeId>,
+    /// Politique `Referer` de la page gelée (étape 132) —
+    /// restaurée : les requêtes émises après un retour
+    /// bfcache suivent la même politique.
+    referrer_policy: Option<explorer_net::http::ReferrerPolicy>,
 }
 
 /// Session : transport + fontes injectés, onglets, viewport,
@@ -874,6 +884,7 @@ impl Session {
                 title: None,
                 hist: Vec::new(),
                 last_req: None,
+                referrer_policy: None,
                 hist_idx: 0,
                 hist_pending: false,
                 scroll_y: 0.0,
