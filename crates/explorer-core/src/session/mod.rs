@@ -384,6 +384,9 @@ pub(crate) struct Tab {
     /// JS (53f) — livrées au moteur à sa réinsertion, leurs
     /// callbacks tournent à la pompe suivante.
     js_pending_net: Vec<NetResponse>,
+    /// Réponses `crypto.subtle` tamponnées pendant le détachement
+    /// — même règle que `js_pending_net` (JS-C79).
+    js_pending_crypto: Vec<explorer_js::CryptoResponse>,
     /// Pushes d'attributs session→miroir survenus pendant le
     /// détachement JS (53f — `value`/`checked` des champs
     /// édités pendant le burst) : rejoués puis re-sérialisés
@@ -563,6 +566,12 @@ pub struct Session {
     /// ré-entrant dans le pipeline).
     net_tx: Sender<NetDone>,
     net_rx: Receiver<NetDone>,
+    /// Canal des résultats `crypto.subtle` (JS-C79) — les
+    /// tâches `spawn_blocking` de `drain_script_net` y livrent
+    /// leur `CryptoDone` (même discipline `pump_net` : intentions
+    /// drainées, jamais de callback ré-entrant).
+    crypto_tx: Sender<CryptoDone>,
+    crypto_rx: Receiver<CryptoDone>,
     /// Fetches script-initiés en vol, `(tab, handle)` →
     /// tâche tokio — `Abort` moteur ou fermeture d'onglet
     /// tuent la jointure.
@@ -656,6 +665,7 @@ impl Session {
     ) -> Self {
         let (events, _) = broadcast::channel(cfg.event_capacity.max(1));
         let (net_tx, net_rx) = channel();
+        let (crypto_tx, crypto_rx) = channel();
         // `Accept-Language` au-dessus de toute la pile (étape
         // 118) : la cellule démarre vide — l'hôte la pose via
         // `set_accept_language` (réglages app → API) et elle
@@ -699,6 +709,8 @@ impl Session {
             local_storage: HashMap::new(),
             net_tx,
             net_rx,
+            crypto_tx,
+            crypto_rx,
             net_tasks: HashMap::new(),
             max_script_net: cfg.max_script_net,
             max_timer_jobs: cfg.max_timer_jobs,
@@ -940,6 +952,7 @@ impl Session {
                 paint_detached: false,
                 deferred_inputs: VecDeque::new(),
                 js_pending_net: Vec::new(),
+                js_pending_crypto: Vec::new(),
                 js_pending_attrs: Vec::new(),
                 sync_floor: None,
                 media: Vec::new(),

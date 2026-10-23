@@ -95,9 +95,16 @@ pub(crate) fn crypto_get_random_values(
     }) else {
         return Err(e.type_error("getRandomValues needs a TypedArray"));
     };
-    // Quota spec : 65 536 octets max.
+    // Quota spec : 65 536 octets max — `QuotaExceededError`
+    // (shape `DOMException {name,message}` — approximation
+    // documentée, idem IDB ; `.name` est le champ testé).
     if len.saturating_mul(ta.size()) > 65_536 {
-        return Err(e.type_error("getRandomValues: quota exceeded"));
+        let o = e.new_object();
+        let n = e.str_val("QuotaExceededError");
+        e.set_own(o, "name", n, true);
+        let m = e.str_val("getRandomValues: more than 65536 bytes requested");
+        e.set_own(o, "message", m, true);
+        return Err(crate::heap::Thrown(Value::Obj(o)));
     }
     let n = len * ta.size();
     // Tirage hors emprunt du heap (le PRNG vit dans `e`) —

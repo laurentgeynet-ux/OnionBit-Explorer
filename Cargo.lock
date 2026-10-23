@@ -635,6 +635,7 @@ dependencies = [
  "idna",
  "psl",
  "rcgen",
+ "ring",
  "rustls",
  "thiserror",
  "tokio",

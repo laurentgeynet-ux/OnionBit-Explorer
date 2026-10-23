@@ -926,6 +926,19 @@ pub(crate) struct NetDone {
     pub(crate) out: NetResult<Response>,
 }
 
+/// Complétion d'une opération `crypto.subtle` (JS-C79) —
+/// produite par une tâche `spawn_blocking` (le calcul vit dans
+/// `explorer_net::crypto`, jamais dans le moteur), consommée
+/// par [`Session::pump_net`] → `deliver_crypto_response`.
+pub(crate) struct CryptoDone {
+    /// Onglet émetteur.
+    pub(crate) tab: TabId,
+    /// Corrélation côté moteur (`CryptoResponse::handle`).
+    pub(crate) handle: u64,
+    /// `Ok(octets)` ou `Err(message)` → `OperationError`.
+    pub(crate) result: Result<Vec<u8>, String>,
+}
+
 /// Verbe d'un `NetRequest` → `Method` — un verbe hors
 /// sous-ensemble usuel n'est pas émis (dégradation status 0).
 pub(crate) fn parse_method(s: &str) -> Option<Method> {

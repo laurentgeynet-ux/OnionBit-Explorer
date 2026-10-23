@@ -187,6 +187,7 @@ pub(crate) fn install(e: &mut Engine) {
         let crypto = e.new_object();
         e.add_method(crypto, "getRandomValues", crypto_get_random_values);
         e.add_method(crypto, "randomUUID", crypto_random_uuid);
+        crate::crypto::install_subtle(e, crypto);
         let tag = e.str_val("Crypto");
         e.set_own(crypto, crate::interp::SYM_TO_STRING_TAG, tag, false);
         e.set_own(g, "crypto", Value::Obj(crypto), false);

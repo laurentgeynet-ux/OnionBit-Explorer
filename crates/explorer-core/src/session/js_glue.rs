@@ -126,16 +126,21 @@ impl Session {
             entry.js_detached = None;
             let Some((jobs, mutated, mut eng)) = out else {
                 entry.js_pending_net.clear();
+                entry.js_pending_crypto.clear();
                 entry.js_pending_attrs.clear();
                 return 0;
             };
             if entry.nav_epoch != epoch {
                 entry.js_pending_net.clear();
+                entry.js_pending_crypto.clear();
                 entry.js_pending_attrs.clear();
                 return 0;
             }
             for resp in std::mem::take(&mut entry.js_pending_net) {
                 let _ = eng.deliver_net_response(resp);
+            }
+            for resp in std::mem::take(&mut entry.js_pending_crypto) {
+                let _ = eng.deliver_crypto_response(resp);
             }
             let attrs = std::mem::take(&mut entry.js_pending_attrs);
             // Les pushes sont **toujours** rejoués dans le

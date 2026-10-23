@@ -1136,6 +1136,86 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   ordre/réentrance, cycles,
   destroy, GC, timers).
 
+- **JS-C79 — `crypto.subtle`
+  par couture embedder**
+  (`explorer-jscore` +
+  `explorer-js`/`net`/`core` —
+  déclencheur : PKCE
+  `code_challenge` S256 des
+  logins OAuth2 réels) :
+  `crypto.subtle.digest(
+  algorithm, data)` →
+  `Promise` résolvant un
+  `ArrayBuffer`, algorithmes
+  `SHA-256`/`SHA-384`/`SHA-512`
+  normalisés côté moteur
+  (`'SHA-256'`, `'sha-256'`,
+  `'SHA256'` ou `{name}` —
+  `AlgorithmIdentifier`).
+  **Arbitrage « couture
+  embedder » tenu** : jscore
+  reste autonome zéro-
+  dépendance — il émet
+  `CryptoRequest{op,data}`
+  (octets **copiés** hors du
+  heap à l'appel, spec
+  `CopyBytes`) vers un
+  `CryptoTransport` injecté
+  (`install_crypto`, même
+  forme que `XhrTransport`) ;
+  la plateforme exécute —
+  `NetRequest::Crypto` drainé
+  par la session, calcul
+  `ring::digest` dans
+  `explorer_net::crypto`
+  (`spawn_blocking`, jamais
+  dans la boucle), résultat
+  livré par un canal
+  `CryptoDone` pompé dans
+  `poll_net` →
+  `JsEngine::deliver_crypto_
+  response` → la promesse
+  résout/rejette **dans le
+  realm émetteur** (pending
+  document-local, livraison
+  avec switch de contexte
+  comme XHR — C78 ; le
+  transport est engine-global
+  : les iframes en héritent
+  dès `context_new`). Erreurs
+  spec : algo inconnu ou
+  transport absent → rejet
+  `NotSupportedError` ; échec
+  plateforme → `OperationError`
+  ; `data` non-`BufferSource` →
+  `TypeError` **synchrone**
+  (conversion `WebIDL`, avant
+  la promesse). Ops clé
+  (`importKey`/`sign`/`verify`/
+  `encrypt`/`CryptoKey`) :
+  absents — la détection de
+  feature voit des méthodes
+  manquantes, pas des stubs.
+  `getRandomValues` : la borne
+  spec 64 Kio jette
+  désormais
+  `QuotaExceededError` (était
+  `TypeError`). **Dépendance**
+  : `ring` devient dep directe
+  d'`explorer-net` — même
+  provider que rustls,
+  exception `*-sys` déjà
+  consignée ADR-0002, zéro
+  ajout au lockfile. La même
+  couture sert le FFI Flutter.
+  Régressions `c79_*` (11
+  tests jscore) + vecteurs
+  FIPS 180-4 (`net::crypto`) +
+  2 tests session end-to-end
+  (vrai `SHA-256('abc')` dans
+  le DOM via la boucle de
+  pompe réelle).
+
 ### Fixed
 
 - **JS-C72 — adoption de promesse

@@ -45,6 +45,7 @@ mod ast;
 mod builtins;
 mod collections;
 mod context;
+mod crypto;
 mod dom;
 mod dom_host;
 mod error;
@@ -73,6 +74,7 @@ mod worker;
 mod xhr;
 
 pub use context::CtxId;
+pub use crypto::{CryptoOp, CryptoRequest, CryptoResponse, CryptoTransport, DigestAlgo};
 pub use dom::{
     CanvasOpRecord, CanvasState, Dom, JournalOp, MediaCmd, MediaElState, MediaReport, MediaState,
     NodeId, SerializeStats,

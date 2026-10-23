@@ -104,6 +104,11 @@ pub(crate) struct BrowsingContext {
     pub idb: crate::idb::IdbState,
     pub ws: crate::websocket::WsState,
     pub misc: crate::misc_apis::MiscState,
+    /// Opérations `crypto.subtle` en vol (JS-C79) — le
+    /// transport est engine-global (`Engine::crypto_
+    /// transport`), seule la file des promesses est
+    /// document-local.
+    pub crypto: crate::crypto::CryptoState,
     pub ce_upgrade_slot: Option<Value>,
     pub strict: bool,
     pub completion: Value,
@@ -175,6 +180,9 @@ impl BrowsingContext {
         self.idb.root_ids(ids);
         self.ws.root_ids(ids);
         self.misc.root_ids(ids);
+        for (_, promise) in &self.crypto.pending {
+            ids.push(*promise);
+        }
         if let Some((dom, cache)) = &self.dom_ctx {
             for &id in cache.borrow().values() {
                 ids.push(id);
@@ -330,6 +338,7 @@ impl BrowsingContext {
             idb: crate::idb::IdbState::default(),
             ws: crate::websocket::WsState::default(),
             misc: crate::misc_apis::MiscState::default(),
+            crypto: crate::crypto::CryptoState::default(),
             ce_upgrade_slot: None,
             strict: false,
             completion: Value::Undefined,

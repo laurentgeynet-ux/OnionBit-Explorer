@@ -143,6 +143,23 @@ pub(crate) fn new_ta(e: &mut Engine, ta: TaKind, bid: ObjId, offset: usize, len:
     }))
 }
 
+/// New `ArrayBuffer` possédant `bytes` — résultat de
+/// `crypto.subtle.digest` (JS-C79 : la promesse résout un
+/// `ArrayBuffer` brut, pas une vue).
+pub(crate) fn new_array_buffer(e: &mut Engine, bytes: Vec<u8>) -> Value {
+    let len = bytes.len();
+    let bid = e.heap.alloc_obj(Object {
+        proto: Value::Obj(e.protos.array_buffer),
+        props: Vec::new(),
+        kind: ObjKind::ByteBuf(bytes),
+        extensible: true,
+        elem_integrity: 0,
+        args_map: None,
+    });
+    mark_buffer(e, bid, false, len);
+    Value::Obj(bid)
+}
+
 /// New `Uint8Array` over `bytes` (own buffer) — partagé avec
 /// `TextEncoder.encode`/`TextDecoder`/`crypto` côté builtins.
 pub(crate) fn new_u8_array(e: &mut Engine, bytes: Vec<u8>) -> Value {

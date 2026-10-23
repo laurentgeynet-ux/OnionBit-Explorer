@@ -287,6 +287,9 @@ pub struct Engine {
     /// `reportError` bookkeeping (JS-C74) — protos, registre
     /// de canaux et messages livrés au checkpoint microtask.
     pub(crate) misc: crate::misc_apis::MiscState,
+    /// `crypto.subtle` bookkeeping (JS-C79) — opérations en
+    /// vol du contexte courant (handle → promesse).
+    pub(crate) crypto: crate::crypto::CryptoState,
     /// Élément en cours de construction par upgrade
     /// `customElements` (JS-C68) — le `super()` d'une classe
     /// `extends HTMLElement` le récupère comme `this` (rôle du
@@ -389,6 +392,10 @@ pub struct Engine {
     /// (JS-C78) — `frame.eval()` pousse le realm appelant, le
     /// `postMessage` de l'enfant lit son `source`/`origin` ici.
     pub(crate) native_caller: Vec<crate::context::CtxId>,
+    /// Fournisseur crypto injecté par l'embedder (JS-C79) —
+    /// **engine-global** : la plateforme est unique pour tous
+    /// les realms, chaque contexte en hérite dès `context_new`.
+    pub(crate) crypto_transport: Option<Rc<dyn crate::crypto::CryptoTransport>>,
 }
 
 /// Dernier match `RegExp` — `RegExp.$1…$9`/`input`/`lastMatch`/…
@@ -676,6 +683,8 @@ impl Engine {
             idb: crate::idb::IdbState::default(),
             ws: crate::websocket::WsState::default(),
             misc: crate::misc_apis::MiscState::default(),
+            crypto: crate::crypto::CryptoState::default(),
+            crypto_transport: None,
             ce_upgrade_slot: None,
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,
@@ -829,6 +838,7 @@ impl Engine {
         swap(&mut self.idb, &mut ctx.idb);
         swap(&mut self.ws, &mut ctx.ws);
         swap(&mut self.misc, &mut ctx.misc);
+        swap(&mut self.crypto, &mut ctx.crypto);
         swap(&mut self.ce_upgrade_slot, &mut ctx.ce_upgrade_slot);
         swap(&mut self.strict, &mut ctx.strict);
         swap(&mut self.completion, &mut ctx.completion);
@@ -1302,6 +1312,12 @@ impl Engine {
         .flatten()
         {
             ids.push(p);
+        }
+        // Promesses `crypto.subtle` en vol (JS-C79) — contexte
+        // courant ; les garés sont tracés dans
+        // `BrowsingContext::push_roots`.
+        for (_, promise) in &self.crypto.pending {
+            ids.push(*promise);
         }
         for (_, job) in &self.microtasks {
             match job {

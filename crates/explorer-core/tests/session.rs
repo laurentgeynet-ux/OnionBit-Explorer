@@ -7676,3 +7676,71 @@ async fn iframe_composite_survives_relayout() {
         "bitmap conservé au relayout"
     );
 }
+// ===== JS-C79 — `crypto.subtle` : couture embedder
+// (moteur → NetRequest::Crypto → `explorer_net::crypto` ring
+// → Promise résolue) =====
+
+/// La page exécute `crypto.subtle.digest('SHA-256', …)` de
+/// bout en bout : la requête traverse la file `NetRequest`,
+/// `spawn_blocking` calcule le vrai condensat `ring`, la
+/// promesse résout un `ArrayBuffer` — le script écrit le hex
+/// dans le DOM.
+#[tokio::test]
+async fn subtle_digest_sha256_end_to_end() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=\"r\">?</div>\
+         <script>crypto.subtle.digest('SHA-256',\
+         new TextEncoder().encode('abc'))\
+         .then(function(b){document.getElementById('r').textContent=\
+         Array.from(new Uint8Array(b),function(x){return x.toString(16).padStart(2,'0')}).join('')})\
+         .catch(function(e){document.getElementById('r').textContent='ERR:'+e.name})</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    // La tâche `spawn_blocking` livre sur `crypto_rx` — pompes
+    // bornées jusqu'à livraison (sous charge parallèle le
+    // premier yield peut précéder la fin du calcul).
+    let mut dump = String::new();
+    for _ in 0..50 {
+        s.pump_net().await;
+        dump = s.dom_dump(id).unwrap();
+        if dump.contains("ba7816bf") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        dump.contains("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+        "digest SHA-256('abc') attendu dans le DOM : {dump}"
+    );
+}
+
+/// Algorithme non supporté → promesse rejetée
+/// `NotSupportedError`, le script le voit en `.catch`.
+#[tokio::test]
+async fn subtle_digest_unknown_algo_rejects() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=\"r\">?</div>\
+         <script>crypto.subtle.digest('MD5',new Uint8Array(1))\
+         .then(function(){document.getElementById('r').textContent='ok'})\
+         .catch(function(e){document.getElementById('r').textContent=e.name})</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    let dump = s.dom_dump(id).unwrap();
+    assert!(
+        dump.contains("NotSupportedError"),
+        "rejet NotSupportedError attendu : {dump}"
+    );
+}

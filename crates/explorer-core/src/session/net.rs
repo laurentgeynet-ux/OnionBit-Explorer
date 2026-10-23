@@ -338,6 +338,37 @@ impl Session {
                         j.abort();
                     }
                 }
+                // Opération `crypto.subtle` (JS-C79) — pas une
+                // requête réseau : le calcul tourne en
+                // `spawn_blocking` (CPU bornée par la taille
+                // des données, copiées hors heap à l'émission)
+                // et livre sur `crypto_tx`, drainé par
+                // `poll_net` comme les `NetDone`. La promesse
+                // reste non-réentrante : jamais de livraison
+                // synchrone dans le drain.
+                NetRequest::Crypto { handle, op, data } => {
+                    let explorer_js::CryptoOp::Digest(algo) = op;
+                    let tx = self.crypto_tx.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let a = match algo {
+                            explorer_js::DigestAlgo::Sha256 => {
+                                explorer_net::crypto::CryptoAlgo::Sha256
+                            }
+                            explorer_js::DigestAlgo::Sha384 => {
+                                explorer_net::crypto::CryptoAlgo::Sha384
+                            }
+                            explorer_js::DigestAlgo::Sha512 => {
+                                explorer_net::crypto::CryptoAlgo::Sha512
+                            }
+                        };
+                        let result = Ok(explorer_net::crypto::digest(a, &data));
+                        let _ = tx.send(CryptoDone {
+                            tab,
+                            handle,
+                            result,
+                        });
+                    });
+                }
             }
         }
         // Échecs immédiats (bloquée/quota) : livrés comme un
@@ -384,6 +415,41 @@ impl Session {
             }
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après réponse réseau");
+            Self::sync_for_apply(eng.as_mut())
+        };
+        if let Some(s) = mutated {
+            self.queue_apply_sync(tab, s);
+        }
+        self.after_script(tab);
+    }
+
+    /// Livre un résultat `crypto.subtle` au moteur (JS-C79) —
+    /// même discipline que [`Self::deliver_net_response`] :
+    /// buffer si le moteur est détaché (réinséré au flush),
+    /// tour post-script complet (microtasks + resynchro +
+    /// drains — le handler `then` peut émettre de nouvelles
+    /// requêtes, crypto ou réseau).
+    fn deliver_crypto_response(&mut self, tab: TabId, resp: explorer_js::CryptoResponse) {
+        let mutated = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            if entry.js_detached.is_some() {
+                entry.js_pending_crypto.push(resp);
+                return;
+            }
+            let Some(eng) = entry.js.as_mut() else {
+                return;
+            };
+            if let Err(e) = eng.deliver_crypto_response(resp) {
+                tracing::debug!(tab, error = %e, "livraison crypto js");
+                let _ = self.events.send(CoreEvent::PipelineError {
+                    tab: Some(tab),
+                    message: e.to_string(),
+                });
+            }
+            let n = eng.run_pending();
+            tracing::trace!(tab, jobs = n, "jobs js après réponse crypto");
             Self::sync_for_apply(eng.as_mut())
         };
         if let Some(s) = mutated {
@@ -451,6 +517,22 @@ impl Session {
         let mut done = Vec::new();
         while let Ok(d) = self.net_rx.try_recv() {
             done.push(d);
+        }
+        // Résultats `crypto.subtle` (JS-C79) — même pompe :
+        // la livraison passe par `deliver_crypto_response`
+        // (buffer détaché + tour post-script inclus).
+        let mut crypto_done = Vec::new();
+        while let Ok(d) = self.crypto_rx.try_recv() {
+            crypto_done.push(d);
+        }
+        for d in crypto_done {
+            self.deliver_crypto_response(
+                d.tab,
+                explorer_js::CryptoResponse {
+                    handle: d.handle,
+                    result: d.result,
+                },
+            );
         }
         let n = done.len();
         for d in done {

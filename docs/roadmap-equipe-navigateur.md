@@ -4396,8 +4396,8 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   par realm — 17 tests `c78_*`.
   La couture `SubFrame`→contexte
   reste côté session (étape 131).
-- [ ] **JS-C79. `crypto.subtle`
-  (RustCrypto)** — *réservé à la
+- [x] **JS-C79. `crypto.subtle`
+  (couture embedder)** — *réservé à la
   piste JS par l'annonce cap-g1
   (journal 2026-10-23), reliquat
   non consommé du cap « web réel
@@ -4427,7 +4427,38 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   côté net/core, deps permises) →
   résultat en `Promise`. Bonus :
   la même couture sert le FFI
-  Flutter.
+  Flutter. **Livré** : `digest`
+  `SHA-256`/`SHA-384`/`SHA-512`
+  (`AlgorithmIdentifier` normalisé
+  — `{name}` et casse acceptés) ;
+  `CryptoTransport`/`CryptoRequest`/
+  `CryptoResponse` publics,
+  `install_crypto` engine-global
+  (les sous-contextes C78 en
+  héritent), pending document-local
+  livré dans le realm émetteur ;
+  `NetRequest::Crypto` →
+  `spawn_blocking` → canal
+  `CryptoDone` → `poll_net` ;
+  `NotSupportedError` (algo
+  inconnu, transport absent),
+  `OperationError` (échec
+  plateforme), `TypeError` sync
+  (`WebIDL`). Fournisseur = `ring`
+  (dep directe `explorer-net` —
+  déjà provider rustls ADR-0002,
+  zéro nouvelle entrée lockfile) ;
+  `getRandomValues` borne 64 Kio →
+  `QuotaExceededError` (était
+  `TypeError`). Ops à clé
+  (`importKey`/`sign`/`verify`/
+  `encrypt`/`CryptoKey`/`derive*`) :
+  absents, au besoin site — la
+  couture est prête (`CryptoOp`
+  extensible). Régressions `c79_*`
+  (11) + vecteurs FIPS `net::
+  crypto` + 2 tests session
+  end-to-end.
 
 ## Tâches continues
 

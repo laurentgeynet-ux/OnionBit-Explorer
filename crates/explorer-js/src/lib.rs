@@ -121,6 +121,20 @@ pub enum NetRequest {
         /// Identifiant de la requête à annuler.
         handle: u64,
     },
+    /// Opération `crypto.subtle` émise par le script (JS-C79) —
+    /// **pas une requête réseau** : la session l'exécute en
+    /// in-process (`explorer-net::crypto`) et livre le
+    /// résultat via [`JsEngine::deliver_crypto_response`].
+    /// C'est la couture embedder du moteur : jscore reste
+    /// zéro-dépendance, la plateforme fournit le calcul.
+    Crypto {
+        /// Identifiant rendu par `CryptoTransport::submit`.
+        handle: u64,
+        /// Opération normalisée (`Digest` + algo validé).
+        op: explorer_jscore::CryptoOp,
+        /// Octets source copiés hors du heap à l'appel.
+        data: Vec<u8>,
+    },
 }
 
 /// Réponse livrée au moteur pour un `handle` drainé —
@@ -139,6 +153,18 @@ pub struct NetResponse {
     pub headers: Vec<(String, String)>,
     /// Corps brut — `responseText`/`text()` le décode en lossy.
     pub body: Vec<u8>,
+}
+
+/// Résultat d'une opération `crypto.subtle` livrée au moteur
+/// (JS-C79) — `Ok` = octets résultat (digest → `ArrayBuffer`),
+/// `Err` = message → rejet `OperationError`. Miroir de
+/// `explorer_jscore::CryptoResponse`.
+#[derive(Debug, Clone)]
+pub struct CryptoResponse {
+    /// Identifiant rendu par [`NetRequest::Crypto`].
+    pub handle: u64,
+    /// `Ok(octets)` ou `Err(message)`.
+    pub result: Result<Vec<u8>, String>,
 }
 
 /// Chemin `(tag, index parmi les frères éléments de même
@@ -627,6 +653,18 @@ pub trait JsEngine: Send {
         Ok(())
     }
 
+    /// Livre le résultat d'une `NetRequest::Crypto` drainée :
+    /// la `Promise` `subtle.digest` se résout en `ArrayBuffer`
+    /// ou rejette `OperationError`. Défaut : `Ok(())` (moteur
+    /// sans backend crypto).
+    ///
+    /// # Errors
+    /// [`JsError::Uncaught`] si un handler `then` jette,
+    /// [`JsError::Dead`] si le moteur est inerte.
+    fn deliver_crypto_response(&mut self, _resp: CryptoResponse) -> Result<(), JsError> {
+        Ok(())
+    }
+
     /// Installe `localStorage`/`sessionStorage` : `local` est le
     /// snapshot **par origine** de la session (le moteur y écrit
     /// en direct — relire via [`Self::drain_storage`]),
@@ -713,6 +751,10 @@ pub use explorer_jscore::{is_bare_specifier, rewrite_bare_specifier};
 // JS-C77 — `Request.mode`/`Request.credentials` transportés par
 // `NetRequest::Fetch` (ré-export : le type reste unique).
 pub use explorer_jscore::{FetchCredentials, FetchMode};
+
+// JS-C79 — opération `crypto.subtle` transportée par
+// `NetRequest::Crypto` (ré-export : le type reste unique).
+pub use explorer_jscore::{CryptoOp, DigestAlgo};
 
 /// Commandes vers le thread moteur — valeurs sérialisables, aucun
 /// handle `Rc` ne traverse.
@@ -901,6 +943,10 @@ enum Cmd {
     },
     DeliverNet {
         resp: NetResponse,
+        tx: Sender<Result<(), JsError>>,
+    },
+    DeliverCrypto {
+        resp: CryptoResponse,
         tx: Sender<Result<(), JsError>>,
     },
     InstallStorage {
@@ -1405,6 +1451,14 @@ impl JsEngine for JscoreEngine {
         rx.recv().map_err(|_| JsError::Dead)?
     }
 
+    fn deliver_crypto_response(&mut self, resp: CryptoResponse) -> Result<(), JsError> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DeliverCrypto { resp, tx }).is_err() {
+            return Err(JsError::Dead);
+        }
+        rx.recv().map_err(|_| JsError::Dead)?
+    }
+
     fn install_storage(&mut self, local: std::collections::BTreeMap<String, String>) {
         let _ = self.tx.send(Cmd::InstallStorage { local });
     }
@@ -1610,6 +1664,15 @@ fn serve_side(
                 .map_err(|t| JsError::Uncaught(eng.describe(t.0)));
             tx.send(out).is_ok()
         }
+        Cmd::DeliverCrypto { resp, tx } => {
+            let out = eng
+                .deliver_crypto_response(explorer_jscore::CryptoResponse {
+                    handle: resp.handle,
+                    result: resp.result,
+                })
+                .map_err(|t| JsError::Uncaught(eng.describe(t.0)));
+            tx.send(out).is_ok()
+        }
         Cmd::InstallStorage { local } => {
             let map: explorer_jscore::Storage = std::rc::Rc::new(std::cell::RefCell::new(local));
             eng.install_storage(&map);
@@ -1686,6 +1749,10 @@ fn install_dom(
         }));
     }
     eng.install_xhr(std::rc::Rc::new(ChanXhr {
+        q: std::rc::Rc::clone(net_q),
+        next: std::cell::Cell::new(0),
+    }));
+    eng.install_crypto(std::rc::Rc::new(ChanCrypto {
         q: std::rc::Rc::clone(net_q),
         next: std::cell::Cell::new(0),
     }));
@@ -1820,6 +1887,31 @@ impl explorer_jscore::XhrTransport for ChanXhr {
 
     fn abort(&self, handle: u64) {
         self.q.borrow_mut().push(NetRequest::Abort { handle });
+    }
+}
+
+/// Fournisseur `crypto.subtle` vers la session (JS-C79) — même
+/// couture que [`ChanXhr`] : la requête est enfilée en
+/// `NetRequest::Crypto`, la réponse revient par
+/// `Cmd::DeliverCrypto`. Le calcul vit côté plateforme
+/// (`explorer-net`), jamais dans le moteur.
+struct ChanCrypto {
+    /// File partagée avec `DrainNet`.
+    q: std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    /// Prochain handle libre (compteur du contexte).
+    next: std::cell::Cell<u64>,
+}
+
+impl explorer_jscore::CryptoTransport for ChanCrypto {
+    fn submit(&self, req: explorer_jscore::CryptoRequest) -> u64 {
+        let handle = self.next.get();
+        self.next.set(handle + 1);
+        self.q.borrow_mut().push(NetRequest::Crypto {
+            handle,
+            op: req.op,
+            data: req.data,
+        });
+        handle
     }
 }
 
