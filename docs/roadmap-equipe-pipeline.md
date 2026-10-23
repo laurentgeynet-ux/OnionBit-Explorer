@@ -2085,6 +2085,20 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (`tests/text.rs`), flottants resserrés/élargis
   (`tests/block.rs`). Terrain : les 9 items de la nav
   weather.gov tiennent sur une ligne, « ABOUT » compris.
+
+- [x] **R-79. `DirFontSource` : génériques à nom espacé
+  jamais matchés** (couture NAV→PIPE, issue #9 résidu).
+  `map_generics` stockait le candidat brut (« times new
+  roman ») alors que `f.families` est normalisé
+  (`"timesnewroman"`) — `serif` tombait au repli
+  (première face scannée = sans) → le corps CERN restait
+  sans-serif malgré `default_family:"serif"` (R-75) ;
+  `sans-serif`/`monospace` survivaient par accident
+  (noms d'un mot). Fix NAV éprouvé en worktree :
+  `norm(pref)` au stockage — une ligne. Régression
+  `generic_a_nom_espace_resout_la_famille` (resolve +
+  fallback_for). Terrain : corps `info.cern.ch` en
+  serif — le résidu #9 est soldé côté PIPE.
   (binaire périmé = validation fantôme).
 
 ## Palier R-B — Contenu étranger, animation, canvas

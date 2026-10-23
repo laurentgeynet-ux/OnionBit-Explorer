@@ -7,6 +7,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **R-79 — `DirFontSource` : les
+  génériques à nom espacé ne
+  matchaient jamais** (couture
+  NAV→PIPE, issue #9 résidu) :
+  `map_generics` stockait le
+  candidat **brut**
+  (`"times new roman"`) alors que
+  `f.families` est normalisé
+  (`norm` retire espaces/casse →
+  `"timesnewroman"`) — `resolve`/
+  `fallback_for` comparant en
+  égalité stricte, tout générique
+  dont la famille retenue contient
+  un espace manquait le match :
+  `serif` tombait au repli (première
+  face scannée = sans) → corps
+  `info.cern.ch` rendu sans-serif
+  malgré `default_family:"serif"`
+  (R-75). `sans-serif`/`monospace`
+  survivaient par accident (noms
+  d'un seul mot). Fix : `norm(pref)`
+  au stockage — une ligne, aucune
+  API (diagnostic + fix éprouvés
+  par NAV en worktree `obe-probe`).
+  Régression
+  `generic_a_nom_espace_resout_
+  la_famille` (resolve +
+  fallback_for). Terrain : corps
+  CERN en serif, empattements
+  visibles.
+
 ### Added
 
 - **R-78 — `letter-spacing` en layout**

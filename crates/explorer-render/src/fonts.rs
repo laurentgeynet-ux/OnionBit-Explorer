@@ -156,8 +156,14 @@ impl DirFontSource {
         for (generic, prefs) in candidates {
             for pref in *prefs {
                 if self.index_of(pref).is_some() {
-                    self.generics
-                        .insert((*generic).to_string(), (*pref).to_string());
+                    // `pref` est stocké NORMALISÉ : `f.families`
+                    // l'est aussi (norm — espaces/casse retirés),
+                    // `resolve`/`fallback_for` comparent en
+                    // strict égal. Un nom à espace stocké brut
+                    // ("times new roman") ne matchait jamais —
+                    // serif muet, corps CERN sans-serif (issue
+                    // #9 résidu, sonde NAV `zz_font_probe`).
+                    self.generics.insert((*generic).to_string(), norm(pref));
                     break;
                 }
             }
@@ -535,6 +541,51 @@ mod tests {
         let _ = w.font_data(&req(&["F"], 700, true));
         let _ = w.font_data(&req(&["F"], 600, false)); // → 400
         let _ = w.font_data(&req(&["F"], 900, true)); // → 700i
+    }
+
+    #[test]
+    fn generic_a_nom_espace_resout_la_famille() {
+        // R-79 / issue #9 résidu : `map_generics` stockait le
+        // candidat brut ("times new roman") alors que
+        // `f.families` est normalisé ("timesnewroman") — tout
+        // générique dont la famille retenue contient un espace
+        // manquait le match : `resolve` tombait au repli
+        // (corps CERN rendu sans-serif, sonde NAV
+        // `zz_font_probe` : serif == sans-serif).
+        let mut src = DirFontSource {
+            fonts: vec![
+                FoundFont {
+                    families: vec!["fakesans".into()],
+                    data: Arc::new(fixture_ttf()),
+                    face_index: 0,
+                    weight: 400,
+                    italic: false,
+                },
+                FoundFont {
+                    families: vec!["timesnewroman".into()],
+                    data: Arc::new(fixture_ttf()),
+                    face_index: 0,
+                    weight: 400,
+                    italic: false,
+                },
+            ],
+            generics: HashMap::new(),
+            fallback: Some(0),
+        };
+        src.map_generics();
+        let f = src
+            .resolve(&req(&["serif"], 400, false))
+            .expect("serif doit résoudre");
+        assert_eq!(
+            f.families,
+            vec!["timesnewroman".to_string()],
+            "sans le fix : tombé au repli fakesans"
+        );
+        // `fallback_for` partage le même `want` — même fix.
+        let fb = src
+            .fallback_for('a', &req(&["serif"], 400, false))
+            .expect("repli serif");
+        assert_eq!(fb.1, 0);
     }
 
     #[test]
