@@ -529,3 +529,150 @@ async fn cache_eviction_bounded() {
         .unwrap();
     assert_eq!(cache.len(), 1, "len={}", cache.len());
 }
+
+// -- Cookies `Partitioned` — CHIPS (étape 127) --------------------------
+
+use explorer_net::cookies::{partition_key, request_partition};
+
+/// `Set-Cookie` d'un embed `https://cdn-widgets.net/` servi en
+/// sous-ressource de la page `page` — simule `CookieTransport`.
+fn set_embed(jar: &CookieJar, page: &str, header: &str) -> bool {
+    let mut req = Request::get(u("https://cdn-widgets.net/frame"));
+    req.initiator = Some(Initiator::Subresource(u(page)));
+    jar.set_from_header_ctx(&req.url, header, request_partition(&req))
+}
+
+#[test]
+fn chips_partitioned_requires_secure() {
+    let jar = CookieJar::new();
+    // `Partitioned` sans `Secure` → rejet net (pas de repli).
+    assert!(!set_embed(&jar, "https://site-a.test/", "p=1; Partitioned"));
+    assert!(set_embed(
+        &jar,
+        "https://site-a.test/",
+        "p=1; Partitioned; Secure"
+    ));
+}
+
+#[test]
+fn chips_sent_only_in_own_bucket() {
+    let jar = CookieJar::new();
+    assert!(set_embed(
+        &jar,
+        "https://site-a.test/",
+        "p=1; Partitioned; Secure"
+    ));
+    // Sous-ressource du même embed sous la MÊME page → envoyé.
+    let h = jar.header_for_ctx(
+        &req_from(
+            "https://cdn-widgets.net/frame",
+            Initiator::Subresource(u("https://site-a.test/")),
+        ),
+        true,
+    );
+    assert_eq!(names(&h), ["p"], "{h}");
+    // Même embed sous une AUTRE page top-level → seau
+    // différent → rien.
+    let h = jar.header_for_ctx(
+        &req_from(
+            "https://cdn-widgets.net/frame",
+            Initiator::Subresource(u("https://site-b.test/")),
+        ),
+        true,
+    );
+    assert_eq!(h, "", "{h}");
+    // Navigation top-level sur l'embed lui-même → seau =
+    // son propre site, pas celui de `site-a` → rien non plus.
+    let h = jar.header_for_ctx(
+        &req_from("https://cdn-widgets.net/", Initiator::TopLevelNav),
+        true,
+    );
+    assert_eq!(h, "", "{h}");
+}
+
+#[test]
+fn chips_partition_overrides_samesite() {
+    let jar = CookieJar::new();
+    // `SameSite=Strict` + `Partitioned` : la partition remplace
+    // la politique SameSite — envoyé cross-site dans son seau.
+    assert!(set_embed(
+        &jar,
+        "https://site-a.test/",
+        "p=1; Partitioned; Secure; SameSite=Strict"
+    ));
+    let h = jar.header_for_ctx(
+        &req_from(
+            "https://cdn-widgets.net/frame",
+            Initiator::Subresource(u("https://site-a.test/")),
+        ),
+        true,
+    );
+    assert_eq!(names(&h), ["p"], "{h}");
+}
+
+#[test]
+fn chips_same_name_two_buckets_coexist() {
+    let jar = CookieJar::new();
+    // Le même nom existe non partitionné (pose top-level via
+    // `set_from_header` = seau propre) ET partitionné sous
+    // `site-a` — deux entrées distinctes. `SameSite=None` est
+    // requis sur le cookie non partitionné pour qu'il soit
+    // éligible en contexte cross-site (le partitionnement ne
+    // lève que les restrictions du cookie Partitioned, pas
+    // celles des autres).
+    assert!(jar.set_from_header(
+        &u("https://cdn-widgets.net/"),
+        "k=plain; Secure; SameSite=None"
+    ));
+    assert!(set_embed(
+        &jar,
+        "https://site-a.test/",
+        "k=chip; Partitioned; Secure"
+    ));
+    assert_eq!(jar.len(), 2);
+    // Top-level → cookie non partitionné seul.
+    let h = jar.header_for_ctx(
+        &req_from("https://cdn-widgets.net/", Initiator::TopLevelNav),
+        true,
+    );
+    assert_eq!(h, "k=plain", "{h}");
+    // Sous-ressource sous `site-a` → LES DEUX seaux se joignent
+    // (ordre non spécifié → comparaison par noms).
+    let h = jar.header_for_ctx(
+        &req_from(
+            "https://cdn-widgets.net/frame",
+            Initiator::Subresource(u("https://site-a.test/")),
+        ),
+        true,
+    );
+    assert!(h.contains("k=chip") && h.contains("k=plain"), "{h}");
+}
+
+#[test]
+fn chips_partition_keys() {
+    // `request_partition` : sous-ressource → page ; navigation
+    // → cible ; sans initiateur → cible elle-même.
+    let sub = req_from(
+        "https://cdn.example/x",
+        Initiator::Subresource(u("https://a.example/")),
+    );
+    assert_eq!(
+        request_partition(&sub).as_deref(),
+        Some("https://a.example")
+    );
+    let nav = req_from("https://b.example/", Initiator::TopLevelNav);
+    assert_eq!(
+        request_partition(&nav).as_deref(),
+        Some("https://b.example")
+    );
+    let bare = Request::get(u("https://c.example/"));
+    assert_eq!(
+        request_partition(&bare).as_deref(),
+        Some("https://c.example")
+    );
+    // `partition_key` : registrable (sous-domaines → même seau),
+    // `data:` → None.
+    let pk = partition_key(&u("https://deep.sub.a.example/x"));
+    assert_eq!(pk.as_deref(), Some("https://a.example"));
+    assert_eq!(partition_key(&u("data:text/plain,x")), None);
+}

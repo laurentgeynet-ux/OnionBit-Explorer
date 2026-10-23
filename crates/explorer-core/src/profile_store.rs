@@ -262,6 +262,11 @@ struct RawCookie {
     http_only: bool,
     #[serde(default)]
     same_site: String,
+    /// Clé de partition CHIPS (étape 127) — `default` : les
+    /// profils écrits avant l'étape relisent `None`
+    /// (cookie non partitionné), aucune migration.
+    #[serde(default)]
+    partition: Option<String>,
 }
 
 impl RawCookie {
@@ -279,6 +284,7 @@ impl RawCookie {
             secure: self.secure,
             http_only: self.http_only,
             same_site: self.same_site,
+            partition: self.partition,
         }
     }
 }
@@ -295,6 +301,7 @@ impl From<&StoredCookie> for RawCookie {
             secure: c.secure,
             http_only: c.http_only,
             same_site: c.same_site.clone(),
+            partition: c.partition.clone(),
         }
     }
 }

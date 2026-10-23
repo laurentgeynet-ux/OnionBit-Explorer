@@ -5393,6 +5393,7 @@ async fn cookies_persist_across_restart() {
             secure: false,
             http_only: false,
             same_site: "lax".to_string(),
+            partition: None,
         }]),
     });
     let (mut s, t) = test_session();

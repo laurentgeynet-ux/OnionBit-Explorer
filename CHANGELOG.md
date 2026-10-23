@@ -565,6 +565,47 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   header_blocked` (le preflight
   `OPTIONS` part désormais —
   2 appels, même `error`).
+- **Étape 127 — cookies
+  `Partitioned` (CHIPS)**
+  (`explorer-net`, `explorer-core`
+  — cap « web réel sécurisé ») :
+  requis par les embeds
+  authentifiés modernes (widgets
+  de login, boutons tiers sous
+  blocage des cookies tiers).
+  Clé de jar étendue à
+  `(partition, domaine, chemin,
+  nom)` — `partition_key(url)`
+  = `"{scheme}://{registrable}"`,
+  `request_partition(req)` =
+  site de la page
+  (`Subresource`), de la cible
+  (navigations, outils). Pose :
+  `Partitioned` exige `Secure`
+  (rejet, pas dégradé) et se
+  range sous le seau de la page
+  initiatrice via
+  `set_from_header_ctx`.
+  Envoi : un cookie partitionné
+  n'entre que dans son seau
+  propre — la partition remplace
+  `SameSite` (spec CHIPS) ;
+  l'ordinaire suit la politique
+  existante. Câblé dans
+  `CookieTransport` (fetch +
+  stream), la capture
+  `Set-Cookie` XHR
+  (`NetDone.partition`) et
+  `document.cookie`. Persistance
+  profil : `StoredCookie`/
+  `RawCookie.partition`
+  (`serde(default)` — profils
+  antérieurs relus non
+  partitionnés, aucune
+  migration). Les homonymes
+  cohabitent par seau.
+  Régressions `chips_*`
+  (5 tests cookies_cache).
 
 - **JS-C72 — `indexedDB` +
   `caches` (Cache API)**

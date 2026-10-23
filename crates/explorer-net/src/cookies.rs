@@ -59,6 +59,13 @@ pub struct Cookie {
     pub http_only: bool,
     /// `SameSite`.
     pub same_site: SameSite,
+    /// Clé de partition CHIPS (étape 127) — `"{scheme}://
+    /// {registrable}"` du site top-level au moment de la pose ;
+    /// `None` = cookie non partitionné. Un cookie partitionné
+    /// n'est renvoyé que dans son seau ([`request_partition`]
+    /// égal), quelle que soit sa valeur `SameSite` — la
+    /// partition remplace la politique `SameSite` (spec CHIPS).
+    pub partition: Option<String>,
 }
 
 impl Cookie {
@@ -86,10 +93,14 @@ impl Default for CookieConfig {
     }
 }
 
-/// Clé de stockage : `(domain, path, name)` — deux cookies
-/// homonymes cohabitent sur des chemins différents.
+/// Clé de stockage : `(partition, domain, path, name)` — les
+/// homonymes cohabitent sur des chemins différents **et dans
+/// des partitions différentes** (CHIPS, étape 127 : le même
+/// nom existe une fois par site top-level, plus la forme
+/// non partitionnée).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Key {
+    partition: Option<String>,
     domain: String,
     path: String,
     name: String,
@@ -121,16 +132,40 @@ impl CookieJar {
     /// Traite un en-tête `Set-Cookie` pour `url`. Renvoie `true` si
     /// le cookie a été accepté — rejet silencieux sinon (le web est
     /// hostile : un cookie invalide se droppe, ne crashe pas).
+    ///
+    /// Sans contexte de page : un attribut `Partitioned` se range
+    /// sous le site de `url` elle-même (outil = top-level).
     pub fn set_from_header(&self, url: &Url, header: &str) -> bool {
-        self.set_from_header_at(url, header, SystemTime::now())
+        self.set_from_header_ctx(url, header, partition_key(url))
+    }
+
+    /// Variante contextuelle (CHIPS, étape 127) : `partition` =
+    /// clé du site top-level ([`request_partition`]) sous lequel
+    /// le cookie `Partitioned` est rangé — `None` pour un appelant
+    /// sans page (la pose se range alors sous le site de `url`,
+    /// comme [`Self::set_from_header`]).
+    pub fn set_from_header_ctx(&self, url: &Url, header: &str, partition: Option<String>) -> bool {
+        self.set_from_header_ctx_at(url, header, partition, SystemTime::now())
     }
 
     /// Variant datée — les tests passent un `now` fixe.
     pub fn set_from_header_at(&self, url: &Url, header: &str, now: SystemTime) -> bool {
-        let Some(cookie) = Self::parse(url, header, now) else {
+        self.set_from_header_ctx_at(url, header, partition_key(url), now)
+    }
+
+    /// Variante contextuelle datée de [`Self::set_from_header_ctx`].
+    pub fn set_from_header_ctx_at(
+        &self,
+        url: &Url,
+        header: &str,
+        partition: Option<String>,
+        now: SystemTime,
+    ) -> bool {
+        let Some(cookie) = Self::parse(url, header, partition, now) else {
             return false;
         };
         let key = Key {
+            partition: cookie.partition.clone(),
             domain: cookie.domain.clone(),
             path: cookie.path.clone(),
             name: cookie.name.clone(),
@@ -167,9 +202,12 @@ impl CookieJar {
     /// `Cookie:` pour `req` avec politique `SameSite` appliquée
     /// à l'envoi (étape 66, RFC 6265bis) : `Strict` exige
     /// same-site, `Lax` ajoute l'exception navigation top-level
-    /// sûre (`GET`/`HEAD`), `None` reste libre. Sans initiateur
-    /// (`req.initiator` vide) = envoi permissif — les requêtes
-    /// sans page (CLI, fakes) gardent le comportement historique.
+    /// sûre (`GET`/`HEAD`), `None` reste libre. Un cookie
+    /// **partitionné** (étape 127) n'entre que si sa clé égale
+    /// [`request_partition`]`(req)` — la partition remplace la
+    /// règle `SameSite`. Sans initiateur (`req.initiator`
+    /// vide) = envoi permissif — les requêtes sans page (CLI,
+    /// fakes) gardent le comportement historique.
     #[must_use]
     pub fn header_for_ctx(&self, req: &Request, for_http: bool) -> String {
         self.header_for_ctx_at(req, for_http, SystemTime::now())
@@ -178,9 +216,7 @@ impl CookieJar {
     /// Variant datée de [`Self::header_for_ctx`].
     #[must_use]
     pub fn header_for_ctx_at(&self, req: &Request, for_http: bool, now: SystemTime) -> String {
-        self.header_for_sel(&req.url, for_http, now, |c| {
-            same_site_allows(c, req.initiator.as_ref(), req)
-        })
+        self.header_for_sel(&req.url, for_http, now, |c| send_allows(c, req))
     }
 
     /// Variant datée de [`Self::header_for`].
@@ -190,7 +226,8 @@ impl CookieJar {
     }
 
     /// Corps partagé de `header_for*` — `extra` affine
-    /// l'admission de chaque cookie (politique `SameSite`).
+    /// l'admission de chaque cookie (politique `SameSite`
+    /// / partition CHIPS).
     fn header_for_sel(
         &self,
         url: &Url,
@@ -263,6 +300,7 @@ impl CookieJar {
             return false;
         }
         let key = Key {
+            partition: cookie.partition.clone(),
             domain: cookie.domain.clone(),
             path: cookie.path.clone(),
             name: cookie.name.clone(),
@@ -278,7 +316,12 @@ impl CookieJar {
     }
 
     /// Parse `Set-Cookie` → `Cookie` si la politique l'accepte.
-    fn parse(url: &Url, header: &str, now: SystemTime) -> Option<Cookie> {
+    fn parse(
+        url: &Url,
+        header: &str,
+        partition: Option<String>,
+        now: SystemTime,
+    ) -> Option<Cookie> {
         let mut parts = header.split(';');
         let (name, value) = parts.next()?.split_once('=')?;
         let name = name.trim();
@@ -298,7 +341,9 @@ impl CookieJar {
             secure: false,
             http_only: false,
             same_site: SameSite::default(),
+            partition: None,
         };
+        let mut partitioned = false;
 
         for attr in parts {
             let (k, v) = attr.trim().split_once('=').unwrap_or((attr.trim(), ""));
@@ -342,7 +387,23 @@ impl CookieJar {
                     "none" => SameSite::None,
                     _ => SameSite::Lax,
                 };
+            } else if k.eq_ignore_ascii_case("partitioned") {
+                partitioned = true;
             }
+        }
+
+        // CHIPS (étape 127) : `Partitioned` exige `Secure` —
+        // un cookie partitionné non sécurisé est rejeté, pas
+        // dégradé (le seau d'un cookie invalide serait flou).
+        if partitioned {
+            if !c.secure {
+                return None;
+            }
+            // Sans contexte explicite, la pose se range sous
+            // le site de l'URL elle-même (top-level = soi).
+            c.partition = Some(
+                partition.unwrap_or_else(|| format!("{}://{}", url.scheme(), registrable(&host))),
+            );
         }
 
         // Durcissements.
@@ -462,6 +523,42 @@ fn path_match(req_path: &str, cookie_path: &str) -> bool {
 /// top-level sûre (`GET`/`HEAD`) ; `None` = libre
 /// (`Secure` exigé à la pose). Sans initiateur = permissif
 /// (compat — requêtes sans page initiatrice).
+/// Clé de partition CHIPS d'une URL = site top-level
+/// `"{scheme}://{registrable}"` (étape 127). `None` hors
+/// `http(s)` — `data:`/`about:`/`file:` ne partitionnent pas.
+#[must_use]
+pub fn partition_key(url: &Url) -> Option<String> {
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    Some(format!("{}://{}", url.scheme(), registrable(&url.host())))
+}
+
+/// Seau CHIPS d'une requête (étape 127) — site top-level sous
+/// lequel un cookie `Partitioned` est rangé/comparé :
+/// navigation (`TopLevelNav`/`NavFrom`) → site de la **cible**
+/// (le nouveau document devient le top-level) ; sous-ressource
+/// → site de la page ; sans initiateur (outils) → site de la
+/// cible elle-même. `None` hors `http(s)`.
+#[must_use]
+pub fn request_partition(req: &Request) -> Option<String> {
+    match req.initiator.as_ref() {
+        Some(Initiator::Subresource(page)) => partition_key(page),
+        Some(Initiator::TopLevelNav | Initiator::NavFrom(_)) | None => partition_key(&req.url),
+    }
+}
+
+/// Admission d'un cookie à l'envoi : un cookie **partitionné**
+/// n'entre que dans son seau ([`request_partition`] égal — la
+/// partition remplace la politique `SameSite`, spec CHIPS) ;
+/// un cookie ordinaire suit [`same_site_allows`].
+fn send_allows(c: &Cookie, req: &Request) -> bool {
+    match &c.partition {
+        Some(p) => Some(p.as_str()) == request_partition(req).as_deref(),
+        None => same_site_allows(c, req.initiator.as_ref(), req),
+    }
+}
+
 fn same_site_allows(c: &Cookie, ini: Option<&Initiator>, req: &Request) -> bool {
     let Some(ini) = ini else { return true };
     let host = req.url.host();
@@ -593,8 +690,9 @@ impl HttpTransport for CookieTransport {
             req.headers.push(("Cookie".to_string(), cookie));
         }
         let resp = self.inner.fetch(&req).await?;
+        let partition = request_partition(&req);
         for v in resp.headers_all("set-cookie") {
-            let _ = self.jar.set_from_header(&req.url, v);
+            let _ = self.jar.set_from_header_ctx(&req.url, v, partition.clone());
         }
         Ok(resp)
     }
@@ -614,9 +712,10 @@ impl HttpTransport for CookieTransport {
             req.headers.push(("Cookie".to_string(), cookie));
         }
         let resp = self.inner.fetch_stream(&req).await?;
+        let partition = request_partition(&req);
         for (n, v) in &resp.headers {
             if n.eq_ignore_ascii_case("set-cookie") {
-                let _ = self.jar.set_from_header(&req.url, v);
+                let _ = self.jar.set_from_header_ctx(&req.url, v, partition.clone());
             }
         }
         Ok(resp)

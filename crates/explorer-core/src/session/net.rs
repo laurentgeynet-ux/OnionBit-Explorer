@@ -286,6 +286,7 @@ impl Session {
                         .map_or(explorer_net::http::FetchCredentials::SameOrigin, |c| {
                             c.credentials
                         });
+                    let partition = explorer_net::cookies::request_partition(&req);
                     let j = tokio::spawn(async move {
                         let out = tr.fetch(&req).await;
                         let _ = tx.send(NetDone {
@@ -295,6 +296,7 @@ impl Session {
                             credentials,
                             page_origin,
                             req_url,
+                            partition,
                             out,
                         });
                     });
@@ -377,8 +379,13 @@ impl Session {
             return;
         };
         if let Some(page) = page {
+            // `document.cookie` écrit dans le contexte de la
+            // page — un `Partitioned` posé par script se range
+            // sous le site de la page (étape 127).
+            let partition = explorer_net::cookies::partition_key(&page);
             for w in &writes {
-                self.cookies.set_from_header(&page, &strip_http_only(w));
+                self.cookies
+                    .set_from_header_ctx(&page, &strip_http_only(w), partition.clone());
             }
             if !writes.is_empty() {
                 self.persist_cookies();
@@ -429,7 +436,8 @@ impl Session {
             if cookie_ok {
                 if let Ok(resp) = &d.out {
                     for v in resp.headers_all("set-cookie") {
-                        self.cookies.set_from_header(&d.req_url, v);
+                        self.cookies
+                            .set_from_header_ctx(&d.req_url, v, d.partition.clone());
                     }
                 }
             }

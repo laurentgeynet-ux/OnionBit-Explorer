@@ -35,6 +35,7 @@ fn sc(name: &str, value: &str) -> StoredCookie {
         secure: false,
         http_only: false,
         same_site: "lax".to_string(),
+        partition: None,
     }
 }
 

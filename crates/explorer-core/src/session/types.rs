@@ -533,6 +533,10 @@ pub struct StoredCookie {
     /// `SameSite` — `"strict"`, `"lax"` ou `"none"`
     /// (inconnu restauré en `lax`).
     pub same_site: String,
+    /// Clé de partition CHIPS (étape 127) — `"{scheme}://
+    /// {registrable}"` du site top-level ; `None` = cookie
+    /// non partitionné.
+    pub partition: Option<String>,
 }
 
 /// `Cookie` filaire → forme persistée (expiration → secs
@@ -558,6 +562,7 @@ pub(crate) fn cookie_to_stored(c: &Cookie) -> StoredCookie {
             SameSite::None => "none",
         }
         .to_string(),
+        partition: c.partition.clone(),
     }
 }
 
@@ -580,6 +585,7 @@ pub(crate) fn stored_to_cookie(s: &StoredCookie) -> Cookie {
             "none" => SameSite::None,
             _ => SameSite::Lax,
         },
+        partition: s.partition.clone(),
     }
 }
 
