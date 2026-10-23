@@ -539,9 +539,23 @@ journal « livré ».
   `getElementsByName`, named getters `form.*`/`document.forms`.
   Repro à l'identique impossible (variante `/ml` servie par
   `escs` périmé — `jprobe` ressert le shell challenge PoW) :
-  fix sur la classe de faute, régressions `c76_*`. Reliquat
-  connu : le challenge enablejs reste killé par `mem_limit`
-  (PoW insatisfiable — lacune honnête JS-C65).
+  fix sur la classe de faute, régressions `c76_*`. **Clos
+  « borné par design » (vols `714a166`/`5e6fd4f`)** : série
+  de trois mesures bornes relevées — 512 Mio/5 M ops → mort
+  `heap` ×2 ; 2048 Mio/5 M ops → mort `ops` ×1 ; 2048 Mio/
+  200 M ops → mort `heap` ×2 de nouveau — le PoW `SG_SS`
+  est un **puits de ressources ouvert dimensionné pour des
+  moteurs JIT** (>2 Gio de heap ET >200 M ops dans un
+  interpréteur ~100× trop lent). L'espace d'exécution
+  post-challenge — là où la variante `Error: b` pourrait se
+  prononcer — est structurellement inatteignable par
+  design, pas par bug : `google.com/search` restera
+  `emsg=SG_REL` avec des `pipeline_error` `RangeError`
+  propres (protection JS-C65 = bon comportement produit,
+  page vivante). `MEM=0`/`OPS=0` refusé : risque OOM
+  machine, information attendue nulle (tendance monotone).
+  Classe `z()` couverte (C76 sur origin) — réouvrable si
+  un vol futur sert une variante sans `SG_SS`.
 - [x] ~~**Reliquat `Invalid base URL`**~~ → **résolu,
   JS-C64** : `import.meta.url` est désormais la liaison
   lexicale `IMPORT_META` de l'env du module *propriétaire*
