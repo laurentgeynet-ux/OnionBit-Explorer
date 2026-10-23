@@ -3101,6 +3101,109 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `template_content_is_fragment` (fragment, déplace
   enfants, identité stable, markup parsé).
 
+- [x] **JS-C59. Surface des events dispatchés — la
+  seconde implémentation d'`Event`** (trou remonté
+  par github.com après Étape 114 : la résolution
+  import-map réparée laisse les modules React
+  s'évaluer assez loin pour frapper
+  `TypeError: composedPath is not a function (on
+  Event)` ×3 dans `ser-*.js` — EventHost dispatché
+  n'avait que 3 méthodes là où `Event.prototype`
+  des events script-créés en a 5 ; même pattern
+  « deux chemins, deux surfaces » que la saga
+  fonte) :
+  - **`composedPath` réel** — chaîne
+    `target → ancêtres → #document` via
+    `Dom::ancestors` (ordre spec, `[0]` = cible) ;
+    `[]` hors dispatch (`currentTarget` null).
+  - **`eventPhase` réel** — `Cell` posé par
+    `propagate_event` : 1 capture / 2 at-target /
+    3 bubble / 0 hors dispatch ; `currentTarget`
+    repart à `null` en fin de marche (spec).
+  - **`stopPropagation` rectifié au passage** —
+    il tuait aussi les listeners *frères* du
+    nœud courant ; désormais seul
+    **`stopImmediatePropagation`** (nouveau,
+    flag `immediate` distinct) le fait, spec.
+  - **`preventDefault` honoré par
+    `cancelable`** — le dict `EventInit` (déjà
+    lu au constructeur) est relu à
+    `event_state_of` ; no-op spec sans flag.
+    `dispatchEvent` rend `!defaultPrevented`.
+  - **`isTrusted` distingué** — plateforme
+    (`dom_event*`, media) vrai, script
+    (`dispatchEvent`, `el.click()`) faux.
+  - **`timeStamp`** = `Instant` depuis la
+    construction de l'état (ms, pas epoch).
+  - **`composed`/`cancelable` lisibles** +
+    `detail` recopié (CustomEvent) ;
+    `cancelBubble = true` ≡ `stopPropagation`,
+    `returnValue = false` ≡ `preventDefault`
+    (legacy DOM0, `Host::set`).
+  - Convention moteur confirmée par sonde :
+    méthodes host = `invoke`-only, `typeof` →
+    `undefined` partout (`addEventListener`…)
+    — la discrimination se mesure à l'*appel*.
+  - **`Element.prototype` porte les méthodes en
+    *valeur*** — au re-vol github, les ×3
+    `composedPath` disparus laissent `call of
+    Undefined` dans `selector-observer` (`o =
+    Element.prototype.matches || …Selector`
+    → `o.call`) : le shim lit la *référence*
+    sur le proto, pas l'appel — or les méthodes
+    host invoke-only sont invisibles à la
+    lecture. `matches`/`closest` posés en
+    natives receveur-élément (`TypeError` sur
+    receveur non-Element, spec) + alias
+    `matchesSelector`/`webkit`/`moz`/`o`/`ms`
+    au bras invoke des éléments.
+  Mesure sonde `zz_gap_probe` : `4|main` chemin
+  complet, frère +10 survit à `stopPropagation`
+  (11) mais meurt à `stopImmediatePropagation`
+  (1), `preventDefault` `false|true` selon
+  `cancelable`. Régression
+  `event_dispatche_surface_honnete` (4 blocs).
+  Résidu noté : le proto `Event` script-créé
+  ignore `cancelable` dans `preventDefault`
+  (déviation pré-existante, autre chemin).
+
+- [x] **JS-C60. `/` après `)` de clause =
+  regex** (trou remonté par github.com après
+  Étape 114 : `SyntaxError at 2:56320`
+  affichée `module «landing-pages-*.js»` —
+  bissection réelle : le coupable est la dep
+  `ns-*.js`, `if (o<128)
+  /[!#$&-;=?-Z_a-z~]/.test(…)` ; le nom de
+  l'entrée masquait la source fautive) :
+  - **Lexeur** : pile `clause_parens` — le
+    token précédant chaque `(` est mémorisé ;
+    au `)`, `if`/`while`/`for`/`switch`/
+    `with`/`catch` réarment `expect_operand`
+    → `/` = regex. Spec : la clause fermée,
+    ce qui suit est un statement, la division
+    y est impossible. `return (x)/2`,
+    `(expr)/n`, appels `f(x)/n` restent
+    divisions (parens de groupe — `return`
+    & co. hors `clause_kw`).
+  - **Diagnostic** : `instantiate` suffixe
+    `SyntaxError` du `spec` fautif
+    (`— «ns-*.js»`) — `js_glue` préfixe le
+    nom de l'*entrée* ; sans suffixe, la
+    source réelle est introuvable dans un
+    graphe de ~50 chunks webpack.
+  - Déniais de mesure : `(0,o.m)()`
+    innocenté, fetch byte-identique, fichier
+    100 % ASCII, source saine parsée hors
+    session — le défaut était dans la
+    disjonction lexicale, pas le transport.
+  Régression `regex_after_clause_paren`
+  (lang.rs, 5 cas). Vol github : la
+  `SyntaxError` disparaît — résidus
+  `sym1` (catalyst, receveur undefined en
+  frontière native) + `set is not a
+  function (on Object)` (nouveau, modules
+  allant plus loin).
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

@@ -239,7 +239,16 @@ impl Engine {
         }
         let prog =
             parser::parse_module_in(src, self.nest_limit, Some(Rc::from(spec))).map_err(|err| {
-                Thrown(self.error_value(self.protos.syntax_error, "SyntaxError", &err.to_string()))
+                // La faute porte le nom du module fautif, pas celui
+                // de l'entrée — `session` préfixe déjà « module
+                // « entry » », sans lui la source est introuvable
+                // (debug réel : erreur attribuée à landing-pages
+                // alors que le coupable était une dep `ns-*.js`).
+                Thrown(self.error_value(
+                    self.protos.syntax_error,
+                    "SyntaxError",
+                    &format!("{err} — «{spec}»"),
+                ))
             })?;
         let env = Env::local(self.global_env.clone());
         let idx = self.modules.len();

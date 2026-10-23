@@ -344,10 +344,15 @@ impl Lexer {
     }
 
     fn run(&mut self) -> Result<Vec<Token>> {
-        let mut out = Vec::new();
+        let mut out: Vec<Token> = Vec::new();
         // `/` is division after an operand, a regex literal start
         // otherwise — the classic heuristic (no parser feedback).
         let mut expect_operand = true;
+        // `)` lève l'ambiguïté par le token précédant son `(` :
+        // `if (…)`/`while (…)`/… clôturent une clause, ce qui suit
+        // est un statement — `/` y est toujours regex, jamais
+        // division (`if (o<128) /re/.test(…)` réel sur github).
+        let mut clause_parens: Vec<bool> = Vec::new();
         loop {
             let newline_before = self.skip_trivia()?;
             let (line, col) = (self.line, self.col);
@@ -367,6 +372,12 @@ impl Lexer {
                 Some(_) => Tok::P(self.punct()?),
             };
             expect_operand = !ends_operand(&tok);
+            if tok == Tok::P(P::LParen) {
+                clause_parens
+                    .push(matches!(out.last().map(|t| &t.tok), Some(Tok::Kw(k)) if clause_kw(k)));
+            } else if tok == Tok::P(P::RParen) && clause_parens.pop().unwrap_or(false) {
+                expect_operand = true;
+            }
             let is_eof = tok == Tok::Eof;
             out.push(Token {
                 tok,
@@ -1142,6 +1153,17 @@ impl Lexer {
         }
         Ok(p)
     }
+}
+
+/// Mots-clés dont la `(` ouvre une clause, pas une expression :
+/// après leur `)`, `/` est un début de regex (`if (x) /re/`),
+/// jamais une division. `return`/`case`/`typeof`/… absents —
+/// leurs parens groupent une expression (`return (x)/2` = div).
+fn clause_kw(k: &Kw) -> bool {
+    matches!(
+        k,
+        Kw::If | Kw::While | Kw::For | Kw::Switch | Kw::With | Kw::Catch
+    )
 }
 
 /// Does this token end an operand position — i.e. a following `/`

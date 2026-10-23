@@ -9,6 +9,37 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **JS-C60 — `/` après `)` de clause :
+  regex, pas division** (`explorer-jscore`,
+  trou remonté par github.com après Étape
+  114 — `SyntaxError at 2:56320` attribuée
+  à `landing-pages-*.js` alors que le
+  coupable était sa dep `ns-*.js` :
+  `if (o<128) /[!#$&-;=?-Z_a-z~]/.test(…)`
+  tuait le parse, la `/` lue division
+  après `)` classé operand-end). Le
+  lexeur empile désormais le token
+  précédant chaque `(` ; au `)`, les
+  mots-clés de clause (`if`/`while`/
+  `for`/`switch`/`with`/`catch`)
+  réarment `expect_operand` — spec :
+  ce qui suit la clause est un
+  statement, jamais une division.
+  `return (x)/2` et `(expr)/n`
+  restent divisions (parens de
+  groupe). Diagnostic réparé au
+  passage : `instantiate` suffixe
+  le `SyntaxError` du module fautif
+  (`— «spec»`) — la session préfixe
+  l'entrée, sans lui la source est
+  introuvable dans un graphe de 50
+  chunks. Régression
+  `regex_after_clause_paren`
+  (5 cas : clause→regex, groupe→div,
+  return/while/for). Vol github :
+  `SyntaxError` disparu, 5→2 erreurs
+  résiduelles (`sym1` + `set`).
+
 - **JS-C59 — surface des events dispatchés :
   la seconde implémentation d'`Event` alignée
   sur le proto** (`explorer-jscore`, trou

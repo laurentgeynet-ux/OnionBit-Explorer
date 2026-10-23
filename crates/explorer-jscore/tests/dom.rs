@@ -1817,6 +1817,84 @@ fn dom_interface_constructors() {
     );
 }
 
+/// Surface des events *dispatchés* (host object, JS-C59 — trou
+/// remonté par github.com : `composedPath is not a function`) :
+/// chemin réel, phases, trusted, flags — le chemin script-créé
+/// (`new Event` → `Event.prototype`) était déjà couvert par
+/// `dom_interface_constructors`.
+#[test]
+fn event_dispatche_surface_honnete() {
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r='';var el=document.getElementById('main');\
+             el.addEventListener('x',function(e){\
+             var p=e.composedPath();\
+             r=p.length+'|'+p[0].id+'|'+e.eventPhase+'|'+e.isTrusted+'|'+\
+             (typeof e.timeStamp)+'|'+(e.timeStamp>=0)});\
+             el.dispatchEvent(new Event('x',{bubbles:true}));\
+             r=r+'|'+(new Event('x').composedPath().length)",
+            "r"
+        ),
+        "4|main|2|false|number|true|0"
+    );
+    // `stopPropagation` épargne les listeners frères du nœud
+    // (spec) ; `stopImmediatePropagation` les tue. L'ancêtre
+    // meurt dans les deux cas.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r=0;var el=document.getElementById('main');\
+             el.addEventListener('x',function(e){e.stopPropagation();r+=1});\
+             el.addEventListener('x',function(e){r+=10});\
+             document.body.addEventListener('x',function(e){r+=100});\
+             el.dispatchEvent(new Event('x',{bubbles:true}));r",
+            "r"
+        ),
+        "11"
+    );
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var r=0;var el=document.getElementById('main');\
+             el.addEventListener('x',function(e){e.stopImmediatePropagation();r+=1});\
+             el.addEventListener('x',function(e){r+=10});\
+             document.body.addEventListener('x',function(e){r+=100});\
+             el.dispatchEvent(new Event('x',{bubbles:true}));r",
+            "r"
+        ),
+        "1"
+    );
+    // `preventDefault` est no-op sans `cancelable` (spec) ;
+    // `dispatchEvent` rend `!defaultPrevented`.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var el=document.getElementById('main');\
+             el.addEventListener('x',function(e){e.preventDefault()});\
+             var r=(!el.dispatchEvent(new Event('x')))+'|'+\
+             (!el.dispatchEvent(new Event('x',{cancelable:true})))",
+            "r"
+        ),
+        "false|true"
+    );
+    // `Element.prototype.matches` en *valeur* — les shims
+    // lisent la référence puis `.call(el,…)` (selector-observer
+    // github, JS-C59) ; receveur non-Element → TypeError.
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var o=Element.prototype.matches||Element.prototype.msMatchesSelector;\
+             var r=typeof o+'|'+o.call(document.getElementById('main'),'#main')+'|'+\
+             o.call(document.getElementById('main'),'#nope')+'|'+\
+             Element.prototype.closest.call(document.getElementById('main'),'body').tagName;\
+             try{Element.prototype.matches.call(document,'x')}catch(e){r+='|'+e.name}",
+            "r"
+        ),
+        "function|true|false|BODY|TypeError"
+    );
+}
+
 #[test]
 fn custom_elements_registry() {
     // `customElements` — registre minimal (JS-C56, github.com).

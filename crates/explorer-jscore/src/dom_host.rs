@@ -367,11 +367,106 @@ pub(crate) struct EventState {
     target: Cell<NodeId>,
     current: Cell<Option<NodeId>>,
     bubbles: Cell<bool>,
+    /// `cancelable` (spec `EventInit`) — `preventDefault` est
+    /// no-op sans lui.
+    cancelable: Cell<bool>,
+    /// `composed` (spec `EventInit`) — traversée d'ombres ; sans
+    /// shadow DOM, flag purement lisible.
+    composed: Cell<bool>,
+    /// `isTrusted` (spec) — plateforme (`dom_event*`) vrai,
+    /// script (`dispatchEvent`, `el.click()`) faux.
+    trusted: bool,
+    /// `stopPropagation` — la marche vers les *autres* nœuds
+    /// cesse ; les listeners frères du nœud courant finissent
+    /// leur passe (spec, contrairement à `immediate`).
     stopped: Cell<bool>,
+    /// `stopImmediatePropagation` — tue aussi les listeners
+    /// frères du nœud courant. Pose aussi `stopped`.
+    immediate: Cell<bool>,
     prevented: Cell<bool>,
+    /// `eventPhase` : 0 hors dispatch, 1 capture, 2 at-target,
+    /// 3 bubble — posé par `propagate_event`.
+    phase: Cell<u8>,
+    /// Origine du `timeStamp` — ms depuis la construction de
+    /// l'état (Instant, pas epoch : la spec compte depuis la
+    /// création de l'event relativement à l'origine temps).
+    created: std::time::Instant,
     /// Props plateforme (`key`, `code`, `keyCode`…) — résolues
     /// par l'`EventHost` après les champs du cœur.
     props: Vec<(String, Value)>,
+}
+
+/// Flags d'initialisation d'un event (spec `EventInit` +
+/// `isTrusted` interne — plateforme vs script).
+#[allow(clippy::struct_excessive_bools)] // forme WebIDL `EventInit`.
+#[derive(Clone, Copy)]
+struct EventFlags {
+    bubbles: bool,
+    cancelable: bool,
+    composed: bool,
+    /// `isTrusted` (spec) — plateforme (`dom_event*`) vrai,
+    /// script (`dispatchEvent`, `el.click()`) faux.
+    trusted: bool,
+}
+
+/// État event neuf — `created` marque la « construction » pour
+/// `timeStamp` (approximation honnête : l'état naît au dispatch,
+/// quasi synchrone de la création JS dans les flux observés).
+fn make_event_state(
+    ty: &str,
+    target: NodeId,
+    flags: EventFlags,
+    props: Vec<(String, Value)>,
+) -> Rc<EventState> {
+    Rc::new(EventState {
+        ty: RefCell::new(ty.to_string()),
+        target: Cell::new(target),
+        current: Cell::new(None),
+        bubbles: Cell::new(flags.bubbles),
+        cancelable: Cell::new(flags.cancelable),
+        composed: Cell::new(flags.composed),
+        trusted: flags.trusted,
+        stopped: Cell::new(false),
+        immediate: Cell::new(false),
+        prevented: Cell::new(false),
+        phase: Cell::new(0),
+        created: std::time::Instant::now(),
+        props,
+    })
+}
+
+/// Flags `cancelable`/`composed` par défaut des events
+/// plateforme (UI Events) — les interactifs (click, keydown…)
+/// sont annulables et traversants ; les états de focus,
+/// chargement et défilement ne le sont pas.
+fn platform_event_flags(ty: &str) -> (bool, bool) {
+    const NON_CANCELABLE: &[&str] = &[
+        "focus",
+        "blur",
+        "focusin",
+        "focusout",
+        "load",
+        "error",
+        "resize",
+        "scroll",
+        "DOMContentLoaded",
+        "readystatechange",
+        "abort",
+    ];
+    const NON_COMPOSED: &[&str] = &[
+        "focus",
+        "blur",
+        "focusin",
+        "focusout",
+        "load",
+        "error",
+        "resize",
+        "scroll",
+        "DOMContentLoaded",
+        "readystatechange",
+        "abort",
+    ];
+    (!NON_CANCELABLE.contains(&ty), !NON_COMPOSED.contains(&ty))
 }
 
 /// DOM `Event` host object (from `document.createEvent` +
@@ -665,6 +760,29 @@ impl Engine {
             }
             self.set_own(g, name, f, false);
         }
+        // `Element.prototype` porte `matches`/`closest` en
+        // *valeurs* : les shims lisent la référence de méthode
+        // (`o = Element.prototype.matches || i.msMatchesSelector`
+        // — selector-observer github.com) puis l'appellent via
+        // `.call(el,…)` ; les méthodes host invoke-only sont
+        // invisibles à la lecture. Les alias pré-standards
+        // `*MatchesSelector` complètent la détection.
+        if let Some(Value::Obj(cid)) = self.get_prop(g, "Element") {
+            if let Some(Value::Obj(pid)) = self.get_prop(cid, "prototype") {
+                for (k, f2) in [
+                    ("matches", element_matches as crate::heap::NativeFn),
+                    ("matchesSelector", element_matches),
+                    ("webkitMatchesSelector", element_matches),
+                    ("mozMatchesSelector", element_matches),
+                    ("oMatchesSelector", element_matches),
+                    ("msMatchesSelector", element_matches),
+                    ("closest", element_closest),
+                ] {
+                    let m = self.native_fn(k, f2);
+                    self.set_own(pid, k, m, true);
+                }
+            }
+        }
         // `document` hérite de `Document.prototype` — les sites
         // monkey-patchent le proto DOM (mesuré dev.to :
         // `Document.prototype.ready = new Promise(…)` puis
@@ -903,15 +1021,14 @@ impl Engine {
                 (k.clone(), v)
             })
             .collect();
-        let state = Rc::new(EventState {
-            ty: RefCell::new(ty.to_string()),
-            target: Cell::new(node),
-            current: Cell::new(None),
-            bubbles: Cell::new(true),
-            stopped: Cell::new(false),
-            prevented: Cell::new(false),
-            props,
-        });
+        let (cancelable, composed) = platform_event_flags(ty);
+        let flags = EventFlags {
+            bubbles: true,
+            cancelable,
+            composed,
+            trusted: true,
+        };
+        let state = make_event_state(ty, node, flags, props);
         self.propagate_event(&dom, &cache, &state)?;
         // Event dispatch is a job boundary — drain queued reactions.
         self.run_microtasks()?;
@@ -1050,15 +1167,19 @@ impl Engine {
         node: NodeId,
         ty: &str,
     ) -> JsResult<()> {
-        let state = Rc::new(EventState {
-            ty: RefCell::new(ty.to_string()),
-            target: Cell::new(node),
-            current: Cell::new(None),
-            bubbles: Cell::new(false),
-            stopped: Cell::new(false),
-            prevented: Cell::new(false),
-            props: Vec::new(),
-        });
+        // Media : non-bubblant, non-annulable, non-traversant ;
+        // déclenché par le pipeline de lecture → `trusted`.
+        let state = make_event_state(
+            ty,
+            node,
+            EventFlags {
+                bubbles: false,
+                cancelable: false,
+                composed: false,
+                trusted: true,
+            },
+            Vec::new(),
+        );
         self.propagate_event(dom, cache, &state)
     }
 
@@ -1071,15 +1192,21 @@ impl Engine {
         node: NodeId,
         ty: &str,
     ) -> JsResult<()> {
-        let state = Rc::new(EventState {
-            ty: RefCell::new(ty.to_string()),
-            target: Cell::new(node),
-            current: Cell::new(None),
-            bubbles: Cell::new(true),
-            stopped: Cell::new(false),
-            prevented: Cell::new(false),
-            props: Vec::new(),
-        });
+        // `el.click()` & co sont script-initiés → `trusted:false`
+        // (spec `isTrusted`), flags par type via
+        // `platform_event_flags`.
+        let (cancelable, composed) = platform_event_flags(ty);
+        let state = make_event_state(
+            ty,
+            node,
+            EventFlags {
+                bubbles: true,
+                cancelable,
+                composed,
+                trusted: false,
+            },
+            Vec::new(),
+        );
         self.propagate_event(dom, cache, &state)
     }
 
@@ -1094,21 +1221,29 @@ impl Engine {
         let path = dom.borrow().ancestors(target); // parent … root
         let ev_val = self.event_value(dom, cache, ev);
         // Capture: root → parent (capture listeners only).
+        ev.phase.set(1);
         for &n in path.iter().rev() {
             if ev.stopped.get() {
-                return Ok(());
+                break;
             }
             ev.current.set(Some(n));
             self.fire_listeners(dom, cache, n, ev, &ev_val, true)?;
         }
         // At target: capture listeners, then bubble listeners/on*.
-        ev.current.set(Some(target));
-        self.fire_listeners(dom, cache, target, ev, &ev_val, true)?;
+        // `stopped` posé en capture court-circuite la cible (spec) ;
+        // à la cible seul `immediate` tue la seconde passe — les
+        // listeners de la cible forment un seul groupe (spec).
         if !ev.stopped.get() {
-            self.fire_listeners(dom, cache, target, ev, &ev_val, false)?;
+            ev.phase.set(2);
+            ev.current.set(Some(target));
+            self.fire_listeners(dom, cache, target, ev, &ev_val, true)?;
+            if !ev.immediate.get() {
+                self.fire_listeners(dom, cache, target, ev, &ev_val, false)?;
+            }
         }
         // Bubble: parent → root.
-        if ev.bubbles.get() {
+        if ev.bubbles.get() && !ev.stopped.get() {
+            ev.phase.set(3);
             for &n in &path {
                 if ev.stopped.get() {
                     break;
@@ -1117,6 +1252,10 @@ impl Engine {
                 self.fire_listeners(dom, cache, n, ev, &ev_val, false)?;
             }
         }
+        // Spec : hors dispatch, `currentTarget`/`eventPhase` → 0 —
+        // et `composedPath` redevient `[]`.
+        ev.phase.set(0);
+        ev.current.set(None);
         Ok(())
     }
 
@@ -1148,14 +1287,16 @@ impl Engine {
         };
         let this = node_value(self, dom, cache, node);
         for f in fns {
-            if ev.stopped.get() {
+            // Spec : `stopPropagation` laisse finir les listeners
+            // frères du nœud ; seul `immediate` les tue.
+            if ev.immediate.get() {
                 break;
             }
             if self.is_callable(f) {
                 self.call_value(f, this, &[*ev_val])?;
             }
         }
-        if !capture && !ev.stopped.get() {
+        if !capture && !ev.immediate.get() {
             let key = format!("on{ty}");
             // Prop scriptée (`el.onclick = f`) prioritaire —
             // dernier écrivain gagne, l'attribut est "écrit"
@@ -1498,15 +1639,17 @@ impl Host for DocumentHost {
             // `document.createEvent('HTMLEvents')` + `initEvent` —
             // the old-school event constructor path.
             "createEvent" => {
-                let st = Rc::new(EventState {
-                    ty: RefCell::new(String::new()),
-                    target: Cell::new(0),
-                    current: Cell::new(None),
-                    bubbles: Cell::new(false),
-                    stopped: Cell::new(false),
-                    prevented: Cell::new(false),
-                    props: Vec::new(),
-                });
+                let st = make_event_state(
+                    "",
+                    0,
+                    EventFlags {
+                        bubbles: false,
+                        cancelable: false,
+                        composed: false,
+                        trusted: false,
+                    },
+                    Vec::new(),
+                );
                 Ok(Some(e.new_host_object(Rc::new(EventHost {
                     dom: self.dom.clone(),
                     cache: self.cache.clone(),
@@ -2311,6 +2454,23 @@ impl Host for NodeHost {
                 };
                 return Ok(Some(Value::Num(f64::from(px))));
             }
+            // Références de méthode — les shims lisent
+            // `o = el.matches || el.msMatchesSelector`
+            // (selector-observer github.com : `o.call(e,t)`)
+            // puis invoquent via `.call`/apply ; les méthodes
+            // host invoke-only sont invisibles à la lecture.
+            // La native prend son `this` du receveur d'appel.
+            "matches"
+            | "matchesSelector"
+            | "webkitMatchesSelector"
+            | "mozMatchesSelector"
+            | "oMatchesSelector"
+            | "msMatchesSelector" => {
+                return Ok(Some(e.native_fn("matches", element_matches)));
+            }
+            "closest" => {
+                return Ok(Some(e.native_fn("closest", element_closest)));
+            }
             _ => {}
         }
         // Attribute-mapped props.
@@ -2599,15 +2759,18 @@ impl Host for NodeHost {
                 if !ok {
                     return Ok(Some(Value::Undefined));
                 }
-                let state = Rc::new(EventState {
-                    ty: RefCell::new("submit".to_string()),
-                    target: Cell::new(node),
-                    current: Cell::new(None),
-                    bubbles: Cell::new(true),
-                    stopped: Cell::new(false),
-                    prevented: Cell::new(false),
-                    props: Vec::new(),
-                });
+                // `submit` spec : bubbles + cancelable, non-composed.
+                let state = make_event_state(
+                    "submit",
+                    node,
+                    EventFlags {
+                        bubbles: true,
+                        cancelable: true,
+                        composed: false,
+                        trusted: false,
+                    },
+                    Vec::new(),
+                );
                 e.propagate_event(&self.dom, &self.cache, &state)?;
                 if !state.prevented.get() {
                     if let Some(p) = self.submit_payload(node, submitter) {
@@ -2673,7 +2836,15 @@ impl Host for NodeHost {
                     node_for(e, arg(args, 0)).is_some_and(|o| self.dom.borrow().contains(node, o));
                 Ok(Some(Value::Bool(r)))
             }
-            "matches" | "webkitMatchesSelector" => {
+            // `*MatchesSelector` : alias pré-standards encore
+            // utilisés par les shims de libs réelles
+            // (selector-observer github.com).
+            "matches"
+            | "matchesSelector"
+            | "webkitMatchesSelector"
+            | "mozMatchesSelector"
+            | "oMatchesSelector"
+            | "msMatchesSelector" => {
                 let sel = e.to_js_string(arg(args, 0))?;
                 let r = self.dom.borrow().matches(node, &sel);
                 Ok(Some(Value::Bool(r)))
@@ -2826,6 +2997,22 @@ pub(crate) fn node_for(e: &mut Engine, v: Value) -> Option<NodeId> {
     None
 }
 
+/// `(node, dom, cache)` d'un receveur **élément** — pour les
+/// natives posées sur `Element.prototype` (`m.call(el, …)` ; le
+/// `DocumentHost` ne compte pas, spec : receveur non-Element →
+/// `TypeError`).
+fn element_receiver(e: &mut Engine, v: Value) -> Option<(NodeId, DomRef, NodeCache)> {
+    let Value::Obj(id) = v else {
+        return None;
+    };
+    let h = match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::Host(h)) => h.clone(),
+        _ => return None,
+    };
+    let n = h.as_any().downcast_ref::<NodeHost>()?;
+    Some((n.node, n.dom.clone(), n.cache.clone()))
+}
+
 /// Resolve a `dispatchEvent` argument to event state: an `Event`
 /// host object (its target is reset to the dispatch node) or a
 /// plain `{ type: 'x', bubbles: bool }` literal.
@@ -2855,24 +3042,33 @@ fn event_state_of(
         return Ok(None);
     }
     let bubbles = e.get_prop(id, "bubbles").is_some_and(|b| e.to_boolean(b));
+    // `EventInit` relu (posé par `new Event(type, init)` — le
+    // dict est déjà appliqué sur l'objet au constructeur).
+    let cancelable = e
+        .get_prop(id, "cancelable")
+        .is_some_and(|b| e.to_boolean(b));
+    let composed = e.get_prop(id, "composed").is_some_and(|b| e.to_boolean(b));
     // Props portées par l'objet literal (`key`, `code`…) —
     // recopiées sur le state pour que `e.key` resolve au
     // dispatch (`el.dispatchEvent({type:'keydown',key:'a'})`).
     let props: Vec<(String, Value)> = [
         "key", "code", "keyCode", "which", "charCode", "ctrlKey", "shiftKey", "altKey", "metaKey",
+        "detail",
     ]
     .into_iter()
     .filter_map(|k| e.get_prop(id, k).map(|v| (k.to_string(), v)))
     .collect();
-    Ok(Some(Rc::new(EventState {
-        ty: RefCell::new(ty),
-        target: Cell::new(node),
-        current: Cell::new(None),
-        bubbles: Cell::new(bubbles),
-        stopped: Cell::new(false),
-        prevented: Cell::new(false),
+    Ok(Some(make_event_state(
+        &ty,
+        node,
+        EventFlags {
+            bubbles,
+            cancelable,
+            composed,
+            trusted: false,
+        },
         props,
-    })))
+    )))
 }
 
 // ------------------------------------------------------------------
@@ -2899,13 +3095,43 @@ impl Host for EventHost {
                 None => Value::Null,
             },
             "bubbles" => Value::Bool(self.state.bubbles.get()),
+            "cancelable" => Value::Bool(self.state.cancelable.get()),
+            "composed" => Value::Bool(self.state.composed.get()),
+            "isTrusted" => Value::Bool(self.state.trusted),
+            "eventPhase" => Value::Num(f64::from(self.state.phase.get())),
+            "timeStamp" => Value::Num(self.state.created.elapsed().as_secs_f64() * 1000.0),
             "defaultPrevented" => Value::Bool(self.state.prevented.get()),
             "cancelBubble" => Value::Bool(self.state.stopped.get()),
+            // Legacy DOM0 : `returnValue === false` reflète
+            // `preventDefault` (spec `Event` historique).
+            "returnValue" => Value::Bool(!self.state.prevented.get()),
             _ => match self.state.props.iter().find(|(k, _)| k == key) {
                 Some((_, v)) => *v,
                 None => return Ok(None),
             },
         }))
+    }
+
+    fn set(&self, e: &mut Engine, _t: Value, key: &str, v: Value) -> JsResult<bool> {
+        match key {
+            // Spec : `cancelBubble = true` ≡ `stopPropagation`
+            // (l'écriture de `false` est sans effet).
+            "cancelBubble" => {
+                if e.to_boolean(v) {
+                    self.state.stopped.set(true);
+                }
+                Ok(true)
+            }
+            // Legacy DOM0 : `returnValue = false` ≡
+            // `preventDefault` (no-op si non-annulable).
+            "returnValue" => {
+                if !e.to_boolean(v) && self.state.cancelable.get() {
+                    self.state.prevented.set(true);
+                }
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 
     fn invoke(
@@ -2917,17 +3143,51 @@ impl Host for EventHost {
     ) -> JsResult<Option<Value>> {
         match name {
             "preventDefault" => {
-                self.state.prevented.set(true);
+                // Spec : no-op si l'event n'est pas `cancelable`.
+                if self.state.cancelable.get() {
+                    self.state.prevented.set(true);
+                }
                 Ok(Some(Value::Undefined))
             }
             "stopPropagation" | "cancel" => {
                 self.state.stopped.set(true);
                 Ok(Some(Value::Undefined))
             }
+            "stopImmediatePropagation" => {
+                // Tue aussi les listeners frères du nœud courant ;
+                // `stopped` est posé pour barrer la propagation.
+                self.state.stopped.set(true);
+                self.state.immediate.set(true);
+                Ok(Some(Value::Undefined))
+            }
+            "composedPath" => {
+                // Spec : `[]` hors dispatch (`currentTarget` null),
+                // sinon le chemin réel target → ancêtres → document.
+                if self.state.current.get().is_none() {
+                    return Ok(Some(e.new_array(Vec::new())));
+                }
+                let target = self.state.target.get();
+                let mut nodes = vec![target];
+                {
+                    let d = self.dom.borrow();
+                    nodes.extend(d.ancestors(target));
+                }
+                let vals: Vec<Value> = nodes
+                    .iter()
+                    .map(|&n| node_value(e, &self.dom, &self.cache, n))
+                    .collect();
+                Ok(Some(e.new_array(vals)))
+            }
             "initEvent" => {
                 let ty = e.to_js_string(arg(args, 0))?;
                 *self.state.ty.borrow_mut() = ty;
                 self.state.bubbles.set(e.to_boolean(arg(args, 1)));
+                self.state.cancelable.set(e.to_boolean(arg(args, 2)));
+                // Spec `initEvent` : les flags de propagation et
+                // `defaultPrevented` repartent à zéro.
+                self.state.stopped.set(false);
+                self.state.immediate.set(false);
+                self.state.prevented.set(false);
                 Ok(Some(Value::Undefined))
             }
             _ => Ok(None),
@@ -3729,6 +3989,33 @@ fn event_stop_propagation(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult
 /// `ev.composedPath()` — `[]` honnête hors dispatch.
 fn event_composed_path(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(e.new_array(Vec::new()))
+}
+
+/// `el.matches(sel)` — native d'`Element.prototype` : les
+/// shims lisent la *référence* (`o = Element.prototype.matches
+/// || i.msMatchesSelector` mesuré selector-observer github) —
+/// les méthodes host invoke-only sont invisibles à la lecture.
+fn element_matches(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let sel = e.to_js_string(arg(args, 0))?;
+    let Some((node, dom, _)) = element_receiver(e, this) else {
+        return Err(e.type_error("matches: receiver is not an Element"));
+    };
+    let r = dom.borrow().matches(node, &sel);
+    Ok(Value::Bool(r))
+}
+
+/// `el.closest(sel)` — native d'`Element.prototype` (même
+/// motif que [`element_matches`]).
+fn element_closest(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let sel = e.to_js_string(arg(args, 0))?;
+    let Some((node, dom, cache)) = element_receiver(e, this) else {
+        return Err(e.type_error("closest: receiver is not an Element"));
+    };
+    let hit = dom.borrow().closest(node, &sel);
+    Ok(match hit {
+        Some(n) => node_value(e, &dom, &cache, n),
+        None => Value::Null,
+    })
 }
 
 /// `ev.initEvent(type, bubbles, cancelable)` — héritage DOM Level 2.

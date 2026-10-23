@@ -577,6 +577,30 @@ fn regex_literals_and_test() {
     ));
 }
 
+/// Regex littéral après `)` de clause — `if (…) /re/` est un
+/// statement regex, pas une division (bug réel github
+/// `ns-*.js` : `if (o<128) /[!#$&-;=?-Z_a-z~]/.test(…)`).
+#[test]
+fn regex_after_clause_paren() {
+    assert!(matches!(
+        ev("var o = 65, hit = false; if (o < 128) /[!#$&-;=?-Z_a-z~]/.test(String.fromCharCode(o)) || (hit = true); hit"),
+        Value::Bool(false)
+    ));
+    // Division après `)` d'expression reste une division.
+    assert_eq!(num(ev("var o = 128; if ((o / 2) < 50) { o } o")), 128.0);
+    // `return (x)/2` : paren de groupe, pas de clause.
+    assert_eq!(ev_str("function f(x) { return (x) / 2; } f(10)"), "5");
+    // while / for / switch / catch : même règle.
+    assert!(matches!(
+        ev("var i = 0, ok = false; while (i++ < 1) /a/.test('a') && (ok = true); ok"),
+        Value::Bool(true)
+    ));
+    assert!(matches!(
+        ev("var ok = false; for (var j = 0; j < 1; j++) /a/.test('a') && (ok = true); ok"),
+        Value::Bool(true)
+    ));
+}
+
 #[test]
 fn regexp_exec_and_match() {
     // exec result: array + .index/.input.
