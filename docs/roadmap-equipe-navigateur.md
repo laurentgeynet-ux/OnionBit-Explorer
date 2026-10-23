@@ -2875,9 +2875,19 @@ ci-dessous (fréquence observée sur le corpus réel).
   `String` — limite documentée), `res.blob()` réel,
   `FormData` filename/3e arg, `structuredClone`. GC :
   protos/URL/readers racinés. Régressions `c70_*` (7 tests).
-- [ ] **JS-C71. `ReadableStream`/`WritableStream`/`Transform
+- [x] **JS-C71. `ReadableStream`/`WritableStream`/`Transform
   Stream`** — requis par `Response.body` moderne et les
-  bundlers (webpack dev-server, SSR-streaming).
+  bundlers (webpack dev-server, SSR-streaming). Queues
+  mémoire + `underlyingSource`/`underlyingSink`/`transformer`
+  (`start` synchrone, `pull`/`transform`/`flush` appelés) ;
+  `read()`/`write()`/`close()`/`abort()` en promesses
+  `{value,done}`/`undefined`, pendantes livrées au checkpoint
+  microtask ; `[Symbol.asyncIterator]`, `tee`, `pipeTo`/
+  `pipeThrough` (drain synchrone — pas de backpressure,
+  documenté), `locked`/`desiredSize`, controllers spec.
+  `res.body`/`req.body`/`blob.stream()` = stream d'un chunk
+  `Uint8Array` (transport `String`). Régressions `c71_*`
+  (6 tests).
 - [ ] **JS-C72. IndexedDB + `caches` (Cache API)** — storage
   persistant des apps (Service Worker hors scope : la
   persistence suffit à la plupart des fallbacks gracieux).

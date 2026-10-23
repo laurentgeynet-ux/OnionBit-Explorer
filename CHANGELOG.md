@@ -367,6 +367,59 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   protos, URL objets et readers
   en cours racinés. Régressions
   `c70_*` (7 tests).
+- **JS-C71 —
+  `ReadableStream`/`WritableStream`/`TransformStream`**
+  (`explorer-jscore` — requis par
+  `Response.body` moderne et les
+  bundlers). `ReadableStream` :
+  queue mémoire + `underlyingSource`
+  (`start(controller)` synchrone au
+  construct, `pull` invoqué quand
+  `read()` trouve la queue vide,
+  `cancel`) ; `getReader()` (lock
+  spec) → `read()` en promesses
+  `{value, done}` — résolues
+  immédiatement si chunk/`closed`/
+  `error`, sinon pendantes et
+  résolues au prochain `enqueue`/
+  `close`/`error` ou re-tentées au
+  checkpoint microtask ;
+  `[Symbol.asyncIterator]` →
+  `for await` ; `tee` (copie la
+  queue restante, source locked),
+  `pipeTo`/`pipeThrough` (drain
+  synchrone — pas de backpressure,
+  approximation documentée).
+  `WritableStream` : sink
+  `{start, write, close, abort}` ;
+  `getWriter()` → `write`/`close`/
+  `abort`/`releaseLock` en
+  promesses chaînées sur le sink,
+  `ready`/`closed` own-props,
+  `WritableStreamDefaultController.
+  error`. `TransformStream` :
+  `{readable, writable}` —
+  `writable.write` → `transformer.
+  transform(chunk, controller)`,
+  `writable.close` → `flush?` +
+  `readable.close`, nu =
+  transform identité ; controller
+  `enqueue`/`error`/`terminate`.
+  `res.body`/`req.body` =
+  `ReadableStream` d'un chunk
+  `Uint8Array` (corps du transport
+  `String`, livré d'un bloc — le
+  `null` honnête JS-C66 retiré ;
+  `null` conservé pour les corps
+  vides et GET/HEAD) ; `blob.
+  stream()` (spec File API).
+  `await` sur promesse sink
+  pendante → rejet honnête (limite
+  `await_value` documentée). GC :
+  protos, queue, callbacks
+  source/sink/transformer et
+  lectures pendantes racinés.
+  Régressions `c71_*` (6 tests).
 
 ### Fixed
 

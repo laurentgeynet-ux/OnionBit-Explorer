@@ -509,6 +509,9 @@ impl Engine {
         // `Blob`/`File`/`FileReader` + URL objets (JS-C70) —
         // `res.blob()`/`body: Blob` valides sans DOM non plus.
         crate::files::install_files(self);
+        // `ReadableStream`/`WritableStream`/`TransformStream`
+        // (JS-C71) — `res.body`/`req.body` et les bundlers.
+        crate::streams::install_streams(self);
     }
 
     /// `ctor.prototype = proto` + `proto.constructor = ctor` —
@@ -545,7 +548,9 @@ impl Engine {
         let id = self.heap.alloc_obj(crate::heap::Object {
             proto: Value::Obj(proto),
             props: Vec::new(),
-            kind: ObjKind::FetchBody { body: s.body },
+            kind: ObjKind::FetchBody {
+                body: s.body.clone(),
+            },
             extensible: true,
             elem_integrity: 0,
             args_map: None,
@@ -562,9 +567,12 @@ impl Engine {
         self.set_own(id, "ok", Value::Bool((200..300).contains(&s.status)), true);
         self.set_own(id, "headers", hdrs, true);
         self.set_own(id, "bodyUsed", Value::Bool(false), true);
-        // `ReadableStream` = JS-C71 — `null` honnête (le texte reste
-        // lisible via `text()`/`json()`/…).
-        self.set_own(id, "body", Value::Null, true);
+        // `res.body` = `ReadableStream` JS-C71 — un chunk
+        // `Uint8Array` du corps (transport `String`, livré
+        // d'un bloc — approximation documentée ; `text()`/…
+        // restent la voie canonique).
+        let bs = crate::streams::body_stream(self, s.body.as_bytes());
+        self.set_own(id, "body", bs, true);
         Value::Obj(id)
     }
 
@@ -1016,6 +1024,8 @@ fn fetch_clone(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         ),
         None => return Err(e.type_error("clone: bad receiver")),
     };
+    // `body` cloné — stream mémoire des mêmes octets (JS-C71).
+    let bs = crate::streams::body_stream(e, body.as_bytes());
     let nid = e.heap.alloc_obj(crate::heap::Object {
         proto,
         props: Vec::new(),
@@ -1050,7 +1060,7 @@ fn fetch_clone(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let h = e.headers_obj(hpairs);
     e.set_own(nid, "headers", h, true);
     e.set_own(nid, "bodyUsed", Value::Bool(false), true);
-    e.set_own(nid, "body", Value::Null, true);
+    e.set_own(nid, "body", bs, true);
     Ok(Value::Obj(nid))
 }
 
@@ -1167,6 +1177,13 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         return Err(e.type_error(format!("Request: invalid URL {url:?}")));
     };
     let proto = e.xhr.req_proto.unwrap_or(e.protos.object);
+    // `req.body` (JS-C71) — `null` spec pour GET/HEAD (corps
+    // déjà rejeté plus haut), sinon stream mémoire du corps.
+    let bs = if body.is_empty() {
+        Value::Null
+    } else {
+        crate::streams::body_stream(e, body.as_bytes())
+    };
     let id = e.heap.alloc_obj(crate::heap::Object {
         proto: Value::Obj(proto),
         props: Vec::new(),
@@ -1230,7 +1247,7 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     e.set_own(id, "keepalive", Value::Bool(keepalive), true);
     e.set_own(id, "destination", dest, true);
     e.set_own(id, "bodyUsed", Value::Bool(false), true);
-    e.set_own(id, "body", Value::Null, true);
+    e.set_own(id, "body", bs, true);
     Ok(Value::Obj(id))
 }
 

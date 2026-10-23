@@ -1033,6 +1033,9 @@ impl Engine {
         // `Blob`/`File`/`FileReader` + `URL.createObjectURL`
         // (JS-C70) — uploads et lectures client-side.
         crate::files::install_files(self);
+        // `ReadableStream`/`WritableStream`/`TransformStream`
+        // (JS-C71) — `for await` sur les corps, bundlers.
+        crate::streams::install_streams(self);
         let screen = self.new_object();
         let (w, h) = self.hooks.viewport;
         for (k, v) in [

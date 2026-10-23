@@ -394,7 +394,7 @@ fn c66_request_ctor_and_clone() {
             "var r = new Request('/api', {method: 'post', headers: {'X-A': '1'}, body: 'p=1'});\
              r.url + '|' + r.method + '|' + r.headers.get('x-a') + '|'\
              + r.mode + '|' + r.credentials + '|' + r.redirect + '|'\
-             + (r instanceof Request) + '|' + r.bodyUsed + '|' + (r.body === null)"
+             + (r instanceof Request) + '|' + r.bodyUsed + '|' + (r.body instanceof ReadableStream)"
         ),
         "/api|POST|1|cors|same-origin|follow|true|false|true"
     );
@@ -479,7 +479,7 @@ fn c66_body_mixin() {
         &mut e,
         "var out = '';\
          fetch('/x').then(function (r) {\
-             out += (r.body === null) + '|' + r.bodyUsed;\
+             out += (r.body instanceof ReadableStream) + '|' + r.bodyUsed;\
              return r.text();\
          }).then(function (s) { out += '|' + s; });",
     );
@@ -989,4 +989,241 @@ fn c70_structured_clone_blob_file() {
         ),
         "true|n.txt|7|4|true"
     );
+}
+
+// ---------------------------------------------------------------
+// JS-C71 — ReadableStream/WritableStream/TransformStream
+// ---------------------------------------------------------------
+
+#[test]
+fn c71_readable_start_enqueue_read() {
+    let (mut e, _t) = engine();
+    // `start` enqueué au construct ; `read()` en promesses
+    // `{value, done}` spec.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var rs = new ReadableStream({start: function (c) {\
+                 c.enqueue('a'); c.enqueue('b'); c.close(); }});\
+             (rs instanceof ReadableStream) + '|' + rs.locked"
+        ),
+        "true|false"
+    );
+    describe(
+        &mut e,
+        "var rd = rs.getReader();\
+         var log = (rs.locked ? 'L' : '-') + '|';\
+         rd.read().then(function (r) { log += r.value + r.done + ';'; });\
+         rd.read().then(function (r) { log += r.value + r.done + ';'; });\
+         rd.read().then(function (r) { log += r.done + ';'; });",
+    );
+    assert_eq!(describe(&mut e, "log"), "L|afalse;bfalse;true;");
+    // `releaseLock` → nouveau reader possible.
+    assert_eq!(
+        describe(
+            &mut e,
+            "rd.releaseLock(); rs.locked + '|' + typeof rs.getReader"
+        ),
+        "false|function"
+    );
+}
+
+#[test]
+fn c71_readable_pull_and_pending() {
+    let (mut e, _t) = engine();
+    // Queue vide → `pull(controller)` invoqué ; encore vide →
+    // la promesse `read()` attend le prochain enqueue/close.
+    describe(
+        &mut e,
+        "var i = 0; var seq = '';\
+         var rs2 = new ReadableStream({pull: function (c) {\
+             seq += 'p';\
+             c.enqueue(++i);\
+             if (i >= 2) c.close(); }});\
+         var r2 = rs2.getReader();\
+         var got = '';\
+         r2.read().then(function (r) { got += r.value; });\
+         r2.read().then(function (r) { got += ',' + r.value; });\
+         r2.read().then(function (r) { got += ',' + r.done; });",
+    );
+    // `pull` appelé pour chaque read (backpressure mémoire).
+    assert_eq!(describe(&mut e, "got"), "1,2,true");
+    // `Symbol.asyncIterator` → `for await`-compatible : chaque
+    // `next()` = promesse `{value,done}` (stream frais — un
+    // stream locked refuse l'itérateur, spec).
+    describe(
+        &mut e,
+        "var rs3 = new ReadableStream({start: function (c) {\
+             c.enqueue('z'); c.close(); }});\
+         var it = rs3[Symbol.asyncIterator](); var av = '';\
+         it.next().then(function (r) { av = r.value + r.done; });",
+    );
+    assert_eq!(
+        describe(&mut e, "typeof it !== 'undefined' ? av : '?'"),
+        "zfalse"
+    );
+}
+
+#[test]
+fn c71_writable_sink_write_close() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var sunk = '';\
+         var ws = new WritableStream({\
+             write: function (c) { sunk += c; },\
+             close: function () { sunk += '|closed'; }});\
+         var w = ws.getWriter();\
+         var st = ws.locked + '|';\
+         w.write('x').then(function () { st += 'w'; });\
+         w.close().then(function () { st += 'c'; });\
+         w.closed.then(function () { st += 'C'; });",
+    );
+    assert_eq!(describe(&mut e, "st + '|' + sunk"), "true|wcC|x|closed");
+    // `w.abort(r)` → `sink.abort` + `closed` résolu.
+    describe(
+        &mut e,
+        "var ar = '';\
+         var ws2 = new WritableStream({abort: function (r) { ar = 'a' + r; }});\
+         var w2 = ws2.getWriter();\
+         w2.abort(7).then(function () { ar += '|ok'; });",
+    );
+    assert_eq!(describe(&mut e, "ar"), "a7|ok");
+    // Double getWriter → TypeError (lock spec).
+    assert_eq!(
+        describe(
+            &mut e,
+            "try { ws.getWriter(); 'no' } catch (err) { 'threw' }"
+        ),
+        "threw"
+    );
+}
+
+#[test]
+fn c71_transform_and_pipethrough() {
+    let (mut e, _t) = engine();
+    // `transform(chunk, ctrl)` → `ctrl.enqueue` transformé ;
+    // `pipeThrough` = pipeTo(writable) puis readable.
+    describe(
+        &mut e,
+        "var src = new ReadableStream({start: function (c) {\
+             c.enqueue('a'); c.enqueue('b'); c.close(); }});\
+         var t = new TransformStream({\
+             transform: function (c, ctrl) { ctrl.enqueue(c + '!'); },\
+             flush: function (ctrl) { ctrl.enqueue('end'); }});\
+         var out = src.pipeThrough(t);\
+         var acc = '';\
+         var rd = out.getReader();\
+         rd.read().then(function (r) { acc += r.value + ';'; });\
+         rd.read().then(function (r) { acc += r.value + ';'; });\
+         rd.read().then(function (r) { acc += r.value + ';'; });\
+         rd.read().then(function (r) { acc += 'd' + r.done; });",
+    );
+    assert_eq!(describe(&mut e, "acc"), "a!;b!;end;dtrue");
+    // Transform identité (`new TransformStream()` nu).
+    describe(
+        &mut e,
+        "var s2 = new ReadableStream({start: function (c) {\
+             c.enqueue(1); c.close(); }});\
+         var o2 = s2.pipeThrough(new TransformStream());\
+         var id = '';\
+         o2.getReader().read().then(function (r) { id = r.value; });",
+    );
+    assert_eq!(describe(&mut e, "id"), "1");
+    // `ts.readable`/`ts.writable` exposés + instanceof.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var t2 = new TransformStream();\
+             (t2 instanceof TransformStream) + '|' +\
+             (t2.readable instanceof ReadableStream) + '|' +\
+             (t2.writable instanceof WritableStream)"
+        ),
+        "true|true|true"
+    );
+}
+
+#[test]
+fn c71_response_body_stream() {
+    let (mut e, _t) = engine();
+    // `res.body` = ReadableStream — un chunk Uint8Array + done.
+    describe(
+        &mut e,
+        "fetch('/dl').then(function (r) {\
+             globalThis.rb = r.body; globalThis.bu = r.bodyUsed; });",
+    );
+    respond(&mut e, 1, 200, "streamed");
+    describe(
+        &mut e,
+        "var bl = (rb instanceof ReadableStream) + '|';\
+         var rd = rb.getReader();\
+         rd.read().then(function (r) {\
+             bl += (r.value instanceof Uint8Array) + ':' + r.value.byteLength + ';'; });\
+         rd.read().then(function (r) { bl += 'd' + r.done; });",
+    );
+    assert_eq!(describe(&mut e, "bl"), "true|true:8;dtrue");
+    // `req.body` — stream pour POST, null pour GET (spec).
+    assert_eq!(
+        describe(
+            &mut e,
+            "var rq = new Request('/u', {method: 'POST', body: 'xy'});\
+             (rq.body instanceof ReadableStream) + '|' +\
+             (new Request('/g').body === null)"
+        ),
+        "true|true"
+    );
+    // `new Response('abc').body` → stream du corps.
+    describe(
+        &mut e,
+        "var rr = new Response('abc'); var n = 0;\
+         rr.body.getReader().read().then(function (r) { n = r.value.byteLength; });",
+    );
+    assert_eq!(describe(&mut e, "n"), "3");
+    // `blob.stream()` → ReadableStream des octets (JS-C71).
+    describe(
+        &mut e,
+        "var b = new Blob(['xy']); var bs = 0;\
+         b.stream().getReader().read().then(function (r) {\
+             bs = r.value.byteLength; });",
+    );
+    assert_eq!(describe(&mut e, "bs"), "2");
+}
+
+#[test]
+fn c71_tee_and_cancel() {
+    let (mut e, _t) = engine();
+    // `tee()` → deux branches sur la queue restante ; source locked.
+    describe(
+        &mut e,
+        "var rs = new ReadableStream({start: function (c) {\
+             c.enqueue('x'); c.enqueue('y'); c.close(); }});\
+         var pair = rs.tee();\
+         var ta = ''; var tb = '';\
+         pair[0].getReader().read().then(function (r) { ta = r.value; });\
+         pair[1].getReader().read().then(function (r) { tb = r.value; });",
+    );
+    assert_eq!(
+        describe(&mut e, "rs.locked + '|' + ta + '|' + tb"),
+        "true|x|x"
+    );
+    // `cancel` → `source.cancel(reason)` + done.
+    describe(
+        &mut e,
+        "var cr = '';\
+         var rs2 = new ReadableStream({\
+             start: function (c) { c.enqueue(1); },\
+             cancel: function (r) { cr = 'c' + r; }});\
+         rs2.cancel(9); var rd2 = rs2.getReader();\
+         rd2.read().then(function (r) { cr += '|' + r.done; });",
+    );
+    assert_eq!(describe(&mut e, "cr"), "c9|true");
+    // `reader.cancel` en promesse.
+    describe(
+        &mut e,
+        "var cr2 = '';\
+         var rs3 = new ReadableStream({cancel: function (r) { cr2 = 'k' + r; }});\
+         var rd3 = rs3.getReader();\
+         rd3.cancel(4).then(function () { cr2 += '|p'; });",
+    );
+    assert_eq!(describe(&mut e, "cr2"), "k4|p");
 }

@@ -294,9 +294,12 @@ impl Engine {
             // initiale à l'`observe`, callbacks = jobs).
             // JS-C70 : idem pour les lectures `FileReader`
             // (loadstart→progress→load→loadend).
+            // JS-C71 : re-`pull` des `ReadableStream` ayant des
+            // `read()` pendantes (queue vide post-pull).
             if !self.deliver_mutations()?
                 && self.deliver_observers()? == 0
                 && self.deliver_file_reads()? == 0
+                && self.pump_stream_reads()? == 0
                 && self.pump_workers()? == 0
             {
                 self.maybe_collect();

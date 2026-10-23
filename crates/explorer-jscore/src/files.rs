@@ -94,7 +94,7 @@ pub(crate) fn file_name_of(e: &mut Engine, v: Value) -> Option<String> {
 }
 
 /// `Blob.prototype` paresseux — méthodes `text`/`arrayBuffer`/
-/// `slice` (`stream` = JS-C71 : absence honnête).
+/// `slice`/`stream` (JS-C71 — `ReadableStream` des octets).
 fn blob_proto(e: &mut Engine) -> ObjId {
     if let Some(p) = e.files.blob_proto {
         return p;
@@ -103,6 +103,7 @@ fn blob_proto(e: &mut Engine) -> ObjId {
     e.add_method(p, "text", blob_text);
     e.add_method(p, "arrayBuffer", blob_array_buffer);
     e.add_method(p, "slice", blob_slice);
+    e.add_method(p, "stream", blob_stream);
     let tag = e.str_val("Blob");
     e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
     e.files.blob_proto = Some(p);
@@ -279,6 +280,13 @@ fn blob_array_buffer(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Valu
     });
     e.resolve_promise(pid, Value::Obj(id));
     Ok(Value::Obj(pid))
+}
+
+/// `blob.stream()` → `ReadableStream` d'un chunk `Uint8Array`
+/// (JS-C71 — contenu mémoire, livré d'un bloc).
+fn blob_stream(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (data, _) = blob_this(e, this)?;
+    Ok(crate::streams::body_stream(e, &data))
 }
 
 /// `blob.slice(start?, end?, contentType?)` — index relatifs à
@@ -628,10 +636,10 @@ impl Host for FileReaderHost {
 /// Origine des URL objets — `hooks.page_url` ou `"null"`.
 fn object_url_origin(e: &Engine) -> String {
     let base = e.hooks.page_url.clone();
-    crate::builtins::url::url_parse_absolute(&base)
-        .map_or_else(|| "null".to_string(), |p| {
-            crate::builtins::url::url_origin(&p)
-        })
+    crate::builtins::url::url_parse_absolute(&base).map_or_else(
+        || "null".to_string(),
+        |p| crate::builtins::url::url_origin(&p),
+    )
 }
 
 /// `URL.createObjectURL(blob)` — registre `blob:<origin>/<n>`

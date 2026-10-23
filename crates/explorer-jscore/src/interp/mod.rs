@@ -267,6 +267,10 @@ pub struct Engine {
     /// (JS-C70) — protos paresseux, `blob:` urls, lectures
     /// en cours livrées au checkpoint microtask.
     pub(crate) files: crate::files::FilesState,
+    /// `ReadableStream`/`WritableStream`/`TransformStream`
+    /// (JS-C71) — protos + `read()` pendantes re-`pull`ées au
+    /// checkpoint microtask.
+    pub(crate) streams: crate::streams::StreamState,
     /// Élément en cours de construction par upgrade
     /// `customElements` (JS-C68) — le `super()` d'une classe
     /// `extends HTMLElement` le récupère comme `this` (rôle du
@@ -629,6 +633,7 @@ impl Engine {
             mutobs: crate::mutation::MutObsState::default(),
             obs: crate::observers::ObsState::default(),
             files: crate::files::FilesState::default(),
+            streams: crate::streams::StreamState::default(),
             ce_upgrade_slot: None,
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,
@@ -834,6 +839,10 @@ impl Engine {
         // readers en cours de lecture (le `Host::trace`
         // couvre ensuite listeners et `result`).
         self.files.root_ids(&mut ids);
+        // Streams (JS-C71) — protos + streams avec `read()`
+        // pendantes (le `Host::trace` couvre queue et
+        // callbacks de source/sink).
+        self.streams.root_ids(&mut ids);
         if let Some((dom, cache)) = &self.dom_ctx {
             for &id in cache.borrow().values() {
                 ids.push(id);

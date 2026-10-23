@@ -60,6 +60,7 @@ mod parser;
 mod promise;
 mod regexp;
 mod storage;
+mod streams;
 mod temporal;
 mod timers;
 mod typed_array;
