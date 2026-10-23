@@ -9,6 +9,53 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-83 — Styles géants : index de
+  sélecteurs, filtre d'ancêtres Bloom
+  et mémoïsation du matching**
+  (`explorer-css`, reliure « apply
+  post-script ~250 s » du journal
+  étape 112 — deuxième mur mesuré
+  après le layout) : `compute_styles`
+  coûtait ~13,9 s sur l'article réel
+  — la table entière de règles était
+  balayée pour chaque nœud (×3 avec
+  les passes pseudo). Nouveau :
+  `SelectorIndex` — seaux id/classe/
+  attribut/tag/universel indexés sur
+  la clé du composé final, plus
+  `has_before`/`has_after` pour
+  sauter le calcul pseudo quand
+  aucune feuille n'en produit ;
+  filtre de Bloom 128 bits des
+  ancêtres (tag, id, classes, noms
+  d'attributs — technique « ancestor
+  filter » des moteurs) entretenu à
+  la descente : une clé absente tue
+  la marche ancêtre avant de la
+  faire, jamais de faux négatif ;
+  `MatchCache` partagé `(nœud,
+  sélecteur, composé)` et rangs
+  fraternels (`:nth-*`) mémoïsés
+  par nœud ; attributs lus empruntés
+  (`attributes()` au lieu de clones
+  `attribute()`), sélecteurs dominés
+  en spécificité sautés, clone du
+  style parent supprimé (prêt
+  `&style`), passage `var()` sauté
+  quand aucune `var(` n'est présente,
+  garde-fou `deep` ramené à un par
+  niveau de composé (les marches
+  ancêtres sont itératives).
+  `compute_styles` **~13,9 s → ~3,2 s**
+  (×4,3) ; pipeline complet ~38 s —
+  le reliquat étape 112 passe de
+  ~250 s à ×6,6 cumulé R-82+R-83.
+  Régressions
+  `r83_filtre_ancetres_sans_faux_negatif`
+  et `r83_saut_des_calculs_pseudo`.
+  Reste : interning des noms de
+  propriétés (~1 s d'héritage/
+  mots-clés) en suivi éventuel.
 - **R-82 — Layout géant : faces
   rustybuzz mémoïsées + borne de
   runs relevée** (`explorer-layout`,

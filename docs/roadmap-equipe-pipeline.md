@@ -2159,6 +2159,37 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   silencieux). Reste : `compute_styles` ~12 s et
   `raster`/`encode_png` ~13 s — prochains postes si le
   coût unitaire redevient le goulot.
+- [x] **R-83. Styles géants : index de sélecteurs + filtre
+  d'ancêtres Bloom + mémo de matching** (`explorer-css` —
+  suite de la même reliure : le mur suivant mesuré par la
+  sonde géante). `compute_styles` ~13,9 s = table de
+  règles balayée par nœud (×3 avec pseudo). Livré :
+  `SelectorIndex` (seaux id/classe/attr/tag/universel sur
+  la clé du composé final ; `has_before`/`has_after`
+  sautent le calcul pseudo quand aucune feuille n'en
+  produit) → 189 k candidats essayés au lieu du balayage
+  complet ; filtre de Bloom 128 bits des ancêtres (tag,
+  id, classes, noms d'attributs — « ancestor filter » des
+  moteurs, entretenu à la descente, aucun faux négatif) →
+  lookups ancêtres 1,56 M → 791 k ; `MatchCache` partagé
+  `(nœud, sélecteur, composé)` + rangs fraternels
+  `:nth-*` mémoïsés (test composé 1,0 s → 0,47 s) ;
+  attributs empruntés `attributes()` (fin des clones
+  `attribute()` dans la boucle chaude), skip des
+  sélecteurs dominés en spécificité, `&style` prêté aux
+  enfants (clone parent/nœud supprimé), `var()` sauté
+  sans `var(`, `deep` par niveau de composé au lieu de
+  par pas d'ancêtre. Mesuré : **13,9 s → ~3,2 s** (×4,3),
+  pipeline ~38 s (reliquat étape 112 ~250 s → ×6,6 avec
+  R-82). Régressions
+  `r83_filtre_ancetres_sans_faux_negatif` +
+  `r83_saut_des_calculs_pseudo` ; invariants préservés :
+  pureté DOM/`state` pendant la passe, cap du cache
+  (dégradation perf seule), quirks sur table/index
+  séparés. Reliquat documenté : héritage/mots-clés ~1 s
+  (interning des noms de propriétés), `raster` ~6,7 s,
+  `encode_png` ~4,2 s, `layout_tree` ~14,3 s — prochains
+  postes par ordre de mur.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

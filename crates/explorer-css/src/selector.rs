@@ -21,6 +21,7 @@
 use crate::token::Token;
 use crate::tokenizer::tokenize;
 use explorer_dom::{Dom, NodeId};
+use std::collections::HashMap;
 
 /// Spécificité `(ids, classes+attributs+pseudo-classes, types+ps-élts)`.
 pub type Specificity = (u32, u32, u32);
@@ -690,6 +691,154 @@ fn parse_an_plus_b(text: &str) -> Option<(i32, i32)> {
 
 // ───────────────────────────── matching ─────────────────────────────
 
+/// Cache de matching partagé par une passe de cascade
+/// (R-83) — `(nœud, sélecteur, composé)` → résultat, plus
+/// les faits fraternels par nœud (`:nth-*`/`:first-*` —
+/// une marche O(frères) calculée une fois par nœud au
+/// lieu d'une fois par évaluation).
+/// Invariants de pureté : le DOM ne mute pas pendant le
+/// calcul, `state` est uniforme, et les sélecteurs des
+/// tables de règles ont des adresses stables sous `&self`
+/// — la clé pointe sur l'objet sans le déréférencer.
+/// Sans lui, chaque combinateur ancêtre (`A B`) ré-évalue
+/// `A` sur chaque ancêtre de chaque nœud candidat.
+#[derive(Default)]
+pub(crate) struct MatchCache {
+    sel: HashMap<(NodeId, usize, usize), bool>,
+    /// Rangs fraternels par nœud (avant/après/de type) —
+    /// 0 = non calculé (les rangs réels sont 1-basés).
+    ranks: HashMap<NodeId, [usize; 4]>,
+}
+
+/// Borne du cache sélecteur — un document hostile au-delà
+/// dégrade en vitesse seule (évaluation directe), jamais en
+/// mémoire ni en rendu.
+const MATCH_CACHE_CAP: usize = 524_288;
+
+impl MatchCache {
+    fn sel_get(&self, key: &(NodeId, usize, usize)) -> Option<bool> {
+        self.sel.get(key).copied()
+    }
+
+    fn sel_put(&mut self, key: (NodeId, usize, usize), v: bool) {
+        if self.sel.len() < MATCH_CACHE_CAP {
+            self.sel.insert(key, v);
+        }
+    }
+
+    /// Rang du nœud — `kind` : 0 `element_index`,
+    /// 1 `element_index_from_end`, 2/3 `type_index`
+    /// (avant/après). Calculé une fois, mémoïsé.
+    fn rank(&mut self, dom: &Dom, node: NodeId, kind: usize) -> usize {
+        if let Some(r) = self.ranks.get(&node) {
+            if r[kind] != 0 {
+                return r[kind];
+            }
+        }
+        let v = match kind {
+            0 => element_index(dom, node),
+            1 => element_index_from_end(dom, node),
+            2 => type_index(dom, node, false),
+            _ => type_index(dom, node, true),
+        };
+        self.ranks.entry(node).or_default()[kind] = v;
+        v
+    }
+}
+
+/// Filtre de Bloom des ancêtres d'un nœud — tags, id,
+/// classes et noms d'attributs de chaque élément ancêtre
+/// (technique « ancestor filter » des moteurs de sélecteurs,
+/// R-83). Propriété : **aucun faux négatif** — une clé
+/// absente du filtre ne peut figurer sur aucun ancêtre, la
+/// branche `A B` est alors morte sans marcher la chaîne ;
+/// les faux positifs se paient en marche ordinaire (même
+/// rendu, plus lent). 128 bits, 3 positions par clé.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct AncestorFilter(u128);
+
+/// Salts de kind — une classe `.x` et un attribut `x` n'ont
+/// pas la même empreinte (réduit les faux positifs croisés).
+const SEED_TAG: u64 = 0x9e37_79b9_7f4a_7c15;
+const SEED_CLASS: u64 = 0xc2b2_ae3d_27d4_eb4f;
+const SEED_ID: u64 = 0x1656_67b1_9e37_79f9;
+const SEED_ATTR: u64 = 0xd6e8_feb8_6659_fd93;
+
+/// FNV-1a — `fold` replie la casse ASCII comme le matcher
+/// (tags ASCII-insensibles ; classes/id/attributs exacts).
+fn hash_key(s: &str, fold: bool, seed: u64) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64 ^ seed;
+    for b in s.bytes() {
+        let b = if fold { b.to_ascii_lowercase() } else { b };
+        h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+    }
+    h
+}
+
+impl AncestorFilter {
+    /// Trois positions de bit dérivées de l'empreinte.
+    fn bits(h: u64) -> u128 {
+        (1u128 << (h & 127)) | (1u128 << ((h >> 21) & 127)) | (1u128 << ((h >> 42) & 127))
+    }
+
+    fn may(&self, h: u64) -> bool {
+        self.0 & Self::bits(h) == Self::bits(h)
+    }
+
+    /// Insère les clés d'un élément ancêtre (tag, `id`, mots
+    /// de `class`, noms d'attributs) — non-élément ignoré.
+    pub(crate) fn insert_node(&mut self, dom: &Dom, node: NodeId) {
+        if dom.element(node).is_err() {
+            return;
+        }
+        if let Ok(t) = dom.tag_name(node) {
+            self.0 |= Self::bits(hash_key(t, true, SEED_TAG));
+        }
+        if let Ok(attrs) = dom.attributes(node) {
+            for a in attrs {
+                self.0 |= Self::bits(hash_key(&a.name, false, SEED_ATTR));
+                match a.name.as_str() {
+                    "id" => self.0 |= Self::bits(hash_key(&a.value, false, SEED_ID)),
+                    "class" => {
+                        for c in a.value.split_ascii_whitespace() {
+                            self.0 |= Self::bits(hash_key(c, false, SEED_CLASS));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// Filtre des ancêtres de `node` (marche de parent en
+    /// parent — borne `max_depth` du DOM).
+    pub(crate) fn of_ancestors(dom: &Dom, node: NodeId) -> Self {
+        let mut f = Self::default();
+        let mut cur = dom.parent(node).ok().flatten();
+        while let Some(p) = cur {
+            f.insert_node(dom, p);
+            cur = dom.parent(p).ok().flatten();
+        }
+        f
+    }
+
+    /// `true` si le composé PEUT matcher un ancêtre — `false`
+    /// garanti quand l'une de ses clés est absente du filtre
+    /// (un composé sans clé répond `true` : pas de prune).
+    fn compound_possible(&self, c: &CompoundSelector) -> bool {
+        c.simples.iter().all(|s| {
+            let h = match s {
+                SimpleSelector::Type(t) => hash_key(t, true, SEED_TAG),
+                SimpleSelector::Class(cl) => hash_key(cl, false, SEED_CLASS),
+                SimpleSelector::Id(i) => hash_key(i, false, SEED_ID),
+                SimpleSelector::Attribute { name, .. } => hash_key(name, false, SEED_ATTR),
+                _ => return true,
+            };
+            self.may(h)
+        })
+    }
+}
+
 /// `true` si le nœud matche l'un des sélecteurs de la liste —
 /// les pseudo-classes dynamiques sont considérées fausses.
 #[must_use]
@@ -708,9 +857,32 @@ pub fn matches_any_with_state(
     selectors: &[ComplexSelector],
     state: &dyn Fn(&str) -> bool,
 ) -> bool {
-    selectors
-        .iter()
-        .any(|s| matches_with_state(dom, node, s, state))
+    matches_any_with_state_in(
+        dom,
+        node,
+        selectors,
+        state,
+        &mut MatchCache::default(),
+        AncestorFilter::of_ancestors(dom, node),
+    )
+}
+
+/// Variante mémoïsée de [`matches_any_with_state`]. L'arête
+/// `:not()`/`:is()` niche la récursion (profondeur libre par
+/// le texte du sélecteur) → garde-fou `deep` (R-24).
+fn matches_any_with_state_in(
+    dom: &Dom,
+    node: NodeId,
+    selectors: &[ComplexSelector],
+    state: &dyn Fn(&str) -> bool,
+    cache: &mut MatchCache,
+    anc: AncestorFilter,
+) -> bool {
+    explorer_common::deep(|| {
+        selectors
+            .iter()
+            .any(|s| matches_with_state_cached(dom, node, s, state, &mut *cache, anc))
+    })
 }
 
 /// `true` si le nœud matche ce sélecteur complexe.
@@ -730,6 +902,28 @@ pub fn matches_with_state(
     selector: &ComplexSelector,
     state: &dyn Fn(&str) -> bool,
 ) -> bool {
+    matches_with_state_cached(
+        dom,
+        node,
+        selector,
+        state,
+        &mut MatchCache::default(),
+        AncestorFilter::of_ancestors(dom, node),
+    )
+}
+
+/// Variante mémoïsée de [`matches_with_state`] — `cache`
+/// est partagé par toute la passe de cascade (R-83) et
+/// `anc` porte les clés des ancêtres de `node` (filtre de
+/// Bloom — la cascade l'entretient au fil de la descente).
+pub(crate) fn matches_with_state_cached(
+    dom: &Dom,
+    node: NodeId,
+    selector: &ComplexSelector,
+    state: &dyn Fn(&str) -> bool,
+    cache: &mut MatchCache,
+    anc: AncestorFilter,
+) -> bool {
     if dom.element(node).is_err() {
         return false;
     }
@@ -739,22 +933,54 @@ pub fn matches_with_state(
         selector,
         selector.parts.len().saturating_sub(1),
         state,
+        cache,
+        anc,
     )
 }
 
 /// Matching récursif droite → gauche : `idx` est l'indice du
-/// composé à matcher sur `node`.
+/// composé à matcher sur `node`. Mémoïsé sur `(nœud,
+/// sélecteur, idx)` — les évaluations d'ancêtres sont
+/// partagées entre tous les descendants candidats (R-83).
+#[allow(clippy::too_many_arguments)]
 fn match_selector_part(
     dom: &Dom,
     node: NodeId,
     selector: &ComplexSelector,
     idx: usize,
     state: &dyn Fn(&str) -> bool,
+    cache: &mut MatchCache,
+    anc: AncestorFilter,
 ) -> bool {
     let Some((compound, _)) = selector.parts.get(idx) else {
         return true;
     };
-    if !compound.iter().all(|s| simple_matches(dom, node, s, state)) {
+    let key = (node, std::ptr::from_ref(selector) as usize, idx);
+    if let Some(hit) = cache.sel_get(&key) {
+        return hit;
+    }
+    let hit = match_selector_part_eval(dom, node, selector, idx, compound, state, cache, anc);
+    cache.sel_put(key, hit);
+    hit
+}
+
+/// Évaluation effective d'un composé + sa suite de
+/// combinateurs (corps de [`match_selector_part`] hors cache).
+#[allow(clippy::too_many_arguments)]
+fn match_selector_part_eval(
+    dom: &Dom,
+    node: NodeId,
+    selector: &ComplexSelector,
+    idx: usize,
+    compound: &CompoundSelector,
+    state: &dyn Fn(&str) -> bool,
+    cache: &mut MatchCache,
+    anc: AncestorFilter,
+) -> bool {
+    if !compound
+        .iter()
+        .all(|s| simple_matches(dom, node, s, state, &mut *cache, anc))
+    {
         return false;
     }
     if idx == 0 {
@@ -763,19 +989,32 @@ fn match_selector_part(
     // Le combinateur est porté par le composé PRÉCÉDENT
     // (lien de `parts[idx-1]` vers `parts[idx]`).
     let combinator = selector.parts[idx - 1].1.unwrap_or(Combinator::Descendant);
-    // Récursion ∝ profondeur du sélecteur et des ancêtres DOM
-    // → arêtes garanties `deep` (R-24).
-    match combinator {
+    // Coupure filtre : si le composé à matcher porte une
+    // clé (tag/classe/id/attr) qu'aucun ancêtre ne possède,
+    // la marche est impossible — on n'y va pas (R-83 ;
+    // ancêtres du nœud = ancêtres de ses frères pour `+`/`~`,
+    // combinators frères exclus car le frère testé n'est
+    // PAS un ancêtre).
+    if matches!(combinator, Combinator::Child | Combinator::Descendant)
+        && !anc.compound_possible(&selector.parts[idx - 1].0)
+    {
+        return false;
+    }
+    // Récursion ∝ nombre de composés du sélecteur : les
+    // marches ancêtres/frères sont itératives — un seul
+    // garde-fou `deep` par niveau (R-24 ; chaque niveau
+    // re-bascule tas si le segment s'épuise). Jusqu'ici
+    // le garde-fou courait à CHAQUE pas d'ancêtre — coût
+    // dominant du matching sur pages réelles (R-83).
+    explorer_common::deep(|| match combinator {
         Combinator::Child => match parent_element(dom, node) {
-            Some(p) => {
-                explorer_common::deep(|| match_selector_part(dom, p, selector, idx - 1, state))
-            }
+            Some(p) => match_selector_part(dom, p, selector, idx - 1, state, &mut *cache, anc),
             None => false,
         },
         Combinator::Descendant => {
             let mut cur = parent_element(dom, node);
             while let Some(p) = cur {
-                if explorer_common::deep(|| match_selector_part(dom, p, selector, idx - 1, state)) {
+                if match_selector_part(dom, p, selector, idx - 1, state, &mut *cache, anc) {
                     return true;
                 }
                 cur = parent_element(dom, p);
@@ -783,22 +1022,20 @@ fn match_selector_part(
             false
         }
         Combinator::NextSibling => match prev_element_sibling(dom, node) {
-            Some(s) => {
-                explorer_common::deep(|| match_selector_part(dom, s, selector, idx - 1, state))
-            }
+            Some(s) => match_selector_part(dom, s, selector, idx - 1, state, &mut *cache, anc),
             None => false,
         },
         Combinator::SubsequentSibling => {
             let mut cur = prev_element_sibling(dom, node);
             while let Some(s) = cur {
-                if explorer_common::deep(|| match_selector_part(dom, s, selector, idx - 1, state)) {
+                if match_selector_part(dom, s, selector, idx - 1, state, &mut *cache, anc) {
                     return true;
                 }
                 cur = prev_element_sibling(dom, s);
             }
             false
         }
-    }
+    })
 }
 
 impl CompoundSelector {
@@ -813,28 +1050,38 @@ fn simple_matches(
     node: NodeId,
     sel: &SimpleSelector,
     state: &dyn Fn(&str) -> bool,
+    cache: &mut MatchCache,
+    anc: AncestorFilter,
 ) -> bool {
     match sel {
         SimpleSelector::Type(name) => dom
             .tag_name(node)
             .is_ok_and(|t| t.eq_ignore_ascii_case(name)),
-        SimpleSelector::Class(cls) => match dom.attribute(node, "class") {
-            Ok(Some(v)) => v.split_ascii_whitespace().any(|c| c == cls.as_str()),
-            _ => false,
+        // `attributes` rend la slice empruntée : `attribute`
+        // clonerait la valeur String à chaque test — chaud
+        // dans la boucle candidats × nœuds (R-83).
+        SimpleSelector::Class(cls) => match dom.attributes(node) {
+            Ok(attrs) => attrs.iter().any(|a| {
+                a.name == "class" && a.value.split_ascii_whitespace().any(|c| c == cls.as_str())
+            }),
+            Err(_) => false,
         },
-        SimpleSelector::Id(id) => {
-            matches!(dom.attribute(node, "id"), Ok(Some(v)) if v == *id)
-        }
+        SimpleSelector::Id(id) => match dom.attributes(node) {
+            Ok(attrs) => attrs.iter().any(|a| a.name == "id" && a.value == *id),
+            Err(_) => false,
+        },
         SimpleSelector::Attribute {
             name,
             op,
             value,
             case_insensitive,
-        } => match dom.attribute(node, name) {
-            Ok(Some(actual)) => attr_matches(&actual, *op, value, *case_insensitive),
-            _ => false,
+        } => match dom.attributes(node) {
+            Ok(attrs) => attrs
+                .iter()
+                .any(|a| a.name == *name && attr_matches(&a.value, *op, value, *case_insensitive)),
+            Err(_) => false,
         },
-        SimpleSelector::Pseudo(p) => pseudo_matches(dom, node, p, state),
+        SimpleSelector::Pseudo(p) => pseudo_matches(dom, node, p, state, cache, anc),
         // Le pseudo-élément ne contraint pas l'élément — c'est
         // la cascade qui dirige les déclarations vers le
         // pseudo-style (R-13).
@@ -892,29 +1139,32 @@ fn attr_matches(actual: &str, op: AttrOp, expected: &str, ci: bool) -> bool {
 }
 
 /// Pseudo-classe contre un nœud.
-fn pseudo_matches(dom: &Dom, node: NodeId, p: &PseudoClass, state: &dyn Fn(&str) -> bool) -> bool {
+fn pseudo_matches(
+    dom: &Dom,
+    node: NodeId,
+    p: &PseudoClass,
+    state: &dyn Fn(&str) -> bool,
+    cache: &mut MatchCache,
+    anc: AncestorFilter,
+) -> bool {
     match p {
         PseudoClass::Root => {
             matches!(dom.parent(node), Ok(Some(par)) if dom.element(par).is_err())
         }
         PseudoClass::Empty => empty_element(dom, node),
-        PseudoClass::FirstChild => element_index(dom, node) == 1,
-        PseudoClass::LastChild => element_index_from_end(dom, node) == 1,
-        PseudoClass::OnlyChild => {
-            element_index(dom, node) == 1 && element_index_from_end(dom, node) == 1
-        }
-        PseudoClass::NthChild(a, b) => nth_hit(*a, *b, element_index(dom, node)),
-        PseudoClass::NthLastChild(a, b) => nth_hit(*a, *b, element_index_from_end(dom, node)),
-        PseudoClass::FirstOfType => type_index(dom, node, false) == 1,
-        PseudoClass::LastOfType => type_index(dom, node, true) == 1,
-        PseudoClass::OnlyOfType => {
-            type_index(dom, node, false) == 1 && type_index(dom, node, true) == 1
-        }
-        PseudoClass::NthOfType(a, b) => nth_hit(*a, *b, type_index(dom, node, false)),
-        PseudoClass::NthLastOfType(a, b) => nth_hit(*a, *b, type_index(dom, node, true)),
-        PseudoClass::Not(list) => !matches_any_with_state(dom, node, list, state),
+        PseudoClass::FirstChild => cache.rank(dom, node, 0) == 1,
+        PseudoClass::LastChild => cache.rank(dom, node, 1) == 1,
+        PseudoClass::OnlyChild => cache.rank(dom, node, 0) == 1 && cache.rank(dom, node, 1) == 1,
+        PseudoClass::NthChild(a, b) => nth_hit(*a, *b, cache.rank(dom, node, 0)),
+        PseudoClass::NthLastChild(a, b) => nth_hit(*a, *b, cache.rank(dom, node, 1)),
+        PseudoClass::FirstOfType => cache.rank(dom, node, 2) == 1,
+        PseudoClass::LastOfType => cache.rank(dom, node, 3) == 1,
+        PseudoClass::OnlyOfType => cache.rank(dom, node, 2) == 1 && cache.rank(dom, node, 3) == 1,
+        PseudoClass::NthOfType(a, b) => nth_hit(*a, *b, cache.rank(dom, node, 2)),
+        PseudoClass::NthLastOfType(a, b) => nth_hit(*a, *b, cache.rank(dom, node, 3)),
+        PseudoClass::Not(list) => !matches_any_with_state_in(dom, node, list, state, cache, anc),
         PseudoClass::Is(list) | PseudoClass::Where(list) => {
-            matches_any_with_state(dom, node, list, state)
+            matches_any_with_state_in(dom, node, list, state, cache, anc)
         }
         PseudoClass::Dynamic(d) => dynamic_matches(dom, node, *d, state),
     }
@@ -932,7 +1182,7 @@ fn dynamic_matches(
     match d {
         DynamicPseudo::Link => {
             matches!(dom.tag_name(node), Ok("a" | "area"))
-                && matches!(dom.attribute(node, "href"), Ok(Some(_)))
+                && matches!(dom.attributes(node), Ok(attrs) if attrs.iter().any(|a| a.name == "href"))
         }
         DynamicPseudo::Visited => false,
         _ => state(d.name()),

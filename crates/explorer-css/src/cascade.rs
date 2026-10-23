@@ -18,7 +18,10 @@
 //! en CSS et parsée par notre propre parser.
 
 use crate::parser::{AtKind, Declaration, MediaQuery, Rule, Stylesheet};
-use crate::selector::{matches_with_state, parse_selector_list, ComplexSelector, Specificity};
+use crate::selector::{
+    matches_with_state_cached, parse_selector_list, AncestorFilter, ComplexSelector, MatchCache,
+    SimpleSelector, Specificity,
+};
 use crate::value::{
     expand_shorthand, parse_color, parse_length, value_is_valid_for, Color, Length,
 };
@@ -206,6 +209,187 @@ pub(crate) struct CollectedFontFace {
     pub(crate) declarations: Vec<Declaration>,
 }
 
+/// Position d'un sélecteur dans la table des règles + son
+/// pseudo-élément cible pré-extrait (le filtre `::before` de
+/// la cascade devient un test de champ, R-83).
+#[derive(Debug, Clone, Copy)]
+struct SelEntry {
+    /// Index dans la table des règles (`rules` ou
+    /// `quirks_rules`).
+    rule: u32,
+    /// Index dans `rules[rule].selectors`.
+    selector: u32,
+    /// Pseudo-élément du composé final, `None` = règle
+    /// d'élément.
+    pseudo: Option<crate::PseudoElement>,
+}
+
+/// Index des sélecteurs par **clé du composé le plus à
+/// droite** (R-83) — celui qui s'applique au nœud. Avant,
+/// `collect_candidates` essayait chaque règle sur chaque
+/// nœud, trois fois par élément (élément + `::before` +
+/// `::after`) : O(règles × nœuds × 3) ≈ ~13 s mesurés sur
+/// un article réel de 32 800 nœuds. La clé est une
+/// condition **nécessaire** du match — `div.a[href]` se
+/// range sous `Class(a)` (id > classe > attribut > type) :
+/// tout simple présent doit matcher, n'importe lequel borne
+/// donc les candidats. Le seau `universal` reçoit les
+/// sélecteurs sans clé extractible (`*`, `:root`, `:nth-*`,
+/// ou composé réduit à `:is()`/`:not()`/`:where()` — leurs
+/// clés internes sont des alternatives : ranger sous l'une
+/// manquerait les nœuds des autres).
+#[derive(Debug, Default)]
+struct SelectorIndex {
+    /// `#id` exact → entrées (HTML = sensible à la casse).
+    by_id: HashMap<String, Vec<SelEntry>>,
+    /// `.classe` exacte → entrées.
+    by_class: HashMap<String, Vec<SelEntry>>,
+    /// Nom d'attribut minuscule → entrées. Minuscules des
+    /// deux côtés : le lookup attribut du DOM est exact mais
+    /// le parseur HTML stocke déjà les noms en bas-de-casse —
+    /// normaliser ne change aucun verdict (`[HREF]` ratait
+    /// déjà un `href` stocké, et rate encore).
+    by_attr: HashMap<String, Vec<SelEntry>>,
+    /// Tag minuscule → entrées (le match type est
+    /// ASCII-insensitive).
+    by_tag: HashMap<String, Vec<SelEntry>>,
+    /// Sélecteurs sans clé — essayés sur tout élément.
+    universal: Vec<SelEntry>,
+    /// Au moins un sélecteur cible `::before`/`::after` —
+    /// permet de sauter le calcul pseudo complet sur les
+    /// feuilles qui n'en produisent aucun.
+    has_before: bool,
+    /// Voir `has_before`.
+    has_after: bool,
+}
+
+impl SelectorIndex {
+    /// Range chaque sélecteur de `rules` sous la clé de son
+    /// composé final — une entrée par (règle, sélecteur).
+    fn build(rules: &[CollectedRule]) -> Self {
+        let mut idx = Self::default();
+        for (ri, rule) in rules.iter().enumerate() {
+            for (si, sel) in rule.selectors.iter().enumerate() {
+                let entry = SelEntry {
+                    rule: u32::try_from(ri).unwrap_or(u32::MAX),
+                    selector: u32::try_from(si).unwrap_or(u32::MAX),
+                    pseudo: crate::selector::selector_pseudo_element(sel),
+                };
+                match entry.pseudo {
+                    Some(crate::PseudoElement::Before) => idx.has_before = true,
+                    Some(crate::PseudoElement::After) => idx.has_after = true,
+                    None => {}
+                }
+                match rightmost_key(sel) {
+                    BucketKey::Id(k) => idx.by_id.entry(k).or_default().push(entry),
+                    BucketKey::Class(k) => idx.by_class.entry(k).or_default().push(entry),
+                    BucketKey::Attr(k) => idx.by_attr.entry(k).or_default().push(entry),
+                    BucketKey::Tag(k) => idx.by_tag.entry(k).or_default().push(entry),
+                    BucketKey::Universal => idx.universal.push(entry),
+                }
+            }
+        }
+        idx
+    }
+
+    /// Appelle `out` sur les entrées dont la clé est portée
+    /// par `node` (+ le seau universel). Chaque entrée est
+    /// livrée une fois — un sélecteur n'est rangé que sous
+    /// une clé.
+    fn candidates(&self, dom: &Dom, node: NodeId, out: &mut impl FnMut(&SelEntry)) {
+        if let Ok(tag) = dom.tag_name(node) {
+            if let Some(v) = self.by_tag.get(&tag.to_ascii_lowercase()) {
+                for e in v {
+                    out(e);
+                }
+            }
+        }
+        if let Ok(attrs) = dom.attributes(node) {
+            for a in attrs {
+                if a.name == "class" {
+                    for c in a.value.split_ascii_whitespace() {
+                        if let Some(v) = self.by_class.get(c) {
+                            for e in v {
+                                out(e);
+                            }
+                        }
+                    }
+                } else if a.name == "id" {
+                    if let Some(v) = self.by_id.get(a.value.as_str()) {
+                        for e in v {
+                            out(e);
+                        }
+                    }
+                }
+                if let Some(v) = self.by_attr.get(&a.name.to_ascii_lowercase()) {
+                    for e in v {
+                        out(e);
+                    }
+                }
+            }
+        }
+        for e in &self.universal {
+            out(e);
+        }
+    }
+}
+
+/// Clé de rangement d'un sélecteur (cf. [`SelectorIndex`]).
+#[derive(Debug)]
+enum BucketKey {
+    /// `#id` — valeur exacte.
+    Id(String),
+    /// `.classe` — valeur exacte.
+    Class(String),
+    /// `[attr …]` — nom minuscule.
+    Attr(String),
+    /// `div` — minuscule.
+    Tag(String),
+    /// Aucune condition nécessaire indexable.
+    Universal,
+}
+
+/// Clé du composé final de `sel` — la première condition
+/// nécessaire au niveau le plus contraignant (id > classe >
+/// attribut > type) ; le matching exige TOUS les simples du
+/// composé, n'importe lequel suffit à borner les candidats.
+/// Les contenus de `:is()`/`:not()`/`:where()` ne sont pas
+/// des clés (alternatives ou négations).
+fn rightmost_key(sel: &ComplexSelector) -> BucketKey {
+    let Some((compound, _)) = sel.parts.last() else {
+        return BucketKey::Universal;
+    };
+    let mut class = None;
+    let mut attr = None;
+    let mut tag = None;
+    for s in &compound.simples {
+        match s {
+            SimpleSelector::Id(i) => return BucketKey::Id(i.clone()),
+            SimpleSelector::Class(c) => {
+                class.get_or_insert(c);
+            }
+            SimpleSelector::Attribute { name, .. } => {
+                attr.get_or_insert(name);
+            }
+            SimpleSelector::Type(t) => {
+                tag.get_or_insert(t);
+            }
+            SimpleSelector::Universal
+            | SimpleSelector::Pseudo(_)
+            | SimpleSelector::PseudoElement(_) => {}
+        }
+    }
+    if let Some(c) = class {
+        BucketKey::Class(c.clone())
+    } else if let Some(a) = attr {
+        BucketKey::Attr(a.to_ascii_lowercase())
+    } else if let Some(t) = tag {
+        BucketKey::Tag(t.to_ascii_lowercase())
+    } else {
+        BucketKey::Universal
+    }
+}
+
 /// Moteur de cascade : accumulateur de feuilles + calcul.
 #[derive(Default)]
 pub struct StyleEngine {
@@ -214,6 +398,13 @@ pub struct StyleEngine {
     /// mode ») — parsées avec la feuille UA, ne candidatent
     /// que si `dom.document_mode() == DocumentMode::Quirks`.
     quirks_rules: Vec<CollectedRule>,
+    /// Index de `rules` par clé de composé final (R-83) —
+    /// reconstruit à chaque `collect_rules` (O(règles),
+    /// négligeable à côté du parse de la feuille).
+    index: SelectorIndex,
+    /// Index de `quirks_rules` — construit dans `new` (la
+    /// table quirks est figée après la feuille UA).
+    quirks_index: SelectorIndex,
     next_order: u32,
     /// `@font-face` avec leur contexte media (étape 46).
     pub(crate) font_faces: Vec<CollectedFontFace>,
@@ -416,6 +607,7 @@ impl StyleEngine {
         e.add_css(UA_CSS, Origin::UserAgent);
         let quirks_sheet = crate::parser::parse_stylesheet(QUIRKS_UA_CSS);
         e.collect_rules_into(&quirks_sheet.rules, Origin::UserAgent, &[], true);
+        e.quirks_index = SelectorIndex::build(&e.quirks_rules);
         e
     }
 
@@ -435,6 +627,9 @@ impl StyleEngine {
     /// OR entre les queries d'une même liste).
     fn collect_rules(&mut self, rules: &[Rule], origin: Origin, media: &[Vec<MediaQuery>]) {
         self.collect_rules_into(rules, origin, media, false);
+        // L'index reflète toujours la table complète — une
+        // feuille ajoutée entre deux calculs doit être vue.
+        self.index = SelectorIndex::build(&self.rules);
     }
 
     /// Collecte vers `self.rules` — ou vers `quirks_rules` quand
@@ -522,8 +717,26 @@ impl StyleEngine {
         env: &StyleEnv,
         state: &dyn Fn(&str) -> bool,
     ) -> ComputedStyle {
-        let parent = parent_computed(self, dom, node, env, state, &mut HashMap::new());
-        self.compute_with_parent(dom, node, env, parent.as_ref(), None, state)
+        let mut mcache = MatchCache::default();
+        let parent = parent_computed(
+            self,
+            dom,
+            node,
+            env,
+            state,
+            &mut HashMap::new(),
+            &mut mcache,
+        );
+        self.compute_with_parent(
+            dom,
+            node,
+            env,
+            parent.as_ref(),
+            None,
+            state,
+            &mut mcache,
+            &AncestorFilter::of_ancestors(dom, node),
+        )
     }
 
     /// Styles calculés de tout le sous-arbre de `root`
@@ -544,7 +757,23 @@ impl StyleEngine {
     ) -> StyleMap {
         let mut map = HashMap::new();
         let mut pseudos = HashMap::new();
-        self.compute_subtree(dom, root, env, None, &mut map, &mut pseudos, state);
+        let mut mcache = MatchCache::default();
+        // Ancêtres de `root` : un sous-arbre peut être stylé
+        // hors racine document — leurs clés restent visibles
+        // pour les combinators ancêtres (même contrat que
+        // `compute_scoped`).
+        let anc = AncestorFilter::of_ancestors(dom, root);
+        self.compute_subtree(
+            dom,
+            root,
+            env,
+            None,
+            &mut map,
+            &mut pseudos,
+            state,
+            &mut mcache,
+            &anc,
+        );
         StyleMap { map, pseudos }
     }
 
@@ -590,7 +819,21 @@ impl StyleEngine {
     ) -> StyleMap {
         let mut map = HashMap::new();
         let mut pseudos = HashMap::new();
-        self.compute_subtree(dom, root, env, parent, &mut map, &mut pseudos, state);
+        let mut mcache = MatchCache::default();
+        // Les ancêtres au-dessus du sous-arbre restent
+        // visibles au matching (contrat du restyle scopé).
+        let anc = AncestorFilter::of_ancestors(dom, root);
+        self.compute_subtree(
+            dom,
+            root,
+            env,
+            parent,
+            &mut map,
+            &mut pseudos,
+            state,
+            &mut mcache,
+            &anc,
+        );
         StyleMap { map, pseudos }
     }
 
@@ -604,31 +847,35 @@ impl StyleEngine {
         map: &mut HashMap<NodeId, ComputedStyle>,
         pseudos: &mut HashMap<NodeId, PseudoStyles>,
         state: &dyn Fn(&str) -> bool,
+        mcache: &mut MatchCache,
+        anc: &AncestorFilter,
     ) {
-        let style = self.compute_with_parent(dom, node, env, parent, None, state);
+        let style = self.compute_with_parent(dom, node, env, parent, None, state, mcache, anc);
         // Pseudo-éléments (R-13) : l'élément origine est le
-        // parent d'héritage de ses `::before`/`::after`.
+        // parent d'héritage de ses `::before`/`::after`. Le
+        // calcul est sauté quand aucune feuille n'a de règle
+        // pseudo correspondante (R-83) — `content` ne peut
+        // alors jamais être produit.
         if dom.element(node).is_ok() {
-            let before = self.compute_with_parent(
-                dom,
-                node,
-                env,
-                Some(&style),
-                Some(crate::PseudoElement::Before),
-                state,
-            );
-            let after = self.compute_with_parent(
-                dom,
-                node,
-                env,
-                Some(&style),
-                Some(crate::PseudoElement::After),
-                state,
-            );
-            let ps = PseudoStyles {
-                before: (before.get("content").is_some()).then_some(before),
-                after: (after.get("content").is_some()).then_some(after),
+            let mut pseudo_style = |pe: crate::PseudoElement| -> Option<ComputedStyle> {
+                if !self.has_pseudo_rules(dom, pe) {
+                    return None;
+                }
+                let s = self.compute_with_parent(
+                    dom,
+                    node,
+                    env,
+                    Some(&style),
+                    Some(pe),
+                    state,
+                    mcache,
+                    anc,
+                );
+                (s.get("content").is_some()).then_some(s)
             };
+            let before = pseudo_style(crate::PseudoElement::Before);
+            let after = pseudo_style(crate::PseudoElement::After);
+            let ps = PseudoStyles { before, after };
             if ps.before.is_some() || ps.after.is_some() {
                 pseudos.insert(node, ps);
             }
@@ -637,10 +884,16 @@ impl StyleEngine {
             map.insert(node, style);
             return;
         };
-        map.insert(node, style);
+        // Le style local est prêté aux enfants (`&style`) —
+        // aucun clone du style parent par nœud (R-83) ;
+        // l'insertion dans `map` suit la récursion.
+        // Les enfants voient `node` dans leur filtre
+        // d'ancêtres (copie — le frère ne doit pas hériter
+        // des clés de son aîné).
+        let mut child_anc = *anc;
+        child_anc.insert_node(dom, node);
         for child in children {
             if dom.element(child).is_ok() {
-                let parent_style = map.get(&node).cloned();
                 // Récursion ∝ profondeur DOM → pile garantie
                 // (R-24) : bascule tas en zone rouge.
                 explorer_common::deep(|| {
@@ -648,20 +901,24 @@ impl StyleEngine {
                         dom,
                         child,
                         env,
-                        parent_style.as_ref(),
+                        Some(&style),
                         map,
                         pseudos,
                         state,
+                        &mut *mcache,
+                        &child_anc,
                     );
                 });
             }
         }
+        map.insert(node, style);
     }
 
     /// Calcul d'un nœud connaissant le style de son parent.
     /// `pseudo` = `Some(pe)` → style du pseudo-élément `pe` du
     /// nœud (R-13) ; `None` → style de l'élément lui-même.
     #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_arguments)]
     fn compute_with_parent(
         &self,
         dom: &Dom,
@@ -670,6 +927,8 @@ impl StyleEngine {
         parent: Option<&ComputedStyle>,
         pseudo: Option<crate::PseudoElement>,
         state: &dyn Fn(&str) -> bool,
+        mcache: &mut MatchCache,
+        anc: &AncestorFilter,
     ) -> ComputedStyle {
         let mut props: HashMap<String, String> = HashMap::new();
         if dom.element(node).is_err() {
@@ -691,7 +950,7 @@ impl StyleEngine {
         } else {
             Vec::new()
         };
-        let mut cand = self.collect_candidates(dom, node, env, pseudo, state);
+        let mut cand = self.collect_candidates(dom, node, env, pseudo, state, mcache, anc);
         if pseudo.is_none() {
             for d in &inline_decls {
                 let rank = if d.important { 4 } else { 1 };
@@ -748,7 +1007,14 @@ impl StyleEngine {
             parent.map_or_else(|| Arc::new(HashMap::new()), |p| Arc::clone(&p.vars));
         // 4. Mots-clés CSS-wide sur les valeurs déclarées.
         for (k, v) in &mut props {
-            let kw = v.trim().to_ascii_lowercase();
+            // Fast-path : la valeur ordinaire (quasi toutes)
+            // n'est aucun mot-clé CSS-wide → pas d'alloc
+            // `lowercase` par propriété (R-83).
+            let t = v.trim();
+            if !is_css_wide(t) {
+                continue;
+            }
+            let kw = t.to_ascii_lowercase();
             // Propriétés custom `--*` (css-variables-1 §3.2) :
             // l'« initiale » d'une --* est la *guaranteed-invalid
             // value*, pas une valeur de la table ordinaire —
@@ -795,37 +1061,46 @@ impl StyleEngine {
         //    invalide (spec « invalid at computed-value time »
         //    → on retire la propriété ; pour une héritée, la
         //    valeur du parent est restaurée).
-        //    R-57 : `snap` = props propres + `--*` déclarées
-        //    (petit — plus les ~200 héritées) ; les héritées
-        //    sont lues dans la table `vars` partagée — lookup
-        //    : propres d'abord (elles masquent l'héritage).
-        let snap = props.clone();
-        // Une `--*` à la *guaranteed-invalid value* est « non
-        // résoluble » : le `var()` qui la référence échoue et
-        // prend son fallback (css-variables §3.2) — `None` ici.
-        let lookup = |name: &str| -> Option<String> {
-            snap.get(name)
-                .cloned()
-                .or_else(|| vars.get(name).cloned())
-                .filter(|v| v != GUARANTEED_INVALID)
-        };
-        for (k, v) in &mut props {
-            if !k.starts_with("--") && v.contains("var(") {
-                if let Some(resolved) = substitute_vars(v, &lookup, 0) {
-                    *v = resolved;
+        //    R-57 → R-83 : le passage est sauté quand aucune
+        //    valeur ne contient `var(` ; et le snapshot
+        //    `props.clone()` laisse place à une résolution en
+        //    deux passes — le lookup lit `props` immuablement,
+        //    la mutation suit (le clone complet par nœud
+        //    disparaît ; lookup : propres d'abord, elles
+        //    masquent l'héritage `vars`).
+        if props
+            .iter()
+            .any(|(k, v)| !k.starts_with("--") && v.contains("var("))
+        {
+            // Une `--*` à la *guaranteed-invalid value* est « non
+            // résoluble » : le `var()` qui la référence échoue et
+            // prend son fallback (css-variables §3.2) — `None` ici.
+            let lookup = |name: &str| -> Option<String> {
+                props
+                    .get(name)
+                    .cloned()
+                    .or_else(|| vars.get(name).cloned())
+                    .filter(|v| v != GUARANTEED_INVALID)
+            };
+            let resolved: Vec<(String, Option<String>)> = props
+                .iter()
+                .filter(|(k, v)| !k.starts_with("--") && v.contains("var("))
+                .map(|(k, v)| (k.clone(), substitute_vars(v, &lookup, 0)))
+                .collect();
+            for (k, r) in resolved {
+                if let Some(res) = r {
+                    props.insert(k, res);
                 } else {
-                    if is_inherited(k) {
-                        if let Some(pv) = parent.and_then(|p| p.get(k)) {
-                            *v = pv.to_string();
+                    if is_inherited(&k) {
+                        if let Some(pv) = parent.and_then(|p| p.get(&k)) {
+                            props.insert(k, pv.to_string());
                             continue;
                         }
                     }
-                    // Marqueur de retrait — éliminé juste après.
-                    *v = "\u{0}".to_string();
+                    props.remove(&k);
                 }
             }
         }
-        props.retain(|_, v| v != "\u{0}");
         // R-57 — les `--*` déclarées rejoignent la table
         // partagée : clone-on-write seulement si le nœud en
         // possède (une `--*` propre masque l'héritée du même
@@ -885,11 +1160,33 @@ impl StyleEngine {
         }
     }
 
+    /// `true` si au moins une règle collectée cible le
+    /// pseudo-élément `pe` — permet de sauter le calcul
+    /// pseudo complet (`collect_candidates` + héritage) sur
+    /// les feuilles qui n'en produisent aucun (R-83) : sans
+    /// règle ciblée, `content` ne peut jamais être posé.
+    fn has_pseudo_rules(&self, dom: &Dom, pe: crate::PseudoElement) -> bool {
+        let (a, q) = match pe {
+            crate::PseudoElement::Before => (self.index.has_before, self.quirks_index.has_before),
+            crate::PseudoElement::After => (self.index.has_after, self.quirks_index.has_after),
+        };
+        a || (dom.document_mode() == explorer_dom::DocumentMode::Quirks && q)
+    }
+
     /// Candidats de déclaration des **règles** triés (rang,
     /// spécificité, ordre croissants — la dernière écriture
     /// gagne) : un sélecteur doit matcher **avec le même
     /// pseudo-élément** cible. L'attribut `style` est fusionné
     /// par l'appelant (durée de vie locale).
+    ///
+    /// R-83 — seuls les sélecteurs dont la clé de composé
+    /// final est portée par `node` sont essayés (index
+    /// [`SelectorIndex`]) au lieu de balayer toute la table.
+    /// La spécificité d'une règle = max de ses sélecteurs qui
+    /// matchent (invariant de la cascade) ; l'ordre source
+    /// départage déterministe après le tri — l'ordre de
+    /// collecte par seaux n'a donc pas d'effet observable.
+    #[allow(clippy::too_many_arguments)]
     fn collect_candidates<'a>(
         &'a self,
         dom: &Dom,
@@ -897,31 +1194,68 @@ impl StyleEngine {
         env: &StyleEnv,
         pseudo: Option<crate::PseudoElement>,
         state: &dyn Fn(&str) -> bool,
+        mcache: &mut MatchCache,
+        anc: &AncestorFilter,
     ) -> Vec<(u8, Specificity, u32, &'a Declaration)> {
-        let mut rules_cand: Vec<(u8, Specificity, u32, &Declaration)> = Vec::new();
-        // Règles UA quirks : la spec HTML Rendering ne les
-        // applique qu'aux documents en mode quirks — elles
-        // partagent le rang UA et l'ordre source global.
-        let quirks = dom.document_mode() == explorer_dom::DocumentMode::Quirks;
-        for rule in self.rules.iter().chain(
-            quirks
-                .then(|| self.quirks_rules.iter())
-                .into_iter()
-                .flatten(),
-        ) {
+        // Spécificité max des sélecteurs qui matchent, par
+        // règle (`true` = table quirks — mêmes rang UA et
+        // ordre source que la table principale).
+        let mut spec_by_rule: HashMap<(bool, u32), Specificity> = HashMap::new();
+        let mut consider = |quirks: bool, e: &SelEntry| {
+            if e.pseudo != pseudo {
+                return;
+            }
+            let rules = if quirks {
+                &self.quirks_rules
+            } else {
+                &self.rules
+            };
+            let Some(rule) = rules.get(e.rule as usize) else {
+                return;
+            };
             // Chaque groupe `@media` englobant doit matcher.
             if !rule.media.is_empty() && !rule.media.iter().all(|qs| media_matches(env, qs)) {
-                continue;
+                return;
             }
-            // Spécificité = max des sélecteurs qui matchent.
-            let spec = rule
-                .selectors
-                .iter()
-                .filter(|s| crate::selector::selector_pseudo_element(s) == pseudo)
-                .filter(|s| matches_with_state(dom, node, s, state))
-                .map(ComplexSelector::specificity)
-                .max();
-            let Some(spec) = spec else { continue };
+            let Some(sel) = rule.selectors.get(e.selector as usize) else {
+                return;
+            };
+            let spec = sel.specificity();
+            // Sélecteur dominé : la règle a déjà un max de
+            // spécificité ≥ — matcher celui-ci ne peut rien
+            // changer (R-83).
+            if spec_by_rule
+                .get(&(quirks, e.rule))
+                .is_some_and(|m| spec <= *m)
+            {
+                return;
+            }
+            let hit = matches_with_state_cached(dom, node, sel, state, mcache, *anc);
+            if hit {
+                spec_by_rule
+                    .entry((quirks, e.rule))
+                    .and_modify(|s| *s = (*s).max(spec))
+                    .or_insert(spec);
+            }
+        };
+        self.index
+            .candidates(dom, node, &mut |e| consider(false, e));
+        // Règles UA quirks : la spec HTML Rendering ne les
+        // applique qu'aux documents en mode quirks.
+        if dom.document_mode() == explorer_dom::DocumentMode::Quirks {
+            self.quirks_index
+                .candidates(dom, node, &mut |e| consider(true, e));
+        }
+        let mut rules_cand: Vec<(u8, Specificity, u32, &Declaration)> = Vec::new();
+        for ((quirks, ri), spec) in spec_by_rule {
+            let rules = if quirks {
+                &self.quirks_rules
+            } else {
+                &self.rules
+            };
+            let Some(rule) = rules.get(ri as usize) else {
+                continue;
+            };
             for d in &rule.declarations {
                 let rank = match (rule.origin, d.important) {
                     (Origin::UserAgent, false) => 0,
@@ -1339,6 +1673,7 @@ fn parent_computed(
     env: &StyleEnv,
     state: &dyn Fn(&str) -> bool,
     memo: &mut HashMap<NodeId, ComputedStyle>,
+    mcache: &mut MatchCache,
 ) -> Option<ComputedStyle> {
     let parent = match dom.parent(node) {
         Ok(Some(p)) if dom.element(p).is_ok() => p,
@@ -1347,8 +1682,17 @@ fn parent_computed(
     if let Some(s) = memo.get(&parent) {
         return Some(s.clone());
     }
-    let grand = parent_computed(engine, dom, parent, env, state, memo);
-    let s = engine.compute_with_parent(dom, parent, env, grand.as_ref(), None, state);
+    let grand = parent_computed(engine, dom, parent, env, state, memo, mcache);
+    let s = engine.compute_with_parent(
+        dom,
+        parent,
+        env,
+        grand.as_ref(),
+        None,
+        state,
+        mcache,
+        &AncestorFilter::of_ancestors(dom, parent),
+    );
     memo.insert(parent, s.clone());
     Some(s)
 }
@@ -1389,6 +1733,18 @@ const INHERITED_PROPS: &[&str] = &[
 #[must_use]
 pub fn is_inherited(name: &str) -> bool {
     name.starts_with("--") || INHERITED_PROPS.contains(&name)
+}
+
+/// La valeur (trimée) est-elle un mot-clé CSS-wide
+/// (`inherit`/`initial`/`unset`/`revert`/`revert-layer`) ?
+/// Comparaison insensible sans allocation — sert de
+/// fast-path à la boucle mots-clés (R-83).
+fn is_css_wide(t: &str) -> bool {
+    t.eq_ignore_ascii_case("inherit")
+        || t.eq_ignore_ascii_case("initial")
+        || t.eq_ignore_ascii_case("unset")
+        || t.eq_ignore_ascii_case("revert")
+        || t.eq_ignore_ascii_case("revert-layer")
 }
 
 /// Valeur initiale des propriétés couvertes (table réduite —

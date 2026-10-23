@@ -1387,3 +1387,88 @@ fn media_not_parens_formes() {
     // absente » → nié vrai (tolérance documentée).
     assert_eq!(s.get("display"), Some("none"), "double borne niée → vrai");
 }
+
+// ── R-83 : index, filtre d'ancêtres Bloom, mémo de matching ──
+// Le filtre ne produit jamais de faux négatif : chaque kind
+// de clé (tag/id/class/attr) reste trouvable quand l'ancêtre
+// la porte, les combinators frères et les rangs `:nth-*` sont
+// inchangés, et les sélecteurs impossibles restent absents.
+
+#[test]
+fn r83_filtre_ancetres_sans_faux_negatif() {
+    // body > div#wrap > section.items[data-x] > [span, p, p2]
+    // et `em` dans `p` — clés variées sur les ancêtres.
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let body = dom.create_element("body").unwrap();
+    dom.append_child(doc, body).unwrap();
+    let div = dom.create_element("div").unwrap();
+    dom.set_attribute(div, "id", "wrap").unwrap();
+    dom.append_child(body, div).unwrap();
+    let sec = dom.create_element("section").unwrap();
+    dom.set_attribute(sec, "class", "items").unwrap();
+    dom.set_attribute(sec, "data-x", "1").unwrap();
+    dom.append_child(div, sec).unwrap();
+    let span = dom.create_element("span").unwrap();
+    dom.append_child(sec, span).unwrap();
+    let p = dom.create_element("p").unwrap();
+    dom.append_child(sec, p).unwrap();
+    let em = dom.create_element("em").unwrap();
+    dom.append_child(p, em).unwrap();
+    let p2 = dom.create_element("p").unwrap();
+    dom.append_child(sec, p2).unwrap();
+
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "article p { color: red } \
+         div p { color: green } \
+         #wrap p { font-weight: bold } \
+         .items p { text-align: center } \
+         [data-x] p { width: 1px } \
+         [data-y] p { z-index: 7 } \
+         span + p { border-top-width: 0 } \
+         p:nth-child(2) { margin-top: 2px } \
+         section p em { top: 0px }",
+        Origin::Author,
+    );
+    let map = e.compute_tree(&dom, doc, &env());
+    let sp = map.get(p).unwrap();
+    // Tag ancêtre : `article` élagué sans casser `div`.
+    assert_eq!(sp.get("color"), Some("green"));
+    // Id / classe / nom d'attribut ancêtres.
+    assert_eq!(sp.get("font-weight"), Some("bold"));
+    assert_eq!(sp.get("text-align"), Some("center"));
+    assert_eq!(sp.get("width"), Some("1px"));
+    // Clé absente partout → jamais posée (élagage correct).
+    assert_eq!(sp.get("z-index"), None);
+    // Frère précédent immédiat — non filtré (ce n'est pas
+    // un ancêtre).
+    assert_eq!(sp.get("border-top-width"), Some("0"));
+    // Rang fraternel mémoïsé — `p` est le 2ᵉ élément enfant
+    // (`p2` garde la marge UA `1em`, pas le `2px` du nth).
+    assert_eq!(sp.get("margin-top"), Some("2px"));
+    assert_eq!(map.get(p2).unwrap().get("margin-top"), Some("1em"));
+    // Chaîne à trois composés.
+    assert_eq!(map.get(em).unwrap().get("top"), Some("0px"));
+}
+
+#[test]
+fn r83_saut_des_calculs_pseudo() {
+    // Sans règle `::before`/`::after`, le calcul pseudo est
+    // sauté : pas de pseudo-style produit — et une feuille
+    // qui en a un le produit toujours.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("p { color: green }", Origin::Author);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert!(map
+        .pseudo(f.p, explorer_css::PseudoElement::Before)
+        .is_none());
+    e.add_css("p::before { content: 'x' }", Origin::Author);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(
+        map.pseudo(f.p, explorer_css::PseudoElement::Before)
+            .and_then(|s| s.get("content")),
+        Some("\"x\"")
+    );
+}
