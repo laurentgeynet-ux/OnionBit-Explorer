@@ -731,14 +731,75 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   aucun contexte commis.
   Exposé `tab_frames` /
   `frame_dom_dump`. Le rendu
-  composite et les ponts
+  composite est livré à
+  l'étape 129 ; les ponts
   `parent`/`top`/`postMessage`
-  restent à l'étape 129
+  restent à l'étape 130
   (dépendent de la piste JS —
   un contexte enfant exige son
   propre moteur ; journal).
   Régressions `iframe_*`
   (6 tests session).
+- **Étape 129 — sous-contextes
+  `<iframe>` : rendu
+  composite** (`explorer-core`
+  — cap « web réel sécurisé ») :
+  chaque `SubFrame` est
+  rasterisée dans **sa propre
+  surface** par la pipeline
+  complète (styles → boîtes →
+  layout → display list →
+  `rasterize_window_cached`,
+  viewport = content box de
+  sa boîte, `image_max_px`
+  borné), puis blittée dans
+  `images.replaced` à la clé
+  `NodeId` de l'élément —
+  `paint_replaced` émet
+  l'`Image` clippé à la
+  content box **sans extension
+  PIPE** (z-order, `overflow`/
+  `clip-path`, `object-fit`
+  du peintre générique). La
+  boîte `<iframe>` devient
+  une feuille remplacée
+  atomique (gabarit 300×150
+  spec / attributs `width`/
+  `height` px) même sans
+  contexte fetché — le repli
+  RAWTEXT ne rend plus ;
+  `src` absent, 404 ou rendu
+  enfant hors bornes → cadre
+  blanc, jamais de panic.
+  **Surfaces cachées clées
+  `(url, w, h)`** (`frame_
+  bitmaps`, 32 entrées max) —
+  jamais par `NodeId` : le
+  re-parse réattribue les
+  cases et un cache indexé
+  id aliasserait deux
+  contextes. Purge des
+  bitmaps `images.replaced`
+  **avant** les inserts de la
+  passe pour la même raison ;
+  invalidation complète à
+  chaque commit (même URL ≠
+  même contenu). Chemins
+  `&mut self` ET détaché
+  `spawn_blocking` couverts
+  (`frames`/`frame_bitmaps`
+  voyagent dans
+  `PaintPayload`). Relayout
+  sans re-parse réutilise les
+  surfaces inchangées ;
+  bfcache restaure les DOM
+  enfants et régénère les
+  surfaces. Ponts JS
+  (`window.parent`/`top`,
+  `postMessage`) → étape 130,
+  piste JS. Régressions
+  `iframe_composite_*`
+  (4 tests session).
 
 - **JS-C72 — `indexedDB` +
   `caches` (Cache API)**

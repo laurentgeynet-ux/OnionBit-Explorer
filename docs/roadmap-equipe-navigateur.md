@@ -2788,19 +2788,61 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Régressions `iframe_*`
   (6 tests session).
 
-- [ ] **Étape 131. Sous-contextes
-  `<iframe>` — rendu composite +
-  ponts JS** (renumérotée : 129 = radar
-  pris par NAV, 130 = empreinte) : blit du sous-DOM
-  dans sa boîte remplacée
-  (layout enfant + raster),
-  `window.parent`/`top` et
-  `postMessage` cross-contexte
-  borné — **dépend de la piste
-  JS** (couture `JsEngine`
-  par contexte — le contexte
-  enfant a besoin de son propre
-  moteur ; journal).
+- [x] **Étape 131. Sous-contextes
+  `<iframe>` — rendu
+  composite** (renumérotée : 129
+  = radar pris par NAV, 130 =
+  empreinte) : chaque
+  `SubFrame` est rasterisée
+  dans sa surface (pipeline
+  complète : styles → boîtes
+  → layout → display list →
+  `rasterize_window_cached`,
+  viewport = content box,
+  `image_max_px` borné) puis
+  blittée en `images.replaced`
+  à la clé `NodeId` de sa
+  boîte — `paint_replaced`
+  émet l'`Image` clippé sans
+  extension PIPE. La boîte
+  est atomique (gabarit
+  300×150 / attributs px —
+  `intrinsic` → pas de repli
+  RAWTEXT) même sans contexte
+  (`src` absent, 404, cadre
+  vide blanc). Surfaces
+  cachées `(url,w,h)` bornées
+  — jamais par `NodeId`
+  (réattribution au re-parse) ;
+  purge `images.replaced`
+  **avant** les inserts de la
+  passe pour la même raison.
+  Relayout/resize : réutilise
+  les surfaces inchangées ;
+  bfcache : DOM enfants
+  restaurés, surfaces
+  régénérées. 4 tests
+  `iframe_composite_*`.
+
+- [ ] **Étape 134. Câblage
+  `SubFrame` → contexte JS**
+  (renumérotée — la partie
+  « ponts » de l'ex-131 ;
+  JS-C78 a livré le moteur
+  multi-contextes) : instancier
+  `context_new` par `SubFrame`
+  au commit (`install_dom` +
+  transports de l'enfant),
+  `context_switch`/`dom_event`/
+  `eval` adressés par `CtxId`,
+  `context_destroy` hors
+  bfcache, **tag ctx sur
+  `NetRequest`** (initiator/
+  page_url de l'émetteur —
+  le fetch de l'enfant est une
+  émission du document enfant).
+  Journal : reliquat explicite
+  de l'entrée « JS-C78 livré ».
 
 - [x] **Étape 129. Radar corpus
   ≥1200 px — `doc_h`/`scroll_y`

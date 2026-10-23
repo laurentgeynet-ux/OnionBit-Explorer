@@ -121,7 +121,7 @@ impl FontSource for SharedFonts {
 /// persistant de la payload (R-65 — transplantation : le
 /// cache voyage avec [`PaintPayload`] comme le `GlyphCache`
 /// raster R-36) — symétrique de [`restitute_font_cache`].
-fn layout_ctx<'a>(ctx: &'a ApplyCtx, p: &mut PaintPayload) -> BlockCtx<'a> {
+pub(crate) fn layout_ctx<'a>(ctx: &'a ApplyCtx, p: &mut PaintPayload) -> BlockCtx<'a> {
     BlockCtx {
         fonts: Some(&ctx.fonts as &dyn FontSource),
         viewport_w: ctx.viewport.0,
@@ -135,7 +135,7 @@ fn layout_ctx<'a>(ctx: &'a ApplyCtx, p: &mut PaintPayload) -> BlockCtx<'a> {
 /// un bug (le `BlockCtx` l'emporterait en le détruisant,
 /// la passe suivante repartirait froide), juste du shaping
 /// re-facturé.
-fn restitute_font_cache(p: &mut PaintPayload, block: &BlockCtx) {
+pub(crate) fn restitute_font_cache(p: &mut PaintPayload, block: &BlockCtx) {
     p.layout_font_cache = block.take_font_cache();
 }
 
@@ -196,6 +196,12 @@ pub(crate) fn run_apply_job(
 /// lisent/mutent ; la comptabilité de l'onglet (`hist`,
 /// `js`, `focused`, `pending_nav`…) reste sur `Tab` et
 /// répond normalement pendant la fenêtre.
+///
+/// `Default` = payload **scratch** — le rendu borné d'un
+/// sous-contexte `<iframe>` en consomme une par passe
+/// (étape 129 : `dom` reste `None`, l'arbre est passé
+/// par référence).
+#[derive(Default)]
 pub(crate) struct PaintPayload {
     /// DOM parsé commis.
     pub dom: Option<Dom>,
@@ -230,6 +236,27 @@ pub(crate) struct PaintPayload {
     pub focused: Option<Vec<(String, u32)>>,
     /// Bitmaps indexés par `NodeId`.
     pub images: PaintImages,
+    /// Sous-contextes `<iframe>` de la page (étape 128/129)
+    /// — le composite rasterise chaque `Dom` enfant dans sa
+    /// surface et blitte le bitmap en `images.replaced` à
+    /// la clé `NodeId` de sa boîte. Voyage avec la payload
+    /// comme `images` (rendu détaché sans `Tab`).
+    pub frames: Vec<SubFrame>,
+    /// `NodeId` des boîtes `<iframe>` peintes par le
+    /// composite — purgé puis rempli à chaque passe
+    /// (`images.replaced` survivant d'un re-parse).
+    pub frame_nodes: Vec<explorer_dom::NodeId>,
+    /// Surfaces de sous-contextes déjà rasterisées, clées
+    /// `(url résolue, w px, h px)` — réutilisées d'une
+    /// passe à l'autre sans jamais croiser deux contextes
+    /// (un cache par `NodeId` aliasserait au re-parse).
+    /// Borné par [`composite::MAX_FRAME_BITMAPS`].
+    pub frame_bitmaps: composite::SubFrameBitmaps,
+    /// URL de la page — copie de `Tab.url` pour la
+    /// résolution des `src` dans le composite (lecture
+    /// seule : `put_paint` ne la réécrit jamais sur `Tab`,
+    /// qui fait foi).
+    pub base_url: Option<Url>,
     /// Feuilles `<link>` — une entrée par feuille, parsées
     /// isolément à la cascade (étape 104, cf. R-68).
     pub linked_sheets: Vec<String>,
@@ -379,6 +406,10 @@ impl Tab {
             find: self.find.take(),
             focused: self.focused.clone(),
             images: std::mem::take(&mut self.images),
+            frames: std::mem::take(&mut self.frames),
+            frame_nodes: std::mem::take(&mut self.frame_nodes),
+            frame_bitmaps: std::mem::take(&mut self.frame_bitmaps),
+            base_url: self.url.clone(),
             linked_sheets: std::mem::take(&mut self.linked_sheets),
             prev_styles: std::mem::take(&mut self.prev_styles),
             transitions: std::mem::take(&mut self.transitions),
@@ -414,6 +445,9 @@ impl Tab {
         self.popup = p.popup;
         self.find = p.find;
         self.images = p.images;
+        self.frames = p.frames;
+        self.frame_nodes = p.frame_nodes;
+        self.frame_bitmaps = p.frame_bitmaps;
         self.linked_sheets = p.linked_sheets;
         self.prev_styles = p.prev_styles;
         self.transitions = p.transitions;
@@ -940,6 +974,7 @@ fn try_incr_payload(
     // incrémental (même trou que le RAZ `apply_payload`,
     // en silencieux — les entrées obsolètes survivent
     // indexées sur des ids morts).
+    composite::purge_frame_bitmaps(p);
     p.images.replaced.clear();
     p.images.backgrounds.clear();
     p.images.masks_url.clear();
@@ -957,6 +992,14 @@ fn try_incr_payload(
     insert_fetched_images(p, &styles, ctx.image_max_px);
     let mut sizes = image_sizes(new_dom, &p.images.replaced);
     sizes.extend(explorer_render::svg::svg_sizes(new_dom, root_el));
+    // `<iframe>` (étape 129) : gabarit remplacé — un cadre
+    // inséré par mutation JS est atomique comme au reflow
+    // complet, sans quoi son repli RAWTEXT rendrait.
+    for n in composite::iframe_nodes(new_dom) {
+        sizes
+            .entry(n)
+            .or_insert_with(|| composite::iframe_intrinsic(new_dom, n));
+    }
     let svgs = explorer_render::svg::collect_svg(new_dom, root_el, ctx.image_max_px);
     let block = layout_ctx(ctx, p);
     // Reliquat R-88 : `relayout_subtree` ne pose pas
@@ -991,6 +1034,11 @@ fn try_incr_payload(
     p.doc_h = doc_h;
     p.images.svgs = svgs;
     p.images.canvases = canvas_table_from_ops(canvas_ops, new_dom);
+    // Sous-contextes `<iframe>` (étape 129) : bitmaps
+    // re-blittés sur les boîtes du nouvel arbre — les
+    // surfaces `frame_bitmaps` clées `(url,w,h)` rendent
+    // la passe gratuite si les cadres n'ont pas bougé.
+    composite::composite_frames(p, ctx, new_dom);
     repaint_payload(p, ctx, None).is_ok()
 }
 
@@ -1072,6 +1120,12 @@ pub(crate) fn relayout_dom_payload(
     canvas_ops: &CanvasOpsTable,
 ) -> Result<(), CoreError> {
     let t0 = Instant::now();
+    // Bitmaps de sous-contexte `<iframe>` de la passe
+    // précédente : purgés AVANT tout insert sous les
+    // `NodeId` du DOM courant — un re-parse réattribue les
+    // cases, retirer plus tard pourrait emporter un
+    // bitmap frais (étape 129).
+    composite::purge_frame_bitmaps(p);
     let styles = styles_payload(p, dom, ctx.viewport, ctx.color_scheme);
     tracing::info!(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
@@ -1090,6 +1144,16 @@ pub(crate) fn relayout_dom_payload(
     insert_fetched_images(p, &styles, ctx.image_max_px);
     let mut sizes = image_sizes(dom, &p.images.replaced);
     sizes.extend(explorer_render::svg::svg_sizes(dom, root_el));
+    // `<iframe>` (étape 129) : gabarit remplacé (300×150
+    // / attributs px) — la boîte devient feuille atomique
+    // (`intrinsic.is_some()` → pas d'enfants boxifiés : le
+    // texte de repli RAWTEXT ne rend plus) et accueillera
+    // le bitmap du sous-contexte au composite.
+    for n in composite::iframe_nodes(dom) {
+        sizes
+            .entry(n)
+            .or_insert_with(|| composite::iframe_intrinsic(dom, n));
+    }
     let svgs = explorer_render::svg::collect_svg(dom, root_el, ctx.image_max_px);
     let Some(mut bx) = build_box_tree_sized(dom, root_el, &styles, &sizes) else {
         return Err(CoreError::NothingToPaint);
@@ -1116,6 +1180,12 @@ pub(crate) fn relayout_dom_payload(
     // `<canvas>` 2D (JS-C28) : op-lists cumulées du miroir,
     // re-résolues par chemin d'élément dans `dom`.
     p.images.canvases = canvas_table_from_ops(canvas_ops, dom);
+    // Sous-contextes `<iframe>` (étape 129) : chaque
+    // `SubFrame` fetchée est rasterisée dans sa surface
+    // (viewport = content box de sa boîte) et blittée en
+    // `images.replaced` — `paint_replaced` émet l'`Image`
+    // à la peinture qui suit.
+    composite::composite_frames(p, ctx, dom);
     repaint_payload(p, ctx, Some(dom))?;
     tracing::info!(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),

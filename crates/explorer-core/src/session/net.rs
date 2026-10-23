@@ -107,6 +107,11 @@ impl Session {
             // à chaque commit → les contextes du document
             // mort ne survivent pas.
             entry.frames = frames;
+            // Surfaces composites (étape 129) : les bitmaps
+            // clés `(url,w,h)` datent de la vague
+            // précédente — même URL ≠ même contenu d'un
+            // commit à l'autre, le cache est invalidé.
+            entry.frame_bitmaps.clear();
         }
         if let Ok(mut wf) = self.webfonts.lock() {
             for (family, weight, italic, data) in fonts {

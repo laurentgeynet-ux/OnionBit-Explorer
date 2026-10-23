@@ -7575,3 +7575,104 @@ async fn iframe_frames_ride_bfcache() {
     assert_eq!(t.calls(), calls, "bfcache : aucun re-fetch");
     assert_eq!(s.tab_frames(id).len(), 1, "frames restaurés");
 }
+
+// ===== Étape 129 — sous-contextes `<iframe>` : rendu
+// composite (pipeline enfant → bitmap dans la boîte) =====
+
+/// Page parente : iframe épinglée en haut-gauche, 80×60.
+const PAGE_FRAME_POS: &str = "<!doctype html><html><body>\
+     <iframe src=\"/f\" style=\"position:absolute;top:0;left:0;\
+     width:80px;height:60px\"></iframe></body></html>";
+
+/// Document enfant : fond rouge sur `body` (propagé au
+/// canvas — aucune dépendance à la hauteur en %).
+const FRAME_RED: &str = "<!doctype html><html><body \
+     style=\"margin:0;background:#ff0000\"></body></html>";
+
+/// Pixel RGBA aux coords CSS (scale=1 en tests).
+fn px_at(px: &[u8], w: u32, x: u32, y: u32) -> [u8; 4] {
+    let i = (y * w + x) as usize * 4;
+    [px[i], px[i + 1], px[i + 2], px[i + 3]]
+}
+
+/// Le contenu enfant est rasterisé dans sa surface et
+/// blitté dans la boîte de l'iframe : le centre du cadre
+/// porte le fond rouge du document enfant.
+#[tokio::test]
+async fn iframe_composite_paints_child_bitmap() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FRAME_POS);
+    t.route("/f", 200, FRAME_RED);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(
+        px_at(px, w, 40, 30),
+        [255, 0, 0, 255],
+        "centre du cadre = rouge enfant"
+    );
+}
+
+/// Deux cadres homonymes (même `src`) : un seul fetch, un
+/// seul sous-contexte — le bitmap sert les deux boîtes.
+#[tokio::test]
+async fn iframe_composite_shared_url_two_boxes() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <iframe src=\"/f\" style=\"position:absolute;top:0;left:0;\
+         width:40px;height:40px\"></iframe>\
+         <iframe src=\"/f\" style=\"position:absolute;top:0;left:60px;\
+         width:40px;height:40px\"></iframe></body></html>",
+    );
+    t.route("/f", 200, FRAME_RED);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(
+        t.paths().iter().filter(|p| *p == "/f").count(),
+        1,
+        "dédup : un seul fetch /f"
+    );
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(px_at(px, w, 20, 20), [255, 0, 0, 255], "cadre 1");
+    assert_eq!(px_at(px, w, 80, 20), [255, 0, 0, 255], "cadre 2");
+}
+
+/// La boîte `<iframe>` est atomique même sans contexte :
+/// `srcdoc`/pas de `src`/404 → cadre vide (fond parent)
+/// — jamais le texte de repli RAWTEXT, jamais de crash.
+#[tokio::test]
+async fn iframe_composite_blank_without_context() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FRAME_POS);
+    // `/f` non routé → 404 : la boîte existe, vide.
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    assert_ne!(
+        px_at(px, w, 40, 30),
+        [255, 0, 0, 255],
+        "pas de bitmap enfant"
+    );
+}
+
+/// Le bitmap survit au relayout sans re-render (taille de
+/// boîte inchangée → réutilisation) et suit le redimen-
+/// sionnement — le cadre reste rouge dans les deux cas.
+#[tokio::test]
+async fn iframe_composite_survives_relayout() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FRAME_POS);
+    t.route("/f", 200, FRAME_RED);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(s.rerender(id).is_ok());
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(
+        px_at(px, w, 40, 30),
+        [255, 0, 0, 255],
+        "bitmap conservé au relayout"
+    );
+}

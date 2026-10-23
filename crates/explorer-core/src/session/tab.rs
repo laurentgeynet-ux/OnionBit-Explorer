@@ -52,6 +52,7 @@ impl Tab {
             img_bodies: std::mem::take(&mut self.img_bodies),
             bg_aliases: std::mem::take(&mut self.bg_aliases),
             mask_aliases: std::mem::take(&mut self.mask_aliases),
+            frame_nodes: std::mem::take(&mut self.frame_nodes),
         };
         // Étape 133 — le gelé ne garde que les corps
         // compressés : les bitmaps `DecodedImage` sont
@@ -125,6 +126,7 @@ impl Tab {
         self.img_bodies = snap.img_bodies;
         self.bg_aliases = snap.bg_aliases;
         self.mask_aliases = snap.mask_aliases;
+        self.frame_nodes = snap.frame_nodes;
         self.transitions.clear();
         // Idem animations : la restauration repart sur les
         // déclarations — lecture réenregistrée au premier
