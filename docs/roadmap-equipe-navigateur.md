@@ -2916,6 +2916,34 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-142. `<iframe
+  srcdoc>`** *(numéro officiel
+  attribué à l'intégration —
+  convention CAP-xxx)* :
+  document **inline**
+  prioritaire sur `src` quand
+  présent, même vide (spec
+  HTML) — aucun fetch, le HTML
+  de l'attribut est parsé en
+  `SubFrame` dont l'URL est
+  `about:srcdoc` (origine
+  opaque) ; dédup par contenu
+  (deux cadres au même HTML =
+  un seul contexte), borne
+  `max_frames` partagée avec
+  les `src`. Association
+  boîte ↔ contexte par
+  contenu côté composite
+  (clé de cache = hash du
+  HTML — tous les
+  `about:srcdoc` partagent
+  leur URL) ; l'enfant hérite
+  la base du parent.
+  Tests : `iframe_srcdoc_*`
+  (4 : peinture, priorité sur
+  `src`, vide → blanc opaque,
+  dédup).
+
 - [x] **CAP-141. `Accept` par
   destination** *(numéro
   officiel attribué à

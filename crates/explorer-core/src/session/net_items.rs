@@ -41,10 +41,14 @@ pub(crate) struct SubPlan {
     /// `<img>`/`poster` résolus et dédupliqués.
     pub(crate) imgs: Vec<Url>,
     /// `<iframe src>` résolus — navigations de
-    /// sous-contexte (bornés `max_frames`) ; la
-    /// `referrerpolicy` de l'élément voyage avec l'URL
-    /// (étape 132).
+    /// sous-contexte (bornés `max_frames`, partagé avec
+    /// `srcdoc`) ; la `referrerpolicy` de l'élément voyage
+    /// avec l'URL (étape 132).
     pub(crate) frames: Vec<(Url, Option<ReferrerPolicy>)>,
+    /// `<iframe srcdoc>` — documents **inline** (CAP-142) :
+    /// aucun fetch, le HTML de l'attribut est parsé tel
+    /// quel en `SubFrame` (`about:srcdoc`) à la vague.
+    pub(crate) srcdoc_frames: Vec<String>,
 }
 
 /// Routage d'une complétion de sous-ressource (étape 50).
@@ -501,6 +505,11 @@ pub(crate) struct SubJob {
     /// la `referrerpolicy` de l'élément voyage avec l'URL
     /// (étape 132).
     pub(crate) frame_urls: Vec<(Url, Option<ReferrerPolicy>)>,
+    /// `<iframe srcdoc>` — documents inline (CAP-142) :
+    /// pas de requête, le HTML est parsé en `SubFrame`
+    /// (`about:srcdoc`) après la vague — la borne
+    /// `max_frames` est déjà appliquée en plan.
+    pub(crate) srcdoc_frames: Vec<String>,
     /// Jar partagé — les `Set-Cookie` des documents
     /// `<iframe>` sont capturés à réception (étape 128) :
     /// même partitionnement CHIPS que `CookieTransport`
@@ -700,6 +709,12 @@ impl SubJob {
             }
         })
         .await;
+        // `srcdoc` (CAP-142) : document inline — le HTML de
+        // l'attribut est le sous-contexte (`about:srcdoc`),
+        // aucune requête n'a été émise ni attendue.
+        for html in &self.srcdoc_frames {
+            frames.push(store_srcdoc_frame(&self.url, html));
+        }
         self.eng = eng;
         self.async_mods = async_mods;
         self.frames = frames;
@@ -1232,6 +1247,28 @@ pub(crate) fn store_frame(page: &Url, cookies: &CookieJar, u: &Url, resp: &Respo
     let title = extract_title(&dom);
     SubFrame {
         url: u.clone(),
+        srcdoc: None,
+        dom,
+        title,
+    }
+}
+
+/// Réception d'un document `<iframe srcdoc>` (CAP-142) :
+/// le HTML de l'attribut est parsé tel quel — l'URL du
+/// sous-contexte est `about:srcdoc` (schéma opaque,
+/// origine opaque héritée à l'usage ; repli dégradé = URL
+/// de la page si jamais le littéral échouait) ; aucun
+/// `Set-Cookie` n'existe à capturer (pas de réponse). Le
+/// contenu est conservé dans `srcdoc` — c'est la clé
+/// d'association boîte ↔ contexte côté composite (deux
+/// cadres au même HTML partagent le `SubFrame`, comme deux
+/// `src` homonymes).
+pub(crate) fn store_srcdoc_frame(page: &Url, html: &str) -> SubFrame {
+    let dom = TreeBuilder::parse(html);
+    let title = extract_title(&dom);
+    SubFrame {
+        url: Url::parse("about:srcdoc").unwrap_or_else(|_| page.clone()),
+        srcdoc: Some(html.to_string()),
         dom,
         title,
     }

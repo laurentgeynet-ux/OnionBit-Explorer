@@ -189,30 +189,56 @@ pub(crate) fn composite_frames(p: &mut PaintPayload, ctx: &ApplyCtx, dom: &Dom) 
         }
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let (wp, hp) = (w_px.round() as u32, h_px.round() as u32);
-        let (Some(base), Ok(Some(src))) = (base.as_ref(), dom.attribute(node, "src")) else {
-            continue;
-        };
-        let Ok(url) = Url::resolve(base, &src) else {
-            continue;
-        };
-        let Some(f) = p.frames.iter().find(|f| f.url == url) else {
-            continue;
+        // `srcdoc` (CAP-142) prime sur `src` : le contexte se
+        // recherche par **contenu** (tous les `about:srcdoc`
+        // partagent leur URL — la clé de cache est le hash du
+        // HTML, pas l'adresse).
+        let (f, cache_id) = if let Some(html) = dom.attribute(node, "srcdoc").ok().flatten() {
+            let Some(f) = p
+                .frames
+                .iter()
+                .find(|f| f.srcdoc.as_deref() == Some(html.as_str()))
+            else {
+                continue;
+            };
+            (f, srcdoc_key(&html))
+        } else {
+            let (Some(base), Ok(Some(src))) = (base.as_ref(), dom.attribute(node, "src")) else {
+                continue;
+            };
+            let Ok(url) = Url::resolve(base, &src) else {
+                continue;
+            };
+            let Some(f) = p.frames.iter().find(|f| f.url == url) else {
+                continue;
+            };
+            (f, url.to_string())
         };
         if p.frame_bitmaps.len() >= MAX_FRAME_BITMAPS {
             p.frame_bitmaps.clear();
         }
-        let key = (url.to_string(), wp, hp);
+        let key = (cache_id, wp, hp);
         let img = p
             .frame_bitmaps
             .entry(key)
             .or_insert_with(|| {
-                render_subframe(f, rect.width, rect.height, ctx)
+                render_subframe(f, rect.width, rect.height, ctx, base.as_ref())
                     .map_or_else(|| Arc::new(blank(wp, hp)), Arc::new)
             })
             .clone();
         p.images.replaced.insert(node, img);
         p.frame_nodes.push(node);
     }
+}
+
+/// Clé de cache d'un sous-contexte `srcdoc` : tous
+/// partagent `about:srcdoc` — le discriminant est le
+/// contenu (hash non-crypto, table interne seulement).
+fn srcdoc_key(html: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    html.hash(&mut h);
+    format!("srcdoc:{:x}", h.finish())
 }
 
 /// Bitmap vide de la fenêtre — posé quand le pipeline
@@ -233,9 +259,22 @@ fn blank(w: u32, h: u32) -> DecodedImage {
 /// Pipeline enfant bornée : `f.dom` → bitmap de la fenêtre
 /// `[0, w×h)` px CSS à l'échelle session. `None` = cadre
 /// vide (pas de racine, page hostile hors bornes).
-fn render_subframe(f: &SubFrame, w: f32, h: f32, ctx: &ApplyCtx) -> Option<DecodedImage> {
+/// `parent_base` = base effective du document parent —
+/// un enfant `srcdoc` hérite sa base du parent (spec
+/// HTML : `about:srcdoc` n'a pas d'adresse résolvable),
+/// un enfant fetché résout contre sa propre URL.
+fn render_subframe(
+    f: &SubFrame,
+    w: f32,
+    h: f32,
+    ctx: &ApplyCtx,
+    parent_base: Option<&Url>,
+) -> Option<DecodedImage> {
     let mut cp = PaintPayload {
-        base_url: Some(f.url.clone()),
+        base_url: Some(match &f.srcdoc {
+            Some(_) => parent_base.cloned().unwrap_or_else(|| f.url.clone()),
+            None => f.url.clone(),
+        }),
         ..PaintPayload::default()
     };
     let child_ctx = ApplyCtx {

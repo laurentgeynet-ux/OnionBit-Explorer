@@ -385,25 +385,47 @@ pub(crate) fn collect_images(dom: &Dom) -> Vec<(NodeId, String)> {
     out
 }
 
-/// `<iframe src>` du document dans l'ordre — `(src,
-/// referrerpolicy)` par élément (étape 128 + 132 : absent
-/// ou vide sauté ; `srcdoc` — document inline — n'est pas
-/// une URL et n'entre pas dans la file réseau ;
-/// l'attribut gouverne le `Referer` de la requête de
-/// sous-contexte, `None` = politique du document). La
-/// résolution/dédup/mixed-content vit dans
-/// `plan_subresources`.
+/// Source d'un sous-contexte `<iframe>` (CAP-142) :
+/// `srcdoc` est un document **inline** (prioritaire sur
+/// `src` quand présent, même vide — spec HTML « process
+/// the iframe attributes » : l'attribut charge
+/// `about:srcdoc` sans aucune requête) ; `Src` est la
+/// valeur brute à résoudre/fetcher.
+pub(crate) enum IframeKind {
+    /// `srcdoc="…"` — HTML du document enfant, verbatim.
+    Srcdoc(String),
+    /// `src="…"` brut non vide — ignoré si `srcdoc` est
+    /// présent (la collecte garantit l'exclusivité).
+    Src(String),
+}
+
+/// `<iframe>` du document dans l'ordre — `(kind,
+/// referrerpolicy)` par élément (étape 128 + 132 +
+/// CAP-142 : sans `src` ni `srcdoc` l'élément saute —
+/// sa boîte reste un cadre vide ; l'attribut gouverne le
+/// `Referer` de la requête de sous-contexte, `None` =
+/// politique du document). La résolution/dédup/mixed-
+/// content vit dans `plan_subresources`.
 pub(crate) fn collect_iframes(
     dom: &Dom,
-) -> Vec<(String, Option<explorer_net::http::ReferrerPolicy>)> {
+) -> Vec<(IframeKind, Option<explorer_net::http::ReferrerPolicy>)> {
     let mut out = Vec::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "iframe") {
-            if let Ok(Some(src)) = dom.attribute(n, "src") {
-                if !src.is_empty() {
-                    out.push((src, element_referrer_policy(dom, n)));
-                }
+            let srcdoc = dom.attribute(n, "srcdoc").ok().flatten();
+            let src = dom
+                .attribute(n, "src")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty());
+            let kind = match (srcdoc, src) {
+                (Some(h), _) => Some(IframeKind::Srcdoc(h)),
+                (None, Some(s)) => Some(IframeKind::Src(s)),
+                (None, None) => None,
+            };
+            if let Some(k) = kind {
+                out.push((k, element_referrer_policy(dom, n)));
             }
         }
         if let Ok(ch) = dom.children(n) {

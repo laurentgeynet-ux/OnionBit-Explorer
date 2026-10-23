@@ -560,23 +560,45 @@ impl Session {
             .filter(|u| !is_mixed_content(page, u) && seen_img.insert(u.as_str()))
             .take(self.max_images)
             .collect();
-        // `<iframe src>` (étape 128) — un sous-contexte est
-        // un document complet : http(s) seulement, mixed-
-        // content filtré, dédup par URL résolue, borné
-        // `max_frames` (`0` = désactivé — vide).
+        // `<iframe>` (étape 128 + CAP-142) — un sous-contexte
+        // est un document complet : `src` = fetch http(s),
+        // mixed-content filtré, dédup par URL résolue ;
+        // `srcdoc` = document inline (prioritaire sur `src`,
+        // aucun fetch — spec HTML) dédupliqué par contenu.
+        // Les deux partagent la borne `max_frames`
+        // (`0` = désactivé — vide) dans l'ordre document.
         let mut seen_frames = std::collections::HashSet::new();
-        let frames: Vec<(Url, Option<explorer_net::http::ReferrerPolicy>)> = collect_iframes(dom)
-            .into_iter()
-            .filter_map(|(src, policy)| Url::resolve(base, &src).ok().map(|u| (u, policy)))
-            .filter(|(u, _)| matches!(u.scheme(), "http" | "https"))
-            .filter(|(u, _)| !is_mixed_content(page, u) && seen_frames.insert(u.as_str()))
-            .take(self.max_frames)
-            .collect();
+        let mut seen_srcdoc = std::collections::HashSet::new();
+        let mut frames: Vec<(Url, Option<explorer_net::http::ReferrerPolicy>)> = Vec::new();
+        let mut srcdoc_frames: Vec<String> = Vec::new();
+        for (kind, policy) in collect_iframes(dom) {
+            if frames.len() + srcdoc_frames.len() >= self.max_frames {
+                break;
+            }
+            match kind {
+                IframeKind::Src(src) => {
+                    if let Ok(u) = Url::resolve(base, &src) {
+                        if matches!(u.scheme(), "http" | "https")
+                            && !is_mixed_content(page, &u)
+                            && seen_frames.insert(u.as_str())
+                        {
+                            frames.push((u, policy));
+                        }
+                    }
+                }
+                IframeKind::Srcdoc(html) => {
+                    if seen_srcdoc.insert(html.clone()) {
+                        srcdoc_frames.push(html);
+                    }
+                }
+            }
+        }
         SubPlan {
             sheets,
             scripts,
             imgs,
             frames,
+            srcdoc_frames,
         }
     }
 

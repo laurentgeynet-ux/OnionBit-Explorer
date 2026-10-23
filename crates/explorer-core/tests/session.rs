@@ -8286,3 +8286,114 @@ async fn accept_header_reaches_wire_per_destination() {
         accept_of("/f")
     );
 }
+
+// ===== CAP-142 — `<iframe srcdoc>` : document inline
+// (prioritaire sur `src`, aucun fetch — spec HTML) =====
+
+/// `srcdoc` produit un sous-contexte sans aucune requête :
+/// le HTML de l'attribut est parsé en `SubFrame`
+/// (`about:srcdoc`) et peint dans la boîte.
+#[tokio::test]
+async fn iframe_srcdoc_paints_inline_document() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <iframe srcdoc=\"<body style='margin:0;\
+         background:#00ff00'></body>\" style=\"position:absolute;\
+         top:0;left:0;width:80px;height:60px\"></iframe></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(
+        t.paths().len(),
+        1,
+        "seule la nav est émise — srcdoc ne fetch pas"
+    );
+    let frames = s.tab_frames(id);
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0].0, "about:srcdoc");
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(
+        px_at(px, w, 40, 30),
+        [0, 255, 0, 255],
+        "cadre = vert du srcdoc"
+    );
+}
+
+/// `srcdoc` **prime sur `src`** (spec HTML) : présent, même
+/// vide, l'attribut `src` n'est jamais fetché.
+#[tokio::test]
+async fn iframe_srcdoc_wins_over_src() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <iframe src=\"/f\" srcdoc=\"<body style='margin:0;\
+         background:#00ff00'></body>\" style=\"position:absolute;\
+         top:0;left:0;width:80px;height:60px\"></iframe></body></html>",
+    );
+    t.route("/f", 200, FRAME_RED);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(
+        !t.paths().contains(&"/f".to_string()),
+        "src ignoré quand srcdoc est présent"
+    );
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(px_at(px, w, 40, 30), [0, 255, 0, 255], "srcdoc peint");
+}
+
+/// `srcdoc=""` (présent et vide) : sous-contexte
+/// `about:srcdoc` vide → cadre blanc opaque (jamais le fond
+/// parent, jamais le repli RAWTEXT).
+#[tokio::test]
+async fn iframe_srcdoc_empty_is_blank() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body style='margin:0;\
+         background:#0000ff'>\
+         <iframe srcdoc=\"\" style=\"position:absolute;top:0;\
+         left:0;width:80px;height:60px\"></iframe></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let frames = s.tab_frames(id);
+    assert_eq!(frames.len(), 1, "srcdoc vide = contexte vide");
+    assert_eq!(frames[0].0, "about:srcdoc");
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(
+        px_at(px, w, 40, 30),
+        [255, 255, 255, 255],
+        "cadre blanc opaque, pas le bleu parent"
+    );
+}
+
+/// Deux cadres au `srcdoc` identique partagent un seul
+/// `SubFrame` (dédup par contenu) — le bitmap sert les
+/// deux boîtes.
+#[tokio::test]
+async fn iframe_srcdoc_dedup_same_content() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <iframe srcdoc=\"<body style='margin:0;\
+         background:#00ff00'></body>\" style=\"position:absolute;\
+         top:0;left:0;width:40px;height:40px\"></iframe>\
+         <iframe srcdoc=\"<body style='margin:0;\
+         background:#00ff00'></body>\" style=\"position:absolute;\
+         top:0;left:60px;width:40px;height:40px\"></iframe></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(s.tab_frames(id).len(), 1, "dédup par contenu");
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(px_at(px, w, 20, 20), [0, 255, 0, 255], "cadre 1");
+    assert_eq!(px_at(px, w, 80, 20), [0, 255, 0, 255], "cadre 2");
+}

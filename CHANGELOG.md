@@ -948,6 +948,45 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   image/iframe vérifiés sur
   le fil).
 
+- **CAP-142 — `<iframe
+  srcdoc>`** (`explorer-core`
+  — cap « web réel sécurisé » ;
+  numéro officiel attribué à
+  l'intégration, compteur
+  gelé) : document **inline**
+  prioritaire sur `src` quand
+  l'attribut est présent, même
+  vide (spec HTML « process
+  the iframe attributes ») —
+  aucune requête n'est émise,
+  le HTML de l'attribut est
+  parsé en `SubFrame` d'URL
+  `about:srcdoc` (origine
+  opaque), dédupliqué par
+  contenu et borné avec les
+  `src` par `max_frames`.
+  `collect_iframes` rend
+  désormais `IframeKind::
+  Srcdoc`/`Src` (l'exclusivité
+  srcdoc/src est garantie à la
+  collecte) ; le composite
+  associe boîte ↔ contexte
+  par contenu (clé de cache =
+  hash du HTML — tous les
+  `about:srcdoc` partagent
+  leur URL) et l'enfant
+  `srcdoc` hérite la base du
+  document parent (spec :
+  `about:srcdoc` n'a pas
+  d'adresse résolvable).
+  Régressions
+  `iframe_srcdoc_*` (4) :
+  peinture du document inline,
+  priorité sur `src` (`src`
+  jamais fetché), `srcdoc=""`
+  → cadre blanc opaque, dédup
+  deux cadres homonymes.
+
 ### Fixed
 
 - **Étape 122 — `root_font_size`

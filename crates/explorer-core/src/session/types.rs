@@ -551,8 +551,13 @@ pub struct StoredCookie {
 /// sont les tranches suivantes — l'étape livre le
 /// contexte réseau + DOM.
 pub(crate) struct SubFrame {
-    /// URL effectivement chargée (résolue sur la page).
+    /// URL effectivement chargée (résolue sur la page) —
+    /// `about:srcdoc` pour un document inline (CAP-142).
     pub(crate) url: Url,
+    /// HTML du `srcdoc` quand le sous-contexte est inline
+    /// (CAP-142) — clé d'association boîte ↔ contexte côté
+    /// composite (`None` = contexte fetché, clé = `url`).
+    pub(crate) srcdoc: Option<String>,
     /// DOM du document enfant — propre arbre, isolé du
     /// parent (aucun accès DOM croisé n'existe).
     pub(crate) dom: Dom,

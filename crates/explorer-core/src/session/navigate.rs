@@ -698,6 +698,7 @@ impl Session {
             scripts,
             imgs: img_urls,
             frames: frame_urls,
+            srcdoc_frames,
         } = self.plan_subresources(&dom, &url, &base, scripting);
         let doc_sheets = collect_style_sheets(&dom);
         // Issue #6 : les `<script type="importmap">` pilotent le
@@ -802,6 +803,7 @@ impl Session {
             scripts,
             img_urls,
             frame_urls,
+            srcdoc_frames,
             import_maps,
             import_specs,
             doc_sheets,
