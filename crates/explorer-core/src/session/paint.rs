@@ -152,6 +152,10 @@ impl Session {
             // requête `failed` de l'entrée — retente de la
             // requête tombée, pas d'un `GET` vide (étape 93).
             e.last_req = None;
+            // Idem commit réussi : la file d'intentions
+            // appartient au document mort — elle n'a pas à
+            // tirer après l'atterrissage de la page d'erreur.
+            e.pending_nav.clear();
             // Étape 76 : la navigation en échec prend son
             // entrée d'historique (Chrome/Firefox) — `back`
             // revient à la page précédente, `forward` et la

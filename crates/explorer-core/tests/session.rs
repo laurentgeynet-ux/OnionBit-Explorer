@@ -1186,6 +1186,42 @@ async fn click_on_link_navigates() {
     assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/b"));
 }
 
+/// Terrain 23/10 — « reload d'un onglet wikipedia rechargeait
+/// google.com » : une intention de navigation enfilée sur le
+/// document A (clic lien via `handle_input_now`, reste au-delà
+/// de `MAX_NAV_HOPS`, drain hôte interrompu) survivait au
+/// commit du document B — `pending_nav` n'était pas purgé —
+/// et tirait au drain suivant (nav, reload, input). Le commit
+/// doit tuer les intentions du document mort, comme
+/// `restore()` le fait déjà (tab.rs).
+#[tokio::test]
+async fn commit_kills_pending_nav_of_previous_document() {
+    let (mut s, t) = test_session();
+    t.route("/a", 200, PAGE_LINK);
+    t.route("/b", 200, PAGE);
+    t.route("/c", 200, PAGE);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/a").await.unwrap();
+
+    // Clic lien enfilé mais jamais drainé (l'utilisateur a
+    // tapé une URL omnibox avant que l'hôte ne draine).
+    let out = s
+        .handle_input_now(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+
+    // La navigation omnibox gagne : l'intention /b du
+    // document mort ne doit pas tirer après le commit.
+    s.navigate(id, "http://h.test/c").await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/c"));
+    assert_eq!(t.last().unwrap().1, "/c");
+
+    // Idem au reload : aucun reliquat ne doit naviguer ailleurs.
+    s.reload(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/c"));
+    assert_eq!(t.last().unwrap().1, "/c");
+}
+
 #[tokio::test]
 async fn click_off_link_is_ignored() {
     let (mut s, t) = test_session();
@@ -4952,6 +4988,37 @@ async fn bfcache_restores_back_forward_without_refetch() {
     // reload reste un vrai re-fetch (bfcache ≠ rechargement).
     s.reload(id).await.unwrap();
     assert_eq!(t.calls(), calls + 1);
+}
+
+/// Terrain 23/10 : `back` restauré par bfcache puis `reload`
+/// rechargeait la page **quittée** — `try_bfcache` met à jour
+/// `url`/`hist_idx` mais laissait `last_req` sur la requête
+/// de /b ; `reload_request` la rejouait sur l'affichage /a.
+/// Le reload post-restauration doit réémettre la requête de
+/// la position restaurée.
+#[tokio::test]
+async fn reload_after_bfcache_restore_refetches_restored_page() {
+    let (mut s, t) = test_session();
+    t.route("/a", 200, PAGE_T);
+    t.route("/b", 200, PAGE);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/a").await.unwrap();
+    s.navigate(id, "http://h.test/b").await.unwrap();
+
+    // back → /a restaurée sans réseau ; reload → re-fetch de /a.
+    s.go_back(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/a"));
+    s.reload(id).await.unwrap();
+    assert_eq!(
+        t.last().unwrap().1,
+        "/a",
+        "reload post-bfcache doit rejouer la requête de la page restaurée"
+    );
+
+    // Aller-retour symétrique : forward restaure /b, reload /b.
+    s.go_forward(id).await.unwrap();
+    s.reload(id).await.unwrap();
+    assert_eq!(t.last().unwrap().1, "/b");
 }
 
 /// Le bfcache est borné (`bfcache_pages` = 4) : la page la

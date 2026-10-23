@@ -2339,6 +2339,41 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   vers `test/browser_test_fakes.dart`
   (partagé avec `widget_test`).
 
+- [x] **Étape 117. `pending_nav` purgé
+  au commit** (terrain 23/10 —
+  « reload sur wikipedia rechargeait
+  google.com »). Le commit de
+  `nav_apply` purgeait `js`,
+  `deferred_inputs`, `popup`… mais
+  pas la file d'intentions de
+  navigation — `restore()` la
+  purgeait déjà (tab.rs:111), pas
+  le commit. Une intention posée
+  par le document mort (clic lien
+  via `handle_input_now` jamais
+  drainé par l'hôte, reste au-delà
+  de `MAX_NAV_HOPS`, drain
+  interrompu) survivait à la
+  navigation suivante et tirait au
+  prochain drain — dont celui de
+  `reload` (navigate.rs:107) : la
+  page affichée naviguait vers la
+  cible périmée. Repro mesuré :
+  clic lien enfilé + nav omnibox →
+  l'onglet atterrissait sur la
+  cible du lien mort au lieu de
+  l'URL tapée. Fix : `pending_nav.
+  clear()` au commit (page réussie
+  ET page d'erreur) — les
+  intentions sont à vie document.
+  Tests : `commit_kills_pending_nav
+  _of_previous_document` (rouge→vert
+  vérifié) + `reload_after_bfcache
+  _restore_refetches_restored_page`
+  (couvre la piste `last_req`
+  initialement soupçonnée — le
+  snapshot la porte déjà).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

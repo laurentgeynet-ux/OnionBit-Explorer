@@ -329,14 +329,16 @@ journal « livré ».
 
 ### Piste NAVIGATEUR
 
-- [ ] **Omnibox désynchronisée** : après navigation par lien
-  (google→wikipedia→fr), la barre d'adresse garde l'ancienne
-  URL alors que `list_tabs` rapporte la bonne — le champ ne
-  suit pas `state.url` (app).
-- [ ] **`reload` divergent** : `reload` d'un onglet affichant
-  wikipedia rechargeait google.com — `last_req`/`hist_idx`
-  désynchronisés (`reload_request` relit la dernière requête,
-  pas l'entrée courante).
+- [x] ~~**Omnibox désynchronisée**~~ → **résolu, Étape 116** :
+  le listener ne sélectionnait que `activeId` — la navigation
+  interne met à jour `active.url` sans le toucher ; la
+  sélection porte désormais sur `active?.url` + garde focus.
+- [x] ~~**`reload` divergent**~~ → **résolu, Étape 117** :
+  cause racine = `pending_nav` non purgée au commit — une
+  intention de navigation du document mort (clic lien non
+  drainé, reste >8 hops) tirait au drain post-commit/reload.
+  (La piste `last_req` du dispatch était fausse : le snapshot
+  bfcache la porte déjà — couvert par test de non-régression.)
 - [ ] **Recherche Google impossible** : google.com renvoie
   l'interstitiel « Activez JavaScript » + exception JS
   `Error: b` (stack `(3:2662)`/`(3:2460)`/`U(3:4262)`) —

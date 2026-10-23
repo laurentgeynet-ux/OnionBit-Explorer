@@ -58,6 +58,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Fakes de test partagés extraits
   vers `app/test/browser_test_fakes.dart`.
 
+- **Étape 117 — `pending_nav` purgé
+  au commit** (`explorer-core`,
+  terrain 23/10). Une intention de
+  navigation enfilée sur le
+  document quitté (clic lien non
+  drainé par l'hôte, reste au-delà
+  de `MAX_NAV_HOPS`) survivait au
+  commit de la page suivante et
+  tirait au prochain drain — dont
+  celui de `reload` : « reload sur
+  wikipedia rechargeait google.com ».
+  La file est purgée au commit
+  (page réussie et page d'erreur),
+  comme `restore()` le faisait déjà.
+
 - **R-87 — `doc_h` = région défilante
   réelle** (`explorer-layout` +
   `explorer-render`, terrain humain

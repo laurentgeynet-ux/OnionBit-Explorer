@@ -672,6 +672,12 @@ impl Session {
             entry.deferred_inputs.clear();
             entry.popup = None;
             entry.find = None;
+            // Les intentions en file appartiennent au document
+            // mort (clic lien non drainé, reste >MAX_NAV_HOPS)
+            // — comme `restore()` : elles ne doivent pas tirer
+            // après le commit (terrain 23/10 : une intention
+            // périmée rejouait une autre page au drain suivant).
+            entry.pending_nav.clear();
             entry.js = None;
             entry.images = PaintImages::default();
             entry.bg_aliases.clear();
