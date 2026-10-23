@@ -426,7 +426,10 @@ fn is_public_suffix(domain: &str) -> bool {
 }
 
 /// Domaine registrable (`example.co.uk`) pour `max_per_domain`.
-fn registrable(domain: &str) -> String {
+/// `pub(crate)` : le calcul « site » de `Sec-Fetch-Site`
+/// (étape 125, `policy::sec_fetch_headers`) partage la même
+/// notion que « site pour cookies ».
+pub(crate) fn registrable(domain: &str) -> String {
     psl::domain(domain.as_bytes()).map_or_else(
         || domain.to_string(),
         |d| String::from_utf8_lossy(d.as_bytes()).into_owned(),

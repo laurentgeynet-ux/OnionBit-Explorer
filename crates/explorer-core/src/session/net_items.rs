@@ -19,8 +19,8 @@ use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
 use explorer_js::JsEngine;
 use explorer_net::error::NetResult;
-use explorer_net::http::{HttpTransport, Initiator, Method, Request, Response};
-use explorer_net::policy::initiator_headers;
+use explorer_net::http::{FetchDest, HttpTransport, Initiator, Method, Request, Response};
+use explorer_net::policy::{initiator_headers, sec_fetch_headers};
 use explorer_net::url::Url;
 use explorer_render::decode_font;
 use futures_util::stream::{FuturesUnordered, StreamExt};
@@ -645,7 +645,11 @@ impl SubJob {
                 return;
             }
             ctx.left -= 1;
-            let Ok(resp) = self.transport.fetch(&sub_request(&self.url, &url)).await else {
+            let Ok(resp) = self
+                .transport
+                .fetch(&sub_request(&self.url, &url, FetchDest::Style))
+                .await
+            else {
                 return;
             };
             if !(200..300).contains(&resp.status) {
@@ -726,7 +730,11 @@ impl SubJob {
                     continue;
                 }
                 left -= 1;
-                let Ok(resp) = self.transport.fetch(&sub_request(&self.url, &url)).await else {
+                let Ok(resp) = self
+                    .transport
+                    .fetch(&sub_request(&self.url, &url, FetchDest::Image))
+                    .await
+                else {
                     continue;
                 };
                 if !(200..300).contains(&resp.status) {
@@ -772,6 +780,8 @@ impl SubJob {
                 };
                 let mut req = Request::get(url);
                 req.initiator = Some(Initiator::Subresource(self.url.clone()));
+                req.fetch_dest = FetchDest::Font;
+                req.headers.extend(sec_fetch_headers(&req));
                 let Ok(resp) = self.transport.fetch(&req).await else {
                     continue;
                 };
@@ -972,28 +982,38 @@ pub(crate) fn sub_jobs(
 ) -> VecDeque<(SubTag, Request)> {
     let mut jobs = VecDeque::new();
     for (i, u) in sheet_urls.iter().enumerate() {
-        jobs.push_back((SubTag::Css(i), sub_request(base, u)));
+        jobs.push_back((SubTag::Css(i), sub_request(base, u, FetchDest::Style)));
     }
     for item in scripts {
         if let (Some(u), Some(slot)) = (&item.src, item.slot) {
-            jobs.push_back((SubTag::Script(slot), sub_request(base, u)));
+            jobs.push_back((
+                SubTag::Script(slot),
+                sub_request(base, u, FetchDest::Script),
+            ));
         }
     }
     for u in img_urls {
-        jobs.push_back((SubTag::Img(u.clone()), sub_request(base, u)));
+        jobs.push_back((
+            SubTag::Img(u.clone()),
+            sub_request(base, u, FetchDest::Image),
+        ));
     }
     jobs
 }
 
 /// Requête GET de sous-ressource : `Referer`/`Origin` calculés
 /// à l'émission (`initiator_headers`, strict-origin-when-
-/// cross-origin) — le mixed-content est filtré en amont.
-pub(crate) fn sub_request(base: &Url, url: &Url) -> Request {
+/// cross-origin) + métadonnées `Sec-Fetch-*` (étape 125 —
+/// `dest` posé par l'appelant, `mode` = `no-cors` classique)
+/// — le mixed-content est filtré en amont.
+pub(crate) fn sub_request(base: &Url, url: &Url, dest: FetchDest) -> Request {
     let mut req = Request::get(url.clone());
     req.initiator = Some(Initiator::Subresource(base.clone()));
+    req.fetch_dest = dest;
     for (n, v) in initiator_headers(base, url, Method::Get) {
         req.headers.push((n, v));
     }
+    req.headers.extend(sec_fetch_headers(&req));
     req
 }
 

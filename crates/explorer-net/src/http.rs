@@ -45,6 +45,44 @@ impl Method {
     }
 }
 
+/// Destination d'une requête (`Sec-Fetch-Dest`, étape 125) —
+/// posée par l'émetteur à la création ; `Empty` est le défaut
+/// sûr (`fetch()`/`XHR`, outils — la spec leur assigne
+/// `empty`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FetchDest {
+    /// `document` — navigation de haut niveau.
+    Document,
+    /// `script` — `<script src>` et modules.
+    Script,
+    /// `style` — `<link rel=stylesheet>` et `@import`.
+    Style,
+    /// `image` — `<img>`, fonds CSS, masques.
+    Image,
+    /// `font` — `@font-face` `url()`.
+    Font,
+    /// `empty` — `fetch()`/`XHR` et requêtes non typées.
+    #[default]
+    Empty,
+}
+
+/// Mode d'une sous-ressource (`Sec-Fetch-Mode`, étape 125).
+/// `navigate` n'y figure pas : il est **dérivé de
+/// l'initiateur** à l'émission — un appelant ne pose jamais
+/// un mode de navigation à la main.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FetchMode {
+    /// `cors` — `fetch()`/`XMLHttpRequest` (spec Fetch).
+    Cors,
+    /// `no-cors` — sous-ressources classiques
+    /// (`<img>`/`<script>`/`<link>` — défaut conservateur).
+    #[default]
+    NoCors,
+    /// `same-origin` — garde-fou spec (`Request.mode` interne
+    /// des APIs qui exigent la même origine).
+    SameOrigin,
+}
+
 /// Une requête HTTP.
 #[derive(Debug, Clone)]
 pub struct Request {
@@ -62,6 +100,19 @@ pub struct Request {
     /// pas de page initiatrice). Posé par la session
     /// (étape 66).
     pub initiator: Option<Initiator>,
+    /// Destination `Sec-Fetch-Dest` (étape 125) — posée par
+    /// l'émetteur ; `Empty` = non typée.
+    pub fetch_dest: FetchDest,
+    /// Mode `Sec-Fetch-Mode` d'une sous-ressource (étape 125)
+    /// — ignoré pour les navigations (`navigate` est dérivé
+    /// de l'initiateur). `fetch()`/`XHR` posent `Cors`.
+    pub fetch_mode: FetchMode,
+    /// Activation utilisateur (étape 125) — `true` = émission
+    /// issue d'un geste (clic, submit, saisie omnibox,
+    /// reload) ; `Sec-Fetch-User: ?1` n'est émis que sur les
+    /// navigations ainsi marquées. Posée aux points de
+    /// dispatch, jamais devinée côté transport.
+    pub fetch_user: bool,
 }
 
 /// Qui a initié la requête — « site pour cookies » de la
@@ -94,6 +145,9 @@ impl Request {
             headers: Vec::new(),
             body: None,
             initiator: None,
+            fetch_dest: FetchDest::Empty,
+            fetch_mode: FetchMode::NoCors,
+            fetch_user: false,
         }
     }
 }

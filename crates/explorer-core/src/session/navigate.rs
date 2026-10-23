@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use explorer_dom::Dom;
 use explorer_js::NavRequest;
-use explorer_net::http::{Initiator, Method, Request};
-use explorer_net::policy::{initiator_headers, is_mixed_content};
+use explorer_net::http::{FetchDest, FetchMode, Initiator, Method, Request};
+use explorer_net::policy::{initiator_headers, is_mixed_content, sec_fetch_headers};
 use explorer_net::url::Url;
 use explorer_render::PaintImages;
 
@@ -525,6 +525,24 @@ impl Session {
                     .map_or(Initiator::TopLevelNav, Initiator::NavFrom),
             );
         }
+        // Métadonnées `Sec-Fetch-*` de navigation (étape 125) :
+        // `dest=document`/`mode=navigate` dérivés ici ;
+        // `TopLevelNav` = geste utilisateur implicite (saisie,
+        // favori, reload, back/forward) ; `NavFrom` ne porte
+        // `?1` que si l'émetteur l'a marqué (clic/submit vs
+        // `location.href` — `sec-fetch_headers` n'émet `User`
+        // que sur navigation marquée).
+        req.fetch_dest = FetchDest::Document;
+        if matches!(req.initiator, Some(Initiator::TopLevelNav)) {
+            req.fetch_user = true;
+        }
+        if !req
+            .headers
+            .iter()
+            .any(|(n, _)| n.eq_ignore_ascii_case("sec-fetch-site"))
+        {
+            req.headers.extend(sec_fetch_headers(&req));
+        }
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
         entry.nav_epoch += 1;
         // Un id de téléchargement est réservé par navigation
@@ -967,7 +985,13 @@ impl Session {
             // `fetch`/`XHR` = sous-ressource de la page —
             // `SameSite=Strict`/`Lax` exigent same-site (66).
             initiator: Some(Initiator::Subresource(page.clone())),
+            fetch_dest: FetchDest::Empty,
+            // `fetch()`/`XHR` = mode `cors` (spec Fetch, 125) —
+            // lisibilité filtrée par `cors_readable` en retour.
+            fetch_mode: FetchMode::Cors,
+            fetch_user: false,
         };
+        req.headers.extend(sec_fetch_headers(&req));
         if cross
             && !req
                 .headers

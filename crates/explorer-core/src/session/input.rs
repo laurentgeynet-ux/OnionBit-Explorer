@@ -319,7 +319,10 @@ impl Session {
         match self.link_at(tab, x, y) {
             Some(url) if !prevented => {
                 let u = Url::parse(&url).map_err(|e| CoreError::Url(e.to_string()))?;
-                self.enqueue_nav_act(tab, DrainAct::Req(Box::new(Request::get(u)), true));
+                let mut r = Request::get(u);
+                // Clic lien = geste utilisateur — `?1` (125).
+                r.fetch_user = true;
+                self.enqueue_nav_act(tab, DrainAct::Req(Box::new(r), true));
                 Ok(InputOutcome::Navigated)
             }
             _ => Ok(InputOutcome::Ignored),
@@ -600,7 +603,7 @@ impl Session {
         form: NodeId,
         submitter: Option<NodeId>,
     ) -> Result<(), CoreError> {
-        let req = {
+        let mut req = {
             let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
             let (Some(dom), Some(base)) = (entry.dom.as_ref(), entry.url.as_ref()) else {
                 return Err(CoreError::EmptyDocument);
@@ -620,6 +623,10 @@ impl Session {
             form_request(base, &action, &method, &enctype, &pairs)
                 .ok_or_else(|| CoreError::Url("action de formulaire irrésolvable".to_string()))?
         };
+        // Clic submit / Enter implicite = geste utilisateur —
+        // `Sec-Fetch-User: ?1` sur la navigation (étape 125) ;
+        // `form.submit()` scripté reste non marqué.
+        req.fetch_user = true;
         self.enqueue_nav_act(tab, DrainAct::Req(Box::new(req), true));
         Ok(())
     }
