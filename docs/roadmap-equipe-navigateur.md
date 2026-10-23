@@ -4281,14 +4281,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `MessageEvent` livré au
   destinataire. Chantier
   architectural (comme C75) —
-  pas un stub : isolation des
-  globals par contexte,
-  récursivité checkpoints GC,
-  ordre de livraison cross-
-  contexte. Couture côté
-  session : instanciation d'un
-  engine par `SubFrame` — à
-  arrêter avec l'étape 131 au
+  **périmètre v1 arrêté** :
+  `contentWindow`/`contentDocument`
+  same-origin uniquement (cross →
+  `null`, spec) ; `postMessage`
+  clone `WireValue` (C29),
+  `targetOrigin` **exigé** — `*`
+  = `SyntaxError` honnête ;
+  `MessageEvent.origin`/`source`
+  peuplés. Forme retenue : **un
+  heap, N globals** (modèle agent
+  spec — zéro réentrance,
+  `contentDocument` = vrai miroir
+  enfant) — arrêt couture au
   journal.
 - [ ] **JS-C79. `crypto.subtle`
   (RustCrypto)** — *réservé à la
@@ -4312,12 +4317,16 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   besoin site. Point d'architecture
   : `explorer-jscore` est
   autonome sans dépendance —
-  ajout `RustCrypto` (pur Rust
-  admis par mission) à justifier
-  au commit, ou couture embedder
-  si la politique crypto doit
-  rester plateforme. À arrêter
-  avant code.
+  **arbitrage tranché : couture
+  embedder** — `explorer-jscore`
+  reste autonome-zéro-dépendance
+  (promesse mission) : requête
+  abstraite `Crypto{algo,op,data}`
+  → plateforme exécute (RustCrypto
+  côté net/core, deps permises) →
+  résultat en `Promise`. Bonus :
+  la même couture sert le FFI
+  Flutter.
 
 ## Tâches continues
 
