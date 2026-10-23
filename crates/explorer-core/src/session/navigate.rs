@@ -969,14 +969,6 @@ impl Session {
         }
         let m = parse_method(method)?;
         let cross = page.origin() != url.origin();
-        // CORS minimal : cross-origin limité aux requêtes
-        // simples — en-tête non safelisté = preflight requis,
-        // bloqué au MVP (déviation documentée).
-        if cross
-            && !(cors_simple_method(m) && headers.iter().all(|(n, _)| cors_safelisted_header(n)))
-        {
-            return None;
-        }
         let mut req = Request {
             method: m,
             url: url.clone(),
@@ -987,10 +979,39 @@ impl Session {
             initiator: Some(Initiator::Subresource(page.clone())),
             fetch_dest: FetchDest::Empty,
             // `fetch()`/`XHR` = mode `cors` (spec Fetch, 125) —
-            // lisibilité filtrée par `cors_readable` en retour.
+            // enforcement par `CorsTransport` (étape 126).
             fetch_mode: FetchMode::Cors,
             fetch_user: false,
+            cors: None,
         };
+        if cross {
+            // Enforcement CORS (étape 126) : les en-têtes
+            // auteur non safelistés (ou `Content-Type` hors
+            // types « form ») déclenchent le preflight
+            // `OPTIONS` du `CorsTransport` — plus bloqués à
+            // l'émission (MVP documenté remplacé).
+            let mut unsafe_headers: Vec<String> = headers
+                .iter()
+                .filter(|(n, _)| !forbidden_request_header(n))
+                .filter(|(n, v)| {
+                    !cors_safelisted_header(n)
+                        || (n.trim().eq_ignore_ascii_case("content-type")
+                            && !explorer_net::policy::cors_safelisted_content_type(
+                                v.split(';').next().unwrap_or("").trim(),
+                            ))
+                })
+                .map(|(n, _)| n.trim().to_ascii_lowercase())
+                .collect();
+            unsafe_headers.sort();
+            unsafe_headers.dedup();
+            req.cors = Some(explorer_net::http::CorsRequest {
+                origin: origin_header_value(page),
+                // `credentials` non câblé au JS — défaut spec
+                // `same-origin` (piste JS : `fetch({credentials})`).
+                credentials: explorer_net::http::FetchCredentials::SameOrigin,
+                unsafe_headers,
+            });
+        }
         req.headers.extend(sec_fetch_headers(&req));
         if cross
             && !req
@@ -1007,7 +1028,18 @@ impl Session {
                 .filter(|(n, _)| !forbidden_request_header(n))
                 .cloned(),
         );
-        if !cross {
+        // `credentials:include` (champ posé, non câblé JS) —
+        // le jar filtre `SameSite` : seuls les cookies
+        // `None;Secure` partent en cross-site (126).
+        let include = matches!(
+            req.cors.as_ref().map(|c| c.credentials),
+            Some(explorer_net::http::FetchCredentials::Include)
+        );
+        let omit = matches!(
+            req.cors.as_ref().map(|c| c.credentials),
+            Some(explorer_net::http::FetchCredentials::Omit)
+        );
+        if !omit && (!cross || include) {
             let c = self.cookies.header_for_ctx(&req, true);
             if !c.is_empty() {
                 req.headers.push(("Cookie".to_string(), c));

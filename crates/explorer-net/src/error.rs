@@ -79,6 +79,13 @@ pub enum NetError {
     /// Requête bloquée par la politique de sécurité (mixed-content).
     #[error("mixed-content bloqué : {0}")]
     BlockedMixedContent(String),
+    /// Requête CORS refusée : preflight `OPTIONS` échoué
+    /// (`ACAO`/`ACAM`/`ACAH` absents ou insuffisants) ou
+    /// réponse finale non lisible (`ACAO` manquant/`ACAC`
+    /// requis). Livrée au script comme un échec réseau
+    /// opaque (`status: 0`) — jamais de détail exploitable.
+    #[error("CORS bloqué : {0}")]
+    CorsBlocked(String),
     /// Corps au-delà du budget après décompression.
     #[error("corps décodé > {0} octets")]
     DecodedTooLarge(usize),

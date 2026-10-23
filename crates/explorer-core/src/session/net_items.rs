@@ -860,12 +860,15 @@ pub(crate) struct NetDone {
     /// Corrélation côté moteur (`NetResponse::handle`).
     pub(crate) handle: u64,
     /// Requête cross-origin — la lisibilité de la réponse
-    /// est conditionnée à `Access-Control-Allow-Origin`.
+    /// est conditionnée à `Access-Control-Allow-Origin`
+    /// (enforcement `CorsTransport`, étape 126).
     pub(crate) cross: bool,
+    /// `credentials:` de la requête — `Set-Cookie` capturé
+    /// same-origin (sauf `omit`) ou `include` (étape 126).
+    pub(crate) credentials: explorer_net::http::FetchCredentials,
     /// Origine canonique de la page émettrice (check ACAO).
     pub(crate) page_origin: String,
-    /// URL de la requête — capture `Set-Cookie` (same-origin
-    /// uniquement, `credentials` cross-origin hors MVP).
+    /// URL de la requête — capture `Set-Cookie`.
     pub(crate) req_url: Url,
     /// Sortie brute du transport.
     pub(crate) out: NetResult<Response>,
@@ -885,14 +888,11 @@ pub(crate) fn parse_method(s: &str) -> Option<Method> {
     })
 }
 
-/// Verbe « safelisté » CORS — une requête cross-origin avec
-/// un autre verbe exigerait un preflight `OPTIONS` (hors MVP).
-pub(crate) const fn cors_simple_method(m: Method) -> bool {
-    matches!(m, Method::Get | Method::Head | Method::Post)
-}
-
-/// En-tête safelisté CORS — une requête cross-origin portant
-/// un autre en-tête exigerait un preflight : bloquée au MVP.
+/// En-tête safelisté CORS (nom) — un en-tête auteur hors
+/// liste figure dans `CorsRequest::unsafe_headers` et
+/// déclenche le preflight `OPTIONS` du `CorsTransport`
+/// (étape 126 ; la vérification `Access-Control-Allow-
+/// Headers` est côté transport).
 pub(crate) fn cors_safelisted_header(name: &str) -> bool {
     matches!(
         name.trim().to_ascii_lowercase().as_str(),

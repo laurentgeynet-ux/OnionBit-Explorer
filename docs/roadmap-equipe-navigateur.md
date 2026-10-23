@@ -2650,27 +2650,59 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Régressions : `sec_fetch_*`
   (6 tests policy).
 
-- [ ] **Étape 126. Enforcement
+- [x] **Étape 126. Enforcement
   CORS** (suite cap « web réel
-  sécurisé ») : `Origin` est émis
-  mais `Access-Control-*` n'est
-  jamais lu — chaque `fetch`/XHR
-  cross-origin réussit sans
-  autorisation = navigateur
-  permissif, incompatible avec
-  un login réel. `CorsTransport`
-  : requêtes `mode:cors`
-  cross-origin → preflight
-  `OPTIONS` pour non-simples,
-  vérification `ACAO`/`ACAC` à
-  la réponse, `credentials`
-  (`omit`/`same-origin`/`include`)
-  relié au jar ; erreur typée
-  `NetError::CorsBlocked`.
-  Couture jscore : le `fetch`
-  JS gagne `mode`/`credentials`
-  (annonce journal — la piste
-  JS câble l'optique miroir).
+  sécurisé ») : `Origin` était
+  émis mais `Access-Control-*`
+  jamais lu sur la requête — le
+  MVP bloquait tout cross-origin
+  non safelisté à l'émission.
+  `Request::cors: Option<
+  CorsRequest>` (origin
+  sérialisée, `FetchCredentials`
+  `Omit`/`SameOrigin`/`Include`,
+  `unsafe_headers` auteur) posé
+  par `script_request` sur les
+  cross `mode:cors` — la requête
+  n'est plus refusée, elle est
+  soumise au protocole.
+  `CorsTransport` (`policy.rs`,
+  wrappé sous `LangTransport` à
+  la session — `fetch_stream`
+  délégué pour préserver le
+  rendu progressif) : preflight
+  `OPTIONS` quand verbe non
+  safelisté / `unsafe_headers`
+  non vide / `Content-Type`
+  hors types « form » →
+  `Origin` + `ACRM` + `ACRH`,
+  validation statut 2xx +
+  `ACAO` (`*` seulement sans
+  `include`) + `ACAM` + `ACAH` ;
+  réponse finale vérifiée
+  `ACAO`/`ACAC` (`ACAC: true`
+  exigé sous `include`).
+  Échec → `NetError::CorsBlocked`
+  (opaque `status: 0` au script,
+  même surface qu'un échec
+  réseau). Cookies : `Cookie`
+  injecté same-origin ou sous
+  `include` (jar filtre
+  `SameSite`), `Set-Cookie`
+  capturé sauf `omit` /
+  cross-origin seulement sous
+  `include`. Pas de cache
+  preflight (MVP). Couture
+  jscore : `Request.fetch_mode`/
+  `cors.credentials` existent —
+  `fetch(mode,credentials)` peut
+  s'y brancher (journal).
+  Régressions `cors_*` (9 tests
+  policy) ; carve-out
+  `xhr_cross_origin_custom_
+  header_blocked` (preflight
+  réel : doc+OPTIONS = 2 appels,
+  même `error` livrée).
 
 - [ ] **Étape 127. Cookies
   `Partitioned` (CHIPS)** :

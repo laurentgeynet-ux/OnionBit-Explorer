@@ -466,6 +466,51 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   consommé par l'enforcement
   CORS (étape 126). Régressions
   `sec_fetch_*` (6 tests).
+- **Étape 126 — enforcement
+  CORS** (`explorer-net`,
+  `explorer-core` — cap « web
+  réel sécurisé ») : `Origin`
+  était émis mais
+  `Access-Control-*` jamais lu
+  — le MVP bloquait à
+  l'émission tout cross-origin
+  non safelisté. `Request::cors`
+  (`CorsRequest` : origine
+  sérialisée, `FetchCredentials`
+  `Omit`/`SameOrigin`/`Include`,
+  `unsafe_headers` auteur) posé
+  par `script_request` — la
+  requête entre dans le
+  protocole au lieu d'être
+  refusée. `CorsTransport`
+  (sous `LangTransport`,
+  `fetch_stream` délégué —
+  rendu progressif préservé) :
+  preflight `OPTIONS` sur
+  verbe non safelisté /
+  en-tête auteur non safelisté /
+  `Content-Type` hors types
+  « form », puis `ACAO`/`ACAM`/
+  `ACAH` validés ; réponse
+  finale vérifiée `ACAO` +
+  `ACAC` (`ACAC: true` exigé
+  sous `include`, `*` refusé).
+  Échec → `NetError::CorsBlocked`
+  = `status: 0` opaque au script.
+  `Cookie` injecté same-origin
+  ou sous `include` ;
+  `Set-Cookie` capturé sauf
+  `omit`, cross-origin sous
+  `include` seulement. Couture
+  prête pour `fetch(mode,
+  credentials)` côté jscore
+  (journal). Régressions
+  `cors_*` (9 tests policy) ;
+  carve-out du test session
+  `xhr_cross_origin_custom_
+  header_blocked` (le preflight
+  `OPTIONS` part désormais —
+  2 appels, même `error`).
 
 ### Fixed
 

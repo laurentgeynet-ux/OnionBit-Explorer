@@ -280,12 +280,19 @@ impl Session {
                     let tx = self.net_tx.clone();
                     let page_origin = origin_header_value(&page);
                     let req_url = req.url.clone();
+                    let credentials = req
+                        .cors
+                        .as_ref()
+                        .map_or(explorer_net::http::FetchCredentials::SameOrigin, |c| {
+                            c.credentials
+                        });
                     let j = tokio::spawn(async move {
                         let out = tr.fetch(&req).await;
                         let _ = tx.send(NetDone {
                             tab,
                             handle,
                             cross,
+                            credentials,
                             page_origin,
                             req_url,
                             out,
@@ -410,7 +417,16 @@ impl Session {
         let n = done.len();
         for d in done {
             self.net_tasks.remove(&(d.tab, d.handle));
-            if !d.cross {
+            // `Set-Cookie` capturé : same-origin sauf
+            // `credentials:omit` ; cross-origin sous `include`
+            // seulement (étape 126 — le transport a déjà exigé
+            // `ACAC: true` pour qu'elle soit lisible).
+            let cookie_ok = match d.credentials {
+                explorer_net::http::FetchCredentials::Omit => false,
+                explorer_net::http::FetchCredentials::SameOrigin => !d.cross,
+                explorer_net::http::FetchCredentials::Include => true,
+            };
+            if cookie_ok {
                 if let Ok(resp) = &d.out {
                     for v in resp.headers_all("set-cookie") {
                         self.cookies.set_from_header(&d.req_url, v);

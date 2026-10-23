@@ -3891,7 +3891,9 @@ async fn xhr_cross_origin_readable_with_acao() {
 }
 
 /// XHR cross-origin avec en-tête non safelisté — preflight
-/// requis → bloquée à l'émission (`error`, jamais émise).
+/// `OPTIONS` émis par `CorsTransport` (étape 126) ; la
+/// réponse sans `Access-Control-Allow-Headers` refuse la
+/// requête (`error` côté script, jamais la vraie `GET`).
 const PAGE_XHR_PREFLIGHT: &str = "<!doctype html><html><body>\
     <div id=\"x\">?</div>\
     <script>var q=new XMLHttpRequest();q.open('GET','http://b.test/api');\
@@ -3912,9 +3914,10 @@ async fn xhr_cross_origin_custom_header_blocked() {
     s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://a.test/").await.unwrap();
-    // Un seul fetch : le document — la XHR est bloquée
-    // avant émission (preflight hors MVP).
-    assert_eq!(t.calls(), 1, "requête preflightable non émise");
+    // Deux appels : le document + le preflight `OPTIONS`
+    // (refusé : `ACAH`/`ACAO` absents) — la vraie requête ne
+    // part jamais.
+    assert_eq!(t.calls(), 2, "document + preflight OPTIONS refusé");
     let b = s.open_tab();
     s.navigate(b, "http://a.test/stat").await.unwrap();
     assert_eq!(

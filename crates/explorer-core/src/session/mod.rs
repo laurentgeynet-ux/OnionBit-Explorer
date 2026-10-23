@@ -608,8 +608,13 @@ impl Session {
         // `set_accept_language` (réglages app → API) et elle
         // couvre navigations, sous-ressources et XHR d'un coup.
         let accept_language = explorer_net::lang::accept_language_cell(None);
+        // `Accept-Language` au-dessus de toute la pile (étape
+        // 118) ; `CorsTransport` en dessous (étape 126) — il
+        // émet le preflight `OPTIONS` et vérifie `ACAO`/`ACAC`
+        // sur les requêtes `mode:cors` portant `req.cors`
+        // (posé par `script_request`), tout le reste passe.
         let transport: Arc<dyn HttpTransport> = Arc::new(explorer_net::lang::LangTransport::wrap(
-            transport,
+            Arc::new(explorer_net::policy::CorsTransport::wrap(transport)),
             accept_language.clone(),
         ));
         Self {

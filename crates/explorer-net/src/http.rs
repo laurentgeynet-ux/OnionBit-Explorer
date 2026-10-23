@@ -83,6 +83,47 @@ pub enum FetchMode {
     SameOrigin,
 }
 
+/// Mode `credentials` d'une requête scriptée (étape 126,
+/// spec Fetch `Request.credentials`) — gouverne l'envoi du
+/// `Cookie` et la lisibilité de la réponse cross-origin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FetchCredentials {
+    /// `omit` — jamais de `Cookie` sortant, `Set-Cookie`
+    /// entrant ignoré ; la réponse reste lisible sur `ACAO`.
+    Omit,
+    /// `same-origin` — défaut `fetch()` : credentials pour
+    /// la même origine seulement (comportement historique).
+    #[default]
+    SameOrigin,
+    /// `include` — credentials y compris cross-origin ;
+    /// la réponse n'est lisible que si `ACAO` exact +
+    /// `Access-Control-Allow-Credentials: true` (jamais `*`).
+    Include,
+}
+
+/// Contexte CORS d'une requête `mode:cors` cross-origin
+/// (étape 126) — posé par la session à l'émission ; le
+/// transport de politique l'utilise pour le preflight
+/// `OPTIONS` et la vérification de la réponse. `None` =
+/// requête non soumise au protocole (navigations, sous-
+/// ressources `no-cors`, fetch same-origin).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CorsRequest {
+    /// Origine canonique de la page émettrice — comparée à
+    /// `Access-Control-Allow-Origin` et posée en `Origin:`
+    /// du preflight (`scheme://host[:port]`, `"null"` si
+    /// opaque — sérialisée par la session).
+    pub origin: String,
+    /// `credentials:` de l'appel script.
+    pub credentials: FetchCredentials,
+    /// En-têtes auteur **non** CORS-safelistés — déclencheurs
+    /// de preflight et contenu de `Access-Control-Request-
+    /// Headers`. La plateforme les connaît à l'émission
+    /// (après filtrage des interdits) : le transport ne les
+    /// redevine pas dans les en-têtes fusionnés.
+    pub unsafe_headers: Vec<String>,
+}
+
 /// Une requête HTTP.
 #[derive(Debug, Clone)]
 pub struct Request {
@@ -113,6 +154,11 @@ pub struct Request {
     /// navigations ainsi marquées. Posée aux points de
     /// dispatch, jamais devinée côté transport.
     pub fetch_user: bool,
+    /// Contexte CORS (étape 126) — `Some` sur une requête
+    /// `mode:cors` cross-origin : le transport de politique
+    /// y lit `origin`/`credentials`/`unsafe_headers` pour le
+    /// preflight et la lisibilité de la réponse.
+    pub cors: Option<CorsRequest>,
 }
 
 /// Qui a initié la requête — « site pour cookies » de la
@@ -148,6 +194,7 @@ impl Request {
             fetch_dest: FetchDest::Empty,
             fetch_mode: FetchMode::NoCors,
             fetch_user: false,
+            cors: None,
         }
     }
 }
