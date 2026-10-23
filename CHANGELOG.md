@@ -262,6 +262,68 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   GC : callbacks et wrappers
   racinés. Régressions `c69_*`
   (7 tests).
+- **JS-C70 —
+  `Blob`/`File`/`FileReader` +
+  `URL.createObjectURL`**
+  (`explorer-jscore` — uploads et
+  traitement client-side). `Blob`
+  = `ObjKind::Blob { data: Rc,
+  type }` : parts `string`/
+  `ArrayBuffer`/typed arrays/
+  `DataView`/`Blob` (spec
+  `processBlobParts`), `type`
+  normalisé minuscule ASCII,
+  `size`, `slice` indices relatifs
+  (`Rc` partagé, contenu immuable),
+  `text()`/`arrayBuffer()` en
+  promesses ; `stream()` absent
+  (JS-C71, honnête). `File` =
+  même kind + `name`/`lastModified`
+  (défaut : maintenant)/
+  `webkitRelativePath`, proto
+  `File.prototype → Blob.prototype`
+  (`file instanceof Blob` spec).
+  `FileReader` : `readAsText`/
+  `readAsDataURL` (`data:<type>;
+  base64,…`)/`readAsArrayBuffer`/
+  `readAsBinaryString`, livraison
+  au checkpoint microtask —
+  `loadstart` → `progress` →
+  `load` → `loadend`, `abort` →
+  `abort` + `loadend`,
+  `readyState`/`result`/`error`,
+  `on<ev>` + `addEventListener`
+  (ProgressEvent minimal `{type,
+  target, lengthComputable, loaded,
+  total}`), constantes
+  `EMPTY/LOADING/DONE`. `URL.
+  createObjectURL` → registre
+  `blob:<origin>/<n>` (origine =
+  `page_url`, compteur) ;
+  `fetch("blob:…")` résout en
+  local (200 + `Content-Type`),
+  `revokeObjectURL` silencieux,
+  URL inconnue → rejet réseau.
+  Intégrations : `body: Blob`/
+  `File` dans `fetch`/`Request`/
+  `Response`/`xhr.send` (octets →
+  `String` UTF-8 lossy — transport
+  `String` documenté, pas de
+  multipart), `Content-Type` =
+  `blob.type` ; `res.blob()` rend
+  un vrai `Blob` (remplace le stub
+  JS-C66 `{size,type}`) ;
+  `FormData.append/set(name,
+  blob, filename)` emballe en
+  `File` nommé, sérialisation
+  urlencodée porte le filename
+  (`Blob` nu → `"blob"`) ;
+  `structuredClone` préserve
+  octets (partagés), proto et
+  props (`File` → `File`). GC :
+  protos, URL objets et readers
+  en cours racinés. Régressions
+  `c70_*` (7 tests).
 
 ### Fixed
 

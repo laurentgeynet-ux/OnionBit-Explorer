@@ -506,6 +506,9 @@ impl Engine {
         // `FormData` (JS-C67) — `new FormData()` valide sans DOM ;
         // l'argument `form` exige le miroir (`install_dom`).
         crate::dom_host::install_formdata_global(self);
+        // `Blob`/`File`/`FileReader` + URL objets (JS-C70) —
+        // `res.blob()`/`body: Blob` valides sans DOM non plus.
+        crate::files::install_files(self);
     }
 
     /// `ctor.prototype = proto` + `proto.constructor = ctor` —
@@ -1361,6 +1364,9 @@ fn response_json(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 // ---- objets minimaux `blob()`/`formData()` -----------------------
 
 /// `Blob` minimal de `res.blob()` (constructeur complet : JS-C70).
+/// `res.blob()` → vrai `Blob` JS-C70 (proto réel, `slice`,
+/// `FileReader`-compatible) ; `type` = `Content-Type` de la
+/// réponse ; corps = texte UTF-8 décodé (transport `String`).
 fn blob_value(e: &mut Engine, body: &str, this: Value) -> Value {
     let ty = match this {
         Value::Obj(id) => match e.get_prop(id, "headers") {
@@ -1373,44 +1379,7 @@ fn blob_value(e: &mut Engine, body: &str, this: Value) -> Value {
         },
         _ => String::new(),
     };
-    let o = e.new_object();
-    let sz = Value::Num(body.len() as f64);
-    e.set_own(o, "size", sz, true);
-    let tv = e.str_val(ty);
-    e.set_own(o, "type", tv, true);
-    let bv = e.str_val(body.to_string());
-    let t = e.bound_native("text", blob_text_fulfill, vec![bv]);
-    e.set_own(o, "text", t, false);
-    let bv = e.str_val(body.to_string());
-    let t = e.bound_native("arrayBuffer", blob_ab_fulfill, vec![bv]);
-    e.set_own(o, "arrayBuffer", t, false);
-    Value::Obj(o)
-}
-
-/// `blob.text()` → promesse du texte (bound arg = corps).
-fn blob_text_fulfill(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let pid = e.new_promise();
-    e.resolve_promise(pid, arg(args, 0));
-    Ok(Value::Obj(pid))
-}
-
-/// `blob.arrayBuffer()` → promesse `ArrayBuffer` (bound arg = corps).
-fn blob_ab_fulfill(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let pid = e.new_promise();
-    let bytes = e
-        .heap_string_of(arg(args, 0))
-        .unwrap_or_default()
-        .into_bytes();
-    let id = e.heap.alloc_obj(crate::heap::Object {
-        proto: Value::Obj(e.protos.array_buffer),
-        props: Vec::new(),
-        kind: ObjKind::ByteBuf(bytes),
-        extensible: true,
-        elem_integrity: 0,
-        args_map: None,
-    });
-    e.resolve_promise(pid, Value::Obj(id));
-    Ok(Value::Obj(pid))
+    crate::files::blob_value(e, body.as_bytes().to_vec(), ty)
 }
 
 /// `BodyInit` → `(texte, Content-Type suggéré)` — `FormData` et
@@ -1432,6 +1401,13 @@ fn body_init_text(e: &mut Engine, v: Value) -> JsResult<(String, Option<String>)
             .collect::<Vec<_>>()
             .join("&")
     };
+    // `Blob`/`File` (JS-C70) — corps = octets décodés UTF-8
+    // lossy (transport `String` documenté) ; `Content-Type` =
+    // `blob.type` si renseigné (spec).
+    if let Some((data, ty)) = crate::files::blob_parts(e, v) {
+        let ct = if ty.is_empty() { None } else { Some(ty) };
+        return Ok((String::from_utf8_lossy(&data).into_owned(), ct));
+    }
     if let Some(pairs) = crate::dom_host::formdata_pairs_of(e, v) {
         return Ok((
             encode(&pairs),
@@ -1549,6 +1525,30 @@ fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             e.reject_promise(pid, msg);
             return Ok(Value::Obj(pid));
         }
+    }
+    // `blob:<origin>/<n>` — URL objet enregistrée (JS-C70) :
+    // résolue en local sans transport (spec `fetch` reconnaît
+    // le schéma) ; URL inconnue → erreur réseau honnête.
+    if req.url.starts_with("blob:") {
+        if let Some((data, ty)) = crate::files::blob_url_lookup(e, &req.url) {
+            let resp = XhrResponse {
+                handle: 0,
+                status: 200,
+                status_text: "OK".into(),
+                headers: if ty.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![("Content-Type".into(), ty)]
+                },
+                body: (*data).clone(),
+            };
+            let r = e.make_fetch_response(resp, req.url.clone());
+            e.resolve_promise(pid, r);
+        } else {
+            let msg = e.str_val("fetch: blob URL not registered");
+            e.reject_promise(pid, msg);
+        }
+        return Ok(Value::Obj(pid));
     }
     if let Some(t) = &e.xhr.transport {
         let h = t.send(&req);

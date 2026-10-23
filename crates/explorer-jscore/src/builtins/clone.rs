@@ -37,6 +37,9 @@ enum CloneShape {
     Dv(ObjId, usize, usize),
     Ta(crate::heap::TaKind, ObjId, usize, usize),
     Re(String, String),
+    /// `Blob`/`File` (JS-C70) — octets immuables partagés,
+    /// props propres énumérables clonées (File `name`…).
+    Blb(std::rc::Rc<Vec<u8>>, String, Value),
     Ordinary,
     Err(&'static str),
 }
@@ -80,6 +83,10 @@ pub(crate) fn clone_deep(
         Some(ObjKind::Proxy { .. }) => CloneShape::Err("Proxy"),
         Some(ObjKind::Iter { .. }) => CloneShape::Err("iterator"),
         Some(ObjKind::FetchBody { .. }) => CloneShape::Err("Response"),
+        Some(ObjKind::Blob { data, ty }) => {
+            let proto = e.heap.obj(id).map_or(Value::Null, |o| o.proto);
+            CloneShape::Blb(data.clone(), ty.clone(), proto)
+        }
         _ => CloneShape::Ordinary,
     };
     match shape {
@@ -174,6 +181,35 @@ pub(crate) fn clone_deep(
             for v in items {
                 let vc = clone_deep(e, v, seen, depth + 1)?;
                 crate::collections::set_add(e, cid, vc);
+            }
+            Ok(Value::Obj(cid))
+        }
+        CloneShape::Blb(data, ty, proto) => {
+            // `Blob`/`File` — stockage partagé (immuabilité spec),
+            // proto conservé (File → File) ; props propres
+            // énumérables clonées comme `Ordinary` (name…).
+            let cid = e.heap.alloc_obj(Object {
+                proto,
+                props: Vec::new(),
+                kind: ObjKind::Blob { data, ty },
+                extensible: true,
+                elem_integrity: 0,
+                args_map: None,
+            });
+            seen.push((id, cid));
+            let props = match e.heap.obj(id) {
+                Some(o) => o.props.clone(),
+                _ => Vec::new(),
+            };
+            for (key, prop) in props {
+                let crate::heap::Prop::Data { value, attrs } = prop else {
+                    continue;
+                };
+                if !attrs.enumerable {
+                    continue;
+                }
+                let cv = clone_deep(e, value, seen, depth + 1)?;
+                e.set_own(cid, &key, cv, true);
             }
             Ok(Value::Obj(cid))
         }

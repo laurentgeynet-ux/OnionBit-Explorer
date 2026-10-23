@@ -93,6 +93,20 @@ pub(crate) fn url_has_origin(scheme: &str) -> bool {
     matches!(scheme, "http" | "https" | "ws" | "wss" | "ftp" | "file")
 }
 
+/// `p.origin` — `scheme://host[:port]` ou `"null"` pour les
+/// origines opaques (`about:`, données…) — sert aux URL objets
+/// `blob:<origin>/<id>` (JS-C70).
+pub(crate) fn url_origin(p: &UrlParts) -> String {
+    if !url_has_origin(&p.scheme) || p.host.is_empty() {
+        return "null".to_string();
+    }
+    if p.port.is_empty() {
+        format!("{}://{}", p.scheme, p.host)
+    } else {
+        format!("{}://{}:{}", p.scheme, p.host, p.port)
+    }
+}
+
 /// Découpe `user:pass@host:port` (authority après `//`).
 pub(crate) fn url_split_authority(auth: &str, p: &mut UrlParts) {
     let (up, hp) = match auth.rsplit_once('@') {

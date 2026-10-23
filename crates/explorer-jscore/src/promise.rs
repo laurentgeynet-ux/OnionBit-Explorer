@@ -292,8 +292,11 @@ impl Engine {
             // JS-C69 : même checkpoint pour les notifications
             // `IntersectionObserver`/`ResizeObserver` (entrée
             // initiale à l'`observe`, callbacks = jobs).
+            // JS-C70 : idem pour les lectures `FileReader`
+            // (loadstart→progress→load→loadend).
             if !self.deliver_mutations()?
                 && self.deliver_observers()? == 0
+                && self.deliver_file_reads()? == 0
                 && self.pump_workers()? == 0
             {
                 self.maybe_collect();

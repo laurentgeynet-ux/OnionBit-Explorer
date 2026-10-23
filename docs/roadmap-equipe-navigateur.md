@@ -2821,8 +2821,20 @@ ci-dessous (fréquence observée sur le corpus réel).
   non appliquées — pas de géométrie réelle à filtrer.
   Callbacks/wrappers racinés GC. Régressions `c69_*`
   (7 tests).
-- [ ] **JS-C70. `Blob`/`File`/`FileReader` + `URL.
+- [x] **JS-C70. `Blob`/`File`/`FileReader` + `URL.
   createObjectURL`** — uploads et traitement client-side.
+  `Blob` (parts string/AB/TA/DV/Blob, `size`/`type`/`slice`
+  partagé, `text`/`arrayBuffer` promesses) ; `File` (`name`,
+  `lastModified`, proto sous `Blob`) ; `FileReader` complet
+  (`readAsText/DataURL/ArrayBuffer/BinaryString`, events
+  `loadstart→progress→load→loadend` au checkpoint microtask,
+  `abort`+`loadend`, ProgressEvent minimal) ; `URL.create
+  ObjectURL`/`revokeObjectURL` — registre `blob:<origin>/<n>`
+  résolu par `fetch` en local. Corps `Blob`/`File` dans
+  fetch/Request/Response/XHR (octets→String lossy, transport
+  `String` — limite documentée), `res.blob()` réel,
+  `FormData` filename/3e arg, `structuredClone`. GC :
+  protos/URL/readers racinés. Régressions `c70_*` (7 tests).
 - [ ] **JS-C71. `ReadableStream`/`WritableStream`/`Transform
   Stream`** — requis par `Response.body` moderne et les
   bundlers (webpack dev-server, SSR-streaming).

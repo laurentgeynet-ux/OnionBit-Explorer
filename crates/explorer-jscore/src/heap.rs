@@ -338,6 +338,7 @@ impl Heap {
             | ObjKind::Symbol { .. }
             | ObjKind::FetchBody { .. }
             | ObjKind::ByteBuf(_)
+            | ObjKind::Blob { .. }
             | ObjKind::BigInt(_) => {}
         }
     }
@@ -477,6 +478,15 @@ fn cell_bytes(data: &CellData) -> usize {
             base + std::mem::size_of::<Object>()
                 + o.props.capacity() * std::mem::size_of::<(String, Prop)>()
                 + o.props.iter().map(|(k, _)| k.len()).sum::<usize>()
+                // Charges utiles octets (borne mémoire JS-C65 —
+                // un upload géant ne doit pas passer sous le
+                // compteur : `ByteBuf`/`Blob` comptent leur
+                // contenu).
+                + match &o.kind {
+                    ObjKind::ByteBuf(b) => b.len(),
+                    ObjKind::Blob { data, .. } => data.len(),
+                    _ => 0,
+                }
         }
     }
 }
@@ -774,6 +784,17 @@ pub enum ObjKind {
     /// `ArrayBuffer` — fixed byte store shared by views (element
     /// writes through one view are visible through the others).
     ByteBuf(Vec<u8>),
+    /// `Blob`/`File` (JS-C70) — octets immuables partagés par
+    /// `Rc` (`slice`/`structuredClone` partagent le stockage,
+    /// spec « snapshot state ») ; métadonnées `File` (`name`,
+    /// `lastModified`…) en own-props ordinaires, distinction
+    /// par proto (`file_proto`).
+    Blob {
+        /// Contenu (ne mute jamais — les `Blob` sont immuables).
+        data: Rc<Vec<u8>>,
+        /// Type MIME (minuscule — `options.type` normalisé).
+        ty: String,
+    },
     /// `DataView` — byte window over a `ByteBuf` object.
     DataView {
         /// Backing `ObjKind::ByteBuf` object.

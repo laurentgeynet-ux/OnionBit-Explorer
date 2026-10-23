@@ -721,3 +721,272 @@ fn c67_fetch_xhr_body_usp() {
         r1.headers
     );
 }
+
+// ---------------------------------------------------------------
+// JS-C70 — Blob/File/FileReader + URL.createObjectURL
+// ---------------------------------------------------------------
+
+#[test]
+fn c70_blob_ctor_parts_meta() {
+    let (mut e, _t) = engine();
+    // Parts : string, ArrayBuffer, typed array, Blob imbriqué.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var inner = new Blob(['ZZ']);\
+             var b = new Blob(['ab', new Uint8Array([99, 100]), inner], {type: 'Text/CSV'});\
+             b.size + '|' + b.type + '|' + (b instanceof Blob) + '|' +\
+             Object.prototype.toString.call(b)"
+        ),
+        "6|text/csv|true|[object Blob]"
+    );
+    // Slice : indices relatifs spec + contentType.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var s = b.slice(1, -1, 'TEXT/PLAIN'); s.size + '|' + s.type"
+        ),
+        "4|text/plain"
+    );
+    // blob.text()/arrayBuffer() → promesses.
+    describe(
+        &mut e,
+        "var out = '';\
+         s.text().then(function (t) { out += t; });\
+         s.arrayBuffer().then(function (ab) { out += ':' + ab.byteLength; });",
+    );
+    assert_eq!(describe(&mut e, "out"), "bcdZ:4");
+    // Type invalide (hors ASCII printable) → "".
+    assert_eq!(
+        describe(&mut e, "new Blob([], {type: 'x\ty'}).type === ''"),
+        "true"
+    );
+}
+
+#[test]
+fn c70_file_ctor_meta() {
+    let (mut e, _t) = engine();
+    assert_eq!(
+        describe(
+            &mut e,
+            "var f = new File(['hi'], 'a.txt', {type: 'TEXT/PLAIN', lastModified: 42});\
+             f.name + '|' + f.size + '|' + f.type + '|' + f.lastModified + '|' +\
+             f.webkitRelativePath + '|' + (f instanceof File) + '|' + (f instanceof Blob)"
+        ),
+        "a.txt|2|text/plain|42||true|true"
+    );
+    // lastModified par défaut ≈ maintenant (> 0).
+    describe(&mut e, "var g = new File([], 'n');");
+    assert_eq!(describe(&mut e, "g.lastModified > 0"), "true");
+    // `new File(['x'])` → TypeError (2 args requis).
+    assert_eq!(
+        describe(
+            &mut e,
+            "try { new File(['x']); 'no' } catch (err) { 'threw' }"
+        ),
+        "threw"
+    );
+}
+
+#[test]
+fn c70_filereader_events_result() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var f = new File(['hello'], 'h.txt', {type: 'text/plain'});\
+         var r = new FileReader();\
+         var log = 'rs' + r.readyState;\
+         r.addEventListener('progress', function (ev) { log += ':p' + ev.loaded + '/' + ev.total; });\
+         r.onload = function (ev) { log += ':load:' + (ev.target === r) + ':' + r.result; };\
+         r.onloadend = function () { log += ':end:rs' + r.readyState; };\
+         r.readAsText(f); log += ':rs' + r.readyState;",
+    );
+    // Livré au checkpoint : events en ordre + result + DONE.
+    assert_eq!(
+        describe(&mut e, "log"),
+        "rs0:rs1:p5/5:load:true:hello:end:rs2"
+    );
+    // readAsDataURL → `data:<type>;base64,…`.
+    describe(
+        &mut e,
+        "var r2 = new FileReader(); var du = '';\
+         r2.onload = function () { du = r2.result; };\
+         r2.readAsDataURL(f);",
+    );
+    assert_eq!(describe(&mut e, "du"), "data:text/plain;base64,aGVsbG8=");
+    // readAsArrayBuffer → ArrayBuffer des octets.
+    describe(
+        &mut e,
+        "var r3 = new FileReader(); var ab = 0;\
+         r3.onload = function () { ab = r3.result.byteLength; };\
+         r3.readAsArrayBuffer(f);",
+    );
+    assert_eq!(describe(&mut e, "ab"), "5");
+    // readAsBinaryString → byte → code unit.
+    describe(
+        &mut e,
+        "var r4 = new FileReader(); var bs = '';\
+         r4.onload = function () { bs = r4.result; };\
+         r4.readAsBinaryString(new Blob([new Uint8Array([65, 66])]));",
+    );
+    assert_eq!(describe(&mut e, "bs"), "AB");
+    // Constantes statiques + instance.
+    assert_eq!(
+        describe(
+            &mut e,
+            "FileReader.EMPTY + ',' + FileReader.DONE + ',' + r.DONE + ',' +\
+             (r instanceof FileReader)"
+        ),
+        "0,2,2,true"
+    );
+    // abort() pendant une lecture → abort + loadend, result null.
+    describe(
+        &mut e,
+        "var r5 = new FileReader(); var al = '';\
+         r5.onabort = function () { al += 'abort'; };\
+         r5.onloadend = function () { al += ':end:' + (r5.result === null); };\
+         r5.readAsText(f); r5.abort();",
+    );
+    assert_eq!(describe(&mut e, "al"), "abort:end:true");
+}
+
+#[test]
+fn c70_object_url_fetch() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var b = new Blob(['payload'], {type: 'text/x-test'});\
+         var u = URL.createObjectURL(b);",
+    );
+    // `blob:<origin>/<n>` — harnais sans page → origine "null".
+    assert_eq!(describe(&mut e, "u.indexOf('blob:null/')"), "0");
+    // `fetch(blob:)` résout en local — sans transport.
+    describe(
+        &mut e,
+        "var st = 0; var ct = ''; var txt = '';\
+         fetch(u).then(function (r) {\
+             st = r.status; ct = r.headers.get('content-type');\
+             return r.text();\
+         }).then(function (t) { txt = t; });",
+    );
+    assert_eq!(
+        describe(&mut e, "st + '|' + ct + '|' + txt"),
+        "200|text/x-test|payload"
+    );
+    // revoke → l'URL ne résout plus (promise rejetée).
+    describe(
+        &mut e,
+        "URL.revokeObjectURL(u); var rej = '';\
+         fetch(u).then(function () { rej = 'ok'; }, function (m) { rej = 'err'; });",
+    );
+    assert_eq!(describe(&mut e, "rej"), "err");
+    // createObjectURL(non-blob) → TypeError.
+    assert_eq!(
+        describe(
+            &mut e,
+            "try { URL.createObjectURL({}); 'no' } catch (err) { 'threw' }"
+        ),
+        "threw"
+    );
+}
+
+#[test]
+fn c70_body_blob_and_res_blob() {
+    let (mut e, t) = engine();
+    // `body: Blob` → octets UTF-8 + CT = blob.type.
+    describe(
+        &mut e,
+        "fetch('/u', {method: 'POST', body: new Blob(['contenu'], {type: 'text/plain'})});",
+    );
+    // `xhr.send(File)` → même conversion.
+    describe(
+        &mut e,
+        "var x = new XMLHttpRequest(); x.open('POST', '/u2');\
+         x.send(new File(['fdata'], 'f.txt', {type: 'text/csv'}));",
+    );
+    {
+        let reqs = t.requests.borrow();
+        let (r0, r1) = (&reqs[0].1, &reqs[1].1);
+        assert_eq!(r0.body.as_deref(), Some("contenu"));
+        assert!(r0
+            .headers
+            .iter()
+            .any(|(k, v)| k == "Content-Type" && v == "text/plain"));
+        assert_eq!(r1.body.as_deref(), Some("fdata"));
+        assert!(r1
+            .headers
+            .iter()
+            .any(|(k, v)| k == "Content-Type" && v == "text/csv"));
+    }
+    // `new Request`/`new Response` avec corps Blob.
+    assert_eq!(
+        describe(
+            &mut e,
+            "new Response(new Blob(['x'], {type: 'text/a'})).headers.get('content-type')"
+        ),
+        "text/a"
+    );
+    // `res.blob()` → vrai Blob (proto, slice, instanceof).
+    describe(
+        &mut e,
+        "fetch('/dl').then(function (r) { globalThis.rb = r.blob(); });",
+    );
+    respond(&mut e, 3, 200, "streamed");
+    describe(
+        &mut e,
+        "var rok = ''; rb.then(function (bl) {\
+             rok = (bl instanceof Blob) + '|' + bl.size + '|' + bl.type + '|' +\
+             Object.prototype.toString.call(bl); });",
+    );
+    assert_eq!(describe(&mut e, "rok"), "true|8|text/plain|[object Blob]");
+}
+
+#[test]
+fn c70_formdata_file_filename() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var fd = new FormData();\
+         fd.append('plain', 'v');\
+         fd.append('file', new File(['x'], 'doc.txt', {type: 'text/plain'}));\
+         fd.append('raw', new Blob(['y']));\
+         fd.append('named', new Blob(['z']), 'renamed.bin');\
+         fd.set('s', new Blob(['w']), 'set.bin');\
+         fetch('/up', {method: 'POST', body: fd});",
+    );
+    // Corps urlencodé (limite documentée) — File → filename,
+    // Blob nu → "blob", 3e arg → File renommé.
+    {
+        let reqs = t.requests.borrow();
+        let body = reqs[0].1.body.clone().unwrap_or_default();
+        assert_eq!(
+            body,
+            "plain=v&file=doc.txt&raw=blob&named=renamed.bin&s=set.bin"
+        );
+    }
+    // `fd.get` garde la valeur File (proto conservé).
+    assert_eq!(
+        describe(
+            &mut e,
+            "(fd.get('file') instanceof File) + '|' + fd.get('file').name + '|' +\
+             (fd.get('named') instanceof File) + '|' + fd.get('named').name + '|' +\
+             fd.get('named').size"
+        ),
+        "true|doc.txt|true|renamed.bin|1"
+    );
+}
+
+#[test]
+fn c70_structured_clone_blob_file() {
+    let (mut e, _t) = engine();
+    assert_eq!(
+        describe(
+            &mut e,
+            "var f = new File(['data'], 'n.txt', {type: 'text/plain', lastModified: 7});\
+             var c = structuredClone(f);\
+             (c instanceof File) + '|' + c.name + '|' + c.lastModified + '|' +\
+             c.size + '|' + (c !== f)"
+        ),
+        "true|n.txt|7|4|true"
+    );
+}

@@ -1030,6 +1030,9 @@ impl Engine {
         // `FormData` (JS-C67) — ctor + proto paresseux partagé
         // avec `res.formData()`/`xhr.send` (détail : FormData §).
         install_formdata_global(self);
+        // `Blob`/`File`/`FileReader` + `URL.createObjectURL`
+        // (JS-C70) — uploads et lectures client-side.
+        crate::files::install_files(self);
         let screen = self.new_object();
         let (w, h) = self.hooks.viewport;
         for (k, v) in [
@@ -5767,7 +5770,17 @@ pub(crate) fn formdata_pairs_of(e: &mut Engine, v: Value) -> Option<Vec<(String,
     Some(
         fd_pairs(e, id)
             .into_iter()
-            .map(|(k, val)| (k, e.to_js_string(val).unwrap_or_default()))
+            .map(|(k, val)| {
+                // `File`/`Blob` (JS-C70) — la sérialisation
+                // urlencodée porte le nom de fichier (spec
+                // multipart `filename=` ; `Blob` nu → "blob").
+                let s = match crate::files::file_name_of(e, val) {
+                    Some(n) => n,
+                    None if crate::files::is_blob(e, val) => "blob".to_string(),
+                    None => e.to_js_string(val).unwrap_or_default(),
+                };
+                (k, s)
+            })
             .collect(),
     )
 }
@@ -5868,14 +5881,23 @@ fn formdata_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     Ok(formdata_new(e, pairs))
 }
 
-/// `fd.append(name, value)` — 2 args requis (spec).
+/// `fd.append(name, value, filename?)` — `filename` emballe
+/// un `Blob` en `File` nommé (spec ; JS-C70).
 fn fd_append(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (id, mut pairs) = fd_this(e, this)?;
     if args.len() < 2 {
         return Err(e.type_error("FormData.append: 2 arguments required"));
     }
     let name = e.to_js_string(arg(args, 0))?;
-    pairs.push((name, arg(args, 1)));
+    let mut val = arg(args, 1);
+    let fname = arg(args, 2);
+    if !matches!(fname, Value::Undefined) {
+        let fn_str = e.to_js_string(fname)?;
+        if let Some(f) = crate::files::file_wrap_named(e, val, fn_str) {
+            val = f;
+        }
+    }
+    pairs.push((name, val));
     fd_write(e, id, pairs);
     Ok(Value::Undefined)
 }
@@ -5888,7 +5910,14 @@ fn fd_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         return Err(e.type_error("FormData.set: 2 arguments required"));
     }
     let name = e.to_js_string(arg(args, 0))?;
-    let val = arg(args, 1);
+    let mut val = arg(args, 1);
+    let fname = arg(args, 2);
+    if !matches!(fname, Value::Undefined) {
+        let fn_str = e.to_js_string(fname)?;
+        if let Some(f) = crate::files::file_wrap_named(e, val, fn_str) {
+            val = f;
+        }
+    }
     let mut out = Vec::with_capacity(pairs.len());
     let mut inserted = false;
     for (k, v) in pairs {

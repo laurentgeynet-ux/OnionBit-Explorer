@@ -47,6 +47,7 @@ mod collections;
 mod dom;
 mod dom_host;
 mod error;
+mod files;
 mod heap;
 mod interp;
 mod intl;

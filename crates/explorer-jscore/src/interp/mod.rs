@@ -263,6 +263,10 @@ pub struct Engine {
     /// (JS-C69) — registrations + notifications initiales
     /// pendantes, livrées au checkpoint microtask.
     pub(crate) obs: crate::observers::ObsState,
+    /// `Blob`/`File`/`FileReader` + URL objets bookkeeping
+    /// (JS-C70) — protos paresseux, `blob:` urls, lectures
+    /// en cours livrées au checkpoint microtask.
+    pub(crate) files: crate::files::FilesState,
     /// Élément en cours de construction par upgrade
     /// `customElements` (JS-C68) — le `super()` d'une classe
     /// `extends HTMLElement` le récupère comme `this` (rôle du
@@ -624,6 +628,7 @@ impl Engine {
             microtasks: std::collections::VecDeque::new(),
             mutobs: crate::mutation::MutObsState::default(),
             obs: crate::observers::ObsState::default(),
+            files: crate::files::FilesState::default(),
             ce_upgrade_slot: None,
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,
@@ -825,6 +830,10 @@ impl Engine {
         // `IntersectionObserver`/`ResizeObserver` (JS-C69) —
         // même traitement : callbacks + wrappers enregistrés.
         self.obs.root_ids(&mut ids);
+        // `Blob`/`File`/`FileReader` (JS-C70) — protos +
+        // readers en cours de lecture (le `Host::trace`
+        // couvre ensuite listeners et `result`).
+        self.files.root_ids(&mut ids);
         if let Some((dom, cache)) = &self.dom_ctx {
             for &id in cache.borrow().values() {
                 ids.push(id);
