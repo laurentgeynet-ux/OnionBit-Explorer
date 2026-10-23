@@ -2704,13 +2704,33 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   réel : doc+OPTIONS = 2 appels,
   même `error` livrée).
 
-- [ ] **Étape 127. Cookies
-  `Partitioned` (CHIPS)** :
-  l'attribut est requis par les
-  embeds authentifiés modernes ;
-  la clé de jar gagne la
-  partition top-level-site,
-  `Partitioned` exige `Secure`.
+- [x] **Étape 127. Cookies
+  `Partitioned` (CHIPS)** : clé
+  de jar `(partition, domaine,
+  chemin, nom)` — `partition` =
+  `"{scheme}://{registrable}"`
+  du site top-level ([`partition_
+  key`/`request_partition`]).
+  Un `Set-Cookie: …; Partitioned`
+  exige `Secure` (rejet sinon)
+  et se range sous le seau de la
+  page initiatrice ; l'envoi
+  n'admet le cookie que dans son
+  seau propre — la partition
+  remplace la politique
+  `SameSite` (spec CHIPS : le
+  cloisonnement supplée la
+  restriction). `CookieTransport`,
+  capture `Set-Cookie` XHR
+  (`NetDone.partition`) et
+  `document.cookie` passent la
+  partition ; `StoredCookie`/
+  `RawCookie` (`serde(default)`,
+  profils antérieurs relus en
+  non-partitionné) la
+  persistent. Les homonymes
+  cohabitent par seau.
+  5 tests `chips_*`.
 
 - [ ] **Étape 128. Contextes de
   navigation imbriqués

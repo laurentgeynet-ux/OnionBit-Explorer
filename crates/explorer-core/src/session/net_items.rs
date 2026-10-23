@@ -870,6 +870,9 @@ pub(crate) struct NetDone {
     pub(crate) page_origin: String,
     /// URL de la requête — capture `Set-Cookie`.
     pub(crate) req_url: Url,
+    /// Seau CHIPS de la requête (étape 127) — un `Set-Cookie:
+    /// …; Partitioned` se range sous cette clé.
+    pub(crate) partition: Option<String>,
     /// Sortie brute du transport.
     pub(crate) out: NetResult<Response>,
 }
