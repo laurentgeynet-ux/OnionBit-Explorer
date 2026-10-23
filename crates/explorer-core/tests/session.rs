@@ -6399,3 +6399,117 @@ async fn lifecycle_domcontentloaded_and_load_dispatch() {
         Some("dcl+loaded")
     );
 }
+
+/// ADR-0025 (issue #3) — une mutation **post-baseline** doit
+/// être rejouée par le journal, pas repliée en re-parse :
+/// le DCL produit le premier journal (repli `NoBaseline`
+/// attendu → baseline cléée), puis un timer tardif mute —
+/// `journal_applies` passe à 1, les compteurs le prouvent.
+/// Le délai du timer doit excéder la durée de `navigate`
+/// (sinon la mutation fond dans le journal DCL — mesuré au
+/// diagnostic de la sonde d'origine).
+#[tokio::test]
+async fn journal_post_baseline_rejoue_en_place() {
+    let (mut s, t) = test_session();
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    t.route_bin(
+        "/",
+        200,
+        concat!(
+            "<!doctype html><html><body><p id=x>avant</p>",
+            "<script>document.addEventListener('DOMContentLoaded',function(){",
+            "document.getElementById('x').innerText='dcl';})</script>",
+            "<script>setTimeout(function(){",
+            "document.getElementById('x').innerText='REJ'+'OUE';},2500)</script>",
+            "</body></html>"
+        )
+        .into(),
+    );
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    for _ in 0..70 {
+        s.pump_net().await;
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        s.pump_timers(a);
+    }
+    assert_eq!(
+        s.journal_fallbacks(),
+        1,
+        "un seul repli attendu — le premier journal (NoBaseline)"
+    );
+    assert_eq!(
+        s.journal_applies(),
+        1,
+        "le journal post-baseline doit rejouer en place"
+    );
+    assert_eq!(s.journal_classified(), 0, "rien de classé re-parse");
+    assert_eq!(s.find_in_page(a, "rejoue"), 1, "mutation commise");
+}
+
+/// ADR-0025 — un `Insert` sous parent « risqué » (table —
+/// parsing contextuel) classe le journal non rejouable au
+/// drain : `classified` +1 et repli keyed qui livre quand
+/// même la mutation (issue #3 — la voie `classified` mesurée
+/// en terrain pour la première fois). Le scénario exerce les
+/// trois compteurs : `fallbacks` (bootstrap `NoBaseline`),
+/// `classified` (insert tabulaire) puis `applies` (`SetText`
+/// rejeué en place une fois la baseline posée). Les
+/// marqueurs JS sont éclatés pour que `find` ne matche pas
+/// la source du `<script>` lui-même.
+#[tokio::test]
+async fn journal_insert_sous_table_classe_repli_keyed() {
+    let (mut s, t) = test_session();
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let page = concat!(
+        "<!doctype html><html><body>",
+        "<table><tbody id=\"tb\"><tr><td>r0</td></tr></tbody></table>",
+        "<p id=\"p\">txt</p>",
+        "<script>",
+        "setTimeout(function(){",
+        "document.getElementById('p').innerText='JRN'+'AL';",
+        "},300);",
+        "setTimeout(function(){",
+        "var tr=document.createElement('tr');",
+        "tr.innerHTML='<td>'+'JR'+'OW'+'</td>';",
+        "document.getElementById('tb').appendChild(tr);",
+        "},900);",
+        "setTimeout(function(){",
+        "document.getElementById('p').innerText='JRN'+'AL2';",
+        "},1500);",
+        "</script></body></html>"
+    );
+    t.route("/", 200, page);
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    // Timer 300 ms — premier journal : bootstrap NoBaseline,
+    // le repli keyed livre le SetText et pose la baseline.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    s.pump_timers(a);
+    assert_eq!(s.journal_fallbacks(), 1, "bootstrap NoBaseline attendu");
+    assert_eq!(s.journal_classified(), 0, "SetText traduisible");
+    assert_eq!(
+        s.find_in_page(a, "jrnal"),
+        1,
+        "SetText livrée par le repli keyed"
+    );
+    // Timer 900 ms — `Insert` sous <tbody> : classé non
+    // rejouable au drain, la sérialisation keyed subsume.
+    std::thread::sleep(std::time::Duration::from_millis(700));
+    s.pump_timers(a);
+    assert_eq!(
+        s.journal_classified(),
+        1,
+        "insert sous parent risqué → classé"
+    );
+    assert_eq!(
+        s.find_in_page(a, "jrow"),
+        1,
+        "ligne insérée livrée par le repli keyed"
+    );
+    // Timer 1500 ms — baseline posée : le journal rejoue.
+    std::thread::sleep(std::time::Duration::from_millis(700));
+    s.pump_timers(a);
+    assert_eq!(s.journal_applies(), 1, "journal post-baseline rejeué");
+    assert_eq!(s.find_in_page(a, "jrnal2"), 1, "rejeu commis");
+}
