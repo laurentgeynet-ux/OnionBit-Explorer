@@ -560,3 +560,164 @@ fn c66_fetch_request_input() {
         vec![("x-h".to_string(), "9".to_string())]
     );
 }
+
+// ------------------------------------------------------------------
+// JS-C67 — `FormData` dans fetch/XHR + bidirectionnel USP
+// ------------------------------------------------------------------
+
+#[test]
+fn c67_fetch_body_formdata_urlencoded() {
+    let (mut e, t) = engine();
+    // `fetch(url, {body: FormData})` → corps urlencodé +
+    // Content-Type posé (déviation documentée vs multipart).
+    describe(
+        &mut e,
+        "var fd = new FormData();\
+         fd.append('u', 'lou x'); fd.append('n', '1');\
+         fetch('/login', {method: 'post', body: fd});",
+    );
+    let reqs = t.requests.borrow();
+    let r = &reqs[0].1;
+    assert_eq!(r.body.as_deref(), Some("u=lou+x&n=1"));
+    assert!(
+        r.headers
+            .iter()
+            .any(|(k, v)| k == "Content-Type" && v == "application/x-www-form-urlencoded"),
+        "headers: {:?}",
+        r.headers
+    );
+    drop(reqs);
+    // Content-Type fourni → non écrasé.
+    describe(
+        &mut e,
+        "var fd2 = new FormData(); fd2.append('a', '1');\
+         fetch('/x', {body: fd2, headers: {'Content-Type': 'text/custom'}});",
+    );
+    let reqs = t.requests.borrow();
+    let r = &reqs[1].1;
+    assert!(
+        r.headers
+            .iter()
+            .any(|(k, v)| k == "Content-Type" && v == "text/custom"),
+        "headers: {:?}",
+        r.headers
+    );
+    drop(reqs);
+}
+
+#[test]
+fn c67_xhr_send_formdata_urlencoded() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var fd = new FormData(); fd.append('k', 'v v');\
+         var x = new XMLHttpRequest();\
+         x.open('POST', '/f'); x.send(fd);",
+    );
+    let reqs = t.requests.borrow();
+    let r = &reqs[0].1;
+    assert_eq!(r.body.as_deref(), Some("k=v+v"));
+    assert!(
+        r.headers
+            .iter()
+            .any(|(k, v)| k == "Content-Type" && v == "application/x-www-form-urlencoded"),
+        "headers: {:?}",
+        r.headers
+    );
+}
+
+#[test]
+fn c67_response_formdata_is_real() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var out = '';\
+         fetch('/f').then(function (r) { return r.formData(); })\
+                   .then(function (fd) {\
+                       out += (fd instanceof FormData) + '|' + fd.get('a')\
+                            + '|' + fd.getAll('b').join(',') + '|' + fd.has('zz');\
+                   });",
+    );
+    let h = t.requests.borrow()[0].0;
+    respond(&mut e, h, 200, "a=1&b=2&b=3");
+    assert_eq!(describe(&mut e, "out"), "true|1|2,3|false");
+    // `new FormData()` sans DOM marche aussi côté fetch-only.
+    assert_eq!(
+        describe(&mut e, "typeof FormData + '|' + new FormData().has('x')"),
+        "function|false"
+    );
+}
+
+#[test]
+fn c67_request_response_bodyinit() {
+    let (mut e, _t) = engine();
+    // `new Request(url, {body: FormData})` → corps urlencodé + CT
+    // sur les `Headers` du Request (extract spec).
+    assert_eq!(
+        describe(
+            &mut e,
+            "var fd = new FormData(); fd.append('a', '1 2');\
+             var rq = new Request('/p', {method: 'POST', body: fd});\
+             rq.headers.get('content-type')"
+        ),
+        "application/x-www-form-urlencoded"
+    );
+    // Le corps est consommé par `fetch(rq)` → urlencodé.
+    describe(&mut e, "fetch(rq);");
+    // `new Response(fd)` → corps texte lisible + CT.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var rs = new Response(fd);\
+             rs.headers.get('content-type') + '|' + rs.bodyUsed"
+        ),
+        "application/x-www-form-urlencoded|false"
+    );
+    describe(
+        &mut e,
+        "var rtxt = ''; rs.text().then(function (t) { rtxt = t; });",
+    );
+    assert_eq!(describe(&mut e, "rtxt"), "a=1+2");
+    // `new Response(usp)` → urlencoded + CT `charset=UTF-8` (spec).
+    assert_eq!(
+        describe(
+            &mut e,
+            "new Response(new URLSearchParams('x=1')).headers.get('content-type')"
+        ),
+        "application/x-www-form-urlencoded;charset=UTF-8"
+    );
+}
+
+#[test]
+fn c67_fetch_xhr_body_usp() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "fetch('/u', {method: 'PUT', body: new URLSearchParams('a=1&b=x y')});",
+    );
+    describe(
+        &mut e,
+        "var x = new XMLHttpRequest(); x.open('POST', '/u');\
+         x.send(new URLSearchParams('q=test me'));",
+    );
+    let reqs = t.requests.borrow();
+    let (r0, r1) = (&reqs[0].1, &reqs[1].1);
+    assert_eq!(r0.body.as_deref(), Some("a=1&b=x+y"));
+    assert!(
+        r0.headers
+            .iter()
+            .any(|(k, v)| k == "Content-Type"
+                && v == "application/x-www-form-urlencoded;charset=UTF-8"),
+        "headers: {:?}",
+        r0.headers
+    );
+    assert_eq!(r1.body.as_deref(), Some("q=test+me"));
+    assert!(
+        r1.headers
+            .iter()
+            .any(|(k, v)| k == "Content-Type"
+                && v == "application/x-www-form-urlencoded;charset=UTF-8"),
+        "headers: {:?}",
+        r1.headers
+    );
+}

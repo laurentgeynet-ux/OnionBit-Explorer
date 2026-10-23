@@ -130,6 +130,49 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   = objet `Headers`). Régressions
   `c66_*` (6 tests).
 
+- **JS-C67 — `FormData` +
+  `URLSearchParams`
+  bidirectionnel** (`explorer-jscore`
+  — `FormData` valait
+  `ReferenceError`, mesuré en sonde).
+  Objet à prototype réel (paires
+  `[[nom, valeur], …]` en prop
+  sentinelle — doublons et ordre
+  d'insertion préservés) : `append`/
+  `set`/`delete`/`get`/`getAll`/
+  `has`/`forEach`/`entries`/`keys`/
+  `values` + `@@iterator` =
+  `entries` ; `instanceof`,
+  `Object.prototype.toString` =
+  `[object FormData]`. `new
+  FormData(form, submitter?)`
+  collecte les champs « successful »
+  du `<form>` miroir (mêmes règles
+  que `form.submit()` : nommés, non
+  disabled, cases cochées seules,
+  submitter passé inclus) —
+  `TypeError` sur non-`<form>`.
+  `new URLSearchParams(fd)` via
+  `@@iterator` (doublons conservés) ;
+  direction inverse par `for-of` +
+  `append` (`new FormData(usp)`
+  reste `TypeError`, conforme).
+  `BodyInit` unifié : `fetch`,
+  `new Request`, `new Response` et
+  `xhr.send` acceptent `FormData` et
+  `URLSearchParams` → corps
+  `application/x-www-form-urlencoded`
+  (`charset=UTF-8` pour USP, spec) +
+  `Content-Type` posé si absent.
+  `res.formData()` renvoie un vrai
+  `FormData` (proto partagé
+  paresseux, valide sans DOM).
+  Déviation assumée : la spec exige
+  `multipart/form-data` — hors
+  scope du transport `String` ;
+  valeurs `File`/`Blob` à JS-C70.
+  Régressions `c67_*` (7 tests).
+
 ### Fixed
 
 - **Étape 122 — `root_font_size`

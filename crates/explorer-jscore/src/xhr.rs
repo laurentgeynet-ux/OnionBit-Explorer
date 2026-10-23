@@ -87,6 +87,9 @@ pub(crate) struct XhrEngineState {
     pub req_proto: Option<crate::value::ObjId>,
     /// `Response.prototype` — voir `headers_proto`.
     pub res_proto: Option<crate::value::ObjId>,
+    /// `FormData.prototype` (JS-C67) — paresseux (naît de
+    /// `res.formData()`/`new FormData` même sans DOM).
+    pub fd_proto: Option<crate::value::ObjId>,
 }
 
 /// Per-XHR-instance state, shared between the JS wrapper and the
@@ -306,10 +309,27 @@ impl Host for XhrHost {
                 Ok(Some(Value::Undefined))
             }
             "send" => {
+                let mut ct: Option<String> = None;
                 let body = match arg(args, 0) {
                     Value::Undefined | Value::Null => None,
-                    v => Some(e.to_js_string(v)?),
+                    v => {
+                        // `FormData`/`URLSearchParams` → urlencoded +
+                        // CT (même déviation que `fetch`, JS-C67).
+                        let (text, c) = body_init_text(e, v)?;
+                        ct = c;
+                        Some(text)
+                    }
                 };
+                if let Some(ct) = ct {
+                    let mut d = self.data.borrow_mut();
+                    if !d
+                        .request_headers
+                        .iter()
+                        .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                    {
+                        d.request_headers.push(("Content-Type".into(), ct));
+                    }
+                }
                 let (transport, wrapper) = {
                     let t = e.xhr.transport.clone();
                     let Value::Obj(w) = this else {
@@ -483,6 +503,9 @@ impl Engine {
             self.add_method(cid, "json", response_json);
         }
         self.set_own(g, "Response", sc, false);
+        // `FormData` (JS-C67) — `new FormData()` valide sans DOM ;
+        // l'argument `form` exige le miroir (`install_dom`).
+        crate::dom_host::install_formdata_global(self);
     }
 
     /// `ctor.prototype = proto` + `proto.constructor = ctor` —
@@ -938,13 +961,16 @@ fn body_arraybuf(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 }
 
 /// `body.formData()` — décodage `application/x-www-form-urlencoded`
-/// en objet minimal `{get, getAll, has, entries, @@iterator}`
-/// (le constructeur `FormData` complet arrive à JS-C67).
+/// en vrai `FormData` (JS-C67).
 fn body_formdata(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let pid = e.new_promise();
     match body_take(e, this)? {
         Ok(b) => {
-            let fd = formdata_value(e, &b);
+            let pairs: Vec<(String, Value)> = crate::builtins::url::url_decode_pairs(&b)
+                .into_iter()
+                .map(|(k, v)| (k, e.str_val(v)))
+                .collect();
+            let fd = crate::dom_host::formdata_new(e, pairs);
             e.resolve_promise(pid, fd);
         }
         Err(err) => e.reject_promise(pid, err),
@@ -1118,7 +1144,16 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         }
         if let Some(b) = e.get_prop(oid, "body") {
             if !matches!(b, Value::Undefined | Value::Null) {
-                body = e.to_js_string(b)?;
+                let (text, ct) = body_init_text(e, b)?;
+                body = text;
+                if let Some(ct) = ct {
+                    if !headers
+                        .iter()
+                        .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                    {
+                        headers.push(("Content-Type".into(), ct));
+                    }
+                }
             }
         }
     }
@@ -1201,12 +1236,20 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 /// `new Response(body?, init?)` — `init.status` ∈ [200, 599] entier
 /// (`RangeError` sinon, spec), `init.headers` = `HeadersInit`.
 fn response_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let body = match arg(args, 0) {
-        Value::Undefined | Value::Null => String::new(),
-        v => e.to_js_string(v)?,
+    let (body, body_ct) = match arg(args, 0) {
+        Value::Undefined | Value::Null => (String::new(), None),
+        v => body_init_text(e, v)?,
     };
     let init = arg(args, 1);
-    let (status, status_text, headers) = response_init(e, init, 200)?;
+    let (status, status_text, mut headers) = response_init(e, init, 200)?;
+    if let Some(ct) = body_ct {
+        if !headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        {
+            headers.push(("Content-Type".into(), ct));
+        }
+    }
     Ok(e.response_obj(RespSpec {
         status,
         status_text,
@@ -1370,103 +1413,38 @@ fn blob_ab_fulfill(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
     Ok(Value::Obj(pid))
 }
 
-/// `FormData` minimal de `res.formData()` — paires urlencodées en
-/// own-props (dernier gagne) + `get`/`getAll`/`has`/`entries` bound
-/// sur le tableau de paires (constructeur complet : JS-C67).
-fn formdata_value(e: &mut Engine, body: &str) -> Value {
-    let pairs = crate::builtins::url::url_decode_pairs(body);
-    let mut elems = Vec::with_capacity(pairs.len());
-    for (k, v) in &pairs {
-        let k = e.str_val(k.clone());
-        let v = e.str_val(v.clone());
-        elems.push(e.new_array(vec![k, v]));
-    }
-    let data = e.new_array(elems);
-    let o = e.new_object();
-    for (k, v) in &pairs {
-        let vv = e.str_val(v.clone());
-        e.set_own(o, k, vv, true);
-    }
-    for (name, f) in [
-        ("get", fd_get as crate::heap::NativeFn),
-        ("getAll", fd_get_all),
-        ("has", fd_has),
-        ("entries", fd_entries),
-    ] {
-        let bf = e.bound_native(name, f, vec![data]);
-        e.set_own(o, name, bf, false);
-    }
-    let it = e.bound_native("[Symbol.iterator]", fd_entries, vec![data]);
-    e.set_own(o, crate::interp::SYM_ITERATOR, it, false);
-    Value::Obj(o)
-}
-
-/// Paires `(nom, valeur)` du tableau bound (éléments `[k, v]`).
-fn fd_pairs(e: &Engine, data: Value) -> Vec<(String, String)> {
-    let Value::Obj(id) = data else {
-        return Vec::new();
-    };
-    match e.heap.obj(id).map(|o| &o.kind) {
-        Some(ObjKind::Array(elems)) => elems
+/// `BodyInit` → `(texte, Content-Type suggéré)` — `FormData` et
+/// `URLSearchParams` sérialisent en urlencodé (déviation
+/// documentée JS-C67 : la spec exige `multipart/form-data` pour
+/// `FormData`, hors scope du transport `String`) ; toute autre
+/// valeur passe par `ToString` sans type suggéré.
+fn body_init_text(e: &mut Engine, v: Value) -> JsResult<(String, Option<String>)> {
+    let encode = |pairs: &[(String, String)]| {
+        pairs
             .iter()
-            .filter_map(|el| {
-                let Value::Obj(pid) = el else { return None };
-                match e.heap.obj(*pid).map(|o| &o.kind) {
-                    Some(ObjKind::Array(kv)) if kv.len() >= 2 => Some((
-                        e.heap_string_of(kv[0]).unwrap_or_default(),
-                        e.heap_string_of(kv[1]).unwrap_or_default(),
-                    )),
-                    _ => None,
-                }
+            .map(|(k, val)| {
+                format!(
+                    "{}={}",
+                    crate::builtins::url::form_encode(k),
+                    crate::builtins::url::form_encode(val)
+                )
             })
-            .collect(),
-        _ => Vec::new(),
+            .collect::<Vec<_>>()
+            .join("&")
+    };
+    if let Some(pairs) = crate::dom_host::formdata_pairs_of(e, v) {
+        return Ok((
+            encode(&pairs),
+            Some("application/x-www-form-urlencoded".into()),
+        ));
     }
-}
-
-/// `fd.get(name)` → première valeur | `null` (bound arg = paires).
-fn fd_get(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let name = e.to_js_string(arg(args, 1))?;
-    Ok(
-        match fd_pairs(e, arg(args, 0))
-            .into_iter()
-            .find(|(k, _)| *k == name)
-        {
-            Some((_, v)) => e.str_val(v),
-            None => Value::Null,
-        },
-    )
-}
-
-/// `fd.getAll(name)` → toutes les valeurs du nom.
-fn fd_get_all(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let name = e.to_js_string(arg(args, 1))?;
-    let out = fd_pairs(e, arg(args, 0))
-        .into_iter()
-        .filter(|(k, _)| *k == name)
-        .map(|(_, v)| e.str_val(v))
-        .collect();
-    Ok(e.new_array(out))
-}
-
-/// `fd.has(name)` → bool.
-fn fd_has(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let name = e.to_js_string(arg(args, 1))?;
-    Ok(Value::Bool(
-        fd_pairs(e, arg(args, 0)).iter().any(|(k, _)| *k == name),
-    ))
-}
-
-/// `fd.entries()`/`@@iterator` — itérateur `[nom, valeur]`.
-fn fd_entries(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let mut items = Vec::new();
-    for (k, v) in fd_pairs(e, arg(args, 0)) {
-        let kk = e.str_val(k);
-        let vv = e.str_val(v);
-        items.push(e.new_array(vec![kk, vv]));
+    if let Some(pairs) = crate::builtins::url::usp_pairs_of(e, v) {
+        return Ok((
+            encode(&pairs),
+            Some("application/x-www-form-urlencoded;charset=UTF-8".into()),
+        ));
     }
-    let proto = e.protos.array_iter;
-    Ok(crate::collections::iter_obj(e, items, proto))
+    Ok((e.to_js_string(v)?, None))
 }
 
 // ---- fetch --------------------------------------------------------
@@ -1545,7 +1523,17 @@ fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         }
         if let Some(b) = e.get_prop(oid, "body") {
             if !matches!(b, Value::Undefined | Value::Null) {
-                req.body = Some(e.to_js_string(b)?);
+                let (text, ct) = body_init_text(e, b)?;
+                req.body = Some(text);
+                if let Some(ct) = ct {
+                    if !req
+                        .headers
+                        .iter()
+                        .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                    {
+                        req.headers.push(("Content-Type".into(), ct));
+                    }
+                }
             }
         }
         if let Some(s) = e.get_prop(oid, "signal") {

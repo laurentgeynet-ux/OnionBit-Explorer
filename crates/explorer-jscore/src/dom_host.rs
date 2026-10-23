@@ -1030,6 +1030,9 @@ impl Engine {
             registry: RefCell::new(HashMap::new()),
         }));
         self.set_own(g, "customElements", ce, false);
+        // `FormData` (JS-C67) — ctor + proto paresseux partagé
+        // avec `res.formData()`/`xhr.send` (détail : FormData §).
+        install_formdata_global(self);
         let screen = self.new_object();
         let (w, h) = self.hooks.viewport;
         for (k, v) in [
@@ -5447,3 +5450,289 @@ const NAMED_COLORS: &[NamedColor] = &[
     ("gold", (255, 215, 0, 255)),
     ("rebeccapurple", (102, 51, 153, 255)),
 ];
+
+// -- `FormData` (JS-C67) -------------------------------------------
+//
+// Objet à prototype réel (`FormData.prototype`) portant ses paires
+// `[[nom, valeur], …]` dans la prop sentinelle [`FD_PAIRS`] — les
+// valeurs sont des `Value` quelconques (`File`/`Blob` à JS-C70).
+// `new FormData(form, submitter?)` collecte les champs
+// « successful » du `<form>` miroir (mêmes règles que
+// `form.submit()`) ; `new URLSearchParams(fd)` marche via
+// `@@iterator` ; `fetch`/`XHR` encodent un corps `FormData` en
+// `application/x-www-form-urlencoded` (déviation documentée — la
+// spec exige `multipart/form-data`, structurellement hors scope).
+
+/// Prop cachée des paires `FormData` — tableau `[[k, v], …]`.
+pub(crate) const FD_PAIRS: &str = "\u{f131}fdpairs";
+
+/// `FormData.prototype` paresseux — les objets peuvent naître de
+/// `res.formData()`/`xhr.send` sans qu'`install_dom` ait tourné.
+fn fd_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.xhr.fd_proto {
+        return p;
+    }
+    let p = e
+        .heap
+        .alloc_obj(crate::heap::Object::ordinary(Value::Obj(e.protos.object)));
+    e.add_method(p, "append", fd_append);
+    e.add_method(p, "set", fd_set);
+    e.add_method(p, "delete", fd_delete);
+    e.add_method(p, "get", fd_get);
+    e.add_method(p, "getAll", fd_get_all);
+    e.add_method(p, "has", fd_has);
+    e.add_method(p, "forEach", fd_for_each);
+    e.add_method(p, "entries", fd_entries);
+    e.add_method(p, "keys", fd_keys);
+    e.add_method(p, "values", fd_values);
+    let it = e.native_fn("[Symbol.iterator]", fd_entries);
+    e.set_own(p, crate::interp::SYM_ITERATOR, it, false);
+    let tag = e.str_val("FormData");
+    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.xhr.fd_proto = Some(p);
+    p
+}
+
+/// Objet `FormData` portant `pairs` (proto paresseux).
+pub(crate) fn formdata_new(e: &mut Engine, pairs: Vec<(String, Value)>) -> Value {
+    let p = fd_proto(e);
+    let id = e
+        .heap
+        .alloc_obj(crate::heap::Object::ordinary(Value::Obj(p)));
+    fd_write(e, id, pairs);
+    Value::Obj(id)
+}
+
+/// `v` est-il un `FormData` ? → ses paires `(nom, valeur-texte)`.
+pub(crate) fn formdata_pairs_of(e: &mut Engine, v: Value) -> Option<Vec<(String, String)>> {
+    let Value::Obj(id) = v else { return None };
+    if !matches!(e.get_prop(id, FD_PAIRS), Some(Value::Obj(_))) {
+        return None;
+    }
+    Some(
+        fd_pairs(e, id)
+            .into_iter()
+            .map(|(k, val)| (k, e.to_js_string(val).unwrap_or_default()))
+            .collect(),
+    )
+}
+
+/// Paires `(nom, valeur)` du prop `FD_PAIRS` de `id`.
+fn fd_pairs(e: &mut Engine, id: ObjId) -> Vec<(String, Value)> {
+    let Some(Value::Obj(arr)) = e.get_prop(id, FD_PAIRS) else {
+        return Vec::new();
+    };
+    let n = match e.get_prop(arr, "length") {
+        Some(Value::Num(n)) => n.max(0.0) as usize,
+        _ => 0,
+    };
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        if let Some(Value::Obj(pair)) = e.get_prop(arr, &i.to_string()) {
+            let k = e
+                .get_prop(pair, "0")
+                .and_then(|v| e.to_js_string(v).ok())
+                .unwrap_or_default();
+            let v = e.get_prop(pair, "1").unwrap_or(Value::Undefined);
+            out.push((k, v));
+        }
+    }
+    out
+}
+
+/// Réécrit le prop `FD_PAIRS` de `id`.
+fn fd_write(e: &mut Engine, id: ObjId, pairs: Vec<(String, Value)>) {
+    let vals: Vec<Value> = pairs
+        .into_iter()
+        .map(|(k, v)| {
+            let k = e.str_val(k);
+            e.new_array(vec![k, v])
+        })
+        .collect();
+    let arr = e.new_array(vals);
+    e.set_own(id, FD_PAIRS, arr, false);
+}
+
+/// Receveur `FormData` → `(ObjId, paires)` — `TypeError` sinon.
+fn fd_this(e: &mut Engine, this: Value) -> JsResult<(ObjId, Vec<(String, Value)>)> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("FormData method on non-object"));
+    };
+    if !matches!(e.get_prop(id, FD_PAIRS), Some(Value::Obj(_))) {
+        return Err(e.type_error("FormData method on incompatible receiver"));
+    }
+    Ok((id, fd_pairs(e, id)))
+}
+
+/// Installe `FormData` sur le global si absent (depuis
+/// `install_dom` — et `install_fetch` pour les contextes sans DOM :
+/// `new FormData()` y reste valide, seul l'argument `form` exige le
+/// miroir).
+pub(crate) fn install_formdata_global(e: &mut Engine) {
+    let g = e.global;
+    if e.get_prop(g, "FormData").is_some() {
+        return;
+    }
+    let p = fd_proto(e);
+    let f = e.native_fn("FormData", formdata_ctor);
+    if let Value::Obj(fid) = f {
+        e.set_own(fid, "prototype", Value::Obj(p), false);
+    }
+    e.set_own(p, "constructor", f, false);
+    e.set_own(g, "FormData", f, false);
+}
+
+/// `new FormData(form?, submitter?)` — `form` = élément `<form>`
+/// du miroir : champs « successful » collectés (mêmes règles que
+/// `form.submit()`) ; `submitter` = bouton nommé à inclure.
+fn formdata_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let mut pairs: Vec<(String, Value)> = Vec::new();
+    match arg(args, 0) {
+        Value::Undefined | Value::Null => {}
+        v => {
+            let Some(dom) = e.dom_ctx.as_ref().map(|(d, _)| d.clone()) else {
+                return Err(e.type_error("FormData: pas de DOM — élément form indisponible"));
+            };
+            let Some(n) = node_for(e, v) else {
+                return Err(e.type_error("FormData: argument is not a form element"));
+            };
+            let submitter = node_for(e, arg(args, 1));
+            let fields = {
+                let d = dom.borrow();
+                if d.nodes[n as usize].tag != "form" {
+                    drop(d);
+                    return Err(e.type_error("FormData: argument is not a form element"));
+                }
+                collect_fields(&d, n, submitter)
+            };
+            for (k, val) in fields {
+                pairs.push((k, e.str_val(val)));
+            }
+        }
+    }
+    Ok(formdata_new(e, pairs))
+}
+
+/// `fd.append(name, value)` — 2 args requis (spec).
+fn fd_append(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (id, mut pairs) = fd_this(e, this)?;
+    if args.len() < 2 {
+        return Err(e.type_error("FormData.append: 2 arguments required"));
+    }
+    let name = e.to_js_string(arg(args, 0))?;
+    pairs.push((name, arg(args, 1)));
+    fd_write(e, id, pairs);
+    Ok(Value::Undefined)
+}
+
+/// `fd.set(name, value)` — remplace toutes les entrées du nom (à la
+/// position de la première) ou ajoute en fin.
+fn fd_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (id, pairs) = fd_this(e, this)?;
+    if args.len() < 2 {
+        return Err(e.type_error("FormData.set: 2 arguments required"));
+    }
+    let name = e.to_js_string(arg(args, 0))?;
+    let val = arg(args, 1);
+    let mut out = Vec::with_capacity(pairs.len());
+    let mut inserted = false;
+    for (k, v) in pairs {
+        if k == name {
+            if !inserted {
+                out.push((k, val));
+                inserted = true;
+            }
+        } else {
+            out.push((k, v));
+        }
+    }
+    if !inserted {
+        out.push((name, val));
+    }
+    fd_write(e, id, out);
+    Ok(Value::Undefined)
+}
+
+/// `fd.delete(name)` — retire toutes les entrées du nom.
+fn fd_delete(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (id, pairs) = fd_this(e, this)?;
+    let name = e.to_js_string(arg(args, 0))?;
+    fd_write(
+        e,
+        id,
+        pairs.into_iter().filter(|(k, _)| *k != name).collect(),
+    );
+    Ok(Value::Undefined)
+}
+
+/// `fd.get(name)` → première valeur | `null`.
+fn fd_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (_id, pairs) = fd_this(e, this)?;
+    let name = e.to_js_string(arg(args, 0))?;
+    Ok(match pairs.into_iter().find(|(k, _)| *k == name) {
+        Some((_, v)) => v,
+        None => Value::Null,
+    })
+}
+
+/// `fd.getAll(name)` → toutes les valeurs du nom.
+fn fd_get_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (_id, pairs) = fd_this(e, this)?;
+    let name = e.to_js_string(arg(args, 0))?;
+    let vals: Vec<Value> = pairs
+        .into_iter()
+        .filter(|(k, _)| *k == name)
+        .map(|(_, v)| v)
+        .collect();
+    Ok(e.new_array(vals))
+}
+
+/// `fd.has(name)` → bool.
+fn fd_has(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (_id, pairs) = fd_this(e, this)?;
+    let name = e.to_js_string(arg(args, 0))?;
+    Ok(Value::Bool(pairs.iter().any(|(k, _)| *k == name)))
+}
+
+/// `fd.forEach(cb, thisArg?)` — `(valeur, nom, fd)`.
+fn fd_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (_id, pairs) = fd_this(e, this)?;
+    let cb = arg(args, 0);
+    if !e.is_callable(cb) {
+        return Err(e.type_error("FormData.forEach needs a function"));
+    }
+    let this_arg = arg(args, 1);
+    for (k, v) in pairs {
+        let kk = e.str_val(k);
+        e.call_value(cb, this_arg, &[v, kk, this])?;
+    }
+    Ok(Value::Undefined)
+}
+
+/// `fd.entries()`/`@@iterator` — itérateur `[nom, valeur]`.
+fn fd_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_id, pairs) = fd_this(e, this)?;
+    let mut items = Vec::with_capacity(pairs.len());
+    for (k, v) in pairs {
+        let kk = e.str_val(k);
+        items.push(e.new_array(vec![kk, v]));
+    }
+    let proto = e.protos.usp_iter;
+    Ok(crate::collections::iter_obj(e, items, proto))
+}
+
+/// `fd.keys()` — itérateur des noms.
+fn fd_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_id, pairs) = fd_this(e, this)?;
+    let items: Vec<Value> = pairs.into_iter().map(|(k, _)| e.str_val(k)).collect();
+    let proto = e.protos.usp_iter;
+    Ok(crate::collections::iter_obj(e, items, proto))
+}
+
+/// `fd.values()` — itérateur des valeurs.
+fn fd_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_id, pairs) = fd_this(e, this)?;
+    let items: Vec<Value> = pairs.into_iter().map(|(_, v)| v).collect();
+    let proto = e.protos.usp_iter;
+    Ok(crate::collections::iter_obj(e, items, proto))
+}

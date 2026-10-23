@@ -464,6 +464,17 @@ pub(crate) fn usp_pairs(e: &mut Engine, id: crate::value::ObjId) -> Vec<(String,
     out
 }
 
+/// `v` est-il un `URLSearchParams` ? → ses paires (détection par
+/// le prop sentinelle — un `toString` redéfini ne leurre pas la
+/// sérialisation `BodyInit`, JS-C67).
+pub(crate) fn usp_pairs_of(e: &mut Engine, v: Value) -> Option<Vec<(String, String)>> {
+    let Value::Obj(id) = v else { return None };
+    if !matches!(e.get_prop(id, USP_PAIRS), Some(Value::Obj(_))) {
+        return None;
+    }
+    Some(usp_pairs(e, id))
+}
+
 pub(crate) fn usp_write(e: &mut Engine, id: crate::value::ObjId, pairs: Vec<(String, String)>) {
     let vals: Vec<Value> = pairs
         .into_iter()

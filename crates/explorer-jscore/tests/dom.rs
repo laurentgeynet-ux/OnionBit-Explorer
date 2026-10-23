@@ -2738,3 +2738,119 @@ fn c76_surfaces_detail() {
         "0|null"
     );
 }
+
+// -- JS-C67 : FormData + URLSearchParams bidirectionnel --------------
+
+const PAGE_FD: &str = r#"
+<html><body>
+<form id="f" action="/go" method="post">
+  <input name="u" value="lou">
+  <input name="pw" type="password" value="s3cr">
+  <input name="cb" type="checkbox" value="on" checked>
+  <input name="off" type="checkbox" value="no">
+  <input name="dis" value="x" disabled>
+  <input type="submit" name="go" value="send">
+  <button type="submit" name="btn" value="b1">Go</button>
+  <textarea name="bio">hello world</textarea>
+  <select name="sel"><option value="a">A</option><option value="b" selected>B</option></select>
+  <input type="file" name="fi">
+</form>
+</body></html>
+"#;
+
+#[test]
+fn c67_formdata_from_form() {
+    // Champs « successful » : nommés, non-disabled, cases cochées —
+    // submitter seul pour les boutons (spec FormData(form, submitter)).
+    assert_eq!(
+        ev_in(
+            PAGE_FD,
+            "var fd=new FormData(document.getElementById('f'));\
+             fd.getAll('pw').length+'|'+fd.get('u')+'|'+fd.get('cb')+'|'\
+             +fd.has('off')+'|'+fd.has('dis')+'|'+fd.has('go')+'|'\
+             +fd.get('bio')+'|'+fd.get('sel')+'|'+fd.get('fi')+'|'\
+             +(fd instanceof FormData)"
+        ),
+        "1|lou|on|false|false|false|hello world|b||true"
+    );
+    // `submitter` inclus quand nommé et passé en 2e argument.
+    assert_eq!(
+        ev_in(
+            PAGE_FD,
+            "var f=document.getElementById('f');\
+             new FormData(f, f.elements.go).get('go')+'|'\
+             +new FormData(f, f.elements.btn).get('btn')"
+        ),
+        "send|b1"
+    );
+    // Non-`<form>` → TypeError.
+    assert_eq!(
+        {
+            let mut e = engine_with(PAGE_FD);
+            match e.eval("new FormData(document.getElementById('f').elements.u)") {
+                Ok(v) => e.describe(v),
+                Err(_) => "TypeError".to_string(),
+            }
+        },
+        "TypeError"
+    );
+}
+
+#[test]
+fn c67_formdata_methods() {
+    // append/set/delete/get/getAll/has/forEach + itérable.
+    assert_eq!(
+        ev_in(
+            PAGE_FD,
+            "var fd=new FormData();fd.append('a','1');fd.append('a','2');fd.append('b','3');\
+             fd.getAll('a').join(',')+'|'+fd.get('b')"
+        ),
+        "1,2|3"
+    );
+    assert_eq!(
+        ev_in(
+            PAGE_FD,
+            "var fd=new FormData();fd.append('a','1');fd.append('a','2');fd.append('b','3');\
+             fd.set('a','9');fd.delete('b');\
+             fd.getAll('a').join(',')+'|'+fd.has('b')"
+        ),
+        "9|false"
+    );
+    assert_eq!(
+        ev_in(
+            PAGE_FD,
+            "var fd=new FormData(),s='';fd.append('x','1');fd.append('y','2');\
+             fd.forEach(function(v,k){s+=k+'='+v+';'});\
+             for(var kv of fd)s+='['+kv[0]+kv[1]+']';\
+             s+'|'+Object.keys(fd).length+'|'+fd.keys().next().value+'|'\
+             +fd.values().next().value"
+        ),
+        "x=1;y=2;[x1][y2]|0|x|1"
+    );
+    // `entries()`/`keys()`/`values()` = itérateurs.
+    assert_eq!(
+        ev_in(
+            PAGE_FD,
+            "var fd=new FormData();fd.append('m','v');\
+             var e=fd.entries();e.next().value.join(',')+'|'\
+             +fd.keys().next().value+'|'+fd.values().next().value"
+        ),
+        "m,v|m|v"
+    );
+    // `new URLSearchParams(fd)` — bidirectionnel (iterable spec).
+    assert_eq!(
+        ev_in(
+            PAGE_FD,
+            "var fd=new FormData();fd.append('a','x y');fd.append('a','2');\
+             var usp=new URLSearchParams(fd);\
+             usp.getAll('a').join(',')+'|'+usp.toString()"
+        ),
+        "x y,2|a=x+y&a=2"
+    );
+    // `new URLSearchParams(string)` ↔ `String(fd)` n'existe pas —
+    // mais l'encodage fetch est testé côté xhr.rs.
+    assert_eq!(
+        ev_in(PAGE_FD, "new URLSearchParams('?a=1&b=2').get('b')"),
+        "2"
+    );
+}
