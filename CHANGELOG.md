@@ -7,6 +7,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Added
+
+- **Étape 120 — sondes de document
+  vivant** (`explorer-core`,
+  `explorer-api`, `explorer-cli` —
+  triage consent Google : le clic au
+  bouton « Tout accepter » peint
+  répond `ignored` avec `hit_tag=
+  "form"`). `Session::dom_dump` /
+  `Session::layout_dump` exposent le
+  DOM post-JS et l'arbre de layout
+  du tab vivant ; routes
+  `GET /api/tabs/{id}/dom` et
+  `/layout` (404 sur onglet vierge) ;
+  `explorer-cli dom <url>` dump hors
+  daemon. Le triage a mesuré que le
+  mur de consentement rend de vrais
+  `form[method=POST]` +
+  `input[type=submit]` et isolé le
+  blocant : un `<input>` en
+  `display:inline-flex` posé au rect
+  du sibling (`assign_child_rects`,
+  index `owner` racine vs local) —
+  défaut layout dispatché PIPE au
+  journal avec repro minimal.
+
 ### Fixed
 
 - **Étape 119 — piège

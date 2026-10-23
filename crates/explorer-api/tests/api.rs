@@ -137,6 +137,80 @@ async fn open_tab_then_frame_is_png() {
     assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
 }
 
+/// Étape 120 — `GET …/dom` et `GET …/layout` : dumps
+/// diagnostiques du document vivant (triage « clic ignoré »
+/// — consent google : hit-test `form` vs `<input>` peint).
+#[tokio::test]
+async fn dom_and_layout_dumps_after_navigate() {
+    let app = test_app();
+    let resp = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let id = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+
+    // Onglet vierge : ni DOM ni layout → 404 honnête.
+    for sub in ["dom", "layout"] {
+        let r = app
+            .clone()
+            .oneshot(
+                HttpRequest::builder()
+                    .uri(format!("/api/tabs/{id}/{sub}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::NOT_FOUND, "{sub} vierge");
+    }
+
+    app.clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/navigate"),
+            r#"{"url":"http://h.test/"}"#,
+        ))
+        .await
+        .unwrap();
+
+    let dom = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri(format!("/api/tabs/{id}/dom"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(dom.status(), StatusCode::OK);
+    let d = axum::body::to_bytes(dom.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let d = String::from_utf8_lossy(&d);
+    assert!(d.contains("<html>"), "dom dump : {d}");
+    assert!(d.contains("api"), "contenu : {d}");
+
+    let lay = app
+        .oneshot(
+            HttpRequest::builder()
+                .uri(format!("/api/tabs/{id}/layout"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(lay.status(), StatusCode::OK);
+    let l = axum::body::to_bytes(lay.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let l = String::from_utf8_lossy(&l);
+    assert!(l.contains("<div>"), "layout dump : {l}");
+}
+
 /// Étape 97 — `POST …/color-scheme` propage le réglage
 /// `dark`/`light` à la session (`prefers-color-scheme` +
 /// défauts UA) ; valeur hors contrat → 400.

@@ -940,6 +940,31 @@ impl Session {
             .filter_map(|&id| self.tab_info(id))
             .collect()
     }
+
+    /// Dump diagnostic du DOM vivant de l'onglet — le miroir
+    /// **post-JS** des mutations (les `<form>`/`<button>`
+    /// construits par script y figurent). `None` si l'onglet
+    /// est inconnu ou que le DOM est détaché (apply en vol,
+    /// étape 91). Outil de triage (cli `dom`) — hors chemin
+    /// chaud.
+    #[must_use]
+    pub fn dom_dump(&self, tab: TabId) -> Option<String> {
+        let dom = self.tabs.get(&tab)?.dom.as_ref()?;
+        Some(explorer_html::debug::dump(dom))
+    }
+
+    /// Dump diagnostic de l'arbre de boîtes posé — positions
+    /// et tailles réelles. Le hit-test vit sur cette
+    /// structure : un « clic ignoré » se diagnostique en
+    /// comparant la zone peinte à la boîte qui la produit
+    /// (étape 120 — consent google). `None` dans les mêmes
+    /// cas que [`Self::dom_dump`].
+    #[must_use]
+    pub fn layout_dump(&self, tab: TabId) -> Option<String> {
+        let entry = self.tabs.get(&tab)?;
+        let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
+        Some(tree.dump(dom))
+    }
 }
 
 #[cfg(test)]

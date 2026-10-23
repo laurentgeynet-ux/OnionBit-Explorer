@@ -360,6 +360,33 @@ journal « livré ».
   `shorthand_columns`.
 - [ ] **`<select>` stylé** : apparence native différente de
   Chrome (déjà documenté — prioriser si terrain le signale).
+- [ ] **`assign_child_rects` : `owner` racine vs index
+  local** (`inline.rs` — bloque le consentement Google, voir
+  triage NAV « Recherche Google » ci-dessous). Deux défauts
+  mesurés, même repro
+  (`explorer-cli layout repro_c.html` :
+  `<div><span style="display:inline"><input
+  style="display:inline-flex" type=submit value=refuser></span>
+  <span style="display:inline"><input …value=accepter></span>`) :
+  `inline<span> [78.4 9.6 70.4]` (2ᵉ, correct) contient
+  `inline<input> [8 9.6 61.6]` = **rect du 1ᵉr input**.
+  (a) `is_atomic` (inline.rs:200) exige
+  `display()=="inline-block"` — `inline-flex`/`inline-grid`/
+  `inline-table` sont *aussi* des atomes de niveau inline
+  (CSS §9.2.4, établissent un FC) → l'input flex est traité
+  en conteneur inline non-atomique. (b) `assign_child_rects`
+  compare `f.owner == i` où `f.owner` = index dans
+  `bx.children` **de la racine IFC** mais `i` = index dans
+  le parent courant en récursion → tout inline imbriqué
+  d'index i récupère l'union des fragments du iᵉ enfant
+  racine (copie du rect du sibling). Invisible sur texte
+  (peint par fragment) — tue les **contrôles** hit-testés
+  (`<input>`/`form`) : hit-test au bouton peint → `form`,
+  `submit_control` remonte sans input → clic `Ignored`.
+  Piste : `is_atomic` devrait couvrir les atomes de niveau
+  inline (même prédicat que boxtree.rs:741) et/ou l'union
+  de `assign_child_rects` ne doit regarder que les enfants
+  directs de la racine (récursion ≠ même table d'owner).
 - [x] **Images de la page Accueil FR** → **triage PIPE :
   innocente, dispatch NAV/JS**. Mesures terrain (shot 1216 px,
   23/10) : les vignettes `<img>` **arrivent et se peignent** —
@@ -387,11 +414,26 @@ journal « livré ».
   drainé, reste >8 hops) tirait au drain post-commit/reload.
   (La piste `last_req` du dispatch était fausse : le snapshot
   bfcache la porte déjà — couvert par test de non-régression.)
-- [ ] **Recherche Google impossible** : google.com renvoie
-  l'interstitiel « Activez JavaScript » + exception JS
-  `Error: b` (stack `(3:2662)`/`(3:2460)`/`U(3:4262)`) —
-  trier : exception jscore à isoler (piste JS) + boucle de
-  redirection/consentement côté session.
+- [ ] **Recherche Google impossible** → **triage NAV borné,
+  Étape 120 (23/10)** : `/search` redirige vers
+  `consent.google.com/ml?continue=…` — mur de consentement UE
+  réel, pas une boucle (comportement correct). Le mur rend
+  **de vrais** `<form action="/save" method=POST>` +
+  `<input type=submit value="Tout accepter">` (vérifié via le
+  nouveau `GET /api/tabs/{id}/dom`) — DOM sain, cookies
+  (`CookieJar` + `set-cookie`) câblés. **Blocant** : clic au
+  bouton peint → `ignored`, sonde `hit_tag="form"` — c'est
+  le défaut PIPE `assign_child_rects` ci-dessus (input
+  `inline-flex` posé au rect du sibling). Variante servie à
+  froid : `?ucbcb=1` = le shell « enablejs » du rapport
+  (noscript + meta-refresh) — Google varie selon chaîne de
+  redirection/cookies. **Reliquat piste JS** : exception
+  `Error: b` (stack `(3:2662)`/`(3:2460)`/`U(3:4262)`) à
+  reproduire isolément ; et deux notes de rendu sur le mur —
+  titre avec `�` (« Avant d'accéder �\xa0 la recherche »,
+  probable encodage déclaré vs réel) + le bouton « Tout
+  refuser » paraît vide (les deux labels se peignent
+  superposés au même rect — même défaut PIPE).
 - [x] ~~**Accept-Language absent**~~ → **résolu, Étape 118** :
   `LangTransport` (cellule partagée à chaud) + `POST
   /api/accept-language` + reflet `/api/status` + export FFI

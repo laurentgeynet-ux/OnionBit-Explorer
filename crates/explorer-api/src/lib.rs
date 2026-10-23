@@ -83,6 +83,8 @@ pub fn router_with_egress(
         .route("/api/tabs", get(list_tabs).post(open_tab))
         .route("/api/tabs/{id}", delete(close_tab))
         .route("/api/tabs/{id}/frame", get(frame))
+        .route("/api/tabs/{id}/dom", get(dom_dump))
+        .route("/api/tabs/{id}/layout", get(layout_dump))
         .route("/api/tabs/{id}/navigate", post(navigate))
         .route("/api/tabs/{id}/reload", post(reload))
         .route("/api/tabs/{id}/back", post(back))
@@ -567,6 +569,31 @@ async fn input(
         }
     })
     .into_response()
+}
+
+/// `GET /api/tabs/{id}/dom` → `text/plain` : dump du DOM
+/// **vivant** (post-JS — étape 120). Outil de triage : les
+/// contrôles construits par script (mur de consentement
+/// Google…) n'apparaissent qu'ici, pas dans le HTML servi.
+/// `404` onglet inconnu ou DOM détaché (apply en vol).
+async fn dom_dump(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
+    let session = st.session.lock().await;
+    match session.dom_dump(id) {
+        Some(d) => (StatusCode::OK, d).into_response(),
+        None => (StatusCode::NOT_FOUND, "pas de DOM").into_response(),
+    }
+}
+
+/// `GET /api/tabs/{id}/layout` → `text/plain` : dump de
+/// l'arbre de boîtes posé (étape 120) — le hit-test s'y
+/// résout ; un « clic ignoré » = zone peinte sans boîte
+/// couvrante. `404` onglet inconnu ou arbre détaché.
+async fn layout_dump(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
+    let session = st.session.lock().await;
+    match session.layout_dump(id) {
+        Some(d) => (StatusCode::OK, d).into_response(),
+        None => (StatusCode::NOT_FOUND, "pas de layout").into_response(),
+    }
 }
 
 /// `POST /api/tabs/{id}/find` `{ "query": "…", "dir": 0|±1 }`

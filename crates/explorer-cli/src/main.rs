@@ -47,12 +47,14 @@ fn main() -> ExitCode {
         [_, cmd, url, out] if cmd == "shot" => shot(url, out, None),
         [_, cmd, url, out, size] if cmd == "shot" => shot(url, out, Some(size)),
         [_, cmd, url] if cmd == "jprobe" => jprobe(url),
+        [_, cmd, url] if cmd == "dom" => dom_live(url),
         _ => {
             eprintln!("usage : explorer-cli dump <fichier|url>");
             eprintln!("        explorer-cli fetch <url>");
             eprintln!("        explorer-cli layout <fichier|url>");
             eprintln!("        explorer-cli shot <url> <sortie.png> [LxH]");
             eprintln!("        explorer-cli jprobe <url>");
+            eprintln!("        explorer-cli dom <url>");
             ExitCode::FAILURE
         }
     }
@@ -172,6 +174,36 @@ async fn shot(url: &str, out: &str, size: Option<&str>) -> ExitCode {
 ///   claim d'essai sur la première (cycle 71e en
 ///   conditions réelles — la fixture couvre la mécanique,
 ///   pas le terrain).
+/// `dom <url>` : navigation réelle complète (JS + redirections
+/// + hydratation bornée) puis dump du DOM **vivant** — outil
+/// de triage : le mur de consentement Google, par exemple,
+/// n'existe que post-script (étape 120).
+#[tokio::main(flavor = "current_thread")]
+async fn dom_live(url: &str) -> ExitCode {
+    let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
+    let mut session = explorer_core::Session::new(client_stack(), Arc::new(fonts));
+    session.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = session.open_tab();
+    if let Err(e) = session.navigate(tab, url).await {
+        eprintln!("erreur : {e}");
+        return ExitCode::FAILURE;
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1_500);
+    while std::time::Instant::now() < deadline {
+        session.pump_net().await;
+        session.pump_timers(tab);
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    eprintln!("[url : {}]", session.tab_url(tab).unwrap_or_default());
+    if let Some(d) = session.dom_dump(tab) {
+        print!("{d}");
+        ExitCode::SUCCESS
+    } else {
+        eprintln!("pas de DOM (détaché ?)");
+        ExitCode::FAILURE
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn jprobe(url: &str) -> ExitCode {
     let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
