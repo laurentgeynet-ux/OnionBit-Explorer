@@ -1036,6 +1036,9 @@ impl Engine {
         // `ReadableStream`/`WritableStream`/`TransformStream`
         // (JS-C71) — `for await` sur les corps, bundlers.
         crate::streams::install_streams(self);
+        // `WebSocket` (JS-C73) — stub honnête (handshake
+        // refusé en async) pour les feature-detects.
+        crate::websocket::install_websocket(self);
         let screen = self.new_object();
         let (w, h) = self.hooks.viewport;
         for (k, v) in [

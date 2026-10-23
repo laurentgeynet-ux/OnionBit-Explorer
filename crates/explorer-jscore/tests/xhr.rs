@@ -1359,3 +1359,87 @@ fn c72_idb_request_shape() {
     );
     assert_eq!(describe(&mut e, "s[s.length-1]"), "done");
 }
+
+// ------------------------------------------------------------------
+// JS-C73 — WebSocket stub honnête
+// ------------------------------------------------------------------
+
+#[test]
+fn c73_websocket_shape() {
+    let (mut e, _t) = engine();
+    // `typeof WebSocket` → feature-detect des frameworks ;
+    // constantes + props initiales spec.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var s = [];             s.push(typeof WebSocket);             s.push(WebSocket.CONNECTING + '/' + WebSocket.OPEN + '/' + WebSocket.CLOSING + '/' + WebSocket.CLOSED);             var ws = new WebSocket('ws://h.test/sock');             s.push(ws instanceof WebSocket);             s.push(ws.readyState);             s.push(ws.url);             s.push(ws.protocol + '|' + ws.extensions + '|' + ws.binaryType);             s.push(ws.bufferedAmount);             s.join(',')"
+        ),
+        "function,0/1/2/3,true,0,ws://h.test/sock,||blob,0"
+    );
+}
+
+#[test]
+fn c73_websocket_refusal() {
+    let (mut e, _t) = engine();
+    // Handshake refusé en async : error puis close 1006 —
+    // la séquence observable d'un vrai refus (arme les
+    // fallbacks long-polling).
+    assert_eq!(
+        describe(
+            &mut e,
+            "var log = [];             var ws = new WebSocket('wss://h.test/x');             ws.onerror = function (ev) { log.push('E:' + ev.type); };             ws.onclose = function (ev) { log.push('C:' + ev.code + ':' + ev.wasClean + ':' + ws.readyState); };             log.push('pre:' + ws.readyState);             'armed'"
+        ),
+        "armed"
+    );
+    // Livré au checkpoint de fin d'eval.
+    assert_eq!(
+        describe(&mut e, "log.join(',')"),
+        "pre:0,E:error,C:1006:false:3"
+    );
+}
+
+#[test]
+fn c73_websocket_url_and_protocols() {
+    let (mut e, _t) = engine();
+    // Schéma ws/wss exigé + arg requis + protocols validés.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var out = [];             try { new WebSocket('http://h.test/'); } catch (err) { out.push('http:' + (err instanceof SyntaxError)); }             try { new WebSocket(); } catch (err) { out.push('noarg:' + (err instanceof TypeError)); }             try { new WebSocket('ws://h/', 'not a proto!'); } catch (err) { out.push('badtok:' + (err instanceof SyntaxError)); }             try { new WebSocket('ws://h/', ['a', 'a']); } catch (err) { out.push('dup:' + (err instanceof SyntaxError)); }             var ok = new WebSocket('ws://h/', ['chat', 'super']);             out.push('ok:' + ok.readyState);             out.join(',')"
+        ),
+        "http:true,noarg:true,badtok:true,dup:true,ok:0"
+    );
+}
+
+#[test]
+fn c73_websocket_send_close_binarytype() {
+    let (mut e, _t) = engine();
+    // `send` en CONNECTING → InvalidStateError (name spec) ;
+    // `close()` valide → CLOSING ; codes invalides refusés ;
+    // `binaryType` validé.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var out = [];             var ws = new WebSocket('ws://h.test/');             try { ws.send('x'); } catch (err) { out.push('send:' + err.name); }             try { ws.close(2000); } catch (err) { out.push('code:' + err.name); }             try { ws.close(1000, 'x'.repeat(200)); } catch (err) { out.push('reason:' + (err instanceof SyntaxError)); }             ws.binaryType = 'arraybuffer';             out.push('bt:' + ws.binaryType);             ws.binaryType = 'bogus';             out.push('bt2:' + ws.binaryType);             ws.close();             out.push('rs:' + ws.readyState);             ws.close();             out.push('rs2:' + ws.readyState);             out.join(',')"
+        ),
+        "send:InvalidStateError,code:InvalidAccessError,reason:true,bt:arraybuffer,bt2:arraybuffer,rs:2,rs2:2"
+    );
+    // Le refus livre quand même error + close (spec : la
+    // connexion échoue même après close() en CONNECTING).
+    assert_eq!(describe(&mut e, "ws.readyState"), "3");
+}
+
+#[test]
+fn c73_websocket_event_target() {
+    let (mut e, _t) = engine();
+    // addEventListener/removeEventListener + close() en
+    // CONNECTING → readyState 2 jusqu'au refus.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var log = [];             var ws = new WebSocket('ws://h.test/');             var a = function () { log.push('a'); };             var b = function () { log.push('b'); };             ws.addEventListener('close', a);             ws.addEventListener('close', b);             ws.removeEventListener('close', b);             ws.addEventListener('error', function () { log.push('err!'); });             'armed'"
+        ),
+        "armed"
+    );
+    assert_eq!(describe(&mut e, "log.join(',')"), "err!,a");
+}

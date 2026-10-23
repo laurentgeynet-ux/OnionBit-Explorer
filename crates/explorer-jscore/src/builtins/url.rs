@@ -93,6 +93,12 @@ pub(crate) fn url_has_origin(scheme: &str) -> bool {
     matches!(scheme, "http" | "https" | "ws" | "wss" | "ftp" | "file")
 }
 
+/// `p.scheme` — accesseur (champs privés ; `WebSocket` JS-C73
+/// valide `ws`/`wss`).
+pub(crate) fn url_scheme(p: &UrlParts) -> &str {
+    &p.scheme
+}
+
 /// `p.origin` — `scheme://host[:port]` ou `"null"` pour les
 /// origines opaques (`about:`, données…) — sert aux URL objets
 /// `blob:<origin>/<id>` (JS-C70).

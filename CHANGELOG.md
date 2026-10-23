@@ -540,6 +540,45 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   racinés. Régressions `c72_*`
   (8 tests).
 
+- **JS-C73 — `WebSocket` stub
+  honnête** (`explorer-jscore` —
+  feature-detect + fallbacks des
+  frameworks temps réel). Aucune
+  socket ouverte (`explorer-net`
+  seul en a le droit — pas de
+  transport WS à ce jour) : le
+  handshake est refusé **en async**
+  au checkpoint microtask —
+  `error` puis `close`
+  `{code: 1006, wasClean: false}`,
+  la séquence observable exacte
+  d'un refus réseau ; c'est ce qui
+  arme les fallbacks long-polling
+  (Socket.IO, SockJS…). Surface
+  spec : `readyState`, `url`
+  (absolue, `ws`/`wss` exigés —
+  `SyntaxError`), `protocol`/
+  `extensions` (`''`, rien de
+  négocié), `bufferedAmount`,
+  `binaryType` (`'blob'`/
+  `'arraybuffer'` validé),
+  `send` (`InvalidStateError` en
+  `CONNECTING`, silencieux en
+  `CLOSING`/`CLOSED` — `OPEN`
+  inatteignable), `close(code,
+  reason)` validé (1000 ou
+  3000-4999, raison ≤ 123 octets),
+  `onopen`/`onmessage`/`onerror`/
+  `onclose` + `addEventListener`/
+  `removeEventListener`/
+  `dispatchEvent`, constantes sur
+  le ctor et le prototype,
+  validation `protocols` (tokens,
+  doublons → `SyntaxError`).
+  GC : proto + sockets en file
+  racinés. Régressions `c73_*`
+  (5 tests).
+
 ### Fixed
 
 - **JS-C72 — adoption de promesse

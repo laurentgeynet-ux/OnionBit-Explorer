@@ -309,11 +309,14 @@ impl Engine {
             // `read()` pendantes (queue vide post-pull).
             // JS-C72 : même checkpoint pour les `IDBRequest`
             // (success/error, cursor steps, txn complete).
+            // JS-C73 : refus de handshake `WebSocket` (error +
+            // close 1006 — arme les fallbacks long-polling).
             if !self.deliver_mutations()?
                 && self.deliver_observers()? == 0
                 && self.deliver_file_reads()? == 0
                 && self.pump_stream_reads()? == 0
                 && crate::idb::deliver_idb_requests(self)? == 0
+                && self.deliver_ws()? == 0
                 && self.pump_workers()? == 0
             {
                 self.maybe_collect();

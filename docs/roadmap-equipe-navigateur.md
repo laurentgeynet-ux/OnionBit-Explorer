@@ -3047,10 +3047,18 @@ ci-dessous (fréquence observée sur le corpus réel).
   honnête sans). Fix promesse au passage : adoption pendante
   résolvait `undefined` (résolveurs de la mauvaise promesse).
   Régressions `c72_*` (8 tests).
-- [ ] **JS-C73. `WebSocket` stub fonctionnel** — handshake
-  refusé honnêtement (pas de sockets hors `explorer-net`),
-  mais la détection `typeof WebSocket` doit exister pour que
-  les fallbacks long-polling des frameworks s'arment.
+- [x] **JS-C73. `WebSocket` stub honnête** — `src/websocket.rs`
+  : handshake refusé en async au checkpoint microtask
+  (`error` puis `close` `{code: 1006, wasClean: false}` — la
+  séquence observable d'un vrai refus, qui arme les fallbacks
+  long-polling ; aucune socket ouverte). Surface spec :
+  `readyState`, `url` (`ws`/`wss` exigés), `protocol`/
+  `extensions`, `bufferedAmount`, `binaryType` validé,
+  `send` (`InvalidStateError` en `CONNECTING`),
+  `close(code, reason)` validé, `on*` + `addEventListener`/
+  `removeEventListener`/`dispatchEvent`, constantes ctor +
+  proto, `protocols` validé (tokens/doublons →
+  `SyntaxError`). Régressions `c73_*` (5 tests).
 - [ ] **JS-C74. `Notification`/`BroadcastChannel`/
   `navigator.sendBeacon`/`getSelection`/`reportError`/
   `scrollIntoView`** — queue d'APIs ponctuelles, ordre à

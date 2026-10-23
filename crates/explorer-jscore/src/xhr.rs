@@ -518,6 +518,9 @@ impl Engine {
         // pages = sa responsabilité).
         crate::idb::install_idb(self, None);
         crate::idb::install_caches(self, None);
+        // `WebSocket` (JS-C73) — stub honnête : handshake
+        // refusé en async, arme les fallbacks long-polling.
+        crate::websocket::install_websocket(self);
     }
 
     /// `ctor.prototype = proto` + `proto.constructor = ctor` —
