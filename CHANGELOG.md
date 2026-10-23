@@ -35,6 +35,41 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-90 — rects des inlines
+  imbriqués + atomes `inline-*`**
+  (`explorer-layout` — terrain
+  Étape 120 : le clic « Tout
+  accepter » du consentement
+  Google retombait sur `form`,
+  `ignored`, les deux labels
+  superposés au même rect).
+  `is_atomic` couvre désormais
+  tout le niveau inline à
+  contexte propre (`inline-flex`/
+  `inline-grid`/`inline-table`,
+  CSS §9.2.4) — un contrôle
+  `inline-flex` niché coule en
+  atome posé par `aid` ; et
+  l'union `owner == i` de
+  `assign_child_rects` reste au
+  seul niveau racine — en
+  profondeur, les rects des
+  descendants sont l'union de
+  leurs propres fragments via
+  `f.node` ∈ sous-arbre
+  (`assign_nested_rects`).
+  Bonus : `inline-grid` devient
+  boîte de niveau Inline (spec)
+  et `inline-table` reçoit le
+  vrai algorithme table en atome.
+  Régressions
+  `controle_inline_flex_niche_
+  est_atomique`,
+  `inline_niche_recupere_ses_
+  propres_fragments`,
+  `inline_grid_et_inline_table_
+  sont_atomiques`.
+
 - **Étape 119 — piège
   `engineMode=auto` visible**
   (`app/`, `scripts/`). Une

@@ -1030,7 +1030,9 @@ fn layout_block_inner(
     // `display: table` → dimensionnement dédié. La marge
     // gauche s'applique à la boîte table (§10.3 : `auto` →
     // 0 pour le MVP) — `cb_w` est amputé d'autant.
-    if st.get("display") == Some("table") {
+    // `inline-table` passe ici aussi : l'atome de niveau
+    // inline garde l'algorithme table à l'intérieur (R-90).
+    if matches!(st.get("display"), Some("table" | "inline-table")) {
         let ml = side_px(&st, "margin-left", cb_w, fs, ctx, 0.0);
         let mr = side_px(&st, "margin-right", cb_w, fs, ctx, 0.0);
         return crate::tables::layout_table(

@@ -2343,6 +2343,46 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   Régressions : `colonnes_distribuent_les_items`,
   `colonnes_degenerent_sans_niveau_multiple` (layout),
   `shorthand_columns` (css).
+- [x] **R-90. Rects des inlines imbriqués + atomes
+  `inline-*`** (journal piste PIPE — bloquait le
+  consentement Google, triage Étape 120 : clic au bouton
+  peint → `ignored`, `hit_tag="form"` ; repro
+  `repro_c.html` : le 2ᵉ `<input style="display:
+  inline-flex">` recevait le rect du 1ᵉʳ). Deux défauts
+  chaînés : **(a)** `is_atomic` n'exigeait que
+  `inline-block` — étendu à `inline-flex`/`inline-grid`/
+  `inline-table` (CSS §9.2.4, atomes de niveau inline à
+  FC propre — même liste que l'`atomic_inline` de
+  `wrap_children`/`hoist_blocks`) : la série `aid` reste
+  synchrone de fait entre `size_atomics`/`collect_child`/
+  `assign_atomic_rects` ; l'input coule en atome
+  dimensionné par `layout_block` (flex réel à
+  l'intérieur). Bonus cohérents : `box_kind_of` mappe
+  `inline-grid` → `BoxKind::Inline` (dernière valeur
+  atomique manquante — jamais de niveau inline, écart
+  spec corrigé) et `layout_block` route `inline-table`
+  vers `layout_table` (l'atome garde l'algo table
+  dedans). **(b)** `assign_child_rects` comparait
+  `f.owner == i` en récursion — or `owner` n'indexe que
+  les enfants **directs** de la boîte à lignes : tout
+  inline niché d'index i copiait le rect du iᵉ enfant
+  racine (invisible sur le texte peint par fragment,
+  mortel sur les contrôles hit-testés). L'union reste au
+  seul niveau racine ; en profondeur
+  `assign_nested_rects` attribue les fragments via
+  `f.node` ∈ sous-arbre (HashSet — exact, `Text`
+  inclus) ; la position statique des hors-flux nichés
+  s'ancre au dernier fragment des frères in-flow
+  précédents (`seen`), sinon à l'origine du parent.
+  Imprécision bornée documentée : fragments `node: None`
+  (pseudos) et marqueurs de `split_piece` à `node`
+  partagé. Vérifié terrain : `layout repro_c.html` →
+  inputs côte à côte (x=8 / x=120.4), chacun portant son
+  libellé ; hit-test du 2ᵉ bouton → son `input`.
+  Régressions : `controle_inline_flex_niche_est_
+  atomique`, `inline_niche_recupere_ses_propres_
+  fragments`, `inline_grid_et_inline_table_sont_
+  atomiques`.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

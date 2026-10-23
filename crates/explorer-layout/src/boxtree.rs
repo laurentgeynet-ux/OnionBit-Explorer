@@ -436,12 +436,14 @@ fn box_kind_of(style: &ComputedStyle) -> BoxKind {
     // `list-item` n'est pas dans la table de blockification
     // (sa puce survit au positionnement).
     match style.get_or("display", "inline") {
-        "inline" | "inline-block" | "inline-table" | "inline-flex"
+        "inline" | "inline-block" | "inline-table" | "inline-flex" | "inline-grid"
             if matches!(style.get("position"), Some("absolute" | "fixed")) =>
         {
             BoxKind::Block
         }
-        "inline" | "inline-block" | "inline-table" | "inline-flex" => BoxKind::Inline,
+        "inline" | "inline-block" | "inline-table" | "inline-flex" | "inline-grid" => {
+            BoxKind::Inline
+        }
         "list-item" => BoxKind::ListItem,
         // block, table* et tout l'inconnu → bloc (repli).
         _ => BoxKind::Block,

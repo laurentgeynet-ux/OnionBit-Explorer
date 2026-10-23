@@ -192,12 +192,19 @@ pub(crate) fn layout_inline(
 }
 
 /// `true` si la boîte coule en ligne comme un atome :
-/// `inline-block` conteneur, ou élément **remplacé**
-/// (`intrinsic` — `<object>` résolu, `<img>`, `<svg>`,
-/// `<canvas>`) sans texte de repli. Un repli `alt` porte
-/// `text` → il reste un item texte, jamais atomique.
+/// conteneur de niveau inline établissant un contexte de
+/// formatage propre (`inline-block`/`inline-flex`/
+/// `inline-grid`/`inline-table` — CSS §9.2.4, même liste que
+/// `atomic_inline` de `wrap_children`), ou élément
+/// **remplacé** (`intrinsic` — `<object>` résolu, `<img>`,
+/// `<svg>`, `<canvas>`) sans texte de repli. Un repli `alt`
+/// porte `text` → il reste un item texte, jamais atomique.
 fn is_atomic(b: &LayoutBox) -> bool {
-    b.text.is_none() && (b.display() == "inline-block" || b.intrinsic.is_some())
+    b.text.is_none()
+        && (matches!(
+            b.display(),
+            "inline-block" | "inline-flex" | "inline-grid" | "inline-table"
+        ) || b.intrinsic.is_some())
 }
 
 /// Sous-rect d'une tranche d'octets `start..end` de
@@ -1081,7 +1088,80 @@ fn assign_child_rects(bx: &mut LayoutBox, lines: &[LineBox]) {
             child.rect = u;
         }
         // Arête ∝ profondeur de l'arbre (R-24).
-        explorer_common::deep(|| assign_child_rects(child, lines));
+        explorer_common::deep(|| assign_nested_rects(child, lines));
+    }
+}
+
+/// Rects des descendants d'un enfant direct de la boîte à
+/// lignes (récursif). `Fragment::owner` n'indexe que les
+/// enfants **directs** de la racine IFC : en profondeur,
+/// comparer l'indice local à `owner` copiait le rect d'un
+/// sibling (R-90 — le `<input>` « Tout accepter » du
+/// consentement Google recevait le rect du 1ᵉʳ bouton →
+/// hit-test → `form`, clic `Ignored`). Un descendant
+/// retrouve donc les siens via `f.node` ∈ son sous-arbre :
+/// le fragment porte le nœud DOM de sa feuille émettrice
+/// (texte, atome, élément de marqueur). Imprécision bornée
+/// documentée : les fragments de pseudo-boîtes (`node:
+/// None`) et les marqueurs de morceaux `split_piece`
+/// partageant un même `node` peuvent manquer ou s'agréger à
+/// la mauvaise moitié — jamais le rect d'un sibling disjoint.
+fn assign_nested_rects(bx: &mut LayoutBox, lines: &[LineBox]) {
+    // Nœuds du contenu in-flow des frères déjà traités — la
+    // position statique d'un hors-flux s'ancre à leur
+    // dernier fragment (même logique que la racine).
+    let mut seen = std::collections::HashSet::new();
+    for child in &mut bx.children {
+        if child.out_of_flow() {
+            let mut pos = None;
+            for line in lines {
+                for f in &line.fragments {
+                    if f.node.is_some_and(|n| seen.contains(&n)) {
+                        pos = Some((f.rect.x + f.rect.width, line.rect.y));
+                    }
+                }
+            }
+            let (sx, sy) = pos.unwrap_or((bx.rect.x, bx.rect.y));
+            child.rect.x = sx;
+            child.rect.y = sy;
+            continue;
+        }
+        let mut mine = std::collections::HashSet::new();
+        subtree_nodes(child, &mut mine);
+        // Atome : rect posé par `assign_atomic_rects` via
+        // `aid` — mais ses fragments comptent comme contenu
+        // précédent pour un frère hors-flux.
+        if !is_atomic(child) {
+            let mut union: Option<Rect> = None;
+            for line in lines {
+                for f in &line.fragments {
+                    if f.node.is_some_and(|n| mine.contains(&n)) {
+                        union = Some(match union {
+                            None => f.rect,
+                            Some(u) => union_rect(u, f.rect),
+                        });
+                    }
+                }
+            }
+            if let Some(u) = union {
+                child.rect = u;
+            }
+            // Arête ∝ profondeur de l'arbre (R-24).
+            explorer_common::deep(|| assign_nested_rects(child, lines));
+        }
+        seen.extend(mine);
+    }
+}
+
+/// `NodeId`s du sous-arbre de `bx` (la boîte incluse) —
+/// base d'attribution des fragments à un descendant,
+/// `f.node` portant le nœud de la feuille émettrice.
+fn subtree_nodes(bx: &LayoutBox, out: &mut std::collections::HashSet<explorer_dom::NodeId>) {
+    if let Some(n) = bx.node {
+        out.insert(n);
+    }
+    for c in &bx.children {
+        explorer_common::deep(|| subtree_nodes(c, out));
     }
 }
 

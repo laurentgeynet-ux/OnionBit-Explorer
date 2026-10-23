@@ -298,6 +298,7 @@ ni l'un ni l'autre. Variante arrêtée (pull, cohérente avec
 | 2026-10-23 | `explorer-core`/`explorer-render` — réponse mesurée : « un apply paie-t-il le layout complet ? » (question lead post-R-85, reliure étape 112) | **Oui en structure, non en coût — `zz_profile_giant` enrichie d'une mesure « apply simulé » (boxtree + `layout_tree` sur `FontCache` chaud, fidèle à `PaintPayload.layout_font_cache` R-65 via `layout_ctx`/`restitute_font_cache`)**. **Debug** : layout chaud **1,33 s** vs 12,1 s froid (les ~10 s de buzz re-shapé deviennent des hits — le cache persisté amortit le reflow complet) → apply complet ≈ parse 0,76 + styles 3,0 + boxtree 1,07 + layout 1,33 + dl 0,8 + raster 0,6 ≈ **7,5 s** vs ~250 s documentés étape 112. **Release** (même sonde, `--release`) : pipeline entier **~2,3 s** — `layout_tree` 389 ms (×31 vs debug : taxe debug du shaping, pas l'algorithme), png 150 ms, styles 339 ms, layout chaud 213 ms → apply ≈ **1,9 s**. **Structure des deux chemins** : `try_incr_payload` (incrémental R-12) ne saute que boxtree+layout et exige `job.dirty` + **zéro flottant dans tout le document** + chemin bloc — sur page réelle à flottants, `has_float` retombe quasi toujours en reflow complet ; `styles_payload` (`StyleEngine` **reconstruit à chaque apply** — re-parse des feuilles + cascade complète), le re-parse DOM, la display list (incrémentale R-37 quand `prev` présent) et le repaint restent complets sur les deux chemins. **Arbitrage** : R-86 (pré-shaping parallèle, premier thread en crate domaine) **non retenu** — le plancher restant est du debug ; 389 ms release ne justifie ni threads ni ADR, et les clés de shape (fragments post-itemisation UAX#14) ne sont pas collectables en amont sans rejouer la moitié du travail. Reliquat par-apply identifié : `StyleEngine` non persisté → ~3 s debug / ~0,3 s release de cascade à chaque apply, premier poste fixe désormais (si un jour le coût apply redevient le goulot : persister le moteur ou styler le sous-arbre sale seulement). | PIPE → NAV (réponse reliure étape 112) | livré — sonde `zz_profile_giant` porte la mesure « apply simulé » ; reliure étape 112 close côté PIPE |
 | 2026-10-23 | `explorer-render` — R-86 : moitié PIPE des `mask-*` + **demande NAV : fetch `mask-image: url(http…)`** | **Livré côté domaine** (backlog issue #14 / reliquat R-80 — icônes MDN invisibles, motif = 3 trous cumulés mesurés sur `mdn.html`) : (1) **pseudos** — `PaintImages.masks_url` (`url(...)` brut du style calculé → bitmap) + repli lookup à l'émission `masks[NodeId]` → `masks_url[style["mask-image"]]` : les boîtes `::before`/`::after` (sans `NodeId`) trouvent leur mask — motif `.color-theme__button:before` MDN ; collecte `data:` étendue aux styles pseudo (`StyleMap::pseudo`). (2) **placement** — `mask-size` (`cover`/`contain`/`<len>`/`%` ; `auto` = étirement sur la zone, déviation assumée : comportement R-52 préservé, pixels de référence inchangés), `mask-position` (`bg_position` réutilisé, aire border box), `mask-repeat` (tuilage `rem_euclid`, défaut `repeat`, `space`/`round` ≈ repeat) → `DisplayItem::MaskedFill` porte `dst`+`repeat` (`item_eq`/`shifted`/`dump` alignés ; pattern `..` en aval inchangé). (3) **couture** — `PaintImages::register_mask(url, img)` additif. **Demande NAV** : pour un `mask-image`/`(-webkit-)mask-image`/`mask` dont l'url n'est pas `data:` — fetch + décodage (mêmes bornes `image_max_px`/`img_decoded` que les fonds) puis `register_mask(<texte url brut du style calculé>, img)` — symétrique d'`insert_fetched_backgrounds`, l'alias url brute↔résolue vivant côté appelant comme `bg_aliases`. Effet attendu : icônes MDN (color-theme, `.external`, menu nav) — le motif devient *possible*, pixels réels dès le wiring. Régressions : `mask_sur_pseudo_via_url`, `mask_size_position_repeat_placent_la_tuile`, `mask_repeat_defaut_u_tile`, `mask_fetchem_enregistre_via_register_mask` — tout côté PIPE, `data:` seules. | PIPE → NAV (demande de couture) | livré côté PIPE — pixels MDN en attente du wiring fetch |
 | 2026-10-23 | `explorer-layout`/`explorer-render` — R-87 : `doc_h` = région défilante réelle (terrain humain — fr.wikipedia ≥1120 px, doc à 1 viewport) | **Correctif comportemental + API publique additive** : `scrollable_overflow_bottom(&LayoutBox) -> f32` exporté d'`explorer-layout` (≈ `scrollHeight` — max des bords inférieurs des boîtes à débord non clippé ; `overflow` ≠ visible borne ses descendants à sa bordure ; `fixed` exclu). Constat : `doc_h` lisait `root.rect.height` ; `html,body{height:100%}` de vector-2022 fige `body` à l'ICB et le contenu déborde en `overflow:visible` sans l'étirer — en dessous de 1120 px des flottants remontaient au `FloatCtx` racine (`layout_tree` étend la racine à leur profondeur) et masquaient le trou ; à 1120 px `.mw-page-container-inner` passe en `display:grid` (BFC → flottants capturés) → effondrement. Côté session : `p.doc_h` (apply plein + relayout incrémental) et `DisplayList.height`/rect de canvas (`build_list`) bornés par cette mesure — avant, la frame s'arrêtait au viewport et le scroll était structurellement impossible. **Observable NAV** : les pages dont le contenu déborde un ancêtre à hauteur fixe deviennent scrollables et entièrement peintes ; frames potentiellement plus hautes (cap `MAX_FRAME_DIM` inchangé). Régression : `doc_h_covers_overflow_past_fixed_height_body`. | PIPE (R-87) | livré |
+| 2026-10-23 | `explorer-layout` — R-90 : rects des inlines imbriqués + atomes `inline-*` (bloquant consentement Google — clic peint → `ignored`) | **Correctif comportemental, aucune API touchée** : (a) `is_atomic` couvre tout le niveau inline à FC propre (`inline-flex`/`inline-grid`/`inline-table` en plus d'`inline-block`, CSS §9.2.4) — un `<input display:inline-flex>` niché coule désormais en atome posé par `aid` au lieu d'être éclaté en conteneur ; (b) l'union `f.owner == i` n'est plus appliquée en récursion (`owner` n'indexe que les enfants directs de la boîte à lignes) — `assign_nested_rects` attribue les fragments aux descendants via `f.node` ∈ sous-arbre, y compris les boîtes `Text` ; position statique des hors-flux nichés = dernier fragment des frères in-flow précédents. Bonus cohérents : `box_kind_of` mappe `inline-grid` → `BoxKind::Inline` (dernière valeur atomique manquante — n'était jamais de niveau inline, écart spec corrigé) et `layout_block` route `inline-table` vers `layout_table`. **Observable NAV** : les rects des éléments nichés dans des inlines (contrôles, liens, texte) sont désormais exacts → hit-test et clic sur les boutons peints atteignent le bon `NodeId` ; rects différents (justes) sur toute page à inline niché. Régressions : `controle_inline_flex_niche_est_atomique`, `inline_niche_recupere_ses_propres_fragments`, `inline_grid_et_inline_table_sont_atomiques`. | PIPE (R-90) | livré |
 
 ## Phase terrain humain 2026-10-23 — anomalies dispatchées
 
@@ -360,33 +361,43 @@ journal « livré ».
   `shorthand_columns`.
 - [ ] **`<select>` stylé** : apparence native différente de
   Chrome (déjà documenté — prioriser si terrain le signale).
-- [ ] **`assign_child_rects` : `owner` racine vs index
-  local** (`inline.rs` — bloque le consentement Google, voir
-  triage NAV « Recherche Google » ci-dessous). Deux défauts
-  mesurés, même repro
-  (`explorer-cli layout repro_c.html` :
-  `<div><span style="display:inline"><input
-  style="display:inline-flex" type=submit value=refuser></span>
-  <span style="display:inline"><input …value=accepter></span>`) :
-  `inline<span> [78.4 9.6 70.4]` (2ᵉ, correct) contient
-  `inline<input> [8 9.6 61.6]` = **rect du 1ᵉr input**.
-  (a) `is_atomic` (inline.rs:200) exige
-  `display()=="inline-block"` — `inline-flex`/`inline-grid`/
-  `inline-table` sont *aussi* des atomes de niveau inline
-  (CSS §9.2.4, établissent un FC) → l'input flex est traité
-  en conteneur inline non-atomique. (b) `assign_child_rects`
-  compare `f.owner == i` où `f.owner` = index dans
-  `bx.children` **de la racine IFC** mais `i` = index dans
-  le parent courant en récursion → tout inline imbriqué
-  d'index i récupère l'union des fragments du iᵉ enfant
-  racine (copie du rect du sibling). Invisible sur texte
-  (peint par fragment) — tue les **contrôles** hit-testés
-  (`<input>`/`form`) : hit-test au bouton peint → `form`,
-  `submit_control` remonte sans input → clic `Ignored`.
-  Piste : `is_atomic` devrait couvrir les atomes de niveau
-  inline (même prédicat que boxtree.rs:741) et/ou l'union
-  de `assign_child_rects` ne doit regarder que les enfants
-  directs de la racine (récursion ≠ même table d'owner).
+- [x] ~~**`assign_child_rects` : `owner` racine vs index
+  local**~~ (`inline.rs` — bloquait le consentement Google,
+  voir triage NAV « Recherche Google » ci-dessous) →
+  **livré → R-90**. Deux défauts mesurés au repro
+  `explorer-cli layout repro_c.html` (`<span><input
+  style="display:inline-flex" type=submit>` ×2) :
+  `inline<span> [78.4 9.6 70.4]` (2ᵉ) contenait
+  `inline<input> [8 9.6 61.6]` = rect du 1ᵉʳ.
+  (a) `is_atomic` n'exigeait que `display:inline-block` —
+  `inline-flex`/`inline-grid`/`inline-table` sont aussi des
+  atomes de niveau inline (CSS §9.2.4, FC propre) : prédicat
+  étendu à la liste `atomic_inline`/`hoist_blocks` ; l'input
+  coule en atome (dimensionné par `layout_block` — flex réel
+  dedans — et posé par `aid`, série synchrone de fait entre
+  `size_atomics`/`collect_child`/`assign_atomic_rects`).
+  `box_kind_of` gagne `inline-grid` (dernière valeur
+  atomique manquante au niveau Inline) et `layout_block`
+  route `inline-table` vers `layout_table`.
+  (b) `assign_child_rects` comparait `f.owner == i` en
+  récursion — `owner` n'indexe que les enfants **directs**
+  de la boîte à lignes : l'union reste au seul niveau
+  racine ; en profondeur `assign_nested_rects` attribue les
+  fragments via `f.node` ∈ sous-arbre (HashSet — exact,
+  boîtes `Text` incluses) ; position statique des hors-flux
+  nichés = dernier fragment des frères in-flow précédents
+  (`seen`), sinon origine du parent. Imprécision bornée
+  documentée : fragments `node: None` (pseudo-boîtes) et
+  marqueurs de `split_piece` à `node` partagé — jamais le
+  rect d'un sibling disjoint. Vérifié : `layout repro_c.html`
+  → inputs côte à côte (x=8 / x=120.4), hit-test du 2ᵉ
+  bouton → son `input`. Régressions
+  `controle_inline_flex_niche_est_atomique`,
+  `inline_niche_recupere_ses_propres_fragments`,
+  `inline_grid_et_inline_table_sont_atomiques`.
+  **NAV** : le clic du mur de consentement devrait désormais
+  atteindre le `submit` — le reliquat `Error: b` reste
+  piste JS.
 - [x] **Images de la page Accueil FR** → **triage PIPE :
   innocente, dispatch NAV/JS**. Mesures terrain (shot 1216 px,
   23/10) : les vignettes `<img>` **arrivent et se peignent** —
@@ -424,7 +435,10 @@ journal « livré ».
   (`CookieJar` + `set-cookie`) câblés. **Blocant** : clic au
   bouton peint → `ignored`, sonde `hit_tag="form"` — c'est
   le défaut PIPE `assign_child_rects` ci-dessus (input
-  `inline-flex` posé au rect du sibling). Variante servie à
+  `inline-flex` posé au rect du sibling), **livré → R-90**
+  (le « bouton vide » noté plus bas — labels superposés au
+  même rect — devrait se résoudre avec ; à re-vérifier au
+  prochain vol). Variante servie à
   froid : `?ucbcb=1` = le shell « enablejs » du rapport
   (noscript + meta-refresh) — Google varie selon chaîne de
   redirection/cookies. **Reliquat piste JS** : exception

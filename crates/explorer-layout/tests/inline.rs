@@ -367,6 +367,115 @@ fn no_quirks_table_cellule_herite_centre() {
     assert!(off > 40.0, "no-quirks : texte centré, off={off}");
 }
 
+// ── R-90 : rects des inlines imbriqués + atomes inline-* ──
+
+/// Toutes les boîtes portant un nœud de tag donné (ordre doc).
+fn find_all(b: &LayoutBox, dom: &Dom, tag: &str, out: &mut Vec<NodeId>) {
+    if let Some(n) = b.node {
+        if dom.tag_name(n).is_ok_and(|t| t == tag) {
+            out.push(n);
+        }
+    }
+    for c in &b.children {
+        find_all(c, dom, tag, out);
+    }
+}
+
+#[test]
+fn controle_inline_flex_niche_est_atomique() {
+    // Mur de consentement Google (journal interface, terrain
+    // mission Étape 120) : deux `<input type=submit>` en
+    // `display:inline-flex` nichés dans des `<span>` inline.
+    // `is_atomic` n'exigeait que `inline-block` : l'atome
+    // `inline-flex` était traité en conteneur inline, et
+    // l'union `owner == i` en récursion comparait l'indice
+    // LOCAL à l'indice RACINE — le 2ᵉ bouton recevait le
+    // rect du 1ᵉʳ → hit-test → `form`, clic `Ignored`.
+    let (dom, bx) = laid(
+        "<!doctype html><div><span><input class=b type=submit value=refuser></span>\
+         <span><input class=b type=submit value=accepter></span></div>",
+        "div{font-size:10px} .b{display:inline-flex}",
+    );
+    let mut ids = Vec::new();
+    find_all(&bx, &dom, "input", &mut ids);
+    // La valeur synthétique du contrôle porte le même NodeId
+    // que l'input (Text enfant) → un id par boîte, dédupliqué.
+    ids.dedup();
+    assert_eq!(ids.len(), 2, "deux inputs attendus, {ids:?}");
+    let i1 = find(&bx, ids[0]);
+    let i2 = find(&bx, ids[1]);
+    // Chacun a son propre rect, côte à côte (pas la copie du
+    // sibling).
+    assert!(i1.rect.width > 0.0 && i2.rect.width > 0.0);
+    assert!(
+        i2.rect.x > i1.rect.x,
+        "i2 devrait être à droite de i1 : {i1:?} vs {i2:?}",
+        i1 = i1.rect,
+        i2 = i2.rect
+    );
+    // Le clic au centre du 2ᵉ bouton remonte SON input.
+    let cx = i2.rect.x + i2.rect.width / 2.0;
+    let cy = i2.rect.y + i2.rect.height / 2.0;
+    assert_eq!(
+        explorer_layout::hit_test(&bx, cx, cy),
+        Some(ids[1]),
+        "hit au 2ᵉ bouton"
+    );
+}
+
+#[test]
+fn inline_niche_recupere_ses_propres_fragments() {
+    // Même défaut sur inline NON atomique : `<i>` seul enfant
+    // de `<span>` (index local 0) recevait l'union des
+    // fragments de l'enfant racine n°0 (`<b>`) — le rect du
+    // sibling, pas le sien.
+    let (dom, bx) = laid(
+        "<!doctype html><p><b>AAAA</b><span><i>BBBB</i></span></p>",
+        "p{font-size:10px;width:200px}",
+    );
+    let b = find(&bx, by_tag(&dom, "b"));
+    let i = find(&bx, by_tag(&dom, "i"));
+    // Fixture 0.5em → « AAAA » = 20 px ; « BBBB » suit à x≈20.
+    assert!(
+        (i.rect.x - 20.0).abs() < 1.0,
+        "i.x={} attendu ~20 (après AAAA), pas {}",
+        i.rect.x,
+        b.rect.x
+    );
+    assert!(
+        (i.rect.width - 20.0).abs() < 1.0,
+        "i.width={} attendu ~20",
+        i.rect.width
+    );
+}
+
+#[test]
+fn inline_grid_et_inline_table_sont_atomiques() {
+    // CSS §9.2.4 : tous les `inline-*` à contexte de formatage
+    // propre coulent en atome — un seul fragment `atomic` par
+    // boîte, contenu jamais itemisé dans la ligne parente.
+    let (dom, bx) = laid(
+        "<!doctype html><div>AA<span class=g><i>BB</i><i>CC</i></span>DD</div>",
+        "div{font-size:10px} .g{display:inline-grid}",
+    );
+    let g = find(&bx, by_tag(&dom, "span"));
+    assert!(g.rect.width > 0.0 && g.rect.height > 0.0, "{:?}", g.rect);
+    let (dom2, bx2) = laid(
+        "<!doctype html><div>AA<table class=t><tr><td>cc</td></tr></table>DD</div>",
+        "div{font-size:10px} .t{display:inline-table}",
+    );
+    let t = find(&bx2, by_tag(&dom2, "table"));
+    // Vraie table posée (sa cellule existe et tient dedans).
+    let td = find(&bx2, by_tag(&dom2, "td"));
+    assert!(t.rect.width > 0.0 && td.rect.width > 0.0);
+    assert!(
+        td.rect.x >= t.rect.x - 0.01 && td.rect.y >= t.rect.y - 0.01,
+        "cellule dans la table : {td:?} vs {t:?}",
+        td = td.rect,
+        t = t.rect
+    );
+}
+
 #[test]
 fn text_indent_premiere_ligne_seule() {
     // R-70 : `text-indent` ne décale que la première ligne
