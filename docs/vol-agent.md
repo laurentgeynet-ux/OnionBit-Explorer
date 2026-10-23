@@ -7,10 +7,16 @@ Procédure pour qu'une piste (PIPE, NAV, JS) joue un **vol humain
 sans humain** : les yeux = la frame PNG du moteur, les mains =
 l'API REST d'input, la télémétrie = `dom`/`layout`/`mem`/SSE.
 
-> **Prérequis — binaire frais** (règle §8 AGENTS) : un verdict
-> visuel n'est valable que sur un daemon buildé **après** le dernier
-> commit touché. Attendre `Finished` — jamais de screenshot sur un
-> `.exe` périmé.
+> **Prérequis — binaire frais *et propre*** (règle §8 AGENTS,
+> durcie au vol d'étalonnage 2026-10-24) : un verdict visuel
+> n'est valable que sur un daemon buildé après le dernier
+> commit touché **et sur un arbre sans WIP** — un binaire
+> produit dans un worktree chargé du mi-chantier d'une autre
+> piste produit des mesures mensongères (mesuré : télémétrie
+> 404, `doc_h` tronqué, scroll bloqué — trois faux constats
+> disparus sur HEAD propre). Si le worktree partagé porte du
+> WIP, builder depuis un worktree éphémère à HEAD :
+> `git worktree add <dir> HEAD`.
 
 ## 1. Lancer le daemon dédié
 
@@ -64,7 +70,7 @@ Invoke-RestMethod "$BASE/api/tabs/$tab/layout"   # arbre de boîtes
 | `GET  /api/tabs/{id}/frame?x=&y=&w=&h=` | yeux zoomés — région |
 | `POST /api/tabs/{id}/input` | **mains** — `click`/`mousemove`/`scroll`/`key`/`keyup` |
 | `POST /api/tabs/{id}/viewport` `{w,h}` | fenêtre de vol |
-| `GET  /api/tabs/{id}/dom` `/layout` `/mem` | télémétrie |
+| `GET  /api/tabs/{id}/dom` `/layout` `/mem` | télémétrie — **404 transitoire possible sur page à JS continu** (DOM détaché pendant les apply jobs : alternance 200/404 mesurée sur github) — retenter, ne pas diagnostiquer un « DOM absent » |
 | `POST /api/tabs/{id}/back` `/forward` `/reload` | historique |
 | `GET  /api/events` | SSE — `navigated`, `frame_invalidated`… |
 
