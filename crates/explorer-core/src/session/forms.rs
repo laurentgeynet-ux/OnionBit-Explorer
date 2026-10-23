@@ -569,6 +569,8 @@ pub(crate) fn form_request(
             // `fetch_user` est marqué par le dispatch
             // (`try_submit` = geste ; `form.submit()` = non).
             fetch_user: false,
+            // Navigation de formulaire — hors protocole CORS.
+            cors: None,
         });
     }
     let qs = form_url_encode(entries);

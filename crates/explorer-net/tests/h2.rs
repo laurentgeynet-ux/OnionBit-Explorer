@@ -67,6 +67,7 @@ fn req(url: &str) -> Request {
         fetch_dest: FetchDest::Empty,
         fetch_mode: FetchMode::NoCors,
         fetch_user: false,
+        cors: None,
     }
 }
 

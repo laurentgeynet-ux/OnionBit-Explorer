@@ -31,7 +31,8 @@ use async_trait::async_trait;
 
 use crate::error::{NetError, NetResult};
 use crate::http::{
-    FetchDest, FetchMode, HttpTransport, Initiator, Method, Request, Response, StreamedResponse,
+    CorsRequest, FetchCredentials, FetchDest, FetchMode, HttpTransport, Initiator, Method, Request,
+    Response, StreamedResponse,
 };
 use crate::url::Url;
 
@@ -638,6 +639,222 @@ impl HttpTransport for PolicyTransport {
                 )));
             }
         }
+        self.inner.fetch_stream(req).await
+    }
+}
+
+// ---------------------------------------------------------------------
+// CorsTransport — enforcement CORS (étape 126)
+// ---------------------------------------------------------------------
+
+/// Transport décorateur : enforce le protocole CORS sur les
+/// requêtes `fetch_mode == Cors` portant `req.cors` (étape
+/// 126, spec Fetch « HTTP-network-or-cache fetch ») — toute
+/// autre requête passe sans examen.
+///
+/// - **Preflight** : méthode hors `{GET, HEAD, POST}`,
+///   `cors.unsafe_headers` non vide ou `Content-Type` hors
+///   des trois types « form » (`application/x-www-form-
+///   urlencoded`/`multipart/form-data`/`text/plain`) →
+///   `OPTIONS` préalable : `Origin:` (origine de la page),
+///   `Access-Control-Request-Method:`, `Access-Control-
+///   Request-Headers:` quand non vide. Accepté si statut
+///   2xx + `ACAO` (`*` admis seulement sans `include`,
+///   sinon origine exacte) + `ACAM` couvrant la méthode +
+///   `ACAH` couvrant chaque en-tête demandé ; `ACAC: true`
+///   exigé quand `credentials == Include`.
+/// - **Réponse finale** : lisible si `ACAO: *` (sans
+///   `include`) ou `ACAO` = origine exacte ; `ACAC: true`
+///   exigé sous `include` — sinon `NetError::CorsBlocked`
+///   (l'échec remonte opaque : `status: 0` côté script,
+///   comme une erreur réseau).
+///
+/// Pas de cache de preflight — spec : entrée `(origine, url,
+/// credentials)` ; hors MVP : un `OPTIONS` de plus par
+/// requête non simple. Cookies sortants/`Set-Cookie` restent
+/// à la session (jar) — le transport ne voit que la requête.
+pub struct CorsTransport {
+    inner: Arc<dyn HttpTransport>,
+}
+
+impl CorsTransport {
+    /// Enveloppe `inner`.
+    #[must_use]
+    pub fn wrap(inner: Arc<dyn HttpTransport>) -> Self {
+        Self { inner }
+    }
+
+    /// Requête soumise au protocole : `mode:cors` + contexte
+    /// + `http(s)`. `no-cors`/`navigate` passent.
+    fn cors_of(req: &Request) -> Option<&CorsRequest> {
+        if req.fetch_mode != FetchMode::Cors {
+            return None;
+        }
+        if !matches!(req.url.scheme(), "http" | "https") {
+            return None;
+        }
+        req.cors.as_ref()
+    }
+
+    /// Un `OPTIONS` est-il exigé ? Méthode non safelistée,
+    /// en-tête auteur non safelisté, ou `Content-Type` hors
+    /// des trois types « form » (spec Fetch §3.2.5).
+    fn needs_preflight(req: &Request, cors: &CorsRequest) -> bool {
+        if !cors_simple_method(req.method) {
+            return true;
+        }
+        if !cors.unsafe_headers.is_empty() {
+            return true;
+        }
+        req.headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case("content-type"))
+            .is_some_and(|(_, v)| {
+                !cors_safelisted_content_type(v.split(';').next().unwrap_or("").trim())
+            })
+    }
+
+    /// Requête `OPTIONS` de preflight (spec Fetch §3.2.7) :
+    /// sans corps ni credentials, `Origin` + `ACRM` (+ `ACRH`
+    /// si des en-têtes auteur non safelistés existent). Le
+    /// contexte `cors` n'est pas propagé — le preflight n'est
+    /// pas lui-même vérifié par CORS.
+    fn preflight(req: &Request, cors: &CorsRequest) -> Request {
+        let mut p = Request {
+            method: Method::Options,
+            url: req.url.clone(),
+            headers: vec![
+                ("origin".to_string(), cors.origin.clone()),
+                (
+                    "access-control-request-method".to_string(),
+                    req.method.as_str().to_string(),
+                ),
+            ],
+            body: None,
+            initiator: req.initiator.clone(),
+            fetch_dest: req.fetch_dest,
+            fetch_mode: FetchMode::Cors,
+            fetch_user: false,
+            cors: None,
+        };
+        if !cors.unsafe_headers.is_empty() {
+            p.headers.push((
+                "access-control-request-headers".to_string(),
+                cors.unsafe_headers.join(", "),
+            ));
+        }
+        p.headers.extend(sec_fetch_headers(&p));
+        p
+    }
+
+    /// `ACAO`/`ACAC` sur une réponse — `Some(raison)` si la
+    /// politique refuse la lecture.
+    fn acao_violation(cors: &CorsRequest, resp: &Response) -> Option<String> {
+        let include = cors.credentials == FetchCredentials::Include;
+        let acao_ok = resp.headers_all("access-control-allow-origin").any(|v| {
+            let v = v.trim();
+            (v == "*" && !include) || v == cors.origin
+        });
+        if !acao_ok {
+            return Some(format!(
+                "Access-Control-Allow-Origin absent ou ≠ {}",
+                cors.origin
+            ));
+        }
+        if include
+            && !resp
+                .headers_all("access-control-allow-credentials")
+                .any(|v| v.trim().eq_ignore_ascii_case("true"))
+        {
+            return Some(
+                "Access-Control-Allow-Credentials requis (credentials=include)".to_string(),
+            );
+        }
+        None
+    }
+
+    /// La réponse `OPTIONS` autorise-t-elle `(méthode,
+    /// en-têtes)` ? `ACAM`/`ACAH` = listes de jetons
+    /// insensibles à la casse ; `*` admis seulement sans
+    /// `include` (spec : `*` ne couvre pas les credentials).
+    fn preflight_violation(req: &Request, cors: &CorsRequest, resp: &Response) -> Option<String> {
+        if !(200..300).contains(&resp.status) {
+            return Some(format!("preflight OPTIONS → statut {}", resp.status));
+        }
+        if let Some(why) = Self::acao_violation(cors, resp) {
+            return Some(format!("preflight : {why}"));
+        }
+        let include = cors.credentials == FetchCredentials::Include;
+        let method = req.method.as_str();
+        let method_ok = resp
+            .headers_all("access-control-allow-methods")
+            .flat_map(|v| v.split(','))
+            .any(|t| {
+                let t = t.trim();
+                t.eq_ignore_ascii_case(method) || (t == "*" && !include)
+            });
+        if !method_ok {
+            return Some(format!("preflight : méthode {method} non autorisée"));
+        }
+        for h in &cors.unsafe_headers {
+            let ok = resp
+                .headers_all("access-control-allow-headers")
+                .flat_map(|v| v.split(','))
+                .any(|t| {
+                    let t = t.trim();
+                    t.eq_ignore_ascii_case(h) || (t == "*" && !include)
+                });
+            if !ok {
+                return Some(format!("preflight : en-tête {h} non autorisé"));
+            }
+        }
+        None
+    }
+}
+
+/// Verbe CORS-safelisté (`GET`/`HEAD`/`POST`) — tout autre
+/// déclenche le preflight (spec Fetch §3.2.2).
+const fn cors_simple_method(m: Method) -> bool {
+    matches!(m, Method::Get | Method::Head | Method::Post)
+}
+
+/// `Content-Type` CORS-safelisté (spec : les trois types
+/// `application/x-www-form-urlencoded`, `multipart/form-data`,
+/// `text/plain` — comparé sans paramètres, insensible à la
+/// casse). `pub` : la session compose
+/// `CorsRequest::unsafe_headers` avec le même filtre.
+#[must_use]
+pub fn cors_safelisted_content_type(v: &str) -> bool {
+    matches!(
+        v.to_ascii_lowercase().as_str(),
+        "application/x-www-form-urlencoded" | "multipart/form-data" | "text/plain"
+    )
+}
+
+#[async_trait]
+impl HttpTransport for CorsTransport {
+    async fn fetch(&self, req: &Request) -> NetResult<Response> {
+        let Some(cors) = Self::cors_of(req) else {
+            return self.inner.fetch(req).await;
+        };
+        if Self::needs_preflight(req, cors) {
+            let pre = self.inner.fetch(&Self::preflight(req, cors)).await?;
+            if let Some(why) = Self::preflight_violation(req, cors, &pre) {
+                return Err(NetError::CorsBlocked(why));
+            }
+        }
+        let resp = self.inner.fetch(req).await?;
+        if let Some(why) = Self::acao_violation(cors, &resp) {
+            return Err(NetError::CorsBlocked(why));
+        }
+        Ok(resp)
+    }
+
+    /// Streamé : délégation directe — les requêtes streamées
+    /// (documents) ne sont jamais `mode:cors` ; sans override
+    /// le défaut du trait bufferiserait via `fetch` et tuerait
+    /// le rendu progressif.
+    async fn fetch_stream(&self, req: &Request) -> NetResult<StreamedResponse> {
         self.inner.fetch_stream(req).await
     }
 }

@@ -604,3 +604,299 @@ fn sec_fetch_no_initiator_is_none() {
     assert_eq!(hdr(&h, "sec-fetch-mode"), Some("no-cors"));
     assert_eq!(hdr(&h, "sec-fetch-dest"), Some("empty"));
 }
+
+// -- CORS : CorsTransport (étape 126) -------------------------------------
+
+use explorer_net::http::{CorsRequest, FetchCredentials};
+use explorer_net::policy::CorsTransport;
+
+fn req_hdr<'a>(req: &'a Request, name: &str) -> Option<&'a str> {
+    req.headers
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
+}
+
+fn cors_req(url: &str, method: Method, origin: &str, unsafe_h: &[&str]) -> Request {
+    let mut req = Request::get(u(url));
+    req.method = method;
+    req.initiator = Some(Initiator::Subresource(u("https://page.example/")));
+    req.fetch_mode = FetchMode::Cors;
+    req.cors = Some(CorsRequest {
+        origin: origin.to_string(),
+        credentials: FetchCredentials::SameOrigin,
+        unsafe_headers: unsafe_h.iter().map(ToString::to_string).collect(),
+    });
+    req
+}
+
+#[tokio::test]
+async fn cors_simple_get_acao_star_passes() {
+    // Requête simple + `ACAO: *` → pas de preflight, réponse livrée.
+    let inner = FakeTransport::new(vec![resp(
+        200,
+        &[("access-control-allow-origin", "*")],
+        b"ok",
+    )]);
+    let t = CorsTransport::wrap(inner.clone());
+    let r = t
+        .fetch(&cors_req(
+            "https://api.example/x",
+            Method::Get,
+            "https://page.example",
+            &[],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.body, b"ok");
+    // Une seule requête émise — aucun OPTIONS.
+    assert_eq!(inner.seen().len(), 1);
+}
+
+#[tokio::test]
+async fn cors_simple_get_acao_mismatch_blocked() {
+    // `ACAO` ≠ origine → CorsBlocked (opaque côté script).
+    let inner = FakeTransport::new(vec![resp(
+        200,
+        &[("access-control-allow-origin", "https://other.example")],
+        b"ok",
+    )]);
+    let t = CorsTransport::wrap(inner.clone());
+    let err = t
+        .fetch(&cors_req(
+            "https://api.example/x",
+            Method::Get,
+            "https://page.example",
+            &[],
+        ))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, NetError::CorsBlocked(_)), "{err}");
+}
+
+#[tokio::test]
+async fn cors_preflight_put_then_request() {
+    // PUT cross → OPTIONS d'abord ; `ACAM` couvrant PUT +
+    // `ACAO` exact → la vraie requête part ensuite.
+    let inner = FakeTransport::new(vec![
+        resp(
+            200,
+            &[
+                ("access-control-allow-origin", "https://page.example"),
+                ("access-control-allow-methods", "GET, PUT"),
+            ],
+            b"",
+        ),
+        resp(
+            200,
+            &[("access-control-allow-origin", "https://page.example")],
+            b"done",
+        ),
+    ]);
+    let t = CorsTransport::wrap(inner.clone());
+    let r = t
+        .fetch(&cors_req(
+            "https://api.example/x",
+            Method::Put,
+            "https://page.example",
+            &[],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.body, b"done");
+    let seen = inner.seen();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[0].method, Method::Options);
+    assert_eq!(
+        req_hdr(&seen[0], "access-control-request-method"),
+        Some("PUT")
+    );
+    assert_eq!(seen[1].method, Method::Put);
+}
+
+#[tokio::test]
+async fn cors_preflight_denied_method_blocks() {
+    // `ACAM` ne couvre pas DELETE → bloqué, la vraie requête
+    // ne part jamais.
+    let inner = FakeTransport::new(vec![resp(
+        200,
+        &[
+            ("access-control-allow-origin", "https://page.example"),
+            ("access-control-allow-methods", "GET"),
+        ],
+        b"",
+    )]);
+    let t = CorsTransport::wrap(inner.clone());
+    let err = t
+        .fetch(&cors_req(
+            "https://api.example/x",
+            Method::Delete,
+            "https://page.example",
+            &[],
+        ))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, NetError::CorsBlocked(_)), "{err}");
+    assert_eq!(inner.seen().len(), 1);
+}
+
+#[tokio::test]
+async fn cors_preflight_bad_status_blocks() {
+    let inner = FakeTransport::new(vec![resp(403, &[], b"nope")]);
+    let t = CorsTransport::wrap(inner.clone());
+    let err = t
+        .fetch(&cors_req(
+            "https://api.example/x",
+            Method::Put,
+            "https://page.example",
+            &[],
+        ))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, NetError::CorsBlocked(_)), "{err}");
+    assert_eq!(inner.seen().len(), 1);
+}
+
+#[tokio::test]
+async fn cors_unsafe_header_checked_by_acah() {
+    // `x-token` non safelisté → `ACRH: x-token` au preflight ;
+    // `ACAH` qui ne le couvre pas → blocage, puis acceptation
+    // quand l'en-tête est listé.
+    let inner = FakeTransport::new(vec![resp(
+        200,
+        &[
+            ("access-control-allow-origin", "https://page.example"),
+            ("access-control-allow-methods", "*"),
+            ("access-control-allow-headers", "content-type"),
+        ],
+        b"",
+    )]);
+    let t = CorsTransport::wrap(inner.clone());
+    let err = t
+        .fetch(&cors_req(
+            "https://api.example/x",
+            Method::Get,
+            "https://page.example",
+            &["x-token"],
+        ))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, NetError::CorsBlocked(_)), "{err}");
+    assert_eq!(
+        req_hdr(&inner.seen()[0], "access-control-request-headers"),
+        Some("x-token")
+    );
+
+    let inner = FakeTransport::new(vec![
+        resp(
+            200,
+            &[
+                ("access-control-allow-origin", "https://page.example"),
+                ("access-control-allow-methods", "*"),
+                ("access-control-allow-headers", "X-TOKEN, content-type"),
+            ],
+            b"",
+        ),
+        resp(
+            200,
+            &[("access-control-allow-origin", "https://page.example")],
+            b"ok",
+        ),
+    ]);
+    let t = CorsTransport::wrap(inner.clone());
+    t.fetch(&cors_req(
+        "https://api.example/x",
+        Method::Get,
+        "https://page.example",
+        &["x-token"],
+    ))
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn cors_include_requires_exact_acao_and_acac() {
+    // `credentials:include` : `*` refusé, origine exacte sans
+    // `ACAC` refusée, exact+`ACAC:true` acceptée.
+    let mut req = cors_req(
+        "https://api.example/x",
+        Method::Get,
+        "https://page.example",
+        &[],
+    );
+    req.cors.as_mut().unwrap().credentials = FetchCredentials::Include;
+
+    let inner = FakeTransport::new(vec![resp(
+        200,
+        &[("access-control-allow-origin", "*")],
+        b"x",
+    )]);
+    let t = CorsTransport::wrap(inner.clone());
+    let err = t.fetch(&req.clone()).await.unwrap_err();
+    assert!(matches!(err, NetError::CorsBlocked(_)), "{err}");
+
+    let inner = FakeTransport::new(vec![resp(
+        200,
+        &[("access-control-allow-origin", "https://page.example")],
+        b"x",
+    )]);
+    let t = CorsTransport::wrap(inner.clone());
+    let err = t.fetch(&req.clone()).await.unwrap_err();
+    assert!(matches!(err, NetError::CorsBlocked(_)), "{err}");
+
+    let inner = FakeTransport::new(vec![resp(
+        200,
+        &[
+            ("access-control-allow-origin", "https://page.example"),
+            ("access-control-allow-credentials", "true"),
+        ],
+        b"ok",
+    )]);
+    let t = CorsTransport::wrap(inner.clone());
+    let r = t.fetch(&req).await.unwrap();
+    assert_eq!(r.body, b"ok");
+}
+
+#[tokio::test]
+async fn cors_json_content_type_triggers_preflight() {
+    // `Content-Type: application/json` (safelisté en nom,
+    // valeur hors types « form ») → preflight quand même.
+    let mut req = cors_req(
+        "https://api.example/x",
+        Method::Post,
+        "https://page.example",
+        &[],
+    );
+    req.headers
+        .push(("content-type".to_string(), "application/json".to_string()));
+    let inner = FakeTransport::new(vec![
+        resp(
+            200,
+            &[
+                ("access-control-allow-origin", "https://page.example"),
+                ("access-control-allow-methods", "POST"),
+            ],
+            b"",
+        ),
+        resp(
+            200,
+            &[("access-control-allow-origin", "https://page.example")],
+            b"ok",
+        ),
+    ]);
+    let t = CorsTransport::wrap(inner.clone());
+    t.fetch(&req).await.unwrap();
+    assert_eq!(inner.seen()[0].method, Method::Options);
+}
+
+#[tokio::test]
+async fn cors_no_context_passthrough() {
+    // Requête sans `cors` (sous-ressource `no-cors`, nav…) —
+    // aucune vérification, réponse nue.
+    let inner = FakeTransport::new(vec![resp(200, &[], b"raw")]);
+    let t = CorsTransport::wrap(inner.clone());
+    let mut req = Request::get(u("https://api.example/x"));
+    req.initiator = Some(Initiator::Subresource(u("https://page.example/")));
+    let r = t.fetch(&req).await.unwrap();
+    assert_eq!(r.body, b"raw");
+}
