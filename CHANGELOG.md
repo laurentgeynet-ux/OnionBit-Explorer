@@ -1315,6 +1315,38 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   media) et `absolu_largeur_
   pourcent_{content,border}_box`.
 
+- **R-92 — noms `--*` sensibles à
+  la casse** (`explorer-css` —
+  vol d'étalonnage corpus, F3 :
+  superposition rangée d'onglets
+  / paragraphe dans le hero
+  github). css-variables-1 §2.1 :
+  les propriétés custom sont
+  sensibles à la casse — la
+  cascade normalisait tous les
+  noms en minuscules, donc un
+  `--Mixte` déclaré n'était
+  jamais retrouvé par
+  `var(--Mixte)` et toute la
+  chaîne de fallbacks s'effondrait
+  au littéral terminal. Terrain :
+  `.lp-Spacer` chaîne
+  `--Spacer-size{,544,768,1012,
+  1280}` posée en `style=` —
+  le spacer visuel du hero
+  rendait 156 px au lieu de
+  600/660 → `.lp-Intro` sombre
+  ~500 px trop court, sections
+  remontées sous le hero `fixed`.
+  Vérifié : spacer 156 → 600,
+  `.lp-Intro` 491 → 755.
+  Régressions `var_nom_custom_
+  sensible_a_la_casse`,
+  `var_custom_casse_mixte_dans_
+  style_inline`,
+  `var_custom_casse_mixte_
+  heritage_et_lecture`.
+
 - **Étape 119 — piège
   `engineMode=auto` visible**
   (`app/`, `scripts/`). Une

@@ -778,6 +778,82 @@ fn var_custom_valeur_vide_valide() {
     );
 }
 
+// ── R-92 — les noms `--*` sont SENSIBLES À LA CASSE ───────
+// css-variables-1 §2.1 : les propriétés custom sont des
+// identifiants sensibles à la casse — `--Foo` et `--foo` sont
+// deux propriétés DISTINCTES (contrairement aux propriétés
+// ordinaires, ASCII-insensibles). La cascade normalisait tous
+// les noms en minuscules à la déclaration : une `--*` à casse
+// mixte était stockée minuscule et jamais retrouvée par le
+// `var(--CasseExacte)` — tout le fallback s'effondrait au
+// littéral terminal. Mesuré sur github.com : `.lp-Spacer` lit
+// `var(--Spacer-size1280, var(--Spacer-size1012, …,
+// var(--Spacer-size, 156px)))` avec les --Spacer-size* posées
+// en `style=` — le spacer `.lp-IntroVisuals` (660px attendu
+// à ≥1012px) s'écrasait à 156px, le hero sombre perdait sa
+// hauteur et les sections suivantes remontaient dedans.
+
+#[test]
+fn var_nom_custom_sensible_a_la_casse() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { --Foo: 42px } p { width: var(--Foo); color: var(--foo, teal) }",
+        Origin::Author,
+    );
+    let s = e.compute(&f.dom, f.p, &env());
+    assert_eq!(
+        s.get("width"),
+        Some("42px"),
+        "var(--Foo) doit joindre --Foo déclarée telle quelle"
+    );
+    assert_eq!(
+        s.get("color"),
+        Some("teal"),
+        "--foo ≠ --Foo : la référence minuscule ne la voit pas"
+    );
+}
+
+#[test]
+fn var_custom_casse_mixte_dans_style_inline() {
+    // Le cas github `.lp-IntroVisuals-spacer` : --* déclarées
+    // en `style=` avec casse mixte + digits.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    let mut dom = f.dom;
+    dom.set_attribute(
+        f.p,
+        "style",
+        "--Spacer-size:64px;--Spacer-size768:600px;--Spacer-size1012:660px",
+    )
+    .unwrap();
+    e.add_css(
+        "p { height: var(--Spacer-size1280, var(--Spacer-size1012, \
+         var(--Spacer-size768, var(--Spacer-size, 156px)))) }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e.compute(&dom, f.p, &env()).get("height"),
+        Some("660px"),
+        "--Spacer-size1280 absente → --Spacer-size1012 (style=)"
+    );
+}
+
+#[test]
+fn var_custom_casse_mixte_heritage_et_lecture() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    // --Foo sur div hérite chez p (les --* héritent) ;
+    // get() lit à la casse exacte.
+    e.add_css("div { --Mixed: 9px }", Origin::Author);
+    let s = e.compute(&f.dom, f.p, &env());
+    assert_eq!(s.get("--Mixed"), Some("9px"), "héritée à la casse");
+    assert_eq!(s.get("--mixed"), None, "la clé minuscule n'existe pas");
+    // Et var() hérité : width lit --Mixed via la table parent.
+    e.add_css("p { width: var(--Mixed) }", Origin::Author);
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("width"), Some("9px"));
+}
+
 // ── feuille UA legacy et hints présentationnels (R-16) ────
 
 /// Crée un élément `tag` avec `attrs` sous `parent`.

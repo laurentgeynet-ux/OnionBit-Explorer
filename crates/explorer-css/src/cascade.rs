@@ -1115,7 +1115,21 @@ impl StyleEngine {
             cand.sort_by_key(|(rank, layer, spec, order, _)| (*rank, layer.clone(), *spec, *order));
         }
         for (_, _, _, _, d) in &cand {
-            let lname = d.name.to_ascii_lowercase();
+            // Les noms de propriétés ordinaires sont
+            // ASCII-insensibles → minuscules canoniques ; les
+            // propriétés custom `--*` sont SENSIBLES À LA CASSE
+            // (css-variables-1 §2.1) — `--Foo` et `--foo` sont
+            // deux propriétés distinctes : les lecteurs
+            // (`get`, `var()`) adressent le nom tel qu'écrit,
+            // le stockage doit le conserver verbatim (R-92 —
+            // `--Spacer-size1012` de github s'effondrait en
+            // minuscules → `var(--Spacer-size1012)` raté →
+            // chaîne de fallbacks au littéral terminal).
+            let lname = if d.name.starts_with("--") {
+                d.name.clone()
+            } else {
+                d.name.to_ascii_lowercase()
+            };
             // Shorthand → longhands (spec : `margin: x` fixe les
             // quatre côtés, chacun à la spécificité de la règle).
             match expand_shorthand(&lname, &d.value) {
