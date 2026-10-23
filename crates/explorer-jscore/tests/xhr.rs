@@ -308,3 +308,255 @@ fn fetch_no_transport_rejects() {
     // No install_xhr → fetch absent entirely (same as XHR ctor).
     assert_eq!(describe(&mut e, "typeof fetch"), "undefined");
 }
+
+// ------------------------------------------------------------------
+// JS-C66 — `Headers`/`Request`/`Response` constructibles + mixin Body
+// ------------------------------------------------------------------
+
+#[test]
+fn c66_headers_ctor_methods_iter() {
+    let (mut e, _t) = engine();
+    // Record init + lecture insensible à la casse.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var h = new Headers({'X-A': '1', 'Content-Type': 'text/plain'});\
+             h.get('x-a') + '|' + h.has('CONTENT-TYPE') + '|' + h.get('missing')"
+        ),
+        "1|true|null"
+    );
+    // append combine par ", ", set remplace, delete supprime.
+    assert_eq!(
+        describe(&mut e, "h.append('x-a', '2'); h.get('x-a')"),
+        "1, 2"
+    );
+    assert_eq!(
+        describe(
+            &mut e,
+            "h.set('x-a', '3'); h.get('x-a') + '|' + h.has('x-a')"
+        ),
+        "3|true"
+    );
+    describe(&mut e, "h.delete('x-a'); var gone = h.has('x-a');");
+    assert_eq!(describe(&mut e, "gone"), "false");
+    // Init séquence de paires + normalisation des valeurs.
+    assert_eq!(
+        describe(&mut e, "new Headers([['a','1'],['b',' 2 ']]).get('b')"),
+        "2"
+    );
+    // Nom malformé → TypeError.
+    assert!(e.eval("new Headers().append('bad name', 'x')").is_err());
+    assert!(e.eval("new Headers().set('ok', 'a\nb')").is_err());
+    // `instanceof` + `Object.keys` vides (props non énumérables).
+    assert_eq!(describe(&mut e, "h instanceof Headers"), "true");
+    assert_eq!(describe(&mut e, "Object.keys(h).length"), "0");
+    // Itération triée par nom (spec) + forEach(v, n, h).
+    assert_eq!(
+        describe(
+            &mut e,
+            "var s = ''; var h2 = new Headers({b:'2', a:'1'});\
+             for (var kv of h2) s += kv[0] + '=' + kv[1] + ';';\
+             h2.forEach(function (v, n) { s += n; }); s"
+        ),
+        "a=1;b=2;ab"
+    );
+    // `new Headers(autre)` copie.
+    assert_eq!(describe(&mut e, "new Headers(h2).get('a')"), "1");
+}
+
+#[test]
+fn c66_headers_set_cookie_never_combined() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var h = new Headers();\
+         h.append('Set-Cookie', 'a=1; Expires=Wed, 21 Oct 2026');\
+         h.append('set-cookie', 'b=2');",
+    );
+    // `getSetCookie` = valeurs brutes (la virgule d'Expires est
+    // préservée — jamais recombinée), `get` rend la première.
+    assert_eq!(
+        describe(
+            &mut e,
+            "h.getSetCookie().join(' / ') + '|' + h.get('set-cookie')"
+        ),
+        "a=1; Expires=Wed, 21 Oct 2026 / b=2|a=1; Expires=Wed, 21 Oct 2026"
+    );
+}
+
+#[test]
+fn c66_request_ctor_and_clone() {
+    let (mut e, _t) = engine();
+    // Surface minimale — pas de `page_url` → URL brute conservée.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var r = new Request('/api', {method: 'post', headers: {'X-A': '1'}, body: 'p=1'});\
+             r.url + '|' + r.method + '|' + r.headers.get('x-a') + '|'\
+             + r.mode + '|' + r.credentials + '|' + r.redirect + '|'\
+             + (r instanceof Request) + '|' + r.bodyUsed + '|' + (r.body === null)"
+        ),
+        "/api|POST|1|cors|same-origin|follow|true|false|true"
+    );
+    // URL résolue contre la base de la page.
+    e.set_page_url("https://ex.test/dir/page");
+    assert_eq!(
+        describe(&mut e, "new Request('sub/x').url"),
+        "https://ex.test/dir/sub/x"
+    );
+    // GET/HEAD + corps → TypeError (spec).
+    assert!(e.eval("new Request('/g', {body: 'x'})").is_err());
+    // `new Request(r)` reprend les champs (headers copiés).
+    assert_eq!(
+        describe(
+            &mut e,
+            "var r2 = new Request(r); r2.method + '|' + r2.headers.get('x-a')"
+        ),
+        "POST|1"
+    );
+    // `clone()` — headers copiés (mutation de l'originale n'y
+    // touche pas), `bodyUsed` relu à false.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var c = r.clone(); r.headers.set('x-a', '9');\
+             c.headers.get('x-a') + '|' + (c instanceof Request)"
+        ),
+        "1|true"
+    );
+    // Signal frais par défaut.
+    assert_eq!(describe(&mut e, "r.signal.aborted"), "false");
+}
+
+#[test]
+fn c66_response_ctor_and_statics() {
+    let (mut e, _t) = engine();
+    assert_eq!(
+        describe(
+            &mut e,
+            "var res = new Response('hi', {status: 404, statusText: 'Nope', headers: {'X-B': '2'}});\
+             res.status + '|' + res.statusText + '|' + res.ok + '|'\
+             + res.type + '|' + res.headers.get('x-b') + '|'\
+             + (res instanceof Response)"
+        ),
+        "404|Nope|false|default|2|true"
+    );
+    // status hors [200,599] → RangeError.
+    assert!(e.eval("new Response('x', {status: 99})").is_err());
+    assert!(e.eval("new Response('x', {status: 600})").is_err());
+    // Statics : error / redirect / json.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var er = Response.error(); er.type + '|' + er.status + '|' + er.ok"
+        ),
+        "error|0|false"
+    );
+    assert_eq!(
+        describe(
+            &mut e,
+            "var rd = Response.redirect('/dest', 307);\
+             rd.status + '|' + rd.headers.get('location')"
+        ),
+        "307|/dest"
+    );
+    assert!(e.eval("Response.redirect('/x', 200)").is_err());
+    assert_eq!(
+        describe(
+            &mut e,
+            "var rj = Response.json({a: 1});\
+             rj.headers.get('content-type') + '|' + rj.status"
+        ),
+        "application/json|200"
+    );
+}
+
+#[test]
+fn c66_body_mixin() {
+    let (mut e, t) = engine();
+    // Mixin complet sur la réponse livrée.
+    describe(
+        &mut e,
+        "var out = '';\
+         fetch('/x').then(function (r) {\
+             out += (r.body === null) + '|' + r.bodyUsed;\
+             return r.text();\
+         }).then(function (s) { out += '|' + s; });",
+    );
+    let h = t.requests.borrow()[0].0;
+    respond(&mut e, h, 200, "payload");
+    assert_eq!(describe(&mut e, "out"), "true|false|payload");
+    // Seconde consommation → TypeError rejeté (promesse).
+    describe(
+        &mut e,
+        "var out2 = '';\
+         var rr;\
+         fetch('/y').then(function (r) { rr = r; return r.text(); })\
+                   .then(function () { return rr.text(); })\
+                   .catch(function (er) { out2 += er.name + ':' + rr.bodyUsed; });",
+    );
+    let h2 = t.requests.borrow()[1].0;
+    respond(&mut e, h2, 200, "x");
+    assert_eq!(describe(&mut e, "out2"), "TypeError:true");
+    // arrayBuffer / blob / formData.
+    describe(
+        &mut e,
+        "var out3 = '';\
+         fetch('/ab').then(function (r) { return r.arrayBuffer(); })\
+                     .then(function (ab) { out3 += 'ab' + ab.byteLength; });\
+         fetch('/bl').then(function (r) { return r.blob(); })\
+                     .then(function (b) { out3 += '|bl' + b.size + '/' + b.type; });\
+         fetch('/fd').then(function (r) { return r.formData(); })\
+                     .then(function (f) { out3 += '|fd' + f.get('a') + f.getAll('b').length + f.has('c'); });",
+    );
+    let h3 = t.requests.borrow()[2].0;
+    let h4 = t.requests.borrow()[3].0;
+    let h5 = t.requests.borrow()[4].0;
+    respond(&mut e, h3, 200, "abc");
+    respond(&mut e, h4, 200, "abcd");
+    respond(&mut e, h5, 200, "a=1&b=2&b=3");
+    assert_eq!(describe(&mut e, "out3"), "ab3|bl4/text/plain|fd12false");
+}
+
+#[test]
+fn c66_fetch_request_input() {
+    let (mut e, t) = engine();
+    // `fetch(new Request(...))` — url/method/headers/body repris.
+    describe(
+        &mut e,
+        "var out = '';\
+         fetch(new Request('/rq', {method: 'put', headers: {'X-R': '7'}, body: 'q=8'}))\
+           .then(function (r) { out += (r instanceof Response) + '/' + r.status + '/' + r.url; });",
+    );
+    {
+        let reqs = t.requests.borrow();
+        let (h, r) = &reqs[0];
+        assert_eq!(r.method, "PUT");
+        assert_eq!(r.url, "/rq");
+        assert_eq!(r.headers, vec![("x-r".to_string(), "7".to_string())]);
+        assert_eq!(r.body.as_deref(), Some("q=8"));
+        let h = *h;
+        drop(reqs);
+        respond(&mut e, h, 200, "ok");
+    }
+    assert_eq!(describe(&mut e, "out"), "true/200//rq");
+    // `opts` surcharge le Request d'entrée (méthode normalisée).
+    describe(
+        &mut e,
+        "fetch(new Request('/rq2', {method: 'get'}), {method: 'post', body: 'z'});",
+    );
+    let reqs = t.requests.borrow();
+    assert_eq!(reqs[1].1.method, "POST");
+    assert_eq!(reqs[1].1.body.as_deref(), Some("z"));
+    // `{headers: new Headers(...)}` accepté en opts.
+    drop(reqs);
+    describe(
+        &mut e,
+        "fetch('/hh', {headers: new Headers({'X-H': '9'})});",
+    );
+    let reqs = t.requests.borrow();
+    assert_eq!(
+        reqs[2].1.headers,
+        vec![("x-h".to_string(), "9".to_string())]
+    );
+}

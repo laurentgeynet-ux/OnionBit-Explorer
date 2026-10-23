@@ -336,7 +336,7 @@ impl Heap {
             | ObjKind::Ordinary
             | ObjKind::RegExp(_)
             | ObjKind::Symbol { .. }
-            | ObjKind::FetchResponse { .. }
+            | ObjKind::FetchBody { .. }
             | ObjKind::ByteBuf(_)
             | ObjKind::BigInt(_) => {}
         }
@@ -763,13 +763,12 @@ pub enum ObjKind {
         /// `[[ProxyHandler]]` — `None` après `revoke()`.
         handler: Option<Value>,
     },
-    /// `fetch` Response — body + headers delivered by the embedder's
-    /// transport (`status`/`statusText`/`ok` are plain own props);
-    /// `text()`/`json()` read `body` as resolved promises.
-    FetchResponse {
-        /// Response headers (lower-cased lookup order).
-        headers: Vec<(String, String)>,
-        /// Body text.
+    /// `fetch` `Request`/`Response` body store (JS-C66) — the
+    /// hidden payload read by the `Body` mixin; `headers`/`status`/
+    /// `method`/`url`/`bodyUsed` are ordinary own props (headers
+    /// lives in a `Headers`-shaped object, source of truth).
+    FetchBody {
+        /// Body text (lossy-decoded for network responses).
         body: String,
     },
     /// `ArrayBuffer` — fixed byte store shared by views (element

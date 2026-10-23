@@ -326,7 +326,7 @@ impl Engine {
                     Some(ObjKind::Symbol { .. }) => Shape::Bad("Symbol"),
                     Some(ObjKind::Proxy { .. }) => Shape::Bad("Proxy"),
                     Some(ObjKind::Iter { .. }) => Shape::Bad("iterator"),
-                    Some(ObjKind::FetchResponse { .. }) => Shape::Bad("Response"),
+                    Some(ObjKind::FetchBody { .. }) => Shape::Bad("Response"),
                     Some(ObjKind::Map(m)) => Shape::Map(m.clone()),
                     Some(ObjKind::Set(s)) => Shape::Set(s.clone()),
                     _ => {

@@ -2708,12 +2708,25 @@ github fetchés (`ReferenceError` mesurés en sonde) —
 sont commandables dès que la file JS est vide, dans l'ordre
 ci-dessous (fréquence observée sur le corpus réel).
 
-- [ ] **JS-C66. `fetch` — surface complète** : `Request`,
+- [x] **JS-C66. `fetch` — surface complète** : `Request`,
   `Response`, `Headers` constructibles (aujourd'hui `fetch`
   existe mais `new Headers()` = `ReferenceError` — mesuré en
   sonde github). Mixin `Body` (`text`/`json`/`blob`/
   `arrayBuffer`/`formData`), `Response` natif lisible
   (`status`/`ok`/`headers`), `Request` en entrée de `fetch`.
+  **Livré** : trois classes à prototype réel (`instanceof`,
+  `for-of` — `@@iterator` sur `Headers.prototype`) ; `Headers`
+  = own-props non énumérables (combinaison `", "` en stockage,
+  `set-cookie` isolé en prop sentinelle + `getSetCookie`) ;
+  `new Request` valide méthode/`GET`+corps/URL résolue contre
+  `location` ; `new Response` + `error`/`redirect`/`json`
+  statiques ; mixin partagé avec `bodyUsed` (rejet promesse au
+  second usage) ; `fetch` accepte `Request` et `Headers` en
+  `opts`, `response.url` renseignée. `FetchResponse` →
+  `FetchBody` (corps seul). Reliquats assumés : `body` =
+  `null` (streams JS-C71), `formData()`/`blob()` minimaux
+  (JS-C67/C70), guards `Headers` non appliqués, `credentials`
+  etc. stockés non appliqués. Régressions `c66_*` (6 tests).
 - [ ] **JS-C67. `FormData`** (mesuré `ReferenceError` en
   sonde) + `URLSearchParams` bidirectionnel — formulaires et
   uploads des sites réels (google recherche, github login).

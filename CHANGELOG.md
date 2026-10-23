@@ -81,6 +81,55 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `fetched_mask_survives_js_dom_
   resync` (6 tests session).
 
+- **JS-C66 — `fetch` : `Headers`/
+  `Request`/`Response`
+  constructibles** (`explorer-jscore`
+  — `new Headers()` valait
+  `ReferenceError`, mesuré en sonde
+  github). Objets à prototype réel
+  (`instanceof`, `for-of`,
+  `Object.keys` conformes) : `new
+  Headers(record|paires|Headers)`
+  avec `append`/`set`/`delete`/
+  `has`/`get`/`getSetCookie`/
+  `forEach`/`entries`/`keys`/
+  `values` + `@@iterator`, entrées
+  en props non énumérables (noms
+  minuscules, valeurs jointes — la
+  combinaison spec est un fait de
+  stockage), validation token RFC
+  7230, `set-cookie` jamais combiné
+  (prop sentinelle + liste brute).
+  `new Request(url|Request, init)` :
+  méthode normalisée, URL résolue
+  contre `location` (`hooks.page_url`),
+  headers/mode/credentials/cache/
+  redirect/referrer/referrerPolicy/
+  integrity/keepalive/signal,
+  `GET`/`HEAD` + corps →
+  `TypeError`. `new Response(body?,
+  {status,statusText,headers})` +
+  statiques `error`/`redirect`
+  (3xx validé)/`json` (content-type
+  `application/json`). Mixin `Body`
+  partagé : `text`/`json`/
+  `arrayBuffer` (vrai `ArrayBuffer`)
+  /`formData`/`blob` — `bodyUsed`
+  consommé une fois (rejet
+  `TypeError` en promesse).
+  `fetch(Request, init)` accepte le
+  Request (init surcharge) et
+  `opts.headers` = `Headers` ;
+  `response.url` = URL de la
+  requête. `res.body`/`req.body` =
+  `null` honnête (streams = JS-C71) ;
+  `formData()`/`blob()` = objets
+  minimaux (ctors JS-C67/C70).
+  `ObjKind::FetchResponse` →
+  `FetchBody` (corps seul, en-têtes
+  = objet `Headers`). Régressions
+  `c66_*` (6 tests).
+
 ### Fixed
 
 - **JS-C76 — collections DOM

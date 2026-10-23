@@ -770,8 +770,20 @@ impl Engine {
                 crate::heap::push_value(&mut ids, cb);
             }
         }
-        for (_, promise) in &self.xhr.fetches {
+        for (_, promise, _) in &self.xhr.fetches {
             ids.push(*promise);
+        }
+        // Prototypes `Headers`/`Request`/`Response` (JS-C66) —
+        // racines tant qu'installés.
+        for p in [
+            self.xhr.headers_proto,
+            self.xhr.req_proto,
+            self.xhr.res_proto,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            ids.push(p);
         }
         for job in &self.microtasks {
             match job {

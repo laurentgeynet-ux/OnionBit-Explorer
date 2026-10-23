@@ -79,7 +79,7 @@ pub(crate) fn clone_deep(
         Some(ObjKind::Symbol { .. }) => CloneShape::Err("Symbol"),
         Some(ObjKind::Proxy { .. }) => CloneShape::Err("Proxy"),
         Some(ObjKind::Iter { .. }) => CloneShape::Err("iterator"),
-        Some(ObjKind::FetchResponse { .. }) => CloneShape::Err("Response"),
+        Some(ObjKind::FetchBody { .. }) => CloneShape::Err("Response"),
         _ => CloneShape::Ordinary,
     };
     match shape {
