@@ -1193,11 +1193,7 @@ fn layout_block_inner(
             );
             cursor + used
         }
-        _ => flow_children(
-            bx,
-            content_x,
-            cursor,
-            content_w,
+        _ => {
             // §8.3.1 : la marge haute du premier fils ne
             // « traverse » le parent que s'il ne la sépare
             // de rien — pas de padding/bordure haut ET pas
@@ -1205,14 +1201,16 @@ fn layout_block_inner(
             // de son premier fils à l'intérieur). Jamais pour
             // la racine : ses marges ne collapsent pas, la
             // chaîne du premier fils reste à l'intérieur.
-            !is_root && pt + bt <= 0.0 && !is_fc_root(bx),
-            line_h,
-            ctx,
-            fs,
-            pos_cb,
-            fl,
-            h_spec,
-        ),
+            let adjoins = !is_root && pt + bt <= 0.0 && !is_fc_root(bx);
+            flow_columns(
+                bx, content_x, cursor, content_w, adjoins, line_h, ctx, fs, pos_cb, h_spec,
+            )
+            .unwrap_or_else(|| {
+                flow_children(
+                    bx, content_x, cursor, content_w, adjoins, line_h, ctx, fs, pos_cb, fl, h_spec,
+                )
+            })
+        }
     };
 
     let content_h = cursor - (y + bt + pt);
@@ -1469,6 +1467,255 @@ fn place_float(
     } else {
         fl.left.push(placed);
     }
+}
+
+/// Multi-colonnes minimal — dispatch terrain 23/10 (accueil
+/// FR `.colonnes` : `column-width`/`column-count`/`column-gap`
+/// en style inline). Stratégie : couler les enfants une fois
+/// dans UNE colonne de largeur `col_w` (passe de mesure,
+/// origine scratch 0), descendre les chaînes mono-enfant
+/// jusqu'au premier niveau possédant ≥2 enfants, puis
+/// translater chaque unité vers sa colonne — l'équilibrage se
+/// fait par unités entières : aucune n'est jamais coupée, ce
+/// qui honore `break-inside` de fait.
+///
+/// `None` = pas de colonnes utiles → repli flux normal.
+///
+/// Déviations assumées (CSS Multi-column L1) : pas de
+/// fragmentation intra-boîte (un bloc de texte seul est une
+/// unité insécable), pas de `column-span`, `column-fill:auto`
+/// traité comme `balance`, marges collapsées mesurées en flux
+/// mono-colonne, flottants/positionnés translatés avec leur
+/// unité, padding/marges des maillons de chaîne ignorés au
+/// re-cadrage de leur `rect`.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::cast_sign_loss)]
+#[allow(clippy::cast_precision_loss)]
+fn flow_columns(
+    bx: &mut LayoutBox,
+    content_x: f32,
+    cursor: f32,
+    content_w: f32,
+    adjoining_top: bool,
+    line_h: f32,
+    ctx: &BlockCtx,
+    fs: f32,
+    pos_cb: Rect,
+    cb_h: Option<f32>,
+) -> Option<f32> {
+    let st = &bx.style;
+    let count = st
+        .get("column-count")
+        .filter(|v| v.trim() != "auto")
+        .and_then(|v| v.trim().parse::<u32>().ok());
+    let width = st
+        .get("column-width")
+        .filter(|v| v.trim() != "auto")
+        .and_then(|v| raw_length_px(v, content_w, fs, ctx));
+    if count.is_none() && width.is_none() {
+        return None;
+    }
+    // `normal` = 1em (§4). `%` sur `column-gap`/`width` se
+    // résout contre la largeur du conteneur.
+    let gap = st
+        .get("column-gap")
+        .filter(|v| v.trim() != "normal")
+        .and_then(|v| raw_length_px(v, content_w, fs, ctx))
+        .unwrap_or(fs);
+    let n = match (count, width) {
+        (Some(c), Some(w)) => {
+            c.min(((content_w + gap) / (w + gap).max(1.0)).floor().max(1.0) as u32)
+        }
+        (Some(c), None) => c,
+        (None, Some(w)) => ((content_w + gap) / (w + gap).max(1.0)).floor() as u32,
+        (None, None) => 1,
+    };
+    if n <= 1 {
+        return None;
+    }
+    // Borne de tolérance : une colonne < 1 px est sans objet —
+    // plafonner à `content_w` évite `vec![None; n]` absurde.
+    let n = (n as usize).min(content_w.max(1.0) as usize);
+    let col_w = (content_w - gap * (n as f32 - 1.0)) / n as f32;
+    if col_w <= 0.0 {
+        return None;
+    }
+
+    // Mesure : les enfants coulent en scratch dans UNE colonne
+    // — `fl` reste vierge : les flottants internes sont couverts
+    // par la hauteur des colonnes et ne fuient pas hors du
+    // conteneur (les colonnes sont des racines de FC).
+    let mut scratch_fl = FloatCtx::default();
+    let scratch_cb = Rect {
+        x: pos_cb.x - content_x,
+        y: pos_cb.y - cursor,
+        ..pos_cb
+    };
+    flow_children(
+        bx,
+        0.0,
+        0.0,
+        col_w,
+        adjoining_top,
+        line_h,
+        ctx,
+        fs,
+        scratch_cb,
+        &mut scratch_fl,
+        cb_h,
+    );
+
+    let h = columns_place(
+        bx, 0.0, 0.0, content_x, cursor, content_w, n, col_w, gap, ctx, fs, 0,
+    );
+    if let Some(h) = h {
+        return Some(cursor + h);
+    }
+    // Chaîne terminée par une unité seule (texte, bloc unique) :
+    // les colonnes dégénèrent — on recale les enfants mesurés
+    // à `col_w`, cohérent avec l'équilibrage spec.
+    let mut bottom = 0.0_f32;
+    for c in &mut bx.children {
+        crate::flex::translate_subtree(c, content_x, cursor);
+        bottom = bottom.max(c.rect.y + c.rect.height);
+    }
+    Some(bottom.max(cursor))
+}
+
+/// Cherche le premier niveau possédant ≥2 enfants et y
+/// répartit les colonnes ; les maillons mono-enfant traversés
+/// sont recadrés en vrai border-box une fois la hauteur
+/// connue. `scratch_x/_y` = origine contenu du niveau dans la
+/// mesure ; `dst_x/_y` = sa destination réelle. Renvoie la
+/// hauteur de contenu des colonnes, `None` si la chaîne finit
+/// en unité seule.
+#[allow(clippy::too_many_arguments)]
+fn columns_place(
+    parent: &mut LayoutBox,
+    scratch_x: f32,
+    scratch_y: f32,
+    dst_x: f32,
+    dst_y: f32,
+    level_w: f32,
+    n_cols: usize,
+    col_w: f32,
+    gap: f32,
+    ctx: &BlockCtx,
+    fs: f32,
+    depth: u32,
+) -> Option<f32> {
+    if depth > 16 {
+        return None;
+    }
+    match parent.children.len() {
+        0 => None,
+        1 if parent.children[0].children.is_empty() => None,
+        1 => {
+            // Origine contenu du maillon en scratch → son
+            // équivalent réel décalé de `dst - scratch`.
+            let w = &parent.children[0];
+            let wfs = font_size_px(&w.style, fs, ctx);
+            let (bt, bb) = (
+                border_px(&w.style, "border-top-width", level_w, wfs, ctx),
+                border_px(&w.style, "border-bottom-width", level_w, wfs, ctx),
+            );
+            let (pt, pb) = (
+                side_px(&w.style, "padding-top", level_w, wfs, ctx, 0.0),
+                side_px(&w.style, "padding-bottom", level_w, wfs, ctx, 0.0),
+            );
+            let (bl, br) = (
+                border_px(&w.style, "border-left-width", level_w, wfs, ctx),
+                border_px(&w.style, "border-right-width", level_w, wfs, ctx),
+            );
+            let (pl, pr) = (
+                side_px(&w.style, "padding-left", level_w, wfs, ctx, 0.0),
+                side_px(&w.style, "padding-right", level_w, wfs, ctx, 0.0),
+            );
+            let (ml, mr) = (
+                side_px(&w.style, "margin-left", level_w, wfs, ctx, 0.0),
+                side_px(&w.style, "margin-right", level_w, wfs, ctx, 0.0),
+            );
+            let w_left = w.rect.x + bl + pl;
+            let w_top = w.rect.y + bt + pt;
+            let inner_dst_x = dst_x + (w_left - scratch_x);
+            let inner_dst_y = dst_y + (w_top - scratch_y);
+            // Contenu réel du maillon = cadre du niveau moins
+            // ses marges et son châssis (mesuré en scratch à
+            // `col_w`, recalé ici pleine largeur).
+            let inner_w = (level_w - ml - mr - bl - pl - br - pr).max(0.0);
+            let inner = explorer_common::deep(|| {
+                columns_place(
+                    &mut parent.children[0],
+                    w_left,
+                    w_top,
+                    inner_dst_x,
+                    inner_dst_y,
+                    inner_w,
+                    n_cols,
+                    col_w,
+                    gap,
+                    ctx,
+                    wfs,
+                    depth + 1,
+                )
+            });
+            if let Some(h) = inner {
+                let w = &mut parent.children[0];
+                w.rect = Rect {
+                    x: inner_dst_x - pl - bl,
+                    y: inner_dst_y - bt - pt,
+                    width: inner_w + bl + pl + br + pr,
+                    height: h + bt + pt + bb + pb,
+                };
+            }
+            inner
+        }
+        _ => Some(partition_units(parent, n_cols, col_w, gap, dst_x, dst_y)),
+    }
+}
+
+/// Répartit les enfants de `parent` (déjà posés en scratch) en
+/// `n_cols` colonnes équilibrées — une unité rejoint la colonne
+/// visée par son MILIEU vertical — puis translate chacune à sa
+/// place réelle. Renvoie la hauteur de la plus haute colonne.
+#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::cast_sign_loss)]
+#[allow(clippy::cast_precision_loss)]
+fn partition_units(
+    parent: &mut LayoutBox,
+    n_cols: usize,
+    col_w: f32,
+    gap: f32,
+    dst_x: f32,
+    dst_y: f32,
+) -> f32 {
+    let mut top = f32::INFINITY;
+    let mut bot = f32::NEG_INFINITY;
+    for c in &parent.children {
+        top = top.min(c.rect.y);
+        bot = bot.max(c.rect.y + c.rect.height);
+    }
+    let target = (bot - top).max(0.0) / n_cols as f32;
+    let x0 = parent.children.first().map_or(dst_x, |c| c.rect.x);
+    let mut origins: Vec<Option<f32>> = vec![None; n_cols];
+    let mut max_h = 0.0_f32;
+    for c in &mut parent.children {
+        let mid = c.rect.y + c.rect.height * 0.5;
+        let col = if target > 0.0 {
+            (((mid - top) / target) as usize).min(n_cols - 1)
+        } else {
+            0
+        };
+        let origin = *origins[col].get_or_insert(c.rect.y);
+        // `u.x - x0` préserve l'indentation propre à l'unité ;
+        // `dy` est constant par colonne (ordre et espacements
+        // scratch préservés à l'intérieur).
+        let dx = dst_x + col as f32 * (col_w + gap) + (c.rect.x - x0) - c.rect.x;
+        crate::flex::translate_subtree(c, dx, dst_y - origin);
+        max_h = max_h.max(c.rect.y + c.rect.height - dst_y);
+    }
+    max_h
 }
 
 /// Empilement vertical des enfants de niveau bloc : marges

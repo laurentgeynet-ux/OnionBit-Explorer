@@ -2320,6 +2320,30 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   Régressions : `font_size_rem_contre_racine_calculee`
   (cascade), `rem_contre_font_size_racine` (layout).
 
+- [x] **R-89. Multi-colonnes MVP — `column-*`** (terrain
+  23/10 — « `.liste-horizontale` en colonne » ; diagnostic
+  corrigé : la vraie fautive est `.colonnes` avec
+  `column-width:10em;column-count:3` inline — la boîte
+  d'accueil FR empilait ses liens au lieu de 3 colonnes).
+  `flow_columns` dans `block.rs` : passe de mesure
+  mono-colonne à `col_w` (`FloatCtx` jetable, origine
+  scratch), descente des chaînes mono-enfant jusqu'au premier
+  niveau ≥2 enfants (`columns_place` — origine contenu
+  suivie par niveau, maillons recadrés en border-box réelle),
+  répartition gloutonne par milieu d'unité vs `span/n`,
+  `translate_subtree` par colonne (`partition_units`).
+  `column-gap` (`normal`=1em), `n=min(count,
+  ⌊(w+gap)/(width+gap)⌋)`, borné à `content_w` (tolérance).
+  CSS : `expand_columns` (`columns:` → longhands, ordre
+  libre). Déviations documentées : pas de fragmentation
+  intra-boîte (texte seul = unité insécable), pas de
+  `column-span`, `fill:auto`=`balance`, unités jamais coupées
+  (`break-inside` couvert de fait). Terrain vérifié : accueil
+  FR rend 3 colonnes équilibrées (identique Chrome).
+  Régressions : `colonnes_distribuent_les_items`,
+  `colonnes_degenerent_sans_niveau_multiple` (layout),
+  `shorthand_columns` (css).
+
 ## Palier R-B — Contenu étranger, animation, canvas
 
 - [x] **R-8. Foreign-content dans `explorer-html`** (ex-60a) :

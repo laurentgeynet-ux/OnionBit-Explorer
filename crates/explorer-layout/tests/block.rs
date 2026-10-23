@@ -1371,3 +1371,49 @@ fn rem_contre_font_size_racine() {
     assert_eq!(d.rect.width, 100.0, "width:10rem → 100px");
     assert_eq!(d.rect.height, 5.0, "height:0.5rem → 5px");
 }
+
+#[test]
+fn colonnes_distribuent_les_items() {
+    // R-89 / terrain 23/10 — accueil FR `.colonnes` :
+    // `column-count` répartit les unités bloc en colonnes
+    // équilibrées au lieu de les empiler. La partition se
+    // fait au premier niveau multi-enfants (ici `ul>li`,
+    // un cran sous le conteneur `.c`).
+    let (dom, bx) = laid(
+        "<div class=c><ul><li>A</li><li>B</li><li>C</li><li>D</li>\
+         <li>E</li><li>F</li></ul></div>",
+        ".c { column-count: 3; column-gap: 10px; width: 300px } li { height: 20px }",
+    );
+    let ul = find(&bx, by_tag(&dom, "ul"));
+    assert_eq!(ul.children.len(), 6);
+    // col_w = (300 - 20)/3 ≈ 93.33 ; 6×20 px, cible 40 → 2/col.
+    // La marge UA `ul{margin-top:1em}` décale tout à y=16,
+    // le `padding-left:40px` UA décale les colonnes à x=40+.
+    let (a, c, e) = (&ul.children[0], &ul.children[2], &ul.children[4]);
+    assert!(approx(a.rect.x, 40.0), "col0 x={}", a.rect.x);
+    assert!(approx(c.rect.x, 143.333), "col1 x={}", c.rect.x);
+    assert!(approx(e.rect.x, 246.667), "col2 x={}", e.rect.x);
+    // Chaque colonne repart du haut du conteneur.
+    for (i, u) in ul.children.iter().enumerate() {
+        let want = [16.0, 36.0][i % 2];
+        assert!(approx(u.rect.y, want), "li{i} y={}", u.rect.y);
+    }
+    // Le conteneur couvre les trois colonnes.
+    let div = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(div.rect.height, 40.0), "div h={}", div.rect.height);
+    assert!(approx(ul.rect.height, 40.0), "ul h={}", ul.rect.height);
+}
+
+#[test]
+fn colonnes_degenerent_sans_niveau_multiple() {
+    // R-89 : un seul enfant feuille → pas de partition, la
+    // mesure mono-colonne est recalée telle quelle (jamais
+    // de panique, jamais de re-flow).
+    let (dom, bx) = laid(
+        "<div class=c><p>seul</p></div>",
+        ".c { column-count: 4; width: 300px } p { height: 30px }",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    assert!(approx(p.rect.x, 0.0), "x={}", p.rect.x);
+    assert!(approx(p.rect.height, 30.0), "h={}", p.rect.height);
+}

@@ -455,6 +455,7 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
         "flex-flow" => Some(expand_flex_flow(value)),
         "flex" => expand_flex(value),
         "gap" => expand_gap(value),
+        "columns" => Some(expand_columns(value)),
         "background" => expand_background(value),
         "font" => expand_font(value),
         "list-style" => expand_list_style(value),
@@ -529,6 +530,24 @@ fn expand_gap(value: &str) -> Option<Vec<(String, String)>> {
         ("row-gap".to_string(), row.to_string()),
         ("column-gap".to_string(), col.to_string()),
     ])
+}
+
+/// `columns` : `[<width>] [<count>]` ordre libre (CSS
+/// Multi-column L1 §3.3) — `auto` couvre le volet absent.
+fn expand_columns(value: &str) -> Vec<(String, String)> {
+    let mut width = "auto";
+    let mut count = "auto";
+    for part in value.split_whitespace() {
+        match part {
+            "auto" => {}
+            p if p.parse::<u32>().is_ok() => count = p,
+            p => width = p,
+        }
+    }
+    vec![
+        ("column-width".to_string(), width.to_string()),
+        ("column-count".to_string(), count.to_string()),
+    ]
 }
 
 /// `margin`/`padding` : 1..4 valeurs → quatre longhands.

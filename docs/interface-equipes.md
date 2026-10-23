@@ -336,10 +336,28 @@ journal « livré ».
   aucune régression mais écart conservé) ; NAV peut poser
   `ctx.root_font_size.set(Some(fs_racine_px))` depuis la
   `StyleMap` avant l'appel.
-- [ ] **`inline` stacking dans `.liste-horizontale`** : liens
-  du bas de la boîte d'accueil rendus en colonne chez nous,
-  en ligne chez Chrome — vérifier `display:inline` + séparateur
-  `::after` (content `"\A0· "`).
+- [x] **`inline` stacking dans `.liste-horizontale`** →
+  **livré → R-89**, diagnostic terrain corrigé : la liste
+  fautive n'est PAS `.liste-horizontale` (le pied de page,
+  lui, rendait déjà inline avec `·`). Le coupable est
+  `class="colonnes liste-simple"` portant
+  `column-width:10em;column-count:3;column-gap:1em` en style
+  inline — **le multi-colonnes CSS était totalement absent**
+  du moteur : les liens s'empilaient en flux normal.
+  Implémentation MVP dans `flow_columns` (layout) : passe de
+  mesure mono-colonne à `col_w`, descente des chaînes
+  mono-enfant (`.colonnes > div > ul > li×6` — partition au
+  premier niveau multi-enfants), répartition gloutonne par
+  milieu d'unité vs `span/n`, translation de sous-arbres.
+  `columns:` expansé côté css (`expand_columns`). Déviations
+  assumées et documentées : pas de fragmentation intra-boîte
+  (texte seul = unité insécable), pas de `column-span`,
+  `column-fill:auto` = balance, unités jamais coupées
+  (`break-inside` couvert de fait). Vérifié terrain : la
+  boîte d'accueil rend 3 colonnes équilibrées comme Chrome.
+  Régressions : `colonnes_distribuent_les_items`,
+  `colonnes_degenerent_sans_niveau_multiple`,
+  `shorthand_columns`.
 - [ ] **`<select>` stylé** : apparence native différente de
   Chrome (déjà documenté — prioriser si terrain le signale).
 - [ ] **Images de la page Accueil FR** : bandeau « Wiki aime

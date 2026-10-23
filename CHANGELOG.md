@@ -76,6 +76,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   calculee` +
   `rem_contre_font_size_racine`.
 
+- **R-89 — multi-colonnes MVP**
+  (`explorer-layout`,
+  `explorer-css` — terrain 23/10 :
+  liens de la boîte d'accueil FR
+  empilés au lieu de 3 colonnes ;
+  diagnostic corrigé : fautive =
+  `.colonnes` +
+  `column-count/width/gap`, pas
+  `.liste-horizontale`). Mesure
+  mono-colonne à `col_w` puis
+  partition par unités entières au
+  premier niveau multi-enfants
+  (`columns_place` +
+  `partition_units` +
+  `translate_subtree`) ; `columns:`
+  expansé. Déviations documentées :
+  pas de fragmentation intra-boîte,
+  pas de `column-span`,
+  `fill:auto`=`balance`. Accueil FR
+  vérifié en 3 colonnes comme
+  Chrome. Régressions
+  `colonnes_distribuent_les_items`,
+  `colonnes_degenerent_sans_niveau_
+  multiple`, `shorthand_columns`.
+
 - **Étape 115 — affichage frame :
   `OverflowBox` + barre de scroll**
   (`app/`). Depuis les frames

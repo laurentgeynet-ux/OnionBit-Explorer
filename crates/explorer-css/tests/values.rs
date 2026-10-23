@@ -274,3 +274,21 @@ fn shorthand_background_size_et_gradient() {
     assert!(expand_shorthand("background", "url(a.png) cover").is_none());
     assert!(expand_shorthand("background", "url(a.png) /cover/x/y").is_none());
 }
+
+#[test]
+fn shorthand_columns() {
+    // R-89 : `columns` = `[width] [count]` ordre libre —
+    // l'accueil FR n'utilise que les longhands mais le
+    // raccourci couvre la forme compacte.
+    let e = expand_shorthand("columns", "10em 3").unwrap();
+    assert_eq!(
+        e,
+        vec![
+            ("column-width".to_string(), "10em".to_string()),
+            ("column-count".to_string(), "3".to_string()),
+        ]
+    );
+    let e = expand_shorthand("columns", "auto 2").unwrap();
+    assert_eq!(e[1].1, "2");
+    assert_eq!(e[0].1, "auto");
+}
