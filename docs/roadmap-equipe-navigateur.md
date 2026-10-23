@@ -2628,6 +2628,79 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   gèle le contexte à 0, réglage
   de vol uniquement.
 
+- [ ] **Étape 125. En-têtes de
+  métadonnées `Sec-Fetch-*`**
+  (cap « web réel sécurisé » —
+  worktree `nav/cap-g1`) : la
+  plateforme calcule déjà
+  `Referer`/`Origin`
+  (strict-origin-when-cross-origin,
+  étape 8) et le « site pour
+  cookies » (`Initiator`, étape
+  66) — les endpoints d'auth et
+  CDN modernes servent des flux
+  différents selon les fetch
+  metadata headers, absents des
+  nôtres. `Request` gagne
+  `fetch_dest` (`document`/
+  `script`/`style`/`image`/
+  `font`/`fetch`/`iframe`…)
+  + `fetch_mode` (`navigate`/
+  `same-origin`/`cors`/`no-cors`)
+  additifs ; `SecFetchTransport`
+  émet `Sec-Fetch-Site`
+  (`none`/`same-origin`/`same-site`/
+  `cross-site` — même calcul que
+  `same_site_allows`),
+  `-Mode`, `-Dest`,
+  `Sec-Fetch-User: ?1` (nav
+  top-level activée) —
+  le terrain `mode`/`dest` est
+  aussi le socle de l'enforcement
+  CORS de l'étape 126.
+
+- [ ] **Étape 126. Enforcement
+  CORS** (suite cap « web réel
+  sécurisé ») : `Origin` est émis
+  mais `Access-Control-*` n'est
+  jamais lu — chaque `fetch`/XHR
+  cross-origin réussit sans
+  autorisation = navigateur
+  permissif, incompatible avec
+  un login réel. `CorsTransport`
+  : requêtes `mode:cors`
+  cross-origin → preflight
+  `OPTIONS` pour non-simples,
+  vérification `ACAO`/`ACAC` à
+  la réponse, `credentials`
+  (`omit`/`same-origin`/`include`)
+  relié au jar ; erreur typée
+  `NetError::CorsBlocked`.
+  Couture jscore : le `fetch`
+  JS gagne `mode`/`credentials`
+  (annonce journal — la piste
+  JS câble l'optique miroir).
+
+- [ ] **Étape 127. Cookies
+  `Partitioned` (CHIPS)** :
+  l'attribut est requis par les
+  embeds authentifiés modernes ;
+  la clé de jar gagne la
+  partition top-level-site,
+  `Partitioned` exige `Secure`.
+
+- [ ] **Étape 128. Contextes de
+  navigation imbriqués
+  (`<iframe>`)** (chantier le
+  plus lourd du cap) : un
+  `<iframe src>` = sous-contexte
+  (propre pipeline + jar hérité
+  + initiator = le parent) ;
+  `window.parent`/`top` et
+  `postMessage` cross-contexte
+  borné — widgets de login,
+  captchas, boutons tiers.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
