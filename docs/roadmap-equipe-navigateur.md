@@ -2788,9 +2788,10 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Régressions `iframe_*`
   (6 tests session).
 
-- [ ] **Étape 129. Sous-contextes
+- [ ] **Étape 131. Sous-contextes
   `<iframe>` — rendu composite +
-  ponts JS** : blit du sous-DOM
+  ponts JS** (renumérotée : 129 = radar
+  pris par NAV, 130 = empreinte) : blit du sous-DOM
   dans sa boîte remplacée
   (layout enfant + raster),
   `window.parent`/`top` et
