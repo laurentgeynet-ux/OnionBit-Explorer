@@ -37,6 +37,16 @@ pub struct Thrown(pub Value);
 /// Result alias for interpreter code that can unwind via `throw`.
 pub type JsResult<T> = Result<T, Thrown>;
 
+/// Borne mémoire heap armée par défaut (ADR-0019) — 512 Mio,
+/// 2× la garde d'alloc unitaire `MAX_SINGLE_ALLOC`. Assez
+/// pour des graphes de page réels volumineux, assez bas pour
+/// qu'un script hosti ou une preuve-de-travail ne puisse pas
+/// emporter la machine : dépassée, le `tick` émet un
+/// `RangeError` (« heap memory limit exceeded ») au lieu d'un
+/// OOM processus. `Heap::set_mem_limit` le règle — `0`
+/// restaure l'illimité pour les harnais qui en ont besoin.
+pub(crate) const DEFAULT_MEM_LIMIT: usize = 512 * 1024 * 1024;
+
 /// Native function signature. `this` is the receiver `Value`,
 /// args are the call arguments.
 pub type NativeFn = fn(&mut crate::Engine, Value, &[Value]) -> JsResult<Value>;
@@ -75,7 +85,11 @@ pub struct Heap {
     /// mutations post-alloc (props ajoutées) ne sont comptées
     /// qu'après une passe GC — borne approximative, documentée.
     bytes: usize,
-    /// Borne mémoire par contexte en octets — `0` = illimité.
+    /// Borne mémoire par contexte en octets — `0` = illimité,
+    /// sinon armée d'office à [`DEFAULT_MEM_LIMIT`] (ADR-0019 :
+    /// un script hosti ne doit jamais pouvoir vider la machine —
+    /// jusqu'ici la borne existait mais n'était armée nulle part,
+    /// mesuré : challenge google + budget relevé = OOM station).
     /// Le dépassement lève `over_mem` ; le kill doux est émis au
     /// `tick` suivant (l'alloc elle-même ne peut pas échouer).
     mem_limit: usize,
@@ -99,7 +113,7 @@ impl Heap {
             roots: HashMap::new(),
             allocated: 0,
             bytes: 0,
-            mem_limit: 0,
+            mem_limit: DEFAULT_MEM_LIMIT,
             over_mem: false,
             gc_runs: 0,
             peak_live: 0,
@@ -1484,5 +1498,33 @@ impl Env {
             kind: EnvKind::With(obj),
             parent: Some(parent),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// La borne heap est **armée par défaut** (ADR-0019) — le
+    /// constat post-crash : `mem_limit = 0` était le défaut et
+    /// `set_mem_limit` n'était appelé nulle part, donc un script
+    /// assez long vidait la machine (mesuré : challenge google,
+    /// budget d'ops relevé → OOM station de travail).
+    #[test]
+    fn mem_limit_armed_by_default() {
+        let h = Heap::new();
+        assert_eq!(h.mem_limit(), DEFAULT_MEM_LIMIT);
+        assert!(!h.over_limit());
+    }
+
+    /// `set_mem_limit(0)` reste le désarmement explicite — les
+    /// harnais/tests qui doivent dépasser le défaut le demandent.
+    #[test]
+    fn mem_limit_zero_disarms() {
+        let mut h = Heap::new();
+        h.set_mem_limit(0);
+        assert_eq!(h.mem_limit(), 0);
+        h.set_mem_limit(64);
+        assert_eq!(h.mem_limit(), 64);
     }
 }

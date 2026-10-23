@@ -2438,6 +2438,37 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `barre de statut affiche le
   moteur actif` (40/40 verts).
 
+- [x] **Étape 120. Sondes document
+  vivant + triage consent Google**
+  (terrain 23/10 — le clic « Tout
+  accepter » du mur consent répond
+  `ignored` alors que DOM et paint
+  sont justes). Outils livrés :
+  `Session::dom_dump` /
+  `Session::layout_dump` (DOM post-JS
+  et arbre de layout du tab vivant) ;
+  routes `GET /api/tabs/{id}/dom`
+  et `/layout` (404 honnêtes sur
+  onglet vierge) ; CLI `explorer-cli
+  dom <url>` (fetch + JS + dump
+  hors daemon). Triage consent :
+  `/search` → `consent.google.com/ml`
+  (mur UE réel, pas une boucle) ;
+  DOM du mur sain (vrais
+  `form[method=POST]` +
+  `input[type=submit]`), jar à
+  cookies câblé ; clic `ignored`
+  avec `hit_tag="form"` — défaut
+  layout mesuré (input `inline-flex`
+  posé au rect du sibling) dispatché
+  PIPE au journal avec repro minimal
+  (`repro_c.html`, `is_atomic` +
+  `assign_child_rects` owner-index).
+  Reliquat `Error: b` = piste JS.
+  Test : `dom_and_layout_dumps_after_
+  navigate` (404 vierge + contenu
+  après nav).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
@@ -2610,7 +2641,7 @@ Priorité terrain (lead, mission 14/16) : **JS-C45** en tête
 
 ### J-A2 — Inventaire API : gaps énumérables (décidé 2026-10-23)
 
-Contrairement aux trous de sémantique (JS-C59→C64 — dormants,
+Contrairement aux trous de sémantique (JS-C59→C65 — dormants,
 seul un bundle réel les révèle), les gaps **d'interface** sont
 listables à l'avance : chaque global absent est un
 `ReferenceError` garanti sur les sites qui l'utilisent.
@@ -2620,45 +2651,45 @@ github fetchés (`ReferenceError` mesurés en sonde) —
 sont commandables dès que la file JS est vide, dans l'ordre
 ci-dessous (fréquence observée sur le corpus réel).
 
-- [ ] **JS-C65. `fetch` — surface complète** : `Request`,
+- [ ] **JS-C66. `fetch` — surface complète** : `Request`,
   `Response`, `Headers` constructibles (aujourd'hui `fetch`
   existe mais `new Headers()` = `ReferenceError` — mesuré en
   sonde github). Mixin `Body` (`text`/`json`/`blob`/
   `arrayBuffer`/`formData`), `Response` natif lisible
   (`status`/`ok`/`headers`), `Request` en entrée de `fetch`.
-- [ ] **JS-C66. `FormData`** (mesuré `ReferenceError` en
+- [ ] **JS-C67. `FormData`** (mesuré `ReferenceError` en
   sonde) + `URLSearchParams` bidirectionnel — formulaires et
   uploads des sites réels (google recherche, github login).
-- [ ] **JS-C67. `customElements` machinery** : `define` avec
+- [ ] **JS-C68. `customElements` machinery** : `define` avec
   upgrade des éléments existants, callbacks `connected
   Callback`/`disconnectedCallback`/`attributeChangedCallback`,
   `whenDefined` résolutrice. **Débloque le résidu github
   `turbo-frame.delegate`** (seule erreur honnête restante du
   census — la turbo-frame est un custom element).
-- [ ] **JS-C68. `IntersectionObserver`/`ResizeObserver`
+- [ ] **JS-C69. `IntersectionObserver`/`ResizeObserver`
   fonctionnels** : les stubs actuels sont constructibles mais
   le callback n'est jamais livré (documenté « no-op honnête »
   JS-C56) — les sites qui attendent un premier appel
   (lazy-load, infinite scroll) restent muets. Entrées
   minimales : un `IntersectionObserverEntry` initial +
   déclenchement à l'`observe`.
-- [ ] **JS-C69. `Blob`/`File`/`FileReader` + `URL.
+- [ ] **JS-C70. `Blob`/`File`/`FileReader` + `URL.
   createObjectURL`** — uploads et traitement client-side.
-- [ ] **JS-C70. `ReadableStream`/`WritableStream`/`Transform
+- [ ] **JS-C71. `ReadableStream`/`WritableStream`/`Transform
   Stream`** — requis par `Response.body` moderne et les
   bundlers (webpack dev-server, SSR-streaming).
-- [ ] **JS-C71. IndexedDB + `caches` (Cache API)** — storage
+- [ ] **JS-C72. IndexedDB + `caches` (Cache API)** — storage
   persistant des apps (Service Worker hors scope : la
   persistence suffit à la plupart des fallbacks gracieux).
-- [ ] **JS-C72. `WebSocket` stub fonctionnel** — handshake
+- [ ] **JS-C73. `WebSocket` stub fonctionnel** — handshake
   refusé honnêtement (pas de sockets hors `explorer-net`),
   mais la détection `typeof WebSocket` doit exister pour que
   les fallbacks long-polling des frameworks s'arment.
-- [ ] **JS-C73. `Notification`/`BroadcastChannel`/
+- [ ] **JS-C74. `Notification`/`BroadcastChannel`/
   `navigator.sendBeacon`/`getSelection`/`reportError`/
   `scrollIntoView`** — queue d'APIs ponctuelles, ordre à
   re-décider au premier trigger mesuré par site.
-- [ ] **JS-C74. `attachShadow`/Shadow DOM minimal** — le
+- [ ] **JS-C75. `attachShadow`/Shadow DOM minimal** — le
   trou le plus structurel (scoped CSS + slots) : old.reddit
   et MDN l'utilisent, écarté « hors portée » à ce jour.
   *Seul item J-A2 qui reste trigger-conditionné — coût
@@ -3572,6 +3603,27 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Terrain github.com : résidu inchangé
   (turbo-frame honnête). Régression
   `mod_import_meta_url_per_module`.
+
+- [x] **JS-C65. Borne heap armée par défaut
+  (ADR-0019)** — crash mesuré : le challenge
+  « enablejs » de Google (`/search` →
+  `/httpservice/retry/enablejs`, preuve-de-
+  travail à flux aplatie `for(D=46;D!=83;)`)
+  + `js_ops` relevé à 2 G pour mesure =
+  heap en Gio → OOM station. Cause : 3
+  couches — `mem_limit` jamais armé
+  (`set_mem_limit` appelé nulle part),
+  pas de GC mid-eval (par design), ops
+  seul frein indirect. `Heap::new` arme
+  désormais `DEFAULT_MEM_LIMIT` = 512 Mio
+  — kill doux `RangeError` au `tick`, le
+  sweep post-kill relève le drapeau et le
+  moteur survit ; `set_mem_limit(0)` reste
+  le désarmement explicite. Le challenge
+  Google reste une lacune honnête (PoW
+  taillée pour V8 — insatisfiable sous un
+  interpréteur, même classe que le tarpit
+  Fnac) : **l'item `Error: b` reste ouvert**.
 
 ## Tâches continues
 

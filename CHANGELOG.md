@@ -215,6 +215,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `mask_fetchem_enregistre_via_
   register_mask`.
 
+- **JS-C65 — borne mémoire heap armée par défaut**
+  (`explorer-jscore`, durcissement ADR-0019 — mesuré par
+  crash : `js_ops` relevé à 2 G sur le challenge
+  « enablejs » de Google a vidé la station de travail).
+  `Heap::mem_limit` existait (`over_limit` relu au `tick`,
+  kill doux `RangeError`) mais `set_mem_limit` n'était
+  appelé **nulle part** — défaut `0` = illimité. Un script
+  assez long pouvait donc croître le heap sans plafond
+  (pas de GC mid-eval par design — la pile n'est pas
+  racine ; `alloc_guard` ne borne que l'alloc *unitaire*).
+  `DEFAULT_MEM_LIMIT` = 512 Mio est désormais armé dans
+  `Heap::new` — tout contexte (session, workers, CLI,
+  tests) est borné d'office ; `set_mem_limit(0)` reste le
+  désarmement explicite. Tests : `mem_limit_armed_by_
+  default`, `mem_limit_zero_disarms` (heap.rs).
+
 - **JS-C64 — `import.meta.url` par module :
   liaison lexicale `IMPORT_META`** (`explorer-
   jscore` + `explorer-js`, reliquat « Invalid
