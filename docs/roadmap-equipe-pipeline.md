@@ -2069,6 +2069,22 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   de #13 soldés sans fix : panneau `#myfcst` =
   `display:none` levé par jQuery (couture NAV/JS), logo
   NOAA = déjà peint (fond `body`).
+
+- [x] **R-78. `letter-spacing` en layout** (§16.4, issue
+  #13 suite — le résidu documenté de R-77). La propriété
+  était cascadée/héritée mais ignorée de la mesure :
+  `.topMenuNavList{letter-spacing:-.04em}` (~-45 px
+  cumulés) laissait « ABOUT » retomber en ligne 2.
+  `shape_face_ls` (additif — `shape_face`/`shape`/
+  `measure` inchangés) ajoute `ls` à chaque avance de
+  glyphe non nulle dans le signe de l'avance, **avant**
+  la bbox d'encre ; `FontCache::shape` reçoit `ls` (clé
+  étendue) ; `measure_fn`/`inline` le passent depuis le
+  style via `letter_spacing_px` ; repli no-font borné
+  ≥0. Régressions : clé de cache `ls` + avances signées
+  (`tests/text.rs`), flottants resserrés/élargis
+  (`tests/block.rs`). Terrain : les 9 items de la nav
+  weather.gov tiennent sur une ligne, « ABOUT » compris.
   (binaire périmé = validation fantôme).
 
 ## Palier R-B — Contenu étranger, animation, canvas

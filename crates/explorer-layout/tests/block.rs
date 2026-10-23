@@ -1273,3 +1273,37 @@ fn float_origine_negative_bande_rend_cw_exact() {
     let total: usize = a.lines.len() + a.children.iter().map(|c| c.lines.len()).sum::<usize>();
     assert_eq!(total, 1, "texte coupé en {total} lignes (bande)");
 }
+
+// ── R-78 : `letter-spacing` (§16.4) entre dans la mesure
+// — la nav weather.gov cumule ~-45px sur la rangée et
+// « ABOUT » tient sur la ligne. Sans fonte : mesure =
+// `chars × (fs×0.55 + ls)` — déterministe.
+
+#[test]
+fn letter_spacing_negatif_resserre_le_flottant() {
+    let html = concat!(
+        "<!doctype html><div style=\"width:800px\">",
+        "<a style=\"float:left;font-size:10px\">AAAAA</a>",
+        "<b style=\"float:left;font-size:10px;letter-spacing:-2px\">AAAAA</b>",
+        "</div>"
+    );
+    let (dom, bx) = laid(html, "");
+    let a = find(&bx, by_tag(&dom, "a"));
+    let b = find(&bx, by_tag(&dom, "b"));
+    // a : 5 × 5.5 = 27.5 ; b : 5 × (5.5 − 2) = 17.5.
+    assert!(approx(a.rect.width, 27.5), "a w={}", a.rect.width);
+    assert!(approx(b.rect.width, 17.5), "b w={}", b.rect.width);
+}
+
+#[test]
+fn letter_spacing_positif_elargit_le_flottant() {
+    let html = concat!(
+        "<!doctype html><div style=\"width:800px\">",
+        "<a style=\"float:left;font-size:10px;letter-spacing:1px\">AAAAA</a>",
+        "</div>"
+    );
+    let (dom, bx) = laid(html, "");
+    let a = find(&bx, by_tag(&dom, "a"));
+    // 5 × (5.5 + 1) = 32.5.
+    assert!(approx(a.rect.width, 32.5), "a w={}", a.rect.width);
+}

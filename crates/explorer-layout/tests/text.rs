@@ -213,19 +213,63 @@ fn cache_metrics_et_shape_coherents() {
     // Shape : même entrée → même run (l'`Arc` est partagé),
     // sans re-shaping.
     let direct_run = font::shape(&src.ttf, "abcd", 20.0, false).expect("shape");
-    let first = fc.shape(&src, &req, "abcd", 20.0, false).expect("shape");
+    let first = fc
+        .shape(&src, &req, "abcd", 20.0, false, 0.0)
+        .expect("shape");
     assert_eq!(*first, direct_run);
     for _ in 0..3 {
-        let hit = fc.shape(&src, &req, "abcd", 20.0, false).expect("shape");
+        let hit = fc
+            .shape(&src, &req, "abcd", 20.0, false, 0.0)
+            .expect("shape");
         assert!(std::sync::Arc::ptr_eq(&hit, &first));
     }
     // Texte différent = entrée différente.
     let other = fc
-        .shape(&src, &req, "xy", 20.0, false)
+        .shape(&src, &req, "xy", 20.0, false, 0.0)
         .expect("autre pièce");
     assert_ne!(*other, direct_run);
     // Une seule résolution de fonte pour tout.
     assert_eq!(src.calls.get(), 1);
+}
+
+/// R-78 — §16.4 : `letter-spacing` ajouté à l'avance de
+/// chaque glyphe non nul (signe de l'avance) et présent
+/// dans la clé de mémoïsation — deux `ls` distincts ne
+/// partagent pas le run.
+#[test]
+fn letter_spacing_decale_les_avances_et_cle_le_cache() {
+    let src = CountingSource {
+        ttf: common::fixture_ttf(),
+        calls: std::cell::Cell::new(0),
+    };
+    let mut fc = FontCache::new();
+    let req = fixture_req();
+    let base = fc.shape(&src, &req, "abcd", 20.0, false, 0.0).expect("run");
+    let wide = fc
+        .shape(&src, &req, "abcd", 20.0, false, 2.0)
+        .expect("run ls");
+    let n = base.glyphs.iter().filter(|g| g.advance != 0.0).count() as f32;
+    assert!(
+        (wide.advance - base.advance - 2.0 * n).abs() < 0.001,
+        "advance ls={} base={} n={n}",
+        wide.advance,
+        base.advance
+    );
+    assert!(
+        !std::sync::Arc::ptr_eq(&wide, &base),
+        "ls doit faire partie de la clé"
+    );
+    // `ls` négatif : les avances se resserrent.
+    let tight = fc
+        .shape(&src, &req, "abcd", 20.0, false, -1.0)
+        .expect("run -ls");
+    assert!(
+        tight.advance < base.advance,
+        "tight={} base={} ptr_eq={}",
+        tight.advance,
+        base.advance,
+        std::sync::Arc::ptr_eq(&tight, &base)
+    );
 }
 
 /// R-65 : source à révision — un `None` figé doit être
@@ -299,7 +343,7 @@ fn cache_tolere_fonte_invalide() {
     let req = fixture_req();
     assert!(fc.data(&src, &req).is_some()); // octets servis
     assert!(fc.metrics(&src, &req, 10.0).is_none());
-    assert!(fc.shape(&src, &req, "abc", 10.0, false).is_none());
+    assert!(fc.shape(&src, &req, "abc", 10.0, false, 0.0).is_none());
     // Miss re-joué : toujours None, jamais panic.
     assert!(fc.metrics(&src, &req, 12.0).is_none());
 }

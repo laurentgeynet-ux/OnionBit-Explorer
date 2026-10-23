@@ -220,8 +220,9 @@ pub struct FontCache {
 type FaceRef = (Arc<Vec<u8>>, u32);
 
 /// Clé des runs mémoïsés : (identité octets, index face,
-/// taille px en bits, texte, rtl).
-type ShapeKey = (usize, u32, u32, String, bool);
+/// taille px en bits, texte, rtl, letter-spacing en bits —
+/// R-78, §16.4 modifie les avances de glyphes).
+type ShapeKey = (usize, u32, u32, String, bool, u32);
 
 /// Choix de face par segment de texte (R-69) : la fonte
 /// primaire, ou une face de repli couvrant le segment.
@@ -334,6 +335,9 @@ impl FontCache {
     /// Glyphes manquants → segmentation par couverture et
     /// shaping en fonte de repli (R-69) — voir
     /// `shape_with_fallback`.
+    /// `ls` = `letter-spacing` résolu en px (§16.4, signe
+    /// conservé) — ajouté à l'avance de chaque glyphe dans
+    /// le signe de l'avance, entre dans la clé de mémoïsation.
     pub fn shape(
         &mut self,
         src: &dyn FontSource,
@@ -341,30 +345,26 @@ impl FontCache {
         text: &str,
         size_px: f32,
         rtl: bool,
+        ls: f32,
     ) -> Option<std::sync::Arc<ShapedRun>> {
         let (k, i) = self.key(src, req)?;
-        if let Some(hit) = self
-            .shape
-            .get(&(k, i, size_px.to_bits(), text.to_string(), rtl))
-        {
+        let key = (k, i, size_px.to_bits(), text.to_string(), rtl, ls.to_bits());
+        if let Some(hit) = self.shape.get(&key) {
             return hit.clone();
         }
         let run = self
             .face(src, req)
-            .and_then(|(d, i)| shape_face(&d, i, text, size_px, rtl).map(|r| (d, i, r)))
+            .and_then(|(d, i)| shape_face_ls(&d, i, text, size_px, rtl, ls).map(|r| (d, i, r)))
             .map(|(d, i, r)| {
                 let r = if r.glyphs.iter().any(|g| g.id == 0) {
-                    self.shape_with_fallback(src, req, &d, i, text, size_px, rtl, r)
+                    self.shape_with_fallback(src, req, &d, i, text, size_px, rtl, ls, r)
                 } else {
                     r
                 };
                 std::sync::Arc::new(r)
             });
         if self.shape.len() < SHAPE_CACHE_CAP {
-            self.shape.insert(
-                (k, i, size_px.to_bits(), text.to_string(), rtl),
-                run.clone(),
-            );
+            self.shape.insert(key, run.clone());
         }
         run
     }
@@ -393,6 +393,7 @@ impl FontCache {
         text: &str,
         size_px: f32,
         rtl: bool,
+        ls: f32,
         primary: ShapedRun,
     ) -> ShapedRun {
         let Some(tface) = ttf_parser::Face::parse(data, index).ok() else {
@@ -456,7 +457,8 @@ impl FontCache {
                 Choice::Primary => (data.clone(), index),
                 Choice::Fallback(d, i) => (d.clone(), *i),
             };
-            let Some(run) = shape_face(&bytes, idx, &text[*start..*end], size_px, rtl) else {
+            let Some(run) = shape_face_ls(&bytes, idx, &text[*start..*end], size_px, rtl, ls)
+            else {
                 continue;
             };
             let start_glyph = u32::try_from(glyphs.len()).unwrap_or(u32::MAX);
@@ -591,6 +593,26 @@ pub fn shape_face(
     size_px: f32,
     rtl: bool,
 ) -> Option<ShapedRun> {
+    shape_face_ls(font_data, face_index, text, size_px, rtl, 0.0)
+}
+
+/// [`shape_face`] avec `letter-spacing` `ls` (§16.4, px,
+/// signe conservé — négatif légal) ajouté à l'avance de
+/// chaque glyphe dans le **signe de son avance** (RTL
+/// couvert) ; les avances nulles (marques combinées,
+/// jambages attachés) sont épargnées. Appliqué **avant**
+/// le cumul d'encre : la bbox suit la plume décalée.
+/// Approximation documentée : par glyphe (une ligature ne
+/// reçoit `ls` qu'une fois), pas par caractère source.
+#[must_use]
+pub fn shape_face_ls(
+    font_data: &[u8],
+    face_index: u32,
+    text: &str,
+    size_px: f32,
+    rtl: bool,
+    ls: f32,
+) -> Option<ShapedRun> {
     let tface = ttf_parser::Face::parse(font_data, face_index).ok()?;
     let met = metrics_of(&tface, size_px)?;
     let face = rustybuzz::Face::from_slice(font_data, face_index)?;
@@ -625,6 +647,14 @@ pub fn shape_face(
             cluster: info.cluster,
         })
         .collect();
+    let mut glyphs = glyphs;
+    if ls != 0.0 {
+        for g in &mut glyphs {
+            if g.advance != 0.0 {
+                g.advance += ls * g.advance.signum();
+            }
+        }
+    }
     let advance = glyphs.iter().map(|g| g.advance).sum();
     // Bbox d'encre réelle : union des bounding boxes de
     // contours décalées par position de plume (même
@@ -757,7 +787,7 @@ mod tests {
         let src = Src::new(true);
         let mut cache = FontCache::new();
         let run = cache
-            .shape(&src, &Src::req(), "A日C", 10.0, false)
+            .shape(&src, &Src::req(), "A日C", 10.0, false, 0.0)
             .expect("run");
         assert_eq!(run.glyphs.len(), 3);
         assert_eq!(run.fallback_spans.len(), 1);
@@ -780,7 +810,7 @@ mod tests {
         let src = Src::new(true);
         let mut cache = FontCache::new();
         let run = cache
-            .shape(&src, &Src::req(), "ABC", 10.0, false)
+            .shape(&src, &Src::req(), "ABC", 10.0, false, 0.0)
             .expect("run");
         assert_eq!(run.glyphs.len(), 3);
         assert_eq!(run.fallback_spans.len(), 0);
@@ -793,7 +823,7 @@ mod tests {
         let src = Src::new(true);
         let mut cache = FontCache::new();
         let run = cache
-            .shape(&src, &Src::req(), "日旦", 10.0, false)
+            .shape(&src, &Src::req(), "日旦", 10.0, false, 0.0)
             .expect("run");
         assert_eq!(run.glyphs.len(), 2);
         assert_eq!(run.fallback_spans.len(), 1);
@@ -812,7 +842,7 @@ mod tests {
         let src = Src::new(false);
         let mut cache = FontCache::new();
         let run = cache
-            .shape(&src, &Src::req(), "A日", 10.0, false)
+            .shape(&src, &Src::req(), "A日", 10.0, false, 0.0)
             .expect("run");
         assert_eq!(run.glyphs.len(), 2);
         assert_eq!(run.glyphs[1].id, 0);
@@ -833,7 +863,7 @@ mod tests {
         let src = Min;
         let mut cache = FontCache::new();
         let run = cache
-            .shape(&src, &Src::req(), "日", 10.0, false)
+            .shape(&src, &Src::req(), "日", 10.0, false, 0.0)
             .expect("run");
         assert_eq!(run.glyphs[0].id, 0);
     }

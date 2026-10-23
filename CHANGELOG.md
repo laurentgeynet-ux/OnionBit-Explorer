@@ -7,6 +7,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+### Added
+
+- **R-78 — `letter-spacing` en layout**
+  (`explorer-layout`, §16.4, issue
+  #13 suite) : la propriété était
+  cascadée/héritée mais jamais
+  consommée — les navs à
+  `letter-spacing:-0.04em` mesuraient
+  trop large (rangée weather.gov
+  ~45 px de trop → « ABOUT »
+  retombait en ligne 2). `ls` est
+  résolu (`letter_spacing_px`,
+  `normal`→0, `em` relatif à la
+  fonte, signe conservé) et
+  injecté dans le shaping :
+  `shape_face_ls` (additif,
+  `shape_face`/`shape`/`measure`
+  inchangés) ajoute `ls` à l'avance
+  de chaque glyphe non nul dans le
+  signe de l'avance (RTL couvert,
+  marques combinées épargnées),
+  **avant** le cumul de la bbox
+  d'encre — mesure, intrinsèque et
+  peinture restent cohérentes
+  d'un coup. `FontCache::shape`
+  reçoit le paramètre `ls` (clé de
+  mémoïsation étendue). Repli
+  no-font : `chars × (fs×0.55+ls)`
+  borné ≥0. Régressions :
+  `letter_spacing_decale_les_avances_
+  et_cle_le_cache` (avance ±ls×n,
+  `ls` dans la clé — Arc distinct),
+  `letter_spacing_{negatif,positif}`.
+  Terrain : nav weather.gov entière
+  sur une ligne, « ABOUT » compris.
+
 ### Fixed
 
 - **R-77 — coupure fantôme de texte

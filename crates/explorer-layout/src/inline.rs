@@ -901,6 +901,7 @@ fn break_into_lines(
                     text,
                     fs,
                     piece.dir == Direction::Rtl,
+                    crate::block::letter_spacing_px(&item.style, fs, ctx),
                 )
             });
             let baseline = shaped.as_ref().map_or(fs * 0.8, |s| s.metrics.ascent);

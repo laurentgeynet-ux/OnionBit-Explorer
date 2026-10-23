@@ -2148,21 +2148,30 @@ fn line_height(style: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> f32 {
 /// Fonction de mesure px d'une chaîne, par la fonte réelle
 /// via `FontSource`, sinon repli `0.55em`/caractère (dev
 /// headless documenté — jamais la production).
+/// `letter-spacing` résolu en px (§16.4) : `normal` → 0,
+/// les longueurs `em` sont relatives à la fonte de
+/// l'élément ; le signe est conservé (négatif légal).
+pub(crate) fn letter_spacing_px(st: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> f32 {
+    css_px(st, "letter-spacing", 0.0, fs, ctx).unwrap_or(0.0)
+}
+
 pub(crate) fn measure_fn<'a>(
     style: &'a ComputedStyle,
     fs: f32,
     ctx: &'a BlockCtx,
 ) -> impl Fn(&str) -> f32 + 'a {
     let font = ctx.fonts.map(|src| (src, font::request_of(style, ctx)));
+    let ls = letter_spacing_px(style, fs, ctx);
     #[allow(clippy::cast_precision_loss)]
     move |s: &str| {
+        let fallback = || (s.chars().count() as f32 * (fs * 0.55 + ls)).max(0.0);
         if let Some((src, req)) = &font {
             ctx.font_cache
                 .borrow_mut()
-                .shape(*src, req, s, fs, false)
-                .map_or_else(|| s.chars().count() as f32 * fs * 0.55, |r| r.advance)
+                .shape(*src, req, s, fs, false, ls)
+                .map_or_else(fallback, |r| r.advance)
         } else {
-            s.chars().count() as f32 * fs * 0.55
+            fallback()
         }
     }
 }
