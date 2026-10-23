@@ -360,9 +360,20 @@ journal « livré ».
   `shorthand_columns`.
 - [ ] **`<select>` stylé** : apparence native différente de
   Chrome (déjà documenté — prioriser si terrain le signale).
-- [ ] **Images de la page Accueil FR** : bandeau « Wiki aime
-  la paix » et vignettes absents — vérifier côté PIPE si les
-  `<img>` arrivent avec pixels (sinon → NAV fetch/`srcset`).
+- [x] **Images de la page Accueil FR** → **triage PIPE :
+  innocente, dispatch NAV/JS**. Mesures terrain (shot 1216 px,
+  23/10) : les vignettes `<img>` **arrivent et se peignent** —
+  vignette « Romain II », buste Éphéméride, logos projets
+  sœurs — y compris cross-origin `thumb/upload.wikimedia.org`
+  (19 `loading="lazy"` servis). Le bandeau « Wiki aime la
+  paix » est **absent du HTML servi** : injecté par
+  `ext.centralNotice.startUp` + `ext.centralNotice.geoIP`
+  (présents dans la liste des modules ResourceLoader) —
+  injection JS côté NAV, **et** sa présence dépend du ciblage
+  geoIP/campagne côté serveur (rien ne garantit qu'il serait
+  servi à notre profil même avec un JS parfait). PIPE n'a
+  rien à corriger ; NAV peut surveiller si les modules
+  CentralNotice s'exécutent.
 
 ### Piste NAVIGATEUR
 
