@@ -3029,6 +3029,79 @@ fn mod_import_meta_url() {
     assert_eq!(global(&mut e, "__r"), "main.js");
 }
 
+/// Loader qui rapporte l'URL résolue (`ModuleLoader::resolve`) —
+/// le spec joint au répertoire du référent (mini-résolution
+/// `./x`/`/` suffisante pour la régression).
+struct UrlLoader(std::collections::BTreeMap<&'static str, &'static str>);
+
+impl explorer_jscore::ModuleLoader for UrlLoader {
+    fn load(&mut self, specifier: &str, _referrer: &str) -> std::result::Result<String, String> {
+        self.0
+            .get(specifier)
+            .map(std::string::ToString::to_string)
+            .ok_or_else(|| format!("not found: {specifier}"))
+    }
+
+    fn resolve(&mut self, specifier: &str, referrer: &str) -> Option<String> {
+        if specifier.starts_with("https:") {
+            return Some(specifier.to_string());
+        }
+        let dir = referrer.rsplit_once('/').map_or("", |(d, _)| d);
+        if dir.is_empty() {
+            Some(specifier.trim_start_matches("./").to_string())
+        } else {
+            Some(format!("{dir}/{}", specifier.trim_start_matches("./")))
+        }
+    }
+}
+
+#[test]
+fn mod_import_meta_url_per_module() {
+    // `import.meta.url` = l'URL du module *propriétaire* (spec
+    // `HostGetImportMetaProperties`) — avant : le `current_module`
+    // global rendait l'entrée pour toutes les deps, et "" depuis
+    // une microtâche → `new URL(x, import.meta.url)` = « Invalid
+    // base URL » (reliquat mesuré terrain — bundles webpack
+    // `new URL(asset, import.meta.url)`/`import()` lazy).
+    let mut e = Engine::new();
+    e.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(UrlLoader(
+        [
+            (
+                "./dep.js",
+                "export const u = import.meta.url; \
+                 export function later(cb) { cb(import.meta.url); } \
+                 globalThis.__imp = import('./sub.js').then(ns => globalThis.__sub = ns.w);",
+            ),
+            ("./sub.js", "export const w = import.meta.url;"),
+        ]
+        .iter()
+        .copied()
+        .collect(),
+    ))));
+    e.eval_module(
+        "import {u, later} from './dep.js'; \
+         globalThis.__entry = import.meta.url; \
+         globalThis.__dep = u; \
+         later(v => globalThis.__cb = v);",
+        "https://site.com/app/entry.js",
+    )
+    .unwrap_or_else(|err| panic!("eval -> {err}"));
+    // Le dep lit sa propre URL résolue — pas celle de l'entrée.
+    assert_eq!(global(&mut e, "__dep"), "https://site.com/app/dep.js");
+    // Idem depuis un callback défini dans le dep (liaison
+    // lexicale — `current_module` est restauré entre-temps).
+    assert_eq!(global(&mut e, "__cb"), "https://site.com/app/dep.js");
+    // `import()` depuis le dep : référent = l'URL du dep, et le
+    // sous-module lit sa propre URL (avant : référent entrée,
+    // meta entrée ou vide).
+    assert_eq!(global(&mut e, "__sub"), "https://site.com/app/sub.js");
+    // `new URL(x, import.meta.url)` sur URL absolue — le motif
+    // qui levait « Invalid base URL ».
+    e.eval("globalThis.__u2 = new URL('a.png', globalThis.__dep).href;")
+        .unwrap_or_else(|err| panic!("{err}"));
+    assert_eq!(global(&mut e, "__u2"), "https://site.com/app/a.png");
+}
+
 // -- JS-C44 : import map minimale ---------------------------------
 
 /// Eval `main` comme module après enregistrement de `map_json`

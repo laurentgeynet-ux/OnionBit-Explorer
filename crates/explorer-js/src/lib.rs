@@ -1751,6 +1751,15 @@ impl explorer_jscore::ModuleLoader for MapLoader {
             .cloned()
             .ok_or_else(|| format!("module non chargé : {key}"))
     }
+
+    // L'URL absolue résolue devient l'identité du module :
+    // `import.meta.url` absolu — `new URL(x, import.meta.url)`
+    // fonctionne (avant : spécificateur relatif `./chunk.js` →
+    // « Invalid base URL ») — et sert de référent aux imports
+    // qu'il émet.
+    fn resolve(&mut self, specifier: &str, referrer: &str) -> Option<String> {
+        (self.resolve)(specifier, referrer)
+    }
 }
 
 /// `XhrTransport` du thread moteur (JS-C27) : `send`/`abort`

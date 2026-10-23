@@ -15,6 +15,7 @@
 use crate::ast::{ExportDecl, ImportBind, Pat, Stmt};
 use crate::error::{Error, Result};
 use crate::heap::{Env, EnvCell, EnvRef, JsResult, Object, PropAttrs, Thrown};
+use crate::interp::IMPORT_META;
 use crate::parser;
 use crate::value::Value;
 use crate::Engine;
@@ -32,6 +33,18 @@ pub trait ModuleLoader {
     /// # Errors
     /// `Err` message is surfaced to the script as a module error.
     fn load(&mut self, specifier: &str, referrer: &str) -> std::result::Result<String, String>;
+
+    /// Résolution optionnelle `specifier`+`referrer` → URL du
+    /// module — devient son `import.meta.url` et le référent
+    /// des imports qu'il émet (spec : `import.meta.url` = l'URL
+    /// du module *propriétaire*). `None` (défaut) = le
+    /// spécificateur import-map tient lieu d'identité — des
+    /// bundles qui font `new URL(x, import.meta.url)` voient
+    /// alors un chemin relatif, cause réelle de `Invalid base
+    /// URL` mesuré en terrain.
+    fn resolve(&mut self, _specifier: &str, _referrer: &str) -> Option<String> {
+        None
+    }
 }
 
 /// Evaluation status of a [`Module`] — `Evaluating` marks the DFS
@@ -61,6 +74,10 @@ pub(crate) struct Module {
     pub state: ModState,
     /// Instantiated dependency indices, in source order.
     pub deps: Vec<usize>,
+    /// Spec résolu du module (URL côté hôte, spécificateur
+    /// sinon) — `import.meta.url` et `current_module` pendant
+    /// l'évaluation.
+    pub spec: String,
     /// Re-exports waiting on dep instantiation (`export {…} from`,
     /// `export * [as ns] from`).
     pub pending: Vec<PendingExport>,
@@ -177,15 +194,23 @@ impl Engine {
         rewrite_bare_specifier(&self.import_map, spec)
     }
 
-    /// Fetch a dependency's source through the injected loader.
-    fn load_source(&mut self, spec: &str, referrer: &str) -> JsResult<String> {
+    /// Fetch a dependency's source through the injected loader —
+    /// rend `(url_résolue, source)` : l'URL est celle rapportée
+    /// par `ModuleLoader::resolve` (ou le spécificateur
+    /// import-map à défaut) — identité du module pour
+    /// `import.meta.url` et les référents aval.
+    fn load_source(&mut self, spec: &str, referrer: &str) -> JsResult<(String, String)> {
         let Some(loader) = self.module_loader.clone() else {
             return Err(self.type_error(format!("no module loader for `{spec}`")));
         };
         let resolved = self.resolve_bare(spec).unwrap_or_else(|| spec.to_string());
+        let url = loader
+            .borrow_mut()
+            .resolve(&resolved, referrer)
+            .unwrap_or_else(|| resolved.clone());
         let r = loader.borrow_mut().load(&resolved, referrer);
         match r {
-            Ok(src) => Ok(src),
+            Ok(src) => Ok((url, src)),
             Err(msg) => Err(self.type_error(format!("cannot load module `{spec}`: {msg}"))),
         }
     }
@@ -212,16 +237,18 @@ impl Engine {
     }
 
     fn eval_module_inner(&mut self, src: &str, name: &str) -> JsResult<Value> {
-        let idx = self.instantiate(name, src, 0)?;
+        let idx = self.instantiate(name, name, src, 0)?;
         self.evaluate_module(idx)?;
         Ok(self.module_ns_object(idx))
     }
 
     /// `import(spec)` — resolve, instantiate, evaluate → namespace.
-    pub(crate) fn dynamic_import(&mut self, spec: &str) -> JsResult<Value> {
-        let referrer = self.current_module.clone();
-        let src = self.load_source(spec, &referrer)?;
-        let idx = self.instantiate(spec, &src, 0)?;
+    /// `referrer` = l'URL du module importeur (lue via la liaison
+    /// cachée `IMPORT_META` de son env — couvre les appels depuis
+    /// fonctions/callbacks, où `current_module` ne dit rien).
+    pub(crate) fn dynamic_import(&mut self, spec: &str, referrer: &str) -> JsResult<Value> {
+        let (url, src) = self.load_source(spec, referrer)?;
+        let idx = self.instantiate(spec, &url, &src, 0)?;
         self.evaluate_module(idx)?;
         Ok(self.module_ns_object(idx))
     }
@@ -230,7 +257,7 @@ impl Engine {
     /// specifier cache *before* recursing (cycles re-resolve to the
     /// same instance), wires import aliases and builds the export
     /// table. Idempotent by specifier.
-    fn instantiate(&mut self, spec: &str, src: &str, depth: u32) -> JsResult<usize> {
+    fn instantiate(&mut self, spec: &str, url: &str, src: &str, depth: u32) -> JsResult<usize> {
         if let Some(&idx) = self.module_specs.get(spec) {
             return Ok(idx);
         }
@@ -251,12 +278,21 @@ impl Engine {
                 ))
             })?;
         let env = Env::local(self.global_env.clone());
+        // Liaison lexicale du spec résolu — `import.meta.url` et
+        // le référent de `import()` se résolvent dans l'env du
+        // module *propriétaire* (fonctions, closures, timers —
+        // spec `HostGetImportMetaProperties`), pas dans un
+        // « module courant » global déjà restauré quand une
+        // microtâche s'évalue.
+        let meta = self.str_val(url);
+        Self::env_put(&env, IMPORT_META, meta, false);
         let idx = self.modules.len();
         self.modules.push(Module {
             env: env.clone(),
             exports: Vec::new(),
             state: ModState::Instantiated,
             deps: Vec::new(),
+            spec: url.to_string(),
             pending: Vec::new(),
             body: prog.body.clone(),
         });
@@ -321,8 +357,11 @@ impl Engine {
             }
         }
         for dep_spec in dep_specs {
-            let dep_src = self.load_source(&dep_spec, spec)?;
-            let dep_idx = self.instantiate(&dep_spec, &dep_src, depth + 1)?;
+            // Référent = l'URL *résolue* du parent — la résolution
+            // `./x` depuis un module relatif chaîne les chemins
+            // bruts au lieu de repartir de la racine du site.
+            let (dep_url, dep_src) = self.load_source(&dep_spec, url)?;
+            let dep_idx = self.instantiate(&dep_spec, &dep_url, &dep_src, depth + 1)?;
             self.modules[idx].deps.push(dep_idx);
         }
 
@@ -445,7 +484,9 @@ impl Engine {
         let body = std::mem::take(&mut self.modules[idx].body);
         let outer_strict = self.strict;
         self.strict = true; // modules are always strict
+        let prev_mod = std::mem::replace(&mut self.current_module, self.modules[idx].spec.clone());
         let r = self.exec_body(&env, Value::Undefined, &body);
+        self.current_module = prev_mod;
         self.strict = outer_strict;
         self.modules[idx].state = ModState::Evaluated;
         r.map(|_| ())

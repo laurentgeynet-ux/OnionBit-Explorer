@@ -214,17 +214,33 @@ impl Engine {
             Expr::ImportCall(e) => {
                 let sv = self.eval_expr(env, this, e)?;
                 let spec = self.to_js_string(sv)?;
+                // Référent = le module *propriétaire* du call site
+                // (liaison lexicale IMPORT_META — visible depuis
+                // fonctions et callbacks) ; `current_module` ne
+                // couvre que le code top-level synchrone.
+                let referrer = self
+                    .env_get(env, IMPORT_META)
+                    .and_then(|v| self.to_js_string(v).ok())
+                    .unwrap_or_else(|| self.current_module.clone());
                 let pid = self.new_promise();
-                match self.dynamic_import(&spec) {
+                match self.dynamic_import(&spec, &referrer) {
                     Ok(ns) => self.resolve_promise(pid, ns),
                     Err(Thrown(t)) => self.reject_promise(pid, t),
                 }
                 Ok(Value::Obj(pid))
             }
-            // `import.meta` — `{url: <specifier courant>}`.
+            // `import.meta` — `{url: <URL du module propriétaire>}`
+            // (spec `HostGetImportMetaProperties`) — lue via la
+            // liaison lexicale IMPORT_META posée à
+            // l'instanciation ; un timer/callback la voit encore.
+            // Repli `current_module` hors module (tolérance).
             Expr::ImportMeta => {
                 let obj = self.new_object();
-                let url = self.str_val(self.current_module.clone());
+                let url_s = self
+                    .env_get(env, IMPORT_META)
+                    .and_then(|v| self.to_js_string(v).ok())
+                    .unwrap_or_else(|| self.current_module.clone());
+                let url = self.str_val(url_s);
                 self.set_own(obj, "url", url, false);
                 Ok(Value::Obj(obj))
             }

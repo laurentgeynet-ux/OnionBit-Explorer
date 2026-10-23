@@ -53,6 +53,13 @@ pub(crate) const SUPER_BIND: &str = "\u{f120}super";
 /// fonction invoquée par `new`/`Reflect.construct`.
 pub(crate) const NEW_TARGET: &str = "\u{f120}new.target";
 
+/// Liaison cachée du spec résolu du module dans son env —
+/// `import.meta.url` et le référent de `import()` se lisent
+/// lexicalement (fonctions/callbacks imbriqués), pas dans
+/// `current_module` global déjà restauré à l'évaluation
+/// différée.
+pub(crate) const IMPORT_META: &str = "\u{f120}import.meta";
+
 /// Préfixe des clés privées `\u{f131}privN.name` — produit par le
 /// parser (résolution lexicale des `#x`), jamais énumérable.
 pub(crate) const PRIV_PREFIX: &str = "\u{f131}priv";
