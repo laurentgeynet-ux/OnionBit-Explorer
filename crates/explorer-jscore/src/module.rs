@@ -489,7 +489,7 @@ impl Engine {
 /// finit par `/` (spec « resolve a module specifier » : le
 /// préfixe consommé est remplacé, le reste du spécificateur
 /// est conservé). Fonction pure partagée : le prefetch de la
-/// session applique la même règle que [`Engine::resolve_bare`]
+/// session applique la même règle que `Engine::resolve_bare`
 /// à l'évaluation — sinon la map serait honorée à l'eval mais
 /// ignorée du téléchargement (issue #6).
 #[must_use]
