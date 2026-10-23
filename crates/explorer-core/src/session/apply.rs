@@ -51,7 +51,8 @@ use explorer_html::TreeBuilder;
 use explorer_js::CanvasOpsTable;
 use explorer_layout::font::FontSource;
 use explorer_layout::{
-    build_box_tree_sized, layout_tree, relayout_subtree, BlockCtx, LayoutBox, Rect, Relayout,
+    build_box_tree_sized, layout_tree, relayout_subtree, scrollable_overflow_bottom, BlockCtx,
+    LayoutBox, Rect, Relayout,
 };
 use explorer_render::canvas::CanvasTable;
 use explorer_render::{
@@ -938,7 +939,7 @@ fn try_incr_payload(
             restitute_font_cache(p, &block);
             return false;
         }
-        tree.rect.height
+        tree.rect.height.max(scrollable_overflow_bottom(tree))
     };
     restitute_font_cache(p, &block);
     p.doc_h = doc_h;
@@ -1055,7 +1056,10 @@ pub(crate) fn relayout_dom_payload(
         "apply: layout"
     );
     restitute_font_cache(p, &block);
-    p.doc_h = bx.rect.height;
+    // Hauteur défilante ≠ hauteur de boîte : le contenu qui
+    // déborde un ancêtre à hauteur spécifiée (`height:100%` de
+    // vector-2022) reste scrollable — R-82.
+    p.doc_h = bx.rect.height.max(scrollable_overflow_bottom(&bx));
     p.tree = Some(bx);
     p.tree_epoch = p.tree_epoch.wrapping_add(1);
     p.images.svgs = svgs;

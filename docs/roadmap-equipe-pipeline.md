@@ -2277,6 +2277,26 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
 > premier poste fixe si le coût redevient le goulot.
 > Détail au journal des coutures.
 
+- [x] **R-87. Hauteur de document = région défilante** (terrain
+  humain 2026-10-23 — fr.wikipedia.org en fenêtre ≥1120 px :
+  document réduit à un viewport, scroll impossible, bas de
+  page clippé). Mécanisme mesuré : `html,body{height:100%}`
+  fige `body` à la hauteur ICB ; le contenu déborde en
+  `overflow:visible` (légal) sans étirer `body`. En dessous
+  de 1120 px le bas survivait par les flottants remontant au
+  `FloatCtx` racine (`layout_tree` étend `rect.height` à
+  leur profondeur) ; à 1120 px Vector-2022 bascule
+  `.mw-page-container-inner` en `display:grid` — BFC qui
+  capture ses flottants — et plus rien ne remonte. Correct :
+  `doc_h` = `scrollable_overflow_bottom` (≈ `scrollHeight`) :
+  max des bords inférieurs de toutes les boîtes dont le
+  débord n'est pas clippé (`overflow` ≠ visible borne ses
+  descendants à sa bordure ; `fixed` exclu — ancré viewport).
+  La même borne nourrit `DisplayList.height` et le rect de
+  canvas dans `display::build_list`. Régression :
+  `doc_h_covers_overflow_past_fixed_height_body`
+  (session.rs — hauteur + scroll effectif).
+
 ## Palier R-B — Contenu étranger, animation, canvas
 
 - [x] **R-8. Foreign-content dans `explorer-html`** (ex-60a) :

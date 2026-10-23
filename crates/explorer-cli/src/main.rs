@@ -42,7 +42,8 @@ fn main() -> ExitCode {
     match args.as_slice() {
         [_, cmd, arg] if cmd == "dump" => dump(arg),
         [_, cmd, arg] if cmd == "fetch" => fetch(arg),
-        [_, cmd, arg] if cmd == "layout" => layout(arg),
+        [_, cmd, arg] if cmd == "layout" => layout(arg, None),
+        [_, cmd, arg, size] if cmd == "layout" => layout(arg, Some(size)),
         [_, cmd, url, out] if cmd == "shot" => shot(url, out, None),
         [_, cmd, url, out, size] if cmd == "shot" => shot(url, out, Some(size)),
         [_, cmd, url] if cmd == "jprobe" => jprobe(url),
@@ -319,8 +320,14 @@ async fn dump(src: &str) -> ExitCode {
 }
 
 /// Pipeline fetch → parse → style → boîtes → wireframe.
+/// `size` optionnel `LxH` : largeur de layout + env médias
+/// (défaut 800 — triage terrain à la largeur fenêtre).
 #[tokio::main(flavor = "current_thread")]
-async fn layout(src: &str) -> ExitCode {
+async fn layout(src: &str, size: Option<&str>) -> ExitCode {
+    let width = size
+        .and_then(|s| s.split('x').next())
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(800.0);
     match read_source(src).await {
         Ok(bytes) => {
             let (html, enc) = explorer_html::encoding::decode_sniffed(&bytes);
@@ -329,9 +336,10 @@ async fn layout(src: &str) -> ExitCode {
             let mut eng = explorer_css::StyleEngine::new();
             eng.add_css(&collect_style_css(&dom), explorer_css::Origin::Author);
             // Media queries évaluées contre le viewport réel
-            // du layout (800px, même constante que plus bas).
+            // du layout (800px par défaut, paramétrable).
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let env = explorer_css::StyleEnv {
-                width_px: 800,
+                width_px: width as u32,
                 ..explorer_css::StyleEnv::default()
             };
             let styles = eng.compute_tree(&dom, dom.document(), &env);
@@ -345,7 +353,7 @@ async fn layout(src: &str) -> ExitCode {
                 return ExitCode::FAILURE;
             };
             if let Some(mut bx) = explorer_layout::build_box_tree(&dom, root_el, &styles) {
-                explorer_layout::layout_tree(&mut bx, 800.0, &explorer_layout::BlockCtx::default());
+                explorer_layout::layout_tree(&mut bx, width, &explorer_layout::BlockCtx::default());
                 print!("{}", bx.dump(&dom));
                 ExitCode::SUCCESS
             } else {

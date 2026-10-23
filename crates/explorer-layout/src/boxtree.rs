@@ -1087,3 +1087,33 @@ fn control_box(
     bx.control_checked = checked;
     bx
 }
+
+/// Bas de la région défilante propagée à la racine — pendant
+/// de `scrollHeight`. `rect.height` de la racine ne suffit
+/// pas : un contenu qui déborde un ancêtre à hauteur fixe
+/// (`html,body{height:100%}` de vector-2022 — R-82) reste
+/// visible et défilable ; la zone scrollable du document suit
+/// le bord inférieur de toute boîte dont le débord n'est pas
+/// clippé. Une boîte `overflow` ≠ visible clippe : ses
+/// enfants ne contribuent pas au-delà de sa propre bordure.
+/// `fixed` est ancré au viewport — exclu du total (un bandeau
+/// fixe en bas de fenêtre ne doit pas allonger la page).
+/// Récursion bornée par `deep` (R-24 — arbres hostiles).
+#[must_use]
+pub fn scrollable_overflow_bottom(root: &LayoutBox) -> f32 {
+    fn visit(bx: &LayoutBox, clip_bottom: f32) -> f32 {
+        let own_bottom = (bx.rect.y + bx.rect.height).min(clip_bottom);
+        if bx.position == Position::Fixed {
+            return own_bottom;
+        }
+        let child_clip = if bx.overflow == Overflow::Visible {
+            clip_bottom
+        } else {
+            own_bottom
+        };
+        bx.children.iter().fold(own_bottom, |acc, c| {
+            acc.max(explorer_common::deep(|| visit(c, child_clip)))
+        })
+    }
+    visit(root, f32::INFINITY)
+}

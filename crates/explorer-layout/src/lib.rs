@@ -31,8 +31,8 @@ pub mod text;
 
 pub use block::{layout_tree, BlockCtx};
 pub use boxtree::{
-    build_box_tree, build_box_tree_sized, BoxKind, BoxSlot, Float, LayoutBox, Overflow, Position,
-    Rect,
+    build_box_tree, build_box_tree_sized, scrollable_overflow_bottom, BoxKind, BoxSlot, Float,
+    LayoutBox, Overflow, Position, Rect,
 };
 pub use font::{FontCache, FontMetrics, FontRequest, FontSource, Glyph, ShapedRun};
 pub use hit::hit_test;

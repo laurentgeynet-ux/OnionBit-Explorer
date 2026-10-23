@@ -2764,6 +2764,38 @@ async fn doc_h_reports_measured_height_not_frame_cap() {
     assert!(!info.doc_h_clamped, "doc_h={}", info.doc_h);
 }
 
+/// R-87 — `html,body{height:100%}` (vector-2022) : le contenu
+/// qui déborde le body à hauteur spécifiée reste **défilable** —
+/// `doc_h` suit le bas de la région défilante, pas la boîte
+/// `body`. Terrain : fr.wikipedia ≥1120 px rendait un document
+/// d'un viewport — scroll mort, bas de page clippé.
+#[tokio::test]
+async fn doc_h_covers_overflow_past_fixed_height_body() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/ovf",
+        200,
+        "<!doctype html><html><head><style>html,body{height:100%}</style></head>\
+         <body><div style=\"height:2000px\">haut</div></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/ovf").await.unwrap();
+    let info = s.tab_info(id).unwrap();
+    assert!(info.doc_h >= 2000.0, "doc_h={}", info.doc_h);
+    // Le scroll avance réellement — avant le fix, le clamp à
+    // `doc_h − viewport = 0` clouait la page.
+    let out = s
+        .handle_input(id, InputEvent::Scroll { dy: 300.0 })
+        .await
+        .unwrap();
+    match out {
+        InputOutcome::Scrolled { scroll_y } => {
+            assert!((scroll_y - 300.0).abs() < 0.01, "scroll_y={scroll_y}");
+        }
+        o => panic!("inattendu : {o:?}"),
+    }
+}
+
 /// `Escape` referme sans choix — `s=o1` à la soumission.
 #[tokio::test]
 async fn select_popup_escape_keeps_default() {

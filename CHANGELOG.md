@@ -41,6 +41,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   scrollabilité détectée est
   désormais visible.
 
+- **R-87 — `doc_h` = région défilante
+  réelle** (`explorer-layout` +
+  `explorer-render`, terrain humain
+  2026-10-23 — fr.wikipedia ≥1120 px :
+  page réduite à un viewport, scroll
+  mort, contenu clippé). `doc_h` lisait
+  `root.rect.height` — or
+  `html,body{height:100%}` fige `body`
+  à l'ICB et le contenu déborde en
+  `overflow:visible` sans l'étirer ;
+  en dessous de 1120 px des flottants
+  remontaient au `FloatCtx` racine et
+  masquaient le trou, la grille
+  `display:grid` de Vector-2022 (BFC)
+  les capture → plus rien ne remontait.
+  `scrollable_overflow_bottom` (≈
+  `scrollHeight`) borne désormais
+  `doc_h`, `DisplayList.height` et le
+  canvas. Régression
+  `doc_h_covers_overflow_past_fixed_
+  height_body`.
+
 - **R-86 — `mask-*` : la moitié domaine
   livrée** (`explorer-render`, backlog
   issue #14 / reliquat R-80 — icônes

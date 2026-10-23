@@ -25,7 +25,9 @@
 use explorer_css::value::Color;
 use explorer_css::value::{parse_color, parse_length, Unit};
 use explorer_layout::font::ShapedRun;
-use explorer_layout::{BoxKind, Float, LayoutBox, Overflow, Position, Rect};
+use explorer_layout::{
+    scrollable_overflow_bottom, BoxKind, Float, LayoutBox, Overflow, Position, Rect,
+};
 
 /// Une primitive de dessin, dans l'ordre de peinture.
 #[derive(Debug, Clone)]
@@ -869,11 +871,16 @@ fn build_list(
     // (`margin-collapse-021` : le fond de `body` positionné
     // `no-repeat` part du coin du canvas, pas de sa boîte
     // décalée par sa marge).
+    // Hauteur de la liste = région défilante réelle : le
+    // contenu qui déborde un ancêtre à hauteur spécifiée
+    // (`html,body{height:100%}` vector-2022, R-82) doit
+    // entrer dans la frame — `rect.height` seul coupait tout.
+    let doc_h = scrollable_overflow_bottom(root).max(viewport_h);
     let canvas = Rect {
         x: 0.0,
         y: 0.0,
         width: viewport_w,
-        height: root.rect.height.max(viewport_h),
+        height: doc_h,
     };
     cx.canvas_bg_src = emit_canvas_bg(root, canvas, viewport_w, viewport_h, images, &mut items);
     // Portées racine des reports : inlines (App. E étape 5)
@@ -935,7 +942,7 @@ fn build_list(
     DisplayList {
         items,
         width: viewport_w,
-        height: root.rect.height.max(viewport_h),
+        height: doc_h,
         spans,
         tree_epoch,
     }
