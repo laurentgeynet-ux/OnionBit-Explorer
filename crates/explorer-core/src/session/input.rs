@@ -316,13 +316,32 @@ impl Session {
         if let Some((form, sub)) = self.submit_at(tab, x, y) {
             return self.try_submit(tab, form, Some(sub), prevented);
         }
-        match self.link_at(tab, x, y) {
-            Some(url) if !prevented => {
+        match self.link_node_at(tab, x, y) {
+            Some((anchor, url)) if !prevented => {
                 let u = Url::parse(&url).map_err(|e| CoreError::Url(e.to_string()))?;
-                let mut r = Request::get(u);
+                let (new_ctx, no_referer) = {
+                    let dom = self.tabs.get(&tab).and_then(|e| e.dom.as_ref());
+                    (
+                        dom.is_some_and(|d| target_new_context(d, anchor)),
+                        dom.is_some_and(|d| rel_no_referrer(d, anchor)),
+                    )
+                };
+                let mut req = Request::get(u);
                 // Clic lien = geste utilisateur — `?1` (125).
-                r.fetch_user = true;
-                self.enqueue_nav_act(tab, DrainAct::Req(Box::new(r), true));
+                req.fetch_user = true;
+                // `rel=noreferrer` : pas de `Referer` émis
+                // (étape 131 — `noopener` implicite sans
+                // objet avant les ponts JS de l'étape 130).
+                req.no_referer = no_referer;
+                // `target=_blank`/nommé → nouveau contexte
+                // top-level (étape 131) ; `_self`/`_parent`/
+                // `_top`/absent → onglet courant.
+                let act = if new_ctx {
+                    DrainAct::NewTab(Box::new(req))
+                } else {
+                    DrainAct::Req(Box::new(req), true)
+                };
+                self.enqueue_nav_act(tab, act);
                 Ok(InputOutcome::Navigated)
             }
             _ => Ok(InputOutcome::Ignored),
@@ -603,7 +622,7 @@ impl Session {
         form: NodeId,
         submitter: Option<NodeId>,
     ) -> Result<(), CoreError> {
-        let mut req = {
+        let (mut req, new_ctx, no_referer) = {
             let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
             let (Some(dom), Some(base)) = (entry.dom.as_ref(), entry.url.as_ref()) else {
                 return Err(CoreError::EmptyDocument);
@@ -620,14 +639,27 @@ impl Session {
                 .flatten()
                 .unwrap_or_default();
             let enctype = attr_lower(dom, form, "enctype");
-            form_request(base, &action, &method, &enctype, &pairs)
-                .ok_or_else(|| CoreError::Url("action de formulaire irrésolvable".to_string()))?
+            let req = form_request(base, &action, &method, &enctype, &pairs)
+                .ok_or_else(|| CoreError::Url("action de formulaire irrésolvable".to_string()))?;
+            (
+                req,
+                target_new_context(dom, form),
+                rel_no_referrer(dom, form),
+            )
         };
         // Clic submit / Enter implicite = geste utilisateur —
         // `Sec-Fetch-User: ?1` sur la navigation (étape 125) ;
         // `form.submit()` scripté reste non marqué.
         req.fetch_user = true;
-        self.enqueue_nav_act(tab, DrainAct::Req(Box::new(req), true));
+        req.no_referer = no_referer;
+        // `form target=_blank`/nommé → nouveau contexte
+        // (étape 131 — même règle que `<a target>`).
+        let act = if new_ctx {
+            DrainAct::NewTab(Box::new(req))
+        } else {
+            DrainAct::Req(Box::new(req), true)
+        };
+        self.enqueue_nav_act(tab, act);
         Ok(())
     }
 
@@ -844,13 +876,20 @@ impl Session {
     /// hit-test profond sur la boîte posée + remontée des
     /// ancêtres DOM.
     pub(crate) fn link_at(&self, tab: TabId, x: f32, y: f32) -> Option<String> {
+        self.link_node_at(tab, x, y).map(|(_, u)| u)
+    }
+
+    /// `(nœud `<a>`, URL résolue)` sous `(x, y)` — le nœud
+    /// sert au dispatch `target`/`rel` (étape 131).
+    fn link_node_at(&self, tab: TabId, x: f32, y: f32) -> Option<(NodeId, String)> {
         let entry = self.tabs.get(&tab)?;
         let tree = entry.tree.as_ref()?;
         let dom = entry.dom.as_ref()?;
         let node = hit_test(tree, x, y + entry.scroll_y)?;
-        let href = ancestor_href(dom, node)?;
+        let a = ancestor_link(dom, node)?;
+        let href = dom.attribute(a, "href").ok().flatten()?;
         let base = entry.url.as_ref()?;
-        Some(Url::resolve(base, &href).ok()?.to_string())
+        Some((a, Url::resolve(base, &href).ok()?.to_string()))
     }
 
     /// Scroll borné `[0, doc_h - viewport_h]` puis repaint +

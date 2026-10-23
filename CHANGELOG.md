@@ -659,6 +659,46 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   piste JS. Régressions
   `iframe_composite_*`
   (4 tests session).
+- **Étape 131 — cibles de
+  navigation (`target`) et
+  `rel`** (`explorer-net`,
+  `explorer-core` — cap « web
+  réel sécurisé ») : `<a>`/
+  `<form>` avec
+  `target=_blank` ou un nom
+  non réservé émettent
+  `DrainAct::NewTab` — les
+  drains (`drain_script_nav`
+  et `drain_navs_shared`)
+  ouvrent un onglet
+  (`open_tab`, `TabOpened`
+  émis) et y conduisent la
+  requête ; `_self`/`_parent`/
+  `_top`/absent/vide → onglet
+  courant (casse insensible).
+  `rel=noreferrer` →
+  `Request::no_referer`
+  (additif) : `RefererTransport`
+  n'injecte plus `Referer`
+  — `Origin` préservé (pas
+  une info de référent), le
+  preflight CORS suit la
+  politique de sa requête.
+  `noopener` implicite reste
+  sans objet tant que
+  `window.opener` n'a pas de
+  pont JS (étape 130).
+  Bornes : les contextes
+  nommés ne sont pas réutilisés
+  (chaque clic = onglet frais) ;
+  `form.submit()` via le miroir
+  JS ne porte pas `target`
+  (dispatch DOM réel + submit
+  hôte seulement). Régressions
+  `target_*`/`form_target_*`
+  (4 tests session) +
+  `no_referer_suppresses_
+  injection` (policy).
 
 ### Fixed
 

@@ -481,6 +481,32 @@ async fn origin_on_cross_origin_post() {
     assert_eq!(origin, Some("https://a.example"));
 }
 
+/// `rel=noreferrer` (étape 131) : `Request::no_referer`
+/// supprime l'injection du `Referer` même avec un
+/// initiateur suivi — `Origin`, lui, n'est pas une
+/// information de référent et reste émis.
+#[tokio::test]
+async fn no_referer_suppresses_injection() {
+    let inner = FakeTransport::new(vec![resp(200, &[], b"x"), resp(200, &[], b"x")]);
+    let t = RefererTransport::wrap(inner.clone(), Some(u("https://a.example/page")));
+    let mut req = Request::get(u("https://b.example/"));
+    req.no_referer = true;
+    t.fetch(&req).await.unwrap();
+    // Sans le drapeau : injection normale (contrôle).
+    t.fetch(&Request::get(u("https://b.example/")))
+        .await
+        .unwrap();
+    let seen = inner.seen();
+    assert!(
+        !seen[0].headers.iter().any(|(n, _)| n == "Referer"),
+        "no_referer : aucun Referer injecté"
+    );
+    assert!(
+        seen[1].headers.iter().any(|(n, _)| n == "Referer"),
+        "contrôle : Referer injecté sans le drapeau"
+    );
+}
+
 // -- Mixed-content ------------------------------------------------------------
 
 #[test]

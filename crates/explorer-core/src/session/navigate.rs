@@ -935,6 +935,13 @@ impl Session {
             };
             let ok = match act {
                 DrainAct::Req(req, push) => self.navigate_request(tab, *req, push).await.is_ok(),
+                DrainAct::NewTab(req) => {
+                    // `target=_blank`/nommé (étape 131) :
+                    // nouveau contexte top-level — la
+                    // requête le peuple d'une entrée.
+                    let t2 = self.open_tab();
+                    self.navigate_request(t2, *req, true).await.is_ok()
+                }
                 DrainAct::Go(0) => {
                     // `history.go(0)` = rechargement de
                     // l'entrée courante (spec HTML).
@@ -993,6 +1000,11 @@ impl Session {
             fetch_mode: FetchMode::Cors,
             fetch_user: false,
             cors: None,
+            // `Referer` du script est posé par
+            // `initiator_headers` ci-dessus — pas de
+            // suppression (la politique `referrer` JS
+            // reste à la piste JS).
+            no_referer: false,
         };
         if cross {
             // Enforcement CORS (étape 126) : les en-têtes

@@ -16,6 +16,12 @@ pub(crate) enum DrainAct {
     /// `Request` (233 o) domine `Go` (8 o) — la file
     /// n'embarque pas le pire cas par cellule.
     Req(Box<Request>, bool),
+    /// Navigation dans un **nouveau** contexte top-level
+    /// (étape 131 — `target=_blank`/nommé sur `<a>` ou
+    /// `<form>`) : le drain ouvre un onglet puis y conduit
+    /// la requête — l'intention vit dans la file de
+    /// l'onglet émetteur.
+    NewTab(Box<Request>),
     /// `history.go(d)` — résolu via `history_move` (ou son
     /// équivalent partagé) ; `0` = reload.
     Go(isize),

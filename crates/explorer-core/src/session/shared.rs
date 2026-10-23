@@ -288,6 +288,19 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
             Some(DrainAct::Req(req, push)) => Box::pin(navigate_shared(sess, tab, *req, push))
                 .await
                 .is_ok(),
+            Some(DrainAct::NewTab(req)) => {
+                // `target=_blank`/nommé (étape 131) —
+                // `open_tab` sous verrou court, navigation
+                // conduite hors verrou sur le nouvel
+                // onglet.
+                let t2 = {
+                    let mut s = sess.lock().await;
+                    s.open_tab()
+                };
+                Box::pin(navigate_shared(sess, t2, *req, true))
+                    .await
+                    .is_ok()
+            }
             Some(DrainAct::Go(0)) => {
                 // `history.go(0)` = rechargement de l'entrée
                 // courante (spec HTML).

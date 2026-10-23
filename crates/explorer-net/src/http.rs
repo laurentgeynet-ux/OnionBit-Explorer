@@ -169,6 +169,13 @@ pub struct Request {
     /// y lit `origin`/`credentials`/`unsafe_headers` pour le
     /// preflight et la lisibilité de la réponse.
     pub cors: Option<CorsRequest>,
+    /// Suppression du `Referer` (étape 131) — `true` quand
+    /// la source l'exige (`rel=noreferrer`, politique
+    /// `no-referrer`) : `RefererTransport` n'injecte pas
+    /// l'en-tête même si un initiateur est suivi.
+    /// `Origin` n'est **pas** concerné (il n'est pas une
+    /// information de référent).
+    pub no_referer: bool,
 }
 
 /// Qui a initié la requête — « site pour cookies » de la
@@ -205,6 +212,7 @@ impl Request {
             fetch_mode: FetchMode::NoCors,
             fetch_user: false,
             cors: None,
+            no_referer: false,
         }
     }
 }

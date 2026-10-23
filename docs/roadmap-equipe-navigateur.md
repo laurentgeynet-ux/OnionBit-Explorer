@@ -2805,6 +2805,37 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (le contexte enfant exige
   son propre moteur ; journal).
 
+- [x] **Étape 131. Cibles de
+  navigation (`target`) et
+  `rel`** : `target=_blank`
+  ou nom non réservé sur
+  `<a>`/`<form>` → `DrainAct::
+  NewTab` — le drain ouvre un
+  onglet (`TabOpened` émis) et
+  y conduit la requête ;
+  `_self`/`_parent`/`_top`/
+  absent → onglet courant.
+  `rel=noreferrer` →
+  `Request::no_referer`
+  (additif net) supprime
+  l'injection `Referer` dans
+  `RefererTransport` —
+  `Origin` préservé (pas une
+  info de référent) ;
+  `noopener` implicite sans
+  objet tant que
+  `window.opener` n'a pas de
+  pont JS. Bornes : contextes
+  nommés non réutilisés
+  (chaque clic = onglet frais),
+  `form.submit()` miroir ne
+  porte pas `target` (lien
+  DOM réel et submit hôte
+  seulement). 4 tests
+  `target_*`/`form_target_*`
+  session + 1 test
+  `no_referer` policy.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use explorer_core::{
     Bookmark, CoreError, CoreEvent, InputEvent, InputOutcome, KeyMods, Session, SessionConfig,
+    TabId,
 };
 use explorer_layout::font::{FontRequest, FontSource};
 use explorer_net::error::NetResult;
@@ -7421,4 +7422,129 @@ async fn iframe_composite_survives_relayout() {
         [255, 0, 0, 255],
         "bitmap conservé au relayout"
     );
+}
+
+// ===== Étape 131 — cible de navigation (`target`) et
+// `rel` : `_blank`/nommé → nouvel onglet top-level,
+// `noreferrer` → suppression du `Referer` =====
+
+/// Page : lien `target=_blank` en haut à gauche.
+const PAGE_BLANK: &str = "<!doctype html><html><body>\
+     <a href=\"/b\" target=\"_blank\">lien blank</a></body></html>";
+
+/// Page : lien `target=_self` (reste dans l'onglet).
+const PAGE_SELF: &str = "<!doctype html><html><body>\
+     <a href=\"/b\" target=\"_self\">lien self</a></body></html>";
+
+/// Page : lien `target=win1` (contexte nommé → nouvel
+/// onglet — les contextes nommés ne sont pas suivis).
+const PAGE_NAMED: &str = "<!doctype html><html><body>\
+     <a href=\"/b\" target=\"win1\">lien nommé</a></body></html>";
+
+/// Page : formulaire `target=_blank` avec bouton submit.
+const PAGE_FORM_BLANK: &str = "<!doctype html><html><body>\
+     <form action=\"/b\" target=\"_blank\">\
+     <input type=\"submit\" value=\"go\"></form></body></html>";
+
+/// `tabs()` n'a pas d'ordre (`HashMap::keys`) — le nouvel
+/// onglet est celui qui n'est pas `src`.
+fn other_tab(s: &Session, src: TabId) -> TabId {
+    s.tabs().into_iter().find(|t| *t != src).unwrap_or(src)
+}
+
+/// Un clic `<a target=_blank>` ouvre un **nouvel onglet**
+/// navigué — l'onglet source n'est pas déplacé et
+/// `TabOpened` est émis pour le nouveau contexte.
+#[tokio::test]
+async fn target_blank_opens_new_tab() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_BLANK);
+    t.route("/b", 200, PAGE_T);
+    let mut rx = s.subscribe();
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(
+        s.tab_url(id).as_deref(),
+        Some("http://h.test/"),
+        "source intacte"
+    );
+    assert_eq!(s.tabs().len(), 2, "un nouvel onglet a été ouvert");
+    let t2 = other_tab(&s, id);
+    assert_eq!(s.tab_url(t2).as_deref(), Some("http://h.test/b"));
+    let mut saw_open = false;
+    while let Ok(ev) = rx.try_recv() {
+        if matches!(ev, CoreEvent::TabOpened { tab } if tab == t2) {
+            saw_open = true;
+        }
+    }
+    assert!(saw_open, "TabOpened émis pour le contexte _blank");
+}
+
+/// `target=_self` (comme `_parent`/`_top`/absent au top
+/// level) navigue dans l'onglet courant.
+#[tokio::test]
+async fn target_self_stays_same_tab() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_SELF);
+    t.route("/b", 200, PAGE_T);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(s.tabs().len(), 1, "aucun onglet ouvert");
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/b"));
+}
+
+/// Un `target` non réservé (`win1`) est un contexte
+/// nommé : non suivi → chaque clic ouvre un onglet frais.
+#[tokio::test]
+async fn target_named_opens_new_tab() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_NAMED);
+    t.route("/b", 200, PAGE_T);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(s.tabs().len(), 2);
+    assert_eq!(
+        s.tab_url(other_tab(&s, id)).as_deref(),
+        Some("http://h.test/b")
+    );
+}
+
+/// `form target=_blank` : la soumission part dans un
+/// nouvel onglet (même règle que les liens).
+#[tokio::test]
+async fn form_target_blank_opens_new_tab() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FORM_BLANK);
+    t.route("/b", 200, PAGE_T);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 10.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(
+        s.tab_url(id).as_deref(),
+        Some("http://h.test/"),
+        "source intacte"
+    );
+    assert_eq!(s.tabs().len(), 2, "soumission en nouvel onglet");
+    let t2 = other_tab(&s, id);
+    let url = s.tab_url(t2).unwrap_or_default();
+    assert!(url.starts_with("http://h.test/b"), "form GET → /b : {url}");
 }

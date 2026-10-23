@@ -140,20 +140,53 @@ pub(crate) fn edit_field(dom: &mut Dom, field: NodeId, key: &str) -> Result<(), 
     Ok(())
 }
 
-/// `href` du plus proche ancêtre `<a>` (le nœud lui-même
+/// Plus proche ancêtre `<a href>` (le nœud lui-même
 /// compris) — `None` si le point n'est pas dans un lien.
-pub(crate) fn ancestor_href(dom: &Dom, mut node: NodeId) -> Option<String> {
+/// L'élément est rendu (pas seulement le `href`) : le
+/// dispatch lit `target`/`rel` dessus (étape 131).
+pub(crate) fn ancestor_link(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
     loop {
-        if dom.tag_name(node).is_ok_and(|t| t == "a") {
-            if let Ok(Some(href)) = dom.attribute(node, "href") {
-                return Some(href);
-            }
+        if dom.tag_name(node).is_ok_and(|t| t == "a")
+            && matches!(dom.attribute(node, "href"), Ok(Some(_)))
+        {
+            return Some(node);
         }
         node = match dom.parent(node) {
             Ok(Some(p)) => p,
             _ => return None,
         };
     }
+}
+
+/// Cible de navigation d'un élément liant (`<a>`,
+/// `<form>`) — HTML « rules for choosing a navigable » :
+/// `true` = **nouveau** contexte de navigation
+/// (`target=_blank`, ou nom non réservé — les contextes
+/// nommés ne sont pas suivis : chaque dispatch ouvre un
+/// onglet frais), `false` = contexte courant (`_self`,
+/// `_parent`, `_top`, attribut absent/vide). La casse
+/// est insensible (spec).
+pub(crate) fn target_new_context(dom: &Dom, el: NodeId) -> bool {
+    let Ok(Some(t)) = dom.attribute(el, "target") else {
+        return false;
+    };
+    let t = t.trim();
+    !t.is_empty()
+        && !matches!(
+            t.to_ascii_lowercase().as_str(),
+            "_self" | "_parent" | "_top"
+        )
+}
+
+/// `rel` contient `noreferrer` — suppression du
+/// `Referer` sur la navigation émise (et `noopener`
+/// implicite, sans objet tant que `window.opener` n'a
+/// pas de pont JS — étape 130).
+pub(crate) fn rel_no_referrer(dom: &Dom, el: NodeId) -> bool {
+    dom.attribute(el, "rel").ok().flatten().is_some_and(|r| {
+        r.split_whitespace()
+            .any(|t| t.eq_ignore_ascii_case("noreferrer"))
+    })
 }
 
 /// Extrait le texte du premier `<title>` du document —

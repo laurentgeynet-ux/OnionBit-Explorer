@@ -503,10 +503,11 @@ impl HttpTransport for RefererTransport {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         if let Some(i) = init {
-            if !req
-                .headers
-                .iter()
-                .any(|(n, _)| n.eq_ignore_ascii_case("referer"))
+            if !req.no_referer
+                && !req
+                    .headers
+                    .iter()
+                    .any(|(n, _)| n.eq_ignore_ascii_case("referer"))
             {
                 if let Some(r) = referer_value(&i, &req.url) {
                     req.headers.push(("Referer".to_string(), r));
@@ -535,10 +536,11 @@ impl HttpTransport for RefererTransport {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         if let Some(i) = init {
-            if !req
-                .headers
-                .iter()
-                .any(|(n, _)| n.eq_ignore_ascii_case("referer"))
+            if !req.no_referer
+                && !req
+                    .headers
+                    .iter()
+                    .any(|(n, _)| n.eq_ignore_ascii_case("referer"))
             {
                 if let Some(r) = referer_value(&i, &req.url) {
                     req.headers.push(("Referer".to_string(), r));
@@ -738,6 +740,10 @@ impl CorsTransport {
             fetch_mode: FetchMode::Cors,
             fetch_user: false,
             cors: None,
+            // Le preflight suit la politique `Referer` de la
+            // requête d'origine (Fetch : même referrer
+            // policy sur l'`OPTIONS`).
+            no_referer: req.no_referer,
         };
         if !cors.unsafe_headers.is_empty() {
             p.headers.push((

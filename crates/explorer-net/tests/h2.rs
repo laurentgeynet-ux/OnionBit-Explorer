@@ -68,6 +68,7 @@ fn req(url: &str) -> Request {
         fetch_mode: FetchMode::NoCors,
         fetch_user: false,
         cors: None,
+        no_referer: false,
     }
 }
 

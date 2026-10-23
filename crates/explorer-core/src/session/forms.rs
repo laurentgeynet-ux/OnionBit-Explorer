@@ -571,6 +571,9 @@ pub(crate) fn form_request(
             fetch_user: false,
             // Navigation de formulaire — hors protocole CORS.
             cors: None,
+            // `rel=noreferrer` du `<form>` est lu au dispatch
+            // (`submit_form`) — la fabrique ne le connaît pas.
+            no_referer: false,
         });
     }
     let qs = form_url_encode(entries);
