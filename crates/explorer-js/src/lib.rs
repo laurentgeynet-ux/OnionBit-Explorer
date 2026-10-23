@@ -109,6 +109,12 @@ pub enum NetRequest {
         headers: Vec<(String, String)>,
         /// Corps `send(body)`/`fetch({body})`, si présent.
         body: Option<String>,
+        /// `Request.mode` de l'appel (JS-C77) — `fetch({mode})`,
+        /// `Cors` pour XHR, `NoCors` pour `sendBeacon`.
+        mode: explorer_jscore::FetchMode,
+        /// `Request.credentials` de l'appel (JS-C77) — gouverne
+        /// `Cookie`/`Set-Cookie` côté session.
+        credentials: explorer_jscore::FetchCredentials,
     },
     /// `xhr.abort()` — annuler la tâche `handle` si encore en vol.
     Abort {
@@ -704,6 +710,9 @@ pub fn null_factory() -> JsFactory {
 
 pub use explorer_jscore::module_specifiers;
 pub use explorer_jscore::{is_bare_specifier, rewrite_bare_specifier};
+// JS-C77 — `Request.mode`/`Request.credentials` transportés par
+// `NetRequest::Fetch` (ré-export : le type reste unique).
+pub use explorer_jscore::{FetchCredentials, FetchMode};
 
 /// Commandes vers le thread moteur — valeurs sérialisables, aucun
 /// handle `Rc` ne traverse.
@@ -1803,6 +1812,8 @@ impl explorer_jscore::XhrTransport for ChanXhr {
             url: req.url.clone(),
             headers: req.headers.clone(),
             body: req.body.clone(),
+            mode: req.mode,
+            credentials: req.credentials,
         });
         handle
     }

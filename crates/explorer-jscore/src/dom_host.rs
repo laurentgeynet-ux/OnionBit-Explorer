@@ -4978,6 +4978,11 @@ fn nav_send_beacon(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
         url,
         headers: Vec::new(),
         body,
+        // Spec `sendBeacon` : `mode: no-cors` + `credentials:
+        // include` (JS-C77 — le beacon part avec les cookies,
+        // réponse ignorée).
+        mode: crate::xhr::FetchMode::NoCors,
+        credentials: crate::xhr::FetchCredentials::Include,
     });
     Ok(Value::Bool(true))
 }

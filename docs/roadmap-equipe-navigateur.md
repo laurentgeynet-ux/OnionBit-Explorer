@@ -4161,6 +4161,45 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   la classe de faute balayée. Régressions
   `c76_*` (3 tests).
 
+- [x] **JS-C77. `fetch(mode,
+  credentials)` → transport** —
+  couture réservée de l'étape 126
+  (journal), consommée : le chantier
+  « web réel sécurisé » (125/126)
+  n'était exercé que par la
+  plateforme, le script peut
+  désormais piloter `Request.mode`
+  et `Request.credentials`.
+  `XhrRequest` + `NetRequest::Fetch`
+  gagnent `mode`/`credentials`
+  (enums `FetchMode`/`FetchCredentials`
+  jscore, ré-exportés par
+  `explorer-js`, mappés aux enums
+  net dans `script_request`).
+  `fetch` : lecture `Request` input
+  puis `init`, validation
+  `TypeError` en rejet (`new Request`
+  : synchrone) ; `same-origin` +
+  cross → rejet avant émission ;
+  `no-cors` → verbe simple exigé +
+  safelist à l'émission + réponse
+  **opaque** livrée (`type:'opaque'`,
+  statut 0, corps/en-têtes vides —
+  `ACAO` non exigé) ; `cors` cross
+  → `type:'cors'`. `xhr.withCredentials`
+  réel → `credentials:include` ;
+  `sendBeacon` → `no-cors`+`include` ;
+  `cache.add/addAll` → `include`
+  (spec). Cookies : `omit` pose/capture
+  rien, `include` envoie sous
+  `SameSite` et capture `Set-Cookie`
+  — beacon `no-cors` cross inclus.
+  Défense session : strip no-cors
+  redoublé dans `script_request`,
+  `same-origin` cross → bloquée.
+  Régressions `c77_*` (10 tests
+  jscore) + 4 session.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

@@ -807,7 +807,7 @@ impl Engine {
                 crate::heap::push_value(&mut ids, cb);
             }
         }
-        for (_, promise, _) in &self.xhr.fetches {
+        for (_, promise, _, _) in &self.xhr.fetches {
             ids.push(*promise);
         }
         // Prototypes `Headers`/`Request`/`Response`/`FormData`

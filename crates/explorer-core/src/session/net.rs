@@ -264,13 +264,23 @@ impl Session {
                     url,
                     headers,
                     body,
+                    mode,
+                    credentials,
                 } => {
                     let inflight = self.net_tasks.keys().filter(|(t, _)| *t == tab).count();
                     let built = if inflight >= self.max_script_net {
                         tracing::trace!(tab, handle, "quota requêtes script atteint");
                         None
                     } else {
-                        self.script_request(&page, &method, &url, &headers, body.as_deref())
+                        self.script_request(
+                            &page,
+                            &method,
+                            &url,
+                            &headers,
+                            body.as_deref(),
+                            mode,
+                            credentials,
+                        )
                     };
                     let Some((req, cross)) = built else {
                         failed.push(handle);
@@ -280,19 +290,29 @@ impl Session {
                     let tx = self.net_tx.clone();
                     let page_origin = origin_header_value(&page);
                     let req_url = req.url.clone();
-                    let credentials = req
-                        .cors
-                        .as_ref()
-                        .map_or(explorer_net::http::FetchCredentials::SameOrigin, |c| {
-                            c.credentials
-                        });
+                    // `credentials` du script (JS-C77) — porté hors
+                    // `req.cors` : `no-cors`/`include` (`sendBeacon`
+                    // cross) capture aussi `Set-Cookie`.
+                    let credentials = match credentials {
+                        explorer_js::FetchCredentials::Omit => {
+                            explorer_net::http::FetchCredentials::Omit
+                        }
+                        explorer_js::FetchCredentials::SameOrigin => {
+                            explorer_net::http::FetchCredentials::SameOrigin
+                        }
+                        explorer_js::FetchCredentials::Include => {
+                            explorer_net::http::FetchCredentials::Include
+                        }
+                    };
                     let partition = explorer_net::cookies::request_partition(&req);
+                    let fetch_mode = req.fetch_mode;
                     let j = tokio::spawn(async move {
                         let out = tr.fetch(&req).await;
                         let _ = tx.send(NetDone {
                             tab,
                             handle,
                             cross,
+                            mode: fetch_mode,
                             credentials,
                             page_origin,
                             req_url,
@@ -442,13 +462,22 @@ impl Session {
                 }
             }
             let resp = match &d.out {
-                Ok(resp) if !d.cross || cors_readable(&d.page_origin, resp) => NetResponse {
-                    handle: d.handle,
-                    status: resp.status,
-                    status_text: resp.reason.clone(),
-                    headers: resp.headers.clone(),
-                    body: resp.body.clone(),
-                },
+                // `no-cors` cross : livrée opaque par le moteur —
+                // `ACAO` n'est pas exigé (JS-C77 ; la lisibilité
+                // CORS ne s'applique qu'au mode `cors`).
+                Ok(resp)
+                    if !d.cross
+                        || d.mode == explorer_net::http::FetchMode::NoCors
+                        || cors_readable(&d.page_origin, resp) =>
+                {
+                    NetResponse {
+                        handle: d.handle,
+                        status: resp.status,
+                        status_text: resp.reason.clone(),
+                        headers: resp.headers.clone(),
+                        body: resp.body.clone(),
+                    }
+                }
                 _ => NetResponse {
                     handle: d.handle,
                     status: 0,

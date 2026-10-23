@@ -4073,6 +4073,166 @@ async fn xhr_set_cookie_same_origin_captured() {
     assert_eq!(t.last_header("cookie").as_deref(), Some("s=1"));
 }
 
+// ===== JS-C77 — `fetch(mode, credentials)` bout-en-bout =====
+
+/// `mode:'no-cors'` cross : la réponse se livre opaque sans
+/// `ACAO` — promesse résolue, `res.type === 'opaque'` (en
+/// `mode:'cors'` la même cible rendait `error`).
+const PAGE_NO_CORS: &str = "<!doctype html><html><body>\
+    <div id=\"x\">?</div>\
+    <script>fetch('http://b.test/api',{mode:'no-cors'})\
+    .then(function(r){document.getElementById('x').textContent=r.type})\
+    .catch(function(){document.getElementById('x').textContent='ERR'})</script>\
+    </body></html>";
+
+#[tokio::test]
+async fn fetch_no_cors_opaque_without_acao() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_NO_CORS);
+    // Aucun `ACAO` — `mode:cors` rendrait `error` ; `no-cors`
+    // doit résoudre `opaque`.
+    t.route("/api", 200, "DATA");
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">opaque</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://a.test/").await.unwrap();
+    // `Sec-Fetch-Mode: no-cors` posé à l'émission (étape 125).
+    assert_eq!(t.last_header("sec-fetch-mode").as_deref(), Some("no-cors"));
+    let b = s.open_tab();
+    s.navigate(b, "http://a.test/stat").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b), "no-cors → type opaque");
+}
+
+/// `mode:'same-origin'` sur cible cross : rejet `TypeError`
+/// avant émission — aucune requête réseau ne part.
+const PAGE_SAME_ORIGIN: &str = "<!doctype html><html><body>\
+    <div id=\"x\">?</div>\
+    <script>fetch('http://b.test/api',{mode:'same-origin'})\
+    .then(function(){document.getElementById('x').textContent='OK'})\
+    .catch(function(e){document.getElementById('x').textContent=e.name})</script>\
+    </body></html>";
+
+#[tokio::test]
+async fn fetch_same_origin_cross_never_emitted() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_SAME_ORIGIN);
+    t.route("/api", 200, "DATA");
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">TypeError</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://a.test/").await.unwrap();
+    assert!(
+        !t.paths().iter().any(|p| p == "/api"),
+        "aucune émission attendue : rejet same-origin avant transport"
+    );
+    let b = s.open_tab();
+    s.navigate(b, "http://a.test/stat").await.unwrap();
+    assert_eq!(
+        s.frame_png(a),
+        s.frame_png(b),
+        "same-origin cross → TypeError catch"
+    );
+}
+
+/// `credentials:'include'` cross : `Set-Cookie` de la cible
+/// capturé sous `include`, puis `Cookie` émis sur le fetch
+/// `include` suivant (`SameSite=None;Secure` + https).
+const PAGE_CREDS: &str = "<!doctype html><html><body>\
+    <div id=\"x\">?</div>\
+    <script>fetch('https://b.test/set',{credentials:'include'})\
+    .then(function(){return fetch('https://b.test/get',{credentials:'include'})})\
+    .then(function(){document.getElementById('x').textContent='OK'})\
+    .catch(function(){document.getElementById('x').textContent='ERR'})</script>\
+    </body></html>";
+
+#[tokio::test]
+async fn fetch_include_cross_sends_cookie() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_CREDS);
+    // `/set` : lisible sous `include` — `ACAO` explicite +
+    // `ACAC: true` requis (spec : `*` refusé sous include) —
+    // + pose `k=v` (capturé sous `include`) ; `/get` : idem,
+    // doit recevoir `Cookie`.
+    t.route_headers(
+        "/set",
+        200,
+        "S",
+        &[
+            ("access-control-allow-origin", "https://a.test"),
+            ("access-control-allow-credentials", "true"),
+            ("set-cookie", "k=v; SameSite=None; Secure"),
+        ],
+    );
+    t.route_headers(
+        "/get",
+        200,
+        "G",
+        &[
+            ("access-control-allow-origin", "https://a.test"),
+            ("access-control-allow-credentials", "true"),
+        ],
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">OK</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "https://a.test/").await.unwrap();
+    // La chaîne `.then` émet `/get` à la livraison de `/set` —
+    // une pompe de plus le draine (idem hôte réel).
+    s.pump_net().await;
+    let paths = t.paths();
+    assert!(
+        paths.iter().any(|p| p == "/get"),
+        "le fetch /get enchaîné doit être émis : {paths:?}"
+    );
+    assert_eq!(
+        t.last_header("cookie").as_deref(),
+        Some("k=v"),
+        "credentials:include → Cookie émis cross sous SameSite=None;Secure"
+    );
+    let b = s.open_tab();
+    s.navigate(b, "https://a.test/stat").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b), "chaîne fetch include → OK");
+}
+
+/// `credentials:'omit'` same-origin : `Cookie` absent même
+/// avec un cookie en jar (l'omit gouverne émission ET capture).
+const PAGE_OMIT: &str = "<!doctype html><html><body>\
+    <div id=\"x\">?</div>\
+    <script>fetch('/api',{credentials:'omit'})\
+    .then(function(){document.getElementById('x').textContent='OK'})\
+    .catch(function(){document.getElementById('x').textContent='ERR'})</script>\
+    </body></html>";
+
+#[tokio::test]
+async fn fetch_omit_sends_no_cookie() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_OMIT);
+    t.route_headers("/seed", 200, "S", &[("set-cookie", "k=v;path=/")]);
+    t.route("/api", 200, "DATA");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let seed = s.open_tab();
+    s.navigate(seed, "http://h.test/seed").await.unwrap();
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    assert_eq!(
+        t.last_header("cookie"),
+        None,
+        "credentials:omit → aucun Cookie émis malgré le jar"
+    );
+}
+
 /// `localStorage` : écrit dans un document, relu dans le
 /// suivant (même origine — map de session drainée/installée).
 const PAGE_LS_SET: &str = "<!doctype html><html><body><p>x</p>\

@@ -863,6 +863,10 @@ pub(crate) struct NetDone {
     /// est conditionnée à `Access-Control-Allow-Origin`
     /// (enforcement `CorsTransport`, étape 126).
     pub(crate) cross: bool,
+    /// `mode:` de la requête (JS-C77) — `NoCors` cross se
+    /// livre opaque sans `ACAO` ; `Cors` exige
+    /// `cors_readable`.
+    pub(crate) mode: explorer_net::http::FetchMode,
     /// `credentials:` de la requête — `Set-Cookie` capturé
     /// same-origin (sauf `omit`) ou `include` (étape 126).
     pub(crate) credentials: explorer_net::http::FetchCredentials,

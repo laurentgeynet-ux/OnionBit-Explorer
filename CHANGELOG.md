@@ -810,6 +810,67 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   wrapper `Selection` racinés.
   Régressions `c74_*` (6 tests).
 
+- **JS-C77 — `fetch(mode,
+  credentials)` câblé bout-en-
+  bout** (`explorer-jscore`,
+  `explorer-js`, `explorer-core`
+  — couture réservée de l'étape
+  126, consommée) : les champs
+  `Request.fetch_mode`/
+  `CorsRequest.credentials` posés
+  par le chantier « web réel
+  sécurisé » (étapes 125→126)
+  étaient remplis de défauts —
+  le script peut désormais les
+  piloter. `XhrRequest` gagne
+  `mode`/`credentials` (enums
+  `FetchMode`/`FetchCredentials`
+  exposés, `PartialEq`) ;
+  `NetRequest::Fetch` les
+  transporte ; `script_request`
+  les mappe aux enums net.
+  `fetch(input, {mode,
+  credentials})` : lecture
+  depuis le `Request` d'entrée
+  puis surcharge `init`, défauts
+  spec `cors`/`same-origin`,
+  valeurs inconnues → promesse
+  rejetée `TypeError`
+  (`new Request` → `TypeError`
+  synchrone). `same-origin` +
+  cible cross → rejet **avant
+  émission** (le transport n'est
+  pas sollicité). `no-cors` :
+  verbe simple exigé, en-têtes
+  auteur réduits à la CORS-
+  safelist à l'émission, réponse
+  livrée **opaque** (`type:
+  'opaque'`, `status: 0`, corps
+  et en-têtes vides — promesse
+  résolue, `ACAO` non exigé côté
+  session). `cors` cross →
+  `type: 'cors'` ; same-origin →
+  `'basic'`. `xhr.withCredentials`
+  réel (get/set, `InvalidStateError`
+  hors `unsent`/`opened` non
+  envoyé, survit à `open()`) →
+  `credentials: include`.
+  `sendBeacon` émet `no-cors` +
+  `include` (spec). `cache.add/
+  addAll` court en `include`
+  (spec Cache API). Cookies :
+  `omit` ne pose ni ne capture ;
+  `include` envoie sous réserve
+  `SameSite` **et** capture
+  `Set-Cookie` — y compris
+  `no-cors` cross (beacon).
+  Régressions `c77_*` (10 tests
+  jscore) + 4 tests session
+  bout-en-bout (`no-cors`
+  opaque, `same-origin` non
+  émis, `include` ↔ `Cookie`,
+  `omit` sans `Cookie`).
+
 ### Fixed
 
 - **JS-C72 — adoption de promesse

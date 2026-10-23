@@ -2628,6 +2628,7 @@ fn cached_response(e: &mut Engine, en: &CacheEntry) -> Value {
             body: en.body.clone().into_bytes(),
         },
         en.url.clone(),
+        "basic",
     )
 }
 
@@ -2807,7 +2808,12 @@ fn cache_add(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         return Err(e.type_error("add on incompatible receiver"));
     };
     let key = cache_key(e, arg(args, 0))?;
-    let fp = crate::xhr::fetch_fn(e, Value::Undefined, &[arg(args, 0)])?;
+    // Spec `cache.add` : le fetch interne court en
+    // `credentials: include` (le cache embarque les cookies).
+    let init = e.new_object();
+    let inc = e.str_val("include");
+    e.set_own(init, "credentials", inc, true);
+    let fp = crate::xhr::fetch_fn(e, Value::Undefined, &[arg(args, 0), Value::Obj(init)])?;
     // `.then(res => put(url, res))` — callback bound au ctx.
     let cache_v = cache_value(e, &reg, &name);
     let kv = e.str_val(key);

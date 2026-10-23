@@ -1479,3 +1479,201 @@ fn c74_broadcast_close_and_clone() {
         "closed:InvalidStateError,got"
     );
 }
+
+// ------------------------------------------------------------------
+// JS-C77 — `fetch(mode, credentials)` → transport (couture 125/126).
+// ------------------------------------------------------------------
+
+#[test]
+fn c77_fetch_defaults_and_props() {
+    let (mut e, t) = engine();
+    describe(&mut e, "fetch('/x');");
+    let reqs = t.requests.borrow();
+    assert_eq!(reqs.len(), 1);
+    let r = &reqs[0].1;
+    assert_eq!(r.mode, explorer_jscore::FetchMode::Cors);
+    assert_eq!(r.credentials, explorer_jscore::FetchCredentials::SameOrigin);
+    drop(reqs);
+    // `Request` expose `mode`/`credentials` (défauts spec).
+    assert_eq!(
+        describe(
+            &mut e,
+            "var r = new Request('/y'); r.mode + '|' + r.credentials"
+        ),
+        "cors|same-origin"
+    );
+}
+
+#[test]
+fn c77_fetch_init_overrides() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "fetch('/x', {mode: 'no-cors', credentials: 'include'});",
+    );
+    let reqs = t.requests.borrow();
+    let r = &reqs[0].1;
+    assert_eq!(r.mode, explorer_jscore::FetchMode::NoCors);
+    assert_eq!(r.credentials, explorer_jscore::FetchCredentials::Include);
+}
+
+#[test]
+fn c77_no_cors_strips_author_headers() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "fetch('/x', {mode: 'no-cors', headers: {'X-Key': '1', 'Accept': 'a',                        'Content-Type': 'text/plain', 'Content-Language': 'fr'}});",
+    );
+    let reqs = t.requests.borrow();
+    let names: Vec<String> = reqs[0]
+        .1
+        .headers
+        .iter()
+        .map(|(n, _)| n.to_ascii_lowercase())
+        .collect();
+    // Safelist seulement — `X-Key` strippé à l'émission.
+    assert_eq!(names, vec!["accept", "content-type", "content-language"]);
+}
+
+#[test]
+fn c77_same_origin_cross_rejects_before_transport() {
+    let (mut e, t) = engine();
+    e.set_page_url("https://a.test/dir/page");
+    describe(
+        &mut e,
+        "var out = '';         fetch('https://b.test/x', {mode: 'same-origin'})           .catch(function (er) { out = er.name; });",
+    );
+    assert_eq!(describe(&mut e, "out"), "TypeError");
+    // Rejet avant émission — le transport n'est pas sollicité.
+    assert_eq!(t.requests.borrow().len(), 0);
+    // `same-origin` sur cible same-origin : émise.
+    describe(
+        &mut e,
+        "fetch('https://a.test/dir/y', {mode: 'same-origin'});",
+    );
+    assert_eq!(t.requests.borrow().len(), 1);
+}
+
+#[test]
+fn c77_cross_cors_types_response() {
+    let (mut e, t) = engine();
+    e.set_page_url("https://a.test/dir/page");
+    describe(
+        &mut e,
+        "var t1 = '', t2 = '';         fetch('https://a.test/dir/y').then(function (r) { t1 = r.type; });         fetch('https://b.test/z').then(function (r) { t2 = r.type; });",
+    );
+    let h1 = t.requests.borrow()[0].0;
+    let h2 = t.requests.borrow()[1].0;
+    respond(&mut e, h1, 200, "x");
+    respond(&mut e, h2, 200, "x");
+    assert_eq!(describe(&mut e, "t1 + '|' + t2"), "basic|cors");
+}
+
+#[test]
+fn c77_no_cors_opaque_response() {
+    let (mut e, t) = engine();
+    e.set_page_url("https://a.test/dir/page");
+    describe(
+        &mut e,
+        "var log = '';         fetch('https://b.test/z', {mode: 'no-cors'})           .then(function (r) {              r.text().then(function (t) {                log = r.type + '|' + r.status + '|' + r.ok + '|' +                       r.headers.get('x') + '|' + t.length;              });            });",
+    );
+    let h = t.requests.borrow()[0].0;
+    respond(&mut e, h, 200, "secret");
+    // Réponse opaque : `type:'opaque'`, status 0, `ok` false,
+    // headers vides, corps vide — la promesse résout tout de même.
+    assert_eq!(describe(&mut e, "log"), "opaque|0|false|null|0");
+}
+
+#[test]
+fn c77_mode_and_credentials_validation() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var out = [];         fetch('/a', {mode: 'navigate'})           .catch(function (er) { out.push(er.name); });         fetch('/b', {mode: 'bogus'})           .catch(function (er) { out.push(er.name); });         fetch('/c', {credentials: 'bogus'})           .catch(function (er) { out.push(er.name); });         fetch('/d', {mode: 'no-cors', method: 'PUT'})           .catch(function (er) { out.push(er.name); });",
+    );
+    assert_eq!(
+        describe(&mut e, "out.join(',')"),
+        "TypeError,TypeError,TypeError,TypeError"
+    );
+    assert_eq!(t.requests.borrow().len(), 0);
+    // `new Request` : `TypeError` synchrone (spec).
+    assert!(e.eval("new Request('/x', {mode: 'navigate'})").is_err());
+    assert!(e
+        .eval("new Request('/x', {mode: 'no-cors', method: 'PUT'})")
+        .is_err());
+    assert!(e.eval("new Request('/x', {credentials: 'bogus'})").is_err());
+}
+
+#[test]
+fn c77_request_inherits_mode_credentials() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var rq = new Request('/x', {mode: 'no-cors', credentials: 'omit'});         fetch(rq);",
+    );
+    let reqs = t.requests.borrow();
+    let r = &reqs[0].1;
+    assert_eq!(r.mode, explorer_jscore::FetchMode::NoCors);
+    assert_eq!(r.credentials, explorer_jscore::FetchCredentials::Omit);
+    drop(reqs);
+    // `init` surcharge l'héritage.
+    describe(&mut e, "fetch(rq, {credentials: 'include'});");
+    let reqs = t.requests.borrow();
+    assert_eq!(
+        reqs[1].1.credentials,
+        explorer_jscore::FetchCredentials::Include
+    );
+    assert_eq!(reqs[1].1.mode, explorer_jscore::FetchMode::NoCors);
+}
+
+#[test]
+fn c77_xhr_with_credentials() {
+    let (mut e, t) = engine();
+    assert_eq!(
+        describe(&mut e, "var x = new XMLHttpRequest(); x.withCredentials"),
+        "false"
+    );
+    describe(
+        &mut e,
+        "x.open('POST', '/a'); x.withCredentials = true; x.send();",
+    );
+    let reqs = t.requests.borrow();
+    let r = &reqs[0].1;
+    assert_eq!(r.mode, explorer_jscore::FetchMode::Cors);
+    assert_eq!(r.credentials, explorer_jscore::FetchCredentials::Include);
+    drop(reqs);
+    // `withCredentials` hors `opened` non envoyé →
+    // `InvalidStateError` (spec — DOMException shape `{name}`).
+    assert_eq!(
+        describe(
+            &mut e,
+            "var n = ''; try { x.withCredentials = false; } catch (er) { n = er.name; } n"
+        ),
+        "InvalidStateError"
+    );
+    // `open()` reset l'état, pas le drapeau — toujours include.
+    describe(&mut e, "x.open('GET', '/b'); x.send();");
+    assert_eq!(
+        t.requests.borrow()[1].1.credentials,
+        explorer_jscore::FetchCredentials::Include
+    );
+}
+
+#[test]
+fn c77_send_beacon_no_cors_include() {
+    // `sendBeacon` (navigator, DOM installé) : spec `mode:
+    // no-cors` + `credentials: include` — fire-and-forget.
+    let mut e = Engine::new();
+    let t = StubTransport::new();
+    e.install_xhr(t.clone());
+    e.install_dom(&std::rc::Rc::new(std::cell::RefCell::new(
+        explorer_jscore::Dom::from_html("<html><body></body></html>"),
+    )));
+    describe(&mut e, "navigator.sendBeacon('/beacon', 'd=1')");
+    let reqs = t.requests.borrow();
+    assert_eq!(reqs.len(), 1);
+    let r = &reqs[0].1;
+    assert_eq!(r.method, "POST");
+    assert_eq!(r.mode, explorer_jscore::FetchMode::NoCors);
+    assert_eq!(r.credentials, explorer_jscore::FetchCredentials::Include);
+}
