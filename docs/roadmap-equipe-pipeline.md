@@ -2209,6 +2209,32 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   séquentiel (la parallélisation exigerait l'ensemble des
   clés avant itemisation — chantier architectural
   séparé), `raster` ~6,4 s, `encode_png` ~4,0 s.
+- [x] **R-85. Raster géant : atlas de glyphes rendus**
+  (`explorer-render`, reliure étape 112 — quatrième mur
+  mesuré) : décomposition par variante → **texte = ~95 %
+  du raster** (76 k items) ; par glyphe : clone du contour
+  + `transform` + `fill_path`, et sur frame > 8 191 px le
+  `DrawTiler` de tiny-skia re-clone+transforme le path
+  **par tuile** (les vides comprises — TODO amont). La
+  plume étant snapée sur la grille device, la couverture
+  est position-indépendante → `GlyphCache::rendered` :
+  `(face, glyphe, échelle device, couleur) → RenderedGlyph`
+  (pixmap couleur×couverture + offsets) rendue une fois
+  via `Mask::fill_path` — même rasterizer, couverture
+  bit-exacte — puis blit src-over prémultiplié par pixel
+  (clip appliqué en facteur d'alpha ; `±1/255`, sous la
+  tolérance reftest). `None` figé = pas d'encre ou hors
+  gabarit (`RENDER_MAX_DIM=2048`) → repli `fill_path` ;
+  `RENDER_CAP=8192` au-delà → idem (perf seule). Chemin
+  non axis-aligned inchangé. Mesuré : `raster` **6,4 s →
+  0,6-0,8 s** (×8-10) ; pipeline ~24 s (reliquat étape
+  112 → ×10,5 cumulé). Régressions
+  `atlas_meme_texte_meme_empreinte_a_deux_positions`
+  (invariant de position) +
+  `atlas_repaint_a_chaud_reproduit_la_frame`
+  (bit-identique). Reliquat : `layout_tree` ~12 s (buzz
+  ~10 s plancher debug), `encode_png` ~4,0 s,
+  `compute_styles` ~3,0 s.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

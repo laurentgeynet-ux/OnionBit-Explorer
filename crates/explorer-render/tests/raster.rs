@@ -542,3 +542,73 @@ fn sans_fallback_notdef_ne_peint_rien() {
     assert!(a[0] < 128 && a[3] > 128, "'A' peint, got {a:?}");
     assert_eq!(px(&f, 15, 10), [255, 255, 255, 255], "notdef vide");
 }
+
+// ── atlas de glyphes rendus (R-85) ────────────────────────────
+
+/// Empreinte des pixels d'encre d'une bande `(y0, y1)` —
+/// positions normalisées au min (x, y) de la zone : deux
+/// bandes contenant le même texte doivent donner la même
+/// empreinte (la couverture snapée est position-
+/// indépendante — c'est l'invariant qui rend l'atlas
+/// correct).
+fn empreinte_encre(f: &Frame, y0: u32, y1: u32) -> Vec<(u32, u32)> {
+    let mut pts = Vec::new();
+    for y in y0..y1 {
+        for x in 0..f.width {
+            let p = px(f, x, y);
+            if p[0] < 200 && p[3] > 64 {
+                pts.push((x, y));
+            }
+        }
+    }
+    let (mx, my) = pts.iter().fold((u32::MAX, u32::MAX), |(ax, ay), &(x, y)| {
+        (ax.min(x), ay.min(y))
+    });
+    pts.iter().map(|&(x, y)| (x - mx, y - my)).collect()
+}
+
+#[test]
+fn atlas_meme_texte_meme_empreinte_a_deux_positions() {
+    // Deux paragraphes au texte identique, positions
+    // différentes → bitmaps d'encre identiques à la
+    // translation près (le blit atlas reproduit exactement
+    // la couverture du `fill_path` historique).
+    let f = frame(
+        "<p>HH</p><p style=\"margin-top:40px\">HH</p>",
+        "p{margin:0;font-size:20px;color:#000000}",
+    );
+    let a = empreinte_encre(&f, 0, 30);
+    let b = empreinte_encre(&f, 40, 100);
+    assert!(!a.is_empty(), "encre attendue en bande haute");
+    assert_eq!(a, b, "même texte → même empreinte d'encre");
+}
+
+#[test]
+fn atlas_repaint_a_chaud_reproduit_la_frame() {
+    // Deux passes avec le même `GlyphCache` : la passe
+    // chaude ne fait que des blits depuis l'atlas — le
+    // résultat doit être BIT-IDENTIQUE à la passe froide
+    // (le cache introduit de la mémoire, pas de la
+    // divergence).
+    let html = "<p>atlas chaud</p>";
+    let css = "p{margin:0;font-size:20px;color:#000000}";
+    let dom: Dom = TreeBuilder::parse(html);
+    let mut eng = StyleEngine::new();
+    eng.add_css("body { margin: 0 }", Origin::Author);
+    eng.add_css(css, Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let list = build_display_list(&bx, VIEW, 200.0, 0.0);
+    let src = font_src();
+    let mut gc = explorer_render::GlyphCache::new();
+    let froid = explorer_render::rasterize_cached(&list, src, 1.0, &mut gc).expect("frame froide");
+    let chaud = explorer_render::rasterize_cached(&list, src, 1.0, &mut gc).expect("frame chaude");
+    assert_eq!(froid.pixels, chaud.pixels, "atlas : repaint divergent");
+}

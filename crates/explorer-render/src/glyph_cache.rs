@@ -43,7 +43,7 @@ use std::sync::Arc;
 
 use explorer_layout::font::{FontRequest, FontSource};
 use owned_ttf_parser::OwnedFace;
-use tiny_skia::{Path, PathBuilder, Transform};
+use tiny_skia::{FillRule, Mask, Path, PathBuilder, Pixmap, PremultipliedColorU8, Transform};
 
 /// Borne du registre de faces parsées — requêtes distinctes
 /// plausibles par page (familles × graisses × italiques).
@@ -52,6 +52,33 @@ const FACE_CAP: usize = 64;
 /// Borne des contours mémorisés — un glyphe ≈ dizaines de
 /// points ; 32 k entrées restent de l'ordre du Mo.
 const PATH_CAP: usize = 32_768;
+
+/// Borne des glyphes rendus mémorisés (R-85) — chaque
+/// entrée ≈ une petite `Pixmap` (bbox d'encre + marge AA) ;
+/// au-delà, l'appelant retombe sur `fill_path` direct.
+const RENDER_CAP: usize = 8192;
+
+/// Dimension maximale d'un glyphe rendu en atlas — un
+/// glyphe géant (titre × scale élevé) reste sur le chemin
+/// `fill_path` historique.
+const RENDER_MAX_DIM: i32 = 2048;
+
+/// Glyphe rendu prêt au blit (R-85) : couverture AA cuite
+/// avec la couleur dans une pixmap prémultipliée — la
+/// position de plume étant snapée sur la grille device, le
+/// bitmap est strictement position-indépendant sous
+/// transform axis-aligned.
+pub struct RenderedGlyph {
+    /// `couleur × couverture` prémultipliée ; `dx`,`dy` =
+    /// décalage du coin (0,0) depuis la plume snapée
+    /// (l'encre d'un glyphe déborde au-dessus/gauche de la
+    /// plume — les offsets sont typiquement négatifs).
+    pub pm: Pixmap,
+    /// Offset x device du bitmap depuis la plume (px entiers).
+    pub dx: i32,
+    /// Offset y device du bitmap depuis la plume (px entiers).
+    pub dy: i32,
+}
 
 /// Cache persistant de raster (R-36) — voir le module.
 #[derive(Default)]
@@ -73,6 +100,17 @@ pub struct GlyphCache {
     /// fonte` (`None` figé = glyphe sans contour — espace,
     /// `.notdef` absent…).
     paths: HashMap<(usize, u16), Option<Path>>,
+    /// `(face, glyphe, échelle device x|y, couleur) → glyphe
+    /// rendu` (R-85) — le `fill_path` par glyphe repassait
+    /// clone + transform du contour à chaque occurrence
+    /// **et** payait le `DrawTiler` de tiny-skia sur les
+    /// frames > 8191 px (clone+transform du path par tuile,
+    /// y compris celles que le glyphe ne touche pas — TODO
+    /// amont non résolu). Sous plume snapée, le blit d'un
+    /// bitmap rendu une fois est pixel-identique. `None`
+    /// figé = pas d'encre ou hors gabarit (`RENDER_MAX_DIM`)
+    /// → l'appelant retombe sur `fill_path`.
+    rendered: HashMap<(usize, u16, u32, u32, u32), Option<RenderedGlyph>>,
 }
 
 impl GlyphCache {
@@ -95,6 +133,7 @@ impl GlyphCache {
                 self.faces.clear();
                 self.faces_fb.clear();
                 self.paths.clear();
+                self.rendered.clear();
                 self.rev = Some(rev);
             }
         }
@@ -180,13 +219,123 @@ impl GlyphCache {
         self.paths.len()
     }
 
+    /// Glyphe **rendu** (couverture × couleur) prêt au blit
+    /// (R-85) — mémoïsé par `(face, glyphe, échelle device,
+    /// couleur)` ; le même bitmap sert à toute position de
+    /// plume entière. `gsx`/`gsy` = échelle device du glyphe
+    /// (`gscale × cur.sx|sy`, signe conservé — un miroir
+    /// produit un autre glyphe).
+    ///
+    /// `None` = pas d'encre (espace, contour vide) **ou**
+    /// hors gabarit (`RENDER_MAX_DIM`/`RENDER_CAP`) — dans
+    /// les deux cas l'appelant retombe sur le `fill_path`
+    /// historique, qui fait alors le bon choix (rien à
+    /// peindre / glyphe géant peint normalement).
+    pub fn rendered_glyph(
+        &mut self,
+        face: &ttf_parser::Face<'_>,
+        face_key: usize,
+        id: u16,
+        gsx: f32,
+        gsy: f32,
+        color: tiny_skia::Color,
+    ) -> Option<&RenderedGlyph> {
+        let c = color.to_color_u8();
+        let key = (
+            face_key,
+            id,
+            gsx.to_bits(),
+            gsy.to_bits(),
+            pack_u8(c.red(), c.green(), c.blue(), c.alpha()),
+        );
+        if self.rendered.contains_key(&key) {
+            return self.rendered.get(&key).and_then(Option::as_ref);
+        }
+        if self.rendered.len() >= RENDER_CAP {
+            return None;
+        }
+        let built = self.build_glyph(face, face_key, id, gsx, gsy, c.premultiply());
+        self.rendered.insert(key, built);
+        self.rendered.get(&key).and_then(Option::as_ref)
+    }
+
+    /// Rasterise le glyphe dans un `Mask` à sa taille
+    /// d'encre (+1 px de marge AA) puis cuit `couleur ×
+    /// couverture` en pixmap prémultipliée. `Mask::fill_path`
+    /// = même rasterizer que le `fill_path` de pixmap — la
+    /// couverture est bit-exacte, seule la composition
+    /// finale change de chemin (blit, ±1/255 d'arrondi).
+    fn build_glyph(
+        &mut self,
+        face: &ttf_parser::Face<'_>,
+        face_key: usize,
+        id: u16,
+        gsx: f32,
+        gsy: f32,
+        color: PremultipliedColorU8,
+    ) -> Option<RenderedGlyph> {
+        let path = self.glyph_path(face, face_key, id)?;
+        let tpath = path.transform(Transform::from_scale(gsx, -gsy))?;
+        let b = tpath.bounds();
+        // i32 : une bbox de glyphe reste très loin de
+        // l'overflow (bornée juste après).
+        #[allow(clippy::cast_possible_truncation)]
+        let (dx0, dy0) = (
+            (b.left() - 1.0).floor() as i32,
+            (b.top() - 1.0).floor() as i32,
+        );
+        #[allow(clippy::cast_possible_truncation)]
+        let (dx1, dy1) = (
+            (b.right() + 1.0).ceil() as i32,
+            (b.bottom() + 1.0).ceil() as i32,
+        );
+        let (w, h) = (dx1 - dx0, dy1 - dy0);
+        if w <= 0 || h <= 0 || w > RENDER_MAX_DIM || h > RENDER_MAX_DIM {
+            return None;
+        }
+        #[allow(clippy::cast_sign_loss)]
+        let mut mask = Mask::new(w as u32, h as u32)?;
+        // i32→f32 : dx/dy bornés par RENDER_MAX_DIM — exact.
+        #[allow(clippy::cast_precision_loss)]
+        mask.fill_path(
+            &tpath,
+            FillRule::Winding,
+            true,
+            Transform::from_translate(-dx0 as f32, -dy0 as f32),
+        );
+        #[allow(clippy::cast_sign_loss)]
+        let mut pm = Pixmap::new(w as u32, h as u32)?;
+        for (dst, &cov) in pm.pixels_mut().iter_mut().zip(mask.data().iter()) {
+            #[allow(clippy::cast_possible_truncation)]
+            let m = |v: u8| ((u32::from(v) * u32::from(cov) + 127) / 255) as u8;
+            *dst = PremultipliedColorU8::from_rgba(
+                m(color.red()),
+                m(color.green()),
+                m(color.blue()),
+                m(color.alpha()),
+            )
+            .unwrap_or(PremultipliedColorU8::TRANSPARENT);
+        }
+        Some(RenderedGlyph {
+            pm,
+            dx: dx0,
+            dy: dy0,
+        })
+    }
+
     /// Vide tout (sans toucher `rev` — prochain sync à la
     /// même révision ne re-vide pas).
     pub fn clear(&mut self) {
         self.faces.clear();
         self.faces_fb.clear();
         self.paths.clear();
+        self.rendered.clear();
     }
+}
+
+/// Quatre octets RGBA tassés en clé `u32` (carte `rendered`).
+fn pack_u8(r: u8, g: u8, b: u8, a: u8) -> u32 {
+    (u32::from(r) << 24) | (u32::from(g) << 16) | (u32::from(b) << 8) | u32::from(a)
 }
 
 /// Adaptateur `OutlineBuilder → PathBuilder` — mêmes

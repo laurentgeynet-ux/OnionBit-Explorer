@@ -258,7 +258,7 @@ fn paint_text(
         };
         let gscale = size_px / f32::from(face.units_per_em()).max(1.0);
         draw_glyph(
-            pixmap, gc, face, face_key, g, pen, oy, gscale, size_px, cur, &paint, clip,
+            pixmap, gc, face, face_key, g, pen, oy, gscale, size_px, cur, &paint, color, clip,
         );
         pen += g.advance;
     }
@@ -283,6 +283,7 @@ fn draw_glyph(
     size_px: f32,
     cur: Transform,
     paint: &Paint,
+    color: tiny_skia::Color,
     clip: Option<&Mask>,
 ) {
     // La position de plume (espace device) doit rester dans le
@@ -322,11 +323,97 @@ fn draw_glyph(
             ))
             .post_concat(cur)
     };
+    // R-85 — atlas de glyphes rendus : sous transform
+    // axis-aligned (le cas quasi universel), la couverture
+    // d'un glyphe snapé est position-indépendante → blit
+    // d'un bitmap rendu une fois. Évite le clone+transform
+    // du contour par glyphe ET le `DrawTiler` de tiny-skia
+    // (clone+transform par tuile ≥ 8192 px, y compris les
+    // tuiles que le glyphe ne touche pas). `None` = pas
+    // d'encre ou hors gabarit → repli `fill_path`.
+    if cur.kx == 0.0 && cur.ky == 0.0 {
+        if let Some(rg) = gc.rendered_glyph(
+            face,
+            face_key,
+            g.id,
+            gscale * cur.sx,
+            gscale * cur.sy,
+            color,
+        ) {
+            #[allow(clippy::cast_possible_truncation)]
+            blit_glyph(
+                pixmap,
+                rg,
+                px.round() as i32 + rg.dx,
+                py.round() as i32 + rg.dy,
+                clip,
+            );
+            return;
+        }
+    }
     if let Some(path) = gc
         .glyph_path(face, face_key, g.id)
         .and_then(|p| p.transform(tf))
     {
         pixmap.fill_path(&path, paint, FillRule::Winding, Transform::default(), clip);
+    }
+}
+
+/// Blit d'un glyphe rendu (R-85) — source-over prémultiplié
+/// par pixel, mêmes formules que `paint_image_axis` : la
+/// couverture AA est déjà cuite dans `rg.pm` (colorisée au
+/// rendu), le `clip` module l'alpha. Équivalence de blend
+/// avec `fill_path` : `dst = (couleur·cov·clip) +
+/// dst·(1 − alpha·cov·clip)` des deux côtés (±1/255
+/// d'arrondi — largement sous la tolérance reftest).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn blit_glyph(
+    pixmap: &mut Pixmap,
+    rg: &crate::glyph_cache::RenderedGlyph,
+    ox: i32,
+    oy: i32,
+    clip: Option<&Mask>,
+) {
+    let (pw, ph) = (
+        i32::try_from(pixmap.width()).unwrap_or(i32::MAX),
+        i32::try_from(pixmap.height()).unwrap_or(i32::MAX),
+    );
+    let (sw, sh) = (
+        i32::try_from(rg.pm.width()).unwrap_or(i32::MAX),
+        i32::try_from(rg.pm.height()).unwrap_or(i32::MAX),
+    );
+    let (x0, y0) = (ox.max(0), oy.max(0));
+    let (x1, y1) = ((ox + sw).min(pw), (oy + sh).min(ph));
+    if x0 >= x1 || y0 >= y1 {
+        return;
+    }
+    let clip_data = clip.map(tiny_skia::Mask::data);
+    let dst = pixmap.pixels_mut();
+    let src = rg.pm.pixels();
+    let (pwu, swu) = (pw as usize, sw as usize);
+    for yy in y0..y1 {
+        let srow = (yy - oy) as usize * swu;
+        for xx in x0..x1 {
+            let sp = src[srow + (xx - ox) as usize];
+            let cov = clip_data.map_or(255, |m| u32::from(m[yy as usize * pwu + xx as usize]));
+            let sa = (u32::from(sp.alpha()) * cov + 127) / 255;
+            if sa == 0 {
+                continue;
+            }
+            let di = yy as usize * pwu + xx as usize;
+            let dp = dst[di];
+            let inv = 255 - sa;
+            // Premult src-over : dst = src·clip + dst·(1−a·clip)
+            let blend =
+                |sv: u8, dv: u8| ((u32::from(sv) * cov + u32::from(dv) * inv + 127) / 255) as u8;
+            dst[di] = tiny_skia::PremultipliedColorU8::from_rgba(
+                blend(sp.red(), dp.red()),
+                blend(sp.green(), dp.green()),
+                blend(sp.blue(), dp.blue()),
+                ((sa * 255 + u32::from(dp.alpha()) * inv + 127) / 255) as u8,
+            )
+            .unwrap_or(tiny_skia::PremultipliedColorU8::TRANSPARENT);
+        }
     }
 }
 

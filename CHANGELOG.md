@@ -38,17 +38,59 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `detail` recopié ; `cancelBubble = true` ≡
   `stopPropagation` et `returnValue = false` ≡
   `preventDefault` (legacy DOM0, `Host::set`) ;
-  `initEvent` réarme les flags. Alias
-  `matchesSelector`/`msMatchesSelector`
-  (pré-standards, shims `selector-observer`
-  github : `el.matchesSelector||el.ms…` →
-  `call of Undefined` sans eux). Régression
+  `initEvent` réarme les flags.
+  `Element.prototype` porte `matches`/`closest`
+  en *valeurs* (natives receveur-élément,
+  `TypeError` sinon) + alias pré-standards
+  `matchesSelector`/`webkit`/`moz`/`o`/`ms` —
+  les shims lisent la référence proto puis
+  `.call(el,…)` (selector-observer github :
+  `call of Undefined` sans elles). Régression
   `event_dispatche_surface_honnete` (chemin
   `4|main`, frère épargné/tué selon la méthode,
   gate `cancelable` `false|true`). Résidu :
   proto `Event` script-créé ignore
   `cancelable` (déviation pré-existante).
 
+- **R-85 — Raster géant : atlas
+  de glyphes rendus** (`explorer-
+  render`, reliure « ~250 s »
+  étape 112 — quatrième mur) :
+  le texte = ~95 % du raster
+  (76 k items) ; chaque glyphe
+  payait clone + transform du
+  contour ET le `DrawTiler` de
+  tiny-skia (clone+transform du
+  path par tuile ≥ 8 192 px,
+  tuiles vides comprises — TODO
+  amont non résolu). La plume
+  étant snapée sur la grille
+  device, la couverture d'un
+  glyphe est position-
+  indépendante sous transform
+  axis-aligned → `GlyphCache::
+  rendered` mémoïse `(face,
+  glyphe, échelle, couleur) →
+  pixmap couleur×couverture`
+  rendue une fois via
+  `Mask::fill_path` (même
+  rasterizer → couverture
+  bit-exacte), puis blit
+  src-over prémultiplié par
+  pixel (`±1/255`, sous la
+  tolérance reftest). `None`
+  figé = pas d'encre ou hors
+  gabarit (`RENDER_MAX_DIM`) →
+  repli `fill_path` historique.
+  Mesuré : `raster` **6,4 s →
+  0,6-0,8 s** (×8-10) ;
+  pipeline ~24 s (~250 s →
+  ×10,5 cumulé R-82→R-85).
+  Régressions
+  `atlas_meme_texte_meme_
+  empreinte_a_deux_positions` +
+  `atlas_repaint_a_chaud_
+  reproduit_la_frame`.
 - **R-84 — Layout géant : bbox
   d'encre mémoïsée par (fonte,
   glyphe)** (`explorer-layout`,
