@@ -575,6 +575,21 @@ impl Session {
                     req.headers.push(("referer".to_string(), r));
                 }
             }
+            // `Origin` de navigation (étape 133) : spec Fetch —
+            // toute méthode non-safe (POST de formulaire…) porte
+            // l'origine de la page source, same-origin inclus ;
+            // indépendante du `Referer` (`no_referer` ne la
+            // supprime pas). `Origin` sur navigations = POST
+            // uniquement (GET reste safelisté sans).
+            if !matches!(req.method, Method::Get | Method::Head | Method::Options)
+                && !req
+                    .headers
+                    .iter()
+                    .any(|(n, _)| n.eq_ignore_ascii_case("origin"))
+            {
+                req.headers
+                    .push(("origin".to_string(), origin_header_value(&page)));
+            }
         }
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
         entry.nav_epoch += 1;

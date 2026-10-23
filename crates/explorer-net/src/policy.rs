@@ -397,17 +397,15 @@ pub fn referer_value_for(initiator: &Url, target: &Url, policy: ReferrerPolicy) 
     }
 }
 
-/// `Origin:` calculé — non-safe cross-origin seulement.
-fn origin_value(initiator: &Url, target: &Url, method: Method) -> Option<String> {
+/// `Origin:` calculé — toute méthode non-safe (spec Fetch :
+/// ni `GET` ni `HEAD`, origine same-origin **incluse** —
+/// étape 133 ; les endpoints CSRF/auth l'exigent). Origine
+/// opaque sérialisée `null` (spec).
+fn origin_value(initiator: &Url, _target: &Url, method: Method) -> Option<String> {
     if matches!(method, Method::Get | Method::Head | Method::Options) {
         return None;
     }
-    match initiator.origin() {
-        crate::url::Origin::Tuple { .. } if initiator.origin() != target.origin() => {
-            referer_value_origin(initiator)
-        }
-        _ => None,
-    }
+    Some(referer_value_origin(initiator).unwrap_or_else(|| "null".to_string()))
 }
 
 fn referer_value_origin(u: &Url) -> Option<String> {

@@ -758,6 +758,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `form_referrerpolicy_attr`,
   `iframe_referrerpolicy_attr`.
 
+- **Étape 133 — `Origin` sur les
+  requêtes non-safe**
+  (`explorer-net`,
+  `explorer-core` — cap « web
+  réel sécurisé ») : spec Fetch —
+  toute méthode ni `GET` ni
+  `HEAD` porte `Origin`,
+  **same-origin inclus** (le
+  gate était cross-origin
+  seulement ; les endpoints
+  CSRF/auth exigent l'en-tête
+  sur les POST same-origin).
+  `policy::origin_value`
+  élargie ; origine opaque
+  sérialisée `Origin: null`
+  (spec). `nav_begin` stamp
+  `Origin` sur les navigations
+  non-safe initiées par la
+  page — trou mesuré : un
+  submit POST de formulaire
+  n'en portait aucun.
+  `RefererTransport` (fetch +
+  stream), `initiator_headers_
+  policy` (sous-ressources,
+  `fetch`/XHR same-origin POST)
+  couverts par la même source
+  unique. `no_referer` ne
+  supprime pas `Origin` (pas
+  une info de référent).
+  Régressions session
+  `nav_post_emits_origin_*`/
+  `nav_get_emits_no_origin`
+  (3 tests) + policy
+  `origin_on_same_origin_post`,
+  `origin_opaque_serializes_null`.
+
 ### Fixed
 
 - **Étape 122 — `root_font_size`

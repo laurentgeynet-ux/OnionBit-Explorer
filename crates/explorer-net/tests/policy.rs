@@ -1060,3 +1060,53 @@ async fn cors_no_context_passthrough() {
     let r = t.fetch(&req).await.unwrap();
     assert_eq!(r.body, b"raw");
 }
+
+// ---- Étape 133 : `Origin` sur toute méthode non-safe ----
+
+/// Spec Fetch : `Origin` part sur tout non-GET/HEAD —
+/// **same-origin inclus** (les endpoints CSRF/auth l'exigent).
+/// Contrôle : GET et HEAD restent sans `Origin`.
+#[tokio::test]
+async fn origin_on_same_origin_post() {
+    let inner = FakeTransport::new(vec![resp(200, &[], b"x"), resp(200, &[], b"x")]);
+    let t = RefererTransport::wrap(inner.clone(), Some(u("https://a.example/p")));
+    let mut req = Request::get(u("https://a.example/api"));
+    req.method = Method::Post;
+    t.fetch(&req).await.unwrap();
+    t.fetch(&Request::get(u("https://a.example/api")))
+        .await
+        .unwrap();
+    let seen = inner.seen();
+    let origin = seen[0]
+        .headers
+        .iter()
+        .find(|(n, _)| n == "Origin")
+        .map(|(_, v)| v.as_str());
+    assert_eq!(
+        origin,
+        Some("https://a.example"),
+        "POST same-origin : Origin de l'initiateur"
+    );
+    assert!(
+        !seen[1].headers.iter().any(|(n, _)| n == "Origin"),
+        "GET : aucun Origin"
+    );
+}
+
+/// Origine opaque (`about:blank`, `data:`…) : `Origin: null`
+/// sur non-safe — sérialisation spec.
+#[tokio::test]
+async fn origin_opaque_serializes_null() {
+    let inner = FakeTransport::new(vec![resp(200, &[], b"x")]);
+    let t = RefererTransport::wrap(inner.clone(), Some(u("about:blank")));
+    let mut req = Request::get(u("https://a.example/api"));
+    req.method = Method::Post;
+    t.fetch(&req).await.unwrap();
+    let seen = inner.seen();
+    let origin = seen[0]
+        .headers
+        .iter()
+        .find(|(n, _)| n == "Origin")
+        .map(|(_, v)| v.as_str());
+    assert_eq!(origin, Some("null"), "origine opaque → Origin: null");
+}

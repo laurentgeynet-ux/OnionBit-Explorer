@@ -7707,3 +7707,68 @@ async fn form_referrerpolicy_attr() {
         "form referrerpolicy=same-origin : cross → rien"
     );
 }
+
+// ===== Étape 133 : `Origin` sur les requêtes non-safe
+// (spec Fetch — same-origin inclus, navigations POST) =====
+
+/// Un POST de formulaire **same-origin** porte `Origin`
+/// (l'en-tête n'est plus réservé au cross-origin — les
+/// endpoints CSRF/auth l'exigent, spec Fetch).
+#[tokio::test]
+async fn nav_post_emits_origin_same_origin() {
+    let (mut s, t) = test_session();
+    t.route("/f", 200, PAGE_POST_FORM);
+    t.route("/doit", 200, "<html><body>done</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    s.handle_input(id, InputEvent::Click { x: 10.0, y: 183.0 })
+        .await
+        .unwrap();
+    assert_eq!(
+        t.req_header("/doit", "origin").as_deref(),
+        Some("http://h.test"),
+        "POST de navigation : Origin de la page source"
+    );
+}
+
+/// Cross-origin : même obligation — `Origin` = page source.
+#[tokio::test]
+async fn nav_post_emits_origin_cross_origin() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/f",
+        200,
+        "<html><body><form method=\"post\" action=\"http://cdn.test/b\">\
+         <input type=\"submit\" value=\"go\"></form></body></html>",
+    );
+    t.route("/b", 200, PAGE_T);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    s.handle_input(id, InputEvent::Click { x: 10.0, y: 10.0 })
+        .await
+        .unwrap();
+    assert_eq!(
+        t.req_header("/b", "origin").as_deref(),
+        Some("http://h.test"),
+        "POST cross-origin : Origin = origine de la page"
+    );
+}
+
+/// Un GET de navigation reste safelisté : pas d'`Origin`.
+#[tokio::test]
+async fn nav_get_emits_no_origin() {
+    let (mut s, t) = test_session();
+    t.route("/dir/p", 200, PAGE_REF_LINK);
+    t.route("/b", 200, PAGE_T);
+    t.route_bin("/i.png", 200, vec![1]);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(
+        t.req_header("/b", "origin"),
+        None,
+        "GET de navigation : aucun Origin (méthode sûre)"
+    );
+}

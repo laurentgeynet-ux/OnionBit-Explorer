@@ -2870,6 +2870,28 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   indépendant du `Referer`.
   6 tests session + 3 policy.
 
+- [x] **Étape 133. `Origin` sur
+  les requêtes non-safe** :
+  spec Fetch — toute méthode
+  ni `GET` ni `HEAD` porte
+  `Origin`, **same-origin
+  inclus** (les endpoints
+  CSRF/auth l'exigent ; le
+  gate était cross-origin
+  seulement). `origin_value`
+  (net) élargie, origine
+  opaque → `Origin: null`.
+  `nav_begin` stamp `Origin`
+  sur les navigations POST
+  initiées par la page —
+  trou mesuré : les submit
+  de formulaire n'en
+  portaient aucun. Fetch/
+  XHR same-origin POST
+  couverts via
+  `initiator_headers_policy`.
+  3 tests session + 2 policy.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
