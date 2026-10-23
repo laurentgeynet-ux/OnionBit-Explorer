@@ -658,6 +658,52 @@ fn pseudo_elements_generent_des_boites_bordees() {
     assert!(bx.children.iter().all(|c| c.node.is_some()));
 }
 
+#[test]
+fn pseudo_content_alt_text_non_peint() {
+    // R-80 — CSS Content-3 : `content: <valeur> / <alt>` — le
+    // texte après le `/` est l'alternative d'accessibilité,
+    // jamais peinte (`content:"\200b"/" (external)"` de MDN
+    // rendait « (external) » en clair, issue #14).
+    let dom = TreeBuilder::parse("<html><body><a id=x href=/u>lien</a></body></html>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("#x::after { content:' Z' / ' (external)' }", Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root = dom.document_element().expect("el");
+    let bx = build_box_tree(&dom, root, &styles).expect("arbre");
+    // Cherche le pseudo ::after : sa boîte n'a pas de nœud DOM
+    // et son enfant texte = « Z » seul.
+    let mut stack = vec![&bx];
+    let mut found = false;
+    while let Some(b) = stack.pop() {
+        if b.node.is_none() && b.children.iter().any(|c| c.text.is_some()) {
+            let t = b.children.iter().find_map(|c| c.text.as_ref());
+            assert_eq!(t.map(String::as_str), Some(" Z"), "alt jamais peint");
+            found = true;
+        }
+        stack.extend(b.children.iter());
+    }
+    assert!(found, "boîte ::after produite");
+    // Variante : pas de `/` → toutes les chaînes concaténées
+    // (comportement historique conservé).
+    let mut eng2 = StyleEngine::new();
+    eng2.add_css("#x::after { content:' A' ' B' }", Origin::Author);
+    let styles = eng2.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let bx2 = build_box_tree(&dom, root, &styles).expect("arbre2");
+    let mut stack = vec![&bx2];
+    let mut texts = String::new();
+    while let Some(b) = stack.pop() {
+        if b.node.is_none() {
+            for c in &b.children {
+                if let Some(t) = &c.text {
+                    texts.push_str(t);
+                }
+            }
+        }
+        stack.extend(b.children.iter());
+    }
+    assert_eq!(texts, " A B");
+}
+
 // ── R-13c : <object> repli vs remplacé ───────────────────────
 
 #[test]

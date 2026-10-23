@@ -112,6 +112,31 @@ fn texte_emis_depuis_fragments_shapes() {
 }
 
 #[test]
+fn texte_replie_sur_la_famille_mesuree() {
+    // R-81 — `font_request` (peinture) délègue à
+    // `request_of_family` : le repli `font-family` absent et
+    // la pondération `bolder`/`lighter` sont ceux de la mesure
+    // (avant : `"sans-serif"` en dur + `bolder`→800 là où la
+    // mesure lit 700 — issue #9 4ᵉ défaut).
+    let (_dom, _bx, items) = dl("<p>bonjour</p><p id=b>x</p>", "#b{font-weight:bolder}");
+    let (def, bold): (Vec<_>, Vec<_>) = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::Text { font, .. } => Some(font),
+            _ => None,
+        })
+        .partition(|f| f.weight == 400);
+    assert!(
+        def.iter().all(|f| f.families == ["serif"]),
+        "repli = famille mesurée (serif), pas sans-serif : {def:?}"
+    );
+    assert!(
+        bold.iter().all(|f| f.weight == 700),
+        "bolder pondéré comme la mesure : {bold:?}"
+    );
+}
+
+#[test]
 fn visibility_hidden_supprime_emission() {
     // R-49 : `visibility:hidden` supprime l'émission de tout
     // le sous-arbre (fond + texte) — motif « visually hidden »

@@ -576,7 +576,13 @@ impl<'t> Parser<'t> {
             self.pos += 1;
         }
         let (value, important) = strip_important(&parts.join(""));
-        if value.is_empty() || has_stray_bang(&value) {
+        // Une propriété custom `--*` accepte la valeur vide
+        // (css-variables-1 : `<declaration-value>` peut n'être
+        // qu'un token whitespace — stream vide valide ; MDN
+        // s'en sert pour basculer son toggle `light-dark` en
+        // contexte sombre, R-80). Les autres propriétés à
+        // valeur vide restent des déclarations mortes.
+        if (value.is_empty() && !name.starts_with("--")) || has_stray_bang(&value) {
             return None;
         }
         Some(Declaration {

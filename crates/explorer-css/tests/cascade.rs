@@ -527,6 +527,103 @@ fn var_ne_se_substitut_pas_aux_proprietes_custom() {
     assert_eq!(e.compute(&f.dom, f.p, &env()).get("width"), Some("4px"));
 }
 
+// ── R-80 — `initial` sur --* = guaranteed-invalid value ──
+// css-variables-1 §3.2 : l'initiale d'une propriété custom est
+// la *guaranteed-invalid value* — un `var()` qui la référence
+// échoue et prend son fallback (ou invalide la déclaration).
+// Le mécanisme « light-dark » de MDN (`--scheme: initial`
+// invalidant un toggle `--t: var(--scheme) var(--white)`)
+// reposait dessus : la --* réduite à `""` rendait la
+// substitution « réussie » avec ` #fff` → texte blanc sur
+// blanc (titres de cartes et contributions invisibles,
+// issue #14).
+
+#[test]
+fn var_initial_sur_custom_est_guaranteed_invalid() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { --t: var(--scheme) #fff; color: var(--t, #000) } \
+         p { --scheme: initial }",
+        Origin::Author,
+    );
+    // --t référence --scheme (GIV sur p) → --t invalide →
+    // color prend le fallback #000, pas «  #fff ».
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("color"), Some("#000"));
+    // --scheme masquée : get() ne retourne pas la sentinelle.
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("--scheme"), None);
+}
+
+#[test]
+fn var_initial_sur_custom_masque_heritage() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    // div fixe --x ; p la réduit à `initial` → GIV propre qui
+    // MASQUE la valeur héritée (spec : initial ≠ absent).
+    e.add_css(
+        "div { --x: blue } p { --x: initial; color: var(--x, red) }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.p, &env()).get("color"),
+        Some("red"),
+        "la --* propre GIV masque --x hérité → fallback"
+    );
+}
+
+#[test]
+fn var_inherit_unset_sur_custom() {
+    let f = fixture();
+    // `inherit`/`unset` sur --* → valeur du parent.
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { --x: blue } p { --x: unset; color: var(--x, red) }",
+        Origin::Author,
+    );
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("color"), Some("blue"));
+    // Parent sans la --* → `unset` → GIV → fallback.
+    let mut e2 = StyleEngine::new();
+    e2.add_css("p { --z: unset; width: var(--z, 5px) }", Origin::Author);
+    assert_eq!(e2.compute(&f.dom, f.p, &env()).get("width"), Some("5px"));
+}
+
+#[test]
+fn var_guaranteed_invalid_sans_fallback_invalide() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    // Référence à une --* GIV sans fallback → déclaration
+    // invalide « at computed-value time » : `width` non
+    // héritée → propriété retirée (initiale `auto`).
+    e.add_css("div { --x: initial } p { width: var(--x) }", Origin::Author);
+    assert_eq!(e.compute(&f.dom, f.p, &env()).get("width"), None);
+}
+
+#[test]
+fn var_custom_valeur_vide_valide() {
+    let f = fixture();
+    // `--x: ;` = stream vide valide (css-variables-1 —
+    // `<declaration-value>` peut n'être qu'un whitespace) :
+    // le toggle `[data-scheme=dark]` de MDN s'en sert pour
+    // sélectionner le jeton droit de `var(--scheme) var(--c)`.
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "p { --t: var(--scheme) #fff; --scheme: ; color: var(--t, #000) }",
+        Origin::Author,
+    );
+    let s = e.compute(&f.dom, f.p, &env());
+    // --scheme vide → --t = «  #fff » → couleur #fff, pas le
+    // fallback #000.
+    assert_eq!(
+        s.color("color"),
+        Some(explorer_css::value::Color {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255
+        })
+    );
+}
+
 // ── feuille UA legacy et hints présentationnels (R-16) ────
 
 /// Crée un élément `tag` avec `attrs` sous `parent`.

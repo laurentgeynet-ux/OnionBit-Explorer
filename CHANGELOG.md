@@ -9,6 +9,95 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-81 — `font_request` de la
+  display list replie sur la famille
+  mesurée** (`explorer-layout`/
+  `explorer-render`, issue #9 4ᵉ
+  défaut — demande NAV→PIPE du
+  journal) : deux constructeurs de
+  `FontRequest` désaccordés — la
+  mesure lisait
+  `ctx.default_family` (`serif`)
+  alors que la peinture repliait
+  `"sans-serif"` en dur et pondérait
+  `bolder`/`lighter` en 800/300 là
+  où la mesure rend 700/400 → tout
+  texte sans `font-family` déclaré
+  (`<p>` nu) mesuré serif mais peint
+  sans (corps `info.cern.ch` au
+  vol). Factorisation : nouvelle
+  `font::request_of_family`
+  (additive — `request_of` devient
+  wrapper) + constante partagée
+  `font::DEFAULT_FAMILY` (source
+  unique du repli, `BlockCtx::
+  default()` la consomme) ;
+  `display::font_request` délègue
+  entièrement. Aucune signature
+  publique cassée — le threading
+  `PaintCx←BlockCtx` reste
+  documenté pour une surcharge
+  future de `default_family`.
+  Régressions
+  `texte_replie_sur_la_famille_
+  mesuree` (repli + `bolder`) ;
+  carve-out : `glyph_cache.rs`
+  enregistre la face sous le nom
+  requis (`serif`).
+
+- **R-80 — `initial` sur `--*` =
+  *guaranteed-invalid value* +
+  valeur `--*` vide valide +
+  `content:/"alt"`** (`explorer-css`,
+  `explorer-layout`, issue #14) :
+  trois trous du même constat MDN.
+  (1) css-variables-1 §3.2 —
+  l'initiale d'une propriété custom
+  est la *guaranteed-invalid value*,
+  pas `initial_value()` (qui rendait
+  `""`) : `--scheme:initial` rendait
+  `var(--scheme) var(--color)`
+  « résoluble » en ` #fff` →
+  `color`/`background` blancs →
+  titres h3 et contributions MDN
+  blanc-sur-blanc. Sentinelle GIV
+  dans `vars` (masque l'héritage —
+  spec : la valeur, pas « absente »),
+  filtrée au lookup `var()` (→
+  fallback / retrait de la
+  déclaration) et dans
+  `get`/`iter`. `inherit`/`unset`/
+  `revert` sur `--*` lisent la
+  valeur parent (GIV si absente).
+  (2) `--x: ;` — valeur vide valide
+  (spec : `<declaration-value>` peut
+  n'être qu'un whitespace) : le
+  parseur la jetait → le basculeur
+  `[data-scheme=dark]` de MDN
+  (`--scheme: ;`) ne s'armait
+  jamais → nav/héro sombres
+  absents. Les `--*` à valeur vide
+  survivent au parse (les autres
+  propriétés vides restent mortes).
+  (3) CSS Content-3 —
+  `content: <valeur> / <alt>` : le
+  `/` de niveau 0 n'était pas
+  reconnu → l'alt-text
+  d'accessibilité (`" (external)"`)
+  se concaténait au contenu peint.
+  `pseudo_content` coupe au `/`
+  hors guillemets/parenthèses.
+  Régressions : 5 cascade (GIV,
+  masquage héritage, inherit/unset,
+  sans-fallback, valeur vide) + 1
+  layout (`/alt` non peint).
+  Terrain MDN : titres h3 peints,
+  contributions noires, héro/nav
+  sombres restaurés, `(external)`
+  invisible (l'icône propre reste
+  non rendue — `mask-image` non
+  supporté, dégradation discrète).
+
 - **R-79 — `DirFontSource` : les
   génériques à nom espacé ne
   matchaient jamais** (couture

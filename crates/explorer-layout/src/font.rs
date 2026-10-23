@@ -509,12 +509,32 @@ impl FontCache {
     }
 }
 
+/// Famille de repli **par défaut** quand `font-family` est
+/// absent du style calculé — la source unique consommée par
+/// `BlockCtx::default()` (mesure) et `explorer-render`
+/// (peinture, R-81). Surcharger `BlockCtx::default_family`
+/// sans la propager jusqu'à la construction de la display
+/// list réintroduirait une divergence mesure/peinture.
+pub const DEFAULT_FAMILY: &str = "serif";
+
 /// `FontRequest` du style calculé — partagée par les points
 /// d'entrée fonte (avant : triple copie inline/block/font).
 #[must_use]
 pub fn request_of(style: &explorer_css::ComputedStyle, ctx: &crate::BlockCtx<'_>) -> FontRequest {
+    request_of_family(style, ctx.default_family)
+}
+
+/// Variante à famille de repli explicite — même corps que
+/// [`request_of`], pour les consommateurs qui n'ont pas de
+/// `BlockCtx` sous la main (R-81 : `explorer-render` construit
+/// les `DisplayItem::Text.font` — la peinture doit requérir la
+/// même famille que la mesure : un repli `"sans-serif"` en dur
+/// y peignait des glyphes sans sur du texte mesuré serif, et
+/// `bolder`/`lighter` y étaient pondérés autrement).
+#[must_use]
+pub fn request_of_family(style: &explorer_css::ComputedStyle, default_family: &str) -> FontRequest {
     let families: Vec<String> = style.get("font-family").map_or_else(
-        || vec![ctx.default_family.to_string()],
+        || vec![default_family.to_string()],
         |f| {
             f.split(',')
                 .map(|s| s.trim().trim_matches(|c| c == '"' || c == '\'').to_string())

@@ -560,6 +560,34 @@ fn pseudo_content(raw: &str) -> Option<String> {
     if t.eq_ignore_ascii_case("none") || t.eq_ignore_ascii_case("normal") {
         return None;
     }
+    // CSS Content-3 : `content: <valeur> / <texte-alt>` — la
+    // partie après le `/` de niveau 0 est l'alternative
+    // d'accessibilité, jamais peinte (MDN :
+    // `content:"\200b"/" (external)"` rendait « (external) »
+    // en clair, R-80). `/` hors guillemets/parenthèses.
+    let t = {
+        let mut parens = 0i32;
+        let mut quote = 0u8;
+        let mut slash = t.len();
+        for (i, b) in t.bytes().enumerate() {
+            match b {
+                b if quote != 0 => {
+                    if b == quote {
+                        quote = 0;
+                    }
+                }
+                b'"' | b'\'' => quote = b,
+                b'(' => parens += 1,
+                b')' => parens -= 1,
+                b'/' if parens == 0 => {
+                    slash = i;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        &t[..slash]
+    };
     let mut out = String::new();
     let mut rest = t;
     while let Some(qpos) = rest.find(['\'', '"']) {

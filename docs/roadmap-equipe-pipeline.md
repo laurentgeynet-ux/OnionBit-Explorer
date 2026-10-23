@@ -2100,6 +2100,35 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   fallback_for). Terrain : corps `info.cern.ch` en
   serif — le résidu #9 est soldé côté PIPE.
   (binaire périmé = validation fantôme).
+- [x] **R-80. `initial` sur `--*` = *guaranteed-invalid* +
+  valeur `--*` vide + `content:/"alt"`** (issue #14 — trois
+  trous d'un seul constat MDN). (1) css-variables-1 §3.2 :
+  `initial`/`unset`/`revert`/`inherit` sur propriété custom →
+  sentinelle GIV dans `vars` (masque l'héritage), filtrée au
+  lookup `var()` → fallback / retrait — avant, `initial` →
+  `""` rendait le toggle `light-dark` MDN « résoluble » en
+  ` #fff` → texte blanc sur blanc (h3, contributions). (2)
+  `--x: ;` : la valeur vide est valide (un whitespace seul) —
+  le parseur la jetait → `[data-scheme=dark]` jamais armé →
+  nav/héro sombres absents. (3) `content: v / "alt"` : le
+  `/` de niveau 0 coupe le contenu peint de l'alt-text a11y —
+  `pseudo_content` ne concatène plus `" (external)"`.
+  Régressions : 5 cascade + 1 layout. Terrain : les 4
+  symptômes soldés ; reliquat connu — `mask-image` non
+  supporté (icône externe invisible au lieu d'un carré
+  d'encre — dégradation discrète) + items du menu nav en
+  masque (invisibles) → backlog fonctionnalité `mask-*`.
+- [x] **R-81. `font_request` peinture = mesure** (demande
+  NAV→PIPE, issue #9 4ᵉ défaut) : la display list repliait
+  `font-family` absent sur `"sans-serif"` en dur (mesure :
+  `ctx.default_family` = `serif`) et pondérait `bolder`/
+  `lighter` en 800/300 (mesure : 700/400) → `<p>` nu peint
+  sans sur mesure serif. Factorisation sans casse :
+  `font::request_of_family` additif + `font::DEFAULT_FAMILY`
+  (repli unique partagé), `display::font_request` délègue.
+  Carve-out : `glyph_cache.rs` enregistre la face sous
+  `serif`. Reliquat : propager `BlockCtx::default_family`
+  surchargé à `PaintCx` reste ouvert (journal).
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

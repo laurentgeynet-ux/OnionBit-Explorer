@@ -222,6 +222,14 @@ pub struct StyleEngine {
     pub(crate) keyframes: crate::animation::Keyframes,
 }
 
+/// « Guaranteed-invalid value » (css-variables-1 §3.2) :
+/// l'initiale d'une propriété custom `--*`. Stockée en sentinelle
+/// dans la table `vars` (elle masque l'héritage — la spec veut
+/// la valeur, pas « absente ») ; jamais substituable : un
+/// `var()` qui la référence échoue et prend son fallback. Les
+/// API (`get`/`iter`) la filtrent — invisible de l'extérieur.
+const GUARANTEED_INVALID: &str = "\u{1}\u{fffd}giv\u{1}";
+
 /// Computed style d'un nœud : propriété (minuscules) → valeur
 /// texte résolue (mot-clés `inherit`/`initial`/`unset` déjà
 /// réduits ; le *typage* est l'affaire de l'étape 16).
@@ -248,7 +256,11 @@ impl ComputedStyle {
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&str> {
         if name.starts_with("--") {
-            return self.vars.get(name).map(String::as_str);
+            return self
+                .vars
+                .get(name)
+                .map(String::as_str)
+                .filter(|v| *v != GUARANTEED_INVALID);
         }
         self.props.get(name).map(String::as_str)
     }
@@ -257,7 +269,11 @@ impl ComputedStyle {
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.props
             .iter()
-            .chain(self.vars.iter())
+            .chain(
+                self.vars
+                    .iter()
+                    .filter(|(_, v)| v.as_str() != GUARANTEED_INVALID),
+            )
             .map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
@@ -733,6 +749,30 @@ impl StyleEngine {
         // 4. Mots-clés CSS-wide sur les valeurs déclarées.
         for (k, v) in &mut props {
             let kw = v.trim().to_ascii_lowercase();
+            // Propriétés custom `--*` (css-variables-1 §3.2) :
+            // l'« initiale » d'une --* est la *guaranteed-invalid
+            // value*, pas une valeur de la table ordinaire —
+            // la sentinelle masque l'héritage et fait échouer
+            // tout `var()` qui la référence (→ fallback). Une
+            // --* réduite à `""` par `initial_value()` comme
+            // avant rendait la substitution « réussie » avec
+            // un stream tronqué (` #fff` chez MDN → texte
+            // blanc sur blanc, R-80).
+            if k.starts_with("--") {
+                *v = match kw.as_str() {
+                    "initial" => GUARANTEED_INVALID.to_string(),
+                    // --* hérite : `inherit`/`unset`/`revert`
+                    // lisent la valeur du parent (déjà GIV le
+                    // cas échéant) ; parent sans la propriété
+                    // → l'initiale, donc GIV.
+                    "inherit" | "unset" | "revert" | "revert-layer" => vars
+                        .get(k)
+                        .cloned()
+                        .unwrap_or_else(|| GUARANTEED_INVALID.to_string()),
+                    _ => continue,
+                };
+                continue;
+            }
             let initial = || initial_value(k).unwrap_or("").to_string();
             *v = match kw.as_str() {
                 // `inherit` : valeur du parent (initiale à la racine).
@@ -760,8 +800,14 @@ impl StyleEngine {
         //    sont lues dans la table `vars` partagée — lookup
         //    : propres d'abord (elles masquent l'héritage).
         let snap = props.clone();
+        // Une `--*` à la *guaranteed-invalid value* est « non
+        // résoluble » : le `var()` qui la référence échoue et
+        // prend son fallback (css-variables §3.2) — `None` ici.
         let lookup = |name: &str| -> Option<String> {
-            snap.get(name).cloned().or_else(|| vars.get(name).cloned())
+            snap.get(name)
+                .cloned()
+                .or_else(|| vars.get(name).cloned())
+                .filter(|v| v != GUARANTEED_INVALID)
         };
         for (k, v) in &mut props {
             if !k.starts_with("--") && v.contains("var(") {

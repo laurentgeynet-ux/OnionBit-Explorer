@@ -1756,31 +1756,18 @@ fn sticky_offset(bx: &LayoutBox, off: (f32, f32), bound: Rect, vp: (f32, f32)) -
     (dx, dy)
 }
 
-/// `FontRequest` dérivé du style : familles `font-family`
-/// (virgules), `font-weight` (100-900), `font-style`.
+/// `FontRequest` dérivé du style — **délègue à
+/// `request_of_family`** (R-81) : une seule implémentation
+/// pour mesure et peinture (avant : repli `"sans-serif"` en
+/// dur + `bolder`→800/`lighter`→300 là où la mesure rend
+/// 700/400 — corps `<p>` nu peint sans sur une mesure serif,
+/// issue #9 4ᵉ défaut). `PaintCx` ne porte pas le `BlockCtx` :
+/// le repli partagé est la constante
+/// [`explorer_layout::font::DEFAULT_FAMILY`] — surcharger
+/// `BlockCtx::default_family` exigerait de la propager jusque
+/// là (journal `interface-equipes`).
 fn font_request(st: &explorer_css::ComputedStyle) -> explorer_layout::font::FontRequest {
-    let families = st.get("font-family").map_or_else(
-        || vec!["sans-serif".to_string()],
-        |v| {
-            v.split(',')
-                .map(|f| f.trim().trim_matches('"').trim_matches('\'').to_string())
-                .filter(|f| !f.is_empty())
-                .collect()
-        },
-    );
-    let weight = st.get("font-weight").map_or(400, |v| match v.trim() {
-        "normal" => 400,
-        "bold" => 700,
-        "bolder" => 800,
-        "lighter" => 300,
-        n => n.parse::<u16>().unwrap_or(400).clamp(1, 1000),
-    });
-    let italic = matches!(st.get("font-style"), Some("italic" | "oblique"));
-    explorer_layout::font::FontRequest {
-        families,
-        weight,
-        italic,
-    }
+    explorer_layout::font::request_of_family(st, explorer_layout::font::DEFAULT_FAMILY)
 }
 
 /// Longueur d'une fonction `transform` → px : absolues via

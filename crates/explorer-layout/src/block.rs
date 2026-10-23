@@ -61,7 +61,11 @@ impl Default for BlockCtx<'_> {
             // Famille de repli quand `font-family` est absent
             // du style calculé — l'initiale cascade est
             // `serif`, le repli la suit (issue #9 résiduel).
-            default_family: "serif",
+            // Constante partagée : `explorer-render` replie sur
+            // la même famille à la peinture (R-81) — une
+            // surcharge de `default_family` devra aussi porter
+            // jusqu'au display list builder.
+            default_family: crate::font::DEFAULT_FAMILY,
             base_font_size: 16.0,
             viewport_h: 600.0,
             viewport_w: 800.0,

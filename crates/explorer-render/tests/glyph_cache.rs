@@ -135,7 +135,10 @@ fn revision_change_vide_le_cache() {
     // `register` bumpe la révision → le cache est vidé au
     // sync suivant, la face fraîche est résolue.
     assert!(web.register(
-        "sans-serif",
+        // R-81 — la requête `font-family` absente replie sur
+        // `DEFAULT_FAMILY` (`"serif"`, comme la mesure) : la
+        // face enregistrée suit le nom requis.
+        "serif",
         400,
         false,
         explorer_test_support::fixture_ttf()
