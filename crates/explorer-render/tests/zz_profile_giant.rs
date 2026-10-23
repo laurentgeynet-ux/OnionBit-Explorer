@@ -117,8 +117,14 @@ fn profile_giant() {
     let mut bx = build_box_tree(&dom, root, &styles).expect("boxtree");
     eprintln!("boxtree        : {:?}", t.elapsed());
 
+    let icb_w = std::env::var("PROBE_W")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(1024.0);
+    eprintln!("icb_w          : {icb_w}");
+
     let t = Instant::now();
-    layout_tree(&mut bx, 1024.0, &ctx);
+    layout_tree(&mut bx, icb_w, &ctx);
     eprintln!("layout_tree    : {:?}", t.elapsed());
 
     // Coût d'un apply post-script à caches fonte chauds : la
@@ -131,7 +137,7 @@ fn profile_giant() {
     let mut bx2 = build_box_tree(&dom, root, &styles).expect("boxtree#2");
     let t_box2 = t.elapsed();
     let t = Instant::now();
-    layout_tree(&mut bx2, 1024.0, &ctx);
+    layout_tree(&mut bx2, icb_w, &ctx);
     eprintln!(
         "apply simulé   : boxtree {:?} + layout chaud {:?}",
         t_box2,
@@ -140,7 +146,7 @@ fn profile_giant() {
 
     let images = PaintImages::default();
     let t = Instant::now();
-    let mut list = build_display_list_full(&bx, 1024.0, 768.0, 0.0, &images);
+    let mut list = build_display_list_full(&bx, icb_w, 768.0, 0.0, &images);
     if list.height > 16_384.0 {
         list.height = 16_384.0; // même cap que la session (MAX_FRAME_DIM)
     }

@@ -36,8 +36,17 @@ pub struct BlockCtx<'a> {
     /// Famille de repli quand `font-family` n'en nomme aucune
     /// connue de la source.
     pub default_family: &'a str,
-    /// Font-size de base (px) pour `rem` et la racine.
+    /// Font-size de base (px) — initiale `font-size` : base
+    /// des mots-clés absolus, de `%` sur la racine et repli
+    /// `rem` quand [`Self::root_font_size`] n'est pas posé.
     pub base_font_size: f32,
+    /// Font-size **calculée** de `documentElement` — base des
+    /// `rem` (CSS Values §5.2). Posée par `layout_tree` une
+    /// fois la racine connue ; `None` → repli
+    /// `base_font_size` (chemins où la racine n'est pas
+    /// visible — ex. relayout scopé sans propagation,
+    /// statu quo documenté).
+    pub root_font_size: std::cell::Cell<Option<f32>>,
     /// Hauteur du viewport — bloc conteneur des `fixed` et
     /// base des `vh` (étape 21).
     pub viewport_h: f32,
@@ -67,6 +76,7 @@ impl Default for BlockCtx<'_> {
             // jusqu'au display list builder.
             default_family: crate::font::DEFAULT_FAMILY,
             base_font_size: 16.0,
+            root_font_size: std::cell::Cell::new(None),
             viewport_h: 600.0,
             viewport_w: 800.0,
             font_cache: std::cell::RefCell::new(font::FontCache::new()),
@@ -91,6 +101,14 @@ impl BlockCtx<'_> {
     /// le ctx persistant avant de détruire le `BlockCtx`).
     pub fn take_font_cache(&self) -> font::FontCache {
         std::mem::take(&mut self.font_cache.borrow_mut())
+    }
+
+    /// Base `rem` effective : font-size calculée de
+    /// `documentElement` quand [`Self::root_font_size`] est
+    /// posée, sinon l'initiale.
+    #[must_use]
+    pub fn rem_basis(&self) -> f32 {
+        self.root_font_size.get().unwrap_or(self.base_font_size)
     }
 }
 
@@ -314,6 +332,14 @@ pub fn layout_tree(root: &mut LayoutBox, viewport_w: f32, ctx: &BlockCtx) {
     // la boîte dans l'ICB ; les latérales sont résolues en
     // interne comme pour toute boîte bloc.
     let root_fs = font_size_px(&root.style, ctx.base_font_size, ctx);
+    // `rem` = font-size calculée de la racine (CSS Values
+    // §5.2) — posée avant toute résolution de longueur du
+    // document : marges, tailles, `line-height:Nrem`, `calc`.
+    // La racine elle-même a déjà vu son `font-size` résolu
+    // en cascade (px absolu) ; un `font-size:Nrem` qui
+    // survivrait brut retomberait sur l'initiale — le `Cell`
+    // n'est pas encore posé à cette ligne.
+    ctx.root_font_size.set(Some(root_fs));
     let root_mt = margins(&root.style, viewport_w, root_fs, ctx).top;
     explorer_common::deep(|| {
         layout_block_inner(
@@ -402,7 +428,7 @@ pub(crate) fn raw_length_px(
     #[allow(clippy::cast_possible_truncation)]
     Some(match len.unit {
         Unit::Em => len.value as f32 * em_basis,
-        Unit::Rem => len.value as f32 * ctx.base_font_size,
+        Unit::Rem => len.value as f32 * ctx.rem_basis(),
         Unit::Ex | Unit::Ch => len.value as f32 * em_basis * 0.5,
         // Unités viewport (R-42) : `vw`/`vh` sur leurs axes,
         // `vmin`/`vmax` sur min/max des deux (§5.1.2 MQ4/CSS3).
@@ -439,7 +465,7 @@ fn eval_calc(expr: &str, pct_basis: f32, em_basis: f32, ctx: &BlockCtx) -> Optio
         if let Some(l) = parse_length(t) {
             let px = match l.unit {
                 Unit::Em => l.value * f64::from(em),
-                Unit::Rem => l.value * f64::from(ctx.base_font_size),
+                Unit::Rem => l.value * f64::from(ctx.rem_basis()),
                 Unit::Ex | Unit::Ch => l.value * f64::from(em) * 0.5,
                 Unit::Vw => l.value * f64::from(ctx.viewport_w) / 100.0,
                 Unit::Vh => l.value * f64::from(ctx.viewport_h) / 100.0,

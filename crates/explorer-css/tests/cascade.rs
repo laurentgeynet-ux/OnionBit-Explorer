@@ -931,6 +931,51 @@ fn font_size_rem_et_absolus_inchanges() {
     );
 }
 
+#[test]
+fn font_size_rem_contre_racine_calculee() {
+    // CSS Values §5.2 : `rem` = font-size **calculée** de
+    // :root — `html { font-size:62.5% }` (10 px) fait
+    // 1rem = 10px, pas 16. Motif terrain (dispatch phase
+    // 23/10, « métriques verticales généreuses ») : le portail
+    // Wikipedia compose tout en rem → métriques gonflées
+    // ×1.6 quand la base fixe servait de référence.
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let html = dom.create_element("html").unwrap();
+    let body = dom.create_element("body").unwrap();
+    let p = dom.create_element("p").unwrap();
+    dom.append_child(doc, html).unwrap();
+    dom.append_child(html, body).unwrap();
+    dom.append_child(body, p).unwrap();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "html { font-size: 62.5% } body { font-size: 1.4rem } p { font-size: 1rem }",
+        Origin::Author,
+    );
+    assert_eq!(e.compute(&dom, html, &env()).get("font-size"), Some("10px"));
+    assert_eq!(
+        e.compute(&dom, body, &env()).get("font-size"),
+        Some("14px"),
+        "rem contre la racine calculée (10 px), pas l'initiale"
+    );
+    assert_eq!(e.compute(&dom, p, &env()).get("font-size"), Some("10px"));
+    // Sur `font-size` de la racine elle-même, `rem` vaut
+    // l'initiale (16) — :root n'a pas de racine au-dessus.
+    let mut e2 = StyleEngine::new();
+    e2.add_css("html { font-size: 2rem }", Origin::Author);
+    assert_eq!(
+        e2.compute(&dom, html, &env()).get("font-size"),
+        Some("32px")
+    );
+    // Même résolution dans le parcours d'arbre complet.
+    let styles = e.compute_tree(&dom, doc, &env());
+    assert_eq!(styles.get(p).and_then(|s| s.get("font-size")), Some("10px"));
+    assert_eq!(
+        styles.get(body).and_then(|s| s.get("font-size")),
+        Some("14px")
+    );
+}
+
 // ── R-10 : @keyframes + animation-* ─────────────────────────
 
 /// `<div id=d>` seul — suffit aux tests animation/keyframes.

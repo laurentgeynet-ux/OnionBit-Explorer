@@ -9,6 +9,37 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-88 — `rem` = font-size calculée
+  de `:root`** (`explorer-css`,
+  `explorer-layout` — terrain 23/10 :
+  portail Wikipedia ~+74 % de hauteur
+  vs Chrome). `rem` se résolvait
+  contre l'initiale (16 px fixe) au
+  lieu de la font-size calculée de
+  `documentElement` — violation CSS
+  Values §5.2. `html{font-size:62.5%}`
+  (→ 10 px, motif répandu) gonflait
+  chaque `rem` ×1.6 : polices,
+  marges, `line-height:Nrem`,
+  `width`, `calc()`. Cascade :
+  `root_fs` propagé dans
+  `compute_subtree`/`parent_computed`
+  (sur `font-size` de la racine,
+  `rem` reste l'initiale — spec).
+  Layout : `BlockCtx.root_font_size`
+  (`Cell<Option<f32>>`, posée par
+  `layout_tree`) lu par
+  `raw_length_px`/`eval_calc` ;
+  reliquat connu : `relayout_subtree`
+  hors `layout_tree` retombe sur
+  l'initiale (statu quo, propagation
+  NAV au journal). Portail live :
+  doc 1917 → 1088 px (Chrome ~1102).
+  Régressions
+  `font_size_rem_contre_racine_
+  calculee` +
+  `rem_contre_font_size_racine`.
+
 - **Étape 115 — affichage frame :
   `OverflowBox` + barre de scroll**
   (`app/`). Depuis les frames

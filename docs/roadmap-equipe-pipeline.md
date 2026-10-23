@@ -2297,6 +2297,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `doc_h_covers_overflow_past_fixed_height_body`
   (session.rs — hauteur + scroll effectif).
 
+- [x] **R-88. `rem` = font-size calculée de `:root`**
+  (terrain 23/10 — portail Wikipedia ~+74 % de hauteur
+  vs Chrome ; cause racine : `rem` se résolvait contre
+  `env.font_size_base`, l'initiale 16 px, pas contre la
+  font-size calculée de `documentElement` — CSS Values
+  §5.2). `html{font-size:62.5%}` (→ 10 px, motif répandu)
+  gonflait chaque `rem` ×1.6 : polices, marges,
+  `line-height:Nrem`, `width`, `calc(…rem)`. Correctif en
+  deux couches : **cascade** — `resolve_font_size` reçoit
+  `root_fs` (le rem de `font-size` sur la racine reste
+  l'initiale, spec ; ses pseudos résolvent contre la fs
+  calculée) ; threading `&mut root_fs` dans `compute_subtree`
+  + `parent_computed`, seed via `documentElement` pour les
+  entrées unitaire/scopée. **Layout** —
+  `BlockCtx.root_font_size : Cell<Option<f32>>` posée par
+  `layout_tree` ; `raw_length_px`/`eval_calc` lisent
+  `rem_basis()` (repli base quand non posé — relayout
+  scopé : statu quo, propagation NAV au journal des
+  coutures). Mesures : portail live doc 1917 → **1088 px**
+  (Chrome ~1102) ; fixture `html` 5038 → 2411 px.
+  Régressions : `font_size_rem_contre_racine_calculee`
+  (cascade), `rem_contre_font_size_racine` (layout).
+
 ## Palier R-B — Contenu étranger, animation, canvas
 
 - [x] **R-8. Foreign-content dans `explorer-html`** (ex-60a) :

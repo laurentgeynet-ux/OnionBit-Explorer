@@ -311,12 +311,31 @@ journal « livré ».
 
 ### Piste PIPE
 
-- [ ] **Métriques verticales généreuses** : à contenu identique
+- [x] **Métriques verticales généreuses** : à contenu identique
   le document Explorer mesure ~+74 % de hauteur vs Chrome
   (www.wikipedia.org : 1917 px vs ~1102 px au même viewport
   1216). Suspects : `line-height:normal`, ascent/descent des
   fontes de repli. Mesurer ligne par ligne vs Chrome, réduire
-  l'écart.
+  l'écart. **livré → R-88** : cause racine trouvée ailleurs —
+  `rem` se résolvait contre `env.font_size_base` (initiale,
+  16 px fixe) au lieu de la font-size **calculée de `:root`**
+  (CSS Values §5.2) ; le portail pose `html{font-size:62.5%}`
+  → tout `rem` gonflait ×1.6 (polices, marges, `line-height`,
+  `width:54.6rem`…). Fix deux couches : cascade
+  (`resolve_font_size` reçoit `root_fs` ; la racine elle-même
+  garde l'initiale) + layout (`BlockCtx.root_font_size` —
+  `Cell<Option<f32>>` posée par `layout_tree`,
+  `raw_length_px`/`eval_calc` lisent `rem_basis()`). Mesures :
+  portail live 1216 px → **doc 1088 px** (Chrome ~1102 —
+  écart ~1 %) vs 1917 avant ; dump fixture `html` 5038 →
+  2411 px. Régressions : `font_size_rem_contre_racine_
+  calculee` (cascade) + `rem_contre_font_size_racine` (layout).
+  **Reliquat NAV** : le chemin incrémental `relayout_subtree`
+  ne passe pas par `layout_tree` → `root_font_size` reste
+  `None` → `rem` retombe sur l'initiale (statu quo pré-R-88,
+  aucune régression mais écart conservé) ; NAV peut poser
+  `ctx.root_font_size.set(Some(fs_racine_px))` depuis la
+  `StyleMap` avant l'appel.
 - [ ] **`inline` stacking dans `.liste-horizontale`** : liens
   du bas de la boîte d'accueil rendus en colonne chez nous,
   en ligne chez Chrome — vérifier `display:inline` + séparateur

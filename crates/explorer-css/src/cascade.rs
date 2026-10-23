@@ -718,6 +718,7 @@ impl StyleEngine {
         state: &dyn Fn(&str) -> bool,
     ) -> ComputedStyle {
         let mut mcache = MatchCache::default();
+        let root_fs = self.root_font_size(dom, env, state);
         let parent = parent_computed(
             self,
             dom,
@@ -726,6 +727,7 @@ impl StyleEngine {
             state,
             &mut HashMap::new(),
             &mut mcache,
+            root_fs,
         );
         self.compute_with_parent(
             dom,
@@ -736,7 +738,38 @@ impl StyleEngine {
             state,
             &mut mcache,
             &AncestorFilter::of_ancestors(dom, node),
+            root_fs,
         )
+    }
+
+    /// Font-size calculée de `documentElement` — base `rem`
+    /// du document (CSS Values §5.2). Repli : initiale
+    /// (`env.font_size_base`) — absence de racine, ou valeur
+    /// non résolue (`calc()` hostile…).
+    fn root_font_size(&self, dom: &Dom, env: &StyleEnv, state: &dyn Fn(&str) -> bool) -> f32 {
+        let Some(doc_el) = dom.document_element() else {
+            return env.font_size_base;
+        };
+        // Le nœud est la racine : son propre `font-size:Nrem`
+        // se résout contre l'initiale — garde d'identité dans
+        // `compute_with_parent`. Appel direct : passer par
+        // `compute_with_state` re-bouclerait ici sans fin.
+        let mut mcache = MatchCache::default();
+        self.compute_with_parent(
+            dom,
+            doc_el,
+            env,
+            None,
+            None,
+            state,
+            &mut mcache,
+            &AncestorFilter::of_ancestors(dom, doc_el),
+            env.font_size_base,
+        )
+        .get("font-size")
+        .and_then(|v| v.trim().trim_end_matches("px").trim().parse::<f32>().ok())
+        .filter(|fs| *fs > 0.0)
+        .unwrap_or(env.font_size_base)
     }
 
     /// Styles calculés de tout le sous-arbre de `root`
@@ -763,6 +796,10 @@ impl StyleEngine {
         // pour les combinators ancêtres (même contrat que
         // `compute_scoped`).
         let anc = AncestorFilter::of_ancestors(dom, root);
+        // Base `rem` — fs calculée de `documentElement` ;
+        // la marche la met à jour si la racine est dans le
+        // sous-arbre.
+        let mut root_fs = self.root_font_size(dom, env, state);
         self.compute_subtree(
             dom,
             root,
@@ -773,6 +810,7 @@ impl StyleEngine {
             state,
             &mut mcache,
             &anc,
+            &mut root_fs,
         );
         StyleMap { map, pseudos }
     }
@@ -823,6 +861,7 @@ impl StyleEngine {
         // Les ancêtres au-dessus du sous-arbre restent
         // visibles au matching (contrat du restyle scopé).
         let anc = AncestorFilter::of_ancestors(dom, root);
+        let mut root_fs = self.root_font_size(dom, env, state);
         self.compute_subtree(
             dom,
             root,
@@ -833,6 +872,7 @@ impl StyleEngine {
             state,
             &mut mcache,
             &anc,
+            &mut root_fs,
         );
         StyleMap { map, pseudos }
     }
@@ -849,8 +889,19 @@ impl StyleEngine {
         state: &dyn Fn(&str) -> bool,
         mcache: &mut MatchCache,
         anc: &AncestorFilter,
+        root_fs: &mut f32,
     ) {
-        let style = self.compute_with_parent(dom, node, env, parent, None, state, mcache, anc);
+        let style =
+            self.compute_with_parent(dom, node, env, parent, None, state, mcache, anc, *root_fs);
+        // L'élément racine vient d'être calculé : sa font-size
+        // devient la base `rem` de tout le document (la marche
+        // est parent-d'abord — ses descendants viennent après).
+        if dom.document_element() == Some(node) {
+            *root_fs = style
+                .get("font-size")
+                .and_then(|v| v.trim().trim_end_matches("px").trim().parse::<f32>().ok())
+                .unwrap_or(env.font_size_base);
+        }
         // Pseudo-éléments (R-13) : l'élément origine est le
         // parent d'héritage de ses `::before`/`::after`. Le
         // calcul est sauté quand aucune feuille n'a de règle
@@ -870,6 +921,7 @@ impl StyleEngine {
                     state,
                     mcache,
                     anc,
+                    *root_fs,
                 );
                 (s.get("content").is_some()).then_some(s)
             };
@@ -907,6 +959,7 @@ impl StyleEngine {
                         state,
                         &mut *mcache,
                         &child_anc,
+                        root_fs,
                     );
                 });
             }
@@ -917,6 +970,10 @@ impl StyleEngine {
     /// Calcul d'un nœud connaissant le style de son parent.
     /// `pseudo` = `Some(pe)` → style du pseudo-élément `pe` du
     /// nœud (R-13) ; `None` → style de l'élément lui-même.
+    /// `root_fs` = font-size calculée de `documentElement` —
+    /// base des `rem` (CSS Values §5.2 ; sur le `font-size` de
+    /// la racine elle-même `rem` vaut l'initiale, pas la
+    /// calculée — la racine n'a pas de racine au-dessus).
     #[allow(clippy::too_many_lines)]
     #[allow(clippy::too_many_arguments)]
     fn compute_with_parent(
@@ -929,11 +986,21 @@ impl StyleEngine {
         state: &dyn Fn(&str) -> bool,
         mcache: &mut MatchCache,
         anc: &AncestorFilter,
+        root_fs: f32,
     ) -> ComputedStyle {
         let mut props: HashMap<String, String> = HashMap::new();
         if dom.element(node).is_err() {
             return ComputedStyle::default();
         }
+        // `rem` : initiale sur le `font-size` de `:root` — et
+        // seulement lui (ses pseudos `::before`/`::after`
+        // résolvent déjà contre `root_fs`, comme tout
+        // descendant).
+        let rem_base = if pseudo.is_none() && dom.document_element() == Some(node) {
+            env.font_size_base
+        } else {
+            root_fs
+        };
         // 1-2. Collecte ordonnée (rang, spécificité, ordre) :
         // règles + attribut `style` (rang auteur inline,
         // `!important` au-dessus de tout — CSS2 §6.4.4 ;
@@ -1121,7 +1188,7 @@ impl StyleEngine {
         }
         // 6. `font-size` → valeur calculée absolue (R-17 —
         //    détail dans `normalize_font_size`).
-        normalize_font_size(&mut props, parent, env);
+        normalize_font_size(&mut props, parent, env, rem_base);
         // 7. `color-scheme` sur la racine (R-59) : schéma
         //    `dark` utilisé → défauts UA sombres sur les
         //    propriétés restées initiales.
@@ -1284,6 +1351,7 @@ fn normalize_font_size(
     props: &mut HashMap<String, String>,
     parent: Option<&ComputedStyle>,
     env: &StyleEnv,
+    rem_base: f32,
 ) {
     let Some(raw) = props.get("font-size").cloned() else {
         return;
@@ -1292,18 +1360,21 @@ fn normalize_font_size(
         .and_then(|p| p.get("font-size"))
         .and_then(|v| v.trim().trim_end_matches("px").trim().parse::<f32>().ok())
         .unwrap_or(env.font_size_base);
-    if let Some(px) = resolve_font_size(&raw, parent_fs, env) {
+    if let Some(px) = resolve_font_size(&raw, parent_fs, env, rem_base) {
         props.insert("font-size".to_string(), format!("{px}px"));
     }
 }
 
 /// Résout `font-size` en px absolus : `em`/`ex`/`ch`/`%` et
 /// `larger`/`smaller` contre la taille **calculée** du parent
-/// (`parent_fs`), `rem` et mots-clés absolus contre la base
-/// (`base`). `calc()` et syntaxes inconnues → `None` (la
-/// valeur brute survit pour le layout — dégradation
-/// documentée, jamais de panique).
-fn resolve_font_size(raw: &str, parent_fs: f32, env: &StyleEnv) -> Option<f32> {
+/// (`parent_fs`), `rem` contre la font-size **calculée de
+/// l'élément racine** (`rem_base` — CSS Values §5.2 ; pour le
+/// `font-size` de la racine elle-même l'appelant passe
+/// `env.font_size_base`, la valeur initiale), mots-clés
+/// absolus contre `env.font_size_base`. `calc()` et syntaxes
+/// inconnues → `None` (la valeur brute survit pour le
+/// layout — dégradation documentée, jamais de panique).
+fn resolve_font_size(raw: &str, parent_fs: f32, env: &StyleEnv, rem_base: f32) -> Option<f32> {
     let v = raw.trim();
     let base = env.font_size_base;
     // Mots-clés de la spec : échelle absolue ×1.2 autour de
@@ -1333,7 +1404,7 @@ fn resolve_font_size(raw: &str, parent_fs: f32, env: &StyleEnv) -> Option<f32> {
     #[allow(clippy::cast_possible_truncation)]
     Some(match len.unit {
         crate::value::Unit::Em => len.value as f32 * parent_fs,
-        crate::value::Unit::Rem => len.value as f32 * base,
+        crate::value::Unit::Rem => len.value as f32 * rem_base,
         crate::value::Unit::Ex | crate::value::Unit::Ch => len.value as f32 * parent_fs * 0.5,
         // R-42 : `font-size:Nvw` légal — résolu au moment de
         // la cascade contre `env` (valeur calculée absolue).
@@ -1666,6 +1737,7 @@ fn split_top_comma(s: &str) -> (&str, Option<&str>) {
 }
 
 /// Style calculé du parent élément (mémoïsation locale).
+#[allow(clippy::too_many_arguments)]
 fn parent_computed(
     engine: &StyleEngine,
     dom: &Dom,
@@ -1674,6 +1746,7 @@ fn parent_computed(
     state: &dyn Fn(&str) -> bool,
     memo: &mut HashMap<NodeId, ComputedStyle>,
     mcache: &mut MatchCache,
+    root_fs: f32,
 ) -> Option<ComputedStyle> {
     let parent = match dom.parent(node) {
         Ok(Some(p)) if dom.element(p).is_ok() => p,
@@ -1682,7 +1755,7 @@ fn parent_computed(
     if let Some(s) = memo.get(&parent) {
         return Some(s.clone());
     }
-    let grand = parent_computed(engine, dom, parent, env, state, memo, mcache);
+    let grand = parent_computed(engine, dom, parent, env, state, memo, mcache, root_fs);
     let s = engine.compute_with_parent(
         dom,
         parent,
@@ -1692,6 +1765,7 @@ fn parent_computed(
         state,
         mcache,
         &AncestorFilter::of_ancestors(dom, parent),
+        root_fs,
     );
     memo.insert(parent, s.clone());
     Some(s)

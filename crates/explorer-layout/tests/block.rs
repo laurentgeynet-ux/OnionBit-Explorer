@@ -1353,3 +1353,21 @@ fn letter_spacing_positif_elargit_le_flottant() {
     // 5 × (5.5 + 1) = 32.5.
     assert!(approx(a.rect.width, 32.5), "a w={}", a.rect.width);
 }
+
+#[test]
+fn rem_contre_font_size_racine() {
+    // CSS Values §5.2 côté propriétés non-font-size : `rem`
+    // = font-size calculée de :root (10 px après `62.5%`),
+    // pas l'initiale — marges, tailles, line-height suivent.
+    // Terrain (dispatch 23/10, « métriques verticales
+    // généreuses ») : le portail Wikipedia compose en rem,
+    // tout gonflait ×1.6 quand la base 16 servait encore.
+    let (dom, bx) = laid(
+        "<div id=d>t</div>",
+        "html { font-size: 62.5% } #d { margin-left: 2rem; width: 10rem; height: 0.5rem }",
+    );
+    let d = find(&bx, by_tag(&dom, "div"));
+    assert_eq!(d.rect.x, 20.0, "margin-left:2rem → 20px (root fs 10)");
+    assert_eq!(d.rect.width, 100.0, "width:10rem → 100px");
+    assert_eq!(d.rect.height, 5.0, "height:0.5rem → 5px");
+}
