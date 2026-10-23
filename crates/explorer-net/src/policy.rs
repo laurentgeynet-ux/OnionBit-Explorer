@@ -1167,3 +1167,133 @@ impl HttpTransport for AcceptTransport {
         self.inner.fetch_stream(&Self::stamp(req)).await
     }
 }
+
+/// Client Hints basse-entropie (CAP-146) — `Sec-CH-UA`,
+/// `Sec-CH-UA-Mobile`, `Sec-CH-UA-Platform` : le trio
+/// qu'un navigateur moderne émet sur **chaque** requête
+/// http(s) sans négociation `Accept-CH`. Les hints à haute
+/// entropie (`Sec-CH-UA-Platform-Version`, `-Arch`,
+/// `-Bitness`, `-Model`, `-Full-Version-List`, `Sec-CH-*`
+/// négociés) restent non implémentés — jamais émises non
+/// sollicitées.
+#[derive(Debug, Clone)]
+pub struct ClientHints {
+    /// Marques `Sec-CH-UA` — `(nom, version)`, émises dans
+    /// l'ordre (Chromium adjoint toujours une marque GREASE
+    /// `Not/A)Brand` : la présence d'une marque secondaire
+    /// est le signal attendu, pas sa valeur).
+    pub brands: Vec<(String, String)>,
+    /// `Sec-CH-UA-Mobile` — `?1` (mobile) ou `?0` (desktop).
+    pub mobile: bool,
+    /// `Sec-CH-UA-Platform` — `None` → en-tête omis
+    /// (plateforme hors liste connue).
+    pub platform: Option<String>,
+}
+
+impl Default for ClientHints {
+    /// Branding honnête : `Explorer` + marque GREASE —
+    /// jamais `Chromium`/`Google Chrome` (l'empreinte CH
+    /// décrit le produit réel, comme Edge/Brave le font).
+    fn default() -> Self {
+        Self {
+            brands: vec![
+                ("Explorer".to_string(), "0".to_string()),
+                ("Not/A)Brand".to_string(), "24".to_string()),
+            ],
+            mobile: false,
+            platform: platform_name(),
+        }
+    }
+}
+
+impl ClientHints {
+    /// Valeur `Sec-CH-UA` sérialisée — `"Marque";v="V"`,
+    /// jointes par `, ` (WICG client-hints §infra).
+    #[must_use]
+    pub fn ua_brands(&self) -> String {
+        self.brands
+            .iter()
+            .map(|(n, v)| format!("\"{n}\";v=\"{v}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// `Sec-CH-UA-Platform` du système hôte — valeurs WICG
+/// connues, `None` ailleurs (l'en-tête est alors omis).
+fn platform_name() -> Option<String> {
+    Some(
+        match std::env::consts::OS {
+            "windows" => "Windows",
+            "macos" => "macOS",
+            "linux" => "Linux",
+            "android" => "Android",
+            "ios" => "iOS",
+            _ => return None,
+        }
+        .to_string(),
+    )
+}
+
+/// Émet les Client Hints basse-entropie (CAP-146) —
+/// chaque en-tête est posé **seulement si absent** : une
+/// valeur auteur ou d'une couche interne (branding hôte
+/// propre) n'est jamais écrasée, et les requêtes non-http(s)
+/// ne reçoivent rien (jamais de socket).
+pub struct ClientHintsTransport {
+    inner: Arc<dyn HttpTransport>,
+    hints: ClientHints,
+}
+
+impl ClientHintsTransport {
+    /// Enveloppe `inner` avec `hints` (défaut = branding
+    /// `Explorer` + plateforme détectée).
+    #[must_use]
+    pub fn wrap(inner: Arc<dyn HttpTransport>, hints: ClientHints) -> Self {
+        Self { inner, hints }
+    }
+
+    /// Stamp par en-tête — granularité indépendante : un
+    /// `Sec-CH-UA` auteur ne masque pas `-Mobile`/`-Platform`.
+    fn stamp(&self, req: &Request) -> Request {
+        if !matches!(req.url.scheme(), "http" | "https") {
+            return req.clone();
+        }
+        let has = |name: &str| {
+            req.headers
+                .iter()
+                .any(|(n, _)| n.eq_ignore_ascii_case(name))
+        };
+        let mut req = req.clone();
+        if !has("sec-ch-ua") {
+            req.headers
+                .push(("Sec-CH-UA".to_string(), self.hints.ua_brands()));
+        }
+        if !has("sec-ch-ua-mobile") {
+            req.headers.push((
+                "Sec-CH-UA-Mobile".to_string(),
+                if self.hints.mobile { "?1" } else { "?0" }.to_string(),
+            ));
+        }
+        if let Some(p) = &self.hints.platform {
+            if !has("sec-ch-ua-platform") {
+                req.headers
+                    .push(("Sec-CH-UA-Platform".to_string(), p.clone()));
+            }
+        }
+        req
+    }
+}
+
+#[async_trait]
+impl HttpTransport for ClientHintsTransport {
+    async fn fetch(&self, req: &Request) -> NetResult<Response> {
+        self.inner.fetch(&self.stamp(req)).await
+    }
+
+    /// Streamé : même stamp puis délégation (voir
+    /// `AcceptTransport::fetch_stream`, CAP-141).
+    async fn fetch_stream(&self, req: &Request) -> NetResult<StreamedResponse> {
+        self.inner.fetch_stream(&self.stamp(req)).await
+    }
+}

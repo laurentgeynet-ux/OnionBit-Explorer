@@ -1115,6 +1115,43 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-146 — Client Hints
+  basse-entropie** (`explorer-net`
+  + `explorer-core` — cap « web
+  réel sécurisé » ; numéro
+  officiel attribué à
+  l'intégration, compteur
+  gelé) : `policy::ClientHints`
+  (`brands`, `mobile`,
+  `platform` mappé depuis l'OS
+  hôte) et
+  `ClientHintsTransport`
+  (décorateur `HttpTransport`,
+  patron `AcceptTransport`)
+  émettent `Sec-CH-UA`
+  (`"Explorer";v="0",
+  "Not/A)Brand";v="24"` —
+  branding honnête + marque
+  GREASE), `Sec-CH-UA-Mobile`
+  (`?0`/`?1`) et
+  `Sec-CH-UA-Platform` sur
+  chaque requête http(s),
+  chacun posé seulement si
+  absent (valeurs auteur ou
+  hôte préservées ; rien hors
+  http(s)). Câblé dans
+  `Session::with_config` sous
+  `Cors` — preflights couverts,
+  hôte libre de poser les siens
+  dans sa pile interne. Hints
+  haute entropie non émis
+  (`Accept-CH` non négocié) ;
+  `navigator.userAgentData`
+  reste à la piste JS.
+  Tests : 3 policy +
+  `client_hints_reach_wire_…`
+  (session).
+
 ### Fixed
 
 - **Étape 122 — `root_font_size`

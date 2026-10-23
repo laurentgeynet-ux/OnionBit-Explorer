@@ -1332,3 +1332,87 @@ async fn accept_stamped_per_dest_and_author_kept() {
     assert_eq!(accept_of(&seen[3]), Some("*/*"));
     assert_eq!(accept_of(&seen[4]), Some("application/json"));
 }
+
+// --------------------------------------------------------- CAP-146
+
+/// `Sec-CH-UA*` basse-entropie émis sur chaque requête
+/// http(s) — marques `Explorer` + GREASE, mobile `?0`,
+/// plateforme de l'OS hôte.
+#[tokio::test]
+async fn client_hints_emitted_on_http_requests() {
+    use explorer_net::policy::{ClientHints, ClientHintsTransport};
+    fn hdr<'a>(r: &'a Request, name: &str) -> Option<&'a str> {
+        r.headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+    let inner = FakeTransport::new(vec![resp(200, &[], b"x"), resp(200, &[], b"x")]);
+    let t = ClientHintsTransport::wrap(inner.clone(), ClientHints::default());
+    t.fetch(&Request::get(u("https://h.test/p"))).await.unwrap();
+    t.fetch(&Request::get(u("http://h.test/q"))).await.unwrap();
+    let seen = inner.seen();
+    for r in &seen {
+        assert_eq!(
+            hdr(r, "sec-ch-ua"),
+            Some("\"Explorer\";v=\"0\", \"Not/A)Brand\";v=\"24\""),
+            "{r:?}"
+        );
+        assert_eq!(hdr(r, "sec-ch-ua-mobile"), Some("?0"), "{r:?}");
+        assert!(
+            hdr(r, "sec-ch-ua-platform").is_some_and(|v| !v.is_empty()),
+            "plateforme absente sur cet OS ou omise : {r:?}"
+        );
+    }
+}
+
+/// Chaque en-tête est posé indépendamment et jamais écrasé :
+/// `sec-ch-ua` auteur préservé, `-mobile`/`-platform`
+/// toujours complétés ; branding hôte custom honoré.
+#[tokio::test]
+async fn client_hints_author_kept_and_custom_brand() {
+    use explorer_net::policy::{ClientHints, ClientHintsTransport};
+    fn hdr<'a>(r: &'a Request, name: &str) -> Option<&'a str> {
+        r.headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+    let inner = FakeTransport::new(vec![resp(200, &[], b"x"), resp(200, &[], b"x")]);
+    let hints = ClientHints {
+        brands: vec![("Zed".to_string(), "9".to_string())],
+        mobile: true,
+        platform: Some("TestOS".to_string()),
+    };
+    let t = ClientHintsTransport::wrap(inner.clone(), hints);
+    let mut author = Request::get(u("https://h.test/p"));
+    author
+        .headers
+        .push(("sec-ch-ua".to_string(), "\"Mine\";v=\"1\"".to_string()));
+    t.fetch(&author).await.unwrap();
+    t.fetch(&Request::get(u("https://h.test/q"))).await.unwrap();
+    let seen = inner.seen();
+    assert_eq!(hdr(&seen[0], "sec-ch-ua"), Some("\"Mine\";v=\"1\""));
+    assert_eq!(hdr(&seen[0], "sec-ch-ua-mobile"), Some("?1"));
+    assert_eq!(hdr(&seen[0], "sec-ch-ua-platform"), Some("TestOS"));
+    assert_eq!(hdr(&seen[1], "sec-ch-ua"), Some("\"Zed\";v=\"9\""));
+}
+
+/// Hors http(s) : rien d'émis (jamais de socket → le stamp
+/// ne doit pas courir). `Request::get` sur `data:` traverse
+/// le décorateur sans en-tête CH.
+#[tokio::test]
+async fn client_hints_skipped_on_non_http() {
+    use explorer_net::policy::{ClientHints, ClientHintsTransport};
+    let inner = FakeTransport::new(vec![resp(200, &[], b"x")]);
+    let t = ClientHintsTransport::wrap(inner.clone(), ClientHints::default());
+    t.fetch(&Request::get(u("data:text/plain,x")))
+        .await
+        .unwrap();
+    let seen = inner.seen();
+    assert!(
+        !seen[0].headers.iter().any(|(n, _)| n.starts_with("sec-ch")),
+        "{:?}",
+        seen[0].headers
+    );
+}

@@ -8989,3 +8989,34 @@ async fn csp_connect_src_none_blocks_fetch() {
         "fetch() admis malgré connect-src"
     );
 }
+
+/// `Sec-CH-UA*` basse-entropie sur le fil : navigations et
+/// sous-ressources portent le trio (branding `Explorer` +
+/// mobile `?0` + plateforme), posé une fois par requête.
+#[tokio::test]
+async fn client_hints_reach_wire_on_nav_and_subresources() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><img src=\"/i.png\"></body></html>",
+    );
+    t.route_bin("/i.png", 200, b"notapng".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    for path in ["/", "/i.png"] {
+        assert!(
+            t.req_header(path, "sec-ch-ua")
+                .is_some_and(|v| v.contains("Explorer")),
+            "{path} sans sec-ch-ua"
+        );
+        assert_eq!(
+            t.req_header(path, "sec-ch-ua-mobile").as_deref(),
+            Some("?0")
+        );
+        assert!(
+            t.req_header(path, "sec-ch-ua-platform").is_some(),
+            "{path} sans plateforme"
+        );
+    }
+}

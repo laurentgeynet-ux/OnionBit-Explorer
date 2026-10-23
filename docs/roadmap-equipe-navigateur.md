@@ -2916,6 +2916,44 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-146. Client Hints
+  basse-entropie** *(numéro
+  officiel attribué à
+  l'intégration)* :
+  `policy::ClientHints` +
+  `ClientHintsTransport`
+  (décorateur, patron
+  `AcceptTransport`) émettent
+  `Sec-CH-UA` (`"Explorer";v="0",
+  "Not/A)Brand";v="24"` —
+  branding honnête + marque
+  GREASE), `Sec-CH-UA-Mobile`
+  (`?0`/`?1`) et
+  `Sec-CH-UA-Platform` (OS
+  hôte mappé, omis hors liste
+  connue) sur **chaque**
+  requête http(s) — chaque
+  en-tête posé seulement si
+  absent (valeur auteur ou
+  branding hôte interne
+  préservés), rien hors
+  http(s). Câblé dans
+  `Session::with_config` sous
+  `Cors` (preflights couverts),
+  au-dessus d'`Accept` —
+  configurable côté hôte sans
+  changement core (les siens
+  priment). Hints haute
+  entropie (`-Platform-Version`,
+  `-Arch`, `-Bitness`, `-Model`,
+  `-Full-Version-List`) non
+  implémentés — jamais émis
+  non sollicités. Surface JS
+  `navigator.userAgentData`
+  restée à la piste JS.
+  Tests : 3 policy + 1 session
+  (`client_hints_*`).
+
 - [x] **CAP-145. Content-
   Security-Policy —
   enforcement** *(numéro
