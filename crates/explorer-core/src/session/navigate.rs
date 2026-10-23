@@ -613,6 +613,7 @@ impl Session {
     /// l'onglet, planifie les sous-ressources, arme le moteur
     /// JS et emballe le [`SubJob`] détachable. `None` = epoch
     /// supplantée (navigation abandonnée — rien à commettre).
+    #[allow(clippy::too_many_lines)] // phase séquentielle — chaque étape est documentée in situ
     pub(crate) fn nav_apply(
         &mut self,
         tab: TabId,
@@ -636,7 +637,12 @@ impl Session {
             s.record_visit(&url.to_string(), title.as_deref());
         }
         let scripting = self.js_factory.is_some();
-        let (sheet_urls, scripts, img_urls) = self.plan_subresources(&dom, &url, scripting);
+        let SubPlan {
+            sheets: sheet_urls,
+            scripts,
+            imgs: img_urls,
+            frames: frame_urls,
+        } = self.plan_subresources(&dom, &url, scripting);
         let doc_sheets = collect_style_sheets(&dom);
         // Issue #6 : les `<script type="importmap">` pilotent le
         // prefetch des bare specifiers (`import_specs` — même
@@ -704,6 +710,7 @@ impl Session {
             entry.img_decoded.clear();
             entry.bg_decoded.clear();
             entry.linked_sheets.clear();
+            entry.frames.clear();
             entry.prev_styles = HashMap::new();
             entry.transitions.clear();
             entry.sync_floor = None;
@@ -723,10 +730,12 @@ impl Session {
             title,
             transport: Arc::clone(&self.transport),
             events: self.events.clone(),
+            cookies: Arc::clone(&self.cookies),
             page: url,
             sheet_urls,
             scripts,
             img_urls,
+            frame_urls,
             import_maps,
             import_specs,
             doc_sheets,
@@ -734,6 +743,7 @@ impl Session {
             css_slots: Vec::new(),
             script_srcs: Vec::new(),
             img_bodies: HashMap::new(),
+            frames: Vec::new(),
             bg_aliases: HashMap::new(),
             bg_bodies: HashMap::new(),
             mask_aliases: HashMap::new(),

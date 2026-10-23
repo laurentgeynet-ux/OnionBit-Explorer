@@ -256,6 +256,29 @@ pub(crate) fn collect_images(dom: &Dom) -> Vec<(NodeId, String)> {
     out
 }
 
+/// `src` des `<iframe>` du document dans l'ordre (étape
+/// 128) — absent ou vide sauté ; `srcdoc` (document inline)
+/// n'est pas une URL : l'iframe `srcdoc`-seul n'entre pas
+/// dans la file réseau. La résolution/dédup/mixed-content
+/// vit dans `plan_subresources`.
+pub(crate) fn collect_iframes(dom: &Dom) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "iframe") {
+            if let Ok(Some(src)) = dom.attribute(n, "src") {
+                if !src.is_empty() {
+                    out.push(src);
+                }
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    out
+}
+
 /// Extrait tous les `url(…)` d'une valeur CSS — même forme
 /// en déclaration de feuille et en valeur calculée (la
 /// cascade conserve `url("…")` tel quel). Guillemets

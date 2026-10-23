@@ -18,13 +18,31 @@ use explorer_css::{
 use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
 use explorer_js::JsEngine;
+use explorer_net::cookies::{partition_key, CookieJar};
 use explorer_net::error::NetResult;
-use explorer_net::http::{FetchDest, HttpTransport, Initiator, Method, Request, Response};
+use explorer_net::http::{
+    FetchDest, FetchMode, HttpTransport, Initiator, Method, Request, Response,
+};
 use explorer_net::policy::{initiator_headers, sec_fetch_headers};
 use explorer_net::url::Url;
 use explorer_render::decode_font;
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::broadcast;
+
+/// Plan de collecte d'un document (étape 50 ; `<iframe>`
+/// ajouté à l'étape 128) — produit de
+/// [`Session::plan_subresources`], consommé par `sub_jobs`.
+pub(crate) struct SubPlan {
+    /// Feuilles `<link rel=stylesheet>` résolues.
+    pub(crate) sheets: Vec<Url>,
+    /// Scripts collectés (`<script src>` + inline/modules).
+    pub(crate) scripts: Vec<ScriptItem>,
+    /// `<img>`/`poster` résolus et dédupliqués.
+    pub(crate) imgs: Vec<Url>,
+    /// `<iframe src>` résolus — navigations de
+    /// sous-contexte (bornés `max_frames`).
+    pub(crate) frames: Vec<Url>,
+}
 
 /// Routage d'une complétion de sous-ressource (étape 50).
 pub(crate) enum SubTag {
@@ -35,6 +53,10 @@ pub(crate) enum SubTag {
     /// `<img>` — clé `Url::as_str()` : la table images ne
     /// prend des `NodeId` qu'après la resynchro DOM.
     Img(Url),
+    /// `<iframe src>` (étape 128) — navigation d'un
+    /// sous-contexte : la réponse est un document HTML,
+    /// parsé en `Dom` propre au commit.
+    Frame(Url),
 }
 
 /// Graphe de modules préfetché (étape 50) — `sources` :
@@ -412,6 +434,14 @@ pub(crate) struct SubJob {
     pub(crate) sheet_urls: Vec<Url>,
     pub(crate) scripts: Vec<ScriptItem>,
     pub(crate) img_urls: Vec<Url>,
+    /// `<iframe src>` résolus à `nav_apply` (étape 128 —
+    /// déjà dédupliqués/mixed-content-filtrés/bornés).
+    pub(crate) frame_urls: Vec<Url>,
+    /// Jar partagé — les `Set-Cookie` des documents
+    /// `<iframe>` sont capturés à réception (étape 128) :
+    /// même partitionnement CHIPS que `CookieTransport`
+    /// (seau = site top-level de la page parente).
+    pub(crate) cookies: Arc<CookieJar>,
     /// Corps JSON des `<script type="importmap">` (ordre
     /// document) — poussés au moteur avant le premier
     /// `eval_module` (issue #6).
@@ -432,6 +462,10 @@ pub(crate) struct SubJob {
     pub(crate) css_slots: Vec<Option<String>>,
     pub(crate) script_srcs: Vec<Option<String>>,
     pub(crate) img_bodies: HashMap<String, Vec<u8>>,
+    /// Documents `<iframe>` reçus et parsés (étape 128) —
+    /// un `SubFrame` par fetch 2xx, appliqués à l'onglet au
+    /// commit.
+    pub(crate) frames: Vec<SubFrame>,
     /// Fonds `url(http…)` fetchés (étape 98) : `bg_aliases`
     /// relie le texte `url(...)` brut (déséchappé — la forme
     /// conservée en valeur calculée) à l'URL résolue, les
@@ -538,9 +572,16 @@ impl SubJob {
             }
         };
         // Émission par priorité : CSS → scripts → images.
-        let jobs = sub_jobs(&self.url, &self.sheet_urls, &self.scripts, &self.img_urls);
+        let jobs = sub_jobs(
+            &self.url,
+            &self.sheet_urls,
+            &self.scripts,
+            &self.img_urls,
+            &self.frame_urls,
+        );
         let mut eng = self.eng.take();
         let mut async_mods = Vec::new();
+        let mut frames = Vec::new();
         fetch_wave(&self.transport, self.max_inflight, jobs, |tag, res| {
             let Ok(resp) = res else { return };
             if !(200..300).contains(&resp.status) {
@@ -570,11 +611,15 @@ impl SubJob {
                 SubTag::Img(u) => {
                     self.img_bodies.insert(u.as_str(), resp.body);
                 }
+                SubTag::Frame(u) => {
+                    frames.push(store_frame(&self.url, &self.cookies, &u, &resp));
+                }
             }
         })
         .await;
         self.eng = eng;
         self.async_mods = async_mods;
+        self.frames = frames;
         self.fetch_imports().await;
         self.fetch_backgrounds().await;
         self.fetch_fonts().await;
@@ -982,6 +1027,7 @@ pub(crate) fn sub_jobs(
     sheet_urls: &[Url],
     scripts: &[ScriptItem],
     img_urls: &[Url],
+    frame_urls: &[Url],
 ) -> VecDeque<(SubTag, Request)> {
     let mut jobs = VecDeque::new();
     for (i, u) in sheet_urls.iter().enumerate() {
@@ -1001,6 +1047,9 @@ pub(crate) fn sub_jobs(
             sub_request(base, u, FetchDest::Image),
         ));
     }
+    for u in frame_urls {
+        jobs.push_back((SubTag::Frame(u.clone()), frame_request(base, u)));
+    }
     jobs
 }
 
@@ -1018,6 +1067,46 @@ pub(crate) fn sub_request(base: &Url, url: &Url, dest: FetchDest) -> Request {
     }
     req.headers.extend(sec_fetch_headers(&req));
     req
+}
+
+/// Requête de navigation d'un sous-contexte `<iframe>`
+/// (étape 128) : même canal `sub_request` (initiateur =
+/// page parente → `SameSite`/`CHIPS` corrects — un cookie
+/// `Partitioned` du seau parent est admissible, un
+/// `Lax` cross-site ne l'est pas, spec cookies) mais mode
+/// `navigate` à l'émission — `sec-fetch-dest: iframe` +
+/// `sec-fetch-mode: navigate` comme une vraie navigation
+/// imbriquée (spec Fetch metadata).
+pub(crate) fn frame_request(base: &Url, url: &Url) -> Request {
+    let mut req = sub_request(base, url, FetchDest::Iframe);
+    req.fetch_mode = FetchMode::Navigate;
+    // `sec-fetch-*` recalculés après le changement de mode.
+    req.headers.retain(|(n, _)| !n.starts_with("sec-fetch-"));
+    req.headers.extend(sec_fetch_headers(&req));
+    req
+}
+
+/// Réception d'un document `<iframe>` (étape 128) :
+/// `Set-Cookie` capturé dans le jar partagé — seau CHIPS =
+/// site top-level de la **page parente** (profondeur 1 :
+/// le parent EST le top-level, même calcul que
+/// `CookieTransport` côté pile daemon) — puis le corps
+/// HTML est décodé (charset transport en amorce, comme la
+/// nav) et parsé en `Dom` propre : aucune mutation croisée
+/// avec le parent n'existe.
+pub(crate) fn store_frame(page: &Url, cookies: &CookieJar, u: &Url, resp: &Response) -> SubFrame {
+    let partition = partition_key(page);
+    for v in resp.headers_all("set-cookie") {
+        let _ = cookies.set_from_header_ctx(u, v, partition.clone());
+    }
+    let text = decode_subresource(&resp.body, transport_charset(&resp.headers).as_deref());
+    let dom = TreeBuilder::parse(&text);
+    let title = extract_title(&dom);
+    SubFrame {
+        url: u.clone(),
+        dom,
+        title,
+    }
 }
 
 /// Profondeur max d'une chaîne `@import` (étape 96) —

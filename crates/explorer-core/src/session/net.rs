@@ -93,6 +93,7 @@ impl Session {
             arrival_evals,
             post_evals,
             import_maps,
+            frames,
             ..
         } = job;
         // Feuilles liées dans l'ordre document (slot vide =
@@ -101,6 +102,11 @@ impl Session {
         // parsée isolément à la cascade.
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.linked_sheets = css_slots.into_iter().flatten().collect();
+            // Sous-contextes `<iframe>` de la vague (étape
+            // 128) — ordre d'arrivée ; `frames` est réassigné
+            // à chaque commit → les contextes du document
+            // mort ne survivent pas.
+            entry.frames = frames;
         }
         if let Ok(mut wf) = self.webfonts.lock() {
             for (family, weight, italic, data) in fonts {
@@ -496,14 +502,9 @@ impl Session {
 
     /// Collecte des sous-ressources du document (étape 50) :
     /// URLs résolues ici (émission propre), mixed-content
-    /// filtré, images dédupliquées — `(feuilles, scripts,
-    /// images)` bornés par la config.
-    pub(crate) fn plan_subresources(
-        &self,
-        dom: &Dom,
-        base: &Url,
-        scripting: bool,
-    ) -> (Vec<Url>, Vec<ScriptItem>, Vec<Url>) {
+    /// filtré, images dédupliquées — plan borné par la
+    /// config (étape 128 : les `<iframe>` le rejoignent).
+    pub(crate) fn plan_subresources(&self, dom: &Dom, base: &Url, scripting: bool) -> SubPlan {
         // Étape 96 : `media=` évalué contre l'env viewport
         // AVANT la borne — une feuille hors-media (variante
         // `print`, `(prefers-color-scheme: …)`) n'est ni
@@ -532,7 +533,24 @@ impl Session {
             .filter(|u| !is_mixed_content(base, u) && seen_img.insert(u.as_str()))
             .take(self.max_images)
             .collect();
-        (sheets, scripts, imgs)
+        // `<iframe src>` (étape 128) — un sous-contexte est
+        // un document complet : http(s) seulement, mixed-
+        // content filtré, dédup par URL résolue, borné
+        // `max_frames` (`0` = désactivé — vide).
+        let mut seen_frames = std::collections::HashSet::new();
+        let frames: Vec<Url> = collect_iframes(dom)
+            .into_iter()
+            .filter_map(|src| Url::resolve(base, &src).ok())
+            .filter(|u| matches!(u.scheme(), "http" | "https"))
+            .filter(|u| !is_mixed_content(base, u) && seen_frames.insert(u.as_str()))
+            .take(self.max_frames)
+            .collect();
+        SubPlan {
+            sheets,
+            scripts,
+            imgs,
+            frames,
+        }
     }
 
     /// Remplit `graph` en BFS du graphe statique

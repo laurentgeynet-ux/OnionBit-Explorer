@@ -144,6 +144,7 @@ fn paintless_snapshot_repairs_on_restore() {
             dirty: Vec::new(),
             emitted: 0,
             last_req: None,
+            frames: Vec::new(),
         });
     }
 
@@ -226,6 +227,7 @@ async fn back_during_inflight_nav_restores_previous() {
             dirty: Vec::new(),
             emitted: 0,
             last_req: None,
+            frames: Vec::new(),
         });
     }
 

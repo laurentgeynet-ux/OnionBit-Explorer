@@ -61,15 +61,21 @@ pub enum FetchDest {
     Image,
     /// `font` — `@font-face` `url()`.
     Font,
+    /// `iframe` — navigation d'un contexte imbriqué
+    /// (`<iframe src>`, étape 128).
+    Iframe,
     /// `empty` — `fetch()`/`XHR` et requêtes non typées.
     #[default]
     Empty,
 }
 
 /// Mode d'une sous-ressource (`Sec-Fetch-Mode`, étape 125).
-/// `navigate` n'y figure pas : il est **dérivé de
-/// l'initiateur** à l'émission — un appelant ne pose jamais
-/// un mode de navigation à la main.
+/// `navigate` y figure (étape 128) : une navigation de
+/// contexte **imbriqué** porte l'initiateur `Subresource`
+/// (la page parente — CHIPS/`SameSite`) mais un mode
+/// `navigate` à l'émission ; les navigations top-level
+/// continuent de le dériver de l'initiateur — un appelant
+/// ne pose ce mode à la main que pour un sous-contexte.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FetchMode {
     /// `cors` — `fetch()`/`XMLHttpRequest` (spec Fetch).
@@ -81,6 +87,10 @@ pub enum FetchMode {
     /// `same-origin` — garde-fou spec (`Request.mode` interne
     /// des APIs qui exigent la même origine).
     SameOrigin,
+    /// `navigate` — navigation d'un sous-contexte
+    /// (`<iframe>`, étape 128) ; les navigations top-level
+    /// n'en ont pas besoin (dérivé de l'initiateur).
+    Navigate,
 }
 
 /// Mode `credentials` d'une requête scriptée (étape 126,

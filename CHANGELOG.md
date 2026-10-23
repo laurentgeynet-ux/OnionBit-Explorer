@@ -552,6 +552,52 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   cohabitent par seau.
   Régressions `chips_*`
   (5 tests cookies_cache).
+- **Étape 128 — contextes
+  `<iframe>` (socle)**
+  (`explorer-net`, `explorer-core`
+  — cap « web réel sécurisé ») :
+  `<iframe src>` déclenche une
+  **navigation de sous-contexte**
+  — `frame_request` = initiator
+  `Subresource(page parente)`
+  (`SameSite`/`CHIPS` corrects :
+  un cookie `Lax` cross-site
+  retenu, un `Partitioned` du
+  seau parent admissible) +
+  `FetchMode::Navigate` /
+  `FetchDest::Iframe` additifs
+  (`sec-fetch-mode: navigate`,
+  `sec-fetch-dest: iframe`,
+  `referer` = page). Le fetch
+  voyage dans la vague
+  `SubTag::Frame` sous
+  `max_frames` (défaut 8,
+  profondeur 1) ; `Set-Cookie`
+  capturé sous le seau
+  top-level de la page
+  (`SubJob.cookies` — même
+  calcul que `CookieTransport`,
+  idempotent avec lui en
+  production). La réponse est
+  décodée (charset transport)
+  et **parsée en `Dom` propre**
+  — `SubFrame` sur `Tab`
+  (ordre document, vidé à la
+  navigation, **restauré par
+  le bfcache** sans re-fetch).
+  Échec iframe toléré : la
+  navigation parente survit,
+  aucun contexte commis.
+  Exposé `tab_frames` /
+  `frame_dom_dump`. Le rendu
+  composite et les ponts
+  `parent`/`top`/`postMessage`
+  restent à l'étape 129
+  (dépendent de la piste JS —
+  un contexte enfant exige son
+  propre moteur ; journal).
+  Régressions `iframe_*`
+  (6 tests session).
 
 ### Fixed
 

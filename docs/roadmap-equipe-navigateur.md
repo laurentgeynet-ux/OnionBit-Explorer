@@ -2732,17 +2732,47 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   cohabitent par seau.
   5 tests `chips_*`.
 
-- [ ] **Étape 128. Contextes de
+- [x] **Étape 128. Contextes de
   navigation imbriqués
-  (`<iframe>`)** (chantier le
-  plus lourd du cap) : un
-  `<iframe src>` = sous-contexte
-  (propre pipeline + jar hérité
-  + initiator = le parent) ;
+  (`<iframe>`) — socle** :
+  `<iframe src>` = fetch de
+  sous-contexte sous
+  l'initiateur parent
+  (`Subresource` → `SameSite`/
+  CHIPS corrects —
+  `sec-fetch-dest: iframe` +
+  `sec-fetch-mode: navigate`,
+  `FetchDest::Iframe`/
+  `FetchMode::Navigate`
+  additifs), `Set-Cookie`
+  capturé sous le seau
+  top-level de la page
+  (`SubJob.cookies`, même
+  calcul que `CookieTransport`),
+  corps décodé et **parsé en
+  `Dom` propre** (`SubFrame`
+  sur `Tab` — ordre document,
+  bfcache restauré, borné
+  `max_frames: 8`, profondeur
+  1 : pas de descente dans
+  l'enfant). Exposé :
+  `tab_frames` /
+  `frame_dom_dump`.
+  Régressions `iframe_*`
+  (6 tests session).
+
+- [ ] **Étape 129. Sous-contextes
+  `<iframe>` — rendu composite +
+  ponts JS** : blit du sous-DOM
+  dans sa boîte remplacée
+  (layout enfant + raster),
   `window.parent`/`top` et
   `postMessage` cross-contexte
-  borné — widgets de login,
-  captchas, boutons tiers.
+  borné — **dépend de la piste
+  JS** (couture `JsEngine`
+  par contexte — le contexte
+  enfant a besoin de son propre
+  moteur ; journal).
 
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :

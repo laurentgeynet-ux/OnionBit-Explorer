@@ -6,7 +6,9 @@
 //! erreurs, DTO du store de profil, configuration.
 use std::collections::BTreeMap;
 
+use explorer_dom::Dom;
 use explorer_net::cookies::{Cookie, SameSite};
+use explorer_net::url::Url;
 
 /// Identifiant d'onglet (monotone, jamais réutilisé).
 pub type TabId = u64;
@@ -539,6 +541,25 @@ pub struct StoredCookie {
     pub partition: Option<String>,
 }
 
+/// Contexte de navigation imbriqué d'un `<iframe src>`
+/// (étape 128 — socle) : le document enfant est fetché
+/// sous l'initiateur de la page parente (`Subresource` —
+/// `SameSite`/`CHIPS` corrects, `sec-fetch-dest: iframe`,
+/// `sec-fetch-mode: navigate`) puis **parsé en son propre
+/// `Dom`**. Le rendu composite dans la boîte remplacée et
+/// les ponts JS (`window.parent`/`top`, `postMessage`)
+/// sont les tranches suivantes — l'étape livre le
+/// contexte réseau + DOM.
+pub(crate) struct SubFrame {
+    /// URL effectivement chargée (résolue sur la page).
+    pub(crate) url: Url,
+    /// DOM du document enfant — propre arbre, isolé du
+    /// parent (aucun accès DOM croisé n'existe).
+    pub(crate) dom: Dom,
+    /// `<title>` extrait, s'il existe.
+    pub(crate) title: Option<String>,
+}
+
 /// `Cookie` filaire → forme persistée (expiration → secs
 /// unix ; les expirés ne sont jamais exportés —
 /// [`CookieJar::export`] purge déjà).
@@ -693,6 +714,12 @@ pub struct SessionConfig {
     /// Nombre max de `<script src>` fetchés par document
     /// (étape 50 — une page peut en déclarer des centaines).
     pub max_scripts: usize,
+    /// Nombre max de `<iframe src>` fetchés par document
+    /// (étape 128 — un sous-contexte = un document complet ;
+    /// `0` = iframes désactivés). Profondeur 1 : les
+    /// `<iframe>` **dans** un document enfant ne sont pas
+    /// descendus (borne la cascade de sous-contextes).
+    pub max_frames: usize,
     /// Nombre max de modules dans le graphe préfetché d'un
     /// `<script type="module">` (entrée + dépendances
     /// transitives — borne les chaînes d'import hostiles).
@@ -777,6 +804,7 @@ impl Default for SessionConfig {
             max_imports: 16,
             max_fonts: 16,
             max_scripts: 32,
+            max_frames: 8,
             max_modules: 64,
             max_inflight: 6,
             max_script_net: 16,

@@ -240,6 +240,11 @@ pub(crate) struct Tab {
     /// isolation d'erreur par `<link>`, cf. R-68), vidées à
     /// chaque re-parse.
     linked_sheets: Vec<String>,
+    /// Contextes de navigation imbriqués (étape 128) :
+    /// `<iframe src>` fetchés sous l'initiateur de la page
+    /// et parsés en leur `Dom` propre — ordre document.
+    /// Vidés à chaque navigation, restaurés via le bfcache.
+    frames: Vec<SubFrame>,
     /// Tampon des fonds `url(http…)` fetchés pendant la vague
     /// (étape 98) — posés entre `sub_commit` et le relayout,
     /// consommés à la cascade par `insert_fetched_backgrounds`
@@ -443,6 +448,10 @@ pub(crate) struct PageSnapshot {
     /// Requête d'origine de la page gelée — restaurée pour
     /// que `reload` réémette la bonne méthode (étape 56).
     last_req: Option<Request>,
+    /// Sous-contextes `<iframe>` gelés avec la page (étape
+    /// 128) — la restauration rétablit les DOM enfants sans
+    /// re-fetch.
+    frames: Vec<SubFrame>,
 }
 
 /// Session : transport + fontes injectés, onglets, viewport,
@@ -495,6 +504,9 @@ pub struct Session {
     /// simultanés par onglet.
     max_scripts: usize,
     max_modules: usize,
+    /// Borne des contextes `<iframe>` par document (étape
+    /// 128 — `0` = désactivé).
+    max_frames: usize,
     max_inflight: usize,
     /// Jar à cookies partagé — le daemon le branche aussi
     /// sur le `CookieTransport` pour que `document.cookie`
@@ -639,6 +651,7 @@ impl Session {
             max_imports: cfg.max_imports,
             max_fonts: cfg.max_fonts,
             max_scripts: cfg.max_scripts,
+            max_frames: cfg.max_frames,
             max_modules: cfg.max_modules,
             max_inflight: cfg.max_inflight,
             cookies: Arc::new(CookieJar::new()),
@@ -863,6 +876,7 @@ impl Session {
                 js: None,
                 images: PaintImages::default(),
                 linked_sheets: Vec::new(),
+                frames: Vec::new(),
                 bg_aliases: HashMap::new(),
                 bg_bodies: HashMap::new(),
                 mask_aliases: HashMap::new(),
@@ -972,6 +986,31 @@ impl Session {
     pub fn dom_dump(&self, tab: TabId) -> Option<String> {
         let dom = self.tabs.get(&tab)?.dom.as_ref()?;
         Some(explorer_html::debug::dump(dom))
+    }
+
+    /// Contextes `<iframe>` commis de l'onglet (étape 128)
+    /// — `(url chargée, titre extrait)` dans l'ordre du
+    /// document ; vide hors pages à iframes ou borne `0`.
+    #[must_use]
+    pub fn tab_frames(&self, tab: TabId) -> Vec<(String, Option<String>)> {
+        self.tabs
+            .get(&tab)
+            .map(|e| {
+                e.frames
+                    .iter()
+                    .map(|f| (f.url.to_string(), f.title.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Dump diagnostic du DOM d'un sous-contexte `<iframe>`
+    /// (étape 128) — même outil que [`Self::dom_dump`],
+    /// indexé par position document. `None` hors bornes.
+    #[must_use]
+    pub fn frame_dom_dump(&self, tab: TabId, index: usize) -> Option<String> {
+        let f = self.tabs.get(&tab)?.frames.get(index)?;
+        Some(explorer_html::debug::dump(&f.dom))
     }
 
     /// Dump diagnostic de l'arbre de boîtes posé — positions
