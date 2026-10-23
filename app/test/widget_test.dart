@@ -112,6 +112,27 @@ void main() {
     expect(field.controller?.text, 'https://fr.wikipedia.org/wiki/Accueil');
   });
 
+  testWidgets('barre de statut affiche le moteur actif', (
+    WidgetTester tester,
+  ) async {
+    // Étape 119 — piège `engineMode=auto` : le choix FFI/REST
+    // doit rester visible en permanence (une dll périmée
+    // adjacente détournait les tests en silence).
+    final c = makeContainer(FakeRepo(), FakeEvents());
+    addTearDown(c.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: c,
+        child: MaterialApp(
+          home: BrowserPage(tokens: DesignTokens.fallback),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('TEST fake'), findsOneWidget);
+  });
+
   test('tokens de repli exposent les sections clés', () {
     final t = DesignTokens.fallback;
     expect(t.color('surface', 'base'), isA<Color>());

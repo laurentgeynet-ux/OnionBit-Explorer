@@ -71,7 +71,15 @@ class FfiInvalidation {
 ///   (`Isolate.kill` diffère à la sortie du code natif) —
 ///   le contrat de l'étape reste : l'UI continue de répondre.
 class FfiEngine implements BrowserRepository {
-  FfiEngine._(this._worker);
+  FfiEngine._(this._worker, this.libPath);
+
+  /// Chemin de la bibliothèque chargée — affiché dans la barre
+  /// de statut (étape 119 : le piège `engineMode=auto` était
+  /// de charger silencieusement une dll périmée adjacente).
+  final String libPath;
+
+  @override
+  String get engineLabel => 'FFI $libPath';
 
   /// Tente de charger la bibliothèque dynamique — `null` si
   /// absente (mode dégradé → REST, jamais d'exception hors
@@ -88,7 +96,7 @@ class FfiEngine implements BrowserRepository {
         // Vérif ABI minimale : le symbole existe → le worker
         // partira sur ce chemin (sa propre `open`+`create`).
         lib.lookup('explorer_create');
-        return FfiEngine._(_FfiWorker.start(candidate));
+        return FfiEngine._(_FfiWorker.start(candidate), candidate);
       } on Object {
         // Candidat absent ou ABI incompatible → suivant.
       }

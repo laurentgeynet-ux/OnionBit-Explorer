@@ -2412,6 +2412,32 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   clear` (API : set, reflet status,
   clear, rejet `lang:42`).
 
+- [x] **Étape 119. Piège
+  `engineMode=auto` rendu visible**
+  (terrain : une `explorer_ffi.dll`
+  périmée adjacente à l'exe gagnait
+  silencieusement la sonde
+  `tryLoad` — latence 20 s + gel
+  attribués à tort au daemon).
+  `BrowserRepository.engineLabel`
+  → `REST <baseUrl>` ; `FfiEngine`
+  retient le chemin candidat
+  gagnant → `FFI <chemin dll>` ;
+  `engineLabelProvider` lu par la
+  barre de statut — désormais
+  **toujours rendue** (moteur à
+  droite, ellipsis RTL : la fin du
+  chemin — nom du fichier — reste
+  visible). `package.ps1` :
+  `cargo build --release -p
+  explorer-ffi` ajouté et la dll
+  fraîche copiée dans `dist/app/`
+  à côté de l'exe — le bundle ne
+  repose plus sur une dll
+  préexistante. Régression :
+  `barre de statut affiche le
+  moteur actif` (40/40 verts).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

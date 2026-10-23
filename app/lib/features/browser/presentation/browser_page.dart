@@ -271,7 +271,11 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
                       )
                     : _FrameView(tokens: t, state: st, ctrl: ctrl),
               ),
-              _StatusBar(tokens: t, state: st),
+              _StatusBar(
+                tokens: t,
+                state: st,
+                engine: ref.watch(engineLabelProvider),
+              ),
             ],
           ),
         ),
@@ -367,20 +371,34 @@ class _ErrorPage extends StatelessWidget {
 }
 
 /// Barre de statut : `href` survolé (curseur lien) ou
-/// indicateur de champ focalisé — hauteur `metrics.
-/// statusBarHeight`, invisible quand rien à dire.
+/// indicateur de champ focalisé à gauche, **moteur actif à
+/// droite** (étape 119 — le choix `auto` FFI/REST reste
+/// visible en permanence ; une dll périmée adjacente
+/// détournait les tests en silence). Hauteur
+/// `metrics.statusBarHeight`, toujours rendue.
 class _StatusBar extends StatelessWidget {
-  const _StatusBar({required this.tokens, required this.state});
+  const _StatusBar({
+    required this.tokens,
+    required this.state,
+    required this.engine,
+  });
 
   final DesignTokens tokens;
   final BrowserState state;
+
+  /// `engineLabel` du dépôt actif (`FFI <chemin dll>` /
+  /// `REST <base>`).
+  final String engine;
 
   @override
   Widget build(BuildContext context) {
     final label =
         state.hoverUrl ??
         (state.fieldFocused ? 'Champ actif — saisie envoyée au moteur' : '');
-    if (label.isEmpty) return const SizedBox.shrink();
+    final style = TextStyle(
+      color: tokens.color('onSurface', 'muted'),
+      fontSize: tokens.dim2('typography', 'size', 'sm', fallback: 12),
+    );
     return Container(
       height: tokens.dim('metrics', 'statusBarHeight', fallback: 22),
       padding: EdgeInsets.symmetric(
@@ -390,15 +408,26 @@ class _StatusBar extends StatelessWidget {
         color: tokens.color('surface', 'raised'),
         border: Border(top: BorderSide(color: tokens.color('border', 'base'))),
       ),
-      alignment: Alignment.centerLeft,
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: tokens.color('onSurface', 'muted'),
-          fontSize: tokens.dim2('typography', 'size', 'sm', fallback: 12),
-        ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: style,
+            ),
+          ),
+          // Miroir logique : le chemin FFI peut être long, la
+          // fin (nom du fichier) est l'information utile.
+          Text(
+            engine,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textDirection: TextDirection.rtl,
+            style: style,
+          ),
+        ],
       ),
     );
   }

@@ -9,6 +9,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Étape 119 — piège
+  `engineMode=auto` visible**
+  (`app/`, `scripts/`). Une
+  `explorer_ffi.dll` périmée à
+  côté de l'exe gagnait
+  silencieusement la sonde
+  `tryLoad` (latence 20 s + gel
+  attribués au daemon). Le moteur
+  actif est affiché en permanence
+  dans la barre de statut
+  (`FFI <chemin>` / `REST <base>`)
+  et `package.ps1` compile
+  `explorer-ffi` release puis
+  dépose la dll fraîche à côté
+  de l'exe du bundle.
+
 - **Étape 118 — `Accept-Language`
   bout en bout** (`explorer-net`,
   `explorer-core`, `explorer-api`,

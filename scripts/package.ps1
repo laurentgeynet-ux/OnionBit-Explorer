@@ -16,8 +16,8 @@ Set-Location (Split-Path -Parent $PSScriptRoot)
 $Version = '0.2.0'
 $Dist    = "dist/explorer-$Version"
 
-Write-Host "==> cargo build --release (daemon + cli)" -ForegroundColor Cyan
-cargo build --release -p explorer-daemon -p explorer-cli
+Write-Host "==> cargo build --release (daemon + cli + ffi)" -ForegroundColor Cyan
+cargo build --release -p explorer-daemon -p explorer-cli -p explorer-ffi
 if ($LASTEXITCODE -ne 0) { throw "ECHEC : build release" }
 
 New-Item -ItemType Directory -Force -Path "$Dist/bin" | Out-Null
@@ -36,6 +36,15 @@ if (-not $SkipApp -and (Test-Path 'app/pubspec.yaml')) {
         $runner = 'app/build/windows/x64/runner/Release'
         if (Test-Path $runner) {
             Copy-Item $runner "$Dist/app" -Recurse
+            # Etape 119 — DLL fraîche À CÔTÉ de l'exe : en mode
+            # `auto` une `explorer_ffi.dll` périmée adjacente
+            # gagnait silencieusement la sonde `tryLoad`
+            # (terrain : latence 20 s + gel). Le binaire
+            # compilé ici est déposé dans le bundle.
+            $ffiDll = 'target/release/explorer_ffi.dll'
+            if (Test-Path $ffiDll) {
+                Copy-Item $ffiDll "$Dist/app/"
+            }
         }
     } else {
         Write-Host "==> flutter absent — app non embarquee (bin/ seul)" -ForegroundColor Yellow

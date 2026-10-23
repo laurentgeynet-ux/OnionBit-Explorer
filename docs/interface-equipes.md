@@ -368,10 +368,11 @@ journal « livré ».
   /api/accept-language` + reflet `/api/status` + export FFI
   additif (vieille dll = no-op) + réglage app « Langue »
   (`''` = locale OS → `fr-FR,fr;q=0.9,en;q=0.8`).
-- [ ] **Piège `engineMode=auto`** : une `explorer_ffi.dll`
-  périmée à côté de l'exe détourne silencieusement tout test
-  « daemon + UI » (mesuré : latence 20 s + gel). Afficher le
-  moteur actif (status bar) + copier la DLL fraîche au build.
+- [x] ~~**Piège `engineMode=auto`**~~ → **résolu, Étape 119** :
+  moteur actif affiché en permanence en barre de statut
+  (`FFI <chemin dll>` / `REST <base>`) + `package.ps1`
+  compile `explorer-ffi` release et dépose la dll fraîche
+  à côté de l'exe du bundle.
 - [ ] **Empreinte daemon ~1,4 Gio** en croissance par page —
   mesurer relâchement à la fermeture d'onglets (bfcache /
   heaps jscore / PNG / `PaintImages`).
@@ -398,6 +399,14 @@ journal « livré ».
 - [ ] **`Error: b` sur google.com** — stack minifiée
   `(3:2662)`→`U(3:4262)` : repro isolée à produire via
   `jprobe`/console, puis fix JS-C suivant.
-- [ ] **Reliquat `Invalid base URL`** : sonde
-  `zz_gap_probe.rs` vivante (non pushée) — probablement
-  `import.meta.url`, à clore.
+- [x] ~~**Reliquat `Invalid base URL`**~~ → **résolu,
+  JS-C64** : `import.meta.url` est désormais la liaison
+  lexicale `IMPORT_META` de l'env du module *propriétaire*
+  (dep/callback/timer = leur propre URL résolue — avant :
+  `current_module` global = URL de l'entrée, "" depuis une
+  microtâche) + `ModuleLoader::resolve` additif → URL
+  absolue chez `MapLoader` → `new URL(x, import.meta.url)`
+  fonctionne (trigger confirmé : `new URL("./",
+  import.meta.url)` de `wp-runtime-*.js`, la détection
+  `publicPath` standard de webpack). Régression
+  `mod_import_meta_url_per_module`.

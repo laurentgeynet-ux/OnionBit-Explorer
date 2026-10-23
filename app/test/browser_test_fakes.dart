@@ -171,6 +171,9 @@ class FakeRepo implements BrowserRepository {
   Future<void> setAcceptLanguage(String lang) async => langPushes.add(lang);
 
   @override
+  String get engineLabel => 'TEST fake';
+
+  @override
   Future<List<Bookmark>> bookmarks() async => List.of(marks);
 
   @override

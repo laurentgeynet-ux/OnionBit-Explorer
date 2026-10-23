@@ -21,6 +21,12 @@ class BrowserRepository {
 
   final ApiClient _api;
 
+  /// Descripteur du moteur actif pour la barre de statut
+  /// (étape 119 — piège `engineMode=auto` : une dll périmée
+  /// choisie silencieusement doit être *visible*).
+  /// `FfiEngine` le surcharge avec le chemin de la dll.
+  String get engineLabel => 'REST ${_api.config.daemonBaseUrl}';
+
   /// Crée un onglet côté daemon et le traduit en entité métier.
   Future<BrowserTab> createTab() async {
     final res = await _api.postJson('/api/tabs');

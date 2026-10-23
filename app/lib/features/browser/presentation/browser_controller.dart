@@ -165,6 +165,13 @@ final browserRepositoryProvider = Provider<BrowserRepository>((ref) {
   return ffi ?? BrowserRepository(ref.watch(apiClientProvider));
 });
 
+/// Descripteur du moteur actif — barre de statut (étape 119 :
+/// le choix `auto` FFI/REST doit être *visible*, une dll
+/// périmée adjacente détournait les tests en silence).
+final engineLabelProvider = Provider<String>(
+  (ref) => ref.watch(browserRepositoryProvider).engineLabel,
+);
+
 /// Signets du store moteur — `AsyncNotifier` rechargé après
 /// chaque mutation (`toggle`/`remove`). En mode FFI la liste
 /// reste vide (dégradation documentée, ADR-0018).
