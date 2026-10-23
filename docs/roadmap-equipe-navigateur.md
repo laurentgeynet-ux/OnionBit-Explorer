@@ -3204,6 +3204,76 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   function (on Object)` (nouveau, modules
   allant plus loin).
 
+- [x] **JS-C61. Portée de bloc réelle —
+  `EnvKind::Block`** (une seule cause
+  racine pour les DEUX résidus de
+  JS-C60 — mesure du graphe réel
+  `behaviors-*.js` + deps sur disque,
+  stack complète `P@catalyst ←
+  c@runtime-helpers` = `tslib.__decorate`) :
+  - **Chaîne de causalité mesurée** —
+    `let`/`const` sans portée de bloc
+    liaient dans l'env *fonction* :
+    1ᵉʳ appel `_(A)`, `let e = A[O]` =
+    `undefined` **écrasait le paramètre
+    `e`** → `o.set(undefined, Set)` →
+    map `O` à clé `undefined` ; 2ᵉ
+    appel `_(B)` héritant la map →
+    `for (let [t,n] of e)` **écrasait
+    le paramètre `t`** → `t = undefined`
+    → `let o = t[O]` → `TypeError:
+    cannot read 'sym2' of Undefined`.
+    Instrumentation du bundle par
+    try/catch étiquetés (`READ3`)
+    jusqu'au statement exact.
+  - **`set is not a function` mort
+    de la même cause** — `4u-*.js`
+    évalue proprement : une liaison de
+    boucle écrasait le détenteur du
+    `Map`/`Set`.
+  - **`EnvKind::Block`** — record
+    déclaratif identique à `Local`
+    pour `let`/`const`/lectures,
+    traversé par `var`/déclarations de
+    fonction (`env_declare` monte,
+    spec VarDeclaredNames) ; `with`
+    inchangé. `Env::block(parent)`.
+  - **Sites couverts** — `Stmt::Block`,
+    `try`/`finally`, `switch` (UN env
+    partagé entre `case`, spec),
+    `catch` (param en liaison lexicale
+    — `bind_pat Var` traverserait le
+    bloc), têtes `for`/`for-in`/`for-of`
+    lexicales et `using`.
+  - **`for (let i;;)` — env par
+    itération, copie post-corps** :
+    cellules fraîches recréées entre
+    corps et `update` (spec
+    CreatePerIterationEnvironment) —
+    les closures capturent LEUR `i`
+    (`0,1,2`, pas `1,2,3` : `i++`
+    mute la cellule du tour suivant).
+  - **`history.*` en *valeur*** —
+    `get` rend les natives
+    `pushState`/`replaceState`/`back`/
+    `forward`/`go` (le wrap turbo
+    `e.call(history,…)` de github lit
+    la référence, invoke-only la rend
+    invisible) — logique partagée
+    avec `invoke`, `this` sans effet.
+  Régression `block_scoping` (lang.rs —
+  shadowing param, fuites de bloc,
+  `var` traversant, closures par
+  itération, motif catalyst réduit) +
+  cas `.call(history,…)` dans
+  `window_history` (dom.rs). Sonde
+  réelle : le graphe `behaviors`
+  traverse `__decorate`/`P`/`_` et
+  meurt sur `client-env` absent —
+  donnée applicative de la page
+  réelle (artefact de fixture,
+  borne honnête du miroir).
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

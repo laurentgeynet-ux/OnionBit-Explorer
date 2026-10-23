@@ -548,7 +548,9 @@ pub fn is_bare_specifier(spec: &str) -> bool {
 fn env_alias(env: &EnvRef, local: &str, dep_env: &EnvRef, binding: &str) {
     let mut b = env.borrow_mut();
     match &mut b.kind {
-        crate::heap::EnvKind::Local(m) | crate::heap::EnvKind::Global(m) => {
+        crate::heap::EnvKind::Local(m)
+        | crate::heap::EnvKind::Global(m)
+        | crate::heap::EnvKind::Block(m) => {
             m.insert(
                 local.to_string(),
                 EnvCell::Alias(dep_env.clone(), binding.to_string()),

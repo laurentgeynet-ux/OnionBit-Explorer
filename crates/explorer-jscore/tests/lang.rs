@@ -478,6 +478,102 @@ fn let_const_bindings() {
 }
 
 #[test]
+fn block_scoping() {
+    // `let`/`const` vivent dans leur bloc — jamais dans le scope
+    // fonction (régression réelle : la fuite clobérait les
+    // paramètres de fonction — bundle catalyst de github.com).
+    assert_eq!(
+        ev_str("function f(t){ { let t = 42; } return t } f('orig')"),
+        "orig"
+    );
+    assert_eq!(
+        ev_str("function f(t){ if (true) { const t = 1; } return t } f('orig')"),
+        "orig"
+    );
+    // Le nom de bloc est invisible après le bloc.
+    assert_eq!(ev_str("{ let z = 9; } typeof z"), "undefined");
+    // `for (let …)` / `for (let … of/in …)` — la liaison de tête
+    // n'écrase pas le scope englobant (le motif exact catalyst :
+    // `for (let [t,n] of e)` dans une fonction à paramètre `t`,
+    // suivi d'une lecture `t[sym]`).
+    assert_eq!(
+        ev_str("function f(t){ for (let t = 0; t < 2; t++) {} return t } f('orig')"),
+        "orig"
+    );
+    assert_eq!(
+        ev_str(
+            "function f(t){ let e = [[1,2],[3,4]]; for (let [t,n] of e) {} return t } f('orig')"
+        ),
+        "orig"
+    );
+    assert_eq!(
+        ev_str("function f(t){ for (let t in {a:1}) {} return t } f('orig')"),
+        "orig"
+    );
+    // Catalyst réduit : `let e` hérite une map, le `for` copie ses
+    // entrées, `t` redevient le paramètre après la boucle.
+    assert_eq!(
+        ev_str(
+            "var O = Symbol.for('c'); function g(t, e) { \
+               if (!Object.prototype.hasOwnProperty.call(t, O)) { \
+                 let e = t[O], o = t[O] = new Map(); \
+                 if (e) for (let [t, n] of e) o.set(t, new Set(n)); \
+               } \
+               let o = t[O]; \
+               return o.has(e) || o.set(e, new Set()), o.get(e); \
+             } \
+             var base = {}; base[O] = new Map([['x', new Set([1])]]); \
+             var p = Object.create(base); \
+             g(p, 'targets'); \
+             p[O].get('x').has(1) && p[O].get('targets').size === 0 ? 'copied' : 'no'"
+        ),
+        "copied"
+    );
+    // `var` dans un bloc remonte toujours au scope fonction.
+    assert_eq!(ev_str("function f(){ { var z = 7; } return z } f()"), "7");
+    assert_eq!(ev_str("var o = {}; with (o) { var z = 7; } z"), "7");
+    // `try`/`finally`/`switch`/`catch` sont des blocs aussi ;
+    // `var` dans `catch` reste fonction-scope.
+    assert_eq!(
+        ev_str("try { let a = 1; } finally { let b = 2; } typeof a + typeof b"),
+        "undefinedundefined"
+    );
+    assert_eq!(ev_str("try { throw 1 } catch (e) { var z = 5; } z"), "5");
+    assert_eq!(ev_str("try { throw 1 } catch (e) {} typeof e"), "undefined");
+    assert_eq!(
+        ev_str("switch (1) { case 1: let k = 'x'; } typeof k"),
+        "undefined"
+    );
+    // `for (let i)` — capture par itération : chaque closure
+    // garde SA valeur de `i` (spec CreatePerIterationEnvironment).
+    assert_eq!(
+        ev_str(
+            "var fs = []; for (let i = 0; i < 3; i++) fs.push(() => i); fs.map(f => f()).join(',')"
+        ),
+        "0,1,2"
+    );
+    assert_eq!(
+        ev_str(
+            "var fs = []; for (let x of [10, 20, 30]) fs.push(() => x); fs.map(f => f()).join(',')"
+        ),
+        "10,20,30"
+    );
+    // `for (var i)` — comportement inchangé : une seule liaison.
+    assert_eq!(
+        ev_str(
+            "var fs = []; for (var i = 0; i < 3; i++) fs.push(() => i); fs.map(f => f()).join(',')"
+        ),
+        "3,3,3"
+    );
+    // Clés symbole : lecture/écriture d'une prop symbole sur un
+    // objet ordinaire, y compris via prototype.
+    assert_eq!(
+        ev_str("var O = Symbol.for('c'); var a = {}, b = Object.create(a); a[O] = 5; b[O]"),
+        "5"
+    );
+}
+
+#[test]
 fn arrow_functions() {
     assert_eq!(num(ev("var f = x => x * 2; f(21)")), 42.0);
     assert_eq!(num(ev("var g = (a, b) => a + b; g(3, 4)")), 7.0);

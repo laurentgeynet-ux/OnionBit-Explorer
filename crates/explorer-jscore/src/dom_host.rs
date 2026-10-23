@@ -3695,44 +3695,82 @@ impl Host for HistoryHost {
     }
 
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
-        if key == "length" {
-            return Ok(Some(Value::Num(f64::from(e.hooks.history_len))));
+        match key {
+            "length" => Ok(Some(Value::Num(f64::from(e.hooks.history_len)))),
+            // Méthodes en *valeur* : les wraps de navigation
+            // (`e.call(history,…)` — turbo github.com) lisent la
+            // référence puis l'appellent ; invoke-only les rend
+            // invisibles. Le `this` est sans effet — tout passe
+            // par les hooks.
+            "back" => Ok(Some(e.native_fn("back", history_back))),
+            "forward" => Ok(Some(e.native_fn("forward", history_forward))),
+            "go" => Ok(Some(e.native_fn("go", history_go))),
+            "pushState" => Ok(Some(e.native_fn("pushState", history_push_state))),
+            "replaceState" => Ok(Some(e.native_fn("replaceState", history_replace_state))),
+            _ => Ok(None),
         }
-        Ok(None)
     }
 
     fn invoke(
         &self,
         e: &mut Engine,
-        _t: Value,
+        t: Value,
         name: &str,
         args: &[Value],
     ) -> JsResult<Option<Value>> {
-        let n = match name {
-            "back" => -1,
-            "forward" => 1,
-            "go" => e.to_number(arg(args, 0))? as i32,
-            "pushState" | "replaceState" => {
-                // Pas de pile de session — l'URL courante change
-                // comme chez un navigateur, sans rechargement.
-                let u = arg(args, 2);
-                if !matches!(u, Value::Undefined | Value::Null) {
-                    let url = e.to_js_string(u)?;
-                    if !url.is_empty() {
-                        e.hooks.page_url = url;
-                    }
-                }
-                return Ok(Some(Value::Undefined));
-            }
+        let r = match name {
+            "back" => history_back(e, t, args),
+            "forward" => history_forward(e, t, args),
+            "go" => history_go(e, t, args),
+            "pushState" => history_push_state(e, t, args),
+            "replaceState" => history_replace_state(e, t, args),
             _ => return Ok(None),
         };
-        if n != 0 {
-            if let Some(go) = &e.hooks.history_go {
-                go(n);
-            }
-        }
-        Ok(Some(Value::Undefined))
+        r.map(Some)
     }
+}
+
+fn history_nav(e: &mut Engine, n: i32) -> JsResult<Value> {
+    if n != 0 {
+        if let Some(go) = &e.hooks.history_go {
+            go(n);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+fn history_push_replace(e: &mut Engine, args: &[Value]) -> JsResult<Value> {
+    // Pas de pile de session — l'URL courante change comme chez
+    // un navigateur, sans rechargement.
+    let u = arg(args, 2);
+    if !matches!(u, Value::Undefined | Value::Null) {
+        let url = e.to_js_string(u)?;
+        if !url.is_empty() {
+            e.hooks.page_url = url;
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+fn history_back(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    history_nav(e, -1)
+}
+
+fn history_forward(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    history_nav(e, 1)
+}
+
+fn history_go(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let n = e.to_number(arg(args, 0))? as i32;
+    history_nav(e, n)
+}
+
+fn history_push_state(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    history_push_replace(e, args)
+}
+
+fn history_replace_state(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    history_push_replace(e, args)
 }
 
 /// `document.fonts` — `FontFaceSet` minimal. Pas de pipeline de

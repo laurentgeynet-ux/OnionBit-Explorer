@@ -37,6 +37,38 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `mask_fetchem_enregistre_via_
   register_mask`.
 
+- **JS-C61 — portée de bloc réelle :
+  `EnvKind::Block`** (`explorer-jscore` —
+  UNE cause racine pour les deux résidus
+  de JS-C60, mesurée sur le graphe réel
+  `behaviors-*.js` : `let`/`const`
+  liaient dans l'env fonction, pas dans
+  le bloc. `let e = t[O]` écrasait le
+  paramètre `e` de `_` catalyst → map à
+  clé `undefined` ; puis `for (let
+  [t,n] of e)` écrasait le paramètre
+  `t` → `t[O]` → `TypeError: cannot
+  read 'sym2' of Undefined` — et le
+  même trou rendait `set is not a
+  function` dans `4u-*.js`, qui évalue
+  désormais proprement). `Block` =
+  record déclaratif pour `let`/`const`/
+  lectures, traversé par `var` et les
+  déclarations de fonction (spec
+  VarDeclaredNames). Couvre `Stmt::
+  Block`, `try`/`finally`, `switch`
+  (env partagé entre `case`), `catch`
+  (param lexical), têtes de boucles
+  lexicales et `using`. `for (let i;;)`
+  copie ses liaisons entre corps et
+  `update` (CreatePerIteration-
+  Environment) — les closures
+  capturent leur `i` (`0,1,2`). Au
+  passage : `history.*` rendus en
+  *valeur* (`e.call(history,…)` du
+  wrap turbo). Régressions
+  `block_scoping` + `window_history`.
+
 - **JS-C60 — `/` après `)` de clause :
   regex, pas division** (`explorer-jscore`,
   trou remonté par github.com après Étape

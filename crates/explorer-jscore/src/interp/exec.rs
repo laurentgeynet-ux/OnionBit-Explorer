@@ -293,7 +293,19 @@ impl Engine {
                 }
                 Ok(Flow::Normal)
             }
-            Stmt::Block(stmts) => self.exec_body(env, this, stmts),
+            // `{ let x … }` — portée de bloc réelle : les `let`/
+            // `const`/`class` du corps vivent dans une env enfant
+            // (ils ne doivent pas écraser les liaisons du scope
+            // englobant — régression réelle : catalyst `for(let
+            // [t,n]of e)` clobérait le paramètre `t` de sa fonction,
+            // puis `t[O]` lisait une clé symbole sur `undefined`).
+            // `var`/fonctions restent fonction-scope via `env_set`
+            // (résolution par la chaîne parente, `hoist_vars_only`
+            // les a déjà déclarés dans l'env fonction).
+            Stmt::Block(stmts) => {
+                let benv = Env::block(env.clone());
+                self.exec_body(&benv, this, stmts)
+            }
             // `using x = e` (ES2026) — binding const + disposeur
             // enregistré sur la frame du corps courant.
             Stmt::Using { decls, is_await } => {
@@ -363,6 +375,16 @@ impl Engine {
                 body,
             } => {
                 let labels = std::mem::take(&mut self.pending_labels);
+                // `for (let i = …)` — env de tête dédiée : les noms
+                // lexicaux ne fuient pas dans le scope englobant et
+                // chaque itération en reçoit une copie fraîche
+                // (spec `CreatePerIterationEnvironment` — la copie
+                // tombe ENTRE le corps et `update` : `i++` mute la
+                // cellule du tour suivant, la closure capturée au
+                // tour k garde `i = k`). `ienv` = env du tour
+                // courant ; `names` = liaisons à recopier.
+                let mut names: Vec<(String, bool)> = Vec::new();
+                let mut ienv = env.clone();
                 if let Some(init) = init {
                     match init {
                         ForInit::Var(decls) => {
@@ -374,12 +396,14 @@ impl Engine {
                             }
                         }
                         ForInit::Lexical { decls, constant } => {
+                            let head = Env::block(env.clone());
                             for d in decls {
-                                Self::declare_pat_lex(env, &d.pat, !constant);
+                                Self::lex_pat_names(&d.pat, !constant, &mut names);
+                                Self::declare_pat_lex(&head, &d.pat, !constant);
                                 if let Some(i) = &d.init {
-                                    let v = self.eval_expr(env, this, i)?;
+                                    let v = self.eval_expr(&head, this, i)?;
                                     self.bind_pat(
-                                        env,
+                                        &head,
                                         this,
                                         &d.pat,
                                         v,
@@ -387,6 +411,7 @@ impl Engine {
                                     )?;
                                 }
                             }
+                            ienv = head;
                         }
                         ForInit::Expr(e) => {
                             self.eval_expr(env, this, e)?;
@@ -396,17 +421,42 @@ impl Engine {
                 loop {
                     self.tick()?;
                     if let Some(t) = test {
-                        let c = self.eval_expr(env, this, t)?;
+                        let c = self.eval_expr(&ienv, this, t)?;
                         if !self.to_boolean(c) {
                             return Ok(Flow::Normal);
                         }
                     }
-                    let f = self.exec_stmt(env, this, body)?;
+                    let f = self.exec_stmt(&ienv, this, body)?;
                     if let Some(f) = Self::loop_flow(f, &labels) {
                         return Ok(f);
                     }
                     if let Some(u) = update {
-                        self.eval_expr(env, this, u)?;
+                        if names.is_empty() {
+                            self.eval_expr(&ienv, this, u)?;
+                        } else {
+                            // Copie post-corps : le tour suivant
+                            // reçoit des cellules fraîches portant
+                            // les valeurs courantes, puis `update`
+                            // les mute (spec).
+                            let next = Env::block(env.clone());
+                            for (n, m) in &names {
+                                let v = self.env_get(&ienv, n).unwrap_or(Value::Undefined);
+                                Self::env_declare_lex(&next, n, *m);
+                                Self::env_init_lex(&next, n, v);
+                            }
+                            self.eval_expr(&next, this, u)?;
+                            ienv = next;
+                        }
+                    } else if !names.is_empty() {
+                        // Sans `update` : recopier quand même entre
+                        // les tours (les closures restent distinctes).
+                        let next = Env::block(env.clone());
+                        for (n, m) in &names {
+                            let v = self.env_get(&ienv, n).unwrap_or(Value::Undefined);
+                            Self::env_declare_lex(&next, n, *m);
+                            Self::env_init_lex(&next, n, v);
+                        }
+                        ienv = next;
                     }
                 }
             }
@@ -425,10 +475,19 @@ impl Engine {
                 let Value::Obj(id) = ov else {
                     return Ok(Flow::Normal); // for-in over primitives: skip
                 };
+                // `for (let k in o)` — env fraîche par itération
+                // (bindings block-scope + capture de closure).
+                let per_iter =
+                    matches!(target, ForTarget::Lexical { .. } | ForTarget::Using { .. });
                 for key in self.enum_keys(id)? {
                     let kv = self.str_val(key);
-                    self.assign_target(env, this, target, kv)?;
-                    let f = self.exec_stmt(env, this, body)?;
+                    let ienv = if per_iter {
+                        Env::block(env.clone())
+                    } else {
+                        env.clone()
+                    };
+                    self.assign_target(&ienv, this, target, kv)?;
+                    let f = self.exec_stmt(&ienv, this, body)?;
                     if let Some(f) = Self::loop_flow(f, &labels) {
                         return Ok(f);
                     }
@@ -449,16 +508,25 @@ impl Engine {
                     self.iter_values(v)?
                 };
                 // `for (using x of y)` : frame par itération (spec —
-                // la ressource est dépilée à chaque tour).
-                let per_iter = matches!(target, ForTarget::Using { .. });
+                // la ressource est dépilée à chaque tour). Cibles
+                // `let`/`const`/`using` : env fraîche par tour —
+                // la liaison n'écrase pas le scope englobant et
+                // chaque closure capture sa cellule.
+                let using = matches!(target, ForTarget::Using { .. });
+                let lex = matches!(target, ForTarget::Lexical { .. } | ForTarget::Using { .. });
                 for item in items {
-                    if per_iter {
+                    if using {
                         self.using_stack.push(Vec::new());
                     }
+                    let ienv = if lex {
+                        Env::block(env.clone())
+                    } else {
+                        env.clone()
+                    };
                     let mut r = self
-                        .assign_target(env, this, target, item)
-                        .and_then(|()| self.exec_stmt(env, this, body));
-                    if per_iter {
+                        .assign_target(&ienv, this, target, item)
+                        .and_then(|()| self.exec_stmt(&ienv, this, body));
+                    if using {
                         r = self.drain_using(r);
                     }
                     if let Some(f) = Self::loop_flow(r?, &labels) {
@@ -510,11 +578,18 @@ impl Engine {
                 catch,
                 finally,
             } => {
-                let mut r = self.exec_body(env, this, block);
+                // `try {}`/`finally {}` sont des blocs — env enfant
+                // pour leurs `let`/`const` (même règle que Block).
+                let benv = Env::block(env.clone());
+                let mut r = self.exec_body(&benv, this, block);
                 if let Err(Thrown(v)) = r {
                     if let Some((pat, cbody)) = catch {
-                        let cenv = Env::local(env.clone());
-                        if let Err(e) = self.bind_pat(&cenv, this, pat, v, BindMode::Var) {
+                        let cenv = Env::block(env.clone());
+                        // Param en liaison lexicale : `bind_pat Var`
+                        // traverserait le bloc vers le scope fonction.
+                        if let Err(e) =
+                            self.bind_pat(&cenv, this, pat, v, BindMode::Lex { mutable: true })
+                        {
                             r = Err(e);
                         } else {
                             r = self.exec_body(&cenv, this, cbody);
@@ -522,7 +597,8 @@ impl Engine {
                     }
                 }
                 if let Some(fbody) = finally {
-                    let fr = self.exec_body(env, this, fbody)?;
+                    let fenv = Env::block(env.clone());
+                    let fr = self.exec_body(&fenv, this, fbody)?;
                     if !matches!(fr, Flow::Normal) {
                         return Ok(fr);
                     }
@@ -548,8 +624,12 @@ impl Engine {
                 let Some(start) = matched.or(default) else {
                     return Ok(Flow::Normal);
                 };
+                // Tous les `case` d'un `switch` partagent UN seul
+                // bloc déclaratif (spec — `let` dans un case est
+                // visible des suivants, jamais du scope englobant).
+                let senv = Env::block(env.clone());
                 for c in &cases[start..] {
-                    match self.exec_body(env, this, &c.body)? {
+                    match self.exec_body(&senv, this, &c.body)? {
                         Flow::Normal => {}
                         // `break` seul sort du switch ; `break lbl`
                         // remonte jusqu'au statement étiqueté.

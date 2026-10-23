@@ -1107,6 +1107,24 @@ fn window_history() {
     );
     // go(0) = reload — not a relative move, ignored by the hook.
     assert_eq!(navs.borrow().as_slice(), ["go:-1", "go:1", "go:-2"]);
+    // Références de méthode lisibles : les wraps SPA lisent
+    // `history.pushState` en valeur puis `e.call(history,…)`
+    // (turbo — github.com).
+    assert_eq!(evf(&mut e, "typeof history.pushState"), "function");
+    assert_eq!(evf(&mut e, "typeof history.go"), "function");
+    evf(
+        &mut e,
+        "var p = history.pushState; p.call(history, {t:1}, '', '/via-call');",
+    );
+    assert_eq!(
+        evf(&mut e, "location.pathname || location.href"),
+        "/via-call"
+    );
+    evf(&mut e, "var g = history.go; g.call(history, -1);");
+    assert_eq!(
+        navs.borrow().as_slice(),
+        ["go:-1", "go:1", "go:-2", "go:-1"]
+    );
 }
 
 // -- JS-7f window surface ------------------------------------------------

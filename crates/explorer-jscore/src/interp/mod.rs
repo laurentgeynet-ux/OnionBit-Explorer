@@ -1277,7 +1277,7 @@ impl Engine {
             let next = {
                 let b = e.borrow();
                 match &b.kind {
-                    EnvKind::Local(m) => match m.get(&name) {
+                    EnvKind::Local(m) | EnvKind::Block(m) => match m.get(&name) {
                         Some(EnvCell::Bind(v)) => return Some(v.value),
                         Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
                         None => Next::Up(b.parent.clone()),
@@ -1373,7 +1373,7 @@ impl Engine {
             let next = {
                 let b = e.borrow();
                 match &b.kind {
-                    EnvKind::Local(m) | EnvKind::Global(m) => {
+                    EnvKind::Local(m) | EnvKind::Global(m) | EnvKind::Block(m) => {
                         if m.contains_key(name) {
                             return true;
                         }
@@ -1428,19 +1428,23 @@ impl Engine {
             let act = {
                 let b = e.borrow();
                 match &b.kind {
-                    EnvKind::Local(m) if m.contains_key(name) => Act::Local(e.clone()),
+                    EnvKind::Local(m) | EnvKind::Block(m) if m.contains_key(name) => {
+                        Act::Local(e.clone())
+                    }
                     EnvKind::Global(m) if m.contains_key(name) => Act::Local(e.clone()),
                     EnvKind::Global(_) => Act::Global,
                     // `With` déjà géré au-dessus — repli défensif
                     // identique à `Local` sans la clé.
-                    EnvKind::Local(_) | EnvKind::With(_) => Act::Up(b.parent.clone()),
+                    EnvKind::Local(_) | EnvKind::Block(_) | EnvKind::With(_) => {
+                        Act::Up(b.parent.clone())
+                    }
                 }
             };
             match act {
                 Act::Local(e) => {
                     let mut b = e.borrow_mut();
                     let m = match &mut b.kind {
-                        EnvKind::Local(m) | EnvKind::Global(m) => m,
+                        EnvKind::Local(m) | EnvKind::Global(m) | EnvKind::Block(m) => m,
                         // `Act::Local` ne cible jamais un `with`.
                         EnvKind::With(_) => return Ok(()),
                     };
@@ -1540,9 +1544,9 @@ impl Engine {
                     }
                     return;
                 }
-                // `var` dans un `with` se déclare dans le scope
+                // `var` dans un `with`/bloc se déclare dans le scope
                 // fonction englobant (spec `VarDeclaredNames`).
-                EnvKind::With(_) => b.parent.clone(),
+                EnvKind::With(_) | EnvKind::Block(_) => b.parent.clone(),
             }
         };
         if let Some(p) = parent {
@@ -1557,7 +1561,7 @@ impl Engine {
         let parent = {
             let mut b = env.borrow_mut();
             match &mut b.kind {
-                EnvKind::Local(m) | EnvKind::Global(m) => {
+                EnvKind::Local(m) | EnvKind::Global(m) | EnvKind::Block(m) => {
                     m.insert(
                         name.to_string(),
                         EnvCell::Bind(Binding {
@@ -1577,9 +1581,9 @@ impl Engine {
     }
 
     /// `let`/`const`: declare in the *current* scope only, no hoisting
-    /// (block scoping is approximated — a `let` inside `{}` lives in
-    /// the function scope and there is no TDZ: an uninitialised read
-    /// yields `undefined` rather than throwing).
+    /// (block scoping is real — a `let` inside `{}` lives in the
+    /// block env ; no TDZ: an uninitialised read yields `undefined`
+    /// rather than throwing).
     ///
     /// Global `let`/`const` go to the declarative record, *not* the
     /// global object — `window.x` stays `undefined` for `let x`.
@@ -1587,7 +1591,7 @@ impl Engine {
         let parent = {
             let mut b = env.borrow_mut();
             match &mut b.kind {
-                EnvKind::Local(m) | EnvKind::Global(m) => {
+                EnvKind::Local(m) | EnvKind::Global(m) | EnvKind::Block(m) => {
                     m.insert(
                         name.to_string(),
                         EnvCell::Bind(Binding {
@@ -1613,7 +1617,7 @@ impl Engine {
         let parent = {
             let mut b = env.borrow_mut();
             match &mut b.kind {
-                EnvKind::Local(m) | EnvKind::Global(m) => {
+                EnvKind::Local(m) | EnvKind::Global(m) | EnvKind::Block(m) => {
                     if let Some(EnvCell::Bind(bnd)) = m.get_mut(name) {
                         bnd.value = v;
                     }
@@ -1647,6 +1651,30 @@ impl Engine {
                 }
                 if let Some(p) = rest {
                     self.declare_pat_names(env, p);
+                }
+            }
+        }
+    }
+
+    /// Collecte les `(nom, mutable)` d'un pattern `let`/`const` —
+    /// utilisé par `for (let …)` pour recréer les liaisons à chaque
+    /// itération (spec `CreatePerIterationEnvironment`).
+    pub(crate) fn lex_pat_names(pat: &Pat, mutable: bool, out: &mut Vec<(String, bool)>) {
+        match pat {
+            Pat::Ident(n) => out.push((n.clone(), mutable)),
+            Pat::Lvalue(_) => {}
+            Pat::Rest(p) | Pat::Default(p, _) => Self::lex_pat_names(p, mutable, out),
+            Pat::Array(elems) => {
+                for e in elems.iter().flatten() {
+                    Self::lex_pat_names(e, mutable, out);
+                }
+            }
+            Pat::Object { props, rest } => {
+                for (_, p) in props {
+                    Self::lex_pat_names(p, mutable, out);
+                }
+                if let Some(p) = rest {
+                    Self::lex_pat_names(p, mutable, out);
                 }
             }
         }

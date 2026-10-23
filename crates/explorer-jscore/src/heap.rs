@@ -489,7 +489,7 @@ pub(crate) fn trace_env(env: &EnvRef, out: &mut Vec<ObjId>, visited: &mut HashSe
             }
             let borrowed = e.borrow();
             match &borrowed.kind {
-                EnvKind::Global(m) | EnvKind::Local(m) => {
+                EnvKind::Global(m) | EnvKind::Local(m) | EnvKind::Block(m) => {
                     for c in m.values() {
                         match c {
                             EnvCell::Bind(b) => push_value(out, b.value),
@@ -1408,8 +1408,13 @@ pub enum EnvKind {
     /// object; the map is the declarative global record holding
     /// `let`/`const` names (they do *not* appear on `window`).
     Global(HashMap<String, EnvCell>),
-    /// Function/catch scope.
+    /// Function scope (paramètres, corps de fonction/programme).
     Local(HashMap<String, EnvCell>),
+    /// Portée de bloc (`{ … }`, tête de `for`, `switch`, `catch`) —
+    /// même stockage que `Local`, mais `var`/déclarations de
+    /// fonction la TRAVERSENT jusqu'au scope fonction englobant
+    /// (spec `VarDeclaredNames`) ; `let`/`const`/`class` y vivent.
+    Block(HashMap<String, EnvCell>),
     /// `with (obj)` — object-as-scope : la résolution d'un nom
     /// consulte les props de l'objet (sauf `@@unscopables`)
     /// puis remonte au parent.
@@ -1461,6 +1466,15 @@ impl Env {
         Rc::new(RefCell::new(Env {
             kind: EnvKind::Global(HashMap::new()),
             parent: None,
+        }))
+    }
+
+    /// New block scope chained to `parent` — `let`/`const` y vivent,
+    /// `var` la traverse (voir [`EnvKind::Block`]).
+    pub fn block(parent: EnvRef) -> EnvRef {
+        Rc::new(RefCell::new(Env {
+            kind: EnvKind::Block(HashMap::new()),
+            parent: Some(parent),
         }))
     }
 
