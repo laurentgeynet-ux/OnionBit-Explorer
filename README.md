@@ -2,8 +2,8 @@
 
 # 🧅 OnionBit Explorer
 
-**A web browser engine written from scratch in Rust — every layer implemented here.**
-*Un navigateur web écrit de zéro en Rust — chaque couche est implémentée ici.*
+**A web browser engine written from scratch in Rust — no imported engine, every browser-specific layer implemented here.**
+*Un navigateur web écrit de zéro en Rust — aucun moteur importé, chaque couche métier est implémentée ici.*
 
 [![CI](https://github.com/laurentgeynet-ux/OnionBit-Explorer/actions/workflows/ci.yml/badge.svg)](https://github.com/laurentgeynet-ux/OnionBit-Explorer/actions/workflows/ci.yml)
 [![Nightly terrain](https://github.com/laurentgeynet-ux/OnionBit-Explorer/actions/workflows/nightly-terrain.yml/badge.svg)](https://github.com/laurentgeynet-ux/OnionBit-Explorer/actions/workflows/nightly-terrain.yml)
@@ -12,8 +12,8 @@
 
 <img src="docs/wiki-hero.jpg" alt="Wikipedia rendered by OnionBit Explorer's own engine" width="880">
 
-*en.wikipedia.org — fetched, parsed, styled, laid out, rasterized and painted
-by this repository's code. No WebView, no imported engine.*
+*en.wikipedia.org — fetched, parsed, styled, laid out and painted
+by this repository's engine code. No WebView, no imported engine.*
 
 </div>
 
@@ -23,15 +23,19 @@ by this repository's code. No WebView, no imported engine.*
 
 OnionBit Explorer is a **complete browser stack built from zero** —
 no `html5ever`, no Servo, no WebKit embed, no JS runtime borrowed.
-If it renders on screen, the code that produced it lives in this tree:
+Every browser-specific layer — networking policy, HTML, CSS, layout,
+display list, the JS interpreter — is written in this tree.
+Upstream infrastructure crates carry the commodity bricks
+(TLS, HTTP/2 framing, raster primitives, text shaping, image/SVG
+codecs) — the full, declared list is in `Cargo.toml` and ADR-0001:
 
 | Layer | Crate | What's inside |
 |---|---|---|
-| **Networking** | `explorer-net` | URL/IDNA, DNS (+DoH), HTTP/1.1 **and HTTP/2**, TLS (rustls), cookies, cache, proxy — the only crate allowed to open sockets |
+| **Networking** | `explorer-net` | URL/IDNA, DNS (+DoH), HTTP/1.1, HTTP/2 (via `h2`), TLS (rustls), cookies, cache, proxy — the only crate allowed to open sockets |
 | **HTML** | `explorer-dom` + `explorer-html` | Arena DOM with generational ids, WHATWG-style tokenizer + tree builder |
 | **CSS** | `explorer-css` | Tokenizer, selectors, cascade — `@layer`, custom properties, pseudo-elements, media queries |
 | **Layout** | `explorer-layout` | Block/inline, **Flexbox, Grid**, floats, positioned elements, fragmentation, incremental relayout |
-| **Rendering** | `explorer-render` | Display list → RGBA framebuffer → PNG (tiny-skia), text shaping, SVG subset, image decode |
+| **Rendering** | `explorer-render` | Display list → RGBA framebuffer → PNG — our own display model and paint, over `tiny-skia` (raster), `rustybuzz`/`ttf-parser` (text), `resvg` (SVG), `image` (codecs) |
 | **JavaScript** | `explorer-jscore` | An interpreter written here — ES5+ core, classes, generators, promises/microtasks, modules, typed arrays, streams, IndexedDB, Cache API, `customElements`, observers… tracked against **test262** |
 | **Session** | `explorer-core` | Tabs, navigation, event loop, timers, bfcache, sub-resource scheduler |
 | **Interface** | `explorer-api` / `-daemon` / `-ffi` / `-cli` | Local **REST + SSE** control API, in-process FFI mode, dev CLI |
@@ -40,15 +44,20 @@ If it renders on screen, the code that produced it lives in this tree:
 ## Why it's interesting
 
 - **Provably from scratch** — the architecture contract (ADR-0001)
-  forbids importing an engine. The only dependencies allowed are
-  pure-Rust infrastructure crates (tokio, rustls, tiny-skia…).
+  forbids importing an engine. Dependencies are infrastructure
+  crates (tokio, rustls, tiny-skia, resvg, rustybuzz…) — all pure
+  Rust except two exceptions declared and justified in the
+  manifests (`ring` for TLS crypto, `stacker`/`psm` for stack
+  growth; both carry asm, both documented).
 - **Security plumbing as a feature** — `Sec-Fetch-*` metadata,
   real **CORS enforcement** (preflight `OPTIONS` + `ACAO`/`ACAC`),
   **CHIPS** `Partitioned` cookies, `SameSite`/`__Host-`/`__Secure-`,
   HSTS, mixed-content blocking, per-page JS budgets
   (`EXPLORER_JS_MEM_MIB` / `EXPLORER_JS_OPS`) — content is hostile by default.
-- **Honesty as a method** — compatibility is *measured*, never claimed:
-  public suites (html5lib-tests, WPT reftests, test262 excerpts) and
+- **Honesty as a method** — compatibility is *measured*, never claimed,
+  and every score carries its denominator: public suites
+  (html5lib-tests, WPT reftest *slices*, test262 **extracts** —
+  e.g. 1077 lexical-category files out of ~50 000, ≈ 2 %) and
   nightly real-site terrain runs (`scripts/site_smoke.ps1` — real
   `doc_h`, real `scroll_y`, hit-tested link clicks). Deviations and
   limits are written down in the open.
@@ -87,6 +96,14 @@ the JS engine runs real-world scripts under explicit budgets.
 Some walls are measured and documented, not hidden — e.g. JIT-class
 proof-of-work challenges are marked *bounded by design* rather than "fixed".
 
+> **⚠ Security notice — no sandbox.** The JS engine and renderer run
+> *in the engine process*, with budgets (time, memory, depth) but
+> **no OS-level sandboxing**. For hostile sites use the documented
+> isolation mode: run `explorer-daemon` (separate process, REST+SSE)
+> — never embed untrusted navigation in-process via FFI
+> (ADR-0011 / ADR-0019). Do not browse sites you would not trust
+> with code execution on your machine.
+
 **Roadmap:** [`ROADMAP.md`](ROADMAP.md) → team files —
 [`docs/roadmap-equipe-pipeline.md`](docs/roadmap-equipe-pipeline.md) (PIPELINE, steps `R-N`),
 [`docs/roadmap-equipe-navigateur.md`](docs/roadmap-equipe-navigateur.md) (NAVIGATEUR, steps `NN` + `JS-CNN`).
@@ -103,11 +120,13 @@ proof-of-work challenges are marked *bounded by design* rather than "fixed".
 
 ## Français 🇫🇷
 
-**Navigateur web écrit from scratch** : moteur 100 % Rust (réseau,
+**Navigateur web écrit from scratch** : moteur en Rust (réseau,
 HTML, CSS, layout, rendu, JS) et interface **Flutter** desktop reliées
 par une API de contrôle locale **REST + SSE** — l'app ne touche jamais
-le moteur. Aucun moteur importé : chaque couche du pipeline
-`fetch → parse → style → layout → render → paint` vit dans ce dépôt.
+le moteur. Aucun moteur importé : chaque couche métier du pipeline
+`fetch → parse → style → layout → render → paint` vit dans ce dépôt —
+les briques d'infrastructure (TLS, framing HTTP/2, raster, shaping,
+codecs image/SVG) sont des crates amont déclarées.
 Compatibilité web moderne visée en **direction asymptotique** (ADR-0001),
 mesurée par paliers sur corpus publics et terrain réel — les écarts et
 limites sont documentés honnêtement, jamais maquillés.
