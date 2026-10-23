@@ -99,7 +99,11 @@ pub fn collect_data_images(dom: &Dom, styles: &StyleMap, max_px: u32) -> PaintIm
         // `background-color` (Codex/Primer/Material). Le mask
         // est quasi-systématiquement un `data:` SVG inline ;
         // `-webkit-mask-image` est l'orthographe historique,
-        // encore fréquente dans le CSS minifié.
+        // encore fréquente dans le CSS minifié. La même image
+        // est aussi indexée **par url** (`masks_url`) — les
+        // boîtes pseudo (`::before`/`::after`) n'ont pas de
+        // `NodeId` : leur lookup passe par le texte `url(...)`
+        // du style calculé.
         for prop in ["mask-image", "-webkit-mask-image"] {
             if let Some(url) = style
                 .get(prop)
@@ -107,13 +111,45 @@ pub fn collect_data_images(dom: &Dom, styles: &StyleMap, max_px: u32) -> PaintIm
                 .filter(|u| u.starts_with("data:"))
             {
                 if let Some(img) = decode_data_url(&url, max_px) {
-                    out.masks.insert(node, Arc::new(img));
+                    let img = Arc::new(img);
+                    out.masks_url.insert(url, img.clone());
+                    out.masks.insert(node, img);
                     break;
+                }
+            }
+        }
+        // Masks portés par les `::before`/`::after` de `node` —
+        // les styles pseudo sont clés sur l'élément origine
+        // dans `StyleMap` ; la boîte pseudo n'a pas de
+        // `NodeId` propre → index `masks_url` uniquement.
+        for which in [
+            explorer_css::PseudoElement::Before,
+            explorer_css::PseudoElement::After,
+        ] {
+            if let Some(ps) = styles.pseudo(node, which) {
+                if let Some(url) = mask_url(ps).filter(|u| u.starts_with("data:")) {
+                    if let Some(img) = decode_data_url(&url, max_px) {
+                        out.masks_url.insert(url, Arc::new(img));
+                    }
                 }
             }
         }
     }
     out
+}
+
+/// `mask-image` / `-webkit-mask-image` d'un style calculé →
+/// texte `url(...)` déballé (première propriété renseignée) —
+/// clé de [`crate::PaintImages::masks_url`], utilisée pour les
+/// porteurs sans `NodeId` (pseudos) et les masks fetchés
+/// enregistrés par l'appelant.
+pub(crate) fn mask_url(style: &explorer_css::ComputedStyle) -> Option<String> {
+    for prop in ["mask-image", "-webkit-mask-image"] {
+        if let Some(url) = style.get(prop).and_then(url_arg) {
+            return Some(url);
+        }
+    }
+    None
 }
 
 /// `url(<x>)` → `<x>` déballé : guillemets optionnels ôtés,
@@ -123,7 +159,7 @@ pub fn collect_data_images(dom: &Dom, styles: &StyleMap, max_px: u32) -> PaintIm
 /// sans dééchappement la payload arrive avec des `\`
 /// littéraux (un `data:` SVG devient du XML invalide —
 /// R-52, motif icône Wikipedia).
-fn url_arg(value: &str) -> Option<String> {
+pub(crate) fn url_arg(value: &str) -> Option<String> {
     let inner = value.trim().strip_prefix("url(")?.strip_suffix(')')?.trim();
     let inner = inner.trim_matches(|c| c == '"' || c == '\'');
     Some(css_unescape(inner))

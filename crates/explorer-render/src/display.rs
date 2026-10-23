@@ -103,17 +103,26 @@ pub enum DisplayItem {
     /// opaque — motif « icône colorée » des design systems
     /// (`mask-image:url(icon.svg)` + `background-color` ; sans
     /// le mask la couleur remplirait la boîte entière → carré
-    /// plein). `mask-size`/`mask-position` hors portée : le
-    /// mask est échantillonné à la taille de `rect`, ce qui
-    /// couvre le motif (la boîte est dimensionnée à l'icône).
+    /// plein). `mask-size`/`mask-position`/`mask-repeat` sont
+    /// résolus à l'émission dans `dst`/`repeat` (déviation
+    /// documentée : `mask-size:auto` = étirement sur la zone,
+    /// le motif dimensionnant la boîte à l'icône).
     MaskedFill {
-        /// Boîte de destination (border box) — le mask y est
-        /// mis à l'échelle en nearest.
+        /// Boîte de destination (border box) — aire de
+        /// peinture (mask-clip par défaut).
         rect: Rect,
         /// `background-color` résolue.
         color: Color,
         /// Bitmap du mask — seul l'alpha est lu.
         mask: std::sync::Arc<crate::image::DecodedImage>,
+        /// Zone d'**une tuile** du mask (coords document) :
+        /// `mask-size` + `mask-position` résolus — le bitmap
+        /// y est mis à l'échelle en nearest puis tuilé selon
+        /// `repeat`.
+        dst: Rect,
+        /// `mask-repeat` résolu `(x, y)` — défaut `repeat`
+        /// (tuilage ±∞ comme `background-repeat`).
+        repeat: (bool, bool),
     },
     /// Entrée de zone de clipping (`overflow` ≠ `visible`).
     PushClip(Rect),
@@ -447,6 +456,7 @@ fn apply_tf(r: Rect, t: tiny_skia::Transform) -> Rect {
 
 /// Égalité visuelle de deux items — `Arc` comparés par
 /// identité (pixels différents = arc différent ⇒ dirty).
+#[allow(clippy::too_many_lines)]
 fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
     use DisplayItem as D;
     match (a, b) {
@@ -522,13 +532,17 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 rect: r1,
                 color: c1,
                 mask: m1,
+                dst: d1,
+                repeat: p1,
             },
             D::MaskedFill {
                 rect: r2,
                 color: c2,
                 mask: m2,
+                dst: d2,
+                repeat: p2,
             },
-        ) => r1 == r2 && c1 == c2 && std::sync::Arc::ptr_eq(m1, m2),
+        ) => r1 == r2 && c1 == c2 && d1 == d2 && p1 == p2 && std::sync::Arc::ptr_eq(m1, m2),
         (
             D::Marker {
                 rect: r1,
@@ -1393,6 +1407,91 @@ fn bg_position(raw: Option<&str>, area: (f32, f32), img: (f32, f32), fs: f64) ->
     (token(x_tok, area.0, img.0), token(y_tok, area.1, img.1))
 }
 
+/// `mask-size` → dimensions (px) d'une tuile du mask dans la
+/// zone `area` (border box). Couvre le motif réel :
+/// `cover`/`contain` (ratio préservé), `<len>`/`<%>` (une
+/// valeur = largeur, l'autre garde le ratio), `auto` ou
+/// absent = **étirement sur la zone** — déviation assumée à
+/// la spec (qui veut la taille intrinsèque) : le motif
+/// « icône colorée » dimensionne toujours sa boîte à
+/// l'icône, et l'étirement était le comportement R-52 dont
+/// les pixels sont la référence. Longueurs font-relatives
+/// résolues sur `fs` comme `background-position`.
+#[allow(clippy::cast_possible_truncation)]
+fn mask_size(
+    st: &explorer_css::ComputedStyle,
+    area: (f32, f32),
+    img: (f32, f32),
+    fs: f64,
+) -> (f32, f32) {
+    let raw = st.get("mask-size").or_else(|| st.get("-webkit-mask-size"));
+    let toks: Vec<&str> = raw.unwrap_or("").split_whitespace().collect();
+    // `img.1 > 0` garanti par l'appelant (bitmap décodée).
+    let ratio = img.0 / img.1;
+    let len = |t: &str, span: f32| -> Option<f32> {
+        t.strip_suffix('%')
+            .and_then(|p| p.parse::<f32>().ok())
+            .map(|p| span * p / 100.0)
+            .or_else(|| {
+                parse_length(t).map(|l| {
+                    (match l.unit.px_factor() {
+                        Some(f) => l.value * f,
+                        None => l.value * fs * em_factor(l.unit),
+                    }) as f32
+                })
+            })
+    };
+    match toks.as_slice() {
+        // `auto`/absent : étirement (déviation — voir doc).
+        [] | ["auto"] | ["auto", "auto"] => area,
+        ["cover" | "contain"] => {
+            if img.0 <= 0.0 || img.1 <= 0.0 {
+                return area;
+            }
+            let s = if toks[0] == "cover" {
+                (area.0 / img.0).max(area.1 / img.1)
+            } else {
+                (area.0 / img.0).min(area.1 / img.1)
+            };
+            (img.0 * s, img.1 * s)
+        }
+        [a] => len(a, area.0).map_or(area, |w| (w, if ratio > 0.0 { w / ratio } else { w })),
+        [a, b, ..] => {
+            let w = if *a == "auto" {
+                len(b, area.1).map_or(img.0, |h| h * ratio)
+            } else {
+                len(a, area.0).unwrap_or(img.0)
+            };
+            let h = if *b == "auto" {
+                len(a, area.0).map_or(img.1, |w| if ratio > 0.0 { w / ratio } else { w })
+            } else {
+                len(b, area.1).unwrap_or(img.1)
+            };
+            (w, h)
+        }
+    }
+}
+
+/// `mask-repeat` → `(x, y)` : `repeat` par défaut (tuilage),
+/// `space`/`round` approchés en `repeat` (nearest — l'écart
+/// de rendu est sub-pixel sur les motifs icon, où la tuile
+/// couvre la zone). Deux valeurs = x puis y.
+fn mask_repeat(st: &explorer_css::ComputedStyle) -> (bool, bool) {
+    let raw = st
+        .get("mask-repeat")
+        .or_else(|| st.get("-webkit-mask-repeat"));
+    let toks: Vec<&str> = raw.unwrap_or("").split_whitespace().collect();
+    let on = |t: &str| !matches!(t, "no-repeat");
+    match toks.as_slice() {
+        [] => (true, true),
+        ["no-repeat"] => (false, false),
+        ["repeat-x"] => (true, false),
+        ["repeat-y"] => (false, true),
+        [a] => (on(a), on(a)),
+        [a, b, ..] => (on(a), on(b)),
+    }
+}
+
 /// Fond + bordures + texte propre d'une boîte (avant les
 /// enfants — le fond passe TOUJOURS sous son contenu).
 /// `off` = décalage vertical de scroll (`0` dans les
@@ -1442,12 +1541,43 @@ fn paint_self(
                 // passe que par l'alpha du mask (icônes des
                 // design systems). Mask absent des tables
                 // (non décodé/réseau) → repli fond plein,
-                // comportement antérieur.
-                if let Some(mask) = bx.node.and_then(|n| images.masks.get(&n)) {
+                // comportement antérieur. Repli **par url**
+                // (`masks_url`) : les boîtes pseudo n'ont pas
+                // de `NodeId` — leur mask se retrouve par le
+                // texte `url(...)` du style (motif `.x:before`
+                // des icônes MDN), et les masks fetchés sont
+                // enregistrés par l'appelant sur la même clé.
+                let mask = bx.node.and_then(|n| images.masks.get(&n)).or_else(|| {
+                    crate::dataurl::mask_url(&bx.style).and_then(|u| images.masks_url.get(&u))
+                });
+                if let Some(mask) = mask {
+                    // `mask-size`/`mask-position`/`mask-repeat`
+                    // résolus en zone d'une tuile (`dst`) —
+                    // aire = border box (mask-origin/clip
+                    // initiaux, § mask-clip).
+                    let area = (rect.width, rect.height);
+                    let fs = font_size_of(&bx.style);
+                    let (mw, mh) =
+                        mask_size(&bx.style, area, (mask.width as f32, mask.height as f32), fs);
+                    let (px, py) = bg_position(
+                        bx.style
+                            .get("mask-position")
+                            .or_else(|| bx.style.get("-webkit-mask-position")),
+                        area,
+                        (mw, mh),
+                        fs,
+                    );
                     items.push(DisplayItem::MaskedFill {
                         rect,
                         color: c,
                         mask: mask.clone(),
+                        dst: Rect {
+                            x: rect.x + px,
+                            y: rect.y + py,
+                            width: mw,
+                            height: mh,
+                        },
+                        repeat: mask_repeat(&bx.style),
                     });
                 } else {
                     items.push(DisplayItem::FillRect { rect, color: c });
@@ -2403,10 +2533,18 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             repeat: *repeat,
             origin: (origin.0 + d.0, origin.1 + d.1),
         },
-        D::MaskedFill { rect, color, mask } => D::MaskedFill {
+        D::MaskedFill {
+            rect,
+            color,
+            mask,
+            dst,
+            repeat,
+        } => D::MaskedFill {
             rect: shifted(*rect, d),
             color: *color,
             mask: mask.clone(),
+            dst: shifted(*dst, d),
+            repeat: *repeat,
         },
         D::Marker { rect, kind, color } => D::Marker {
             rect: shifted(*rect, d),

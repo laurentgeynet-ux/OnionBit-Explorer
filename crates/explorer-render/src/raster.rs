@@ -849,8 +849,14 @@ fn paint_item(
         } => {
             paint_tiled(pixmap, rect, img, *repeat, *origin, dpi, clip);
         }
-        DisplayItem::MaskedFill { rect, color, mask } => {
-            paint_masked_fill(pixmap, rect, *color, mask, dpi, clip);
+        DisplayItem::MaskedFill {
+            rect,
+            color,
+            mask,
+            dst,
+            repeat,
+        } => {
+            paint_masked_fill(pixmap, rect, *color, mask, dst, *repeat, dpi, clip);
         }
         DisplayItem::Marker { rect, kind, color } => {
             paint_marker(pixmap, rect, *kind, *color, dpi, clip);
@@ -918,21 +924,24 @@ fn paint_marker(
 /// `background-color` passé par l'alpha d'un `mask-image`
 /// (R-52) : la couleur n'apparaît que là où le mask est
 /// opaque. Le bitmap est échantillonné en nearest dans la
-/// zone device de `rect` — `mask-size`/`mask-position` hors
-/// portée (le motif icône dimensionne la boîte à l'icône, la
-/// zone est donc déjà la bonne). Un `clip` (`overflow`)
-/// actif est composé par `min` des couvertures ≈ intersection
+/// tuile `dst` (zone de `mask-size`/`mask-position` résolue
+/// à l'émission), tuilée selon `repeat` — hors tuile sans
+/// repeat = couverture nulle. Un `clip` (`overflow`) actif
+/// est composé par `min` des couvertures ≈ intersection
 /// (les masks sont quasi binaires dans le motif).
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
-    clippy::cast_sign_loss
+    clippy::cast_sign_loss,
+    clippy::too_many_arguments
 )]
 fn paint_masked_fill(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,
     color: Color,
     img: &crate::DecodedImage,
+    dst: &explorer_layout::Rect,
+    repeat: (bool, bool),
     cur: Transform,
     clip: Option<&Mask>,
 ) {
@@ -967,17 +976,67 @@ fn paint_masked_fill(
     let Some(mut m) = Mask::new(pw, ph) else {
         return;
     };
+    // Tuile du mask en coords device — `dst` transformée et
+    // arrêtée comme `phys` (axis-aligned → bords nets).
+    let Some(local_dst) = Rect::from_xywh(dst.x, dst.y, dst.width, dst.height) else {
+        return;
+    };
+    let Some(dst_phys) = local_dst.transform(cur) else {
+        return;
+    };
+    let dst_phys = if cur.kx == 0.0 && cur.ky == 0.0 {
+        Rect::from_ltrb(
+            dst_phys.left().round(),
+            dst_phys.top().round(),
+            dst_phys.right().round(),
+            dst_phys.bottom().round(),
+        )
+        .unwrap_or(dst_phys)
+    } else {
+        dst_phys
+    };
+    let (dx0, dy0) = (
+        dst_phys.left().round() as i32,
+        dst_phys.top().round() as i32,
+    );
+    let (dw, dh) = (
+        dst_phys.width().round() as i32,
+        dst_phys.height().round() as i32,
+    );
+    if dw <= 0 || dh <= 0 {
+        return;
+    }
+    let (tile_w, tile_h) = (dw as usize, dh as usize);
+    let (img_w, img_h) = (iw as usize, ih as usize);
     let (x0, y0) = (zone.left().max(0.0) as i32, zone.top().max(0.0) as i32);
     let (x1, y1) = (zone.right().ceil() as i32, zone.bottom().ceil() as i32);
     let w = pw as usize;
     let data = m.data_mut();
     for py in y0..y1 {
-        let fy = (py as f32 - phys.top()) / phys.height();
-        let sy = ((fy.max(0.0) * ih as f32) as usize).min(ih as usize - 1);
+        // Tuilage `mask-repeat` ±∞ (`rem_euclid` gère les
+        // rel négatifs — pixels avant l'origine de la tuile) ;
+        // sans repeat, hors tuile = couverture nulle (mask
+        // absent → pixel masqué, pas peint).
+        let ry = py - dy0;
+        let ty = if repeat.1 {
+            ry.rem_euclid(dh)
+        } else if (0..dh).contains(&ry) {
+            ry
+        } else {
+            continue;
+        };
+        let sy = (ty as usize * img_h / tile_h).min(img_h - 1);
         for px in x0..x1 {
-            let fx = (px as f32 - phys.left()) / phys.width();
-            let sx = ((fx.max(0.0) * iw as f32) as usize).min(iw as usize - 1);
-            data[py as usize * w + px as usize] = img.rgba[(sy * iw as usize + sx) * 4 + 3];
+            let rx = px - dx0;
+            let tx = if repeat.0 {
+                rx.rem_euclid(dw)
+            } else if (0..dw).contains(&rx) {
+                rx
+            } else {
+                continue;
+            };
+            let sx = (tx as usize * img_w / tile_w).min(img_w - 1);
+            data[py as usize * w + px as usize] = img.rgba[(sy * img_w + sx) * 4 + 3];
         }
     }
     // Compose avec le clip actif (`overflow`) — min des

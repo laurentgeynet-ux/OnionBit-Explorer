@@ -418,6 +418,189 @@ fn mask_image_indecodable_repli_fond_plein() {
     );
 }
 
+// ── R-86 : masks sur pseudos + mask-size/position/repeat ────
+
+/// Mask porté par un `::before` — la boîte pseudo n'a pas de
+/// `NodeId` : le lookup passe par `masks_url` (texte `url(...)`
+/// du style calculé). Motif `.x::before` des icônes MDN.
+#[test]
+fn mask_sur_pseudo_via_url() {
+    let dom: Dom = TreeBuilder::parse("<span class=x></span>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    // Mask 20×20 moitié gauche opaque, comme le test R-52 —
+    // porté par le pseudo : seule la moitié gauche est rouge.
+    eng.add_css(
+        ".x::before{content:\"\";display:inline-block;width:20px;height:20px;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>');\
+         background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    assert!(
+        list.items
+            .iter()
+            .any(|i| matches!(i, explorer_render::DisplayItem::MaskedFill { .. })),
+        "MaskedFill attendu sur pseudo, got {}",
+        list.dump()
+    );
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(px(&f, 5, 10)[0], 255, "mask pseudo : zone opaque rouge");
+    assert_eq!(
+        px(&f, 15, 10),
+        [255, 255, 255, 255],
+        "mask pseudo : hors alpha = canvas"
+    );
+}
+
+/// `mask-size` + `mask-position` + `mask-repeat:no-repeat`
+/// résolus à l'émission : la tuile est placée, pas étirée.
+#[test]
+fn mask_size_position_repeat_placent_la_tuile() {
+    let dom: Dom = TreeBuilder::parse("<div class=x></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    // Tuile 10×10 (moitié gauche opaque → 5 px rouges) centrée
+    // dans la boîte 20×20, sans répétition : rouge en
+    // x∈[5,10) y∈[5,15), canvas partout ailleurs.
+    eng.add_css(
+        ".x{display:block;width:20px;height:20px;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>');\
+         mask-size:10px;mask-position:center;mask-repeat:no-repeat;\
+         background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(px(&f, 7, 10)[0], 255, "tuile centrée : moitié opaque");
+    assert_eq!(
+        px(&f, 12, 10),
+        [255, 255, 255, 255],
+        "no-repeat : hors tuile = rien (pas de fuite du fond)"
+    );
+    assert_eq!(
+        px(&f, 2, 10),
+        [255, 255, 255, 255],
+        "no-repeat : avant la tuile = rien"
+    );
+}
+
+/// `mask-repeat` défaut = tuilage : `mask-size:50%` sans
+/// repeat explicite recouvre la boîte en tuiles.
+#[test]
+fn mask_repeat_defaut_u_tile() {
+    let dom: Dom = TreeBuilder::parse("<div class=x></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    // Tuile 10×10 (moitié gauche opaque → 5 px rouges par
+    // tuile) répétée sur la boîte 20×20 : x∈{0..5,10..15}
+    // rouges, x∈{5..10,15..20} blancs.
+    eng.add_css(
+        ".x{display:block;width:20px;height:20px;\
+         mask-image:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"20\" fill=\"black\"/></svg>');\
+         mask-size:50%;\
+         background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let imgs = collect_data_images(&dom, &styles, 1 << 20);
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(px(&f, 12, 10)[0], 255, "deuxième tuile = opaque aussi");
+    assert_eq!(
+        px(&f, 17, 10),
+        [255, 255, 255, 255],
+        "interstice de tuile = canvas"
+    );
+}
+
+/// `register_mask` — couture fetch : le mask `url(http…)`
+/// enregistré par l'appelant borne le fond comme un `data:`.
+#[test]
+fn mask_fetchem_enregistre_via_register_mask() {
+    let dom: Dom = TreeBuilder::parse("<div class=x></div>");
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    eng.add_css(
+        ".x{display:block;width:20px;height:20px;\
+         mask-image:url(http://example.test/icon.svg);\
+         background-color:#ff0000}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    // L'appelant (NAV) enregistre le bitmap sous le texte
+    // `url(...)` brut du style calculé.
+    let mut imgs = explorer_render::PaintImages::default();
+    imgs.register_mask(
+        "http://example.test/icon.svg",
+        std::sync::Arc::new(explorer_render::DecodedImage {
+            width: 20,
+            height: 20,
+            rgba: (0..20 * 20)
+                .flat_map(|i| {
+                    let x = i % 20;
+                    if x < 10 {
+                        [0, 0, 0, 255]
+                    } else {
+                        [0, 0, 0, 0]
+                    }
+                })
+                .collect(),
+        }),
+    );
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &imgs);
+    assert!(
+        list.items
+            .iter()
+            .any(|i| matches!(i, explorer_render::DisplayItem::MaskedFill { .. })),
+        "mask enregistré → MaskedFill, got {}",
+        list.dump()
+    );
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    assert_eq!(px(&f, 5, 10)[0], 255, "mask fetché : opaque rouge");
+    assert_eq!(
+        px(&f, 15, 10),
+        [255, 255, 255, 255],
+        "mask fetché : transparent = canvas"
+    );
+}
+
 // ── R-58 : clip-path inset borne les pixels ─────────────────
 
 #[test]

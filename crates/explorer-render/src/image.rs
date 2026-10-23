@@ -50,6 +50,13 @@ pub struct PaintImages {
     /// passer que là où le mask est opaque). Canal luminance
     /// ignoré — alpha seul, per spec `mask-mode` initial.
     pub masks: ImageTable,
+    /// `mask-image` décodés **par url** — le texte `url(...)`
+    /// brut du style calculé → bitmap. Complément de `masks`
+    /// pour les porteurs sans `NodeId` (pseudos `::before`/
+    /// `::after` — motif des icônes MDN) et pour les masks
+    /// fetchés que l'appelant enregistre via
+    /// [`PaintImages::register_mask`].
+    pub masks_url: HashMap<String, Arc<DecodedImage>>,
     /// `<canvas>` : op-list 2D enregistrée par `explorer-jscore`
     /// (`NodeId` → `Vec<CanvasOp>` — R-11, contrat
     /// [`crate::canvas`]) ; rejouée vers un bitmap au moment
@@ -66,8 +73,20 @@ impl PaintImages {
             backgrounds: ImageTable::new(),
             svgs: ImageTable::new(),
             masks: ImageTable::new(),
+            masks_url: HashMap::new(),
             canvases: crate::canvas::CanvasTable::new(),
         }
+    }
+
+    /// Enregistre un `mask-image` **fetché** par l'appelant
+    /// (couture réseau — symétrique des fonds `bg_decoded`).
+    /// `url` = le texte `url(...)` **brut** tel qu'il apparaît
+    /// dans le style calculé : c'est la clé de lookup à
+    /// l'émission, y compris pour les boîtes pseudo sans
+    /// `NodeId`. L'appelant gère l'alias url brute ↔ résolue
+    /// (comme `bg_aliases` pour `background-image`).
+    pub fn register_mask(&mut self, url: &str, img: Arc<DecodedImage>) {
+        self.masks_url.insert(url.to_string(), img);
     }
 }
 

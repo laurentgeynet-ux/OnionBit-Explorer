@@ -2235,6 +2235,32 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (bit-identique). Reliquat : `layout_tree` ~12 s (buzz
   ~10 s plancher debug), `encode_png` ~4,0 s,
   `compute_styles` ~3,0 s.
+- [x] **R-86. `mask-*` : moitié domaine — pseudos,
+  placement, couture fetch** (`explorer-render`, backlog
+  issue #14 / reliquat R-80 — icônes MDN invisibles ; motif
+  caractérisé sur `mdn.html` = trois trous cumulés :
+  `mask-image:var(--icon)` → `url(/static/*.svg)` fetchée
+  sur `::before` + `mask-size:cover`). Livré :
+  `PaintImages.masks_url` (clé = `url(...)` brut du style
+  calculé) + `register_mask(url, img)` additif (point
+  d'entrée NAV symétrique d'`insert_fetched_backgrounds`,
+  alias url brute↔résolue côté appelant) ; lookup à
+  l'émission `masks[NodeId]` → repli `masks_url[url]` →
+  boîtes pseudo couvertes ; `mask-size` (`cover`/`contain`/
+  `<len>`/`%` — `auto` = étirement, déviation assumée :
+  comportement R-52 préservé), `mask-position`
+  (`bg_position` réutilisé), `mask-repeat` (tuilage
+  `rem_euclid`, défaut `repeat`, `space`/`round` ≈
+  repeat) ; `MaskedFill` porte `dst`+`repeat` ;
+  `collect_data_images` couvre les styles pseudo
+  (`StyleMap::pseudo`). Formulation honnête : le motif
+  devient *possible* — MDN reste invisible tant que NAV ne
+  wire pas le fetch des `url()` de masks (demande au
+  journal des coutures). Régressions :
+  `mask_sur_pseudo_via_url`,
+  `mask_size_position_repeat_placent_la_tuile`,
+  `mask_repeat_defaut_u_tile`,
+  `mask_fetchem_enregistre_via_register_mask`.
 
 > **Clôture de la reliure « apply post-script ~250 s »
 > (étape 112) — arbitrage du 2026-10-23** : mesures release

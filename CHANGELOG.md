@@ -9,6 +9,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-86 — `mask-*` : la moitié domaine
+  livrée** (`explorer-render`, backlog
+  issue #14 / reliquat R-80 — icônes
+  MDN : le motif devient *possible* ;
+  l'affichage réel attend le wiring
+  fetch NAV, demande au journal des
+  coutures). Trois trous couverts :
+  boîtes **pseudo** `::before`/`::after`
+  (sans `NodeId` → lookup par le texte
+  `url(...)` du style via la nouvelle
+  table `PaintImages.masks_url` +
+  `register_mask(url, img)` additif
+  pour les masks fetchés) ;
+  `mask-size` (`cover`/`contain`/
+  `<len>`/`%` — `auto` = étirement,
+  déviation assumée : comportement
+  R-52 préservé), `mask-position`
+  et `mask-repeat` résolus à
+  l'émission (`MaskedFill` porte la
+  tuile `dst` + `repeat`, tuilage
+  `rem_euclid`) ; collecte `data:`
+  étendue aux styles pseudo.
+  Régressions `mask_sur_pseudo_via_url`,
+  `mask_size_position_repeat_placent_
+  la_tuile`, `mask_repeat_defaut_u_tile`,
+  `mask_fetchem_enregistre_via_
+  register_mask`.
+
 - **JS-C60 — `/` après `)` de clause :
   regex, pas division** (`explorer-jscore`,
   trou remonté par github.com après Étape
