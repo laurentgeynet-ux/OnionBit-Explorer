@@ -139,6 +139,21 @@ fn restitute_font_cache(p: &mut PaintPayload, block: &BlockCtx) {
     p.layout_font_cache = block.take_font_cache();
 }
 
+/// Font-size calculée de `documentElement` en px — base des
+/// `rem` (CSS Values §5.2). La cascade stocke `font-size` en
+/// valeur absolue (R-17, `"{px}px"`) : parse direct, même
+/// forme que `StyleEngine::root_font_size` (cascade.rs).
+/// `None` sur résidu non résolu (`calc()`…) → le ctx retombe
+/// sur l'initiale, comportement `layout_tree` identique.
+fn root_font_size_px(new_dom: &Dom, styles: &StyleMap) -> Option<f32> {
+    new_dom
+        .document_element()
+        .and_then(|el| styles.get(el))
+        .and_then(|st| st.get("font-size"))
+        .and_then(|v| v.trim().trim_end_matches("px").trim().parse::<f32>().ok())
+        .filter(|fs| *fs > 0.0)
+}
+
 /// Contexte d'apply cloné sous verrou court — tout ce que
 /// les phases lisent hors de l'onglet. `Send` : la payload
 /// + ce contexte migrent vers `spawn_blocking`.
@@ -937,6 +952,14 @@ fn try_incr_payload(
     sizes.extend(explorer_render::svg::svg_sizes(new_dom, root_el));
     let svgs = explorer_render::svg::collect_svg(new_dom, root_el, ctx.image_max_px);
     let block = layout_ctx(ctx, p);
+    // Reliquat R-88 : `relayout_subtree` ne pose pas
+    // `root_font_size`, contrairement à `layout_tree` —
+    // tout `rem` du sous-arbre relayouté retombait sur
+    // l'initiale à la première synchro incrémentale.
+    // Posée ici depuis la cascade fraîche, même base.
+    block
+        .root_font_size
+        .set(root_font_size_px(new_dom, &styles));
     // Phase 2 — remap + relayout local (le remap précède :
     // `bx.node == target` compare des ids du nouveau DOM).
     // Le cache fonte est restitué sur tous les chemins —

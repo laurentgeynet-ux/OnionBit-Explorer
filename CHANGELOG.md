@@ -132,6 +132,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Étape 122 — `root_font_size`
+  sur `relayout_subtree`**
+  (`explorer-core` — reliquat
+  R-88 du journal). La voie
+  incrémentale (`try_incr_payload`)
+  contournait `layout_tree` →
+  `BlockCtx.root_font_size` restait
+  `None` → tout `rem` d'un
+  sous-arbre resynchronisé par
+  synchro cléée retombait sur
+  l'initiale 16 px au lieu de la
+  font-size calculée de `:root`
+  (statu quo pré-R-88 conservé,
+  écart ×1.6 typique
+  `html{font-size:62.5%}`). Fix
+  côté appelant : `root_font_size_px`
+  relit le `font-size` calculé de
+  `documentElement` dans la
+  `StyleMap` fraîche (forme
+  `"{px}px"` R-17, même parse que
+  `StyleEngine::root_font_size`,
+  résidu `calc()` → `None` →
+  repli initiale comme
+  `layout_tree`) et arme
+  `block.root_font_size` avant
+  `relayout_subtree`. Aucun code
+  PIPE touché. Régression :
+  `rem_basis_survives_incremental_
+  relayout` — mutation classée
+  « re-parse » (`setAttribute`
+  sur `<table>`, ADR-0025) prouve
+  la voie `relayout_subtree` par
+  `incremental_syncs` ; frame
+  identique au statique 40 px,
+  rouge sans le fix (32 px).
+
 - **JS-C76 — collections DOM
   itérables** (`explorer-jscore` —
   terrain : exception `Error: b`

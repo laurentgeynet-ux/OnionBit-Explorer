@@ -5621,6 +5621,60 @@ async fn dom_sync_falls_back_when_floats_present() {
     );
 }
 
+/// Reliquat R-88 — la voie incrémentale (`relayout_subtree`)
+/// ne posait pas `root_font_size` : tout `rem` du sous-arbre
+/// retombait sur l'initiale (16 px) dès la synchro cléée.
+/// `html{font-size:20px}` + `table{width:2rem}` : un
+/// `setAttribute` sur `<table>` est classé « re-parse » par
+/// le journal (ADR-0025 — `RISKY_PARENT`), le `dirty` reste
+/// intact → synchro cléée → `relayout_subtree` sur la table.
+/// 40 px attendus (32 avant le fix) ; le compteur
+/// `incremental_syncs` prouve la voie empruntée.
+#[tokio::test]
+async fn rem_basis_survives_incremental_relayout() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><head><style>html{font-size:20px}\
+         #t{width:2rem;height:2rem;background:#ff0000}\
+         </style></head><body><table id=\"t\"><tr><td>x</td></tr></table>\
+         <script>document.body.onclick=function(){\
+         document.getElementById('t').setAttribute('data-k','1')}</script>\
+         </body></html>",
+    );
+    // Équivalent statique : 2rem sur racine 20px = 40px.
+    t.route(
+        "/s",
+        200,
+        "<html><head><style>#t{width:40px;height:40px;background:#ff0000}\
+         </style></head><body>\
+         <table id=\"t\" data-k=\"1\"><tr><td>x</td></tr></table>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/m").await.unwrap();
+    let before = s.incremental_syncs();
+    s.handle_input(a, InputEvent::Click { x: 10.0, y: 10.0 })
+        .await
+        .unwrap();
+    assert!(
+        s.incremental_syncs() > before,
+        "la synchro classée re-parse doit passer par relayout_subtree"
+    );
+
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    let (pa, pb) = (s.frame_png(a), s.frame_png(b));
+    assert!(pa.is_some() && pb.is_some());
+    assert_eq!(
+        pa, pb,
+        "le rem doit tenir la font-size racine (20px) après relayout incrémental"
+    );
+}
+
 /// Étape 56e — métrique mission 11 : `<img src>` déclenche
 /// bien une requête de sous-ressource (document + image =
 /// 2 hits transport). La panne observée terrain venait du

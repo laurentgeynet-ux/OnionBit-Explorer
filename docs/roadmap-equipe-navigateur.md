@@ -2526,6 +2526,41 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `fetched_mask_survives_js_dom_
   resync` (RAZ).
 
+- [x] **Étape 122. `root_font_size`
+  sur `relayout_subtree`** (reliquat
+  R-88 consigné au journal) : la
+  voie incrémentale ne passe pas
+  par `layout_tree` →
+  `BlockCtx.root_font_size` restait
+  `None` → tout `rem` d'un
+  sous-arbre resynchronisé
+  retombait sur l'initiale (16 px)
+  alors que le reflow global
+  lisait la font-size calculée de
+  `documentElement`. Fix côté
+  appelant (`apply.rs`, aucune
+  retouche PIPE) : helper
+  `root_font_size_px` parse le
+  `font-size` calculé de la racine
+  dans la `StyleMap` fraîche
+  (forme `"{px}px"` normalisée
+  R-17 — même parse que
+  `StyleEngine::root_font_size`) ;
+  `block.root_font_size.set(...)`
+  avant `relayout_subtree`, cache
+  fonte restitué sur tous les
+  chemins. Test :
+  `rem_basis_survives_incremental_
+  relayout` — `setAttribute` sur
+  `<table>` (classé « re-parse »
+  ADR-0025 → `dirty` intact →
+  synchro cléée réelle),
+  `incremental_syncs` prouve la
+  voie, frame identique au
+  statique 40 px (32 px avant le
+  fix — régression vérifiée par
+  inversion).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
@@ -2727,9 +2762,22 @@ ci-dessous (fréquence observée sur le corpus réel).
   `null` (streams JS-C71), `formData()`/`blob()` minimaux
   (JS-C67/C70), guards `Headers` non appliqués, `credentials`
   etc. stockés non appliqués. Régressions `c66_*` (6 tests).
-- [ ] **JS-C67. `FormData`** (mesuré `ReferenceError` en
+- [x] **JS-C67. `FormData`** (mesuré `ReferenceError` en
   sonde) + `URLSearchParams` bidirectionnel — formulaires et
   uploads des sites réels (google recherche, github login).
+  **Livré** : prototype réel (`instanceof`, `@@iterator`,
+  `[object FormData]`), paires `[[k, v], …]` en prop sentinelle
+  (doublons + ordre), API complète (`append`/`set`/`delete`/
+  `get`/`getAll`/`has`/`forEach`/`entries`/`keys`/`values`).
+  `new FormData(form, submitter?)` = champs « successful » du
+  miroir (règles de `form.submit()`) ; `new URLSearchParams(fd)`
+  via `@@iterator`. `BodyInit` unifié sur `fetch`/`Request`/
+  `Response`/`xhr.send` : `FormData` et `URLSearchParams` →
+  urlencodé + `Content-Type` (`charset=UTF-8` pour USP).
+  `res.formData()` → vrai `FormData` (proto paresseux, valide
+  sans DOM). Reliquats assumés : `multipart/form-data` hors
+  scope transport `String` (déviation documentée), `File`/`Blob`
+  à JS-C70. Régressions `c67_*` (7 tests).
 - [ ] **JS-C68. `customElements` machinery** : `define` avec
   upgrade des éléments existants, callbacks `connected
   Callback`/`disconnectedCallback`/`attributeChangedCallback`,

@@ -337,7 +337,14 @@ journal « livré ».
   `None` → `rem` retombe sur l'initiale (statu quo pré-R-88,
   aucune régression mais écart conservé) ; NAV peut poser
   `ctx.root_font_size.set(Some(fs_racine_px))` depuis la
-  `StyleMap` avant l'appel.
+  `StyleMap` avant l'appel. **Traité → NAV Étape 122** :
+  `root_font_size_px` (`session/apply.rs`) relit le
+  `font-size` calculé de `documentElement` dans la `StyleMap`
+  fraîche et arme `block.root_font_size` avant
+  `relayout_subtree` — aucun code PIPE touché ; régression
+  `rem_basis_survives_incremental_relayout` (voie cléée
+  réelle via mutation classée « re-parse », 40 px vs 32 px
+  avant).
 - [x] **`inline` stacking dans `.liste-horizontale`** →
   **livré → R-89**, diagnostic terrain corrigé : la liste
   fautive n'est PAS `.liste-horizontale` (le pied de page,
