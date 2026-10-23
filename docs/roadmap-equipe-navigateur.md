@@ -4295,7 +4295,7 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `same-origin` cross → bloquée.
   Régressions `c77_*` (10 tests
   jscore) + 4 session.
-- [ ] **JS-C78. `JsEngine` par
+- [x] **JS-C78. `JsEngine` par
   contexte — ponts `window.parent`/
   `top`/`postMessage` borné** —
   *déclenché : étape 131 produit
@@ -4324,19 +4324,36 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   destinataire. Chantier
   architectural (comme C75) —
   **périmètre v1 arrêté** :
-  `contentWindow`/`contentDocument`
-  same-origin uniquement (cross →
-  `null`, spec) ; `postMessage`
-  clone `WireValue` (C29),
-  `targetOrigin` **exigé** — `*`
-  = `SyntaxError` honnête ;
+  `contentDocument` same-origin
+  uniquement (cross → `null`,
+  spec) ; `contentWindow` cross →
+  `WindowProxy` **opaque
+  whitelisté** (spec réelle —
+  `null` rendrait `postMessage`
+  cross injoignable : la surface
+  whitelistée n'est ni un stub ni
+  une fuite d'objet natif) ;
+  `postMessage` clone `WireValue`
+  (C29), `targetOrigin` **exigé**
+  — absent/`undefined`/`*` =
+  `SyntaxError` honnête ;
   `MessageEvent.origin`/`source`
-  peuplés. Forme retenue : **un
-  heap, N globals** (modèle agent
-  spec — zéro réentrance,
-  `contentDocument` = vrai miroir
+  peuplés, livraison après les
+  microtasks de l'émetteur.
+  Forme retenue : **un heap, N
+  globals** (modèle agent spec —
+  zéro réentrance, `content
+  Document` = vrai miroir
   enfant) — arrêt couture au
-  journal.
+  journal. Livré : `context_new`/
+  `context_switch`/`current_
+  context`/`context_destroy`
+  publics, timers/microtasks/XHR
+  taggés par contexte, racines
+  GC des garés, intrinsics frais
+  par realm — 17 tests `c78_*`.
+  La couture `SubFrame`→contexte
+  reste côté session (étape 131).
 - [ ] **JS-C79. `crypto.subtle`
   (RustCrypto)** — *réservé à la
   piste JS par l'annonce cap-g1

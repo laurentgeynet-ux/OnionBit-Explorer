@@ -184,6 +184,38 @@ impl Engine {
     /// # Errors
     /// Propagates the first uncaught exception from a handler.
     pub fn deliver_xhr_response(&mut self, resp: XhrResponse) -> JsResult<()> {
+        // JS-C78 : le handle appartient au contexte qui a émis
+        // la requête — son état `xhr` vit dans `parked` s'il est
+        // garé. On localise le propriétaire, on switch, on livre,
+        // on restaure (spec « job callback realm »).
+        let owner = if self.xhr.fetches.iter().any(|(h, ..)| *h == resp.handle)
+            || self.xhr.live.iter().any(|(h, ..)| *h == resp.handle)
+        {
+            Some(self.cur_ctx)
+        } else {
+            self.parked
+                .iter()
+                .find(|(_, c)| {
+                    c.xhr.fetches.iter().any(|(h, ..)| *h == resp.handle)
+                        || c.xhr.live.iter().any(|(h, ..)| *h == resp.handle)
+                })
+                .map(|(k, _)| *k)
+        };
+        let Some(owner) = owner else {
+            return Ok(());
+        };
+        let home = self.cur_ctx;
+        self.switch_to(owner);
+        let r = self.deliver_xhr_response_ctx(resp);
+        if self.cur_ctx != home {
+            self.switch_to(home);
+        }
+        r
+    }
+
+    /// Livraison dans le contexte **courant** — corps de
+    /// [`Self::deliver_xhr_response`] après switch (JS-C78).
+    fn deliver_xhr_response_ctx(&mut self, resp: XhrResponse) -> JsResult<()> {
         // `fetch` handles resolve a promise instead of filling an XHR.
         if let Some(pos) = self
             .xhr

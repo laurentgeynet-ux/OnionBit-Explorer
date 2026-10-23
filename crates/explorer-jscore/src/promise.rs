@@ -136,16 +136,19 @@ impl Engine {
         };
         for r in reactions {
             let rejected = state == PromiseState::Rejected;
-            self.microtasks.push_back(Job::Reaction {
-                cb: if rejected {
-                    r.on_rejected
-                } else {
-                    r.on_fulfilled
+            self.microtasks.push_back((
+                self.cur_ctx,
+                Job::Reaction {
+                    cb: if rejected {
+                        r.on_rejected
+                    } else {
+                        r.on_fulfilled
+                    },
+                    arg: result,
+                    rejected,
+                    next: r.next,
                 },
-                arg: result,
-                rejected,
-                next: r.next,
-            });
+            ));
         }
     }
 
@@ -213,12 +216,15 @@ impl Engine {
                         let ObjKind::Promise(p) = &o.kind else { return };
                         (p.resolve_fn, p.reject_fn)
                     };
-                    self.microtasks.push_back(Job::Thenable {
-                        then_fn,
-                        this: v,
-                        resolve,
-                        reject,
-                    });
+                    self.microtasks.push_back((
+                        self.cur_ctx,
+                        Job::Thenable {
+                            then_fn,
+                            this: v,
+                            resolve,
+                            reject,
+                        },
+                    ));
                     return;
                 }
             }
@@ -233,7 +239,7 @@ impl Engine {
 
     /// `queueMicrotask(f)` — also used internally for deferred work.
     pub(crate) fn enqueue_microtask(&mut self, f: Value) {
-        self.microtasks.push_back(Job::Plain(f));
+        self.microtasks.push_back((self.cur_ctx, Job::Plain(f)));
     }
 
     /// Drain the microtask queue until empty. Runs at every job
@@ -245,8 +251,19 @@ impl Engine {
     /// callback exception.
     pub fn run_microtasks(&mut self) -> JsResult<usize> {
         let mut ran = 0usize;
+        let home = self.cur_ctx;
         loop {
-            while let Some(job) = self.microtasks.pop_front() {
+            while let Some((ctx, job)) = self.microtasks.pop_front() {
+                // JS-C78 : le job court dans le realm qui l'a
+                // enregistré (spec « job callback realm ») —
+                // contexte garé → livraison différée : re-queue
+                // si le contexte est mort (le switch no-op
+                // garderait le courant et exécuterait le job
+                // dans le mauvais realm).
+                self.switch_to(ctx);
+                if self.cur_ctx != ctx {
+                    continue;
+                }
                 self.tick()?;
                 ran += 1;
                 match job {
@@ -312,15 +329,40 @@ impl Engine {
             // JS-C73 : refus de handshake `WebSocket` (error +
             // close 1006 — arme les fallbacks long-polling).
             // JS-C74 : messages `BroadcastChannel` en file.
-            if !self.deliver_mutations()?
-                && self.deliver_observers()? == 0
-                && self.deliver_file_reads()? == 0
-                && self.pump_stream_reads()? == 0
-                && crate::idb::deliver_idb_requests(self)? == 0
-                && self.deliver_ws()? == 0
-                && self.deliver_bc()? == 0
-                && self.pump_workers()? == 0
-            {
+            // JS-C78 : les états livrables sont **par contexte**
+            // (garés) — la pompe visite chaque contexte vivant
+            // pour drainer ses files propres, puis les messages
+            // `postMessage` (file commune cross-contexte), puis
+            // les events workers (pool global, livrés à leur
+            // contexte émetteur par la livraison elle-même).
+            let mut delivered = false;
+            let ids: Vec<u32> = self
+                .ctxs
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.alive)
+                .map(|(i, _)| i as u32)
+                .collect();
+            for id in ids {
+                self.switch_to(id);
+                if self.cur_ctx != id {
+                    continue;
+                }
+                if self.deliver_mutations()?
+                    || self.deliver_observers()? > 0
+                    || self.deliver_file_reads()? > 0
+                    || self.pump_stream_reads()? > 0
+                    || crate::idb::deliver_idb_requests(self)? > 0
+                    || self.deliver_ws()? > 0
+                    || self.deliver_bc()? > 0
+                {
+                    delivered = true;
+                }
+            }
+            let msgs = self.drain_pending_msgs()?;
+            let workers = self.pump_workers()?;
+            if !delivered && msgs == 0 && workers == 0 && self.microtasks.is_empty() {
+                self.switch_to(home);
                 self.maybe_collect();
                 return Ok(ran);
             }
@@ -404,12 +446,15 @@ fn promise_then(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
         }
         PromiseState::Fulfilled | PromiseState::Rejected => {
             let rejected = state == PromiseState::Rejected;
-            e.microtasks.push_back(Job::Reaction {
-                cb: if rejected { on_r } else { on_f },
-                arg: result,
-                rejected,
-                next,
-            });
+            e.microtasks.push_back((
+                e.cur_ctx,
+                Job::Reaction {
+                    cb: if rejected { on_r } else { on_f },
+                    arg: result,
+                    rejected,
+                    next,
+                },
+            ));
         }
     }
     Ok(Value::Obj(next))

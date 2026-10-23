@@ -44,6 +44,7 @@
 mod ast;
 mod builtins;
 mod collections;
+mod context;
 mod dom;
 mod dom_host;
 mod error;
@@ -71,6 +72,7 @@ mod websocket;
 mod worker;
 mod xhr;
 
+pub use context::CtxId;
 pub use dom::{
     CanvasOpRecord, CanvasState, Dom, JournalOp, MediaCmd, MediaElState, MediaReport, MediaState,
     NodeId, SerializeStats,

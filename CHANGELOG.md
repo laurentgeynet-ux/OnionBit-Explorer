@@ -968,6 +968,113 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   émis, `include` ↔ `Cookie`,
   `omit` sans `Cookie`).
 
+- **JS-C78 — contextes de
+  navigation imbriqués**
+  (`explorer-jscore` —
+  dépendance piste JS de
+  l'étape 131 « composite
+  iframe », arrêt couture
+  journal 2026-… tranché) :
+  un `Engine`, N realms —
+  « un heap, N globals »
+  (même modèle que les agents
+  same-origin spec : les
+  objets cross-contexte
+  restent des `ObjId` valides,
+  `contentDocument` same-
+  origin est le vrai miroir,
+  pas une copie). Chaque
+  `BrowsingContext` parque
+  ses champs document-local
+  (global, env, protos,
+  dom_ctx, timers, xhr, idb,
+  observers, modules, hooks
+  page/nav/history) ;
+  `switch_to` swap courant ↔
+  garé. **Intrinsics frais par
+  realm** (spec : `frame.Array
+  !== parent.Array` —
+  `builtins::install` ré-
+  exécuté par contexte).
+  Fenêtre : `window.parent`/
+  `top`/`frames`/`length`/
+  `closed` en accessors
+  résolvant leur contexte
+  depuis `this` (jamais
+  `cur_ctx`) — `frames[n]`
+  dynamique (survit à
+  `destroy`). `iframe.
+  contentWindow`/`content
+  Document` bornés : same-
+  origin → vrais handles ;
+  cross-origin → `content
+  Document` = `null` spec,
+  `contentWindow` = le
+  `WindowProxy` opaque
+  whitelisté (`postMessage`,
+  `closed`, `length`, `top`/
+  `parent`/`frames`/`self`,
+  `opener`, `location`
+  write-only — tout le reste
+  `undefined`, écritures
+  ignorées) — c'est la
+  surface spec réelle : sans
+  lui, `postMessage` cross
+  serait injoignable.
+  `postMessage` : structured
+  clone `WireValue` (cycles
+  préservés — mécanique
+  Worker C29) à l'émission,
+  `targetOrigin` **exigé**
+  (absent/`undefined`/`"*"`
+  → `SyntaxError` honnête —
+  arbitrage v1 : vérification
+  réelle, jamais de broadcast
+  silencieux), origine non
+  concordante → non livré
+  (silencieux spec). Livraison
+  : file commune drainée au
+  checkpoint — après les
+  microtasks de l'émetteur
+  (spec « task postée »),
+  jamais en réentrance
+  d'eval ; `MessageEvent.
+  data`/`origin`/`source`
+  peuplés. Appels cross-ctx :
+  `Fun::Script` switche sur
+  le realm de la fonction
+  (env capturée racine) ;
+  natives (`frame.eval`,
+  `frame.setTimeout`…) sur
+  le realm de `this`=global,
+  pile `native_caller` pour
+  le `source`/`origin`
+  spec (« incumbent » =
+  appelant). Microtasks,
+  timers, XHR/fetch et toutes
+  les livraisons taggés par
+  contexte — la pompe visite
+  chaque contexte vivant
+  (les timers d'un iframe
+  tournent). GC : racines des
+  contextes garés tracées
+  (`BrowsingContext::push_
+  roots`) + proxies stables.
+  API publique additive :
+  `context_new`/`context_
+  switch`/`current_context`/
+  `context_destroy`. Lookup
+  d'identifiant global étendu
+  aux accessors (`parent`…)
+  — `env_get` invoque les
+  getters du global.
+  Régressions `c78_*` (17
+  tests — isolation,
+  intrinsics, arbre fenêtre,
+  proxies, postMessage,
+  ordre/réentrance, cycles,
+  destroy, GC, timers).
+
 ### Fixed
 
 - **JS-C72 — adoption de promesse

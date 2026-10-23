@@ -106,6 +106,12 @@ impl Engine {
     /// Point `location`/`document.cookie` at `url`.
     pub fn set_page_url(&mut self, url: &str) {
         self.hooks.page_url = url.to_string();
+        // JS-C78 : l'URL du contexte **courant** sert l'origine
+        // (`ctx_origin`/`same-origin`/`postMessage.targetOrigin`)
+        // — la méta suit la page effectivement installée.
+        if let Some(m) = self.ctxs.get_mut(self.cur_ctx as usize) {
+            m.url = url.to_string();
+        }
     }
 
     /// Install the cookie jar backing `document.cookie`.
@@ -693,10 +699,11 @@ impl Engine {
         self.set_own(g, "window", gv, false);
         self.set_own(g, "self", gv, false);
         self.set_own(g, "globalThis", gv, false);
-        // Pas de frames → `top`/`parent`/`frames` ≙ la fenêtre elle-même.
-        self.set_own(g, "top", gv, false);
-        self.set_own(g, "parent", gv, false);
-        self.set_own(g, "frames", gv, false);
+        // `top`/`parent`/`frames`/`length`/`closed`/`postMessage` —
+        // accessors résolvant leur contexte depuis `this` (JS-C78) ;
+        // sans parent, `top`/`parent`/`frames` ≙ la fenêtre
+        // elle-même comme avant.
+        crate::context::install_ctx_window_props(self);
         // `MutationObserver` (JS-C26) — les records vivent dans
         // la file du `Dom`, livrés au microtask checkpoint.
         self.install_mutation_observer();
@@ -2299,6 +2306,45 @@ impl Host for NodeHost {
                 .and_then(|s| s.trim().parse::<f64>().ok())
                 .unwrap_or(if key == "width" { 300.0 } else { 150.0 });
             return Ok(Some(Value::Num(v.max(0.0))));
+        }
+        // `<iframe>.contentWindow`/`contentDocument` (JS-C78) :
+        // same-origin uniquement (arrêt v1) — cross-origin rend
+        // `null` (comportement spec, pas un stub). `contentWindow`
+        // rend le `window` de l'enfant (global same-origin ou
+        // `WindowProxy` opaque) ; `contentDocument` rend le
+        // `document` de son miroir, `null` si cross ou sans
+        // contexte attaché.
+        if matches!(key, "contentWindow" | "contentDocument")
+            && self.dom.borrow().nodes[node as usize].tag == "iframe"
+        {
+            let viewer = e.cur_ctx;
+            let dom_ptr = std::rc::Rc::as_ptr(&self.dom) as usize;
+            let Some(child) = e.ctx_of_frame(dom_ptr, node) else {
+                return Ok(Some(Value::Null));
+            };
+            if key == "contentWindow" {
+                if e.ctx_same_origin(viewer, child) {
+                    return Ok(Some(e.ctx_window_value_as(viewer, child)));
+                }
+                // Cross-origin : la fenêtre existe mais est opaque
+                // — le `WindowProxy` seul passe, jamais le global.
+                return Ok(Some(e.ctx_window_value_as(viewer, child)));
+            }
+            if !e.ctx_same_origin(viewer, child) {
+                return Ok(Some(Value::Null));
+            }
+            let doc = if child == e.cur_ctx {
+                e.dom_ctx
+                    .as_ref()
+                    .and_then(|(d, cache)| cache.borrow().get(&d.borrow().root).copied())
+            } else {
+                e.parked.get(&child).and_then(|p| {
+                    p.dom_ctx
+                        .as_ref()
+                        .and_then(|(d, cache)| cache.borrow().get(&d.borrow().root).copied())
+                })
+            };
+            return Ok(Some(doc.map_or(Value::Null, Value::Obj)));
         }
         // `constructor.name` (étape 74) : objet allégé
         // portant le nom de classe — `v.constructor.name`

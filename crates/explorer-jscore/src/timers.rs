@@ -114,6 +114,40 @@ impl Engine {
     /// # Errors
     /// Same as [`Self::run_due_timers`].
     pub fn run_due_timers_bounded(&mut self, max: usize) -> JsResult<usize> {
+        // JS-C78 : les timers vivent par contexte — une pompe
+        // visite chaque contexte vivant (les timers d'un iframe
+        // tournent même quand son document n'est pas courant).
+        let home = self.cur_ctx;
+        let ids: Vec<u32> = self
+            .ctxs
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.alive)
+            .map(|(i, _)| i as u32)
+            .collect();
+        let mut ran = 0usize;
+        for id in ids {
+            if ran >= max {
+                break;
+            }
+            self.switch_to(id);
+            if self.cur_ctx != id {
+                continue;
+            }
+            ran += self.run_due_timers_ctx(max - ran)?;
+        }
+        self.switch_to(home);
+        // Microtask checkpoint at the task boundary — une fois la
+        // tournée terminée (`run_microtasks` draine déjà tous les
+        // contextes, JS-C78).
+        self.run_microtasks()?;
+        Ok(ran)
+    }
+
+    /// Due timers du contexte **courant** uniquement — corps de
+    /// pompe partagé par [`Self::run_due_timers_bounded`] pour
+    /// chaque contexte visité (JS-C78).
+    fn run_due_timers_ctx(&mut self, max: usize) -> JsResult<usize> {
         // Snapshot the due timers first: an interval rescheduled to
         // `now` would otherwise be picked up again in this same pump
         // and loop forever. One pump = each due timer fires at most
@@ -167,23 +201,35 @@ impl Engine {
             }
             ran += 1;
         }
-        // Microtask checkpoint at the task boundary: callbacks queued
-        // by a timer (`Promise` reactions…) run before we report done.
-        self.run_microtasks()?;
         Ok(ran)
     }
 
     /// Earliest pending fire time — the embedder sleeps until then
-    /// (or on its next UI event, whichever first).
+    /// (or on its next UI event, whichever first). JS-C78 : min
+    /// sur tous les contextes vivants (courant + garés).
     #[must_use]
     pub fn next_timer_deadline(&self) -> Option<Instant> {
-        self.timers.timers.iter().map(|t| t.at).min()
+        self.timers
+            .timers
+            .iter()
+            .map(|t| t.at)
+            .chain(
+                self.parked
+                    .values()
+                    .flat_map(|c| c.timers.timers.iter().map(|t| t.at)),
+            )
+            .min()
     }
 
-    /// Pending timer count (tests/diagnostics).
+    /// Pending timer count (tests/diagnostics) — tous contextes.
     #[must_use]
     pub fn pending_timers(&self) -> usize {
         self.timers.timers.len()
+            + self
+                .parked
+                .values()
+                .map(|c| c.timers.timers.len())
+                .sum::<usize>()
     }
 }
 
