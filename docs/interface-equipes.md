@@ -298,3 +298,82 @@ ni l'un ni l'autre. Variante arrêtée (pull, cohérente avec
 | 2026-10-23 | `explorer-core`/`explorer-render` — réponse mesurée : « un apply paie-t-il le layout complet ? » (question lead post-R-85, reliure étape 112) | **Oui en structure, non en coût — `zz_profile_giant` enrichie d'une mesure « apply simulé » (boxtree + `layout_tree` sur `FontCache` chaud, fidèle à `PaintPayload.layout_font_cache` R-65 via `layout_ctx`/`restitute_font_cache`)**. **Debug** : layout chaud **1,33 s** vs 12,1 s froid (les ~10 s de buzz re-shapé deviennent des hits — le cache persisté amortit le reflow complet) → apply complet ≈ parse 0,76 + styles 3,0 + boxtree 1,07 + layout 1,33 + dl 0,8 + raster 0,6 ≈ **7,5 s** vs ~250 s documentés étape 112. **Release** (même sonde, `--release`) : pipeline entier **~2,3 s** — `layout_tree` 389 ms (×31 vs debug : taxe debug du shaping, pas l'algorithme), png 150 ms, styles 339 ms, layout chaud 213 ms → apply ≈ **1,9 s**. **Structure des deux chemins** : `try_incr_payload` (incrémental R-12) ne saute que boxtree+layout et exige `job.dirty` + **zéro flottant dans tout le document** + chemin bloc — sur page réelle à flottants, `has_float` retombe quasi toujours en reflow complet ; `styles_payload` (`StyleEngine` **reconstruit à chaque apply** — re-parse des feuilles + cascade complète), le re-parse DOM, la display list (incrémentale R-37 quand `prev` présent) et le repaint restent complets sur les deux chemins. **Arbitrage** : R-86 (pré-shaping parallèle, premier thread en crate domaine) **non retenu** — le plancher restant est du debug ; 389 ms release ne justifie ni threads ni ADR, et les clés de shape (fragments post-itemisation UAX#14) ne sont pas collectables en amont sans rejouer la moitié du travail. Reliquat par-apply identifié : `StyleEngine` non persisté → ~3 s debug / ~0,3 s release de cascade à chaque apply, premier poste fixe désormais (si un jour le coût apply redevient le goulot : persister le moteur ou styler le sous-arbre sale seulement). | PIPE → NAV (réponse reliure étape 112) | livré — sonde `zz_profile_giant` porte la mesure « apply simulé » ; reliure étape 112 close côté PIPE |
 | 2026-10-23 | `explorer-render` — R-86 : moitié PIPE des `mask-*` + **demande NAV : fetch `mask-image: url(http…)`** | **Livré côté domaine** (backlog issue #14 / reliquat R-80 — icônes MDN invisibles, motif = 3 trous cumulés mesurés sur `mdn.html`) : (1) **pseudos** — `PaintImages.masks_url` (`url(...)` brut du style calculé → bitmap) + repli lookup à l'émission `masks[NodeId]` → `masks_url[style["mask-image"]]` : les boîtes `::before`/`::after` (sans `NodeId`) trouvent leur mask — motif `.color-theme__button:before` MDN ; collecte `data:` étendue aux styles pseudo (`StyleMap::pseudo`). (2) **placement** — `mask-size` (`cover`/`contain`/`<len>`/`%` ; `auto` = étirement sur la zone, déviation assumée : comportement R-52 préservé, pixels de référence inchangés), `mask-position` (`bg_position` réutilisé, aire border box), `mask-repeat` (tuilage `rem_euclid`, défaut `repeat`, `space`/`round` ≈ repeat) → `DisplayItem::MaskedFill` porte `dst`+`repeat` (`item_eq`/`shifted`/`dump` alignés ; pattern `..` en aval inchangé). (3) **couture** — `PaintImages::register_mask(url, img)` additif. **Demande NAV** : pour un `mask-image`/`(-webkit-)mask-image`/`mask` dont l'url n'est pas `data:` — fetch + décodage (mêmes bornes `image_max_px`/`img_decoded` que les fonds) puis `register_mask(<texte url brut du style calculé>, img)` — symétrique d'`insert_fetched_backgrounds`, l'alias url brute↔résolue vivant côté appelant comme `bg_aliases`. Effet attendu : icônes MDN (color-theme, `.external`, menu nav) — le motif devient *possible*, pixels réels dès le wiring. Régressions : `mask_sur_pseudo_via_url`, `mask_size_position_repeat_placent_la_tuile`, `mask_repeat_defaut_u_tile`, `mask_fetchem_enregistre_via_register_mask` — tout côté PIPE, `data:` seules. | PIPE → NAV (demande de couture) | livré côté PIPE — pixels MDN en attente du wiring fetch |
 | 2026-10-23 | `explorer-layout`/`explorer-render` — R-87 : `doc_h` = région défilante réelle (terrain humain — fr.wikipedia ≥1120 px, doc à 1 viewport) | **Correctif comportemental + API publique additive** : `scrollable_overflow_bottom(&LayoutBox) -> f32` exporté d'`explorer-layout` (≈ `scrollHeight` — max des bords inférieurs des boîtes à débord non clippé ; `overflow` ≠ visible borne ses descendants à sa bordure ; `fixed` exclu). Constat : `doc_h` lisait `root.rect.height` ; `html,body{height:100%}` de vector-2022 fige `body` à l'ICB et le contenu déborde en `overflow:visible` sans l'étirer — en dessous de 1120 px des flottants remontaient au `FloatCtx` racine (`layout_tree` étend la racine à leur profondeur) et masquaient le trou ; à 1120 px `.mw-page-container-inner` passe en `display:grid` (BFC → flottants capturés) → effondrement. Côté session : `p.doc_h` (apply plein + relayout incrémental) et `DisplayList.height`/rect de canvas (`build_list`) bornés par cette mesure — avant, la frame s'arrêtait au viewport et le scroll était structurellement impossible. **Observable NAV** : les pages dont le contenu déborde un ancêtre à hauteur fixe deviennent scrollables et entièrement peintes ; frames potentiellement plus hautes (cap `MAX_FRAME_DIM` inchangé). Régression : `doc_h_covers_overflow_past_fixed_height_body`. | PIPE (R-87) | livré |
+
+## Phase terrain humain 2026-10-23 — anomalies dispatchées
+
+Bilan de la session de test réel (daemon REST + app, binaires
+release). Deux anomalies soldées en session : **étape 115**
+(affichage frame `OverflowBox` + composite post-resize) et
+**R-87** (`doc_h` = région défilante — le « scroll mort » FR).
+Restent les anomalies ci-dessous, à prendre par piste. Chaque
+entrée attendue : repro isolée → fix → régression → ligne
+journal « livré ».
+
+### Piste PIPE
+
+- [ ] **Métriques verticales généreuses** : à contenu identique
+  le document Explorer mesure ~+74 % de hauteur vs Chrome
+  (www.wikipedia.org : 1917 px vs ~1102 px au même viewport
+  1216). Suspects : `line-height:normal`, ascent/descent des
+  fontes de repli. Mesurer ligne par ligne vs Chrome, réduire
+  l'écart.
+- [ ] **`inline` stacking dans `.liste-horizontale`** : liens
+  du bas de la boîte d'accueil rendus en colonne chez nous,
+  en ligne chez Chrome — vérifier `display:inline` + séparateur
+  `::after` (content `"\A0· "`).
+- [ ] **`<select>` stylé** : apparence native différente de
+  Chrome (déjà documenté — prioriser si terrain le signale).
+- [ ] **Images de la page Accueil FR** : bandeau « Wiki aime
+  la paix » et vignettes absents — vérifier côté PIPE si les
+  `<img>` arrivent avec pixels (sinon → NAV fetch/`srcset`).
+
+### Piste NAVIGATEUR
+
+- [ ] **Omnibox désynchronisée** : après navigation par lien
+  (google→wikipedia→fr), la barre d'adresse garde l'ancienne
+  URL alors que `list_tabs` rapporte la bonne — le champ ne
+  suit pas `state.url` (app).
+- [ ] **`reload` divergent** : `reload` d'un onglet affichant
+  wikipedia rechargeait google.com — `last_req`/`hist_idx`
+  désynchronisés (`reload_request` relit la dernière requête,
+  pas l'entrée courante).
+- [ ] **Recherche Google impossible** : google.com renvoie
+  l'interstitiel « Activez JavaScript » + exception JS
+  `Error: b` (stack `(3:2662)`/`(3:2460)`/`U(3:4262)`) —
+  trier : exception jscore à isoler (piste JS) + boucle de
+  redirection/consentement côté session.
+- [ ] **Accept-Language absent** : le portal sert l'anglais —
+  envoyer `Accept-Language` depuis les réglages app.
+- [ ] **Piège `engineMode=auto`** : une `explorer_ffi.dll`
+  périmée à côté de l'exe détourne silencieusement tout test
+  « daemon + UI » (mesuré : latence 20 s + gel). Afficher le
+  moteur actif (status bar) + copier la DLL fraîche au build.
+- [ ] **Empreinte daemon ~1,4 Gio** en croissance par page —
+  mesurer relâchement à la fermeture d'onglets (bfcache /
+  heaps jscore / PNG / `PaintImages`).
+- [ ] **Barre de scroll = indicateur** : drag/clic sur piste
+  comme contrôle réel (la molette REST est prouvée — la
+  barre reste non interactive).
+- [ ] **Radar nightly aveugle au tier desktop ≥1120 px** :
+  `site_smoke.ps1` sonde en viewport **1024×768** — sous le
+  breakpoint `min-width:1120px` de Vector-2022 → la variante
+  `display:grid` n'est jamais exercée et l'effondrement R-87
+  est resté vert chaque nuit. Passer la passe fonctionnelle
+  à ≥1200 px de large **et** asserter `doc_h > viewport` +
+  `scroll_y` qui avance réellement sur les sites connus
+  longs (le sondage par bandes de 700 px ne vérifie pas que
+  le scroll a bougé).
+- [ ] **`google.com` hors corpus radar** : l'échec de recherche
+  Google trouvé au terrain n'a aucune couverture — ajouter un
+  site à fort JS au smoke (avec tolérance consentement) pour
+  détecter les régressions JS côté produit, pas seulement
+  `dispatch:OK`.
+
+### Piste JS (spécialiste)
+
+- [ ] **`Error: b` sur google.com** — stack minifiée
+  `(3:2662)`→`U(3:4262)` : repro isolée à produire via
+  `jprobe`/console, puis fix JS-C suivant.
+- [ ] **Reliquat `Invalid base URL`** : sonde
+  `zz_gap_probe.rs` vivante (non pushée) — probablement
+  `import.meta.url`, à clore.
