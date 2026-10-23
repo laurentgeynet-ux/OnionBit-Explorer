@@ -41,6 +41,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   scrollabilité détectée est
   désormais visible.
 
+- **Étape 116 — omnibox synchronisée
+  sur la navigation par lien**
+  (`app/`, terrain 23/10). Le
+  listener ne sélectionnait que
+  `activeId` : naviguer en interne
+  (clic sur un lien) mettait à jour
+  `active.url` sans rafraîchir la
+  barre d'adresse — l'UI affichait
+  l'ancienne URL pendant que
+  `list_tabs` rapportait la bonne.
+  La sélection porte désormais sur
+  `active?.url` et l'écriture est
+  gardée par `!omniboxFocus.hasFocus`
+  (édition en cours préservée).
+  Fakes de test partagés extraits
+  vers `app/test/browser_test_fakes.dart`.
+
 - **R-87 — `doc_h` = région défilante
   réelle** (`explorer-layout` +
   `explorer-render`, terrain humain

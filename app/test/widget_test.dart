@@ -2,13 +2,17 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+import 'package:explorer_app/core/api/events_client.dart';
 import 'package:explorer_app/core/design/app_theme.dart';
 import 'package:explorer_app/core/design/design_tokens.dart';
 import 'package:explorer_app/core/di/providers.dart';
+import 'package:explorer_app/features/browser/presentation/browser_page.dart';
 import 'package:explorer_app/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'browser_test_fakes.dart';
 
 void main() {
   testWidgets('app démarre et affiche la coquille navigateur', (
@@ -70,6 +74,42 @@ void main() {
     ]) {
       expect(find.text(label), findsOneWidget, reason: '$label absent du menu');
     }
+  });
+
+  testWidgets('omnibox suit l’URL après navigation par lien', (
+    WidgetTester tester,
+  ) async {
+    // Terrain 23/10 : `list_tabs` rapportait fr.wikipedia.org
+    // pendant que la barre gardait www.wikipedia.com — le
+    // listener ne sélectionnait que `activeId`, inchangé quand
+    // l'onglet courant navigue en interne.
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: c,
+        child: MaterialApp(
+          home: BrowserPage(tokens: DesignTokens.fallback),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    // Navigation interne : l'événement `navigated` met à jour
+    // `active.url` sans toucher `activeId`.
+    events.ctrl.add(
+      ServerEvent('navigated', {
+        'tab': '1',
+        'url': 'https://fr.wikipedia.org/wiki/Accueil',
+        'title': 'Accueil',
+      }),
+    );
+    await tester.pump();
+    await tester.pump();
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller?.text, 'https://fr.wikipedia.org/wiki/Accueil');
   });
 
   test('tokens de repli exposent les sections clés', () {

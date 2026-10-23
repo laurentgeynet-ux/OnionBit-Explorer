@@ -58,10 +58,13 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
 
     // Omnibox synchronisée sur le changement d'onglet/URL —
     // uniquement si l'utilisateur n'est pas en train d'éditer.
-    ref.listen(browserProvider.select((s) => s.activeId), (_, id) {
-      final active = ref.read(browserProvider).active;
-      if (active != null && _omnibox.text != active.url) {
-        _omnibox.text = active.url == 'about:blank' ? '' : active.url;
+    // La sélection porte sur l'URL elle-même : une navigation
+    // par lien met à jour `active.url` sans changer `activeId`
+    // (terrain 23/10 : la barre gardait www.wikipedia.com
+    // pendant que l'onglet chargeait fr.wikipedia.org).
+    ref.listen(browserProvider.select((s) => s.active?.url), (_, url) {
+      if (url != null && !_omniboxFocus.hasFocus && _omnibox.text != url) {
+        _omnibox.text = url == 'about:blank' ? '' : url;
       }
     });
     ref.listen(browserProvider.select((s) => s.lastError), (_, msg) {

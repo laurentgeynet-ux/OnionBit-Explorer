@@ -2312,6 +2312,33 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   position `scrollY/maxScroll` —
   indicateur pur, pas de drag.
 
+- [x] **Étape 116. Omnibox synchronisée
+  sur la navigation par lien**
+  (terrain 23/10 — www.wikipedia.com
+  → clic « Français » →
+  `list_tabs` rapportait
+  fr.wikipedia.org pendant que la
+  barre affichait l'ancienne URL).
+  Cause : le listener omnibox ne
+  sélectionnait que `s.activeId` —
+  une navigation interne met à jour
+  `active.url` sans changer
+  `activeId`. Fix : la sélection
+  porte sur `s.active?.url`
+  (couvre changement d'onglet **et**
+  navigation interne) + garde
+  `!_omniboxFocus.hasFocus` — le
+  commentaire promettait « sauf
+  édition en cours », le code ne le
+  faisait pas. Test widget :
+  `navigated` SSE injecté → le
+  champ affiche la nouvelle URL.
+  Harnais : fakes dépôt/événements/
+  lecteur extraits de
+  `browser_controller_test.dart`
+  vers `test/browser_test_fakes.dart`
+  (partagé avec `widget_test`).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
