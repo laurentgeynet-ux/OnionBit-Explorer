@@ -48,6 +48,7 @@ impl Tab {
             dirty: std::mem::take(&mut self.dirty),
             emitted: self.emitted,
             last_req: self.last_req.take(),
+            frames: std::mem::take(&mut self.frames),
         };
         self.scroll_y = 0.0;
         self.doc_h = 0.0;
@@ -102,6 +103,7 @@ impl Tab {
         self.js_pending_attrs.clear();
         self.sync_floor = None;
         self.last_req = snap.last_req;
+        self.frames = snap.frames;
         self.transitions.clear();
         // Idem animations : la restauration repart sur les
         // déclarations — lecture réenregistrée au premier

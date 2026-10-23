@@ -301,7 +301,7 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
                     false
                 }
             }
-            Some(DrainAct::Go(d)) => history_move_shared(sess, tab, d).await.is_ok(),
+            Some(DrainAct::Go(d)) => Box::pin(history_move_shared(sess, tab, d)).await.is_ok(),
         };
         committed += usize::from(ok);
     }

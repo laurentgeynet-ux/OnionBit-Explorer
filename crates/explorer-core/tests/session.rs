@@ -50,7 +50,15 @@ struct FakeTransport {
     /// qu'une feuille hors-media/`@import` n'a *pas* été
     /// fetchée, pas seulement qu'elle n'est pas appliquée).
     paths: Mutex<Vec<String>>,
+    /// Journal `(path, en-têtes)` par requête (étape 128 —
+    /// les métadonnées `sec-fetch-*`/`cookie` d'un fetch
+    /// `<iframe>` ne sont pas forcément la *dernière*
+    /// requête : `last_headers` ne suffit pas).
+    req_log: Mutex<ReqLog>,
 }
+
+/// `(path, en-têtes de requête)` par requête émise (étape 128).
+type ReqLog = Vec<(String, Vec<(String, String)>)>;
 
 /// R-32 : la feuille UA pose `body { margin: 8px }` (compat
 /// navigateurs — les refs WPT la supposent). Les fixtures
@@ -91,6 +99,7 @@ impl FakeTransport {
             resp_headers: Mutex::new(HashMap::new()),
             chunks: Mutex::new(HashMap::new()),
             paths: Mutex::new(Vec::new()),
+            req_log: Mutex::new(Vec::new()),
         }
     }
 
@@ -173,6 +182,29 @@ impl FakeTransport {
         if let Ok(mut p) = self.paths.lock() {
             p.push(req.url.path_query());
         }
+        if let Ok(mut l) = self.req_log.lock() {
+            l.push((req.url.path().to_string(), req.headers.clone()));
+        }
+    }
+
+    /// En-têtes de la requête émise vers `path` (premier
+    /// match) — étape 128 : asserts `sec-fetch-*`/`cookie`
+    /// d'un fetch `<iframe>` ou d'une sous-ressource non
+    /// terminale.
+    fn req_headers(&self, path: &str) -> Option<Vec<(String, String)>> {
+        self.req_log
+            .lock()
+            .ok()
+            .and_then(|l| l.iter().find(|(p, _)| p == path).map(|(_, h)| h.clone()))
+    }
+
+    /// Valeur d'en-tête de la requête vers `path`.
+    fn req_header(&self, path: &str, name: &str) -> Option<String> {
+        self.req_headers(path).and_then(|h| {
+            h.iter()
+                .find(|(n, _)| n.eq_ignore_ascii_case(name))
+                .map(|(_, v)| v.clone())
+        })
     }
 
     /// Réponse simulée — la même pour `fetch` et `fetch_stream`.
@@ -249,6 +281,7 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
         max_imports: 8,
         max_fonts: 16,
         max_scripts: 32,
+        max_frames: 8,
         max_modules: 64,
         max_inflight: 6,
         max_script_net: 16,
@@ -6733,6 +6766,7 @@ async fn redirect_commits_final_url_and_fragment() {
             max_imports: 8,
             max_fonts: 16,
             max_scripts: 32,
+            max_frames: 8,
             max_modules: 64,
             max_inflight: 6,
             max_script_net: 16,
@@ -7315,4 +7349,178 @@ async fn journal_insert_sous_table_classe_repli_keyed() {
     s.pump_timers(a);
     assert_eq!(s.journal_applies(), 1, "journal post-baseline rejeué");
     assert_eq!(s.find_in_page(a, "jrnal2"), 1, "rejeu commis");
+}
+
+// ===== Étape 128 — contextes `<iframe>` (cap « web réel
+// sécurisé ») : fetch sous-initiateur + sous-DOM parsé =====
+
+/// Page à un `<iframe src>`.
+const PAGE_IFRAME: &str = "<!doctype html><html><body>\
+     <iframe src=\"/f\"></iframe><div>parent</div></body></html>";
+
+/// Document enfant servi à l'iframe.
+const FRAME_DOC: &str = "<!doctype html><html><head>\
+     <title>Widget</title></head><body><p>enfant</p></body></html>";
+
+/// `<iframe src>` = fetch d'un sous-contexte : requête émise,
+/// document enfant parsé en son DOM propre, titre extrait.
+#[tokio::test]
+async fn iframe_src_fetches_subcontext() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME);
+    t.route("/f", 200, FRAME_DOC);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(t.paths().contains(&"/f".to_string()), "iframe fetchée");
+    let frames = s.tab_frames(id);
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0].0, "http://h.test/f");
+    assert_eq!(frames[0].1.as_deref(), Some("Widget"));
+    let dump = s.frame_dom_dump(id, 0).unwrap();
+    assert!(dump.contains("enfant"), "{dump}");
+}
+
+/// La requête iframe porte les métadonnées d'une navigation
+/// imbriquée : `sec-fetch-dest: iframe`, `sec-fetch-mode:
+/// navigate`, `sec-fetch-site` calculé sur la page parente,
+/// `referer` = page.
+#[tokio::test]
+async fn iframe_fetch_emits_navigate_metadata() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME);
+    t.route("/f", 200, FRAME_DOC);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(
+        t.req_header("/f", "sec-fetch-dest").as_deref(),
+        Some("iframe")
+    );
+    assert_eq!(
+        t.req_header("/f", "sec-fetch-mode").as_deref(),
+        Some("navigate")
+    );
+    assert_eq!(
+        t.req_header("/f", "sec-fetch-site").as_deref(),
+        Some("same-origin")
+    );
+    assert_eq!(
+        t.req_header("/f", "referer").as_deref(),
+        Some("http://h.test/")
+    );
+    // Pas de `sec-fetch-user` — pas un geste top-level.
+    assert_eq!(t.req_header("/f", "sec-fetch-user"), None);
+}
+
+/// `<iframe>` cross-site : `sec-fetch-site: cross-site`,
+/// et la politique `SameSite` retient les cookies `Lax` —
+/// seuls les `Partitioned` du seau parent voyagent (CHIPS).
+#[tokio::test]
+async fn iframe_cross_site_samesite_and_partition() {
+    use explorer_net::cookies::CookieJar;
+    use explorer_net::http::{Initiator, Request};
+    use explorer_net::url::Url;
+
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+        <iframe src=\"https://cdn.test/f\"></iframe></body></html>",
+    );
+    // L'enfant cross-site pose un cookie partitionné (le
+    // FakeTransport sert par `path`, l'hôte importe peu).
+    t.route_headers(
+        "/f",
+        200,
+        FRAME_DOC,
+        &[("set-cookie", "chip=1; Partitioned; Secure")],
+    );
+    let id = s.open_tab();
+    s.navigate(id, "https://site-a.test/").await.unwrap();
+    assert_eq!(
+        t.req_header("/f", "sec-fetch-site").as_deref(),
+        Some("cross-site"),
+        "site-a.test vs cdn.test"
+    );
+
+    // Le cookie `Partitioned` est rangé sous le seau de la
+    // page top-level (site-a.test) : il part sur une sous-
+    // ressource ultérieure de cdn.test sous site-a, jamais
+    // en top-level direct ni sous un autre site.
+    let jar = s.cookie_jar();
+    let jar: &CookieJar = &jar;
+    let cdn = Url::parse("https://cdn.test/f").unwrap();
+    let mut req = Request::get(cdn.clone());
+    req.initiator = Some(Initiator::Subresource(
+        Url::parse("https://site-a.test/").unwrap(),
+    ));
+    assert!(
+        jar.header_for_ctx(&req, true).contains("chip=1"),
+        "partition site-a"
+    );
+    let mut other = Request::get(cdn);
+    other.initiator = Some(Initiator::Subresource(
+        Url::parse("https://site-b.test/").unwrap(),
+    ));
+    assert!(
+        !jar.header_for_ctx(&other, true).contains("chip=1"),
+        "seau site-b vide"
+    );
+}
+
+/// Un `<iframe src>` en échec (404) ne casse pas la
+/// navigation — aucun sous-contexte commis, page vivante.
+#[tokio::test]
+async fn iframe_404_is_tolerated() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME);
+    // `/f` non routé → 404 du FakeTransport.
+    let id = s.open_tab();
+    assert!(s.navigate(id, "http://h.test/").await.is_ok());
+    assert!(t.paths().contains(&"/f".to_string()));
+    assert_eq!(s.tab_frames(id), Vec::new());
+}
+
+/// `max_frames` borne la vague : 2 iframes déclarés, borne
+/// à 1 → un seul fetch part.
+#[tokio::test]
+async fn iframe_bounded_by_max_frames() {
+    let (mut s, t) = test_session_with(SessionConfig {
+        max_frames: 1,
+        ..SessionConfig::default()
+    });
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <iframe src=\"/a\"></iframe><iframe src=\"/b\"></iframe>\
+         </body></html>",
+    );
+    t.route("/a", 200, FRAME_DOC);
+    t.route("/b", 200, FRAME_DOC);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let paths = t.paths();
+    assert!(paths.contains(&"/a".to_string()));
+    assert!(!paths.contains(&"/b".to_string()), "borne max_frames=1");
+    assert_eq!(s.tab_frames(id).len(), 1);
+}
+
+/// Les sous-contextes voyagent dans le snapshot bfcache :
+/// back/forward restaure les DOM enfants sans re-fetch.
+#[tokio::test]
+async fn iframe_frames_ride_bfcache() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME);
+    t.route("/f", 200, FRAME_DOC);
+    t.route("/b", 200, PAGE_T);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(s.tab_frames(id).len(), 1);
+    s.navigate(id, "http://h.test/b").await.unwrap();
+    assert_eq!(s.tab_frames(id), Vec::new(), "page sans iframe");
+    let calls = t.calls();
+    s.go_back(id).await.unwrap();
+    assert_eq!(t.calls(), calls, "bfcache : aucun re-fetch");
+    assert_eq!(s.tab_frames(id).len(), 1, "frames restaurés");
 }

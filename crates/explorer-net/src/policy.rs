@@ -452,6 +452,7 @@ pub fn sec_fetch_headers(req: &Request) -> Vec<(String, String)> {
             FetchMode::Cors => "cors",
             FetchMode::NoCors => "no-cors",
             FetchMode::SameOrigin => "same-origin",
+            FetchMode::Navigate => "navigate",
         }
     };
     let dest = if nav {
@@ -463,6 +464,7 @@ pub fn sec_fetch_headers(req: &Request) -> Vec<(String, String)> {
             FetchDest::Style => "style",
             FetchDest::Image => "image",
             FetchDest::Font => "font",
+            FetchDest::Iframe => "iframe",
         }
     };
     let mut out = vec![
