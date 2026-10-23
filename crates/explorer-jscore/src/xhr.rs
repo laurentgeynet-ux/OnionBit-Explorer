@@ -512,12 +512,18 @@ impl Engine {
         // `ReadableStream`/`WritableStream`/`TransformStream`
         // (JS-C71) — `res.body`/`req.body` et les bundlers.
         crate::streams::install_streams(self);
+        // `indexedDB` + `caches` (JS-C72) — registres mémoire
+        // par défaut ; l'embedder réinjecte les siens via
+        // `install_idb`/`install_caches` (persistence inter-
+        // pages = sa responsabilité).
+        crate::idb::install_idb(self, None);
+        crate::idb::install_caches(self, None);
     }
 
     /// `ctor.prototype = proto` + `proto.constructor = ctor` —
     /// liaison `instanceof` (`OrdinaryHasInstance`) des classes
     /// fetch (JS-C66).
-    fn link_ctor(&mut self, ctor: Value, proto: Option<crate::value::ObjId>) {
+    pub(crate) fn link_ctor(&mut self, ctor: Value, proto: Option<crate::value::ObjId>) {
         let Some(pid) = proto else { return };
         if let Value::Obj(cid) = ctor {
             self.set_own(cid, "prototype", Value::Obj(pid), false);
@@ -527,7 +533,7 @@ impl Engine {
 
     /// `Response` livrée par le transport : même forme que
     /// `new Response` — `type: "basic"`, `url` = URL de la requête.
-    fn make_fetch_response(&mut self, resp: XhrResponse, url: String) -> Value {
+    pub(crate) fn make_fetch_response(&mut self, resp: XhrResponse, url: String) -> Value {
         self.response_obj(RespSpec {
             status: resp.status,
             status_text: resp.status_text,
@@ -1087,10 +1093,57 @@ fn norm_method(e: &mut Engine, m: String) -> JsResult<String> {
     })
 }
 
+/// `new Request(url)` — helper `cache.keys()` (JS-C72) :
+/// délègue au ctor partagé (méthode GET, headers vides).
+pub(crate) fn request_of(e: &mut Engine, url: Value) -> JsResult<Value> {
+    request_ctor(e, Value::Undefined, &[url])
+}
+
+/// Tuple `(url, status, status_text, headers, body, type)`
+/// d'un snapshot `Response` pour `Cache.put` (JS-C72).
+pub(crate) type CacheSnapshot = (String, u16, String, Vec<(String, String)>, String, String);
+
+/// Snapshot d'une `Response` pour `Cache.put` (JS-C72) —
+/// `(url, status, status_text, headers, body, type)` copiés.
+/// `None` si l'argument n'est pas une `Response` exploitable
+/// (corps manquant → `None` honnête).
+pub(crate) fn cache_entry_snapshot(e: &mut Engine, res: Value) -> JsResult<Option<CacheSnapshot>> {
+    let Value::Obj(id) = res else { return Ok(None) };
+    let Some((_, body)) = fetch_body_of(e, res) else {
+        return Ok(None);
+    };
+    let url = e
+        .get_prop(id, "url")
+        .and_then(|v| e.heap_string_of(v))
+        .unwrap_or_default();
+    let status = e
+        .get_prop(id, "status")
+        .and_then(|v| e.to_number(v).ok())
+        .unwrap_or(0.0) as u16;
+    let status_text = e
+        .get_prop(id, "statusText")
+        .and_then(|v| e.heap_string_of(v))
+        .unwrap_or_default();
+    let ty = e
+        .get_prop(id, "type")
+        .and_then(|v| e.heap_string_of(v))
+        .unwrap_or_else(|| "basic".into());
+    let mut headers = match e.get_prop(id, "headers") {
+        Some(h) => headers_pairs(e, h)?,
+        None => Vec::new(),
+    };
+    if let Some(Value::Obj(hid)) = e.get_prop(id, "headers") {
+        for sc in set_cookie_list(e, hid) {
+            headers.push(("set-cookie".into(), sc));
+        }
+    }
+    Ok(Some((url, status, status_text, headers, body, ty)))
+}
+
 /// Résolution d'URL contre `hooks.page_url` (base document) —
 /// brut si la base est absente (contexte de test) ; `None` si le
 /// résultat est invalide.
-fn resolve_url(e: &Engine, raw: &str) -> Option<String> {
+pub(crate) fn resolve_url(e: &Engine, raw: &str) -> Option<String> {
     let base = e.hooks.page_url.clone();
     if base.is_empty() {
         return Some(raw.to_string());
@@ -1445,7 +1498,7 @@ fn body_init_text(e: &mut Engine, v: Value) -> JsResult<(String, Option<String>)
 /// `fetch(url | Request, opts?)` — `input` `Request` fournit
 /// url/method/headers/body par défaut, `opts` surcharge (spec
 /// `fetch` = `new Request(input, init)` puis transport).
-fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let input = arg(args, 0);
     let opts = arg(args, 1);
     let mut req = XhrRequest {

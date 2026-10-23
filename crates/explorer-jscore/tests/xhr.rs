@@ -1227,3 +1227,135 @@ fn c71_tee_and_cancel() {
     );
     assert_eq!(describe(&mut e, "cr2"), "k4|p");
 }
+
+// ---- JS-C72 : IndexedDB + Cache API -------------------------------
+
+#[test]
+fn c72_idb_open_upgrade_create_store() {
+    let (mut e, _t) = engine();
+    // `indexedDB.open` : `upgradeneeded` (oldVersion=0) puis
+    // `success` — `createObjectStore` légal dans l'upgrade.
+    describe(
+        &mut e,
+        "var log = '';         var rq = indexedDB.open('appdb', 1);         rq.onupgradeneeded = function (ev) {           log += 'up' + ev.oldVersion + '>' + ev.newVersion;           var db = ev.target.result;           db.createObjectStore('kv', { keyPath: 'id' });         };         rq.onsuccess = function (ev) {           var db = ev.target.result;           log += '|ok:' + db.name + '@' + db.version                + '/' + db.objectStoreNames.join(',');         };",
+    );
+    assert_eq!(describe(&mut e, "log"), "up0>1|ok:appdb@1/kv");
+}
+
+#[test]
+fn c72_idb_put_get_delete() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var out = '';         var r0 = indexedDB.open('shop', 1);         r0.onupgradeneeded = function (ev) {           ev.target.result.createObjectStore('items');         };         r0.onsuccess = function (ev) {           var db = ev.target.result;           var tx = db.transaction(['items'], 'readwrite');           var st = tx.objectStore('items');           st.put({ n: 5 }, 'a');           var g = st.get('a');           g.onsuccess = function (e2) { out += 'g:' + e2.target.result.n; };           var c = st.count();           c.onsuccess = function (e2) { out += '|c:' + e2.target.result; };           tx.oncomplete = function () { out += '|done'; };         };",
+    );
+    assert_eq!(describe(&mut e, "out"), "g:5|c:1|done");
+    // deleteDatabase.
+    describe(
+        &mut e,
+        "var dlog = '';         var rd = indexedDB.deleteDatabase('shop');         rd.onsuccess = function () { dlog = 'del'; };",
+    );
+    assert_eq!(describe(&mut e, "dlog"), "del");
+}
+
+#[test]
+fn c72_idb_keypath_autoinc_cursor() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var log = '';         var r = indexedDB.open('lib', 1);         r.onupgradeneeded = function (ev) {           var db = ev.target.result;           var s = db.createObjectStore('books', { keyPath: 'isbn' });           s.createIndex('byYear', 'year', { unique: false });         };         r.onsuccess = function (ev) {           var st = ev.target.result.transaction(['books'], 'readwrite')             .objectStore('books');           st.put({ isbn: 'b2', year: 2001 });           st.put({ isbn: 'b1', year: 1999 });           var cur = st.openCursor();           var seen = [];           cur.onsuccess = function (e2) {             var c = e2.target.result;             if (c) { seen.push(c.key + '=' + c.value.year); c.continue(); }             else { log = seen.join(','); }           };         };",
+    );
+    // Curseur `next` : ordre de clés `b1` puis `b2`.
+    assert_eq!(describe(&mut e, "log"), "b1=1999,b2=2001");
+    // Requête sur l'index.
+    describe(
+        &mut e,
+        "var ilog = '';         var r2 = indexedDB.open('lib');         r2.onsuccess = function (ev) {           var st = ev.target.result.transaction(['books'])             .objectStore('books');           var g = st.index('byYear').get(1999);           g.onsuccess = function (e2) {             ilog = e2.target.result.isbn;           };         };",
+    );
+    assert_eq!(describe(&mut e, "ilog"), "b1");
+}
+
+#[test]
+fn c72_idb_keyrange_and_cmp() {
+    let (mut e, _t) = engine();
+    assert_eq!(
+        describe(
+            &mut e,
+            "[indexedDB.cmp(1, 2), indexedDB.cmp('a', 'a'),              IDBKeyRange.bound(1, 5).includes(3),              IDBKeyRange.bound(1, 5).includes(9),              IDBKeyRange.lowerBound(2, true).includes(2)].join(',')"
+        ),
+        "-1,0,true,false,false"
+    );
+}
+
+#[test]
+fn c72_idb_errors() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var elog = '';         var r = indexedDB.open('errs', 1);         r.onupgradeneeded = function (ev) {           ev.target.result.createObjectStore('s');         };         r.onsuccess = function (ev) {           var st = ev.target.result.transaction(['s'], 'readwrite')             .objectStore('s');           try { st.put({ x: 1 }); } catch (er) {             elog = 'err:' + er.name;           }           var dup = st.put('v', 'k');           var dup2 = st.add('v', 'k');           dup.onsuccess = function () { elog += '|put-ok'; };           dup2.onerror = function (e2) {             elog += '|add:' + e2.target.error.name;           };         };",
+    );
+    // `put` sans clé ni keyPath → TypeError synchrone (spec
+    // DataError, mappé TypeError) ; `add` doublon → request
+    // `error` ConstraintError.
+    assert_eq!(
+        describe(&mut e, "elog"),
+        "err:TypeError|put-ok|add:ConstraintError"
+    );
+}
+
+#[test]
+fn c72_caches_roundtrip() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var log = '';         var res = new Response('BODY1', { status: 201 });         caches.open('v1').then(function (c) {           return c.put('/api/x', res).then(function () { return c; });         }).then(function (c) {           return c.match('/api/x');         }).then(function (r) {           return r.text();         }).then(function (t) {           log = 'hit:' + t;         });",
+    );
+    assert_eq!(describe(&mut e, "log"), "hit:BODY1");
+    // `has`/`keys`/`delete` + match global.
+    describe(
+        &mut e,
+        "var log2 = '';         caches.has('v1').then(function (h) { log2 += 'has:' + h; });         caches.keys().then(function (ks) { log2 += '|' + ks.join('+'); });         caches.match('/api/x').then(function (r) {           log2 += '|m:' + (r !== undefined);         });         caches.delete('v1').then(function (d) {           log2 += '|del:' + d;           return caches.has('v1');         }).then(function (h) { log2 += '|gone:' + h; });",
+    );
+    assert_eq!(
+        describe(&mut e, "log2"),
+        "has:true|v1|m:true|del:true|gone:false"
+    );
+}
+
+#[test]
+fn c72_caches_add_uses_transport() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var alog = '';         caches.open('v2').then(function (c) {           return c.add('/net-res');         }).then(function () { alog = 'added'; });",
+    );
+    // `add` → fetch via le transport stub — on joue le réseau.
+    let reqs = t.requests.borrow();
+    assert_eq!(reqs.len(), 1);
+    let (h, r) = &reqs[0];
+    assert_eq!(r.url, "/net-res");
+    let h = *h;
+    drop(reqs);
+    respond(&mut e, h, 200, "NET!");
+    assert_eq!(describe(&mut e, "alog"), "added");
+    // Le corps est caché.
+    describe(
+        &mut e,
+        "var blog = '';         caches.match('/net-res').then(function (r) {           return r.text();         }).then(function (t) { blog = t; });",
+    );
+    assert_eq!(describe(&mut e, "blog"), "NET!");
+}
+
+#[test]
+fn c72_idb_request_shape() {
+    let (mut e, _t) = engine();
+    // `IDBRequest` : readyState pending → done, typeof global.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var s = [];             var rq = indexedDB.open('shape', 1);             s.push(typeof indexedDB);             s.push(rq.readyState);             s.push(typeof rq.onsuccess);             rq.onsuccess = function () { s.push('done'); };             s.join(',')"
+        ),
+        "object,pending,undefined"
+    );
+    assert_eq!(describe(&mut e, "s[s.length-1]"), "done");
+}

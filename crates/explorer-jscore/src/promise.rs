@@ -166,21 +166,32 @@ impl Engine {
             // Adopt `v`: subscribe our own resolve/reject — re-entering
             // resolve_promise handles thenable chains naturally.
             let Value::Obj(vid) = v else { return };
-            let (resolve_fn, reject_fn, state, result) = {
+            let (state, result) = {
                 let Some(o) = self.heap.obj(vid) else { return };
                 let ObjKind::Promise(p) = &o.kind else { return };
-                (p.resolve_fn, p.reject_fn, p.state, p.result)
+                (p.state, p.result)
             };
             match state {
                 PromiseState::Pending => {
+                    // Les réactions adoptantes doivent appeler les
+                    // résolveurs de `id` (l'adoptante) — pas ceux de
+                    // `vid` (no-op : déjà settlée). Bogue corrigé
+                    // JS-C72 : `then` retournant une promesse issue
+                    // d'un `.then` résolvait `undefined`.
+                    let (my_resolve, my_reject) = {
+                        let Some(o) = self.heap.obj(id) else { return };
+                        let ObjKind::Promise(p) = &o.kind else { return };
+                        (p.resolve_fn, p.reject_fn)
+                    };
                     if let Some(o) = self.heap.obj_mut(vid) {
                         if let ObjKind::Promise(p) = &mut o.kind {
                             p.reactions.push(Reaction {
-                                on_fulfilled: resolve_fn,
-                                on_rejected: reject_fn,
-                                // Dummy chained promise — unused for
-                                // adoption since handlers settle `id`
-                                // directly. Point it at `id` anyway.
+                                on_fulfilled: my_resolve,
+                                on_rejected: my_reject,
+                                // `next` factice — le
+                                // `resolve_promise(next, retour_cb)`
+                                // du job est un no-op (`id` déjà
+                                // settlée par la réaction elle-même).
                                 next: id,
                             });
                         }
@@ -296,10 +307,13 @@ impl Engine {
             // (loadstart→progress→load→loadend).
             // JS-C71 : re-`pull` des `ReadableStream` ayant des
             // `read()` pendantes (queue vide post-pull).
+            // JS-C72 : même checkpoint pour les `IDBRequest`
+            // (success/error, cursor steps, txn complete).
             if !self.deliver_mutations()?
                 && self.deliver_observers()? == 0
                 && self.deliver_file_reads()? == 0
                 && self.pump_stream_reads()? == 0
+                && crate::idb::deliver_idb_requests(self)? == 0
                 && self.pump_workers()? == 0
             {
                 self.maybe_collect();

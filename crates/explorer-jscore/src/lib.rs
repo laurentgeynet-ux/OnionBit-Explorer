@@ -49,6 +49,7 @@ mod dom_host;
 mod error;
 mod files;
 mod heap;
+mod idb;
 mod interp;
 mod intl;
 mod json;
@@ -75,6 +76,7 @@ pub use dom::{
 pub use dom_host::{CookieJar, DomRef, EventProp, FormSubmit};
 pub use error::{Error, Result};
 pub use heap::{HeapStats, Host};
+pub use idb::{CacheEntry, CacheRegistry, IdbDb, IdbIndexDef, IdbRegistry, IdbStore};
 pub use interp::Engine;
 pub use module::{is_bare_specifier, module_specifiers, rewrite_bare_specifier, ModuleLoader};
 pub use storage::Storage;

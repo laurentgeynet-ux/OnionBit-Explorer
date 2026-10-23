@@ -271,6 +271,10 @@ pub struct Engine {
     /// (JS-C71) — protos + `read()` pendantes re-`pull`ées au
     /// checkpoint microtask.
     pub(crate) streams: crate::streams::StreamState,
+    /// `indexedDB` + `caches` bookkeeping (JS-C72) — registres
+    /// partagés injectables + file de `IDBRequest` livrées au
+    /// checkpoint microtask.
+    pub(crate) idb: crate::idb::IdbState,
     /// Élément en cours de construction par upgrade
     /// `customElements` (JS-C68) — le `super()` d'une classe
     /// `extends HTMLElement` le récupère comme `this` (rôle du
@@ -634,6 +638,7 @@ impl Engine {
             obs: crate::observers::ObsState::default(),
             files: crate::files::FilesState::default(),
             streams: crate::streams::StreamState::default(),
+            idb: crate::idb::IdbState::default(),
             ce_upgrade_slot: None,
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,
@@ -843,6 +848,7 @@ impl Engine {
         // pendantes (le `Host::trace` couvre queue et
         // callbacks de source/sink).
         self.streams.root_ids(&mut ids);
+        self.idb.root_ids(&mut ids);
         if let Some((dom, cache)) = &self.dom_ctx {
             for &id in cache.borrow().values() {
                 ids.push(id);

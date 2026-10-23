@@ -447,7 +447,87 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   lectures pendantes racinés.
   Régressions `c71_*` (6 tests).
 
+- **JS-C72 — `indexedDB` +
+  `caches` (Cache API)**
+  (`explorer-jscore` —
+  persistence client-side des
+  apps). Registres
+  `Rc<RefCell<…>>` injectables
+  (`Engine::install_idb`/
+  `install_caches` — même couture
+  que `install_storage`,
+  persistence inter-pages =
+  responsabilité de l'embedder ;
+  mémoire par défaut).
+  `indexedDB.open` →
+  `IDBOpenDBRequest` :
+  `upgradeneeded`
+  (`oldVersion`/`newVersion`,
+  `createObjectStore`/`createIndex`
+  légaux dans la txn
+  `versionchange`) puis `success`,
+  livrés au checkpoint microtask ;
+  `deleteDatabase`, `databases`,
+  `cmp` (ordre total des clés :
+  nombre < chaîne < tableau).
+  `IDBDatabase.transaction` →
+  `IDBTransaction` (`mode`,
+  `objectStore`, `oncomplete` à la
+  vidange de sa file). Stores :
+  `put`/`add`/`get`/`getAll`/
+  `getKey`/`getAllKeys`/`delete`/
+  `clear`/`count`/`openCursor` —
+  valeurs structured-clonées à
+  l'écriture et à la lecture ;
+  `keyPath` pointillé,
+  `autoIncrement`, clés
+  `number`/`string`/`Array`/`Date`.
+  Index `unique`/`multiEntry`
+  (rejet `ConstraintError`),
+  `IDBKeyRange.only`/`bound`/… +
+  `includes`. Curseurs : `key`/
+  `primaryKey`/`value`,
+  `continue(k)`/`advance`/`update`/
+  `delete` — `continue` re-tire le
+  `onsuccess` de **sa** request
+  (spec). `IDBKeyRange` filtre
+  stores, index et curseurs
+  (directions `next`/`prev`/
+  `*unique`). `caches`
+  (`CacheStorage`) : `open`/`has`/
+  `delete`/`keys`/`match` en
+  promesses ; `Cache.put`/
+  `match`/`matchAll`/`keys`/
+  `delete` — `Response` snapshotée
+  (corps + status + headers) ;
+  `add`/`addAll` passent par le
+  transport fetch installé (sans
+  transport → rejet honnête).
+  Erreurs en `{name, message}`
+  (`ConstraintError`,
+  `VersionError`… — approx
+  `DOMException` documentée).
+  GC : protos, registres (valeurs
+  stockées) et requests pendantes
+  racinés. Régressions `c72_*`
+  (8 tests).
+
 ### Fixed
+
+- **JS-C72 — adoption de promesse
+  pendante** (`explorer-jscore`).
+  `resolve_promise` poussait sur la
+  promesse adoptée les résolveurs
+  **de celle-ci** au lieu de ceux
+  de l'adoptante → un `.then`
+  retournant une promesse issue
+  d'un autre `.then` résolvait
+  `undefined` (jobs qui
+  s'annulaient). Corrigé : les
+  résolveurs de l'adoptante sont
+  poussés — `Promise.resolve(x).
+  then(() => Promise.resolve(0).
+  then(() => x))` rend `x`.
 
 - **Étape 122 — `root_font_size`
   sur `relayout_subtree`**

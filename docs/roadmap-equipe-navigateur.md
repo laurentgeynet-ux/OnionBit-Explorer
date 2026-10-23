@@ -2988,9 +2988,24 @@ ci-dessous (fréquence observée sur le corpus réel).
   `res.body`/`req.body`/`blob.stream()` = stream d'un chunk
   `Uint8Array` (transport `String`). Régressions `c71_*`
   (6 tests).
-- [ ] **JS-C72. IndexedDB + `caches` (Cache API)** — storage
+- [x] **JS-C72. `indexedDB` + `caches` (Cache API)** — storage
   persistant des apps (Service Worker hors scope : la
   persistence suffit à la plupart des fallbacks gracieux).
+  Registres `Rc<RefCell>` injectables (`install_idb`/
+  `install_caches`, même couture que `localStorage`) : `open`
+  → `IDBOpenDBRequest` (`upgradeneeded` → `success`,
+  checkpoint microtask), `deleteDatabase`/`databases`/`cmp` ;
+  txns `readonly`/`readwrite`/`versionchange` + `oncomplete` ;
+  stores `put`/`add`/`get`/`getAll`/`delete`/`clear`/`count`/
+  `openCursor` (valeurs structured-clonées) ; `keyPath`,
+  `autoIncrement`, index `unique`/`multiEntry` + `IDBKeyRange` ;
+  curseurs `continue`/`advance`/`update`/`delete` (request
+  re-tirée — spec). `caches` : `CacheStorage` `open`/`has`/
+  `delete`/`keys`/`match` + `Cache` `put`/`match`/`matchAll`/
+  `keys`/`delete`/`add`/`addAll` (via transport fetch — rejet
+  honnête sans). Fix promesse au passage : adoption pendante
+  résolvait `undefined` (résolveurs de la mauvaise promesse).
+  Régressions `c72_*` (8 tests).
 - [ ] **JS-C73. `WebSocket` stub fonctionnel** — handshake
   refusé honnêtement (pas de sockets hors `explorer-net`),
   mais la détection `typeof WebSocket` doit exister pour que
