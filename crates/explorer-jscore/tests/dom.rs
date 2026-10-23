@@ -3256,3 +3256,105 @@ fn c69_ctor_validation() {
         "TypeError|TypeError|TypeError|TypeError|TypeError|object|[object ResizeObserver]"
     );
 }
+
+// ------------------------------------------------------------------
+// JS-C74 — Notification / Selection / reportError / scrollIntoView
+// ------------------------------------------------------------------
+
+fn dev(e: &mut Engine, src: &str) -> String {
+    match e.eval(src) {
+        Ok(v) => e.describe(v),
+        Err(err) => panic!("{src} -> {err}"),
+    }
+}
+
+#[test]
+fn c74_notification_stub() {
+    let mut e = engine_with(PAGE);
+    // Stub honnête : permission 'default', requestPermission
+    // → 'denied', instance inerte avec props spec.
+    assert_eq!(
+        dev(
+            &mut e,
+            "var s = [];             s.push(typeof Notification);             s.push(Notification.permission);             s.push(Notification.maxActions);             var n = new Notification('Hi', {body: 'B', tag: 't1', silent: true});             s.push(n instanceof Notification);             s.push(n.title + '|' + n.body + '|' + n.tag + '|' + n.silent);             s.push(n.onclick === null);             n.close();             s.join(',')"
+        ),
+        "function,default,0,true,Hi|B|t1|true,true"
+    );
+    // requestPermission → promesse 'denied' + callback legacy.
+    dev(
+        &mut e,
+        "var p = '';         Notification.requestPermission(function (r) { p = 'cb:' + r; }).then(function (r) { p += '|th:' + r; });",
+    );
+    assert_eq!(dev(&mut e, "p"), "cb:denied|th:denied");
+}
+
+#[test]
+fn c74_get_selection() {
+    let mut e = engine_with(PAGE);
+    // Selection réelle : singleton (`s1 === s2`),
+    // selectAllChildren, toString = textContent, ranges.
+    assert_eq!(
+        dev(
+            &mut e,
+            "var s1 = window.getSelection();             var s2 = document.getSelection();             var out = [];             out.push(s1 === s2);             out.push(s1.rangeCount + '/' + s1.isCollapsed + '/' + s1.type);             s1.selectAllChildren(document.getElementById('list'));             out.push(s1.rangeCount + '/' + s1.isCollapsed + '/' + s1.type);             out.push(s1.toString());             var r = s1.getRangeAt(0);             out.push(r.startContainer.id + '/' + r.startOffset + '/' + r.endOffset + '/' + r.collapsed);             out.push(s1.anchorNode === r.startContainer);             out.join(',')"
+        ),
+        "true,0/true/None,1/false/Range,ab,list/0/2/false,true"
+    );
+    // collapse → Caret ; removeAllRanges → None.
+    assert_eq!(
+        dev(
+            &mut e,
+            "s1.collapse(document.getElementById('main'), 0);             s1.type + '/' + s1.isCollapsed"
+        ),
+        "Caret/true"
+    );
+    assert_eq!(
+        dev(
+            &mut e,
+            "s1.removeAllRanges(); s1.rangeCount + '/' + s1.type + '/' + s1.toString()"
+        ),
+        "0/None/"
+    );
+    // containsNode + getRangeAt hors borne → TypeError.
+    assert_eq!(
+        dev(
+            &mut e,
+            "var s3 = window.getSelection();             s3.selectAllChildren(document.getElementById('main'));             var hits = [];             hits.push(s3.containsNode(document.querySelector('#main p'), false));             hits.push(s3.containsNode(document.getElementById('inp'), false));             try { s3.getRangeAt(5); } catch (err) { hits.push('rng:' + (err instanceof TypeError)); }             hits.join(',')"
+        ),
+        "true,false,rng:true"
+    );
+}
+
+#[test]
+fn c74_report_error() {
+    let mut e = engine_with(PAGE);
+    // reportError → window.onerror (signature legacy) ; un
+    // retour truthy = géré (pas de rapport console).
+    dev(
+        &mut e,
+        "var log = [];         window.onerror = function (msg, src, line, col, err) {           log.push('on:' + msg + '|' + (err && err.message));           return true;         };         reportError(new Error('boom'));         window.onerror = null;",
+    );
+    assert_eq!(dev(&mut e, "log.join(',')"), "on:Error: boom|boom");
+    // Non-annulé par onerror → listener error reçoit
+    // l'ErrorEvent ; preventDefault = géré.
+    dev(
+        &mut e,
+        "var log2 = [];         window.addEventListener('error', function (ev) {           log2.push('l:' + ev.type + '|' + ev.message);           ev.preventDefault();         });         reportError('plain string');",
+    );
+    assert_eq!(dev(&mut e, "log2.join(',')"), "l:error|plain string");
+}
+
+#[test]
+fn c74_scroll_into_view() {
+    let mut e = engine_with(PAGE);
+    // Méthode no-op honnête — lisible (feature-detect sur le
+    // prototype), appelable sans exception, TypeError sur
+    // receveur non-Element.
+    assert_eq!(
+        dev(
+            &mut e,
+            "var out = [];             out.push(typeof Element.prototype.scrollIntoView);             var el = document.getElementById('main');             out.push(el.scrollIntoView() === undefined);             out.push(el.scrollIntoViewIfNeeded() === undefined);             el.scrollIntoView({behavior: 'smooth', block: 'center'});             try { Element.prototype.scrollIntoView.call({}); } catch (err) { out.push('bad:' + (err instanceof TypeError)); }             out.join(',')"
+        ),
+        "function,true,true,bad:true"
+    );
+}

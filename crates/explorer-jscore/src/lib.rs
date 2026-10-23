@@ -54,6 +54,7 @@ mod interp;
 mod intl;
 mod json;
 mod lexer;
+mod misc_apis;
 mod module;
 mod mutation;
 mod observers;

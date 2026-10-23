@@ -3109,10 +3109,19 @@ ci-dessous (fréquence observée sur le corpus réel).
   `removeEventListener`/`dispatchEvent`, constantes ctor +
   proto, `protocols` validé (tokens/doublons →
   `SyntaxError`). Régressions `c73_*` (5 tests).
-- [ ] **JS-C74. `Notification`/`BroadcastChannel`/
+- [x] **JS-C74. `Notification`/`BroadcastChannel`/
   `navigator.sendBeacon`/`getSelection`/`reportError`/
-  `scrollIntoView`** — queue d'APIs ponctuelles, ordre à
-  re-décider au premier trigger mesuré par site.
+  `scrollIntoView`** — `src/misc_apis.rs` : BroadcastChannel
+  **réel** intra-contexte (clone par destinataire, jamais
+  soi-même, `close` → `InvalidStateError`) ; `Notification`
+  stub honnête (`permission` `'default'`,
+  `requestPermission` → `'denied'`, instances inertes) ;
+  `getSelection` singleton réel (ranges, `selectAllChildren`,
+  `toString` = `textContent`, `getRangeAt`) ; `reportError`
+  réel (`window.onerror` legacy + `ErrorEvent` propagé +
+  `console` embedder `Uncaught:`) ; `scrollIntoView` no-op
+  honnête sur `Element.prototype` ; `sendBeacon` existait
+  déjà. Régressions `c74_*` (6 tests).
 - [ ] **JS-C75. `attachShadow`/Shadow DOM minimal** — le
   trou le plus structurel (scoped CSS + slots) : old.reddit
   et MDN l'utilisent, écarté « hors portée » à ce jour.

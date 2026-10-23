@@ -907,6 +907,10 @@ impl Engine {
                     ("oMatchesSelector", element_matches),
                     ("msMatchesSelector", element_matches),
                     ("closest", element_closest),
+                    // `scrollIntoView` (JS-C74) — no-op honnête,
+                    // même motif de lisibilité que `matches`.
+                    ("scrollIntoView", element_scroll_into_view),
+                    ("scrollIntoViewIfNeeded", element_scroll_into_view),
                 ] {
                     let m = self.native_fn(k, f2);
                     self.set_own(pid, k, m, true);
@@ -1039,6 +1043,10 @@ impl Engine {
         // `WebSocket` (JS-C73) — stub honnête (handshake
         // refusé en async) pour les feature-detects.
         crate::websocket::install_websocket(self);
+        // `Notification`/`BroadcastChannel`/`reportError`/
+        // `getSelection` (JS-C74) — dom_ctx posé → Selection
+        // disponible ici.
+        crate::misc_apis::install_misc(self);
         let screen = self.new_object();
         let (w, h) = self.hooks.viewport;
         for (k, v) in [
@@ -1686,6 +1694,12 @@ impl Host for DocumentHost {
             }
             // Fenêtre unique affichée → focus constant.
             "hasFocus" => Ok(Some(Value::Bool(true))),
+            // `document.getSelection()` — même `Selection`
+            // partagée que `window.getSelection` (JS-C74).
+            "getSelection" => {
+                let v = crate::misc_apis::get_selection(e, Value::Undefined, &[])?;
+                Ok(Some(v))
+            }
             "getElementById" => {
                 let id = e.to_js_string(arg(args, 0))?;
                 let found = self.dom.borrow().by_id(&id);
@@ -2692,6 +2706,15 @@ impl Host for NodeHost {
             "closest" => {
                 return Ok(Some(e.native_fn("closest", element_closest)));
             }
+            // `scrollIntoView`/`scrollIntoViewIfNeeded`
+            // (JS-C74) — pas de scroll réel dans le miroir :
+            // méthode no-op honnête (les scripts l'appellent
+            // librement ; jamais d'exception).
+            "scrollIntoView" | "scrollIntoViewIfNeeded" => {
+                return Ok(Some(
+                    e.native_fn("scrollIntoView", element_scroll_into_view),
+                ));
+            }
             _ => {}
         }
         // Attribute-mapped props.
@@ -3250,6 +3273,27 @@ fn element_receiver(e: &mut Engine, v: Value) -> Option<(NodeId, DomRef, NodeCac
 /// Resolve a `dispatchEvent` argument to event state: an `Event`
 /// host object (its target is reset to the dispatch node) or a
 /// plain `{ type: 'x', bubbles: bool }` literal.
+impl EventState {
+    /// `defaultPrevented` après dispatch — lu par
+    /// `reportError` (JS-C74 : annulé = erreur « gérée »).
+    pub(crate) fn default_prevented(&self) -> bool {
+        self.prevented.get()
+    }
+}
+
+/// `event_state_of` exposé à `misc_apis` (JS-C74 —
+/// `reportError` construit son `ErrorEvent` hors dispatch
+/// script-classique).
+pub(crate) fn misc_event_state(
+    e: &mut Engine,
+    node: NodeId,
+    dom: &DomRef,
+    cache: &NodeCache,
+    v: Value,
+) -> JsResult<Option<Rc<EventState>>> {
+    event_state_of(e, node, dom, cache, v)
+}
+
 fn event_state_of(
     e: &mut Engine,
     node: NodeId,
@@ -3285,9 +3329,32 @@ fn event_state_of(
     // Props portées par l'objet literal (`key`, `code`…) —
     // recopiées sur le state pour que `e.key` resolve au
     // dispatch (`el.dispatchEvent({type:'keydown',key:'a'})`).
+    // `message`/`error`/`filename`/`lineno`/`colno` : ErrorEvent
+    // (`reportError` JS-C74) ; `data`/`origin`/`source`/
+    // `ports` : MessageEvent.
     let props: Vec<(String, Value)> = [
-        "key", "code", "keyCode", "which", "charCode", "ctrlKey", "shiftKey", "altKey", "metaKey",
+        "key",
+        "code",
+        "keyCode",
+        "which",
+        "charCode",
+        "ctrlKey",
+        "shiftKey",
+        "altKey",
+        "metaKey",
         "detail",
+        "message",
+        "error",
+        "filename",
+        "lineno",
+        "colno",
+        "data",
+        "origin",
+        "source",
+        "ports",
+        "lastEventId",
+        "reason",
+        "wasClean",
     ]
     .into_iter()
     .filter_map(|k| e.get_prop(id, k).map(|v| (k.to_string(), v)))
@@ -4819,6 +4886,17 @@ fn element_closest(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
         Some(n) => node_value(e, &dom, &cache, n),
         None => Value::Null,
     })
+}
+
+/// `el.scrollIntoView(arg?)` — no-op honnête (JS-C74) : le
+/// miroir n'a pas de scrolling réel, mais la méthode existe
+/// (feature-detect + scripts l'appelant librement — jamais
+/// d'exception ; `TypeError` sur receveur non-Element, spec).
+fn element_scroll_into_view(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
+    if element_receiver(e, this).is_none() {
+        return Err(e.type_error("scrollIntoView: receiver is not an Element"));
+    }
+    Ok(Value::Undefined)
 }
 
 /// `ev.initEvent(type, bubbles, cancelable)` — héritage DOM Level 2.

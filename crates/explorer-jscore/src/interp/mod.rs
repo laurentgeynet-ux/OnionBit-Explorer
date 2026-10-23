@@ -279,6 +279,10 @@ pub struct Engine {
     /// `CONNECTING` dont le refus de handshake est livré au
     /// checkpoint microtask (`error` + `close` 1006).
     pub(crate) ws: crate::websocket::WsState,
+    /// `Notification`/`BroadcastChannel`/`Selection`/
+    /// `reportError` bookkeeping (JS-C74) — protos, registre
+    /// de canaux et messages livrés au checkpoint microtask.
+    pub(crate) misc: crate::misc_apis::MiscState,
     /// Élément en cours de construction par upgrade
     /// `customElements` (JS-C68) — le `super()` d'une classe
     /// `extends HTMLElement` le récupère comme `this` (rôle du
@@ -644,6 +648,7 @@ impl Engine {
             streams: crate::streams::StreamState::default(),
             idb: crate::idb::IdbState::default(),
             ws: crate::websocket::WsState::default(),
+            misc: crate::misc_apis::MiscState::default(),
             ce_upgrade_slot: None,
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,
@@ -855,6 +860,7 @@ impl Engine {
         self.streams.root_ids(&mut ids);
         self.idb.root_ids(&mut ids);
         self.ws.root_ids(&mut ids);
+        self.misc.root_ids(&mut ids);
         if let Some((dom, cache)) = &self.dom_ctx {
             for &id in cache.borrow().values() {
                 ids.push(id);

@@ -670,6 +670,69 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   racinés. Régressions `c73_*`
   (5 tests).
 
+- **JS-C74 — `Notification`,
+  `BroadcastChannel`,
+  `getSelection`, `reportError`,
+  `scrollIntoView`** (`explorer-jscore`
+  — queue d'APIs fenêtre,
+  `src/misc_apis.rs`).
+  `BroadcastChannel` **réel**
+  intra-contexte : `postMessage`
+  structured-clone par
+  destinataire (jamais soi-même,
+  spec), `message` livré au
+  checkpoint microtask, `close`
+  désinscrit, `InvalidStateError`
+  sur canal fermé, `name`,
+  `onmessage` +
+  `addEventListener`/
+  `removeEventListener`/
+  `dispatchEvent`. `Notification`
+  stub honnête : `permission`
+  `'default'` (pas d'UI de grant),
+  `requestPermission` → promesse
+  `'denied'` (+ callback legacy),
+  `maxActions` 0, ctor → objet
+  inerte avec props spec (`title`,
+  `body`, `tag`, `silent`…),
+  jamais d'events. `getSelection`
+  (window + document) → **le même
+  objet** `Selection` (singleton
+  spec) : `selectAllChildren`,
+  `collapse`/`collapseTo*`/
+  `extend`, `addRange`,
+  `setBaseAndExtent`, `toString`
+  = `textContent` des ranges,
+  `getRangeAt` → Range-objet
+  (`startContainer`, `collapsed`…),
+  `removeAllRanges`/`empty`,
+  `containsNode`, `rangeCount`,
+  `type` (`None`/`Caret`/`Range`),
+  `deleteFromDocument` (mono-
+  conteneur). `reportError` réel :
+  `window.onerror` (signature
+  legacy `(msg, src, line, col,
+  err)`), `ErrorEvent` `error`
+  propagé aux listeners racine —
+  annulé → `console` embedder
+  `Uncaught: …`. `scrollIntoView`/
+  `scrollIntoViewIfNeeded` sur
+  `Element.prototype` : no-op
+  honnête, lisible en feature-
+  detect, `TypeError` sur
+  receveur non-Element. `sendBeacon`
+  existait déjà (POST fire-and-
+  forget sur transport, `false`
+  sans connecteur). `event_state_of`
+  étendu : props `ErrorEvent`/
+  `MessageEvent`/`CloseEvent`
+  recopiées au dispatch.
+  GC : protos, canaux ouverts
+  (entangled tant que non
+  `close`), messages en file et
+  wrapper `Selection` racinés.
+  Régressions `c74_*` (6 tests).
+
 ### Fixed
 
 - **JS-C72 — adoption de promesse

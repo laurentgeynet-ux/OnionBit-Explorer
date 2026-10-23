@@ -521,6 +521,10 @@ impl Engine {
         // `WebSocket` (JS-C73) — stub honnête : handshake
         // refusé en async, arme les fallbacks long-polling.
         crate::websocket::install_websocket(self);
+        // `Notification`/`BroadcastChannel`/`reportError`
+        // (JS-C74) — APIs fenêtre non-DOM ; `getSelection`
+        // ajouté par `install_dom` (nœuds requis).
+        crate::misc_apis::install_misc(self);
     }
 
     /// `ctor.prototype = proto` + `proto.constructor = ctor` —

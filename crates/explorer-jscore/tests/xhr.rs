@@ -1443,3 +1443,39 @@ fn c73_websocket_event_target() {
     );
     assert_eq!(describe(&mut e, "log.join(',')"), "err!,a");
 }
+
+// ------------------------------------------------------------------
+// JS-C74 — BroadcastChannel (contexte sans DOM)
+// ------------------------------------------------------------------
+
+#[test]
+fn c74_broadcast_channel() {
+    let (mut e, _t) = engine();
+    // Réel intra-contexte : post → les autres instances du
+    // canal reçoivent `message` au checkpoint ; pas soi-même.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var log = [];             var a = new BroadcastChannel('chan');             var b = new BroadcastChannel('chan');             var c = new BroadcastChannel('autre');             a.onmessage = function (ev) { log.push('a:' + ev.data.n); };             b.addEventListener('message', function (ev) { log.push('b:' + ev.data.n); });             c.onmessage = function () { log.push('c:!'); };             b.postMessage({n: 42});             log.push(b.name + '|' + (a instanceof BroadcastChannel));             'armed'"
+        ),
+        "armed"
+    );
+    // a reçoit (pas b — jamais soi-même), c non (autre canal).
+    assert_eq!(describe(&mut e, "log.join(',')"), "chan|true,a:42");
+}
+
+#[test]
+fn c74_broadcast_close_and_clone() {
+    let (mut e, _t) = engine();
+    // close() → InvalidStateError + désinscription ; payload
+    // cloné par destinataire (le receveur mute sans effet).
+    describe(
+        &mut e,
+        "var log = [];         var a = new BroadcastChannel('x');         var b = new BroadcastChannel('x');         b.onmessage = function (ev) { ev.data.mut = true; log.push('got'); };         a.postMessage({mut: false});         var sent = a.postMessage ? 'ok' : 'no';         a.close();         try { a.postMessage(1); } catch (err) { log.push('closed:' + err.name); }",
+    );
+    // `closed:` posé dans l'eval, `got` livré au checkpoint.
+    assert_eq!(
+        describe(&mut e, "log.join(',')"),
+        "closed:InvalidStateError,got"
+    );
+}
