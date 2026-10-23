@@ -63,6 +63,11 @@ struct DaemonConfig {
     /// `0` = illimité explicite. Outillage diagnostic de vol,
     /// pas une promesse produit.
     js_mem_mib: Option<usize>,
+    /// Budget d'ops JS par évaluation (`EXPLORER_JS_OPS`,
+    /// étape 124) — `None` = défaut `SessionConfig` (5 M) ;
+    /// `0` = illimité explicite (mappé `u64::MAX` — un `while(1)`
+    /// gèle alors le contexte : réglage diagnostic uniquement).
+    js_ops: Option<u64>,
 }
 
 impl DaemonConfig {
@@ -101,6 +106,9 @@ impl DaemonConfig {
             js_mem_mib: std::env::var("EXPLORER_JS_MEM_MIB")
                 .ok()
                 .and_then(|v| v.parse::<usize>().ok()),
+            js_ops: std::env::var("EXPLORER_JS_OPS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok()),
         }
     }
 }
@@ -119,6 +127,13 @@ fn session_config(cfg: &DaemonConfig) -> explorer_core::SessionConfig {
     if let Some(mib) = cfg.js_mem_mib {
         tracing::info!("EXPLORER_JS_MEM_MIB={mib} — borne heap JS par contexte");
         sc.js_mem_limit_mib = mib;
+    }
+    if let Some(ops) = cfg.js_ops {
+        // `0` = illimité explicite (étape 124) — `op_limit=0`
+        // tuerait le premier `tick` ; `u64::MAX` en tient lieu.
+        let v = if ops == 0 { u64::MAX } else { ops };
+        tracing::info!("EXPLORER_JS_OPS={ops} — budget d'ops JS par évaluation");
+        sc.js_ops = v;
     }
     sc
 }
@@ -161,7 +176,8 @@ fn print_usage() {
          \x20            EXPLORER_MAX_BODY, EXPLORER_API_KEY, EXPLORER_DOWNLOAD_DIR,\n\
          \x20            EXPLORER_DOH, EXPLORER_DOH_TIMEOUT_MS,\n\
          \x20            EXPLORER_COLOR_SCHEME (dark|light),\n\
-         \x20            EXPLORER_JS_MEM_MIB (borne heap JS ; 0=illimité)"
+         \x20            EXPLORER_JS_MEM_MIB (borne heap JS ; 0=illimité),\n\
+         \x20            EXPLORER_JS_OPS (budget ops JS ; 0=illimité)"
     );
 }
 

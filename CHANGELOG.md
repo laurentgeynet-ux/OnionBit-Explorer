@@ -305,6 +305,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `js_heap_limit_zero_disarms`
   (`0` → titre `ok`) — couture
   bidirectionnelle.
+- **Étape 124 — `EXPLORER_JS_OPS`
+  (budget d'ops JS exposé)**
+  (`explorer-daemon`,
+  `explorer-cli` — suite du vol
+  `ef087e1` : à 2 Gio de heap,
+  le PoW `SG_SS` de Google meurt
+  au budget ops 5 M au lieu du
+  heap — le réglage 123 a
+  déplacé le mur). Budget ops
+  par évaluation en unités
+  absolues ; `0` = illimité
+  explicite mappé `u64::MAX`
+  (`op_limit=0` tuerait le
+  premier `tick` — sémantique
+  divergente de la borne
+  mémoire, mapping local à
+  l'env). Daemon `session_config`
+  + CLI `session_from_env`,
+  valeur tracée (`info!`/
+  `eprintln`). La couture
+  `js_ops` → `set_budget` →
+  `set_op_limit` existait ;
+  l'ajout est l'exposition env
+  seule — même cave
+  « outillage diagnostic »
+  qu'étape 123.
 - **JS-C70 —
   `Blob`/`File`/`FileReader` +
   `URL.createObjectURL`**

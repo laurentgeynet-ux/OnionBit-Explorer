@@ -86,8 +86,10 @@ fn default_fonts_dir() -> std::path::PathBuf {
 }
 
 /// Session de vol CLI — `SessionConfig` par défaut surchargée
-/// de `EXPLORER_JS_MEM_MIB` (étape 123 : borne heap JS en Mio,
-/// `0` = illimité — outillage diagnostic, tracée à l'usage).
+/// de `EXPLORER_JS_MEM_MIB` (étape 123 : borne heap JS en Mio)
+/// et `EXPLORER_JS_OPS` (étape 124 : budget d'ops par éval) —
+/// `0` = illimité explicite ; outillage diagnostic, tracé à
+/// l'usage.
 fn session_from_env(fonts: explorer_render::DirFontSource) -> explorer_core::Session {
     let mut cfg = explorer_core::SessionConfig::default();
     if let Some(mib) = std::env::var("EXPLORER_JS_MEM_MIB")
@@ -96,6 +98,13 @@ fn session_from_env(fonts: explorer_render::DirFontSource) -> explorer_core::Ses
     {
         eprintln!("[EXPLORER_JS_MEM_MIB={mib} — borne heap JS par contexte]");
         cfg.js_mem_limit_mib = mib;
+    }
+    if let Some(ops) = std::env::var("EXPLORER_JS_OPS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        eprintln!("[EXPLORER_JS_OPS={ops} — budget d'ops JS par évaluation]");
+        cfg.js_ops = if ops == 0 { u64::MAX } else { ops };
     }
     explorer_core::Session::with_config(client_stack(), std::sync::Arc::new(fonts), cfg)
 }

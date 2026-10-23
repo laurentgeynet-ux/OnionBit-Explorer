@@ -2600,6 +2600,33 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `js_heap_limit_zero_disarms`
   (`0` → titre `ok`) — couture
   bidirectionnelle prouvée.
+- [x] **Étape 124. Budget d'ops JS
+  exposé — `EXPLORER_JS_OPS`**
+  (suite de la mesure de vol
+  `ef087e1` : borne 2048 Mio →
+  le PoW `SG_SS` meurt au
+  **budget ops** `5 M` au lieu
+  du heap — le réglage 123 a
+  déplacé le mur, pas franchi
+  l'espace). `EXPLORER_JS_OPS`
+  (ops absolues) lu par daemon
+  (`session_config`, tracé
+  `info!`) et CLI
+  (`session_from_env`) ;
+  `0` = illimité explicite mappé
+  `u64::MAX` (`op_limit=0`
+  tuerait le premier `tick` — la
+  sémantique diverge de la borne
+  mémoire, le mapping est local
+  à l'env). La couture
+  `js_ops` → `set_budget` →
+  `set_op_limit` existait
+  (étape ~50) — l'ajout est
+  purement l'exposition env ;
+  même cave « diagnostic, pas
+  produit » : un `while(1)`
+  gèle le contexte à 0, réglage
+  de vol uniquement.
 
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
