@@ -244,6 +244,53 @@ pub(crate) fn download_meta(headers: &[(String, String)]) -> Option<DownloadMeta
     None
 }
 
+/// Méta de téléchargement de la réponse : en-têtes
+/// d'abord (étape 70), puis `<a download>` forcé
+/// (CAP-148 — le hint est posé au dispatch lien, la garde
+/// same-origin de la spec y est vérifiée).
+fn response_download_meta(headers: &[(String, String)], req: &Request) -> Option<DownloadMeta> {
+    download_meta(headers).or_else(|| {
+        req.download_hint
+            .as_deref()
+            .map(|attr| forced_download_meta(headers, attr))
+    })
+}
+
+/// Meta d'un téléchargement **forcé** par `<a download>`
+/// (CAP-148) — la voie s'impose même quand le type est
+/// affichable (HTML « downloading resources »). Priorité
+/// du nom : `filename=` du `Content-Disposition`, puis la
+/// valeur non vide de l'attribut, puis (en aval) le
+/// segment d'URL — même ordre que la spec.
+fn forced_download_meta(headers: &[(String, String)], attr: &str) -> DownloadMeta {
+    let get = |name: &str| {
+        headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    };
+    let total = get("content-length").and_then(|v| v.trim().parse::<u64>().ok());
+    let disposition = get("content-disposition").unwrap_or_default();
+    let mime = get("content-type")
+        .unwrap_or_default()
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
+    let attr = attr.trim();
+    DownloadMeta {
+        filename_hint: disposition_filename(disposition)
+            .or_else(|| (!attr.is_empty()).then(|| attr.to_string())),
+        mime: if mime.is_empty() {
+            "application/octet-stream".to_string()
+        } else {
+            mime
+        },
+        total,
+    }
+}
+
 /// `filename=` d'un `Content-Disposition` — guillemets et
 /// espaces tolérés ; `filename*=` (RFC 5987) non décodé
 /// en v1 (déviation documentée, le repli est le segment
@@ -347,9 +394,10 @@ impl NavJob {
             .iter()
             .filter(|(n, _)| n.eq_ignore_ascii_case("refresh"))
             .find_map(|(_, v)| parse_refresh_content(v));
-        // Corps non affichable (étape 70) : bufferisé avec
-        // borne et progression — jamais décodé en mojibake.
-        if let Some(meta) = download_meta(&resp.headers) {
+        // Corps non affichable (étape 70) ou `<a download>`
+        // (CAP-148) : bufferisé avec borne et progression —
+        // jamais décodé en mojibake.
+        if let Some(meta) = response_download_meta(&resp.headers, &self.req) {
             return self.buffer_download(resp, resolved, meta).await;
         }
         let mut tb = TreeBuilder::new();

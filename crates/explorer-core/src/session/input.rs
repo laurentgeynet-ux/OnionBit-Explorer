@@ -319,7 +319,7 @@ impl Session {
         match self.link_node_at(tab, x, y) {
             Some((anchor, url)) if !prevented => {
                 let u = Url::parse(&url).map_err(|e| CoreError::Url(e.to_string()))?;
-                let (new_ctx, no_referer, policy) = {
+                let (new_ctx, no_referer, policy, download) = {
                     let entry = self.tabs.get(&tab);
                     let dom = entry.and_then(|e| e.dom.as_ref());
                     (
@@ -332,6 +332,22 @@ impl Session {
                         }),
                         dom.is_some_and(|d| rel_no_referrer(d, anchor)),
                         dom.and_then(|d| element_referrer_policy(d, anchor)),
+                        // `<a download>` (CAP-148) : honoré
+                        // seulement si la cible est
+                        // same-origin avec le document —
+                        // cross-origin = attribut ignoré
+                        // (navigation normale, spec HTML
+                        // « downloading resources »).
+                        match dom.and_then(|d| d.attribute(anchor, "download").ok().flatten()) {
+                            Some(v)
+                                if entry
+                                    .and_then(|e| e.url.as_ref())
+                                    .is_some_and(|p| p.origin() == u.origin()) =>
+                            {
+                                Some(v)
+                            }
+                            _ => None,
+                        },
                     )
                 };
                 let mut req = Request::get(u);
@@ -347,10 +363,14 @@ impl Session {
                 req.referrer_policy = policy;
                 // `target=_blank`/nommé → nouveau contexte
                 // top-level (étape 131) ; `_self`/`_parent`/
-                // `_top`/absent → onglet courant.
-                let act = if new_ctx {
+                // `_top`/absent → onglet courant. `download`
+                // prime `target` (CAP-148 : la spec tranche
+                // avant la cible — pas d'onglet pour un
+                // fichier).
+                let act = if new_ctx && download.is_none() {
                     DrainAct::NewTab(Box::new(req))
                 } else {
+                    req.download_hint = download;
                     DrainAct::Req(Box::new(req), true)
                 };
                 self.enqueue_nav_act(tab, act);

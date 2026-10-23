@@ -246,6 +246,15 @@ pub struct Request {
     /// ou l'élément (`referrerpolicy=`) à l'émission ;
     /// `no_referer` reste prioritaire.
     pub referrer_policy: Option<ReferrerPolicy>,
+    /// Attribut `<a download>` (CAP-148) — `Some(valeur)`
+    /// = la navigation devient un téléchargement forcé
+    /// même pour un type affichable ; la valeur est la
+    /// suggestion de nom (`""` = aucune — le repli reste
+    /// `filename=` du `Content-Disposition` puis le segment
+    /// d'URL). Posée par le dispatch lien uniquement
+    /// (cible same-origin par spec, jamais par les
+    /// sous-ressources) ; les transports l'ignorent.
+    pub download_hint: Option<String>,
 }
 
 /// Qui a initié la requête — « site pour cookies » de la
@@ -284,6 +293,7 @@ impl Request {
             cors: None,
             no_referer: false,
             referrer_policy: None,
+            download_hint: None,
         }
     }
 }

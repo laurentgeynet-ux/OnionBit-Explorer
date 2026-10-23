@@ -2916,6 +2916,40 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-148. `<a download>`** —
+  téléchargement forcé *(numéro
+  officiel attribué à
+  l'intégration)* : attribut
+  `download` sur `<a>` — clic
+  dispatché → `Request::
+  download_hint` (additif,
+  valeur = suggestion de nom,
+  `""` = aucune) → `NavJob`
+  force la voie `PendingDownload`
+  même pour un type affichable
+  (`text/html` téléchargé, pas
+  peint). Garde spec : honoré
+  seulement **same-origin** avec
+  le document — cross-origin =
+  attribut ignoré (navigation
+  normale). `download` prime
+  `target` (pas d'onglet pour
+  un fichier). Priorité du nom
+  (spec « downloading
+  resources ») : `filename=` du
+  `Content-Disposition` >
+  attribut > segment d'URL >
+  `download` — sanitisé comme
+  toujours. Borne : `<a
+  download>` depuis un script
+  (`a.click()`) suit le drain
+  `ScriptNav::To` qui ne porte
+  pas le hint — piste JS quand
+  elle implémentera
+  `HTMLAnchorElement::click`.
+  Tests : 4 session
+  (`a_download_*`).
+
 - [x] **CAP-147. `Clear-Site-Data`
   — cookies** *(numéro officiel
   attribué à l'intégration)* :

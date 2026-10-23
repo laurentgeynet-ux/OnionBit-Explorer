@@ -583,6 +583,7 @@ pub(crate) fn form_request(
             // (étape 132) ; `nav_begin` applique sinon la
             // politique du document source.
             referrer_policy: None,
+            download_hint: None,
         });
     }
     let qs = form_url_encode(entries);

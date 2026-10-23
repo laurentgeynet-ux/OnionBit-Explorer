@@ -9090,3 +9090,97 @@ async fn no_clear_site_data_keeps_cookies() {
     s.navigate(id, "http://h.test/").await.unwrap();
     assert_eq!(s.cookie_jar().header_for(&url, true), "sid=abc");
 }
+
+// --- CAP-148 : `<a download>` -------------------------------------------
+
+/// `download` nu force le téléchargement d'un type
+/// affichable (`text/html`) — nom de repli = segment d'URL,
+/// page source conservée.
+#[tokio::test]
+async fn a_download_attr_forces_download() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><a href=\"/doc.html\" download>dl</a></body></html>",
+    );
+    t.route("/doc.html", 200, PAGE);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    let pending = s.pending_downloads(id);
+    assert_eq!(pending.len(), 1, "téléchargement proposé");
+    assert_eq!(pending[0].filename, "doc.html");
+    // Sans `Content-Type` déclaré, le mime replie sur le
+    // neutre `octet-stream` (téléchargement, pas affichage).
+    assert_eq!(pending[0].mime, "application/octet-stream");
+    // Pas de commit : la page source reste affichée.
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+}
+
+/// `download="nom"` suggère le nom du fichier.
+#[tokio::test]
+async fn a_download_value_suggests_filename() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><a href=\"/page2\" download=\"rapport.txt\">dl</a></body></html>",
+    );
+    t.route("/page2", 200, PAGE);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(s.pending_downloads(id)[0].filename, "rapport.txt");
+}
+
+/// `filename=` du `Content-Disposition` prime la valeur de
+/// l'attribut (spec HTML « downloading resources »).
+#[tokio::test]
+async fn a_download_disposition_filename_wins() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><a href=\"/page2\" download=\"attr.html\">dl</a></body></html>",
+    );
+    t.route_headers(
+        "/page2",
+        200,
+        PAGE,
+        &[("content-disposition", "inline; filename=\"cd.html\"")],
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(s.pending_downloads(id)[0].filename, "cd.html");
+}
+
+/// Cross-origin : l'attribut est ignoré — navigation
+/// normale, aucun téléchargement (spec : `download` n'a
+/// d'effet que same-origin).
+#[tokio::test]
+async fn a_download_cross_origin_ignored() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><a href=\"http://o.test/x\" download>dl</a></body></html>",
+    );
+    t.route("/x", 200, PAGE_T);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert!(s.pending_downloads(id).is_empty());
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://o.test/x"));
+}

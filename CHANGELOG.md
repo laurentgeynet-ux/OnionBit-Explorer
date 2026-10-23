@@ -1115,6 +1115,37 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-148 — `<a download>`**
+  (`explorer-net` +
+  `explorer-core` — cap « web
+  réel sécurisé » ; numéro
+  officiel attribué à
+  l'intégration, compteur
+  gelé) : attribut `download`
+  sur `<a>` — champ
+  `Request::download_hint`
+  (additif, valeur = suggestion
+  de nom, `""` = aucune) posé
+  au dispatch clic ; `NavJob`
+  force la voie
+  `PendingDownload` même pour
+  un type affichable
+  (`response_download_meta` :
+  en-têtes d'abord, hint
+  ensuite). Gardes spec : honoré
+  seulement **same-origin** avec
+  le document (cross-origin =
+  attribut ignoré, navigation
+  normale) ; `download` prime
+  `target` (pas d'onglet pour
+  un fichier). Nom : `filename=`
+  `Content-Disposition` >
+  attribut > segment d'URL >
+  `download`. Borne : `a.click()`
+  scripté ne porte pas le hint
+  (piste JS). Tests : 4 session
+  (`a_download_*`).
+
 - **CAP-147 — `Clear-Site-Data`
   cookies** (`explorer-net` +
   `explorer-core` — cap « web

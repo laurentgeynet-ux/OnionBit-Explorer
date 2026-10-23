@@ -1141,6 +1141,7 @@ impl Session {
             // seulement).
             no_referer: false,
             referrer_policy: policy,
+            download_hint: None,
         };
         if cross {
             // Enforcement CORS (étape 126) : les en-têtes

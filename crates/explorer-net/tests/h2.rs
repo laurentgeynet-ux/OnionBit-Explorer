@@ -70,6 +70,7 @@ fn req(url: &str) -> Request {
         cors: None,
         no_referer: false,
         referrer_policy: None,
+        download_hint: None,
     }
 }
 

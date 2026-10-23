@@ -786,6 +786,7 @@ impl CorsTransport {
             // policy sur l'`OPTIONS`).
             no_referer: req.no_referer,
             referrer_policy: req.referrer_policy,
+            download_hint: None,
         };
         if !cors.unsafe_headers.is_empty() {
             p.headers.push((
