@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -1111,10 +1112,12 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                           }
                       }
                     },
-                    onPointerHover: (ev) => widget.ctrl.hover(
-                      ev.localPosition.dx / cssPerLogical,
-                      ev.localPosition.dy / cssPerLogical,
-                    ),
+                    onPointerHover: (ev) {
+                      widget.ctrl.hover(
+                        ev.localPosition.dx / cssPerLogical,
+                        ev.localPosition.dy / cssPerLogical,
+                      );
+                    },
                     child: GestureDetector(
                       onTapUp: (d) => widget.ctrl.click(
                         d.localPosition.dx / cssPerLogical,
@@ -1178,16 +1181,30 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                                 // `ui.Image` décodée côté
                                 // contrôleur (REST : codec PNG ;
                                 // FFI : pixels bruts ADR-0018) —
-                                // `RawImage` direct.
+                                // `RawImage` direct. `OverflowBox`
+                                // requis : sous contraintes
+                                // bornées, RenderImage rétrécit
+                                // sa boîte au ratio de l'image
+                                // (doc_haute > fenêtre → tranche
+                                // centrale peinte — défaut
+                                // « colonne étroite » terrain
+                                // 23/10) ; l'image doit garder
+                                // sa taille naturelle et
+                                // déborder, le Container clippe.
                                 child: Transform.scale(
                                   scale: fitW,
                                   alignment: Alignment.topLeft,
-                                  child: RawImage(
-                                    image: raw,
-                                    fit: BoxFit.none,
-                                    // 1 px image = 1 px physique :
-                                    // taille logique = px/dpr.
-                                    scale: dpr,
+                                  child: OverflowBox(
+                                    alignment: Alignment.topLeft,
+                                    maxWidth: double.infinity,
+                                    maxHeight: double.infinity,
+                                    child: RawImage(
+                                      image: raw,
+                                      fit: BoxFit.none,
+                                      // 1 px image = 1 px physique :
+                                      // taille logique = px/dpr.
+                                      scale: dpr,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1199,6 +1216,12 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                             // px logiques (étape 82) — `fZoom`
                             // pendant le transit fit:width.
                             ..._mediaOverlays(st, active!.id, fZoom),
+                            // Barre de scroll verticale
+                            // (diagnostic terrain 23/10 : rend
+                            // visible la scrollabilité détectée —
+                            // doc_h > viewport) — indicateur pur,
+                            // le drag viendra plus tard.
+                            _vScrollbar(t, size, raw, zoom, dpr, st),
                           ],
                         ),
                       ),
@@ -1230,6 +1253,62 @@ class _FrameViewState extends ConsumerState<_FrameView> {
             child: _mediaSurface(st, tabId, m),
           ),
     ];
+  }
+
+  /// Barre de scroll verticale : la piste est toujours visible
+  /// (diagnostic), le thumb n'apparaît que si le document
+  /// dépasse le viewport — `doc_h` vient de la hauteur image
+  /// (`raw.height / (zoom·dpr)` px CSS), `scroll_y` de l'état
+  /// (déjà en px CSS moteur).
+  Widget _vScrollbar(
+    DesignTokens t,
+    Size size,
+    ui.Image raw,
+    double zoom,
+    double dpr,
+    BrowserState st,
+  ) {
+    final id = st.activeId;
+    final docH = raw.height / (zoom * dpr);
+    final viewH = size.height / zoom;
+    final scrollable = docH > viewH + 1;
+    final maxScroll = scrollable ? docH - viewH : 1.0;
+    final scrollY = ((id != null ? st.scrollY[id] : null) ?? 0.0)
+        .clamp(0.0, maxScroll);
+    final progress = scrollY / maxScroll;
+    const k = 10000;
+    final thumbFlex = scrollable
+        ? ((viewH / docH) * k).clamp(400, k).round()
+        : k;
+    final topFlex = scrollable
+        ? ((k - thumbFlex) * progress).round()
+        : 0;
+    final bottomFlex = k - thumbFlex - topFlex;
+    final track = t.color('surface', 'sunken', fallback: Colors.black26);
+    final thumb = t.color('onSurface', 'muted', fallback: Colors.grey);
+    return Positioned(
+      top: 6,
+      right: 3,
+      bottom: 6,
+      width: 5,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(3),
+        child: Column(
+          children: [
+            if (topFlex > 0)
+              Flexible(flex: topFlex, child: Container(color: track)),
+            Flexible(
+              flex: thumbFlex,
+              child: Container(
+                color: scrollable ? thumb : Colors.transparent,
+              ),
+            ),
+            if (bottomFlex > 0)
+              Flexible(flex: bottomFlex, child: Container(color: track)),
+          ],
+        ),
+      ),
+    );
   }
 
   /// La vue native du lecteur, sur fond noir (letterbox) tant

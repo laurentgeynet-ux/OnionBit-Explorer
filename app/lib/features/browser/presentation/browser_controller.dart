@@ -1167,7 +1167,11 @@ class BrowserController extends Notifier<BrowserState> {
         // Daemon sans la route région (pré-étape 55) : il
         // répond la frame entière — la taille décodée déborde
         // la région → composer à (x,y) serait faux → plein.
-        if (patch.width > w || patch.height > h) {
+        // Symétrique : un patch plus petit que demandé = le
+        // daemon a clippé à une frame d'une autre taille
+        // (resize en vol) → composer décalerait le contenu
+        // → plein.
+        if (patch.width != w || patch.height != h) {
           patch.dispose();
           return false;
         }
@@ -1318,8 +1322,15 @@ class BrowserController extends Notifier<BrowserState> {
     final id = state.activeId;
     if (id == null) return;
     try {
-      // ignore: avoid_print — sonde terrain 22/10 (frame ≠ fenêtre)
       await _repo.setViewport(id, w, h, scale);
+      // La frame retenue n'a plus la géométrie de celle que le
+      // daemon repeint : tout pull partiel composerait les
+      // `rects` de la nouvelle taille sur l'ancienne base —
+      // corruption mesurée au démarrage (fenêtre transitoire
+      // ~600 px : bande gauche étroite + reliquat sombre,
+      // terrain 23/10). Le prochain pull est forcé plein.
+      _pendingFull.add(id);
+      _pendingRects.remove(id);
     } on ApiException catch (e) {
       state = state.copyWith(lastError: () => e.message);
     }

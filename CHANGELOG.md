@@ -9,6 +9,38 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Étape 115 — affichage frame :
+  `OverflowBox` + barre de scroll**
+  (`app/`). Depuis les frames
+  hauteur-document, `RenderImage`
+  rétrécissait sa boîte au ratio
+  de l'image (`constrainSizeAnd
+  AttemptToPreserveAspectRatio`)
+  puis peignait la tranche
+  **centrale** à 1:1 — la page
+  apparaissait comme une colonne
+  étroite avec une grande zone
+  sombre, et le zoom « réparait »
+  en apparence. `OverflowBox`
+  (bornes infinies, topLeft)
+  rend l'image à sa taille
+  naturelle, clippée par le
+  conteneur. Robustesse :
+  `setViewport` force le pull
+  plein suivant (les `rects`
+  post-resize sont dans les
+  coords de la nouvelle frame,
+  le composite partiel sur
+  l'ancienne base corrompait
+  l'image retenue), et un patch
+  de taille ≠ demandée rebascule
+  en pull plein. Ajout : barre de
+  scroll verticale (piste +
+  thumb `viewH/docH`, position
+  `scrollY/maxScroll`) — la
+  scrollabilité détectée est
+  désormais visible.
+
 - **R-86 — `mask-*` : la moitié domaine
   livrée** (`explorer-render`, backlog
   issue #14 / reliquat R-80 — icônes

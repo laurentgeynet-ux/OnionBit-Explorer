@@ -2272,6 +2272,46 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `importmap_dep_bare_resout_ses_
   propres_imports`.
 
+- [x] **Étape 115. Affichage frame :
+  `OverflowBox` + barre de scroll**
+  (terrain 23/10 — « colonne
+  étroite » persistante depuis les
+  frames hauteur-document). Cause
+  racine mesurée au SDK :
+  `RenderImage._sizeForConstraints`
+  réduit sa boîte au ratio de
+  l'image (`constrainSizeAnd
+  AttemptToPreserveAspectRatio`)
+  — frame 1826×2876 dans une boîte
+  1217×543 → enfant **345×543**
+  centré → `paintImage` fit:none
+  aligne au centre → on voyait une
+  **tranche centrale à 1:1** de la
+  page (le zoom « réparait » : la
+  colonne mobile tenait dans la
+  tranche). Fix : `OverflowBox`
+  (maxW/H `infinity`, topLeft)
+  autour du `RawImage` — taille
+  naturelle, déborde, le
+  `Container` clippe. Bonus
+  robustesse mesurés en route :
+  `setViewport` marque
+  `_pendingFull` (les `rects`
+  post-resize vivent dans les
+  coords de la nouvelle frame —
+  composite partiel sur ancienne
+  base = corruption), et un patch
+  de taille ≠ demandée (daemon a
+  clippé à une frame d'une autre
+  taille) rebascule en pull plein.
+  **Barre de scroll verticale**
+  ajoutée : piste toujours
+  visible, thumb dimensionné
+  `viewH/docH` (doc_h déduit de
+  `raw.height/(zoom·dpr)`),
+  position `scrollY/maxScroll` —
+  indicateur pur, pas de drag.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

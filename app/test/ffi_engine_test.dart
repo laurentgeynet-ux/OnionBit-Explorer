@@ -23,7 +23,7 @@ void main() {
     );
   });
 
-  test('pipeline ABI réel si explorer_ffi.dll est buildée', () {
+  test('pipeline ABI réel si explorer_ffi.dll est buildée', () async {
     // `cargo build -p explorer-ffi` produit la DLL — le test
     // se saute silencieusement si l'artefact n'existe pas
     // (CI Flutter seule, sans toolchain Rust).
@@ -32,16 +32,20 @@ void main() {
     final e = FfiEngine.tryLoad(const AppConfig(engineLibPath: rel));
     expect(e, isNotNull);
     addTearDown(e!.dispose);
+    // Le `ready` du worker arrive en async — un premier appel
+    // réel attend `_ready` (avant, `isLoaded` était sondé
+    // synchrone : course toujours perdue). `listTabs` est
+    // local — `createTab` passe par le worker.
+    final tab = await e.createTab();
     expect(e.isLoaded, isTrue);
-
-    // Onglet → liste → frame absente → tick inerte → close.
-    e.createTab().then((tab) async {
-      expect(int.tryParse(tab.id), isNotNull);
-      expect(await e.listTabs(), isNotEmpty);
-      expect(await e.fetchFrameImage(tab.id), isNull);
-      expect(e.tick(tab.id), isFalse);
-      await e.closeTab(tab.id);
-      expect(await e.listTabs(), isEmpty);
-    });
+    expect(int.tryParse(tab.id), isNotNull);
+    expect(await e.listTabs(), isNotEmpty);
+    expect(await e.fetchFrameImage(tab.id), isNull);
+    // `tick` est async (étape 71e) : `invalidated` = false —
+    // rien n'a repeint ; awaité sinon le dispose du tearDown
+    // casse un appel encore en vol.
+    expect((await e.tick(tab.id)).invalidated, isFalse);
+    await e.closeTab(tab.id);
+    expect(await e.listTabs(), isEmpty);
   });
 }
