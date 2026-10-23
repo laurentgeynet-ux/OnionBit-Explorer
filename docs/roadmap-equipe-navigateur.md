@@ -2608,6 +2608,62 @@ Priorité terrain (lead, mission 14/16) : **JS-C45** en tête
   `queue_len`, budget ops/worker hérité). Documenté : pas de
   `SharedArrayBuffer` inter-thread réel.
 
+### J-A2 — Inventaire API : gaps énumérables (décidé 2026-10-23)
+
+Contrairement aux trous de sémantique (JS-C59→C64 — dormants,
+seul un bundle réel les révèle), les gaps **d'interface** sont
+listables à l'avance : chaque global absent est un
+`ReferenceError` garanti sur les sites qui l'utilisent.
+Inventaire établi sur l'existant `install_dom` + bundles
+github fetchés (`ReferenceError` mesurés en sonde) —
+**les items J-A2 ne sont pas trigger-conditionnés** : ils
+sont commandables dès que la file JS est vide, dans l'ordre
+ci-dessous (fréquence observée sur le corpus réel).
+
+- [ ] **JS-C65. `fetch` — surface complète** : `Request`,
+  `Response`, `Headers` constructibles (aujourd'hui `fetch`
+  existe mais `new Headers()` = `ReferenceError` — mesuré en
+  sonde github). Mixin `Body` (`text`/`json`/`blob`/
+  `arrayBuffer`/`formData`), `Response` natif lisible
+  (`status`/`ok`/`headers`), `Request` en entrée de `fetch`.
+- [ ] **JS-C66. `FormData`** (mesuré `ReferenceError` en
+  sonde) + `URLSearchParams` bidirectionnel — formulaires et
+  uploads des sites réels (google recherche, github login).
+- [ ] **JS-C67. `customElements` machinery** : `define` avec
+  upgrade des éléments existants, callbacks `connected
+  Callback`/`disconnectedCallback`/`attributeChangedCallback`,
+  `whenDefined` résolutrice. **Débloque le résidu github
+  `turbo-frame.delegate`** (seule erreur honnête restante du
+  census — la turbo-frame est un custom element).
+- [ ] **JS-C68. `IntersectionObserver`/`ResizeObserver`
+  fonctionnels** : les stubs actuels sont constructibles mais
+  le callback n'est jamais livré (documenté « no-op honnête »
+  JS-C56) — les sites qui attendent un premier appel
+  (lazy-load, infinite scroll) restent muets. Entrées
+  minimales : un `IntersectionObserverEntry` initial +
+  déclenchement à l'`observe`.
+- [ ] **JS-C69. `Blob`/`File`/`FileReader` + `URL.
+  createObjectURL`** — uploads et traitement client-side.
+- [ ] **JS-C70. `ReadableStream`/`WritableStream`/`Transform
+  Stream`** — requis par `Response.body` moderne et les
+  bundlers (webpack dev-server, SSR-streaming).
+- [ ] **JS-C71. IndexedDB + `caches` (Cache API)** — storage
+  persistant des apps (Service Worker hors scope : la
+  persistence suffit à la plupart des fallbacks gracieux).
+- [ ] **JS-C72. `WebSocket` stub fonctionnel** — handshake
+  refusé honnêtement (pas de sockets hors `explorer-net`),
+  mais la détection `typeof WebSocket` doit exister pour que
+  les fallbacks long-polling des frameworks s'arment.
+- [ ] **JS-C73. `Notification`/`BroadcastChannel`/
+  `navigator.sendBeacon`/`getSelection`/`reportError`/
+  `scrollIntoView`** — queue d'APIs ponctuelles, ordre à
+  re-décider au premier trigger mesuré par site.
+- [ ] **JS-C74. `attachShadow`/Shadow DOM minimal** — le
+  trou le plus structurel (scoped CSS + slots) : old.reddit
+  et MDN l'utilisent, écarté « hors portée » à ce jour.
+  *Seul item J-A2 qui reste trigger-conditionné — coût
+  architectural, pas un stub.*
+
 ### J-B — Couverture langue par besoin (réactive)
 
 **Règle du palier — aucune de ces étapes ne s'ouvre sans un

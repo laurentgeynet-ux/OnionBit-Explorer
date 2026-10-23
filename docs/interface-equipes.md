@@ -426,8 +426,12 @@ journal « livré ».
 ### Piste JS (spécialiste)
 
 - [ ] **`Error: b` sur google.com** — stack minifiée
-  `(3:2662)`→`U(3:4262)` : repro isolée à produire via
-  `jprobe`/console, puis fix JS-C suivant.
+  `(3:2662)`→`U(3:4262)` : **relocalisé post-recherche**
+  (pas la page d'accueil — `jprobe` servait la mauvaise
+  variante) ; `explorer-cli dom <url>` (étape 120) expose
+  le DOM vivant post-JS — le mur de consentement n'existe
+  qu'après script. Repro à produire sur le parcours
+  consentement→recherche, puis fix JS-C suivant.
 - [x] ~~**Reliquat `Invalid base URL`**~~ → **résolu,
   JS-C64** : `import.meta.url` est désormais la liaison
   lexicale `IMPORT_META` de l'env du module *propriétaire*
