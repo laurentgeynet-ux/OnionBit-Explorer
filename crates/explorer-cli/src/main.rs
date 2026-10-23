@@ -289,8 +289,12 @@ async fn mem_report(url: &str) -> ExitCode {
     println!("  display    : {} items", r.display_items);
     println!("  frame      : {} Mio", mib(r.frame_bytes));
     println!("  png        : {} Mio", mib(r.png_bytes));
-    println!("  images     : {} Mio (dédup onglet)", mib(r.images_bytes));
+    println!("  images     : {} Mio (dédup vivant)", mib(r.images_bytes));
     println!("  bg_bodies  : {} Mio", mib(r.bg_bodies_bytes));
+    println!(
+        "  img_bodies : {} Mio (compressé retenu)",
+        mib(r.img_bodies_bytes)
+    );
     println!("  js heap    : {} Mio", mib(r.js_heap_bytes));
     println!("bfcache ({} pages gelées) :", r.bfcache_pages);
     println!(
@@ -300,6 +304,14 @@ async fn mem_report(url: &str) -> ExitCode {
     println!(
         "  frame+png  : {} Mio",
         mib(r.bfcache_frame_bytes + r.bfcache_png_bytes)
+    );
+    println!(
+        "  images     : {} Mio (résiduel — attendu 0 post-étape 133)",
+        mib(r.bfcache_images_bytes)
+    );
+    println!(
+        "  img_bodies : {} Mio (compressé retenu)",
+        mib(r.bfcache_img_bodies_bytes)
     );
     println!("  js heap    : {} Mio", mib(r.bfcache_js_heap_bytes));
     println!("total octets attribués : {} Mio", mib(r.total_bytes));

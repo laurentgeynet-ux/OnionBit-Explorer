@@ -244,7 +244,7 @@ pub async fn history_move_shared(
     };
     // Miss → la requête d'origine est rejouée (POST rejoué
     // tel quel — étape 56).
-    match navigate_shared(sess, tab, req, false).await {
+    match Box::pin(navigate_shared(sess, tab, req, false)).await {
         Ok(()) => {
             let mut s = sess.lock().await;
             s.set_hist_idx(tab, idx);
@@ -285,7 +285,9 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
         };
         let ok = match act {
             None => break,
-            Some(DrainAct::Req(req, push)) => navigate_shared(sess, tab, *req, push).await.is_ok(),
+            Some(DrainAct::Req(req, push)) => Box::pin(navigate_shared(sess, tab, *req, push))
+                .await
+                .is_ok(),
             Some(DrainAct::Go(0)) => {
                 // `history.go(0)` = rechargement de l'entrée
                 // courante (spec HTML).
@@ -294,7 +296,7 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
                     s.tabs.get(&tab).and_then(|t| t.url.clone())
                 };
                 if let Some(u) = url {
-                    navigate_shared(sess, tab, Request::get(u), false)
+                    Box::pin(navigate_shared(sess, tab, Request::get(u), false))
                         .await
                         .is_ok()
                 } else {

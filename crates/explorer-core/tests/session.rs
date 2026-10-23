@@ -528,7 +528,7 @@ async fn failed_nav_shared_commits_error_page() {
     let id = sess.lock().await.open_tab();
     let req = Request::get(Url::parse("http://h.test/ko").unwrap());
     assert!(matches!(
-        explorer_core::navigate_shared(&sess, id, req, true).await,
+        Box::pin(explorer_core::navigate_shared(&sess, id, req, true)).await,
         Err(CoreError::HttpStatus(500))
     ));
     let mut g = sess.lock().await;
@@ -2128,7 +2128,58 @@ async fn mem_report_attributes_live_and_bfcache() {
     assert!(s.mem_report(999).is_none());
 }
 
-/// Page dont un script mute le DOM miroir (`textContent`).
+/// Étape 133 — le gel bfcache libère les bitmaps
+/// `DecodedImage` (multiplicateur ×`bfcache_pages` mesuré
+/// par l'étape 130 : ~144 Mio de bitmaps github × 4 pages
+/// gelées) mais retient les corps compressés : le retour
+/// re-décode depuis `img_bodies` **sans réseau** et la
+/// page restaurée peint à l'identique.
+#[tokio::test]
+async fn bfcache_snapshot_drops_bitmaps_keeps_bodies() {
+    let (mut s, t) = test_session();
+    t.route("/i", 200, "<html><body><img src=\"/i.png\"></body></html>");
+    t.route_bin("/i.png", 200, red_png());
+    t.route("/b", 200, "<html><body><div>b</div></body></html>");
+
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/i").await.unwrap();
+    let before = s.frame_png(id).expect("frame /i");
+    let live = s.mem_report(id).expect("rapport vivant /i");
+    assert!(live.images_bytes > 0, "bitmap <img> vivante");
+    assert!(live.img_bodies_bytes > 0, "corps compressé retenu");
+
+    // Navigation → /i gèle : plus aucun `Arc` de bitmap ne
+    // doit survivre dans le snapshot, mais le corps
+    // compressé reste.
+    s.navigate(id, "http://h.test/b").await.unwrap();
+    let r = s.mem_report(id).expect("rapport après nav /b");
+    assert_eq!(r.bfcache_pages, 1, "/i gelée");
+    assert_eq!(
+        r.bfcache_images_bytes, 0,
+        "le gelé ne retient plus de bitmap"
+    );
+    assert!(
+        r.bfcache_img_bodies_bytes > 0,
+        "le gelé retient le corps compressé"
+    );
+
+    // Retour bfcache : re-décodage sans réseau (le
+    // transport n'a pas été re-sollicité), rendu identique.
+    let calls = *t.calls.lock().unwrap();
+    s.go_back(id).await.unwrap();
+    assert_eq!(
+        *t.calls.lock().unwrap(),
+        calls,
+        "restauration sans re-fetch"
+    );
+    let r2 = s.mem_report(id).expect("rapport après back");
+    assert!(r2.images_bytes > 0, "bitmap re-décodée au retour");
+    assert_eq!(
+        s.frame_png(id).expect("frame restaurée"),
+        before,
+        "la page restaurée peint à l'identique"
+    );
+}
 const PAGE_MUT: &str = "<!doctype html><html><body>\
      <div id=\"x\">avant</div>\
      <script>document.getElementById('x').textContent='APRES'</script>\
@@ -5389,12 +5440,12 @@ async fn shared_session_stays_responsive_during_navigation() {
     let tab = sess.lock().await.open_tab();
     let s2 = sess.clone();
     let nav = tokio::spawn(async move {
-        explorer_core::navigate_shared(
+        Box::pin(explorer_core::navigate_shared(
             &s2,
             tab,
             Request::get(Url::parse("https://a/b").unwrap()),
             true,
-        )
+        ))
         .await
     });
     // Attends que le fetch soit réellement parti.
@@ -5719,7 +5770,7 @@ async fn reload_request_on_failed_post_replays_request() {
     req.method = explorer_net::http::Method::Post;
     req.body = Some(b"a=1".to_vec());
     assert!(matches!(
-        explorer_core::navigate_shared(&sess, id, req, true).await,
+        Box::pin(explorer_core::navigate_shared(&sess, id, req, true)).await,
         Err(CoreError::HttpStatus(500))
     ));
     // Page d'erreur commise : `last_req` est purgé, la
@@ -5731,7 +5782,7 @@ async fn reload_request_on_failed_post_replays_request() {
     // Le rejeu émet le POST (il retombe 500 — c'est la
     // retente qui compte, pas le résultat).
     assert!(matches!(
-        explorer_core::navigate_shared(&sess, id, req, true).await,
+        Box::pin(explorer_core::navigate_shared(&sess, id, req, true)).await,
         Err(CoreError::HttpStatus(500))
     ));
     assert_eq!(t.last().unwrap().0, "Post", "le rejeu est un POST");
@@ -6082,12 +6133,12 @@ async fn superseded_nav_reverts_speculative_paint() {
     let tab = sess.lock().await.open_tab();
 
     // A commit sa page.
-    explorer_core::navigate_shared(
+    Box::pin(explorer_core::navigate_shared(
         &sess,
         tab,
         Request::get(Url::parse("https://h/a").unwrap()),
         true,
-    )
+    ))
     .await
     .unwrap();
     let a_frame = sess.lock().await.frame_png(tab);
@@ -6095,12 +6146,12 @@ async fn superseded_nav_reverts_speculative_paint() {
     // /slow démarre, peint son document en vol, puis attend.
     let s2 = sess.clone();
     let slow = tokio::spawn(async move {
-        explorer_core::navigate_shared(
+        Box::pin(explorer_core::navigate_shared(
             &s2,
             tab,
             Request::get(Url::parse("https://h/slow").unwrap()),
             true,
-        )
+        ))
         .await
     });
     tokio::time::timeout(std::time::Duration::from_secs(2), painted.notified())
@@ -6127,12 +6178,12 @@ async fn superseded_nav_reverts_speculative_paint() {
 
     // /c commit — /slow est supplantée : sa nav_apply sera
     // jetée, la peinture spéculative doit être révertée.
-    explorer_core::navigate_shared(
+    Box::pin(explorer_core::navigate_shared(
         &sess,
         tab,
         Request::get(Url::parse("https://h/c").unwrap()),
         true,
-    )
+    ))
     .await
     .unwrap();
     released.notify_waiters();
@@ -6140,12 +6191,12 @@ async fn superseded_nav_reverts_speculative_paint() {
 
     // Référence : la page /c rendue dans un onglet neuf.
     let ref_tab = sess.lock().await.open_tab();
-    explorer_core::navigate_shared(
+    Box::pin(explorer_core::navigate_shared(
         &sess,
         ref_tab,
         Request::get(Url::parse("https://h/c").unwrap()),
         true,
-    )
+    ))
     .await
     .unwrap();
 

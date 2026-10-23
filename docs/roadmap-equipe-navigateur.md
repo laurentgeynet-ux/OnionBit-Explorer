@@ -2908,6 +2908,48 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   canal nouveau. `flutter
   analyze`/`test` verts.
 
+- [ ] **Étape 133. Discard des
+  bitmaps des snapshots
+  bfcache** — le multiplicateur
+  mesuré par l'étape 130 (~144
+  Mio de bitmaps github × 4
+  pages gelées/onglet) est le
+  réservoir dominant du constat
+  « ~1,4 Gio ». Au `freeze` :
+  les tables `images.*`
+  (`replaced`/`backgrounds`/
+  `svgs`/`masks`/`masks_url`)
+  sont vidées et `snap.list`
+  lâchée — tous les `Arc` de
+  `DecodedImage` meurent ; les
+  op-lists `<canvas>` survivent.
+  Les **corps compressés** sont
+  retenus dans `img_bodies`
+  (clé URL résolue, borné
+  `MAX_IMG_BODY_STORE` = 32
+  Mio — `<img>`/poster,
+  fonds, masques) + alias
+  `bg_aliases`/`mask_aliases`.
+  Au retour (`history_move`),
+  `Session::restore_images`
+  re-décode **sans réseau** :
+  http depuis `img_bodies`,
+  `data:` depuis l'attribut,
+  fonds/masques via
+  `prev_styles` (ordinal→NodeId
+  par `element_ordinals`), svg
+  inline re-rasterisés par
+  `collect_svg`. `mem_report`
+  gagne `img_bodies_bytes`,
+  `bfcache_img_bodies_bytes` et
+  le diagnostic
+  `bfcache_images_bytes`
+  (attendu 0) — CLI `mem`
+  affiché. Tests : bitmaps
+  gelés libérés + corps
+  retenus + `back()` re-décode
+  à l'identique sans re-fetch.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

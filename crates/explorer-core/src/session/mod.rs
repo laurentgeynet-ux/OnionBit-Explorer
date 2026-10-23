@@ -277,6 +277,14 @@ pub(crate) struct Tab {
     /// devient idempotent.
     img_decoded: HashMap<String, Arc<DecodedImage>>,
     bg_decoded: HashMap<String, Option<Arc<DecodedImage>>>,
+    /// Corps **compressés** des images de la page retenus
+    /// (étape 133 — clé = URL résolue ; `<img>`/`poster`,
+    /// fonds `url()` et masques partagent le magasin) :
+    /// source du re-décodage au retour bfcache — les bitmaps
+    /// `DecodedImage` gelés sont libérés au `freeze`, les
+    /// corps permettent la restauration **sans réseau**.
+    /// Borné `MAX_IMG_BODY_STORE`, vidé à la navigation.
+    img_bodies: HashMap<String, Vec<u8>>,
     /// Table d'identité `miroir → NodeId` (ADR-0025, étape
     /// 111) — montée à chaque baseline cléée (`DomSyncKeyed`),
     /// voyage avec la payload (`take_paint`/`put_paint`).
@@ -455,6 +463,18 @@ pub(crate) struct PageSnapshot {
     /// 128) — la restauration rétablit les DOM enfants sans
     /// re-fetch.
     frames: Vec<SubFrame>,
+    /// Corps compressés des images de la page gelée (étape
+    /// 133) — les bitmaps `DecodedImage` sont libérés au
+    /// freeze (`images` vidée, `list` lâchée : les deux
+    /// portaient les `Arc`), les corps retenus permettent
+    /// le re-décodage au retour sans réseau.
+    img_bodies: HashMap<String, Vec<u8>>,
+    /// Alias fonds/masques gelés avec les corps — la
+    /// restauration re-résout `url(...)` → corps → bitmap
+    /// sans repasser par la cascade (`StyleMap` absente).
+    bg_aliases: HashMap<String, String>,
+    /// Alias `mask-image` gelés (même rôle).
+    mask_aliases: HashMap<String, String>,
 }
 
 /// Session : transport + fontes injectés, onglets, viewport,
@@ -885,6 +905,7 @@ impl Session {
                 mask_aliases: HashMap::new(),
                 img_decoded: HashMap::new(),
                 bg_decoded: HashMap::new(),
+                img_bodies: HashMap::new(),
                 dom_keymap: HashMap::new(),
                 prev_styles: HashMap::new(),
                 transitions: Vec::new(),

@@ -192,6 +192,10 @@ impl Session {
         let needs_paint = entry.dom.is_some() && entry.frame.is_none();
         let url = entry.url.clone();
         let title = entry.title.clone();
+        // Étape 133 : les bitmaps gelés ont été libérés au
+        // freeze — re-décodage depuis les corps compressés
+        // retenus (sans réseau) avant toute re-peinture.
+        self.restore_images(tab);
         // La page quittée (gelée à l'instant ou page
         // d'erreur non gelable) meurt — ses surfaces média
         // sont closes ; le snapshot restauré n'en porte
@@ -709,6 +713,7 @@ impl Session {
             entry.mask_aliases.clear();
             entry.img_decoded.clear();
             entry.bg_decoded.clear();
+            entry.img_bodies.clear();
             entry.linked_sheets.clear();
             entry.frames.clear();
             entry.prev_styles = HashMap::new();

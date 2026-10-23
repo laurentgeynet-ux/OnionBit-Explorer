@@ -55,12 +55,17 @@ pub struct MemReport {
     /// Taille du PNG servi (cache paresseux — `0` s'il n'a
     /// jamais été demandé).
     pub png_bytes: usize,
-    /// Bitmaps décodées dé-dupliquées de l'onglet entier —
-    /// `images.*` + display list + caches `img_decoded`/
-    /// `bg_decoded` + snapshots (octets `rgba` exacts).
+    /// Bitmaps décodées dé-dupliquées de la **page vivante**
+    /// — `images.*` + display list + caches `img_decoded`/
+    /// `bg_decoded` (octets `rgba` exacts). Le côté gelé est
+    /// rapporté à part dans `bfcache_images_bytes` (étape
+    /// 133 : attendu 0).
     pub images_bytes: usize,
     /// Corps `bg_bodies` pas encore décodés (octets exacts).
     pub bg_bodies_bytes: usize,
+    /// Corps compressés retenus de la page vivante (étape
+    /// 133 — source du re-décodage au retour bfcache).
+    pub img_bodies_bytes: usize,
     /// Heap JS du contexte vivant (`heap_stats().estimated_bytes`).
     pub js_heap_bytes: usize,
     /// Nombre de pages gelées dans le bfcache.
@@ -79,6 +84,17 @@ pub struct MemReport {
     /// suspecté du constat 1,4 Gio (jusqu'à `bfcache_pages` ×
     /// `js_mem_limit_mib`).
     pub bfcache_js_heap_bytes: usize,
+    /// Corps compressés retenus par les pages gelées (étape
+    /// 133 — survivent au gel pour le re-décodage).
+    pub bfcache_img_bodies_bytes: usize,
+    /// Bitmaps encore référencées par les pages gelées —
+    /// post-étape 133, attendu **0** : les `Arc` des
+    /// `images.*`/`list`/`masks_url` sont lâchés au freeze ;
+    /// non nul = référence résiduelle à investiguer.
+    /// Sous-ensemble diagnostique (déjà couvert par
+    /// `images_bytes` dé-dupliqué) — non compté dans
+    /// `total_bytes`.
+    pub bfcache_images_bytes: usize,
     /// Somme des champs `_bytes` de l'onglet (vivant + gelé)
     /// — hors structures à compte seul, honnête.
     pub total_bytes: usize,
@@ -158,6 +174,7 @@ impl Session {
             r.png_bytes = p.len();
         }
         r.bg_bodies_bytes = entry.bg_bodies.values().map(Vec::len).sum();
+        r.img_bodies_bytes = entry.img_bodies.values().map(Vec::len).sum();
         if let Some(js) = entry.js.as_mut() {
             if let Some(s) = js.heap_stats() {
                 r.js_heap_bytes = s.estimated_bytes;
@@ -170,7 +187,11 @@ impl Session {
             entry.bg_decoded.values().filter_map(Option::as_ref),
         );
 
-        // Pages gelées bfcache — même attribution, sommée.
+        // Pages gelées bfcache — même attribution, sommée ;
+        // les bitmaps gelées alimentent un ensemble propre
+        // (étape 133 : le diagnostic « le gelé ne garde plus
+        // aucun `Arc` » vaut par réservoir).
+        let mut seen_snap: ImgSet = StdHashMap::new();
         r.bfcache_pages = entry.bfcache.len();
         for snap in &mut entry.bfcache {
             if let Some(d) = &snap.dom {
@@ -193,17 +214,21 @@ impl Session {
                     r.bfcache_js_heap_bytes += s.estimated_bytes;
                 }
             }
-            collect_page_imgs(&mut seen, &snap.images, snap.list.as_ref());
+            r.bfcache_img_bodies_bytes += snap.img_bodies.values().map(Vec::len).sum::<usize>();
+            collect_page_imgs(&mut seen_snap, &snap.images, snap.list.as_ref());
         }
+        r.bfcache_images_bytes = seen_snap.values().sum();
         r.images_bytes = seen.values().sum();
         r.total_bytes = r.frame_bytes
             + r.png_bytes
             + r.images_bytes
             + r.bg_bodies_bytes
+            + r.img_bodies_bytes
             + r.js_heap_bytes
             + r.bfcache_frame_bytes
             + r.bfcache_png_bytes
-            + r.bfcache_js_heap_bytes;
+            + r.bfcache_js_heap_bytes
+            + r.bfcache_img_bodies_bytes;
         Some(r)
     }
 }

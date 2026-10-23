@@ -14,7 +14,7 @@ use explorer_js::{NetRequest, NetResponse};
 use explorer_net::http::HttpTransport;
 use explorer_net::policy::is_mixed_content;
 use explorer_net::url::Url;
-use explorer_render::{decode_image, DecodedImage};
+use explorer_render::{data_url_bytes, decode_image, DecodedImage};
 
 impl Session {
     /// Le commit complet sous `&mut self` (hôtes synchrones :
@@ -678,8 +678,150 @@ impl Session {
             bodies,
             max_px,
             &mut entry.img_decoded,
+            &mut entry.img_bodies,
         );
     }
+
+    /// Étape 133 — retour bfcache : les bitmaps de la page
+    /// gelée ont été libérés au `freeze` (`images.*` vidées,
+    /// `list` lâchée) ; on les re-décode ici depuis les corps
+    /// compressés retenus (`img_bodies`) + attributs/styles
+    /// restaurés — restauration toujours **sans réseau**.
+    /// `data:` est auto-porteur (payload dans l'attribut),
+    /// les `svg` inline re-rasterisés depuis le DOM.
+    pub(crate) fn restore_images(&mut self, tab: TabId) {
+        let max_px = self.image_max_px;
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        let Some(dom) = entry.dom.as_ref() else {
+            return;
+        };
+        let Some(base) = entry.url.clone() else {
+            return;
+        };
+        // Phase lecture : items `<img>`/`poster`, table
+        // ordinal→nœud (`prev_styles` est indexée ordinal), et
+        // racine pour la collecte svg.
+        let items = collect_images(dom);
+        let ord_to_node: HashMap<usize, explorer_dom::NodeId> = element_ordinals(dom)
+            .into_iter()
+            .map(|(n, o)| (o, n))
+            .collect();
+        let root = dom.document_element();
+        // Travaux styles (lecture seule de `prev_styles`) —
+        // même surface que `insert_fetched_images` : fonds via
+        // `background-image`, masques via les deux propriétés.
+        let mut bg_work = Vec::new();
+        let mut mask_work = Vec::new();
+        for (ord, st) in &entry.prev_styles {
+            if let Some(raw) = st.get("background-image").and_then(css_url_arg) {
+                if let Some(node) = ord_to_node.get(ord) {
+                    bg_work.push((*node, raw));
+                }
+            }
+            for prop in ["mask-image", "-webkit-mask-image"] {
+                if let Some(raw) = st.get(prop).and_then(css_url_arg) {
+                    mask_work.push(raw);
+                }
+            }
+        }
+
+        // Corps compressé → bitmap décodé ; `data:` se décode
+        // depuis l'URL elle-même, sinon l'alias résout la clé
+        // du magasin retenu. Renvoie `(octets, clé_résolue)`.
+        let body_of = |raw: &str,
+                       aliases: &HashMap<String, String>,
+                       store: &HashMap<String, Vec<u8>>|
+         -> Option<(Vec<u8>, Option<String>)> {
+            if let Some(b) = data_url_bytes(raw) {
+                return Some((b, None));
+            }
+            let resolved = aliases.get(raw).cloned()?;
+            store.get(&resolved).cloned().map(|b| (b, Some(resolved)))
+        };
+
+        // (a) `<img>`/`poster` — `src` relu du DOM restauré.
+        for (node, src) in items {
+            let Some((bytes, key)) = (if let Some(b) = data_url_bytes(&src) {
+                Some((b, None))
+            } else {
+                let Ok(u) = Url::resolve(&base, &src) else {
+                    continue;
+                };
+                entry
+                    .img_bodies
+                    .get(&u.as_str())
+                    .cloned()
+                    .map(|b| (b, Some(u.as_str())))
+            }) else {
+                continue;
+            };
+            let Some(img) = decode_image(&bytes, max_px).map(Arc::new) else {
+                continue;
+            };
+            entry.images.replaced.insert(node, img.clone());
+            entry.img_decoded.insert(src, img.clone());
+            if let Some(k) = key {
+                entry.bg_decoded.insert(k, Some(img));
+            }
+        }
+        // (b) fonds `url(...)` — alias → corps → bitmap, le
+        // cache `bg_decoded` est re-alimenté sous la clé résolue.
+        for (node, raw) in bg_work {
+            let Some((bytes, key)) = body_of(&raw, &entry.bg_aliases, &entry.img_bodies) else {
+                continue;
+            };
+            let Some(img) = decode_image(&bytes, max_px).map(Arc::new) else {
+                continue;
+            };
+            entry.images.backgrounds.insert(node, img.clone());
+            if let Some(k) = key {
+                entry.bg_decoded.insert(k, Some(img));
+            }
+        }
+        // (c) masques — table cléée par le texte `url(...)` brut
+        // (couvre les pseudo-éléments sans `NodeId`).
+        for raw in mask_work {
+            let Some((bytes, key)) = body_of(&raw, &entry.mask_aliases, &entry.img_bodies) else {
+                continue;
+            };
+            let Some(img) = decode_image(&bytes, max_px).map(Arc::new) else {
+                continue;
+            };
+            if let Some(k) = key {
+                entry.bg_decoded.insert(k, Some(img.clone()));
+            }
+            entry.images.register_mask(&raw, img);
+        }
+        // (d) `<svg>` inline — re-rasterisés depuis le DOM
+        // restauré (collecte pure, pas de corps nécessaire).
+        if let Some(root_el) = root {
+            entry.images.svgs = explorer_render::svg::collect_svg(dom, root_el, max_px);
+        }
+    }
+}
+
+/// Plafond du magasin de corps compressés retenus par page
+/// (étape 133) — 32 Mio de compressé ≈ plusieurs centaines
+/// de Mio de bitmaps. Au-delà, les corps excédentaires ne
+/// sont pas retenus : ces images ne survivront pas au gel
+/// bfcache (dégradation honnête à la restauration, pas de
+/// réservoir non borné).
+const MAX_IMG_BODY_STORE: usize = 32 << 20;
+
+/// Retient le corps compressé `body` sous `key` (URL
+/// résolue) dans le magasin de l'onglet — no-op si déjà
+/// présent ou si le plafond serait dépassé.
+pub(crate) fn retain_img_body(store: &mut HashMap<String, Vec<u8>>, key: &str, body: Vec<u8>) {
+    if store.contains_key(key) {
+        return;
+    }
+    let total: usize = store.values().map(Vec::len).sum();
+    if total + body.len() > MAX_IMG_BODY_STORE {
+        return;
+    }
+    store.insert(key.to_string(), body);
 }
 
 /// Boucle `insert_images` partagée — `dom` et `images`
@@ -696,6 +838,7 @@ fn insert_images_into(
     bodies: &HashMap<String, Vec<u8>>,
     max_px: u32,
     decoded_cache: &mut HashMap<String, Arc<DecodedImage>>,
+    bodies_store: &mut HashMap<String, Vec<u8>>,
 ) {
     let items = collect_images(dom);
     let mut decoded: HashMap<String, Option<Arc<DecodedImage>>> = HashMap::new();
@@ -712,6 +855,9 @@ fn insert_images_into(
         if let Some(img) = img {
             images.replaced.insert(node, img.clone());
             decoded_cache.insert(src, img.clone());
+            // Corps compressé retenu (étape 133) — source du
+            // re-décodage au retour bfcache.
+            retain_img_body(bodies_store, &u.as_str(), body.clone());
         }
     }
 }
@@ -752,10 +898,11 @@ pub(crate) fn insert_images_payload(
         dom,
         images,
         img_decoded,
+        img_bodies,
         ..
     } = p;
     let Some(dom) = dom.as_ref() else {
         return;
     };
-    insert_images_into(dom, images, base, bodies, max_px, img_decoded);
+    insert_images_into(dom, images, base, bodies, max_px, img_decoded, img_bodies);
 }

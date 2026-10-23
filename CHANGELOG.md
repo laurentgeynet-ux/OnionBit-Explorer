@@ -411,6 +411,41 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   autoritaire + traduction
   locale (étape 109) existants.
   `flutter analyze`/`test` verts.
+- **Étape 133 — discard des
+  bitmaps des snapshots
+  bfcache** (`explorer-core` —
+  réponse au multiplicateur
+  mesuré par l'étape 130 :
+  ~144 Mio de bitmaps décodés
+  × 4 pages gelées/onglet). Au
+  `freeze`, toutes les
+  `Arc<DecodedImage>` du
+  snapshot meurent : tables
+  `images.*` vidées + display
+  list lâchée (porteuse
+  d'`Arc` elle aussi) ; les
+  **corps compressés** restent
+  dans `img_bodies` (clé URL
+  résolue, borne 32 Mio/page)
+  avec les alias
+  `bg_aliases`/`mask_aliases`.
+  `Session::restore_images`
+  re-décode au retour **sans
+  réseau** (http depuis les
+  corps, `data:` depuis
+  l'attribut, fonds/masques via
+  `prev_styles` ordinal→NodeId,
+  svg inline re-rasterisés) —
+  restauration peinte à
+  l'identique, prouvée par
+  test. `mem_report` gagne
+  `img_bodies_bytes`,
+  `bfcache_img_bodies_bytes` et
+  `bfcache_images_bytes`
+  (diagnostic, attendu 0) ;
+  CLI `mem` affiché. Réduction
+  attendue ≈ le poids bitmap
+  de chaque page gelée.
 - **JS-C70 —
   `Blob`/`File`/`FileReader` +
   `URL.createObjectURL`**
