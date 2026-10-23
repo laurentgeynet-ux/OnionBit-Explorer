@@ -618,6 +618,12 @@ impl Session {
                 if !(200..300).contains(&resp.status) {
                     continue;
                 }
+                // En-têtes de sécurité de réponse (étape 134) —
+                // dest `script` : nosniff + CORP.
+                if !subresp_security_allows(page, &u, explorer_net::http::FetchDest::Script, &resp)
+                {
+                    continue;
+                }
                 let text = decode_subresource(&resp.body, None);
                 graph.sources.insert(key, text.clone());
                 for (spec2, u2) in module_deps(&text, &u, import_specs) {

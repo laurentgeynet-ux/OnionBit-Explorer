@@ -1110,3 +1110,154 @@ async fn origin_opaque_serializes_null() {
         .map(|(_, v)| v.as_str());
     assert_eq!(origin, Some("null"), "origine opaque → Origin: null");
 }
+
+// ---- Étape 134 : en-têtes de sécurité de réponse ----
+
+use explorer_net::policy::{corp_allows, frame_embedding_allowed, nosniff_allows};
+
+/// `nosniff` : script/style exigent le `Content-Type` déclaré
+/// correct ; les autres destinations passent ; sans l'en-tête
+/// tout passe.
+#[test]
+fn nosniff_matrix() {
+    let nosniff_js = resp(
+        200,
+        &[
+            ("content-type", "text/javascript; charset=utf-8"),
+            ("x-content-type-options", "nosniff"),
+        ],
+        b"x",
+    );
+    assert!(nosniff_allows(FetchDest::Script, &nosniff_js));
+    let nosniff_plain = resp(
+        200,
+        &[
+            ("content-type", "text/plain"),
+            ("x-content-type-options", "nosniff"),
+        ],
+        b"x",
+    );
+    assert!(!nosniff_allows(FetchDest::Script, &nosniff_plain));
+    assert!(!nosniff_allows(FetchDest::Style, &nosniff_plain));
+    // Image sous nosniff+text/plain : non concernée.
+    assert!(nosniff_allows(FetchDest::Image, &nosniff_plain));
+    let nosniff_css = resp(
+        200,
+        &[
+            ("content-type", "text/css"),
+            ("x-content-type-options", "nosniff"),
+        ],
+        b"x",
+    );
+    assert!(nosniff_allows(FetchDest::Style, &nosniff_css));
+    // Content-Type absent sous nosniff → bloqué ; sans nosniff → admis.
+    let bare = resp(200, &[("x-content-type-options", "nosniff")], b"x");
+    assert!(!nosniff_allows(FetchDest::Script, &bare));
+    let plain = resp(200, &[("content-type", "text/plain")], b"x");
+    assert!(nosniff_allows(FetchDest::Script, &plain));
+}
+
+/// CORP `same-origin`/`same-site` restreignent à la page ;
+/// `cross-origin` et valeurs inconnues admettent.
+#[test]
+fn corp_matrix() {
+    let page = u("http://h.test/p");
+    let same = u("http://h.test/r");
+    let cross = u("http://cdn.test/r");
+    let same_site = u("http://sub.h.test/r");
+    let policy = |v: &str| resp(200, &[("cross-origin-resource-policy", v)], b"x");
+    assert!(!corp_allows(&page, &cross, &policy("same-origin")));
+    assert!(corp_allows(&page, &same, &policy("same-origin")));
+    assert!(!corp_allows(&page, &cross, &policy("same-site")));
+    assert!(
+        corp_allows(&page, &same_site, &policy("same-site")),
+        "même site registrable → admis"
+    );
+    assert!(corp_allows(&page, &cross, &policy("cross-origin")));
+    assert!(corp_allows(&page, &cross, &policy("garbage")));
+    assert!(corp_allows(&page, &cross, &resp(200, &[], b"x")));
+}
+
+/// XFO `deny`/`sameorigin` ; CSP `frame-ancestors` l'emporte.
+#[test]
+fn frame_embedding_matrix() {
+    let page = u("http://h.test/");
+    let same_res = u("http://h.test/f");
+    let cross_res = u("http://cdn.test/f");
+    let xfo = |v: &str| resp(200, &[("x-frame-options", v)], b"x");
+    assert!(!frame_embedding_allowed(&page, &same_res, &xfo("deny")));
+    assert!(frame_embedding_allowed(
+        &page,
+        &same_res,
+        &xfo("SAMEORIGIN")
+    ));
+    assert!(!frame_embedding_allowed(
+        &page,
+        &cross_res,
+        &xfo("sameorigin")
+    ));
+    assert!(frame_embedding_allowed(
+        &page,
+        &cross_res,
+        &xfo("allow-from http://x")
+    ));
+    // CSP présent → XFO ignoré même s'il refuse.
+    let both = resp(
+        200,
+        &[
+            ("x-frame-options", "deny"),
+            ("content-security-policy", "frame-ancestors *"),
+        ],
+        b"x",
+    );
+    assert!(frame_embedding_allowed(&page, &cross_res, &both));
+    // 'none' refuse même un ancêtre same-origin.
+    let none = resp(
+        200,
+        &[("content-security-policy", "frame-ancestors 'none'")],
+        b"x",
+    );
+    assert!(!frame_embedding_allowed(&page, &same_res, &none));
+    // 'self' = origine de la ressource.
+    let selfp = resp(
+        200,
+        &[("content-security-policy", "frame-ancestors 'self'")],
+        b"x",
+    );
+    assert!(frame_embedding_allowed(&page, &same_res, &selfp));
+    assert!(!frame_embedding_allowed(&page, &cross_res, &selfp));
+    // host-source : hôte exact, wildcard, scheme+host.
+    let hostp = resp(
+        200,
+        &[("content-security-policy", "frame-ancestors h.test")],
+        b"x",
+    );
+    assert!(frame_embedding_allowed(&page, &cross_res, &hostp));
+    let wild = resp(
+        200,
+        &[("content-security-policy", "frame-ancestors *.test")],
+        b"x",
+    );
+    assert!(frame_embedding_allowed(
+        &u("http://sub.h.test/"),
+        &cross_res,
+        &wild
+    ));
+    let sch = resp(
+        200,
+        &[("content-security-policy", "frame-ancestors https:")],
+        b"x",
+    );
+    assert!(!frame_embedding_allowed(&page, &cross_res, &sch));
+    assert!(frame_embedding_allowed(
+        &u("https://h.test/"),
+        &cross_res,
+        &sch
+    ));
+    // En-tête absent → admis.
+    assert!(frame_embedding_allowed(
+        &page,
+        &cross_res,
+        &resp(200, &[], b"x")
+    ));
+}

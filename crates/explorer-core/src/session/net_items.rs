@@ -630,30 +630,47 @@ impl SubJob {
             }
             match tag {
                 SubTag::Css(i) => {
-                    self.css_slots[i] = Some(decode_stylesheet(&resp.body, &resp.headers));
+                    if subresp_security_allows(
+                        &self.url,
+                        &self.sheet_urls[i],
+                        FetchDest::Style,
+                        &resp,
+                    ) {
+                        self.css_slots[i] = Some(decode_stylesheet(&resp.body, &resp.headers));
+                    }
                 }
                 SubTag::Script(slot) => {
                     let item = &self.scripts[slot_items[slot]];
-                    // Étape 53b : charset déclaré
-                    // (classique) → BOM → UTF-8.
-                    let text = decode_subresource(&resp.body, item.charset.as_deref());
-                    if item.exec == ScriptExec::Arrival {
-                        if item.module {
-                            if let Some(u) = &item.src {
-                                async_mods.push((u.clone(), text));
+                    if item.src.as_ref().is_none_or(|u| {
+                        subresp_security_allows(&self.url, u, FetchDest::Script, &resp)
+                    }) {
+                        // Étape 53b : charset déclaré
+                        // (classique) → BOM → UTF-8.
+                        let text = decode_subresource(&resp.body, item.charset.as_deref());
+                        if item.exec == ScriptExec::Arrival {
+                            if item.module {
+                                if let Some(u) = &item.src {
+                                    async_mods.push((u.clone(), text));
+                                }
+                            } else {
+                                eval_arrival(&mut eng, &text);
                             }
                         } else {
-                            eval_arrival(&mut eng, &text);
+                            self.script_srcs[slot] = Some(text);
                         }
-                    } else {
-                        self.script_srcs[slot] = Some(text);
                     }
                 }
                 SubTag::Img(u) => {
-                    self.img_bodies.insert(u.as_str(), resp.body);
+                    if subresp_security_allows(&self.url, &u, FetchDest::Image, &resp) {
+                        self.img_bodies.insert(u.as_str(), resp.body);
+                    }
                 }
                 SubTag::Frame(u) => {
-                    frames.push(store_frame(&self.url, &self.cookies, &u, &resp));
+                    // XFO/CSP `frame-ancestors` (étape 134) :
+                    // la réponse peut interdire l'embarquement.
+                    if explorer_net::policy::frame_embedding_allowed(&self.url, &u, &resp) {
+                        frames.push(store_frame(&self.url, &self.cookies, &u, &resp));
+                    }
                 } // SubTag reste inchangé — `referrerpolicy` vit
                   // dans la `Request`, pas dans le routage.
             }
@@ -747,6 +764,11 @@ impl SubJob {
             if !(200..300).contains(&resp.status) {
                 return;
             }
+            // En-têtes de sécurité de réponse (étape 134) —
+            // même règle que la vague (dest `style`).
+            if !subresp_security_allows(&self.url, &url, FetchDest::Style, &resp) {
+                return;
+            }
             let text = decode_stylesheet(&resp.body, &resp.headers);
             for sub in parse_stylesheet(&text).imports {
                 self.expand_import(&sub, &url, depth + 1, ctx).await;
@@ -837,6 +859,9 @@ impl SubJob {
                 if !(200..300).contains(&resp.status) {
                     continue;
                 }
+                if !subresp_security_allows(&self.url, &url, FetchDest::Image, &resp) {
+                    continue;
+                }
                 if is_mask {
                     self.mask_aliases.insert(raw, url.to_string());
                 } else {
@@ -890,6 +915,9 @@ impl SubJob {
                     continue;
                 };
                 if !(200..300).contains(&resp.status) {
+                    continue;
+                }
+                if !subresp_security_allows(&self.url, &req.url, FetchDest::Font, &resp) {
                     continue;
                 }
                 let Some(data) = decode_font(&resp.body) else {
@@ -1183,6 +1211,24 @@ pub(crate) fn store_frame(page: &Url, cookies: &CookieJar, u: &Url, resp: &Respo
         dom,
         title,
     }
+}
+
+/// En-têtes de sécurité de réponse sur une sous-ressource
+/// `no-cors` (étape 134) : `X-Content-Type-Options: nosniff`
+/// (script/style → `Content-Type` déclaré correct, MIME
+/// sniffing §5) + `Cross-Origin-Resource-Policy`
+/// (`same-origin`/`same-site` restreignent à la page
+/// initiatrice). `true` = la réponse est admise ; sinon la
+/// sous-ressource est simplement abandonnée (jamais d'échec
+/// propagé — même dégradation qu'un 404).
+pub(crate) fn subresp_security_allows(
+    page: &Url,
+    url: &Url,
+    dest: FetchDest,
+    resp: &Response,
+) -> bool {
+    explorer_net::policy::nosniff_allows(dest, resp)
+        && explorer_net::policy::corp_allows(page, url, resp)
 }
 
 /// Profondeur max d'une chaîne `@import` (étape 96) —

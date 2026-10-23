@@ -7772,3 +7772,261 @@ async fn nav_get_emits_no_origin() {
         "GET de navigation : aucun Origin (méthode sûre)"
     );
 }
+
+// ===== Étape 134 : en-têtes de sécurité de réponse —
+// `nosniff`, `X-Frame-Options`/CSP `frame-ancestors`, CORP =====
+
+/// `nosniff` + `Content-Type: text/plain` sur `<script src>` :
+/// la réponse est rejetée — le script n'est pas évalué, le DOM
+/// reste intact (même surface qu'une page sans le script).
+#[tokio::test]
+async fn nosniff_blocks_mismatched_script() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script src=\"/s.js\"></script></body></html>",
+    );
+    t.route_headers(
+        "/s.js",
+        200,
+        "document.getElementById('x').textContent='EXT'",
+        &[
+            ("content-type", "text/plain"),
+            ("x-content-type-options", "nosniff"),
+        ],
+    );
+    t.route(
+        "/avant",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div></body></html>",
+    );
+    t.route(
+        "/ext",
+        200,
+        "<!doctype html><html><body><div id=\"x\">EXT</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let blocked = s.open_tab();
+    s.navigate(blocked, "http://h.test/p").await.unwrap();
+    let plain = s.open_tab();
+    s.navigate(plain, "http://h.test/avant").await.unwrap();
+    let mutated = s.open_tab();
+    s.navigate(mutated, "http://h.test/ext").await.unwrap();
+
+    assert!(t.paths().contains(&"/s.js".to_string()), "fetch émis");
+    assert_eq!(
+        s.frame_png(blocked),
+        s.frame_png(plain),
+        "script rejeté : page intacte"
+    );
+    assert_ne!(
+        s.frame_png(blocked),
+        s.frame_png(mutated),
+        "le script aurait muté le DOM"
+    );
+}
+
+/// Contrôle : `nosniff` + `Content-Type: text/javascript` →
+/// le script passe et mute le DOM.
+#[tokio::test]
+async fn nosniff_allows_js_mime_script() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script src=\"/s.js\"></script></body></html>",
+    );
+    t.route_headers(
+        "/s.js",
+        200,
+        "document.getElementById('x').textContent='EXT'",
+        &[
+            ("content-type", "text/javascript"),
+            ("x-content-type-options", "nosniff"),
+        ],
+    );
+    t.route(
+        "/ext",
+        200,
+        "<!doctype html><html><body><div id=\"x\">EXT</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let live = s.open_tab();
+    s.navigate(live, "http://h.test/p").await.unwrap();
+    let mutated = s.open_tab();
+    s.navigate(mutated, "http://h.test/ext").await.unwrap();
+    assert_eq!(
+        s.frame_png(live),
+        s.frame_png(mutated),
+        "script admis : DOM muté"
+    );
+}
+
+/// `nosniff` sur `<link rel=stylesheet>` servi `text/plain` :
+/// la feuille est rejetée — la page rend comme sans elle.
+#[tokio::test]
+async fn nosniff_blocks_mismatched_stylesheet() {
+    let (mut s, t) = test_session();
+    let page = "<!doctype html><html><head>\
+        <link rel=\"stylesheet\" href=\"/s.css\"></head>\
+        <body><div>boite</div></body></html>";
+    let css = "div{background:#ff0000;width:100px;height:100px}";
+    t.route("/p", 200, page);
+    t.route_headers(
+        "/s.css",
+        200,
+        css,
+        &[
+            ("content-type", "text/plain"),
+            ("x-content-type-options", "nosniff"),
+        ],
+    );
+    t.route(
+        "/plain",
+        200,
+        "<!doctype html><html><body><div>boite</div></body></html>",
+    );
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/plain").await.unwrap();
+    assert_eq!(
+        s.frame_png(a),
+        s.frame_png(b),
+        "feuille nosniff rejetée : page non stylée"
+    );
+}
+
+/// `X-Frame-Options: DENY` sur la réponse d'un `<iframe>` :
+/// la sous-navigation est refusée, aucun contexte commis.
+#[tokio::test]
+async fn xfo_deny_blocks_iframe() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME);
+    t.route_headers("/f", 200, FRAME_DOC, &[("x-frame-options", "deny")]);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(t.paths().contains(&"/f".to_string()), "iframe fetchée");
+    assert_eq!(s.tab_frames(id), Vec::new(), "XFO deny : pas de contexte");
+}
+
+/// `X-Frame-Options: SAMEORIGIN` : l'embarquement same-origin
+/// passe, l'ancêtre cross-origin est refusé.
+#[tokio::test]
+async fn xfo_sameorigin_blocks_cross_ancestor() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME);
+    t.route(
+        "/cross",
+        200,
+        "<html><body><iframe src=\"http://cdn.test/f\"></iframe></body></html>",
+    );
+    t.route_headers("/f", 200, FRAME_DOC, &[("x-frame-options", "sameorigin")]);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(s.tab_frames(id).len(), 1, "same-origin : embarqué");
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/cross").await.unwrap();
+    assert_eq!(
+        s.tab_frames(b),
+        Vec::new(),
+        "XFO sameorigin : ancêtre cross-origin refusé"
+    );
+}
+
+/// CSP `frame-ancestors 'none'` refuse même un ancêtre
+/// same-origin ; `'self'` l'admet.
+#[tokio::test]
+async fn csp_frame_ancestors_governs_embedding() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME);
+    t.route_headers(
+        "/none",
+        200,
+        "<html><body><iframe src=\"/f-none\"></iframe></body></html>",
+        &[],
+    );
+    t.route(
+        "/selfp",
+        200,
+        "<html><body><iframe src=\"/f-self\"></iframe></body></html>",
+    );
+    t.route_headers(
+        "/f-none",
+        200,
+        FRAME_DOC,
+        &[("content-security-policy", "frame-ancestors 'none'")],
+    );
+    t.route_headers(
+        "/f-self",
+        200,
+        FRAME_DOC,
+        &[("content-security-policy", "frame-ancestors 'self'")],
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/none").await.unwrap();
+    assert_eq!(s.tab_frames(id), Vec::new(), "'none' : refusé");
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/selfp").await.unwrap();
+    assert_eq!(s.tab_frames(b).len(), 1, "'self' same-origin : admis");
+}
+
+/// CSP `frame-ancestors` présent → il l'emporte sur
+/// `X-Frame-Options: deny` (CSP supplante l'en-tête legacy).
+#[tokio::test]
+async fn csp_frame_ancestors_overrides_xfo() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME);
+    t.route_headers(
+        "/f",
+        200,
+        FRAME_DOC,
+        &[
+            ("x-frame-options", "deny"),
+            ("content-security-policy", "frame-ancestors *"),
+        ],
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(s.tab_frames(id).len(), 1, "CSP autorise → XFO ignoré");
+}
+
+/// CORP `same-origin` sur un script cross-origin : la
+/// réponse est abandonnée — le script n'est pas évalué.
+#[tokio::test]
+async fn corp_same_origin_blocks_cross_script() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script src=\"http://cdn.test/s.js\"></script></body></html>",
+    );
+    t.route_headers(
+        "/s.js",
+        200,
+        "document.getElementById('x').textContent='EXT'",
+        &[("cross-origin-resource-policy", "same-origin")],
+    );
+    t.route(
+        "/avant",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/avant").await.unwrap();
+    assert_eq!(
+        s.frame_png(a),
+        s.frame_png(b),
+        "CORP same-origin : script cross-origin rejeté"
+    );
+}

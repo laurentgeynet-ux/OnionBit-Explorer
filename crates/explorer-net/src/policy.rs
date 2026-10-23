@@ -908,3 +908,192 @@ impl HttpTransport for CorsTransport {
         self.inner.fetch_stream(req).await
     }
 }
+
+// ---------------------------------------------------------------------
+// En-têtes de sécurité de réponse (étape 134)
+// ---------------------------------------------------------------------
+
+/// MIMEs JavaScript (table WHATWG « JavaScript MIME type » —
+/// utilisée par `nosniff` et module scripts).
+fn is_js_mime(mime: &str) -> bool {
+    matches!(
+        mime,
+        "application/ecmascript"
+            | "application/javascript"
+            | "application/x-ecmascript"
+            | "application/x-javascript"
+            | "text/ecmascript"
+            | "text/javascript"
+            | "text/javascript1.0"
+            | "text/javascript1.1"
+            | "text/javascript1.2"
+            | "text/javascript1.3"
+            | "text/javascript1.4"
+            | "text/javascript1.5"
+            | "text/jscript"
+            | "text/livescript"
+            | "text/x-ecmascript"
+            | "text/x-javascript"
+    )
+}
+
+/// `X-Content-Type-Options: nosniff` (étape 134, spec MIME
+/// sniffing §5) — la réponse déclare honorer son
+/// `Content-Type` : pour une destination `script` la MIME
+/// doit être JavaScript, pour `style` `text/css` ; tout autre
+/// destination est inchangée (images, fonts…). `true` =
+/// admissible. `Content-Type` absent ou invalide sous
+/// `nosniff` = échec de MIME (bloqué, spec).
+#[must_use]
+pub fn nosniff_allows(dest: FetchDest, resp: &Response) -> bool {
+    if !resp.nosniff() {
+        return true;
+    }
+    if !matches!(dest, FetchDest::Script | FetchDest::Style) {
+        return true;
+    }
+    let Some(ct) = resp.content_type() else {
+        return false;
+    };
+    let mime = ct
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    match dest {
+        FetchDest::Script => is_js_mime(&mime),
+        FetchDest::Style => mime == "text/css",
+        _ => true,
+    }
+}
+
+/// `Cross-Origin-Resource-Policy` (étape 134, Fetch §4.7) —
+/// sur une sous-ressource `no-cors` : `same-origin` n'admet
+/// que l'origine de la page, `same-site` son site
+/// (`schéma://registrable`, même notion que `SameSite`) ;
+/// `cross-origin`, en-tête absent ou valeur inconnue →
+/// admis. `page`/`resp_url` : URL de la page initiatrice et
+/// de la ressource. `true` = admissible.
+#[must_use]
+pub fn corp_allows(page: &Url, resp_url: &Url, resp: &Response) -> bool {
+    let Some(v) = resp.header("cross-origin-resource-policy") else {
+        return true;
+    };
+    match v.trim().to_ascii_lowercase().as_str() {
+        "same-origin" => page.origin() == resp_url.origin(),
+        "same-site" => {
+            let a = crate::cookies::partition_key(page);
+            let b = crate::cookies::partition_key(resp_url);
+            a.is_some() && a == b
+        }
+        _ => true,
+    }
+}
+
+/// Peut-on embarquer `resp` en sous-contexte sous `page`
+/// (étape 134) — `X-Frame-Options` + CSP `frame-ancestors`
+/// sur la réponse de la sous-navigation (`<iframe src>`,
+/// `FetchDest::Iframe`). CSP `frame-ancestors` l'emporte dès
+/// qu'une directive existe (CSP §frame-ancestors : XFO
+/// ignoré en sa présence) ; chaque en-tête `Content-Security-
+/// Policy` doit autoriser (un CSP plus restrictif réduit).
+/// XFO : `deny` → jamais ; `sameorigin` → origine de la page
+/// = origine de la ressource ; `allow-from` obsolète ignoré
+/// (navigateurs modernes le passent sous silence) ; valeurs
+/// inconnues → pas de restriction. Sans en-tête → admis.
+#[must_use]
+pub fn frame_embedding_allowed(page: &Url, resp_url: &Url, resp: &Response) -> bool {
+    let mut csp_seen = false;
+    for csp in resp.headers_all("content-security-policy") {
+        for directive in csp.split(';') {
+            let mut tokens = directive.split_whitespace();
+            let Some(name) = tokens.next() else { continue };
+            if !name.eq_ignore_ascii_case("frame-ancestors") {
+                continue;
+            }
+            csp_seen = true;
+            // Aucune source ne matche → la directive refuse.
+            if !tokens.any(|src| fa_source_matches(src, page, resp_url)) {
+                return false;
+            }
+        }
+    }
+    if csp_seen {
+        return true;
+    }
+    for v in resp.headers_all("x-frame-options") {
+        match v.trim().to_ascii_lowercase().as_str() {
+            "deny" => return false,
+            "sameorigin" if page.origin() != resp_url.origin() => return false,
+            _ => {}
+        }
+    }
+    true
+}
+
+/// Une source `frame-ancestors` matche-t-elle `page` —
+/// ancêtre candidat (CSP §6.6.2.10 « matching a source
+/// expression »), sous-ensemble borné : `'none'` (jamais),
+/// `*` (tout hôte http(s)), `'self'` (origine de la
+/// **ressource** embarquée), scheme-source `https:`,
+/// host-source `[scheme://][*.]host[:port]` (le `*` de tête
+/// admet le hôte et ses sous-domaines ; chemin ignoré —
+/// la spec ne conserve que l'hôte). Les sources `data:`,
+/// `'unsafe-*'`, nonce/hash n'ont pas de sens ici.
+fn fa_source_matches(src: &str, page: &Url, resp_url: &Url) -> bool {
+    let s = src.trim().to_ascii_lowercase();
+    if s == "*" {
+        return matches!(page.scheme(), "http" | "https");
+    }
+    if s == "'self'" {
+        return page.origin() == resp_url.origin();
+    }
+    if s == "'none'" || s.is_empty() {
+        return false;
+    }
+    // Scheme-source : `https:`/`http:` (sans `//`).
+    if let Some(scheme) = s.strip_suffix(':') {
+        if !scheme.is_empty()
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+            && !scheme.contains('.')
+        {
+            return page.scheme() == scheme;
+        }
+    }
+    // Host-source : `[scheme://][*.]host[:port][/path…]`.
+    let (scheme, rest) = match s.split_once("://") {
+        Some((sch, rest)) => (Some(sch), rest),
+        None => (None, s.as_str()),
+    };
+    let host_port = rest.split('/').next().unwrap_or("");
+    let (host_pat, port_pat) = match host_port.split_once(':') {
+        Some((h, p)) => (h, Some(p)),
+        None => (host_port, None),
+    };
+    let page_host = page.host();
+    let host_ok = if let Some(suffix) = host_pat.strip_prefix("*.") {
+        page_host == suffix || page_host.ends_with(&format!(".{suffix}"))
+    } else {
+        page_host == host_pat
+    };
+    if !host_ok {
+        return false;
+    }
+    if let Some(sch) = scheme {
+        if page.scheme() != sch {
+            return false;
+        }
+    }
+    if let Some(p) = port_pat {
+        let Ok(want) = p.parse::<u16>() else {
+            return false;
+        };
+        if page.effective_port() != Some(want) {
+            return false;
+        }
+    }
+    true
+}

@@ -794,6 +794,54 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `origin_on_same_origin_post`,
   `origin_opaque_serializes_null`.
 
+- **Étape 134 — en-têtes de
+  sécurité de réponse**
+  (`explorer-net`,
+  `explorer-core` — cap « web
+  réel sécurisé ») :
+  `policy::nosniff_allows`
+  applique `X-Content-Type-
+  Options: nosniff` — dest
+  `script` exige une MIME
+  JavaScript (table WHATWG),
+  `style` exige `text/css`,
+  `Content-Type` absent =
+  échec ; autres destinations
+  inchangées.
+  `policy::corp_allows`
+  applique `Cross-Origin-
+  Resource-Policy` aux sous-
+  ressources `no-cors` :
+  `same-origin`/`same-site`
+  restreignent à l'origine/
+  site de la page initiatrice.
+  `policy::frame_embedding_
+  allowed` applique
+  `X-Frame-Options` (`deny`,
+  `sameorigin`, `allow-from`
+  obsolète ignoré) et CSP
+  `frame-ancestors`
+  (`'none'`, `'self'`, scheme-
+  source, host-source avec
+  `*.`/`port`) sur les
+  navigations `<iframe>` — CSP
+  supplante XFO dès qu'une
+  directive existe. Enforcement
+  aux points d'admission :
+  vague de sous-ressources,
+  `@import`, graphe de modules,
+  fonts, fonds CSS, iframes ;
+  une réponse refusée est
+  abandonnée comme un échec
+  réseau. Régressions
+  `nosniff_*`/`xfo_*`/
+  `csp_frame_ancestors_*`/
+  `corp_*` (8 tests session)
+  + matrices `nosniff_matrix`,
+  `corp_matrix`,
+  `frame_embedding_matrix`
+  (policy).
+
 ### Fixed
 
 - **Étape 122 — `root_font_size`

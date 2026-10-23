@@ -2892,6 +2892,30 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `initiator_headers_policy`.
   3 tests session + 2 policy.
 
+- [x] **Étape 134. En-têtes de
+  sécurité de réponse** :
+  `nosniff` (dest `script` →
+  MIME JavaScript, `style` →
+  `text/css`, `Content-Type`
+  absent = échec) ; CORP
+  `same-origin`/`same-site`
+  sur les sous-ressources
+  `no-cors` ; `X-Frame-Options`
+  `deny`/`sameorigin` + CSP
+  `frame-ancestors`
+  (`'none'`/`'self'`/scheme/
+  host-source, `*` — CSP
+  l'emporte sur XFO) sur les
+  navigations `<iframe>`.
+  Enforcement aux points
+  d'admission : vague de sous-
+  ressources, `@import`,
+  modules, fonts, fonds ;
+  réponse refusée = ressource
+  abandonnée (même surface
+  qu'un échec réseau).
+  8 tests session + 3 policy.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
