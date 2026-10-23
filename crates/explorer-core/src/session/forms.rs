@@ -534,7 +534,12 @@ pub(crate) fn form_multipart_encode(entries: &[FormEntry], boundary: &str) -> Ve
 /// (miroir) : `POST` selon `enctype` (`multipart/form-data`
 /// ou `urlencoded` — `text/plain` retombe sur urlencoded,
 /// déviation ADR-0014), sinon `GET` en query.
+/// `action` résout contre `base` (`<base href>` ou URL du
+/// document, étape 135) ; `page` porte l'initiateur
+/// (`NavFrom` → `Referer`/`SameSite` = la page émettrice,
+/// pas sa base).
 pub(crate) fn form_request(
+    page: &Url,
     base: &Url,
     action: &str,
     method: &str,
@@ -563,7 +568,7 @@ pub(crate) fn form_request(
             // Soumission = navigation initiée par la page —
             // `SameSite=Lax` n'est pas envoyé sur POST
             // cross-site (méthode non sûre, étape 66).
-            initiator: Some(Initiator::NavFrom(base.clone())),
+            initiator: Some(Initiator::NavFrom(page.clone())),
             fetch_dest: explorer_net::http::FetchDest::Document,
             fetch_mode: explorer_net::http::FetchMode::NoCors,
             // `fetch_user` est marqué par le dispatch
@@ -588,7 +593,7 @@ pub(crate) fn form_request(
         format!("{action}{sep}{qs}")
     };
     let mut req = Request::get(Url::resolve(base, &target).ok()?);
-    req.initiator = Some(Initiator::NavFrom(base.clone()));
+    req.initiator = Some(Initiator::NavFrom(page.clone()));
     req.fetch_dest = explorer_net::http::FetchDest::Document;
     Some(req)
 }
@@ -597,6 +602,7 @@ pub(crate) fn form_request(
 /// déjà collectés côté miroir en `(name, value)` plats
 /// (les fichiers y portent leur nom de fichier).
 pub(crate) fn script_form_request(
+    page: &Url,
     base: &Url,
     method: &str,
     action: &str,
@@ -607,7 +613,7 @@ pub(crate) fn script_form_request(
         .iter()
         .map(|(n, v)| FormEntry::Text(n.clone(), v.clone()))
         .collect();
-    form_request(base, action, method, enctype, &entries)
+    form_request(page, base, action, method, enctype, &entries)
 }
 
 /// Frontière multipart pseudo-unique : 96 bits d'horloge +

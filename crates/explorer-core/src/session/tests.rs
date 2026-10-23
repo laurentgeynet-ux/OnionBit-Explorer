@@ -147,6 +147,8 @@ fn paintless_snapshot_repairs_on_restore() {
             frames: Vec::new(),
             frame_nodes: Vec::new(),
             referrer_policy: None,
+            base_url: None,
+            base_target: None,
         });
     }
 
@@ -232,6 +234,8 @@ async fn back_during_inflight_nav_restores_previous() {
             frames: Vec::new(),
             frame_nodes: Vec::new(),
             referrer_policy: None,
+            base_url: None,
+            base_target: None,
         });
     }
 

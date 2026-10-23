@@ -404,7 +404,10 @@ impl Tab {
             frames: std::mem::take(&mut self.frames),
             frame_nodes: std::mem::take(&mut self.frame_nodes),
             frame_bitmaps: std::mem::take(&mut self.frame_bitmaps),
-            base_url: self.url.clone(),
+            // `<base href>` résolu (étape 135) ou URL du
+            // document — base de toutes les résolutions
+            // relatives de la passe de peinture détachée.
+            base_url: self.base_url.clone().or_else(|| self.url.clone()),
             linked_sheets: std::mem::take(&mut self.linked_sheets),
             prev_styles: std::mem::take(&mut self.prev_styles),
             transitions: std::mem::take(&mut self.transitions),

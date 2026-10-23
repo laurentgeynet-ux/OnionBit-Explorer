@@ -163,6 +163,15 @@ pub(crate) struct Tab {
     /// toutes les requêtes émises par la page) ; `None` =
     /// défaut plateforme. Gelée/restaurée avec le bfcache.
     referrer_policy: Option<explorer_net::http::ReferrerPolicy>,
+    /// `<base href>` résolu du document commis (étape 135)
+    /// — base de résolution des URLs relatives (liens,
+    /// formulaires, médias, `fetch`) ; `None` = `url`
+    /// reste la base. La page garde `url` comme identité/
+    /// origine/`Referer`. Gelée/restaurée avec le bfcache.
+    base_url: Option<Url>,
+    /// `<base target>` brut (étape 135) — cible par défaut
+    /// des `<a>`/`<form>` sans `target` propre.
+    base_target: Option<String>,
     /// Position dans `hist`.
     hist_idx: usize,
     /// La page **affichée** provient d'une navigation `push`
@@ -480,6 +489,10 @@ pub(crate) struct PageSnapshot {
     /// restaurée : les requêtes émises après un retour
     /// bfcache suivent la même politique.
     referrer_policy: Option<explorer_net::http::ReferrerPolicy>,
+    /// `<base href>`/`target` gelés (étape 135) — la base de
+    /// résolution survit à un aller-retour bfcache.
+    base_url: Option<Url>,
+    base_target: Option<String>,
 }
 
 /// Session : transport + fontes injectés, onglets, viewport,
@@ -885,6 +898,8 @@ impl Session {
                 hist: Vec::new(),
                 last_req: None,
                 referrer_policy: None,
+                base_url: None,
+                base_target: None,
                 hist_idx: 0,
                 hist_pending: false,
                 scroll_y: 0.0,

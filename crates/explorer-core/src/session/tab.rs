@@ -51,6 +51,8 @@ impl Tab {
             frames: std::mem::take(&mut self.frames),
             frame_nodes: std::mem::take(&mut self.frame_nodes),
             referrer_policy: self.referrer_policy.take(),
+            base_url: self.base_url.take(),
+            base_target: self.base_target.take(),
         };
         self.scroll_y = 0.0;
         self.doc_h = 0.0;
@@ -108,6 +110,8 @@ impl Tab {
         self.frames = snap.frames;
         self.frame_nodes = snap.frame_nodes;
         self.referrer_policy = snap.referrer_policy;
+        self.base_url = snap.base_url;
+        self.base_target = snap.base_target;
         self.transitions.clear();
         // Idem animations : la restauration repart sur les
         // déclarations — lecture réenregistrée au premier
@@ -118,5 +122,12 @@ impl Tab {
         // La position restaurée a son entrée d'historique —
         // plus de fenêtre « en vol » (étape 84).
         self.hist_pending = false;
+    }
+
+    /// Base de résolution des URLs relatives (étape 135) —
+    /// `<base href>` du document, ou son URL ; `None` = pas
+    /// de document chargé.
+    pub(crate) fn nav_base(&self) -> Option<&Url> {
+        self.base_url.as_ref().or(self.url.as_ref())
     }
 }

@@ -444,7 +444,7 @@ impl Session {
             // proposé à l'UI — rien n'est committé, la page
             // courante reste en place.
             Ok(NavOutcome::Download(dl)) => {
-                self.offer_download(tab, dl);
+                self.offer_download(tab, *dl);
                 return Ok(None);
             }
             Ok(NavOutcome::Document(d, t)) => (d, t),
@@ -475,7 +475,7 @@ impl Session {
             ms = u64::try_from(t_nav.elapsed().as_millis()).unwrap_or(u64::MAX),
             "nav: fetch+parse ok → peinture"
         );
-        let mut sub = match self.nav_apply(tab, tail, done) {
+        let mut sub = match self.nav_apply(tab, *tail, *done) {
             Ok(Some(s)) => s,
             Ok(None) => return Ok(None),
             Err(e) => {
@@ -681,17 +681,24 @@ impl Session {
             html,
             title,
             referrer_policy,
+            base_url,
+            base_target,
         } = done;
         if let Some(s) = &self.store {
             s.record_visit(&url.to_string(), title.as_deref());
         }
+        // Base de résolution effective (étape 135) :
+        // `<base href>` ou l'URL du document — la page
+        // (`url`) reste l'initiateur/`Referer`/ancre
+        // mixed-content de toutes les requêtes émises.
+        let base = base_url.clone().unwrap_or_else(|| url.clone());
         let scripting = self.js_factory.is_some();
         let SubPlan {
             sheets: sheet_urls,
             scripts,
             imgs: img_urls,
             frames: frame_urls,
-        } = self.plan_subresources(&dom, &url, scripting);
+        } = self.plan_subresources(&dom, &url, &base, scripting);
         let doc_sheets = collect_style_sheets(&dom);
         // Issue #6 : les `<script type="importmap">` pilotent le
         // prefetch des bare specifiers (`import_specs` — même
@@ -741,6 +748,11 @@ impl Session {
             // Politique `Referer` du nouveau document (étape
             // 132) — gouverne les requêtes qu'il émettra.
             entry.referrer_policy = referrer_policy;
+            // `<base>` du nouveau document (étape 135) —
+            // résolution des liens, formulaires, médias et
+            // `fetch` relatifs ; `None` = l'URL reste base.
+            entry.base_url = base_url;
+            entry.base_target = base_target;
             entry.scroll_y = 0.0;
             entry.focused = None;
             entry.focused_key = None;
@@ -785,6 +797,7 @@ impl Session {
             cookies: Arc::clone(&self.cookies),
             page: url,
             page_policy: referrer_policy,
+            doc_base: base,
             sheet_urls,
             scripts,
             img_urls,
@@ -929,7 +942,7 @@ impl Session {
                     let url = self
                         .tabs
                         .get(&tab)
-                        .and_then(|t| t.url.as_ref())
+                        .and_then(|t| t.nav_base())
                         .and_then(|b| Url::resolve(b, &href).ok());
                     if let Some(u) = url {
                         return Some(ScriptNav::To(u));
@@ -948,10 +961,24 @@ impl Session {
                     enctype,
                     fields,
                 } => {
-                    let base = self.tabs.get(&tab).and_then(|t| t.url.as_ref());
-                    if let Some(req) = base
-                        .and_then(|b| script_form_request(b, &method, &action, &enctype, &fields))
-                    {
+                    // `action` résout contre la base document
+                    // (`<base href>`, étape 135) ; l'initiateur
+                    // reste l'URL de la page (voir
+                    // `script_form_request`).
+                    let (page, base) = self
+                        .tabs
+                        .get(&tab)
+                        .map_or((None, None), |t| (t.url.as_ref(), t.nav_base()));
+                    if let Some(req) = base.and_then(|b| {
+                        script_form_request(
+                            page.unwrap_or(b),
+                            b,
+                            &method,
+                            &action,
+                            &enctype,
+                            &fields,
+                        )
+                    }) {
                         return Some(ScriptNav::Submit(Box::new(req)));
                     }
                 }
@@ -1025,16 +1052,26 @@ impl Session {
     /// CORS porte `Origin` même en verbe safelisté (spec
     /// Fetch) ; `Cookie` injecté same-origin uniquement
     /// (`credentials` cross-origin hors MVP).
+    /// `page` = URL du document (initiateur, `Referer`,
+    /// mixed-content, `Origin`) ; `base` = base de
+    /// résolution effective (`<base href>` ou `page`,
+    /// étape 135 — `fetch('rel')` résout contre la base
+    /// document, spec Fetch « API base URL »).
+    #[allow(clippy::too_many_arguments)] // la forme
+                                         // requête (méthode/URL/en-têtes/corps/politique) est
+                                         // intrinsèquement large — regrouper en struct n'ajoute
+                                         // que de l'indirection au seul appelant `drain_script_net`.
     pub(crate) fn script_request(
         &self,
         page: &Url,
+        base: &Url,
         method: &str,
         raw_url: &str,
         headers: &[(String, String)],
         body: Option<&str>,
         policy: Option<ReferrerPolicy>,
     ) -> Option<(Request, bool)> {
-        let url = Url::resolve(page, raw_url.trim()).ok()?;
+        let url = Url::resolve(base, raw_url.trim()).ok()?;
         if is_mixed_content(page, &url) {
             return None;
         }

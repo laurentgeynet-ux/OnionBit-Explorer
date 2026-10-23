@@ -143,18 +143,27 @@ pub(crate) struct NavDone {
     /// `<meta name=referrer>` (la meta, traitée après les
     /// en-têtes, l'emporte) ; `None` = défaut plateforme.
     pub(crate) referrer_policy: Option<ReferrerPolicy>,
+    /// `<base href>` résolu contre l'URL du document
+    /// (étape 135) — `None` = la base de résolution reste
+    /// l'URL du document.
+    pub(crate) base_url: Option<Url>,
+    /// `<base target>` brut (étape 135) — cible par défaut
+    /// des `<a>`/`<form>` sans `target` propre.
+    pub(crate) base_target: Option<String>,
 }
 
 /// Issue de [`NavJob::run`] (étape 70) : document à commettre
 /// ou téléchargement bufferisé à proposer.
 pub(crate) enum NavOutcome {
     /// Document affichable — commit `nav_apply` habituel.
-    Document(NavDone, NavTail),
+    /// Boxé : `NavDone` (DOM + métadonnées) écrase la
+    /// différence de taille avec `Download` (étape 135).
+    Document(Box<NavDone>, Box<NavTail>),
     /// Corps non affichable bufferisé — la session le garde
     /// en attente d'acceptation (`PendingDownload`, queue de
     /// navigation incluse pour le rejeu « dump document »
     /// d'un rejet).
-    Download(super::downloads::PendingDownload),
+    Download(Box<super::downloads::PendingDownload>),
 }
 
 /// Métadonnées de détection téléchargement (étape 70) —
@@ -330,11 +339,17 @@ impl NavJob {
         tb.finish();
         let dom = tb.into_dom();
         let title = extract_title(&dom);
+        // `<base>` résolu contre l'URL de la réponse (étape
+        // 135) — la résolution des sous-ressources, liens et
+        // formulaires suit la base déclarée.
+        let (base_url, base_target) = document_base(&dom, &resolved);
         let done = NavDone {
             url: resolved,
             // `<meta name=referrer>` l'emporte sur
             // l'en-tête (traitée après lui, spec).
             referrer_policy: meta_referrer_policy(&dom).or(header_policy),
+            base_url,
+            base_target,
             dom,
             html,
             title,
@@ -345,7 +360,7 @@ impl NavJob {
             prev_title: self.prev_title.take(),
             req: self.req.clone(),
         };
-        Ok(NavOutcome::Document(done, tail))
+        Ok(NavOutcome::Document(Box::new(done), Box::new(tail)))
     }
 
     /// Corps non affichable (étape 70) : bufferisé avec
@@ -374,21 +389,23 @@ impl NavJob {
                 total: meta.total,
             });
         }
-        Ok(NavOutcome::Download(super::downloads::PendingDownload {
-            tail: NavTail {
-                epoch: self.epoch,
-                push: self.push,
-                prev_title: self.prev_title.take(),
-                req: self.req.clone(),
+        Ok(NavOutcome::Download(Box::new(
+            super::downloads::PendingDownload {
+                tail: NavTail {
+                    epoch: self.epoch,
+                    push: self.push,
+                    prev_title: self.prev_title.take(),
+                    req: self.req.clone(),
+                },
+                id: dl_id,
+                tab: self.tab,
+                url: resolved,
+                filename_hint: meta.filename_hint,
+                mime: meta.mime,
+                size: meta.total,
+                body,
             },
-            id: dl_id,
-            tab: self.tab,
-            url: resolved,
-            filename_hint: meta.filename_hint,
-            mime: meta.mime,
-            size: meta.total,
-            body,
-        }))
+        )))
     }
 
     /// `about:blank` (étape 88) : le document vide canonique
@@ -409,14 +426,16 @@ impl NavJob {
             req: self.req.clone(),
         };
         Some(NavOutcome::Document(
-            NavDone {
+            Box::new(NavDone {
                 url: self.req.url.clone(),
                 dom: tb.into_dom(),
                 html: String::new(),
                 title: None,
                 referrer_policy: None,
-            },
-            tail,
+                base_url: None,
+                base_target: None,
+            }),
+            Box::new(tail),
         ))
     }
 }
@@ -468,6 +487,11 @@ pub(crate) struct SubJob {
     /// sauf attribut `referrerpolicy=` par élément
     /// (`<iframe>` seul honoré v1).
     pub(crate) page_policy: Option<ReferrerPolicy>,
+    /// Base de résolution des URLs relatives du document
+    /// (étape 135) — `<base href>` résolu, `url` sinon.
+    /// `self.url` reste la page (initiateur, `Referer`,
+    /// mixed-content) ; `doc_base` ne sert qu'à résoudre.
+    pub(crate) doc_base: Url,
     /// Plan de collecte — URLs résolues à `nav_apply`.
     pub(crate) sheet_urls: Vec<Url>,
     pub(crate) scripts: Vec<ScriptItem>,
@@ -823,7 +847,7 @@ impl SubJob {
                 collect_decl_urls(&rules, &env, BG_PROPS, &mut bg);
                 collect_decl_urls(&rules, &env, MASK_PROPS, &mut mask);
             }
-            decl_urls.push((self.url.clone(), bg, mask));
+            decl_urls.push((self.doc_base.clone(), bg, mask));
         }
         'slots: for (base, bg_urls, mask_urls) in decl_urls {
             for (raw, is_mask) in bg_urls
@@ -897,7 +921,7 @@ impl SubJob {
                 let FontSrc::Url(href) = src else {
                     continue;
                 };
-                let Ok(url) = Url::resolve(&self.url, href) else {
+                let Ok(url) = Url::resolve(&self.doc_base, href) else {
                     continue;
                 };
                 let mut req = Request::get(url);
@@ -950,7 +974,7 @@ impl SubJob {
             // Entrée inline : nom synthétique unique, aliasé
             // vers la page pour la résolution des deps.
             let (name, base_u) = item.src.clone().map_or_else(
-                || (format!("inline:{i}"), self.url.clone()),
+                || (format!("inline:{i}"), self.doc_base.clone()),
                 |u| (u.as_str(), u),
             );
             entries.push((name, base_u, src.to_string()));

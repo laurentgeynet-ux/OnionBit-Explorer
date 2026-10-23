@@ -2916,6 +2916,44 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **Étape 135. `<base
+  href>`/`<base target>`** :
+  premier `<base href>` en
+  ordre document fixe la base
+  de résolution des URLs
+  relatives — sous-ressources
+  (`link`/`img`/`script`/
+  `<iframe>`/fonts/fonds/
+  `mask-image`/specificateurs
+  de modules inline), clic
+  `<a>`, `<form action>`,
+  `location.href` et
+  `form.submit()` scriptés,
+  `fetch`/`XHR`, médias
+  `<video>`/`<audio>`, images
+  de la passe de peinture
+  détachée. `<base target>`
+  fixe la cible par défaut
+  des `<a>`/`<form>` sans
+  `target` propre. Base
+  invalide → repli sur l'URL
+  du document ; second
+  `<base>` sans effet.
+  Distinction conservée :
+  `url` = page (initiateur,
+  `Referer`, `Origin`,
+  mixed-content, historique),
+  `base_url` = résolution
+  seule — gelée/restaurée
+  avec le bfcache, portée par
+  `Tab`/`PageSnapshot`/
+  `PaintPayload`/`SubJob.
+  doc_base`. `NavOutcome`
+  boxé (Box<NavDone/NavTail/
+  PendingDownload> — croît
+  avec les métadonnées de
+  document). 8 tests session.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

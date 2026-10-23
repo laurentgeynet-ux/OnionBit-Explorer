@@ -77,7 +77,7 @@ pub async fn navigate_shared(
         // — rien de committé, la page courante reste.
         Ok(NavOutcome::Download(dl)) => {
             let mut s = sess.lock().await;
-            s.offer_download(tab, dl);
+            s.offer_download(tab, *dl);
             return Ok(());
         }
         Ok(NavOutcome::Document(d, t)) => (d, t),
@@ -101,7 +101,7 @@ pub async fn navigate_shared(
     let push = tail.push;
     let sub = {
         let mut s = sess.lock().await;
-        match s.nav_apply(tab, tail, done) {
+        match s.nav_apply(tab, *tail, *done) {
             Ok(sub) => sub,
             Err(e) => {
                 s.paint_error_page(tab, &err_req, push, &e);
@@ -165,7 +165,10 @@ async fn nav_commit_shared(
             NavPaint::Busy => tokio::time::sleep(Duration::from_millis(50)).await,
         }
     };
-    let base = tail.url.clone();
+    // `p.base_url` porte la base effective (`<base href>`
+    // ou l'URL de la page, étape 135) — l'URL de la
+    // réponse reste en repli.
+    let base = p.base_url.clone().unwrap_or_else(|| tail.url.clone());
     let bodies = std::mem::take(&mut tail.img_bodies);
     // Fonds `url(http…)` (étape 98) et masques `mask-image`
     // (étape 121) : posés sur la payload, insérés à la

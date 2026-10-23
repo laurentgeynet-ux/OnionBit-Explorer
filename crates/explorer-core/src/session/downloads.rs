@@ -23,8 +23,8 @@ use std::path::{Path, PathBuf};
 use explorer_net::url::Url;
 
 use super::{
-    extract_title, meta_referrer_policy, CoreError, CoreEvent, DownloadInfo, NavDone, NavTail,
-    Session, StreamDecoder, TabId,
+    document_base, extract_title, meta_referrer_policy, CoreError, CoreEvent, DownloadInfo,
+    NavDone, NavTail, Session, StreamDecoder, TabId,
 };
 
 /// Téléchargement bufferisé en attente de décision —
@@ -184,6 +184,7 @@ impl Session {
         tb.finish();
         let dom = tb.into_dom();
         let title = extract_title(&dom);
+        let (base_url, base_target) = document_base(&dom, &dl.url);
         let done = NavDone {
             // Rejeu « document » d'un corps bufferisé : les
             // en-têtes de la réponse d'origine ne sont pas
@@ -191,6 +192,8 @@ impl Session {
             // `Referer` vient des seules `<meta name=referrer>`
             // (étape 132, borne assumée).
             referrer_policy: meta_referrer_policy(&dom),
+            base_url,
+            base_target,
             url: dl.url,
             dom,
             html,

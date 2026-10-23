@@ -842,6 +842,65 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `frame_embedding_matrix`
   (policy).
 
+- **Étape 135 — `<base href>`/
+  `<base target>`**
+  (`explorer-core` — cap « web
+  réel sécurisé ») :
+  `document_base` extrait le
+  premier `<base href>` en
+  ordre document (résolu
+  contre l'URL de la réponse —
+  invalide = repli document,
+  les suivants sans effet) et
+  le premier `<base target>`
+  (cible de navigation par
+  défaut des `<a>`/`<form>`
+  sans `target` propre). La
+  base effective gouverne
+  **uniquement** la résolution
+  des URLs relatives : plan de
+  sous-ressources (`link`,
+  `img`, `script`, `<iframe>`,
+  `@font-face`, `background`/
+  `mask-image` des feuilles
+  inline, modules inline,
+  `@import` inchangé = feuille
+  liée), clic `<a>`, `form
+  action`, `location.href`/
+  `form.submit()` scriptés,
+  `fetch`/`XHR`
+  (`script_request`), médias,
+  peinture détachée. La page
+  garde `url` comme identité :
+  initiateur `NavFrom`/
+  `Subresource`, `Referer`,
+  `Origin`, ancre
+  mixed-content et historique
+  suivent toujours l'URL de la
+  réponse — vérifié par
+  `base_href_cross_origin_
+  keeps_page_initiator`
+  (`Sec-Fetch-Site: cross-site`,
+  `Referer` = origine page).
+  Champs `base_url`/
+  `base_target` sur `Tab`,
+  `PageSnapshot` (bfcache
+  restauré), `PaintPayload`
+  (voie détachée) ;
+  `SubJob.doc_base` sert les
+  résolutions tardives.
+  `NavOutcome::Document`
+  boxe `NavDone`/`NavTail`
+  (croissance métadonnées →
+  `large_enum_variant`), idem
+  `Download`. Tests session
+  `base_href_*`/`base_target_*`
+  (8) : sous-ressources,
+  script, clic, forme, premier
+  `<base>`, repli invalide,
+  cible `_blank`, initiateur
+  cross-origin.
+
 ### Fixed
 
 - **Étape 122 — `root_font_size`

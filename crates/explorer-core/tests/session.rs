@@ -8030,3 +8030,216 @@ async fn corp_same_origin_blocks_cross_script() {
         "CORP same-origin : script cross-origin rejeté"
     );
 }
+
+// ---- Étape 135 : `<base href>`/`<base target>` ----------
+
+/// `<base href>` fixe la base de résolution de toutes les
+/// sous-ressources du document — feuille liée, image et
+/// `<iframe>` partent sous `/cdn/`, jamais sous `/dir/`
+/// (l'URL de la page).
+#[tokio::test]
+async fn base_href_resolves_subresources() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/dir/p",
+        200,
+        "<!doctype html><html><head><base href=\"/cdn/\">\
+         <link rel=stylesheet href=\"a.css\"></head>\
+         <body><img src=\"i.png\"><iframe src=\"f\"></iframe></body></html>",
+    );
+    t.route_bin("/cdn/a.css", 200, b"body{}".to_vec());
+    t.route_bin("/cdn/i.png", 200, b"notapng".to_vec());
+    t.route("/cdn/f", 200, "<html><body>in</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    let paths = t.paths();
+    for want in ["/cdn/a.css", "/cdn/i.png", "/cdn/f"] {
+        assert!(
+            paths.iter().any(|p| p == want),
+            "{want} absent de {paths:?}"
+        );
+    }
+    for bad in ["/dir/a.css", "/dir/i.png", "/dir/f"] {
+        assert!(!paths.iter().any(|p| p == bad), "{bad} fetché : {paths:?}");
+    }
+    // L'initiateur reste la page — `Referer` complet (same-
+    // origin), `Sec-Fetch-Site` non cross.
+    assert_eq!(
+        t.req_header("/cdn/a.css", "referer").as_deref(),
+        Some("http://h.test/dir/p")
+    );
+    assert_eq!(
+        t.req_header("/cdn/a.css", "sec-fetch-site").as_deref(),
+        Some("same-origin")
+    );
+}
+
+/// `<script src>` relatif résout contre la base déclarée.
+#[tokio::test]
+async fn base_href_resolves_script_src() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/dir/p",
+        200,
+        "<!doctype html><html><head><base href=\"/cdn/\"></head>\
+         <body><script src=\"a.js\"></script></body></html>",
+    );
+    t.route("/cdn/a.js", 200, "/* noop */");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    let paths = t.paths();
+    assert!(paths.iter().any(|p| p == "/cdn/a.js"), "{paths:?}");
+    assert!(!paths.iter().any(|p| p == "/dir/a.js"), "{paths:?}");
+}
+
+/// Clic `<a href>` : la cible résout contre la base —
+/// le `Referer` émis reste l'URL du document source.
+#[tokio::test]
+async fn base_href_resolves_link_click() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/dir/p",
+        200,
+        "<!doctype html><html><head><base href=\"/cdn/\"></head>\
+         <body><a href=\"next\">go</a></body></html>",
+    );
+    t.route("/cdn/next", 200, PAGE_T);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/cdn/next"));
+    assert_eq!(
+        t.req_header("/cdn/next", "referer").as_deref(),
+        Some("http://h.test/dir/p")
+    );
+}
+
+/// `<form action>` relatif résout contre la base — la
+/// soumission GET part sous `/cdn/` avec sa query.
+#[tokio::test]
+async fn base_href_resolves_form_action() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/dir/f",
+        200,
+        "<html><head><base href=\"/cdn/\"></head>\
+         <body><form action=\"search\" method=\"get\">\
+         <div><input name=\"q\" value=\"x\"></div>\
+         <div><input type=\"submit\" value=\"Go\"></div>\
+         </form></body></html>",
+    );
+    t.route("/cdn/search", 200, PAGE);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/f").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 36.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(
+        s.tab_url(id).as_deref(),
+        Some("http://h.test/cdn/search?q=x")
+    );
+}
+
+/// Deux `<base href>` : le premier en ordre document fait
+/// foi — le second est sans effet (spec HTML).
+#[tokio::test]
+async fn base_href_first_wins() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/dir/p",
+        200,
+        "<!doctype html><html><head>\
+         <base href=\"/a/\"><base href=\"/b/\">\
+         <link rel=stylesheet href=\"x.css\"></head><body></body></html>",
+    );
+    t.route_bin("/a/x.css", 200, b"body{}".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    let paths = t.paths();
+    assert!(paths.iter().any(|p| p == "/a/x.css"), "{paths:?}");
+    assert!(!paths.iter().any(|p| p == "/b/x.css"), "{paths:?}");
+}
+
+/// `<base href>` irrésolvable → repli sur l'URL du document
+/// (le premier `<base href>` gagne même invalide — un second
+/// valide ne le remplace pas).
+#[tokio::test]
+async fn base_href_invalid_falls_back_to_document() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/dir/p",
+        200,
+        "<!doctype html><html><head>\
+         <base href=\"http://[::1\"><base href=\"/cdn/\">\
+         <link rel=stylesheet href=\"x.css\"></head><body></body></html>",
+    );
+    t.route_bin("/dir/x.css", 200, b"body{}".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    let paths = t.paths();
+    assert!(paths.iter().any(|p| p == "/dir/x.css"), "{paths:?}");
+    assert!(!paths.iter().any(|p| p == "/cdn/x.css"), "{paths:?}");
+}
+
+/// `<base target="_blank">` sans `href` : la base reste la
+/// page (résolution sous `/dir/`), la cible par défaut ouvre
+/// un nouvel onglet.
+#[tokio::test]
+async fn base_target_blank_opens_new_tab() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/dir/p",
+        200,
+        "<!doctype html><html><head><base target=\"_blank\"></head>\
+         <body><a href=\"next\">go</a></body></html>",
+    );
+    t.route("/dir/next", 200, PAGE_T);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    // L'onglet source est intact, le nouvel onglet porte la
+    // cible résolue contre l'URL du document.
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/dir/p"));
+    assert_eq!(s.tabs().len(), 2, "un nouvel onglet a été ouvert");
+    let opened = other_tab(&s, id);
+    assert_eq!(s.tab_url(opened).as_deref(), Some("http://h.test/dir/next"));
+}
+
+/// `<base href>` cross-origin : la résolution suit la base
+/// (`/cdn/…` fetché) mais la politique reste ancrée à la
+/// page — `Sec-Fetch-Site: cross-site`, `Referer` réduit à
+/// l'origine (strict-origin-when-cross-origin par défaut).
+#[tokio::test]
+async fn base_href_cross_origin_keeps_page_initiator() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/dir/p",
+        200,
+        "<!doctype html><html><head><base href=\"http://cdn.test/root/\">\
+         <link rel=stylesheet href=\"a.css\"></head><body></body></html>",
+    );
+    t.route_bin("/root/a.css", 200, b"body{}".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    let paths = t.paths();
+    assert!(paths.iter().any(|p| p == "/root/a.css"), "{paths:?}");
+    assert_eq!(
+        t.req_header("/root/a.css", "sec-fetch-site").as_deref(),
+        Some("cross-site")
+    );
+    assert_eq!(
+        t.req_header("/root/a.css", "referer").as_deref(),
+        Some("http://h.test/")
+    );
+}

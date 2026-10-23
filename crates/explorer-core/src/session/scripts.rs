@@ -61,11 +61,15 @@ pub(crate) struct ScriptItem {
 }
 
 /// `<script>` exécutables du document, ordre document —
-/// `src` résolues, bornés `max_src`, mixed-content filtré.
-/// `scripting = false` (pas de fabrique JS) → vide : scripting
-/// désactivé = aucun fetch de script (spec HTML).
+/// `src` résolues contre `base` (`<base href>` ou URL du
+/// document, étape 135), bornés `max_src`, mixed-content
+/// filtré contre `page` (l'ancre de sécurité reste l'URL
+/// du document, pas la base). `scripting = false` (pas de
+/// fabrique JS) → vide : scripting désactivé = aucun fetch
+/// de script (spec HTML).
 pub(crate) fn collect_scripts(
     dom: &Dom,
+    page: &Url,
     base: &Url,
     scripting: bool,
     max_src: usize,
@@ -100,7 +104,7 @@ pub(crate) fn collect_scripts(
                         let defer = !async_ && dom.attribute(n, "defer").ok().flatten().is_some();
                         let resolved = Url::resolve(base, raw.trim())
                             .ok()
-                            .filter(|u| !is_mixed_content(base, u));
+                            .filter(|u| !is_mixed_content(page, u));
                         if let (Some(u), true) = (resolved, slots < max_src) {
                             out.push(ScriptItem {
                                 src: Some(u),

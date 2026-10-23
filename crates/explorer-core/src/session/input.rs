@@ -320,9 +320,16 @@ impl Session {
             Some((anchor, url)) if !prevented => {
                 let u = Url::parse(&url).map_err(|e| CoreError::Url(e.to_string()))?;
                 let (new_ctx, no_referer, policy) = {
-                    let dom = self.tabs.get(&tab).and_then(|e| e.dom.as_ref());
+                    let entry = self.tabs.get(&tab);
+                    let dom = entry.and_then(|e| e.dom.as_ref());
                     (
-                        dom.is_some_and(|d| target_new_context(d, anchor)),
+                        dom.is_some_and(|d| {
+                            target_new_context(
+                                d,
+                                anchor,
+                                entry.and_then(|e| e.base_target.as_deref()),
+                            )
+                        }),
                         dom.is_some_and(|d| rel_no_referrer(d, anchor)),
                         dom.and_then(|d| element_referrer_policy(d, anchor)),
                     )
@@ -629,7 +636,13 @@ impl Session {
     ) -> Result<(), CoreError> {
         let (mut req, new_ctx, no_referer, form_policy) = {
             let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
-            let (Some(dom), Some(base)) = (entry.dom.as_ref(), entry.url.as_ref()) else {
+            // `action` résout contre la base document
+            // (`<base href>`, étape 135) ; l'initiateur reste
+            // `entry.url` — `NavFrom(page)` voir
+            // `form_request`.
+            let (Some(dom), Some(page), Some(base)) =
+                (entry.dom.as_ref(), entry.url.as_ref(), entry.nav_base())
+            else {
                 return Err(CoreError::EmptyDocument);
             };
             let pairs = collect_form_data(dom, form, submitter);
@@ -644,11 +657,11 @@ impl Session {
                 .flatten()
                 .unwrap_or_default();
             let enctype = attr_lower(dom, form, "enctype");
-            let req = form_request(base, &action, &method, &enctype, &pairs)
+            let req = form_request(page, base, &action, &method, &enctype, &pairs)
                 .ok_or_else(|| CoreError::Url("action de formulaire irrésolvable".to_string()))?;
             (
                 req,
-                target_new_context(dom, form),
+                target_new_context(dom, form, entry.base_target.as_deref()),
                 rel_no_referrer(dom, form),
                 element_referrer_policy(dom, form),
             )
@@ -896,7 +909,9 @@ impl Session {
         let node = hit_test(tree, x, y + entry.scroll_y)?;
         let a = ancestor_link(dom, node)?;
         let href = dom.attribute(a, "href").ok().flatten()?;
-        let base = entry.url.as_ref()?;
+        // `href` résout contre la base document (`<base
+        // href>` ou l'URL de la page, étape 135).
+        let base = entry.nav_base()?;
         Some((a, Url::resolve(base, &href).ok()?.to_string()))
     }
 

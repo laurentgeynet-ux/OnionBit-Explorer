@@ -259,13 +259,17 @@ impl Session {
     /// immédiate d'un échec `status: 0` (`error` côté
     /// script — la page reste vivante, jamais de panic).
     pub(crate) fn drain_script_net(&mut self, tab: TabId) {
-        let Some((page, reqs)) = self.tabs.get_mut(&tab).and_then(|e| {
+        let Some((page, base, reqs)) = self.tabs.get_mut(&tab).and_then(|e| {
+            let page = e.url.clone();
+            let base = e.nav_base().cloned();
             e.js.as_mut()
-                .map(|eng| (e.url.clone(), eng.drain_net_requests()))
+                .map(|eng| (page, base, eng.drain_net_requests()))
         }) else {
             return;
         };
-        let Some(page) = page else { return };
+        let (Some(page), Some(base)) = (page, base) else {
+            return;
+        };
         let mut failed = Vec::new();
         for r in reqs {
             match r {
@@ -283,6 +287,7 @@ impl Session {
                     } else {
                         self.script_request(
                             &page,
+                            &base,
                             &method,
                             &url,
                             &headers,
@@ -516,7 +521,17 @@ impl Session {
     /// URLs résolues ici (émission propre), mixed-content
     /// filtré, images dédupliquées — plan borné par la
     /// config (étape 128 : les `<iframe>` le rejoignent).
-    pub(crate) fn plan_subresources(&self, dom: &Dom, base: &Url, scripting: bool) -> SubPlan {
+    /// `page` = URL du document (ancre mixed-content,
+    /// initiateur) ; `base` = base de résolution effective
+    /// (`<base href>` ou `page`, étape 135) — seule la
+    /// résolution des `src`/`href` suit la base.
+    pub(crate) fn plan_subresources(
+        &self,
+        dom: &Dom,
+        page: &Url,
+        base: &Url,
+        scripting: bool,
+    ) -> SubPlan {
         // Étape 96 : `media=` évalué contre l'env viewport
         // AVANT la borne — une feuille hors-media (variante
         // `print`, `(prefers-color-scheme: …)`) n'est ni
@@ -531,10 +546,10 @@ impl Session {
             .into_iter()
             .filter(|(_, m)| media_attr_matches(&env, m.as_deref().unwrap_or_default()))
             .filter_map(|(h, _)| Url::resolve(base, &h).ok())
-            .filter(|u| !is_mixed_content(base, u) && seen_sheets.insert(u.to_string()))
+            .filter(|u| !is_mixed_content(page, u) && seen_sheets.insert(u.to_string()))
             .take(self.max_sheets)
             .collect();
-        let scripts = collect_scripts(dom, base, scripting, self.max_scripts);
+        let scripts = collect_scripts(dom, page, base, scripting, self.max_scripts);
         let mut seen_img = std::collections::HashSet::new();
         let imgs: Vec<Url> = collect_images(dom)
             .into_iter()
@@ -542,7 +557,7 @@ impl Session {
             // `data:` (et autres non-http) ne se fetch pas —
             // peints inline par `collect_data_images` (56f).
             .filter(|u| matches!(u.scheme(), "http" | "https"))
-            .filter(|u| !is_mixed_content(base, u) && seen_img.insert(u.as_str()))
+            .filter(|u| !is_mixed_content(page, u) && seen_img.insert(u.as_str()))
             .take(self.max_images)
             .collect();
         // `<iframe src>` (étape 128) — un sous-contexte est
@@ -554,7 +569,7 @@ impl Session {
             .into_iter()
             .filter_map(|(src, policy)| Url::resolve(base, &src).ok().map(|u| (u, policy)))
             .filter(|(u, _)| matches!(u.scheme(), "http" | "https"))
-            .filter(|(u, _)| !is_mixed_content(base, u) && seen_frames.insert(u.as_str()))
+            .filter(|(u, _)| !is_mixed_content(page, u) && seen_frames.insert(u.as_str()))
             .take(self.max_frames)
             .collect();
         SubPlan {

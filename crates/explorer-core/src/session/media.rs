@@ -235,7 +235,7 @@ impl Session {
                 return;
             };
             let (Some(dom), Some(tree), Some(base)) =
-                (entry.dom.as_ref(), entry.tree.as_ref(), entry.url.as_ref())
+                (entry.dom.as_ref(), entry.tree.as_ref(), entry.nav_base())
             else {
                 return;
             };

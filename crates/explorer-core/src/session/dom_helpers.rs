@@ -165,17 +165,66 @@ pub(crate) fn ancestor_link(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
 /// nommés ne sont pas suivis : chaque dispatch ouvre un
 /// onglet frais), `false` = contexte courant (`_self`,
 /// `_parent`, `_top`, attribut absent/vide). La casse
-/// est insensible (spec).
-pub(crate) fn target_new_context(dom: &Dom, el: NodeId) -> bool {
-    let Ok(Some(t)) = dom.attribute(el, "target") else {
-        return false;
+/// est insensible (spec). `base_target` = `<base target>`
+/// du document (étape 135) — consulté quand l'élément
+/// n'a pas de `target` propre.
+pub(crate) fn target_new_context(dom: &Dom, el: NodeId, base_target: Option<&str>) -> bool {
+    let t = match dom.attribute(el, "target") {
+        Ok(Some(t)) => t,
+        _ => match base_target {
+            Some(b) => b.to_string(),
+            None => return false,
+        },
     };
     let t = t.trim();
     !t.is_empty()
         && !matches!(
             t.to_ascii_lowercase().as_str(),
-            "_self" | "_parent" | "_top"
+            "_self" | "_parent" | "_top" | ""
         )
+}
+
+/// `<base>` du document (HTML §4.8.3, étape 135) —
+/// `(base_url résolue, base target)` : le **premier**
+/// `<base href>` en ordre document fixe l'URL de base de
+/// résolution (liens, formulaires, sous-ressources,
+/// `fetch` relatif) — résolue contre `doc_url`, ignorée
+/// si absente ou irrésolvable (`None` → l'URL du document
+/// reste la base). Le premier `<base target>` fixe la
+/// cible de navigation par défaut. Les `<base>`
+/// suivants sont sans effet (spec).
+pub(crate) fn document_base(dom: &Dom, doc_url: &Url) -> (Option<Url>, Option<String>) {
+    let mut seen_href = false;
+    let mut seen_target = false;
+    let mut base_url = None;
+    let mut base_target = None;
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "base") {
+            if !seen_href {
+                // Premier `<base href>` en ordre document —
+                // irrésolvable = repli sur l'URL du document,
+                // les `<base>` suivants sont sans effet (spec).
+                if let Some(href) = dom.attribute(n, "href").ok().flatten() {
+                    seen_href = true;
+                    base_url = Url::resolve(doc_url, href.trim()).ok();
+                }
+            }
+            if !seen_target {
+                if let Some(t) = dom.attribute(n, "target").ok().flatten() {
+                    seen_target = true;
+                    base_target = Some(t);
+                }
+            }
+            if seen_href && seen_target {
+                break;
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    (base_url, base_target)
 }
 
 /// `rel` contient `noreferrer` — suppression du
