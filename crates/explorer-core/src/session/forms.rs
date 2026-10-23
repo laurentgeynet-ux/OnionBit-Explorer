@@ -564,6 +564,11 @@ pub(crate) fn form_request(
             // `SameSite=Lax` n'est pas envoyé sur POST
             // cross-site (méthode non sûre, étape 66).
             initiator: Some(Initiator::NavFrom(base.clone())),
+            fetch_dest: explorer_net::http::FetchDest::Document,
+            fetch_mode: explorer_net::http::FetchMode::NoCors,
+            // `fetch_user` est marqué par le dispatch
+            // (`try_submit` = geste ; `form.submit()` = non).
+            fetch_user: false,
         });
     }
     let qs = form_url_encode(entries);
@@ -575,6 +580,7 @@ pub(crate) fn form_request(
     };
     let mut req = Request::get(Url::resolve(base, &target).ok()?);
     req.initiator = Some(Initiator::NavFrom(base.clone()));
+    req.fetch_dest = explorer_net::http::FetchDest::Document;
     Some(req)
 }
 

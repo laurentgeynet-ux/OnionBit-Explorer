@@ -523,3 +523,84 @@ async fn policy_blocks_mixed_content() {
         .unwrap();
     assert_eq!(inner.seen().len(), 1);
 }
+
+// -- Sec-Fetch-* (étape 125) ---------------------------------------------
+
+use explorer_net::http::{FetchDest, FetchMode, Initiator};
+use explorer_net::policy::sec_fetch_headers;
+
+fn hdr<'a>(hs: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    hs.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str())
+}
+
+#[test]
+fn sec_fetch_top_level_nav_is_none_document() {
+    let mut req = Request::get(u("https://accounts.example/"));
+    req.initiator = Some(Initiator::TopLevelNav);
+    req.fetch_user = true;
+    let h = sec_fetch_headers(&req);
+    assert_eq!(hdr(&h, "sec-fetch-site"), Some("none"));
+    assert_eq!(hdr(&h, "sec-fetch-mode"), Some("navigate"));
+    assert_eq!(hdr(&h, "sec-fetch-dest"), Some("document"));
+    assert_eq!(hdr(&h, "sec-fetch-user"), Some("?1"));
+}
+
+#[test]
+fn sec_fetch_nav_from_same_origin() {
+    let mut req = Request::get(u("https://a.example/next"));
+    req.initiator = Some(Initiator::NavFrom(u("https://a.example/")));
+    let h = sec_fetch_headers(&req);
+    assert_eq!(hdr(&h, "sec-fetch-site"), Some("same-origin"));
+    assert_eq!(hdr(&h, "sec-fetch-mode"), Some("navigate"));
+    // Non marqué par l'émetteur → pas de `?1` (nav scriptée).
+    assert!(hdr(&h, "sec-fetch-user").is_none());
+}
+
+#[test]
+fn sec_fetch_subresource_same_site_vs_cross() {
+    // Même registrable + même schéma, hôte différent → same-site.
+    let mut req = Request::get(u("https://cdn.a.example/x.css"));
+    req.initiator = Some(Initiator::Subresource(u("https://a.example/")));
+    req.fetch_dest = FetchDest::Style;
+    let h = sec_fetch_headers(&req);
+    assert_eq!(hdr(&h, "sec-fetch-site"), Some("same-site"));
+    assert_eq!(hdr(&h, "sec-fetch-mode"), Some("no-cors"));
+    assert_eq!(hdr(&h, "sec-fetch-dest"), Some("style"));
+
+    // Autre registrable → cross-site.
+    let mut req = Request::get(u("https://b.example/x.png"));
+    req.initiator = Some(Initiator::Subresource(u("https://a.example/")));
+    req.fetch_dest = FetchDest::Image;
+    let h = sec_fetch_headers(&req);
+    assert_eq!(hdr(&h, "sec-fetch-site"), Some("cross-site"));
+    assert_eq!(hdr(&h, "sec-fetch-dest"), Some("image"));
+}
+
+#[test]
+fn sec_fetch_script_request_is_cors_empty() {
+    // `fetch()`/XHR : mode `cors`, dest `empty` — la session pose
+    // ces champs à la construction (`script_request`, étape 125).
+    let mut req = Request::get(u("https://api.example/v1"));
+    req.initiator = Some(Initiator::Subresource(u("https://a.example/")));
+    req.fetch_mode = FetchMode::Cors;
+    let h = sec_fetch_headers(&req);
+    assert_eq!(hdr(&h, "sec-fetch-mode"), Some("cors"));
+    assert_eq!(hdr(&h, "sec-fetch-dest"), Some("empty"));
+}
+
+#[test]
+fn sec_fetch_skipped_off_http() {
+    let mut req = Request::get(u("data:text/plain,x"));
+    req.initiator = Some(Initiator::Subresource(u("https://a.example/")));
+    assert_eq!(sec_fetch_headers(&req), Vec::<(String, String)>::new());
+}
+
+#[test]
+fn sec_fetch_no_initiator_is_none() {
+    // Outil sans page (CLI/fakes) — `none`, mode/dest des champs.
+    let req = Request::get(u("https://a.example/x"));
+    let h = sec_fetch_headers(&req);
+    assert_eq!(hdr(&h, "sec-fetch-site"), Some("none"));
+    assert_eq!(hdr(&h, "sec-fetch-mode"), Some("no-cors"));
+    assert_eq!(hdr(&h, "sec-fetch-dest"), Some("empty"));
+}

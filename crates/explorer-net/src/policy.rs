@@ -30,7 +30,9 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 
 use crate::error::{NetError, NetResult};
-use crate::http::{HttpTransport, Method, Request, Response, StreamedResponse};
+use crate::http::{
+    FetchDest, FetchMode, HttpTransport, Initiator, Method, Request, Response, StreamedResponse,
+};
 use crate::url::Url;
 
 // ---------------------------------------------------------------------
@@ -405,6 +407,87 @@ pub fn initiator_headers(initiator: &Url, target: &Url, method: Method) -> Vec<(
         out.push(("origin".to_string(), o));
     }
     out
+}
+
+/// En-têtes `Sec-Fetch-*` d'une requête (étape 125, *Fetch
+/// Metadata Request Headers*) — calculés **à l'émission** par
+/// l'appelant, même patron que [`initiator_headers`] : la
+/// plateforme les contrôle, le contenu ne peut pas les poser
+/// (`sec-*` est un nom interdit côté script).
+///
+/// - `Sec-Fetch-Site` : `none` sans initiateur de page ;
+///   `same-origin`/`same-site`/`cross-site` sinon — « site »
+///   = `(schéma, domaine registrable)`, même calcul que la
+///   politique `SameSite` des cookies. `TopLevelNav` rend
+///   `none` (pas de site initiateur : saisie, favori).
+/// - `Sec-Fetch-Mode` : `navigate` pour les initiateurs de
+///   navigation, sinon `req.fetch_mode` (`fetch()`/`XHR`
+///   portent `cors`, les sous-ressources `no-cors`).
+/// - `Sec-Fetch-Dest` : `document` pour les navigations,
+///   sinon `req.fetch_dest`.
+/// - `Sec-Fetch-User` : `?1` uniquement sur une navigation
+///   marquée `req.fetch_user` (geste utilisateur réel, posé
+///   au dispatch — jamais deviné).
+///
+/// Rien n'est émis hors `http`/`https` (`data:`/`about:`/
+/// `file:` ne portent pas de fetch metadata).
+#[must_use]
+pub fn sec_fetch_headers(req: &Request) -> Vec<(String, String)> {
+    if !matches!(req.url.scheme(), "http" | "https") {
+        return Vec::new();
+    }
+    let nav = matches!(
+        req.initiator,
+        Some(Initiator::TopLevelNav | Initiator::NavFrom(_))
+    );
+    let site = match req.initiator.as_ref() {
+        None | Some(Initiator::TopLevelNav) => "none",
+        Some(Initiator::NavFrom(page) | Initiator::Subresource(page)) => fetch_site(page, &req.url),
+    };
+    let mode = if nav {
+        "navigate"
+    } else {
+        match req.fetch_mode {
+            FetchMode::Cors => "cors",
+            FetchMode::NoCors => "no-cors",
+            FetchMode::SameOrigin => "same-origin",
+        }
+    };
+    let dest = if nav {
+        "document"
+    } else {
+        match req.fetch_dest {
+            FetchDest::Document | FetchDest::Empty => "empty",
+            FetchDest::Script => "script",
+            FetchDest::Style => "style",
+            FetchDest::Image => "image",
+            FetchDest::Font => "font",
+        }
+    };
+    let mut out = vec![
+        ("sec-fetch-site".to_string(), site.to_string()),
+        ("sec-fetch-mode".to_string(), mode.to_string()),
+        ("sec-fetch-dest".to_string(), dest.to_string()),
+    ];
+    if nav && req.fetch_user {
+        out.push(("sec-fetch-user".to_string(), "?1".to_string()));
+    }
+    out
+}
+
+/// `Sec-Fetch-Site` d'une sous-requête émise depuis `page` :
+/// `same-origin` si origines égales, `same-site` si même
+/// `(schéma, registrable)`, `cross-site` sinon.
+fn fetch_site(page: &Url, target: &Url) -> &'static str {
+    if page.origin() == target.origin() {
+        "same-origin"
+    } else if page.scheme() == target.scheme()
+        && crate::cookies::registrable(&page.host()) == crate::cookies::registrable(&target.host())
+    {
+        "same-site"
+    } else {
+        "cross-site"
+    }
 }
 
 #[async_trait]

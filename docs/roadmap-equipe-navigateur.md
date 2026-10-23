@@ -2628,36 +2628,54 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   gèle le contexte à 0, réglage
   de vol uniquement.
 
-- [ ] **Étape 125. En-têtes de
+- [x] **Étape 125. En-têtes de
   métadonnées `Sec-Fetch-*`**
   (cap « web réel sécurisé » —
-  worktree `nav/cap-g1`) : la
-  plateforme calcule déjà
-  `Referer`/`Origin`
-  (strict-origin-when-cross-origin,
-  étape 8) et le « site pour
-  cookies » (`Initiator`, étape
-  66) — les endpoints d'auth et
-  CDN modernes servent des flux
-  différents selon les fetch
-  metadata headers, absents des
-  nôtres. `Request` gagne
-  `fetch_dest` (`document`/
-  `script`/`style`/`image`/
-  `font`/`fetch`/`iframe`…)
-  + `fetch_mode` (`navigate`/
-  `same-origin`/`cors`/`no-cors`)
-  additifs ; `SecFetchTransport`
-  émet `Sec-Fetch-Site`
+  worktree `nav/cap-g1`) : les
+  endpoints d'auth et CDN modernes
+  servent des flux différents
+  selon les fetch metadata
+  headers, absents des nôtres.
+  `Request` gagne `fetch_dest`
+  (`FetchDest` : `Empty`/`Document`/
+  `Script`/`Style`/`Image`/`Font`),
+  `fetch_mode` (`FetchMode` :
+  `NoCors`/`Cors`/`SameOrigin` —
+  `navigate` est **dérivé de
+  l'initiateur** à l'émission, un
+  appelant ne le pose jamais) et
+  `fetch_user` — tous additifs,
+  défauts `Empty`/`NoCors`/`false`
+  (comportement inchangé pour les
+  outils sans page). Helper
+  `policy::sec_fetch_headers`
+  calcule `Sec-Fetch-Site`
   (`none`/`same-origin`/`same-site`/
-  `cross-site` — même calcul que
-  `same_site_allows`),
-  `-Mode`, `-Dest`,
-  `Sec-Fetch-User: ?1` (nav
-  top-level activée) —
-  le terrain `mode`/`dest` est
-  aussi le socle de l'enforcement
-  CORS de l'étape 126.
+  `cross-site` — même grille que
+  `same_site_allows` : registrable
+  + schéma), `-Mode`, `-Dest`
+  et `Sec-Fetch-User: ?1` (geste
+  utilisateur réel uniquement) ;
+  ignoré hors http(s). Câblage
+  session : navigations et
+  formulaires → `dest:document`
+  + `?1` au geste (clic lien,
+  submit implicite ; `form.submit()`
+  scripté non marqué) ; `script_
+  request` (`fetch()`/XHR) →
+  `mode:cors`, `dest:empty` ;
+  sous-ressources (`sub_request`)
+  typées `script`/`style`/`image`/
+  `font` par contexte d'appel ;
+  modules ES → `dest:script`.
+  `sec-*` déjà interdit aux
+  scripts (`forbidden_request_
+  header`) — les champs ne sont
+  posés que par la plateforme.
+  Socle `mode`/`dest` consommé
+  par l'enforcement CORS (126).
+  Régressions : `sec_fetch_*`
+  (6 tests policy).
 
 - [ ] **Étape 126. Enforcement
   CORS** (suite cap « web réel

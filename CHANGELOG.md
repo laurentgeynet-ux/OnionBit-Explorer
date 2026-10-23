@@ -474,6 +474,52 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   source/sink/transformer et
   lectures pendantes racinés.
   Régressions `c71_*` (6 tests).
+- **Étape 125 — en-têtes de
+  métadonnées `Sec-Fetch-*`**
+  (`explorer-net`, `explorer-core`
+  — cap « web réel sécurisé »,
+  worktree `nav/cap-g1`) : les
+  endpoints d'auth et CDN
+  modernes servent des flux
+  différents selon les fetch
+  metadata headers, absents des
+  nôtres. `Request` gagne
+  `fetch_dest` (`FetchDest` :
+  `Empty`/`Document`/`Script`/
+  `Style`/`Image`/`Font`),
+  `fetch_mode` (`FetchMode` :
+  `NoCors`/`Cors`/`SameOrigin` —
+  `navigate` est dérivé de
+  l'initiateur à l'émission) et
+  `fetch_user` — additifs,
+  défauts conservateurs
+  (`Empty`/`NoCors`/`false`, les
+  outils sans page inchangés).
+  `policy::sec_fetch_headers`
+  émet `Sec-Fetch-Site`
+  (`none`/`same-origin`/`same-site`/
+  `cross-site` — même grille
+  `(schéma, registrable)` que la
+  politique `SameSite`), `-Mode`,
+  `-Dest`, et `Sec-Fetch-User: ?1`
+  sur les seules navigations
+  marquées par un geste ; ignoré
+  hors http(s). Câblage session :
+  navigations et formulaires →
+  `document`, `?1` au geste
+  (clic lien, submit implicite —
+  `form.submit()` scripté non
+  marqué) ; `fetch()`/XHR →
+  `cors`/`empty` ; sous-ressources
+  typées `script`/`style`/`image`/
+  `font` par contexte d'appel ;
+  modules ES → `script`. `sec-*`
+  déjà interdit aux scripts —
+  champs posés par la plateforme
+  seule. Socle `mode`/`dest`
+  consommé par l'enforcement
+  CORS (étape 126). Régressions
+  `sec_fetch_*` (6 tests).
 
 - **JS-C72 — `indexedDB` +
   `caches` (Cache API)**

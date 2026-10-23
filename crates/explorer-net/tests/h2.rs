@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use explorer_net::error::NetResult;
 use explorer_net::h1::{Conn, Connector, HttpConfig, IoStream};
 use explorer_net::h2::AutoClient;
-use explorer_net::http::{HttpTransport, Method, Request};
+use explorer_net::http::{FetchDest, FetchMode, HttpTransport, Method, Request};
 use explorer_net::url::Url;
 use tokio::io::{duplex, DuplexStream};
 
@@ -64,6 +64,9 @@ fn req(url: &str) -> Request {
         headers: vec![],
         body: None,
         initiator: None,
+        fetch_dest: FetchDest::Empty,
+        fetch_mode: FetchMode::NoCors,
+        fetch_user: false,
     }
 }
 

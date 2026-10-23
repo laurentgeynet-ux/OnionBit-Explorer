@@ -547,7 +547,10 @@ impl Session {
             let room = (max_modules - graph.sources.len()).min(frontier.len());
             let mut jobs = VecDeque::new();
             for (_, u) in frontier.drain(..room) {
-                jobs.push_back(((u.as_str(), u.clone()), sub_request(page, &u)));
+                jobs.push_back((
+                    (u.as_str(), u.clone()),
+                    sub_request(page, &u, explorer_net::http::FetchDest::Script),
+                ));
             }
             let mut fetched = Vec::new();
             fetch_wave(transport, max_inflight, jobs, |tag, res| {
