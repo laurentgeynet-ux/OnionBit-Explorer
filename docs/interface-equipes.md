@@ -363,8 +363,11 @@ journal « livré ».
   `Error: b` (stack `(3:2662)`/`(3:2460)`/`U(3:4262)`) —
   trier : exception jscore à isoler (piste JS) + boucle de
   redirection/consentement côté session.
-- [ ] **Accept-Language absent** : le portal sert l'anglais —
-  envoyer `Accept-Language` depuis les réglages app.
+- [x] ~~**Accept-Language absent**~~ → **résolu, Étape 118** :
+  `LangTransport` (cellule partagée à chaud) + `POST
+  /api/accept-language` + reflet `/api/status` + export FFI
+  additif (vieille dll = no-op) + réglage app « Langue »
+  (`''` = locale OS → `fr-FR,fr;q=0.9,en;q=0.8`).
 - [ ] **Piège `engineMode=auto`** : une `explorer_ffi.dll`
   périmée à côté de l'exe détourne silencieusement tout test
   « daemon + UI » (mesuré : latence 20 s + gel). Afficher le

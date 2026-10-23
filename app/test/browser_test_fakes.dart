@@ -164,6 +164,12 @@ class FakeRepo implements BrowserRepository {
   Future<void> setColorScheme(String tabId, String scheme) async =>
       actions.add('scheme:$tabId:$scheme');
 
+  /// `Accept-Language` poussés (étape 118).
+  final List<String> langPushes = [];
+
+  @override
+  Future<void> setAcceptLanguage(String lang) async => langPushes.add(lang);
+
   @override
   Future<List<Bookmark>> bookmarks() async => List.of(marks);
 

@@ -16,29 +16,40 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 ///   `AppConfig.engineMode`), `'rest'` ou `'ffi'` forcé ;
 /// - [profileDir] : répertoire de profil moteur exporté vers
 ///   `EXPLORER_PROFILE` avant le chargement FFI — en mode REST
-///   il appartient au daemon (même variable à son lancement).
+///   il appartient au daemon (même variable à son lancement) ;
+/// - [language] : valeur `Accept-Language` poussée au moteur
+///   (étape 118) — `''` = locale OS, sinon étiquette de langue
+///   (`fr-FR`) ou liste qualifiée complète (`fr-FR,fr;q=0.9`).
 class AppSettings {
   const AppSettings({
     this.theme = 'system',
     this.engine = 'auto',
     this.profileDir = '',
+    this.language = '',
   });
 
   final String theme;
   final String engine;
   final String profileDir;
+  final String language;
 
-  AppSettings copyWith({String? theme, String? engine, String? profileDir}) =>
-      AppSettings(
-        theme: theme ?? this.theme,
-        engine: engine ?? this.engine,
-        profileDir: profileDir ?? this.profileDir,
-      );
+  AppSettings copyWith({
+    String? theme,
+    String? engine,
+    String? profileDir,
+    String? language,
+  }) => AppSettings(
+    theme: theme ?? this.theme,
+    engine: engine ?? this.engine,
+    profileDir: profileDir ?? this.profileDir,
+    language: language ?? this.language,
+  );
 
   Map<String, dynamic> toJson() => {
     'theme': theme,
     'engine': engine,
     'profileDir': profileDir,
+    'language': language,
   };
 
   /// Tolérant : entrée absente/invalide → valeur par défaut
@@ -56,6 +67,7 @@ class AppSettings {
       profileDir: json['profileDir'] is String
           ? json['profileDir'] as String
           : '',
+      language: json['language'] is String ? json['language'] as String : '',
     );
   }
 }
@@ -149,6 +161,11 @@ class SettingsController extends Notifier<AppSettings> {
   /// prochain chargement du moteur in-process / démarrage daemon.
   Future<void> setProfileDir(String dir) =>
       _save(state.copyWith(profileDir: dir.trim()));
+
+  /// `Accept-Language` (`''` = locale OS) — propagé au moteur
+  /// en direct par l'écoute `browserProvider` (étape 118).
+  Future<void> setLanguage(String lang) =>
+      _save(state.copyWith(language: lang.trim()));
 }
 
 /// Provider des réglages — `main.dart` en dérive `themeMode`,

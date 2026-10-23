@@ -172,6 +172,64 @@ async fn color_scheme_accepts_dark_rejects_junk() {
     assert_eq!(junk.status(), StatusCode::BAD_REQUEST);
 }
 
+/// Étape 118 — `POST /api/accept-language` règle la valeur
+/// session (reflétée dans `/api/status`), chaîne vide lève
+/// l'en-tête, corps sans `lang` → 400.
+#[tokio::test]
+async fn accept_language_roundtrip_and_clear() {
+    let app = test_app();
+
+    let ok = app
+        .clone()
+        .oneshot(json_post(
+            "/api/accept-language",
+            r#"{"lang":"fr-FR,fr;q=0.9"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), StatusCode::OK);
+
+    let st = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(st.into_body(), 1024).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["accept_language"], "fr-FR,fr;q=0.9");
+
+    let clear = app
+        .clone()
+        .oneshot(json_post("/api/accept-language", r#"{"lang":""}"#))
+        .await
+        .unwrap();
+    assert_eq!(clear.status(), StatusCode::OK);
+    let st = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(st.into_body(), 1024).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(v["accept_language"].is_null());
+
+    let junk = app
+        .oneshot(json_post("/api/accept-language", r#"{"lang":42}"#))
+        .await
+        .unwrap();
+    assert_eq!(junk.status(), StatusCode::BAD_REQUEST);
+}
+
 #[tokio::test]
 async fn frame_before_navigate_is_no_content() {
     let app = test_app();

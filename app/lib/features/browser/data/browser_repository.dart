@@ -145,6 +145,12 @@ class BrowserRepository {
         body: {'scheme': scheme},
       );
 
+  /// `Accept-Language` session (`POST /api/accept-language`,
+  /// étape 118) — valeur annoncée sur toutes les requêtes
+  /// suivantes ; `''` lève l'en-tête.
+  Future<void> setAcceptLanguage(String lang) =>
+      _api.postJson('/api/accept-language', body: {'lang': lang});
+
   // ------------------------------------------------------------------
   // Bibliothèque — signets + historique du store moteur (étape 57).
   // ------------------------------------------------------------------

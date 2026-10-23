@@ -60,6 +60,12 @@ typedef _ViewportN = ffi.Int32 Function(
 typedef _ViewportD = int Function(_NativeHandle, double, double, double);
 typedef _ColorSchemeN = ffi.Int32 Function(_NativeHandle, ffi.Int32);
 typedef _ColorSchemeD = int Function(_NativeHandle, int);
+typedef _SetLangN = ffi.Int32 Function(
+  _NativeHandle,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
+typedef _SetLangD = int Function(_NativeHandle, ffi.Pointer<ffi.Uint8>, int);
 typedef _InputN = ffi.Int32 Function(
   _NativeHandle,
   ffi.Uint64,
@@ -208,6 +214,7 @@ const opMediaList = 14;
 const opMediaClaim = 15;
 const opMediaRelease = 16;
 const opMediaState = 17;
+const opSetAcceptLanguage = 18;
 
 /// Point d'entrée de l'isolate — `args` = `{'reply': SendPort,
 /// 'path': String}`. Envoie `{'port': SendPort}` puis
@@ -274,6 +281,7 @@ class _WorkerImpl {
     this._mediaClaim,
     this._mediaRelease,
     this._mediaState,
+    this._setAcceptLanguage,
   );
 
   final ffi.DynamicLibrary _lib;
@@ -304,6 +312,8 @@ class _WorkerImpl {
   final _MediaClaimD? _mediaClaim;
   final _MediaReleaseD? _mediaRelease;
   final _MediaClaimD? _mediaState;
+  // Export additif étape 118 — `null` sur dll antérieure.
+  final _SetLangD? _setAcceptLanguage;
 
   static _WorkerImpl open(String path) {
     final lib = ffi.DynamicLibrary.open(path);
@@ -395,6 +405,16 @@ class _WorkerImpl {
       } on Object {
         /* export absent */
       }
+      // Export `Accept-Language` (étape 118) — dll
+      // antérieure → `null` → en-tête jamais posé.
+      _SetLangD? setAcceptLanguage;
+      try {
+        setAcceptLanguage = lib.lookupFunction<_SetLangN, _SetLangD>(
+          'explorer_set_accept_language',
+        );
+      } on Object {
+        /* export absent */
+      }
       final handle = create();
       if (handle == ffi.nullptr) {
         throw _LastError.read(lastError);
@@ -426,6 +446,7 @@ class _WorkerImpl {
         mediaClaim,
         mediaRelease,
         mediaState,
+        setAcceptLanguage,
       );
     } on Object {
       lib.close();
@@ -507,6 +528,19 @@ class _WorkerImpl {
       case opSetColorScheme:
         // Export additif étape 97 — dll antérieure : no-op.
         _setColorScheme?.call(_handle, m['dark'] == true ? 1 : 0);
+        return null;
+      case opSetAcceptLanguage:
+        // Export additif étape 118 — dll antérieure : no-op
+        // (l'en-tête n'est jamais posé, comportement inchangé).
+        final f = _setAcceptLanguage;
+        if (f != null) {
+          final bytes = (m['lang'] as String? ?? '').toNativeUtf8();
+          try {
+            f(_handle, bytes.cast<ffi.Uint8>(), bytes.length);
+          } finally {
+            calloc.free(bytes);
+          }
+        }
         return null;
       case opShutdown:
         _destroy(_handle);

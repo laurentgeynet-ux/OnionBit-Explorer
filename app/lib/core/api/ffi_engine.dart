@@ -310,6 +310,13 @@ class FfiEngine implements BrowserRepository {
     await _worker.call(opSetColorScheme, {'dark': scheme == 'dark'});
   }
 
+  @override
+  Future<void> setAcceptLanguage(String lang) async {
+    // Export additif étape 118 — dll antérieure : no-op
+    // (l'en-tête n'est pas posé, comportement inchangé).
+    await _worker.call(opSetAcceptLanguage, {'lang': lang});
+  }
+
   // ------------------------------------------------------------------
   // Bibliothèque — dégradation documentée (étape 57) : l'ABI
   // n'exporte ni signets ni historique (le store du profil est

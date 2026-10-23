@@ -30,18 +30,20 @@ class SettingsDialog extends ConsumerStatefulWidget {
 
 class _SettingsDialogState extends ConsumerState<SettingsDialog> {
   late final TextEditingController _profile;
+  late final TextEditingController _language;
 
   @override
   void initState() {
     super.initState();
-    _profile = TextEditingController(
-      text: ref.read(settingsProvider).profileDir,
-    );
+    final s = ref.read(settingsProvider);
+    _profile = TextEditingController(text: s.profileDir);
+    _language = TextEditingController(text: s.language);
   }
 
   @override
   void dispose() {
     _profile.dispose();
+    _language.dispose();
     super.dispose();
   }
 
@@ -116,6 +118,17 @@ class _SettingsDialogState extends ConsumerState<SettingsDialog> {
                   isDense: true,
                 ),
                 onSubmitted: ctrl.setProfileDir,
+              ),
+            ),
+            row(
+              'Langue',
+              TextField(
+                controller: _language,
+                decoration: const InputDecoration(
+                  hintText: 'Accept-Language (vide : locale OS)',
+                  isDense: true,
+                ),
+                onSubmitted: ctrl.setLanguage,
               ),
             ),
             Align(

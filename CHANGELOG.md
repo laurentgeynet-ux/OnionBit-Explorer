@@ -9,6 +9,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Étape 118 — `Accept-Language`
+  bout en bout** (`explorer-net`,
+  `explorer-core`, `explorer-api`,
+  `explorer-ffi`, `app/` — terrain
+  23/10 : les portails servaient
+  l'anglais). `LangTransport` coiffe
+  la pile transport avec une cellule
+  partagée : navigations, sous-
+  ressources et XHR annoncent la
+  même valeur, en-tête explicite de
+  l'appelant prioritaire. Session :
+  `set_accept_language` à chaud,
+  `""` lève l'en-tête. Surface :
+  `POST /api/accept-language`,
+  reflet dans `/api/status`, export
+  FFI additif (dll antérieure =
+  no-op). App : réglage « Langue »
+  (`''` = locale OS) poussé au
+  bootstrap et au changement.
+
 - **R-88 — `rem` = font-size calculée
   de `:root`** (`explorer-css`,
   `explorer-layout` — terrain 23/10 :
@@ -153,6 +173,36 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   la_tuile`, `mask_repeat_defaut_u_tile`,
   `mask_fetchem_enregistre_via_
   register_mask`.
+
+- **JS-C64 — `import.meta.url` par module :
+  liaison lexicale `IMPORT_META`** (`explorer-
+  jscore` + `explorer-js`, reliquat « Invalid
+  base URL » du journal — trigger confirmé sur
+  `wp-runtime-*.js` : `new URL("./",
+  import.meta.url)`, la détection `publicPath`
+  standard de webpack) :
+  - `import.meta.url` lisait `current_module`
+    global : les deps héritaient de l'URL de
+    l'entrée, les microtâches/callbacks
+    différés voyaient `""` → `new URL(x, "")`
+    = « Invalid base URL » ; `import()`
+    résolvait aussi contre `current_module`.
+  - `instantiate` lie désormais `IMPORT_META`
+    (spec résolu) dans l'env du module —
+    résolution lexicale comme `SUPER_BIND` :
+    fonctions, closures et timers voient l'URL
+    de *leur* module.
+  - `ModuleLoader::resolve` — méthode additive
+    (défaut `None`) : l'hôte rapporte l'URL
+    absolue, `MapLoader` la rend → `new URL`
+    sur `import.meta.url` fonctionne ;
+    `import()` reçoit le référent lexical ;
+    `Module.spec` + `current_module` alignés
+    par module à l'évaluation.
+  Mesure : dep/callback/chunk lazy lisent leur
+  propre URL résolue ; github.com inchangé
+  (résidu turbo-frame). Régression
+  `mod_import_meta_url_per_module`.
 
 - **JS-C63 — census github.com, nom propre des
   class expressions** (`explorer-jscore`, `jprobe`

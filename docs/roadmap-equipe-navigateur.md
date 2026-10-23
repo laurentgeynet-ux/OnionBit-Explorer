@@ -2374,6 +2374,44 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   initialement soupçonnée — le
   snapshot la porte déjà).
 
+- [x] **Étape 118. `Accept-Language`
+  de bout en bout** (terrain 23/10 —
+  les portails servaient l'anglais).
+  `LangTransport` (explorer-net) :
+  décorateur à cellule partagée
+  `Arc<RwLock<Option<String>>>` qui
+  coiffe toute la pile transport —
+  navigations, sous-ressources et
+  XHR annoncent la même valeur ;
+  un en-tête explicite de l'appelant
+  reste prioritaire (fetch API).
+  `Session::set_accept_language`
+  fait évoluer la cellule à chaud ;
+  `""`/`None` lève l'en-tête.
+  Surface : `POST /api/accept-
+  language` (`{"lang":""}` lève),
+  `/api/status.accept_language`
+  (observabilité), export FFI
+  `explorer_set_accept_language`
+  (additif — worker Dart lookup
+  optionnel, dll antérieure = no-op
+  documenté). App : réglage
+  `AppSettings.language` + champ
+  « Langue » dans les réglages —
+  `''` = locale OS, sinon étiquette
+  (`fr-FR`) ou liste qualifiée ;
+  `_effectiveLanguage` forme
+  `fr-FR,fr;q=0.9,en;q=0.8`, poussé
+  au bootstrap et à chaque
+  changement. Tests :
+  `accept_language_reaches_requests
+  _and_updates_live` (FakeTransport
+  `last_header` : posé, propagé,
+  levé par `""` et blancs) +
+  `accept_language_roundtrip_and_
+  clear` (API : set, reflet status,
+  clear, rejet `lang:42`).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
@@ -3415,6 +3453,43 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   honnête inchangé : `turbo-frame.delegate`
   (machinery custom-elements, backlog).
   Test : `class_expr_self_name`.
+
+- [x] **JS-C64. `import.meta.url` par module —
+  liaison lexicale `IMPORT_META`** (journal
+  interface « reliquat `Invalid base URL` » —
+  trigger confirmé sur `wp-runtime-*.js` :
+  `new URL("./", import.meta.url)`, la
+  détection `publicPath` standard de webpack) :
+  - **Avant** : `import.meta.url` lisait
+    `current_module` global — chaque dep voyait
+    l'URL de l'*entrée*, et une microtâche/
+    un callback différé voyait `""`
+    (`eval_module` le restaure avant
+    `run_microtasks`) → `new URL(x, "")` =
+    « Invalid base URL » ; `import()` prenait
+    aussi `current_module` en référent, les
+    deps profondes résolvaient `./x` contre un
+    spécificateur relatif brut.
+  - **Maintenant** : `instantiate` pose la
+    liaison cachée `IMPORT_META` = spec résolu
+    dans l'env du module — résolution
+    *lexicale* (fonctions, closures, timers)
+    comme `SUPER_BIND`/`HOME_BIND` ;
+    `ModuleLoader::resolve` (méthode additive,
+    défaut `None`) laisse l'hôte rapporter
+    l'URL absolue — `MapLoader` (session) la
+    rend → `import.meta.url` absolu par module,
+    `new URL("./", meta.url)` fonctionne ;
+    `import()` reçoit le référent lexical ;
+    `evaluate_module` aligne `current_module`
+    sur `Module.spec` ; le référent des deps
+    est l'URL *résolue* du parent.
+  Mesure sonde : dep/callback/lazy-chunk lisent
+  `https://site/app/{dep,sub}.js` au lieu de
+  l'entrée ; `new URL('a.png', dep.url)` OK.
+  Terrain github.com : résidu inchangé
+  (turbo-frame honnête). Régression
+  `mod_import_meta_url_per_module`.
 
 ## Tâches continues
 

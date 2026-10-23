@@ -560,6 +560,11 @@ pub struct Session {
     /// synchrone ou `drain_applies_shared` hors verrou).
     /// Une entrée par onglet au plus (coalescence).
     pending_applies: apply::ApplyQueue,
+    /// Cellule `Accept-Language` partagée avec le
+    /// `LangTransport` qui coiffe `transport` (étape 118) —
+    /// `set_accept_language` la fait évoluer à chaud, sans
+    /// reconstruire la pile.
+    accept_language: explorer_net::lang::AcceptLanguage,
 }
 
 impl Session {
@@ -584,6 +589,15 @@ impl Session {
     ) -> Self {
         let (events, _) = broadcast::channel(cfg.event_capacity.max(1));
         let (net_tx, net_rx) = channel();
+        // `Accept-Language` au-dessus de toute la pile (étape
+        // 118) : la cellule démarre vide — l'hôte la pose via
+        // `set_accept_language` (réglages app → API) et elle
+        // couvre navigations, sous-ressources et XHR d'un coup.
+        let accept_language = explorer_net::lang::accept_language_cell(None);
+        let transport: Arc<dyn HttpTransport> = Arc::new(explorer_net::lang::LangTransport::wrap(
+            transport,
+            accept_language.clone(),
+        ));
         Self {
             transport,
             webfonts: Arc::new(std::sync::Mutex::new(WebFontSource::new(
@@ -623,6 +637,7 @@ impl Session {
             journal_fallbacks: 0,
             journal_applies: 0,
             pending_applies: std::collections::VecDeque::new(),
+            accept_language,
             downloads: HashMap::new(),
             next_download_id: 1,
             next_media_id: 1,
@@ -685,6 +700,29 @@ impl Session {
     /// chaque navigation qui rencontre un `<script>`.
     pub fn set_js_factory(&mut self, f: JsFactory) {
         self.js_factory = Some(f);
+    }
+
+    /// Valeur `Accept-Language` annoncée sur toutes les requêtes
+    /// (étape 118 — navigation, sous-ressources, XHR). `None`
+    /// ou chaîne vide = en-tête non envoyé. Effet immédiat sur
+    /// les requêtes suivantes — les fetch en vol gardent la
+    /// valeur de leur émission.
+    pub fn set_accept_language(&mut self, lang: Option<String>) {
+        *self
+            .accept_language
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            lang.filter(|v| !v.trim().is_empty());
+    }
+
+    /// Valeur `Accept-Language` courante (`None` = en-tête
+    /// absent) — reflétée dans le statut API pour diagnostic.
+    #[must_use]
+    pub fn accept_language(&self) -> Option<String> {
+        self.accept_language
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Jar à cookies de la session — l'hôte le partage avec

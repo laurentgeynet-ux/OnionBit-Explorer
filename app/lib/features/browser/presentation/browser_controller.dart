@@ -441,6 +441,10 @@ class BrowserController extends Notifier<BrowserState> {
     ref.listen(settingsProvider.select((s) => s.theme), (_, _) {
       unawaited(_pushColorScheme());
     });
+    // Étape 118 — `Accept-Language` suit le réglage langue.
+    ref.listen(settingsProvider.select((s) => s.language), (_, _) {
+      unawaited(_pushAcceptLanguage());
+    });
     // `PlatformDispatcher.instance` (dart:ui) est accessible
     // sans `WidgetsBinding` — le notifier vit aussi dans les
     // tests unitaires purs (ProviderContainer seul).
@@ -537,6 +541,9 @@ class BrowserController extends Notifier<BrowserState> {
       // Réglage courant poussé au moteur neuf (étape 97 —
       // l'env session démarre `light` sinon).
       unawaited(_pushColorScheme());
+      // `Accept-Language` poussé à la (re)connexion — la
+      // session neuve n'en porte aucun (étape 118).
+      unawaited(_pushAcceptLanguage());
       // Réconciliation à froid : les offres émises avant la
       // reconnexion SSE sont récupérées par `GET …/media`.
       for (final t in tabs) {
@@ -1356,6 +1363,30 @@ class BrowserController extends Notifier<BrowserState> {
       unawaited(_pullFrame(id));
     } on Object {
       // Daemon injoignable → prochain appui/nav réessaie.
+    }
+  }
+
+  /// `Accept-Language` effectif (étape 118) : réglage
+  /// `language` explicite, sinon la locale OS — forme
+  /// navigateur `<locale>,<lang>;q=0.9,en;q=0.8`
+  /// (`fr_FR` → `fr-FR,fr;q=0.9,en;q=0.8`).
+  String _effectiveLanguage() {
+    final cfg = ref.read(settingsProvider).language.trim();
+    final raw = cfg.isNotEmpty ? cfg : ui.PlatformDispatcher.instance.locale.toLanguageTag();
+    // Déjà une liste qualifiée → telle quelle.
+    if (raw.contains(',') || raw.contains(';')) return raw;
+    final base = raw.split('-').first;
+    return base == raw ? '$raw,en;q=0.8' : '$raw,$base;q=0.9,en;q=0.8';
+  }
+
+  /// Pousse `Accept-Language` à la session moteur — les
+  /// portails localisés (google, wikipedia) servaient
+  /// l'anglais faute d'en-tête (terrain 23/10).
+  Future<void> _pushAcceptLanguage() async {
+    try {
+      await _repo.setAcceptLanguage(_effectiveLanguage());
+    } on Object {
+      // Injoignable/export absent → retenté au prochain bootstrap.
     }
   }
 

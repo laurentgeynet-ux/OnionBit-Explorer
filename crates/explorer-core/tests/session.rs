@@ -1222,6 +1222,32 @@ async fn commit_kills_pending_nav_of_previous_document() {
     assert_eq!(t.last().unwrap().1, "/c");
 }
 
+/// Étape 118 — `Accept-Language` piloté à chaud : absent par
+/// défaut, la valeur posée par `set_accept_language` part sur
+/// les requêtes suivantes, chaîne vide lève l'en-tête (le
+/// `LangTransport` qui coiffe la pile la relit à chaque appel).
+#[tokio::test]
+async fn accept_language_reaches_requests_and_updates_live() {
+    let (mut s, t) = test_session();
+    t.route("/a", 200, PAGE);
+    t.route("/b", 200, PAGE);
+    let id = s.open_tab();
+
+    s.navigate(id, "http://h.test/a").await.unwrap();
+    assert_eq!(t.last_header("accept-language"), None);
+
+    s.set_accept_language(Some("fr-FR,fr;q=0.9,en;q=0.8".into()));
+    s.navigate(id, "http://h.test/b").await.unwrap();
+    assert_eq!(
+        t.last_header("accept-language").as_deref(),
+        Some("fr-FR,fr;q=0.9,en;q=0.8")
+    );
+
+    s.set_accept_language(Some("   ".into()));
+    s.navigate(id, "http://h.test/a").await.unwrap();
+    assert_eq!(t.last_header("accept-language"), None);
+}
+
 #[tokio::test]
 async fn click_off_link_is_ignored() {
     let (mut s, t) = test_session();

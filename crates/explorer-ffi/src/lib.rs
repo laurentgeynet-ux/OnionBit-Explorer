@@ -427,6 +427,33 @@ pub unsafe extern "C" fn explorer_set_color_scheme(h: *mut ExplorerHandle, dark:
     }
 }
 
+/// Valeur `Accept-Language` annoncée sur les requêtes
+/// suivantes (étape 118) — `len == 0` lève l'en-tête.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `lang..lang+len` lisible.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_set_accept_language(
+    h: *mut ExplorerHandle,
+    lang: *const u8,
+    len: usize,
+) -> i32 {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let lang = if len == 0 {
+        None
+    } else {
+        match unsafe { read_str(lang, len, MAX_URL) } {
+            Some(l) => Some(l.to_string()),
+            None => return -1,
+        }
+    };
+    h.session.set_accept_language(lang);
+    0
+}
+
 /// Genre d'entrée pour [`explorer_input`].
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]

@@ -79,6 +79,7 @@ pub fn router_with_egress(
     let r = Router::new()
         .route("/api/status", get(status))
         .route("/api/egress", get(egress_info))
+        .route("/api/accept-language", post(accept_language))
         .route("/api/tabs", get(list_tabs).post(open_tab))
         .route("/api/tabs/{id}", delete(close_tab))
         .route("/api/tabs/{id}/frame", get(frame))
@@ -171,7 +172,40 @@ async fn status(State(st): State<ApiState>) -> impl IntoResponse {
         "engine": "explorer",
         "version": env!("CARGO_PKG_VERSION"),
         "tabs": session.tabs(),
+        "accept_language": session.accept_language(),
     }))
+}
+
+/// `POST /api/accept-language` — `{"lang": "fr-FR,fr;q=0.9"}`
+/// (étape 118) : la session annonce la valeur en
+/// `Accept-Language` sur toutes les requêtes suivantes ;
+/// `""`/`null` lève l'en-tête.
+async fn accept_language(
+    State(st): State<ApiState>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let lang = body.get("lang").and_then(|v| {
+        if v.is_null() {
+            Some(String::new())
+        } else {
+            v.as_str().map(str::to_string)
+        }
+    });
+    let Some(lang) = lang else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            &CoreError::Url("champ « lang » chaîne attendu".to_string()),
+        );
+    };
+    st.session
+        .lock()
+        .await
+        .set_accept_language(if lang.trim().is_empty() {
+            None
+        } else {
+            Some(lang)
+        });
+    StatusCode::OK.into_response()
 }
 
 /// `GET /api/egress` → `{resolver}` — mode de résolution DNS
