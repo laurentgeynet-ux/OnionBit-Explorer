@@ -2593,3 +2593,148 @@ fn media_constructor_name_is_class_name() {
         "HTMLAudioElement"
     );
 }
+
+// ------------------------------------------------------------------
+// JS-C76 — collections DOM itérables (déclencheur `Error: b`
+// google.com : les helpers `makeIterator` des bundles closure
+// exigent `Symbol.iterator` **ou** `length` numérique + indexés).
+// ------------------------------------------------------------------
+
+const PAGE_COLL: &str = r#"<html><body>
+<form id="f" name="login"><input id="u" name="user" value="v1">
+<input name="kind" value="a"><input name="kind" value="b">
+<select id="s"><option value="x">X</option><option value="y" selected>Y</option></select>
+<button name="go">ok</button></form>
+<div id="c" class="aa bb" data-x="1" lang="fr"></div>
+<input id="fi" type="file"><input id="tf" type="text">
+</body></html>"#;
+
+/// `for-of`/`Symbol.iterator` sur les collections host —
+/// `makeIterator` de Google s'appuie dessus (`Error: b` sinon).
+#[test]
+fn c76_collections_iterables() {
+    // `classList` : itérable + indexée (DOMTokenList spec).
+    assert_eq!(
+        ev_in(
+            PAGE_COLL,
+            "var r=[];for(var t of document.getElementById('c').classList)r.push(t);r.join(',')"
+        ),
+        "aa,bb"
+    );
+    assert_eq!(
+        ev_in(
+            PAGE_COLL,
+            "var c=document.getElementById('c').classList;c[0]+'|'+c[1]+'|'+c[9]+'|'+c.length+'|'+c.item(1)+'|'+c.item(9)+'|'+c.value"
+        ),
+        "aa|bb|undefined|2|bb|null|aa bb"
+    );
+    // `attributes` : NamedNodeMap itérable, indexée, nommée.
+    assert_eq!(
+        ev_in(
+            PAGE_COLL,
+            "var a=document.getElementById('c').attributes;var r=[];for(var x of a)r.push(x.name+'='+x.value);a.length+'|'+r.join(',')+'|'+a[1].name+'|'+a.lang.value+'|'+a.item(0).name"
+        ),
+        "4|id=c,class=aa bb,data-x=1,lang=fr|class|fr|id"
+    );
+    // `form.elements` : itérable, length, accès nommé + namedItem.
+    assert_eq!(
+        ev_in(
+            PAGE_COLL,
+            "var el=document.getElementById('f').elements;var tags=[];for(var x of el)tags.push(x.tagName);el.length+'|'+tags.join(',')+'|'+el.user.id+'|'+el.namedItem('u').value+'|'+el.namedItem('zz')"
+        ),
+        "5|INPUT,INPUT,INPUT,SELECT,BUTTON|u|v1|null"
+    );
+    // `children`/`childNodes`/`qSA`/`getElementsBy*` : `.item(i)`.
+    assert_eq!(
+        ev_in(
+            PAGE_COLL,
+            "var l=document.querySelectorAll('input');l.item(1).name+'|'+l.item(99)+'|'+document.getElementById('f').children.item(0).tagName"
+        ),
+        "kind|null|INPUT"
+    );
+    // NamedNodeMap mutateurs.
+    assert_eq!(
+        ev_in(
+            PAGE_COLL,
+            "var el=document.getElementById('c'),a=el.attributes;a.setNamedItem({name:'title',value:'hi'});a.getNamedItem('title').value+'|'+el.getAttribute('title')+'|'+a.removeNamedItem('title').value+'|'+el.getAttribute('title')"
+        ),
+        "hi|hi|hi|null"
+    );
+}
+
+/// Le `z()` closure au sens littéral : `Symbol.iterator` ou
+/// `length` numérique — chaque surface passait `undefined` avant.
+#[test]
+fn c76_makeiterator_gate() {
+    let gate = "function z(a){var b=typeof Symbol!='undefined'&&Symbol.iterator&&a[Symbol.iterator];if(b)return b.call(a);if(typeof a.length=='number')return{arraylike:true};throw Error('b`'+String(a));}";
+    for (label, src, want) in [
+        (
+            "attributes",
+            "z(document.getElementById('c').attributes);'ok'",
+            "ok",
+        ),
+        (
+            "elements",
+            "z(document.getElementById('f').elements);'ok'",
+            "ok",
+        ),
+        (
+            "classList",
+            "z(document.getElementById('c').classList);'ok'",
+            "ok",
+        ),
+        ("style", "z(document.getElementById('c').style);'ok'", "ok"),
+        ("files", "z(document.getElementById('fi').files);'ok'", "ok"),
+        (
+            "options",
+            "z(document.getElementById('s').options);'ok'",
+            "ok",
+        ),
+    ] {
+        assert_eq!(ev_in(PAGE_COLL, &format!("{gate}{src}")), want, "{label}");
+    }
+}
+
+/// Détails de surface : `style.length` numérique, `form.username`
+/// named getter, multi-match → collection, `files` null hors
+/// file, `selectedOptions`/`selectedIndex`, `getElementsByName`,
+/// `classList.forEach`/`toggle(force)`/`replace`.
+#[test]
+fn c76_surfaces_detail() {
+    assert_eq!(
+        ev_in(
+            PAGE_COLL,
+            "var el=document.getElementById('c');el.setAttribute('style','color:red; margin: 0');el.style.length+'|'+el.style[0]+'|'+el.style.item(1)"
+        ),
+        "2|color|margin"
+    );
+    assert_eq!(
+        ev_in(
+            PAGE_COLL,
+            "var f=document.getElementById('f');f.user.tagName+'|'+f.kind.length+'|'+f.kind[0].value+'|'+(document.forms.login===f)+'|'+document.forms.namedItem('login').id+'|'+document.getElementsByName('kind').length"
+        ),
+        "INPUT|2|a|true|f|2"
+    );
+    assert_eq!(
+        ev_in(
+            PAGE_COLL,
+            "var s=document.getElementById('s');s.options.length+'|'+s.options[1].value+'|'+s.selectedOptions.length+'|'+s.selectedIndex"
+        ),
+        "2|y|1|1"
+    );
+    assert_eq!(
+        ev_in(
+            PAGE_COLL,
+            "var c=document.getElementById('c').classList,r=[];c.forEach(function(t,i){r.push(i+':'+t)});c.toggle('zz',true);c.replace('aa','cc');r.join(',')+'|'+c.contains('zz')+'|'+c.contains('cc')+'|'+c.contains('aa')"
+        ),
+        "0:aa,1:bb|true|true|false"
+    );
+    // `input.files` : FileList vide pour file, null sinon.
+    assert_eq!(
+        ev_in(
+            PAGE_COLL,
+            "document.getElementById('fi').files.length+'|'+document.getElementById('tf').files"
+        ),
+        "0|null"
+    );
+}

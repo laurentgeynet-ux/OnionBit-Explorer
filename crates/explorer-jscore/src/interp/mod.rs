@@ -2824,6 +2824,21 @@ impl Engine {
         }))
     }
 
+    /// `new_host_object` + own-prop `Symbol.iterator` (JS-C76) : la
+    /// valeur est `for-of`/spread-compatible et passe la détection
+    /// `a[Symbol.iterator]` des helpers `makeIterator` des bundles
+    /// closure (déclencheur : `Error: b` google.com). La native
+    /// relit [`crate::heap::Host::iter_items`] à chaque appel —
+    /// collection vivante ; le host doit implémenter `iter_items`.
+    pub fn new_iterable_host(&mut self, host: Rc<dyn crate::heap::Host>) -> Value {
+        let v = self.new_host_object(host);
+        if let Value::Obj(id) = v {
+            let it = self.native_fn("[Symbol.iterator]", host_sym_iterator);
+            self.set_own(id, SYM_ITERATOR, it, false);
+        }
+        v
+    }
+
     /// `base[key]` on any value — wraps primitives via their prototype.
     pub(crate) fn get_prop_value(&mut self, base: Value, key: &str) -> JsResult<Value> {
         match base {

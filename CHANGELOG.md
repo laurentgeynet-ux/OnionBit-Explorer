@@ -33,7 +33,98 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   défaut layout dispatché PIPE au
   journal avec repro minimal.
 
+- **Étape 121 — fetch `mask-image:
+  url(http…)`** (`explorer-core` —
+  réponse à la demande de couture
+  PIPE R-86 : icônes MDN
+  `.color-theme__button`/`.external`).
+  `fetch_backgrounds` collecte aussi
+  `mask-image`/`-webkit-mask-image`
+  (feuilles liées + `<style>` inline,
+  `@media` évalués — `mask` non
+  expansé par la cascade, honnête) :
+  même boucle que les fonds (budget
+  `max_images` partagé, dédup par
+  résolue, `data:` exclus — collectés
+  côté render), alias brut→résolue
+  `mask_aliases` transporté via
+  `SubCommitTail` → `Tab` →
+  `PaintPayload`. Corps partagés
+  `bg_bodies`, décodage `bg_decoded`
+  commun (`image_max_px`) —
+  `insert_fetched_images` ex-
+  `insert_fetched_backgrounds`
+  enregistre `register_mask` sous la
+  clé `url(...)` brute à chaque
+  cascade (`masks_url` RAZ avec
+  `PaintImages::default()`) — les
+  pseudos sans `NodeId` couverts de
+  fait. **Trou colatéral réparé** :
+  `data_imgs.masks_url` n'était
+  jamais étendu à l'apply — tout
+  `mask-image` `data:` était aveugle
+  en session depuis R-52. Promesse
+  honnête : le motif devient
+  *possible* — l'icône MDN au shot
+  reste à mesurer en terrain.
+  Régressions `mask_image_*`,
+  `data_mask_paints_in_session`,
+  `fetched_mask_survives_js_dom_
+  resync` (6 tests session).
+
 ### Fixed
+
+- **JS-C76 — collections DOM
+  itérables** (`explorer-jscore` —
+  terrain : exception `Error: b`
+  sur google.com, stack
+  `(3:2662)`/`U(3:4262)`). Le throw
+  est `Error("b`" + String(a))` du
+  helper closure `makeIterator`
+  (tout `for-of`/spread des bundles
+  compilés) — il cible une valeur
+  sans `Symbol.iterator` **ni**
+  `length` numérique. Surfaces
+  host corrigées : `el.attributes`
+  (`NamedNodeMap` vivante,
+  indexée, nommée, mutateurs
+  `*NamedItem`), `form.elements`/
+  `fieldset.elements` (contrôles
+  listés + `namedItem` + accès
+  nommé), named getter
+  `form.username`, `select.
+  options`/`selectedOptions`/
+  `selectedIndex`, `input.files`,
+  `document.getElementsByName`,
+  accès nommé des collections
+  `document.forms/links/images/
+  scripts`, `classList` (indexés,
+  `value`, `item`, `forEach`,
+  `entries`/`keys`/`values`,
+  `replace`, `toggle(force)`,
+  `supports`, `Symbol.iterator`
+  spec), `style.length` numérique
+  + `style[i]`/`item(i)`, et
+  `item()` (`null` hors-bornes)
+  sur toutes les collections.
+  Mécanique : `Host::iter_items`
+  + `Engine::new_iterable_host`
+  posent `Symbol.iterator` en
+  own-prop — les lectures
+  `a[Symbol.iterator]` *et* le
+  `for-of` moteur la voient ;
+  chaque itération resnapshotte la
+  collection (vivante). Déviations
+  documentées : `Attr` = objet
+  plat snapshot, collections =
+  snapshots à l'accès, `namedItem`
+  multi-match → premier. Repro
+  `/ml` impossible (token `escs`
+  périmé — la sonde `jprobe`
+  ressert le shell challenge PoW,
+  lacune honnête JS-C65) : fix
+  porté sur la classe de faute
+  balayée. Régressions `c76_*`.
 
 - **R-90 — rects des inlines
   imbriqués + atomes `inline-*`**

@@ -501,6 +501,128 @@ fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).copied().unwrap_or(Value::Undefined)
 }
 
+/// `collection.item(i)` — `null` hors-bornes (spec `NodeList`/
+/// `HTMLCollection` ; l'accès indexé `collection[i]` rend
+/// `undefined`, différence assumée).
+fn collection_item(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let i = e.to_number(arg(args, 0))? as usize;
+    if let Value::Obj(id) = t {
+        if let Some(o) = e.heap.obj(id) {
+            if let ObjKind::Array(elems) = &o.kind {
+                return Ok(elems.get(i).copied().unwrap_or(Value::Null));
+            }
+        }
+    }
+    Ok(Value::Null)
+}
+
+/// `collection.namedItem(name)` (JS-C76) — premier élément dont
+/// `id` ou `name` matche, `null` sinon. Déviation documentée :
+/// multi-match (radio group) → premier seul, pas de
+/// `RadioNodeList`.
+fn collection_named_item(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let name = e.to_js_string(arg(args, 0))?;
+    if let Value::Obj(id) = t {
+        let elems = match e.heap.obj(id) {
+            Some(o) => match &o.kind {
+                ObjKind::Array(elems) => elems.clone(),
+                _ => Vec::new(),
+            },
+            None => Vec::new(),
+        };
+        for v in elems {
+            for key in ["id", "name"] {
+                if let Ok(Value::Str(s)) = e.get_prop_value(v, key) {
+                    if e.heap.string(s).is_some_and(|v| v == name) {
+                        return Ok(v);
+                    }
+                }
+            }
+        }
+    }
+    Ok(Value::Null)
+}
+
+/// Collection DOM « HTMLCollection-like » (JS-C76 — déclencheur
+/// `Error: b` google.com : les helpers `makeIterator` des bundles
+/// closure exigent `a[Symbol.iterator]` **ou** `a.length`
+/// numérique) : tableau JS réel (`@@iterator`/`length`/indexés
+/// natifs) + `item()` ; `named` ajoute `namedItem()` et l'accès
+/// nommé (`collection.foo` ≙ élément de `id`/`name` `foo`,
+/// propre aux collections de formulaires). Snapshot à l'accès —
+/// la vivacité vient de la relecture à chaque get.
+fn dom_collection(
+    e: &mut Engine,
+    dom: &DomRef,
+    cache: &NodeCache,
+    ids: &[NodeId],
+    named: bool,
+) -> Value {
+    let vals: Vec<Value> = ids.iter().map(|&n| node_value(e, dom, cache, n)).collect();
+    let arr = e.new_array(vals);
+    if let Value::Obj(id) = arr {
+        e.add_method(id, "item", collection_item);
+        if named {
+            e.add_method(id, "namedItem", collection_named_item);
+            for &n in ids {
+                for k in ["id", "name"] {
+                    let v = dom.borrow().attr(n, k).map(str::to_string);
+                    if let Some(v) = v {
+                        if !v.is_empty()
+                            && crate::interp::array_index(&v).is_none()
+                            && e.get_prop(id, &v).is_none()
+                        {
+                            let nv = node_value(e, dom, cache, n);
+                            e.set_own(id, &v, nv, false);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    arr
+}
+
+/// Éléments « listés » d'un `<form>`/`<fieldset>` (HTML §4.10.3 —
+/// `button fieldset input object output select textarea`), ordre
+/// document approximé par ordre d'allocation du miroir (exact pour
+/// les documents parsés). L'association `form=` cross-arbre n'est
+/// pas suivie — déviation documentée.
+fn listed_controls(d: &Dom, root: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    for tag in [
+        "input", "select", "textarea", "button", "fieldset", "object", "output",
+    ] {
+        out.extend(d.by_tag(root, tag));
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// Objet `Attr` honnête (JS-C76 — snapshot nom/valeur + lien
+/// `ownerElement`) : pas un vrai nœud du miroir ; les mutations
+/// transitent par `attributes.setNamedItem`, qui relit `name`/
+/// `value` de l'objet passé.
+fn attr_value(e: &mut Engine, owner: Value, name: &str, value: &str) -> Value {
+    let o = e.new_object();
+    let (n, v) = (e.str_val(name.to_string()), e.str_val(value.to_string()));
+    for (k, p) in [
+        ("name", n),
+        ("nodeName", n),
+        ("localName", n),
+        ("value", v),
+        ("nodeValue", v),
+        ("textContent", v),
+    ] {
+        e.set_own(o, k, p, true);
+    }
+    e.set_own(o, "nodeType", Value::Num(2.0), true);
+    e.set_own(o, "specified", Value::Bool(true), true);
+    e.set_own(o, "ownerElement", owner, true);
+    Value::Obj(o)
+}
+
 /// Wrap a `Dom` in a `document` host object (fresh node cache) —
 /// used by `install_dom` and by `xhr.responseXML`.
 pub(crate) fn document_value(e: &mut Engine, dom: &DomRef) -> Value {
@@ -1429,7 +1551,8 @@ impl Host for DocumentHost {
             "URL" | "documentURI" => Ok(Some(e.str_val(e.hooks.page_url.clone()))),
             // `document.links`/`images`/`forms`/`scripts` — live-ish
             // (recomputed at each access) tag collections ≙ amont
-            // `links[]`.
+            // `links[]`. Accès nommé (`document.forms.login`) +
+            // `namedItem` (named getter `HTMLCollection`, JS-C76).
             "links" | "images" | "forms" | "scripts" => {
                 let tag = match key {
                     "links" => "a",
@@ -1441,11 +1564,7 @@ impl Host for DocumentHost {
                     let d = self.dom.borrow();
                     d.by_tag(d.root, tag)
                 };
-                let vals: Vec<Value> = ids
-                    .iter()
-                    .map(|&n| node_value(e, &self.dom, &self.cache, n))
-                    .collect();
-                Ok(Some(e.new_array(vals)))
+                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, true)))
             }
             "head" => {
                 let n = {
@@ -1572,11 +1691,7 @@ impl Host for DocumentHost {
                     let d = self.dom.borrow();
                     d.by_tag(d.root, &tag)
                 };
-                let vals: Vec<Value> = ids
-                    .iter()
-                    .map(|&n| node_value(e, &self.dom, &self.cache, n))
-                    .collect();
-                Ok(Some(e.new_array(vals)))
+                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
             }
             "getElementsByClassName" => {
                 let cls = e.to_js_string(arg(args, 0))?;
@@ -1584,11 +1699,24 @@ impl Host for DocumentHost {
                     let d = self.dom.borrow();
                     d.by_class(d.root, &cls)
                 };
-                let vals: Vec<Value> = ids
-                    .iter()
-                    .map(|&n| node_value(e, &self.dom, &self.cache, n))
-                    .collect();
-                Ok(Some(e.new_array(vals)))
+                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
+            }
+            // `getElementsByName` — attribut `name` (JS-C76).
+            "getElementsByName" => {
+                let name = e.to_js_string(arg(args, 0))?;
+                let ids = {
+                    let d = self.dom.borrow();
+                    d.nodes
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, n)| {
+                            n.kind == NodeKind::Element
+                                && n.attrs.iter().any(|(k, v)| k == "name" && v == &name)
+                        })
+                        .map(|(i, _)| i as NodeId)
+                        .collect::<Vec<_>>()
+                };
+                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
             }
             "querySelector" => {
                 let sel = e.to_js_string(arg(args, 0))?;
@@ -1603,11 +1731,7 @@ impl Host for DocumentHost {
                 let sel = e.to_js_string(arg(args, 0))?;
                 let root = self.dom.borrow().root;
                 let ids = self.dom.borrow().query(root, &sel);
-                let vals: Vec<Value> = ids
-                    .iter()
-                    .map(|&n| node_value(e, &self.dom, &self.cache, n))
-                    .collect();
-                Ok(Some(e.new_array(vals)))
+                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
             }
             "createElement" => {
                 let tag = e.to_js_string(arg(args, 0))?;
@@ -2169,7 +2293,7 @@ impl Host for NodeHost {
                 }))));
             }
             "classList" => {
-                return Ok(Some(e.new_host_object(Rc::new(ClassListHost {
+                return Ok(Some(e.new_iterable_host(Rc::new(ClassListHost {
                     dom: self.dom.clone(),
                     node,
                 }))));
@@ -2203,11 +2327,93 @@ impl Host for NodeHost {
             }
             "children" => {
                 let kids = self.dom.borrow().element_children(node);
-                let vals: Vec<Value> = kids
-                    .iter()
-                    .map(|&n| node_value(e, &self.dom, &self.cache, n))
-                    .collect();
-                return Ok(Some(e.new_array(vals)));
+                return Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &kids,
+                    false,
+                )));
+            }
+            // `el.attributes` — `NamedNodeMap` vivante (JS-C76) :
+            // itérable + `length` + indexés — les helpers
+            // `makeIterator` des bundles closure l'exigent
+            // (`Error: b` google.com sinon).
+            "attributes" => {
+                return Ok(Some(e.new_iterable_host(Rc::new(AttributesHost {
+                    dom: self.dom.clone(),
+                    cache: self.cache.clone(),
+                    node,
+                }))));
+            }
+            // `form.elements`/`fieldset.elements` —
+            // `HTMLFormControlsCollection` : contrôles listés du
+            // sous-arbre + accès nommé + `namedItem` (JS-C76).
+            "elements" => {
+                let is_listing = {
+                    let d = self.dom.borrow();
+                    matches!(d.nodes[node as usize].tag.as_str(), "form" | "fieldset")
+                };
+                if is_listing {
+                    let ids = {
+                        let d = self.dom.borrow();
+                        listed_controls(&d, node)
+                    };
+                    return Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, true)));
+                }
+            }
+            // `select.options`/`selectedOptions` —
+            // `HTMLOptionsCollection` ≙ tableau des `<option>`
+            // (JS-C76) ; `selectedOptions` = filtre `selected`.
+            "options" | "selectedOptions" => {
+                let is_select = {
+                    let d = self.dom.borrow();
+                    d.nodes[node as usize].tag == "select"
+                };
+                if is_select {
+                    let opts = {
+                        let d = self.dom.borrow();
+                        let mut opts = d.by_tag(node, "option");
+                        if key == "selectedOptions" {
+                            opts.retain(|&o| d.has_attr(o, "selected"));
+                        }
+                        opts
+                    };
+                    return Ok(Some(dom_collection(
+                        e,
+                        &self.dom,
+                        &self.cache,
+                        &opts,
+                        false,
+                    )));
+                }
+            }
+            "selectedIndex" => {
+                let d = self.dom.borrow();
+                if d.nodes[node as usize].tag == "select" {
+                    let i = d
+                        .by_tag(node, "option")
+                        .iter()
+                        .position(|&o| d.has_attr(o, "selected"));
+                    return Ok(Some(Value::Num(i.map_or(-1.0, |i| i as f64))));
+                }
+            }
+            // `input.files` — `FileList` honnête vide (`type=file`)
+            // ou `null` (autres types) — l'upload réel est JS-C70.
+            "files" => {
+                let is_file = {
+                    let d = self.dom.borrow();
+                    d.nodes[node as usize].tag == "input" && d.attr(node, "type") == Some("file")
+                };
+                return Ok(Some(if is_file {
+                    let a = e.new_array(Vec::new());
+                    if let Value::Obj(id) = a {
+                        e.add_method(id, "item", collection_item);
+                    }
+                    a
+                } else {
+                    Value::Null
+                }));
             }
             "firstChild" => {
                 let c = self.dom.borrow().nodes[node as usize]
@@ -2233,11 +2439,13 @@ impl Host for NodeHost {
             // elements-only above).
             "childNodes" => {
                 let kids = self.dom.borrow().child_nodes(node);
-                let vals: Vec<Value> = kids
-                    .iter()
-                    .map(|&n| node_value(e, &self.dom, &self.cache, n))
-                    .collect();
-                return Ok(Some(e.new_array(vals)));
+                return Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &kids,
+                    false,
+                )));
             }
             "childElementCount" => {
                 let n = self.dom.borrow().element_children(node).len();
@@ -2485,6 +2693,27 @@ impl Host for NodeHost {
             let has = self.dom.borrow().has_attr(node, key);
             return Ok(Some(Value::Bool(has)));
         }
+        // Named getter du `<form>` (HTML §4.10.3) : `form.username`
+        // ≙ contrôle listé de `id`/`name` — multi-match (radio)
+        // ≙ collection (RadioNodeList spec → tableau snapshot,
+        // déviation documentée). Dernier recours : les props
+        // réelles et les attributs priment.
+        if self.dom.borrow().nodes[node as usize].tag == "form" {
+            let ids = {
+                let d = self.dom.borrow();
+                listed_controls(&d, node)
+                    .into_iter()
+                    .filter(|&c| d.attr(c, "id") == Some(key) || d.attr(c, "name") == Some(key))
+                    .collect::<Vec<_>>()
+            };
+            if !ids.is_empty() {
+                return Ok(Some(if ids.len() == 1 {
+                    node_value(e, &self.dom, &self.cache, ids[0])
+                } else {
+                    dom_collection(e, &self.dom, &self.cache, &ids, false)
+                }));
+            }
+        }
         let _ = this;
         Ok(None)
     }
@@ -2615,20 +2844,12 @@ impl Host for NodeHost {
             "getElementsByTagName" => {
                 let tag = e.to_js_string(arg(args, 0))?;
                 let ids = self.dom.borrow().by_tag(node, &tag);
-                let vals: Vec<Value> = ids
-                    .iter()
-                    .map(|&n| node_value(e, &self.dom, &self.cache, n))
-                    .collect();
-                Ok(Some(e.new_array(vals)))
+                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
             }
             "getElementsByClassName" => {
                 let cls = e.to_js_string(arg(args, 0))?;
                 let ids = self.dom.borrow().by_class(node, &cls);
-                let vals: Vec<Value> = ids
-                    .iter()
-                    .map(|&n| node_value(e, &self.dom, &self.cache, n))
-                    .collect();
-                Ok(Some(e.new_array(vals)))
+                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
             }
             "querySelector" => {
                 let sel = e.to_js_string(arg(args, 0))?;
@@ -2641,11 +2862,7 @@ impl Host for NodeHost {
             "querySelectorAll" => {
                 let sel = e.to_js_string(arg(args, 0))?;
                 let ids = self.dom.borrow().query(node, &sel);
-                let vals: Vec<Value> = ids
-                    .iter()
-                    .map(|&n| node_value(e, &self.dom, &self.cache, n))
-                    .collect();
-                Ok(Some(e.new_array(vals)))
+                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
             }
             "appendChild" | "append" => {
                 let target = node_for(e, arg(args, 0));
@@ -3252,6 +3469,28 @@ impl Host for StyleHost {
     }
 
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        // `length`/`style[i]` : `CSSStyleDeclaration` est array-
+        // like spec (nombre + noms de déclarations indexés) — les
+        // helpers `makeIterator` des bundles closure lisent
+        // `length` numérique (JS-C76 ; avant, `style.length`
+        // tombait sur la lookup de propriété CSS → `""`).
+        if key == "length" {
+            let n = {
+                let d = self.dom.borrow();
+                style_map(&d, self.node).len()
+            };
+            return Ok(Some(Value::Num(n as f64)));
+        }
+        if let Some(i) = crate::interp::array_index(key) {
+            let name = {
+                let d = self.dom.borrow();
+                style_map(&d, self.node).get(i).map(|(k, _)| k.clone())
+            };
+            return Ok(Some(match name {
+                Some(k) => e.str_val(k),
+                None => Value::Undefined,
+            }));
+        }
         let kebab = camel_to_kebab(key);
         let v = {
             let d = self.dom.borrow();
@@ -3316,6 +3555,19 @@ impl Host for StyleHost {
                 }
                 Ok(Some(e.str_val("")))
             }
+            // `style.item(i)` — nom de la i-ème déclaration, `""`
+            // hors-bornes (spec CSSStyleDeclaration).
+            "item" => {
+                let i = e.to_number(arg(args, 0))? as usize;
+                let name = {
+                    let d = self.dom.borrow();
+                    style_map(&d, self.node)
+                        .get(i)
+                        .map(|(k, _)| k.clone())
+                        .unwrap_or_default()
+                };
+                Ok(Some(e.str_val(name)))
+            }
             _ => Ok(None),
         }
     }
@@ -3324,6 +3576,17 @@ impl Host for StyleHost {
 // ------------------------------------------------------------------
 // classList
 // ------------------------------------------------------------------
+
+impl ClassListHost {
+    /// Jetons `class` courants — relus à chaque appel (vivants).
+    fn tokens(&self) -> Vec<String> {
+        self.dom
+            .borrow()
+            .attr(self.node, "class")
+            .map(|c| c.split_whitespace().map(str::to_string).collect())
+            .unwrap_or_default()
+    }
+}
 
 impl Host for ClassListHost {
     fn class_name(&self) -> &'static str {
@@ -3336,24 +3599,106 @@ impl Host for ClassListHost {
 
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
         if key == "length" {
-            let n = {
-                let d = self.dom.borrow();
-                d.attr(self.node, "class")
-                    .map_or(0, |c| c.split_whitespace().count())
-            };
-            return Ok(Some(Value::Num(n as f64)));
+            return Ok(Some(Value::Num(self.tokens().len() as f64)));
         }
-        let _ = e;
+        // Accès indexé `cl[i]` + `cl.value` (JS-C76 — DOMTokenList
+        // est array-like : le chemin `makeIterator` des bundles
+        // closure itère `a[b++]`).
+        if let Some(i) = crate::interp::array_index(key) {
+            return Ok(Some(match self.tokens().get(i) {
+                Some(t) => e.str_val(t.clone()),
+                None => Value::Undefined,
+            }));
+        }
+        if key == "value" {
+            return Ok(Some(e.str_val(self.tokens().join(" "))));
+        }
         Ok(None)
+    }
+
+    /// `Symbol.iterator` — `DOMTokenList` est itérable spec
+    /// (JS-C76).
+    fn iter_items(&self, e: &mut Engine) -> JsResult<Option<Vec<Value>>> {
+        Ok(Some(
+            self.tokens().into_iter().map(|t| e.str_val(t)).collect(),
+        ))
+    }
+
+    fn keys(&self, _e: &mut Engine, _t: Value) -> Vec<String> {
+        (0..self.tokens().len()).map(|i| i.to_string()).collect()
     }
 
     fn invoke(
         &self,
         e: &mut Engine,
-        _t: Value,
+        this: Value,
         name: &str,
         args: &[Value],
     ) -> JsResult<Option<Value>> {
+        // Méthodes non-token d'abord — arg0 ≠ jeton (JS-C76 : la
+        // coercion préalable jetait `forEach(cb)` en string).
+        match name {
+            "item" => {
+                let i = e.to_number(arg(args, 0))? as usize;
+                return Ok(Some(match self.tokens().get(i) {
+                    Some(t) => e.str_val(t.clone()),
+                    None => Value::Null,
+                }));
+            }
+            "forEach" => {
+                let cb = arg(args, 0);
+                let this_arg = arg(args, 1);
+                for (i, t) in self.tokens().into_iter().enumerate() {
+                    let tv = e.str_val(t);
+                    e.call_value(cb, this_arg, &[tv, Value::Num(i as f64), this])?;
+                }
+                return Ok(Some(Value::Undefined));
+            }
+            "entries" | "keys" | "values" => {
+                let tokens = self.tokens();
+                let items: Vec<Value> = match name {
+                    "keys" => (0..tokens.len()).map(|i| Value::Num(i as f64)).collect(),
+                    "values" => tokens.into_iter().map(|t| e.str_val(t)).collect(),
+                    _ => tokens
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, t)| {
+                            let tv = e.str_val(t);
+                            e.new_array(vec![Value::Num(i as f64), tv])
+                        })
+                        .collect(),
+                };
+                let proto = e.protos.array_iter;
+                return Ok(Some(crate::collections::iter_obj(e, items, proto)));
+            }
+            "supports" => {
+                let t = e.to_js_string(arg(args, 0))?;
+                return Ok(Some(Value::Bool(
+                    !t.is_empty() && !t.chars().any(char::is_whitespace),
+                )));
+            }
+            "toString" | "toLocaleString" => {
+                return Ok(Some(e.str_val(self.tokens().join(" "))));
+            }
+            "replace" => {
+                let a = e.to_js_string(arg(args, 0))?;
+                let b = e.to_js_string(arg(args, 1))?;
+                let mut tokens = self.tokens();
+                if !tokens.iter().any(|t| t == &a) {
+                    return Ok(Some(Value::Bool(false)));
+                }
+                for t in &mut tokens {
+                    if *t == a {
+                        t.clone_from(&b);
+                    }
+                }
+                self.dom
+                    .borrow_mut()
+                    .set_attr(self.node, "class", &tokens.join(" "));
+                return Ok(Some(Value::Bool(true)));
+            }
+            _ => {}
+        }
         let cls = e.to_js_string(arg(args, 0))?;
         let mut d = self.dom.borrow_mut();
         let mut tokens: Vec<String> = d
@@ -3364,15 +3709,22 @@ impl Host for ClassListHost {
         match name {
             "add" => {
                 if !contains {
-                    tokens.push(cls);
+                    tokens.push(cls.clone());
                 }
             }
             "remove" => tokens.retain(|t| t != &cls),
             "toggle" => {
-                if contains {
-                    tokens.retain(|t| t != &cls);
+                // `toggle(t, force)` — le second arg force l'état
+                // cible (spec DOMTokenList, JS-C76).
+                let force = match arg(args, 1) {
+                    Value::Undefined => None,
+                    f => Some(e.to_boolean(f)),
+                };
+                let want = force.unwrap_or(!contains);
+                if want {
+                    tokens.push(cls.clone());
                 } else {
-                    tokens.push(cls);
+                    tokens.retain(|t| t != &cls);
                 }
             }
             "contains" => return Ok(Some(Value::Bool(contains))),
@@ -3380,9 +3732,155 @@ impl Host for ClassListHost {
         }
         d.set_attr(self.node, "class", &tokens.join(" "));
         Ok(Some(match name {
-            "toggle" => Value::Bool(!contains),
+            "toggle" => Value::Bool(tokens.iter().any(|t| t == &cls)),
             _ => Value::Undefined,
         }))
+    }
+}
+
+// ------------------------------------------------------------------
+// attributes — NamedNodeMap (JS-C76)
+// ------------------------------------------------------------------
+
+/// `el.attributes` — `NamedNodeMap` vivante sur les `attrs` du
+/// miroir : `length`, accès indexé (`attributes[0]`), accès nommé
+/// (`attributes.href`/`attributes["href"]`), `item`/`getNamedItem`/
+/// `setNamedItem`/`removeNamedItem` (variantes `*NS` = alias sur
+/// le nom local — pas de namespaces dans le miroir), itérable
+/// (for-of de facto — déclencheur `Error: b` google.com).
+struct AttributesHost {
+    dom: DomRef,
+    cache: NodeCache,
+    node: NodeId,
+}
+
+impl AttributesHost {
+    /// `(name, value)` des attributs courants — relus (vivants).
+    fn attrs(&self) -> Vec<(String, String)> {
+        self.dom.borrow().nodes[self.node as usize].attrs.clone()
+    }
+
+    /// `Attr` snapshot pour `(name, value)` + lien `ownerElement`.
+    fn attr_at(&self, e: &mut Engine, name: &str, value: &str) -> Value {
+        let owner = node_value(e, &self.dom, &self.cache, self.node);
+        attr_value(e, owner, name, value)
+    }
+}
+
+impl Host for AttributesHost {
+    fn class_name(&self) -> &'static str {
+        "NamedNodeMap"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        if key == "length" {
+            return Ok(Some(Value::Num(self.attrs().len() as f64)));
+        }
+        if let Some(i) = crate::interp::array_index(key) {
+            let attrs = self.attrs();
+            return Ok(Some(match attrs.get(i) {
+                Some((n, v)) => {
+                    let (n, v) = (n.clone(), v.clone());
+                    self.attr_at(e, &n, &v)
+                }
+                None => Value::Undefined,
+            }));
+        }
+        // Accès nommé : `attributes.href` — les props réelles de
+        // la map priment (longueur/indexés lus plus haut).
+        let found = {
+            let d = self.dom.borrow();
+            d.attr(self.node, key).map(str::to_string)
+        };
+        if let Some(v) = found {
+            return Ok(Some(self.attr_at(e, key, &v)));
+        }
+        Ok(None)
+    }
+
+    fn iter_items(&self, e: &mut Engine) -> JsResult<Option<Vec<Value>>> {
+        let mut out = Vec::new();
+        for (n, v) in self.attrs() {
+            out.push(self.attr_at(e, &n, &v));
+        }
+        Ok(Some(out))
+    }
+
+    fn keys(&self, _e: &mut Engine, _t: Value) -> Vec<String> {
+        (0..self.attrs().len()).map(|i| i.to_string()).collect()
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _t: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        match name {
+            "item" => {
+                let i = e.to_number(arg(args, 0))? as usize;
+                let attrs = self.attrs();
+                return Ok(Some(match attrs.get(i) {
+                    Some((n, v)) => {
+                        let (n, v) = (n.clone(), v.clone());
+                        self.attr_at(e, &n, &v)
+                    }
+                    None => Value::Null,
+                }));
+            }
+            "getNamedItem" | "getNamedItemNS" => {
+                // `*NS` : nom local = dernier arg (pas de
+                // namespaces dans le miroir).
+                let k = e.to_js_string(arg(args, usize::from(name.ends_with("NS"))))?;
+                let v = {
+                    let d = self.dom.borrow();
+                    d.attr(self.node, &k).map(str::to_string)
+                };
+                return Ok(Some(match v {
+                    Some(v) => self.attr_at(e, &k, &v),
+                    None => Value::Null,
+                }));
+            }
+            "setNamedItem" | "setNamedItemNS" => {
+                let attr = arg(args, usize::from(name.ends_with("NS")));
+                let nv = e.get_prop_value(attr, "name")?;
+                let vv = e.get_prop_value(attr, "value")?;
+                let k = e.to_js_string(nv)?;
+                let v = e.to_js_string(vv)?;
+                let old = {
+                    let d = self.dom.borrow();
+                    d.attr(self.node, &k).map(str::to_string)
+                };
+                self.dom.borrow_mut().set_attr(self.node, &k, &v);
+                // Spec : rend l'attribut remplacé, `null` sinon.
+                return Ok(Some(match old {
+                    Some(old) => self.attr_at(e, &k, &old),
+                    None => Value::Null,
+                }));
+            }
+            "removeNamedItem" | "removeNamedItemNS" => {
+                let k = e.to_js_string(arg(args, usize::from(name.ends_with("NS"))))?;
+                let old = {
+                    let d = self.dom.borrow();
+                    d.attr(self.node, &k).map(str::to_string)
+                };
+                let Some(old) = old else {
+                    // `NotFoundError` (DOMException) ≙ TypeError —
+                    // la famille DOMException n'est pas encore
+                    // constructible (stub `illegal_ctor`).
+                    return Err(e.type_error(format!("no attribute named `{k}`")));
+                };
+                self.dom.borrow_mut().remove_attr(self.node, &k);
+                return Ok(Some(self.attr_at(e, &k, &old)));
+            }
+            _ => {}
+        }
+        Ok(None)
     }
 }
 

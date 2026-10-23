@@ -1341,6 +1341,20 @@ pub trait Host: std::any::Any {
         "HostObject"
     }
 
+    /// Snapshot des valeurs itérées par `obj[Symbol.iterator]()`
+    /// (`for-of`, spread, helpers closure `makeIterator` de la
+    /// cible — JS-C76) : `Some(items)` expose `@@iterator`,
+    /// `None` (défaut) = non itérable. Posée en own-prop par
+    /// [`crate::Engine::new_iterable_host`] — la collection est
+    /// **relue à chaque appel** (vivante comme les collections
+    /// DOM), le snapshot gelé dans l'iterateur résultat.
+    ///
+    /// # Errors
+    /// Propage les exceptions levées pendant la collecte.
+    fn iter_items(&self, _e: &mut crate::Engine) -> JsResult<Option<Vec<Value>>> {
+        Ok(None)
+    }
+
     /// Trace hook for the mark-sweep GC (ADR-0008) : tout `Value`
     /// retenu par l'objet hôte doit être poussé dans `out`, sinon
     /// le collecteur le réclamera sous le pied du script. Défaut :

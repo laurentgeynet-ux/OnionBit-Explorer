@@ -2469,6 +2469,55 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   navigate` (404 vierge + contenu
   après nav).
 
+- [x] **Étape 121. Fetch `mask-image:
+  url(http…)`** (demande de couture
+  PIPE R-86 — icônes MDN invisibles
+  `.color-theme__button`/`.external`).
+  Chaîne symétrique des fonds étape
+  98 : `collect_decl_urls` généralisé
+  (`mask-image`/`-webkit-mask-image`
+  — `mask` non expansé par la
+  cascade, hors scope honnête) ;
+  fetch dans la même boucle que les
+  fonds (budget `max_images` partagé,
+  dédup par résolue, résolution sur
+  la base feuille/document,
+  `data:` exclus — déjà collectés
+  render-side) ; alias `mask_aliases`
+  brut→résolue via `SubJob` →
+  `SubCommitTail` → `Tab` →
+  `PaintPayload` (chemins sync +
+  détaché) ; corps `bg_bodies` et
+  cache `bg_decoded` communs
+  (`image_max_px`). `insert_fetched_
+  images` (ex-`insert_fetched_
+  backgrounds`) enregistre
+  `register_mask` sous clé `url(...)`
+  brute à chaque cascade — requis :
+  `masks_url` meurt au RAZ
+  `PaintImages::default()` de chaque
+  apply ; pseudos sans `NodeId`
+  couverts de fait. **Trou
+  colatéral réparé** : `data_imgs.
+  masks_url` jamais étendu à l'apply
+  → `mask-image` `data:` aveugle en
+  session depuis R-52. Promesse
+  tenue : le motif devient
+  *possible* — pixel MDN
+  (`.color-theme__button`/`.external`
+  visibles) à mesurer en terrain
+  avant de le clamer. Tests :
+  `mask_image_fetched_and_rendered`
+  (base feuille), `webkit_mask_image_
+  fetched_and_rendered` (style
+  inline + préfixe), `mask_on_
+  pseudo_fetched` (motif `::before`
+  MDN), `mask_image_missed_fetch_
+  is_silent` (404 → fond plein),
+  `data_mask_paints_in_session`,
+  `fetched_mask_survives_js_dom_
+  resync` (RAZ).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
@@ -3624,6 +3673,47 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   taillée pour V8 — insatisfiable sous un
   interpréteur, même classe que le tarpit
   Fnac) : **l'item `Error: b` reste ouvert**.
+
+- [x] **JS-C76. Collections DOM itérables
+  — `Error: b` google.com** : le throw
+  `Error("b`" + a)` du helper closure
+  `makeIterator` (tout `for-of`/spread des
+  bundles compilés) cible une valeur sans
+  `Symbol.iterator` **ni** `length`
+  numérique. Balayage des surfaces host :
+  `el.attributes`/`form.elements` =
+  `undefined` (throw), `style.length` =
+  `""` (throw), `classList`/`children`… =
+  `length` OK mais indexés absents (items
+  `undefined` silencieux). Livré :
+  `Host::iter_items` + `Engine::new_
+  iterable_host` posant `Symbol.iterator`
+  en own-prop (native partagée resnapshottant
+  à l'appel) ; `el.attributes` =
+  `NamedNodeMap` vivante (`length`/indexés/
+  accès nommé/`item`/`get|set|removeNamedItem`
+  — `*NS` = alias nom local) ; `form.
+  elements`/`fieldset.elements` = contrôles
+  listés + `namedItem` + accès nommé ;
+  named getter `form.username` (multi-match
+  → collection) ; `select.options`/
+  `selectedOptions`/`selectedIndex` ;
+  `input.files` (FileList vide / `null`) ;
+  `document.getElementsByName` ; accès nommé
+  `document.forms/links/images/scripts` ;
+  `classList` indexé/`value`/`item`/`forEach`/
+  `entries`/`keys`/`values`/`replace`/
+  `toggle(force)`/`supports` ; `style.length`
+  numérique + `style[i]`/`item(i)` ;
+  `item()` (null hors-bornes) sur toutes les
+  collections tableaux. Déviations : `Attr`
+  = objet plat snapshot, collections =
+  snapshots d'accès, `namedItem` multi-match
+  → premier (pas de `RadioNodeList`). Non
+  reproduit à l'identique (variante `/ml`
+  servie par token `escs` périmé) — fix sur
+  la classe de faute balayée. Régressions
+  `c76_*` (3 tests).
 
 ## Tâches continues
 

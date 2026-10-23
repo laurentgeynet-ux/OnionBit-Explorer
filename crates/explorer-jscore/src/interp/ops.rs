@@ -191,3 +191,21 @@ pub(crate) fn expr_to_pat(e: &Expr) -> Option<Pat> {
         _ => None,
     }
 }
+
+/// `obj[Symbol.iterator]()` partagé des host objects créés par
+/// `Engine::new_iterable_host` (JS-C76) : relit
+/// `Host::iter_items` à chaque appel (collection vivante) et rend
+/// un `%ArrayIterator%` sur le snapshot. `undefined` si `this`
+/// n'est pas un host itérable — ne devrait pas arriver (la native
+/// n'est posée qu'en own-prop des hôtes itérables).
+pub(crate) fn host_sym_iterator(e: &mut Engine, t: Value, _args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = t {
+        if let Some(h) = e.host_of(id) {
+            if let Some(items) = h.iter_items(e)? {
+                let proto = e.protos.array_iter;
+                return Ok(crate::collections::iter_obj(e, items, proto));
+            }
+        }
+    }
+    Ok(Value::Undefined)
+}
