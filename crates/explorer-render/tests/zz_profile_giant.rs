@@ -121,6 +121,23 @@ fn profile_giant() {
     layout_tree(&mut bx, 1024.0, &ctx);
     eprintln!("layout_tree    : {:?}", t.elapsed());
 
+    // Coût d'un apply post-script à caches fonte chauds : la
+    // session re-parse + recascade + reboîte, puis re-pose tout
+    // (sauf si le relayout incrémental R-12 vise un sous-arbre —
+    // bornes : aucun flottant, chemin bloc). Ici `ctx` réutilise
+    // le `FontCache` exactement comme `PaintPayload.layout_font_cache`
+    // (R-65) le fait entre applys.
+    let t = Instant::now();
+    let mut bx2 = build_box_tree(&dom, root, &styles).expect("boxtree#2");
+    let t_box2 = t.elapsed();
+    let t = Instant::now();
+    layout_tree(&mut bx2, 1024.0, &ctx);
+    eprintln!(
+        "apply simulé   : boxtree {:?} + layout chaud {:?}",
+        t_box2,
+        t.elapsed()
+    );
+
     let images = PaintImages::default();
     let t = Instant::now();
     let mut list = build_display_list_full(&bx, 1024.0, 768.0, 0.0, &images);

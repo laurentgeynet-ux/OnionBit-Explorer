@@ -2236,6 +2236,21 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   ~10 s plancher debug), `encode_png` ~4,0 s,
   `compute_styles` ~3,0 s.
 
+> **Clôture de la reliure « apply post-script ~250 s »
+> (étape 112) — arbitrage du 2026-10-23** : mesures release
+> de la sonde géante — pipeline complet **~2,3 s**
+> (`layout_tree` 389 ms, ×31 vs debug : le plancher restant
+> était la taxe debug du shaping, pas l'algorithme) ;
+> « apply simulé » à caches fonte chauds ≈ **1,9 s**
+> (layout chaud 213 ms). **R-86 (pré-shaping parallèle) non
+> retenu** — premier thread en crate domaine non justifié
+> par 389 ms ; de plus les clés de shape sont des fragments
+> post-itemisation, non collectables sans rejouer la moitié
+> du travail. Reliquat par-apply : `StyleEngine` reconstruit
+> à chaque apply (~3 s debug / ~0,3 s release de cascade) —
+> premier poste fixe si le coût redevient le goulot.
+> Détail au journal des coutures.
+
 ## Palier R-B — Contenu étranger, animation, canvas
 
 - [x] **R-8. Foreign-content dans `explorer-html`** (ex-60a) :
