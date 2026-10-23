@@ -412,6 +412,14 @@ pub(crate) struct SubJob {
     pub(crate) sheet_urls: Vec<Url>,
     pub(crate) scripts: Vec<ScriptItem>,
     pub(crate) img_urls: Vec<Url>,
+    /// Corps JSON des `<script type="importmap">` (ordre
+    /// document) — poussés au moteur avant le premier
+    /// `eval_module` (issue #6).
+    pub(crate) import_maps: Vec<String>,
+    /// `imports` fusionné (`merge_import_maps`) — sert au
+    /// prefetch : `module_deps` réécrit les bare specifiers
+    /// avant `Url::resolve`, comme le moteur à l'eval.
+    pub(crate) import_specs: Vec<(String, String)>,
     /// `<style>` inline du document — une entrée par
     /// élément (étape 104) — nourrit la résolution
     /// `@font-face` (le DOM n'est pas accessible hors
@@ -788,6 +796,7 @@ impl SubJob {
                 &self.page,
                 &base,
                 &src,
+                &self.import_specs,
                 &mut graph,
             )
             .await;
@@ -1031,12 +1040,32 @@ pub(crate) async fn fetch_wave<T>(
 }
 
 /// Spécificateurs statiques `(spec brut, url résolue)` d'un
-/// corps de module — `module_specifiers` (explorer-jscore, JS-C5)
-/// + résolution contre l'URL du module parent.
-pub(crate) fn module_deps(src: &str, referrer: &Url) -> Vec<(String, Url)> {
+/// corps de module — `module_specifiers` (explorer-jscore,
+/// JS-C5) + réécriture des bare via l'import map de la page
+/// (issue #6 — `rewrite_bare_specifier`, même règle que le
+/// moteur à l'eval) puis résolution contre l'URL du module
+/// parent. `map` = `imports` fusionné (`merge_import_maps`).
+/// Le `spec` rendu reste la forme **brute** : jscore
+/// enregistre chaque module sous son spécificateur d'origine,
+/// c'est donc la clé qui servira de `referrer` à l'eval —
+/// `alias` doit la traduire vers l'URL résolue.
+pub(crate) fn module_deps(
+    src: &str,
+    referrer: &Url,
+    map: &[(String, String)],
+) -> Vec<(String, Url)> {
     explorer_js::module_specifiers(src)
         .into_iter()
-        .filter_map(|spec| Url::resolve(referrer, &spec).ok().map(|u| (spec, u)))
+        .filter_map(|spec| {
+            let resolved =
+                explorer_js::rewrite_bare_specifier(map, &spec).unwrap_or_else(|| spec.clone());
+            // Bare resté hors map : « unresolvable » par spec —
+            // ne pas le dégénérer en chemin relatif.
+            if explorer_js::is_bare_specifier(&resolved) {
+                return None;
+            }
+            Url::resolve(referrer, &resolved).ok().map(|u| (spec, u))
+        })
         .collect()
 }
 

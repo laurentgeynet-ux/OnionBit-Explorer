@@ -73,7 +73,7 @@ pub use dom_host::{CookieJar, DomRef, EventProp, FormSubmit};
 pub use error::{Error, Result};
 pub use heap::{HeapStats, Host};
 pub use interp::Engine;
-pub use module::{module_specifiers, ModuleLoader};
+pub use module::{is_bare_specifier, module_specifiers, rewrite_bare_specifier, ModuleLoader};
 pub use storage::Storage;
 pub use value::{ObjId, Value};
 pub use worker::{WorkerConfig, WorkerFactory, WorkerLoader};

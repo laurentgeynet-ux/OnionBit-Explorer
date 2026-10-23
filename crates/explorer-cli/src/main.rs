@@ -236,21 +236,32 @@ async fn jprobe(url: &str) -> ExitCode {
     );
     eprintln!("[editable : {editable_hits} points sur la grille]");
     // Comptage des événements média émis pendant la sonde
-    // (offered vs gone tranche « jamais scanné » vs « tué »).
+    // (offered vs gone tranche « jamais scanné » vs « tué ») —
+    // et des `PipelineError` JS/module : c'est le compteur de
+    // terrain des erreurs de script (issue #6 — les bare
+    // specifiers React y apparaissaient comme « cannot load »).
     let mut n_off = 0u32;
     let mut n_gone = 0u32;
     let mut n_mov = 0u32;
     let mut n_cmd = 0u32;
+    let mut pipe_errors: Vec<String> = Vec::new();
     while let Ok(ev) = events.try_recv() {
         match ev {
             explorer_core::CoreEvent::MediaOffered { .. } => n_off += 1,
             explorer_core::CoreEvent::MediaGone { .. } => n_gone += 1,
             explorer_core::CoreEvent::MediaMoved { .. } => n_mov += 1,
             explorer_core::CoreEvent::MediaCommand { .. } => n_cmd += 1,
+            explorer_core::CoreEvent::PipelineError { message, .. } => {
+                pipe_errors.push(message);
+            }
             _ => {}
         }
     }
     eprintln!("[media events : {n_off} offered / {n_mov} moved / {n_gone} gone / {n_cmd} cmd]");
+    eprintln!("[erreurs pipeline : {}]", pipe_errors.len());
+    for e in pipe_errors.iter().take(12) {
+        eprintln!("  - {}", &e[..e.len().min(160)]);
+    }
     // Cycle MediaSurface réel : offres + claim d'essai.
     let offers = session.media_list(tab);
     eprintln!("[media : {} offres]", offers.len());

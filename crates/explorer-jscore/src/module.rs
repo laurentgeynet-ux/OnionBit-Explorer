@@ -169,25 +169,12 @@ impl Engine {
     }
 
     /// Traduction d'un spécificateur bare via l'import map —
-    /// correspondance exacte puis préfixe le plus long dont la clé
-    /// finit par `/` (spec « resolve a module specifier » : le
-    /// préfixe consommé est remplacé, le reste du spécificateur
-    /// est conservé). `None` hors map : le `ModuleLoader` garde
-    /// son message d'erreur actuel.
+    /// délègue à [`rewrite_bare_specifier`] (même règle
+    /// consommée par le prefetch session — issue #6).
+    /// `None` hors map : le `ModuleLoader` garde son message
+    /// d'erreur actuel.
     fn resolve_bare(&self, spec: &str) -> Option<String> {
-        if !is_bare_specifier(spec) {
-            return None;
-        }
-        let mut best: Option<&(String, String)> = None;
-        for entry in &self.import_map {
-            let (key, _) = &entry;
-            if (key == spec || (key.ends_with('/') && spec.starts_with(key.as_str())))
-                && best.is_none_or(|(bk, _)| key.len() > bk.len())
-            {
-                best = Some(entry);
-            }
-        }
-        best.map(|(key, t)| format!("{t}{}", &spec[key.len()..]))
+        rewrite_bare_specifier(&self.import_map, spec)
     }
 
     /// Fetch a dependency's source through the injected loader.
@@ -497,10 +484,39 @@ impl Engine {
     }
 }
 
+/// Traduction d'un spécificateur bare via une import map —
+/// correspondance exacte puis préfixe le plus long dont la clé
+/// finit par `/` (spec « resolve a module specifier » : le
+/// préfixe consommé est remplacé, le reste du spécificateur
+/// est conservé). Fonction pure partagée : le prefetch de la
+/// session applique la même règle que [`Engine::resolve_bare`]
+/// à l'évaluation — sinon la map serait honorée à l'eval mais
+/// ignorée du téléchargement (issue #6).
+#[must_use]
+pub fn rewrite_bare_specifier(map: &[(String, String)], spec: &str) -> Option<String> {
+    if !is_bare_specifier(spec) {
+        return None;
+    }
+    let mut best: Option<&(String, String)> = None;
+    for entry in map {
+        let (key, _) = &entry;
+        if (key == spec || (key.ends_with('/') && spec.starts_with(key.as_str())))
+            && best.is_none_or(|(bk, _)| key.len() > bk.len())
+        {
+            best = Some(entry);
+        }
+    }
+    best.map(|(key, t)| format!("{t}{}", &spec[key.len()..]))
+}
+
 /// Spécificateur « bare » au sens de la spec import map : ni
 /// URL absolue (`scheme:` — `https:`, `data:`, `node:`…), ni
 /// chemin `/…`, `./…`, `../…`. Seuls les bare passent par la map.
-fn is_bare_specifier(spec: &str) -> bool {
+/// Publique : la session refuse au prefetch/resolve un bare
+/// resté hors map (issue #6 — un bare non mappé est
+/// « unresolvable », jamais un chemin relatif déguisé).
+#[must_use]
+pub fn is_bare_specifier(spec: &str) -> bool {
     if spec.starts_with('/') || spec.starts_with("./") || spec.starts_with("../") {
         return false;
     }

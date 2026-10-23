@@ -6446,6 +6446,135 @@ async fn journal_post_baseline_rejoue_en_place() {
     assert_eq!(s.find_in_page(a, "rejoue"), 1, "mutation commise");
 }
 
+/// Issue #6 — l'import map de la page réécrit les bare
+/// specifiers : `import 'pkg'` avec `{"pkg":"./real-pkg.js"}`
+/// doit fetcher et exécuter `/real-pkg.js`, jamais `/pkg`.
+/// Les deux routes sont servies avec des marqueurs distincts :
+/// `MAPDEP` = map honorée, `RELDEP` = résolution relative
+/// accidentelle (le trou mesuré avant le fix — la map était
+/// collectée nulle part : `set_import_map` jamais appelé).
+/// Marqueurs éclatés pour que `find` ne matche pas le source.
+#[tokio::test]
+async fn importmap_reecrit_bare_au_prefetch_et_eval() {
+    let (mut s, t) = test_session();
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    t.route(
+        "/",
+        200,
+        concat!(
+            "<!doctype html><html><body><p id=m>-</p><p id=d>-</p>",
+            "<script type=\"importmap\">{\"imports\":{\"pkg\":\"./real-pkg.js\"}}</script>",
+            "<script type=\"module\">import 'pkg';",
+            "document.getElementById('m').innerText='ENT'+'RYOK';</script>",
+            "</body></html>"
+        ),
+    );
+    t.route_bin(
+        "/pkg",
+        200,
+        b"document.getElementById('d').innerText='REL'+'DEP';".to_vec(),
+    );
+    t.route_bin(
+        "/real-pkg.js",
+        200,
+        b"document.getElementById('d').innerText='MAP'+'DEP';".to_vec(),
+    );
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    for _ in 0..5 {
+        s.pump_net().await;
+        s.pump_timers(a);
+    }
+    assert_eq!(
+        s.find_in_page(a, "mapdep"),
+        1,
+        "la cible de la map doit être exécutée"
+    );
+    assert_eq!(
+        s.find_in_page(a, "reldep"),
+        0,
+        "/pkg ne doit pas être exécuté à la place"
+    );
+    assert_eq!(s.find_in_page(a, "entryok"), 1, "module d'entrée commis");
+    assert!(
+        t.paths().iter().all(|p| p != "/pkg"),
+        "/pkg ne doit même pas être fetché — chemins : {:?}",
+        t.paths()
+    );
+}
+
+/// Issue #6 bis — un module **importé via bare specifier**
+/// s'enregistre chez jscore sous son nom brut (`'pkg'`) : ses
+/// propres imports doivent résoudre contre **son** URL
+/// résolue, pas planter en « irrésolvable » (mesuré sur
+/// github.com : les chunks React importent `react` depuis un
+/// module bare-enregistré → `spécificateur irrésolvable` sur
+/// l'URL absolue). La clé `alias` est le spec brut.
+#[tokio::test]
+async fn importmap_dep_bare_resout_ses_propres_imports() {
+    let (mut s, t) = test_session();
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    t.route(
+        "/",
+        200,
+        concat!(
+            "<!doctype html><html><body><p id=m>-</p><p id=d>-</p>",
+            "<script type=\"importmap\">",
+            "{\"imports\":{\"pkg\":\"./pkg-real.js\",\"deep\":\"./deep-real.js\"}}",
+            "</script>",
+            "<script type=\"module\">import 'pkg';",
+            "document.getElementById('m').innerText='ENT'+'RYOK';</script>",
+            "</body></html>"
+        ),
+    );
+    // `pkg` importe à la fois un relatif (`./sub.js` — base =
+    // l'URL résolue de pkg) et un autre bare (`deep`).
+    t.route_bin(
+        "/pkg-real.js",
+        200,
+        concat!(
+            "import './sub.js';import 'deep';",
+            "document.getElementById('d').innerText='PKG'+'OK';"
+        )
+        .into(),
+    );
+    t.route_bin(
+        "/sub.js",
+        200,
+        b"document.getElementById('d').innerText='SUB'+'OK';".to_vec(),
+    );
+    t.route_bin(
+        "/deep-real.js",
+        200,
+        b"document.getElementById('d').innerText='DEP'+'OK';".to_vec(),
+    );
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    for _ in 0..5 {
+        s.pump_net().await;
+        s.pump_timers(a);
+    }
+    let paths = t.paths();
+    assert!(
+        paths.iter().any(|p| p == "/sub.js"),
+        "le relatif dans un module bare doit résoudre sur sa base — fetches : {paths:?}"
+    );
+    assert!(
+        paths.iter().any(|p| p == "/deep-real.js"),
+        "un bare imbriqué suit la map — fetches : {paths:?}"
+    );
+    assert!(
+        paths.iter().all(|p| p != "/pkg" && p != "/deep"),
+        "les bare ne doivent jamais se dégénérer en relatif — fetches : {paths:?}"
+    );
+    assert_eq!(
+        s.find_in_page(a, "pkgok"),
+        1,
+        "deps évaluées avant le parent — #d finit à PKGOK"
+    );
+    assert_eq!(s.find_in_page(a, "entryok"), 1, "module d'entrée commis");
+}
+
 /// ADR-0025 — un `Insert` sous parent « risqué » (table —
 /// parsing contextuel) classe le journal non rejouable au
 /// drain : `classified` +1 et repli keyed qui livre quand

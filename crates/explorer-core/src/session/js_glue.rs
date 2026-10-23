@@ -196,6 +196,12 @@ impl Session {
     pub(crate) fn eval_module_graph(&mut self, tab: TabId, eng: &mut dyn JsEngine, me: ModEval) {
         let ModuleGraph { sources, alias } = me.graph;
         let resolve: UrlResolver = Arc::new(move |spec, referrer| {
+            // Un bare arrivant ici est resté hors import map
+            // (le moteur réécrit d'abord) — « unresolvable » par
+            // spec, jamais un chemin relatif déguisé (issue #6).
+            if explorer_js::is_bare_specifier(spec) {
+                return None;
+            }
             let b = alias.get(referrer).map_or(referrer, String::as_str);
             Url::parse(b)
                 .ok()

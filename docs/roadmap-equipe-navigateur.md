@@ -2229,6 +2229,49 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     étaient déjà là, il ne manquait
     que le déclenchement.
 
+- [x] **Étape 114. Import maps :
+  collecte + prefetch + eval**
+  (issue #6 — github.com : la page
+  sert la map React complète mais
+  `import 'react'` mourrait en
+  `cannot load` : jamais collectée,
+  jamais poussée à
+  `set_import_map`, et le prefetch
+  résolvait le bare en relatif →
+  `github.com/react` 404). Sonde
+  3 scénarios : bare sans map servi
+  exécutait **silencieusement** le
+  relatif ; map + cible seule
+  échouait. Fix : `collect_import_
+  maps` (ordre document) →
+  `merge_import_maps` ; `SubJob`
+  porte raws + `imports` fusionné ;
+  `module_deps` réécrit via
+  `rewrite_bare_specifier` (pure,
+  extraite de `resolve_bare` — une
+  règle partagée prefetch/eval) ;
+  maps poussées au moteur avant le
+  premier `eval_module` ; bare non
+  mappé = « irrésolvable » propre
+  (plus de relatif déguisé) ; alias
+  par spec **brut** (un module
+  bare-importé est `referrer` de
+  ses propres imports — trou
+  révélé par le vol github réel).
+  `jprobe` affiche les
+  `PipelineError`. Approximation :
+  toutes les maps s'appliquent à
+  tous les modules. *Terrain* :
+  erreurs `react` soldées sur
+  github.com — résidus = gaps
+  moteur distincts (Symbol,
+  syntaxe, `composedPath`).
+  *Régressions* :
+  `importmap_reecrit_bare_au_
+  prefetch_et_eval` +
+  `importmap_dep_bare_resout_ses_
+  propres_imports`.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

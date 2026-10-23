@@ -620,6 +620,16 @@ impl Session {
         let scripting = self.js_factory.is_some();
         let (sheet_urls, scripts, img_urls) = self.plan_subresources(&dom, &url, scripting);
         let doc_sheets = collect_style_sheets(&dom);
+        // Issue #6 : les `<script type="importmap">` pilotent le
+        // prefetch des bare specifiers (`import_specs` — même
+        // réécriture que le moteur) et sont poussés au moteur
+        // avant le premier `eval_module` (`import_maps`).
+        let import_maps = if scripting {
+            collect_import_maps(&dom)
+        } else {
+            Vec::new()
+        };
+        let import_specs = merge_import_maps(&import_maps);
         // JS-C45 : les handlers inline `on*` exigent un moteur
         // même sans `<script>` — sinon clic muet (page à
         // `onclick=` seul : premier bug site-réel mesuré M24).
@@ -692,6 +702,8 @@ impl Session {
             sheet_urls,
             scripts,
             img_urls,
+            import_maps,
+            import_specs,
             doc_sheets,
             eng,
             css_slots: Vec::new(),

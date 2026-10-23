@@ -1403,6 +1403,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Étape 114 — import maps : collecte, prefetch et
+  eval honorent `{"imports":{…}}`** (`explorer-core`,
+  `explorer-jscore`, `explorer-js`, `explorer-cli`,
+  issue #6 — github.com) : la machinerie
+  `set_import_map` (JS-C44) n'était **jamais
+  alimentée** — la session ne collectait pas
+  `<script type="importmap">`, et le prefetch
+  résolvait chaque spécificateur en relatif
+  (`import 'react'` → `github.com/react` → 404 →
+  graphe mort ; github sert la map React complète).
+  Quatre trous soldés : (1) collecte des corps
+  importmap en ordre document → poussés au moteur
+  **avant** le premier `eval_module` ; (2)
+  `module_deps` applique `rewrite_bare_specifier`
+  (fonction pure extraite de `resolve_bare` — une
+  seule règle partagée prefetch/eval) avant
+  `Url::resolve` → la cible de la map est fetchée ;
+  (3) un bare resté hors map est « irrésolvable »
+  (prefetch sauté, resolve → `None` → erreur JS
+  propre) au lieu de masquer en `./pkg` accidentel ;
+  (4) la clé d'alias reste le **spécifier brut** :
+  jscore enregistre chaque module sous son nom
+  d'origine — un module bare-importé (`'pkg'`) sert
+  de `referrer` à ses propres imports (mesuré sur
+  github : `spécificateur irrésolvable` sur URL
+  absolue — `Url::parse('pkg')`). `jprobe` compte
+  désormais les `PipelineError`. Approximation
+  documentée : toutes les maps de la page
+  s'appliquent à tous ses modules. Terrain github :
+  **les erreurs de résolution `react` disparaissent**
+  — les 5 erreurs restantes sont des gaps moteur
+  distincts (Symbol, syntaxe moderne,
+  `Event.composedPath`) démasqués par la
+  résolution réparée. Régressions
+  `importmap_reecrit_bare_au_prefetch_et_eval` +
+  `importmap_dep_bare_resout_ses_propres_imports`.
 - **Étape 111 — alignement keymap par tag +
   compteur `journal_classified` (mesure
   fixture classes hors-pilote)** (`explorer-

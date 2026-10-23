@@ -693,6 +693,7 @@ pub fn null_factory() -> JsFactory {
 }
 
 pub use explorer_jscore::module_specifiers;
+pub use explorer_jscore::{is_bare_specifier, rewrite_bare_specifier};
 
 /// Commandes vers le thread moteur — valeurs sérialisables, aucun
 /// handle `Rc` ne traverse.
@@ -1742,8 +1743,9 @@ struct MapLoader {
 
 impl explorer_jscore::ModuleLoader for MapLoader {
     fn load(&mut self, specifier: &str, referrer: &str) -> Result<String, String> {
-        let key = (self.resolve)(specifier, referrer)
-            .ok_or_else(|| format!("spécificateur irrésolvable : {specifier}"))?;
+        let key = (self.resolve)(specifier, referrer).ok_or_else(|| {
+            format!("spécificateur irrésolvable : {specifier} (depuis {referrer})")
+        })?;
         self.map
             .get(&key)
             .cloned()

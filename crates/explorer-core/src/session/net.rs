@@ -88,6 +88,7 @@ impl Session {
             fonts,
             arrival_evals,
             post_evals,
+            import_maps,
             ..
         } = job;
         // Feuilles liées dans l'ordre document (slot vide =
@@ -103,6 +104,13 @@ impl Session {
             }
         }
         if let Some(eng) = eng.as_mut() {
+            // Issue #6 : les import maps arment la résolution des
+            // bare specifiers — la spec les veut enregistrées avant
+            // le premier module évalué (le prefetch, lui, a déjà
+            // réécrit les spécificateurs via `import_specs`).
+            for json in &import_maps {
+                eng.set_import_map(json);
+            }
             for item in scripts.iter().filter(|i| i.exec == ScriptExec::Parse) {
                 let Some(src) = item_source(item, &script_srcs) else {
                     continue;
@@ -502,10 +510,12 @@ impl Session {
     /// d'`entry_src` — vagues parallèles `max_inflight`,
     /// `sources` plafonné à `max_modules` (l'entrée incluse).
     /// `page` porte la politique (`Referer`, mixed-content) ;
-    /// `entry_base` sert à résoudre les spécificateurs.
+    /// `entry_base` sert à résoudre les spécificateurs après
+    /// réécriture des bare par l'import map (issue #6).
     /// Associée sans `&self` : `dyn JsEngine` n'est pas
     /// `Sync`, `&Session` ne peut donc pas traverser un
     /// `.await` dans une future `Send`.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn fetch_module_sources(
         transport: &Arc<dyn HttpTransport>,
         max_inflight: usize,
@@ -513,12 +523,13 @@ impl Session {
         page: &Url,
         entry_base: &Url,
         entry_src: &str,
+        import_specs: &[(String, String)],
         graph: &mut ModuleGraph,
     ) {
         let mut queued: std::collections::HashSet<String> =
             std::iter::once(entry_base.as_str()).collect();
         let mut frontier: Vec<(String, Url)> = Vec::new();
-        for (spec, u) in module_deps(entry_src, entry_base) {
+        for (spec, u) in module_deps(entry_src, entry_base, import_specs) {
             graph
                 .alias
                 .entry(spec.clone())
@@ -546,7 +557,7 @@ impl Session {
                 }
                 let text = decode_subresource(&resp.body, None);
                 graph.sources.insert(key, text.clone());
-                for (spec2, u2) in module_deps(&text, &u) {
+                for (spec2, u2) in module_deps(&text, &u, import_specs) {
                     graph
                         .alias
                         .entry(spec2.clone())

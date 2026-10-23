@@ -156,6 +156,71 @@ pub(crate) fn collect_scripts(
     out
 }
 
+/// Corps des `<script type="importmap">` du document, ordre
+/// document (issue #6) : JSON bruts poussés au moteur via
+/// `set_import_map` **avant** le premier `eval_module`, et
+/// leur `imports` parsé sert au prefetch (`module_deps`
+/// réécrit les bare specifiers avant `Url::resolve` — sans
+/// ça, `import 'react'` se résoudrait en relatif sur la
+/// page référente et fetcherait une URL jamais voulue).
+/// Approximation documentée : toutes les maps s'appliquent
+/// à tous les modules de la page (la spec n'honore que les
+/// maps antérieures au premier chargement de module —
+/// l'ordre exact n'importe pas aux sites observés).
+pub(crate) fn collect_import_maps(dom: &Dom) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "script") {
+            let ty = dom
+                .attribute(n, "type")
+                .ok()
+                .flatten()
+                .map_or_else(String::new, |t| t.trim().to_ascii_lowercase());
+            if ty == "importmap" {
+                let text = dom.text_content(n).unwrap_or_default();
+                if !text.trim().is_empty() {
+                    out.push(text);
+                }
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    out
+}
+
+/// `imports` d'une import map : paires `(clé, cible)` dans
+/// l'ordre du document JSON — `scopes` ignoré, valeurs non
+/// string sautées, JSON invalide → vide (tolérance miroir,
+/// même contrat que `JsEngine::set_import_map`).
+pub(crate) fn parse_import_map(json: &str) -> Vec<(String, String)> {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|v| v.get("imports")?.as_object().cloned())
+        .map(|obj| {
+            obj.into_iter()
+                .filter_map(|(k, t)| t.as_str().map(|t| (k, t.to_string())))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Fusion additive des maps d'une page (spec « merge » — la
+/// première cible d'une clé l'emporte, comme le moteur).
+pub(crate) fn merge_import_maps(maps: &[String]) -> Vec<(String, String)> {
+    let mut merged: Vec<(String, String)> = Vec::new();
+    for json in maps {
+        for (k, t) in parse_import_map(json) {
+            if merged.iter().all(|(ek, _)| *ek != k) {
+                merged.push((k, t));
+            }
+        }
+    }
+    merged
+}
+
 /// Le document porte-t-il un handler inline `on*` (JS-C45) ?
 /// Une page sans `<script>` mais avec `onclick=` doit quand
 /// même obtenir un moteur — sinon ses handlers sont lettre
