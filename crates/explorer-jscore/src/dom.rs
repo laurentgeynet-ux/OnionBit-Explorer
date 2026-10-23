@@ -533,7 +533,7 @@ pub struct Dom {
     /// (`drain_media_commands`) qui les relaie vers l'hôte.
     pub media_cmds: Vec<(u64, MediaCmd)>,
     /// Registre custom elements (JS-C68) — les définitions
-    /// pilotent l'émission des [`CeReaction`] par les
+    /// pilotent l'émission des `CeReaction` par les
     /// mutateurs ; les `Value`/`ObjId` qu'il porte sont
     /// racines GC via `Engine::collect` (`dom_ctx`).
     pub ce: CeRegistry,
