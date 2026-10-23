@@ -23,8 +23,8 @@ use std::path::{Path, PathBuf};
 use explorer_net::url::Url;
 
 use super::{
-    document_base, extract_title, meta_referrer_policy, meta_refresh, CoreError, CoreEvent,
-    DownloadInfo, NavDone, NavTail, Session, StreamDecoder, TabId,
+    collect_meta_csp, document_base, extract_title, meta_referrer_policy, meta_refresh, CoreError,
+    CoreEvent, DownloadInfo, NavDone, NavTail, Session, StreamDecoder, TabId,
 };
 
 /// Téléchargement bufferisé en attente de décision —
@@ -208,6 +208,13 @@ impl Session {
             base_url,
             base_target,
             refresh,
+            // CSP au rejeu (CAP-145) : les en-têtes de la
+            // réponse ne sont pas conservés — méta seules
+            // (même borne assumée que la politique Referer).
+            csp: collect_meta_csp(&dom)
+                .iter()
+                .map(|v| explorer_net::csp::CspPolicy::parse(v, true))
+                .collect(),
             url: dl.url,
             dom,
             html,

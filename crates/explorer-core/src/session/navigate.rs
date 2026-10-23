@@ -684,6 +684,7 @@ impl Session {
             base_url,
             base_target,
             refresh,
+            csp,
         } = done;
         if let Some(s) = &self.store {
             s.record_visit(&url.to_string(), title.as_deref());
@@ -700,8 +701,8 @@ impl Session {
             imgs: img_urls,
             frames: frame_urls,
             srcdoc_frames,
-        } = self.plan_subresources(&dom, &url, &base, scripting);
-        let doc_sheets = collect_style_sheets(&dom);
+        } = self.plan_subresources(&dom, &url, &base, scripting, &csp);
+        let doc_sheets = collect_style_sheets(&dom, &csp);
         // Issue #6 : les `<script type="importmap">` pilotent le
         // prefetch des bare specifiers (`import_specs` — même
         // réécriture que le moteur) et sont poussés au moteur
@@ -761,6 +762,10 @@ impl Session {
             // de navigation ; `None` = le document n'en
             // programme pas.
             entry.refresh_at = refresh.map(|(d, u)| (std::time::Instant::now() + d, u));
+            // CSP du document (CAP-145) — évaluée aux fetchs
+            // tardifs (fonts, fonds, modules) et aux
+            // intentions (formes, `fetch` JS).
+            entry.csp.clone_from(&csp);
             entry.scroll_y = 0.0;
             entry.focused = None;
             entry.focused_key = None;
@@ -811,6 +816,7 @@ impl Session {
             img_urls,
             frame_urls,
             srcdoc_frames,
+            csp,
             import_maps,
             import_specs,
             doc_sheets,
@@ -974,10 +980,10 @@ impl Session {
                     // (`<base href>`, étape 135) ; l'initiateur
                     // reste l'URL de la page (voir
                     // `script_form_request`).
-                    let (page, base) = self
-                        .tabs
-                        .get(&tab)
-                        .map_or((None, None), |t| (t.url.as_ref(), t.nav_base()));
+                    let (page, base, csp) =
+                        self.tabs.get(&tab).map_or((None, None, &[][..]), |t| {
+                            (t.url.as_ref(), t.nav_base(), t.csp.as_slice())
+                        });
                     if let Some(req) = base.and_then(|b| {
                         script_form_request(
                             page.unwrap_or(b),
@@ -988,7 +994,14 @@ impl Session {
                             &fields,
                         )
                     }) {
-                        return Some(ScriptNav::Submit(Box::new(req)));
+                        // `form-action` (CAP-145) : la cible
+                        // résolue est filtrée — soumission
+                        // bloquée = intention morte, comme
+                        // une URL irrésolvable.
+                        let pg = page.unwrap_or(&req.url);
+                        if explorer_net::csp::csp_form_action_allowed(csp, pg, &req.url) {
+                            return Some(ScriptNav::Submit(Box::new(req)));
+                        }
                     }
                 }
             }
@@ -1079,9 +1092,17 @@ impl Session {
         headers: &[(String, String)],
         body: Option<&str>,
         policy: Option<ReferrerPolicy>,
+        csp: &[explorer_net::csp::CspPolicy],
     ) -> Option<(Request, bool)> {
         let url = Url::resolve(base, raw_url.trim()).ok()?;
         if is_mixed_content(page, &url) {
+            return None;
+        }
+        // `connect-src` (CAP-145) : `fetch()`/`XHR` sont des
+        // requêtes à destination vide — chaque politique doit
+        // l'admettre ; silence côté JS (le `NetResponse`
+        // d'échec est rapporté à l'appelant, pas d'exception).
+        if !explorer_net::csp::csp_allows(csp, page, FetchDest::Empty, &url) {
             return None;
         }
         let m = parse_method(method)?;

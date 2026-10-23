@@ -159,6 +159,12 @@ pub(crate) struct NavDone {
     /// navigation programmée. L'échéance est posée au
     /// commit (`Instant` recalé sur l'apply).
     pub(crate) refresh: Option<(std::time::Duration, Url)>,
+    /// Politiques CSP du document (CAP-145) — en-têtes
+    /// `Content-Security-Policy:` de la réponse **plus**
+    /// `<meta http-equiv=Content-Security-Policy>` en
+    /// ordre document (chacune doit autoriser — la plus
+    /// restrictive réduit ; `Report-Only` ignoré).
+    pub(crate) csp: Vec<explorer_net::csp::CspPolicy>,
 }
 
 /// Issue de [`NavJob::run`] (étape 70) : document à commettre
@@ -250,6 +256,29 @@ fn disposition_filename(disposition: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// CSP du document (CAP-145) : **toutes** les en-têtes
+/// `Content-Security-Policy` de la réponse (chaque
+/// politique s'applique — la plus restrictive réduit),
+/// puis les `<meta http-equiv>` du DOM (`via_meta` :
+/// `frame-ancestors`/`sandbox`/`report-*` y sont écartées
+/// par spec au parse).
+fn collect_response_csp(
+    headers: &[(String, String)],
+    dom: &Dom,
+) -> Vec<explorer_net::csp::CspPolicy> {
+    let mut csp: Vec<explorer_net::csp::CspPolicy> = headers
+        .iter()
+        .filter(|(n, _)| n.eq_ignore_ascii_case("content-security-policy"))
+        .map(|(_, v)| explorer_net::csp::CspPolicy::parse(v, false))
+        .collect();
+    csp.extend(
+        collect_meta_csp(dom)
+            .iter()
+            .map(|v| explorer_net::csp::CspPolicy::parse(v, true)),
+    );
+    csp
 }
 
 impl NavJob {
@@ -356,10 +385,14 @@ impl NavJob {
         tb.finish();
         let dom = tb.into_dom();
         let title = extract_title(&dom);
+        let csp = collect_response_csp(&resp.headers, &dom);
         // `<base>` résolu contre l'URL de la réponse (étape
         // 135) — la résolution des sous-ressources, liens et
-        // formulaires suit la base déclarée.
+        // formulaires suit la base déclarée. `base-uri`
+        // (CAP-145) : une base refusée est ignorée.
         let (base_url, base_target) = document_base(&dom, &resolved);
+        let base_url =
+            base_url.filter(|b| explorer_net::csp::csp_base_uri_allowed(&csp, &resolved, b));
         // Refresh (CAP-143 + CAP-144) : l'en-tête `Refresh:`
         // prime sur la `<meta>` du document — cible résolue
         // sur la base effective ; sans `url` c'est un
@@ -384,6 +417,7 @@ impl NavJob {
             base_url,
             base_target,
             refresh,
+            csp,
             dom,
             html,
             title,
@@ -469,6 +503,7 @@ impl NavJob {
                 base_url: None,
                 base_target: None,
                 refresh: None,
+                csp: Vec::new(),
             }),
             Box::new(tail),
         ))
@@ -541,6 +576,12 @@ pub(crate) struct SubJob {
     /// (`about:srcdoc`) après la vague — la borne
     /// `max_frames` est déjà appliquée en plan.
     pub(crate) srcdoc_frames: Vec<String>,
+    /// Politiques CSP du document (CAP-145) — servent les
+    /// fetchs tardifs (`@import`, fonds/masques, fonts,
+    /// modules) : le plan a déjà éliminé les sous-
+    /// ressources interdites, ici les émissions suivent
+    /// la même règle.
+    pub(crate) csp: Vec<explorer_net::csp::CspPolicy>,
     /// Jar partagé — les `Set-Cookie` des documents
     /// `<iframe>` sont capturés à réception (étape 128) :
     /// même partitionnement CHIPS que `CookieTransport`
@@ -812,10 +853,16 @@ impl SubJob {
             {
                 return;
             }
-            let Ok(url) = Url::resolve(base, &imp.url) else {
+            let Ok(url) = Url::resolve(base, &imp.url)
+                .map(|u| explorer_net::csp::csp_upgrade(&self.csp, &u).unwrap_or(u))
+            else {
                 return;
             };
             if !matches!(url.scheme(), "http" | "https") || !ctx.seen.insert(url.to_string()) {
+                return;
+            }
+            // CSP `style-src` (CAP-145).
+            if !explorer_net::csp::csp_allows(&self.csp, &self.url, FetchDest::Style, &url) {
                 return;
             }
             ctx.left -= 1;
@@ -907,10 +954,17 @@ impl SubJob {
                 if raw.starts_with("data:") {
                     continue;
                 }
-                let Ok(url) = Url::resolve(&base, &raw) else {
+                let Ok(url) = Url::resolve(&base, &raw)
+                    .map(|u| explorer_net::csp::csp_upgrade(&self.csp, &u).unwrap_or(u))
+                else {
                     continue;
                 };
                 if !matches!(url.scheme(), "http" | "https") || !seen.insert(url.to_string()) {
+                    continue;
+                }
+                // CSP `img-src` (CAP-145) — même règle que
+                // le plan pour les fetchs tardifs.
+                if !explorer_net::csp::csp_allows(&self.csp, &self.url, FetchDest::Image, &url) {
                     continue;
                 }
                 left -= 1;
@@ -967,9 +1021,15 @@ impl SubJob {
                 let FontSrc::Url(href) = src else {
                     continue;
                 };
-                let Ok(url) = Url::resolve(&self.doc_base, href) else {
+                let Ok(url) = Url::resolve(&self.doc_base, href)
+                    .map(|u| explorer_net::csp::csp_upgrade(&self.csp, &u).unwrap_or(u))
+                else {
                     continue;
                 };
+                // CSP `font-src` (CAP-145).
+                if !explorer_net::csp::csp_allows(&self.csp, &self.url, FetchDest::Font, &url) {
+                    continue;
+                }
                 let mut req = Request::get(url);
                 req.initiator = Some(Initiator::Subresource(self.url.clone()));
                 req.fetch_dest = FetchDest::Font;
@@ -1037,6 +1097,7 @@ impl SubJob {
                 self.max_modules,
                 &self.page,
                 self.page_policy,
+                &self.csp,
                 &base,
                 &src,
                 &self.import_specs,

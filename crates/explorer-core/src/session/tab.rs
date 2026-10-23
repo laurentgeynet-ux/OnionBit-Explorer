@@ -61,6 +61,7 @@ impl Tab {
                 .refresh_at
                 .take()
                 .map(|(t, u)| (t.saturating_duration_since(std::time::Instant::now()), u)),
+            csp: std::mem::take(&mut self.csp),
         };
         self.scroll_y = 0.0;
         self.doc_h = 0.0;
@@ -123,6 +124,7 @@ impl Tab {
         self.refresh_at = snap
             .refresh
             .map(|(d, u)| (std::time::Instant::now() + d, u));
+        self.csp = snap.csp;
         self.transitions.clear();
         // Idem animations : la restauration repart sur les
         // déclarations — lecture réenregistrée au premier

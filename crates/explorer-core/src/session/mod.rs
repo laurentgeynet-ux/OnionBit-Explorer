@@ -177,6 +177,12 @@ pub(crate) struct Tab {
     /// une échéance échue en intention de navigation. Gelée/
     /// restaurée avec le bfcache (délai restant conservé).
     refresh_at: Option<(std::time::Instant, Url)>,
+    /// Politiques CSP du document commis (CAP-145) —
+    /// évaluées aux fetchs tardifs (`@import`, fonds/
+    /// masques, fonts, modules), aux intentions de
+    /// formulaire (`form-action`) et aux `fetch()`/`XHR`
+    /// JS (`connect-src`). Vide = aucune politique.
+    csp: Vec<explorer_net::csp::CspPolicy>,
     /// Position dans `hist`.
     hist_idx: usize,
     /// La page **affichée** provient d'une navigation `push`
@@ -503,6 +509,11 @@ pub(crate) struct PageSnapshot {
     /// sur l'instant présent (un gel ne consomme pas le
     /// compte à rebours).
     refresh: Option<(std::time::Duration, Url)>,
+    /// Politiques CSP de la page gelée (CAP-145) —
+    /// restaurées avec elle : un retour bfcache réapplique
+    /// les mêmes restrictions (une politique vit avec son
+    /// document, pas avec l'onglet).
+    csp: Vec<explorer_net::csp::CspPolicy>,
 }
 
 /// Session : transport + fontes injectés, onglets, viewport,
@@ -916,6 +927,7 @@ impl Session {
                 base_url: None,
                 base_target: None,
                 refresh_at: None,
+                csp: Vec::new(),
                 hist_idx: 0,
                 hist_pending: false,
                 scroll_y: 0.0,

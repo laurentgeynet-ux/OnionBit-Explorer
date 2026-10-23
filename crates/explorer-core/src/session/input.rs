@@ -659,6 +659,13 @@ impl Session {
             let enctype = attr_lower(dom, form, "enctype");
             let req = form_request(page, base, &action, &method, &enctype, &pairs)
                 .ok_or_else(|| CoreError::Url("action de formulaire irrésolvable".to_string()))?;
+            // `form-action` (CAP-145) : la cible résolue est
+            // refusée par une politique → soumission morte
+            // silencieuse (le navigateur logue en console —
+            // ici l'intention n'est simplement jamais posée).
+            if !explorer_net::csp::csp_form_action_allowed(&entry.csp, page, &req.url) {
+                return Ok(());
+            }
             (
                 req,
                 target_new_context(dom, form, entry.base_target.as_deref()),

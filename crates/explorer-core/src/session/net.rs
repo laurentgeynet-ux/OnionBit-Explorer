@@ -293,6 +293,7 @@ impl Session {
                             &headers,
                             body.as_deref(),
                             self.tabs.get(&tab).and_then(|e| e.referrer_policy),
+                            self.tabs.get(&tab).map_or(&[][..], |e| e.csp.as_slice()),
                         )
                     };
                     let Some((req, cross)) = built else {
@@ -524,13 +525,17 @@ impl Session {
     /// `page` = URL du document (ancre mixed-content,
     /// initiateur) ; `base` = base de résolution effective
     /// (`<base href>` ou `page`, étape 135) — seule la
-    /// résolution des `src`/`href` suit la base.
+    /// résolution des `src`/`href` suit la base. `csp` =
+    /// politiques du document (CAP-145) : chaque cible doit
+    /// être admise par sa directive (`upgrade-insecure-
+    /// requests` réécrit `http:` → `https:` en amont).
     pub(crate) fn plan_subresources(
         &self,
         dom: &Dom,
         page: &Url,
         base: &Url,
         scripting: bool,
+        csp: &[explorer_net::csp::CspPolicy],
     ) -> SubPlan {
         // Étape 96 : `media=` évalué contre l'env viewport
         // AVANT la borne — une feuille hors-media (variante
@@ -541,23 +546,40 @@ impl Session {
         // ~7 doublons : un doublon brûle quota + fetch pour
         // un contenu identique en cascade).
         let env = super::apply::viewport_env(self.viewport, self.color_scheme);
+        // CSP `upgrade-insecure-requests` (CAP-145) —
+        // réécriture en amont des filtres : une cible
+        // upgradée devient admissible mixed-content.
+        let upg = |u: Url| explorer_net::csp::csp_upgrade(csp, &u).unwrap_or(u);
+        let allow = |dest: explorer_net::http::FetchDest, u: &Url| {
+            explorer_net::csp::csp_allows(csp, page, dest, u)
+        };
         let mut seen_sheets = std::collections::HashSet::new();
         let sheets: Vec<Url> = collect_stylesheet_links(dom)
             .into_iter()
             .filter(|(_, m)| media_attr_matches(&env, m.as_deref().unwrap_or_default()))
             .filter_map(|(h, _)| Url::resolve(base, &h).ok())
-            .filter(|u| !is_mixed_content(page, u) && seen_sheets.insert(u.to_string()))
+            .map(&upg)
+            .filter(|u| {
+                !is_mixed_content(page, u)
+                    && allow(explorer_net::http::FetchDest::Style, u)
+                    && seen_sheets.insert(u.to_string())
+            })
             .take(self.max_sheets)
             .collect();
-        let scripts = collect_scripts(dom, page, base, scripting, self.max_scripts);
+        let scripts = collect_scripts(dom, page, base, scripting, self.max_scripts, csp);
         let mut seen_img = std::collections::HashSet::new();
         let imgs: Vec<Url> = collect_images(dom)
             .into_iter()
             .filter_map(|(_, src)| Url::resolve(base, &src).ok())
+            .map(&upg)
             // `data:` (et autres non-http) ne se fetch pas —
             // peints inline par `collect_data_images` (56f).
             .filter(|u| matches!(u.scheme(), "http" | "https"))
-            .filter(|u| !is_mixed_content(page, u) && seen_img.insert(u.as_str()))
+            .filter(|u| {
+                !is_mixed_content(page, u)
+                    && allow(explorer_net::http::FetchDest::Image, u)
+                    && seen_img.insert(u.as_str())
+            })
             .take(self.max_images)
             .collect();
         // `<iframe>` (étape 128 + CAP-142) — un sous-contexte
@@ -577,9 +599,10 @@ impl Session {
             }
             match kind {
                 IframeKind::Src(src) => {
-                    if let Ok(u) = Url::resolve(base, &src) {
+                    if let Ok(u) = Url::resolve(base, &src).map(upg) {
                         if matches!(u.scheme(), "http" | "https")
                             && !is_mixed_content(page, &u)
+                            && allow(explorer_net::http::FetchDest::Iframe, &u)
                             && seen_frames.insert(u.as_str())
                         {
                             frames.push((u, policy));
@@ -587,7 +610,14 @@ impl Session {
                     }
                 }
                 IframeKind::Srcdoc(html) => {
-                    if seen_srcdoc.insert(html.clone()) {
+                    // `frame-src` s'applique à `srcdoc`
+                    // (CAP-145) : le contexte inline hérite
+                    // l'origine du parent — `'self'` l'admet,
+                    // `'none'` le bloque. La cible testée est
+                    // l'URL de la page (origine héritée).
+                    if allow(explorer_net::http::FetchDest::Iframe, page)
+                        && seen_srcdoc.insert(html.clone())
+                    {
                         srcdoc_frames.push(html);
                     }
                 }
@@ -618,6 +648,7 @@ impl Session {
         max_modules: usize,
         page: &Url,
         page_policy: Option<explorer_net::http::ReferrerPolicy>,
+        csp: &[explorer_net::csp::CspPolicy],
         entry_base: &Url,
         entry_src: &str,
         import_specs: &[(String, String)],
@@ -627,11 +658,19 @@ impl Session {
             std::iter::once(entry_base.as_str()).collect();
         let mut frontier: Vec<(String, Url)> = Vec::new();
         for (spec, u) in module_deps(entry_src, entry_base, import_specs) {
+            let u = explorer_net::csp::csp_upgrade(csp, &u).unwrap_or(u);
             graph
                 .alias
                 .entry(spec.clone())
                 .or_insert_with(|| u.as_str());
-            if !is_mixed_content(page, &u) && queued.insert(u.as_str()) {
+            let allowed = !is_mixed_content(page, &u)
+                && explorer_net::csp::csp_allows(
+                    csp,
+                    page,
+                    explorer_net::http::FetchDest::Script,
+                    &u,
+                );
+            if allowed && queued.insert(u.as_str()) {
                 frontier.push((spec, u));
             }
         }
@@ -664,11 +703,19 @@ impl Session {
                 let text = decode_subresource(&resp.body, None);
                 graph.sources.insert(key, text.clone());
                 for (spec2, u2) in module_deps(&text, &u, import_specs) {
+                    let u2 = explorer_net::csp::csp_upgrade(csp, &u2).unwrap_or(u2);
                     graph
                         .alias
                         .entry(spec2.clone())
                         .or_insert_with(|| u2.as_str());
-                    if !is_mixed_content(page, &u2) && queued.insert(u2.as_str()) {
+                    let allowed = !is_mixed_content(page, &u2)
+                        && explorer_net::csp::csp_allows(
+                            csp,
+                            page,
+                            explorer_net::http::FetchDest::Script,
+                            &u2,
+                        );
+                    if allowed && queued.insert(u2.as_str()) {
                         next.push((spec2, u2));
                     }
                 }

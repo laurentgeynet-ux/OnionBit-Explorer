@@ -2916,6 +2916,72 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-145. Content-
+  Security-Policy —
+  enforcement** *(numéro
+  officiel attribué à
+  l'intégration)* : nouveau
+  module `explorer-net::csp`
+  — parseur `Content-
+  Security-Policy` (toutes
+  les valeurs d'en-tête +
+  `<meta http-equiv>` :
+  chaque politique s'applique,
+  la plus restrictive réduit ;
+  `frame-ancestors`/`sandbox`/
+  `report-*` écartées en méta
+  par spec) + évaluateurs.
+  Directives : `default-src`,
+  `script-src`, `style-src`,
+  `img-src`, `font-src`,
+  `connect-src`, `frame-src`
+  (repli `child-src`),
+  `form-action`, `base-uri`
+  (sans repli), `upgrade-
+  insecure-requests` (`http:`
+  → `https:`, `ws:` → `wss:`).
+  Enforcement à tous les
+  points : plan (scripts,
+  feuilles, `<img>`, cadres —
+  `srcdoc` testé comme origine
+  héritée `'self'`), inline
+  (`<script>`/`<style>` :
+  `'unsafe-inline'` + `nonce`,
+  bypass nonce/hash spec),
+  fetchs tardifs (`@import`
+  récursif, fonds/masques,
+  fonts, dépendances de
+  modules), `fetch()`/`XHR`
+  (`connect-src`), soumissions
+  de formulaire (`form-action`,
+  DOM + script), `<base href>`
+  (base refusée = ignorée).
+  CSP portée : `NavDone` →
+  `Tab` → `PaintPayload` (re-
+  filtrage `<style>` à chaque
+  cascade) → `SubJob` (fetchs
+  tardifs) → `PageSnapshot`
+  (gel/restauration bfcache).
+  Bornes documentées :
+  `Report-Only` ignoré,
+  `sha*-` non-matching (pas de
+  SHA-2), `*-src-elem`/`-attr`
+  et `strict-dynamic` non
+  implémentés (fail-closed),
+  `object-src`/`media-src`/
+  `worker-src`/`navigate-to`
+  hors périmètre (pas de
+  fetch `<object>`/média/
+  worker en moteur).
+  Tests : 18 `tests/csp.rs`
+  (parseur/matching/inline/
+  upgrade) + 14 session
+  (`csp_*` — scripts, styles,
+  img, fonte, cadres, srcdoc,
+  form-action, base-uri,
+  multi-en-têtes, méta,
+  `@import`, `connect-src`).
+
 - [x] **CAP-144. `Refresh:`
   en-tête de réponse**
   *(numéro officiel attribué

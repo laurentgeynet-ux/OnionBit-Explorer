@@ -1060,6 +1060,61 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   sur la méta, invalide →
   repli méta.
 
+- **CAP-145 — Content-
+  Security-Policy,
+  enforcement** (`explorer-net`
+  + `explorer-core` — cap « web
+  réel sécurisé » ; numéro
+  officiel attribué à
+  l'intégration, compteur
+  gelé) : nouveau module
+  `explorer_net::csp` — parseur
+  `Content-Security-Policy`
+  multi-en-têtes + `<meta
+  http-equiv>` (chaque
+  politique s'applique, la plus
+  restrictive réduit) et
+  évaluateurs `csp_allows`,
+  `csp_inline_allowed`,
+  `csp_form_action_allowed`,
+  `csp_base_uri_allowed`,
+  `csp_upgrade`. Directives
+  couvertes : `default-src`,
+  `script-src`, `style-src`,
+  `img-src`, `font-src`,
+  `connect-src`, `frame-src`
+  (repli `child-src`),
+  `form-action`, `base-uri`
+  (sans repli `default-src`,
+  spec), `upgrade-insecure-
+  requests`. Gates aux points
+  de fetch : plan de sous-
+  ressources (scripts, `<link>`,
+  `<img>`, cadres `src` +
+  `srcdoc` en origine héritée),
+  inline `<script>`/`<style>`
+  (`'unsafe-inline'`, `nonce`,
+  règle nonce/hash spec),
+  `@import` récursif, fonds/
+  masques CSS, `@font-face`,
+  graphe de modules, `fetch()`/
+  `XHR` (`connect-src`), `<form>`
+  DOM et `form.submit()` JS
+  (`form-action`), `<base href>`
+  (`base-uri` → base refusée
+  ignorée). La CSP vit sur
+  `Tab` → `PaintPayload` (re-
+  filtrage `<style>` à chaque
+  cascade/relayout) → `SubJob`
+  → `PageSnapshot` (restaurée
+  au retour bfcache). Bornes
+  documentées : `Report-Only`
+  ignoré, `sha*-`/`strict-
+  dynamic`/`*-src-elem`/`-attr`
+  non implémentés (fail-closed).
+  Tests : 18 `tests/csp.rs` +
+  14 session (`csp_*`).
+
 ### Fixed
 
 - **Étape 122 — `root_font_size`

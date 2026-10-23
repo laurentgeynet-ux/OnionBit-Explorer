@@ -222,7 +222,7 @@ pub(crate) fn composite_frames(p: &mut PaintPayload, ctx: &ApplyCtx, dom: &Dom) 
             .frame_bitmaps
             .entry(key)
             .or_insert_with(|| {
-                render_subframe(f, rect.width, rect.height, ctx, base.as_ref())
+                render_subframe(f, rect.width, rect.height, ctx, base.as_ref(), &p.csp)
                     .map_or_else(|| Arc::new(blank(wp, hp)), Arc::new)
             })
             .clone();
@@ -263,18 +263,31 @@ fn blank(w: u32, h: u32) -> DecodedImage {
 /// un enfant `srcdoc` hérite sa base du parent (spec
 /// HTML : `about:srcdoc` n'a pas d'adresse résolvable),
 /// un enfant fetché résout contre sa propre URL.
+/// `parent_csp` = politiques CSP du parent : un cadre
+/// `srcdoc` les hérite (spec CSP — le document inline
+/// n'a pas d'en-têtes propres) ; un cadre fetché vit sous
+/// ses propres méta CSP (ses en-têtes de réponse ne sont
+/// pas conservés — borne assumée CAP-145).
 fn render_subframe(
     f: &SubFrame,
     w: f32,
     h: f32,
     ctx: &ApplyCtx,
     parent_base: Option<&Url>,
+    parent_csp: &[explorer_net::csp::CspPolicy],
 ) -> Option<DecodedImage> {
     let mut cp = PaintPayload {
         base_url: Some(match &f.srcdoc {
             Some(_) => parent_base.cloned().unwrap_or_else(|| f.url.clone()),
             None => f.url.clone(),
         }),
+        csp: match &f.srcdoc {
+            Some(_) => parent_csp.to_vec(),
+            None => crate::session::collect_meta_csp(&f.dom)
+                .iter()
+                .map(|v| explorer_net::csp::CspPolicy::parse(v, true))
+                .collect(),
+        },
         ..PaintPayload::default()
     };
     let child_ctx = ApplyCtx {

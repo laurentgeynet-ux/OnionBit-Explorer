@@ -8598,3 +8598,394 @@ async fn refresh_header_invalid_falls_back_to_meta() {
         Some("http://h.test/meta")
     );
 }
+
+// ---------------------------------------------------------------- CAP-145
+// Content-Security-Policy — enforcement des fetch-directives
+// + inline à la navigation (en-têtes + `<meta http-equiv>`).
+
+/// `script-src 'none'` : le `<script src>` externe n'est
+/// jamais fetché — la page se peint quand même.
+#[tokio::test]
+async fn csp_script_src_none_blocks_external() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <script src=\"/x.js\"></script><div>a</div></body></html>",
+        &[("content-security-policy", "script-src 'none'")],
+    );
+    t.route("/x.js", 200, "/* noop */");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(
+        !t.paths().contains(&"/x.js".to_string()),
+        "x.js fetché malgré CSP"
+    );
+}
+
+/// `script-src 'none'` : le `<script>` inline ne s'exécute
+/// pas — la mutation DOM reste « avant ». Le marqueur est
+/// concaténé (`'AP'+'RES'`) pour ne pas figurer dans le
+/// dump via le texte du script lui-même.
+#[tokio::test]
+async fn csp_script_src_none_blocks_inline() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script>document.getElementById('x').textContent='AP'+'RES'</script>\
+         </body></html>",
+        &[("content-security-policy", "script-src 'none'")],
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap();
+    assert!(dump.contains("avant"), "{dump}");
+    assert!(!dump.contains("APRES"), "{dump}");
+}
+
+/// `script-src 'nonce-abc'` : seul le `<script nonce=abc>`
+/// inline s'exécute — le voisin sans nonce est bloqué.
+#[tokio::test]
+async fn csp_script_src_nonce_allows_matching_inline_only() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <div id=\"x\">avant</div><div id=\"y\">avant</div>\
+         <script nonce=\"abc\">document.getElementById('x').textContent='AP'+'RES'</script>\
+         <script>document.getElementById('y').textContent='AP'+'RES'</script>\
+         </body></html>",
+        &[("content-security-policy", "script-src 'nonce-abc'")],
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap();
+    assert!(dump.contains("APRES"), "script noncé exécuté : {dump}");
+    assert_eq!(
+        dump.matches("APRES").count(),
+        1,
+        "un seul script admis : {dump}"
+    );
+}
+
+/// `script-src 'self'` : le script cross-origin est refusé,
+/// le script same-origin est fetché.
+#[tokio::test]
+async fn csp_script_src_self_blocks_cross_origin_only() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <script src=\"/ok.js\"></script>\
+         <script src=\"http://evil.test/e.js\"></script>\
+         </body></html>",
+        &[("content-security-policy", "script-src 'self'")],
+    );
+    t.route("/ok.js", 200, "/* noop */");
+    t.route("/e.js", 200, "/* noop */");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let paths = t.paths();
+    assert!(paths.contains(&"/ok.js".to_string()), "{paths:?}");
+    assert!(!paths.contains(&"/e.js".to_string()), "{paths:?}");
+}
+
+/// `style-src 'none'` : ni `<link>` fetché ni `<style>`
+/// appliqué — le fond reste le fond UA.
+#[tokio::test]
+async fn csp_style_src_none_blocks_sheet_and_inline() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <link rel=stylesheet href=\"/a.css\">\
+         <style>body{background:#00ff00}</style></head>\
+         <body><div>a</div></body></html>",
+        &[("content-security-policy", "style-src 'none'")],
+    );
+    t.route_bin("/a.css", 200, b"body{background:#ff0000}".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(
+        !t.paths().contains(&"/a.css".to_string()),
+        "feuille fetchée malgré CSP"
+    );
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(
+        px_at(px, w, 400, 300),
+        [255, 255, 255, 255],
+        "ni vert ni rouge"
+    );
+}
+
+/// `img-src 'none'` : l'`<img>` n'est jamais fetché.
+#[tokio::test]
+async fn csp_img_src_none_blocks_img() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body><img src=\"/i.png\"></body></html>",
+        &[("content-security-policy", "img-src 'none'")],
+    );
+    t.route_bin("/i.png", 200, b"notapng".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(
+        !t.paths().contains(&"/i.png".to_string()),
+        "img fetchée malgré CSP"
+    );
+}
+
+/// `font-src 'none'` : la source `url()` du `@font-face`
+/// n'est jamais fetchée.
+#[tokio::test]
+async fn csp_font_src_none_blocks_webfont() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><head><style>\
+         @font-face{font-family:X;src:url(/f.woff)}\
+         </style></head><body><div>a</div></body></html>",
+        &[("content-security-policy", "font-src 'none'")],
+    );
+    t.route_bin("/f.woff", 200, b"notafont".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(
+        !t.paths().contains(&"/f.woff".to_string()),
+        "fonte fetchée malgré CSP"
+    );
+}
+
+/// `frame-src 'none'` : l'`<iframe src>` n'est ni fetché ni
+/// peuplé — le sous-contexte n'existe pas.
+#[tokio::test]
+async fn csp_frame_src_none_blocks_iframe() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <iframe src=\"/f\"></iframe></body></html>",
+        &[("content-security-policy", "frame-src 'none'")],
+    );
+    t.route("/f", 200, FRAME_DOC);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(
+        !t.paths().contains(&"/f".to_string()),
+        "iframe fetchée malgré CSP"
+    );
+    assert!(s.tab_frames(id).is_empty(), "aucun sous-contexte");
+}
+
+/// `frame-src 'self'` : le cadre `srcdoc` (origine héritée
+/// = 'self') est admis, le cadre fetché same-origin aussi.
+#[tokio::test]
+async fn csp_frame_src_self_allows_srcdoc_and_same_origin() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <iframe src=\"/f\"></iframe>\
+         <iframe srcdoc=\"<body>in</body>\"></iframe></body></html>",
+        &[("content-security-policy", "frame-src 'self'")],
+    );
+    t.route("/f", 200, FRAME_DOC);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(
+        t.paths().contains(&"/f".to_string()),
+        "iframe same-origin admise"
+    );
+    assert_eq!(s.tab_frames(id).len(), 2, "src + srcdoc présents");
+}
+
+/// `frame-src 'none'` bloque aussi `<iframe srcdoc>` —
+/// le document inline est un sous-contexte soumis à la
+/// directive (origine héritée testée contre la page).
+#[tokio::test]
+async fn csp_frame_src_none_blocks_srcdoc() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <iframe srcdoc=\"<body>in</body>\"></iframe></body></html>",
+        &[("content-security-policy", "frame-src 'none'")],
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(
+        s.tab_frames(id).is_empty(),
+        "srcdoc bloqué par frame-src 'none'"
+    );
+}
+
+/// `form-action 'none'` : le clic submit produit une
+/// soumission morte — aucune navigation, aucun fetch de la
+/// cible.
+#[tokio::test]
+async fn csp_form_action_none_blocks_submit() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/f",
+        200,
+        "<html><body><form action=\"/search\" method=\"get\">\
+         <div><input name=\"q\" value=\"x\"></div>\
+         <div><input type=\"submit\" value=\"Go\"></div>\
+         </form></body></html>",
+        &[("content-security-policy", "form-action 'none'")],
+    );
+    t.route("/search", 200, PAGE_T);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    s.handle_input(id, InputEvent::Click { x: 6.0, y: 36.0 })
+        .await
+        .unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/f"));
+    assert!(
+        !t.paths().contains(&"/search?q=x".to_string()),
+        "form-action contourné"
+    );
+}
+
+/// `base-uri 'none'` : le `<base href>` est ignoré — les
+/// relatives résolvent contre l'URL du document.
+#[tokio::test]
+async fn csp_base_uri_none_ignores_base() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/dir/p",
+        200,
+        "<!doctype html><html><head>\
+         <base href=\"/cdn/\"><link rel=stylesheet href=\"x.css\">\
+         </head><body></body></html>",
+        &[("content-security-policy", "base-uri 'none'")],
+    );
+    t.route_bin("/dir/x.css", 200, b"body{}".to_vec());
+    t.route_bin("/cdn/x.css", 200, b"body{}".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    let paths = t.paths();
+    assert!(paths.contains(&"/dir/x.css".to_string()), "{paths:?}");
+    assert!(!paths.contains(&"/cdn/x.css".to_string()), "{paths:?}");
+}
+
+/// Deux en-têtes CSP : chaque politique s'applique — la
+/// plus restrictive (`'none'`) réduit la permissive
+/// (`'self'`).
+#[tokio::test]
+async fn csp_multiple_headers_most_restrictive_wins() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <script src=\"/ok.js\"></script></body></html>",
+        &[
+            ("content-security-policy", "script-src 'self'"),
+            ("content-security-policy", "script-src 'none'"),
+        ],
+    );
+    t.route("/ok.js", 200, "/* noop */");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(
+        !t.paths().contains(&"/ok.js".to_string()),
+        "politique restrictive contournée"
+    );
+}
+
+/// `<meta http-equiv=Content-Security-Policy>` : admise
+/// comme les en-têtes — ici `img-src 'none'` bloque
+/// l'`<img>` du document.
+#[tokio::test]
+async fn csp_meta_blocks_img() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <meta http-equiv=\"Content-Security-Policy\" content=\"img-src 'none'\">\
+         </head><body><img src=\"/i.png\"></body></html>",
+    );
+    t.route_bin("/i.png", 200, b"notapng".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert!(
+        !t.paths().contains(&"/i.png".to_string()),
+        "méta CSP ignorée"
+    );
+}
+
+/// `@import` dans une feuille liée : la cible de l'import
+/// est sous `style-src` — refusée, jamais fetchée.
+#[tokio::test]
+async fn csp_style_src_blocks_at_import() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <link rel=stylesheet href=\"/a.css\"></head><body></body></html>",
+        &[("content-security-policy", "style-src 'self'")],
+    );
+    t.route_bin(
+        "/a.css",
+        200,
+        b"@import url(http://evil.test/b.css);".to_vec(),
+    );
+    t.route_bin("/b.css", 200, b"body{}".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let paths = t.paths();
+    assert!(paths.contains(&"/a.css".to_string()), "{paths:?}");
+    assert!(
+        !paths.contains(&"/b.css".to_string()),
+        "@import cross-origin admis malgré CSP"
+    );
+}
+
+/// `connect-src 'none'` : `fetch()` du JS est refusé —
+/// le script tourne (`'unsafe-inline'` en `script-src`)
+/// mais la requête ne part jamais.
+#[tokio::test]
+async fn csp_connect_src_none_blocks_fetch() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <script>fetch('/api').catch(()=>{})</script>\
+         </body></html>",
+        &[(
+            "content-security-policy",
+            "script-src 'unsafe-inline'; connect-src 'none'",
+        )],
+    );
+    t.route("/api", 200, "{}");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    assert!(
+        !t.paths().contains(&"/api".to_string()),
+        "fetch() admis malgré connect-src"
+    );
+}

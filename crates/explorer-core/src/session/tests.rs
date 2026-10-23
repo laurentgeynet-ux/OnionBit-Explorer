@@ -150,6 +150,7 @@ fn paintless_snapshot_repairs_on_restore() {
             base_url: None,
             base_target: None,
             refresh: None,
+            csp: Vec::new(),
         });
     }
 
@@ -238,6 +239,7 @@ async fn back_during_inflight_nav_restores_previous() {
             base_url: None,
             base_target: None,
             refresh: None,
+            csp: Vec::new(),
         });
     }
 

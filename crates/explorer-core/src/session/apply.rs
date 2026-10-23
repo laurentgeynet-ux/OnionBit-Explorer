@@ -257,6 +257,13 @@ pub(crate) struct PaintPayload {
     /// seule : `put_paint` ne la réécrit jamais sur `Tab`,
     /// qui fait foi).
     pub base_url: Option<Url>,
+    /// Politiques CSP du document (CAP-145) — miroir de
+    /// `Tab::csp` pour la passe de peinture détachée :
+    /// `styles_payload` re-filtre les `<style>` inline à
+    /// chaque cascade (un relayout ne doit pas réintroduire
+    /// une feuille bloquée à la navigation). Lecture seule,
+    /// comme `base_url`.
+    pub csp: Vec<explorer_net::csp::CspPolicy>,
     /// Feuilles `<link>` — une entrée par feuille, parsées
     /// isolément à la cascade (étape 104, cf. R-68).
     pub linked_sheets: Vec<String>,
@@ -408,6 +415,9 @@ impl Tab {
             // document — base de toutes les résolutions
             // relatives de la passe de peinture détachée.
             base_url: self.base_url.clone().or_else(|| self.url.clone()),
+            // Miroir `Tab::csp` (CAP-145) — cloné, jamais
+            // ré-écrit par `put_paint` (Tab fait foi).
+            csp: self.csp.clone(),
             linked_sheets: std::mem::take(&mut self.linked_sheets),
             prev_styles: std::mem::take(&mut self.prev_styles),
             transitions: std::mem::take(&mut self.transitions),
@@ -1074,7 +1084,7 @@ pub(crate) fn styles_payload(
     // défaut de fermeture (accolade, commentaire) ne peut plus
     // absorber la feuille suivante, et `@import`/`@charset`
     // en tête de feuille redeviennent valides (cf. R-68).
-    for css in collect_style_sheets(dom) {
+    for css in collect_style_sheets(dom, &p.csp) {
         eng.add_css(&css, Origin::Author);
     }
     for css in &p.linked_sheets {

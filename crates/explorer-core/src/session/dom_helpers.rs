@@ -393,11 +393,50 @@ pub(crate) fn extract_title(dom: &Dom) -> Option<String> {
 /// — une entrée par élément (étape 104 : chaque feuille est
 /// parsée isolément — une accolade non fermée ne peut plus
 /// absorber la feuille suivante, cf. R-68).
-pub(crate) fn collect_style_sheets(dom: &Dom) -> Vec<String> {
+/// `<meta http-equiv=Content-Security-Policy>` du document
+/// — valeurs `content` en ordre document (CAP-145) : les
+/// politiques méta se cumulent avec celles de l'en-tête
+/// (chacune doit autoriser — la plus restrictive réduit).
+pub(crate) fn collect_meta_csp(dom: &Dom) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "meta")
+            && dom
+                .attribute(n, "http-equiv")
+                .ok()
+                .flatten()
+                .is_some_and(|v| v.trim().eq_ignore_ascii_case("content-security-policy"))
+        {
+            if let Some(c) = dom.attribute(n, "content").ok().flatten() {
+                out.push(c);
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    out
+}
+
+/// Corps des `<style>` du document, ordre document —
+/// sous CSP `style-src` (CAP-145) : un `<style>` inline
+/// n'est retenu que si `'unsafe-inline'`/un `nonce`
+/// d'élément l'autorise (`csp` vide = aucune politique →
+/// tout admis, comme avant).
+pub(crate) fn collect_style_sheets(dom: &Dom, csp: &[explorer_net::csp::CspPolicy]) -> Vec<String> {
     let mut sheets = Vec::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "style") {
+            let nonce = dom.attribute(n, "nonce").ok().flatten();
+            if !explorer_net::csp::csp_inline_allowed(
+                csp,
+                explorer_net::csp::InlineKind::Style,
+                nonce.as_deref(),
+            ) {
+                continue;
+            }
             if let Ok(t) = dom.text_content(n) {
                 sheets.push(t);
             }

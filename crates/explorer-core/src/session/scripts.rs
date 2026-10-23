@@ -66,13 +66,17 @@ pub(crate) struct ScriptItem {
 /// filtré contre `page` (l'ancre de sécurité reste l'URL
 /// du document, pas la base). `scripting = false` (pas de
 /// fabrique JS) → vide : scripting désactivé = aucun fetch
-/// de script (spec HTML).
+/// de script (spec HTML). Sous CSP `script-src` (CAP-145) :
+/// un `src` doit matcher une source, un inline exige
+/// `'unsafe-inline'` ou `nonce=` valide — balise sinon
+/// inerte, non collectée.
 pub(crate) fn collect_scripts(
     dom: &Dom,
     page: &Url,
     base: &Url,
     scripting: bool,
     max_src: usize,
+    csp: &[explorer_net::csp::CspPolicy],
 ) -> Vec<ScriptItem> {
     let mut out = Vec::new();
     if !scripting {
@@ -104,7 +108,15 @@ pub(crate) fn collect_scripts(
                         let defer = !async_ && dom.attribute(n, "defer").ok().flatten().is_some();
                         let resolved = Url::resolve(base, raw.trim())
                             .ok()
-                            .filter(|u| !is_mixed_content(page, u));
+                            .filter(|u| !is_mixed_content(page, u))
+                            .filter(|u| {
+                                explorer_net::csp::csp_allows(
+                                    csp,
+                                    page,
+                                    explorer_net::http::FetchDest::Script,
+                                    u,
+                                )
+                            });
                         if let (Some(u), true) = (resolved, slots < max_src) {
                             out.push(ScriptItem {
                                 src: Some(u),
@@ -133,7 +145,13 @@ pub(crate) fn collect_scripts(
                         // balise inerte, non collectée.
                     } else {
                         let text = dom.text_content(n).unwrap_or_default();
-                        if !text.trim().is_empty() {
+                        let nonce = dom.attribute(n, "nonce").ok().flatten();
+                        let inline_ok = explorer_net::csp::csp_inline_allowed(
+                            csp,
+                            explorer_net::csp::InlineKind::Script,
+                            nonce.as_deref(),
+                        );
+                        if !text.trim().is_empty() && inline_ok {
                             // Inline : `async`/`defer` sans effet —
                             // classique = file parse, module = post.
                             out.push(ScriptItem {
