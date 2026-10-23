@@ -289,7 +289,13 @@ impl Engine {
             // est vidé au tour suivant.
             // JS-C37 : frontière de jobs = point sûr GC — seuil de
             // cellules vivantes dépassé → passe mark-sweep.
-            if !self.deliver_mutations()? && self.pump_workers()? == 0 {
+            // JS-C69 : même checkpoint pour les notifications
+            // `IntersectionObserver`/`ResizeObserver` (entrée
+            // initiale à l'`observe`, callbacks = jobs).
+            if !self.deliver_mutations()?
+                && self.deliver_observers()? == 0
+                && self.pump_workers()? == 0
+            {
                 self.maybe_collect();
                 return Ok(ran);
             }

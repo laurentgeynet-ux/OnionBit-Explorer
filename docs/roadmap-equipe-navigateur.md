@@ -2800,13 +2800,27 @@ ci-dessous (fréquence observée sur le corpus réel).
   vérifiée à `define` (échec « failed » à l'upgrade au
   lieu du `NotSupportedError` spec). Régressions `c68_*`
   (7 tests).
-- [ ] **JS-C69. `IntersectionObserver`/`ResizeObserver`
+- [x] **JS-C69. `IntersectionObserver`/`ResizeObserver`
   fonctionnels** : les stubs actuels sont constructibles mais
   le callback n'est jamais livré (documenté « no-op honnête »
   JS-C56) — les sites qui attendent un premier appel
   (lazy-load, infinite scroll) restent muets. Entrées
   minimales : un `IntersectionObserverEntry` initial +
   déclenchement à l'`observe`.
+  **Livré** : `observers.rs` (parallèle `mutation.rs`) —
+  `observe` enfile la notification initiale livrée au
+  checkpoint microtask (ordre de création des observers) ;
+  `unobserve`/`disconnect`/`takeRecords` réels, re-observe
+  dédupliqué, `cb(entries, observer)`. Entries spec-shape :
+  IOE (`isIntersecting` ≙ `is_attached`, `intersectionRatio`
+  1|0, `time`, `boundingClientRect`/`intersectionRect`/
+  `rootBounds`) et ROE (`contentRect`, `*BoxSize[]`) —
+  géométrie honnête règle `clientWidth` (viewport pour
+  `documentElement`/`body`, 0 sinon). Options validées et
+  lisibles (`thresholds`, `root`, `rootMargin`, `box`) mais
+  non appliquées — pas de géométrie réelle à filtrer.
+  Callbacks/wrappers racinés GC. Régressions `c69_*`
+  (7 tests).
 - [ ] **JS-C70. `Blob`/`File`/`FileReader` + `URL.
   createObjectURL`** — uploads et traitement client-side.
 - [ ] **JS-C71. `ReadableStream`/`WritableStream`/`Transform

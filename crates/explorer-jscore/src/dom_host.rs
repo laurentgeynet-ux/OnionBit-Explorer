@@ -1013,25 +1013,11 @@ impl Engine {
             self.set_own(fid, "prototype", Value::Obj(p), false);
         }
         self.set_own(g, "AbortController", ac_f, false);
-        // `IntersectionObserver`/`ResizeObserver` — constructibles,
-        // callback requis ; `observe`/`unobserve`/`disconnect`
-        // no-op honnêtes (le miroir ne génère ni intersection ni
-        // resize — le callback n'est jamais appelé). Mesuré
+        // `IntersectionObserver`/`ResizeObserver` (JS-C69) —
+        // notification initiale à l'`observe` livrée au
+        // checkpoint microtask (`observers.rs`). Mesuré
         // github.com : `new IntersectionObserver(cb)` (JS-C56).
-        for (name, f) in [
-            (
-                "IntersectionObserver",
-                intersection_observer_ctor as crate::heap::NativeFn,
-            ),
-            ("ResizeObserver", resize_observer_ctor),
-        ] {
-            let fv = self.native_fn(name, f);
-            if let Value::Obj(fid) = fv {
-                let p = self.new_object();
-                self.set_own(fid, "prototype", Value::Obj(p), false);
-            }
-            self.set_own(g, name, fv, false);
-        }
+        self.install_observers();
         // `customElements` — registre adossé au `Dom` :
         // `define`/`get`/`getName`/`whenDefined`/`upgrade` avec
         // upgrade des éléments et callbacks de cycle de vie
@@ -4279,64 +4265,6 @@ impl Engine {
             }
         }
     }
-}
-
-/// `IntersectionObserver`/`ResizeObserver` — passifs : le
-/// callback est validé/retenu mais jamais appelé (le miroir ne
-/// produit ni intersection ni resize — honnête, pas un feu
-/// artificiel). `observe`/`unobserve`/`disconnect` no-op,
-/// `takeRecords` → `[]`.
-struct PassiveObserverHost {
-    kind: &'static str,
-    cb: Value,
-}
-
-impl Host for PassiveObserverHost {
-    fn class_name(&self) -> &'static str {
-        self.kind
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn invoke(
-        &self,
-        e: &mut Engine,
-        _t: Value,
-        name: &str,
-        _args: &[Value],
-    ) -> JsResult<Option<Value>> {
-        match name {
-            "observe" | "unobserve" | "disconnect" => Ok(Some(Value::Undefined)),
-            "takeRecords" => Ok(Some(e.new_array(Vec::new()))),
-            _ => Ok(None),
-        }
-    }
-
-    fn trace(&self, out: &mut Vec<ObjId>) {
-        if let Value::Obj(id) = self.cb {
-            out.push(id);
-        }
-    }
-}
-
-/// `new IntersectionObserver(cb[, options])` — callback requis.
-fn intersection_observer_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    passive_observer(e, args, "IntersectionObserver")
-}
-
-/// `new ResizeObserver(cb)` — callback requis.
-fn resize_observer_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    passive_observer(e, args, "ResizeObserver")
-}
-
-fn passive_observer(e: &mut Engine, args: &[Value], kind: &'static str) -> JsResult<Value> {
-    let cb = arg(args, 0);
-    if !e.is_callable(cb) {
-        return Err(e.type_error(format!("{kind}: callback is not a function")));
-    }
-    Ok(e.new_host_object(Rc::new(PassiveObserverHost { kind, cb })))
 }
 
 /// `document.implementation` — `createHTMLDocument` produit un

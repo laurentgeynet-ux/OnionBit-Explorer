@@ -3082,3 +3082,177 @@ fn describe_ev(e: &mut Engine, src: &str) -> String {
         Err(err) => panic!("{src} -> {err}"),
     }
 }
+
+// -- JS-C69 : IntersectionObserver/ResizeObserver fonctionnels -------
+//
+// Même modèle de livraison que MutationObserver : notifications
+// au checkpoint microtask — `ev2` lit leurs effets au second eval.
+
+const PAGE_OBS: &str = r#"
+<html><body>
+<div id="a"></div>
+<div id="b"><i>x</i></div>
+</body></html>
+"#;
+
+#[test]
+fn c69_intersection_initial_entry() {
+    // `observe` enfile la notification initiale (spec — les
+    // navigateurs rapportent toujours l'état courant à la
+    // première passe) : entries[1], target, `isIntersecting`
+    // (attaché), ratio 1, `observer` en second argument.
+    assert_eq!(
+        ev2(
+            PAGE_OBS,
+            "var log='';\
+             var io=new IntersectionObserver(function(es,o){\
+               var e=es[0];\
+               log=es.length+'/'+(o===io)+'/'+(e.target===document.getElementById('a'))\
+                 +'/'+e.isIntersecting+'/'+e.intersectionRatio\
+                 +'/'+typeof e.time+'/'+typeof e.boundingClientRect.width\
+                 +'/'+typeof e.intersectionRect.width+'/'+typeof e.rootBounds.width;\
+             });\
+             io.observe(document.getElementById('a'));",
+            "log"
+        ),
+        "1/true/true/true/1/number/number/number/number"
+    );
+}
+
+#[test]
+fn c69_detached_not_intersecting() {
+    // Élément détaché → `isIntersecting:false`, ratio 0 — un
+    // nœud hors document ne peut intersecter (spec).
+    assert_eq!(
+        ev2(
+            PAGE_OBS,
+            "var log='';\
+             var el=document.createElement('div');\
+             new IntersectionObserver(function(es){\
+               log=es[0].isIntersecting+'/'+es[0].intersectionRatio+'/'+es[0].intersectionRect.width;\
+             }).observe(el);",
+            "log"
+        ),
+        "false/0/0"
+    );
+}
+
+#[test]
+fn c69_unobserve_disconnect_takerecords() {
+    // `unobserve` avant le checkpoint purge la notification ;
+    // `disconnect` purge cibles + pendantes ; `takeRecords`
+    // consomme la file immédiatement (le callback ne la voit
+    // plus — spec).
+    assert_eq!(
+        ev2(
+            PAGE_OBS,
+            "var calls=0;\
+             var io1=new IntersectionObserver(function(){calls++});\
+             io1.observe(document.getElementById('a'));\
+             io1.unobserve(document.getElementById('a'));\
+             var io2=new IntersectionObserver(function(){calls++});\
+             io2.observe(document.getElementById('b'));\
+             io2.disconnect();\
+             var io3=new IntersectionObserver(function(){calls++});\
+             io3.observe(document.getElementById('a'));\
+             var taken=io3.takeRecords().length;",
+            "taken+'/'+calls"
+        ),
+        // `takeRecords` a vidé la pendante d'io3 → 0 appel ;
+        // io1/io2 purgés → 0 appel non plus.
+        "1/0"
+    );
+}
+
+#[test]
+fn c69_observe_dedup_and_rearm() {
+    // Deux `observe` sur la même cible = une seule notification
+    // (spec : ensemble de cibles) ; re-observe après
+    // `disconnect` ré-arme proprement.
+    assert_eq!(
+        ev2(
+            PAGE_OBS,
+            "var n=0;\
+             var io=new IntersectionObserver(function(es){n+=es.length});\
+             io.observe(document.getElementById('a'));\
+             io.observe(document.getElementById('a'));\
+             io.observe(document.getElementById('b'));\
+             io.disconnect();\
+             io.observe(document.getElementById('b'));",
+            "n+''"
+        ),
+        "1"
+    );
+}
+
+#[test]
+fn c69_resize_initial_entry() {
+    // `ResizeObserver` — notification initiale avec
+    // `contentRect`/`contentBoxSize`/`borderBoxSize`/
+    // `devicePixelContentBoxSize` (spec).
+    assert_eq!(
+        ev2(
+            PAGE_OBS,
+            "var log='';\
+             var ro=new ResizeObserver(function(es,o){\
+               var e=es[0];\
+               log=(o===ro)+'/'+(e.target===document.getElementById('b'))\
+                 +'/'+typeof e.contentRect.width+'/'+e.contentBoxSize[0].inlineSize\
+                 +'/'+e.borderBoxSize.length+'/'+e.devicePixelContentBoxSize.length;\
+             });\
+             ro.observe(document.getElementById('b'));",
+            "log"
+        ),
+        "true/true/number/0/1/1"
+    );
+}
+
+#[test]
+fn c69_viewport_geometry_root() {
+    // `documentElement`/`body` ≙ viewport (règle `clientWidth`)
+    // — `rootBounds` sans `root` = viewport ; avec `root: el`
+    // = rect honnête de l'élément (0 pour un non-racine).
+    let mut e = engine_with(PAGE_OBS);
+    e.set_viewport(800, 600);
+    let _ = describe_ev(
+        &mut e,
+        "var log='';\
+         new IntersectionObserver(function(es){\
+           log=es[0].rootBounds.width+'/'+es[0].rootBounds.height+'/'+es[0].boundingClientRect.width+'/'+es[0].intersectionRect.height;\
+         }).observe(document.body);",
+    );
+    assert_eq!(describe_ev(&mut e, "log"), "800/600/800/600");
+    // `io.root` reflète l'option ; `thresholds`/`rootMargin`
+    // figés et exposés (spec).
+    assert_eq!(
+        describe_ev(
+            &mut e,
+            "var a=document.getElementById('a');\
+             var io=new IntersectionObserver(function(){},{root:a,threshold:[0.25,0.5],rootMargin:'10px 5%'});\
+             var io2=new IntersectionObserver(function(){});\
+             (io.root===a)+'/'+io.thresholds.join(',')+'/'+io.rootMargin\
+             +'|'+(io2.root===null)+'/'+io2.thresholds.join(',')+'/'+io2.rootMargin"
+        ),
+        "true/0.25,0.5/10px 5%|true/0/0px"
+    );
+}
+
+#[test]
+fn c69_ctor_validation() {
+    // Callback requis ; `threshold` hors [0,1] rejeté ;
+    // `rootMargin` malformé rejeté ; `box` inconnu rejeté.
+    assert_eq!(
+        ev_in(
+            PAGE_OBS,
+            "var r='';\
+             try{new IntersectionObserver(42)}catch(e){r+=e.name+'|'}\
+             try{new IntersectionObserver(function(){},{threshold:2})}catch(e){r+=e.name+'|'}\
+             try{new IntersectionObserver(function(){},{rootMargin:'10em'})}catch(e){r+=e.name+'|'}\
+             try{new IntersectionObserver(function(){},{root:42})}catch(e){r+=e.name+'|'}\
+             try{new ResizeObserver(function(){},{box:'weird'})}catch(e){r+=e.name}\
+             var t=typeof new IntersectionObserver(function(){});\
+             r+'|'+t+'|'+Object.prototype.toString.call(new ResizeObserver(function(){}))"
+        ),
+        "TypeError|TypeError|TypeError|TypeError|TypeError|object|[object ResizeObserver]"
+    );
+}

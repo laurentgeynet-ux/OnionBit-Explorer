@@ -218,6 +218,51 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   l'upgrade au lieu de jeter.
   Régressions `c68_*` (7 tests).
 
+- **JS-C69 —
+  `IntersectionObserver`/`ResizeObserver`
+  fonctionnels** (`explorer-jscore`
+  — les stubs JS-C56 validaient le
+  callback mais ne l'appelaient
+  jamais : lazy-load et infinite
+  scroll restaient muets, mesuré
+  github.com). Registrations par id
+  côté moteur (`obs`, module
+  `observers.rs` parallèle à
+  `mutation.rs`) : `observe`
+  enfile la **notification
+  initiale** spec, livrée au
+  checkpoint microtask (un appel
+  par observer, ordre de création) ;
+  `unobserve`/`disconnect`/`takeRecords`
+  réels (purge / consommation
+  immédiate) ; re-observe d'une
+  même cible = no-op. Entries :
+  `IntersectionObserverEntry`
+  (`target`, `isIntersecting` ≙
+  `is_attached`, `intersectionRatio`
+  1|0, `time`, `boundingClientRect`,
+  `intersectionRect`,
+  `rootBounds`) et
+  `ResizeObserverEntry`
+  (`contentRect`, `contentBoxSize`/
+  `borderBoxSize`/`devicePixelContentBoxSize`)
+  — géométrie honnête de la règle
+  `clientWidth` (viewport pour
+  `documentElement`/`body`, 0
+  sinon ; pas de moteur de mise en
+  page dans le miroir). Options
+  validées et exposées :
+  `threshold` ∈ `0..=1` (sinon
+  rejet), `root` Element/Document/
+  null, `rootMargin` au format
+  `px`/`%`, `box` enum —
+  `thresholds`/`root`/`rootMargin`
+  lisibles, non appliquées (pas de
+  géométrie réelle à filtrer).
+  GC : callbacks et wrappers
+  racinés. Régressions `c69_*`
+  (7 tests).
+
 ### Fixed
 
 - **Étape 122 — `root_font_size`

@@ -259,6 +259,10 @@ pub struct Engine {
     /// `MutationObserver` bookkeeping (JS-C26) — callbacks par
     /// id d'observer ; les records vivent dans la file du `Dom`.
     pub(crate) mutobs: crate::mutation::MutObsState,
+    /// `IntersectionObserver`/`ResizeObserver` bookkeeping
+    /// (JS-C69) — registrations + notifications initiales
+    /// pendantes, livrées au checkpoint microtask.
+    pub(crate) obs: crate::observers::ObsState,
     /// Élément en cours de construction par upgrade
     /// `customElements` (JS-C68) — le `super()` d'une classe
     /// `extends HTMLElement` le récupère comme `this` (rôle du
@@ -619,6 +623,7 @@ impl Engine {
             dom_ctx: None,
             microtasks: std::collections::VecDeque::new(),
             mutobs: crate::mutation::MutObsState::default(),
+            obs: crate::observers::ObsState::default(),
             ce_upgrade_slot: None,
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,
@@ -817,6 +822,9 @@ impl Engine {
         // `MutationObserver` (JS-C26) — callbacks + wrappers
         // racines tant que l'engine vit (ré-armement possible).
         self.mutobs.root_ids(&mut ids);
+        // `IntersectionObserver`/`ResizeObserver` (JS-C69) —
+        // même traitement : callbacks + wrappers enregistrés.
+        self.obs.root_ids(&mut ids);
         if let Some((dom, cache)) = &self.dom_ctx {
             for &id in cache.borrow().values() {
                 ids.push(id);
