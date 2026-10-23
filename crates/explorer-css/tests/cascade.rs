@@ -114,6 +114,160 @@ fn important_ua_bat_auteur() {
     );
 }
 
+// ── @layer (Cascade 5 §6.4 — R-91) ────────────────────────────
+
+#[test]
+fn regle_en_layer_sapplique() {
+    // Terrain github : tout le reset Primer vit dans
+    // `@layer primer-css-base{…}` — le bloc était avalé entier
+    // (at-rule inconnu) → `*{box-sizing:border-box}` perdu,
+    // les éléments restaient content-box.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@layer primer-css-base { * { box-sizing: border-box } }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("box-sizing"),
+        Some("border-box")
+    );
+}
+
+#[test]
+fn hors_layer_bat_tous_les_layers() {
+    // Hors-layer gagne même avec une spécificité inférieure et
+    // une position plus ancienne (§6.4.4) — la règle en layer
+    // s'applique quand même sur ses autres propriétés.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { display: none } \
+         @layer base { #a { display: block } div { color: rgb(1, 2, 3) } }",
+        Origin::Author,
+    );
+    let s = e.compute(&f.dom, f.div, &env());
+    assert_eq!(s.get("display"), Some("none"));
+    assert_eq!(s.get("color"), Some("rgb(1, 2, 3)"));
+}
+
+#[test]
+fn ordre_des_layers_prime_sur_specificite() {
+    // `b` déclaré après `a` → `b` gagne malgré un sélecteur
+    // moins spécifique : le rang de layer prime sur (id,class,type).
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@layer a { #a { color: rgb(1, 2, 3) } } \
+         @layer b { div { color: rgb(4, 5, 6) } }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("color"),
+        Some("rgb(4, 5, 6)")
+    );
+}
+
+#[test]
+fn ordre_des_layers_declare_par_statement() {
+    // `@layer b, a;` fixe l'ordre d'abord : `a` gagne même si
+    // son bloc arrive avant celui de `b` dans la source.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@layer b, a; @layer a { div { color: rgb(4, 5, 6) } } \
+         @layer b { #a { color: rgb(1, 2, 3) } }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("color"),
+        Some("rgb(4, 5, 6)")
+    );
+}
+
+#[test]
+fn important_inverse_ordre_des_layers() {
+    // `!important` renverse l'ordre : le PREMIER layer gagne ;
+    // un hors-layer `!important` est le plus faible de tous.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@layer a { div { display: none !important } } \
+         @layer b { #a { display: block !important } }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("display"),
+        Some("none"),
+        "a !important bat b !important (ordre renversé)"
+    );
+    e.add_css("div { display: inline !important }", Origin::Author);
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("display"),
+        Some("none"),
+        "hors-layer !important < tout layer !important"
+    );
+    e.add_css("div { display: inline }", Origin::Author);
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("display"),
+        Some("none"),
+        "layer !important bat hors-layer normal"
+    );
+}
+
+#[test]
+fn layer_anonyme_et_imbrication() {
+    // Deux `@layer{}` anonymes : slots distincts, le second gagne.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@layer { div { display: none } } @layer { div { display: block } }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.div, &env()).get("display"),
+        Some("block")
+    );
+    // Sublayer `a.b` : déclaré dans `a` après ses règles
+    // propres → il leur est postérieur.
+    let mut e2 = StyleEngine::new();
+    e2.add_css(
+        "@layer a { div { display: inline } @layer b { div { display: block } } }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e2.compute(&f.dom, f.div, &env()).get("display"),
+        Some("block")
+    );
+    // Nom pointé direct `@layer a.b{}` ≡ sous-couche de `a`.
+    let mut e3 = StyleEngine::new();
+    e3.add_css(
+        "@layer a { div { display: none } } @layer a.b { div { display: table } }",
+        Origin::Author,
+    );
+    assert_eq!(
+        e3.compute(&f.dom, f.div, &env()).get("display"),
+        Some("table")
+    );
+}
+
+#[test]
+fn layer_sous_media() {
+    // `@layer` imbriqué dans `@media` : layer + requête cumulés —
+    // la règle s'applique (color) sans battre le hors-layer
+    // (display).
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { display: block } \
+         @media all { @layer a { div { display: none; color: rgb(1, 2, 3) } } }",
+        Origin::Author,
+    );
+    let s = e.compute(&f.dom, f.div, &env());
+    assert_eq!(s.get("display"), Some("block"));
+    assert_eq!(s.get("color"), Some("rgb(1, 2, 3)"));
+}
+
 // ── héritage et mots-clés ─────────────────────────────────────
 
 #[test]

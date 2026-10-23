@@ -2383,6 +2383,49 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   atomique`, `inline_niche_recupere_ses_propres_
   fragments`, `inline_grid_et_inline_table_sont_
   atomiques`.
+- [x] **R-91. `@layer` + `%` des positionnés** (journal
+  piste PIPE — hero github : texte coupé ~800 px, colonne
+  droite hors viewport au shot 1216 px). Deux défauts
+  chaînés mesurés par bissection sur le fragment réel
+  (`gh_mini.html` — `.lp-IntroHero` rendait 1312 px dans
+  un bloc conteneur de 1200/1216). **(a) `@layer` absent** :
+  GitHub enveloppe **tout son reset Primer** dans
+  `@layer primer-css-base{…}` — at-rule inconnu →
+  `skip_block` avalait le bloc entier : `*{box-sizing:
+  border-box}`, `body{margin:0}`, resets de formulaires…
+  tous perdus. `AtKind::Layer` (prélude `nom`/`a.b`/
+  anonyme, règles imbriquées sous la borne `MAX_NESTING`) ;
+  `StyleEngine` tient une table chemin→rang à l'**ordre de
+  première déclaration** (`@layer a, b;` déclare sans
+  corps, `a.b` ≡ sous-couche, chaque préfixe déclaré au
+  passage) et la clé `(rank, layer, spec, order)` s'insère
+  entre origine et spécificité — hors-layer bat tous les
+  layers en normal, `!important` renverse (premier layer
+  gagnant, hors-layer dernier ; segments complémentés +
+  borne `MAX` pour que les règles propres d'une couche
+  restent après ses sous-couches). `revert-layer` garde
+  son repli documenté. **(b) `%` re-résolu sur les
+  positionnés** : `abs_geometry` calculait la border box
+  (`width:%` + châssis = 1264) puis la repassait à
+  `layout_block` comme `cb_w` — la résolution interne de
+  `width` s'y re-appliquait (1264 → 1312, content-box).
+  La base passée est désormais `target.width` quand
+  `width` est non-`auto` (px idempotent, % → vrai CB ;
+  bases de `min|max-width` et marges `auto` corrigées au
+  passage — un absolu `width:600px;margin:0 auto` se
+  centre désormais dans son CB). Vérifié terrain :
+  `layout gh_probe.html` → `.lp-IntroHero` 1216, hero
+  1168, grid 1120, CTA « Download GitHub Copilot app »
+  x=777→1065 **dans la frame** ; `body{margin:0}` et
+  `*{box-sizing:border-box}` appliqués (div sonde 1152).
+  Régressions : `regle_en_layer_sapplique`,
+  `hors_layer_bat_tous_les_layers`,
+  `ordre_des_layers_prime_sur_specificite`,
+  `ordre_des_layers_declare_par_statement`,
+  `important_inverse_ordre_des_layers`,
+  `layer_anonyme_et_imbrication`, `layer_sous_media`,
+  `absolu_largeur_pourcent_content_box`,
+  `absolu_largeur_pourcent_border_box`.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

@@ -83,6 +83,17 @@ pub enum AtKind {
         /// `(sélecteur de frame, déclarations)`.
         frames: Vec<(String, Vec<Declaration>)>,
     },
+    /// `@layer <nom>? { rules }` — cascade layers (CSS
+    /// Cascading 5 §6.4). `name = None` pour le layer anonyme ;
+    /// le prélude peut être pointé (`a.b` = sous-couche de `a`).
+    /// La forme sans bloc `@layer a, b;` reste
+    /// [`AtKind::Statement`] — elle déclare l'ordre, sans règles.
+    Layer {
+        /// Nom du layer (`None` = anonyme).
+        name: Option<String>,
+        /// Règles imbriquées.
+        rules: Vec<Rule>,
+    },
     /// Sans bloc : `@name prelude ;` (`@import`, `@charset`,
     /// `@namespace`, `@supports` sans cas nominal ici, etc.) —
     /// le prélude est conservé brut.
@@ -405,6 +416,29 @@ impl<'t> Parser<'t> {
                                     conditions: Vec::new(),
                                     unknown: true,
                                 }]
+                            },
+                            rules,
+                        }
+                    }
+                    "layer" => {
+                        // Bloc de règles, même grammaire que
+                        // `@media` (règles qualifiées, at-rules
+                        // imbriquées dont `@layer`/`@media`).
+                        let rules = if self.nest_depth >= MAX_NESTING {
+                            self.skip_block();
+                            Vec::new()
+                        } else {
+                            self.nest_depth += 1;
+                            let r = self.nested_rules();
+                            self.nest_depth -= 1;
+                            r
+                        };
+                        let name = prelude.trim();
+                        AtKind::Layer {
+                            name: if name.is_empty() {
+                                None
+                            } else {
+                                Some(name.to_string())
                             },
                             rules,
                         }

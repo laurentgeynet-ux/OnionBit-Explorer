@@ -572,6 +572,45 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `inline_grid_et_inline_table_
   sont_atomiques`.
 
+- **R-91 — `@layer` + `%` des
+  positionnés** (`explorer-css`,
+  `explorer-layout` — terrain
+  github : le hero `.lp-IntroHero`
+  rendait 1312 px dans un bloc
+  conteneur de 1216, texte et CTA
+  « Download GitHub Copilot app »
+  coupés au bord droit). Deux
+  défauts chaînés. (a) **`@layer`
+  supporté** : GitHub enferme tout
+  son reset Primer dans
+  `@layer primer-css-base{…}` —
+  bloc avalé entier comme at-rule
+  inconnu (`*{box-sizing:
+  border-box}`, `body{margin:0}`…
+  perdus). `AtKind::Layer` +
+  table chemin→rang à l'ordre de
+  première déclaration
+  (`@layer a, b;`, `a.b`,
+  anonymes, imbrication) ; clé
+  `(rank, layer, spec, order)` —
+  hors-layer bat tous les layers
+  en normal, `!important`
+  renverse. `revert-layer` garde
+  son repli. (b) **`width:%`
+  re-résolu sur les absolus** :
+  `abs_geometry` passait sa border
+  box déjà calculée comme `cb_w`
+  à `layout_block`, qui y
+  re-résolvait le % (1264→1312).
+  `cb_w = target.width` quand
+  `width` est non-auto.
+  Régressions `regle_en_layer_
+  sapplique` + 6 sœurs cascade
+  (ordre, statement, anonyme,
+  imbrication, `!important`,
+  media) et `absolu_largeur_
+  pourcent_{content,border}_box`.
+
 - **Étape 119 — piège
   `engineMode=auto` visible**
   (`app/`, `scripts/`). Une

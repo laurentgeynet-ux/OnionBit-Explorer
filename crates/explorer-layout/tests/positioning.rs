@@ -409,6 +409,65 @@ fn absolu_inline_position_statique_du_conteneur() {
     );
 }
 
+#[test]
+fn absolu_largeur_pourcent_content_box() {
+    // R-91 — terrain github : `.lp-IntroHero` (`position:
+    // fixed; width:100%; padding:0 24px`, content-box) rendait
+    // 1312 px dans un CB de 1216. `abs_geometry` calculait la
+    // border box (1216+48=1264) et la repassait à
+    // `layout_block` comme `cb_w` — le % était résolu UNE
+    // DEUXIÈME fois sur la base gonflée (1264→1312). Le %
+    // d'un absolu doit se résoudre une seule fois, contre le
+    // vrai bloc conteneur.
+    let (dom, bx) = laid_w(
+        "<div id=p><div id=a><div id=i></div></div></div>",
+        "#p{position:relative;height:10px}\
+         #a{position:absolute;width:100%;padding:0 24px}\
+         #i{height:10px}",
+        1216.0,
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let i = find(&bx, by_id(&dom, "i"));
+    // content-box : contenu = 100 % du CB (1216), border =
+    // contenu + padding (48) = 1264 — pas 1312.
+    assert!(
+        (a.rect.width - 1264.0).abs() < 0.01,
+        "absolu width:100% content-box : border = CB + châssis, {:?}",
+        a.rect
+    );
+    assert!(
+        (i.rect.width - 1216.0).abs() < 0.01,
+        "contenu = CB : {:?}",
+        i.rect
+    );
+}
+
+#[test]
+fn absolu_largeur_pourcent_border_box() {
+    // Variante border-box (le cas github une fois
+    // `*{box-sizing:border-box}` appliqué, R-91) : la border
+    // box = 100 % du CB, le contenu absorbe le padding.
+    let (dom, bx) = laid_w(
+        "<div id=p><div id=a><div id=i></div></div></div>",
+        "#p{position:relative;height:10px}\
+         #a{position:absolute;width:100%;padding:0 24px;box-sizing:border-box}\
+         #i{height:10px}",
+        1216.0,
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let i = find(&bx, by_id(&dom, "i"));
+    assert!(
+        (a.rect.width - 1216.0).abs() < 0.01,
+        "absolu width:100% border-box : border = CB, {:?}",
+        a.rect
+    );
+    assert!(
+        (i.rect.width - (1216.0 - 48.0)).abs() < 0.01,
+        "contenu = CB - châssis : {:?}",
+        i.rect
+    );
+}
+
 // ---------- métadonnées usées ----------
 
 #[test]

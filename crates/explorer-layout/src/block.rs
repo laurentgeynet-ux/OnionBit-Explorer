@@ -2174,6 +2174,10 @@ struct AbsGeo {
     ml: f32,
     mr: f32,
     mb: f32,
+    /// `width` est non-`auto` : `layout_block` le re-résoudra
+    /// — `cb_w` doit alors rester le vrai bloc conteneur (le %
+    /// s'y re-résout), pas `cw` déjà gonflé du châssis (R-91).
+    explicit_w: bool,
 }
 
 /// §10.3.7 : `width` non-`auto` → contrainte `l`+`r` ;
@@ -2253,6 +2257,7 @@ fn abs_geometry(
         ml,
         mr,
         mb,
+        explicit_w: w_css.is_some(),
     }
 }
 
@@ -2342,11 +2347,22 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
         // largeur conteneur en flux (`w:auto` → `cb_w - fixed
         // - ml - mr`) → on lui rend les marges pour que la
         // soustraction interne retombe sur `cw`.
+        // R-91 : `width` NON-auto → `layout_block` re-résout
+        // `width` en interne contre `cb_w` — lui passer le
+        // VRAI bloc conteneur (`target`), pas `cw` : un %
+        // résolu sur la border box déjà calculée appliquait
+        // le châssis deux fois (`.lp-IntroHero` github :
+        // 1216 → 1264 → 1312 en content-box).
+        let cb_w = if geo.explicit_w {
+            target.width
+        } else {
+            geo.cw + geo.ml + geo.mr
+        };
         layout_block(
             child,
             geo.cx,
             geo.cy,
-            geo.cw + geo.ml + geo.mr,
+            cb_w,
             Some(target.height),
             ctx,
             fs,
