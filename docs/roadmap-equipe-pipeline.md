@@ -2129,6 +2129,36 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   Carve-out : `glyph_cache.rs` enregistre la face sous
   `serif`. Reliquat : propager `BlockCtx::default_family`
   surchargé à `PaintCx` reste ouvert (journal).
+- [x] **R-82. Layout géant : faces rustybuzz mémoïsées +
+  borne de runs relevée** (reliure « apply post-script
+  ~250 s » du journal, étape 112 — coût unitaire PIPE sur
+  article réel de 2,2 Mo / 32 803 nœuds). Le profil a
+  localisé le mur : 115 776 appels `shape`, ~98 % du
+  layout — et sa décomposition a renversé le diagnostic :
+  le shaping pur ne pesait que ~10 s ; le reste =
+  `hb_font_t::from_face` reconstruisant les digests de
+  couverture GSUB/GPOS à **chaque** run unique (~2,6 ms ×
+  ~20 k ≈ 50 s), le parse `ttf_parser` doublant la facture,
+  et `SHAPE_CACHE_CAP=8 192` saturant en cours de document
+  → ~33 k re-shapings parasites (~115 s de recalcul pur).
+  Fix : carte `buzz` du `FontCache` — `(identité octets,
+  index .ttc)` → `rustybuzz::Face<'static>` sur octets
+  figés par `Box::leak` **sous** borne `BUZZ_FACE_CAP=64`
+  (fuite assumée bornée ; son `Deref` vers
+  `ttf_parser::Face` sert aussi métriques et bbox d'encre
+  → parse unique par fonte) ; `SHAPE_CACHE_CAP` relevée à
+  65 536 (~20 k runs uniques mesurés). Hors borne ou fonte
+  hostile → repli au chemin par octets **identique**
+  (couverture/fallback inchangés — borne de performance
+  uniquement, régression
+  `cap_buzz_preserve_la_couverture`). Résultat mesuré :
+  `layout_tree` **181 s → ~17 s** (×10,7), pipeline total
+  ~57 s. Sonde de profil conservée :
+  `tests/zz_profile_giant.rs` (ignorée — fixture
+  `target/probes/brasil.html` non versionnée, skip
+  silencieux). Reste : `compute_styles` ~12 s et
+  `raster`/`encode_png` ~13 s — prochains postes si le
+  coût unitaire redevient le goulot.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

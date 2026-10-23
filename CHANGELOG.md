@@ -9,6 +9,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-82 — Layout géant : faces
+  rustybuzz mémoïsées + borne de
+  runs relevée** (`explorer-layout`,
+  reliure « apply post-script ~250 s »
+  du journal étape 112) : sur article
+  réel de 2,2 Mo (32 803 nœuds), le
+  layout coûtait ~181 s dont ~98 % en
+  `FontCache::shape` — décomposition :
+  `hb_font_t::from_face`
+  reconstruisait les digests de
+  couverture GSUB/GPOS à chaque run
+  unique (~50 s), doublé par le re-parse
+  `ttf_parser`, et `SHAPE_CACHE_CAP`
+  8 192 saturait en cours de document →
+  ~33 000 re-shapings parasites (~115 s).
+  Nouveau : carte `buzz` du
+  `FontCache` — `(identité octets,
+  index .ttc)` → `rustybuzz::Face<
+  'static>` sur octets figés par
+  `Box::leak` sous borne
+  `BUZZ_FACE_CAP=64` (fuite bornée ;
+  son `Deref` vers `ttf_parser::Face`
+  sert aussi métriques et bbox — parse
+  unique par fonte) + `SHAPE_CACHE_CAP`
+  → 65 536 (~20 000 runs uniques
+  mesurés). Hors borne ou fonte
+  hostile → repli au chemin par octets
+  identique : borne de performance,
+  jamais de sémantique (régression
+  `cap_buzz_preserve_la_couverture`).
+  `layout_tree` **181 s → ~17 s**
+  (×10,7) ; pipeline complet ~57 s.
+  Sonde de profil permanente
+  `tests/zz_profile_giant.rs`
+  (ignorée, fixture non versionnée).
+
 - **R-81 — `font_request` de la
   display list replie sur la famille
   mesurée** (`explorer-layout`/

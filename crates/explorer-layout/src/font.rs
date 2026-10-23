@@ -182,7 +182,7 @@ pub struct ShapedRun {
 /// persister entre applys) ; sert sous `RefCell` dans
 /// [`crate::BlockCtx::font_cache`] — le domaine reste
 /// single-writer par contrat.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct FontCache {
     /// Révision de la source vue à la dernière requête —
     /// sync `FontSource::revision` (même contrat que le
@@ -213,6 +213,37 @@ pub struct FontCache {
     /// `FB_CACHE_CAP` — un texte CJK dense ne re-parcourt
     /// le registre qu'une fois par caractère distinct.
     fb: HashMap<(char, FontRequest), Option<FaceRef>>,
+    /// `(identité octets, index de face)` → face **rustybuzz**
+    /// construite (R-82) — `hb_font_t::from_slice`/`from_face`
+    /// collecte les digests de couverture des lookups GSUB/GPOS
+    /// : ~2,6 ms par appel mesuré, rejoué à chaque miss de run
+    /// (~50 s sur un article géant de 20 k runs uniques).
+    /// Les octets sont figés par `Box::leak` **sous** la borne
+    /// `BUZZ_FACE_CAP` (une copie par fonte) → `Face<'static>`
+    /// partageable sans cellule auto-référentielle ; son
+    /// `Deref` vers `ttf_parser::Face` sert aussi métriques et
+    /// bbox. La fuite est assumée et bornée — les octets de
+    /// fonte vivent déjà toute la session dans la source ; un
+    /// pointeur figé n'est jamais réutilisé, donc jamais de
+    /// collision de clé après `sync()`. Hors borne ou parse
+    /// échoué → `None` = repli au chemin par octets
+    /// (performances seules, jamais la couverture).
+    buzz: HashMap<(usize, u32), Option<Arc<rustybuzz::Face<'static>>>>,
+}
+
+/// `rustybuzz::Face` n'implémente pas `Debug` — résumé par
+/// cardinalités (le contenu n'a pas d'intérêt en dump).
+impl std::fmt::Debug for FontCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FontCache")
+            .field("rev", &self.rev)
+            .field("faces", &self.faces.len())
+            .field("metrics", &self.metrics.len())
+            .field("shape", &self.shape.len())
+            .field("fb", &self.fb.len())
+            .field("buzz", &self.buzz.len())
+            .finish()
+    }
 }
 
 /// Octets de fonte partagés + index de face `.ttc` — la
@@ -232,12 +263,23 @@ enum Choice {
     Fallback(Arc<Vec<u8>>, u32),
 }
 
-/// Borne des entrées `shape` mémorisées.
-const SHAPE_CACHE_CAP: usize = 8192;
+/// Borne des entrées `shape` mémorisées — dimensionnée pour
+/// couvrir les documents géants réels (~20 k runs uniques
+/// mesurés sur un article d'encyclopédie de 2,2 Mo, R-82 :
+/// au-delà, le calcul se fait sans insertion — à 8 192 la
+/// borne saturait en cours de document et chaque répétition
+/// re-shapait → ~60 % du layout en recalcul pur).
+const SHAPE_CACHE_CAP: usize = 65_536;
 
 /// Borne des entrées `fb` mémorisées (caractères distincts
 /// plausibles par document).
 const FB_CACHE_CAP: usize = 4096;
+
+/// Borne des faces rustybuzz retenues — fontes distinctes
+/// plausibles par page (même ordre que `FACE_CAP` du
+/// `GlyphCache` raster ; chaque entrée ≈ une copie figée
+/// des octets de la fonte).
+const BUZZ_FACE_CAP: usize = 64;
 
 impl FontCache {
     /// Cache vide pour une passe.
@@ -259,6 +301,7 @@ impl FontCache {
             self.metrics.clear();
             self.shape.clear();
             self.fb.clear();
+            self.buzz.clear();
             self.rev = Some(rev);
         }
     }
@@ -309,6 +352,30 @@ impl FontCache {
             .map(|(d, i)| (Arc::as_ptr(&d) as usize, i))
     }
 
+    /// Face rustybuzz construite pour `(data, index)` —
+    /// mémoïsée par identité d'octets (R-82). `Arc` clonée
+    /// pour libérer l'emprunt du cache. `Box::leak` fige une
+    /// copie des octets **sous** la borne — hors borne,
+    /// `None` renvoie au chemin par octets, jamais à une
+    /// fuite non bornée (cf. champ `buzz`).
+    fn buzz_face(
+        &mut self,
+        data: &Arc<Vec<u8>>,
+        index: u32,
+    ) -> Option<Arc<rustybuzz::Face<'static>>> {
+        let k = (Arc::as_ptr(data) as usize, index);
+        if let Some(hit) = self.buzz.get(&k) {
+            return hit.clone();
+        }
+        if self.buzz.len() >= BUZZ_FACE_CAP {
+            return None;
+        }
+        let static_data: &'static [u8] = Box::leak(data.as_slice().into());
+        let face = rustybuzz::Face::from_slice(static_data, index).map(Arc::new);
+        self.buzz.insert(k, face.clone());
+        face
+    }
+
     /// Métriques verticales à `size_px` — un parse `hhea`
     /// par (fonte, face, taille).
     pub fn metrics(
@@ -321,9 +388,11 @@ impl FontCache {
         if let Some(&m) = self.metrics.get(&(k, i, size_px.to_bits())) {
             return m;
         }
-        let m = self
-            .face(src, req)
-            .and_then(|(d, i)| metrics_face(&d, i, size_px));
+        let m = self.face(src, req).and_then(|(d, i)| {
+            self.buzz_face(&d, i)
+                .and_then(|f| metrics_of(&f, size_px))
+                .or_else(|| metrics_face(&d, i, size_px))
+        });
         self.metrics.insert((k, i, size_px.to_bits()), m);
         m
     }
@@ -354,7 +423,13 @@ impl FontCache {
         }
         let run = self
             .face(src, req)
-            .and_then(|(d, i)| shape_face_ls(&d, i, text, size_px, rtl, ls).map(|r| (d, i, r)))
+            .and_then(|(d, i)| {
+                let run = match self.buzz_face(&d, i) {
+                    Some(f) => shape_parsed(&f, text, size_px, rtl, ls),
+                    None => shape_face_ls(&d, i, text, size_px, rtl, ls),
+                };
+                run.map(|r| (d, i, r))
+            })
             .map(|(d, i, r)| {
                 let r = if r.glyphs.iter().any(|g| g.id == 0) {
                     self.shape_with_fallback(src, req, &d, i, text, size_px, rtl, ls, r)
@@ -383,7 +458,7 @@ impl FontCache {
     /// c'est possible — les segments couverts reprennent le
     /// shaping indépendant, approximant le contexte
     /// inter-segments : limite documentée).
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn shape_with_fallback(
         &mut self,
         src: &dyn FontSource,
@@ -396,7 +471,19 @@ impl FontCache {
         ls: f32,
         primary: ShapedRun,
     ) -> ShapedRun {
-        let Some(tface) = ttf_parser::Face::parse(data, index).ok() else {
+        // Face primaire pour la carte de couverture : cachée
+        // (`buzz_face`), sinon re-parse des octets — au-delà
+        // de `BUZZ_FACE_CAP` le chemin lent reste correct
+        // (le cap borne la fuite, pas la sémantique).
+        let tface_owned = self.buzz_face(data, index);
+        let tface_local;
+        let tface: Option<&ttf_parser::Face<'_>> = if let Some(f) = &tface_owned {
+            Some(&***f)
+        } else {
+            tface_local = ttf_parser::Face::parse(data, index).ok();
+            tface_local.as_ref()
+        };
+        let Some(tface) = tface else {
             return primary;
         };
         // Segments logiques : couverture de `tface` caractère
@@ -457,22 +544,32 @@ impl FontCache {
                 Choice::Primary => (data.clone(), index),
                 Choice::Fallback(d, i) => (d.clone(), *i),
             };
-            let Some(run) = shape_face_ls(&bytes, idx, &text[*start..*end], size_px, rtl, ls)
+            let seg_face = self.buzz_face(&bytes, idx);
+            let Some(run) = seg_face
+                .as_deref()
+                .and_then(|f| shape_parsed(f, &text[*start..*end], size_px, rtl, ls))
+                .or_else(|| shape_face_ls(&bytes, idx, &text[*start..*end], size_px, rtl, ls))
             else {
                 continue;
             };
             let start_glyph = u32::try_from(glyphs.len()).unwrap_or(u32::MAX);
-            // Face re-parsée pour la bbox d'encre (une par
-            // segment — peu de segments par run).
-            let tf = ttf_parser::Face::parse(&bytes, idx).ok();
-            let scale =
-                size_px / f32::from(tf.as_ref().map_or(1, ttf_parser::Face::units_per_em)).max(1.0);
+            // Face du segment pour la bbox d'encre — cache si
+            // dispo, re-parse hors borne (cap = fuite bornée,
+            // pas sémantique bornée).
+            let seg_local;
+            let tf: Option<&ttf_parser::Face<'_>> = if let Some(f) = &seg_face {
+                Some(&***f)
+            } else {
+                seg_local = ttf_parser::Face::parse(&bytes, idx).ok();
+                seg_local.as_ref()
+            };
+            let scale = size_px / f32::from(tf.map_or(1, ttf_parser::Face::units_per_em)).max(1.0);
             let mut pen = advance;
             for mut g in run.glyphs {
                 g.cluster = g
                     .cluster
                     .saturating_add(u32::try_from(*start).unwrap_or(u32::MAX));
-                if let Some(f) = tf.as_ref() {
+                if let Some(f) = tf {
                     if let Some(b) = f.glyph_bounding_box(ttf_parser::GlyphId(g.id)) {
                         let r = crate::Rect {
                             x: pen + g.offset_x + f32::from(b.x_min) * scale,
@@ -634,8 +731,24 @@ pub fn shape_face_ls(
     ls: f32,
 ) -> Option<ShapedRun> {
     let tface = ttf_parser::Face::parse(font_data, face_index).ok()?;
-    let met = metrics_of(&tface, size_px)?;
-    let face = rustybuzz::Face::from_slice(font_data, face_index)?;
+    let face = rustybuzz::Face::from_face(tface);
+    shape_parsed(&face, text, size_px, rtl, ls)
+}
+
+/// Cœur de [`shape_face_ls`] sur un `hb_font_t` **déjà
+/// construit** (R-82) : `FontCache::shape` y arrive via
+/// `buzz_face` sans reconstruire les digests de couverture
+/// GSUB/GPOS (~2,6 ms par appel mesuré sur page géante).
+/// Métriques et bbox passent par le `Deref` vers
+/// `ttf_parser::Face` du même objet.
+fn shape_parsed(
+    face: &rustybuzz::Face<'_>,
+    text: &str,
+    size_px: f32,
+    rtl: bool,
+    ls: f32,
+) -> Option<ShapedRun> {
+    let met = metrics_of(face, size_px)?;
     // rustybuzz expose `units_per_em` en `i32` — clamp avant
     // conversion (fonte hostile → 0/négatif possible).
     #[allow(clippy::cast_precision_loss)]
@@ -647,7 +760,7 @@ pub fn shape_face_ls(
     if rtl {
         buf.set_direction(rustybuzz::Direction::RightToLeft);
     }
-    let out = rustybuzz::shape(&face, &[], buf);
+    let out = rustybuzz::shape(face, &[], buf);
 
     let positions = out.glyph_positions();
     // i32→f32 : les positions de glyphes restent bien en deçà
@@ -684,7 +797,7 @@ pub fn shape_face_ls(
     let mut pen = 0.0_f32;
     let mut ink: Option<crate::Rect> = None;
     for g in &glyphs {
-        if let Some(b) = tface.glyph_bounding_box(ttf_parser::GlyphId(g.id)) {
+        if let Some(b) = face.glyph_bounding_box(ttf_parser::GlyphId(g.id)) {
             let r = crate::Rect {
                 x: pen + g.offset_x + f32::from(b.x_min) * scale,
                 y: -g.offset_y - f32::from(b.y_max) * scale,
@@ -905,5 +1018,42 @@ mod tests {
         let src = Ttc;
         let mut cache = FontCache::new();
         assert_eq!(cache.face(&src, &Src::req()).map(|(_, i)| i), Some(2));
+    }
+
+    /// R-82 : au-delà de `BUZZ_FACE_CAP`, `buzz_face` rend
+    /// `None` et le shaping repasse par le chemin octets —
+    /// la borne bride la fuite de `Box::leak`, jamais la
+    /// couverture (une face hors cap doit produire les mêmes
+    /// glyphes que cachée).
+    #[test]
+    fn cap_buzz_preserve_la_couverture() {
+        /// Chaque `font_face` alloue un `Arc` neuf → autant
+        /// d'identités distinctes que de requêtes.
+        struct Fresh;
+        impl FontSource for Fresh {
+            fn font_data(&self, _req: &FontRequest) -> Option<Vec<u8>> {
+                Some(fixture_ttf())
+            }
+            fn font_face(&self, _req: &FontRequest) -> Option<(Arc<Vec<u8>>, u32)> {
+                Some((Arc::new(fixture_ttf()), 0))
+            }
+        }
+        let src = Fresh;
+        let mut cache = FontCache::new();
+        for n in 0..(BUZZ_FACE_CAP + 8) {
+            let req = FontRequest {
+                families: vec![format!("F{n}")],
+                weight: 400,
+                italic: false,
+            };
+            let run = cache
+                .shape(&src, &req, "ABC", 10.0, false, 0.0)
+                .expect("run");
+            assert_eq!(run.glyphs.len(), 3);
+            assert!(
+                run.glyphs.iter().all(|g| g.id != 0),
+                "couverture perdue à la requête {n} (cap = {BUZZ_FACE_CAP})"
+            );
+        }
     }
 }
