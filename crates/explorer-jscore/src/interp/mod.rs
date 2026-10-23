@@ -366,6 +366,26 @@ pub(crate) struct Protos {
     pub promise: ObjId,
     /// Shared `next()`/`[Symbol.iterator]` iterator prototype.
     pub iterator: ObjId,
+    /// `%ArrayIteratorPrototype%` — niveau concret entre
+    /// l'itérateur retourné et `%IteratorPrototype%` (spec :
+    /// `getPrototypeOf(getPrototypeOf([][Symbol.iterator]()))
+    /// === Iterator.prototype`). Partagé par `Array` et les
+    /// `TypedArray` (`CreateArrayIterator`).
+    pub array_iter: ObjId,
+    /// `%MapIteratorPrototype%`.
+    pub map_iter: ObjId,
+    /// `%SetIteratorPrototype%`.
+    pub set_iter: ObjId,
+    /// `%StringIteratorPrototype%` (`str[Symbol.iterator]()`).
+    pub string_iter: ObjId,
+    /// `%RegExpStringIteratorPrototype%` (`re[Symbol.matchAll]`).
+    pub regexp_iter: ObjId,
+    /// `%URLSearchParamsIteratorPrototype%`.
+    pub usp_iter: ObjId,
+    /// `%IteratorHelperPrototype%` — résultats des helpers
+    /// ES2025 (`map`/`filter`/`take`/`drop`/`flatMap`,
+    /// `Iterator.concat`, wrap `Iterator.from`).
+    pub iter_helper: ObjId,
     pub map: ObjId,
     pub set: ObjId,
     /// `Symbol.prototype` (`toString`/`valueOf`/`description`).
@@ -396,7 +416,7 @@ pub(crate) struct Protos {
 
 impl Protos {
     /// Tous les prototypes — racines GC permanentes.
-    pub(crate) fn all(&self) -> [ObjId; 30] {
+    pub(crate) fn all(&self) -> [ObjId; 37] {
         [
             self.object,
             self.function,
@@ -428,6 +448,13 @@ impl Protos {
             self.url_params,
             self.weak_map,
             self.weak_set,
+            self.array_iter,
+            self.map_iter,
+            self.set_iter,
+            self.string_iter,
+            self.regexp_iter,
+            self.usp_iter,
+            self.iter_helper,
         ]
     }
 }
@@ -476,6 +503,19 @@ impl Engine {
         let regexp = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let promise = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let iterator = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
+        // Prototypes itérateurs concrets (spec) — un niveau entre
+        // l'objet itérateur et `%IteratorPrototype%`. Sans lui,
+        // `getPrototypeOf(getPrototypeOf(iter))` retombe sur
+        // `Object.prototype` : le polyfill iterator-helpers de
+        // github (`ser.js` `ee()`) y installe alors `map`/`filter`…
+        // via `Object.assign` — énumérables, empoisonne `for in`.
+        let array_iter = heap.alloc_obj(Object::ordinary(Value::Obj(iterator)));
+        let map_iter = heap.alloc_obj(Object::ordinary(Value::Obj(iterator)));
+        let set_iter = heap.alloc_obj(Object::ordinary(Value::Obj(iterator)));
+        let string_iter = heap.alloc_obj(Object::ordinary(Value::Obj(iterator)));
+        let regexp_iter = heap.alloc_obj(Object::ordinary(Value::Obj(iterator)));
+        let usp_iter = heap.alloc_obj(Object::ordinary(Value::Obj(iterator)));
+        let iter_helper = heap.alloc_obj(Object::ordinary(Value::Obj(iterator)));
         let map = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let set = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
         let symbol = heap.alloc_obj(Object::ordinary(Value::Obj(object)));
@@ -518,6 +558,13 @@ impl Engine {
                 regexp,
                 promise,
                 iterator,
+                array_iter,
+                map_iter,
+                set_iter,
+                string_iter,
+                regexp_iter,
+                usp_iter,
+                iter_helper,
                 map,
                 set,
                 symbol,

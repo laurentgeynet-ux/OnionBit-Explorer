@@ -37,6 +37,53 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `mask_fetchem_enregistre_via_
   register_mask`.
 
+- **JS-C62 — census github.com, reliquat aval :
+  trois gaps mesurés** (`explorer-jscore`, `jprobe`
+  réel — repro isolé avant fix) :
+  - **`o.m?.()` préserve le récepteur** (polyfill
+    popover `ser-*.js` : `e.matches?.(sel)` appelait
+    avec `this`=global — `bad this` sur le wrapper
+    `Element.prototype.matches`) — l'accès membre
+    plié dans la tête de `Expr::Chain` migre dans
+    les steps au premier `?.` (spec `Reference`).
+  - **Prototypes itérateurs concrets** (cause racine
+    du `TypeError: cannot read `get` of Undefined`
+    zod `er`/`97-*.js`) — `Object.getPrototypeOf(
+    Object.getPrototypeOf(iter))` retombait sur
+    `Object.prototype` faute de `%XxxIterator
+    Prototype%` intermédiaire : le polyfill
+    iterator-helpers `ser.js` y installait alors
+    `map`/`filter`/`take`… via `Object.assign` —
+    *énumérables*, chaque `for in` du site voyait
+    `map` dont `getOwnPropertyDescriptor` rendait
+    `undefined`. `%ArrayIteratorPrototype%`
+    (Array+TypedArray), `%MapIteratorPrototype%`,
+    `%SetIteratorPrototype%`, `%StringIterator
+    Prototype%`, `%RegExpStringIteratorPrototype%`,
+    `%URLSearchParamsIteratorPrototype%`,
+    `%IteratorHelperPrototype%` chaînés sur
+    `%IteratorPrototype%`, `@@toStringTag` spec.
+  - **`Object.getPrototypeOf` — `ToObject` spec**
+    (`behaviors-*.js` : `getPrototypeOf(null)`
+    rendait `Null` silencieux, `.requestErrored`
+    levait à côté) — `null`/`undefined` →
+    `TypeError`, primitives wrappées → proto
+    correspondant.
+  Mesure terrain github.com (après JS-C59/60/61) :
+    **2 erreurs → 1** — `get` of Undefined (zod)
+    et `matches: bad this` (popover) morts ;
+    résidu honnête `Cannot convert undefined or
+    null to object` sur `createElement('turbo-frame')
+    .delegate` — machinery custom-elements/turbo
+    manquante (gap de feature, backlog).
+  Tests : `iterator_concrete_protos` (chaînes par
+    famille, toStringTag, motif `ee()`/`Object.assign`
+    du polyfill, `for in` non empoisonné),
+    `?.()` récepteur dans `optional_chaining_and_
+    nullish` + `event_dispatche_surface_honnete`
+    (`matches?.()` sur hôte), `getPrototypeOf`
+    `ToObject` dans `prototypes_and_new`.
+
 - **JS-C61 — portée de bloc réelle :
   `EnvKind::Block`** (`explorer-jscore` —
   UNE cause racine pour les deux résidus

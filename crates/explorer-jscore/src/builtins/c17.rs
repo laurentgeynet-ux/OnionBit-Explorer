@@ -162,7 +162,7 @@ pub(crate) fn iterator_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
     }
     if let Value::Str(_) = v {
         let items = e.iter_values(v)?;
-        return Ok(crate::collections::iter_obj(e, items));
+        return Ok(crate::collections::iter_obj(e, items, e.protos.iter_helper));
     }
     Err(e.type_error("Iterator.from on non-iterable"))
 }
@@ -175,7 +175,7 @@ pub(crate) fn iterator_concat(e: &mut Engine, _t: Value, args: &[Value]) -> JsRe
     for a in args {
         items.extend(e.iter_values(*a)?);
     }
-    Ok(crate::collections::iter_obj(e, items))
+    Ok(crate::collections::iter_obj(e, items, e.protos.iter_helper))
 }
 
 /// `SuppressedError(error, suppressed, message?)` — ES2026.

@@ -260,7 +260,7 @@ async fn jprobe(url: &str) -> ExitCode {
     eprintln!("[media events : {n_off} offered / {n_mov} moved / {n_gone} gone / {n_cmd} cmd]");
     eprintln!("[erreurs pipeline : {}]", pipe_errors.len());
     for e in pipe_errors.iter().take(12) {
-        eprintln!("  - {}", &e[..e.len().min(160)]);
+        eprintln!("  - {}", &e[..e.len().min(2000)]);
     }
     // Cycle MediaSurface réel : offres + claim d'essai.
     let offers = session.media_list(tab);

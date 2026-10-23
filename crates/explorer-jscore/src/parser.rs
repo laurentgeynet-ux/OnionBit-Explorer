@@ -1813,6 +1813,29 @@ impl Parser {
                 }
             } else if self.eat_p(P::QDot) {
                 let s = steps.get_or_insert_with(Vec::new);
+                // Premier `?.` de la chaîne : l'accès membre déjà
+                // plié dans `e` (`a.b?.()`, `a.b?.c`) doit migrer
+                // dans les steps — sinon le récepteur du `?.()` est
+                // le global au lieu de `a.b` (spec `Reference` —
+                // trigger github.com `e.matches?.()` dans le
+                // polyfill popover).
+                if s.is_empty() {
+                    // `Expr` a un Drop itératif : pas de
+                    // déstructuration — on extrait les champs
+                    // par `mem::replace`.
+                    let mut old = std::mem::replace(&mut e, Expr::Null);
+                    match &mut old {
+                        Expr::Member(inner, name) => {
+                            s.push(ChainStep::Member(std::mem::take(name)));
+                            e = std::mem::replace(&mut **inner, Expr::Null);
+                        }
+                        Expr::Index(inner, key) => {
+                            s.push(ChainStep::Index(std::mem::replace(&mut **key, Expr::Null)));
+                            e = std::mem::replace(&mut **inner, Expr::Null);
+                        }
+                        _ => e = old,
+                    }
+                }
                 if self.check_p(P::LParen) {
                     let args = self.args(no_in)?;
                     s.push(ChainStep::OptCall(args));

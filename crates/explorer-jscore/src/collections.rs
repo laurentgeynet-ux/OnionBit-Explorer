@@ -42,7 +42,9 @@ fn set_items(e: &Engine, id: ObjId) -> Vec<Value> {
 /// Generator object — `Iter` snapshot plus a terminal `ret`
 /// (`gen.return v` → `{value: v, done: true}` after exhaustion).
 pub(crate) fn gen_iter_obj(e: &mut Engine, items: Vec<Value>, ret: Value) -> Value {
-    let it = iter_obj(e, items);
+    // Proto de base `%IteratorPrototype%` — l'appelant l'écrase
+    // avec `g.prototype` (spec `GeneratorStart`).
+    let it = iter_obj(e, items, e.protos.iterator);
     if let Value::Obj(id) = it {
         if let Some(o) = e.heap.obj_mut(id) {
             if let ObjKind::Iter { ret: r, .. } = &mut o.kind {
@@ -66,8 +68,11 @@ fn iter_result(e: &mut Engine, value: Value, done: bool) -> Value {
 /// New lazy iterator object over a snapshot.
 /// `next()`/`[Symbol.iterator]` iterator over a snapshot — shared
 /// by Map/Set and now `Array.prototype.entries/keys/values`.
-pub(crate) fn iter_obj(e: &mut Engine, items: Vec<Value>) -> Value {
-    let proto = Value::Obj(e.protos.iterator);
+/// `proto` = le prototype concret spec de la famille
+/// (`%ArrayIteratorPrototype%`, `%MapIteratorPrototype%`…), lui-
+/// même chaîné sur `%IteratorPrototype%`.
+pub(crate) fn iter_obj(e: &mut Engine, items: Vec<Value>, proto: ObjId) -> Value {
+    let proto = Value::Obj(proto);
     Value::Obj(e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
@@ -309,7 +314,7 @@ fn map_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         .into_iter()
         .map(|(k, _)| k)
         .collect();
-    Ok(iter_obj(e, items))
+    Ok(iter_obj(e, items, e.protos.map_iter))
 }
 
 fn map_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -317,7 +322,7 @@ fn map_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         .into_iter()
         .map(|(_, v)| v)
         .collect();
-    Ok(iter_obj(e, items))
+    Ok(iter_obj(e, items, e.protos.map_iter))
 }
 
 /// `map.entries()` — iterator of `[k, v]` arrays.
@@ -327,7 +332,7 @@ fn map_iter_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value
     for (k, v) in pairs {
         items.push(e.new_array(vec![k, v]));
     }
-    Ok(iter_obj(e, items))
+    Ok(iter_obj(e, items, e.protos.map_iter))
 }
 
 // ------------------------------------------------------------------
@@ -388,7 +393,7 @@ fn set_size(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 
 /// `set.values()`/`keys()`/`entries()` + `[Symbol.iterator]`.
 fn set_values_iter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(iter_obj(e, set_items(e, c_id(this))))
+    Ok(iter_obj(e, set_items(e, c_id(this)), e.protos.set_iter))
 }
 
 fn set_entries_iter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -397,7 +402,7 @@ fn set_entries_iter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value
     for v in items {
         out.push(e.new_array(vec![v, v]));
     }
-    Ok(iter_obj(e, out))
+    Ok(iter_obj(e, out, e.protos.set_iter))
 }
 
 // -- ES2025 Set composition ------------------------------------------------
@@ -766,7 +771,7 @@ fn it_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     for (i, v) in vals.into_iter().enumerate() {
         out.push(it_callback(e, f, v, i)?);
     }
-    Ok(iter_obj(e, out))
+    Ok(iter_obj(e, out, e.protos.iter_helper))
 }
 
 fn it_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -779,19 +784,27 @@ fn it_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             out.push(v);
         }
     }
-    Ok(iter_obj(e, out))
+    Ok(iter_obj(e, out, e.protos.iter_helper))
 }
 
 fn it_take(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let n = e.to_number(arg(args, 0))?.max(0.0) as usize;
     let vals = it_pull_all(e, this)?;
-    Ok(iter_obj(e, vals.into_iter().take(n).collect()))
+    Ok(iter_obj(
+        e,
+        vals.into_iter().take(n).collect(),
+        e.protos.iter_helper,
+    ))
 }
 
 fn it_drop(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let n = e.to_number(arg(args, 0))?.max(0.0) as usize;
     let vals = it_pull_all(e, this)?;
-    Ok(iter_obj(e, vals.into_iter().skip(n).collect()))
+    Ok(iter_obj(
+        e,
+        vals.into_iter().skip(n).collect(),
+        e.protos.iter_helper,
+    ))
 }
 
 fn it_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -802,7 +815,7 @@ fn it_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         let m = it_callback(e, f, v, i)?;
         out.extend(e.iter_values(m)?);
     }
-    Ok(iter_obj(e, out))
+    Ok(iter_obj(e, out, e.protos.iter_helper))
 }
 
 fn it_to_array(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {

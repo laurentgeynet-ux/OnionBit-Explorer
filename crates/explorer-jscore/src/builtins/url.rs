@@ -644,13 +644,13 @@ pub(crate) fn usp_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResu
 pub(crate) fn usp_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let (_id, pairs) = usp_this(e, this)?;
     let vals: Vec<Value> = pairs.into_iter().map(|(k, _)| e.str_val(k)).collect();
-    Ok(crate::collections::iter_obj(e, vals))
+    Ok(crate::collections::iter_obj(e, vals, e.protos.usp_iter))
 }
 
 pub(crate) fn usp_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let (_id, pairs) = usp_this(e, this)?;
     let vals: Vec<Value> = pairs.into_iter().map(|(_, v)| e.str_val(v)).collect();
-    Ok(crate::collections::iter_obj(e, vals))
+    Ok(crate::collections::iter_obj(e, vals, e.protos.usp_iter))
 }
 
 pub(crate) fn usp_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -663,5 +663,5 @@ pub(crate) fn usp_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult
             e.new_array(vec![k, v])
         })
         .collect();
-    Ok(crate::collections::iter_obj(e, vals))
+    Ok(crate::collections::iter_obj(e, vals, e.protos.usp_iter))
 }

@@ -104,7 +104,7 @@ pub(crate) fn re_match_all_impl(
         .iter()
         .map(|m| match_result(e, m, re, s))
         .collect();
-    Ok(crate::collections::iter_obj(e, items))
+    Ok(crate::collections::iter_obj(e, items, e.protos.regexp_iter))
 }
 
 /// Branche `RegExp` de `replace`/`@@replace` (global → toutes les

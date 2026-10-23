@@ -627,6 +627,28 @@ fn optional_chaining_and_nullish() {
     assert_eq!(ev_str("null ?? 'd'"), "d");
     assert_eq!(ev_str("undefined ?? 'd'"), "d");
     assert_eq!(num(ev("var u; u ?? 1 ?? 2")), 1.0);
+    // `o.m?.(args)` appelle avec `this === o` — le membre plié
+    // dans la tête migre dans la chaîne (trigger réel :
+    // `e.matches?.(sel)` dans le polyfill popover de github.com).
+    assert_eq!(
+        num(ev("var o = {x: 3, m() { return this.x; }}; o.m?.()")),
+        3.0
+    );
+    assert_eq!(
+        num(ev("var o = {i: {x: 4, m() { return this.x; }}}; o.i.m?.()")),
+        4.0
+    );
+    assert_eq!(
+        num(ev("var o = {x: 5, m() { return this.x; }}; o['m']?.()")),
+        5.0
+    );
+    assert_eq!(num(ev("var o = {m() { return 9; }}; o?.m?.()")), 9.0);
+    assert_eq!(ev_str("var o = {m() { return 9; }}; o.m?.(1)"), "9");
+    // Récepteur nullish → court-circuit, pas d'appel.
+    assert_eq!(
+        ev_str("var o = null; try { o.m?.() } catch(e) { 'threw' } typeof o?.m?.()"),
+        "undefined"
+    );
 }
 
 #[test]
@@ -2504,6 +2526,24 @@ fn property_descriptors() {
     assert_eq!(
         ev_str("var o = {}, p = {k: 3}; Object.setPrototypeOf(o, p); o.k"),
         "3"
+    );
+    // `getPrototypeOf` — spec `ToObject` : nullish → TypeError,
+    // primitives wrappées → leur proto (trigger réel : github
+    // `behaviors.js` lisait `.requestErrored` sur le Null rendu
+    // par un `getPrototypeOf(null)` silencieux).
+    assert_eq!(
+        ev_str("try { Object.getPrototypeOf(null); 'x' } catch(e) { e instanceof TypeError }"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("try { Object.getPrototypeOf(); 'x' } catch(e) { e instanceof TypeError }"),
+        "true"
+    );
+    assert_eq!(
+        ev_str(
+            "[Object.getPrototypeOf(5) === Number.prototype,              Object.getPrototypeOf('s') === String.prototype,              Object.getPrototypeOf(true) === Boolean.prototype,              Object.getPrototypeOf(5n) === BigInt.prototype].join(',')"
+        ),
+        "true,true,true,true"
     );
     assert!(matches!(
         Engine::new().eval("var o = {}; Object.setPrototypeOf(o, o)"),
@@ -5390,8 +5430,10 @@ fn c17_annex_b() {
 fn c17_iterator_global() {
     for (src, want) in [
         ("typeof Iterator", "function"),
+        // Spec : `%ArrayIteratorPrototype%` entre l'objet et
+        // `%IteratorPrototype%` — deux remontées, pas une.
         (
-            "Iterator.prototype===Object.getPrototypeOf([].values())",
+            "Iterator.prototype===Object.getPrototypeOf(Object.getPrototypeOf([].values()))",
             "true",
         ),
         (
@@ -5414,6 +5456,59 @@ fn c17_iterator_global() {
     }
     assert!(Engine::new().eval("Iterator.from(5)").is_err());
     assert!(Engine::new().eval("new Iterator()").is_err());
+}
+
+#[test]
+fn iterator_concrete_protos() {
+    // github `ser.js` — le polyfill iterator-helpers résout
+    // `Iterator.prototype` par `getPrototypeOf(getPrototypeOf(iter))`
+    // puis `Object.assign(proto, {map, filter, …})`. Sans le niveau
+    // concret spec (`%ArrayIteratorPrototype%`…), la résolution
+    // tombait sur `Object.prototype` et l'assignation y installait
+    // des méthodes ÉNUMÉRABLES → chaque `for in` du site voyait
+    // `map`, puis `getOwnPropertyDescriptor(t,'map')` → undefined
+    // → `TypeError: cannot read `get` of Undefined` (zod `er`).
+    for (src, want) in [
+        // Chaque famille a son proto concret, chaîné sur
+        // `%IteratorPrototype%`.
+        (
+            "var p=Object.getPrototypeOf;[[][Symbol.iterator](),[].values(),new Uint8Array(2).keys()].every(i=>p(p(i))===Iterator.prototype)",
+            "true",
+        ),
+        (
+            "var p=Object.getPrototypeOf;[new Map().keys(),new Map().entries()].every(i=>p(p(i))===Iterator.prototype)",
+            "true",
+        ),
+        (
+            "var p=Object.getPrototypeOf;[new Set().values(),'x'[Symbol.iterator](),/x/g[Symbol.matchAll]('x'),new URLSearchParams('a=1').keys()].every(i=>p(p(i))===Iterator.prototype)",
+            "true",
+        ),
+        // Helpers : `%IteratorHelperPrototype%` pareil.
+        (
+            "var p=Object.getPrototypeOf;p(p([1].values().map(x=>x)))===Iterator.prototype",
+            "true",
+        ),
+        // `@@toStringTag` spec sur les protos concrets.
+        (
+            "var t=o=>Object.prototype.toString.call(o);[t(Object.getPrototypeOf([].values())),t(Object.getPrototypeOf(new Map().keys())),t(Object.getPrototypeOf('a'[Symbol.iterator]()))].join('|')",
+            "[object Array Iterator]|[object Map Iterator]|[object String Iterator]",
+        ),
+        // Le motif exact du polyfill : `ee()` ≠ `Object.prototype`
+        // — l'`Object.assign` n'y écrit plus.
+        (
+            "var ee=Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]()));ee===Iterator.prototype",
+            "true",
+        ),
+        (
+            "var ee=Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]()));Object.assign(ee,{__probe__:1});'__probe__' in Object.prototype",
+            "false",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    // `for in` sur un objet ordinaire ne voit aucune méthode
+    // héritée (le poison est contenu).
+    assert_eq!(ev_str("var o={a:1},s='';for(var k in o)s+=k;s"), "a");
 }
 
 #[test]

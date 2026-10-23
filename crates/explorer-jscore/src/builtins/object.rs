@@ -161,7 +161,18 @@ pub(crate) fn object_get_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
             }
             Ok(e.heap.obj(id).map_or(Value::Null, |o| o.proto))
         }
-        _ => Ok(Value::Null),
+        // Spec `ToObject` : `null`/`undefined` → `TypeError` ; les
+        // primitives sont wrappées et remontent leur proto (github
+        // `behaviors.js` — `getPrototypeOf(elt.delegate)` avec
+        // `delegate` null : l'erreur doit surgir ici, pas au
+        // `.requestErrored` en aval).
+        Value::Null | Value::Undefined | Value::Hole => {
+            Err(e.type_error("Cannot convert undefined or null to object"))
+        }
+        Value::Num(_) => Ok(Value::Obj(e.protos.number)),
+        Value::Str(_) => Ok(Value::Obj(e.protos.string)),
+        Value::Bool(_) => Ok(Value::Obj(e.protos.boolean)),
+        Value::Big(_) => Ok(Value::Obj(e.protos.bigint)),
     }
 }
 

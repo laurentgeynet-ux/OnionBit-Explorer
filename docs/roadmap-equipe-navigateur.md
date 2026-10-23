@@ -3274,6 +3274,27 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   réelle (artefact de fixture,
   borne honnête du miroir).
 
+- [x] **JS-C62. Census github.com, reliquat aval —
+  trois gaps mesurés** (`jprobe` réel, repro isolé
+  avant fix — 2 erreurs → 1) : `o.m?.()` préserve
+  le récepteur (membre plié dans la tête `Chain`
+  migré au premier `?.` — polyfill popover
+  `e.matches?.()`) ; **prototypes itérateurs
+  concrets** `%Array/Map/Set/String/RegExpString/
+  URLSearchParams Iterator%` + `%IteratorHelper
+  Prototype%` (cause racine du `get` of Undefined
+  zod — le polyfill ser.js résolvait
+  `Iterator.prototype` en `Object.prototype` et y
+  installait `map`/`filter` énumérables via
+  `Object.assign`, poison `for in` global) ;
+  `Object.getPrototypeOf` `ToObject` spec
+  (nullish → `TypeError`, primitives → proto).
+  Résidu honnête : `turbo-frame.delegate` —
+  machinery custom-elements manquante (backlog).
+  Tests : `iterator_concrete_protos`, `?.()`
+  récepteur (lang + dom), `getPrototypeOf`
+  `ToObject`.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

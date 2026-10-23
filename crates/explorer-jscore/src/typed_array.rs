@@ -1438,13 +1438,13 @@ fn ta_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value
 fn ta_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let (_, _, _, len) = ta_view(e, this)?;
     let items = (0..len).map(|i| Value::Num(i as f64)).collect();
-    Ok(crate::collections::iter_obj(e, items))
+    Ok(crate::collections::iter_obj(e, items, e.protos.array_iter))
 }
 
 /// `ta.values()` / `[Symbol.iterator]` — itérateur d'éléments.
 fn ta_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let (_, vals) = ta_vals(e, this)?;
-    Ok(crate::collections::iter_obj(e, vals))
+    Ok(crate::collections::iter_obj(e, vals, e.protos.array_iter))
 }
 
 /// `ta.entries()` — itérateur `[i, v]`.
@@ -1454,7 +1454,7 @@ fn ta_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     for (i, v) in vals.iter().enumerate() {
         items.push(e.new_array(vec![Value::Num(i as f64), *v]));
     }
-    Ok(crate::collections::iter_obj(e, items))
+    Ok(crate::collections::iter_obj(e, items, e.protos.array_iter))
 }
 
 // ------------------------------------------------------------------

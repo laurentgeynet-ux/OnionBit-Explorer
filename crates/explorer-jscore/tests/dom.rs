@@ -1911,6 +1911,18 @@ fn event_dispatche_surface_honnete() {
         ),
         "function|true|false|BODY|TypeError"
     );
+    // `e.matches?.(sel)` — appel optionnel sur membre : le
+    // récepteur `e` est conservé (trigger réel github.com :
+    // `t.find(e=>e.matches?.("…"))` dans le polyfill popover,
+    // `t` = composedPath → éléments, #document et window).
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var p=document.getElementById('main');             var r=p.matches?.('#main')+'|'+p.matches?.('span')+'|'+             ([p,document.body,document,window]             .find(e=>e.matches?.('body'))===document.body)+'|'+             ([window,document].find(e=>e.matches?.('x')))",
+            "r"
+        ),
+        "true|false|true|undefined"
+    );
 }
 
 #[test]

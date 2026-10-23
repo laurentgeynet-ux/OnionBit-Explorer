@@ -226,7 +226,7 @@ pub(crate) fn array_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResul
     put_elems(e, id, elems.clone());
     // L'itérateur produit `undefined` pour les trous (spec `Get`).
     let vals: Vec<Value> = elems.iter().map(|v| v.unhole()).collect();
-    Ok(crate::collections::iter_obj(e, vals))
+    Ok(crate::collections::iter_obj(e, vals, e.protos.array_iter))
 }
 
 pub(crate) fn array_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -235,6 +235,7 @@ pub(crate) fn array_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<
     Ok(crate::collections::iter_obj(
         e,
         (0..n).map(|i| Value::Num(i as f64)).collect(),
+        e.protos.array_iter,
     ))
 }
 
@@ -246,7 +247,7 @@ pub(crate) fn array_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResu
         items.push(e.new_array(vec![Value::Num(i as f64), v.unhole()]));
     }
     put_elems(e, id, elems);
-    Ok(crate::collections::iter_obj(e, items))
+    Ok(crate::collections::iter_obj(e, items, e.protos.array_iter))
 }
 
 // ES2023 non-mutating variants.
@@ -404,7 +405,7 @@ pub(crate) fn string_code_point_at(e: &mut Engine, this: Value, args: &[Value]) 
 pub(crate) fn string_iterator(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this)?;
     let items: Vec<Value> = s.chars().map(|c| e.str_val(c.to_string())).collect();
-    Ok(crate::collections::iter_obj(e, items))
+    Ok(crate::collections::iter_obj(e, items, e.protos.string_iter))
 }
 
 /// `matchAll(re)` — requires the `g` flag (spec `TypeError`); yields
