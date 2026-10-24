@@ -508,6 +508,98 @@ fn media_query_prefers_color_scheme() {
 }
 
 #[test]
+fn media_query_scripting() {
+    // R-93 — MQ5 `scripting` : `enabled`/`none` contre
+    // `env.scripting`, feature nue = « pas none », et
+    // `initial-only` jamais rapporté par notre moteur.
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@media (scripting: enabled) { div { color: red } } \
+         @media (scripting: none) { p { margin-top: 9px } } \
+         @media (scripting) { div { display: none } } \
+         @media (scripting: initial-only) { p { margin-bottom: 9px } }",
+        Origin::Author,
+    );
+    // scripting off (défaut) : enabled faux, none vrai,
+    // nue fausse, initial-only faux.
+    let s = e.compute(&f.dom, f.div, &env());
+    assert_eq!(s.get("color"), None, "off : enabled faux");
+    assert_eq!(s.get("display"), Some("block"), "off : nue fausse");
+    assert_eq!(
+        e.compute(&f.dom, f.p, &env()).get("margin-top"),
+        Some("9px"),
+        "off : none vrai"
+    );
+    assert_eq!(
+        e.compute(&f.dom, f.p, &env()).get("margin-bottom"),
+        Some("1em"),
+        "off : initial-only faux → retombe sur l'UA"
+    );
+    let on = StyleEnv {
+        scripting: true,
+        ..env()
+    };
+    let s = e.compute(&f.dom, f.div, &on);
+    assert_eq!(s.get("color"), Some("red"), "on : enabled vrai");
+    assert_eq!(s.get("display"), Some("none"), "on : nue vraie");
+    let s = e.compute(&f.dom, f.p, &on);
+    assert_eq!(
+        s.get("margin-top"),
+        Some("1em"),
+        "on : none retombe sur l'UA"
+    );
+    assert_eq!(
+        s.get("margin-bottom"),
+        Some("1em"),
+        "on : initial-only jamais vrai"
+    );
+}
+
+#[test]
+fn noscript_masque_sous_scripting() {
+    // R-93 — la feuille UA masque `<noscript>` quand
+    // `env.scripting` (fuite de rawtext mesurée sur wikipedia,
+    // issue #22) ; sans scripting il reste un sous-arbre
+    // rendu (comportement historique).
+    let dom = TreeBuilder::parse("<body><noscript><p>x</p></noscript></body>");
+    let noscript = {
+        let html = dom
+            .children(dom.document())
+            .unwrap_or_default()
+            .into_iter()
+            .find(|&c| dom.tag_name(c).is_ok_and(|t| t == "html"))
+            .expect("html présent");
+        let body = dom
+            .children(html)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|&b| dom.tag_name(b).is_ok_and(|t| t == "body"))
+            .expect("body présent");
+        dom.children(body)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|&n| dom.tag_name(n).is_ok_and(|t| t == "noscript"))
+            .expect("noscript présent")
+    };
+    let e = StyleEngine::new();
+    assert_eq!(
+        e.compute(&dom, noscript, &env()).get("display"),
+        None,
+        "sans scripting : noscript reste à sa valeur initiale (UA ne masque pas)"
+    );
+    let on = StyleEnv {
+        scripting: true,
+        ..env()
+    };
+    assert_eq!(
+        e.compute(&dom, noscript, &on).get("display"),
+        Some("none"),
+        "sous scripting : UA masque noscript"
+    );
+}
+
+#[test]
 fn color_scheme_dark_defauts_ua() {
     // R-59 — `color-scheme` sur la racine arbitre les défauts
     // UA sombres (canvas + texte) : `dark` utilisé quand env

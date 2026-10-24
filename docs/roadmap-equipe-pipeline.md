@@ -2456,6 +2456,28 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (design tokens `--Brand-*`, `--Font-*`…) fonctionne
   désormais — les vars minuscules (`--base-size-*`) sont
   inchangées.
+- [x] **R-93. `(scripting)` MQ5 + `<noscript>` UA** (re-baseline
+  post-train CAP → vol d'étalonnage, issue #22). CAP-155 a
+  rendu `noscript` rawtext sous scripting — sa feuille UA
+  n'avait aucun moyen de le masquer : le texte brut peignait
+  (mesuré wikipedia : `CentralAutoLogin` en clair en bas de
+  page ; github : 15 img ctfassets perdues — mais attribution
+  dominante là = matcher CSP path-source, issue #21 NAV).
+  MQ5 définit la media feature pour exactement ça : `StyleEnv`
+  gagne `scripting: bool` (additif, défaut `false` = `none`
+  = comportement historique — même motif que `color_scheme`
+  en R-59). `condition_matches` évalue `scripting`
+  (`enabled`/`none`/feature nue = « pas none ») ; `initial-only`
+  jamais rapporté — nos scripts tournent aussi après le
+  chargement. UA sheet : `@media (scripting) { noscript {
+  display: none } }` — sous scripting l'arbre rawtext
+  (unique enfant texte) ne peint plus ; sans scripting le
+  sous-arbre reste rendu (le seul `noscript` utile). Filage
+  NAV côté `viewport_env` (`apply.rs`) : `env.scripting =
+  ctx.scripting` — une ligne, journalée. Régressions :
+  `media_query_scripting` (enabled/none/nue/initial-only
+  sur les deux mondes), `noscript_masque_sous_scripting`
+  (UA ne masque pas sans scripting, masque sous).
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

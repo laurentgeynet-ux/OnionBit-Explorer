@@ -56,6 +56,14 @@ pub struct StyleEnv {
     pub font_size_base: f32,
     /// Schéma de couleurs préféré (R-59).
     pub color_scheme: ColorScheme,
+    /// « scripting flag » pour la media feature MQ5
+    /// `scripting` (R-93) : `true` = un moteur JS exécute le
+    /// document → `(scripting: enabled)` ; `false` =
+    /// `none`. `initial-only` n'est jamais rapporté (les
+    /// scripts tournent aussi après le chargement). La feuille
+    /// UA s'en sert pour masquer `<noscript>` — spec HTML :
+    /// son contenu ne doit s'afficher que sans scripting.
+    pub scripting: bool,
 }
 
 impl Default for StyleEnv {
@@ -66,6 +74,7 @@ impl Default for StyleEnv {
             height_px: 768,
             font_size_base: 16.0,
             color_scheme: ColorScheme::default(),
+            scripting: false,
         }
     }
 }
@@ -168,6 +177,18 @@ fn condition_matches(env: &StyleEnv, name: &str, value: &str) -> bool {
             "" => true,
             "light" => env.color_scheme == ColorScheme::Light,
             "dark" => env.color_scheme == ColorScheme::Dark,
+            _ => false,
+        },
+        // R-93 — MQ5 `scripting` (Media Queries 5 §scripting) :
+        // `enabled` = un moteur JS exécute le document (env
+        // `scripting`) ; `none` = aucun. `initial-only`
+        // n'est jamais rapporté par notre moteur — les
+        // scripts tournent aussi après le chargement → toujours
+        // faux, retombe sur `_`. Feature nue `(scripting)`
+        // = « pas none ».
+        "scripting" => match value.trim() {
+            "" | "enabled" => env.scripting,
+            "none" => !env.scripting,
             _ => false,
         },
         // Feature inconnue → query fausse (spec : `not all`).
@@ -2015,9 +2036,11 @@ pub fn initial_value(name: &str) -> Option<&'static str> {
 /// parsée par notre propre pipeline (dogfooding). Reprend
 /// les défauts classiques de la spec HTML Rendering.
 ///
-/// `noscript` n'est **pas** masqué : scripting désactivé
-/// (périmètre domaine) ⇒ son contenu est un vrai sous-arbre
-/// rendu. `noframes`/`noembed` restent visibles pour la même
+/// `noscript` est masqué **sous scripting** (R-93 — MQ5
+/// `(scripting)`, HTML Rendering : son contenu ne s'affiche
+/// que sans moteur de script). Sans scripting il reste un
+/// vrai sous-arbre rendu — comportement historique.
+/// `noframes`/`noembed` restent visibles pour la même
 /// raison (pas de frames ni de plugins — leur contenu EST le
 /// repli). `center` porte `-webkit-center` : centre aussi les
 /// descendants **bloc** (spec « align descendants to the
@@ -2044,6 +2067,7 @@ frame { display: none }
 details:not([open]) > :not(summary) { display: none }
 dialog:not([open]) { display: none }
 audio:not([controls]) { display: none }
+@media (scripting) { noscript { display: none } }
 li { display: list-item }
 ul, menu, dir { list-style-type: disc }
 ul ul, ol ul, menu ul, dir ul { list-style-type: circle }
