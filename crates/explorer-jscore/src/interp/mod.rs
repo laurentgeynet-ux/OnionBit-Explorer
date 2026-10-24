@@ -862,6 +862,7 @@ impl Engine {
             &mut self.hooks.scroll_restore_manual,
             &mut ctx.scroll_restore_manual,
         );
+        swap(&mut self.hooks.ready_state, &mut ctx.ready_state);
         swap(&mut self.hooks.viewport, &mut ctx.viewport);
     }
 
@@ -1081,6 +1082,28 @@ impl Engine {
         let _ = self.fire_event_listeners(Value::Obj(ev));
         if ctx != prev {
             self.switch_to(prev);
+        }
+    }
+
+    /// `document.readyState` du contexte `ctx` (CAP-170) —
+    /// posé par l'embedder au fil du cycle de vie du document
+    /// (`"loading"` → `"interactive"` avant `DOMContentLoaded`
+    /// → `"complete"` après `load` ; le `readystatechange` est
+    /// dispatché par l'appelant via `dispatch_event_ctx`, même
+    /// voie que `DOMContentLoaded`/`load`). `ctx` garé → le
+    /// champ garé est écrit ; valeurs hors enum ignorées
+    /// (harnais qui balancerait n'importe quoi).
+    pub fn set_ready_state(&mut self, ctx: crate::context::CtxId, state: &str) {
+        let v: &'static str = match state {
+            "loading" => "loading",
+            "interactive" => "interactive",
+            "complete" => "complete",
+            _ => return,
+        };
+        if ctx == self.cur_ctx {
+            self.hooks.ready_state = v;
+        } else if let Some(p) = self.parked.get_mut(&ctx) {
+            p.ready_state = v;
         }
     }
 

@@ -1315,6 +1315,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-170 — `document.readyState` + `readystatechange`**
+  (`explorer-jscore`/`explorer-js`/`explorer-core` —
+  cap « web réel sécurisé » ; numéro officiel
+  attribué à l'intégration) : le cycle de vie
+  document est réel — `loading` pendant l'éval des
+  scripts, `interactive` avant `DOMContentLoaded`,
+  `complete` avant `load` — avec `readystatechange`
+  dispatché à chaque transition (spec). Fini le
+  `readyState` codé `"complete"` en dur ; chaque
+  contexte `<iframe>` suit son propre cycle
+  (`hooks.ready_state` garé par `BrowsingContext`).
+  Plomberie additive : `JsEngine::set_ready_state`
+  → `Cmd::SetReadyState` → `Engine::set_ready_state`
+  (ctx courant ou garé, valeurs hors enum
+  ignorées). Bornes : scripts `defer` lisent
+  `loading` (transition posée au commit, après
+  leur éval — écart spec assumé) ;
+  `readystatechange` enfant non propagé. 2 tests
+  session.
 - **CAP-169 — `<script>` inséré dynamiquement**
   (`explorer-jscore`/`explorer-js`/`explorer-core` —
   cap « web réel sécurisé » ; numéro officiel

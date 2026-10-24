@@ -368,8 +368,12 @@ impl Session {
             for src in &fp.scripts {
                 self.eval_ctx_or_report(tab, eng, ctx, src);
             }
-            // Cycle de vie du sous-document : DCL après ses
-            // scripts (le `load` enfant est tiré au tail).
+            // Cycle de vie du sous-document : `readyState`
+            // « interactive » + `readystatechange` puis DCL
+            // après ses scripts (CAP-170 ; le `load` enfant
+            // est tiré au tail).
+            eng.set_ready_state(ctx, "interactive");
+            let _ = eng.dispatch_event_ctx(ctx, "readystatechange", &[]);
             let _ = eng.dispatch_event_ctx(ctx, "DOMContentLoaded", &[]);
             fcs.push(FrameCtx {
                 ctx,
@@ -434,6 +438,12 @@ impl Session {
                 let Some(eng) = entry.js.as_mut() else {
                     return;
                 };
+                // `complete` + `readystatechange` dans le realm
+                // enfant **avant** son `load` (CAP-170, spec —
+                // `readyState === "complete"` dans les
+                // listeners `load`).
+                eng.set_ready_state(ctx, "complete");
+                let _ = eng.dispatch_event_ctx(ctx, "readystatechange", &[]);
                 let _ = eng.dispatch_event_ctx(ctx, "load", &[]);
             }
             // `onload` sur l'élément <iframe> — le chemin est

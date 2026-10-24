@@ -3359,6 +3359,31 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-170. `document.readyState` +
+  `readystatechange`** — *(numéro officiel attribué
+  à l'intégration)* : le cycle de vie document est
+  réel (`loading` → `interactive` → `complete`),
+  fini le `readyState` codé `"complete"` en dur —
+  les pages qui attendent `interactive`/`complete`
+  (bootstrap de Docs/Gmail, mesures de perf,
+  defer maison) lisent l'état vrai et reçoivent
+  `readystatechange` à chaque transition (ordre
+  spec : `interactive` avant `DOMContentLoaded`,
+  `complete` avant `load`). `hooks.ready_state`
+  document-local garé par `BrowsingContext` —
+  chaque `<iframe>` suit son propre cycle.
+  `JsEngine::set_ready_state` additif (défaut
+  no-op) ; le `readystatechange` suit la voie
+  `dispatch_event_ctx`/`dispatch_doc_event`
+  (mutations des listeners resynchronisées).
+  Bornes documentées : les scripts `defer` courent
+  avant la transition `interactive` (ils lisent
+  `loading`, écart spec assumé — notre commit
+  n'a pas encore de frontière parse/defer
+  observable) ; `readystatechange` d'un `<iframe>`
+  ne se propage pas au parent. 2 tests session
+  (`document_ready_state_*`).
+
 - [x] **CAP-169. `<script>` inséré dynamiquement** —
   *(numéro officiel attribué à l'intégration)* :
   `document.createElement('script')` + insertion

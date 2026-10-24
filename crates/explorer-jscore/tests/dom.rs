@@ -1452,7 +1452,11 @@ fn collections_and_document_props() {
         ),
         "A"
     );
-    assert_eq!(ev("document.readyState"), "complete");
+    // CAP-170 : `readyState` reflète le cycle de vie —
+    // sans embedder qui pousse les transitions, le document
+    // reste honnêtement `loading` (plus de `"complete"`
+    // codé en dur).
+    assert_eq!(ev("document.readyState"), "loading");
     assert_eq!(ev("document.head.tagName"), "HEAD");
     assert_eq!(ev("document.body.tagName"), "BODY");
 }
@@ -3665,4 +3669,23 @@ fn document_current_script() {
     assert_eq!(evf(&mut e, "document.currentScript"), "null");
     // Éval ordinaire (pas d'élément porteur) : `null`.
     assert_eq!(evf(&mut e, "document.currentScript === null"), "true");
+}
+
+/// CAP-170 — `document.readyState` : `loading` par défaut
+/// (sans embedder), transitions pilotées par
+/// `Engine::set_ready_state`, valeurs hors enum ignorées.
+#[test]
+fn document_ready_state_transitions() {
+    let mut e = engine_with("<p>x</p>");
+    let read = |e: &mut Engine| match e.eval("document.readyState") {
+        Ok(v) => e.describe(v),
+        Err(err) => panic!("readyState -> {err}"),
+    };
+    assert_eq!(read(&mut e), "loading");
+    e.set_ready_state(0, "interactive");
+    assert_eq!(read(&mut e), "interactive");
+    e.set_ready_state(0, "complete");
+    assert_eq!(read(&mut e), "complete");
+    e.set_ready_state(0, "bogus");
+    assert_eq!(read(&mut e), "complete");
 }

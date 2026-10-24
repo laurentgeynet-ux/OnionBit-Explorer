@@ -257,6 +257,16 @@ impl Session {
         // voie que toute mutation script (le drain n'est pas
         // forcé ici : sous hôte partagé il tournerait sous
         // verrou, exactement ce que l'étape 55h a retiré).
+        // CAP-170 : `readyState` « interactive » +
+        // `readystatechange` juste avant `DOMContentLoaded`
+        // (ordre spec — les scripts de la page ont déjà couru,
+        // les sous-ressources peuvent encore charger).
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            if let Some(eng) = entry.js.as_mut() {
+                eng.set_ready_state(explorer_js::JS_CTX_TOP, "interactive");
+            }
+        }
+        self.dispatch_doc_event(tab, "readystatechange");
         self.dispatch_doc_event(tab, "DOMContentLoaded");
         // `Navigated` seulement si le document final est bien
         // celui demandé : une redirection script a déjà émis
@@ -285,6 +295,16 @@ impl Session {
         // le `load` de la page attend ses `<iframe>`), puis
         // `load`/`onload` sur chaque élément porteur.
         self.frame_ctx_load_events(tab);
+        // CAP-170 : `readyState` « complete » +
+        // `readystatechange` **avant** `load` (spec — dans un
+        // listener `load`, `document.readyState ===
+        // "complete"`).
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            if let Some(eng) = entry.js.as_mut() {
+                eng.set_ready_state(explorer_js::JS_CTX_TOP, "complete");
+            }
+        }
+        self.dispatch_doc_event(tab, "readystatechange");
         // `load` : tout est commis (sous-ressources, peinture,
         // historique) — dernier événement du cycle de vie.
         self.dispatch_doc_event(tab, "load");

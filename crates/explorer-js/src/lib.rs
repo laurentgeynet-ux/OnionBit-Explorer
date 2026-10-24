@@ -675,6 +675,15 @@ pub trait JsEngine: Send {
     /// hash des SPA en vivent). Défaut : no-op.
     fn fire_hashchange(&mut self, _ctx: JsCtxId, _old: &str, _new: &str) {}
 
+    /// Pose `document.readyState` du contexte `ctx`
+    /// (CAP-170) — la session appelle avec
+    /// `"interactive"` avant `DOMContentLoaded` puis
+    /// `"complete"` après `load` (le `readystatechange`
+    /// est dispatché par `dispatch_event_ctx`, même voie
+    /// que les autres events de cycle de vie). Défaut :
+    /// no-op.
+    fn set_ready_state(&mut self, _ctx: JsCtxId, _state: &str) {}
+
     /// Viewport de la session en px CSS (CAP-161) — posé
     /// **avant** `install_dom` : `innerWidth`/`screen.*` et
     /// les requêtes `matchMedia` `(min-/max-)width`/`height`/
@@ -1165,6 +1174,11 @@ enum Cmd {
         old: String,
         new: String,
     },
+    /// `document.readyState` du contexte `ctx` (CAP-170).
+    SetReadyState {
+        ctx: JsCtxId,
+        state: String,
+    },
     SetMediaEnv {
         env: explorer_jscore::MediaEnv,
     },
@@ -1506,6 +1520,9 @@ impl JscoreEngine {
                 }
                 Cmd::FireHashchange { ctx, old, new } => {
                     eng.fire_hashchange(ctx, &old, &new);
+                }
+                Cmd::SetReadyState { ctx, state } => {
+                    eng.set_ready_state(ctx, &state);
                 }
                 Cmd::SetMediaEnv { env } => {
                     eng.set_media_env(env);
@@ -2060,6 +2077,13 @@ impl JsEngine for JscoreEngine {
             ctx,
             old: old.to_string(),
             new: new.to_string(),
+        });
+    }
+
+    fn set_ready_state(&mut self, ctx: JsCtxId, state: &str) {
+        let _ = self.tx.send(Cmd::SetReadyState {
+            ctx,
+            state: state.to_string(),
         });
     }
 

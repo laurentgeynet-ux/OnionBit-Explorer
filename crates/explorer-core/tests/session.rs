@@ -11755,3 +11755,53 @@ async fn dyn_script_inner_html_inert() {
         "script innerHTML doit rester inerte (spec)"
     );
 }
+
+/// CAP-170 — `document.readyState` : `loading` pendant
+/// l'éval des scripts, `interactive` avant DCL,
+/// `complete` après `load` — `readystatechange`
+/// dispatché à chaque transition (spec).
+#[tokio::test(flavor = "multi_thread")]
+async fn document_ready_state_lifecycle() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><script>         var x=document.getElementById('x');         x.textContent='run:'+document.readyState;         document.addEventListener('readystatechange',function(){x.textContent+='|'+document.readyState;});         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    let dump = s.dom_dump(a).unwrap();
+    assert!(
+        dump.contains("run:loading|interactive|complete"),
+        "cycle complet observable : {dump}"
+    );
+}
+
+/// `readyState` d'un document enfant suit son propre
+/// cycle (défaut `loading` tant que la session n'a pas
+/// poussé ses transitions).
+#[tokio::test(flavor = "multi_thread")]
+async fn document_ready_state_child_ctx() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div>         <iframe src='/f'></iframe><script>         var x=document.getElementById('x');         document.addEventListener('readystatechange',function(){x.textContent+='|'+document.readyState;});         </script></body></html>",
+    );
+    t.route(
+        "/f",
+        200,
+        "<html><body><script>document.title='t:'+document.readyState;</script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    let dump = s.dom_dump(a).unwrap();
+    assert!(
+        dump.contains("|interactive|complete"),
+        "interactive avant DCL, complete avant load : {dump}"
+    );
+}

@@ -207,6 +207,13 @@ pub(crate) struct BrowserHooks {
     /// courante sans entrée nouvelle (CAP-152). Absent →
     /// `navigate(page_url)` (comportement historique).
     pub navigate_reload: Option<Rc<dyn Fn()>>,
+    /// `document.readyState` (CAP-170) — `"loading"`/
+    /// `"interactive"`/`"complete"` du document, posé par
+    /// l'embedder via [`Engine::set_ready_state`] au rythme
+    /// de son cycle de vie (spec : `interactive` avant
+    /// `DOMContentLoaded`, `complete` après `load`).
+    /// Document-local (swappé au `switch_to`).
+    pub ready_state: &'static str,
     /// Viewport size in CSS px — backs `innerWidth`/`innerHeight`
     /// and `screen.width`/`height`.
     pub viewport: (u32, u32),
@@ -2091,9 +2098,16 @@ impl Host for DocumentHost {
                     None => Value::Null,
                 }))
             }
-            // Parsing is done when scripts run — `complete` is the
-            // only state we can observe (no `loading`/`interactive`).
-            "readyState" => Ok(Some(e.str_val("complete"))),
+            // `document.readyState` (CAP-170) — cycle de vie
+            // piloté par l'embedder : `""` (jamais posé) =
+            // `"loading"` (le miroir est installé en cours de
+            // parse) ; transitions `interactive`/`complete`
+            // via `Engine::set_ready_state`.
+            "readyState" => Ok(Some(e.str_val(if e.hooks.ready_state.is_empty() {
+                "loading"
+            } else {
+                e.hooks.ready_state
+            }))),
             // `document.fonts` — FontFaceSet stub : pas de pipeline
             // de fontes web, `load()`/`ready` résolvent toujours.
             "fonts" => Ok(Some(e.new_host_object(Rc::new(FontFaceSetHost)))),

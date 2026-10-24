@@ -140,6 +140,9 @@ pub(crate) struct BrowsingContext {
     /// (CAP-166) — document-local, garé/restauré au
     /// `switch_to`.
     pub scroll_restore_manual: bool,
+    /// `document.readyState` du contexte (CAP-170) —
+    /// document-local, garé/restauré au `switch_to`.
+    pub ready_state: &'static str,
     pub viewport: (u32, u32),
 }
 
@@ -372,6 +375,7 @@ impl BrowsingContext {
             history_state: None,
             win_name: String::new(),
             scroll_restore_manual: false,
+            ready_state: "loading",
             viewport: (0, 0),
         }
     }
