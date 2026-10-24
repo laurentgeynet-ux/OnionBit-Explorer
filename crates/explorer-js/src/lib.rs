@@ -519,6 +519,23 @@ pub trait JsEngine: Send {
         None
     }
 
+    /// [`Self::context_new`] explicitement sous le contexte
+    /// `parent` (CAP-171) : un `<iframe>` inséré **dans un
+    /// cadre enfant** doit voir `frame_ord` résolu dans le
+    /// miroir de SON document parent et son realm rattaché à
+    /// ce parent (`window.parent` de l'enfant = son
+    /// émetteur) — sinon l'ordre serait lu dans le document
+    /// courant. Défaut : [`Self::context_new`] (moteur
+    /// mono-contexte ou sans ordre par parent).
+    fn context_new_in(
+        &mut self,
+        _parent: JsCtxId,
+        url: &str,
+        frame_ord: Option<u32>,
+    ) -> Option<JsCtxId> {
+        self.context_new(url, frame_ord)
+    }
+
     /// Détruit un contexte enfant (étape 134) — page quittée
     /// **hors bfcache** ou cadre supprimé : `frames[]` du
     /// parent rétrécit, `postMessage` vers lui devient no-op.
@@ -583,6 +600,23 @@ pub trait JsEngine: Send {
     /// `None` : refus réseau/politique → `error`. Défaut :
     /// no-op.
     fn deliver_dyn_script(&mut self, _ctx: JsCtxId, _seq: u64, _body: Option<String>) {}
+
+    /// Draine les `<iframe>` insérés dynamiquement (ou
+    /// re-navigués par `src=`/`srcdoc=` — CAP-171) : la
+    /// session fetch le `src` (CSP `frame-src`, XFO,
+    /// cookies/partition) ou parse le `srcdoc`, crée le
+    /// sous-contexte (`context_new` + `install_dom_ctx`)
+    /// puis livre via [`Self::deliver_dyn_frame`]. Défaut :
+    /// rien (moteur sans DOM miroir dynamique).
+    fn drain_dyn_frames(&mut self) -> Vec<explorer_jscore::DynFrameReq> {
+        Vec::new()
+    }
+
+    /// Livre le résultat d'un `<iframe>` dynamique au moteur
+    /// (CAP-171) — `true` : sous-contexte créé, `load` tiré
+    /// sur l'élément ; `false` : refus réseau/politique →
+    /// `error`. Défaut : no-op.
+    fn deliver_dyn_frame(&mut self, _ctx: JsCtxId, _seq: u64, _ok: bool) {}
 
     /// Éval d'un élément `<script>` classique (CAP-168) :
     /// `script_ord` = ordinal de l'élément parmi les
@@ -1006,6 +1040,9 @@ pub use explorer_jscore::MediaEnv;
 pub use explorer_jscore::{is_bare_specifier, rewrite_bare_specifier};
 // JS-C77 — `Request.mode`/`Request.credentials` transportés par
 // `NetRequest::Fetch` (ré-export : le type reste unique).
+/// Réémis : requête de `<iframe>` dynamique (CAP-171) —
+/// drainée par [`JsEngine::drain_dyn_frames`].
+pub use explorer_jscore::DynFrameReq;
 /// Réémis : requête de `<script>` dynamique (CAP-169) —
 /// drainée par [`JsEngine::drain_dyn_scripts`].
 pub use explorer_jscore::DynScriptReq;
@@ -1281,6 +1318,16 @@ enum Cmd {
         frame_ord: Option<u32>,
         tx: Sender<Option<JsCtxId>>,
     },
+    /// CAP-171 — `context_new` sous un parent explicite :
+    /// `frame_ord` est résolu dans le miroir du contexte
+    /// `parent` (un iframe inséré dans un sous-contexte ne
+    /// lit jamais le miroir du top-level).
+    ContextNewIn {
+        parent: JsCtxId,
+        url: String,
+        frame_ord: Option<u32>,
+        tx: Sender<Option<JsCtxId>>,
+    },
     ContextDestroy {
         ctx: JsCtxId,
     },
@@ -1321,6 +1368,14 @@ enum Cmd {
         ctx: JsCtxId,
         seq: u64,
         body: Option<String>,
+    },
+    DrainDynFrames {
+        tx: Sender<Vec<explorer_jscore::DynFrameReq>>,
+    },
+    DeliverDynFrame {
+        ctx: JsCtxId,
+        seq: u64,
+        ok: bool,
     },
     DispatchCtx {
         ctx: JsCtxId,
@@ -1685,6 +1740,47 @@ impl JscoreEngine {
                         return;
                     }
                 }
+                Cmd::ContextNewIn {
+                    parent,
+                    url,
+                    frame_ord,
+                    tx,
+                } => {
+                    // Même résolution `frame_ord → frame_node`
+                    // que `ContextNew` mais dans le miroir du
+                    // **parent explicite** (CAP-171 — cadre
+                    // inséré dans un sous-contexte) ; le switch
+                    // rattache aussi le realm au bon parent
+                    // (`context_new` prend `cur_ctx`).
+                    let pdom = if parent == JS_CTX_TOP {
+                        jsd.as_ref()
+                    } else {
+                        ctx_doms.get(&parent)
+                    };
+                    let frame = pdom.and_then(|d| {
+                        frame_ord.and_then(|o| {
+                            d.borrow()
+                                .nodes
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, n)| n.tag == "iframe")
+                                .nth(o as usize)
+                                .map(|(i, _)| {
+                                    (
+                                        std::rc::Rc::as_ptr(d) as usize,
+                                        u32::try_from(i).unwrap_or(u32::MAX),
+                                    )
+                                })
+                        })
+                    });
+                    let prev = eng.current_context();
+                    eng.context_switch(parent);
+                    let id = eng.context_new(&url, frame);
+                    eng.context_switch(prev);
+                    if tx.send(Some(id)).is_err() {
+                        return;
+                    }
+                }
                 Cmd::ContextDestroy { ctx } => {
                     eng.context_destroy(ctx);
                     ctx_doms.remove(&ctx);
@@ -1784,6 +1880,19 @@ impl JscoreEngine {
                     eng.context_switch(ctx);
                     if eng.current_context() == ctx {
                         eng.deliver_dyn_script(seq, body.as_deref());
+                    }
+                    eng.context_switch(prev);
+                }
+                Cmd::DrainDynFrames { tx } => {
+                    if tx.send(eng.drain_dyn_frames()).is_err() {
+                        return;
+                    }
+                }
+                Cmd::DeliverDynFrame { ctx, seq, ok } => {
+                    let prev = eng.current_context();
+                    eng.context_switch(ctx);
+                    if eng.current_context() == ctx {
+                        eng.deliver_dyn_frame(seq, ok);
                     }
                     eng.context_switch(prev);
                 }
@@ -1912,6 +2021,28 @@ impl JsEngine for JscoreEngine {
         rx.recv().ok().flatten()
     }
 
+    fn context_new_in(
+        &mut self,
+        parent: JsCtxId,
+        url: &str,
+        frame_ord: Option<u32>,
+    ) -> Option<JsCtxId> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::ContextNewIn {
+                parent,
+                url: url.to_string(),
+                frame_ord,
+                tx,
+            })
+            .is_err()
+        {
+            return None;
+        }
+        rx.recv().ok().flatten()
+    }
+
     fn context_destroy(&mut self, ctx: JsCtxId) {
         let _ = self.tx.send(Cmd::ContextDestroy { ctx });
     }
@@ -1989,6 +2120,18 @@ impl JsEngine for JscoreEngine {
 
     fn deliver_dyn_script(&mut self, ctx: JsCtxId, seq: u64, body: Option<String>) {
         let _ = self.tx.send(Cmd::DeliverDynScript { ctx, seq, body });
+    }
+
+    fn drain_dyn_frames(&mut self) -> Vec<explorer_jscore::DynFrameReq> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainDynFrames { tx }).is_err() {
+            return Vec::new();
+        }
+        rx.recv().unwrap_or_default()
+    }
+
+    fn deliver_dyn_frame(&mut self, ctx: JsCtxId, seq: u64, ok: bool) {
+        let _ = self.tx.send(Cmd::DeliverDynFrame { ctx, seq, ok });
     }
 
     fn dispatch_event_ctx(

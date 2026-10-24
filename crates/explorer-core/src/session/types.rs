@@ -625,6 +625,13 @@ pub(crate) struct FrameCtx {
     /// cookies `SameSite` jamais same-site sur ses
     /// `NetRequest`.
     pub(crate) opaque: bool,
+    /// `readystatechange`/`load` déjà tirés dans le realm
+    /// (CAP-171 : un `<iframe>` dynamique installe son
+    /// contexte et tire son cycle complet à la réponse — un
+    /// script parseur peut le faire **avant**
+    /// `frame_ctx_load_events` du même commit, qui ne doit
+    /// pas rejouer le cycle).
+    pub(crate) load_fired: bool,
 }
 
 /// `Cookie` filaire → forme persistée (expiration → secs

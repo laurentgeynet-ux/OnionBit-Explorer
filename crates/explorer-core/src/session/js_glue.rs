@@ -381,6 +381,7 @@ impl Session {
                 url: fp.url,
                 node: fp.node,
                 opaque: fp.opaque,
+                load_fired: false,
             });
         }
         if let Some(entry) = self.tabs.get_mut(&tab) {
@@ -393,7 +394,10 @@ impl Session {
     /// [`Self::spawn_engine`] : `localStorage` persisté de
     /// l'origine **de l'enfant** et vue `document.cookie`
     /// non-HttpOnly pour son URL.
-    fn origin_state(&self, url: &Url) -> (std::collections::BTreeMap<String, String>, String) {
+    pub(crate) fn origin_state(
+        &self,
+        url: &Url,
+    ) -> (std::collections::BTreeMap<String, String>, String) {
         let key = url.origin().to_string();
         let local = self
             .local_storage
@@ -423,8 +427,20 @@ impl Session {
     /// **avant** le `load` du document top-level (spec : le
     /// `load` de la page attend ses sous-contextes).
     pub(crate) fn frame_ctx_load_events(&mut self, tab: TabId) {
-        let fcs: Vec<(u32, NodeId)> = self.tabs.get(&tab).map_or_else(Vec::new, |e| {
-            e.frame_ctxs.iter().map(|f| (f.ctx, f.node)).collect()
+        // CAP-171 : un `<iframe>` dynamique installé pendant
+        // les scripts du commit a déjà tiré son cycle —
+        // `load_fired` le saute ici (jamais de double
+        // `readystatechange`/`load`).
+        let fcs: Vec<(u32, NodeId)> = self.tabs.get_mut(&tab).map_or_else(Vec::new, |e| {
+            e.frame_ctxs
+                .iter_mut()
+                .filter_map(|f| {
+                    (!f.load_fired).then(|| {
+                        f.load_fired = true;
+                        (f.ctx, f.node)
+                    })
+                })
+                .collect()
         });
         for (ctx, node) in fcs {
             // L'événement vit dans le realm enfant (chemin

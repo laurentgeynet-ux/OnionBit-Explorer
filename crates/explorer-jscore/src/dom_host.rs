@@ -111,6 +111,38 @@ pub struct DynScriptReq {
     pub ctx: crate::context::CtxId,
 }
 
+/// CAP-171 — intention de chargement d'un `<iframe>` inséré
+/// dynamiquement (ou re-navigué par `src=`), drainée par
+/// [`crate::interp::Engine::drain_dyn_frames`] et servie par
+/// l'embedder : fetch `src` (CSP `frame-src`, XFO/
+/// `frame-ancestors`, cookies/partition) ou `srcdoc` direct,
+/// puis `context_new` + `install_dom_ctx` dans le realm
+/// émetteur. Le moteur ne touche jamais le réseau.
+pub struct DynFrameReq {
+    /// Identifiant d'émission — répercuté à la livraison
+    /// (`deliver_dyn_frame` retrouve le nœud pour
+    /// `load`/`error`).
+    pub seq: u64,
+    /// Index du nœud parmi les `<iframe>` du miroir émetteur
+    /// (ordre document) — alimente `context_new(frame_ord)`
+    /// pour `contentWindow`/`frameElement`.
+    pub ord: u32,
+    /// Attribut `src` brut — la session résout contre la
+    /// base du document émetteur. `None` quand `srcdoc`.
+    pub src: Option<String>,
+    /// Attribut `srcdoc` — prime sur `src` (spec, CAP-142).
+    pub srcdoc: Option<String>,
+    /// Attribut `sandbox` brut — `SandboxFlags` côté
+    /// session (CAP-149).
+    pub sandbox: Option<String>,
+    /// Attribut `referrerpolicy` brut — prime la politique
+    /// du document (étape 132).
+    pub referrerpolicy: Option<String>,
+    /// Contexte émetteur (`JsCtxId`) — le sous-contexte est
+    /// créé enfant de lui ; la livraison vise son miroir.
+    pub ctx: crate::context::CtxId,
+}
+
 /// Browser-surface hooks (JS-7e) — everything `window.location`,
 /// `history` and `document.cookie` need, injected by the embedder so
 /// the engine never navigates or touches the cookie store itself.
@@ -136,6 +168,10 @@ pub(crate) struct BrowserHooks {
     /// la plus ancienne est abandonnée (jamais de croissance
     /// hostiles).
     pub dyn_script_nodes: std::collections::BTreeMap<u64, NodeId>,
+    /// `seq` → nœud miroir des `<iframe>` dynamiques en vol
+    /// (CAP-171) — pour `load`/`error` à la livraison. Même
+    /// borne que `dyn_script_nodes`.
+    pub dyn_frame_nodes: std::collections::BTreeMap<u64, NodeId>,
     /// Séquence d'émission des scripts dynamiques.
     pub dyn_script_seq: u64,
     /// Cookie jar for `document.cookie`.
@@ -2102,12 +2138,15 @@ impl Host for DocumentHost {
             // piloté par l'embedder : `""` (jamais posé) =
             // `"loading"` (le miroir est installé en cours de
             // parse) ; transitions `interactive`/`complete`
-            // via `Engine::set_ready_state`.
-            "readyState" => Ok(Some(e.str_val(if e.hooks.ready_state.is_empty() {
-                "loading"
-            } else {
-                e.hooks.ready_state
-            }))),
+            // via `Engine::set_ready_state`. CAP-171 : lu sur
+            // le ctx **propriétaire** du miroir — un
+            // `contentDocument` d'iframe rapporte SON état.
+            "readyState" => Ok(Some(
+                e.str_val(
+                    e.dom_owner_ctx(&self.dom)
+                        .map_or("loading", |ctx| e.ready_state_ctx(ctx)),
+                ),
+            )),
             // `document.fonts` — FontFaceSet stub : pas de pipeline
             // de fontes web, `load()`/`ready` résolvent toujours.
             "fonts" => Ok(Some(e.new_host_object(Rc::new(FontFaceSetHost)))),
@@ -2395,6 +2434,11 @@ const MAPPED_ATTRS: &[&str] = &[
     // de même nom sur `<video>`/`<audio>`.
     "poster",
     "preload",
+    // `HTMLIFrameElement` (CAP-171) — `f.srcdoc=`/`sandbox=`
+    // écrivent l'attribut (la mutation déclenche la
+    // navigation du sous-contexte).
+    "srcdoc",
+    "sandbox",
 ];
 
 /// Boolean attributes mirrored as `bool` props (`checked`…).
@@ -2412,6 +2456,7 @@ fn prop_to_attr(key: &str) -> Option<&'static str> {
         "value" => "value",
         "crossOrigin" => "crossorigin",
         "playsInline" => "playsinline",
+        "referrerPolicy" => "referrerpolicy",
         k => return MAPPED_ATTRS.iter().copied().find(|&a| a == k),
     })
 }

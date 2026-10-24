@@ -585,6 +585,18 @@ pub struct Dom {
     /// en attente de fetch/éval par la session
     /// (`Engine::drain_dyn_scripts`). Ordre document.
     pub(crate) pending_dyn: Vec<NodeId>,
+    /// `<iframe>` déjà « pris en charge » (CAP-171) — le
+    /// parse initial pré-marque les siens (chargés par le
+    /// pipeline sous-ressource statique, jamais via la file
+    /// dynamique) ; une insertion ou un `src=` ultérieur
+    /// ré-enfile. Contrairement aux scripts, un iframe
+    /// `innerHTML` **charge** (spec — pas d'« already
+    /// started » pour les cadres).
+    pub(crate) dyn_frame_seen: HashSet<NodeId>,
+    /// `<iframe>` devenus attachés (ou `src` modifié sur
+    /// cadre attaché) — en attente de fetch par la session
+    /// (`Engine::drain_dyn_frames`). Ordre document.
+    pub(crate) pending_dyn_frames: Vec<NodeId>,
     /// « Document ouvert à l'écriture » (JS-C35) — `true` tant
     /// que la page se charge : `document.write`/`writeln` y
     /// ajoutent à `<body>`. `document.close()` ou la
@@ -690,6 +702,8 @@ impl Dom {
             doc_open: true,
             dyn_started: HashSet::new(),
             pending_dyn: Vec::new(),
+            dyn_frame_seen: HashSet::new(),
+            pending_dyn_frames: Vec::new(),
             focused: Cell::new(None),
             serialize_calls: Cell::new(0),
             serialize_bytes: Cell::new(0),
@@ -1027,7 +1041,60 @@ impl Dom {
         // chaque `<script>` statique serait évalué en double.
         d.mark_scripts_started(d.root);
         d.pending_dyn.clear();
+        // Les `<iframe>` du parse initial sont chargés par
+        // le pipeline sous-ressource — jamais par la file
+        // dynamique (CAP-171, même exclusion que les
+        // scripts ci-dessus).
+        d.mark_frames_seen(d.root);
+        d.pending_dyn_frames.clear();
         d
+    }
+
+    /// Marque « déjà chargés » tous les `<iframe>` du
+    /// sous-arbre `node` (CAP-171) — contrairement aux
+    /// scripts, la spec ne marque **pas** les cadres
+    /// `innerHTML` inertes : cette fonction n'est appelée
+    /// que pour le parse initial. Itératif (JS-C55).
+    fn mark_frames_seen(&mut self, node: NodeId) {
+        let mut stack = vec![node];
+        while let Some(n) = stack.pop() {
+            let el = &self.nodes[n as usize];
+            if el.kind == NodeKind::Element && el.tag == "iframe" {
+                self.dyn_frame_seen.insert(n);
+            }
+            stack.extend(el.children.iter().rev().copied());
+        }
+    }
+
+    /// CAP-171 : `<iframe>` attaché → enfilé pour fetch par
+    /// la session — même sans `src`/`srcdoc` (spec « process
+    /// the iframe attributes » → `about:blank` : le realm
+    /// existe dès l'insertion, `contentWindow` non-null et
+    /// `load` part). Appelé par les mutateurs et le setter
+    /// `src`/`srcdoc` sur cadre attaché (re-navigation, spec).
+    fn note_attached_frame(&mut self, node: NodeId) {
+        if !self.is_attached(node) || self.dyn_frame_seen.contains(&node) {
+            return;
+        }
+        let el = &self.nodes[node as usize];
+        if el.kind != NodeKind::Element || el.tag != "iframe" {
+            return;
+        }
+        self.dyn_frame_seen.insert(node);
+        self.pending_dyn_frames.push(node);
+    }
+
+    /// `src`/`srcdoc` modifié sur un `<iframe>` attaché →
+    /// re-navigation (spec : tout changement de `src`
+    /// recharge). Une éventuelle entrée non drainée est
+    /// retirée — le dernier `src` subsume l'ancien (le fetch
+    /// en vol, lui, aboutira `load`/`error` normalement —
+    /// borne : pas d'annulation de tâche en cours).
+    /// Appelé par `set_attribute`.
+    pub(crate) fn note_frame_src_changed(&mut self, node: NodeId) {
+        self.pending_dyn_frames.retain(|&n| n != node);
+        self.dyn_frame_seen.remove(&node);
+        self.note_attached_frame(node);
     }
 
     /// Marque « already started » tous les `<script>` du
@@ -1046,25 +1113,32 @@ impl Dom {
         }
     }
 
-    /// CAP-169 : les `<script>` attachés par `node` (sous-arbre
-    /// compris, ordre document) et pas encore « started » sont
-    /// enfilés pour fetch/éval — insertion dynamique
-    /// (`appendChild` & co = `force-async`, spec). Appelé par
-    /// chaque mutateur **après** propagation du flag
-    /// `attached` — un script dans un sous-arbre détaché ne
-    /// charge rien.
+    /// CAP-169/171 : les `<script>`/`<iframe>` attachés par
+    /// `node` (sous-arbre compris, ordre document) et pas
+    /// encore « started »/« seen » sont enfilés pour
+    /// fetch/éval — insertion dynamique (`appendChild` & co
+    /// = `force-async`, spec). Appelé par chaque mutateur
+    /// **après** propagation du flag `attached` — un élément
+    /// dans un sous-arbre détaché ne charge rien.
     fn note_attached_scripts(&mut self, node: NodeId) {
         if !self.is_attached(node) {
             return;
         }
         let mut stack = vec![node];
         while let Some(n) = stack.pop() {
-            if self.nodes[n as usize].kind == NodeKind::Element
-                && self.nodes[n as usize].tag == "script"
-                && !self.dyn_started.contains(&n)
-            {
+            if self.nodes[n as usize].kind != NodeKind::Element {
+                stack.extend(self.nodes[n as usize].children.iter().rev().copied());
+                continue;
+            }
+            if self.nodes[n as usize].tag == "script" && !self.dyn_started.contains(&n) {
                 self.dyn_started.insert(n);
                 self.pending_dyn.push(n);
+            }
+            // `innerHTML` n'inerte pas les cadres (spec) —
+            // `note_attached_frame` filtre l'absence de
+            // `src`/`srcdoc`.
+            if self.nodes[n as usize].tag == "iframe" {
+                self.note_attached_frame(n);
             }
             stack.extend(self.nodes[n as usize].children.iter().rev().copied());
         }
@@ -1960,7 +2034,16 @@ impl Dom {
             attr_name: Some(name.to_lowercase()),
             old_value: old.clone(),
         });
-        self.ce_attr_reaction(node, name, old, Some(value.to_string()));
+        self.ce_attr_reaction(node, name, old.clone(), Some(value.to_string()));
+        // `iframe.src=`/`srcdoc=` sur cadre attaché →
+        // (re-)navigation du sous-contexte (CAP-171, spec) —
+        // seulement si la valeur change réellement.
+        if old.as_deref() != Some(value)
+            && self.nodes[node as usize].tag == "iframe"
+            && (name.eq_ignore_ascii_case("src") || name.eq_ignore_ascii_case("srcdoc"))
+        {
+            self.note_frame_src_changed(node);
+        }
     }
 
     /// `removeAttribute`. Returns whether it existed.

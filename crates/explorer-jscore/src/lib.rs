@@ -80,7 +80,7 @@ pub use dom::{
     CanvasOpRecord, CanvasState, Dom, JournalOp, MediaCmd, MediaElState, MediaReport, MediaState,
     NodeId, SerializeStats,
 };
-pub use dom_host::{CookieJar, DomRef, DynScriptReq, EventProp, FormSubmit};
+pub use dom_host::{CookieJar, DomRef, DynFrameReq, DynScriptReq, EventProp, FormSubmit};
 pub use error::{Error, Result};
 pub use heap::{HeapStats, Host};
 pub use idb::{CacheEntry, CacheRegistry, IdbDb, IdbIndexDef, IdbRegistry, IdbStore};

@@ -3384,6 +3384,55 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-171. `<iframe>` inséré dynamiquement** —
+  *(numéro officiel attribué à l'intégration)* :
+  `document.createElement('iframe')` + insertion
+  (ou `src=`/`srcdoc=` sur cadre attaché —
+  re-navigation spec) déclenche le cycle réel :
+  fetch → sous-contexte → `load`/`error` — le
+  patron Gmail/One Tap/reCAPTCHA (leurs cadres
+  sont injectés par JS, jamais au parse). Miroir :
+  les mutateurs `Dom` enfilent les `<iframe>`
+  attachés (`pending_dyn_frames`, `dyn_frame_seen`
+  — contrairement aux scripts, `innerHTML`
+  **charge** : pas d'« already started » pour les
+  cadres, spec) ; insertion-détachée avant drain
+  = annulation ; `src`/`srcdoc` modifié sur cadre
+  attaché re-enfile (dedup). `drain_dyn_frames`
+  émet des `DynFrameReq` (`ctx` émetteur, `seq`,
+  `ord`, `src`, `srcdoc`, `sandbox`,
+  `referrerpolicy`) pompés par
+  `drain_script_net` hors réentrance :
+  `srcdoc` → `SubFrame` inline synchrone ; `src`
+  absent/vide → `about:blank` synchrone (spec «
+  process the iframe attributes » — `contentWindow`
+  non-null + `load` dès l'insertion) ; `src` →
+  résolution base émetteur + CSP `frame-src` +
+  mixed-content + `frame_request` (Sec-Fetch nav
+  + `referrerpolicy` + partition cookies). La
+  réponse passe `collect_frame` (XFO/`frame-ancestors`
+  /`Set-Cookie` — même pile que l'étape 128) ;
+  `install_dyn_frame_ctx` crée le realm via
+  `JsEngine::context_new_in` (additif — rattaché
+  au **ctx émetteur**, cadre imbriqué correct),
+  installe le miroir, évalue les scripts inline
+  (CSP enfant + `sandbox`), tire le cycle
+  `readyState` complet (ordre spec) puis
+  `load`/`error` sur l'élément du miroir parent.
+  `FrameCtx.load_fired` empêche le double cycle
+  quand le cadre est installé pendant les scripts
+  du commit. Bonus spec livrés : origine `about:*`
+  héritée du parent (`contentWindow`/`contentDocument`
+  same-origin) ; `f.srcdoc`/`sandbox`/
+  `referrerPolicy` propriétés réfléchies ;
+  `document.readyState` lu par ctx **propriétaire**
+  du miroir. Bornes : `max_frames` partagé avec le
+  plan statique ; un `src=` en vol n'est pas
+  annulé au re-set (dernier émis gagne) ; le
+  `load` d'un cadre dynamique ne retarde pas le
+  `load` parent. 6 tests session
+  (`dyn_frame_*`).
+
 - [x] **CAP-169. `<script>` inséré dynamiquement** —
   *(numéro officiel attribué à l'intégration)* :
   `document.createElement('script')` + insertion

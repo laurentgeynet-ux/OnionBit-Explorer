@@ -11,7 +11,8 @@ use std::sync::Arc;
 
 use explorer_dom::Dom;
 use explorer_js::{NetRequest, NetResponse};
-use explorer_net::http::HttpTransport;
+use explorer_net::error::NetResult;
+use explorer_net::http::{HttpTransport, Response};
 use explorer_net::policy::is_mixed_content;
 use explorer_net::url::Url;
 use explorer_render::{data_url_bytes, decode_image, DecodedImage};
@@ -319,7 +320,7 @@ impl Session {
     /// immédiate d'un échec `status: 0` (`error` côté
     /// script — la page reste vivante, jamais de panic).
     pub(crate) fn drain_script_net(&mut self, tab: TabId) {
-        let Some((page, base, reqs, dyns)) = self.tabs.get_mut(&tab).and_then(|e| {
+        let Some((page, base, reqs, dyns, dyn_frames)) = self.tabs.get_mut(&tab).and_then(|e| {
             let page = e.url.clone();
             let base = e.nav_base().cloned();
             e.js.as_mut().map(|eng| {
@@ -328,6 +329,7 @@ impl Session {
                     base,
                     eng.drain_net_requests(),
                     eng.drain_dyn_scripts(),
+                    eng.drain_dyn_frames(),
                 )
             })
         }) else {
@@ -425,6 +427,12 @@ impl Session {
         // `load`/`error` sur l'élément à la livraison.
         for d in dyns {
             self.spawn_dyn_script(tab, &page, &base, &d);
+        }
+        // `<iframe>` insérés dynamiquement / `src=` modifié
+        // (CAP-171) : fetch puis realm enfant —
+        // `commit_dyn_frame` à la réponse.
+        for d in dyn_frames {
+            self.spawn_dyn_frame(tab, &page, &base, &d);
         }
     }
 
@@ -527,6 +535,7 @@ impl Session {
                         partition,
                         out,
                         script: Some(meta),
+                        frame: None,
                     });
                 });
                 self.dyn_tasks.insert((tab, seq), j);
@@ -562,6 +571,355 @@ impl Session {
             eng.deliver_dyn_script(ctx, seq, body);
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après script dynamique");
+            Self::sync_for_apply(eng.as_mut())
+        };
+        if let Some(s) = mutated {
+            self.queue_apply_sync(tab, s);
+        }
+        self.after_script(tab);
+    }
+
+    /// Un `<iframe>` inséré dynamiquement ou re-navigué par
+    /// `src=`/`srcdoc=` (CAP-171) : `srcdoc` → sous-document
+    /// inline, `commit_dyn_frame` synchrone ; `src` →
+    /// résolution contre la base de l'émetteur, `frame-src`
+    /// CSP + mixed-content, puis fetch `frame_request`
+    /// (mode navigate — `Sec-Fetch-Dest: iframe` + Sec-Fetch
+    /// nav, même pile que les cadres du parse). Refus →
+    /// `error` sur l'élément, jamais de realm installé.
+    fn spawn_dyn_frame(
+        &mut self,
+        tab: TabId,
+        page: &Url,
+        base: &Url,
+        d: &explorer_js::DynFrameReq,
+    ) {
+        let sandbox = parse_sandbox(d.sandbox.as_deref());
+        let Some((req_page, req_base, doc_policy, csp, _opaque)) =
+            self.ctx_net_origin(tab, d.ctx, page, base)
+        else {
+            self.deliver_dyn_frame_el(tab, d.ctx, d.seq, false);
+            return;
+        };
+        // Sous-documents synchrones : `srcdoc` (prioritaire,
+        // spec) sinon `about:blank` quand `src` est absent ou
+        // vide (un cadre nu a un realm `contentWindow` et un
+        // `load` dès l'insertion — le parse saute ces cadres,
+        // ici le script peut demander le realm).
+        let src = d.src.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let sf = if let Some(html) = &d.srcdoc {
+            let parent_scripting = self.tabs.get(&tab).is_some_and(|e| e.js.is_some());
+            Some(store_srcdoc_frame(
+                &req_page,
+                html,
+                sandbox,
+                frame_scripting(parent_scripting, sandbox),
+            ))
+        } else if src.is_none() {
+            let mut tb = explorer_html::TreeBuilder::new();
+            tb.finish();
+            Some(SubFrame {
+                url: Url::parse("about:blank").unwrap_or_else(|_| req_page.clone()),
+                sandbox,
+                srcdoc: None,
+                dom: tb.into_dom(),
+                title: None,
+                html: String::new(),
+            })
+        } else {
+            None
+        };
+        if let Some(sf) = sf {
+            let meta = DynFrameMeta {
+                ctx: d.ctx,
+                seq: d.seq,
+                ord: d.ord,
+                sandbox,
+                url: sf.url.clone(),
+                page: req_page,
+            };
+            self.commit_dyn_frame(tab, &meta, sf);
+            return;
+        }
+        let Some(src) = src else { return };
+        self.spawn_dyn_frame_fetch(tab, req_page, &req_base, doc_policy, &csp, d, src);
+    }
+
+    /// Fetch `src` d'un `<iframe>` dynamique (CAP-171) —
+    /// résolution contre la base de l'émetteur, `frame-src`
+    /// CSP + mixed-content, puis `frame_request` (mode
+    /// navigate — `Sec-Fetch-Dest: iframe`, même pile que
+    /// les cadres du parse). Refus → `error` sur l'élément.
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_dyn_frame_fetch(
+        &mut self,
+        tab: TabId,
+        req_page: Url,
+        req_base: &Url,
+        doc_policy: Option<explorer_net::http::ReferrerPolicy>,
+        csp: &[explorer_net::csp::CspPolicy],
+        d: &explorer_js::DynFrameReq,
+        src: &str,
+    ) {
+        let Some(url) = Url::resolve(req_base, src)
+            .ok()
+            .filter(|u| !is_mixed_content(&req_page, u))
+            .filter(|u| {
+                explorer_net::csp::csp_allows(
+                    csp,
+                    &req_page,
+                    explorer_net::http::FetchDest::Iframe,
+                    u,
+                )
+            })
+        else {
+            self.deliver_dyn_frame_el(tab, d.ctx, d.seq, false);
+            return;
+        };
+        let policy = d
+            .referrerpolicy
+            .as_deref()
+            .and_then(explorer_net::http::ReferrerPolicy::parse)
+            .or(doc_policy);
+        let req = frame_request(&req_page, &url, policy);
+        let is_cross = req_page.origin() != url.origin();
+        let page_origin = origin_header_value(&req_page);
+        let partition = explorer_net::cookies::request_partition(&req);
+        let req_url = req.url.clone();
+        let meta = DynFrameMeta {
+            ctx: d.ctx,
+            seq: d.seq,
+            ord: d.ord,
+            sandbox: parse_sandbox(d.sandbox.as_deref()),
+            url,
+            page: req_page,
+        };
+        let tr = self.transport.clone();
+        let tx = self.net_tx.clone();
+        let seq = d.seq;
+        let j = tokio::spawn(async move {
+            let out = tr.fetch(&req).await;
+            let _ = tx.send(NetDone {
+                tab,
+                handle: seq,
+                cross: is_cross,
+                mode: req.fetch_mode,
+                credentials: explorer_net::http::FetchCredentials::SameOrigin,
+                page_origin,
+                req_url,
+                partition,
+                out,
+                script: None,
+                frame: Some(meta),
+            });
+        });
+        self.dyn_tasks.insert((tab, seq), j);
+    }
+
+    /// Réception d'un `<iframe>` dynamique fetché (CAP-171) —
+    /// la réponse passe `collect_frame` (XFO/`frame-ancestors`/
+    /// `Set-Cookie`/parse — même pile que l'étape 128, sécurité
+    /// sous-ressource + statut 2xx) puis rejoint
+    /// `entry.frames` ; refus → `error` sur l'élément.
+    fn commit_dyn_frame_resp(
+        &mut self,
+        tab: TabId,
+        meta: &DynFrameMeta,
+        out: &NetResult<Response>,
+    ) {
+        let parent_scripting = self.tabs.get(&tab).is_some_and(|e| e.js.is_some());
+        let mut got = Vec::new();
+        if let Ok(resp) = &out {
+            if (200..300).contains(&resp.status)
+                && subresp_security_allows(
+                    &meta.page,
+                    &meta.url,
+                    explorer_net::http::FetchDest::Iframe,
+                    resp,
+                )
+            {
+                collect_frame(
+                    &meta.page,
+                    &self.cookies,
+                    &meta.url,
+                    resp,
+                    meta.sandbox,
+                    parent_scripting,
+                    &mut got,
+                );
+            }
+        }
+        match got.pop() {
+            Some(sf) => self.install_dyn_frame_ctx(tab, meta, sf),
+            None => self.deliver_dyn_frame_el(tab, meta.ctx, meta.seq, false),
+        }
+    }
+
+    /// Document `srcdoc` d'un `<iframe>` dynamique (CAP-171)
+    /// — aucune requête : `SubFrame` inline puis même
+    /// câblage que [`Self::commit_dyn_frame_resp`].
+    fn commit_dyn_frame(&mut self, tab: TabId, meta: &DynFrameMeta, sf: SubFrame) {
+        self.install_dyn_frame_ctx(tab, meta, sf);
+    }
+
+    /// Câblage du sous-contexte dynamique (CAP-171) — même
+    /// séquence que `wire_frame_contexts` mais pour un cadre
+    /// arrivé en cours de vie : realm enfant du ctx émetteur,
+    /// `install_dom_ctx`, scripts inline, cycle `readyState`
+    /// (`interactive` → `readystatechange` → DCL →
+    /// `complete` → `readystatechange` → `load`, ordre spec)
+    /// puis `load` sur l'élément. Le `FrameCtx` est poussé
+    /// pour `ctx_net_origin`/drains postérieurs ; `node`
+    /// est une sentinelle (le nœud réel n'existe qu'après
+    /// resynchro — le `load` élément passe par le miroir).
+    fn install_dyn_frame_ctx(&mut self, tab: TabId, meta: &DynFrameMeta, sf: SubFrame) {
+        // `max_frames` partagé avec le plan statique (une
+        // page hostile ne gonfle pas `entry.frames` par
+        // insertions en boucle).
+        if self
+            .tabs
+            .get(&tab)
+            .is_some_and(|e| e.frames.len() >= self.max_frames)
+        {
+            self.deliver_dyn_frame_el(tab, meta.ctx, meta.seq, false);
+            return;
+        }
+        let url = sf.url.clone();
+        let html = sf.html.clone();
+        let opaque = sf.sandbox.is_some_and(|s| !s.same_origin);
+        // Phase 1 : `SubFrame` rangé, scripts inline collectés
+        // (mêmes contrôles CSP/sandbox que le câblage
+        // statique), realm créé — `frame_ord` relie l'élément
+        // pour `contentWindow`.
+        let Some((sub, scripts, ctx)) = self.prepare_dyn_frame(tab, meta, sf, &url) else {
+            // Realm indisponible → `error` sur l'élément (le
+            // `SubFrame` reste rendu, comme un cadre statique
+            // sans JS).
+            self.deliver_dyn_frame_el(tab, meta.ctx, meta.seq, false);
+            return;
+        };
+        // Phase 2 : état d'origine — la clé opaque est liée
+        // au `ctx` frais (même convention que
+        // `wire_frame_contexts`).
+        let (local, cookie) = if opaque {
+            (
+                self.local_storage
+                    .get(&format!("opaque:{ctx}"))
+                    .cloned()
+                    .unwrap_or_default(),
+                String::new(),
+            )
+        } else {
+            self.origin_state(&url)
+        };
+        // Phase 3 : miroir installé, scripts évalués, cycle
+        // `readyState` complet puis `load` sur l'élément.
+        let evs = self.events.clone();
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        let Some(eng) = entry.js.as_mut() else {
+            return;
+        };
+        eng.install_dom_ctx(ctx, &html, &url.to_string(), local, &cookie);
+        for src in scripts {
+            if let Err(e) = eng.eval_ctx(ctx, &src, None) {
+                let _ = evs.send(CoreEvent::PipelineError {
+                    tab: Some(tab),
+                    message: format!("{e} — iframe dynamique"),
+                });
+            }
+        }
+        eng.set_ready_state(ctx, "interactive");
+        let _ = eng.dispatch_event_ctx(ctx, "readystatechange", &[]);
+        let _ = eng.dispatch_event_ctx(ctx, "DOMContentLoaded", &[]);
+        eng.set_ready_state(ctx, "complete");
+        let _ = eng.dispatch_event_ctx(ctx, "readystatechange", &[]);
+        let _ = eng.dispatch_event_ctx(ctx, "load", &[]);
+        entry.frame_ctxs.push(FrameCtx {
+            ctx,
+            sub,
+            url,
+            node: explorer_dom::NodeId::from_parts(u32::MAX, u32::MAX),
+            opaque,
+            load_fired: true,
+        });
+        // `load` sur l'élément — il vit dans le miroir du
+        // ctx **émetteur** (`meta.ctx`), pas de l'enfant.
+        eng.deliver_dyn_frame(meta.ctx, meta.seq, true);
+        let n = eng.run_pending();
+        tracing::trace!(tab, jobs = n, "jobs js après iframe dynamique");
+        self.after_script(tab);
+    }
+
+    /// Phase 1 de [`Self::install_dyn_frame_ctx`] (CAP-171) :
+    /// pousse le `SubFrame`, collecte ses scripts inline
+    /// (mêmes contrôles CSP/`sandbox` que le câblage
+    /// statique — `srcdoc` hérite la CSP de l'émetteur,
+    /// `<script>` externes non fetchés à cette tranche) et
+    /// crée le realm **sous le ctx émetteur**
+    /// (`context_new_in` — `frame_ord` résolu dans son
+    /// miroir). `(index frames, scripts, ctx)` — `None` =
+    /// realm indisponible (le `SubFrame` reste rendu).
+    fn prepare_dyn_frame(
+        &mut self,
+        tab: TabId,
+        meta: &DynFrameMeta,
+        sf: SubFrame,
+        url: &Url,
+    ) -> Option<(usize, Vec<String>, explorer_js::JsCtxId)> {
+        let entry = self.tabs.get_mut(&tab)?;
+        entry.frames.push(sf);
+        let sub = entry.frames.len() - 1;
+        let f = &entry.frames[sub];
+        let (f_base, f_csp) = if f.srcdoc.is_some() {
+            (
+                entry
+                    .nav_base()
+                    .cloned()
+                    .unwrap_or_else(|| entry.url.clone().unwrap_or_else(|| url.clone())),
+                entry.csp.clone(),
+            )
+        } else {
+            (
+                document_base(&f.dom, &f.url)
+                    .0
+                    .unwrap_or_else(|| url.clone()),
+                collect_meta_csp(&f.dom)
+                    .iter()
+                    .map(|v| explorer_net::csp::CspPolicy::parse(v, true))
+                    .collect(),
+            )
+        };
+        let scripts = if f.sandbox.is_some_and(|s| !s.scripts) {
+            Vec::new()
+        } else {
+            collect_scripts(&f.dom, &f.url, &f_base, true, 0, &f_csp)
+                .into_iter()
+                .filter_map(|i| (!i.module).then_some(i.inline).flatten())
+                .collect()
+        };
+        let ctx = entry
+            .js
+            .as_mut()
+            .and_then(|eng| eng.context_new_in(meta.ctx, &url.to_string(), Some(meta.ord)))?;
+        Some((sub, scripts, ctx))
+    }
+
+    /// `load`/`error` sur l'élément `<iframe>` miroir
+    /// (CAP-171) — relais mince de `deliver_dyn_frame` avec
+    /// resynchro (la livraison peut muter le DOM du ctx).
+    fn deliver_dyn_frame_el(&mut self, tab: TabId, ctx: explorer_js::JsCtxId, seq: u64, ok: bool) {
+        let mutated = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            let Some(eng) = entry.js.as_mut() else {
+                return;
+            };
+            eng.deliver_dyn_frame(ctx, seq, ok);
+            let n = eng.run_pending();
+            tracing::trace!(tab, jobs = n, "jobs js après livraison iframe dyn");
             Self::sync_for_apply(eng.as_mut())
         };
         if let Some(s) = mutated {
@@ -723,6 +1081,7 @@ impl Session {
                 partition,
                 out,
                 script: None,
+                frame: None,
             });
         });
         self.net_tasks.insert((tab, handle), j);
@@ -967,6 +1326,13 @@ impl Session {
                     _ => None,
                 };
                 self.deliver_dyn_script(d.tab, meta.ctx, meta.seq, body);
+                continue;
+            }
+            // `<iframe>` dynamique (CAP-171) — `handle` = `seq`
+            // moteur, espace distinct des handles fetch.
+            if let Some(meta) = d.frame {
+                self.dyn_tasks.remove(&(d.tab, meta.seq));
+                self.commit_dyn_frame_resp(d.tab, &meta, &d.out);
                 continue;
             }
             self.net_tasks.remove(&(d.tab, d.handle));

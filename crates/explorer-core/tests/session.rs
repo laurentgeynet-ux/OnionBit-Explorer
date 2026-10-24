@@ -11805,3 +11805,171 @@ async fn document_ready_state_child_ctx() {
         "interactive avant DCL, complete avant load : {dump}"
     );
 }
+
+// ===== CAP-171 — `<iframe>` inséré dynamiquement =====
+
+/// `createElement('iframe')` + `src` + `appendChild` :
+/// requête de sous-contexte émise (`sec-fetch-dest:
+/// iframe`), realm câblé, `load` sur l'élément,
+/// `contentWindow` same-origin joignable.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_frame_fetch_realm_load() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><div id=y></div><script>         var f=document.createElement('iframe');         f.src='/f';         f.onload=function(){             document.getElementById('x').textContent='load';             var d=f.contentWindow&&f.contentWindow.document;             if(d){document.getElementById('y').textContent=d.getElementById('c').textContent;}         };         f.onerror=function(){document.getElementById('x').textContent='err';};         document.body.appendChild(f);         </script></body></html>",
+    );
+    t.route(
+        "/f",
+        200,
+        "<html><body><div id=c>enfant</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    assert!(
+        t.paths().contains(&"/f".to_string()),
+        "iframe dynamique fetché"
+    );
+    assert_eq!(
+        t.req_header("/f", "sec-fetch-dest").as_deref(),
+        Some("iframe")
+    );
+    let dump = s.dom_dump(a).unwrap();
+    assert!(dump.contains("load"), "onload tiré : {dump}");
+    assert!(
+        dump.contains("enfant"),
+        "contentWindow.document traversé : {dump}"
+    );
+    let frames = s.tab_frames(a);
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0].0, "http://h.test/f");
+}
+
+/// `srcdoc` dynamique : aucune requête, realm installé,
+/// `load` part sur l'élément — le document inline est le
+/// sous-contexte (CAP-142 dynamique).
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_frame_srcdoc_no_fetch() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><script>         var f=document.createElement('iframe');         f.srcdoc='<html><body><b>sd</b></body></html>';         f.onload=function(){document.getElementById('x').textContent='ok';};         document.body.appendChild(f);         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    assert_eq!(t.paths(), vec!["/".to_string()], "srcdoc ne requête rien");
+    let dump = s.dom_dump(a).unwrap();
+    assert!(dump.contains("ok"), "load srcdoc : {dump}");
+    assert_eq!(s.tab_frames(a).len(), 1);
+    let sub = s.frame_dom_dump(a, 0).unwrap();
+    assert!(sub.contains("sd"), "srcdoc installé : {sub}");
+}
+
+/// `<iframe>` nu inséré (ni `src` ni `srcdoc`) : spec →
+/// `about:blank` synchrone — realm créé, `load` tiré.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_frame_blank_loads_about_blank() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><script>         var f=document.createElement('iframe');         f.onload=function(){             var d=f.contentWindow&&f.contentWindow.document;             document.getElementById('x').textContent=                 'load'+(d&&d.readyState||'');         };         document.body.appendChild(f);         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    assert_eq!(t.paths(), vec!["/".to_string()], "aucune requête");
+    let dump = s.dom_dump(a).unwrap();
+    assert!(
+        dump.contains("loadcomplete"),
+        "about:blank chargé à complete : {dump}"
+    );
+}
+
+/// `iframe.src=` sur cadre attaché = re-navigation (spec) —
+/// le second fetch part et remplace le sous-document.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_frame_src_renavigates() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><script>         var f=document.createElement('iframe');         document.body.appendChild(f);         f.src='/a';         f.src='/b';         </script></body></html>",
+    );
+    t.route("/a", 200, "<html><body>A</body></html>");
+    t.route("/b", 200, "<html><body>B</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    let paths = t.paths();
+    assert!(
+        paths.contains(&"/b".to_string()),
+        "dernier src fetché : {paths:?}"
+    );
+    let sub = s.frame_dom_dump(a, 0).unwrap();
+    assert!(sub.contains('B'), "sous-document = /b : {sub}");
+}
+
+/// CSP `frame-src 'none'` : le fetch du cadre dynamique est
+/// refusé, `error` part sur l'élément, aucun realm installé.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_frame_csp_frame_src_blocks() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head><meta http-equiv='Content-Security-Policy' content=\"frame-src 'none'\"></head>         <body><div id=x></div><script>         var f=document.createElement('iframe');         f.src='/f';         f.onload=function(){document.getElementById('x').textContent='load';};         f.onerror=function(){document.getElementById('x').textContent='err';};         document.body.appendChild(f);         </script></body></html>",
+    );
+    t.route("/f", 200, "<html><body>f</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    assert!(
+        !t.paths().contains(&"/f".to_string()),
+        "frame-src 'none' refuse le fetch"
+    );
+    let dump = s.dom_dump(a).unwrap();
+    assert!(dump.contains("err"), "error tiré : {dump}");
+    assert_eq!(s.tab_frames(a).len(), 0, "aucun sous-contexte");
+}
+
+/// Iframe **imbriqué** dynamique : l'enfant insère son
+/// propre `<iframe>` — `context_new_in` rattache le
+/// petit-enfant au bon parent (jamais au top-level) et
+/// `frame_ord` est résolu dans le miroir de l'émetteur.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_frame_nested_child_ctx() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><iframe src='/p'></iframe></body></html>",
+    );
+    t.route(
+        "/p",
+        200,
+        "<html><body><script>         var g=document.createElement('iframe');         g.src='/g';         g.onload=function(){             var d=g.contentWindow&&g.contentWindow.document;             document.title='n:'+(d&&d.getElementById('x').textContent||'none');         };         document.body.appendChild(g);         </script></body></html>",
+    );
+    t.route("/g", 200, "<html><body><div id=x>gc</div></body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    assert!(t.paths().contains(&"/g".to_string()), "petit-enfant fetché");
+    assert_eq!(s.tab_frames(a).len(), 2);
+    let sub = s.frame_dom_dump(a, 1).unwrap();
+    assert!(sub.contains("gc"), "sous-document petit-enfant : {sub}");
+}

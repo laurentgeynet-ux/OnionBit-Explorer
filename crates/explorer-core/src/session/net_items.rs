@@ -1238,6 +1238,12 @@ pub(crate) struct NetDone {
     /// l'élément), jamais une `NetResponse` de `fetch`/XHR.
     /// `handle` porte alors le `seq` moteur.
     pub(crate) script: Option<DynScriptMeta>,
+    /// `<iframe>` dynamique (CAP-171) — `Some` = la réponse
+    /// est un document enfant à installer par
+    /// [`Session::commit_dyn_frame`] (realm + `load`/`error`
+    /// sur l'élément), jamais une `NetResponse`. `handle`
+    /// porte alors le `seq` moteur.
+    pub(crate) frame: Option<DynFrameMeta>,
 }
 
 /// Métadonnées de livraison d'un `<script>` dynamique
@@ -1254,6 +1260,31 @@ pub(crate) struct DynScriptMeta {
     /// `charset` déclaré (étape 53b).
     pub(crate) charset: Option<String>,
     /// Document émetteur — ancre `nosniff`/CORP.
+    pub(crate) page: Url,
+}
+
+/// Métadonnées de livraison d'un `<iframe>` dynamique
+/// (CAP-171) — le document est installé en sous-contexte
+/// (realm + miroir) puis `load`/`error` part sur l'élément.
+pub(crate) struct DynFrameMeta {
+    /// Contexte moteur émetteur (`JS_CTX_TOP` ou iframe) —
+    /// parent du sous-contexte créé.
+    pub(crate) ctx: u32,
+    /// `dyn_script_seq` miroir partagé — retrouve l'élément
+    /// cible de `load`/`error`.
+    pub(crate) seq: u64,
+    /// Index du nœud parmi les `<iframe>` du miroir
+    /// émetteur (ordre document) — `context_new(frame_ord)`
+    /// pour `contentWindow`/`frameElement`.
+    pub(crate) ord: u32,
+    /// `sandbox` de l'élément (CAP-149) — scripting/origine
+    /// opaque du sous-contexte en découlent.
+    pub(crate) sandbox: Option<SandboxFlags>,
+    /// URL résolue du `src` (déjà CSP/mixed-content filtrée
+    /// à l'émission).
+    pub(crate) url: Url,
+    /// Document émetteur — `Referer`/`Origin`/ancre
+    /// `frame-ancestors`/partition cookies.
     pub(crate) page: Url,
 }
 
@@ -1553,7 +1584,7 @@ fn scripted_tree_builder(scripting: bool) -> TreeBuilder {
 /// du sandbox — `<noscript>` n'est rawtext que si les
 /// scripts de l'enfant tourneront (un cadre `sandbox` sans
 /// `allow-scripts` doit afficher le fallback).
-fn frame_scripting(parent: bool, sandbox: Option<SandboxFlags>) -> bool {
+pub(crate) fn frame_scripting(parent: bool, sandbox: Option<SandboxFlags>) -> bool {
     parent && sandbox.is_none_or(|s| s.scripts)
 }
 
@@ -1561,7 +1592,7 @@ fn frame_scripting(parent: bool, sandbox: Option<SandboxFlags>) -> bool {
 /// `frame-ancestors` (étape 134) peuvent interdire
 /// l'embarquement — sinon le `SubFrame` est stocké
 /// (scripting effectif calculé, CAP-155).
-fn collect_frame(
+pub(crate) fn collect_frame(
     page: &Url,
     cookies: &CookieJar,
     u: &Url,

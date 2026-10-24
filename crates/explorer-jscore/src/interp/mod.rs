@@ -1248,6 +1248,142 @@ impl Engine {
         let _ = self.propagate_event(&dom, &cache, &ev);
     }
 
+    /// Draine les `<iframe>` devenus attachés (ou `src`/`srcdoc`
+    /// modifié sur cadre attaché — CAP-171) — tous les
+    /// contextes, même discipline que [`Self::drain_dyn_scripts`].
+    /// `ord` = index du nœud parmi les `<iframe>` du miroir
+    /// émetteur — `context_new(frame_ord)` le traduit en
+    /// `(dom_ptr, node)` pour `contentWindow`/`frameElement`.
+    /// Un cadre détaché entre mutation et drain n'est pas
+    /// émis (insertion-détachée = annulation, spec).
+    pub fn drain_dyn_frames(&mut self) -> Vec<crate::dom_host::DynFrameReq> {
+        let mut doms: Vec<(crate::context::CtxId, crate::dom_host::DomRef)> = Vec::new();
+        if let Some((d, _)) = &self.dom_ctx {
+            doms.push((self.cur_ctx, d.clone()));
+        }
+        for (id, ctx) in &self.parked {
+            if let Some((d, _)) = &ctx.dom_ctx {
+                doms.push((*id, d.clone()));
+            }
+        }
+        let mut out = Vec::new();
+        for (ctx, dom) in doms {
+            let nodes = std::mem::take(&mut dom.borrow_mut().pending_dyn_frames);
+            let d = dom.borrow();
+            for n in nodes {
+                let Some(node) = d.nodes.get(n as usize) else {
+                    continue;
+                };
+                if !d.is_attached(n) {
+                    continue;
+                }
+                let attr = |k: &str| {
+                    node.attrs
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(k))
+                        .map(|(_, v)| v.clone())
+                };
+                let ord = d
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, m)| m.kind == crate::dom::NodeKind::Element && m.tag == "iframe")
+                    .position(|(i, _)| i == n as usize);
+                let Some(ord) = ord else { continue };
+                let seq = self.hooks.dyn_script_seq;
+                self.hooks.dyn_script_seq += 1;
+                if self.hooks.dyn_frame_nodes.len() >= 256 {
+                    if let Some((first, _)) = self
+                        .hooks
+                        .dyn_frame_nodes
+                        .iter()
+                        .next()
+                        .map(|(k, v)| (*k, *v))
+                    {
+                        self.hooks.dyn_frame_nodes.remove(&first);
+                    }
+                }
+                self.hooks.dyn_frame_nodes.insert(seq, n);
+                out.push(crate::dom_host::DynFrameReq {
+                    seq,
+                    ord: u32::try_from(ord).unwrap_or(u32::MAX),
+                    src: attr("src"),
+                    srcdoc: attr("srcdoc"),
+                    sandbox: attr("sandbox"),
+                    referrerpolicy: attr("referrerpolicy"),
+                    ctx,
+                });
+            }
+        }
+        out
+    }
+
+    /// Livraison d'un `<iframe>` dynamique (CAP-171) — le
+    /// sous-contexte a été créé (`Ok`) ou refusé (fetch, CSP,
+    /// XFO…) par la session ; l'événement `load`/`error` part
+    /// sur l'élément miroir (non-bullant, spec). Élément
+    /// retiré entre-temps → no-op tolérant.
+    pub fn deliver_dyn_frame(&mut self, seq: u64, ok: bool) {
+        let Some(node) = self.hooks.dyn_frame_nodes.remove(&seq) else {
+            return;
+        };
+        let Some((dom, cache)) = self.dom_ctx.clone() else {
+            return;
+        };
+        let ty = if ok { "load" } else { "error" };
+        let (bubbles, cancelable, composed) = crate::dom_host::platform_event_flags(ty);
+        let ev = crate::dom_host::make_event_state(
+            ty,
+            node,
+            crate::dom_host::EventFlags {
+                bubbles,
+                cancelable,
+                composed,
+                trusted: true,
+            },
+            Vec::new(),
+        );
+        let _ = self.propagate_event(&dom, &cache, &ev);
+    }
+
+    /// Contexte propriétaire du miroir `dom` (`Rc::as_ptr`) —
+    /// `contentDocument.readyState` vu depuis un autre realm
+    /// doit lire l'état de **son** document, pas du ctx
+    /// courant (CAP-171). `None` = miroir inconnu.
+    pub(crate) fn dom_owner_ctx(
+        &self,
+        dom: &crate::dom_host::DomRef,
+    ) -> Option<crate::context::CtxId> {
+        if let Some((d, _)) = &self.dom_ctx {
+            if std::rc::Rc::ptr_eq(d, dom) {
+                return Some(self.cur_ctx);
+            }
+        }
+        self.parked.iter().find_map(|(id, c)| {
+            c.dom_ctx
+                .as_ref()
+                .filter(|(d, _)| std::rc::Rc::ptr_eq(d, dom))
+                .map(|_| *id)
+        })
+    }
+
+    /// `readyState` du document du contexte `ctx` — courant
+    /// via `self.hooks`, garé via son `BrowsingContext` ;
+    /// vide = `"loading"` (miroir installé en cours de parse,
+    /// CAP-170).
+    pub(crate) fn ready_state_ctx(&self, ctx: crate::context::CtxId) -> &'static str {
+        let s = if ctx == self.cur_ctx {
+            self.hooks.ready_state
+        } else {
+            self.parked.get(&ctx).map_or("", |c| c.ready_state)
+        };
+        if s.is_empty() {
+            "loading"
+        } else {
+            s
+        }
+    }
+
     /// Contexte courant.
     #[must_use]
     pub fn current_context(&self) -> crate::context::CtxId {
@@ -1365,12 +1501,22 @@ impl Engine {
 
     /// Origine sérialisée (`scheme://host[:port]` ou `"null"`)
     /// d'un contexte — partagée par `ctx_same_origin` et
-    /// `postMessage.targetOrigin`.
+    /// `postMessage.targetOrigin`. Spec « origin inheritance »
+    /// (CAP-171) : un document `about:` (`about:blank`,
+    /// `about:srcdoc`) hérite l'origine de son contexte
+    /// **parent** — top-level `about:` reste opaque.
     pub(crate) fn ctx_origin(&self, ctx: crate::context::CtxId) -> String {
-        crate::builtins::url::url_parse_absolute(&self.ctxs[ctx as usize].url).map_or_else(
+        let meta = &self.ctxs[ctx as usize];
+        let o = crate::builtins::url::url_parse_absolute(&meta.url).map_or_else(
             || "null".to_string(),
             |p| crate::builtins::url::url_origin(&p),
-        )
+        );
+        if o == "null" && meta.url.starts_with("about:") {
+            if let Some(parent) = meta.parent {
+                return self.ctx_origin(parent);
+            }
+        }
+        o
     }
 
     /// Same-origin (tuple scheme/host/port sérialisé) entre deux

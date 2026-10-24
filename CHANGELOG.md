@@ -1334,6 +1334,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-171 — `<iframe>` inséré dynamiquement**
+  (`explorer-jscore`/`explorer-js`/`explorer-core` —
+  cap « web réel sécurisé » ; numéro officiel
+  attribué à l'intégration) : `createElement('iframe')`
+  + insertion (ou `src=`/`srcdoc=` sur cadre attaché)
+  → fetch + realm + `load`/`error` réels — le patron
+  Gmail/One Tap/reCAPTCHA. Le miroir enfile les cadres
+  attachés (`pending_dyn_frames`, `dyn_frame_seen` —
+  `innerHTML` **charge**, pas d'« already started »
+  pour les cadres, spec) ; insertion-détachée avant
+  drain = annulation. `spawn_dyn_frame` : `srcdoc`
+  → `SubFrame` inline synchrone ; `src` absent/vide
+  → `about:blank` synchrone (spec « process the
+  iframe attributes ») ; `src` → résolution base
+  émetteur + CSP `frame-src` + mixed-content +
+  `frame_request` (Sec-Fetch nav, `referrerpolicy`,
+  partition cookies). `commit_dyn_frame_resp` :
+  `collect_frame` réutilisée (XFO/`frame-ancestors`/
+  `Set-Cookie`) ; `install_dyn_frame_ctx` :
+  `context_new_in` (realm rattaché au **ctx
+  émetteur** — cadre imbriqué correct, `frame_ord`
+  résolu dans son miroir), `install_dom_ctx`,
+  scripts inline (CSP enfant + `sandbox`), cycle
+  `readyState` complet (interactive→complete,
+  `readystatechange`, `load` ordre spec) puis
+  `load`/`error` sur l'élément du miroir parent.
+  `FrameCtx.load_fired` évite le double cycle si le
+  cadre est installé pendant les scripts du commit.
+  Bonus spec : origine `about:*` héritée du parent
+  (`contentWindow`/`contentDocument` same-origin) ;
+  `f.srcdoc`/`sandbox`/`referrerPolicy` propriétés
+  réfléchies ; `document.readyState` lu par ctx
+  propriétaire du miroir. Bornes : `max_frames`
+  partagé ; `src=` en vol non annulé au re-set ;
+  `load` ne retarde pas le `load` parent. 6 tests
+  session.
 - **CAP-169 — `<script>` inséré dynamiquement**
   (`explorer-jscore`/`explorer-js`/`explorer-core` —
   cap « web réel sécurisé » ; numéro officiel
