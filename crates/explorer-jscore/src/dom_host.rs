@@ -2496,9 +2496,25 @@ impl Host for DocumentHost {
                 Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, true)))
             }
             "head" => {
+                // Spec : `head` existe TOUJOURS (le parseur
+                // l'auto-génère même sans `<head>` dans la
+                // source). Miroir sans head → on le crée et
+                // l'insère avant `body` (JS-C89 — le hoisting
+                // `<title>`/metadata de React 19 fait
+                // `document.head.insertBefore` au mount).
                 let n = {
-                    let d = self.dom.borrow();
-                    d.by_tag(d.root, "head").first().copied()
+                    let mut d = self.dom.borrow_mut();
+                    match d.by_tag(d.root, "head").first().copied() {
+                        Some(n) => Some(n),
+                        None => {
+                            let h = d.create_element("head");
+                            let html_el =
+                                d.by_tag(d.root, "html").first().copied().unwrap_or(d.root);
+                            let first = d.child_nodes(html_el).first().copied();
+                            d.insert_before(html_el, h, first);
+                            Some(h)
+                        }
+                    }
                 };
                 Ok(Some(match n {
                     Some(n) => node_value(e, &self.dom, &self.cache, n),

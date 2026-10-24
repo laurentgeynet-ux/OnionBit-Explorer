@@ -4488,3 +4488,23 @@ fn anchor_url_decomposition() {
         "/y|undefined"
     );
 }
+
+// -- `document.head` auto-créé (JS-C89) ----------------------------------------
+
+/// Spec : `head` existe toujours (parseur l'auto-génère) —
+/// React 19 `mountHoistable` fait `document.head.insertBefore`
+/// pour `<title>`/metadata. Un doc sans `<head>` explicit doit
+/// quand même le servir (créé + inséré avant `body`).
+#[test]
+fn document_head_always_exists() {
+    let mut e = engine_with("<!doctype html><html><body></body></html>");
+    let v = e
+        .eval("document.head ? document.head.tagName : 'null'")
+        .expect("head");
+    assert_eq!(e.describe(v), "HEAD");
+    // head créé = premier enfant de html, avant body.
+    let v = e.eval(
+        "var h=document.documentElement;[h.firstElementChild.tagName,h.children[1].tagName].join('/')",
+    ).expect("order");
+    assert_eq!(e.describe(v), "HEAD/BODY");
+}

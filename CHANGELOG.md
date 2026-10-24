@@ -9,6 +9,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C89 — `document.head` auto-généré**
+  (`explorer-jscore`) : audit React 19 —
+  `mountHoistable` (hoisting `<title>`/
+  `<meta>`/`<link>` des composants vers
+  `<head>`) mourait `insertBefore of
+  Null` sur un doc sans `<head>`
+  explicite. Spec : `head` existe
+  toujours → créé paresseusement à la
+  lecture et inséré avant `body`.
+  Régression `document_head_always_exists`.
+  Audit R19 en cours (hooks restants).
+
 - **JS-C88 — build React dev mesurée
   saine** (`explorer-jscore`, sonde UMD
   `react-dom.development.js`) : mêmes

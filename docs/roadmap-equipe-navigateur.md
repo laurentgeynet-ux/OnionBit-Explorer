@@ -6039,6 +6039,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   (warnings console, mêmes résultats
   que prod — count=1, echo:hello).
 
+- [x] **JS-C89. Audit React 19 (1/2) —
+  `document.head` auto-généré** :
+  `mountHoistable` crashait sur doc
+  sans `<head>` (`insertBefore of
+  Null`) — le hoisting métadonnée
+  exige `head` toujours présent. Fix :
+  création paresseuse + insertion
+  avant `body`. Reste mesuré : render
+  de l'app d'audit silencieusement
+  vide — bisection des hooks R19
+  (`use`/`useOptimistic`/`useActionState`)
+  à poursuivre.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand
