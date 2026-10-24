@@ -297,6 +297,9 @@ fn render_subframe(
         image_max_px: ctx.image_max_px,
         color_scheme: ctx.color_scheme,
         dom_journal_max_ops: ctx.dom_journal_max_ops,
+        // CAP-155 — scripting de l'enfant = celui du parent
+        // modulé par `allow-scripts` de son sandbox.
+        scripting: ctx.scripting && f.sandbox.is_none_or(|s| s.scripts),
     };
     let root_el = f.dom.document_element()?;
     let styles = styles_payload(&mut cp, &f.dom, (w, h), ctx.color_scheme);

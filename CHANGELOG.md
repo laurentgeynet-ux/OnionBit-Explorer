@@ -1315,6 +1315,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-155 — `<noscript>` sous scripting**
+  (`explorer-html` + `explorer-core` — cap « web
+  réel sécurisé » ; numéro officiel attribué à
+  l'intégration) : « scripting flag » additif sur
+  `TreeBuilder` (`set_scripting`/`parse_scripting`)
+  — avec JS actif, `<noscript>` est rawtext en
+  head et body : le fallback n'est plus parsé en
+  éléments (ni fetché, ni rendu). Filé par
+  contexte : nav top-level, `store_frame`/
+  `store_srcdoc_frame` (parent × `allow-scripts`),
+  re-parse des miroirs (`apply`, `sync_frame_mirrors`).
 - **CAP-154 — Navigation `javascript:` évaluée**
   (`explorer-core` + `explorer-net` — cap « web
   réel sécurisé » ; numéro officiel attribué à

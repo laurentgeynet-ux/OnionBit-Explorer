@@ -317,6 +317,11 @@ const TABLE_CONTEXT: &[&str] = &["table", "tbody", "tfoot", "thead", "tr"];
 const TABLE_CONTEXT_CLEAR: &[&str] = &["html", "table", "template"];
 
 /// Tree-builder : consomme des tokens, produit un [`Dom`].
+// Les drapeaux de mode (`frameset_ok`, `foster_parenting`,
+// `skip_leading_lf`, `scripting`) sont des bools atomiques de la
+// machine d'insertion — la spec les énonce comme tels ; les
+// fusionner en enum d'état briserait leur orthogonalité.
+#[allow(clippy::struct_excessive_bools)]
 pub struct TreeBuilder {
     dom: Dom,
     /// Tokenizer interne de la conduite [`TreeBuilder::push`] /
@@ -344,6 +349,14 @@ pub struct TreeBuilder {
     skip_leading_lf: bool,
     /// Pile des modes d'insertion « template » (spec §13.2.4.1).
     template_modes: Vec<Mode>,
+    /// « scripting flag » de la spec (§13.2.3.5) : quand il est
+    /// levé, `<noscript>` est du **rawtext** — son contenu reste
+    /// texte et ne devient jamais des éléments (le fallback ne
+    /// s'affiche que sans scripting). `false` par défaut =
+    /// comportement historique (scripting off, parse complet) ;
+    /// l'appelant qui exécute du JS le lève via
+    /// [`TreeBuilder::set_scripting`].
+    scripting: bool,
 }
 
 impl TreeBuilder {
@@ -371,7 +384,18 @@ impl TreeBuilder {
             last_table: None,
             skip_leading_lf: false,
             template_modes: Vec::new(),
+            scripting: false,
         }
+    }
+
+    /// Lève le « scripting flag » (CAP-155 — spec §13.2.3.5) :
+    /// `<noscript>` bascule en contenu rawtext — ses enfants ne
+    /// sont plus jamais des éléments (un moteur JS actif n'affiche
+    /// pas le fallback). À appeler **avant** le premier
+    /// [`TreeBuilder::push`]/[`TreeBuilder::process`] — un
+    /// basculement en cours de parse ne revisite pas le passé.
+    pub fn set_scripting(&mut self, scripting: bool) {
+        self.scripting = scripting;
     }
 
     /// DOM consommé une fois la construction terminée.
@@ -399,6 +423,18 @@ impl TreeBuilder {
     #[must_use]
     pub fn parse(input: &str) -> Dom {
         let mut tb = Self::new();
+        tb.push(input);
+        tb.finish();
+        tb.into_dom()
+    }
+
+    /// [`TreeBuilder::parse`] avec « scripting flag » levé
+    /// (CAP-155) — raccourci pour les documents dont le JS
+    /// tournera (`<noscript>` = rawtext, spec §13.2.3.5).
+    #[must_use]
+    pub fn parse_scripting(input: &str, scripting: bool) -> Dom {
+        let mut tb = Self::new();
+        tb.set_scripting(scripting);
         tb.push(input);
         tb.finish();
         tb.into_dom()
@@ -1521,9 +1557,19 @@ impl TreeBuilder {
                     self.mode = Mode::Text;
                 }
                 "noscript" => {
-                    // Scripting off (notre cas) → « in head noscript ».
-                    self.insert_element(&name, &attributes);
-                    self.mode = Mode::InHeadNoscript;
+                    if self.scripting {
+                        // Scripting on (CAP-155 — spec
+                        // §13.2.6.4.1) : rawtext, comme
+                        // `noframes` — le contenu reste texte.
+                        self.insert_element(&name, &attributes);
+                        tokenizer.set_content_state(ContentKind::RawText);
+                        self.original_mode = self.mode;
+                        self.mode = Mode::Text;
+                    } else {
+                        // Scripting off → « in head noscript ».
+                        self.insert_element(&name, &attributes);
+                        self.mode = Mode::InHeadNoscript;
+                    }
                 }
                 "template" => {
                     self.insert_element(&name, &attributes);
@@ -2021,6 +2067,16 @@ impl TreeBuilder {
                 self.original_mode = self.mode;
                 self.mode = Mode::Text;
                 self.frameset_ok = false;
+            }
+            "noscript" if self.scripting => {
+                // Scripting on (CAP-155 — spec §13.2.6.4.4,
+                // même clause que les rawtext) : le contenu
+                // reste texte — le fallback ne s'affiche que
+                // sans scripting.
+                self.insert_element(name, attributes);
+                tokenizer.set_content_state(ContentKind::RawText);
+                self.original_mode = self.mode;
+                self.mode = Mode::Text;
             }
             _ if RAWTEXT.contains(&name) => {
                 if name == "xmp" {

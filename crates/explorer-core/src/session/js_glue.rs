@@ -435,7 +435,11 @@ impl Session {
                     // tailles pour forcer la re-rasterisation.
                     let url = f.url.to_string();
                     entry.frame_bitmaps.retain(|(u, ..), _| *u != url);
-                    f.dom = explorer_html::TreeBuilder::parse(html);
+                    // CAP-155 : le re-parse du miroir enfant
+                    // reprend son scripting (un cadre sans
+                    // `allow-scripts` affiche `<noscript>`).
+                    let scripting = f.sandbox.is_none_or(|s| s.scripts);
+                    f.dom = explorer_html::TreeBuilder::parse_scripting(html, scripting);
                 }
             }
         }

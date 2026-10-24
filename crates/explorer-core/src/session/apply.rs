@@ -173,6 +173,11 @@ pub(crate) struct ApplyCtx {
     /// `SessionConfig::dom_journal_max_ops`, cloné pour le
     /// worker détaché qui n'a pas la session).
     pub dom_journal_max_ops: usize,
+    /// « scripting flag » du re-parse (CAP-155) : le HTML
+    /// sérialisé du miroir est relu avec `<noscript>` en
+    /// rawtext si le JS tourne — sinon le fallback
+    /// réapparaîtrait à chaque apply (divergence miroir/DOM).
+    pub scripting: bool,
 }
 
 /// Lance l'apply du job — voie journal (rejeu en place,
@@ -504,7 +509,7 @@ pub(crate) fn apply_payload(
 ) -> ApplyOutcome {
     let t0 = Instant::now();
     let mut out = ApplyOutcome::default();
-    let new_dom = TreeBuilder::parse(&job.html);
+    let new_dom = TreeBuilder::parse_scripting(&job.html, ctx.scripting);
     let new_title = extract_title(&new_dom);
     // Relayout incrémental (étape 55f) avant tout
     // remplacement — il a besoin de l'ancien DOM et de
@@ -892,7 +897,7 @@ fn apply_journal(
                 // document minimal et ses enfants de `<body>`
                 // greffés (le classifieur miroir a déjà écarté
                 // les contenus à parsing contextuel).
-                let frag = TreeBuilder::parse(html);
+                let frag = TreeBuilder::parse_scripting(html, ctx.scripting);
                 let Some(root_el) = frag.document_element() else {
                     return Err(JournalReject::Dom);
                 };
@@ -1433,6 +1438,7 @@ impl Session {
             image_max_px: self.image_max_px,
             color_scheme: self.color_scheme,
             dom_journal_max_ops: self.dom_journal_max_ops,
+            scripting: self.js_factory.is_some(),
         }
     }
 

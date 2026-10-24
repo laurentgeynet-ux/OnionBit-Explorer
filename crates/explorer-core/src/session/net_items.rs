@@ -119,6 +119,11 @@ pub(crate) struct NavJob {
     /// Compteur d'identifiants de téléchargement — cloné
     /// par `nav_begin`, incrémenté à la détection.
     pub(crate) next_download_id: u64,
+    /// « scripting flag » pour le parse (CAP-155 — spec
+    /// §13.2.3.5 : `<noscript>` = rawtext quand le JS
+    /// tournera). Cloné depuis `js_factory.is_some()` au
+    /// `nav_begin` — le job détaché n'a pas la session.
+    pub(crate) scripting: bool,
 }
 
 /// Queue de [`NavJob::run`] — ce que le commit consomme
@@ -404,7 +409,8 @@ impl NavJob {
         if let Some(meta) = response_download_meta(&resp.headers, &self.req) {
             return self.buffer_download(resp, resolved, meta).await;
         }
-        let mut tb = TreeBuilder::new();
+        // `<noscript>` = rawtext si le JS tournera (CAP-155).
+        let mut tb = scripted_tree_builder(self.scripting);
         // Charset du transport (`Content-Type`) en amorce du
         // décodeur — priorité sur le prescan `<meta>` (53e).
         let dec_hint = transport_charset(&resp.headers)
@@ -779,15 +785,7 @@ impl SubJob {
         let tab = self.tab;
         let events = self.events.clone();
         let eval_arrival = |eng: &mut Option<Box<dyn JsEngine>>, src: &str| {
-            if let Some(e) = eng.as_mut() {
-                if let Err(err) = e.eval(src) {
-                    tracing::debug!(tab, error = %err, "script async en échec");
-                    let _ = events.send(CoreEvent::PipelineError {
-                        tab: Some(tab),
-                        message: err.to_string(),
-                    });
-                }
-            }
+            eval_async_arrival(eng, src, tab, &events);
         };
         // Émission par priorité : CSS → scripts → images.
         let jobs = sub_jobs(
@@ -799,6 +797,10 @@ impl SubJob {
             self.page_policy,
         );
         let mut eng = self.eng.take();
+        // Scripting du parent (CAP-155) — hissé hors de la
+        // closure `!Sync`-sûre (le moteur n'est pas Sync,
+        // le booléen l'est).
+        let parent_scripting = eng.is_some();
         let mut async_mods = Vec::new();
         let mut frames = Vec::new();
         fetch_wave(&self.transport, self.max_inflight, jobs, |tag, res| {
@@ -845,11 +847,15 @@ impl SubJob {
                 }
                 SubTag::Frame(i) => {
                     let (u, _, sandbox) = &self.frame_urls[i];
-                    // XFO/CSP `frame-ancestors` (étape 134) :
-                    // la réponse peut interdire l'embarquement.
-                    if explorer_net::policy::frame_embedding_allowed(&self.url, u, &resp) {
-                        frames.push(store_frame(&self.url, &self.cookies, u, &resp, *sandbox));
-                    }
+                    collect_frame(
+                        &self.url,
+                        &self.cookies,
+                        u,
+                        &resp,
+                        *sandbox,
+                        parent_scripting,
+                        &mut frames,
+                    );
                 } // `referrerpolicy`/`sandbox` vivent dans la
                   // `Request`/le `SubFrame`, pas le routage.
             }
@@ -859,7 +865,12 @@ impl SubJob {
         // l'attribut est le sous-contexte (`about:srcdoc`),
         // aucune requête n'a été émise ni attendue.
         for (html, sandbox) in &self.srcdoc_frames {
-            frames.push(store_srcdoc_frame(&self.url, html, *sandbox));
+            frames.push(store_srcdoc_frame(
+                &self.url,
+                html,
+                *sandbox,
+                frame_scripting(parent_scripting, *sandbox),
+            ));
         }
         self.eng = eng;
         self.async_mods = async_mods;
@@ -1457,19 +1468,84 @@ pub(crate) fn frame_request(base: &Url, url: &Url, policy: Option<ReferrerPolicy
 /// HTML est décodé (charset transport en amorce, comme la
 /// nav) et parsé en `Dom` propre : aucune mutation croisée
 /// avec le parent n'existe.
+///
+/// `async`/arrivée désordonnée (étape 51) : le corps reçu
+/// est évalué immédiatement sur le moteur embarqué — un
+/// échec est rapporté en `PipelineError`, jamais fatal.
+fn eval_async_arrival(
+    eng: &mut Option<Box<dyn JsEngine>>,
+    src: &str,
+    tab: TabId,
+    events: &broadcast::Sender<CoreEvent>,
+) {
+    if let Some(e) = eng.as_mut() {
+        if let Err(err) = e.eval(src) {
+            tracing::debug!(tab, error = %err, "script async en échec");
+            let _ = events.send(CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: err.to_string(),
+            });
+        }
+    }
+}
+
+/// Tree-builder avec « scripting flag » (CAP-155) —
+/// `<noscript>` = rawtext quand le JS tournera.
+fn scripted_tree_builder(scripting: bool) -> TreeBuilder {
+    let mut tb = TreeBuilder::new();
+    tb.set_scripting(scripting);
+    tb
+}
+
+/// Scripting effectif d'un sous-contexte (CAP-155 — spec
+/// §13.2.3.5) : scripting du parent **et** `allow-scripts`
+/// du sandbox — `<noscript>` n'est rawtext que si les
+/// scripts de l'enfant tourneront (un cadre `sandbox` sans
+/// `allow-scripts` doit afficher le fallback).
+fn frame_scripting(parent: bool, sandbox: Option<SandboxFlags>) -> bool {
+    parent && sandbox.is_none_or(|s| s.scripts)
+}
+
+/// Réception d'un `<iframe src>` : XFO/CSP
+/// `frame-ancestors` (étape 134) peuvent interdire
+/// l'embarquement — sinon le `SubFrame` est stocké
+/// (scripting effectif calculé, CAP-155).
+fn collect_frame(
+    page: &Url,
+    cookies: &CookieJar,
+    u: &Url,
+    resp: &Response,
+    sandbox: Option<SandboxFlags>,
+    parent_scripting: bool,
+    frames: &mut Vec<SubFrame>,
+) {
+    if explorer_net::policy::frame_embedding_allowed(page, u, resp) {
+        frames.push(store_frame(
+            page,
+            cookies,
+            u,
+            resp,
+            sandbox,
+            frame_scripting(parent_scripting, sandbox),
+        ));
+    }
+}
+
+/// `scripting` (CAP-155) — voir [`frame_scripting`].
 pub(crate) fn store_frame(
     page: &Url,
     cookies: &CookieJar,
     u: &Url,
     resp: &Response,
     sandbox: Option<SandboxFlags>,
+    scripting: bool,
 ) -> SubFrame {
     let partition = partition_key(page);
     for v in resp.headers_all("set-cookie") {
         let _ = cookies.set_from_header_ctx(u, v, partition.clone());
     }
     let text = decode_subresource(&resp.body, transport_charset(&resp.headers).as_deref());
-    let dom = TreeBuilder::parse(&text);
+    let dom = TreeBuilder::parse_scripting(&text, scripting);
     let title = extract_title(&dom);
     SubFrame {
         url: u.clone(),
@@ -1498,8 +1574,9 @@ pub(crate) fn store_srcdoc_frame(
     page: &Url,
     html: &str,
     sandbox: Option<SandboxFlags>,
+    scripting: bool,
 ) -> SubFrame {
-    let dom = TreeBuilder::parse(html);
+    let dom = TreeBuilder::parse_scripting(html, scripting);
     let title = extract_title(&dom);
     SubFrame {
         url: Url::parse("about:srcdoc").unwrap_or_else(|_| page.clone()),

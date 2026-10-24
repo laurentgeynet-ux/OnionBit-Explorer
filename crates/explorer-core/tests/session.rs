@@ -10563,3 +10563,118 @@ async fn javascript_link_blocked_by_csp() {
         "javascript: bloqué par CSP : {dump}"
     );
 }
+
+// ---------- CAP-155 — `<noscript>` sous scripting ----------
+
+/// CAP-155 — « scripting flag » (spec §13.2.3.5) : avec un
+/// moteur JS installé, `<noscript>` est du rawtext — son
+/// contenu ne devient jamais des éléments (le fallback ne
+/// s'affiche que sans scripting). Sans moteur, le contenu
+/// est parsé normalement (comportement historique).
+/// Scripting ON : `<noscript><img src=/ns>` — l'image est
+/// du **texte**, jamais fetchée, jamais rendue.
+#[tokio::test]
+async fn noscript_body_fallback_not_fetched_with_js() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <noscript><img src=\"/ns\">fallback</noscript>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    assert_eq!(t.calls(), 1, "/ns jamais fetchée : {}", t.calls());
+    let dump = s.dom_dump(id).unwrap();
+    // Rawtext : le balisage survit comme **texte** verbatim
+    // (`<img src="/ns">` en une ligne) — un élément aurait
+    // son tag et ses attributs sur des lignes séparées.
+    assert!(
+        dump.contains("<img src=\"/ns\">"),
+        "img = texte rawtext : {dump}"
+    );
+}
+
+/// Scripting OFF (aucun moteur) : le contenu `<noscript>`
+/// est du vrai DOM — le fallback s'affiche/fetche.
+#[tokio::test]
+async fn noscript_body_fallback_fetched_without_js() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <noscript><img src=\"/ns\">fallback</noscript>\
+         </body></html>",
+    );
+    t.route("/ns", 200, "IMG");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    assert_eq!(t.calls(), 2, "/ns fetchée sans scripting : {}", t.calls());
+}
+
+/// Scripting ON en `<head>` : `<noscript><link href=/ns>`
+/// — la feuille est du texte, jamais fetchée.
+#[tokio::test]
+async fn noscript_head_fallback_not_fetched_with_js() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <noscript><link rel=\"stylesheet\" href=\"/ns.css\"></noscript>\
+         </head><body></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    assert_eq!(t.calls(), 1, "/ns.css jamais fetchée : {}", t.calls());
+}
+
+/// Cadre `sandbox` sans `allow-scripts` (parent scripté) :
+/// le scripting de l'enfant est OFF — son `<noscript>`
+/// affiche le fallback (spec : le drapeau est par
+/// contexte). Témoin : `allow-scripts` le cache.
+#[tokio::test]
+async fn noscript_frame_sandbox_shows_fallback() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <iframe src=\"/f1\" sandbox></iframe>\
+         <iframe src=\"/f2\" sandbox=\"allow-scripts\"></iframe>\
+         </body></html>",
+    );
+    t.route(
+        "/f1",
+        200,
+        "<!doctype html><html><body>\
+         <noscript><b>FALLBACK1</b></noscript></body></html>",
+    );
+    t.route(
+        "/f2",
+        200,
+        "<!doctype html><html><body>\
+         <noscript><b>FALLBACK2</b></noscript></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let d1 = s.frame_dom_dump(id, 0).unwrap_or_default();
+    let d2 = s.frame_dom_dump(id, 1).unwrap_or_default();
+    assert!(
+        d1.contains("<b>"),
+        "sandbox sans allow-scripts : <b> = vrai élément : {d1}"
+    );
+    assert!(
+        d2.contains("<b>FALLBACK2</b>"),
+        "allow-scripts : <b> = texte rawtext verbatim : {d2}"
+    );
+}

@@ -789,6 +789,9 @@ impl Session {
             events: self.events.clone(),
             max_download_bytes: self.max_download_bytes,
             next_download_id: dl_id,
+            // CAP-155 — `<noscript>` = rawtext quand un
+            // moteur JS est installé (scripting flag spec).
+            scripting: self.js_factory.is_some(),
         })
     }
 

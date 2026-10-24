@@ -3359,6 +3359,26 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-155. `<noscript>` sous scripting** —
+  *(numéro officiel attribué à l'intégration)* :
+  « scripting flag » de la spec (§13.2.3.5) posé
+  additivement sur `TreeBuilder` (`set_scripting`
+  + `parse_scripting`, défaut `false` = parse
+  historique) — avec JS actif, `<noscript>` est
+  du **rawtext** en `<head>` **et** en body : le
+  fallback ne devient jamais des éléments (aucun
+  fetch ni rendu des `<img>`/`<link>`/`meta`
+  enfouis — tout site sérieux en porte, les
+  dupliquer était un bug de compat réel). Filé
+  par contexte : `NavJob.scripting` (top-level,
+  `js_factory.is_some()`), `frame_scripting` =
+  parent **et** `allow-scripts` du sandbox
+  (`store_frame`/`store_srcdoc_frame`),
+  `ApplyCtx.scripting` + re-parse des miroirs
+  (`apply`, `sync_frame_mirrors`, composite) —
+  sinon le fallback réapparaissait à chaque sync
+  miroir. Un cadre `sandbox` sans `allow-scripts`
+  affiche correctement son fallback.
 - [x] **CAP-154. Navigation `javascript:` évaluée** —
   *(numéro officiel attribué à l'intégration)* : une
   intention vers une URL `javascript:` n'est plus
