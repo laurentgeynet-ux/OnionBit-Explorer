@@ -1620,6 +1620,33 @@ impl Engine {
         self.run_program(&prog)
     }
 
+    /// Éval d'un élément `<script>` (CAP-168) : `ord` =
+    /// ordinal de l'élément parmi les `<script>` du document
+    /// en ordre document — `document.currentScript` le
+    /// reflète pendant l'évaluation (spec : scripts
+    /// classiques seulement ; modules = `null`), puis redevient
+    /// `null`. Élément introuvable (miroir divergé,
+    /// `document.write`…) → `currentScript` = `null`, éval
+    /// normale — tolérant, jamais de crash.
+    ///
+    /// # Errors
+    /// Identique à [`Engine::eval`].
+    pub fn eval_script_el(&mut self, src: &str, name: Option<&str>, ord: usize) -> Result<Value> {
+        let el = self.dom_ctx.as_ref().and_then(|(dom, _)| {
+            let d = dom.borrow();
+            d.by_tag(d.root, "script").get(ord).copied()
+        });
+        let prev = self.hooks.current_script;
+        self.hooks.current_script = el;
+        let prog = parser::parse_in(src, false, self.nest_limit, name.map(std::rc::Rc::from));
+        let r = match prog {
+            Ok(p) => self.run_program(&p),
+            Err(e) => Err(e),
+        };
+        self.hooks.current_script = prev;
+        r
+    }
+
     /// Corps partagé d'`eval`/`eval_named` : budget d'ops
     /// ré-armé, programme exécuté, microtasks drainées avant le
     /// retour (une frontière de job).

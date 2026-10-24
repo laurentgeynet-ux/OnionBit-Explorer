@@ -788,8 +788,8 @@ impl SubJob {
 
         let tab = self.tab;
         let events = self.events.clone();
-        let eval_arrival = |eng: &mut Option<Box<dyn JsEngine>>, src: &str| {
-            eval_async_arrival(eng, src, tab, &events);
+        let eval_arrival = |eng: &mut Option<Box<dyn JsEngine>>, src: &str, ord: usize| {
+            eval_async_arrival(eng, src, ord, tab, &events);
         };
         // Émission par priorité : CSS → scripts → images.
         let jobs = sub_jobs(
@@ -836,7 +836,7 @@ impl SubJob {
                                     async_mods.push((u.clone(), text));
                                 }
                             } else {
-                                eval_arrival(&mut eng, &text);
+                                eval_arrival(&mut eng, &text, item.el_ord);
                             }
                         } else {
                             self.script_srcs[slot] = Some(text);
@@ -1502,11 +1502,12 @@ pub(crate) fn frame_request(base: &Url, url: &Url, policy: Option<ReferrerPolicy
 fn eval_async_arrival(
     eng: &mut Option<Box<dyn JsEngine>>,
     src: &str,
+    el_ord: usize,
     tab: TabId,
     events: &broadcast::Sender<CoreEvent>,
 ) {
     if let Some(e) = eng.as_mut() {
-        if let Err(err) = e.eval(src) {
+        if let Err(err) = e.eval_script_el(explorer_js::JS_CTX_TOP, src, None, el_ord) {
             tracing::debug!(tab, error = %err, "script async en échec");
             let _ = events.send(CoreEvent::PipelineError {
                 tab: Some(tab),

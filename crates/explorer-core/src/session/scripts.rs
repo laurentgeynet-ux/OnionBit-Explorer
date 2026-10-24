@@ -69,6 +69,12 @@ pub(crate) struct ScriptItem {
     /// Slot de réception du corps fetché (index dans
     /// `script_srcs`) — `None` pour les inline.
     pub(crate) slot: Option<usize>,
+    /// Ordinal de l'élément `<script>` parmi **tous** les
+    /// `<script>` du document en ordre document (y compris
+    /// les non-collectés — CSP-refusés, `nomodule`, types
+    /// inconnus) : identifie l'élément miroir pendant
+    /// l'éval pour `document.currentScript` (CAP-168).
+    pub(crate) el_ord: usize,
 }
 
 /// `<script>` exécutables du document, ordre document —
@@ -94,9 +100,14 @@ pub(crate) fn collect_scripts(
         return out;
     }
     let mut slots = 0usize;
+    // Tous les `<script>` — y compris les non-collectés —
+    // numérotés pour `document.currentScript` (CAP-168).
+    let mut els = 0usize;
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "script") {
+            let el_ord = els;
+            els += 1;
             let ty = dom
                 .attribute(n, "type")
                 .ok()
@@ -152,6 +163,7 @@ pub(crate) fn collect_scripts(
                                     slots += 1;
                                     Some(s)
                                 },
+                                el_ord,
                             });
                         }
                         // Hors borne / irrésoluble / bloqué :
@@ -180,6 +192,7 @@ pub(crate) fn collect_scripts(
                                     ScriptExec::Parse
                                 },
                                 slot: None,
+                                el_ord,
                             });
                         }
                     }

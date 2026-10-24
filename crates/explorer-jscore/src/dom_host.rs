@@ -90,6 +90,12 @@ pub(crate) struct BrowserHooks {
     /// l'embedder via [`Engine::set_page_referrer`] — le
     /// moteur ne le déduit jamais lui-même.
     pub page_referrer: String,
+    /// `document.currentScript` (CAP-168) — nœud `<script>`
+    /// en cours d'évaluation, posé autour de
+    /// [`Engine::eval_script_el`] (null hors éval, spec ;
+    /// jamais posé pour les modules — spec `currentScript`
+    /// = scripts classiques uniquement).
+    pub current_script: Option<NodeId>,
     /// Cookie jar for `document.cookie`.
     pub cookie_jar: Option<Rc<dyn CookieJar>>,
     /// `location.assign/replace/href=`/`reload` → navigate to arg.
@@ -2009,6 +2015,13 @@ impl Host for DocumentHost {
             // (spec : reflète le referrer initial, jamais la
             // politique des requêtes ultérieures).
             "referrer" => Ok(Some(e.str_val(e.hooks.page_referrer.clone()))),
+            // `document.currentScript` (CAP-168) — l'élément
+            // `<script>` en cours d'évaluation, `null` sinon
+            // (spec : posé uniquement pendant l'exécution).
+            "currentScript" => Ok(Some(match e.hooks.current_script {
+                Some(n) => node_value(e, &self.dom, &self.cache, n),
+                None => Value::Null,
+            })),
             // `document.links`/`images`/`forms`/`scripts` — live-ish
             // (recomputed at each access) tag collections ≙ amont
             // `links[]`. Accès nommé (`document.forms.login`) +

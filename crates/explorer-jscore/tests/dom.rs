@@ -3630,3 +3630,39 @@ fn history_scroll_restoration() {
     assert!(e.eval("history.scrollRestoration = 'bogus'").is_err());
     assert_eq!(evf(&mut e, "history.scrollRestoration"), "auto");
 }
+
+/// `document.currentScript` (CAP-168) — l'élément `<script>`
+/// en cours d'évaluation, `null` hors éval ; identifie le
+/// bundle en exécution (loaders UMD, polyfills).
+#[test]
+fn document_current_script() {
+    let mut e = engine_with(
+        "<html><body>\
+         <script src=a.js></script>\
+         <script src=b.js></script>\
+         <script>var z = 1;</script>\
+         </body></html>",
+    );
+    // Hors éval : `null`.
+    assert_eq!(evf(&mut e, "document.currentScript"), "null");
+    // Pendant l'éval de l'élément ordinal 1 : `b.js`.
+    let v = e
+        .eval_script_el(
+            "var seen = document.currentScript;\
+             (seen ? seen.tagName + ':' + seen.getAttribute('src') : 'null')",
+            None,
+            1,
+        )
+        .unwrap();
+    assert_eq!(e.describe(v), "SCRIPT:b.js");
+    // Inline (ordinal 2) : pas de `src`, c'est le bon élément
+    // quand même (`textContent` relu).
+    let v = e
+        .eval_script_el("document.currentScript.textContent.trim()", None, 2)
+        .unwrap();
+    assert_eq!(e.describe(v), "var z = 1;");
+    // Après éval : `null` restauré (spec).
+    assert_eq!(evf(&mut e, "document.currentScript"), "null");
+    // Éval ordinaire (pas d'élément porteur) : `null`.
+    assert_eq!(evf(&mut e, "document.currentScript === null"), "true");
+}

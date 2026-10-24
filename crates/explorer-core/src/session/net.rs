@@ -136,7 +136,7 @@ impl Session {
                     continue;
                 };
                 let url = item.src.as_ref().map(Url::as_str);
-                self.eval_or_report(tab, eng.as_mut(), src, url.as_deref());
+                self.eval_or_report(tab, eng.as_mut(), src, url.as_deref(), Some(item.el_ord));
             }
             for me in arrival_evals {
                 self.eval_module_graph(tab, eng.as_mut(), me);
@@ -149,7 +149,7 @@ impl Session {
                     }
                 } else if let Some(src) = item_source(item, &script_srcs) {
                     let url = item.src.as_ref().map(Url::as_str);
-                    self.eval_or_report(tab, eng.as_mut(), src, url.as_deref());
+                    self.eval_or_report(tab, eng.as_mut(), src, url.as_deref(), Some(item.el_ord));
                 }
             }
             let n = eng.run_pending();

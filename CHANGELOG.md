@@ -1315,6 +1315,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-168 — `document.currentScript`**
+  (`explorer-jscore`/`explorer-js`/`explorer-core` —
+  cap « web réel sécurisé » ; numéro officiel
+  attribué à l'intégration) : l'élément `<script>`
+  en cours d'évaluation est reflété pendant son
+  exécution, `null` sinon (spec) — les
+  loaders/bundles UMD s'en servent pour se
+  retrouver. `ScriptItem.el_ord` numérote **tous**
+  les `<script>` (le filtre de collecte ne décale
+  pas l'ordinal miroir) → `JsEngine::eval_script_el`
+  additif → `Cmd::EvalScriptEl` → posé sur
+  `hooks.current_script` autour de l'éval. Bornes :
+  modules → `null` (spec) ; scripts d'iframe sans
+  ordinal ; miroir divergé → `null` tolérant.
+  1 test dom + 1 session.
 - **CAP-167 — `crossorigin` sur `<script>`/`<link rel=stylesheet>`**
   (`explorer-core` — cap « web réel sécurisé » ;
   numéro officiel attribué à l'intégration) : attribut

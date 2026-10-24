@@ -11637,3 +11637,33 @@ async fn crossorigin_stylesheet_needs_acao() {
         "feuille cors + ACAO appliquée"
     );
 }
+
+/// `document.currentScript` (CAP-168) en session réelle —
+/// chaque `<script>` externe/inline se voit pendant son
+/// éval, `null` après (loaders/UMD s'en servent pour se
+/// retrouver).
+#[tokio::test]
+async fn document_current_script_in_session() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div>\
+         <script src=/a.js></script>\
+         <script>document.getElementById('x').textContent+=\
+            '|inline:'+document.currentScript.tagName;</script>\
+         </body></html>",
+    );
+    t.route(
+        "/a.js",
+        200,
+        "document.getElementById('x').textContent+=\
+            'ext:'+document.currentScript.src.split('/').pop();",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(dump.contains("ext:a.js"), "script externe vu : {dump}");
+    assert!(dump.contains("inline:SCRIPT"), "script inline vu : {dump}");
+}

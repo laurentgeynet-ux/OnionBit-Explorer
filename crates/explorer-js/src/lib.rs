@@ -567,6 +567,26 @@ pub trait JsEngine: Send {
         }
     }
 
+    /// Éval d'un élément `<script>` classique (CAP-168) :
+    /// `script_ord` = ordinal de l'élément parmi les
+    /// `<script>` du document (ordre document) — pendant
+    /// l'évaluation `document.currentScript` le reflète
+    /// (spec), puis redevient `null`. Défaut :
+    /// [`Self::eval_ctx`] (moteur sans notion d'élément
+    /// courant — `currentScript` reste `null`).
+    ///
+    /// # Errors
+    /// Identique à [`Self::eval`].
+    fn eval_script_el(
+        &mut self,
+        ctx: JsCtxId,
+        source: &str,
+        name: Option<&str>,
+        _script_ord: usize,
+    ) -> Result<String, JsError> {
+        self.eval_ctx(ctx, source, name)
+    }
+
     /// [`Self::dispatch_event`] adressé au contexte `ctx`
     /// (étape 134) — `path` se résout dans le miroir **de
     /// l'enfant** ; `path` vide = événement document de
@@ -1253,6 +1273,13 @@ enum Cmd {
         name: Option<String>,
         tx: Sender<Result<String, JsError>>,
     },
+    EvalScriptEl {
+        ctx: JsCtxId,
+        src: String,
+        name: Option<String>,
+        ord: usize,
+        tx: Sender<Result<String, JsError>>,
+    },
     DispatchCtx {
         ctx: JsCtxId,
         ty: String,
@@ -1680,6 +1707,28 @@ impl JscoreEngine {
                         return;
                     }
                 }
+                Cmd::EvalScriptEl {
+                    ctx,
+                    src,
+                    name,
+                    ord,
+                    tx,
+                } => {
+                    let prev = eng.current_context();
+                    eng.context_switch(ctx);
+                    let out = if eng.current_context() == ctx {
+                        match eng.eval_script_el(&src, name.as_deref(), ord) {
+                            Ok(v) => Ok(eng.describe(v)),
+                            Err(e) => Err(JsError::from(e)),
+                        }
+                    } else {
+                        Err(JsError::Dead)
+                    };
+                    eng.context_switch(prev);
+                    if tx.send(out).is_err() {
+                        return;
+                    }
+                }
                 Cmd::DispatchCtx { ctx, ty, path, tx } => {
                     let prev = eng.current_context();
                     eng.context_switch(ctx);
@@ -1839,6 +1888,30 @@ impl JsEngine for JscoreEngine {
                 ctx,
                 src: source.to_string(),
                 name: name.map(str::to_string),
+                tx,
+            })
+            .is_err()
+        {
+            return Err(JsError::Dead);
+        }
+        rx.recv().map_err(|_| JsError::Dead)?
+    }
+
+    fn eval_script_el(
+        &mut self,
+        ctx: JsCtxId,
+        source: &str,
+        name: Option<&str>,
+        script_ord: usize,
+    ) -> Result<String, JsError> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::EvalScriptEl {
+                ctx,
+                src: source.to_string(),
+                name: name.map(str::to_string),
+                ord: script_ord,
                 tx,
             })
             .is_err()

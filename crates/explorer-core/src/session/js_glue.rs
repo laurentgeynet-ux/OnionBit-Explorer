@@ -489,18 +489,26 @@ impl Session {
     /// `url` = `src` résolue du script externe — étiquette les
     /// frames `error.stack` (`eval_named`, JS-C56) et préfixe le
     /// rapport d'erreur.
+    /// `el_ord` (CAP-168) = ordinal de l'élément `<script>`
+    /// parmi tous ceux du document — `document.currentScript`
+    /// le reflète pendant l'éval ; `None` = pas d'élément
+    /// porteur (`javascript:`, eval direct).
     pub(crate) fn eval_or_report(
         &mut self,
         tab: TabId,
         eng: &mut dyn JsEngine,
         src: &str,
         url: Option<&str>,
+        el_ord: Option<usize>,
     ) {
         let t_eval = std::time::Instant::now();
         tracing::info!(tab, bytes = src.len(), "script: eval…");
-        let r = match url {
-            Some(u) => eng.eval_named(src, u),
-            None => eng.eval(src),
+        let r = match el_ord {
+            Some(ord) => eng.eval_script_el(explorer_js::JS_CTX_TOP, src, url, ord),
+            None => match url {
+                Some(u) => eng.eval_named(src, u),
+                None => eng.eval(src),
+            },
         };
         tracing::info!(
             tab,

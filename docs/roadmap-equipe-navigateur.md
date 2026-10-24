@@ -3359,6 +3359,30 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-168. `document.currentScript`** —
+  *(numéro officiel attribué à l'intégration)* :
+  l'élément `<script>` en cours d'évaluation est
+  reflété pendant son exécution (`null` hors éval,
+  spec) — les loaders/bundles UMD et polyfills s'en
+  servent pour se retrouver (Google tag, webpack
+  chunks). `ScriptItem.el_ord` = ordinal parmi
+  **tous** les `<script>` du document (ordre
+  document, CSP-refusés/`nomodule`/types inconnus
+  compris — l'index reste stable quel que soit le
+  filtre de collecte) → `JsEngine::eval_script_el`
+  (additif, défaut → `eval_ctx`) →
+  `Cmd::EvalScriptEl` → `Engine::eval_script_el` :
+  le nœud est retrouvé dans le miroir par ordinal
+  (`by_tag` itératif), posé sur
+  `hooks.current_script` autour de l'éval. Parse,
+  `defer`/`Post` et `async`/arrivée couverts.
+  Bornes documentées : modules → `null` (spec) ;
+  scripts d'iframe évalués via `eval_ctx` sans
+  ordinal (cas marginal — leurs loaders passent par
+  `install_dom_ctx`) ; élément introuvable (miroir
+  divergé par `document.write`) → `null`, éval
+  normale. 1 test dom + 1 session.
+
 - [x] **CAP-167. `crossorigin` sur
   `<script src>`/`<link rel=stylesheet>`** —
   *(numéro officiel attribué à l'intégration)* :
