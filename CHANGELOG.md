@@ -31,7 +31,7 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   diff vs PNG de référence (Chrome).
   Reste en file : sonde `/net`
   (sous-ressources, entaille session)
-  et serveur MCP explorer-flight.
+  et serveur MCP explorer-flight (fait — `explorer-cli mcp`).
 
 - **ADR-0026 — trajectoire sandbox OS**
   (proposée) : P1 confinement du daemon

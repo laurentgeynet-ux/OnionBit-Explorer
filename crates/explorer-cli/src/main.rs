@@ -18,6 +18,8 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
+mod mcp;
+
 use explorer_html::TreeBuilder;
 use explorer_net::decode::DecodingTransport;
 use explorer_net::h1::HttpConfig;
@@ -50,6 +52,8 @@ fn main() -> ExitCode {
         [_, cmd, url] if cmd == "dom" => dom_live(url),
         [_, cmd, url] if cmd == "mem" => mem_report(url),
         [_, cmd, url, dir] if cmd == "save" => save_fixture(url, dir),
+        [_, cmd] if cmd == "mcp" => mcp_main("9377"),
+        [_, cmd, port] if cmd == "mcp" => mcp_main(port),
         [_, cmd, a, b] if cmd == "diff" => diff_pngs(a, b),
         _ => {
             eprintln!("usage : explorer-cli dump <fichier|url>");
@@ -61,6 +65,7 @@ fn main() -> ExitCode {
             eprintln!("        explorer-cli mem <url>");
             eprintln!("        explorer-cli save <url> <dossier>");
             eprintln!("        explorer-cli diff <a.png> <b.png>");
+            eprintln!("        explorer-cli mcp [port]  (serveur MCP stdio → daemon)");
             ExitCode::FAILURE
         }
     }
@@ -252,6 +257,22 @@ async fn dom_live(url: &str) -> ExitCode {
     } else {
         eprintln!("pas de DOM (détaché ?)");
         ExitCode::FAILURE
+    }
+}
+
+/// `mcp [port]` — serveur MCP stdio qui wrappe l'API REST du
+/// daemon (`--port` attendu : 9377 humain, 9385 agent-flight).
+fn mcp_main(port: &str) -> ExitCode {
+    let Ok(p) = port.parse::<u16>() else {
+        eprintln!("mcp : port invalide '{port}'");
+        return ExitCode::FAILURE;
+    };
+    match mcp::serve(p) {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("mcp : {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 
