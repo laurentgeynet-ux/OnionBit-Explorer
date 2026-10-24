@@ -3407,6 +3407,17 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-181. `navigator.clipboard`
+  par hook embedder (sonde)** —
+  `writeText`/`readText` via
+  `BrowserHooks::clipboard_*` +
+  `set_clipboard_hooks` (engine-global) ;
+  sans hook → `NotAllowedError` honnête.
+  Bornes : pas de permission prompt
+  (embedder arbitre), clipboard-item
+  hors surface. Test jscore
+  `cap181_clipboard_hook`.
+
 - [x] **CAP-180. Hit-test inverse +
   `getClientRects` (sonde)** — même
   `GeometryMap` i#19 que `gBCR` :

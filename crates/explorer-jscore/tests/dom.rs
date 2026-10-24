@@ -4800,3 +4800,51 @@ fn cap180_inverse_geometry() {
         "1|10|15|100|0|function"
     );
 }
+
+// ===== CAP-181 — `navigator.clipboard` par hook embedder
+// (sonde `_census_calls` : `writeText` TypeError/absent) —
+// sans hook → `NotAllowedError` honnête.
+
+#[test]
+fn cap181_clipboard_hook() {
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    // Surface : objet présent, méthodes lisibles.
+    assert_eq!(
+        evf(
+            &mut e,
+            "[typeof navigator.clipboard, typeof navigator.clipboard.writeText,\
+             typeof navigator.clipboard.readText, navigator.clipboard.toString()].join('|')"
+        ),
+        "object|function|function|[object Clipboard]"
+    );
+    // Sans hook → `NotAllowedError` rejetée (honnête).
+    e.eval(
+        "var wr='',rd='';navigator.clipboard.writeText('x').catch(function(v){wr=v});\
+            navigator.clipboard.readText().catch(function(v){rd=v});",
+    )
+    .expect("deny");
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(
+        evf(&mut e, "wr.slice(0,15)+'|'+rd.slice(0,15)"),
+        "NotAllowedError|NotAllowedError"
+    );
+    // Hook écriture/livraison — l'embedder décide.
+    e.set_clipboard_hooks(
+        Some(std::rc::Rc::new(|t| {
+            if t == "ok" {
+                Ok(())
+            } else {
+                Err("denied".into())
+            }
+        })),
+        Some(std::rc::Rc::new(|| Some("clip!".into()))),
+    );
+    e.eval(
+        "var w='',r='';navigator.clipboard.writeText('ok').then(function(){w='resolved'});\
+            navigator.clipboard.writeText('no').catch(function(v){w+='/reject'});\
+            navigator.clipboard.readText().then(function(v){r=v});",
+    )
+    .expect("hooks");
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(evf(&mut e, "w+'|'+r"), "resolved/reject|clip!");
+}

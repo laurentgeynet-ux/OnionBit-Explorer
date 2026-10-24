@@ -281,6 +281,17 @@ pub(crate) struct BrowserHooks {
     /// `console.*` — one formatted line per call (`"log: a b"`).
     /// Absent → the call is a silent no-op.
     pub console: Option<Rc<dyn Fn(String)>>,
+    /// `navigator.clipboard.writeText` (CAP-181) — l'embedder
+    /// décide du presse-papiers (OS, sandbox, permission).
+    /// Absent → la promesse rejette `NotAllowedError` (spec :
+    /// permission refusée — honnête, jamais de faux succès).
+    /// Engine-global (comme `console`) — le presse-papiers
+    /// est une ressource plateforme, pas un slot document.
+    pub clipboard_write: Option<ClipboardWriteHook>,
+    /// `navigator.clipboard.readText` (CAP-181) — `Some` →
+    /// texte, `None` → rejet `NotAllowedError`. Absent →
+    /// même rejet que l'écriture.
+    pub clipboard_read: Option<ClipboardReadHook>,
     /// `alert(msg)` — modal-less notification (fire-and-forget).
     pub alert: Option<Rc<dyn Fn(String)>>,
     /// `confirm(msg)` → `true`/`false`; absent → `false`.
@@ -392,6 +403,18 @@ impl Engine {
     }
 
     /// Install the `console.*` line sink (formatted `"a b"` lines).
+    /// `navigator.clipboard` (CAP-181) — l'embedder pose ses
+    /// transporteurs presse-papiers ; sans eux les promesses
+    /// rejettent `NotAllowedError` (permission refusée spec).
+    pub fn set_clipboard_hooks(
+        &mut self,
+        write: Option<ClipboardWriteHook>,
+        read: Option<ClipboardReadHook>,
+    ) {
+        self.hooks.clipboard_write = write;
+        self.hooks.clipboard_read = read;
+    }
+
     pub fn set_console_hook(&mut self, f: Rc<dyn Fn(String)>) {
         self.hooks.console = Some(f);
     }
@@ -1532,6 +1555,18 @@ impl Engine {
         let tag = self.str_val("CredentialsContainer");
         self.set_own(creds, crate::interp::SYM_TO_STRING_TAG, tag, false);
         self.set_own(nav, "credentials", Value::Obj(creds), true);
+        // `navigator.clipboard` (CAP-181) — surface spec
+        // `writeText`/`readText` par hook embedder (le presse-
+        // papiers est une ressource OS/permission, pas du
+        // moteur) ; sans hook → rejet `NotAllowedError`
+        // honnête. `typeof navigator.clipboard` = 'object'
+        // pour le feature-detect — la promesse tranche.
+        let clip = self.new_object();
+        self.add_method(clip, "writeText", clip_write_text);
+        self.add_method(clip, "readText", clip_read_text);
+        let tag = self.str_val("Clipboard");
+        self.set_own(clip, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own(nav, "clipboard", Value::Obj(clip), true);
         self.set_own(g, "navigator", Value::Obj(nav), false);
 
         // `Worker` borné (JS-C29) — le constructeur est présent
@@ -7934,6 +7969,50 @@ fn creds_unsupported(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value>
 
 /// `credentials.preventSilentAccess` — spec dépréciée :
 /// résout `undefined`.
+/// Transporteurs `navigator.clipboard` posés par l'embedder
+/// (CAP-181) — voir `BrowserHooks::clipboard_*`.
+type ClipboardWriteHook = Rc<dyn Fn(String) -> Result<(), String>>;
+type ClipboardReadHook = Rc<dyn Fn() -> Option<String>>;
+
+/// `navigator.clipboard.writeText(t)` (CAP-181) — le hook
+/// embedder écrit (ou refuse) ; absent → `NotAllowedError`
+/// (spec : permission refusée — promesse rejetée, jamais de
+/// faux succès — Docs « copier » prend le chemin
+/// `document.execCommand` hérité ou refuse proprement).
+fn clip_write_text(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    let text = e.to_js_string(arg(a, 0))?;
+    let Some(hook) = e.hooks.clipboard_write.clone() else {
+        let msg = e.str_val("NotAllowedError: clipboard write denied");
+        e.reject_promise(pid, msg);
+        return Ok(Value::Obj(pid));
+    };
+    match hook(text) {
+        Ok(()) => e.resolve_promise(pid, Value::Undefined),
+        Err(m) => {
+            let msg = e.str_val(format!("NotAllowedError: {m}"));
+            e.reject_promise(pid, msg);
+        }
+    }
+    Ok(Value::Obj(pid))
+}
+
+/// `navigator.clipboard.readText()` (CAP-181) — même motif :
+/// `Some(texte)` du hook → résolution, `None`/absent →
+/// `NotAllowedError`.
+fn clip_read_text(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    let text = e.hooks.clipboard_read.clone().and_then(|hook| hook());
+    if let Some(t) = text {
+        let v = e.str_val(t);
+        e.resolve_promise(pid, v);
+    } else {
+        let msg = e.str_val("NotAllowedError: clipboard read denied");
+        e.reject_promise(pid, msg);
+    }
+    Ok(Value::Obj(pid))
+}
+
 fn creds_psa(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     let pid = e.new_promise();
     e.resolve_promise(pid, Value::Undefined);
