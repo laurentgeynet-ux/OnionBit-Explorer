@@ -1249,6 +1249,13 @@ pub(crate) struct NetDone {
     /// sur l'élément), jamais une `NetResponse`. `handle`
     /// porte alors le `seq` moteur.
     pub(crate) frame: Option<DynFrameMeta>,
+    /// `<img>` dynamique (CAP-172) — `Some` = le corps est
+    /// rangé dans `img_bodies`/`img_decoded` puis `load`/
+    /// `error` tiré sur l'élément par
+    /// [`Session::commit_dyn_img`] — jamais une
+    /// `NetResponse` de `fetch`/XHR. `handle` porte alors
+    /// le `seq` moteur.
+    pub(crate) img: Option<DynImgMeta>,
 }
 
 /// Métadonnées de livraison d'un `<script>` dynamique
@@ -1290,6 +1297,29 @@ pub(crate) struct DynFrameMeta {
     pub(crate) url: Url,
     /// Document émetteur — `Referer`/`Origin`/ancre
     /// `frame-ancestors`/partition cookies.
+    pub(crate) page: Url,
+}
+
+/// Métadonnées de livraison d'un `<img>` dynamique
+/// (CAP-172) — le corps vérifié est rangé sous deux clés :
+/// `img_bodies` (URL résolue — source du re-décodage
+/// bfcache) et `img_decoded` (chaîne `src`/candidat —
+/// re-matche `collect_images` après resynchro), puis
+/// `load`/`error` part sur l'élément.
+pub(crate) struct DynImgMeta {
+    /// Contexte moteur émetteur (`JS_CTX_TOP` ou iframe).
+    pub(crate) ctx: u32,
+    /// `dyn_script_seq` miroir partagé — retrouve l'élément
+    /// cible de `load`/`error`.
+    pub(crate) seq: u64,
+    /// Chaîne source choisie telle que `collect_images` la
+    /// relira (`src` brut ou candidat `srcset`) — clé de
+    /// `img_decoded`.
+    pub(crate) src_key: String,
+    /// URL résolue du fetch (déjà CSP/mixed-content filtrée
+    /// à l'émission).
+    pub(crate) url: Url,
+    /// Document émetteur — ancre `nosniff`/CORP/`img-src`.
     pub(crate) page: Url,
 }
 

@@ -3384,6 +3384,47 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-172. `<img>` inséré dynamiquement** —
+  *(numéro officiel attribué à l'intégration)* :
+  `document.createElement('img')` + `src`/`srcset`/
+  `sizes` + insertion — et `img.src=` sur élément
+  **détaché** (`new Image().src=` = prefetch, spec
+  « update the image data ») — déclenche le cycle
+  réel : fetch → décodage → `load`/`error` —
+  le patron des galeries lazy, avatars et threads
+  Gmail (leurs images sont injectées par JS,
+  jamais au parse). Miroir : `note_img` enfile les
+  sources demandées (`pending_dyn_imgs`,
+  `dyn_img_seen` — dedup par clé
+  `srcset|sizes|src`, dernier non drainé gagne ;
+  insertion à source inchangée ≠ re-fetch).
+  `drain_dyn_imgs` émet des `DynImgReq` (`ctx`
+  émetteur, `seq`, `src`, `srcset`, `sizes`,
+  `crossorigin` parsé `FetchCredentials`,
+  `referrerpolicy`) pompés par
+  `drain_script_net` hors réentrance : `srcset` →
+  candidat choisi par `resolve_sizes`/`pick_srcset`
+  (mêmes helpers `pub(crate)` que `collect_images`
+  — viewport/dpr de session) ; `data:` décodé
+  **sans requête** ; sinon résolution base
+  émetteur + CSP `img-src` + mixed-content +
+  `sub_request` (`Sec-Fetch-Dest: image`, CORS si
+  `crossorigin`). La réponse passe 2xx +
+  `subresp_security_allows` (`nosniff`/CORP) puis
+  `commit_dyn_img_body` range le décodé dans
+  `img_decoded` (clé chaîne source — la resynchro
+  rematche `collect_images` sur le vrai DOM) +
+  `img_bodies` (URL résolue — re-décodage bfcache)
+  avant `load`/`error` non-bullant sur l'élément
+  — détaché inclus (prefetch). Bonus livrés :
+  `m.srcset`/`m.sizes` propriétés réfléchies
+  (`MAPPED_ATTRS`). Bornes : dernier `src` non
+  pompé gagne (coalescence spec — pas
+  d'annulation de tâche en vol) ; `loading=lazy`
+  ignoré (eager, borne documentée) ;
+  `<source>`/`<picture>` exclus à cette tranche.
+  7 tests session (`dyn_img_*`).
+
 - [x] **CAP-171. `<iframe>` inséré dynamiquement** —
   *(numéro officiel attribué à l'intégration)* :
   `document.createElement('iframe')` + insertion

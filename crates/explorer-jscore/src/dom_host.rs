@@ -143,6 +143,41 @@ pub struct DynFrameReq {
     pub ctx: crate::context::CtxId,
 }
 
+/// CAP-172 — intention de chargement d'un `<img>` créé par
+/// script (ou `src`/`srcset`/`sizes` modifié), drainée par
+/// [`crate::interp::Engine::drain_dyn_imgs`] et servie par
+/// l'embedder : fetch `src`/candidat `srcset` (CSP `img-src`,
+/// mixed-content, `crossorigin` CORS, `referrerpolicy`) ou
+/// décodage `data:` direct, puis `load`/`error` sur
+/// l'élément — attaché **ou détaché** (`new Image().src=`
+/// = prefetch, spec « update the image data »). Le moteur
+/// ne touche jamais le réseau.
+pub struct DynImgReq {
+    /// Identifiant d'émission — répercuté à la livraison
+    /// (`deliver_dyn_img` retrouve le nœud pour
+    /// `load`/`error`).
+    pub seq: u64,
+    /// Attribut `src` brut — la session résout contre la
+    /// base du document émetteur (`data:` servi sans fetch).
+    pub src: Option<String>,
+    /// Attribut `srcset` brut — prime sur `src` quand
+    /// présent (candidat choisi par `sizes`/dpr côté
+    /// session, même pile que `collect_images`).
+    pub srcset: Option<String>,
+    /// Attribut `sizes` brut — pilote le choix `srcset`.
+    pub sizes: Option<String>,
+    /// Attribut `crossorigin` (même mapping que CAP-167) —
+    /// `anonymous`/`use-credentials` → `Include`, vide ou
+    /// valeur nue → `SameOrigin` (mode CORS).
+    pub crossorigin: Option<crate::xhr::FetchCredentials>,
+    /// Attribut `referrerpolicy` brut — prime la politique
+    /// du document (étape 132).
+    pub referrerpolicy: Option<String>,
+    /// Contexte émetteur (`JsCtxId`) — la résolution de
+    /// base et la livraison visent son miroir.
+    pub ctx: crate::context::CtxId,
+}
+
 /// Browser-surface hooks (JS-7e) — everything `window.location`,
 /// `history` and `document.cookie` need, injected by the embedder so
 /// the engine never navigates or touches the cookie store itself.
@@ -172,6 +207,11 @@ pub(crate) struct BrowserHooks {
     /// (CAP-171) — pour `load`/`error` à la livraison. Même
     /// borne que `dyn_script_nodes`.
     pub dyn_frame_nodes: std::collections::BTreeMap<u64, NodeId>,
+    /// `seq` → nœud miroir des `<img>` dynamiques en vol
+    /// (CAP-172) — pour `load`/`error` à la livraison. Même
+    /// borne que `dyn_script_nodes` ; les images détachées
+    /// sont livrées aussi (`new Image().src=` = prefetch).
+    pub dyn_img_nodes: std::collections::BTreeMap<u64, NodeId>,
     /// Séquence d'émission des scripts dynamiques.
     pub dyn_script_seq: u64,
     /// Cookie jar for `document.cookie`.
@@ -2496,6 +2536,11 @@ const MAPPED_ATTRS: &[&str] = &[
     // navigation du sous-contexte).
     "srcdoc",
     "sandbox",
+    // `HTMLImageElement` (CAP-172) — `m.srcset=`/`sizes=`
+    // écrivent l'attribut (le choix de source `srcset`
+    // relit `sizes`, spec).
+    "srcset",
+    "sizes",
 ];
 
 /// Boolean attributes mirrored as `bool` props (`checked`…).

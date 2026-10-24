@@ -12096,3 +12096,173 @@ async fn dyn_frame_nested_child_ctx() {
     let sub = s.frame_dom_dump(a, 1).unwrap();
     assert!(sub.contains("gc"), "sous-document petit-enfant : {sub}");
 }
+
+// ===== CAP-172 — `<img>` inséré dynamiquement =====
+
+/// `createElement('img')` + `src` + insertion : requête
+/// émise (`sec-fetch-dest: image`), corps décodé, `load`
+/// sur l'élément — patron lazy galleries/avatars.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_img_fetch_decodes_load() {
+    let (mut s, t) = test_session();
+    // 1x1 PNG (8 octets magique + IDAT minime servi brut —
+    // le décodeur dégrade en None si non décodable : le
+    // signal testé est fetch + événement, pas le pixel).
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><script>         var m=document.createElement('img');         m.src='/p.png';         m.onload=function(){document.getElementById('x').textContent='load';};         m.onerror=function(){document.getElementById('x').textContent='err';};         document.body.appendChild(m);         </script></body></html>",
+    );
+    t.route_bin("/p.png", 200, red_png());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    assert!(t.paths().contains(&"/p.png".to_string()), "img fetchée");
+    assert_eq!(
+        t.req_header("/p.png", "sec-fetch-dest").as_deref(),
+        Some("image")
+    );
+}
+
+/// Corps PNG réellement décodable → `load` (le `error` ne
+/// doit jamais partir sur un corps valide).
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_img_valid_body_loads() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><script>         var m=document.createElement('img');         m.src='/ok.png';         m.onload=function(){document.getElementById('x').textContent='load';};         m.onerror=function(){document.getElementById('x').textContent='err';};         document.body.appendChild(m);         </script></body></html>",
+    );
+    t.route_bin("/ok.png", 200, red_png());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    let dump = s.dom_dump(a).unwrap();
+    assert!(
+        dump.contains("\"load\""),
+        "load tiré sur corps valide : {dump}"
+    );
+}
+
+/// `img.src=` sur élément **détaché** = prefetch (spec
+/// « update the image data ») — `new Image()` charge sans
+/// insertion, `load` part quand même.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_img_detached_prefetch_loads() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><script>         var m=new Image();         m.onload=function(){document.getElementById('x').textContent='pf';};         m.onerror=function(){document.getElementById('x').textContent='err';};         m.src='/pf.png';         </script></body></html>",
+    );
+    t.route_bin("/pf.png", 200, red_png());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    assert!(t.paths().contains(&"/pf.png".to_string()), "prefetch émis");
+    let dump = s.dom_dump(a).unwrap();
+    assert!(dump.contains("pf"), "load détaché : {dump}");
+}
+
+/// Fetch 404 → `error` sur l'élément, jamais de `load`.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_img_404_fires_error() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><script>         var m=document.createElement('img');         m.src='/miss.png';         m.onload=function(){document.getElementById('x').textContent='load';};         m.onerror=function(){document.getElementById('x').textContent='err';};         document.body.appendChild(m);         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    let dump = s.dom_dump(a).unwrap();
+    assert!(dump.contains("err"), "error tiré : {dump}");
+}
+
+/// CSP `img-src 'none'` : fetch refusé → `error`, aucune
+/// requête vers la ressource.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_img_csp_img_src_blocks() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head><meta http-equiv='Content-Security-Policy' content=\"img-src 'none'\"></head>         <body><div id=x></div><script>         var m=document.createElement('img');         m.src='/p.png';         m.onload=function(){document.getElementById('x').textContent='load';};         m.onerror=function(){document.getElementById('x').textContent='err';};         document.body.appendChild(m);         </script></body></html>",
+    );
+    t.route_bin("/p.png", 200, red_png());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    assert!(
+        !t.paths().contains(&"/p.png".to_string()),
+        "img-src 'none' refuse le fetch"
+    );
+    let dump = s.dom_dump(a).unwrap();
+    assert!(dump.contains("err"), "error tiré : {dump}");
+}
+
+/// `srcset` dynamique : le candidat est choisi par
+/// `sizes`+dpr (même pile que `collect_images`) — le bon
+/// URL part en requête.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_img_srcset_picks_candidate() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><script>         var m=document.createElement('img');         m.srcset='/s1.png 300w, /s2.png 600w';         m.sizes='300px';         m.onload=function(){document.getElementById('x').textContent='load';};         document.body.appendChild(m);         </script></body></html>",
+    );
+    t.route_bin("/s1.png", 200, red_png());
+    t.route_bin("/s2.png", 200, red_png());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    let paths = t.paths();
+    let picked = paths.contains(&"/s1.png".to_string()) || paths.contains(&"/s2.png".to_string());
+    assert!(picked, "un candidat srcset fetché : {paths:?}");
+    let dump = s.dom_dump(a).unwrap();
+    assert!(dump.contains("load"), "load tiré : {dump}");
+}
+
+/// « update the image data » coalesce (spec) : `src=a;
+/// src=b` avant pompe ne fetch que `b` — l'entrée non
+/// drainée est subsumée par la dernière source ; `src=`
+/// **inchangé** ne re-enfile pas (dedup par clé).
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_img_src_dedup_and_renav() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><script>         var m=document.createElement('img');         m.src='/a.png';         m.src='/a.png';         document.body.appendChild(m);         m.src='/b.png';         </script></body></html>",
+    );
+    t.route_bin("/a.png", 200, red_png());
+    t.route_bin("/b.png", 200, red_png());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    let paths = t.paths();
+    assert!(
+        !paths.contains(&"/a.png".to_string()),
+        "src subsummé par /b avant pompe : {paths:?}"
+    );
+    assert_eq!(
+        paths.iter().filter(|p| *p == "/b.png").count(),
+        1,
+        "dernière source = un seul fetch : {paths:?}"
+    );
+}

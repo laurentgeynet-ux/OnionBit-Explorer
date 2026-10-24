@@ -618,6 +618,24 @@ pub trait JsEngine: Send {
     /// `error`. Défaut : no-op.
     fn deliver_dyn_frame(&mut self, _ctx: JsCtxId, _seq: u64, _ok: bool) {}
 
+    /// Draine les `<img>` dont la source a été demandée
+    /// (CAP-172 — `src`/`srcset`/`sizes` posé ou insertion ;
+    /// élément détaché inclus, `new Image().src=` = prefetch
+    /// spec) : la session fetch le candidat choisi
+    /// (`srcset`+`sizes`+dpr, CSP `img-src`, mixed-content,
+    /// `crossorigin`/`referrerpolicy`) ou décode `data:`,
+    /// puis livre via [`Self::deliver_dyn_img`]. Défaut :
+    /// rien (moteur sans DOM miroir dynamique).
+    fn drain_dyn_imgs(&mut self) -> Vec<explorer_jscore::DynImgReq> {
+        Vec::new()
+    }
+
+    /// Livre le résultat d'un `<img>` dynamique au moteur
+    /// (CAP-172) — `true` : corps décodé et rangé,
+    /// `load` tiré sur l'élément ; `false` : refus
+    /// réseau/politique → `error`. Défaut : no-op.
+    fn deliver_dyn_img(&mut self, _ctx: JsCtxId, _seq: u64, _ok: bool) {}
+
     /// Éval d'un élément `<script>` classique (CAP-168) :
     /// `script_ord` = ordinal de l'élément parmi les
     /// `<script>` du document (ordre document) — pendant
@@ -1043,6 +1061,9 @@ pub use explorer_jscore::{is_bare_specifier, rewrite_bare_specifier};
 /// Réémis : requête de `<iframe>` dynamique (CAP-171) —
 /// drainée par [`JsEngine::drain_dyn_frames`].
 pub use explorer_jscore::DynFrameReq;
+/// Réémis : requête de `<img>` dynamique (CAP-172) —
+/// drainée par [`JsEngine::drain_dyn_imgs`].
+pub use explorer_jscore::DynImgReq;
 /// Réémis : requête de `<script>` dynamique (CAP-169) —
 /// drainée par [`JsEngine::drain_dyn_scripts`].
 pub use explorer_jscore::DynScriptReq;
@@ -1361,6 +1382,9 @@ enum Cmd {
         ord: usize,
         tx: Sender<Result<String, JsError>>,
     },
+    DrainDynImgs {
+        tx: Sender<Vec<explorer_jscore::DynImgReq>>,
+    },
     DrainDynScripts {
         tx: Sender<Vec<explorer_jscore::DynScriptReq>>,
     },
@@ -1373,6 +1397,11 @@ enum Cmd {
         tx: Sender<Vec<explorer_jscore::DynFrameReq>>,
     },
     DeliverDynFrame {
+        ctx: JsCtxId,
+        seq: u64,
+        ok: bool,
+    },
+    DeliverDynImg {
         ctx: JsCtxId,
         seq: u64,
         ok: bool,
@@ -1896,6 +1925,19 @@ impl JscoreEngine {
                     }
                     eng.context_switch(prev);
                 }
+                Cmd::DrainDynImgs { tx } => {
+                    if tx.send(eng.drain_dyn_imgs()).is_err() {
+                        return;
+                    }
+                }
+                Cmd::DeliverDynImg { ctx, seq, ok } => {
+                    let prev = eng.current_context();
+                    eng.context_switch(ctx);
+                    if eng.current_context() == ctx {
+                        eng.deliver_dyn_img(seq, ok);
+                    }
+                    eng.context_switch(prev);
+                }
                 Cmd::DispatchCtx { ctx, ty, path, tx } => {
                     let prev = eng.current_context();
                     eng.context_switch(ctx);
@@ -2132,6 +2174,18 @@ impl JsEngine for JscoreEngine {
 
     fn deliver_dyn_frame(&mut self, ctx: JsCtxId, seq: u64, ok: bool) {
         let _ = self.tx.send(Cmd::DeliverDynFrame { ctx, seq, ok });
+    }
+
+    fn drain_dyn_imgs(&mut self) -> Vec<explorer_jscore::DynImgReq> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainDynImgs { tx }).is_err() {
+            return Vec::new();
+        }
+        rx.recv().unwrap_or_default()
+    }
+
+    fn deliver_dyn_img(&mut self, ctx: JsCtxId, seq: u64, ok: bool) {
+        let _ = self.tx.send(Cmd::DeliverDynImg { ctx, seq, ok });
     }
 
     fn dispatch_event_ctx(

@@ -1346,6 +1346,101 @@ impl Engine {
         let _ = self.propagate_event(&dom, &cache, &ev);
     }
 
+    /// Draine les `<img>` dont la source a été demandée
+    /// (CAP-172 — `src`/`srcset`/`sizes` posé ou insertion)
+    /// — tous les contextes, même discipline que
+    /// [`Self::drain_dyn_scripts`]. Contrairement aux cadres
+    /// la **détache** n'exclut pas : `new Image().src=` est
+    /// un prefetch spec — seul un nœud devenu absent du
+    /// miroir saute.
+    pub fn drain_dyn_imgs(&mut self) -> Vec<crate::dom_host::DynImgReq> {
+        let mut doms: Vec<(crate::context::CtxId, crate::dom_host::DomRef)> = Vec::new();
+        if let Some((d, _)) = &self.dom_ctx {
+            doms.push((self.cur_ctx, d.clone()));
+        }
+        for (id, ctx) in &self.parked {
+            if let Some((d, _)) = &ctx.dom_ctx {
+                doms.push((*id, d.clone()));
+            }
+        }
+        let mut out = Vec::new();
+        for (ctx, dom) in doms {
+            let nodes = std::mem::take(&mut dom.borrow_mut().pending_dyn_imgs);
+            let d = dom.borrow();
+            for n in nodes {
+                let Some(node) = d.nodes.get(n as usize) else {
+                    continue;
+                };
+                if node.kind != crate::dom::NodeKind::Element || node.tag != "img" {
+                    continue;
+                }
+                let attr = |k: &str| {
+                    node.attrs
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(k))
+                        .map(|(_, v)| v.clone())
+                };
+                let seq = self.hooks.dyn_script_seq;
+                self.hooks.dyn_script_seq += 1;
+                if self.hooks.dyn_img_nodes.len() >= 256 {
+                    if let Some((first, _)) = self
+                        .hooks
+                        .dyn_img_nodes
+                        .iter()
+                        .next()
+                        .map(|(k, v)| (*k, *v))
+                    {
+                        self.hooks.dyn_img_nodes.remove(&first);
+                    }
+                }
+                self.hooks.dyn_img_nodes.insert(seq, n);
+                let crossorigin =
+                    attr("crossorigin").map(|v| match v.trim().to_ascii_lowercase().as_str() {
+                        "use-credentials" => crate::xhr::FetchCredentials::Include,
+                        _ => crate::xhr::FetchCredentials::SameOrigin,
+                    });
+                out.push(crate::dom_host::DynImgReq {
+                    seq,
+                    src: attr("src"),
+                    srcset: attr("srcset"),
+                    sizes: attr("sizes"),
+                    crossorigin,
+                    referrerpolicy: attr("referrerpolicy"),
+                    ctx,
+                });
+            }
+        }
+        out
+    }
+
+    /// Livraison d'un `<img>` dynamique (CAP-172) — corps
+    /// décodé (`Ok`) ou refusé (fetch, CSP `img-src`,
+    /// mixed-content) par la session ; `load`/`error` part
+    /// sur l'élément miroir (non-bullant, spec) — attaché
+    /// **ou détaché** (prefetch `new Image()`).
+    pub fn deliver_dyn_img(&mut self, seq: u64, ok: bool) {
+        let Some(node) = self.hooks.dyn_img_nodes.remove(&seq) else {
+            return;
+        };
+        let Some((dom, cache)) = self.dom_ctx.clone() else {
+            return;
+        };
+        let ty = if ok { "load" } else { "error" };
+        let (bubbles, cancelable, composed) = crate::dom_host::platform_event_flags(ty);
+        let ev = crate::dom_host::make_event_state(
+            ty,
+            node,
+            crate::dom_host::EventFlags {
+                bubbles,
+                cancelable,
+                composed,
+                trusted: true,
+            },
+            Vec::new(),
+        );
+        let _ = self.propagate_event(&dom, &cache, &ev);
+    }
+
     /// Contexte propriétaire du miroir `dom` (`Rc::as_ptr`) —
     /// `contentDocument.readyState` vu depuis un autre realm
     /// doit lire l'état de **son** document, pas du ctx

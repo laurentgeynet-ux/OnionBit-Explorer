@@ -1400,6 +1400,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-172 — `<img>` inséré dynamiquement**
+  (`explorer-jscore`/`explorer-js`/`explorer-core` —
+  cap « web réel sécurisé » ; numéro officiel
+  attribué à l'intégration) : `createElement('img')`
+  + `src`/`srcset`/`sizes` + insertion — ou `src=`
+  sur élément **détaché** (`new Image().src=` =
+  prefetch, spec « update the image data ») —
+  déclenche fetch réel + décodage + `load`/`error`.
+  Le miroir enfile les sources demandées
+  (`pending_dyn_imgs`, dedup par clé
+  `srcset|sizes|src` — dernier non drainé gagne,
+  coalescence spec). `drain_dyn_imgs` émet des
+  `DynImgReq` (`ctx`, `seq`, `src`, `srcset`,
+  `sizes`, `crossorigin` parsé, `referrerpolicy`)
+  pompés par `drain_script_net` : `srcset` →
+  candidat choisi par `resolve_sizes`/`pick_srcset`
+  (même pile que `collect_images` — viewport/dpr) ;
+  `data:` décodé sans requête ; sinon résolution
+  base émetteur + CSP `img-src` + mixed-content +
+  `sub_request` (`Sec-Fetch-Dest: image`, mode CORS
+  si `crossorigin`). La réponse passe statut 2xx +
+  sécurité sous-ressource (`nosniff`/CORP) puis le
+  corps rejoint `img_decoded` (clé chaîne source —
+  la resynchro rematche `collect_images` sur le
+  vrai DOM) + `img_bodies` (URL résolue — source
+  bfcache) ; `load`/`error` non-bullant sur
+  l'élément miroir, détaché inclus. Bonus :
+  `m.srcset`/`m.sizes` propriétés réfléchies.
+  Bornes : dernier `src` non pompé gagne (pas
+  d'annulation de tâche en vol) ; `loading=lazy`
+  non honoré (eager) ; `<source>`/`<picture>`
+  exclus. 7 tests session (`dyn_img_*`).
+
 - **CAP-171 — `<iframe>` inséré dynamiquement**
   (`explorer-jscore`/`explorer-js`/`explorer-core` —
   cap « web réel sécurisé » ; numéro officiel

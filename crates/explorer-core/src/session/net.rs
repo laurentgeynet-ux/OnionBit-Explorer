@@ -320,19 +320,22 @@ impl Session {
     /// immédiate d'un échec `status: 0` (`error` côté
     /// script — la page reste vivante, jamais de panic).
     pub(crate) fn drain_script_net(&mut self, tab: TabId) {
-        let Some((page, base, reqs, dyns, dyn_frames)) = self.tabs.get_mut(&tab).and_then(|e| {
-            let page = e.url.clone();
-            let base = e.nav_base().cloned();
-            e.js.as_mut().map(|eng| {
-                (
-                    page,
-                    base,
-                    eng.drain_net_requests(),
-                    eng.drain_dyn_scripts(),
-                    eng.drain_dyn_frames(),
-                )
+        let Some((page, base, reqs, dyns, dyn_frames, dyn_imgs)) =
+            self.tabs.get_mut(&tab).and_then(|e| {
+                let page = e.url.clone();
+                let base = e.nav_base().cloned();
+                e.js.as_mut().map(|eng| {
+                    (
+                        page,
+                        base,
+                        eng.drain_net_requests(),
+                        eng.drain_dyn_scripts(),
+                        eng.drain_dyn_frames(),
+                        eng.drain_dyn_imgs(),
+                    )
+                })
             })
-        }) else {
+        else {
             return;
         };
         let (Some(page), Some(base)) = (page, base) else {
@@ -422,17 +425,41 @@ impl Session {
                 },
             );
         }
-        // `<script>` insérés dynamiquement (CAP-169) —
-        // `force-async` spec : fetch/éval dès l'arrivée,
-        // `load`/`error` sur l'élément à la livraison.
+        // `<script>`/`<iframe>`/`<img>` dynamiques
+        // (CAP-169/171/172) — hors réentrance, même
+        // discipline : fetch en tâches, livraison au
+        // `seq` moteur.
+        self.spawn_dyn_subresources(tab, &page, &base, dyns, dyn_frames, dyn_imgs);
+    }
+
+    /// Distribution des requêtes dynamiques drainées
+    /// (CAP-169/171/172) : `force-async` spec — fetch/éval
+    /// dès l'arrivée, `load`/`error` sur l'élément à la
+    /// livraison, jamais d'exécution synchrone dans le
+    /// drain.
+    fn spawn_dyn_subresources(
+        &mut self,
+        tab: TabId,
+        page: &Url,
+        base: &Url,
+        dyns: Vec<explorer_js::DynScriptReq>,
+        dyn_frames: Vec<explorer_js::DynFrameReq>,
+        dyn_imgs: Vec<explorer_js::DynImgReq>,
+    ) {
         for d in dyns {
-            self.spawn_dyn_script(tab, &page, &base, &d);
+            self.spawn_dyn_script(tab, page, base, &d);
         }
-        // `<iframe>` insérés dynamiquement / `src=` modifié
-        // (CAP-171) : fetch puis realm enfant —
+        // `<iframe>` : fetch puis realm enfant —
         // `commit_dyn_frame` à la réponse.
         for d in dyn_frames {
-            self.spawn_dyn_frame(tab, &page, &base, &d);
+            self.spawn_dyn_frame(tab, page, base, &d);
+        }
+        // `<img>` : source choisie (`srcset`/`sizes`/dpr ou
+        // `src`), `data:` décodé sans fetch, sinon
+        // `img-src` CSP + mixed-content puis fetch —
+        // `commit_dyn_img` à la réponse.
+        for d in dyn_imgs {
+            self.spawn_dyn_img(tab, page, base, &d);
         }
     }
 
@@ -536,6 +563,7 @@ impl Session {
                         out,
                         script: Some(meta),
                         frame: None,
+                        img: None,
                     });
                 });
                 self.dyn_tasks.insert((tab, seq), j);
@@ -711,9 +739,207 @@ impl Session {
                 out,
                 script: None,
                 frame: Some(meta),
+                img: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
+    }
+
+    /// Un `<img>` dynamique (CAP-172) : `srcset` → candidat
+    /// choisi par `resolve_sizes`/`pick_srcset` (même pile
+    /// que `collect_images` — viewport/dpr de session), sinon
+    /// `src` ; `data:` est décodé **sans requête** ; sinon
+    /// résolution base émetteur + `img-src` CSP +
+    /// mixed-content puis `sub_request`
+    /// (`Sec-Fetch-Dest: image`, `crossorigin` CORS,
+    /// `referrerpolicy`). Refus → `error` sur l'élément.
+    fn spawn_dyn_img(&mut self, tab: TabId, page: &Url, base: &Url, d: &explorer_js::DynImgReq) {
+        let Some((req_page, req_base, doc_policy, csp, _opaque)) =
+            self.ctx_net_origin(tab, d.ctx, page, base)
+        else {
+            self.deliver_dyn_img_el(tab, d.ctx, d.seq, false);
+            return;
+        };
+        // Choix de la source — `srcset` prime sur `src`
+        // (spec) ; la clé est la chaîne telle que
+        // `collect_images` la relira au prochain apply.
+        let src_key = d
+            .srcset
+            .as_deref()
+            .and_then(|ss| {
+                let eff_w = resolve_sizes(d.sizes.clone(), self.viewport.0);
+                pick_srcset(ss, eff_w, self.scale)
+            })
+            .or_else(|| {
+                d.src
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+            });
+        let Some(src_key) = src_key else {
+            self.deliver_dyn_img_el(tab, d.ctx, d.seq, false);
+            return;
+        };
+        // `data:` — corps auto-porteur, aucune requête
+        // (même pile que le decode statique).
+        if let Some(body) = data_url_bytes(&src_key) {
+            let url = Url::parse(&src_key).unwrap_or_else(|_| req_page.clone());
+            self.commit_dyn_img_body(tab, d.ctx, d.seq, src_key, &url, body);
+            return;
+        }
+        let Some(url) = Url::resolve(&req_base, &src_key)
+            .ok()
+            .filter(|u| !is_mixed_content(&req_page, u))
+            .filter(|u| {
+                explorer_net::csp::csp_allows(
+                    &csp,
+                    &req_page,
+                    explorer_net::http::FetchDest::Image,
+                    u,
+                )
+            })
+        else {
+            self.deliver_dyn_img_el(tab, d.ctx, d.seq, false);
+            return;
+        };
+        let policy = d
+            .referrerpolicy
+            .as_deref()
+            .and_then(explorer_net::http::ReferrerPolicy::parse)
+            .or(doc_policy);
+        let cross = d.crossorigin.map(|c| match c {
+            explorer_js::FetchCredentials::Omit => explorer_net::http::FetchCredentials::Omit,
+            explorer_js::FetchCredentials::SameOrigin => {
+                explorer_net::http::FetchCredentials::SameOrigin
+            }
+            explorer_js::FetchCredentials::Include => explorer_net::http::FetchCredentials::Include,
+        });
+        let req = sub_request(
+            &req_page,
+            &url,
+            explorer_net::http::FetchDest::Image,
+            policy,
+            cross,
+        );
+        let is_cross = req_page.origin() != url.origin();
+        let credentials = cross.unwrap_or(explorer_net::http::FetchCredentials::SameOrigin);
+        let fetch_mode = req.fetch_mode;
+        let page_origin = origin_header_value(&req_page);
+        let partition = explorer_net::cookies::request_partition(&req);
+        let req_url = req.url.clone();
+        let meta = DynImgMeta {
+            ctx: d.ctx,
+            seq: d.seq,
+            src_key,
+            url,
+            page: req_page,
+        };
+        let tr = self.transport.clone();
+        let tx = self.net_tx.clone();
+        let seq = d.seq;
+        let j = tokio::spawn(async move {
+            let out = tr.fetch(&req).await;
+            let _ = tx.send(NetDone {
+                tab,
+                handle: seq,
+                cross: is_cross,
+                mode: fetch_mode,
+                credentials,
+                page_origin,
+                req_url,
+                partition,
+                out,
+                script: None,
+                frame: None,
+                img: Some(meta),
+            });
+        });
+        self.dyn_tasks.insert((tab, seq), j);
+    }
+
+    /// Réception d'un `<img>` dynamique fetché (CAP-172) —
+    /// statut 2xx + sécurité sous-ressource (`nosniff`/CORP)
+    /// exigés, puis le corps est rangé par
+    /// [`Self::commit_dyn_img_body`] ; refus → `error` sur
+    /// l'élément.
+    fn commit_dyn_img(&mut self, tab: TabId, meta: DynImgMeta, out: &NetResult<Response>) {
+        let body = match out {
+            Ok(resp)
+                if (200..300).contains(&resp.status)
+                    && subresp_security_allows(
+                        &meta.page,
+                        &meta.url,
+                        explorer_net::http::FetchDest::Image,
+                        resp,
+                    ) =>
+            {
+                Some(resp.body.clone())
+            }
+            _ => None,
+        };
+        match body {
+            Some(b) => {
+                self.commit_dyn_img_body(tab, meta.ctx, meta.seq, meta.src_key, &meta.url, b);
+            }
+            None => self.deliver_dyn_img_el(tab, meta.ctx, meta.seq, false),
+        }
+    }
+
+    /// Corps accepté d'un `<img>` dynamique (CAP-172) :
+    /// décodage `decode_image` → `img_decoded[src_key]` (la
+    /// resynchro fait le reste — `collect_images` rematche
+    /// la même clé sur le vrai DOM) + corps compressé retenu
+    /// dans `img_bodies` sous l'URL résolue (bfcache).
+    /// `load` part sur l'élément quoi qu'il arrive ;
+    /// l'échec de **décodage** → `error` (spec — un corps
+    /// invalide n'est pas une image chargée).
+    fn commit_dyn_img_body(
+        &mut self,
+        tab: TabId,
+        ctx: explorer_js::JsCtxId,
+        seq: u64,
+        src_key: String,
+        url: &Url,
+        body: Vec<u8>,
+    ) {
+        let max_px = self.image_max_px;
+        let img = decode_image(&body, max_px).map(Arc::new);
+        let ok = img.is_some();
+        if let Some(img) = img {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            entry.img_decoded.insert(src_key, img.clone());
+            entry.bg_decoded.insert(url.as_str(), Some(img));
+            retain_img_body(&mut entry.img_bodies, &url.as_str(), body);
+        }
+        // Échec de décodage → `error` : un corps invalide
+        // n'est pas une image chargée (spec), et rien n'est
+        // retenu (un blob invalide ne re-servirait pas).
+        self.deliver_dyn_img_el(tab, ctx, seq, ok);
+    }
+
+    /// `load`/`error` sur l'élément `<img>` miroir (CAP-172) —
+    /// relais mince de `deliver_dyn_img` avec resynchro (la
+    /// livraison peut muter le DOM du ctx).
+    fn deliver_dyn_img_el(&mut self, tab: TabId, ctx: explorer_js::JsCtxId, seq: u64, ok: bool) {
+        let mutated = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            let Some(eng) = entry.js.as_mut() else {
+                return;
+            };
+            eng.deliver_dyn_img(ctx, seq, ok);
+            let n = eng.run_pending();
+            tracing::trace!(tab, jobs = n, "jobs js après livraison img dyn");
+            Self::sync_for_apply(eng.as_mut())
+        };
+        if let Some(s) = mutated {
+            self.queue_apply_sync(tab, s);
+        }
+        self.after_script(tab);
     }
 
     /// Réception d'un `<iframe>` dynamique fetché (CAP-171) —
@@ -1082,6 +1308,7 @@ impl Session {
                 out,
                 script: None,
                 frame: None,
+                img: None,
             });
         });
         self.net_tasks.insert((tab, handle), j);
@@ -1333,6 +1560,13 @@ impl Session {
             if let Some(meta) = d.frame {
                 self.dyn_tasks.remove(&(d.tab, meta.seq));
                 self.commit_dyn_frame_resp(d.tab, &meta, &d.out);
+                continue;
+            }
+            // `<img>` dynamique (CAP-172) — même convention
+            // `handle` = `seq` moteur.
+            if let Some(meta) = d.img {
+                self.dyn_tasks.remove(&(d.tab, meta.seq));
+                self.commit_dyn_img(d.tab, meta, &d.out);
                 continue;
             }
             self.net_tasks.remove(&(d.tab, d.handle));

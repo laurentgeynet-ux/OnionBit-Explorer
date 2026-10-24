@@ -486,6 +486,7 @@ dependencies = [
  "explorer-layout",
  "explorer-net",
  "explorer-render",
+ "serde_json",
  "tokio",
  "tracing-subscriber",
 ]

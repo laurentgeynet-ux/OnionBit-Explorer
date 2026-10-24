@@ -603,6 +603,17 @@ pub struct Dom {
     /// cadre attaché) — en attente de fetch par la session
     /// (`Engine::drain_dyn_frames`). Ordre document.
     pub(crate) pending_dyn_frames: Vec<NodeId>,
+    /// `<img>` dont la source a été demandée (CAP-172) —
+    /// nœud → clé `srcset|sizes|src` de la **dernière**
+    /// requête : `img.src=` re-fetch à chaque changement
+    /// (spec), l'insertion ne re-fetch pas une source
+    /// identique déjà en vol. Contrairement aux cadres,
+    /// une image se charge **détachée** (`new Image().src=`
+    /// = prefetch, spec « update the image data »).
+    pub(crate) dyn_img_seen: HashMap<NodeId, String>,
+    /// `<img>` en attente de fetch par la session
+    /// (`Engine::drain_dyn_imgs`) — ordre d'émission.
+    pub(crate) pending_dyn_imgs: Vec<NodeId>,
     /// « Document ouvert à l'écriture » (JS-C35) — `true` tant
     /// que la page se charge : `document.write`/`writeln` y
     /// ajoutent à `<body>`. `document.close()` ou la
@@ -709,6 +720,8 @@ impl Dom {
             doc_open: true,
             dyn_started: HashSet::new(),
             pending_dyn: Vec::new(),
+            dyn_img_seen: HashMap::new(),
+            pending_dyn_imgs: Vec::new(),
             dyn_frame_seen: HashSet::new(),
             pending_dyn_frames: Vec::new(),
             focused: Cell::new(None),
@@ -1054,6 +1067,11 @@ impl Dom {
         // scripts ci-dessus).
         d.mark_frames_seen(d.root);
         d.pending_dyn_frames.clear();
+        // Idem `<img>` (CAP-172) — les images du parse sont
+        // collectées par la pile statique (`collect_images`),
+        // jamais via la file dynamique.
+        d.dyn_img_seen.clear();
+        d.pending_dyn_imgs.clear();
         d
     }
 
@@ -1104,6 +1122,42 @@ impl Dom {
         self.note_attached_frame(node);
     }
 
+    /// CAP-172 — « update the image data » (spec) : appelé
+    /// sur insertion attachée et sur tout changement de
+    /// `src`/`srcset`/`sizes` d'un `<img>` — attaché **ou
+    /// détaché** (`new Image().src=` = prefetch, spec). La
+    /// clé source (`srcset|sizes|src`) dedup : ré-insérer
+    /// un `<img>` à source inchangée ne re-fetch pas ;
+    /// changer `src` enfile une nouvelle requête (l'ancienne
+    /// en vol aboutit `load`/`error` normalement — borne :
+    /// pas d'annulation de tâche).
+    fn note_img(&mut self, node: NodeId) {
+        let el = &self.nodes[node as usize];
+        if el.kind != NodeKind::Element || el.tag != "img" {
+            return;
+        }
+        let get = |k: &str| {
+            el.attrs
+                .iter()
+                .find(|(name, _)| name == k)
+                .map_or("", |(_, v)| v.as_str())
+        };
+        let key = format!("{}\u{0}{}\u{0}{}", get("srcset"), get("sizes"), get("src"));
+        if key == "\u{0}\u{0}" {
+            return;
+        }
+        if self.dyn_img_seen.get(&node) == Some(&key) {
+            return;
+        }
+        self.dyn_img_seen.insert(node, key);
+        // Dernière source gagne (spec « update the image
+        // data » coalesce) : une entrée non drainée pour ce
+        // nœud est subsumée — `src=a; src=b` avant pompe ne
+        // fetch que `b`.
+        self.pending_dyn_imgs.retain(|&n| n != node);
+        self.pending_dyn_imgs.push(node);
+    }
+
     /// Marque « already started » tous les `<script>` du
     /// sous-arbre `node` (spec : le parseur de fragments pose
     /// le flag — `innerHTML` n'exécute jamais ses scripts,
@@ -1146,6 +1200,13 @@ impl Dom {
             // `src`/`srcdoc`.
             if self.nodes[n as usize].tag == "iframe" {
                 self.note_attached_frame(n);
+            }
+            // `<img>` inséré → « update the image data »
+            // (CAP-172, spec) — `note_img` dedup par clé
+            // source : une image dont `src=` a déjà enfilé
+            // détachée n'est pas re-fetchée à l'insertion.
+            if self.nodes[n as usize].tag == "img" {
+                self.note_img(n);
             }
             stack.extend(self.nodes[n as usize].children.iter().rev().copied());
         }
@@ -2074,6 +2135,19 @@ impl Dom {
             && (name.eq_ignore_ascii_case("src") || name.eq_ignore_ascii_case("srcdoc"))
         {
             self.note_frame_src_changed(node);
+        }
+        // `img.src`/`srcset`/`sizes` modifié → « update the
+        // image data » (CAP-172, spec) — détaché inclus
+        // (`new Image().src=` = prefetch) ; `note_img` dedup
+        // par clé source.
+        if old.as_deref() != Some(value)
+            && self.nodes[node as usize].tag == "img"
+            && matches!(
+                name,
+                "src" | "srcset" | "sizes" | "crossorigin" | "referrerpolicy"
+            )
+        {
+            self.note_img(node);
         }
     }
 

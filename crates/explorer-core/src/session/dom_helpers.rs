@@ -554,7 +554,7 @@ fn srcset_desc(tok: &str) -> Option<SrcsetDesc> {
 /// `None` (repli `src` — les candidats `data:` sont bornés :
 /// le peintre inline `collect_data_images` indexe par `src`,
 /// les ignorer évite la désynchronisation fetch/peinture).
-fn pick_srcset(srcset: &str, eff_w: f32, dpr: f32) -> Option<String> {
+pub(crate) fn pick_srcset(srcset: &str, eff_w: f32, dpr: f32) -> Option<String> {
     let mut cands: Vec<(String, SrcsetDesc)> = Vec::new();
     // Queue d'une URL `data:` découpée sur sa virgule
     // interne — le segment suivant est sa fin (+desc), pas
@@ -626,7 +626,7 @@ fn pick_srcset(srcset: &str, eff_w: f32, dpr: f32) -> Option<String> {
 /// termes conditionnels `(...) Npx` sont sautés (éval
 /// média hors portée — le terme final non conditionnel de
 /// la spec est ainsi trouvé). Défaut : `viewport` (100vw).
-fn resolve_sizes(sizes: Option<String>, vp_w: f32) -> f32 {
+pub(crate) fn resolve_sizes(sizes: Option<String>, vp_w: f32) -> f32 {
     let Some(sizes) = sizes else {
         return vp_w;
     };
