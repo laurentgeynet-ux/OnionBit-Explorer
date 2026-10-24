@@ -449,22 +449,50 @@ impl Session {
                         });
                     }
                 }
-                NetRequest::Crypto { handle, op, data } => {
-                    let explorer_js::CryptoOp::Digest(algo) = op;
+                NetRequest::Crypto {
+                    handle,
+                    op,
+                    data,
+                    key,
+                } => {
                     let tx = self.crypto_tx.clone();
                     tokio::task::spawn_blocking(move || {
-                        let a = match algo {
-                            explorer_js::DigestAlgo::Sha256 => {
-                                explorer_net::crypto::CryptoAlgo::Sha256
+                        use explorer_net::crypto as nc;
+                        fn digest_of(a: explorer_js::DigestAlgo) -> nc::CryptoAlgo {
+                            match a {
+                                explorer_js::DigestAlgo::Sha256 => nc::CryptoAlgo::Sha256,
+                                explorer_js::DigestAlgo::Sha384 => nc::CryptoAlgo::Sha384,
+                                explorer_js::DigestAlgo::Sha512 => nc::CryptoAlgo::Sha512,
                             }
-                            explorer_js::DigestAlgo::Sha384 => {
-                                explorer_net::crypto::CryptoAlgo::Sha384
+                        }
+                        fn key_of(a: explorer_js::KeyAlgo) -> nc::KeyAlgo {
+                            match a {
+                                explorer_js::KeyAlgo::Hmac { hash } => {
+                                    nc::KeyAlgo::Hmac(digest_of(hash))
+                                }
+                                explorer_js::KeyAlgo::EcdsaP256 => nc::KeyAlgo::EcdsaP256,
+                                explorer_js::KeyAlgo::Ed25519 => nc::KeyAlgo::Ed25519,
                             }
-                            explorer_js::DigestAlgo::Sha512 => {
-                                explorer_net::crypto::CryptoAlgo::Sha512
+                        }
+                        let result = match op {
+                            explorer_js::CryptoOp::Digest(algo) => {
+                                Ok(nc::digest(digest_of(algo), &data))
+                            }
+                            explorer_js::CryptoOp::ImportKey { format, algo } => {
+                                let f = match format {
+                                    explorer_js::ImportFormat::Raw => nc::KeyFormat::Raw,
+                                    explorer_js::ImportFormat::Pkcs8 => nc::KeyFormat::Pkcs8,
+                                    explorer_js::ImportFormat::Spki => nc::KeyFormat::Spki,
+                                };
+                                nc::import_key(key_of(algo), f, &data)
+                            }
+                            explorer_js::CryptoOp::Sign { algo } => {
+                                nc::sign(key_of(algo), &key, &data)
+                            }
+                            explorer_js::CryptoOp::Verify { algo, sig } => {
+                                nc::verify(key_of(algo), &key, &sig, &data)
                             }
                         };
-                        let result = Ok(explorer_net::crypto::digest(a, &data));
                         let _ = tx.send(CryptoDone {
                             tab,
                             handle,

@@ -9,6 +9,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C93 — `crypto.subtle` à clé +
+  `navigator.credentials` honnête**
+  (`explorer-jscore`, `explorer-net`,
+  `explorer-js`, `explorer-core`) :
+  `importKey`(`raw`/`pkcs8`/`spki`),
+  `sign`, `verify` — HMAC, ECDSA
+  P-256/SHA-256, Ed25519 via `ring`
+  (zéro dép ajoutée). `CryptoKey`
+  opaque (type/algorithm/usages/
+  extractable ; l'algo complet vit
+  sur la clé — `sign('HMAC',k)` spec).
+  `CryptoRequest` gagne `key` ; la
+  livraison résout ArrayBuffer/
+  booléen/`CryptoKey` selon l'op.
+  `navigator.credentials` pose
+  `CredentialsContainer` : `create`/
+  `get` → `NotSupportedError` (pas
+  d'authentificateur — passkeys =
+  chantier embedder), `preventSilentAccess`
+  → `undefined`. Bornes : `jwk` rejeté,
+  pas de `generateKey`/`derive*`/`encrypt`.
+  Régressions : `subtle_hmac_import_
+  sign_verify`, `credentials_stub_
+  rejects_honestly` (2 session).
+
 - **JS-C90 — méthodes `Array.prototype` génériques**
   (`explorer-jscore`) : `[].push.call(o)` sur un objet
   `length`+indices — `take_elems`/`put_elems` matérialisent

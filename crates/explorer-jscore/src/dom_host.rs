@@ -1511,6 +1511,19 @@ impl Engine {
         // via le transport XHR (staple de télémétrie des pages
         // réelles ; `false` sans connecteur, comme la spec).
         self.add_method(nav, "sendBeacon", nav_send_beacon);
+        // `navigator.credentials` (JS-C93) — surface spec
+        // `CredentialsContainer` : `create`/`get` rejettent
+        // `NotSupportedError` (pas d'authentificateur
+        // plateforme — la délégation passkey réelle est un
+        // chantier embedder à part) ; `preventSilentAccess`
+        // résout `undefined` (spec, API dépréciée mais lue).
+        let creds = self.new_object();
+        self.add_method(creds, "create", creds_unsupported);
+        self.add_method(creds, "get", creds_unsupported);
+        self.add_method(creds, "preventSilentAccess", creds_psa);
+        let tag = self.str_val("CredentialsContainer");
+        self.set_own(creds, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own(nav, "credentials", Value::Obj(creds), true);
         self.set_own(g, "navigator", Value::Obj(nav), false);
 
         // `Worker` borné (JS-C29) — le constructeur est présent
@@ -7700,6 +7713,30 @@ fn nav_send_beacon(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
         ctx: e.cur_ctx,
     });
     Ok(Value::Bool(true))
+}
+
+/// `credentials.create`/`get` (JS-C93) — stub honnête : pas
+/// d'authentificateur plateforme → `Promise` rejetée
+/// `NotSupportedError` (les feature-detects passent, le flux
+/// passkey échoue proprement au lieu de casser sur
+/// `undefined`).
+fn creds_unsupported(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    let o = e.new_object();
+    let n = e.str_val("NotSupportedError");
+    e.set_own(o, "name", n, true);
+    let m = e.str_val("credentials: no platform authenticator");
+    e.set_own(o, "message", m, true);
+    e.reject_promise(pid, Value::Obj(o));
+    Ok(Value::Obj(pid))
+}
+
+/// `credentials.preventSilentAccess` — spec dépréciée :
+/// résout `undefined`.
+fn creds_psa(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    e.resolve_promise(pid, Value::Undefined);
+    Ok(Value::Obj(pid))
 }
 
 // ------------------------------------------------------------------

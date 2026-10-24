@@ -180,10 +180,14 @@ pub enum NetRequest {
     Crypto {
         /// Identifiant rendu par `CryptoTransport::submit`.
         handle: u64,
-        /// Opération normalisée (`Digest` + algo validé).
+        /// Opération normalisée (`Digest` + algo validé ;
+        /// `ImportKey`/`Sign`/`Verify` depuis JS-C93).
         op: explorer_jscore::CryptoOp,
         /// Octets source copiés hors du heap à l'appel.
         data: Vec<u8>,
+        /// Octets de la `CryptoKey` (`sign`/`verify`, JS-C93)
+        /// — vide pour `digest`/`importKey`.
+        key: Vec<u8>,
     },
     /// Ouverture d'un flux SSE `EventSource` (JS-C92) —
     /// requête **streamée** : la session fetch
@@ -1155,7 +1159,8 @@ pub type JsCtxId = u32;
 pub const JS_CTX_TOP: JsCtxId = 0;
 // JS-C79 — opération `crypto.subtle` transportée par
 // `NetRequest::Crypto` (ré-export : le type reste unique).
-pub use explorer_jscore::{CryptoOp, DigestAlgo};
+// JS-C93 — `KeyAlgo`/`ImportFormat` pour les ops à clé.
+pub use explorer_jscore::{CryptoOp, DigestAlgo, ImportFormat, KeyAlgo};
 
 /// Commandes vers le thread moteur — valeurs sérialisables, aucun
 /// handle `Rc` ne traverse.
@@ -3171,6 +3176,7 @@ impl explorer_jscore::CryptoTransport for ChanCrypto {
             handle,
             op: req.op,
             data: req.data,
+            key: req.key,
         });
         handle
     }

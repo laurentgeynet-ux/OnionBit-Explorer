@@ -216,7 +216,7 @@ impl BrowsingContext {
         self.ws.root_ids(ids);
         self.es.root_ids(ids);
         self.misc.root_ids(ids);
-        for (_, promise) in &self.crypto.pending {
+        for (_, promise, _) in &self.crypto.pending {
             ids.push(*promise);
         }
         if let Some((dom, cache)) = &self.dom_ctx {

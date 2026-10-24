@@ -6113,6 +6113,16 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `htmx.ajax` part. Reste : heap-limit au swap
   (`hx-swap`), Alpine `x-data`.
 
+- [x] **JS-C93. `crypto.subtle` à clé +
+  `navigator.credentials` honnête** —
+  `importKey`/`sign`/`verify` (HMAC,
+  ECDSA-P256, Ed25519 — `ring`),
+  `CryptoKey` opaque ; `credentials`
+  `create`/`get` → `NotSupportedError`.
+  Reste : `jwk`, `generateKey`,
+  `derive*`, `encrypt`, passkeys
+  plateforme (délégation embedder).
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

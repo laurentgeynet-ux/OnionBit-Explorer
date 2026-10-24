@@ -12608,3 +12608,65 @@ async fn dyn_link_detached_never_fetches() {
         "lien détaché = pas de fetch"
     );
 }
+
+// -- `crypto.subtle` à clé + `navigator.credentials` (JS-C93) ---------------
+
+/// Roundtrip HMAC réel via `ring` : importKey `raw` → `sign`
+/// → `verify` (vrai) + `verify` (faux). Chaîne complète :
+/// `CryptoKey` opaque → couture → plateforme → promesses.
+#[tokio::test]
+async fn subtle_hmac_import_sign_verify() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><p id=\"p\">?</p><script>\
+        crypto.subtle.importKey('raw',new Uint8Array([115,101,99,114,101,116]),{name:'HMAC',hash:'SHA-256'},false,['sign','verify']).then(function(k){\
+        return crypto.subtle.sign('HMAC',k,new Uint8Array([97,98,99])).then(function(sig){return [k,sig]})}).then(function(ks){\
+        var k=ks[0],sig=ks[1];\
+        return crypto.subtle.verify('HMAC',k,sig,new Uint8Array([97,98,99])).then(function(ok){return [k,sig,ok]})}).then(function(kso){\
+        var k=kso[0],sig=kso[1],ok=kso[2];\
+        return crypto.subtle.verify('HMAC',k,sig,new Uint8Array([120])).then(function(bad){\
+        document.getElementById('p').textContent='k:'+k.type+'/'+k.algorithm.name+'/x'+k.extractable+' sig:'+sig.byteLength+' ok:'+ok+' bad:'+bad})}).catch(function(e2){\
+        document.getElementById('p').textContent='err:'+e2.name+'|'+e2.message})</script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    for _ in 0..4 {
+        s.pump_net().await;
+        s.pump_timers(id);
+    }
+    let dump = s.dom_dump(id).unwrap_or_default();
+    // Tag HMAC-SHA256 = 32 octets ; ok:true, bad:false.
+    assert!(
+        dump.contains("k:secret/HMAC/xfalse sig:32 ok:true bad:false"),
+        "subtle hmac : {dump}"
+    );
+}
+
+/// `navigator.credentials` — stub honnête : `create`/`get`
+/// rejettent `NotSupportedError` (pas d'authentificateur
+/// plateforme), `preventSilentAccess` résout `undefined`.
+#[tokio::test]
+async fn credentials_stub_rejects_honestly() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><p id=\"p\">?</p><script>(async function(){\
+        try{await navigator.credentials.create({publicKey:{}});document.getElementById('p').textContent='created?!'}\
+        catch(e){var u=await navigator.credentials.preventSilentAccess();\
+        document.getElementById('p').textContent='rej:'+e.name+'|psa:'+u}})()</script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_timers(id);
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(
+        dump.contains("rej:NotSupportedError|psa:undefined"),
+        "credentials stub : {dump}"
+    );
+}

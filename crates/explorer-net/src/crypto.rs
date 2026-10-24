@@ -136,6 +136,144 @@ fn base64_decode(s: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
+// -- `crypto.subtle` ops à clé (JS-C93) ------------------------------------
+
+/// Algorithme à clé normalisé côté moteur — la plateforme
+/// ne re-parse jamais de chaîne. Première tranche bornée aux
+/// algorithmes couverts par `ring` sans nouvelle dépendance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyAlgo {
+    /// `HMAC` — clé `raw`, `sign`/`verify` (tag).
+    Hmac(CryptoAlgo),
+    /// `ECDSA` `P-256`/`SHA-256` — privée `pkcs8`, publique
+    /// `raw` SEC1 non compressée ou `spki`.
+    EcdsaP256,
+    /// `Ed25519` — privée `pkcs8`, publique `raw`/`spki`.
+    Ed25519,
+}
+
+/// Format d'`importKey` — `jwk` non supporté à cette
+/// tranche (le moteur le rejette `NotSupportedError` avant
+/// émission).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyFormat {
+    /// Octets bruts (`HMAC`, clés publiques SEC1).
+    Raw,
+    /// `PKCS#8` — clé privée.
+    Pkcs8,
+    /// `SubjectPublicKeyInfo` — clé publique.
+    Spki,
+}
+
+/// `subtle.importKey` — valide la matière et la rend
+/// canonique (les octets retournés sont ce que `sign`/
+/// `verify` consommeront). Erreur = `DataError`.
+pub fn import_key(algo: KeyAlgo, format: KeyFormat, bytes: &[u8]) -> Result<Vec<u8>, String> {
+    match (algo, format) {
+        // `HMAC` accepte n'importe quelle longueur (spec —
+        // la clé est normalisée à l'usage par le hash).
+        (KeyAlgo::Hmac(_), KeyFormat::Raw) => Ok(bytes.to_vec()),
+        // Privées : `pkcs8` validé par construction ring.
+        (KeyAlgo::EcdsaP256, KeyFormat::Pkcs8) => ring::signature::EcdsaKeyPair::from_pkcs8(
+            &ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+            bytes,
+            &ring::rand::SystemRandom::new(),
+        )
+        .map(|_| bytes.to_vec())
+        .map_err(|_| "importKey: invalid pkcs8 (ECDSA P-256)".to_string()),
+        (KeyAlgo::Ed25519, KeyFormat::Pkcs8) => ring::signature::Ed25519KeyPair::from_pkcs8(bytes)
+            .map(|_| bytes.to_vec())
+            .map_err(|_| "importKey: invalid pkcs8 (Ed25519)".to_string()),
+        // Publiques `raw` : point SEC1 non compressé P-256
+        // (65 octets, préfixe 0x04) / clé Ed25519 (32 octets) ;
+        // `spki` est vérifié à l'usage (`verify`) — borne :
+        // pas de parse ASN.1 ici.
+        (KeyAlgo::EcdsaP256, KeyFormat::Raw) => {
+            if bytes.len() == 65 && bytes.first() == Some(&0x04) {
+                Ok(bytes.to_vec())
+            } else {
+                Err("importKey: invalid raw key (ECDSA P-256 SEC1)".to_string())
+            }
+        }
+        (KeyAlgo::Ed25519, KeyFormat::Raw) => {
+            if bytes.len() == 32 {
+                Ok(bytes.to_vec())
+            } else {
+                Err("importKey: invalid raw key (Ed25519)".to_string())
+            }
+        }
+        (KeyAlgo::Hmac(_), KeyFormat::Pkcs8 | KeyFormat::Spki) => {
+            Err("importKey: HMAC accepts raw only".to_string())
+        }
+        // `spki` ECDSA/Ed25519 : passthrough — la matière est
+        // validée à l'usage (`verify`), pas de parse ASN.1 ici.
+        (_, KeyFormat::Spki) => Ok(bytes.to_vec()),
+    }
+}
+
+/// `subtle.sign` — `key` = octets canoniques retournés par
+/// [`import_key`]. Erreur = `OperationError`.
+pub fn sign(algo: KeyAlgo, key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
+    match algo {
+        KeyAlgo::Hmac(hash) => {
+            let a = match hash {
+                CryptoAlgo::Sha256 => ring::hmac::HMAC_SHA256,
+                CryptoAlgo::Sha384 => ring::hmac::HMAC_SHA384,
+                CryptoAlgo::Sha512 => ring::hmac::HMAC_SHA512,
+            };
+            Ok(ring::hmac::sign(&ring::hmac::Key::new(a, key), data)
+                .as_ref()
+                .to_vec())
+        }
+        KeyAlgo::EcdsaP256 => {
+            let rng = ring::rand::SystemRandom::new();
+            let kp = ring::signature::EcdsaKeyPair::from_pkcs8(
+                &ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+                key,
+                &rng,
+            )
+            .map_err(|_| "sign: invalid pkcs8 (ECDSA P-256)".to_string())?;
+            kp.sign(&rng, data)
+                .map(|sig| sig.as_ref().to_vec())
+                .map_err(|_| "sign: ECDSA P-256 failed".to_string())
+        }
+        KeyAlgo::Ed25519 => ring::signature::Ed25519KeyPair::from_pkcs8(key)
+            .map(|kp| kp.sign(data).as_ref().to_vec())
+            .map_err(|_| "sign: Ed25519 failed".to_string()),
+    }
+}
+
+/// `subtle.verify` — `key` = octets canoniques (publique
+/// `raw`/`spki`, ou `pkcs8` privée dont on extrait la
+/// partie publique pour `HMAC`... non : HMAC signe ET
+/// vérifie avec la même clé secrète). `Ok(true/false)` —
+/// un échec de vérification n'est **pas** une erreur
+/// (spec : `false`, pas `OperationError`).
+pub fn verify(algo: KeyAlgo, key: &[u8], sig: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
+    let ok = match algo {
+        KeyAlgo::Hmac(hash) => {
+            let a = match hash {
+                CryptoAlgo::Sha256 => ring::hmac::HMAC_SHA256,
+                CryptoAlgo::Sha384 => ring::hmac::HMAC_SHA384,
+                CryptoAlgo::Sha512 => ring::hmac::HMAC_SHA512,
+            };
+            ring::hmac::verify(&ring::hmac::Key::new(a, key), data, sig).is_ok()
+        }
+        KeyAlgo::EcdsaP256 => {
+            ring::signature::UnparsedPublicKey::new(&ring::signature::ECDSA_P256_SHA256_ASN1, key)
+                .verify(data, sig)
+                .is_ok()
+        }
+        KeyAlgo::Ed25519 => ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key)
+            .verify(data, sig)
+            .is_ok(),
+    };
+    // Booléen encodé sur un octet — le moteur le décode en
+    // `true`/`false` à la livraison (la promesse `verify`
+    // résout un booléen, pas un ArrayBuffer).
+    Ok(vec![u8::from(ok)])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
