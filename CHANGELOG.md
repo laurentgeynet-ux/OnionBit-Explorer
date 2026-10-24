@@ -2266,6 +2266,40 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Issue #16 —
+  `Element.toggleAttribute`**
+  (`explorer-jscore` — le bundle
+  `catalyst` de github.com mourait
+  au boot sur `TypeError`). Spec
+  DOM : `el.toggleAttribute(name
+  [, force])` — `force` absent ou
+  `undefined` explicite → bascule,
+  présent → impose, retourne
+  l'état final.
+- **Issue #17 — `prepend` d'un
+  nœud déjà parenté**
+  (`explorer-jscore` — vol agent
+  example.com : `B.prepend(p)` sur
+  le 1er enfant le renvoyait en
+  queue). `insert_before` avec
+  `ref == child` détachait avant
+  de chercher la référence →
+  introuvable → append ; spec
+  « insert » : `ref == node` vise
+  son **prochain frère**. Bonus
+  même classe : l'ancre `prepend`
+  est glissante — les args
+  multiples gardent leur ordre.
+- **Issue #20 — `style.
+  setProperty` et noms `--*`**
+  (`explorer-jscore` — même classe
+  que R-92, côté JS) : les clés
+  custom sont **sensibles à la
+  casse** (css-variables-1 §2.1) —
+  `prop_key` préserve `--*`,
+  lowercase le reste ; appliqué à
+  `setProperty`/`getPropertyValue`/
+  `removeProperty`/`style_map`.
 - **Issue #21 — CSP path-source
   : trailing-`/` matche en
   préfixe** (`explorer-net` —

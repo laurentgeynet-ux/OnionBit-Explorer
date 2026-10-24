@@ -1383,6 +1383,24 @@ fn mutation_methods() {
         ev("var l = document.getElementById('list'); var li = document.createElement('li'); l.prepend(li); l.children[0] === li"),
         "true"
     );
+    // Issue #17 — move d'un nœud déjà parenté : `prepend`
+    // détache puis insère en tête (pas un append).
+    assert_eq!(
+        ev("var b=document.body; var l=document.getElementById('list'); b.prepend(l); b.children[0]===l"),
+        "true"
+    );
+    // …et le cas du bug réel : `prepend` du PREMIER enfant —
+    // `ref == child`, l'insert doit viser son prochain frère
+    // (sans fix : détaché → ref introuvable → append en queue).
+    assert_eq!(
+        ev("var b=document.body; var f=b.children[0]; b.prepend(f); b.children[0]===f"),
+        "true"
+    );
+    // Ordre des args multiples préservé.
+    assert_eq!(
+        ev("var l=document.getElementById('list'); var a=document.createElement('li'); var c=document.createElement('li'); l.prepend(a,c); l.children[0]===a && l.children[1]===c"),
+        "true"
+    );
     assert_eq!(
         ev("var l = document.getElementById('list'); var n = document.createElement('li'); l.children[0].before(n); l.children[0] === n"),
         "true"
@@ -1412,6 +1430,65 @@ fn mutation_methods() {
         ev("var l = document.getElementById('list'); var n = document.createElement('li'); l.insertBefore(n, l.children[1]); l.children[1] === n"),
         "true"
     );
+}
+
+/// Issue #16 — `Element.toggleAttribute(name[, force])` :
+/// bascule sans force, impose avec, retourne l'état final.
+#[test]
+fn toggle_attribute() {
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.toggleAttribute('hidden')"),
+        "true"
+    );
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.setAttribute('hidden',''); m.toggleAttribute('hidden')"),
+        "false"
+    );
+    // `force` impose l'état (idempotent).
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.toggleAttribute('hidden',true) && m.hasAttribute('hidden') && m.toggleAttribute('hidden',true)"),
+        "true"
+    );
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.setAttribute('hidden','x'); m.toggleAttribute('hidden',false)===false && !m.hasAttribute('hidden')"),
+        "true"
+    );
+    // `undefined` explicite = force absent → bascule.
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.toggleAttribute('hidden',undefined)"),
+        "true"
+    );
+}
+
+/// Issue #20 — `style.setProperty` : les propriétés custom
+/// `--*` gardent leur casse (css-variables-1 §2.1 — miroir
+/// du fix cascade R-92), les standard sont minuscules.
+#[test]
+fn style_set_property_custom_case() {
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.style.setProperty('--Spacer-size1012','660px'); m.style.getPropertyValue('--Spacer-size1012')"),
+        "660px"
+    );
+    // La lecture sous une autre casse NE retrouve PAS la var
+    // (custom properties = case-sensitive).
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.style.setProperty('--Spacer-size1012','660px'); m.style.getPropertyValue('--spacer-size1012')"),
+        ""
+    );
+    // Standard : minuscules toujours.
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.style.setProperty('MARGIN-TOP','3px'); m.style.getPropertyValue('margin-top')"),
+        "3px"
+    );
+    // removeProperty tient le même nommage.
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.style.setProperty('--A','1'); m.style.removeProperty('--A'); m.style.getPropertyValue('--A')"),
+        ""
+    );
+}
+
+#[test]
+fn clone_and_adjacent_mutations() {
     // cloneNode shallow vs deep.
     assert_eq!(
         ev("var c = document.getElementById('list').cloneNode(false); c.children.length"),

@@ -1612,6 +1612,15 @@ impl Dom {
             self.splice_fragment(parent, child, ref_node);
             return;
         }
+        // Spec « insert » : un `ref_node` égal à `child` vise le
+        // **prochain frère** de `child` — sinon le détachement
+        // rend la référence introuvable et l'insert dégrade en
+        // append (`prepend` du 1er enfant → queue, issue #17).
+        let ref_node = if ref_node == Some(child) {
+            self.sibling(child, true)
+        } else {
+            ref_node
+        };
         self.detach(child);
         let idx = ref_node.and_then(|r| {
             self.nodes[parent as usize]

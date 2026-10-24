@@ -3555,6 +3555,26 @@ impl Host for NodeHost {
                 self.dom.borrow_mut().remove_attr(node, &k);
                 Ok(Some(Value::Undefined))
             }
+            // Issue #16 — spec Element.toggleAttribute : `force`
+            // absent (ou `undefined` explicite) → bascule ; présent
+            // → impose ; retourne l'état final.
+            "toggleAttribute" => {
+                let k = e.to_js_string(arg(args, 0))?;
+                let has = self.dom.borrow().has_attr(node, &k);
+                let want = match args.get(1) {
+                    None | Some(Value::Undefined) => !has,
+                    Some(f) => e.to_boolean(*f),
+                };
+                if want != has {
+                    let mut d = self.dom.borrow_mut();
+                    if want {
+                        d.set_attr(node, &k, "");
+                    } else {
+                        d.remove_attr(node, &k);
+                    }
+                }
+                Ok(Some(Value::Bool(want)))
+            }
             "addEventListener" => {
                 let ty = e.to_js_string(arg(args, 0))?;
                 let f = arg(args, 1);
@@ -3797,9 +3817,18 @@ impl Host for NodeHost {
             // nodes or strings (strings → text nodes).
             "prepend" => {
                 let kids = self.norm_children(e, args)?;
+                // Ancre glissante (comme `after`) : chaque inséré
+                // se place après le précédent — l'ordre des args
+                // est préservé, et un `first` déplacé par
+                // l'opération ne casse pas l'insertion (issue #17).
+                let mut anchor = None;
                 for k in kids {
-                    let first = self.dom.borrow().child_nodes(node).first().copied();
-                    self.dom.borrow_mut().insert_before(node, k, first);
+                    let ref_n = match anchor {
+                        None => self.dom.borrow().child_nodes(node).first().copied(),
+                        Some(a) => self.dom.borrow().sibling(a, true),
+                    };
+                    self.dom.borrow_mut().insert_before(node, k, ref_n);
+                    anchor = Some(k);
                 }
                 Ok(Some(Value::Undefined))
             }
@@ -4170,12 +4199,25 @@ fn camel_to_kebab(s: &str) -> String {
     out
 }
 
+/// Nom de propriété normalisé — spec css-variables-1 §2.1 :
+/// les propriétés custom `--*` sont **sensibles à la casse**,
+/// seules les standard passent en ASCII minuscules (miroir du
+/// fix cascade R-92 — issue #20 : `setProperty('--Spacer-x')`
+/// perdu sinon).
+fn prop_key(raw: &str) -> String {
+    if raw.starts_with("--") {
+        raw.to_string()
+    } else {
+        raw.to_lowercase()
+    }
+}
+
 fn style_map(dom: &Dom, node: NodeId) -> Vec<(String, String)> {
     let mut out = Vec::new();
     if let Some(style) = dom.attr(node, "style") {
         for decl in style.split(';') {
             if let Some((k, v)) = decl.split_once(':') {
-                let k = k.trim().to_lowercase();
+                let k = prop_key(k.trim());
                 if !k.is_empty() {
                     out.push((k, v.trim().to_string()));
                 }
@@ -4262,13 +4304,13 @@ impl Host for StyleHost {
     ) -> JsResult<Option<Value>> {
         match name {
             "setProperty" => {
-                let k = e.to_js_string(arg(args, 0))?.to_lowercase();
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
                 let v = e.to_js_string(arg(args, 1))?;
                 style_set(&mut self.dom.borrow_mut(), self.node, &k, &v);
                 Ok(Some(Value::Undefined))
             }
             "getPropertyValue" => {
-                let k = e.to_js_string(arg(args, 0))?.to_lowercase();
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
                 let v = {
                     let d = self.dom.borrow();
                     style_map(&d, self.node)
@@ -4280,7 +4322,7 @@ impl Host for StyleHost {
                 Ok(Some(e.str_val(v)))
             }
             "removeProperty" => {
-                let k = e.to_js_string(arg(args, 0))?.to_lowercase();
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
                 let mut d = self.dom.borrow_mut();
                 let mut map = style_map(&d, self.node);
                 map.retain(|(kk, _)| kk != &k);

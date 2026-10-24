@@ -2144,6 +2144,31 @@ async fn script_dom_append_is_rendered() {
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
 
+/// Issue #17 — `prepend` d'un nœud déjà parenté **en premier**
+/// (example.com : `B.prepend(p)` remontait `<p lang=en>` en
+/// tête — le `ref == child` dégradait l'insert en append, le
+/// paragraphe restait dernier). Avec le fix : il reste en
+/// tête, avant le `<script>`.
+#[tokio::test]
+async fn prepend_first_child_stays_first() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><p id=\"p\" lang=en>P</p>\
+         <script>var p=document.getElementById('p');document.body.prepend(p)</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let dump = s.dom_dump(id).unwrap();
+    let pi = dump.find("<p>").expect("p présent : {dump}");
+    let si = dump.find("<script>").expect("script présent : {dump}");
+    assert!(pi < si, "prepend(1er enfant) le garde en tête : {dump}");
+}
+
 /// Page `<canvas>` dessinée par script (JS-C28, couture R-11).
 const PAGE_CANVAS: &str = "<!doctype html><html><body>\
 <canvas id=\"c\" width=\"40\" height=\"30\"></canvas>\
