@@ -2266,6 +2266,45 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Issue #24 —
+  `document.domain`**
+  (`explorer-jscore` — le boot
+  `behaviors` de github.com lisait
+  `document.domain === null` et
+  jetait). Getter = hostname de
+  l'URL de page ; setter borne à
+  un suffixe à frontière de label
+  (faute de PSL), non-suffixe
+  ignoré — tolérant, spec
+  `SecurityError`.
+- **Issue #25 — `attachShadow` /
+  `attachInternals` stubs**
+  (`explorer-jscore` — le
+  polyfill Invoker Commands de
+  `github-elements` mourait :
+  `n = HTMLElement.prototype.
+  attachShadow` lisait
+  `undefined` puis `n.call`
+  jetait). Les méthodes sont
+  installées en **fonctions
+  natives** sur `Element.
+  prototype` et `HTMLElement.
+  prototype` — lisibles comme
+  références, appelables via
+  `.call` — plus le dispatch
+  `invoke` classique. La racine
+  attachée est un
+  `DocumentFragment` rôle
+  shadowRoot (table latérale
+  `Dom::shadow_roots`) :
+  `mode:"closed"` →
+  `el.shadowRoot` `null`,
+  `attachInternals().shadowRoot`
+  la voit quand même ; ré-attach
+  idempotent. PAS le vrai
+  Shadow DOM (scoping, slots,
+  retargeting restent le chantier
+  planifié).
 - **Issue #16 —
   `Element.toggleAttribute`**
   (`explorer-jscore` — le bundle

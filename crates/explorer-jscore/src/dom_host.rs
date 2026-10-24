@@ -375,6 +375,9 @@ struct DocumentHost {
     /// `document.implementation` — objet unique par document
     /// (spec), paresseusement construit.
     implementation: RefCell<Option<Value>>,
+    /// `document.domain` (issue #24) — suffixe enregistrable
+    /// posé par le setter ; `None` = hostname courant.
+    domain_override: RefCell<Option<String>>,
 }
 
 /// Element/text node object (`this` carries the node id).
@@ -1118,6 +1121,7 @@ pub(crate) fn document_value(e: &mut Engine, dom: &DomRef) -> Value {
         dom: dom.clone(),
         cache: Rc::new(RefCell::new(HashMap::new())),
         implementation: RefCell::new(None),
+        domain_override: RefCell::new(None),
     }))
 }
 
@@ -1132,6 +1136,7 @@ impl Engine {
             dom: dom.clone(),
             cache: cache.clone(),
             implementation: RefCell::new(None),
+            domain_override: RefCell::new(None),
         }));
         // `#document` == `document` : listeners/`this`/`on*` au
         // sommet de la propagation résolvent sur l'objet document
@@ -1263,6 +1268,22 @@ impl Engine {
         let he = self.native_fn("HTMLElement", html_element_ctor);
         if let Value::Obj(fid) = he {
             let p = self.new_object();
+            // `attachShadow`/`attachInternals` (issue #25) —
+            // les polyfills lisent `HTMLElement.prototype.*`
+            // (github-elements : `e = globalThis.HTMLElement`,
+            // `n = e.prototype.attachShadow` puis `n.call`) —
+            // la chaîne proto vers `Element.prototype` n'est
+            // pas garantie côté stub.
+            for (k, f2) in [
+                (
+                    "attachShadow",
+                    element_attach_shadow as crate::heap::NativeFn,
+                ),
+                ("attachInternals", element_attach_internals),
+            ] {
+                let m = self.native_fn(k, f2);
+                self.set_own(p, k, m, true);
+            }
             self.set_own(fid, "prototype", Value::Obj(p), false);
         }
         self.set_own(g, "HTMLElement", he, false);
@@ -1400,6 +1421,13 @@ impl Engine {
                     // même motif de lisibilité que `matches`.
                     ("scrollIntoView", element_scroll_into_view),
                     ("scrollIntoViewIfNeeded", element_scroll_into_view),
+                    // `attachShadow` stub (issue #25) — la
+                    // référence doit être **lisible** : le
+                    // polyfill Invoker Commands fait
+                    // `n = Element.prototype.attachShadow`
+                    // puis `n.call(this, init)` (mesuré
+                    // github-elements).
+                    ("attachShadow", element_attach_shadow),
                 ] {
                     let m = self.native_fn(k, f2);
                     self.set_own(pid, k, m, true);
@@ -2163,6 +2191,18 @@ impl Host for DocumentHost {
                 Some(jar) => jar.get(&e.hooks.page_url),
                 None => String::new(),
             }))),
+            // `document.domain` (issue #24 — le module
+            // `behaviors` de github throw `Unable to get
+            // document domain` sans lui) : l'override posé
+            // par le setter, sinon le hostname de la page.
+            "domain" => Ok(Some(
+                e.str_val(
+                    self.domain_override
+                        .borrow()
+                        .clone()
+                        .unwrap_or_else(|| url_parts(&e.hooks.page_url).2),
+                ),
+            )),
             _ => Ok(None),
         }
     }
@@ -2172,6 +2212,23 @@ impl Host for DocumentHost {
             let s = e.to_js_string(v)?;
             if let Some(jar) = &e.hooks.cookie_jar {
                 jar.set(&e.hooks.page_url, &s);
+            }
+            return Ok(true);
+        }
+        if key == "domain" {
+            // Spec : seul un suffixe enregistrable du host
+            // est accepté (raccourcit le domaine effectif) —
+            // faute de PSL, on borne à « suffixe à frontière
+            // de label » du hostname courant ; non-suffixe
+            // ignoré (tolérant — spec : SecurityError).
+            let s = e.to_js_string(v)?;
+            let host = url_parts(&e.hooks.page_url).2;
+            let ok = host == s
+                || (host.len() > s.len() + 1
+                    && host.ends_with(&s)
+                    && host.as_bytes()[host.len() - s.len() - 1] == b'.');
+            if ok && !s.is_empty() {
+                *self.domain_override.borrow_mut() = Some(s);
             }
             return Ok(true);
         }
@@ -3141,6 +3198,16 @@ impl Host for NodeHost {
                     e.get_prop(e.global, "document").unwrap_or(Value::Null),
                 ));
             }
+            // `el.shadowRoot` (stub issue #25) — la racine
+            // attachée par `attachShadow`, `null` en mode
+            // `closed` ou sans racine.
+            "shadowRoot" => {
+                let r = self.dom.borrow().shadow_root(node, false);
+                return Ok(Some(match r {
+                    Some(r) => node_value(e, &self.dom, &self.cache, r),
+                    None => Value::Null,
+                }));
+            }
             "length" if self.dom.borrow().nodes[node as usize].kind == NodeKind::Text => {
                 let n = self.dom.borrow().nodes[node as usize].text.len();
                 return Ok(Some(Value::Num(n as f64)));
@@ -3813,6 +3880,44 @@ impl Host for NodeHost {
                 self.dom.borrow_mut().set_canvas_ctx(node, v);
                 Ok(Some(v))
             }
+            // `attachShadow(init)` — stub spec-minimal
+            // (issue #25, PAS le vrai Shadow DOM) : attache
+            // un `DocumentFragment` rôle shadowRoot et le
+            // retourne — suffit aux polyfills
+            // d'instrumentation (Invoker Commands : `n.call`
+            // sur la méthode absente tuait github-elements).
+            // `mode:"closed"` → `el.shadowRoot` null, racine
+            // réelle quand même. Re-appel : la racine
+            // existante est retournée (tolérant — spec jette
+            // `NotSupportedError`).
+            "attachShadow" => {
+                let open = match args.first() {
+                    Some(Value::Obj(id)) => {
+                        e.get_prop(*id, "mode")
+                            .and_then(|m| e.to_js_string(m).ok())
+                            .as_deref()
+                            != Some("closed")
+                    }
+                    _ => true,
+                };
+                let existing = self.dom.borrow().shadow_root(node, true);
+                let root = if let Some(r) = existing {
+                    r
+                } else {
+                    let r = self.dom.borrow_mut().create_fragment();
+                    self.dom.borrow_mut().attach_shadow_root(node, r, open);
+                    r
+                };
+                Ok(Some(node_value(e, &self.dom, &self.cache, root)))
+            }
+            // `attachInternals()` — stub (issue #25) : objet
+            // minimal exposant `shadowRoot` (même en mode
+            // `closed`, spec `ElementInternals`).
+            "attachInternals" => Ok(Some(e.new_host_object(Rc::new(ElementInternalsHost {
+                dom: self.dom.clone(),
+                cache: self.cache.clone(),
+                node,
+            })))),
             // `prepend(...kids)` / `before`/`after`/`replaceWith` —
             // nodes or strings (strings → text nodes).
             "prepend" => {
@@ -4225,6 +4330,39 @@ fn style_map(dom: &Dom, node: NodeId) -> Vec<(String, String)> {
         }
     }
     out
+}
+
+/// `ElementInternals` (stub issue #25) — objet minimal
+/// retourné par `attachInternals()` : `shadowRoot` lisible
+/// même en mode `closed` (spec `ElementInternals`), le
+/// reste de la surface reste à l'arc Shadow DOM.
+struct ElementInternalsHost {
+    dom: DomRef,
+    cache: NodeCache,
+    node: NodeId,
+}
+
+impl Host for ElementInternalsHost {
+    fn class_name(&self) -> &'static str {
+        "ElementInternals"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        match key {
+            "shadowRoot" => {
+                let r = self.dom.borrow().shadow_root(self.node, true);
+                Ok(Some(match r {
+                    Some(r) => node_value(e, &self.dom, &self.cache, r),
+                    None => Value::Null,
+                }))
+            }
+            _ => Ok(None),
+        }
+    }
 }
 
 fn style_set(dom: &mut Dom, node: NodeId, key: &str, value: &str) {
@@ -5083,6 +5221,7 @@ impl Host for DomImplementationHost {
                     dom: Rc::new(RefCell::new(d)),
                     cache: Rc::new(RefCell::new(HashMap::new())),
                     implementation: RefCell::new(None),
+                    domain_override: RefCell::new(None),
                 }))))
             }
             // `hasFeature()` — spec : retourne toujours `true`
@@ -5819,6 +5958,48 @@ fn element_scroll_into_view(e: &mut Engine, this: Value, _args: &[Value]) -> JsR
         return Err(e.type_error("scrollIntoView: receiver is not an Element"));
     }
     Ok(Value::Undefined)
+}
+
+/// `el.attachShadow(init)` — stub spec-minimal (issue #25,
+/// PAS le vrai Shadow DOM) : attache un `DocumentFragment`
+/// rôle shadowRoot et le retourne — suffit aux polyfills
+/// d'instrumentation (Invoker Commands : `n.call` sur la
+/// méthode absente tuait le module github-elements).
+/// `mode:"closed"` → `el.shadowRoot` null, racine réelle
+/// quand même ; re-appel : racine existante retournée
+/// (tolérant — spec : `NotSupportedError`).
+fn element_attach_shadow(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((node, dom, cache)) = element_receiver(e, this) else {
+        return Err(e.type_error("attachShadow: receiver is not an Element"));
+    };
+    let open = match args.first() {
+        Some(Value::Obj(id)) => {
+            e.get_prop(*id, "mode")
+                .and_then(|m| e.to_js_string(m).ok())
+                .as_deref()
+                != Some("closed")
+        }
+        _ => true,
+    };
+    let existing = dom.borrow().shadow_root(node, true);
+    let root = if let Some(r) = existing {
+        r
+    } else {
+        let r = dom.borrow_mut().create_fragment();
+        dom.borrow_mut().attach_shadow_root(node, r, open);
+        r
+    };
+    Ok(node_value(e, &dom, &cache, root))
+}
+
+/// `el.attachInternals()` — stub (issue #25) : objet
+/// minimal exposant `shadowRoot` (même `closed`, spec
+/// `ElementInternals`).
+fn element_attach_internals(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
+    let Some((node, dom, cache)) = element_receiver(e, this) else {
+        return Err(e.type_error("attachInternals: receiver is not an Element"));
+    };
+    Ok(e.new_host_object(Rc::new(ElementInternalsHost { dom, cache, node })))
 }
 
 /// `ev.initEvent(type, bubbles, cancelable)` — héritage DOM Level 2.

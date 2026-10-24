@@ -3766,3 +3766,38 @@ fn document_ready_state_transitions() {
     e.set_ready_state(0, "bogus");
     assert_eq!(read(&mut e), "complete");
 }
+
+/// `document.domain` (issue #24) — getter = hostname de
+/// l'URL de page ; setter à suffixe de label accepté
+/// (raccourcit le domaine effectif), non-suffixe ignoré
+/// (tolérant — spec : `SecurityError`).
+#[test]
+fn document_domain_getter_setter() {
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    assert_eq!(evf(&mut e, "document.domain"), "ex.org");
+    // Réécriture au même host : acceptée.
+    evf(&mut e, "document.domain = 'ex.org'");
+    assert_eq!(evf(&mut e, "document.domain"), "ex.org");
+    // Non-suffixe : ignoré, la valeur courante survit.
+    evf(&mut e, "document.domain = 'other.com'");
+    assert_eq!(evf(&mut e, "document.domain"), "ex.org");
+}
+
+/// `el.attachShadow` stubs (issue #25) — le polyfill
+/// Invoker Commands lit la **référence** sur
+/// `HTMLElement.prototype` puis l'appelle via `.call`
+/// (mesuré github-elements) : la méthode doit être une
+/// valeur callable, pas seulement un dispatch `invoke`.
+/// `mode:"open"` → `el.shadowRoot` non-null ; `closed` →
+/// `null` publiquement, visible via `attachInternals`.
+#[test]
+fn attach_shadow_stub_polyfill_pattern() {
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    assert_eq!(
+        evf(
+            &mut e,
+            "var out = [];             var el = document.getElementById('main');             var el2 = document.getElementById('list');             var n = HTMLElement.prototype.attachShadow;             out.push(typeof n);             out.push(typeof Element.prototype.attachShadow);             var r = n.call(el, {mode: 'open'});             out.push(el.shadowRoot === r);             out.push(el.shadowRoot.nodeType);             var r2 = n.call(el2, {mode: 'closed'});             out.push(el2.shadowRoot === null);             out.push(el2.attachInternals().shadowRoot === r2);             out.push(n.call(el, {mode: 'closed'}) === r);             out.join(',')"
+        ),
+        "function,function,true,11,true,true,true"
+    );
+}

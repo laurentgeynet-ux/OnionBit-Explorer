@@ -528,7 +528,13 @@ pub struct Dom {
     /// jamais touché garde ses enfants comme nœuds ordinaires —
     /// sérialisation équivalente.
     template_contents: HashMap<NodeId, NodeId>,
-    /// Ordres média page → hôte en file (étape 71c) —
+    /// Hôte → `(racine shadow, mode ouvert)` — stubs
+    /// `attachShadow` (issue #25) : la racine est un
+    /// `DocumentFragment` hors-arbre, juste assez pour que
+    /// les polyfills d'instrumentation (Invoker Commands)
+    /// attachent et lisent `shadowRoot`. Pas de scoping,
+    /// pas de slots — l'arc Shadow DOM reste ouvert.
+    shadow_roots: HashMap<NodeId, (NodeId, bool)>,
     /// `(media, cmd)`, drainés par l'adaptateur
     /// (`drain_media_commands`) qui les relaie vers l'hôte.
     pub media_cmds: Vec<(u64, MediaCmd)>,
@@ -695,6 +701,7 @@ impl Dom {
             canvases: HashMap::new(),
             media: HashMap::new(),
             template_contents: HashMap::new(),
+            shadow_roots: HashMap::new(),
             media_cmds: Vec::new(),
             ce: CeRegistry::default(),
             ce_reactions: Vec::new(),
@@ -1174,6 +1181,21 @@ impl Dom {
     /// Detached `DocumentFragment` (`document.createDocumentFragment`).
     pub fn create_fragment(&mut self) -> NodeId {
         self.alloc(NodeKind::Fragment, "#document-fragment")
+    }
+
+    /// Attache une racine shadow à `host` (stub issue #25) —
+    /// `open` = `mode: "open"` de l'init.
+    pub fn attach_shadow_root(&mut self, host: NodeId, root: NodeId, open: bool) {
+        self.shadow_roots.insert(host, (root, open));
+    }
+
+    /// Racine shadow de `host` — `include_closed` pour
+    /// `ElementInternals.shadowRoot` (spec : lisible même
+    /// en mode `closed`, contrairement à `el.shadowRoot`).
+    pub fn shadow_root(&self, host: NodeId, include_closed: bool) -> Option<NodeId> {
+        self.shadow_roots
+            .get(&host)
+            .and_then(|&(r, open)| (open || include_closed).then_some(r))
     }
 
     /// `CharacterData.data`/`nodeValue` sur un nœud texte —
