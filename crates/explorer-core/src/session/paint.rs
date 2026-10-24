@@ -166,10 +166,16 @@ impl Session {
                 e.hist.push(HistEntry {
                     req: req.clone(),
                     failed: true,
+                    same_doc: false,
                 });
                 e.hist_idx = e.hist.len() - 1;
-                // L'entrée `failed` résout la position (84).
+                // L'entrée `failed` résout la position (84) —
+                // les files `pushState`/`replaceState`
+                // différés (CAP-151) appartiennent au
+                // document tombé : vidées.
                 e.hist_pending = false;
+                e.pending_push.clear();
+                e.pending_replace = None;
             }
         }
         self.emit_navigated(tab, url, title, prev.as_deref());

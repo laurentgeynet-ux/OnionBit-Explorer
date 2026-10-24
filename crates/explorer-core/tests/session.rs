@@ -10111,3 +10111,174 @@ async fn submitter_formmethod_dialog_does_not_submit() {
     assert_eq!(t.calls(), calls, "dialog ne fetch rien");
     assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/f"));
 }
+
+// ===== CAP-151 — `history.pushState`/`replaceState` :
+// navigation same-document — URL + historique commis sans
+// fetch ; le miroir est resynchronisé (sync_ctx_url) =====
+
+/// Page SPA : `pushState` au chargement (pendant
+/// `hist_pending` — file `pending_push`), `location.href`
+/// relu dans le même script (déjà résolu côté moteur).
+const PAGE_PUSHSTATE: &str = "<!doctype html><html><body>\
+    <p id=\"c\">?</p>\
+    <script>history.pushState({s:1}, '', '/spa/route?x=1');\
+    document.getElementById('c').textContent = 'u:'+location.href\
+    </script></body></html>";
+
+/// `pushState` au chargement (`hist_pending` — entrée
+/// différée à `sub_commit_tail`) : l'URL commise devient la
+/// cible poussée, `location.href` reflète déjà la résolution
+/// absolue, aucun fetch de la cible (entrée same-document —
+/// la traversée est un swap d'URL), `back` revient à la
+/// page.
+#[tokio::test]
+async fn pushstate_commits_url_without_fetch() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_PUSHSTATE);
+    t.route("/orig", 200, "<html><body>orig</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/orig").await.unwrap();
+    // La nav vers /orig a servi le document de base — la
+    // page pushée : on recharge /orig avec le script.
+    t.route("/", 200, PAGE_PUSHSTATE);
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(
+        dump.contains("u:http://h.test/spa/route?x=1"),
+        "location.href résolu dès le script : {dump}"
+    );
+    assert_eq!(
+        s.tab_url(id).as_deref(),
+        Some("http://h.test/spa/route?x=1"),
+        "URL commise = cible pushState"
+    );
+    // Aucun fetch vers /spa/route : la poussée est une
+    // entrée d'historique, pas une navigation réseau.
+    assert!(
+        t.last().is_none_or(|(_, pq, _)| pq != "/spa/route?x=1"),
+        "pushState ne fetch pas"
+    );
+    // `back` : la traversée rejoue l'entrée du document
+    // d'origine (bfcache ou rejeu — l'URL revient).
+    s.go_back(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+}
+
+/// `replaceState` : l'entrée courante est réécrite — `back`
+/// n'a plus d'entrée antérieure (`EmptyDocument`).
+#[tokio::test]
+async fn replacestate_rewrites_current_entry() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><script>\
+         history.replaceState({s:1}, '', '/other')</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/other"));
+    assert!(matches!(s.go_back(id).await, Err(CoreError::EmptyDocument)));
+}
+
+/// `pushState` cross-origin : `SecurityError` spec →
+/// intention ignorée, URL inchangée (tolérant).
+#[tokio::test]
+async fn pushstate_cross_origin_ignored() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><script>\
+         history.pushState({}, '', 'http://autre.test/x')</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+}
+
+/// `pushState` relatif : résolu contre la base du document
+/// (API base URL — `<base>` non présent → URL de page).
+#[tokio::test]
+async fn pushstate_relative_resolves_against_document() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/dir/p",
+        200,
+        "<!doctype html><html><body><script>\
+         history.pushState({}, '', 'rel?y=2')</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+    assert_eq!(
+        s.tab_url(id).as_deref(),
+        Some("http://h.test/dir/rel?y=2"),
+        "relatif → URL du répertoire du document"
+    );
+}
+
+/// `pushState` résolu contre `<base href>` : la base
+/// effective du document gouverne (étape 135 — API base
+/// URL), pas l'URL de page.
+#[tokio::test]
+async fn pushstate_resolves_against_base_href() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head><base href=\"http://h.test/app/\">\
+         </head><body><script>\
+         history.pushState({}, '', 'page?x=9')</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(
+        s.tab_url(id).as_deref(),
+        Some("http://h.test/app/page?x=9"),
+        "relatif → base effective (<base href>)"
+    );
+}
+
+/// `pushState` hors chargement (timer — `hist_pending`
+/// refermée) : la poussée est immédiate ; back/forward
+/// traversent le run same-document par swap d'URL, sans
+/// aucune requête (le document commis reste affiché).
+#[tokio::test]
+async fn pushstate_after_load_pushes_entry() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><script>\
+         setTimeout(function(){\
+         history.pushState({}, '', '/late')}, 0)</script>\
+         </body></html>",
+    );
+    t.route("/late", 200, "<html><body>late</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_timers(id);
+    s.drain_script_nav(id).await;
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/late"));
+    // Entrée `same_doc` : la traversée reste dans le run —
+    // swap d'URL, **zéro requête** (le document commis est
+    // affiché — modèle Chrome, pas de rejeu ni de
+    // re-pushState par re-run du timer).
+    let calls = t.calls();
+    s.go_back(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+    assert_eq!(t.calls(), calls, "back same-document : aucun fetch");
+    s.go_forward(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/late"));
+    assert_eq!(t.calls(), calls, "forward same-document : aucun fetch");
+}

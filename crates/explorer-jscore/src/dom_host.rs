@@ -93,6 +93,12 @@ pub(crate) struct BrowserHooks {
     /// `form.submit()`/`requestSubmit()` — absent → no-op
     /// silencieux (le moteur ne navigue jamais seul).
     pub form_submit: Option<Rc<dyn Fn(FormSubmit)>>,
+    /// `history.pushState`/`replaceState` — `(url_brute,
+    /// replace)` ; l'embedder résout contre la base du
+    /// document et commit URL + historique de session
+    /// (CAP-151). Absent → `page_url` remplacée à la brute
+    /// (harnais sans session — comportement historique).
+    pub push_state: Option<Rc<dyn Fn(String, bool)>>,
     /// Viewport size in CSS px — backs `innerWidth`/`innerHeight`
     /// and `screen.width`/`height`.
     pub viewport: (u32, u32),
@@ -142,6 +148,13 @@ impl Engine {
         self.hooks.alert = Some(alert);
         self.hooks.confirm = Some(confirm);
         self.hooks.prompt = Some(prompt);
+    }
+
+    /// Install the `history.pushState`/`replaceState` hook —
+    /// `(url, replace)` ; l'embedder résout et commit (URL +
+    /// historique, CAP-151). Absent → URL locale brute.
+    pub fn set_push_state_hook(&mut self, f: Rc<dyn Fn(String, bool)>) {
+        self.hooks.push_state = Some(f);
     }
 
     /// Install the `window.open(url)` hook (new context).
@@ -4604,14 +4617,52 @@ fn history_nav(e: &mut Engine, n: i32) -> JsResult<Value> {
     Ok(Value::Undefined)
 }
 
-fn history_push_replace(e: &mut Engine, args: &[Value]) -> JsResult<Value> {
-    // Pas de pile de session — l'URL courante change comme chez
-    // un navigateur, sans rechargement.
+fn history_push_replace(e: &mut Engine, args: &[Value], replace: bool) -> JsResult<Value> {
+    // Navigation same-document — l'URL courante change comme
+    // chez un navigateur, sans rechargement. Avec un embedder
+    // (`push_state`, CAP-151) : l'intention `(url, replace)`
+    // remonte — la session résout, commit l'historique et
+    // resynchronise `page_url` via `sync_ctx_url` (l'URL
+    // brute n'est jamais stockée : elle pourrait être
+    // relative). Sans embedder : comportement harnais —
+    // `page_url` remplacée à la brute.
     let u = arg(args, 2);
     if !matches!(u, Value::Undefined | Value::Null) {
         let url = e.to_js_string(u)?;
         if !url.is_empty() {
-            e.hooks.page_url = url;
+            // Résolution locale contre `page_url` (document
+            // URL — même grammaire que XHR) : `location.href`
+            // relu dans le même script est déjà absolu. La
+            // session canonisera via `sync_ctx_url` au drain.
+            let resolved = crate::xhr::resolve_url(e, &url).unwrap_or_else(|| url.clone());
+            // Same-origin exigée (spec : `SecurityError` — ici
+            // refus silencieux ; la session refuserait de
+            // même au drain) : une origine distante ne touche
+            // ni le miroir ni l'historique.
+            if crate::xhr::cross_origin(e, &resolved) == Some(true) {
+                return Ok(Value::Undefined);
+            }
+            if let Some(h) = &e.hooks.push_state {
+                let h = h.clone();
+                // L'URL **brute** remonte : la session résout
+                // contre la base effective (`nav_base` —
+                // `<base href>` s'applique), que `page_url`
+                // ne reflète pas.
+                h(url.clone(), replace);
+            }
+            // L'URL résolue (contre `page_url`) s'applique
+            // localement : `location.href`/`document.URL`
+            // relus dans le même script et les fetchs suivants
+            // sont déjà absolus. Transitoire sous `<base>`
+            // — la session recanonise via `sync_ctx_url` au
+            // drain.
+            e.set_page_url(&resolved);
+            if !replace {
+                // `history.length` suit l'entrée poussée —
+                // `sync_ctx_url` recalera sur la longueur
+                // session au drain.
+                e.hooks.history_len = e.hooks.history_len.saturating_add(1);
+            }
         }
     }
     Ok(Value::Undefined)
@@ -4631,11 +4682,11 @@ fn history_go(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 }
 
 fn history_push_state(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    history_push_replace(e, args)
+    history_push_replace(e, args, false)
 }
 
 fn history_replace_state(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    history_push_replace(e, args)
+    history_push_replace(e, args, true)
 }
 
 /// `document.fonts` — `FontFaceSet` minimal. Pas de pipeline de

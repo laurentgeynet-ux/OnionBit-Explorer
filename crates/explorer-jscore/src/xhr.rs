@@ -1318,7 +1318,7 @@ fn fetch_credentials_parse(s: &str) -> Result<FetchCredentials, String> {
 /// Origine page vs URL requête : `Some(true)` = cross-origin ;
 /// `None` = pas de page de contexte (outillage) → same-origin
 /// par convention (comportement hors-contexte inchangé).
-fn cross_origin(e: &Engine, req_url: &str) -> Option<bool> {
+pub(crate) fn cross_origin(e: &Engine, req_url: &str) -> Option<bool> {
     use crate::builtins::url::{url_origin, url_parse_absolute};
     let base = e.hooks.page_url.as_str();
     if base.is_empty() {

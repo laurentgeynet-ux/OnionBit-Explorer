@@ -3359,6 +3359,35 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-151. History API `pushState`/`replaceState`** —
+  *(numéro officiel attribué à l'intégration)* :
+  `history.pushState`/`replaceState` remontent à la
+  session via `NavRequest::PushState` (additif,
+  drain existant) — résolution contre la **base
+  effective** du document (`<base href>` honoré,
+  `nav_base`), **same-origin exigée** (refus
+  silencieux côté moteur *et* session — spec
+  `SecurityError`, tolérant). `push` = nouvelle
+  entrée, `replace` = réécriture de l'entrée
+  courante ; pendant `hist_pending`, les mutations
+  sont différées (`pending_push`/`pending_replace`)
+  et drainées par `sub_commit_tail` au-dessus de
+  l'entrée de navigation. `entry.url`, `last_req`
+  (reload/back) et le contexte JS suivent dès le
+  drain — `location.href` reflète la résolution
+  dès le même script (`set_page_url` local), puis
+  `JsEngine::sync_ctx_url` (trait additif) recanonise
+  et aligne `history.length`. Entrées marquées
+  `same_doc` : elles partagent le document commis
+  de la tête de « run » — `back`/`forward` à
+  l'intérieur d'un run = **swap d'URL, zéro
+  réseau** (modèle Chrome ; entrée hors run →
+  bfcache/rejeu classique). Navigation fragment
+  marquée `same_doc` de même. Bornes : `popstate`
+  non dispatché, état objet non stocké, run
+  quitté puis rejoint → rejeu de la requête
+  historiée (le document n'est pas persisté par
+  entrée).
 - [x] **CAP-150. Overrides du submitter** —
   `formaction`/`formmethod`/`formenctype`/
   `formtarget` *(numéro officiel attribué à

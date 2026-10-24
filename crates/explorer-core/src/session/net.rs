@@ -211,11 +211,37 @@ impl Session {
                 entry.hist.push(HistEntry {
                     req: req.clone(),
                     failed: false,
+                    same_doc: false,
                 });
                 entry.hist_idx = entry.hist.len() - 1;
                 // Fenêtre « en vol » refermée (étape 84) :
                 // la page commise a désormais son entrée.
                 entry.hist_pending = false;
+                // `pushState`/`replaceState` reçus pendant
+                // la fenêtre (CAP-151 — scripts de chargement
+                // SPA : le document est celui commité) :
+                // `replace` corrige la requête poussée, les
+                // `push` s'empilent au-dessus dans l'ordre.
+                if let Some(rep) = entry.pending_replace.take() {
+                    if let Some(h) = entry.hist.last_mut() {
+                        h.req.url = rep;
+                    }
+                }
+                let extras = std::mem::take(&mut entry.pending_push);
+                for u in extras {
+                    let mut r = Request::get(u);
+                    r.initiator = Some(explorer_net::http::Initiator::TopLevelNav);
+                    entry.hist.truncate(entry.hist_idx + 1);
+                    // `pushState` différés : entrées
+                    // same-document du document fraîchement
+                    // commis (CAP-151).
+                    entry.hist.push(HistEntry {
+                        req: r,
+                        failed: false,
+                        same_doc: true,
+                    });
+                    entry.hist_idx = entry.hist.len() - 1;
+                }
             }
         }
         // Cycle de vie document (issue #11) : les scripts

@@ -137,6 +137,15 @@ pub(crate) struct HistEntry {
     /// `true` = navigation en échec (page d'erreur commise).
     /// Aucune restauration bfcache — la traversée retente.
     pub(crate) failed: bool,
+    /// `true` = entrée **same-document** (CAP-151) : créée
+    /// par `pushState` ou une navigation fragment — elle
+    /// partage le document commis de la première entrée
+    /// réelle de son « run » (chaîne contiguë remontant à
+    /// la tête). La traversée *à l'intérieur* d'un run est
+    /// un swap d'URL (zéro réseau, zéro bfcache) ; entrer
+    /// dans un run dont le document n'est plus affiché
+    /// retombe sur le chemin classique (bfcache → rejeu).
+    pub(crate) same_doc: bool,
 }
 
 /// État d'un onglet : pipeline complet gardé — le re-render
@@ -200,6 +209,17 @@ pub(crate) struct Tab {
     /// échouait pendant ~100 s). Non gelable : la page en vol
     /// n'a pas de position — `freeze` la saute.
     hist_pending: bool,
+    /// `pushState` reçus **pendant** la fenêtre `hist_pending`
+    /// (CAP-151 — l'entrée de la page affichée n'existe pas
+    /// encore : l'URL poussée se met en file et
+    /// `sub_commit_tail` pousse ces entrées au-dessus de la
+    /// sienne, dans l'ordre d'émission).
+    pending_push: Vec<Url>,
+    /// `replaceState` reçu pendant `hist_pending` (CAP-151) —
+    /// réécrit l'URL de la requête que `sub_commit_tail`
+    /// poussera (l'entrée de la page affichée n'existe pas
+    /// encore — remplacer = corriger la requête en vol).
+    pending_replace: Option<Url>,
     /// Décalage de scroll (px CSS).
     scroll_y: f32,
     /// Hauteur du document posé — borne max du scroll.
@@ -982,6 +1002,8 @@ impl Session {
                 csp: Vec::new(),
                 hist_idx: 0,
                 hist_pending: false,
+                pending_push: Vec::new(),
+                pending_replace: None,
                 scroll_y: 0.0,
                 doc_h: 0.0,
                 dom: None,

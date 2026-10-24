@@ -161,8 +161,12 @@ impl Tab {
         self.nav_epoch += 1;
         self.pending_nav.clear();
         // La position restaurée a son entrée d'historique —
-        // plus de fenêtre « en vol » (étape 84).
+        // plus de fenêtre « en vol » (étape 84) ni de files
+        // `pushState`/`replaceState` différés (CAP-151 —
+        // elles appartenaient au document en vol).
         self.hist_pending = false;
+        self.pending_push.clear();
+        self.pending_replace = None;
     }
 
     /// Base de résolution des URLs relatives (étape 135) —

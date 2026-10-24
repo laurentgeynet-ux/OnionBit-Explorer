@@ -244,13 +244,22 @@ impl Session {
             e.hist.push(HistEntry {
                 req: req.clone(),
                 failed: false,
+                // Navigation fragment = same-document
+                // (CAP-151) : l'entrée partage le document
+                // affiché — la traversée y revient par swap
+                // d'URL, sans rejeu.
+                same_doc: true,
             });
             e.hist_idx = e.hist.len() - 1;
             // L'entrée fragment résout la position — la page
             // affichée a désormais son entrée, `hist_pending`
             // tombe. La nav en vol poussera quand même la
             // sienne à son commit (au-dessus, futur tronqué).
+            // Les files `pushState`/`replaceState` différés
+            // (CAP-151) sont vidées — la position est fixée.
             e.hist_pending = false;
+            e.pending_push.clear();
+            e.pending_replace = None;
             e.url = Some(req.url.clone());
         }
         let title = self.tabs.get(&tab).and_then(|e| e.title.clone());
@@ -262,6 +271,88 @@ impl Session {
             self.scroll_to_fragment(tab, frag);
         }
         true
+    }
+
+    /// `history.pushState`/`replaceState` (CAP-151) —
+    /// navigation **same-document** : `url` résolue contre la
+    /// base effective du document (API base URL — `<base>`
+    /// s'applique), **same-origin exigée** (spec : sinon
+    /// `SecurityError` — ici l'intention est ignorée,
+    /// tolérant). `push` → tronque le futur et pousse une
+    /// entrée `GET` (une traversée ultérieure la refetch —
+    /// déviation documentée : pas de réutilisation du
+    /// document commis ni d'état objet/`popstate` à cette
+    /// tranche) ; `replace` → réécrit l'entrée courante.
+    /// Fenêtre en vol (`hist_pending` — l'entrée de la page
+    /// affichée n'existe pas encore) : `push` se met en file
+    /// (`pending_push` — poussé au-dessus de l'entrée à son
+    /// commit par `sub_commit_tail`), `replace` corrige la
+    /// requête en vol (`pending_replace`). `entry.url`
+    /// (affichage, `Referer`, origine des fetchs suivants)
+    /// et `last_req` (reload → URL courante) suivent ; le
+    /// miroir est resynchronisé (`sync_ctx_url`) et
+    /// `Navigated` émis — l'URL de l'onglet a changé.
+    fn apply_push_state(&mut self, tab: TabId, raw: &str, replace: bool) {
+        let (url, title, hist_len) = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            let Some(base) = entry.nav_base().cloned() else {
+                return;
+            };
+            let Ok(url) = Url::resolve(&base, raw.trim()) else {
+                return;
+            };
+            let same = entry
+                .url
+                .as_ref()
+                .is_some_and(|u| u.origin() == url.origin());
+            if !same {
+                tracing::debug!(tab, url = %url, "pushState cross-origin refusé");
+                return;
+            }
+            if entry.hist_pending {
+                if replace {
+                    entry.pending_replace = Some(url.clone());
+                } else {
+                    entry.pending_push.push(url.clone());
+                }
+            } else if replace {
+                if let Some(h) = entry.hist.get_mut(entry.hist_idx) {
+                    h.req.url = url.clone();
+                }
+            } else {
+                let mut req = Request::get(url.clone());
+                req.initiator = Some(Initiator::TopLevelNav);
+                entry.hist.truncate(entry.hist_idx + 1);
+                entry.hist.push(HistEntry {
+                    req,
+                    failed: false,
+                    same_doc: true,
+                });
+                entry.hist_idx = entry.hist.len() - 1;
+            }
+            entry.url = Some(url.clone());
+            if let Some(r) = entry.last_req.as_mut() {
+                r.url = url.clone();
+            }
+            (
+                url,
+                entry.title.clone(),
+                u32::try_from(
+                    entry.hist.len() + usize::from(entry.hist_pending) + entry.pending_push.len(),
+                )
+                .unwrap_or(u32::MAX),
+            )
+        };
+        // Miroir d'abord (le `location.href` relu par le
+        // script suivant est canonisé), puis `Navigated` —
+        // titre inchangé (`prev == title` → pas de
+        // `TitleChanged` re-émis).
+        if let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()) {
+            eng.sync_ctx_url(explorer_js::JS_CTX_TOP, &url.to_string(), hist_len);
+        }
+        self.emit_navigated(tab, &url, title.clone(), title.as_deref());
     }
 
     /// Scrolle vers la cible d'un `#fragment` : `id` puis
@@ -353,6 +444,42 @@ impl Session {
         // navigateur — le contexte initiateur historié ne
         // s'applique plus (étape 66).
         req.initiator = Some(Initiator::TopLevelNav);
+        // Traversée **same-document** (CAP-151) : cible et
+        // position dans le même « run » documentaire — les
+        // entrées `pushState`/fragment (`same_doc`) partagent
+        // le document commis de la tête de run, qui est le
+        // document affiché (une position dans le run affiche
+        // le run). → swap d'URL : zéro réseau, zéro bfcache,
+        // le miroir est resynchronisé. `popstate` n'est pas
+        // dispatché à cette tranche.
+        let same_doc_target = !entry.hist_pending && {
+            let root = |mut i: usize| {
+                while i > 0 && entry.hist[i].same_doc {
+                    i -= 1;
+                }
+                i
+            };
+            root(pos) == root(idx)
+        };
+        if same_doc_target {
+            let url = req.url.clone();
+            let title = entry.title.clone();
+            let hist_len = u32::try_from(entry.hist.len()).unwrap_or(u32::MAX);
+            entry.hist_idx = idx;
+            entry.url = Some(url.clone());
+            // `last_req` suit l'entrée : `reload` rejoue
+            // l'URL courante (le `pushState` d'origine).
+            entry.last_req = Some(req);
+            if let Some(eng) = entry.js.as_mut() {
+                eng.sync_ctx_url(explorer_js::JS_CTX_TOP, &url.to_string(), hist_len);
+            }
+            let frag = url.fragment().map(str::to_string);
+            self.emit_navigated(tab, &url, title.clone(), title.as_deref());
+            if let Some(f) = frag.filter(|f| !f.is_empty()) {
+                self.scroll_to_fragment(tab, &f);
+            }
+            return Ok(());
+        }
         // Hit bfcache (étape 56) : restauration instantanée,
         // zéro réseau.
         if self.try_bfcache(tab, idx) {
@@ -755,6 +882,13 @@ impl Session {
             // compte la page affichée comme position
             // `hist_idx + 1` jusque-là.
             entry.hist_pending = tail.push;
+            // Files `pushState`/`replaceState` différés
+            // (CAP-151) : elles appartiennent à la fenêtre
+            // en vol du document **sortant** — une nouvelle
+            // navigation les vide (jamais rejouées sur le
+            // document entrant).
+            entry.pending_push.clear();
+            entry.pending_replace = None;
             entry.last_req = Some(tail.req.clone());
             entry.url = Some(url.clone());
             entry.title.clone_from(&title);
@@ -1002,6 +1136,13 @@ impl Session {
                     // refus de borne dans `history_move`.
                     let delta = isize::try_from(d).unwrap_or(isize::MAX);
                     return Some(ScriptNav::Go(delta));
+                }
+                NavRequest::PushState { url, replace } => {
+                    // Navigation same-document (CAP-151) —
+                    // appliquée immédiatement (aucun fetch,
+                    // pas de `ScriptNav` à émettre) puis on
+                    // poursuit la file.
+                    self.apply_push_state(tab, &url, replace);
                 }
                 NavRequest::FormSubmit {
                     method,

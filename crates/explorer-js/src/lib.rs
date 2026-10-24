@@ -81,6 +81,19 @@ pub enum NavRequest {
         /// `(name, value)` des contrôles « successful ».
         fields: Vec<(String, String)>,
     },
+    /// `history.pushState`/`replaceState` (CAP-151) —
+    /// navigation **same-document** : la session résout
+    /// `url` contre la base du document, exige same-origin,
+    /// commit URL + historique sans fetch puis resynchronise
+    /// le miroir via [`JsEngine::sync_ctx_url`]. Jamais
+    /// routée vers `navigate_request` (aucun fetch).
+    PushState {
+        /// Argument `url` brut (peut être relatif ou vide).
+        url: String,
+        /// `true` = `replaceState` (remplace l'entrée),
+        /// `false` = `pushState` (nouvelle entrée).
+        replace: bool,
+    },
 }
 
 /// Résolveur de spécificateurs de module fourni par l'hôte :
@@ -558,6 +571,14 @@ pub trait JsEngine: Send {
         Vec::new()
     }
 
+    /// Resynchronise `location`/`history.length` du contexte
+    /// `ctx` après une navigation same-document scriptée
+    /// (`pushState`/`replaceState`, CAP-151) : la session a
+    /// résolu et committé — le miroir reçoit l'URL canonisée
+    /// et la longueur d'historique réelle. Défaut : no-op
+    /// (moteur sans sessions par contexte — harnais).
+    fn sync_ctx_url(&mut self, _ctx: JsCtxId, _url: &str, _history_len: u32) {}
+
     /// Synchronise le DOM miroir → `Some(html)` si des mutations
     /// JS ont eu lieu depuis la dernière synchro (le hôte
     /// re-parse alors le document), `None` sinon.
@@ -1000,6 +1021,14 @@ enum Cmd {
     DrainNav {
         tx: Sender<Vec<NavRequest>>,
     },
+    /// Resynchro `location`/`history.length` d'un contexte
+    /// après un `pushState`/`replaceState` committé par la
+    /// session (CAP-151).
+    SyncCtxUrl {
+        ctx: JsCtxId,
+        url: String,
+        history_len: u32,
+    },
     DomSync {
         tx: Sender<Option<DomSyncPayload>>,
     },
@@ -1291,6 +1320,13 @@ impl JscoreEngine {
                     if tx.send(out).is_err() {
                         return;
                     }
+                }
+                Cmd::SyncCtxUrl {
+                    ctx,
+                    url,
+                    history_len,
+                } => {
+                    eng.sync_ctx_url(ctx, &url, history_len);
                 }
                 Cmd::DomSync { tx } => {
                     let out = jsd.as_ref().and_then(|d| {
@@ -1726,6 +1762,14 @@ impl JsEngine for JscoreEngine {
             return Vec::new();
         }
         rx.recv().unwrap_or_default()
+    }
+
+    fn sync_ctx_url(&mut self, ctx: JsCtxId, url: &str, history_len: u32) {
+        let _ = self.tx.send(Cmd::SyncCtxUrl {
+            ctx,
+            url: url.to_string(),
+            history_len,
+        });
     }
 
     fn sync_dom(&mut self) -> Option<String> {
@@ -2172,6 +2216,16 @@ fn install_dom(
                 enctype: p.enctype,
                 fields: p.fields,
             });
+        }));
+        // `history.pushState`/`replaceState` (CAP-151) —
+        // intention same-document : la session résout,
+        // commit URL + historique, resynchronise le miroir
+        // via `sync_ctx_url`. Top-level seul (comme les
+        // autres hooks nav — cadre = inerte à cette tranche).
+        let q4 = nav_q.clone();
+        eng.set_push_state_hook(std::rc::Rc::new(move |u: String, replace: bool| {
+            q4.borrow_mut()
+                .push(NavRequest::PushState { url: u, replace });
         }));
     }
     eng.install_xhr(std::rc::Rc::new(ChanXhr {

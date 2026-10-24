@@ -127,6 +127,9 @@ pub(crate) struct BrowsingContext {
     pub history_len: u32,
     pub form_submit: Option<Rc<dyn Fn(FormSubmit)>>,
     pub open: Option<Rc<dyn Fn(String)>>,
+    /// `history.pushState`/`replaceState` — hook embedder
+    /// (CAP-151) : `(url_brute, replace)`.
+    pub push_state: Option<Rc<dyn Fn(String, bool)>>,
     pub viewport: (u32, u32),
 }
 
@@ -355,6 +358,7 @@ impl BrowsingContext {
             history_len: 0,
             form_submit: None,
             open: None,
+            push_state: None,
             viewport: (0, 0),
         }
     }

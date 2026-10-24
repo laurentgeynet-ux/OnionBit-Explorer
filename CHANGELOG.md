@@ -1315,6 +1315,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-151 — History API**
+  (`explorer-js` + `explorer-jscore` +
+  `explorer-core` — cap « web réel sécurisé » ;
+  numéro officiel attribué à l'intégration,
+  compteur gelé) : `history.pushState`/
+  `replaceState` — intentions remontées à la
+  session (`NavRequest::PushState`, additif),
+  résolution contre la base effective
+  (`<base href>` honoré), same-origin exigée
+  (refus tolérant des deux côtés). Mutations
+  différées pendant `hist_pending`
+  (`pending_push`/`pending_replace`, drainées
+  par `sub_commit_tail`). `location.href`
+  résolu dès le même script ; trait additif
+  `JsEngine::sync_ctx_url` recanonise URL +
+  `history.length`. Entrées `same_doc` :
+  back/forward intra-run = swap d'URL sans
+  requête (document partagé, modèle Chrome) ;
+  entrées fragment marquées de même. Bornes :
+  pas de `popstate`, état objet non stocké.
+  Tests : 6 session (`pushstate_*`,
+  `replacestate_*`).
+
 - **CAP-150 — Overrides du submitter**
   (`explorer-core` — cap « web réel sécurisé » ;
   numéro officiel attribué à l'intégration,

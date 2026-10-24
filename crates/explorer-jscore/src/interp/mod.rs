@@ -855,6 +855,7 @@ impl Engine {
         swap(&mut self.hooks.history_len, &mut ctx.history_len);
         swap(&mut self.hooks.form_submit, &mut ctx.form_submit);
         swap(&mut self.hooks.open, &mut ctx.open);
+        swap(&mut self.hooks.push_state, &mut ctx.push_state);
         swap(&mut self.hooks.viewport, &mut ctx.viewport);
     }
 
@@ -977,6 +978,27 @@ impl Engine {
             self.switch_to(p);
         }
         self.parked.remove(&id);
+    }
+
+    /// Resynchronise l'URL + `history.length` d'un contexte
+    /// après une navigation same-document scriptée
+    /// (`history.pushState`/`replaceState`, CAP-151) — la
+    /// session a résolu et committé : le miroir reçoit
+    /// l'URL **canonisée**. `hooks.page_url`/`history_len`
+    /// si le contexte est courant, champs garés sinon ; la
+    /// méta `ctxs[ctx]` suit toujours (origine `postMessage`,
+    /// `location` d'un `WindowProxy`).
+    pub fn sync_ctx_url(&mut self, ctx: crate::context::CtxId, url: &str, history_len: u32) {
+        if ctx == self.cur_ctx {
+            self.hooks.page_url = url.to_string();
+            self.hooks.history_len = history_len;
+        } else if let Some(p) = self.parked.get_mut(&ctx) {
+            p.page_url = url.to_string();
+            p.history_len = history_len;
+        }
+        if let Some(m) = self.ctxs.get_mut(ctx as usize) {
+            m.url = url.to_string();
+        }
     }
 
     /// Contexte courant.
