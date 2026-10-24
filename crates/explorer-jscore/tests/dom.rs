@@ -4716,3 +4716,87 @@ fn cap179_fullscreen_popover() {
         "noerr"
     );
 }
+
+// ===== CAP-180 — hit-test inverse + getClientRects
+// (sonde `_census_calls` : `elementFromPoint`/`elementsFromPoint`/
+// `caretPositionFromPoint`/`getClientRects` absents) — même
+// `GeometryMap` publiée que `gBCR` (i#19).
+
+#[test]
+fn cap180_inverse_geometry() {
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    let geom = explorer_jscore::GeometrySlot::default();
+    {
+        let mut g = geom.lock().unwrap();
+        g.scroll_y = 5.0;
+        // #main div — document coords (10,20)-(110,70),
+        // viewport (10,15)-(110,65) après scroll.
+        g.rects.insert(
+            vec![
+                ("html".to_string(), 0),
+                ("body".to_string(), 0),
+                ("div".to_string(), 0),
+            ],
+            explorer_jscore::ElementGeom {
+                rect: explorer_jscore::GeoRect {
+                    x: 10.0,
+                    y: 20.0,
+                    w: 100.0,
+                    h: 50.0,
+                },
+                fixed: false,
+            },
+        );
+        // #list ul — fixed, déjà viewport (10,15)-(110,65)
+        // — chevauche le div : le frère tardif gagne (DFS desc).
+        g.rects.insert(
+            vec![
+                ("html".to_string(), 0),
+                ("body".to_string(), 0),
+                ("ul".to_string(), 0),
+            ],
+            explorer_jscore::ElementGeom {
+                rect: explorer_jscore::GeoRect {
+                    x: 10.0,
+                    y: 15.0,
+                    w: 100.0,
+                    h: 50.0,
+                },
+                fixed: true,
+            },
+        );
+    }
+    e.set_geometry_ctx(0, geom);
+    assert_eq!(
+        evf(
+            &mut e,
+            "var m=document.getElementById('main'),l=document.getElementById('list');\
+            var top=document.elementFromPoint(50,40),all=document.elementsFromPoint(50,40);\
+            var cp=document.caretPositionFromPoint(50,40);\
+            [top===l, all.length, all[0]===l, all[1]===m, cp.offsetNode===l, cp.offset].join('|')"
+        ),
+        "true|2|true|true|true|0"
+    );
+    // Hors rect → null / liste vide.
+    assert_eq!(
+        evf(
+            &mut e,
+            "[document.elementFromPoint(500,500)===null,\
+             document.elementsFromPoint(500,500).length,\
+             document.caretPositionFromPoint(500,500)===null].join('|')"
+        ),
+        "true|0|true"
+    );
+    // `getClientRects` — union bornée : `[rect]` si géom,
+    // `[]` sinon (détaché). `typeof` honnête partout.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var r=m.getClientRects();\
+            [r.length, r[0].x, r[0].y, r[0].width,\
+             document.createElement('div').getClientRects().length,\
+             typeof document.elementFromPoint].join('|')"
+        ),
+        "1|10|15|100|0|function"
+    );
+}

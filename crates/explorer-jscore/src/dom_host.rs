@@ -2881,6 +2881,49 @@ impl Host for DocumentHost {
                 e.resolve_promise(pid, Value::Undefined);
                 Ok(Some(Value::Obj(pid)))
             }
+            // Hit-test inverse (CAP-180) — même `GeometryMap`
+            // publiée que `getBoundingClientRect` (i#19) :
+            // `elementFromPoint` rend le candidat
+            // topmost-first, `elementsFromPoint` tous les
+            // contenus dans cet ordre, `caretPositionFromPoint`
+            // `{offsetNode, offset:0}` (borné : pas de mesure
+            // de glyphe — l'offset dans le texte n'est pas
+            // calculable sans shaping). Sans table → `null`/
+            // `[]`/`null` (document sans paint publiée).
+            "elementFromPoint" => {
+                let x = e.to_number(arg(args, 0))?;
+                let y = e.to_number(arg(args, 1))?;
+                let hits = point_candidate_paths(&self.dom, x, y);
+                let n = hits.first().and_then(|p| self.dom.borrow().node_at_path(p));
+                Ok(Some(match n {
+                    Some(n) => node_value(e, &self.dom, &self.cache, n),
+                    None => Value::Null,
+                }))
+            }
+            "elementsFromPoint" => {
+                let x = e.to_number(arg(args, 0))?;
+                let y = e.to_number(arg(args, 1))?;
+                let hits = point_candidate_paths(&self.dom, x, y);
+                let nodes: Vec<Value> = hits
+                    .iter()
+                    .filter_map(|p| self.dom.borrow().node_at_path(p))
+                    .map(|n| node_value(e, &self.dom, &self.cache, n))
+                    .collect();
+                Ok(Some(e.new_array(nodes)))
+            }
+            "caretPositionFromPoint" => {
+                let x = e.to_number(arg(args, 0))?;
+                let y = e.to_number(arg(args, 1))?;
+                let hits = point_candidate_paths(&self.dom, x, y);
+                let Some(n) = hits.first().and_then(|p| self.dom.borrow().node_at_path(p)) else {
+                    return Ok(Some(Value::Null));
+                };
+                let o = e.new_object();
+                let nv = node_value(e, &self.dom, &self.cache, n);
+                e.set_own(o, "offsetNode", nv, true);
+                e.set_own(o, "offset", Value::Num(0.0), true);
+                Ok(Some(Value::Obj(o)))
+            }
             "adoptNode" => {
                 let Some(src) = node_for(e, arg(args, 0)) else {
                     return Err(e.type_error("adoptNode: nœud requis"));
@@ -3173,6 +3216,9 @@ const DOC_METHODS: &[&str] = &[
     "adoptNode",
     "importNode",
     "exitFullscreen",
+    "elementFromPoint",
+    "elementsFromPoint",
+    "caretPositionFromPoint",
     "getSelection",
     "hasFocus",
     "getElementById",
@@ -3237,6 +3283,7 @@ const NODE_METHODS: &[&str] = &[
     "closest",
     "matches",
     "getBoundingClientRect",
+    "getClientRects",
     "scrollIntoView",
     "scrollIntoViewIfNeeded",
     "attachShadow",
@@ -5254,6 +5301,18 @@ impl Host for NodeHost {
             // boîtes du nœud ≈ border-box ; `None` → zero-rect,
             // comportement historique du stub).
             "getBoundingClientRect" => Ok(Some(gbrect_value(e, &self.dom, node))),
+            // `getClientRects` (CAP-180) — même table que
+            // `gBCR` ; la map publie l'**union** des boîtes du
+            // nœud → la liste spec multi-fragments s'aplatit
+            // à `[union]` (borné, documenté). Absent → `[]`.
+            "getClientRects" => {
+                let rects = if element_geom_rect(&self.dom, node).is_some() {
+                    vec![gbrect_value(e, &self.dom, node)]
+                } else {
+                    Vec::new()
+                };
+                Ok(Some(e.new_array(rects)))
+            }
             // `HTMLMediaElement` (étape 58/71c, ADR-0023/24) —
             // non claimé : stubs honnêtes, jamais de faux
             // succès. Claimé : délégation hôte (`play()` tenu
@@ -5478,6 +5537,45 @@ fn geom_doc_dim(dom: &DomRef, horizontal: bool) -> Option<f64> {
     let g = map.lock().ok()?;
     let d = if horizontal { g.doc_w } else { g.doc_h };
     (d > 0.0).then(|| f64::from(d))
+}
+
+/// Chemins des éléments contenant le point viewport `(x, y)`
+/// (CAP-180 — hit-test inverse sur la `GeometryMap` publiée,
+/// i#19) : rects non-`fixed` en coords document → `-scroll`,
+/// `fixed` déjà viewport (i#18). Tri **topmost-first** borné :
+/// chemin le plus long en premier (le plus profond peint
+/// par-dessus ses ancêtres), puis ordre DFS décroissant à
+/// profondeur égale (frère tardif au-dessus du frère tôt) —
+/// approximation honnête sans z-index/stacking context
+/// (borné : `display:none`/absents de la map ne matchent
+/// jamais — déjà exclu par la session).
+fn point_candidate_paths(dom: &DomRef, x: f64, y: f64) -> Vec<Vec<(String, u32)>> {
+    let Some(slot) = dom.borrow().geometry.clone() else {
+        return Vec::new();
+    };
+    let Ok(g) = slot.lock() else {
+        return Vec::new();
+    };
+    let mut hits: Vec<Vec<(String, u32)>> = g
+        .rects
+        .iter()
+        .filter(|(_, eg)| {
+            let (rx, ry) = if eg.fixed {
+                (f64::from(eg.rect.x), f64::from(eg.rect.y))
+            } else {
+                (
+                    f64::from(eg.rect.x - g.scroll_x),
+                    f64::from(eg.rect.y - g.scroll_y),
+                )
+            };
+            x >= rx && x <= rx + f64::from(eg.rect.w) && y >= ry && y <= ry + f64::from(eg.rect.h)
+        })
+        .map(|(p, _)| p.clone())
+        .collect();
+    drop(g);
+    // Le plus profond d'abord, DFS décroissant ensuite.
+    hits.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| b.cmp(a)));
+    hits
 }
 
 /// L'objet `DOMRect`-like de `getBoundingClientRect` — partagé

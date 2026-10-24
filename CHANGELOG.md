@@ -1680,6 +1680,38 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-180 — hit-test inverse +
+  `getClientRects` (sonde `_census_calls`,
+  couture géométrie i#19)** (`explorer-jscore`)
+  : `document.elementFromPoint(x,y)`/
+  `elementsFromPoint`/`caretPositionFromPoint`
+  — même `GeometryMap` publiée que
+  `getBoundingClientRect` : candidats filtrés
+  par rect (non-`fixed` −scroll, `fixed`
+  déjà viewport — i#18), tri
+  **topmost-first** borné (chemin le plus
+  profond d'abord — les descendants peintent
+  par-dessus leurs ancêtres — puis DFS
+  décroissant à profondeur égale — frère
+  tardif au-dessus du frère tôt ; z-index/
+  stacking context non porté, documenté).
+  `elementFromPoint` → élément ou `null`,
+  `elementsFromPoint` → tableau des contenus
+  (ordre idem), `caretPositionFromPoint` →
+  `{offsetNode, offset:0}` (pas de mesure de
+  glyphe — l'offset texte exige le shaping,
+  borné). `el.getClientRects()` →
+  `DOMRectList` àplatie : la map publie
+  l'**union** des boîtes du nœud → `[union]`
+  ou `[]` (documenté — spec = fragments
+  inline). `Dom::node_at_path` — marche
+  inverse d'`element_path` (chemin → nœud,
+  divergence miroir/session → `null`
+  honnête). Sans table géométrie publiée →
+  `null`/`[]`/`null` (document sans paint).
+  Test jscore `cap180_inverse_geometry`
+  (topmost, hors-rect, `typeof` honnête).
+
 - **CAP-179 — machine à états fullscreen +
   popover (sonde `_census_calls`)**
   (`explorer-jscore` — cap « web réel
