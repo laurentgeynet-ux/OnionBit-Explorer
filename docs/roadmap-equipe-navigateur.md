@@ -3407,6 +3407,22 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-179. Machine à états
+  fullscreen + popover (sonde)** —
+  `requestFullscreen`/`exitFullscreen`/
+  `fullscreenElement`/`fullscreen`/
+  `fullscreenEnabled` (promesse résolue,
+  détaché → rejet `TypeError` spec) ;
+  `showPopover`/`hidePopover`/`togglePopover`
+  gatés `popover` attr (`InvalidStateError`
+  spec), état interne `popover_open`,
+  `beforetoggle`/`toggle` tirés
+  (beforetoggle non-annulable — borné).
+  Slots document-local garés au swap.
+  `typeof` honnête : popover seulement
+  si l'attribut est présent. Test
+  jscore `cap179_fullscreen_popover`.
+
 - [x] **CAP-178. Batch surface mesurée
   (sonde `_census_calls`)** — *(numéro
   officiel attribué à l'intégration)*

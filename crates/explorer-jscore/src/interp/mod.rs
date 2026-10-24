@@ -889,6 +889,8 @@ impl Engine {
         swap(&mut self.hooks.ready_state, &mut ctx.ready_state);
         swap(&mut self.hooks.dialog_modal, &mut ctx.dialog_modal);
         swap(&mut self.hooks.dialog_retval, &mut ctx.dialog_retval);
+        swap(&mut self.hooks.fullscreen_el, &mut ctx.fullscreen_el);
+        swap(&mut self.hooks.popover_open, &mut ctx.popover_open);
         swap(&mut self.hooks.viewport, &mut ctx.viewport);
     }
 

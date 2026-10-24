@@ -4657,3 +4657,62 @@ fn classlist_methods_readable() {
 
 // (le test `xhr.upload` vit dans `tests/xhr.rs` — son
 // harnais installe le transport stub)
+
+// ===== CAP-179 — fullscreen + popover (sonde `_census_calls` :
+// `requestFullscreen`/`exitFullscreen`/`fullscreenElement`,
+// `showPopover`/`hidePopover`/`togglePopover` absents).
+
+#[test]
+fn cap179_fullscreen_popover() {
+    let mut e = engine_with(
+        "<!doctype html><html><body><div id=x></div>\
+        <div id=p popover></div><div id=q></div></body></html>",
+    );
+    e.eval("var x=document.getElementById('x'),p=document.getElementById('p'),q=document.getElementById('q'),d=document;")
+        .expect("setup");
+    // `requestFullscreen` : promesse résolue, `fullscreenElement`,
+    // `fullscreenchange` ; détaché → rejet.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var fs='';d.addEventListener('fullscreenchange',function(){fs+='!'});\
+            x.requestFullscreen().then(function(){fs+='ok'});\
+            [d.fullscreenElement===x, d.fullscreen, d.fullscreenEnabled].join('|')"
+        ),
+        "true|true|true"
+    );
+    e.eval("var rj='';document.createElement('div').requestFullscreen().catch(function(){rj='catch'});")
+        .expect("detached");
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(evf(&mut e, "rj"), "catch");
+    // `exitFullscreen` : efface + événement ; double-exit = no-op.
+    assert_eq!(
+        evf(
+            &mut e,
+            "d.exitFullscreen();d.exitFullscreen();\
+            [d.fullscreenElement===null, d.fullscreen].join('|')"
+        ),
+        "true|false"
+    );
+    // Popover : show/hide/toggle + `InvalidStateError` rules.
+    assert_eq!(
+        evf(&mut e,
+            "var tg='';p.addEventListener('toggle',function(){tg+='T'});p.addEventListener('beforetoggle',function(){tg+='b'});\
+            p.showPopover();p.showPopover===undefined;\
+            [tg, typeof q.showPopover].join('|')"),
+        "bT|undefined"
+    );
+    assert_eq!(
+        evf(
+            &mut e,
+            "var errs='';try{p.showPopover()}catch(err){errs+=err.name};\
+            try{q.showPopover()}catch(err){errs+='/'+err.name};\
+            [errs, p.togglePopover(), p.togglePopover()].join('|')"
+        ),
+        "InvalidStateError/InvalidStateError|false|true"
+    );
+    assert_eq!(
+        evf(&mut e, "try{p.hidePopover();'noerr'}catch(err){err.name}"),
+        "noerr"
+    );
+}

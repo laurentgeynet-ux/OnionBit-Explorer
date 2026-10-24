@@ -260,6 +260,14 @@ pub(crate) struct BrowserHooks {
     /// au `switch_to`.
     pub dialog_modal: std::collections::BTreeSet<NodeId>,
     pub dialog_retval: std::collections::BTreeMap<NodeId, String>,
+    /// Fullscreen (CAP-179) — un seul élément fullscreen par
+    /// document (spec) ; `None` hors fullscreen.
+    /// Document-local — garé/restauré au `switch_to`.
+    pub fullscreen_el: Option<NodeId>,
+    /// Popovers ouverts (CAP-179) — état interne spec
+    /// (`:popover-open` n'est **pas** un attribut reflété).
+    /// Document-local.
+    pub popover_open: std::collections::BTreeSet<NodeId>,
     /// Séquence d'émission des scripts dynamiques.
     pub dyn_script_seq: u64,
     /// Cookie jar for `document.cookie`.
@@ -2503,6 +2511,16 @@ impl Host for DocumentHost {
                     None => Value::Null,
                 }))
             }
+            // Fullscreen (CAP-179) — `fullscreenElement` =
+            // l'élément posé par `requestFullscreen` (un
+            // seul par document), `fullscreen`/`Enabled` :
+            // le miroir le supporte → `true` honnête.
+            "fullscreenElement" => Ok(Some(match e.hooks.fullscreen_el {
+                Some(n) => node_value(e, &self.dom, &self.cache, n),
+                None => Value::Null,
+            })),
+            "fullscreen" => Ok(Some(Value::Bool(e.hooks.fullscreen_el.is_some()))),
+            "fullscreenEnabled" => Ok(Some(Value::Bool(true))),
             "documentElement" => {
                 let n = self.dom.borrow().document_element();
                 Ok(Some(match n {
@@ -2850,6 +2868,19 @@ impl Host for DocumentHost {
             // cible ; miroir mono-document → detach + retour
             // (le re-propriétage est un no-op — il n'y a qu'un
             // document).
+            // `exitFullscreen` (CAP-179) — promesse résolue,
+            // `fullscreenElement` effacé, `fullscreenchange`
+            // sur l'ancien élément. Sans fullscreen →
+            // promesse résolue no-op (spec : si
+            // `fullscreenElement` est `null`, résoudre).
+            "exitFullscreen" => {
+                let pid = e.new_promise();
+                if let Some(n) = e.hooks.fullscreen_el.take() {
+                    e.dispatch_simple(&self.dom, &self.cache, n, "fullscreenchange")?;
+                }
+                e.resolve_promise(pid, Value::Undefined);
+                Ok(Some(Value::Obj(pid)))
+            }
             "adoptNode" => {
                 let Some(src) = node_for(e, arg(args, 0)) else {
                     return Err(e.type_error("adoptNode: nœud requis"));
@@ -3141,6 +3172,7 @@ const DOC_METHODS: &[&str] = &[
     "dispatchEvent",
     "adoptNode",
     "importNode",
+    "exitFullscreen",
     "getSelection",
     "hasFocus",
     "getElementById",
@@ -3798,6 +3830,14 @@ impl Host for NodeHost {
                 && name == "reset")
             || (self.dom.borrow().nodes[self.node as usize].tag.as_str() == "img"
                 && name == "decode")
+            // CAP-179 — fullscreen sur tout élément attaché
+            // (spec) ; popover gaté par l'attribut `popover`
+            // (`typeof el.showPopover` = 'function' seulement
+            // si l'élément est un popover — feature-detect
+            // honnête).
+            || name == "requestFullscreen"
+            || (self.dom.borrow().has_attr(self.node, "popover")
+                && matches!(name, "showPopover" | "hidePopover" | "togglePopover"))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -5285,6 +5325,69 @@ impl Host for NodeHost {
                         Ok(Some(Value::Undefined))
                     }
                 }
+            }
+            // Fullscreen (CAP-179) — spec : promesse résolue,
+            // `fullscreenElement` posé, `fullscreenchange` tiré.
+            // Élément détaché → promesse rejetée `TypeError`
+            // (spec). Borné : état logique honnête — la peinture
+            // n'a pas d'overlay plein-écran à changer.
+            "requestFullscreen" => {
+                let pid = e.new_promise();
+                let attached = {
+                    let d = self.dom.borrow();
+                    d.root_of(node) == d.root
+                };
+                if attached {
+                    e.hooks.fullscreen_el = Some(node);
+                    e.dispatch_simple(&self.dom, &self.cache, node, "fullscreenchange")?;
+                    e.resolve_promise(pid, Value::Undefined);
+                } else {
+                    let msg = e.str_val("TypeError: detached element");
+                    e.reject_promise(pid, msg);
+                }
+                Ok(Some(Value::Obj(pid)))
+            }
+            // Popover (CAP-179) — attribut `popover`
+            // requis (spec : `InvalidStateError` sinon,
+            // déjà-ouvert pour `show`, déjà-fermé pour
+            // `hide`). `togglePopover` rend le nouvel
+            // état. `beforetoggle`/`toggle` tirés —
+            // `beforetoggle` non-annulable (borné :
+            // `dispatch_simple` ne consulte pas
+            // `defaultPrevented`).
+            "showPopover" | "hidePopover" | "togglePopover" => {
+                if !self.dom.borrow().has_attr(node, "popover") {
+                    return Err(crate::heap::Thrown(dom_ex(
+                        e,
+                        "InvalidStateError",
+                        "popover attribute required",
+                    )));
+                }
+                let open = e.hooks.popover_open.contains(&node);
+                if matches!(name, "showPopover") == open && name != "togglePopover" {
+                    return Err(crate::heap::Thrown(dom_ex(
+                        e,
+                        "InvalidStateError",
+                        "popover state invalid",
+                    )));
+                }
+                let now_open = match name {
+                    "showPopover" => true,
+                    "hidePopover" => false,
+                    _ => !open,
+                };
+                e.dispatch_simple(&self.dom, &self.cache, node, "beforetoggle")?;
+                if now_open {
+                    e.hooks.popover_open.insert(node);
+                } else {
+                    e.hooks.popover_open.remove(&node);
+                }
+                e.dispatch_simple(&self.dom, &self.cache, node, "toggle")?;
+                Ok(Some(if name == "togglePopover" {
+                    Value::Bool(now_open)
+                } else {
+                    Value::Undefined
+                }))
             }
             _ => Ok(None),
         }

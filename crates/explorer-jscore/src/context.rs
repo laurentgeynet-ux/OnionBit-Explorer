@@ -162,6 +162,9 @@ pub(crate) struct BrowsingContext {
     /// Document-local, garé/restauré au `switch_to`.
     pub dialog_modal: std::collections::BTreeSet<crate::dom::NodeId>,
     pub dialog_retval: std::collections::BTreeMap<crate::dom::NodeId, String>,
+    /// Fullscreen/popover (CAP-179) — voir `BrowserHooks`.
+    pub fullscreen_el: Option<crate::dom::NodeId>,
+    pub popover_open: std::collections::BTreeSet<crate::dom::NodeId>,
     pub viewport: (u32, u32),
 }
 
@@ -399,6 +402,8 @@ impl BrowsingContext {
             ready_state: "loading",
             dialog_modal: std::collections::BTreeSet::new(),
             dialog_retval: std::collections::BTreeMap::new(),
+            fullscreen_el: None,
+            popover_open: std::collections::BTreeSet::new(),
             viewport: (0, 0),
         }
     }

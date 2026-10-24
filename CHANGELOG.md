@@ -1680,6 +1680,38 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-179 — machine à états fullscreen +
+  popover (sonde `_census_calls`)**
+  (`explorer-jscore` — cap « web réel
+  sécurisé ») : `el.requestFullscreen()`
+  → promesse résolue + `document.
+  fullscreenElement` posé + `fullscreenchange`
+  (élément détaché → rejet `TypeError`
+  spec — les sites `.catch()` leur
+  propre chemin) ; `document.
+  exitFullscreen()` → promesse résolue +
+  état effacé + événement, no-op hors
+  fullscreen (spec). `document.
+  fullscreen`/`fullscreenEnabled` reflétés.
+  Popover : `el.showPopover()`/`hidePopover()`/
+  `togglePopover()` gatés à l'attribut
+  `popover` (`InvalidStateError` sans
+  attribut, déjà-ouvert sur `show`,
+  déjà-fermé sur `hide` — spec) ;
+  état interne `popover_open` (pas
+  d'attribut reflété — `:popover-open`
+  n'en est pas un), `beforetoggle`/`toggle`
+  tirés — `beforetoggle` non-annulable
+  (borné : `dispatch_simple` ne consulte
+  pas `defaultPrevented`). Slots
+  document-local (`fullscreen_el`,
+  `popover_open`) — garés/restaurés au
+  `switch_to`. `typeof` feature-detect
+  honnête : `requestFullscreen` sur tout
+  élément (spec), trio popover seulement
+  si `popover` présent. Test jscore
+  `cap179_fullscreen_popover`.
+
 - **CAP-178 — batch surface mesurée absente
   (sonde `_census_calls`, 44→~30 trous)**
   (`explorer-jscore` — cap « web réel
