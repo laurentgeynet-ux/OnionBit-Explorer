@@ -9,6 +9,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **ADR-0026 — trajectoire sandbox OS**
+  (proposée) : P1 confinement du daemon
+  entier (Job Object + token restreint
+  Windows, seccomp/Landlock Linux,
+  seatbelt macOS, ou lanceur externe
+  `.wsb`/VM/pare-feu) ; P2 split
+  broker/contenu — contenu spawné déjà
+  confiné, un par onglet, zéro socket
+  (`IpcTransport` tunnelé vers
+  l'`EgressConnector` du broker), mode
+  in-process loopback conservé pour les
+  tests, `ring`/TLS côté broker = résidu
+  nommé ; P3 site isolation par origine
+  hors périmètre. Chaque palier déclenché
+  par conditions (distribution, phase
+  10+, workers JS-C29, FFI défaut,
+  décodeurs média réels sur octets
+  réseau) ; `forbid(unsafe_code)` et pur
+  Rust inchangés — aucun code modifié.
+
 - **R-93 — `(scripting)` MQ5 +
   `<noscript>` masqué UA**
   (`explorer-css` — re-baseline post-

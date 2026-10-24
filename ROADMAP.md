@@ -1067,5 +1067,7 @@ roadmap — candidats à un ADR dédié si un besoin réel émerge :
   en phase 10 (étape 45) ;
 - extensions, DevTools complet (`explorer-cli` couvre le debug
   moteur) ;
-- site isolation multi-processus (modèle de menace : ADR-0011).
+- site isolation multi-processus (modèle de menace : ADR-0011 ;
+  trajectoire sandbox figée par ADR-0026 — paliers P1/P2/P3
+  déclenchés par conditions).
 
