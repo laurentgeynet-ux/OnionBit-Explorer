@@ -167,7 +167,7 @@ pub trait CryptoTransport {
 pub(crate) struct CryptoState {
     /// `(handle, promise ObjId, forme du résultat)` en vol
     /// dans ce contexte — la livraison sait quoi résoudre
-    /// (ArrayBuffer / booléen / `CryptoKey`).
+    /// (`ArrayBuffer` / booléen / `CryptoKey`).
     pub pending: Vec<(u64, ObjId, PendingKind)>,
     /// `CryptoKey.prototype` paresseux (JS-C93).
     pub ck_proto: Option<ObjId>,
@@ -325,7 +325,7 @@ fn subtle_digest(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 /// `algorithm` → [`KeyAlgo`] (JS-C93) : `HMAC`
 /// (`{name,hash[,length]}` — hash obligatoire à cette
 /// tranche), `ECDSA` `{name,namedCurve:"P-256"}` uniquement,
-/// `Ed25519` `{name:"Ed25519"|"Ed25519"}` (cf. draft WebCrypto
+/// `Ed25519` `{name:"Ed25519"|"Ed25519"}` (cf. draft `WebCrypto`
 /// `NODE-ED25519`/`Ed25519` — les deux casse-courants admis).
 fn key_algo(e: &mut Engine, v: Value) -> JsResult<Option<(KeyAlgo, &'static str)>> {
     let name = match v {
@@ -387,18 +387,19 @@ fn key_usages(e: &mut Engine, v: Value) -> JsResult<Vec<String>> {
 }
 
 /// `CryptoKey` → octets + nom d'algo — `None` si l'objet
-/// n'est pas une `CryptoKey` (`TypeError` WebIDL).
-fn crypto_key_of(
-    e: &Engine,
-    v: Value,
-) -> Option<(
+/// Pièces extraites d'une `CryptoKey` (clé brute, `type`,
+/// nom d'algo, algo résolu, usages, `extractable`).
+type CryptoKeyParts = (
     Vec<u8>,
     &'static str,
     &'static str,
     KeyAlgo,
     Vec<String>,
     bool,
-)> {
+);
+
+/// n'est pas une `CryptoKey` (`TypeError` `WebIDL`).
+fn crypto_key_of(e: &Engine, v: Value) -> Option<CryptoKeyParts> {
     let Value::Obj(id) = v else { return None };
     match e.heap.obj(id).map(|o| &o.kind) {
         Some(crate::heap::ObjKind::Host(h)) => {
@@ -419,7 +420,7 @@ fn crypto_key_of(
 
 /// Nom d'algorithme seul (`"HMAC"` ou `{name:"HMAC"}`) — la
 /// vérification `sign`/`verify` se fait sur le NOM : les
-/// détails (hash, courbe) viennent de la clé (spec WebCrypto
+/// détails (hash, courbe) viennent de la clé (spec `WebCrypto`
 /// — `sign(algorithm, key)` n'exige que `name`).
 fn algo_name_of(e: &mut Engine, v: Value) -> JsResult<Option<String>> {
     let name = match v {
@@ -434,7 +435,7 @@ fn algo_name_of(e: &mut Engine, v: Value) -> JsResult<Option<String>> {
 
 /// `crypto.subtle.importKey(format, keyData, algorithm,
 /// extractable, usages)` (JS-C93) — conversions synchrones
-/// WebIDL (`TypeError` sur BufferSource/format invalide) ;
+/// `WebIDL` (`TypeError` sur `BufferSource`/format invalide) ;
 /// le reste est asynchrone : `NotSupportedError` (format
 /// `jwk`, algo inconnu, transport absent), `DataError`
 /// (matière refusée par la plateforme), `SyntaxError`

@@ -168,11 +168,21 @@ pub enum KeyFormat {
 /// `subtle.importKey` — valide la matière et la rend
 /// canonique (les octets retournés sont ce que `sign`/
 /// `verify` consommeront). Erreur = `DataError`.
+///
+/// # Errors
+/// `Err` (`DataError`) si la clé est invalide pour
+/// `(algo, format)` (pkcs8 malformé, raw de mauvaise
+/// taille, combinaison non supportée).
 pub fn import_key(algo: KeyAlgo, format: KeyFormat, bytes: &[u8]) -> Result<Vec<u8>, String> {
     match (algo, format) {
+        (KeyAlgo::Hmac(_), KeyFormat::Pkcs8 | KeyFormat::Spki) => {
+            Err("importKey: HMAC accepts raw only".to_string())
+        }
         // `HMAC` accepte n'importe quelle longueur (spec —
         // la clé est normalisée à l'usage par le hash).
-        (KeyAlgo::Hmac(_), KeyFormat::Raw) => Ok(bytes.to_vec()),
+        // `spki` ECDSA/Ed25519 : passthrough — la matière est
+        // validée à l'usage (`verify`), pas de parse ASN.1 ici.
+        (KeyAlgo::Hmac(_), KeyFormat::Raw) | (_, KeyFormat::Spki) => Ok(bytes.to_vec()),
         // Privées : `pkcs8` validé par construction ring.
         (KeyAlgo::EcdsaP256, KeyFormat::Pkcs8) => ring::signature::EcdsaKeyPair::from_pkcs8(
             &ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
@@ -202,17 +212,15 @@ pub fn import_key(algo: KeyAlgo, format: KeyFormat, bytes: &[u8]) -> Result<Vec<
                 Err("importKey: invalid raw key (Ed25519)".to_string())
             }
         }
-        (KeyAlgo::Hmac(_), KeyFormat::Pkcs8 | KeyFormat::Spki) => {
-            Err("importKey: HMAC accepts raw only".to_string())
-        }
-        // `spki` ECDSA/Ed25519 : passthrough — la matière est
-        // validée à l'usage (`verify`), pas de parse ASN.1 ici.
-        (_, KeyFormat::Spki) => Ok(bytes.to_vec()),
     }
 }
 
 /// `subtle.sign` — `key` = octets canoniques retournés par
 /// [`import_key`]. Erreur = `OperationError`.
+///
+/// # Errors
+/// `Err` (`OperationError`) si l'algo ne peut pas signer
+/// avec cette clé (taille/format incompatible).
 pub fn sign(algo: KeyAlgo, key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
     match algo {
         KeyAlgo::Hmac(hash) => {
@@ -249,6 +257,10 @@ pub fn sign(algo: KeyAlgo, key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
 /// vérifie avec la même clé secrète). `Ok(true/false)` —
 /// un échec de vérification n'est **pas** une erreur
 /// (spec : `false`, pas `OperationError`).
+///
+/// # Errors
+/// `Err` (`OperationError`) si la clé est inutilisable pour
+/// cet algo (format incompatible, extraction impossible).
 pub fn verify(algo: KeyAlgo, key: &[u8], sig: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
     let ok = match algo {
         KeyAlgo::Hmac(hash) => {

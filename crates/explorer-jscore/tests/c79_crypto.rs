@@ -49,6 +49,8 @@ impl StubCrypto {
             CryptoOp::Digest(DigestAlgo::Sha256) => self.sizes.0,
             CryptoOp::Digest(DigestAlgo::Sha384) => self.sizes.1,
             CryptoOp::Digest(DigestAlgo::Sha512) => self.sizes.2,
+            // JS-C93 : ce harnais ne couvre que `digest`.
+            CryptoOp::ImportKey { .. } | CryptoOp::Sign { .. } | CryptoOp::Verify { .. } => 0,
         };
         let mut out = req.data;
         out.resize(size, 0xAA);
@@ -140,8 +142,9 @@ fn digest_algorithm_identifier_forms() {
         .requests
         .borrow()
         .iter()
-        .map(|(_, r)| match r.op {
-            CryptoOp::Digest(a) => a,
+        .filter_map(|(_, r)| match r.op {
+            CryptoOp::Digest(a) => Some(a),
+            _ => None,
         })
         .collect();
     assert_eq!(ops, vec![DigestAlgo::Sha384, DigestAlgo::Sha512]);

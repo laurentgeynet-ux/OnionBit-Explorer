@@ -365,6 +365,7 @@ impl Session {
     /// Boucle de dispatch des `NetRequest` (fetch/abort/crypto/
     /// `EventSource`) — extrait de `drain_script_net` (clippy
     /// `too_many_lines` : JS-C92 l'a fait passer à 115).
+    #[allow(clippy::too_many_lines)] // dispatch séquentiel — chaque variante est documentée in situ
     fn dispatch_net_reqs_inner(
         &mut self,
         tab: TabId,
