@@ -1315,6 +1315,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-154 — Navigation `javascript:` évaluée**
+  (`explorer-core` + `explorer-net` — cap « web
+  réel sécurisé » ; numéro officiel attribué à
+  l'intégration) : une URL `javascript:` est
+  évaluée dans le contexte top-level au lieu
+  d'être fetchée — intercept au drain
+  `DrainAct::Req` (session exclusive + partagée) :
+  clic lien, `location=`, `form action`, `open`.
+  `void(0)` = no-op ; CSP `script-src` exige
+  `'unsafe-inline'` ; mutations synchronisées
+  (`sync_dom_keyed` → `apply_dom_sync` →
+  `after_script`) ; moteur installé au commit pour
+  page sans script porteuse (`has_javascript_urls`) ;
+  `url::percent_decode` exposé.
 - **CAP-153 — Activation behavior du clic scripté +
   `window.open`** (`explorer-jscore` + `explorer-js`
   + `explorer-core` — cap « web réel sécurisé » ;

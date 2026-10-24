@@ -10457,3 +10457,109 @@ async fn scripted_summary_click_toggles_details() {
         "details ouvert par clic summary : {dump}"
     );
 }
+
+// ---------- CAP-154 — navigation `javascript:` évaluée ----------
+
+/// `javascript:void(0)` : clic consommé sans navigation ni
+/// fetch — l'URL de l'onglet reste celle de la page.
+#[tokio::test]
+async fn javascript_void_link_click_is_noop() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <a href=\"javascript:void(0)\">noop</a></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+    assert_eq!(t.calls(), 1, "aucun fetch javascript: : {}", t.calls());
+}
+
+/// `javascript:` sur un lien : le code — chemin opaque de
+/// l'URL — s'évalue dans le contexte top-level (la page
+/// est mutée, pas remplacée).
+#[tokio::test]
+async fn javascript_link_executes_in_top_context() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <a href=\"javascript:document.getElementById('x').textContent='JS'+'OK'\">go</a>\
+         <div id=\"x\">avant</div>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+
+    let dump = s.dom_dump(id).unwrap();
+    assert!(dump.contains("JSOK"), "code évalué en top : {dump}");
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+}
+
+/// `location = 'javascript:…'` — même chemin d'intention
+/// (`DrainAct::Req`) : évalué, pas fetché.
+#[tokio::test]
+async fn javascript_location_assign_executes() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script>location.href=\"javascript:document.getElementById('x').textContent='LC'+'OK'\"</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let dump = s.dom_dump(id).unwrap();
+    assert!(
+        dump.contains("LCOK"),
+        "assignation javascript: évaluée : {dump}"
+    );
+    assert_eq!(t.calls(), 1, "aucun fetch javascript: : {}", t.calls());
+}
+
+/// CSP `script-src 'self'` : les URL `javascript:` sont
+/// bloquées faute de `'unsafe-inline'` (spec) — le code
+/// ne s'évalue pas.
+#[tokio::test]
+async fn javascript_link_blocked_by_csp() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <a href=\"javascript:document.getElementById('x').textContent='BL'+'OK'\">go</a>\
+         <div id=\"x\">avant</div>\
+         </body></html>",
+        &[("content-security-policy", "script-src 'self'")],
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+
+    let dump = s.dom_dump(id).unwrap();
+    assert!(
+        !dump.contains("BLOK"),
+        "javascript: bloqué par CSP : {dump}"
+    );
+}

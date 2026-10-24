@@ -355,6 +355,53 @@ impl Session {
         self.emit_navigated(tab, &url, title.clone(), title.as_deref());
     }
 
+    /// Navigation `javascript:` (CAP-154) : le corps de
+    /// l'URL — chemin opaque **percent-décodé** (spec HTML)
+    /// — est **évalué** dans le contexte top-level au lieu
+    /// d'être fetché. `<a href="javascript:void(0)">`,
+    /// `location= 'javascript:…'` : le cas dominant est
+    /// `void(0)` → aucune navigation. CSP `script-src`
+    /// s'applique (`'unsafe-inline'` requis — nonce/hash
+    /// n'ouvrent pas `javascript:`). Renvoie `true` si
+    /// l'intention a été conduite (même en no-op) ; un
+    /// résultat chaîne remplacerait le document (borne
+    /// documentée : ignoré — cas marginal face à `void`).
+    pub(crate) fn run_javascript_url(&mut self, tab: TabId, url: &Url) -> bool {
+        let (allowed, has_js) = self.tabs.get(&tab).map_or((false, false), |e| {
+            (
+                explorer_net::csp::csp_inline_allowed(
+                    &e.csp,
+                    explorer_net::csp::InlineKind::Script,
+                    None,
+                ),
+                e.js.is_some(),
+            )
+        });
+        if !allowed || !has_js {
+            return false;
+        }
+        let code = explorer_net::url::percent_decode(url.path());
+        let sync = {
+            let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()) else {
+                return false;
+            };
+            let _ = eng.eval_ctx(explorer_js::JS_CTX_TOP, &code, Some("javascript:"));
+            // Miroir muté par le code évalué → re-parse +
+            // relayout (même chemin que le drain post-script,
+            // net.rs) ; les cookies/storage/requêtes émises
+            // sont drainés par `after_script` ci-dessous.
+            eng.sync_dom_keyed()
+                .map(|k| (k.html, Some(k.ids), Some(k.tags)))
+                .or_else(|| eng.sync_dom_path().map(|(m, _)| (m, None, None)))
+        };
+        if let Some((html, ids, tags)) = sync {
+            self.apply_dom_sync(tab, &html, None, false, ids, tags);
+        }
+        self.after_script(tab);
+        self.sync_frame_mirrors(tab);
+        true
+    }
+
     /// Scrolle vers la cible d'un `#fragment` : `id` puis
     /// `<a name>` (ordre navigateur). Position = le haut de
     /// la première boîte posée portant le nœud — bornée
@@ -850,6 +897,10 @@ impl Session {
         // `onclick=` seul : premier bug site-réel mesuré M24).
         let want_js = !scripts.is_empty()
             || has_inline_handlers(&dom)
+            // CAP-154 : un `<a href="javascript:…">`/
+            // `form action=javascript:` exige le moteur au
+            // commit — l'URL est évaluée en contexte top.
+            || has_javascript_urls(&dom)
             // Étape 134 : un `<iframe>` fetché obtient un realm
             // JS même sans script parent — sinon son propre
             // `<script>` serait muet.
@@ -1245,7 +1296,17 @@ impl Session {
                 break;
             };
             let ok = match act {
-                DrainAct::Req(req, push) => self.navigate_request(tab, *req, push).await.is_ok(),
+                DrainAct::Req(req, push) => {
+                    // `javascript:` (CAP-154) — évalué dans
+                    // le contexte top, jamais fetché : tous
+                    // les chemins y aboutissent (clic lien,
+                    // `location=`, form action, `open`).
+                    if req.url.scheme() == "javascript" {
+                        self.run_javascript_url(tab, &req.url)
+                    } else {
+                        self.navigate_request(tab, *req, push).await.is_ok()
+                    }
+                }
                 DrainAct::NewTab(req) => {
                     // `target=_blank`/nommé (étape 131) :
                     // nouveau contexte top-level — la

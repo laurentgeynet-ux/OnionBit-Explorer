@@ -3359,6 +3359,26 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-154. Navigation `javascript:` évaluée** —
+  *(numéro officiel attribué à l'intégration)* : une
+  intention vers une URL `javascript:` n'est plus
+  fetchée — le chemin opaque **percent-décodé**
+  (spec HTML) est évalué dans le contexte top-level
+  (`DrainAct::Req` intercepté au drain, session
+  exclusive + partagée — couvre clic lien,
+  `location=`, `form action`, `open`). `void(0)` =
+  no-op dominant (résultat non-string ; borne : un
+  string ne remplace pas encore le document) ; CSP
+  `script-src` s'applique (`'unsafe-inline'` requis,
+  nonce/hash n'ouvrent pas `javascript:`). Miroir
+  muté → `sync_dom_keyed` + `apply_dom_sync` +
+  `after_script` (cookies/storage/XHR émis par le
+  code évalué). `has_javascript_urls` installe le
+  moteur au commit pour une page sans `<script>`
+  porteuse d'un `href`/`action`/`formaction`
+  `javascript:` — sinon l'évaluation serait lettre
+  morte. `explorer_net::url::percent_decode` exposé
+  (API additive).
 - [x] **CAP-153. Activation behavior du clic scripté +
   `window.open`** — *(numéro officiel attribué à
   l'intégration)* : `el.click()` exécute désormais

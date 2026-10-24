@@ -598,7 +598,12 @@ fn normalize_path(raw: &str) -> String {
 
 /// Percent-decode `%XX` → octets → UTF-8 lossy (octets invalides →
 /// U+FFFD, spec).
-fn percent_decode(s: &str) -> String {
+///
+/// Exposé pour les consommateurs dont la spec exige un décodage
+/// du chemin opaque (`javascript:` CAP-154 — le code évalué est
+/// le chemin percent-décodé).
+#[must_use]
+pub fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

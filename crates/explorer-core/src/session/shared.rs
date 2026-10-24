@@ -288,9 +288,19 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
         };
         let ok = match act {
             None => break,
-            Some(DrainAct::Req(req, push)) => Box::pin(navigate_shared(sess, tab, *req, push))
-                .await
-                .is_ok(),
+            Some(DrainAct::Req(req, push)) => {
+                // `javascript:` (CAP-154) — évalué sous
+                // verrou court dans le contexte top, jamais
+                // fetché (même règle que le drain exclusif).
+                if req.url.scheme() == "javascript" {
+                    let mut s = sess.lock().await;
+                    s.run_javascript_url(tab, &req.url)
+                } else {
+                    Box::pin(navigate_shared(sess, tab, *req, push))
+                        .await
+                        .is_ok()
+                }
+            }
             Some(DrainAct::NewTab(req)) => {
                 // `target=_blank`/nommé (étape 131) —
                 // `open_tab` sous verrou court, navigation

@@ -267,6 +267,35 @@ pub(crate) fn has_inline_handlers(dom: &Dom) -> bool {
     false
 }
 
+/// Le document porte-t-il une cible `javascript:` (CAP-154) ?
+/// `<a href>`/`form action` — une page sans `<script>` mais
+/// avec un lien `javascript:` doit obtenir un moteur au
+/// commit : l'URL est évaluée dans le contexte top-level,
+/// sans moteur elle serait lettre morte. Même balayage que
+/// [`has_inline_handlers`], préfixe ASCII-insensible (le
+/// schéma est insensible à la casse, espaces trimés comme
+/// le fait `Url::resolve`).
+pub(crate) fn has_javascript_urls(dom: &Dom) -> bool {
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if let Ok(attrs) = dom.attributes(n) {
+            if attrs.iter().any(|a| {
+                (a.name == "href" || a.name == "action" || a.name == "formaction")
+                    && a.value
+                        .trim_start()
+                        .get(..11)
+                        .is_some_and(|p| p.eq_ignore_ascii_case("javascript:"))
+            }) {
+                return true;
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    false
+}
+
 /// Corps d'un `ScriptItem` : inline direct, externe depuis son
 /// slot (`None` = fetch en échec → le script est sauté).
 pub(crate) fn item_source<'a>(item: &'a ScriptItem, srcs: &'a [Option<String>]) -> Option<&'a str> {
