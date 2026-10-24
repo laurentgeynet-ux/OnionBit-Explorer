@@ -1640,6 +1640,146 @@ impl Dom {
         a == b || self.ancestors(b).contains(&a)
     }
 
+    /// `getRootNode()` — sommet de l'arbre de `node` : le
+    /// `#document` si rattaché, sinon le plus haut ancêtre
+    /// (racine d'un fragment/sous-arbre détaché ; un nœud
+    /// orphelin est sa propre racine — spec). L'option
+    /// `{composed:true}` n'ouvre rien ici : pas de shadow
+    /// DOM dans le miroir (borné). Itératif + garde
+    /// anti-cycle bornée par la taille d'arène.
+    #[must_use]
+    pub fn root_of(&self, node: NodeId) -> NodeId {
+        let mut cur = node;
+        let mut hops = 0usize;
+        while let Some(p) = self.nodes.get(cur as usize).and_then(|n| n.parent) {
+            cur = p;
+            hops += 1;
+            if hops > self.nodes.len() {
+                return node; // corruption cyclique — repli sûr
+            }
+        }
+        cur
+    }
+
+    /// `isEqualNode(other)` — égalité structurelle spec :
+    /// kind, tag, attributs (ordre indifférent — ensemble),
+    /// texte, et enfants pairwise. Itératif (JS-C55 : la
+    /// profondeur est contrôlée par le script), borné par
+    /// la taille de l'arène.
+    #[must_use]
+    pub fn is_equal_node(&self, a: NodeId, b: NodeId) -> bool {
+        let mut work = vec![(a, b)];
+        let mut left = self.nodes.len();
+        while let Some((x, y)) = work.pop() {
+            if left == 0 {
+                return false;
+            }
+            left -= 1;
+            let (nx, ny) = (&self.nodes[x as usize], &self.nodes[y as usize]);
+            if nx.kind != ny.kind
+                || nx.tag != ny.tag
+                || nx.text != ny.text
+                || nx.attrs.len() != ny.attrs.len()
+                || !nx
+                    .attrs
+                    .iter()
+                    .all(|(k, v)| ny.attrs.iter().any(|(k2, v2)| k == k2 && v == v2))
+                || nx.children.len() != ny.children.len()
+            {
+                return false;
+            }
+            work.extend(nx.children.iter().copied().zip(ny.children.iter().copied()));
+        }
+        true
+    }
+
+    /// `compareDocumentPosition(other)` — bitmask
+    /// `Node.DOCUMENT_POSITION_*` décrivant `other` relatif
+    /// à `a` (spec DOM §3.4) : `a.compareDocumentPosition(b)`
+    /// rend la position de **b** vue de a. Arbres disjoints
+    /// → `DISCONNECTED|IMPLEMENTATION_SPECIFIC` + un ordre
+    /// stable (index d'arène — ordre cohérent d'implémentation
+    /// exigé par la spec, jamais aléatoire).
+    #[must_use]
+    pub fn compare_position(&self, a: NodeId, b: NodeId) -> u8 {
+        const DISCONNECTED: u8 = 0x01;
+        const PRECEDING: u8 = 0x02;
+        const FOLLOWING: u8 = 0x04;
+        const CONTAINS: u8 = 0x08;
+        const CONTAINED_BY: u8 = 0x10;
+        const IMPL_SPECIFIC: u8 = 0x20;
+        if a == b {
+            return 0;
+        }
+        if self.contains(a, b) {
+            return CONTAINED_BY | FOLLOWING;
+        }
+        if self.contains(b, a) {
+            return CONTAINS | PRECEDING;
+        }
+        // Rangs préordre depuis `#document` — DFS itératif.
+        let mut rank = std::collections::HashMap::with_capacity(self.nodes.len());
+        let mut stack = vec![self.root];
+        while let Some(n) = stack.pop() {
+            if rank.contains_key(&n) {
+                continue;
+            }
+            rank.insert(n, rank.len());
+            stack.extend(self.nodes[n as usize].children.iter().rev().copied());
+        }
+        match (rank.get(&a), rank.get(&b)) {
+            (Some(&ra), Some(&rb)) => {
+                if rb < ra {
+                    PRECEDING
+                } else {
+                    FOLLOWING
+                }
+            }
+            _ => DISCONNECTED | IMPL_SPECIFIC | if b < a { PRECEDING } else { FOLLOWING },
+        }
+    }
+
+    /// `normalize()` — fusionne les `Text` adjacents et
+    /// supprime les `Text` vides dans tout le sous-arbre
+    /// de `node` (spec Node.normalize). Itératif ; chaque
+    /// suppression passe par [`Dom::detach`] — les records
+    /// `childList` et les drapeaux `attached` restent
+    /// cohérents.
+    pub fn normalize(&mut self, node: NodeId) {
+        let mut work = vec![node];
+        while let Some(n) = work.pop() {
+            let kids = self.nodes[n as usize].children.clone();
+            let mut i = 0;
+            while i < kids.len() {
+                let c = kids[i];
+                if self.nodes[c as usize].kind != NodeKind::Text {
+                    i += 1;
+                    continue;
+                }
+                if self.nodes[c as usize].text.is_empty() {
+                    self.detach(c);
+                    i += 1;
+                    continue;
+                }
+                // Absorbe les textes adjacents suivants.
+                let mut j = i + 1;
+                while j < kids.len() && self.nodes[kids[j] as usize].kind == NodeKind::Text {
+                    let next = kids[j];
+                    let extra = std::mem::take(&mut self.nodes[next as usize].text);
+                    self.nodes[c as usize].text.push_str(&extra);
+                    self.detach(next);
+                    j += 1;
+                }
+                i = j;
+            }
+            work.extend(
+                kids.iter()
+                    .copied()
+                    .filter(|&c| self.nodes[c as usize].kind != NodeKind::Text),
+            );
+        }
+    }
+
     /// `el.matches(sel)` — single-node selector test (same subset
     /// as [`Dom::query`]: simple selectors + descendant combinator).
     #[must_use]

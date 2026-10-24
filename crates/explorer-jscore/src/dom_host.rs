@@ -2805,6 +2805,12 @@ impl Host for NodeHost {
                     None => Value::Null,
                 }));
             }
+            // `isConnected` (CAP-164) — le nœud remonte à
+            // `#document` ; les libs réelles le lisent avant
+            // mesure/délégation (React, selector-observer).
+            "isConnected" => {
+                return Ok(Some(Value::Bool(self.dom.borrow().is_attached(node))));
+            }
             // `parentElement` : spec — `null` quand le parent n'est
             // pas un élément (ex. `html.parentElement`, dont le
             // parentNode est `#document`). Le confondre avec
@@ -3569,6 +3575,52 @@ impl Host for NodeHost {
                 let r =
                     node_for(e, arg(args, 0)).is_some_and(|o| self.dom.borrow().contains(node, o));
                 Ok(Some(Value::Bool(r)))
+            }
+            // CAP-164 — surface Node de complétude : les libs
+            // réelles (React, closure, éditeurs) les lisent
+            // pour la délégation et la comparaison d'arbres.
+            "getRootNode" => {
+                // `{composed:true}` n'ouvre rien — pas de
+                // shadow DOM dans le miroir (borné). Racine
+                // `#document` → le global `document` (identité
+                // `===` exigée, comme `ownerDocument`).
+                let root = self.dom.borrow().root_of(node);
+                let doc_root = self.dom.borrow().root;
+                let v = if root == doc_root {
+                    e.get_prop(e.global, "document").unwrap_or(Value::Null)
+                } else {
+                    node_value(e, &self.dom, &self.cache, root)
+                };
+                Ok(Some(v))
+            }
+            "hasChildNodes" => {
+                let r = self
+                    .dom
+                    .borrow()
+                    .nodes
+                    .get(node as usize)
+                    .is_some_and(|n| !n.children.is_empty());
+                Ok(Some(Value::Bool(r)))
+            }
+            "isSameNode" => {
+                let r = node_for(e, arg(args, 0)).is_some_and(|o| o == node);
+                Ok(Some(Value::Bool(r)))
+            }
+            "isEqualNode" => {
+                let r = node_for(e, arg(args, 0))
+                    .is_some_and(|o| self.dom.borrow().is_equal_node(node, o));
+                Ok(Some(Value::Bool(r)))
+            }
+            "compareDocumentPosition" => {
+                let Some(o) = node_for(e, arg(args, 0)) else {
+                    return Err(e.type_error("compareDocumentPosition: not a node"));
+                };
+                let bits = self.dom.borrow().compare_position(node, o);
+                Ok(Some(Value::Num(f64::from(bits))))
+            }
+            "normalize" => {
+                self.dom.borrow_mut().normalize(node);
+                Ok(Some(Value::Undefined))
             }
             // `*MatchesSelector` : alias pré-standards encore
             // utilisés par les shims de libs réelles

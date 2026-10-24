@@ -3458,3 +3458,97 @@ fn autofocus_sets_active_element() {
     let mut e = engine_with("<input id=nope disabled autofocus><input id=yes autofocus>");
     assert_eq!(evf(&mut e, "document.activeElement.id"), "yes");
 }
+
+/// CAP-164 — surface Node de complétude : `getRootNode`,
+/// `isConnected`, `hasChildNodes`, `isSameNode`,
+/// `compareDocumentPosition`, `isEqualNode`, `normalize`.
+#[test]
+fn node_completeness_surface() {
+    let mut e = engine_with("<div id=a><p id=p>x<b id=b>y</b></p></div><div id=z></div>");
+    // getRootNode : attaché → le document (identité `===`).
+    assert_eq!(
+        evf(
+            &mut e,
+            "document.getElementById('b').getRootNode() === document"
+        ),
+        "true"
+    );
+    // Détaché → le sommet du sous-arbre (pas document).
+    assert_eq!(
+        evf(
+            &mut e,
+            "var f=document.createElement('div');f.appendChild(document.createTextNode('t'));\
+             var r=f.getRootNode(); (r===f)+'|'+(r===document)"
+        ),
+        "true|false"
+    );
+    // isConnected / hasChildNodes / isSameNode.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var a=document.getElementById('a'),b=document.getElementById('b');\
+             a.isConnected+'|'+f.isConnected+'|'+a.hasChildNodes()+'|'+\
+             document.getElementById('z').hasChildNodes()+'|'+a.isSameNode(a)+'|'+a.isSameNode(b)"
+        ),
+        "true|false|true|false|true|false"
+    );
+}
+
+/// `compareDocumentPosition` — bitmask spec : l'autre vu de
+/// `this` (contains → 8|4, contained → 16|4, ordre doc → 2/4,
+/// détaché → 1|32+ordre).
+#[test]
+fn compare_document_position_bits() {
+    let mut e = engine_with("<div id=a><p id=p></p></div><div id=z></div>");
+    assert_eq!(
+        evf(
+            &mut e,
+            "var a=document.getElementById('a'),p=document.getElementById('p'),\
+             z=document.getElementById('z');\
+             a.compareDocumentPosition(p)+'/'+p.compareDocumentPosition(a)+'/'+\
+             a.compareDocumentPosition(z)+'/'+z.compareDocumentPosition(a)+'/'+\
+             a.compareDocumentPosition(a)"
+        ),
+        // p est contenu par a et suit a : 16|4=20 ; a contient
+        // p et précède : 8|2=10 ; z suit a : 4 ; a précède z : 2 ;
+        // même nœud : 0.
+        "20/10/4/2/0"
+    );
+    // Nœuds d'arbres disjoints : DISCONNECTED|IMPL + ordre.
+    let d = evf(
+        &mut e,
+        "var f=document.createElement('span');\
+         a.compareDocumentPosition(f)&(1|32)",
+    );
+    assert_eq!(d, "33");
+}
+
+/// `isEqualNode` / `normalize` — égalité structurelle et
+/// fusion des textes adjacents (spec Node).
+#[test]
+fn equal_node_and_normalize() {
+    let mut e = engine_with("<div id=a></div>");
+    assert_eq!(
+        evf(
+            &mut e,
+            "var a=document.getElementById('a');\
+             var x=document.createElement('div');x.setAttribute('c','1');x.setAttribute('d','2');\
+             var y=document.createElement('div');y.setAttribute('d','2');y.setAttribute('c','1');\
+             x.isEqualNode(y)+'|'+x.isEqualNode(a)+'|'+x.isEqualNode(null)"
+        ),
+        "true|false|false"
+    );
+    // normalize : "ab"+"cd" adjacents + texte vide → 1 enfant.
+    assert_eq!(
+        evf(
+            &mut e,
+            "a.appendChild(document.createTextNode('ab'));\
+             a.appendChild(document.createTextNode('cd'));\
+             a.appendChild(document.createTextNode(''));\
+             a.appendChild(document.createElement('i'));\
+             a.appendChild(document.createTextNode('x'));\
+             a.normalize();a.childNodes.length+'|'+a.childNodes[0].textContent+'|'+a.childNodes[2].textContent"
+        ),
+        "3|abcd|x"
+    );
+}

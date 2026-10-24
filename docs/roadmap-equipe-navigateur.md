@@ -3359,6 +3359,28 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-164. API Node de complétude (miroir)** —
+  *(numéro officiel attribué à l'intégration)* : les
+  libs réelles lisent ces primitives pour la délégation
+  d'événements et la comparaison d'arbres (React lit
+  `getRootNode`, selector-observer `isConnected`).
+  Ajouts `explorer-jscore::Dom` — tous itératifs,
+  bornés par la taille d'arène (JS-C55 : profondeur
+  contrôlée par le script) : `root_of` (`getRootNode` —
+  sommet d'arbre, `{composed:true}` inerte : pas de
+  shadow DOM), `is_equal_node` (kind/tag/attrs-
+  ensemble/texte/enfants pairwise), `compare_position`
+  (bitmask `DOCUMENT_POSITION_*` spec : contains→
+  `8|4`, contained→`16|4`, ordre par rang préordre DFS,
+  arbres disjoints→`1|32`+ordre stable d'arène),
+  `normalize` (fusion `Text` adjacents + suppression
+  des vides via `detach` → records `childList` émis).
+  Côté hôte : `isConnected` (getter, = `is_attached`),
+  `hasChildNodes`, `isSameNode`, `compareDocumentPosition`
+  (TypeError sur non-nœud), `normalize`, `getRootNode`
+  (racine `#document` → global `document` — identité
+  `===` comme `ownerDocument`). 3 tests dom.
+
 - [x] **CAP-163. `integrity` (SRI) sur scripts et
   feuilles externes** — *(numéro officiel attribué à
   l'intégration)* : `<script src integrity>` et

@@ -1315,6 +1315,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-164 — API Node de complétude (miroir)**
+  (`explorer-jscore` — cap « web réel sécurisé » ;
+  numéro officiel attribué à l'intégration) :
+  `getRootNode` (racine `#document` → global
+  `document`, `{composed:true}` inerte — pas de shadow
+  DOM), `isConnected`, `hasChildNodes`, `isSameNode`,
+  `isEqualNode` (attributs en ensemble, enfants
+  pairwise), `compareDocumentPosition` (bitmask spec,
+  arbres disjoints → `DISCONNECTED|IMPL_SPECIFIC` +
+  ordre stable), `normalize` (fusion textes adjacents,
+  suppressions via `detach` → records `childList`).
+  Tous itératifs bornés (JS-C55). Les libs réelles
+  (React, closure) en dépendent pour la délégation
+  d'événements et l'introspection d'arbres. 3 tests
+  dom.
 - **CAP-163 — `integrity` (SRI) sur scripts et feuilles
   externes** (`explorer-net` + `explorer-core` — cap
   « web réel sécurisé » ; numéro officiel attribué à
