@@ -856,6 +856,91 @@ fn object_fit_positions_media_content() {
     assert!(push < at && at < pop, "image entre les clips");
 }
 
+/// R-95 — `background-size` met la tuile à l'échelle au
+/// raster : le bitmap est réduit/étiré vers la tuile déclarée
+/// au lieu d'être dessiné à taille naturelle. Cas mesuré :
+/// `.votearrow` de news.ycombinator.com — SVG 32×32 dont le
+/// motif est **centré** ; à taille naturelle la boîte 10×10
+/// n'échantillonnait que le coin (0,0) — vide → flèche
+/// invisible malgré fetch, décodage et matching corrects.
+#[test]
+fn background_size_met_la_tuile_a_l_echelle() {
+    use explorer_render::PaintImages;
+    use std::sync::Arc;
+
+    // Bitmap 32×32 : carré rouge central x12..20 / y12..20
+    // — à taille naturelle, une boîte 10×10 ne voit que du
+    // transparent ; réduite à 10×10, le rouge couvre le centre.
+    fn center_red() -> Arc<explorer_render::DecodedImage> {
+        let mut rgba = vec![0u8; 32 * 32 * 4];
+        for y in 12..20 {
+            for x in 12..20 {
+                let i = (y * 32 + x) * 4;
+                rgba[i] = 255;
+                rgba[i + 3] = 255;
+            }
+        }
+        Arc::new(explorer_render::DecodedImage {
+            width: 32,
+            height: 32,
+            rgba,
+        })
+    }
+
+    fn bg_frame(css: &str) -> explorer_render::Frame {
+        let dom = TreeBuilder::parse("<html><body><div id=v></div></body></html>");
+        let mut eng = StyleEngine::new();
+        eng.add_css("body{margin:0}", Origin::Author);
+        eng.add_css(css, Origin::Author);
+        let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+        let root_el = dom
+            .children(dom.document())
+            .into_iter()
+            .flatten()
+            .find(|&c| dom.element(c).is_ok())
+            .expect("racine");
+        let v = by_id(&dom, "v");
+        let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+        layout_tree(&mut bx, VIEW, &ctx());
+        let images = PaintImages {
+            backgrounds: std::iter::once((v, center_red())).collect(),
+            ..PaintImages::default()
+        };
+        let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &images);
+        let fonts = ctx().fonts.expect("fixture fonte");
+        rasterize(&list, fonts, 1.0).expect("frame")
+    }
+
+    fn px(frame: &explorer_render::Frame, x: usize, y: usize) -> [u8; 4] {
+        let i = (y * frame.width as usize + x) * 4;
+        [
+            frame.pixels[i],
+            frame.pixels[i + 1],
+            frame.pixels[i + 2],
+            frame.pixels[i + 3],
+        ]
+    }
+
+    // `background-size:10px` → centre de la boîte rouge.
+    let f = bg_frame(
+        "#v{width:10px;height:10px;background:url(/i.png) no-repeat;background-size:10px}",
+    );
+    assert_eq!(
+        px(&f, 5, 5),
+        [255, 0, 0, 255],
+        "tuile réduite : le motif centré peint au centre de la boîte"
+    );
+    // Sans `background-size` → taille naturelle : le même pixel
+    // n'échantillonne que le coin transparent (référence du bug
+    // — le canvas non couvert reste blanc).
+    let f = bg_frame("#v{width:10px;height:10px;background:url(/i.png) no-repeat}");
+    assert_eq!(
+        px(&f, 5, 5),
+        [255, 255, 255, 255],
+        "taille naturelle : le coin de l'image reste transparent"
+    );
+}
+
 // ── R-9 : `<svg>` inline ────────────────────────────────────
 
 #[test]

@@ -2853,6 +2853,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-95 — `background-size` ignoré au
+  raster** (`explorer-render` — vol
+  terrain, suite « flèches HN »). La
+  tuile `BackgroundImage` était peinte
+  à **taille naturelle** : un bitmap
+  plus grand que sa boîte n'y montrait
+  que son coin `(0,0)`. Le triangle
+  `.votearrow` de news.ycombinator.com
+  (SVG 32×32, motif centré, boîte
+  10×10, `background-size:10px`)
+  échantillonnait une zone entièrement
+  transparente → flèche invisible
+  malgré fetch, décodage et cascade
+  corrects. La tuile est désormais
+  mise à l'échelle à l'émission
+  (`bg_size` : `auto`/intrinsèque,
+  `cover`/`contain`, `<len>`/`<%>` —
+  même grammaire que `mask-size`) ;
+  `background-position` en `%` mesure
+  `zone − tuile réduite` (spec
+  §images-3). Zéro changement d'API —
+  interne `display.rs`, tuile >
+  16 Mpx bornée. Régressions :
+  `background_size_met_la_tuile_a_l_
+  echelle` (render),
+  `background_size_scales_fetched_
+  image` (session, motif HN exact).
 - **R-94 — `background` multi-couches
   droppé entièrement** (`explorer-css`
   — vol terrain : les flèches de vote

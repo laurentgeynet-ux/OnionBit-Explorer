@@ -85,7 +85,8 @@ pub enum DisplayItem {
     },
     /// `background-image` décodée, tuilée dans `rect` selon
     /// `background-repeat` — origine padding box, aire border
-    /// box (`background-size` hors portée — taille naturelle).
+    /// box. La tuile est mise à l'échelle selon
+    /// `background-size` à l'émission (R-95).
     BackgroundImage {
         /// Aire de peinture (border box de la boîte porteuse) —
         /// les tuiles n'apparaissent que dedans.
@@ -1171,7 +1172,14 @@ fn bg_layers(v: &str) -> Vec<&str> {
 /// intrinsèque — il couvre l'aire, §images-3). Une couche dont
 /// la source manque (url non décodée, dégradé non supporté)
 /// est simplement sautée, les autres peignent.
-#[allow(clippy::cast_precision_loss)]
+// tw/th ci-dessous sont vérifiés finis et > 0 juste avant le
+// cast (`round().max(1.0)`) — ni troncature utile ni signe
+// perdu, au pire un arrondi pixel.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn emit_bg_layers(
     items: &mut Vec<DisplayItem>,
     style: &explorer_css::ComputedStyle,
@@ -1204,11 +1212,32 @@ fn emit_bg_layers(
             None
         };
         if let Some(img) = img {
+            // R-95 — `background-size` dimensionne la tuile
+            // (naturelle par défaut) ; sans lui un bitmap plus
+            // grand que la boîte n'en peignait que le coin —
+            // mesuré : `.votearrow` de news.ycombinator.com,
+            // SVG 32×32 à motif centré dans une boîte 10×10.
+            let (tw, th) = bg_size(style, area, (img.width as f32, img.height as f32), fs);
+            if !(tw.is_finite() && th.is_finite()) || tw <= 0.0 || th <= 0.0 {
+                continue; // `background-size:0` ou non résolu.
+            }
+            let (tw, th) = (tw.round().max(1.0), th.round().max(1.0));
+            let img = if tw * th > MAX_TILE_PX as f32 {
+                // Borne : tuile naturelle plutôt qu'une
+                // allocation hostile (`cover` sur une très
+                // grande aire, `background-size` énorme).
+                img
+            } else if tw as u32 != img.width || th as u32 != img.height {
+                std::sync::Arc::new(scale_tile(&img, tw as u32, th as u32))
+            } else {
+                img
+            };
             // `%` de `background-position` mesure
             // `(zone − image)` : un dégradé calibré à la zone
             // rend donc les positions relatives neutres, les
             // offsets absolus (`0 -667px` sprites) actifs —
-            // conforme §14.2.1.
+            // conforme §14.2.1. La dimension retenue est la
+            // tuile **mise à l'échelle** (spec §images-3).
             let (px, py) = bg_position(
                 style.get("background-position"),
                 area,
@@ -1412,6 +1441,105 @@ fn bg_position(raw: Option<&str>, area: (f32, f32), img: (f32, f32), fs: f64) ->
         _ => ("left", "top"),
     };
     (token(x_tok, area.0, img.0), token(y_tok, area.1, img.1))
+}
+
+/// Plafond de la tuile `background-size` mise à l'échelle
+/// (R-95) — 16 Mpx ≈ le budget `image_max_px` des décodages ;
+/// au-delà, la tuile naturelle est conservée (dégradation
+/// tolérante, jamais d'allocation hostile).
+const MAX_TILE_PX: u64 = 16_777_216;
+
+/// `background-size` → dimensions (px) d'une tuile dans la
+/// zone `area` (R-95) : `auto`/absent = **taille
+/// intrinsèque** (spec — la tuile était historiquement
+/// naturelle) ; `cover`/`contain` (ratio préservé),
+/// `<len>`/`<%>` (une valeur = largeur, l'autre garde le
+/// ratio). Même grammaire que [`mask_size`], seul le défaut
+/// `auto` diffère (étirement pour les masks — déviation
+/// documentée R-52). Longueurs font-relatives résolues sur
+/// `fs` comme `background-position`.
+#[allow(clippy::cast_possible_truncation)]
+// le `as f32` des longueurs suit le même motif que
+// `mask_size`/`bg_position` — valeurs CSS ordinaires.
+fn bg_size(
+    st: &explorer_css::ComputedStyle,
+    area: (f32, f32),
+    img: (f32, f32),
+    fs: f64,
+) -> (f32, f32) {
+    let toks: Vec<&str> = st
+        .get("background-size")
+        .unwrap_or("")
+        .split_whitespace()
+        .collect();
+    let ratio = if img.1 > 0.0 { img.0 / img.1 } else { 0.0 };
+    let len = |t: &str, span: f32| -> Option<f32> {
+        t.strip_suffix('%')
+            .and_then(|p| p.parse::<f32>().ok())
+            .map(|p| span * p / 100.0)
+            .or_else(|| {
+                parse_length(t).map(|l| {
+                    (match l.unit.px_factor() {
+                        Some(f) => l.value * f,
+                        None => l.value * fs * em_factor(l.unit),
+                    }) as f32
+                })
+            })
+    };
+    match toks.as_slice() {
+        [] | ["auto"] | ["auto", "auto"] => img,
+        ["cover" | "contain"] => {
+            if img.0 <= 0.0 || img.1 <= 0.0 {
+                return img;
+            }
+            let s = if toks[0] == "cover" {
+                (area.0 / img.0).max(area.1 / img.1)
+            } else {
+                (area.0 / img.0).min(area.1 / img.1)
+            };
+            (img.0 * s, img.1 * s)
+        }
+        [a] => len(a, area.0).map_or(img, |w| (w, if ratio > 0.0 { w / ratio } else { img.1 })),
+        [a, b, ..] => {
+            let w = if *a == "auto" {
+                len(b, area.1).map_or(img.0, |h| h * ratio)
+            } else {
+                len(a, area.0).unwrap_or(img.0)
+            };
+            let h = if *b == "auto" {
+                len(a, area.0).map_or(img.1, |w| if ratio > 0.0 { w / ratio } else { img.1 })
+            } else {
+                len(b, area.1).unwrap_or(img.1)
+            };
+            (w, h)
+        }
+    }
+}
+
+/// Tuile `background-size` mise à l'échelle en nearest-
+/// neighbor (R-95) — le tuilage échantillonne ensuite la
+/// copie réduite à l'unité près, comme une image native de
+/// cette taille. `w`/`h` ≥ 1 garantis par l'appelant.
+#[allow(clippy::cast_possible_truncation)]
+// w×h ≤ MAX_TILE_PX (16 Mpx) vérifié avant l'appel — chaque
+// dimension tient largement dans u32.
+fn scale_tile(img: &crate::image::DecodedImage, w: u32, h: u32) -> crate::image::DecodedImage {
+    let (iw, ih) = (img.width as usize, img.height as usize);
+    let (w, h) = (w as usize, h as usize);
+    let mut rgba = Vec::with_capacity(w * h * 4);
+    for dy in 0..h {
+        let sy = dy * ih / h;
+        for dx in 0..w {
+            let sx = dx * iw / w;
+            let i = (sy * iw + sx) * 4;
+            rgba.extend_from_slice(&img.rgba[i..i + 4]);
+        }
+    }
+    crate::image::DecodedImage {
+        width: w as u32,
+        height: h as u32,
+        rgba,
+    }
 }
 
 /// `mask-size` → dimensions (px) d'une tuile du mask dans la
