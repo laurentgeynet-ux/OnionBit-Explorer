@@ -10679,6 +10679,57 @@ async fn noscript_frame_sandbox_shows_fallback() {
     );
 }
 
+/// R-93 — filage NAV `env.scripting = ctx.scripting` : la
+/// règle UA `@media (scripting) { noscript { display:none } }`
+/// s'applique quand un moteur JS est installé — le fallback
+/// rawtext ne produit plus aucune boîte (bug mesuré wikipedia
+/// `CentralAutoLogin` en clair, issue #22).
+#[tokio::test]
+async fn noscript_fallback_hidden_by_ua_rule_with_js() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <noscript>FALLBACK_TXT</noscript>\
+         <div>stay</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let dump = s.layout_dump(id).unwrap();
+    assert!(
+        !dump.contains("<noscript>") && !dump.contains("FALLBACK_TXT"),
+        "scripting ON : noscript display:none (aucune boîte) : {dump}"
+    );
+    assert!(
+        dump.contains("stay"),
+        "le reste du corps reste peint : {dump}"
+    );
+}
+
+/// Contrôle R-93 : scripting OFF (aucun moteur) — `(scripting)`
+/// = `none`, la règle UA est inerte, le fallback s'affiche.
+#[tokio::test]
+async fn noscript_fallback_visible_without_js() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <noscript>FALLBACK_TXT</noscript></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let dump = s.layout_dump(id).unwrap();
+    assert!(
+        dump.contains("FALLBACK_TXT"),
+        "scripting OFF : le fallback noscript peint : {dump}"
+    );
+}
+
 // ---------- CAP-156 — `document.referrer` ----------
 
 /// `document.referrer` reflète le `Referer` effectivement

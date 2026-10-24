@@ -1009,7 +1009,7 @@ fn try_incr_payload(
         ctx.viewport.0,
         ctx.scale,
     );
-    let styles = styles_payload(p, new_dom, ctx.viewport, ctx.color_scheme);
+    let styles = styles_payload(p, new_dom, ctx.viewport, ctx.color_scheme, ctx.scripting);
     let data_imgs = collect_data_images(new_dom, &styles, ctx.image_max_px);
     p.images.replaced.extend(data_imgs.replaced);
     p.images.backgrounds.extend(data_imgs.backgrounds);
@@ -1074,19 +1074,24 @@ fn try_incr_payload(
 
 /// `StyleEnv` dérivé du viewport session (f32 → px entiers,
 /// saturé à `[0, u32::MAX]` — un viewport invalide ne peut
-/// pas produire un env négatif ou absurdement grand) et du
+/// pas produire un env négatif ou absurdement grand), du
 /// schéma de couleurs réglé (étape 97 — `prefers-color-scheme`
-/// des media queries et défauts UA sombres, R-59).
+/// des media queries et défauts UA sombres, R-59) et du
+/// « scripting flag » du contexte (R-93 — MQ `(scripting)` +
+/// `<noscript>` masqué UA : sans filage, le fallback rawtext
+/// peignait en clair sous un moteur installé — issue #22).
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 // px CSS ≪ 2^32 en pratique — `as` sature déjà.
 pub(crate) fn viewport_env(
     viewport: (f32, f32),
     color_scheme: explorer_css::ColorScheme,
+    scripting: bool,
 ) -> StyleEnv {
     StyleEnv {
         width_px: viewport.0.max(0.0).round() as u32,
         height_px: viewport.1.max(0.0).round() as u32,
         color_scheme,
+        scripting,
         ..StyleEnv::default()
     }
 }
@@ -1100,6 +1105,7 @@ pub(crate) fn styles_payload(
     dom: &Dom,
     viewport: (f32, f32),
     color_scheme: explorer_css::ColorScheme,
+    scripting: bool,
 ) -> StyleMap {
     let mut eng = StyleEngine::new();
     eng.add_css(MEDIA_UA_CSS, Origin::UserAgent);
@@ -1118,7 +1124,7 @@ pub(crate) fn styles_payload(
     // session (demande PIPE→NAV : `max-width:1007` doit être
     // vrai à 800px, pas lue sur le 1024×768 par défaut) et
     // le schéma de couleurs réglé (étape 97).
-    let env = viewport_env(viewport, color_scheme);
+    let env = viewport_env(viewport, color_scheme, scripting);
     let mut styles = eng.compute_tree(dom, dom.document(), &env);
     let ord_of = element_ordinals(dom);
     let raw: HashMap<usize, ComputedStyle> = styles
@@ -1156,7 +1162,7 @@ pub(crate) fn relayout_dom_payload(
     // cases, retirer plus tard pourrait emporter un
     // bitmap frais (étape 129).
     composite::purge_frame_bitmaps(p);
-    let styles = styles_payload(p, dom, ctx.viewport, ctx.color_scheme);
+    let styles = styles_payload(p, dom, ctx.viewport, ctx.color_scheme, ctx.scripting);
     tracing::info!(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
         "apply: cascade"

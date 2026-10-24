@@ -1442,7 +1442,7 @@ impl Session {
         // de liens générés répètent le même `href`, GitHub
         // ~7 doublons : un doublon brûle quota + fetch pour
         // un contenu identique en cascade).
-        let env = super::apply::viewport_env(self.viewport, self.color_scheme);
+        let env = super::apply::viewport_env(self.viewport, self.color_scheme, scripting);
         // CSP `upgrade-insecure-requests` (CAP-145) —
         // réécriture en amont des filtres : une cible
         // upgradée devient admissible mixed-content.

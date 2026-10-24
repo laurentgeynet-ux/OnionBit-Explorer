@@ -1105,6 +1105,9 @@ impl Session {
             .find(|(n, _)| n.eq_ignore_ascii_case("referer"))
             .map_or("", |(_, v)| v.as_str());
         let eng = self.spawn_engine(tab, &html, want_js, doc_referrer);
+        // R-93 — scripting réel = moteur installé (`want_js`
+        // peut être levé pour des frames sans moteur dispo).
+        let scripting = eng.is_some();
         Ok(Some(SubJob {
             tab,
             epoch: tail.epoch,
@@ -1129,6 +1132,7 @@ impl Session {
             import_specs,
             doc_sheets,
             eng,
+            scripting,
             css_slots: Vec::new(),
             script_srcs: Vec::new(),
             img_bodies: HashMap::new(),

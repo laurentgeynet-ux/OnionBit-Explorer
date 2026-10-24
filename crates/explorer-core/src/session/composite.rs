@@ -302,7 +302,13 @@ fn render_subframe(
         scripting: ctx.scripting && f.sandbox.is_none_or(|s| s.scripts),
     };
     let root_el = f.dom.document_element()?;
-    let styles = styles_payload(&mut cp, &f.dom, (w, h), ctx.color_scheme);
+    let styles = styles_payload(
+        &mut cp,
+        &f.dom,
+        (w, h),
+        ctx.color_scheme,
+        child_ctx.scripting,
+    );
     let data_imgs = collect_data_images(&f.dom, &styles, ctx.image_max_px);
     cp.images.replaced.extend(data_imgs.replaced);
     cp.images.backgrounds.extend(data_imgs.backgrounds);
