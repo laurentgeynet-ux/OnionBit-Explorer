@@ -594,6 +594,12 @@ pub trait JsEngine: Send {
     /// (moteur sans sessions par contexte — harnais).
     fn sync_ctx_url(&mut self, _ctx: JsCtxId, _url: &str, _history_len: u32) {}
 
+    /// `document.referrer` (CAP-156) : le `Referer` envoyé
+    /// par la navigation du document (`""` = aucun) — posé
+    /// après `install_dom`, avant la première évaluation.
+    /// Défaut : no-op (moteur sans document réel).
+    fn set_page_referrer(&mut self, _referrer: &str) {}
+
     /// Synchronise le DOM miroir → `Some(html)` si des mutations
     /// JS ont eu lieu depuis la dernière synchro (le hôte
     /// re-parse alors le document), `None` sinon.
@@ -1044,6 +1050,10 @@ enum Cmd {
         url: String,
         history_len: u32,
     },
+    /// `document.referrer` du document top-level (CAP-156).
+    SetPageReferrer {
+        referrer: String,
+    },
     DomSync {
         tx: Sender<Option<DomSyncPayload>>,
     },
@@ -1342,6 +1352,9 @@ impl JscoreEngine {
                     history_len,
                 } => {
                     eng.sync_ctx_url(ctx, &url, history_len);
+                }
+                Cmd::SetPageReferrer { referrer } => {
+                    eng.set_page_referrer(&referrer);
                 }
                 Cmd::DomSync { tx } => {
                     let out = jsd.as_ref().and_then(|d| {
@@ -1784,6 +1797,12 @@ impl JsEngine for JscoreEngine {
             ctx,
             url: url.to_string(),
             history_len,
+        });
+    }
+
+    fn set_page_referrer(&mut self, referrer: &str) {
+        let _ = self.tx.send(Cmd::SetPageReferrer {
+            referrer: referrer.to_string(),
         });
     }
 

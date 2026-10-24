@@ -1315,6 +1315,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-156 — `document.referrer`** (`explorer-jscore`
+  + `explorer-js` + `explorer-core` — cap « web réel
+  sécurisé » ; numéro officiel attribué à
+  l'intégration) : reflète le `Referer`
+  effectivement envoyé par la navigation — lu des
+  en-têtes finaux de la requête au commit
+  (`rel=noreferrer`, politique, `no_referer` déjà
+  appliqués) ; `""` hors referrer. Trait additif
+  `JsEngine::set_page_referrer` → hook
+  `page_referrer` → getter `document.referrer`.
 - **CAP-155 — `<noscript>` sous scripting**
   (`explorer-html` + `explorer-core` — cap « web
   réel sécurisé » ; numéro officiel attribué à

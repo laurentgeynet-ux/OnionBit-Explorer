@@ -3359,6 +3359,23 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-156. `document.referrer`** — *(numéro
+  officiel attribué à l'intégration)* : la propriété
+  reflète le `Referer` effectivement envoyé par la
+  navigation du document — lu depuis les en-têtes
+  finaux de `tail.req` au commit (politique
+  `Referrer-Policy`/`rel=noreferrer`/`no_referer`
+  déjà appliqués — le DOM reflète le fil réel, pas
+  un recalcul approximatif) ; `""` hors navigation
+  référée (omnibox, `about:blank`, noreferrer).
+  Plomberie additive : `JsEngine::set_page_referrer`
+  (défaut no-op) → `Cmd::SetPageReferrer` →
+  `BrowserHooks.page_referrer` → getter
+  `document.referrer` ; `spawn_engine` porte le
+  paramètre. Borne documentée : les contextes
+  `<iframe>` partagent `hooks` — leur
+  `document.referrer` retourne le referrer du
+  document top (idéalement celui du parent).
 - [x] **CAP-155. `<noscript>` sous scripting** —
   *(numéro officiel attribué à l'intégration)* :
   « scripting flag » de la spec (§13.2.3.5) posé

@@ -70,6 +70,12 @@ pub struct FormSubmit {
 pub(crate) struct BrowserHooks {
     /// Absolute URL of the loaded page (`location.href` source).
     pub page_url: String,
+    /// `document.referrer` (CAP-156) — le `Referer`
+    /// effectivement envoyé par la navigation du document
+    /// (`""` hors navigation suivie d'un referrer). Posé par
+    /// l'embedder via [`Engine::set_page_referrer`] — le
+    /// moteur ne le déduit jamais lui-même.
+    pub page_referrer: String,
     /// Cookie jar for `document.cookie`.
     pub cookie_jar: Option<Rc<dyn CookieJar>>,
     /// `location.assign/replace/href=`/`reload` → navigate to arg.
@@ -132,6 +138,12 @@ impl Engine {
     /// Install the cookie jar backing `document.cookie`.
     pub fn set_cookie_jar(&mut self, jar: Rc<dyn CookieJar>) {
         self.hooks.cookie_jar = Some(jar);
+    }
+
+    /// `document.referrer` (CAP-156) — le `Referer` envoyé
+    /// par la navigation du document (`""` = aucun).
+    pub fn set_page_referrer(&mut self, referrer: &str) {
+        self.hooks.page_referrer = referrer.to_string();
     }
 
     /// Install navigation hooks: `navigate` for `location.*`,
@@ -1847,6 +1859,11 @@ impl Host for DocumentHost {
                 Ok(Some(e.str_val(t)))
             }
             "URL" | "documentURI" => Ok(Some(e.str_val(e.hooks.page_url.clone()))),
+            // `document.referrer` (CAP-156) — le `Referer` de
+            // la navigation du document, `""` hors referrer
+            // (spec : reflète le referrer initial, jamais la
+            // politique des requêtes ultérieures).
+            "referrer" => Ok(Some(e.str_val(e.hooks.page_referrer.clone()))),
             // `document.links`/`images`/`forms`/`scripts` — live-ish
             // (recomputed at each access) tag collections ≙ amont
             // `links[]`. Accès nommé (`document.forms.login`) +

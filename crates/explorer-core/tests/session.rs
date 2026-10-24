@@ -10678,3 +10678,85 @@ async fn noscript_frame_sandbox_shows_fallback() {
         "allow-scripts : <b> = texte rawtext verbatim : {d2}"
     );
 }
+
+// ---------- CAP-156 — `document.referrer` ----------
+
+/// `document.referrer` reflète le `Referer` effectivement
+/// envoyé par la navigation (spec) — ici, le lien cliqué
+/// depuis `/a` porte `/a` en referrer de `/b`.
+#[tokio::test]
+async fn document_referrer_reflects_nav_referer() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_LINK);
+    t.route(
+        "/b",
+        200,
+        "<!doctype html><html><body><div id=\"x\"></div>\
+         <script>document.getElementById('x').textContent='ref:'+document.referrer</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+
+    let dump = s.dom_dump(id).unwrap();
+    assert!(
+        dump.contains("ref:http://h.test/"),
+        "referrer = page liante : {dump}"
+    );
+}
+
+/// Navigation omnibox (sans initiateur) : `document.referrer`
+/// = `""` — aucun en-tête `Referer` n'a été émis.
+#[tokio::test]
+async fn document_referrer_empty_for_omnibox_nav() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=\"x\"></div>\
+         <script>document.getElementById('x').textContent='ref:['+document.referrer+']'</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let dump = s.dom_dump(id).unwrap();
+    assert!(dump.contains("ref:[]"), "referrer vide : {dump}");
+}
+
+/// `rel="noreferrer"` : aucun `Referer` n'est émis →
+/// `document.referrer` de la cible = `""` (cohérence avec
+/// l'en-tête réellement envoyé).
+#[tokio::test]
+async fn document_referrer_empty_for_noreferrer_link() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <a href=\"/b\" rel=\"noreferrer\">lien</a></body></html>",
+    );
+    t.route(
+        "/b",
+        200,
+        "<!doctype html><html><body><div id=\"x\"></div>\
+         <script>document.getElementById('x').textContent='ref:['+document.referrer+']'</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    s.handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+
+    let dump = s.dom_dump(id).unwrap();
+    assert!(dump.contains("ref:[]"), "noreferrer → vide : {dump}");
+}

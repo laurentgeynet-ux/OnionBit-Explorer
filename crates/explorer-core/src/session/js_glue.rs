@@ -243,11 +243,15 @@ impl Session {
     /// Contexte JS de chargement : moteur neuf + miroir posé —
     /// `want = false` (aucun script collecté) → `None`, pas de
     /// moteur créé (règle budgets).
+    /// `referrer` (CAP-156) : le `Referer` effectivement
+    /// envoyé par la navigation du document — servi à
+    /// `document.referrer` (`""` hors navigation référée).
     pub(crate) fn spawn_engine(
         &self,
         tab: TabId,
         html: &str,
         want: bool,
+        referrer: &str,
     ) -> Option<Box<dyn JsEngine>> {
         if !want {
             return None;
@@ -266,6 +270,7 @@ impl Session {
             e.set_budget(self.js_ops);
             e.set_mem_limit(self.js_mem_bytes);
             e.install_dom(html, &page_url, hist_len);
+            e.set_page_referrer(referrer);
             // Étape 51 : état d'origine injecté au contexte —
             // `localStorage` (map session > profil persisté)
             // et snapshot cookie non-HttpOnly

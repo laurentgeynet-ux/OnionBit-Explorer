@@ -591,7 +591,7 @@ fn profile_click_sync_heavy() {
              var d=document.createElement('div');d.textContent='AJOUT';\
              this.appendChild(d);})</script></body></html>",
     );
-    let eng = s.spawn_engine(tab, &html, true);
+    let eng = s.spawn_engine(tab, &html, true, "");
     {
         let e = s.tabs.get_mut(&tab).unwrap();
         let mut tb = TreeBuilder::new();
@@ -677,7 +677,7 @@ fn pump_resync_coalesced_under_floor() {
     s.set_js_factory(explorer_js::JscoreEngine::factory());
     let tab = s.open_tab();
     let html = "<!doctype html><html><body><div id=\"x\">init</div></body></html>";
-    let eng = s.spawn_engine(tab, html, true);
+    let eng = s.spawn_engine(tab, html, true, "");
     {
         let e = s.tabs.get_mut(&tab).unwrap();
         let mut tb = TreeBuilder::new();
@@ -1044,7 +1044,7 @@ fn media_js_page(body: &str) -> (Session, TabId, broadcast::Receiver<CoreEvent>)
     let tab = s.open_tab();
     let rx = s.subscribe();
     let html = format!("<!doctype html><html><body>{body}</body></html>");
-    let eng = s.spawn_engine(tab, &html, true).unwrap();
+    let eng = s.spawn_engine(tab, &html, true, "").unwrap();
     {
         let e = s.tabs.get_mut(&tab).unwrap();
         e.dom = Some(test_dom(body));

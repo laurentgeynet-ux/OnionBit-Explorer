@@ -1017,7 +1017,17 @@ impl Session {
         if let Ok(mut wf) = self.webfonts.lock() {
             wf.clear();
         }
-        let eng = self.spawn_engine(tab, &html, want_js);
+        // `document.referrer` (CAP-156) — le `Referer`
+        // effectivement envoyé par la navigation (en-tête
+        // déjà calculé par `nav_begin`, politique appliquée) ;
+        // `""` hors navigation référée (`about:blank`…).
+        let doc_referrer = tail
+            .req
+            .headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case("referer"))
+            .map_or("", |(_, v)| v.as_str());
+        let eng = self.spawn_engine(tab, &html, want_js, doc_referrer);
         Ok(Some(SubJob {
             tab,
             epoch: tail.epoch,
