@@ -6023,6 +6023,16 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Reste mesuré : 1 repli fingerprint
   journal (différentiel→re-parse).
 
+- [x] **JS-C86. `hydrateRoot` /
+  hydration** — markup SSR + hydrate
+  sur sonde React 19 : React
+  réconcilie l'existant (pas de
+  recréation), délégation attachée,
+  effets lancés — clic et useEffect
+  vivants de bout en bout. Aucun trou
+  moteur ; l'hydration réelle de
+  react.dev (JS-C87) le confirme.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

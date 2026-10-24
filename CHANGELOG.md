@@ -9,6 +9,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C86 — `hydrateRoot` mesuré sain**
+  (`explorer-jscore`, sonde React 19) :
+  markup SSR (`renderToString` → HTML
+  statique) + `hydrateRoot` — React
+  réconcilie l'existant, rattache la
+  délégation d'événements et lance les
+  effets sans recréer le DOM : clic
+  → `count=1`, `useEffect` →
+  `effect-ran`. La chaîne hydrate
+  (matching markup + listeners +
+  effets passifs) couverte par le
+  socle existant.
+
 - **JS-C87 — census terrain react.dev :
   décomposition URL `<a>`/`<area>` +
   attribution des erreurs inline**
