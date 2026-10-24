@@ -10760,3 +10760,125 @@ async fn document_referrer_empty_for_noreferrer_link() {
     let dump = s.dom_dump(id).unwrap();
     assert!(dump.contains("ref:[]"), "noreferrer → vide : {dump}");
 }
+
+/// CAP-157 — `<img srcset>` descripteurs `x` : la candidate
+/// est choisie par densité de pixels (DPR de session) — à
+/// scale=2.0 la source `2x` est fetchée, `1x` ignorée (404
+/// volontaire : un mauvais choix casserait l'image et le
+/// PNG ne matchera pas le bloc témoin).
+#[tokio::test]
+async fn srcset_x_picks_by_dpr() {
+    let (mut s, t) = test_session();
+    s.set_viewport(800.0, 600.0, 2.0);
+    t.route(
+        "/i",
+        200,
+        "<html><body><img srcset=\"/s1.png 1x, /s2.png 2x\"></body></html>",
+    );
+    t.route_bin("/s2.png", 200, red_png());
+    t.route(
+        "/s",
+        200,
+        "<html><head><style>#b{display:inline-block;background-color:#ff0000;\
+         width:2px;height:2px}</style></head>\
+         <body><div id=\"b\"></div></body></html>",
+    );
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// CAP-157 — descripteurs `w` + `sizes` : `sizes="50vw"` à
+/// viewport 800 → largeur rendue 400 CSS px → le plus petit
+/// `w ≥ 400` est fetché (`1280w`), `320w` non routé.
+#[tokio::test]
+async fn srcset_w_honors_sizes() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><body><img srcset=\"/s320.png 320w, /s1280.png 1280w\" \
+         sizes=\"50vw\"></body></html>",
+    );
+    t.route_bin("/s1280.png", 200, red_png());
+    t.route(
+        "/s",
+        200,
+        "<html><head><style>#b{display:inline-block;background-color:#ff0000;\
+         width:2px;height:2px}</style></head>\
+         <body><div id=\"b\"></div></body></html>",
+    );
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// CAP-157 — `<img srcset>` **sans** `src` : la candidate
+/// seule est fetchée (pages réelles omettent `src`).
+#[tokio::test]
+async fn srcset_without_src_fetches_candidate() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/i",
+        200,
+        "<html><body><img srcset=\"/only.png 1x\"></body></html>",
+    );
+    t.route_bin("/only.png", 200, red_png());
+    t.route(
+        "/s",
+        200,
+        "<html><head><style>#b{display:inline-block;background-color:#ff0000;\
+         width:2px;height:2px}</style></head>\
+         <body><div id=\"b\"></div></body></html>",
+    );
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/i").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/s").await.unwrap();
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
+/// CAP-157 — `srcset` prime `src`, sauf si aucun candidat
+/// n'est utilisable (tous `data:` — bornés) → repli `src`.
+#[tokio::test]
+async fn srcset_beats_src_and_falls_back() {
+    let (mut s, t) = test_session();
+    // (a) srcset utilisable → `src` NON fetché.
+    t.route(
+        "/a",
+        200,
+        "<html><body><img src=\"/ignored.png\" srcset=\"/picked.png 1x\"></body></html>",
+    );
+    t.route_bin("/picked.png", 200, red_png());
+    // (b) srcset 100 % data: → repli `src`.
+    t.route(
+        "/b",
+        200,
+        "<html><body><img src=\"/f.png\" \
+         srcset=\"data:image/png;base64,iVBOR 1x\"></body></html>",
+    );
+    t.route_bin("/f.png", 200, red_png());
+    t.route(
+        "/s",
+        200,
+        "<html><head><style>#b{display:inline-block;background-color:#ff0000;\
+         width:2px;height:2px}</style></head>\
+         <body><div id=\"b\"></div></body></html>",
+    );
+
+    let ta = s.open_tab();
+    s.navigate(ta, "http://h.test/a").await.unwrap();
+    let tb = s.open_tab();
+    s.navigate(tb, "http://h.test/b").await.unwrap();
+    let tref = s.open_tab();
+    s.navigate(tref, "http://h.test/s").await.unwrap();
+    assert_eq!(s.frame_png(ta), s.frame_png(tref));
+    assert_eq!(s.frame_png(tb), s.frame_png(tref));
+}

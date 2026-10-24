@@ -177,7 +177,14 @@ async fn nav_commit_shared(
     let bg_bodies = std::mem::take(&mut tail.bg_bodies);
     let mask_aliases = std::mem::take(&mut tail.mask_aliases);
     let work = tokio::task::spawn_blocking(move || {
-        net::insert_images_payload(&mut p, &base, &bodies, ctx.image_max_px);
+        net::insert_images_payload(
+            &mut p,
+            &base,
+            &bodies,
+            ctx.image_max_px,
+            ctx.viewport.0,
+            ctx.scale,
+        );
         p.bg_aliases = bg_aliases;
         p.bg_bodies = bg_bodies;
         p.mask_aliases = mask_aliases;

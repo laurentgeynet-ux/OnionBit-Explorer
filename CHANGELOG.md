@@ -1315,6 +1315,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-157 — `<img srcset>`/`sizes`**
+  (`explorer-core` — cap « web réel sécurisé » ;
+  numéro officiel attribué à l'intégration) : la
+  candidate `srcset` est choisie au collect
+  (`pick_srcset`) — `x` par densité de pixels de
+  session (`scale`), `w` par `sizes` résolu × DPR —
+  et **prime** `src` quand résoluble ; `src` reste
+  le repli. La candidate choisie devient la clé
+  `src` de bout en bout (fetch → décodage → cache
+  → réinsertion). Signature étendue :
+  `collect_images(dom, img_w, dpr)` (pub(crate),
+  `img_w` = viewport CSS px, `dpr` = `scale`) —
+  propagée aux sites d'insertion/réinsertion et à
+  `insert_images_payload` (via `ApplyCtx`).
+  Bornes : candidats `data:` et `h` ignorés,
+  mélange `x`/`w` → repli `src`, `sizes` à
+  condition média sauté, `<picture>`/`imagesrcset`
+  hors portée. Tests : 4 session (`srcset_*`).
+
 - **CAP-156 — `document.referrer`** (`explorer-jscore`
   + `explorer-js` + `explorer-core` — cap « web réel
   sécurisé » ; numéro officiel attribué à

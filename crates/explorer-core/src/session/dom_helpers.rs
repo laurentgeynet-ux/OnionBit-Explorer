@@ -489,25 +489,194 @@ pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<(String, Option<String>
     out
 }
 
-/// `(NodeId, src)` des `<img>` et des affiches `<video
+/// Descripteur d'un candidat `srcset` (CAP-157) — `X` =
+/// densité de pixels (`2x`), `W` = largeur source en px
+/// (`640w`). Les descripteurs `h` et les candidats sans
+/// descripteur reconnaissable sont bornés : `h` saute le
+/// candidat, « rien » vaut `1x` par défaut (spec « parsing
+/// a srcset attribute »).
+enum SrcsetDesc {
+    /// `Nx` — ratio par rapport à la densité du device.
+    X(f32),
+    /// `Nw` — largeur intrinsèque de la source en px.
+    W(u32),
+}
+
+/// Token descripteur terminal d'un candidat `srcset` —
+/// `None` = pas un descripteur (le token fait partie de
+/// l'URL ou le candidat est nu → `1x` par défaut).
+fn srcset_desc(tok: &str) -> Option<SrcsetDesc> {
+    let (num, kind) = tok.split_at(tok.len().checked_sub(1)?);
+    match kind {
+        "x" | "X" => num
+            .parse::<f32>()
+            .ok()
+            .filter(|v| *v > 0.0)
+            .map(SrcsetDesc::X),
+        "w" | "W" => num
+            .parse::<u32>()
+            .ok()
+            .filter(|v| *v > 0)
+            .map(SrcsetDesc::W),
+        _ => None,
+    }
+}
+
+/// Candidat `srcset` choisi (CAP-157) — sélection bornée de
+/// la spec « select an image source » : descripteurs `x`
+/// → plus petit `x ≥ dpr`, sinon le plus grand ; `w` → plus
+/// petit `w ≥ eff_w×dpr`, sinon le plus grand (`eff_w` =
+/// largeur rendue en CSS px, `sizes` résolu ou viewport).
+/// Mélange `x`/`w`, candidat `data:`, `h` ou liste vide →
+/// `None` (repli `src` — les candidats `data:` sont bornés :
+/// le peintre inline `collect_data_images` indexe par `src`,
+/// les ignorer évite la désynchronisation fetch/peinture).
+fn pick_srcset(srcset: &str, eff_w: f32, dpr: f32) -> Option<String> {
+    let mut cands: Vec<(String, SrcsetDesc)> = Vec::new();
+    // Queue d'une URL `data:` découpée sur sa virgule
+    // interne — le segment suivant est sa fin (+desc), pas
+    // un candidat.
+    let mut data_tail = false;
+    for part in srcset.split(',') {
+        let p = part.trim();
+        if p.is_empty() {
+            continue;
+        }
+        if data_tail {
+            data_tail = false;
+            continue;
+        }
+        let (url, desc) = match p.rsplit_once(char::is_whitespace) {
+            Some((u, d)) if !u.trim().is_empty() => {
+                (u.trim(), srcset_desc(d).unwrap_or(SrcsetDesc::X(1.0)))
+            }
+            _ => (p, SrcsetDesc::X(1.0)),
+        };
+        if url.starts_with("data:") {
+            data_tail = true;
+            continue;
+        }
+        cands.push((url.to_string(), desc));
+    }
+    if cands.is_empty() {
+        return None;
+    }
+    let w_of = |d: &SrcsetDesc| match d {
+        SrcsetDesc::W(w) => Some(*w),
+        SrcsetDesc::X(_) => None,
+    };
+    let x_of = |d: &SrcsetDesc| match d {
+        SrcsetDesc::X(x) => Some(*x),
+        SrcsetDesc::W(_) => None,
+    };
+    if cands.iter().all(|(_, d)| w_of(d).is_some()) {
+        let need = f64::from(eff_w * dpr);
+        cands
+            .iter()
+            .filter(|(_, d)| w_of(d).is_some_and(|w| f64::from(w) >= need))
+            .min_by_key(|(_, d)| w_of(d).unwrap_or(u32::MAX))
+            .or_else(|| cands.iter().max_by_key(|(_, d)| w_of(d).unwrap_or(0)))
+            .map(|(u, _)| u.clone())
+    } else {
+        if !cands.iter().all(|(_, d)| x_of(d).is_some()) {
+            return None; // mélange x/w — invalide, repli `src`.
+        }
+        let by_x = |a: &(String, SrcsetDesc), b: &(String, SrcsetDesc)| {
+            x_of(&a.1)
+                .unwrap_or(f32::MAX)
+                .partial_cmp(&x_of(&b.1).unwrap_or(f32::MAX))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        };
+        cands
+            .iter()
+            .filter(|(_, d)| x_of(d).is_some_and(|x| x >= dpr))
+            .min_by(|a, b| by_x(a, b))
+            .or_else(|| cands.iter().max_by(|a, b| by_x(a, b)))
+            .map(|(u, _)| u.clone())
+    }
+}
+
+/// `sizes` résolu en CSS px (CAP-157, borné) : la liste est
+/// parcourue et le **premier** terme sans condition média
+/// (sans parenthèse ouvrante) s'applique — `Npx` → `N`,
+/// `Nvw` → `N/100×viewport`, `Nem`/`Nrem` → `N×16` ; les
+/// termes conditionnels `(...) Npx` sont sautés (éval
+/// média hors portée — le terme final non conditionnel de
+/// la spec est ainsi trouvé). Défaut : `viewport` (100vw).
+fn resolve_sizes(sizes: Option<String>, vp_w: f32) -> f32 {
+    let Some(sizes) = sizes else {
+        return vp_w;
+    };
+    for term in sizes.split(',') {
+        let t = term.trim();
+        if t.contains('(') {
+            continue;
+        }
+        if let Some(v) = t
+            .strip_suffix("px")
+            .and_then(|n| n.trim().parse::<f32>().ok())
+        {
+            return v;
+        }
+        if let Some(v) = t
+            .strip_suffix("vw")
+            .and_then(|n| n.trim().parse::<f32>().ok())
+        {
+            return vp_w * (v / 100.0);
+        }
+        let v: Option<f32> = t
+            .strip_suffix("rem")
+            .or_else(|| t.strip_suffix("em"))
+            .and_then(|n| n.trim().parse().ok())
+            .map(|n: f32| n * 16.0);
+        if let Some(v) = v {
+            return v;
+        }
+    }
+    vp_w
+}
+
+/// `(NodeId, url)` des `<img>` et des affiches `<video
 /// poster>` du document dans l'ordre — `src`/`poster`
 /// absent ou vide est sauté (étape 58 : l'affiche suit le
-/// canal image, se peint dans la boîte vidéo).
-pub(crate) fn collect_images(dom: &Dom) -> Vec<(NodeId, String)> {
+/// canal image, se peint dans la boîte vidéo). CAP-157 :
+/// `<img srcset>` présent et résoluble **prime** sur `src`
+/// — `img_w`/`dpr` = largeur viewport CSS px et densité de
+/// pixels de la session (choix `w`/`x` de `pick_srcset`,
+/// `sizes` résolu par `resolve_sizes`).
+pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, String)> {
     let mut out = Vec::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
-        let attr = match dom.tag_name(n) {
-            Ok("img") => "src",
-            Ok("video") => "poster",
-            _ => "",
-        };
-        if !attr.is_empty() {
-            if let Ok(Some(src)) = dom.attribute(n, attr) {
-                if !src.is_empty() {
+        match dom.tag_name(n) {
+            Ok("img") => {
+                let srcset = dom
+                    .attribute(n, "srcset")
+                    .ok()
+                    .flatten()
+                    .filter(|s| !s.is_empty());
+                let picked = srcset.and_then(|ss| {
+                    let eff_w = resolve_sizes(dom.attribute(n, "sizes").ok().flatten(), img_w);
+                    pick_srcset(&ss, eff_w, dpr)
+                });
+                let src = picked.or_else(|| {
+                    dom.attribute(n, "src")
+                        .ok()
+                        .flatten()
+                        .filter(|s| !s.is_empty())
+                });
+                if let Some(src) = src {
                     out.push((n, src));
                 }
             }
+            Ok("video") => {
+                if let Ok(Some(src)) = dom.attribute(n, "poster") {
+                    if !src.is_empty() {
+                        out.push((n, src));
+                    }
+                }
+            }
+            _ => {}
         }
         if let Ok(ch) = dom.children(n) {
             queue.extend(ch.iter().rev());

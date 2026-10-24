@@ -3359,6 +3359,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-157. `<img srcset>`/`sizes`** — *(numéro
+  officiel attribué à l'intégration)* : sélection de
+  la candidate par `pick_srcset` au collect — `x` →
+  plus petit ratio `≥ dpr` de session (`scale`),
+  `w` → plus petit `w ≥ sizes×dpr` (`sizes` résolu :
+  premier terme non média, `px`/`vw`/`em`/`rem`,
+  défaut `100vw`) ; `srcset` résoluble **prime**
+  `src`, `src` reste le repli quand aucun candidat
+  n'est utilisable. La candidate choisie devient la
+  clé `src` de bout en bout (fetch, décodage, cache
+  `img_decoded`, réinsertion post re-parse) — un
+  seul point de décision, zéro désynchronisation.
+  Plomberie : `collect_images(dom, img_w, dpr)` —
+  `img_w` = viewport CSS px, `dpr` = `scale` —
+  propagée aux quatre sites (plan de fetch,
+  insertion, réinsertion, payload détaché via
+  `ApplyCtx`). Bornes documentées : candidats
+  `data:` et descripteurs `h` ignorés, mélange
+  `x`/`w` invalide → repli `src`, termes `sizes`
+  à condition média sautés, `<picture><source>` et
+  `imagesrcset` de `<link>` hors portée.
+  4 tests session (sélection DPR, `w`+`sizes`,
+  sans `src`, primauté + repli).
 - [x] **CAP-156. `document.referrer`** — *(numéro
   officiel attribué à l'intégration)* : la propriété
   reflète le `Referer` effectivement envoyé par la

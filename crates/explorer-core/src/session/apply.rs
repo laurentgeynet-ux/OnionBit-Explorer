@@ -539,7 +539,13 @@ pub(crate) fn apply_payload(
     // 108 ; avant ce cache, tout `<img>` http(s) mourait à la
     // première synchro JS post-fetch).
     if let Some(dom) = p.dom.as_ref() {
-        net::reinsert_imgs_by_src(dom, &mut p.images, &p.img_decoded);
+        net::reinsert_imgs_by_src(
+            dom,
+            &mut p.images,
+            &p.img_decoded,
+            ctx.viewport.0,
+            ctx.scale,
+        );
     }
     // Un re-parse de synchro rend obsolètes les options
     // figées du popup `<select>` — il se referme (étape 54) ;
@@ -996,7 +1002,13 @@ fn try_incr_payload(
     p.images.replaced.clear();
     p.images.backgrounds.clear();
     p.images.masks_url.clear();
-    net::reinsert_imgs_by_src(new_dom, &mut p.images, &p.img_decoded);
+    net::reinsert_imgs_by_src(
+        new_dom,
+        &mut p.images,
+        &p.img_decoded,
+        ctx.viewport.0,
+        ctx.scale,
+    );
     let styles = styles_payload(p, new_dom, ctx.viewport, ctx.color_scheme);
     let data_imgs = collect_data_images(new_dom, &styles, ctx.image_max_px);
     p.images.replaced.extend(data_imgs.replaced);

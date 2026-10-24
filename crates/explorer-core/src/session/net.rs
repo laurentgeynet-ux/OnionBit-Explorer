@@ -867,7 +867,7 @@ impl Session {
             .collect();
         let scripts = collect_scripts(dom, page, base, scripting, self.max_scripts, csp);
         let mut seen_img = std::collections::HashSet::new();
-        let imgs: Vec<Url> = collect_images(dom)
+        let imgs: Vec<Url> = collect_images(dom, self.viewport.0, self.scale)
             .into_iter()
             .filter_map(|(_, src)| Url::resolve(base, &src).ok())
             .map(&upg)
@@ -1042,6 +1042,8 @@ impl Session {
             return;
         }
         let max_px = self.image_max_px;
+        let img_w = self.viewport.0;
+        let dpr = self.scale;
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
         };
@@ -1056,6 +1058,8 @@ impl Session {
             max_px,
             &mut entry.img_decoded,
             &mut entry.img_bodies,
+            img_w,
+            dpr,
         );
     }
 
@@ -1080,7 +1084,7 @@ impl Session {
         // Phase lecture : items `<img>`/`poster`, table
         // ordinal→nœud (`prev_styles` est indexée ordinal), et
         // racine pour la collecte svg.
-        let items = collect_images(dom);
+        let items = collect_images(dom, self.viewport.0, self.scale);
         let ord_to_node: HashMap<usize, explorer_dom::NodeId> = element_ordinals(dom)
             .into_iter()
             .map(|(n, o)| (o, n))
@@ -1208,6 +1212,7 @@ pub(crate) fn retain_img_body(store: &mut HashMap<String, Vec<u8>>, key: &str, b
 /// `replaced` indexée `NodeId` meurt à chaque re-parse, le
 /// cache survit et permet la ré-insertion sans re-fetch ni
 /// re-décodage.
+#[allow(clippy::too_many_arguments)]
 fn insert_images_into(
     dom: &Dom,
     images: &mut PaintImages,
@@ -1216,8 +1221,10 @@ fn insert_images_into(
     max_px: u32,
     decoded_cache: &mut HashMap<String, Arc<DecodedImage>>,
     bodies_store: &mut HashMap<String, Vec<u8>>,
+    img_w: f32,
+    dpr: f32,
 ) {
-    let items = collect_images(dom);
+    let items = collect_images(dom, img_w, dpr);
     let mut decoded: HashMap<String, Option<Arc<DecodedImage>>> = HashMap::new();
     for (node, src) in items {
         let Ok(u) = Url::resolve(base, &src) else {
@@ -1248,11 +1255,13 @@ pub(crate) fn reinsert_imgs_by_src(
     dom: &Dom,
     images: &mut PaintImages,
     decoded_cache: &HashMap<String, Arc<DecodedImage>>,
+    img_w: f32,
+    dpr: f32,
 ) {
     if decoded_cache.is_empty() {
         return;
     }
-    for (node, src) in collect_images(dom) {
+    for (node, src) in collect_images(dom, img_w, dpr) {
         if let Some(img) = decoded_cache.get(&src) {
             images.replaced.insert(node, img.clone());
         }
@@ -1267,6 +1276,8 @@ pub(crate) fn insert_images_payload(
     base: &Url,
     bodies: &HashMap<String, Vec<u8>>,
     max_px: u32,
+    img_w: f32,
+    dpr: f32,
 ) {
     if bodies.is_empty() {
         return;
@@ -1281,7 +1292,17 @@ pub(crate) fn insert_images_payload(
     let Some(dom) = dom.as_ref() else {
         return;
     };
-    insert_images_into(dom, images, base, bodies, max_px, img_decoded, img_bodies);
+    insert_images_into(
+        dom,
+        images,
+        base,
+        bodies,
+        max_px,
+        img_decoded,
+        img_bodies,
+        img_w,
+        dpr,
+    );
 }
 
 /// Drain des surfaces script d'un contexte enfant (étape
