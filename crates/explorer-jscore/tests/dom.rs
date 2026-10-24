@@ -4534,3 +4534,50 @@ fn cap178_surface_batch() {
         "TypeError|Worker: no loader instal"
     );
 }
+// -- décomposition URL `<a>`/`<area>` (JS-C87) --------------------------------
+
+/// Le patron « parse via ancre » (`c.href=u; c.pathname`) des
+/// libs de télémétrie : `pathname` doit rendre une **chaîne**
+/// (`""` sans href) — `undefined` tuait gtag (`d[0]`).
+#[test]
+fn anchor_url_decomposition() {
+    assert_eq!(
+        ev(
+            "var a=document.createElement('a');a.href='https://ex.com:8080/p/q?x=1#f';\
+            [a.protocol,a.hostname,a.port,a.pathname,a.search,a.hash,a.origin].join('|')"
+        ),
+        "https:|ex.com|8080|/p/q|?x=1|#f|https://ex.com:8080"
+    );
+    // Sans `href` : chaîne vide — `d[0]` lit un char absent, pas TypeError.
+    assert_eq!(
+        ev("var a=document.createElement('a');var d=a.pathname;typeof d+'|'+d"),
+        "string|"
+    );
+    // `<area>` pareil, `<div>` inerte.
+    assert_eq!(
+        ev("var a=document.createElement('area');a.href='https://x/y';\
+            var d=document.createElement('div');\
+            [a.pathname, typeof d.pathname].join('|')"),
+        "/y|undefined"
+    );
+}
+
+// -- `document.head` auto-créé (JS-C89) ----------------------------------------
+
+/// Spec : `head` existe toujours (parseur l'auto-génère) —
+/// React 19 `mountHoistable` fait `document.head.insertBefore`
+/// pour `<title>`/metadata. Un doc sans `<head>` explicit doit
+/// quand même le servir (créé + inséré avant `body`).
+#[test]
+fn document_head_always_exists() {
+    let mut e = engine_with("<!doctype html><html><body></body></html>");
+    let v = e
+        .eval("document.head ? document.head.tagName : 'null'")
+        .expect("head");
+    assert_eq!(e.describe(v), "HEAD");
+    // head créé = premier enfant de html, avant body.
+    let v = e.eval(
+        "var h=document.documentElement;[h.firstElementChild.tagName,h.children[1].tagName].join('/')",
+    ).expect("order");
+    assert_eq!(e.describe(v), "HEAD/BODY");
+}

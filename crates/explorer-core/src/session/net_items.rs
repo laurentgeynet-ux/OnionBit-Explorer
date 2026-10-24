@@ -1627,7 +1627,12 @@ fn eval_async_arrival(
     events: &broadcast::Sender<CoreEvent>,
 ) {
     if let Some(e) = eng.as_mut() {
-        if let Err(err) = e.eval_script_el(explorer_js::JS_CTX_TOP, src, None, el_ord) {
+        // `name` = étiquette de pile (`at fn (inline:N:l:c)`)
+        // — attribution des exceptions de scripts inline
+        // (JS-C87, même esprit que `eval_named` des scripts
+        // dynamiques).
+        let label = format!("inline:{el_ord}");
+        if let Err(err) = e.eval_script_el(explorer_js::JS_CTX_TOP, src, Some(&label), el_ord) {
             tracing::debug!(tab, error = %err, "script async en échec");
             let _ = events.send(CoreEvent::PipelineError {
                 tab: Some(tab),

@@ -9,6 +9,62 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C89 — `document.head` auto-généré**
+  (`explorer-jscore`) : audit React 19 —
+  `mountHoistable` (hoisting `<title>`/
+  `<meta>`/`<link>` des composants vers
+  `<head>`) mourait `insertBefore of
+  Null` sur un doc sans `<head>`
+  explicite. Spec : `head` existe
+  toujours → créé paresseusement à la
+  lecture et inséré avant `body`.
+  Régression `document_head_always_exists`.
+  Audit R19 en cours (hooks restants).
+
+- **JS-C88 — build React dev mesurée
+  saine** (`explorer-jscore`, sonde UMD
+  `react-dom.development.js`) : mêmes
+  chemins que prod — montage, hooks,
+  `onClick`/`onChange` contrôlé,
+  `useEffect`, warnings console — aucun
+  trou `__DEV__` supplémentaire.
+
+- **JS-C86 — `hydrateRoot` mesuré sain**
+  (`explorer-jscore`, sonde React 19) :
+  markup SSR (`renderToString` → HTML
+  statique) + `hydrateRoot` — React
+  réconcilie l'existant, rattache la
+  délégation d'événements et lance les
+  effets sans recréer le DOM : clic
+  → `count=1`, `useEffect` →
+  `effect-ran`. La chaîne hydrate
+  (matching markup + listeners +
+  effets passifs) couverte par le
+  socle existant.
+
+- **JS-C87 — census terrain react.dev :
+  décomposition URL `<a>`/`<area>` +
+  attribution des erreurs inline**
+  (`explorer-jscore`, `explorer-core`) :
+  sonde Next.js réelle — le site monte
+  (SSR + hydratation, fetch des chunks
+  JSONP dynamiques OK) mais gtag.js
+  mourait : le patron « parse via ancre »
+  (`c=createElement('a');c.href=u;
+  c.pathname[0]`) — `pathname` rendait
+  `undefined` au lieu d'une chaîne.
+  Livré : `protocol`/`host`/`hostname`/
+  `port`/`pathname`/`search`/`hash`/
+  `origin` de l'attribut `href` sur
+  `a`/`area` (`""` sans href, spec) +
+  attribution des piles : `at Fj
+  (inline:0:425:1)` identifie le script
+  (`eval_named` scripts dynamiques,
+  `inline:{ord}` scripts async). Mesuré :
+  **0 erreur pipeline**, replis journal
+  3→1. Régression
+  `anchor_url_decomposition`.
+
 - **Étape 130 — ponts JS des
   sous-contextes `<iframe>` + fix
   `postMessage` avant parse**

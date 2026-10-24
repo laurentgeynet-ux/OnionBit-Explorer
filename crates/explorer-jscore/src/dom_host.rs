@@ -2546,9 +2546,21 @@ impl Host for DocumentHost {
                 Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, true)))
             }
             "head" => {
+                // Spec : `head` existe TOUJOURS (le parseur
+                // l'auto-génère même sans `<head>` dans la
+                // source). Miroir sans head → on le crée et
+                // l'insère avant `body` (JS-C89 — le hoisting
+                // `<title>`/metadata de React 19 fait
+                // `document.head.insertBefore` au mount).
                 let n = {
-                    let d = self.dom.borrow();
-                    d.by_tag(d.root, "head").first().copied()
+                    let mut d = self.dom.borrow_mut();
+                    d.by_tag(d.root, "head").first().copied().or_else(|| {
+                        let h = d.create_element("head");
+                        let html_el = d.by_tag(d.root, "html").first().copied().unwrap_or(d.root);
+                        let first = d.child_nodes(html_el).first().copied();
+                        d.insert_before(html_el, h, first);
+                        Some(h)
+                    })
                 };
                 Ok(Some(match n {
                     Some(n) => node_value(e, &self.dom, &self.cache, n),
@@ -3779,6 +3791,55 @@ impl Host for NodeHost {
         if let Value::Obj(id) = this {
             if matches!(e.find_own(id, key), Some(crate::heap::Prop::Acc { .. })) {
                 return Ok(None);
+            }
+        }
+        // `<a>`/`<area>` : décomposition d'URL sur l'attribut
+        // `href` (JS-C87) — le patron « parse via ancre » de
+        // toutes les libs (`c.href=u; c.pathname` — gtag en meurt
+        // si `pathname` rend `undefined` au lieu de `""`).
+        // Valeurs brutes du href (pas de résolution base — la
+        // déviation est documentée ; absolu passe intact).
+        if matches!(
+            key,
+            "protocol" | "host" | "hostname" | "port" | "pathname" | "search" | "hash" | "origin"
+        ) {
+            let d = self.dom.borrow();
+            if matches!(d.nodes[node as usize].tag.as_str(), "a" | "area") {
+                let raw = d.attr(node, "href").unwrap_or("").to_string();
+                let (proto, host, hostname, port, path, search, hash) = if raw.is_empty() {
+                    // `<a>` sans `href` : champs vides (spec —
+                    // `pathname` ≙ `""`, jamais `undefined`).
+                    (
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                    )
+                } else {
+                    url_parts(&raw)
+                };
+                let s = match key {
+                    "protocol" => proto,
+                    "host" => host,
+                    "hostname" => hostname,
+                    "port" => port,
+                    "pathname" => path,
+                    "search" => search,
+                    "hash" => hash,
+                    // `origin` : scheme+host — "null" sans scheme
+                    // (spec : tuple d'origine sérialisé).
+                    _ => {
+                        if proto.is_empty() {
+                            "null".to_string()
+                        } else {
+                            format!("{proto}//{host}")
+                        }
+                    }
+                };
+                return Ok(Some(e.str_val(s)));
             }
         }
         // `<canvas>.width`/`.height` (JS-C28) : valeur

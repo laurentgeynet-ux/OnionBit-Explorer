@@ -6029,6 +6029,48 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   remplacé) — la pompe microtasks +
   `MessageChannel` couvrent la sémantique.
 
+- [x] **JS-C87. Census terrain
+  react.dev** — Next.js hydraté :
+  page montée, chunks JSONP dynamiques
+  fetchés (CAP-169), gtag.js évalué.
+  **Trou corrigé** : `a.pathname`
+  rendait `undefined` (le parse-via-
+  ancre de toute la télémétrie) →
+  décomposition URL `a`/`area` depuis
+  `href` (`""` sans href). Bonus :
+  attribution des piles inline/dyn.
+  Reste mesuré : 1 repli fingerprint
+  journal (différentiel→re-parse).
+
+- [x] **JS-C86. `hydrateRoot` /
+  hydration** — markup SSR + hydrate
+  sur sonde React 19 : React
+  réconcilie l'existant (pas de
+  recréation), délégation attachée,
+  effets lancés — clic et useEffect
+  vivants de bout en bout. Aucun trou
+  moteur ; l'hydration réelle de
+  react.dev (JS-C87) le confirme.
+
+- [x] **JS-C88. Build React dev** —
+  `react-dom.development.js` sur la
+  sonde UMD : chemins `__DEV__` sains
+  (warnings console, mêmes résultats
+  que prod — count=1, echo:hello).
+
+- [x] **JS-C89. Audit React 19 (1/2) —
+  `document.head` auto-généré** :
+  `mountHoistable` crashait sur doc
+  sans `<head>` (`insertBefore of
+  Null`) — le hoisting métadonnée
+  exige `head` toujours présent. Fix :
+  création paresseuse + insertion
+  avant `body`. Reste mesuré : render
+  de l'app d'audit silencieusement
+  vide — bisection des hooks R19
+  (`use`/`useOptimistic`/`useActionState`)
+  à poursuivre.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand
