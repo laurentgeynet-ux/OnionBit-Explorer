@@ -3359,6 +3359,25 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-165. `requestIdleCallback`/`cancelIdleCallback`**
+  — *(numéro officiel attribué à l'intégration)* : React
+  scheduler et les libs riches en dépendent
+  (`window.requestIdleCallback || shim` — sans lui le
+  repli `setTimeout` dégrade le scheduling). Planifié sur
+  la `TimerQueue` : sans `{timeout}` → 0 ms (la prochaine
+  pompe *est* le moment creux — même déviation bornée que
+  `requestAnimationFrame` ≙ `setTimeout(16)`), avec
+  `{timeout: ms}` → tir à l'échéance et `didTimeout:
+  true` (le timer *est* l'échéance — `{timeout:
+  undefined}`/`{}` = pas d'échéance). Le callback reçoit
+  un `IdleDeadline` ordinaire : `didTimeout` data-prop,
+  `timeRemaining()` = native liée portant l'instant
+  d'ordonnancement — reliquat d'une tranche de 50 ms,
+  plancher 0 (spec : ≤ 50). Callback non-fonction →
+  `TypeError` (WebIDL). `cancelIdleCallback` ≙
+  `clearTimeout`. Installé via `install_timers` — live
+  sur les vraies pages (explorer-js). 3 tests dom.
+
 - [x] **CAP-164. API Node de complétude (miroir)** —
   *(numéro officiel attribué à l'intégration)* : les
   libs réelles lisent ces primitives pour la délégation

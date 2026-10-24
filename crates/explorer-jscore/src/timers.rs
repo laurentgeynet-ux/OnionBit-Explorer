@@ -90,6 +90,8 @@ impl Engine {
             ("clearInterval", timer_clear),
             ("requestAnimationFrame", timer_raf),
             ("cancelAnimationFrame", timer_raf_cancel),
+            ("requestIdleCallback", timer_ric),
+            ("cancelIdleCallback", timer_raf_cancel),
         ] {
             let v = self.native_fn(name, f);
             self.set_own(g, name, v, false);
@@ -264,6 +266,63 @@ fn timer_raf(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 /// `cancelAnimationFrame(id)` ≙ `clearTimeout`.
 fn timer_raf_cancel(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
     timer_clear(e, t, args)
+}
+
+// -- `requestIdleCallback` (CAP-165) -------------------------------------
+
+/// `requestIdleCallback(cb, {timeout})` → id. Pas de vraie
+/// période « idle » côté hôte : sans `timeout` le callback est
+/// planifié à 0 ms — la prochaine pompe de la boucle *est* le
+/// moment creux (déviation bornée, même contrat que
+/// `requestAnimationFrame` ≙ `setTimeout(16)`). Avec
+/// `{timeout: ms}` le tir part à l'échéance et `didTimeout`
+/// vaut `true` (le délai est réellement écoulé — le timer *est*
+/// l'échéance). `cancelIdleCallback(id)` ≙ `clearTimeout`.
+fn timer_ric(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    if !e.is_callable(cb) {
+        return Err(e.type_error("requestIdleCallback: callback is not a function"));
+    }
+    let opts = arg(args, 1);
+    let timeout = if matches!(opts, Value::Obj(_)) {
+        let v = e.get_prop_value(opts, "timeout")?;
+        // `{timeout: undefined}`/`{}` = pas d'échéance (spec :
+        // la prop doit être un nombre pour armer le timeout).
+        if matches!(v, Value::Num(_)) {
+            Some(delay_ms(e, Some(v))?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let (delay, did_timeout) = timeout.map_or((0, false), |ms| (ms, true));
+    // `IdleDeadline` : objet ordinaire — `didTimeout` en data
+    // prop, `timeRemaining()` = native liée portant l'instant
+    // d'ordonnancement (ms depuis `t0`) ; reliquat d'une
+    // tranche « idle » de 50 ms (spec : ≤ 50 — tir rapproché
+    // ≈ tranche entière, tir sur échéance ≈ 0).
+    let deadline = e.new_object();
+    e.set_own(deadline, "didTimeout", Value::Bool(did_timeout), true);
+    let sched = Value::Num(e.t0.elapsed().as_secs_f64() * 1000.0);
+    let tr = e.bound_native("timeRemaining", idle_time_remaining, vec![sched]);
+    e.set_own(deadline, "timeRemaining", tr, true);
+    let id = e
+        .timers
+        .schedule(cb, delay, false, vec![Value::Obj(deadline)]);
+    Ok(Value::Num(id as f64))
+}
+
+/// `IdleDeadline.timeRemaining()` — `args[0]` = instant
+/// d'ordonnancement lié (ms depuis `t0`) ; reliquat de la
+/// tranche de 50 ms, plancher 0.
+fn idle_time_remaining(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let sched_ms = match arg(args, 0) {
+        Value::Num(ms) => ms,
+        _ => 0.0,
+    };
+    let now_ms = e.t0.elapsed().as_secs_f64() * 1000.0;
+    Ok(Value::Num((50.0 - (now_ms - sched_ms)).max(0.0)))
 }
 
 /// `clearTimeout(id)` / `clearInterval(id)`.

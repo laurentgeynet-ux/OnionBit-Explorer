@@ -1315,6 +1315,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-165 — `requestIdleCallback`/`cancelIdleCallback`**
+  (`explorer-jscore` — cap « web réel sécurisé » ;
+  numéro officiel attribué à l'intégration) : React
+  scheduler et les libs riches en dépendent. Planifié
+  sur la `TimerQueue` : sans `timeout` → prochaine
+  pompe (le creux de boucle — même déviation que
+  `requestAnimationFrame`), `{timeout: ms}` → échéance
+  avec `didTimeout: true`. Le callback reçoit un
+  `IdleDeadline` : `didTimeout` + `timeRemaining()`
+  (native liée — reliquat de la tranche de 50 ms,
+  plancher 0). Non-fonction → `TypeError`. 3 tests dom.
 - **CAP-164 — API Node de complétude (miroir)**
   (`explorer-jscore` — cap « web réel sécurisé » ;
   numéro officiel attribué à l'intégration) :

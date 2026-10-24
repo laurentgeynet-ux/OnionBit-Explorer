@@ -866,6 +866,67 @@ fn string_callback_runs_in_global_scope() {
     );
 }
 
+/// `requestIdleCallback`/`cancelIdleCallback` (CAP-165) —
+/// React scheduler et les libs riches en dépendent
+/// (`window.requestIdleCallback || shim` sinon).
+#[test]
+fn request_idle_callback_deadline() {
+    let mut e = engine_with("");
+    e.install_timers();
+    e.eval(
+        "var got = '';\
+            requestIdleCallback(function (d) {\
+                got = d.didTimeout + '|' + (typeof d.timeRemaining) + '|' +\
+                    (d.timeRemaining() >= 0 && d.timeRemaining() <= 50);\
+            });",
+    )
+    .expect("eval");
+    assert_eq!(e.run_due_timers().unwrap_or(0), 1);
+    assert_eq!(
+        e.eval("got").map(|v| e.describe(v)).unwrap_or_default(),
+        "false|function|true"
+    );
+}
+
+/// `{timeout: ms}` arme l'échéance — un timeout lointain ne
+/// tire pas à la pompe immédiate (devient `didTimeout:true`
+/// à son échéance).
+#[test]
+fn idle_callback_timeout_arms() {
+    let mut e = engine_with("");
+    e.install_timers();
+    e.eval(
+        "var fired = false;\
+            requestIdleCallback(function (d) { fired = d.didTimeout; }, { timeout: 60000 });",
+    )
+    .expect("eval");
+    assert_eq!(e.run_due_timers().unwrap_or(0), 0);
+    assert_eq!(
+        e.eval("fired").map(|v| e.describe(v)).unwrap_or_default(),
+        "false"
+    );
+}
+
+/// `cancelIdleCallback` ≙ `clearTimeout` ; callback non
+/// fonction → `TypeError` (spec `WebIDL`).
+#[test]
+fn idle_callback_cancel_and_typecheck() {
+    let mut e = engine_with("");
+    e.install_timers();
+    e.eval(
+        "var ran = false;\
+            var id = requestIdleCallback(function () { ran = true; });\
+            cancelIdleCallback(id);",
+    )
+    .expect("eval");
+    e.run_due_timers().unwrap_or(0);
+    assert_eq!(
+        e.eval("ran").map(|v| e.describe(v)).unwrap_or_default(),
+        "false"
+    );
+    assert!(e.eval("requestIdleCallback(42)").is_err());
+}
+
 // -- tolerance ------------------------------------------------------------
 
 #[test]
