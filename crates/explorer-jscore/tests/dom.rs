@@ -3387,3 +3387,45 @@ fn location_part_setters_navigate() {
         ]
     );
 }
+
+/// `matchMedia` évalue réellement contre l'env posé par
+/// `set_media_env` (CAP-161) : viewport, dark, hover,
+/// `not`, jointures `and`, `or` dans les parens, inconnu →
+/// false (dégradation spec).
+#[test]
+fn matchmedia_evaluates_against_env() {
+    let mut e = engine_with("");
+    e.set_viewport(800, 600);
+    e.set_media_env(explorer_jscore::MediaEnv {
+        dark: true,
+        reduced_motion: false,
+        hover: true,
+        pointer_fine: true,
+    });
+    let cases = [
+        ("(prefers-color-scheme: dark)", true),
+        ("(prefers-color-scheme: light)", false),
+        ("(min-width: 700px)", true),
+        ("(max-width: 700px)", false),
+        ("(min-width: 50em)", true),
+        ("(orientation: landscape)", true),
+        ("(hover: hover)", true),
+        ("(pointer: fine)", true),
+        ("(pointer: coarse)", false),
+        ("not (prefers-color-scheme: light)", true),
+        (
+            "screen and (min-width: 600px) and (max-width: 1000px)",
+            true,
+        ),
+        ("print and (min-width: 600px)", false),
+        ("(min-width: 1000px) or (orientation: landscape)", true),
+        ("(unknown-feature: x)", false),
+        ("(scripting: enabled)", true),
+        ("(prefers-reduced-motion: reduce)", false),
+        ("", true),
+    ];
+    for (q, want) in cases {
+        let got = evf(&mut e, &format!("matchMedia('{q}').matches"));
+        assert_eq!(got, want.to_string(), "matchMedia('{q}')");
+    }
+}

@@ -134,6 +134,13 @@ pub(crate) struct BrowserHooks {
     /// `window.open(u,"x")` document-local, swappé au
     /// `switch_to`).
     pub win_name: String,
+    /// Environnement `matchMedia` (CAP-161) — snapshot de la
+    /// session posé par `set_media_env` au `spawn_engine` :
+    /// viewport, `prefers-color-scheme`, `hover`/`pointer`.
+    /// Engine-global (même env pour tous les contextes de
+    /// l'onglet), borné — les `MediaQueryList` ne redispatchent
+    /// jamais `change` (l'env ne bouge pas à chaud).
+    pub media_env: crate::mediaq::MediaEnv,
     /// `location.replace(url)` — navigation `historyHandling:
     /// "replace"` : l'entrée d'historique courante est
     /// réécrite, pas poussée (CAP-152 — flows auth).
@@ -5273,7 +5280,19 @@ fn win_get_computed_style(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
 fn win_match_media(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let q = e.to_js_string(arg(args, 0))?;
     let m = e.new_object();
-    e.set_own(m, "matches", Value::Bool(false), true);
+    // CAP-161 — évaluation réelle (bornée) contre l'env de
+    // session : `prefers-color-scheme`, `min/max-width`,
+    // `orientation`, `hover`, `pointer`… voir `mediaq`.
+    e.set_own(
+        m,
+        "matches",
+        Value::Bool(crate::mediaq::eval_media_query(
+            &q,
+            e.hooks.media_env,
+            e.hooks.viewport,
+        )),
+        true,
+    );
     let media = e.str_val(q);
     e.set_own(m, "media", media, true);
     e.set_own(m, "onchange", Value::Null, true);

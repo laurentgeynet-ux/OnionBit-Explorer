@@ -1046,6 +1046,13 @@ impl Engine {
         let _ = self.fire_event_listeners(Value::Obj(ev));
     }
 
+    /// Environnement `matchMedia` de la session (CAP-161) —
+    /// snapshot posé par l'embedder au spawn (`viewport`,
+    /// `prefers-color-scheme`, `hover`/`pointer` desktop).
+    pub fn set_media_env(&mut self, env: crate::mediaq::MediaEnv) {
+        self.hooks.media_env = env;
+    }
+
     /// `hashchange` (CAP-160) — événement `{type:"hashchange",
     /// oldURL, newURL}` dispatché sur la fenêtre du contexte
     /// `ctx` (routeurs hash des SPA : navigation fragment et

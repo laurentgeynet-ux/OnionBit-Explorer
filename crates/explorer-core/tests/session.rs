@@ -11264,3 +11264,56 @@ async fn hashchange_fires_on_traversal() {
     assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/#a"));
     assert!(dump.contains("pha"), "popstate puis hashchange : {dump}");
 }
+
+/// CAP-161 — `matchMedia` évalue contre l'env session :
+/// viewport (800×600) → `(min-width:700px)` vrai,
+/// `(orientation:landscape)` vrai, `screen and (…)` vrai,
+/// `print` faux, query inconnue fausse. Schéma Light →
+/// `prefers-color-scheme: dark` faux ; une session Dark le
+/// passe vrai. `.media` rend la query verbatim.
+#[tokio::test]
+async fn matchmedia_evaluates_session_env() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><script>\
+         var m='';\
+         function q(s){return matchMedia(s).matches?'1':'0'}\
+         m+=q('(min-width: 700px)');\
+         m+=q('(max-width: 700px)');\
+         m+=q('(orientation: landscape)');\
+         m+=q('screen and (min-height: 500px)');\
+         m+=q('print');\
+         m+=q('(unknown-feat: x)');\
+         m+=q('(prefers-color-scheme: dark)');\
+         document.getElementById('x').textContent=\
+         m+'|'+matchMedia('(min-width: 700px)').media;\
+         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(
+        dump.contains("1011000|(min-width: 700px)"),
+        "env clair attendu : {dump}"
+    );
+
+    // Session sombre → la même query répond vrai.
+    let (mut s2, t2) = test_session();
+    t2.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><script>\
+         document.getElementById('x').textContent=\
+         matchMedia('(prefers-color-scheme: dark)').matches;\
+         </script></body></html>",
+    );
+    s2.set_js_factory(explorer_js::JscoreEngine::factory());
+    s2.set_color_scheme(explorer_css::ColorScheme::Dark);
+    let id2 = s2.open_tab();
+    s2.navigate(id2, "http://h.test/").await.unwrap();
+    let dump2 = s2.dom_dump(id2).unwrap_or_default();
+    assert!(dump2.contains("true"), "env sombre attendu : {dump2}");
+}

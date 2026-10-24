@@ -638,6 +638,20 @@ pub trait JsEngine: Send {
     /// hash des SPA en vivent). Défaut : no-op.
     fn fire_hashchange(&mut self, _ctx: JsCtxId, _old: &str, _new: &str) {}
 
+    /// Viewport de la session en px CSS (CAP-161) — posé
+    /// **avant** `install_dom` : `innerWidth`/`screen.*` et
+    /// les requêtes `matchMedia` `(min-/max-)width`/`height`/
+    /// `orientation`/`aspect-ratio` lisent cette valeur.
+    /// Défaut : no-op (viewport `(0,0)` — queries fausses).
+    fn set_viewport(&mut self, _w: u32, _h: u32) {}
+
+    /// Environnement `matchMedia` de la session (CAP-161) —
+    /// snapshot schéma/pointeur poussé au spawn ;
+    /// `matchMedia(q)` l'évalue alors réellement (borné —
+    /// voir `explorer_jscore::mediaq`). Défaut : no-op
+    /// (env `Default` : scheme clair, souris fine).
+    fn set_media_env(&mut self, _env: explorer_jscore::MediaEnv) {}
+
     /// `document.referrer` (CAP-156) : le `Referer` envoyé
     /// par la navigation du document (`""` = aucun) — posé
     /// après `install_dom`, avant la première évaluation.
@@ -942,6 +956,7 @@ pub fn null_factory() -> JsFactory {
 }
 
 pub use explorer_jscore::module_specifiers;
+pub use explorer_jscore::MediaEnv;
 pub use explorer_jscore::{is_bare_specifier, rewrite_bare_specifier};
 // JS-C77 — `Request.mode`/`Request.credentials` transportés par
 // `NetRequest::Fetch` (ré-export : le type reste unique).
@@ -1109,6 +1124,15 @@ enum Cmd {
         ctx: JsCtxId,
         old: String,
         new: String,
+    },
+    SetMediaEnv {
+        env: explorer_jscore::MediaEnv,
+    },
+    /// Viewport CSS px poussé au moteur (CAP-161) —
+    /// `innerWidth`/`screen`/`matchMedia` en dépendent.
+    SetViewport {
+        w: u32,
+        h: u32,
     },
     /// `document.referrer` du document top-level (CAP-156).
     SetPageReferrer {
@@ -1427,6 +1451,12 @@ impl JscoreEngine {
                 }
                 Cmd::FireHashchange { ctx, old, new } => {
                     eng.fire_hashchange(ctx, &old, &new);
+                }
+                Cmd::SetMediaEnv { env } => {
+                    eng.set_media_env(env);
+                }
+                Cmd::SetViewport { w, h } => {
+                    eng.set_viewport(w, h);
                 }
                 Cmd::SetPageReferrer { referrer } => {
                     eng.set_page_referrer(&referrer);
@@ -1905,6 +1935,14 @@ impl JsEngine for JscoreEngine {
             old: old.to_string(),
             new: new.to_string(),
         });
+    }
+
+    fn set_viewport(&mut self, w: u32, h: u32) {
+        let _ = self.tx.send(Cmd::SetViewport { w, h });
+    }
+
+    fn set_media_env(&mut self, env: explorer_jscore::MediaEnv) {
+        let _ = self.tx.send(Cmd::SetMediaEnv { env });
     }
 
     fn set_page_referrer(&mut self, referrer: &str) {

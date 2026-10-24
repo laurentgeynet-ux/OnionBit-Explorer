@@ -269,6 +269,15 @@ impl Session {
             let mut e = f();
             e.set_budget(self.js_ops);
             e.set_mem_limit(self.js_mem_bytes);
+            // Viewport session (CAP-161) — avant `install_dom`
+            // pour que `innerWidth`/`screen.*`/`matchMedia`
+            // voient la taille réelle (sinon `(0,0)`).
+            // px CSS ≪ 2^32 en pratique — `as` sature déjà.
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            e.set_viewport(
+                self.viewport.0.max(0.0).round() as u32,
+                self.viewport.1.max(0.0).round() as u32,
+            );
             e.install_dom(html, &page_url, hist_len);
             e.set_page_referrer(referrer);
             // `window.name` (CAP-159) — nom du contexte posé
@@ -277,6 +286,18 @@ impl Session {
             if let Some(n) = self.tabs.get(&tab).and_then(|t| t.win_name.as_deref()) {
                 e.set_ctx_name(explorer_js::JS_CTX_TOP, n);
             }
+            // `matchMedia` (CAP-161) — snapshot de l'env de
+            // session : `prefers-color-scheme` ; desktop →
+            // `hover`/`pointer: fine`, pas de reduced-motion
+            // (borné — pas de `change`). Le viewport est
+            // lu en direct (`hooks.viewport`, posé par
+            // `install_dom`/`set_viewport`).
+            e.set_media_env(explorer_js::MediaEnv {
+                dark: self.color_scheme == explorer_css::ColorScheme::Dark,
+                reduced_motion: false,
+                hover: true,
+                pointer_fine: true,
+            });
             // Étape 51 : état d'origine injecté au contexte —
             // `localStorage` (map session > profil persisté)
             // et snapshot cookie non-HttpOnly

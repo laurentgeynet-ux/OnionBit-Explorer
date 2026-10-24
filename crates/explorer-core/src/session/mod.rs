@@ -989,6 +989,18 @@ impl Session {
         if w > 0.0 && h > 0.0 && scale.is_finite() && scale > 0.0 {
             self.viewport = (w, h);
             self.scale = scale;
+            // CAP-161 — pousse aux moteurs JS vivants : les
+            // prochaines lectures `innerWidth`/`screen.*` et
+            // évaluations `matchMedia` reflètent la taille
+            // réelle (snapshot relu à la demande — jamais de
+            // `change` dispatché, borné).
+            // px CSS ≪ 2^32 en pratique — `as` sature déjà.
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            for t in self.tabs.values_mut() {
+                if let Some(eng) = t.js.as_mut() {
+                    eng.set_viewport(w.round() as u32, h.round() as u32);
+                }
+            }
         }
     }
 

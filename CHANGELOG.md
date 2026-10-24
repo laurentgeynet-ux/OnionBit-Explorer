@@ -1315,6 +1315,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-161 — `matchMedia` évalué (borné)**
+  (`explorer-jscore` + `explorer-js` + `explorer-core` —
+  cap « web réel sécurisé » ; numéro officiel attribué à
+  l'intégration) : `window.matchMedia` évalue réellement
+  les media queries au lieu de `matches:false` permanent —
+  module `mediaq` (`,`, `not`/`only`, type `screen`/`all`,
+  `and`/`or`, `width`/`height`/`min-`/`max-`/`em`/`rem`,
+  `aspect-ratio`, `orientation`, `prefers-color-scheme`,
+  `prefers-reduced-motion`, `hover`/`pointer`,
+  `color`/`color-gamut`/`resolution`/`grid`/`update`/
+  `scripting`/`display-mode`/`forced-colors` ; inconnu →
+  faux, dégradation spec). `JsEngine::set_media_env` +
+  `set_viewport` additifs ; viewport poussé avant
+  `install_dom` et repoussé par `Session::set_viewport`
+  aux moteurs vivants — répare `innerWidth`/`screen.*`
+  (restés à `(0,0)`). Bornes : pas de `change` events,
+  plages MQ4 `(<x < w < y>)`/`style()` non supportées.
+  1 test dom + 1 test session.
 - **CAP-160 — `hashchange` + setters `location.*`**
   (`explorer-jscore` + `explorer-js` + `explorer-core` —
   cap « web réel sécurisé » ; numéro officiel attribué à

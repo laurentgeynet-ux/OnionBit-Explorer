@@ -3359,6 +3359,33 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-161. `matchMedia` — évaluateur borné + env
+  de session** — *(numéro officiel attribué à
+  l'intégration)* : `window.matchMedia` sort du stub
+  `matches:false` permanent. Nouveau module
+  `explorer-jscore::mediaq` — sous-ensemble réel des
+  media queries : `,` (ou), `not`/`only`, type
+  `all`/`screen` vs inapplicables (`print`… → faux),
+  conditions `and`/`or` (mixte = invalide, spec MQ4),
+  `width`/`height` `px`/`em`/`rem` + `min-`/`max-`,
+  `aspect-ratio`, `orientation`, `prefers-color-scheme`,
+  `prefers-reduced-motion`, `hover`/`pointer` (et
+  `any-*`), `color`/`color-gamut`/`resolution`/`grid`/
+  `monochrome`/`update`/`scripting`/`display-mode`/
+  `forced-colors` ; feature nue = « non zéro »,
+  inconnue = clause fausse. Env poussé au spawn :
+  `JsEngine::set_media_env` (`MediaEnv` —
+  dark/reduced-motion/hover/pointer) +
+  `JsEngine::set_viewport` **avant** `install_dom` —
+  répare au passage `innerWidth`/`screen.*` jamais
+  câblés (lisaient `(0,0)`) ; `Session::set_viewport`
+  repousse aux moteurs vivants (re-lecture à la
+  demande — pas de `change`, borné). Doublon assumé
+  et borné de `explorer-css::media_matches` : jscore
+  est autonome (pas de dépendance PIPE possible).
+  1 test dom jscore (17 queries) + 1 test session
+  (env clair vs sombre).
+
 - [x] **CAP-160. `hashchange` + setters `location.*`** —
   *(numéro officiel attribué à l'intégration)* : deux trous
   liés des routeurs SPA. (a) `location.hash=`/`search=`/
