@@ -9,6 +9,87 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C83 — `MouseEventInit` + sonde
+  « vraie app React »** (`explorer-jscore`) :
+  app React 19 bundlée esbuild (fetch,
+  `pushState`/`popstate`, `createPortal`,
+  `startTransition`, react-router-dom 7).
+  Trou : `new MouseEvent` n'appliquait pas
+  les défauts IDL (`button`/`buttons`/
+  coords = 0) et le dispatch littéral
+  recopiait une allowlist sans eux —
+  `event.button === 0` ratant, React
+  Router ignorait les clics `<Link>`.
+  Livré : `mouse_event_ctor` (MouseEvent/
+  PointerEvent/WheelEvent/DragEvent,
+  `button`/`buttons`/coordonnées = 0,
+  modifieurs = `false`, `view`/`detail`)
+  + allowlist de dispatch étendue. Mesuré :
+  `Link` → `pushState` → `route:/x`,
+  portail monté, `useTransition` appliqué,
+  `fetch`→JSON→re-render. Régression
+  `mouse_event_defaults_reach_dispatch`.
+
+- **JS-C80/81/82 — compat frameworks (React 18
+  probe)** (`explorer-jscore`) : trois trous
+  remontés par la sonde React (`umd` prod,
+  createRoot/useState/useEffect/input
+  contrôlé) — (80) attributs énumérés
+  « limited to only known values »
+  (`input.type`→`"text"`, `button.type`→
+  `"submit"`, `form.method`/`enctype`,
+  `track.kind`, `img.decoding`/`loading`,
+  `iframe.loading`, `th.scope`,
+  `select.type`) + méthodes host lisibles
+  (`document.createElement` & co. étaient
+  invoke-only → `canUseDOM` React faux →
+  `onChange` mort) + handlers `on*`
+  lisibles/détectables (`"oninput" in
+  document` — sniff `Lj`) ; (81)
+  `MessageChannel`/`MessagePort` —
+  `postMessage`→`message` cloné
+  (WireValue) livré au checkpoint de
+  pompe, voie rapide du scheduler React ;
+  (82) `el.constructor` typé par classe +
+  `prototype` porteur d'accesseurs IDL
+  (`value`/`checked`/…) + précédence des
+  props propres `defineProperty` — la
+  chaîne `inputValueTracking` complète.
+  Mesuré session : `onClick`→`count=1`,
+  `onChange` contrôlé → `echo:hello`,
+  `useEffect` propagé. Régressions
+  `dom.rs` (+8 tests).
+
+- **Issue #19 — pont géométrie
+  miroir↔layout** (`explorer-jscore`,
+  `explorer-js`, `explorer-core`) :
+  la session marche l'arbre `LayoutBox`
+  commis à chaque `put_paint` (nav,
+  apply, relayout, restore bfcache) et
+  remplit `Tab::geom` — table
+  `element_path → union des boîtes`
+  publiée via `GeometrySlot =
+  Arc<Mutex<GeometryMap>>` posée sur
+  `Dom::geometry` (document-local,
+  bfcache-sain) par
+  `JsEngine::set_geometry_ctx` →
+  `Cmd::SetGeometry`. `getBoundingClientRect`
+  (invoke + référence lisible
+  `Element.prototype` — motif `.call`)
+  répond en coords viewport (doc −
+  scroll ; `fixed` déjà viewport —
+  i#18) ; `offset*`/`client*` non
+  racine = border-box de la table ;
+  `scroll*` racine = dimensions du
+  document publiées. Scroll propagé
+  sans rebuild (`set_scroll`) ; table
+  vidée au commit nav/freeze (jamais
+  de chemins recyclés). Borné :
+  top-document seul, union ≈ spec,
+  absent → 0 (comportement
+  historique). Contrat journalisé
+  (`docs/interface-equipes.md`).
+
 - **Outillage terrain : sonde `/console`,
   `cli diff`, `cli save`, scripts de vol**
   (`explorer-api`, `explorer-cli`,

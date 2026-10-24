@@ -303,6 +303,17 @@ impl Session {
                 hover: true,
                 pointer_fine: true,
             });
+            // Issue #19 — cellule de géométrie publiée, posée
+            // sur le document du contexte TOP (`Dom::geometry`
+            // — document-local, swap/bfcache sain ; journal
+            // interface). `Tab::geom` survit aux navigations
+            // (un moteur par document, la même cellule repasse) ;
+            // la session la remplit à chaque commit paint,
+            // `getBoundingClientRect`/`offset*` la lisent en
+            // direct sur le worker (pas d'appel synchrone).
+            if let Some(t) = self.tabs.get(&tab) {
+                e.set_geometry_ctx(explorer_js::JS_CTX_TOP, t.geom.clone());
+            }
             // Étape 51 : état d'origine injecté au contexte —
             // `localStorage` (map session > profil persisté)
             // et snapshot cookie non-HttpOnly

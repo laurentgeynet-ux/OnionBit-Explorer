@@ -55,6 +55,40 @@ pub(crate) fn element_path(dom: &Dom, node: NodeId) -> Option<Vec<(String, u32)>
     Some(path)
 }
 
+/// Marche l'arbre de layout **commis** et remplit la table de
+/// géométrie publiée au JS (issue #19, JS-8) : `element_path`
+/// du nœud DOM → union de ses boîtes (≙ le rect union des
+/// fragments de `getBoundingClientRect` spec). `fixed` se
+/// propage aux descendants — leurs rects sont en coords
+/// **viewport** (le layout pose `position:fixed` contre le
+/// viewport, i#18) ; les boîtes anonymes (`node: None`)
+/// n'ont pas de path mais leurs enfants sont marchés.
+/// Appelée à chaque commit paint : jamais sur arbre en
+/// mutation.
+pub(crate) fn collect_geometry(
+    dom: &Dom,
+    bx: &LayoutBox,
+    fixed: bool,
+    out: &mut explorer_js::GeometryMap,
+) {
+    let fixed = fixed || bx.position == explorer_layout::Position::Fixed;
+    if let Some(n) = bx.node {
+        if let Some(path) = element_path(dom, n) {
+            let e = out.rects.entry(path).or_default();
+            e.rect = e.rect.union(explorer_js::GeoRect {
+                x: bx.rect.x,
+                y: bx.rect.y,
+                w: bx.rect.width,
+                h: bx.rect.height,
+            });
+            e.fixed |= fixed;
+        }
+    }
+    for c in &bx.children {
+        collect_geometry(dom, c, fixed, out);
+    }
+}
+
 /// Champ éditable le plus proche du nœud (lui-même compris) :
 /// `<input>` à type texte ou `<textarea>`. `None` sinon.
 pub(crate) fn editable_field(dom: &Dom, mut node: NodeId) -> Option<NodeId> {

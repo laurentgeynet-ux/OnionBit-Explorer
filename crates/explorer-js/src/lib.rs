@@ -762,6 +762,16 @@ pub trait JsEngine: Send {
     /// Défaut : no-op (viewport `(0,0)` — queries fausses).
     fn set_viewport(&mut self, _w: u32, _h: u32) {}
 
+    /// Table de géométrie publiée par la session (issue #19,
+    /// JS-8) — cellule partagée pré-remplie au commit paint
+    /// (`Arc<Mutex<..>>` : le JS tourne sur worker, aucun appel
+    /// synchrone n'est possible pendant l'exécution).
+    /// `getBoundingClientRect`/`offset*`/`client*`/`scroll*`
+    /// lisent l'état publié ; document top-level (borné — les
+    /// cadres manquent → 0). À poser après `install_dom`.
+    /// Défaut : no-op (moteur sans layout → zéros historiques).
+    fn set_geometry_ctx(&mut self, _ctx: JsCtxId, _slot: explorer_jscore::GeometrySlot) {}
+
     /// Environnement `matchMedia` de la session (CAP-161) —
     /// snapshot schéma/pointeur poussé au spawn ;
     /// `matchMedia(q)` l'évalue alors réellement (borné —
@@ -1074,7 +1084,11 @@ pub fn null_factory() -> JsFactory {
 
 pub use explorer_jscore::module_specifiers;
 pub use explorer_jscore::MediaEnv;
+// Issue #19 / JS-8 — table de géométrie session↔moteur
+// (ré-export : le type reste unique — la session construit et
+// remplit, le moteur lit).
 pub use explorer_jscore::{is_bare_specifier, rewrite_bare_specifier};
+pub use explorer_jscore::{ElementGeom, GeoRect, GeometryMap, GeometrySlot};
 // JS-C77 — `Request.mode`/`Request.credentials` transportés par
 // `NetRequest::Fetch` (ré-export : le type reste unique).
 /// Réémis : requête de `<iframe>` dynamique (CAP-171) —
@@ -1267,6 +1281,15 @@ enum Cmd {
     SetViewport {
         w: u32,
         h: u32,
+    },
+    /// Table de géométrie publiée (issue #19, JS-8) —
+    /// posée sur le document du contexte `ctx`
+    /// (`Dom::geometry` — document-local, journal interface).
+    /// `getBoundingClientRect`/`offset*`/`client*`/`scroll*`
+    /// la lisent ; la session la remplit au commit paint.
+    SetGeometry {
+        ctx: JsCtxId,
+        slot: explorer_jscore::GeometrySlot,
     },
     /// `document.referrer` du document top-level (CAP-156).
     SetPageReferrer {
@@ -1643,6 +1666,9 @@ impl JscoreEngine {
                 }
                 Cmd::SetViewport { w, h } => {
                     eng.set_viewport(w, h);
+                }
+                Cmd::SetGeometry { ctx, slot } => {
+                    eng.set_geometry_ctx(ctx, slot);
                 }
                 Cmd::SetPageReferrer { referrer } => {
                     eng.set_page_referrer(&referrer);
@@ -2341,6 +2367,10 @@ impl JsEngine for JscoreEngine {
 
     fn set_viewport(&mut self, w: u32, h: u32) {
         let _ = self.tx.send(Cmd::SetViewport { w, h });
+    }
+
+    fn set_geometry_ctx(&mut self, ctx: JsCtxId, slot: explorer_jscore::GeometrySlot) {
+        let _ = self.tx.send(Cmd::SetGeometry { ctx, slot });
     }
 
     fn set_media_env(&mut self, env: explorer_jscore::MediaEnv) {

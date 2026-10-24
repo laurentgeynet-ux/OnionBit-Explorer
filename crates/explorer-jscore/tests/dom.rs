@@ -4010,3 +4010,421 @@ fn cap177_dom_primitives_batch() {
         "function,function"
     );
 }
+
+/// Pont de géométrie (issue #19, JS-8) — la session publie
+/// `element_path → union des boîtes` dans une map partagée
+/// posée sur le document par `Engine::set_geometry_ctx` :
+/// `getBoundingClientRect` répond en coords **viewport**
+/// (scroll soustrait — sauf sous `position:fixed` où les
+/// coords sont déjà viewport, i#18) ; `offset*`/`client*`/
+/// `scroll*` non racine = border-box ; `scroll*` racine =
+/// dimensions du document publiées ; chemin absent → 0
+/// (comportement historique, jamais de panic) ; la méthode
+/// est une **référence lisible** (`.call(el)` — motif #25).
+#[test]
+fn geometry_bridge_gbrect_and_dims() {
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    e.set_viewport(800, 600);
+    let geom = explorer_jscore::GeometrySlot::default();
+    {
+        let mut g = geom.lock().unwrap();
+        g.scroll_y = 5.0;
+        g.doc_w = 800.0;
+        g.doc_h = 3000.0;
+        // #main → html>body>div[0]
+        g.rects.insert(
+            vec![
+                ("html".to_string(), 0),
+                ("body".to_string(), 0),
+                ("div".to_string(), 0),
+            ],
+            explorer_jscore::ElementGeom {
+                rect: explorer_jscore::GeoRect {
+                    x: 10.0,
+                    y: 20.0,
+                    w: 100.0,
+                    h: 50.0,
+                },
+                fixed: false,
+            },
+        );
+        // #list → html>body>ul[0] — sous un ancêtre fixed :
+        // coords viewport, le scroll ne se soustrait pas.
+        g.rects.insert(
+            vec![
+                ("html".to_string(), 0),
+                ("body".to_string(), 0),
+                ("ul".to_string(), 0),
+            ],
+            explorer_jscore::ElementGeom {
+                rect: explorer_jscore::GeoRect {
+                    x: 0.0,
+                    y: 8.0,
+                    w: 200.0,
+                    h: 40.0,
+                },
+                fixed: true,
+            },
+        );
+    }
+    e.set_geometry_ctx(0, geom);
+    assert_eq!(
+        evf(
+            &mut e,
+            "var out=[];\
+             var el=document.getElementById('main');\
+             var r=el.getBoundingClientRect();\
+             out.push(r.x,r.y,r.width,r.height,r.bottom,r.right);\
+             out.push(el.offsetWidth,el.offsetHeight,el.clientWidth,el.scrollHeight);\
+             out.push(document.getElementById('list').getBoundingClientRect().y);\
+             out.push(document.getElementById('inp').offsetWidth);\
+             out.push(document.documentElement.scrollHeight,document.documentElement.clientHeight);\
+             out.push(Element.prototype.getBoundingClientRect.call(el).x);\
+             out.join(',')"
+        ),
+        "10,15,100,50,65,110,100,50,100,50,8,0,3000,600,10"
+    );
+}
+
+/// Sans table injectée (harnais, `set_geometry_ctx` jamais
+/// appelé) : les zéros historiques — le pont est additif.
+#[test]
+fn geometry_absent_keeps_zero_stub() {
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    assert_eq!(
+        evf(
+            &mut e,
+            "var el=document.getElementById('main');\
+             var r=el.getBoundingClientRect();\
+             [r.width,el.offsetWidth].join(',')"
+        ),
+        "0,0"
+    );
+}
+
+// -- attributs énumérés à défaut spec (JS-C80) ------------------------------
+
+const ENUM_PAGE: &str = r#"
+<html><body>
+<input id="i1">
+<input id="i2" type="checkbox">
+<input id="i3" type="BOGUS">
+<button id="b1"></button>
+<button id="b2" type="reset">
+<button id="b3" type="BOGUS">
+<select id="s1"></select>
+<select id="s2" multiple></select>
+<form id="f1"></form>
+<form id="f2" method="POST" enctype="multipart/form-data"></form>
+<textarea id="ta" wrap="HARD"></textarea>
+<table><tr><th id="th1"></th></tr></table>
+<img id="im">
+<iframe id="fr"></iframe>
+</body></html>
+"#;
+
+/// React pose `input.type` dans `isTextInputElement` : absent
+/// ou invalide, la lecture IDL doit rendre `"text"` (HTML
+/// §2.5.5 — « limited to only known values »).
+#[test]
+fn enum_attr_input_type_defaults() {
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('i1').type"),
+        "text"
+    );
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('i2').type"),
+        "checkbox"
+    );
+    // Invalide → défaut, casse normalisée.
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('i3').type"),
+        "text"
+    );
+}
+
+#[test]
+fn enum_attr_button_and_select() {
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('b1').type"),
+        "submit"
+    );
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('b2').type"),
+        "reset"
+    );
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('b3').type"),
+        "submit"
+    );
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('s1').type"),
+        "select-one"
+    );
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('s2').type"),
+        "select-multiple"
+    );
+}
+
+#[test]
+fn enum_attr_form_media_misc() {
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('f1').method"),
+        "get"
+    );
+    // POST → mot-clé canonique minuscule.
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('f2').method"),
+        "post"
+    );
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('f1').enctype"),
+        "application/x-www-form-urlencoded"
+    );
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('f2').encoding"),
+        "multipart/form-data"
+    );
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('ta').wrap"),
+        "hard"
+    );
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('th1').scope"),
+        "auto"
+    );
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('im').decoding"),
+        "auto"
+    );
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('im').loading"),
+        "eager"
+    );
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.getElementById('fr').loading"),
+        "eager"
+    );
+}
+
+/// Les éléments hors table gardent le reflet brut (`""`).
+#[test]
+fn enum_attr_unlisted_tags_stay_raw() {
+    assert_eq!(ev_in(ENUM_PAGE, "document.createElement('div').type"), "");
+    // `track.kind` : absent → `subtitles`, invalide → `metadata`.
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.createElement('track').kind"),
+        "subtitles"
+    );
+    assert_eq!(
+        ev_in(
+            ENUM_PAGE,
+            "var t=document.createElement('track');t.setAttribute('kind','bogus');t.kind"
+        ),
+        "metadata"
+    );
+}
+
+/// L'écriture reflète l'attribut brut ; la lecture clampe —
+/// aller-retour fidèle pour les valeurs du vocabulaire.
+#[test]
+fn enum_attr_set_reflects_get_clamps() {
+    assert_eq!(
+        ev_in(
+            ENUM_PAGE,
+            "var i=document.getElementById('i1');i.type='radio';i.type"
+        ),
+        "radio"
+    );
+    assert_eq!(
+        ev_in(
+            ENUM_PAGE,
+            "var i=document.getElementById('i1');i.type='BOGUS';[i.type,i.getAttribute('type')].join('|')"
+        ),
+        "text|BOGUS"
+    );
+}
+
+// -- méthodes lisibles + handlers `on*` (JS-C80) -----------------------------
+
+/// Les méthodes host étaient invoke-only : invisibles à
+/// `typeof`/`in`. `canUseDOM` de React exige
+/// `typeof document.createElement === 'function'` — sinon
+/// `isInputEventSupported` tombe faux et `onChange` passe au
+/// polyfill IE8 (`propertychange`) : champs contrôlés morts.
+#[test]
+fn methods_are_readable_functions() {
+    assert_eq!(ev("typeof document.createElement"), "function");
+    assert_eq!(ev("typeof document.getElementById"), "function");
+    assert_eq!(ev("typeof document.querySelectorAll"), "function");
+    assert_eq!(ev("typeof document.write"), "function");
+    assert_eq!(ev("'createElement' in document"), "true");
+    // Éléments : les méthodes universelles aussi.
+    assert_eq!(
+        ev("typeof document.getElementById('main').appendChild"),
+        "function"
+    );
+    assert_eq!(
+        ev("typeof document.getElementById('main').setAttribute"),
+        "function"
+    );
+    assert_eq!(
+        ev("'querySelector' in document.getElementById('main')"),
+        "true"
+    );
+    // Hors table → toujours `undefined` (pas de promesse vide).
+    assert_eq!(ev("typeof document.pasUneMethode"), "undefined");
+    // Hors gate de tag : `div.submit` n'existe pas côté spec.
+    assert_eq!(
+        ev("typeof document.getElementById('main').submit"),
+        "undefined"
+    );
+}
+
+/// La fonction lue est appelable — elle redispatche `invoke`.
+#[test]
+fn readable_method_is_callable() {
+    assert_eq!(ev("var f=document.createElement;f('span').tagName"), "SPAN");
+    assert_eq!(
+        ev("var d=document.getElementById('main'),g=d.querySelector;g.call(d,'b').textContent"),
+        "world"
+    );
+    assert_eq!(ev("document.createElement.call(document,'i').tagName"), "I");
+}
+
+/// `el.on*`/`document.on*` : propre scriptée prioritaire, puis
+/// attribut compilé (JS-C45), sinon `null` — la surface est
+/// **détectable** (`"oninput" in document`), ce que le sniff
+/// `Lj` de React exige pour armer `ChangeEventPlugin`.
+#[test]
+fn on_handlers_readable_and_detectable() {
+    assert_eq!(ev("document.getElementById('main').onclick"), "null");
+    assert_eq!(ev("document.oninput"), "null");
+    assert_eq!(ev("'oninput' in document"), "true");
+    assert_eq!(ev("'onchange' in document"), "true");
+    // Nom inconnu → pas un handler (`undefined`, fidèle spec).
+    assert_eq!(ev("'onpasuntruc' in document"), "false");
+    // Attribut compilé lisible en prop.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=\"x\" onclick=\"void 0\"></div></body></html>",
+            "typeof document.getElementById('x').onclick"
+        ),
+        "function"
+    );
+    // Propre scriptée gagne sur l'attribut.
+    assert_eq!(
+        ev_in(
+            "<html><body><div id=\"x\" onclick=\"void 0\"></div></body></html>",
+            "var d=document.getElementById('x');var f=function(){};d.onclick=f;d.onclick===f"
+        ),
+        "true"
+    );
+}
+
+// -- `MessageChannel`/`MessagePort` (JS-C81) --------------------------------
+
+/// La voie rapide des schedulers : `port2.postMessage` →
+/// `message` sur `port1` au checkpoint de pompe (React
+/// préfère `MessageChannel` à `setTimeout`).
+#[test]
+fn message_channel_roundtrip() {
+    let mut e = engine_with(PAGE);
+    e.eval(
+        "var ch=new MessageChannel();\
+         var got='none';\
+         ch.port1.onmessage=function(ev){got='M:'+ev.data};\
+         ch.port2.postMessage('hi')",
+    )
+    .expect("eval");
+    e.run_microtasks().expect("pump");
+    let v = e.eval("got").expect("read");
+    assert_eq!(e.describe(v), "M:hi");
+}
+
+/// `typeof` détectable, structured clone des données,
+/// `addEventListener` et `close` (défausse à la livraison).
+#[test]
+fn message_channel_surface() {
+    let mut e = engine_with(PAGE);
+    e.eval(
+        "var out=[];         var ch=new MessageChannel();         out.push(typeof MessageChannel);         out.push(typeof ch.port1.postMessage);         out.push(ch.port1.onmessage===null);         out.push(String(ch));         ch.port1.addEventListener('message',function(ev){out.push('L:'+ev.data.v)});         ch.port2.postMessage({v:42});         window.__out=out;",
+    )
+    .expect("eval");
+    e.run_microtasks().expect("pump");
+    // `close` défausse les messages en file du port (spec :
+    // désentrelacement).
+    e.eval(
+        "var c2=new MessageChannel();         c2.port1.onmessage=function(){window.__out.push('BAD')};         c2.port2.postMessage('x');         c2.port1.close();",
+    )
+    .expect("eval2");
+    e.run_microtasks().expect("pump2");
+    let v = e.eval("window.__out.join('|')").expect("read");
+    assert_eq!(
+        e.describe(v),
+        "function|function|true|[object MessageChannel]|L:42"
+    );
+}
+
+// -- accesseurs IDL + `constructor` typé (JS-C82) ----------------------------
+
+/// `inputValueTracking` de React exige un vrai descripteur
+/// `{get,set}` sur `ctor.prototype` + `defineProperty`
+/// accesseur own sur l'élément — la chaîne complète.
+#[test]
+fn idl_accessors_descriptor_surface() {
+    assert_eq!(
+        ev("var i=document.getElementById('inp');i.constructor.name"),
+        "HTMLInputElement"
+    );
+    assert_eq!(
+        ev("var i=document.getElementById('inp');\
+            var d=Object.getOwnPropertyDescriptor(i.constructor.prototype,'value');\
+            d && typeof d.get + '/' + typeof d.set + '/' + d.configurable"),
+        "function/function/true"
+    );
+    // defineProperty accesseur own : interception réelle.
+    assert_eq!(
+        ev("var i=document.getElementById('inp');var seen='';\
+            var d=Object.getOwnPropertyDescriptor(i.constructor.prototype,'value');\
+            Object.defineProperty(i,'value',{configurable:true,\
+              get:function(){return d.get.call(this)},\
+              set:function(v){seen='S:'+v;d.set.call(this,v)}});\
+            i.value='zz';seen+'|'+i.value+'|'+i.getAttribute('value')"),
+        "S:zz|zz|zz"
+    );
+    // `new HTMLInputElement()` — illegal constructor (spec).
+    assert_eq!(
+        ev("try{new document.getElementById('inp').constructor()}catch(e){e.message}"),
+        "illegal constructor"
+    );
+}
+
+// -- `MouseEventInit` + dispatch littéral (JS-C83) ----------------------------
+
+/// React Router `<Link>` garde `event.button === 0` — sans les
+/// défauts `MouseEventInit` au ctor et leur recopie au dispatch
+/// d'un événement littéral, le clic est ignoré.
+#[test]
+fn mouse_event_defaults_reach_dispatch() {
+    // Constructeur : défauts numériques.
+    assert_eq!(
+        ev("var m=new MouseEvent('click');m.button+'/'+m.buttons+'/'+m.clientX+'/'+m.ctrlKey"),
+        "0/0/0/false"
+    );
+    // Init dict lu (`button:2`) + le reste par défaut.
+    assert_eq!(
+        ev("var m=new MouseEvent('click',{button:2,shiftKey:true});m.button+'/'+m.shiftKey+'/'+m.pageY"),
+        "2/true/0"
+    );
+    // Dispatch : les props atteignent les listeners.
+    assert_eq!(
+        ev(
+            "var b=document.createElement('b');document.body.appendChild(b);var seen='';\
+            document.addEventListener('click',function(e){seen='d:'+e.button+'/'+e.clientX});\
+            b.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:7}));seen"
+        ),
+        "d:0/7"
+    );
+}

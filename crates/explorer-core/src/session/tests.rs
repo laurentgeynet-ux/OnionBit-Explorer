@@ -1961,3 +1961,46 @@ fn keymods_from_bits_decode() {
     }
     .chord());
 }
+
+/// Issue #19 — `put_paint` (ici via `relayout`) publie la
+/// table de géométrie clée `element_path` (union des boîtes
+/// du nœud) ; `set_scroll` propage le scroll sans rebuild ;
+/// `clear_geometry` vide les rects du document mort (jamais
+/// de chemins recyclés → mesures d'un autre document).
+#[test]
+fn geometry_published_at_relayout() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<div><p>bonjour</p></div>"));
+        e.url = Some(Url::parse("http://h.test/geom").unwrap());
+    }
+    s.relayout(tab).unwrap();
+    let geom = s.tabs.get(&tab).unwrap().geom.clone();
+    let div_path = vec![
+        ("html".to_string(), 0u32),
+        ("body".to_string(), 0),
+        ("div".to_string(), 0),
+    ];
+    let mut p_path = div_path.clone();
+    p_path.push(("p".to_string(), 0));
+    {
+        let g = geom.lock().unwrap();
+        let div = g.rects.get(&div_path).expect("div mesuré");
+        assert!(div.rect.w > 0.0 && div.rect.h > 0.0);
+        assert!(!div.fixed);
+        let p = g.rects.get(&p_path).expect("p mesuré");
+        assert!(p.rect.h > 0.0);
+    }
+    // Scroll propagé sans rebuild (les rects survivent).
+    s.tabs.get_mut(&tab).unwrap().set_scroll(42.0);
+    {
+        let g = geom.lock().unwrap();
+        assert_eq!(g.scroll_y, 42.0);
+        assert!(g.rects.contains_key(&div_path));
+    }
+    // Document mort → table vide.
+    s.tabs.get_mut(&tab).unwrap().clear_geometry();
+    assert!(geom.lock().unwrap().rects.is_empty());
+}
