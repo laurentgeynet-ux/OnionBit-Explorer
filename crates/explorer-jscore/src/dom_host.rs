@@ -2143,7 +2143,38 @@ impl Engine {
 // document
 // ------------------------------------------------------------------
 
+/// Méthodes dispatchées par `invoke` sur le `document` —
+/// même motif feature-detect que [`NODE_METHODS`].
+const DOCUMENT_METHODS: &[&str] = &[
+    "addEventListener",
+    "adoptNode",
+    "close",
+    "createComment",
+    "createDocumentFragment",
+    "createElement",
+    "createElementNS",
+    "createEvent",
+    "createTextNode",
+    "dispatchEvent",
+    "getElementById",
+    "getElementsByClassName",
+    "getElementsByName",
+    "getElementsByTagName",
+    "getSelection",
+    "hasFocus",
+    "importNode",
+    "open",
+    "querySelector",
+    "querySelectorAll",
+    "removeEventListener",
+    "write",
+    "writeln",
+];
+
 impl Host for DocumentHost {
+    fn methods(&self) -> &[&'static str] {
+        DOCUMENT_METHODS
+    }
     fn class_name(&self) -> &'static str {
         "HTMLDocument"
     }
@@ -2974,6 +3005,65 @@ fn can_play(arg: &str, declared: &[String]) -> &'static str {
     }
 }
 
+/// Méthodes dispatchées par `invoke` sur les nœuds élément —
+/// lisibles comme props fonctionnelles (feature-detect :
+/// `typeof el.m === 'function'` — la sonde terrain a mesuré
+/// les shims qui échouaient sur la lecture `o = el.m`).
+const NODE_METHODS: &[&str] = &[
+    "addEventListener",
+    "addTextTrack",
+    "after",
+    "append",
+    "appendChild",
+    "attachInternals",
+    "attachShadow",
+    "before",
+    "blur",
+    "canPlayType",
+    "checkValidity",
+    "click",
+    "cloneNode",
+    "closest",
+    "compareDocumentPosition",
+    "contains",
+    "dispatchEvent",
+    "focus",
+    "getAttribute",
+    "getBoundingClientRect",
+    "getContext",
+    "getElementsByClassName",
+    "getElementsByTagName",
+    "getRootNode",
+    "hasAttribute",
+    "hasChildNodes",
+    "insertAdjacentHTML",
+    "insertAdjacentText",
+    "insertBefore",
+    "isEqualNode",
+    "isSameNode",
+    "matches",
+    "normalize",
+    "pause",
+    "play",
+    "prepend",
+    "querySelector",
+    "querySelectorAll",
+    "remove",
+    "removeAttribute",
+    "removeChild",
+    "removeEventListener",
+    "replaceChild",
+    "replaceWith",
+    "reportValidity",
+    "requestSubmit",
+    "scrollIntoView",
+    "scrollIntoViewIfNeeded",
+    "setAttribute",
+    "setCustomValidity",
+    "submit",
+    "toggleAttribute",
+];
+
 impl Host for NodeHost {
     fn class_name(&self) -> &'static str {
         match self.dom.borrow().nodes[self.node as usize].tag.as_str() {
@@ -2982,6 +3072,10 @@ impl Host for NodeHost {
             "canvas" => "HTMLCanvasElement",
             _ => "HTMLElement",
         }
+    }
+
+    fn methods(&self) -> &[&'static str] {
+        NODE_METHODS
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -1350,6 +1350,15 @@ pub trait Host: std::any::Any {
         Ok(None)
     }
 
+    /// Noms des méthodes que [`Self::invoke`] dispatche —
+    /// lisibles comme propriétés fonctionnelles (feature-detect :
+    /// `typeof el.m === 'function'`, shims `o = el.matches || …`).
+    /// Défaut : aucune — seuls les hosts qui listent leur
+    /// surface exposent le repli.
+    fn methods(&self) -> &[&'static str] {
+        &[]
+    }
+
     /// Enumerable host keys (`for-in`); own enumerable props are
     /// appended by the engine.
     fn keys(&self, _e: &mut crate::Engine, _this: Value) -> Vec<String> {

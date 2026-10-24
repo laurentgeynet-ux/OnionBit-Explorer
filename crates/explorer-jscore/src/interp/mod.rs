@@ -2263,6 +2263,28 @@ impl Engine {
         self.heap.alloc_obj(Object::ordinary(proto))
     }
 
+    /// Fonction native enveloppant une méthode host
+    /// (feature-detect) — `args[0]` = nom lié posé par
+    /// `bound_native` au site `get_prop_value`, `this` =
+    /// receveur host → re-dispatche via `Host::invoke`
+    /// (même pile que `el.m()` à l'appel). `Ok(None)` →
+    /// `Undefined` (la surface a pu changer entre lecture
+    /// et appel).
+    fn host_method(&mut self, this: Value, args: &[Value]) -> JsResult<Value> {
+        let name = match args.first() {
+            Some(Value::Str(s)) => self.heap.string(*s).unwrap_or_default(),
+            _ => return Ok(Value::Undefined),
+        };
+        let Value::Obj(id) = this else {
+            return Ok(Value::Undefined);
+        };
+        let Some(h) = self.host_of(id) else {
+            return Ok(Value::Undefined);
+        };
+        Ok(h.invoke(self, this, &name, &args[1..])?
+            .unwrap_or(Value::Undefined))
+    }
+
     /// New array value.
     pub(crate) fn new_array(&mut self, elems: Vec<Value>) -> Value {
         let proto = Value::Obj(self.protos.array);
@@ -4092,12 +4114,35 @@ impl Engine {
                 Err(self.type_error(format!("cannot read `{key}` of {base:?}")))
             }
             Value::Obj(id) => {
-                if let Some(h) = self.host_of(id) {
+                let h = self.host_of(id);
+                if let Some(h) = &h {
                     if let Some(v) = h.get(self, base, key)? {
                         return Ok(v);
                     }
                 }
-                self.read_prop(base, base, key)
+                let v = self.read_prop(base, base, key)?;
+                // Feature-detect : les méthodes host sont
+                // invoke-only — quand ni `get` ni la chaîne
+                // proto ne produisent de valeur, exposer le
+                // nom comme fonction lisible (re-dispatch via
+                // `Host::invoke` à l'appel) : `typeof el.m`
+                // = 'function', shims `o = el.matches || …`.
+                // Une own-prop scriptée du même nom continue de
+                // primer (elle aurait été trouvée par `get`/
+                // `read_prop`).
+                if matches!(v, Value::Undefined) {
+                    if let Some(h) = &h {
+                        if h.methods().contains(&key) {
+                            let name = self.str_val(key);
+                            return Ok(self.bound_native(
+                                "hostMethod",
+                                Self::host_method,
+                                vec![name],
+                            ));
+                        }
+                    }
+                }
+                Ok(v)
             }
             Value::Str(id) => {
                 if key == "length" {

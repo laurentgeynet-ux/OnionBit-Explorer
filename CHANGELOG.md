@@ -1400,6 +1400,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-174 — feature-detect : méthodes host
+  lisibles en propriété fonctionnelle**
+  (`explorer-jscore` — cap « web réel sécurisé » ;
+  numéro officiel attribué à l'intégration ; trou
+  mesuré par sonde empirique) : les méthodes host
+  étaient invoke-only — `o.m()` dispatchait via
+  `Host::invoke` mais `o.m` lisait `undefined` →
+  les feature-detects (`typeof el.attachShadow
+  === 'function'`, shims `o = el.matches ||
+  el.msMatchesSelector`, `el.method.call(el,…)`)
+  tombaient en faux **en masse** sur les pages
+  réelles alors que les appels marchaient.
+  `Host::methods()` (trait additif, défaut `&[]`)
+  liste les noms dispatchés ; à la lecture
+  `get_prop_value`, quand ni `get` ni la chaîne
+  proto ne produisent de valeur, le nom est
+  enveloppé `bound_native` → `typeof` = `'function'`
+  et l'appel re-dispatche `invoke` — même pile
+  que `el.m()`. Tables livrées : `NODE_METHODS`
+  (éléments, ~55 méthodes) + `DOCUMENT_METHODS`
+  (~23). Une own-prop scriptée du même nom
+  continue de primer (shadowing préservé).
+  Bornes : surface bornée aux tables déclarées
+  (extension par `impl methods()` au fil des
+  hosts) ; `Element`/`Document`/`Node` restent
+  sans `.prototype` réel (arc distinct).
+  Test jscore `host_methods_read_as_functions`.
+
 - **CAP-173 — `<link rel=stylesheet>` inséré
   dynamiquement** (`explorer-jscore`/`explorer-js`/
   `explorer-core` — cap « web réel sécurisé » ;

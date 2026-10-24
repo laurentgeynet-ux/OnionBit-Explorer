@@ -54,7 +54,7 @@ pub struct ApiState {
     /// `GET /api/egress`, jamais de basculement silencieux.
     pub egress: String,
     /// Journal console par onglet — `PipelineError` enregistrés
-    /// (cap [`CONSOLE_RING`]) : les erreurs JS/fetch survivent
+    /// (cap `CONSOLE_RING`) : les erreurs JS/fetch survivent
     /// au flux SSE éphémère (`GET /api/tabs/{id}/console`).
     pub console: ConsoleRing,
 }

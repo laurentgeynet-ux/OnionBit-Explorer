@@ -3384,6 +3384,32 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-174. Feature-detect : méthodes host
+  lisibles en propriété fonctionnelle** —
+  *(numéro officiel attribué à l'intégration ;
+  trou mesuré par sonde empirique `_census_*`)* :
+  les méthodes host étaient invoke-only — `o.m()`
+  dispatchait via `Host::invoke` mais `o.m` lisait
+  `undefined` → feature-detects (`typeof el.m ===
+  'function'`, `o = el.matches || el.msMatchesSelector`,
+  `.call`/`.bind`) cassés **en masse** alors que les
+  appels marchaient — les sites prenaient les
+  mauvaises branches (polyfill/dégradé/bail).
+  `Host::methods()` (trait additif, défaut `&[]`)
+  liste les noms dispatchés ; `get_prop_value`
+  enveloppe `bound_native` le nom → `'function'`
+  lisible + re-dispatch `invoke` à l'appel (même
+  pile que `el.m()` — `this` = receveur). Tables :
+  `NODE_METHODS` (~55 méthodes élément) +
+  `DOCUMENT_METHODS` (~23 document). Shadowing
+  préservé (own-prop scriptée prime).
+  Bornes : surface bornée aux tables
+  (extension `impl methods()` par host au fil) ;
+  les constructeurs restent sans `.prototype`
+  réel (arc distinct). Test jscore
+  `host_methods_read_as_functions` (typeof×12,
+  shim, `.call` re-dispatch, shadowing).
+
 - [x] **CAP-173. `<link rel=stylesheet>` inséré
   dynamiquement** — *(numéro officiel attribué à
   l'intégration)* : `document.createElement('link')`

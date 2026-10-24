@@ -3801,3 +3801,65 @@ fn attach_shadow_stub_polyfill_pattern() {
         "function,function,true,11,true,true,true"
     );
 }
+
+// ===== CAP-174 — feature-detect : méthodes host lisibles
+// comme propriétés fonctionnelles (typeof el.m = 'function',
+// shims `o = el.matches || …`). Mesuré par sonde terrain :
+// les feature-detects tombaient en faux sur toute la surface
+// invoke-only alors que les appels marchaient.
+
+#[test]
+fn host_methods_read_as_functions() {
+    let mut e = engine_with("<!doctype html><html><body><div id=x></div></body></html>");
+    // `typeof` sur les méthodes dispatchées invoke-only.
+    let s = e
+        .eval(
+            "var el=document.getElementById('x');
+             [ typeof el.appendChild,
+               typeof el.querySelector,
+               typeof el.matches,
+               typeof el.getBoundingClientRect,
+               typeof el.setAttribute,
+               typeof el.attachShadow,
+               typeof el.cloneNode,
+               typeof el.addEventListener,
+               typeof document.getElementById,
+               typeof document.querySelector,
+               typeof document.createElement,
+               typeof document.hasFocus ].join(',')",
+        )
+        .map(|v| e.describe(v))
+        .unwrap_or_default();
+    assert_eq!(
+        s,
+        "function,function,function,function,function,function,function,function,function,function,function,function",
+        "toutes les méthodes lisibles en fonction : {s}"
+    );
+    // Shim feature-detect réel : `o = el.matches || el.msMatchesSelector`.
+    let v2 = e
+        .eval(
+            "var el=document.getElementById('x');
+             var o=el.matches || el.msMatchesSelector; typeof o",
+        )
+        .map(|v| e.describe(v))
+        .unwrap_or_default();
+    assert_eq!(v2, "function");
+    // La fonction lue appelle bien la méthode (re-dispatch invoke).
+    let v3 = e
+        .eval(
+            "var el=document.getElementById('x');
+             var m=el.matches; m.call(el,'div') ? 'ok' : 'bad'",
+        )
+        .map(|v| e.describe(v))
+        .unwrap_or_default();
+    assert_eq!(v3, "ok");
+    // Une own-prop scriptée du même nom prime (shadowing préservé).
+    let v4 = e
+        .eval(
+            "var el=document.getElementById('x');
+             el.foo=function(){return 7;}; el.foo()",
+        )
+        .map(|v| e.describe(v))
+        .unwrap_or_default();
+    assert_eq!(v4, "7");
+}
