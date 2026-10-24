@@ -30,34 +30,120 @@ use crate::value::{ObjId, Value};
 use crate::Engine;
 
 /// État moteur `WebSocket` — proto paresseux + sockets en
-/// `CONNECTING` dont le refus reste à livrer.
+/// `CONNECTING` dont le refus reste à livrer + flux vivants
+/// ouverts via la couture [`WsTransport`] (JS-C94).
 #[derive(Default)]
 pub(crate) struct WsState {
     /// `WebSocket.prototype` paresseux.
     ws_proto: Option<ObjId>,
     /// Wrappers dont le refus de handshake est en file —
-    /// drainés au checkpoint et racines GC jusque-là.
+    /// drainés au checkpoint et racines GC jusque-là
+    /// (chemin « sans transport » du stub).
     pending: Vec<ObjId>,
+    /// Flux vivants : `(handle, wrapper ObjId)` — le handle
+    /// vient de `WsTransport::open`, les livraisons
+    /// `open`/`message`/`error`/`close` arrivent par
+    /// [`Engine::deliver_ws_event`]. Racines GC tant que
+    /// non `CLOSED`.
+    pub live: Vec<(u64, ObjId)>,
+}
+
+/// Ouverture demandée par `new WebSocket` (JS-C94) — l'URL
+/// est déjà résolue absolue et les sous-protocoles validés
+/// (`token` uniques) par le moteur.
+#[derive(Debug, Clone)]
+pub struct WsRequest {
+    /// URL absolue `ws://`/`wss://`.
+    pub url: String,
+    /// Sous-protocoles demandés (ordre script — le serveur
+    /// choisit, le moteur restitue dans `ws.protocol`).
+    pub protocols: Vec<String>,
+    /// Contexte émetteur (JS-C78/134 — base URL/cookies/
+    /// origine du **cadre**, jamais du parent).
+    pub ctx: crate::context::CtxId,
+}
+
+/// Événement serveur→script — le miroir session
+/// (`explorer-net::ws::WsEvent`) traduit côté `explorer-js`.
+#[derive(Debug, Clone)]
+pub enum WsEventKind {
+    /// `101` validé — `protocol` négocié (vide si aucun).
+    Open(String),
+    /// Message texte (UTF-8 validé côté codec).
+    Text(String),
+    /// Message binaire → `Blob`-shape `{type:''}` ou
+    /// `ArrayBuffer` selon `binaryType` (borne : pas de
+    /// `Blob` réel — l'objet porte `size`/`arrayBuffer`).
+    Binary(Vec<u8>),
+    /// `CloseEvent` : `code` + `reason` + `wasClean`.
+    Close {
+        /// Code RFC 6455 §7.4.
+        code: u16,
+        /// Raison UTF-8.
+        reason: String,
+        /// `true` = close propre (handshake §7.1.2 bouclé),
+        /// `false` = coupure (1006).
+        clean: bool,
+    },
+    /// `error` — transport mort ; la session enchaîne un
+    /// `close` `{1006, wasClean:false}` (spec « fail the
+    /// WebSocket connection »).
+    Error,
+}
+
+/// Sortant — `send`/`close` du script vers la plateforme.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WsOut {
+    /// Trame texte (`send(string)`).
+    Text(String),
+    /// Trame binaire (`send(ArrayBuffer/Blob)`).
+    Binary(Vec<u8>),
+    /// `close(code, reason)`.
+    Close {
+        /// Code validé (1000 ou 3000-4999 — spec).
+        code: u16,
+        /// Raison ≤ 123 octets (validée).
+        reason: String,
+    },
+}
+
+/// Couture socket de la plateforme (JS-C94) — **engine-
+/// global** comme `crypto_transport`/`es_transport` : tous
+/// les contextes ouvrent par la même dial. Object-safe,
+/// non bloquant : `open` enfile et rend un handle, les
+/// événements reviennent par [`Engine::deliver_ws_event`].
+pub trait WsTransport {
+    /// Ouvre la connexion ; handle écho des livraisons.
+    fn open(&self, req: &WsRequest) -> u64;
+    /// `send` — texte ou binaire (spec : `send` en `OPEN`).
+    fn send(&self, handle: u64, out: WsOut);
+    /// `close` — best-effort ; la plateforme répond par
+    /// `Close` (propre) ou `Error`→1006 (sale).
+    fn close(&self, _handle: u64, _code: u16, _reason: &str) {}
 }
 
 impl WsState {
     /// Racines GC : proto installé + sockets en attente de
-    /// refus (le `Host::trace` du wrapper couvre listeners).
+    /// refus + flux vivants (les `Host::trace` des wrappers
+    /// couvrent leurs listeners).
     pub(crate) fn root_ids(&self, ids: &mut Vec<ObjId>) {
         if let Some(p) = self.ws_proto {
             ids.push(p);
         }
         ids.extend(self.pending.iter().copied());
+        ids.extend(self.live.iter().map(|(_, w)| *w));
     }
 }
 
 /// Données partagées d'un `WebSocket` (slots spec).
 struct WsData {
-    /// `0` CONNECTING, `1` OPEN, `2` CLOSING, `3` CLOSED —
-    /// `OPEN` inatteignable dans le stub (handshake refusé).
+    /// `0` CONNECTING, `1` OPEN, `2` CLOSING, `3` CLOSED.
     ready: u8,
     /// URL absolue résolue (`ws:`/`wss:` validés au ctor).
     url: String,
+    /// Handle couture (`Some` = flux réel ouvert via
+    /// `WsTransport`, `None` = refus différé sans transport).
+    handle: Option<u64>,
     /// Sous-protocole retenu — `''` (aucune négociation).
     protocol: String,
     /// Extensions négociées — `''`.
@@ -152,9 +238,9 @@ fn websocket_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
     }
     // `protocols` : string unique ou liste itérable —
     // doublons et tokens mal formés → `SyntaxError` (spec).
+    let mut seen: Vec<String> = Vec::new();
     let protos = arg(args, 1);
     if !matches!(protos, Value::Undefined) {
-        let mut seen: Vec<String> = Vec::new();
         let mut push = |e: &mut Engine, v: Value| -> JsResult<()> {
             let s = e.to_js_string(v)?;
             if !valid_ws_token(&s) {
@@ -178,7 +264,8 @@ fn websocket_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
     let v = e.new_host_object(Rc::new(WebSocketHost {
         data: Rc::new(RefCell::new(WsData {
             ready: 0,
-            url,
+            url: url.clone(),
+            handle: None,
             protocol: String::new(),
             extensions: String::new(),
             binary_type: "blob".into(),
@@ -192,8 +279,24 @@ fn websocket_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
         if let Some(o) = e.heap.obj_mut(id) {
             o.proto = Value::Obj(p);
         }
-        // Handshake en file → refus livré au checkpoint.
-        e.ws.pending.push(id);
+        match &e.ws_transport {
+            // Couture installée → ouverture réelle ; les
+            // événements arrivent par `deliver_ws_event`.
+            Some(tr) => {
+                let h = tr.open(&WsRequest {
+                    url,
+                    protocols: seen,
+                    ctx: e.cur_ctx,
+                });
+                if let Some(data) = ws_data(e, v) {
+                    data.borrow_mut().handle = Some(h);
+                }
+                e.ws.live.push((h, id));
+            }
+            // Sans transport : refus différé (stub JS-C73 —
+            // les fallbacks long-polling s'arment).
+            None => e.ws.pending.push(id),
+        }
     }
     Ok(v)
 }
@@ -227,6 +330,157 @@ impl Engine {
             self.fire_ws_event(wid, &data, "close", Some((1006.0, String::new(), false)))?;
         }
         Ok(n)
+    }
+
+    /// Livraison d'un événement de flux réel (JS-C94) —
+    /// même forme que [`Engine::deliver_es`] : localise le
+    /// contexte propriétaire par handle (courant ou garé),
+    /// switch, livre, restaure.
+    ///
+    /// `open` : `readyState`→1 + `protocol` négocié posé.
+    /// `message` : `MessageEvent` `{type, target, data}`
+    /// — texte = `String`, binaire = `ArrayBuffer` si
+    /// `binaryType==='arraybuffer'`, sinon objet
+    /// `{size, type:''}` (borne : pas de `Blob` réel).
+    /// `error` : event `error` simple. `close` :
+    /// `readyState`→3 + `CloseEvent` `{code,reason,wasClean}`
+    /// + retrait du registre.
+    ///
+    /// # Errors
+    /// Propage la première exception d'un handler.
+    pub fn deliver_ws_event(&mut self, ctx: crate::context::CtxId, handle: u64, ev: WsEventKind) {
+        let owner = if self.ws.live.iter().any(|(h, _)| *h == handle) {
+            Some(self.cur_ctx)
+        } else {
+            self.parked
+                .iter()
+                .find(|(_, c)| c.ws.live.iter().any(|(h, _)| *h == handle))
+                .map(|(k, _)| *k)
+        };
+        if owner != Some(ctx) {
+            // Handle orphelin ou mauvais ctx — la session
+            // sait normalement router ; on tente le
+            // propriétaire trouvé, sinon drop.
+            if let Some(o) = owner {
+                let home = self.cur_ctx;
+                self.switch_to(o);
+                self.deliver_ws_here(handle, ev);
+                if self.cur_ctx != home {
+                    self.switch_to(home);
+                }
+            }
+            return;
+        }
+        let home = self.cur_ctx;
+        self.deliver_ws_here(handle, ev);
+        if self.cur_ctx != home {
+            self.switch_to(home);
+        }
+    }
+
+    /// Livraison dans le contexte courant (voir
+    /// [`Engine::deliver_ws_event`] pour la forme des
+    /// événements).
+    fn deliver_ws_here(&mut self, handle: u64, ev: WsEventKind) {
+        let Some(pos) = self.ws.live.iter().position(|(h, _)| *h == handle) else {
+            return;
+        };
+        let wid = self.ws.live[pos].1;
+        let Some(data) = ws_data(self, Value::Obj(wid)) else {
+            return;
+        };
+        match ev {
+            WsEventKind::Open(protocol) => {
+                {
+                    let mut d = data.borrow_mut();
+                    d.ready = 1;
+                    d.protocol = protocol;
+                    d.buffered = 0;
+                }
+                let _ = self.fire_ws_event(wid, &data, "open", None);
+            }
+            WsEventKind::Text(s) => {
+                let m = self.str_val(s);
+                let _ = self.fire_ws_message(wid, &data, m);
+            }
+            WsEventKind::Binary(bytes) => {
+                let bin_is_ab = data.borrow().binary_type == "arraybuffer";
+                let v = if bin_is_ab {
+                    crate::typed_array::new_array_buffer(self, bytes)
+                } else {
+                    // `Blob` approximé : `{size, type:''}`
+                    // (borne — pas de `Blob` constructible à
+                    // cette tranche ; `arrayBuffer()` absent).
+                    let o = self.new_object();
+                    self.set_own(o, "size", Value::Num(bytes.len() as f64), true);
+                    let t = self.str_val("");
+                    self.set_own(o, "type", t, true);
+                    Value::Obj(o)
+                };
+                let _ = self.fire_ws_message(wid, &data, v);
+            }
+            WsEventKind::Error => {
+                let _ = self.fire_ws_event(wid, &data, "error", None);
+            }
+            WsEventKind::Close {
+                code,
+                reason,
+                clean,
+            } => {
+                {
+                    data.borrow_mut().ready = 3;
+                }
+                let _ =
+                    self.fire_ws_event(wid, &data, "close", Some((f64::from(code), reason, clean)));
+                self.ws.live.remove(pos);
+            }
+        }
+    }
+
+    /// `message` : `MessageEvent` `{type, target, data}` —
+    /// même fan-out `on*`/`addEventListener` que `fire_ws_event`.
+    fn fire_ws_message(
+        &mut self,
+        wrapper: ObjId,
+        data: &Rc<RefCell<WsData>>,
+        payload: Value,
+    ) -> JsResult<()> {
+        let this = Value::Obj(wrapper);
+        let ev = {
+            let o = self.new_object();
+            let t = self.str_val("message");
+            self.set_own(o, "type", t, true);
+            self.set_own(o, "target", this, true);
+            self.set_own(o, "data", payload, true);
+            Value::Obj(o)
+        };
+        if let Some(f) = self.get_prop(wrapper, "onmessage") {
+            if self.is_callable(f) {
+                self.call_value(f, this, &[ev])?;
+            }
+        }
+        let fns: Vec<Value> = data
+            .borrow()
+            .listeners
+            .iter()
+            .filter(|(t, _, _)| t == "message")
+            .map(|(_, f, _)| *f)
+            .collect();
+        for f in fns {
+            if self.is_callable(f) {
+                self.call_value(f, this, &[ev])?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Injecte le dial WebSocket de la plateforme (JS-C94) —
+    /// **engine-global** : posé une fois, tous les sous-
+    /// contextes ouvrent par la même couture (forme
+    /// [`Engine::install_es_transport`]). Sans transport,
+    /// `new WebSocket` file un refus différé (stub JS-C73).
+    pub fn install_ws_transport(&mut self, transport: Rc<dyn WsTransport>) {
+        self.ws_transport = Some(transport);
     }
 
     /// Event `WebSocket` minimal : `Event` `{type, target}`
@@ -337,15 +591,29 @@ impl Host for WebSocketHost {
                         "WebSocket: still CONNECTING",
                     )));
                 }
-                // CLOSING/CLOSED (OPEN jamais atteint dans le
-                // stub) : silencieux, `bufferedAmount` +=
-                // taille du message (spec).
-                let len = match arg(args, 0) {
-                    Value::Undefined => 0,
-                    v => e.to_js_string(v).map_or(0, |s| s.len()) as u64,
-                };
+                if d.ready != 1 {
+                    // CLOSING/CLOSED : silencieux,
+                    // `bufferedAmount` += taille (spec).
+                    let len = match arg(args, 0) {
+                        Value::Undefined => 0,
+                        v => e.to_js_string(v).map_or(0, |s| s.len()) as u64,
+                    };
+                    drop(d);
+                    self.data.borrow_mut().buffered += len;
+                    return Ok(Some(Value::Undefined));
+                }
+                // OPEN : émission réelle via la couture —
+                // binaire si `ArrayBuffer`/`Uint8Array`,
+                // texte sinon (spec `send(data)`).
+                let handle = d.handle;
                 drop(d);
-                self.data.borrow_mut().buffered += len;
+                if let (Some(tr), Some(h)) = (e.ws_transport.clone(), handle) {
+                    let out = match crate::typed_array::bytes_of_value(e, arg(args, 0)) {
+                        Some(b) => WsOut::Binary(b),
+                        None => WsOut::Text(e.to_js_string(arg(args, 0)).unwrap_or_default()),
+                    };
+                    tr.send(h, out);
+                }
                 Ok(Some(Value::Undefined))
             }
             "close" => {
@@ -373,9 +641,30 @@ impl Host for WebSocketHost {
                 if d.ready == 0 {
                     // CONNECTING → CLOSING ; le refus déjà en
                     // file livrera `error` + `close` (spec :
-                    // la connexion échoue quand même).
+                    // la connexion échoue quand même). Flux
+                    // réel : on notifie aussi la couture
+                    // (abandon du handshake).
+                    if let (Some(h), Some(tr)) = (d.handle, &e.ws_transport) {
+                        tr.close(h, 1001, "");
+                    }
                     d.ready = 2;
                     d.close_requested = true;
+                } else if d.ready == 1 {
+                    // OPEN → close(code, reason) réel.
+                    let code = if matches!(code, Value::Undefined) {
+                        1000
+                    } else {
+                        e.to_number(code)? as u16
+                    };
+                    let reason = if matches!(reason, Value::Undefined) {
+                        String::new()
+                    } else {
+                        e.to_js_string(reason)?
+                    };
+                    if let (Some(h), Some(tr)) = (d.handle, &e.ws_transport) {
+                        tr.close(h, code, &reason);
+                    }
+                    d.ready = 2;
                 }
                 // CLOSING/CLOSED : no-op (spec).
                 Ok(Some(Value::Undefined))

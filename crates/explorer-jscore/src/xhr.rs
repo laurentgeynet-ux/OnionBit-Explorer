@@ -699,6 +699,10 @@ impl Engine {
         // transport est injecté, refus différé sinon
         // (même motif asynchrone que le refus `WebSocket`).
         crate::eventsource::install_eventsource(self);
+        // `WebSocket` réel si un dial est injecté — sinon
+        // l'install stub `install_websocket` (chemin refus
+        // différé, fallbacks armés) reste la surface.
+        crate::websocket::install_websocket(self);
         // `Notification`/`BroadcastChannel`/`reportError`
         // (JS-C74) — APIs fenêtre non-DOM ; `getSelection`
         // ajouté par `install_dom` (nœuds requis).

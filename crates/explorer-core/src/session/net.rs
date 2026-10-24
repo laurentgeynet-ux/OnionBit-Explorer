@@ -319,6 +319,26 @@ impl Session {
     /// `max_script_net` et requêtes bloquées → livraison
     /// immédiate d'un échec `status: 0` (`error` côté
     /// script — la page reste vivante, jamais de panic).
+    /// Événements `WebSocket` (JS-C94) — multi-coups par
+    /// flux ; `Close`/`Error` = fin de flux → le handle sort
+    /// de `net_tasks`/`ws_sends` (comme un `NetDone`).
+    fn drain_ws_events(&mut self) {
+        let mut ws_done = Vec::new();
+        while let Ok(d) = self.ws_rx.try_recv() {
+            ws_done.push(d);
+        }
+        for d in ws_done {
+            if matches!(
+                d.ev,
+                explorer_net::ws::WsEvent::Close { .. } | explorer_net::ws::WsEvent::Error(_)
+            ) {
+                self.net_tasks.remove(&(d.tab, d.handle));
+                self.ws_sends.remove(&(d.tab, d.handle));
+            }
+            self.deliver_ws(d.tab, d.ctx, d.handle, d.ev);
+        }
+    }
+
     /// Événements `EventSource` (JS-C92) — multi-coups par
     /// flux ; `Error` = fin de tâche → le handle sort du
     /// registre (comme un `NetDone` complet).
@@ -448,6 +468,59 @@ impl Session {
                             handle,
                             ev: explorer_js::EsEvent::Error,
                         });
+                    }
+                }
+                // `WebSocket` (JS-C94) — socket dédiée hors
+                // pool : `WsOpen` dial via `WsDial`, `send`/
+                // `close` routés par `ws_sends` vers la
+                // tâche driver du flux. La livraison
+                // `open`/`message`/`error`/`close` est
+                // multi-coups sur `ws_tx`, comme `EsDone`.
+                NetRequest::WsOpen {
+                    handle,
+                    url,
+                    protocols,
+                    ctx,
+                } => {
+                    if self
+                        .spawn_ws(&WsSpawnArgs {
+                            tab,
+                            page,
+                            base,
+                            handle,
+                            url: &url,
+                            protocols: &protocols,
+                            ctx,
+                        })
+                        .is_err()
+                    {
+                        let _ = self.ws_tx.send(WsDone {
+                            tab,
+                            ctx,
+                            handle,
+                            ev: explorer_net::ws::WsEvent::Error("ws: open refused".into()),
+                        });
+                    }
+                }
+                NetRequest::WsSend { handle, out } => {
+                    let out = match out {
+                        explorer_js::WsOut::Text(t) => explorer_net::ws::WsSend::Text(t),
+                        explorer_js::WsOut::Binary(b) => explorer_net::ws::WsSend::Binary(b),
+                        explorer_js::WsOut::Close { code, reason } => {
+                            explorer_net::ws::WsSend::Close { code, reason }
+                        }
+                    };
+                    if let Some(tx) = self.ws_sends.get(&(tab, handle)) {
+                        let _ = tx.try_send(out);
+                    }
+                }
+                NetRequest::WsClose {
+                    handle,
+                    code,
+                    reason,
+                } => {
+                    if let Some(tx) = self.ws_sends.get(&(tab, handle)) {
+                        let _ = tx.try_send(explorer_net::ws::WsSend::Close { code, reason });
                     }
                 }
                 NetRequest::Crypto {
@@ -1595,6 +1668,177 @@ impl Session {
     /// `error` à l'échec ou à la fin de flux (borne
     /// documentée : pas de reconnexion `Last-Event-ID` à
     /// cette tranche — le script ré-ouvre s'il veut).
+    /// Ouverture `WebSocket` (JS-C94) — `ctx_net_origin`
+    /// porte l'initiateur (origine `Origin`, base, CSP
+    /// `connect-src` via `FetchDest::Empty`, cookies du
+    /// cadre) ; la socket dédiée est possédée par la tâche
+    /// `WsDial` (jamais dans le pool HTTP). `Sec-WebSocket-
+    /// Protocol` = liste script jointe par virgule (spec).
+    fn spawn_ws(&mut self, spec: &WsSpawnArgs<'_>) -> Result<(), ()> {
+        let &WsSpawnArgs {
+            tab,
+            page,
+            base,
+            handle,
+            url,
+            protocols,
+            ctx,
+        } = spec;
+        let Some((req_page, _req_base, _policy, csp, _opaque)) =
+            self.ctx_net_origin(tab, ctx, page, base)
+        else {
+            return Err(());
+        };
+        let inflight = self.net_tasks.keys().filter(|(t, _)| *t == tab).count();
+        if inflight >= self.max_script_net {
+            return Err(());
+        }
+        let secure = url.starts_with("wss:");
+        // `connect-src` : l'URL HTTP correspondante sert à la
+        // vérification (`ws:`/`wss:` mappés `http:`/`https:` —
+        // spec Fetch « WebSocket connections »). On parse
+        // l'URL **mappée** — `Url` ne connaît pas `ws:` comme
+        // schéma hiérarchique (`host()` serait vide).
+        let http_url = Url::parse(&format!(
+            "{}{}",
+            if secure { "https" } else { "http" },
+            &url[url.find(':').unwrap_or(2)..]
+        ))
+        .map_err(|_| ())?;
+        let ws_url = &http_url;
+        if !explorer_net::csp::csp_allows(
+            &csp,
+            &req_page,
+            explorer_net::http::FetchDest::Empty,
+            &http_url,
+        ) {
+            return Err(());
+        }
+        let mut headers = vec![("Origin".into(), origin_header_value(&req_page))];
+        if !protocols.is_empty() {
+            headers.push(("Sec-WebSocket-Protocol".into(), protocols.join(", ")));
+        }
+        // Cookies : la spec WS les envoie comme une requête
+        // `same-origin`/`include` selon l'origine — borne
+        // v1 : header du jar si same-origin (cross-origin
+        // sans `SameSite=None` ne passe de toute façon pas).
+        if req_page.origin() == http_url.origin() {
+            let c = self.cookies.header_for(&http_url, false);
+            if !c.is_empty() {
+                headers.push(("Cookie".into(), c));
+            }
+        }
+        let ws_spec = explorer_net::ws::WsSpec {
+            secure,
+            host: ws_url.host(),
+            port: ws_url.port().unwrap_or(if secure { 443 } else { 80 }),
+            resource: ws_url.path_query(),
+            headers,
+        };
+        let Some(dial) = self.ws_dial.clone() else {
+            return Err(());
+        };
+        let (send_tx, send_rx) = tokio::sync::mpsc::channel::<explorer_net::ws::WsSend>(64);
+        self.ws_sends.insert((tab, handle), send_tx);
+        let tx = self.ws_tx.clone();
+        let j = tokio::spawn(async move {
+            // Adaptateur événements → canal session (même
+            // discipline `EsDone` : intentions drainées).
+            // `WsDial` veut du tokio mpsc ; `ws_tx` est le
+            // `std::mpsc` session (`send` non bloquant).
+            let (ev_tx, mut ev_rx) = tokio::sync::mpsc::channel::<explorer_net::ws::WsEvent>(64);
+            let tx_fwd = tx.clone();
+            let fwd = tokio::spawn(async move {
+                while let Some(ev) = ev_rx.recv().await {
+                    let _ = tx_fwd.send(WsDone {
+                        tab,
+                        ctx,
+                        handle,
+                        ev,
+                    });
+                }
+            });
+            let r = dial.open(ws_spec, ev_tx, send_rx).await;
+            if let Err(e) = r {
+                // Échec dial/handshake → `Error` (la session
+                // normalise `error` + `close 1006`).
+                let _ = tx.send(WsDone {
+                    tab,
+                    ctx,
+                    handle,
+                    ev: explorer_net::ws::WsEvent::Error(e.to_string()),
+                });
+            }
+            let _ = fwd.await;
+        });
+        self.net_tasks.insert((tab, handle), j);
+        Ok(())
+    }
+
+    /// Livraison d'un événement WS : traduction net→moteur,
+    /// `Error` → `error` + `close {1006, wasClean:false}`
+    /// (spec « fail the WebSocket connection » — les
+    /// fallbacks ne voient jamais un faux `open`).
+    fn deliver_ws(
+        &mut self,
+        tab: TabId,
+        ctx: explorer_js::JsCtxId,
+        handle: u64,
+        ev: explorer_net::ws::WsEvent,
+    ) {
+        use explorer_js::WsEventKind as K;
+        let kinds: Vec<K> = match ev {
+            explorer_net::ws::WsEvent::Open { protocol } => {
+                vec![K::Open(protocol)]
+            }
+            explorer_net::ws::WsEvent::Text(s) => vec![K::Text(s)],
+            explorer_net::ws::WsEvent::Binary(b) => vec![K::Binary(b)],
+            explorer_net::ws::WsEvent::Close { code, reason } => vec![K::Close {
+                code,
+                reason,
+                clean: true,
+            }],
+            explorer_net::ws::WsEvent::Error(_) => vec![
+                K::Error,
+                K::Close {
+                    code: 1006,
+                    reason: String::new(),
+                    clean: false,
+                },
+            ],
+        };
+        let mutated = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            if entry.js_detached.is_some() {
+                entry
+                    .js_pending_ws
+                    .extend(kinds.into_iter().map(|k| (ctx, handle, k)));
+                return;
+            }
+            let Some(eng) = entry.js.as_mut() else {
+                return;
+            };
+            for k in kinds {
+                if let Err(e) = eng.deliver_ws_event(ctx, handle, k) {
+                    tracing::debug!(tab, error = %e, "livraison websocket js");
+                    let _ = self.events.send(CoreEvent::PipelineError {
+                        tab: Some(tab),
+                        message: e.to_string(),
+                    });
+                }
+            }
+            let n = eng.run_pending();
+            tracing::trace!(tab, jobs = n, "jobs js après événement ws");
+            Self::sync_for_apply(eng.as_mut())
+        };
+        if let Some(s) = mutated {
+            self.queue_apply_sync(tab, s);
+        }
+        self.after_script(tab);
+    }
+
     /// `ctx_net_origin` porte le document **émetteur** (base
     /// résolue côté moteur, CSP `connect-src` via
     /// `FetchDest::Empty`, politique Referer du cadre) ;
@@ -1941,6 +2185,7 @@ impl Session {
             );
         }
         self.drain_es_events();
+        self.drain_ws_events();
         let n = done.len();
         for d in done {
             // `<script>` dynamique (CAP-169) — la tâche vit

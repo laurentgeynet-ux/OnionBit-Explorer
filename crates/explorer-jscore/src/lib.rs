@@ -98,5 +98,6 @@ pub use mediaq::MediaEnv;
 pub use module::{is_bare_specifier, module_specifiers, rewrite_bare_specifier, ModuleLoader};
 pub use storage::Storage;
 pub use value::{ObjId, Value};
+pub use websocket::{WsEventKind, WsOut, WsRequest, WsTransport};
 pub use worker::{WorkerConfig, WorkerFactory, WorkerLoader};
 pub use xhr::{FetchCredentials, FetchMode, XhrRequest, XhrResponse, XhrTransport};

@@ -28,3 +28,4 @@ pub mod resolver;
 pub mod sse;
 pub mod tls;
 pub mod url;
+pub mod ws;

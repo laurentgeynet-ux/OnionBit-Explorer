@@ -12670,3 +12670,126 @@ async fn credentials_stub_rejects_honestly() {
         "credentials stub : {dump}"
     );
 }
+
+// -- `WebSocket` réel (JS-C94) -------------------------------------------------
+
+/// Dial simulé in-process : `open` → `Open`, echo
+/// `Text`/`Binary`, `Close` → `Close` propre. Aucune socket
+/// (AGENTS §10) — le codec réel est couvert par les
+/// unitaires `explorer_net::ws`.
+struct EchoWsDial;
+
+#[async_trait::async_trait]
+impl explorer_net::ws::WsDial for EchoWsDial {
+    async fn open(
+        &self,
+        spec: explorer_net::ws::WsSpec,
+        events: tokio::sync::mpsc::Sender<explorer_net::ws::WsEvent>,
+        mut sends: tokio::sync::mpsc::Receiver<explorer_net::ws::WsSend>,
+    ) -> explorer_net::error::NetResult<()> {
+        assert_eq!(spec.host, "h.test");
+        let _ = events
+            .send(explorer_net::ws::WsEvent::Open {
+                protocol: spec
+                    .headers
+                    .iter()
+                    .find(|(k, _)| k == "Sec-WebSocket-Protocol")
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_default(),
+            })
+            .await;
+        while let Some(s) = sends.recv().await {
+            match s {
+                explorer_net::ws::WsSend::Text(t) => {
+                    let _ = events.send(explorer_net::ws::WsEvent::Text(t)).await;
+                }
+                explorer_net::ws::WsSend::Binary(b) => {
+                    let _ = events.send(explorer_net::ws::WsEvent::Binary(b)).await;
+                }
+                explorer_net::ws::WsSend::Close { code, reason } => {
+                    let _ = events
+                        .send(explorer_net::ws::WsEvent::Close { code, reason })
+                        .await;
+                    return Ok(());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Cycle de vie complet : `open` → `send` (echo) → `close`.
+/// Chaîne : ctor → `NetRequest::WsOpen` → `spawn_ws` → dial
+/// → `WsDone` → `deliver_ws_event` dans le realm.
+#[tokio::test]
+async fn websocket_echo_lifecycle() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><p id=\"p\">?</p><script>\
+        var ws=new WebSocket('ws://h.test/x','p1');var out=[];\
+        ws.onopen=function(){out.push('open:'+ws.readyState+'/'+ws.protocol);ws.send('hi')};\
+        ws.onmessage=function(e){out.push('msg:'+e.data);ws.close(1000,'bye')};\
+        ws.onclose=function(e){out.push('close:'+e.code+'/'+e.wasClean);\
+        document.getElementById('p').textContent=out.join('|')}\
+        </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    s.set_ws_dial(std::sync::Arc::new(EchoWsDial));
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    for _ in 0..6 {
+        s.pump_net().await;
+        s.pump_timers(id);
+    }
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(
+        dump.contains("open:1/p1|msg:hi|close:1000/true"),
+        "ws echo : {dump}"
+    );
+}
+
+/// Échec de handshake → `error` puis `close {1006,
+/// wasClean:false}` — les fallbacks long-polling s'arment
+/// (même séquence observable que le stub JS-C73).
+struct RefuseWsDial;
+
+#[async_trait::async_trait]
+impl explorer_net::ws::WsDial for RefuseWsDial {
+    async fn open(
+        &self,
+        _spec: explorer_net::ws::WsSpec,
+        _events: tokio::sync::mpsc::Sender<explorer_net::ws::WsEvent>,
+        _sends: tokio::sync::mpsc::Receiver<explorer_net::ws::WsSend>,
+    ) -> explorer_net::error::NetResult<()> {
+        Err(explorer_net::error::NetError::InvalidResponse(
+            "ws: handshake 403".into(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn websocket_refused_fires_error_close() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><p id=\"p\">?</p><script>\
+        var ws=new WebSocket('ws://h.test/x');var out=[];\
+        ws.onerror=function(){out.push('err')};\
+        ws.onclose=function(e){out.push('close:'+e.code+'/'+e.wasClean);\
+        document.getElementById('p').textContent=out.join('|')}\
+        </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    s.set_ws_dial(std::sync::Arc::new(RefuseWsDial));
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    for _ in 0..4 {
+        s.pump_net().await;
+        s.pump_timers(id);
+    }
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(dump.contains("err|close:1006/false"), "ws refus : {dump}");
+}

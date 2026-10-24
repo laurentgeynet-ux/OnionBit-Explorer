@@ -4716,3 +4716,55 @@ fn cap179_fullscreen_popover() {
         "noerr"
     );
 }
+
+// -- `WebSocket` réel (JS-C94) -------------------------------------------------
+
+/// Transport simulé : `open` rend un handle fixe, `send`/
+/// `close` notés — les événements sont injectés par le test
+/// via `deliver_ws_event` (comme le harnais `deliver_xhr`).
+struct FakeWsTr(std::cell::RefCell<Vec<String>>);
+impl explorer_jscore::WsTransport for FakeWsTr {
+    fn open(&self, _r: &explorer_jscore::WsRequest) -> u64 {
+        7
+    }
+    fn send(&self, _h: u64, out: explorer_jscore::WsOut) {
+        self.0.borrow_mut().push(format!("send:{out:?}"));
+    }
+    fn close(&self, h: u64, c: u16, _r: &str) {
+        self.0.borrow_mut().push(format!("close:{h}:{c}"));
+    }
+}
+
+#[test]
+fn ws_lifecycle_echo() {
+    let mut e = engine_with("<!doctype html><html><body><p id=p>?</p></body></html>");
+    let tr: std::rc::Rc<dyn explorer_jscore::WsTransport> =
+        std::rc::Rc::new(FakeWsTr(std::cell::RefCell::new(Vec::new())));
+    e.install_ws_transport(tr);
+    e.eval(
+        "var ws=new WebSocket('ws://h.test/x','p1');var out=[];\
+        ws.onopen=function(){out.push('open:'+ws.readyState);ws.send('hi')};\
+        ws.onmessage=function(ev){out.push('msg:'+ev.data);ws.close(1000,'bye')};\
+        ws.onclose=function(ev){out.push('close:'+ev.code+'/'+ev.wasClean);\
+        document.getElementById('p').textContent=out.join('|')}",
+    )
+    .expect("script");
+    // `open` → onopen → send('hi') via transport.
+    e.deliver_ws_event(0, 7, explorer_jscore::WsEventKind::Open("p1".into()));
+    // echo texte → onmessage → close(1000).
+    e.deliver_ws_event(0, 7, explorer_jscore::WsEventKind::Text("hi".into()));
+    // close serveur → onclose → DOM.
+    e.deliver_ws_event(
+        0,
+        7,
+        explorer_jscore::WsEventKind::Close {
+            code: 1000,
+            reason: "bye".into(),
+            clean: true,
+        },
+    );
+    let v = e
+        .eval("document.getElementById('p').textContent")
+        .expect("dom");
+    assert_eq!(e.describe(v), "open:1|msg:hi|close:1000/true");
+}

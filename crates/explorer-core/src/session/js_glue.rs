@@ -146,6 +146,7 @@ impl Session {
                 entry.js_pending_net.clear();
                 entry.js_pending_crypto.clear();
                 entry.js_pending_es.clear();
+                entry.js_pending_ws.clear();
                 entry.js_pending_dyn.clear();
                 entry.js_pending_attrs.clear();
                 return 0;
@@ -154,6 +155,7 @@ impl Session {
                 entry.js_pending_net.clear();
                 entry.js_pending_crypto.clear();
                 entry.js_pending_es.clear();
+                entry.js_pending_ws.clear();
                 entry.js_pending_dyn.clear();
                 entry.js_pending_attrs.clear();
                 return 0;
@@ -166,6 +168,9 @@ impl Session {
             }
             for (ctx, handle, ev) in std::mem::take(&mut entry.js_pending_es) {
                 let _ = eng.deliver_es_event(ctx, handle, ev);
+            }
+            for (ctx, handle, ev) in std::mem::take(&mut entry.js_pending_ws) {
+                let _ = eng.deliver_ws_event(ctx, handle, ev);
             }
             for (ctx, seq, body) in std::mem::take(&mut entry.js_pending_dyn) {
                 eng.deliver_dyn_script(ctx, seq, body);

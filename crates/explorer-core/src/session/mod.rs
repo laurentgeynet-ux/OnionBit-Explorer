@@ -477,6 +477,10 @@ pub(crate) struct Tab {
     /// détachement (JS-C92) — `(ctx, handle, ev)`, même
     /// règle que `js_pending_crypto`.
     js_pending_es: Vec<(explorer_js::JsCtxId, u64, explorer_js::EsEvent)>,
+    /// Événements `WebSocket` tamponnés pendant le
+    /// détachement (JS-C94) — `(ctx, handle, ev)`, même
+    /// règle que `js_pending_es`.
+    js_pending_ws: Vec<(explorer_js::JsCtxId, u64, explorer_js::WsEventKind)>,
     /// Livraisons de `<script>` dynamiques tamponnées pendant
     /// le détachement (CAP-169) — `(ctx, seq, corps décodé)`,
     /// `None` = refus → `error` sur l'élément.
@@ -693,6 +697,24 @@ pub struct Session {
     /// `EsDone` (multi-coups, même discipline `pump_net`).
     es_tx: Sender<EsDone>,
     es_rx: Receiver<EsDone>,
+    /// Canal des événements `WebSocket` (JS-C94) — les tâches
+    /// `WsDial` y livrent leur `WsDone` (multi-coups, même
+    /// discipline `pump_net` : intentions drainées, jamais de
+    /// callback ré-entrant).
+    ws_tx: Sender<WsDone>,
+    ws_rx: Receiver<WsDone>,
+    /// Dial `WebSocket` injecté (JS-C94) — prod =
+    /// `explorer_net::ws::RealWsDial` (connecteur `h1`, socket
+    /// dédiée), tests = dial simulé in-process. `None` =
+    /// `WsOpen` refuse comme le stub jscore (error+close).
+    ws_dial: Option<Arc<dyn explorer_net::ws::WsDial>>,
+    /// `Sender` des messages sortants par flux WS vivant,
+    /// `(tab, handle)` — les `WsSend`/`WsClose` drainés y
+    /// sont routés ; retiré à `Close`/`Error`/`Abort`.
+    /// Canal **tokio borné** (contrairement aux `net_tx`
+    /// `std::mpsc`) : la tâche driver le consomme en
+    /// `recv().await`.
+    ws_sends: HashMap<(TabId, u64), tokio::sync::mpsc::Sender<explorer_net::ws::WsSend>>,
     /// Fetches script-initiés en vol, `(tab, handle)` →
     /// tâche tokio — `Abort` moteur ou fermeture d'onglet
     /// tuent la jointure.
@@ -804,6 +826,7 @@ impl Session {
         let (net_tx, net_rx) = channel();
         let (crypto_tx, crypto_rx) = channel();
         let (es_tx, es_rx) = channel();
+        let (ws_tx, ws_rx) = channel();
         // `Accept-Language` au-dessus de toute la pile (étape
         // 118) : la cellule démarre vide — l'hôte la pose via
         // `set_accept_language` (réglages app → API) et elle
@@ -863,6 +886,10 @@ impl Session {
             crypto_rx,
             es_tx,
             es_rx,
+            ws_tx,
+            ws_rx,
+            ws_dial: None,
+            ws_sends: HashMap::new(),
             net_tasks: HashMap::new(),
             dyn_tasks: HashMap::new(),
             max_script_net: cfg.max_script_net,
@@ -940,6 +967,15 @@ impl Session {
     /// côté infra, `null_factory()` pour un no-op, `None` par
     /// défaut = scripts ignorés). Un contexte neuf est créé à
     /// chaque navigation qui rencontre un `<script>`.
+    /// Injecte le dial `WebSocket` (JS-C94) — prod :
+    /// `explorer_net::ws::RealWsDial` (même connecteur que
+    /// le transport, socket dédiée par flux) ; tests : dial
+    /// simulé in-process. Sans dial, `new WebSocket` échoue
+    /// comme le stub jscore (`error` + `close 1006`).
+    pub fn set_ws_dial(&mut self, dial: Arc<dyn explorer_net::ws::WsDial>) {
+        self.ws_dial = Some(dial);
+    }
+
     pub fn set_js_factory(&mut self, f: JsFactory) {
         self.js_factory = Some(f);
     }
@@ -1170,6 +1206,7 @@ impl Session {
                 js_pending_dyn: Vec::new(),
                 js_pending_crypto: Vec::new(),
                 js_pending_es: Vec::new(),
+                js_pending_ws: Vec::new(),
                 js_pending_attrs: Vec::new(),
                 sync_floor: None,
                 media: Vec::new(),

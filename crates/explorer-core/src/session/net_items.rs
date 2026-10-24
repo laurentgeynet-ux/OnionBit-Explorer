@@ -1395,6 +1395,36 @@ pub(crate) struct EsDone {
     pub(crate) ev: explorer_js::EsEvent,
 }
 
+/// Paramètres d'ouverture `WebSocket` (JS-C94) — packés
+/// pour `Session::spawn_ws` (clippy `too_many_arguments`,
+/// même motif [`EsSpawnArgs`]).
+pub(crate) struct WsSpawnArgs<'a> {
+    pub tab: crate::TabId,
+    pub page: &'a explorer_net::url::Url,
+    pub base: &'a explorer_net::url::Url,
+    pub handle: u64,
+    pub url: &'a str,
+    pub protocols: &'a [String],
+    pub ctx: explorer_js::JsCtxId,
+}
+
+/// Livraison d'un événement `WebSocket` (JS-C94) — produite
+/// par la tâche `WsDial::open` (socket dédiée hors pool),
+/// consommée par [`Session::poll_net`] → `deliver_ws`.
+/// Multi-coups ; `Close`/`Error` = fin de flux.
+pub(crate) struct WsDone {
+    /// Onglet émetteur.
+    pub(crate) tab: TabId,
+    /// Contexte émetteur — la livraison vise son realm.
+    pub(crate) ctx: explorer_js::JsCtxId,
+    /// Corrélation côté moteur (`WsTransport::open`).
+    pub(crate) handle: u64,
+    /// Événement brut du dial — traduit en `WsEventKind`
+    /// moteur dans `deliver_ws` (`Error` → `error` +
+    /// `close 1006` spec « fail the connection »).
+    pub(crate) ev: explorer_net::ws::WsEvent,
+}
+
 /// Verbe d'un `NetRequest` → `Method` — un verbe hors
 /// sous-ensemble usuel n'est pas émis (dégradation status 0).
 pub(crate) fn parse_method(s: &str) -> Option<Method> {

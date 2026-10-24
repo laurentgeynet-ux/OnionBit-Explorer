@@ -6139,6 +6139,21 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `derive*`, `encrypt`, passkeys
   plateforme (délégation embedder).
 
+- [x] **JS-C94. `WebSocket` réel** —
+  codec RFC 6455 `explorer_net::ws`
+  (masquage, fragmentation, ping/pong,
+  close) + `WsDial`/`RealWsDial` (socket
+  dédiée hors pool) + couture
+  `WsTransport` → `NetRequest::WsOpen`/
+  `WsSend`/`WsClose` → livraisons
+  `open`/`message`/`error`/`close`
+  multi-coups par realm (spec, spec
+  « fail » = error+close 1006).
+  Bornes : pas de CONNECT-proxy ni
+  deflate, `Blob` approximé.
+  Régressions : 2 session + 1 jscore +
+  6 codec.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

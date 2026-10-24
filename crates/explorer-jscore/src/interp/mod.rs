@@ -414,6 +414,12 @@ pub struct Engine {
     /// **engine-global** comme `crypto_transport` : tous les
     /// contextes ouvrent leurs flux par la même couture.
     pub(crate) es_transport: Option<Rc<dyn crate::eventsource::EsTransport>>,
+    /// Dial WebSocket injecté par l'embedder (JS-C94) —
+    /// **engine-global** comme `es_transport` : tous les
+    /// contextes ouvrent leurs flux par la même couture ;
+    /// `None` = refus différé au checkpoint (stub JS-C73,
+    /// fallbacks long-polling armés).
+    pub(crate) ws_transport: Option<Rc<dyn crate::websocket::WsTransport>>,
 }
 
 /// Dernier match `RegExp` — `RegExp.$1…$9`/`input`/`lastMatch`/…
@@ -705,6 +711,7 @@ impl Engine {
             crypto: crate::crypto::CryptoState::default(),
             crypto_transport: None,
             es_transport: None,
+            ws_transport: None,
             ce_upgrade_slot: None,
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,

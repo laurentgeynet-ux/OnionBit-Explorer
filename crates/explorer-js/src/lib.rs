@@ -208,6 +208,38 @@ pub enum NetRequest {
         /// visent son realm.
         ctx: JsCtxId,
     },
+    /// Ouverture d'une connexion `WebSocket` réelle (JS-C94)
+    /// — la session dial via `WsDial`, handshake `101`, puis
+    /// livre `open`/`message`/`error`/`close` multi-coups par
+    /// [`JsEngine::deliver_ws_event`] (même discipline que le
+    /// flux SSE — jamais de callback ré-entrant).
+    WsOpen {
+        /// Identifiant rendu par `WsTransport::open` — espace
+        /// `xhr` partagé (`Abort` univoque).
+        handle: u64,
+        /// URL absolue `ws://`/`wss://` — résolue au ctor.
+        url: String,
+        /// Sous-protocoles demandés (tokens validés).
+        protocols: Vec<String>,
+        /// Contexte émetteur (étape 134).
+        ctx: JsCtxId,
+    },
+    /// `ws.send(data)` — trame vers un flux vivant (JS-C94).
+    WsSend {
+        /// Handle du flux.
+        handle: u64,
+        /// Charge utile (texte ou binaire — `WsOut` moteur).
+        out: explorer_jscore::WsOut,
+    },
+    /// `ws.close(code, reason)` — handshake close RFC 6455.
+    WsClose {
+        /// Handle du flux.
+        handle: u64,
+        /// Code validé (1000 ou 3000-4999).
+        code: u16,
+        /// Raison ≤ 123 octets.
+        reason: String,
+    },
 }
 
 /// Réponse livrée au moteur pour un `handle` drainé —
@@ -1026,6 +1058,24 @@ pub trait JsEngine: Send {
         Ok(())
     }
 
+    /// Livraison d'un événement `WebSocket` (JS-C94) : `ctx` =
+    /// realm émetteur, `handle` = flux, `ev` =
+    /// `Open`/`Text`/`Binary`/`Close`/`Error`. Multi-coups —
+    /// `Close` = fin de flux. Défaut : `Ok(())` (moteur sans
+    /// transport WS).
+    ///
+    /// # Errors
+    /// [`JsError::Uncaught`] si un handler `on*` jette,
+    /// [`JsError::Dead`] si le moteur est inerte.
+    fn deliver_ws_event(
+        &mut self,
+        _ctx: JsCtxId,
+        _handle: u64,
+        _ev: explorer_jscore::WsEventKind,
+    ) -> Result<(), JsError> {
+        Ok(())
+    }
+
     /// Installe `localStorage`/`sessionStorage` : `local` est le
     /// snapshot **par origine** de la session (le moteur y écrit
     /// en direct — relire via [`Self::drain_storage`]),
@@ -1161,6 +1211,9 @@ pub const JS_CTX_TOP: JsCtxId = 0;
 // `NetRequest::Crypto` (ré-export : le type reste unique).
 // JS-C93 — `KeyAlgo`/`ImportFormat` pour les ops à clé.
 pub use explorer_jscore::{CryptoOp, DigestAlgo, ImportFormat, KeyAlgo};
+// JS-C94 — requêtes/événements `WebSocket` transportés par
+// `NetRequest::WsOpen`/`WsSend`/`WsClose` (types uniques).
+pub use explorer_jscore::{WsEventKind, WsOut, WsRequest};
 
 /// Commandes vers le thread moteur — valeurs sérialisables, aucun
 /// handle `Rc` ne traverse.
@@ -1410,6 +1463,12 @@ enum Cmd {
         ctx: JsCtxId,
         handle: u64,
         ev: explorer_jscore::EsEvent,
+        tx: Sender<Result<(), JsError>>,
+    },
+    DeliverWs {
+        ctx: JsCtxId,
+        handle: u64,
+        ev: explorer_jscore::WsEventKind,
         tx: Sender<Result<(), JsError>>,
     },
     InstallStorage {
@@ -2600,6 +2659,28 @@ impl JsEngine for JscoreEngine {
         rx.recv().map_err(|_| JsError::Dead)?
     }
 
+    fn deliver_ws_event(
+        &mut self,
+        ctx: JsCtxId,
+        handle: u64,
+        ev: explorer_jscore::WsEventKind,
+    ) -> Result<(), JsError> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::DeliverWs {
+                ctx,
+                handle,
+                ev,
+                tx,
+            })
+            .is_err()
+        {
+            return Err(JsError::Dead);
+        }
+        rx.recv().map_err(|_| JsError::Dead)?
+    }
+
     fn deliver_crypto_response(&mut self, resp: CryptoResponse) -> Result<(), JsError> {
         let (tx, rx) = channel();
         if self.tx.send(Cmd::DeliverCrypto { resp, tx }).is_err() {
@@ -2831,6 +2912,15 @@ fn serve_side(
             eng.deliver_es(ctx, handle, &ev);
             tx.send(Ok(())).is_ok()
         }
+        Cmd::DeliverWs {
+            ctx,
+            handle,
+            ev,
+            tx,
+        } => {
+            eng.deliver_ws_event(ctx, handle, ev);
+            tx.send(Ok(())).is_ok()
+        }
         Cmd::InstallStorage { local } => {
             let map: explorer_jscore::Storage = std::rc::Rc::new(std::cell::RefCell::new(local));
             eng.install_storage(&map);
@@ -2962,6 +3052,12 @@ fn install_dom(
         q: std::rc::Rc::clone(net_q),
         next: std::rc::Rc::clone(xhr_next),
     }));
+    // `WebSocket` (JS-C94) — ouvertures `NetRequest::WsOpen`,
+    // `send`/`close` `WsSend`/`WsClose` ; handles `xhr_next`.
+    eng.install_ws_transport(std::rc::Rc::new(ChanWs {
+        q: std::rc::Rc::clone(net_q),
+        next: std::rc::Rc::clone(xhr_next),
+    }));
     eng.set_cookie_jar(jar.clone());
     d
 }
@@ -3008,6 +3104,12 @@ fn install_dom_ctx(
         next: std::rc::Rc::clone(crypto_next),
     }));
     eng.install_es_transport(std::rc::Rc::new(ChanEs {
+        q: std::rc::Rc::clone(net_q),
+        next: std::rc::Rc::clone(xhr_next),
+    }));
+    // `WebSocket` (JS-C94) — même dial que le contexte
+    // parent (engine-global) ; les livraisons visent ce ctx.
+    eng.install_ws_transport(std::rc::Rc::new(ChanWs {
         q: std::rc::Rc::clone(net_q),
         next: std::rc::Rc::clone(xhr_next),
     }));
@@ -3210,6 +3312,44 @@ impl explorer_jscore::EsTransport for ChanEs {
 
     fn abort(&self, handle: u64) {
         self.q.borrow_mut().push(NetRequest::Abort { handle });
+    }
+}
+
+/// Dial `WebSocket` vers la session (JS-C94) — même couture
+/// que [`ChanEs`] : `open` = `NetRequest::WsOpen` (le
+/// handshake réel vit côté plateforme, socket dédiée hors
+/// pool), `send`/`close` = `WsSend`/`WsClose`. Les événements
+/// reviennent par `Cmd::DeliverWs` — multi-coups comme SSE.
+struct ChanWs {
+    /// File partagée avec `DrainNet`.
+    q: std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    /// Prochain handle libre — partagé avec `ChanXhr`/`ChanEs`.
+    next: std::rc::Rc<std::cell::Cell<u64>>,
+}
+
+impl explorer_jscore::WsTransport for ChanWs {
+    fn open(&self, req: &explorer_jscore::WsRequest) -> u64 {
+        let handle = self.next.get();
+        self.next.set(handle + 1);
+        self.q.borrow_mut().push(NetRequest::WsOpen {
+            handle,
+            url: req.url.clone(),
+            protocols: req.protocols.clone(),
+            ctx: req.ctx,
+        });
+        handle
+    }
+
+    fn send(&self, handle: u64, out: explorer_jscore::WsOut) {
+        self.q.borrow_mut().push(NetRequest::WsSend { handle, out });
+    }
+
+    fn close(&self, handle: u64, code: u16, reason: &str) {
+        self.q.borrow_mut().push(NetRequest::WsClose {
+            handle,
+            code,
+            reason: reason.to_string(),
+        });
     }
 }
 

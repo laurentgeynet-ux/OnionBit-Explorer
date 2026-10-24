@@ -9,6 +9,37 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+### Added
+
+- **JS-C94 — `WebSocket` réel (RFC 6455)**
+  (`explorer-net`, `explorer-jscore`,
+  `explorer-js`, `explorer-core`) : le
+  stub JS-C73 devient un transport —
+  `new WebSocket` dial via
+  `WsTransport`/`WsDial` injectés
+  (socket dédiée hors pool, handshake
+  `101` validé, sous-protocole négocié),
+  `send`/`close` routés par trames
+  masquées client, événements `open`/
+  `message`/`error`/`close` multi-coups
+  livrés dans le realm émetteur.
+  Codec : masquage aléatoire par trame,
+  fragmentation, ping→pong auto, close
+  handshake (écho + code/raison),
+  RSV/contrôle>125/trame masquée
+  serveur → erreur, message borné.
+  `Error` normalisé `error`+`close
+  {1006,wasClean:false}` (spec « fail
+  the connection »). Bornes : `Blob`
+  approximé `{size}`, pas de proxy
+  CONNECT ni permessage-deflate, pas
+  de ping périodique. Régressions :
+  `websocket_echo_lifecycle`,
+  `websocket_refused_fires_error_close`
+  (2 session) + `ws_lifecycle_echo`
+  (jscore) + 6 unitaires codec (vecteur
+  `Accept` RFC 6455 inclus).
+
 - **JS-C93 — `crypto.subtle` à clé +
   `navigator.credentials` honnête**
   (`explorer-jscore`, `explorer-net`,
