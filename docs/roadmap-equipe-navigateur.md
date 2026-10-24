@@ -6010,6 +6010,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   remplacé) — la pompe microtasks +
   `MessageChannel` couvrent la sémantique.
 
+- [x] **JS-C87. Census terrain
+  react.dev** — Next.js hydraté :
+  page montée, chunks JSONP dynamiques
+  fetchés (CAP-169), gtag.js évalué.
+  **Trou corrigé** : `a.pathname`
+  rendait `undefined` (le parse-via-
+  ancre de toute la télémétrie) →
+  décomposition URL `a`/`area` depuis
+  `href` (`""` sans href). Bonus :
+  attribution des piles inline/dyn.
+  Reste mesuré : 1 repli fingerprint
+  journal (différentiel→re-parse).
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

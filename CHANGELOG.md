@@ -9,6 +9,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C87 — census terrain react.dev :
+  décomposition URL `<a>`/`<area>` +
+  attribution des erreurs inline**
+  (`explorer-jscore`, `explorer-core`) :
+  sonde Next.js réelle — le site monte
+  (SSR + hydratation, fetch des chunks
+  JSONP dynamiques OK) mais gtag.js
+  mourait : le patron « parse via ancre »
+  (`c=createElement('a');c.href=u;
+  c.pathname[0]`) — `pathname` rendait
+  `undefined` au lieu d'une chaîne.
+  Livré : `protocol`/`host`/`hostname`/
+  `port`/`pathname`/`search`/`hash`/
+  `origin` de l'attribut `href` sur
+  `a`/`area` (`""` sans href, spec) +
+  attribution des piles : `at Fj
+  (inline:0:425:1)` identifie le script
+  (`eval_named` scripts dynamiques,
+  `inline:{ord}` scripts async). Mesuré :
+  **0 erreur pipeline**, replis journal
+  3→1. Régression
+  `anchor_url_decomposition`.
+
 - **Étape 130 — ponts JS des
   sous-contextes `<iframe>` + fix
   `postMessage` avant parse**

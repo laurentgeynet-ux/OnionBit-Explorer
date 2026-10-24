@@ -4460,3 +4460,31 @@ fn specialized_event_init_reaches_dispatch() {
         "f"
     );
 }
+
+// -- décomposition URL `<a>`/`<area>` (JS-C87) --------------------------------
+
+/// Le patron « parse via ancre » (`c.href=u; c.pathname`) des
+/// libs de télémétrie : `pathname` doit rendre une **chaîne**
+/// (`""` sans href) — `undefined` tuait gtag (`d[0]`).
+#[test]
+fn anchor_url_decomposition() {
+    assert_eq!(
+        ev(
+            "var a=document.createElement('a');a.href='https://ex.com:8080/p/q?x=1#f';\
+            [a.protocol,a.hostname,a.port,a.pathname,a.search,a.hash,a.origin].join('|')"
+        ),
+        "https:|ex.com|8080|/p/q|?x=1|#f|https://ex.com:8080"
+    );
+    // Sans `href` : chaîne vide — `d[0]` lit un char absent, pas TypeError.
+    assert_eq!(
+        ev("var a=document.createElement('a');var d=a.pathname;typeof d+'|'+d"),
+        "string|"
+    );
+    // `<area>` pareil, `<div>` inerte.
+    assert_eq!(
+        ev("var a=document.createElement('area');a.href='https://x/y';\
+            var d=document.createElement('div');\
+            [a.pathname, typeof d.pathname].join('|')"),
+        "/y|undefined"
+    );
+}
