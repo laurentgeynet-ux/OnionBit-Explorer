@@ -242,6 +242,16 @@ pub(crate) struct Tab {
     scroll_y: f32,
     /// Hauteur du document posé — borne max du scroll.
     doc_h: f32,
+    /// Table de géométrie publiée au moteur JS (issue #19,
+    /// JS-8) — cellule `Arc` stable injectée au `spawn_engine`
+    /// (un moteur par document : la même cellule survit aux
+    /// navigations) et **re-remplie** à chaque état commis
+    /// (`put_paint`, restauration bfcache) par
+    /// [`Tab::rebuild_geometry`]. Le scroll y est propagé
+    /// sans rebuild par [`Tab::set_scroll`]. Ne voyage pas
+    /// dans `PaintPayload` : pendant la fenêtre détachée
+    /// (i#23) la table sert l'état du dernier commit — borné.
+    geom: explorer_js::GeometrySlot,
     /// DOM parsé.
     dom: Option<Dom>,
     /// Arbre de boîtes posé.
@@ -1103,6 +1113,7 @@ impl Session {
                 pending_replace: None,
                 scroll_y: 0.0,
                 doc_h: 0.0,
+                geom: explorer_js::GeometrySlot::default(),
                 dom: None,
                 tree: None,
                 tree_epoch: 0,

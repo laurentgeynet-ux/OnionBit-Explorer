@@ -234,6 +234,11 @@ pub(crate) struct BrowserHooks {
     /// l'onglet), borné — les `MediaQueryList` ne redispatchent
     /// jamais `change` (l'env ne bouge pas à chaud).
     pub media_env: crate::mediaq::MediaEnv,
+    // NB — géométrie publiée (issue #19, JS-8) : **pas** de
+    // champ ici, elle est **document-local** par contrat
+    // (journal interface 2026-10-24) — le slot vit dans
+    // `Dom::geometry`, posé par `Engine::set_geometry_ctx`
+    // (meurt avec le miroir, swap gratuit, bfcache-sain).
     /// `location.replace(url)` — navigation `historyHandling:
     /// "replace"` : l'entrée d'historique courante est
     /// réécrite, pas poussée (CAP-152 — flows auth).
@@ -359,6 +364,32 @@ impl Engine {
             self.set_own(g, "innerHeight", Value::Num(f64::from(h)), false);
             self.set_own(g, "outerWidth", Value::Num(f64::from(w)), false);
             self.set_own(g, "outerHeight", Value::Num(f64::from(h)), false);
+        }
+    }
+
+    /// Branche la table de géométrie publiée par la session
+    /// (issue #19, JS-8) sur le **document du contexte `ctx`**
+    /// — `getBoundingClientRect`/`offset*`/`client*`/`scroll*`
+    /// la lisent en direct : aucun appel synchrone vers la
+    /// session (le JS tourne sur son worker), la map est un
+    /// **état pré-rempli** au commit paint. Document-local
+    /// (`Dom::geometry` — swap ctx gratuit, bfcache-sain) ;
+    /// à poser après `install_dom`/`install_dom_ctx` du
+    /// contexte visé. `ctx` inconnu/sans DOM → no-op.
+    pub fn set_geometry_ctx(
+        &mut self,
+        ctx: crate::context::CtxId,
+        slot: crate::geom::GeometrySlot,
+    ) {
+        let dom = if ctx == self.cur_ctx {
+            self.dom_ctx.as_ref().map(|(d, _)| d.clone())
+        } else {
+            self.parked
+                .get(&ctx)
+                .and_then(|p| p.dom_ctx.as_ref().map(|(d, _)| d.clone()))
+        };
+        if let Some(d) = dom {
+            d.borrow_mut().geometry = Some(slot);
         }
     }
 }
@@ -1428,6 +1459,11 @@ impl Engine {
                     // puis `n.call(this, init)` (mesuré
                     // github-elements).
                     ("attachShadow", element_attach_shadow),
+                    // `getBoundingClientRect` (issue #19) —
+                    // référence lisible pour les mesures via
+                    // `.call(el)` (utils/polyfills de
+                    // géométrie — même motif).
+                    ("getBoundingClientRect", element_gbrect),
                 ] {
                     let m = self.native_fn(k, f2);
                     self.set_own(pid, k, m, true);
@@ -3337,11 +3373,15 @@ impl Host for NodeHost {
             {
                 return Ok(Some(media_prop(e, &self.dom, node, key)));
             }
-            // Dimensions sans moteur de mise en page derrière :
-            // `documentElement`/`body` empruntent le viewport,
-            // tout autre élément vaut 0 — stub honnête (les pages
-            // lisent `documentElement.clientHeight` pour le
-            // « scroll bottom » — mesuré sur google.com).
+            // Dimensions — issue #19 : la table de géométrie
+            // publiée par la session sert les éléments non
+            // racine (`None` → repli 0, comportement
+            // historique). Racine (`documentElement`/`body`) :
+            // `client*`/`offset*` = viewport (les pages lisent
+            // `documentElement.clientHeight` pour le
+            // « scroll bottom » — mesuré sur google.com) ;
+            // `scroll*` = dimensions du document publiées
+            // (repli viewport sans table — harnais).
             "clientWidth" | "clientHeight" | "scrollWidth" | "scrollHeight" | "offsetWidth"
             | "offsetHeight" => {
                 let (vw, vh) = e.hooks.viewport;
@@ -3349,14 +3389,19 @@ impl Host for NodeHost {
                     let d = self.dom.borrow();
                     node == d.body() || Some(node) == d.document_element()
                 };
-                let px = if is_root && key.ends_with("Height") {
-                    vh
-                } else if is_root {
-                    vw
+                let vert = key.ends_with("Height");
+                let px = if is_root {
+                    if key.starts_with("scroll") {
+                        geom_doc_dim(&self.dom, !vert)
+                            .unwrap_or_else(|| f64::from(if vert { vh } else { vw }))
+                    } else {
+                        f64::from(if vert { vh } else { vw })
+                    }
                 } else {
-                    0
+                    element_geom_size(&self.dom, node)
+                        .map_or(0.0, |(w, h)| if vert { h } else { w })
                 };
-                return Ok(Some(Value::Num(f64::from(px))));
+                return Ok(Some(Value::Num(px)));
             }
             // Références de méthode — les shims lisent
             // `o = el.matches || el.msMatchesSelector`
@@ -3383,6 +3428,13 @@ impl Host for NodeHost {
                 return Ok(Some(
                     e.native_fn("scrollIntoView", element_scroll_into_view),
                 ));
+            }
+            // Référence lisible (même motif que `matches`) —
+            // les scripts mesurent aussi via
+            // `Element.prototype.getBoundingClientRect.call(el)`
+            // (issue #19 : invoke seul la rendrait invisible).
+            "getBoundingClientRect" => {
+                return Ok(Some(e.native_fn("getBoundingClientRect", element_gbrect)));
             }
             _ => {}
         }
@@ -3979,17 +4031,11 @@ impl Host for NodeHost {
                 self.insert_adjacent_text(e, node, &pos, &s)?;
                 Ok(Some(Value::Undefined))
             }
-            // Zero-rect placeholder — layout metrics live in dw, not
-            // in the mirror. Real geometry needs a dw bridge (JS-8).
-            "getBoundingClientRect" => {
-                let r = e.new_object();
-                for k in [
-                    "x", "y", "top", "left", "bottom", "right", "width", "height",
-                ] {
-                    e.set_own(r, k, Value::Num(0.0), true);
-                }
-                Ok(Some(Value::Obj(r)))
-            }
+            // Rect viewport depuis la table de géométrie
+            // publiée (issue #19, JS-8 — borné : union des
+            // boîtes du nœud ≈ border-box ; `None` → zero-rect,
+            // comportement historique du stub).
+            "getBoundingClientRect" => Ok(Some(gbrect_value(e, &self.dom, node))),
             // `HTMLMediaElement` (étape 58/71c, ADR-0023/24) —
             // non claimé : stubs honnêtes, jamais de faux
             // succès. Claimé : délégation hôte (`play()` tenu
@@ -4059,6 +4105,78 @@ fn element_receiver(e: &mut Engine, v: Value) -> Option<(NodeId, DomRef, NodeCac
     };
     let n = h.as_any().downcast_ref::<NodeHost>()?;
     Some((n.node, n.dom.clone(), n.cache.clone()))
+}
+
+/// Géométrie publiée de `node` (issue #19, JS-8) — lookup
+/// `element_path` du miroir dans la table session.
+/// `Some((rect, fixed, scroll_x, scroll_y))` — `None` sans
+/// table injectée (harnais), nœud détaché, ou chemin absent
+/// (divergence miroir/session bornée → repli sur les 0
+/// historiques à l'appelant).
+fn element_geom(dom: &DomRef, node: NodeId) -> Option<(crate::geom::GeoRect, bool, f32, f32)> {
+    let d = dom.borrow();
+    let map = d.geometry.as_ref()?.clone();
+    let path = d.element_path(node)?;
+    drop(d);
+    let g = map.lock().ok()?;
+    let eg = g.rects.get(&path).copied()?;
+    Some((eg.rect, eg.fixed, g.scroll_x, g.scroll_y))
+}
+
+/// Rect **viewport** de `node` pour `getBoundingClientRect` —
+/// `(x, y, w, h)` : coords document moins scroll, ou telles
+/// quelles sous `position:fixed` (le layout pose `fixed`
+/// contre le viewport — i#18).
+fn element_geom_rect(dom: &DomRef, node: NodeId) -> Option<(f64, f64, f64, f64)> {
+    let (r, fixed, sx, sy) = element_geom(dom, node)?;
+    let (x, y) = if fixed {
+        (r.x, r.y)
+    } else {
+        (r.x - sx, r.y - sy)
+    };
+    Some((f64::from(x), f64::from(y), f64::from(r.w), f64::from(r.h)))
+}
+
+/// Border-box `(w, h)` de `node` pour `offset*`/`client*`/
+/// `scroll*` — indépendante du scroll (bornée : les trois
+/// familles ≈ même boîte, voir `crate::geom`).
+fn element_geom_size(dom: &DomRef, node: NodeId) -> Option<(f64, f64)> {
+    let (r, ..) = element_geom(dom, node)?;
+    Some((f64::from(r.w), f64::from(r.h)))
+}
+
+/// Dimension du document publiée pour `scroll*` de l'élément
+/// racine — `horizontal` → `doc_w`, sinon `doc_h`. `None` sans
+/// table (repli viewport à l'appelant).
+fn geom_doc_dim(dom: &DomRef, horizontal: bool) -> Option<f64> {
+    let map = dom.borrow().geometry.as_ref()?.clone();
+    let g = map.lock().ok()?;
+    let d = if horizontal { g.doc_w } else { g.doc_h };
+    (d > 0.0).then(|| f64::from(d))
+}
+
+/// L'objet `DOMRect`-like de `getBoundingClientRect` — partagé
+/// par l'`invoke` et la native `Element.prototype` (issue
+/// #19) : `x`/`left`/`top`/`y`, `right`/`bottom` dérivés,
+/// `width`/`height`. Absent de la table → zero-rect
+/// (comportement historique du stub — un nœud détaché ou une
+/// divergence miroir/session dégrade, ne plante pas).
+fn gbrect_value(e: &mut Engine, dom: &DomRef, node: NodeId) -> Value {
+    let (x, y, w, h) = element_geom_rect(dom, node).unwrap_or_default();
+    let r = e.new_object();
+    for (k, v) in [
+        ("x", x),
+        ("y", y),
+        ("top", y),
+        ("left", x),
+        ("bottom", y + h),
+        ("right", x + w),
+        ("width", w),
+        ("height", h),
+    ] {
+        e.set_own(r, k, Value::Num(v), true);
+    }
+    Value::Obj(r)
 }
 
 /// Resolve a `dispatchEvent` argument to event state: an `Event`
@@ -5958,6 +6076,17 @@ fn element_scroll_into_view(e: &mut Engine, this: Value, _args: &[Value]) -> JsR
         return Err(e.type_error("scrollIntoView: receiver is not an Element"));
     }
     Ok(Value::Undefined)
+}
+
+/// `el.getBoundingClientRect()` en native `Element.prototype`
+/// (issue #19) — référence lisible pour les mesures via
+/// `.call(el)` (polyfills, utils de géométrie). Receveur
+/// non-Element → `TypeError` (spec).
+fn element_gbrect(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
+    let Some((node, dom, _)) = element_receiver(e, this) else {
+        return Err(e.type_error("getBoundingClientRect: receiver is not an Element"));
+    };
+    Ok(gbrect_value(e, &dom, node))
 }
 
 /// `el.attachShadow(init)` — stub spec-minimal (issue #25,

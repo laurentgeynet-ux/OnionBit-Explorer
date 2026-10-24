@@ -481,7 +481,7 @@ impl Session {
             if (next - entry.scroll_y).abs() < f32::EPSILON {
                 return Ok(false);
             }
-            entry.scroll_y = next;
+            entry.set_scroll(next);
         }
         self.repaint(tab)?;
         self.emit_invalidated(tab);
@@ -1053,7 +1053,11 @@ impl Session {
                     tracing::info!(site = %url.host(), cleared = n, "clear-site-data: cookies");
                 }
             }
-            entry.scroll_y = 0.0;
+            entry.set_scroll(0.0);
+            // Issue #19 — les chemins du document mort
+            // seraient recyclés par le nouveau : fausses
+            // mesures jusqu'au premier paint → on vide.
+            entry.clear_geometry();
             entry.focused = None;
             entry.focused_key = None;
             entry.hovered = None;

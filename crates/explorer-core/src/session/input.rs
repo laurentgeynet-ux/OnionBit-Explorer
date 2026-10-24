@@ -984,7 +984,7 @@ impl Session {
             if (next - entry.scroll_y).abs() < f32::EPSILON {
                 return Ok(());
             }
-            entry.scroll_y = next;
+            entry.set_scroll(next);
         }
         // Peinture détachée pour un apply hors verrou (étape
         // 55h) : la position est acceptée tout de suite — le

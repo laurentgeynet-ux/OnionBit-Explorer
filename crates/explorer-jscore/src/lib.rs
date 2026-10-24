@@ -50,6 +50,7 @@ mod dom;
 mod dom_host;
 mod error;
 mod files;
+mod geom;
 mod heap;
 mod idb;
 mod interp;
@@ -82,6 +83,7 @@ pub use dom::{
 };
 pub use dom_host::{CookieJar, DomRef, DynFrameReq, DynScriptReq, EventProp, FormSubmit};
 pub use error::{Error, Result};
+pub use geom::{ElementGeom, GeoRect, GeometryMap, GeometrySlot};
 pub use heap::{HeapStats, Host};
 pub use idb::{CacheEntry, CacheRegistry, IdbDb, IdbIndexDef, IdbRegistry, IdbStore};
 pub use interp::Engine;

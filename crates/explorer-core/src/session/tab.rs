@@ -83,8 +83,13 @@ impl Tab {
         snap.images.masks.clear();
         snap.images.masks_url.clear();
         snap.list = None;
-        self.scroll_y = 0.0;
+        self.set_scroll(0.0);
         self.doc_h = 0.0;
+        // Issue #19 : la page gelée emporte son moteur — la
+        // table partagée est vidée pour que le document
+        // suivant mesure 0 (stubs) plutôt que des rects
+        // d'un autre document, jusqu'au prochain commit.
+        self.clear_geometry();
         // `dirty` vient d'être gelée → le live repart à
         // vide, watermark ré-armé.
         self.emitted = 0;
@@ -168,6 +173,10 @@ impl Tab {
         self.hist_pending = false;
         self.pending_push.clear();
         self.pending_replace = None;
+        // Géométrie du document restauré (issue #19) —
+        // même contrat que `put_paint` : la table reflète
+        // l'état commis, pas celui de la page d'avant.
+        self.rebuild_geometry();
     }
 
     /// Base de résolution des URLs relatives (étape 135) —
@@ -175,5 +184,55 @@ impl Tab {
     /// de document chargé.
     pub(crate) fn nav_base(&self) -> Option<&Url> {
         self.base_url.as_ref().or(self.url.as_ref())
+    }
+
+    /// Scroll commis — propage à la table de géométrie
+    /// publiée (issue #19) **sans rebuild** : la conversion
+    /// document→viewport se fait à la lecture. Les mutations
+    /// directes de `scroll_y` hors navigation passent par
+    /// ici (input scroll, restore de position).
+    pub(crate) fn set_scroll(&mut self, y: f32) {
+        self.scroll_y = y;
+        if let Ok(mut g) = self.geom.lock() {
+            g.scroll_y = y;
+        }
+    }
+
+    /// Vide la table de géométrie — commit de navigation :
+    /// les `element_path` du document mort seraient recyclés
+    /// par le nouveau et serviraient de **fausses** mesures
+    /// jusqu'au premier paint (issue #19 — un absent doit
+    /// répondre 0, jamais l'état d'un autre document).
+    pub(crate) fn clear_geometry(&mut self) {
+        if let Ok(mut g) = self.geom.lock() {
+            g.rects.clear();
+            g.doc_w = 0.0;
+            g.doc_h = 0.0;
+        }
+    }
+
+    /// Re-remplit la table de géométrie publiée depuis
+    /// l'état **commis** (`dom`/`tree`/`scroll_y`/`doc_h`) —
+    /// issue #19 : appelée à chaque `put_paint` et à la
+    /// restauration bfcache, les deux points où DOM + arbre
+    /// reposent ensemble. Sans DOM/arbre (page vierge,
+    /// fenêtre détachée) la table est vidée : mesurer un
+    /// instantané absent doit répondre 0, pas un état
+    /// périmé d'un autre document (les rects sont clés par
+    /// `element_path` — des chemins recyclés serviraient de
+    /// fausses mesures).
+    pub(crate) fn rebuild_geometry(&mut self) {
+        let Ok(mut g) = self.geom.lock() else {
+            return;
+        };
+        g.rects.clear();
+        g.scroll_x = 0.0;
+        g.scroll_y = self.scroll_y;
+        g.doc_w = 0.0;
+        g.doc_h = self.doc_h;
+        if let (Some(dom), Some(tree)) = (self.dom.as_ref(), self.tree.as_ref()) {
+            g.doc_w = tree.rect.width;
+            dom_helpers::collect_geometry(dom, tree, false, &mut g);
+        }
     }
 }

@@ -3801,3 +3801,94 @@ fn attach_shadow_stub_polyfill_pattern() {
         "function,function,true,11,true,true,true"
     );
 }
+
+/// Pont de géométrie (issue #19, JS-8) — la session publie
+/// `element_path → union des boîtes` dans une map partagée
+/// posée sur le document par `Engine::set_geometry_ctx` :
+/// `getBoundingClientRect` répond en coords **viewport**
+/// (scroll soustrait — sauf sous `position:fixed` où les
+/// coords sont déjà viewport, i#18) ; `offset*`/`client*`/
+/// `scroll*` non racine = border-box ; `scroll*` racine =
+/// dimensions du document publiées ; chemin absent → 0
+/// (comportement historique, jamais de panic) ; la méthode
+/// est une **référence lisible** (`.call(el)` — motif #25).
+#[test]
+fn geometry_bridge_gbrect_and_dims() {
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    e.set_viewport(800, 600);
+    let geom = explorer_jscore::GeometrySlot::default();
+    {
+        let mut g = geom.lock().unwrap();
+        g.scroll_y = 5.0;
+        g.doc_w = 800.0;
+        g.doc_h = 3000.0;
+        // #main → html>body>div[0]
+        g.rects.insert(
+            vec![
+                ("html".to_string(), 0),
+                ("body".to_string(), 0),
+                ("div".to_string(), 0),
+            ],
+            explorer_jscore::ElementGeom {
+                rect: explorer_jscore::GeoRect {
+                    x: 10.0,
+                    y: 20.0,
+                    w: 100.0,
+                    h: 50.0,
+                },
+                fixed: false,
+            },
+        );
+        // #list → html>body>ul[0] — sous un ancêtre fixed :
+        // coords viewport, le scroll ne se soustrait pas.
+        g.rects.insert(
+            vec![
+                ("html".to_string(), 0),
+                ("body".to_string(), 0),
+                ("ul".to_string(), 0),
+            ],
+            explorer_jscore::ElementGeom {
+                rect: explorer_jscore::GeoRect {
+                    x: 0.0,
+                    y: 8.0,
+                    w: 200.0,
+                    h: 40.0,
+                },
+                fixed: true,
+            },
+        );
+    }
+    e.set_geometry_ctx(0, geom);
+    assert_eq!(
+        evf(
+            &mut e,
+            "var out=[];\
+             var el=document.getElementById('main');\
+             var r=el.getBoundingClientRect();\
+             out.push(r.x,r.y,r.width,r.height,r.bottom,r.right);\
+             out.push(el.offsetWidth,el.offsetHeight,el.clientWidth,el.scrollHeight);\
+             out.push(document.getElementById('list').getBoundingClientRect().y);\
+             out.push(document.getElementById('inp').offsetWidth);\
+             out.push(document.documentElement.scrollHeight,document.documentElement.clientHeight);\
+             out.push(Element.prototype.getBoundingClientRect.call(el).x);\
+             out.join(',')"
+        ),
+        "10,15,100,50,65,110,100,50,100,50,8,0,3000,600,10"
+    );
+}
+
+/// Sans table injectée (harnais, `set_geometry_ctx` jamais
+/// appelé) : les zéros historiques — le pont est additif.
+#[test]
+fn geometry_absent_keeps_zero_stub() {
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    assert_eq!(
+        evf(
+            &mut e,
+            "var el=document.getElementById('main');\
+             var r=el.getBoundingClientRect();\
+             [r.width,el.offsetWidth].join(',')"
+        ),
+        "0,0"
+    );
+}

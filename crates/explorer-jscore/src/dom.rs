@@ -616,6 +616,18 @@ pub struct Dom {
     /// détaché perde le focus (`activeElement` retombe sur
     /// `body`, spec « unfocus »). `Cell` : lecture `&self`.
     pub focused: Cell<Option<NodeId>>,
+    /// Slot de géométrie publié par la session (issue #19,
+    /// JS-8) — la table `element_path → union des boîtes` du
+    /// document **top-level**, lue en direct par les getters
+    /// `getBoundingClientRect`/`offset*`/`client*`/`scroll*`
+    /// de `dom_host`. Document-local par design (journal
+    /// interface 2026-10-24) : posé par
+    /// `Engine::set_geometry_ctx`, il vit et meurt avec le
+    /// miroir — le swap de contexte est gratuit et le
+    /// bfcache gèle le document **avec** sa table (mesures
+    /// valides au retour, jamais celles d'un autre document).
+    /// `None` = harnais sans session → zéros historiques.
+    pub geometry: Option<crate::geom::GeometrySlot>,
     /// Compteurs `serialize_document` (JS-C37/C39) — appels,
     /// octets et micros produits, cumulés depuis la création.
     /// `Cell` : la sérialisation est `&self`.
@@ -712,6 +724,7 @@ impl Dom {
             dyn_frame_seen: HashSet::new(),
             pending_dyn_frames: Vec::new(),
             focused: Cell::new(None),
+            geometry: None,
             serialize_calls: Cell::new(0),
             serialize_bytes: Cell::new(0),
             serialize_micros: Cell::new(0),
@@ -1324,7 +1337,10 @@ impl Dom {
 
     /// `element_path` du nœud `n` (remonté à l'élément le plus
     /// proche) — `None` si le nœud est détaché du document.
-    fn element_path(&self, mut n: NodeId) -> Option<Vec<(String, u32)>> {
+    /// `pub(crate)` : sert aussi de clé de lookup dans la table
+    /// de géométrie publiée par la session (issue #19 —
+    /// `getBoundingClientRect`/`offset*` de `dom_host`).
+    pub(crate) fn element_path(&self, mut n: NodeId) -> Option<Vec<(String, u32)>> {
         while self.nodes[n as usize].kind != NodeKind::Element
             || self.nodes[n as usize].tag == "#document"
         {

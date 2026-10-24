@@ -483,6 +483,11 @@ impl Tab {
         self.bg_decoded = p.bg_decoded;
         self.img_bodies = p.img_bodies;
         self.dom_keymap = p.keymap;
+        // Issue #19 — la table de géométrie publiée au JS se
+        // re-remplit à chaque état commis (nav, apply,
+        // relayout, reclaim) : `getBoundingClientRect` &
+        // co ne mesurent jamais un arbre en mutation.
+        self.rebuild_geometry();
     }
 }
 

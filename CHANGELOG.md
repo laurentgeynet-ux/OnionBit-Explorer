@@ -9,6 +9,36 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Issue #19 — pont géométrie
+  miroir↔layout** (`explorer-jscore`,
+  `explorer-js`, `explorer-core`) :
+  la session marche l'arbre `LayoutBox`
+  commis à chaque `put_paint` (nav,
+  apply, relayout, restore bfcache) et
+  remplit `Tab::geom` — table
+  `element_path → union des boîtes`
+  publiée via `GeometrySlot =
+  Arc<Mutex<GeometryMap>>` posée sur
+  `Dom::geometry` (document-local,
+  bfcache-sain) par
+  `JsEngine::set_geometry_ctx` →
+  `Cmd::SetGeometry`. `getBoundingClientRect`
+  (invoke + référence lisible
+  `Element.prototype` — motif `.call`)
+  répond en coords viewport (doc −
+  scroll ; `fixed` déjà viewport —
+  i#18) ; `offset*`/`client*` non
+  racine = border-box de la table ;
+  `scroll*` racine = dimensions du
+  document publiées. Scroll propagé
+  sans rebuild (`set_scroll`) ; table
+  vidée au commit nav/freeze (jamais
+  de chemins recyclés). Borné :
+  top-document seul, union ≈ spec,
+  absent → 0 (comportement
+  historique). Contrat journalisé
+  (`docs/interface-equipes.md`).
+
 - **Outillage terrain : sonde `/console`,
   `cli diff`, `cli save`, scripts de vol**
   (`explorer-api`, `explorer-cli`,
