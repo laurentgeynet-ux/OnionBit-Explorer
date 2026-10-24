@@ -114,3 +114,27 @@ frame-moteur vs fenêtre-app est un constat en soi (bug UI).
 | vrais clics souris | ✓ | `POST input` (équivalent moteur) |
 | drag scrollbar | ✓ | — (geste UI, testé en `flutter test`) |
 | latence ressentie | ✓ | mesurable via SSE timings |
+
+## 7. Outillage de vol (depuis 2026-10-24)
+
+- **`GET /api/tabs/{id}/console`** — erreurs pipeline par onglet,
+  **persistantes** (ring 512) : les erreurs JS de boot restent
+  consultables après coup — fini l'écoute SSE en direct pendant
+  la nav. Premier réflexe de bissection : `/console` avant de
+  lire le DOM.
+- **`explorer-cli diff a.png b.png`** — diff pixel (%, boîte
+  englobante, grille 4×4) — exit 0 identique / 2 diffère.
+- **`explorer-cli save <url> <dir>`** — fixture terrain :
+  `frame.png` + `dom.txt` + `layout.txt` + `manifest.txt`
+  (url, url finale, version) pour repro offline et bissection.
+- **`explorer-cli mcp [port]`** — serveur MCP stdio qui wrappe
+  cette API : un agent vole en natif (tabs, viewport, navigate,
+  frame, dom, layout, mem, console, input) sans pwsh maison.
+- **`scripts/build_terrain.ps1`** — build release des trois
+  artefacts + copie `terrain-bin/` + `MANIFEST.txt` (commit,
+  date, état arbre) : la preuve de fraîcheur du binaire testé
+  (leçon R-75 — jamais de verdict sur un binaire périmé).
+- **`scripts/compare_render.ps1 <url> [-Ref ref.png]`** — shot
+  moteur + `diff` contre une référence (Chrome/Playwright).
+- **En file** : sonde `/net` (verdicts sous-ressources
+  CSP/SRI/CORS par URL) — entaille session, file NAV.
