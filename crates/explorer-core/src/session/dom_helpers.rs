@@ -15,15 +15,17 @@ use explorer_render::ImageTable;
 use super::{CoreError, SandboxFlags};
 
 /// Hit-test profond : la boîte la plus imbriquée contenant
-/// `(x, y)` document gagne — renvoie son `NodeId` source
+/// `(x, y)` **viewport** gagne — renvoie son `NodeId` source
 /// (`None` pour les boîtes anonymes → on remonte au parent
 /// peint le plus proche via les ancêtres DOM côté appelant).
-pub(crate) fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
+/// `scroll_y` est filé pour que les boîtes `position:fixed`
+/// (coords viewport) restent atteignables après scroll (i#18).
+pub(crate) fn hit_test(bx: &LayoutBox, x: f32, y: f32, scroll_y: f32) -> Option<NodeId> {
     // R-19 : l'élagage sur le border-box tuait les zones dont
     // un enfant déborde le parent (lite.ddg). Le test vit en
-    // amont : `explorer_layout::hit_test` élague sur l'union
-    // du sous-arbre (paint bounds) — même contrat de retour.
-    explorer_layout::hit_test(bx, x, y)
+    // amont : `explorer_layout::hit_test_scrolled` élague sur
+    // l'union du sous-arbre (paint bounds) — même contrat.
+    explorer_layout::hit_test_scrolled(bx, x, y, scroll_y)
 }
 
 /// Chemin `(tag, index parmi les frères éléments de même tag)`

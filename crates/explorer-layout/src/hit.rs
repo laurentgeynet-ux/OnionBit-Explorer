@@ -76,3 +76,42 @@ pub fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
     }
     contains(bx.rect, x, y).then_some(bx.node).flatten()
 }
+
+/// Hit-test conscient du scroll (issue #18) : `y` est en
+/// coordonnées **viewport** — `scroll_y` s'ajoute en
+/// descendant, sauf sous `position:fixed` dont les boîtes
+/// sont posées **contre le viewport** (leurs rects sont
+/// déjà en coords viewport : le delta retombe à 0 pour tout
+/// le sous-arbre — parité avec `build_display_list_scrolled`
+/// qui « ré-initialise l'offset » sous `fixed`).
+///
+/// Sans ce filage, un élément fixed visuellement épinglé
+/// n'encaissait plus rien dès `scroll_y > 0` (sonde `y+scroll`
+/// sur un rect resté à `y≈0`) — nav github morte au hover.
+/// `hit_test` reste la variante coords document (delta nul).
+#[must_use]
+pub fn hit_test_scrolled(bx: &LayoutBox, x: f32, y: f32, scroll_y: f32) -> Option<NodeId> {
+    hit_test_delta(bx, x, y, scroll_y)
+}
+
+fn hit_test_delta(bx: &LayoutBox, x: f32, y_vp: f32, delta: f32) -> Option<NodeId> {
+    let y = y_vp + delta;
+    if !contains(paint_bounds(bx), x, y) {
+        return None;
+    }
+    for child in &bx.children {
+        // `position:fixed` = coords viewport : delta nul pour
+        // tout le sous-arbre. Détection par le **style** (comme
+        // `resolve_absolutes`) — le champ `position` n'est
+        // renseigné que sur les boîtes de bloc.
+        let d = if child.style.get("position") == Some("fixed") {
+            0.0
+        } else {
+            delta
+        };
+        if let Some(n) = explorer_common::deep(|| hit_test_delta(child, x, y_vp, d)) {
+            return Some(n);
+        }
+    }
+    contains(bx.rect, x, y).then_some(bx.node).flatten()
+}

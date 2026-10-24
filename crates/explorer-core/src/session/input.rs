@@ -390,7 +390,7 @@ impl Session {
         let entry = self.tabs.get(&tab)?;
         let tree = entry.tree.as_ref()?;
         let dom = entry.dom.as_ref()?;
-        let node = hit_test(tree, x, y + entry.scroll_y)?;
+        let node = hit_test(tree, x, y, entry.scroll_y)?;
         editable_field(dom, node)
     }
 
@@ -398,7 +398,7 @@ impl Session {
     pub(crate) fn toggle_at(&self, tab: TabId, x: f32, y: f32) -> Option<NodeId> {
         let entry = self.tabs.get(&tab)?;
         let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
-        let node = hit_test(tree, x, y + entry.scroll_y)?;
+        let node = hit_test(tree, x, y, entry.scroll_y)?;
         toggle_control(dom, node)
     }
 
@@ -406,7 +406,7 @@ impl Session {
     pub(crate) fn select_at(&self, tab: TabId, x: f32, y: f32) -> Option<NodeId> {
         let entry = self.tabs.get(&tab)?;
         let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
-        let node = hit_test(tree, x, y + entry.scroll_y)?;
+        let node = hit_test(tree, x, y, entry.scroll_y)?;
         select_control(dom, node)
     }
 
@@ -479,7 +479,7 @@ impl Session {
     pub(crate) fn submit_at(&self, tab: TabId, x: f32, y: f32) -> Option<(NodeId, NodeId)> {
         let entry = self.tabs.get(&tab)?;
         let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
-        let node = hit_test(tree, x, y + entry.scroll_y)?;
+        let node = hit_test(tree, x, y, entry.scroll_y)?;
         let ctrl = submit_control(dom, node)?;
         let form = enclosing_form(dom, ctrl)?;
         Some((form, ctrl))
@@ -930,7 +930,7 @@ impl Session {
     pub(crate) fn node_at(&self, tab: TabId, x: f32, y: f32) -> Option<NodeId> {
         let entry = self.tabs.get(&tab)?;
         let tree = entry.tree.as_ref()?;
-        let hit = hit_test(tree, x, y + entry.scroll_y);
+        let hit = hit_test(tree, x, y, entry.scroll_y);
         // Diagnostic hit-test : quel nœud encaisse le clic —
         // premier réflexe de triage des « clics ignorés » sur
         // pages réelles (M-H1 : consent google).
@@ -965,7 +965,7 @@ impl Session {
         let entry = self.tabs.get(&tab)?;
         let tree = entry.tree.as_ref()?;
         let dom = entry.dom.as_ref()?;
-        let node = hit_test(tree, x, y + entry.scroll_y)?;
+        let node = hit_test(tree, x, y, entry.scroll_y)?;
         let a = ancestor_link(dom, node)?;
         let href = dom.attribute(a, "href").ok().flatten()?;
         // `href` résout contre la base document (`<base

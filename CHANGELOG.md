@@ -2266,6 +2266,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **Issue #18 — hit-test aveugle à
+  `position:fixed` après scroll**
+  (`explorer-layout` + `explorer-core`
+  — nav `fixed` de github : hover 8/8
+  mort ; wikipedia, statique, passait).
+  Les boîtes `fixed` sont posées contre
+  le **viewport** (rects coords
+  viewport) mais la sonde compensait
+  `scroll_y` uniformément → leur zone
+  de hit « restait » au sommet du
+  document. API additive
+  `hit_test_scrolled(bx, x, y_vp,
+  scroll_y)` : le delta retombe à 0
+  sous les sous-arbres `fixed`
+  (détection par le style, parité
+  `display.rs` « ré-initialise
+  l'offset ») ; `hit_test` inchangée.
+  Consommé par les 6 sites de sonde
+  `input.rs` (`node_at`, `link_node_at`,
+  `field_at`, `toggle_at`, `select_at`
+  ×2).
 - **Issue #24 —
   `document.domain`**
   (`explorer-jscore` — le boot

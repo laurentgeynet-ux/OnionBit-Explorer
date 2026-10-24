@@ -1381,6 +1381,53 @@ async fn scroll_is_clamped_and_invalidates() {
     assert!((last_scroll - 0.0).abs() < f32::EPSILON);
 }
 
+/// Issue #18 — un lien dans un conteneur `position:fixed`
+/// reste survolable **après scroll** : la boîte est posée
+/// contre le viewport (coords viewport) alors que le
+/// hit-test sondait uniformément en coords document —
+/// le nav `fixed` de github échouait 8/8 (wikipedia,
+/// statique, passait).
+const PAGE_FIXED_NAV: &str = "<!doctype html><html><head><style>\
+    #nav{position:fixed;top:0;left:0}#t{height:2000px}</style></head>\
+    <body><div id=\"nav\"><a href=\"/dest\">L</a></div>\
+    <div id=\"t\"></div></body></html>";
+
+#[tokio::test]
+async fn fixed_nav_link_hovers_after_scroll() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FIXED_NAV);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    // Témoin pré-scroll : le lien répond à y≈10.
+    let out = s
+        .handle_input(id, InputEvent::MouseMove { x: 5.0, y: 10.0 })
+        .await
+        .unwrap();
+    let InputOutcome::Hover { url, .. } = out else {
+        panic!("inattendu : {out:?}")
+    };
+    assert_eq!(url.as_deref(), Some("http://h.test/dest"));
+
+    // Après scroll, la nav fixed reste visuellement épinglée
+    // à y≈10 — le hover doit répondre le même href.
+    s.handle_input(id, InputEvent::Scroll { dy: 300.0 })
+        .await
+        .unwrap();
+    let out = s
+        .handle_input(id, InputEvent::MouseMove { x: 5.0, y: 10.0 })
+        .await
+        .unwrap();
+    let InputOutcome::Hover { url, .. } = out else {
+        panic!("inattendu : {out:?}")
+    };
+    assert_eq!(
+        url.as_deref(),
+        Some("http://h.test/dest"),
+        "lien fixed mort après scroll"
+    );
+}
+
 #[tokio::test]
 async fn key_input_is_unfocused() {
     let (mut s, _t) = test_session();
