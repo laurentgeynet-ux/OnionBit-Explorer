@@ -9,6 +9,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Outillage terrain : sonde `/console`,
+  `cli diff`, `cli save`, scripts de vol**
+  (`explorer-api`, `explorer-cli`,
+  `scripts/`) — `GET /api/tabs/{id}/console`
+  : ring borné (512) des `PipelineError`
+  par onglet, peuplé par une tâche
+  enregistreuse abonnée au broadcast —
+  les erreurs de boot JS survivent au
+  flux SSE éphémère (mesuré au vol
+  github). `explorer-cli diff a.png b.png`
+  : diff pixel (%, boîte englobante,
+  grille 4×4) — exit 0/2. `explorer-cli
+  save <url> <dir>` : fixture terrain
+  (frame.png + dom.txt + layout.txt +
+  manifest). `scripts/build_terrain.ps1`
+  : build release + copie dédiée +
+  manifeste de provenance (leçon R-75 —
+  verdict = binaire daté). `scripts/
+  compare_render.ps1` : shot moteur +
+  diff vs PNG de référence (Chrome).
+  Reste en file : sonde `/net`
+  (sous-ressources, entaille session)
+  et serveur MCP explorer-flight.
+
 - **ADR-0026 — trajectoire sandbox OS**
   (proposée) : P1 confinement du daemon
   entier (Job Object + token restreint

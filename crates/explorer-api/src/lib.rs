@@ -53,6 +53,56 @@ pub struct ApiState {
     /// `doh:<endpoint>` — étape 72) — observabilité
     /// `GET /api/egress`, jamais de basculement silencieux.
     pub egress: String,
+    /// Journal console par onglet — `PipelineError` enregistrés
+    /// (cap [`CONSOLE_RING`]) : les erreurs JS/fetch survivent
+    /// au flux SSE éphémère (`GET /api/tabs/{id}/console`).
+    pub console: ConsoleRing,
+}
+
+/// Ring borné des erreurs pipeline par onglet — la tâche
+/// `recorder` (`router_with_egress`) le remplit depuis le
+/// broadcast ; la sonde le lit. `std::sync::Mutex` : tenue
+/// brève, jamais d'`.await` sous verrou.
+pub type ConsoleRing = std::sync::Arc<
+    std::sync::Mutex<std::collections::HashMap<TabId, std::collections::VecDeque<String>>>,
+>;
+
+/// Capacité par onglet — assez pour un boot de bundle.
+const CONSOLE_RING: usize = 512;
+
+/// Enregistre les `PipelineError` par onglet dans `ring` —
+/// la sonde `/console` survit à l'éphémère SSE (vol github :
+/// les erreurs de boot mouraient avec la connexion).
+fn spawn_console_recorder(session: &Arc<tokio::sync::Mutex<Session>>, ring: &ConsoleRing) {
+    let mut rx = {
+        // Subscribe sans garder le verrou : subscribe() est
+        // sync, le lock ne sert qu'à atteindre la session.
+        let Ok(s) = session.try_lock() else {
+            return; // session occupée : pas de recorder (dégradé, jamais bloquant)
+        };
+        s.subscribe()
+    };
+    let ring = std::sync::Arc::clone(ring);
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(CoreEvent::PipelineError { tab, message }) => {
+                    if let Some(t) = tab {
+                        let mut g = ring
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        let q = g.entry(t).or_default();
+                        if q.len() >= CONSOLE_RING {
+                            q.pop_front();
+                        }
+                        q.push_back(message);
+                    }
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    });
 }
 
 /// Construit le routeur de l'API. `session` est injectée par
@@ -76,6 +126,8 @@ pub fn router_with_egress(
     key: Option<String>,
     egress: String,
 ) -> Router {
+    let console = ConsoleRing::default();
+    spawn_console_recorder(&session, &console);
     let r = Router::new()
         .route("/api/status", get(status))
         .route("/api/egress", get(egress_info))
@@ -114,7 +166,12 @@ pub fn router_with_egress(
         )
         .route("/api/history", get(history))
         .route("/api/events", get(events))
-        .with_state(ApiState { session, egress });
+        .route("/api/tabs/{id}/console", get(console_log))
+        .with_state(ApiState {
+            session,
+            egress,
+            console,
+        });
     match key {
         Some(k) if !k.is_empty() => r.layer(axum::middleware::from_fn(move |req, next| {
             auth(k.clone(), req, next)
@@ -864,6 +921,25 @@ async fn history(State(st): State<ApiState>) -> impl IntoResponse {
         .map(|e| serde_json::json!({ "url": e.url, "title": e.title }))
         .collect();
     Json(serde_json::json!({ "history": v }))
+}
+
+/// `GET /api/tabs/{id}/console` → `[{ts_ms, message}]` :
+/// erreurs pipeline (scripts en échec, fetch refusés)
+/// enregistrées par onglet — la sonde persistante là où le
+/// flux SSE est éphémère (vol github : les erreurs de boot
+/// mouraient avec la connexion). `404` onglet sans journal.
+async fn console_log(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
+    let g = st
+        .console
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match g.get(&id) {
+        Some(q) if !q.is_empty() => Json(serde_json::json!({
+            "console": q.iter().collect::<Vec<_>>()
+        }))
+        .into_response(),
+        _ => (StatusCode::NOT_FOUND, "pas de journal").into_response(),
+    }
 }
 
 /// `GET /api/events` — flux SSE des événements de session.

@@ -49,6 +49,8 @@ fn main() -> ExitCode {
         [_, cmd, url] if cmd == "jprobe" => jprobe(url),
         [_, cmd, url] if cmd == "dom" => dom_live(url),
         [_, cmd, url] if cmd == "mem" => mem_report(url),
+        [_, cmd, url, dir] if cmd == "save" => save_fixture(url, dir),
+        [_, cmd, a, b] if cmd == "diff" => diff_pngs(a, b),
         _ => {
             eprintln!("usage : explorer-cli dump <fichier|url>");
             eprintln!("        explorer-cli fetch <url>");
@@ -57,6 +59,8 @@ fn main() -> ExitCode {
             eprintln!("        explorer-cli jprobe <url>");
             eprintln!("        explorer-cli dom <url>");
             eprintln!("        explorer-cli mem <url>");
+            eprintln!("        explorer-cli save <url> <dossier>");
+            eprintln!("        explorer-cli diff <a.png> <b.png>");
             ExitCode::FAILURE
         }
     }
@@ -249,6 +253,120 @@ async fn dom_live(url: &str) -> ExitCode {
         eprintln!("pas de DOM (détaché ?)");
         ExitCode::FAILURE
     }
+}
+
+/// `diff <a.png> <b.png>` — diff pixel entre deux rendus :
+/// % de pixels différents, boîte englobante des deltas,
+/// grille 4×4 des zones chaudes. Exit 0 = identiques,
+/// 2 = diffèrent (scriptable), 1 = erreur.
+fn diff_pngs(file_a: &str, file_b: &str) -> ExitCode {
+    let read = |path: &str| -> Option<explorer_render::image::DecodedImage> {
+        let bytes = std::fs::read(path).ok()?;
+        explorer_render::image::decode_image(&bytes, 200_000_000)
+    };
+    let (Some(ia), Some(ib)) = (read(file_a), read(file_b)) else {
+        eprintln!("diff : PNG indécodable ou absent ({file_a} / {file_b})");
+        return ExitCode::FAILURE;
+    };
+    if ia.width != ib.width || ia.height != ib.height {
+        println!(
+            "diff : dimensions differentes {}x{} vs {}x{} — 100%",
+            ia.width, ia.height, ib.width, ib.height
+        );
+        return ExitCode::from(2);
+    }
+    let wpx = ia.width as usize;
+    let hpx = ia.height as usize;
+    let (mut ndiff, mut x0, mut y0, mut x1, mut y1) = (0usize, wpx, hpx, 0usize, 0usize);
+    let mut grid = [0u32; 16];
+    for row in 0..hpx {
+        for col in 0..wpx {
+            let idx = (row * wpx + col) * 4;
+            if (0..3).any(|chan| ia.rgba[idx + chan] != ib.rgba[idx + chan]) {
+                ndiff += 1;
+                x0 = x0.min(col);
+                y0 = y0.min(row);
+                x1 = x1.max(col);
+                y1 = y1.max(row);
+                grid[(row * 4 / hpx).min(3) * 4 + (col * 4 / wpx).min(3)] += 1;
+            }
+        }
+    }
+    let total = wpx * hpx;
+    if ndiff == 0 {
+        println!("diff : identiques ({total} px)");
+        return ExitCode::SUCCESS;
+    }
+    // Pourcentage entier ×100 pour éviter les casts f64 —
+    // suffisant pour un diff pixel (clippy pedantic).
+    println!(
+        "diff : {}.{}% ({ndiff} / {total} px) — boite [{x0},{y0} → {x1},{y1}]",
+        ndiff * 10_000 / total / 100,
+        (ndiff * 10_000 / total) % 100
+    );
+    print!("       grille4x4 :");
+    for cell in grid {
+        print!(" {cell}");
+    }
+    println!();
+    ExitCode::from(2)
+}
+
+/// `save <url> <dossier>` : nav réelle complète puis fixture
+/// terrain — frame.png, dom.txt, layout.txt, manifest.txt
+/// (url+date) pour repro offline et bissection.
+#[tokio::main(flavor = "current_thread")]
+async fn save_fixture(url: &str, dir: &str) -> ExitCode {
+    let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
+    let mut session = session_from_env(fonts);
+    session.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = session.open_tab();
+    if let Err(e) = session.navigate(tab, url).await {
+        eprintln!("erreur : {e}");
+        return ExitCode::FAILURE;
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(XHR_GRACE_MS);
+    while std::time::Instant::now() < deadline {
+        session.pump_net().await;
+        session.pump_timers(tab);
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    if std::fs::create_dir_all(dir).is_err() {
+        eprintln!("save : impossible de créer {dir}");
+        return ExitCode::FAILURE;
+    }
+    let put = |name: &str, bytes: &[u8]| {
+        let p = format!("{dir}/{name}");
+        std::fs::write(&p, bytes).map(|()| p)
+    };
+    let mut wrote = Vec::new();
+    if let Some(png) = session.frame_png(tab) {
+        if let Ok(p) = put("frame.png", &png) {
+            wrote.push(p);
+        }
+    }
+    if let Some(d) = session.dom_dump(tab) {
+        if let Ok(p) = put("dom.txt", d.as_bytes()) {
+            wrote.push(p);
+        }
+    }
+    if let Some(l) = session.layout_dump(tab) {
+        if let Ok(p) = put("layout.txt", l.as_bytes()) {
+            wrote.push(p);
+        }
+    }
+    let url_now = session.tab_url(tab).unwrap_or_default();
+    let manifest = format!(
+        "url     : {url}\nurl_fin : {url_now}\nversion : {}\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    let _ = put("manifest.txt", manifest.as_bytes());
+    if wrote.is_empty() {
+        eprintln!("save : rien à écrire (page vide ?)");
+        return ExitCode::FAILURE;
+    }
+    println!("save : {} artefacts dans {dir}", wrote.len());
+    ExitCode::SUCCESS
 }
 
 /// `mem <url>` : attribution mémoire par réservoir après
