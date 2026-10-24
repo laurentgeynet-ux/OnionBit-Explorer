@@ -946,12 +946,16 @@ fn this_num(e: &mut Engine, this: Value) -> JsResult<f64> {
     }
 }
 
-/// `this` must be an array; returns its `ObjId`.
+/// `this` must be an object array-like — spec : toutes les
+/// méthodes de `Array.prototype` sont **génériques** (elles
+/// opèrent sur `length` + indices — `[].push.call(obj)`, et
+/// jQuery attache `push`/`sort`/`splice` à ses instances non
+/// tableau ; JS-C90). Les primitives (`"x".push`…) restent
+/// rejetées — la coercition `ToObject` n'est pas portée
+/// (déviation documentée).
 fn this_array(e: &mut Engine, this: Value) -> JsResult<ObjId> {
     match this {
-        Value::Obj(id) if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_))) => {
-            Ok(id)
-        }
+        Value::Obj(id) => Ok(id),
         _ => Err(e.type_error("array method called on non-array")),
     }
 }
@@ -991,6 +995,23 @@ fn this_array_like(e: &mut Engine, this: Value) -> JsResult<Vec<Value>> {
 }
 
 fn take_elems(e: &mut Engine, id: ObjId) -> Vec<Value> {
+    if let Some(o) = e.heap.obj(id) {
+        if !matches!(&o.kind, ObjKind::Array(_)) {
+            // Objet array-like (méthodes génériques spec,
+            // JS-C90) : matérialise via `length` + `[[Get]]`
+            // indices — `take_elems` vide alors le backing
+            // array pour rien.
+            let len = match e.get_prop(id, "length") {
+                Some(v) => (e.to_number(v).unwrap_or(0.0).max(0.0) as usize).min(4_000_000),
+                None => 0,
+            };
+            let mut v = Vec::with_capacity(len.min(1 << 20));
+            for i in 0..len {
+                v.push(e.get_prop(id, &i.to_string()).unwrap_or(Value::Undefined));
+            }
+            return v;
+        }
+    }
     match e.heap.obj_mut(id) {
         Some(o) => match &mut o.kind {
             ObjKind::Array(v) => std::mem::take(v),
@@ -1001,6 +1022,26 @@ fn take_elems(e: &mut Engine, id: ObjId) -> Vec<Value> {
 }
 
 fn put_elems(e: &mut Engine, id: ObjId, elems: Vec<Value>) {
+    let is_array = e
+        .heap
+        .obj(id)
+        .is_some_and(|o| matches!(&o.kind, ObjKind::Array(_)));
+    if !is_array {
+        // Array-like : `[[Set]]` indices, `[[Delete]]` de la
+        // queue et `length` final (spec mutants génériques).
+        let old_len = match e.get_prop(id, "length") {
+            Some(v) => (e.to_number(v).unwrap_or(0.0).max(0.0) as usize).min(4_000_000),
+            None => 0,
+        };
+        for (i, v) in elems.iter().enumerate() {
+            let _ = e.set_prop(id, &i.to_string(), *v);
+        }
+        for i in elems.len()..old_len {
+            e.delete_prop(id, &i.to_string());
+        }
+        let _ = e.set_prop(id, "length", Value::Num(elems.len() as f64));
+        return;
+    }
     if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Array(v) = &mut o.kind {
             *v = elems;

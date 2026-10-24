@@ -145,6 +145,7 @@ impl Session {
             let Some((jobs, mutated, mut eng)) = out else {
                 entry.js_pending_net.clear();
                 entry.js_pending_crypto.clear();
+                entry.js_pending_es.clear();
                 entry.js_pending_dyn.clear();
                 entry.js_pending_attrs.clear();
                 return 0;
@@ -152,6 +153,7 @@ impl Session {
             if entry.nav_epoch != epoch {
                 entry.js_pending_net.clear();
                 entry.js_pending_crypto.clear();
+                entry.js_pending_es.clear();
                 entry.js_pending_dyn.clear();
                 entry.js_pending_attrs.clear();
                 return 0;
@@ -161,6 +163,9 @@ impl Session {
             }
             for resp in std::mem::take(&mut entry.js_pending_crypto) {
                 let _ = eng.deliver_crypto_response(resp);
+            }
+            for (ctx, handle, ev) in std::mem::take(&mut entry.js_pending_es) {
+                let _ = eng.deliver_es_event(ctx, handle, ev);
             }
             for (ctx, seq, body) in std::mem::take(&mut entry.js_pending_dyn) {
                 eng.deliver_dyn_script(ctx, seq, body);

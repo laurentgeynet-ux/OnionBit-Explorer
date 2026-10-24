@@ -1725,7 +1725,6 @@ impl Engine {
             "StyleSheet",
             "CSSStyleSheet",
             "Range",
-            "DOMParser",
             "XMLSerializer",
             "AbortSignal",
             "DOMException",
@@ -1740,6 +1739,16 @@ impl Engine {
             }
             self.set_own(g, name, f, false);
         }
+        // `DOMParser` — constructible (JS-C91) : htmx parse
+        // les réponses `hx-swap` via `new DOMParser().
+        // parseFromString(html,"text/html")` — même voie que
+        // `xhr.responseXML` (`Dom::from_html` → document miroir).
+        let f = self.native_fn("DOMParser", dom_parser_ctor);
+        if let Value::Obj(fid) = f {
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "DOMParser", f, false);
         // `Element.prototype` porte `matches`/`closest` en
         // *valeurs* : les shims lisent la référence de méthode
         // (`o = Element.prototype.matches || i.msMatchesSelector`
@@ -5897,6 +5906,30 @@ impl Host for ClassListHost {
         Ok(None)
     }
 
+    /// Méthodes lisibles (JS-C91) — `classList["add"]` doit se
+    /// lire comme fonction : htmx fait
+    /// `e.classList["add"].call(e.classList, "htmx-indicator")`
+    /// — `.call` sur `undefined` tuait tout son pipeline
+    /// `hx-indicator`.
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "item"
+                | "forEach"
+                | "entries"
+                | "keys"
+                | "values"
+                | "supports"
+                | "toString"
+                | "toLocaleString"
+                | "replace"
+                | "add"
+                | "remove"
+                | "toggle"
+                | "contains"
+        )
+    }
+
     /// `Symbol.iterator` — `DOMTokenList` est itérable spec
     /// (JS-C76).
     fn iter_items(&self, e: &mut Engine) -> JsResult<Option<Vec<Value>>> {
@@ -7163,6 +7196,56 @@ fn node_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 /// Constructeur-stub des interfaces DOM sans implémentation
 /// (`HTMLElement`, `IntersectionObserver`…) — « illegal
 /// constructor » comme `Node`, la détection `typeof`/`in` suffit.
+/// Host `DOMParser` (JS-C91) — `parseFromString` via le
+/// parseur HTML du miroir (`Dom::from_html` — tolérant tag
+/// soup). Seule la famille `text/html` est parseée ; les
+/// autres MIME rendent un document vide (déviation — pas de
+/// parseur XML).
+struct DomParserHost;
+
+impl Host for DomParserHost {
+    fn class_name(&self) -> &'static str {
+        "DOMParser"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(name, "parseFromString")
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _t: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        if name == "parseFromString" {
+            let src = e.to_js_string(arg(args, 0))?;
+            let mime = e.to_js_string(arg(args, 1))?;
+            // Spec : `text/html`/`application/xhtml+xml` →
+            // document HTML ; les autres MIME retournent un
+            // document d'erreur `<parsererror>` — ici un
+            // document vide (déviation honnête).
+            let body = if mime.contains("html") {
+                src
+            } else {
+                String::new()
+            };
+            let domref: DomRef = Rc::new(RefCell::new(crate::dom::Dom::from_html(&body)));
+            return Ok(Some(document_value(e, &domref)));
+        }
+        Ok(None)
+    }
+}
+
+fn dom_parser_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(e.new_host_object(Rc::new(DomParserHost)))
+}
+
 fn illegal_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Err(e.type_error("illegal constructor"))
 }

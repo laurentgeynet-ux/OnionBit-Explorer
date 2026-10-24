@@ -185,6 +185,25 @@ pub enum NetRequest {
         /// Octets source copiés hors du heap à l'appel.
         data: Vec<u8>,
     },
+    /// Ouverture d'un flux SSE `EventSource` (JS-C92) —
+    /// requête **streamée** : la session fetch
+    /// `text/event-stream` et livre `open`/`message`/`error`
+    /// par [`JsEngine::deliver_es_event`] — multi-coups,
+    /// contrairement au one-shot `Fetch`/`NetResponse` ;
+    /// `close()` se traduit en `Abort` sur le handle.
+    EventSource {
+        /// Identifiant rendu par `EsTransport::open` —
+        /// partage l'espace des handles `Fetch` (même
+        /// registre `Abort` côté session).
+        handle: u64,
+        /// URL absolue — résolue par le moteur au ctor.
+        url: String,
+        /// `withCredentials` de l'init (`include` ↔ true).
+        with_credentials: bool,
+        /// Contexte émetteur (étape 134) — les livraisons
+        /// visent son realm.
+        ctx: JsCtxId,
+    },
 }
 
 /// Réponse livrée au moteur pour un `handle` drainé —
@@ -987,6 +1006,22 @@ pub trait JsEngine: Send {
         Ok(())
     }
 
+    /// Livre un `EsEvent` (`open`/`message`/`error`) au flux
+    /// SSE `handle` du contexte `ctx` (JS-C92). Défaut :
+    /// `Ok(())` (moteur sans transport SSE).
+    ///
+    /// # Errors
+    /// [`JsError::Uncaught`] si un handler `on*` jette,
+    /// [`JsError::Dead`] si le moteur est inerte.
+    fn deliver_es_event(
+        &mut self,
+        _ctx: JsCtxId,
+        _handle: u64,
+        _ev: explorer_jscore::EsEvent,
+    ) -> Result<(), JsError> {
+        Ok(())
+    }
+
     /// Installe `localStorage`/`sessionStorage` : `local` est le
     /// snapshot **par origine** de la session (le moteur y écrit
     /// en direct — relire via [`Self::drain_storage`]),
@@ -1103,6 +1138,9 @@ pub use explorer_jscore::DynLinkReq;
 /// Réémis : requête de `<script>` dynamique (CAP-169) —
 /// drainée par [`JsEngine::drain_dyn_scripts`].
 pub use explorer_jscore::DynScriptReq;
+/// Réémis : événement `EventSource` livré par la session
+/// (JS-C92) — `open`/`message`/`error`.
+pub use explorer_jscore::EsEvent;
 pub use explorer_jscore::{FetchCredentials, FetchMode};
 
 /// Contexte de navigation du tas moteur (étape 134 — JS-C78
@@ -1361,6 +1399,12 @@ enum Cmd {
     },
     DeliverCrypto {
         resp: CryptoResponse,
+        tx: Sender<Result<(), JsError>>,
+    },
+    DeliverEs {
+        ctx: JsCtxId,
+        handle: u64,
+        ev: explorer_jscore::EsEvent,
         tx: Sender<Result<(), JsError>>,
     },
     InstallStorage {
@@ -2529,6 +2573,28 @@ impl JsEngine for JscoreEngine {
         rx.recv().map_err(|_| JsError::Dead)?
     }
 
+    fn deliver_es_event(
+        &mut self,
+        ctx: JsCtxId,
+        handle: u64,
+        ev: explorer_jscore::EsEvent,
+    ) -> Result<(), JsError> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::DeliverEs {
+                ctx,
+                handle,
+                ev,
+                tx,
+            })
+            .is_err()
+        {
+            return Err(JsError::Dead);
+        }
+        rx.recv().map_err(|_| JsError::Dead)?
+    }
+
     fn deliver_crypto_response(&mut self, resp: CryptoResponse) -> Result<(), JsError> {
         let (tx, rx) = channel();
         if self.tx.send(Cmd::DeliverCrypto { resp, tx }).is_err() {
@@ -2751,6 +2817,15 @@ fn serve_side(
                 .map_err(|t| JsError::Uncaught(eng.describe(t.0)));
             tx.send(out).is_ok()
         }
+        Cmd::DeliverEs {
+            ctx,
+            handle,
+            ev,
+            tx,
+        } => {
+            eng.deliver_es(ctx, handle, &ev);
+            tx.send(Ok(())).is_ok()
+        }
         Cmd::InstallStorage { local } => {
             let map: explorer_jscore::Storage = std::rc::Rc::new(std::cell::RefCell::new(local));
             eng.install_storage(&map);
@@ -2875,6 +2950,13 @@ fn install_dom(
         q: std::rc::Rc::clone(net_q),
         next: std::rc::Rc::clone(crypto_next),
     }));
+    // `EventSource` (JS-C92) — ouvertures en `NetRequest::
+    // EventSource`, `close()` en `Abort` ; les handles
+    // partagent le compteur `xhr_next` (Abort univoque).
+    eng.install_es_transport(std::rc::Rc::new(ChanEs {
+        q: std::rc::Rc::clone(net_q),
+        next: std::rc::Rc::clone(xhr_next),
+    }));
     eng.set_cookie_jar(jar.clone());
     d
 }
@@ -2919,6 +3001,10 @@ fn install_dom_ctx(
     eng.install_crypto(std::rc::Rc::new(ChanCrypto {
         q: std::rc::Rc::clone(net_q),
         next: std::rc::Rc::clone(crypto_next),
+    }));
+    eng.install_es_transport(std::rc::Rc::new(ChanEs {
+        q: std::rc::Rc::clone(net_q),
+        next: std::rc::Rc::clone(xhr_next),
     }));
     eng.set_cookie_jar(jar.clone());
     // `localStorage` pré-rempli de l'origine enfant — le
@@ -3087,6 +3173,37 @@ impl explorer_jscore::CryptoTransport for ChanCrypto {
             data: req.data,
         });
         handle
+    }
+}
+
+/// Fournisseur `EventSource` vers la session (JS-C92) — même
+/// couture que [`ChanXhr`] : ouverture = `NetRequest::
+/// EventSource` (streamée, multi-livraisons), `close()` =
+/// `NetRequest::Abort` — le handle vit dans l'espace `xhr`
+/// pour que l'abort tue la tâche streamée comme un fetch.
+struct ChanEs {
+    /// File partagée avec `DrainNet`.
+    q: std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    /// Prochain handle libre — partagé avec `ChanXhr` (les
+    /// `Abort { handle }` doivent rester non ambigus).
+    next: std::rc::Rc<std::cell::Cell<u64>>,
+}
+
+impl explorer_jscore::EsTransport for ChanEs {
+    fn open(&self, req: explorer_jscore::EsRequest) -> u64 {
+        let handle = self.next.get();
+        self.next.set(handle + 1);
+        self.q.borrow_mut().push(NetRequest::EventSource {
+            handle,
+            url: req.url,
+            with_credentials: req.with_credentials,
+            ctx: req.ctx,
+        });
+        handle
+    }
+
+    fn abort(&self, handle: u64) {
+        self.q.borrow_mut().push(NetRequest::Abort { handle });
     }
 }
 

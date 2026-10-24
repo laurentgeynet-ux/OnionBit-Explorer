@@ -50,6 +50,7 @@ mod crypto;
 mod dom;
 mod dom_host;
 mod error;
+mod eventsource;
 mod files;
 mod geom;
 mod heap;
@@ -86,6 +87,7 @@ pub use dom_host::{
     CookieJar, DomRef, DynFrameReq, DynImgReq, DynLinkReq, DynScriptReq, EventProp, FormSubmit,
 };
 pub use error::{Error, Result};
+pub use eventsource::{EsEvent, EsRequest, EsTransport};
 pub use geom::{ElementGeom, GeoRect, GeometryMap, GeometrySlot};
 pub use heap::{HeapStats, Host};
 pub use idb::{CacheEntry, CacheRegistry, IdbDb, IdbIndexDef, IdbRegistry, IdbStore};

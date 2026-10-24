@@ -14,6 +14,23 @@ use super::*;
 
 pub(crate) fn array_push(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
+    // Array-like non-tableau (générique spec, JS-C90 — jQuery
+    // `$.prototype.push`) : `take_elems` matérialise via
+    // `length`+`Get`, `put_elems` réécrit indices+`length`.
+    if !e
+        .heap
+        .obj(id)
+        .is_some_and(|o| matches!(&o.kind, ObjKind::Array(_)))
+    {
+        if !args.is_empty() && e.heap.obj(id).is_some_and(|o| o.elem_integrity & 3 != 0) {
+            return Err(e.type_error("cannot push onto a sealed array"));
+        }
+        let mut elems = take_elems(e, id);
+        elems.extend_from_slice(args);
+        let n = elems.len();
+        put_elems(e, id, elems);
+        return Ok(Value::Num(n as f64));
+    }
     // Ajout d'éléments : impossible sous `seal`/`freeze` — la spec
     // passe par `Set(throw)` → `TypeError` même en sloppy.
     if !args.is_empty() && e.heap.obj(id).is_some_and(|o| o.elem_integrity & 3 != 0) {
@@ -229,6 +246,17 @@ pub(crate) fn array_reverse(e: &mut Engine, this: Value, _a: &[Value]) -> JsResu
         o.elem_integrity & 2 != 0 && matches!(&o.kind, ObjKind::Array(v) if v.len() > 1)
     }) {
         return Err(e.type_error("cannot reverse a frozen array"));
+    }
+    // Array-like (JS-C90) : via `take`/`put_elems` génériques.
+    if !e
+        .heap
+        .obj(id)
+        .is_some_and(|o| matches!(&o.kind, ObjKind::Array(_)))
+    {
+        let mut elems = take_elems(e, id);
+        elems.reverse();
+        put_elems(e, id, elems);
+        return Ok(this);
     }
     if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Array(v) = &mut o.kind {

@@ -9878,6 +9878,76 @@ const FRAME_PM_EMIT_TIMER: &str = "<!doctype html><html><body>\
     <script>setTimeout(function(){parent.postMessage({tag:'pong',n:2},'http://h.test')},0)\
     </script></body></html>";
 
+// -- `EventSource` (JS-C92) -------------------------------------------------
+
+/// Page hôte `EventSource` — `onopen`/`onmessage`/`onerror`
+/// écrivent dans `#p` (le dernier événement gagne).
+const PAGE_ES: &str = "<!doctype html><html><body><p id=\"p\">?</p><script>\
+    var es=new EventSource('/live');\
+    es.onopen=function(){document.getElementById('p').textContent+='|open:'+es.readyState};\
+    es.onmessage=function(e){document.getElementById('p').textContent+='|msg:'+e.data+'/'+e.lastEventId};\
+    es.addEventListener('ping',function(e){document.getElementById('p').textContent+='|named'});\
+    es.onerror=function(){document.getElementById('p').textContent+='|err:'+es.readyState};\
+    </script></body></html>";
+
+/// `EventSource` réel : open → messages dispatchés au fil des
+/// chunks streamés (multi-ligne `data`, `id`, `event` nommé).
+#[tokio::test]
+async fn eventsource_streams_messages() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_ES);
+    t.route_headers(
+        "/live",
+        200,
+        "ignored-by-chunks",
+        &[("content-type", "text/event-stream")],
+    );
+    t.route_chunks(
+        "/live",
+        200,
+        vec![
+            b"id: 7\ndata: hel".to_vec(),
+            b"lo\n\ndata: two\n".to_vec(),
+            b"event: ping\ndata: {}\n\n".to_vec(),
+        ],
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    let dump = s.dom_dump(id).unwrap_or_default();
+    // Corps incomplètement envoyé : `data: two` n'a pas sa
+    // ligne vide → non dispatché ; puis `ping` nommé, puis
+    // fin de flux → `error` + CLOSED (borne : pas de
+    // reconnexion à cette tranche).
+    assert!(
+        dump.contains("open:1")
+            && dump.contains("msg:hello/7")
+            && dump.contains("named")
+            && dump.contains("err:2"),
+        "eventsource : {dump}"
+    );
+}
+
+/// Sans route SSE (404 ou mauvais content-type) : `error`
+/// livré + `readyState` CLOSED — dégradation, jamais de
+/// panic.
+#[tokio::test]
+async fn eventsource_error_on_non_sse() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_ES);
+    t.route("/live", 200, "<html>not an event stream</html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(dump.contains("err:2"), "eventsource err : {dump}");
+    assert!(!dump.contains("open:1"), "pas d'open : {dump}");
+}
+
 #[tokio::test]
 async fn iframe_postmessage_child_to_parent() {
     let (mut s, t) = test_session();

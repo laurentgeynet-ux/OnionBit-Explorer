@@ -25,7 +25,7 @@
 //! the old-school scripts we target.
 
 use crate::heap::{Host, JsResult, ObjKind};
-use crate::value::Value;
+use crate::value::{ObjId, Value};
 use crate::Engine;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -152,17 +152,31 @@ pub(crate) struct XhrData {
     with_credentials: bool,
     /// `addEventListener` handlers: `(type, fn, capture)`.
     listeners: Vec<(String, Value, bool)>,
+    /// `xhr.upload` paresseux — objet `XMLHttpRequestUpload`
+    /// stable (spec : même instance à chaque lecture).
+    upload: Option<ObjId>,
 }
 
 impl XhrData {
     /// `Value` retenues par les listeners — racines GC : un XHR
     /// vivant garde ses callbacks `readystatechange`/`load`/…
-    /// en vie.
+    /// et son `upload` en vie.
     pub(crate) fn listener_values(&self, out: &mut Vec<Value>) {
         for (_, cb, _) in &self.listeners {
             out.push(*cb);
         }
+        if let Some(u) = self.upload {
+            out.push(Value::Obj(u));
+        }
     }
+}
+
+/// `addEventListener`/`removeEventListener`/`dispatchEvent`
+/// avalés sur `xhr.upload` — le transport ne rapporte pas de
+/// progression d'upload : les listeners restent enregistrés,
+/// jamais tirés (stub honnête, comme `close` des flux).
+fn evt_noop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Undefined)
 }
 
 /// The `XMLHttpRequest` host object.
@@ -356,6 +370,37 @@ impl Host for XhrHost {
                     crate::dom_host::document_value(e, &domref)
                 }
             }
+            // `xhr.upload` (JS-C91) — htmx enchaîne
+            // `xhr.upload.addEventListener('progress',…)` :
+            // objet stable, handlers `on*` null, méthodes
+            // EventTarget avalées (pas de progression upload
+            // rapportée par le transport).
+            "upload" => {
+                let cached = d.upload;
+                drop(d);
+                if let Some(u) = cached {
+                    Value::Obj(u)
+                } else {
+                    let o = e.new_object();
+                    for m in ["addEventListener", "removeEventListener", "dispatchEvent"] {
+                        let f = e.native_fn(m, evt_noop);
+                        e.set_own(o, m, f, false);
+                    }
+                    for p in [
+                        "onloadstart",
+                        "onprogress",
+                        "onabort",
+                        "onerror",
+                        "onload",
+                        "ontimeout",
+                        "onloadend",
+                    ] {
+                        e.set_own(o, p, Value::Null, true);
+                    }
+                    self.data.borrow_mut().upload = Some(o);
+                    Value::Obj(o)
+                }
+            }
             "withCredentials" => Value::Bool(d.with_credentials),
             "UNSENT" | "OPENED" | "HEADERS_RECEIVED" | "LOADING" | "DONE" => {
                 // Constants per spec (also exposed on the constructor
@@ -422,6 +467,11 @@ impl Host for XhrHost {
                 self.data.borrow_mut().request_headers.push((k, v));
                 Ok(Some(Value::Undefined))
             }
+            // `overrideMimeType` (JS-C91, htmx l'appelle avant
+            // chaque `send`) : spec = réinterprète le CT de
+            // réponse — le moteur n'a pas de décodage MIME à
+            // surcharger → stub spec : accepté, sans effet.
+            "overrideMimeType" => Ok(Some(Value::Undefined)),
             "send" => {
                 let mut ct: Option<String> = None;
                 let body = match arg(args, 0) {
@@ -645,6 +695,10 @@ impl Engine {
         // `WebSocket` (JS-C73) — stub honnête : handshake
         // refusé en async, arme les fallbacks long-polling.
         crate::websocket::install_websocket(self);
+        // `EventSource` (JS-C92) — flux SSE réel si un
+        // transport est injecté, refus différé sinon
+        // (même motif asynchrone que le refus `WebSocket`).
+        crate::eventsource::install_eventsource(self);
         // `Notification`/`BroadcastChannel`/`reportError`
         // (JS-C74) — APIs fenêtre non-DOM ; `getSelection`
         // ajouté par `install_dom` (nœuds requis).

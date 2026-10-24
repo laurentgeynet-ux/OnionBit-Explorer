@@ -25,5 +25,6 @@ pub mod lang;
 pub mod policy;
 pub mod proxy;
 pub mod resolver;
+pub mod sse;
 pub mod tls;
 pub mod url;

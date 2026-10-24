@@ -4581,3 +4581,79 @@ fn document_head_always_exists() {
     ).expect("order");
     assert_eq!(e.describe(v), "HEAD/BODY");
 }
+
+// -- méthodes `Array.prototype` génériques (JS-C90) ---------------------------
+
+/// Spec : les méthodes `Array.prototype` n'exigent pas un vrai
+/// tableau — `length` + `[[Get]]`/`[[Set]]`/`[[Delete]]` indices.
+/// jQuery attache `push`/`sort`/`splice` à ses instances : ses
+/// helpers mouraient « array method called on non-array ».
+#[test]
+fn array_methods_generic_on_array_like() {
+    // push/pop/sort/splice/slice/concat sur `{length,indices}`.
+    assert_eq!(
+        ev("var o={length:2,'0':'b','1':'a'};\
+            [].push.call(o,'c');o.length+'/'+o['2']"),
+        "3/c"
+    );
+    assert_eq!(
+        ev("var o={length:3,'0':'x','1':'a','2':'m'};\
+            [].sort.call(o);[o['0'],o['1'],o['2']].join('')"),
+        "amx"
+    );
+    assert_eq!(
+        ev("var o={length:4,'0':1,'1':2,'2':3,'3':4};\
+            var d=[].splice.call(o,1,2,'z');o.length+'/'+o['1']+'/'+d.join(',')"),
+        "3/z/2,3"
+    );
+    assert_eq!(
+        ev("var o={length:3,'0':'a','1':'b','2':'c'};\
+            [].slice.call(o,1).join(',')"),
+        "b,c"
+    );
+    // La queue est [[Delete]]'ée : pop raccourcit et efface le dernier slot.
+    assert_eq!(
+        ev("var o={length:3,'0':'a','1':'b','2':'c'};\
+            [].pop.call(o);o.length+'|'+('2' in o)"),
+        "2|false"
+    );
+}
+
+// -- `DOMParser` (JS-C91) -----------------------------------------------------
+
+/// `new DOMParser().parseFromString(html,'text/html')` — htmx
+/// parse ses réponses `hx-swap` ainsi ; le ctor était classé
+/// `illegal_ctor`.
+#[test]
+fn dom_parser_constructs_and_parses() {
+    assert_eq!(
+        ev(
+            "var d=new DOMParser().parseFromString('<p id=x>hi</p>','text/html');\
+            d.body.childNodes.length+'/'+d.getElementById('x').textContent"
+        ),
+        "1/hi"
+    );
+    // MIME non-HTML : document vide (déviation — pas de parseur XML).
+    assert_eq!(
+        ev("new DOMParser().parseFromString('<a/>','text/xml').body.childNodes.length"),
+        "0"
+    );
+}
+
+// -- `classList` méthodes lisibles (JS-C91) -----------------------------------
+
+/// `classList.add` doit se lire comme fonction — htmx fait
+/// `e.classList["add"].call(e.classList,…)` : `.call` sur
+/// `undefined` tuait `hx-indicator`.
+#[test]
+fn classlist_methods_readable() {
+    assert_eq!(
+        ev("var el=document.createElement('div');\
+            typeof el.classList['add']+'/'+\
+            (el.classList['add'].call(el.classList,'x'),el.className)"),
+        "function/x"
+    );
+}
+
+// (le test `xhr.upload` vit dans `tests/xhr.rs` — son
+// harnais installe le transport stub)

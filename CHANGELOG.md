@@ -9,6 +9,54 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C90 — méthodes `Array.prototype` génériques**
+  (`explorer-jscore`) : `[].push.call(o)` sur un objet
+  `length`+indices — `take_elems`/`put_elems` matérialisent
+  et réécrivent via `[[Get]]`/`[[Set]]`/`[[Delete]]`+`length`
+  (spec générique) ; `this_array` accepte tout objet
+  (primitives rejetées — `ToObject` non porté). jQuery
+  fonctionne de bout en bout : `$(fn)`, `append`, `on('click')`,
+  `.text()`, `addClass`/`hide`/`is(':hidden')`.
+- **JS-C91 — chaîne htmx débloquée** (`explorer-jscore`) :
+  `overrideMimeType` (stub spec), `classList` méthodes
+  lisibles (`e.classList["add"].call(...)`), `xhr.upload`
+  (EventTarget stable, `addEventListener` avalé), `DOMParser`
+  constructible (`new DOMParser().parseFromString` →
+  `Dom::from_html`). Mesuré : `htmx.ajax` part (`beforeReq`),
+  XHR complet. Reste : `RangeError` heap au swap htmx
+  (bisection `hx-swap` en cours) + Alpine `x-data` non
+  évalué (sonde ouverte).
+
+- **JS-C92 — `EventSource` réel
+  (SSE)** (`explorer-jscore`,
+  `explorer-net`, `explorer-js`,
+  `explorer-core`) : flux
+  `text/event-stream` fonctionnels —
+  `new EventSource(url)` émet
+  `NetRequest::EventSource` via la
+  couture `EsTransport` (engine-global,
+  même forme `XhrTransport`), la
+  session fetch streamé (`Accept`
+  spec, `connect-src`, quota, `close()`
+  → `Abort`) et livre `open`/`message`/
+  `error` multi-coups par
+  `JsEngine::deliver_es_event` dans le
+  realm émetteur (tour post-script
+  complet, buffer si moteur détaché).
+  Parseur incrémental `explorer_net::
+  sse::SseParser` — spec §9.2.6 (CR/
+  LF/CRLF, frontières de chunks, BOM
+  tête, `data` jointe, `id` persistant,
+  événement sans `data` ignoré).
+  Bornes : pas de reconnexion auto ni
+  `retry:` (`error`+CLOSED — le script
+  ré-ouvre), `MessageEvent` sans
+  `source`/`ports` ; sans transport →
+  refus différé au checkpoint (comme
+  le stub `WebSocket`, les fallbacks
+  s'arment). Régressions : 2 tests
+  session + 6 unitaires parseur.
+
 - **JS-C89 — `document.head` auto-généré**
   (`explorer-jscore`) : audit React 19 —
   `mountHoistable` (hoisting `<title>`/
