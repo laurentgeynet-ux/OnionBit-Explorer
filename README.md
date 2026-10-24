@@ -36,8 +36,8 @@ codecs) — the full, declared list is in `Cargo.toml` and ADR-0001:
 | **CSS** | `explorer-css` | Tokenizer, selectors, cascade — `@layer`, custom properties, pseudo-elements, media queries |
 | **Layout** | `explorer-layout` | Block/inline, **Flexbox, Grid**, floats, positioned elements, fragmentation, incremental relayout |
 | **Rendering** | `explorer-render` | Display list → RGBA framebuffer → PNG — our own display model and paint, over `tiny-skia` (raster), `rustybuzz`/`ttf-parser` (text), `resvg` (SVG), `image` (codecs) |
-| **JavaScript** | `explorer-jscore` | An interpreter written here — ES5+ core, classes, generators, promises/microtasks, modules, typed arrays, streams, IndexedDB, Cache API, `customElements`, observers… tracked against **test262** |
-| **Session** | `explorer-core` | Tabs, navigation, event loop, timers, bfcache, sub-resource scheduler |
+| **JavaScript** | `explorer-jscore` | An interpreter written here — ES5+ core, classes, generators, promises/microtasks, modules, typed arrays, streams, IndexedDB, Cache API, `customElements`, observers, `crypto.subtle` (digests via `ring`), `matchMedia` (bounded)… tracked against **test262** |
+| **Session** | `explorer-core` | Tabs, navigation, event loop, timers, bfcache, sub-resource scheduler, **iframes with per-frame JS realms** (incl. `srcdoc`, `sandbox`, dynamic insertion), History API, `window.open`/named targets, meta/`Refresh:` |
 | **Interface** | `explorer-api` / `-daemon` / `-ffi` / `-cli` | Local **REST + SSE** control API, in-process FFI mode, dev CLI |
 | **Client** | `app/` | **Flutter** desktop app — talks to the engine over the API, never touches core directly |
 
@@ -52,7 +52,13 @@ codecs) — the full, declared list is in `Cargo.toml` and ADR-0001:
 - **Security plumbing as a feature** — `Sec-Fetch-*` metadata,
   real **CORS enforcement** (preflight `OPTIONS` + `ACAO`/`ACAC`),
   **CHIPS** `Partitioned` cookies, `SameSite`/`__Host-`/`__Secure-`,
-  HSTS, mixed-content blocking, per-page JS budgets
+  HSTS, mixed-content blocking, **Content-Security-Policy**
+  enforcement (multi-policy intersection, meta CSP per spec —
+  reporting endpoints not implemented), **SRI** `integrity=`,
+  `Referrer-Policy`/`Referer`, `Origin` on non-safe methods,
+  `nosniff`/CORP/`X-Frame-Options`, `Clear-Site-Data`,
+  low-entropy Client Hints, `<iframe sandbox>`,
+  per-page JS budgets
   (`EXPLORER_JS_MEM_MIB` / `EXPLORER_JS_OPS`) — content is hostile by default.
 - **Honesty as a method** — compatibility is *measured*, never claimed,
   and every score carries its denominator: public suites
