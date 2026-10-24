@@ -2478,6 +2478,27 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `media_query_scripting` (enabled/none/nue/initial-only
   sur les deux mondes), `noscript_masque_sous_scripting`
   (UA ne masque pas sans scripting, masque sous).
+- [x] **R-94. `background` multi-couches (première couche)**
+  (vol terrain — reliquat « flèches HN »). Le shorthand était
+  strictement mono-couche : `url(image), linear-gradient(décor)`
+  — motif très courant (image + dégradé décoratif, HN
+  `.votearrow` : `url("triangle.svg"), linear-gradient(…)`)
+  — collait la virgule au token `url(` puis le second
+  `<bg-image>` faisait **tomber la déclaration entière** →
+  boîte 10×10 vide, flèches de vote invisibles (logo
+  `<img>` voisin OK → symptôme isolé à la boîte vide, frame
+  vs layout). Fix : `split_top_commas` (paren-aware — les
+  virgules *dans* les fonctions protégées) éclate les
+  couches, `parse_bg_layer` valide chacune par la grammaire
+  d'avant — **une couche invalide invalide la déclaration
+  entière (spec)** — et la **première** couche (la plus
+  haute, spec) fournit les longhands. Borne honnête :
+  première couche gagne — le stacking multi-couches au paint
+  (toutes couches compositées) et la couleur de la dernière
+  couche restent l'arc. Régressions :
+  `background_multicouche_premiere_gagne` (url+gradient →
+  image conservée), `background_multicouche_invalide_drope`
+  (couche 2 invalide → déclaration droppée).
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

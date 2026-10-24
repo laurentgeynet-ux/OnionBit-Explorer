@@ -637,6 +637,18 @@ fn expand_overflow(value: &str) -> Option<Vec<(String, String)>> {
 /// `background: none` laisserait une couleur déclarée avant
 /// survivre).
 ///
+/// CSS3 autorise des **couches séparées par des virgules**
+/// (`url(image), linear-gradient(décor)`) — chaque couche est
+/// une grammaire complète et une couche invalide invalide la
+/// déclaration entière (spec). Borné R-94 : la **première**
+/// couche (la plus haute, peinte au-dessus) fournit les
+/// longhands — le stacking multi-couches au paint reste un
+/// arc. Avant ce split la virgule collait au token `url(` et
+/// le second `<bg-image>` faisait tomber la déclaration
+/// entière — mesuré : `.votearrow` de news.ycombinator.com
+/// (`background: url("triangle.svg"), linear-gradient(…)`)
+/// perdait sa flèche de vote.
+///
 /// La tokenisation est **paren-consciente** : `linear-gradient(
 /// to right, red, blue)` reste un seul atome malgré ses
 /// espaces — un `split_whitespace` naïf l'éclatait et la
@@ -645,8 +657,20 @@ fn expand_overflow(value: &str) -> Option<Vec<(String, String)>> {
 /// collé (`50%/cover`) est accepté comme le font les
 /// navigateurs.
 fn expand_background(value: &str) -> Option<Vec<(String, String)>> {
+    let mut first = None;
+    for layer in split_top_commas(value) {
+        let longhands = parse_bg_layer(layer)?;
+        first.get_or_insert(longhands);
+    }
+    first
+}
+
+/// Parse **une** couche du shorthand `background` — même
+/// grammaire qu'avant le split multi-couches (R-94) : une
+/// valeur par composante, doublon ou token inconnu → `None`.
+fn parse_bg_layer(layer: &str) -> Option<Vec<(String, String)>> {
     let mut acc = BgParts::default();
-    for raw in bg_tokens(value) {
+    for raw in bg_tokens(layer) {
         let segs = split_top_slash(raw);
         // `pos / w h` au plus : `a/b/c/d` est malformé.
         if segs.len() > 3 {
@@ -816,6 +840,32 @@ fn bg_tokens(value: &str) -> Vec<&str> {
     toks
 }
 
+/// Éclate la valeur `background` sur les virgules hors
+/// parenthèses — les **couches** CSS3 (`url(a), gradient(…)`).
+/// Les virgules *dans* une fonction sont protégées par la
+/// profondeur (`linear-gradient(red, blue)` reste un segment).
+/// Un segment vide (`url(a),` ou `,url(a)`) produit une couche
+/// que [`parse_bg_layer`] rejettera — déclaration invalide,
+/// conforme à la spec.
+fn split_top_commas(value: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0u32;
+    let mut start = 0usize;
+    for (i, ch) in value.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(value[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(value[start..].trim());
+    out
+}
+
 /// Éclate un atome du shorthand sur les `/` hors parenthèses —
 /// `50%/cover` → `["50%", "cover"]`, `/` seul → `["", ""]`.
 fn split_top_slash(tok: &str) -> Vec<&str> {
@@ -841,10 +891,9 @@ fn split_top_slash(tok: &str) -> Vec<&str> {
 /// fonction image CSS3 — dégradés (`linear-gradient` et ses
 /// variantes `radial-`/`conic-`/`repeating-`/préfixées vendeur,
 /// toutes repérées par leur suffixe `gradient(`),
-/// `image()`/`image-set()`. La couche multi-fonds
-/// (`url(a),url(b)`) n'est pas supportée en shorthand : le
-/// second `url(` percute la règle « une seule image » →
-/// déclaration droppée comme avant.
+/// `image()`/`image-set()`). Dans une même couche, une seule
+/// image — `url(a) url(b)` invalide ; le multi-fonds par
+/// virgules est éclaté en amont (`split_top_commas`, R-94).
 fn bg_image_token(part: &str) -> bool {
     part == "none"
         || part.starts_with("url(")

@@ -2821,6 +2821,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-94 — `background` multi-couches
+  droppé entièrement** (`explorer-css`
+  — vol terrain : les flèches de vote
+  de news.ycombinator.com invisibles).
+  Le shorthand était mono-couche :
+  `url(a), linear-gradient(…)` collait
+  la virgule au token `url(`, puis le
+  second `<bg-image>` faisait tomber
+  **toute la déclaration** → boîte
+  10×10 sans fond (`.votearrow` HN,
+  motif très courant image+dégradé).
+  `split_top_commas` éclate les couches
+  hors parenthèses, chaque couche est
+  validée (une invalide = déclaration
+  invalide, spec), la **première**
+  fournit les longhands — borne
+  honnête (stacking complet = arc).
+  Régressions :
+  `background_multicouche_premiere_
+  gagne` / `_invalide_drope`.
 - **Issue #18 — hit-test aveugle à
   `position:fixed` après scroll**
   (`explorer-layout` + `explorer-core`
