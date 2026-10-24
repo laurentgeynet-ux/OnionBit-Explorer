@@ -3359,6 +3359,20 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-166. `history.scrollRestoration`** —
+  *(numéro officiel attribué à l'intégration)* : enum
+  reflété `"auto"`/`"manual"` document-local —
+  `BrowserHooks.scroll_restore_manual` swappé au
+  `switch_to` (miroir `BrowsingContext`). Les routeurs
+  SPA posent `'manual'` avant de restaurer le scroll
+  eux-mêmes ; absent, l'écriture tombait sur un expando
+  ou un throw selon le mode strict. Valeur hors enum →
+  `TypeError` (WebIDL), état inchangé. Borne
+  documentée : la persistance de scroll par entrée
+  n'existant pas, l'effet `auto` reste le comportement
+  actuel dans tous les cas — le drapeau est honnête
+  (stocké/relu, pas un faux repli). 1 test dom.
+
 - [x] **CAP-165. `requestIdleCallback`/`cancelIdleCallback`**
   — *(numéro officiel attribué à l'intégration)* : React
   scheduler et les libs riches en dépendent

@@ -858,6 +858,10 @@ impl Engine {
         swap(&mut self.hooks.push_state, &mut ctx.push_state);
         swap(&mut self.hooks.history_state, &mut ctx.history_state);
         swap(&mut self.hooks.win_name, &mut ctx.win_name);
+        swap(
+            &mut self.hooks.scroll_restore_manual,
+            &mut ctx.scroll_restore_manual,
+        );
         swap(&mut self.hooks.viewport, &mut ctx.viewport);
     }
 

@@ -1315,6 +1315,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-166 — `history.scrollRestoration`**
+  (`explorer-jscore` — cap « web réel sécurisé » ;
+  numéro officiel attribué à l'intégration) : enum
+  reflété `"auto"`/`"manual"` document-local
+  (`BrowserHooks.scroll_restore_manual`, swappé au
+  `switch_to`) — les routeurs SPA le posent `'manual'`
+  avant de restaurer le scroll. Valeur hors enum →
+  `TypeError` (WebIDL). Borne : pas encore de
+  persistance de scroll par entrée — le drapeau est
+  stocké/relu honnêtement. 1 test dom.
 - **CAP-165 — `requestIdleCallback`/`cancelIdleCallback`**
   (`explorer-jscore` — cap « web réel sécurisé » ;
   numéro officiel attribué à l'intégration) : React

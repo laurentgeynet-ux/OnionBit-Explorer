@@ -134,6 +134,15 @@ pub(crate) struct BrowserHooks {
     /// `window.open(u,"x")` document-local, swappé au
     /// `switch_to`).
     pub win_name: String,
+    /// `history.scrollRestoration` (CAP-166) — `true` =
+    /// `"manual"` (le document gère sa restauration de
+    /// scroll — les routeurs SPA le posent avant de
+    /// restaurer eux-mêmes). Document-local, swappé au
+    /// `switch_to`. La persistance de scroll par entrée
+    /// n'existant pas encore, le drapeau est honnêtement
+    /// stocké/relu — l'effet `auto` est le comportement
+    /// actuel dans tous les cas (borne documentée).
+    pub scroll_restore_manual: bool,
     /// Environnement `matchMedia` (CAP-161) — snapshot de la
     /// session posé par `set_media_env` au `spawn_engine` :
     /// viewport, `prefers-color-scheme`, `hover`/`pointer`.
@@ -5161,6 +5170,17 @@ impl Host for HistoryHost {
             // référence puis l'appellent ; invoke-only les rend
             // invisibles. Le `this` est sans effet — tout passe
             // par les hooks.
+            // `scrollRestoration` (CAP-166) — `"auto"`/`"manual"`
+            // reflété document-local (les routeurs SPA posent
+            // `'manual'` avant de restaurer le scroll eux-mêmes).
+            "scrollRestoration" => {
+                let s = if e.hooks.scroll_restore_manual {
+                    "manual"
+                } else {
+                    "auto"
+                };
+                Ok(Some(e.str_val(s)))
+            }
             "back" => Ok(Some(e.native_fn("back", history_back))),
             "forward" => Ok(Some(e.native_fn("forward", history_forward))),
             "go" => Ok(Some(e.native_fn("go", history_go))),
@@ -5168,6 +5188,22 @@ impl Host for HistoryHost {
             "replaceState" => Ok(Some(e.native_fn("replaceState", history_replace_state))),
             _ => Ok(None),
         }
+    }
+
+    fn set(&self, e: &mut Engine, _t: Value, key: &str, v: Value) -> JsResult<bool> {
+        if key == "scrollRestoration" {
+            // Enum WebIDL : toute autre valeur → TypeError.
+            let s = e.to_js_string(v)?;
+            match s.as_str() {
+                "auto" => e.hooks.scroll_restore_manual = false,
+                "manual" => e.hooks.scroll_restore_manual = true,
+                _ => {
+                    return Err(e.type_error("scrollRestoration: invalid enum value"));
+                }
+            }
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     fn invoke(

@@ -3613,3 +3613,20 @@ fn equal_node_and_normalize() {
         "3|abcd|x"
     );
 }
+
+/// `history.scrollRestoration` (CAP-166) — enum reflété
+/// `"auto"`/`"manual"` document-local ; les routeurs SPA le
+/// posent `'manual'` avant de restaurer le scroll eux-mêmes.
+/// Valeur invalide → `TypeError` (enum `WebIDL`).
+#[test]
+fn history_scroll_restoration() {
+    let mut e = engine_with("");
+    assert_eq!(evf(&mut e, "history.scrollRestoration"), "auto");
+    evf(&mut e, "history.scrollRestoration = 'manual';");
+    assert_eq!(evf(&mut e, "history.scrollRestoration"), "manual");
+    evf(&mut e, "history.scrollRestoration = 'auto';");
+    assert_eq!(evf(&mut e, "history.scrollRestoration"), "auto");
+    // Valeur hors enum → TypeError, état inchangé.
+    assert!(e.eval("history.scrollRestoration = 'bogus'").is_err());
+    assert_eq!(evf(&mut e, "history.scrollRestoration"), "auto");
+}
