@@ -241,6 +241,10 @@ impl Session {
         let prev = self.tabs.get(&tab).and_then(|e| e.title.clone());
         if let Some(e) = self.tabs.get_mut(&tab) {
             e.hist.truncate(e.hist_idx + 1);
+            // L'entrée fragment hérite l'état de l'entrée
+            // courante (spec — le `popstate` de la traversée
+            // rend l'état courant, CAP-158).
+            let state = e.hist.get(e.hist_idx).and_then(|h| h.state.clone());
             e.hist.push(HistEntry {
                 req: req.clone(),
                 failed: false,
@@ -249,6 +253,7 @@ impl Session {
                 // affiché — la traversée y revient par swap
                 // d'URL, sans rejeu.
                 same_doc: true,
+                state,
             });
             e.hist_idx = e.hist.len() - 1;
             // L'entrée fragment résout la position — la page
@@ -290,9 +295,10 @@ impl Session {
     /// requête en vol (`pending_replace`). `entry.url`
     /// (affichage, `Referer`, origine des fetchs suivants)
     /// et `last_req` (reload → URL courante) suivent ; le
-    /// miroir est resynchronisé (`sync_ctx_url`) et
-    /// `Navigated` émis — l'URL de l'onglet a changé.
-    fn apply_push_state(&mut self, tab: TabId, raw: &str, replace: bool) {
+    /// miroir est resynchronisé (`sync_ctx_state`, CAP-158)
+    /// et `Navigated` émis — l'URL de l'onglet a changé.
+    /// `state` = JSON de `args[0]` (`history.state`).
+    fn apply_push_state(&mut self, tab: TabId, raw: &str, replace: bool, state: Option<&str>) {
         let (url, title, hist_len) = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return;
@@ -313,13 +319,16 @@ impl Session {
             }
             if entry.hist_pending {
                 if replace {
-                    entry.pending_replace = Some(url.clone());
+                    entry.pending_replace = Some((url.clone(), state.map(str::to_string)));
                 } else {
-                    entry.pending_push.push(url.clone());
+                    entry
+                        .pending_push
+                        .push((url.clone(), state.map(str::to_string)));
                 }
             } else if replace {
                 if let Some(h) = entry.hist.get_mut(entry.hist_idx) {
                     h.req.url = url.clone();
+                    h.state = state.map(str::to_string);
                 }
             } else {
                 let mut req = Request::get(url.clone());
@@ -329,6 +338,7 @@ impl Session {
                     req,
                     failed: false,
                     same_doc: true,
+                    state: state.map(str::to_string),
                 });
                 entry.hist_idx = entry.hist.len() - 1;
             }
@@ -345,12 +355,19 @@ impl Session {
                 .unwrap_or(u32::MAX),
             )
         };
-        // Miroir d'abord (le `location.href` relu par le
-        // script suivant est canonisé), puis `Navigated` —
-        // titre inchangé (`prev == title` → pas de
-        // `TitleChanged` re-émis).
+        // Miroir d'abord (le `location.href`/`history.state`
+        // relus par le script suivant sont canonisés), puis
+        // `Navigated` — titre inchangé (`prev == title` → pas
+        // de `TitleChanged` re-émis). `popstate: false` —
+        // spec, jamais dispatché au `pushState`/`replaceState`.
         if let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()) {
-            eng.sync_ctx_url(explorer_js::JS_CTX_TOP, &url.to_string(), hist_len);
+            eng.sync_ctx_state(
+                explorer_js::JS_CTX_TOP,
+                &url.to_string(),
+                hist_len,
+                state,
+                false,
+            );
         }
         self.emit_navigated(tab, &url, title.clone(), title.as_deref());
     }
@@ -497,8 +514,8 @@ impl Session {
         // le document commis de la tête de run, qui est le
         // document affiché (une position dans le run affiche
         // le run). → swap d'URL : zéro réseau, zéro bfcache,
-        // le miroir est resynchronisé. `popstate` n'est pas
-        // dispatché à cette tranche.
+        // le miroir est resynchronisé et `popstate` est
+        // dispatché avec l'état de l'entrée (CAP-158).
         let same_doc_target = !entry.hist_pending && {
             let root = |mut i: usize| {
                 while i > 0 && entry.hist[i].same_doc {
@@ -512,14 +529,34 @@ impl Session {
             let url = req.url.clone();
             let title = entry.title.clone();
             let hist_len = u32::try_from(entry.hist.len()).unwrap_or(u32::MAX);
+            let state = entry.hist[idx].state.clone();
             entry.hist_idx = idx;
             entry.url = Some(url.clone());
             // `last_req` suit l'entrée : `reload` rejoue
             // l'URL courante (le `pushState` d'origine).
             entry.last_req = Some(req);
             if let Some(eng) = entry.js.as_mut() {
-                eng.sync_ctx_url(explorer_js::JS_CTX_TOP, &url.to_string(), hist_len);
+                eng.sync_ctx_state(
+                    explorer_js::JS_CTX_TOP,
+                    &url.to_string(),
+                    hist_len,
+                    state.as_deref(),
+                    true,
+                );
             }
+            // Mutations des listeners `popstate` → re-parse +
+            // relayout (même chemin que le drain post-script) ;
+            // cookies/storage/écritures drainés ensuite.
+            let sync = self.tabs.get_mut(&tab).and_then(|e| {
+                let eng = e.js.as_mut()?;
+                eng.sync_dom_keyed()
+                    .map(|k| (k.html, Some(k.ids), Some(k.tags)))
+                    .or_else(|| eng.sync_dom_path().map(|(m, _)| (m, None, None)))
+            });
+            if let Some((html, ids, tags)) = sync {
+                self.apply_dom_sync(tab, &html, None, false, ids, tags);
+            }
+            self.after_script(tab);
             let frag = url.fragment().map(str::to_string);
             self.emit_navigated(tab, &url, title.clone(), title.as_deref());
             if let Some(f) = frag.filter(|f| !f.is_empty()) {
@@ -1204,12 +1241,17 @@ impl Session {
                     let delta = isize::try_from(d).unwrap_or(isize::MAX);
                     return Some(ScriptNav::Go(delta));
                 }
-                NavRequest::PushState { url, replace } => {
+                NavRequest::PushState {
+                    url,
+                    replace,
+                    state,
+                } => {
                     // Navigation same-document (CAP-151) —
                     // appliquée immédiatement (aucun fetch,
                     // pas de `ScriptNav` à émettre) puis on
-                    // poursuit la file.
-                    self.apply_push_state(tab, &url, replace);
+                    // poursuit la file. `state` = JSON de
+                    // `args[0]` (CAP-158 — `history.state`).
+                    self.apply_push_state(tab, &url, replace, state.as_deref());
                 }
                 NavRequest::Replace(href) => {
                     // `location.replace` (CAP-152) — même

@@ -10882,3 +10882,129 @@ async fn srcset_beats_src_and_falls_back() {
     assert_eq!(s.frame_png(ta), s.frame_png(tref));
     assert_eq!(s.frame_png(tb), s.frame_png(tref));
 }
+
+/// CAP-158 — `history.state` : l'objet `args[0]` de
+/// `pushState` est sérialisé JSON côté moteur, stocké dans
+/// l'entrée d'historique et désérialisé au getter —
+/// `history.state.k` reflète la valeur poussée. Sans
+/// état → `null`.
+#[tokio::test]
+async fn history_state_roundtrip() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<html><body><div id=\"x\"></div><script>\
+         history.pushState({k:'v',n:2},'','/a');\
+         var st=history.state;\
+         document.getElementById('x').textContent='st:'+st.k+':'+st.n;\
+         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    let dump = s.dom_dump(id).unwrap();
+    assert!(dump.contains("st:v:2"), "state lu : {dump}");
+}
+
+/// CAP-158 — `history.state` vaut `null` sur une entrée de
+/// navigation réelle (aucun `pushState`).
+#[tokio::test]
+async fn history_state_null_on_nav_entry() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<html><body><div id=\"x\"></div><script>\
+         document.getElementById('x').textContent='st:'+String(history.state);\
+         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    let dump = s.dom_dump(id).unwrap();
+    assert!(dump.contains("st:null"), "state null : {dump}");
+}
+
+/// CAP-158 — traversée same-document : `popstate` est
+/// dispatché avec l'état **de l'entrée cible** — back
+/// rend `null` (entrée de navigation), forward rend
+/// `{n:1}` (l'entrée pushState).
+#[tokio::test]
+async fn popstate_fires_with_target_state() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<html><body><div id=\"x\"></div><script>\
+         history.pushState({n:1},'','/one');\
+         window.addEventListener('popstate',function(ev){\
+           var s=ev.state?ev.state.n:'null';\
+           document.getElementById('x').textContent='pop:'+s;\
+         });\
+         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+
+    s.go_back(id).await.unwrap();
+    let dump = s.dom_dump(id).unwrap();
+    assert!(dump.contains("pop:null"), "back → état null : {dump}");
+
+    s.go_forward(id).await.unwrap();
+    let dump = s.dom_dump(id).unwrap();
+    assert!(dump.contains("pop:1"), "forward → état n=1 : {dump}");
+}
+
+/// CAP-158 — `pushState(state)` **sans URL** : nouvelle
+/// entrée à même adresse (spec) — `history.length` croît,
+/// `location.pathname` inchangé, l'état est attaché.
+#[tokio::test]
+async fn push_state_without_url_pushes_entry() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<html><body><div id=\"x\"></div><script>\
+         var l0=history.length;\
+         history.pushState({a:1},'');\
+         document.getElementById('x').textContent=\
+           'len:'+(history.length-l0)+':st:'+history.state.a+':u:'+location.pathname;\
+         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    let dump = s.dom_dump(id).unwrap();
+    assert!(dump.contains("len:1:st:1:u:/"), "entrée sans URL : {dump}");
+}
+
+/// CAP-158 — `replaceState` réécrit l'état de l'entrée
+/// courante sans pousser (`history.length` inchangé,
+/// `history.state` mis à jour) — et `null` efface.
+#[tokio::test]
+async fn replace_state_rewrites_current_state() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<html><body><div id=\"x\"></div><script>\
+         history.pushState({a:1},'','/a');\
+         var l0=history.length;\
+         history.replaceState({b:2},'','/a');\
+         document.getElementById('x').textContent=\
+           'len:'+(history.length-l0)+':st:'+history.state.b;\
+         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    let dump = s.dom_dump(id).unwrap();
+    assert!(dump.contains("len:0:st:2"), "replaceState : {dump}");
+}

@@ -144,8 +144,15 @@ pub(crate) struct HistEntry {
     /// la tête). La traversée *à l'intérieur* d'un run est
     /// un swap d'URL (zéro réseau, zéro bfcache) ; entrer
     /// dans un run dont le document n'est plus affiché
-    /// retombe sur le chemin classique (bfcache → rejeu).
+    /// reste un rejeu conservateur (nav réelle).
+    /// reste un rejeu conservateur (nav réelle) — retombe
+    /// sur le chemin classique (bfcache → rejeu).
     pub(crate) same_doc: bool,
+    /// `history.state` de l'entrée (CAP-158) — JSON
+    /// sérialisé de `pushState(state)` ; `None` = état
+    /// absent → `history.state` = `null`. Restitué au
+    /// miroir à la traversée same-document (`popstate`).
+    pub(crate) state: Option<String>,
 }
 
 /// État d'un onglet : pipeline complet gardé — le re-render
@@ -213,13 +220,15 @@ pub(crate) struct Tab {
     /// (CAP-151 — l'entrée de la page affichée n'existe pas
     /// encore : l'URL poussée se met en file et
     /// `sub_commit_tail` pousse ces entrées au-dessus de la
-    /// sienne, dans l'ordre d'émission).
-    pending_push: Vec<Url>,
+    /// sienne, dans l'ordre d'émission). Le second membre
+    /// transporte l'état JSON (CAP-158).
+    pending_push: Vec<(Url, Option<String>)>,
     /// `replaceState` reçu pendant `hist_pending` (CAP-151) —
     /// réécrit l'URL de la requête que `sub_commit_tail`
     /// poussera (l'entrée de la page affichée n'existe pas
-    /// encore — remplacer = corriger la requête en vol).
-    pending_replace: Option<Url>,
+    /// encore — remplacer = corriger la requête en vol) ;
+    /// l'état JSON accompagne (CAP-158).
+    pending_replace: Option<(Url, Option<String>)>,
     /// Décalage de scroll (px CSS).
     scroll_y: f32,
     /// Hauteur du document posé — borne max du scroll.

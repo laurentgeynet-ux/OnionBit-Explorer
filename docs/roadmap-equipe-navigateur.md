@@ -3359,6 +3359,35 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-158. `history.state`/`popstate`** —
+  *(numéro officiel attribué à l'intégration)* :
+  `pushState(state)`/`replaceState(state)` attachent
+  l'état à l'entrée d'historique — `args[0]` est
+  sérialisé `JSON.stringify` côté moteur (borne
+  documentée : structured clone hors portée —
+  fonctions, cycles, `Map`/`Set` dégradent en
+  `None` → `history.state` = `null`), transporté
+  par `NavRequest::PushState.state` jusqu'à
+  `HistEntry.state`. `pushState(state)` **sans**
+  URL crée une entrée à même adresse (spec).
+  `history.state` getter désérialise par
+  `json::parse` (`null` absent/indésérialisable) ;
+  la traversée same-document restitue l'état de
+  l'entrée cible **et** dispatche `popstate` —
+  `{type:"popstate", state}` via
+  `fire_event_listeners` (cible window, listeners
+  `onpopstate` + `addEventListener` ; les
+  mutations des handlers sont resynchronisées
+  DOM→rendu). Entrée fragment hérite l'état
+  courant (spec). Plomberie : alias
+  `PushStateHook`, `BrowserHooks`/`BrowsingContext`
+  `.history_state` swappé au `switch_to`,
+  `JsEngine::sync_ctx_state` additif (défaut →
+  `sync_ctx_url`) → `Cmd::SyncCtxState` →
+  `Engine::sync_ctx_state` (popstate `false` au
+  push/replace — spec). 5 tests session
+  (`history_state_*`, `popstate_*`,
+  `push_state_without_url`, `replace_state_*`).
 - [x] **CAP-157. `<img srcset>`/`sizes`** — *(numéro
   officiel attribué à l'intégration)* : sélection de
   la candidate par `pick_srcset` au collect — `x` →

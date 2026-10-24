@@ -88,11 +88,16 @@ pub enum NavRequest {
     /// le miroir via [`JsEngine::sync_ctx_url`]. Jamais
     /// routée vers `navigate_request` (aucun fetch).
     PushState {
-        /// Argument `url` brut (peut être relatif ou vide).
+        /// Argument `url` brut (peut être relatif ou vide
+        /// — vide = nouvelle entrée à même adresse).
         url: String,
         /// `true` = `replaceState` (remplace l'entrée),
         /// `false` = `pushState` (nouvelle entrée).
         replace: bool,
+        /// `args[0]` sérialisé JSON (CAP-158) —
+        /// `history.state` de l'entrée ; `None` = absent/
+        /// non sérialisable (borne structured clone).
+        state: Option<String>,
     },
     /// `location.replace(url)` (CAP-152) — navigation
     /// `historyHandling: "replace"` : fetch réel puis
@@ -594,6 +599,23 @@ pub trait JsEngine: Send {
     /// (moteur sans sessions par contexte — harnais).
     fn sync_ctx_url(&mut self, _ctx: JsCtxId, _url: &str, _history_len: u32) {}
 
+    /// `sync_ctx_url` + `history.state` (CAP-158) : la
+    /// session remonte l'état JSON de l'entrée courante ;
+    /// `popstate` = `true` à la traversée same-document
+    /// (l'événement `popstate` est dispatché avec `state`
+    /// désérialisé — jamais au `pushState`, spec). Défaut :
+    /// délègue à `sync_ctx_url` (état/popstate ignorés).
+    fn sync_ctx_state(
+        &mut self,
+        ctx: JsCtxId,
+        url: &str,
+        history_len: u32,
+        _state: Option<&str>,
+        _popstate: bool,
+    ) {
+        self.sync_ctx_url(ctx, url, history_len);
+    }
+
     /// `document.referrer` (CAP-156) : le `Referer` envoyé
     /// par la navigation du document (`""` = aucun) — posé
     /// après `install_dom`, avant la première évaluation.
@@ -1050,6 +1072,13 @@ enum Cmd {
         url: String,
         history_len: u32,
     },
+    SyncCtxState {
+        ctx: JsCtxId,
+        url: String,
+        history_len: u32,
+        state: Option<String>,
+        popstate: bool,
+    },
     /// `document.referrer` du document top-level (CAP-156).
     SetPageReferrer {
         referrer: String,
@@ -1352,6 +1381,15 @@ impl JscoreEngine {
                     history_len,
                 } => {
                     eng.sync_ctx_url(ctx, &url, history_len);
+                }
+                Cmd::SyncCtxState {
+                    ctx,
+                    url,
+                    history_len,
+                    state,
+                    popstate,
+                } => {
+                    eng.sync_ctx_state(ctx, &url, history_len, state.as_deref(), popstate);
                 }
                 Cmd::SetPageReferrer { referrer } => {
                     eng.set_page_referrer(&referrer);
@@ -1797,6 +1835,23 @@ impl JsEngine for JscoreEngine {
             ctx,
             url: url.to_string(),
             history_len,
+        });
+    }
+
+    fn sync_ctx_state(
+        &mut self,
+        ctx: JsCtxId,
+        url: &str,
+        history_len: u32,
+        state: Option<&str>,
+        popstate: bool,
+    ) {
+        let _ = self.tx.send(Cmd::SyncCtxState {
+            ctx,
+            url: url.to_string(),
+            history_len,
+            state: state.map(str::to_string),
+            popstate,
         });
     }
 
@@ -2257,10 +2312,15 @@ fn install_dom(
         // via `sync_ctx_url`. Top-level seul (comme les
         // autres hooks nav — cadre = inerte à cette tranche).
         let q4 = nav_q.clone();
-        eng.set_push_state_hook(std::rc::Rc::new(move |u: String, replace: bool| {
-            q4.borrow_mut()
-                .push(NavRequest::PushState { url: u, replace });
-        }));
+        eng.set_push_state_hook(std::rc::Rc::new(
+            move |u: String, replace: bool, state: Option<String>| {
+                q4.borrow_mut().push(NavRequest::PushState {
+                    url: u,
+                    replace,
+                    state,
+                });
+            },
+        ));
         // `location.replace`/`reload` (CAP-152) — replace
         // réécrit l'entrée courante (back saute la page
         // remplacée), reload rejoue sa requête sans entrée

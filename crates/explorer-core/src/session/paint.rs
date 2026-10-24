@@ -167,6 +167,7 @@ impl Session {
                     req: req.clone(),
                     failed: true,
                     same_doc: false,
+                    state: None,
                 });
                 e.hist_idx = e.hist.len() - 1;
                 // L'entrée `failed` résout la position (84) —

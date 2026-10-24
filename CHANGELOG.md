@@ -1315,6 +1315,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-158 — `history.state`/`popstate`**
+  (`explorer-jscore` + `explorer-js` +
+  `explorer-core` — cap « web réel sécurisé » ;
+  numéro officiel attribué à l'intégration) :
+  `pushState`/`replaceState` attachent `args[0]`
+  sérialisé JSON à `HistEntry.state` (borne :
+  structured clone hors portée — non sérialisable
+  → `history.state` = `null`) ; `pushState(state)`
+  sans URL crée une entrée à même adresse ;
+  `history.state` getter désérialise ; la
+  traversée same-document restitue l'état cible
+  **et** dispatche `popstate` (cible window via
+  `fire_event_listeners`, mutations resync DOM).
+  Plomberie additive : `NavRequest::PushState.
+  state`, `JsEngine::sync_ctx_state` →
+  `Cmd::SyncCtxState`, `PushStateHook`,
+  `BrowserHooks`/`BrowsingContext.history_state`
+  (swappé par contexte). Entrée fragment hérite
+  l'état courant. Tests : 5 session.
+
 - **CAP-157 — `<img srcset>`/`sizes`**
   (`explorer-core` — cap « web réel sécurisé » ;
   numéro officiel attribué à l'intégration) : la

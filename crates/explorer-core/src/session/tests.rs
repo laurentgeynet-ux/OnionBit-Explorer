@@ -114,11 +114,13 @@ fn paintless_snapshot_repairs_on_restore() {
                 req: Request::get(url_a),
                 failed: false,
                 same_doc: false,
+                state: None,
             },
             HistEntry {
                 req: Request::get(url_b.clone()),
                 failed: false,
                 same_doc: false,
+                state: None,
             },
         ];
         e.hist_idx = 0;
@@ -208,6 +210,7 @@ async fn back_during_inflight_nav_restores_previous() {
             req: Request::get(url_a.clone()),
             failed: false,
             same_doc: false,
+            state: None,
         }];
         e.hist_idx = 0;
         e.hist_pending = true;
@@ -296,6 +299,7 @@ fn hist_target_during_inflight_nav() {
             req: Request::get(url_a.clone()),
             failed: false,
             same_doc: false,
+            state: None,
         }];
         e.hist_idx = 0;
         e.hist_pending = true;

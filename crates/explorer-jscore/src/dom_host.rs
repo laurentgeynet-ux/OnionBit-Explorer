@@ -44,6 +44,10 @@ pub type HistHook = Rc<dyn Fn(i32)>;
 /// `prompt(msg, default)` → user text (`None` = cancel → `null`).
 pub type PromptHook = Rc<dyn Fn(String, String) -> Option<String>>;
 
+/// `history.pushState`/`replaceState` hook (CAP-151/158) :
+/// `(url_brute, replace, state_json)`.
+pub type PushStateHook = Rc<dyn Fn(String, bool, Option<String>)>;
+
 /// Soumission de formulaire émise par `form.submit()` /
 /// `requestSubmit()` (étape 54) — l'embedder résout `action`
 /// contre l'URL de page, choisit le transport (`method`,
@@ -100,11 +104,20 @@ pub(crate) struct BrowserHooks {
     /// silencieux (le moteur ne navigue jamais seul).
     pub form_submit: Option<Rc<dyn Fn(FormSubmit)>>,
     /// `history.pushState`/`replaceState` — `(url_brute,
-    /// replace)` ; l'embedder résout contre la base du
-    /// document et commit URL + historique de session
-    /// (CAP-151). Absent → `page_url` remplacée à la brute
-    /// (harnais sans session — comportement historique).
-    pub push_state: Option<Rc<dyn Fn(String, bool)>>,
+    /// replace, state_json)` ; l'embedder résout contre la
+    /// base du document et commit URL + historique de
+    /// session (CAP-151 ; CAP-158 : `state` est l'objet
+    /// `args[0]` sérialisé JSON — `None` = `undefined`/
+    /// non sérialisable). Absent → `page_url` remplacée
+    /// à la brute (harnais sans session).
+    pub push_state: Option<PushStateHook>,
+    /// `history.state` (CAP-158) — JSON sérialisé de l'état
+    /// de l'entrée courante : posé localement au
+    /// `pushState` et restauré par l'embedder à la
+    /// traversée (`sync_ctx_state`). `None` → `null`.
+    /// Document-local comme `page_url` (swappé au
+    /// `switch_to`).
+    pub history_state: Option<String>,
     /// `location.replace(url)` — navigation `historyHandling:
     /// "replace"` : l'entrée d'historique courante est
     /// réécrite, pas poussée (CAP-152 — flows auth).
@@ -172,9 +185,10 @@ impl Engine {
     }
 
     /// Install the `history.pushState`/`replaceState` hook —
-    /// `(url, replace)` ; l'embedder résout et commit (URL +
-    /// historique, CAP-151). Absent → URL locale brute.
-    pub fn set_push_state_hook(&mut self, f: Rc<dyn Fn(String, bool)>) {
+    /// `(url, replace, state_json)` ; l'embedder résout et
+    /// commit (URL + historique + état, CAP-151/158).
+    /// Absent → URL locale brute, état non persisté.
+    pub fn set_push_state_hook(&mut self, f: PushStateHook) {
         self.hooks.push_state = Some(f);
     }
 
@@ -4868,6 +4882,19 @@ impl Host for HistoryHost {
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
         match key {
             "length" => Ok(Some(Value::Num(f64::from(e.hooks.history_len)))),
+            // `history.state` (CAP-158) — état JSON de
+            // l'entrée courante désérialisé (`null` absent
+            // ou indésérialisable — borne structured clone).
+            "state" => {
+                let v = match e.hooks.history_state.clone() {
+                    Some(s) => {
+                        let sv = e.str_val(&s);
+                        crate::json::parse(e, sv).unwrap_or(Value::Null)
+                    }
+                    None => Value::Null,
+                };
+                Ok(Some(v))
+            }
             // Méthodes en *valeur* : les wraps de navigation
             // (`e.call(history,…)` — turbo github.com) lisent la
             // référence puis l'appellent ; invoke-only les rend
@@ -4920,43 +4947,78 @@ fn history_push_replace(e: &mut Engine, args: &[Value], replace: bool) -> JsResu
     // relative). Sans embedder : comportement harnais —
     // `page_url` remplacée à la brute.
     let u = arg(args, 2);
-    if !matches!(u, Value::Undefined | Value::Null) {
-        let url = e.to_js_string(u)?;
-        if !url.is_empty() {
-            // Résolution locale contre `page_url` (document
-            // URL — même grammaire que XHR) : `location.href`
-            // relu dans le même script est déjà absolu. La
-            // session canonisera via `sync_ctx_url` au drain.
-            let resolved = crate::xhr::resolve_url(e, &url).unwrap_or_else(|| url.clone());
-            // Same-origin exigée (spec : `SecurityError` — ici
-            // refus silencieux ; la session refuserait de
-            // même au drain) : une origine distante ne touche
-            // ni le miroir ni l'historique.
-            if crate::xhr::cross_origin(e, &resolved) == Some(true) {
-                return Ok(Value::Undefined);
-            }
-            if let Some(h) = &e.hooks.push_state {
-                let h = h.clone();
-                // L'URL **brute** remonte : la session résout
-                // contre la base effective (`nav_base` —
-                // `<base href>` s'applique), que `page_url`
-                // ne reflète pas.
-                h(url.clone(), replace);
-            }
-            // L'URL résolue (contre `page_url`) s'applique
-            // localement : `location.href`/`document.URL`
-            // relus dans le même script et les fetchs suivants
-            // sont déjà absolus. Transitoire sous `<base>`
-            // — la session recanonise via `sync_ctx_url` au
-            // drain.
-            e.set_page_url(&resolved);
-            if !replace {
-                // `history.length` suit l'entrée poussée —
-                // `sync_ctx_url` recalera sur la longueur
-                // session au drain.
-                e.hooks.history_len = e.hooks.history_len.saturating_add(1);
+    // `args[0]` = l'état (CAP-158) — sérialisé JSON pour
+    // traverser la frontière session (borne documentée :
+    // structured clone hors portée — fonctions, cycles,
+    // `Map`/`Set` dégradent en `None` → `history.state`
+    // = `null`). Enregistré **même sans URL** : spec,
+    // `pushState(state)` crée une entrée à URL inchangée.
+    let state_json = match arg(args, 0) {
+        Value::Undefined => None,
+        v => match crate::json::stringify(e, v) {
+            Ok(s) if !matches!(s, Value::Undefined) => e.to_js_string(s).ok(),
+            _ => None,
+        },
+    };
+    let url = match u {
+        Value::Undefined | Value::Null => None,
+        _ => {
+            let s = e.to_js_string(u)?;
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
             }
         }
+    };
+    let Some(url) = url else {
+        // Sans URL : nouvelle entrée à même adresse —
+        // `""` résout sur la base document côté session.
+        // Aucun garde same-origin n'entre en jeu.
+        e.hooks.history_state.clone_from(&state_json);
+        if let Some(h) = &e.hooks.push_state {
+            let h = h.clone();
+            h(String::new(), replace, state_json);
+        }
+        if !replace {
+            e.hooks.history_len = e.hooks.history_len.saturating_add(1);
+        }
+        return Ok(Value::Undefined);
+    };
+    // Résolution locale contre `page_url` (document
+    // URL — même grammaire que XHR) : `location.href`
+    // relu dans le même script est déjà absolu. La
+    // session canonisera via `sync_ctx_url` au drain.
+    let resolved = crate::xhr::resolve_url(e, &url).unwrap_or_else(|| url.clone());
+    // Same-origin exigée (spec : `SecurityError` — ici
+    // refus silencieux ; la session refuserait de
+    // même au drain) : une origine distante ne touche
+    // ni le miroir ni l'historique — état inclus
+    // (posé après ce garde, jamais sur refus).
+    if crate::xhr::cross_origin(e, &resolved) == Some(true) {
+        return Ok(Value::Undefined);
+    }
+    e.hooks.history_state.clone_from(&state_json);
+    if let Some(h) = &e.hooks.push_state {
+        let h = h.clone();
+        // L'URL **brute** remonte : la session résout
+        // contre la base effective (`nav_base` —
+        // `<base href>` s'applique), que `page_url`
+        // ne reflète pas.
+        h(url.clone(), replace, state_json);
+    }
+    // L'URL résolue (contre `page_url`) s'applique
+    // localement : `location.href`/`document.URL`
+    // relus dans le même script et les fetchs suivants
+    // sont déjà absolus. Transitoire sous `<base>`
+    // — la session recanonise via `sync_ctx_url` au
+    // drain.
+    e.set_page_url(&resolved);
+    if !replace {
+        // `history.length` suit l'entrée poussée —
+        // `sync_ctx_url` recalera sur la longueur
+        // session au drain.
+        e.hooks.history_len = e.hooks.history_len.saturating_add(1);
     }
     Ok(Value::Undefined)
 }

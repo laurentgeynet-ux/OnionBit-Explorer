@@ -255,6 +255,14 @@ pub(crate) fn parse(e: &mut Engine, v: Value) -> JsResult<Value> {
     Ok(v)
 }
 
+/// `JSON.stringify(v)` en appel direct (CAP-158 —
+/// `history.state` sérialise l'état pour le stocker
+/// côté session) — mêmes règles `replacer`-nul,
+/// erreur propagée.
+pub(crate) fn stringify(e: &mut Engine, v: Value) -> JsResult<Value> {
+    json_stringify(e, Value::Undefined, &[v])
+}
+
 pub(crate) fn json_parse(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let v = parse(e, arg(args, 0))?;
     let reviver = arg(args, 1);

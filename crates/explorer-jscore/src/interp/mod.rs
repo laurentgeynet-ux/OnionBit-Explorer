@@ -856,6 +856,7 @@ impl Engine {
         swap(&mut self.hooks.form_submit, &mut ctx.form_submit);
         swap(&mut self.hooks.open, &mut ctx.open);
         swap(&mut self.hooks.push_state, &mut ctx.push_state);
+        swap(&mut self.hooks.history_state, &mut ctx.history_state);
         swap(&mut self.hooks.viewport, &mut ctx.viewport);
     }
 
@@ -999,6 +1000,49 @@ impl Engine {
         if let Some(m) = self.ctxs.get_mut(ctx as usize) {
             m.url = url.to_string();
         }
+    }
+
+    /// `sync_ctx_url` + état d'historique (CAP-158) :
+    /// `state` = JSON sérialisé de `history.state` pour
+    /// l'entrée courante — restitué au getter. `popstate`
+    /// = `true` à la traversée same-document seulement
+    /// (spec : `pushState`/`replaceState` ne dispatchent
+    /// **pas** `popstate`) — l'événement `{type:"popstate",
+    /// state}` suit `fire_event_listeners` (cible window).
+    pub fn sync_ctx_state(
+        &mut self,
+        ctx: crate::context::CtxId,
+        url: &str,
+        history_len: u32,
+        state: Option<&str>,
+        popstate: bool,
+    ) {
+        self.sync_ctx_url(ctx, url, history_len);
+        let sv = state.map(str::to_string);
+        if ctx == self.cur_ctx {
+            self.hooks.history_state = sv;
+        } else if let Some(p) = self.parked.get_mut(&ctx) {
+            p.history_state = sv;
+        }
+        if !popstate || ctx != self.cur_ctx {
+            return;
+        }
+        // `popstate` — state désérialisé pour les listeners
+        // (`null` absent/indésérialisable).
+        let st = match state {
+            Some(s) => {
+                let sv = self.str_val(s);
+                crate::json::parse(self, sv).unwrap_or(Value::Null)
+            }
+            None => Value::Null,
+        };
+        let ev = self.new_object();
+        let ty = self.str_val("popstate");
+        self.set_own(ev, "type", ty, true);
+        self.set_own(ev, "state", st, true);
+        self.set_own(ev, "cancelable", Value::Bool(false), true);
+        self.set_own(ev, "bubbles", Value::Bool(false), true);
+        let _ = self.fire_event_listeners(Value::Obj(ev));
     }
 
     /// Contexte courant.
