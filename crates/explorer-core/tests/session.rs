@@ -9966,3 +9966,148 @@ async fn iframe_plain_fetch_same_origin_baseline() {
         "témoin Origin réel"
     );
 }
+
+// ===== CAP-150 — overrides du submitter : `formaction`/
+// `formmethod`/`formenctype`/`formtarget`/`formmethod=dialog`
+// sur le bouton cliqué priment les attributs du `<form>`
+// (HTML §4.10.21 — formulaires multi-actions) =====
+
+/// Form `GET /a` — le submit porte `formaction="/b"`.
+const PAGE_FORMACTION: &str = "<html><body>\
+    <form action=\"/a\" method=\"get\">\
+    <div><input name=\"q\" value=\"x\"></div>\
+    <div><input type=\"submit\" value=\"go\" formaction=\"/b\">\
+    </div></form></body></html>";
+
+/// `formaction` du submitter prime `action` du form.
+#[tokio::test]
+async fn submitter_formaction_overrides_form_action() {
+    let (mut s, t) = test_session();
+    t.route("/f", 200, PAGE_FORMACTION);
+    t.route("/a", 200, "<html><body>A</body></html>");
+    t.route("/b", 200, "<html><body>B</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 36.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    let (m, pq, _) = t.last().unwrap();
+    assert_eq!(m, "Get");
+    assert_eq!(pq, "/b?q=x", "formaction prime action");
+}
+
+/// Form `GET` — le submit porte `formmethod="post"`.
+const PAGE_FORMMETHOD: &str = "<html><body>\
+    <form action=\"/a\" method=\"get\">\
+    <div><input name=\"q\" value=\"x\"></div>\
+    <div><input type=\"submit\" value=\"go\" formmethod=\"post\">\
+    </div></form></body></html>";
+
+/// `formmethod="post"` prime `method="get"` → corps
+/// urlencodé, pas de query.
+#[tokio::test]
+async fn submitter_formmethod_overrides_form_method() {
+    let (mut s, t) = test_session();
+    t.route("/f", 200, PAGE_FORMMETHOD);
+    t.route("/a", 200, "<html><body>A</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 36.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    let (m, pq, body) = t.last().unwrap();
+    assert_eq!(m, "Post", "formmethod prime method");
+    assert_eq!(pq, "/a");
+    assert_eq!(String::from_utf8(body).unwrap(), "q=x");
+}
+
+/// Form `POST` urlencodé — le submit porte
+/// `formenctype="multipart/form-data"`.
+const PAGE_FORMENCTYPE: &str = "<html><body>\
+    <form action=\"/a\" method=\"post\">\
+    <div><input name=\"q\" value=\"x\"></div>\
+    <div><input type=\"submit\" value=\"go\" \
+    formenctype=\"multipart/form-data\"></div></form></body></html>";
+
+/// `formenctype` du submitter prime `enctype` du form →
+/// corps multipart avec boundary.
+#[tokio::test]
+async fn submitter_formenctype_overrides_form_enctype() {
+    let (mut s, t) = test_session();
+    t.route("/f", 200, PAGE_FORMENCTYPE);
+    t.route("/a", 200, "<html><body>A</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 36.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    let ct = t.req_header("/a", "content-type").unwrap_or_default();
+    assert!(
+        ct.starts_with("multipart/form-data; boundary="),
+        "formenctype prime enctype : {ct}"
+    );
+    let (_, _, body) = t.last().unwrap();
+    let body = String::from_utf8_lossy(&body).to_string();
+    assert!(
+        body.contains("name=\"q\"") && body.contains("\r\nx"),
+        "{body}"
+    );
+}
+
+/// Form — le submit porte `formtarget="_blank"`.
+const PAGE_FORMTARGET: &str = "<html><body>\
+    <form action=\"/a\" method=\"get\">\
+    <div><input type=\"submit\" value=\"go\" formtarget=\"_blank\">\
+    </div></form></body></html>";
+
+/// `formtarget="_blank"` du submitter ouvre un nouvel
+/// onglet — la chaîne de cible du `<form>`/`<base>` est
+/// court-circuitée.
+#[tokio::test]
+async fn submitter_formtarget_opens_new_tab() {
+    let (mut s, t) = test_session();
+    t.route("/f", 200, PAGE_FORMTARGET);
+    t.route("/a", 200, "<html><body>A</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 12.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(s.tabs().len(), 2, "formtarget=_blank → nouvel onglet");
+    let t2 = other_tab(&s, id);
+    assert_eq!(s.tab_url(t2).as_deref(), Some("http://h.test/a"));
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/f"));
+}
+
+/// Form — le submit porte `formmethod="dialog"`.
+const PAGE_FORMDIALOG: &str = "<html><body>\
+    <form action=\"/a\" method=\"get\">\
+    <div><input type=\"submit\" value=\"go\" formmethod=\"dialog\">\
+    </div></form></body></html>";
+
+/// `formmethod="dialog"` : le bouton ne soumet pas (il
+/// fermerait un `<dialog>` — hors périmètre) : intention
+/// morte, aucun fetch, URL inchangée.
+#[tokio::test]
+async fn submitter_formmethod_dialog_does_not_submit() {
+    let (mut s, t) = test_session();
+    t.route("/f", 200, PAGE_FORMDIALOG);
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/f").await.unwrap();
+    let calls = t.calls();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 6.0, y: 12.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Edited, "clic consommé, pas de nav");
+    assert_eq!(t.calls(), calls, "dialog ne fetch rien");
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/f"));
+}

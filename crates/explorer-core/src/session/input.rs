@@ -666,17 +666,40 @@ impl Session {
                 return Err(CoreError::EmptyDocument);
             };
             let pairs = collect_form_data(dom, form, submitter);
-            let action = dom
+            let mut action = dom
                 .attribute(form, "action")
                 .ok()
                 .flatten()
                 .unwrap_or_default();
-            let method = dom
+            let mut method = dom
                 .attribute(form, "method")
                 .ok()
                 .flatten()
                 .unwrap_or_default();
-            let enctype = attr_lower(dom, form, "enctype");
+            let mut enctype = attr_lower(dom, form, "enctype");
+            // Overrides du submitter (HTML §4.10.21 — `formaction`/
+            // `formmethod`/`formenctype`/`formtarget` sur le bouton
+            // cliqué priment les attributs du `<form>` — formulaires
+            // multi-actions, CAP-150).
+            let mut target_override = None;
+            if let Some(s) = submitter {
+                if let Ok(Some(v)) = dom.attribute(s, "formaction") {
+                    action = v;
+                }
+                if let Ok(Some(v)) = dom.attribute(s, "formmethod") {
+                    method = v;
+                }
+                if let Ok(Some(v)) = dom.attribute(s, "formenctype") {
+                    enctype = v.to_ascii_lowercase();
+                }
+                target_override = dom.attribute(s, "formtarget").ok().flatten();
+            }
+            // `formmethod="dialog"` : le bouton ferme un
+            // `<dialog>` sans soumettre — hors périmètre (pas
+            // de dialog), intention morte (dégradation saine).
+            if method.eq_ignore_ascii_case("dialog") {
+                return Ok(());
+            }
             let req = form_request(page, base, &action, &method, &enctype, &pairs)
                 .ok_or_else(|| CoreError::Url("action de formulaire irrésolvable".to_string()))?;
             // `form-action` (CAP-145) : la cible résolue est
@@ -688,7 +711,12 @@ impl Session {
             }
             (
                 req,
-                target_new_context(dom, form, entry.base_target.as_deref()),
+                // `formtarget` du submitter > `target` du
+                // `<form>` > `<base target>` (HTML §4.10.21).
+                target_override.as_deref().map_or_else(
+                    || target_new_context(dom, form, entry.base_target.as_deref()),
+                    target_name_new_context,
+                ),
                 rel_no_referrer(dom, form),
                 element_referrer_policy(dom, form),
             )

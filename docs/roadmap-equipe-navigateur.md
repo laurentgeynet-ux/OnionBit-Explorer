@@ -3359,6 +3359,23 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-150. Overrides du submitter** —
+  `formaction`/`formmethod`/`formenctype`/
+  `formtarget` *(numéro officiel attribué à
+  l'intégration)* : le bouton cliqué
+  (`<input type=submit>`/`<button>`) prime
+  les attributs du `<form>` (HTML §4.10.21 —
+  formulaires multi-actions : « Enregistrer »
+  vs « Supprimer »). Chaîne de cible :
+  `formtarget` > `target` du form > `<base
+  target>` (`target_name_new_context` factorisé
+  depuis `target_new_context`).
+  `formmethod="dialog"` = pas de soumission
+  (fermeture de `<dialog>` — hors périmètre,
+  intention morte). `formnovalidate` sans
+  effet (pas de validation à cette tranche).
+  Tests : 5 session (`submitter_*`).
+
 - [x] **CAP-149. `<iframe sandbox>`** —
   restrictions de contexte *(numéro officiel
   attribué à l'intégration)* : attribut

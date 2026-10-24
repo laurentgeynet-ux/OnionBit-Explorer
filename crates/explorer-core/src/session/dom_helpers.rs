@@ -176,7 +176,15 @@ pub(crate) fn target_new_context(dom: &Dom, el: NodeId, base_target: Option<&str
             None => return false,
         },
     };
-    let t = t.trim();
+    target_name_new_context(&t)
+}
+
+/// Un nom de cible (`target`/`formtarget`/`base target`)
+/// désigne-t-il un contexte neuf ? — `_self`/`_parent`/
+/// `_top` et vide = contexte courant ; `_blank` ou un nom
+/// arbitraire = nouveau contexte (étape 131, CAP-150).
+pub(crate) fn target_name_new_context(name: &str) -> bool {
+    let t = name.trim();
     !t.is_empty()
         && !matches!(
             t.to_ascii_lowercase().as_str(),

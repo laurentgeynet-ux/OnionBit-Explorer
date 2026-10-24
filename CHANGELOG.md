@@ -1315,6 +1315,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-150 — Overrides du submitter**
+  (`explorer-core` — cap « web réel sécurisé » ;
+  numéro officiel attribué à l'intégration,
+  compteur gelé) : `formaction`/`formmethod`/
+  `formenctype`/`formtarget` sur le bouton
+  cliqué priment les attributs du `<form>`
+  (HTML §4.10.21 — formulaires multi-actions).
+  Chaîne de cible : `formtarget` > `target`
+  du form > `<base target>` —
+  `target_name_new_context` factorisé.
+  `formmethod="dialog"` = intention morte
+  (pas de `<dialog>` à cette tranche).
+  `formnovalidate` sans effet (pas de
+  validation). Tests : 5 session (`submitter_*`).
+
 - **CAP-149 — `<iframe sandbox>`**
   (`explorer-net` + `explorer-core` — cap « web
   réel sécurisé » ; numéro officiel attribué à
