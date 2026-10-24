@@ -5980,6 +5980,13 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   étendues. Régression
   `specialized_event_init_reaches_dispatch`.
 
+- [x] **JS-C85. `useSyncExternalStore`
+  + `lazy`/`Suspense`** — sonde React 19 :
+  sains sans fix (subscribe→bump→
+  re-render ; lazy→promesse→fallback
+  remplacé) — la pompe microtasks +
+  `MessageChannel` couvrent la sémantique.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

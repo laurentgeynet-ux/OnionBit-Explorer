@@ -9,6 +9,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C85 — `useSyncExternalStore` +
+  `lazy`/`Suspense` mesurés sains**
+  (`explorer-jscore`, sonde React 19) :
+  subscribe/getSnapshot → re-render sur
+  mutation store (`snap=1`), `lazy`→
+  promesse → fallback remplacé (`lazy-ok`)
+  — aucun trou moteur, surfaces couvertes
+  par la pompe/microtasks existantes.
+
 - **JS-C84 — événements React étendus +
   init d'événements spécialisés**
   (`explorer-jscore`) : la sonde React 19
