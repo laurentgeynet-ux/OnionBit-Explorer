@@ -6033,6 +6033,12 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   moteur ; l'hydration réelle de
   react.dev (JS-C87) le confirme.
 
+- [x] **JS-C88. Build React dev** —
+  `react-dom.development.js` sur la
+  sonde UMD : chemins `__DEV__` sains
+  (warnings console, mêmes résultats
+  que prod — count=1, echo:hello).
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

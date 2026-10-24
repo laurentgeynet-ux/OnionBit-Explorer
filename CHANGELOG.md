@@ -9,6 +9,14 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C88 — build React dev mesurée
+  saine** (`explorer-jscore`, sonde UMD
+  `react-dom.development.js`) : mêmes
+  chemins que prod — montage, hooks,
+  `onClick`/`onChange` contrôlé,
+  `useEffect`, warnings console — aucun
+  trou `__DEV__` supplémentaire.
+
 - **JS-C86 — `hydrateRoot` mesuré sain**
   (`explorer-jscore`, sonde React 19) :
   markup SSR (`renderToString` → HTML
