@@ -178,6 +178,43 @@ pub struct DynImgReq {
     pub ctx: crate::context::CtxId,
 }
 
+/// CAP-173 — intention de chargement d'un
+/// `<link rel=stylesheet>` inséré par script (ou `href`/
+/// `rel` modifié sur lien attaché), drainée par
+/// [`crate::interp::Engine::drain_dyn_links`] et servie par
+/// l'embedder : fetch du `href` (CSP `style-src`,
+/// mixed-content, `crossorigin` CORS, `referrerpolicy`,
+/// SRI `integrity`) puis application à la cascade et
+/// `load`/`error` sur l'élément — attaché requis (spec
+/// « link processing » : un lien détaché ne charge pas).
+/// Le moteur ne touche jamais le réseau.
+pub struct DynLinkReq {
+    /// Identifiant d'émission — répercuté à la livraison
+    /// (`deliver_dyn_link` retrouve le nœud pour
+    /// `load`/`error`).
+    pub seq: u64,
+    /// Attribut `href` brut — la session résout contre la
+    /// base du document émetteur.
+    pub href: String,
+    /// Attribut `integrity` brut — SRI exigée à la
+    /// livraison (CAP-163), même pile que les liens
+    /// statiques.
+    pub integrity: Option<String>,
+    /// Attribut `media` brut — la feuille est appliquée
+    /// même si le media ne matche pas (spec : le fetch a
+    /// lieu, le style s'applique sous condition — la
+    /// cascade réévalue à chaque env, borne historique de
+    /// la pile statique).
+    pub media: Option<String>,
+    /// Attribut `crossorigin` (même mapping que CAP-167).
+    pub crossorigin: Option<crate::xhr::FetchCredentials>,
+    /// Attribut `referrerpolicy` brut — prime la politique
+    /// du document (étape 132).
+    pub referrerpolicy: Option<String>,
+    /// Contexte émetteur (`JsCtxId`).
+    pub ctx: crate::context::CtxId,
+}
+
 /// Browser-surface hooks (JS-7e) — everything `window.location`,
 /// `history` and `document.cookie` need, injected by the embedder so
 /// the engine never navigates or touches the cookie store itself.
@@ -212,6 +249,10 @@ pub(crate) struct BrowserHooks {
     /// borne que `dyn_script_nodes` ; les images détachées
     /// sont livrées aussi (`new Image().src=` = prefetch).
     pub dyn_img_nodes: std::collections::BTreeMap<u64, NodeId>,
+    /// `seq` → nœud miroir des `<link>` dynamiques en vol
+    /// (CAP-173) — pour `load`/`error` à la livraison. Même
+    /// borne que `dyn_script_nodes`.
+    pub dyn_link_nodes: std::collections::BTreeMap<u64, NodeId>,
     /// Séquence d'émission des scripts dynamiques.
     pub dyn_script_seq: u64,
     /// Cookie jar for `document.cookie`.
@@ -2541,6 +2582,10 @@ const MAPPED_ATTRS: &[&str] = &[
     // relit `sizes`, spec).
     "srcset",
     "sizes",
+    // `HTMLLinkElement`/`HTMLStyleElement`/`HTMLSourceElement`
+    // (CAP-173) — `l.media=` écrit l'attribut (gate
+    // d'application de la feuille, spec IDL `media`).
+    "media",
 ];
 
 /// Boolean attributes mirrored as `bool` props (`checked`…).

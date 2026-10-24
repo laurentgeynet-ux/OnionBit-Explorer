@@ -1400,6 +1400,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-173 — `<link rel=stylesheet>` inséré
+  dynamiquement** (`explorer-jscore`/`explorer-js`/
+  `explorer-core` — cap « web réel sécurisé » ;
+  numéro officiel attribué à l'intégration) :
+  `createElement('link')` + `rel=stylesheet` +
+  `href` + insertion — et `href=`/`rel=` modifié
+  sur lien attaché — déclenche fetch + application
+  à la cascade + `load`/`error`. Le miroir enfile
+  les liens demandés (`pending_dyn_links`,
+  `dyn_link_seen` — dedup par clé `rel|href`,
+  dernier non drainé gagne ; **attaché requis**,
+  spec « link processing »). `drain_dyn_links`
+  émet des `DynLinkReq` (`ctx`, `seq`, `href`,
+  `integrity`, `media`, `crossorigin` parsé,
+  `referrerpolicy`) pompés par `drain_script_net` :
+  résolution base émetteur + CSP `style-src` +
+  mixed-content + `sub_request`
+  (`Sec-Fetch-Dest: style`, mode CORS si
+  `crossorigin`). La réponse passe statut 2xx +
+  sécurité sous-ressource (`nosniff`/CORP) + SRI
+  (`integrity_allows`, CAP-163) puis
+  `decode_stylesheet` rejoint `linked_sheets`
+  (cascade au prochain apply) — `media` non
+  matching : fetch maintenu, application gatée
+  (`media_attr_matches`, spec). `load`/`error`
+  non-bullant sur l'élément. Bonus : `l.media`
+  propriété réfléchie (`MAPPED_ATTRS`). Bornes :
+  dernier `href` non pompé gagne (pas
+  d'annulation de tâche en vol) ; `disabled`/
+  alternate stylesheets non honorés (la feuille
+  s'applique toujours — borne documentée).
+  5 tests session (`dyn_link_*`).
+
 - **CAP-172 — `<img>` inséré dynamiquement**
   (`explorer-jscore`/`explorer-js`/`explorer-core` —
   cap « web réel sécurisé » ; numéro officiel

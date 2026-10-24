@@ -12266,3 +12266,132 @@ async fn dyn_img_src_dedup_and_renav() {
         "dernière source = un seul fetch : {paths:?}"
     );
 }
+
+// ===== CAP-173 — `<link rel=stylesheet>` inséré dynamiquement =====
+
+/// `createElement('link')` + `rel=stylesheet` + `href` +
+/// insertion : feuille fetchée (`sec-fetch-dest: style`),
+/// appliquée à la cascade (pixels de frame), `load` sur
+/// l'élément — le patron CSS-in-JS/theme switcher.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_link_stylesheet_fetches_applies_loads() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=k style=\"width:50px;height:50px\"></div>\
+         <div id=x></div><script>         var l=document.createElement('link');         l.rel='stylesheet';         l.href='/dyn.css';         l.onload=function(){document.getElementById('x').textContent='load';};         l.onerror=function(){document.getElementById('x').textContent='err';};         document.head.appendChild(l);         </script></body></html>",
+    );
+    t.route_bin("/dyn.css", 200, b"#k{background:#00ff00}".to_vec());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    assert!(
+        t.paths().contains(&"/dyn.css".to_string()),
+        "feuille fetchée"
+    );
+    assert_eq!(
+        t.req_header("/dyn.css", "sec-fetch-dest").as_deref(),
+        Some("style")
+    );
+    let dump = s.dom_dump(a).unwrap();
+    assert!(dump.contains("\"load\""), "load tiré : {dump}");
+    let (fw, fh, px) = s.frame_pixels(a).unwrap();
+    assert!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]) > 0,
+        "feuille appliquée à la cascade"
+    );
+}
+
+/// 404 → `error` sur l'élément, jamais de `load`.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_link_404_fires_error() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><script>         var l=document.createElement('link');         l.rel='stylesheet';         l.href='/miss.css';         l.onload=function(){document.getElementById('x').textContent='load';};         l.onerror=function(){document.getElementById('x').textContent='err';};         document.head.appendChild(l);         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    let dump = s.dom_dump(a).unwrap();
+    assert!(dump.contains("err"), "error tiré : {dump}");
+}
+
+/// CSP `style-src 'none'` : fetch refusé → `error`, aucune
+/// requête vers la feuille.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_link_csp_style_src_blocks() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head><meta http-equiv='Content-Security-Policy' content=\"style-src 'none'; script-src 'unsafe-inline'\"></head>         <body><div id=x></div><script>         var l=document.createElement('link');         l.rel='stylesheet';         l.href='/dyn.css';         l.onload=function(){document.getElementById('x').textContent='load';};         l.onerror=function(){document.getElementById('x').textContent='err';};         document.head.appendChild(l);         </script></body></html>",
+    );
+    t.route_bin("/dyn.css", 200, b"#k{background:#00ff00}".to_vec());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    assert!(
+        !t.paths().contains(&"/dyn.css".to_string()),
+        "style-src 'none' refuse le fetch"
+    );
+    let dump = s.dom_dump(a).unwrap();
+    assert!(dump.contains("err"), "error tiré : {dump}");
+}
+
+/// `media=print` : le fetch a lieu (spec) mais la feuille
+/// ne s'applique pas — `load` part quand même.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_link_media_gates_application_not_fetch() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=k style=\"width:50px;height:50px\"></div>         <div id=x></div><script>         var l=document.createElement('link');         l.rel='stylesheet';         l.href='/print.css';         l.media='print';         l.onload=function(){document.getElementById('x').textContent='load';};         l.onerror=function(){document.getElementById('x').textContent='err';};         document.head.appendChild(l);         </script></body></html>",
+    );
+    t.route_bin("/print.css", 200, b"#k{background:#00ff00}".to_vec());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_net().await;
+    assert!(
+        t.paths().contains(&"/print.css".to_string()),
+        "fetch toujours émis"
+    );
+    let dump = s.dom_dump(a).unwrap();
+    assert!(dump.contains("\"load\""), "load tiré : {dump}");
+    let (fw, fh, px) = s.frame_pixels(a).unwrap();
+    assert_eq!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]),
+        0,
+        "media=print non appliquée en écran"
+    );
+}
+
+/// Lien jamais inséré → aucun fetch (spec « link
+/// processing » : connexion requise).
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_link_detached_never_fetches() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><script>         var l=document.createElement('link');         l.rel='stylesheet';         l.href='/d.css';         </script></body></html>",
+    );
+    t.route_bin("/d.css", 200, b"body{background:#00ff00}".to_vec());
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    assert!(
+        !t.paths().contains(&"/d.css".to_string()),
+        "lien détaché = pas de fetch"
+    );
+}

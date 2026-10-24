@@ -3384,6 +3384,46 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-173. `<link rel=stylesheet>` inséré
+  dynamiquement** — *(numéro officiel attribué à
+  l'intégration)* : `document.createElement('link')`
+  + `rel=stylesheet` + `href` + insertion — et
+  `href=`/`rel=` modifié sur lien attaché — déclenche
+  le cycle réel : fetch → feuille appliquée à la
+  cascade → `load`/`error` — le patron CSS-in-JS
+  et theme switcher (React/Vue injectent leurs
+  feuilles par JS, jamais au parse). Miroir :
+  `note_link` enfile les liens demandés
+  (`pending_dyn_links`, `dyn_link_seen` — dedup
+  par clé `rel|href`, dernier non drainé gagne ;
+  **attaché requis**, spec « link processing » —
+  un lien détaché ne charge pas, contrairement aux
+  images). `drain_dyn_links` émet des `DynLinkReq`
+  (`ctx` émetteur, `seq`, `href`, `integrity`,
+  `media`, `crossorigin` parsé `FetchCredentials`,
+  `referrerpolicy`) pompés par `drain_script_net`
+  hors réentrance : résolution base émetteur +
+  CSP `style-src` + mixed-content + `sub_request`
+  (`Sec-Fetch-Dest: style`, CORS si `crossorigin`).
+  La réponse passe statut 2xx +
+  `subresp_security_allows` (`nosniff`/CORP) + SRI
+  (`integrity_allows`, CAP-163) puis
+  `decode_stylesheet` rejoint `linked_sheets` — la
+  cascade la reprend au prochain apply (même pile
+  que les feuilles statiques). `media` non
+  matching : fetch maintenu (spec) mais
+  application gatée par `media_attr_matches`.
+  `load`/`error` non-bullant sur l'élément.
+  Bonus livré : `l.media` propriété réfléchie
+  (`MAPPED_ATTRS` — `HTMLLinkElement`/`HTMLStyle`/
+  `HTMLSource`). Bornes : dernier `href` non
+  pompé gagne (coalescence — pas d'annulation
+  de tâche en vol) ; `disabled`/alternate
+  stylesheets non honorés (la feuille s'applique
+  toujours — borne documentée) ;
+  `rel=preload`/`modulepreload` non couverts.
+  5 tests session (`dyn_link_*`).
+
 - [x] **CAP-172. `<img>` inséré dynamiquement** —
   *(numéro officiel attribué à l'intégration)* :
   `document.createElement('img')` + `src`/`srcset`/

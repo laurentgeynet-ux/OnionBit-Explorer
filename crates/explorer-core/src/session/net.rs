@@ -320,7 +320,7 @@ impl Session {
     /// immédiate d'un échec `status: 0` (`error` côté
     /// script — la page reste vivante, jamais de panic).
     pub(crate) fn drain_script_net(&mut self, tab: TabId) {
-        let Some((page, base, reqs, dyns, dyn_frames, dyn_imgs)) =
+        let Some((page, base, reqs, dyns, dyn_frames, dyn_imgs, dyn_links)) =
             self.tabs.get_mut(&tab).and_then(|e| {
                 let page = e.url.clone();
                 let base = e.nav_base().cloned();
@@ -332,6 +332,7 @@ impl Session {
                         eng.drain_dyn_scripts(),
                         eng.drain_dyn_frames(),
                         eng.drain_dyn_imgs(),
+                        eng.drain_dyn_links(),
                     )
                 })
             })
@@ -425,11 +426,11 @@ impl Session {
                 },
             );
         }
-        // `<script>`/`<iframe>`/`<img>` dynamiques
-        // (CAP-169/171/172) — hors réentrance, même
+        // `<script>`/`<iframe>`/`<img>`/`<link>` dynamiques
+        // (CAP-169/171/172/173) — hors réentrance, même
         // discipline : fetch en tâches, livraison au
         // `seq` moteur.
-        self.spawn_dyn_subresources(tab, &page, &base, dyns, dyn_frames, dyn_imgs);
+        self.spawn_dyn_subresources(tab, &page, &base, dyns, dyn_frames, dyn_imgs, dyn_links);
     }
 
     /// Distribution des requêtes dynamiques drainées
@@ -437,6 +438,7 @@ impl Session {
     /// dès l'arrivée, `load`/`error` sur l'élément à la
     /// livraison, jamais d'exécution synchrone dans le
     /// drain.
+    #[allow(clippy::too_many_arguments)]
     fn spawn_dyn_subresources(
         &mut self,
         tab: TabId,
@@ -445,6 +447,7 @@ impl Session {
         dyns: Vec<explorer_js::DynScriptReq>,
         dyn_frames: Vec<explorer_js::DynFrameReq>,
         dyn_imgs: Vec<explorer_js::DynImgReq>,
+        dyn_links: Vec<explorer_js::DynLinkReq>,
     ) {
         for d in dyns {
             self.spawn_dyn_script(tab, page, base, &d);
@@ -460,6 +463,12 @@ impl Session {
         // `commit_dyn_img` à la réponse.
         for d in dyn_imgs {
             self.spawn_dyn_img(tab, page, base, &d);
+        }
+        // `<link rel=stylesheet>` : fetch `style-src` CSP +
+        // mixed-content puis `linked_sheets` + `load`/`error`
+        // — `commit_dyn_link` à la réponse.
+        for d in dyn_links {
+            self.spawn_dyn_link(tab, page, base, &d);
         }
     }
 
@@ -564,6 +573,7 @@ impl Session {
                         script: Some(meta),
                         frame: None,
                         img: None,
+                        link: None,
                     });
                 });
                 self.dyn_tasks.insert((tab, seq), j);
@@ -740,6 +750,7 @@ impl Session {
                 script: None,
                 frame: Some(meta),
                 img: None,
+                link: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -853,6 +864,7 @@ impl Session {
                 script: None,
                 frame: None,
                 img: Some(meta),
+                link: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -918,6 +930,163 @@ impl Session {
         // n'est pas une image chargée (spec), et rien n'est
         // retenu (un blob invalide ne re-servirait pas).
         self.deliver_dyn_img_el(tab, ctx, seq, ok);
+    }
+
+    /// Un `<link rel=stylesheet>` dynamique (CAP-173) :
+    /// résolution base émetteur + `style-src` CSP +
+    /// mixed-content puis `sub_request`
+    /// (`Sec-Fetch-Dest: style`, `crossorigin` CORS,
+    /// `referrerpolicy`) — le fetch a toujours lieu
+    /// (spec), l'application est gated par `media` à la
+    /// livraison. Refus → `error` sur l'élément.
+    fn spawn_dyn_link(&mut self, tab: TabId, page: &Url, base: &Url, d: &explorer_js::DynLinkReq) {
+        let Some((req_page, req_base, doc_policy, csp, _opaque)) =
+            self.ctx_net_origin(tab, d.ctx, page, base)
+        else {
+            self.deliver_dyn_link_el(tab, d.ctx, d.seq, false);
+            return;
+        };
+        let Some(url) = Url::resolve(&req_base, &d.href)
+            .ok()
+            .filter(|u| !is_mixed_content(&req_page, u))
+            .filter(|u| {
+                explorer_net::csp::csp_allows(
+                    &csp,
+                    &req_page,
+                    explorer_net::http::FetchDest::Style,
+                    u,
+                )
+            })
+        else {
+            self.deliver_dyn_link_el(tab, d.ctx, d.seq, false);
+            return;
+        };
+        let policy = d
+            .referrerpolicy
+            .as_deref()
+            .and_then(explorer_net::http::ReferrerPolicy::parse)
+            .or(doc_policy);
+        let cross = d.crossorigin.map(|c| match c {
+            explorer_js::FetchCredentials::Omit => explorer_net::http::FetchCredentials::Omit,
+            explorer_js::FetchCredentials::SameOrigin => {
+                explorer_net::http::FetchCredentials::SameOrigin
+            }
+            explorer_js::FetchCredentials::Include => explorer_net::http::FetchCredentials::Include,
+        });
+        let req = sub_request(
+            &req_page,
+            &url,
+            explorer_net::http::FetchDest::Style,
+            policy,
+            cross,
+        );
+        let is_cross = req_page.origin() != url.origin();
+        let credentials = cross.unwrap_or(explorer_net::http::FetchCredentials::SameOrigin);
+        let fetch_mode = req.fetch_mode;
+        let page_origin = origin_header_value(&req_page);
+        let partition = explorer_net::cookies::request_partition(&req);
+        let req_url = req.url.clone();
+        let meta = DynLinkMeta {
+            ctx: d.ctx,
+            seq: d.seq,
+            integrity: d.integrity.clone(),
+            media: d.media.clone(),
+            url,
+            page: req_page,
+        };
+        let tr = self.transport.clone();
+        let tx = self.net_tx.clone();
+        let seq = d.seq;
+        let j = tokio::spawn(async move {
+            let out = tr.fetch(&req).await;
+            let _ = tx.send(NetDone {
+                tab,
+                handle: seq,
+                cross: is_cross,
+                mode: fetch_mode,
+                credentials,
+                page_origin,
+                req_url,
+                partition,
+                out,
+                script: None,
+                frame: None,
+                img: None,
+                link: Some(meta),
+            });
+        });
+        self.dyn_tasks.insert((tab, seq), j);
+    }
+
+    /// Réception d'un `<link>` dynamique fetché (CAP-173).
+    /// Statut 2xx, sécurité sous-ressource (`nosniff`/CORP)
+    /// et SRI (`integrity`, CAP-163) exigés ; la feuille
+    /// décodée rejoint `linked_sheets` (la cascade la reprend
+    /// au prochain apply, gated `media`), puis `load` part
+    /// sur l'élément — sinon `error`.
+    fn commit_dyn_link(&mut self, tab: TabId, meta: &DynLinkMeta, out: &NetResult<Response>) {
+        let text = match out {
+            Ok(resp)
+                if (200..300).contains(&resp.status)
+                    && subresp_security_allows(
+                        &meta.page,
+                        &meta.url,
+                        explorer_net::http::FetchDest::Style,
+                        resp,
+                    )
+                    && meta
+                        .integrity
+                        .as_deref()
+                        .is_none_or(|m| explorer_net::crypto::integrity_allows(m, &resp.body)) =>
+            {
+                Some(decode_stylesheet(&resp.body, &resp.headers))
+            }
+            _ => None,
+        };
+        let ok = match (text, &meta.media) {
+            // `media` présent et non-matching : le fetch a
+            // lieu (spec) mais la feuille ne s'applique pas
+            // — `load` part quand même (même traitement que
+            // la pile statique).
+            (Some(t), media) => {
+                let scripting = self.tabs.get(&tab).is_some_and(|e| e.js.is_some());
+                let env = super::apply::viewport_env(self.viewport, self.color_scheme, scripting);
+                let applies = media.as_deref().is_none_or(|m| media_attr_matches(&env, m));
+                if applies {
+                    if let Some(entry) = self.tabs.get_mut(&tab) {
+                        if entry.linked_sheets.len() < 64 {
+                            entry.linked_sheets.push(t);
+                        }
+                    }
+                }
+                true
+            }
+            _ => false,
+        };
+        self.deliver_dyn_link_el(tab, meta.ctx, meta.seq, ok);
+    }
+
+    /// `load`/`error` sur l'élément `<link>` miroir
+    /// (CAP-173) — relais mince de `deliver_dyn_link` avec
+    /// resynchro (la livraison peut muter le DOM du ctx et
+    /// la feuille rangée doit restyler).
+    fn deliver_dyn_link_el(&mut self, tab: TabId, ctx: explorer_js::JsCtxId, seq: u64, ok: bool) {
+        let mutated = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            let Some(eng) = entry.js.as_mut() else {
+                return;
+            };
+            eng.deliver_dyn_link(ctx, seq, ok);
+            let n = eng.run_pending();
+            tracing::trace!(tab, jobs = n, "jobs js après livraison link dyn");
+            Self::sync_for_apply(eng.as_mut())
+        };
+        if let Some(s) = mutated {
+            self.queue_apply_sync(tab, s);
+        }
+        self.after_script(tab);
     }
 
     /// `load`/`error` sur l'élément `<img>` miroir (CAP-172) —
@@ -1309,6 +1478,7 @@ impl Session {
                 script: None,
                 frame: None,
                 img: None,
+                link: None,
             });
         });
         self.net_tasks.insert((tab, handle), j);
@@ -1567,6 +1737,12 @@ impl Session {
             if let Some(meta) = d.img {
                 self.dyn_tasks.remove(&(d.tab, meta.seq));
                 self.commit_dyn_img(d.tab, meta, &d.out);
+                continue;
+            }
+            // `<link>` dynamique (CAP-173) — même convention.
+            if let Some(meta) = d.link {
+                self.dyn_tasks.remove(&(d.tab, meta.seq));
+                self.commit_dyn_link(d.tab, &meta, &d.out);
                 continue;
             }
             self.net_tasks.remove(&(d.tab, d.handle));

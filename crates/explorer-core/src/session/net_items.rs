@@ -1256,6 +1256,13 @@ pub(crate) struct NetDone {
     /// `NetResponse` de `fetch`/XHR. `handle` porte alors
     /// le `seq` moteur.
     pub(crate) img: Option<DynImgMeta>,
+    /// `<link>` dynamique (CAP-173) — `Some` = le corps est
+    /// vérifié (SRI + sécurité sous-ressource), décodé en
+    /// feuille et rangé dans `linked_sheets` puis `load`/
+    /// `error` tiré sur l'élément par
+    /// [`Session::commit_dyn_link`]. `handle` porte alors
+    /// le `seq` moteur.
+    pub(crate) link: Option<DynLinkMeta>,
 }
 
 /// Métadonnées de livraison d'un `<script>` dynamique
@@ -1320,6 +1327,30 @@ pub(crate) struct DynImgMeta {
     /// à l'émission).
     pub(crate) url: Url,
     /// Document émetteur — ancre `nosniff`/CORP/`img-src`.
+    pub(crate) page: Url,
+}
+
+/// Métadonnées de livraison d'un `<link>` dynamique
+/// (CAP-173) — le corps vérifié (SRI `integrity`, sécurité
+/// sous-ressource) est décodé puis rangé dans
+/// `linked_sheets` (la cascade le reprend au prochain
+/// apply) avant `load`/`error` sur l'élément.
+pub(crate) struct DynLinkMeta {
+    /// Contexte moteur émetteur (`JS_CTX_TOP` ou iframe).
+    pub(crate) ctx: u32,
+    /// `dyn_script_seq` miroir partagé — retrouve l'élément
+    /// cible de `load`/`error`.
+    pub(crate) seq: u64,
+    /// SRI déclarée sur l'élément (`integrity`, CAP-163).
+    pub(crate) integrity: Option<String>,
+    /// Attribut `media` brut — le fetch a toujours lieu
+    /// (spec), l'application est gated par
+    /// `media_matches` à la livraison.
+    pub(crate) media: Option<String>,
+    /// URL résolue du `href` (déjà CSP/mixed-content
+    /// filtrée à l'émission).
+    pub(crate) url: Url,
+    /// Document émetteur — ancre `nosniff`/CORP/`style-src`.
     pub(crate) page: Url,
 }
 

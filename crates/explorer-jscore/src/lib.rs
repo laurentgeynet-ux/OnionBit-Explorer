@@ -81,7 +81,7 @@ pub use dom::{
     NodeId, SerializeStats,
 };
 pub use dom_host::{
-    CookieJar, DomRef, DynFrameReq, DynImgReq, DynScriptReq, EventProp, FormSubmit,
+    CookieJar, DomRef, DynFrameReq, DynImgReq, DynLinkReq, DynScriptReq, EventProp, FormSubmit,
 };
 pub use error::{Error, Result};
 pub use heap::{HeapStats, Host};

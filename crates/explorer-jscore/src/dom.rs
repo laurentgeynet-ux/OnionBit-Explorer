@@ -614,6 +614,16 @@ pub struct Dom {
     /// `<img>` en attente de fetch par la session
     /// (`Engine::drain_dyn_imgs`) — ordre d'émission.
     pub(crate) pending_dyn_imgs: Vec<NodeId>,
+    /// `<link rel=stylesheet>` dont la feuille a été
+    /// demandée (CAP-173) — nœud → clé `rel|href` de la
+    /// **dernière** requête : `href=`/`rel=` re-fetch à
+    /// chaque changement réel ; l'insertion à clé inchangée
+    /// ne re-fetch pas. Comme les cadres, un lien doit être
+    /// **attaché** pour charger (spec « link processing »).
+    pub(crate) dyn_link_seen: HashMap<NodeId, String>,
+    /// `<link>` en attente de fetch par la session
+    /// (`Engine::drain_dyn_links`) — ordre d'émission.
+    pub(crate) pending_dyn_links: Vec<NodeId>,
     /// « Document ouvert à l'écriture » (JS-C35) — `true` tant
     /// que la page se charge : `document.write`/`writeln` y
     /// ajoutent à `<body>`. `document.close()` ou la
@@ -722,6 +732,8 @@ impl Dom {
             pending_dyn: Vec::new(),
             dyn_img_seen: HashMap::new(),
             pending_dyn_imgs: Vec::new(),
+            dyn_link_seen: HashMap::new(),
+            pending_dyn_links: Vec::new(),
             dyn_frame_seen: HashSet::new(),
             pending_dyn_frames: Vec::new(),
             focused: Cell::new(None),
@@ -1072,6 +1084,10 @@ impl Dom {
         // jamais via la file dynamique.
         d.dyn_img_seen.clear();
         d.pending_dyn_imgs.clear();
+        // Idem `<link>` (CAP-173) — les feuilles du parse
+        // passent par `collect_stylesheet_links`.
+        d.dyn_link_seen.clear();
+        d.pending_dyn_links.clear();
         d
     }
 
@@ -1158,6 +1174,44 @@ impl Dom {
         self.pending_dyn_imgs.push(node);
     }
 
+    /// CAP-173 — « link processing » (spec) : un `<link>`
+    /// dont `rel` contient `stylesheet` et porte un `href`
+    /// charge dès qu'il est **connecté** — insertion ou
+    /// changement `rel`/`href` (les liens détachés ne
+    /// chargent pas, contrairement aux images). Dedup par
+    /// clé `rel|href` : dernier non drainé gagne (même
+    /// coalescence que les images).
+    fn note_link(&mut self, node: NodeId) {
+        if !self.is_attached(node) {
+            return;
+        }
+        let el = &self.nodes[node as usize];
+        if el.kind != NodeKind::Element || el.tag != "link" {
+            return;
+        }
+        let get = |k: &str| {
+            el.attrs
+                .iter()
+                .find(|(name, _)| name == k)
+                .map_or("", |(_, v)| v.as_str())
+        };
+        let rel = get("rel");
+        let href = get("href");
+        let is_sheet = rel
+            .split_whitespace()
+            .any(|w| w.eq_ignore_ascii_case("stylesheet"));
+        if !is_sheet || href.is_empty() {
+            return;
+        }
+        let key = format!("{rel}\u{0}{href}");
+        if self.dyn_link_seen.get(&node) == Some(&key) {
+            return;
+        }
+        self.dyn_link_seen.insert(node, key);
+        self.pending_dyn_links.retain(|&n| n != node);
+        self.pending_dyn_links.push(node);
+    }
+
     /// Marque « already started » tous les `<script>` du
     /// sous-arbre `node` (spec : le parseur de fragments pose
     /// le flag — `innerHTML` n'exécute jamais ses scripts,
@@ -1207,6 +1261,11 @@ impl Dom {
             // détachée n'est pas re-fetchée à l'insertion.
             if self.nodes[n as usize].tag == "img" {
                 self.note_img(n);
+            }
+            // `<link rel=stylesheet>` inséré → fetch de la
+            // feuille (CAP-173, spec « link processing »).
+            if self.nodes[n as usize].tag == "link" {
+                self.note_link(n);
             }
             stack.extend(self.nodes[n as usize].children.iter().rev().copied());
         }
@@ -2148,6 +2207,19 @@ impl Dom {
             )
         {
             self.note_img(node);
+        }
+        // `link.rel`/`href`/… modifié → « link processing »
+        // (CAP-173, spec) — `rel` qui gagne `stylesheet` ou
+        // `href` changé re-fetch ; `note_link` filtre
+        // l'attachement et dedup par clé `rel|href`.
+        if old.as_deref() != Some(value)
+            && self.nodes[node as usize].tag == "link"
+            && matches!(
+                name,
+                "rel" | "href" | "integrity" | "crossorigin" | "referrerpolicy"
+            )
+        {
+            self.note_link(node);
         }
     }
 
