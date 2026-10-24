@@ -1367,6 +1367,22 @@ pub(crate) struct CryptoDone {
     pub(crate) result: Result<Vec<u8>, String>,
 }
 
+/// Livraison d'un événement SSE `EventSource` (JS-C92) —
+/// produite par la tâche streamée `fetch_stream` (open aux
+/// en-têtes, un `Message` par événement parsé, `Error` à la
+/// coupure), consommée par [`Session::poll_net`] →
+/// `deliver_es` — multi-coups contrairement à `NetDone`.
+pub(crate) struct EsDone {
+    /// Onglet émetteur.
+    pub(crate) tab: TabId,
+    /// Contexte émetteur — la livraison vise son realm.
+    pub(crate) ctx: explorer_js::JsCtxId,
+    /// Corrélation côté moteur (`EsTransport::open`).
+    pub(crate) handle: u64,
+    /// `open`/`message`/`error` pour [`JsEngine::deliver_es_event`].
+    pub(crate) ev: explorer_js::EsEvent,
+}
+
 /// Verbe d'un `NetRequest` → `Method` — un verbe hors
 /// sous-ensemble usuel n'est pas émis (dégradation status 0).
 pub(crate) fn parse_method(s: &str) -> Option<Method> {

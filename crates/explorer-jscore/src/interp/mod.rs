@@ -283,6 +283,10 @@ pub struct Engine {
     /// `CONNECTING` dont le refus de handshake est livré au
     /// checkpoint microtask (`error` + `close` 1006).
     pub(crate) ws: crate::websocket::WsState,
+    /// `EventSource` bookkeeping (JS-C92) — proto, flux
+    /// vivants `(handle, wrapper)` racines GC tant que non
+    /// CLOSED, refus différés sans transport.
+    pub(crate) es: crate::eventsource::EsState,
     /// `Notification`/`BroadcastChannel`/`Selection`/
     /// `reportError` bookkeeping (JS-C74) — protos, registre
     /// de canaux et messages livrés au checkpoint microtask.
@@ -406,6 +410,10 @@ pub struct Engine {
     /// **engine-global** : la plateforme est unique pour tous
     /// les realms, chaque contexte en hérite dès `context_new`.
     pub(crate) crypto_transport: Option<Rc<dyn crate::crypto::CryptoTransport>>,
+    /// Fournisseur SSE injecté par l'embedder (JS-C92) —
+    /// **engine-global** comme `crypto_transport` : tous les
+    /// contextes ouvrent leurs flux par la même couture.
+    pub(crate) es_transport: Option<Rc<dyn crate::eventsource::EsTransport>>,
 }
 
 /// Dernier match `RegExp` — `RegExp.$1…$9`/`input`/`lastMatch`/…
@@ -692,9 +700,11 @@ impl Engine {
             streams: crate::streams::StreamState::default(),
             idb: crate::idb::IdbState::default(),
             ws: crate::websocket::WsState::default(),
+            es: crate::eventsource::EsState::default(),
             misc: crate::misc_apis::MiscState::default(),
             crypto: crate::crypto::CryptoState::default(),
             crypto_transport: None,
+            es_transport: None,
             ce_upgrade_slot: None,
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,
@@ -850,6 +860,7 @@ impl Engine {
         swap(&mut self.streams, &mut ctx.streams);
         swap(&mut self.idb, &mut ctx.idb);
         swap(&mut self.ws, &mut ctx.ws);
+        swap(&mut self.es, &mut ctx.es);
         swap(&mut self.misc, &mut ctx.misc);
         swap(&mut self.crypto, &mut ctx.crypto);
         swap(&mut self.ce_upgrade_slot, &mut ctx.ce_upgrade_slot);
@@ -2030,6 +2041,7 @@ impl Engine {
         self.streams.root_ids(&mut ids);
         self.idb.root_ids(&mut ids);
         self.ws.root_ids(&mut ids);
+        self.es.root_ids(&mut ids);
         self.misc.root_ids(&mut ids);
         if let Some((dom, cache)) = &self.dom_ctx {
             for &id in cache.borrow().values() {

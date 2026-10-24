@@ -387,6 +387,30 @@ impl Session {
                 // `poll_net` comme les `NetDone`. La promesse
                 // reste non-réentrante : jamais de livraison
                 // synchrone dans le drain.
+                // `EventSource` (JS-C92) — flux streamé
+                // multi-coups : `open` aux en-têtes
+                // `text/event-stream`, un `message` par
+                // événement SSE, `error` à la coupure. La
+                // tâche vit dans `net_tasks` — `Abort`
+                // (`es.close()`) la tue comme un fetch.
+                NetRequest::EventSource {
+                    handle,
+                    url,
+                    with_credentials,
+                    ctx,
+                } => {
+                    if self
+                        .spawn_es(tab, &page, &base, handle, &url, with_credentials, ctx)
+                        .is_err()
+                    {
+                        let _ = self.es_tx.send(EsDone {
+                            tab,
+                            ctx,
+                            handle,
+                            ev: explorer_js::EsEvent::Error,
+                        });
+                    }
+                }
                 NetRequest::Crypto { handle, op, data } => {
                     let explorer_js::CryptoOp::Digest(algo) = op;
                     let tx = self.crypto_tx.clone();
@@ -1489,6 +1513,104 @@ impl Session {
         Ok(())
     }
 
+    /// Ouverture d'un flux SSE `EventSource` (JS-C92) —
+    /// `fetch_stream` : `open` livré aux en-têtes si le
+    /// serveur sert bien `text/event-stream` en 200, un
+    /// `message` par événement parsé au fil des chunks,
+    /// `error` à l'échec ou à la fin de flux (borne
+    /// documentée : pas de reconnexion `Last-Event-ID` à
+    /// cette tranche — le script ré-ouvre s'il veut).
+    /// `ctx_net_origin` porte le document **émetteur** (base
+    /// résolue côté moteur, CSP `connect-src` via
+    /// `FetchDest::Empty`, politique Referer du cadre) ;
+    /// `withCredentials` → `credentials: include`.
+    fn spawn_es(
+        &mut self,
+        tab: TabId,
+        page: &Url,
+        base: &Url,
+        handle: u64,
+        url: &str,
+        with_credentials: bool,
+        ctx: explorer_js::JsCtxId,
+    ) -> Result<(), ()> {
+        let Some((req_page, req_base, policy, csp, opaque)) =
+            self.ctx_net_origin(tab, ctx, page, base)
+        else {
+            tracing::trace!(tab, handle, ctx, "eventsource d'un contexte mort");
+            return Err(());
+        };
+        let inflight = self.net_tasks.keys().filter(|(t, _)| *t == tab).count();
+        if inflight >= self.max_script_net {
+            tracing::trace!(tab, handle, "quota requêtes script atteint (eventsource)");
+            return Err(());
+        }
+        let creds = if with_credentials {
+            explorer_js::FetchCredentials::Include
+        } else {
+            explorer_js::FetchCredentials::SameOrigin
+        };
+        // Spec : `Accept: text/event-stream`, mode `cors` —
+        // `connect-src` consulté comme un XHR.
+        let Some((req, _cross)) = self.script_request(
+            &req_page,
+            &req_base,
+            "GET",
+            url,
+            &[("Accept".into(), "text/event-stream".into())],
+            None,
+            policy,
+            &csp,
+            opaque,
+            explorer_js::FetchMode::Cors,
+            creds,
+        ) else {
+            return Err(());
+        };
+        let tr = self.transport.clone();
+        let tx = self.es_tx.clone();
+        let j = tokio::spawn(async move {
+            let send = |ev: explorer_js::EsEvent| {
+                let _ = tx.send(EsDone {
+                    tab,
+                    ctx,
+                    handle,
+                    ev,
+                });
+            };
+            let ok = tr.fetch_stream(&req).await.ok().filter(|r| {
+                r.status == 200
+                    && r.header("content-type").is_some_and(|c| {
+                        c.split(';')
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .eq_ignore_ascii_case("text/event-stream")
+                    })
+            });
+            let Some(resp) = ok else {
+                send(explorer_js::EsEvent::Error);
+                return;
+            };
+            send(explorer_js::EsEvent::Open);
+            let mut parser = explorer_net::sse::SseParser::new();
+            let mut body = resp.body;
+            while let Some(chunk) = body.recv().await {
+                let Ok(bytes) = chunk else { break };
+                for ev in parser.feed(&bytes) {
+                    send(explorer_js::EsEvent::Message {
+                        data: ev.data,
+                        event: ev.event,
+                        id: ev.id,
+                    });
+                }
+            }
+            send(explorer_js::EsEvent::Error);
+        });
+        self.net_tasks.insert((tab, handle), j);
+        Ok(())
+    }
+
     /// Livre une `NetResponse` au moteur puis applique le
     /// tour post-script : microtasks, resynchro DOM +
     /// relayout, drains (réseau chaîné, cookies, storage).
@@ -1552,6 +1674,47 @@ impl Session {
             }
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après réponse crypto");
+            Self::sync_for_apply(eng.as_mut())
+        };
+        if let Some(s) = mutated {
+            self.queue_apply_sync(tab, s);
+        }
+        self.after_script(tab);
+    }
+
+    /// Livre un `EsEvent` au flux `handle` du contexte `ctx`
+    /// (JS-C92) — même discipline que
+    /// [`Self::deliver_crypto_response`] : buffer si le moteur
+    /// est détaché (rejoué à la réinsertion), tour post-script
+    /// complet — un handler `message` peut muter le DOM et
+    /// émettre fetch/XHR/`postMessage`.
+    fn deliver_es(
+        &mut self,
+        tab: TabId,
+        ctx: explorer_js::JsCtxId,
+        handle: u64,
+        ev: explorer_js::EsEvent,
+    ) {
+        let mutated = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            if entry.js_detached.is_some() {
+                entry.js_pending_es.push((ctx, handle, ev));
+                return;
+            }
+            let Some(eng) = entry.js.as_mut() else {
+                return;
+            };
+            if let Err(e) = eng.deliver_es_event(ctx, handle, ev) {
+                tracing::debug!(tab, error = %e, "livraison eventsource js");
+                let _ = self.events.send(CoreEvent::PipelineError {
+                    tab: Some(tab),
+                    message: e.to_string(),
+                });
+            }
+            let n = eng.run_pending();
+            tracing::trace!(tab, jobs = n, "jobs js après événement sse");
             Self::sync_for_apply(eng.as_mut())
         };
         if let Some(s) = mutated {
@@ -1701,6 +1864,19 @@ impl Session {
                     result: d.result,
                 },
             );
+        }
+        // Événements `EventSource` (JS-C92) — multi-coups par
+        // flux ; `Error` = fin de tâche → le handle sort du
+        // registre (comme un `NetDone` complet).
+        let mut es_done = Vec::new();
+        while let Ok(d) = self.es_rx.try_recv() {
+            es_done.push(d);
+        }
+        for d in es_done {
+            if matches!(d.ev, explorer_js::EsEvent::Error) {
+                self.net_tasks.remove(&(d.tab, d.handle));
+            }
+            self.deliver_es(d.tab, d.ctx, d.handle, d.ev);
         }
         let n = done.len();
         for d in done {

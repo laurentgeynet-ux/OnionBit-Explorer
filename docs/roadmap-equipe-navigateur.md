@@ -6052,6 +6052,37 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   (`use`/`useOptimistic`/`useActionState`)
   à poursuivre.
 
+- [x] **JS-C92. `EventSource` réel
+  (Server-Sent Events)** — surface spec
+  (`readyState`, `url`, `withCredentials`,
+  `close()`→`Abort`, `on*`+`addEventListener`,
+  constantes) + couture `EsTransport`
+  engine-global → `NetRequest::EventSource`
+  streamée (`fetch_stream`, `Accept:
+  text/event-stream`, `connect-src` comme
+  XHR, quota `net_tasks`, `close()` =
+  `Abort` handle) → livraisons
+  `open`/`message`/`error` multi-coups
+  par `deliver_es_event` (realm émetteur,
+  tour post-script complet, buffer
+  détaché). Parseur incrémental
+  `explorer_net::sse` (lignes `\n`/`\r\n`/
+  `\r`, `\r\n` coupé entre chunks, BOM
+  tête, `data` jointe `\n`, `id` persistant,
+  événement sans `data` ignoré, queue
+  incomplète abandonnée — spec §9.2.6).
+  **Bornes** : pas de reconnexion
+  `Last-Event-ID` ni `retry:` à cette
+  tranche — `error` puis CLOSED, le
+  script ré-ouvre ; `ports`/`source`
+  absents du `MessageEvent` minimal ;
+  sans transport injecté → refus différé
+  `error` au checkpoint (feature-detect
+  + fallback, motif `WebSocket`).
+  Régressions : `eventsource_streams_
+  messages`, `eventsource_error_on_non_
+  sse` (2 session) + 6 unitaires parseur.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

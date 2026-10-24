@@ -473,6 +473,10 @@ pub(crate) struct Tab {
     /// Réponses `crypto.subtle` tamponnées pendant le détachement
     /// — même règle que `js_pending_net` (JS-C79).
     js_pending_crypto: Vec<explorer_js::CryptoResponse>,
+    /// Événements `EventSource` tamponnés pendant le
+    /// détachement (JS-C92) — `(ctx, handle, ev)`, même
+    /// règle que `js_pending_crypto`.
+    js_pending_es: Vec<(explorer_js::JsCtxId, u64, explorer_js::EsEvent)>,
     /// Livraisons de `<script>` dynamiques tamponnées pendant
     /// le détachement (CAP-169) — `(ctx, seq, corps décodé)`,
     /// `None` = refus → `error` sur l'élément.
@@ -684,6 +688,11 @@ pub struct Session {
     /// drainées, jamais de callback ré-entrant).
     crypto_tx: Sender<CryptoDone>,
     crypto_rx: Receiver<CryptoDone>,
+    /// Canal des événements `EventSource` (JS-C92) — les
+    /// tâches streamées `fetch_stream` y livrent leur
+    /// `EsDone` (multi-coups, même discipline `pump_net`).
+    es_tx: Sender<EsDone>,
+    es_rx: Receiver<EsDone>,
     /// Fetches script-initiés en vol, `(tab, handle)` →
     /// tâche tokio — `Abort` moteur ou fermeture d'onglet
     /// tuent la jointure.
@@ -794,6 +803,7 @@ impl Session {
         let (events, _) = broadcast::channel(cfg.event_capacity.max(1));
         let (net_tx, net_rx) = channel();
         let (crypto_tx, crypto_rx) = channel();
+        let (es_tx, es_rx) = channel();
         // `Accept-Language` au-dessus de toute la pile (étape
         // 118) : la cellule démarre vide — l'hôte la pose via
         // `set_accept_language` (réglages app → API) et elle
@@ -851,6 +861,8 @@ impl Session {
             net_rx,
             crypto_tx,
             crypto_rx,
+            es_tx,
+            es_rx,
             net_tasks: HashMap::new(),
             dyn_tasks: HashMap::new(),
             max_script_net: cfg.max_script_net,
@@ -1157,6 +1169,7 @@ impl Session {
                 js_pending_net: Vec::new(),
                 js_pending_dyn: Vec::new(),
                 js_pending_crypto: Vec::new(),
+                js_pending_es: Vec::new(),
                 js_pending_attrs: Vec::new(),
                 sync_floor: None,
                 media: Vec::new(),

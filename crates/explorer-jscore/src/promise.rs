@@ -354,6 +354,7 @@ impl Engine {
                     || self.pump_stream_reads()? > 0
                     || crate::idb::deliver_idb_requests(self)? > 0
                     || self.deliver_ws()? > 0
+                    || self.drain_es()? > 0
                     || self.deliver_bc()? > 0
                 {
                     delivered = true;
