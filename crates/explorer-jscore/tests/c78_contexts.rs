@@ -300,12 +300,61 @@ fn c78_post_message_origin_required_and_star_rejected() {
         msg.contains("SyntaxError"),
         "SyntaxError attendu, obtenu : {msg}"
     );
-    // `'*'` → SyntaxError (arrêt v1 : exiger la vraie origine —
-    // jamais de broadcast silencieux).
-    let r = e.eval("frames[0].postMessage('x', '*')");
-    assert!(r.is_err(), "'*' doit jeter SyntaxError");
+    // `''` → SyntaxError (origine vide illégale).
+    let r = e.eval("frames[0].postMessage('x', '')");
+    assert!(r.is_err(), "'' doit jeter SyntaxError");
     let msg = format!("{:?}", r.unwrap_err());
     assert!(msg.contains("SyntaxError"), "SyntaxError attendu : {msg}");
+    // `'*'` (spec) = livrer sans check d'origine — la cible
+    // reçoit `origin`/`source` honnêtes (cap « web réel » :
+    // les embeds font `postMessage(x, '*')`).
+    ev_ctx(
+        &mut e,
+        1,
+        "var got = null; window.addEventListener('message', function(ev) { got = { d: ev.data, o: ev.origin }; });",
+    );
+    ev(&mut e, "frames[0].postMessage('x', '*')");
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(ev_ctx(&mut e, 1, "got.d"), "x");
+    assert_eq!(ev_ctx(&mut e, 1, "got.o"), "https://top.example");
+    // `targetOrigin` explicite non concordant → pas de livraison
+    // (silencieux, spec).
+    ev_ctx(&mut e, 1, "got = null;");
+    ev(
+        &mut e,
+        "frames[0].postMessage('x', 'https://nomatch.example')",
+    );
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(ev_ctx(&mut e, 1, "got"), "null");
+}
+
+/// `scrollTo`/`scrollBy`/`scroll`/`focus`/`blur`/`close` sur le
+/// global — no-op bornés honnêtes (CAP-175 : les scripts les
+/// appellent librement au boot, jamais d'exception — même motif
+/// que `scrollIntoView`, JS-C74 ; la géométrie/scroll réel reste
+/// l'arc #19/JS-8).
+#[test]
+fn c78_window_scroll_focus_noop() {
+    let (mut e, _d) = top_engine();
+    let s = e
+        .eval(
+            "[ typeof scrollTo, typeof scrollBy, typeof scroll,
+               typeof focus, typeof blur, typeof close ].join(',')",
+        )
+        .map(|v| e.describe(v))
+        .unwrap_or_default();
+    assert_eq!(s, "function,function,function,function,function,function");
+    // Les appels ne jettent pas (no-op bornés).
+    e.eval("scrollTo(0,0); scrollBy(0,0); scroll(0,0); focus(); blur()")
+        .expect("no-ops appelables");
+    // `window.scrollX`/`scrollY` restent 0 (pas de scroll
+    // plombé — état honnête).
+    assert_eq!(
+        e.eval("scrollX + ',' + scrollY")
+            .map(|v| e.describe(v))
+            .unwrap_or_default(),
+        "0,0"
+    );
 }
 
 #[test]

@@ -591,6 +591,15 @@ pub(crate) fn install_ctx_window_props(e: &mut crate::Engine) {
     set_acc(e, "closed", window_closed_get);
     let pm = e.native_fn("postMessage", window_post_message);
     e.set_own(g, "postMessage", pm, true);
+    // `scrollTo`/`scrollBy`/`scroll`/`focus`/`blur`/`close`
+    // sur le global top — no-op bornés honnêtes (même motif
+    // documenté que `scrollIntoView`, JS-C74 : les scripts
+    // les appellent librement, jamais d'exception ; la
+    // géométrie/scroll réel reste l'arc #19/JS-8).
+    for name in ["scrollTo", "scrollBy", "scroll", "focus", "blur", "close"] {
+        let f = e.native_fn(name, window_noop);
+        e.set_own(g, name, f, true);
+    }
 }
 
 /// `window.postMessage` — `this` peut être le global d'un

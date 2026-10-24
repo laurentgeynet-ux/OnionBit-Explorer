@@ -1400,6 +1400,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-175 — `postMessage '*'` spec + méthodes
+  fenêtre no-op bornées** (`explorer-jscore` —
+  cap « web réel sécurisé » ; numéro officiel
+  attribué à l'intégration ; trous mesurés par
+  sonde empirique `_census_*`) : deux réparations
+  de surface — `postMessage(x, '*')` : le refus
+  `'*'`→SyntaxError était une sur-restriction
+  (spec : `'*'` = livrer **sans** check d'origine,
+  la cible reçoit `origin`/`source` honnêtes et
+  décide — le patron le plus fréquent des embeds
+  réels) ; `window.scrollTo`/`scrollBy`/`scroll`/
+  `focus`/`blur`/`close` : fonctions no-op bornées
+  installées sur le global (même motif documenté
+  que `scrollIntoView`, JS-C74 — les scripts les
+  appellent librement au boot, jamais d'exception ;
+  la géométrie/scroll réel reste l'arc #19/JS-8,
+  `scrollX`/`scrollY` restent 0 = état honnête).
+  Tests jscore `c78_post_message_origin_required_*
+  ` (`'*'` livré avec `origin`/`source`, `''`
+  → SyntaxError, mismatch explicite → silencieux)
+  + `c78_window_scroll_focus_noop` (typeof×6,
+  appels, scrollX/Y=0).
+
 - **CAP-174 — feature-detect : méthodes host
   lisibles en propriété fonctionnelle**
   (`explorer-jscore` — cap « web réel sécurisé » ;

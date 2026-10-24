@@ -3384,6 +3384,22 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-175. `postMessage '*'` spec +
+  méthodes fenêtre no-op bornées** — *(numéro
+  officiel attribué à l'intégration ; trous
+  mesurés par sonde empirique `_census_*`)* :
+  `postMessage(x, '*')` — le refus `'*'`→SyntaxError
+  était une sur-restriction (spec : `'*'` = livrer
+  sans check d'origine, `origin`/`source` honnêtes —
+  le patron le plus fréquent des embeds réels).
+  `window.scrollTo`/`scrollBy`/`scroll`/`focus`/`blur`/
+  `close` — fonctions no-op bornées sur le global
+  (même motif documenté que `scrollIntoView` JS-C74 ;
+  géométrie/scroll réel = arc #19/JS-8, `scrollX`/
+  `scrollY` restent 0 = état honnête). Tests
+  `c78_post_message_origin_required_*` +
+  `c78_window_scroll_focus_noop`.
+
 - [x] **CAP-174. Feature-detect : méthodes host
   lisibles en propriété fonctionnelle** —
   *(numéro officiel attribué à l'intégration ;

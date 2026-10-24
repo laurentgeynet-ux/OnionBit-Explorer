@@ -1733,12 +1733,14 @@ impl Engine {
     }
 
     /// `postMessage(data, targetOrigin)` vers `target` — vérifié
-    /// à l'émission : `targetOrigin` exigé (`undefined`/absent →
-    /// `SyntaxError`), `*` → `SyntaxError` (vérification réelle
-    /// exigée — jamais de « dégrade honnête » silencieux, arrêt
-    /// journal) ; origine non concordante → retour silencieux
-    /// (spec — le message n'est jamais livré). Contexte mort →
-    /// no-op silencieux. Donnée clonée `WireValue` à l'émission.
+    /// à l'émission : `targetOrigin` exigé (`undefined`/absent/
+    /// vide → `SyntaxError`) ; `'*'` (spec) = livrer sans
+    /// vérification d'origine — la cible reçoit `origin`/`source`
+    /// honnêtes et décide (cap « web réel » : les embeds réels
+    /// font `postMessage(x, '*')`) ; origine explicite non
+    /// concordante → retour silencieux (spec — le message n'est
+    /// jamais livré). Contexte mort → no-op silencieux.
+    /// Donnée clonée `WireValue` à l'émission.
     pub(crate) fn post_message(
         &mut self,
         target: crate::context::CtxId,
@@ -1757,16 +1759,20 @@ impl Engine {
             ));
         }
         let target_origin = self.to_js_string(args[1])?;
-        if target_origin.is_empty() || target_origin == "*" {
+        if target_origin.is_empty() {
             return Err(self.syntax_error(
-                "Failed to execute 'postMessage' on 'Window': 'targetOrigin' is required and '*' is not supported",
+                "Failed to execute 'postMessage' on 'Window': 'targetOrigin' is required",
             ));
         }
         if !self.ctxs[target as usize].alive {
             return Ok(Value::Undefined);
         }
+        // `'*'` (spec) = livrer sans vérification d'origine —
+        // la cible reçoit `origin`/`source` honnêtes et décide.
+        // Une origine explicite non concordante → retour
+        // silencieux (le message n'est jamais livré).
         let dest_origin = self.ctx_origin(target);
-        if dest_origin != target_origin {
+        if target_origin != "*" && dest_origin != target_origin {
             // Origine non concordante → pas de livraison (spec —
             // échec silencieux, pas d'erreur).
             return Ok(Value::Undefined);
