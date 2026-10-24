@@ -11,7 +11,7 @@ use explorer_layout::{LayoutBox, Rect};
 use explorer_net::url::Url;
 use explorer_render::ImageTable;
 
-use super::CoreError;
+use super::{CoreError, SandboxFlags};
 
 /// Hit-test profond : la boîte la plus imbriquée contenant
 /// `(x, y)` document gagne — renvoie son `NodeId` source
@@ -522,16 +522,41 @@ pub(crate) enum IframeKind {
     Src(String),
 }
 
+/// Drapeaux `sandbox` d'un `<iframe>` depuis l'attribut
+/// (CAP-149) : séparés par espaces, jetons insensibles à
+/// la casse, inconnus ignorés (spec HTML « parsing a
+/// sandboxing directive » — un `sandbox` **vide** restreint
+/// tout). `None` = attribut absent = contexte plein droit.
+pub(crate) fn parse_sandbox(attr: Option<&str>) -> Option<SandboxFlags> {
+    let attr = attr?;
+    let has = |tok: &str| {
+        attr.split_ascii_whitespace()
+            .any(|t| t.eq_ignore_ascii_case(tok))
+    };
+    Some(SandboxFlags {
+        scripts: has("allow-scripts"),
+        same_origin: has("allow-same-origin"),
+        popups: has("allow-popups"),
+        forms: has("allow-forms"),
+        top_navigation: has("allow-top-navigation"),
+    })
+}
+
 /// `<iframe>` du document dans l'ordre — `(kind,
-/// referrerpolicy)` par élément (étape 128 + 132 +
-/// CAP-142 : sans `src` ni `srcdoc` l'élément saute —
-/// sa boîte reste un cadre vide ; l'attribut gouverne le
-/// `Referer` de la requête de sous-contexte, `None` =
-/// politique du document). La résolution/dédup/mixed-
-/// content vit dans `plan_subresources`.
+/// referrerpolicy, sandbox)` par élément (étape 128 + 132 +
+/// CAP-142 + CAP-149 : sans `src` ni `srcdoc` l'élément
+/// saute — sa boîte reste un cadre vide ; `referrerpolicy`
+/// gouverne le `Referer` de la requête de sous-contexte,
+/// `None` = politique du document ; `sandbox` restreint le
+/// contexte enfant — `None` = plein droit). La résolution/
+/// dédup/mixed-content vit dans `plan_subresources`.
 pub(crate) fn collect_iframes(
     dom: &Dom,
-) -> Vec<(IframeKind, Option<explorer_net::http::ReferrerPolicy>)> {
+) -> Vec<(
+    IframeKind,
+    Option<explorer_net::http::ReferrerPolicy>,
+    Option<SandboxFlags>,
+)> {
     let mut out = Vec::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
@@ -548,7 +573,11 @@ pub(crate) fn collect_iframes(
                 (None, None) => None,
             };
             if let Some(k) = kind {
-                out.push((k, element_referrer_policy(dom, n)));
+                out.push((
+                    k,
+                    element_referrer_policy(dom, n),
+                    parse_sandbox(dom.attribute(n, "sandbox").ok().flatten().as_deref()),
+                ));
             }
         }
         if let Ok(ch) = dom.children(n) {

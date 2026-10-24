@@ -560,7 +560,7 @@ pub fn partition_key(url: &Url) -> Option<String> {
 #[must_use]
 pub fn request_partition(req: &Request) -> Option<String> {
     match req.initiator.as_ref() {
-        Some(Initiator::Subresource(page)) => partition_key(page),
+        Some(Initiator::Subresource(page) | Initiator::Opaque(page)) => partition_key(page),
         Some(Initiator::TopLevelNav | Initiator::NavFrom(_)) | None => partition_key(&req.url),
     }
 }
@@ -584,6 +584,10 @@ fn same_site_allows(c: &Cookie, ini: Option<&Initiator>, req: &Request) -> bool 
     };
     match (c.same_site, ini) {
         (SameSite::None, _) | (_, Initiator::TopLevelNav) => true,
+        // Origine opaque (`<iframe sandbox>` sans
+        // `allow-same-origin`) : same-site avec rien —
+        // `Strict`/`Lax` retenus (spec Fetch/cookies).
+        (SameSite::Strict | SameSite::Lax, Initiator::Opaque(_)) => false,
         (SameSite::Strict, Initiator::NavFrom(p) | Initiator::Subresource(p))
         | (SameSite::Lax, Initiator::Subresource(p)) => same_site(p),
         (SameSite::Lax, Initiator::NavFrom(p)) => {

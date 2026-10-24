@@ -541,7 +541,35 @@ pub struct StoredCookie {
     pub partition: Option<String>,
 }
 
-/// Contexte de navigation imbriqué d'un `<iframe src>`
+/// Drapeaux `sandbox` d'un `<iframe>` (CAP-149) — `None` sur
+/// [`SubFrame::sandbox`] = pas d'attribut = contexte plein
+/// droit. Tout jeton absent de l'attribut = capacité **refusée**
+/// (spec HTML : le défaut est tout restreint).
+#[allow(clippy::struct_excessive_bools)] // chaque jeton `allow-*` EST un booléen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SandboxFlags {
+    /// `allow-scripts` présent — sinon aucun script du cadre
+    /// n'est évalué (le realm existe encore pour le miroir/
+    /// `contentWindow`, jamais de `eval` ni d'événement utile).
+    pub(crate) scripts: bool,
+    /// `allow-same-origin` présent — sinon le contexte vit en
+    /// **origine opaque** : `localStorage` isolé et jamais
+    /// persisté, `document.cookie` vide et muet, `Origin: null`,
+    /// `Sec-Fetch-Site: cross-site`, cookies `Lax`/`Strict`
+    /// retenus sur ses requêtes script.
+    pub(crate) same_origin: bool,
+    /// `allow-popups` (borne : les cadres n'ouvrent pas de
+    /// popup à cette tranche — jeton retenu pour la suite).
+    pub(crate) popups: bool,
+    /// `allow-forms` (borne : pas de soumission depuis un
+    /// cadre à cette tranche).
+    pub(crate) forms: bool,
+    /// `allow-top-navigation` (borne : les cadres ne
+    /// naviguent pas la page top-level à cette tranche).
+    pub(crate) top_navigation: bool,
+}
+
+/// Contexte de navigation imbriqué d'un `<iframe>`
 /// (étape 128 — socle) : le document enfant est fetché
 /// sous l'initiateur de la page parente (`Subresource` —
 /// `SameSite`/`CHIPS` corrects, `sec-fetch-dest: iframe`,
@@ -554,6 +582,9 @@ pub(crate) struct SubFrame {
     /// URL effectivement chargée (résolue sur la page) —
     /// `about:srcdoc` pour un document inline (CAP-142).
     pub(crate) url: Url,
+    /// Drapeaux `sandbox` de l'élément (CAP-149) — `None` =
+    /// contexte plein droit.
+    pub(crate) sandbox: Option<SandboxFlags>,
     /// HTML du `srcdoc` quand le sous-contexte est inline
     /// (CAP-142) — clé d'association boîte ↔ contexte côté
     /// composite (`None` = contexte fetché, clé = `url`).
@@ -588,6 +619,12 @@ pub(crate) struct FrameCtx {
     /// parent — sert à émettre `load` sur l'élément ; mort
     /// au re-parse (nettoyé, jamais déréférencé aveuglément).
     pub(crate) node: explorer_dom::NodeId,
+    /// Le contexte vit en origine **opaque** (CAP-149 :
+    /// `sandbox` sans `allow-same-origin`) — storage isolé
+    /// non persisté, cookies muets, `Origin: null` et
+    /// cookies `SameSite` jamais same-site sur ses
+    /// `NetRequest`.
+    pub(crate) opaque: bool,
 }
 
 /// `Cookie` filaire → forme persistée (expiration → secs

@@ -3359,6 +3359,34 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-149. `<iframe sandbox>`** —
+  restrictions de contexte *(numéro officiel
+  attribué à l'intégration)* : attribut
+  `sandbox` collecté à la vague (`collect_iframes`
+  → `SubPlan` → `SubTag::Frame` indexé →
+  `SubFrame::sandbox` → `FrameCtx`) — `None` =
+  plein droit, présent = tout jeton absent est
+  une capacité **refusée** (défaut spec).
+  `allow-scripts` : sans lui le realm enfant
+  existe (miroir, `contentWindow`) mais aucun
+  script n'est évalué. `allow-same-origin` :
+  sans lui le contexte vit en **origine
+  opaque** — `Initiator::Opaque` (net,
+  additif) → `Sec-Fetch-Site: cross-site`,
+  `Origin: null` (sérialisation spec), cookies
+  `Lax`/`Strict` retenus et `document.cookie`
+  muet, `localStorage` sous clé éphémère
+  `opaque:{ctx}` jamais persistée ; `'self'`
+  CSP n'étant pas une URL http(s), évalué
+  contre `about:blank`. `srcdoc` sandboxé
+  couvert. `allow-popups`/`allow-forms`/
+  `allow-top-navigation` retenus sur le
+  drapeau (bornes : aucun chemin popup/form/
+  top-nav depuis un cadre à cette tranche).
+  Tests : 6 session (`iframe_sandbox_*`,
+  `iframe_srcdoc_sandbox_*`, témoin
+  `iframe_plain_fetch_same_origin_baseline`).
+
 - [x] **CAP-148. `<a download>`** —
   téléchargement forcé *(numéro
   officiel attribué à

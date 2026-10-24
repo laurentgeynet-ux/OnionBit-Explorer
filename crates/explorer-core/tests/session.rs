@@ -9782,3 +9782,187 @@ async fn subtle_digest_unknown_algo_rejects() {
         "rejet NotSupportedError attendu : {dump}"
     );
 }
+
+// ===== CAP-149 — `<iframe sandbox>` : `allow-scripts` gate
+// l'exécution ; sans `allow-same-origin` le contexte vit en
+// origine opaque (storage isolé non persisté, cookies muets,
+// `Origin: null`, `sec-fetch-site: cross-site`) =====
+
+/// Page parente : un cadre sandboxé (restreint).
+const PAGE_FRAME_SANDBOXED: &str = "<!doctype html><html><body>\
+    <iframe src=\"/f\" sandbox=\"\"></iframe></body></html>";
+
+/// Page parente : cadre sandboxé `allow-scripts` seul.
+const PAGE_FRAME_ALLOW_SCRIPTS: &str = "<!doctype html><html><body>\
+    <iframe src=\"/f\" sandbox=\"allow-scripts\"></iframe></body></html>";
+
+/// Page parente : cadre plein droit (témoin).
+const PAGE_FRAME_PLAIN: &str = "<!doctype html><html><body>\
+    <iframe src=\"/f\"></iframe></body></html>";
+
+/// Enfant scripté : mute son document — n'atterrit que si
+/// les scripts courent (marqueur concaténé : le littéral
+/// `'en'+'fant-js'` ne contient pas `enfant-js`, qui
+/// n'apparaît au dump que si le script s'est évalué).
+const FRAME_SANDBOX_CHILD: &str = "<!doctype html><html><body>\
+    <p id=\"c\">avant</p>\
+    <script>document.getElementById('c').textContent = 'en'+'fant-js'\
+    </script></body></html>";
+
+/// `sandbox` (vide = tout restreint) : aucun script du cadre
+/// ne s'évalue — le DOM enfant reste à l'état parsé.
+#[tokio::test]
+async fn iframe_sandbox_blocks_scripts() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FRAME_SANDBOXED);
+    t.route("/f", 200, FRAME_SANDBOX_CHILD);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.frame_dom_dump(id, 0).unwrap_or_default();
+    assert!(
+        !dump.contains("enfant-js"),
+        "script sandboxé évalué : {dump}"
+    );
+    assert!(dump.contains("avant"), "{dump}");
+}
+
+/// `sandbox=\"allow-scripts\"` : le jeton lève la
+/// restriction scripts — le cadre s'exécute (mais reste
+/// opaque : pas de `allow-same-origin`).
+#[tokio::test]
+async fn iframe_sandbox_allow_scripts_runs() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FRAME_ALLOW_SCRIPTS);
+    t.route("/f", 200, FRAME_SANDBOX_CHILD);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.frame_dom_dump(id, 0).unwrap_or_default();
+    assert!(dump.contains("enfant-js"), "allow-scripts : {dump}");
+}
+
+/// Enfant qui écrit `localStorage` puis le relit.
+const FRAME_LS_CHILD: &str = "<!doctype html><html><body>\
+    <p id=\"c\">?</p>\
+    <script>localStorage.setItem('k', 'v-en'+'fant');\
+    document.getElementById('c').textContent = \
+    localStorage.getItem('k')\
+    </script></body></html>";
+
+/// Page lectrice top-level : relit `k` sous l'origine
+/// réelle — `lit:null` si l'écriture opaque n'a pas fui.
+const PAGE_LS_PROBE: &str = "<!doctype html><html><body>\
+    <p id=\"c\">?</p>\
+    <script>document.getElementById('c').textContent = \
+    'lit:' + localStorage.getItem('k')\
+    </script></body></html>";
+
+/// Origine opaque (`sandbox` sans `allow-same-origin`) :
+/// `localStorage` du cadre est une map éphémère propre au
+/// contexte — la relecture interne fonctionne, mais la clé
+/// n'atterrit jamais dans le stock de l'origine réelle :
+/// une navigation top-level ultérieure relit `null`.
+#[tokio::test]
+async fn iframe_sandbox_opaque_storage_isolated() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FRAME_ALLOW_SCRIPTS);
+    t.route("/f", 200, FRAME_LS_CHILD);
+    t.route("/read", 200, PAGE_LS_PROBE);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.frame_dom_dump(id, 0).unwrap_or_default();
+    assert!(
+        dump.contains("v-enfant"),
+        "map éphémère du ctx opaque fonctionnelle : {dump}"
+    );
+    // Navigation top-level sous l'origine réelle : la clé
+    // écrite dans le ctx opaque est invisible — jamais
+    // rangée sous `http://h.test`.
+    s.navigate(id, "http://h.test/read").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(dump.contains("lit:null"), "fuite storage opaque : {dump}");
+}
+
+/// Enfant scripté qui émet `fetch('/res')` — en contexte
+/// opaque la requête est cross-origin (`sec-fetch-site:
+/// cross-site`, `Origin: null` sur le POST).
+const FRAME_FETCH_POST: &str = "<!doctype html><html><body>\
+    <p id=\"c\">?</p>\
+    <script>fetch('/res', {method:'POST', body:'x'})\
+    .then(function(r){return r.text()})\
+    .then(function(t){\
+    document.getElementById('c').textContent = 'got:'+t})\
+    </script></body></html>";
+
+/// Fetch depuis un contexte opaque (`allow-scripts` seul
+/// — les scripts courent, l'origine reste opaque) :
+/// `Origin: null` et `sec-fetch-site: cross-site` sur la
+/// requête émise.
+#[tokio::test]
+async fn iframe_sandbox_opaque_fetch_is_cross() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FRAME_ALLOW_SCRIPTS);
+    t.route("/f", 200, FRAME_FETCH_POST);
+    t.route("/res", 200, "RES-BODY");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    assert_eq!(
+        t.last_header("origin").as_deref(),
+        Some("null"),
+        "Origin opaque sérialisé null"
+    );
+    assert_eq!(
+        t.last_header("sec-fetch-site").as_deref(),
+        Some("cross-site"),
+        "opaque jamais same-site"
+    );
+}
+
+/// `sandbox` + `srcdoc` : l'attribut restreint aussi le
+/// document inline — le script srcdoc ne s'évalue pas.
+#[tokio::test]
+async fn iframe_srcdoc_sandbox_blocks_scripts() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <iframe sandbox srcdoc=\"<body><p>x</p>\
+         <script>document.querySelector('p').textContent='R'+'AN'</script>\
+         </body>\"></iframe></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.frame_dom_dump(id, 0).unwrap_or_default();
+    assert!(!dump.contains("RAN"), "srcdoc sandboxé évalué : {dump}");
+}
+
+/// Témoin : le cadre non sandboxé d'origine identique émet
+/// `sec-fetch-site: same-origin` — le contraste prouve que
+/// le travers opaque est spécifique au sandbox.
+#[tokio::test]
+async fn iframe_plain_fetch_same_origin_baseline() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_FRAME_PLAIN);
+    t.route("/f", 200, FRAME_FETCH_POST);
+    t.route("/res", 200, "RES-BODY");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    assert_eq!(
+        t.last_header("sec-fetch-site").as_deref(),
+        Some("same-origin"),
+        "témoin same-origin"
+    );
+    assert_eq!(
+        t.last_header("origin").as_deref(),
+        Some("http://h.test"),
+        "témoin Origin réel"
+    );
+}

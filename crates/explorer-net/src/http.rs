@@ -275,6 +275,14 @@ pub enum Initiator {
     /// `Strict`/`Lax` n'envoient que same-site ; `None`
     /// reste libre (`Secure` exigé à la pose).
     Subresource(Url),
+    /// Sous-ressource émise depuis un document d'origine
+    /// **opaque** (`<iframe sandbox>` sans
+    /// `allow-same-origin`, CAP-149) : l'URL du document est
+    /// conservée (résolution, partition CHIPS du site
+    /// top-level) mais l'origine opaque n'est **same-site
+    /// avec rien** — `Strict`/`Lax` ne partent jamais, et
+    /// `Sec-Fetch-Site` lit `cross-site`.
+    Opaque(Url),
 }
 
 impl Request {

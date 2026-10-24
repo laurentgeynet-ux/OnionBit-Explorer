@@ -1315,6 +1315,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-149 — `<iframe sandbox>`**
+  (`explorer-net` + `explorer-core` — cap « web
+  réel sécurisé » ; numéro officiel attribué à
+  l'intégration, compteur gelé) : attribut
+  `sandbox` collecté à la vague
+  (`collect_iframes` → `SubPlan` →
+  `SubTag::Frame` indexé → `SubFrame::sandbox`
+  → `FrameCtx`) — `None` = plein droit ; tout
+  jeton absent = capacité refusée (défaut
+  spec). `allow-scripts` : sans lui le realm
+  enfant existe (miroir/`contentWindow`) mais
+  aucun script n'est évalué. `allow-same-origin`
+  : sans lui le contexte vit en **origine
+  opaque** — `Initiator::Opaque` (additif) →
+  `Sec-Fetch-Site: cross-site`, `Origin: null`,
+  cookies `Lax`/`Strict` retenus,
+  `document.cookie` muet, `localStorage`
+  éphémère `opaque:{ctx}` jamais persisté ;
+  `'self'` CSP évalué contre `about:blank`.
+  `srcdoc` sandboxé couvert. `allow-popups`/
+  `allow-forms`/`allow-top-navigation` retenus
+  (bornes : pas de chemin popup/form/top-nav
+  depuis un cadre à cette tranche). Tests :
+  6 session.
+
 - **CAP-148 — `<a download>`**
   (`explorer-net` +
   `explorer-core` — cap « web

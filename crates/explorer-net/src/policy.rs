@@ -482,6 +482,9 @@ pub fn sec_fetch_headers(req: &Request) -> Vec<(String, String)> {
     );
     let site = match req.initiator.as_ref() {
         None | Some(Initiator::TopLevelNav) => "none",
+        // Origine opaque (CAP-149) : jamais same-* — le site
+        // se lit `cross-site` comme une origine étrangère.
+        Some(Initiator::Opaque(_)) => "cross-site",
         Some(Initiator::NavFrom(page) | Initiator::Subresource(page)) => fetch_site(page, &req.url),
     };
     let mode = if nav {

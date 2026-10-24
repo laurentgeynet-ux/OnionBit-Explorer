@@ -298,100 +298,10 @@ impl Session {
     /// [`Self::frame_ctx_load_events`]. Remplit
     /// `entry.frame_ctxs`.
     pub(crate) fn wire_frame_contexts(&mut self, tab: TabId, eng: &mut dyn JsEngine) {
-        // Phase collecte (immuable) : `<iframe>` en ordre
-        // document → (rang, NodeId parent, index `frames`,
-        // URL, html, scripts inline). Même correspondance
-        // par URL résolue que le composite (étape 129) : deux
-        // cadres homonymes partagent le `SubFrame` mais
-        // reçoivent chacun un realm propre (spec : realms
-        // distincts).
-        struct FramePlan {
-            ord: u32,
-            node: NodeId,
-            sub: usize,
-            url: Url,
-            html: String,
-            scripts: Vec<String>,
-        }
-        let mut plan = Vec::new();
-        {
-            let Some(entry) = self.tabs.get(&tab) else {
-                return;
-            };
-            let (Some(dom), Some(base)) = (entry.dom.as_ref(), entry.url.as_ref()) else {
-                return;
-            };
-            for (ord, node) in composite::iframe_nodes(dom).into_iter().enumerate() {
-                // `srcdoc` prime sur `src` (spec, CAP-142) —
-                // association par **contenu** comme le
-                // composite (tous les `about:srcdoc`
-                // partagent leur URL) ; `src` = par URL.
-                let srcdoc = dom.attribute(node, "srcdoc").ok().flatten();
-                let sub = if let Some(sd) = srcdoc.as_deref() {
-                    let Some(sub) = entry
-                        .frames
-                        .iter()
-                        .position(|f| f.srcdoc.as_deref() == Some(sd))
-                    else {
-                        continue;
-                    };
-                    sub
-                } else {
-                    let Ok(Some(src)) = dom.attribute(node, "src") else {
-                        continue;
-                    };
-                    let Ok(url) = Url::resolve(base, &src) else {
-                        continue;
-                    };
-                    let Some(sub) = entry
-                        .frames
-                        .iter()
-                        .position(|f| f.srcdoc.is_none() && f.url == url)
-                    else {
-                        continue;
-                    };
-                    sub
-                };
-                let f = &entry.frames[sub];
-                // Politiques du document enfant (132/CAP-145)
-                // — `srcdoc` hérite base + CSP du parent ;
-                // un cadre fetché suit sa `<base href>`
-                // propre et ses `<meta>` CSP.
-                let (f_base, f_csp) = if f.srcdoc.is_some() {
-                    (
-                        entry.nav_base().cloned().unwrap_or_else(|| base.clone()),
-                        entry.csp.clone(),
-                    )
-                } else {
-                    (
-                        document_base(&f.dom, &f.url)
-                            .0
-                            .unwrap_or_else(|| f.url.clone()),
-                        collect_meta_csp(&f.dom)
-                            .iter()
-                            .map(|v| explorer_net::csp::CspPolicy::parse(v, true))
-                            .collect::<Vec<_>>(),
-                    )
-                };
-                // Scripts **inline** de l'enfant, ordre
-                // document — `max_src = 0` écarte les `src=`
-                // externes (sous-ressources des cadres non
-                // fetchées à cette tranche — journal) ; les
-                // modules n'ont pas de chargeur en contexte.
-                let scripts = collect_scripts(&f.dom, &f.url, &f_base, true, 0, &f_csp)
-                    .into_iter()
-                    .filter_map(|i| (!i.module).then_some(i.inline).flatten())
-                    .collect();
-                plan.push(FramePlan {
-                    ord: u32::try_from(ord).unwrap_or(u32::MAX),
-                    node,
-                    sub,
-                    url: f.url.clone(),
-                    html: f.html.clone(),
-                    scripts,
-                });
-            }
-        }
+        let Some(entry) = self.tabs.get(&tab) else {
+            return;
+        };
+        let plan = frame_context_plan(entry);
         if plan.is_empty() {
             return;
         }
@@ -402,7 +312,21 @@ impl Session {
             let Some(ctx) = eng.context_new(&fp.url.to_string(), Some(fp.ord)) else {
                 continue;
             };
-            let (local, cookie) = self.origin_state(&fp.url);
+            // Origine opaque (CAP-149) : storage éphémère
+            // propre au contexte (`opaque:{ctx}` — jamais
+            // chargé ni persisté) et `document.cookie`
+            // vide/muet ; sinon l'état réel de l'origine.
+            let (local, cookie) = if fp.opaque {
+                (
+                    self.local_storage
+                        .get(&format!("opaque:{ctx}"))
+                        .cloned()
+                        .unwrap_or_default(),
+                    String::new(),
+                )
+            } else {
+                self.origin_state(&fp.url)
+            };
             eng.install_dom_ctx(ctx, &fp.html, &fp.url.to_string(), local, &cookie);
             for src in &fp.scripts {
                 self.eval_ctx_or_report(tab, eng, ctx, src);
@@ -415,6 +339,7 @@ impl Session {
                 sub: fp.sub,
                 url: fp.url,
                 node: fp.node,
+                opaque: fp.opaque,
             });
         }
         if let Some(entry) = self.tabs.get_mut(&tab) {
@@ -732,6 +657,115 @@ impl Session {
             eng.sync_mirror_attr(&path, attr, value);
         }
     }
+}
+
+/// Plan d'un realm enfant (étape 134) — collecte immuable
+/// avant la création des contextes : rang document,
+/// `NodeId` de l'élément `<iframe>`, index dans
+/// `Tab::frames`, URL, HTML source et scripts inline à
+/// évaluer.
+struct FramePlan {
+    ord: u32,
+    node: NodeId,
+    sub: usize,
+    url: Url,
+    html: String,
+    scripts: Vec<String>,
+    /// Origine opaque (`sandbox` sans
+    /// `allow-same-origin`, CAP-149).
+    opaque: bool,
+}
+
+/// Phase collecte de [`Session::wire_frame_contexts`] :
+/// `<iframe>` en ordre document → `FramePlan`. Même
+/// correspondance par URL résolue que le composite (étape
+/// 129) : deux cadres homonymes partagent le `SubFrame`
+/// mais reçoivent chacun un realm propre (spec : realms
+/// distincts).
+fn frame_context_plan(entry: &Tab) -> Vec<FramePlan> {
+    let mut plan = Vec::new();
+    let (Some(dom), Some(base)) = (entry.dom.as_ref(), entry.url.as_ref()) else {
+        return plan;
+    };
+    for (ord, node) in composite::iframe_nodes(dom).into_iter().enumerate() {
+        // `srcdoc` prime sur `src` (spec, CAP-142) —
+        // association par **contenu** comme le composite
+        // (tous les `about:srcdoc` partagent leur URL) ;
+        // `src` = par URL.
+        let srcdoc = dom.attribute(node, "srcdoc").ok().flatten();
+        let sub = if let Some(sd) = srcdoc.as_deref() {
+            let Some(sub) = entry
+                .frames
+                .iter()
+                .position(|f| f.srcdoc.as_deref() == Some(sd))
+            else {
+                continue;
+            };
+            sub
+        } else {
+            let Ok(Some(src)) = dom.attribute(node, "src") else {
+                continue;
+            };
+            let Ok(url) = Url::resolve(base, &src) else {
+                continue;
+            };
+            let Some(sub) = entry
+                .frames
+                .iter()
+                .position(|f| f.srcdoc.is_none() && f.url == url)
+            else {
+                continue;
+            };
+            sub
+        };
+        let f = &entry.frames[sub];
+        // Politiques du document enfant (132/CAP-145) —
+        // `srcdoc` hérite base + CSP du parent ; un cadre
+        // fetché suit sa `<base href>` propre et ses
+        // `<meta>` CSP.
+        let (f_base, f_csp) = if f.srcdoc.is_some() {
+            (
+                entry.nav_base().cloned().unwrap_or_else(|| base.clone()),
+                entry.csp.clone(),
+            )
+        } else {
+            (
+                document_base(&f.dom, &f.url)
+                    .0
+                    .unwrap_or_else(|| f.url.clone()),
+                collect_meta_csp(&f.dom)
+                    .iter()
+                    .map(|v| explorer_net::csp::CspPolicy::parse(v, true))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        // Scripts **inline** de l'enfant, ordre document —
+        // `max_src = 0` écarte les `src=` externes (sous-
+        // ressources des cadres non fetchées à cette
+        // tranche — journal) ; les modules n'ont pas de
+        // chargeur en contexte. `sandbox` sans
+        // `allow-scripts` (CAP-149) : le realm existe mais
+        // aucun script ne s'exécute — collecte sautée.
+        let sb = f.sandbox;
+        let scripts = if sb.is_some_and(|s| !s.scripts) {
+            Vec::new()
+        } else {
+            collect_scripts(&f.dom, &f.url, &f_base, true, 0, &f_csp)
+                .into_iter()
+                .filter_map(|i| (!i.module).then_some(i.inline).flatten())
+                .collect()
+        };
+        plan.push(FramePlan {
+            ord: u32::try_from(ord).unwrap_or(u32::MAX),
+            node,
+            sub,
+            url: f.url.clone(),
+            html: f.html.clone(),
+            scripts,
+            opaque: sb.is_some_and(|s| !s.same_origin),
+        });
+    }
+    plan
 }
 
 /// Props `KeyboardEvent` d'une touche DOM `key` (étape 103) :

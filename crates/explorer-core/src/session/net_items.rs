@@ -43,12 +43,14 @@ pub(crate) struct SubPlan {
     /// `<iframe src>` résolus — navigations de
     /// sous-contexte (bornés `max_frames`, partagé avec
     /// `srcdoc`) ; la `referrerpolicy` de l'élément voyage
-    /// avec l'URL (étape 132).
-    pub(crate) frames: Vec<(Url, Option<ReferrerPolicy>)>,
+    /// avec l'URL (étape 132) ainsi que ses `sandbox`
+    /// (CAP-149, `None` = plein droit).
+    pub(crate) frames: Vec<(Url, Option<ReferrerPolicy>, Option<SandboxFlags>)>,
     /// `<iframe srcdoc>` — documents **inline** (CAP-142) :
     /// aucun fetch, le HTML de l'attribut est parsé tel
-    /// quel en `SubFrame` (`about:srcdoc`) à la vague.
-    pub(crate) srcdoc_frames: Vec<String>,
+    /// quel en `SubFrame` (`about:srcdoc`) à la vague ; les
+    /// `sandbox` de l'élément suivent (CAP-149).
+    pub(crate) srcdoc_frames: Vec<(String, Option<SandboxFlags>)>,
 }
 
 /// Routage d'une complétion de sous-ressource (étape 50).
@@ -62,8 +64,10 @@ pub(crate) enum SubTag {
     Img(Url),
     /// `<iframe src>` (étape 128) — navigation d'un
     /// sous-contexte : la réponse est un document HTML,
-    /// parsé en `Dom` propre au commit.
-    Frame(Url),
+    /// parsé en `Dom` propre au commit. Index dans
+    /// `SubJob::frame_urls` (CAP-149 : l'URL, la
+    /// `referrerpolicy` ET les `sandbox` voyagent ensemble).
+    Frame(usize),
 }
 
 /// Graphe de modules préfetché (étape 50) — `sources` :
@@ -637,13 +641,14 @@ pub(crate) struct SubJob {
     /// `<iframe src>` résolus à `nav_apply` (étape 128 —
     /// déjà dédupliqués/mixed-content-filtrés/bornés) ;
     /// la `referrerpolicy` de l'élément voyage avec l'URL
-    /// (étape 132).
-    pub(crate) frame_urls: Vec<(Url, Option<ReferrerPolicy>)>,
+    /// (étape 132) ainsi que ses `sandbox` (CAP-149).
+    pub(crate) frame_urls: Vec<(Url, Option<ReferrerPolicy>, Option<SandboxFlags>)>,
     /// `<iframe srcdoc>` — documents inline (CAP-142) :
     /// pas de requête, le HTML est parsé en `SubFrame`
     /// (`about:srcdoc`) après la vague — la borne
-    /// `max_frames` est déjà appliquée en plan.
-    pub(crate) srcdoc_frames: Vec<String>,
+    /// `max_frames` est déjà appliquée en plan ; les
+    /// `sandbox` de l'élément suivent (CAP-149).
+    pub(crate) srcdoc_frames: Vec<(String, Option<SandboxFlags>)>,
     /// Politiques CSP du document (CAP-145) — servent les
     /// fetchs tardifs (`@import`, fonds/masques, fonts,
     /// modules) : le plan a déjà éliminé les sous-
@@ -838,22 +843,23 @@ impl SubJob {
                         self.img_bodies.insert(u.as_str(), resp.body);
                     }
                 }
-                SubTag::Frame(u) => {
+                SubTag::Frame(i) => {
+                    let (u, _, sandbox) = &self.frame_urls[i];
                     // XFO/CSP `frame-ancestors` (étape 134) :
                     // la réponse peut interdire l'embarquement.
-                    if explorer_net::policy::frame_embedding_allowed(&self.url, &u, &resp) {
-                        frames.push(store_frame(&self.url, &self.cookies, &u, &resp));
+                    if explorer_net::policy::frame_embedding_allowed(&self.url, u, &resp) {
+                        frames.push(store_frame(&self.url, &self.cookies, u, &resp, *sandbox));
                     }
-                } // SubTag reste inchangé — `referrerpolicy` vit
-                  // dans la `Request`, pas dans le routage.
+                } // `referrerpolicy`/`sandbox` vivent dans la
+                  // `Request`/le `SubFrame`, pas le routage.
             }
         })
         .await;
         // `srcdoc` (CAP-142) : document inline — le HTML de
         // l'attribut est le sous-contexte (`about:srcdoc`),
         // aucune requête n'a été émise ni attendue.
-        for html in &self.srcdoc_frames {
-            frames.push(store_srcdoc_frame(&self.url, html));
+        for (html, sandbox) in &self.srcdoc_frames {
+            frames.push(store_srcdoc_frame(&self.url, html, *sandbox));
         }
         self.eng = eng;
         self.async_mods = async_mods;
@@ -1283,6 +1289,43 @@ pub(crate) fn forbidden_request_header(name: &str) -> bool {
         )
 }
 
+/// `CorsRequest` d'un `fetch`/`XHR` cross `mode:cors` (étape
+/// 126 + JS-C77 + CAP-149) : en-têtes auteur non safelistés
+/// (ou `Content-Type` hors types « form ») →
+/// `unsafe_headers` déclenchant le preflight `OPTIONS` du
+/// `CorsTransport` ; `origin` = origine de la page ou `null`
+/// en contexte opaque.
+pub(crate) fn cors_request_for(
+    page: &Url,
+    headers: &[(String, String)],
+    opaque: bool,
+    credentials: explorer_net::http::FetchCredentials,
+) -> explorer_net::http::CorsRequest {
+    let mut unsafe_headers: Vec<String> = headers
+        .iter()
+        .filter(|(n, _)| !forbidden_request_header(n))
+        .filter(|(n, v)| {
+            !cors_safelisted_header(n)
+                || (n.trim().eq_ignore_ascii_case("content-type")
+                    && !explorer_net::policy::cors_safelisted_content_type(
+                        v.split(';').next().unwrap_or("").trim(),
+                    ))
+        })
+        .map(|(n, _)| n.trim().to_ascii_lowercase())
+        .collect();
+    unsafe_headers.sort();
+    unsafe_headers.dedup();
+    explorer_net::http::CorsRequest {
+        origin: if opaque {
+            "null".to_string()
+        } else {
+            origin_header_value(page)
+        },
+        credentials,
+        unsafe_headers,
+    }
+}
+
 /// Réponse cross-origin lisible par le script ? CORS minimal :
 /// `Access-Control-Allow-Origin: *` ou égal à l'origine
 /// canonique de la page — sinon la réponse est opaque
@@ -1331,7 +1374,7 @@ pub(crate) fn sub_jobs(
     sheet_urls: &[Url],
     scripts: &[ScriptItem],
     img_urls: &[Url],
-    frame_urls: &[(Url, Option<ReferrerPolicy>)],
+    frame_urls: &[(Url, Option<ReferrerPolicy>, Option<SandboxFlags>)],
     page_policy: Option<ReferrerPolicy>,
 ) -> VecDeque<(SubTag, Request)> {
     let mut jobs = VecDeque::new();
@@ -1355,9 +1398,9 @@ pub(crate) fn sub_jobs(
             sub_request(base, u, FetchDest::Image, page_policy),
         ));
     }
-    for (u, policy) in frame_urls {
+    for (i, (u, policy, _)) in frame_urls.iter().enumerate() {
         jobs.push_back((
-            SubTag::Frame(u.clone()),
+            SubTag::Frame(i),
             frame_request(base, u, policy.or(page_policy)),
         ));
     }
@@ -1414,7 +1457,13 @@ pub(crate) fn frame_request(base: &Url, url: &Url, policy: Option<ReferrerPolicy
 /// HTML est décodé (charset transport en amorce, comme la
 /// nav) et parsé en `Dom` propre : aucune mutation croisée
 /// avec le parent n'existe.
-pub(crate) fn store_frame(page: &Url, cookies: &CookieJar, u: &Url, resp: &Response) -> SubFrame {
+pub(crate) fn store_frame(
+    page: &Url,
+    cookies: &CookieJar,
+    u: &Url,
+    resp: &Response,
+    sandbox: Option<SandboxFlags>,
+) -> SubFrame {
     let partition = partition_key(page);
     for v in resp.headers_all("set-cookie") {
         let _ = cookies.set_from_header_ctx(u, v, partition.clone());
@@ -1424,6 +1473,7 @@ pub(crate) fn store_frame(page: &Url, cookies: &CookieJar, u: &Url, resp: &Respo
     let title = extract_title(&dom);
     SubFrame {
         url: u.clone(),
+        sandbox,
         srcdoc: None,
         dom,
         title,
@@ -1444,11 +1494,16 @@ pub(crate) fn store_frame(page: &Url, cookies: &CookieJar, u: &Url, resp: &Respo
 /// d'association boîte ↔ contexte côté composite (deux
 /// cadres au même HTML partagent le `SubFrame`, comme deux
 /// `src` homonymes).
-pub(crate) fn store_srcdoc_frame(page: &Url, html: &str) -> SubFrame {
+pub(crate) fn store_srcdoc_frame(
+    page: &Url,
+    html: &str,
+    sandbox: Option<SandboxFlags>,
+) -> SubFrame {
     let dom = TreeBuilder::parse(html);
     let title = extract_title(&dom);
     SubFrame {
         url: Url::parse("about:srcdoc").unwrap_or_else(|_| page.clone()),
+        sandbox,
         srcdoc: Some(html.to_string()),
         dom,
         title,

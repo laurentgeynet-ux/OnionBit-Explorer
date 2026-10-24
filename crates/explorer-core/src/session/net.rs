@@ -391,8 +391,9 @@ impl Session {
         // Document émetteur (étape 134) + sa base effective
         // (étape 135) + ses politiques Referer (132) et CSP
         // (CAP-145) — un `fetch` de cadre vit sous **son**
-        // document, pas sous la page top.
-        let (req_page, req_base, policy, csp);
+        // document, pas sous la page top. `opaque` = origine
+        // opaque sandboxée (CAP-149).
+        let (req_page, req_base, policy, csp, opaque);
         if ctx == explorer_js::JS_CTX_TOP {
             let Some(e) = self.tabs.get(&tab) else {
                 return Err(());
@@ -401,8 +402,9 @@ impl Session {
             req_base = e.nav_base().cloned().unwrap_or_else(|| base.clone());
             policy = e.referrer_policy;
             csp = e.csp.clone();
+            opaque = false;
         } else {
-            let Some(sf) = self
+            let Some((f_url, f_opaque, sf)) = self
                 .tabs
                 .get(&tab)
                 .and_then(|e| e.frame_ctxs.iter().find(|f| f.ctx == ctx))
@@ -410,14 +412,14 @@ impl Session {
                     self.tabs
                         .get(&tab)
                         .and_then(|e| e.frames.get(f.sub))
-                        .map(|sf| (f.url.clone(), sf))
+                        .map(|sf| (f.url.clone(), f.opaque, sf))
                 })
             else {
                 tracing::trace!(tab, handle, ctx, "fetch d'un contexte mort");
                 return Err(());
             };
-            let (f_url, sf) = sf;
             req_page = f_url;
+            opaque = f_opaque;
             // `srcdoc` hérite la base du parent (CAP-142,
             // spec HTML) ; un cadre fetché résout contre sa
             // propre `<base href>` éventuelle.
@@ -448,6 +450,7 @@ impl Session {
             body,
             policy,
             &csp,
+            opaque,
             mode,
             credentials,
         ) else {
@@ -455,7 +458,13 @@ impl Session {
         };
         let tr = self.transport.clone();
         let tx = self.net_tx.clone();
-        let page_origin = origin_header_value(&req_page);
+        // Origine opaque : `null` (sérialisation spec) — ACAO
+        // `*` reste admis, un `ACAO: <origine>` ne l'est pas.
+        let page_origin = if opaque {
+            "null".to_string()
+        } else {
+            origin_header_value(&req_page)
+        };
         let req_url = req.url.clone();
         // `credentials` du script (JS-C77) — porté hors
         // `req.cors` : `no-cors`/`include` (`sendBeacon`
@@ -610,7 +619,7 @@ impl Session {
         // l'identité du parent. **Avant** `drain_script_net` :
         // un `document.cookie` suivi d'un `fetch` dans le même
         // script doit émettre le cookie — comme le top-level.
-        let sinks: Vec<(Url, Vec<String>, std::collections::BTreeMap<String, String>)> = self
+        let sinks: Vec<FrameSink> = self
             .tabs
             .get_mut(&tab)
             .map(|e| {
@@ -619,14 +628,31 @@ impl Session {
                         .iter()
                         .map(|f| {
                             let (writes, map) = eng.drain_sinks_ctx(f.ctx);
-                            (f.url.clone(), writes, map)
+                            (f.url.clone(), f.opaque, f.ctx, writes, map)
                         })
                         .collect()
                 })
             })
             .unwrap_or_default();
         if let Some(page) = self.tabs.get(&tab).and_then(|e| e.url.clone()) {
-            for (furl, writes, map) in sinks {
+            for (furl, opaque, ctx, writes, map) in sinks {
+                // Origine opaque (CAP-149) : `document.cookie`
+                // est muet (écritures jetées — pas de fuite
+                // vers le vrai jar) et `localStorage` vit
+                // sous une clé éphémère par contexte, jamais
+                // persistée (une origine opaque n'a pas
+                // d'identité durable — spec HTML).
+                if opaque {
+                    let key = format!("opaque:{ctx}");
+                    let changed = match self.local_storage.get(&key) {
+                        Some(prev) => *prev != map,
+                        None => !map.is_empty(),
+                    };
+                    if changed {
+                        self.local_storage.insert(key, map);
+                    }
+                    continue;
+                }
                 let partition = explorer_net::cookies::partition_key(&page);
                 for w in &writes {
                     self.cookies
@@ -838,9 +864,13 @@ impl Session {
         // (`0` = désactivé — vide) dans l'ordre document.
         let mut seen_frames = std::collections::HashSet::new();
         let mut seen_srcdoc = std::collections::HashSet::new();
-        let mut frames: Vec<(Url, Option<explorer_net::http::ReferrerPolicy>)> = Vec::new();
-        let mut srcdoc_frames: Vec<String> = Vec::new();
-        for (kind, policy) in collect_iframes(dom) {
+        let mut frames: Vec<(
+            Url,
+            Option<explorer_net::http::ReferrerPolicy>,
+            Option<SandboxFlags>,
+        )> = Vec::new();
+        let mut srcdoc_frames: Vec<(String, Option<SandboxFlags>)> = Vec::new();
+        for (kind, policy, sandbox) in collect_iframes(dom) {
             if frames.len() + srcdoc_frames.len() >= self.max_frames {
                 break;
             }
@@ -852,7 +882,7 @@ impl Session {
                             && allow(explorer_net::http::FetchDest::Iframe, &u)
                             && seen_frames.insert(u.as_str())
                         {
-                            frames.push((u, policy));
+                            frames.push((u, policy, sandbox));
                         }
                     }
                 }
@@ -865,7 +895,7 @@ impl Session {
                     if allow(explorer_net::http::FetchDest::Iframe, page)
                         && seen_srcdoc.insert(html.clone())
                     {
-                        srcdoc_frames.push(html);
+                        srcdoc_frames.push((html, sandbox));
                     }
                 }
             }
@@ -1227,3 +1257,15 @@ pub(crate) fn insert_images_payload(
     };
     insert_images_into(dom, images, base, bodies, max_px, img_decoded, img_bodies);
 }
+
+/// Drain des surfaces script d'un contexte enfant (étape
+/// 134 + CAP-149) : (URL de l'enfant, origine opaque,
+/// `JsCtxId`, écritures `document.cookie`, map
+/// `localStorage` complète).
+type FrameSink = (
+    Url,
+    bool,
+    u32,
+    Vec<String>,
+    std::collections::BTreeMap<String, String>,
+);

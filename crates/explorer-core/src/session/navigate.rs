@@ -1129,6 +1129,7 @@ impl Session {
         body: Option<&str>,
         policy: Option<ReferrerPolicy>,
         csp: &[explorer_net::csp::CspPolicy],
+        opaque: bool,
         fetch_mode: explorer_js::FetchMode,
         credentials: explorer_js::FetchCredentials,
     ) -> Option<(Request, bool)> {
@@ -1140,11 +1141,22 @@ impl Session {
         // requêtes à destination vide — chaque politique doit
         // l'admettre ; silence côté JS (le `NetResponse`
         // d'échec est rapporté à l'appelant, pas d'exception).
-        if !explorer_net::csp::csp_allows(csp, page, FetchDest::Empty, &url) {
+        // Origine opaque (CAP-149) : `'self'` n'est jamais
+        // une URL http(s) — évalué contre `about:blank`.
+        let csp_page;
+        let page_for_csp = if opaque {
+            csp_page = Url::parse("about:blank").unwrap_or_else(|_| page.clone());
+            &csp_page
+        } else {
+            page
+        };
+        if !explorer_net::csp::csp_allows(csp, page_for_csp, FetchDest::Empty, &url) {
             return None;
         }
         let m = parse_method(method)?;
-        let cross = page.origin() != url.origin();
+        // Une origine opaque n'est l'origine de rien — **toute**
+        // cible est cross-origin pour le protocole CORS (spec).
+        let cross = opaque || page.origin() != url.origin();
         // JS-C77 — miroir `fetch(mode)`/`xhr.withCredentials` →
         // `Request.fetch_mode`/`CorsRequest.credentials` (types
         // jscore → enums net : même lexique, traduction pure).
@@ -1190,8 +1202,15 @@ impl Session {
             headers: initiator_headers_policy(page, &url, m, policy.unwrap_or_default()),
             body: body.map(|b| b.as_bytes().to_vec()),
             // `fetch`/`XHR` = sous-ressource de la page —
-            // `SameSite=Strict`/`Lax` exigent same-site (66).
-            initiator: Some(Initiator::Subresource(page.clone())),
+            // `SameSite=Strict`/`Lax` exigent same-site (66) ;
+            // origine opaque → `Opaque` : jamais same-site
+            // (`Strict`/`Lax` retenus, `sec-fetch-site:
+            // cross-site` — CAP-149).
+            initiator: Some(if opaque {
+                Initiator::Opaque(page.clone())
+            } else {
+                Initiator::Subresource(page.clone())
+            }),
             fetch_dest: FetchDest::Empty,
             // `fetch_mode`/`credentials` du script (JS-C77) —
             // le protocole CORS (126) ne s'arme que `mode:cors`.
@@ -1209,32 +1228,15 @@ impl Session {
             download_hint: None,
         };
         if cross && mode == FetchMode::Cors {
-            // Enforcement CORS (étape 126) : les en-têtes
-            // auteur non safelistés (ou `Content-Type` hors
-            // types « form ») déclenchent le preflight
-            // `OPTIONS` du `CorsTransport` — plus bloqués à
-            // l'émission (MVP documenté remplacé).
-            let mut unsafe_headers: Vec<String> = headers
-                .iter()
-                .filter(|(n, _)| !forbidden_request_header(n))
-                .filter(|(n, v)| {
-                    !cors_safelisted_header(n)
-                        || (n.trim().eq_ignore_ascii_case("content-type")
-                            && !explorer_net::policy::cors_safelisted_content_type(
-                                v.split(';').next().unwrap_or("").trim(),
-                            ))
-                })
-                .map(|(n, _)| n.trim().to_ascii_lowercase())
-                .collect();
-            unsafe_headers.sort();
-            unsafe_headers.dedup();
-            req.cors = Some(explorer_net::http::CorsRequest {
-                origin: origin_header_value(page),
-                // `credentials` du script (JS-C77 — `omit`/
-                // `same-origin`/`include` honorés).
-                credentials: creds,
-                unsafe_headers,
-            });
+            req.cors = Some(cors_request_for(page, headers, opaque, creds));
+        }
+        // Origine opaque (CAP-149) : `Origin: null` — la
+        // valeur produite par `initiator_headers_policy`
+        // (requête non-safe) comme le repli cross sont
+        // remplacés par la sérialisation d'origine opaque.
+        if opaque {
+            req.headers
+                .retain(|(n, _)| !n.eq_ignore_ascii_case("origin"));
         }
         req.headers.extend(sec_fetch_headers(&req));
         if cross
@@ -1243,8 +1245,12 @@ impl Session {
                 .iter()
                 .any(|(n, _)| n.eq_ignore_ascii_case("origin"))
         {
-            req.headers
-                .push(("origin".to_string(), origin_header_value(page)));
+            let o = if opaque {
+                "null".to_string()
+            } else {
+                origin_header_value(page)
+            };
+            req.headers.push(("origin".to_string(), o));
         }
         req.headers.extend(
             author_headers
