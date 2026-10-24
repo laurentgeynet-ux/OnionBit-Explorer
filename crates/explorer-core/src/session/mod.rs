@@ -191,6 +191,15 @@ pub(crate) struct Tab {
     /// `<base target>` brut (étape 135) — cible par défaut
     /// des `<a>`/`<form>` sans `target` propre.
     base_target: Option<String>,
+    /// `window.name` du contexte (CAP-159) — posé quand
+    /// l'onglet naît d'une intention nommée
+    /// (`window.open(u,"x")`/`target="x"`) : une intention
+    /// ultérieure portant ce nom navigue **cet** onglet
+    /// au lieu d'en ouvrir un nouveau (corrélation des
+    /// popups nommées — spec « selecting a browsing
+    /// context »). Installé dans le moteur via
+    /// `JsEngine::set_ctx_name` au `spawn_engine`.
+    win_name: Option<String>,
     /// Échéance `<meta refresh>` (CAP-143) — instant local +
     /// cible résolue ; le tick (`pump_timers`) transforme
     /// une échéance échue en intention de navigation. Gelée/
@@ -391,6 +400,12 @@ pub(crate) struct Tab {
     /// (compat) ou `drain_navs_shared` (session partagée).
     /// Bornée — un flot d'input n'accumule pas.
     pending_nav: std::collections::VecDeque<DrainAct>,
+    /// Intentions `NavRequest` dépilées du moteur en attente
+    /// de traduction (CAP-159) — `next_script_nav` ne rend
+    /// qu'une intention par appel ; sans tampon, le reste
+    /// du lot drainé était détruit (deux `window.open` du
+    /// même script perdaient le second).
+    pending_nav_reqs: std::collections::VecDeque<explorer_js::NavRequest>,
     /// Régions invalides accumulées (étape 55) — px CSS de
     /// document, scroll cuit (contrat `changed_rects`).
     /// Alimentée par `repaint` (diff avec la display list
@@ -994,6 +1009,42 @@ impl Session {
     }
 
     /// Ouvre un onglet vide.
+    /// Contexte cible d'une intention `NewTab` nommée
+    /// (CAP-159 — HTML « selecting a browsing context ») :
+    /// - `""`/`_blank` → toujours un onglet **neuf** sans nom ;
+    /// - `_self`/`_parent`/`_top` → l'onglet émetteur
+    ///   (repli défensif — filtrés en amont des chemins
+    ///   `<a>`/`<form>` ; `window.open(u,"_self")` les émet) ;
+    /// - nom arbitraire → l'onglet porteur de ce nom s'il
+    ///   existe (réutilisation — la popup OAuth/ Docs
+    ///   nommée est re-naviguée), sinon un onglet neuf
+    ///   **baptisé** de ce nom.
+    pub(crate) fn named_or_new_tab(&mut self, fallback: TabId, name: &str) -> TabId {
+        let n = name.trim();
+        if n.is_empty() || n.eq_ignore_ascii_case("_blank") {
+            return self.open_tab();
+        }
+        if matches!(
+            n.to_ascii_lowercase().as_str(),
+            "_self" | "_parent" | "_top"
+        ) {
+            return fallback;
+        }
+        if let Some(t) = self
+            .tabs
+            .iter()
+            .find(|(_, e)| e.win_name.as_deref() == Some(n))
+            .map(|(id, _)| *id)
+        {
+            return t;
+        }
+        let t = self.open_tab();
+        if let Some(e) = self.tabs.get_mut(&t) {
+            e.win_name = Some(n.to_string());
+        }
+        t
+    }
+
     pub fn open_tab(&mut self) -> TabId {
         let id = self.next_tab;
         self.next_tab += 1;
@@ -1007,6 +1058,7 @@ impl Session {
                 referrer_policy: None,
                 base_url: None,
                 base_target: None,
+                win_name: None,
                 refresh_at: None,
                 csp: Vec::new(),
                 hist_idx: 0,
@@ -1047,6 +1099,7 @@ impl Session {
                 animations: Vec::new(),
                 nav_epoch: 0,
                 pending_nav: std::collections::VecDeque::new(),
+                pending_nav_reqs: std::collections::VecDeque::new(),
                 dirty: Vec::new(),
                 emitted: 0,
                 bfcache: VecDeque::new(),

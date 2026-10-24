@@ -20,8 +20,10 @@ pub(crate) enum DrainAct {
     /// (étape 131 — `target=_blank`/nommé sur `<a>` ou
     /// `<form>`) : le drain ouvre un onglet puis y conduit
     /// la requête — l'intention vit dans la file de
-    /// l'onglet émetteur.
-    NewTab(Box<Request>),
+    /// l'onglet émetteur. Le second membre = nom de cible
+    /// (CAP-159) : `""`/`_blank` = toujours neuf ; un nom
+    /// réutilise l'onglet porteur s'il existe.
+    NewTab(Box<Request>, String),
     /// `history.go(d)` — résolu via `history_move` (ou son
     /// équivalent partagé) ; `0` = reload.
     Go(isize),

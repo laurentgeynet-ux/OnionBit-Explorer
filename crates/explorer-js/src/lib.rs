@@ -80,6 +80,10 @@ pub enum NavRequest {
         enctype: String,
         /// `(name, value)` des contrôles « successful ».
         fields: Vec<(String, String)>,
+        /// `formtarget`/`target` du formulaire (CAP-159) —
+        /// `""` = contexte courant ; `_blank`/nommé =
+        /// contexte neuf ou nommé à réutiliser.
+        target: String,
     },
     /// `history.pushState`/`replaceState` (CAP-151) —
     /// navigation **same-document** : la session résout
@@ -108,12 +112,19 @@ pub enum NavRequest {
     /// de l'entrée courante (méthode + corps — POST re-POSTe)
     /// sans entrée nouvelle.
     Reload,
-    /// `window.open(url)` ou clic scripté sur `<a
+    /// `window.open(url, target)` ou clic scripté sur `<a
     /// target=_blank|nom>` (CAP-153) — navigation dans un
-    /// **nouveau** contexte top-level ; l'intention vit
-    /// dans la file de l'onglet émetteur (même voie que le
-    /// clic `target=_blank`, étape 131).
-    NewTab(String),
+    /// **nouveau** contexte top-level ; un `name` non vide
+    /// désigne un contexte à réutiliser (CAP-159 — spec
+    /// « selecting a browsing context »). L'intention vit
+    /// dans la file de l'onglet émetteur.
+    NewTab {
+        /// URL brute — à résoudre côté session.
+        url: String,
+        /// Nom de cible (`window.open` arg 2, `target` de
+        /// `<a>`/`<form>`) — `""` = toujours neuf sans nom.
+        name: String,
+    },
 }
 
 /// Résolveur de spécificateurs de module fourni par l'hôte :
@@ -616,6 +627,11 @@ pub trait JsEngine: Send {
         self.sync_ctx_url(ctx, url, history_len);
     }
 
+    /// Nomme le contexte `ctx` pour `window.name` (CAP-159) —
+    /// corrélation `target="x"`/`window.open(u,"x")`. Défaut
+    /// : no-op (moteur sans contextes nommés — harnais).
+    fn set_ctx_name(&mut self, _ctx: JsCtxId, _name: &str) {}
+
     /// `document.referrer` (CAP-156) : le `Referer` envoyé
     /// par la navigation du document (`""` = aucun) — posé
     /// après `install_dom`, avant la première évaluation.
@@ -1079,6 +1095,10 @@ enum Cmd {
         state: Option<String>,
         popstate: bool,
     },
+    SetCtxName {
+        ctx: JsCtxId,
+        name: String,
+    },
     /// `document.referrer` du document top-level (CAP-156).
     SetPageReferrer {
         referrer: String,
@@ -1390,6 +1410,9 @@ impl JscoreEngine {
                     popstate,
                 } => {
                     eng.sync_ctx_state(ctx, &url, history_len, state.as_deref(), popstate);
+                }
+                Cmd::SetCtxName { ctx, name } => {
+                    eng.set_ctx_name(ctx, &name);
                 }
                 Cmd::SetPageReferrer { referrer } => {
                     eng.set_page_referrer(&referrer);
@@ -1855,6 +1878,13 @@ impl JsEngine for JscoreEngine {
         });
     }
 
+    fn set_ctx_name(&mut self, ctx: JsCtxId, name: &str) {
+        let _ = self.tx.send(Cmd::SetCtxName {
+            ctx,
+            name: name.to_string(),
+        });
+    }
+
     fn set_page_referrer(&mut self, referrer: &str) {
         let _ = self.tx.send(Cmd::SetPageReferrer {
             referrer: referrer.to_string(),
@@ -2304,6 +2334,7 @@ fn install_dom(
                 action: p.action,
                 enctype: p.enctype,
                 fields: p.fields,
+                target: p.target,
             });
         }));
         // `history.pushState`/`replaceState` (CAP-151) —
@@ -2335,12 +2366,13 @@ fn install_dom(
                 q6.borrow_mut().push(NavRequest::Reload);
             }),
         );
-        // `window.open` + `<a target>` scripté (CAP-153) —
-        // nouveau contexte top-level : même voie que le
-        // clic `target=_blank` (`DrainAct::NewTab`).
+        // `window.open` + `<a target>` scripté (CAP-153/159)
+        // — nouveau contexte top-level : même voie que le
+        // clic `target=_blank` (`DrainAct::NewTab`) — le
+        // nom gouverne la réutilisation (CAP-159).
         let q7 = nav_q.clone();
-        eng.set_open_hook(std::rc::Rc::new(move |u: String| {
-            q7.borrow_mut().push(NavRequest::NewTab(u));
+        eng.set_open_hook(std::rc::Rc::new(move |u: String, name: String| {
+            q7.borrow_mut().push(NavRequest::NewTab { url: u, name });
         }));
     }
     eng.install_xhr(std::rc::Rc::new(ChanXhr {

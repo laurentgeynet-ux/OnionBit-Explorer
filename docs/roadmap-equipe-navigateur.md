@@ -3359,6 +3359,36 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-159. Contextes nommés — `window.open(u,"x")`/
+  `target="x"`/`form target="x"` réutilisent l'onglet
+  porteur** — *(numéro officiel attribué à l'intégration)* :
+  HTML « selecting a browsing context ». Un `target` non
+  réservé (ni `_blank`/`_self`/`_parent`/`_top`) désigne un
+  contexte **nommé** : le drain le retrouve par nom
+  (`Session::named_or_new_tab`) et le re-navigue au lieu
+  d'empiler des onglets — le cas des popups OAuth
+  (`open(u,"auth")`) et des ouvertures nommées de Docs.
+  `""`/`_blank` = toujours neuf sans nom ; `_self`/
+  `_parent`/`_top` = contexte émetteur (repli top-level).
+  `window.name` est installé via `JsEngine::set_ctx_name`
+  → `BrowserHooks.win_name` (document-local, swappé au
+  `switch_to`) et survit à la navigation du contexte
+  (attaché au **contexte**, pas au document — spec).
+  Plomberie : `OpenHook` sig `(url, name)` ; `NavRequest::
+  NewTab{url,name}` + `FormSubmit.target` ;
+  `ScriptNav::NewTab(Url,String)`/`Submit(Box<Request>,
+  String)` ; `DrainAct::NewTab(Box<Request>,String)` ;
+  `resolved_target_name` remplace le booléen
+  `target_new_context` (le nom voyage jusqu'au drain) ;
+  `formtarget` du submitter prime `target` du `<form>`
+  (CAP-150 en version moteur). **Réparation adjacente** :
+  `next_script_nav` drainait tout le lot moteur puis
+  détruisait les intentions après le premier `return` —
+  tampon `Tab.pending_nav_reqs` (deux `window.open` du
+  même script survivent tous deux). Borne : `window.name`
+  écrit par script n'est pas re-remonté à la session (le
+  nom de ciblage reste celui de l'ouverture). 6 tests
+  session + 1 test dom jscore (couple `(url, name)`).
 - [x] **CAP-158. `history.state`/`popstate`** —
   *(numéro officiel attribué à l'intégration)* :
   `pushState(state)`/`replaceState(state)` attachent

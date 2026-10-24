@@ -21,7 +21,7 @@
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-use crate::dom_host::{DomRef, FormSubmit, HistHook, NavHook, NodeCache, PushStateHook};
+use crate::dom_host::{DomRef, FormSubmit, HistHook, NavHook, NodeCache, OpenHook, PushStateHook};
 use crate::heap::{EnvRef, Host, JsResult};
 use crate::interp::ReStatic;
 use crate::value::{ObjId, Value};
@@ -126,13 +126,16 @@ pub(crate) struct BrowsingContext {
     pub history_go: Option<HistHook>,
     pub history_len: u32,
     pub form_submit: Option<Rc<dyn Fn(FormSubmit)>>,
-    pub open: Option<Rc<dyn Fn(String)>>,
+    pub open: Option<OpenHook>,
     /// `history.pushState`/`replaceState` — hook embedder
     /// (CAP-151/158) : `(url_brute, replace, state_json)`.
     pub push_state: Option<PushStateHook>,
     /// `history.state` JSON du contexte (CAP-158) —
     /// document-local, garé/restauré au `switch_to`.
     pub history_state: Option<String>,
+    /// `window.name` du contexte (CAP-159) —
+    /// document-local, garé/restauré au `switch_to`.
+    pub win_name: String,
     pub viewport: (u32, u32),
 }
 
@@ -363,6 +366,7 @@ impl BrowsingContext {
             open: None,
             push_state: None,
             history_state: None,
+            win_name: String::new(),
             viewport: (0, 0),
         }
     }

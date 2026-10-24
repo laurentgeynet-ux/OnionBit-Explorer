@@ -1315,6 +1315,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-159 — contextes nommés** (`explorer-jscore` +
+  `explorer-js` + `explorer-core` — cap « web réel
+  sécurisé » ; numéro officiel attribué à l'intégration) :
+  `window.open(u,"x")`, `<a target="x">` et `<form
+  target="x">` réutilisent l'onglet porteur du nom au
+  lieu d'en ouvrir un nouveau (HTML « selecting a
+  browsing context » — popups OAuth, ouvertures nommées
+  Docs) ; `""`/`_blank` = toujours neuf, `_self`/
+  `_parent`/`_top` = émetteur ; `window.name` installé
+  dans le contexte et attaché à lui à travers les
+  navigations (ré-injecté à chaque `spawn_engine`).
+  Plomberie : `OpenHook(url,name)`, `NavRequest::NewTab
+  {url,name}`/`FormSubmit.target`, `ScriptNav`/`DrainAct`
+  nommés, `Tab.win_name` + `Session::named_or_new_tab`,
+  `JsEngine::set_ctx_name` additif. Réparation :
+  `Tab.pending_nav_reqs` tamponne le lot drainé —
+  `next_script_nav` perdait les intentions après le
+  premier nav du lot (deux `window.open` d'un script).
+  Borne : `window.name` écrit par script non remonté au
+  registre de noms. 6 tests session + 1 test dom.
 - **CAP-158 — `history.state`/`popstate`**
   (`explorer-jscore` + `explorer-js` +
   `explorer-core` — cap « web réel sécurisé » ;

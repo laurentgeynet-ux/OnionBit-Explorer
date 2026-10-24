@@ -1187,14 +1187,23 @@ fn dialogs_absent_degrade() {
 #[test]
 fn window_open_and_screen() {
     use std::cell::RefCell as RC;
-    let opened = Rc::new(RC::new(Vec::<String>::new()));
+    let opened = Rc::new(RC::new(Vec::<(String, String)>::new()));
     let o = opened.clone();
     let mut e = Engine::new();
     e.set_viewport(1280, 800);
     e.install_dom(&Rc::new(RC::new(Dom::from_html(""))));
-    e.set_open_hook(Rc::new(move |u: String| o.borrow_mut().push(u)));
-    e.eval("window.open('http://x/');").expect("open");
-    assert_eq!(opened.borrow().as_slice(), ["http://x/"]);
+    e.set_open_hook(Rc::new(move |u: String, n: String| {
+        o.borrow_mut().push((u, n));
+    }));
+    e.eval("window.open('http://x/');window.open('http://y/','auth');")
+        .expect("open");
+    assert_eq!(
+        opened.borrow().as_slice(),
+        [
+            ("http://x/".to_string(), String::new()),
+            ("http://y/".to_string(), "auth".to_string())
+        ]
+    );
     assert_eq!(
         e.eval("innerWidth")
             .map(|v| e.describe(v))

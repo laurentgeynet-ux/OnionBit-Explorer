@@ -308,14 +308,14 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
                         .is_ok()
                 }
             }
-            Some(DrainAct::NewTab(req)) => {
-                // `target=_blank`/nommé (étape 131) —
-                // `open_tab` sous verrou court, navigation
-                // conduite hors verrou sur le nouvel
-                // onglet.
+            Some(DrainAct::NewTab(req, name)) => {
+                // `target=_blank`/nommé (étape 131,
+                // CAP-159) — sélection du contexte
+                // (`named_or_new_tab`) sous verrou court,
+                // navigation conduite hors verrou.
                 let t2 = {
                     let mut s = sess.lock().await;
-                    s.open_tab()
+                    s.named_or_new_tab(tab, &name)
                 };
                 Box::pin(navigate_shared(sess, t2, *req, true))
                     .await

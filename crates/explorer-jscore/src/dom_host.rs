@@ -48,6 +48,12 @@ pub type PromptHook = Rc<dyn Fn(String, String) -> Option<String>>;
 /// `(url_brute, replace, state_json)`.
 pub type PushStateHook = Rc<dyn Fn(String, bool, Option<String>)>;
 
+/// `window.open(url, target)` hook (CAP-153/159) :
+/// `(url, target)` — `""` = contexte neuf sans nom ; un nom
+/// désigne un contexte existant à réutiliser (spec — les
+/// popups OAuth `window.open(u, "auth")` en dépendent).
+pub type OpenHook = Rc<dyn Fn(String, String)>;
+
 /// Soumission de formulaire émise par `form.submit()` /
 /// `requestSubmit()` (étape 54) — l'embedder résout `action`
 /// contre l'URL de page, choisit le transport (`method`,
@@ -65,6 +71,10 @@ pub struct FormSubmit {
     /// moteur : nommés, non `disabled`, cases cochées,
     /// submitter seul pour les boutons).
     pub fields: Vec<(String, String)>,
+    /// `formtarget` du submitter ou `target` du `<form>`
+    /// (CAP-159) — `""` = contexte courant ; `_blank`/nommé
+    /// = contexte neuf ou nommé à réutiliser.
+    pub target: String,
 }
 
 /// Browser-surface hooks (JS-7e) — everything `window.location`,
@@ -97,9 +107,9 @@ pub(crate) struct BrowserHooks {
     pub confirm: Option<Rc<dyn Fn(String) -> bool>>,
     /// `prompt(msg, default)` → user text; absent/cancel → `null`.
     pub prompt: Option<PromptHook>,
-    /// `window.open(url)` — new context. Absent → same-tab
-    /// `navigate` fallback.
-    pub open: Option<Rc<dyn Fn(String)>>,
+    /// `window.open(url, target)` — new context. Absent →
+    /// same-tab `navigate` fallback.
+    pub open: Option<OpenHook>,
     /// `form.submit()`/`requestSubmit()` — absent → no-op
     /// silencieux (le moteur ne navigue jamais seul).
     pub form_submit: Option<Rc<dyn Fn(FormSubmit)>>,
@@ -118,6 +128,12 @@ pub(crate) struct BrowserHooks {
     /// Document-local comme `page_url` (swappé au
     /// `switch_to`).
     pub history_state: Option<String>,
+    /// `window.name` du contexte (CAP-159) — nom du contexte
+    /// top-level posé par l'embedder à l'installation
+    /// (`set_ctx_name` — corrélation `target="x"`/
+    /// `window.open(u,"x")` document-local, swappé au
+    /// `switch_to`).
+    pub win_name: String,
     /// `location.replace(url)` — navigation `historyHandling:
     /// "replace"` : l'entrée d'historique courante est
     /// réécrite, pas poussée (CAP-152 — flows auth).
@@ -206,7 +222,7 @@ impl Engine {
     }
 
     /// Install the `window.open(url)` hook (new context).
-    pub fn set_open_hook(&mut self, f: Rc<dyn Fn(String)>) {
+    pub fn set_open_hook(&mut self, f: OpenHook) {
         self.hooks.open = Some(f);
     }
 
@@ -361,6 +377,7 @@ impl NodeHost {
                     return Ok(());
                 }
                 let tgt = d.attr(node, "target").unwrap_or("").to_ascii_lowercase();
+                let tgt_raw = d.attr(node, "target").unwrap_or("").to_string();
                 drop(d);
                 if tgt.is_empty() || tgt == "_self" {
                     if let Some(nav) = e.hooks.navigate.clone() {
@@ -369,8 +386,11 @@ impl NodeHost {
                 } else if let Some(f) = e.hooks.open.clone() {
                     // `target` nommé/`_blank` → nouveau
                     // contexte si le hook existe (sinon
-                    // intention morte — dégradation).
-                    f(href);
+                    // intention morte — dégradation) ; le
+                    // nom passe **brut** (les noms de
+                    // contexte sont sensibles à la casse —
+                    // seuls les réservés `_x` ne le sont pas).
+                    f(href, tgt_raw);
                 }
             }
             "input" => {
@@ -525,6 +545,13 @@ impl NodeHost {
             action: d.attr(node, "action").unwrap_or("").to_string(),
             enctype: d.attr(node, "enctype").unwrap_or("").to_string(),
             fields: collect_fields(&d, node, submitter),
+            // `formtarget` du submitter prime `target` du
+            // `<form>` (spec — CAP-150 en version moteur).
+            target: submitter
+                .and_then(|s| d.attr(s, "formtarget"))
+                .or_else(|| d.attr(node, "target"))
+                .unwrap_or("")
+                .to_string(),
         })
     }
 
@@ -1338,6 +1365,12 @@ impl Engine {
             cache: cache.clone(),
         }));
         self.set_own(g, "customElements", ce, false);
+        // `window.name` (CAP-159) — nom du contexte posé
+        // par l'embedder (`set_ctx_name`) ; les écritures
+        // JS suivantes vivent sur cette propre-prop.
+        let wn = self.hooks.win_name.clone();
+        let wnv = self.str_val(&wn);
+        self.set_own(g, "name", wnv, true);
         // `FormData` (JS-C67) — ctor + proto paresseux partagé
         // avec `res.formData()`/`xhr.send` (détail : FormData §).
         install_formdata_global(self);
@@ -5490,8 +5523,12 @@ fn win_open(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     if url.is_empty() {
         return Ok(Value::Null);
     }
+    let name = match arg(args, 1) {
+        Value::Undefined | Value::Null => String::new(),
+        v => e.to_js_string(v)?,
+    };
     if let Some(f) = e.hooks.open.clone() {
-        f(url);
+        f(url, name);
     } else if let Some(nav) = e.hooks.navigate.clone() {
         nav(&url);
     }

@@ -11008,3 +11008,172 @@ async fn replace_state_rewrites_current_state() {
     let dump = s.dom_dump(id).unwrap();
     assert!(dump.contains("len:0:st:2"), "replaceState : {dump}");
 }
+
+// ===== CAP-159 — contextes nommés : `window.open(u,"x")` /
+// `target="x"` / `form target="x"` réutilisent l'onglet
+// porteur du nom (popups OAuth, ouvertures Docs) ;
+// `window.name` est installé dans le contexte. =====
+
+/// Deux `window.open(u, "auth")` : le second réutilise le
+/// contexte nommé — un seul onglet ouvert, navigué vers la
+/// dernière URL (comportement « popup nommée » des flows
+/// OAuth : `open(u,"auth")` retrouve toujours sa fenêtre).
+#[tokio::test]
+async fn window_open_named_reuses_context() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<html><body><script>\
+         window.open('/p1','auth');window.open('/p2','auth')\
+         </script></body></html>",
+    );
+    t.route("/p1", 200, PAGE_T);
+    t.route("/p2", 200, "<html><body>p2</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(s.tabs().len(), 2, "un seul contexte nommé ouvert");
+    assert_eq!(
+        s.tab_url(other_tab(&s, id)).as_deref(),
+        Some("http://h.test/p2"),
+        "le second open a re-navigué le contexte nommé"
+    );
+}
+
+/// `window.open(u)` sans nom → toujours un contexte neuf
+/// (deux opens = deux onglets — `""` ≙ `_blank`).
+#[tokio::test]
+async fn window_open_unnamed_always_new() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<html><body><script>\
+         window.open('/p1');window.open('/p2')\
+         </script></body></html>",
+    );
+    t.route("/p1", 200, PAGE_T);
+    t.route("/p2", 200, PAGE_T);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(s.tabs().len(), 3, "deux contextes anonymes ouverts");
+}
+
+/// `window.open(u, "_self")` navigue le contexte courant —
+/// les noms réservés n'ouvrent jamais d'onglet.
+#[tokio::test]
+async fn window_open_self_navigates_current() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<html><body><script>window.open('/b','_self')</script></body></html>",
+    );
+    t.route("/b", 200, "<html><body>b</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(s.tabs().len(), 1, "aucun onglet ouvert");
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/b"));
+}
+
+/// `window.name` est installé dans le contexte nommé (le
+/// script du popup lit son propre nom) et survit à la
+/// re-navigation (spec : le nom est attaché au contexte,
+/// pas au document).
+#[tokio::test]
+async fn window_name_installed_in_named_context() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<html><body><script>window.open('/p','auth')</script></body></html>",
+    );
+    t.route(
+        "/p",
+        200,
+        "<html><body><div id=x></div><script>\
+         document.getElementById('x').textContent='n:'+window.name\
+         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    let dump = s.dom_dump(other_tab(&s, id)).unwrap_or_default();
+    assert!(dump.contains("n:auth"), "window.name installé : {dump}");
+}
+
+/// `<a target="auth">` cliqué retrouve le contexte nommé
+/// ouvert par `window.open` — l'ancre navigue le popup
+/// existant au lieu d'empiler des onglets.
+#[tokio::test]
+async fn anchor_named_target_reuses_popup() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <a href=\"/b\" target=\"auth\">lien</a>\
+         <script>window.open('/p','auth')</script>\
+         </body></html>",
+    );
+    t.route("/p", 200, PAGE_T);
+    t.route("/b", 200, "<html><body>b</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(s.tabs().len(), 2);
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(s.tabs().len(), 2, "le contexte nommé est réutilisé");
+    assert_eq!(
+        s.tab_url(other_tab(&s, id)).as_deref(),
+        Some("http://h.test/b"),
+        "le popup nommé a été re-navigué vers /b"
+    );
+}
+
+/// `<form target="auth">` soumis retrouve le contexte
+/// nommé (même règle que les liens — chemin plateforme
+/// `try_submit`).
+#[tokio::test]
+async fn form_named_target_reuses_popup() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <form action=\"/go\" target=\"auth\">\
+         <input type=\"submit\" value=\"ok\"></form>\
+         <script>window.open('/p','auth')</script>\
+         </body></html>",
+    );
+    t.route("/p", 200, PAGE_T);
+    t.route("/go", 200, "<html><body>go</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(s.tabs().len(), 2);
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 10.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    assert_eq!(s.tabs().len(), 2, "le contexte nommé est réutilisé");
+    assert_eq!(
+        s.tab_url(other_tab(&s, id)).as_deref(),
+        Some("http://h.test/go"),
+        "le popup nommé a reçu la soumission"
+    );
+}

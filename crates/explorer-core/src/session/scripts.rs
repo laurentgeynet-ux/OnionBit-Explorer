@@ -318,7 +318,9 @@ pub(crate) enum ScriptNav {
     /// `form.submit()`/`requestSubmit()` : requête déjà
     /// construite (méthode + corps + en-têtes — étape 54).
     /// `Box` : `Request` est la variante large de l'enum.
-    Submit(Box<Request>),
+    /// Second membre = `target`/`formtarget` (CAP-159) —
+    /// `""` = contexte courant ; `_blank`/nommé = `NewTab`.
+    Submit(Box<Request>, String),
     /// `location.replace` (CAP-152) : navigation réelle puis
     /// réécriture de l'entrée courante — `back` saute la
     /// page remplacée (flows auth).
@@ -327,6 +329,8 @@ pub(crate) enum ScriptNav {
     /// l'entrée courante (méthode + corps — POST re-POSTe).
     Reload,
     /// `window.open`/`<a target>` scripté (CAP-153) :
-    /// navigation dans un nouveau contexte top-level.
-    NewTab(Url),
+    /// navigation dans un nouveau contexte top-level ; le
+    /// second membre porte le nom de cible (CAP-159) —
+    /// `""` = toujours neuf sans nom.
+    NewTab(Url, String),
 }

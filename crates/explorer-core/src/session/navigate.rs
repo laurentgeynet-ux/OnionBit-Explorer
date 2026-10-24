@@ -1145,10 +1145,13 @@ impl Session {
             let act = match n {
                 ScriptNav::To(u) => DrainAct::Req(Box::new(Request::get(u)), true),
                 ScriptNav::Go(d) => DrainAct::Go(d),
-                ScriptNav::Submit(req) => DrainAct::Req(req, true),
+                ScriptNav::Submit(req, name) if target_name_new_context(&name) => {
+                    DrainAct::NewTab(req, name)
+                }
+                ScriptNav::Submit(req, _) => DrainAct::Req(req, true),
                 ScriptNav::Replace(u) => DrainAct::Replace(Box::new(Request::get(u))),
                 ScriptNav::Reload => DrainAct::Reload,
-                ScriptNav::NewTab(u) => DrainAct::NewTab(Box::new(Request::get(u))),
+                ScriptNav::NewTab(u, n) => DrainAct::NewTab(Box::new(Request::get(u)), n),
             };
             if !self.enqueue_nav_act(tab, act) {
                 break;
@@ -1217,12 +1220,24 @@ impl Session {
     /// consommées et sautées ; le reste de la file sera
     /// re-lu au tour suivant de [`drain_script_nav`].
     pub(crate) fn next_script_nav(&mut self, tab: TabId) -> Option<ScriptNav> {
+        // Les intentions drainées du moteur sont tamponnées
+        // dans `pending_nav_reqs` (CAP-159) — sans tampon,
+        // un `return` en cours de boucle détruisait le reste
+        // du lot (deux `window.open` d'un même script :
+        // le second n'atteignait jamais le drain).
         let reqs = self
             .tabs
             .get_mut(&tab)
             .and_then(|e| e.js.as_mut())
             .map_or_else(Vec::new, |e| e.drain_nav_requests());
-        for r in reqs {
+        if let Some(t) = self.tabs.get_mut(&tab) {
+            t.pending_nav_reqs.extend(reqs);
+        }
+        loop {
+            let r = self
+                .tabs
+                .get_mut(&tab)
+                .and_then(|t| t.pending_nav_reqs.pop_front())?;
             match r {
                 NavRequest::Navigate(href) => {
                     let url = self
@@ -1272,17 +1287,17 @@ impl Session {
                     // drain (aucune entrée nouvelle).
                     return Some(ScriptNav::Reload);
                 }
-                NavRequest::NewTab(href) => {
+                NavRequest::NewTab { url: href, name } => {
                     // `window.open`/`<a target>` scripté
-                    // (CAP-153) — résolution base du doc,
-                    // nouveau contexte au drain.
+                    // (CAP-153/159) — résolution base du
+                    // doc, contexte neuf ou nommé au drain.
                     let url = self
                         .tabs
                         .get(&tab)
                         .and_then(|t| t.nav_base())
                         .and_then(|b| Url::resolve(b, &href).ok());
                     if let Some(u) = url {
-                        return Some(ScriptNav::NewTab(u));
+                        return Some(ScriptNav::NewTab(u, name));
                     }
                 }
                 NavRequest::FormSubmit {
@@ -1290,6 +1305,7 @@ impl Session {
                     action,
                     enctype,
                     fields,
+                    target,
                 } => {
                     // `action` résout contre la base document
                     // (`<base href>`, étape 135) ; l'initiateur
@@ -1315,13 +1331,12 @@ impl Session {
                         // une URL irrésolvable.
                         let pg = page.unwrap_or(&req.url);
                         if explorer_net::csp::csp_form_action_allowed(csp, pg, &req.url) {
-                            return Some(ScriptNav::Submit(Box::new(req)));
+                            return Some(ScriptNav::Submit(Box::new(req), target));
                         }
                     }
                 }
             }
         }
-        None
     }
 
     /// Drainage des intentions de navigation accumulées —
@@ -1362,11 +1377,14 @@ impl Session {
                         self.navigate_request(tab, *req, push).await.is_ok()
                     }
                 }
-                DrainAct::NewTab(req) => {
-                    // `target=_blank`/nommé (étape 131) :
-                    // nouveau contexte top-level — la
-                    // requête le peuple d'une entrée.
-                    let t2 = self.open_tab();
+                DrainAct::NewTab(req, name) => {
+                    // `target=_blank`/nommé (étape 131,
+                    // CAP-159) : un nom réutilise l'onglet
+                    // porteur s'il existe (popup nommée),
+                    // `_blank`/vide = toujours un contexte
+                    // neuf — la requête le peuple d'une
+                    // entrée.
+                    let t2 = self.named_or_new_tab(tab, &name);
                     self.navigate_request(t2, *req, true).await.is_ok()
                 }
                 DrainAct::Go(0) => {

@@ -187,7 +187,7 @@ fn main() {
     engine.set_form_submit_hook(Rc::new(|f: FormSubmit| {
         println!("[form-submit] {} {}", f.method, f.action);
     }));
-    engine.set_open_hook(Rc::new(|u| println!("[window.open] {u}")));
+    engine.set_open_hook(Rc::new(|u, n| println!("[window.open] {u} target={n}")));
     let xhr_requests: Rc<RefCell<Vec<(String, String)>>> = Rc::new(RefCell::new(Vec::new()));
     engine.install_xhr(Rc::new(DumpTransport {
         requests: Rc::clone(&xhr_requests),

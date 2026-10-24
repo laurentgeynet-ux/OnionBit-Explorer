@@ -857,6 +857,7 @@ impl Engine {
         swap(&mut self.hooks.open, &mut ctx.open);
         swap(&mut self.hooks.push_state, &mut ctx.push_state);
         swap(&mut self.hooks.history_state, &mut ctx.history_state);
+        swap(&mut self.hooks.win_name, &mut ctx.win_name);
         swap(&mut self.hooks.viewport, &mut ctx.viewport);
     }
 
@@ -1043,6 +1044,25 @@ impl Engine {
         self.set_own(ev, "cancelable", Value::Bool(false), true);
         self.set_own(ev, "bubbles", Value::Bool(false), true);
         let _ = self.fire_event_listeners(Value::Obj(ev));
+    }
+
+    /// Nom du contexte `ctx` pour `window.name` (CAP-159) —
+    /// posé par l'embedder quand la session nomme un
+    /// contexte top-level (`target="x"`/`window.open`) ;
+    /// la propre-prop `name` du global suit pour que
+    /// `window.name` la lise immédiatement.
+    pub fn set_ctx_name(&mut self, ctx: crate::context::CtxId, name: &str) {
+        let (g, nv) = if ctx == self.cur_ctx {
+            self.hooks.win_name = name.to_string();
+            (self.global, self.str_val(name))
+        } else {
+            let Some(p) = self.parked.get_mut(&ctx) else {
+                return;
+            };
+            p.win_name = name.to_string();
+            (p.global, self.str_val(name))
+        };
+        self.set_own(g, "name", nv, true);
     }
 
     /// Contexte courant.

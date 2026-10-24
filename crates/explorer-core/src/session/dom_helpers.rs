@@ -158,27 +158,6 @@ pub(crate) fn ancestor_link(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
     }
 }
 
-/// Cible de navigation d'un élément liant (`<a>`,
-/// `<form>`) — HTML « rules for choosing a navigable » :
-/// `true` = **nouveau** contexte de navigation
-/// (`target=_blank`, ou nom non réservé — les contextes
-/// nommés ne sont pas suivis : chaque dispatch ouvre un
-/// onglet frais), `false` = contexte courant (`_self`,
-/// `_parent`, `_top`, attribut absent/vide). La casse
-/// est insensible (spec). `base_target` = `<base target>`
-/// du document (étape 135) — consulté quand l'élément
-/// n'a pas de `target` propre.
-pub(crate) fn target_new_context(dom: &Dom, el: NodeId, base_target: Option<&str>) -> bool {
-    let t = match dom.attribute(el, "target") {
-        Ok(Some(t)) => t,
-        _ => match base_target {
-            Some(b) => b.to_string(),
-            None => return false,
-        },
-    };
-    target_name_new_context(&t)
-}
-
 /// Un nom de cible (`target`/`formtarget`/`base target`)
 /// désigne-t-il un contexte neuf ? — `_self`/`_parent`/
 /// `_top` et vide = contexte courant ; `_blank` ou un nom
@@ -190,6 +169,18 @@ pub(crate) fn target_name_new_context(name: &str) -> bool {
             t.to_ascii_lowercase().as_str(),
             "_self" | "_parent" | "_top" | ""
         )
+}
+
+/// Nom de cible **effectif** d'un élément liant (`<a>`,
+/// `<form>`) — `target` propre sinon `<base target>`,
+/// `""` si aucun (CAP-159 : le drain en a besoin pour la
+/// réutilisation des contextes nommés — le booléen
+/// `target_new_context` seul perd l'information).
+pub(crate) fn resolved_target_name(dom: &Dom, el: NodeId, base_target: Option<&str>) -> String {
+    match dom.attribute(el, "target") {
+        Ok(Some(t)) => t,
+        _ => base_target.map_or_else(String::new, str::to_string),
+    }
 }
 
 /// `<base>` du document (HTML §4.8.3, étape 135) —

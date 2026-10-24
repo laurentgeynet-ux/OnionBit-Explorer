@@ -271,6 +271,12 @@ impl Session {
             e.set_mem_limit(self.js_mem_bytes);
             e.install_dom(html, &page_url, hist_len);
             e.set_page_referrer(referrer);
+            // `window.name` (CAP-159) — nom du contexte posé
+            // par l'ouverture nommée (`target="x"`/
+            // `window.open(u,"x")`), `""` sinon.
+            if let Some(n) = self.tabs.get(&tab).and_then(|t| t.win_name.as_deref()) {
+                e.set_ctx_name(explorer_js::JS_CTX_TOP, n);
+            }
             // Étape 51 : état d'origine injecté au contexte —
             // `localStorage` (map session > profil persisté)
             // et snapshot cookie non-HttpOnly

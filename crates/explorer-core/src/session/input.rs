@@ -319,12 +319,15 @@ impl Session {
         match self.link_node_at(tab, x, y) {
             Some((anchor, url)) if !prevented => {
                 let u = Url::parse(&url).map_err(|e| CoreError::Url(e.to_string()))?;
-                let (new_ctx, no_referer, policy, download) = {
+                let (tname, no_referer, policy, download) = {
                     let entry = self.tabs.get(&tab);
                     let dom = entry.and_then(|e| e.dom.as_ref());
                     (
-                        dom.is_some_and(|d| {
-                            target_new_context(
+                        // Nom de cible effectif (`target` >
+                        // `<base target>` — CAP-159 : le
+                        // drain réutilise le contexte nommé).
+                        dom.map_or_else(String::new, |d| {
+                            resolved_target_name(
                                 d,
                                 anchor,
                                 entry.and_then(|e| e.base_target.as_deref()),
@@ -361,14 +364,14 @@ impl Session {
                 // — sinon `nav_begin` posera la politique du
                 // document source.
                 req.referrer_policy = policy;
-                // `target=_blank`/nommé → nouveau contexte
-                // top-level (étape 131) ; `_self`/`_parent`/
-                // `_top`/absent → onglet courant. `download`
-                // prime `target` (CAP-148 : la spec tranche
-                // avant la cible — pas d'onglet pour un
-                // fichier).
-                let act = if new_ctx && download.is_none() {
-                    DrainAct::NewTab(Box::new(req))
+                // `target=_blank`/nommé → contexte neuf ou
+                // nommé (étape 131, CAP-159) ; `_self`/
+                // `_parent`/`_top`/absent → onglet courant.
+                // `download` prime `target` (CAP-148 : la
+                // spec tranche avant la cible — pas
+                // d'onglet pour un fichier).
+                let act = if download.is_none() && target_name_new_context(&tname) {
+                    DrainAct::NewTab(Box::new(req), tname)
                 } else {
                     req.download_hint = download;
                     DrainAct::Req(Box::new(req), true)
@@ -654,7 +657,7 @@ impl Session {
         form: NodeId,
         submitter: Option<NodeId>,
     ) -> Result<(), CoreError> {
-        let (mut req, new_ctx, no_referer, form_policy) = {
+        let (mut req, tname, no_referer, form_policy) = {
             let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
             // `action` résout contre la base document
             // (`<base href>`, étape 135) ; l'initiateur reste
@@ -712,11 +715,11 @@ impl Session {
             (
                 req,
                 // `formtarget` du submitter > `target` du
-                // `<form>` > `<base target>` (HTML §4.10.21).
-                target_override.as_deref().map_or_else(
-                    || target_new_context(dom, form, entry.base_target.as_deref()),
-                    target_name_new_context,
-                ),
+                // `<form>` > `<base target>` (HTML §4.10.21,
+                // CAP-159 : le nom voyage jusqu'au drain).
+                target_override.unwrap_or_else(|| {
+                    resolved_target_name(dom, form, entry.base_target.as_deref())
+                }),
                 rel_no_referrer(dom, form),
                 element_referrer_policy(dom, form),
             )
@@ -728,10 +731,11 @@ impl Session {
         req.no_referer = no_referer;
         // `referrerpolicy=` du `<form>` (étape 132).
         req.referrer_policy = form_policy;
-        // `form target=_blank`/nommé → nouveau contexte
-        // (étape 131 — même règle que `<a target>`).
-        let act = if new_ctx {
-            DrainAct::NewTab(Box::new(req))
+        // `form target=_blank`/nommé → contexte neuf ou
+        // nommé (étape 131, CAP-159 — même règle que
+        // `<a target>`).
+        let act = if target_name_new_context(&tname) {
+            DrainAct::NewTab(Box::new(req), tname)
         } else {
             DrainAct::Req(Box::new(req), true)
         };
