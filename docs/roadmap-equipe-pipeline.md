@@ -2499,6 +2499,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `background_multicouche_premiere_gagne` (url+gradient →
   image conservée), `background_multicouche_invalide_drope`
   (couche 2 invalide → déclaration droppée).
+- [x] **R-95. `background-size` au raster** (vol terrain —
+  suite de la bissection « flèches HN »). R-94 avait rendu la
+  déclaration visible : fetch, décodage SVG, alias et
+  matching `images.backgrounds` fonctionnaient tous — mais
+  `DisplayItem::BackgroundImage` dessinait la tuile à
+  **taille naturelle** (`background-size` hors portée). Le
+  triangle HN (SVG 32×32 à motif centré) n'échantillonnait
+  que le coin `(0,0)` — transparent — dans sa boîte 10×10 →
+  peint mais invisible. Fix interne `display.rs` (zéro
+  changement d'API) : `bg_size` résout `background-size`
+  (`auto` = intrinsèque, `cover`/`contain`, `<len>`/`<%>`
+  1-2 valeurs — même grammaire que `mask_size`, défaut
+  différent), `scale_tile` produit la tuile nearest-neighbor
+  une fois à l'émission — `paint_tiled`, `bg_position` (dont
+  le `%` mesure désormais `zone − tuile réduite`, spec
+  §images-3) et l'item sont inchangés. Borné : tuile >
+  16 Mpx → naturelle conservée (jamais d'allocation hostile) ;
+  `background-size` par couche non représenté (valeur unique
+  — le modèle multi-couches est déjà borné R-94). Régressions :
+  `background_size_met_la_tuile_a_l_echelle` (render — pixel
+  central rouge avec `10px`, blanc sans), et bout-en-bout
+  `background_size_scales_fetched_image` (session — motif HN
+  exact : `url(svg), linear-gradient(…)` + `size:10px`).
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

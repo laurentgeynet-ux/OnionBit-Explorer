@@ -1711,6 +1711,63 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-181 — `navigator.clipboard` par
+  hook embedder (sonde `_census_calls`)**
+  (`explorer-jscore`) : surface spec
+  `writeText`/`readText` — les promesses
+  passent par les transporteurs
+  `BrowserHooks::clipboard_*` posés par
+  `Engine::set_clipboard_hooks` (le
+  presse-papiers est une ressource
+  OS/permission, pas du moteur — engine-
+  global comme `console`). Sans hook →
+  rejet `NotAllowedError` (spec :
+  permission refusée — honnête, jamais
+  de faux succès : les apps style Docs
+  prennent leur chemin `execCommand`
+  hérité ou refusent proprement).
+  `typeof navigator.clipboard` =
+  `'object'` pour le feature-detect — la
+  promesse tranche l'autorisation.
+  Bornes : pas de permission prompt
+  (l'embedder arbitre), `read`/`write`
+  binaires hors surface (`clipboard-item`
+  = chantier MIME). Test jscore
+  `cap181_clipboard_hook` (surface,
+  rejet honnête, hook round-trip).
+
+- **CAP-180 — hit-test inverse +
+  `getClientRects` (sonde `_census_calls`,
+  couture géométrie i#19)** (`explorer-jscore`)
+  : `document.elementFromPoint(x,y)`/
+  `elementsFromPoint`/`caretPositionFromPoint`
+  — même `GeometryMap` publiée que
+  `getBoundingClientRect` : candidats filtrés
+  par rect (non-`fixed` −scroll, `fixed`
+  déjà viewport — i#18), tri
+  **topmost-first** borné (chemin le plus
+  profond d'abord — les descendants peintent
+  par-dessus leurs ancêtres — puis DFS
+  décroissant à profondeur égale — frère
+  tardif au-dessus du frère tôt ; z-index/
+  stacking context non porté, documenté).
+  `elementFromPoint` → élément ou `null`,
+  `elementsFromPoint` → tableau des contenus
+  (ordre idem), `caretPositionFromPoint` →
+  `{offsetNode, offset:0}` (pas de mesure de
+  glyphe — l'offset texte exige le shaping,
+  borné). `el.getClientRects()` →
+  `DOMRectList` àplatie : la map publie
+  l'**union** des boîtes du nœud → `[union]`
+  ou `[]` (documenté — spec = fragments
+  inline). `Dom::node_at_path` — marche
+  inverse d'`element_path` (chemin → nœud,
+  divergence miroir/session → `null`
+  honnête). Sans table géométrie publiée →
+  `null`/`[]`/`null` (document sans paint).
+  Test jscore `cap180_inverse_geometry`
+  (topmost, hors-rect, `typeof` honnête).
+
 - **CAP-179 — machine à états fullscreen +
   popover (sonde `_census_calls`)**
   (`explorer-jscore` — cap « web réel
@@ -2852,6 +2909,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Fixed
 
+- **R-95 — `background-size` ignoré au
+  raster** (`explorer-render` — vol
+  terrain, suite « flèches HN »). La
+  tuile `BackgroundImage` était peinte
+  à **taille naturelle** : un bitmap
+  plus grand que sa boîte n'y montrait
+  que son coin `(0,0)`. Le triangle
+  `.votearrow` de news.ycombinator.com
+  (SVG 32×32, motif centré, boîte
+  10×10, `background-size:10px`)
+  échantillonnait une zone entièrement
+  transparente → flèche invisible
+  malgré fetch, décodage et cascade
+  corrects. La tuile est désormais
+  mise à l'échelle à l'émission
+  (`bg_size` : `auto`/intrinsèque,
+  `cover`/`contain`, `<len>`/`<%>` —
+  même grammaire que `mask-size`) ;
+  `background-position` en `%` mesure
+  `zone − tuile réduite` (spec
+  §images-3). Zéro changement d'API —
+  interne `display.rs`, tuile >
+  16 Mpx bornée. Régressions :
+  `background_size_met_la_tuile_a_l_
+  echelle` (render),
+  `background_size_scales_fetched_
+  image` (session, motif HN exact).
 - **R-94 — `background` multi-couches
   droppé entièrement** (`explorer-css`
   — vol terrain : les flèches de vote

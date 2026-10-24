@@ -3407,6 +3407,32 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-181. `navigator.clipboard`
+  par hook embedder (sonde)** —
+  `writeText`/`readText` via
+  `BrowserHooks::clipboard_*` +
+  `set_clipboard_hooks` (engine-global) ;
+  sans hook → `NotAllowedError` honnête.
+  Bornes : pas de permission prompt
+  (embedder arbitre), clipboard-item
+  hors surface. Test jscore
+  `cap181_clipboard_hook`.
+
+- [x] **CAP-180. Hit-test inverse +
+  `getClientRects` (sonde)** — même
+  `GeometryMap` i#19 que `gBCR` :
+  `elementFromPoint`/`elementsFromPoint`/
+  `caretPositionFromPoint` (topmost-first
+  borné — profondeur puis DFS desc,
+  z-index non porté) ; `caretPosition`
+  `{offsetNode, offset:0}` (pas de
+  shaping) ; `getClientRects` → `[union]`
+  ou `[]` (multi-fragments aplati,
+  documenté). `Dom::node_at_path` —
+  chemin inverse `element_path`. Sans
+  table → `null`/`[]` honnêtes. Test
+  jscore `cap180_inverse_geometry`.
+
 - [x] **CAP-179. Machine à états
   fullscreen + popover (sonde)** —
   `requestFullscreen`/`exitFullscreen`/

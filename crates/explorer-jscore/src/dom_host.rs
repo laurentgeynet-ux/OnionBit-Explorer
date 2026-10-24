@@ -281,6 +281,17 @@ pub(crate) struct BrowserHooks {
     /// `console.*` — one formatted line per call (`"log: a b"`).
     /// Absent → the call is a silent no-op.
     pub console: Option<Rc<dyn Fn(String)>>,
+    /// `navigator.clipboard.writeText` (CAP-181) — l'embedder
+    /// décide du presse-papiers (OS, sandbox, permission).
+    /// Absent → la promesse rejette `NotAllowedError` (spec :
+    /// permission refusée — honnête, jamais de faux succès).
+    /// Engine-global (comme `console`) — le presse-papiers
+    /// est une ressource plateforme, pas un slot document.
+    pub clipboard_write: Option<ClipboardWriteHook>,
+    /// `navigator.clipboard.readText` (CAP-181) — `Some` →
+    /// texte, `None` → rejet `NotAllowedError`. Absent →
+    /// même rejet que l'écriture.
+    pub clipboard_read: Option<ClipboardReadHook>,
     /// `alert(msg)` — modal-less notification (fire-and-forget).
     pub alert: Option<Rc<dyn Fn(String)>>,
     /// `confirm(msg)` → `true`/`false`; absent → `false`.
@@ -392,6 +403,18 @@ impl Engine {
     }
 
     /// Install the `console.*` line sink (formatted `"a b"` lines).
+    /// `navigator.clipboard` (CAP-181) — l'embedder pose ses
+    /// transporteurs presse-papiers ; sans eux les promesses
+    /// rejettent `NotAllowedError` (permission refusée spec).
+    pub fn set_clipboard_hooks(
+        &mut self,
+        write: Option<ClipboardWriteHook>,
+        read: Option<ClipboardReadHook>,
+    ) {
+        self.hooks.clipboard_write = write;
+        self.hooks.clipboard_read = read;
+    }
+
     pub fn set_console_hook(&mut self, f: Rc<dyn Fn(String)>) {
         self.hooks.console = Some(f);
     }
@@ -1532,6 +1555,18 @@ impl Engine {
         let tag = self.str_val("CredentialsContainer");
         self.set_own(creds, crate::interp::SYM_TO_STRING_TAG, tag, false);
         self.set_own(nav, "credentials", Value::Obj(creds), true);
+        // `navigator.clipboard` (CAP-181) — surface spec
+        // `writeText`/`readText` par hook embedder (le presse-
+        // papiers est une ressource OS/permission, pas du
+        // moteur) ; sans hook → rejet `NotAllowedError`
+        // honnête. `typeof navigator.clipboard` = 'object'
+        // pour le feature-detect — la promesse tranche.
+        let clip = self.new_object();
+        self.add_method(clip, "writeText", clip_write_text);
+        self.add_method(clip, "readText", clip_read_text);
+        let tag = self.str_val("Clipboard");
+        self.set_own(clip, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own(nav, "clipboard", Value::Obj(clip), true);
         self.set_own(g, "navigator", Value::Obj(nav), false);
 
         // `Worker` borné (JS-C29) — le constructeur est présent
@@ -2881,6 +2916,49 @@ impl Host for DocumentHost {
                 e.resolve_promise(pid, Value::Undefined);
                 Ok(Some(Value::Obj(pid)))
             }
+            // Hit-test inverse (CAP-180) — même `GeometryMap`
+            // publiée que `getBoundingClientRect` (i#19) :
+            // `elementFromPoint` rend le candidat
+            // topmost-first, `elementsFromPoint` tous les
+            // contenus dans cet ordre, `caretPositionFromPoint`
+            // `{offsetNode, offset:0}` (borné : pas de mesure
+            // de glyphe — l'offset dans le texte n'est pas
+            // calculable sans shaping). Sans table → `null`/
+            // `[]`/`null` (document sans paint publiée).
+            "elementFromPoint" => {
+                let x = e.to_number(arg(args, 0))?;
+                let y = e.to_number(arg(args, 1))?;
+                let hits = point_candidate_paths(&self.dom, x, y);
+                let n = hits.first().and_then(|p| self.dom.borrow().node_at_path(p));
+                Ok(Some(match n {
+                    Some(n) => node_value(e, &self.dom, &self.cache, n),
+                    None => Value::Null,
+                }))
+            }
+            "elementsFromPoint" => {
+                let x = e.to_number(arg(args, 0))?;
+                let y = e.to_number(arg(args, 1))?;
+                let hits = point_candidate_paths(&self.dom, x, y);
+                let nodes: Vec<Value> = hits
+                    .iter()
+                    .filter_map(|p| self.dom.borrow().node_at_path(p))
+                    .map(|n| node_value(e, &self.dom, &self.cache, n))
+                    .collect();
+                Ok(Some(e.new_array(nodes)))
+            }
+            "caretPositionFromPoint" => {
+                let x = e.to_number(arg(args, 0))?;
+                let y = e.to_number(arg(args, 1))?;
+                let hits = point_candidate_paths(&self.dom, x, y);
+                let Some(n) = hits.first().and_then(|p| self.dom.borrow().node_at_path(p)) else {
+                    return Ok(Some(Value::Null));
+                };
+                let o = e.new_object();
+                let nv = node_value(e, &self.dom, &self.cache, n);
+                e.set_own(o, "offsetNode", nv, true);
+                e.set_own(o, "offset", Value::Num(0.0), true);
+                Ok(Some(Value::Obj(o)))
+            }
             "adoptNode" => {
                 let Some(src) = node_for(e, arg(args, 0)) else {
                     return Err(e.type_error("adoptNode: nœud requis"));
@@ -3173,6 +3251,9 @@ const DOC_METHODS: &[&str] = &[
     "adoptNode",
     "importNode",
     "exitFullscreen",
+    "elementFromPoint",
+    "elementsFromPoint",
+    "caretPositionFromPoint",
     "getSelection",
     "hasFocus",
     "getElementById",
@@ -3237,6 +3318,7 @@ const NODE_METHODS: &[&str] = &[
     "closest",
     "matches",
     "getBoundingClientRect",
+    "getClientRects",
     "scrollIntoView",
     "scrollIntoViewIfNeeded",
     "attachShadow",
@@ -5254,6 +5336,18 @@ impl Host for NodeHost {
             // boîtes du nœud ≈ border-box ; `None` → zero-rect,
             // comportement historique du stub).
             "getBoundingClientRect" => Ok(Some(gbrect_value(e, &self.dom, node))),
+            // `getClientRects` (CAP-180) — même table que
+            // `gBCR` ; la map publie l'**union** des boîtes du
+            // nœud → la liste spec multi-fragments s'aplatit
+            // à `[union]` (borné, documenté). Absent → `[]`.
+            "getClientRects" => {
+                let rects = if element_geom_rect(&self.dom, node).is_some() {
+                    vec![gbrect_value(e, &self.dom, node)]
+                } else {
+                    Vec::new()
+                };
+                Ok(Some(e.new_array(rects)))
+            }
             // `HTMLMediaElement` (étape 58/71c, ADR-0023/24) —
             // non claimé : stubs honnêtes, jamais de faux
             // succès. Claimé : délégation hôte (`play()` tenu
@@ -5478,6 +5572,45 @@ fn geom_doc_dim(dom: &DomRef, horizontal: bool) -> Option<f64> {
     let g = map.lock().ok()?;
     let d = if horizontal { g.doc_w } else { g.doc_h };
     (d > 0.0).then(|| f64::from(d))
+}
+
+/// Chemins des éléments contenant le point viewport `(x, y)`
+/// (CAP-180 — hit-test inverse sur la `GeometryMap` publiée,
+/// i#19) : rects non-`fixed` en coords document → `-scroll`,
+/// `fixed` déjà viewport (i#18). Tri **topmost-first** borné :
+/// chemin le plus long en premier (le plus profond peint
+/// par-dessus ses ancêtres), puis ordre DFS décroissant à
+/// profondeur égale (frère tardif au-dessus du frère tôt) —
+/// approximation honnête sans z-index/stacking context
+/// (borné : `display:none`/absents de la map ne matchent
+/// jamais — déjà exclu par la session).
+fn point_candidate_paths(dom: &DomRef, x: f64, y: f64) -> Vec<Vec<(String, u32)>> {
+    let Some(slot) = dom.borrow().geometry.clone() else {
+        return Vec::new();
+    };
+    let Ok(g) = slot.lock() else {
+        return Vec::new();
+    };
+    let mut hits: Vec<Vec<(String, u32)>> = g
+        .rects
+        .iter()
+        .filter(|(_, eg)| {
+            let (rx, ry) = if eg.fixed {
+                (f64::from(eg.rect.x), f64::from(eg.rect.y))
+            } else {
+                (
+                    f64::from(eg.rect.x - g.scroll_x),
+                    f64::from(eg.rect.y - g.scroll_y),
+                )
+            };
+            x >= rx && x <= rx + f64::from(eg.rect.w) && y >= ry && y <= ry + f64::from(eg.rect.h)
+        })
+        .map(|(p, _)| p.clone())
+        .collect();
+    drop(g);
+    // Le plus profond d'abord, DFS décroissant ensuite.
+    hits.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| b.cmp(a)));
+    hits
 }
 
 /// L'objet `DOMRect`-like de `getBoundingClientRect` — partagé
@@ -7836,6 +7969,50 @@ fn creds_unsupported(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value>
 
 /// `credentials.preventSilentAccess` — spec dépréciée :
 /// résout `undefined`.
+/// Transporteurs `navigator.clipboard` posés par l'embedder
+/// (CAP-181) — voir `BrowserHooks::clipboard_*`.
+type ClipboardWriteHook = Rc<dyn Fn(String) -> Result<(), String>>;
+type ClipboardReadHook = Rc<dyn Fn() -> Option<String>>;
+
+/// `navigator.clipboard.writeText(t)` (CAP-181) — le hook
+/// embedder écrit (ou refuse) ; absent → `NotAllowedError`
+/// (spec : permission refusée — promesse rejetée, jamais de
+/// faux succès — Docs « copier » prend le chemin
+/// `document.execCommand` hérité ou refuse proprement).
+fn clip_write_text(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    let text = e.to_js_string(arg(a, 0))?;
+    let Some(hook) = e.hooks.clipboard_write.clone() else {
+        let msg = e.str_val("NotAllowedError: clipboard write denied");
+        e.reject_promise(pid, msg);
+        return Ok(Value::Obj(pid));
+    };
+    match hook(text) {
+        Ok(()) => e.resolve_promise(pid, Value::Undefined),
+        Err(m) => {
+            let msg = e.str_val(format!("NotAllowedError: {m}"));
+            e.reject_promise(pid, msg);
+        }
+    }
+    Ok(Value::Obj(pid))
+}
+
+/// `navigator.clipboard.readText()` (CAP-181) — même motif :
+/// `Some(texte)` du hook → résolution, `None`/absent →
+/// `NotAllowedError`.
+fn clip_read_text(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    let text = e.hooks.clipboard_read.clone().and_then(|hook| hook());
+    if let Some(t) = text {
+        let v = e.str_val(t);
+        e.resolve_promise(pid, v);
+    } else {
+        let msg = e.str_val("NotAllowedError: clipboard read denied");
+        e.reject_promise(pid, msg);
+    }
+    Ok(Value::Obj(pid))
+}
+
 fn creds_psa(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     let pid = e.new_promise();
     e.resolve_promise(pid, Value::Undefined);

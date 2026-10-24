@@ -1483,6 +1483,30 @@ impl Dom {
         Some(path)
     }
 
+    /// Nœud au `element_path` donné — marche inverse de
+    /// [`Self::element_path`] : pour chaque `(tag, k)`, le
+    /// k-ième enfant élément portant ce tag. `None` si le
+    /// chemin sort du miroir (divergence session/miroir —
+    /// dégrade, ne plante pas ; CAP-180, hit-test inverse).
+    pub(crate) fn node_at_path(&self, path: &[(String, u32)]) -> Option<NodeId> {
+        let mut cur = self.root;
+        for (tag, k) in path {
+            let mut seen = 0u32;
+            let mut next = None;
+            for &c in &self.nodes[cur as usize].children {
+                if self.nodes[c as usize].tag == *tag {
+                    if seen == *k {
+                        next = Some(c);
+                        break;
+                    }
+                    seen += 1;
+                }
+            }
+            cur = next?;
+        }
+        Some(cur)
+    }
+
     // -- `<canvas>` 2D (JS-C28, couture R-11) ------------------------
 
     /// État 2D du `<canvas>` `node`, créé au premier

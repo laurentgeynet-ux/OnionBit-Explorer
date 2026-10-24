@@ -2497,6 +2497,50 @@ async fn fetched_background_survives_js_dom_resync() {
     assert_eq!(pa, pb, "le fond fetché doit survivre à la synchro JS");
 }
 
+/// R-95 — `background-size` appliqué au raster, chaîne
+/// complète fetch → cascade → peinture. Cas mesuré :
+/// `.votearrow` de news.ycombinator.com — déclaration
+/// multi-couches (`url(svg), linear-gradient(…)` — R-94)
+/// + `background-size:10px` sur un SVG 32×32 à motif centré.
+/// Sans la mise à l'échelle, la boîte 10×10 n'échantillonnait
+/// que le coin transparent de l'image naturelle → flèche
+/// invisible malgré fetch, décodage et matching corrects.
+#[tokio::test]
+async fn background_size_scales_fetched_image() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><div id=\"v\"></div><style>\
+         body{margin:0}#v{width:10px;height:10px;\
+         background:url(/tri.svg),linear-gradient(transparent,transparent) no-repeat;\
+         background-size:10px}</style></body></html>",
+    );
+    // SVG 32×32 — carré rouge centré x12..20 : la boîte 10×10
+    // à taille naturelle n'en touche que le coin vide. (Sur
+    // une ligne : la continuation `\` des littéraux avale les
+    // espaces et malformerait le XML.)
+    t.route_bin(
+        "/tri.svg",
+        200,
+        b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\"><rect x=\"12\" y=\"12\" width=\"8\" height=\"8\" fill=\"#ff0000\"/></svg>".to_vec(),
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+    assert!(
+        t.paths().iter().any(|p| p == "/tri.svg"),
+        "fond fetché : /tri.svg demandé — {:?}",
+        t.paths()
+    );
+    let (w, _h, px) = s.frame_pixels(id).unwrap();
+    // Centre de la boîte 10×10 (0,0) : le motif réduit peint.
+    assert_eq!(
+        px_at(px, w, 5, 5),
+        [255, 0, 0, 255],
+        "background-size:10px — le motif centré du SVG fetché peint au centre"
+    );
+}
+
 #[tokio::test]
 #[allow(clippy::many_single_char_names)]
 async fn broken_img_falls_back_to_alt() {

@@ -4767,4 +4767,134 @@ fn ws_lifecycle_echo() {
         .eval("document.getElementById('p').textContent")
         .expect("dom");
     assert_eq!(e.describe(v), "open:1|msg:hi|close:1000/true");
+// ===== CAP-180 — hit-test inverse + getClientRects
+// (sonde `_census_calls` : `elementFromPoint`/`elementsFromPoint`/
+// `caretPositionFromPoint`/`getClientRects` absents) — même
+// `GeometryMap` publiée que `gBCR` (i#19).
+
+#[test]
+fn cap180_inverse_geometry() {
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    let geom = explorer_jscore::GeometrySlot::default();
+    {
+        let mut g = geom.lock().unwrap();
+        g.scroll_y = 5.0;
+        // #main div — document coords (10,20)-(110,70),
+        // viewport (10,15)-(110,65) après scroll.
+        g.rects.insert(
+            vec![
+                ("html".to_string(), 0),
+                ("body".to_string(), 0),
+                ("div".to_string(), 0),
+            ],
+            explorer_jscore::ElementGeom {
+                rect: explorer_jscore::GeoRect {
+                    x: 10.0,
+                    y: 20.0,
+                    w: 100.0,
+                    h: 50.0,
+                },
+                fixed: false,
+            },
+        );
+        // #list ul — fixed, déjà viewport (10,15)-(110,65)
+        // — chevauche le div : le frère tardif gagne (DFS desc).
+        g.rects.insert(
+            vec![
+                ("html".to_string(), 0),
+                ("body".to_string(), 0),
+                ("ul".to_string(), 0),
+            ],
+            explorer_jscore::ElementGeom {
+                rect: explorer_jscore::GeoRect {
+                    x: 10.0,
+                    y: 15.0,
+                    w: 100.0,
+                    h: 50.0,
+                },
+                fixed: true,
+            },
+        );
+    }
+    e.set_geometry_ctx(0, geom);
+    assert_eq!(
+        evf(
+            &mut e,
+            "var m=document.getElementById('main'),l=document.getElementById('list');\
+            var top=document.elementFromPoint(50,40),all=document.elementsFromPoint(50,40);\
+            var cp=document.caretPositionFromPoint(50,40);\
+            [top===l, all.length, all[0]===l, all[1]===m, cp.offsetNode===l, cp.offset].join('|')"
+        ),
+        "true|2|true|true|true|0"
+    );
+    // Hors rect → null / liste vide.
+    assert_eq!(
+        evf(
+            &mut e,
+            "[document.elementFromPoint(500,500)===null,\
+             document.elementsFromPoint(500,500).length,\
+             document.caretPositionFromPoint(500,500)===null].join('|')"
+        ),
+        "true|0|true"
+    );
+    // `getClientRects` — union bornée : `[rect]` si géom,
+    // `[]` sinon (détaché). `typeof` honnête partout.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var r=m.getClientRects();\
+            [r.length, r[0].x, r[0].y, r[0].width,\
+             document.createElement('div').getClientRects().length,\
+             typeof document.elementFromPoint].join('|')"
+        ),
+        "1|10|15|100|0|function"
+    );
+}
+
+// ===== CAP-181 — `navigator.clipboard` par hook embedder
+// (sonde `_census_calls` : `writeText` TypeError/absent) —
+// sans hook → `NotAllowedError` honnête.
+
+#[test]
+fn cap181_clipboard_hook() {
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    // Surface : objet présent, méthodes lisibles.
+    assert_eq!(
+        evf(
+            &mut e,
+            "[typeof navigator.clipboard, typeof navigator.clipboard.writeText,\
+             typeof navigator.clipboard.readText, navigator.clipboard.toString()].join('|')"
+        ),
+        "object|function|function|[object Clipboard]"
+    );
+    // Sans hook → `NotAllowedError` rejetée (honnête).
+    e.eval(
+        "var wr='',rd='';navigator.clipboard.writeText('x').catch(function(v){wr=v});\
+            navigator.clipboard.readText().catch(function(v){rd=v});",
+    )
+    .expect("deny");
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(
+        evf(&mut e, "wr.slice(0,15)+'|'+rd.slice(0,15)"),
+        "NotAllowedError|NotAllowedError"
+    );
+    // Hook écriture/livraison — l'embedder décide.
+    e.set_clipboard_hooks(
+        Some(std::rc::Rc::new(|t| {
+            if t == "ok" {
+                Ok(())
+            } else {
+                Err("denied".into())
+            }
+        })),
+        Some(std::rc::Rc::new(|| Some("clip!".into()))),
+    );
+    e.eval(
+        "var w='',r='';navigator.clipboard.writeText('ok').then(function(){w='resolved'});\
+            navigator.clipboard.writeText('no').catch(function(v){w+='/reject'});\
+            navigator.clipboard.readText().then(function(v){r=v});",
+    )
+    .expect("hooks");
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(evf(&mut e, "w+'|'+r"), "resolved/reject|clip!");
 }
