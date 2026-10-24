@@ -578,7 +578,10 @@ async fn input(
 /// Google…) n'apparaissent qu'ici, pas dans le HTML servi.
 /// `404` onglet inconnu ou DOM détaché (apply en vol).
 async fn dom_dump(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
-    let session = st.session.lock().await;
+    let mut session = st.session.lock().await;
+    // Réinsère d'abord une éventuelle payload détachée
+    // orpheline (issue #23 — tâche de rendu tombée en vol).
+    session.reclaim_orphaned_paint(id);
     match session.dom_dump(id) {
         Some(d) => (StatusCode::OK, d).into_response(),
         None => (StatusCode::NOT_FOUND, "pas de DOM").into_response(),
@@ -590,7 +593,8 @@ async fn dom_dump(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response
 /// résout ; un « clic ignoré » = zone peinte sans boîte
 /// couvrante. `404` onglet inconnu ou arbre détaché.
 async fn layout_dump(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
-    let session = st.session.lock().await;
+    let mut session = st.session.lock().await;
+    session.reclaim_orphaned_paint(id);
     match session.layout_dump(id) {
         Some(d) => (StatusCode::OK, d).into_response(),
         None => (StatusCode::NOT_FOUND, "pas de layout").into_response(),
@@ -604,6 +608,7 @@ async fn layout_dump(State(st): State<ApiState>, Path(id): Path<TabId>) -> Respo
 /// JS passe par le canal de son worker.
 async fn mem_report(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
     let mut session = st.session.lock().await;
+    session.reclaim_orphaned_paint(id);
     match session.mem_report(id) {
         Some(r) => Json(r).into_response(),
         None => (StatusCode::NOT_FOUND, "onglet inconnu").into_response(),

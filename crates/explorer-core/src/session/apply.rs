@@ -486,10 +486,86 @@ impl Tab {
     }
 }
 
+/// Payload détachée sous garde anti-perte (issue #23) :
+/// entre `take_*` et `commit_*` la payload vit hors de
+/// `Tab` — une tâche annulée en vol (client HTTP de la
+/// navigation tombé en timeout, drain interrompu) la
+/// perdait à vie et laissait `paint_detached` collé :
+/// sondes 404 permanentes, hit-test et scroll morts,
+/// `doc_h` replié. À sa destruction — où qu'elle soit
+/// (tâche async droppée, sortie de worker jamais
+/// récupérée) — la garde parque la payload dans
+/// [`Session::orphaned_paints`] ; le prochain passage
+/// sous verrou la réinsère via
+/// [`Session::reclaim_orphaned_paint`] (epoch-gardée).
+pub(crate) struct DetachedPaint {
+    /// Slot de parking partagé avec la session — joignable
+    /// sans le verrou tokio (`Drop` ne peut pas `.await`).
+    slot: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<TabId, (u64, PaintPayload)>>>,
+    /// Onglet propriétaire.
+    tab: TabId,
+    /// Epoch de navigation au moment du détachement.
+    epoch: u64,
+    /// La payload — `None` une fois extraite pour commit.
+    p: Option<PaintPayload>,
+}
+
+impl DetachedPaint {
+    /// Arme la garde sur `p` pour `tab`/`epoch`.
+    pub(crate) fn new(
+        slot: std::sync::Arc<
+            std::sync::Mutex<std::collections::HashMap<TabId, (u64, PaintPayload)>>,
+        >,
+        tab: TabId,
+        epoch: u64,
+        p: PaintPayload,
+    ) -> Self {
+        Self {
+            slot,
+            tab,
+            epoch,
+            p: Some(p),
+        }
+    }
+
+    /// Accès lecture à la payload gardée — `None` une
+    /// fois extraite (chemin impossible hors commit).
+    pub(crate) fn payload(&self) -> Option<&PaintPayload> {
+        self.p.as_ref()
+    }
+
+    /// Accès mutable à la payload pour le worker de rendu —
+    /// la garde reste armée : si le résultat du worker est
+    /// jeté (tâche droppée), `Drop` parque quand même.
+    pub(crate) fn payload_mut(&mut self) -> &mut PaintPayload {
+        self.p.get_or_insert_with(PaintPayload::default)
+    }
+
+    /// Extrait la payload pour le commit — désarme la
+    /// garde (rien à parquer, la propriété a été cédée).
+    pub(crate) fn into_payload(mut self) -> PaintPayload {
+        self.p.take().unwrap_or_default()
+    }
+}
+
+impl Drop for DetachedPaint {
+    fn drop(&mut self) {
+        if let Some(p) = self.p.take() {
+            let _ = self
+                .slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(self.tab, (self.epoch, p));
+        }
+    }
+}
+
 /// Sortie de [`Session::take_nav_paint`] (étape 90).
 pub(crate) enum NavPaint {
-    /// Payload + contexte prêts pour le worker de rendu.
-    Ready(Box<PaintPayload>, ApplyCtx, CanvasOpsTable),
+    /// Payload gardée + contexte prêts pour le worker de
+    /// rendu (issue #23 : la garde parque l'orpheline si le
+    /// détenteur meurt avant le commit).
+    Ready(Box<DetachedPaint>, ApplyCtx, CanvasOpsTable),
     /// Un apply (ou un rendu de nav) détaché tient la
     /// payload — réessayer après son commit : le détenteur
     /// la restitue toujours, même supplanté (epoch jetée).
@@ -1621,9 +1697,10 @@ impl Session {
     /// plus récente) sont jetées ici.
     pub(crate) fn take_next_apply(
         &mut self,
-    ) -> Option<(PendingApply, PaintPayload, ApplyCtx, Option<String>)> {
+    ) -> Option<(PendingApply, DetachedPaint, ApplyCtx, Option<String>)> {
         loop {
             let mut job = self.pending_applies.pop_front()?;
+            self.reclaim_orphaned_paint(job.tab);
             let ctx = self.apply_ctx();
             {
                 let Some(entry) = self.tabs.get_mut(&job.tab) else {
@@ -1640,7 +1717,14 @@ impl Session {
             self.freshen_apply(job.tab, &mut job);
             let entry = self.tabs.get_mut(&job.tab)?;
             entry.paint_detached = true;
-            return Some((job, entry.take_paint(), ctx, entry.title.clone()));
+            let p = entry.take_paint();
+            let g = DetachedPaint::new(
+                std::sync::Arc::clone(&self.orphaned_paints),
+                job.tab,
+                job.epoch,
+                p,
+            );
+            return Some((job, g, ctx, entry.title.clone()));
         }
     }
 
@@ -1655,10 +1739,15 @@ impl Session {
         payload: PaintPayload,
         out: &ApplyOutcome,
     ) {
+        self.reclaim_orphaned_paint(tab);
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return; // onglet fermé pendant l'apply
         };
         if !entry.paint_detached {
+            // Drapeau déjà libéré : la payload est parquée
+            // plutôt que jetée (issue #23 — la prochaine
+            // réclamation la réinsère si encore vivante).
+            self.park_orphaned_paint(tab, epoch, payload);
             return;
         }
         entry.paint_detached = false;
@@ -1690,6 +1779,7 @@ impl Session {
     /// `canvas_ops` du moteur est capturé ici (le moteur
     /// reste sur `Tab`).
     pub(crate) fn take_nav_paint(&mut self, tab: TabId, epoch: u64) -> NavPaint {
+        self.reclaim_orphaned_paint(tab);
         let ctx = self.apply_ctx();
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return NavPaint::Superseded;
@@ -1705,7 +1795,17 @@ impl Session {
             .as_deref_mut()
             .map_or_else(CanvasOpsTable::new, explorer_js::JsEngine::canvas_ops);
         entry.paint_detached = true;
-        NavPaint::Ready(Box::new(entry.take_paint()), ctx, canvas_ops)
+        let p = entry.take_paint();
+        NavPaint::Ready(
+            Box::new(DetachedPaint::new(
+                std::sync::Arc::clone(&self.orphaned_paints),
+                tab,
+                epoch,
+                p,
+            )),
+            ctx,
+            canvas_ops,
+        )
     }
 
     /// Réinsère la payload de rendu de navigation — garde
@@ -1721,10 +1821,16 @@ impl Session {
         epoch: u64,
         payload: PaintPayload,
     ) -> bool {
+        self.reclaim_orphaned_paint(tab);
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return false;
         };
         if !entry.paint_detached {
+            // Drapeau déjà libéré (rearm/réclamation) : la
+            // payload est parquée plutôt que jetée — la
+            // prochaine réclamation la réinsèrera si elle
+            // est encore d'actualité (issue #23).
+            self.park_orphaned_paint(tab, epoch, payload);
             return false;
         }
         entry.paint_detached = false;
@@ -1780,11 +1886,69 @@ impl Session {
         }
     }
 
+    /// Parque une payload détachée dont le commit n'a pu
+    /// aboutir (issue #23) — même slot que la garde
+    /// [`DetachedPaint`] : elle sera reprise par
+    /// [`Self::reclaim_orphaned_paint`] à la prochaine
+    /// opportunité sous verrou.
+    pub(crate) fn park_orphaned_paint(&mut self, tab: TabId, epoch: u64, p: PaintPayload) {
+        let _ = self
+            .orphaned_paints
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(tab, (epoch, p));
+    }
+
+    /// Réinsère une payload détachée devenue orpheline
+    /// (issue #23) : une tâche de rendu annulée en vol —
+    /// timeout/déconnexion du client HTTP de navigation
+    /// pendant le `spawn_blocking`, drain interrompu —
+    /// jetait la payload avec `paint_detached` collé :
+    /// `/dom`/`/layout`/`/mem` 404 permanents, hit-test et
+    /// scroll morts. Ici, à la première opportunité sous
+    /// verrou (sonde, prochaine peinture, input), l'onglet
+    /// la reprend si son epoch vit encore — sinon elle est
+    /// jetée (la nav plus récente porte la sienne).
+    /// `paint_detached` est toujours libéré : un orphelin
+    /// en attente signifie que le détenteur est mort.
+    pub fn reclaim_orphaned_paint(&mut self, tab: TabId) {
+        let parked = self
+            .orphaned_paints
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&tab);
+        let Some((epoch, p)) = parked else {
+            return;
+        };
+        let Some(e) = self.tabs.get_mut(&tab) else {
+            return; // onglet fermé entre-temps — jetée
+        };
+        e.paint_detached = false;
+        if e.nav_epoch == epoch {
+            e.put_paint(p);
+        }
+    }
+
+    /// Seam de test/diagnostic (issue #23) : simule la mort
+    /// d'un futur détenant la payload détachée — détache
+    /// comme `nav_commit_shared` puis détruit la garde, ce
+    /// qui parque l'orpheline exactement comme un drop de
+    /// tâche en vol. La réclamation suivante doit la
+    /// réinsérer. Hors tests, ne pas appeler.
+    #[doc(hidden)]
+    pub fn debug_drop_detached_paint(&mut self, tab: TabId) {
+        let epoch = self.tabs.get(&tab).map_or(0, |e| e.nav_epoch);
+        if let NavPaint::Ready(g, _ctx, _ops) = self.take_nav_paint(tab, epoch) {
+            drop(g);
+        }
+    }
+
     /// Apply synchrone d'une entrée de file — take/put sous
     /// `&mut self` (hôtes `&mut` : compat `handle_input`,
     /// pompe synchrone, FFI/CLI/tests).
     fn run_apply(&mut self, job: &mut PendingApply) {
         let tab = job.tab;
+        self.reclaim_orphaned_paint(tab);
         let ctx = self.apply_ctx();
         {
             let Some(entry) = self.tabs.get_mut(&tab) else {

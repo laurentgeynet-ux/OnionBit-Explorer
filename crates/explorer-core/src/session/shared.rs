@@ -154,13 +154,13 @@ async fn nav_commit_shared(
     // détenteur la restitue toujours à son commit, l'epoch
     // est revérifiée à chaque tour (une nav plus récente
     // coupe court). Le verrou n'est jamais tenu ici.
-    let (mut p, ctx, canvas_ops) = loop {
+    let (mut g, ctx, canvas_ops) = loop {
         let take = {
             let mut s = sess.lock().await;
             s.take_nav_paint(tab, epoch)
         };
         match take {
-            NavPaint::Ready(p, c, o) => break (*p, c, o),
+            NavPaint::Ready(p, c, o) => break (p, c, o),
             NavPaint::Superseded => return Ok(()),
             NavPaint::Busy => tokio::time::sleep(Duration::from_millis(50)).await,
         }
@@ -168,7 +168,10 @@ async fn nav_commit_shared(
     // `p.base_url` porte la base effective (`<base href>`
     // ou l'URL de la page, étape 135) — l'URL de la
     // réponse reste en repli.
-    let base = p.base_url.clone().unwrap_or_else(|| tail.url.clone());
+    let base = g
+        .payload()
+        .and_then(|p| p.base_url.clone())
+        .unwrap_or_else(|| tail.url.clone());
     let bodies = std::mem::take(&mut tail.img_bodies);
     // Fonds `url(http…)` (étape 98) et masques `mask-image`
     // (étape 121) : posés sur la payload, insérés à la
@@ -176,9 +179,14 @@ async fn nav_commit_shared(
     let bg_aliases = std::mem::take(&mut tail.bg_aliases);
     let bg_bodies = std::mem::take(&mut tail.bg_bodies);
     let mask_aliases = std::mem::take(&mut tail.mask_aliases);
+    // La garde traverse le worker : si ce futur est droppé
+    // (client HTTP tombé, shutdown), la payload est parquée
+    // puis réinsérée à la prochaine prise de verrou —
+    // jamais perdue avec `paint_detached` collé (issue #23).
     let work = tokio::task::spawn_blocking(move || {
+        let p = g.payload_mut();
         net::insert_images_payload(
-            &mut p,
+            p,
             &base,
             &bodies,
             ctx.image_max_px,
@@ -189,17 +197,17 @@ async fn nav_commit_shared(
         p.bg_bodies = bg_bodies;
         p.mask_aliases = mask_aliases;
         let Some(dom) = p.dom.take() else {
-            return (p, Err(CoreError::EmptyDocument));
+            return (g, Err(CoreError::EmptyDocument));
         };
-        let r = apply::relayout_dom_payload(&mut p, &ctx, &dom, &canvas_ops);
+        let r = apply::relayout_dom_payload(p, &ctx, &dom, &canvas_ops);
         p.dom = Some(dom);
-        (p, r)
+        (g, r)
     })
     .await;
     let mut s = sess.lock().await;
     match work {
-        Ok((p, r)) => {
-            let live = s.commit_nav_paint(tab, epoch, p);
+        Ok((g, r)) => {
+            let live = s.commit_nav_paint(tab, epoch, (*g).into_payload());
             match (r, live) {
                 (Ok(()), true) => {
                     s.sub_commit_tail(tab, tail);
@@ -475,30 +483,32 @@ pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, _tab: TabI
             let mut s = sess.lock().await;
             s.take_next_apply()
         };
-        let Some((job, mut payload, ctx, old_title)) = job else {
+        let Some((job, mut g, ctx, old_title)) = job else {
             break;
         };
         let (tab, epoch) = (job.tab, job.epoch);
         // Hors verrou : les phases lourdes ne gèlent plus
-        // ni l'API ni les autres onglets.
+        // ni l'API ni les autres onglets. La garde traverse
+        // le worker : un drain droppé en vol parque la
+        // payload au lieu de la perdre (issue #23).
         let out = tokio::task::spawn_blocking(move || {
             // ADR-0025 : voie journal (rejeu en place) ou
             // re-parse ; le rejet est remonté, la session
             // re-enfile en mode baseline.
-            let r = apply::run_apply_job(&mut payload, &ctx, &job, old_title.as_deref());
-            (payload, r, job)
+            let r = apply::run_apply_job(g.payload_mut(), &ctx, &job, old_title.as_deref());
+            (g, r, job)
         })
         .await;
         let mut s = sess.lock().await;
         match out {
-            Ok((p, Ok(o), job)) => {
+            Ok((g, Ok(o), job)) => {
                 if job.journal.is_some() {
                     s.journal_applies += 1;
                 }
-                s.commit_apply_detached(tab, epoch, p, &o);
+                s.commit_apply_detached(tab, epoch, g.into_payload(), &o);
             }
-            Ok((p, Err(why), job)) => {
-                s.journal_apply_rejected(tab, epoch, p, job, &why);
+            Ok((g, Err(why), job)) => {
+                s.journal_apply_rejected(tab, epoch, g.into_payload(), job, &why);
             }
             Err(_) => {
                 // Panic dans le worker : la payload est

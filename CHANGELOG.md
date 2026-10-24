@@ -2323,6 +2323,49 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `path_source_trailing_slash_
   is_prefix`.
 
+- **Issue #23 — payload de peinture
+  détachée anti-perte**
+  (`explorer-core`, `explorer-api`
+  — vol terrain : `/dom`, `/layout`,
+  `/mem` répondaient en fenêtre
+  courte post-nav puis mouraient en
+  404 à vie, scroll inerte, `doc_h`
+  replié ~900). Cause : le rendu de
+  navigation détache la payload hors
+  de `Tab` entre `take_nav_paint` et
+  `commit_nav_paint` — un futur
+  droppé dans cette fenêtre (client
+  HTTP de `POST /navigate` tombé en
+  timeout pendant le `spawn_blocking`
+  — des dizaines de secondes sur
+  pages réelles — ou drain
+  interrompu) perdait la payload et
+  laissait `paint_detached` collé à
+  vie : plus aucune peinture, sondes
+  mortes. Garde `DetachedPaint` : la
+  payload traverse le worker sous
+  garde — sa destruction où que ce
+  soit parque l'orpheline dans un
+  slot `std::sync::Mutex` joignable
+  sans le verrou tokio ;
+  `reclaim_orphaned_paint` la
+  réinsère à la prochaine opportunité
+  (sondes `/dom`·`/layout`·`/mem`,
+  take/commit de peinture, applies,
+  relayouts, peinture progressive),
+  epoch-gardée — une orpheline
+  supplantée est jetée, jamais
+  ressuscitée. Les commits arrivant
+  après libération du drapeau sont
+  parqués au lieu d'être jetés.
+  Régressions : 4 session (cycle de
+  vie garde, epoch périmée, voie
+  apply, commit post-libération) +
+  1 API (`probes_survive_dropped_
+  detached_paint` — les trois sondes
+  répondent 200 après la perte
+  simulée).
+
 - **JS-C72 — adoption de promesse
   pendante** (`explorer-jscore`).
   `resolve_promise` poussait sur la

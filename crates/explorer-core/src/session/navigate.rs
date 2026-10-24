@@ -877,6 +877,7 @@ impl Session {
     /// la navigation est encore la plus récente de l'onglet —
     /// sinon il est silencieusement jeté.
     pub(crate) fn nav_paint(&mut self, tab: TabId, epoch: u64, dom: &Dom) {
+        self.reclaim_orphaned_paint(tab);
         let live = self.tabs.get(&tab).is_some_and(|e| e.nav_epoch == epoch);
         if live && self.relayout_dom(tab, dom).is_ok() {
             // Peinture spéculative (étape 56c) : l'arbre et la

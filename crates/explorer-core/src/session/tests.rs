@@ -1350,6 +1350,133 @@ fn deferred_inputs_fifo_and_coalesce() {
     assert_eq!(v.as_deref(), Some("abc"));
 }
 
+/// Issue #23 — mort permanente des sondes : un futur de
+/// navigation droppé pendant le rendu détaché (timeout du
+/// client HTTP de `POST /navigate`, drain interrompu)
+/// perdait la payload avec `paint_detached` collé —
+/// `/dom`/`/layout`/`/mem` 404 à vie, scroll inerte. La
+/// garde `DetachedPaint` parque l'orpheline ; la prochaine
+/// prise de verrou la réinsère.
+#[test]
+fn orphaned_nav_paint_is_reclaimed() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<p>page vivante</p>"));
+        e.nav_epoch = 3;
+    }
+    // Détachement identique à `nav_commit_shared`.
+    let apply::NavPaint::Ready(g, _ctx, _ops) = s.take_nav_paint(tab, 3) else {
+        panic!("payload attendue")
+    };
+    // Fenêtre détachée : les sondes meurent (constat).
+    assert!(s.dom_dump(tab).is_none());
+    // Le détenteur meurt en vol — le futur droppé détruit
+    // la garde qui parque la payload.
+    drop(g);
+    // Première opportunité sous verrou (ici : la sonde du
+    // handler API qui appelle reclaim avant son dump) —
+    // l'onglet récupère son état, le drapeau retombe.
+    s.reclaim_orphaned_paint(tab);
+    assert!(s.dom_dump(tab).unwrap().contains("page vivante"));
+    assert!(!s.tabs.get(&tab).unwrap().paint_detached);
+    // Le cycle de peinture n'est plus bloqué (la boucle
+    // `Busy` de `nav_commit_shared` repart).
+    assert!(matches!(
+        s.take_nav_paint(tab, 3),
+        apply::NavPaint::Ready(..)
+    ));
+}
+
+/// Issue #23 — la garde ne ressuscite jamais une page
+/// supplantée : un orphelin d'epoch périmée est jeté à la
+/// réclamation (la nav plus récente porte son propre
+/// rendu) ; le drapeau est libéré quand même pour ne pas
+/// bloquer la peinture suivante.
+#[test]
+fn orphaned_nav_paint_stale_epoch_is_dropped() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<p>page A</p>"));
+        e.nav_epoch = 3;
+    }
+    let apply::NavPaint::Ready(g, _ctx, _ops) = s.take_nav_paint(tab, 3) else {
+        panic!("payload attendue")
+    };
+    // Une nav plus récente démarre pendant que la payload
+    // est dehors — puis le détenteur meurt.
+    s.tabs.get_mut(&tab).unwrap().nav_epoch = 4;
+    drop(g);
+    s.reclaim_orphaned_paint(tab);
+    let e = s.tabs.get(&tab).unwrap();
+    assert!(!e.paint_detached);
+    // Epoch périmée → jetée (la nav epoch 4 peindra la
+    // sienne) — le DOM n'est pas ressuscité.
+    assert!(s.dom_dump(tab).is_none());
+}
+
+/// Issue #23 — même garde sur la voie apply détaché
+/// (`drain_applies_shared`) : un drain droppé en vol
+/// réinsère aussi sa payload.
+#[test]
+fn orphaned_apply_paint_is_reclaimed() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<p>page vivante</p>"));
+        e.nav_epoch = 1;
+    }
+    s.pending_applies.push_back(apply::PendingApply {
+        tab,
+        epoch: 1,
+        html: "<p>resync</p>".into(),
+        dirty: None,
+        canvas_ops: explorer_js::CanvasOpsTable::new(),
+        relayout: true,
+        journal: None,
+        ids: Vec::new(),
+        tags: Vec::new(),
+    });
+    let Some((_job, g, _ctx, _t)) = s.take_next_apply() else {
+        panic!("apply attendu");
+    };
+    assert!(s.dom_dump(tab).is_none());
+    drop(g);
+    s.reclaim_orphaned_paint(tab);
+    assert!(s.dom_dump(tab).unwrap().contains("page vivante"));
+    assert!(!s.tabs.get(&tab).unwrap().paint_detached);
+}
+
+/// Issue #23 — un commit qui arrive **après** la
+/// libération du drapeau (rearm/réclamation) parque la
+/// payload au lieu de la jeter : l'orpheline est reprise
+/// à la réclamation suivante.
+#[test]
+fn nav_paint_commit_on_cleared_flag_is_parked() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom("<p>page vivante</p>"));
+        e.nav_epoch = 3;
+    }
+    let apply::NavPaint::Ready(g, _ctx, _ops) = s.take_nav_paint(tab, 3) else {
+        panic!("payload attendue")
+    };
+    let p = g.into_payload();
+    // Le drapeau retombe avant le commit (rearm).
+    s.rearm_nav_paint(tab);
+    assert!(!s.commit_nav_paint(tab, 3, p));
+    // La payload n'est pas perdue : la réclamation la
+    // réinsère (epoch encore vivante).
+    s.reclaim_orphaned_paint(tab);
+    assert!(s.dom_dump(tab).unwrap().contains("page vivante"));
+}
+
 // ------------------------------------------------------------------
 // Inventaire mémoire du Tab — sonde M-H1. Chaque champ volumineux
 // est compté en octets (capacités × size_of) ; l'écart entre la

@@ -37,6 +37,7 @@ impl Session {
         ids: Option<Vec<u64>>,
         tags: Option<Vec<String>>,
     ) {
+        self.reclaim_orphaned_paint(tab);
         let ctx = self.apply_ctx();
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
@@ -212,6 +213,7 @@ impl Session {
     /// take/put (étape 55h) — `EmptyDocument` si la peinture
     /// est détachée pour un apply hors verrou.
     pub(crate) fn relayout(&mut self, tab: TabId) -> Result<(), CoreError> {
+        self.reclaim_orphaned_paint(tab);
         let ctx = self.apply_ctx();
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return Err(CoreError::UnknownTab(tab));
@@ -265,6 +267,7 @@ impl Session {
     /// en construction). Délègue à
     /// [`apply::relayout_dom_payload`] (étape 55h).
     pub(crate) fn relayout_dom(&mut self, tab: TabId, dom: &Dom) -> Result<(), CoreError> {
+        self.reclaim_orphaned_paint(tab);
         let ctx = self.apply_ctx();
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return Err(CoreError::UnknownTab(tab));
@@ -283,6 +286,7 @@ impl Session {
     /// sans re-layout (scroll, invalidation partielle).
     /// Délègue à [`apply::repaint_payload`] (étape 55h).
     pub(crate) fn repaint(&mut self, tab: TabId) -> Result<(), CoreError> {
+        self.reclaim_orphaned_paint(tab);
         let ctx = self.apply_ctx();
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return Err(CoreError::UnknownTab(tab));

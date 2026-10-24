@@ -1058,3 +1058,64 @@ async fn media_claim_state_release() {
     let v = media_get(&app, id, &format!("/{mid}")).await;
     assert_eq!(v["claimed"], false);
 }
+
+/// Issue #23 — mort permanente des sondes : un futur de
+/// navigation droppé pendant le rendu détaché (client HTTP
+/// tombé en timeout) laissait la payload perdue et
+/// `paint_detached` collé — `/dom`, `/layout`, `/mem` en
+/// 404 à vie. La garde anti-perte parque l'orpheline ; les
+/// handlers la réinsèrent à la demande — les sondes
+/// doivent répondre 200 **après** la perte simulée.
+#[tokio::test]
+async fn probes_survive_dropped_detached_paint() {
+    let t: Arc<dyn HttpTransport> = Arc::new(FakeTransport {
+        body: "<!doctype html><html><body><div>api</div></body></html>",
+        log: std::sync::Mutex::new(Vec::new()),
+    });
+    let session = Arc::new(tokio::sync::Mutex::new(Session::new(
+        t,
+        Arc::new(FixtureFont),
+    )));
+    let app = explorer_api::router(Arc::clone(&session));
+
+    let resp = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let id = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    app.clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/navigate"),
+            r#"{"url":"http://h.test/"}"#,
+        ))
+        .await
+        .unwrap();
+
+    // Le détenteur meurt en vol — payload détachée parquée
+    // (drop de tâche en rendu, comme un timeout client).
+    session.lock().await.debug_drop_detached_paint(id);
+
+    // Les sondes réinsèrent l'orpheline à la demande —
+    // toutes répondent 200, pas 404 permanents.
+    for sub in ["dom", "layout", "mem"] {
+        let r = app
+            .clone()
+            .oneshot(
+                HttpRequest::builder()
+                    .uri(format!("/api/tabs/{id}/{sub}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r.status(),
+            StatusCode::OK,
+            "{sub} doit survivre à la perte du rendu détaché"
+        );
+    }
+}

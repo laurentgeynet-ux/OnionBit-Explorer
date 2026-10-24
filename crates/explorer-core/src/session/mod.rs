@@ -742,6 +742,18 @@ pub struct Session {
     /// synchrone ou `drain_applies_shared` hors verrou).
     /// Une entrée par onglet au plus (coalescence).
     pending_applies: apply::ApplyQueue,
+    /// Payloads de peinture détachées devenues orphelines
+    /// (issue #23) : une tâche de rendu annulée en vol
+    /// (client HTTP de navigation tombé, drain interrompu)
+    /// y parque sa payload via la garde
+    /// [`apply::DetachedPaint`] plutôt que de la perdre avec
+    /// `paint_detached` collé — sondes 404 et scroll mort à
+    /// vie sinon. `std::sync::Mutex` : joignable sans le
+    /// verrou tokio (`Drop` ne peut pas `.await`) ; reprise
+    /// epoch-gardée par `reclaim_orphaned_paint`.
+    orphaned_paints: std::sync::Arc<
+        std::sync::Mutex<std::collections::HashMap<TabId, (u64, apply::PaintPayload)>>,
+    >,
     /// Cellule `Accept-Language` partagée avec le
     /// `LangTransport` qui coiffe `transport` (étape 118) —
     /// `set_accept_language` la fait évoluer à chaud, sans
@@ -842,6 +854,9 @@ impl Session {
             journal_fallbacks: 0,
             journal_applies: 0,
             pending_applies: std::collections::VecDeque::new(),
+            orphaned_paints: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             accept_language,
             downloads: HashMap::new(),
             next_download_id: 1,
