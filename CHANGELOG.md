@@ -1680,6 +1680,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-181 — `navigator.clipboard` par
+  hook embedder (sonde `_census_calls`)**
+  (`explorer-jscore`) : surface spec
+  `writeText`/`readText` — les promesses
+  passent par les transporteurs
+  `BrowserHooks::clipboard_*` posés par
+  `Engine::set_clipboard_hooks` (le
+  presse-papiers est une ressource
+  OS/permission, pas du moteur — engine-
+  global comme `console`). Sans hook →
+  rejet `NotAllowedError` (spec :
+  permission refusée — honnête, jamais
+  de faux succès : les apps style Docs
+  prennent leur chemin `execCommand`
+  hérité ou refusent proprement).
+  `typeof navigator.clipboard` =
+  `'object'` pour le feature-detect — la
+  promesse tranche l'autorisation.
+  Bornes : pas de permission prompt
+  (l'embedder arbitre), `read`/`write`
+  binaires hors surface (`clipboard-item`
+  = chantier MIME). Test jscore
+  `cap181_clipboard_hook` (surface,
+  rejet honnête, hook round-trip).
+
 - **CAP-180 — hit-test inverse +
   `getClientRects` (sonde `_census_calls`,
   couture géométrie i#19)** (`explorer-jscore`)
