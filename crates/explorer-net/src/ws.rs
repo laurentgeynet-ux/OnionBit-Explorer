@@ -263,11 +263,11 @@ fn encode_frame(opcode: u8, payload: &[u8], fin: bool) -> Vec<u8> {
     let l = payload.len();
     if l < 126 {
         out.push(0x80 | u8::try_from(l).unwrap_or(0));
-    } else if l <= u16::MAX as usize {
-        out.push(0x80 | 126);
-        out.extend_from_slice(&(l as u16).to_be_bytes());
+    } else if u16::try_from(l).is_ok() {
+        out.push(0x80 | 0x7e);
+        out.extend_from_slice(&u16::try_from(l).unwrap_or(u16::MAX).to_be_bytes());
     } else {
-        out.push(0x80 | 127);
+        out.push(0x80 | 0x7f);
         out.extend_from_slice(&(l as u64).to_be_bytes());
     }
     out.extend_from_slice(&mask);
@@ -284,6 +284,7 @@ fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
         .map(|(_, v)| v.as_str())
 }
 
+#[allow(clippy::too_many_lines)]
 #[async_trait::async_trait]
 impl WsDial for RealWsDial {
     async fn open(
@@ -309,7 +310,8 @@ impl WsDial for RealWsDial {
             spec.resource, spec.host, spec.port, key_b64
         );
         for (k, v) in &spec.headers {
-            req.push_str(&format!("{k}: {v}\r\n"));
+            use std::fmt::Write as _;
+            let _ = write!(req, "{k}: {v}\r\n");
         }
         req.push_str("\r\n");
 
@@ -435,7 +437,6 @@ impl WsDial for RealWsDial {
                                                     return Ok(());
                                                 }
                                             }
-                                            OP_PONG => {}
                                             OP_CLOSE => {
                                                 let (code, reason) = if f.payload.len() >= 2 {
                                                     (
@@ -482,13 +483,19 @@ impl WsDial for RealWsDial {
                                                     }
                                                 }
                                             }
-                                            OP_CONT => {
-                                                if pending_msg.is_empty() {
+                                            _ => {
+                                                // Continuation (ou opcode
+                                                // inconnu toléré) : fragment
+                                                // si un message est ouvert —
+                                                // `parse_frame` a déjà rejeté
+                                                // les opcodes hors §5.2.
+                                                if pending_msg.is_empty() && f.opcode == OP_CONT {
                                                     let _ = events.send(WsEvent::Error(
                                                         "ws: stray continuation".into(),
                                                     )).await;
                                                     return Ok(());
                                                 }
+                                                if f.opcode != OP_CONT { continue; }
                                                 pending_msg.extend_from_slice(&f.payload);
                                                 if pending_msg.len() > limits.max_message {
                                                     let _ = events.send(WsEvent::Error(
@@ -513,7 +520,6 @@ impl WsDial for RealWsDial {
                                                     }
                                                 }
                                             }
-                                            _ => {}
                                         }
                                     }
                                 }
