@@ -419,6 +419,191 @@ struct NodeHost {
 }
 
 impl NodeHost {
+    /// (dom, nœud) pour les accesseurs de prototype IDL
+    /// (JS-C82 — `dom_acc_get`/`dom_acc_set` lisent la valeur
+    /// **brute** sans repasser par `Host::get`, faute de quoi
+    /// un `defineProperty` accesseur propre sur l'élément —
+    /// le tracker React `inputValueTracking` — rebouclerait).
+    pub(crate) fn dom_node(&self) -> (DomRef, NodeId) {
+        (self.dom.clone(), self.node)
+    }
+}
+
+/// Props IDL porteuses d'un accesseur sur le prototype de la
+/// classe — table bornée (JS-C82) : `getOwnPropertyDescriptor(
+/// ctor.prototype, 'value')` doit rendre `{get,set}` pour que
+/// le `inputValueTracking` de React s'arme.
+fn dom_acc_props(class: &str) -> &'static [&'static str] {
+    match class {
+        "HTMLInputElement" => &[
+            "value",
+            "checked",
+            "type",
+            "defaultValue",
+            "defaultChecked",
+            "readOnly",
+            "disabled",
+            "name",
+            "placeholder",
+        ],
+        "HTMLTextAreaElement" => &[
+            "value",
+            "defaultValue",
+            "wrap",
+            "readOnly",
+            "disabled",
+            "name",
+            "placeholder",
+        ],
+        "HTMLSelectElement" => &["value", "disabled", "multiple", "name"],
+        "HTMLOptionElement" => &["value", "selected", "disabled"],
+        "HTMLButtonElement" => &["value", "type", "disabled", "name"],
+        "HTMLFormElement" => &["method", "action", "enctype", "target", "name"],
+        "HTMLImageElement" => &["src", "alt", "width", "height", "decoding", "loading"],
+        "HTMLAnchorElement" => &["href", "target", "rel"],
+        "HTMLIFrameElement" => &["src", "srcdoc", "sandbox", "loading"],
+        "HTMLScriptElement" | "HTMLLinkElement" => &["src", "href", "type", "rel"],
+        _ => &["id", "className", "title"],
+    }
+}
+
+/// Attribut booléen reflété (`checked`, `disabled`…) — lecture
+/// `has_attr`, écriture pose/retire.
+fn dom_bool_attr(prop: &str) -> Option<&'static str> {
+    Some(match prop {
+        "checked" | "defaultChecked" => "checked",
+        "selected" => "selected",
+        "disabled" => "disabled",
+        "readOnly" => "readonly",
+        "multiple" => "multiple",
+        "required" => "required",
+        "hidden" => "hidden",
+        "autofocus" => "autofocus",
+        _ => return None,
+    })
+}
+
+/// Lecture brute d'une prop IDL réfléchie — **sans** la voie
+/// `Host::get` : les accesseurs de prototype doivent atteindre
+/// l'attribut même quand l'élément porte un accesseur propre
+/// (`defineProperty`, tracker React).
+fn dom_raw_get(e: &mut Engine, dom: &DomRef, node: NodeId, prop: &str) -> JsResult<Value> {
+    let d = dom.borrow();
+    if let Some(attr) = dom_bool_attr(prop) {
+        return Ok(Value::Bool(d.has_attr(node, attr)));
+    }
+    if prop == "value" {
+        let v = d.attr(node, "value").map(str::to_string).or_else(|| {
+            matches!(d.nodes[node as usize].tag.as_str(), "textarea" | "select")
+                .then(|| control_value(&d, node))
+        });
+        return Ok(match v {
+            Some(v) => e.str_val(v),
+            None => e.str_val(""),
+        });
+    }
+    if let Some(v) = enum_attr_default(&d, node, prop) {
+        return Ok(e.str_val(v));
+    }
+    let attr = prop_to_attr(prop).unwrap_or(prop);
+    let v = d.attr(node, attr).unwrap_or("").to_string();
+    Ok(e.str_val(v))
+}
+
+/// Getter d'accesseur prototype — `bound[0]` = nom de prop,
+/// `this` = l'élément (`desc.get.call(el)`).
+fn dom_acc_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Some(Value::Str(m)) = args.first() else {
+        return Ok(Value::Undefined);
+    };
+    let Some(prop) = e.heap.string(*m) else {
+        return Ok(Value::Undefined);
+    };
+    let Value::Obj(id) = this else {
+        return Ok(Value::Undefined);
+    };
+    let Some((dom, node)) = e.host_of(id).and_then(|h| {
+        h.as_any()
+            .downcast_ref::<NodeHost>()
+            .map(NodeHost::dom_node)
+    }) else {
+        return Ok(Value::Undefined);
+    };
+    dom_raw_get(e, &dom, node, &prop)
+}
+
+/// Setter d'accesseur prototype — `bound[0]` = nom de prop,
+/// `args[1]` = valeur (`desc.set.call(el, v)`).
+fn dom_acc_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Some(Value::Str(m)) = args.first() else {
+        return Ok(Value::Undefined);
+    };
+    let Some(prop) = e.heap.string(*m) else {
+        return Ok(Value::Undefined);
+    };
+    let v = arg(args, 1);
+    let Value::Obj(id) = this else {
+        return Ok(Value::Undefined);
+    };
+    let Some((dom, node)) = e.host_of(id).and_then(|h| {
+        h.as_any()
+            .downcast_ref::<NodeHost>()
+            .map(NodeHost::dom_node)
+    }) else {
+        return Ok(Value::Undefined);
+    };
+    let mut d = dom.borrow_mut();
+    let tag = d.nodes[node as usize].tag.clone();
+    if let Some(attr) = dom_bool_attr(&prop) {
+        if e.to_boolean(v) {
+            d.set_attr(node, attr, "");
+        } else {
+            d.remove_attr(node, attr);
+        }
+        return Ok(Value::Undefined);
+    }
+    let attr = enum_attr_write_name(&tag, &prop)
+        .or_else(|| prop_to_attr(&prop))
+        .unwrap_or_else(|| Box::leak(prop.into_boxed_str()));
+    let s = e.to_js_string(v)?;
+    d.set_attr(node, attr, &s);
+    Ok(Value::Undefined)
+}
+
+impl Engine {
+    /// `el.constructor` typé (JS-C82) : objet fonction non
+    /// constructible nommé `class` + `prototype` porteur des
+    /// accesseurs IDL de `dom_acc_props` — la surface
+    /// `getOwnPropertyDescriptor`/`defineProperty` complète que
+    /// `inputValueTracking` (React) exploite. Cache rooté par
+    /// nom de classe.
+    pub(crate) fn dom_ctor(&mut self, class: &'static str) -> Value {
+        if let Some(v) = self.dom_ctors.get(class) {
+            return *v;
+        }
+        let pid = self.new_object();
+        let proto = Value::Obj(pid);
+        for &prop in dom_acc_props(class) {
+            let nm = self.str_val(prop);
+            let g = self.bound_native("dom.get", dom_acc_get, vec![nm]);
+            let s = self.bound_native("dom.set", dom_acc_set, vec![nm]);
+            if let Some(o) = self.heap.obj_mut(pid) {
+                o.set_accessor(prop, g, s, false);
+            }
+        }
+        let ctor = self.native_fn(class, illegal_ctor);
+        if let Value::Obj(cid) = ctor {
+            self.set_own(cid, "prototype", proto, false);
+            self.set_own(pid, "constructor", ctor, false);
+            self.add_root(cid);
+            self.add_root(pid);
+        }
+        self.dom_ctors.insert(class.to_string(), ctor);
+        ctor
+    }
+}
+
+impl NodeHost {
     /// `checkValidity` partagé : `invalid` dispatché sur chaque
     /// contrôle fautif (le `<form>` couvre tous ses candidats)
     /// — `false` dès qu'un contrôle échoue.
@@ -1212,6 +1397,10 @@ impl Engine {
         // pour la détection de feature ; sans `set_worker_factory`
         // il jette un TypeError honnête.
         self.install_worker_ctor();
+        // `MessageChannel` (JS-C81) — voie d'ordonnancement
+        // des schedulers de frameworks (React la préfère à
+        // `setTimeout`).
+        self.install_channel_ctor();
         // `window`/`self`/`globalThis` — the global object itself.
         let gv = Value::Obj(g);
         self.set_own(g, "window", gv, false);
@@ -2107,7 +2296,7 @@ impl Host for DocumentHost {
         self
     }
 
-    fn get(&self, e: &mut Engine, _this: Value, key: &str) -> JsResult<Option<Value>> {
+    fn get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
         match key {
             "body" => {
                 let n = self.dom.borrow().body();
@@ -2239,6 +2428,24 @@ impl Host for DocumentHost {
                         .unwrap_or_else(|| url_parts(&e.hooks.page_url).2),
                 ),
             )),
+            // Méthodes lisibles (JS-C80) — `document.createElement`
+            // & co. rendent une fonction bornée → `invoke` : le
+            // sniff `typeof d.createElement` (React `canUseDOM`)
+            // l'exige — invoke-only le rendait `undefined`.
+            k if DOC_METHODS.contains(&k) => {
+                let nv = e.str_val(k);
+                Ok(Some(e.bound_native(
+                    "document.method",
+                    host_method_trampoline,
+                    vec![nv, this],
+                )))
+            }
+            // Handlers `on*` sur `document` (JS-C80) —
+            // `"oninput" in document` est le sniff de support
+            // de React (`Lj`) qui arme `ChangeEventPlugin` ;
+            // sans lui les `onChange` des champs contrôlés
+            // tombent sur le chemin IE8 `propertychange`.
+            k if is_event_handler_prop(k) => on_handler_get(e, &self.dom, None, this, k),
             _ => Ok(None),
         }
     }
@@ -2547,10 +2754,384 @@ fn prop_to_attr(key: &str) -> Option<&'static str> {
         "className" => "class",
         "htmlFor" => "for",
         "value" => "value",
+        "encoding" => "enctype",
         "crossOrigin" => "crossorigin",
         "playsInline" => "playsinline",
         "referrerPolicy" => "referrerpolicy",
         k => return MAPPED_ATTRS.iter().copied().find(|&a| a == k),
+    })
+}
+
+/// Noms `on*` reconnus comme handlers IDL (`GlobalEventHandlers`,
+/// pointer/touch/animation/transition). La table borne le sniff :
+/// `on` + nom inconnu reste `undefined` (spec), un nom connu
+/// devient une vraie prop (null/fonction) — `"oninput" in
+/// document` passe à vrai, ce que React (`Lj`) exige pour
+/// armer `ChangeEventPlugin`.
+const EVENT_HANDLER_PROPS: &[&str] = &[
+    // GlobalEventHandlers (HTML §6.1.6.1).
+    "onabort",
+    "onauxclick",
+    "onbeforeinput",
+    "onbeforematch",
+    "onbeforetoggle",
+    "onblur",
+    "oncancel",
+    "oncanplay",
+    "oncanplaythrough",
+    "onchange",
+    "onclick",
+    "onclose",
+    "oncontextlost",
+    "oncontextmenu",
+    "oncontextrestored",
+    "oncopy",
+    "oncuechange",
+    "oncut",
+    "ondblclick",
+    "ondrag",
+    "ondragend",
+    "ondragenter",
+    "ondragleave",
+    "ondragover",
+    "ondragstart",
+    "ondrop",
+    "ondurationchange",
+    "onemptied",
+    "onended",
+    "onerror",
+    "onfocus",
+    "onformdata",
+    "oninput",
+    "oninvalid",
+    "onkeydown",
+    "onkeypress",
+    "onkeyup",
+    "onload",
+    "onloadeddata",
+    "onloadedmetadata",
+    "onloadstart",
+    "onmousedown",
+    "onmouseenter",
+    "onmouseleave",
+    "onmousemove",
+    "onmouseout",
+    "onmouseover",
+    "onmouseup",
+    "onpause",
+    "onplay",
+    "onplaying",
+    "onprogress",
+    "onratechange",
+    "onreset",
+    "onresize",
+    "onscroll",
+    "onscrollend",
+    "onsecuritypolicyviolation",
+    "onseeked",
+    "onseeking",
+    "onselect",
+    "onslotchange",
+    "onstalled",
+    "onsubmit",
+    "onsuspend",
+    "ontimeupdate",
+    "ontoggle",
+    "onvolumechange",
+    "onwaiting",
+    "onwheel",
+    // Pointer events (§Element).
+    "ongotpointercapture",
+    "onlostpointercapture",
+    "onpointercancel",
+    "onpointerdown",
+    "onpointerenter",
+    "onpointerleave",
+    "onpointermove",
+    "onpointerout",
+    "onpointerover",
+    "onpointerup",
+    "onpointerrawupdate",
+    // Touch events.
+    "ontouchstart",
+    "ontouchmove",
+    "ontouchend",
+    "ontouchcancel",
+    // Animation/transition events.
+    "onanimationstart",
+    "onanimationiteration",
+    "onanimationend",
+    "onanimationcancel",
+    "ontransitionrun",
+    "ontransitionstart",
+    "ontransitionend",
+    "ontransitioncancel",
+    // WindowEventHandlers — posables aussi sur document/body.
+    "onafterprint",
+    "onbeforeprint",
+    "onbeforeunload",
+    "ongamepadconnected",
+    "ongamepaddisconnected",
+    "onhashchange",
+    "onlanguagechange",
+    "onmessage",
+    "onmessageerror",
+    "onoffline",
+    "ononline",
+    "onpagehide",
+    "onpageshow",
+    "onpopstate",
+    "onrejectionhandled",
+    "onstorage",
+    "onunhandledrejection",
+    "onunload",
+];
+
+/// `on` + nom connu ?
+fn is_event_handler_prop(key: &str) -> bool {
+    EVENT_HANDLER_PROPS.contains(&key)
+}
+
+/// Méthodes de `document` — historiquement *invoke-only* :
+/// invisibles en lecture de propriété (`typeof d.createElement`
+/// → `undefined`), ce qui faisait échouer les sniffs de support
+/// des frameworks — mesuré : `canUseDOM` de React faux à
+/// l'éval → `isInputEventSupported` faux → `onChange` des
+/// champs contrôlés envoyé sur le polyfill IE8
+/// (`propertychange`), jamais tiré. Chaque nom rend une
+/// fonction bornée qui redispatche [`Host::invoke`].
+const DOC_METHODS: &[&str] = &[
+    "addEventListener",
+    "removeEventListener",
+    "dispatchEvent",
+    "getSelection",
+    "getElementById",
+    "getElementsByTagName",
+    "getElementsByClassName",
+    "getElementsByName",
+    "querySelector",
+    "querySelectorAll",
+    "createElement",
+    "createElementNS",
+    "createTextNode",
+    "createDocumentFragment",
+    "createEvent",
+    "open",
+    "close",
+    "write",
+    "writeln",
+];
+
+/// Méthodes d'élément universelles (Node + Element — hors
+/// variantes à gate de tag : `submit`/`getContext`/`play`… qui
+/// restent invoke-only, fidèles aux éléments qui ne les ont
+/// pas).
+const NODE_METHODS: &[&str] = &[
+    "addEventListener",
+    "removeEventListener",
+    "dispatchEvent",
+    "appendChild",
+    "insertBefore",
+    "removeChild",
+    "replaceChild",
+    "cloneNode",
+    "contains",
+    "getRootNode",
+    "hasChildNodes",
+    "isSameNode",
+    "isEqualNode",
+    "compareDocumentPosition",
+    "normalize",
+    "append",
+    "prepend",
+    "before",
+    "after",
+    "remove",
+    "replaceWith",
+    "getElementsByTagName",
+    "getElementsByClassName",
+    "querySelector",
+    "querySelectorAll",
+    "setAttribute",
+    "getAttribute",
+    "hasAttribute",
+    "removeAttribute",
+    "toggleAttribute",
+    "insertAdjacentHTML",
+    "insertAdjacentText",
+    "attachShadow",
+    "attachInternals",
+    "focus",
+    "blur",
+    "click",
+];
+
+/// Trampoline des méthodes lisibles : `bound ++ args` =
+/// `(nom, receveur, args…)` → [`Host::invoke`]. Le receveur est
+/// lié à la création — `f.call(autreEl)` ne redispatche pas
+/// sur `autreEl` (déviation documentée ; les sites n'y
+/// recourent pas).
+fn host_method_trampoline(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((Value::Str(m), rest)) = args.split_first() else {
+        return Ok(Value::Undefined);
+    };
+    let name = e.heap.string(*m);
+    let Some(name) = name else {
+        return Ok(Value::Undefined);
+    };
+    let Some(Value::Obj(id)) = rest.first().copied() else {
+        return Ok(Value::Undefined);
+    };
+    let Some(h) = e.host_of(id) else {
+        return Ok(Value::Undefined);
+    };
+    Ok(h.invoke(e, Value::Obj(id), &name, &rest[1..])?
+        .unwrap_or(Value::Undefined))
+}
+
+/// Lecture d'un handler `on*` : propre scriptée (`el.onclick =
+/// f`, stockée en expando) prioritaire, puis attribut `on*`
+/// compilé paresseusement (JS-C45) quand `node` est donné,
+/// sinon `null`. Déviation : corps illisible → `null` (le
+/// handler spec est « not set »).
+fn on_handler_get(
+    e: &mut Engine,
+    dom: &DomRef,
+    node: Option<NodeId>,
+    this: Value,
+    key: &str,
+) -> JsResult<Option<Value>> {
+    if !is_event_handler_prop(key) {
+        return Ok(None);
+    }
+    if let Value::Obj(id) = this {
+        if let Some(v) = e.find_prop(id, key).and_then(|p| p.data_value()) {
+            return Ok(Some(v));
+        }
+    }
+    if let Some(n) = node {
+        if let Ok(Some(f)) = e.inline_handler(dom, n, key) {
+            return Ok(Some(f));
+        }
+    }
+    Ok(Some(Value::Null))
+}
+
+/// Attributs énumérés « limited to only known values » (HTML
+/// §2.5.5) : la lecture IDL rend le *mot-clé canonique* —
+/// attribut absent → missing-value default, valeur hors
+/// vocabulaire → invalid-value default (normalisés en
+/// minuscules). Sans cette table `input.type` rend `""` et les
+/// sniffers de frameworks tombent — mesuré : React
+/// `isTextInputElement` exige `type` dans sa liste, faute de
+/// quoi le `ChangeEventPlugin` jette l'événement et `onChange`
+/// ne se déclenche jamais sur les champs contrôlés.
+/// `key` = nom de propriété JS ; `None` hors table.
+fn enum_attr_default(d: &Dom, node: NodeId, key: &str) -> Option<String> {
+    let tag = d.nodes[node as usize].tag.as_str();
+    let lower = |a: &str| d.attr(node, a).map(str::to_ascii_lowercase);
+    let known = |raw: Option<String>, list: &[&str], def: &str| -> String {
+        match raw {
+            Some(v) if list.contains(&v.as_str()) => v,
+            _ => def.to_string(),
+        }
+    };
+    Some(match (tag, key) {
+        ("input", "type") => known(
+            lower("type"),
+            &[
+                "hidden",
+                "text",
+                "search",
+                "tel",
+                "url",
+                "email",
+                "password",
+                "date",
+                "month",
+                "week",
+                "time",
+                "datetime-local",
+                "number",
+                "range",
+                "color",
+                "checkbox",
+                "radio",
+                "file",
+                "submit",
+                "image",
+                "reset",
+                "button",
+            ],
+            "text",
+        ),
+        ("button", "type") => known(lower("type"), &["submit", "reset", "button"], "submit"),
+        // `select.type` n'est pas un reflet : dérivé de
+        // `multiple` (HTML §4.10.7).
+        ("select", "type") => {
+            if d.has_attr(node, "multiple") {
+                "select-multiple".to_string()
+            } else {
+                "select-one".to_string()
+            }
+        }
+        ("form", "method") => known(lower("method"), &["get", "post", "dialog"], "get"),
+        ("form", "enctype" | "encoding") => known(
+            lower("enctype"),
+            &[
+                "application/x-www-form-urlencoded",
+                "multipart/form-data",
+                "text/plain",
+            ],
+            "application/x-www-form-urlencoded",
+        ),
+        ("textarea", "wrap") => known(lower("wrap"), &["soft", "hard"], "soft"),
+        // `track.kind` : absent → `subtitles`, invalide →
+        // `metadata` (deux défauts distincts, HTML §4.8.11.4).
+        ("track", "kind") => match lower("kind") {
+            Some(v)
+                if [
+                    "subtitles",
+                    "captions",
+                    "descriptions",
+                    "chapters",
+                    "metadata",
+                ]
+                .contains(&v.as_str()) =>
+            {
+                v
+            }
+            Some(_) => "metadata".to_string(),
+            None => "subtitles".to_string(),
+        },
+        ("img", "decoding") => known(lower("decoding"), &["auto", "sync", "async"], "auto"),
+        ("img" | "iframe", "loading") => known(lower("loading"), &["eager", "lazy"], "eager"),
+        ("th", "scope") => known(
+            lower("scope"),
+            &["row", "col", "rowgroup", "colgroup"],
+            "auto",
+        ),
+        _ => return None,
+    })
+}
+
+/// Nom d'attribut reflété en **écriture** pour les paires
+/// (tag, prop) énumérées — hors `MAPPED_ATTRS` volontairement
+/// : y figurer ferait du reflet un global qui masque le named
+/// getter des `<form>` (`form.kind` ≙ contrôle nommé « kind »,
+/// régression `c76_surfaces_detail`). `select.type` n'est pas
+/// un attribut → `None`.
+fn enum_attr_write_name(tag: &str, key: &str) -> Option<&'static str> {
+    Some(match (tag, key) {
+        ("input" | "button", "type") => "type",
+        ("form", "method") => "method",
+        ("form", "enctype" | "encoding") => "enctype",
+        ("textarea", "wrap") => "wrap",
+        ("track", "kind") => "kind",
+        ("img", "decoding") => "decoding",
+        ("img" | "iframe", "loading") => "loading",
+        ("th", "scope") => "scope",
+        _ => return None,
     })
 }
 
@@ -2926,6 +3507,19 @@ impl Host for NodeHost {
             "video" => "HTMLVideoElement",
             "audio" => "HTMLAudioElement",
             "canvas" => "HTMLCanvasElement",
+            // JS-C82 — noms d'interface exacts pour les tags à
+            // accesseurs IDL (`constructor.name` fidèle).
+            "input" => "HTMLInputElement",
+            "textarea" => "HTMLTextAreaElement",
+            "select" => "HTMLSelectElement",
+            "option" => "HTMLOptionElement",
+            "button" => "HTMLButtonElement",
+            "form" => "HTMLFormElement",
+            "img" => "HTMLImageElement",
+            "a" => "HTMLAnchorElement",
+            "iframe" => "HTMLIFrameElement",
+            "script" => "HTMLScriptElement",
+            "link" => "HTMLLinkElement",
             _ => "HTMLElement",
         }
     }
@@ -2936,6 +3530,15 @@ impl Host for NodeHost {
 
     fn get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
         let node = self.node;
+        // Accesseur propre `defineProperty` (JS-C82) : il shadowe
+        // la voie host — `read_prop` l'invoquera (spec : own
+        // prop > IDL). Sans ça le tracker React posé par
+        // `inputValueTracking` n'intercepterait rien.
+        if let Value::Obj(id) = this {
+            if matches!(e.find_own(id, key), Some(crate::heap::Prop::Acc { .. })) {
+                return Ok(None);
+            }
+        }
         // `<canvas>.width`/`.height` (JS-C28) : valeur
         // **numérique** lue sur l'attribut — défaut spec
         // 300×150 (les autres éléments suivent le chemin
@@ -2989,16 +3592,12 @@ impl Host for NodeHost {
             };
             return Ok(Some(doc.map_or(Value::Null, Value::Obj)));
         }
-        // `constructor.name` (étape 74) : objet allégé
-        // portant le nom de classe — `v.constructor.name`
-        // vaut « HTMLVideoElement », pas « Object ». Non
-        // constructible (v1 cosmétique documentée — de vrais
-        // bindings `new`-ables sont un chantier plus large).
+        // `constructor` (JS-C82) : objet fonction typé par
+        // classe portant `.prototype` + accesseurs IDL —
+        // `ctor.prototype` sert `getOwnPropertyDescriptor`
+        // (tracker React `inputValueTracking`).
         if key == "constructor" {
-            let o = e.new_object();
-            let name = e.str_val(self.class_name());
-            e.set_own(o, "name", name, true);
-            return Ok(Some(Value::Obj(o)));
+            return Ok(Some(e.dom_ctor(self.class_name())));
         }
         // Fast paths that don't need the dom borrow held across calls.
         match key {
@@ -3438,6 +4037,31 @@ impl Host for NodeHost {
             }
             _ => {}
         }
+        // Méthodes lisibles (JS-C80) — mêmes raisons que
+        // `document` : `el.appendChild` & co. étaient
+        // invoke-only ; les frameworks sniffent
+        // `typeof el.m`/`"m" in el`.
+        if NODE_METHODS.contains(&key) {
+            let nv = e.str_val(key);
+            return Ok(Some(e.bound_native(
+                "node.method",
+                host_method_trampoline,
+                vec![nv, this],
+            )));
+        }
+        // Handlers `on*` (JS-C80) — lecture IDL : propre
+        // scriptée (`el.onclick = f`), attribut compilé
+        // paresseusement (JS-C45), sinon `null`. `"on*"` reste
+        // une vraie prop — sniff React `Lj`.
+        if let Some(v) = on_handler_get(e, &self.dom, Some(node), this, key)? {
+            return Ok(Some(v));
+        }
+        // Attributs énumérés « limited to only known values »
+        // (JS-C80) — avant le reflet brut : `input.type` rend
+        // `"text"`, `button.type` `"submit"`, etc.
+        if let Some(v) = enum_attr_default(&self.dom.borrow(), node, key) {
+            return Ok(Some(e.str_val(v)));
+        }
         // Attribute-mapped props.
         if let Some(attr) = prop_to_attr(key) {
             let v = self.dom.borrow().attr(node, attr).map(str::to_string);
@@ -3475,8 +4099,15 @@ impl Host for NodeHost {
         Ok(None)
     }
 
-    fn set(&self, e: &mut Engine, _this: Value, key: &str, v: Value) -> JsResult<bool> {
+    fn set(&self, e: &mut Engine, this: Value, key: &str, v: Value) -> JsResult<bool> {
         let node = self.node;
+        // Accesseur propre `defineProperty` (JS-C82) : refuser
+        // la voie host → `write_prop` invoque le setter.
+        if let Value::Obj(id) = this {
+            if matches!(e.find_own(id, key), Some(crate::heap::Prop::Acc { .. })) {
+                return Ok(false);
+            }
+        }
         match key {
             "innerHTML" => {
                 let html = e.to_js_string(v)?;
@@ -3583,6 +4214,17 @@ impl Host for NodeHost {
                         d.remove_attr(node, key);
                     }
                     return Ok(true);
+                }
+                // Attributs énumérés tag-scopés (JS-C80) —
+                // écriture = reflet brut ; le clamp spec est
+                // côté lecture (`enum_attr_default`).
+                {
+                    let tag = self.dom.borrow().nodes[node as usize].tag.clone();
+                    if let Some(attr) = enum_attr_write_name(&tag, key) {
+                        let s = e.to_js_string(v)?;
+                        self.dom.borrow_mut().set_attr(node, attr, &s);
+                        return Ok(true);
+                    }
                 }
                 if let Some(attr) = prop_to_attr(key) {
                     let s = e.to_js_string(v)?;

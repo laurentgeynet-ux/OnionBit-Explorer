@@ -9,6 +9,36 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C80/81/82 — compat frameworks (React 18
+  probe)** (`explorer-jscore`) : trois trous
+  remontés par la sonde React (`umd` prod,
+  createRoot/useState/useEffect/input
+  contrôlé) — (80) attributs énumérés
+  « limited to only known values »
+  (`input.type`→`"text"`, `button.type`→
+  `"submit"`, `form.method`/`enctype`,
+  `track.kind`, `img.decoding`/`loading`,
+  `iframe.loading`, `th.scope`,
+  `select.type`) + méthodes host lisibles
+  (`document.createElement` & co. étaient
+  invoke-only → `canUseDOM` React faux →
+  `onChange` mort) + handlers `on*`
+  lisibles/détectables (`"oninput" in
+  document` — sniff `Lj`) ; (81)
+  `MessageChannel`/`MessagePort` —
+  `postMessage`→`message` cloné
+  (WireValue) livré au checkpoint de
+  pompe, voie rapide du scheduler React ;
+  (82) `el.constructor` typé par classe +
+  `prototype` porteur d'accesseurs IDL
+  (`value`/`checked`/…) + précédence des
+  props propres `defineProperty` — la
+  chaîne `inputValueTracking` complète.
+  Mesuré session : `onClick`→`count=1`,
+  `onChange` contrôlé → `echo:hello`,
+  `useEffect` propagé. Régressions
+  `dom.rs` (+8 tests).
+
 - **Issue #19 — pont géométrie
   miroir↔layout** (`explorer-jscore`,
   `explorer-js`, `explorer-core`) :

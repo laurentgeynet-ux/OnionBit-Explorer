@@ -43,6 +43,7 @@
 
 mod ast;
 mod builtins;
+mod channel;
 mod collections;
 mod context;
 mod crypto;

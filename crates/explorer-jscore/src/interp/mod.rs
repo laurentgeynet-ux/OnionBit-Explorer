@@ -388,6 +388,16 @@ pub struct Engine {
     /// (`run_microtasks`), chaque livraison switchant vers le
     /// contexte destinataire.
     pub(crate) pending_msgs: crate::context::PendingMsgs,
+    /// Messages `MessageChannel` en file (JS-C81) — drainés à
+    /// la même frontière de job que `pending_msgs`.
+    pub(crate) port_msgs: std::collections::VecDeque<crate::channel::PortMsg>,
+    /// Cache des constructeurs d'interface par nom de classe
+    /// (`HTMLInputElement`…) — JS-C82 : `el.constructor` typé +
+    /// `.prototype` porteur des accesseurs IDL (surface
+    /// `Object.getOwnPropertyDescriptor` — `inputValueTracking`
+    /// de React l'exige pour tracker `value`/`checked`).
+    /// Chaque entrée est rootée à la création (`add_root`).
+    pub(crate) dom_ctors: std::collections::HashMap<String, Value>,
     /// Pile des contextes appelants pour les natives cross-ctx
     /// (JS-C78) — `frame.eval()` pousse le realm appelant, le
     /// `postMessage` de l'enfant lit son `source`/`origin` ici.
@@ -720,6 +730,8 @@ impl Engine {
             }],
             parked: std::collections::HashMap::new(),
             pending_msgs: std::collections::VecDeque::new(),
+            port_msgs: std::collections::VecDeque::new(),
+            dom_ctors: std::collections::HashMap::new(),
             native_caller: Vec::new(),
         };
         crate::builtins::install(&mut e);

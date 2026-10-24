@@ -361,7 +361,10 @@ impl Engine {
             }
             let msgs = self.drain_pending_msgs()?;
             let workers = self.pump_workers()?;
-            if !delivered && msgs == 0 && workers == 0 && self.microtasks.is_empty() {
+            // JS-C81 : messages `MessageChannel` — même
+            // frontière de job que `postMessage`/workers.
+            let ports = self.drain_port_msgs()?;
+            if !delivered && msgs == 0 && workers == 0 && ports == 0 && self.microtasks.is_empty() {
                 self.switch_to(home);
                 self.maybe_collect();
                 return Ok(ran);

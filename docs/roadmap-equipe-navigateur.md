@@ -5711,6 +5711,71 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   crypto` + 2 tests session
   end-to-end.
 
+- [x] **JS-C80. Compat frameworks —
+  attributs énumérés + méthodes
+  lisibles + handlers `on*`** — sonde
+  React 18 UMD prod (`createRoot`,
+  `useState`, `useEffect`, input
+  contrôlé). Déclencheur : champ
+  contrôlé React jamais tiré —
+  chaîne racine mesurée :
+  `input.type` rendait `""`
+  (sniff `isTextInputElement` rejeté) ;
+  `document.createElement` invoke-only
+  (`canUseDOM` faux → polyfill IE8
+  `propertychange` de
+  `ChangeEventPlugin`) ; `"oninput" in
+  document` faux (sniff `Lj`). Livré :
+  table `enum_attr_default` (défauts
+  missing/invalid spec, set = reflet
+  brut via `enum_attr_write_name`,
+  tag-scopé — hors `MAPPED_ATTRS` qui
+  masquait le named getter `<form>`,
+  c76) ; méthodes lisibles
+  `DOC_METHODS`/`NODE_METHODS` via
+  trampoline `bound_native` →
+  `Host::invoke` ; `on_handler_get`
+  (propre > attribut compilé JS-C45 >
+  `null`). **onChange contrôlé
+  fonctionne en session.**
+- [x] **JS-C81. `MessageChannel`/
+  `MessagePort`** — voie rapide des
+  schedulers (React préfère le canal
+  à `setTimeout`) : `postMessage` →
+  `WireValue` cloné (DataCloneError
+  sur non-clonable), livraison
+  `message` au checkpoint de pompe
+  (`drain_port_msgs`, même frontière
+  que `postMessage`/workers) ;
+  `onmessage` + `addEventListener`,
+  `close` défausse la file, `start`
+  no-op (démarrés à la création) ;
+  GC-traqué (`peer` + listeners).
+  Régressions `message_channel_*`.
+- [x] **JS-C82. Accesseurs IDL +
+  `constructor` typé** —
+  `el.constructor` rend un objet
+  fonction nommé par classe
+  (`HTMLInputElement`…) avec
+  `.prototype` porteur de `Prop::Acc`
+  pour les props réfléchies
+  (`value`/`checked`/`type`/…, table
+  par interface) →
+  `Object.getOwnPropertyDescriptor(
+  ctor.prototype,'value')` rend
+  `{get,set}` réel ; `defineProperty`
+  accesseur own sur élément intercepte
+  get/set (précédence own-Acc dans
+  `NodeHost::get`/`set` ; les
+  accesseurs proto lisent/écrivent
+  l'attribut **brut**, jamais via
+  `Host::get` — récursion sinon).
+  Chaîne `inputValueTracking` armée
+  end-to-end. Ctor non constructible
+  (`illegal constructor` spec).
+  Régression
+  `idl_accessors_descriptor_surface`.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand
