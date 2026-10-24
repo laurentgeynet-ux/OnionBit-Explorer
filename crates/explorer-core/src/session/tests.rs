@@ -151,6 +151,10 @@ fn paintless_snapshot_repairs_on_restore() {
             base_target: None,
             refresh: None,
             csp: Vec::new(),
+            img_bodies: HashMap::new(),
+            bg_aliases: HashMap::new(),
+            mask_aliases: HashMap::new(),
+            frame_ctxs: Vec::new(),
         });
     }
 
@@ -240,6 +244,10 @@ async fn back_during_inflight_nav_restores_previous() {
             base_target: None,
             refresh: None,
             csp: Vec::new(),
+            img_bodies: HashMap::new(),
+            bg_aliases: HashMap::new(),
+            mask_aliases: HashMap::new(),
+            frame_ctxs: Vec::new(),
         });
     }
 

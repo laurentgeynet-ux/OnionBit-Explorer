@@ -144,16 +144,21 @@ impl Session {
             entry.js_detached = None;
             let Some((jobs, mutated, mut eng)) = out else {
                 entry.js_pending_net.clear();
+                entry.js_pending_crypto.clear();
                 entry.js_pending_attrs.clear();
                 return 0;
             };
             if entry.nav_epoch != epoch {
                 entry.js_pending_net.clear();
+                entry.js_pending_crypto.clear();
                 entry.js_pending_attrs.clear();
                 return 0;
             }
             for resp in std::mem::take(&mut entry.js_pending_net) {
                 let _ = eng.deliver_net_response(resp);
+            }
+            for resp in std::mem::take(&mut entry.js_pending_crypto) {
+                let _ = eng.deliver_crypto_response(resp);
             }
             let attrs = std::mem::take(&mut entry.js_pending_attrs);
             // Les pushes sont **toujours** rejoués dans le
@@ -280,8 +285,242 @@ impl Session {
         })
     }
 
-    /// `eval` avec rapport : un échec émet `PipelineError`
-    /// sans faire échouer la page (dégradation, règle 3).
+    /// Étape 134 — câblage `SubFrame` → contexte JS : un
+    /// realm par `<iframe>` rattaché à un sous-document
+    /// fetché, créé **avant** les scripts du parent (un
+    /// `frames[n]`/`contentWindow` lu en cours de parse est
+    /// alors réel). Pour chaque cadre : `context_new` →
+    /// `install_dom_ctx` (miroir + timers + transports de
+    /// l'origine enfant — hooks nav absents par design) →
+    /// eval des `<script>` **inline** du sous-document (les
+    /// `src=` externes ne sont pas fetchés à cette tranche)
+    /// → `DOMContentLoaded`. `load` est tiré au tail par
+    /// [`Self::frame_ctx_load_events`]. Remplit
+    /// `entry.frame_ctxs`.
+    pub(crate) fn wire_frame_contexts(&mut self, tab: TabId, eng: &mut dyn JsEngine) {
+        // Phase collecte (immuable) : `<iframe>` en ordre
+        // document → (rang, NodeId parent, index `frames`,
+        // URL, html, scripts inline). Même correspondance
+        // par URL résolue que le composite (étape 129) : deux
+        // cadres homonymes partagent le `SubFrame` mais
+        // reçoivent chacun un realm propre (spec : realms
+        // distincts).
+        struct FramePlan {
+            ord: u32,
+            node: NodeId,
+            sub: usize,
+            url: Url,
+            html: String,
+            scripts: Vec<String>,
+        }
+        let mut plan = Vec::new();
+        {
+            let Some(entry) = self.tabs.get(&tab) else {
+                return;
+            };
+            let (Some(dom), Some(base)) = (entry.dom.as_ref(), entry.url.as_ref()) else {
+                return;
+            };
+            for (ord, node) in composite::iframe_nodes(dom).into_iter().enumerate() {
+                // `srcdoc` prime sur `src` (spec, CAP-142) —
+                // association par **contenu** comme le
+                // composite (tous les `about:srcdoc`
+                // partagent leur URL) ; `src` = par URL.
+                let srcdoc = dom.attribute(node, "srcdoc").ok().flatten();
+                let sub = if let Some(sd) = srcdoc.as_deref() {
+                    let Some(sub) = entry
+                        .frames
+                        .iter()
+                        .position(|f| f.srcdoc.as_deref() == Some(sd))
+                    else {
+                        continue;
+                    };
+                    sub
+                } else {
+                    let Ok(Some(src)) = dom.attribute(node, "src") else {
+                        continue;
+                    };
+                    let Ok(url) = Url::resolve(base, &src) else {
+                        continue;
+                    };
+                    let Some(sub) = entry
+                        .frames
+                        .iter()
+                        .position(|f| f.srcdoc.is_none() && f.url == url)
+                    else {
+                        continue;
+                    };
+                    sub
+                };
+                let f = &entry.frames[sub];
+                // Politiques du document enfant (132/CAP-145)
+                // — `srcdoc` hérite base + CSP du parent ;
+                // un cadre fetché suit sa `<base href>`
+                // propre et ses `<meta>` CSP.
+                let (f_base, f_csp) = if f.srcdoc.is_some() {
+                    (
+                        entry.nav_base().cloned().unwrap_or_else(|| base.clone()),
+                        entry.csp.clone(),
+                    )
+                } else {
+                    (
+                        document_base(&f.dom, &f.url)
+                            .0
+                            .unwrap_or_else(|| f.url.clone()),
+                        collect_meta_csp(&f.dom)
+                            .iter()
+                            .map(|v| explorer_net::csp::CspPolicy::parse(v, true))
+                            .collect::<Vec<_>>(),
+                    )
+                };
+                // Scripts **inline** de l'enfant, ordre
+                // document — `max_src = 0` écarte les `src=`
+                // externes (sous-ressources des cadres non
+                // fetchées à cette tranche — journal) ; les
+                // modules n'ont pas de chargeur en contexte.
+                let scripts = collect_scripts(&f.dom, &f.url, &f_base, true, 0, &f_csp)
+                    .into_iter()
+                    .filter_map(|i| (!i.module).then_some(i.inline).flatten())
+                    .collect();
+                plan.push(FramePlan {
+                    ord: u32::try_from(ord).unwrap_or(u32::MAX),
+                    node,
+                    sub,
+                    url: f.url.clone(),
+                    html: f.html.clone(),
+                    scripts,
+                });
+            }
+        }
+        if plan.is_empty() {
+            return;
+        }
+        let mut fcs = Vec::with_capacity(plan.len());
+        for fp in plan {
+            // Realm de l'enfant — `frame_ord` le relie à son
+            // élément `<iframe>` pour `contentWindow`.
+            let Some(ctx) = eng.context_new(&fp.url.to_string(), Some(fp.ord)) else {
+                continue;
+            };
+            let (local, cookie) = self.origin_state(&fp.url);
+            eng.install_dom_ctx(ctx, &fp.html, &fp.url.to_string(), local, &cookie);
+            for src in &fp.scripts {
+                self.eval_ctx_or_report(tab, eng, ctx, src);
+            }
+            // Cycle de vie du sous-document : DCL après ses
+            // scripts (le `load` enfant est tiré au tail).
+            let _ = eng.dispatch_event_ctx(ctx, "DOMContentLoaded", &[]);
+            fcs.push(FrameCtx {
+                ctx,
+                sub: fp.sub,
+                url: fp.url,
+                node: fp.node,
+            });
+        }
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.frame_ctxs = fcs;
+        }
+    }
+
+    /// État d'origine pour un contexte enfant (étape 134) —
+    /// même logique que la branche storage de
+    /// [`Self::spawn_engine`] : `localStorage` persisté de
+    /// l'origine **de l'enfant** et vue `document.cookie`
+    /// non-HttpOnly pour son URL.
+    fn origin_state(&self, url: &Url) -> (std::collections::BTreeMap<String, String>, String) {
+        let key = url.origin().to_string();
+        let local = self
+            .local_storage
+            .get(&key)
+            .cloned()
+            .or_else(|| self.store.as_ref().map(|s| s.load_storage(&key)))
+            .unwrap_or_default();
+        (local, self.cookies.header_for(url, false))
+    }
+
+    /// `eval_ctx` avec rapport — même discipline que
+    /// [`Self::eval_or_report`] (`PipelineError`, jamais de
+    /// page cassée), adapté au realm `ctx`.
+    fn eval_ctx_or_report(&mut self, tab: TabId, eng: &mut dyn JsEngine, ctx: u32, src: &str) {
+        if let Err(e) = eng.eval_ctx(ctx, src, None) {
+            tracing::debug!(tab, ctx, error = %e, "script iframe en échec");
+            let _ = self.events.send(CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: format!("{e} — iframe — src «{}»", src_head(src)),
+            });
+        }
+    }
+
+    /// `load` du document enfant dans son contexte, puis
+    /// `load` sur l'élément `<iframe>` côté parent
+    /// (`onload=` — étape 134). Appelé au `sub_commit_tail`
+    /// **avant** le `load` du document top-level (spec : le
+    /// `load` de la page attend ses sous-contextes).
+    pub(crate) fn frame_ctx_load_events(&mut self, tab: TabId) {
+        let fcs: Vec<(u32, NodeId)> = self.tabs.get(&tab).map_or_else(Vec::new, |e| {
+            e.frame_ctxs.iter().map(|f| (f.ctx, f.node)).collect()
+        });
+        for (ctx, node) in fcs {
+            // L'événement vit dans le realm enfant (chemin
+            // vide = document de l'enfant) ; sa mutation
+            // éventuelle est synchronisée par le prochain
+            // `sync_frame_mirrors` (appelé via after_script).
+            {
+                let Some(entry) = self.tabs.get_mut(&tab) else {
+                    return;
+                };
+                let Some(eng) = entry.js.as_mut() else {
+                    return;
+                };
+                let _ = eng.dispatch_event_ctx(ctx, "load", &[]);
+            }
+            // `onload` sur l'élément <iframe> — le chemin est
+            // re-résolu sur le DOM courant (le `NodeId` peut
+            // être mort après un re-parse de synchro : le
+            // dispatch dégrade en `Ok(false)`, jamais de
+            // livraison au mauvais nœud).
+            self.dispatch_dom_event(tab, "load", node);
+        }
+    }
+
+    /// Synchro miroir → `SubFrame.dom` (étape 134) : chaque
+    /// contexte enfant sale est re-sérialisé et re-parsé en
+    /// `entry.frames[sub].dom` — le composite re-rend le
+    /// cadre au prochain relayout (bitmap `(url,w,h)` purgée
+    /// — même clé, contenu neuf). Appelé aux mêmes points
+    /// de synchro que les drains script ([`Self::after_script`]).
+    pub(crate) fn sync_frame_mirrors(&mut self, tab: TabId) {
+        let mut touched = Vec::new();
+        {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            let Some(eng) = entry.js.as_mut() else {
+                return;
+            };
+            for fc in &entry.frame_ctxs {
+                if let Some(html) = eng.sync_dom_ctx(fc.ctx) {
+                    touched.push((fc.sub, html));
+                }
+            }
+            for (sub, html) in &touched {
+                if let Some(f) = entry.frames.get_mut(*sub) {
+                    // La surface composite est clée par URL —
+                    // le contenu change : purger toutes ses
+                    // tailles pour forcer la re-rasterisation.
+                    let url = f.url.to_string();
+                    entry.frame_bitmaps.retain(|(u, ..), _| *u != url);
+                    f.dom = explorer_html::TreeBuilder::parse(html);
+                }
+            }
+        }
+        if !touched.is_empty() {
+            // Un relayout rejoue la passe composite sur les
+            // DOM frais — `relayout` est tolérant à l'absence
+            // d'arbre posé (commit encore en vol).
+            let _ = self.relayout(tab);
+        }
+    }
     /// Le message porte l'en-tête de la source fautive —
     /// « Error: b » seul ne localise rien sur du minifié
     /// (triage M-H1 : trouver quel `<script>` jette est la

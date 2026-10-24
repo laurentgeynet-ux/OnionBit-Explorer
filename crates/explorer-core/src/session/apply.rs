@@ -313,6 +313,11 @@ pub(crate) struct PaintPayload {
     /// Wikipedia, vol 22/10).
     pub img_decoded: HashMap<String, Arc<DecodedImage>>,
     pub bg_decoded: HashMap<String, Option<Arc<DecodedImage>>>,
+    /// Corps compressés retenus (étape 133) — clé URL
+    /// résolue, magasin partagé `<img>`/fonds/masques ;
+    /// source du re-décodage bfcache (`snap.images` gelée
+    /// sans bitmaps). Borné `MAX_IMG_BODY_STORE`.
+    pub img_bodies: HashMap<String, Vec<u8>>,
     /// Table d'identité `miroir → explorer-dom` (ADR-0025,
     /// étape 111) : reconstruite à chaque baseline cléée
     /// (`apply_payload`), étendue par les `Insert` du journal,
@@ -432,6 +437,7 @@ impl Tab {
             mask_aliases: std::mem::take(&mut self.mask_aliases),
             img_decoded: std::mem::take(&mut self.img_decoded),
             bg_decoded: std::mem::take(&mut self.bg_decoded),
+            img_bodies: std::mem::take(&mut self.img_bodies),
             keymap: std::mem::take(&mut self.dom_keymap),
         }
     }
@@ -470,6 +476,7 @@ impl Tab {
         self.mask_aliases = p.mask_aliases;
         self.img_decoded = p.img_decoded;
         self.bg_decoded = p.bg_decoded;
+        self.img_bodies = p.img_bodies;
         self.dom_keymap = p.keymap;
     }
 }
@@ -1850,10 +1857,13 @@ fn insert_fetched_images(p: &mut PaintPayload, styles: &StyleMap, max_px: u32) {
     if p.bg_aliases.is_empty() && p.mask_aliases.is_empty() {
         return;
     }
-    // Drain unique : corps → cache décodé. Les applys
-    // suivants trouvent `bg_bodies` vide et ne coûtent que
-    // la boucle de correspondance styles → cache.
+    // Drain unique : corps → cache décodé **+ magasin retenu
+    // `img_bodies`** (étape 133 — source du re-décodage au
+    // retour bfcache). Les applys suivants trouvent
+    // `bg_bodies` vide et ne coûtent que la boucle de
+    // correspondance styles → cache.
     for (resolved, body) in std::mem::take(&mut p.bg_bodies) {
+        net::retain_img_body(&mut p.img_bodies, &resolved, body.clone());
         p.bg_decoded
             .entry(resolved)
             .or_insert_with(|| decode_image(&body, max_px).map(Arc::new));

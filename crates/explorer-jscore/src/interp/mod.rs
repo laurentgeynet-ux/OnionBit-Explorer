@@ -255,7 +255,11 @@ pub struct Engine {
     /// Microtask queue (JS-7c) — `then` reactions, thenable calls,
     /// `queueMicrotask`. Drained by [`Engine::run_microtasks`] at
     /// every job boundary (end of `eval`, timer cb, event, XHR).
-    pub(crate) microtasks: std::collections::VecDeque<crate::promise::Job>,
+    /// File de microtasks — chaque job porte le contexte de son
+    /// enregistrement (JS-C78) : `then`/`queueMicrotask` d'un
+    /// enfant courent dans SON realm (spec « job callback realm »),
+    /// switchés à l'exécution par `run_microtasks`.
+    pub(crate) microtasks: std::collections::VecDeque<(crate::context::CtxId, crate::promise::Job)>,
     /// `MutationObserver` bookkeeping (JS-C26) — callbacks par
     /// id d'observer ; les records vivent dans la file du `Dom`.
     pub(crate) mutobs: crate::mutation::MutObsState,
@@ -271,6 +275,21 @@ pub struct Engine {
     /// (JS-C71) — protos + `read()` pendantes re-`pull`ées au
     /// checkpoint microtask.
     pub(crate) streams: crate::streams::StreamState,
+    /// `indexedDB` + `caches` bookkeeping (JS-C72) — registres
+    /// partagés injectables + file de `IDBRequest` livrées au
+    /// checkpoint microtask.
+    pub(crate) idb: crate::idb::IdbState,
+    /// `WebSocket` bookkeeping (JS-C73) — proto + sockets en
+    /// `CONNECTING` dont le refus de handshake est livré au
+    /// checkpoint microtask (`error` + `close` 1006).
+    pub(crate) ws: crate::websocket::WsState,
+    /// `Notification`/`BroadcastChannel`/`Selection`/
+    /// `reportError` bookkeeping (JS-C74) — protos, registre
+    /// de canaux et messages livrés au checkpoint microtask.
+    pub(crate) misc: crate::misc_apis::MiscState,
+    /// `crypto.subtle` bookkeeping (JS-C79) — opérations en
+    /// vol du contexte courant (handle → promesse).
+    pub(crate) crypto: crate::crypto::CryptoState,
     /// Élément en cours de construction par upgrade
     /// `customElements` (JS-C68) — le `super()` d'une classe
     /// `extends HTMLElement` le récupère comme `this` (rôle du
@@ -350,6 +369,33 @@ pub struct Engine {
     pub(crate) re_ctor: Value,
     /// Dernier match d'expression régulière — statiques Annex B.
     pub(crate) re_static: Option<ReStatic>,
+    /// Contexte de navigation courant (JS-C78) — `0` = top-level.
+    /// Les champs document-local visibles sur `self` (`global`,
+    /// `global_env`, `protos`, `dom_ctx`, `timers`, `xhr`, …)
+    /// SONT ceux du contexte courant ; les contextes garés
+    /// vivent dans [`Self::parked`].
+    pub(crate) cur_ctx: crate::context::CtxId,
+    /// Arbre des contextes — index = [`crate::context::CtxId`]
+    /// (métadonnées non garées : parent/enfants/URL/nœud iframe).
+    pub(crate) ctxs: Vec<crate::context::CtxMeta>,
+    /// Contextes non courants — champs document-local garés,
+    /// rendus à [`Self::switch_to`]. Le contexte courant n'y est
+    /// jamais (ses champs sont sur `self`).
+    pub(crate) parked:
+        std::collections::HashMap<crate::context::CtxId, crate::context::BrowsingContext>,
+    /// Messages `postMessage` clonés en attente de livraison —
+    /// drainés à la frontière de job de l'émetteur
+    /// (`run_microtasks`), chaque livraison switchant vers le
+    /// contexte destinataire.
+    pub(crate) pending_msgs: crate::context::PendingMsgs,
+    /// Pile des contextes appelants pour les natives cross-ctx
+    /// (JS-C78) — `frame.eval()` pousse le realm appelant, le
+    /// `postMessage` de l'enfant lit son `source`/`origin` ici.
+    pub(crate) native_caller: Vec<crate::context::CtxId>,
+    /// Fournisseur crypto injecté par l'embedder (JS-C79) —
+    /// **engine-global** : la plateforme est unique pour tous
+    /// les realms, chaque contexte en hérite dès `context_new`.
+    pub(crate) crypto_transport: Option<Rc<dyn crate::crypto::CryptoTransport>>,
 }
 
 /// Dernier match `RegExp` — `RegExp.$1…$9`/`input`/`lastMatch`/…
@@ -634,6 +680,11 @@ impl Engine {
             obs: crate::observers::ObsState::default(),
             files: crate::files::FilesState::default(),
             streams: crate::streams::StreamState::default(),
+            idb: crate::idb::IdbState::default(),
+            ws: crate::websocket::WsState::default(),
+            misc: crate::misc_apis::MiscState::default(),
+            crypto: crate::crypto::CryptoState::default(),
+            crypto_transport: None,
             ce_upgrade_slot: None,
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,
@@ -657,6 +708,19 @@ impl Engine {
             eval_fn: Value::Undefined,
             re_ctor: Value::Undefined,
             re_static: None,
+            cur_ctx: 0,
+            ctxs: vec![crate::context::CtxMeta {
+                parent: None,
+                children: Vec::new(),
+                url: String::new(),
+                frame_node: None,
+                proxy: None,
+                global: None,
+                alive: true,
+            }],
+            parked: std::collections::HashMap::new(),
+            pending_msgs: std::collections::VecDeque::new(),
+            native_caller: Vec::new(),
         };
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
@@ -664,6 +728,7 @@ impl Engine {
         crate::temporal::install(&mut e);
         crate::json::install(&mut e);
         crate::typed_array::install(&mut e);
+        e.ctxs[0].global = Some(e.global);
         e
     }
 
@@ -740,6 +805,446 @@ impl Engine {
         self.heap.remove_root(id);
     }
 
+    // --- Contextes de navigation imbriqués (JS-C78) -------------
+
+    /// Échange tous les champs document-local entre `self` (le
+    /// contexte courant) et un [`crate::context::BrowsingContext`]
+    /// garé. **Tout champ ajouté à [`Engine`] doit décider de
+    /// son camp** : document-local → swapper ici ET dans
+    /// `BrowsingContext` ; engine-global (heap, budgets, hooks
+    /// console, workers) → ne rien faire.
+    fn swap_ctx_fields(&mut self, ctx: &mut crate::context::BrowsingContext) {
+        use std::mem::swap;
+        swap(&mut self.global, &mut ctx.global);
+        swap(&mut self.global_env, &mut ctx.global_env);
+        swap(&mut self.protos, &mut ctx.protos);
+        swap(&mut self.gen_ctor, &mut ctx.gen_ctor);
+        swap(&mut self.async_gen_ctor, &mut ctx.async_gen_ctor);
+        swap(&mut self.gen_fn_proto, &mut ctx.gen_fn_proto);
+        swap(&mut self.gen_proto, &mut ctx.gen_proto);
+        swap(&mut self.async_gen_fn_proto, &mut ctx.async_gen_fn_proto);
+        swap(&mut self.async_gen_proto, &mut ctx.async_gen_proto);
+        swap(&mut self.eval_fn, &mut ctx.eval_fn);
+        swap(&mut self.re_ctor, &mut ctx.re_ctor);
+        swap(&mut self.re_static, &mut ctx.re_static);
+        swap(&mut self.finregs, &mut ctx.finregs);
+        swap(&mut self.dom_ctx, &mut ctx.dom_ctx);
+        swap(&mut self.timers, &mut ctx.timers);
+        swap(&mut self.xhr, &mut ctx.xhr);
+        swap(&mut self.mutobs, &mut ctx.mutobs);
+        swap(&mut self.obs, &mut ctx.obs);
+        swap(&mut self.files, &mut ctx.files);
+        swap(&mut self.streams, &mut ctx.streams);
+        swap(&mut self.idb, &mut ctx.idb);
+        swap(&mut self.ws, &mut ctx.ws);
+        swap(&mut self.misc, &mut ctx.misc);
+        swap(&mut self.crypto, &mut ctx.crypto);
+        swap(&mut self.ce_upgrade_slot, &mut ctx.ce_upgrade_slot);
+        swap(&mut self.strict, &mut ctx.strict);
+        swap(&mut self.completion, &mut ctx.completion);
+        swap(&mut self.pending_labels, &mut ctx.pending_labels);
+        swap(&mut self.modules, &mut ctx.modules);
+        swap(&mut self.module_specs, &mut ctx.module_specs);
+        swap(&mut self.module_envs, &mut ctx.module_envs);
+        swap(&mut self.current_module, &mut ctx.current_module);
+        swap(&mut self.import_map, &mut ctx.import_map);
+        swap(&mut self.hooks.page_url, &mut ctx.page_url);
+        swap(&mut self.hooks.screen_obj, &mut ctx.screen_obj);
+        swap(&mut self.hooks.navigate, &mut ctx.navigate);
+        swap(&mut self.hooks.history_go, &mut ctx.history_go);
+        swap(&mut self.hooks.history_len, &mut ctx.history_len);
+        swap(&mut self.hooks.form_submit, &mut ctx.form_submit);
+        swap(&mut self.hooks.open, &mut ctx.open);
+        swap(&mut self.hooks.viewport, &mut ctx.viewport);
+    }
+
+    /// Rend `target` le contexte courant : ses champs garés sont
+    /// swappés sur `self`, l'ancien courant est garé sous son id.
+    /// `target` inexistant/mort → no-op (l'appelant garde le
+    /// contexte courant — les pompes itératives n'ont pas à
+    /// vérifier).
+    pub(crate) fn switch_to(&mut self, target: crate::context::CtxId) {
+        if target == self.cur_ctx {
+            return;
+        }
+        let Some(mut parked) = self.parked.remove(&target) else {
+            return;
+        };
+        self.swap_ctx_fields(&mut parked);
+        self.parked.insert(self.cur_ctx, parked);
+        self.cur_ctx = target;
+    }
+
+    /// Crée un contexte enfant de `cur_ctx` et le rend courant :
+    /// les champs du parent sont garés, des intrinsics frais
+    /// (protos/global/env par realm — spec) sont alloués et les
+    /// builtins réinstallés. `frame_node` = `(Rc::as_ptr du Dom
+    /// parent, NodeId du <iframe>)` — sert `contentWindow`.
+    ///
+    /// La séquence `builtins → dom → xhr → files…` des installs
+    /// hôte est à la charge de l'appelant **après retour** (le
+    /// nouveau contexte est courant — `install_dom` & co posent
+    /// dans le bon global).
+    pub fn context_new(
+        &mut self,
+        url: &str,
+        frame_node: Option<(usize, crate::dom::NodeId)>,
+    ) -> u32 {
+        let parent = self.cur_ctx;
+        let id = self.ctxs.len() as u32;
+        self.ctxs.push(crate::context::CtxMeta {
+            parent: Some(parent),
+            children: Vec::new(),
+            url: url.to_string(),
+            frame_node,
+            proxy: None,
+            global: None,
+            alive: true,
+        });
+        if let Some(m) = self.ctxs.get_mut(parent as usize) {
+            m.children.push(id);
+        }
+        // Intrinsics frais par realm (spec : chaque global a ses
+        // prototypes — `frame.Array !== parent.Array`).
+        let mut fresh = crate::context::BrowsingContext::blank(&mut self.heap);
+        self.swap_ctx_fields(&mut fresh);
+        // `self` porte désormais des champs neufs — installe les
+        // builtins dans le nouveau global (même séquence que
+        // `Engine::new`).
+        crate::builtins::install(self);
+        crate::collections::install(self);
+        crate::intl::install(self);
+        crate::temporal::install(self);
+        crate::json::install(self);
+        crate::typed_array::install(self);
+        self.hooks.page_url = url.to_string();
+        crate::context::install_ctx_window_props(self);
+        self.parked.insert(parent, fresh);
+        self.cur_ctx = id;
+        self.ctxs[id as usize].global = Some(self.global);
+        // `window[n]` sur la fenêtre parente — accessor index
+        // DYNAMIQUE (l'enfant résolu à la lecture : `destroy`
+        // et réordonnancement restent honnêtes — jamais une
+        // data prop figée pointant un contexte mort).
+        let idx = (self.ctxs[parent as usize].children.len() - 1) as f64;
+        let get = self.bound_native(
+            "get [index]",
+            crate::context::window_index_get,
+            vec![Value::Num(idx)],
+        );
+        let parent_global = if parent == self.cur_ctx {
+            Some(self.global)
+        } else {
+            self.parked.get(&parent).map(|p| p.global)
+        };
+        if let Some(g) = parent_global {
+            if let Some(o) = self.heap.obj_mut(g) {
+                o.set_accessor(&((idx as usize).to_string()), get, Value::Undefined, true);
+            }
+        }
+        id
+    }
+
+    /// Contexte enfant porté par l'`<iframe>` `node` du miroir
+    /// `dom_ptr` (`Rc::as_ptr` du Dom parent) — `contentWindow`/
+    /// `contentDocument`/`frameElement` l'interrogent.
+    pub(crate) fn ctx_of_frame(
+        &self,
+        dom_ptr: usize,
+        node: crate::dom::NodeId,
+    ) -> Option<crate::context::CtxId> {
+        self.ctxs
+            .iter()
+            .position(|m| m.alive && m.frame_node == Some((dom_ptr, node)))
+            .map(|i| i as u32)
+    }
+
+    /// Détruit un contexte (navigation du frame hors bfcache) :
+    /// `alive=false`, retiré des `children` du parent, champs
+    /// relâchés (GC les réclamera). `postMessage` vers lui devient
+    /// no-op silencieux — spec.
+    pub fn context_destroy(&mut self, id: crate::context::CtxId) {
+        if id == 0 || id as usize >= self.ctxs.len() {
+            return;
+        }
+        self.ctxs[id as usize].alive = false;
+        self.ctxs[id as usize].children.clear();
+        if let Some(p) = self.ctxs[id as usize].parent {
+            self.ctxs[p as usize].children.retain(|&c| c != id);
+        }
+        if self.cur_ctx == id {
+            let p = self.ctxs[id as usize].parent.unwrap_or(0);
+            self.switch_to(p);
+        }
+        self.parked.remove(&id);
+    }
+
+    /// Contexte courant.
+    #[must_use]
+    pub fn current_context(&self) -> crate::context::CtxId {
+        self.cur_ctx
+    }
+
+    /// Rend `ctx` le contexte courant (couture session :
+    /// `install_dom`/`eval`/`dom_event` agissent alors sur lui).
+    /// `0` = top-level.
+    pub fn context_switch(&mut self, ctx: crate::context::CtxId) {
+        self.switch_to(ctx);
+    }
+
+    /// Le `window` de `target` vu depuis `viewer` : même
+    /// origine → le vrai global (accès synchrone spec) ;
+    /// cross-origin → `WindowProxy` opaque stable par cible
+    /// (identité préservée : `f.contentWindow === f.contentWindow`).
+    /// `target` garé : son global vit dans `parked` — même heap.
+    pub(crate) fn ctx_window_value_as(
+        &mut self,
+        viewer: crate::context::CtxId,
+        target: crate::context::CtxId,
+    ) -> Value {
+        if self.ctx_same_origin(viewer, target) {
+            let g = if target == self.cur_ctx {
+                self.global
+            } else {
+                self.ctxs[target as usize]
+                    .global
+                    .or_else(|| self.parked.get(&target).map(|p| p.global))
+                    .unwrap_or(self.global)
+            };
+            return Value::Obj(g);
+        }
+        self.ctx_proxy(target)
+    }
+
+    /// Raccourci `cur_ctx`-vue (props `parent`/`top`/`frames`
+    /// résolvent leur ctx depuis `this` via [`Self::ctx_of_objid`]
+    /// puis appellent `_as` — jamais `cur_ctx` directement, sauf
+    /// pour la prop `window`/`self` qui vaut le global `this`).
+    pub(crate) fn ctx_window_value(&mut self, ctx: crate::context::CtxId) -> Value {
+        self.ctx_window_value_as(self.cur_ctx, ctx)
+    }
+
+    /// `WindowProxy` stable du contexte `ctx` — créé au premier
+    /// accès cross-origin, gardé dans `ctxs.meta.proxy` (raciné
+    /// au GC — `collect` trace les proxies de tous les ctxs).
+    fn ctx_proxy(&mut self, ctx: crate::context::CtxId) -> Value {
+        if let Some(p) = self.ctxs[ctx as usize].proxy {
+            return Value::Obj(p);
+        }
+        let host = std::rc::Rc::new(crate::context::WindowProxyHost { ctx });
+        let Value::Obj(id) = self.new_host_object(host) else {
+            return Value::Undefined;
+        };
+        self.ctxs[ctx as usize].proxy = Some(id);
+        Value::Obj(id)
+    }
+
+    /// `top` relatif : remonte la chaîne des parents jusqu'à la
+    /// racine (`parent` absent ou cycle → `ctx` lui-même).
+    pub(crate) fn ctx_top_of(&self, ctx: crate::context::CtxId) -> crate::context::CtxId {
+        let mut cur = ctx;
+        let mut depth = 0u32;
+        while let Some(p) = self.ctxs[cur as usize].parent {
+            cur = p;
+            depth += 1;
+            if depth > 64 {
+                break;
+            }
+        }
+        cur
+    }
+
+    /// `ctx` dont `global`/`global_env` vaut `id`/`env` —
+    /// `cur_ctx` d'abord puis les garés (les propriétaires des
+    /// objets résolvent TOUJOURS leur contexte depuis `this`,
+    /// jamais depuis `cur_ctx`).
+    pub(crate) fn ctx_of_objid(&self, id: ObjId) -> Option<crate::context::CtxId> {
+        if id == self.global {
+            return Some(self.cur_ctx);
+        }
+        // `meta.global` identifie aussi les contextes MORTS
+        // (`w.closed`/`w.parent` sur un `window` gardé restent
+        // résolubles — spec, le global survit comme objet heap).
+        self.ctxs
+            .iter()
+            .position(|m| m.global == Some(id))
+            .map(|i| i as crate::context::CtxId)
+    }
+
+    /// Contexte propriétaire d'un env — remonte la chaîne des
+    /// parents jusqu'à la racine et la compare (`Rc::ptr_eq`)
+    /// aux `global_env` des contextes vivants. Une fonction
+    /// définie dans un contexte appelée depuis un autre est
+    /// ainsi exécutée dans SON realm (spec).
+    pub(crate) fn ctx_of_env(&self, env: &EnvRef) -> Option<crate::context::CtxId> {
+        let mut cur = env.clone();
+        let root = loop {
+            let next = cur.borrow().parent.clone();
+            match next {
+                Some(p) => cur = p,
+                None => break cur,
+            }
+        };
+        if std::rc::Rc::ptr_eq(&root, &self.global_env) {
+            return Some(self.cur_ctx);
+        }
+        self.parked
+            .iter()
+            .find(|(_, c)| std::rc::Rc::ptr_eq(&root, &c.global_env))
+            .map(|(k, _)| *k)
+    }
+
+    /// Origine sérialisée (`scheme://host[:port]` ou `"null"`)
+    /// d'un contexte — partagée par `ctx_same_origin` et
+    /// `postMessage.targetOrigin`.
+    pub(crate) fn ctx_origin(&self, ctx: crate::context::CtxId) -> String {
+        crate::builtins::url::url_parse_absolute(&self.ctxs[ctx as usize].url).map_or_else(
+            || "null".to_string(),
+            |p| crate::builtins::url::url_origin(&p),
+        )
+    }
+
+    /// Same-origin (tuple scheme/host/port sérialisé) entre deux
+    /// contextes — une origine `"null"` (opaque : `about:`,
+    /// `data:`…) ne matche qu'elle-même (réflexif — `parent
+    /// === self` reste same-origin pour un top-level opaque).
+    pub(crate) fn ctx_same_origin(
+        &self,
+        a: crate::context::CtxId,
+        b: crate::context::CtxId,
+    ) -> bool {
+        if a == b {
+            return true;
+        }
+        let (oa, ob) = (self.ctx_origin(a), self.ctx_origin(b));
+        oa != "null" && oa == ob
+    }
+
+    /// `postMessage(data, targetOrigin)` vers `target` — vérifié
+    /// à l'émission : `targetOrigin` exigé (`undefined`/absent →
+    /// `SyntaxError`), `*` → `SyntaxError` (vérification réelle
+    /// exigée — jamais de « dégrade honnête » silencieux, arrêt
+    /// journal) ; origine non concordante → retour silencieux
+    /// (spec — le message n'est jamais livré). Contexte mort →
+    /// no-op silencieux. Donnée clonée `WireValue` à l'émission.
+    pub(crate) fn post_message(
+        &mut self,
+        target: crate::context::CtxId,
+        args: &[Value],
+    ) -> JsResult<Value> {
+        if args.len() < 2 {
+            return Err(self.syntax_error(
+                "Failed to execute 'postMessage' on 'Window': 2 arguments required",
+            ));
+        }
+        // `undefined` explicit n'est pas une origine (spec →
+        // SyntaxError, même règle qu'un argument absent).
+        if matches!(args[1], Value::Undefined) {
+            return Err(self.syntax_error(
+                "Failed to execute 'postMessage' on 'Window': 'targetOrigin' is required",
+            ));
+        }
+        let target_origin = self.to_js_string(args[1])?;
+        if target_origin.is_empty() || target_origin == "*" {
+            return Err(self.syntax_error(
+                "Failed to execute 'postMessage' on 'Window': 'targetOrigin' is required and '*' is not supported",
+            ));
+        }
+        if !self.ctxs[target as usize].alive {
+            return Ok(Value::Undefined);
+        }
+        let dest_origin = self.ctx_origin(target);
+        if dest_origin != target_origin {
+            // Origine non concordante → pas de livraison (spec —
+            // échec silencieux, pas d'erreur).
+            return Ok(Value::Undefined);
+        }
+        let wire = self.wire_encode(args[0])?;
+        // `source`/`origin` = realm de l'APPELANT (spec
+        // « incumbent settings object ») — sous switch natif,
+        // `cur_ctx` est la CIBLE ; le vrai appelant est en tête
+        // de `native_caller`.
+        let src = self.native_caller.last().copied().unwrap_or(self.cur_ctx);
+        let origin = self.ctx_origin(src);
+        self.pending_msgs.push_back(crate::context::PendingMsg {
+            target,
+            data: wire,
+            origin,
+            source: src,
+        });
+        Ok(Value::Undefined)
+    }
+
+    /// Vide la file `postMessage` — chaque message est décodé
+    /// dans le heap partagé puis dispatché `message` sur la
+    /// fenêtre destinataire (`MessageEvent.data`/`origin`/
+    /// `source`/`lastEventId`/`ports` peuplés). Les listeners
+    /// peuvent poster en retour — la boucle vidange jusqu'à
+    /// épuisement (bornée par l'op-budget global).
+    pub(crate) fn drain_pending_msgs(&mut self) -> JsResult<usize> {
+        let mut n = 0usize;
+        while let Some(msg) = self.pending_msgs.pop_front() {
+            self.switch_to(msg.target);
+            n += 1;
+            let data = self.wire_decode(&msg.data)?;
+            let source = self.ctx_window_value(msg.source);
+            let ev = self.new_object();
+            let ty = self.str_val("message");
+            self.set_own(ev, "type", ty, true);
+            self.set_own(ev, "data", data, true);
+            let o = self.str_val(msg.origin.clone());
+            self.set_own(ev, "origin", o, true);
+            self.set_own(ev, "source", source, true);
+            let s = self.str_val("");
+            self.set_own(ev, "lastEventId", s, true);
+            let ports = self.new_array(Vec::new());
+            self.set_own(ev, "ports", ports, true);
+            self.set_own(ev, "cancelable", Value::Bool(false), true);
+            self.set_own(ev, "bubbles", Value::Bool(false), true);
+            self.fire_event_listeners(Value::Obj(ev))?;
+        }
+        Ok(n)
+    }
+
+    /// Dispatch d'un event littéral `message`-like sur la fenêtre
+    /// du contexte **courant** : own-prop `on<ty>` du global +
+    /// listeners `addEventListener` de la racine (cible window
+    /// ≙ sommet — même convention que `win_add_event_listener`).
+    /// `currentTarget`/`target` = le global.
+    pub(crate) fn fire_event_listeners(&mut self, ev: Value) -> JsResult<()> {
+        // `on<ty>` own-prop du global (spec window event handlers).
+        let Value::Obj(ev_id) = ev else {
+            return Ok(());
+        };
+        let ty = self
+            .get_prop(ev_id, "type")
+            .and_then(|v| self.heap_string_of(v))
+            .unwrap_or_default();
+        let on = format!("on{ty}");
+        let g = self.global;
+        if let Some(cb) = self.get_prop(g, &on) {
+            if self.is_callable(cb) {
+                let _ = self.call_value(cb, Value::Obj(g), &[ev])?;
+            }
+        }
+        // Listeners `addEventListener` — sur le nœud racine du
+        // dom_ctx courant (même cible que window.*).
+        let Some((dom, _)) = self.dom_ctx.clone() else {
+            return Ok(());
+        };
+        let root = dom.borrow().root;
+        let cbs: Vec<Value> = dom.borrow().nodes[root as usize]
+            .listeners
+            .iter()
+            .filter(|(t, _, _)| *t == ty)
+            .map(|(_, cb, _)| *cb)
+            .collect();
+        for cb in cbs {
+            let _ = self.call_value(cb, Value::Obj(g), &[ev])?;
+        }
+        Ok(())
+    }
+
     /// `true` si `id` pointe une cellule vivante (utile pour
     /// déboguer les handles hôtes).
     #[must_use]
@@ -792,7 +1297,7 @@ impl Engine {
                 crate::heap::push_value(&mut ids, cb);
             }
         }
-        for (_, promise, _) in &self.xhr.fetches {
+        for (_, promise, _, _) in &self.xhr.fetches {
             ids.push(*promise);
         }
         // Prototypes `Headers`/`Request`/`Response`/`FormData`
@@ -808,7 +1313,13 @@ impl Engine {
         {
             ids.push(p);
         }
-        for job in &self.microtasks {
+        // Promesses `crypto.subtle` en vol (JS-C79) — contexte
+        // courant ; les garés sont tracés dans
+        // `BrowsingContext::push_roots`.
+        for (_, promise) in &self.crypto.pending {
+            ids.push(*promise);
+        }
+        for (_, job) in &self.microtasks {
             match job {
                 crate::promise::Job::Reaction { cb, arg, next, .. } => {
                     crate::heap::push_value(&mut ids, *cb);
@@ -843,6 +1354,9 @@ impl Engine {
         // pendantes (le `Host::trace` couvre queue et
         // callbacks de source/sink).
         self.streams.root_ids(&mut ids);
+        self.idb.root_ids(&mut ids);
+        self.ws.root_ids(&mut ids);
+        self.misc.root_ids(&mut ids);
         if let Some((dom, cache)) = &self.dom_ctx {
             for &id in cache.borrow().values() {
                 ids.push(id);
@@ -897,6 +1411,18 @@ impl Engine {
         for m in &self.modules {
             crate::heap::trace_env(&m.env, &mut ids, &mut visited);
         }
+        // JS-C78 : contextes garés — mêmes racines document-local
+        // que le courant (`BrowsingContext::push_roots` réplique
+        // le bloc ci-dessus), plus le `WindowProxy` stable de
+        // chaque contexte (référençable depuis un autre ctx).
+        for ctx in self.parked.values_mut() {
+            ctx.push_roots(&mut ids, &mut visited);
+        }
+        for m in &self.ctxs {
+            if let Some(p) = m.proxy {
+                ids.push(p);
+            }
+        }
         // 3. Mark-sweep.
         let n = self.heap.collect(|mark| {
             for &id in &ids {
@@ -938,7 +1464,8 @@ impl Engine {
                 crate::builtins::finreg_cleanup,
                 vec![cb, held],
             );
-            self.microtasks.push_back(crate::promise::Job::Plain(f));
+            self.microtasks
+                .push_back((self.cur_ctx, crate::promise::Job::Plain(f)));
         }
         n
     }
@@ -1399,9 +1926,29 @@ impl Engine {
                         Some(EnvCell::Bind(v)) => return Some(v.value),
                         Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
                         None => {
-                            // Declarative record first, then `window` props.
-                            if let Some(v) = self.get_prop(self.global, &name) {
-                                return Some(v);
+                            // Declarative record first, then `window`
+                            // props — data ET accessors (JS-C78 :
+                            // `parent`/`top`/`frames`/`length`/`closed`
+                            // sont des getters posés sur le global —
+                            // un identifiant libre doit les invoquer).
+                            let g = self.global;
+                            match self.find_prop(g, &name) {
+                                Some(Prop::Data { value, .. }) => return Some(value),
+                                Some(Prop::Acc {
+                                    get: Value::Obj(gf),
+                                    ..
+                                }) => {
+                                    if let Ok(v) =
+                                        self.call_value(Value::Obj(gf), Value::Obj(g), &[])
+                                    {
+                                        return Some(v);
+                                    }
+                                    // Getter qui jette → prop non
+                                    // liée (la chaîne remonte —
+                                    // `ReferenceError` honnête plutôt
+                                    // qu'un `undefined` silencieux).
+                                }
+                                _ => {}
                             }
                             Next::Up(b.parent.clone())
                         }
@@ -3915,12 +4462,12 @@ impl Engine {
             None => return Err(self.type_error("value is not a function")),
         };
         match fun {
-            Fun::Native { f, .. } => self.call_native(f, this, args),
+            Fun::Native { f, .. } => self.call_native_ctx(f, this, args),
             Fun::BoundNative { f, bound, .. } => {
                 let mut a = Vec::with_capacity(bound.len() + args.len());
                 a.extend_from_slice(&bound);
                 a.extend_from_slice(args);
-                self.call_native(f, this, &a)
+                self.call_native_ctx(f, this, &a)
             }
             Fun::Bound {
                 target,
@@ -3933,159 +4480,226 @@ impl Engine {
                 self.call_value(target, bound_this, &a)
             }
             Fun::Script { lit, env, lex_this } => {
-                self.call_depth += 1;
-                // JS-C41 : borne logique d'appels — la pile elle-
-                // même est protégée par `maybe_grow` au corps.
-                if self.call_depth > self.call_depth_limit {
-                    self.call_depth -= 1;
-                    return Err(self.range_error("maximum call stack exceeded"));
+                // JS-C78 : l'appel s'exécute dans le realm de la
+                // FONCTION — son env capturée racine sur le
+                // `global_env` de son contexte (« job callback
+                // realm » spec). Switch transactionnel restauré
+                // à la sortie — les natives des host objects
+                // emportent leurs `Rc` (DomRef/NodeCache), les
+                // objets same-origin restent donc valides.
+                let prev = self.cur_ctx;
+                if let Some(t) = self.ctx_of_env(&env) {
+                    self.switch_to(t);
                 }
-                // JS-C47 : la frame est empilée APRÈS la borne —
-                // un appel refusé ne laisse pas de résidu dans
-                // `error.stack`/`Uncaught`.
-                self.call_stack.push(lit.clone());
-                // Arrow functions ignore the caller's receiver —
-                // `this` was captured at creation time. En sloppy,
-                // `this` null/undefined est coercé vers l'objet
-                // global (spec § OrdinaryCallBindThis).
-                let this = lex_this.unwrap_or(this);
-                let this = if lit.strict || matches!(this, Value::Obj(_)) {
-                    this
-                } else {
-                    Value::Obj(self.global)
-                };
-                let outer_strict = self.strict;
-                self.strict = lit.strict;
-                let local = Env::local(env);
-                // Param binding: patterns + `= default` + `...rest`.
-                for (i, p) in lit.params.iter().enumerate() {
-                    let v = if p.rest {
-                        self.new_array(args.get(i..).unwrap_or(&[]).to_vec())
-                    } else {
-                        args.get(i).copied().unwrap_or(Value::Undefined)
-                    };
-                    // Param binding runs inside the new scope; a
-                    // destructuring/throwing default aborts the call.
-                    if let Err(t) = self.bind_pat(&local, this, &p.pat, v, BindMode::Var) {
-                        self.call_depth -= 1;
-                        self.call_stack.pop();
-                        return Err(t);
-                    }
+                let r = self.call_script_body(f, &lit, env, lex_this, this, args, nt);
+                if self.cur_ctx != prev {
+                    self.switch_to(prev);
                 }
-                // Arrows have no own `arguments` — lookup falls
-                // through to the enclosing scope, as specced.
-                // Annex B sloppy : `arguments.callee` → la fonction
-                // (strict : absent — déviation vs le poisoned
-                // accessor de la spec, la lecture rend `undefined`).
-                let argv = (!lit.is_arrow).then(|| {
-                    let a = self.new_array(args.to_vec());
-                    if let Value::Obj(aid) = a {
-                        // `arguments` mappé (spec
-                        // `CreateMappedArgumentsObject`) : fonction
-                        // sloppy à liste de paramètres simple —
-                        // `map[i]` nomme le slot env de l'indice `i`.
-                        // Map vide sinon (objet `arguments` non
-                        // mappé, `length.configurable` quand même).
-                        let simple = lit
-                            .params
-                            .iter()
-                            .all(|p| !p.rest && matches!(p.pat, crate::ast::Pat::Ident(_)));
-                        let map: Vec<Option<String>> = if !lit.strict && simple {
-                            (0..args.len().min(lit.params.len()))
-                                .map(|i| match &lit.params[i].pat {
-                                    crate::ast::Pat::Ident(n) => Some(n.clone()),
-                                    _ => None,
-                                })
-                                .collect()
-                        } else {
-                            Vec::new()
-                        };
-                        if let Some(o) = self.heap.obj_mut(aid) {
-                            o.args_map = Some((local.clone(), std::rc::Rc::new(map)));
-                        }
-                        if !lit.strict {
-                            self.set_own(aid, "callee", f, false);
-                        }
-                    }
-                    a
-                });
-                {
-                    let mut b = local.borrow_mut();
-                    if let (EnvKind::Local(m), Some(argv)) = (&mut b.kind, argv) {
-                        m.insert(
-                            "arguments".into(),
-                            EnvCell::Bind(Binding {
-                                value: argv,
-                                mutable: true,
-                                sloppy_silent: false,
-                            }),
-                        );
-                    }
-                }
-                // Les flèches n'ont pas de `new.target` propre —
-                // la lecture remonte lexicalement au ctor englobant
-                // (spec : `new.target` est une MetaProperty du
-                // contexte d'exécution englobant, pas de l'arrow).
-                if !lit.is_arrow {
-                    Self::env_put(&local, NEW_TARGET, nt, false);
-                }
-                self.hoist(&lit.body, &local);
-                // Générateur eager : le corps tourne à l'appel en
-                // empilant un collecteur ; chaque `yield` pousse sa
-                // valeur (déviation — pas de suspension).
-                if lit.is_gen {
-                    self.gen_collect.push(Vec::new());
-                }
-                // JS-C41 : un appel JS coûte ~27–55 Kio de pile
-                // native (mesuré) — la récursion bascule sur un
-                // segment tas avant tout débordement ; la borne
-                // `call_depth_limit` garde le plafond logique.
-                let r = stacker::maybe_grow(
-                    crate::parser::STACK_RED_ZONE,
-                    crate::parser::STACK_GROW,
-                    || self.exec_body(&local, this, &lit.body),
-                );
-                self.call_depth -= 1;
-                self.call_stack.pop();
-                self.strict = outer_strict;
-                if lit.is_gen {
-                    let items = self.gen_collect.pop().unwrap_or_default();
-                    let ret = match r {
-                        Ok(Flow::Return(ret)) => ret,
-                        Ok(_) => Value::Undefined,
-                        Err(t) => return Err(t),
-                    };
-                    let it = crate::collections::gen_iter_obj(self, items, ret);
-                    // `Object.getPrototypeOf(g()) === g.prototype`
-                    // (spec) — l'itérateur partagé rendait le proto
-                    // `Iterator.prototype` à la place.
-                    if let (Value::Obj(iid), Value::Obj(fid)) = (it, f) {
-                        if let Some(proto) = self.get_prop(fid, "prototype") {
-                            if let Some(o) = self.heap.obj_mut(iid) {
-                                o.proto = proto;
-                            }
-                        }
-                    }
-                    return Ok(it);
-                }
-                let out = match r {
-                    Ok(Flow::Return(v)) => Ok(v),
-                    Ok(_) => Ok(Value::Undefined),
-                    Err(t) => Err(t),
-                };
-                // `async`: the body's result/rejection becomes a
-                // promise (deviation: body runs synchronously).
-                if lit.is_async {
-                    let pid = self.new_promise();
-                    match out {
-                        Ok(v) => self.resolve_promise(pid, v),
-                        Err(Thrown(t)) => self.reject_promise(pid, t),
-                    }
-                    return Ok(Value::Obj(pid));
-                }
-                out
+                r
             }
         }
+    }
+
+    /// Appel d'une native avec switch de contexte (JS-C78) :
+    /// `frame.eval(...)`/`frame.setTimeout(...)` — `this` = le
+    /// global d'un autre contexte → la native s'exécute dans SON
+    /// realm (même règle que `Fun::Script`). `native_caller` garde
+    /// le contexte appelant — `postMessage` en a besoin pour sa
+    /// `source`/`origin` (incumbent realm spec : l'appelant, pas
+    /// la cible).
+    fn call_native_ctx(
+        &mut self,
+        f: crate::heap::NativeFn,
+        this: Value,
+        args: &[Value],
+    ) -> JsResult<Value> {
+        let target = match this {
+            Value::Obj(id) => self.ctx_of_objid(id),
+            _ => None,
+        };
+        let Some(t) = target else {
+            return self.call_native(f, this, args);
+        };
+        if t == self.cur_ctx {
+            return self.call_native(f, this, args);
+        }
+        let prev = self.cur_ctx;
+        self.native_caller.push(prev);
+        self.switch_to(t);
+        let r = self.call_native(f, this, args);
+        self.native_caller.pop();
+        if self.cur_ctx != prev {
+            self.switch_to(prev);
+        }
+        r
+    }
+
+    /// Corps d'un appel `Fun::Script` — extrait de
+    /// [`Self::call_value_impl`] pour permettre le switch de
+    /// contexte transactionnel (JS-C78) autour de l'exécution.
+    #[allow(clippy::too_many_arguments)] // corps extrait de
+                                         // `call_value_impl` — même paramétrage d'appel (JS-C78).
+    fn call_script_body(
+        &mut self,
+        f: Value,
+        lit: &std::rc::Rc<crate::ast::FnLit>,
+        env: EnvRef,
+        lex_this: Option<Value>,
+        this: Value,
+        args: &[Value],
+        nt: Value,
+    ) -> JsResult<Value> {
+        self.call_depth += 1;
+        // JS-C41 : borne logique d'appels — la pile elle-
+        // même est protégée par `maybe_grow` au corps.
+        if self.call_depth > self.call_depth_limit {
+            self.call_depth -= 1;
+            return Err(self.range_error("maximum call stack exceeded"));
+        }
+        // JS-C47 : la frame est empilée APRÈS la borne —
+        // un appel refusé ne laisse pas de résidu dans
+        // `error.stack`/`Uncaught`.
+        self.call_stack.push(lit.clone());
+        // Arrow functions ignore the caller's receiver —
+        // `this` was captured at creation time. En sloppy,
+        // `this` null/undefined est coercé vers l'objet
+        // global (spec § OrdinaryCallBindThis).
+        let this = lex_this.unwrap_or(this);
+        let this = if lit.strict || matches!(this, Value::Obj(_)) {
+            this
+        } else {
+            Value::Obj(self.global)
+        };
+        let outer_strict = self.strict;
+        self.strict = lit.strict;
+        let local = Env::local(env);
+        // Param binding: patterns + `= default` + `...rest`.
+        for (i, p) in lit.params.iter().enumerate() {
+            let v = if p.rest {
+                self.new_array(args.get(i..).unwrap_or(&[]).to_vec())
+            } else {
+                args.get(i).copied().unwrap_or(Value::Undefined)
+            };
+            // Param binding runs inside the new scope; a
+            // destructuring/throwing default aborts the call.
+            if let Err(t) = self.bind_pat(&local, this, &p.pat, v, BindMode::Var) {
+                self.call_depth -= 1;
+                self.call_stack.pop();
+                return Err(t);
+            }
+        }
+        // Arrows have no own `arguments` — lookup falls
+        // through to the enclosing scope, as specced.
+        // Annex B sloppy : `arguments.callee` → la fonction
+        // (strict : absent — déviation vs le poisoned
+        // accessor de la spec, la lecture rend `undefined`).
+        let argv = (!lit.is_arrow).then(|| {
+            let a = self.new_array(args.to_vec());
+            if let Value::Obj(aid) = a {
+                // `arguments` mappé (spec
+                // `CreateMappedArgumentsObject`) : fonction
+                // sloppy à liste de paramètres simple —
+                // `map[i]` nomme le slot env de l'indice `i`.
+                // Map vide sinon (objet `arguments` non
+                // mappé, `length.configurable` quand même).
+                let simple = lit
+                    .params
+                    .iter()
+                    .all(|p| !p.rest && matches!(p.pat, crate::ast::Pat::Ident(_)));
+                let map: Vec<Option<String>> = if !lit.strict && simple {
+                    (0..args.len().min(lit.params.len()))
+                        .map(|i| match &lit.params[i].pat {
+                            crate::ast::Pat::Ident(n) => Some(n.clone()),
+                            _ => None,
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                if let Some(o) = self.heap.obj_mut(aid) {
+                    o.args_map = Some((local.clone(), std::rc::Rc::new(map)));
+                }
+                if !lit.strict {
+                    self.set_own(aid, "callee", f, false);
+                }
+            }
+            a
+        });
+        {
+            let mut b = local.borrow_mut();
+            if let (EnvKind::Local(m), Some(argv)) = (&mut b.kind, argv) {
+                m.insert(
+                    "arguments".into(),
+                    EnvCell::Bind(Binding {
+                        value: argv,
+                        mutable: true,
+                        sloppy_silent: false,
+                    }),
+                );
+            }
+        }
+        // Les flèches n'ont pas de `new.target` propre —
+        // la lecture remonte lexicalement au ctor englobant
+        // (spec : `new.target` est une MetaProperty du
+        // contexte d'exécution englobant, pas de l'arrow).
+        if !lit.is_arrow {
+            Self::env_put(&local, NEW_TARGET, nt, false);
+        }
+        self.hoist(&lit.body, &local);
+        // Générateur eager : le corps tourne à l'appel en
+        // empilant un collecteur ; chaque `yield` pousse sa
+        // valeur (déviation — pas de suspension).
+        if lit.is_gen {
+            self.gen_collect.push(Vec::new());
+        }
+        // JS-C41 : un appel JS coûte ~27–55 Kio de pile
+        // native (mesuré) — la récursion bascule sur un
+        // segment tas avant tout débordement ; la borne
+        // `call_depth_limit` garde le plafond logique.
+        let r = stacker::maybe_grow(
+            crate::parser::STACK_RED_ZONE,
+            crate::parser::STACK_GROW,
+            || self.exec_body(&local, this, &lit.body),
+        );
+        self.call_depth -= 1;
+        self.call_stack.pop();
+        self.strict = outer_strict;
+        if lit.is_gen {
+            let items = self.gen_collect.pop().unwrap_or_default();
+            let ret = match r {
+                Ok(Flow::Return(ret)) => ret,
+                Ok(_) => Value::Undefined,
+                Err(t) => return Err(t),
+            };
+            let it = crate::collections::gen_iter_obj(self, items, ret);
+            // `Object.getPrototypeOf(g()) === g.prototype`
+            // (spec) — l'itérateur partagé rendait le proto
+            // `Iterator.prototype` à la place.
+            if let (Value::Obj(iid), Value::Obj(fid)) = (it, f) {
+                if let Some(proto) = self.get_prop(fid, "prototype") {
+                    if let Some(o) = self.heap.obj_mut(iid) {
+                        o.proto = proto;
+                    }
+                }
+            }
+            return Ok(it);
+        }
+        let out = match r {
+            Ok(Flow::Return(v)) => Ok(v),
+            Ok(_) => Ok(Value::Undefined),
+            Err(t) => Err(t),
+        };
+        // `async`: the body's result/rejection becomes a
+        // promise (deviation: body runs synchronously).
+        if lit.is_async {
+            let pid = self.new_promise();
+            match out {
+                Ok(v) => self.resolve_promise(pid, v),
+                Err(Thrown(t)) => self.reject_promise(pid, t),
+            }
+            return Ok(Value::Obj(pid));
+        }
+        out
     }
 
     /// `new F(args)` — `new.target` = `f`.

@@ -1227,3 +1227,453 @@ fn c71_tee_and_cancel() {
     );
     assert_eq!(describe(&mut e, "cr2"), "k4|p");
 }
+
+// ---- JS-C72 : IndexedDB + Cache API -------------------------------
+
+#[test]
+fn c72_idb_open_upgrade_create_store() {
+    let (mut e, _t) = engine();
+    // `indexedDB.open` : `upgradeneeded` (oldVersion=0) puis
+    // `success` — `createObjectStore` légal dans l'upgrade.
+    describe(
+        &mut e,
+        "var log = '';         var rq = indexedDB.open('appdb', 1);         rq.onupgradeneeded = function (ev) {           log += 'up' + ev.oldVersion + '>' + ev.newVersion;           var db = ev.target.result;           db.createObjectStore('kv', { keyPath: 'id' });         };         rq.onsuccess = function (ev) {           var db = ev.target.result;           log += '|ok:' + db.name + '@' + db.version                + '/' + db.objectStoreNames.join(',');         };",
+    );
+    assert_eq!(describe(&mut e, "log"), "up0>1|ok:appdb@1/kv");
+}
+
+#[test]
+fn c72_idb_put_get_delete() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var out = '';         var r0 = indexedDB.open('shop', 1);         r0.onupgradeneeded = function (ev) {           ev.target.result.createObjectStore('items');         };         r0.onsuccess = function (ev) {           var db = ev.target.result;           var tx = db.transaction(['items'], 'readwrite');           var st = tx.objectStore('items');           st.put({ n: 5 }, 'a');           var g = st.get('a');           g.onsuccess = function (e2) { out += 'g:' + e2.target.result.n; };           var c = st.count();           c.onsuccess = function (e2) { out += '|c:' + e2.target.result; };           tx.oncomplete = function () { out += '|done'; };         };",
+    );
+    assert_eq!(describe(&mut e, "out"), "g:5|c:1|done");
+    // deleteDatabase.
+    describe(
+        &mut e,
+        "var dlog = '';         var rd = indexedDB.deleteDatabase('shop');         rd.onsuccess = function () { dlog = 'del'; };",
+    );
+    assert_eq!(describe(&mut e, "dlog"), "del");
+}
+
+#[test]
+fn c72_idb_keypath_autoinc_cursor() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var log = '';         var r = indexedDB.open('lib', 1);         r.onupgradeneeded = function (ev) {           var db = ev.target.result;           var s = db.createObjectStore('books', { keyPath: 'isbn' });           s.createIndex('byYear', 'year', { unique: false });         };         r.onsuccess = function (ev) {           var st = ev.target.result.transaction(['books'], 'readwrite')             .objectStore('books');           st.put({ isbn: 'b2', year: 2001 });           st.put({ isbn: 'b1', year: 1999 });           var cur = st.openCursor();           var seen = [];           cur.onsuccess = function (e2) {             var c = e2.target.result;             if (c) { seen.push(c.key + '=' + c.value.year); c.continue(); }             else { log = seen.join(','); }           };         };",
+    );
+    // Curseur `next` : ordre de clés `b1` puis `b2`.
+    assert_eq!(describe(&mut e, "log"), "b1=1999,b2=2001");
+    // Requête sur l'index.
+    describe(
+        &mut e,
+        "var ilog = '';         var r2 = indexedDB.open('lib');         r2.onsuccess = function (ev) {           var st = ev.target.result.transaction(['books'])             .objectStore('books');           var g = st.index('byYear').get(1999);           g.onsuccess = function (e2) {             ilog = e2.target.result.isbn;           };         };",
+    );
+    assert_eq!(describe(&mut e, "ilog"), "b1");
+}
+
+#[test]
+fn c72_idb_keyrange_and_cmp() {
+    let (mut e, _t) = engine();
+    assert_eq!(
+        describe(
+            &mut e,
+            "[indexedDB.cmp(1, 2), indexedDB.cmp('a', 'a'),              IDBKeyRange.bound(1, 5).includes(3),              IDBKeyRange.bound(1, 5).includes(9),              IDBKeyRange.lowerBound(2, true).includes(2)].join(',')"
+        ),
+        "-1,0,true,false,false"
+    );
+}
+
+#[test]
+fn c72_idb_errors() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var elog = '';         var r = indexedDB.open('errs', 1);         r.onupgradeneeded = function (ev) {           ev.target.result.createObjectStore('s');         };         r.onsuccess = function (ev) {           var st = ev.target.result.transaction(['s'], 'readwrite')             .objectStore('s');           try { st.put({ x: 1 }); } catch (er) {             elog = 'err:' + er.name;           }           var dup = st.put('v', 'k');           var dup2 = st.add('v', 'k');           dup.onsuccess = function () { elog += '|put-ok'; };           dup2.onerror = function (e2) {             elog += '|add:' + e2.target.error.name;           };         };",
+    );
+    // `put` sans clé ni keyPath → TypeError synchrone (spec
+    // DataError, mappé TypeError) ; `add` doublon → request
+    // `error` ConstraintError.
+    assert_eq!(
+        describe(&mut e, "elog"),
+        "err:TypeError|put-ok|add:ConstraintError"
+    );
+}
+
+#[test]
+fn c72_caches_roundtrip() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var log = '';         var res = new Response('BODY1', { status: 201 });         caches.open('v1').then(function (c) {           return c.put('/api/x', res).then(function () { return c; });         }).then(function (c) {           return c.match('/api/x');         }).then(function (r) {           return r.text();         }).then(function (t) {           log = 'hit:' + t;         });",
+    );
+    assert_eq!(describe(&mut e, "log"), "hit:BODY1");
+    // `has`/`keys`/`delete` + match global.
+    describe(
+        &mut e,
+        "var log2 = '';         caches.has('v1').then(function (h) { log2 += 'has:' + h; });         caches.keys().then(function (ks) { log2 += '|' + ks.join('+'); });         caches.match('/api/x').then(function (r) {           log2 += '|m:' + (r !== undefined);         });         caches.delete('v1').then(function (d) {           log2 += '|del:' + d;           return caches.has('v1');         }).then(function (h) { log2 += '|gone:' + h; });",
+    );
+    assert_eq!(
+        describe(&mut e, "log2"),
+        "has:true|v1|m:true|del:true|gone:false"
+    );
+}
+
+#[test]
+fn c72_caches_add_uses_transport() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var alog = '';         caches.open('v2').then(function (c) {           return c.add('/net-res');         }).then(function () { alog = 'added'; });",
+    );
+    // `add` → fetch via le transport stub — on joue le réseau.
+    let reqs = t.requests.borrow();
+    assert_eq!(reqs.len(), 1);
+    let (h, r) = &reqs[0];
+    assert_eq!(r.url, "/net-res");
+    let h = *h;
+    drop(reqs);
+    respond(&mut e, h, 200, "NET!");
+    assert_eq!(describe(&mut e, "alog"), "added");
+    // Le corps est caché.
+    describe(
+        &mut e,
+        "var blog = '';         caches.match('/net-res').then(function (r) {           return r.text();         }).then(function (t) { blog = t; });",
+    );
+    assert_eq!(describe(&mut e, "blog"), "NET!");
+}
+
+#[test]
+fn c72_idb_request_shape() {
+    let (mut e, _t) = engine();
+    // `IDBRequest` : readyState pending → done, typeof global.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var s = [];             var rq = indexedDB.open('shape', 1);             s.push(typeof indexedDB);             s.push(rq.readyState);             s.push(typeof rq.onsuccess);             rq.onsuccess = function () { s.push('done'); };             s.join(',')"
+        ),
+        "object,pending,undefined"
+    );
+    assert_eq!(describe(&mut e, "s[s.length-1]"), "done");
+}
+
+// ------------------------------------------------------------------
+// JS-C73 — WebSocket stub honnête
+// ------------------------------------------------------------------
+
+#[test]
+fn c73_websocket_shape() {
+    let (mut e, _t) = engine();
+    // `typeof WebSocket` → feature-detect des frameworks ;
+    // constantes + props initiales spec.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var s = [];             s.push(typeof WebSocket);             s.push(WebSocket.CONNECTING + '/' + WebSocket.OPEN + '/' + WebSocket.CLOSING + '/' + WebSocket.CLOSED);             var ws = new WebSocket('ws://h.test/sock');             s.push(ws instanceof WebSocket);             s.push(ws.readyState);             s.push(ws.url);             s.push(ws.protocol + '|' + ws.extensions + '|' + ws.binaryType);             s.push(ws.bufferedAmount);             s.join(',')"
+        ),
+        "function,0/1/2/3,true,0,ws://h.test/sock,||blob,0"
+    );
+}
+
+#[test]
+fn c73_websocket_refusal() {
+    let (mut e, _t) = engine();
+    // Handshake refusé en async : error puis close 1006 —
+    // la séquence observable d'un vrai refus (arme les
+    // fallbacks long-polling).
+    assert_eq!(
+        describe(
+            &mut e,
+            "var log = [];             var ws = new WebSocket('wss://h.test/x');             ws.onerror = function (ev) { log.push('E:' + ev.type); };             ws.onclose = function (ev) { log.push('C:' + ev.code + ':' + ev.wasClean + ':' + ws.readyState); };             log.push('pre:' + ws.readyState);             'armed'"
+        ),
+        "armed"
+    );
+    // Livré au checkpoint de fin d'eval.
+    assert_eq!(
+        describe(&mut e, "log.join(',')"),
+        "pre:0,E:error,C:1006:false:3"
+    );
+}
+
+#[test]
+fn c73_websocket_url_and_protocols() {
+    let (mut e, _t) = engine();
+    // Schéma ws/wss exigé + arg requis + protocols validés.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var out = [];             try { new WebSocket('http://h.test/'); } catch (err) { out.push('http:' + (err instanceof SyntaxError)); }             try { new WebSocket(); } catch (err) { out.push('noarg:' + (err instanceof TypeError)); }             try { new WebSocket('ws://h/', 'not a proto!'); } catch (err) { out.push('badtok:' + (err instanceof SyntaxError)); }             try { new WebSocket('ws://h/', ['a', 'a']); } catch (err) { out.push('dup:' + (err instanceof SyntaxError)); }             var ok = new WebSocket('ws://h/', ['chat', 'super']);             out.push('ok:' + ok.readyState);             out.join(',')"
+        ),
+        "http:true,noarg:true,badtok:true,dup:true,ok:0"
+    );
+}
+
+#[test]
+fn c73_websocket_send_close_binarytype() {
+    let (mut e, _t) = engine();
+    // `send` en CONNECTING → InvalidStateError (name spec) ;
+    // `close()` valide → CLOSING ; codes invalides refusés ;
+    // `binaryType` validé.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var out = [];             var ws = new WebSocket('ws://h.test/');             try { ws.send('x'); } catch (err) { out.push('send:' + err.name); }             try { ws.close(2000); } catch (err) { out.push('code:' + err.name); }             try { ws.close(1000, 'x'.repeat(200)); } catch (err) { out.push('reason:' + (err instanceof SyntaxError)); }             ws.binaryType = 'arraybuffer';             out.push('bt:' + ws.binaryType);             ws.binaryType = 'bogus';             out.push('bt2:' + ws.binaryType);             ws.close();             out.push('rs:' + ws.readyState);             ws.close();             out.push('rs2:' + ws.readyState);             out.join(',')"
+        ),
+        "send:InvalidStateError,code:InvalidAccessError,reason:true,bt:arraybuffer,bt2:arraybuffer,rs:2,rs2:2"
+    );
+    // Le refus livre quand même error + close (spec : la
+    // connexion échoue même après close() en CONNECTING).
+    assert_eq!(describe(&mut e, "ws.readyState"), "3");
+}
+
+#[test]
+fn c73_websocket_event_target() {
+    let (mut e, _t) = engine();
+    // addEventListener/removeEventListener + close() en
+    // CONNECTING → readyState 2 jusqu'au refus.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var log = [];             var ws = new WebSocket('ws://h.test/');             var a = function () { log.push('a'); };             var b = function () { log.push('b'); };             ws.addEventListener('close', a);             ws.addEventListener('close', b);             ws.removeEventListener('close', b);             ws.addEventListener('error', function () { log.push('err!'); });             'armed'"
+        ),
+        "armed"
+    );
+    assert_eq!(describe(&mut e, "log.join(',')"), "err!,a");
+}
+
+// ------------------------------------------------------------------
+// JS-C74 — BroadcastChannel (contexte sans DOM)
+// ------------------------------------------------------------------
+
+#[test]
+fn c74_broadcast_channel() {
+    let (mut e, _t) = engine();
+    // Réel intra-contexte : post → les autres instances du
+    // canal reçoivent `message` au checkpoint ; pas soi-même.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var log = [];             var a = new BroadcastChannel('chan');             var b = new BroadcastChannel('chan');             var c = new BroadcastChannel('autre');             a.onmessage = function (ev) { log.push('a:' + ev.data.n); };             b.addEventListener('message', function (ev) { log.push('b:' + ev.data.n); });             c.onmessage = function () { log.push('c:!'); };             b.postMessage({n: 42});             log.push(b.name + '|' + (a instanceof BroadcastChannel));             'armed'"
+        ),
+        "armed"
+    );
+    // a reçoit (pas b — jamais soi-même), c non (autre canal).
+    assert_eq!(describe(&mut e, "log.join(',')"), "chan|true,a:42");
+}
+
+#[test]
+fn c74_broadcast_close_and_clone() {
+    let (mut e, _t) = engine();
+    // close() → InvalidStateError + désinscription ; payload
+    // cloné par destinataire (le receveur mute sans effet).
+    describe(
+        &mut e,
+        "var log = [];         var a = new BroadcastChannel('x');         var b = new BroadcastChannel('x');         b.onmessage = function (ev) { ev.data.mut = true; log.push('got'); };         a.postMessage({mut: false});         var sent = a.postMessage ? 'ok' : 'no';         a.close();         try { a.postMessage(1); } catch (err) { log.push('closed:' + err.name); }",
+    );
+    // `closed:` posé dans l'eval, `got` livré au checkpoint.
+    assert_eq!(
+        describe(&mut e, "log.join(',')"),
+        "closed:InvalidStateError,got"
+    );
+}
+
+// ------------------------------------------------------------------
+// JS-C77 — `fetch(mode, credentials)` → transport (couture 125/126).
+// ------------------------------------------------------------------
+
+#[test]
+fn c77_fetch_defaults_and_props() {
+    let (mut e, t) = engine();
+    describe(&mut e, "fetch('/x');");
+    let reqs = t.requests.borrow();
+    assert_eq!(reqs.len(), 1);
+    let r = &reqs[0].1;
+    assert_eq!(r.mode, explorer_jscore::FetchMode::Cors);
+    assert_eq!(r.credentials, explorer_jscore::FetchCredentials::SameOrigin);
+    drop(reqs);
+    // `Request` expose `mode`/`credentials` (défauts spec).
+    assert_eq!(
+        describe(
+            &mut e,
+            "var r = new Request('/y'); r.mode + '|' + r.credentials"
+        ),
+        "cors|same-origin"
+    );
+}
+
+#[test]
+fn c77_fetch_init_overrides() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "fetch('/x', {mode: 'no-cors', credentials: 'include'});",
+    );
+    let reqs = t.requests.borrow();
+    let r = &reqs[0].1;
+    assert_eq!(r.mode, explorer_jscore::FetchMode::NoCors);
+    assert_eq!(r.credentials, explorer_jscore::FetchCredentials::Include);
+}
+
+#[test]
+fn c77_no_cors_strips_author_headers() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "fetch('/x', {mode: 'no-cors', headers: {'X-Key': '1', 'Accept': 'a',                        'Content-Type': 'text/plain', 'Content-Language': 'fr'}});",
+    );
+    let reqs = t.requests.borrow();
+    let names: Vec<String> = reqs[0]
+        .1
+        .headers
+        .iter()
+        .map(|(n, _)| n.to_ascii_lowercase())
+        .collect();
+    // Safelist seulement — `X-Key` strippé à l'émission.
+    assert_eq!(names, vec!["accept", "content-type", "content-language"]);
+}
+
+#[test]
+fn c77_same_origin_cross_rejects_before_transport() {
+    let (mut e, t) = engine();
+    e.set_page_url("https://a.test/dir/page");
+    describe(
+        &mut e,
+        "var out = '';         fetch('https://b.test/x', {mode: 'same-origin'})           .catch(function (er) { out = er.name; });",
+    );
+    assert_eq!(describe(&mut e, "out"), "TypeError");
+    // Rejet avant émission — le transport n'est pas sollicité.
+    assert_eq!(t.requests.borrow().len(), 0);
+    // `same-origin` sur cible same-origin : émise.
+    describe(
+        &mut e,
+        "fetch('https://a.test/dir/y', {mode: 'same-origin'});",
+    );
+    assert_eq!(t.requests.borrow().len(), 1);
+}
+
+#[test]
+fn c77_cross_cors_types_response() {
+    let (mut e, t) = engine();
+    e.set_page_url("https://a.test/dir/page");
+    describe(
+        &mut e,
+        "var t1 = '', t2 = '';         fetch('https://a.test/dir/y').then(function (r) { t1 = r.type; });         fetch('https://b.test/z').then(function (r) { t2 = r.type; });",
+    );
+    let h1 = t.requests.borrow()[0].0;
+    let h2 = t.requests.borrow()[1].0;
+    respond(&mut e, h1, 200, "x");
+    respond(&mut e, h2, 200, "x");
+    assert_eq!(describe(&mut e, "t1 + '|' + t2"), "basic|cors");
+}
+
+#[test]
+fn c77_no_cors_opaque_response() {
+    let (mut e, t) = engine();
+    e.set_page_url("https://a.test/dir/page");
+    describe(
+        &mut e,
+        "var log = '';         fetch('https://b.test/z', {mode: 'no-cors'})           .then(function (r) {              r.text().then(function (t) {                log = r.type + '|' + r.status + '|' + r.ok + '|' +                       r.headers.get('x') + '|' + t.length;              });            });",
+    );
+    let h = t.requests.borrow()[0].0;
+    respond(&mut e, h, 200, "secret");
+    // Réponse opaque : `type:'opaque'`, status 0, `ok` false,
+    // headers vides, corps vide — la promesse résout tout de même.
+    assert_eq!(describe(&mut e, "log"), "opaque|0|false|null|0");
+}
+
+#[test]
+fn c77_mode_and_credentials_validation() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var out = [];         fetch('/a', {mode: 'navigate'})           .catch(function (er) { out.push(er.name); });         fetch('/b', {mode: 'bogus'})           .catch(function (er) { out.push(er.name); });         fetch('/c', {credentials: 'bogus'})           .catch(function (er) { out.push(er.name); });         fetch('/d', {mode: 'no-cors', method: 'PUT'})           .catch(function (er) { out.push(er.name); });",
+    );
+    assert_eq!(
+        describe(&mut e, "out.join(',')"),
+        "TypeError,TypeError,TypeError,TypeError"
+    );
+    assert_eq!(t.requests.borrow().len(), 0);
+    // `new Request` : `TypeError` synchrone (spec).
+    assert!(e.eval("new Request('/x', {mode: 'navigate'})").is_err());
+    assert!(e
+        .eval("new Request('/x', {mode: 'no-cors', method: 'PUT'})")
+        .is_err());
+    assert!(e.eval("new Request('/x', {credentials: 'bogus'})").is_err());
+}
+
+#[test]
+fn c77_request_inherits_mode_credentials() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var rq = new Request('/x', {mode: 'no-cors', credentials: 'omit'});         fetch(rq);",
+    );
+    let reqs = t.requests.borrow();
+    let r = &reqs[0].1;
+    assert_eq!(r.mode, explorer_jscore::FetchMode::NoCors);
+    assert_eq!(r.credentials, explorer_jscore::FetchCredentials::Omit);
+    drop(reqs);
+    // `init` surcharge l'héritage.
+    describe(&mut e, "fetch(rq, {credentials: 'include'});");
+    let reqs = t.requests.borrow();
+    assert_eq!(
+        reqs[1].1.credentials,
+        explorer_jscore::FetchCredentials::Include
+    );
+    assert_eq!(reqs[1].1.mode, explorer_jscore::FetchMode::NoCors);
+}
+
+#[test]
+fn c77_xhr_with_credentials() {
+    let (mut e, t) = engine();
+    assert_eq!(
+        describe(&mut e, "var x = new XMLHttpRequest(); x.withCredentials"),
+        "false"
+    );
+    describe(
+        &mut e,
+        "x.open('POST', '/a'); x.withCredentials = true; x.send();",
+    );
+    let reqs = t.requests.borrow();
+    let r = &reqs[0].1;
+    assert_eq!(r.mode, explorer_jscore::FetchMode::Cors);
+    assert_eq!(r.credentials, explorer_jscore::FetchCredentials::Include);
+    drop(reqs);
+    // `withCredentials` hors `opened` non envoyé →
+    // `InvalidStateError` (spec — DOMException shape `{name}`).
+    assert_eq!(
+        describe(
+            &mut e,
+            "var n = ''; try { x.withCredentials = false; } catch (er) { n = er.name; } n"
+        ),
+        "InvalidStateError"
+    );
+    // `open()` reset l'état, pas le drapeau — toujours include.
+    describe(&mut e, "x.open('GET', '/b'); x.send();");
+    assert_eq!(
+        t.requests.borrow()[1].1.credentials,
+        explorer_jscore::FetchCredentials::Include
+    );
+}
+
+#[test]
+fn c77_send_beacon_no_cors_include() {
+    // `sendBeacon` (navigator, DOM installé) : spec `mode:
+    // no-cors` + `credentials: include` — fire-and-forget.
+    let mut e = Engine::new();
+    let t = StubTransport::new();
+    e.install_xhr(t.clone());
+    e.install_dom(&std::rc::Rc::new(std::cell::RefCell::new(
+        explorer_jscore::Dom::from_html("<html><body></body></html>"),
+    )));
+    describe(&mut e, "navigator.sendBeacon('/beacon', 'd=1')");
+    let reqs = t.requests.borrow();
+    assert_eq!(reqs.len(), 1);
+    let r = &reqs[0].1;
+    assert_eq!(r.method, "POST");
+    assert_eq!(r.mode, explorer_jscore::FetchMode::NoCors);
+    assert_eq!(r.credentials, explorer_jscore::FetchCredentials::Include);
+}

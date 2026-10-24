@@ -252,6 +252,7 @@ fn xhr_roundtrips_through_net_drain() {
         url,
         headers,
         body,
+        ..
     } = &reqs[0]
     else {
         panic!("attendu Fetch, obtenu {reqs:?}");

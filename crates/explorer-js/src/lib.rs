@@ -109,11 +109,37 @@ pub enum NetRequest {
         headers: Vec<(String, String)>,
         /// Corps `send(body)`/`fetch({body})`, si présent.
         body: Option<String>,
+        /// `Request.mode` de l'appel (JS-C77) — `fetch({mode})`,
+        /// `Cors` pour XHR, `NoCors` pour `sendBeacon`.
+        mode: explorer_jscore::FetchMode,
+        /// `Request.credentials` de l'appel (JS-C77) — gouverne
+        /// `Cookie`/`Set-Cookie` côté session.
+        credentials: explorer_jscore::FetchCredentials,
+        /// Contexte de navigation émetteur (étape 134) —
+        /// [`JS_CTX_TOP`] = document top-level, sinon le
+        /// contexte de l'`<iframe>` dont le script a tiré.
+        /// La session résout la base URL et l'initiateur sur
+        /// le document **émetteur**, jamais le parent.
+        ctx: JsCtxId,
     },
     /// `xhr.abort()` — annuler la tâche `handle` si encore en vol.
     Abort {
         /// Identifiant de la requête à annuler.
         handle: u64,
+    },
+    /// Opération `crypto.subtle` émise par le script (JS-C79) —
+    /// **pas une requête réseau** : la session l'exécute en
+    /// in-process (`explorer-net::crypto`) et livre le
+    /// résultat via [`JsEngine::deliver_crypto_response`].
+    /// C'est la couture embedder du moteur : jscore reste
+    /// zéro-dépendance, la plateforme fournit le calcul.
+    Crypto {
+        /// Identifiant rendu par `CryptoTransport::submit`.
+        handle: u64,
+        /// Opération normalisée (`Digest` + algo validé).
+        op: explorer_jscore::CryptoOp,
+        /// Octets source copiés hors du heap à l'appel.
+        data: Vec<u8>,
     },
 }
 
@@ -133,6 +159,18 @@ pub struct NetResponse {
     pub headers: Vec<(String, String)>,
     /// Corps brut — `responseText`/`text()` le décode en lossy.
     pub body: Vec<u8>,
+}
+
+/// Résultat d'une opération `crypto.subtle` livrée au moteur
+/// (JS-C79) — `Ok` = octets résultat (digest → `ArrayBuffer`),
+/// `Err` = message → rejet `OperationError`. Miroir de
+/// `explorer_jscore::CryptoResponse`.
+#[derive(Debug, Clone)]
+pub struct CryptoResponse {
+    /// Identifiant rendu par [`NetRequest::Crypto`].
+    pub handle: u64,
+    /// `Ok(octets)` ou `Err(message)`.
+    pub result: Result<Vec<u8>, String>,
 }
 
 /// Chemin `(tag, index parmi les frères éléments de même
@@ -423,6 +461,95 @@ pub trait JsEngine: Send {
     /// Défaut : pas de bindings (moteur nu).
     fn install_dom(&mut self, _html: &str, _page_url: &str, _history_len: u32) {}
 
+    /// Crée un contexte de navigation **enfant** (étape 134 —
+    /// un `<iframe>` fetché = un realm propre, JS-C78) :
+    /// intrinsics frais, `parent`/`top`/`frames[n]` câblés,
+    /// `contentWindow` résolu via `frame_ord` = position de
+    /// l'élément `<iframe>` dans l'ordre document du parent
+    /// (`None` = cadre orphelin — `contentWindow` reste
+    /// `null`). Renvoie le [`JsCtxId`] alloué, `None` sur un
+    /// moteur mono-contexte. Le contexte créé n'est **pas**
+    /// laissé courant : l'état d'évaluation revient au
+    /// contexte de l'appelant.
+    fn context_new(&mut self, _url: &str, _frame_ord: Option<u32>) -> Option<JsCtxId> {
+        None
+    }
+
+    /// Détruit un contexte enfant (étape 134) — page quittée
+    /// **hors bfcache** ou cadre supprimé : `frames[]` du
+    /// parent rétrécit, `postMessage` vers lui devient no-op.
+    /// `JS_CTX_TOP`/inconnu → no-op (tolérance). Défaut : rien.
+    fn context_destroy(&mut self, _ctx: JsCtxId) {}
+
+    /// Installe le DOM miroir **du contexte `ctx`** (étape 134)
+    /// — même séquence que [`Self::install_dom`] (miroir
+    /// re-parsé, `document`/`location`, timers, XHR/fetch)
+    /// avec deux écarts : les hooks de navigation ne sont pas
+    /// posés (la navigation de cadre est une piste à part —
+    /// `location.href=` y est inerte plutôt que de risquer le
+    /// document top-level) et l'état d'origine (`local`
+    /// = localStorage, `cookie_header` = vue `document.cookie`)
+    /// est **celui de l'origine de l'enfant**, posé sur un
+    /// jar isolé — aucun partage avec le parent. Défaut : rien.
+    fn install_dom_ctx(
+        &mut self,
+        _ctx: JsCtxId,
+        _html: &str,
+        _page_url: &str,
+        _local: std::collections::BTreeMap<String, String>,
+        _cookie_header: &str,
+    ) {
+    }
+
+    /// [`Self::eval`]/[`Self::eval_named`] adressés au contexte
+    /// `ctx` (étape 134) — le script court dans le realm de
+    /// l'`<iframe>` : ses globals, son `document`, son
+    /// `fetch`. Contexte mort/inconnu → [`JsError::Dead`],
+    /// jamais d'exécution dans le mauvais realm. Défaut :
+    /// délègue à [`Self::eval_named`] (moteur mono-contexte —
+    /// le tag est ignoré).
+    ///
+    /// # Errors
+    /// Identique à [`Self::eval`].
+    fn eval_ctx(
+        &mut self,
+        _ctx: JsCtxId,
+        source: &str,
+        name: Option<&str>,
+    ) -> Result<String, JsError> {
+        match name {
+            Some(n) => self.eval_named(source, n),
+            None => self.eval(source),
+        }
+    }
+
+    /// [`Self::dispatch_event`] adressé au contexte `ctx`
+    /// (étape 134) — `path` se résout dans le miroir **de
+    /// l'enfant** ; `path` vide = événement document de
+    /// l'enfant (`DOMContentLoaded`, `load`…). Défaut :
+    /// délègue à [`Self::dispatch_event`] (moteur
+    /// mono-contexte).
+    ///
+    /// # Errors
+    /// Erreur de listener JS propagée en [`JsError::Uncaught`].
+    fn dispatch_event_ctx(
+        &mut self,
+        _ctx: JsCtxId,
+        ty: &str,
+        path: &[(String, u32)],
+    ) -> Result<bool, JsError> {
+        self.dispatch_event(ty, path)
+    }
+
+    /// Sérialise le miroir du contexte `ctx` s'il a été muté
+    /// depuis la dernière synchro (étape 134) — la session
+    /// re-parse le résultat en `SubFrame.dom` pour le composite.
+    /// `None` = rien de neuf **ou** moteur sans miroir par
+    /// contexte. Défaut : `None`.
+    fn sync_dom_ctx(&mut self, _ctx: JsCtxId) -> Option<String> {
+        None
+    }
+
     /// Draine les intentions de navigation accumulées depuis
     /// le dernier appel — `location`/`history` n'agissent
     /// jamais en plein vol, la session décide après retour.
@@ -621,6 +748,18 @@ pub trait JsEngine: Send {
         Ok(())
     }
 
+    /// Livre le résultat d'une `NetRequest::Crypto` drainée :
+    /// la `Promise` `subtle.digest` se résout en `ArrayBuffer`
+    /// ou rejette `OperationError`. Défaut : `Ok(())` (moteur
+    /// sans backend crypto).
+    ///
+    /// # Errors
+    /// [`JsError::Uncaught`] si un handler `then` jette,
+    /// [`JsError::Dead`] si le moteur est inerte.
+    fn deliver_crypto_response(&mut self, _resp: CryptoResponse) -> Result<(), JsError> {
+        Ok(())
+    }
+
     /// Installe `localStorage`/`sessionStorage` : `local` est le
     /// snapshot **par origine** de la session (le moteur y écrit
     /// en direct — relire via [`Self::drain_storage`]),
@@ -646,6 +785,20 @@ pub trait JsEngine: Send {
     /// Défaut : rien.
     fn drain_cookie_writes(&mut self) -> Vec<String> {
         Vec::new()
+    }
+
+    /// Draine les surfaces script **du contexte `ctx`**
+    /// (étape 134) : `(écritures document.cookie brutes,
+    /// contenu localStorage courant)` — la session les range
+    /// sous l'origine **de l'enfant** (partition de la page
+    /// top-level pour les cookies — `Partitioned` se clé sur
+    /// le site de premier niveau). Contexte inconnu → défaut
+    /// vide. Défaut : rien (moteur mono-contexte).
+    fn drain_sinks_ctx(
+        &mut self,
+        _ctx: JsCtxId,
+    ) -> (Vec<String>, std::collections::BTreeMap<String, String>) {
+        (Vec::new(), std::collections::BTreeMap::new())
     }
 
     /// Marque l'élément média `path` claimé par l'hôte
@@ -704,6 +857,23 @@ pub fn null_factory() -> JsFactory {
 
 pub use explorer_jscore::module_specifiers;
 pub use explorer_jscore::{is_bare_specifier, rewrite_bare_specifier};
+// JS-C77 — `Request.mode`/`Request.credentials` transportés par
+// `NetRequest::Fetch` (ré-export : le type reste unique).
+pub use explorer_jscore::{FetchCredentials, FetchMode};
+
+/// Contexte de navigation du tas moteur (étape 134 — JS-C78
+/// côté `explorer-jscore`) : un realm par document chargé ;
+/// `TOP` = le document top-level, les `<iframe>` fetchés en
+/// reçoivent chacun un au commit. L'identifiant n'a de sens
+/// que dans une session moteur — il n'est ni persisté ni
+/// comparable entre moteurs.
+pub type JsCtxId = u32;
+
+/// Extension de [`JsCtxId`] : le contexte top-level.
+pub const JS_CTX_TOP: JsCtxId = 0;
+// JS-C79 — opération `crypto.subtle` transportée par
+// `NetRequest::Crypto` (ré-export : le type reste unique).
+pub use explorer_jscore::{CryptoOp, DigestAlgo};
 
 /// Commandes vers le thread moteur — valeurs sérialisables, aucun
 /// handle `Rc` ne traverse.
@@ -894,6 +1064,10 @@ enum Cmd {
         resp: NetResponse,
         tx: Sender<Result<(), JsError>>,
     },
+    DeliverCrypto {
+        resp: CryptoResponse,
+        tx: Sender<Result<(), JsError>>,
+    },
     InstallStorage {
         local: std::collections::BTreeMap<String, String>,
     },
@@ -905,6 +1079,51 @@ enum Cmd {
     },
     DrainCookies {
         tx: Sender<Vec<String>>,
+    },
+    /// Étape 134 — contextes de navigation imbriqués (un
+    /// `<iframe>` fetché = un realm). `frame_ord` = position
+    /// de l'élément parmi les `<iframe>` du parent (ordre
+    /// document) — le worker la résout en `NodeId` miroir.
+    ContextNew {
+        url: String,
+        frame_ord: Option<u32>,
+        tx: Sender<Option<JsCtxId>>,
+    },
+    ContextDestroy {
+        ctx: JsCtxId,
+    },
+    InstallDomCtx {
+        ctx: JsCtxId,
+        html: String,
+        page_url: String,
+        /// localStorage de l'origine enfant (isolée).
+        local: std::collections::BTreeMap<String, String>,
+        /// Vue `document.cookie` de l'enfant (jar isolé).
+        cookie_header: String,
+    },
+    /// Drain des surfaces script du contexte `ctx` (étape
+    /// 134) : écritures `document.cookie` brutes + contenu
+    /// `localStorage` courant — la session les range sous
+    /// l'origine **de l'enfant** (jamais celle du parent).
+    DrainSinksCtx {
+        ctx: JsCtxId,
+        tx: Sender<(Vec<String>, std::collections::BTreeMap<String, String>)>,
+    },
+    EvalCtx {
+        ctx: JsCtxId,
+        src: String,
+        name: Option<String>,
+        tx: Sender<Result<String, JsError>>,
+    },
+    DispatchCtx {
+        ctx: JsCtxId,
+        ty: String,
+        path: Vec<(String, u32)>,
+        tx: Sender<Result<bool, JsError>>,
+    },
+    DomSyncCtx {
+        ctx: JsCtxId,
+        tx: Sender<Option<String>>,
     },
     Shutdown,
 }
@@ -988,6 +1207,26 @@ impl JscoreEngine {
         // Backing `localStorage` posé par `InstallStorage` — le
         // moteur y écrit en direct, `DrainStorage` le relit.
         let mut local_store: Option<explorer_jscore::Storage> = None;
+        // Miroirs des contextes `<iframe>` (étape 134) —
+        // `ctx → DomRef` ; même durée de vie que le contexte
+        // (détruits ensemble). Chaque cadre porte aussi son
+        // jar `document.cookie` **isolé** — le `SnapshotJar`
+        // top-level ne doit jamais absorber l'écriture d'un
+        // contexte tiers (fuite cross-origin).
+        let mut ctx_doms: HashMap<JsCtxId, explorer_jscore::DomRef> = HashMap::new();
+        let mut ctx_jars: HashMap<JsCtxId, std::rc::Rc<SnapshotJar>> = HashMap::new();
+        // Backing `localStorage` de chaque contexte — le moteur
+        // y écrit en direct, `DrainSinksCtx` le relit pour la
+        // session (rangé sous l'origine de l'enfant).
+        let mut ctx_stores: HashMap<JsCtxId, explorer_jscore::Storage> = HashMap::new();
+        // Compteur de handles XHR/fetch **partagé entre les
+        // contextes** — un handle unique dans le moteur rend
+        // `NetRequest::Abort { handle }` non ambigu sans tag
+        // ctx (le drain session ne connaît que le handle).
+        // Idem pour `crypto.subtle` (JS-C79).
+        let xhr_next: std::rc::Rc<std::cell::Cell<u64>> = std::rc::Rc::new(std::cell::Cell::new(0));
+        let crypto_next: std::rc::Rc<std::cell::Cell<u64>> =
+            std::rc::Rc::new(std::cell::Cell::new(0));
         while let Ok(cmd) = rx.recv() {
             match cmd {
                 Cmd::Eval { src, name, tx } => {
@@ -1034,6 +1273,8 @@ impl JscoreEngine {
                         &html,
                         &page_url,
                         history_len,
+                        &xhr_next,
+                        &crypto_next,
                     ));
                     // ADR-0025 : l'install est la baseline —
                     // les records du parse initial n'ont rien à
@@ -1171,6 +1412,143 @@ impl JscoreEngine {
                         return;
                     }
                 }
+                // Étape 134 — realm par `<iframe>` (JS-C78 sous
+                // le capot). Chaque commande adressée à `ctx`
+                // fait `context_switch` puis **restaure** le
+                // contexte précédent : l'état courant ne fuit
+                // jamais d'une commande à l'autre.
+                Cmd::ContextNew { url, frame_ord, tx } => {
+                    // `frame_node` = (pointeur du miroir parent,
+                    // NodeId miroir du nième <iframe>) — sert
+                    // `contentWindow`/`contentDocument`/`frameElement`.
+                    let frame = jsd.as_ref().and_then(|d| {
+                        frame_ord.and_then(|o| {
+                            d.borrow()
+                                .nodes
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, n)| n.tag == "iframe")
+                                .nth(o as usize)
+                                .map(|(i, _)| {
+                                    (
+                                        std::rc::Rc::as_ptr(d) as usize,
+                                        u32::try_from(i).unwrap_or(u32::MAX),
+                                    )
+                                })
+                        })
+                    });
+                    let prev = eng.current_context();
+                    let id = eng.context_new(&url, frame);
+                    eng.context_switch(prev);
+                    if tx.send(Some(id)).is_err() {
+                        return;
+                    }
+                }
+                Cmd::ContextDestroy { ctx } => {
+                    eng.context_destroy(ctx);
+                    ctx_doms.remove(&ctx);
+                    ctx_jars.remove(&ctx);
+                    ctx_stores.remove(&ctx);
+                }
+                Cmd::InstallDomCtx {
+                    ctx,
+                    html,
+                    page_url,
+                    local,
+                    cookie_header,
+                } => {
+                    let prev = eng.current_context();
+                    eng.context_switch(ctx);
+                    if eng.current_context() == ctx {
+                        // Jar et storage isolés du cadre : la
+                        // vue `document.cookie`/`localStorage`
+                        // est celle de SON origine ; ses
+                        // écritures sont drainées vers la
+                        // session sous la même origine
+                        // (`DrainSinksCtx`), jamais celle du
+                        // parent — pas de fuite croisée.
+                        let cjar = std::rc::Rc::new(SnapshotJar::default());
+                        cjar.set_header(&cookie_header);
+                        let storage: explorer_jscore::Storage =
+                            std::rc::Rc::new(std::cell::RefCell::new(local));
+                        let d = install_dom_ctx(
+                            &mut eng,
+                            &net_q,
+                            &cjar,
+                            &storage,
+                            &html,
+                            &page_url,
+                            &xhr_next,
+                            &crypto_next,
+                        );
+                        ctx_jars.insert(ctx, cjar);
+                        ctx_stores.insert(ctx, storage);
+                        ctx_doms.insert(ctx, d);
+                        eng.context_switch(prev);
+                    } else {
+                        // Contexte mort/inconnu : le switch est
+                        // un no-op côté moteur — rien à installer.
+                        eng.context_switch(prev);
+                    }
+                }
+                Cmd::EvalCtx { ctx, src, name, tx } => {
+                    let prev = eng.current_context();
+                    eng.context_switch(ctx);
+                    let out = if eng.current_context() == ctx {
+                        let res = match &name {
+                            Some(n) => eng.eval_named(&src, n),
+                            None => eng.eval(&src),
+                        };
+                        match res {
+                            Ok(v) => Ok(eng.describe(v)),
+                            Err(e) => Err(JsError::from(e)),
+                        }
+                    } else {
+                        Err(JsError::Dead)
+                    };
+                    eng.context_switch(prev);
+                    if tx.send(out).is_err() {
+                        return;
+                    }
+                }
+                Cmd::DispatchCtx { ctx, ty, path, tx } => {
+                    let prev = eng.current_context();
+                    eng.context_switch(ctx);
+                    let out = if eng.current_context() == ctx {
+                        dispatch_event(&mut eng, ctx_doms.get(&ctx), &ty, &path, &[])
+                    } else {
+                        Ok(false)
+                    };
+                    eng.context_switch(prev);
+                    if tx.send(out).is_err() {
+                        return;
+                    }
+                }
+                Cmd::DomSyncCtx { ctx, tx } => {
+                    let out = ctx_doms.get(&ctx).and_then(|d| {
+                        let mut d = d.borrow_mut();
+                        d.take_dirty().then(|| {
+                            let html = d.serialize_document();
+                            d.clear_journal();
+                            html
+                        })
+                    });
+                    if tx.send(out).is_err() {
+                        return;
+                    }
+                }
+                Cmd::DrainSinksCtx { ctx, tx } => {
+                    let writes = ctx_jars
+                        .get(&ctx)
+                        .map(|j| std::mem::take(&mut *j.writes.borrow_mut()))
+                        .unwrap_or_default();
+                    let map = ctx_stores
+                        .get(&ctx)
+                        .map_or_else(std::collections::BTreeMap::new, |m| m.borrow().clone());
+                    if tx.send((writes, map)).is_err() {
+                        return;
+                    }
+                }
                 Cmd::SetBudget { ops } => eng.set_op_limit(ops),
                 Cmd::SetMemLimit { bytes } => eng.set_mem_limit(bytes),
                 Cmd::Shutdown => return,
@@ -1240,6 +1618,106 @@ impl JsEngine for JscoreEngine {
             page_url: page_url.to_string(),
             history_len,
         });
+    }
+
+    fn context_new(&mut self, url: &str, frame_ord: Option<u32>) -> Option<JsCtxId> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::ContextNew {
+                url: url.to_string(),
+                frame_ord,
+                tx,
+            })
+            .is_err()
+        {
+            return None;
+        }
+        rx.recv().ok().flatten()
+    }
+
+    fn context_destroy(&mut self, ctx: JsCtxId) {
+        let _ = self.tx.send(Cmd::ContextDestroy { ctx });
+    }
+
+    fn install_dom_ctx(
+        &mut self,
+        ctx: JsCtxId,
+        html: &str,
+        page_url: &str,
+        local: std::collections::BTreeMap<String, String>,
+        cookie_header: &str,
+    ) {
+        let _ = self.tx.send(Cmd::InstallDomCtx {
+            ctx,
+            html: html.to_string(),
+            page_url: page_url.to_string(),
+            local,
+            cookie_header: cookie_header.to_string(),
+        });
+    }
+
+    fn eval_ctx(
+        &mut self,
+        ctx: JsCtxId,
+        source: &str,
+        name: Option<&str>,
+    ) -> Result<String, JsError> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::EvalCtx {
+                ctx,
+                src: source.to_string(),
+                name: name.map(str::to_string),
+                tx,
+            })
+            .is_err()
+        {
+            return Err(JsError::Dead);
+        }
+        rx.recv().map_err(|_| JsError::Dead)?
+    }
+
+    fn dispatch_event_ctx(
+        &mut self,
+        ctx: JsCtxId,
+        ty: &str,
+        path: &[(String, u32)],
+    ) -> Result<bool, JsError> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::DispatchCtx {
+                ctx,
+                ty: ty.to_string(),
+                path: path.to_vec(),
+                tx,
+            })
+            .is_err()
+        {
+            return Err(JsError::Dead);
+        }
+        rx.recv().map_err(|_| JsError::Dead)?
+    }
+
+    fn sync_dom_ctx(&mut self, ctx: JsCtxId) -> Option<String> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DomSyncCtx { ctx, tx }).is_err() {
+            return None;
+        }
+        rx.recv().ok().flatten()
+    }
+
+    fn drain_sinks_ctx(
+        &mut self,
+        ctx: JsCtxId,
+    ) -> (Vec<String>, std::collections::BTreeMap<String, String>) {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainSinksCtx { ctx, tx }).is_err() {
+            return (Vec::new(), std::collections::BTreeMap::new());
+        }
+        rx.recv().unwrap_or_default()
     }
 
     fn drain_nav_requests(&mut self) -> Vec<NavRequest> {
@@ -1391,6 +1869,14 @@ impl JsEngine for JscoreEngine {
     fn deliver_net_response(&mut self, resp: NetResponse) -> Result<(), JsError> {
         let (tx, rx) = channel();
         if self.tx.send(Cmd::DeliverNet { resp, tx }).is_err() {
+            return Err(JsError::Dead);
+        }
+        rx.recv().map_err(|_| JsError::Dead)?
+    }
+
+    fn deliver_crypto_response(&mut self, resp: CryptoResponse) -> Result<(), JsError> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DeliverCrypto { resp, tx }).is_err() {
             return Err(JsError::Dead);
         }
         rx.recv().map_err(|_| JsError::Dead)?
@@ -1601,6 +2087,15 @@ fn serve_side(
                 .map_err(|t| JsError::Uncaught(eng.describe(t.0)));
             tx.send(out).is_ok()
         }
+        Cmd::DeliverCrypto { resp, tx } => {
+            let out = eng
+                .deliver_crypto_response(explorer_jscore::CryptoResponse {
+                    handle: resp.handle,
+                    result: resp.result,
+                })
+                .map_err(|t| JsError::Uncaught(eng.describe(t.0)));
+            tx.send(out).is_ok()
+        }
         Cmd::InstallStorage { local } => {
             let map: explorer_jscore::Storage = std::rc::Rc::new(std::cell::RefCell::new(local));
             eng.install_storage(&map);
@@ -1630,6 +2125,7 @@ fn serve_side(
 /// bindings `document`/`location`/`history`, puis surface
 /// script-initiée (JS-C27) : XHR + `fetch` → `net_q`,
 /// `document.cookie` → `jar`. Renvoie le `DomRef` installé.
+#[allow(clippy::too_many_arguments)]
 fn install_dom(
     eng: &mut explorer_jscore::Engine,
     nav_q: &std::rc::Rc<std::cell::RefCell<Vec<NavRequest>>>,
@@ -1638,6 +2134,8 @@ fn install_dom(
     html: &str,
     page_url: &str,
     history_len: u32,
+    xhr_next: &std::rc::Rc<std::cell::Cell<u64>>,
+    crypto_next: &std::rc::Rc<std::cell::Cell<u64>>,
 ) -> explorer_jscore::DomRef {
     let d = std::rc::Rc::new(std::cell::RefCell::new(explorer_jscore::Dom::from_html(
         html,
@@ -1678,9 +2176,62 @@ fn install_dom(
     }
     eng.install_xhr(std::rc::Rc::new(ChanXhr {
         q: std::rc::Rc::clone(net_q),
-        next: std::cell::Cell::new(0),
+        next: std::rc::Rc::clone(xhr_next),
+    }));
+    eng.install_crypto(std::rc::Rc::new(ChanCrypto {
+        q: std::rc::Rc::clone(net_q),
+        next: std::rc::Rc::clone(crypto_next),
     }));
     eng.set_cookie_jar(jar.clone());
+    d
+}
+
+/// `Cmd::InstallDomCtx` côté worker (étape 134) — même
+/// séquence que [`install_dom`] mais pour le contexte d'un
+/// `<iframe>` : miroir propre, `document`/`location`/timers/
+/// XHR/`crypto.subtle` actifs. **Pas** de hooks de navigation
+/// ni de `form.submit` : la navigation de cadre est une piste
+/// à part (`location.href=` y est inerte — mieux un no-op
+/// qu'un `Navigate` émis sous l'identité du parent). Jar
+/// cookie et backing `localStorage` sont **isolés** — une
+/// écriture d'un contexte tiers n'atteint jamais les surfaces
+/// du document top-level (drainées vers la session sous
+/// l'origine enfant par `DrainSinksCtx`).
+#[allow(clippy::too_many_arguments)]
+fn install_dom_ctx(
+    eng: &mut explorer_jscore::Engine,
+    net_q: &std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    jar: &std::rc::Rc<SnapshotJar>,
+    storage: &explorer_jscore::Storage,
+    html: &str,
+    page_url: &str,
+    xhr_next: &std::rc::Rc<std::cell::Cell<u64>>,
+    crypto_next: &std::rc::Rc<std::cell::Cell<u64>>,
+) -> explorer_jscore::DomRef {
+    let d = std::rc::Rc::new(std::cell::RefCell::new(explorer_jscore::Dom::from_html(
+        html,
+    )));
+    d.borrow().take_dirty();
+    // Voir `install_dom` : le `dirty_node` de construction
+    // est vidé avec le flag — un chemin sale résiduel
+    // empoisonnerait la première vraie mutation de l'enfant.
+    d.borrow().take_dirty_path();
+    eng.install_dom(&d);
+    eng.install_timers();
+    eng.set_page_url(page_url);
+    eng.install_xhr(std::rc::Rc::new(ChanXhr {
+        q: std::rc::Rc::clone(net_q),
+        next: std::rc::Rc::clone(xhr_next),
+    }));
+    eng.install_crypto(std::rc::Rc::new(ChanCrypto {
+        q: std::rc::Rc::clone(net_q),
+        next: std::rc::Rc::clone(crypto_next),
+    }));
+    eng.set_cookie_jar(jar.clone());
+    // `localStorage` pré-rempli de l'origine enfant — le
+    // backing `Rc` vit aussi en `ctx_stores` : `DrainSinksCtx`
+    // le relit pour la session.
+    eng.install_storage(storage);
     d
 }
 
@@ -1789,8 +2340,12 @@ impl explorer_jscore::ModuleLoader for MapLoader {
 struct ChanXhr {
     /// File partagée avec `DrainNet`.
     q: std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
-    /// Prochain handle libre (compteur du contexte).
-    next: std::cell::Cell<u64>,
+    /// Prochain handle libre — `Rc` **partagé entre tous les
+    /// contextes** du moteur (étape 134 : chaque `<iframe>`
+    /// a son transport ; un compteur global garantit des
+    /// handles uniques, rendant `Abort { handle }` non
+    /// ambigu sans tag ctx).
+    next: std::rc::Rc<std::cell::Cell<u64>>,
 }
 
 impl explorer_jscore::XhrTransport for ChanXhr {
@@ -1803,12 +2358,42 @@ impl explorer_jscore::XhrTransport for ChanXhr {
             url: req.url.clone(),
             headers: req.headers.clone(),
             body: req.body.clone(),
+            mode: req.mode,
+            credentials: req.credentials,
+            ctx: req.ctx,
         });
         handle
     }
 
     fn abort(&self, handle: u64) {
         self.q.borrow_mut().push(NetRequest::Abort { handle });
+    }
+}
+
+/// Fournisseur `crypto.subtle` vers la session (JS-C79) — même
+/// couture que [`ChanXhr`] : la requête est enfilée en
+/// `NetRequest::Crypto`, la réponse revient par
+/// `Cmd::DeliverCrypto`. Le calcul vit côté plateforme
+/// (`explorer-net`), jamais dans le moteur.
+struct ChanCrypto {
+    /// File partagée avec `DrainNet`.
+    q: std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    /// Prochain handle libre — `Rc` partagé entre contextes
+    /// (même raison que [`ChanXhr::next`] : handles uniques
+    /// dans tout le moteur).
+    next: std::rc::Rc<std::cell::Cell<u64>>,
+}
+
+impl explorer_jscore::CryptoTransport for ChanCrypto {
+    fn submit(&self, req: explorer_jscore::CryptoRequest) -> u64 {
+        let handle = self.next.get();
+        self.next.set(handle + 1);
+        self.q.borrow_mut().push(NetRequest::Crypto {
+            handle,
+            op: req.op,
+            data: req.data,
+        });
+        handle
     }
 }
 

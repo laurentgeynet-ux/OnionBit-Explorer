@@ -85,6 +85,7 @@ pub fn router_with_egress(
         .route("/api/tabs/{id}/frame", get(frame))
         .route("/api/tabs/{id}/dom", get(dom_dump))
         .route("/api/tabs/{id}/layout", get(layout_dump))
+        .route("/api/tabs/{id}/mem", get(mem_report))
         .route("/api/tabs/{id}/navigate", post(navigate))
         .route("/api/tabs/{id}/reload", post(reload))
         .route("/api/tabs/{id}/back", post(back))
@@ -324,7 +325,7 @@ async fn navigate(
     req.initiator = Some(Initiator::TopLevelNav);
     match Box::pin(navigate_shared(&st.session, id, req, true)).await {
         Ok(()) => {
-            drain_navs_shared(&st.session, id).await;
+            Box::pin(drain_navs_shared(&st.session, id)).await;
             let session = st.session.lock().await;
             tab_json(&session, id)
         }
@@ -369,7 +370,7 @@ async fn reload(
     }
     match Box::pin(navigate_shared(&st.session, id, req, false)).await {
         Ok(()) => {
-            drain_navs_shared(&st.session, id).await;
+            Box::pin(drain_navs_shared(&st.session, id)).await;
             let session = st.session.lock().await;
             tab_json(&session, id)
         }
@@ -379,9 +380,9 @@ async fn reload(
 
 /// `POST …/back` — historique −1.
 async fn back(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
-    match history_move_shared(&st.session, id, -1).await {
+    match Box::pin(history_move_shared(&st.session, id, -1)).await {
         Ok(()) => {
-            drain_navs_shared(&st.session, id).await;
+            Box::pin(drain_navs_shared(&st.session, id)).await;
             let session = st.session.lock().await;
             tab_json(&session, id)
         }
@@ -391,9 +392,9 @@ async fn back(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
 
 /// `POST …/forward` — historique +1.
 async fn forward(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
-    match history_move_shared(&st.session, id, 1).await {
+    match Box::pin(history_move_shared(&st.session, id, 1)).await {
         Ok(()) => {
-            drain_navs_shared(&st.session, id).await;
+            Box::pin(drain_navs_shared(&st.session, id)).await;
             let session = st.session.lock().await;
             tab_json(&session, id)
         }
@@ -552,7 +553,7 @@ async fn input(
         let sess = st.session.clone();
         tokio::spawn(async move {
             drain_applies_shared(&sess, id).await;
-            drain_navs_shared(&sess, id).await;
+            Box::pin(drain_navs_shared(&sess, id)).await;
         });
     }
     Json(match outcome {
@@ -593,6 +594,19 @@ async fn layout_dump(State(st): State<ApiState>, Path(id): Path<TabId>) -> Respo
     match session.layout_dump(id) {
         Some(d) => (StatusCode::OK, d).into_response(),
         None => (StatusCode::NOT_FOUND, "pas de layout").into_response(),
+    }
+}
+
+/// `GET /api/tabs/{id}/mem` → `MemReport` JSON (étape 130) :
+/// attribution mémoire par réservoir — page vivante + pages
+/// gelées bfcache (heaps JS gelés inclus). `404` onglet
+/// inconnu. Verrou mutable : lire `heap_stats` d'un contexte
+/// JS passe par le canal de son worker.
+async fn mem_report(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
+    let mut session = st.session.lock().await;
+    match session.mem_report(id) {
+        Some(r) => Json(r).into_response(),
+        None => (StatusCode::NOT_FOUND, "onglet inconnu").into_response(),
     }
 }
 

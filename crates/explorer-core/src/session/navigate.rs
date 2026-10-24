@@ -194,6 +194,10 @@ impl Session {
         let needs_paint = entry.dom.is_some() && entry.frame.is_none();
         let url = entry.url.clone();
         let title = entry.title.clone();
+        // Étape 133 : les bitmaps gelés ont été libérés au
+        // freeze — re-décodage depuis les corps compressés
+        // retenus (sans réseau) avant toute re-peinture.
+        self.restore_images(tab);
         // La page quittée (gelée à l'instant ou page
         // d'erreur non gelable) meurt — ses surfaces média
         // sont closes ; le snapshot restauré n'en porte
@@ -717,7 +721,12 @@ impl Session {
         // JS-C45 : les handlers inline `on*` exigent un moteur
         // même sans `<script>` — sinon clic muet (page à
         // `onclick=` seul : premier bug site-réel mesuré M24).
-        let want_js = !scripts.is_empty() || has_inline_handlers(&dom);
+        let want_js = !scripts.is_empty()
+            || has_inline_handlers(&dom)
+            // Étape 134 : un `<iframe>` fetché obtient un realm
+            // JS même sans script parent — sinon son propre
+            // `<script>` serait muet.
+            || !frame_urls.is_empty();
         // Le gel capture l'état affiché — une peinture
         // spéculative du document en vol ne doit pas être
         // embarquée dans le snapshot (étape 56c).
@@ -791,13 +800,25 @@ impl Session {
             // après le commit (terrain 23/10 : une intention
             // périmée rejouait une autre page au drain suivant).
             entry.pending_nav.clear();
+            // Étape 134 — `context_destroy` **hors bfcache** :
+            // la page quittée n'est pas gelée (échec, nav en
+            // vol) → ses realms enfants meurent explicitement
+            // avant le moteur (bfcache : le moteur gèle avec
+            // ses contextes dedans, rien à détruire).
+            if let Some(eng) = entry.js.as_mut() {
+                for f in entry.frame_ctxs.drain(..) {
+                    eng.context_destroy(f.ctx);
+                }
+            }
             entry.js = None;
+            entry.frame_ctxs.clear();
             entry.images = PaintImages::default();
             entry.bg_aliases.clear();
             entry.bg_bodies.clear();
             entry.mask_aliases.clear();
             entry.img_decoded.clear();
             entry.bg_decoded.clear();
+            entry.img_bodies.clear();
             entry.linked_sheets.clear();
             entry.frames.clear();
             entry.prev_styles = HashMap::new();
@@ -1081,20 +1102,23 @@ impl Session {
 
     /// `NetRequest::Fetch` → `Request` émettable (étape 51),
     /// `None` = bloquée : URL irrésoluble, mixed-content,
-    /// verbe inconnu, cross-origin non-safelistée (ADR-0019).
-    /// `Referer`/`Origin` posés à l'émission — une requête
-    /// CORS porte `Origin` même en verbe safelisté (spec
-    /// Fetch) ; `Cookie` injecté same-origin uniquement
-    /// (`credentials` cross-origin hors MVP).
-    /// `page` = URL du document (initiateur, `Referer`,
-    /// mixed-content, `Origin`) ; `base` = base de
-    /// résolution effective (`<base href>` ou `page`,
-    /// étape 135 — `fetch('rel')` résout contre la base
-    /// document, spec Fetch « API base URL »).
+    /// verbe inconnu, `mode:same-origin` sur cible cross
+    /// (ADR-0019). `Referer`/`Origin` posés à l'émission — une
+    /// requête CORS porte `Origin` même en verbe safelisté
+    /// (spec Fetch). `fetch_mode`/`credentials` viennent du
+    /// script (JS-C77) : `no-cors` cross = émission bornée
+    /// safelist, réponse opaque, pas de protocole CORS.
+    /// `page` = URL du document émetteur (initiateur, `Referer`,
+    /// mixed-content, `Origin`) ; `base` = base de résolution
+    /// effective (`<base href>` ou `page`, étape 135 — spec
+    /// Fetch « API base URL ») ; `policy`/`csp` = politique
+    /// `Referer` et politiques CSP (`connect-src`, CAP-145)
+    /// du document émetteur — cadre inclus (étape 134).
     #[allow(clippy::too_many_arguments)] // la forme
-                                         // requête (méthode/URL/en-têtes/corps/politique) est
-                                         // intrinsèquement large — regrouper en struct n'ajoute
-                                         // que de l'indirection au seul appelant `drain_script_net`.
+                                         // requête (méthode/URL/en-têtes/corps/mode/creds/politique)
+                                         // est intrinsèquement large — regrouper en struct
+                                         // n'ajoute que de l'indirection au seul appelant
+                                         // `drain_script_net`.
     pub(crate) fn script_request(
         &self,
         page: &Url,
@@ -1105,6 +1129,8 @@ impl Session {
         body: Option<&str>,
         policy: Option<ReferrerPolicy>,
         csp: &[explorer_net::csp::CspPolicy],
+        fetch_mode: explorer_js::FetchMode,
+        credentials: explorer_js::FetchCredentials,
     ) -> Option<(Request, bool)> {
         let url = Url::resolve(base, raw_url.trim()).ok()?;
         if is_mixed_content(page, &url) {
@@ -1119,6 +1145,45 @@ impl Session {
         }
         let m = parse_method(method)?;
         let cross = page.origin() != url.origin();
+        // JS-C77 — miroir `fetch(mode)`/`xhr.withCredentials` →
+        // `Request.fetch_mode`/`CorsRequest.credentials` (types
+        // jscore → enums net : même lexique, traduction pure).
+        let mode = match fetch_mode {
+            explorer_js::FetchMode::Cors => FetchMode::Cors,
+            explorer_js::FetchMode::NoCors => FetchMode::NoCors,
+            explorer_js::FetchMode::SameOrigin => FetchMode::SameOrigin,
+        };
+        let creds = match credentials {
+            explorer_js::FetchCredentials::Omit => explorer_net::http::FetchCredentials::Omit,
+            explorer_js::FetchCredentials::SameOrigin => {
+                explorer_net::http::FetchCredentials::SameOrigin
+            }
+            explorer_js::FetchCredentials::Include => explorer_net::http::FetchCredentials::Include,
+        };
+        // `same-origin` sur cible cross → bloquée (spec ; le
+        // miroir rejette déjà en `TypeError` avant émission —
+        // garde défensive pour tout appelant non-miroir).
+        if mode == FetchMode::SameOrigin && cross {
+            return None;
+        }
+        // `no-cors` : en-têtes auteur bornés à la safelist
+        // (défense — le miroir strippe déjà à l'émission) ;
+        // hors safelist = simplement omis, jamais de preflight.
+        let author_headers: Vec<(String, String)> = if mode == FetchMode::NoCors {
+            headers
+                .iter()
+                .filter(|(n, v)| {
+                    cors_safelisted_header(n)
+                        && (!n.trim().eq_ignore_ascii_case("content-type")
+                            || explorer_net::policy::cors_safelisted_content_type(
+                                v.split(';').next().unwrap_or("").trim(),
+                            ))
+                })
+                .cloned()
+                .collect()
+        } else {
+            headers.to_vec()
+        };
         let mut req = Request {
             method: m,
             url: url.clone(),
@@ -1128,9 +1193,9 @@ impl Session {
             // `SameSite=Strict`/`Lax` exigent same-site (66).
             initiator: Some(Initiator::Subresource(page.clone())),
             fetch_dest: FetchDest::Empty,
-            // `fetch()`/`XHR` = mode `cors` (spec Fetch, 125) —
-            // enforcement par `CorsTransport` (étape 126).
-            fetch_mode: FetchMode::Cors,
+            // `fetch_mode`/`credentials` du script (JS-C77) —
+            // le protocole CORS (126) ne s'arme que `mode:cors`.
+            fetch_mode: mode,
             fetch_user: false,
             cors: None,
             // `Referer` du script est posé par
@@ -1143,7 +1208,7 @@ impl Session {
             referrer_policy: policy,
             download_hint: None,
         };
-        if cross {
+        if cross && mode == FetchMode::Cors {
             // Enforcement CORS (étape 126) : les en-têtes
             // auteur non safelistés (ou `Content-Type` hors
             // types « form ») déclenchent le preflight
@@ -1165,9 +1230,9 @@ impl Session {
             unsafe_headers.dedup();
             req.cors = Some(explorer_net::http::CorsRequest {
                 origin: origin_header_value(page),
-                // `credentials` non câblé au JS — défaut spec
-                // `same-origin` (piste JS : `fetch({credentials})`).
-                credentials: explorer_net::http::FetchCredentials::SameOrigin,
+                // `credentials` du script (JS-C77 — `omit`/
+                // `same-origin`/`include` honorés).
+                credentials: creds,
                 unsafe_headers,
             });
         }
@@ -1182,22 +1247,18 @@ impl Session {
                 .push(("origin".to_string(), origin_header_value(page)));
         }
         req.headers.extend(
-            headers
+            author_headers
                 .iter()
                 .filter(|(n, _)| !forbidden_request_header(n))
                 .cloned(),
         );
-        // `credentials:include` (champ posé, non câblé JS) —
-        // le jar filtre `SameSite` : seuls les cookies
-        // `None;Secure` partent en cross-site (126).
-        let include = matches!(
-            req.cors.as_ref().map(|c| c.credentials),
-            Some(explorer_net::http::FetchCredentials::Include)
-        );
-        let omit = matches!(
-            req.cors.as_ref().map(|c| c.credentials),
-            Some(explorer_net::http::FetchCredentials::Omit)
-        );
+        // `credentials` du script (JS-C77) : `omit` ne pose ni
+        // ne capture jamais de cookies ; `include` envoie sous
+        // réserve `SameSite` — y compris sur `no-cors` cross
+        // (`sendBeacon`, réponse opaque : l'agent traite le
+        // `Set-Cookie`, le script ne lit rien).
+        let include = creds == explorer_net::http::FetchCredentials::Include;
+        let omit = creds == explorer_net::http::FetchCredentials::Omit;
         if !omit && (!cross || include) {
             let c = self.cookies.header_for_ctx(&req, true);
             if !c.is_empty() {

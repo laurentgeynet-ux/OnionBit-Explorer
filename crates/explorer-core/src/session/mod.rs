@@ -65,6 +65,8 @@ mod js_glue;
 #[allow(clippy::wildcard_imports)]
 mod media;
 #[allow(clippy::wildcard_imports)]
+mod mem;
+#[allow(clippy::wildcard_imports)]
 mod nav_types;
 #[allow(clippy::wildcard_imports)]
 mod navigate;
@@ -106,6 +108,7 @@ pub use media::{
     media_codecs_from_json, media_event_json, media_host_state_str, media_offer_json,
     media_report_from_json,
 };
+pub use mem::MemReport;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use nav_types::*;
 #[allow(clippy::wildcard_imports)]
@@ -274,6 +277,12 @@ pub(crate) struct Tab {
     /// réseau (le composite re-matche par URL, étape 129).
     /// Vidés à chaque navigation, restaurés via le bfcache.
     frames: Vec<SubFrame>,
+    /// Liaison `SubFrame` ↔ realm JS (étape 134) — un
+    /// contexte par `<iframe>` rattaché à un sous-document
+    /// fetché. Vit dans le moteur (`entry.js` gèle avec les
+    /// contextes dedans) ; la table sert au routage des
+    /// `NetRequest` tagués et aux événements adressés.
+    frame_ctxs: Vec<FrameCtx>,
     /// `NodeId` des boîtes `<iframe>` dont le bitmap
     /// composite vit dans `images.replaced` (étape 129) —
     /// purgé puis rempli à chaque composite : les entrées
@@ -314,6 +323,14 @@ pub(crate) struct Tab {
     /// devient idempotent.
     img_decoded: HashMap<String, Arc<DecodedImage>>,
     bg_decoded: HashMap<String, Option<Arc<DecodedImage>>>,
+    /// Corps **compressés** des images de la page retenus
+    /// (étape 133 — clé = URL résolue ; `<img>`/`poster`,
+    /// fonds `url()` et masques partagent le magasin) :
+    /// source du re-décodage au retour bfcache — les bitmaps
+    /// `DecodedImage` gelés sont libérés au `freeze`, les
+    /// corps permettent la restauration **sans réseau**.
+    /// Borné `MAX_IMG_BODY_STORE`, vidé à la navigation.
+    img_bodies: HashMap<String, Vec<u8>>,
     /// Table d'identité `miroir → NodeId` (ADR-0025, étape
     /// 111) — montée à chaque baseline cléée (`DomSyncKeyed`),
     /// voyage avec la payload (`take_paint`/`put_paint`).
@@ -399,6 +416,9 @@ pub(crate) struct Tab {
     /// JS (53f) — livrées au moteur à sa réinsertion, leurs
     /// callbacks tournent à la pompe suivante.
     js_pending_net: Vec<NetResponse>,
+    /// Réponses `crypto.subtle` tamponnées pendant le détachement
+    /// — même règle que `js_pending_net` (JS-C79).
+    js_pending_crypto: Vec<explorer_js::CryptoResponse>,
     /// Pushes d'attributs session→miroir survenus pendant le
     /// détachement JS (53f — `value`/`checked` des champs
     /// édités pendant le burst) : rejoués puis re-sérialisés
@@ -492,6 +512,22 @@ pub(crate) struct PageSnapshot {
     /// 128) — la restauration rétablit les DOM enfants sans
     /// re-fetch.
     frames: Vec<SubFrame>,
+    /// Liaisons `SubFrame` ↔ contexte JS gelées avec le
+    /// moteur (étape 134) — les contextes vivent dans `js` ;
+    /// la table revient telle quelle pour le routage.
+    frame_ctxs: Vec<FrameCtx>,
+    /// Corps compressés des images de la page gelée (étape
+    /// 133) — les bitmaps `DecodedImage` sont libérés au
+    /// freeze (`images` vidée, `list` lâchée : les deux
+    /// portaient les `Arc`), les corps retenus permettent
+    /// le re-décodage au retour sans réseau.
+    img_bodies: HashMap<String, Vec<u8>>,
+    /// Alias fonds/masques gelés avec les corps — la
+    /// restauration re-résout `url(...)` → corps → bitmap
+    /// sans repasser par la cascade (`StyleMap` absente).
+    bg_aliases: HashMap<String, String>,
+    /// Alias `mask-image` gelés (même rôle).
+    mask_aliases: HashMap<String, String>,
     /// Clés `NodeId` des bitmaps de sous-contexte gelés
     /// avec `images` (étape 129) — la purge composite les
     /// retrouve après restauration.
@@ -584,6 +620,12 @@ pub struct Session {
     /// ré-entrant dans le pipeline).
     net_tx: Sender<NetDone>,
     net_rx: Receiver<NetDone>,
+    /// Canal des résultats `crypto.subtle` (JS-C79) — les
+    /// tâches `spawn_blocking` de `drain_script_net` y livrent
+    /// leur `CryptoDone` (même discipline `pump_net` : intentions
+    /// drainées, jamais de callback ré-entrant).
+    crypto_tx: Sender<CryptoDone>,
+    crypto_rx: Receiver<CryptoDone>,
     /// Fetches script-initiés en vol, `(tab, handle)` →
     /// tâche tokio — `Abort` moteur ou fermeture d'onglet
     /// tuent la jointure.
@@ -677,6 +719,7 @@ impl Session {
     ) -> Self {
         let (events, _) = broadcast::channel(cfg.event_capacity.max(1));
         let (net_tx, net_rx) = channel();
+        let (crypto_tx, crypto_rx) = channel();
         // `Accept-Language` au-dessus de toute la pile (étape
         // 118) : la cellule démarre vide — l'hôte la pose via
         // `set_accept_language` (réglages app → API) et elle
@@ -732,6 +775,8 @@ impl Session {
             local_storage: HashMap::new(),
             net_tx,
             net_rx,
+            crypto_tx,
+            crypto_rx,
             net_tasks: HashMap::new(),
             max_script_net: cfg.max_script_net,
             max_timer_jobs: cfg.max_timer_jobs,
@@ -956,6 +1001,7 @@ impl Session {
                 images: PaintImages::default(),
                 linked_sheets: Vec::new(),
                 frames: Vec::new(),
+                frame_ctxs: Vec::new(),
                 frame_nodes: Vec::new(),
                 frame_bitmaps: composite::SubFrameBitmaps::new(),
                 bg_aliases: HashMap::new(),
@@ -963,6 +1009,7 @@ impl Session {
                 mask_aliases: HashMap::new(),
                 img_decoded: HashMap::new(),
                 bg_decoded: HashMap::new(),
+                img_bodies: HashMap::new(),
                 dom_keymap: HashMap::new(),
                 prev_styles: HashMap::new(),
                 transitions: Vec::new(),
@@ -977,6 +1024,7 @@ impl Session {
                 paint_detached: false,
                 deferred_inputs: VecDeque::new(),
                 js_pending_net: Vec::new(),
+                js_pending_crypto: Vec::new(),
                 js_pending_attrs: Vec::new(),
                 sync_floor: None,
                 media: Vec::new(),

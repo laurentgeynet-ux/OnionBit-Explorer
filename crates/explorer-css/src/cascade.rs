@@ -191,6 +191,13 @@ struct CollectedRule {
     /// Ordre source global — départage à spécificité égale.
     order: u32,
     origin: Origin,
+    /// Chemin de rangs `@layer` (CSS Cascade 5 §6.4 — R-91) :
+    /// un rang par niveau de couche imbriquée, attribué à la
+    /// première déclaration du nom (comparaison
+    /// lexicographique). Vide = hors-layer — qui bat TOUS les
+    /// layers en déclarations normales et leur cède en
+    /// `!important` (ordre renversé).
+    layer: Vec<u32>,
     /// Queries `@media` englobantes — groupe de listes où
     /// CHAQUE groupe doit matcher (imbrication = AND, `,` =
     /// OR interne). Vide = inconditionnel. Évaluées à l'usage
@@ -406,6 +413,17 @@ pub struct StyleEngine {
     /// table quirks est figée après la feuille UA).
     quirks_index: SelectorIndex,
     next_order: u32,
+    /// Rangs des layers `@layer` : chemin de noms complet
+    /// (`a.b` sous `a` → `[a, b]`) → rang de première
+    /// déclaration, toutes feuilles confondues (R-91). Le rang
+    /// d'un niveau ne sert que contre les couches de même
+    /// parent — la comparaison est lexicographique sur le
+    /// chemin.
+    layers: HashMap<Vec<String>, u32>,
+    next_layer: u32,
+    /// Compteur des layers anonymes (`@layer {…}` sans nom) —
+    /// chacun est un slot unique, ordonné à sa position.
+    next_anon_layer: u32,
     /// `@font-face` avec leur contexte media (étape 46).
     pub(crate) font_faces: Vec<CollectedFontFace>,
     /// `@keyframes` par nom — offsets triés, multi-sélecteurs
@@ -606,7 +624,7 @@ impl StyleEngine {
         let mut e = Self::default();
         e.add_css(UA_CSS, Origin::UserAgent);
         let quirks_sheet = crate::parser::parse_stylesheet(QUIRKS_UA_CSS);
-        e.collect_rules_into(&quirks_sheet.rules, Origin::UserAgent, &[], true);
+        e.collect_rules_into(&quirks_sheet.rules, Origin::UserAgent, &[], &[], true);
         e.quirks_index = SelectorIndex::build(&e.quirks_rules);
         e
     }
@@ -626,25 +644,45 @@ impl StyleEngine {
     /// `media` = pile des listes englobantes (AND entre listes,
     /// OR entre les queries d'une même liste).
     fn collect_rules(&mut self, rules: &[Rule], origin: Origin, media: &[Vec<MediaQuery>]) {
-        self.collect_rules_into(rules, origin, media, false);
+        self.collect_rules_into(rules, origin, media, &[], false);
         // L'index reflète toujours la table complète — une
         // feuille ajoutée entre deux calculs doit être vue.
         self.index = SelectorIndex::build(&self.rules);
     }
 
+    /// Rang de la couche `path` (noms complets par niveau) :
+    /// **ordre de première déclaration** — un `@layer a {}`
+    /// postérieur à `@layer b {}` garde son rang initial même
+    /// si son bloc est lu plus tard (§6.4).
+    fn layer_slot(&mut self, path: &[String]) -> u32 {
+        if let Some(s) = self.layers.get(path) {
+            return *s;
+        }
+        let s = self.next_layer;
+        self.next_layer = self.next_layer.saturating_add(1);
+        self.layers.insert(path.to_vec(), s);
+        s
+    }
+
     /// Collecte vers `self.rules` — ou vers `quirks_rules` quand
     /// `quirks` est vrai (règles filtrées au document mode).
+    /// `layer` = chemin de noms des couches `@layer`
+    /// englobantes (R-91).
     fn collect_rules_into(
         &mut self,
         rules: &[Rule],
         origin: Origin,
         media: &[Vec<MediaQuery>],
+        layer: &[String],
         quirks: bool,
     ) {
         for rule in rules {
             match rule {
                 Rule::Qualified(q) => {
                     if let Some(selectors) = parse_selector_list(&q.prelude) {
+                        let layer_ranks: Vec<u32> = (1..=layer.len())
+                            .map(|i| self.layers[&layer[..i]])
+                            .collect();
                         let dest = if quirks {
                             &mut self.quirks_rules
                         } else {
@@ -655,6 +693,7 @@ impl StyleEngine {
                             declarations: q.declarations.clone(),
                             order: self.next_order,
                             origin,
+                            layer: layer_ranks,
                             media: media.to_vec(),
                         });
                         self.next_order = self.next_order.saturating_add(1);
@@ -666,7 +705,48 @@ impl StyleEngine {
                         // liste de queries du niveau.
                         let mut nested = media.to_vec();
                         nested.push(queries.clone());
-                        self.collect_rules_into(rules, origin, &nested, quirks);
+                        self.collect_rules_into(rules, origin, &nested, layer, quirks);
+                    } else if let AtKind::Layer { name, rules } = &at.kind {
+                        // `@layer nom {…}` : les règles entrent
+                        // dans la couche — l'ordre du layer est
+                        // celui de sa PREMIÈRE déclaration.
+                        let mut path = layer.to_vec();
+                        if let Some(n) = name {
+                            for seg in n.split('.') {
+                                let seg = seg.trim();
+                                if !seg.is_empty() {
+                                    path.push(seg.to_string());
+                                }
+                            }
+                        } else {
+                            // Anonyme : nom synthétique unique
+                            // (non référençable par une feuille
+                            // ultérieure — spec).
+                            path.push(format!("\u{0}a{}", self.next_anon_layer));
+                            self.next_anon_layer = self.next_anon_layer.saturating_add(1);
+                        }
+                        // Déclare chaque préfixe au passage.
+                        for i in 1..=path.len() {
+                            self.layer_slot(&path[..i]);
+                        }
+                        self.collect_rules_into(rules, origin, media, &path, quirks);
+                    } else if let AtKind::Statement { prelude } = &at.kind {
+                        // `@layer a, b;` : déclare l'ordre sans
+                        // règles (les corps s'y raccordent par
+                        // nom — premier arrivé fixe le rang).
+                        if at.name == "layer" {
+                            let mut path = layer.to_vec();
+                            for part in prelude.split(',') {
+                                for seg in part.split('.') {
+                                    let seg = seg.trim();
+                                    if !seg.is_empty() {
+                                        path.push(seg.to_string());
+                                        self.layer_slot(&path);
+                                    }
+                                }
+                                path.truncate(layer.len());
+                            }
+                        }
                     } else if let AtKind::Declarations { declarations, .. } = &at.kind {
                         if at.name.eq_ignore_ascii_case("font-face") {
                             self.font_faces.push(CollectedFontFace {
@@ -1021,13 +1101,35 @@ impl StyleEngine {
         if pseudo.is_none() {
             for d in &inline_decls {
                 let rank = if d.important { 4 } else { 1 };
-                cand.push((rank, (u32::MAX, u32::MAX, u32::MAX), u32::MAX, d));
+                // `style=` est hors-layer — la clé miroir gère
+                // le renversement `!important` (R-91).
+                cand.push((
+                    rank,
+                    layer_sort_key(&[], d.important),
+                    (u32::MAX, u32::MAX, u32::MAX),
+                    u32::MAX,
+                    d,
+                ));
             }
             // Le rang inline s'intercale dans l'ordre global.
-            cand.sort_by_key(|(rank, spec, order, _)| (*rank, *spec, *order));
+            cand.sort_by_key(|(rank, layer, spec, order, _)| (*rank, layer.clone(), *spec, *order));
         }
-        for (_, _, _, d) in &cand {
-            let lname = d.name.to_ascii_lowercase();
+        for (_, _, _, _, d) in &cand {
+            // Les noms de propriétés ordinaires sont
+            // ASCII-insensibles → minuscules canoniques ; les
+            // propriétés custom `--*` sont SENSIBLES À LA CASSE
+            // (css-variables-1 §2.1) — `--Foo` et `--foo` sont
+            // deux propriétés distinctes : les lecteurs
+            // (`get`, `var()`) adressent le nom tel qu'écrit,
+            // le stockage doit le conserver verbatim (R-92 —
+            // `--Spacer-size1012` de github s'effondrait en
+            // minuscules → `var(--Spacer-size1012)` raté →
+            // chaîne de fallbacks au littéral terminal).
+            let lname = if d.name.starts_with("--") {
+                d.name.clone()
+            } else {
+                d.name.to_ascii_lowercase()
+            };
             // Shorthand → longhands (spec : `margin: x` fixe les
             // quatre côtés, chacun à la spécificité de la règle).
             match expand_shorthand(&lname, &d.value) {
@@ -1263,7 +1365,7 @@ impl StyleEngine {
         state: &dyn Fn(&str) -> bool,
         mcache: &mut MatchCache,
         anc: &AncestorFilter,
-    ) -> Vec<(u8, Specificity, u32, &'a Declaration)> {
+    ) -> Vec<(u8, Vec<u32>, Specificity, u32, &'a Declaration)> {
         // Spécificité max des sélecteurs qui matchent, par
         // règle (`true` = table quirks — mêmes rang UA et
         // ordre source que la table principale).
@@ -1313,7 +1415,7 @@ impl StyleEngine {
             self.quirks_index
                 .candidates(dom, node, &mut |e| consider(true, e));
         }
-        let mut rules_cand: Vec<(u8, Specificity, u32, &Declaration)> = Vec::new();
+        let mut rules_cand: Vec<(u8, Vec<u32>, Specificity, u32, &Declaration)> = Vec::new();
         for ((quirks, ri), spec) in spec_by_rule {
             let rules = if quirks {
                 &self.quirks_rules
@@ -1330,11 +1432,46 @@ impl StyleEngine {
                     (Origin::Author, true) => 2,
                     (Origin::UserAgent, true) => 3,
                 };
-                rules_cand.push((rank, spec, rule.order, d));
+                rules_cand.push((
+                    rank,
+                    layer_sort_key(&rule.layer, d.important),
+                    spec,
+                    rule.order,
+                    d,
+                ));
             }
         }
-        rules_cand.sort_by_key(|(rank, spec, order, _)| (*rank, *spec, *order));
+        // Rang (origine/important) → layer (§6.4, inversion
+        // `!important` comprise) → spécificité → ordre source.
         rules_cand
+            .sort_by_key(|(rank, layer, spec, order, _)| (*rank, layer.clone(), *spec, *order));
+        rules_cand
+    }
+}
+
+/// Clé de tri `@layer` d'une déclaration (CSS Cascade 5 §6.4,
+/// R-91) — insérée entre le rang d'origine et la spécificité :
+/// une couche bat TOUTE spécificité hors de son rang.
+///
+/// - Normal : hors-layer (`u32::MAX`) bat tous les layers ;
+///   entre layers, dernier déclaré gagne (rangs croissants,
+///   lexicographique sur le chemin de sous-couches).
+/// - `!important` : l'ordre se renverse — le PREMIER layer
+///   déclaré gagne, hors-layer devient le plus faible (`0`).
+///   Chaque segment est complémenté (`MAX - rang`) et une
+///   borne `MAX` terminale fait passer les règles propres
+///   d'une couche APRES ses sous-couches (miroir du tri
+///   normal où un préfixe plus court trie avant).
+fn layer_sort_key(layer: &[u32], important: bool) -> Vec<u32> {
+    if layer.is_empty() {
+        return if important { vec![0] } else { vec![u32::MAX] };
+    }
+    if important {
+        let mut key: Vec<u32> = layer.iter().map(|s| u32::MAX - *s).collect();
+        key.push(u32::MAX);
+        key
+    } else {
+        layer.to_vec()
     }
 }
 

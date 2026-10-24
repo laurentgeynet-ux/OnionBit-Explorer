@@ -27,6 +27,10 @@ h2.workspace = true
 http.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
+# Provider crypto de `crypto.subtle` (JS-C79) — même `ring`
+# que rustls (exception ADR-0002 déjà consignée), aucune
+# nouvelle dépendance externe n'entre dans le lockfile.
+ring.workspace = true
 
 [dev-dependencies]
 # Certificats de test TLS auto-signés (étape 5) — pur Rust,

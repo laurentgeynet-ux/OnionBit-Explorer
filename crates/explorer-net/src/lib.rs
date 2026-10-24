@@ -14,6 +14,7 @@
 
 pub mod cache;
 pub mod cookies;
+pub mod crypto;
 pub mod csp;
 pub mod decode;
 pub mod error;

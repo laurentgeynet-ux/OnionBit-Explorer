@@ -48,6 +48,7 @@ fn main() -> ExitCode {
         [_, cmd, url, out, size] if cmd == "shot" => shot(url, out, Some(size)),
         [_, cmd, url] if cmd == "jprobe" => jprobe(url),
         [_, cmd, url] if cmd == "dom" => dom_live(url),
+        [_, cmd, url] if cmd == "mem" => mem_report(url),
         _ => {
             eprintln!("usage : explorer-cli dump <fichier|url>");
             eprintln!("        explorer-cli fetch <url>");
@@ -55,6 +56,7 @@ fn main() -> ExitCode {
             eprintln!("        explorer-cli shot <url> <sortie.png> [LxH]");
             eprintln!("        explorer-cli jprobe <url>");
             eprintln!("        explorer-cli dom <url>");
+            eprintln!("        explorer-cli mem <url>");
             ExitCode::FAILURE
         }
     }
@@ -86,8 +88,11 @@ fn default_fonts_dir() -> std::path::PathBuf {
 }
 
 /// Session de vol CLI — `SessionConfig` par défaut surchargée
-/// de `EXPLORER_JS_MEM_MIB` (étape 123 : borne heap JS en Mio,
-/// `0` = illimité — outillage diagnostic, tracée à l'usage).
+/// de `EXPLORER_JS_MEM_MIB` (étape 123 : borne heap JS en Mio),
+/// `EXPLORER_JS_OPS` (étape 124 : budget d'ops par éval —
+/// `0` = illimité explicite) et `EXPLORER_VIEWPORT` (étape 129 :
+/// `WxH`, ex. `1366x900` — viewport initial) ; outillage
+/// diagnostic, tracé à l'usage.
 fn session_from_env(fonts: explorer_render::DirFontSource) -> explorer_core::Session {
     let mut cfg = explorer_core::SessionConfig::default();
     if let Some(mib) = std::env::var("EXPLORER_JS_MEM_MIB")
@@ -97,7 +102,34 @@ fn session_from_env(fonts: explorer_render::DirFontSource) -> explorer_core::Ses
         eprintln!("[EXPLORER_JS_MEM_MIB={mib} — borne heap JS par contexte]");
         cfg.js_mem_limit_mib = mib;
     }
+    if let Some(ops) = std::env::var("EXPLORER_JS_OPS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        eprintln!("[EXPLORER_JS_OPS={ops} — budget d'ops JS par évaluation]");
+        cfg.js_ops = if ops == 0 { u64::MAX } else { ops };
+    }
+    if let Some((w, h)) = std::env::var("EXPLORER_VIEWPORT")
+        .ok()
+        .and_then(|v| parse_viewport(&v))
+    {
+        eprintln!("[EXPLORER_VIEWPORT={w}x{h} — viewport initial]");
+        cfg.viewport = (w, h);
+    }
     explorer_core::Session::with_config(client_stack(), std::sync::Arc::new(fonts), cfg)
+}
+
+/// Parse `WxH` (`1366x900`) → `(w, h)` — vide/invalide → `None`
+/// (réglage d'env : on dégrade au défaut, jamais de panne).
+fn parse_viewport(v: &str) -> Option<(f32, f32)> {
+    let mut it = v.split('x');
+    match (it.next(), it.next()) {
+        (Some(w), Some(h)) => match (w.parse::<f32>(), h.parse::<f32>()) {
+            (Ok(w), Ok(h)) if w > 0.0 && h > 0.0 => Some((w, h)),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// `shot <url> <sortie.png>` : navigation réelle complète
@@ -217,6 +249,74 @@ async fn dom_live(url: &str) -> ExitCode {
         eprintln!("pas de DOM (détaché ?)");
         ExitCode::FAILURE
     }
+}
+
+/// `mem <url>` : attribution mémoire par réservoir après
+/// navigation + grâce (étape 130) — la page vivante ET les
+/// pages gelées bfcache (heaps JS gelés = premier réservoir
+/// suspecté du constat « station ~1,4 Gio »).
+/// Mio en décimale tronquée (`"12.3"`) — arithmétique
+/// entière, aucune conversion `usize`→`f64` (clippy).
+fn mib(b: usize) -> String {
+    let k = b / 1024;
+    format!("{}.{}", k / 1024, (k % 1024) * 10 / 1024)
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn mem_report(url: &str) -> ExitCode {
+    let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
+    let mut session = session_from_env(fonts);
+    session.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = session.open_tab();
+    if let Err(e) = session.navigate(tab, url).await {
+        eprintln!("erreur : {e}");
+        return ExitCode::FAILURE;
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1_500);
+    while std::time::Instant::now() < deadline {
+        session.pump_net().await;
+        session.pump_timers(tab);
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    eprintln!("[url : {}]", session.tab_url(tab).unwrap_or_default());
+    let Some(r) = session.mem_report(tab) else {
+        eprintln!("onglet introuvable");
+        return ExitCode::FAILURE;
+    };
+    println!("page vivante :");
+    println!("  dom        : {} nœuds", r.dom_nodes);
+    println!("  layout     : {} boîtes", r.layout_boxes);
+    println!("  display    : {} items", r.display_items);
+    println!("  frame      : {} Mio", mib(r.frame_bytes));
+    println!("  png        : {} Mio", mib(r.png_bytes));
+    println!("  images     : {} Mio (dédup vivant)", mib(r.images_bytes));
+    println!("  bg_bodies  : {} Mio", mib(r.bg_bodies_bytes));
+    println!(
+        "  img_bodies : {} Mio (compressé retenu)",
+        mib(r.img_bodies_bytes)
+    );
+    println!("  js heap    : {} Mio", mib(r.js_heap_bytes));
+    println!("bfcache ({} pages gelées) :", r.bfcache_pages);
+    println!(
+        "  dom        : {} nœuds · layout {} · display {}",
+        r.bfcache_dom_nodes, r.bfcache_layout_boxes, r.bfcache_display_items
+    );
+    println!(
+        "  frame+png  : {} Mio",
+        mib(r.bfcache_frame_bytes + r.bfcache_png_bytes)
+    );
+    println!(
+        "  images     : {} Mio (résiduel — attendu 0 post-étape 133)",
+        mib(r.bfcache_images_bytes)
+    );
+    println!(
+        "  img_bodies : {} Mio (compressé retenu)",
+        mib(r.bfcache_img_bodies_bytes)
+    );
+    println!("  js heap    : {} Mio", mib(r.bfcache_js_heap_bytes));
+    println!("total octets attribués : {} Mio", mib(r.total_bytes));
+    println!("(non mesuré : caches fontes, prev_styles, miroir DOM jscore, registres idb/caches)");
+    ExitCode::SUCCESS
 }
 
 #[tokio::main(flavor = "current_thread")]

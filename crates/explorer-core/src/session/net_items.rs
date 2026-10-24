@@ -1195,6 +1195,10 @@ pub(crate) struct NetDone {
     /// est conditionnée à `Access-Control-Allow-Origin`
     /// (enforcement `CorsTransport`, étape 126).
     pub(crate) cross: bool,
+    /// `mode:` de la requête (JS-C77) — `NoCors` cross se
+    /// livre opaque sans `ACAO` ; `Cors` exige
+    /// `cors_readable`.
+    pub(crate) mode: explorer_net::http::FetchMode,
     /// `credentials:` de la requête — `Set-Cookie` capturé
     /// same-origin (sauf `omit`) ou `include` (étape 126).
     pub(crate) credentials: explorer_net::http::FetchCredentials,
@@ -1207,6 +1211,19 @@ pub(crate) struct NetDone {
     pub(crate) partition: Option<String>,
     /// Sortie brute du transport.
     pub(crate) out: NetResult<Response>,
+}
+
+/// Complétion d'une opération `crypto.subtle` (JS-C79) —
+/// produite par une tâche `spawn_blocking` (le calcul vit dans
+/// `explorer_net::crypto`, jamais dans le moteur), consommée
+/// par [`Session::pump_net`] → `deliver_crypto_response`.
+pub(crate) struct CryptoDone {
+    /// Onglet émetteur.
+    pub(crate) tab: TabId,
+    /// Corrélation côté moteur (`CryptoResponse::handle`).
+    pub(crate) handle: u64,
+    /// `Ok(octets)` ou `Err(message)` → `OperationError`.
+    pub(crate) result: Result<Vec<u8>, String>,
 }
 
 /// Verbe d'un `NetRequest` → `Method` — un verbe hors
@@ -1410,6 +1427,10 @@ pub(crate) fn store_frame(page: &Url, cookies: &CookieJar, u: &Url, resp: &Respo
         srcdoc: None,
         dom,
         title,
+        // Source gardée : le miroir JS de l'enfant est
+        // re-parsé depuis elle au câblage du contexte
+        // (étape 134) — pas de re-fetch pour le realm.
+        html: text,
     }
 }
 
@@ -1431,6 +1452,7 @@ pub(crate) fn store_srcdoc_frame(page: &Url, html: &str) -> SubFrame {
         srcdoc: Some(html.to_string()),
         dom,
         title,
+        html: html.to_string(),
     }
 }
 
@@ -1451,7 +1473,6 @@ pub(crate) fn subresp_security_allows(
     explorer_net::policy::nosniff_allows(dest, resp)
         && explorer_net::policy::corp_allows(page, url, resp)
 }
-
 /// Profondeur max d'une chaîne `@import` (étape 96) —
 /// complément de la dédup par URL : borne la descente sur
 /// graphes dégénérés longs-sans-cycle.

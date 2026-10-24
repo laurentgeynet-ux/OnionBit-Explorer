@@ -2383,6 +2383,79 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   atomique`, `inline_niche_recupere_ses_propres_
   fragments`, `inline_grid_et_inline_table_sont_
   atomiques`.
+- [x] **R-91. `@layer` + `%` des positionnés** (journal
+  piste PIPE — hero github : texte coupé ~800 px, colonne
+  droite hors viewport au shot 1216 px). Deux défauts
+  chaînés mesurés par bissection sur le fragment réel
+  (`gh_mini.html` — `.lp-IntroHero` rendait 1312 px dans
+  un bloc conteneur de 1200/1216). **(a) `@layer` absent** :
+  GitHub enveloppe **tout son reset Primer** dans
+  `@layer primer-css-base{…}` — at-rule inconnu →
+  `skip_block` avalait le bloc entier : `*{box-sizing:
+  border-box}`, `body{margin:0}`, resets de formulaires…
+  tous perdus. `AtKind::Layer` (prélude `nom`/`a.b`/
+  anonyme, règles imbriquées sous la borne `MAX_NESTING`) ;
+  `StyleEngine` tient une table chemin→rang à l'**ordre de
+  première déclaration** (`@layer a, b;` déclare sans
+  corps, `a.b` ≡ sous-couche, chaque préfixe déclaré au
+  passage) et la clé `(rank, layer, spec, order)` s'insère
+  entre origine et spécificité — hors-layer bat tous les
+  layers en normal, `!important` renverse (premier layer
+  gagnant, hors-layer dernier ; segments complémentés +
+  borne `MAX` pour que les règles propres d'une couche
+  restent après ses sous-couches). `revert-layer` garde
+  son repli documenté. **(b) `%` re-résolu sur les
+  positionnés** : `abs_geometry` calculait la border box
+  (`width:%` + châssis = 1264) puis la repassait à
+  `layout_block` comme `cb_w` — la résolution interne de
+  `width` s'y re-appliquait (1264 → 1312, content-box).
+  La base passée est désormais `target.width` quand
+  `width` est non-`auto` (px idempotent, % → vrai CB ;
+  bases de `min|max-width` et marges `auto` corrigées au
+  passage — un absolu `width:600px;margin:0 auto` se
+  centre désormais dans son CB). Vérifié terrain :
+  `layout gh_probe.html` → `.lp-IntroHero` 1216, hero
+  1168, grid 1120, CTA « Download GitHub Copilot app »
+  x=777→1065 **dans la frame** ; `body{margin:0}` et
+  `*{box-sizing:border-box}` appliqués (div sonde 1152).
+  Régressions : `regle_en_layer_sapplique`,
+  `hors_layer_bat_tous_les_layers`,
+  `ordre_des_layers_prime_sur_specificite`,
+  `ordre_des_layers_declare_par_statement`,
+  `important_inverse_ordre_des_layers`,
+  `layer_anonyme_et_imbrication`, `layer_sous_media`,
+  `absolu_largeur_pourcent_content_box`,
+  `absolu_largeur_pourcent_border_box`.
+- [x] **R-92. Noms `--*` sensibles à la casse** (vol
+  d'étalonnage corpus → F3, bissection du hero github).
+  css-variables-1 §2.1 : les propriétés custom sont des
+  identifiants **sensibles à la casse** — `--Foo` et `--foo`
+  sont deux propriétés distinctes (les propriétés ordinaires,
+  elles, sont ASCII-insensibles). La cascade normalisait tous
+  les noms en minuscules à la déclaration : une `--*` à casse
+  mixte était stockée minuscule et jamais retrouvée par un
+  `var(--CasseExacte)` — tout `var()` à fallbacks chaînés
+  s'effondrait au littéral terminal. Mesuré terrain : github
+  `.lp-Spacer` lit `var(--Spacer-size1280, var(--Spacer-
+  size1012, var(--Spacer-size768, var(--Spacer-size544,
+  var(--Spacer-size, 156px)))))` avec les `--Spacer-size*`
+  posées en `style=` (casse mixte + digits) — le spacer
+  `.lp-IntroVisuals` s'écrasait à **156 px** au lieu de 660
+  (≥1012 px) / 600 (≥768 px), le `.lp-Intro` sombre perdait
+  ~500 px de hauteur (491 au lieu de ~755/839) et les sections
+  en flux remontaient *sous* le contenu du hero `fixed` →
+  superposition onglets/paragraphe du vol. Un seul site fautif
+  (normalisation des noms en cascade) ; lecteurs (`get`,
+  `var()`) déjà spec-corrects (adressage verbatim). Vérifié
+  terrain : `layout gh_probe.html` → `.lp-IntroVisuals-spacer`
+  156 → **600** (≥768 px), `.lp-Intro` 755 (=114+20+600+21).
+  Régressions : `var_nom_custom_sensible_a_la_casse`,
+  `var_custom_casse_mixte_dans_style_inline`,
+  `var_custom_casse_mixte_heritage_et_lecture`. Effet de bord
+  attendu et voulu : toute `--*` à casse mixte du web réel
+  (design tokens `--Brand-*`, `--Font-*`…) fonctionne
+  désormais — les vars minuscules (`--base-size-*`) sont
+  inchangées.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

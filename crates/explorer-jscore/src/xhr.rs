@@ -30,6 +30,34 @@ use crate::Engine;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// `Request.mode` d'une émission script (JS-C77 — couture net
+/// `Request.fetch_mode`, étape 125) : `navigate`/`websocket` ne sont
+/// jamais émis — la validation `fetch()` les rejette en `TypeError`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchMode {
+    /// `cors` — protocole CORS cross-origin (défaut `fetch`/`XHR`).
+    Cors,
+    /// `no-cors` — requête cross bornée (verbe/en-têtes safelistés,
+    /// réponse opaque) ; `sendBeacon` l'utilise toujours.
+    NoCors,
+    /// `same-origin` — la requête échoue si la cible est cross-origin
+    /// (rejet `TypeError` avant émission, spec Fetch).
+    SameOrigin,
+}
+
+/// `Request.credentials` d'une émission script (JS-C77 — couture
+/// `CorsRequest.credentials`, étape 126) : gouverne `Cookie`/`Set-
+/// Cookie` côté transport — `same-origin` est le défaut spec.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchCredentials {
+    /// `omit` — jamais de cookies en émission ni en capture.
+    Omit,
+    /// `same-origin` — cookies seulement sur les requêtes same-origin.
+    SameOrigin,
+    /// `include` — cookies sous réserve des politiques `SameSite`.
+    Include,
+}
+
 /// What the script asked for — handed to the embedder's transport.
 #[derive(Debug, Clone)]
 pub struct XhrRequest {
@@ -42,6 +70,18 @@ pub struct XhrRequest {
     pub headers: Vec<(String, String)>,
     /// `send(body)` payload, if any.
     pub body: Option<String>,
+    /// `Request.mode` de l'appel (JS-C77) — `Cors` pour `XHR`,
+    /// `NoCors` pour `sendBeacon`, `init.mode` pour `fetch`.
+    pub mode: FetchMode,
+    /// `Request.credentials` de l'appel (JS-C77) — `xhr.withCredentials`
+    /// → `Include` ; `sendBeacon` → `Include` (spec).
+    pub credentials: FetchCredentials,
+    /// Contexte émetteur (JS-C78/étape 134) — `0` = document
+    /// top-level, sinon le browsing context de l'`<iframe>`
+    /// dont le script a tiré. La session s'en sert pour
+    /// résoudre la base URL et l'initiateur **du cadre**
+    /// (jamais celui du parent).
+    pub ctx: crate::context::CtxId,
 }
 
 /// What the embedder got back — handed to `deliver_xhr_response`.
@@ -77,8 +117,10 @@ pub(crate) struct XhrEngineState {
     /// In-flight requests: `(handle, wrapper ObjId, shared data)`.
     pub live: Vec<(u64, crate::value::ObjId, Rc<RefCell<XhrData>>)>,
     /// In-flight `fetch` calls: `(handle, promise ObjId, request
-    /// url)` — l'URL est re-servie en `response.url` (JS-C66).
-    pub fetches: Vec<(u64, crate::value::ObjId, String)>,
+    /// url, response.type)` — l'URL est re-servie en `response.url`
+    /// (JS-C66) ; `type` = `basic`/`cors`/`opaque` décidé à
+    /// l'émission depuis `mode` + origine (JS-C77).
+    pub fetches: Vec<(u64, crate::value::ObjId, String, &'static str)>,
     /// `Headers.prototype`/`Request.prototype`/`Response.prototype`
     /// — posés par `install_fetch` (JS-C66), semés en racines GC
     /// dans `Engine::collect`.
@@ -105,6 +147,9 @@ pub(crate) struct XhrData {
     url: String,
     request_headers: Vec<(String, String)>,
     handle: Option<u64>,
+    /// `xhr.withCredentials` (JS-C77) — `send` émet
+    /// `credentials: Include` quand posé (`SameOrigin` sinon).
+    with_credentials: bool,
     /// `addEventListener` handlers: `(type, fn, capture)`.
     listeners: Vec<(String, Value, bool)>,
 }
@@ -145,19 +190,65 @@ impl Engine {
     /// # Errors
     /// Propagates the first uncaught exception from a handler.
     pub fn deliver_xhr_response(&mut self, resp: XhrResponse) -> JsResult<()> {
+        // JS-C78 : le handle appartient au contexte qui a émis
+        // la requête — son état `xhr` vit dans `parked` s'il est
+        // garé. On localise le propriétaire, on switch, on livre,
+        // on restaure (spec « job callback realm »).
+        let owner = if self.xhr.fetches.iter().any(|(h, ..)| *h == resp.handle)
+            || self.xhr.live.iter().any(|(h, ..)| *h == resp.handle)
+        {
+            Some(self.cur_ctx)
+        } else {
+            self.parked
+                .iter()
+                .find(|(_, c)| {
+                    c.xhr.fetches.iter().any(|(h, ..)| *h == resp.handle)
+                        || c.xhr.live.iter().any(|(h, ..)| *h == resp.handle)
+                })
+                .map(|(k, _)| *k)
+        };
+        let Some(owner) = owner else {
+            return Ok(());
+        };
+        let home = self.cur_ctx;
+        self.switch_to(owner);
+        let r = self.deliver_xhr_response_ctx(resp);
+        if self.cur_ctx != home {
+            self.switch_to(home);
+        }
+        r
+    }
+
+    /// Livraison dans le contexte **courant** — corps de
+    /// [`Self::deliver_xhr_response`] après switch (JS-C78).
+    fn deliver_xhr_response_ctx(&mut self, resp: XhrResponse) -> JsResult<()> {
         // `fetch` handles resolve a promise instead of filling an XHR.
         if let Some(pos) = self
             .xhr
             .fetches
             .iter()
-            .position(|(h, _, _)| *h == resp.handle)
+            .position(|(h, _, _, _)| *h == resp.handle)
         {
-            let (_, pid, url) = self.xhr.fetches.remove(pos);
+            let (_, pid, url, ty) = self.xhr.fetches.remove(pos);
             if resp.status == 0 {
                 let msg = self.str_val("fetch: network error");
                 self.reject_promise(pid, msg);
+            } else if ty == "opaque" {
+                // `mode: no-cors` livré : la réponse est opaquée —
+                // `status: 0`, en-têtes et corps vides, `url: ""`
+                // (spec Fetch — la promesse résout tout de même).
+                let r = self.response_obj(RespSpec {
+                    status: 0,
+                    status_text: String::new(),
+                    headers: Vec::new(),
+                    body: String::new(),
+                    ty: "opaque",
+                    url: String::new(),
+                    redirected: false,
+                });
+                self.resolve_promise(pid, r);
             } else {
-                let r = self.make_fetch_response(resp, url);
+                let r = self.make_fetch_response(resp, url, ty);
                 self.resolve_promise(pid, r);
             }
             self.run_microtasks()?;
@@ -265,6 +356,7 @@ impl Host for XhrHost {
                     crate::dom_host::document_value(e, &domref)
                 }
             }
+            "withCredentials" => Value::Bool(d.with_credentials),
             "UNSENT" | "OPENED" | "HEADERS_RECEIVED" | "LOADING" | "DONE" => {
                 // Constants per spec (also exposed on the constructor
                 // — old scripts use `xhr.DONE` on the instance).
@@ -280,6 +372,26 @@ impl Host for XhrHost {
         }))
     }
 
+    fn set(&self, e: &mut Engine, _t: Value, key: &str, v: Value) -> JsResult<bool> {
+        if key != "withCredentials" {
+            return Ok(false);
+        }
+        let mut d = self.data.borrow_mut();
+        // Spec : `InvalidStateError` hors `unsent`/`opened`, ou si
+        // `send()` a déjà été invoqué (drapeau send = handle posé).
+        if d.ready_state > 1 || d.handle.is_some() {
+            drop(d);
+            let v = e.error_value(
+                e.protos.error,
+                "InvalidStateError",
+                "withCredentials: state is not unsent or opened, or send() flag is set",
+            );
+            return Err(crate::heap::Thrown(v));
+        }
+        d.with_credentials = e.to_boolean(v);
+        Ok(true)
+    }
+
     fn invoke(
         &self,
         e: &mut Engine,
@@ -292,12 +404,14 @@ impl Host for XhrHost {
                 let method = e.to_js_string(arg(args, 0))?;
                 let url = e.to_js_string(arg(args, 1))?;
                 let mut d = self.data.borrow_mut();
-                // `open` resets the request per spec.
+                // `open` resets the request per spec — `withCredentials`
+                // et les listeners survivent (props de l'objet).
                 *d = XhrData {
                     ready_state: 1,
                     method,
                     url,
                     listeners: std::mem::take(&mut d.listeners),
+                    with_credentials: d.with_credentials,
                     ..XhrData::default()
                 };
                 Ok(Some(Value::Undefined))
@@ -355,6 +469,16 @@ impl Host for XhrHost {
                         url: d.url.clone(),
                         headers: d.request_headers.clone(),
                         body,
+                        // XHR est toujours `mode: cors` (spec XHR —
+                        // pas de `no-cors` scriptable) ;
+                        // `withCredentials` → `credentials: include`.
+                        mode: FetchMode::Cors,
+                        credentials: if d.with_credentials {
+                            FetchCredentials::Include
+                        } else {
+                            FetchCredentials::SameOrigin
+                        },
+                        ctx: e.cur_ctx,
                     }
                 };
                 let handle = transport.send(&req);
@@ -512,12 +636,25 @@ impl Engine {
         // `ReadableStream`/`WritableStream`/`TransformStream`
         // (JS-C71) — `res.body`/`req.body` et les bundlers.
         crate::streams::install_streams(self);
+        // `indexedDB` + `caches` (JS-C72) — registres mémoire
+        // par défaut ; l'embedder réinjecte les siens via
+        // `install_idb`/`install_caches` (persistence inter-
+        // pages = sa responsabilité).
+        crate::idb::install_idb(self, None);
+        crate::idb::install_caches(self, None);
+        // `WebSocket` (JS-C73) — stub honnête : handshake
+        // refusé en async, arme les fallbacks long-polling.
+        crate::websocket::install_websocket(self);
+        // `Notification`/`BroadcastChannel`/`reportError`
+        // (JS-C74) — APIs fenêtre non-DOM ; `getSelection`
+        // ajouté par `install_dom` (nœuds requis).
+        crate::misc_apis::install_misc(self);
     }
 
     /// `ctor.prototype = proto` + `proto.constructor = ctor` —
     /// liaison `instanceof` (`OrdinaryHasInstance`) des classes
     /// fetch (JS-C66).
-    fn link_ctor(&mut self, ctor: Value, proto: Option<crate::value::ObjId>) {
+    pub(crate) fn link_ctor(&mut self, ctor: Value, proto: Option<crate::value::ObjId>) {
         let Some(pid) = proto else { return };
         if let Value::Obj(cid) = ctor {
             self.set_own(cid, "prototype", Value::Obj(pid), false);
@@ -527,13 +664,18 @@ impl Engine {
 
     /// `Response` livrée par le transport : même forme que
     /// `new Response` — `type: "basic"`, `url` = URL de la requête.
-    fn make_fetch_response(&mut self, resp: XhrResponse, url: String) -> Value {
+    pub(crate) fn make_fetch_response(
+        &mut self,
+        resp: XhrResponse,
+        url: String,
+        ty: &'static str,
+    ) -> Value {
         self.response_obj(RespSpec {
             status: resp.status,
             status_text: resp.status_text,
             headers: resp.headers,
             body: String::from_utf8_lossy(&resp.body).into_owned(),
-            ty: "basic",
+            ty,
             url,
             redirected: false,
         })
@@ -1087,10 +1229,57 @@ fn norm_method(e: &mut Engine, m: String) -> JsResult<String> {
     })
 }
 
+/// `new Request(url)` — helper `cache.keys()` (JS-C72) :
+/// délègue au ctor partagé (méthode GET, headers vides).
+pub(crate) fn request_of(e: &mut Engine, url: Value) -> JsResult<Value> {
+    request_ctor(e, Value::Undefined, &[url])
+}
+
+/// Tuple `(url, status, status_text, headers, body, type)`
+/// d'un snapshot `Response` pour `Cache.put` (JS-C72).
+pub(crate) type CacheSnapshot = (String, u16, String, Vec<(String, String)>, String, String);
+
+/// Snapshot d'une `Response` pour `Cache.put` (JS-C72) —
+/// `(url, status, status_text, headers, body, type)` copiés.
+/// `None` si l'argument n'est pas une `Response` exploitable
+/// (corps manquant → `None` honnête).
+pub(crate) fn cache_entry_snapshot(e: &mut Engine, res: Value) -> JsResult<Option<CacheSnapshot>> {
+    let Value::Obj(id) = res else { return Ok(None) };
+    let Some((_, body)) = fetch_body_of(e, res) else {
+        return Ok(None);
+    };
+    let url = e
+        .get_prop(id, "url")
+        .and_then(|v| e.heap_string_of(v))
+        .unwrap_or_default();
+    let status = e
+        .get_prop(id, "status")
+        .and_then(|v| e.to_number(v).ok())
+        .unwrap_or(0.0) as u16;
+    let status_text = e
+        .get_prop(id, "statusText")
+        .and_then(|v| e.heap_string_of(v))
+        .unwrap_or_default();
+    let ty = e
+        .get_prop(id, "type")
+        .and_then(|v| e.heap_string_of(v))
+        .unwrap_or_else(|| "basic".into());
+    let mut headers = match e.get_prop(id, "headers") {
+        Some(h) => headers_pairs(e, h)?,
+        None => Vec::new(),
+    };
+    if let Some(Value::Obj(hid)) = e.get_prop(id, "headers") {
+        for sc in set_cookie_list(e, hid) {
+            headers.push(("set-cookie".into(), sc));
+        }
+    }
+    Ok(Some((url, status, status_text, headers, body, ty)))
+}
+
 /// Résolution d'URL contre `hooks.page_url` (base document) —
 /// brut si la base est absente (contexte de test) ; `None` si le
 /// résultat est invalide.
-fn resolve_url(e: &Engine, raw: &str) -> Option<String> {
+pub(crate) fn resolve_url(e: &Engine, raw: &str) -> Option<String> {
     let base = e.hooks.page_url.clone();
     if base.is_empty() {
         return Some(raw.to_string());
@@ -1098,6 +1287,67 @@ fn resolve_url(e: &Engine, raw: &str) -> Option<String> {
     crate::builtins::url::url_parse_absolute(&base)
         .and_then(|b| crate::builtins::url::url_parse(raw, Some(&b)))
         .map(|p| crate::builtins::url::url_href(&p))
+}
+
+/// `init.mode`/`Request.mode` → [`FetchMode`] — `Err` = libellé
+/// `TypeError` (`navigate`/`websocket`/valeur inconnue, spec).
+fn fetch_mode_parse(s: &str) -> Result<FetchMode, String> {
+    match s {
+        "cors" => Ok(FetchMode::Cors),
+        "no-cors" => Ok(FetchMode::NoCors),
+        "same-origin" => Ok(FetchMode::SameOrigin),
+        other => Err(format!(
+            "'{other}' is not a supported mode for Request.mode"
+        )),
+    }
+}
+
+/// `init.credentials`/`Request.credentials` → [`FetchCredentials`]
+/// — `Err` = libellé `TypeError`.
+fn fetch_credentials_parse(s: &str) -> Result<FetchCredentials, String> {
+    match s {
+        "omit" => Ok(FetchCredentials::Omit),
+        "same-origin" => Ok(FetchCredentials::SameOrigin),
+        "include" => Ok(FetchCredentials::Include),
+        other => Err(format!(
+            "'{other}' is not a supported value for credentials"
+        )),
+    }
+}
+
+/// Origine page vs URL requête : `Some(true)` = cross-origin ;
+/// `None` = pas de page de contexte (outillage) → same-origin
+/// par convention (comportement hors-contexte inchangé).
+fn cross_origin(e: &Engine, req_url: &str) -> Option<bool> {
+    use crate::builtins::url::{url_origin, url_parse_absolute};
+    let base = e.hooks.page_url.as_str();
+    if base.is_empty() {
+        return None;
+    }
+    let req = resolve_url(e, req_url)?;
+    let p = url_parse_absolute(base)?;
+    let r = url_parse_absolute(&req)?;
+    Some(url_origin(&p) != url_origin(&r))
+}
+
+/// En-tête auteur CORS-safelisté (spec Fetch — doublon figé de
+/// `cors_safelisted_header` côté session : `explorer-jscore`
+/// est autonome, la liste tient en cinq noms + les valeurs
+/// « form » de `Content-Type`).
+fn cors_safelisted_author_header(n: &str, v: &str) -> bool {
+    match n.trim().to_ascii_lowercase().as_str() {
+        "accept" | "accept-language" | "content-language" | "range" => true,
+        "content-type" => matches!(
+            v.split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
+            "application/x-www-form-urlencoded" | "multipart/form-data" | "text/plain"
+        ),
+        _ => false,
+    }
 }
 
 /// `new Request(input, init?)` — `input` = chaîne URL ou `Request`
@@ -1112,6 +1362,10 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let url: String;
     let (mut method, mut headers, mut body) = ("GET".to_string(), Vec::new(), String::new());
     let mut input_signal = Value::Undefined;
+    // `mode`/`credentials` : hérités du `Request` input,
+    // surchargés par `init`, défauts spec (JS-C77).
+    let mut mode_s = "cors".to_string();
+    let mut cred_s = "same-origin".to_string();
     if is_request(e, input) {
         let Value::Obj(rid) = input else {
             return Err(e.type_error("Request: bad input"));
@@ -1124,6 +1378,15 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             .get_prop(rid, "url")
             .and_then(|v| e.heap_string_of(v))
             .unwrap_or_default();
+        if let Some(s) = e.get_prop(rid, "mode").and_then(|v| e.heap_string_of(v)) {
+            mode_s = s;
+        }
+        if let Some(s) = e
+            .get_prop(rid, "credentials")
+            .and_then(|v| e.heap_string_of(v))
+        {
+            cred_s = s;
+        }
         method = e
             .get_prop(rid, "method")
             .and_then(|v| e.heap_string_of(v))
@@ -1169,6 +1432,27 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
                 }
             }
         }
+        if let Some(m) = e.get_prop(oid, "mode") {
+            if !matches!(m, Value::Undefined | Value::Null) {
+                mode_s = e.to_js_string(m)?;
+            }
+        }
+        if let Some(c) = e.get_prop(oid, "credentials") {
+            if !matches!(c, Value::Undefined | Value::Null) {
+                cred_s = e.to_js_string(c)?;
+            }
+        }
+    }
+    // Validation `mode`/`credentials` + mode `no-cors` : verbe
+    // simple exigé et en-têtes réduits à la CORS-safelist (spec
+    // `Request` ctor — `TypeError` synchrone).
+    let mode_v = fetch_mode_parse(&mode_s).map_err(|msg| e.type_error(msg))?;
+    fetch_credentials_parse(&cred_s).map_err(|msg| e.type_error(msg))?;
+    if mode_v == FetchMode::NoCors {
+        if !matches!(method.as_str(), "GET" | "HEAD" | "POST") {
+            return Err(e.type_error("Request: mode 'no-cors' requires a simple method"));
+        }
+        headers.retain(|(n, v)| cors_safelisted_author_header(n, v));
     }
     if matches!(method.as_str(), "GET" | "HEAD") && !body.is_empty() {
         return Err(e.type_error("Request: GET/HEAD cannot have a body"));
@@ -1225,8 +1509,10 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         _ => None,
     }
     .is_some_and(|v| e.to_boolean(v));
-    let mode = get_str(e, "mode", "cors")?;
-    let credentials = get_str(e, "credentials", "same-origin")?;
+    // `mode`/`credentials` validés plus haut (`fetch_mode_parse`/
+    // `fetch_credentials_parse` — `TypeError` déjà levé sinon).
+    let mode = e.str_val(mode_s);
+    let credentials = e.str_val(cred_s);
     let cache = get_str(e, "cache", "default")?;
     let redirect = get_str(e, "redirect", "follow")?;
     let referrer = get_str(e, "referrer", "about:client")?;
@@ -1442,17 +1728,29 @@ fn body_init_text(e: &mut Engine, v: Value) -> JsResult<(String, Option<String>)
 
 // ---- fetch --------------------------------------------------------
 
+/// Rejet `TypeError` de la promesse `pid` (validation `fetch`/`Request`
+/// — la spec rejette en promesse, jamais de throw synchrone).
+fn reject_fetch(e: &mut Engine, pid: crate::value::ObjId, msg: &str) -> JsResult<Value> {
+    let err = e.error_value(e.protos.type_error, "TypeError", msg);
+    e.reject_promise(pid, err);
+    Ok(Value::Obj(pid))
+}
+
 /// `fetch(url | Request, opts?)` — `input` `Request` fournit
 /// url/method/headers/body par défaut, `opts` surcharge (spec
 /// `fetch` = `new Request(input, init)` puis transport).
-fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let input = arg(args, 0);
     let opts = arg(args, 1);
+    let pid = e.new_promise();
     let mut req = XhrRequest {
         method: "GET".into(),
         url: String::new(),
         headers: Vec::new(),
         body: None,
+        mode: FetchMode::Cors,
+        credentials: FetchCredentials::SameOrigin,
+        ctx: e.cur_ctx,
     };
     let mut signal = Value::Undefined;
     if is_request(e, input) {
@@ -1460,7 +1758,6 @@ fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             return Err(e.type_error("fetch: bad Request"));
         };
         if matches!(e.get_prop(rid, "bodyUsed"), Some(Value::Bool(true))) {
-            let pid = e.new_promise();
             let err = e.error_value(
                 e.protos.type_error,
                 "TypeError",
@@ -1491,6 +1788,24 @@ fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             }
         }
         signal = e.get_prop(rid, "signal").unwrap_or(Value::Undefined);
+        // `mode`/`credentials` hérités du `Request` (props posées
+        // par `request_ctor`, déjà validées — parse défensif si un
+        // script les a réécrites par `Object.defineProperty`).
+        if let Some(ms) = e.get_prop(rid, "mode").and_then(|v| e.heap_string_of(v)) {
+            match fetch_mode_parse(&ms) {
+                Ok(m) => req.mode = m,
+                Err(msg) => return reject_fetch(e, pid, &msg),
+            }
+        }
+        if let Some(cs) = e
+            .get_prop(rid, "credentials")
+            .and_then(|v| e.heap_string_of(v))
+        {
+            match fetch_credentials_parse(&cs) {
+                Ok(c) => req.credentials = c,
+                Err(msg) => return reject_fetch(e, pid, &msg),
+            }
+        }
     } else {
         req.url = match input {
             Value::Undefined => return Err(e.type_error("fetch: url required")),
@@ -1532,8 +1847,59 @@ fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         if let Some(s) = e.get_prop(oid, "signal") {
             signal = s;
         }
+        // `init.mode`/`init.credentials` surchargent le `Request`
+        // (spec `fetch` = `new Request(input, init)`).
+        if let Some(m) = e.get_prop(oid, "mode") {
+            if !matches!(m, Value::Undefined | Value::Null) {
+                let ms = e.to_js_string(m)?;
+                match fetch_mode_parse(&ms) {
+                    Ok(m) => req.mode = m,
+                    Err(msg) => return reject_fetch(e, pid, &msg),
+                }
+            }
+        }
+        if let Some(c) = e.get_prop(oid, "credentials") {
+            if !matches!(c, Value::Undefined | Value::Null) {
+                let cs = e.to_js_string(c)?;
+                match fetch_credentials_parse(&cs) {
+                    Ok(c) => req.credentials = c,
+                    Err(msg) => return reject_fetch(e, pid, &msg),
+                }
+            }
+        }
     }
-    let pid = e.new_promise();
+    // Mode `no-cors` : verbe simple exigé + en-têtes auteur
+    // réduits à la CORS-safelist (spec `Request` ctor).
+    if req.mode == FetchMode::NoCors {
+        if !matches!(req.method.as_str(), "GET" | "HEAD" | "POST") {
+            return reject_fetch(
+                e,
+                pid,
+                "Request constructor: mode 'no-cors' requires a simple method",
+            );
+        }
+        req.headers
+            .retain(|(n, v)| cors_safelisted_author_header(n, v));
+    }
+    // `same-origin` échoue sur cible cross-origin (spec Fetch —
+    // rejet avant émission, le transport n'est pas sollicité).
+    if req.mode == FetchMode::SameOrigin && cross_origin(e, &req.url) == Some(true) {
+        return reject_fetch(
+            e,
+            pid,
+            "Fetch API cannot load: request mode is 'same-origin' but the URL is cross-origin",
+        );
+    }
+    // Type de la `Response` à la livraison : `opaque` en no-cors,
+    // `cors` sur cross-origin `mode:cors`, `basic` sinon.
+    let res_ty: &'static str = match req.mode {
+        FetchMode::NoCors => "opaque",
+        FetchMode::Cors => match cross_origin(e, &req.url) {
+            Some(true) => "cors",
+            _ => "basic",
+        },
+        FetchMode::SameOrigin => "basic",
+    };
     // `{signal}` déjà aborted → rejet `AbortError` immédiat (l'abord
     // d'un transfert en vol n'est pas câblé — stub honnête).
     if let Some(d) = abort_data(e, signal) {
@@ -1559,7 +1925,7 @@ fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
                 },
                 body: (*data).clone(),
             };
-            let r = e.make_fetch_response(resp, req.url.clone());
+            let r = e.make_fetch_response(resp, req.url.clone(), "basic");
             e.resolve_promise(pid, r);
         } else {
             let msg = e.str_val("fetch: blob URL not registered");
@@ -1569,7 +1935,7 @@ fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     }
     if let Some(t) = &e.xhr.transport {
         let h = t.send(&req);
-        e.xhr.fetches.push((h, pid, req.url.clone()));
+        e.xhr.fetches.push((h, pid, req.url.clone(), res_ty));
     } else {
         // No connector — reject like a network failure.
         let msg = e.str_val("fetch: no transport");

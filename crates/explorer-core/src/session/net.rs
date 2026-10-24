@@ -14,7 +14,7 @@ use explorer_js::{NetRequest, NetResponse};
 use explorer_net::http::HttpTransport;
 use explorer_net::policy::is_mixed_content;
 use explorer_net::url::Url;
-use explorer_render::{decode_image, DecodedImage};
+use explorer_render::{data_url_bytes, decode_image, DecodedImage};
 
 impl Session {
     /// Le commit complet sous `&mut self` (hôtes synchrones :
@@ -119,6 +119,11 @@ impl Session {
             }
         }
         if let Some(eng) = eng.as_mut() {
+            // Étape 134 : un realm JS par `<iframe>` fetché —
+            // créé avant les scripts du parent pour qu'un
+            // `frames[n]`/`contentWindow` lu en cours de
+            // parse résolve un vrai contexte.
+            self.wire_frame_contexts(tab, eng.as_mut());
             // Issue #6 : les import maps arment la résolution des
             // bare specifiers — la spec les veut enregistrées avant
             // le premier module évalué (le prefetch, lui, a déjà
@@ -245,6 +250,10 @@ impl Session {
             let frag = frag.to_string();
             self.scroll_to_fragment(tab, &frag);
         }
+        // Étape 134 : `load` des sous-contextes d'abord (spec :
+        // le `load` de la page attend ses `<iframe>`), puis
+        // `load`/`onload` sur chaque élément porteur.
+        self.frame_ctx_load_events(tab);
         // `load` : tout est commis (sous-ressources, peinture,
         // historique) — dernier événement du cycle de vie.
         self.dispatch_doc_event(tab, "load");
@@ -279,57 +288,64 @@ impl Session {
                     url,
                     headers,
                     body,
+                    mode,
+                    credentials,
+                    ctx,
                 } => {
-                    let inflight = self.net_tasks.keys().filter(|(t, _)| *t == tab).count();
-                    let built = if inflight >= self.max_script_net {
-                        tracing::trace!(tab, handle, "quota requêtes script atteint");
-                        None
-                    } else {
-                        self.script_request(
+                    if self
+                        .spawn_script_fetch(
+                            tab,
                             &page,
                             &base,
+                            handle,
                             &method,
                             &url,
                             &headers,
                             body.as_deref(),
-                            self.tabs.get(&tab).and_then(|e| e.referrer_policy),
-                            self.tabs.get(&tab).map_or(&[][..], |e| e.csp.as_slice()),
-                        )
-                    };
-                    let Some((req, cross)) = built else {
-                        failed.push(handle);
-                        continue;
-                    };
-                    let tr = self.transport.clone();
-                    let tx = self.net_tx.clone();
-                    let page_origin = origin_header_value(&page);
-                    let req_url = req.url.clone();
-                    let credentials = req
-                        .cors
-                        .as_ref()
-                        .map_or(explorer_net::http::FetchCredentials::SameOrigin, |c| {
-                            c.credentials
-                        });
-                    let partition = explorer_net::cookies::request_partition(&req);
-                    let j = tokio::spawn(async move {
-                        let out = tr.fetch(&req).await;
-                        let _ = tx.send(NetDone {
-                            tab,
-                            handle,
-                            cross,
+                            mode,
                             credentials,
-                            page_origin,
-                            req_url,
-                            partition,
-                            out,
-                        });
-                    });
-                    self.net_tasks.insert((tab, handle), j);
+                            ctx,
+                        )
+                        .is_err()
+                    {
+                        failed.push(handle);
+                    }
                 }
                 NetRequest::Abort { handle } => {
                     if let Some(j) = self.net_tasks.remove(&(tab, handle)) {
                         j.abort();
                     }
+                }
+                // Opération `crypto.subtle` (JS-C79) — pas une
+                // requête réseau : le calcul tourne en
+                // `spawn_blocking` (CPU bornée par la taille
+                // des données, copiées hors heap à l'émission)
+                // et livre sur `crypto_tx`, drainé par
+                // `poll_net` comme les `NetDone`. La promesse
+                // reste non-réentrante : jamais de livraison
+                // synchrone dans le drain.
+                NetRequest::Crypto { handle, op, data } => {
+                    let explorer_js::CryptoOp::Digest(algo) = op;
+                    let tx = self.crypto_tx.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let a = match algo {
+                            explorer_js::DigestAlgo::Sha256 => {
+                                explorer_net::crypto::CryptoAlgo::Sha256
+                            }
+                            explorer_js::DigestAlgo::Sha384 => {
+                                explorer_net::crypto::CryptoAlgo::Sha384
+                            }
+                            explorer_js::DigestAlgo::Sha512 => {
+                                explorer_net::crypto::CryptoAlgo::Sha512
+                            }
+                        };
+                        let result = Ok(explorer_net::crypto::digest(a, &data));
+                        let _ = tx.send(CryptoDone {
+                            tab,
+                            handle,
+                            result,
+                        });
+                    });
                 }
             }
         }
@@ -347,6 +363,128 @@ impl Session {
                 },
             );
         }
+    }
+
+    /// Branche `Fetch` de [`Self::drain_script_net`] (étape
+    /// 134 — extraite pour rester lisible) : la requête d'un
+    /// cadre est émise sous **son** initiateur — base de
+    /// résolution, `Origin`/`Referer` et site top-level
+    /// (cookies `Partitioned`) sont ceux du document enfant,
+    /// pas du parent. `ctx` inconnu (cadre mort entre
+    /// l'émission et le drain) → `Err` (échec livré, jamais
+    /// de requête sous la mauvaise identité).
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_script_fetch(
+        &mut self,
+        tab: TabId,
+        page: &Url,
+        base: &Url,
+        handle: u64,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: Option<&str>,
+        mode: explorer_js::FetchMode,
+        credentials: explorer_js::FetchCredentials,
+        ctx: explorer_js::JsCtxId,
+    ) -> Result<(), ()> {
+        // Document émetteur (étape 134) + sa base effective
+        // (étape 135) + ses politiques Referer (132) et CSP
+        // (CAP-145) — un `fetch` de cadre vit sous **son**
+        // document, pas sous la page top.
+        let (req_page, req_base, policy, csp);
+        if ctx == explorer_js::JS_CTX_TOP {
+            let Some(e) = self.tabs.get(&tab) else {
+                return Err(());
+            };
+            req_page = page.clone();
+            req_base = e.nav_base().cloned().unwrap_or_else(|| base.clone());
+            policy = e.referrer_policy;
+            csp = e.csp.clone();
+        } else {
+            let Some(sf) = self
+                .tabs
+                .get(&tab)
+                .and_then(|e| e.frame_ctxs.iter().find(|f| f.ctx == ctx))
+                .and_then(|f| {
+                    self.tabs
+                        .get(&tab)
+                        .and_then(|e| e.frames.get(f.sub))
+                        .map(|sf| (f.url.clone(), sf))
+                })
+            else {
+                tracing::trace!(tab, handle, ctx, "fetch d'un contexte mort");
+                return Err(());
+            };
+            let (f_url, sf) = sf;
+            req_page = f_url;
+            // `srcdoc` hérite la base du parent (CAP-142,
+            // spec HTML) ; un cadre fetché résout contre sa
+            // propre `<base href>` éventuelle.
+            req_base = if sf.srcdoc.is_some() {
+                base.clone()
+            } else {
+                document_base(&sf.dom, &req_page)
+                    .0
+                    .unwrap_or_else(|| req_page.clone())
+            };
+            policy = meta_referrer_policy(&sf.dom);
+            csp = collect_meta_csp(&sf.dom)
+                .iter()
+                .map(|v| explorer_net::csp::CspPolicy::parse(v, true))
+                .collect();
+        }
+        let inflight = self.net_tasks.keys().filter(|(t, _)| *t == tab).count();
+        if inflight >= self.max_script_net {
+            tracing::trace!(tab, handle, "quota requêtes script atteint");
+            return Err(());
+        }
+        let Some((req, cross)) = self.script_request(
+            &req_page,
+            &req_base,
+            method,
+            url,
+            headers,
+            body,
+            policy,
+            &csp,
+            mode,
+            credentials,
+        ) else {
+            return Err(());
+        };
+        let tr = self.transport.clone();
+        let tx = self.net_tx.clone();
+        let page_origin = origin_header_value(&req_page);
+        let req_url = req.url.clone();
+        // `credentials` du script (JS-C77) — porté hors
+        // `req.cors` : `no-cors`/`include` (`sendBeacon`
+        // cross) capture aussi `Set-Cookie`.
+        let credentials = match credentials {
+            explorer_js::FetchCredentials::Omit => explorer_net::http::FetchCredentials::Omit,
+            explorer_js::FetchCredentials::SameOrigin => {
+                explorer_net::http::FetchCredentials::SameOrigin
+            }
+            explorer_js::FetchCredentials::Include => explorer_net::http::FetchCredentials::Include,
+        };
+        let partition = explorer_net::cookies::request_partition(&req);
+        let fetch_mode = req.fetch_mode;
+        let j = tokio::spawn(async move {
+            let out = tr.fetch(&req).await;
+            let _ = tx.send(NetDone {
+                tab,
+                handle,
+                cross,
+                mode: fetch_mode,
+                credentials,
+                page_origin,
+                req_url,
+                partition,
+                out,
+            });
+        });
+        self.net_tasks.insert((tab, handle), j);
+        Ok(())
     }
 
     /// Livre une `NetResponse` au moteur puis applique le
@@ -377,6 +515,41 @@ impl Session {
             }
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après réponse réseau");
+            Self::sync_for_apply(eng.as_mut())
+        };
+        if let Some(s) = mutated {
+            self.queue_apply_sync(tab, s);
+        }
+        self.after_script(tab);
+    }
+
+    /// Livre un résultat `crypto.subtle` au moteur (JS-C79) —
+    /// même discipline que [`Self::deliver_net_response`] :
+    /// buffer si le moteur est détaché (réinséré au flush),
+    /// tour post-script complet (microtasks + resynchro +
+    /// drains — le handler `then` peut émettre de nouvelles
+    /// requêtes, crypto ou réseau).
+    fn deliver_crypto_response(&mut self, tab: TabId, resp: explorer_js::CryptoResponse) {
+        let mutated = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            if entry.js_detached.is_some() {
+                entry.js_pending_crypto.push(resp);
+                return;
+            }
+            let Some(eng) = entry.js.as_mut() else {
+                return;
+            };
+            if let Err(e) = eng.deliver_crypto_response(resp) {
+                tracing::debug!(tab, error = %e, "livraison crypto js");
+                let _ = self.events.send(CoreEvent::PipelineError {
+                    tab: Some(tab),
+                    message: e.to_string(),
+                });
+            }
+            let n = eng.run_pending();
+            tracing::trace!(tab, jobs = n, "jobs js après réponse crypto");
             Self::sync_for_apply(eng.as_mut())
         };
         if let Some(s) = mutated {
@@ -430,7 +603,56 @@ impl Session {
                 }
             }
         }
+        // Étape 134 : surfaces script des contextes enfants —
+        // cookies rangés sous l'URL **de l'enfant** (partition
+        // du site top-level, spec `Partitioned`) et
+        // `localStorage` sous l'origine enfant. Jamais sous
+        // l'identité du parent. **Avant** `drain_script_net` :
+        // un `document.cookie` suivi d'un `fetch` dans le même
+        // script doit émettre le cookie — comme le top-level.
+        let sinks: Vec<(Url, Vec<String>, std::collections::BTreeMap<String, String>)> = self
+            .tabs
+            .get_mut(&tab)
+            .map(|e| {
+                e.js.as_mut().map_or_else(Vec::new, |eng| {
+                    e.frame_ctxs
+                        .iter()
+                        .map(|f| {
+                            let (writes, map) = eng.drain_sinks_ctx(f.ctx);
+                            (f.url.clone(), writes, map)
+                        })
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+        if let Some(page) = self.tabs.get(&tab).and_then(|e| e.url.clone()) {
+            for (furl, writes, map) in sinks {
+                let partition = explorer_net::cookies::partition_key(&page);
+                for w in &writes {
+                    self.cookies
+                        .set_from_header_ctx(&furl, &strip_http_only(w), partition.clone());
+                }
+                if !writes.is_empty() {
+                    self.persist_cookies();
+                }
+                let key = furl.origin().to_string();
+                let changed = match self.local_storage.get(&key) {
+                    Some(prev) => *prev != map,
+                    None => !map.is_empty(),
+                };
+                if changed {
+                    self.local_storage.insert(key.clone(), map.clone());
+                    if let Some(s) = &self.store {
+                        s.save_storage(&key, &map);
+                    }
+                }
+            }
+        }
         self.drain_script_net(tab);
+        // Étape 134 : les miroirs des contextes `<iframe>`
+        // mutés par leurs scripts reviennent en
+        // `SubFrame.dom` (le composite re-rend au relayout).
+        self.sync_frame_mirrors(tab);
         self.drain_media_commands(tab);
     }
 
@@ -444,6 +666,22 @@ impl Session {
         let mut done = Vec::new();
         while let Ok(d) = self.net_rx.try_recv() {
             done.push(d);
+        }
+        // Résultats `crypto.subtle` (JS-C79) — même pompe :
+        // la livraison passe par `deliver_crypto_response`
+        // (buffer détaché + tour post-script inclus).
+        let mut crypto_done = Vec::new();
+        while let Ok(d) = self.crypto_rx.try_recv() {
+            crypto_done.push(d);
+        }
+        for d in crypto_done {
+            self.deliver_crypto_response(
+                d.tab,
+                explorer_js::CryptoResponse {
+                    handle: d.handle,
+                    result: d.result,
+                },
+            );
         }
         let n = done.len();
         for d in done {
@@ -466,13 +704,22 @@ impl Session {
                 }
             }
             let resp = match &d.out {
-                Ok(resp) if !d.cross || cors_readable(&d.page_origin, resp) => NetResponse {
-                    handle: d.handle,
-                    status: resp.status,
-                    status_text: resp.reason.clone(),
-                    headers: resp.headers.clone(),
-                    body: resp.body.clone(),
-                },
+                // `no-cors` cross : livrée opaque par le moteur —
+                // `ACAO` n'est pas exigé (JS-C77 ; la lisibilité
+                // CORS ne s'applique qu'au mode `cors`).
+                Ok(resp)
+                    if !d.cross
+                        || d.mode == explorer_net::http::FetchMode::NoCors
+                        || cors_readable(&d.page_origin, resp) =>
+                {
+                    NetResponse {
+                        handle: d.handle,
+                        status: resp.status,
+                        status_text: resp.reason.clone(),
+                        headers: resp.headers.clone(),
+                        body: resp.body.clone(),
+                    }
+                }
                 _ => NetResponse {
                     handle: d.handle,
                     status: 0,
@@ -752,8 +999,150 @@ impl Session {
             bodies,
             max_px,
             &mut entry.img_decoded,
+            &mut entry.img_bodies,
         );
     }
+
+    /// Étape 133 — retour bfcache : les bitmaps de la page
+    /// gelée ont été libérés au `freeze` (`images.*` vidées,
+    /// `list` lâchée) ; on les re-décode ici depuis les corps
+    /// compressés retenus (`img_bodies`) + attributs/styles
+    /// restaurés — restauration toujours **sans réseau**.
+    /// `data:` est auto-porteur (payload dans l'attribut),
+    /// les `svg` inline re-rasterisés depuis le DOM.
+    pub(crate) fn restore_images(&mut self, tab: TabId) {
+        let max_px = self.image_max_px;
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        let Some(dom) = entry.dom.as_ref() else {
+            return;
+        };
+        let Some(base) = entry.url.clone() else {
+            return;
+        };
+        // Phase lecture : items `<img>`/`poster`, table
+        // ordinal→nœud (`prev_styles` est indexée ordinal), et
+        // racine pour la collecte svg.
+        let items = collect_images(dom);
+        let ord_to_node: HashMap<usize, explorer_dom::NodeId> = element_ordinals(dom)
+            .into_iter()
+            .map(|(n, o)| (o, n))
+            .collect();
+        let root = dom.document_element();
+        // Travaux styles (lecture seule de `prev_styles`) —
+        // même surface que `insert_fetched_images` : fonds via
+        // `background-image`, masques via les deux propriétés.
+        let mut bg_work = Vec::new();
+        let mut mask_work = Vec::new();
+        for (ord, st) in &entry.prev_styles {
+            if let Some(raw) = st.get("background-image").and_then(css_url_arg) {
+                if let Some(node) = ord_to_node.get(ord) {
+                    bg_work.push((*node, raw));
+                }
+            }
+            for prop in ["mask-image", "-webkit-mask-image"] {
+                if let Some(raw) = st.get(prop).and_then(css_url_arg) {
+                    mask_work.push(raw);
+                }
+            }
+        }
+
+        // Corps compressé → bitmap décodé ; `data:` se décode
+        // depuis l'URL elle-même, sinon l'alias résout la clé
+        // du magasin retenu. Renvoie `(octets, clé_résolue)`.
+        let body_of = |raw: &str,
+                       aliases: &HashMap<String, String>,
+                       store: &HashMap<String, Vec<u8>>|
+         -> Option<(Vec<u8>, Option<String>)> {
+            if let Some(b) = data_url_bytes(raw) {
+                return Some((b, None));
+            }
+            let resolved = aliases.get(raw).cloned()?;
+            store.get(&resolved).cloned().map(|b| (b, Some(resolved)))
+        };
+
+        // (a) `<img>`/`poster` — `src` relu du DOM restauré.
+        for (node, src) in items {
+            let Some((bytes, key)) = (if let Some(b) = data_url_bytes(&src) {
+                Some((b, None))
+            } else {
+                let Ok(u) = Url::resolve(&base, &src) else {
+                    continue;
+                };
+                entry
+                    .img_bodies
+                    .get(&u.as_str())
+                    .cloned()
+                    .map(|b| (b, Some(u.as_str())))
+            }) else {
+                continue;
+            };
+            let Some(img) = decode_image(&bytes, max_px).map(Arc::new) else {
+                continue;
+            };
+            entry.images.replaced.insert(node, img.clone());
+            entry.img_decoded.insert(src, img.clone());
+            if let Some(k) = key {
+                entry.bg_decoded.insert(k, Some(img));
+            }
+        }
+        // (b) fonds `url(...)` — alias → corps → bitmap, le
+        // cache `bg_decoded` est re-alimenté sous la clé résolue.
+        for (node, raw) in bg_work {
+            let Some((bytes, key)) = body_of(&raw, &entry.bg_aliases, &entry.img_bodies) else {
+                continue;
+            };
+            let Some(img) = decode_image(&bytes, max_px).map(Arc::new) else {
+                continue;
+            };
+            entry.images.backgrounds.insert(node, img.clone());
+            if let Some(k) = key {
+                entry.bg_decoded.insert(k, Some(img));
+            }
+        }
+        // (c) masques — table cléée par le texte `url(...)` brut
+        // (couvre les pseudo-éléments sans `NodeId`).
+        for raw in mask_work {
+            let Some((bytes, key)) = body_of(&raw, &entry.mask_aliases, &entry.img_bodies) else {
+                continue;
+            };
+            let Some(img) = decode_image(&bytes, max_px).map(Arc::new) else {
+                continue;
+            };
+            if let Some(k) = key {
+                entry.bg_decoded.insert(k, Some(img.clone()));
+            }
+            entry.images.register_mask(&raw, img);
+        }
+        // (d) `<svg>` inline — re-rasterisés depuis le DOM
+        // restauré (collecte pure, pas de corps nécessaire).
+        if let Some(root_el) = root {
+            entry.images.svgs = explorer_render::svg::collect_svg(dom, root_el, max_px);
+        }
+    }
+}
+
+/// Plafond du magasin de corps compressés retenus par page
+/// (étape 133) — 32 Mio de compressé ≈ plusieurs centaines
+/// de Mio de bitmaps. Au-delà, les corps excédentaires ne
+/// sont pas retenus : ces images ne survivront pas au gel
+/// bfcache (dégradation honnête à la restauration, pas de
+/// réservoir non borné).
+const MAX_IMG_BODY_STORE: usize = 32 << 20;
+
+/// Retient le corps compressé `body` sous `key` (URL
+/// résolue) dans le magasin de l'onglet — no-op si déjà
+/// présent ou si le plafond serait dépassé.
+pub(crate) fn retain_img_body(store: &mut HashMap<String, Vec<u8>>, key: &str, body: Vec<u8>) {
+    if store.contains_key(key) {
+        return;
+    }
+    let total: usize = store.values().map(Vec::len).sum();
+    if total + body.len() > MAX_IMG_BODY_STORE {
+        return;
+    }
+    store.insert(key.to_string(), body);
 }
 
 /// Boucle `insert_images` partagée — `dom` et `images`
@@ -770,6 +1159,7 @@ fn insert_images_into(
     bodies: &HashMap<String, Vec<u8>>,
     max_px: u32,
     decoded_cache: &mut HashMap<String, Arc<DecodedImage>>,
+    bodies_store: &mut HashMap<String, Vec<u8>>,
 ) {
     let items = collect_images(dom);
     let mut decoded: HashMap<String, Option<Arc<DecodedImage>>> = HashMap::new();
@@ -786,6 +1176,9 @@ fn insert_images_into(
         if let Some(img) = img {
             images.replaced.insert(node, img.clone());
             decoded_cache.insert(src, img.clone());
+            // Corps compressé retenu (étape 133) — source du
+            // re-décodage au retour bfcache.
+            retain_img_body(bodies_store, &u.as_str(), body.clone());
         }
     }
 }
@@ -826,10 +1219,11 @@ pub(crate) fn insert_images_payload(
         dom,
         images,
         img_decoded,
+        img_bodies,
         ..
     } = p;
     let Some(dom) = dom.as_ref() else {
         return;
     };
-    insert_images_into(dom, images, base, bodies, max_px, img_decoded);
+    insert_images_into(dom, images, base, bodies, max_px, img_decoded, img_bodies);
 }

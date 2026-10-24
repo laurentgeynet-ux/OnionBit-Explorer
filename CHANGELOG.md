@@ -305,6 +305,206 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `js_heap_limit_zero_disarms`
   (`0` → titre `ok`) — couture
   bidirectionnelle.
+- **Étape 124 — `EXPLORER_JS_OPS`
+  (budget d'ops JS exposé)**
+  (`explorer-daemon`,
+  `explorer-cli` — suite du vol
+  `ef087e1` : à 2 Gio de heap,
+  le PoW `SG_SS` de Google meurt
+  au budget ops 5 M au lieu du
+  heap — le réglage 123 a
+  déplacé le mur). Budget ops
+  par évaluation en unités
+  absolues ; `0` = illimité
+  explicite mappé `u64::MAX`
+  (`op_limit=0` tuerait le
+  premier `tick` — sémantique
+  divergente de la borne
+  mémoire, mapping local à
+  l'env). Daemon `session_config`
+  + CLI `session_from_env`,
+  valeur tracée (`info!`/
+  `eprintln`). La couture
+  `js_ops` → `set_budget` →
+  `set_op_limit` existait ;
+  l'ajout est l'exposition env
+  seule — même cave
+  « outillage diagnostic »
+  qu'étape 123.
+- **Étape 129 — radar corpus
+  ≥1200 px** (`explorer-daemon`,
+  `explorer-cli`, `scripts/`).
+  `EXPLORER_VIEWPORT=WxH`
+  (ex. `1366x900`) règle le
+  viewport initial de session —
+  défaut 1024×768 inchangé,
+  valeur tracée (`info!`/
+  `eprintln`), invalide → repli
+  silencieux. `site_smoke.ps1`
+  phase 2 mesure désormais sous
+  viewport réel : `POST
+  /viewport` 1366×900 par onglet
+  (shots idem via l'env), `doc_h`/
+  `doc_h_clamped` lus sur la
+  réponse `navigate` (`!` au
+  verdict), grille de sondes
+  1366×900, et **scroll réel
+  prouvé** — `dy=doc_h` doit
+  atteindre `doc_h−900`, sinon
+  `scroll:<y>/<max>:FIGÉ` au
+  verdict (la suspicion
+  `scroll_y=0.0` du re-census
+  github devient une mesure
+  automatique site par site).
+  Vérifié terrain : Wikipedia
+  `doc_h=4085` → `scroll_y=
+  3185.29` exact, retour 0.
+- **Étape 130 — empreinte
+  mémoire par réservoir**
+  (`explorer-core/-api/-cli` —
+  constat « station ~1,4 Gio »
+  sous sites réels) :
+  `Session::mem_report(tab) →
+  Option<MemReport>` attribue la
+  page vivante (`dom_nodes`
+  `live_count`, `layout_boxes`,
+  `display_items`, octets exacts
+  `frame`/`png`, bitmaps
+  `DecodedImage` dé-dupliquées
+  par `Arc::as_ptr`, corps
+  `bg_bodies`, `heap_stats` du
+  moteur JS) **et les pages
+  gelées bfcache** — chaque
+  snapshot gèle un moteur JS
+  entier (jusqu'à
+  `js_mem_limit_mib`), premier
+  réservoir suspecté :
+  `bfcache_pages` = 4 → 5 états
+  de page par onglet. Surface :
+  `GET /api/tabs/{id}/mem` (JSON)
+  + `explorer-cli mem <url>`
+  (tableau post-nav). Honnêteté :
+  `_bytes` = octets mesurés,
+  `_nodes`/`_boxes` = comptes ;
+  non mesurés documentés (caches
+  fontes, `prev_styles`, miroir
+  DOM jscore, registres
+  `idb`/`caches` C72 hors heap).
+  Régression
+  `mem_report_attributes_live_and
+  _bfcache` (rapport peuplé,
+  snapshot compté, inconnu →
+  `None`).
+- **Étape 132 — barre de scroll
+  interactive** (`app/` Flutter
+  — la piste/thumb posée en
+  diagnostic restait un
+  indicateur passif) : drag du
+  thumb → px CSS via la course
+  réelle `maxScroll/travel`
+  (`ctrl.scroll` relatif, clamp
+  moteur), tap sur la piste →
+  page ±`viewH`, curseur `grab`,
+  poignée assombrie pendant le
+  geste. Zéro canal nouveau —
+  `scroll` relatif + `scroll_y`
+  autoritaire + traduction
+  locale (étape 109) existants.
+  `flutter analyze`/`test` verts.
+- **Étape 133 — discard des
+  bitmaps des snapshots
+  bfcache** (`explorer-core` —
+  réponse au multiplicateur
+  mesuré par l'étape 130 :
+  ~144 Mio de bitmaps décodés
+  × 4 pages gelées/onglet). Au
+  `freeze`, toutes les
+  `Arc<DecodedImage>` du
+  snapshot meurent : tables
+  `images.*` vidées + display
+  list lâchée (porteuse
+  d'`Arc` elle aussi) ; les
+  **corps compressés** restent
+  dans `img_bodies` (clé URL
+  résolue, borne 32 Mio/page)
+  avec les alias
+  `bg_aliases`/`mask_aliases`.
+  `Session::restore_images`
+  re-décode au retour **sans
+  réseau** (http depuis les
+  corps, `data:` depuis
+  l'attribut, fonds/masques via
+  `prev_styles` ordinal→NodeId,
+  svg inline re-rasterisés) —
+  restauration peinte à
+  l'identique, prouvée par
+  test. `mem_report` gagne
+  `img_bodies_bytes`,
+  `bfcache_img_bodies_bytes` et
+  `bfcache_images_bytes`
+  (diagnostic, attendu 0) ;
+  CLI `mem` affiché. Réduction
+  attendue ≈ le poids bitmap
+  de chaque page gelée.
+- **Étape 134 — câblage
+  `SubFrame` → contexte JS**
+  (`explorer-jscore`/`explorer-js`/
+  `explorer-core` — la soudure
+  entre 128/131 et JS-C78) : un
+  `<iframe>` fetché obtient un
+  realm au commit
+  (`context_new` →
+  `install_dom_ctx` → scripts
+  inline → `DCL` — avant les
+  scripts du parent, pour que
+  `frames[n]`/`contentWindow`
+  résolvent en cours de parse ;
+  `load` enfant puis `onload`
+  de l'élément au tail).
+  `JsEngine` gagne les méthodes
+  adressées `eval_ctx`/
+  `dispatch_event_ctx`/
+  `sync_dom_ctx`/
+  `drain_sinks_ctx` (+ defs
+  compat mono-contexte) ; le
+  worker conserve miroir, jar
+  cookie et backing
+  `localStorage` **par
+  contexte** (isolés —
+  jamais ceux du parent) et
+  restaure le contexte courant
+  après chaque commande.
+  `NetRequest::Fetch` porte
+  `ctx` : la requête de
+  l'enfant est construite sous
+  SON `page_url` (initiateur,
+  `Referer`/`Origin`,
+  résolution de base,
+  `SameSite`, partition
+  `Partitioned`) — un ctx mort
+  → échec livré, jamais la
+  mauvaise identité. Miroir
+  enfant sale → re-parse en
+  `SubFrame.dom`, bitmaps
+  cadre purgées, relayout.
+  `frame_ctxs` voyage dans
+  `PageSnapshot` (bfcache
+  conserve l'arbre entier) ;
+  `context_destroy` explicite
+  sur les documents quittés
+  hors cache. Reliquat
+  documenté : sous-ressources
+  *des cadres* (leurs
+  `src=`) non fetchées à cette
+  tranche — scripts inline
+  seuls. 9 tests adaptateur +
+  9 tests session
+  (`iframe_js_*`,
+  `iframe_fetch_uses_child_
+  initiator`, `iframe_cookie_`,
+  `iframe_storage_`,
+  `iframe_ctx_*`, `onload`,
+  timer).
 - **JS-C70 —
   `Blob`/`File`/`FileReader` +
   `URL.createObjectURL`**
@@ -1213,7 +1413,437 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `client_hints_reach_wire_…`
   (session).
 
+- **JS-C72 — `indexedDB` +
+  `caches` (Cache API)**
+  (`explorer-jscore` —
+  persistence client-side des
+  apps). Registres
+  `Rc<RefCell<…>>` injectables
+  (`Engine::install_idb`/
+  `install_caches` — même couture
+  que `install_storage`,
+  persistence inter-pages =
+  responsabilité de l'embedder ;
+  mémoire par défaut).
+  `indexedDB.open` →
+  `IDBOpenDBRequest` :
+  `upgradeneeded`
+  (`oldVersion`/`newVersion`,
+  `createObjectStore`/`createIndex`
+  légaux dans la txn
+  `versionchange`) puis `success`,
+  livrés au checkpoint microtask ;
+  `deleteDatabase`, `databases`,
+  `cmp` (ordre total des clés :
+  nombre < chaîne < tableau).
+  `IDBDatabase.transaction` →
+  `IDBTransaction` (`mode`,
+  `objectStore`, `oncomplete` à la
+  vidange de sa file). Stores :
+  `put`/`add`/`get`/`getAll`/
+  `getKey`/`getAllKeys`/`delete`/
+  `clear`/`count`/`openCursor` —
+  valeurs structured-clonées à
+  l'écriture et à la lecture ;
+  `keyPath` pointillé,
+  `autoIncrement`, clés
+  `number`/`string`/`Array`/`Date`.
+  Index `unique`/`multiEntry`
+  (rejet `ConstraintError`),
+  `IDBKeyRange.only`/`bound`/… +
+  `includes`. Curseurs : `key`/
+  `primaryKey`/`value`,
+  `continue(k)`/`advance`/`update`/
+  `delete` — `continue` re-tire le
+  `onsuccess` de **sa** request
+  (spec). `IDBKeyRange` filtre
+  stores, index et curseurs
+  (directions `next`/`prev`/
+  `*unique`). `caches`
+  (`CacheStorage`) : `open`/`has`/
+  `delete`/`keys`/`match` en
+  promesses ; `Cache.put`/
+  `match`/`matchAll`/`keys`/
+  `delete` — `Response` snapshotée
+  (corps + status + headers) ;
+  `add`/`addAll` passent par le
+  transport fetch installé (sans
+  transport → rejet honnête).
+  Erreurs en `{name, message}`
+  (`ConstraintError`,
+  `VersionError`… — approx
+  `DOMException` documentée).
+  GC : protos, registres (valeurs
+  stockées) et requests pendantes
+  racinés. Régressions `c72_*`
+  (8 tests).
+
+- **JS-C73 — `WebSocket` stub
+  honnête** (`explorer-jscore` —
+  feature-detect + fallbacks des
+  frameworks temps réel). Aucune
+  socket ouverte (`explorer-net`
+  seul en a le droit — pas de
+  transport WS à ce jour) : le
+  handshake est refusé **en async**
+  au checkpoint microtask —
+  `error` puis `close`
+  `{code: 1006, wasClean: false}`,
+  la séquence observable exacte
+  d'un refus réseau ; c'est ce qui
+  arme les fallbacks long-polling
+  (Socket.IO, SockJS…). Surface
+  spec : `readyState`, `url`
+  (absolue, `ws`/`wss` exigés —
+  `SyntaxError`), `protocol`/
+  `extensions` (`''`, rien de
+  négocié), `bufferedAmount`,
+  `binaryType` (`'blob'`/
+  `'arraybuffer'` validé),
+  `send` (`InvalidStateError` en
+  `CONNECTING`, silencieux en
+  `CLOSING`/`CLOSED` — `OPEN`
+  inatteignable), `close(code,
+  reason)` validé (1000 ou
+  3000-4999, raison ≤ 123 octets),
+  `onopen`/`onmessage`/`onerror`/
+  `onclose` + `addEventListener`/
+  `removeEventListener`/
+  `dispatchEvent`, constantes sur
+  le ctor et le prototype,
+  validation `protocols` (tokens,
+  doublons → `SyntaxError`).
+  GC : proto + sockets en file
+  racinés. Régressions `c73_*`
+  (5 tests).
+
+- **JS-C74 — `Notification`,
+  `BroadcastChannel`,
+  `getSelection`, `reportError`,
+  `scrollIntoView`** (`explorer-jscore`
+  — queue d'APIs fenêtre,
+  `src/misc_apis.rs`).
+  `BroadcastChannel` **réel**
+  intra-contexte : `postMessage`
+  structured-clone par
+  destinataire (jamais soi-même,
+  spec), `message` livré au
+  checkpoint microtask, `close`
+  désinscrit, `InvalidStateError`
+  sur canal fermé, `name`,
+  `onmessage` +
+  `addEventListener`/
+  `removeEventListener`/
+  `dispatchEvent`. `Notification`
+  stub honnête : `permission`
+  `'default'` (pas d'UI de grant),
+  `requestPermission` → promesse
+  `'denied'` (+ callback legacy),
+  `maxActions` 0, ctor → objet
+  inerte avec props spec (`title`,
+  `body`, `tag`, `silent`…),
+  jamais d'events. `getSelection`
+  (window + document) → **le même
+  objet** `Selection` (singleton
+  spec) : `selectAllChildren`,
+  `collapse`/`collapseTo*`/
+  `extend`, `addRange`,
+  `setBaseAndExtent`, `toString`
+  = `textContent` des ranges,
+  `getRangeAt` → Range-objet
+  (`startContainer`, `collapsed`…),
+  `removeAllRanges`/`empty`,
+  `containsNode`, `rangeCount`,
+  `type` (`None`/`Caret`/`Range`),
+  `deleteFromDocument` (mono-
+  conteneur). `reportError` réel :
+  `window.onerror` (signature
+  legacy `(msg, src, line, col,
+  err)`), `ErrorEvent` `error`
+  propagé aux listeners racine —
+  annulé → `console` embedder
+  `Uncaught: …`. `scrollIntoView`/
+  `scrollIntoViewIfNeeded` sur
+  `Element.prototype` : no-op
+  honnête, lisible en feature-
+  detect, `TypeError` sur
+  receveur non-Element. `sendBeacon`
+  existait déjà (POST fire-and-
+  forget sur transport, `false`
+  sans connecteur). `event_state_of`
+  étendu : props `ErrorEvent`/
+  `MessageEvent`/`CloseEvent`
+  recopiées au dispatch.
+  GC : protos, canaux ouverts
+  (entangled tant que non
+  `close`), messages en file et
+  wrapper `Selection` racinés.
+  Régressions `c74_*` (6 tests).
+
+- **JS-C77 — `fetch(mode,
+  credentials)` câblé bout-en-
+  bout** (`explorer-jscore`,
+  `explorer-js`, `explorer-core`
+  — couture réservée de l'étape
+  126, consommée) : les champs
+  `Request.fetch_mode`/
+  `CorsRequest.credentials` posés
+  par le chantier « web réel
+  sécurisé » (étapes 125→126)
+  étaient remplis de défauts —
+  le script peut désormais les
+  piloter. `XhrRequest` gagne
+  `mode`/`credentials` (enums
+  `FetchMode`/`FetchCredentials`
+  exposés, `PartialEq`) ;
+  `NetRequest::Fetch` les
+  transporte ; `script_request`
+  les mappe aux enums net.
+  `fetch(input, {mode,
+  credentials})` : lecture
+  depuis le `Request` d'entrée
+  puis surcharge `init`, défauts
+  spec `cors`/`same-origin`,
+  valeurs inconnues → promesse
+  rejetée `TypeError`
+  (`new Request` → `TypeError`
+  synchrone). `same-origin` +
+  cible cross → rejet **avant
+  émission** (le transport n'est
+  pas sollicité). `no-cors` :
+  verbe simple exigé, en-têtes
+  auteur réduits à la CORS-
+  safelist à l'émission, réponse
+  livrée **opaque** (`type:
+  'opaque'`, `status: 0`, corps
+  et en-têtes vides — promesse
+  résolue, `ACAO` non exigé côté
+  session). `cors` cross →
+  `type: 'cors'` ; same-origin →
+  `'basic'`. `xhr.withCredentials`
+  réel (get/set, `InvalidStateError`
+  hors `unsent`/`opened` non
+  envoyé, survit à `open()`) →
+  `credentials: include`.
+  `sendBeacon` émet `no-cors` +
+  `include` (spec). `cache.add/
+  addAll` court en `include`
+  (spec Cache API). Cookies :
+  `omit` ne pose ni ne capture ;
+  `include` envoie sous réserve
+  `SameSite` **et** capture
+  `Set-Cookie` — y compris
+  `no-cors` cross (beacon).
+  Régressions `c77_*` (10 tests
+  jscore) + 4 tests session
+  bout-en-bout (`no-cors`
+  opaque, `same-origin` non
+  émis, `include` ↔ `Cookie`,
+  `omit` sans `Cookie`).
+
+- **JS-C78 — contextes de
+  navigation imbriqués**
+  (`explorer-jscore` —
+  dépendance piste JS de
+  l'étape 131 « composite
+  iframe », arrêt couture
+  journal 2026-… tranché) :
+  un `Engine`, N realms —
+  « un heap, N globals »
+  (même modèle que les agents
+  same-origin spec : les
+  objets cross-contexte
+  restent des `ObjId` valides,
+  `contentDocument` same-
+  origin est le vrai miroir,
+  pas une copie). Chaque
+  `BrowsingContext` parque
+  ses champs document-local
+  (global, env, protos,
+  dom_ctx, timers, xhr, idb,
+  observers, modules, hooks
+  page/nav/history) ;
+  `switch_to` swap courant ↔
+  garé. **Intrinsics frais par
+  realm** (spec : `frame.Array
+  !== parent.Array` —
+  `builtins::install` ré-
+  exécuté par contexte).
+  Fenêtre : `window.parent`/
+  `top`/`frames`/`length`/
+  `closed` en accessors
+  résolvant leur contexte
+  depuis `this` (jamais
+  `cur_ctx`) — `frames[n]`
+  dynamique (survit à
+  `destroy`). `iframe.
+  contentWindow`/`content
+  Document` bornés : same-
+  origin → vrais handles ;
+  cross-origin → `content
+  Document` = `null` spec,
+  `contentWindow` = le
+  `WindowProxy` opaque
+  whitelisté (`postMessage`,
+  `closed`, `length`, `top`/
+  `parent`/`frames`/`self`,
+  `opener`, `location`
+  write-only — tout le reste
+  `undefined`, écritures
+  ignorées) — c'est la
+  surface spec réelle : sans
+  lui, `postMessage` cross
+  serait injoignable.
+  `postMessage` : structured
+  clone `WireValue` (cycles
+  préservés — mécanique
+  Worker C29) à l'émission,
+  `targetOrigin` **exigé**
+  (absent/`undefined`/`"*"`
+  → `SyntaxError` honnête —
+  arbitrage v1 : vérification
+  réelle, jamais de broadcast
+  silencieux), origine non
+  concordante → non livré
+  (silencieux spec). Livraison
+  : file commune drainée au
+  checkpoint — après les
+  microtasks de l'émetteur
+  (spec « task postée »),
+  jamais en réentrance
+  d'eval ; `MessageEvent.
+  data`/`origin`/`source`
+  peuplés. Appels cross-ctx :
+  `Fun::Script` switche sur
+  le realm de la fonction
+  (env capturée racine) ;
+  natives (`frame.eval`,
+  `frame.setTimeout`…) sur
+  le realm de `this`=global,
+  pile `native_caller` pour
+  le `source`/`origin`
+  spec (« incumbent » =
+  appelant). Microtasks,
+  timers, XHR/fetch et toutes
+  les livraisons taggés par
+  contexte — la pompe visite
+  chaque contexte vivant
+  (les timers d'un iframe
+  tournent). GC : racines des
+  contextes garés tracées
+  (`BrowsingContext::push_
+  roots`) + proxies stables.
+  API publique additive :
+  `context_new`/`context_
+  switch`/`current_context`/
+  `context_destroy`. Lookup
+  d'identifiant global étendu
+  aux accessors (`parent`…)
+  — `env_get` invoque les
+  getters du global.
+  Régressions `c78_*` (17
+  tests — isolation,
+  intrinsics, arbre fenêtre,
+  proxies, postMessage,
+  ordre/réentrance, cycles,
+  destroy, GC, timers).
+
+- **JS-C79 — `crypto.subtle`
+  par couture embedder**
+  (`explorer-jscore` +
+  `explorer-js`/`net`/`core` —
+  déclencheur : PKCE
+  `code_challenge` S256 des
+  logins OAuth2 réels) :
+  `crypto.subtle.digest(
+  algorithm, data)` →
+  `Promise` résolvant un
+  `ArrayBuffer`, algorithmes
+  `SHA-256`/`SHA-384`/`SHA-512`
+  normalisés côté moteur
+  (`'SHA-256'`, `'sha-256'`,
+  `'SHA256'` ou `{name}` —
+  `AlgorithmIdentifier`).
+  **Arbitrage « couture
+  embedder » tenu** : jscore
+  reste autonome zéro-
+  dépendance — il émet
+  `CryptoRequest{op,data}`
+  (octets **copiés** hors du
+  heap à l'appel, spec
+  `CopyBytes`) vers un
+  `CryptoTransport` injecté
+  (`install_crypto`, même
+  forme que `XhrTransport`) ;
+  la plateforme exécute —
+  `NetRequest::Crypto` drainé
+  par la session, calcul
+  `ring::digest` dans
+  `explorer_net::crypto`
+  (`spawn_blocking`, jamais
+  dans la boucle), résultat
+  livré par un canal
+  `CryptoDone` pompé dans
+  `poll_net` →
+  `JsEngine::deliver_crypto_
+  response` → la promesse
+  résout/rejette **dans le
+  realm émetteur** (pending
+  document-local, livraison
+  avec switch de contexte
+  comme XHR — C78 ; le
+  transport est engine-global
+  : les iframes en héritent
+  dès `context_new`). Erreurs
+  spec : algo inconnu ou
+  transport absent → rejet
+  `NotSupportedError` ; échec
+  plateforme → `OperationError`
+  ; `data` non-`BufferSource` →
+  `TypeError` **synchrone**
+  (conversion `WebIDL`, avant
+  la promesse). Ops clé
+  (`importKey`/`sign`/`verify`/
+  `encrypt`/`CryptoKey`) :
+  absents — la détection de
+  feature voit des méthodes
+  manquantes, pas des stubs.
+  `getRandomValues` : la borne
+  spec 64 Kio jette
+  désormais
+  `QuotaExceededError` (était
+  `TypeError`). **Dépendance**
+  : `ring` devient dep directe
+  d'`explorer-net` — même
+  provider que rustls,
+  exception `*-sys` déjà
+  consignée ADR-0002, zéro
+  ajout au lockfile. La même
+  couture sert le FFI Flutter.
+  Régressions `c79_*` (11
+  tests jscore) + vecteurs
+  FIPS 180-4 (`net::crypto`) +
+  2 tests session end-to-end
+  (vrai `SHA-256('abc')` dans
+  le DOM via la boucle de
+  pompe réelle).
+
 ### Fixed
+
+- **JS-C72 — adoption de promesse
+  pendante** (`explorer-jscore`).
+  `resolve_promise` poussait sur la
+  promesse adoptée les résolveurs
+  **de celle-ci** au lieu de ceux
+  de l'adoptante → un `.then`
+  retournant une promesse issue
+  d'un autre `.then` résolvait
+  `undefined` (jobs qui
+  s'annulaient). Corrigé : les
+  résolveurs de l'adoptante sont
+  poussés — `Promise.resolve(x).
+  then(() => Promise.resolve(0).
+  then(() => x))` rend `x`.
 
 - **Étape 122 — `root_font_size`
   sur `relayout_subtree`**
@@ -1337,6 +1967,77 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   propres_fragments`,
   `inline_grid_et_inline_table_
   sont_atomiques`.
+
+- **R-91 — `@layer` + `%` des
+  positionnés** (`explorer-css`,
+  `explorer-layout` — terrain
+  github : le hero `.lp-IntroHero`
+  rendait 1312 px dans un bloc
+  conteneur de 1216, texte et CTA
+  « Download GitHub Copilot app »
+  coupés au bord droit). Deux
+  défauts chaînés. (a) **`@layer`
+  supporté** : GitHub enferme tout
+  son reset Primer dans
+  `@layer primer-css-base{…}` —
+  bloc avalé entier comme at-rule
+  inconnu (`*{box-sizing:
+  border-box}`, `body{margin:0}`…
+  perdus). `AtKind::Layer` +
+  table chemin→rang à l'ordre de
+  première déclaration
+  (`@layer a, b;`, `a.b`,
+  anonymes, imbrication) ; clé
+  `(rank, layer, spec, order)` —
+  hors-layer bat tous les layers
+  en normal, `!important`
+  renverse. `revert-layer` garde
+  son repli. (b) **`width:%`
+  re-résolu sur les absolus** :
+  `abs_geometry` passait sa border
+  box déjà calculée comme `cb_w`
+  à `layout_block`, qui y
+  re-résolvait le % (1264→1312).
+  `cb_w = target.width` quand
+  `width` est non-auto.
+  Régressions `regle_en_layer_
+  sapplique` + 6 sœurs cascade
+  (ordre, statement, anonyme,
+  imbrication, `!important`,
+  media) et `absolu_largeur_
+  pourcent_{content,border}_box`.
+
+- **R-92 — noms `--*` sensibles à
+  la casse** (`explorer-css` —
+  vol d'étalonnage corpus, F3 :
+  superposition rangée d'onglets
+  / paragraphe dans le hero
+  github). css-variables-1 §2.1 :
+  les propriétés custom sont
+  sensibles à la casse — la
+  cascade normalisait tous les
+  noms en minuscules, donc un
+  `--Mixte` déclaré n'était
+  jamais retrouvé par
+  `var(--Mixte)` et toute la
+  chaîne de fallbacks s'effondrait
+  au littéral terminal. Terrain :
+  `.lp-Spacer` chaîne
+  `--Spacer-size{,544,768,1012,
+  1280}` posée en `style=` —
+  le spacer visuel du hero
+  rendait 156 px au lieu de
+  600/660 → `.lp-Intro` sombre
+  ~500 px trop court, sections
+  remontées sous le hero `fixed`.
+  Vérifié : spacer 156 → 600,
+  `.lp-Intro` 491 → 755.
+  Régressions `var_nom_custom_
+  sensible_a_la_casse`,
+  `var_custom_casse_mixte_dans_
+  style_inline`,
+  `var_custom_casse_mixte_
+  heritage_et_lecture`.
 
 - **Étape 119 — piège
   `engineMode=auto` visible**

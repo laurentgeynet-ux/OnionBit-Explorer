@@ -44,15 +44,19 @@
 mod ast;
 mod builtins;
 mod collections;
+mod context;
+mod crypto;
 mod dom;
 mod dom_host;
 mod error;
 mod files;
 mod heap;
+mod idb;
 mod interp;
 mod intl;
 mod json;
 mod lexer;
+mod misc_apis;
 mod module;
 mod mutation;
 mod observers;
@@ -65,9 +69,12 @@ mod temporal;
 mod timers;
 mod typed_array;
 mod value;
+mod websocket;
 mod worker;
 mod xhr;
 
+pub use context::CtxId;
+pub use crypto::{CryptoOp, CryptoRequest, CryptoResponse, CryptoTransport, DigestAlgo};
 pub use dom::{
     CanvasOpRecord, CanvasState, Dom, JournalOp, MediaCmd, MediaElState, MediaReport, MediaState,
     NodeId, SerializeStats,
@@ -75,9 +82,10 @@ pub use dom::{
 pub use dom_host::{CookieJar, DomRef, EventProp, FormSubmit};
 pub use error::{Error, Result};
 pub use heap::{HeapStats, Host};
+pub use idb::{CacheEntry, CacheRegistry, IdbDb, IdbIndexDef, IdbRegistry, IdbStore};
 pub use interp::Engine;
 pub use module::{is_bare_specifier, module_specifiers, rewrite_bare_specifier, ModuleLoader};
 pub use storage::Storage;
 pub use value::{ObjId, Value};
 pub use worker::{WorkerConfig, WorkerFactory, WorkerLoader};
-pub use xhr::{XhrRequest, XhrResponse, XhrTransport};
+pub use xhr::{FetchCredentials, FetchMode, XhrRequest, XhrResponse, XhrTransport};

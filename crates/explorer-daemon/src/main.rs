@@ -63,6 +63,29 @@ struct DaemonConfig {
     /// `0` = illimité explicite. Outillage diagnostic de vol,
     /// pas une promesse produit.
     js_mem_mib: Option<usize>,
+    /// Budget d'ops JS par évaluation (`EXPLORER_JS_OPS`,
+    /// étape 124) — `None` = défaut `SessionConfig` (5 M) ;
+    /// `0` = illimité explicite (mappé `u64::MAX` — un `while(1)`
+    /// gèle alors le contexte : réglage diagnostic uniquement).
+    js_ops: Option<u64>,
+    /// Viewport initial `WxH` (`EXPLORER_VIEWPORT`, étape 129 —
+    /// ex. `1366x900` ; `None` = défaut `SessionConfig`
+    /// 1024×768). Même format que l'argument `LxH` de
+    /// `explorer-cli shot`.
+    viewport: Option<(f32, f32)>,
+}
+
+/// Parse `WxH` (`1366x900`) → `(w, h)` — vide/invalide → `None`
+/// (réglage d'env : on dégrade au défaut, jamais de panne).
+fn parse_viewport(v: &str) -> Option<(f32, f32)> {
+    let mut it = v.split('x');
+    match (it.next(), it.next()) {
+        (Some(w), Some(h)) => match (w.parse::<f32>(), h.parse::<f32>()) {
+            (Ok(w), Ok(h)) if w > 0.0 && h > 0.0 => Some((w, h)),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 impl DaemonConfig {
@@ -101,6 +124,12 @@ impl DaemonConfig {
             js_mem_mib: std::env::var("EXPLORER_JS_MEM_MIB")
                 .ok()
                 .and_then(|v| v.parse::<usize>().ok()),
+            js_ops: std::env::var("EXPLORER_JS_OPS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok()),
+            viewport: std::env::var("EXPLORER_VIEWPORT")
+                .ok()
+                .and_then(|v| parse_viewport(&v)),
         }
     }
 }
@@ -119,6 +148,17 @@ fn session_config(cfg: &DaemonConfig) -> explorer_core::SessionConfig {
     if let Some(mib) = cfg.js_mem_mib {
         tracing::info!("EXPLORER_JS_MEM_MIB={mib} — borne heap JS par contexte");
         sc.js_mem_limit_mib = mib;
+    }
+    if let Some(ops) = cfg.js_ops {
+        // `0` = illimité explicite (étape 124) — `op_limit=0`
+        // tuerait le premier `tick` ; `u64::MAX` en tient lieu.
+        let v = if ops == 0 { u64::MAX } else { ops };
+        tracing::info!("EXPLORER_JS_OPS={ops} — budget d'ops JS par évaluation");
+        sc.js_ops = v;
+    }
+    if let Some((w, h)) = cfg.viewport {
+        tracing::info!("EXPLORER_VIEWPORT={w}x{h} — viewport initial des onglets");
+        sc.viewport = (w, h);
     }
     sc
 }
@@ -161,7 +201,8 @@ fn print_usage() {
          \x20            EXPLORER_MAX_BODY, EXPLORER_API_KEY, EXPLORER_DOWNLOAD_DIR,\n\
          \x20            EXPLORER_DOH, EXPLORER_DOH_TIMEOUT_MS,\n\
          \x20            EXPLORER_COLOR_SCHEME (dark|light),\n\
-         \x20            EXPLORER_JS_MEM_MIB (borne heap JS ; 0=illimité)"
+         \x20            EXPLORER_JS_MEM_MIB (borne heap JS ; 0=illimité),\n\
+         \x20            EXPLORER_JS_OPS (budget ops JS ; 0=illimité)"
     );
 }
 
@@ -371,7 +412,7 @@ async fn main() {
                 // les intentions sont honorées ici, hors
                 // verrou (la pompe reste à sens unique).
                 for tab in tabs {
-                    explorer_core::drain_navs_shared(&s, tab).await;
+                    Box::pin(explorer_core::drain_navs_shared(&s, tab)).await;
                 }
                 tokio::time::sleep(wait).await;
             }

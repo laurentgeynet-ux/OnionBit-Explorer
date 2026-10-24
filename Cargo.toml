@@ -103,6 +103,9 @@ async-trait = "0.1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 webpki-roots = "0.26"
+# Provider direct pour `crypto.subtle` (JS-C79) — même `ring`
+# que rustls : version alignée sur le lockfile, zéro ajout.
+ring = "0.17"
 # Décodage corps explorer-net (ADR-0002, étape 6) — pur Rust :
 # flate2 sur miniz_oxide (gzip/deflate), brotli, encoding_rs
 # (transcodage charset WHATWG — la référence de Firefox).

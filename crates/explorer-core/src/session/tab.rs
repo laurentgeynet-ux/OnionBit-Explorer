@@ -24,7 +24,7 @@ impl Tab {
         // Une page ne vit qu'une fois par position —
         // une nouvelle visite remplace l'ancienne gelée.
         self.bfcache.retain(|s| s.hist_idx != self.hist_idx);
-        let snap = PageSnapshot {
+        let mut snap = PageSnapshot {
             hist_idx: self.hist_idx,
             url: self.url.take(),
             title: self.title.take(),
@@ -62,7 +62,27 @@ impl Tab {
                 .take()
                 .map(|(t, u)| (t.saturating_duration_since(std::time::Instant::now()), u)),
             csp: std::mem::take(&mut self.csp),
+            // Les contextes JS des cadres gèlent **dans le
+            // moteur** (`js` emporté au-dessus) — la table de
+            // liaison suit pour garder le routage `ctx` à la
+            // restauration (étape 134).
+            frame_ctxs: std::mem::take(&mut self.frame_ctxs),
+            img_bodies: std::mem::take(&mut self.img_bodies),
+            bg_aliases: std::mem::take(&mut self.bg_aliases),
+            mask_aliases: std::mem::take(&mut self.mask_aliases),
         };
+        // Étape 133 — le gelé ne garde que les corps
+        // compressés : les bitmaps `DecodedImage` sont
+        // libérés ici (tables `images.*` + display list,
+        // porteuses d'`Arc`), re-décodés depuis `img_bodies`
+        // au retour. Les op-lists `<canvas>` (pas des
+        // bitmaps) survivent.
+        snap.images.replaced.clear();
+        snap.images.backgrounds.clear();
+        snap.images.svgs.clear();
+        snap.images.masks.clear();
+        snap.images.masks_url.clear();
+        snap.list = None;
         self.scroll_y = 0.0;
         self.doc_h = 0.0;
         // `dirty` vient d'être gelée → le live repart à
@@ -113,6 +133,7 @@ impl Tab {
                                  // (53f) ne doivent pas survivre à la restauration.
         self.js_detached = None;
         self.js_pending_net.clear();
+        self.js_pending_crypto.clear();
         self.js_pending_attrs.clear();
         self.sync_floor = None;
         self.last_req = snap.last_req;
@@ -125,6 +146,13 @@ impl Tab {
             .refresh
             .map(|(d, u)| (std::time::Instant::now() + d, u));
         self.csp = snap.csp;
+        self.frame_ctxs = snap.frame_ctxs;
+        // Étape 133 : les corps compressés reviennent vivants
+        // (re-gelables) — le re-décodage des bitmaps est fait
+        // par l'appelant via `Session::restore_images`.
+        self.img_bodies = snap.img_bodies;
+        self.bg_aliases = snap.bg_aliases;
+        self.mask_aliases = snap.mask_aliases;
         self.transitions.clear();
         // Idem animations : la restauration repart sur les
         // déclarations — lecture réenregistrée au premier
