@@ -3367,3 +3367,23 @@ fn c74_scroll_into_view() {
         "function,true,true,bad:true"
     );
 }
+
+/// `location.hash=`/`search=`/`pathname=` naviguent vers
+/// l'URL recomposée (CAP-160 — spec : chaque setter de
+/// composant est une navigation).
+#[test]
+fn location_part_setters_navigate() {
+    let (mut e, _jar, navs) = engine_full(PAGE);
+    evf(&mut e, "location.hash='x'");
+    evf(&mut e, "location.search='?y=2'");
+    evf(&mut e, "location.pathname='/c'");
+    let got = navs.borrow();
+    assert_eq!(
+        got.as_slice(),
+        [
+            "http://ex.org:8080/a/b?q=1#x",
+            "http://ex.org:8080/a/b?y=2#frag",
+            "http://ex.org:8080/c?q=1#frag"
+        ]
+    );
+}

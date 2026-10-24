@@ -4846,6 +4846,82 @@ impl Host for LocationHost {
             }
             return Ok(true);
         }
+        // Setters de composants (CAP-160 — spec « Location
+        // object » : chaque setter navigue vers l'URL avec
+        // le composant remplacé ; `hash`/`search`/
+        // `pathname` sont le gros des usages — routeurs
+        // hash, `location.search=` des flow auth). La
+        // résolution/validation finale reste côté session.
+        if matches!(
+            key,
+            "hash" | "search" | "pathname" | "host" | "hostname" | "port" | "protocol"
+        ) {
+            let val = e.to_js_string(v)?;
+            let (proto, host, hostname, port, path, search, hash) = url_parts(&e.hooks.page_url);
+            if proto.is_empty() {
+                // Pas d'URL absolue → setter inerte
+                // (dégradation tolérante).
+                return Ok(true);
+            }
+            let (proto, host, _hn, _po, path, search, hash) = match key {
+                "protocol" => {
+                    let p = val.trim_end_matches(':');
+                    (format!("{p}:"), host, hostname, port, path, search, hash)
+                }
+                "host" => (proto, val.clone(), hostname, port, path, search, hash),
+                "hostname" => {
+                    let h = if port.is_empty() {
+                        val.clone()
+                    } else {
+                        format!("{val}:{port}")
+                    };
+                    (proto, h, hostname, port, path, search, hash)
+                }
+                "port" => {
+                    let h = if val.is_empty() {
+                        hostname.clone()
+                    } else {
+                        format!("{hostname}:{val}")
+                    };
+                    (proto, h, hostname, port, path, search, hash)
+                }
+                "pathname" => {
+                    let p = if val.starts_with('/') {
+                        val.clone()
+                    } else {
+                        format!("/{val}")
+                    };
+                    (proto, host, hostname, port, p, search, hash)
+                }
+                "search" => {
+                    let s = if val.is_empty() {
+                        String::new()
+                    } else if val.starts_with('?') {
+                        val.clone()
+                    } else {
+                        format!("?{val}")
+                    };
+                    (proto, host, hostname, port, path, s, hash)
+                }
+                _ => {
+                    // `hash` — `""` retire le fragment, sinon
+                    // `#` préfixé si absent (spec).
+                    let h = if val.is_empty() {
+                        String::new()
+                    } else if val.starts_with('#') {
+                        val.clone()
+                    } else {
+                        format!("#{val}")
+                    };
+                    (proto, host, hostname, port, path, search, h)
+                }
+            };
+            let nav_url = format!("{proto}//{host}{path}{search}{hash}");
+            if let Some(nav) = &e.hooks.navigate {
+                nav(&nav_url);
+            }
+            return Ok(true);
+        }
         Ok(false)
     }
 

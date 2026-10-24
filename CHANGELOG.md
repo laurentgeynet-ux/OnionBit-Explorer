@@ -1315,6 +1315,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-160 — `hashchange` + setters `location.*`**
+  (`explorer-jscore` + `explorer-js` + `explorer-core` —
+  cap « web réel sécurisé » ; numéro officiel attribué à
+  l'intégration) : `location.hash`/`search`/`pathname`/
+  `host`/`hostname`/`port`/`protocol` en écriture
+  recomposent l'URL et naviguent (spec — les routeurs
+  hash et `location.search=` des flows auth en vivent) ;
+  la navigation fragment et la traversée same-document
+  entre fragments dispatchent `hashchange`
+  `{type,oldURL,newURL}` (après `popstate` à la
+  traversée, ordre spec), listeners resynchronisés
+  miroir→DOM. Plomberie additive : `JsEngine::
+  fire_hashchange` → `Cmd::FireHashchange` →
+  `Engine::fire_hashchange` → `fire_event_listeners`.
+  3 tests session + 1 test dom.
 - **CAP-159 — contextes nommés** (`explorer-jscore` +
   `explorer-js` + `explorer-core` — cap « web réel
   sécurisé » ; numéro officiel attribué à l'intégration) :

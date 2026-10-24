@@ -1046,6 +1046,33 @@ impl Engine {
         let _ = self.fire_event_listeners(Value::Obj(ev));
     }
 
+    /// `hashchange` (CAP-160) — événement `{type:"hashchange",
+    /// oldURL, newURL}` dispatché sur la fenêtre du contexte
+    /// `ctx` (routeurs hash des SPA : navigation fragment et
+    /// traversée entre fragments le déclenchent — spec HTML).
+    /// `ctx` non courant → `switch_to` temporaire, puis
+    /// restauration (même convention que les autres coutures
+    /// session).
+    pub fn fire_hashchange(&mut self, ctx: crate::context::CtxId, old: &str, new: &str) {
+        let prev = self.cur_ctx;
+        if ctx != prev {
+            self.switch_to(ctx);
+        }
+        let ev = self.new_object();
+        let ty = self.str_val("hashchange");
+        self.set_own(ev, "type", ty, true);
+        let ov = self.str_val(old);
+        self.set_own(ev, "oldURL", ov, true);
+        let nv = self.str_val(new);
+        self.set_own(ev, "newURL", nv, true);
+        self.set_own(ev, "cancelable", Value::Bool(false), true);
+        self.set_own(ev, "bubbles", Value::Bool(false), true);
+        let _ = self.fire_event_listeners(Value::Obj(ev));
+        if ctx != prev {
+            self.switch_to(prev);
+        }
+    }
+
     /// Nom du contexte `ctx` pour `window.name` (CAP-159) —
     /// posé par l'embedder quand la session nomme un
     /// contexte top-level (`target="x"`/`window.open`) ;
@@ -1325,6 +1352,7 @@ impl Engine {
             .filter(|(t, _, _)| *t == ty)
             .map(|(_, cb, _)| *cb)
             .collect();
+
         for cb in cbs {
             let _ = self.call_value(cb, Value::Obj(g), &[ev])?;
         }

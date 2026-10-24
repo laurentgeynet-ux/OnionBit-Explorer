@@ -3359,6 +3359,28 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-160. `hashchange` + setters `location.*`** —
+  *(numéro officiel attribué à l'intégration)* : deux trous
+  liés des routeurs SPA. (a) `location.hash=`/`search=`/
+  `pathname=`/`host`/`hostname`/`port`/`protocol` étaient
+  des écritures silencieusement inertes — chaque setter
+  recompose l'URL courante (`url_parts`) et émet le hook
+  `navigate` (spec « Location » : tout setter de composant
+  navigue ; `''` retire `hash`/`search`, `/` préfixé à
+  `pathname`, `#`/`?` normalisés). (b) La navigation
+  fragment et la traversée entre fragments ne dispatçaient
+  pas `hashchange` : `try_fragment_nav` tire désormais
+  `{type:"hashchange", oldURL, newURL}` quand le fragment
+  diffère réellement (`#a`→`#a` silencieux), et la
+  traversée same-document le tire **après** `popstate`
+  (ordre spec). Plomberie : `JsEngine::fire_hashchange`
+  additif (défaut no-op) → `Cmd::FireHashchange` →
+  `Engine::fire_hashchange` (switch/restore si ctx non
+  courant) → `fire_event_listeners` ; mutations des
+  listeners resynchronisées miroir→DOM
+  (`sync_dom_keyed`/`apply_dom_sync`/`after_script`).
+  3 tests session + 1 test dom jscore (triplet d'URLs
+  recomposées).
 - [x] **CAP-159. Contextes nommés — `window.open(u,"x")`/
   `target="x"`/`form target="x"` réutilisent l'onglet
   porteur** — *(numéro officiel attribué à l'intégration)* :

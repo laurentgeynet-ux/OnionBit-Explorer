@@ -11177,3 +11177,90 @@ async fn form_named_target_reuses_popup() {
         "le popup nommé a reçu la soumission"
     );
 }
+
+// ===== CAP-160 — `hashchange` : navigation fragment et
+// traversée entre fragments dispatchent l'événement
+// `{type,oldURL,newURL}` sur window (routeurs hash SPA). =====
+
+/// Clic `<a href="#ancre">` : nav same-document →
+/// `hashchange` tiré avec `oldURL`/`newURL` réels.
+#[tokio::test]
+async fn hashchange_fires_on_fragment_nav() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <a href=\"#cible\">vers ancre</a><div id=x></div>\
+         <div id=\"cible\">ici</div><script>\
+         addEventListener('hashchange',function(e){\
+         document.getElementById('x').textContent=\
+         'h:'+e.oldURL.split('#')[1]+'>'+e.newURL.split('#')[1]})\
+         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(
+        dump.contains("h:undefined&gt;cible") || dump.contains("h:undefined>cible"),
+        "hashchange dispatché : {dump}"
+    );
+}
+
+/// `location.hash='x'` deux fois de suite : le second est
+/// une nav à fragment **inchangé** → pas de second
+/// `hashchange` (spec : seul un changement de fragment tire).
+#[tokio::test]
+async fn hashchange_not_fired_same_fragment() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><script>         addEventListener('hashchange',function(){         document.getElementById('x').textContent+='h'});         location.hash='x';location.hash='x'         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    s.pump_timers(id);
+    s.drain_script_nav(id).await;
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(dump.contains("\"h\""), "un hashchange : {dump}");
+    assert!(!dump.contains("hh"), "pas de doublon : {dump}");
+}
+
+/// Traversée same-document entre deux fragments : `back`
+/// dispatche `popstate` **puis** `hashchange` (ordre spec) —
+/// le `newURL` porte le fragment de l'entrée cible.
+#[tokio::test]
+async fn hashchange_fires_on_traversal() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div><script>\
+         addEventListener('popstate',function(){\
+         document.getElementById('x').textContent+='p'});\
+         addEventListener('hashchange',function(e){\
+         document.getElementById('x').textContent+=\
+         'h'+(e.newURL.split('#')[1]||'none')});\
+         location.hash='a';location.hash='b';\
+         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    // Trois entrées same-doc : / , /#a , /#b — back vers /#a
+    // → `popstate` puis `hashchange` (`pha` = ordre spec).
+    s.go_back(id).await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/#a"));
+    assert!(dump.contains("pha"), "popstate puis hashchange : {dump}");
+}

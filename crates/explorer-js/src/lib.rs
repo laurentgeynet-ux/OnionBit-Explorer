@@ -632,6 +632,12 @@ pub trait JsEngine: Send {
     /// : no-op (moteur sans contextes nommés — harnais).
     fn set_ctx_name(&mut self, _ctx: JsCtxId, _name: &str) {}
 
+    /// Dispatch `hashchange` (`{oldURL,newURL}`) sur la
+    /// fenêtre du contexte `ctx` (CAP-160 — navigation
+    /// fragment et traversée entre fragments ; les routeurs
+    /// hash des SPA en vivent). Défaut : no-op.
+    fn fire_hashchange(&mut self, _ctx: JsCtxId, _old: &str, _new: &str) {}
+
     /// `document.referrer` (CAP-156) : le `Referer` envoyé
     /// par la navigation du document (`""` = aucun) — posé
     /// après `install_dom`, avant la première évaluation.
@@ -1099,6 +1105,11 @@ enum Cmd {
         ctx: JsCtxId,
         name: String,
     },
+    FireHashchange {
+        ctx: JsCtxId,
+        old: String,
+        new: String,
+    },
     /// `document.referrer` du document top-level (CAP-156).
     SetPageReferrer {
         referrer: String,
@@ -1413,6 +1424,9 @@ impl JscoreEngine {
                 }
                 Cmd::SetCtxName { ctx, name } => {
                     eng.set_ctx_name(ctx, &name);
+                }
+                Cmd::FireHashchange { ctx, old, new } => {
+                    eng.fire_hashchange(ctx, &old, &new);
                 }
                 Cmd::SetPageReferrer { referrer } => {
                     eng.set_page_referrer(&referrer);
@@ -1882,6 +1896,14 @@ impl JsEngine for JscoreEngine {
         let _ = self.tx.send(Cmd::SetCtxName {
             ctx,
             name: name.to_string(),
+        });
+    }
+
+    fn fire_hashchange(&mut self, ctx: JsCtxId, old: &str, new: &str) {
+        let _ = self.tx.send(Cmd::FireHashchange {
+            ctx,
+            old: old.to_string(),
+            new: new.to_string(),
         });
     }
 

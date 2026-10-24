@@ -239,6 +239,10 @@ impl Session {
             return false;
         }
         let prev = self.tabs.get(&tab).and_then(|e| e.title.clone());
+        // URL sortante pour `hashchange` (CAP-160) — le
+        // fragment change → l'événement est dispatché sur
+        // le contexte top avec `oldURL`/`newURL` (spec).
+        let old_url = self.tabs.get(&tab).and_then(|e| e.url.clone());
         if let Some(e) = self.tabs.get_mut(&tab) {
             e.hist.truncate(e.hist_idx + 1);
             // L'entrée fragment hérite l'état de l'entrée
@@ -269,6 +273,30 @@ impl Session {
         }
         let title = self.tabs.get(&tab).and_then(|e| e.title.clone());
         self.emit_navigated(tab, &req.url, title, prev.as_deref());
+        // `hashchange` (CAP-160) — seulement si le fragment
+        // a réellement changé (spec : `#a` → `#a` ne tire pas).
+        if old_url.as_ref().and_then(Url::fragment) != Some(frag) {
+            if let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()) {
+                eng.fire_hashchange(
+                    explorer_js::JS_CTX_TOP,
+                    &old_url.as_ref().map_or_else(String::new, Url::as_str),
+                    &req.url.as_str(),
+                );
+            }
+            // Mutations des listeners `hashchange` → re-parse
+            // + relayout (même chemin que la traversée
+            // same-document, CAP-158) puis drains post-script.
+            let sync = self.tabs.get_mut(&tab).and_then(|e| {
+                let eng = e.js.as_mut()?;
+                eng.sync_dom_keyed()
+                    .map(|k| (k.html, Some(k.ids), Some(k.tags)))
+                    .or_else(|| eng.sync_dom_path().map(|(m, _)| (m, None, None)))
+            });
+            if let Some((html, ids, tags)) = sync {
+                self.apply_dom_sync(tab, &html, None, false, ids, tags);
+            }
+            self.after_script(tab);
+        }
         if frag.is_empty() {
             // `#` nu = haut de page.
             let _ = self.scroll_to_y(tab, 0.0);
@@ -530,6 +558,11 @@ impl Session {
             let title = entry.title.clone();
             let hist_len = u32::try_from(entry.hist.len()).unwrap_or(u32::MAX);
             let state = entry.hist[idx].state.clone();
+            // `hashchange` à la traversée (CAP-160) — le
+            // fragment de l'entrée cible diffère du courant
+            // → événement après `popstate` (ordre spec).
+            let old_url = entry.url.clone();
+            let frag_changed = old_url.as_ref().and_then(Url::fragment) != url.fragment();
             entry.hist_idx = idx;
             entry.url = Some(url.clone());
             // `last_req` suit l'entrée : `reload` rejoue
@@ -543,6 +576,13 @@ impl Session {
                     state.as_deref(),
                     true,
                 );
+                if frag_changed {
+                    eng.fire_hashchange(
+                        explorer_js::JS_CTX_TOP,
+                        &old_url.as_ref().map_or_else(String::new, Url::as_str),
+                        &url.as_str(),
+                    );
+                }
             }
             // Mutations des listeners `popstate` → re-parse +
             // relayout (même chemin que le drain post-script) ;
