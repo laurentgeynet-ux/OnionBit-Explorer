@@ -1315,6 +1315,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-167 — `crossorigin` sur `<script>`/`<link rel=stylesheet>`**
+  (`explorer-core` — cap « web réel sécurisé » ;
+  numéro officiel attribué à l'intégration) : attribut
+  → `fetch_mode: cors` pour les ressources
+  cross-origin (`req.cors` + `Origin:`),
+  `CorsTransport` existant en force ACAO/ACAC —
+  `use-credentials` exige l'origine exacte +
+  `Access-Control-Allow-Credentials: true` (`*`
+  refusé). Mapping : vide/`anonymous`/inconnu →
+  `SameOrigin`, `use-credentials` → `Include`. Sans
+  attribut : `no-cors` inchangé ; same-origin non
+  forcé en CORS. SRI (CAP-163) vérifié après
+  acceptation CORS. Bornes : `@import`, fonds CSS,
+  images, iframes, prefetch module restent
+  `no-cors`. 5 tests session.
 - **CAP-166 — `history.scrollRestoration`**
   (`explorer-jscore` — cap « web réel sécurisé » ;
   numéro officiel attribué à l'intégration) : enum

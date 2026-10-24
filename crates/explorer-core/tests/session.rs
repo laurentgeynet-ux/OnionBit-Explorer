@@ -11466,3 +11466,174 @@ async fn sri_stylesheet_match_applies_mismatch_dropped() {
         "no.css (SRI mismatch) jamais appliquée"
     );
 }
+
+/// `crossorigin` sur `<script src>` (CAP-167) : mode `cors` —
+/// `sec-fetch-mode: cors` + `Origin:` émis cross-origin, et le
+/// `CorsTransport` exige `Access-Control-Allow-Origin`
+/// couvrant la page. Sans ACAO → corps abandonné (même
+/// surface qu'un échec réseau — jamais évalué).
+#[tokio::test]
+async fn crossorigin_script_needs_acao() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div>\
+         <script src=\"http://cdn.test/ok.js\" crossorigin></script>\
+         </body></html>",
+    );
+    // Sans ACAO : le script ne doit PAS s'exécuter.
+    t.route(
+        "/ok.js",
+        200,
+        "document.getElementById('x').textContent='ran';",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(!dump.contains("ran"), "cors sans ACAO → rejeté : {dump}");
+    // La requête est bien partie en mode cors avec Origin.
+    assert_eq!(
+        t.req_header("/ok.js", "sec-fetch-mode").as_deref(),
+        Some("cors")
+    );
+    assert_eq!(
+        t.req_header("/ok.js", "origin").as_deref(),
+        Some("http://h.test")
+    );
+}
+
+/// `crossorigin` + `Access-Control-Allow-Origin` couvrant la
+/// page → le script s'exécute (vraie boucle CDN + SRI).
+#[tokio::test]
+async fn crossorigin_script_acao_runs() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div>\
+         <script src=\"http://cdn.test/ok.js\" crossorigin=\"anonymous\"></script>\
+         </body></html>",
+    );
+    t.route_headers(
+        "/ok.js",
+        200,
+        "document.getElementById('x').textContent='ran';",
+        &[("access-control-allow-origin", "http://h.test")],
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(dump.contains("ran"), "cors + ACAO → exécuté : {dump}");
+}
+
+/// `crossorigin="use-credentials"` : `ACAO: *` ne suffit pas
+/// — `include` exige l'origine exacte + `Access-Control-
+/// Allow-Credentials: true` (spec CORS).
+#[tokio::test]
+async fn crossorigin_use_credentials_rejects_wildcard() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div>\
+         <script src=\"http://cdn.test/ok.js\" crossorigin=\"use-credentials\"></script>\
+         </body></html>",
+    );
+    t.route_headers(
+        "/ok.js",
+        200,
+        "document.getElementById('x').textContent='ran';",
+        &[("access-control-allow-origin", "*")],
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(
+        !dump.contains("ran"),
+        "use-credentials + ACAO:* → rejeté : {dump}"
+    );
+}
+
+/// Sans `crossorigin` : le fetch reste `no-cors` — pas
+/// d'`Origin`, pas d'exigence ACAO (comportement historique).
+#[tokio::test]
+async fn no_crossorigin_stays_no_cors() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div>\
+         <script src=\"http://cdn.test/ok.js\"></script>\
+         </body></html>",
+    );
+    t.route(
+        "/ok.js",
+        200,
+        "document.getElementById('x').textContent='ran';",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(dump.contains("ran"), "no-cors → exécuté : {dump}");
+    assert_eq!(
+        t.req_header("/ok.js", "sec-fetch-mode").as_deref(),
+        Some("no-cors")
+    );
+    assert_eq!(t.req_header("/ok.js", "origin"), None);
+}
+
+/// `crossorigin` sur `<link rel=stylesheet>` : même règle
+/// CORS — sans ACAO la feuille cross-origin est abandonnée,
+/// avec ACAO couvrant la page elle est appliquée.
+#[tokio::test]
+async fn crossorigin_stylesheet_needs_acao() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <link rel=stylesheet href=\"http://cdn.test/s.css\" crossorigin>\
+         </head><body><div id=k style=\"width:50px;height:50px\"></div>\
+         </body></html>",
+    );
+    // Sans ACAO : feuille rejetée → aucun vert.
+    t.route_bin("/s.css", 200, b"#k{background:#00ff00}".to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert_eq!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]),
+        0,
+        "feuille cors sans ACAO non appliquée"
+    );
+    assert_eq!(
+        t.req_header("/s.css", "sec-fetch-mode").as_deref(),
+        Some("cors")
+    );
+    // Avec ACAO couvrant la page → appliquée.
+    t.route_headers(
+        "/s2.css",
+        200,
+        "#k{background:#00ff00}",
+        &[("access-control-allow-origin", "http://h.test")],
+    );
+    t.route(
+        "/p2",
+        200,
+        "<!doctype html><html><head>\
+         <link rel=stylesheet href=\"http://cdn.test/s2.css\" crossorigin>\
+         </head><body><div id=k style=\"width:50px;height:50px\"></div>\
+         </body></html>",
+    );
+    s.navigate(id, "http://h.test/p2").await.unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert!(
+        count_color(fw as usize, fh as usize, px, [0, 255, 0]) > 0,
+        "feuille cors + ACAO appliquée"
+    );
+}

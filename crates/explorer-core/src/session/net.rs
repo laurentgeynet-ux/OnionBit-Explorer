@@ -858,14 +858,15 @@ impl Session {
             explorer_net::csp::csp_allows(csp, page, dest, u)
         };
         let mut seen_sheets = std::collections::HashSet::new();
-        // `(url, integrity)` — SRI (CAP-163) voyage jusqu'au
-        // commit de la réponse (mismatch = feuille rejetée).
-        let sheets: Vec<(Url, Option<String>)> = collect_stylesheet_links(dom)
+        // `(url, integrity, crossorigin)` — SRI (CAP-163) et
+        // mode CORS (CAP-167) voyagent jusqu'au commit de la
+        // réponse.
+        let sheets: Vec<SheetFetch> = collect_stylesheet_links(dom)
             .into_iter()
-            .filter(|(_, m, _)| media_attr_matches(&env, m.as_deref().unwrap_or_default()))
-            .filter_map(|(h, _, i)| Url::resolve(base, &h).ok().map(|u| (u, i)))
-            .map(|(u, i)| (upg(u), i))
-            .filter(|(u, _)| {
+            .filter(|(_, m, ..)| media_attr_matches(&env, m.as_deref().unwrap_or_default()))
+            .filter_map(|(h, _, i, c)| Url::resolve(base, &h).ok().map(|u| (u, i, c)))
+            .map(|(u, i, c)| (upg(u), i, c))
+            .filter(|(u, ..)| {
                 !is_mixed_content(page, u)
                     && allow(explorer_net::http::FetchDest::Style, u)
                     && seen_sheets.insert(u.to_string())
@@ -990,7 +991,13 @@ impl Session {
             for (_, u) in frontier.drain(..room) {
                 jobs.push_back((
                     (u.as_str(), u.clone()),
-                    sub_request(page, &u, explorer_net::http::FetchDest::Script, page_policy),
+                    sub_request(
+                        page,
+                        &u,
+                        explorer_net::http::FetchDest::Script,
+                        page_policy,
+                        None,
+                    ),
                 ));
             }
             let mut fetched = Vec::new();

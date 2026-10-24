@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use explorer_dom::{Dom, DomError, NodeId};
 use explorer_layout::{LayoutBox, Rect};
+use explorer_net::http::FetchCredentials;
 use explorer_net::url::Url;
 use explorer_render::ImageTable;
 
@@ -447,14 +448,41 @@ pub(crate) fn collect_style_sheets(dom: &Dom, csp: &[explorer_net::csp::CspPolic
     sheets
 }
 
-/// `(href, media, integrity)` des `<link rel=stylesheet>`
-/// dans l'ordre — `rel` case-insensitive à tokens (la spec
-/// admet `rel="stylesheet alternate"` et cie) ; `href` vide
-/// sauté. `media` est conservé pour le filtre viewport de
-/// `plan_subresources` (étape 96 : un `<link media="print">`
-/// ne consomme pas la borne `max_sheets`) ; `integrity`
-/// (SRI, CAP-163) voyage jusqu'au commit de la réponse.
-pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<(String, Option<String>, Option<String>)> {
+/// Attribut `crossorigin` (CAP-167, spec HTML « CORS settings
+/// attribute ») → mode credentials : absent → `None`
+/// (comportement `no-cors` historique) ; `""`/`anonymous`/
+/// valeur inconnue → `SameOrigin` (anonymous — credentials
+/// same-origin seulement, spec) ; `use-credentials` →
+/// `Include`. La valeur est ASCII case-insensitive.
+pub(crate) fn crossorigin_attr(dom: &Dom, n: NodeId) -> Option<FetchCredentials> {
+    dom.attribute(n, "crossorigin").ok().flatten().map(|v| {
+        match v.trim().to_ascii_lowercase().as_str() {
+            "use-credentials" => FetchCredentials::Include,
+            _ => FetchCredentials::SameOrigin,
+        }
+    })
+}
+
+/// Élément stylesheet collecté : `(href, media, integrity,
+/// crossorigin)` — `media` sert au filtre viewport de
+/// `plan_subresources` ; `integrity` (SRI, CAP-163) et
+/// `crossorigin` (mode CORS, CAP-167) voyagent jusqu'au
+/// commit de la réponse.
+pub(crate) type SheetLink = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<FetchCredentials>,
+);
+
+/// Feuille résolue prête au fetch : `(url absolue,
+/// integrity, crossorigin)` — `media` a déjà servi au filtre.
+pub(crate) type SheetFetch = (Url, Option<String>, Option<FetchCredentials>);
+
+/// `SheetLink` des `<link rel=stylesheet>` dans l'ordre —
+/// `rel` case-insensitive à tokens (la spec admet
+/// `rel="stylesheet alternate"` et cie) ; `href` vide sauté.
+pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<SheetLink> {
     let mut out = Vec::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
@@ -470,7 +498,7 @@ pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<(String, Option<String>
                     if !href.is_empty() {
                         let media = dom.attribute(n, "media").ok().flatten();
                         let integrity = dom.attribute(n, "integrity").ok().flatten();
-                        out.push((href, media, integrity));
+                        out.push((href, media, integrity, crossorigin_attr(dom, n)));
                     }
                 }
             }

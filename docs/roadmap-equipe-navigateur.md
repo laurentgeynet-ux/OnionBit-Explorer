@@ -3359,6 +3359,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-167. `crossorigin` sur
+  `<script src>`/`<link rel=stylesheet>`** —
+  *(numéro officiel attribué à l'intégration)* :
+  l'attribut bascule la ressource cross-origin en
+  `fetch_mode: cors` — `req.cors` + `Origin:` émis,
+  `CorsTransport` exige `Access-Control-Allow-Origin`
+  (et `Access-Control-Allow-Credentials: true` en
+  `use-credentials`, `*` refusé). Mapping spec :
+  absent/vide/`anonymous`/inconnu →
+  `FetchCredentials::SameOrigin`, `use-credentials` →
+  `Include`. Sans l'attribut la ressource reste
+  `no-cors` (comportement historique conservé) ;
+  same-origin avec `crossorigin` ne force pas de
+  CORS inutile. SRI (CAP-163) inchangé — le condensat
+  est vérifié après acceptation CORS. Bornes
+  documentées : `@import`, fonds CSS, images, iframes
+  et prefetch de graphe module restent `no-cors` ;
+  l'origine opaque sandbox suit le chemin
+  `Origin: null` existant. 5 tests session
+  (ACAO absent/exact, `use-credentials` + `*`
+  rejeté, stylesheet appliquée/rejetée, no-cors
+  inchangé).
+
 - [x] **CAP-166. `history.scrollRestoration`** —
   *(numéro officiel attribué à l'intégration)* : enum
   reflété `"auto"`/`"manual"` document-local —

@@ -21,8 +21,8 @@ use explorer_js::JsEngine;
 use explorer_net::cookies::{partition_key, CookieJar};
 use explorer_net::error::NetResult;
 use explorer_net::http::{
-    FetchDest, FetchMode, HttpTransport, Initiator, Method, ReferrerPolicy, Request, Response,
-    StreamedResponse,
+    FetchCredentials, FetchDest, FetchMode, HttpTransport, Initiator, Method, ReferrerPolicy,
+    Request, Response, StreamedResponse,
 };
 use explorer_net::policy::{initiator_headers_policy, sec_fetch_headers};
 use explorer_net::url::Url;
@@ -35,9 +35,10 @@ use tokio::sync::broadcast;
 /// [`Session::plan_subresources`], consommé par `sub_jobs`.
 pub(crate) struct SubPlan {
     /// Feuilles `<link rel=stylesheet>` résolues —
-    /// `(url, integrity)` : la métadonnée SRI (CAP-163)
-    /// voyage jusqu'au commit de la réponse.
-    pub(crate) sheets: Vec<(Url, Option<String>)>,
+    /// `(url, integrity, crossorigin)` : SRI (CAP-163) et
+    /// mode CORS (CAP-167) voyagent jusqu'à l'émission et
+    /// au commit de la réponse.
+    pub(crate) sheets: Vec<SheetFetch>,
     /// Scripts collectés (`<script src>` + inline/modules).
     pub(crate) scripts: Vec<ScriptItem>,
     /// `<img>`/`poster` résolus et dédupliqués.
@@ -642,8 +643,9 @@ pub(crate) struct SubJob {
     /// `self.url` reste la page (initiateur, `Referer`,
     /// mixed-content) ; `doc_base` ne sert qu'à résoudre.
     pub(crate) doc_base: Url,
-    /// Plan de collecte — URLs résolues à `nav_apply`.
-    pub(crate) sheet_urls: Vec<(Url, Option<String>)>,
+    /// Plan de collecte — URLs résolues à `nav_apply` ;
+    /// `(url, integrity, crossorigin)` (CAP-163/167).
+    pub(crate) sheet_urls: Vec<SheetFetch>,
     pub(crate) scripts: Vec<ScriptItem>,
     pub(crate) img_urls: Vec<Url>,
     /// `<iframe src>` résolus à `nav_apply` (étape 128 —
@@ -812,7 +814,7 @@ impl SubJob {
             }
             match tag {
                 SubTag::Css(i) => {
-                    let (su, sri) = &self.sheet_urls[i];
+                    let (su, sri, _) = &self.sheet_urls[i];
                     if subresp_security_allows(&self.url, su, FetchDest::Style, &resp)
                         && sri_allows(sri.as_deref(), &resp.body)
                     {
@@ -906,7 +908,7 @@ impl SubJob {
             let Some(text) = self.css_slots[i].take() else {
                 continue;
             };
-            let Some(base) = self.sheet_urls.get(i).map(|(u, _)| u.clone()) else {
+            let Some(base) = self.sheet_urls.get(i).map(|(u, ..)| u.clone()) else {
                 self.css_slots[i] = Some(text);
                 continue;
             };
@@ -959,6 +961,7 @@ impl SubJob {
                     &url,
                     FetchDest::Style,
                     self.page_policy,
+                    None,
                 ))
                 .await
             else {
@@ -1009,7 +1012,7 @@ impl SubJob {
             let base = self
                 .sheet_urls
                 .get(i)
-                .map_or_else(|| self.url.clone(), |(u, _)| u.clone());
+                .map_or_else(|| self.url.clone(), |(u, ..)| u.clone());
             let rules = parse_stylesheet(text).rules;
             let mut bg = Vec::new();
             collect_decl_urls(&rules, &env, BG_PROPS, &mut bg);
@@ -1060,6 +1063,7 @@ impl SubJob {
                         &url,
                         FetchDest::Image,
                         self.page_policy,
+                        None,
                     ))
                     .await
                 else {
@@ -1382,31 +1386,31 @@ pub(crate) fn strip_http_only(raw: &str) -> String {
 /// dans cet ordre (étape 50 ; le document est déjà servi).
 pub(crate) fn sub_jobs(
     base: &Url,
-    sheet_urls: &[(Url, Option<String>)],
+    sheet_urls: &[SheetFetch],
     scripts: &[ScriptItem],
     img_urls: &[Url],
     frame_urls: &[(Url, Option<ReferrerPolicy>, Option<SandboxFlags>)],
     page_policy: Option<ReferrerPolicy>,
 ) -> VecDeque<(SubTag, Request)> {
     let mut jobs = VecDeque::new();
-    for (i, (u, _)) in sheet_urls.iter().enumerate() {
+    for (i, (u, _, cross)) in sheet_urls.iter().enumerate() {
         jobs.push_back((
             SubTag::Css(i),
-            sub_request(base, u, FetchDest::Style, page_policy),
+            sub_request(base, u, FetchDest::Style, page_policy, *cross),
         ));
     }
     for item in scripts {
         if let (Some(u), Some(slot)) = (&item.src, item.slot) {
             jobs.push_back((
                 SubTag::Script(slot),
-                sub_request(base, u, FetchDest::Script, page_policy),
+                sub_request(base, u, FetchDest::Script, page_policy, item.crossorigin),
             ));
         }
     }
     for u in img_urls {
         jobs.push_back((
             SubTag::Img(u.clone()),
-            sub_request(base, u, FetchDest::Image, page_policy),
+            sub_request(base, u, FetchDest::Image, page_policy, None),
         ));
     }
     for (i, (u, policy, _)) in frame_urls.iter().enumerate() {
@@ -1424,18 +1428,41 @@ pub(crate) fn sub_jobs(
 /// document, étape 132) + métadonnées `Sec-Fetch-*` (étape
 /// 125 — `dest` posé par l'appelant, `mode` = `no-cors`
 /// classique) — le mixed-content est filtré en amont.
+///
+/// `cross_origin` (attribut `crossorigin`, CAP-167) : `Some`
+/// → `fetch_mode: cors` ; cross-origin → `req.cors` armé
+/// (origine canonique de la page, `unsafe_headers` vide —
+/// GET safelisté) + `Origin:` explicite (spec CORS : émis
+/// même sur GET) ; le `CorsTransport` exige alors `ACAO`
+/// couvrant la page, refus = échec réseau. `SameOrigin`
+/// same-origin → métadonnées `cors` seules (rien à enforcer).
 pub(crate) fn sub_request(
     base: &Url,
     url: &Url,
     dest: FetchDest,
     policy: Option<ReferrerPolicy>,
+    cross_origin: Option<FetchCredentials>,
 ) -> Request {
     let mut req = Request::get(url.clone());
     req.initiator = Some(Initiator::Subresource(base.clone()));
     req.fetch_dest = dest;
     req.referrer_policy = policy;
+    if cross_origin.is_some() {
+        req.fetch_mode = FetchMode::Cors;
+    }
     for (n, v) in initiator_headers_policy(base, url, Method::Get, policy.unwrap_or_default()) {
         req.headers.push((n, v));
+    }
+    if let Some(creds) = cross_origin {
+        if base.origin() != url.origin() {
+            let origin = origin_header_value(base);
+            req.cors = Some(explorer_net::http::CorsRequest {
+                origin: origin.clone(),
+                credentials: creds,
+                unsafe_headers: Vec::new(),
+            });
+            req.headers.push(("origin".to_string(), origin));
+        }
     }
     req.headers.extend(sec_fetch_headers(&req));
     req
@@ -1452,7 +1479,7 @@ pub(crate) fn sub_request(
 /// effective (attribut `referrerpolicy=` de l'élément ou
 /// celle du document — étape 132).
 pub(crate) fn frame_request(base: &Url, url: &Url, policy: Option<ReferrerPolicy>) -> Request {
-    let mut req = sub_request(base, url, FetchDest::Iframe, policy);
+    let mut req = sub_request(base, url, FetchDest::Iframe, policy, None);
     req.fetch_mode = FetchMode::Navigate;
     // `sec-fetch-*` recalculés après le changement de mode.
     req.headers.retain(|(n, _)| !n.starts_with("sec-fetch-"));

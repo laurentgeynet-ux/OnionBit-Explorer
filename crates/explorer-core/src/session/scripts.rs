@@ -59,6 +59,13 @@ pub(crate) struct ScriptItem {
     /// vérifiée au commit de la réponse ; mismatch = corps
     /// abandonné (jamais évalué). `None` = pas d'attribut.
     pub(crate) integrity: Option<String>,
+    /// `crossorigin` (CAP-167) — `Some` = la requête part en
+    /// `mode:cors` (anonymous → `SameOrigin`, `use-credentials`
+    /// → `Include`) ; le `CorsTransport` exige alors `ACAO`
+    /// couvrant l'origine de la page — refus = corps
+    /// abandonné (même surface qu'un échec réseau). SRI
+    /// cross-origin l'exige par spec.
+    pub(crate) crossorigin: Option<explorer_net::http::FetchCredentials>,
     /// Slot de réception du corps fetché (index dans
     /// `script_srcs`) — `None` pour les inline.
     pub(crate) slot: Option<usize>,
@@ -131,6 +138,7 @@ pub(crate) fn collect_scripts(
                                     dom.attribute(n, "charset").ok().flatten()
                                 },
                                 integrity: dom.attribute(n, "integrity").ok().flatten(),
+                                crossorigin: super::dom_helpers::crossorigin_attr(dom, n),
                                 module,
                                 exec: if async_ {
                                     ScriptExec::Arrival
@@ -164,6 +172,7 @@ pub(crate) fn collect_scripts(
                                 inline: Some(text),
                                 charset: None,
                                 integrity: None,
+                                crossorigin: None,
                                 module,
                                 exec: if module {
                                     ScriptExec::Post
