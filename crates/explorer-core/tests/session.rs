@@ -11348,3 +11348,121 @@ async fn autofocus_and_focus_mirror_state() {
         "autofocus→focus→blur→body attendu : {dump}"
     );
 }
+
+/// CAP-163 — SRI `integrity` : un `<script src>` dont le
+/// condensat matche s'exécute ; mismatch → corps abandonné
+/// (jamais évalué, même surface qu'un échec réseau).
+/// sha256("document.title='ok'\n") calculé à la fixture.
+#[tokio::test]
+async fn sri_script_match_runs_mismatch_skipped() {
+    // sha256 du corps "/ok.js" servi par le transport.
+    let body = b"document.getElementById('x').textContent='ran';";
+    let b64 = {
+        // base64 du condensat sha256 — calculé ici pour
+        // garder la fixture auto-portante.
+        const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let h = sha256_test(body);
+        let mut s = String::new();
+        for c in h.chunks(3) {
+            let v = c.iter().fold(0u32, |a, &b| (a << 8) | u32::from(b)) << (8 * (3 - c.len()));
+            for i in 0..4 {
+                let idx = (v >> (18 - 6 * i)) & 63;
+                s.push(if i < c.len() + 1 {
+                    T[idx as usize] as char
+                } else {
+                    '='
+                });
+            }
+        }
+        s
+    };
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x></div>\
+         <script src=/ok.js integrity=\"sha256-%B64%\"></script>\
+         <script src=/bad.js integrity=\"sha256-AAAA\"></script>\
+         </body></html>"
+            .replace("%B64%", &b64)
+            .leak(),
+    );
+    t.route("/ok.js", 200, std::str::from_utf8(body).unwrap());
+    // Corps différent du digest déclaré → jamais évalué.
+    t.route(
+        "/bad.js",
+        200,
+        "document.getElementById('x').textContent='BAD';",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(dump.contains("ran"), "script SRI-match exécuté : {dump}");
+    assert!(!dump.contains("BAD"), "script SRI-mismatch rejeté : {dump}");
+}
+
+/// sha256 minimal pour la fixture (le test n'a pas accès à
+/// `ring` directement — implémentation compacte vérifiable
+/// contre `explorer_net` en amont).
+fn sha256_test(data: &[u8]) -> [u8; 32] {
+    // Réutilise le digest réel via la surface publique —
+    // `crypto::digest` est `pub` dans explorer-net.
+    let v = explorer_net::crypto::digest(explorer_net::crypto::CryptoAlgo::Sha256, data);
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&v);
+    out
+}
+
+/// CAP-163 — SRI sur `<link rel=stylesheet>` : feuille à
+/// `integrity` conforme appliquée (fond vert peint) ;
+/// mismatch → jamais appliquée (rouge absent de la frame).
+#[tokio::test]
+async fn sri_stylesheet_match_applies_mismatch_dropped() {
+    let good = b"#ok{background:#00ff00}";
+    let bad = b"#no{background:#ff0000}";
+    let b64 = |d: &[u8]| {
+        const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let h = explorer_net::crypto::digest(explorer_net::crypto::CryptoAlgo::Sha256, d);
+        let mut s = String::new();
+        for c in h.chunks(3) {
+            let v = c.iter().fold(0u32, |a, &b| (a << 8) | u32::from(b)) << (8 * (3 - c.len()));
+            for i in 0..4 {
+                let idx = (v >> (18 - 6 * i)) & 63;
+                s.push(if i < c.len() + 1 {
+                    T[idx as usize] as char
+                } else {
+                    '='
+                });
+            }
+        }
+        s
+    };
+    let (mut s, t) = test_session();
+    let page = format!(
+        "<!doctype html><html><head>\
+         <link rel=stylesheet href=/ok.css integrity=\"sha256-{}\">\
+         <link rel=stylesheet href=/no.css integrity=\"sha256-AAAA\">\
+         </head><body>\
+         <div id=ok style=\"width:60px;height:60px\"></div>\
+         <div id=no style=\"width:60px;height:60px\"></div>\
+         </body></html>",
+        b64(good)
+    );
+    t.route("/", 200, page.leak());
+    t.route_bin("/ok.css", 200, good.to_vec());
+    t.route_bin("/no.css", 200, bad.to_vec());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    let (fw, fh) = (fw as usize, fh as usize);
+    assert!(
+        count_color(fw, fh, px, [0, 255, 0]) > 0,
+        "ok.css (SRI conforme) appliquée"
+    );
+    assert_eq!(
+        count_color(fw, fh, px, [255, 0, 0]),
+        0,
+        "no.css (SRI mismatch) jamais appliquée"
+    );
+}

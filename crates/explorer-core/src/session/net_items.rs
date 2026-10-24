@@ -34,8 +34,10 @@ use tokio::sync::broadcast;
 /// ajouté à l'étape 128) — produit de
 /// [`Session::plan_subresources`], consommé par `sub_jobs`.
 pub(crate) struct SubPlan {
-    /// Feuilles `<link rel=stylesheet>` résolues.
-    pub(crate) sheets: Vec<Url>,
+    /// Feuilles `<link rel=stylesheet>` résolues —
+    /// `(url, integrity)` : la métadonnée SRI (CAP-163)
+    /// voyage jusqu'au commit de la réponse.
+    pub(crate) sheets: Vec<(Url, Option<String>)>,
     /// Scripts collectés (`<script src>` + inline/modules).
     pub(crate) scripts: Vec<ScriptItem>,
     /// `<img>`/`poster` résolus et dédupliqués.
@@ -641,7 +643,7 @@ pub(crate) struct SubJob {
     /// mixed-content) ; `doc_base` ne sert qu'à résoudre.
     pub(crate) doc_base: Url,
     /// Plan de collecte — URLs résolues à `nav_apply`.
-    pub(crate) sheet_urls: Vec<Url>,
+    pub(crate) sheet_urls: Vec<(Url, Option<String>)>,
     pub(crate) scripts: Vec<ScriptItem>,
     pub(crate) img_urls: Vec<Url>,
     /// `<iframe src>` résolus à `nav_apply` (étape 128 —
@@ -810,12 +812,10 @@ impl SubJob {
             }
             match tag {
                 SubTag::Css(i) => {
-                    if subresp_security_allows(
-                        &self.url,
-                        &self.sheet_urls[i],
-                        FetchDest::Style,
-                        &resp,
-                    ) {
+                    let (su, sri) = &self.sheet_urls[i];
+                    if subresp_security_allows(&self.url, su, FetchDest::Style, &resp)
+                        && sri_allows(sri.as_deref(), &resp.body)
+                    {
                         self.css_slots[i] = Some(decode_stylesheet(&resp.body, &resp.headers));
                     }
                 }
@@ -823,7 +823,8 @@ impl SubJob {
                     let item = &self.scripts[slot_items[slot]];
                     if item.src.as_ref().is_none_or(|u| {
                         subresp_security_allows(&self.url, u, FetchDest::Script, &resp)
-                    }) {
+                    }) && sri_allows(item.integrity.as_deref(), &resp.body)
+                    {
                         // Étape 53b : charset déclaré
                         // (classique) → BOM → UTF-8.
                         let text = decode_subresource(&resp.body, item.charset.as_deref());
@@ -905,7 +906,7 @@ impl SubJob {
             let Some(text) = self.css_slots[i].take() else {
                 continue;
             };
-            let Some(base) = self.sheet_urls.get(i).cloned() else {
+            let Some(base) = self.sheet_urls.get(i).map(|(u, _)| u.clone()) else {
                 self.css_slots[i] = Some(text);
                 continue;
             };
@@ -1008,8 +1009,7 @@ impl SubJob {
             let base = self
                 .sheet_urls
                 .get(i)
-                .cloned()
-                .unwrap_or_else(|| self.url.clone());
+                .map_or_else(|| self.url.clone(), |(u, _)| u.clone());
             let rules = parse_stylesheet(text).rules;
             let mut bg = Vec::new();
             collect_decl_urls(&rules, &env, BG_PROPS, &mut bg);
@@ -1382,14 +1382,14 @@ pub(crate) fn strip_http_only(raw: &str) -> String {
 /// dans cet ordre (étape 50 ; le document est déjà servi).
 pub(crate) fn sub_jobs(
     base: &Url,
-    sheet_urls: &[Url],
+    sheet_urls: &[(Url, Option<String>)],
     scripts: &[ScriptItem],
     img_urls: &[Url],
     frame_urls: &[(Url, Option<ReferrerPolicy>, Option<SandboxFlags>)],
     page_policy: Option<ReferrerPolicy>,
 ) -> VecDeque<(SubTag, Request)> {
     let mut jobs = VecDeque::new();
-    for (i, u) in sheet_urls.iter().enumerate() {
+    for (i, (u, _)) in sheet_urls.iter().enumerate() {
         jobs.push_back((
             SubTag::Css(i),
             sub_request(base, u, FetchDest::Style, page_policy),
@@ -1604,6 +1604,13 @@ pub(crate) fn subresp_security_allows(
 ) -> bool {
     explorer_net::policy::nosniff_allows(dest, resp)
         && explorer_net::policy::corp_allows(page, url, resp)
+}
+
+/// SRI (CAP-163) : pas de métadonnée `integrity` → admis ;
+/// déclarée et mismatch → corps abandonné (même surface
+/// qu'un échec réseau — jamais évalué ni appliqué, spec).
+fn sri_allows(meta: Option<&str>, body: &[u8]) -> bool {
+    meta.is_none_or(|m| explorer_net::crypto::integrity_allows(m, body))
 }
 /// Profondeur max d'une chaîne `@import` (étape 96) —
 /// complément de la dédup par URL : borne la descente sur

@@ -3359,6 +3359,30 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-163. `integrity` (SRI) sur scripts et
+  feuilles externes** — *(numéro officiel attribué à
+  l'intégration)* : `<script src integrity>` et
+  `<link rel=stylesheet integrity>` vérifient le corps
+  téléchargé contre le condensat déclaré avant
+  acceptation — mismatch = ressource abandonnée, même
+  surface qu'un échec réseau (jamais évaluée ni
+  appliquée, spec SRI §3.3.5). `explorer-net::crypto`
+  gagne `integrity_allows(meta, body)` : jetons
+  `algo-base64` séparés d'espaces, `sha256`/`sha384`/
+  `sha512` (options `?` ignorées, spec), le plus fort
+  des algorithmes reconnus décide, aucun reconnu →
+  admis (dégradation spec). Métadonnée filée :
+  `collect_stylesheet_links` → triple
+  `(href, media, integrity)`, `sheet_urls` →
+  `Vec<(Url, Option<String>)>`, `ScriptItem.integrity`,
+  garde `sri_allows` aux deux bras `Css`/`Script` du
+  `fetch_wave`. Bornes : `@import` interne non
+  couvert (le sous-fetch hérite la politique du
+  parent, pas d'`integrity` par règle), `<img>`/module
+  scripts non couverts à cette tranche. 3 tests net
+  (vecteurs + match/mismatch) + 2 session (exécution
+  script, pixel feuille).
+
 - [x] **CAP-162. Focus de document (miroir)** —
   *(numéro officiel attribué à l'intégration)* :
   `el.focus()`/`el.blur()` ne faisaient que dispatcher

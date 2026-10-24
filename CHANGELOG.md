@@ -1315,6 +1315,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-163 — `integrity` (SRI) sur scripts et feuilles
+  externes** (`explorer-net` + `explorer-core` — cap
+  « web réel sécurisé » ; numéro officiel attribué à
+  l'intégration) : `<script src integrity>` et
+  `<link rel=stylesheet integrity>` vérifient le corps
+  contre le condensat déclaré avant acceptation —
+  mismatch = ressource abandonnée (même surface qu'un
+  échec réseau, jamais évaluée ni appliquée, spec SRI).
+  `crypto::integrity_allows` : jetons `algo-base64`,
+  `sha256`/`384`/`512`, options `?` ignorées, plus fort
+  reconnu décide, aucun reconnu → admis. Métadonnée
+  filée dans `sheet_urls: Vec<(Url, Option<String>)>`
+  et `ScriptItem.integrity`. Bornes : `@import` interne
+  et `<img>`/`module` non couverts. 3 tests net + 2
+  session (exécution script, pixel feuille).
 - **CAP-162 — focus de document (miroir)**
   (`explorer-jscore` — cap « web réel sécurisé » ;
   numéro officiel attribué à l'intégration) :

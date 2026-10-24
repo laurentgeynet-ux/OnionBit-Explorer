@@ -55,6 +55,10 @@ pub(crate) struct ScriptItem {
     /// externe seulement — ignoré par spec pour les modules,
     /// toujours UTF-8 ; étape 53b).
     pub(crate) charset: Option<String>,
+    /// `integrity` SRI (CAP-163) — métadonnée `algo-digest`
+    /// vérifiée au commit de la réponse ; mismatch = corps
+    /// abandonné (jamais évalué). `None` = pas d'attribut.
+    pub(crate) integrity: Option<String>,
     /// Slot de réception du corps fetché (index dans
     /// `script_srcs`) — `None` pour les inline.
     pub(crate) slot: Option<usize>,
@@ -126,6 +130,7 @@ pub(crate) fn collect_scripts(
                                 } else {
                                     dom.attribute(n, "charset").ok().flatten()
                                 },
+                                integrity: dom.attribute(n, "integrity").ok().flatten(),
                                 module,
                                 exec: if async_ {
                                     ScriptExec::Arrival
@@ -158,6 +163,7 @@ pub(crate) fn collect_scripts(
                                 src: None,
                                 inline: Some(text),
                                 charset: None,
+                                integrity: None,
                                 module,
                                 exec: if module {
                                     ScriptExec::Post

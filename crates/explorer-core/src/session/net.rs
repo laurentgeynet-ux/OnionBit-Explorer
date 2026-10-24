@@ -858,12 +858,14 @@ impl Session {
             explorer_net::csp::csp_allows(csp, page, dest, u)
         };
         let mut seen_sheets = std::collections::HashSet::new();
-        let sheets: Vec<Url> = collect_stylesheet_links(dom)
+        // `(url, integrity)` — SRI (CAP-163) voyage jusqu'au
+        // commit de la réponse (mismatch = feuille rejetée).
+        let sheets: Vec<(Url, Option<String>)> = collect_stylesheet_links(dom)
             .into_iter()
-            .filter(|(_, m)| media_attr_matches(&env, m.as_deref().unwrap_or_default()))
-            .filter_map(|(h, _)| Url::resolve(base, &h).ok())
-            .map(&upg)
-            .filter(|u| {
+            .filter(|(_, m, _)| media_attr_matches(&env, m.as_deref().unwrap_or_default()))
+            .filter_map(|(h, _, i)| Url::resolve(base, &h).ok().map(|u| (u, i)))
+            .map(|(u, i)| (upg(u), i))
+            .filter(|(u, _)| {
                 !is_mixed_content(page, u)
                     && allow(explorer_net::http::FetchDest::Style, u)
                     && seen_sheets.insert(u.to_string())

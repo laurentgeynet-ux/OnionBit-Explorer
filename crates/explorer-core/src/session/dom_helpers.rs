@@ -447,13 +447,14 @@ pub(crate) fn collect_style_sheets(dom: &Dom, csp: &[explorer_net::csp::CspPolic
     sheets
 }
 
-/// `(href, media)` des `<link rel=stylesheet>` dans l'ordre
-/// — `rel` case-insensitive à tokens (la spec admet
-/// `rel="stylesheet alternate"` et cie) ; `href` vide sauté.
-/// `media` est conservé pour le filtre viewport de
+/// `(href, media, integrity)` des `<link rel=stylesheet>`
+/// dans l'ordre — `rel` case-insensitive à tokens (la spec
+/// admet `rel="stylesheet alternate"` et cie) ; `href` vide
+/// sauté. `media` est conservé pour le filtre viewport de
 /// `plan_subresources` (étape 96 : un `<link media="print">`
-/// ne consomme pas la borne `max_sheets`).
-pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<(String, Option<String>)> {
+/// ne consomme pas la borne `max_sheets`) ; `integrity`
+/// (SRI, CAP-163) voyage jusqu'au commit de la réponse.
+pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<(String, Option<String>, Option<String>)> {
     let mut out = Vec::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
@@ -468,7 +469,8 @@ pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<(String, Option<String>
                 if let Ok(Some(href)) = dom.attribute(n, "href") {
                     if !href.is_empty() {
                         let media = dom.attribute(n, "media").ok().flatten();
-                        out.push((href, media));
+                        let integrity = dom.attribute(n, "integrity").ok().flatten();
+                        out.push((href, media, integrity));
                     }
                 }
             }
