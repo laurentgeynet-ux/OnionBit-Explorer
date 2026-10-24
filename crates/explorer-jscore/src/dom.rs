@@ -581,6 +581,12 @@ pub struct Dom {
     /// `write` sur document fermé rouvre implicitement en
     /// effaçant le contenu d'abord (spec `document open steps`).
     pub doc_open: bool,
+    /// Élément détenant le focus du document (CAP-162) —
+    /// `el.focus()`/`el.blur()`/`autofocus` le maintiennent ;
+    /// `document.activeElement` le lit (repli `body`). Un nœud
+    /// détaché perde le focus (`activeElement` retombe sur
+    /// `body`, spec « unfocus »). `Cell` : lecture `&self`.
+    pub focused: Cell<Option<NodeId>>,
     /// Compteurs `serialize_document` (JS-C37/C39) — appels,
     /// octets et micros produits, cumulés depuis la création.
     /// `Cell` : la sérialisation est `&self`.
@@ -671,6 +677,7 @@ impl Dom {
             ce_reactions: Vec::new(),
             canvas_op_limit: DEFAULT_CANVAS_OP_LIMIT,
             doc_open: true,
+            focused: Cell::new(None),
             serialize_calls: Cell::new(0),
             serialize_bytes: Cell::new(0),
             serialize_micros: Cell::new(0),
@@ -1670,6 +1677,50 @@ impl Dom {
     }
 
     // -- attributes -----------------------------------------------------
+
+    /// Le nœud peut-il recevoir le focus ? (CAP-162 — spec
+    /// « focusable area », liste bornée) : contrôles non
+    /// `disabled`, `a`/`area` avec `href`, `iframe`,
+    /// `summary`, `[tabindex]` (toute valeur — `-1` reste
+    /// focalisable *programmatiquement*), `[contenteditable]`.
+    /// Un nœud détaché n'est pas focalisable.
+    #[must_use]
+    pub fn is_focusable(&self, node: NodeId) -> bool {
+        let Some(n) = self.nodes.get(node as usize) else {
+            return false;
+        };
+        if n.kind != NodeKind::Element || !n.attached {
+            return false;
+        }
+        if self.attr(node, "disabled").is_some() {
+            return false;
+        }
+        match n.tag.as_str() {
+            "input" | "select" | "textarea" | "button" | "iframe" | "summary" => true,
+            "a" | "area" => self.attr(node, "href").is_some(),
+            _ => {
+                self.attr(node, "tabindex").is_some()
+                    || self.attr(node, "contenteditable").is_some()
+            }
+        }
+    }
+
+    /// Élément détenant le focus — `None` ou détaché → `body`
+    /// (repli spec `activeElement` : « the body element or
+    /// null » — `body` absent → `None`).
+    #[must_use]
+    pub fn active_element(&self) -> Option<NodeId> {
+        if let Some(f) = self.focused.get() {
+            if self.nodes.get(f as usize).is_some_and(|n| n.attached) {
+                return Some(f);
+            }
+            // Focus perdu par détachement (spec « unfocus ») —
+            // efface le pointeur mort.
+            self.focused.set(None);
+        }
+        let b = self.body();
+        (b != self.root && self.nodes[b as usize].attached).then_some(b)
+    }
 
     /// `getAttribute` (first occurrence, case-insensitive name).
     #[must_use]

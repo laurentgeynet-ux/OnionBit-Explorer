@@ -3429,3 +3429,32 @@ fn matchmedia_evaluates_against_env() {
         assert_eq!(got, want.to_string(), "matchMedia('{q}')");
     }
 }
+
+/// `el.focus()`/`blur()` + `document.activeElement` +
+/// `autofocus` (CAP-162) : état de focus réel du miroir —
+/// déplacement blur/focusout→focus/focusin, `focus` ne
+/// bulle pas (`focusin` oui), non-focalisable = no-op,
+/// `activeElement` retombe sur `body`.
+#[test]
+fn focus_state_and_events() {
+    let mut e = engine_with(
+        "<form><input id=a><input id=b disabled>         <div id=d tabindex=0></div></form><div id=log></div>",
+    );
+    let got = evf(
+        &mut e,
+        "var L=[];         var a=document.getElementById('a'),b=document.getElementById('b'),         d=document.getElementById('d');         var f=document.querySelector('form');         f.addEventListener('focus',function(){L.push('P:focus')});         f.addEventListener('focusin',function(ev){L.push('P:focusin:'+ev.target.id)});         a.addEventListener('blur',function(){L.push('a:blur')});         a.addEventListener('focusout',function(){L.push('a:focusout')});         b.addEventListener('focus',function(){L.push('b:focus')});         a.focus();L.push('ae:'+document.activeElement.id);         b.focus();L.push('ae2:'+document.activeElement.id);         d.focus();L.push('ae3:'+document.activeElement.id);         d.blur();L.push('ae4:'+(document.activeElement?document.activeElement.tagName:'null'));         L.join(',')",
+    );
+    assert_eq!(
+        got,
+        "P:focusin:a,ae:a,ae2:a,a:blur,a:focusout,P:focusin:d,ae3:d,ae4:null"
+    );
+}
+
+/// `autofocus` (CAP-162) : le premier élément focalisable
+/// `[autofocus]` tient `activeElement` dès l'install —
+/// le `disabled` avant lui est sauté.
+#[test]
+fn autofocus_sets_active_element() {
+    let mut e = engine_with("<input id=nope disabled autofocus><input id=yes autofocus>");
+    assert_eq!(evf(&mut e, "document.activeElement.id"), "yes");
+}

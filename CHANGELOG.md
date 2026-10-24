@@ -1315,6 +1315,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-162 — focus de document (miroir)**
+  (`explorer-jscore` — cap « web réel sécurisé » ;
+  numéro officiel attribué à l'intégration) :
+  `el.focus()`/`blur()` déplacent un état de focus
+  réel (`Dom.focused`) — quad d'événements spec
+  `blur`/`focusout` → `focus`/`focusin`, `focus`/
+  `blur` non-bullants (correction des flags
+  plateforme), `document.activeElement` (repli
+  `body`/`null`), `autofocus` honoré au chargement,
+  éléments non focalisables refusés (disabled,
+  détachés, hors liste). Les formulaires de login à
+  autofocus (Google sign-in) et la gestion de focus
+  des apps riches en dépendent. 2 tests dom + 1
+  session.
 - **CAP-161 — `matchMedia` évalué (borné)**
   (`explorer-jscore` + `explorer-js` + `explorer-core` —
   cap « web réel sécurisé » ; numéro officiel attribué à

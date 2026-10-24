@@ -11317,3 +11317,34 @@ async fn matchmedia_evaluates_session_env() {
     let dump2 = s2.dom_dump(id2).unwrap_or_default();
     assert!(dump2.contains("true"), "env sombre attendu : {dump2}");
 }
+
+/// CAP-162 — focus miroir réel : `autofocus` pose
+/// `document.activeElement` au chargement, `focus()` le
+/// déplace (et `body` est le repli sans focus — page réelle
+/// avec `<body>` contrairement au fragment jscore).
+#[tokio::test]
+async fn autofocus_and_focus_mirror_state() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <input id=who autofocus><input id=other>\
+         <div id=x></div><script>\
+         var d=document.getElementById('x');\
+         d.textContent=document.activeElement.id;\
+         document.getElementById('other').focus();\
+         d.textContent+='|'+document.activeElement.id;\
+         document.getElementById('other').blur();\
+         d.textContent+='|'+document.activeElement.tagName;\
+         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(
+        dump.contains("who|other|BODY"),
+        "autofocus→focus→blur→body attendu : {dump}"
+    );
+}

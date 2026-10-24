@@ -372,6 +372,42 @@ impl NodeHost {
     /// activation (spec). Dégradation : pas de `details`
     /// toggle event, `<input type=reset>`/fichier/couleur
     /// inertes à cette tranche.
+    /// `el.focus()` (CAP-162 — spec « focus update steps »,
+    /// borné) : non focalisable ou déjà focalisé → no-op ;
+    /// sinon `blur` puis `focusout` sur l'ancien, focus posé,
+    /// `focus` puis `focusin` sur le nouveau (ordre Chrome/
+    //  spec). Pas de scroll-into-view — borné.
+    fn focus_move(&self, e: &mut Engine, node: NodeId) -> JsResult<()> {
+        if !self.dom.borrow().is_focusable(node) {
+            return Ok(());
+        }
+        let old = self.dom.borrow().focused.get();
+        if old == Some(node) {
+            return Ok(());
+        }
+        if let Some(o) = old {
+            self.dom.borrow_mut().focused.set(None);
+            e.dispatch_simple(&self.dom, &self.cache, o, "blur")?;
+            e.dispatch_simple(&self.dom, &self.cache, o, "focusout")?;
+        }
+        self.dom.borrow_mut().focused.set(Some(node));
+        e.dispatch_simple(&self.dom, &self.cache, node, "focus")?;
+        e.dispatch_simple(&self.dom, &self.cache, node, "focusin")?;
+        Ok(())
+    }
+
+    /// `el.blur()` (CAP-162) — retire le focus si l'élément
+    /// le détient (`blur` + `focusout`), no-op sinon.
+    fn blur_el(&self, e: &mut Engine, node: NodeId) -> JsResult<()> {
+        if self.dom.borrow().focused.get() != Some(node) {
+            return Ok(());
+        }
+        self.dom.borrow_mut().focused.set(None);
+        e.dispatch_simple(&self.dom, &self.cache, node, "blur")?;
+        e.dispatch_simple(&self.dom, &self.cache, node, "focusout")?;
+        Ok(())
+    }
+
     fn run_activation(&self, e: &mut Engine, node: NodeId) -> JsResult<()> {
         let d = self.dom.borrow();
         let tag = d.nodes[node as usize].tag.clone();
@@ -500,12 +536,12 @@ impl NodeHost {
                 let ctrl = ctrl.or_else(|| first_control(&d, node));
                 drop(d);
                 if let Some(c) = ctrl {
-                    let (cancelable, composed) = platform_event_flags("click");
+                    let (bubbles, cancelable, composed) = platform_event_flags("click");
                     let st = make_event_state(
                         "click",
                         c,
                         EventFlags {
-                            bubbles: true,
+                            bubbles,
                             cancelable,
                             composed,
                             trusted: false,
@@ -775,11 +811,19 @@ fn first_control(d: &crate::dom::Dom, node: NodeId) -> Option<NodeId> {
     None
 }
 
-/// Flags `cancelable`/`composed` par défaut des events
-/// plateforme (UI Events) — les interactifs (click, keydown…)
-/// sont annulables et traversants ; les états de focus,
-/// chargement et défilement ne le sont pas.
-fn platform_event_flags(ty: &str) -> (bool, bool) {
+/// Flags `(bubbles, cancelable, composed)` par défaut des
+/// events plateforme (UI Events) — les interactifs (click,
+/// keydown…) sont annulables et traversants ; les états de
+/// focus, chargement et défilement ne le sont pas.
+/// `focus`/`blur` ne bullent pas (spec — contrairement à
+/// `focusin`/`focusout` et `focus` clavier) : la propagation
+/// de `propagate_event` lit `ev.bubbles`.
+fn platform_event_flags(ty: &str) -> (bool, bool, bool) {
+    // `focus`/`blur` seuls passent non-bullants (CAP-162,
+    // spec) — les autres types gardent leur historique
+    // (`load`/`error`/`DOMContentLoaded` restent bullants
+    // ici, borne documentée).
+    const NON_BUBBLING: &[&str] = &["focus", "blur"];
     const NON_CANCELABLE: &[&str] = &[
         "focus",
         "blur",
@@ -806,7 +850,11 @@ fn platform_event_flags(ty: &str) -> (bool, bool) {
         "readystatechange",
         "abort",
     ];
-    (!NON_CANCELABLE.contains(&ty), !NON_COMPOSED.contains(&ty))
+    (
+        !NON_BUBBLING.contains(&ty),
+        !NON_CANCELABLE.contains(&ty),
+        !NON_COMPOSED.contains(&ty),
+    )
 }
 
 /// DOM `Event` host object (from `document.createEvent` +
@@ -1417,6 +1465,29 @@ impl Engine {
         for k in ["scrollX", "scrollY", "pageXOffset", "pageYOffset"] {
             self.set_own(g, k, Value::Num(0.0), false);
         }
+
+        // `autofocus` (CAP-162 — spec « autofocus processing »,
+        // borné) : le premier élément `[autofocus]` focalisable
+        // reçoit le focus à l'install — `document.activeElement`
+        // et les prochains `focus()` le voient. Pas de dispatch
+        // (les listeners ne peuvent exister qu'après install —
+        // les scripts voient l'état déjà posé).
+        let af = {
+            let d = dom.borrow();
+            d.nodes
+                .iter()
+                .enumerate()
+                .find(|(i, n)| {
+                    n.kind == crate::dom::NodeKind::Element
+                        && n.attached
+                        && d.is_focusable(*i as u32)
+                        && d.attr(*i as u32, "autofocus").is_some()
+                })
+                .map(|(i, _)| i as u32)
+        };
+        if let Some(n) = af {
+            dom.borrow_mut().focused.set(Some(n));
+        }
     }
 
     /// Build the `Event` host wrapper for `state`.
@@ -1507,9 +1578,9 @@ impl Engine {
                 (k.clone(), v)
             })
             .collect();
-        let (cancelable, composed) = platform_event_flags(ty);
+        let (bubbles, cancelable, composed) = platform_event_flags(ty);
         let flags = EventFlags {
-            bubbles: true,
+            bubbles,
             cancelable,
             composed,
             trusted: true,
@@ -1681,12 +1752,12 @@ impl Engine {
         // `el.click()` & co sont script-initiés → `trusted:false`
         // (spec `isTrusted`), flags par type via
         // `platform_event_flags`.
-        let (cancelable, composed) = platform_event_flags(ty);
+        let (bubbles, cancelable, composed) = platform_event_flags(ty);
         let state = make_event_state(
             ty,
             node,
             EventFlags {
-                bubbles: true,
+                bubbles,
                 cancelable,
                 composed,
                 trusted: false,
@@ -1877,6 +1948,17 @@ impl Host for DocumentHost {
             "body" => {
                 let n = self.dom.borrow().body();
                 Ok(Some(node_value(e, &self.dom, &self.cache, n)))
+            }
+            // `document.activeElement` (CAP-162) — l'élément
+            // focalisé du miroir (`Dom::focused` tenu par
+            // `el.focus()`/`blur()`/`autofocus`), repli
+            // `body`, `null` si ni l'un ni l'autre.
+            "activeElement" => {
+                let n = self.dom.borrow().active_element();
+                Ok(Some(match n {
+                    Some(n) => node_value(e, &self.dom, &self.cache, n),
+                    None => Value::Null,
+                }))
             }
             "documentElement" => {
                 let n = self.dom.borrow().document_element();
@@ -3374,12 +3456,12 @@ impl Host for NodeHost {
             // soumet, checkbox/radio basculent, label
             // délègue, summary bascule details).
             "click" => {
-                let (cancelable, composed) = platform_event_flags(name);
+                let (bubbles, cancelable, composed) = platform_event_flags(name);
                 let state = make_event_state(
                     name,
                     node,
                     EventFlags {
-                        bubbles: true,
+                        bubbles,
                         cancelable,
                         composed,
                         trusted: false,
@@ -3392,8 +3474,19 @@ impl Host for NodeHost {
                 }
                 Ok(Some(Value::Undefined))
             }
-            "focus" | "blur" => {
-                e.dispatch_simple(&self.dom, &self.cache, node, name)?;
+            // `el.focus(options?)`/`el.blur()` (CAP-162) —
+            // état de focus réel du miroir : `focus()` sur un
+            // élément focalisable déplace le focus (quad
+            // `blur`/`focusout` → `focus`/`focusin`, spec
+            // « focus update steps »), `blur()` le retire.
+            // Non focalisable / déjà focalisé = no-op.
+            // `document.activeElement` reflète l'état.
+            "focus" => {
+                self.focus_move(e, node)?;
+                Ok(Some(Value::Undefined))
+            }
+            "blur" => {
+                self.blur_el(e, node)?;
                 Ok(Some(Value::Undefined))
             }
             // `form.submit()` : soumission directe — ni

@@ -3359,6 +3359,33 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-162. Focus de document (miroir)** —
+  *(numéro officiel attribué à l'intégration)* :
+  `el.focus()`/`el.blur()` ne faisaient que dispatcher
+  un événement — aucun état, `document.activeElement`
+  absent, `autofocus` ignoré. Désormais :
+  `Dom.focused` (`Cell<Option<NodeId>>`, meurt avec le
+  document) tenu par « focus update steps » bornées —
+  `focus()` sur un élément **focalisable**
+  (`input`/`select`/`textarea`/`button`/`summary`/
+  `iframe`, `a`/`area`[href], `[tabindex]`,
+  `[contenteditable]`, `disabled` exclus, détachés
+  exclus) déplace le focus — quad `blur`/`focusout` →
+  `focus`/`focusin` (ordre Chrome) ; `blur()` retire
+  si détenteur ; `focus()` sur le focalisé = no-op.
+  `document.activeElement` = focalisé, repli `body`,
+  `null` sans corps ; nœud détaché perd le focus
+  (repli immédiat). `autofocus` pose le focus au
+  `install_dom` (premier élément focalisable). Flags
+  plateforme corrigés : `focus`/`blur` ne **bullent**
+  plus (`focusin`/`focusout` si — spec UI Events) ;
+  `platform_event_flags` gagne la colonne `bubbles`
+  (lire par `propagate_event`, `EventFlags.bubbles`).
+  Bornes : pas de `focus-visible`, pas de
+  `preventScroll`, focus non synchronisé avec le
+  `focused` de session (miroir-local), `tabIndex`
+  reflection non ajoutée. 2 tests dom + 1 session.
+
 - [x] **CAP-161. `matchMedia` — évaluateur borné + env
   de session** — *(numéro officiel attribué à
   l'intégration)* : `window.matchMedia` sort du stub
