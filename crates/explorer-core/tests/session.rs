@@ -11667,3 +11667,91 @@ async fn document_current_script_in_session() {
     assert!(dump.contains("ext:a.js"), "script externe vu : {dump}");
     assert!(dump.contains("inline:SCRIPT"), "script inline vu : {dump}");
 }
+
+/// CAP-169 — `<script>` dynamique : `createElement` +
+/// `appendChild` → fetch + éval + `load`/`error` sur
+/// l'élément, sécurité CSP/SRI appliquée.
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_script_fetch_eval_load() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x>A</div>         <script>         var el=document.createElement('script');         el.src='/dyn.js';         el.onload=function(){document.getElementById('x').textContent+='+load';};         el.onerror=function(){document.getElementById('x').textContent+='+err';};         document.head.appendChild(el);         </script></body></html>",
+    );
+    t.route(
+        "/dyn.js",
+        200,
+        "document.getElementById('x').textContent+='+body'",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    assert!(
+        t.paths().contains(&"/dyn.js".to_string()),
+        "le script dynamique doit être fetché"
+    );
+    let dump = s.dom_dump(a).unwrap();
+    assert!(
+        dump.contains("A+body+load"),
+        "corps évalué puis onload : {dump}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_script_404_fires_error() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x>A</div>         <script>         var el=document.createElement('script');         el.src='/missing.js';         el.onload=function(){document.getElementById('x').textContent+='+load';};         el.onerror=function(){document.getElementById('x').textContent+='+err';};         document.head.appendChild(el);         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    let dump = s.dom_dump(a).unwrap();
+    assert!(dump.contains("A+err"), "404 → error event : {dump}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_script_csp_blocks() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x>A</div>         <script>         var el=document.createElement('script');         el.src='http://x.test/dyn.js';         el.onerror=function(){document.getElementById('x').textContent+='+err';};         document.head.appendChild(el);         </script></body></html>",
+        &[(
+            "content-security-policy",
+            "script-src 'self' 'unsafe-inline'",
+        )],
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    let dump = s.dom_dump(a).unwrap();
+    assert!(
+        dump.contains("A+err"),
+        "CSP refuse → error event, jamais fetché : {dump}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dyn_script_inner_html_inert() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=x>A</div>         <div id=holder></div>         <script>         document.getElementById('holder').innerHTML='<script src=/inert.js></scr'+'ipt>';         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    assert!(
+        !t.paths().contains(&"/inert.js".to_string()),
+        "script innerHTML doit rester inerte (spec)"
+    );
+}

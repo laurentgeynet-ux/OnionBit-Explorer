@@ -1232,6 +1232,29 @@ pub(crate) struct NetDone {
     pub(crate) partition: Option<String>,
     /// Sortie brute du transport.
     pub(crate) out: NetResult<Response>,
+    /// `<script>` dynamique (CAP-169) — `Some` = la réponse
+    /// est un corps à évaluer par
+    /// [`Session::deliver_dyn_script`] (`load`/`error` sur
+    /// l'élément), jamais une `NetResponse` de `fetch`/XHR.
+    /// `handle` porte alors le `seq` moteur.
+    pub(crate) script: Option<DynScriptMeta>,
+}
+
+/// Métadonnées de livraison d'un `<script>` dynamique
+/// (CAP-169) — le corps est vérifié (SRI, sécurité
+/// sous-ressource) puis décodé avant évaluation.
+pub(crate) struct DynScriptMeta {
+    /// Contexte moteur émetteur (`JS_CTX_TOP` ou iframe).
+    pub(crate) ctx: u32,
+    /// `dyn_script_seq` miroir — retrouve l'élément cible
+    /// de `load`/`error`/`currentScript`.
+    pub(crate) seq: u64,
+    /// SRI déclaré sur l'élément (`integrity`).
+    pub(crate) integrity: Option<String>,
+    /// `charset` déclaré (étape 53b).
+    pub(crate) charset: Option<String>,
+    /// Document émetteur — ancre `nosniff`/CORP.
+    pub(crate) page: Url,
 }
 
 /// Complétion d'une opération `crypto.subtle` (JS-C79) —
@@ -1637,7 +1660,7 @@ pub(crate) fn subresp_security_allows(
 /// SRI (CAP-163) : pas de métadonnée `integrity` → admis ;
 /// déclarée et mismatch → corps abandonné (même surface
 /// qu'un échec réseau — jamais évalué ni appliqué, spec).
-fn sri_allows(meta: Option<&str>, body: &[u8]) -> bool {
+pub(crate) fn sri_allows(meta: Option<&str>, body: &[u8]) -> bool {
     meta.is_none_or(|m| explorer_net::crypto::integrity_allows(m, body))
 }
 /// Profondeur max d'une chaîne `@import` (étape 96) —

@@ -77,6 +77,40 @@ pub struct FormSubmit {
     pub target: String,
 }
 
+/// `<script>` inséré dynamiquement devenu attaché (CAP-169) —
+/// `createElement('script')`/`innerHTML`-style + `appendChild`
+/// & co : la session fetch/évalue puis livre via
+/// [`Engine::deliver_dyn_script`] (`load`/`error` sur
+/// l'élément). Force-async spec : évalué dès la réponse.
+#[derive(Debug, Clone)]
+pub struct DynScriptReq {
+    /// Identifiant d'émission — répercuté à la livraison.
+    pub seq: u64,
+    /// `src` brut si présent/non vide — la session résout
+    /// contre la base du document émetteur et applique
+    /// CSP/mixed-content ; `None` = script inline (`text`).
+    pub src: Option<String>,
+    /// Corps inline (`textContent`) quand `src` est absent.
+    pub text: Option<String>,
+    /// Attribut `crossorigin` (même mapping que CAP-167) —
+    /// `None` = `no-cors`, `Some` = `mode:cors` + credentials.
+    pub crossorigin: Option<crate::xhr::FetchCredentials>,
+    /// Attribut `integrity` (SRI, CAP-163) — vérifié côté
+    /// session avant acceptation du corps.
+    pub integrity: Option<String>,
+    /// Attribut `referrerpolicy` brut — prime la politique
+    /// du document (étape 132).
+    pub referrerpolicy: Option<String>,
+    /// Attribut `charset` brut (étape 53b).
+    pub charset: Option<String>,
+    /// Attribut `nonce` — ouvre `script-src` CSP inline pour
+    /// les scripts dynamiques sans `src` (CAP-145).
+    pub nonce: Option<String>,
+    /// Contexte émetteur (`JsCtxId`) — la livraison et
+    /// `currentScript` visent son miroir, jamais le parent.
+    pub ctx: crate::context::CtxId,
+}
+
 /// Browser-surface hooks (JS-7e) — everything `window.location`,
 /// `history` and `document.cookie` need, injected by the embedder so
 /// the engine never navigates or touches the cookie store itself.
@@ -96,6 +130,14 @@ pub(crate) struct BrowserHooks {
     /// jamais posé pour les modules — spec `currentScript`
     /// = scripts classiques uniquement).
     pub current_script: Option<NodeId>,
+    /// `seq` → nœud miroir des `<script>` dynamiques en vol
+    /// (CAP-169) — pour `load`/`error` et `currentScript` à
+    /// la livraison. Borné : au-delà de 256 en vol, l'entrée
+    /// la plus ancienne est abandonnée (jamais de croissance
+    /// hostiles).
+    pub dyn_script_nodes: std::collections::BTreeMap<u64, NodeId>,
+    /// Séquence d'émission des scripts dynamiques.
+    pub dyn_script_seq: u64,
     /// Cookie jar for `document.cookie`.
     pub cookie_jar: Option<Rc<dyn CookieJar>>,
     /// `location.assign/replace/href=`/`reload` → navigate to arg.
@@ -772,19 +814,19 @@ pub(crate) struct EventState {
 /// `isTrusted` interne — plateforme vs script).
 #[allow(clippy::struct_excessive_bools)] // forme WebIDL `EventInit`.
 #[derive(Clone, Copy)]
-struct EventFlags {
-    bubbles: bool,
-    cancelable: bool,
-    composed: bool,
+pub(crate) struct EventFlags {
+    pub(crate) bubbles: bool,
+    pub(crate) cancelable: bool,
+    pub(crate) composed: bool,
     /// `isTrusted` (spec) — plateforme (`dom_event*`) vrai,
     /// script (`dispatchEvent`, `el.click()`) faux.
-    trusted: bool,
+    pub(crate) trusted: bool,
 }
 
 /// État event neuf — `created` marque la « construction » pour
 /// `timeStamp` (approximation honnête : l'état naît au dispatch,
 /// quasi synchrone de la création JS dans les flux observés).
-fn make_event_state(
+pub(crate) fn make_event_state(
     ty: &str,
     target: NodeId,
     flags: EventFlags,
@@ -833,7 +875,7 @@ fn first_control(d: &crate::dom::Dom, node: NodeId) -> Option<NodeId> {
 /// `focus`/`blur` ne bullent pas (spec — contrairement à
 /// `focusin`/`focusout` et `focus` clavier) : la propagation
 /// de `propagate_event` lit `ev.bubbles`.
-fn platform_event_flags(ty: &str) -> (bool, bool, bool) {
+pub(crate) fn platform_event_flags(ty: &str) -> (bool, bool, bool) {
     // `focus`/`blur` seuls passent non-bullants (CAP-162,
     // spec) — les autres types gardent leur historique
     // (`load`/`error`/`DOMContentLoaded` restent bullants
@@ -3269,6 +3311,11 @@ impl Host for NodeHost {
                 // move results over.
                 let tmp = d.create_element("#fragment");
                 d.parse_fragment_into(tmp, &html);
+                // Spec : les scripts issus de `innerHTML` sont
+                // « already started » — jamais exécutés (CAP-169 ;
+                // différence réelle avec `insertAdjacentHTML`,
+                // dont les scripts tournent).
+                d.mark_scripts_started(tmp);
                 let kids = std::mem::take(&mut d.nodes[tmp as usize].children);
                 for &k in &kids {
                     d.nodes[k as usize].parent = None;

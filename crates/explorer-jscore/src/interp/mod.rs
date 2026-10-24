@@ -1103,6 +1103,128 @@ impl Engine {
         self.set_own(g, "name", nv, true);
     }
 
+    /// Draine les `<script>` devenus attachés par mutation
+    /// (CAP-169) — tous les contextes (courant **et** garés :
+    /// un script d'iframe injecté puis garé doit quand même
+    /// être chargé — la file vit dans son `Dom`). Chaque
+    /// requête porte `seq` (répercuté à la livraison pour
+    /// `load`/`error`/`currentScript`) et `ctx` émetteur ;
+    /// `src`/`text` selon la balise. La session résout,
+    /// applique CSP/mixed-content et fetch — le moteur ne
+    /// touche jamais le réseau.
+    pub fn drain_dyn_scripts(&mut self) -> Vec<crate::dom_host::DynScriptReq> {
+        let mut doms: Vec<(crate::context::CtxId, crate::dom_host::DomRef)> = Vec::new();
+        if let Some((d, _)) = &self.dom_ctx {
+            doms.push((self.cur_ctx, d.clone()));
+        }
+        for (id, ctx) in &self.parked {
+            if let Some((d, _)) = &ctx.dom_ctx {
+                doms.push((*id, d.clone()));
+            }
+        }
+        let mut out = Vec::new();
+        for (ctx, dom) in doms {
+            let nodes = std::mem::take(&mut dom.borrow_mut().pending_dyn);
+            let d = dom.borrow();
+            for n in nodes {
+                let Some(node) = d.nodes.get(n as usize) else {
+                    continue;
+                };
+                let attr = |k: &str| {
+                    node.attrs
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(k))
+                        .map(|(_, v)| v.clone())
+                };
+                let src = attr("src").filter(|s| !s.trim().is_empty());
+                let text = if src.is_none() {
+                    let t = d.text_content(n);
+                    (!t.trim().is_empty()).then_some(t)
+                } else {
+                    None
+                };
+                let crossorigin =
+                    attr("crossorigin").map(|v| match v.trim().to_ascii_lowercase().as_str() {
+                        "use-credentials" => crate::xhr::FetchCredentials::Include,
+                        _ => crate::xhr::FetchCredentials::SameOrigin,
+                    });
+                let seq = self.hooks.dyn_script_seq;
+                self.hooks.dyn_script_seq += 1;
+                // Borné : 256 livraisons en vol par document —
+                // la plus ancienne est abandonnée (son `load`
+                // ne partira pas — l'élément reste inerte,
+                // jamais de croissance hostile).
+                if self.hooks.dyn_script_nodes.len() >= 256 {
+                    if let Some((first, _)) = self
+                        .hooks
+                        .dyn_script_nodes
+                        .iter()
+                        .next()
+                        .map(|(k, v)| (*k, *v))
+                    {
+                        self.hooks.dyn_script_nodes.remove(&first);
+                    }
+                }
+                self.hooks.dyn_script_nodes.insert(seq, n);
+                out.push(crate::dom_host::DynScriptReq {
+                    seq,
+                    src,
+                    text,
+                    crossorigin,
+                    integrity: attr("integrity"),
+                    referrerpolicy: attr("referrerpolicy"),
+                    charset: attr("charset"),
+                    nonce: attr("nonce"),
+                    ctx,
+                });
+            }
+        }
+        out
+    }
+
+    /// Livraison d'un `<script>` dynamique (CAP-169) —
+    /// appelé dans le contexte `ctx` émetteur (le `Cmd`
+    /// dispatch switche avant). `Some(text)` = corps accepté
+    /// → évalué avec `currentScript` posé sur l'élément,
+    /// puis `load` tiré dessus ; `None` = fetch refusé
+    /// (réseau, CSP, SRI…) → `error`. Les deux events sont
+    /// non-bullants/non-annulables (spec — `NON_BUBBLING`/
+    /// `NON_CANCELABLE` existants). Élément disparu → no-op
+    /// tolérant.
+    pub fn deliver_dyn_script(&mut self, seq: u64, body: Option<&str>) {
+        let Some(node) = self.hooks.dyn_script_nodes.remove(&seq) else {
+            return;
+        };
+        let Some((dom, cache)) = self.dom_ctx.clone() else {
+            return;
+        };
+        let ty = match body {
+            Some(text) => {
+                let prev = self.hooks.current_script;
+                self.hooks.current_script = Some(node);
+                // Un script qui jette n'empêche pas `load`
+                // (spec : `error` n'est que transport/CSP).
+                let _ = self.eval(text);
+                self.hooks.current_script = prev;
+                "load"
+            }
+            None => "error",
+        };
+        let (bubbles, cancelable, composed) = crate::dom_host::platform_event_flags(ty);
+        let ev = crate::dom_host::make_event_state(
+            ty,
+            node,
+            crate::dom_host::EventFlags {
+                bubbles,
+                cancelable,
+                composed,
+                trusted: true,
+            },
+            Vec::new(),
+        );
+        let _ = self.propagate_event(&dom, &cache, &ev);
+    }
+
     /// Contexte courant.
     #[must_use]
     pub fn current_context(&self) -> crate::context::CtxId {

@@ -134,6 +134,7 @@ impl Tab {
         self.js_detached = None;
         self.js_pending_net.clear();
         self.js_pending_crypto.clear();
+        self.js_pending_dyn.clear();
         self.js_pending_attrs.clear();
         self.sync_floor = None;
         self.last_req = snap.last_req;

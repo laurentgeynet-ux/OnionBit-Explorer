@@ -1315,6 +1315,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-169 — `<script>` inséré dynamiquement**
+  (`explorer-jscore`/`explorer-js`/`explorer-core` —
+  cap « web réel sécurisé » ; numéro officiel
+  attribué à l'intégration) : `createElement` +
+  insertion → fetch + éval + `load`/`error` réels
+  (patron des loaders : tag managers, reCAPTCHA,
+  bundles). Les mutateurs du miroir marquent les
+  `<script>` insérés connectés (`dyn_pending`) ;
+  `innerHTML`/détaché → inerte (spec). Drain
+  non-réentrant `drain_dyn_scripts` →
+  `DynScriptReq` (ctx/seq/src/text/nonce/
+  crossorigin/referrerpolicy/base) → session :
+  `script-src` + mixed-content, `sub_request`
+  (CORS/Origin/Referer/Sec-Fetch) + SRI, réponse
+  routée par `NetDone.script` → livraison dans le
+  ctx émetteur, `currentScript` posé. Refus →
+  `error`, jamais d'éval d'un corps refusé. Bornes :
+  fetch interrompu par une navigation abandonné ;
+  `async`/`defer` dynamiques non ordonnancés.
+  4 tests session.
 - **CAP-168 — `document.currentScript`**
   (`explorer-jscore`/`explorer-js`/`explorer-core` —
   cap « web réel sécurisé » ; numéro officiel

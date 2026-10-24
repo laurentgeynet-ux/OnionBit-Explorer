@@ -567,6 +567,23 @@ pub trait JsEngine: Send {
         }
     }
 
+    /// Draine les `<script>` insérés dynamiquement
+    /// (CAP-169) — `createElement('script')` + `appendChild`
+    /// & co : la session résout `src`/`text`, applique la
+    /// politique (CSP/mixed-content) et livre via
+    /// [`Self::deliver_dyn_script`]. Défaut : rien (moteur
+    /// sans DOM miroir dynamique).
+    fn drain_dyn_scripts(&mut self) -> Vec<explorer_jscore::DynScriptReq> {
+        Vec::new()
+    }
+
+    /// Livre le résultat d'un `<script>` dynamique au moteur
+    /// (CAP-169) — `Some(text)` : évalué dans le contexte
+    /// `ctx` émetteur puis `load` tiré sur l'élément ;
+    /// `None` : refus réseau/politique → `error`. Défaut :
+    /// no-op.
+    fn deliver_dyn_script(&mut self, _ctx: JsCtxId, _seq: u64, _body: Option<String>) {}
+
     /// Éval d'un élément `<script>` classique (CAP-168) :
     /// `script_ord` = ordinal de l'élément parmi les
     /// `<script>` du document (ordre document) — pendant
@@ -980,6 +997,9 @@ pub use explorer_jscore::MediaEnv;
 pub use explorer_jscore::{is_bare_specifier, rewrite_bare_specifier};
 // JS-C77 — `Request.mode`/`Request.credentials` transportés par
 // `NetRequest::Fetch` (ré-export : le type reste unique).
+/// Réémis : requête de `<script>` dynamique (CAP-169) —
+/// drainée par [`JsEngine::drain_dyn_scripts`].
+pub use explorer_jscore::DynScriptReq;
 pub use explorer_jscore::{FetchCredentials, FetchMode};
 
 /// Contexte de navigation du tas moteur (étape 134 — JS-C78
@@ -1279,6 +1299,14 @@ enum Cmd {
         name: Option<String>,
         ord: usize,
         tx: Sender<Result<String, JsError>>,
+    },
+    DrainDynScripts {
+        tx: Sender<Vec<explorer_jscore::DynScriptReq>>,
+    },
+    DeliverDynScript {
+        ctx: JsCtxId,
+        seq: u64,
+        body: Option<String>,
     },
     DispatchCtx {
         ctx: JsCtxId,
@@ -1729,6 +1757,19 @@ impl JscoreEngine {
                         return;
                     }
                 }
+                Cmd::DrainDynScripts { tx } => {
+                    if tx.send(eng.drain_dyn_scripts()).is_err() {
+                        return;
+                    }
+                }
+                Cmd::DeliverDynScript { ctx, seq, body } => {
+                    let prev = eng.current_context();
+                    eng.context_switch(ctx);
+                    if eng.current_context() == ctx {
+                        eng.deliver_dyn_script(seq, body.as_deref());
+                    }
+                    eng.context_switch(prev);
+                }
                 Cmd::DispatchCtx { ctx, ty, path, tx } => {
                     let prev = eng.current_context();
                     eng.context_switch(ctx);
@@ -1919,6 +1960,18 @@ impl JsEngine for JscoreEngine {
             return Err(JsError::Dead);
         }
         rx.recv().map_err(|_| JsError::Dead)?
+    }
+
+    fn drain_dyn_scripts(&mut self) -> Vec<explorer_jscore::DynScriptReq> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainDynScripts { tx }).is_err() {
+            return Vec::new();
+        }
+        rx.recv().unwrap_or_default()
+    }
+
+    fn deliver_dyn_script(&mut self, ctx: JsCtxId, seq: u64, body: Option<String>) {
+        let _ = self.tx.send(Cmd::DeliverDynScript { ctx, seq, body });
     }
 
     fn dispatch_event_ctx(

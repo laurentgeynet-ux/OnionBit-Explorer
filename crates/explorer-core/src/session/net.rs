@@ -299,11 +299,17 @@ impl Session {
     /// immédiate d'un échec `status: 0` (`error` côté
     /// script — la page reste vivante, jamais de panic).
     pub(crate) fn drain_script_net(&mut self, tab: TabId) {
-        let Some((page, base, reqs)) = self.tabs.get_mut(&tab).and_then(|e| {
+        let Some((page, base, reqs, dyns)) = self.tabs.get_mut(&tab).and_then(|e| {
             let page = e.url.clone();
             let base = e.nav_base().cloned();
-            e.js.as_mut()
-                .map(|eng| (page, base, eng.drain_net_requests()))
+            e.js.as_mut().map(|eng| {
+                (
+                    page,
+                    base,
+                    eng.drain_net_requests(),
+                    eng.drain_dyn_scripts(),
+                )
+            })
         }) else {
             return;
         };
@@ -394,6 +400,213 @@ impl Session {
                 },
             );
         }
+        // `<script>` insérés dynamiquement (CAP-169) —
+        // `force-async` spec : fetch/éval dès l'arrivée,
+        // `load`/`error` sur l'élément à la livraison.
+        for d in dyns {
+            self.spawn_dyn_script(tab, &page, &base, &d);
+        }
+    }
+
+    /// Un `<script>` inséré dynamiquement (CAP-169) : inline →
+    /// contrôle CSP `script-src` puis livraison synchrone ;
+    /// `src` → résolution contre la base du document émetteur,
+    /// `script-src` + mixed-content, puis fetch `sub_request`
+    /// (initiateur = document émetteur — `Origin`/`Referer`/
+    /// `Sec-Fetch-*`/`crossorigin` identiques aux classiques).
+    /// Refus → `deliver_dyn_script(None)` = `error` jamais
+    /// d'éval d'un corps refusé.
+    fn spawn_dyn_script(
+        &mut self,
+        tab: TabId,
+        page: &Url,
+        base: &Url,
+        d: &explorer_js::DynScriptReq,
+    ) {
+        let Some((req_page, req_base, doc_policy, csp, _opaque)) =
+            self.ctx_net_origin(tab, d.ctx, page, base)
+        else {
+            // Contexte mort entre émission et drain → `error`.
+            self.deliver_dyn_script(tab, d.ctx, d.seq, None);
+            return;
+        };
+        match (&d.src, &d.text) {
+            (None, Some(text)) => {
+                let ok = explorer_net::csp::csp_inline_allowed(
+                    &csp,
+                    explorer_net::csp::InlineKind::Script,
+                    d.nonce.as_deref(),
+                );
+                self.deliver_dyn_script(tab, d.ctx, d.seq, ok.then(|| text.clone()));
+            }
+            (Some(src), _) => {
+                let Some(url) = Url::resolve(&req_base, src.trim())
+                    .ok()
+                    .filter(|u| !is_mixed_content(&req_page, u))
+                    .filter(|u| {
+                        explorer_net::csp::csp_allows(
+                            &csp,
+                            &req_page,
+                            explorer_net::http::FetchDest::Script,
+                            u,
+                        )
+                    })
+                else {
+                    self.deliver_dyn_script(tab, d.ctx, d.seq, None);
+                    return;
+                };
+                let policy = d
+                    .referrerpolicy
+                    .as_deref()
+                    .and_then(explorer_net::http::ReferrerPolicy::parse)
+                    .or(doc_policy);
+                let cross = d.crossorigin.map(|c| match c {
+                    explorer_js::FetchCredentials::Omit => {
+                        explorer_net::http::FetchCredentials::Omit
+                    }
+                    explorer_js::FetchCredentials::SameOrigin => {
+                        explorer_net::http::FetchCredentials::SameOrigin
+                    }
+                    explorer_js::FetchCredentials::Include => {
+                        explorer_net::http::FetchCredentials::Include
+                    }
+                });
+                let req = sub_request(
+                    &req_page,
+                    &url,
+                    explorer_net::http::FetchDest::Script,
+                    policy,
+                    cross,
+                );
+                let is_cross = req_page.origin() != url.origin();
+                let credentials = cross.unwrap_or(explorer_net::http::FetchCredentials::SameOrigin);
+                let fetch_mode = req.fetch_mode;
+                let page_origin = origin_header_value(&req_page);
+                let partition = explorer_net::cookies::request_partition(&req);
+                let req_url = req.url.clone();
+                let meta = DynScriptMeta {
+                    ctx: d.ctx,
+                    seq: d.seq,
+                    integrity: d.integrity.clone(),
+                    charset: d.charset.clone(),
+                    page: req_page,
+                };
+                let tr = self.transport.clone();
+                let tx = self.net_tx.clone();
+                let seq = d.seq;
+                let j = tokio::spawn(async move {
+                    let out = tr.fetch(&req).await;
+                    let _ = tx.send(NetDone {
+                        tab,
+                        handle: seq,
+                        cross: is_cross,
+                        mode: fetch_mode,
+                        credentials,
+                        page_origin,
+                        req_url,
+                        partition,
+                        out,
+                        script: Some(meta),
+                    });
+                });
+                self.dyn_tasks.insert((tab, seq), j);
+            }
+            // Ni `src` ni texte — balise inerte, rien à livrer.
+            (None, None) => {}
+        }
+    }
+
+    /// Livraison d'un `<script>` dynamique (CAP-169) — même
+    /// discipline que [`Self::deliver_net_response`] : tampon
+    /// sous détachement, `run_pending` + resynchro DOM +
+    /// `after_script` après le tour moteur (`load`/`error`
+    /// peuvent émettre de nouvelles intentions).
+    pub(crate) fn deliver_dyn_script(
+        &mut self,
+        tab: TabId,
+        ctx: explorer_js::JsCtxId,
+        seq: u64,
+        body: Option<String>,
+    ) {
+        let mutated = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            if entry.js_detached.is_some() {
+                entry.js_pending_dyn.push((ctx, seq, body));
+                return;
+            }
+            let Some(eng) = entry.js.as_mut() else {
+                return;
+            };
+            eng.deliver_dyn_script(ctx, seq, body);
+            let n = eng.run_pending();
+            tracing::trace!(tab, jobs = n, "jobs js après script dynamique");
+            Self::sync_for_apply(eng.as_mut())
+        };
+        if let Some(s) = mutated {
+            self.queue_apply_sync(tab, s);
+        }
+        self.after_script(tab);
+    }
+
+    /// Résolution de l'origine réseau d'un contexte (étape
+    /// 134, extraite de `spawn_script_fetch` — partagée par
+    /// les `<script>` dynamiques CAP-169) : document
+    /// émetteur (page effective + base `<base href>`) +
+    /// politique Referer + CSP + origine opaque sandboxée.
+    /// `ctx` inconnu (cadre mort) → `None`.
+    #[allow(clippy::type_complexity)]
+    fn ctx_net_origin(
+        &self,
+        tab: TabId,
+        ctx: explorer_js::JsCtxId,
+        page: &Url,
+        base: &Url,
+    ) -> Option<(
+        Url,
+        Url,
+        Option<explorer_net::http::ReferrerPolicy>,
+        Vec<explorer_net::csp::CspPolicy>,
+        bool,
+    )> {
+        if ctx == explorer_js::JS_CTX_TOP {
+            let e = self.tabs.get(&tab)?;
+            return Some((
+                page.clone(),
+                e.nav_base().cloned().unwrap_or_else(|| base.clone()),
+                e.referrer_policy,
+                e.csp.clone(),
+                false,
+            ));
+        }
+        let (f_url, f_opaque, sf) = self
+            .tabs
+            .get(&tab)
+            .and_then(|e| e.frame_ctxs.iter().find(|f| f.ctx == ctx))
+            .and_then(|f| {
+                self.tabs
+                    .get(&tab)
+                    .and_then(|e| e.frames.get(f.sub))
+                    .map(|sf| (f.url.clone(), f.opaque, sf))
+            })?;
+        let req_base = if sf.srcdoc.is_some() {
+            base.clone()
+        } else {
+            document_base(&sf.dom, &f_url)
+                .0
+                .unwrap_or_else(|| f_url.clone())
+        };
+        Some((
+            f_url.clone(),
+            req_base,
+            meta_referrer_policy(&sf.dom),
+            collect_meta_csp(&sf.dom)
+                .iter()
+                .map(|v| explorer_net::csp::CspPolicy::parse(v, true))
+                .collect(),
+            f_opaque,
+        ))
     }
 
     /// Branche `Fetch` de [`Self::drain_script_net`] (étape
@@ -424,49 +637,17 @@ impl Session {
         // (CAP-145) — un `fetch` de cadre vit sous **son**
         // document, pas sous la page top. `opaque` = origine
         // opaque sandboxée (CAP-149).
-        let (req_page, req_base, policy, csp, opaque);
-        if ctx == explorer_js::JS_CTX_TOP {
-            let Some(e) = self.tabs.get(&tab) else {
-                return Err(());
-            };
-            req_page = page.clone();
-            req_base = e.nav_base().cloned().unwrap_or_else(|| base.clone());
-            policy = e.referrer_policy;
-            csp = e.csp.clone();
-            opaque = false;
-        } else {
-            let Some((f_url, f_opaque, sf)) = self
-                .tabs
-                .get(&tab)
-                .and_then(|e| e.frame_ctxs.iter().find(|f| f.ctx == ctx))
-                .and_then(|f| {
-                    self.tabs
-                        .get(&tab)
-                        .and_then(|e| e.frames.get(f.sub))
-                        .map(|sf| (f.url.clone(), f.opaque, sf))
-                })
-            else {
-                tracing::trace!(tab, handle, ctx, "fetch d'un contexte mort");
-                return Err(());
-            };
-            req_page = f_url;
-            opaque = f_opaque;
-            // `srcdoc` hérite la base du parent (CAP-142,
-            // spec HTML) ; un cadre fetché résout contre sa
-            // propre `<base href>` éventuelle.
-            req_base = if sf.srcdoc.is_some() {
-                base.clone()
-            } else {
-                document_base(&sf.dom, &req_page)
-                    .0
-                    .unwrap_or_else(|| req_page.clone())
-            };
-            policy = meta_referrer_policy(&sf.dom);
-            csp = collect_meta_csp(&sf.dom)
-                .iter()
-                .map(|v| explorer_net::csp::CspPolicy::parse(v, true))
-                .collect();
-        }
+        // Document émetteur (étape 134) + sa base effective
+        // (étape 135) + ses politiques Referer (132) et CSP
+        // (CAP-145) — un `fetch` de cadre vit sous **son**
+        // document, pas sous la page top. `opaque` = origine
+        // opaque sandboxée (CAP-149).
+        let Some((req_page, req_base, policy, csp, opaque)) =
+            self.ctx_net_origin(tab, ctx, page, base)
+        else {
+            tracing::trace!(tab, handle, ctx, "fetch d'un contexte mort");
+            return Err(());
+        };
         let inflight = self.net_tasks.keys().filter(|(t, _)| *t == tab).count();
         if inflight >= self.max_script_net {
             tracing::trace!(tab, handle, "quota requêtes script atteint");
@@ -521,6 +702,7 @@ impl Session {
                 req_url,
                 partition,
                 out,
+                script: None,
             });
         });
         self.net_tasks.insert((tab, handle), j);
@@ -742,6 +924,31 @@ impl Session {
         }
         let n = done.len();
         for d in done {
+            // `<script>` dynamique (CAP-169) — la tâche vit
+            // dans `dyn_tasks` (son `handle` est le `seq`
+            // moteur, espace distinct des handles fetch) :
+            // sécurité sous-ressource + SRI, décodage puis
+            // livraison `load`/`error` sur l'élément.
+            if let Some(meta) = d.script {
+                self.dyn_tasks.remove(&(d.tab, meta.seq));
+                let body = match &d.out {
+                    Ok(resp)
+                        if (200..300).contains(&resp.status)
+                            && subresp_security_allows(
+                                &meta.page,
+                                &d.req_url,
+                                explorer_net::http::FetchDest::Script,
+                                resp,
+                            )
+                            && sri_allows(meta.integrity.as_deref(), &resp.body) =>
+                    {
+                        Some(decode_subresource(&resp.body, meta.charset.as_deref()))
+                    }
+                    _ => None,
+                };
+                self.deliver_dyn_script(d.tab, meta.ctx, meta.seq, body);
+                continue;
+            }
             self.net_tasks.remove(&(d.tab, d.handle));
             // `Set-Cookie` capturé : same-origin sauf
             // `credentials:omit` ; cross-origin sous `include`
@@ -819,7 +1026,7 @@ impl Session {
     /// (CLI, tests).
     #[must_use]
     pub fn net_pending(&self) -> usize {
-        self.net_tasks.len()
+        self.net_tasks.len() + self.dyn_tasks.len()
     }
 
     /// Collecte des sous-ressources du document (étape 50) :

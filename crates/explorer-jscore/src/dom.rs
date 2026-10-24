@@ -574,6 +574,17 @@ pub struct Dom {
     /// mesure du périmètre du pilote — un taux élevé signale
     /// des classes de mutations à ouvrir au rejeu).
     journal_dropped: u64,
+    /// `<script>` « already started » (CAP-169, spec HTML
+    /// « script processing model ») — un élément script ne
+    /// s'exécute qu'une fois : le parse initial et
+    /// `innerHTML` les pré-marquent ([`Self::mark_scripts_started`]) ;
+    /// les mutateurs testent ce set avant d'enfiler dans
+    /// `pending_dyn`.
+    pub(crate) dyn_started: HashSet<NodeId>,
+    /// Scripts `<script>` devenus attachés par mutation —
+    /// en attente de fetch/éval par la session
+    /// (`Engine::drain_dyn_scripts`). Ordre document.
+    pub(crate) pending_dyn: Vec<NodeId>,
     /// « Document ouvert à l'écriture » (JS-C35) — `true` tant
     /// que la page se charge : `document.write`/`writeln` y
     /// ajoutent à `<body>`. `document.close()` ou la
@@ -677,6 +688,8 @@ impl Dom {
             ce_reactions: Vec::new(),
             canvas_op_limit: DEFAULT_CANVAS_OP_LIMIT,
             doc_open: true,
+            dyn_started: HashSet::new(),
+            pending_dyn: Vec::new(),
             focused: Cell::new(None),
             serialize_calls: Cell::new(0),
             serialize_bytes: Cell::new(0),
@@ -1008,7 +1021,53 @@ impl Dom {
     pub fn from_html(html: &str) -> Self {
         let mut d = Self::new();
         d.parse_fragment_into(d.root, html);
+        // Les scripts du parse initial sont « already started »
+        // — la session les collecte et évalue via son pipeline
+        // (`ScriptItem`), jamais via la file dynamique ; sinon
+        // chaque `<script>` statique serait évalué en double.
+        d.mark_scripts_started(d.root);
+        d.pending_dyn.clear();
         d
+    }
+
+    /// Marque « already started » tous les `<script>` du
+    /// sous-arbre `node` (spec : le parseur de fragments pose
+    /// le flag — `innerHTML` n'exécute jamais ses scripts,
+    /// contrairement aux insertions directes). Itératif
+    /// (JS-C55).
+    pub fn mark_scripts_started(&mut self, node: NodeId) {
+        let mut stack = vec![node];
+        while let Some(n) = stack.pop() {
+            let el = &self.nodes[n as usize];
+            if el.kind == NodeKind::Element && el.tag == "script" {
+                self.dyn_started.insert(n);
+            }
+            stack.extend(el.children.iter().rev().copied());
+        }
+    }
+
+    /// CAP-169 : les `<script>` attachés par `node` (sous-arbre
+    /// compris, ordre document) et pas encore « started » sont
+    /// enfilés pour fetch/éval — insertion dynamique
+    /// (`appendChild` & co = `force-async`, spec). Appelé par
+    /// chaque mutateur **après** propagation du flag
+    /// `attached` — un script dans un sous-arbre détaché ne
+    /// charge rien.
+    fn note_attached_scripts(&mut self, node: NodeId) {
+        if !self.is_attached(node) {
+            return;
+        }
+        let mut stack = vec![node];
+        while let Some(n) = stack.pop() {
+            if self.nodes[n as usize].kind == NodeKind::Element
+                && self.nodes[n as usize].tag == "script"
+                && !self.dyn_started.contains(&n)
+            {
+                self.dyn_started.insert(n);
+                self.pending_dyn.push(n);
+            }
+            stack.extend(self.nodes[n as usize].children.iter().rev().copied());
+        }
     }
 
     fn alloc(&mut self, kind: NodeKind, tag: &str) -> NodeId {
@@ -1331,6 +1390,7 @@ impl Dom {
             prev,
             None,
         ));
+        self.note_attached_scripts(child);
     }
 
     /// Detach `node` from its parent (keeps the node alive).
@@ -1386,6 +1446,9 @@ impl Dom {
             None,
             None,
         ));
+        for &k in kids {
+            self.note_attached_scripts(k);
+        }
     }
 
     /// All children — elements *and* text (`childNodes`; `children`
@@ -1508,6 +1571,7 @@ impl Dom {
             prev,
             next,
         ));
+        self.note_attached_scripts(child);
     }
 
     /// Insertion d'un `DocumentFragment` : ses enfants sont
@@ -1552,11 +1616,14 @@ impl Dom {
         };
         self.queue_mutation(&MutationRecord::child_list(
             parent,
-            kids,
+            kids.clone(),
             Vec::new(),
             prev,
             next,
         ));
+        for &k in &kids {
+            self.note_attached_scripts(k);
+        }
     }
 
     /// `replaceChild(new, old)` — `old` is detached, `new` takes
@@ -1582,6 +1649,7 @@ impl Dom {
             self.set_attached(new, a);
             self.set_attached(old, false);
             self.mark_dirty_at(parent);
+            self.note_attached_scripts(new);
             self.queue_mutation(&MutationRecord::child_list(
                 parent,
                 vec![new],

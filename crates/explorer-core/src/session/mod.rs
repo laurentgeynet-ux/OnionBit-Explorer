@@ -463,6 +463,10 @@ pub(crate) struct Tab {
     /// Réponses `crypto.subtle` tamponnées pendant le détachement
     /// — même règle que `js_pending_net` (JS-C79).
     js_pending_crypto: Vec<explorer_js::CryptoResponse>,
+    /// Livraisons de `<script>` dynamiques tamponnées pendant
+    /// le détachement (CAP-169) — `(ctx, seq, corps décodé)`,
+    /// `None` = refus → `error` sur l'élément.
+    js_pending_dyn: Vec<(u32, u64, Option<String>)>,
     /// Pushes d'attributs session→miroir survenus pendant le
     /// détachement JS (53f — `value`/`checked` des champs
     /// édités pendant le burst) : rejoués puis re-sérialisés
@@ -674,6 +678,10 @@ pub struct Session {
     /// tâche tokio — `Abort` moteur ou fermeture d'onglet
     /// tuent la jointure.
     net_tasks: HashMap<(TabId, u64), JoinHandle<()>>,
+    /// Fetches de `<script>` dynamiques en vol (CAP-169) —
+    /// `(tab, seq)` → tâche tokio, livrés sur `net_rx` avec
+    /// `NetDone.script` posé (pump [`Session::poll_net`]).
+    dyn_tasks: HashMap<(TabId, u64), JoinHandle<()>>,
     /// Téléchargements bufferisés en attente de décision
     /// (étape 70), `id → corps + méta`.
     downloads: HashMap<u64, PendingDownload>,
@@ -822,6 +830,7 @@ impl Session {
             crypto_tx,
             crypto_rx,
             net_tasks: HashMap::new(),
+            dyn_tasks: HashMap::new(),
             max_script_net: cfg.max_script_net,
             max_timer_jobs: cfg.max_timer_jobs,
             paint_chunk_bytes: cfg.paint_chunk_bytes,
@@ -1120,6 +1129,7 @@ impl Session {
                 paint_detached: false,
                 deferred_inputs: VecDeque::new(),
                 js_pending_net: Vec::new(),
+                js_pending_dyn: Vec::new(),
                 js_pending_crypto: Vec::new(),
                 js_pending_attrs: Vec::new(),
                 sync_floor: None,

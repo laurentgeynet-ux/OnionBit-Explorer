@@ -3359,6 +3359,36 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-169. `<script>` inséré dynamiquement** —
+  *(numéro officiel attribué à l'intégration)* :
+  `document.createElement('script')` + insertion
+  (`appendChild`/`insertBefore`/`replaceChild`,
+  `before`/`after`/`prepend`/`append`,
+  `insertAdjacentElement`, `document.write`)
+  déclenche le cycle réel : fetch réseau → éval →
+  `load`/`error` sur l'élément — le patron dominant
+  des loaders (tag managers, reCAPTCHA, bundlers).
+  Miroir : les mutateurs `Dom` marquent chaque
+  `<script>` inséré connecté (`dyn_pending`) ;
+  `innerHTML`/fragment détaché → inerte (spec
+  « already started »). `drain_dyn_scripts` émet
+  des `DynScriptReq` (`ctx`, `seq`, `src`, `text`,
+  `nonce`, `crossorigin`, `referrerpolicy`, base)
+  que la session pompe **hors** réentrance
+  (`drain_script_net`) : inline → contrôle CSP
+  `script-src` (nonce/hash compris) puis livraison ;
+  `src` → même pile que les classiques (`sub_request`
+  CORS/`Origin`/`Referer`/`Sec-Fetch-*` + `SubFetch`
+  SRI — `NetDone.script` route la réponse vers
+  `deliver_dyn_script`, jamais d'éval d'un corps
+  refusé). Livraison dans le ctx émetteur avec
+  `currentScript` posé ; `error` non-bullant.
+  Bornes documentées : un fetch non retourné avant
+  navigation est abandonné (tampon `js_pending_dyn`
+  purgé) ; `async`/`defer`/`type` dynamiques non
+  ordonnancés (le web réel n'ordonne que `src`).
+  4 tests session (`dyn_script_*`).
+
 - [x] **CAP-168. `document.currentScript`** —
   *(numéro officiel attribué à l'intégration)* :
   l'élément `<script>` en cours d'évaluation est
