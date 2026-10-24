@@ -858,24 +858,38 @@ impl NodeHost {
         s: &str,
     ) -> JsResult<()> {
         let t = self.dom.borrow_mut().create_text(s);
+        self.insert_at_position(e, node, pos, t)
+    }
+
+    /// Position switch partagé `insertAdjacent*` (CAP-177 —
+    /// `insertAdjacentElement` joint le rail) : `beforebegin`/
+    /// `afterbegin`/`beforeend`/`afterend`, `SyntaxError` hors
+    /// jeu (spec).
+    fn insert_at_position(
+        &self,
+        e: &mut Engine,
+        node: NodeId,
+        pos: &str,
+        child: NodeId,
+    ) -> JsResult<()> {
         match pos {
             "beforebegin" => {
                 if let Some(p) = dom_parent(&self.dom, node) {
-                    self.dom.borrow_mut().insert_before(p, t, Some(node));
+                    self.dom.borrow_mut().insert_before(p, child, Some(node));
                 }
             }
             "afterbegin" => {
                 let first = self.dom.borrow().child_nodes(node).first().copied();
-                self.dom.borrow_mut().insert_before(node, t, first);
+                self.dom.borrow_mut().insert_before(node, child, first);
             }
-            "beforeend" => self.dom.borrow_mut().append(node, t),
+            "beforeend" => self.dom.borrow_mut().append(node, child),
             "afterend" => {
                 if let Some(p) = dom_parent(&self.dom, node) {
                     let next = self.dom.borrow().sibling(node, true);
-                    self.dom.borrow_mut().insert_before(p, t, next);
+                    self.dom.borrow_mut().insert_before(p, child, next);
                 }
             }
-            _ => return Err(e.syntax_error("insertAdjacentText: bad position")),
+            _ => return Err(e.syntax_error("insertAdjacent: bad position")),
         }
         Ok(())
     }
@@ -2156,7 +2170,6 @@ const DOCUMENT_METHODS: &[&str] = &[
     "addEventListener",
     "adoptNode",
     "close",
-    "createComment",
     "createDocumentFragment",
     "createElement",
     "createElementNS",
@@ -2506,6 +2519,30 @@ impl Host for DocumentHost {
                 let t = e.to_js_string(arg(args, 0))?;
                 let n = self.dom.borrow_mut().create_text(&t);
                 Ok(Some(node_value(e, &self.dom, &self.cache, n)))
+            }
+            // `document.importNode(node, deep)` (CAP-177) —
+            // spec : clone dans le document cible ; le miroir
+            // n'a qu'un document → même rail que `cloneNode`.
+            "importNode" => {
+                let Some(src) = node_for(e, arg(args, 0)) else {
+                    return Err(e.type_error("importNode: nœud requis"));
+                };
+                let deep = e.to_boolean(arg(args, 1));
+                let c = self.dom.borrow_mut().clone_node(src, deep);
+                ce_upgrade_subtree(e, &self.dom, &self.cache, c)?;
+                Ok(Some(node_value(e, &self.dom, &self.cache, c)))
+            }
+            // `document.adoptNode(node)` (CAP-177) — spec :
+            // détache le nœud et l'adopte dans le document
+            // cible ; miroir mono-document → detach + retour
+            // (le re-propriétage est un no-op — il n'y a qu'un
+            // document).
+            "adoptNode" => {
+                let Some(src) = node_for(e, arg(args, 0)) else {
+                    return Err(e.type_error("adoptNode: nœud requis"));
+                };
+                self.dom.borrow_mut().detach(src);
+                Ok(Some(node_value(e, &self.dom, &self.cache, src)))
             }
             // `document.createDocumentFragment()` — nœud
             // `Fragment` détaché ; son insertion dans un parent
@@ -3060,6 +3097,7 @@ const NODE_METHODS: &[&str] = &[
     "getRootNode",
     "hasAttribute",
     "hasChildNodes",
+    "insertAdjacentElement",
     "insertAdjacentHTML",
     "insertAdjacentText",
     "insertBefore",
@@ -3077,6 +3115,7 @@ const NODE_METHODS: &[&str] = &[
     "removeChild",
     "removeEventListener",
     "replaceChild",
+    "replaceChildren",
     "replaceWith",
     "reportValidity",
     "requestSubmit",
@@ -3101,6 +3140,12 @@ impl Host for NodeHost {
     fn has_method(&self, name: &str) -> bool {
         NODE_METHODS.contains(&name)
             || (is_dialog(&self.dom, self.node) && matches!(name, "showModal" | "show" | "close"))
+            || (is_field(&self.dom, self.node)
+                && matches!(name, "select" | "setSelectionRange" | "setRangeText"))
+            || (self.dom.borrow().nodes[self.node as usize].tag.as_str() == "form"
+                && name == "reset")
+            || (self.dom.borrow().nodes[self.node as usize].tag.as_str() == "img"
+                && name == "decode")
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -3614,6 +3659,35 @@ impl Host for NodeHost {
                     .unwrap_or_default();
                 return Ok(Some(e.str_val(v)));
             }
+            // Sélection de champ `input`/`textarea` (CAP-177) —
+            // slots `data-explorer-sel-*` (motif
+            // `CUSTOM_VALIDITY_ATTR`) : `selectionStart`/`End`
+            // = indices (défaut 0/longueur), `selectionDirection`
+            // = `forward|backward|none` (défaut `none`).
+            "selectionStart" | "selectionEnd" if is_field(&self.dom, node) => {
+                let (attr, def) = if key == "selectionStart" {
+                    (SEL_START_ATTR, 0.0)
+                } else {
+                    let d = self.dom.borrow();
+                    (SEL_END_ATTR, control_value(&d, node).chars().count() as f64)
+                };
+                let v = self
+                    .dom
+                    .borrow()
+                    .attr(node, attr)
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(def);
+                return Ok(Some(Value::Num(v)));
+            }
+            "selectionDirection" if is_field(&self.dom, node) => {
+                let v = self
+                    .dom
+                    .borrow()
+                    .attr(node, SEL_DIR_ATTR)
+                    .unwrap_or("none")
+                    .to_string();
+                return Ok(Some(e.str_val(v)));
+            }
             _ => {}
         }
         // Attribute-mapped props.
@@ -3771,6 +3845,29 @@ impl Host for NodeHost {
             "returnValue" if is_dialog(&self.dom, node) => {
                 let s = e.to_js_string(v)?;
                 e.hooks.dialog_retval.insert(node, s);
+                Ok(true)
+            }
+            // Sélection de champ (CAP-177) — écriture des
+            // slots `data-explorer-sel-*`.
+            "selectionStart" | "selectionEnd" | "selectionDirection"
+                if is_field(&self.dom, node) =>
+            {
+                let mut d = self.dom.borrow_mut();
+                match key {
+                    "selectionStart" | "selectionEnd" => {
+                        let n = e.to_number(v)?.max(0.0);
+                        let attr = if key == "selectionStart" {
+                            SEL_START_ATTR
+                        } else {
+                            SEL_END_ATTR
+                        };
+                        d.set_attr(node, attr, &format!("{}", n as u64));
+                    }
+                    _ => {
+                        let s = e.to_js_string(v)?;
+                        d.set_attr(node, SEL_DIR_ATTR, &s);
+                    }
+                }
                 Ok(true)
             }
             _ => {
@@ -4230,6 +4327,103 @@ impl Host for NodeHost {
                 let s = e.to_js_string(arg(args, 1))?;
                 self.insert_adjacent_text(e, node, &pos, &s)?;
                 Ok(Some(Value::Undefined))
+            }
+            // CAP-177 — primitives mesurées absentes par la
+            // sonde `_census_calls` (TypeError terrain) :
+            // `insertAdjacentElement` = même rail que Text
+            // mais la charge est un nœud ; `replaceChildren`
+            // vide puis insère (React/lit-html l'utilisent).
+            "insertAdjacentElement" => {
+                let pos = e.to_js_string(arg(args, 0))?;
+                let Some(child) = node_for(e, arg(args, 1)) else {
+                    return Err(e.type_error("insertAdjacentElement: not a node"));
+                };
+                self.insert_at_position(e, node, &pos, child)?;
+                Ok(Some(arg(args, 1)))
+            }
+            "replaceChildren" => {
+                let kids = self.norm_children(e, args)?;
+                self.dom.borrow_mut().replace_children(node, &kids);
+                Ok(Some(Value::Undefined))
+            }
+            // Sélection de champ `input`/`textarea` (CAP-177) —
+            // slots `data-explorer-sel-*` sérialisés dans le
+            // miroir (même motif que `CUSTOM_VALIDITY_ATTR`,
+            // ADR-0014) : `select()` = 0..len, `setSelectionRange`
+            // = bornes explicit, `setRangeText` édite `value`
+            // puis repositionne le caret (spec « preserve »
+            // par défaut).
+            "select" | "setSelectionRange" | "setRangeText" if is_field(&self.dom, node) => {
+                match name {
+                    "select" => {
+                        let len = {
+                            let d = self.dom.borrow();
+                            control_value(&d, node).chars().count().to_string()
+                        };
+                        let mut d = self.dom.borrow_mut();
+                        d.set_attr(node, SEL_START_ATTR, "0");
+                        d.set_attr(node, SEL_END_ATTR, &len);
+                        d.set_attr(node, SEL_DIR_ATTR, "none");
+                    }
+                    "setSelectionRange" => {
+                        let s = e.to_number(arg(args, 0))?.max(0.0);
+                        let en = e.to_number(arg(args, 1))?.max(0.0);
+                        let dir = match arg(args, 2) {
+                            Value::Undefined => "none".to_string(),
+                            v => e.to_js_string(v)?,
+                        };
+                        let mut d = self.dom.borrow_mut();
+                        d.set_attr(node, SEL_START_ATTR, &format!("{}", s as u64));
+                        d.set_attr(node, SEL_END_ATTR, &format!("{}", en as u64));
+                        d.set_attr(node, SEL_DIR_ATTR, &dir);
+                    }
+                    // `setRangeText(repl, s?, e?, mode?)` —
+                    // spec : remplace dans `value` puis
+                    // repositionne le caret (défaut
+                    // « preserve » — borné : repositionnement
+                    // toujours à la fin du remplacement,
+                    // documenté).
+                    _ => {
+                        let repl = e.to_js_string(arg(args, 0))?;
+                        let s = e.to_number(arg(args, 1))?.max(0.0) as usize;
+                        let en = e.to_number(arg(args, 2))?.max(0.0) as usize;
+                        let mut d = self.dom.borrow_mut();
+                        let cur = control_value(&d, node);
+                        let head: String = cur.chars().take(s).collect();
+                        let tail: String = cur.chars().skip(en).collect();
+                        let caret = head.chars().count() + repl.chars().count();
+                        let new_v = format!("{head}{repl}{tail}");
+                        if d.nodes[node as usize].tag.eq_ignore_ascii_case("textarea") {
+                            let t = d.create_text(&new_v);
+                            d.replace_children(node, &[t]);
+                        } else {
+                            d.set_attr(node, "value", &new_v);
+                        }
+                        d.set_attr(node, SEL_START_ATTR, &caret.to_string());
+                        d.set_attr(node, SEL_END_ATTR, &caret.to_string());
+                        d.set_attr(node, SEL_DIR_ATTR, "none");
+                    }
+                }
+                Ok(Some(Value::Undefined))
+            }
+            // `form.reset()` (CAP-177) — événement `reset`
+            // annulable tiré (spec : `preventDefault` conserve
+            // les valeurs) ; la restauration des valeurs
+            // par défaut reste une couture plus profonde
+            // (valeurs initiales non snapshotées) — borné.
+            "reset" if self.dom.borrow().nodes[node as usize].tag.as_str() == "form" => {
+                e.dispatch_simple(&self.dom, &self.cache, node, "reset")?;
+                Ok(Some(Value::Undefined))
+            }
+            // `<img>.decode()` (CAP-177) — spec : promesse
+            // résolue quand l'image est décodée ; le miroir
+            // ne décode pas → résolution immédiate honnête
+            // (le fetch/décodage réel suit le rail image
+            // côté session).
+            "decode" if self.dom.borrow().nodes[node as usize].tag.as_str() == "img" => {
+                let pid = e.new_promise();
+                e.resolve_promise(pid, Value::Undefined);
+                Ok(Some(Value::Obj(pid)))
             }
             // Zero-rect placeholder — layout metrics live in dw, not
             // in the mirror. Real geometry needs a dw bridge (JS-8).
@@ -6536,6 +6730,24 @@ impl Host for DatasetHost {
 /// miroir, il atteint le DOM réel qui bloque la soumission
 /// (canal miroir→moteur, déviation `outerHTML` documentée).
 const CUSTOM_VALIDITY_ATTR: &str = "data-explorer-cv";
+
+/// Slots de sélection de champ (CAP-177) — attributs
+/// internes sérialisés avec le miroir (même motif que
+/// `CUSTOM_VALIDITY_ATTR`, ADR-0014) : `selectionStart`/
+/// `selectionEnd`/`selectionDirection` sur `input`/`textarea`.
+const SEL_START_ATTR: &str = "data-explorer-sel-s";
+const SEL_END_ATTR: &str = "data-explorer-sel-e";
+const SEL_DIR_ATTR: &str = "data-explorer-sel-d";
+
+/// `true` si `node` porte la sélection de champ
+/// (`input`/`textarea` — spec `HTMLInputElement`/
+/// `HTMLTextAreaElement` ; les autres types → `null`).
+fn is_field(dom: &DomRef, node: NodeId) -> bool {
+    matches!(
+        dom.borrow().nodes[node as usize].tag.as_str(),
+        "input" | "textarea"
+    )
+}
 
 /// `willValidate` : `input`/`textarea`/`select` non `disabled`,
 /// types « barrés » exclus (`hidden`, boutons, `file` — HTML

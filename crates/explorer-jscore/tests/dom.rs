@@ -3907,3 +3907,106 @@ fn dialog_show_modal_close_bounded() {
     let r = e.eval("v.showModal()");
     assert!(r.is_err(), "showModal sur <div> doit jeter");
 }
+
+// ===== CAP-177 — primitives mesurées absentes (sonde
+// `_census_calls` : TypeError terrain) :
+// insertAdjacentElement, replaceChildren, form.reset,
+// select/setSelectionRange/setRangeText + selection*,
+// img.decode, document.importNode/adoptNode.
+
+#[test]
+fn cap177_dom_primitives_batch() {
+    let mut e = engine_with(
+        "<!doctype html><html><body>\
+         <div id=a><span id=s>x</span></div>\
+         <form id=f><input id=i value=hello><textarea id=t>world</textarea></form>\
+         <img id=g src=x.png></body></html>",
+    );
+    e.eval("var a=document.getElementById('a'), s=document.getElementById('s'), f=document.getElementById('f'), i=document.getElementById('i'), t=document.getElementById('t'), g=document.getElementById('g'), v=document.createElement('div');")
+        .expect("setup");
+    // `insertAdjacentElement` — retourne l'élément inséré.
+    assert_eq!(
+        evf(
+            &mut e,
+            "v.id='z'; var r=a.insertAdjacentElement('beforeend',v); r===v&&a.lastElementChild===v"
+        ),
+        "true"
+    );
+    // `replaceChildren` — vide puis insère.
+    assert_eq!(
+        evf(&mut e,
+            "a.replaceChildren(s, v); [a.childElementCount, a.firstElementChild===s, a.lastElementChild===v].join(',')"),
+        "2,true,true"
+    );
+    // `form.reset()` — événement `reset` annulable tiré.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var rc=0; f.addEventListener('reset', function(){rc++;}); f.reset(); rc"
+        ),
+        "1"
+    );
+    // `input.select()` → selectionStart=0, end=len.
+    assert_eq!(
+        evf(
+            &mut e,
+            "i.select(); [i.selectionStart, i.selectionEnd, i.selectionDirection].join(',')"
+        ),
+        "0,5,none"
+    );
+    // `setSelectionRange(1,3)` → bornes posées.
+    assert_eq!(
+        evf(&mut e, "i.setSelectionRange(1,3,'forward'); [i.selectionStart, i.selectionEnd, i.selectionDirection].join(',')"),
+        "1,3,forward"
+    );
+    // `selectionStart` settable en prop.
+    assert_eq!(evf(&mut e, "i.selectionStart=2; i.selectionStart"), "2");
+    // `textarea.setRangeText` — édite `value` + caret.
+    assert_eq!(
+        evf(
+            &mut e,
+            "t.setRangeText('XY', 0, 2); [t.value, t.selectionStart].join('|')"
+        ),
+        "XYrld|2"
+    );
+    // `img.decode()` → promesse résolue.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var ok=0; g.decode().then(function(){ok=1;}); typeof g.decode"
+        ),
+        "function"
+    );
+    // `document.importNode` — clone profond.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var im=document.importNode(a, true); [im.childElementCount, im!==a].join(',')"
+        ),
+        "2,true"
+    );
+    // `document.adoptNode` — détache et retourne le nœud.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var ad=document.adoptNode(v); [ad===v, v.parentNode===null].join(',')"
+        ),
+        "true,true"
+    );
+    // Feature-detect per-tag (has_method) : les méthodes
+    // gatées ne se lisent que sur leur élément.
+    assert_eq!(
+        evf(&mut e,
+            "[typeof i.select, typeof a.select, typeof f.reset, typeof a.reset, typeof g.decode, typeof a.decode].join(',')"),
+        "function,undefined,function,undefined,function,undefined"
+    );
+    // Non-dispatch : `div.insertAdjacentElement`/`replaceChildren`
+    // lisibles partout (méthodes Node universelles).
+    assert_eq!(
+        evf(
+            &mut e,
+            "[typeof a.insertAdjacentElement, typeof a.replaceChildren].join(',')"
+        ),
+        "function,function"
+    );
+}

@@ -3384,6 +3384,23 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-177. Batch primitives DOM/document
+  mesurées** — *(numéro officiel attribué à
+  l'intégration ; trous `_census_calls`)*
+  : `insertAdjacentElement` (rail
+  `insert_at_position` factorisé),
+  `replaceChildren`, `form.reset` (événement
+  `reset` annulable), `select`/`setSelectionRange`/
+  `setRangeText` + `selection*` sur
+  `input`/`textarea` (slots `data-explorer-sel-*`),
+  `img.decode` → promesse, `document.importNode`
+  + `adoptNode`. Feature-detect per-tag étendu
+  (`has_method` gaté form/field/img) ;
+  `createComment` retiré de la table (non
+  livré). `MutationObserver.observe` hors
+  périmètre — TypeError spec-correct (artefact
+  sonde). Test jscore `cap177_dom_primitives_batch`.
+
 - [x] **CAP-176. `<dialog>` : `showModal`/`show`/
   `close` + `open`/`returnValue`** — *(numéro
   officiel attribué à l'intégration ; trou

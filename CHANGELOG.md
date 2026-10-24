@@ -1400,6 +1400,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-177 — batch primitives DOM/document
+  mesurées absentes** (`explorer-jscore` —
+  cap « web réel sécurisé » ; numéro officiel
+  attribué à l'intégration ; trous mesurés par
+  sonde `_census_calls` — TypeError terrain) :
+  `insertAdjacentElement` (rail
+  `insert_at_position` factorisé),
+  `replaceChildren` (`norm_children` +
+  `replace_children`), `form.reset` (événement
+  `reset` annulable — la restauration des
+  valeurs reste une couture plus profonde),
+  `select`/`setSelectionRange`/`setRangeText` +
+  props `selectionStart`/`End`/`Direction` sur
+  `input`/`textarea` (slots
+  `data-explorer-sel-*` — même motif que
+  `CUSTOM_VALIDITY_ATTR`, ADR-0014),
+  `img.decode()` → promesse résolue (le
+  miroir ne décode pas — honnête),
+  `document.importNode` (mono-document →
+  clone) et `adoptNode` (detach + retour).
+  Feature-detect per-tag étendu : `typeof
+  input.select` = `'function'`, `typeof
+  div.select` = `'undefined'` — `has_method`
+  gaté `form`→`reset`, `img`→`decode`,
+  `input`/`textarea`→`select*`. `createComment`
+  retiré de la table (non implémenté —
+  jamais déclarer non livré) ; `adoptNode`
+  livré. `MutationObserver.observe` retiré du
+  périmètre — la sonde passait `{}` sans type
+  → TypeError spec-correct (artefact sonde).
+  Bornés : `setRangeText` repositionne
+  toujours le caret en fin de remplacement
+  (spec « preserve » approximée) ; `img.decode`
+  résout immédiatement. Test jscore
+  `cap177_dom_primitives_batch`.
+
 - **CAP-176 — `<dialog>` : `showModal`/`show`/
   `close` + `open`/`returnValue`** (`explorer-
   jscore` — cap « web réel sécurisé » ; numéro
