@@ -5360,9 +5360,24 @@ fn event_state_of(
         "pointerType",
         "pointerId",
         "isPrimary",
-        // `UIEvent`/`InputEvent`/`CompositionEvent`.
+        // `UIEvent`/`InputEvent`/`CompositionEvent`/`WheelEvent`.
         "inputType",
         "isComposing",
+        "deltaX",
+        "deltaY",
+        "deltaZ",
+        "deltaMode",
+        "width",
+        "height",
+        "pressure",
+        "tiltX",
+        "tiltY",
+        "twist",
+        "tangentialPressure",
+        "dataTransfer",
+        "touches",
+        "targetTouches",
+        "changedTouches",
     ]
     .into_iter()
     .filter_map(|k| e.get_prop(id, k).map(|v| (k.to_string(), v)))
@@ -7091,9 +7106,50 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     // tels quels.
     if matches!(init, Value::Obj(_)) {
         for k in [
-            "detail", "message", "error", "filename", "lineno", "colno", "promise", "reason",
-            "key", "code", "keyCode", "which", "charCode", "ctrlKey", "shiftKey", "altKey",
+            "detail",
+            "message",
+            "error",
+            "filename",
+            "lineno",
+            "colno",
+            "promise",
+            "reason",
+            "key",
+            "code",
+            "keyCode",
+            "which",
+            "charCode",
+            "ctrlKey",
+            "shiftKey",
+            "altKey",
             "metaKey",
+            // JS-C84 — init d'événements spécialisés copiés tels
+            // quels : `WheelEvent.delta*`, `PointerEvent.*`,
+            // `InputEvent`, `TouchEvent`, `UIEvent.view`,
+            // `FocusEvent.relatedTarget`.
+            "deltaX",
+            "deltaY",
+            "deltaZ",
+            "deltaMode",
+            "pointerType",
+            "pointerId",
+            "isPrimary",
+            "width",
+            "height",
+            "pressure",
+            "tiltX",
+            "tiltY",
+            "twist",
+            "tangentialPressure",
+            "inputType",
+            "isComposing",
+            "data",
+            "dataTransfer",
+            "view",
+            "relatedTarget",
+            "touches",
+            "targetTouches",
+            "changedTouches",
         ] {
             let v = e.get_prop_value(init, k)?;
             if !matches!(v, Value::Undefined) {

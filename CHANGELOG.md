@@ -9,6 +9,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C84 — événements React étendus +
+  init d'événements spécialisés**
+  (`explorer-jscore`) : la sonde React 19
+  couvre `onSubmit` (`requestSubmit` →
+  `preventDefault`), `onKeyDown`
+  (`key`/`code`), `onFocus`/`onBlur`
+  (focusin/focusout délégués),
+  `onPointerDown`, `onWheel`. Trou :
+  `WheelEventInit.delta*`/`PointerEventInit`/
+  `relatedTarget`/`data`/`inputType` n'étaient
+  ni copiés au ctor ni recopiés au dispatch
+  — `e.deltaY` rendait `0` pour `onWheel`.
+  Listes d'init/dispatch étendues (delta*,
+  pointer*, tilt*, touches, dataTransfer,
+  view, relatedTarget). Régression
+  `specialized_event_init_reaches_dispatch`.
+
 - **JS-C83 — `MouseEventInit` + sonde
   « vraie app React »** (`explorer-jscore`) :
   app React 19 bundlée esbuild (fetch,

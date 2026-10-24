@@ -4428,3 +4428,35 @@ fn mouse_event_defaults_reach_dispatch() {
         "d:0/7"
     );
 }
+
+// -- init d'événements spécialisés (JS-C84) ---------------------------------
+
+/// `WheelEventInit`/`PointerEventInit`/`FocusEvent` : les
+/// payloads d'init sont copiés au ctor **et** rejoignent les
+/// listeners au dispatch littéral — `e.deltaY` était `0`
+/// pour `onWheel` React avant ce lot.
+#[test]
+fn specialized_event_init_reaches_dispatch() {
+    // Ctor : `deltaY`/`pointerType`/`relatedTarget` lus.
+    assert_eq!(
+        ev("var w=new WheelEvent('wheel',{deltaY:120,pointerType:'mouse'});w.deltaY+'/'+w.pointerType"),
+        "120/mouse"
+    );
+    // Dispatch : les valeurs atteignent les handlers.
+    assert_eq!(
+        ev(
+            "var b=document.createElement('b');document.body.appendChild(b);var seen='';\
+            b.addEventListener('wheel',function(e){seen='w:'+e.deltaY+'/'+e.deltaMode});\
+            b.dispatchEvent(new WheelEvent('wheel',{deltaY:120,deltaMode:1}));seen"
+        ),
+        "w:120/1"
+    );
+    assert_eq!(
+        ev(
+            "var b=document.createElement('b');document.body.appendChild(b);var seen='';\
+            b.addEventListener('focusin',function(e){seen='f'});\
+            b.dispatchEvent(new FocusEvent('focusin',{bubbles:true,relatedTarget:null}));seen"
+        ),
+        "f"
+    );
+}

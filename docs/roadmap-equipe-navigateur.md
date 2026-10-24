@@ -5962,6 +5962,24 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Régression
   `mouse_event_defaults_reach_dispatch`.
 
+- [x] **JS-C84. Événements React
+  étendus** — sonde React 19 :
+  `onSubmit` (`requestSubmit` →
+  `preventDefault` → reste SPA),
+  `onKeyDown` (`key`/`code`),
+  `onFocus`/`onBlur` via
+  `focusin`/`focusout` délégués,
+  `onPointerDown`, `onWheel` — tous
+  vivants. **Trou corrigé** :
+  `WheelEventInit.delta*` et les
+  inits `PointerEvent`/`FocusEvent`/
+  `InputEvent`/`TouchEvent`
+  n'étaient ni copiés au ctor ni
+  recopiés au dispatch littéral
+  (`e.deltaY` = 0) — listes
+  étendues. Régression
+  `specialized_event_init_reaches_dispatch`.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand
