@@ -199,6 +199,69 @@ fn host_source_matching() {
     ));
 }
 
+/// Issue #21 (vol re-baseline CAP, github : −10 671 px de
+/// `doc_h` sur `img-src … images.ctfassets.net/8aevphvgewt8/`)
+/// — CSP3 §matching : un path-source terminé par `/` est un
+/// **préfixe**, pas une égalité exacte.
+#[test]
+fn path_source_trailing_slash_is_prefix() {
+    let page = u(PAGE);
+    let csp = p("img-src https://cdn.test/dir/");
+    // `/dir/` lui-même et tout ce qui est dessous.
+    assert!(csp_allows(
+        &csp,
+        &page,
+        FetchDest::Image,
+        &u("https://cdn.test/dir/")
+    ));
+    assert!(csp_allows(
+        &csp,
+        &page,
+        FetchDest::Image,
+        &u("https://cdn.test/dir/x.webp")
+    ));
+    assert!(csp_allows(
+        &csp,
+        &page,
+        FetchDest::Image,
+        &u("https://cdn.test/dir/a/b/c.webp")
+    ));
+    // `/dirx` ne partage pas le préfixe `/dir/` — jamais.
+    assert!(!csp_allows(
+        &csp,
+        &page,
+        FetchDest::Image,
+        &u("https://cdn.test/dirx/y.webp")
+    ));
+    assert!(!csp_allows(
+        &csp,
+        &page,
+        FetchDest::Image,
+        &u("https://cdn.test/other/x.webp")
+    ));
+    // Sans le `/` terminal : égalité exacte inchangée —
+    // `/dir` ne couvre ni `/dir/` ni `/dir/x`.
+    let exact = p("img-src https://cdn.test/dir");
+    assert!(csp_allows(
+        &exact,
+        &page,
+        FetchDest::Image,
+        &u("https://cdn.test/dir")
+    ));
+    assert!(!csp_allows(
+        &exact,
+        &page,
+        FetchDest::Image,
+        &u("https://cdn.test/dir/")
+    ));
+    assert!(!csp_allows(
+        &exact,
+        &page,
+        FetchDest::Image,
+        &u("https://cdn.test/dir/x")
+    ));
+}
+
 #[test]
 fn star_and_scheme_sources() {
     let page = u(PAGE);

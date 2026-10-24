@@ -296,9 +296,14 @@ fn source_matches(src: &str, page: &Url, target: &Url) -> bool {
     if let Some(path) = path_pat {
         let p = target.path();
         // §matching : comparaison ASCII insensible à la
-        // casse ; suffixe `*` = préfixe. `get(..len)` —
-        // jamais de slice hors frontière UTF-8.
-        let ok = if let Some(prefix) = path.strip_suffix('*') {
+        // casse. Un chemin terminé par `/` matche en
+        // **préfixe** (`host/dir/` ⇒ `/dir/*` — issue #21) ;
+        // suffixe `*` = préfixe aussi ; sinon égalité exacte.
+        // `get(..len)` — jamais de slice hors frontière UTF-8.
+        let ok = if path.ends_with('/') {
+            p.get(..path.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(&path))
+        } else if let Some(prefix) = path.strip_suffix('*') {
             p.get(..prefix.len())
                 .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
         } else {

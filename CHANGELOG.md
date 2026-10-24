@@ -9,6 +9,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-93 — `(scripting)` MQ5 +
+  `<noscript>` masqué UA**
+  (`explorer-css` — re-baseline post-
+  train CAP → vol d'étalonnage,
+  issue #22). CAP-155 (NAV) a rendu
+  `noscript` rawtext sous scripting ;
+  la feuille UA n'avait aucun moyen
+  de le masquer → le texte brut
+  peignait (mesuré wikipedia :
+  `CentralAutoLogin` visible en clair
+  en bas de page). `StyleEnv` gagne
+  `scripting: bool` (additif, défaut
+  `false` = `none` = historique) ;
+  `condition_matches` évalue
+  `scripting` (`enabled`/`none`,
+  feature nue = « pas none »,
+  `initial-only` jamais rapporté) ;
+  UA : `@media (scripting) { noscript
+  { display: none } }`. Filage NAV
+  : `env.scripting = ctx.scripting`
+  dans `viewport_env` (journalisé).
+
 - **Étape 120 — sondes de document
   vivant** (`explorer-core`,
   `explorer-api`, `explorer-cli` —
@@ -2223,6 +2245,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   pompe réelle).
 
 ### Fixed
+
+- **Issue #21 — CSP path-source
+  : trailing-`/` matche en
+  préfixe** (`explorer-net` —
+  constat du vol re-baseline
+  CAP sur github.com, binaire
+  `a93b799`). CSP3 §matching :
+  `img-src https://h/dir/` doit
+  autoriser `/dir/*` — le
+  matcher exigeait l'égalité
+  exacte → tout
+  `/dir/<id>/<hash>/x.webp`
+  refusé (15 `<img>` ctfassets
+  bloquées, −10 671 px de
+  doc_h : accordons/logos/
+  showcase vides). Corrigé :
+  chemin terminé par `/` (ou
+  suffixe `*`) = match préfixe,
+  égalité exacte sinon —
+  `/dir` n'ouvre ni `/dir/` ni
+  `/dir/x`. Régression
+  `path_source_trailing_slash_
+  is_prefix`.
 
 - **JS-C72 — adoption de promesse
   pendante** (`explorer-jscore`).
