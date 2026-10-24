@@ -4767,6 +4767,7 @@ fn ws_lifecycle_echo() {
         .eval("document.getElementById('p').textContent")
         .expect("dom");
     assert_eq!(e.describe(v), "open:1|msg:hi|close:1000/true");
+}
 // ===== CAP-180 — hit-test inverse + getClientRects
 // (sonde `_census_calls` : `elementFromPoint`/`elementsFromPoint`/
 // `caretPositionFromPoint`/`getClientRects` absents) — même

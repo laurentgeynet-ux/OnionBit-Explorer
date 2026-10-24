@@ -357,12 +357,26 @@ async fn main() {
         },
         None => (None, "system".to_string()),
     };
+    // Dial `WebSocket` (JS-C94) — même connecteur TLS +
+    // résolution que la pile HTTP, mais **sockets dédiées**
+    // (une par flux, hors pool `AutoClient`). Construit
+    // avant `http_stack` qui consomme `resolver`.
+    let ws_conn: Arc<dyn explorer_net::h1::Connector> = match resolver.clone() {
+        Some(r) => Arc::new(TlsConnector::web_roots_over(Arc::new(
+            explorer_net::h1::ResolvingConnector::new(r),
+        ))),
+        None => Arc::new(TlsConnector::web_roots()),
+    };
     let mut session = Session::with_config(
         http_stack(&cfg, jar.clone(), &profile_dir, resolver),
         Arc::new(fonts),
         session_config(&cfg),
     );
     session.set_cookie_jar(jar);
+    session.set_ws_dial(Arc::new(explorer_net::ws::RealWsDial::new(
+        ws_conn,
+        explorer_net::ws::WsLimits::default(),
+    )));
     session.set_store(store);
     // Répertoire des téléchargements acceptés sans chemin
     // explicite (étape 70) — `<profil>/downloads` par défaut.
