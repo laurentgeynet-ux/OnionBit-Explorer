@@ -4191,3 +4191,31 @@ fn idl_accessors_descriptor_surface() {
         "illegal constructor"
     );
 }
+
+// -- `MouseEventInit` + dispatch littéral (JS-C83) ----------------------------
+
+/// React Router `<Link>` garde `event.button === 0` — sans les
+/// défauts `MouseEventInit` au ctor et leur recopie au dispatch
+/// d'un événement littéral, le clic est ignoré.
+#[test]
+fn mouse_event_defaults_reach_dispatch() {
+    // Constructeur : défauts numériques.
+    assert_eq!(
+        ev("var m=new MouseEvent('click');m.button+'/'+m.buttons+'/'+m.clientX+'/'+m.ctrlKey"),
+        "0/0/0/false"
+    );
+    // Init dict lu (`button:2`) + le reste par défaut.
+    assert_eq!(
+        ev("var m=new MouseEvent('click',{button:2,shiftKey:true});m.button+'/'+m.shiftKey+'/'+m.pageY"),
+        "2/true/0"
+    );
+    // Dispatch : les props atteignent les listeners.
+    assert_eq!(
+        ev(
+            "var b=document.createElement('b');document.body.appendChild(b);var seen='';\
+            document.addEventListener('click',function(e){seen='d:'+e.button+'/'+e.clientX});\
+            b.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:7}));seen"
+        ),
+        "d:0/7"
+    );
+}

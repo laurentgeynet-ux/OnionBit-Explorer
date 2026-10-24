@@ -9,6 +9,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C83 — `MouseEventInit` + sonde
+  « vraie app React »** (`explorer-jscore`) :
+  app React 19 bundlée esbuild (fetch,
+  `pushState`/`popstate`, `createPortal`,
+  `startTransition`, react-router-dom 7).
+  Trou : `new MouseEvent` n'appliquait pas
+  les défauts IDL (`button`/`buttons`/
+  coords = 0) et le dispatch littéral
+  recopiait une allowlist sans eux —
+  `event.button === 0` ratant, React
+  Router ignorait les clics `<Link>`.
+  Livré : `mouse_event_ctor` (MouseEvent/
+  PointerEvent/WheelEvent/DragEvent,
+  `button`/`buttons`/coordonnées = 0,
+  modifieurs = `false`, `view`/`detail`)
+  + allowlist de dispatch étendue. Mesuré :
+  `Link` → `pushState` → `route:/x`,
+  portail monté, `useTransition` appliqué,
+  `fetch`→JSON→re-render. Régression
+  `mouse_event_defaults_reach_dispatch`.
+
 - **JS-C80/81/82 — compat frameworks (React 18
   probe)** (`explorer-jscore`) : trois trous
   remontés par la sonde React (`umd` prod,

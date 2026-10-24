@@ -5776,6 +5776,31 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Régression
   `idl_accessors_descriptor_surface`.
 
+- [x] **JS-C83. Sonde « vraie app
+  React » + `MouseEventInit`** — React
+  19 bundlé esbuild (IIFE, 1,2 Mo) :
+  `createRoot`/`useState`/`useEffect`,
+  `fetch`→JSON→re-render, champ
+  contrôlé (chaîne `inputValueTracking`
+  complète — setter natif intercepté),
+  `createPortal` (modal dans
+  `#portal-root`), `useTransition`,
+  `history.pushState`/`location`.
+  **Trou corrigé** : `MouseEventInit`
+  défauts (`button`/`buttons`/coords
+  = 0, modifieurs = `false`) au ctor
+  + recopie au dispatch littéral —
+  `event.button === 0` est le garde
+  des routers ; mesuré
+  react-router-dom 7 `<Link>` →
+  `route:/x` end-to-end. Effet de bord
+  constaté : le repaint post-effets
+  passifs (gap noté JS-C80) est
+  résolu — `MessageChannel` livre le
+  travail React avant la frame.
+  Régression
+  `mouse_event_defaults_reach_dispatch`.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

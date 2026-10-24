@@ -1729,7 +1729,20 @@ impl Engine {
             "PopStateEvent",
             "PromiseRejectionEvent",
         ] {
-            let f = self.native_fn(name, event_ctor);
+            // `MouseEvent` & sous-classes : défauts
+            // `MouseEventInit` spec (`button`/`buttons`/coords
+            // = 0) — sans `button` React Router laisse tomber
+            // les clics `<Link>` (son garde `event.button ===
+            // 0` rate sur `undefined`).
+            let ctor = if matches!(
+                name,
+                "MouseEvent" | "PointerEvent" | "WheelEvent" | "DragEvent"
+            ) {
+                mouse_event_ctor as crate::heap::NativeFn
+            } else {
+                event_ctor as crate::heap::NativeFn
+            };
+            let f = self.native_fn(name, ctor);
             if let Value::Obj(fid) = f {
                 let p = Value::Obj(self.new_object());
                 if let Value::Obj(pid) = p {
@@ -4906,6 +4919,33 @@ fn event_state_of(
         "lastEventId",
         "reason",
         "wasClean",
+        // `MouseEventInit` (JS-C83) — `button` est le garde-fou
+        // des routers JS (`event.button === 0` dans React
+        // Router `<Link>`) ; coords et modifieurs rejoints.
+        "button",
+        "buttons",
+        "clientX",
+        "clientY",
+        "screenX",
+        "screenY",
+        "pageX",
+        "pageY",
+        "offsetX",
+        "offsetY",
+        "movementX",
+        "movementY",
+        "x",
+        "y",
+        "layerX",
+        "layerY",
+        "view",
+        "relatedTarget",
+        "pointerType",
+        "pointerId",
+        "isPrimary",
+        // `UIEvent`/`InputEvent`/`CompositionEvent`.
+        "inputType",
+        "isComposing",
     ]
     .into_iter()
     .filter_map(|k| e.get_prop(id, k).map(|v| (k.to_string(), v)))
@@ -6657,6 +6697,62 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         ("timeStamp", Value::Num(0.0)),
     ] {
         e.set_prop_value(this, k, v)?;
+    }
+    Ok(Value::Undefined)
+}
+
+/// `MouseEvent`/`PointerEvent`/`WheelEvent`/`DragEvent` :
+/// `event_ctor` + défauts `MouseEventInit` — `button`/`buttons`
+/// = 0 et toutes les coordonnées = 0, modifieurs = `false`.
+/// Sans eux `ev.button === 0` rate (`undefined`), ce qui tue le
+/// garde-fou des routers JS (React Router ignore le clic).
+fn mouse_event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    event_ctor(e, this, args)?;
+    let init = arg(args, 1);
+    for k in [
+        "button",
+        "buttons",
+        "clientX",
+        "clientY",
+        "screenX",
+        "screenY",
+        "pageX",
+        "pageY",
+        "offsetX",
+        "offsetY",
+        "movementX",
+        "movementY",
+        "x",
+        "y",
+        "detail",
+        "layerX",
+        "layerY",
+    ] {
+        let v = if matches!(init, Value::Obj(_)) {
+            e.get_prop_value(init, k)?
+        } else {
+            Value::Undefined
+        };
+        let n = if matches!(v, Value::Undefined) {
+            0.0
+        } else {
+            match v {
+                Value::Num(n) => n,
+                other => {
+                    let s = e.to_js_string(other)?;
+                    s.trim().parse().unwrap_or(0.0)
+                }
+            }
+        };
+        e.set_prop_value(this, k, Value::Num(n))?;
+    }
+    for k in ["ctrlKey", "shiftKey", "altKey", "metaKey"] {
+        if !matches!(e.get_prop_value(this, k), Ok(v) if !matches!(v, Value::Undefined)) {
+            e.set_prop_value(this, k, Value::Bool(false))?;
+        }
+    }
+    if !matches!(e.get_prop_value(this, "view"), Ok(v) if !matches!(v, Value::Undefined)) {
+        e.set_prop_value(this, "view", Value::Null)?;
     }
     Ok(Value::Undefined)
 }
