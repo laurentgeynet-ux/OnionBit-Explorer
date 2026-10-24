@@ -103,6 +103,12 @@ pub enum NavRequest {
     /// de l'entrée courante (méthode + corps — POST re-POSTe)
     /// sans entrée nouvelle.
     Reload,
+    /// `window.open(url)` ou clic scripté sur `<a
+    /// target=_blank|nom>` (CAP-153) — navigation dans un
+    /// **nouveau** contexte top-level ; l'intention vit
+    /// dans la file de l'onglet émetteur (même voie que le
+    /// clic `target=_blank`, étape 131).
+    NewTab(String),
 }
 
 /// Résolveur de spécificateurs de module fourni par l'hôte :
@@ -2250,6 +2256,13 @@ fn install_dom(
                 q6.borrow_mut().push(NavRequest::Reload);
             }),
         );
+        // `window.open` + `<a target>` scripté (CAP-153) —
+        // nouveau contexte top-level : même voie que le
+        // clic `target=_blank` (`DrainAct::NewTab`).
+        let q7 = nav_q.clone();
+        eng.set_open_hook(std::rc::Rc::new(move |u: String| {
+            q7.borrow_mut().push(NavRequest::NewTab(u));
+        }));
     }
     eng.install_xhr(std::rc::Rc::new(ChanXhr {
         q: std::rc::Rc::clone(net_q),

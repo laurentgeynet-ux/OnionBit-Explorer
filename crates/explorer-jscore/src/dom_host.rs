@@ -266,6 +266,226 @@ impl NodeHost {
         Ok(ok)
     }
 
+    /// Soumission pilotée partagée (`requestSubmit`,
+    /// activation d'un bouton submit — CAP-153) :
+    /// validation (`invalid` non annulable sur les fautifs,
+    /// `novalidate`/`formnovalidate` exclus) → événement
+    /// `submit` (bubbles + cancelable, non-composed) →
+    /// `form_submit` si non annulé.
+    fn submit_via(&self, e: &mut Engine, form: NodeId, submitter: Option<NodeId>) -> JsResult<()> {
+        let ok = {
+            let d = self.dom.borrow();
+            let skip = d.has_attr(form, "novalidate")
+                || submitter.is_some_and(|s| d.has_attr(s, "formnovalidate"));
+            skip || {
+                drop(d);
+                self.check_validity_of(e, form)?
+            }
+        };
+        if !ok {
+            return Ok(());
+        }
+        // `submit` spec : bubbles + cancelable, non-composed.
+        let state = make_event_state(
+            "submit",
+            form,
+            EventFlags {
+                bubbles: true,
+                cancelable: true,
+                composed: false,
+                trusted: false,
+            },
+            Vec::new(),
+        );
+        e.propagate_event(&self.dom, &self.cache, &state)?;
+        if !state.prevented.get() {
+            if let Some(p) = self.submit_payload(form, submitter) {
+                if let Some(h) = &e.hooks.form_submit {
+                    h(p);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// **Activation behavior** d'un clic scripté non annulé
+    /// (CAP-153 — spec « run synthetic click event » :
+    /// l'action par défaut suit le dispatch) :
+    /// `<a href>` navigue (`target` ≠ `_self` → hook
+    /// `open`), `input`/`button` de type submit/image
+    /// soumettent le `<form>` ancêtre (même voie que
+    /// `requestSubmit`, submitter = le bouton),
+    /// `checkbox`/`radio` basculent `checked` (+`input`/
+    /// `change`, radio décoche son groupe `name`),
+    /// `<label>` délègue à son contrôle (`for=` ou premier
+    /// descendant activable), `<summary>` bascule `open`
+    /// du `<details>` parent. `disabled` = aucune
+    /// activation (spec). Dégradation : pas de `details`
+    /// toggle event, `<input type=reset>`/fichier/couleur
+    /// inertes à cette tranche.
+    fn run_activation(&self, e: &mut Engine, node: NodeId) -> JsResult<()> {
+        let d = self.dom.borrow();
+        let tag = d.nodes[node as usize].tag.clone();
+        match tag.as_str() {
+            "a" | "area" => {
+                let Some(href) = d.attr(node, "href").map(str::to_string) else {
+                    return Ok(());
+                };
+                if href.is_empty() {
+                    return Ok(());
+                }
+                let tgt = d.attr(node, "target").unwrap_or("").to_ascii_lowercase();
+                drop(d);
+                if tgt.is_empty() || tgt == "_self" {
+                    if let Some(nav) = e.hooks.navigate.clone() {
+                        nav(&href);
+                    }
+                } else if let Some(f) = e.hooks.open.clone() {
+                    // `target` nommé/`_blank` → nouveau
+                    // contexte si le hook existe (sinon
+                    // intention morte — dégradation).
+                    f(href);
+                }
+            }
+            "input" => {
+                let ty = d.attr(node, "type").unwrap_or("text").to_ascii_lowercase();
+                if d.attr(node, "disabled").is_some() {
+                    return Ok(());
+                }
+                match ty.as_str() {
+                    "checkbox" => {
+                        let on = d.attr(node, "checked").is_some();
+                        drop(d);
+                        if on {
+                            self.dom.borrow_mut().remove_attr(node, "checked");
+                        } else {
+                            self.dom.borrow_mut().set_attr(node, "checked", "");
+                        }
+                        // Spec : bascule → `input` puis `change`.
+                        e.dispatch_simple(&self.dom, &self.cache, node, "input")?;
+                        e.dispatch_simple(&self.dom, &self.cache, node, "change")?;
+                    }
+                    "radio" => {
+                        // Groupe = même `name` sous le même
+                        // `<form>` (spec « radio button
+                        // group ») — les pairs perdent
+                        // `checked`, self le gagne.
+                        let name = d.attr(node, "name").map(str::to_string);
+                        let form = d
+                            .ancestors(node)
+                            .iter()
+                            .copied()
+                            .find(|&a| d.nodes[a as usize].tag == "form");
+                        let mut peers = Vec::new();
+                        if let Some(n) = name.as_deref().filter(|n| !n.is_empty()) {
+                            for (i, nd) in d.nodes.iter().enumerate() {
+                                let id = i as NodeId;
+                                if id != node
+                                    && nd.tag == "input"
+                                    && d.attr(id, "type")
+                                        .is_some_and(|t| t.eq_ignore_ascii_case("radio"))
+                                    && d.attr(id, "name") == Some(n)
+                                    && d.ancestors(id)
+                                        .iter()
+                                        .copied()
+                                        .find(|&a| d.nodes[a as usize].tag == "form")
+                                        == form
+                                {
+                                    peers.push(id);
+                                }
+                            }
+                        }
+                        drop(d);
+                        for p in peers {
+                            self.dom.borrow_mut().remove_attr(p, "checked");
+                        }
+                        self.dom.borrow_mut().set_attr(node, "checked", "");
+                        e.dispatch_simple(&self.dom, &self.cache, node, "input")?;
+                        e.dispatch_simple(&self.dom, &self.cache, node, "change")?;
+                    }
+                    "submit" | "image" => {
+                        let form = d
+                            .ancestors(node)
+                            .iter()
+                            .copied()
+                            .find(|&a| d.nodes[a as usize].tag == "form");
+                        drop(d);
+                        if let Some(f) = form {
+                            self.submit_via(e, f, Some(node))?;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            "button" => {
+                let ty = d
+                    .attr(node, "type")
+                    .unwrap_or("submit")
+                    .to_ascii_lowercase();
+                if d.attr(node, "disabled").is_some() {
+                    return Ok(());
+                }
+                if ty == "submit" {
+                    let form = d
+                        .ancestors(node)
+                        .iter()
+                        .copied()
+                        .find(|&a| d.nodes[a as usize].tag == "form");
+                    drop(d);
+                    if let Some(f) = form {
+                        self.submit_via(e, f, Some(node))?;
+                    }
+                }
+            }
+            "label" => {
+                // `for=` → contrôle par id ; sinon premier
+                // descendant activable (spec « labeled
+                // control » — sous-ensemble : les contrôles
+                // form). Le contrôle reçoit le clic complet
+                // (listeners + sa propre activation).
+                let ctrl = d.attr(node, "for").and_then(|id| d.by_id(id));
+                let ctrl = ctrl.or_else(|| first_control(&d, node));
+                drop(d);
+                if let Some(c) = ctrl {
+                    let (cancelable, composed) = platform_event_flags("click");
+                    let st = make_event_state(
+                        "click",
+                        c,
+                        EventFlags {
+                            bubbles: true,
+                            cancelable,
+                            composed,
+                            trusted: false,
+                        },
+                        Vec::new(),
+                    );
+                    e.propagate_event(&self.dom, &self.cache, &st)?;
+                    if !st.prevented.get() {
+                        self.run_activation(e, c)?;
+                    }
+                }
+            }
+            "summary" => {
+                let det = d
+                    .ancestors(node)
+                    .iter()
+                    .copied()
+                    .find(|&a| d.nodes[a as usize].tag == "details");
+                let on = det.is_some_and(|dt| d.attr(dt, "open").is_some());
+                drop(d);
+                if let Some(det) = det {
+                    if on {
+                        self.dom.borrow_mut().remove_attr(det, "open");
+                    } else {
+                        self.dom.borrow_mut().set_attr(det, "open", "");
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// `FormSubmit` du `<form>` `node` (méthode `submit` /
     /// `requestSubmit`) — `None` si `node` n'est pas un
     /// `<form>` ou le hook absent (no-op silencieux).
@@ -474,6 +694,25 @@ fn make_event_state(
         created: std::time::Instant::now(),
         props,
     })
+}
+
+/// Premier descendant activable d'un `<label>` — contrôles
+/// form seulement (`input`/`button`/`select`/`textarea`,
+/// spec « labeled control ») : parcours préordre borné par
+/// l'arbre miroir (CAP-153).
+fn first_control(d: &crate::dom::Dom, node: NodeId) -> Option<NodeId> {
+    for k in d.child_nodes(node) {
+        if matches!(
+            d.nodes[k as usize].tag.as_str(),
+            "input" | "button" | "select" | "textarea"
+        ) {
+            return Some(k);
+        }
+        if let Some(n) = first_control(d, k) {
+            return Some(n);
+        }
+    }
+    None
 }
 
 /// Flags `cancelable`/`composed` par défaut des events
@@ -3058,9 +3297,31 @@ impl Host for NodeHost {
                 e.propagate_event(&self.dom, &self.cache, &state)?;
                 Ok(Some(Value::Bool(!state.prevented.get())))
             }
-            // Event triggers callable from scripts; the same
-            // `propagate_event` is the platform-event entry point.
-            "click" | "focus" | "blur" => {
+            // `el.click()` : dispatch complet, puis
+            // **activation behavior** si non annulé
+            // (CAP-153 — `<a href>` navigue, submit
+            // soumet, checkbox/radio basculent, label
+            // délègue, summary bascule details).
+            "click" => {
+                let (cancelable, composed) = platform_event_flags(name);
+                let state = make_event_state(
+                    name,
+                    node,
+                    EventFlags {
+                        bubbles: true,
+                        cancelable,
+                        composed,
+                        trusted: false,
+                    },
+                    Vec::new(),
+                );
+                e.propagate_event(&self.dom, &self.cache, &state)?;
+                if !state.prevented.get() {
+                    self.run_activation(e, node)?;
+                }
+                Ok(Some(Value::Undefined))
+            }
+            "focus" | "blur" => {
                 e.dispatch_simple(&self.dom, &self.cache, node, name)?;
                 Ok(Some(Value::Undefined))
             }
@@ -3078,41 +3339,12 @@ impl Host for NodeHost {
             // `form.requestSubmit(submitter?)` : validation
             // (`invalid` sur les fautifs, `novalidate`/
             // `formnovalidate` exclus) → événement `submit`
-            // → soumission si non annulée.
+            // → soumission si non annulée. Voie partagée
+            // `submit_via` (avec l'activation des boutons
+            // submit, CAP-153).
             "requestSubmit" => {
                 let submitter = node_for(e, arg(args, 0));
-                let ok = {
-                    let d = self.dom.borrow();
-                    let skip = d.has_attr(node, "novalidate")
-                        || submitter.is_some_and(|s| d.has_attr(s, "formnovalidate"));
-                    skip || {
-                        drop(d);
-                        self.check_validity_of(e, node)?
-                    }
-                };
-                if !ok {
-                    return Ok(Some(Value::Undefined));
-                }
-                // `submit` spec : bubbles + cancelable, non-composed.
-                let state = make_event_state(
-                    "submit",
-                    node,
-                    EventFlags {
-                        bubbles: true,
-                        cancelable: true,
-                        composed: false,
-                        trusted: false,
-                    },
-                    Vec::new(),
-                );
-                e.propagate_event(&self.dom, &self.cache, &state)?;
-                if !state.prevented.get() {
-                    if let Some(p) = self.submit_payload(node, submitter) {
-                        if let Some(h) = &e.hooks.form_submit {
-                            h(p);
-                        }
-                    }
-                }
+                self.submit_via(e, node, submitter)?;
                 Ok(Some(Value::Undefined))
             }
             // -- Validation de contraintes (étape 54) ------------------

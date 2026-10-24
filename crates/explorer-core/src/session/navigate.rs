@@ -1047,6 +1047,7 @@ impl Session {
                 ScriptNav::Submit(req) => DrainAct::Req(req, true),
                 ScriptNav::Replace(u) => DrainAct::Replace(Box::new(Request::get(u))),
                 ScriptNav::Reload => DrainAct::Reload,
+                ScriptNav::NewTab(u) => DrainAct::NewTab(Box::new(Request::get(u))),
             };
             if !self.enqueue_nav_act(tab, act) {
                 break;
@@ -1164,6 +1165,19 @@ impl Session {
                     // la requête de l'entrée courante au
                     // drain (aucune entrée nouvelle).
                     return Some(ScriptNav::Reload);
+                }
+                NavRequest::NewTab(href) => {
+                    // `window.open`/`<a target>` scripté
+                    // (CAP-153) — résolution base du doc,
+                    // nouveau contexte au drain.
+                    let url = self
+                        .tabs
+                        .get(&tab)
+                        .and_then(|t| t.nav_base())
+                        .and_then(|b| Url::resolve(b, &href).ok());
+                    if let Some(u) = url {
+                        return Some(ScriptNav::NewTab(u));
+                    }
                 }
                 NavRequest::FormSubmit {
                     method,

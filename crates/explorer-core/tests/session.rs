@@ -10340,3 +10340,120 @@ async fn location_reload_replays_request() {
     // l'entrée — `back` n'a rien à viser.
     assert!(matches!(s.go_back(id).await, Err(CoreError::EmptyDocument)));
 }
+
+/// `el.click()` scripté — **activation behavior** (CAP-153)
+/// : `<a href>` navigue après le dispatch si non annulé.
+#[tokio::test]
+async fn scripted_anchor_click_navigates() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><a id=l href=/dest>x</a>         <script>document.getElementById('l').click()</script>         </body></html>",
+    );
+    t.route("/dest", 200, "<html><body>dest</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/dest"));
+}
+
+/// Clic annulé (`preventDefault` dans un listener) : pas
+/// d'activation — l'URL reste.
+#[tokio::test]
+async fn scripted_anchor_click_prevented_stays() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><a id=l href=/dest>x</a>         <script>         document.getElementById('l').addEventListener('click',         function(e){e.preventDefault()});         document.getElementById('l').click()         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+}
+
+/// `<a target=_blank>` cliqué par script → nouveau contexte
+/// (CAP-153 — même voie que le clic plateforme, étape 131).
+#[tokio::test]
+async fn scripted_anchor_target_blank_opens_tab() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><a id=l href=/pop target=_blank>x</a>         <script>document.getElementById('l').click()</script>         </body></html>",
+    );
+    t.route("/pop", 200, "<html><body>pop</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(
+        s.tab_url(other_tab(&s, id)).as_deref(),
+        Some("http://h.test/pop"),
+        "le clic scripté target=_blank ouvre un onglet"
+    );
+}
+
+/// Bouton submit cliqué par script : le `<form>` ancêtre se
+/// soumet — champs collectés + submitter inclus (CAP-153).
+#[tokio::test]
+async fn scripted_submit_button_click_submits_form() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>         <form action=/go><input name=q value=v>         <button id=b type=submit name=op value=go>Ok</button></form>         <script>document.getElementById('b').click()</script>         </body></html>",
+    );
+    t.route("/go?q=v&op=go", 200, "<html><body>done</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(
+        s.tab_url(id).as_deref(),
+        Some("http://h.test/go?q=v&op=go"),
+        "submit par clic scripté — champs + submitter"
+    );
+}
+
+/// Checkbox/radio basculées par clic scripté — `checked`
+/// muté dans le miroir (synchronisé au DOM réel), `input`+
+/// `change` émis (CAP-153).
+#[tokio::test]
+async fn scripted_checkbox_click_toggles_checked() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>         <input id=c type=checkbox><p id=o>x</p>         <script>         var c=document.getElementById('c');         c.click();         document.getElementById('o').textContent = 'on:'+c.checked         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(dump.contains("on:true"), "checked basculé : {dump}");
+}
+
+/// `<summary>` cliqué bascule `open` du `<details>` parent
+/// (CAP-153).
+#[tokio::test]
+async fn scripted_summary_click_toggles_details() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>         <details><summary id=s>plus</summary>corps</details>         <script>document.getElementById('s').click()</script>         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(
+        dump.contains("open"),
+        "details ouvert par clic summary : {dump}"
+    );
+}

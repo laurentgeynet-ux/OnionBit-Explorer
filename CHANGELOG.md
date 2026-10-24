@@ -1315,6 +1315,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-153 — Activation behavior du clic scripté +
+  `window.open`** (`explorer-jscore` + `explorer-js`
+  + `explorer-core` — cap « web réel sécurisé » ;
+  numéro officiel attribué à l'intégration) :
+  `el.click()` exécute l'action par défaut si non
+  annulée — `<a href>` navigue, `target` ≠ `_self`
+  → nouvel onglet (`NavRequest::NewTab` →
+  `DrainAct::NewTab`), submit soumet le form
+  ancêtre (`submit_via` factorisé de
+  `requestSubmit`, submitter inclus), checkbox/
+  radio basculent `checked` (+`input`/`change`,
+  groupe radio), `<label>` → contrôle, `<summary>`
+  → `open` de `<details>`. `disabled` inerte.
+  `window.open` câblé. Tests : 6 session
+  (`scripted_*_click*`, `window_open` couvert par
+  le test target).
+
 - **CAP-152 — `location.replace`/`location.reload`**
   (`explorer-jscore` + `explorer-js` +
   `explorer-core` — cap « web réel sécurisé » ;

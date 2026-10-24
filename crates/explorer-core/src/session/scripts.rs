@@ -297,4 +297,7 @@ pub(crate) enum ScriptNav {
     /// `location.reload` (CAP-152) : rejeu de la requête de
     /// l'entrée courante (méthode + corps — POST re-POSTe).
     Reload,
+    /// `window.open`/`<a target>` scripté (CAP-153) :
+    /// navigation dans un nouveau contexte top-level.
+    NewTab(Url),
 }

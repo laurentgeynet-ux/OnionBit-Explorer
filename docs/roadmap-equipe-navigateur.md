@@ -3359,6 +3359,28 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-153. Activation behavior du clic scripté +
+  `window.open`** — *(numéro officiel attribué à
+  l'intégration)* : `el.click()` exécute désormais
+  l'action par défaut après dispatch si non annulée
+  (spec « synthetic click » — les apps JS riches
+  pilotent la navigation par clics programmatiques) :
+  `<a href>` navigue (`target` ≠ `_self` → hook
+  `open` → `NavRequest::NewTab` → `DrainAct::NewTab`,
+  même voie que le clic plateforme `_blank`),
+  `input`/`button` submit+image soumettent le
+  `<form>` ancêtre via `submit_via` (factorisé de
+  `requestSubmit` — validation + event `submit` +
+  submitter dans les champs), `checkbox`/`radio`
+  basculent `checked` (+`input`/`change`, radio
+  décoche son groupe `name`+form), `<label>`
+  délègue à `for=`/premier descendant contrôle
+  (`first_control`), `<summary>` bascule `open`
+  de `<details>`. `disabled` = aucune activation.
+  `window.open(url)` câblé (`set_open_hook` →
+  `NewTab`). Bornes : `type=reset`/file/color
+  inertes, `window.open` lit seulement `url`
+  (retour `Null`, target/features ignorés).
 - [x] **CAP-152. `location.replace`/`location.reload`** —
   *(numéro officiel attribué à l'intégration)* : les
   sémantiques `historyHandling` de `location.*`
