@@ -9786,6 +9786,149 @@ async fn iframe_timer_fires_in_child_ctx() {
     assert!(dump.contains("tic-enfant"), "timer enfant : {dump}");
 }
 
+// ===== Étape 130 — ponts JS cross-contexte réels : `parent`/
+// `top`/`self` résolus dans un realm fetché + `postMessage`
+// structuré dans les deux sens (moteur JS-C78, session 134) =====
+
+/// Références fenêtre de l'enfant : `parent`/`top`/`self` sont
+/// de vrais objets (same-origin → accès directs, pas de
+/// proxy opaque) — `parent`/`top` désignent le global parent,
+/// `self` le sien.
+const FRAME_REFS_CHILD: &str = "<!doctype html><html><body>\
+    <p id=\"c\">?</p>\
+    <script>document.getElementById('c').textContent=\
+    'refs:'+(parent===top)+','+(self===window)+','+(parent!==window)\
+    </script></body></html>";
+
+#[tokio::test]
+async fn iframe_window_refs_resolve_in_child() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_IFRAME_JS);
+    t.route("/f", 200, FRAME_REFS_CHILD);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.frame_dom_dump(id, 0).unwrap_or_default();
+    assert!(
+        dump.contains("refs:true,true,true"),
+        "parent/top/self de l'enfant : {dump}"
+    );
+}
+
+/// `postMessage` parent → enfant : `frames[0]` résout le
+/// realm enfant (créé au commit head, avant les scripts du
+/// parent), le message cloné est livré au listener `message`
+/// de l'enfant — `data` + `origin` mutent SON document.
+const FRAME_PM_RECV: &str = "<!doctype html><html><body>\
+    <p id=\"c\">?</p>\
+    <script>window.addEventListener('message',function(e){\
+    document.getElementById('c').textContent=\
+    'enfant-recoit:'+e.data+'|'+e.origin})\
+    </script></body></html>";
+
+const PAGE_PM_TO_CHILD: &str = "<!doctype html><html><body>\
+    <iframe id=\"f\" src=\"/f\"></iframe>\
+    <script>frames[0].postMessage('ping','http://h.test')\
+    </script></body></html>";
+
+#[tokio::test]
+async fn iframe_postmessage_parent_to_child() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_PM_TO_CHILD);
+    t.route("/f", 200, FRAME_PM_RECV);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    // `postMessage` poste une **task** (spec) : livraison à
+    // la pompe de jobs, pas à la pompe réseau.
+    s.pump_timers(id);
+    s.pump_net().await;
+    let dump = s.frame_dom_dump(id, 0).unwrap_or_default();
+    assert!(
+        dump.contains("enfant-recoit:ping|http://h.test"),
+        "postMessage parent→enfant : {dump}"
+    );
+}
+
+/// `postMessage` enfant → parent : le listener `message` du
+/// parent (enregistré au `<head>`, avant tout commit de
+/// cadre) reçoit la donnée **clonée** (`WireValue`) et
+/// l'`origin` de l'émetteur.
+const PAGE_PM_LISTENER: &str = "<!doctype html><html><head>\
+    <script>window.addEventListener('message',function(e){\
+    fetch('/heard');\
+    document.getElementById('p').textContent=\
+    'parent-recoit:'+e.data.tag+'|'+e.origin})</script></head>\
+    <body><div id=\"p\">?</div><iframe src=\"/f\"></iframe></body></html>";
+
+/// Enfant qui poste **pendant son propre parse** — la task
+/// doit attendre que le document parent ait fini le sien
+/// (spec : livraison après les jobs de parse du document
+/// cible), sinon le listener `<script>` du parent n'est pas
+/// encore enregistré à la livraison (mesuré : les scripts
+/// inline du cadre s'évaluent avant ceux du parent).
+const FRAME_PM_EMIT: &str = "<!doctype html><html><body>\
+    <p id=\"c\">?</p>\
+    <script>parent.postMessage({tag:'pong',n:2},'http://h.test')\
+    </script></body></html>";
+
+/// Variante `setTimeout` — la livraison tombe à la pompe de
+/// jobs, hors du flux de navigation.
+const FRAME_PM_EMIT_TIMER: &str = "<!doctype html><html><body>\
+    <script>setTimeout(function(){parent.postMessage({tag:'pong',n:2},'http://h.test')},0)\
+    </script></body></html>";
+
+#[tokio::test]
+async fn iframe_postmessage_child_to_parent() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_PM_LISTENER);
+    t.route("/f", 200, FRAME_PM_EMIT);
+    t.route("/heard", 200, "ok");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let mut rx = s.subscribe();
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    s.pump_timers(id);
+    s.pump_net().await;
+    let fdump = s.frame_dom_dump(id, 0).unwrap_or_default();
+    let dump = s.dom_dump(id).unwrap_or_default();
+    let heard = t.paths().contains(&"/heard".to_string());
+    let mut errs = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        if let CoreEvent::PipelineError { message, .. } = ev {
+            errs.push(message);
+        }
+    }
+    assert!(
+        heard && dump.contains("parent-recoit:pong|http://h.test"),
+        "postMessage enfant→parent : heard={heard} {dump}\nenfant : {fdump}\nerrs : {errs:?}"
+    );
+}
+
+/// Même pont, émis depuis un timer enfant : la livraison à
+/// la pompe de jobs synchronise le miroir parent — le write
+/// du listener atteint le DOM commis.
+#[tokio::test]
+async fn iframe_postmessage_child_to_parent_via_timer() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, PAGE_PM_LISTENER);
+    t.route("/f", 200, FRAME_PM_EMIT_TIMER);
+    t.route("/heard", 200, "ok");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    // Timer enfant tiré par la pompe cross-ctx (étape 134) —
+    // la livraison `postMessage` suit la même frontière.
+    s.pump_timers(id);
+    s.pump_net().await;
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(
+        dump.contains("parent-recoit:pong|http://h.test"),
+        "postMessage enfant→parent (timer) : {dump}"
+    );
+}
+
 // ===== JS-C79 — `crypto.subtle` : couture embedder
 // (moteur → NetRequest::Crypto → `explorer_net::crypto` ring
 // → Promise résolue) =====

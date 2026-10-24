@@ -1217,6 +1217,10 @@ impl Session {
             return;
         };
         eng.install_dom_ctx(ctx, &html, &url.to_string(), local, &cookie);
+        // « loading » jusqu'au cycle interactive/complete —
+        // retient les `postMessage` entrants pendant les
+        // scripts du cadre dynamique (étape 130).
+        eng.set_ready_state(ctx, "loading");
         for src in scripts {
             if let Err(e) = eng.eval_ctx(ctx, &src, None) {
                 let _ = evs.send(CoreEvent::PipelineError {

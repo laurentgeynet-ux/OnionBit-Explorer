@@ -74,6 +74,16 @@ pub(crate) struct CtxMeta {
     /// Contexte détruit (navigation du frame hors bfcache —
     /// `closed === true`, `postMessage` no-op silencieux).
     pub alive: bool,
+    /// Document en cours de parse (commit session non terminé) —
+    /// les `postMessage` vers ce contexte restent en file tant
+    /// que le drapeau tient : la task n'est livrée qu'après
+    /// l'évaluation des scripts du document, sinon un listener
+    /// `<script>` postérieur la raterait (spec — la livraison
+    /// suit les jobs de parse du document cible). Armé par
+    /// `set_ready_state(…, "loading")`, désarmé à
+    /// `interactive`/`complete`. Défaut `false` : hors session
+    /// (harnais), la livraison est immédiate comme avant.
+    pub defer_msgs: bool,
 }
 
 /// Champs document-local d'un contexte garé — miroir exact des

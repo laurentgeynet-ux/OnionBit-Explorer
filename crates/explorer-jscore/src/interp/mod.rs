@@ -727,6 +727,7 @@ impl Engine {
                 proxy: None,
                 global: None,
                 alive: true,
+                defer_msgs: false,
             }],
             parked: std::collections::HashMap::new(),
             pending_msgs: std::collections::VecDeque::new(),
@@ -922,6 +923,7 @@ impl Engine {
             proxy: None,
             global: None,
             alive: true,
+            defer_msgs: false,
         });
         if let Some(m) = self.ctxs.get_mut(parent as usize) {
             m.children.push(id);
@@ -1119,6 +1121,14 @@ impl Engine {
         } else if let Some(p) = self.parked.get_mut(&ctx) {
             p.ready_state = v;
         }
+        // `defer_msgs` : `"loading"` arme la retenue des
+        // `postMessage` entrants (le document n'a pas fini son
+        // parse — ses scripts/listeners courent encore) ;
+        // `interactive`/`complete` la désarme — la file se
+        // vide alors au prochain checkpoint.
+        if let Some(m) = self.ctxs.get_mut(ctx as usize) {
+            m.defer_msgs = v == "loading";
+        }
     }
 
     /// Nom du contexte `ctx` pour `window.name` (CAP-159) —
@@ -1241,7 +1251,16 @@ impl Engine {
                 self.hooks.current_script = Some(node);
                 // Un script qui jette n'empêche pas `load`
                 // (spec : `error` n'est que transport/CSP).
-                let _ = self.eval(text);
+                // `eval_named` (JS-C87) : la pile d'erreur
+                // attribue le chunk (`at fn (url:l:c)`) —
+                // src sinon étiquette seq.
+                let label = {
+                    let d = dom.borrow();
+                    d.attr(node, "src")
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("dyn:{seq}"))
+                };
+                let _ = self.eval_named(text, &label);
                 self.hooks.current_script = prev;
                 "load"
             }
@@ -1815,7 +1834,25 @@ impl Engine {
     /// épuisement (bornée par l'op-budget global).
     pub(crate) fn drain_pending_msgs(&mut self) -> JsResult<usize> {
         let mut n = 0usize;
+        let mut deferred: crate::context::PendingMsgs = std::collections::VecDeque::new();
         while let Some(msg) = self.pending_msgs.pop_front() {
+            let Some(m) = self.ctxs.get(msg.target as usize) else {
+                continue;
+            };
+            // Contexte mort → drop silencieux (spec).
+            // `defer_msgs` : document cible en cours de parse —
+            // la task attend que ses scripts aient tourné
+            // (spec : livraison après les jobs de parse ;
+            // sinon un listener enregistré plus tard dans le
+            // même parse est raté — mesuré : scripts inline de
+            // l'iframe évalués avant ceux du parent).
+            if !m.alive {
+                continue;
+            }
+            if m.defer_msgs {
+                deferred.push_back(msg);
+                continue;
+            }
             self.switch_to(msg.target);
             n += 1;
             let data = self.wire_decode(&msg.data)?;
@@ -1835,6 +1872,11 @@ impl Engine {
             self.set_own(ev, "bubbles", Value::Bool(false), true);
             self.fire_event_listeners(Value::Obj(ev))?;
         }
+        // Les messages différés repartent en file **devant**
+        // ceux postés pendant la livraison (les listeners
+        // peuvent reposter — ordre FIFO préservé).
+        deferred.append(&mut self.pending_msgs);
+        self.pending_msgs = deferred;
         Ok(n)
     }
 

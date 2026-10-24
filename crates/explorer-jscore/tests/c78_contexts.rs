@@ -513,3 +513,20 @@ fn c78_timers_run_per_context() {
     e.run_due_timers().expect("timers");
     assert_eq!(ev_ctx(&mut e, child, "fired"), "1");
 }
+
+#[test]
+fn c78_child_posts_to_parent_during_own_eval() {
+    let (mut e, d) = top_engine();
+    ev(&mut e, "var got=null; window.addEventListener('message',function(ev){got=ev.data.tag+'|'+ev.origin;})");
+    let _c = add_child(&mut e, &d, CHILD_URL);
+    // L'enfant poste PENDANT sa propre évaluation (session :
+    // script inline au commit) — la livraison attend la
+    // prochaine pompe de microtasks.
+    ev_ctx(
+        &mut e,
+        1,
+        "parent.postMessage({tag:'pong'},'https://top.example')",
+    );
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(ev(&mut e, "got"), "pong|https://top.example");
+}

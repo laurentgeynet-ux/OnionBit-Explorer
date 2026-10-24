@@ -284,6 +284,12 @@ impl Session {
                 self.viewport.1.max(0.0).round() as u32,
             );
             e.install_dom(html, &page_url, hist_len);
+            // « loading » jusqu'au DCL de commit (net.rs) —
+            // retient les `postMessage` entrants tant que les
+            // scripts du document n'ont pas tourné (étape 130 :
+            // un cadre qui poste pendant son propre parse ne
+            // devance pas les listeners du parent).
+            e.set_ready_state(explorer_js::JS_CTX_TOP, "loading");
             e.set_page_referrer(referrer);
             // `window.name` (CAP-159) — nom du contexte posé
             // par l'ouverture nommée (`target="x"`/
@@ -376,6 +382,10 @@ impl Session {
                 self.origin_state(&fp.url)
             };
             eng.install_dom_ctx(ctx, &fp.html, &fp.url.to_string(), local, &cookie);
+            // « loading » jusqu'au cycle interactive/complete
+            // ci-dessous — retient les `postMessage` entrants
+            // pendant les scripts du cadre (étape 130).
+            eng.set_ready_state(ctx, "loading");
             for src in &fp.scripts {
                 self.eval_ctx_or_report(tab, eng, ctx, src);
             }

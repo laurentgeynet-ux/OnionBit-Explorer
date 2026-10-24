@@ -3238,15 +3238,38 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   régénérées. 4 tests
   `iframe_composite_*`.
 
-- [ ] **Étape 130. Ponts JS des
+- [x] **Étape 130. Ponts JS des
   sous-contextes `<iframe>`** :
   `JsEngine` par contexte
-  enfant, `window.parent`/
-  `top`/`self`, `postMessage`
-  cross-contexte borné —
-  **dépend de la piste JS**
-  (le contexte enfant exige
-  son propre moteur ; journal).
+  enfant (JS-C78 + étape 134 +
+  CAP-171/175), `window.parent`/
+  `top`/`self` résolus
+  (same-origin = objets réels,
+  cross-origin = `WindowProxy`
+  opaque), `postMessage`
+  cross-contexte borné
+  (`WireValue`, `targetOrigin`
+  exigé, `'*'` spec). **Fix de
+  livraison** : les scripts
+  inline du cadre s'évaluant
+  avant ceux du parent, une
+  task `postMessage` drainée
+  à la frontière de job de
+  l'émetteur livrait à un
+  document sans listener —
+  perte sèche mesurée.
+  `CtxMeta.defer_msgs` (armé
+  par `set_ready_state(…,
+  "loading")`, désarmé à
+  `interactive`/`complete`)
+  retient les messages entrants
+  pendant le parse du document
+  cible — FIFO préservé, drop
+  silencieux sur contexte mort.
+  Défaut `false` hors session
+  (harnais inchangés). 4 tests
+  session `iframe_postmessage_*/
+  iframe_window_refs_*`.
 
 - [x] **Étape 131. Cibles de
   navigation (`target`) et

@@ -9,6 +9,50 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 130 — ponts JS des
+  sous-contextes `<iframe>` + fix
+  `postMessage` avant parse**
+  (`explorer-jscore`, `explorer-core`) :
+  `window.parent`/`top`/`self`/
+  `frames[n]`/`contentWindow` résolus
+  (same-origin = objets réels,
+  cross-origin = `WindowProxy`
+  opaque) et `postMessage`
+  cross-contexte `WireValue`
+  (`targetOrigin` exigé, `'*'`
+  spec) — mesurés bout en bout
+  en session. Trou : les scripts
+  inline du cadre s'évaluant
+  **avant** ceux du parent
+  (étape 134), une task
+  `postMessage` drainée à la
+  frontière de job de l'émetteur
+  livrait à un document sans
+  listener — perte sèche, hors
+  spec (livraison après les jobs
+  de parse du document cible).
+  `CtxMeta.defer_msgs` : armé par
+  `set_ready_state(…,"loading")`
+  posée par la session à chaque
+  commit de document (ctx0 au
+  `spawn_engine`, cadres à
+  l'`install_dom_ctx`), désarmé
+  à `interactive`/`complete` —
+  `drain_pending_msgs` retient
+  les messages vers un contexte
+  en parse (FIFO préservé, drop
+  silencieux sur ctx mort). Hors
+  session (`defer_msgs: false`),
+  livraison immédiate inchangée.
+  Régressions
+  `iframe_window_refs_resolve_in_
+  child`, `iframe_postmessage_
+  parent_to_child`,
+  `iframe_postmessage_child_to_
+  parent`, `_via_timer` +
+  `c78_child_posts_to_parent_
+  during_own_eval` (5 tests).
+
 - **JS-C85 — `useSyncExternalStore` +
   `lazy`/`Suspense` mesurés sains**
   (`explorer-jscore`, sonde React 19) :
