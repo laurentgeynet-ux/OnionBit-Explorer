@@ -9,6 +9,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C90 — méthodes `Array.prototype` génériques**
+  (`explorer-jscore`) : `[].push.call(o)` sur un objet
+  `length`+indices — `take_elems`/`put_elems` matérialisent
+  et réécrivent via `[[Get]]`/`[[Set]]`/`[[Delete]]`+`length`
+  (spec générique) ; `this_array` accepte tout objet
+  (primitives rejetées — `ToObject` non porté). jQuery
+  fonctionne de bout en bout : `$(fn)`, `append`, `on('click')`,
+  `.text()`, `addClass`/`hide`/`is(':hidden')`.
+- **JS-C91 — chaîne htmx débloquée** (`explorer-jscore`) :
+  `overrideMimeType` (stub spec), `classList` méthodes
+  lisibles (`e.classList["add"].call(...)`), `xhr.upload`
+  (EventTarget stable, `addEventListener` avalé), `DOMParser`
+  constructible (`new DOMParser().parseFromString` →
+  `Dom::from_html`). Mesuré : `htmx.ajax` part (`beforeReq`),
+  XHR complet. Reste : `RangeError` heap au swap htmx
+  (bisection `hx-swap` en cours) + Alpine `x-data` non
+  évalué (sonde ouverte).
+
 - **JS-C92 — `EventSource` réel
   (SSE)** (`explorer-jscore`,
   `explorer-net`, `explorer-js`,

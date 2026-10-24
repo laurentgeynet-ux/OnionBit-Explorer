@@ -6083,6 +6083,17 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   messages`, `eventsource_error_on_non_
   sse` (2 session) + 6 unitaires parseur.
 
+- [x] **JS-C90. `Array.prototype` générique** —
+  `take_elems`/`put_elems`/`this_array` array-like
+  (`[[Get]]`/`[[Set]]`/`[[Delete]]`/`length`) : jQuery
+  complet ($(fn), append, on(click), text, addClass,
+  hide). Régression `array_methods_generic_on_array_like`.
+- [x] **JS-C91. Chaîne htmx (partie)** —
+  `overrideMimeType`, `classList` méthodes lisibles,
+  `xhr.upload` stable, `DOMParser` constructible.
+  `htmx.ajax` part. Reste : heap-limit au swap
+  (`hx-swap`), Alpine `x-data`.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

@@ -1677,3 +1677,21 @@ fn c77_send_beacon_no_cors_include() {
     assert_eq!(r.mode, explorer_jscore::FetchMode::NoCors);
     assert_eq!(r.credentials, explorer_jscore::FetchCredentials::Include);
 }
+
+/// `xhr.upload` (JS-C91) — objet EventTarget stable, avale les
+/// registrations : htmx enchaîne `xhr.upload.addEventListener
+/// ('progress',…)` sur chaque requête — `undefined` tuait son
+/// pipeline ajax.
+#[test]
+fn xhr_upload_stub_stable() {
+    let (mut e, _t) = engine();
+    assert_eq!(
+        describe(
+            &mut e,
+            "var x=new XMLHttpRequest();var u=x.upload;\
+             [typeof u, u===x.upload, u.onprogress,\
+             (u.addEventListener('progress',function(){}),'ok')].join('|')"
+        ),
+        "object|true||ok"
+    );
+}
