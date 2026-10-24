@@ -143,6 +143,12 @@ pub(crate) struct BrowsingContext {
     /// `document.readyState` du contexte (CAP-170) —
     /// document-local, garé/restauré au `switch_to`.
     pub ready_state: &'static str,
+    /// Slots `<dialog>` du contexte (CAP-176) — `showModal()`
+    /// pose `open` + le flag modal ; `close()` efface les
+    /// deux + `close` event. `returnValue` = slot spec.
+    /// Document-local, garé/restauré au `switch_to`.
+    pub dialog_modal: std::collections::BTreeSet<crate::dom::NodeId>,
+    pub dialog_retval: std::collections::BTreeMap<crate::dom::NodeId, String>,
     pub viewport: (u32, u32),
 }
 
@@ -376,6 +382,8 @@ impl BrowsingContext {
             win_name: String::new(),
             scroll_restore_manual: false,
             ready_state: "loading",
+            dialog_modal: std::collections::BTreeSet::new(),
+            dialog_retval: std::collections::BTreeMap::new(),
             viewport: (0, 0),
         }
     }

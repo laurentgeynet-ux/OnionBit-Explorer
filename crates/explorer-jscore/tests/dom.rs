@@ -3863,3 +3863,47 @@ fn host_methods_read_as_functions() {
         .unwrap_or_default();
     assert_eq!(v4, "7");
 }
+
+// ===== CAP-176 — `<dialog>` : showModal/show/close bornés
+// (trou mesuré par sonde empirique `_census_calls` —
+// `dialog.showModal` TypeError sur le terrain).
+
+#[test]
+fn dialog_show_modal_close_bounded() {
+    let mut e = engine_with(
+        "<!doctype html><html><body><dialog id=d></dialog><div id=v></div></body></html>",
+    );
+    e.eval("var d=document.getElementById('d'), v=document.getElementById('v');")
+        .expect("setup");
+    // `open` reflété bool, fermé par défaut.
+    assert_eq!(evf(&mut e, "d.open"), "false");
+    // `showModal()` → `open`, flag modal interne.
+    assert_eq!(evf(&mut e, "d.showModal(); d.open"), "true");
+    // Déjà ouvert → `InvalidStateError` (spec).
+    let r = e.eval("d.showModal()");
+    assert!(r.is_err(), "showModal sur ouvert doit jeter");
+    let msg = format!("{:?}", r.unwrap_err());
+    assert!(msg.contains("InvalidStateError"), "attendu : {msg}");
+    // `close()` → `open` retiré + événement `close` tiré.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var c=0; d.addEventListener('close', function(){c++;}); \
+             d.close('ret42'); [d.open, d.returnValue, c].join(',')"
+        ),
+        "false,ret42,1"
+    );
+    // `close()` sur fermé → no-op silencieux (pas d'événement).
+    assert_eq!(evf(&mut e, "d.close(); c"), "1");
+    // `show()` → `open` non-modal.
+    assert_eq!(evf(&mut e, "d.show(); d.open"), "true");
+    // `returnValue` settable en propriété (slot spec).
+    assert_eq!(evf(&mut e, "d.returnValue='x'; d.returnValue"), "x");
+    // Feature-detect : `typeof dlg.showModal` = 'function',
+    // `typeof div.showModal` = 'undefined' (gate per-tag).
+    assert_eq!(evf(&mut e, "typeof d.showModal"), "function");
+    assert_eq!(evf(&mut e, "typeof v.showModal"), "undefined");
+    // `showModal` sur non-dialog → TypeError (pas de méthode).
+    let r = e.eval("v.showModal()");
+    assert!(r.is_err(), "showModal sur <div> doit jeter");
+}

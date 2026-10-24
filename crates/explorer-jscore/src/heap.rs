@@ -1350,13 +1350,14 @@ pub trait Host: std::any::Any {
         Ok(None)
     }
 
-    /// Noms des méthodes que [`Self::invoke`] dispatche —
-    /// lisibles comme propriétés fonctionnelles (feature-detect :
+    /// `true` si [`Self::invoke`] dispatche `name` — lisible
+    /// comme propriété fonctionnelle (feature-detect :
     /// `typeof el.m === 'function'`, shims `o = el.matches || …`).
-    /// Défaut : aucune — seuls les hosts qui listent leur
-    /// surface exposent le repli.
-    fn methods(&self) -> &[&'static str] {
-        &[]
+    /// Défaut : aucune — seuls les hosts qui déclarent leur
+    /// surface exposent le repli (le check peut dépendre du
+    /// receveur : `<dialog>` expose `showModal`, pas `<div>`).
+    fn has_method(&self, _name: &str) -> bool {
+        false
     }
 
     /// Enumerable host keys (`for-in`); own enumerable props are

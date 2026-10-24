@@ -1400,6 +1400,37 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-176 — `<dialog>` : `showModal`/`show`/
+  `close` + `open`/`returnValue`** (`explorer-
+  jscore` — cap « web réel sécurisé » ; numéro
+  officiel attribué à l'intégration ; trou
+  mesuré par sonde empirique `_census_calls` —
+  `dialog.showModal` TypeError) : les modales
+  de sign-in étaient sans support. `showModal()`
+  pose `open` + flag modal (slot interne),
+  `show()` pose `open`, déjà ouvert →
+  `InvalidStateError` (spec) ; `close()` retire
+  `open`, efface le flag, pose `returnValue`
+  si arg fourni (slot spec, pas un attribut) et
+  tire l'événement `close` ; `close()` sur
+  fermé → no-op silencieux. `open` reflété bool
+  (`<dialog>` **et** `<details>` — même slot
+  IDL), `returnValue` prop string. Slots
+  `dialog_modal`/`dialog_retval` document-local
+  (garés par ctx au `switch_to`). Feature-detect
+  per-tag : `typeof dlg.showModal` = `'function'`,
+  `typeof div.showModal` = `'undefined'` —
+  `Host::methods()` devient `has_method(name)`
+  (le check dépend du receveur). Bornes :
+  `cancel` (Esc) hors borne miroir — pas
+  d'entrée clavier ; `form method="dialog"` →
+  fermeture au submit non câblée ; top-layer
+  visuel = arc rendu. Test jscore
+  `dialog_show_modal_close_bounded` (open
+  reflété, InvalidStateError, close event +
+  returnValue, no-op fermé, feature-detect
+  per-tag, non-dialog → TypeError).
+
 - **CAP-175 — `postMessage '*'` spec + méthodes
   fenêtre no-op bornées** (`explorer-jscore` —
   cap « web réel sécurisé » ; numéro officiel

@@ -863,6 +863,8 @@ impl Engine {
             &mut ctx.scroll_restore_manual,
         );
         swap(&mut self.hooks.ready_state, &mut ctx.ready_state);
+        swap(&mut self.hooks.dialog_modal, &mut ctx.dialog_modal);
+        swap(&mut self.hooks.dialog_retval, &mut ctx.dialog_retval);
         swap(&mut self.hooks.viewport, &mut ctx.viewport);
     }
 
@@ -4138,7 +4140,7 @@ impl Engine {
                 // `read_prop`).
                 if matches!(v, Value::Undefined) {
                     if let Some(h) = &h {
-                        if h.methods().contains(&key) {
+                        if h.has_method(key) {
                             let name = self.str_val(key);
                             return Ok(self.bound_native(
                                 "hostMethod",

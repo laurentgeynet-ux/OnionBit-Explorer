@@ -3384,6 +3384,27 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-176. `<dialog>` : `showModal`/`show`/
+  `close` + `open`/`returnValue`** — *(numéro
+  officiel attribué à l'intégration ; trou
+  mesuré par sonde empirique `_census_calls`)*
+  : modales sign-in — `showModal()` pose `open`
+  + flag modal, `show()` pose `open`, déjà
+  ouvert → `InvalidStateError` (spec) ; `close()`
+  retire `open` + flag, pose `returnValue` si
+  arg et tire `close` ; `close()` sur fermé →
+  no-op. `open` reflété bool (`<dialog>` +
+  `<details>`), `returnValue` slot spec string.
+  Slots document-local garés au `switch_to`.
+  Feature-detect per-tag : `typeof dlg.showModal`
+  = `'function'`, `typeof div.showModal` =
+  `'undefined'` — `Host::methods()` devient
+  `has_method(name)` (check dépendant du
+  receveur). Bornes : `cancel` (Esc) hors borne
+  miroir ; `form method="dialog"` non câblé ;
+  top-layer visuel = arc rendu. Test jscore
+  `dialog_show_modal_close_bounded`.
+
 - [x] **CAP-175. `postMessage '*'` spec +
   méthodes fenêtre no-op bornées** — *(numéro
   officiel attribué à l'intégration ; trous

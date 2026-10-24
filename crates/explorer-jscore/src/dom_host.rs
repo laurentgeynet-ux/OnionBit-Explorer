@@ -253,6 +253,13 @@ pub(crate) struct BrowserHooks {
     /// (CAP-173) — pour `load`/`error` à la livraison. Même
     /// borne que `dyn_script_nodes`.
     pub dyn_link_nodes: std::collections::BTreeMap<u64, NodeId>,
+    /// Slots `<dialog>` (CAP-176) : `showModal()` pose `open`
+    /// et le flag modal ; `close()` efface les deux et tire
+    /// `close`. `returnValue` = slot spec (pas un attribut —
+    /// il n'en est pas un). Document-local — garé/restauré
+    /// au `switch_to`.
+    pub dialog_modal: std::collections::BTreeSet<NodeId>,
+    pub dialog_retval: std::collections::BTreeMap<NodeId, String>,
     /// Séquence d'émission des scripts dynamiques.
     pub dyn_script_seq: u64,
     /// Cookie jar for `document.cookie`.
@@ -2172,8 +2179,8 @@ const DOCUMENT_METHODS: &[&str] = &[
 ];
 
 impl Host for DocumentHost {
-    fn methods(&self) -> &[&'static str] {
-        DOCUMENT_METHODS
+    fn has_method(&self, name: &str) -> bool {
+        DOCUMENT_METHODS.contains(&name)
     }
     fn class_name(&self) -> &'static str {
         "HTMLDocument"
@@ -2651,6 +2658,23 @@ fn is_media(dom: &DomRef, node: NodeId) -> bool {
     )
 }
 
+/// `true` si `node` est `<dialog>` — gate des méthodes/props
+/// `HTMLDialogElement` (CAP-176).
+fn is_dialog(dom: &DomRef, node: NodeId) -> bool {
+    dom.borrow().nodes[node as usize].tag.as_str() == "dialog"
+}
+
+/// DOMException-like `{name, message}` — les erreurs DOM
+/// standard hors idb (`InvalidStateError` de `showModal`…).
+fn dom_ex(e: &mut Engine, name: &str, msg: &str) -> Value {
+    let o = e.new_object();
+    let n = e.str_val(name);
+    e.set_own(o, "name", n, true);
+    let m = e.str_val(msg);
+    e.set_own(o, "message", m, true);
+    Value::Obj(o)
+}
+
 /// `TimeRanges` vide : `length` 0, `start`/`end` lèvent
 /// (hors-bornes — spec `INDEX_SIZE_ERR`) plutôt que mentir.
 fn tr_oob(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
@@ -3074,8 +3098,9 @@ impl Host for NodeHost {
         }
     }
 
-    fn methods(&self) -> &[&'static str] {
-        NODE_METHODS
+    fn has_method(&self, name: &str) -> bool {
+        NODE_METHODS.contains(&name)
+            || (is_dialog(&self.dom, self.node) && matches!(name, "showModal" | "show" | "close"))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -3568,6 +3593,27 @@ impl Host for NodeHost {
                     e.native_fn("scrollIntoView", element_scroll_into_view),
                 ));
             }
+            // `<dialog>`/`<details>` (CAP-176) — `open`
+            // reflété bool ; `returnValue` = slot spec sur
+            // `<dialog>` (pas un attribut — il n'en est
+            // pas un).
+            "open"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "dialog" | "details"
+                ) =>
+            {
+                return Ok(Some(Value::Bool(self.dom.borrow().has_attr(node, "open"))));
+            }
+            "returnValue" if is_dialog(&self.dom, node) => {
+                let v = e
+                    .hooks
+                    .dialog_retval
+                    .get(&node)
+                    .cloned()
+                    .unwrap_or_default();
+                return Ok(Some(e.str_val(v)));
+            }
             _ => {}
         }
         // Attribute-mapped props.
@@ -3703,6 +3749,28 @@ impl Host for NodeHost {
                 } else {
                     d.set_attr(node, "value", &s);
                 }
+                Ok(true)
+            }
+            // `<dialog>`/`<details>` (CAP-176) — `open` reflété
+            // bool ; `returnValue` = slot spec sur `<dialog>`.
+            "open"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "dialog" | "details"
+                ) =>
+            {
+                let on = e.to_boolean(v);
+                let mut d = self.dom.borrow_mut();
+                if on {
+                    d.set_attr(node, "open", "");
+                } else {
+                    d.remove_attr(node, "open");
+                }
+                Ok(true)
+            }
+            "returnValue" if is_dialog(&self.dom, node) => {
+                let s = e.to_js_string(v)?;
+                e.hooks.dialog_retval.insert(node, s);
                 Ok(true)
             }
             _ => {
@@ -4200,6 +4268,50 @@ impl Host for NodeHost {
                     "canPlayType" => Ok(Some(e.str_val(""))),
                     "addTextTrack" | "captureStream" => Ok(Some(Value::Null)),
                     _ => Ok(Some(Value::Undefined)),
+                }
+            }
+            // `<dialog>` (CAP-176) — `showModal()`/`show()`
+            // posent `open` (modal = slot interne) ;
+            // `close()` retire `open`, efface le flag modal,
+            // pose `returnValue` si arg fourni et tire
+            // l'événement `close` — `cancel` (Esc) hors
+            // borne miroir (pas d'entrée clavier) : documenté.
+            "showModal" | "show" | "close" if is_dialog(&self.dom, node) => {
+                match name {
+                    "showModal" | "show" => {
+                        if self.dom.borrow().has_attr(node, "open") {
+                            return Err(crate::heap::Thrown(dom_ex(
+                                e,
+                                "InvalidStateError",
+                                "dialog is already open",
+                            )));
+                        }
+                        self.dom.borrow_mut().set_attr(node, "open", "");
+                        if name == "showModal" {
+                            e.hooks.dialog_modal.insert(node);
+                        }
+                        Ok(Some(Value::Undefined))
+                    }
+                    // `close()` sur dialogue fermé → no-op
+                    // silencieux (spec : « if open is not
+                    // set, return »).
+                    _ => {
+                        if !self.dom.borrow().has_attr(node, "open") {
+                            return Ok(Some(Value::Undefined));
+                        }
+                        self.dom.borrow_mut().remove_attr(node, "open");
+                        e.hooks.dialog_modal.remove(&node);
+                        // `close(result)` — arg présent et non
+                        // `undefined` → `returnValue` (spec).
+                        if let Some(a) = args.first() {
+                            if !matches!(a, Value::Undefined) {
+                                let rv = e.to_js_string(*a)?;
+                                e.hooks.dialog_retval.insert(node, rv);
+                            }
+                        }
+                        e.dispatch_simple(&self.dom, &self.cache, node, "close")?;
+                        Ok(Some(Value::Undefined))
+                    }
                 }
             }
             _ => Ok(None),
