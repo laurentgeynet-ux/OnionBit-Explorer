@@ -10282,3 +10282,61 @@ async fn pushstate_after_load_pushes_entry() {
     assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/late"));
     assert_eq!(t.calls(), calls, "forward same-document : aucun fetch");
 }
+
+/// `location.replace` (CAP-152) : fetch réel de la cible
+/// puis **réécriture** de l'entrée courante — `back` saute
+/// la page remplacée (sémantique `historyHandling:
+/// "replace"` — flows auth qui ne doivent pas laisser
+/// l'étape intermédiaire dans l'historique).
+#[tokio::test]
+async fn location_replace_rewrites_entry() {
+    let (mut s, t) = test_session();
+    t.route("/a", 200, "<html><body>a</body></html>");
+    t.route(
+        "/b",
+        200,
+        "<!doctype html><html><body><script>         location.replace('/r2')</script></body></html>",
+    );
+    t.route("/r2", 200, "<html><body>r2</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/a").await.unwrap();
+    s.navigate(id, "http://h.test/b").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/r2"));
+    // `back` saute `/b` **et** `/r2` : l'entrée de `/b` a
+    // été réécrite par `/r2` — la position suivante est `/a`.
+    s.go_back(id).await.unwrap();
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/a"));
+}
+
+/// `location.reload` (CAP-152) : la requête de l'entrée
+/// est rejouée (`last_req`), aucune entrée nouvelle —
+/// `back` reste `EmptyDocument`.
+#[tokio::test]
+async fn location_reload_replays_request() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><script>         setTimeout(function(){location.reload()}, 0)</script>         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let calls = t.calls();
+    s.pump_timers(id);
+    s.drain_script_nav(id).await;
+    // La requête de l'entrée a été rejouée au moins une
+    // fois — le timer se ré-arme à chaque rechargement
+    // (boucle reload → drain borné par `MAX_NAV_HOPS`,
+    // comportement navigateur fidèle).
+    assert!(
+        t.calls() > calls,
+        "reload rejoue la requête — fetch(s) en plus"
+    );
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/"));
+    // Aucune entrée empilée : le rechargement réutilise
+    // l'entrée — `back` n'a rien à viser.
+    assert!(matches!(s.go_back(id).await, Err(CoreError::EmptyDocument)));
+}

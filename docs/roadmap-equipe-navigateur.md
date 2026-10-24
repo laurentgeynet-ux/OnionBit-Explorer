@@ -3359,6 +3359,26 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   qu'un échec réseau).
   8 tests session + 3 policy.
 
+- [x] **CAP-152. `location.replace`/`location.reload`** —
+  *(numéro officiel attribué à l'intégration)* : les
+  sémantiques `historyHandling` de `location.*`
+  (utilisées par les flows auth — une étape de
+  sign-in ne doit pas rester dans l'historique).
+  Hooks additifs `navigate_replace`/`navigate_reload`
+  (jscore) → variantes `NavRequest::Replace`/`Reload`
+  (explorer-js) → `ScriptNav`/`DrainAct` dédiés :
+  **replace** = fetch réel puis réécriture de
+  `hist[hist_idx]` par la requête commise (`back`
+  saute la page remplacée ; `same_doc` retombe à
+  faux — document neuf, tête de run) ; **reload**
+  = rejeu de `last_req` (méthode + corps — POST
+  re-POSTe) à la position courante + règle
+  d'erreur de `reload` public (succès → entrée
+  redevient saine, étape 76). Deux drains couverts
+  (`drain_script_nav` exclusif +
+  `drain_navs_shared` sous verrou). Borne :
+  `location.assign(même URL)` reste un push
+  (spec `navigate` — Chrome diffère peut-être).
 - [x] **CAP-151. History API `pushState`/`replaceState`** —
   *(numéro officiel attribué à l'intégration)* :
   `history.pushState`/`replaceState` remontent à la

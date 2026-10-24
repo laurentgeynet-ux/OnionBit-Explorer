@@ -99,6 +99,15 @@ pub(crate) struct BrowserHooks {
     /// (CAP-151). Absent → `page_url` remplacée à la brute
     /// (harnais sans session — comportement historique).
     pub push_state: Option<Rc<dyn Fn(String, bool)>>,
+    /// `location.replace(url)` — navigation `historyHandling:
+    /// "replace"` : l'entrée d'historique courante est
+    /// réécrite, pas poussée (CAP-152 — flows auth).
+    /// Absent → `navigate` (comportement historique).
+    pub navigate_replace: Option<Rc<dyn Fn(String)>>,
+    /// `location.reload()` — rejeu de la requête de l'entrée
+    /// courante sans entrée nouvelle (CAP-152). Absent →
+    /// `navigate(page_url)` (comportement historique).
+    pub navigate_reload: Option<Rc<dyn Fn()>>,
     /// Viewport size in CSS px — backs `innerWidth`/`innerHeight`
     /// and `screen.width`/`height`.
     pub viewport: (u32, u32),
@@ -155,6 +164,19 @@ impl Engine {
     /// historique, CAP-151). Absent → URL locale brute.
     pub fn set_push_state_hook(&mut self, f: Rc<dyn Fn(String, bool)>) {
         self.hooks.push_state = Some(f);
+    }
+
+    /// Install the `location.replace(url)`/`reload()` hooks
+    /// (CAP-152) — replace réécrit l'entrée au lieu de
+    /// pousser, reload rejoue la requête de l'entrée.
+    /// Absents → repli `navigate` (comportement historique).
+    pub fn set_nav_replace_reload_hooks(
+        &mut self,
+        replace: Rc<dyn Fn(String)>,
+        reload: Rc<dyn Fn()>,
+    ) {
+        self.hooks.navigate_replace = Some(replace);
+        self.hooks.navigate_reload = Some(reload);
     }
 
     /// Install the `window.open(url)` hook (new context).
@@ -4539,17 +4561,39 @@ impl Host for LocationHost {
         args: &[Value],
     ) -> JsResult<Option<Value>> {
         match name {
-            "assign" | "replace" => {
+            "assign" => {
                 let u = e.to_js_string(arg(args, 0))?;
                 if let Some(nav) = &e.hooks.navigate {
                     nav(&u);
                 }
                 Ok(Some(Value::Undefined))
             }
-            "reload" => {
-                let u = e.hooks.page_url.clone();
-                if let Some(nav) = &e.hooks.navigate {
+            "replace" => {
+                // `historyHandling: "replace"` (CAP-152) :
+                // l'entrée courante est réécrite — `back`
+                // saute la page remplacée (flows auth).
+                let u = e.to_js_string(arg(args, 0))?;
+                if let Some(rep) = &e.hooks.navigate_replace {
+                    let rep = rep.clone();
+                    rep(u);
+                } else if let Some(nav) = &e.hooks.navigate {
                     nav(&u);
+                }
+                Ok(Some(Value::Undefined))
+            }
+            "reload" => {
+                // Rejeu de la requête de l'entrée (CAP-152) —
+                // pas d'entrée nouvelle ; repli historique :
+                // `navigate(page_url)` (pousse — déviation
+                // documentée du harnais).
+                if let Some(rel) = &e.hooks.navigate_reload {
+                    let rel = rel.clone();
+                    rel();
+                } else {
+                    let u = e.hooks.page_url.clone();
+                    if let Some(nav) = &e.hooks.navigate {
+                        nav(&u);
+                    }
                 }
                 Ok(Some(Value::Undefined))
             }

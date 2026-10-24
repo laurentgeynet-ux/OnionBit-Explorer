@@ -320,6 +320,55 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
                 }
             }
             Some(DrainAct::Go(d)) => Box::pin(history_move_shared(sess, tab, d)).await.is_ok(),
+            Some(DrainAct::Replace(req)) => {
+                // `location.replace` (CAP-152) — même règle
+                // que le drain exclusif : fetch sans push,
+                // puis l'entrée courante est réécrite par la
+                // requête commise (`back` saute la page
+                // remplacée). `same_doc` retombe à faux :
+                // le document est neuf (tête de run).
+                let req = *req;
+                let ok = Box::pin(navigate_shared(sess, tab, req.clone(), false))
+                    .await
+                    .is_ok();
+                if ok {
+                    let mut s = sess.lock().await;
+                    if let Some(e) = s.tabs.get_mut(&tab) {
+                        if let Some(h) = e.hist.get_mut(e.hist_idx) {
+                            h.req = req;
+                            h.same_doc = false;
+                        }
+                    }
+                }
+                ok
+            }
+            Some(DrainAct::Reload) => {
+                // `location.reload` (CAP-152) — rejeu de
+                // `last_req` (méthode + corps — POST
+                // re-POSTe) à la position courante, sans
+                // entrée nouvelle.
+                let req = {
+                    let s = sess.lock().await;
+                    s.tabs.get(&tab).and_then(|e| e.last_req.clone())
+                };
+                let Some(req) = req else {
+                    continue;
+                };
+                let ok = Box::pin(navigate_shared(sess, tab, req, false))
+                    .await
+                    .is_ok();
+                if ok {
+                    // Comme `reload` public : une page
+                    // d'erreur rechargée avec succès
+                    // redevient une vraie position (76).
+                    let mut s = sess.lock().await;
+                    let idx = s.tabs.get(&tab).map(|e| e.hist_idx);
+                    if let Some(i) = idx {
+                        s.mark_hist_ok(tab, i);
+                    }
+                }
+                ok
+            }
         };
         committed += usize::from(ok);
     }

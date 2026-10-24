@@ -94,6 +94,15 @@ pub enum NavRequest {
         /// `false` = `pushState` (nouvelle entrée).
         replace: bool,
     },
+    /// `location.replace(url)` (CAP-152) — navigation
+    /// `historyHandling: "replace"` : fetch réel puis
+    /// l'entrée d'historique courante est **réécrite**
+    /// (back saute la page remplacée — flows auth).
+    Replace(String),
+    /// `location.reload()` (CAP-152) — rejeu de la requête
+    /// de l'entrée courante (méthode + corps — POST re-POSTe)
+    /// sans entrée nouvelle.
+    Reload,
 }
 
 /// Résolveur de spécificateurs de module fourni par l'hôte :
@@ -2227,6 +2236,20 @@ fn install_dom(
             q4.borrow_mut()
                 .push(NavRequest::PushState { url: u, replace });
         }));
+        // `location.replace`/`reload` (CAP-152) — replace
+        // réécrit l'entrée courante (back saute la page
+        // remplacée), reload rejoue sa requête sans entrée
+        // nouvelle. Top-level seul, comme les autres hooks.
+        let q5 = nav_q.clone();
+        let q6 = nav_q.clone();
+        eng.set_nav_replace_reload_hooks(
+            std::rc::Rc::new(move |u: String| {
+                q5.borrow_mut().push(NavRequest::Replace(u));
+            }),
+            std::rc::Rc::new(move || {
+                q6.borrow_mut().push(NavRequest::Reload);
+            }),
+        );
     }
     eng.install_xhr(std::rc::Rc::new(ChanXhr {
         q: std::rc::Rc::clone(net_q),

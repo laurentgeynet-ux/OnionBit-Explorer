@@ -25,6 +25,16 @@ pub(crate) enum DrainAct {
     /// `history.go(d)` — résolu via `history_move` (ou son
     /// équivalent partagé) ; `0` = reload.
     Go(isize),
+    /// `location.replace` (CAP-152) — navigation réelle
+    /// (`push` off) puis **réécriture** de l'entrée
+    /// courante par la requête commise : `back` saute la
+    /// page remplacée (sémantique `historyHandling:
+    /// "replace"`, flows auth).
+    Replace(Box<Request>),
+    /// `location.reload` (CAP-152) — rejeu de la requête
+    /// historiée de l'entrée courante (méthode + corps —
+    /// un POST re-POSTe), sans entrée nouvelle.
+    Reload,
 }
 
 // ═══════════════ Étape 53d — drivers partagés ═══════════════

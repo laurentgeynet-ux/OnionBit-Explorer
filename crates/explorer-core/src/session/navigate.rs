@@ -1045,6 +1045,8 @@ impl Session {
                 ScriptNav::To(u) => DrainAct::Req(Box::new(Request::get(u)), true),
                 ScriptNav::Go(d) => DrainAct::Go(d),
                 ScriptNav::Submit(req) => DrainAct::Req(req, true),
+                ScriptNav::Replace(u) => DrainAct::Replace(Box::new(Request::get(u))),
+                ScriptNav::Reload => DrainAct::Reload,
             };
             if !self.enqueue_nav_act(tab, act) {
                 break;
@@ -1144,6 +1146,25 @@ impl Session {
                     // poursuit la file.
                     self.apply_push_state(tab, &url, replace);
                 }
+                NavRequest::Replace(href) => {
+                    // `location.replace` (CAP-152) — même
+                    // résolution que `Navigate` (base du
+                    // document), routage `replace` au drain.
+                    let url = self
+                        .tabs
+                        .get(&tab)
+                        .and_then(|t| t.nav_base())
+                        .and_then(|b| Url::resolve(b, &href).ok());
+                    if let Some(u) = url {
+                        return Some(ScriptNav::Replace(u));
+                    }
+                }
+                NavRequest::Reload => {
+                    // `location.reload` (CAP-152) — rejeu de
+                    // la requête de l'entrée courante au
+                    // drain (aucune entrée nouvelle).
+                    return Some(ScriptNav::Reload);
+                }
                 NavRequest::FormSubmit {
                     method,
                     action,
@@ -1234,6 +1255,44 @@ impl Session {
                     let mv: std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send + '_>> =
                         Box::pin(self.history_move(tab, d));
                     mv.await.is_ok()
+                }
+                DrainAct::Replace(req) => {
+                    // `location.replace` (CAP-152) : fetch
+                    // réel sans push, puis l'entrée courante
+                    // est **réécrite** par la requête
+                    // commise — `back` saute la page
+                    // remplacée. `same_doc` retombe à faux :
+                    // le document est neuf (tête de run).
+                    let req = *req;
+                    let ok = self.navigate_request(tab, req.clone(), false).await.is_ok();
+                    if ok {
+                        if let Some(e) = self.tabs.get_mut(&tab) {
+                            if let Some(h) = e.hist.get_mut(e.hist_idx) {
+                                h.req = req;
+                                h.same_doc = false;
+                            }
+                        }
+                    }
+                    ok
+                }
+                DrainAct::Reload => {
+                    // `location.reload` (CAP-152) : rejeu de
+                    // `last_req` (méthode + corps — POST
+                    // re-POSTe) à la position courante.
+                    let req = self.tabs.get(&tab).and_then(|e| e.last_req.clone());
+                    let Some(req) = req else {
+                        continue;
+                    };
+                    let ok = self.navigate_request(tab, req, false).await.is_ok();
+                    // Même règle que `reload` public : une
+                    // page d'erreur rechargée avec succès
+                    // redevient une vraie position (étape 76).
+                    if ok {
+                        if let Some(i) = self.tabs.get(&tab).map(|e| e.hist_idx) {
+                            self.mark_hist_ok(tab, i);
+                        }
+                    }
+                    ok
                 }
             };
             committed += usize::from(ok);

@@ -1315,6 +1315,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
+- **CAP-152 — `location.replace`/`location.reload`**
+  (`explorer-jscore` + `explorer-js` +
+  `explorer-core` — cap « web réel sécurisé » ;
+  numéro officiel attribué à l'intégration) :
+  sémantiques `historyHandling` réelles —
+  `replace` réécrit l'entrée courante au lieu de
+  pousser (`back` saute la page remplacée ;
+  `same_doc` retombe à faux), `reload` rejoue
+  `last_req` sans entrée nouvelle (POST
+  re-POSTe, erreur rechargée redevient saine).
+  Chaîne : hooks jscore additifs →
+  `NavRequest::Replace`/`Reload` → `ScriptNav`/
+  `DrainAct` dédiés — drain exclusif **et**
+  partagé couverts. Borne : `assign(même URL)`
+  reste un push. Tests : 2 session
+  (`location_replace_*`, `location_reload_*`).
+
 - **CAP-151 — History API**
   (`explorer-js` + `explorer-jscore` +
   `explorer-core` — cap « web réel sécurisé » ;

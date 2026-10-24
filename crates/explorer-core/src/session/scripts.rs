@@ -290,4 +290,11 @@ pub(crate) enum ScriptNav {
     /// construite (méthode + corps + en-têtes — étape 54).
     /// `Box` : `Request` est la variante large de l'enum.
     Submit(Box<Request>),
+    /// `location.replace` (CAP-152) : navigation réelle puis
+    /// réécriture de l'entrée courante — `back` saute la
+    /// page remplacée (flows auth).
+    Replace(Url),
+    /// `location.reload` (CAP-152) : rejeu de la requête de
+    /// l'entrée courante (méthode + corps — POST re-POSTe).
+    Reload,
 }
