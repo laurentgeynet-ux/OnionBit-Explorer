@@ -1551,6 +1551,41 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-178 — batch surface mesurée absente
+  (sonde `_census_calls`, 44→~30 trous)**
+  (`explorer-jscore` — cap « web réel
+  sécurisé » ; numéro officiel attribué à
+  l'intégration) : `new Audio(src?)`/
+  `new Video()` (alias `createElement`,
+  motif `Image` — `src` posé pour Audio),
+  `el.getHTML()`/`setHTMLUnsafe(html)`
+  (rails `outerHTML`/`innerHTML` — helper
+  `set_inner_html` factorisé, scripts
+  inertes spec), `el.checkVisibility()`
+  (attaché + `!hidden` + `style.display`
+  ≠ `none` — borné : inline seul, le
+  miroir ne porte pas la cascade),
+  stubs fenêtre honnêtes (`window.find`
+  → `false` — Bool spec, jamais de faux
+  positif ; `moveTo`/`moveBy`/`resizeTo`/
+  `resizeBy`/`openDialog`/`showModalDialog`
+  → no-op — même retrait que les
+  navigateurs modernes), `XMLSerializer`
+  ctor + `serializeToString(node)` →
+  rail `outer_html` (éléments et
+  `document`, DOMPurify l'exige),
+  ctors événements `MessageEvent`/
+  `StorageEvent`/`CloseEvent` + allowlist
+  d'init étendue (`origin`/`source`/
+  `ports`/`lastEventId`/`key`/`oldValue`/
+  `newValue`/`url`/`storageArea`/`wasClean`/
+  `code`/`reason`). `Worker` ctor diagnostiqué
+  — refus honnête par design (`no loader
+  installed` : l'embedder pose
+  `worker_factory`, jamais de faux succès),
+  pas un trou. Test jscore
+  `cap178_surface_batch`.
+
 - **CAP-177 — batch primitives DOM/document
   mesurées absentes** (`explorer-jscore` —
   cap « web réel sécurisé » ; numéro officiel

@@ -3407,6 +3407,25 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-178. Batch surface mesurée
+  (sonde `_census_calls`)** — *(numéro
+  officiel attribué à l'intégration)*
+  : `new Audio`/`new Video` alias
+  `createElement` ; `el.getHTML`/
+  `setHTMLUnsafe` (rails outer/inner,
+  helper `set_inner_html`) ; `el.
+  checkVisibility` (attaché + !hidden +
+  !display:none — borné inline seul) ;
+  stubs fenêtre honnêtes (`find`→false,
+  `moveTo`/`resizeTo`/`openDialog`/
+  `showModalDialog` no-op) ; `XMLSerializer`
+  + `serializeToString` → `outer_html` ;
+  ctors `MessageEvent`/`StorageEvent`/
+  `CloseEvent` + allowlist init étendue.
+  `Worker` diag : refus honnête (pas de
+  chargeur installé), pas un trou. Test
+  jscore `cap178_surface_batch`.
+
 - [x] **CAP-177. Batch primitives DOM/document
   mesurées** — *(numéro officiel attribué à
   l'intégration ; trous `_census_calls`)*

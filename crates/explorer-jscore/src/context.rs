@@ -618,6 +618,39 @@ pub(crate) fn install_ctx_window_props(e: &mut crate::Engine) {
         let f = e.native_fn(name, window_noop);
         e.set_own(g, name, f, true);
     }
+    // CAP-178 — méthodes fenêtre legacy mesurées absentes
+    // (sonde `_census_calls`) : `moveTo`/`resizeTo`/
+    // `openDialog`/`showModalDialog` = no-op honnêtes (les
+    // navigateurs modernes les no-op aussi sur la fenêtre
+    // principale — Chrome : `moveTo`/`resizeTo` silencieux
+    // hors popup, `showModalDialog` supprimé → `undefined`
+    // de retour) ; `find` rend `false` (texte non trouvé —
+    // la recherche document réelle est un arc séparé).
+    for name in [
+        "moveTo",
+        "moveBy",
+        "resizeTo",
+        "resizeBy",
+        "openDialog",
+        "showModalDialog",
+    ] {
+        let f = e.native_fn(name, window_noop);
+        e.set_own(g, name, f, true);
+    }
+    let find_f = e.native_fn("find", window_find);
+    e.set_own(g, "find", find_f, true);
+}
+
+/// `window.find(needle)` — spec : `false` quand introuvable ;
+/// la recherche réelle dans le document est un arc séparé
+/// (borné : toujours `false` — honnête, jamais de faux
+/// positif).
+pub(crate) fn window_find(
+    _e: &mut crate::Engine,
+    _this: Value,
+    _args: &[Value],
+) -> JsResult<Value> {
+    Ok(Value::Bool(false))
 }
 
 /// `window.postMessage` — `this` peut être le global d'un

@@ -1077,6 +1077,24 @@ impl NodeHost {
         self.insert_at_position(e, node, pos, t)
     }
 
+    /// Écriture `innerHTML`/`setHTMLUnsafe` (CAP-178 — rail
+    /// factorisé) : `<template>` → `content` ; parse en
+    /// fragment temporaire ; scripts « already started »
+    /// (jamais exécutés — CAP-169, différence avec
+    /// `insertAdjacentHTML` dont les scripts tournent).
+    fn set_inner_html(&self, node: NodeId, html: &str) {
+        let mut d = self.dom.borrow_mut();
+        let target = d.content_target(node);
+        let tmp = d.create_element("#fragment");
+        d.parse_fragment_into(tmp, html);
+        d.mark_scripts_started(tmp);
+        let kids = std::mem::take(&mut d.nodes[tmp as usize].children);
+        for &k in &kids {
+            d.nodes[k as usize].parent = None;
+        }
+        d.replace_children(target, &kids);
+    }
+
     /// Position switch partagé `insertAdjacent*` (CAP-177 —
     /// `insertAdjacentElement` joint le rail) : `beforebegin`/
     /// `afterbegin`/`beforeend`/`afterend`, `SyntaxError` hors
@@ -1830,6 +1848,14 @@ impl Engine {
             "HashChangeEvent",
             "PopStateEvent",
             "PromiseRejectionEvent",
+            // CAP-178 — interfaces événement mesurées absentes
+            // (sonde `_census_calls`) : init copié par le rail
+            // `event_ctor` générique (`message.data`,
+            // `storage.key`/`oldValue`/`newValue`/`url`,
+            // `close.wasClean`/`code`/`reason`).
+            "MessageEvent",
+            "StorageEvent",
+            "CloseEvent",
         ] {
             // `MouseEvent` & sous-classes : défauts
             // `MouseEventInit` spec (`button`/`buttons`/coords
@@ -1865,6 +1891,30 @@ impl Engine {
             self.set_own(fid, "prototype", Value::Obj(p), false);
         }
         self.set_own(g, "Image", img_f, false);
+        // `Audio`/`Video` (CAP-178) — alias `createElement` des
+        // constructeurs historiques (`new Audio(url)` charge
+        // la source — les jeux/sites l'utilisent encore ;
+        // mesuré `_census_calls` : ReferenceError).
+        for (name, tag) in [("Audio", "audio"), ("Video", "video")] {
+            let tagv = self.str_val(tag);
+            let f = self.bound_native(name, media_el_ctor, vec![tagv]);
+            if let Value::Obj(fid) = f {
+                let p = self.new_object();
+                self.set_own(fid, "prototype", Value::Obj(p), false);
+            }
+            self.set_own(g, name, f, false);
+        }
+        // `XMLSerializer` (CAP-178) — `serializeToString(node)`
+        // → rail `outer_html` (mesuré `_census_calls` :
+        // TypeError ; DOMPurify/sanitisers l'exigent — accepte
+        // éléments ET `document`, résolu `#document` par
+        // `node_for`).
+        let xs_f = self.native_fn("XMLSerializer", xmlserializer_ctor);
+        if let Value::Obj(fid) = xs_f {
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "XMLSerializer", xs_f, false);
         // `AbortController` minimal : `signal.aborted` + `abort()`.
         let ac_f = self.native_fn("AbortController", abort_controller_ctor);
         if let Value::Obj(fid) = ac_f {
@@ -3114,6 +3164,9 @@ const NODE_METHODS: &[&str] = &[
     "insertAdjacentElement",
     "insertAdjacentHTML",
     "insertAdjacentText",
+    "getHTML",
+    "setHTMLUnsafe",
+    "checkVisibility",
     "replaceChildren",
     "closest",
     "matches",
@@ -4355,25 +4408,7 @@ impl Host for NodeHost {
         match key {
             "innerHTML" => {
                 let html = e.to_js_string(v)?;
-                let mut d = self.dom.borrow_mut();
-                // `<template>` : l'écriture cible son fragment de
-                // contenu (spec — `tpl.innerHTML` peuple
-                // `content`, pas les enfants de l'élément).
-                let target = d.content_target(node);
-                // Detach existing children, parse into a temp parent,
-                // move results over.
-                let tmp = d.create_element("#fragment");
-                d.parse_fragment_into(tmp, &html);
-                // Spec : les scripts issus de `innerHTML` sont
-                // « already started » — jamais exécutés (CAP-169 ;
-                // différence réelle avec `insertAdjacentHTML`,
-                // dont les scripts tournent).
-                d.mark_scripts_started(tmp);
-                let kids = std::mem::take(&mut d.nodes[tmp as usize].children);
-                for &k in &kids {
-                    d.nodes[k as usize].parent = None;
-                }
-                d.replace_children(target, &kids);
+                self.set_inner_html(node, &html);
                 Ok(true)
             }
             "textContent" | "innerText" => {
@@ -4974,6 +5009,38 @@ impl Host for NodeHost {
                 };
                 self.insert_at_position(e, node, &pos, child)?;
                 Ok(Some(arg(args, 1)))
+            }
+            // CAP-178 — sérialisation/visibilité mesurées
+            // absentes (sonde `_census_calls`) : `getHTML()` =
+            // `outerHTML` (borné : options `serializable`/
+            // `shadowRoots` ignorées), `setHTMLUnsafe(html)` =
+            // écriture `innerHTML` (même rail, scripts inertes
+            // — spec), `checkVisibility(opts?)` = attaché +
+            // pas `hidden` + `style.display` ≠ `none` (borné :
+            // inline seul — le miroir ne porte pas la cascade
+            // ; `opacityProperty`/`visibilityProperty`/`contentVisibilityAuto`
+            // non évalués).
+            "getHTML" => {
+                let s = self.dom.borrow().outer_html(node);
+                Ok(Some(e.str_val(s)))
+            }
+            "setHTMLUnsafe" => {
+                let html = e.to_js_string(arg(args, 0))?;
+                self.set_inner_html(node, &html);
+                Ok(Some(Value::Undefined))
+            }
+            "checkVisibility" => {
+                let d = self.dom.borrow();
+                let attached = d.root != node && d.contains(d.root, node);
+                let hidden = d.has_attr(node, "hidden");
+                let display_none = d.attr(node, "style").is_some_and(|s| {
+                    s.split(';').any(|p| {
+                        let mut kv = p.splitn(2, ':');
+                        matches!(kv.next(), Some(k) if k.trim().eq_ignore_ascii_case("display"))
+                            && matches!(kv.next(), Some(v) if v.trim() == "none")
+                    })
+                });
+                Ok(Some(Value::Bool(attached && !hidden && !display_none)))
             }
             "replaceChildren" => {
                 let kids = self.norm_children(e, args)?;
@@ -7072,6 +7139,50 @@ fn image_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     Ok(node_value(e, &dom, &cache, n))
 }
 
+/// `new XMLSerializer()` (CAP-178) — objet à une méthode
+/// `serializeToString(node)` → rail `outer_html` du miroir
+/// (éléments et `document` acceptés via `node_for` ; borné :
+/// sérialisation HTML, pas de mode XML — le miroir n'a pas
+/// de namespaces).
+fn xmlserializer_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let o = e.new_object();
+    let f = e.native_fn("serializeToString", xmlserialize_to_string);
+    e.set_own(o, "serializeToString", f, true);
+    Ok(Value::Obj(o))
+}
+
+/// `serializer.serializeToString(node)` — `outer_html` du
+/// nœud (ou du document entier, résolu `#document`).
+fn xmlserialize_to_string(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some(n) = node_for(e, arg(args, 0)) else {
+        return Err(e.type_error("serializeToString: nœud requis"));
+    };
+    let Some((dom, _cache)) = e.dom_ctx.clone() else {
+        return Err(e.type_error("serializeToString: no document"));
+    };
+    let s = dom.borrow().outer_html(n);
+    Ok(e.str_val(s))
+}
+
+/// `new Audio(src?)`/`new Video()` (CAP-178) — alias
+/// `createElement` des constructeurs historiques ; `src` pose
+/// l'attribut `src` (`new Audio(url)` charge la source).
+fn media_el_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((dom, cache)) = e.dom_ctx.clone() else {
+        return Err(e.type_error("Audio/Video: no document"));
+    };
+    let tag = match args.first() {
+        Some(Value::Str(s)) => e.heap.string(*s).unwrap_or("audio".to_string()),
+        _ => "audio".to_string(),
+    };
+    let n = dom.borrow_mut().create_element(&tag);
+    if let Some(v) = args.get(1).filter(|v| !matches!(v, Value::Undefined)) {
+        let s = e.to_js_string(*v)?;
+        dom.borrow_mut().set_attr(n, "src", &s);
+    }
+    Ok(node_value(e, &dom, &cache, n))
+}
+
 /// `new Event(type, init)` — objet ordinaire dispatchable
 /// (`dispatchEvent` lit `type`/`bubbles` sur l'objet) : props
 /// standard posées sur `this`, proto `Event.prototype` assuré par
@@ -7150,6 +7261,22 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             "touches",
             "targetTouches",
             "changedTouches",
+            // CAP-178 — `MessageEvent`/`StorageEvent`/
+            // `CloseEvent` : payloads d'init copiés tels
+            // quels (mesuré `_census_calls` — les libs
+            // les construisent pour le dispatch manuel).
+            "origin",
+            "source",
+            "ports",
+            "lastEventId",
+            "key",
+            "oldValue",
+            "newValue",
+            "url",
+            "storageArea",
+            "wasClean",
+            "code",
+            "reason",
         ] {
             let v = e.get_prop_value(init, k)?;
             if !matches!(v, Value::Undefined) {

@@ -1257,8 +1257,7 @@ impl Engine {
                 let label = {
                     let d = dom.borrow();
                     d.attr(node, "src")
-                        .map(str::to_string)
-                        .unwrap_or_else(|| format!("dyn:{seq}"))
+                        .map_or_else(|| format!("dyn:{seq}"), str::to_string)
                 };
                 let _ = self.eval_named(text, &label);
                 self.hooks.current_script = prev;

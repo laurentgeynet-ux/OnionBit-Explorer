@@ -4460,3 +4460,77 @@ fn specialized_event_init_reaches_dispatch() {
         "f"
     );
 }
+
+// ===== CAP-178 — batch mesuré (sonde `_census_calls` :
+// TypeError/ReferenceError terrain) : `Audio`/`Video` ctors,
+// `getHTML`/`setHTMLUnsafe`, `checkVisibility`, stubs fenêtre
+// legacy, `XMLSerializer`, ctors événements.
+
+#[test]
+fn cap178_surface_batch() {
+    let mut e = engine_with("<!doctype html><html><body><div id=x><b>hi</b></div></body></html>");
+    e.eval("var x=document.getElementById('x');")
+        .expect("setup");
+    // `new Audio(url)`/`new Video()` — alias createElement.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var a=new Audio('/m.mp3'),v=new Video();\
+            [a.tagName,v.tagName,a.getAttribute('src'),typeof a.play].join('|')"
+        ),
+        "AUDIO|VIDEO|/m.mp3|undefined"
+    );
+    // `getHTML`/`setHTMLUnsafe` — outerHTML/innerHTML.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var t=document.createElement('div');t.setHTMLUnsafe('<p>w</p>');\
+            [t.innerHTML, t.getHTML()].join('|')"
+        ),
+        "<p>w</p>|<div><p>w</p></div>"
+    );
+    // `checkVisibility` — attaché+visible / détaché / hidden.
+    assert_eq!(
+        evf(&mut e,
+            "var d=document.createElement('div');d.style.display='none';var h=document.createElement('div');\
+            h.setAttribute('hidden','');document.body.appendChild(h);\
+            [x.checkVisibility(), d.checkVisibility(), h.checkVisibility()].join(',')"),
+        "true,false,false"
+    );
+    // Stubs fenêtre honnêtes : `find`→false, no-ops undefined
+    // (join rend `undefined` vide — on vérifie `typeof` à
+    // la place pour la lisibilité).
+    assert_eq!(
+        evf(
+            &mut e,
+            "[window.find('x'), typeof window.find, window.moveTo(0,0)===undefined,\
+             window.resizeTo(1,1)===undefined, window.openDialog('u')===undefined,\
+             window.showModalDialog('u')===undefined].join('|')"
+        ),
+        "false|function|true|true|true|true"
+    );
+    // `XMLSerializer` — élément et document.
+    assert_eq!(
+        evf(&mut e,
+            "var xs=new XMLSerializer();\
+            [xs.serializeToString(x), xs.serializeToString(document).indexOf('<body>')>-1].join('|')"),
+        "<div id=\"x\"><b>hi</b></div>|true"
+    );
+    // Ctors événements — init copié.
+    assert_eq!(
+        evf(&mut e,
+            "var m=new MessageEvent('message',{data:'d'});var s=new StorageEvent('storage',{key:'k',oldValue:'1'});\
+            var c=new CloseEvent('close',{wasClean:true,code:1000});\
+            [m.data,s.key+'/'+s.oldValue,c.wasClean+'/'+c.code].join('|')"),
+        "d|k/1|true/1000"
+    );
+    // `Worker` — refus honnête sans chargeur (l'embedder
+    // installe `worker_factory` ; jamais de faux succès).
+    assert_eq!(
+        evf(
+            &mut e,
+            "try{new Worker('/w.js')}catch(err){err.name+'|'+err.message.slice(0,24)}"
+        ),
+        "TypeError|Worker: no loader instal"
+    );
+}
