@@ -297,6 +297,12 @@ pub(crate) struct BrowserHooks {
     /// texte, `None` → rejet `NotAllowedError`. Absent →
     /// même rejet que l'écriture.
     pub clipboard_read: Option<ClipboardReadHook>,
+    /// Canal diagnostic (sondes) — `set_diag_hook` : émis
+    /// quand un clone `{...}`/`Object.assign` perd des getters
+    /// proto (mur `TanStack` `e.id` → `undefined` — signature
+    /// spec mais source de bugs terrain : le walk reçoit des
+    /// clones). Engine-global, off par défaut.
+    pub diag: Option<Rc<dyn Fn(String)>>,
     /// `alert(msg)` — modal-less notification (fire-and-forget).
     pub alert: Option<Rc<dyn Fn(String)>>,
     /// `confirm(msg)` → `true`/`false`; absent → `false`.
@@ -405,6 +411,22 @@ impl Engine {
         self.hooks.navigate = Some(navigate);
         self.hooks.history_go = Some(history_go);
         self.hooks.history_len = history_len;
+    }
+
+    /// Canal diagnostic pour les sondes (`dbg_*` du terrain) —
+    /// `Some` → messages `diag:…` remontés à l'appelant ;
+    /// absent → no-op. Pas une surface JS : interne moteur.
+    pub fn set_diag_hook(&mut self, f: Rc<dyn Fn(String)>) {
+        self.hooks.diag = Some(f);
+    }
+
+    /// Emit un message diag si le canal est posé — borrow
+    /// sûr : le hook est cloné avant l'appel (re-entrance
+    /// possible depuis un getter).
+    pub(crate) fn diag(&self, msg: &str) {
+        if let Some(h) = self.hooks.diag.clone() {
+            h(format!("diag: {msg}"));
+        }
     }
 
     /// Install the `console.*` line sink (formatted `"a b"` lines).

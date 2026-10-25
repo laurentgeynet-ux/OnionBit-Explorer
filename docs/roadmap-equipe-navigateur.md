@@ -3407,6 +3407,22 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-193. Canal diag clone-
+  getters (mur `TanStack` x-web)** —
+  `set_diag_hook` + `e.diag` : émis
+  quand `{...}`/`Object.assign` perd
+  les getters proto de la source
+  (`proto_has_accessor`, `Prop::Acc`).
+  Spéc-correct mais signature exacte
+  du mur `Invariant failed` :
+  `e.id` → `undefined` ×2 →
+  collision `i['undefined']` au 2ᵉ
+  nœud. La sonde volante tranche les
+  hypothèses. Sondes `probe_tanstack`
+  (namespace getter proto intact,
+  spread/assign déprotoise,
+  `setPrototypeOf` restaure).
+
 - [x] **CAP-188. `document.evaluate` :
   sous-ensemble `XPath` borné (sonde)** —
   `evaluate(expr, ctx, resolver, type,

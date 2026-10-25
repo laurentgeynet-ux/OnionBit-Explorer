@@ -1545,6 +1545,25 @@ impl Env {
     }
 }
 
+
+/// `true` si la chaîne proto de `sid` porte au moins un
+/// accessor (`Prop::Acc`) — sonde diag : un `{...}`/
+/// `Object.assign` ne copie que les own enumerable, les
+/// getters proto sont perdus (spec — mur terrain `TanStack`
+/// `e.id` → `undefined`).
+pub(crate) fn proto_has_accessor(heap: &Heap, sid: ObjId) -> bool {
+    let mut cur = heap.obj(sid).map_or(Value::Null, |o| o.proto);
+    for _ in 0..32 {
+        let Value::Obj(id) = cur else { return false };
+        let Some(o) = heap.obj(id) else { return false };
+        if o.props.iter().any(|(_, p)| matches!(p, Prop::Acc { .. })) {
+            return true;
+        }
+        cur = o.proto;
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

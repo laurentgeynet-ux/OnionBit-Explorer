@@ -1869,6 +1869,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-193 — canal diag clone-getters
+  (sonde mur `TanStack` `Invariant
+  failed`, vol `576c53e`)** (`explorer-
+  jscore`) : `Engine::set_diag_hook`
+  + `e.diag(msg)` — émis quand un clone
+  `{...}` ou `Object.assign` perd des
+  getters proto de sa source
+  (`proto_has_accessor` — `Prop::Acc`
+  sur la chaîne, borne 32). Spéc-correct
+  (spread = own enumerable seul) mais
+  signature exacte du mur x-web :
+  `e.id` lit `undefined` 2× →
+  `i['undefined']` collision au 2ᵉ
+  nœud (`e.init` arrow own-prop
+  survit, proto getters non).
+  Canal interne, off par défaut —
+  la sonde volante décide entre les
+  hypothèses « clone déprotoisé » vs
+  « `_id` non écrit » en un run.
+  Sondes `probe_tanstack` (namespace
+  getter proto intact, spread/assign
+  déprotoise, `setPrototypeOf`
+  restaure, émission diag aux 2
+  sites).
+
 - **CAP-188 — `document.evaluate` :
   sous-ensemble `XPath` borné (sonde
   `_census_calls` — dernier trou

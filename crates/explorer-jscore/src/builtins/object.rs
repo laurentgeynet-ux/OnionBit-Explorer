@@ -246,6 +246,11 @@ pub(crate) fn object_assign(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
     let target = arg(args, 0);
     for src in &args[1.min(args.len())..] {
         if let Value::Obj(sid) = src {
+            // diag sonde (même mur que `{...}` : getters
+            // proto perdus — spec, terrain TanStack).
+            if crate::heap::proto_has_accessor(&e.heap, *sid) {
+                e.diag("Object.assign dropped proto getters");
+            }
             for k in e.own_enum_keys_trapped(*sid)? {
                 let v = e.get_prop_value(*src, &k)?;
                 e.set_prop_value(target, &k, v)?;

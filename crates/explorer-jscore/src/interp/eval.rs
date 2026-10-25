@@ -69,6 +69,13 @@ impl Engine {
                             // `{...o}` — enumerable own props only.
                             let v = self.eval_expr(env, this, e)?;
                             if let Value::Obj(sid) = v {
+                                // diag sonde (mur TanStack `e.id`) :
+                                // un clone sur objet à getters
+                                // proto les perd — spéc-correct,
+                                // source de bugs terrain.
+                                if crate::heap::proto_has_accessor(&self.heap, sid) {
+                                    self.diag("spread clone dropped proto getters");
+                                }
                                 for k in self.own_enum_keys_trapped(sid)? {
                                     let sv = self.get_prop_value(v, &k)?;
                                     self.set_own(id, &k, sv, true);
