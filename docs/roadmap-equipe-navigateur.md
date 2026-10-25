@@ -5084,7 +5084,8 @@ ci-dessous (fréquence observée sur le corpus réel).
   **T1** surface sans composition — livré (CAP-191/192) ;
   **T2** scoping CSS → PIPE (demande posée au journal) ;
   **T3** slots/distribution + **T5** `shadowrootmode` →
-  piste JS ; **T4** event retargeting + **T6** (stubs
+  piste JS — **livré (CAP-197, miroir flat)** ;
+  **T4** event retargeting + **T6** (stubs
   terrain `adoptedStyleSheets`/`StyleHost position`) → NAV —
   **T6 livré (CAP-195/196)**.
   *Coût architectural, pas un stub.*
@@ -6502,10 +6503,11 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `assignedSlot`/`assignedElements`/
   `assignedNodes` honnêtes (pas de
   répartition), `mode:"closed"` +
-  `ElementInternals`. Borné : pas de
-  scoping CSS (T2), slots (T3), event
-  retargeting (T4), `shadowrootmode` (T5).
-  Test `cap191_shadow_surface`.
+  `ElementInternals`. Reste : scoping
+  CSS (T2 → PIPE), event retargeting
+  (T4) ; slots T3 + `shadowrootmode`
+  T5 livrés en CAP-197. Test
+  `cap191_shadow_surface`.
 
 - [x] **CAP-192. `customElements` lisible
   et patchable** — census shadow DOM
