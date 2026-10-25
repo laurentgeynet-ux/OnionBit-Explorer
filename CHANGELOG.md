@@ -9,6 +9,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-98 — `explorer_html::entities`
+  exposé** (`explorer-html`) :
+  `lookup_named`/`EntityMatch`
+  publics + `decode_str(input,
+  in_attribute)` — version
+  « string entière » du décodage
+  charref du tokenizer (nommées
+  WHATWG ~2 100 + legacy sans `;`,
+  esperluette ambiguë, numériques
+  remap `windows-1252`). Répond à
+  la demande résiduelle du journal
+  (le miroir `explorer-jscore`
+  décodait les entités avec sa
+  propre table dupliquée) —
+  adoption côté NAV à son commit.
+
 - **JS-C103 — drain de microtasks
   borné (jobs + rounds de livraison)**
   (`explorer-jscore`) : une file

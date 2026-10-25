@@ -377,3 +377,23 @@ fn plaintext_tout_texte() {
     t.finish();
     assert_eq!(t.run(), vec![chars("a<b>c</b>&amp;"), Token::Eof]);
 }
+
+#[test]
+fn decode_str_entites_nommees_et_numeriques() {
+    use explorer_html::entities::decode_str;
+
+    // Nommées complètes + legacy sans `;` + esperluette ambiguë.
+    assert_eq!(decode_str("a&nbsp;b&copy;x", false), "a\u{A0}b©x");
+    assert_eq!(decode_str("&notit;&notin;", false), "¬it;∉");
+    // `&amp=x` en attribut = esperluette ambiguë → littéral ;
+    // dans le contenu, `&ampx` sans `;` non-legacy reste brut.
+    assert_eq!(decode_str("?a=1&amp=x", true), "?a=1&amp=x");
+    assert_eq!(decode_str("?a=1&amp;x", true), "?a=1&x");
+    // Numériques décimales/hexa, remap 1252, codepoints invalides.
+    assert_eq!(decode_str("&#65;&#x42;&#150;", false), "AB–");
+    assert_eq!(decode_str("&#0;&#xD800;", false), "\u{FFFD}\u{FFFD}");
+    // Orphelins et `&#` sans chiffres restent littéraux.
+    assert_eq!(decode_str("a & b &# c &#x;", false), "a & b &# c &#x;");
+    // Sans `&`, copie directe.
+    assert_eq!(decode_str("rien", false), "rien");
+}

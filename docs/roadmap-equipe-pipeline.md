@@ -2585,6 +2585,15 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   dom, 5× cascade (`::slotted`/qualifieur-slot/confinement/
   héritage-flat), 2× boxtree (distribution + repli), session
   bout-en-bout `dsd_slot_distribue_et_repli_couvert`.
+- [x] **R-98. `explorer_html::entities` exposé** (demande
+  résiduelle journal 2026-10-21 — le miroir jscore duplique
+  la table) — **livré** : `EntityMatch`/`lookup_named`
+  rendus `pub` + `decode_str(input, in_attribute)` = version
+  « string entière » du décodage charref (nommées WHATWG
+  complètes + legacy sans `;` + esperluette ambiguë en
+  attribut, numériques `&#…`/`&#x…` remap `windows-1252`,
+  orphelins littéraux). Test `decode_str_entites_nommees_
+  et_numeriques`. Adoption miroir = commit NAV.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
