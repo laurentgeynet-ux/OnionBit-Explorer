@@ -279,3 +279,20 @@ fn c102_upgraded_element_constructor() {
         "1"
     );
 }
+
+/// JS-C103 — une file de microtasks **auto-régénérante** ne
+/// peut plus saturer un drain unique (verrou reddit mesuré :
+/// `queueMicrotask` en boucle → `run_microtasks` infini →
+/// `rx.recv()` sous verrou session → daemon gelé ~1 cœur,
+/// nav >15 min). La borne doit retourner — le reliquat
+/// attend le drain suivant (progrès préservé).
+#[test]
+fn c103_self_regenerating_microtasks_bounded() {
+    // `f` s'auto-réenfile : sans borne, le premier drain
+    // boucle à l'infini. Avec, l'eval retourne et un `setTimeout`
+    // ultérieur prouve que la pompe reste vivante.
+    assert_eq!(
+        ev("queueMicrotask(function f(){ queueMicrotask(f); }); 'alive'"),
+        "alive"
+    );
+}

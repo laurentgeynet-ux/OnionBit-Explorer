@@ -6783,6 +6783,21 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Tests `c101_*` (1 — dep statique
   seedée résout `ns:42`).
 
+- [x] **JS-C103. Drain de microtasks
+  borné (jobs + rounds)** —
+  mur reddit mesuré (`21e7507`) :
+  file auto-régénérante ou
+  livraisons perpétuelles (stream
+  `read()` perpétuel, observers
+  ré-armés — `delivered` vrai à
+  chaque round **sans tick de
+  budget ops**) → `run_microtasks`
+  infini → `rx.recv()` sous
+  `sess.lock()` → daemon gelé.
+  Bornes 65 536 jobs + 128 rounds ;
+  reliquat repris au drain suivant.
+  Test `c103_*`.
+
 - [x] **JS-C102. `el.constructor` =
   ctor CE sur élément upgradé**
   (`explorer-jscore`) — verrou

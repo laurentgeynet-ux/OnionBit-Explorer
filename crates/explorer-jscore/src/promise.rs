@@ -246,14 +246,44 @@ impl Engine {
     /// boundary. Job count is bounded by `ops_left` so a self-feeding
     /// microtask loop dies like an infinite `while`.
     ///
+    /// JS-C103 — borne **hostile-content** en plus du budget
+    /// d'ops : une file auto-régénérante (scheduler de lib qui
+    /// `queueMicrotask` en boucle) OU des livraisons qui ne se
+    /// tassent jamais (`pump_stream_reads` d'un `ReadableStream`
+    /// avec `read()` perpétuel, observers ré-armés — reddit
+    /// mesuré : `delivered` vrai à chaque round sans toucher le
+    /// budget ops → drain infini → `rx.recv()` sous verrou
+    /// session → daemon gelé ~1 cœur) ne peuvent plus saturer un
+    /// drain unique : les jobs restants restent en file et sont
+    /// repris par le `run_pending` suivant — le progrès est
+    /// préservé à travers les pompes, seule la rafale est bornée.
+    ///
     /// # Errors
     /// Propagates the op-limit error or an uncaught `queueMicrotask`
     /// callback exception.
     pub fn run_microtasks(&mut self) -> JsResult<usize> {
+        /// Jobs max par drain — large pour les chaînes légitimes
+        /// (hydratation/diff de milliers de promesses), fini pour
+        /// les files auto-régénérantes. Le reliquat attend le
+        /// drain suivant.
+        const MICROTASK_DRAIN_CAP: usize = 65_536;
+        /// Rounds de livraison max par drain — une file de jobs
+        /// vide mais des `deliver_*` perpétuellement productifs
+        /// (stream ouvert, observers qui se réarment) sortent
+        /// aussi : sans ce plafond la boucle externe ne revient
+        /// jamais tester `microtasks.is_empty()`.
+        const DELIVERY_ROUNDS_CAP: usize = 128;
         let mut ran = 0usize;
+        let mut rounds = 0usize;
         let home = self.cur_ctx;
         loop {
-            while let Some((ctx, job)) = self.microtasks.pop_front() {
+            loop {
+                if ran >= MICROTASK_DRAIN_CAP {
+                    break;
+                }
+                let Some((ctx, job)) = self.microtasks.pop_front() else {
+                    break;
+                };
                 // JS-C78 : le job court dans le realm qui l'a
                 // enregistré (spec « job callback realm ») —
                 // contexte garé → livraison différée : re-queue
@@ -365,7 +395,13 @@ impl Engine {
             // JS-C81 : messages `MessageChannel` — même
             // frontière de job que `postMessage`/workers.
             let ports = self.drain_port_msgs()?;
-            if !delivered && msgs == 0 && workers == 0 && ports == 0 && self.microtasks.is_empty() {
+            rounds += 1;
+            // JS-C103 — sortie bornée : plafond de jobs atteint,
+            // rounds de livraison épuisés, ou file réellement
+            // apaisée (spec drain-until-empty).
+            let settled =
+                !delivered && msgs == 0 && workers == 0 && ports == 0 && self.microtasks.is_empty();
+            if settled || ran >= MICROTASK_DRAIN_CAP || rounds >= DELIVERY_ROUNDS_CAP {
                 self.switch_to(home);
                 self.maybe_collect();
                 return Ok(ran);

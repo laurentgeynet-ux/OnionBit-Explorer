@@ -9,6 +9,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C103 — drain de microtasks
+  borné (jobs + rounds de livraison)**
+  (`explorer-jscore`) : une file
+  auto-régénérante (scheduler qui
+  `queueMicrotask` en boucle) ou des
+  livraisons perpétuellement
+  productives (`pump_stream_reads`
+  d'un `read()` perpétuel, observers
+  ré-armés) saturaient un drain
+  unique — `run_microtasks` ne
+  sortait jamais → `rx.recv()` sous
+  verrou session → daemon gelé ~1
+  cœur, nav >15 min (mur reddit
+  mesuré). Bornes : 65 536 jobs +
+  128 rounds de livraison par drain ;
+  le reliquat attend la pompe
+  suivante (progrès préservé).
+  Test `c103_*`.
+
 - **JS-C102 — `el.constructor` =
   ctor CE sur élément upgradé**
   (`explorer-jscore`) : le host
