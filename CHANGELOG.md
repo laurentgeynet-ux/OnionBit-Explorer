@@ -9,6 +9,41 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **CAP-198 — Shadow DOM tranche 4 :
+  event retargeting** (`explorer-jscore`)
+  : le chemin de propagation des
+  événements respecte la frontière
+  shadow — `composed:false` s'arrête à
+  la racine (troncature naturelle : la
+  racine shadow est un fragment détaché),
+  `composed:true` traverse racine →
+  hôte → ancêtres (borné, imbriqué
+  compris). `event.target` ré-étiqueté
+  par listener (spec « retarget ») :
+  le nœud le plus profond visible
+  depuis la racine du `currentTarget`
+  — interne réel pour les listeners
+  du même arbre, hôte pour les
+  externes ; `relatedTarget` subit le
+  même retarget (`FocusEvent`/`Mouse
+  Event`) et le ctor cesse d'écraser
+  à `null` un `relatedTarget` fourni
+  par l'init (bug latent : la boucle
+  de défauts réécrivait la clé copiée).
+  `composedPath()` rend le chemin de
+  dispatch réel — racines shadow
+  incluses pour `composed`, tronqué à
+  la frontière sinon — et `[]` hors
+  dispatch (spec). Borne honnête : le
+  chemin suit l'arbre DOM, pas
+  l'arbre aplat des slots (T3). Phases
+  capture/target/bubble,
+  `currentTarget`, `stop*`/
+  `preventDefault` et handlers `on*`
+  inchangés (hors shadow, chemin
+  strictement identique). Test
+  `cap198_shadow_event_retarget`.
+
 - **CAP-195 — `document.adoptedStyleSheets`
   settable `[]`** (`explorer-jscore` — mur
   mesuré : le polyfill Popover de github fait

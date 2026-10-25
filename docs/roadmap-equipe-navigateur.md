@@ -5087,7 +5087,7 @@ ci-dessous (fréquence observée sur le corpus réel).
   piste JS — **livré (CAP-197, miroir flat)** ;
   **T4** event retargeting + **T6** (stubs
   terrain `adoptedStyleSheets`/`StyleHost position`) → NAV —
-  **T6 livré (CAP-195/196)**.
+  **T4 livré (CAP-198)**, **T6 livré (CAP-195/196)**.
   *Coût architectural, pas un stub.*
 
 ### J-B — Couverture langue par besoin (réactive)
@@ -6545,6 +6545,26 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   est publié (i#19). `getPropertyValue`
   idem. Test `cap196_computed_position_
   from_geometry`.
+
+- [x] **CAP-198. Shadow DOM tranche 4 :
+  event retargeting** — propagation
+  shadow-aware dans `propagate_event` :
+  `composed` traverse racine → hôte →
+  ancêtres (imbriqué, borné 64), non-
+  composé tronqué à la racine (fragment
+  détaché → `ancestors` suffisait).
+  `EventState` gagne `adjusted` /
+  `related_node` / `adjusted_related` /
+  `path` : `target` et `relatedTarget`
+  ré-étiquetés par listener (spec
+  « retarget » — visible depuis la
+  racine du `currentTarget`),
+  `composedPath()` = chemin réel de
+  dispatch, `[]` hors dispatch. Le
+  ctor cesse d'écraser `relatedTarget`
+  d'init à `null`. Borne : chemin DOM,
+  pas l'arbre aplat (T3 CAP-197).
+  Test `cap198_shadow_event_retarget`.
 
 - [ ] **JS-C96. `await` en sous-expression
   paresseuse (mur n°1 x.com, vol

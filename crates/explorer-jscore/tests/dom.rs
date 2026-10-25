@@ -5393,6 +5393,136 @@ fn r96_fingerprint_compte_le_template_shadow() {
     assert_ne!(fp_before, fp_after);
 }
 
+// ===== CAP-198 — Shadow DOM tranche 4 : event retargeting —
+// `target`/`relatedTarget` ré-étiquetés à la frontière shadow
+// (racine du `currentTarget`), `composed` traverse (racine →
+// hôte → ancêtres, imbriqué compris), non-composé tronqué à la
+// racine, `composedPath()` réel pendant le dispatch.
+
+#[test]
+fn cap198_shadow_event_retarget() {
+    let mut e = engine_with("<!doctype html><html><body><div id=h></div></body></html>");
+    e.eval(
+        "var h=document.getElementById('h'),d=document;\
+        var r=h.attachShadow({mode:'open'});\
+        var b=d.createElement('button');r.appendChild(b);",
+    )
+    .expect("setup");
+
+    // `composed:false` — la propagation s'arrête à la racine
+    // shadow : le listener document ne reçoit rien ; le
+    // listener interne (racine) voit la cible réelle `b`.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var seen='none',tg=false;\
+            r.addEventListener('x',function(ev){seen='in';tg=ev.target===b;});\
+            d.addEventListener('x',function(ev){seen='doc';});\
+            b.dispatchEvent({type:'x',bubbles:true,composed:false});seen+'/'+tg"
+        ),
+        "in/true"
+    );
+
+    // `composed:true` — la propagation traverse : le listener
+    // interne voit `b`, les listeners hôte/document voient
+    // `target` retargeté = hôte (spec « retarget »).
+    assert_eq!(
+        evf(
+            &mut e,
+            "var it=false,ht=false,dt=false,htgt=false;\
+            r.addEventListener('y',function(ev){it=ev.target===b;});\
+            h.addEventListener('y',function(ev){ht=ev.target===h;});\
+            d.addEventListener('y',function(ev){dt=true;htgt=ev.target===h;});\
+            b.dispatchEvent({type:'y',bubbles:true,composed:true});\
+            [it,ht,dt,htgt].join('|')"
+        ),
+        "true|true|true|true"
+    );
+
+    // `composedPath()` pendant le dispatch — interne et
+    // externe voient la chaîne complète (racines shadow
+    // incluses) pour `composed`, tronquée à la racine sinon ;
+    // `[]` après dispatch (spec).
+    assert_eq!(
+        evf(
+            &mut e,
+            "var plen=0,p0=false,p1=false;\
+            h.addEventListener('z',function(ev){var p=ev.composedPath();plen=p.length;p0=p[0]===b;p1=p[1]===r;});\
+            var ev3=new Event('z',{bubbles:true,composed:true});\
+            b.dispatchEvent(ev3);\
+            var post=ev3.composedPath().length;\
+            var nclen=0;\
+            b.addEventListener('w',function(ev2){nclen=ev2.composedPath().length});\
+            b.dispatchEvent(new Event('w',{bubbles:true,composed:false}));\
+            [plen,p0,p1,post,nclen].join('|')"
+        ),
+        "6|true|true|0|2"
+    );
+
+    // `relatedTarget` retargeté comme `target` (spec) : le
+    // listener interne voit le nœud shadow réel, l'externe
+    // l'hôte ; restauré après dispatch.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var b2=d.createElement('i');r.appendChild(b2);\
+            var rin=false,rout=false;\
+            r.addEventListener('f',function(ev){rin=ev.relatedTarget===b2;});\
+            h.addEventListener('f',function(ev){rout=ev.relatedTarget===h;});\
+            var fev=new FocusEvent('f',{bubbles:true,composed:true,relatedTarget:b2});\
+            b.dispatchEvent(fev);\
+            [rin,rout,fev.relatedTarget===b2].join('|')"
+        ),
+        "true|true|true"
+    );
+
+    // Non-composé sur un arbre shadow **imbriqué** : la
+    // frontière la plus proche seule compte — un listener sur
+    // la racine externe ne voit rien non plus.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var h3=d.createElement('span');r.appendChild(h3);\
+            var r3=h3.attachShadow({mode:'open'});\
+            var deep=d.createElement('b');r3.appendChild(deep);\
+            var got='';\
+            r3.addEventListener('g',function(){got+='r3'});\
+            h3.addEventListener('g',function(){got+='h3'});\
+            r.addEventListener('g',function(){got+='r'});\
+            deep.dispatchEvent({type:'g',bubbles:true,composed:false});got||'none'"
+        ),
+        "r3"
+    );
+
+    // Composé imbriqué : traversée double frontière —
+    // `target` retargeté par PALIERS (deep → h3 pour la racine
+    // externe, h pour le document).
+    assert_eq!(
+        evf(
+            &mut e,
+            "var t1='',t2='',t3='';\
+            r3.addEventListener('k',function(ev){t1=ev.target===deep?'deep':'?'});\
+            r.addEventListener('k',function(ev){t2=ev.target===h3?'h3':'?'});\
+            d.addEventListener('k',function(ev){t3=ev.target===h?'h':'?'});\
+            deep.dispatchEvent({type:'k',bubbles:true,composed:true});[t1,t2,t3].join('|')"
+        ),
+        "deep|h3|h"
+    );
+
+    // Régression light-DOM : `target` nu hors shadow, et
+    // `composedPath` = [cible, body, html, document].
+    assert_eq!(
+        evf(
+            &mut e,
+            "var lt=false,lp=0;\
+            h.addEventListener('m',function(ev){lt=ev.target===h;});\
+            d.addEventListener('m',function(ev){lp=ev.composedPath().length});\
+            h.dispatchEvent({type:'m',bubbles:true});[lt,lp].join('|')"
+        ),
+        "true|4"
+    );
+}
+
 // ===== CAP-194 — `AbortSignal` réel : statics
 // `abort`/`timeout`/`any`, proto (`aborted`, `reason`,
 // `throwIfAborted`, `onabort`, `addEventListener`), ctor

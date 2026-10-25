@@ -1255,6 +1255,21 @@ pub(crate) struct EventState {
     /// `eventPhase` : 0 hors dispatch, 1 capture, 2 at-target,
     /// 3 bubble — posé par `propagate_event`.
     phase: Cell<u8>,
+    /// `target` ré-étiqueté pour le listener courant (CAP-198
+    /// — spec « retarget » : le nœud le plus profond encore
+    /// visible depuis la racine du `currentTarget` ; hors
+    /// dispatch, `target` s'affiche nu).
+    adjusted: Cell<NodeId>,
+    /// `relatedTarget` résolu en `NodeId` + version retargetée
+    /// du listener courant (CAP-198 — même retarget que
+    /// `target` ; `Host::get` prime les own-props sur les
+    /// objets host, d'où la présentation par cellule).
+    related_node: Cell<Option<NodeId>>,
+    adjusted_related: Cell<Option<NodeId>>,
+    /// Chemin de dispatch complet `[target, …ancêtres, …hôtes]`
+    /// pour `composedPath()` (spec : la chaîne inclut les
+    /// racines shadow ; vidé hors dispatch → `[]`).
+    path: RefCell<Vec<NodeId>>,
     /// Origine du `timeStamp` — ms depuis la construction de
     /// l'état (Instant, pas epoch : la spec compte depuis la
     /// création de l'event relativement à l'origine temps).
@@ -1298,6 +1313,10 @@ pub(crate) fn make_event_state(
         immediate: Cell::new(false),
         prevented: Cell::new(false),
         phase: Cell::new(0),
+        adjusted: Cell::new(target),
+        related_node: Cell::new(None),
+        adjusted_related: Cell::new(None),
+        path: RefCell::new(Vec::new()),
         created: std::time::Instant::now(),
         props,
     })
@@ -2476,8 +2495,43 @@ impl Engine {
         ev: &Rc<EventState>,
     ) -> JsResult<()> {
         let target = ev.target.get();
-        let path = dom.borrow().ancestors(target); // parent … root
+        let path = {
+            let d = dom.borrow();
+            let mut p = d.ancestors(target); // parent … root
+                                             // CAP-198 — `composed` traverse la frontière shadow :
+                                             // chaque racine shadow atteinte est suivie de son
+                                             // hôte puis de ses ancêtres (imbriqués compris).
+                                             // `composed:false` s'arrête à la racine — la racine
+                                             // shadow n'a pas de parent, `ancestors` tronque déjà.
+            if ev.composed.get() {
+                for _ in 0..64 {
+                    // `target` lui-même peut être la racine
+                    // shadow (`root.dispatchEvent(ev)`) — le
+                    // sommet effectif est alors la cible.
+                    let top = p.last().copied().unwrap_or(target);
+                    let Some(host) = d.shadow_host(top) else {
+                        break;
+                    };
+                    p.push(host);
+                    p.extend(d.ancestors(host));
+                }
+            }
+            p
+        };
+        // `composedPath` réel pendant le dispatch (spec : le
+        // chemin inclut les racines shadow quel que soit le
+        // mode ; vidé à la sortie → `[]` hors dispatch).
+        *ev.path.borrow_mut() = std::iter::once(target)
+            .chain(path.iter().copied())
+            .collect();
         let ev_val = self.event_value(dom, cache, ev);
+        // CAP-198 — `relatedTarget` retargeté comme `target` :
+        // résolu ici, présenté par `fire_listeners` via
+        // `adjusted_related` (lu par `EventHost::get`).
+        let rt = self.get_prop_value(ev_val, "relatedTarget")?;
+        ev.related_node.set(node_for(self, rt));
+        ev.adjusted.set(target);
+        ev.adjusted_related.set(ev.related_node.get());
         // Capture: root → parent (capture listeners only).
         ev.phase.set(1);
         for &n in path.iter().rev() {
@@ -2514,7 +2568,28 @@ impl Engine {
         // et `composedPath` redevient `[]`.
         ev.phase.set(0);
         ev.current.set(None);
+        ev.path.borrow_mut().clear();
+        ev.adjusted_related.set(None);
         Ok(())
+    }
+
+    /// `retarget` spec (CAP-198) — la cible vue depuis le
+    /// listener `n` : tant que la racine de `t` diffère de celle
+    /// de `n`, `t` remonte par son hôte shadow (le listener ne
+    /// voit pas sous sa frontière). Borné anti-cycle.
+    fn retarget_node(d: &Dom, mut t: NodeId, n: NodeId) -> NodeId {
+        let root_n = d.root_of(n);
+        for _ in 0..64 {
+            let root_t = d.root_of(t);
+            if root_t == root_n {
+                break;
+            }
+            let Some(host) = d.shadow_host(root_t) else {
+                break;
+            };
+            t = host;
+        }
+        t
     }
 
     /// Run the matching listeners on one node (`capture` selects the
@@ -2529,6 +2604,19 @@ impl Engine {
         ev_val: &Value,
         capture: bool,
     ) -> JsResult<()> {
+        // CAP-198 — `target`/`relatedTarget` ré-étiquetés pour
+        // CE listener avant invocation (spec « retarget »).
+        let (adjusted, related) = {
+            let d = dom.borrow();
+            (
+                Self::retarget_node(&d, ev.target.get(), node),
+                ev.related_node
+                    .get()
+                    .map(|rn| Self::retarget_node(&d, rn, node)),
+            )
+        };
+        ev.adjusted.set(adjusted);
+        ev.adjusted_related.set(related);
         let ty = ev.ty.borrow().clone();
         let fns: Vec<Value> = {
             let d = dom.borrow();
@@ -6048,7 +6136,16 @@ impl Host for EventHost {
         Ok(Some(match key {
             "type" => e.str_val(self.state.ty.borrow().clone()),
             "target" | "srcElement" => {
-                node_value(e, &self.dom, &self.cache, self.state.target.get())
+                // CAP-198 — pendant le dispatch, la cible vue
+                // par le listener courant (retarget à la
+                // frontière shadow) ; hors dispatch, la cible
+                // réelle (spec).
+                let n = if self.state.current.get().is_some() {
+                    self.state.adjusted.get()
+                } else {
+                    self.state.target.get()
+                };
+                node_value(e, &self.dom, &self.cache, n)
             }
             "currentTarget" => match self.state.current.get() {
                 Some(n) => node_value(e, &self.dom, &self.cache, n),
@@ -6065,6 +6162,20 @@ impl Host for EventHost {
             // Legacy DOM0 : `returnValue === false` reflète
             // `preventDefault` (spec `Event` historique).
             "returnValue" => Value::Bool(!self.state.prevented.get()),
+            // CAP-198 — `relatedTarget` retargeté pour le
+            // listener courant pendant le dispatch ; hors
+            // dispatch, la valeur `state.props` (init/platforme)
+            // ou `null` (défaut spec).
+            "relatedTarget" => {
+                if let Some(n) = self.state.adjusted_related.get() {
+                    node_value(e, &self.dom, &self.cache, n)
+                } else {
+                    match self.state.props.iter().find(|(k, _)| k == "relatedTarget") {
+                        Some((_, v)) => *v,
+                        None => Value::Null,
+                    }
+                }
+            }
             _ => match self.state.props.iter().find(|(k, _)| k == key) {
                 Some((_, v)) => *v,
                 None => return Ok(None),
@@ -6121,18 +6232,17 @@ impl Host for EventHost {
                 Ok(Some(Value::Undefined))
             }
             "composedPath" => {
-                // Spec : `[]` hors dispatch (`currentTarget` null),
-                // sinon le chemin réel target → ancêtres → document.
+                // Spec : `[]` hors dispatch (`currentTarget` null) ;
+                // CAP-198 — le chemin de dispatch stocké inclut les
+                // racines shadow traversées (`composed`) et s'arrête
+                // à la frontière pour les événements non-composés.
                 if self.state.current.get().is_none() {
                     return Ok(Some(e.new_array(Vec::new())));
                 }
-                let target = self.state.target.get();
-                let mut nodes = vec![target];
-                {
-                    let d = self.dom.borrow();
-                    nodes.extend(d.ancestors(target));
-                }
-                let vals: Vec<Value> = nodes
+                let vals: Vec<Value> = self
+                    .state
+                    .path
+                    .borrow()
                     .iter()
                     .map(|&n| node_value(e, &self.dom, &self.cache, n))
                     .collect();
@@ -7973,7 +8083,6 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         ("target", Value::Null),
         ("srcElement", Value::Null),
         ("currentTarget", Value::Null),
-        ("relatedTarget", Value::Null),
         ("isTrusted", Value::Bool(false)),
         ("defaultPrevented", Value::Bool(false)),
         ("cancelBubble", Value::Bool(false)),
@@ -7982,6 +8091,14 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         ("timeStamp", Value::Num(0.0)),
     ] {
         e.set_prop_value(this, k, v)?;
+    }
+    // CAP-198 — `relatedTarget` est une clé d'init légitime
+    // (`FocusEventInit`/`MouseEventInit`, copiée plus haut) :
+    // le défaut `null` ne s'applique que si l'init ne l'a pas
+    // fourni (l'écriture inconditionnelle l'écrasait avant).
+    let rt_set = matches!(this, Value::Obj(id) if e.find_own(id, "relatedTarget").is_some());
+    if !rt_set {
+        e.set_prop_value(this, "relatedTarget", Value::Null)?;
     }
     Ok(Value::Undefined)
 }
@@ -8058,9 +8175,32 @@ fn event_stop_propagation(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult
     Ok(Value::Undefined)
 }
 
-/// `ev.composedPath()` — `[]` honnête hors dispatch.
-fn event_composed_path(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(e.new_array(Vec::new()))
+/// `ev.composedPath()` — `[]` hors dispatch, sinon le chemin
+/// complet stocké à l'entrée de `propagate_event` (CAP-198 :
+/// racines shadow traversées incluses pour `composed`, frontière
+/// respectée sinon) — miroir de l'arm `invoke` d'`EventHost`.
+fn event_composed_path(e: &mut Engine, t: Value, _a: &[Value]) -> JsResult<Value> {
+    let st = match t {
+        Value::Obj(id) => e.host_of(id).and_then(|h| {
+            h.as_any()
+                .downcast_ref::<EventHost>()
+                .map(|ev| (ev.state.clone(), ev.dom.clone(), ev.cache.clone()))
+        }),
+        _ => None,
+    };
+    let Some((state, dom, cache)) = st else {
+        return Ok(e.new_array(Vec::new()));
+    };
+    if state.current.get().is_none() {
+        return Ok(e.new_array(Vec::new()));
+    }
+    let vals: Vec<Value> = state
+        .path
+        .borrow()
+        .iter()
+        .map(|&n| node_value(e, &dom, &cache, n))
+        .collect();
+    Ok(e.new_array(vals))
 }
 
 /// `el.matches(sel)` — native d'`Element.prototype` : les
