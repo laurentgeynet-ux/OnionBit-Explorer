@@ -6891,14 +6891,15 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
 
 - [x] **JS-C106. Borne
   d'imbrication 512→4096**
-  () —
-  / vs
+  (`explorer-jscore::parser`) —
+  `nest_max`/`expr_depth` vs
   bundles minifiés (caniuse
-   — terrain).
-   protège la
+  `RangeError: expression too
+  deeply nested` — terrain).
+  `maybe_grow` protège la
   pile — la borne reste
   hostile-only. Test
-  .
+  `deeply_nested_expression_parses`.
 
 - [x] **JS-C104. Virgule finale
   ES2017 en args d'appel**
