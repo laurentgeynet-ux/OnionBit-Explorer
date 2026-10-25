@@ -6693,23 +6693,51 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `speechSynthesis` jar vide +
   `document.{has,request}StorageAccess`.
   Régressions `c98_*` (9 tests).
-  la garde `--marketing-header-fixed-top`
-  lisait `a.offsetTop` (CAP-196
-  servi pour `position`). Livré :
-  `ElementGeom.positioned` (computed
-  `position` ≠ `static`, publié à la
-  collecte `collect_geometry`), la
-  marche `offsetParent` côté miroir —
-  plus proche ancêtre positionné ou
-  `td`/`th`/`table`/`body`, `null`
-  pour `fixed`/racine/sans boîte
-  (spec CSSOM) ; `offsetTop`/
-  `offsetLeft` = `rect − parent.rect`
-  en coords **document** (insensible
-  au scroll, union ≙ border box) ;
-  `fixed` → `rect` viewport.
-  Régression `c97_offset_parent_
-  top_left`.
+
+- [x] **JS-C99. Sous-ensemble
+  sélecteur du miroir — `:not()` +
+  `:defined` + listes `a, b`
+  (verrou Shoelace, vol 2026-11-10)** —
+  `shoelace-autoloader` `discover(root)`
+  faisait `querySelectorAll(":not(
+  :defined)")` → `[]` silencieux →
+  `customElements.define` jamais
+  appelé → `attachShadow` jamais
+  atteint → 29 `<sl-*>` rendus en
+  light DOM brut. Livré : parse de
+  compound étendu (`:` arm +
+  `MAX_PSEUDO_DEPTH`), réparation du
+  `*` universel (jamais parsé avant),
+  coupe top-level `,`/espace
+  respectant `()`/`[` (`[a="x y"]`
+  réparé au passage), pseudo-classes
+  `:defined` (lit `ce.defs`/`upgraded`),
+  `:not`/`:is`/`:where` (listes de
+  compounds), structurelles
+  (`:first/last/only-child`,
+  `:*-of-type`, `:nth-*(an+b)`,
+  `:empty`, `:root`, `:scope`),
+  attributaires (`:checked`,
+  `:disabled`/`:enabled`,
+  `:required`/`:optional`,
+  `:open`/`:closed`, `:indeterminate`,
+  `:placeholder-shown`, `:default`,
+  `:link`/`:any-link`,
+  `:read-only`/`:read-write`),
+  héritées (`:dir`, `:lang`), focus
+  (`:focus`, `:focus-within`),
+  états jamais vrais (`:visited`,
+  `:hover`, `:active`, `:target`,
+  `:fullscreen` → `Never` honnête).
+  Listes `a, b` en ordre document
+  dédoublonné sur `query`/`matches`/
+  `closest`. Régressions `c99_*`
+  (8 tests — le chemin Shoelace
+  `discover→define` complet couvert).
+  Reste borné : `:has`, `:state`,
+  `:host*`, `::part`, `:popover-open`,
+  `:modal`, `:valid`/`:invalid` —
+  parse-fail honnête (`[]`).
 
 ## Tâches continues
 

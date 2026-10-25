@@ -2315,26 +2315,41 @@ impl Dom {
     }
 
     /// `el.matches(sel)` — single-node selector test (same subset
-    /// as [`Dom::query`]: simple selectors + descendant combinator).
+    /// as [`Dom::query`]: simple selectors + descendant combinator,
+    /// selector lists `a, b`, pseudo-classes — JS-C99).
     #[must_use]
     pub fn matches(&self, node: NodeId, sel: &str) -> bool {
-        let parts: Vec<&str> = sel.split_whitespace().collect();
+        let Some(list) = split_selector_list(sel) else {
+            return false;
+        };
+        list.iter()
+            .any(|item| self.matches_single(node, item, node))
+    }
+
+    /// Compound/complexe unique de `sel` sur `node` — `scope`
+    /// = l'élément `:scope` (`el.matches` : le nœud lui-même).
+    fn matches_single(&self, node: NodeId, sel: &str, scope: NodeId) -> bool {
+        let Some(parts) = split_complex_parts(sel) else {
+            return false;
+        };
         let Some((&last, prefix)) = parts.split_last() else {
             return false;
         };
-        let Some(simple) = parse_simple_selector(last) else {
+        let Some(simple) = parse_simple_selector(last, 0) else {
             return false;
         };
-        self.node_matches(node, &simple)
-            && (prefix.is_empty() || self.ancestor_matches(self.root, node, prefix))
+        self.node_matches(node, &simple, scope)
+            && (prefix.is_empty() || self.ancestor_matches(self.root, node, prefix, scope))
     }
 
-    /// `el.closest(sel)` — nearest ancestor-or-self matching `sel`.
+    /// `el.closest(sel)` — nearest ancestor-or-self matching `sel`
+    /// (`:scope` = le nœud de départ — spec).
     #[must_use]
     pub fn closest(&self, node: NodeId, sel: &str) -> Option<NodeId> {
+        let list = split_selector_list(sel)?;
         let mut cur = Some(node);
         while let Some(n) = cur {
-            if self.matches(n, sel) {
+            if list.iter().any(|item| self.matches_single(n, item, node)) {
                 return Some(n);
             }
             cur = self.parent(n);
@@ -2652,29 +2667,48 @@ impl Dom {
         }
     }
 
-    /// Minimal `querySelector(All)`: compound selectors —
-    /// `tag`, `#id`, `.class` (répétable), `[attr]`/`[attr=v]`/
-    /// `[attr~=v]`/`[attr|=v]`/`[attr^=v]`/`[attr$=v]`/`[attr*=v]`
-    /// (répétables, valeur nue ou quotée, flag `i`/`s`), `*`,
-    /// plus the descendant combinator (`a b`). `None`/`empty`
-    /// for anything more complex (documented subset).
+    /// `querySelector(All)` — sous-ensemble documenté : compounds
+    /// `tag`/`#id`/`.class`/`[attr]`/`[attr op v]` (répétables,
+    /// valeur nue ou quotée, flag `i`/`s`), `*`, pseudo-classes
+    /// vérifiables (`:defined`, `:not()`, `:is()`, structurelles,
+    /// états — JS-C99), combinatoire descendant (`a b`), listes
+    /// `a, b`. `[]` pour le reste.
     #[must_use]
     pub fn query(&self, from: NodeId, sel: &str) -> Vec<NodeId> {
-        let parts: Vec<&str> = sel.split_whitespace().collect();
-        let Some(last) = parts.last() else {
+        let Some(list) = split_selector_list(sel) else {
             return Vec::new();
         };
-        let Some(simple) = parse_simple_selector(last) else {
-            return Vec::new();
+        // `:scope` sur `document.qS` = l'élément racine (spec —
+        // `from` n'est pas un élément quand c'est le document).
+        let scope = if from == self.root {
+            self.root_element().unwrap_or(from)
+        } else {
+            from
         };
-        let mut out = Vec::new();
-        self.collect_query(from, &simple, &mut out);
-        // Descendant combinator: keep only nodes whose ancestors match
-        // the left-to-right selector chain (bounded by `from`).
-        if parts.len() > 1 {
-            let prefix = &parts[..parts.len() - 1];
-            out.retain(|&n| self.ancestor_matches(from, n, prefix));
+        let mut matched = std::collections::HashSet::new();
+        for item in &list {
+            let Some(parts) = split_complex_parts(item) else {
+                continue;
+            };
+            let Some(last) = parts.last() else {
+                continue;
+            };
+            let Some(simple) = parse_simple_selector(last, 0) else {
+                continue;
+            };
+            let mut out = Vec::new();
+            self.collect_query(from, &simple, scope, &mut out);
+            // Descendant combinator : ancêtres matchent la chaîne
+            // gauche→droite (bornée à `from`).
+            if parts.len() > 1 {
+                let prefix = &parts[..parts.len() - 1];
+                out.retain(|&n| self.ancestor_matches(from, n, prefix, scope));
+            }
+            matched.extend(out);
         }
+        // Ordre document — DFS unique sur `from`.
+        let mut out = Vec::new();
+        self.collect_ordered(from, &matched, &mut out);
         out
     }
 
@@ -2684,14 +2718,14 @@ impl Dom {
     /// Recursion bounded by `parts.len()` ≤ [`MAX_SELECTOR_PARTS`]
     /// — a longer compound selector is outside the documented
     /// subset and simply fails to match (JS-C55).
-    fn ancestor_matches(&self, bound: NodeId, node: NodeId, parts: &[&str]) -> bool {
+    fn ancestor_matches(&self, bound: NodeId, node: NodeId, parts: &[&str], scope: NodeId) -> bool {
         if parts.len() > MAX_SELECTOR_PARTS {
             return false;
         }
         let Some((&last, rest)) = parts.split_last() else {
             return true;
         };
-        let Some(simple) = parse_simple_selector(last) else {
+        let Some(simple) = parse_simple_selector(last, 0) else {
             return false;
         };
         let mut cur = self.parent(node);
@@ -2699,7 +2733,8 @@ impl Dom {
             if a == bound {
                 break;
             }
-            if self.node_matches(a, &simple) && self.ancestor_matches(bound, a, rest) {
+            if self.node_matches(a, &simple, scope) && self.ancestor_matches(bound, a, rest, scope)
+            {
                 return true;
             }
             cur = self.parent(a);
@@ -2707,7 +2742,7 @@ impl Dom {
         false
     }
 
-    fn collect_query(&self, node: NodeId, sel: &SimpleSel, out: &mut Vec<NodeId>) {
+    fn collect_query(&self, node: NodeId, sel: &SimpleSel, scope: NodeId, out: &mut Vec<NodeId>) {
         let mut stack: Vec<NodeId> = self.nodes[node as usize]
             .children
             .iter()
@@ -2715,7 +2750,29 @@ impl Dom {
             .copied()
             .collect();
         while let Some(c) = stack.pop() {
-            if self.node_matches(c, sel) {
+            if self.node_matches(c, sel, scope) {
+                out.push(c);
+            }
+            stack.extend(self.nodes[c as usize].children.iter().rev());
+        }
+    }
+
+    /// DFS document-order — les `NodeId` déjà matchés (listes
+    /// `a, b` dédoublonnées).
+    fn collect_ordered(
+        &self,
+        node: NodeId,
+        set: &std::collections::HashSet<NodeId>,
+        out: &mut Vec<NodeId>,
+    ) {
+        let mut stack: Vec<NodeId> = self.nodes[node as usize]
+            .children
+            .iter()
+            .rev()
+            .copied()
+            .collect();
+        while let Some(c) = stack.pop() {
+            if set.contains(&c) {
                 out.push(c);
             }
             stack.extend(self.nodes[c as usize].children.iter().rev());
@@ -2723,8 +2780,10 @@ impl Dom {
     }
 
     /// Single-node selector test — `matches()` and `collect_query`
-    /// share the same simple-selector subset.
-    fn node_matches(&self, node: NodeId, sel: &SimpleSel) -> bool {
+    /// share the same simple-selector subset. `scope` = nœud de
+    /// contexte `:scope` (`from` pour query, l'élément pour
+    /// `matches`/`closest`).
+    fn node_matches(&self, node: NodeId, sel: &SimpleSel, scope: NodeId) -> bool {
         let n = &self.nodes[node as usize];
         if n.kind != NodeKind::Element {
             return false;
@@ -2743,7 +2802,192 @@ impl Dom {
             Self::attr_val(n, "class").is_some_and(|v| v.split_whitespace().any(|t| t == cls))
         }) && sel.attrs.iter().all(|a| {
             Self::attr_val(n, &a.name).is_some_and(|v| attr_op_matches(&a.op, v, &a.value, a.ci))
-        })
+        }) && sel
+            .pseudos
+            .iter()
+            .all(|p| self.pseudo_matches(node, n, p, scope))
+    }
+
+    /// Évalue une pseudo-class du sous-ensemble (JS-C99).
+    fn pseudo_matches(&self, node: NodeId, n: &Node, p: &Pseudo, scope: NodeId) -> bool {
+        match p {
+            // `:defined` — builtin ou custom element défini
+            // (un nom avec `-` non défini n'est PAS defined —
+            // la chaîne Shoelace `:not(:defined)` mesurée).
+            Pseudo::Defined => {
+                !n.tag.contains('-')
+                    || self.ce.defs.contains_key(&n.tag)
+                    || self.ce.upgraded.contains_key(&node)
+            }
+            Pseudo::Not(list) => !list.iter().any(|s| self.node_matches(node, s, scope)),
+            Pseudo::Any(list) => list.iter().any(|s| self.node_matches(node, s, scope)),
+            Pseudo::Empty => n.children.iter().all(|&c| {
+                let cn = &self.nodes[c as usize];
+                cn.kind != NodeKind::Element && (cn.kind != NodeKind::Text || cn.text.is_empty())
+            }),
+            Pseudo::Root => self.root_element() == Some(node),
+            Pseudo::Scope => node == scope,
+            Pseudo::FirstChild | Pseudo::LastChild | Pseudo::OnlyChild => {
+                self.elem_siblings(node).is_some_and(|(sibs, idx)| match p {
+                    Pseudo::FirstChild => idx == 0,
+                    Pseudo::LastChild => idx + 1 == sibs.len(),
+                    _ => sibs.len() == 1,
+                })
+            }
+            Pseudo::FirstOfType | Pseudo::LastOfType | Pseudo::OnlyOfType => {
+                self.type_siblings(node).is_some_and(|(sibs, idx)| match p {
+                    Pseudo::FirstOfType => idx == 0,
+                    Pseudo::LastOfType => idx + 1 == sibs.len(),
+                    _ => sibs.len() == 1,
+                })
+            }
+            Pseudo::NthChild(a, b) => self
+                .elem_siblings(node)
+                .is_some_and(|(_, idx)| nth_ok(idx + 1, *a, *b)),
+            Pseudo::NthLastChild(a, b) => self
+                .elem_siblings(node)
+                .is_some_and(|(sibs, idx)| nth_ok(sibs.len() - idx, *a, *b)),
+            Pseudo::NthOfType(a, b) => self
+                .type_siblings(node)
+                .is_some_and(|(_, idx)| nth_ok(idx + 1, *a, *b)),
+            Pseudo::NthLastOfType(a, b) => self
+                .type_siblings(node)
+                .is_some_and(|(sibs, idx)| nth_ok(sibs.len() - idx, *a, *b)),
+            // `:checked` et `:default` partagent le test
+            // attributaire borné (`input[checked]`/
+            // `option[selected]` — la distinction « état
+            // initial » vs « état courant » n'est pas suivie).
+            Pseudo::Checked | Pseudo::Default => {
+                (n.tag == "input" && Self::attr_val(n, "checked").is_some())
+                    || (n.tag == "option" && Self::attr_val(n, "selected").is_some())
+            }
+            Pseudo::Disabled => {
+                Self::is_form_control(&n.tag) && Self::attr_val(n, "disabled").is_some()
+            }
+            Pseudo::Enabled => {
+                Self::is_form_control(&n.tag) && Self::attr_val(n, "disabled").is_none()
+            }
+            Pseudo::Link => {
+                matches!(n.tag.as_str(), "a" | "area") && Self::attr_val(n, "href").is_some()
+            }
+            Pseudo::Never => false,
+            Pseudo::Focus => self.focused.get() == Some(node),
+            Pseudo::FocusWithin => {
+                let mut cur = self.focused.get();
+                while let Some(f) = cur {
+                    if f == node {
+                        return true;
+                    }
+                    cur = self.parent(f);
+                }
+                false
+            }
+            Pseudo::Required => {
+                matches!(n.tag.as_str(), "input" | "select" | "textarea")
+                    && Self::attr_val(n, "required").is_some()
+            }
+            Pseudo::Optional => {
+                matches!(n.tag.as_str(), "input" | "select" | "textarea")
+                    && Self::attr_val(n, "required").is_none()
+            }
+            Pseudo::ReadWrite => Self::is_read_write(n),
+            Pseudo::ReadOnly => !Self::is_read_write(n),
+            Pseudo::PlaceholderShown => {
+                matches!(n.tag.as_str(), "input" | "textarea")
+                    && Self::attr_val(n, "placeholder").is_some()
+                    && Self::attr_val(n, "value").is_none_or(str::is_empty)
+            }
+            Pseudo::Open => {
+                matches!(n.tag.as_str(), "details" | "dialog")
+                    && Self::attr_val(n, "open").is_some()
+            }
+            Pseudo::Closed => {
+                matches!(n.tag.as_str(), "details" | "dialog")
+                    && Self::attr_val(n, "open").is_none()
+            }
+            Pseudo::Indeterminate => n.tag == "progress" && Self::attr_val(n, "value").is_none(),
+            Pseudo::Dir(v) => self
+                .inherited_attr(node, "dir")
+                .is_some_and(|d| d.to_ascii_lowercase() == *v),
+            Pseudo::Lang(v) => self.inherited_attr(node, "lang").is_some_and(|l| {
+                let l = l.to_ascii_lowercase();
+                l == *v || l.starts_with(&format!("{v}-"))
+            }),
+        }
+    }
+
+    /// Frères éléments (`idx` = position de `node`) — `None`
+    /// si pas de parent.
+    fn elem_siblings(&self, node: NodeId) -> Option<(Vec<NodeId>, usize)> {
+        let p = self.nodes[node as usize].parent?;
+        let sibs: Vec<NodeId> = self.nodes[p as usize]
+            .children
+            .iter()
+            .copied()
+            .filter(|&c| self.nodes[c as usize].kind == NodeKind::Element)
+            .collect();
+        let idx = sibs.iter().position(|&c| c == node)?;
+        Some((sibs, idx))
+    }
+
+    /// Frères éléments de même tag (`idx` = position de `node`).
+    fn type_siblings(&self, node: NodeId) -> Option<(Vec<NodeId>, usize)> {
+        let p = self.nodes[node as usize].parent?;
+        let tag = self.nodes[node as usize].tag.as_str();
+        let sibs: Vec<NodeId> = self.nodes[p as usize]
+            .children
+            .iter()
+            .copied()
+            .filter(|&c| {
+                let cn = &self.nodes[c as usize];
+                cn.kind == NodeKind::Element && cn.tag == tag
+            })
+            .collect();
+        let idx = sibs.iter().position(|&c| c == node)?;
+        Some((sibs, idx))
+    }
+
+    /// Premier élément enfant du document (`documentElement`).
+    fn root_element(&self) -> Option<NodeId> {
+        self.nodes[self.root as usize]
+            .children
+            .iter()
+            .copied()
+            .find(|&c| self.nodes[c as usize].kind == NodeKind::Element)
+    }
+
+    /// Attr hérité — premier `dir`/`lang` rencontré en
+    /// remontant (soi inclus).
+    fn inherited_attr(&self, node: NodeId, name: &str) -> Option<String> {
+        let mut cur = Some(node);
+        while let Some(n) = cur {
+            if let Some(v) = Self::attr_val(&self.nodes[n as usize], name) {
+                return Some(v.to_string());
+            }
+            cur = self.parent(n);
+        }
+        None
+    }
+
+    /// Élément éditable — `contenteditable` ≠ `false` ou
+    /// `input`/`textarea` sans `readonly`/`disabled` (spec :
+    /// un champ verrouillé est `:read-only`).
+    fn is_read_write(n: &Node) -> bool {
+        if let Some(ce) = Self::attr_val(n, "contenteditable") {
+            return !ce.eq_ignore_ascii_case("false");
+        }
+        matches!(n.tag.as_str(), "input" | "textarea")
+            && Self::attr_val(n, "readonly").is_none()
+            && Self::attr_val(n, "disabled").is_none()
+    }
+
+    /// Tags recevant `disabled` (borné — `fieldset` exclu de
+    /// la cascade « premier fieldset »).
+    fn is_form_control(tag: &str) -> bool {
+        matches!(
+            tag,
+            "input" | "select" | "textarea" | "button" | "optgroup" | "option" | "fieldset"
+        )
     }
 
     // -- text & serialization ---------------------------------------------
@@ -3123,15 +3367,95 @@ const IMPLICIT_CLOSE: &[&str] = &["li", "p", "tr", "td", "th", "option", "dt", "
 /// `tag` / `#id` / `.class` / `tag.class` / `tag#id` / `*` → parts.
 /// Sélecteur simple du sous-ensemble `Dom::query` — un
 /// « compound selector » CSS : tag (ou `*`), `#id`, `.class`
-/// (répétables) et filtres `[attr]` (répétables, opérateurs
+/// (répétables), filtres `[attr]` (répétables, opérateurs
 /// `=`/`~=`/`|=`/`^=`/`$=`/`*=`, valeurs nues ou quotées, flag
-/// `i`/`s` en fin).
+/// `i`/`s` en fin) et pseudo-classes vérifiables sur le miroir
+/// (`:defined`, `:not()`, `:is()`, structurelles, états —
+/// JS-C99).
 #[derive(Default)]
 struct SimpleSel {
     tag: Option<String>,
     id: Option<String>,
     classes: Vec<String>,
     attrs: Vec<AttrSel>,
+    pseudos: Vec<Pseudo>,
+}
+
+/// Pseudo-classes du sous-ensemble sélecteur (JS-C99) —
+/// celles évaluables honnêtement sur le miroir : structure
+/// (`:empty`, `:first-child`, `nth-*`), état attributaire
+/// (`:checked`, `:disabled`, `:open`), registre CE
+/// (`:defined`), négation/alternatives (`:not`, `:is`,
+/// `:where`), direction/langue (`:dir`, `:lang`), états de
+/// focus (`:focus`, `:focus-within`). Les états inconnus du
+/// miroir (`:visited`, `:hover`, `:active`, `:target`,
+/// `:fullscreen`) deviennent `Never` — jamais matchés, pas
+/// un échec de parse (le reste du compound reste évalué).
+enum Pseudo {
+    /// `:defined` — builtin ou custom element défini
+    /// (`ce.defs`/`ce.upgraded`).
+    Defined,
+    /// `:not(list)` — négation d'une liste de compounds.
+    Not(Vec<SimpleSel>),
+    /// `:is(list)`/`:where(list)` — alternative de compounds.
+    Any(Vec<SimpleSel>),
+    /// `:empty` — ni élément ni texte non vide.
+    Empty,
+    /// `:root` — élément racine du document.
+    Root,
+    /// `:scope` — le nœud de contexte (`from`/`matches`).
+    Scope,
+    /// `:first-child`/`:last-child`/`:only-child`.
+    FirstChild,
+    LastChild,
+    OnlyChild,
+    /// `:*-of-type` — parmi les frères de même tag.
+    FirstOfType,
+    LastOfType,
+    OnlyOfType,
+    /// `:nth-child(an+b)` / `:nth-last-child(an+b)`.
+    NthChild(i64, i64),
+    NthLastChild(i64, i64),
+    /// `:nth-of-type` / `:nth-last-of-type`.
+    NthOfType(i64, i64),
+    NthLastOfType(i64, i64),
+    /// `:checked` — `input[checked]`/`option[selected]`.
+    Checked,
+    /// `:disabled`/`:enabled` — contrôles ± `[disabled]`.
+    Disabled,
+    Enabled,
+    /// `:link`/`:any-link` — `a`/`area` avec `href`.
+    Link,
+    /// États jamais exposés par le miroir (`:visited`,
+    /// `:hover`, `:active`, `:target`, `:fullscreen`) —
+    /// honnêtement `false`.
+    Never,
+    /// `:focus`/`:focus-visible` — nœud `focused`.
+    Focus,
+    /// `:focus-within` — nœud ou ancêtre du `focused`.
+    FocusWithin,
+    /// `:required`/`:optional` — contrôles ± `[required]`.
+    Required,
+    Optional,
+    /// `:read-only`/`:read-write` — `contenteditable` ou
+    /// champ éditable.
+    ReadOnly,
+    ReadWrite,
+    /// `:placeholder-shown` — champ avec `placeholder` et
+    /// valeur vide.
+    PlaceholderShown,
+    /// `:default` — `checked`/`selected` attributaires.
+    Default,
+    /// `:open`/`:closed` — `details`/`dialog` ± `[open]`.
+    Open,
+    Closed,
+    /// `:indeterminate` — `<progress>` sans `value`
+    /// (borné : le flag JS checkbox n'est pas suivi).
+    Indeterminate,
+    /// `:dir(ltr|rtl|auto)` — `dir` hérité.
+    Dir(String),
+    /// `:lang(x)` — `lang` hérité, préfixe `x`/`x-*`.
+    Lang(String),
 }
 
 /// Filtre `[name op value]` — `Exists` = présence seule.
@@ -3165,19 +3489,186 @@ fn is_sel_ident(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c >= 0x80
 }
 
-fn parse_simple_selector(sel: &str) -> Option<SimpleSel> {
-    if sel.is_empty() || sel.contains(' ') || sel.contains(',') || sel.contains('>') {
+/// Profondeur d'imbrication des pseudo-fonctions
+/// (`:not(:not(...))`) — hostile-content bound.
+const MAX_PSEUDO_DEPTH: usize = 8;
+
+/// Coupe `a, b` en items de liste — virgules hors `()`/`[]`
+/// (JS-C99 — spec selector list).
+fn split_selector_list(sel: &str) -> Option<Vec<&str>> {
+    let b = sel.as_bytes();
+    let mut depth = 0i32;
+    let mut out = Vec::new();
+    let mut st = 0;
+    for (i, &c) in b.iter().enumerate() {
+        match c {
+            b'(' | b'[' => depth += 1,
+            b')' | b']' => depth -= 1,
+            b',' if depth == 0 => {
+                out.push(&sel[st..i]);
+                st = i + 1;
+                if out.len() > MAX_SELECTOR_PARTS {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+        if !(0..=16).contains(&depth) {
+            return None;
+        }
+    }
+    if depth != 0 {
+        return None;
+    }
+    out.push(&sel[st..]);
+    Some(out)
+}
+
+/// Coupe `a b` en compounds — espaces hors `()`/`[]` (JS-C99 :
+/// un `[a="x y"]` ou `:not( .x )` ne casse plus la découpe).
+fn split_complex_parts(sel: &str) -> Option<Vec<&str>> {
+    let b = sel.as_bytes();
+    let mut depth = 0i32;
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= b.len() {
+            break;
+        }
+        let st = i;
+        while i < b.len() {
+            match b[i] {
+                b'(' | b'[' => depth += 1,
+                b')' | b']' => depth -= 1,
+                _ if b[i].is_ascii_whitespace() && depth == 0 => break,
+                _ => {}
+            }
+            if !(0..=16).contains(&depth) {
+                return None;
+            }
+            i += 1;
+        }
+        out.push(&sel[st..i]);
+        if out.len() > MAX_SELECTOR_PARTS {
+            return None;
+        }
+    }
+    if depth != 0 {
+        return None;
+    }
+    Some(out)
+}
+
+/// `(` à `i` → `(`contenu, index après `)` correspondante`)` —
+/// parenthèses imbriquées comptées (`:not(:not(x))`).
+fn parse_pseudo_arg_raw(s: &str, i: usize) -> Option<(&str, usize)> {
+    let b = s.as_bytes();
+    if b.get(i) != Some(&b'(') {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut j = i + 1;
+    while j < b.len() {
+        match b[j] {
+            b'(' => depth += 1,
+            b')' => {
+                if depth == 0 {
+                    return Some((&s[i + 1..j], j + 1));
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+        if depth > MAX_PSEUDO_DEPTH {
+            return None;
+        }
+        j += 1;
+    }
+    None
+}
+
+/// Contenu d'un `:not()`/`:is()` — liste de compounds
+/// (sous-ensemble : pas de combinators internes).
+fn parse_pseudo_list(inner: &str, depth: usize) -> Option<Vec<SimpleSel>> {
+    if depth >= MAX_PSEUDO_DEPTH {
+        return None;
+    }
+    let parts = split_selector_list(inner)?;
+    let mut out = Vec::new();
+    for p in parts {
+        out.push(parse_simple_selector(p.trim(), depth + 1)?);
+    }
+    if out.is_empty() {
+        return None;
+    }
+    Some(out)
+}
+
+/// `odd`/`even`/`n`/`an+b`/entier → `(a, b)` (CSS nth).
+fn parse_nth(inner: &str) -> Option<(i64, i64)> {
+    let s: String = inner.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    let s = s.as_str();
+    if s.eq_ignore_ascii_case("odd") {
+        return Some((2, 1));
+    }
+    if s.eq_ignore_ascii_case("even") {
+        return Some((2, 0));
+    }
+    if let Some(pos) = s.find(['n', 'N']) {
+        let (a_str, n_and_b) = s.split_at(pos);
+        let a: i64 = match a_str {
+            "" | "+" => 1,
+            "-" => -1,
+            x => x.parse().ok()?,
+        };
+        let b: i64 = if n_and_b.len() > 1 {
+            n_and_b[1..].parse().ok()?
+        } else {
+            0
+        };
+        Some((a, b))
+    } else {
+        Some((0, s.parse().ok()?))
+    }
+}
+
+/// `idx` (1-based) satisfait-il `an+b` ? (CSS nth-match.)
+fn nth_ok(idx: usize, a: i64, b: i64) -> bool {
+    let i = idx as i64;
+    if a == 0 {
+        return i == b;
+    }
+    let d = i - b;
+    d % a == 0 && d / a >= 0
+}
+
+fn parse_simple_selector(sel: &str, depth: usize) -> Option<SimpleSel> {
+    // Pas de rejet global ` `/`,`/`>` — les espaces sont
+    // légaux dans `()`/`[` (parse attr/pseudo les consomme) ;
+    // un caractère inattendu en tête de compound tombe sur
+    // l'arm `_` de la boucle.
+    if sel.is_empty() || depth > MAX_PSEUDO_DEPTH {
         return None;
     }
     let b = sel.as_bytes();
     let mut i = 0;
     let mut out = SimpleSel::default();
     let start = i;
+    // `*` universel — en tête de compound uniquement.
+    if b.get(i) == Some(&b'*') {
+        i += 1;
+    }
     while i < b.len() && is_sel_ident(b[i]) {
         i += 1;
     }
     if i > start {
-        out.tag = Some(sel[start..i].to_lowercase());
+        let t = &sel[start..i];
+        if t != "*" {
+            out.tag = Some(t.to_lowercase());
+        }
     }
     while i < b.len() {
         match b[i] {
@@ -3205,14 +3696,102 @@ fn parse_simple_selector(sel: &str) -> Option<SimpleSel> {
                 out.attrs.push(a);
                 i += next;
             }
+            b':' => {
+                // Pseudo-élément (`::x`) → hors sous-ensemble.
+                if b.get(i + 1) == Some(&b':') {
+                    return None;
+                }
+                i += 1;
+                let s = i;
+                while i < b.len() && is_sel_ident(b[i]) {
+                    i += 1;
+                }
+                if i == s {
+                    return None;
+                }
+                let pname = &sel[s..i];
+                let p = match pname {
+                    "defined" => Pseudo::Defined,
+                    "empty" => Pseudo::Empty,
+                    "root" => Pseudo::Root,
+                    "scope" => Pseudo::Scope,
+                    "first-child" => Pseudo::FirstChild,
+                    "last-child" => Pseudo::LastChild,
+                    "only-child" => Pseudo::OnlyChild,
+                    "first-of-type" => Pseudo::FirstOfType,
+                    "last-of-type" => Pseudo::LastOfType,
+                    "only-of-type" => Pseudo::OnlyOfType,
+                    "checked" => Pseudo::Checked,
+                    "disabled" => Pseudo::Disabled,
+                    "enabled" => Pseudo::Enabled,
+                    "link" | "any-link" => Pseudo::Link,
+                    "visited" | "hover" | "active" | "target" | "fullscreen" => Pseudo::Never,
+                    "focus" | "focus-visible" => Pseudo::Focus,
+                    "focus-within" => Pseudo::FocusWithin,
+                    "required" => Pseudo::Required,
+                    "optional" => Pseudo::Optional,
+                    "read-only" => Pseudo::ReadOnly,
+                    "read-write" => Pseudo::ReadWrite,
+                    "placeholder-shown" => Pseudo::PlaceholderShown,
+                    "default" => Pseudo::Default,
+                    "open" => Pseudo::Open,
+                    "closed" => Pseudo::Closed,
+                    "indeterminate" => Pseudo::Indeterminate,
+                    "not" | "is" | "where" => {
+                        let (inner, next) = parse_pseudo_arg_raw(sel, i)?;
+                        let list = parse_pseudo_list(inner, depth)?;
+                        i = next;
+                        if pname == "not" {
+                            Pseudo::Not(list)
+                        } else {
+                            Pseudo::Any(list)
+                        }
+                    }
+                    "nth-child" | "nth-last-child" | "nth-of-type" | "nth-last-of-type" => {
+                        let (inner, next) = parse_pseudo_arg_raw(sel, i)?;
+                        let (a, bo) = parse_nth(inner)?;
+                        i = next;
+                        match pname {
+                            "nth-child" => Pseudo::NthChild(a, bo),
+                            "nth-last-child" => Pseudo::NthLastChild(a, bo),
+                            "nth-of-type" => Pseudo::NthOfType(a, bo),
+                            _ => Pseudo::NthLastOfType(a, bo),
+                        }
+                    }
+                    "dir" | "lang" => {
+                        let (inner, next) = parse_pseudo_arg_raw(sel, i)?;
+                        let arg = inner.trim().to_ascii_lowercase();
+                        if arg.is_empty() {
+                            return None;
+                        }
+                        i = next;
+                        if pname == "dir" {
+                            if !matches!(arg.as_str(), "ltr" | "rtl" | "auto") {
+                                return None;
+                            }
+                            Pseudo::Dir(arg)
+                        } else {
+                            Pseudo::Lang(arg)
+                        }
+                    }
+                    // Pseudo-classes hors sous-ensemble
+                    // (`:has`, `:state`, `:host*`, `:popover-open`,
+                    // `:modal`, `:valid`, `::part`…) → échec de
+                    // parse → `[]`, sous-ensemble documenté.
+                    _ => return None,
+                };
+                out.pseudos.push(p);
+            }
             _ => return None,
         }
     }
-    if out.tag.is_none() && out.id.is_none() && out.classes.is_empty() && out.attrs.is_empty() {
+    if out.tag.is_none()
+        && out.id.is_none()
+        && out.classes.is_empty()
+        && out.attrs.is_empty()
+        && out.pseudos.is_empty()
+    {
         return None;
-    }
-    if out.tag.as_deref() == Some("*") {
-        out.tag = None;
     }
     Some(out)
 }

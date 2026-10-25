@@ -9,6 +9,35 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C99 — sous-ensemble sélecteur
+  du miroir** (`explorer-jscore`) :
+  `:not()`/`:is()`/`:where()` +
+  `:defined` + listes `a, b` —
+  verrou Shoelace (`querySelectorAll(
+  ":not(:defined)")` → `[]` tuait
+  `discover` → `define` jamais
+  appelé → Shadow mort). Livré :
+  `:` arm de parse (profondeur
+  bornée), `*` universel réparé,
+  coupe `,`/espace respectant
+  `()`/`[` (`[a="x y"]` réparé),
+  `:defined` lit `ce.defs`/`upgraded`,
+  structurelles (`:first/last/only-
+  child`, `:*-of-type`, `:nth-*`,
+  `:empty`, `:root`, `:scope`),
+  attributaires (`:checked`,
+  `:disabled`, `:required`, `:open`,
+  `:indeterminate`, `:placeholder-
+  shown`, `:link`, `:read-only`…),
+  `:dir`/`:lang`, `:focus`/`-within`,
+  états jamais vrais → `Never`
+  honnête. Reste borné : `:has`,
+  `:state`, `:host*`, `::part`,
+  `:popover-open`, `:modal`,
+  `:valid` — parse-fail (`[]`).
+  Tests `c99_*` (8 — le chemin
+  `discover→define` Shoelace couvert).
+
 - **JS-C98 — complétude de surface
   (census)** (`explorer-jscore`) :
   recensement `typeof` des globaux

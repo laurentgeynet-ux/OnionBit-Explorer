@@ -442,11 +442,16 @@ fn query_selector_attr_operators() {
     // Absent ou valeur différente → null.
     assert_eq!(ev("document.querySelector('[data-nope]')"), "null");
     assert_eq!(ev("document.querySelector('input[type=radio]')"), "null");
-    // Hors sous-ensemble (`,`, `>`, pseudo) → null, jamais d'erreur.
+    // Listes `a, b` — sous-ensemble JS-C99 : premier match en
+    // ordre document.
     assert_eq!(
-        ev("document.querySelector('[type=text],[checked]')"),
-        "null"
+        ev("document.querySelector('[type=text],[checked]').id"),
+        "inp"
     );
+    // Hors sous-ensemble (`>`, pseudo-élément) → null, jamais
+    // d'erreur ; `:hover` = état `Never` (JS-C99) → non matché.
+    assert_eq!(ev("document.querySelector('div > p')"), "null");
+    assert_eq!(ev("document.querySelector('input::x')"), "null");
     assert_eq!(ev("document.querySelector('input:hover')"), "null");
     // `matches`/`closest` partagent le même sous-ensemble.
     assert_eq!(
