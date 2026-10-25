@@ -832,6 +832,12 @@ impl GExec {
             }
         }
         loop {
+            // Wedge gov.uk : une boucle dans un corps lowered
+            // (`await` → `GenLive`) tournait sans jamais ticker
+            // le budget — spin infini dans `eval_module`
+            // (op-limit jamais atteint). Chaque pas du driver
+            // compte désormais.
+            e.tick()?;
             // `yield*` en vidange : les items restants
             // s'émettent AVANT tout statement — sinon le pc
             // suivant (`Expr(__gN)` lifté) tournerait pendant
@@ -1114,6 +1120,12 @@ impl GExec {
         let Some(f) = self.stack.last() else {
             return Ok(());
         };
+        // Wedge gov.uk (bissection bis) : une boucle dans un
+        // corps lowered (`await` → GenLive) tournait hors budget
+        // — cette continuation de frame est le point d'itération
+        // (`While`/`For` réévaluent cond, `ForIter`/`ForAwait`
+        // avancent) ; le tick la compte.
+        e.tick()?;
         match &f.kind {
             FKind::Seq => {
                 self.stack.pop();

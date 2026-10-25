@@ -229,6 +229,11 @@ pub struct Engine {
     /// hook les voit avant parse (diagnostic, jamais modifié).
     pub(crate) eval_hook: Option<EvalHook>,
     expr_depth: u32,
+    /// Comptage par nom de native (diagnostic wedge) — incrémenté
+    /// au dispatch `Fun::Native` quand `EXPLORER_NAT_TRACE` est armé ;
+    /// périodiquement dumpé pour nommer un natif en boucle.
+    nat_trace_counts: std::collections::HashMap<&'static str, u64>,
+    nat_trace_total: u64,
     /// Borne d'emboîtement du parseur et de l'évaluateur
     /// d'expressions (JS-C41) — relevable par l'embeddeur sur un
     /// thread moteur à pile large.
@@ -717,6 +722,8 @@ impl Engine {
             call_stack: Vec::new(),
             eval_hook: None,
             expr_depth: 0,
+            nat_trace_counts: std::collections::HashMap::new(),
+            nat_trace_total: 0,
             nest_limit: crate::parser::DEFAULT_NEST_LIMIT,
             ops_left: DEFAULT_OP_LIMIT,
             op_limit: DEFAULT_OP_LIMIT,
@@ -2615,6 +2622,27 @@ impl Engine {
             },
         );
         Ok(Value::Obj(id))
+    }
+
+    /// Compte l'appel natif `name` (diagnostic wedge — gov.uk) :
+    /// tous les 8192 appels sous `EXPLORER_NAT_TRACE`, dump du
+    /// top des dominants — un natif en boucle se nomme au sommet.
+    fn nat_trace_tick(&mut self, name: &'static str) {
+        if std::env::var_os("EXPLORER_NAT_TRACE").is_none() {
+            return;
+        }
+        self.nat_trace_total += 1;
+        *self.nat_trace_counts.entry(name).or_default() += 1;
+        if self.nat_trace_total % 8192 == 0 {
+            let mut v: Vec<_> = self.nat_trace_counts.iter().collect();
+            v.sort_by_key(|(_, n)| std::cmp::Reverse(**n));
+            let top: Vec<String> = v
+                .iter()
+                .take(6)
+                .map(|(n, c)| format!("{n}={c}"))
+                .collect();
+            eprintln!("[nat-trace] total={} top={}", self.nat_trace_total, top.join(" "));
+        }
     }
 
     /// Operation budget tick — also counts microtasks so a
@@ -5297,8 +5325,12 @@ impl Engine {
             None => return Err(self.type_error("value is not a function")),
         };
         match fun {
-            Fun::Native { f, .. } => self.call_native_ctx(f, this, args),
-            Fun::BoundNative { f, bound, .. } => {
+            Fun::Native { name, f } => {
+                self.nat_trace_tick(name);
+                self.call_native_ctx(f, this, args)
+            }
+            Fun::BoundNative { name, f, bound } => {
+                self.nat_trace_tick(name);
                 let mut a = Vec::with_capacity(bound.len() + args.len());
                 a.extend_from_slice(&bound);
                 a.extend_from_slice(args);

@@ -353,6 +353,9 @@ impl Engine {
     /// same instance), wires import aliases and builds the export
     /// table. Idempotent by specifier.
     fn instantiate(&mut self, spec: &str, url: &str, src: &str, depth: u32) -> JsResult<usize> {
+        if std::env::var("DBG_DRIVE").is_ok() {
+            eprintln!("[instantiate] {spec}");
+        }
         if let Some(&idx) = self.module_specs.get(spec) {
             return Ok(idx);
         }
@@ -373,6 +376,9 @@ impl Engine {
         }
         let prog =
             parser::parse_module_in(src, self.nest_limit, Some(Rc::from(spec))).map_err(|err| {
+                if std::env::var("DBG_DRIVE").is_ok() {
+                    eprintln!("[instantiate] parse erreur {spec}: {err}");
+                }
                 // La faute porte le nom du module fautif, pas celui
                 // de l'entrée — `session` préfixe déjà « module
                 // « entry » », sans lui la source est introuvable
@@ -406,6 +412,9 @@ impl Engine {
         self.module_specs.insert(spec.to_string(), idx);
         self.module_urls.insert(url.to_string(), idx);
         self.module_envs.push(env.clone());
+        if std::env::var("DBG_DRIVE").is_ok() {
+            eprintln!("[instantiate] parsé+lié {spec} idx={idx}");
+        }
 
         // 1. Static export pass — les entrées *locales* sont connues
         //    dès l'enregistrement : un module cyclique qui remonte
@@ -579,6 +588,9 @@ impl Engine {
     /// `InnerModuleEvaluation` — evaluate deps DFS post-order; a dep
     /// already `Evaluating` is a cycle edge (skipped, spec-like).
     fn evaluate_module(&mut self, idx: usize) -> JsResult<()> {
+        if std::env::var("DBG_DRIVE").is_ok() {
+            eprintln!("[eval_mod] entrée idx={idx} spec={}", self.modules[idx].spec);
+        }
         match self.modules[idx].state {
             ModState::Evaluated | ModState::Evaluating => return Ok(()),
             ModState::Instantiated => {}
@@ -600,6 +612,9 @@ impl Engine {
         // d'importeurs n'attend pas — les exports lisent les
         // bindings lexicalement (vivants par `nsget`).
         if body.iter().any(crate::interp::lazy::stmt_has_suspend) {
+            if std::env::var("DBG_DRIVE").is_ok() {
+                eprintln!("[eval_mod] lowered body idx={idx}");
+            }
             let lowered = crate::interp::lazy::lower_suspend_body(&body);
             let prom = self.new_promise();
             let gen =

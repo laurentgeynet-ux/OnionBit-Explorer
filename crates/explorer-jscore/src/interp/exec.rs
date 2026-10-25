@@ -127,6 +127,9 @@ impl Engine {
         }
         let mut r = Ok(Flow::Normal);
         for s in body {
+            if std::env::var("DBG_DRIVE").is_ok() {
+                eprintln!("[exec_body] stmt={:?}", std::mem::discriminant(s));
+            }
             match self.exec_stmt(env, this, s) {
                 Ok(Flow::Normal) => {}
                 other => {
