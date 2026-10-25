@@ -13215,3 +13215,85 @@ async fn imported_namespace_exposes_webpack_modules_table() {
     let dump = s.dom_dump(a).unwrap_or_default();
     eprintln!("ns test : {dump}");
 }
+
+/// Wedge gov.uk (vol corpus 11/11) : eval de `application.js`
+/// réel — si le mur se reproduit, la nav ne rend jamais
+/// (boucle jscore sans budget — classe C103).
+#[tokio::test]
+async fn govuk_app_module_eval_terminates() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">a</div>\
+         <script type=\"module\" src=\"/app.js\"></script></body></html>",
+    );
+    let body = std::fs::read_to_string("C:/Users/Lou/AppData/Local/Temp/govuk_app.js")
+        .unwrap_or_else(|_| "document.title='SKIP'".into());
+    t.route("/app.js", 200, Box::leak(body.into_boxed_str()));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        s.navigate(a, "http://h.test/p"),
+    )
+    .await;
+    eprintln!("wedge repro : {}", if r.is_err() { "TIMEOUT (wedge confirmé)" } else { "terminé" });
+}
+
+/// Wedge gov.uk — bissection combinaison : les vrais fichiers
+/// servis en fake transport, même ordre que la page réelle.
+#[tokio::test]
+async fn govuk_all_scripts_eval_terminates() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">a</div>\
+         <script src=\"/lux.js\" async></script>\
+         <script src=\"/rumcd.js\" type=\"module\"></script>\
+         <script src=\"/rum.js\" async></script>\
+         <script src=\"/load-analytics.js\" type=\"module\"></script>\
+         <script src=\"/app.js\" type=\"module\"></script></body></html>",
+    );
+    for (path, file) in [
+        ("/lux.js", "lux-measurer-d66192b1b665d415e1874e49a48138b7ae339548aa6cdb8687c7f9933e72b969"),
+        ("/rumcd.js", "rum-custom-data-b9e1806d1da2fa8ef1855d01aa71ba5eb0afc010dd2c4de3672cc7c7a39b0c8c"),
+        ("/rum.js", "rum-loader-a65b10e18ceeba3bd8a2eac507c7f2c513cdc82f35097df903fdea87f1dc2e33"),
+        ("/load-analytics.js", "load-analytics-d5c92d4ce9f98141170a466427da86ca1ff62f234637bf0776121e6df57b3b67"),
+        ("/app.js", "govuk_app"),
+    ] {
+        let body = std::fs::read_to_string(format!("C:/Users/Lou/AppData/Local/Temp/govuk_{file}.js"))
+            .unwrap_or_else(|_| "document.title='SKIP'".into());
+        t.route(path, 200, Box::leak(body.into_boxed_str()));
+    }
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        s.navigate(a, "http://h.test/p"),
+    )
+    .await;
+    eprintln!("wedge combinaison : {}", if r.is_err() { "TIMEOUT (wedge)" } else { "terminé" });
+}
+
+/// Wedge gov.uk — vrai DOM + module application réel :
+/// si l'éval boucle sur le DOM réel, repro in-process.
+#[tokio::test]
+async fn govuk_app_real_dom_eval() {
+    let (mut s, t) = test_session();
+    let page = std::fs::read_to_string("C:/Users/Lou/AppData/Local/Temp/govuk_page.html")
+        .unwrap_or_else(|_| "<html><body><div>x</div></body></html>".into());
+    t.route("/p", 200, Box::leak(page.into_boxed_str()));
+    let body = std::fs::read_to_string("C:/Users/Lou/AppData/Local/Temp/govuk_app.js")
+        .unwrap_or_else(|_| "document.title='SKIP'".into());
+    t.route("/app.js", 200, Box::leak(body.into_boxed_str()));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(25),
+        s.navigate(a, "http://h.test/p"),
+    )
+    .await;
+    eprintln!("vrai DOM + app : {}", if r.is_err() { "TIMEOUT (wedge reproduit)" } else { "terminé" });
+}

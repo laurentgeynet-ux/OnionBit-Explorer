@@ -247,12 +247,16 @@ impl Session {
     /// `eval_module` + `PipelineError` sans faire échouer la
     /// page.
     pub(crate) fn eval_module_graph(&mut self, tab: TabId, eng: &mut dyn JsEngine, me: &ModEval) {
+        tracing::debug!(tab, name = %me.name, "module eval…");
+        let t0 = std::time::Instant::now();
         if let Err(e) = Self::eval_mod(eng, me) {
             tracing::debug!(tab, error = %e, "module en échec");
             let _ = self.events.send(CoreEvent::PipelineError {
                 tab: Some(tab),
                 message: format!("{e} — module «{}»", me.name),
             });
+        } else {
+            tracing::debug!(tab, ms = t0.elapsed().as_millis(), "module eval fin");
         }
     }
 
