@@ -6394,6 +6394,20 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   retargeting (T4), `shadowrootmode` (T5).
   Test `cap191_shadow_surface`.
 
+- [x] **CAP-192. `customElements` lisible
+  et patchable** — census shadow DOM
+  (reddit `patchDefine`) :
+  `has_method` sur `CustomElementsHost`
+  (méthodes lisibles `typeof ===
+  "function"`) ; dispatch `obj.m(…)`
+  cède à l'own-prop scriptée avant
+  `Host::invoke` (spec `[[Get]]` —
+  patchs de shim effectifs) ; le
+  trampoline capturé `n.call(t)` joint
+  l'original sans récursion. Tests
+  `custom_elements_methods_readable_
+  and_patchable`, `custom_elements_registry`.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

@@ -9,6 +9,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **CAP-192 — `customElements` lisible et
+  patchable** (`explorer-jscore`) : le
+  bootstrap `patchDefine` de reddit meurt
+  à `` `_patched` in customElements.define
+  `` — `define` n'était joignable qu'à
+  l'appel (`invoke`), pas à la lecture.
+  `CustomElementsHost::has_method` expose
+  `define`/`get`/`getName`/`whenDefined`/
+  `upgrade` en propriétés fonction ; le
+  dispatch `obj.m(…)` consulte désormais
+  l'own-prop avant `Host::invoke` — un
+  remplacement scripté (`t.define = f`,
+  motif polyfill) prime la méthode hôte,
+  spec `[[Get]]` avant l'appel. La
+  référence capturée (`n.call(t,…)`) via
+  trampoline `hostMethod` continue de
+  joindre l'`invoke` original — pas de
+  récursion. Tests
+  `custom_elements_methods_readable_
+  and_patchable` +
+  `custom_elements_registry`.
+
 - **CAP-191 — Shadow DOM tranche 1 :
   surface API sans composition**
   (`explorer-jscore`) : l'arc `attachShadow`

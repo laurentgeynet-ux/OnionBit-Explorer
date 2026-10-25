@@ -6761,6 +6761,21 @@ impl Host for CustomElementsHost {
             _ => Ok(None),
         }
     }
+
+    /// Méthodes lisibles — les patches de registre lisent
+    /// `customElements.define` (motif reddit : `'_patched' in
+    /// t.define` — invoke-only le rendait `undefined` →
+    /// `TypeError` et le patch mourait ; census shadow DOM).
+    /// Le repli moteur expose une fonction re-dispatchée sur
+    /// `invoke` ; la redéfinition `t.define = f` passe par le
+    /// `set` défaut → own-prop shadow — le patch s'installe
+    /// et `n.call(t, …)` retombe sur l'invoke original.
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "define" | "get" | "getName" | "whenDefined" | "upgrade"
+        )
+    }
 }
 
 /// Définition de `node` (si élément customisable) → `(nom,

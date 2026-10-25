@@ -719,14 +719,9 @@ impl Session {
                     self.deliver_dyn_script(tab, d.ctx, d.seq, ok.then(|| text.clone()));
                 }
             }
-            (Some(_), _) => self.spawn_dyn_script_src(
-                tab,
-                d,
-                &req_page,
-                &req_base,
-                doc_policy,
-                &csp,
-            ),
+            (Some(_), _) => {
+                self.spawn_dyn_script_src(tab, d, &req_page, &req_base, doc_policy, &csp);
+            }
             // Ni `src` ni texte — balise inerte, rien à livrer.
             (None, None) => {}
         }
@@ -770,15 +765,11 @@ impl Session {
             .and_then(explorer_net::http::ReferrerPolicy::parse)
             .or(doc_policy);
         let cross = d.crossorigin.map(|c| match c {
-            explorer_js::FetchCredentials::Omit => {
-                explorer_net::http::FetchCredentials::Omit
-            }
+            explorer_js::FetchCredentials::Omit => explorer_net::http::FetchCredentials::Omit,
             explorer_js::FetchCredentials::SameOrigin => {
                 explorer_net::http::FetchCredentials::SameOrigin
             }
-            explorer_js::FetchCredentials::Include => {
-                explorer_net::http::FetchCredentials::Include
-            }
+            explorer_js::FetchCredentials::Include => explorer_net::http::FetchCredentials::Include,
         });
         let req = sub_request(
             req_page,
@@ -2538,7 +2529,6 @@ impl Session {
             self.deliver_net_response(d.tab, resp);
         }
     }
-
 
     /// Pompe les réponses des requêtes script-initiées
     /// (étape 51) — cède d'abord le tour pour laisser les

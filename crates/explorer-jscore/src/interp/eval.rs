@@ -358,15 +358,24 @@ impl Engine {
                     }
                     Callee::Member(recv, name) => {
                         // Host method dispatch first: `hostObj.m(…)`
-                        // hits the host's `invoke` before prop lookup.
+                        // hits the host's `invoke` before prop lookup —
+                        // sauf shadow own-prop : `hostObj.m = f` (patch
+                        // de polyfill/shim — motif `patchDefine` de
+                        // reddit, census shadow DOM) prime la méthode,
+                        // spec [[Get]] avant l'appel ; le trampoline
+                        // `n.call(t)` contourne le repli (référence
+                        // capturée avant le patch → invoke original).
                         if let Value::Obj(bid) = recv {
                             if let Some(h) = self.host_of(bid) {
-                                if let Some(v) = h.invoke(self, recv, &name, &args)? {
-                                    // Réactions CE synchrones
-                                    // (JS-C68) — la méthode host a
-                                    // pu muter le miroir.
-                                    self.drain_ce_reactions()?;
-                                    return Ok(v);
+                                let shadowed = self.find_own(bid, &name).is_some();
+                                if !shadowed {
+                                    if let Some(v) = h.invoke(self, recv, &name, &args)? {
+                                        // Réactions CE synchrones
+                                        // (JS-C68) — la méthode host a
+                                        // pu muter le miroir.
+                                        self.drain_ce_reactions()?;
+                                        return Ok(v);
+                                    }
                                 }
                             }
                         }

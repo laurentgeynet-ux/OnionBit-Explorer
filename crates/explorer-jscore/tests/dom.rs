@@ -2125,6 +2125,36 @@ fn custom_elements_registry() {
     );
 }
 
+/// Motif `patchDefine` de reddit (census shadow DOM — chantier
+/// tranche 1) : le shim lit `customElements.define` pour le
+/// wrapper — invoke-only le rendait `undefined` et
+/// `'_patched' in undefined` tuait le patch d'un `TypeError`.
+/// Attendus : méthode lisible (`typeof` function), `in` sans
+/// throw, shadow propre `t.define = f` qui s'installe, et
+/// l'originale restée joignable via `n.call(t, …)` (le
+/// trampoline re-dispatche l'`invoke`).
+#[test]
+fn custom_elements_methods_readable_and_patchable() {
+    assert_eq!(
+        ev2(
+            PAGE,
+            "var t=window.customElements;\
+             var n=t.define;\
+             var r=''+typeof n;\
+             r+='|'+('_patched' in n);\
+             t.define=function(a,o,s){window.__ALL_ELEMENTS=window.__ALL_ELEMENTS||[];\
+                 window.__ALL_ELEMENTS.push(a);return n.call(t,a,o,s)};\
+             class MyP extends HTMLElement {}\
+             t.define('p-el',MyP);\
+             r+='|'+(customElements.get('p-el')===MyP);\
+             r+='|'+window.__ALL_ELEMENTS.join(',');\
+             r+='|'+(t.get('p-el')===MyP)",
+            "r"
+        ),
+        "function|false|true|p-el|true"
+    );
+}
+
 // -- constraint validation (étape 54) -----------------------------------
 
 const FORM_PAGE: &str = r#"
