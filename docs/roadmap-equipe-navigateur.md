@@ -6197,7 +6197,9 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Bornes : pas de CONNECT-proxy ni
   deflate, `Blob` approximé.
   Régressions : 2 session + 1 jscore +
-  6 codec.
+  6 codec + 2 loopback `RealWsDial`
+  (socket TCP réelle — handshake,
+  echo, pong constaté, close 2 sens).
 
 ## Tâches continues
 

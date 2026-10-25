@@ -593,4 +593,322 @@ mod tests {
         let mask = [f[2], f[3], f[4], f[5]];
         assert_eq!([f[6] ^ mask[0], f[7] ^ mask[1]], *b"hi");
     }
+
+    // ── Fil réel (JS-C94) — loopback TCP ─────────────────────
+    //
+    // Le codec est couvert par les unitaires ci-dessus et le
+    // contrat JS par les tests session (dial simulé) ; ce test
+    // est le seul à exercer `RealWsDial` **contre une socket
+    // réelle** : handshake HTTP/1.1 Upgrade → `101` validé,
+    // trames masquées client ↔ serveur en clair, echo
+    // texte/binaire, `ping` → `pong` auto (constaté côté
+    // serveur), close serveur → écho + `WsEvent::Close`.
+
+    /// Trame **client** (masquée) lue côté serveur de test —
+    /// `parse_frame` refuse les trames masquées (côté client),
+    /// le serveur a besoin de son propre décodeur.
+    fn srv_frame(buf: &[u8]) -> Option<(usize, u8, Vec<u8>)> {
+        if buf.len() < 2 {
+            return None;
+        }
+        let op = buf[0] & 0x0f;
+        let masked = buf[1] & 0x80 != 0;
+        let mut len = usize::from(buf[1] & 0x7f);
+        let mut off = 2;
+        if len == 126 {
+            if buf.len() < 4 {
+                return None;
+            }
+            len = usize::from(u16::from_be_bytes([buf[2], buf[3]]));
+            off = 4;
+        } else if len == 127 {
+            if buf.len() < 10 {
+                return None;
+            }
+            len = usize::try_from(u64::from_be_bytes(buf[2..10].try_into().unwrap_or([0; 8])))
+                .ok()?;
+            off = 10;
+        }
+        let mask = if masked {
+            if buf.len() < off + 4 {
+                return None;
+            }
+            let m = [buf[off], buf[off + 1], buf[off + 2], buf[off + 3]];
+            off += 4;
+            m
+        } else {
+            [0u8; 4]
+        };
+        if buf.len() < off + len {
+            return None;
+        }
+        let mut p = buf[off..off + len].to_vec();
+        if masked {
+            for (i, b) in p.iter_mut().enumerate() {
+                *b ^= mask[i % 4];
+            }
+        }
+        Some((off + len, op, p))
+    }
+
+    /// Trame **serveur** (jamais masquée) vers le client.
+    fn srv_encode(op: u8, p: &[u8]) -> Vec<u8> {
+        let mut out = vec![0x80 | op];
+        if p.len() < 126 {
+            out.push(u8::try_from(p.len()).unwrap_or(0));
+        } else if let Ok(l) = u16::try_from(p.len()) {
+            out.push(126);
+            out.extend_from_slice(&l.to_be_bytes());
+        } else {
+            out.push(127);
+            out.extend_from_slice(&(p.len() as u64).to_be_bytes());
+        }
+        out.extend_from_slice(p);
+        out
+    }
+
+    /// Marqueur de la validation du handshake côté serveur
+    /// (pas un opcode — `seen` mélange opcodes et sentinelle).
+    const SEEN_HANDSHAKE: u8 = 0xEE;
+
+    /// Lit la requête `Upgrade` et répond `101` (Accept
+    /// recalculé, sous-protocole renvoyé si demandé) —
+    /// retourne `false` si la socket est à abandonner.
+    async fn srv_handshake(
+        sock: &mut tokio::net::TcpStream,
+        seen: &std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    ) -> bool {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut req = Vec::new();
+        let mut b = [0u8; 512];
+        loop {
+            let Ok(n) = sock.read(&mut b).await else {
+                return false;
+            };
+            if n == 0 {
+                return false;
+            }
+            req.extend_from_slice(&b[..n]);
+            if req.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let head_orig = String::from_utf8_lossy(&req).to_string();
+        let head = head_orig.to_lowercase();
+        // Forme RFC : upgrade + version + clé présents.
+        if head.contains("upgrade: websocket")
+            && head.contains("sec-websocket-version: 13")
+            && head.contains("connection: upgrade")
+        {
+            seen.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(SEEN_HANDSHAKE);
+        }
+        // La clé est extraite de la tête **originale** — la
+        // valeur base64 est sensible à la casse.
+        let Some(key) = head_orig.lines().find_map(|l| {
+            l.split_once(':')
+                .filter(|(k, _)| k.trim().eq_ignore_ascii_case("sec-websocket-key"))
+                .map(|(_, v)| v.trim().to_string())
+        }) else {
+            return false;
+        };
+        let proto_hdr = if head.contains("sec-websocket-protocol: p1") {
+            "Sec-WebSocket-Protocol: p1\r\n"
+        } else {
+            ""
+        };
+        let resp = format!(
+            "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\
+             Connection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n{}\r\n",
+            accept_for(&key),
+            proto_hdr
+        );
+        sock.write_all(resp.as_bytes()).await.is_ok()
+    }
+
+    /// Serveur d'écho minimal : [`srv_handshake`], puis echo
+    /// texte/binaire ; après le 2ᵉ écho il émet un `ping`,
+    /// attend le `pong` client (constaté dans `seen`) puis
+    /// envoie `close{1000,"sv"}` — le client échoit le close
+    /// et termine.
+    async fn echo_server(
+        listener: tokio::net::TcpListener,
+        seen: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    ) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mark = |op: u8| {
+            seen.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(op);
+        };
+        let Ok((mut sock, _)) = listener.accept().await else {
+            return;
+        };
+        if !srv_handshake(&mut sock, &seen).await {
+            return;
+        }
+        let mut b = [0u8; 512];
+        let mut buf = Vec::new();
+        let mut echoes = 0u8;
+        let mut pinged = false;
+        loop {
+            let Ok(n) = sock.read(&mut b).await else {
+                return;
+            };
+            if n == 0 {
+                return;
+            }
+            buf.extend_from_slice(&b[..n]);
+            while let Some((used, op, p)) = srv_frame(&buf) {
+                buf.drain(..used);
+                match op {
+                    OP_TEXT | OP_BIN => {
+                        if sock.write_all(&srv_encode(op, &p)).await.is_err() {
+                            return;
+                        }
+                        echoes += 1;
+                        if echoes == 2 && !pinged {
+                            pinged = true;
+                            if sock.write_all(&srv_encode(OP_PING, b"pc")).await.is_err() {
+                                return;
+                            }
+                        }
+                    }
+                    OP_PONG => {
+                        mark(OP_PONG);
+                        let mut pl = Vec::with_capacity(4);
+                        pl.extend_from_slice(&1000u16.to_be_bytes());
+                        pl.extend_from_slice(b"sv");
+                        let _ = sock.write_all(&srv_encode(OP_CLOSE, &pl)).await;
+                        return;
+                    }
+                    OP_PING => {
+                        mark(OP_PING);
+                        if sock.write_all(&srv_encode(OP_PONG, &p)).await.is_err() {
+                            return;
+                        }
+                    }
+                    OP_CLOSE => {
+                        mark(OP_CLOSE);
+                        let _ = sock.write_all(&srv_encode(OP_CLOSE, &p)).await;
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// `open` → `Open{p1}` → echo `Text`/`Binary` → le serveur
+    /// émet `ping` (le `pong` client est constaté côté
+    /// serveur) puis `close{1000,"sv"}` → `WsEvent::Close` +
+    /// `open` retourne `Ok`. Le handshake validé (upgrade,
+    /// version, clé) est marqué `SEEN_HANDSHAKE`.
+    #[tokio::test]
+    async fn real_dial_loopback_lifecycle() {
+        use crate::h1::TcpConnector;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        tokio::spawn(echo_server(listener, std::sync::Arc::clone(&seen)));
+
+        let dial = RealWsDial::new(std::sync::Arc::new(TcpConnector), WsLimits::default());
+        let (ev_tx, mut ev_rx) = tokio::sync::mpsc::channel::<WsEvent>(16);
+        let (send_tx, send_rx) = tokio::sync::mpsc::channel::<WsSend>(16);
+        let spec = WsSpec {
+            secure: false,
+            host: "127.0.0.1".into(),
+            port,
+            resource: "/x".into(),
+            headers: vec![("Sec-WebSocket-Protocol".into(), "p1".into())],
+        };
+        let h = tokio::spawn(async move { dial.open(spec, ev_tx, send_rx).await });
+
+        // Handshake `101` + sous-protocole négocié.
+        match ev_rx.recv().await {
+            Some(WsEvent::Open { protocol }) => assert_eq!(protocol, "p1"),
+            other => panic!("open attendu : {other:?}"),
+        }
+        // Echo texte puis binaire (les deux opcodes données).
+        send_tx.send(WsSend::Text("hi".into())).await.expect("send");
+        match ev_rx.recv().await {
+            Some(WsEvent::Text(t)) => assert_eq!(t, "hi"),
+            other => panic!("echo texte : {other:?}"),
+        }
+        send_tx
+            .send(WsSend::Binary(vec![1, 2, 3]))
+            .await
+            .expect("send");
+        match ev_rx.recv().await {
+            Some(WsEvent::Binary(b)) => assert_eq!(b, [1, 2, 3]),
+            other => panic!("echo binaire : {other:?}"),
+        }
+        // Le serveur a clos après son ping : `close` livré.
+        match ev_rx.recv().await {
+            Some(WsEvent::Close { code, reason }) => {
+                assert_eq!((code, reason.as_str()), (1000, "sv"));
+            }
+            other => panic!("close attendu : {other:?}"),
+        }
+        h.await.expect("join").expect("open ok");
+        let seen = seen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(
+            seen.contains(&SEEN_HANDSHAKE),
+            "handshake RFC vu : {seen:?}"
+        );
+        assert!(seen.contains(&OP_PONG), "pong auto du client vu : {seen:?}");
+    }
+
+    /// Close **initié par le client** (chemin `ws.close()`) :
+    /// `open` écrit le close masqué, le serveur l'échoit, le
+    /// flux termine `Ok` — la livraison `Close{1000}` reste
+    /// la normalisation côté session (pas d'événement pour
+    /// notre propre close — comportement visé).
+    #[tokio::test]
+    async fn real_dial_loopback_client_close() {
+        use crate::h1::TcpConnector;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        tokio::spawn(echo_server(listener, std::sync::Arc::clone(&seen)));
+
+        let dial = RealWsDial::new(std::sync::Arc::new(TcpConnector), WsLimits::default());
+        let (ev_tx, mut ev_rx) = tokio::sync::mpsc::channel::<WsEvent>(16);
+        let (send_tx, send_rx) = tokio::sync::mpsc::channel::<WsSend>(16);
+        let spec = WsSpec {
+            secure: false,
+            host: "127.0.0.1".into(),
+            port,
+            resource: "/x".into(),
+            headers: Vec::new(),
+        };
+        let h = tokio::spawn(async move { dial.open(spec, ev_tx, send_rx).await });
+        assert!(matches!(ev_rx.recv().await, Some(WsEvent::Open { .. })));
+        send_tx
+            .send(WsSend::Close {
+                code: 1000,
+                reason: "bye".into(),
+            })
+            .await
+            .expect("send close");
+        // Le serveur échoit : `open` termine sans erreur —
+        // aucun `WsEvent` post-close n'est attendu.
+        h.await.expect("join").expect("open ok");
+        let seen = seen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(
+            seen.contains(&OP_CLOSE),
+            "close client masqué reçu côté serveur : {seen:?}"
+        );
+    }
 }

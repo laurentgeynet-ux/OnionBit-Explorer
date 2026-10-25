@@ -38,7 +38,12 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `websocket_refused_fires_error_close`
   (2 session) + `ws_lifecycle_echo`
   (jscore) + 6 unitaires codec (vecteur
-  `Accept` RFC 6455 inclus).
+  `Accept` RFC 6455 inclus) + 2 loopback
+  `RealWsDial` sur socket TCP réelle
+  (handshake `101` + sous-protocole,
+  echo texte/binaire, `ping`→`pong`
+  constaté serveur, close dans les deux
+  sens — `real_dial_loopback_*`).
 
 - **JS-C93 — `crypto.subtle` à clé +
   `navigator.credentials` honnête**
