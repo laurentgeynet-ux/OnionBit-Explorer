@@ -4813,8 +4813,10 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     `canGoBack`/`canGoForward`) ;
     routage back/forward/reload
     déjà posé en 136c. 1 test.
-  - [ ] 136f — indicateur chrome
-    de délégation
+  - [x] **136f — indicateur
+    chrome** : icône `live_tv` +
+    tooltip « rendu WebView2
+    natif » sur l'onglet délégué.
   - [ ] 136g — repli honnête
     hors-Windows (site non lu)
   - [ ] 136h — tests allowlist +

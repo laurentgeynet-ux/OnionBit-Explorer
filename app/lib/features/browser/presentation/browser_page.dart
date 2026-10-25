@@ -629,6 +629,18 @@ class _TabChip extends StatelessWidget {
                   height: tokens.dim('metrics', 'progressSize', fallback: 12),
                   child: const CircularProgressIndicator(),
                 )
+              else if (tab.kind == TabKind.delegated)
+                // Indicateur de délégation (136f, ADR-0027 §3) :
+                // l'onglet vit dans une WebView2 native — la
+                // bascule est signalée dans le chrome.
+                Tooltip(
+                  message: 'Onglet délégué — rendu WebView2 natif',
+                  child: Icon(
+                    Icons.live_tv,
+                    size: tokens.dim('metrics', 'iconSm', fallback: 14),
+                    color: tokens.color('accent', 'base'),
+                  ),
+                )
               else
                 Icon(
                   Icons.public,

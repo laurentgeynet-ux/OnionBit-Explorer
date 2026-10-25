@@ -793,6 +793,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   que les événements SSE moteur.
   1 test.
 
+- **136f — indicateur chrome de
+  délégation** (`app/`, étape 136
+  NAV, ADR-0027 §3) : onglet
+  délégué signalé par une icône
+  `live_tv` accentuée + tooltip
+  « Onglet délégué — rendu
+  WebView2 natif » dans la barre
+  d'onglets — la bascule est
+  transparente à l'usage et
+  visible.
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des
