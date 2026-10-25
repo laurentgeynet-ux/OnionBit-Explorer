@@ -3446,7 +3446,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   paresseuse (`&&`/`?:`/`?.`/`??`)
   évaluée éager — hoist non porté.
 
-- [x] **JS-C35. TLA de module** —
+- [x] **JS-C35b. TLA de module** —
   `await` top-level → corps module
   sur `GExec` (même infra JS-C34).
   Borne : importeurs n'attendent pas
@@ -5064,11 +5064,17 @@ ci-dessous (fréquence observée sur le corpus réel).
   `console` embedder `Uncaught:`) ; `scrollIntoView` no-op
   honnête sur `Element.prototype` ; `sendBeacon` existait
   déjà. Régressions `c74_*` (6 tests).
-- [ ] **JS-C75. `attachShadow`/Shadow DOM minimal** — le
-  trou le plus structurel (scoped CSS + slots) : old.reddit
-  et MDN l'utilisent, écarté « hors portée » à ce jour.
-  *Seul item J-A2 qui reste trigger-conditionné — coût
-  architectural, pas un stub.*
+- [~] **JS-C75. `attachShadow`/Shadow DOM** — le trou le
+  plus structurel (scoped CSS + slots) : old.reddit et MDN
+  l'utilisent. **Découpé en tranches T1→T6** (vol 2026-10-25,
+  répartition actée dans `docs/interface-equipes.md`) :
+  **T1** surface sans composition — livré (CAP-191/192) ;
+  **T2** scoping CSS → PIPE (demande posée au journal) ;
+  **T3** slots/distribution + **T5** `shadowrootmode` →
+  piste JS ; **T4** event retargeting + **T6** (stubs
+  terrain `adoptedStyleSheets`/`StyleHost position`) → NAV —
+  **T6 livré (CAP-195/196)**.
+  *Coût architectural, pas un stub.*
 
 ### J-B — Couverture langue par besoin (réactive)
 
@@ -5099,7 +5105,7 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   *Déclencheur : site réel + ADR de dépendance.*
 - [ ] **JS-C33. Décorateurs ES2026** — *déclencheur : site
   réel.*
-- [ ] **JS-C34. Générateurs lazy + `await` pending** : refacto
+- [x] **JS-C34. Générateurs lazy + `await` pending** : refacto
   structurel, **uniquement si des sites réels bloquent**
   (l'eager documenté tient le corpus actuel). **Rendre le
   déclencheur observable** : un fixture minimal volontairement
@@ -5112,8 +5118,9 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `c34_await_pending_spec_fixture` dans `tests/lang.rs` —
   encodent le comportement spec, échouent aujourd'hui
   (`"body,call"` vs `"call"` ; `"unset"` vs `"7"`),
-  `#[ignore]` documentés. La case reste ouverte : la refacto
-  lazy/pending n'est pas engagée, en attente du site réel.
+  `#[ignore]` documentés. **Livré (vol 2026-10-25)** :
+  suspension réelle `GExec`/`GenLive` (entrée piste
+  produit ci-dessus), fixtures `c34_*` dé-ignorées vertes.
 - [x] **JS-C35. `document.write` complet + insertion dynamique**
   (miroir) — **livré** : `write`/`writeln` variadiques
   (concat de tous les args, `\n` pour `writeln`),
@@ -6523,6 +6530,45 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   est publié (i#19). `getPropertyValue`
   idem. Test `cap196_computed_position_
   from_geometry`.
+
+- [ ] **JS-C96. `await` en sous-expression
+  paresseuse (mur n°1 x.com, vol
+  `ebb5168`)** — borne documentée de
+  JS-C34b désormais **mesurée sur site
+  réel** : `entry-client-logged-out--
+  kyjfLnL.js` jette `TypeError "await
+  on a pending promise is unsupported"`
+  (`await_value`, `interp/mod.rs:3327`)
+  — `lower_suspend_body` ne hisse pas
+  `await`/`yield` portés par les
+  sous-expressions paresseuses
+  (`&&`/`?:`/`?.`/`??`). Porter le
+  hoist aux positions d'expression
+  (ou repli micro-task poll).
+  **Prioritaire** : landing x.com
+  rendue au vol `ebb5168` (premier
+  rendu x.com du projet), bootstrap
+  arrêté sur ce mur.
+
+- [ ] **JS-C97. Palier 2 geom —
+  `offsetTop`/`offset*` sur
+  `ElementGeom` (verrou de valeur
+  github, vol `73820bf`)** — la
+  garde `--marketing-header-fixed-top`
+  lit `a.offsetTop` après
+  `"fixed"===getComputedStyle().position`
+  (CAP-196 servi) : la var reste
+  absente sans `offsetTop`. Chaîne
+  complète mesurée au source :
+  `position` + `children.find(contains)`
+  + `offsetTop` → `setProperty`.
+  Même canal que CAP-196 (i#19 —
+  `StyleHost` ← `ElementGeom`
+  publié). **Preuve source, pas
+  spéculation.** Requis aussi pour
+  `offsetHeight`/`clientHeight`
+  (même palier — les guards
+  géométrie des menus/overlays).
 
 ## Tâches continues
 

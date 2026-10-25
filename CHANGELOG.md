@@ -1924,7 +1924,7 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
--- **JS-C35 — TLA de module**
+- **JS-C35b — TLA de module**
   (`explorer-jscore`, suite de
   JS-C34) : `await` au top-level
   d'un module — `evaluate_module`
