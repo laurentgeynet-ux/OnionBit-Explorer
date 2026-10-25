@@ -27,6 +27,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   + parent réel (`boxtree.rs`),
   items flex promus (`block.rs`).
 
+- **Étape 137c — seuil de repli
+  journal calibré** (`explorer-core`) :
+  `MemReport` gagne `journal_applies`/
+  `journal_fallbacks` (session-globale,
+  `/api/tabs/{id}/mem`). Mesuré en
+  vols : github 1/0, x.com 1/0,
+  churn `setInterval` 94/1 + 252/2
+  ≈ **99 % de succès** — les replis
+  sont `NoBaseline` bootstrap
+  (attendu). Seuil consigné : replis
+  hors bootstrap > ~5 % = anomalie
+  (`journal_classified` nomme la
+  classe).
+
 - **Étape 137a — ciblage
   `relayout_subtree` par les ops du
   journal** (`explorer-core`) : fin du
