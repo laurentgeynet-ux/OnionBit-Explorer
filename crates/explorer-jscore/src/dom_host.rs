@@ -3046,6 +3046,11 @@ impl Host for DocumentHost {
                 Value::Undefined,
                 args,
             )?)),
+            "evaluate" => Ok(Some(crate::misc_apis::xpath_evaluate(
+                e,
+                Value::Undefined,
+                args,
+            )?)),
             "adoptNode" => {
                 let Some(src) = node_for(e, arg(args, 0)) else {
                     return Err(e.type_error("adoptNode: nœud requis"));
@@ -3344,6 +3349,7 @@ const DOC_METHODS: &[&str] = &[
     "execCommand",
     "getAnimations",
     "startViewTransition",
+    "evaluate",
     "elementFromPoint",
     "elementsFromPoint",
     "caretPositionFromPoint",

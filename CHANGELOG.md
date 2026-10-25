@@ -1804,6 +1804,36 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-188 — `document.evaluate` :
+  sous-ensemble `XPath` borné (sonde
+  `_census_calls` — dernier trou
+  jscore mesuré)** (`explorer-jscore`,
+  `explorer-core`) : `evaluate(expr,
+  ctx, resolver, type, result)` →
+  `XPathResult` — chemins `//tag`,
+  `/tag`, `.//`, `./`, `.`/`..`,
+  pas `tag`/`*`/`text()`/`node()`,
+  prédicats `[@a]`, `[@a='v']`, `[n]`
+  (n-ième global — spec : par parent,
+  borné), fonctions `id('x')` et
+  `count(...)` — syntaxe non portée →
+  `TypeError` honnête (spec
+  `InvalidExpressionError`, borné).
+  Types : `NUMBER`/`STRING`/`BOOLEAN`
+  (scalaires à l'évaluation) + itérateurs
+  4/5 (`iterateNext`), snapshot 7
+  (`snapshotLength`/`snapshotItem`) et
+  9 (`singleNodeValue`) — liste
+  matérialisée même pour les itérateurs
+  (borné documenté). Réparation gate
+  amont : `net.rs` (CAP-169/186/JS-C94
+  ont poussé `spawn_dyn_script`/`poll_
+  net` à >100 lignes) — extractions
+  `spawn_dyn_script_src`, `drain_net_done`,
+  `deliver_dyn_done` + `eval_module_graph`
+  par référence. Test jscore
+  `cap188_xpath_subset`.
+
 - **CAP-187 — Web Animations borné :
   `animate`, `getAnimations`,
   `startViewTransition` (sonde
