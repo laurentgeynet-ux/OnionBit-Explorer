@@ -385,3 +385,76 @@ fn hote_shadow_peint_ses_enfants_shadow_pas_le_light() {
     let tpl = by_tag(&dom, "template");
     assert!(find(&bx, tpl).is_none(), "template DSD consommé");
 }
+
+/// R-97 — distribution : les enfants light assignés sont
+/// peints **dans** la boîte de leur `<slot>` ; le non-assigné
+/// et le repli couvert ne peignent pas.
+#[test]
+fn slot_distribue_les_enfants_light_assignes() {
+    let (dom, bx) = tree(
+        "<html><body><x-foo><template shadowrootmode=\"open\">\
+         <slot name=\"t\"></slot><slot><b>repli</b></slot></template>\
+         <em slot=\"t\">E</em><i>I</i><u slot=\"z\">Z</u></x-foo></body></html>",
+    );
+    let host = by_tag(&dom, "x-foo");
+    let root = dom.shadow_root(host, true).expect("racine");
+    let mut slots = dom.slots_in(root).into_iter();
+    let slot_t = slots.next().expect("slot t");
+    let slot_def = slots.next().expect("slot defaut");
+
+    let em = by_tag(&dom, "em");
+    let i = by_tag(&dom, "i");
+    let u = by_tag(&dom, "u");
+    // Le `<b>` de repli vit dans la racine latérale — hors
+    // BFS ordinaire : il est le seul enfant du slot défaut.
+    let fb = dom
+        .children(slot_def)
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("repli du slot défaut");
+    let host_bx = find(&bx, host).expect("boîte hôte");
+
+    // `em` est enfant de la boîte de `slot name=t` ; `i` de
+    // celle du slot défaut — et le repli est couvert par `i`.
+    let under = |parent: &explorer_layout::LayoutBox, n| {
+        parent
+            .children
+            .iter()
+            .any(|c| c.node == Some(n) || find(c, n).is_some())
+    };
+    assert!(under(host_bx, em), "em peint");
+    assert!(under(host_bx, i), "i peint");
+    let slot_t_bx = find(&bx, slot_t).expect("boîte slot t");
+    assert!(
+        slot_t_bx.children.iter().any(|c| c.node == Some(em)),
+        "em distribué au slot t"
+    );
+    let slot_def_bx = find(&bx, slot_def).expect("boîte slot defaut");
+    assert!(
+        slot_def_bx.children.iter().any(|c| c.node == Some(i)),
+        "i distribué au slot defaut"
+    );
+    assert!(find(&bx, u).is_none(), "slot=z orphelin non peint");
+    assert!(find(&bx, fb).is_none(), "repli couvert par i");
+}
+
+/// Sans enfant assigné, le `<slot>` peint son contenu de
+/// repli (css-scoping §3.4 — fallback).
+#[test]
+fn slot_sans_assigne_peint_son_repli() {
+    let (dom, bx) = tree(
+        "<html><body><x-foo><template shadowrootmode=\"open\">\
+         <slot><b>repli</b></slot></template></x-foo></body></html>",
+    );
+    let host = by_tag(&dom, "x-foo");
+    let root = dom.shadow_root(host, true).expect("racine");
+    let slot = dom.slots_in(root).into_iter().next().expect("slot");
+    let fb = dom
+        .children(slot)
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("repli");
+    assert!(find(&bx, fb).is_some(), "repli peint faute d'assigné");
+}

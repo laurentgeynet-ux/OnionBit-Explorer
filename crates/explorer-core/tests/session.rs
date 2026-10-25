@@ -12947,3 +12947,40 @@ async fn dsd_shadow_paint_scoped() {
         "règle document `span` confinée hors du scope"
     );
 }
+
+/// R-97 — bout en bout distribution : l'enfant light
+/// assigné est peint (stylé par `::slotted`), l'orphelin
+/// `slot` inconnu et le repli couvert ne le sont pas.
+#[tokio::test]
+async fn dsd_slot_distribue_et_repli_couvert() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <style>.a,.z{display:block;width:50px;height:50px}\
+         .a{background:#00ff00}.z{background:#ffff00}</style>\
+         </head><body>\
+         <div id=host><template shadowrootmode=open>\
+         <style>::slotted(.a){background:#0000ff}\
+         .fb{display:block;width:50px;height:50px;background:#ff0000}</style>\
+         <slot><p class=fb></p></slot>\
+         </template><p class=a></p><p class=z slot=qq></p></div></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    let (fw, fh) = (fw as usize, fh as usize);
+    assert!(
+        count_color(fw, fh, px, [0, 0, 255]) > 0,
+        "enfant assigné peint, stylé par ::slotted"
+    );
+    // L'orphelin `slot=qq` n'entre pas le flat tree.
+    assert_eq!(
+        count_color(fw, fh, px, [255, 255, 0]),
+        0,
+        "orphelin non peint"
+    );
+    // Le repli est couvert par l'assigné du slot défaut.
+    assert_eq!(count_color(fw, fh, px, [255, 0, 0]), 0, "repli couvert");
+}

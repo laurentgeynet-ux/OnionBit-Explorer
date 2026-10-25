@@ -2058,3 +2058,136 @@ fn descendant_depuis_host_franchit() {
         Some("block")
     );
 }
+
+// ── R-97 — distribution `<slot>` + `::slotted` ───────────
+
+/// DOM : `body > x-foo` (hôte) ; light DOM : `<em slot="t">`
+/// (assigné nommé), `<i>` (défaut), `<u slot="z">` (orphelin).
+/// Racine shadow : `<slot name="t">` puis `<slot>` (défaut,
+/// avec un `<b>` de repli).
+struct SlotFixture {
+    dom: Dom,
+    root: NodeId,
+    em: NodeId,
+    i: NodeId,
+    u: NodeId,
+    fb: NodeId,
+}
+
+fn slot_fixture() -> SlotFixture {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let body = dom.create_element("body").unwrap();
+    dom.append_child(doc, body).unwrap();
+    let host = dom.create_element("x-foo").unwrap();
+    dom.append_child(body, host).unwrap();
+    let em = dom.create_element("em").unwrap();
+    dom.set_attribute(em, "slot", "t").unwrap();
+    let i = dom.create_element("i").unwrap();
+    let u = dom.create_element("u").unwrap();
+    dom.set_attribute(u, "slot", "z").unwrap();
+    for c in [em, i, u] {
+        dom.append_child(host, c).unwrap();
+    }
+    let root = dom.create_fragment().unwrap();
+    let slot_t = dom.create_element("slot").unwrap();
+    dom.set_attribute(slot_t, "name", "t").unwrap();
+    let slot_def = dom.create_element("slot").unwrap();
+    let fb = dom.create_element("b").unwrap();
+    dom.append_child(slot_def, fb).unwrap();
+    dom.append_child(root, slot_t).unwrap();
+    dom.append_child(root, slot_def).unwrap();
+    dom.attach_shadow_root(host, root, true);
+    SlotFixture {
+        dom,
+        root,
+        em,
+        i,
+        u,
+        fb,
+    }
+}
+
+#[test]
+fn slotted_atteint_lenfant_assigne() {
+    let f = slot_fixture();
+    let mut e = StyleEngine::new();
+    // Feuille scopée : `::slotted` franchit en sortie vers
+    // les enfants light assignés à ses slots.
+    e.add_scoped_css("::slotted(em) { color: olive }", Origin::Author, f.root);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(map.get(f.em).and_then(|s| s.get("color")), Some("olive"));
+    // `<i>` n'est pas `em` → pas atteint.
+    assert_ne!(map.get(f.i).and_then(|s| s.get("color")), Some("olive"));
+}
+
+#[test]
+fn slotted_non_assigne_intouche() {
+    let f = slot_fixture();
+    let mut e = StyleEngine::new();
+    // `u` a `slot="z"` — aucun `<slot name="z">` → non
+    // distribué, `::slotted(*)` ne l'atteint pas.
+    e.add_scoped_css("::slotted(*) { color: olive }", Origin::Author, f.root);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(map.get(f.em).and_then(|s| s.get("color")), Some("olive"));
+    assert_eq!(map.get(f.i).and_then(|s| s.get("color")), Some("olive"));
+    assert_ne!(map.get(f.u).and_then(|s| s.get("color")), Some("olive"));
+}
+
+#[test]
+fn slotted_qualifie_le_slot() {
+    let f = slot_fixture();
+    let mut e = StyleEngine::new();
+    // Les simples hors `::slotted` qualifient le SLOT —
+    // `slot[name=t]` n'assigne que `em`.
+    e.add_scoped_css(
+        "slot[name=t]::slotted(*) { color: olive }",
+        Origin::Author,
+        f.root,
+    );
+    e.add_scoped_css(
+        "slot[name=x]::slotted(*) { color: pink }",
+        Origin::Author,
+        f.root,
+    );
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(map.get(f.em).and_then(|s| s.get("color")), Some("olive"));
+    // `<i>` est au slot défaut (sans name) — ni olive ni pink.
+    assert_ne!(map.get(f.i).and_then(|s| s.get("color")), Some("olive"));
+    assert_ne!(map.get(f.i).and_then(|s| s.get("color")), Some("pink"));
+}
+
+#[test]
+fn slotted_document_ne_franchit_pas() {
+    let f = slot_fixture();
+    let mut e = StyleEngine::new();
+    // `::slotted` en feuille document : le franchissement
+    // exige une feuille scopée — rien n'est atteint.
+    e.add_css("::slotted(*) { color: olive }", Origin::Author);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_ne!(map.get(f.em).and_then(|s| s.get("color")), Some("olive"));
+    assert_ne!(map.get(f.i).and_then(|s| s.get("color")), Some("olive"));
+}
+
+#[test]
+fn heritage_assigne_depuis_le_slot() {
+    let f = slot_fixture();
+    let mut e = StyleEngine::new();
+    // Flat tree : l'enfant assigné hérite du style de son
+    // `<slot>` (qui hérite lui-même de l'hôte) — pas de
+    // l'hôte directement.
+    e.add_scoped_css("slot { color: teal }", Origin::Author, f.root);
+    e.add_css("x-foo { color: purple }", Origin::Author);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(
+        map.get(f.i).and_then(|s| s.get("color")),
+        Some("teal"),
+        "assigné → hérite du slot, pas de l'hôte"
+    );
+    assert_eq!(map.get(f.em).and_then(|s| s.get("color")), Some("teal"));
+    // `u` n'est pas assigné → hérite de l'hôte (parent DOM).
+    assert_eq!(map.get(f.u).and_then(|s| s.get("color")), Some("purple"));
+    // Le contenu de repli vit DANS l'arbre shadow : enfant
+    // ordinaire du slot → hérite du slot aussi.
+    assert_eq!(map.get(f.fb).and_then(|s| s.get("color")), Some("teal"));
+}

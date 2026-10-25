@@ -2555,6 +2555,37 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (canal synchro seul — `innerHTML` reste muet, spec),
   `collect_style_sheets` retourne `(scope, css)`.
 
+- [x] **R-97. Shadow DOM tranche 3 (PIPE) — flat tree /
+  distribution `<slot>` + `::slotted`** (répond au trigger
+  « atterrissage T3 » de la note d'anticipation — T3 miroir
+  livré par CAP-197). `explorer-dom` porte la relation
+  d'assignation partagée : `slots_in` (préordre dans la
+  racine), `slot_assigned` (enfants light dont `slot` égale
+  `name`, défaut `""` + textes → slot défaut, template DSD
+  consommé exclu — la spec le retire de l'arbre),
+  `assigned_slot`. Layout : `child_boxes` distribue — les
+  enfants light assignés sont les enfants boîte de leur
+  `<slot>` (peints à sa position flat tree), le repli couvre
+  l'absence d'assigné, l'orphelin `slot` inconnu ne peint
+  pas. CSS : `::slotted(c)` — pseudo-élément frontier
+  **sortant** (symétrique de `::part` — le sujet est
+  l'enfant light assigné, les autres simples qualifient le
+  slot, les combinators marchent dans la racine depuis le
+  slot) ; confinement arbitré — le sujet doit être assigné
+  à un slot de la racine DE LA RÈGLE (feuille document =
+  `::slotted` muet). Héritage flat tree : `compute_subtree`
+  calcule l'arbre shadow avant les enfants light — un
+  assigné hérite du style de son `<slot>` (css-scoping §3.4),
+  le non-assigné de l'hôte. Borné honnête : slots imbriqués
+  non aplatis (`flatten` `assigned*()`), `<slot>` suit son
+  `display` calculé (`display:contents` UA non porté),
+  `exportparts`/`::part` imbriqué et `!important` inversé à
+  la frontière absents, `slotchange`/`slot.assign()` =
+  surface miroir NAV. Régressions : `slot_distribution`
+  dom, 5× cascade (`::slotted`/qualifieur-slot/confinement/
+  héritage-flat), 2× boxtree (distribution + repli), session
+  bout-en-bout `dsd_slot_distribue_et_repli_couvert`.
+
 ## Palier R-B — Contenu étranger, animation, canvas
 
 - [x] **R-8. Foreign-content dans `explorer-html`** (ex-60a) :

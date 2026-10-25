@@ -74,6 +74,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   tree layout, tables dom, sérialiseur+fingerprint
   jscore, session).
 
+- **R-97 — Shadow DOM tranche 3 (PIPE) : distribution
+  `<slot>` + `::slotted`** (`explorer-dom`/`css`/`layout`)
+  — suite du trigger « T3 atterrit » (CAP-197 miroir) :
+  le flat tree compose réellement. DOM : relation
+  d'assignation partagée (`slots_in`, `slot_assigned`,
+  `assigned_slot` — nommée par `slot`/`name`, défaut `""`,
+  textes → slot défaut, template DSD consommé exclu).
+  Layout : les enfants light assignés sont les enfants
+  boîte de leur `<slot>` — peints à sa position ; repli
+  peint faute d'assigné ; orphelin `slot` inconnu et
+  light DOM non distribué absents. CSS : `::slotted(c)`
+  pseudo-élément frontier sortant (symétrique de
+  `::part`) — sujet = enfant light assigné, autres
+  simples qualifient le slot, combinators depuis le
+  slot ; arbitrage de scope : le sujet doit être assigné
+  à un slot de la racine de la règle (`::slotted` muet
+  en feuille document). Héritage flat tree : l'assigné
+  hérite du style de son `<slot>` (css-scoping §3.4),
+  le non-assigné de l'hôte. Borné : slots imbriqués non
+  aplatis, `display:contents` UA non porté (le `<slot>`
+  suit son `display` calculé), `exportparts`,
+  `!important` inversé, `slotchange`/`slot.assign()`
+  = miroir NAV. 9 tests (dom distribution, 5 cascade,
+  2 boxtree, session `dsd_slot_distribue_et_repli_couvert`).
+
 - **CAP-192 — `customElements` lisible et
   patchable** (`explorer-jscore`) : le
   bootstrap `patchDefine` de reddit meurt

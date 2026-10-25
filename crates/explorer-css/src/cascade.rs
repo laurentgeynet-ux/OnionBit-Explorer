@@ -400,8 +400,11 @@ fn rightmost_key(sel: &ComplexSelector) -> BucketKey {
         match s {
             // `E::part(n)` : le sujet est l'élément `part` en
             // shadow — `E` et consorts qualifient l'HÔTE, pas
-            // le nœud → aucune clé utilisable (R-96).
-            SimpleSelector::Part(_) => return BucketKey::Universal,
+            // le nœud → aucune clé utilisable (R-96). Idem
+            // `E::slotted(c)` : `E` qualifie le SLOT (R-97).
+            SimpleSelector::Part(_) | SimpleSelector::Slotted(_) => {
+                return BucketKey::Universal;
+            }
             SimpleSelector::Id(i) => return BucketKey::Id(i.clone()),
             SimpleSelector::Class(c) => {
                 class.get_or_insert(c);
@@ -1089,34 +1092,18 @@ impl StyleEngine {
         // des clés de son aîné).
         let mut child_anc = *anc;
         child_anc.insert_node(dom, node);
-        for child in children {
-            if dom.element(child).is_ok() {
-                // Récursion ∝ profondeur DOM → pile garantie
-                // (R-24) : bascule tas en zone rouge.
-                explorer_common::deep(|| {
-                    self.compute_subtree(
-                        dom,
-                        child,
-                        env,
-                        Some(&style),
-                        map,
-                        pseudos,
-                        state,
-                        &mut *mcache,
-                        &child_anc,
-                        root_fs,
-                    );
-                });
-            }
-        }
-        // R-96 — arbre shadow : le flat tree de l'hôte est
-        // fait des enfants de sa racine (latérale — hors
-        // `children`). L'héritage franchit la frontière :
-        // le style de l'hôte est le parent des enfants
-        // shadow (css-scoping §3.3 — les `--*` et propriétés
+        // R-96/97 — arbre shadow calculé AVANT les enfants
+        // light : le flat tree de l'hôte est fait des enfants
+        // de sa racine (latérale — hors `children`), et les
+        // styles des `<slot>` doivent déjà être dans `map`
+        // quand les enfants light distribués héritent d'eux.
+        // L'héritage franchit la frontière : le style de
+        // l'hôte est le parent des enfants shadow
+        // (css-scoping §3.3 — les `--*` et propriétés
         // héritées traversent, les sélecteurs non : le
         // filtre de `collect_candidates` tient la porte).
-        if let Some(root) = dom.shadow_root(node, true) {
+        let host_root = dom.shadow_root(node, true);
+        if let Some(root) = host_root {
             if let Ok(schildren) = dom.children(root) {
                 for child in schildren {
                     if dom.element(child).is_ok() {
@@ -1136,6 +1123,34 @@ impl StyleEngine {
                         });
                     }
                 }
+            }
+        }
+        for child in children {
+            if dom.element(child).is_ok() {
+                // R-97 — distribution : un enfant light
+                // assigné hérite du style de son `<slot>`
+                // (flat tree, css-scoping §3.4) ; les non-
+                // assignés héritent de l'hôte (parent DOM).
+                // La sonde n'est payée que sur hôte shadow.
+                let slot_style = host_root
+                    .and_then(|_| dom.assigned_slot(child).and_then(|s| map.get(&s).cloned()));
+                let pstyle = slot_style.as_ref().unwrap_or(&style);
+                // Récursion ∝ profondeur DOM → pile garantie
+                // (R-24) : bascule tas en zone rouge.
+                explorer_common::deep(|| {
+                    self.compute_subtree(
+                        dom,
+                        child,
+                        env,
+                        Some(pstyle),
+                        map,
+                        pseudos,
+                        state,
+                        &mut *mcache,
+                        &child_anc,
+                        root_fs,
+                    );
+                });
             }
         }
         map.insert(node, style);
@@ -1453,15 +1468,32 @@ impl StyleEngine {
         node_scope: Option<NodeId>,
         sel_idx: usize,
     ) -> bool {
-        if rule.scope == node_scope {
-            return true;
-        }
         let Some(sel) = rule.selectors.get(sel_idx) else {
             return false;
         };
         let Some((last, _)) = sel.parts.last() else {
             return false;
         };
+        if last
+            .simples
+            .iter()
+            .any(|s| matches!(s, SimpleSelector::Slotted(_)))
+        {
+            // R-97 — `::slotted` n'a de sens qu'en feuille
+            // scopée : le sujet doit être assigné à un
+            // `<slot>` de la racine de la RÈGLE — arbitré
+            // avant le raccourci même-arbre (un enfant light
+            // assigné est dans l'arbre englobant, pas dans
+            // l'arbre de la feuille ; et en feuille document
+            // le scope `None` ne possède aucun slot — pas de
+            // raccourci `None == None` : le slot doit exister).
+            return dom
+                .assigned_slot(node)
+                .is_some_and(|s| dom.containing_shadow_root(s) == rule.scope);
+        }
+        if rule.scope == node_scope {
+            return true;
+        }
         if last
             .simples
             .iter()

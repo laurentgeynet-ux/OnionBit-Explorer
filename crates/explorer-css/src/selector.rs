@@ -123,6 +123,14 @@ pub enum SimpleSelector {
     /// qualifient **l'hôte** (les combinators en amont
     /// marchent dans l'arbre englobant, depuis l'hôte).
     Part(String),
+    /// `::slotted(<composé>)` (R-97) — pseudo-élément
+    /// frontier **sortant** : le sujet est un enfant light
+    /// de l'hôte **assigné** à un `<slot>` de la racine du
+    /// scope, et l'argument le qualifie ; les autres simples
+    /// du composé qualifient **le slot**, les combinators
+    /// en amont marchent dans la racine depuis le slot
+    /// (css-scoping §3.4 — l'inverse symétrique de `::part`).
+    Slotted(CompoundSelector),
 }
 
 /// Pseudo-éléments générant des boîtes (R-13).
@@ -142,8 +150,14 @@ impl SimpleSelector {
         match self {
             Self::Id(_) => (1, 0, 0),
             Self::Class(_) | Self::Attribute { .. } => (0, 1, 0),
-            // Pseudo-élément : colonne « type » (CSS2 §6.4.3).
+            // Pseudo-élément : colonne « type » (CSS2 §6.4.3) ;
+            // `::slotted(c)` ajoute la spécificité de son
+            // argument (css-scoping §3.4).
             Self::Type(_) | Self::PseudoElement(_) | Self::Part(_) => (0, 0, 1),
+            Self::Slotted(arg) => {
+                let (a, b, c) = arg.specificity();
+                (a, b, c + 1)
+            }
             Self::Universal => (0, 0, 0),
             Self::Pseudo(p) => p.specificity(),
         }
@@ -667,6 +681,15 @@ impl<'t> SelectorParser<'t> {
                 }
                 Some(SimpleSelector::Part(part))
             }
+            Some(Token::Function(name)) if name.as_str() == "slotted" => {
+                self.skip_ws();
+                let arg = self.compound()?;
+                self.skip_ws();
+                if !matches!(self.next(), Some(Token::CloseParen)) {
+                    return None;
+                }
+                Some(SimpleSelector::Slotted(arg))
+            }
             _ => None,
         }
     }
@@ -1125,7 +1148,33 @@ fn match_selector_part_eval(
     // (ce `node`), les autres simples du composé qualifient
     // l'hôte de sa racine — et la suite des combinators
     // marche dans l'arbre englobant **depuis l'hôte**.
-    let base = if let Some(pname) = compound.simples.iter().find_map(|s| match s {
+    //
+    // `::slotted(c)` (R-97) : le sujet est un enfant light
+    // assigné à un `<slot>` — `c` le qualifie ; les autres
+    // simples du composé qualifient **le slot** et la suite
+    // des combinators marche dans la racine **depuis le
+    // slot** (sa position de flat tree).
+    let base = if let Some(arg) = compound.simples.iter().find_map(|s| match s {
+        SimpleSelector::Slotted(c) => Some(c),
+        _ => None,
+    }) {
+        if !arg
+            .iter()
+            .all(|s| simple_matches(dom, node, s, state, &mut *cache, anc, scope))
+        {
+            return false;
+        }
+        let Some(slot) = dom.assigned_slot(node) else {
+            return false;
+        };
+        if !compound.iter().all(|s| match s {
+            SimpleSelector::Slotted(_) => true,
+            _ => simple_matches(dom, slot, s, state, &mut *cache, anc, scope),
+        }) {
+            return false;
+        }
+        slot
+    } else if let Some(pname) = compound.simples.iter().find_map(|s| match s {
         SimpleSelector::Part(n) => Some(n.as_str()),
         _ => None,
     }) {
@@ -1266,9 +1315,13 @@ fn simple_matches(
         SimpleSelector::Pseudo(p) => pseudo_matches(dom, node, p, state, cache, anc, scope),
         // Le pseudo-élément ne contraint pas l'élément — c'est
         // la cascade qui dirige les déclarations vers le
-        // pseudo-style (R-13). `Part` n'atteint ici que hors
-        // chemin pierce (intercepté au niveau composé) → faux.
-        SimpleSelector::Universal | SimpleSelector::PseudoElement(_) | SimpleSelector::Part(_) => {
+        // pseudo-style (R-13). `Part`/`Slotted` n'atteignent
+        // ici que hors chemin pierce (interceptés au niveau
+        // composé) → faux.
+        SimpleSelector::Universal
+        | SimpleSelector::PseudoElement(_)
+        | SimpleSelector::Part(_)
+        | SimpleSelector::Slotted(_) => {
             matches!(
                 sel,
                 SimpleSelector::Universal | SimpleSelector::PseudoElement(_)
@@ -1527,9 +1580,14 @@ fn empty_element(dom: &Dom, node: NodeId) -> bool {
     true
 }
 
-/// `true` si `s` est un pseudo-élément (`::before`/`::after`).
+/// `true` si `s` est un pseudo-élément — `::before`/`::after`
+/// comme les frontier `::part`/`::slotted` : tous réservés au
+/// composé final (Selectors §5.2, css-scoping §3.3/§3.4).
 fn is_pseudo_element(s: &SimpleSelector) -> bool {
-    matches!(s, SimpleSelector::PseudoElement(_))
+    matches!(
+        s,
+        SimpleSelector::PseudoElement(_) | SimpleSelector::Part(_) | SimpleSelector::Slotted(_)
+    )
 }
 
 /// Pseudo-élément du composé final de `sel`, le cas échéant

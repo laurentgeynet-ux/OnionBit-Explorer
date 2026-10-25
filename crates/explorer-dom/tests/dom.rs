@@ -348,3 +348,46 @@ fn shadow_root_tables() {
     assert_eq!(dom.shadow_root(host2, false), None);
     assert_eq!(dom.shadow_root(host2, true), Some(root2));
 }
+
+/// R-97 — distribution `<slot>` : assignation nommée,
+/// slot défaut (éléments sans `slot` + textes), lookup
+/// `assigned_slot`.
+#[test]
+fn slot_distribution() {
+    let mut dom = Dom::new();
+    let host = dom.create_element("div").expect("host");
+    dom.append_child(dom.document(), host).expect("append");
+    // Enfants light : un assigné nommé, un défaut, un texte.
+    let named = dom.create_element("b").expect("named");
+    dom.set_attribute(named, "slot", "t").expect("slot attr");
+    let plain = dom.create_element("i").expect("plain");
+    let other = dom.create_element("u").expect("other");
+    dom.set_attribute(other, "slot", "z").expect("slot z");
+    let text = dom.create_text("hi").expect("text");
+    for c in [named, plain, other, text] {
+        dom.append_child(host, c).expect("append light");
+    }
+    // Racine : <slot name="t"> puis <slot> (défaut).
+    let root = dom.create_fragment().expect("frag");
+    let s_named = dom.create_element("slot").expect("slot t");
+    dom.set_attribute(s_named, "name", "t").expect("name t");
+    let s_def = dom.create_element("slot").expect("slot def");
+    dom.append_child(root, s_named).expect("append slot t");
+    dom.append_child(root, s_def).expect("append slot def");
+    dom.attach_shadow_root(host, root, true);
+
+    assert_eq!(dom.slots_in(root), vec![s_named, s_def]);
+    assert_eq!(dom.slot_assigned(s_named, false), vec![named]);
+    // Défaut : éléments sans slot + le texte.
+    assert_eq!(dom.slot_assigned(s_def, false), vec![plain, text]);
+    assert_eq!(dom.slot_assigned(s_def, true), vec![plain]);
+    // `slot="z"` ne correspond à rien → non rendu.
+    assert_eq!(dom.assigned_slot(named), Some(s_named));
+    assert_eq!(dom.assigned_slot(plain), Some(s_def));
+    assert_eq!(dom.assigned_slot(text), Some(s_def));
+    assert_eq!(dom.assigned_slot(other), None);
+    // Hors hôte : rien.
+    let orphan = dom.create_element("span").expect("orphan");
+    assert_eq!(dom.assigned_slot(orphan), None);
+    assert_eq!(dom.slots_in(host), Vec::<explorer_dom::NodeId>::new());
+}

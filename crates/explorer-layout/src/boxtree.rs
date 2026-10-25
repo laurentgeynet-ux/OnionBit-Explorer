@@ -451,10 +451,15 @@ fn box_kind_of(style: &ComputedStyle) -> BoxKind {
 }
 
 /// Boîtes des enfants de `parent` (éléments + texte utile).
-/// R-96 — flat tree : les enfants d'un hôte shadow sont les
-/// enfants de sa racine (latérale) ; le light DOM non
-/// distribué ne produit pas de boîtes (`<slot>` = fallback
-/// honnête jusqu'à la distribution, tranche T3).
+/// R-96/97 — flat tree : les enfants d'un hôte shadow sont
+/// les enfants de sa racine (latérale) ; un `<slot>` en
+/// arbre shadow **distribue** les enfants light de l'hôte
+/// assignés à son `name` (css-scoping §3.4), et retombe sur
+/// son propre contenu de repli quand rien n'est assigné ;
+/// le light DOM non assigné ne produit pas de boîtes.
+/// Borne : la boîte `<slot>` suit son `display` calculé
+/// (inline par défaut — `display:contents` UA non porté,
+/// le découpage en-ligne/autour-de-bloc est celui de R-17).
 fn child_boxes<S: ::std::hash::BuildHasher>(
     dom: &Dom,
     parent: NodeId,
@@ -462,9 +467,20 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     parent_style: &ComputedStyle,
     sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
 ) -> Vec<LayoutBox> {
-    let owner = dom.shadow_root(parent, true).unwrap_or(parent);
-    let Ok(children) = dom.children(owner) else {
-        return Vec::new();
+    let is_slot = dom
+        .tag_name(parent)
+        .is_ok_and(|t| t.eq_ignore_ascii_case("slot"))
+        && dom.containing_shadow_root(parent).is_some();
+    let children: Vec<NodeId> = if is_slot {
+        let assigned = dom.slot_assigned(parent, false);
+        if assigned.is_empty() {
+            dom.children(parent).unwrap_or_default()
+        } else {
+            assigned
+        }
+    } else {
+        let owner = dom.shadow_root(parent, true).unwrap_or(parent);
+        dom.children(owner).unwrap_or_default()
     };
     let mut out = Vec::new();
     // `::before` généré en tête du contenu (R-13).

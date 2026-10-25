@@ -621,6 +621,122 @@ impl Dom {
         }
     }
 
+    /// Les `<slot>` de l'arbre shadow `root`, en préordre —
+    /// base de la distribution (R-97, flat tree). Les racines
+    /// shadow imbriquées sont latérales (hors `children`) :
+    /// la descente n'y entre jamais. Pas d'aplatissement de
+    /// slots imbriqués — la sémantique `flatten` d'
+    /// `assignedElements({flatten:true})` reste une borne.
+    #[must_use]
+    pub fn slots_in(&self, root: NodeId) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let mut stack: Vec<NodeId> = self.children(root).unwrap_or_default();
+        stack.reverse();
+        while let Some(n) = stack.pop() {
+            if self
+                .tag_name(n)
+                .is_ok_and(|t| t.eq_ignore_ascii_case("slot"))
+            {
+                out.push(n);
+            }
+            if let Ok(cs) = self.children(n) {
+                for &c in cs.iter().rev() {
+                    stack.push(c);
+                }
+            }
+        }
+        out
+    }
+
+    /// Nœuds distribués au `<slot>` `slot` (R-97) : enfants de
+    /// l'hôte de la racine shadow contenant `slot` dont
+    /// l'attribut `slot` égale `slot.name` — le slot **défaut**
+    /// (`name` absent ou `""`) collecte les enfants sans
+    /// `slot`/`slot=""`, plus les nœuds `Text` (slottables —
+    /// `elements_only` les exclut). Vide si `slot` n'est pas
+    /// dans une racine attachée ou si rien ne correspond —
+    /// le fallback est alors affaire de l'appelant.
+    #[must_use]
+    pub fn slot_assigned(&self, slot: NodeId, elements_only: bool) -> Vec<NodeId> {
+        let Some(host) = self
+            .containing_shadow_root(slot)
+            .and_then(|r| self.shadow_host(r))
+        else {
+            return Vec::new();
+        };
+        let name = self
+            .attribute(slot, "name")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let mut out = Vec::new();
+        if let Ok(children) = self.children(host) {
+            for c in children {
+                if self.element(c).is_ok() {
+                    // `<template shadowrootmode>` consommé : la
+                    // spec RETIRE le template de l'arbre à
+                    // l'attache (notre table le conserve comme
+                    // repère inerte — `template_contents` = la
+                    // racine attachée) : il n'est pas un
+                    // slottable, il ne couvre pas le repli.
+                    let consumed = self
+                        .template_contents(c)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|frag| self.is_shadow_root(frag));
+                    if consumed {
+                        continue;
+                    }
+                    let want = self.attribute(c, "slot").ok().flatten().unwrap_or_default();
+                    if want == name {
+                        out.push(c);
+                    }
+                } else if !elements_only
+                    && name.is_empty()
+                    && matches!(self.data(c), Ok(NodeData::Text(_)))
+                {
+                    out.push(c);
+                }
+            }
+        }
+        out
+    }
+
+    /// Le `<slot>` auquel `el` est distribué (R-97) : le
+    /// premier slot de la racine shadow de son parent dont
+    /// `name` égale l'attribut `slot` de `el` (défaut `""` —
+    /// un `Text` n'a pas d'attribut, il va toujours au slot
+    /// défaut). `None` si le parent n'est pas un hôte shadow
+    /// ou si aucun slot ne correspond — l'enfant n'est alors
+    /// pas rendu (flat tree).
+    #[must_use]
+    pub fn assigned_slot(&self, el: NodeId) -> Option<NodeId> {
+        // `<template shadowrootmode>` consommé : pas un
+        // slottable (cf. `slot_assigned`).
+        if self
+            .template_contents(el)
+            .ok()
+            .flatten()
+            .is_some_and(|frag| self.is_shadow_root(frag))
+        {
+            return None;
+        }
+        let host = self.parent(el).ok().flatten()?;
+        let root = self.shadow_root(host, true)?;
+        let want = self
+            .attribute(el, "slot")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        self.slots_in(root).into_iter().find(|s| {
+            self.attribute(*s, "name")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                == want
+        })
+    }
+
     // -----------------------------------------------------------------
     // Normalisation (`Node.normalize()`)
     // -----------------------------------------------------------------
