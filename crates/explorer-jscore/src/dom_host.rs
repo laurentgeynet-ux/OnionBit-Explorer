@@ -3197,6 +3197,10 @@ const MAPPED_ATTRS: &[&str] = &[
     // (CAP-173) — `l.media=` écrit l'attribut (gate
     // d'application de la feuille, spec IDL `media`).
     "media",
+    // `slot` (T3) — `el.slot=` écrit l'attribut
+    // (re-distribution flat recalculée à la prochaine
+    // lecture `assigned*`).
+    "slot",
 ];
 
 /// Boolean attributes mirrored as `bool` props (`checked`…).
@@ -4414,10 +4418,16 @@ impl Host for NodeHost {
                     None => Value::Null,
                 }));
             }
-            // `el.assignedSlot` (CAP-191 tranche 1) — pas de
-            // répartition : un light DOM n'est jamais assigné
-            // (borné honnête, spec : `null` hors distribution).
-            "assignedSlot" => return Ok(Some(Value::Null)),
+            // `el.assignedSlot` (T3) — le `<slot>` de la
+            // racine shadow du parent dont `name` égale
+            // `el.slot` ; `null` hors distribution.
+            "assignedSlot" => {
+                let s = self.dom.borrow().assigned_slot(node);
+                return Ok(Some(match s {
+                    Some(s) => node_value(e, &self.dom, &self.cache, s),
+                    None => Value::Null,
+                }));
+            }
             // `el.shadowRoot` (stub issue #25) — la racine
             // attachée par `attachShadow`, `null` en mode
             // `closed` ou sans racine.
@@ -5295,11 +5305,21 @@ impl Host for NodeHost {
                 cache: self.cache.clone(),
                 node,
             })))),
-            // `slot.assignedElements()`/`assignedNodes({flatten})`
-            // (CAP-191 tranche 1) — pas de répartition dans le
-            // miroir : tableau vide honnête (borné — l'arc
-            // slots est tranche 3).
-            "assignedElements" | "assignedNodes" => Ok(Some(e.new_array(Vec::new()))),
+            // `slot.assignedElements()`/`assignedNodes()`
+            // (T3) — répartition flat du miroir : enfants
+            // light-DOM de l'hôte dont `slot` égale
+            // `slot.name` ("" → défaut ; textes → défaut).
+            // `{flatten:true}` accepté — borne flat (pas de
+            // re-distribution imbriquée).
+            "assignedElements" | "assignedNodes" => {
+                let els = name == "assignedElements";
+                let nodes = self.dom.borrow().slot_assigned(node, els);
+                let arr = nodes
+                    .into_iter()
+                    .map(|n| node_value(e, &self.dom, &self.cache, n))
+                    .collect::<Vec<_>>();
+                Ok(Some(e.new_array(arr)))
+            }
             // `prepend(...kids)` / `before`/`after`/`replaceWith` —
             // nodes or strings (strings → text nodes).
             "prepend" => {

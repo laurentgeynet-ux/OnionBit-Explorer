@@ -1795,7 +1795,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   sur la méta, invalide →
   repli méta.
 
-- **CAP-145 — Content-
+-- **CAP-197 — Shadow DOM T3+T5
+  (miroir)** (`explorer-jscore`) :
+  T3 répartition flat — `slots_in`
+  (`<slot>` DFS de la racine),
+  `slot_assigned` (enfants light-DOM
+  de l'hôte dont `slot` égale
+  `name`, textes → défaut, racines
+  exclues), `assigned_slot`
+  (`el.assignedSlot`) ; `el.slot=`
+  reflété (`MAPPED_ATTRS`),
+  `slot.name` via `name`. T5
+  `<template shadowrootmode>` — le
+  fragment `content` devient la
+  racine shadow du parent (open/
+  closed). Journal : flat-tree pour
+  le rendu + parse déclaratif réel =
+  entrées PIPE futures (interface-
+  équipes). Tests : `shadow_t3`
+  (distribution named/défaut/texte/
+  `assignedSlot`/`el.slot=`/
+  declarative open+closed).
+
+ **CAP-145 — Content-
   Security-Policy,
   enforcement** (`explorer-net`
   + `explorer-core` — cap « web
@@ -1850,7 +1872,7 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
--- **JS-C35 — TLA de module**
+-- **JS-C35b — TLA de module**
   (`explorer-jscore`, suite de
   JS-C34) : `await` au top-level
   d'un module — `evaluate_module`
@@ -5431,7 +5453,7 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   census.rs` porté (compte-rendu d'erreurs de pages réelles).
   Sens inverse vérifié : JS-C46, JS-C45 et la vague JS-C26+
   étaient déjà Explorer-only — `src/dom.rs` reste canonique.
-- **JS-C35 — `document.write` complet + insertion dynamique**
+- **JS-C35b — `document.write` complet + insertion dynamique**
   (`explorer-jscore`, miroir) : `write`/`writeln` deviennent
   variadiques (concaténation de tous les arguments, `\n`
   terminal pour `writeln` — spec) ; `document.open()`/

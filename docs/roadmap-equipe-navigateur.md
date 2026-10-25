@@ -3446,7 +3446,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   paresseuse (`&&`/`?:`/`?.`/`??`)
   évaluée éager — hoist non porté.
 
-- [x] **JS-C35. TLA de module** —
+- [x] **JS-C35b. TLA de module** —
   `await` top-level → corps module
   sur `GExec` (même infra JS-C34).
   Borne : importeurs n'attendent pas
@@ -3454,6 +3454,19 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `nsget`) — entrées feuilles
   couvertes. Test `tla_module_awaits_
   pending`.
+
+- [x] **CAP-197. Shadow DOM T3+T5
+  (miroir)** — T3 répartition flat :
+  `slots_in`/`slot_assigned`/
+  `assigned_slot` (`<slot>` DFS,
+  enfants hôte dont `slot` égale
+  `name`, textes → défaut, racines
+  exclues) ; `el.slot=` reflété.
+  T5 `<template shadowrootmode>` —
+  fragment `content` = racine.
+  Journal : flat-tree rendu + parse
+  déclaratif réel = entrées PIPE
+  futures. Tests `shadow_t3`.
 
 - [x] **CAP-188. `document.evaluate` :
   sous-ensemble `XPath` borné (sonde)** —
@@ -5114,7 +5127,7 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   (`"body,call"` vs `"call"` ; `"unset"` vs `"7"`),
   `#[ignore]` documentés. La case reste ouverte : la refacto
   lazy/pending n'est pas engagée, en attente du site réel.
-- [x] **JS-C35. `document.write` complet + insertion dynamique**
+- [x] **JS-C35b. `document.write` complet + insertion dynamique**
   (miroir) — **livré** : `write`/`writeln` variadiques
   (concat de tous les args, `\n` pour `writeln`),
   `document.open()`/`close()` et le flag `Dom.doc_open` —
