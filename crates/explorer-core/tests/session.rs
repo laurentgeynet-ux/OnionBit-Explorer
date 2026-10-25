@@ -12897,8 +12897,12 @@ async fn dynamic_module_script_evals_graph() {
         document.body.appendChild(s)\
         </script></body></html>",
     );
-    t.route("/m.js", 200, "import {v} from '/dep.js';\
-        document.getElementById('p').textContent='mod:'+v");
+    t.route(
+        "/m.js",
+        200,
+        "import {v} from '/dep.js';\
+        document.getElementById('p').textContent='mod:'+v",
+    );
     t.route("/dep.js", 200, "export const v=42");
     s.set_js_factory(explorer_js::JscoreEngine::factory());
     let id = s.open_tab();

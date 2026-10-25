@@ -235,8 +235,8 @@ impl Session {
     /// déjà rempli (prefetch détaché dans [`SubJob::run`]) —
     /// `eval_module` + `PipelineError` sans faire échouer la
     /// page.
-    pub(crate) fn eval_module_graph(&mut self, tab: TabId, eng: &mut dyn JsEngine, me: ModEval) {
-        if let Err(e) = Self::eval_mod(eng, &me) {
+    pub(crate) fn eval_module_graph(&mut self, tab: TabId, eng: &mut dyn JsEngine, me: &ModEval) {
+        if let Err(e) = Self::eval_mod(eng, me) {
             tracing::debug!(tab, error = %e, "module en échec");
             let _ = self.events.send(CoreEvent::PipelineError {
                 tab: Some(tab),
@@ -262,7 +262,8 @@ impl Session {
                 .and_then(|u| Url::resolve(&u, spec).ok())
                 .map(|u| u.as_str())
         });
-        eng.eval_module(&me.name, sources.clone(), resolve).map(|_| ())
+        eng.eval_module(&me.name, sources.clone(), resolve)
+            .map(|_| ())
     }
 
     /// Contexte JS de chargement : moteur neuf + miroir posé —

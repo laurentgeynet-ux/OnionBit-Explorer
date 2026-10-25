@@ -353,6 +353,19 @@ impl Lexer {
         // est un statement — `/` y est toujours regex, jamais
         // division (`if (o<128) /re/.test(…)` réel sur github).
         let mut clause_parens: Vec<bool> = Vec::new();
+        // Même ambiguïté pour `}` (mur réel x-web :
+        // `} /(?:^|;\s*)gt=/.test(…)` — corps de fonction fermé
+        // puis regex en statement) : un `{` qui ouvre un **bloc**
+        // (statement) a son `}` qui ré-arme `expect_operand` ;
+        // un `{` en position operande (littéral objet, pattern)
+        // a son `}` qui termine un operande — `/` = division.
+        // Le `{` est classé bloc par le token précédent :
+        // `)`/`}`/`;`/`=>`, `else|do|try|finally`, ou un `{`
+        // lui-même bloc. Bornes honnêtes : `{` après `:` (label,
+        // `case x:`), après ident de `class`/`interface` et après
+        // `import`/`export` sont classés operande — un `/` regex
+        // derrière leur `}` serait lu division (rare en pratique).
+        let mut brace_kinds: Vec<bool> = Vec::new();
         loop {
             let newline_before = self.skip_trivia()?;
             let (line, col) = (self.line, self.col);
@@ -376,6 +389,18 @@ impl Lexer {
                 clause_parens
                     .push(matches!(out.last().map(|t| &t.tok), Some(Tok::Kw(k)) if clause_kw(k)));
             } else if tok == Tok::P(P::RParen) && clause_parens.pop().unwrap_or(false) {
+                expect_operand = true;
+            } else if tok == Tok::P(P::LBrace) {
+                let block = match out.last().map(|t| &t.tok) {
+                    None => true,
+                    Some(Tok::P(P::RParen | P::RBrace | P::Semi | P::Arrow)) => true,
+                    Some(Tok::Kw(Kw::Else | Kw::Do | Kw::Try | Kw::Finally)) => true,
+                    Some(Tok::P(P::LBrace)) => brace_kinds.last().copied().unwrap_or(false),
+                    _ => false,
+                };
+                brace_kinds.push(block);
+            } else if tok == Tok::P(P::RBrace) && brace_kinds.pop().unwrap_or(false) {
+                // `}` de bloc : nouveau statement possible → regex.
                 expect_operand = true;
             }
             let is_eof = tok == Tok::Eof;

@@ -141,13 +141,13 @@ impl Session {
                 self.eval_or_report(tab, eng.as_mut(), src, url.as_deref(), Some(item.el_ord));
             }
             for me in arrival_evals {
-                self.eval_module_graph(tab, eng.as_mut(), me);
+                self.eval_module_graph(tab, eng.as_mut(), &me);
             }
             let mut post_evals = post_evals.into_iter();
             for item in scripts.iter().filter(|i| i.exec == ScriptExec::Post) {
                 if item.module {
                     if let Some(me) = post_evals.next() {
-                        self.eval_module_graph(tab, eng.as_mut(), me);
+                        self.eval_module_graph(tab, eng.as_mut(), &me);
                     }
                 } else if let Some(src) = item_source(item, &script_srcs) {
                     let url = item.src.as_ref().map(Url::as_str);
@@ -666,6 +666,7 @@ impl Session {
     /// `Sec-Fetch-*`/`crossorigin` identiques aux classiques).
     /// Refus → `deliver_dyn_script(None)` = `error` jamais
     /// d'éval d'un corps refusé.
+    #[allow(clippy::too_many_lines)] // branches src/inline × classique/module, chacune documentée in situ
     fn spawn_dyn_script(
         &mut self,
         tab: TabId,
@@ -829,14 +830,8 @@ impl Session {
         let req_url = entry_base.clone();
         let j = tokio::spawn(async move {
             let mut graph = crate::session::net_items::ModuleGraph {
-                sources: std::collections::HashMap::from([(
-                    name.clone(),
-                    entry_src.clone(),
-                )]),
-                alias: std::collections::HashMap::from([(
-                    name.clone(),
-                    entry_base.to_string(),
-                )]),
+                sources: std::collections::HashMap::from([(name.clone(), entry_src.clone())]),
+                alias: std::collections::HashMap::from([(name.clone(), entry_base.to_string())]),
             };
             Self::fetch_module_sources(
                 &tr,
@@ -908,7 +903,7 @@ impl Session {
         };
         let ok = graph.is_some();
         if let Some(graph) = graph {
-            self.eval_module_graph(tab, eng.as_mut(), ModEval { name, graph });
+            self.eval_module_graph(tab, eng.as_mut(), &ModEval { name, graph });
         }
         eng.deliver_dyn_module(ctx, seq, ok);
         let n = eng.run_pending();
@@ -2335,6 +2330,7 @@ impl Session {
     /// rapportées sont enfilées (étape 55h), à drainer via
     /// `drain_applies_shared` hors verrou ou `drain_applies`
     /// sous `&mut self`.
+    #[allow(clippy::too_many_lines)] // dispatch séquentiel des NetDone — chaque variante documentée in situ
     pub fn poll_net(&mut self) -> usize {
         let mut done = Vec::new();
         while let Ok(d) = self.net_rx.try_recv() {
@@ -2388,8 +2384,8 @@ impl Session {
                 if meta.module {
                     match body {
                         Some(text) => {
-                            let Some((req_page, _rb, doc_policy, csp, _o)) = self
-                                .ctx_net_origin(d.tab, meta.ctx, &meta.page, &meta.page)
+                            let Some((req_page, _rb, doc_policy, csp, _o)) =
+                                self.ctx_net_origin(d.tab, meta.ctx, &meta.page, &meta.page)
                             else {
                                 continue;
                             };

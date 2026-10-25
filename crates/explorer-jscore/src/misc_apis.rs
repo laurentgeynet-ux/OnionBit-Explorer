@@ -1993,9 +1993,7 @@ fn anim_wrapper(e: &mut Engine, data: &Rc<RefCell<AnimData>>) -> Value {
     if e.dom_ctx.is_none() {
         return Value::Null;
     }
-    let v = e.new_host_object(Rc::new(AnimHost {
-        data: data.clone(),
-    }));
+    let v = e.new_host_object(Rc::new(AnimHost { data: data.clone() }));
     let p = anim_proto(e);
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {

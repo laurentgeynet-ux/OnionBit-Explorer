@@ -1233,8 +1233,7 @@ impl Engine {
                     }
                 }
                 self.hooks.dyn_script_nodes.insert(seq, n);
-                let module = attr("type")
-                    .is_some_and(|t| t.trim().eq_ignore_ascii_case("module"));
+                let module = attr("type").is_some_and(|t| t.trim().eq_ignore_ascii_case("module"));
                 out.push(crate::dom_host::DynScriptReq {
                     seq,
                     src,
