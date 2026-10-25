@@ -152,6 +152,21 @@ pub enum DisplayItem {
         /// Encre (`color` hérité de l'élément `li`).
         color: Color,
     },
+    /// Marqueur **textuel** (`decimal`, alpha, roman…) — R-108 :
+    /// la display list ne shape pas, le raster résout la fonte et
+    /// shape la chaîne au paint.
+    MarkerText {
+        /// Origine : x gauche, y de la baseline.
+        origin: (f32, f32),
+        /// Libellé (`"1."`, `"c."`, `"iv."`…).
+        text: String,
+        /// Requête fonte.
+        font: explorer_layout::font::FontRequest,
+        /// Encre (`color` hérité).
+        color: Color,
+        /// Taille utilisée (px).
+        size_px: f32,
+    },
 }
 
 /// Forme d'un marqueur de liste peint sans fonte.
@@ -300,6 +315,9 @@ impl DisplayList {
                 DisplayItem::Marker { rect, kind, .. } => {
                     let _ = writeln!(out, "marker {kind:?} {rect:?}");
                 }
+                DisplayItem::MarkerText { origin, text, .. } => {
+                    let _ = writeln!(out, "marker-text {text:?} {origin:?}");
+                }
                 DisplayItem::PushClip(r) => {
                     let _ = writeln!(out, "push-clip {r:?}");
                 }
@@ -393,6 +411,7 @@ pub(crate) fn resolved_bounds(items: &[DisplayItem]) -> Vec<Option<Rect>> {
 }
 
 /// Zone couverte par un item de dessin, avant transform/clip.
+#[allow(clippy::cast_precision_loss)] // longueurs de texte → f32
 fn item_bounds(item: &DisplayItem) -> Option<Rect> {
     match item {
         DisplayItem::FillRect { rect, .. }
@@ -402,6 +421,20 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::MaskedFill { rect, .. }
         | DisplayItem::Marker { rect, .. }
         | DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
+        // Pas de fonte résolue ici — borne approchée :
+        // ~0.6em/caractère de large, 1.2em de haut au-dessus de
+        // la baseline.
+        DisplayItem::MarkerText {
+            origin,
+            text,
+            size_px,
+            ..
+        } => Some(Rect {
+            x: origin.0,
+            y: origin.1 - size_px * 1.2,
+            width: text.chars().count() as f32 * size_px * 0.6,
+            height: size_px * 1.2,
+        }),
         DisplayItem::Text { origin, run, .. } => Some(match run.ink {
             // R-37 : bbox d'encre réelle (glyphes) plutôt que
             // la boîte de métriques — couvre l'overhang
@@ -558,6 +591,22 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
                 color: c2,
             },
         ) => r1 == r2 && k1 == k2 && c1 == c2,
+        (
+            D::MarkerText {
+                origin: o1,
+                text: t1,
+                font: f1,
+                color: c1,
+                size_px: s1,
+            },
+            D::MarkerText {
+                origin: o2,
+                text: t2,
+                font: f2,
+                color: c2,
+                size_px: s2,
+            },
+        ) => o1 == o2 && t1 == t2 && f1 == f2 && c1 == c2 && s1 == s2,
         (D::PushClip(r1), D::PushClip(r2)) => r1 == r2,
         (D::PushTransform(m1), D::PushTransform(m2)) => {
             (m1.sx, m1.ky, m1.kx, m1.sy, m1.tx, m1.ty) == (m2.sx, m2.ky, m2.kx, m2.sy, m2.tx, m2.ty)
@@ -1314,13 +1363,20 @@ fn emit_list_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
     }
     let kind = match bx.style.get("list-style-type").map(str::trim) {
         // Initiale spec = `disc` (absence ou `initial`).
-        None | Some("disc" | "initial" | "inherit") => MarkerKind::Disc,
-        Some("circle") => MarkerKind::Circle,
-        Some("square") => MarkerKind::Square,
-        // `none` + marqueurs textuels (`decimal`, alpha,
-        // roman…) — hors portée : la display list ne shape pas.
-        Some(_) => return,
+        None | Some("disc" | "initial" | "inherit") => Some(MarkerKind::Disc),
+        Some("circle") => Some(MarkerKind::Circle),
+        Some("square") => Some(MarkerKind::Square),
+        Some("none") => None,
+        Some(other) => {
+            // R-108 — marqueurs textuels (`decimal`, alpha,
+            // roman…) : la display list ne shape pas, on émet
+            // `MarkerText` — le raster résout la fonte et shape
+            // le libellé au paint.
+            emit_text_marker(bx, items, off, other);
+            return;
+        }
     };
+    let Some(kind) = kind else { return };
     #[allow(clippy::cast_possible_truncation)]
     let fs = font_size_of(&bx.style) as f32;
     if !fs.is_finite() || fs <= 0.0 {
@@ -1365,6 +1421,134 @@ fn emit_list_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
         kind,
         color,
     });
+}
+
+#[allow(clippy::cast_precision_loss)]
+/// Marqueur textuel `list-style-type` (R-108, css-lists §2) :
+/// le libellé = compteur `marker_ordinal` rendu dans le type —
+/// `decimal`/`decimal-leading-zero`, `lower|upper-alpha`
+/// (=`latin`), `lower|upper-roman` ; type inconnu → `decimal`
+/// (repli spec « unsupported counter style »). Ordinals ≤ 0
+/// suivent la forme signée (`decimal` affiche `-1.`).
+/// Position : aligné à droite dans la gouttière (spec marker
+/// §3 — le marqueur finit avant le bord du contenu).
+fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32), ty: &str) {
+    #[allow(clippy::cast_possible_truncation)]
+    let fs = font_size_of(&bx.style) as f32;
+    if !fs.is_finite() || fs <= 0.0 {
+        return;
+    }
+    let text = marker_label(ty, bx.marker_ordinal);
+    let baseline_y = bx.lines.first().map_or_else(
+        || {
+            bx.rect.y
+                + border_side_w(&bx.style, "top")
+                + prop_px(&bx.style, "padding-top", 0.0)
+                + fs
+        },
+        |l| l.rect.y + l.baseline,
+    );
+    let content_x = content_rect(bx).x;
+    let inside = bx
+        .style
+        .get("list-style-position")
+        .is_some_and(|p| p.trim() == "inside");
+    // Largeur approchée (~0.55em/car — chiffres et lettres
+    // romaines) : la gouttière aligne le marqueur à droite ;
+    // `inside` le pose au début du contenu.
+    let est_w = text.chars().count() as f32 * fs * 0.55;
+    let x = if inside {
+        content_x
+    } else {
+        content_x - (fs * 0.4).max(1.0) - est_w
+    };
+    let color = bx
+        .style
+        .get("color")
+        .and_then(parse_color)
+        .unwrap_or(Color::BLACK);
+    items.push(DisplayItem::MarkerText {
+        origin: (x + off.0, baseline_y + off.1),
+        text,
+        font: font_request(&bx.style),
+        color,
+        size_px: fs,
+    });
+}
+
+/// Libellé du marqueur pour `list-style-type` + ordinal
+/// (R-108) — `decimal`, `decimal-leading-zero`, alpha et
+/// romain ; le `.` final est la ponctuation spec du marqueur.
+fn marker_label(ty: &str, n: i32) -> String {
+    let body = match ty {
+        "decimal" | "decimal-leading-zero" => {
+            if ty.starts_with("decimal-leading") && (0..10).contains(&n) {
+                format!("0{n}")
+            } else {
+                n.to_string()
+            }
+        }
+        "lower-alpha" | "lower-latin" => alpha_label(n, false),
+        "upper-alpha" | "upper-latin" => alpha_label(n, true),
+        "lower-roman" => roman_label(n).to_lowercase(),
+        "upper-roman" => roman_label(n),
+        // Style inconnu → repli decimal (css-counter-styles-3).
+        _ => n.to_string(),
+    };
+    format!("{body}.")
+}
+
+/// `lower-alpha` / `upper-alpha` : colonne de lettres
+/// (1→a…26→z, 27→aa…), base 26 sans zéro. `n ≤ 0` → le
+/// nombre tel quel.
+fn alpha_label(n: i32, upper: bool) -> String {
+    if n <= 0 {
+        return n.to_string();
+    }
+    let mut s = Vec::new();
+    let mut v = n;
+    while v > 0 {
+        v -= 1;
+        s.push((b'a' + u8::try_from(v % 26).unwrap_or(0)) as char);
+        v /= 26;
+    }
+    let s: String = s.into_iter().rev().collect();
+    if upper {
+        s.to_uppercase()
+    } else {
+        s
+    }
+}
+
+/// Chiffres romains (subtractive, ≤ 3999 — au-delà, décimal).
+fn roman_label(n: i32) -> String {
+    const T: &[(i32, &str)] = &[
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    if !(1..4000).contains(&n) {
+        return n.to_string();
+    }
+    let mut v = n;
+    let mut out = String::new();
+    for &(val, s) in T {
+        while v >= val {
+            out.push_str(s);
+            v -= val;
+        }
+    }
+    out
 }
 
 /// La boîte déclare un fond : `background-color` non
@@ -2727,6 +2911,19 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             rect: shifted(*rect, d),
             kind: *kind,
             color: *color,
+        },
+        D::MarkerText {
+            origin,
+            text,
+            font,
+            color,
+            size_px,
+        } => D::MarkerText {
+            origin: (origin.0 + d.0, origin.1 + d.1),
+            text: text.clone(),
+            font: font.clone(),
+            color: *color,
+            size_px: *size_px,
         },
         D::PushClip(r) => D::PushClip(shifted(*r, d)),
         D::PushTransform(m) => {

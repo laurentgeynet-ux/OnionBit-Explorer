@@ -166,6 +166,11 @@ pub struct LayoutBox {
     /// Champ (pas paramètre) : il survit au relayout incrémental
     /// `relayout_subtree`, qui repose la boîte via `slot`.
     pub fc_root: bool,
+    /// Ordinal du marqueur de liste (`list-item`, R-108) —
+    /// position dans les frères `list-item` du parent : base
+    /// `ol[start]`, décrément `reversed`, ancrage `li[value]`.
+    /// 0 pour les non-`list-item`.
+    pub marker_ordinal: i32,
 }
 
 /// Contexte de pose enregistré par `layout_block` (R-12) :
@@ -416,6 +421,7 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
         slot: BoxSlot::default(),
         height_raised: false,
         fc_root: false,
+        marker_ordinal: 0,
     };
     let children = child_boxes(dom, root, styles, &style, sizes);
     b.children = wrap_children(children, &style, kind);
@@ -555,6 +561,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     slot: BoxSlot::default(),
                     height_raised: false,
                     fc_root: false,
+                    marker_ordinal: 0,
                 });
             }
         }
@@ -563,7 +570,47 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     if let Some(b) = pseudo_box(styles, parent, PseudoElement::After) {
         out.push(b);
     }
+    // R-108 — ordinals de marqueurs : position des `list-item`
+    // fils (css-lists §2.4 — `ol[start]` fixe la base,
+    // `reversed` décrémente, `li[value]` ancrape la série).
+    assign_marker_ordinals(dom, parent, &mut out);
     out
+}
+
+/// Ordinaux de liste sur les fils `list-item` de `parent`
+/// (R-108). `ol[start]` = base (défaut 1, ou le compte pour
+/// `reversed`), `li[value]` ré-ancre la série courante.
+fn assign_marker_ordinals(dom: &Dom, parent: NodeId, out: &mut [LayoutBox]) {
+    let n_items = out.iter().filter(|b| b.kind == BoxKind::ListItem).count();
+    if n_items == 0 {
+        return;
+    }
+    let is_ol = dom.tag_name(parent).is_ok_and(|t| t == "ol");
+    let reversed = is_ol && dom.attribute(parent, "reversed").ok().flatten().is_some();
+    let mut cur: i32 = dom
+        .attribute(parent, "start")
+        .ok()
+        .flatten()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+        .filter(|_| is_ol)
+        .unwrap_or(if reversed {
+            i32::try_from(n_items).unwrap_or(i32::MAX)
+        } else {
+            1
+        });
+    for b in out.iter_mut() {
+        if b.kind != BoxKind::ListItem {
+            continue;
+        }
+        // `li[value]` fixe l'ordinal et déplace le compteur.
+        let v = b
+            .node
+            .and_then(|n| dom.attribute(n, "value").ok().flatten())
+            .and_then(|s| s.trim().parse::<i32>().ok());
+        cur = v.unwrap_or(cur);
+        b.marker_ordinal = cur;
+        cur += if reversed { -1 } else { 1 };
+    }
 }
 
 /// Boîte générée par `::before`/`::after` (R-13, CSS2 §12) :
@@ -674,6 +721,7 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         slot: BoxSlot::default(),
         height_raised: false,
         fc_root: false,
+        marker_ordinal: 0,
     }
 }
 
@@ -896,6 +944,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             slot: BoxSlot::default(),
             height_raised: false,
             fc_root: false,
+            marker_ordinal: 0,
         });
     }
 }
@@ -995,6 +1044,7 @@ fn object_box(
         slot: BoxSlot::default(),
         height_raised: false,
         fc_root: false,
+        marker_ordinal: 0,
     };
     // Ressource résolue → feuille remplacée ; sinon les
     // enfants prennent la place de l'objet.
@@ -1087,6 +1137,7 @@ fn leaf_box(
         slot: BoxSlot::default(),
         height_raised: false,
         fc_root: false,
+        marker_ordinal: 0,
     }
 }
 
@@ -1134,6 +1185,7 @@ fn control_box(
                     slot: BoxSlot::default(),
                     height_raised: false,
                     fc_root: false,
+                    marker_ordinal: 0,
                 }],
                 &style,
             )

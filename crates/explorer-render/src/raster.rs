@@ -861,6 +861,17 @@ fn paint_item(
         DisplayItem::Marker { rect, kind, color } => {
             paint_marker(pixmap, rect, *kind, *color, dpi, clip);
         }
+        // R-108 — marqueur textuel : la fonte se résout ici
+        // (la display list ne shape pas), run shapé puis peint.
+        DisplayItem::MarkerText {
+            origin,
+            text,
+            font,
+            color,
+            size_px,
+        } => paint_marker_text(
+            pixmap, *origin, text, font, *color, *size_px, dpi, fonts, gc, clip,
+        ),
         DisplayItem::PushClip(_)
         | DisplayItem::PopClip
         | DisplayItem::PushTransform(_)
@@ -872,6 +883,43 @@ fn paint_item(
 /// dans `rect` : `disc`/`square` pleins, `circle` en anneau.
 /// `fill_guarded` couvre le carré ; le disque passe par un
 /// chemin ovale (même garde de domaine via `device_bbox`).
+/// Marqueur textuel (R-108) — la fonte est résolue via le port
+/// `FontSource` (la display list ne shape pas), le libellé est
+/// shapé puis peint comme un run ordinaire.
+#[allow(clippy::too_many_arguments)]
+fn paint_marker_text(
+    pixmap: &mut Pixmap,
+    origin: (f32, f32),
+    text: &str,
+    font: &FontRequest,
+    color: Color,
+    size_px: f32,
+    dpi: Transform,
+    fonts: &dyn FontSource,
+    gc: &mut GlyphCache,
+    clip: Option<&Mask>,
+) {
+    let Some((data, face)) = fonts.font_face(font) else {
+        return;
+    };
+    let Some(run) = explorer_layout::font::shape_face(&data, face, text, size_px, false) else {
+        return;
+    };
+    paint_text(
+        pixmap,
+        origin.0,
+        origin.1,
+        &run,
+        font,
+        skia_color(color),
+        size_px,
+        dpi,
+        fonts,
+        gc,
+        clip,
+    );
+}
+
 fn paint_marker(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,

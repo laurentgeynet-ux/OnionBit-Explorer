@@ -9,6 +9,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-108 — marqueurs de liste
+  textuels** (`explorer-layout` +
+  `explorer-render`, résidu du
+  catalogue — `decimal`, alpha,
+  roman non peints) : `LayoutBox
+  .marker_ordinal` assigné au
+  boxtree (`ol[start]`/`reversed`,
+  `li[value]` ré-ancre) ;
+  `DisplayItem::MarkerText`
+  transporte le libellé (`"1."`,
+  `"c."`, `"iv."` — le raster shape
+  via `FontSource` au paint, la
+  display list reste sans fonte) ;
+  alignement gouttière droite /
+  `inside` au début du contenu.
+  Types : `decimal`,
+  `decimal-leading-zero`,
+  `lower|upper-alpha`/`latin`,
+  `lower|upper-roman` ; inconnu →
+  `decimal`. Test `markers_textuels`
+  (ordre, reversed, value).
+
 - **R-107 — `background` shorthand
   multi-couches complet**
   (`explorer-css` + `explorer-render`,

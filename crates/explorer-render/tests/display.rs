@@ -1769,3 +1769,33 @@ fn background_multicouche_paint_les_deux_couches() {
         .expect("couche url no-repeat");
     let _ = url_item;
 }
+
+// ── R-108 : marqueurs textuels (decimal, alpha, roman) ─────
+
+#[test]
+fn markers_textuels_decimal_roman_emis() {
+    // `ol` → `decimal` par défaut : 3 items = 3 MarkerText
+    // "1." "2." "3." ; `upper-roman` → "I." "II." "III.".
+    let (_d, _b, items) = dl("<ol><li>a</li><li>b</li><li>c</li></ol>", "body{margin:0}");
+    let texts: Vec<&str> = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::MarkerText { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts, ["1.", "2.", "3."], "decimal par défaut");
+    let (_d, _b, items) = dl(
+        "<ol start=9 reversed><li>a</li><li value=4>b</li><li>c</li></ol>",
+        "body{margin:0} ol{list-style-type:upper-roman}",
+    );
+    let texts: Vec<&str> = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::MarkerText { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    // reversed+start=9 : 9, puis value=4 ré-ancre, puis 3.
+    assert_eq!(texts, ["IX.", "IV.", "III."], "romain + reversed/value");
+}

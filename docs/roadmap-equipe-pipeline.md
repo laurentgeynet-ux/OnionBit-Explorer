@@ -2674,6 +2674,12 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   url(a), linear-gradient(…)`), couleur réservée à la dernière
   couche (§3.10), paint par index de couche pour
   repeat/position/size/origin/clip. Carve-out du test R-94.
+- [x] **R-108. Marqueurs textuels de liste** (résidu
+  catalogue) : `marker_ordinal` sur `LayoutBox`
+  (`ol[start]`/`reversed`, `li[value]`), `DisplayItem::
+  MarkerText` shapé au raster via `FontSource` —
+  `decimal`, `decimal-leading-zero`, alpha, roman ;
+  inconnu → `decimal`. Test ordinals + types.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
