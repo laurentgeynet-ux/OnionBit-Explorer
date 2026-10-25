@@ -2449,14 +2449,61 @@ impl TreeBuilder {
             return;
         }
         self.generate_implied_end_tags("");
+        let mut popped = None;
         while let Some(top) = self.stack.pop() {
             if self.is_html_named(top, "template") {
+                popped = Some(top);
                 break;
             }
         }
         self.afe_clear_to_marker();
         self.template_modes.pop();
         self.reset_mode();
+        if let Some(t) = popped {
+            self.attach_dsd_shadow(t);
+        }
+    }
+
+    /// Shadow DOM déclaratif (R-96 — arc T2) : un `<template>`
+    /// fermé porteur de `shadowrootmode` devient la racine shadow
+    /// de son parent — le fragment `content` y est attaché tel
+    /// quel (ses enfants y ont déjà été redirigés pendant le
+    /// parse). L'élément template reste en light DOM, inerte :
+    /// `display:none` UA le tient hors des boîtes.
+    ///
+    /// Dégradations honnêtes : parent non-élément ou hôte déjà
+    /// raciné → le template reste un template ordinaire (spec :
+    /// un seul shadow root par hôte ; `attachShadow` JS ferait
+    /// `NotSupportedError`). `shadowrootdelegatesfocus` et autres
+    /// init ne sont pas portés à cette tranche (borné T5).
+    fn attach_dsd_shadow(&mut self, template: NodeId) {
+        let Some(mode) = self
+            .dom
+            .attribute(template, "shadowrootmode")
+            .ok()
+            .flatten()
+        else {
+            return;
+        };
+        let Ok(Some(frag)) = self.dom.template_contents(template) else {
+            return;
+        };
+        let Ok(Some(host)) = self.dom.parent(template) else {
+            return;
+        };
+        if self.dom.element(host).is_err() || self.dom.shadow_root(host, true).is_some() {
+            return;
+        }
+        // Énuméré HTML : comparaison ASCII-insensible ; un
+        // `shadowrootmode` exotique reste un template ordinaire.
+        let open = if mode.eq_ignore_ascii_case("open") {
+            true
+        } else if mode.eq_ignore_ascii_case("closed") {
+            false
+        } else {
+            return;
+        };
+        self.dom.attach_shadow_root(host, frag, open);
     }
 
     // -----------------------------------------------------------------
@@ -2518,14 +2565,19 @@ impl TreeBuilder {
                     return;
                 }
                 // Ferme le template puis retraite l'Eof.
+                let mut popped = None;
                 while let Some(top) = self.stack.pop() {
                     if self.dom.tag_name(top).ok() == Some("template") {
+                        popped = Some(top);
                         break;
                     }
                 }
                 self.afe_clear_to_marker();
                 self.template_modes.pop();
                 self.reset_mode();
+                if let Some(t) = popped {
+                    self.attach_dsd_shadow(t);
+                }
                 self.dispatch(tokenizer, Token::Eof);
             }
         }

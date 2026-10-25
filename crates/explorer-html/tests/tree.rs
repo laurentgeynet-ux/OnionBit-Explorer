@@ -493,3 +493,65 @@ fn deep_nesting_is_capped() {
     assert!(divs < 600, "{divs} divs insérés");
     assert!(divs > 400, "{divs} divs insérés");
 }
+
+#[test]
+fn dsd_shadowrootmode_attaches_root() {
+    // `<template shadowrootmode>` : le fragment content devient
+    // la racine shadow de l'hôte, le template sort de l'arbre.
+    let d = parse(
+        "<div id=h><template shadowrootmode=open><span class=s>x</span></template><p id=l>light</p></div>",
+    );
+    let h = find_by_id(&d, "h").expect("host");
+    let l = find_by_id(&d, "l").expect("light");
+    let root = d.shadow_root(h, false).expect("shadow root attachée");
+    let kids = d.children(root).expect("shadow kids");
+    assert_eq!(kids.len(), 1);
+    assert_eq!(d.tag_name(kids[0]), Ok("span"));
+    // Le template reste en light DOM (inerte) : 2 enfants light
+    // — template consommé + `p`.
+    let kids_h = d.children(h).expect("host kids");
+    assert_eq!(kids_h.len(), 2);
+    assert_eq!(kids_h[1], l);
+    assert_eq!(d.tag_name(kids_h[0]), Ok("template"));
+    assert_eq!(d.containing_shadow_root(kids[0]), Some(root));
+}
+
+#[test]
+fn dsd_shadowrootmode_closed_et_eof() {
+    // `closed` + template non fermé à EOF → racine attachée en
+    // mode closed.
+    let d = parse("<div id=h><template shadowrootmode=closed><b>s</b>");
+    let h = find_by_id(&d, "h").expect("host");
+    assert_eq!(d.shadow_root(h, false), None, "closed masqué");
+    let root = d.shadow_root(h, true).expect("closed lisible avec flag");
+    assert_eq!(d.children(root).expect("kids").len(), 1);
+}
+
+#[test]
+fn dsd_sans_shadowrootmode_reste_template() {
+    let d = parse("<div><template><span>x</span></template></div>");
+    let mut stack = vec![d.document()];
+    let mut tmpl = None;
+    while let Some(n) = stack.pop() {
+        if d.tag_name(n) == Ok("template") {
+            tmpl = Some(n);
+        }
+        stack.extend(d.children(n).unwrap_or_default());
+    }
+    let t = tmpl.expect("template ordinaire présent");
+    assert!(d.template_contents(t).expect("contents").is_some());
+    assert!(d
+        .shadow_root(d.parent(t).expect("p").expect("h"), true)
+        .is_none());
+}
+
+fn find_by_id(d: &explorer_dom::Dom, id: &str) -> Option<explorer_dom::NodeId> {
+    let mut stack = vec![d.document()];
+    while let Some(n) = stack.pop() {
+        if d.attribute(n, "id").ok().flatten().as_deref() == Some(id) {
+            return Some(n);
+        }
+        stack.extend(d.children(n).unwrap_or_default());
+    }
+    None
+}

@@ -20,7 +20,7 @@
 use crate::parser::{AtKind, Declaration, MediaQuery, Rule, Stylesheet};
 use crate::selector::{
     matches_with_state_cached, parse_selector_list, AncestorFilter, ComplexSelector, MatchCache,
-    SimpleSelector, Specificity,
+    PseudoClass, SimpleSelector, Specificity,
 };
 use crate::value::{
     expand_shorthand, parse_color, parse_length, value_is_valid_for, Color, Length,
@@ -212,6 +212,12 @@ struct CollectedRule {
     /// Ordre source global — départage à spécificité égale.
     order: u32,
     origin: Origin,
+    /// Arbre d'appartenance (R-96) : `None` = document ;
+    /// `Some(racine shadow)` = feuille confinée à cet arbre
+    /// shadow (un `<style>` en shadow n'atteint ni le
+    /// document ni les autres racines — seuls `:host` sujet
+    /// et `::part` franchissent, cf. `collect_candidates`).
+    scope: Option<NodeId>,
     /// Chemin de rangs `@layer` (CSS Cascade 5 §6.4 — R-91) :
     /// un rang par niveau de couche imbriquée, attribué à la
     /// première déclaration du nom (comparaison
@@ -392,6 +398,10 @@ fn rightmost_key(sel: &ComplexSelector) -> BucketKey {
     let mut tag = None;
     for s in &compound.simples {
         match s {
+            // `E::part(n)` : le sujet est l'élément `part` en
+            // shadow — `E` et consorts qualifient l'HÔTE, pas
+            // le nœud → aucune clé utilisable (R-96).
+            SimpleSelector::Part(_) => return BucketKey::Universal,
             SimpleSelector::Id(i) => return BucketKey::Id(i.clone()),
             SimpleSelector::Class(c) => {
                 class.get_or_insert(c);
@@ -645,7 +655,7 @@ impl StyleEngine {
         let mut e = Self::default();
         e.add_css(UA_CSS, Origin::UserAgent);
         let quirks_sheet = crate::parser::parse_stylesheet(QUIRKS_UA_CSS);
-        e.collect_rules_into(&quirks_sheet.rules, Origin::UserAgent, &[], &[], true);
+        e.collect_rules_into(&quirks_sheet.rules, Origin::UserAgent, &[], &[], true, None);
         e.quirks_index = SelectorIndex::build(&e.quirks_rules);
         e
     }
@@ -661,13 +671,43 @@ impl StyleEngine {
         self.add_stylesheet(&sheet, origin);
     }
 
+    /// Feuille **confinée à un arbre shadow** (R-96) : ses
+    /// règles n'atteignent que les nœuds de la racine
+    /// `scope` — plus l'hôte lui-même via les sélecteurs
+    /// `:host*` et les `::part` exposés. Un `<style>` trouvé
+    /// en shadow se branche ici (collecte par arbre dans
+    /// `explorer-core`), pas dans `add_stylesheet`.
+    pub fn add_scoped_stylesheet(&mut self, sheet: &Stylesheet, origin: Origin, scope: NodeId) {
+        self.collect_rules_scoped(&sheet.rules, origin, &[], scope);
+    }
+
+    /// Variante texte de [`StyleEngine::add_scoped_stylesheet`].
+    pub fn add_scoped_css(&mut self, input: &str, origin: Origin, scope: NodeId) {
+        let sheet = crate::parser::parse_stylesheet(input);
+        self.add_scoped_stylesheet(&sheet, origin, scope);
+    }
+
     /// Aplati récursif : règles qualifiées + corps `@media`.
     /// `media` = pile des listes englobantes (AND entre listes,
     /// OR entre les queries d'une même liste).
     fn collect_rules(&mut self, rules: &[Rule], origin: Origin, media: &[Vec<MediaQuery>]) {
-        self.collect_rules_into(rules, origin, media, &[], false);
+        self.collect_rules_into(rules, origin, media, &[], false, None);
         // L'index reflète toujours la table complète — une
         // feuille ajoutée entre deux calculs doit être vue.
+        self.index = SelectorIndex::build(&self.rules);
+    }
+
+    /// Contrepartie scopée de [`StyleEngine::collect_rules`]
+    /// (R-96) : même aplatissement, règles estampillées
+    /// `scope` (racine shadow propriétaire).
+    fn collect_rules_scoped(
+        &mut self,
+        rules: &[Rule],
+        origin: Origin,
+        media: &[Vec<MediaQuery>],
+        scope: NodeId,
+    ) {
+        self.collect_rules_into(rules, origin, media, &[], false, Some(scope));
         self.index = SelectorIndex::build(&self.rules);
     }
 
@@ -688,7 +728,9 @@ impl StyleEngine {
     /// Collecte vers `self.rules` — ou vers `quirks_rules` quand
     /// `quirks` est vrai (règles filtrées au document mode).
     /// `layer` = chemin de noms des couches `@layer`
-    /// englobantes (R-91).
+    /// englobantes (R-91). `scope` = racine shadow
+    /// propriétaire (R-96, `None` = document).
+    #[allow(clippy::too_many_arguments)]
     fn collect_rules_into(
         &mut self,
         rules: &[Rule],
@@ -696,6 +738,7 @@ impl StyleEngine {
         media: &[Vec<MediaQuery>],
         layer: &[String],
         quirks: bool,
+        scope: Option<NodeId>,
     ) {
         for rule in rules {
             match rule {
@@ -714,6 +757,7 @@ impl StyleEngine {
                             declarations: q.declarations.clone(),
                             order: self.next_order,
                             origin,
+                            scope,
                             layer: layer_ranks,
                             media: media.to_vec(),
                         });
@@ -726,7 +770,7 @@ impl StyleEngine {
                         // liste de queries du niveau.
                         let mut nested = media.to_vec();
                         nested.push(queries.clone());
-                        self.collect_rules_into(rules, origin, &nested, layer, quirks);
+                        self.collect_rules_into(rules, origin, &nested, layer, quirks, scope);
                     } else if let AtKind::Layer { name, rules } = &at.kind {
                         // `@layer nom {…}` : les règles entrent
                         // dans la couche — l'ordre du layer est
@@ -750,7 +794,7 @@ impl StyleEngine {
                         for i in 1..=path.len() {
                             self.layer_slot(&path[..i]);
                         }
-                        self.collect_rules_into(rules, origin, media, &path, quirks);
+                        self.collect_rules_into(rules, origin, media, &path, quirks, scope);
                     } else if let AtKind::Statement { prelude } = &at.kind {
                         // `@layer a, b;` : déclare l'ordre sans
                         // règles (les corps s'y raccordent par
@@ -1065,6 +1109,35 @@ impl StyleEngine {
                 });
             }
         }
+        // R-96 — arbre shadow : le flat tree de l'hôte est
+        // fait des enfants de sa racine (latérale — hors
+        // `children`). L'héritage franchit la frontière :
+        // le style de l'hôte est le parent des enfants
+        // shadow (css-scoping §3.3 — les `--*` et propriétés
+        // héritées traversent, les sélecteurs non : le
+        // filtre de `collect_candidates` tient la porte).
+        if let Some(root) = dom.shadow_root(node, true) {
+            if let Ok(schildren) = dom.children(root) {
+                for child in schildren {
+                    if dom.element(child).is_ok() {
+                        explorer_common::deep(|| {
+                            self.compute_subtree(
+                                dom,
+                                child,
+                                env,
+                                Some(&style),
+                                map,
+                                pseudos,
+                                state,
+                                &mut *mcache,
+                                &child_anc,
+                                root_fs,
+                            );
+                        });
+                    }
+                }
+            }
+        }
         map.insert(node, style);
     }
 
@@ -1363,6 +1436,56 @@ impl StyleEngine {
         a || (dom.document_mode() == explorer_dom::DocumentMode::Quirks && q)
     }
 
+    /// R-96 — le sélecteur `sel` de la règle peut-il atteindre
+    /// `node` ? Quand `rule.scope == node_scope`, toujours oui
+    /// (même arbre). Sinon, deux franchissements seulement :
+    ///   • sortant — `:host*` en composé sujet d'une feuille
+    ///     scopée, seulement sur l'hôte de sa racine
+    ///     (`.a:host` qualifie l'hôte) ;
+    ///   • entrant — `::part` en composé sujet d'une feuille
+    ///     externe : le sujet vit dans la racine shadow dont
+    ///     l'HÔTE appartient à l'arbre de la feuille (un seul
+    ///     boundary — `part` n'expose jamais au-delà).
+    fn selector_reaches(
+        dom: &Dom,
+        rule: &CollectedRule,
+        node: NodeId,
+        node_scope: Option<NodeId>,
+        sel_idx: usize,
+    ) -> bool {
+        if rule.scope == node_scope {
+            return true;
+        }
+        let Some(sel) = rule.selectors.get(sel_idx) else {
+            return false;
+        };
+        let Some((last, _)) = sel.parts.last() else {
+            return false;
+        };
+        if last
+            .simples
+            .iter()
+            .any(|s| matches!(s, SimpleSelector::Part(_)))
+        {
+            // Le nœud est dans `node_scope` ; sa racine a un
+            // hôte — la feuille doit appartenir à l'arbre de
+            // cet hôte.
+            let host_scope = node_scope
+                .and_then(|r| dom.shadow_host(r))
+                .and_then(|h| dom.containing_shadow_root(h));
+            return rule.scope == host_scope;
+        }
+        if rule.scope.and_then(|r| dom.shadow_host(r)) != Some(node) {
+            return false;
+        }
+        last.simples.iter().any(|s| {
+            matches!(
+                s,
+                SimpleSelector::Pseudo(PseudoClass::Host(_) | PseudoClass::HostContext(_))
+            )
+        })
+    }
+
     /// Candidats de déclaration des **règles** triés (rang,
     /// spécificité, ordre croissants — la dernière écriture
     /// gagne) : un sélecteur doit matcher **avec le même
@@ -1387,6 +1510,9 @@ impl StyleEngine {
         mcache: &mut MatchCache,
         anc: &AncestorFilter,
     ) -> Vec<(u8, Vec<u32>, Specificity, u32, &'a Declaration)> {
+        // Arbre d'appartenance du nœud (R-96) : `None` =
+        // document. Arbitre le confinement des feuilles.
+        let node_scope = dom.containing_shadow_root(node);
         // Spécificité max des sélecteurs qui matchent, par
         // règle (`true` = table quirks — mêmes rang UA et
         // ordre source que la table principale).
@@ -1403,6 +1529,12 @@ impl StyleEngine {
             let Some(rule) = rules.get(e.rule as usize) else {
                 return;
             };
+            // R-96 — confinement : une feuille n'atteint que
+            // son propre arbre (franchissements `:host*`/
+            // `::part` arbitrés par `selector_reaches`).
+            if !Self::selector_reaches(dom, rule, node, node_scope, e.selector as usize) {
+                return;
+            }
             // Chaque groupe `@media` englobant doit matcher.
             if !rule.media.is_empty() && !rule.media.iter().all(|qs| media_matches(env, qs)) {
                 return;
@@ -1420,7 +1552,7 @@ impl StyleEngine {
             {
                 return;
             }
-            let hit = matches_with_state_cached(dom, node, sel, state, mcache, *anc);
+            let hit = matches_with_state_cached(dom, node, sel, state, mcache, *anc, rule.scope);
             if hit {
                 spec_by_rule
                     .entry((quirks, e.rule))

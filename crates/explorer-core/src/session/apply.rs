@@ -1195,8 +1195,14 @@ pub(crate) fn styles_payload(
     // défaut de fermeture (accolade, commentaire) ne peut plus
     // absorber la feuille suivante, et `@import`/`@charset`
     // en tête de feuille redeviennent valides (cf. R-68).
-    for css in collect_style_sheets(dom, &p.csp) {
-        eng.add_css(&css, Origin::Author);
+    // R-96 — chaque `<style>` se charge dans son arbre :
+    // `scope = Some(racine)` → feuille confinée shadow
+    // (`add_scoped_css`), `None` → feuille document.
+    for (scope, css) in collect_style_sheets(dom, &p.csp) {
+        match scope {
+            Some(root) => eng.add_scoped_css(&css, Origin::Author, root),
+            None => eng.add_css(&css, Origin::Author),
+        }
     }
     for css in &p.linked_sheets {
         eng.add_css(css, Origin::Author);

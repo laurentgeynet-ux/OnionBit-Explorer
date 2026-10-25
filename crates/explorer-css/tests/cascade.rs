@@ -1874,3 +1874,187 @@ fn r83_saut_des_calculs_pseudo() {
         Some("\"x\"")
     );
 }
+
+// ── R-96 — scoping shadow DOM ─────────────────────────────────
+
+/// DOM : `body > section.wrap > x-foo.dark#h` ; l'hôte `x-foo`
+/// porte une racine shadow ouverte contenant `p.inner` (avec
+/// `part=label` sur `span.slot`) :
+///   shadowroot: <p class="inner"> / <span part="label">
+struct ShadowFixture {
+    dom: Dom,
+    host: NodeId,
+    root: NodeId,
+    inner: NodeId,
+    label: NodeId,
+}
+
+fn shadow_fixture() -> ShadowFixture {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let body = dom.create_element("body").unwrap();
+    dom.append_child(doc, body).unwrap();
+    let wrap = dom.create_element("section").unwrap();
+    dom.set_attribute(wrap, "class", "wrap").unwrap();
+    dom.append_child(body, wrap).unwrap();
+    let host = dom.create_element("x-foo").unwrap();
+    dom.set_attribute(host, "class", "dark").unwrap();
+    dom.set_attribute(host, "id", "h").unwrap();
+    dom.append_child(wrap, host).unwrap();
+    let root = dom.create_fragment().unwrap();
+    dom.attach_shadow_root(host, root, true);
+    let inner = dom.create_element("p").unwrap();
+    dom.set_attribute(inner, "class", "inner").unwrap();
+    dom.append_child(root, inner).unwrap();
+    let label = dom.create_element("span").unwrap();
+    dom.set_attribute(label, "part", "label").unwrap();
+    dom.append_child(root, label).unwrap();
+    ShadowFixture {
+        dom,
+        host,
+        root,
+        inner,
+        label,
+    }
+}
+
+#[test]
+fn feuille_document_ne_rentre_pas_en_shadow() {
+    let f = shadow_fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("p { color: red }", Origin::Author);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    // `.inner` est calculé (flat tree) mais la règle document
+    // `p` ne l'atteint pas — confinement.
+    assert_ne!(map.get(f.inner).and_then(|s| s.get("color")), Some("red"));
+}
+
+#[test]
+fn feuille_scopee_atteint_son_arbre() {
+    let f = shadow_fixture();
+    let mut e = StyleEngine::new();
+    e.add_scoped_css("p { color: green }", Origin::Author, f.root);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(map.get(f.inner).and_then(|s| s.get("color")), Some("green"));
+}
+
+#[test]
+fn feuille_scopee_ne_fuit_pas_vers_document() {
+    // Deux racines : le scope A n'atteint pas l'arbre B ni le
+    // document.
+    let mut f = shadow_fixture();
+    let host2 = f.dom.create_element("x-bar").unwrap();
+    let doc = f.dom.document();
+    f.dom.append_child(doc, host2).unwrap();
+    let root2 = f.dom.create_fragment().unwrap();
+    f.dom.attach_shadow_root(host2, root2, true);
+    let inner2 = f.dom.create_element("p").unwrap();
+    f.dom.append_child(root2, inner2).unwrap();
+    let mut e = StyleEngine::new();
+    e.add_scoped_css("p { color: green }", Origin::Author, f.root);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(map.get(f.inner).and_then(|s| s.get("color")), Some("green"));
+    assert_ne!(map.get(inner2).and_then(|s| s.get("color")), Some("green"));
+}
+
+#[test]
+fn host_sujet_matche_lhote() {
+    let f = shadow_fixture();
+    let mut e = StyleEngine::new();
+    e.add_scoped_css(":host { display: block }", Origin::Author, f.root);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(
+        map.get(f.host).and_then(|s| s.get("display")),
+        Some("block")
+    );
+}
+
+#[test]
+fn host_fonctionnel_filtre_lhote() {
+    let f = shadow_fixture();
+    let mut e = StyleEngine::new();
+    // L'hôte a bien `class=dark` → match.
+    e.add_scoped_css(":host(.dark) { color: navy }", Origin::Author, f.root);
+    // `.light` absent → ne doit pas matcher.
+    e.add_scoped_css(":host(.light) { color: pink }", Origin::Author, f.root);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(map.get(f.host).and_then(|s| s.get("color")), Some("navy"));
+}
+
+#[test]
+fn host_context_remonte_dans_lenglobant() {
+    let f = shadow_fixture();
+    let mut e = StyleEngine::new();
+    e.add_scoped_css(
+        ":host-context(.wrap) { display: grid }",
+        Origin::Author,
+        f.root,
+    );
+    e.add_scoped_css(
+        ":host-context(.absent) { display: flex }",
+        Origin::Author,
+        f.root,
+    );
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(map.get(f.host).and_then(|s| s.get("display")), Some("grid"));
+}
+
+#[test]
+fn part_depuis_document_atteint_lelement_expose() {
+    let f = shadow_fixture();
+    let mut e = StyleEngine::new();
+    e.add_css("x-foo::part(label) { color: teal }", Origin::Author);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(map.get(f.label).and_then(|s| s.get("color")), Some("teal"));
+}
+
+#[test]
+fn part_sans_attribut_ne_matche_pas() {
+    let f = shadow_fixture();
+    let mut e = StyleEngine::new();
+    // `.inner` n'a pas `part=label`.
+    e.add_css("x-foo::part(label) { color: teal }", Origin::Author);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_ne!(map.get(f.inner).and_then(|s| s.get("color")), Some("teal"));
+}
+
+#[test]
+fn heritage_franchit_la_frontiere() {
+    let f = shadow_fixture();
+    let mut e = StyleEngine::new();
+    // `color` et `--var` héritent de l'hôte vers l'arbre
+    // shadow (pas de règle ciblée sur `.inner`).
+    e.add_css("x-foo { color: purple; --ton: violet }", Origin::Author);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(
+        map.get(f.inner).and_then(|s| s.get("color")),
+        Some("purple")
+    );
+    // `--*` traverse la frontière : la règle consommatrice
+    // vit dans la feuille scopée, la variable sur l'hôte
+    // (feuille document) — héritée via le style parent.
+    let mut e2 = StyleEngine::new();
+    e2.add_css("x-foo { --ton: violet }", Origin::Author);
+    e2.add_scoped_css("p { color: var(--ton) }", Origin::Author, f.root);
+    let map2 = e2.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(
+        map2.get(f.inner).and_then(|s| s.get("color")),
+        Some("violet")
+    );
+}
+
+#[test]
+fn descendant_depuis_host_franchit() {
+    // `div :host p` — dans la feuille scopée : `div` marche
+    // les ancêtres de l'hôte dans l'arbre englobant (section
+    // n'est pas div → faux ici) ; `.wrap :host` doit matcher.
+    let f = shadow_fixture();
+    let mut e = StyleEngine::new();
+    e.add_scoped_css("div :host { display: none }", Origin::Author, f.root);
+    e.add_scoped_css(".wrap :host { display: block }", Origin::Author, f.root);
+    let map = e.compute_tree(&f.dom, f.dom.document(), &env());
+    assert_eq!(
+        map.get(f.host).and_then(|s| s.get("display")),
+        Some("block")
+    );
+}

@@ -460,25 +460,39 @@ pub(crate) fn collect_meta_csp(dom: &Dom) -> Vec<String> {
 /// n'est retenu que si `'unsafe-inline'`/un `nonce`
 /// d'élément l'autorise (`csp` vide = aucune politique →
 /// tout admis, comme avant).
-pub(crate) fn collect_style_sheets(dom: &Dom, csp: &[explorer_net::csp::CspPolicy]) -> Vec<String> {
+///
+/// R-96 — chaque entrée est `(scope, css)` : `scope` = la
+/// racine shadow propriétaire de la feuille (`None` =
+/// document). La traversée descend dans les racines
+/// attachées : un `<style>` en shadow est confiné à sa
+/// racine (`add_scoped_css` côté moteur), jamais fusionné
+/// dans la feuille document.
+pub(crate) fn collect_style_sheets(
+    dom: &Dom,
+    csp: &[explorer_net::csp::CspPolicy],
+) -> Vec<(Option<NodeId>, String)> {
     let mut sheets = Vec::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "style") {
             let nonce = dom.attribute(n, "nonce").ok().flatten();
-            if !explorer_net::csp::csp_inline_allowed(
+            if explorer_net::csp::csp_inline_allowed(
                 csp,
                 explorer_net::csp::InlineKind::Style,
                 nonce.as_deref(),
             ) {
-                continue;
-            }
-            if let Ok(t) = dom.text_content(n) {
-                sheets.push(t);
+                if let Ok(t) = dom.text_content(n) {
+                    sheets.push((dom.containing_shadow_root(n), t));
+                }
             }
         }
         if let Ok(ch) = dom.children(n) {
             queue.extend(ch.iter().rev());
+        }
+        // Flat tree : la racine shadow se visite à la
+        // position de son hôte — avant les enfants light.
+        if let Some(root) = dom.shadow_root(n, true) {
+            queue.push(root);
         }
     }
     sheets

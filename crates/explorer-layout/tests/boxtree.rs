@@ -355,3 +355,33 @@ fn media_native_replaced_boxes() {
         "audio sans controls masqué par l'UA"
     );
 }
+
+// ── R-96 — flat tree shadow ───────────────────────────────────
+
+#[test]
+fn hote_shadow_peint_ses_enfants_shadow_pas_le_light() {
+    // DSD : `<x-foo>` reçoit une racine shadow contenant
+    // `<p class="inner">` ; son light DOM `<em>` n'est pas
+    // distribué → absent des boîtes.
+    let (dom, bx) = tree(
+        "<html><body><x-foo><template shadowrootmode=\"open\">\
+         <p class=\"inner\">S</p></template><em>L</em></x-foo></body></html>",
+    );
+    let host = by_tag(&dom, "x-foo");
+    let root = dom.shadow_root(host, true).expect("racine attachée");
+    let inner = dom
+        .children(root)
+        .unwrap()
+        .into_iter()
+        .find(|&c| dom.tag_name(c).is_ok_and(|t| t == "p"))
+        .expect("p dans la racine");
+    assert!(find(&bx, inner).is_some(), "enfant shadow en boîte");
+    let em = by_tag(&dom, "em");
+    assert!(
+        find(&bx, em).is_none(),
+        "light DOM non distribué non peint (T3)"
+    );
+    // Le template DSD consommé n'est pas une boîte.
+    let tpl = by_tag(&dom, "template");
+    assert!(find(&bx, tpl).is_none(), "template DSD consommé");
+}

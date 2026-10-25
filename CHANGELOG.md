@@ -36,6 +36,43 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `"fixed"` — `getPropertyValue` suit le
   même repli. Test
   `cap196_computed_position_from_geometry`.
+- **R-96 — Shadow DOM tranche 2 : scoping CSS + DSD
+  de bout en bout** (`explorer-dom`/`html`/`css`/
+  `layout`, transport `explorer-jscore`→`explorer-core`)
+  — arc T2 du plan CAP-191 : les arbres shadow
+  traversent désormais tout le pipeline. DOM : tables
+  latérales hôte↔racine (`attach_shadow_root`,
+  `shadow_root(host, include_closed)`, `shadow_host`,
+  `is_shadow_root`, `containing_shadow_root`) — la
+  racine réutilise le fragment `template_contents`.
+  HTML : `<template shadowrootmode=open|closed>`
+  attaché à sa fermeture et au EOF (énuméré HTML
+  insensible à la casse ; valeur exotique ou double
+  racine → template ordinaire, jamais de panic).
+  CSS : `CollectedRule.scope` + `add_scoped_css` —
+  une feuille `<style>` en shadow est confinée à sa
+  racine ; sélecteurs `:host`, `:host(c)`,
+  `:host-context(c)`, `::part(n)` (un seul boundary
+  franchi, `::slotted`/`exportparts` non portés) ;
+  la marche de combinators ne franchit la frontière
+  que vers un composé `:host` ; héritage et `--*`
+  traversent via le style de l'hôte. Layout : le
+  flat tree lit les enfants de la racine — light
+  DOM non distribué non peint (`<slot>` muet
+  jusqu'à T3). Couture NAV↔PIPELINE : le
+  sérialiseur de synchro `serialize_keyed` émet
+  `<template shadowrootmode>` (re-parse → racine
+  réattachée, `keymap` alignée par tag — `innerHTML`
+  JS reste muet, spec) ; `attach_shadow_root` miroir
+  marque dirty ; `collect_style_sheets` retourne
+  `(scope, css)` branché sur `add_scoped_css`.
+  Borné : distribution/slots = T3, retargeting
+  events = T4 (NAV), `shadowrootdelegatesfocus` +
+  `DomMutation::AttachShadow` journal non portés
+  (la racine programmatique voyage par re-parse).
+  21 tests (3 DSD html, 11 scoping cascade, flat
+  tree layout, tables dom, sérialiseur+fingerprint
+  jscore, session).
 
 - **CAP-192 — `customElements` lisible et
   patchable** (`explorer-jscore`) : le

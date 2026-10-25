@@ -320,3 +320,31 @@ fn text_content_propage_erreur_handle() {
         Err(DomError::OutOfBounds(_))
     ));
 }
+
+#[test]
+fn shadow_root_tables() {
+    let mut dom = Dom::new();
+    let host = dom.create_element("div").expect("host");
+    dom.append_child(dom.document(), host).expect("append");
+    let root = dom.create_fragment().expect("frag");
+    let inner = dom.create_element("span").expect("inner");
+    dom.append_child(root, inner).expect("append inner");
+
+    dom.attach_shadow_root(host, root, true);
+    assert_eq!(dom.shadow_root(host, false), Some(root));
+    assert_eq!(dom.shadow_host(root), Some(host));
+    assert!(dom.is_shadow_root(root));
+    assert!(!dom.is_shadow_root(host));
+    // Le fragment n'est PAS un enfant de l'hôte — arbre latéral.
+    assert_eq!(dom.children(host).expect("kids"), Vec::new());
+    // La remontée d'ancêtres termine à la racine shadow.
+    assert_eq!(dom.containing_shadow_root(inner), Some(root));
+    assert_eq!(dom.containing_shadow_root(root), Some(root));
+    assert_eq!(dom.containing_shadow_root(host), None);
+    // Mode closed : `shadow_root` honnête sans include_closed.
+    let host2 = dom.create_element("div").expect("host2");
+    let root2 = dom.create_fragment().expect("frag2");
+    dom.attach_shadow_root(host2, root2, false);
+    assert_eq!(dom.shadow_root(host2, false), None);
+    assert_eq!(dom.shadow_root(host2, true), Some(root2));
+}

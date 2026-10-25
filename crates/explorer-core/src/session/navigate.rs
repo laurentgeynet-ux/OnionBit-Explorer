@@ -962,7 +962,10 @@ impl Session {
             frames: frame_urls,
             srcdoc_frames,
         } = self.plan_subresources(&dom, &url, &base, scripting, &csp);
-        let doc_sheets = collect_style_sheets(&dom, &csp);
+        let doc_sheets = collect_style_sheets(&dom, &csp)
+            .into_iter()
+            .map(|(_, css)| css)
+            .collect();
         // Issue #6 : les `<script type="importmap">` pilotent le
         // prefetch des bare specifiers (`import_specs` — même
         // réécriture que le moteur) et sont poussés au moteur

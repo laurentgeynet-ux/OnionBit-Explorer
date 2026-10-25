@@ -908,6 +908,22 @@ impl Dom {
             for &c in self.serial_children(id).iter().rev() {
                 stack.push(c);
             }
+            // R-96 — le fragment shadow compte comme le
+            // `<template>` émis par `serialize_keyed` (même
+            // ordre : enfants shadow avant light).
+            if n.kind == NodeKind::Element {
+                if let Some(&(root, _)) = self.shadow_roots.get(&id) {
+                    for b in b"template" {
+                        h ^= u64::from(*b);
+                        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+                    }
+                    h ^= 0xff;
+                    h = h.wrapping_mul(0x0000_0100_0000_01b3);
+                    for &c in self.nodes[root as usize].children.iter().rev() {
+                        stack.push(c);
+                    }
+                }
+            }
         }
         h
     }
@@ -960,10 +976,15 @@ impl Dom {
             Enter(NodeId),
             Exit(NodeId),
             Rawtext(NodeId),
+            /// Balise littérale — `<template shadowrootmode>`
+            /// synthétique d'une racine shadow (R-96) : le
+            /// fragment n'a pas de tag propre à émettre.
+            Lit(&'static str),
         }
         let mut stack = vec![Ser::Enter(node)];
         while let Some(ev) = stack.pop() {
             match ev {
+                Ser::Lit(s) => out.push_str(s),
                 Ser::Exit(id) => {
                     let n = &self.nodes[id as usize];
                     out.push_str("</");
@@ -1023,6 +1044,30 @@ impl Dom {
                         } else {
                             stack.push(Ser::Enter(c));
                         }
+                    }
+                    // R-96 — transport DSD : une racine shadow
+                    // s'émet en `<template shadowrootmode>` EN
+                    // TÊTE des enfants (le re-parse moteur la
+                    // réattache ; le fragment porte l'id, aligné
+                    // keymap sur l'élément template canonique).
+                    // Empilé APRES les enfants light → pop avant
+                    // eux : l'ordre émis est [shadow][light].
+                    if let Some(&(root, open)) = self.shadow_roots.get(&id) {
+                        let mode = if open {
+                            "<template shadowrootmode=\"open\">"
+                        } else {
+                            "<template shadowrootmode=\"closed\">"
+                        };
+                        stack.push(Ser::Lit("</template>"));
+                        // Les enfants de la racine (table
+                        // latérale) — même ordre pré-ordre que
+                        // le `template_contents` canonique.
+                        for &c in self.nodes[root as usize].children.iter().rev() {
+                            stack.push(Ser::Enter(c));
+                        }
+                        ids.push(u64::from(root));
+                        tags.push("template".to_string());
+                        stack.push(Ser::Lit(mode));
                     }
                 }
             }
@@ -1383,10 +1428,14 @@ impl Dom {
     }
 
     /// Attache une racine shadow à `host` (stub issue #25) —
-    /// `open` = `mode: "open"` de l'init.
+    /// `open` = `mode: "open"` de l'init. L'hôte est marqué
+    /// sale : la synchro de rendu doit re-sérialiser — le
+    /// sérialiseur émet la racine en `<template
+    /// shadowrootmode>` (R-96 — DSD transport).
     pub fn attach_shadow_root(&mut self, host: NodeId, root: NodeId, open: bool) {
         self.shadow_roots.insert(host, (root, open));
         self.shadow_hosts.insert(root, host);
+        self.mark_dirty_at(host);
     }
 
     /// Hôte de la racine shadow `root` (CAP-191) — `None`
@@ -2767,7 +2816,11 @@ impl Dom {
                     }
                     // Fragment : pas de balise englobante —
                     // `innerHTML` d'un `DocumentFragment` =
-                    // ses enfants (spec sérialisation).
+                    // ses enfants (spec sérialisation). Les
+                    // racines shadow ne sont PAS émises ici
+                    // (spec innerHTML/outerHTML — le transport
+                    // DSD n'existe que dans `serialize_keyed`,
+                    // canal synchro, R-96).
                     if n.kind == NodeKind::Fragment {
                         for &c in n.children.iter().rev() {
                             stack.push(Ser::Enter(c));

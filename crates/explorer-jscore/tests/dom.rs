@@ -5330,6 +5330,69 @@ fn cap191_shadow_surface() {
     );
 }
 
+// ===== R-96 — transport DSD : la synchro sérialise les racines
+// shadow en `<template shadowrootmode>` (re-parse moteur →
+// racine attachée), le fragment porte l'id aligné keymap ;
+// `innerHTML`/`outerHTML` JS restent muets (spec).
+
+#[test]
+fn r96_serialize_keyed_emet_shadowrootmode() {
+    let dom = Rc::new(RefCell::new(Dom::from_html(
+        "<!doctype html><html><body><div id=h><em id=light>L</em></div></body></html>",
+    )));
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    evf(
+        &mut e,
+        "var h=document.getElementById('h'),r=h.attachShadow({mode:'open'});\
+         var s=document.createElement('b');s.id='sh';r.appendChild(s);'ok'",
+    );
+    let (html, ids, tags) = dom.borrow().serialize_keyed();
+    // Ordre émis : host, <template>(id=fragment), enfants
+    // shadow, enfants light.
+    let pos_tpl = html
+        .find("<template shadowrootmode=\"open\">")
+        .expect("dsd");
+    let pos_b = html.find("<b id=\"sh\"").expect("enfant shadow");
+    let pos_em = html.find("<em id=\"light\"").expect("light");
+    let pos_close = html.find("</template>").expect("fermeture");
+    assert!(pos_tpl < pos_b && pos_b < pos_close && pos_close < pos_em);
+    // La série `tags` aligne le fragment sur « template ».
+    let i = tags.iter().position(|t| t == "template").expect("tag tpl");
+    let host_i = tags.iter().position(|t| t == "div").expect("host");
+    let b_i = tags.iter().position(|t| t == "b").expect("b");
+    let em_i = tags.iter().position(|t| t == "em").expect("em");
+    assert!(host_i < i && i < b_i && b_i < em_i);
+    assert_eq!(ids.len(), tags.len());
+    // `innerHTML`/`outerHTML` JS : pas de racine shadow (spec).
+    assert_eq!(
+        evf(
+            &mut e,
+            "[h.innerHTML.includes('shadowroot'),h.outerHTML.includes('shadowroot')].join('|')"
+        ),
+        "false|false"
+    );
+}
+
+#[test]
+fn r96_fingerprint_compte_le_template_shadow() {
+    let dom = Rc::new(RefCell::new(Dom::from_html(
+        "<!doctype html><html><body><div id=h></div></body></html>",
+    )));
+    let fp_before = dom.borrow().structural_fingerprint();
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    evf(
+        &mut e,
+        "var r=document.getElementById('h').attachShadow({mode:'open'});\
+         r.appendChild(document.createElement('i'));'ok'",
+    );
+    let fp_after = dom.borrow().structural_fingerprint();
+    // L'attach + l'enfant shadow changent l'empreinte (le
+    // template synthétique et `i` sont comptés).
+    assert_ne!(fp_before, fp_after);
+}
+
 // ===== CAP-194 — `AbortSignal` réel : statics
 // `abort`/`timeout`/`any`, proto (`aborted`, `reason`,
 // `throwIfAborted`, `onabort`, `addEventListener`), ctor

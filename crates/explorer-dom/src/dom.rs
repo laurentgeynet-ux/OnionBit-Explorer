@@ -63,6 +63,16 @@ pub struct Dom {
     roots: HashMap<RootId, NodeId>,
     next_root: u64,
     document_mode: DocumentMode,
+    /// Hôte → (racine shadow, mode ouvert) — R-96 (Shadow T2).
+    /// La racine est un fragment [`NodeData::Document`] détaché
+    /// (jamais enfant de l'hôte — l'arbre shadow vit hors de la
+    /// liste `children` ; la traversée « flat tree » l'atteint
+    /// via [`Dom::shadow_root`]).
+    shadow_roots: HashMap<NodeId, (NodeId, bool)>,
+    /// Racine shadow → hôte — inverse de `shadow_roots`, pour
+    /// `host` JS et le scoping cascade (`:host`, remontée des
+    /// ancêtres hors de l'arbre).
+    shadow_hosts: HashMap<NodeId, NodeId>,
 }
 
 impl Dom {
@@ -84,6 +94,8 @@ impl Dom {
             roots: HashMap::new(),
             next_root: 0,
             document_mode: DocumentMode::NoQuirks,
+            shadow_roots: HashMap::new(),
+            shadow_hosts: HashMap::new(),
         };
         // Index 0 sur arène vide : ne peut pas échouer.
         let _ = dom.alloc(NodeData::Document);
@@ -552,6 +564,61 @@ impl Dom {
     pub fn set_template_contents(&mut self, id: NodeId, fragment: NodeId) -> Result<()> {
         self.element_mut(id)?.template_contents = Some(fragment);
         Ok(())
+    }
+
+    // -----------------------------------------------------------------
+    // Racines shadow (R-96 — couture Shadow DOM T2)
+    // -----------------------------------------------------------------
+
+    /// Attache la racine shadow `root` à l'hôte `host` —
+    /// `open` = `mode: "open"` de l'init. La racine est un
+    /// fragment ordinaire (ses enfants sont dans `children`) ;
+    /// le lien hôte↔racine vit ici, hors arbre (un `attachShadow`
+    /// répété écrase — le tree-builder DSD garantit l'unicité,
+    /// la surface JS borne ailleurs).
+    pub fn attach_shadow_root(&mut self, host: NodeId, root: NodeId, open: bool) {
+        self.shadow_roots.insert(host, (root, open));
+        self.shadow_hosts.insert(root, host);
+    }
+
+    /// Racine shadow de `host` — `None` si aucune n'est attachée.
+    /// `include_closed` expose aussi le mode `closed` (surface
+    /// JS `ElementInternals` — la cascade et le layout lisent
+    /// toujours les deux modes : le contenu se peint pareil).
+    #[must_use]
+    pub fn shadow_root(&self, host: NodeId, include_closed: bool) -> Option<NodeId> {
+        self.shadow_roots
+            .get(&host)
+            .and_then(|&(r, open)| (open || include_closed).then_some(r))
+    }
+
+    /// Hôte de la racine shadow `root` — `None` si `root` n'est
+    /// pas une racine attachée.
+    #[must_use]
+    pub fn shadow_host(&self, root: NodeId) -> Option<NodeId> {
+        self.shadow_hosts.get(&root).copied()
+    }
+
+    /// `true` si `node` est une racine shadow attachée.
+    #[must_use]
+    pub fn is_shadow_root(&self, node: NodeId) -> bool {
+        self.shadow_hosts.contains_key(&node)
+    }
+
+    /// Racine shadow englobant `node` — `None` si `node` vit dans
+    /// l'arbre document (non-scopé). Marche de parent en parent :
+    /// la racine shadow est le sommet de la chaîne (son `parent`
+    /// est `None`, comme le `Document` — c'est `shadow_hosts`
+    /// qui la distingue).
+    #[must_use]
+    pub fn containing_shadow_root(&self, node: NodeId) -> Option<NodeId> {
+        let mut cur = node;
+        loop {
+            if self.is_shadow_root(cur) {
+                return Some(cur);
+            }
+            cur = self.parent(cur).ok()??;
+        }
     }
 
     // -----------------------------------------------------------------

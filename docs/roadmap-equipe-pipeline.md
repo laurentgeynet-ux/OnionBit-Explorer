@@ -2523,6 +2523,38 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `background_size_scales_fetched_image` (session — motif HN
   exact : `url(svg), linear-gradient(…)` + `size:10px`).
 
+- [x] **R-96. Shadow DOM tranche 2 — scoping CSS + DSD**
+  (arc T2 du plan CAP-191 ; T1 = surface JS côté NAV).
+  Chaîne complète octets→pixels pour les arbres shadow :
+  `explorer-dom` porte les tables latérales hôte↔racine
+  (`attach_shadow_root`/`shadow_root`/`shadow_host`/
+  `is_shadow_root`/`containing_shadow_root` — la racine est
+  le fragment `template_contents`, zéro nœud synthétique) ;
+  `explorer-html` attache `<template shadowrootmode=open|
+  closed>` à la fermeture (et au EOF) — énuméré HTML
+  insensible à la casse, valeur exotique = template
+  ordinaire, double racine refusée ; `explorer-css` gagne le
+  confinement : `CollectedRule.scope`, `add_scoped_css`,
+  matching `:host`/`:host(c)`/`:host-context(c)`/`::part(n)`
+  (sujet `::part` = nœud `part` en shadow, les autres
+  simples qualifient l'hôte — un seul boundary franchi),
+  filtre d'arbre dans `collect_candidates` (document ↛
+  shadow, racine ↛ autre racine ; `:host*` sujet = seule
+  porte sortante, `::part` = seule porte entrante), marche
+  de combinators qui ne franchit la frontière que vers un
+  composé `:host`, héritage + `--*` qui traversent via le
+  style de l'hôte ; `explorer-layout` peint le flat tree
+  (`child_boxes` lit les enfants de la racine — light DOM
+  non distribué non peint, `<slot>` = rien en attendant la
+  distribution T3). Borné honnête : pas de `::slotted`, pas
+  d'`exportparts`, distribution = T3, retargeting events =
+  T4 (NAV). Régressions : 3× DSD html, 11× cascade scoping
+  (`:host*`/`::part`/isolation/héritage), flat-tree boxtree,
+  `shadow_root_tables` dom — + transport NAV↔PIPELINE :
+  `serialize_keyed` miroir émet `<template shadowrootmode>`
+  (canal synchro seul — `innerHTML` reste muet, spec),
+  `collect_style_sheets` retourne `(scope, css)`.
+
 ## Palier R-B — Contenu étranger, animation, canvas
 
 - [x] **R-8. Foreign-content dans `explorer-html`** (ex-60a) :

@@ -117,6 +117,12 @@ pub enum SimpleSelector {
     /// composé final : le matching élément l'ignore, la
     /// cascade dirige les déclarations vers le pseudo-style.
     PseudoElement(PseudoElement),
+    /// `::part(<nom>)` (R-96) — pseudo-élément frontier :
+    /// le sujet est un élément `part~=<nom>` **dans une
+    /// racine shadow**, les autres simples du composé
+    /// qualifient **l'hôte** (les combinators en amont
+    /// marchent dans l'arbre englobant, depuis l'hôte).
+    Part(String),
 }
 
 /// Pseudo-éléments générant des boîtes (R-13).
@@ -137,7 +143,7 @@ impl SimpleSelector {
             Self::Id(_) => (1, 0, 0),
             Self::Class(_) | Self::Attribute { .. } => (0, 1, 0),
             // Pseudo-élément : colonne « type » (CSS2 §6.4.3).
-            Self::Type(_) | Self::PseudoElement(_) => (0, 0, 1),
+            Self::Type(_) | Self::PseudoElement(_) | Self::Part(_) => (0, 0, 1),
             Self::Universal => (0, 0, 0),
             Self::Pseudo(p) => p.specificity(),
         }
@@ -196,6 +202,15 @@ pub enum PseudoClass {
     Is(Vec<ComplexSelector>),
     /// `:where(<liste>)` — comme `is` mais spécificité nulle.
     Where(Vec<ComplexSelector>),
+    /// `:host` / `:host(<composé>)` — l'élément hôte de la
+    /// racine shadow du scope de la règle (R-96). Ne matche
+    /// qu'au franchissement de frontière (composé d'un
+    /// sélecteur scopé atteignant l'hôte) ou en sujet sur
+    /// l'hôte — jamais sur un nœud ordinaire.
+    Host(Option<Box<CompoundSelector>>),
+    /// `:host-context(<composé>)` — l'hôte du scope **ou un
+    /// de ses ancêtres** (arbre englobant) matche le composé.
+    HostContext(Box<CompoundSelector>),
     /// Pseudo-classe dynamique (`:hover`, `:focus`…) — évaluée
     /// via l'état fourni par l'appelant (`matches_with_state`) ;
     /// `matches` seul les considère fausses (hors `:link` qui
@@ -312,6 +327,16 @@ impl PseudoClass {
                 .max()
                 .unwrap_or((0, 0, 0)),
             Self::Where(_) => (0, 0, 0),
+            // `:host(c)` / `:host-context(c)` : classe + le
+            // composé argument (Selectors §4.3).
+            Self::Host(arg) => arg.as_ref().map_or((0, 1, 0), |c| {
+                let (a, b, cc) = c.specificity();
+                (a, b + 1, cc)
+            }),
+            Self::HostContext(arg) => {
+                let (a, b, cc) = arg.specificity();
+                (a, b + 1, cc)
+            }
             _ => (0, 1, 0),
         }
     }
@@ -564,6 +589,7 @@ impl<'t> SelectorParser<'t> {
                     "first-of-type" => PseudoClass::FirstOfType,
                     "last-of-type" => PseudoClass::LastOfType,
                     "only-of-type" => PseudoClass::OnlyOfType,
+                    "host" => PseudoClass::Host(None),
                     other => {
                         // Dynamiques reconnues → gardées (l'état
                         // arbitre au matching) ; inconnues →
@@ -574,6 +600,20 @@ impl<'t> SelectorParser<'t> {
                 Some(SimpleSelector::Pseudo(simple))
             }
             Some(Token::Function(name)) => match name.as_str() {
+                "host" | "host-context" => {
+                    self.skip_ws();
+                    let arg = self.compound()?;
+                    self.skip_ws();
+                    if !matches!(self.next(), Some(Token::CloseParen)) {
+                        return None;
+                    }
+                    let simple = if name.as_str() == "host" {
+                        PseudoClass::Host(Some(Box::new(arg)))
+                    } else {
+                        PseudoClass::HostContext(Box::new(arg))
+                    };
+                    Some(SimpleSelector::Pseudo(simple))
+                }
                 "nth-child" | "nth-last-child" | "nth-of-type" | "nth-last-of-type" => {
                     let (a, b) = self.nth_args()?;
                     let simple = match name.as_str() {
@@ -604,7 +644,8 @@ impl<'t> SelectorParser<'t> {
     }
 
     /// `::name` — pseudo-élément : seuls `before`/`after`
-    /// génèrent des boîtes (R-13) ; les autres noms
+    /// génèrent des boîtes (R-13) ; `::part(<nom>)` est le
+    /// franchissement shadow (R-96) ; les autres noms
     /// (`first-line`, `selection`…) rendent le sélecteur
     /// invalide → la règle est ignorée, dégradation sûre.
     fn pseudo_element(&mut self) -> Option<SimpleSelector> {
@@ -614,6 +655,18 @@ impl<'t> SelectorParser<'t> {
                 "after" => Some(SimpleSelector::PseudoElement(PseudoElement::After)),
                 _ => None,
             },
+            Some(Token::Function(name)) if name.as_str() == "part" => {
+                self.skip_ws();
+                let part = match self.next() {
+                    Some(Token::Ident(p)) => p.clone(),
+                    _ => return None,
+                };
+                self.skip_ws();
+                if !matches!(self.next(), Some(Token::CloseParen)) {
+                    return None;
+                }
+                Some(SimpleSelector::Part(part))
+            }
             _ => None,
         }
     }
@@ -864,12 +917,14 @@ pub fn matches_any_with_state(
         state,
         &mut MatchCache::default(),
         AncestorFilter::of_ancestors(dom, node),
+        None,
     )
 }
 
 /// Variante mémoïsée de [`matches_any_with_state`]. L'arête
 /// `:not()`/`:is()` niche la récursion (profondeur libre par
 /// le texte du sélecteur) → garde-fou `deep` (R-24).
+#[allow(clippy::too_many_arguments)]
 fn matches_any_with_state_in(
     dom: &Dom,
     node: NodeId,
@@ -877,11 +932,12 @@ fn matches_any_with_state_in(
     state: &dyn Fn(&str) -> bool,
     cache: &mut MatchCache,
     anc: AncestorFilter,
+    scope: Option<NodeId>,
 ) -> bool {
     explorer_common::deep(|| {
         selectors
             .iter()
-            .any(|s| matches_with_state_cached(dom, node, s, state, &mut *cache, anc))
+            .any(|s| matches_with_state_cached(dom, node, s, state, &mut *cache, anc, scope))
     })
 }
 
@@ -909,6 +965,7 @@ pub fn matches_with_state(
         state,
         &mut MatchCache::default(),
         AncestorFilter::of_ancestors(dom, node),
+        None,
     )
 }
 
@@ -916,6 +973,10 @@ pub fn matches_with_state(
 /// est partagé par toute la passe de cascade (R-83) et
 /// `anc` porte les clés des ancêtres de `node` (filtre de
 /// Bloom — la cascade l'entretient au fil de la descente).
+/// `scope` = racine shadow de la règle évaluée (R-96) :
+/// `None` document ; il conditionne `:host`/`:host-context`
+/// (hôte de cette racine) et la marche des combinators ne
+/// franchit la frontière que vers un composé `:host`.
 pub(crate) fn matches_with_state_cached(
     dom: &Dom,
     node: NodeId,
@@ -923,6 +984,7 @@ pub(crate) fn matches_with_state_cached(
     state: &dyn Fn(&str) -> bool,
     cache: &mut MatchCache,
     anc: AncestorFilter,
+    scope: Option<NodeId>,
 ) -> bool {
     if dom.element(node).is_err() {
         return false;
@@ -935,6 +997,7 @@ pub(crate) fn matches_with_state_cached(
         state,
         cache,
         anc,
+        scope,
     )
 }
 
@@ -951,6 +1014,7 @@ fn match_selector_part(
     state: &dyn Fn(&str) -> bool,
     cache: &mut MatchCache,
     anc: AncestorFilter,
+    scope: Option<NodeId>,
 ) -> bool {
     let Some((compound, _)) = selector.parts.get(idx) else {
         return true;
@@ -959,9 +1023,88 @@ fn match_selector_part(
     if let Some(hit) = cache.sel_get(&key) {
         return hit;
     }
-    let hit = match_selector_part_eval(dom, node, selector, idx, compound, state, cache, anc);
+    let hit =
+        match_selector_part_eval(dom, node, selector, idx, compound, state, cache, anc, scope);
     cache.sel_put(key, hit);
     hit
+}
+
+/// Composé contenant un simple `:host` — seule forme de
+/// composé autorisée à matcher **au-delà** de la frontière
+/// shadow (R-96) : la marche d'ancêtres franchit alors vers
+/// l'hôte de la racine du scope.
+fn compound_has_host(c: &CompoundSelector) -> bool {
+    c.simples
+        .iter()
+        .any(|s| matches!(s, SimpleSelector::Pseudo(PseudoClass::Host(_))))
+}
+
+/// Hôte franchissable depuis `node` : son parent direct est
+/// la racine shadow → le franchissement mène à `shadow_host`.
+/// (`parent_element` rend `None` sur le fragment — cette
+/// sonde est l'unique porte de sortie du scope, R-96.)
+fn boundary_host(dom: &Dom, node: NodeId) -> Option<NodeId> {
+    dom.parent(node)
+        .ok()
+        .flatten()
+        .filter(|p| dom.is_shadow_root(*p))
+        .and_then(|r| dom.shadow_host(r))
+}
+
+/// Bras `Descendant` de [`match_selector_part_eval`] : marche
+/// d'ancêtres ordinaire, puis franchissement de frontière
+/// quand la chaîne s'épuise au sommet d'un scope — réservé
+/// à un composé `:host` (R-96 ; chaînable sur shadow
+/// imbriqués, chaque saut exigeant le `:host`).
+#[allow(clippy::too_many_arguments)]
+fn match_descendant(
+    dom: &Dom,
+    base: NodeId,
+    selector: &ComplexSelector,
+    idx: usize,
+    state: &dyn Fn(&str) -> bool,
+    cache: &mut MatchCache,
+    anc: AncestorFilter,
+    scope: Option<NodeId>,
+) -> bool {
+    let mut cur = parent_element(dom, base);
+    while let Some(p) = cur {
+        if match_selector_part(dom, p, selector, idx - 1, state, &mut *cache, anc, scope) {
+            return true;
+        }
+        cur = parent_element(dom, p);
+    }
+    let mut top = base;
+    loop {
+        match boundary_host(dom, top) {
+            Some(h) if compound_has_host(&selector.parts[idx - 1].0) => {
+                if match_selector_part(dom, h, selector, idx - 1, state, &mut *cache, anc, scope) {
+                    return true;
+                }
+                // Au-delà de l'hôte, la marche reprend dans
+                // l'arbre englobant (ancêtres ordinaires — un
+                // composé non-`:host` n'aurait pas franchi).
+                let mut cur = parent_element(dom, h);
+                while let Some(p) = cur {
+                    if match_selector_part(
+                        dom,
+                        p,
+                        selector,
+                        idx - 1,
+                        state,
+                        &mut *cache,
+                        anc,
+                        scope,
+                    ) {
+                        return true;
+                    }
+                    cur = parent_element(dom, p);
+                }
+                top = h;
+            }
+            _ => return false,
+        }
+    }
 }
 
 /// Évaluation effective d'un composé + sa suite de
@@ -976,13 +1119,46 @@ fn match_selector_part_eval(
     state: &dyn Fn(&str) -> bool,
     cache: &mut MatchCache,
     anc: AncestorFilter,
+    scope: Option<NodeId>,
 ) -> bool {
-    if !compound
-        .iter()
-        .all(|s| simple_matches(dom, node, s, state, &mut *cache, anc))
-    {
-        return false;
-    }
+    // `::part(n)` (R-96) : le sujet est l'élément `part~=n`
+    // (ce `node`), les autres simples du composé qualifient
+    // l'hôte de sa racine — et la suite des combinators
+    // marche dans l'arbre englobant **depuis l'hôte**.
+    let base = if let Some(pname) = compound.simples.iter().find_map(|s| match s {
+        SimpleSelector::Part(n) => Some(n.as_str()),
+        _ => None,
+    }) {
+        let Some(root) = dom.containing_shadow_root(node) else {
+            return false;
+        };
+        let part_ok = dom
+            .attribute(node, "part")
+            .ok()
+            .flatten()
+            .is_some_and(|v| v.split_ascii_whitespace().any(|t| t == pname));
+        let Some(host) = dom.shadow_host(root) else {
+            return false;
+        };
+        if !part_ok {
+            return false;
+        }
+        if !compound.iter().all(|s| match s {
+            SimpleSelector::Part(_) => true,
+            _ => simple_matches(dom, host, s, state, &mut *cache, anc, scope),
+        }) {
+            return false;
+        }
+        host
+    } else {
+        if !compound
+            .iter()
+            .all(|s| simple_matches(dom, node, s, state, &mut *cache, anc, scope))
+        {
+            return false;
+        }
+        node
+    };
     if idx == 0 {
         return true;
     }
@@ -1007,28 +1183,32 @@ fn match_selector_part_eval(
     // le garde-fou courait à CHAQUE pas d'ancêtre — coût
     // dominant du matching sur pages réelles (R-83).
     explorer_common::deep(|| match combinator {
-        Combinator::Child => match parent_element(dom, node) {
-            Some(p) => match_selector_part(dom, p, selector, idx - 1, state, &mut *cache, anc),
-            None => false,
+        Combinator::Child => match parent_element(dom, base) {
+            Some(p) => {
+                match_selector_part(dom, p, selector, idx - 1, state, &mut *cache, anc, scope)
+            }
+            // Frontière shadow : le franchissement n'existe
+            // que pour un composé `:host` (R-96).
+            None => match boundary_host(dom, base) {
+                Some(h) if compound_has_host(&selector.parts[idx - 1].0) => {
+                    match_selector_part(dom, h, selector, idx - 1, state, &mut *cache, anc, scope)
+                }
+                _ => false,
+            },
         },
         Combinator::Descendant => {
-            let mut cur = parent_element(dom, node);
-            while let Some(p) = cur {
-                if match_selector_part(dom, p, selector, idx - 1, state, &mut *cache, anc) {
-                    return true;
-                }
-                cur = parent_element(dom, p);
-            }
-            false
+            match_descendant(dom, base, selector, idx, state, &mut *cache, anc, scope)
         }
-        Combinator::NextSibling => match prev_element_sibling(dom, node) {
-            Some(s) => match_selector_part(dom, s, selector, idx - 1, state, &mut *cache, anc),
+        Combinator::NextSibling => match prev_element_sibling(dom, base) {
+            Some(s) => {
+                match_selector_part(dom, s, selector, idx - 1, state, &mut *cache, anc, scope)
+            }
             None => false,
         },
         Combinator::SubsequentSibling => {
-            let mut cur = prev_element_sibling(dom, node);
+            let mut cur = prev_element_sibling(dom, base);
             while let Some(s) = cur {
-                if match_selector_part(dom, s, selector, idx - 1, state, &mut *cache, anc) {
+                if match_selector_part(dom, s, selector, idx - 1, state, &mut *cache, anc, scope) {
                     return true;
                 }
                 cur = prev_element_sibling(dom, s);
@@ -1044,7 +1224,8 @@ impl CompoundSelector {
     }
 }
 
-/// Un simple contre un nœud élément.
+/// Un simple contre un nœud élément. `scope` = racine shadow
+/// de la règle évaluée (R-96) — conditionne `:host*`.
 fn simple_matches(
     dom: &Dom,
     node: NodeId,
@@ -1052,6 +1233,7 @@ fn simple_matches(
     state: &dyn Fn(&str) -> bool,
     cache: &mut MatchCache,
     anc: AncestorFilter,
+    scope: Option<NodeId>,
 ) -> bool {
     match sel {
         SimpleSelector::Type(name) => dom
@@ -1081,12 +1263,33 @@ fn simple_matches(
                 .any(|a| a.name == *name && attr_matches(&a.value, *op, value, *case_insensitive)),
             Err(_) => false,
         },
-        SimpleSelector::Pseudo(p) => pseudo_matches(dom, node, p, state, cache, anc),
+        SimpleSelector::Pseudo(p) => pseudo_matches(dom, node, p, state, cache, anc, scope),
         // Le pseudo-élément ne contraint pas l'élément — c'est
         // la cascade qui dirige les déclarations vers le
-        // pseudo-style (R-13).
-        SimpleSelector::Universal | SimpleSelector::PseudoElement(_) => true,
+        // pseudo-style (R-13). `Part` n'atteint ici que hors
+        // chemin pierce (intercepté au niveau composé) → faux.
+        SimpleSelector::Universal | SimpleSelector::PseudoElement(_) | SimpleSelector::Part(_) => {
+            matches!(
+                sel,
+                SimpleSelector::Universal | SimpleSelector::PseudoElement(_)
+            )
+        }
     }
+}
+
+/// Tous les simples de `c` contre `node` — helper pour les
+/// arguments de `:host()`/`:host-context()`.
+fn compound_matches(
+    dom: &Dom,
+    node: NodeId,
+    c: &CompoundSelector,
+    state: &dyn Fn(&str) -> bool,
+    cache: &mut MatchCache,
+    anc: AncestorFilter,
+    scope: Option<NodeId>,
+) -> bool {
+    c.iter()
+        .all(|s| simple_matches(dom, node, s, state, cache, anc, scope))
 }
 
 /// Compare une valeur d'attribut selon l'opérateur.
@@ -1138,7 +1341,9 @@ fn attr_matches(actual: &str, op: AttrOp, expected: &str, ci: bool) -> bool {
     }
 }
 
-/// Pseudo-classe contre un nœud.
+/// Pseudo-classe contre un nœud. `scope` = racine shadow de
+/// la règle évaluée (R-96) — `:host*` n'y répond que sur
+/// l'hôte de cette racine.
 fn pseudo_matches(
     dom: &Dom,
     node: NodeId,
@@ -1146,6 +1351,7 @@ fn pseudo_matches(
     state: &dyn Fn(&str) -> bool,
     cache: &mut MatchCache,
     anc: AncestorFilter,
+    scope: Option<NodeId>,
 ) -> bool {
     match p {
         PseudoClass::Root => {
@@ -1162,9 +1368,35 @@ fn pseudo_matches(
         PseudoClass::OnlyOfType => cache.rank(dom, node, 2) == 1 && cache.rank(dom, node, 3) == 1,
         PseudoClass::NthOfType(a, b) => nth_hit(*a, *b, cache.rank(dom, node, 2)),
         PseudoClass::NthLastOfType(a, b) => nth_hit(*a, *b, cache.rank(dom, node, 3)),
-        PseudoClass::Not(list) => !matches_any_with_state_in(dom, node, list, state, cache, anc),
+        PseudoClass::Not(list) => {
+            !matches_any_with_state_in(dom, node, list, state, cache, anc, scope)
+        }
         PseudoClass::Is(list) | PseudoClass::Where(list) => {
-            matches_any_with_state_in(dom, node, list, state, cache, anc)
+            matches_any_with_state_in(dom, node, list, state, cache, anc, scope)
+        }
+        // `:host` / `:host(c)` — vrai seulement sur l'hôte de
+        // la racine du scope (atteint via le franchissement
+        // de combinateur, ou en sujet sur l'hôte).
+        PseudoClass::Host(arg) => {
+            scope.is_some_and(|r| dom.shadow_host(r) == Some(node))
+                && arg
+                    .as_ref()
+                    .is_none_or(|c| compound_matches(dom, node, c, state, cache, anc, scope))
+        }
+        // `:host-context(c)` — l'hôte du scope ou un de ses
+        // ancêtres (arbre englobant) matche `c`.
+        PseudoClass::HostContext(arg) => {
+            if !scope.is_some_and(|r| dom.shadow_host(r) == Some(node)) {
+                return false;
+            }
+            let mut cur = Some(node);
+            while let Some(n) = cur {
+                if compound_matches(dom, n, arg, state, cache, anc, scope) {
+                    return true;
+                }
+                cur = parent_element(dom, n);
+            }
+            false
         }
         PseudoClass::Dynamic(d) => dynamic_matches(dom, node, *d, state),
     }

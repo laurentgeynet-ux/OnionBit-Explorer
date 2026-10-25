@@ -12915,3 +12915,35 @@ async fn dynamic_module_script_evals_graph() {
     assert!(dump.contains("mod:42"), "module dynamique : {dump}");
     assert!(dump.contains("|load"), "load de l'élément : {dump}");
 }
+
+/// R-96 — bout en bout : `<template shadowrootmode>` parsé →
+/// racine attachée → `<style>` confiné peint le flat tree,
+/// feuille document tenue hors du scope.
+#[tokio::test]
+async fn dsd_shadow_paint_scoped() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <style>span{background:#00ff00;width:50px;height:50px;display:block}</style>\
+         </head><body>\
+         <div id=host><template shadowrootmode=open>\
+         <style>.b{background:#0000ff;width:50px;height:50px;display:block}</style>\
+         <span class=b></span>\
+         </template></div></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    let (fw, fh) = (fw as usize, fh as usize);
+    assert!(
+        count_color(fw, fh, px, [0, 0, 255]) > 0,
+        "feuille shadow peinte (flat tree)"
+    );
+    assert_eq!(
+        count_color(fw, fh, px, [0, 255, 0]),
+        0,
+        "règle document `span` confinée hors du scope"
+    );
+}

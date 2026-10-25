@@ -451,6 +451,10 @@ fn box_kind_of(style: &ComputedStyle) -> BoxKind {
 }
 
 /// Boîtes des enfants de `parent` (éléments + texte utile).
+/// R-96 — flat tree : les enfants d'un hôte shadow sont les
+/// enfants de sa racine (latérale) ; le light DOM non
+/// distribué ne produit pas de boîtes (`<slot>` = fallback
+/// honnête jusqu'à la distribution, tranche T3).
 fn child_boxes<S: ::std::hash::BuildHasher>(
     dom: &Dom,
     parent: NodeId,
@@ -458,7 +462,8 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     parent_style: &ComputedStyle,
     sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
 ) -> Vec<LayoutBox> {
-    let Ok(children) = dom.children(parent) else {
+    let owner = dom.shadow_root(parent, true).unwrap_or(parent);
+    let Ok(children) = dom.children(owner) else {
         return Vec::new();
     };
     let mut out = Vec::new();
