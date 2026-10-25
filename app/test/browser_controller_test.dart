@@ -938,6 +938,23 @@ void main() {
     expect(tab.loading, isFalse);
     expect(tab.title, 'Netflix');
   });
+
+  test('136g — sans WebView2 : repli honnête, chemin moteur',
+      () async {
+    BrowserController.debugDelegationSupported = false;
+    addTearDown(() => BrowserController.debugDelegationSupported = null);
+    final repo = FakeRepo();
+    final c = makeContainer(repo, FakeEvents());
+    addTearDown(c.dispose);
+    await settle(c);
+
+    // Allowlist matchée mais pas de délégation disponible →
+    // navigation moteur normale (ADR-0027 §6, jamais de faux
+    // succès : le site porte son propre échec DRM).
+    await c.read(browserProvider.notifier).navigate('netflix.com');
+    expect(repo.navigations, ['1:http://netflix.com']);
+    expect(c.read(browserProvider).active!.kind, TabKind.engine);
+  });
 }
 
 /// Contrôleur minimal sans onglet — `activeId` reste null.

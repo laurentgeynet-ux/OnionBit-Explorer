@@ -382,6 +382,16 @@ class BrowserController extends Notifier<BrowserState> {
   /// Allowlist DRM (136b) — reconstruite avec `_cfg`.
   late DrmAllowlist _allow;
 
+  /// WebView2 disponible (Windows + runtime) — `false` →
+  /// repli honnête : la navigation reste sur le moteur et
+  /// le site porte son propre échec DRM (136g, ADR-0027 §6).
+  /// Override injectable en test (`debugDelegationSupported`).
+  @visibleForTesting
+  static bool? debugDelegationSupported;
+
+  bool get _delegationSupported =>
+      debugDelegationSupported ?? Platform.isWindows;
+
   /// Contrôleurs WebView2 des onglets délégués, indexés par
   /// id d'onglet — enregistrés par `DelegatedWebView` au
   /// mount (`registerWebView`), consommés pour la navigation
@@ -1489,7 +1499,7 @@ class BrowserController extends Notifier<BrowserState> {
     // moteur n'est jamais contacté pour ces domaines.
     // Hors-Windows : repli honnête (§6) — chemin moteur
     // normal, l'échec DRM reste porté par le site.
-    if (Platform.isWindows && _allow.delegatesUrl(url)) {
+    if (_delegationSupported && _allow.delegatesUrl(url)) {
       _patch(
         id,
         (t) =>

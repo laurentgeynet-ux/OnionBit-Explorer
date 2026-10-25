@@ -804,6 +804,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   transparente à l'usage et
   visible.
 
+- **136g — repli honnête
+  hors-Windows** (`app/`, étape 136
+  NAV, ADR-0027 §6) : gate
+  `_delegationSupported`
+  (`Platform.isWindows`, override
+  `debugDelegationSupported` pour
+  les tests) — allowlist matchée
+  sans WebView2 → navigation
+  moteur normale, le site porte
+  son propre échec DRM, jamais de
+  faux succès. 1 test.
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des

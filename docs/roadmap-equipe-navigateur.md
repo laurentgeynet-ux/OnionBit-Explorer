@@ -4817,8 +4817,13 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     chrome** : icône `live_tv` +
     tooltip « rendu WebView2
     natif » sur l'onglet délégué.
-  - [ ] 136g — repli honnête
-    hors-Windows (site non lu)
+  - [x] **136g — repli honnête
+    hors-Windows** : gate
+    `Platform.isWindows`
+    (override test) — allowlist
+    matchée sans WebView2 →
+    moteur normal, échec DRM du
+    site. 1 test.
   - [ ] 136h — tests allowlist +
     modèle onglet, gate Flutter,
     doc.
