@@ -9,6 +9,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-111 — `!important` inversé à
+  la frontière shadow**
+  (`explorer-css`, css-scoping §6 —
+  dernière borne du catalogue) :
+  rang `scope_rank` inséré entre
+  l'origine et les layers dans le
+  tri de cascade — déclaration
+  **interne** (scopée à la racine
+  du nœud) > document pour le
+  normal, **inversé** pour
+  `!important` ; `style=` traité au
+  contexte du nœud. Test
+  `important_frontiere_shadow_inverse`
+  (3 sens : inner normal, outer
+  !important, inner !important).
+
 - **R-110 — `::part` chaîné +
   `exportparts`** (`explorer-css`,
   css-scoping §3.5, bornes Shadow

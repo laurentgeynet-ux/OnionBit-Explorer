@@ -1208,12 +1208,17 @@ impl StyleEngine {
         };
         let mut cand = self.collect_candidates(dom, node, env, pseudo, state, mcache, anc);
         if pseudo.is_none() {
+            // `style=` vit au contexte du nœud : interne si le
+            // nœud est en shadow — le rang de frontière est
+            // le même que `scope == sa racine` (§6, R-111).
+            let node_outer = dom.containing_shadow_root(node).is_none();
             for d in &inline_decls {
                 let rank = if d.important { 4 } else { 1 };
                 // `style=` est hors-layer — la clé miroir gère
                 // le renversement `!important` (R-91).
                 cand.push((
                     rank,
+                    u8::from(d.important == node_outer),
                     layer_sort_key(&[], d.important),
                     (u32::MAX, u32::MAX, u32::MAX),
                     u32::MAX,
@@ -1221,9 +1226,11 @@ impl StyleEngine {
                 ));
             }
             // Le rang inline s'intercale dans l'ordre global.
-            cand.sort_by_key(|(rank, layer, spec, order, _)| (*rank, layer.clone(), *spec, *order));
+            cand.sort_by_key(|(rank, scope_rank, layer, spec, order, _)| {
+                (*rank, *scope_rank, layer.clone(), *spec, *order)
+            });
         }
-        for (_, _, _, _, d) in &cand {
+        for (_, _, _, _, _, d) in &cand {
             // Les noms de propriétés ordinaires sont
             // ASCII-insensibles → minuscules canoniques ; les
             // propriétés custom `--*` sont SENSIBLES À LA CASSE
@@ -1563,7 +1570,7 @@ impl StyleEngine {
     /// matchent (invariant de la cascade) ; l'ordre source
     /// départage déterministe après le tri — l'ordre de
     /// collecte par seaux n'a donc pas d'effet observable.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     fn collect_candidates<'a>(
         &'a self,
         dom: &Dom,
@@ -1573,7 +1580,7 @@ impl StyleEngine {
         state: &dyn Fn(&str) -> bool,
         mcache: &mut MatchCache,
         anc: &AncestorFilter,
-    ) -> Vec<(u8, Vec<u32>, Specificity, u32, &'a Declaration)> {
+    ) -> Vec<(u8, u8, Vec<u32>, Specificity, u32, &'a Declaration)> {
         // Arbre d'appartenance du nœud (R-96) : `None` =
         // document. Arbitre le confinement des feuilles.
         let node_scope = dom.containing_shadow_root(node);
@@ -1632,7 +1639,7 @@ impl StyleEngine {
             self.quirks_index
                 .candidates(dom, node, &mut |e| consider(true, e));
         }
-        let mut rules_cand: Vec<(u8, Vec<u32>, Specificity, u32, &Declaration)> = Vec::new();
+        let mut rules_cand: Vec<(u8, u8, Vec<u32>, Specificity, u32, &Declaration)> = Vec::new();
         for ((quirks, ri), spec) in spec_by_rule {
             let rules = if quirks {
                 &self.quirks_rules
@@ -1649,8 +1656,17 @@ impl StyleEngine {
                     (Origin::Author, true) => 2,
                     (Origin::UserAgent, true) => 3,
                 };
+                // R-111 — frontière shadow (css-scoping §6) :
+                // pour les règles **normales** la déclaration
+                // interne (scopée à la racine du nœud) bat la
+                // document ; pour `!important` c'est
+                // l'**inverse** — la document gagne. La porte
+                // `rules_reaches` garantit que `scope.is_some()`
+                // = racine du nœud pour les règles retenues.
+                let scope_rank = u8::from(d.important == rule.scope.is_none());
                 rules_cand.push((
                     rank,
+                    scope_rank,
                     layer_sort_key(&rule.layer, d.important),
                     spec,
                     rule.order,
@@ -1658,10 +1674,12 @@ impl StyleEngine {
                 ));
             }
         }
-        // Rang (origine/important) → layer (§6.4, inversion
-        // `!important` comprise) → spécificité → ordre source.
-        rules_cand
-            .sort_by_key(|(rank, layer, spec, order, _)| (*rank, layer.clone(), *spec, *order));
+        // Rang (origine/important) → frontière shadow (§6,
+        // R-111) → layer (§6.4, inversion `!important`
+        // comprise) → spécificité → ordre source.
+        rules_cand.sort_by_key(|(rank, scope_rank, layer, spec, order, _)| {
+            (*rank, *scope_rank, layer.clone(), *spec, *order)
+        });
         rules_cand
     }
 }

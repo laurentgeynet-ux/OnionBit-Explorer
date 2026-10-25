@@ -2691,6 +2691,10 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `exportparts` expose `i` sous `o` (§3.5) ; slots nichés
   couverts par récursion `slot_assigned` (test verrou).
   `match_part_chain` extrait.
+- [x] **R-111. `!important` inversé à la frontière shadow**
+  (css-scoping §6 — dernière borne) : `scope_rank` entre
+  origine et layer — inner > outer normal, outer > inner
+  `!important` ; `style=` au contexte du nœud. 3 sens testés.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

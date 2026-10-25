@@ -2294,3 +2294,37 @@ fn part_chaine_et_exportparts() {
     assert!(!matches(&dom, deep, &sel("x-inner::part(mid)")));
     assert!(!matches(&dom, deep, &sel("x-outer::part(deep)")));
 }
+
+#[test]
+fn important_frontiere_shadow_inverse() {
+    // R-111 — css-scoping §6 : pour le normal, l'**interne**
+    // (scoped) bat le document ; pour `!important` c'est
+    // **l'inverse** — le document gagne. Conflit mesuré via
+    // `::part` (le seul canal document → shadow).
+    let f = shadow_fixture();
+    // Normal : inner gagne.
+    let mut e = StyleEngine::new();
+    e.add_css("x-foo::part(label) { color: red }", Origin::Author);
+    e.add_scoped_css("[part] { color: blue }", Origin::Author, f.root);
+    let s = e.compute(&f.dom, f.label, &env());
+    assert_eq!(s.get("color"), Some("blue"), "inner normal > outer");
+    // !important : outer gagne.
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "x-foo::part(label) { color: red !important }",
+        Origin::Author,
+    );
+    e.add_scoped_css("[part] { color: blue !important }", Origin::Author, f.root);
+    let s = e.compute(&f.dom, f.label, &env());
+    assert_eq!(s.get("color"), Some("red"), "outer !important > inner");
+    // Mixte : inner important bat outer normal (rang domine).
+    let mut e = StyleEngine::new();
+    e.add_css("x-foo::part(label) { color: red }", Origin::Author);
+    e.add_scoped_css("[part] { color: blue !important }", Origin::Author, f.root);
+    let s = e.compute(&f.dom, f.label, &env());
+    assert_eq!(
+        s.get("color"),
+        Some("blue"),
+        "inner !important > outer normal"
+    );
+}
