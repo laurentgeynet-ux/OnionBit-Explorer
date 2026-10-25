@@ -5,7 +5,9 @@ Statut : Acceptée (2026-10-19) — réévaluation exigée par
 *a posteriori* : la phase 8 (étapes 34–36) est livrée, `dillo-js`
 exécute du JavaScript réel dans le processus du navigateur. Cette
 ADR solde la dette documentaire et fixe les prochains points de
-réévaluation.
+réévaluation. **Soldée (2026-10-25)** — tous les points de
+réévaluation événementiels sont traités (§ Clôture) ; la question
+d'isolation vit désormais dans ADR-0026.
 
 ## Contexte
 
@@ -143,3 +145,42 @@ leur volume est borné par la sémantique (un job ne peut en
 créer qu'un nombre fini par checkpoint). `MutationObserver`
 est ainsi drainé aux mêmes sync points que les timers, comme
 exigé par l'étape 52.
+
+## Clôture 2026-10-25 — les deux derniers points de réévaluation
+
+**Workers (JS-C29, livré)** — le déclencheur « exécution
+multi-thread de code hostile » est tiré, et la surface livrée
+est **bornée par construction** : un `Engine` par thread (le
+tas `!Send` ne quitte jamais son thread — même schéma que le
+contexte principal), `postMessage` en clone fil `WireValue`
+(aucun handle de heap ne traverse), pool borné (`max_workers`
+= 8, `queue_len` en back-pressure), budget ops propagé à
+chaque worker, pas de `SharedArrayBuffer` inter-thread réel
+(buffer posté = copié), `new Worker` sans fabrique =
+`TypeError` honnête. Pas d'état partagé mutable inter-thread
+→ aucune classe d'exploit nouvelle ; les budgets + le
+confinement par thread couvrent le résidu comme pour le
+contexte principal. Réévaluation : **maintien du différé** —
+le confinement OS reste la trajectoire ADR-0026, qui liste
+déjà « workers câblés » comme déclencheur P2 tiré.
+
+**FFI devenu le chemin principal** — tiré : `engineMode:
+'auto'` charge `explorer_ffi` dès que la DLL est présente, et
+le journal 08/11 a acté « FFI premier rang » (canal push +
+worker isolate, étape 107). Le coût isolationnel a été pesé
+au moment de la bascule (2ᵉ audit externe, même journal) :
+verdict amendé — FFI premier rang **pour la performance**,
+daemon conservé comme **mode d'isolation documenté** pour la
+navigation hostile, pas simple couture debug. La dégradation
+d'isolation d'ADR-0018 devient donc le chemin principal **par
+décision documentée**, avec une réponse nommée (le mode
+daemon), pas par accident de défaut. ADR-0026 liste « FFI
+devenant défaut » parmi les déclencheurs P2 — tiré.
+
+**Bilan** : les trois points événementiels sont clos (étape
+51 § ci-dessus, workers et FFI ici) et la borne heap JS-C37
+est livrée. Cette ADR n'a plus de déclencheur propre : la
+réévaluation d'isolation est définitivement déléguée à
+ADR-0026 (P1 requis avant distribution ; P2 déclenché par
+conditions — deux déjà tirées, le frein restant est le
+séquencement « phase 10+ » du lead).
