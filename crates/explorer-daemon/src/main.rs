@@ -356,9 +356,25 @@ fn build_session(
     session
 }
 
-#[tokio::main]
+fn main() {
+    // Pile large pour **tous** les threads du runtime (workers
+    // + pool `spawn_blocking`) : le thread moteur jscore porte
+    // déjà 32 Mio (JS-C41) ; un overflow sur un worker —
+    // apply/layout récursif sur DOM profond, dispatch
+    // ré-entrant — tue le processus sans unwind (signature du
+    // crash x.com intermittent mesuré au vol). 32 Mio ici =
+    // hypothèse fix+diagnostic : si la mort revient, ce n'est
+    // pas la pile ; si elle disparaît, mécanisme confirmé.
+    tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(32 * 1024 * 1024)
+        .enable_all()
+        .build()
+        .expect("runtime tokio")
+        .block_on(amain());
+}
+
 #[allow(clippy::too_many_lines)] // setup séquentiel — chaque bloc est documenté in situ
-async fn main() {
+async fn amain() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
