@@ -3446,6 +3446,15 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   paresseuse (`&&`/`?:`/`?.`/`??`)
   évaluée éager — hoist non porté.
 
+- [x] **JS-C35. TLA de module** —
+  `await` top-level → corps module
+  sur `GExec` (même infra JS-C34).
+  Borne : importeurs n'attendent pas
+  (exports lus paresseusement via
+  `nsget`) — entrées feuilles
+  couvertes. Test `tla_module_awaits_
+  pending`.
+
 - [x] **CAP-188. `document.evaluate` :
   sous-ensemble `XPath` borné (sonde)** —
   `evaluate(expr, ctx, resolver, type,

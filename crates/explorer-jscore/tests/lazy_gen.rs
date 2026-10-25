@@ -46,3 +46,20 @@ fn lazy_gen_resumes_at_yield() {
         "9|Cx"
     );
 }
+
+/// JS-C35 — TLA de module : `await` top-level suspend le corps
+/// sur `GExec` ; la promesse pendante le reprend ; les effets du
+/// reste du module courent dans la continuation.
+#[test]
+fn tla_module_awaits_pending() {
+    let mut e = explorer_jscore::Engine::new();
+    e.eval("globalThis.__out = 'unset'").unwrap();
+    e.eval_module(
+        "var x = await new Promise(res => Promise.resolve().then(() => res(7)));\
+         globalThis.__out = x;",
+        "m",
+    )
+    .unwrap();
+    let v = e.eval("globalThis.__out").unwrap();
+    assert_eq!(e.describe(v), "7");
+}
