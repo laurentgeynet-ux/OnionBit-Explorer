@@ -1404,22 +1404,28 @@ fn background_invalide_drope_pas_remplace() {
 }
 
 #[test]
-fn background_multicouche_premiere_gagne() {
+fn background_multicouche_fusionne_les_couches() {
     let f = fixture();
     let mut e = StyleEngine::new();
     // R-94 : `url(image), linear-gradient(décor)` = deux
     // couches valides — avant, le second <bg-image> faisait
     // tomber la déclaration entière (votearrow de HN : la
     // flèche `background: url("triangle.svg"),
-    // linear-gradient(…)` ne peignait jamais). Borné : la
-    // première couche (la plus haute) fournit les longhands.
+    // linear-gradient(…)` ne peignait jamais). R-107 : les
+    // longhands sortent **jointes par couche** (`, `-séparées)
+    // — la peinture les consomme par index de couche.
     e.add_css(
         "p { background: url(\"tri.svg\"), linear-gradient(red, blue) no-repeat }",
         Origin::Author,
     );
     let s = e.compute(&f.dom, f.p, &env());
-    assert_eq!(s.get("background-image"), Some("url(\"tri.svg\")"));
-    assert_eq!(s.get("background-repeat"), Some("repeat"));
+    assert_eq!(
+        s.get("background-image"),
+        Some("url(\"tri.svg\"), linear-gradient(red, blue)")
+    );
+    // Couche 1 = repeat (absent → initiale), couche 2 =
+    // no-repeat.
+    assert_eq!(s.get("background-repeat"), Some("repeat, no-repeat"));
 }
 
 #[test]

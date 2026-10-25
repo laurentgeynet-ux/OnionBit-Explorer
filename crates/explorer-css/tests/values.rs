@@ -292,3 +292,28 @@ fn shorthand_columns() {
     assert_eq!(e[1].1, "2");
     assert_eq!(e[0].1, "auto");
 }
+
+// ── R-107 : expansion `background` multi-couches ────────────
+
+#[test]
+fn background_shorthand_fusionne_les_couches() {
+    // `background: url(a) no-repeat, linear-gradient(r,b)` :
+    // les longhands sortent jointes par couche ; la couleur ne
+    // vient que de la dernière couche (spec §3.10).
+    let v = expand_shorthand(
+        "background",
+        "url(a.png) no-repeat, linear-gradient(red, blue)",
+    )
+    .expect("couches valides");
+    let get = |n: &str| v.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+    assert_eq!(
+        get("background-image"),
+        Some("url(a.png), linear-gradient(red, blue)")
+    );
+    assert_eq!(get("background-repeat"), Some("no-repeat, repeat"));
+    // Couleur sur la couche non finale → déclaration invalide.
+    assert!(expand_shorthand("background", "red, url(a.png)").is_none());
+    // Couleur sur la dernière couche → OK.
+    let v = expand_shorthand("background", "url(a.png), red").expect("couleur finale");
+    assert!(v.iter().any(|(n, v)| n == "background-color" && v == "red"));
+}

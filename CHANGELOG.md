@@ -9,6 +9,46 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-107 — `background` shorthand
+  multi-couches complet**
+  (`explorer-css` + `explorer-render`,
+  borne R-94 levée) : les longhands
+  sortent **jointes par couche**
+  (`background-image: url(a),
+  linear-gradient(…)` etc.) ;
+  `background-color` n'accepte une
+  couleur que sur la dernière
+  couche (§3.10 — sinon déclaration
+  invalide). Au paint,
+  `emit_bg_layers` consomme chaque
+  longhand **par index de couche**
+  (liste courte répétée) : repeat,
+  position, size, origin, clip par
+  couche. Carve-out : le test R-94
+  « première couche gagne » mis à
+  jour vers le comportement joint.
+
+- **Document image top-level**
+  (`explorer-core`) — politique « image
+  document » des navigateurs : une
+  réponse `image/*` (sans
+  `Content-Disposition: attachment` ni
+  `<a download>`, qui gardent la voie
+  download) n'est plus classée en offre
+  de téléchargement invisible mais
+  bufferisée (borne identique) puis
+  commise en page synthétique
+  `<title>nom</title><img src="…">` —
+  le pipeline `<img>` existant
+  re-fetch/décode/rend. Terrain :
+  `lien:clic-sans-nav` stallman (clic
+  `<a href="…jpg"><img>` → download
+  silencieux, url inchangée) → commit
+  `…/so-many-candidates.jpg`, titre nom
+  de fichier, image rendue, `back`
+  restaure. Test
+  `click_image_link_commits_image_document`.
+
 - **R-106 — `background-origin` /
   `background-clip` consommés**
   (`explorer-render`, résidu du

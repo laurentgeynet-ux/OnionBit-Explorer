@@ -1738,3 +1738,34 @@ fn background_origin_border_box_positionne_a_la_bordure() {
         .expect("item fond émis");
     assert_eq!(origin, (0.0, 0.0), "origine au bord externe : {origin:?}");
 }
+
+// ── R-107 : shorthand `background` multi-couches ───────────
+
+#[test]
+fn background_multicouche_paint_les_deux_couches() {
+    // `background: url(spr) no-repeat, linear-gradient(…)` —
+    // les longhands sont jointes par couche et `emit_bg_layers`
+    // les consomme par couche : 2 items, le `no-repeat` de la
+    // couche sprite préservé.
+    let list = bg_div("background: url(a.png) no-repeat, linear-gradient(red, blue)");
+    let items: Vec<&DisplayItem> = list
+        .items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::BackgroundImage { .. }))
+        .collect();
+    assert_eq!(
+        items.len(),
+        2,
+        "deux couches émises : {:?}",
+        list.items.len()
+    );
+    // La couche url (première = au-dessus) garde son no-repeat.
+    let url_item = items
+        .iter()
+        .find(|i| match i {
+            DisplayItem::BackgroundImage { repeat, .. } => *repeat == (false, false),
+            _ => false,
+        })
+        .expect("couche url no-repeat");
+    let _ = url_item;
+}

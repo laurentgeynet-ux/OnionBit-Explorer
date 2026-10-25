@@ -640,14 +640,15 @@ fn expand_overflow(value: &str) -> Option<Vec<(String, String)>> {
 /// CSS3 autorise des **couches séparées par des virgules**
 /// (`url(image), linear-gradient(décor)`) — chaque couche est
 /// une grammaire complète et une couche invalide invalide la
-/// déclaration entière (spec). Borné R-94 : la **première**
-/// couche (la plus haute, peinte au-dessus) fournit les
-/// longhands — le stacking multi-couches au paint reste un
-/// arc. Avant ce split la virgule collait au token `url(` et
-/// le second `<bg-image>` faisait tomber la déclaration
-/// entière — mesuré : `.votearrow` de news.ycombinator.com
-/// (`background: url("triangle.svg"), linear-gradient(…)`)
-/// perdait sa flèche de vote.
+/// déclaration entière (spec). R-107 : les longhands sont
+/// **fusionnées par couche** — valeur `, `-jointe par
+/// propriété, consommée par `emit_bg_layers` (render) ; la
+/// `<bg-color>` n'est légale que sur la **dernière** couche
+/// (css-backgrounds-3 §3.10 — une couleur en couche non
+/// finale invalide la déclaration). Avant ce split la virgule
+/// collait au token `url(` et le second `<bg-image>` faisait
+/// tomber la déclaration entière — mesuré : `.votearrow` de
+/// news.ycombinator.com.
 ///
 /// La tokenisation est **paren-consciente** : `linear-gradient(
 /// to right, red, blue)` reste un seul atome malgré ses
@@ -657,12 +658,37 @@ fn expand_overflow(value: &str) -> Option<Vec<(String, String)>> {
 /// collé (`50%/cover`) est accepté comme le font les
 /// navigateurs.
 fn expand_background(value: &str) -> Option<Vec<(String, String)>> {
-    let mut first = None;
-    for layer in split_top_commas(value) {
-        let longhands = parse_bg_layer(layer)?;
-        first.get_or_insert(longhands);
+    let layers: Vec<Vec<(String, String)>> = split_top_commas(value)
+        .into_iter()
+        .map(parse_bg_layer)
+        .collect::<Option<_>>()?;
+    let (last, rest) = layers.split_last()?;
+    // §3.10 : `<bg-color>` n'apparaît que dans la couche
+    // finale — une couleur non transparente plus haut rend la
+    // déclaration invalide.
+    if rest.iter().any(|l| {
+        l.iter()
+            .any(|(n, v)| n == "background-color" && v != "transparent")
+    }) {
+        return None;
     }
-    first
+    // Toutes les couches émettent les mêmes longhands dans le
+    // même ordre (`into_longhands` est un vecteur fixe) —
+    // fusion positionnelle.
+    let mut out = Vec::with_capacity(last.len());
+    for (i, (name, _)) in last.iter().enumerate() {
+        if name == "background-color" {
+            out.push((name.clone(), last[i].1.clone()));
+        } else {
+            let joined = layers
+                .iter()
+                .map(|l| l[i].1.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push((name.clone(), joined));
+        }
+    }
+    Some(out)
 }
 
 /// Parse **une** couche du shorthand `background` — même

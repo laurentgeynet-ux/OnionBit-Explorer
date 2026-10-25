@@ -1196,11 +1196,14 @@ fn emit_bg_layers(
     if v.is_empty() || v == "none" || !bg_has_image(v) {
         return;
     }
-    // R-106 — `background-origin` (aire de positionnement) et
-    // `background-clip` (boîte de clip) sont désormais
-    // consommés : les trois boîtes se déduisent du rect
-    // (bordure), de `area`/`base` (padding) et de
-    // `content_rect` (contenu — publique R-99).
+    // R-106/107 — par couche : `background-origin` (aire de
+    // positionnement), `background-clip` (clip), `repeat`,
+    // `position`, `size` sont des **listes** (séparées `, ` par
+    // le shorthand multi-couches) — la i-ème valeur de chaque
+    // longhand s'applique à la i-ème couche, la liste courte
+    // se répète (css-backgrounds-3 §3.10). Les trois boîtes se
+    // déduisent de `rect` (bordure), `area`/`base` (padding)
+    // et `content_rect` (contenu — publique R-99).
     let content = content_rect(bx);
     let padding = Rect {
         x: base.0,
@@ -1208,31 +1211,43 @@ fn emit_bg_layers(
         width: area.0,
         height: area.1,
     };
-    let clip = match style.get("background-clip") {
-        Some("content-box") => content,
-        Some("padding-box") => padding,
-        // `border-box` (défaut), `text` non porté, `border-area`
-        // — repli bordure.
-        _ => rect,
-    };
-    let (area, base) = match style.get("background-origin") {
-        Some("border-box") => ((rect.width, rect.height), (rect.x, rect.y)),
-        Some("content-box") => ((content.width, content.height), (content.x, content.y)),
-        // `padding-box` = défaut — identique à l'aire reçue.
-        _ => (area, base),
-    };
-    let repeat = match style.get("background-repeat") {
-        Some("no-repeat") => (false, false),
-        Some("repeat-x") => (true, false),
-        Some("repeat-y") => (false, true),
-        _ => (true, true), // `repeat` = défaut.
+    // i-ème valeur d'une longhand liste (ou repli liste vide /
+    // hors de portée → `None`, le `match` du site retombe sur
+    // le défaut CSS).
+    let layer_value = |name: &str, i: usize| -> Option<String> {
+        let raw = style.get(name)?;
+        let parts = bg_layers(raw);
+        parts
+            .get(i)
+            .or_else(|| parts.last())
+            .map(|s| (*s).trim().to_string())
+            .filter(|s| !s.is_empty())
     };
     let fs = font_size_of(style);
-    for layer in bg_layers(v).iter().rev() {
+    for (i, layer) in bg_layers(v).iter().enumerate().rev() {
+        let clip = match layer_value("background-clip", i).as_deref() {
+            Some("content-box") => content,
+            Some("padding-box") => padding,
+            // `border-box` (défaut), `text` non porté,
+            // `border-area` — repli bordure.
+            _ => rect,
+        };
+        let (l_area, l_base) = match layer_value("background-origin", i).as_deref() {
+            Some("border-box") => ((rect.width, rect.height), (rect.x, rect.y)),
+            Some("content-box") => ((content.width, content.height), (content.x, content.y)),
+            // `padding-box` = défaut — identique à l'aire reçue.
+            _ => (area, base),
+        };
+        let repeat = match layer_value("background-repeat", i).as_deref() {
+            Some("no-repeat") => (false, false),
+            Some("repeat-x") => (true, false),
+            Some("repeat-y") => (false, true),
+            _ => (true, true), // `repeat` = défaut.
+        };
         let img = if bg_has_url(layer) {
             node.and_then(|n| images.backgrounds.get(&n)).cloned()
         } else if bg_has_gradient(layer) {
-            crate::gradient::decode_gradient(layer, area.0, area.1, fs).map(std::sync::Arc::new)
+            crate::gradient::decode_gradient(layer, l_area.0, l_area.1, fs).map(std::sync::Arc::new)
         } else {
             None
         };
@@ -1242,7 +1257,13 @@ fn emit_bg_layers(
             // grand que la boîte n'en peignait que le coin —
             // mesuré : `.votearrow` de news.ycombinator.com,
             // SVG 32×32 à motif centré dans une boîte 10×10.
-            let (tw, th) = bg_size(style, area, (img.width as f32, img.height as f32), fs);
+            // R-107 : la taille est lue **par couche**.
+            let (tw, th) = bg_size(
+                layer_value("background-size", i).as_deref(),
+                l_area,
+                (img.width as f32, img.height as f32),
+                fs,
+            );
             if !(tw.is_finite() && th.is_finite()) || tw <= 0.0 || th <= 0.0 {
                 continue; // `background-size:0` ou non résolu.
             }
@@ -1264,8 +1285,8 @@ fn emit_bg_layers(
             // conforme §14.2.1. La dimension retenue est la
             // tuile **mise à l'échelle** (spec §images-3).
             let (px, py) = bg_position(
-                style.get("background-position"),
-                area,
+                layer_value("background-position", i).as_deref(),
+                l_area,
                 (img.width as f32, img.height as f32),
                 fs,
             );
@@ -1273,7 +1294,7 @@ fn emit_bg_layers(
                 rect: clip,
                 img,
                 repeat,
-                origin: (base.0 + px, base.1 + py),
+                origin: (l_base.0 + px, l_base.1 + py),
             });
         }
     }
@@ -1491,17 +1512,8 @@ const MAX_TILE_PX: u64 = 16_777_216;
 #[allow(clippy::cast_possible_truncation)]
 // le `as f32` des longueurs suit le même motif que
 // `mask_size`/`bg_position` — valeurs CSS ordinaires.
-fn bg_size(
-    st: &explorer_css::ComputedStyle,
-    area: (f32, f32),
-    img: (f32, f32),
-    fs: f64,
-) -> (f32, f32) {
-    let toks: Vec<&str> = st
-        .get("background-size")
-        .unwrap_or("")
-        .split_whitespace()
-        .collect();
+fn bg_size(raw: Option<&str>, area: (f32, f32), img: (f32, f32), fs: f64) -> (f32, f32) {
+    let toks: Vec<&str> = raw.unwrap_or("").split_whitespace().collect();
     let ratio = if img.1 > 0.0 { img.0 / img.1 } else { 0.0 };
     let len = |t: &str, span: f32| -> Option<f32> {
         t.strip_suffix('%')

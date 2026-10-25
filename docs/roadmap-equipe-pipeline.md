@@ -2669,6 +2669,11 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `content_rect` publique R-99) — `origin` choisit l'aire de
   positionnement, `clip` la zone de clip. `text`/`border-area`
   non portés. 2 tests.
+- [x] **R-107. `background` shorthand multi-couches** (borne
+  R-94 levée) : longhands jointes par couche (`background-image:
+  url(a), linear-gradient(…)`), couleur réservée à la dernière
+  couche (§3.10), paint par index de couche pour
+  repeat/position/size/origin/clip. Carve-out du test R-94.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
