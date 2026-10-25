@@ -626,6 +626,7 @@ impl Session {
             .and_then(|e| e.js.as_mut())
             .map_or_else(Vec::new, |eng| eng.drain_dyn_imports())
         {
+            tracing::debug!(tab, url = %r.url, seq = r.seq, "spawn dyn import");
             self.spawn_dyn_import(tab, &page, &base, &r);
         }
     }
@@ -683,6 +684,7 @@ impl Session {
         let Some((req_page, req_base, doc_policy, csp, _opaque)) =
             self.ctx_net_origin(tab, r.ctx, page, base)
         else {
+            tracing::debug!(tab, ctx = r.ctx, "dyn import : pas d'origine — rejet");
             self.deliver_dyn_import_req(tab, r.ctx, r.seq, None, Vec::new());
             return;
         };
@@ -698,9 +700,11 @@ impl Session {
                 )
             })
         else {
+            tracing::debug!(tab, url = %r.url, "dyn import : résolution/CSP refusé — rejet");
             self.deliver_dyn_import_req(tab, r.ctx, r.seq, None, Vec::new());
             return;
         };
+        tracing::debug!(tab, url = %url, "dyn import : fetch émis");
         let req = sub_request(
             &req_page,
             &url,
@@ -788,6 +792,7 @@ impl Session {
         src: Option<String>,
         deps: Vec<(String, String)>,
     ) {
+        tracing::debug!(tab, seq, ok = src.is_some(), deps = deps.len(), "deliver dyn import");
         if let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()) {
             eng.deliver_dyn_import(ctx, seq, src, deps);
         }

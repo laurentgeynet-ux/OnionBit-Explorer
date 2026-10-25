@@ -256,6 +256,7 @@ impl Engine {
     /// est branchée (JS-C100) : la promesse reste pending et
     /// une `DynImportReq` part dans `drain_dyn_imports`.
     pub(crate) fn dynamic_import(&mut self, spec: &str, referrer: &str) -> JsResult<Value> {
+        tracing::debug!(spec, referrer, "import() dynamique");
         match self.load_source(spec, referrer) {
             Ok((url, src)) => {
                 let idx = self.instantiate(spec, &url, &src, 0)?;
