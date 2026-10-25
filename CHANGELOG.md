@@ -9,6 +9,57 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 137b — op de couture
+  `DomMutation::AttachShadow`**
+  (`explorer-jscore`/`explorer-js`/
+  `explorer-core`) : `attachShadow`
+  programmatique voyage désormais
+  par **journal** (plus par
+  re-parse). Le miroir émet
+  `JournalOp::AttachShadow{host,root,
+  open}` (hôte attaché) ; `explorer-js`
+  le transporte ; `apply_journal`
+  rejoue `Dom::create_fragment` +
+  `Dom::attach_shadow_root` (API PIPE
+  R-96) et monte la clé racine en
+  `keymap` — les `Insert` suivants
+  dans l'ombre résolvent. Test
+  `journal_attach_shadow_rejoue_en_place`.
+
+- **ADR-0025 — acceptée + reliquat ouvert
+  (Étape 137)** (docs — décision lead
+  2026-10-25) : le pilote est soldé et la
+  voie différentielle est de fait le chemin
+  nominal ; l'ADR passe « Acceptée » et le
+  reliquat est ouvert en quatre items —
+  137a ciblage `relayout_subtree` par les
+  ops du journal (fin du reflow complet
+  post-rejeu), 137b op de couture
+  `AttachShadow` (fin du re-parse pour
+  `attachShadow` programmatique), 137c
+  seuil de repli calibré sur
+  `journal_fallbacks`, 137d simplification
+  optionnelle `img_decoded`/`bg_decoded`.
+
+- **Triage des déclencheurs ADR** (docs —
+  décision lead 2026-10-25) : **ADR-0019
+  soldée** — les deux derniers points de
+  réévaluation événementiels clos (workers
+  JS-C29 livrés bornés par construction ;
+  FFI devenu chemin principal par décision
+  documentée — daemon = mode d'isolation
+  pour navigation hostile), la question
+  d'isolation migre dans ADR-0026.
+  **ADR-0022 §6 amendée** — la branche
+  arti/Tor est la dernière à ouvrir,
+  déclenchée quand la version « vanilla »
+  est fonctionnelle. **ADR-0024 acceptée +
+  désambiguïsée** — « zéro codec » = crates
+  `explorer-*` ; stack hôte nommée
+  `video_player` + `fvp` (MDK, FFmpeg
+  dynamique LGPL) ; décodeurs internes non
+  planifiés.
+
 - **R-102 — hit-test filtre
   `visibility:hidden`/`collapse`**
   (`explorer-layout`, §11.2) : un

@@ -4794,7 +4794,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     `take_dirty_path` ni remap ;
     unifier avec `job.dirty` (R-12)
     ou le supplanter.
-  - [ ] **137b — `DomMutation::
+  - [x] **137b — `DomMutation::
     AttachShadow`** : op de couture
     `(host, mode, sous-arbre)` —
     l'attache `attachShadow`
@@ -4813,6 +4813,41 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     devenue inutile sous journal
     nominal ; les caches restent en
     dédup de décodage — confort.
+
+- [ ] **Étape 138. Piles élargies +
+  capture de crash (mort silencieuse
+  daemon x.com, prioritaire)** —
+  seul trou non nommé de la file :
+  mort daemon intermittente post-clic
+  (~25 min de churn JS), zéro trace
+  panic, non reproduit en ~55 inputs
+  de campagne — signature stack
+  overflow probable (récursion
+  dispatch/JS ré-entrant) ou kill
+  externe. **Deux tiers, tous deux
+  safe** : (a) `tokio::Builder::
+  thread_stack_size` + `std::thread::
+  Builder::stack_size` pour le
+  thread moteur (~8→32 Mo, ~15
+  lignes) — fix candidat ET test
+  d'hypothèse : mort récurrente →
+  pile innocente, plus de mort →
+  mécanisme confirmé ; (b) **WER
+  LocalDumps** — capture externe OS
+  (`HKLM\SOFTWARE\Microsoft\Windows\
+  Windows Error Reporting\LocalDumps\
+  explorer-daemon.exe`, admin une
+  fois, note `scripts/vol-agent.md`)
+  — tout crash futur écrit un `.dmp`
+  complet, survit aux fautes où un
+  handler in-process ne tourne plus.
+  **Écarté** : SEH/minidump
+  in-process — `forbid(unsafe)` +
+  fiabilité douteuse sur overflow
+  (le handler court sur la pile
+  épuisée) ; WER le remplace
+  strictement. Régression : test de
+  récursion profonde qui survit.
 
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :

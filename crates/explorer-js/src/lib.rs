@@ -352,6 +352,18 @@ pub enum DomMutation {
         /// Nouveau contenu.
         text: String,
     },
+    /// `attachShadow` programmatique — op de couture
+    /// (Étape 137b) : `root` est le fragment miroir créé au
+    /// `attachShadow`; le replay crée le fragment réel et
+    /// l'attache à l'hôte mappé.
+    AttachShadow {
+        /// `NodeId` miroir de l'hôte.
+        host: u64,
+        /// `NodeId` miroir du fragment racine.
+        root: u64,
+        /// `mode: "open"`.
+        open: bool,
+    },
 }
 
 /// Journal de mutations drainé du miroir (ADR-0025) :
@@ -1343,6 +1355,13 @@ fn journal_ops_to_seam(
                 out.push(DomMutation::SetText {
                     key: u64::from(key),
                     text: n.text.clone(),
+                });
+            }
+            explorer_jscore::JournalOp::AttachShadow { host, root, open } => {
+                out.push(DomMutation::AttachShadow {
+                    host: u64::from(host),
+                    root: u64::from(root),
+                    open,
                 });
             }
         }

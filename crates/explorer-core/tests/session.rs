@@ -12984,3 +12984,41 @@ async fn dsd_slot_distribue_et_repli_couvert() {
     // Le repli est couvert par l'assigné du slot défaut.
     assert_eq!(count_color(fw, fh, px, [255, 0, 0]), 0, "repli couvert");
 }
+
+/// Étape 137b — `attachShadow` programmatique voyage par
+/// **journal** (op de couture ADR-0025), plus par re-parse :
+/// l'op rejoue `Dom::attach_shadow_root` côté réel et la
+/// racine est sérialisée `<template shadowrootmode>` (R-96).
+#[tokio::test]
+async fn journal_attach_shadow_rejoue_en_place() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<html><body><div id=\"h\">hote</div>\
+         <script>setTimeout(function(){\
+         var h=document.getElementById('h');\
+         var r=h.attachShadow({mode:'open'});\
+         r.innerHTML='<b>ombre</b>';\
+         h.setAttribute('data-sh','1')},40)</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/m").await.unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(90));
+    s.pump_timers(a);
+    // Première rafale : NoBaseline attendu (repli cléé qui
+    // monte la table d'identité) puis journal rejouable.
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    s.pump_timers(a);
+    let dump = s.dom_dump(a).unwrap_or_default();
+    assert!(
+        dump.contains("shadowrootmode"),
+        "racine shadow programmatique absente du dump : {dump}"
+    );
+    assert!(
+        dump.contains("<b>ombre</b>"),
+        "enfant de l'ombre absent : {dump}"
+    );
+}

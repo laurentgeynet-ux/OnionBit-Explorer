@@ -160,25 +160,35 @@ impl Session {
                 entry.js_pending_attrs.clear();
                 return 0;
             }
+            // Sous-phases `commit_lock` (tâche profil github
+            // doc 20,6 s — attribution fine des ~800 ms/round :
+            // chaque livraison exécute du moteur sous verrou).
+            let mut t = Instant::now();
             for resp in std::mem::take(&mut entry.js_pending_net) {
                 let _ = eng.deliver_net_response(resp);
             }
+            t = sync_phase(tab, "commit.dl_net", t);
             for resp in std::mem::take(&mut entry.js_pending_crypto) {
                 let _ = eng.deliver_crypto_response(resp);
             }
+            t = sync_phase(tab, "commit.dl_crypto", t);
             for (ctx, handle, ev) in std::mem::take(&mut entry.js_pending_es) {
                 let _ = eng.deliver_es_event(ctx, handle, ev);
             }
+            t = sync_phase(tab, "commit.dl_es", t);
             for (ctx, handle, ev) in std::mem::take(&mut entry.js_pending_ws) {
                 let _ = eng.deliver_ws_event(ctx, handle, ev);
             }
+            t = sync_phase(tab, "commit.dl_ws", t);
             for (ctx, seq, body) in std::mem::take(&mut entry.js_pending_dyn) {
                 eng.deliver_dyn_script(ctx, seq, body);
             }
+            t = sync_phase(tab, "commit.dl_dyn", t);
             for (ctx, seq, me) in std::mem::take(&mut entry.js_pending_mod) {
                 let ok = me.is_some_and(|me| Self::eval_mod(eng.as_mut(), &me).is_ok());
                 eng.deliver_dyn_module(ctx, seq, ok);
             }
+            t = sync_phase(tab, "commit.eval_mod", t);
             let attrs = std::mem::take(&mut entry.js_pending_attrs);
             // Les pushes sont **toujours** rejoués dans le
             // miroir (la saisie ne se perd pas) ; la
@@ -197,6 +207,7 @@ impl Session {
                     None
                 }
             };
+            sync_phase(tab, "commit.attrs_sync", t);
             entry.js = Some(eng);
             (jobs, mutated)
         };

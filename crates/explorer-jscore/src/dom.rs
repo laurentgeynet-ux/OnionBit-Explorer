@@ -722,6 +722,19 @@ pub enum JournalOp {
         /// Nœud texte cible.
         key: NodeId,
     },
+    /// `attachShadow` programmatique — op de couture
+    /// (Étape 137b) : sans elle, l'attache voyageait par
+    /// re-parse (la garde `Fingerprint`/`NoBaseline` tombait
+    /// sur une mutation non rejouable).
+    AttachShadow {
+        /// Hôte recevant la racine (élément attaché).
+        host: NodeId,
+        /// Fragment racine créé dans le miroir.
+        root: NodeId,
+        /// `mode: "open"` — `closed` garde `shadowRoot` nul
+        /// côté JS mais se peint pareil.
+        open: bool,
+    },
 }
 
 impl Default for Dom {
@@ -1436,6 +1449,13 @@ impl Dom {
         self.shadow_roots.insert(host, (root, open));
         self.shadow_hosts.insert(root, host);
         self.mark_dirty_at(host);
+        // Étape 137b : op de couture — l'attache voyage par
+        // journal comme les autres mutations (re-parse seulement
+        // si la garde rejette, jamais par défaut).
+        if self.is_attached(host) {
+            self.journal
+                .push(JournalOp::AttachShadow { host, root, open });
+        }
     }
 
     /// Hôte de la racine shadow `root` (CAP-191) — `None`

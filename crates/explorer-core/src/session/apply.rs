@@ -916,6 +916,26 @@ fn key_node(p: &PaintPayload, key: u64) -> Result<explorer_dom::NodeId, JournalR
         .ok_or(JournalReject::UnmappedKey)
 }
 
+/// Étape 137b — replay `attachShadow` programmatique : le
+/// fragment est créé côté `explorer-dom` et attaché à l'hôte
+/// mappé ; la clé miroir de la racine entre en `keymap` pour
+/// que les `Insert` suivants dans l'ombre résolvent (API
+/// `Dom::attach_shadow_root` PIPE livrée R-96 — consommation
+/// pure).
+fn journal_attach_shadow(
+    p: &mut PaintPayload,
+    host: u64,
+    root: u64,
+    open: bool,
+) -> Result<(), JournalReject> {
+    let h = key_node(p, host)?;
+    let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
+    let r = dom.create_fragment().map_err(|_| JournalReject::Dom)?;
+    dom.attach_shadow_root(h, r, open);
+    p.keymap.insert(root, r);
+    Ok(())
+}
+
 /// Applique un journal de mutations **en place** sur le DOM
 /// commis (ADR-0025 — les `NodeId` survivent : `images`,
 /// `find`, `popup`, `focused` restent valides sans
@@ -971,6 +991,15 @@ fn apply_journal(
                 let id = key_node(p, *key)?;
                 let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
                 dom.set_text(id, text).map_err(|_| JournalReject::Dom)?;
+            }
+            // Étape 137b — `attachShadow` programmatique : le
+            // fragment est créé côté `explorer-dom` et attaché à
+            // l'hôte mappé ; la clé miroir de la racine entre en
+            // `keymap` pour que les `Insert` suivants dans
+            // l'ombre résolvent (API `Dom::attach_shadow_root`
+            // PIPE livrée R-96 — consommation pure).
+            explorer_js::DomMutation::AttachShadow { host, root, open } => {
+                journal_attach_shadow(p, *host, *root, *open)?;
             }
             explorer_js::DomMutation::Insert {
                 parent,
