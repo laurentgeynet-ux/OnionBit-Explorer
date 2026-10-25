@@ -9,6 +9,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:webview_win_floating/webview_win_floating.dart';
 
 import '../../../core/design/design_tokens.dart';
 import '../../../core/settings/app_settings.dart';
@@ -305,6 +306,10 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
                                     userDataFolder: wvUserDir,
                                     onController: (c) =>
                                         ctrl.registerWebView(tab.id, c),
+                                    navDelegate: _delegatedNavDelegate(
+                                      ctrl,
+                                      tab.id,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -323,6 +328,35 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
     );
   }
 }
+
+/// Délégué de navigation WebView2 → `BrowserTab` (136e) :
+/// pageStarted/pageFinished pilotent `loading`, urlChange et
+/// le titre resynchronisent le chrome, historyChanged relance
+/// la lecture de canBack/canForward.
+WinNavigationDelegate _delegatedNavDelegate(
+  BrowserController ctrl,
+  String tabId,
+) =>
+    WinNavigationDelegate(
+      onPageStarted: (url) =>
+          ctrl.onDelegatedNav(tabId, url: url, loading: true),
+      onPageFinished: (url) => ctrl.onDelegatedNav(
+        tabId,
+        url: url,
+        loading: false,
+        history: true,
+      ),
+      onUrlChange: (change) {
+        final url = change.url;
+        if (url != null) {
+          ctrl.onDelegatedNav(tabId, url: url, history: true);
+        }
+      },
+      onPageTitleChanged: (title) =>
+          ctrl.onDelegatedNav(tabId, title: title),
+      onHistoryChanged: () =>
+          ctrl.onDelegatedNav(tabId, history: true),
+    );
 
 /// Déclencheurs Ctrl+1..8 — index d'onglet direct (étape 85).
 const _tabDigitKeys = [

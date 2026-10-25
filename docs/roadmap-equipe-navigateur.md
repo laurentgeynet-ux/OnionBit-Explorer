@@ -4806,10 +4806,13 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     `userDataFolder` =
     `<profileDir>/webview2` —
     sessions hors profil Explorer.
-  - [ ] 136e — resync events
-    navigation (URL/titre/
-    historique) + routage
-    back/forward/reload
+  - [x] **136e — resync
+    navigation** : délégué WebView2
+    → `BrowserTab` (loading, url,
+    titre, canBack/canForward via
+    `canGoBack`/`canGoForward`) ;
+    routage back/forward/reload
+    déjà posé en 136c. 1 test.
   - [ ] 136f — indicateur chrome
     de délégation
   - [ ] 136g — repli honnête

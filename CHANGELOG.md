@@ -775,6 +775,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   profil Explorer ; `profileName`
   exposé au widget.
 
+- **136e — resync navigation
+  WebView2 → `BrowserTab`**
+  (`app/`, étape 136 NAV, ADR-0027
+  §3) : `WinNavigationDelegate`
+  branché — `pageStarted`/
+  `pageFinished` pilotent
+  `loading`, `urlChange` et
+  `pageTitleChanged` resynchronisent
+  l'omnibox et l'onglet,
+  `historyChanged`/`pageFinished`
+  relancent la lecture
+  `canGoBack`/`canGoForward` →
+  `canBack`/`canForward` du chrome.
+  `onDelegatedNav` = point
+  d'entrée unique, même contrat
+  que les événements SSE moteur.
+  1 test.
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des

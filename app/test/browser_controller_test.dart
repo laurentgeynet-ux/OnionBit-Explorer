@@ -916,6 +916,28 @@ void main() {
     expect(repo.actions.where((a) => a.startsWith('forward:')), isEmpty);
     expect(repo.navigations, isEmpty);
   });
+
+  test('136e — resync navigation WebView2 → BrowserTab', () async {
+    final repo = FakeRepo();
+    final c = makeContainer(repo, FakeEvents());
+    addTearDown(c.dispose);
+    await settle(c);
+
+    final ctrl = c.read(browserProvider.notifier);
+    await ctrl.navigate('netflix.com');
+    final id = c.read(browserProvider).activeId!;
+
+    ctrl.onDelegatedNav(id, url: 'https://netflix.com/browse', loading: true);
+    var tab = c.read(browserProvider).active!;
+    expect(tab.url, 'https://netflix.com/browse');
+    expect(tab.loading, isTrue);
+
+    ctrl.onDelegatedNav(id, url: 'https://netflix.com/browse', loading: false);
+    ctrl.onDelegatedNav(id, title: 'Netflix');
+    tab = c.read(browserProvider).active!;
+    expect(tab.loading, isFalse);
+    expect(tab.title, 'Netflix');
+  });
 }
 
 /// Contrôleur minimal sans onglet — `activeId` reste null.

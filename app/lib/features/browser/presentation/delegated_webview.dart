@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
@@ -35,6 +36,7 @@ class DelegatedWebView extends StatefulWidget {
     this.userDataFolder,
     this.profileName,
     this.onController,
+    this.navDelegate,
   });
 
   /// URL initiale du domaine délégué.
@@ -59,6 +61,11 @@ class DelegatedWebView extends StatefulWidget {
   /// 136e : `goBack`/`goForward`/`currentUrl`/`getTitle`…).
   final void Function(WinWebViewController controller)? onController;
 
+  /// Délégué de navigation (136e) — les événements WebView2
+  /// (pageStarted/pageFinished/urlChange/titre/historique)
+  /// resynchronisent `BrowserTab` côté appelant.
+  final WinNavigationDelegate? navDelegate;
+
   @override
   State<DelegatedWebView> createState() => _DelegatedWebViewState();
 }
@@ -77,6 +84,10 @@ class _DelegatedWebViewState extends State<DelegatedWebView> {
       ),
     );
     controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+    final delegate = widget.navDelegate;
+    if (delegate != null) {
+      unawaited(controller.setNavigationDelegate(delegate));
+    }
     controller.loadRequest(Uri.parse(widget.url));
     _controller = controller;
     widget.onController?.call(controller);

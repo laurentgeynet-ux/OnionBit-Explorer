@@ -395,6 +395,48 @@ class BrowserController extends Notifier<BrowserState> {
   void registerWebView(String tabId, WinWebViewController c) =>
       _webviews[tabId] = c;
 
+  /// Resync navigation WebView2 → `BrowserTab` (136e,
+  /// ADR-0027 §3) : les événements natifs mettent à jour
+  /// `url`/`title`/`loading` de l'onglet délégué — le même
+  /// contrat que les événements SSE du moteur. `history`
+  /// déclenche la relecture asynchrone de
+  /// `canBack`/`canForward` (pageFinished, historyChanged).
+  void onDelegatedNav(
+    String tabId, {
+    String? url,
+    String? title,
+    bool? loading,
+    bool history = false,
+  }) {
+    _patch(
+      tabId,
+      (t) => t.copyWith(
+        url: url ?? t.url,
+        title: title ?? t.title,
+        loading: loading ?? t.loading,
+      ),
+    );
+    if (history) unawaited(_syncDelegatedHistory(tabId));
+  }
+
+  /// Relecture `canGoBack`/`canGoForward` auprès de la
+  /// WebView2 — l'événement natif `historyChanged` ne porte
+  /// pas les booléens, ils se relisent au contrôleur.
+  Future<void> _syncDelegatedHistory(String tabId) async {
+    final wv = _webviews[tabId];
+    if (wv == null) return;
+    try {
+      final back = await wv.canGoBack();
+      final fwd = await wv.canGoForward();
+      _patch(
+        tabId,
+        (t) => t.copyWith(canBack: back, canForward: fwd),
+      );
+    } on Object {
+      // Canal mort (webview détruite) — rien à resynchroniser.
+    }
+  }
+
   /// Fabrique de lecteurs natifs — injectable en test.
   late MediaPlayerFactory _playerFactory;
 
