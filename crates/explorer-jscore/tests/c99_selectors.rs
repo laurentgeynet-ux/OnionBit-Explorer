@@ -244,3 +244,38 @@ fn c99_shoelace_discover() {
         "0|sl-button,sl-icon"
     );
 }
+
+/// JS-C102 — `el.constructor` sur un élément **upgradé CE**
+/// rend le ctor enregistré, pas l'interface `HTMLElement` —
+/// sinon `this.constructor.elementProperties` dans le corps
+/// `LitElement` manque → `ce.failed` → `shadowRoot` jamais créé
+/// (verrou Shoelace mesuré).
+#[test]
+fn c102_upgraded_element_constructor() {
+    // `define` + createElement → l'upgrade lie le proto ;
+    // `el.constructor` = le ctor CE.
+    assert_eq!(
+        ev("var C = class extends HTMLElement {};\
+            customElements.define('x-ctor', C);\
+            var el = document.createElement('x-ctor');\
+            el.constructor === C"),
+        "true"
+    );
+    // Les éléments non-CE gardent le ctor d'interface.
+    assert_eq!(
+        ev("document.createElement('div').constructor.name"),
+        "HTMLElement"
+    );
+    // `this.constructor.elementProperties` dans le corps ctor
+    // résout via la chaîne CE → statique héritée (verrou
+    // LitElement mesuré).
+    assert_eq!(
+        ev("var C3 = class extends HTMLElement {\
+             static elementProperties = new Map([['a',1]]);\
+             constructor(){ super(); globalThis.__ep2 = this.constructor.elementProperties.get('a'); } };\
+            customElements.define('x-chain', C3);\
+            document.createElement('x-chain');\
+            globalThis.__ep2"),
+        "1"
+    );
+}

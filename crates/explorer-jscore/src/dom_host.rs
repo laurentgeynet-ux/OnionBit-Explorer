@@ -4690,7 +4690,23 @@ impl Host for NodeHost {
         // classe portant `.prototype` + accesseurs IDL —
         // `ctor.prototype` sert `getOwnPropertyDescriptor`
         // (tracker React `inputValueTracking`).
+        // Élément **upgradé CE** → `Ctor.prototype.constructor`
+        // = le ctor enregistré (spec : `el.constructor` suit le
+        // proto installé par l'upgrade — sinon `this.constructor`
+        // dans le corps LitElement rend l'interface `HTMLElement`
+        // et `elementProperties` manque → `ce.failed` — verrou
+        // Shoelace mesuré, JS-C102).
         if key == "constructor" {
+            let upgraded = self
+                .dom
+                .borrow()
+                .ce
+                .upgraded
+                .get(&node)
+                .and_then(|n| self.dom.borrow().ce.defs.get(n).map(|d| d.ctor));
+            if let Some(ctor) = upgraded {
+                return Ok(Some(ctor));
+            }
             return Ok(Some(e.dom_ctor(self.class_name())));
         }
         // Fast paths that don't need the dom borrow held across calls.

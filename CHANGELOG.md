@@ -9,6 +9,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C102 — `el.constructor` =
+  ctor CE sur élément upgradé**
+  (`explorer-jscore`) : le host
+  `get("constructor")` masquait le
+  proto d'upgrade → `this.constructor.
+  elementProperties` LitElement =
+  `undefined` → `ce.failed` →
+  `shadowRoot` jamais créé (verrou
+  Shoelace bout-en-bout — `sr=SR`
+  mesuré).
+
 - **JS-C100 + JS-C101 — `import()`
   dynamique end-to-end** (jscore+js+
   core) : miss `MapLoader` →
