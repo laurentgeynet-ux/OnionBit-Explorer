@@ -1406,7 +1406,39 @@ impl StyleEngine {
         if parent.is_none() && pseudo.is_none() {
             Self::apply_scheme_defaults(&mut props, env);
         }
+        // 8. `light-dark(a, b)` (R-105 — css-color-adjust-1
+        //    §2.4) : résolu à la valeur calculée — le schéma
+        //    usé de l'élément est sa `color-scheme` calculée
+        //    (héritée ou déclarée) ∩ la préférence `env`.
+        if props.values().any(|v| v.contains("light-dark(")) {
+            let dark = Self::used_dark_scheme(props.get("color-scheme").map(String::as_str), env);
+            for v in props.values_mut() {
+                if v.contains("light-dark(") {
+                    *v = resolve_light_dark(v, dark);
+                }
+            }
+        }
         ComputedStyle { props, vars }
+    }
+
+    /// Schéma usé sombre ? `color-scheme` : `only light` ou
+    /// `light` seul → clair ; `only dark`/`dark` seul →
+    /// sombre ; les deux (ou `normal`/absent) → préférence
+    /// de l'env (`prefers-color-scheme`, R-59).
+    fn used_dark_scheme(scheme: Option<&str>, env: &StyleEnv) -> bool {
+        let Some(s) = scheme else {
+            return env.color_scheme == ColorScheme::Dark;
+        };
+        let has = |w| {
+            s.split_ascii_whitespace()
+                .any(|t| t.eq_ignore_ascii_case(w))
+        };
+        let (l, d) = (has("light"), has("dark"));
+        match (l, d) {
+            (true, false) => false,
+            (false, true) => true,
+            _ => env.color_scheme == ColorScheme::Dark,
+        }
     }
 
     /// R-59 — défauts UA sombres (§ css-color-adjust-1) : le
@@ -2291,6 +2323,69 @@ table {
   text-align: initial
 }
 ";
+
+/// `light-dark(a, b)` → la branche claire ou sombre
+/// (css-color-adjust-1 §2.4 — R-105). Résolution récursive
+/// (un `light-dark` peut nicher dans une autre valeur), la
+/// virgule de tête sépare les deux branches ; un argument
+/// manquant conserve le texte source (dégradation).
+fn resolve_light_dark(v: &str, dark: bool) -> String {
+    let mut out = String::with_capacity(v.len());
+    let mut rest = v;
+    while let Some(i) = rest.to_ascii_lowercase().find("light-dark(") {
+        out.push_str(&rest[..i]);
+        let open = i + "light-dark".len();
+        // Parenthèse fermante assortie.
+        let mut depth = 0i32;
+        let mut close = None;
+        for (j, ch) in rest.char_indices().skip_while(|(j, _)| *j <= open) {
+            match ch {
+                '(' => depth += 1,
+                ')' if depth == 0 => {
+                    close = Some(j);
+                    break;
+                }
+                ')' => depth -= 1,
+                _ => {}
+            }
+        }
+        let Some(cj) = close else {
+            out.push_str(&rest[i..]);
+            return out;
+        };
+        let inner = resolve_light_dark(&rest[open + 1..cj], dark);
+        let parts = split_top_commas_css(&inner);
+        let pick = usize::from(dark);
+        match parts.get(pick).or_else(|| parts.first()) {
+            Some(c) if !c.trim().is_empty() => out.push_str(c.trim()),
+            _ => out.push_str(&rest[i..=cj]),
+        }
+        rest = &rest[cj + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Éclate sur les virgules hors parenthèses (`rgb(1,2,3)` et
+/// fonctions internes protégées) — miroir du split gradient.
+fn split_top_commas_css(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0u32;
+    let mut start = 0usize;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&s[start..]);
+    out
+}
 
 #[cfg(test)]
 mod tests {

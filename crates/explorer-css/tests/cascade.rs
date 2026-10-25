@@ -2191,3 +2191,65 @@ fn heritage_assigne_depuis_le_slot() {
     // ordinaire du slot → hérite du slot aussi.
     assert_eq!(map.get(f.fb).and_then(|s| s.get("color")), Some("teal"));
 }
+
+// ── R-105 : light-dark() résolu à la valeur calculée ────────
+
+#[test]
+fn light_dark_suit_le_schema_use() {
+    // css-color-adjust-1 §2.4 : la branche dépend du schéma
+    // usé = `color-scheme` de l'élément ∩ préférence env.
+    let mk = |env: explorer_css::ColorScheme, css: &str| {
+        let mut dom = Dom::new();
+        let doc = dom.document();
+        let div = dom.create_element("div").unwrap();
+        dom.append_child(doc, div).unwrap();
+        let mut eng = StyleEngine::new();
+        eng.add_css(css, Origin::Author);
+        let env = StyleEnv {
+            color_scheme: env,
+            ..StyleEnv::default()
+        };
+        let styles = eng.compute_tree(&dom, div, &env);
+        styles.get(div).unwrap().get("color").map(str::to_owned)
+    };
+    // Env clair → branche claire ; env sombre → sombre.
+    assert_eq!(
+        mk(
+            explorer_css::ColorScheme::Light,
+            "div{color:light-dark(white, black)}"
+        ),
+        Some("white".into())
+    );
+    assert_eq!(
+        mk(
+            explorer_css::ColorScheme::Dark,
+            "div{color:light-dark(white, black)}"
+        ),
+        Some("black".into())
+    );
+    // `color-scheme: only light` sur l'élément → clair même
+    // sous env sombre (opt-out par construction).
+    assert_eq!(
+        mk(
+            explorer_css::ColorScheme::Dark,
+            "div{color-scheme:only light;color:light-dark(white, black)}"
+        ),
+        Some("white".into())
+    );
+    // `color-scheme: dark` sous env clair → sombre.
+    assert_eq!(
+        mk(
+            explorer_css::ColorScheme::Light,
+            "div{color-scheme:dark;color:light-dark(white, black)}"
+        ),
+        Some("black".into())
+    );
+    // Niché dans une valeur composite (var()+fond) : résolu.
+    assert_eq!(
+        mk(
+            explorer_css::ColorScheme::Dark,
+            "div{--c:light-dark(#fff,#000);color:var(--c)}"
+        ),
+        Some("#000".into())
+    );
+}

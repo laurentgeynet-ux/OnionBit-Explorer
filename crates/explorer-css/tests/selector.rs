@@ -401,10 +401,10 @@ fn match_liste_complexe_reelle() {
 
 // ── R-100 : pseudos d'état structurels + :valid/:invalid ────
 
-/// DOM formulaire de test : `form > input[required] (vide),
-/// input type=email value=malformé, input type=checkbox
-/// checked, select required (option vide), fieldset[disabled]
-/// > legend > input + input`.
+/// DOM formulaire de test : `form` > `input[required]` (vide),
+/// `input` type=email value=malformé, `input` type=checkbox
+/// checked, `select` required (option vide), `fieldset[disabled]`
+/// > `legend` > `input` + `input`.
 struct FormFixture {
     dom: Dom,
     input_req: NodeId,

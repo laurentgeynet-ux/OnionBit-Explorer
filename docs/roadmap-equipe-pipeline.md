@@ -2657,6 +2657,12 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (shape/size/`at`, `√2` corner de css-images-3 §3.2, rayons
   px/%) et cône horaire (`from`, `at`, stops `%`/angle).
   `repeating-*` inclus. 3 tests pixels.
+- [x] **R-105. `light-dark()` résolu à la valeur calculée**
+  (résidu catalogue — hors scope R-59) : la cascade réécrit
+  la branche claire/sombre selon le schéma usé de l'élément
+  (`color-scheme` calculée ∩ `prefers-color-scheme` env),
+  récursion paren-consciente, passe post-`var()`. Test
+  `light_dark_suit_le_schema_use`.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

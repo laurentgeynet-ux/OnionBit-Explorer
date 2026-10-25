@@ -9,6 +9,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-105 — `light-dark()` résolu à
+  la valeur calculée**
+  (`explorer-css`, css-color-adjust-1
+  §2.4) : la cascade réécrit toute
+  valeur contenant `light-dark(` en
+  sa branche claire ou sombre selon
+  le schéma **usé** de l'élément —
+  sa `color-scheme` calculée
+  (héritée ou déclarée : `only
+  light`/`light` seul → clair,
+  `only dark`/`dark` → sombre,
+  les deux/`normal`/absent →
+  `prefers-color-scheme` de
+  l'env). Résolution paren-consciente
+  et récursive (imbrication et
+  `--*`/`var()` couverts — passe
+  après la substitution). Test
+  `light_dark_suit_le_schema_use`.
+
 - **R-104 — `radial-`/`conic-gradient`
   peints** (`explorer-render`,
   résidu du catalogue — parsés
