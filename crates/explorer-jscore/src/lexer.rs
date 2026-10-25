@@ -392,9 +392,11 @@ impl Lexer {
                 expect_operand = true;
             } else if tok == Tok::P(P::LBrace) {
                 let block = match out.last().map(|t| &t.tok) {
-                    None => true,
-                    Some(Tok::P(P::RParen | P::RBrace | P::Semi | P::Arrow)) => true,
-                    Some(Tok::Kw(Kw::Else | Kw::Do | Kw::Try | Kw::Finally)) => true,
+                    None
+                    | Some(
+                        Tok::P(P::RParen | P::RBrace | P::Semi | P::Arrow)
+                        | Tok::Kw(Kw::Else | Kw::Do | Kw::Try | Kw::Finally),
+                    ) => true,
                     Some(Tok::P(P::LBrace)) => brace_kinds.last().copied().unwrap_or(false),
                     _ => false,
                 };

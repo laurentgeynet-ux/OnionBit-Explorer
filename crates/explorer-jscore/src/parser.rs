@@ -2582,7 +2582,16 @@ impl Parser {
 }
 
 fn is_lvalue(e: &Expr) -> bool {
-    matches!(e, Expr::Ident(_) | Expr::Member(..) | Expr::Index(..))
+    // `super.x`/`super[k]` sont des lvalues spec (mur réel
+    // x-web : `super.foo = …` dans les champs de classe).
+    matches!(
+        e,
+        Expr::Ident(_)
+            | Expr::Member(..)
+            | Expr::Index(..)
+            | Expr::SuperMember(_)
+            | Expr::SuperIndex(_)
+    )
 }
 
 /// Source spelling of a keyword — used for reserved-word member

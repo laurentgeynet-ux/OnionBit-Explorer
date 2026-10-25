@@ -11,6 +11,45 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **CAP-189 — `}`-bloc → regex + lvalues
+  `super.*`** (`explorer-jscore`) : deux murs
+  de parse/assign du bundle `entry-client`
+  de x.com. `ends_operand` classait tout
+  `}` en fin d'operande → `/` après `}` de
+  bloc lu division ; le lexer suit
+  désormais `brace_kinds` (`{` classé bloc
+  vs objet par le token précédent).
+  `is_lvalue` ignorait `super.x`/`super[k]`
+  → l'interpréteur les livre
+  (`read_prop`/`write_prop` sur
+  `super_base`, receiver `this`). Tests
+  `regex_after_block_brace` +
+  `super_prop_assignment`. Verdict : les
+  modules `entry-client`/`startup-vendor`
+  s'évaluent entièrement — mur runtime
+  suivant : `constructor is not a
+  function` (API hôte absente).
+
+- **CAP-186 — `<script type="module">`
+  dynamique** (`explorer-jscore`,
+  `explorer-js`, `explorer-core`) : un
+  `<script>` inséré par `createElement` +
+  `appendChild` était toujours évalué en
+  classique — l'`entry-client` de `x-web`
+  (module ES) y prenait `SyntaxError`
+  avalée. `DynScriptReq.module` lit
+  l'attribut `type` ; le corps vérifié
+  ensemence un `ModuleGraph` dont les
+  dépendances sont fetchées hors session
+  (`NetDone.dyn_module` →
+  `eval_module`), puis `load`/`error`
+  sur l'élément (`deliver_dyn_module`,
+  tampon `js_pending_mod` sous
+  détachement moteur). Borne : bare
+  specifier hors import map non
+  résolvable. Test session
+  `dynamic_module_script_evals_graph`.
+
 - **CAP-185 — `load`/`error` des `<link
   rel=stylesheet>` statiques** (`explorer-jscore`,
   `explorer-js`, `explorer-core`) : les feuilles

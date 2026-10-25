@@ -3497,13 +3497,52 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   livrés. Tests jscore `cap185_static_link_
   load_error` + session `static_stylesheet_
   fires_load_and_error`. Sonde x.com : mutation
-  classée (l'`appendChild` de `startEntry`) —
-  **prochain mur identifié : `type="module"`
-  dynamique évalué en classique →
-  `SyntaxError` silencieuse (CAP-186 à
-  ouvrir : `deliver_dyn_script` ignore le
-  type)**.
->>>>>>> Stashed changes
+  classée (l'`appendChild` de `startEntry`).
+
+- [x] **CAP-189. `}`-bloc → regex +
+  lvalues `super.*` (sonde x.com)** — deux murs
+  de parse/assign de `entry-client` : (a)
+  `ends_operand` classait tout `}` en fin
+  d'operande → `/` après `}` de **bloc**
+  (corps de fonction) lu division au lieu de
+  regex (`/(?:^|;\s*)gt=/` réel) ; suivi
+  `brace_kinds` parallèle à `clause_parens`
+  classifie `{` bloc vs littéral objet par
+  le token précédent (bornes : `{` après
+  `:`/`class`/`import`/`export` = operande).
+  (b) `is_lvalue` ignorait
+  `Expr::SuperMember`/`SuperIndex` →
+  `super.x = v`/`super[k] = v` rejetés ;
+  `read_lvalue`/`write_lvalue` les livrent
+  via `super_base` + `read_prop`/`write_prop`
+  (receiver `this`, setter cherché sur le
+  proto — spec [[Set]]). Tests :
+  `regex_after_block_brace`,
+  `super_prop_assignment`. Verdict sonde :
+  `entry-client` + `startup-vendor`
+  **parsent et s'évaluent** — mur passé
+  en runtime (`TypeError: constructor is
+  not a function`, API hôte manquante).
+
+- [x] **CAP-186. `<script type="module">`
+  dynamique (sonde x.com)** — `deliver_dyn_script`
+  évaluait tout insertion en classique :
+  l'`entry-client-*.js` de `x-web` (module
+  ES) y était `SyntaxError` avalée. Le drain
+  lit `type` (`DynScriptReq.module`) ;
+  `src` → le corps vérifié ensemence un
+  `ModuleGraph` dont les deps sont fetchées
+  hors session (`spawn_dyn_module_graph`,
+  `NetDone.dyn_module`), `inline` →
+  `inline:{seq}` même chemin ; la livraison
+  `deliver_dyn_module` évalue par
+  `eval_module` puis tire `load`/`error`
+  (helper `eval_mod` sans `&self` pour le
+  replay `js_pending_mod` sous détachement).
+  Borne : bare specifier hors import map =
+  « unresolvable ». Test session
+  `dynamic_module_script_evals_graph`
+  (entrée + `import` réel + `load`).
 
 - [x] **CAP-182. Arc édition : `Range`
   vivant + `TreeWalker` + `execCommand`

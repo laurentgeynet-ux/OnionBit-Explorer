@@ -580,6 +580,16 @@ impl Engine {
                 let k = self.prop_key(k)?;
                 self.get_prop_value(b, &k)
             }
+            Expr::SuperMember(name) => {
+                let base = self.super_base(env)?;
+                self.read_prop(base, this, name)
+            }
+            Expr::SuperIndex(k) => {
+                let base = self.super_base(env)?;
+                let kv = self.eval_expr(env, this, k)?;
+                let key = self.prop_key(kv)?;
+                self.read_prop(base, this, &key)
+            }
             _ => Err(self.type_error("invalid assignment target")),
         }
     }
@@ -608,6 +618,24 @@ impl Engine {
                 let pat = expr_to_pat(e)
                     .ok_or_else(|| self.type_error("invalid destructuring target"))?;
                 self.bind_pat(env, this, &pat, v, BindMode::Assign)
+            }
+            // `super.x = v` / `super[k] = v` (mur réel x-web,
+            // champs de classe) — lookup setter sur le proto
+            // (`super_base`), valeur posée sur `this` (spec
+            // [[Set]] receiver) via `write_prop`.
+            Expr::SuperMember(name) => {
+                let Value::Obj(base) = self.super_base(env)? else {
+                    return Err(self.type_error("invalid `super` base"));
+                };
+                self.write_prop(base, this, name, v)
+            }
+            Expr::SuperIndex(k) => {
+                let kv = self.eval_expr(env, this, k)?;
+                let key = self.prop_key(kv)?;
+                let Value::Obj(base) = self.super_base(env)? else {
+                    return Err(self.type_error("invalid `super` base"));
+                };
+                self.write_prop(base, this, &key, v)
             }
             _ => Err(self.type_error("invalid assignment target")),
         }

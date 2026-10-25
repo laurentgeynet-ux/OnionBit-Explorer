@@ -713,6 +713,32 @@ fn regex_after_clause_paren() {
         ev("var i = 0, ok = false; while (i++ < 1) /a/.test('a') && (ok = true); ok"),
         Value::Bool(true)
     ));
+}
+
+/// Regex littéral après `}` de **bloc** — `} /re/` en tête de
+/// statement est une regex, pas une division (bug réel x-web
+/// `entry-client-*.js` : corps de fonction fermé puis
+/// `/(?:^|;\s*)gt=/.test(document.cookie)` — le lexer classait
+/// tout `}` en fin d'operande).
+#[test]
+fn regex_after_block_brace() {
+    // `}` de corps de fonction : statement regex.
+    assert_eq!(
+        ev_str("function f() { return 1, 2; } /(?:^|;\\s*)gt=/.test(';gt=x')"),
+        "true"
+    );
+    // Bloc nu au top : même règle.
+    assert_eq!(ev_str("{ var a = 1; } /ab/.test('ab')"), "true");
+    // `}` d'objet en position operande : `/` reste division.
+    assert_eq!(num(ev("var x = 8, o = {a: 1}; x / 4")), 2.0);
+    // Méthode dans littéral objet : le `}` du corps ré-arme
+    // regex, le `}` de l'objet termine l'operande.
+    assert_eq!(ev_str("var o = {m() { return 3; }}; o.m()"), "3");
+    // Arrow à corps bloc : même règle.
+    assert_eq!(
+        ev_str("var g = () => { return 1; }; g(); /ab/.test('ab')"),
+        "true"
+    );
     assert!(matches!(
         ev("var ok = false; for (var j = 0; j < 1; j++) /a/.test('a') && (ok = true); ok"),
         Value::Bool(true)
@@ -7686,4 +7712,49 @@ fn c34_await_pending_spec_fixture() {
          out",
     );
     assert_eq!(v, "7", "spec : await pending suspend, ne jette pas");
+}
+
+/// `super.prop = v` / `super[k] = v` — lvalues spec : le
+/// setter est cherché sur le proto (`super_base`), la
+/// valeur posée sur `this` — mur réel x-web
+/// (`invalid assignment target` sur `startup-vendor`).
+#[test]
+fn super_prop_assignment() {
+    // Champ plain : `super.x = v` pose `x` sur `this`.
+    assert_eq!(
+        ev_str(
+            "class B {} class D extends B { put(v) { super.x = v; } } \
+             var d = new D(); d.put(7); d.x"
+        ),
+        "7"
+    );
+    // Setter sur le proto : receiver = `this`.
+    assert_eq!(
+        ev_str(
+            "var seen = 0; \
+             class B { set x(v) { seen = v * 2; } } \
+             class D extends B { go(v) { super.x = v; } } \
+             new D().go(5); seen"
+        ),
+        "10"
+    );
+    // `super[k] = v`.
+    assert_eq!(
+        ev_str(
+            "class B {} class D extends B { put(k, v) { super[k] = v; } } \
+             var d = new D(); d.put('a', 9); d.a"
+        ),
+        "9"
+    );
+    // Compound `super.x += v` : read via proto (getter),
+    // write via setter — receiver `this`.
+    assert_eq!(
+        ev_str(
+            "class B { constructor() { this._x = 0; } \
+                     set x(v) { this._x = v; } get x() { return this._x; } } \
+             class D extends B { add(v) { super.x += v; } } \
+             var d = new D(); d.add(3); d.add(4); d._x"
+        ),
+        "7"
+    );
 }
