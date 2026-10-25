@@ -98,6 +98,12 @@ pub struct MemReport {
     /// Somme des champs `_bytes` de l'onglet (vivant + gelé)
     /// — hors structures à compte seul, honnête.
     pub total_bytes: usize,
+    /// Journaux rejoués en place (session-globale, pas par
+    /// onglet) — taux de succès de la voie différentielle
+    /// ADR-0025 (étape 137c — calibrage du seuil de repli).
+    pub journal_applies: u32,
+    /// Replis re-parse après journal tenté (session-globale).
+    pub journal_fallbacks: u32,
 }
 
 /// Compte les boîtes d'un arbre de layout (descente récursive
@@ -229,6 +235,10 @@ impl Session {
             + r.bfcache_png_bytes
             + r.bfcache_js_heap_bytes
             + r.bfcache_img_bodies_bytes;
+        // 137c — taux de succès de la voie différentielle,
+        // session-globale (seuil de repli à calibrer en vols).
+        r.journal_applies = self.journal_applies;
+        r.journal_fallbacks = self.journal_fallbacks;
         Some(r)
     }
 }

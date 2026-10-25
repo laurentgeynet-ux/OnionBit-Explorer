@@ -4802,7 +4802,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     re-parse (borne R-96) ;
     `Dom::attach_shadow_root` existe,
     consommation pure périmètre NAV.
-  - [ ] **137c — seuil de repli
+  - [x] **137c — seuil de repli
     calibré** : mesurer
     `journal_fallbacks` sur vols
     terrain réels, fixer le seuil
