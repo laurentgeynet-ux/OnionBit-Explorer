@@ -36,8 +36,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use explorer_core::{
-    drain_applies_shared, drain_navs_shared, history_move_shared, navigate_shared, CoreError,
-    CoreEvent, InputEvent, InputOutcome, KeyMods, Session, TabId,
+    drain_applies_shared, drain_navs_shared, eval_shared, history_move_shared, navigate_shared,
+    CoreError, CoreEvent, EvalReply, InputEvent, InputOutcome, KeyMods, Session, TabId,
 };
 use explorer_net::http::{Initiator, Method, Request};
 use explorer_net::url::Url;
@@ -145,6 +145,7 @@ pub fn router_with_egress(
         .route("/api/tabs/{id}/viewport", post(viewport))
         .route("/api/tabs/{id}/color-scheme", post(color_scheme))
         .route("/api/tabs/{id}/input", post(input))
+        .route("/api/tabs/{id}/eval", post(eval_js))
         .route("/api/tabs/{id}/find", post(find))
         .route("/api/tabs/{id}/media", get(list_media))
         .route("/api/tabs/{id}/media/{mid}", get(get_media))
@@ -704,6 +705,39 @@ async fn find(
         "query": query,
     }))
     .into_response()
+}
+
+/// `POST /api/tabs/{id}/eval` `{ "expr": "<js>" }` — sonde
+/// live : évalue l'expression dans le contexte top-level de
+/// l'onglet (bissection d'hydratation, état du miroir — le
+/// travail tourne hors verrou comme la pompe, les mutations
+/// DOM sont appliquées). Réponse `{ ok, value|error, jobs }` ;
+/// `409` moteur indisponible (pompe en vol, page sans
+/// script) — réessayer.
+async fn eval_js(
+    State(st): State<ApiState>,
+    Path(id): Path<TabId>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let Some(src) = body.get("expr").and_then(serde_json::Value::as_str) else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            &CoreError::Url("champ « expr » manquant".to_string()),
+        );
+    };
+    match eval_shared(&st.session, id, src.to_string()).await {
+        EvalReply::Done { value, jobs } => Json(serde_json::json!({
+            "ok": value.is_ok(),
+            "value": value.as_deref().ok(),
+            "error": value.err(),
+            "jobs": jobs,
+        }))
+        .into_response(),
+        EvalReply::Unavailable => err(
+            StatusCode::CONFLICT,
+            &CoreError::Url("moteur JS indisponible — pompe en vol".to_string()),
+        ),
+    }
 }
 
 /// `GET /api/tabs/{id}/downloads` → téléchargements en

@@ -2004,3 +2004,59 @@ fn geometry_published_at_relayout() {
     s.tabs.get_mut(&tab).unwrap().clear_geometry();
     assert!(geom.lock().unwrap().rects.is_empty());
 }
+
+/// Sonde `/eval` — `eval_shared` évalue dans le
+/// contexte top-level de l'onglet avec le même contrat de
+/// détachement que la pompe : valeur sérialisée rendue,
+/// jobs armés par l'éval drainés dans le même tour, erreurs
+/// JS rendues en `Err` (jamais de panic), `Unavailable`
+/// sans moteur.
+#[tokio::test]
+async fn eval_shared_evalue_drain_et_tolere() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let tab_nu = s.open_tab();
+    let html = "<!doctype html><html><body><p>x</p><script></script></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "").unwrap();
+    s.tabs.get_mut(&tab).unwrap().js = Some(eng);
+    let sm = tokio::sync::Mutex::new(s);
+
+    // Onglet sans moteur → Unavailable (rien n'a tourné).
+    assert!(matches!(
+        eval_shared(&sm, tab_nu, "1".to_string()).await,
+        EvalReply::Unavailable
+    ));
+
+    // Valeur immédiate.
+    match eval_shared(&sm, tab, "40 + 2".to_string()).await {
+        EvalReply::Done { value, .. } => assert_eq!(value.as_deref(), Ok("42")),
+        EvalReply::Unavailable => panic!("moteur attendu"),
+    }
+
+    // L'éval arme une microtask — le drain interne la joue
+    // avant réinsertion : la seconde éval la lit sans pompe.
+    let _ = eval_shared(
+        &sm,
+        tab,
+        "Promise.resolve().then(function(){window.__m = 9;}); 0".to_string(),
+    )
+    .await;
+    match eval_shared(&sm, tab, "window.__m".to_string()).await {
+        EvalReply::Done { value, jobs: _ } => assert_eq!(value.as_deref(), Ok("9")),
+        EvalReply::Unavailable => panic!("moteur attendu"),
+    }
+
+    // Erreur JS → `Err` sérialisée, pas de panic.
+    match eval_shared(&sm, tab, "null.champ".to_string()).await {
+        EvalReply::Done { value, .. } => assert!(value.is_err()),
+        EvalReply::Unavailable => panic!("moteur attendu"),
+    }
+
+    // Le moteur a été réinséré : une éval suivante reste
+    // serviable (preuve du round-trip take/commit).
+    match eval_shared(&sm, tab, "window.__m + 1".to_string()).await {
+        EvalReply::Done { value, .. } => assert_eq!(value.as_deref(), Ok("10")),
+        EvalReply::Unavailable => panic!("moteur réinséré attendu"),
+    }
+}

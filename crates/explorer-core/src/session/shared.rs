@@ -464,6 +464,77 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     jobs
 }
 
+/// Réponse d'une évaluation JS à la demande (sonde `/eval`).
+pub enum EvalReply {
+    /// Moteur disponible : `value` = résultat sérialisé par
+    /// le moteur ou message d'erreur JS ; `jobs` = jobs
+    /// (microtasks/timers) drainés après l'éval.
+    Done {
+        value: Result<String, String>,
+        jobs: usize,
+    },
+    /// Pas de moteur sur l'onglet (page sans `<script>`,
+    /// naviguée) ou pompe détachée déjà en vol — réessayer
+    /// plus tard (l'éval n'a pas tourné).
+    Unavailable,
+}
+
+/// Évalue `src` dans le contexte top-level de l'onglet —
+/// sonde live (bissection d'hydratation, état du miroir,
+/// probes d'attribution — ex. « la var CSS est-elle posée ? »).
+///
+/// Même contrat de détachement que [`pump_timers_shared`] :
+/// l'éval + le drain des jobs qu'elle enfile +
+/// la sérialisation miroir tournent en `spawn_blocking` hors
+/// verrou ; `commit_js_pump` réinsère (garde epoch, buffers
+/// net/attrs, drains de fin) et les applies sont drainés —
+/// une éval peut muter le DOM comme n'importe quel script.
+///
+/// `run_pending_bounded` borne le drain (JS-C103) ; l'éval
+/// elle-même reste soumise au budget ops du moteur — une
+/// expression hostile est traitée comme un script hostile.
+pub async fn eval_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId, src: String) -> EvalReply {
+    let taken = {
+        let mut s = sess.lock().await;
+        s.take_js_engine(tab)
+    };
+    let Some((mut eng, max, epoch, sync_ok)) = taken else {
+        return EvalReply::Unavailable;
+    };
+    let out = tokio::task::spawn_blocking(move || {
+        let value = eng
+            .eval_ctx(explorer_js::JS_CTX_TOP, &src, Some("api/eval"))
+            .map_err(|e| e.to_string());
+        // L'éval a pu armer timers/microtasks (attribution
+        // d'hydratation, setTimeout(0)…) — on les draine pour
+        // que la valeur rendue reflète l'état stabilisé.
+        let jobs = eng.run_pending_bounded(max);
+        let mutated = if sync_ok {
+            Session::sync_for_apply(&mut *eng)
+        } else {
+            None
+        };
+        (value, jobs, mutated, eng)
+    })
+    .await;
+    let mut s = sess.lock().await;
+    if let Ok((value, jobs, mutated, eng)) = out {
+        let _ = s.commit_js_pump(tab, epoch, Some((jobs, mutated, eng)), sync_ok);
+        drop(s);
+        drain_applies_shared(sess, tab).await;
+        EvalReply::Done { value, jobs }
+    } else {
+        // Bloc perdu (panic du spawn) — commit sans
+        // moteur : l'onglet continue sans JS, la sonde
+        // rend l'échec plutôt que de masquer.
+        let _ = s.commit_js_pump(tab, epoch, None, sync_ok);
+        EvalReply::Done {
+            value: Err("bloc spawn perdu (panic)".to_string()),
+            jobs: 0,
+        }
+    }
+}
+
 /// Drain d'applies sur session partagée (étape 55h) :
 /// détache l'état de peinture de l'onglet, applique en
 /// `spawn_blocking` (re-parse → cascade → remap/relayout →
