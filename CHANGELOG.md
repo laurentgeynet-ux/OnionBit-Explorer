@@ -1869,7 +1869,52 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
-- **CAP-193 — canal diag clone-getters
+-- - **JS-C34 — suspension réelle :
+  générateurs lazy + `await` sur
+  promesse pendante (mur n°1 moteur)** (`explorer-
+  jscore`) : `function*` produit un
+  `ObjKind::GenLive` portant un
+  `GExec` — exécuteur à pile de
+  contrôle explicite (`Vec<GFrame>`,
+  kinds `Seq`/`While`/`For`/`ForIter`/
+  `Try`) qui suspend/reprend SANS
+  pile native. `lower_suspend_body`
+  hisse `yield`/`await` en init de
+  déclaration (`let __gN = yield e`)
+  — suspension uniquement aux
+  positions de statement (les
+  sous-expressions paresseuses
+  `?:`/`&&`/`||`/`??`/`?.` portant un
+  suspend : borne documentée, hoist
+  éager). `next(v)` lie `v` au
+  binding, `throw(e)` jette au site
+  (`try/catch` interne rattrape),
+  `return(v)` clôt ; `for..of`,
+  spread, `yield*`, boucles+try
+  imbriqués verts. Correctifs moteur :
+  `Adv` avance le frame appelant
+  (pas le poussé), `drain` de
+  `yield*` en tête de boucle,
+  `throw` purge le `pending`.
+  **`async fn` (JS-C34b)** : le corps
+  tourne sur le même `GExec` — `await`
+  évalue sa cible : promesse pendante
+  → `pending=Await{into,prom}` +
+  réactions `then` `BoundNative`es au
+  `GenLive` porteur (bound=[gen,
+  outer]) ; settled → livrée/jetée
+  sans hop ; non-promesse → livrée
+  directe. `resume_await` reprend le
+  frame (rejet = `throw` au site —
+  `try/catch` interne rattrape) ;
+  `settle_outer` settle la promesse
+  rendue à `return`/`throw`. Traces
+  GC : `Await.prom`, `gen_obj`,
+  `outer` sont des racines. Fixtures
+  `c34_generator_lazy`/`c34_await_
+  pending` dé-ignorées, vertes.
+
+ **CAP-193 — canal diag clone-getters
   (sonde mur `TanStack` `Invariant
   failed`, vol `576c53e`)** (`explorer-
   jscore`) : `Engine::set_diag_hook`

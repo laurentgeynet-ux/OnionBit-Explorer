@@ -1588,8 +1588,9 @@ fn async_fn_and_await() {
         ),
         "c:boom"
     );
-    // `await` on a pending promise → runtime TypeError (no
-    // continuations — documented deviation).
+    // `await` on a never-settling promise → the async frame
+    // suspends forever (JS-C34) — the promise stays pending,
+    // no throw (spec — was a TypeError before JS-C34b).
     assert_eq!(
         ev_str(
             "var p = new Promise(function(res, rej) {});\
@@ -7679,7 +7680,6 @@ fn assign_compound_key_evaluee_une_fois() {
 /// l'appel (eager) : `log` vaut `["body","call"]` au lieu de
 /// `["call"]`.
 #[test]
-#[ignore = "JS-C34 — générateur eager : déclenché par site réel uniquement"]
 fn c34_generator_lazy_spec_fixture() {
     let v = ev_str(
         "var log = [];\
@@ -7696,20 +7696,20 @@ fn c34_generator_lazy_spec_fixture() {
 /// `await` sur pending jette `TypeError` — le plus petit programme
 /// observable : promesse résolue en microtâche différée.
 #[test]
-#[ignore = "JS-C34 — await pending : déclenché par site réel uniquement"]
 fn c34_await_pending_spec_fixture() {
     // `eval` draine les microtâches en fin de job — `p` est
-    // résolue quand `out` est lu. Spec : `await p` suspend `f`
+    // résolue et la continuation `f` rejouée quand `out` est
+    // lu au job suivant. Spec : `await p` suspend `f`
     // jusqu'à la résolution → `out = 7`. Moteur : `await` sur
     // pending jette → `f()` rejette → `"unset"`.
-    let v = ev_str(
+    let v = seq_str(
         "var out = 'unset';\
          var p = new Promise(function (res) {\
              Promise.resolve().then(function () { res(7); });\
          });\
          async function f() { return await p; }\
-         f().then(function (v) { out = v; });\
-         out",
+         f().then(function (v) { out = v; });",
+        "out",
     );
     assert_eq!(v, "7", "spec : await pending suspend, ne jette pas");
 }

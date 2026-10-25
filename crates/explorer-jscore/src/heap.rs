@@ -306,6 +306,11 @@ impl Heap {
                 }
                 push_value(out, *ret);
             }
+            ObjKind::GenLive { exec } => {
+                if let Ok(g) = exec.try_borrow() {
+                    g.trace(out, envs);
+                }
+            }
             ObjKind::Proxy { target, handler } => {
                 push_value(out, *target);
                 if let Some(h) = handler {
@@ -736,6 +741,14 @@ pub enum ObjKind {
         /// Terminal value — `{value, done:true}` after exhaustion
         /// (generator `return v`; `Undefined` for plain iterators).
         ret: Value,
+    },
+    /// Générateur lazy (`function*`) — exécuteur suspendable
+    /// `GExec` (JS-C34) : pile de contrôle explicite partagée
+    /// via `RefCell` (les natives `next`/`throw`/`return`
+    /// reprennent le corps au dernier `yield`).
+    GenLive {
+        /// Exécuteur du corps (frames + env + pending).
+        exec: std::rc::Rc<std::cell::RefCell<crate::interp::lazy::GExec>>,
     },
     /// `Symbol(desc)` — identité unique par alloc (`===` par
     /// `ObjId`, `typeof` → `"symbol"`). `key` est la clé-propriété
@@ -1544,7 +1557,6 @@ impl Env {
         }))
     }
 }
-
 
 /// `true` si la chaîne proto de `sid` porte au moins un
 /// accessor (`Prop::Acc`) — sonde diag : un `{...}`/

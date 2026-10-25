@@ -5448,11 +5448,48 @@ impl Engine {
             Self::env_put(&local, NEW_TARGET, nt, false);
         }
         self.hoist(&lit.body, &local);
-        // Générateur eager : le corps tourne à l'appel en
-        // empilant un collecteur ; chaque `yield` pousse sa
-        // valeur (déviation — pas de suspension).
+        // Générateur lazy (JS-C34) : le corps ne tourne
+        // qu'à `next()` — un `GExec` suspendable porte la
+        // pile de contrôle ; `yield` suspend/reprend.
         if lit.is_gen {
-            self.gen_collect.push(Vec::new());
+            let body = crate::interp::lazy::lower_suspend_body(&lit.body);
+            let it = crate::interp::lazy::gen_lazy_obj(self, local.clone(), this, body);
+            if let (Value::Obj(iid), Value::Obj(fid)) = (it, f) {
+                if let Some(proto) = self.get_prop(fid, "prototype") {
+                    if let Some(o) = self.heap.obj_mut(iid) {
+                        o.proto = proto;
+                    }
+                }
+            }
+            self.call_depth -= 1;
+            self.call_stack.pop();
+            self.strict = outer_strict;
+            return Ok(it);
+        }
+        // Async fn (JS-C34b) : le corps tourne sur le même
+        // `GExec` suspendable que les générateurs — `await`
+        // pendante suspend le frame et s'enfile en réaction
+        // `then` ; `return`/`throw` settle la promesse rendue.
+        if lit.is_async {
+            let body = crate::interp::lazy::lower_suspend_body(&lit.body);
+            let prom = self.new_promise();
+            let gen = crate::interp::lazy::gen_lazy_obj(self, local.clone(), this, body);
+            if let Value::Obj(gid) = gen {
+                if let Some(o) = self.heap.obj(gid) {
+                    if let ObjKind::GenLive { exec } = &o.kind {
+                        let exec = exec.clone();
+                        {
+                            let mut g = exec.borrow_mut();
+                            g.set_outer(prom);
+                            let _ = g.start(self);
+                        }
+                    }
+                }
+            }
+            self.call_depth -= 1;
+            self.call_stack.pop();
+            self.strict = outer_strict;
+            return Ok(Value::Obj(prom));
         }
         // JS-C41 : un appel JS coûte ~27–55 Kio de pile
         // native (mesuré) — la récursion bascule sur un
@@ -5466,42 +5503,12 @@ impl Engine {
         self.call_depth -= 1;
         self.call_stack.pop();
         self.strict = outer_strict;
-        if lit.is_gen {
-            let items = self.gen_collect.pop().unwrap_or_default();
-            let ret = match r {
-                Ok(Flow::Return(ret)) => ret,
-                Ok(_) => Value::Undefined,
-                Err(t) => return Err(t),
-            };
-            let it = crate::collections::gen_iter_obj(self, items, ret);
-            // `Object.getPrototypeOf(g()) === g.prototype`
-            // (spec) — l'itérateur partagé rendait le proto
-            // `Iterator.prototype` à la place.
-            if let (Value::Obj(iid), Value::Obj(fid)) = (it, f) {
-                if let Some(proto) = self.get_prop(fid, "prototype") {
-                    if let Some(o) = self.heap.obj_mut(iid) {
-                        o.proto = proto;
-                    }
-                }
-            }
-            return Ok(it);
-        }
-        let out = match r {
+
+        match r {
             Ok(Flow::Return(v)) => Ok(v),
             Ok(_) => Ok(Value::Undefined),
             Err(t) => Err(t),
-        };
-        // `async`: the body's result/rejection becomes a
-        // promise (deviation: body runs synchronously).
-        if lit.is_async {
-            let pid = self.new_promise();
-            match out {
-                Ok(v) => self.resolve_promise(pid, v),
-                Err(Thrown(t)) => self.reject_promise(pid, t),
-            }
-            return Ok(Value::Obj(pid));
         }
-        out
     }
 
     /// `new F(args)` — `new.target` = `f`.
@@ -5725,6 +5732,7 @@ impl Engine {
 
 mod eval;
 mod exec;
+pub(crate) mod lazy;
 mod ops;
 
 pub(crate) use ops::*;

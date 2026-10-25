@@ -39,22 +39,6 @@ fn set_items(e: &Engine, id: ObjId) -> Vec<Value> {
     }
 }
 
-/// Generator object — `Iter` snapshot plus a terminal `ret`
-/// (`gen.return v` → `{value: v, done: true}` after exhaustion).
-pub(crate) fn gen_iter_obj(e: &mut Engine, items: Vec<Value>, ret: Value) -> Value {
-    // Proto de base `%IteratorPrototype%` — l'appelant l'écrase
-    // avec `g.prototype` (spec `GeneratorStart`).
-    let it = iter_obj(e, items, e.protos.iterator);
-    if let Value::Obj(id) = it {
-        if let Some(o) = e.heap.obj_mut(id) {
-            if let ObjKind::Iter { ret: r, .. } = &mut o.kind {
-                *r = ret;
-            }
-        }
-    }
-    it
-}
-
 /// `{value, done}` iterator result.
 fn iter_result(e: &mut Engine, value: Value, done: bool) -> Value {
     let o = e.new_object();
@@ -486,10 +470,20 @@ fn set_is_disjoint(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
 // Iterator prototype — `next()` on ObjKind::Iter
 // ------------------------------------------------------------------
 
-fn iter_next(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+fn iter_next(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Err(e.type_error("next on non-iterator"));
     };
+    // Générateur lazy (JS-C34) — `next(v)` reprend le corps.
+    {
+        let Some(o) = e.heap.obj(id) else {
+            return Err(e.type_error("next on non-iterator"));
+        };
+        if let ObjKind::GenLive { exec } = &o.kind {
+            let exec = exec.clone();
+            return exec.borrow_mut().next(e, arg(a, 0));
+        }
+    }
     let (item, ret) = {
         let Some(o) = e.heap.obj_mut(id) else {
             return Err(e.type_error("next on non-iterator"));
@@ -522,6 +516,13 @@ fn iter_return(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Err(e.type_error("return on non-iterator"));
     };
+    // Générateur lazy — `return(v)` termine le corps.
+    if let Some(o) = e.heap.obj(id) {
+        if let ObjKind::GenLive { exec } = &o.kind {
+            let exec = exec.clone();
+            return exec.borrow_mut().ret_at(e, arg(args, 0));
+        }
+    }
     if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Iter { items, idx, .. } = &mut o.kind {
             *idx = items.len();
@@ -530,9 +531,18 @@ fn iter_return(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     Ok(iter_result(e, arg(args, 0), true))
 }
 
-/// `gen.throw(e)` — le corps eager a déjà terminé : la spec lève
-/// l'erreur directement à l'appelant.
-fn iter_throw(_e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+/// `gen.throw(e)` — lazy (JS-C34) : jeté *au site* suspendu
+/// (un `try/catch` interne peut rattraper) ; eager : levée
+/// directe à l'appelant.
+fn iter_throw(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = t {
+        if let Some(o) = e.heap.obj(id) {
+            if let ObjKind::GenLive { exec } = &o.kind {
+                let exec = exec.clone();
+                return exec.borrow_mut().throw_at(e, arg(args, 0));
+            }
+        }
+    }
     Err(Thrown(arg(args, 0)))
 }
 
