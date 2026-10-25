@@ -6380,6 +6380,20 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   (socket TCP réelle — handshake,
   echo, pong constaté, close 2 sens).
 
+- [x] **CAP-191. Shadow DOM tranche 1 :
+  surface sans composition** — `attachShadow`
+  spec-fidèle (`NotSupportedError` au
+  re-attach), `shadowRoot.host` via
+  `Dom::shadow_hosts`, `getRootNode({composed:
+  true})` traversant à `document`,
+  `assignedSlot`/`assignedElements`/
+  `assignedNodes` honnêtes (pas de
+  répartition), `mode:"closed"` +
+  `ElementInternals`. Borné : pas de
+  scoping CSS (T2), slots (T3), event
+  retargeting (T4), `shadowrootmode` (T5).
+  Test `cap191_shadow_surface`.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

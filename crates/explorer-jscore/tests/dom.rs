@@ -5227,3 +5227,74 @@ fn cap188_xpath_subset() {
         "TypeError"
     );
 }
+
+// ===== CAP-191 — Shadow DOM tranche 1 : surface API sans
+// composition — `attachShadow`, `shadowRoot` open/closed,
+// `host`, `getRootNode({composed})`, `assignedSlot`/
+// `assignedElements` honnêtes (pas de scoping ni slots).
+
+#[test]
+fn cap191_shadow_surface() {
+    let mut e =
+        engine_with("<!doctype html><html><body><div id=h><p id=light>x</p></div></body></html>");
+    e.eval("var h=document.getElementById('h'),d=document;")
+        .expect("setup");
+    // attachShadow open → objet fragment, nodeType 11,
+    // `el.shadowRoot === r`, `r.host === h`, ownerDocument.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var r=h.attachShadow({mode:'open'});\
+            [r.nodeType, r.nodeName, h.shadowRoot===r, r.host===h,\
+             r.getRootNode()===r, r instanceof DocumentFragment,\
+             typeof r.querySelector].join('|')"
+        ),
+        "11|#DOCUMENT-FRAGMENT|true|true|true|false|function"
+    );
+    // Enfants de la racine : getRootNode() = racine ;
+    // {composed:true} → document (traverse l'hôte).
+    assert_eq!(
+        evf(
+            &mut e,
+            "var s=d.createElement('b');r.appendChild(s);\
+            [s.getRootNode()===r, s.getRootNode({composed:true})===document,\
+             s.getRootNode()===d.getElementById('light').getRootNode()].join('|')"
+        ),
+        "true|true|false"
+    );
+    // mode closed → `el.shadowRoot` null, racine via
+    // attachInternals (spec `ElementInternals.shadowRoot`).
+    assert_eq!(
+        evf(
+            &mut e,
+            "var h2=d.createElement('div');d.body.appendChild(h2);\
+            var r2=h2.attachShadow({mode:'closed'});\
+            [h2.shadowRoot===null, r2.host===h2, r2.getRootNode()===r2].join('|')"
+        ),
+        "true|true|true"
+    );
+    // Re-attach → NotSupportedError (spec).
+    assert_eq!(
+        evf(&mut e, "var t='';try{h.attachShadow()}catch(v){t=v.name}t"),
+        "NotSupportedError"
+    );
+    // Pas de répartition : `assignedSlot` null,
+    // `assignedElements()` vide — borné honnête.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var sl=d.createElement('slot');r.appendChild(sl);\
+            [d.getElementById('light').assignedSlot===null,\
+             sl.assignedElements().length, sl.assignedNodes().length].join('|')"
+        ),
+        "true|0|0"
+    );
+    // innerHTML sur la racine (fragment parsing).
+    assert_eq!(
+        evf(
+            &mut e,
+            "r.innerHTML='<i>in</i>';r.querySelector('i')===null?'null':r.childNodes.length"
+        ),
+        "1"
+    );
+}

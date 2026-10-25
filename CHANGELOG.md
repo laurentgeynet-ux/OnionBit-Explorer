@@ -9,6 +9,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **CAP-191 — Shadow DOM tranche 1 :
+  surface API sans composition**
+  (`explorer-jscore`) : l'arc `attachShadow`
+  passe de l'amorçage #25 (polyfills) à une
+  surface mesurée — re-attach →
+  `NotSupportedError` spec (renvoyer
+  l'existante trompait les feature-
+  detects), `shadowRoot.host` (seulement
+  sur racine attachée — map inverse
+  `Dom::shadow_hosts`), `getRootNode
+  ({composed:true})` traverse à l'arbre
+  de l'hôte → `document` (identité `===`),
+  `assignedSlot`/`assignedElements()`/
+  `assignedNodes()` honnêtes (`null`/`[]`
+  — pas de répartition, tranche 3).
+  `mode:"closed"` → `shadowRoot` null +
+  `attachInternals().shadowRoot` lisible
+  (spec `ElementInternals`). Borné :
+  scoping CSS (tranche 2), slots/
+  distribution (3), event retargeting
+  (4), `shadowrootmode` (5), `instanceof
+  DocumentFragment` non lié (proto).
+  Test jscore `cap191_shadow_surface`.
+
 ### Added
 
 - **CAP-190 — `Intl.Segmenter` borné** (`explorer-jscore`,

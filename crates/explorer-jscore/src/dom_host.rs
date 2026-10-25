@@ -4381,7 +4381,7 @@ impl Host for NodeHost {
                     e.get_prop(e.global, "document").unwrap_or(Value::Null),
                 ));
             }
-            // `shadowRoot.host` (CAP-190 tranche 1) — l'hôte
+            // `shadowRoot.host` (CAP-191 tranche 1) — l'hôte
             // de la racine ; absent (`undefined` fallthrough)
             // sur tout autre nœud — la propriété n'existe
             // que sur `ShadowRoot` (spec).
@@ -4392,7 +4392,7 @@ impl Host for NodeHost {
                     None => Value::Null,
                 }));
             }
-            // `el.assignedSlot` (CAP-190 tranche 1) — pas de
+            // `el.assignedSlot` (CAP-191 tranche 1) — pas de
             // répartition : un light DOM n'est jamais assigné
             // (borné honnête, spec : `null` hors distribution).
             "assignedSlot" => return Ok(Some(Value::Null)),
@@ -5134,7 +5134,7 @@ impl Host for NodeHost {
             // réelles (React, closure, éditeurs) les lisent
             // pour la délégation et la comparaison d'arbres.
             "getRootNode" => {
-                // `{composed:true}` (CAP-190) : depuis
+                // `{composed:true}` (CAP-191) : depuis
                 // l'intérieur d'une racine shadow, remonte à
                 // l'arbre de l'hôte (spec — sinon la racine
                 // shadow elle-même). Racine `#document` →
@@ -5234,14 +5234,14 @@ impl Host for NodeHost {
                 Ok(Some(v))
             }
             // `attachShadow(init)` — surface tranche 1
-            // (CAP-190, hors scoping/slots/répartition) :
+            // (CAP-191, hors scoping/slots/répartition) :
             // attache un `DocumentFragment` rôle shadowRoot
             // et le retourne — suffit aux polyfills
             // d'instrumentation (Invoker Commands : `n.call`
             // sur la méthode absente tuait github-elements).
             // `mode:"closed"` → `el.shadowRoot` null, racine
             // réelle quand même. Re-appel → `NotSupportedError`
-            // (spec, CAP-190 : renvoyer l'existante trompait
+            // (spec, CAP-191 : renvoyer l'existante trompait
             // les feature-detects qui vérifient le jeté).
             "attachShadow" => {
                 let open = match args.first() {
@@ -5274,7 +5274,7 @@ impl Host for NodeHost {
                 node,
             })))),
             // `slot.assignedElements()`/`assignedNodes({flatten})`
-            // (CAP-190 tranche 1) — pas de répartition dans le
+            // (CAP-191 tranche 1) — pas de répartition dans le
             // miroir : tableau vide honnête (borné — l'arc
             // slots est tranche 3).
             "assignedElements" | "assignedNodes" => Ok(Some(e.new_array(Vec::new()))),

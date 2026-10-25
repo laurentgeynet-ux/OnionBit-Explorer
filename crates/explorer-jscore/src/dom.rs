@@ -535,6 +535,10 @@ pub struct Dom {
     /// attachent et lisent `shadowRoot`. Pas de scoping,
     /// pas de slots — l'arc Shadow DOM reste ouvert.
     shadow_roots: HashMap<NodeId, (NodeId, bool)>,
+    /// Racine shadow → hôte (CAP-191 tranche 1) — inverse
+    /// de `shadow_roots`, pour `shadowRoot.host` et
+    /// `getRootNode({composed:true})`.
+    shadow_hosts: HashMap<NodeId, NodeId>,
     /// `(media, cmd)`, drainés par l'adaptateur
     /// (`drain_media_commands`) qui les relaie vers l'hôte.
     pub media_cmds: Vec<(u64, MediaCmd)>,
@@ -757,6 +761,7 @@ impl Dom {
             media: HashMap::new(),
             template_contents: HashMap::new(),
             shadow_roots: HashMap::new(),
+            shadow_hosts: HashMap::new(),
             media_cmds: Vec::new(),
             ce: CeRegistry::default(),
             ce_reactions: Vec::new(),
@@ -1356,6 +1361,21 @@ impl Dom {
     /// `open` = `mode: "open"` de l'init.
     pub fn attach_shadow_root(&mut self, host: NodeId, root: NodeId, open: bool) {
         self.shadow_roots.insert(host, (root, open));
+        self.shadow_hosts.insert(root, host);
+    }
+
+    /// Hôte de la racine shadow `root` (CAP-191) — `None`
+    /// si `root` n'est pas une racine attachée.
+    #[must_use]
+    pub fn shadow_host(&self, root: NodeId) -> Option<NodeId> {
+        self.shadow_hosts.get(&root).copied()
+    }
+
+    /// `true` si `node` est une racine shadow attachée
+    /// (CAP-191) — `host`/`getRootNode({composed})`.
+    #[must_use]
+    pub fn is_shadow_root(&self, node: NodeId) -> bool {
+        self.shadow_hosts.contains_key(&node)
     }
 
     /// Racine shadow de `host` — `include_closed` pour
