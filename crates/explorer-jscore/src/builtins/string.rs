@@ -406,9 +406,25 @@ pub(crate) fn splice_matches(
     rep: Value,
 ) -> JsResult<Value> {
     let use_fn = e.is_callable(rep);
+    if std::env::var("DBG_DRIVE").is_ok() {
+        eprintln!(
+            "[splice] matches={} use_fn={} s.len={}",
+            matches.len(),
+            use_fn,
+            s.len()
+        );
+    }
     let mut out = String::with_capacity(s.len() + matches.len() * 8);
     let mut cur = 0usize; // byte offset
-    for m in matches {
+    for (mi, m) in matches.iter().enumerate() {
+        if std::env::var("DBG_DRIVE").is_ok() && mi % 64 == 0 {
+            eprintln!(
+                "[splice] i={mi}/{} idx={} end={}",
+                matches.len(),
+                m.index,
+                m.end
+            );
+        }
         out.push_str(&s[cur..m.start_b]);
         if use_fn {
             // f(match, g1…gn, index, string [, groups])

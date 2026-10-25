@@ -246,6 +246,55 @@ fn array_slice_concat_generic_on_array_like() {
 }
 
 #[test]
+fn array_push_generic_array_like_no_materialize() {
+    // Wedge gov.uk (JS-C107) : `push` générique sur array-like ne
+    // matérialise PAS les `len` éléments — spec `Set(len+i, arg)`
+    // + `Set("length")`. `{length: 2**32}` gelait l'éval dans
+    // ~8M de get/delete non tickés (borne take_elems sous l'op-limit).
+    assert_eq!(
+        ev_str("var al = {length:2, 0:'a', 1:'b'}; al.push ? al.push('c') : Array.prototype.push.call(al,'c'); [al.length, al[2]].join(',')"),
+        "3,c"
+    );
+    // `length` chaîne — coercition ToNumber (Array.from déjà le fait).
+    assert_eq!(
+        ev_str("var al = {length:'2', 0:'a', 1:'b'}; Array.prototype.push.call(al,'c'); [al.length, al[2]].join(',')"),
+        "3,c"
+    );
+    // Sans arg : retourne `length`, n'écrit rien.
+    assert_eq!(
+        ev_str("var al = {length:4}; Array.prototype.push.call(al); al.length"),
+        "4"
+    );
+    // L'ancien comportement (matérialisation plafonnée à 4M) ne
+    // revient JAMAIS : ce cas doit terminer en temps borné —
+    // ici l'assert elle-même est la borne (la suite figeait sinon).
+    assert_eq!(
+        ev_str("var al = {length:4294967296}; var r = Array.prototype.push.call(al,'x'); [r, al.length, al['4294967296']].join(',')"),
+        "4294967297,4294967297,x"
+    );
+    // Indices écrits restent ordinaires — un second push s'appuie
+    // sur la `length` relue (spec : pas de backing tableau caché).
+    assert_eq!(
+        ev_str("var al = {length:0}; Array.prototype.push.call(al,'a','b'); Array.prototype.push.call(al,'c'); [al.length,al[0]+al[1]+al[2]].join(',')"),
+        "3,abc"
+    );
+    // `pop` array-like : O(1) — `Get(len-1)`/`Delete`/`Set length`
+    // — même vecteur de wedge, même fix.
+    assert_eq!(
+        ev_str("var al = {length:2, 0:'a', 1:'b'}; var v = Array.prototype.pop.call(al); [v, al.length, al['1']].join(',')"),
+        "b,1,"
+    );
+    assert_eq!(
+        ev_str("var al = {length:4294967296, '4294967295':'z'}; var v = Array.prototype.pop.call(al); [v, al.length].join(',')"),
+        "z,4294967295"
+    );
+    assert_eq!(
+        ev_str("var al = {length:0}; var v = Array.prototype.pop.call(al); [v === undefined, al.length].join(',')"),
+        "true,0"
+    );
+}
+
+#[test]
 fn for_in() {
     assert_eq!(
         ev_str("var o = {a:1, b:2}; var s=''; for (var k in o) { s += k } s"),

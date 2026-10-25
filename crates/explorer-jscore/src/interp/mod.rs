@@ -2628,6 +2628,10 @@ impl Engine {
     /// tous les 8192 appels sous `EXPLORER_NAT_TRACE`, dump du
     /// top des dominants — un natif en boucle se nomme au sommet.
     fn nat_trace_tick(&mut self, name: &'static str) {
+        if std::env::var_os("DBG_NAT").is_some() {
+            eprintln!("[nat] {name}");
+            return;
+        }
         if std::env::var_os("EXPLORER_NAT_TRACE").is_none() {
             return;
         }
@@ -2636,12 +2640,12 @@ impl Engine {
         if self.nat_trace_total % 8192 == 0 {
             let mut v: Vec<_> = self.nat_trace_counts.iter().collect();
             v.sort_by_key(|(_, n)| std::cmp::Reverse(**n));
-            let top: Vec<String> = v
-                .iter()
-                .take(6)
-                .map(|(n, c)| format!("{n}={c}"))
-                .collect();
-            eprintln!("[nat-trace] total={} top={}", self.nat_trace_total, top.join(" "));
+            let top: Vec<String> = v.iter().take(6).map(|(n, c)| format!("{n}={c}")).collect();
+            eprintln!(
+                "[nat-trace] total={} top={}",
+                self.nat_trace_total,
+                top.join(" ")
+            );
         }
     }
 

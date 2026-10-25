@@ -130,6 +130,29 @@ impl Engine {
             if std::env::var("DBG_DRIVE").is_ok() {
                 eprintln!("[exec_body] stmt={:?}", std::mem::discriminant(s));
             }
+            if self.ops_total % 256 == 0 && std::env::var("DBG_DRIVE").is_ok() {
+                let st = self.heap.stats();
+                let txt = format!("{s:?}");
+                let short: String = txt.chars().take(200).collect();
+                eprintln!("[stmt] {short}");
+                let frames: Vec<String> = self
+                    .call_stack
+                    .iter()
+                    .rev()
+                    .take(6)
+                    .map(|f| f.name.clone().unwrap_or_else(|| "?".into()))
+                    .collect();
+                eprintln!("[stack] {}", frames.join(" <- "));
+                eprintln!(
+                    "[ops] total={} left={} live={} bytes={}M gc={} depth={}",
+                    self.ops_total,
+                    self.ops_left,
+                    st.live_cells,
+                    st.estimated_bytes / 1_048_576,
+                    st.gc_runs,
+                    self.call_depth
+                );
+            }
             match self.exec_stmt(env, this, s) {
                 Ok(Flow::Normal) => {}
                 other => {

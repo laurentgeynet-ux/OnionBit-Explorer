@@ -589,7 +589,10 @@ impl Engine {
     /// already `Evaluating` is a cycle edge (skipped, spec-like).
     fn evaluate_module(&mut self, idx: usize) -> JsResult<()> {
         if std::env::var("DBG_DRIVE").is_ok() {
-            eprintln!("[eval_mod] entrée idx={idx} spec={}", self.modules[idx].spec);
+            eprintln!(
+                "[eval_mod] entrée idx={idx} spec={}",
+                self.modules[idx].spec
+            );
         }
         match self.modules[idx].state {
             ModState::Evaluated | ModState::Evaluating => return Ok(()),

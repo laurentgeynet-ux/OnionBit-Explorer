@@ -115,11 +115,22 @@ pub(crate) fn re_replace_impl(
     s: &str,
     rep: Value,
 ) -> JsResult<Value> {
+    if std::env::var("DBG_DRIVE").is_ok() {
+        eprintln!(
+            "[re_replace] src={:?} g={} s.len={}",
+            re.source,
+            re.global,
+            s.len()
+        );
+    }
     let matches = if re.global {
         re.exec_all(s, 0)
     } else {
         re.exec(s, 0).into_iter().collect()
     };
+    if std::env::var("DBG_DRIVE").is_ok() {
+        eprintln!("[re_replace] matches={} s.len={}", matches.len(), s.len());
+    }
     e.note_re(s, matches.last());
     if matches.is_empty() {
         return Ok(e.str_val(s.to_string()));

@@ -13238,7 +13238,14 @@ async fn govuk_app_module_eval_terminates() {
         s.navigate(a, "http://h.test/p"),
     )
     .await;
-    eprintln!("wedge repro : {}", if r.is_err() { "TIMEOUT (wedge confirmé)" } else { "terminé" });
+    eprintln!(
+        "wedge repro : {}",
+        if r.is_err() {
+            "TIMEOUT (wedge confirmé)"
+        } else {
+            "terminé"
+        }
+    );
 }
 
 /// Wedge gov.uk — bissection DOM réel : le vrai HTML de
@@ -13249,7 +13256,10 @@ async fn govuk_app_module_eval_terminates() {
 async fn govuk_dom_app_module_eval_terminates() {
     let (mut s, t) = test_session();
     let page = std::fs::read_to_string("C:/Users/Lou/AppData/Local/Temp/govuk_dom.html")
-        .unwrap_or_else(|_| "<!doctype html><div id=x>a</div><script type=\"module\" src=\"/app.js\"></script>".into());
+        .unwrap_or_else(|_| {
+            "<!doctype html><div id=x>a</div><script type=\"module\" src=\"/app.js\"></script>"
+                .into()
+        });
     t.route("/p", 200, Box::leak(page.into_boxed_str()));
     t.route("/dead.js", 200, "void 0");
     let body = std::fs::read_to_string("C:/Users/Lou/AppData/Local/Temp/govuk_app.js")
@@ -13262,7 +13272,14 @@ async fn govuk_dom_app_module_eval_terminates() {
         s.navigate(a, "http://h.test/p"),
     )
     .await;
-    eprintln!("wedge DOM réel : {}", if r.is_err() { "TIMEOUT (wedge confirmé)" } else { "terminé" });
+    eprintln!(
+        "wedge DOM réel : {}",
+        if r.is_err() {
+            "TIMEOUT (wedge confirmé)"
+        } else {
+            "terminé"
+        }
+    );
 }
 
 /// Wedge gov.uk — repro fidèle live : DOM réel + les 5
@@ -13273,8 +13290,9 @@ async fn govuk_dom_app_module_eval_terminates() {
 async fn govuk_full_scripts_eval_terminates() {
     let (mut s, t) = test_session();
     let tmp = "C:/Users/Lou/AppData/Local/Temp/";
-    let page = std::fs::read_to_string(format!("{tmp}govuk_full.html"))
-        .unwrap_or_else(|_| "<!doctype html><div id=x>a</div><script type=\"module\" src=\"/app.js\"></script>".into());
+    let page = std::fs::read_to_string(format!("{tmp}govuk_full.html")).unwrap_or_else(|_| {
+        "<!doctype html><div id=x>a</div><script type=\"module\" src=\"/app.js\"></script>".into()
+    });
     t.route("/p", 200, Box::leak(page.into_boxed_str()));
     t.route("/dead.js", 200, "void 0");
     for (route, file) in [
@@ -13284,8 +13302,8 @@ async fn govuk_full_scripts_eval_terminates() {
         ("/analytics.js", "govuk_load-analytics-d.js"),
         ("/app.js", "govuk_app.js"),
     ] {
-        let body = std::fs::read_to_string(format!("{tmp}{file}"))
-            .unwrap_or_else(|_| "void 0".into());
+        let body =
+            std::fs::read_to_string(format!("{tmp}{file}")).unwrap_or_else(|_| "void 0".into());
         t.route(route, 200, Box::leak(body.into_boxed_str()));
     }
     s.set_js_factory(explorer_js::JscoreEngine::factory());
@@ -13295,7 +13313,14 @@ async fn govuk_full_scripts_eval_terminates() {
         s.navigate(a, "http://h.test/p"),
     )
     .await;
-    eprintln!("wedge scripts complets : {}", if r.is_err() { "TIMEOUT (wedge confirmé)" } else { "terminé" });
+    eprintln!(
+        "wedge scripts complets : {}",
+        if r.is_err() {
+            "TIMEOUT (wedge confirmé)"
+        } else {
+            "terminé"
+        }
+    );
 }
 
 /// Variante bissection gov.uk : les **3 modules seuls**
@@ -13316,8 +13341,8 @@ async fn govuk_modules_only_eval_terminates() {
         ("/analytics.js", "govuk_load-analytics-d.js"),
         ("/app.js", "govuk_app.js"),
     ] {
-        let body = std::fs::read_to_string(format!("{tmp}{file}"))
-            .unwrap_or_else(|_| "void 0".into());
+        let body =
+            std::fs::read_to_string(format!("{tmp}{file}")).unwrap_or_else(|_| "void 0".into());
         t.route(route, 200, Box::leak(body.into_boxed_str()));
     }
     s.set_js_factory(explorer_js::JscoreEngine::factory());
@@ -13327,7 +13352,14 @@ async fn govuk_modules_only_eval_terminates() {
         s.navigate(a, "http://h.test/p"),
     )
     .await;
-    eprintln!("wedge modules seuls : {}", if r.is_err() { "TIMEOUT (wedge confirmé)" } else { "terminé" });
+    eprintln!(
+        "wedge modules seuls : {}",
+        if r.is_err() {
+            "TIMEOUT (wedge confirmé)"
+        } else {
+            "terminé"
+        }
+    );
 }
 
 /// Bissection gov.uk : un helper par variante de jeu de
@@ -13346,7 +13378,286 @@ async fn govuk_rum_variant_eval_terminates() {
     govuk_variant("govuk_rum.html", "rum").await;
 }
 
+/// Bissection gov.uk — `rum-loader` SEUL (scripts modules
+/// neutralisés) : si ça wedge seul, le spin vit dans son
+/// éval (cookie read / addEventListener / qSA attr).
+#[tokio::test]
+async fn govuk_rumonly_eval_terminates() {
+    govuk_variant("govuk_rumonly.html", "rum-seul").await;
+}
+
+/// Bissection gov.uk — `rum-loader` + `application` module
+/// seuls (couple minimal suspect).
+#[tokio::test]
+async fn govuk_rum_app_eval_terminates() {
+    govuk_variant("govuk_rum_app.html", "rum+app").await;
+}
+
+/// Bissection gov.uk — `rum-loader` + `rum-custom-data`
+/// module seuls (couple minimal autre).
+#[tokio::test]
+async fn govuk_rum_data_eval_terminates() {
+    govuk_variant("govuk_rum_data.html", "rum+data").await;
+}
+
+/// Bissection gov.uk — `rum-loader` + `load-analytics` +
+/// `application` (triple minimal sans rum-custom-data).
+#[tokio::test]
+async fn govuk_rum_an_app_eval_terminates() {
+    govuk_variant("govuk_raa.html", "rum+an+app").await;
+}
+
+/// Bissection gov.uk — `rum-loader` + `rum-custom-data` +
+/// `load-analytics` (triple minimal sans application).
+#[tokio::test]
+async fn govuk_rum_data_an_eval_terminates() {
+    govuk_variant("govuk_rrl.html", "rum+data+an").await;
+}
+
+/// Bissection gov.uk — `rum-loader` + `load-analytics`
+/// seuls (paire minimale sans application).
+#[tokio::test]
+async fn govuk_rum_an_eval_terminates() {
+    govuk_variant("govuk_ra.html", "rum+an").await;
+}
+
+/// Bissection gov.uk — `load-analytics` + `application`
+/// seuls (paire sans rum-loader).
+#[tokio::test]
+async fn govuk_an_app_eval_terminates() {
+    govuk_variant("govuk_aa.html", "an+app").await;
+}
+
+/// Bissection gov.uk — `load-analytics` SEUL en module
+/// (le plus petit wedge potentiel restant).
+#[tokio::test]
+async fn govuk_an_only_eval_terminates() {
+    govuk_variant("govuk_anonly.html", "an-seul").await;
+}
+
+/// Bissection gov.uk — `application` AVANT `load-analytics`
+/// (ordre inversé) : si ça wedge pareil, l'état poison est
+/// produit par analytics et rencontré par app ; si ça
+/// termine, c'est l'ordre qui importe.
+#[tokio::test]
+async fn govuk_app_an_eval_terminates() {
+    govuk_variant("govuk_appan.html", "app→an").await;
+}
+
+/// Bissection gov.uk — `rum-custom-data` + `application`
+/// (paire modules témoin).
+#[tokio::test]
+async fn govuk_data_app_eval_terminates() {
+    govuk_variant("govuk_da.html", "data+app").await;
+}
+
+/// Bissection gov.uk — `rum-custom-data` + `load-analytics`
+/// (paire modules témoin).
+#[tokio::test]
+async fn govuk_data_an_eval_terminates() {
+    govuk_variant("govuk_dan.html", "data+an").await;
+}
+
+/// Bissection gov.uk — stub : un module trivial armant
+/// listeners/timers à la place de `load-analytics` réel,
+/// puis `application`. Isole « état armé » vs « contenu ».
+#[tokio::test]
+async fn govuk_stub_an_app_eval_terminates() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">a</div>\
+         <script type=\"module\" src=\"/stub.js\"></script>\
+         <script type=\"module\" src=\"/app.js\"></script></body></html>",
+    );
+    t.route(
+        "/stub.js",
+        200,
+        "window.addEventListener('cookie-consent',()=>{});\
+         window.addEventListener('click',()=>{});\
+         setInterval(()=>{}, 1000); setTimeout(()=>{}, 10);",
+    );
+    let body = std::fs::read_to_string("C:/Users/Lou/AppData/Local/Temp/govuk_app.js")
+        .unwrap_or_else(|_| "void 0".into());
+    t.route("/app.js", 200, Box::leak(body.into_boxed_str()));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        s.navigate(a, "http://h.test/p"),
+    )
+    .await;
+    eprintln!(
+        "wedge stub+app : {}",
+        if r.is_err() { "TIMEOUT" } else { "terminé" }
+    );
+    assert!(r.is_ok());
+}
+
+/// Bissection gov.uk — `load-analytics` puis un module
+/// **trivial** : si ça wedge, le poison est un job armé par
+/// analytics qui spinne au prochain drain (pas un état lu
+/// par app).
+#[tokio::test]
+async fn govuk_an_then_trivial_eval_terminates() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">a</div>\
+         <script type=\"module\" src=\"/analytics.js\"></script>\
+         <script type=\"module\" src=\"/trivial.js\"></script></body></html>",
+    );
+    let body = std::fs::read_to_string("C:/Users/Lou/AppData/Local/Temp/govuk_load-analytics-d.js")
+        .unwrap_or_else(|_| "void 0".into());
+    t.route("/analytics.js", 200, Box::leak(body.into_boxed_str()));
+    t.route("/trivial.js", 200, "export const x = 1");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(45),
+        s.navigate(a, "http://h.test/p"),
+    )
+    .await;
+    eprintln!(
+        "wedge an+trivial : {}",
+        if r.is_err() { "TIMEOUT" } else { "terminé" }
+    );
+    assert!(r.is_ok());
+}
+
+/// Bissection gov.uk — `analytics`+`app` en **scripts
+/// classiques** (pas `type=module`) : si ça wedge pareil,
+/// le mécanisme module (instantiate/namespace) est innocent
+/// — le spin est intra-éval pur.
+#[tokio::test]
+async fn govuk_classic_pair_eval_terminates() {
+    govuk_variant("govuk_classic.html", "classique").await;
+}
+
+/// Bissection gov.uk — `load-analytics` puis des sondes
+/// d'énumération de l'état armé : `JSON.stringify(GOVUK)`,
+/// `structuredClone(GOVUK)`, `for-in GOVUK` — nomme le
+/// chemin natif non compté si l'une wedge.
+#[tokio::test]
+async fn govuk_an_state_probe_eval_terminates() {
+    for (label, probe) in [
+        ("stringify", "JSON.stringify(window.GOVUK)"),
+        ("clone", "structuredClone(window.GOVUK)"),
+        ("for-in", "for (const k in window.GOVUK) { window.__x = k }"),
+    ] {
+        let (mut s, t) = test_session();
+        t.route(
+            "/p",
+            200,
+            "<!doctype html><html><body><div id=\"x\">a</div>\
+             <script type=\"module\" src=\"/analytics.js\"></script>\
+             <script type=\"module\" src=\"/probe.js\"></script></body></html>",
+        );
+        let body =
+            std::fs::read_to_string("C:/Users/Lou/AppData/Local/Temp/govuk_load-analytics-d.js")
+                .unwrap_or_else(|_| "void 0".into());
+        t.route("/analytics.js", 200, Box::leak(body.into_boxed_str()));
+        t.route("/probe.js", 200, Box::leak(probe.into()));
+        s.set_js_factory(explorer_js::JscoreEngine::factory());
+        let a = s.open_tab();
+        let r = tokio::time::timeout(
+            std::time::Duration::from_secs(40),
+            s.navigate(a, "http://h.test/p"),
+        )
+        .await;
+        eprintln!(
+            "wedge an+{label} : {}",
+            if r.is_err() { "TIMEOUT" } else { "terminé" }
+        );
+        assert!(r.is_ok(), "variante {label}");
+    }
+}
+
+/// Bissection gov.uk — `load-analytics` + `application`
+/// réels mais DOM trivial : si ça wedge, le déclencheur est
+/// intra-moteur (état miroir) ; si ça termine, il faut le
+/// DOM gov.uk réel.
+#[tokio::test]
+async fn govuk_an_app_tinydom_eval_terminates() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">a</div>\
+         <script type=\"module\" src=\"/analytics.js\"></script>\
+         <script type=\"module\" src=\"/app.js\"></script></body></html>",
+    );
+    let tmp = "C:/Users/Lou/AppData/Local/Temp/";
+    for (route, file) in [
+        ("/analytics.js", "govuk_load-analytics-d.js"),
+        ("/app.js", "govuk_app.js"),
+    ] {
+        let body =
+            std::fs::read_to_string(format!("{tmp}{file}")).unwrap_or_else(|_| "void 0".into());
+        t.route(route, 200, Box::leak(body.into_boxed_str()));
+    }
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        s.navigate(a, "http://h.test/p"),
+    )
+    .await;
+    eprintln!(
+        "wedge an+app tiny-dom : {}",
+        if r.is_err() { "TIMEOUT" } else { "terminé" }
+    );
+    assert!(r.is_ok());
+}
+
+/// Bissection gov.uk — même fichier deux fois :
+/// `analytics`+`analytics` et `app`+`app` — isole « poison
+/// croisé » vs « simple répétition ».
+#[tokio::test]
+async fn govuk_twice_eval_terminates() {
+    for (label, a, b) in [
+        (
+            "an+an",
+            "govuk_load-analytics-d.js",
+            "govuk_load-analytics-d.js",
+        ),
+        ("app+app", "govuk_app.js", "govuk_app.js"),
+    ] {
+        let (mut s, t) = test_session();
+        t.route(
+            "/p",
+            200,
+            "<!doctype html><html><body><div id=\"x\">a</div>\
+             <script type=\"module\" src=\"/m1.js\"></script>\
+             <script type=\"module\" src=\"/m2.js\"></script></body></html>",
+        );
+        let tmp = "C:/Users/Lou/AppData/Local/Temp/";
+        for (route, file) in [("/m1.js", a), ("/m2.js", b)] {
+            let body =
+                std::fs::read_to_string(format!("{tmp}{file}")).unwrap_or_else(|_| "void 0".into());
+            t.route(route, 200, Box::leak(body.into_boxed_str()));
+        }
+        s.set_js_factory(explorer_js::JscoreEngine::factory());
+        let tab = s.open_tab();
+        let r = tokio::time::timeout(
+            std::time::Duration::from_secs(45),
+            s.navigate(tab, "http://h.test/p"),
+        )
+        .await;
+        eprintln!(
+            "wedge {label} : {}",
+            if r.is_err() { "TIMEOUT" } else { "terminé" }
+        );
+        assert!(r.is_ok(), "variante {label}");
+    }
+}
+
 async fn govuk_variant(page_file: &str, label: &str) {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
     let (mut s, t) = test_session();
     let tmp = "C:/Users/Lou/AppData/Local/Temp/";
     let page = std::fs::read_to_string(format!("{tmp}{page_file}"))
@@ -13360,8 +13671,8 @@ async fn govuk_variant(page_file: &str, label: &str) {
         ("/analytics.js", "govuk_load-analytics-d.js"),
         ("/app.js", "govuk_app.js"),
     ] {
-        let body = std::fs::read_to_string(format!("{tmp}{file}"))
-            .unwrap_or_else(|_| "void 0".into());
+        let body =
+            std::fs::read_to_string(format!("{tmp}{file}")).unwrap_or_else(|_| "void 0".into());
         t.route(route, 200, Box::leak(body.into_boxed_str()));
     }
     s.set_js_factory(explorer_js::JscoreEngine::factory());
@@ -13371,7 +13682,10 @@ async fn govuk_variant(page_file: &str, label: &str) {
         s.navigate(a, "http://h.test/p"),
     )
     .await;
-    eprintln!("wedge variante {label} : {}", if r.is_err() { "TIMEOUT" } else { "terminé" });
+    eprintln!(
+        "wedge variante {label} : {}",
+        if r.is_err() { "TIMEOUT" } else { "terminé" }
+    );
     assert!(r.is_ok(), "navigate doit rendre (variante {label})");
 }
 
@@ -13391,14 +13705,27 @@ async fn govuk_all_scripts_eval_terminates() {
          <script src=\"/app.js\" type=\"module\"></script></body></html>",
     );
     for (path, file) in [
-        ("/lux.js", "lux-measurer-d66192b1b665d415e1874e49a48138b7ae339548aa6cdb8687c7f9933e72b969"),
-        ("/rumcd.js", "rum-custom-data-b9e1806d1da2fa8ef1855d01aa71ba5eb0afc010dd2c4de3672cc7c7a39b0c8c"),
-        ("/rum.js", "rum-loader-a65b10e18ceeba3bd8a2eac507c7f2c513cdc82f35097df903fdea87f1dc2e33"),
-        ("/load-analytics.js", "load-analytics-d5c92d4ce9f98141170a466427da86ca1ff62f234637bf0776121e6df57b3b67"),
+        (
+            "/lux.js",
+            "lux-measurer-d66192b1b665d415e1874e49a48138b7ae339548aa6cdb8687c7f9933e72b969",
+        ),
+        (
+            "/rumcd.js",
+            "rum-custom-data-b9e1806d1da2fa8ef1855d01aa71ba5eb0afc010dd2c4de3672cc7c7a39b0c8c",
+        ),
+        (
+            "/rum.js",
+            "rum-loader-a65b10e18ceeba3bd8a2eac507c7f2c513cdc82f35097df903fdea87f1dc2e33",
+        ),
+        (
+            "/load-analytics.js",
+            "load-analytics-d5c92d4ce9f98141170a466427da86ca1ff62f234637bf0776121e6df57b3b67",
+        ),
         ("/app.js", "govuk_app"),
     ] {
-        let body = std::fs::read_to_string(format!("C:/Users/Lou/AppData/Local/Temp/govuk_{file}.js"))
-            .unwrap_or_else(|_| "document.title='SKIP'".into());
+        let body =
+            std::fs::read_to_string(format!("C:/Users/Lou/AppData/Local/Temp/govuk_{file}.js"))
+                .unwrap_or_else(|_| "document.title='SKIP'".into());
         t.route(path, 200, Box::leak(body.into_boxed_str()));
     }
     s.set_js_factory(explorer_js::JscoreEngine::factory());
@@ -13408,7 +13735,14 @@ async fn govuk_all_scripts_eval_terminates() {
         s.navigate(a, "http://h.test/p"),
     )
     .await;
-    eprintln!("wedge combinaison : {}", if r.is_err() { "TIMEOUT (wedge)" } else { "terminé" });
+    eprintln!(
+        "wedge combinaison : {}",
+        if r.is_err() {
+            "TIMEOUT (wedge)"
+        } else {
+            "terminé"
+        }
+    );
 }
 
 /// Wedge gov.uk — vrai DOM + module application réel :
@@ -13429,7 +13763,14 @@ async fn govuk_app_real_dom_eval() {
         s.navigate(a, "http://h.test/p"),
     )
     .await;
-    eprintln!("vrai DOM + app : {}", if r.is_err() { "TIMEOUT (wedge reproduit)" } else { "terminé" });
+    eprintln!(
+        "vrai DOM + app : {}",
+        if r.is_err() {
+            "TIMEOUT (wedge reproduit)"
+        } else {
+            "terminé"
+        }
+    );
 }
 
 /// Wedge gov.uk — état complet : vraie page + inlines +
@@ -13442,12 +13783,19 @@ async fn govuk_full_state_eval() {
         .unwrap_or_else(|_| "<html><body><div>x</div></body></html>".into());
     t.route("/p", 200, Box::leak(page.into_boxed_str()));
     for (path, file) in [
-        ("/rumcd.js", "rum-custom-data-b9e1806d1da2fa8ef1855d01aa71ba5eb0afc010dd2c4de3672cc7c7a39b0c8c"),
-        ("/load-analytics.js", "load-analytics-d5c92d4ce9f98141170a466427da86ca1ff62f234637bf0776121e6df57b3b67"),
+        (
+            "/rumcd.js",
+            "rum-custom-data-b9e1806d1da2fa8ef1855d01aa71ba5eb0afc010dd2c4de3672cc7c7a39b0c8c",
+        ),
+        (
+            "/load-analytics.js",
+            "load-analytics-d5c92d4ce9f98141170a466427da86ca1ff62f234637bf0776121e6df57b3b67",
+        ),
         ("/app.js", "govuk_app"),
     ] {
-        let body = std::fs::read_to_string(format!("C:/Users/Lou/AppData/Local/Temp/govuk_{file}.js"))
-            .unwrap_or_else(|_| "document.title='SKIP'".into());
+        let body =
+            std::fs::read_to_string(format!("C:/Users/Lou/AppData/Local/Temp/govuk_{file}.js"))
+                .unwrap_or_else(|_| "document.title='SKIP'".into());
         t.route(path, 200, Box::leak(body.into_boxed_str()));
     }
     s.set_js_factory(explorer_js::JscoreEngine::factory());
@@ -13457,7 +13805,14 @@ async fn govuk_full_state_eval() {
         s.navigate(a, "http://h.test/p"),
     )
     .await;
-    eprintln!("état-complet : {}", if r.is_err() { "TIMEOUT (wedge reproduit)" } else { "terminé" });
+    eprintln!(
+        "état-complet : {}",
+        if r.is_err() {
+            "TIMEOUT (wedge reproduit)"
+        } else {
+            "terminé"
+        }
+    );
 }
 
 /// JS-C105 — éval wedge bornée : un script `while(true)` ne doit
@@ -13481,7 +13836,11 @@ async fn wedging_script_does_not_freeze_session() {
     .await;
     eprintln!(
         "wedge bornée : {}",
-        if r.is_err() { "TIMEOUT — échec" } else { "navigate retourné — borné" }
+        if r.is_err() {
+            "TIMEOUT — échec"
+        } else {
+            "navigate retourné — borné"
+        }
     );
     assert!(r.is_ok(), "le script boucle a figé la session");
 }

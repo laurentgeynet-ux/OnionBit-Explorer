@@ -15,8 +15,11 @@ use super::*;
 pub(crate) fn array_push(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
     // Array-like non-tableau (générique spec, JS-C90 — jQuery
-    // `$.prototype.push`) : `take_elems` matérialise via
-    // `length`+`Get`, `put_elems` réécrit indices+`length`.
+    // `$.prototype.push`) : la spec n'écrit que `len..len+argc`
+    // puis `length` — jamais de matérialisation des `len`
+    // éléments existants. Wedge gov.uk : `{length: 2**32}`
+    // gelait le navigateur dans 4M de `get_prop`/`delete_prop`
+    // non tickés (borne take_elems sous l'op-limit).
     if !e
         .heap
         .obj(id)
@@ -25,11 +28,27 @@ pub(crate) fn array_push(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         if !args.is_empty() && e.heap.obj(id).is_some_and(|o| o.elem_integrity & 3 != 0) {
             return Err(e.type_error("cannot push onto a sealed array"));
         }
-        let mut elems = take_elems(e, id);
-        elems.extend_from_slice(args);
-        let n = elems.len();
-        put_elems(e, id, elems);
-        return Ok(Value::Num(n as f64));
+        let len = match e.get_prop(id, "length") {
+            Some(v) => e.to_number(v).unwrap_or(0.0).max(0.0),
+            None => 0.0,
+        };
+        let new_len = len + args.len() as f64;
+        if !(new_len.is_finite() && new_len <= 9_007_199_254_740_991.0) {
+            return Err(e.range_error("push exceeds maximum array length"));
+        }
+        let base = len as u64;
+        for (i, a) in args.iter().enumerate() {
+            let key = if len.fract() == 0.0 && len <= 9_007_199_254_740_991.0 {
+                (base + i as u64).to_string()
+            } else {
+                // `length` non entière : la spec ToString la
+                // notation décimale — chemin rare, reste fidèle.
+                e.to_js_string(Value::Num(len + i as f64))?
+            };
+            let _ = e.set_prop(id, &key, *a);
+        }
+        let _ = e.set_prop(id, "length", Value::Num(new_len));
+        return Ok(Value::Num(new_len));
     }
     // Ajout d'éléments : impossible sous `seal`/`freeze` — la spec
     // passe par `Set(throw)` → `TypeError` même en sloppy.
@@ -51,6 +70,36 @@ pub(crate) fn array_push(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
 
 pub(crate) fn array_pop(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
+    // Array-like : chemin O(1) spec (`Get(len-1)` → `Delete` →
+    // `Set("length")`) — la matérialisation `take_elems` gelait
+    // sur `{length: 2**32}` comme pour `push` (JS-C107).
+    if !e
+        .heap
+        .obj(id)
+        .is_some_and(|o| matches!(&o.kind, ObjKind::Array(_)))
+    {
+        if e.heap.obj(id).is_some_and(|o| o.elem_integrity & 3 != 0) {
+            return Err(e.type_error("cannot pop a sealed array"));
+        }
+        let len = match e.get_prop(id, "length") {
+            Some(v) => e.to_number(v).unwrap_or(0.0).max(0.0),
+            None => 0.0,
+        };
+        if len <= 0.0 {
+            let _ = e.set_prop(id, "length", Value::Num(0.0));
+            return Ok(Value::Undefined);
+        }
+        let last = len - 1.0;
+        let key = if last.fract() == 0.0 && last <= 9_007_199_254_740_991.0 {
+            (last as u64).to_string()
+        } else {
+            e.to_js_string(Value::Num(last))?
+        };
+        let v = e.get_prop(id, &key).unwrap_or(Value::Undefined);
+        e.delete_prop(id, &key);
+        let _ = e.set_prop(id, "length", Value::Num(last));
+        return Ok(v);
+    }
     let mut elems = take_elems(e, id);
     let orig = elems.clone();
     let v = elems.pop().unwrap_or(Value::Undefined).unhole();

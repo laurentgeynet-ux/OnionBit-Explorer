@@ -6928,6 +6928,26 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   reliquat repris au drain suivant.
   Test `c103_*`.
 
+- [x] **JS-C107. `push`/`pop`
+  array-like O(1) — wedge gov.uk
+  tuée** (`explorer-jscore::builtins`)
+  — la voie générique matérialisait
+  `len` (cap 4M) via `take_elems`/
+  `put_elems` : ~8M d'ops natives
+  non tickées, spin de minutes
+  (`Array.prototype.push.call` sur
+  `{length: 2**32}` — queue webpack/
+  GOVUK). Spec : `Set(len+i, arg)` +
+  `Set("length")` — zéro
+  matérialisation ; `pop` O(1) idem.
+  Repro 100 % wedge → 2,12 s,
+  matrice 26/26. Test
+  `array_push_generic_array_like_
+  no_materialize`. Reliquat :
+  take/put faillibles + tick pour
+  les mutateurs O(len) (`shift`,
+  `splice`, `sort`).
+
 - [x] **JS-C106. Borne
   d'imbrication 512→4096**
   (`explorer-jscore::parser`) —

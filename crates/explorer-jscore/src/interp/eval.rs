@@ -28,6 +28,9 @@ impl Engine {
 
     #[allow(clippy::too_many_lines)]
     pub(crate) fn eval_inner(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
+        if std::env::var("DBG_EXPR").is_ok() {
+            eprintln!("[expr] {:?}", std::mem::discriminant(e));
+        }
         match e {
             Expr::Num(n) => Ok(Value::Num(*n)),
             Expr::BigInt(s) => {

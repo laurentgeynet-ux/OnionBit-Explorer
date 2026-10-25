@@ -31,6 +31,35 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   l'ordre UA < auteur couvre déjà.
   Test `ol_type_attribut_mappe_list_style`.
 
+- **JS-C107 — `push`/`pop` array-like
+  O(1), wedge gov.uk tuée**
+  (`explorer-jscore::builtins`) :
+  le chemin générique matérialisait
+  `take_elems`/`put_elems` — `len`
+  plafonnée à 4M, ~8M de
+  `get_prop`/`delete_prop` **non
+  tickés** → spin natif de minutes
+  hors budget ops. Bissection
+  repro in-process (`load-analytics`
+  puis `application.js`, DOM
+  trivial) + probes DBG_* :
+  `Array.prototype.push.call` sur
+  `{length: 2**32}` (webpack
+  `t.j`/queue GOVUK). Spec
+  `Set(len+i, arg)` + `Set("length")`
+  — plus de matérialisation ; `pop`
+  idem (`Get`/`Delete`/`Set` O(1)).
+  `new_len > 2^53-1` → `RangeError`.
+  Repro : paire an→app de 100 %
+  wedge → **2,12 s** ; matrice
+  govuk 26/26. Test
+  `array_push_generic_array_like_
+  no_materialize`. Reliquat connu :
+  mutateurs O(len) (`shift`,
+  `splice`, `sort`…) gardent la cap
+  4M non tickée — même classe,
+  fix = take/put faillibles + tick.
+
 - **JS-C104 — virgule finale
   ES2017 en liste d'arguments**
   (`explorer-jscore::parser`) :
