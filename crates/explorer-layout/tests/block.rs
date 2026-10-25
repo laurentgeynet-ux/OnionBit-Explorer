@@ -1417,3 +1417,93 @@ fn colonnes_degenerent_sans_niveau_multiple() {
     assert!(approx(p.rect.x, 0.0), "x={}", p.rect.x);
     assert!(approx(p.rect.height, 30.0), "h={}", p.rect.height);
 }
+
+// ── R-101 : searchInput Wikipedia — motif .cdx-text-input ──
+
+#[test]
+fn hit_test_input_dans_wrapper_cdx() {
+    // Motif Codex/Vector-2022 : le wrapper `.cdx-text-input`
+    // (position:relative, bordure peinte sur lui) contient
+    // l'input en-flux + une icône absolue. Le clic dans la zone
+    // peinte doit atteindre l'`<input>`, pas rester sur le
+    // wrapper (dispatch 2026-10-22 : 54 sondes → zéro editable).
+    let (dom, bx) = laid(
+        "<form><div class=\"cdx-text-input\">\
+         <input class=\"cdx-text-input__input\" type=\"search\">\
+         <span class=\"cdx-text-input__icon\"></span></div></form>",
+        "body{margin:0}\
+         .cdx-text-input{position:relative;border:1px solid #000;display:flex}\
+         .cdx-text-input__input{width:100%;height:32px;border:0;padding:0 32px}\
+         .cdx-text-input__icon{position:absolute;left:4px;top:4px;width:16px;height:16px}",
+    );
+    let input = by_tag(&dom, "input");
+    // Centre du champ (hors icône) → l'input doit gagner.
+    assert_eq!(
+        explorer_layout::hit_test(&bx, 400.0, 17.0),
+        Some(input),
+        "le centre du champ stylé doit retomber sur <input>"
+    );
+}
+
+#[test]
+fn hit_test_input_absolu_inset_dans_wrapper() {
+    // Variante : l'input est `position:absolute;inset:0` dans
+    // le wrapper relatif (peint par-dessus toute la zone).
+    let (dom, bx) = laid(
+        "<form><div class=\"w\">\
+         <input id=i type=\"search\">\
+         <span class=\"ic\"></span></div></form>",
+        "body{margin:0}\
+         .w{position:relative;width:400px;height:32px;border:1px solid #000}\
+         #i{position:absolute;left:0;top:0;width:100%;height:100%;border:0;padding:0}\
+         .ic{position:absolute;left:4px;top:4px;width:16px;height:16px}",
+    );
+    let input = by_tag(&dom, "input");
+    assert_eq!(
+        explorer_layout::hit_test(&bx, 300.0, 16.0),
+        Some(input),
+        "input absolu doit être atteint"
+    );
+}
+
+#[test]
+fn hit_test_input_height_pourcent_dans_wrapper() {
+    // Variante : `height:100%` sur l'input en-flux.
+    let (dom, bx) = laid(
+        "<form><div class=\"w\">\
+         <input id=i type=\"search\"></div></form>",
+        "body{margin:0}\
+         .w{position:relative;width:400px;height:32px;border:1px solid #000}\
+         #i{width:100%;height:100%;border:0;padding:0}",
+    );
+    let input = by_tag(&dom, "input");
+    assert_eq!(
+        explorer_layout::hit_test(&bx, 300.0, 16.0),
+        Some(input),
+        "input height:100% doit être atteint"
+    );
+}
+
+#[test]
+fn hit_test_input_height_pourcent_parent_auto() {
+    // Le repro exact du dispatch 2026-10-22 (searchInput
+    // Wikipedia) : `height:100%` contre un parent à hauteur
+    // **auto** → §10.5 le % vaut `auto` → la boîte contrôle
+    // sans contenu mesurait **0 px** et ne couvrait pas la
+    // zone peinte par la bordure du wrapper → le hit tombait
+    // sur le `div` (champ incliquable). La jambe NBSP du
+    // contrôle vide lui rend sa hauteur de ligne (~1.2em).
+    let (dom, bx) = laid(
+        "<form><div class=\"w\">\
+         <input id=i type=\"search\"></div></form>",
+        "body{margin:0}\
+         .w{position:relative;width:400px;border:1px solid #000;padding:4px}\
+         #i{width:100%;height:100%;border:0;padding:0}",
+    );
+    let input = by_tag(&dom, "input");
+    assert_eq!(
+        explorer_layout::hit_test(&bx, 300.0, 8.0),
+        Some(input),
+        "la boîte input doit couvrir la zone peinte"
+    );
+}

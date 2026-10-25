@@ -9,6 +9,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-101 — contrôle vide : jambe
+  NBSP pour la hauteur `auto`**
+  (`explorer-layout`, bug terrain —
+  `searchInput` Wikipedia
+  incliquable) : un `input`/`select`
+  /bouton sans valeur ni
+  placeholder n'avait **aucun
+  enfant** → hauteur `auto` (ou
+  `height:%` non résolvable, §10.5)
+  = 0 px → la boîte ne couvrait
+  pas la zone peinte par
+  l'enveloppe (hit-test retombait
+  sur le `div` parent — 54 sondes,
+  zéro editable). `control_paint`
+  synthétise désormais un `Text`
+  `\u{A0}` (insécable, invisible) —
+  le contrôle vide reprend sa
+  hauteur de ligne ≈ le `1.2em` de
+  la feuille UA que la règle auteur
+  écrasait. Régressions : 4 tests
+  `hit_test_input_*` (motif Codex
+  `.cdx-text-input`, absolu
+  `inset:0`, `height:100%` parent
+  défini/indéfini).
+
 - **R-100 — `:valid`/`:invalid` +
   pseudos d'état structurels**
   (`explorer-css`, répond à la

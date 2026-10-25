@@ -887,6 +887,11 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
 ///   est déjà `display:none` en feuille UA).
 /// - `select` : texte de l'`<option selected>` (ou de la
 ///   première) — ses enfants `<option>` ne sont pas posés.
+/// - Champ totalement vide : jambe `\u{A0}` (insécable — R-2)
+///   à la place du texte. Sans enfant, sa hauteur `auto`
+///   retombe à 0 — la boîte ne couvre plus la zone peinte
+///   (hit-test mort : `searchInput` Wikipedia à
+///   `height:100%` non résolvable, R-101).
 fn control_paint(dom: &Dom, node: NodeId, ty: &str) -> (Option<String>, bool) {
     let attr = |n: NodeId, name: &str| dom.attribute(n, name).ok().flatten();
     let tag = dom.tag_name(node).unwrap_or("");
@@ -912,16 +917,23 @@ fn control_paint(dom: &Dom, node: NodeId, ty: &str) -> (Option<String>, bool) {
                 .or_else(|| dom.text_content(o).ok().map(|t| t.trim().to_string()))
                 .filter(|t| !t.is_empty())
         });
-        return (text, false);
+        return (text.or_else(|| Some("\u{A0}".to_owned())), false);
     }
     match ty {
         "checkbox" | "radio" => (None, attr(node, "checked").is_some()),
-        "submit" | "button" | "reset" => (attr(node, "value"), false),
+        "submit" | "button" | "reset" => (
+            attr(node, "value").or_else(|| Some("\u{A0}".to_owned())),
+            false,
+        ),
         "hidden" | "file" | "image" => (None, false),
-        // Texte libre : `value`, `placeholder` en repli.
+        // Texte libre : `value`, `placeholder`, jambe en repli.
         _ => {
             let v = attr(node, "value").filter(|s| !s.is_empty());
-            (v.or_else(|| attr(node, "placeholder")), false)
+            (
+                v.or_else(|| attr(node, "placeholder"))
+                    .or_else(|| Some("\u{A0}".to_owned())),
+                false,
+            )
         }
     }
 }

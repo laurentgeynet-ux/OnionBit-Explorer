@@ -2623,6 +2623,21 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   7 tests `etat_*` (`tests/selector.rs`) : fieldset/legend,
   checked, required/optional, valid/invalid + agrégation
   form, remplissage, readonly/placeholder, gate user-*.
+- [x] **R-101. Contrôle vide → boîte hauteur 0 → hit-test mort**
+  (bug terrain dispatché 2026-10-22 — `searchInput` Wikipedia :
+  54 sondes `mousemove`, zéro editable) — **livré** : la cause
+  racine n'était ni l'atome `inline-*` (R-90) ni l'absolu,
+  mais `control_paint` sans valeur/placeholder → **aucun
+  enfant `Text`** → `height:auto` (ou `%` non résolvable)
+  mesure 0 px → la boîte ne couvre pas la zone peinte par
+  l'enveloppe `.cdx-text-input` (qui porte la bordure).
+  Repro exact : `.w{position:relative}` + `input{height:100%}`
+  → `rect.height = 0`, hit = `div`. Fix : jambe `Text`
+  `\u{A0}` (insécable R-2, invisible) synthétisée pour tout
+  contrôle textuel/select/bouton vide → hauteur de ligne ≈
+  `1.2em` UA. Régressions `hit_test_input_*` ×4 (wrapper
+  Codex, absolu `inset:0`, `height:100%` parent défini et
+  indéfini). À re-mesurer terrain au prochain vol Wikipedia.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
