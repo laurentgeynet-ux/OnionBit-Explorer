@@ -345,6 +345,12 @@ pub struct Engine {
     /// Compteur de séquences `import()` (répercuté à la
     /// livraison — même motif `dyn_script_seq`).
     pub(crate) dyn_import_seq: u64,
+    /// Sources de modules livrées à la demande (JS-C101) —
+    /// clé = URL résolue ; `load_source` la consulte avant
+    /// le chargeur — couvre les deps **statiques** des
+    /// modules livrés par `import()` (le chargeur ne sert
+    /// que le préfetch).
+    pub(crate) module_sources: std::collections::HashMap<String, String>,
     /// Specifier du module en cours d'exécution (`import.meta.url`
     /// et referrer de `import()`).
     pub(crate) current_module: String,
@@ -745,6 +751,7 @@ impl Engine {
             dyn_import_reqs: Vec::new(),
             import_drain_wired: false,
             dyn_import_seq: 0,
+            module_sources: std::collections::HashMap::new(),
             current_module: String::new(),
             import_map: Vec::new(),
             workers: Vec::new(),

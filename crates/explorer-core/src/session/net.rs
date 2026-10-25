@@ -680,10 +680,10 @@ impl Session {
         base: &Url,
         r: &explorer_js::DynImportReq,
     ) {
-        let Some((req_page, req_base, _doc_policy, csp, _opaque)) =
+        let Some((req_page, req_base, doc_policy, csp, _opaque)) =
             self.ctx_net_origin(tab, r.ctx, page, base)
         else {
-            self.deliver_dyn_import_req(tab, r.ctx, r.seq, None);
+            self.deliver_dyn_import_req(tab, r.ctx, r.seq, None, Vec::new());
             return;
         };
         let Some(url) = Url::resolve(&req_base, &r.url)
@@ -698,7 +698,7 @@ impl Session {
                 )
             })
         else {
-            self.deliver_dyn_import_req(tab, r.ctx, r.seq, None);
+            self.deliver_dyn_import_req(tab, r.ctx, r.seq, None, Vec::new());
             return;
         };
         let req = sub_request(
@@ -713,15 +713,50 @@ impl Session {
         let page_origin = origin_header_value(&req_page);
         let partition = explorer_net::cookies::request_partition(&req);
         let req_url = req.url.clone();
-        let meta = crate::session::net_items::DynImportMeta {
-            ctx: r.ctx,
-            seq: r.seq,
-        };
+        let (ctx, seq) = (r.ctx, r.seq);
+        let import_specs = r.import_specs.clone();
         let tr = self.transport.clone();
         let tx = self.net_tx.clone();
-        let seq = r.seq;
+        let max_inflight = self.max_inflight;
+        let max_modules = self.max_modules;
+        let page_g = req_page.clone();
+        let policy = doc_policy;
+        let url_g = url.clone();
         tokio::spawn(async move {
             let out = tr.fetch(&req).await;
+            // Entrée 2xx → graphe de deps fetché (JS-C101) :
+            // le module livré fait `import {x} from 'lit'` —
+            // `load_source` aval manquerait le préfetch.
+            let (entry, sources) = match &out {
+                Ok(resp) if (200..300).contains(&resp.status) => {
+                    let entry_src = String::from_utf8_lossy(&resp.body).into_owned();
+                    let mut graph = crate::session::net_items::ModuleGraph {
+                        sources: std::collections::HashMap::new(),
+                        alias: std::collections::HashMap::new(),
+                    };
+                    Self::fetch_module_sources(
+                        &tr,
+                        max_inflight,
+                        max_modules,
+                        &page_g,
+                        policy,
+                        &csp,
+                        &url_g,
+                        &entry_src,
+                        &import_specs,
+                        &mut graph,
+                    )
+                    .await;
+                    (Some(entry_src), graph.sources.into_iter().collect())
+                }
+                _ => (None, Vec::new()),
+            };
+            let meta = crate::session::net_items::DynImportMeta {
+                ctx,
+                seq,
+                entry,
+                sources,
+            };
             let _ = tx.send(NetDone {
                 tab,
                 handle: seq,
@@ -743,26 +778,25 @@ impl Session {
     }
 
     /// `deliver_dyn_import` au moteur du contexte émetteur —
-    /// `Some(body)` → instancier+évaluer ; `None` → rejet.
-    fn deliver_dyn_import_req(&mut self, tab: TabId, ctx: u32, seq: u64, src: Option<String>) {
+    /// `Some(entry)` → instancier+évaluer ; `None` → rejet ;
+    /// `deps` seedées dans `module_sources` avant (JS-C101).
+    fn deliver_dyn_import_req(
+        &mut self,
+        tab: TabId,
+        ctx: u32,
+        seq: u64,
+        src: Option<String>,
+        deps: Vec<(String, String)>,
+    ) {
         if let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()) {
-            eng.deliver_dyn_import(ctx, seq, src);
+            eng.deliver_dyn_import(ctx, seq, src, deps);
         }
     }
 
-    /// `NetDone` `import` → corps du module → `deliver_dyn_import`.
-    fn commit_dyn_import(
-        &mut self,
-        tab: TabId,
-        meta: &crate::session::net_items::DynImportMeta,
-        out: &NetResult<explorer_net::http::Response>,
-    ) {
-        let src = out.as_ref().ok().and_then(|r| {
-            (200..300)
-                .contains(&r.status)
-                .then(|| String::from_utf8_lossy(&r.body).into_owned())
-        });
-        self.deliver_dyn_import_req(tab, meta.ctx, meta.seq, src);
+    /// `NetDone` `import` → corps + graphe → `deliver_dyn_import`.
+    fn commit_dyn_import(&mut self, tab: TabId, meta: &crate::session::net_items::DynImportMeta) {
+        let deps = meta.sources.clone();
+        self.deliver_dyn_import_req(tab, meta.ctx, meta.seq, meta.entry.clone(), deps);
     }
 
     /// Un `<script>` inséré dynamiquement (CAP-169) : inline →
@@ -2600,7 +2634,7 @@ impl Session {
             // moteur (instancier+évaluer+résoudre la promesse).
             if let Some(meta) = d.import {
                 self.dyn_tasks.remove(&(d.tab, meta.seq));
-                self.commit_dyn_import(d.tab, &meta, &d.out);
+                self.commit_dyn_import(d.tab, &meta);
                 continue;
             }
             self.net_tasks.remove(&(d.tab, d.handle));

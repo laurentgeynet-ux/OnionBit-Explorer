@@ -94,3 +94,35 @@ fn c100_no_drain_rejects_immediately() {
     let r = e.eval("globalThis.__r").expect("eval __r");
     assert_eq!(e.describe(r), "rej");
 }
+
+/// JS-C101 — le module livré fait `import {x} from 'dep'` :
+/// la dep statique manque le préfetch MAIS la session l'a
+/// seedée dans `module_sources` → `instantiate` la trouve.
+/// Verrou Shoelace réel : le composant livré importe
+/// `LitElement` depuis `lit` (dep statique hors préfetch).
+#[test]
+fn c101_delivered_module_deps_seeded() {
+    let mut e = Engine::new();
+    e.set_module_loader(Rc::new(RefCell::new(EmptyLoader)));
+    e.set_import_drain();
+    e.eval_module(
+        "globalThis.__r='start'; import('./comp/sl-button.js').then(m=>{globalThis.__r='ns:'+m.answer;}).catch(x=>{globalThis.__r='rej';});",
+        "main.js",
+    )
+    .expect("module eval");
+    let reqs = e.drain_dyn_imports();
+    assert_eq!(reqs.len(), 1);
+    // La session a fetché le graphe — dep seedée sous l'URL
+    // résolue (clé `load_source` : `resolve('lit')` → url).
+    e.seed_module_source(
+        "https://cdn.example/lit".to_string(),
+        "export const Lit = 1;".to_string(),
+    );
+    e.deliver_import(
+        reqs[0].seq,
+        Ok("import {Lit} from 'lit'; export const answer = Lit + 41;".to_string()),
+    );
+    let _ = e.eval("0"); // drain microtasks → `.then` tourné.
+    let r = e.eval("globalThis.__r").expect("eval __r");
+    assert_eq!(e.describe(r), "ns:42");
+}

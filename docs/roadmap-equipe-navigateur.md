@@ -6759,6 +6759,29 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Sans drain branché : rejet comme
   avant (pas de defer fantôme).
   Tests `c100_*` (3).
+- [x] **JS-C101. Graphe rempli à la
+  livraison d'`import()`**
+  (`explorer-jscore` + `explorer-js` +
+  `explorer-core`) — verrou Shoelace
+  **complet** : le fichier livré
+  (`sl-button.js`) importe `lit`
+  **statiquement** → `load_source`
+  manquait le préfetch → `instantiate`
+  rejetait → `.catch` avalé →
+  `define` jamais atteint. Livré :
+  `spawn_dyn_import` fetch l'entrée
+  puis **`fetch_module_sources`**
+  (même chemin `type=module`, import-
+  specs de la page portées dans
+  `DynImportReq`) → `deliver_dyn_
+  import(ctx, seq, entry, deps)` →
+  `seed_module_source` × deps dans
+  `Engine::module_sources` (cache
+  par URL résolue, consulté avant
+  le chargeur dans `load_source`)
+  → `instantiate` trouve `lit`.
+  Tests `c101_*` (1 — dep statique
+  seedée résout `ns:42`).
 
 ## Tâches continues
 

@@ -208,6 +208,12 @@ impl Engine {
             .borrow_mut()
             .resolve(&resolved, referrer)
             .unwrap_or_else(|| resolved.clone());
+        // JS-C101 — sources livrées à la demande d'abord :
+        // les deps statiques d'un module `import()` manquent
+        // le préfetch mais la session a seedé leur graphe.
+        if let Some(src) = self.module_sources.get(&url) {
+            return Ok((url, src.clone()));
+        }
         let r = loader.borrow_mut().load(&resolved, referrer);
         match r {
             Ok(src) => Ok((url, src)),
@@ -287,6 +293,7 @@ impl Engine {
             seq,
             url,
             ctx: self.cur_ctx,
+            import_specs: self.import_map.clone(),
         });
         Ok(Value::Obj(pid))
     }
@@ -328,6 +335,13 @@ impl Engine {
     /// miss du chargeur.
     pub fn set_import_drain(&mut self) {
         self.import_drain_wired = true;
+    }
+
+    /// Seed une source fetchée par la session (JS-C101) —
+    /// `url` = URL résolue (clé `load_source`) : les deps
+    /// statiques d'un module `import()` livré la trouvent.
+    pub fn seed_module_source(&mut self, url: String, src: String) {
+        self.module_sources.insert(url, src);
     }
 
     /// `InnerModuleInstantiation` — registers the module in the
@@ -825,4 +839,8 @@ pub struct DynImportReq {
     pub url: String,
     /// Contexte émetteur — la livraison vise son miroir.
     pub ctx: crate::context::CtxId,
+    /// Import-map de la page (`spec → target`) — les deps
+    /// bare (`lit`, `react`…) du graphe fetché résolvent
+    /// via elle (JS-C101 ; même source que `resolve_bare`).
+    pub import_specs: Vec<(String, String)>,
 }

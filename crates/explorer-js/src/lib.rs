@@ -726,9 +726,18 @@ pub trait JsEngine: Send {
 
     /// Livre la source d'un `import()` fetchée par la session
     /// (JS-C100) — `Some` → instancier+évaluer+résoudre la
-    /// promesse ; `None` → rejet `fetch échoué`. Défaut :
+    /// promesse ; `None` → rejet `fetch échoué`. `deps`
+    /// (JS-C101) = les deps statiques du graphe livré, seedées
+    /// dans `Engine::module_sources` avant l'entrée. Défaut :
     /// no-op.
-    fn deliver_dyn_import(&mut self, _ctx: JsCtxId, _seq: u64, _src: Option<String>) {}
+    fn deliver_dyn_import(
+        &mut self,
+        _ctx: JsCtxId,
+        _seq: u64,
+        _src: Option<String>,
+        _deps: Vec<(String, String)>,
+    ) {
+    }
 
     /// Livre le résultat d'un `<link>` **statique** (parse
     /// initial, CAP-185) — `ord` = ordinal de l'élément
@@ -1604,6 +1613,7 @@ enum Cmd {
         ctx: JsCtxId,
         seq: u64,
         src: Option<String>,
+        deps: Vec<(String, String)>,
     },
     DeliverStaticLink {
         ctx: JsCtxId,
@@ -2171,10 +2181,21 @@ impl JscoreEngine {
                         return;
                     }
                 }
-                Cmd::DeliverDynImport { ctx, seq, src } => {
+                Cmd::DeliverDynImport {
+                    ctx,
+                    seq,
+                    src,
+                    deps,
+                } => {
                     let prev = eng.current_context();
                     eng.context_switch(ctx);
                     if eng.current_context() == ctx {
+                        // JS-C101 — deps seedées avant l'entrée :
+                        // `load_source` des imports statiques du
+                        // module livré les trouve en map.
+                        for (u, s) in deps {
+                            eng.seed_module_source(u, s);
+                        }
                         eng.deliver_import(seq, src.map_or_else(|| Err("fetch échoué".into()), Ok));
                     }
                     eng.context_switch(prev);
@@ -2465,8 +2486,19 @@ impl JsEngine for JscoreEngine {
         rx.recv().unwrap_or_default()
     }
 
-    fn deliver_dyn_import(&mut self, ctx: JsCtxId, seq: u64, src: Option<String>) {
-        let _ = self.tx.send(Cmd::DeliverDynImport { ctx, seq, src });
+    fn deliver_dyn_import(
+        &mut self,
+        ctx: JsCtxId,
+        seq: u64,
+        src: Option<String>,
+        deps: Vec<(String, String)>,
+    ) {
+        let _ = self.tx.send(Cmd::DeliverDynImport {
+            ctx,
+            seq,
+            src,
+            deps,
+        });
     }
 
     fn deliver_static_link(&mut self, ctx: JsCtxId, ord: u32, ok: bool) {

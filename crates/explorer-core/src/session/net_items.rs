@@ -1306,6 +1306,13 @@ pub(crate) struct DynImportMeta {
     pub(crate) ctx: u32,
     /// `dyn_import_seq` moteur — clé `pending_imports`.
     pub(crate) seq: u64,
+    /// Corps de l'entrée (2xx) — `None` = fetch refusé/erreur.
+    pub(crate) entry: Option<String>,
+    /// Dépendances **statiques** du module livré — `(url
+    /// résolue, source)` seedées dans `Engine::module_sources`
+    /// (JS-C101 : `instantiate` des deps de l'entrée les
+    /// trouve — le chargeur ne sert que le préfetch).
+    pub(crate) sources: Vec<(String, String)>,
 }
 
 /// Livraison d'un `<script type="module">` dynamique

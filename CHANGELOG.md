@@ -9,15 +9,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
-- **JS-C100 — `import()` dynamique
-  servi à la demande** (jscore+js+
+- **JS-C100 + JS-C101 — `import()`
+  dynamique end-to-end** (jscore+js+
   core) : miss `MapLoader` →
   promesse pending + `DynImportReq`
   drainée + fetch session →
   `deliver_dyn_import` → namespace
-  résolu (verrou Shoelace —
-  autoloader `import("${tag}.js")`
-  non préfetché).
+  résolu ; C101 remplit le **graphe**
+  — les deps **statiques** du module
+  livré (`lit`, `LitElement`…)
+  manquaient le préfetch → seedées
+  dans `Engine::module_sources` via
+  `fetch_module_sources` (verrou
+  Shoelace complet).
 
 - **JS-C99 — sous-ensemble sélecteur
   du miroir** (`explorer-jscore`) :
