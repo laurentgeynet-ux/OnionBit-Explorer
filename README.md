@@ -36,8 +36,8 @@ codecs) — the full, declared list is in `Cargo.toml` and ADR-0001:
 | **CSS** | `explorer-css` | Tokenizer, selectors, cascade — `@layer`, custom properties, pseudo-elements, media queries |
 | **Layout** | `explorer-layout` | Block/inline, **Flexbox, Grid**, floats, positioned elements, fragmentation, incremental relayout |
 | **Rendering** | `explorer-render` | Display list → RGBA framebuffer → PNG — our own display model and paint, over `tiny-skia` (raster), `rustybuzz`/`ttf-parser` (text), `resvg` (SVG), `image` (codecs) |
-| **JavaScript** | `explorer-jscore` | An interpreter written here — ES5+ core, classes, generators, promises/microtasks, modules, typed arrays, streams, IndexedDB, Cache API, `customElements`, observers, `crypto.subtle` (digests via `ring`), `matchMedia` (bounded)… tracked against **test262** |
-| **Session** | `explorer-core` | Tabs, navigation, event loop, timers, bfcache, sub-resource scheduler, **iframes with per-frame JS realms** (incl. `srcdoc`, `sandbox`, dynamic insertion), History API, `window.open`/named targets, meta/`Refresh:` |
+| **JavaScript** | `explorer-jscore` | An interpreter written here — ES5+ core, classes, lazy generators, **real `await` suspension** (explicit control stack, no native stack), promises/microtasks (bounded drains), ES modules (static graph + dynamic `import()`), typed arrays, streams, **WebSocket**, fetch/XHR, `customElements` + **Shadow DOM** (attach, DSD, scoped styles), IndexedDB, Cache API, observers, `crypto.subtle`, `Intl.Segmenter`… tracked against **test262** |
+| **Session** | `explorer-core` | Tabs, navigation, event loop, timers, bfcache, sub-resource scheduler, **iframes with per-frame JS realms** (incl. `srcdoc`, `sandbox`, dynamic insertion), History API, `window.open`/named targets, meta/`Refresh:`, **DOM mutation journal** (differential apply — incremental relayout instead of full reflow), image-document policy |
 | **Interface** | `explorer-api` / `-daemon` / `-ffi` / `-cli` | Local **REST + SSE** control API, in-process FFI mode, dev CLI |
 | **Client** | `app/` | **Flutter** desktop app — talks to the engine over the API, never touches core directly |
 
@@ -75,6 +75,9 @@ codecs) — the full, declared list is in `Cargo.toml` and ADR-0001:
 
 ## Quick start
 
+The toolchain is pinned (`rust-toolchain.toml` — Rust 1.99.0 with
+rustfmt/clippy); worktrees must stay in sync, CI gates on it.
+
 ```powershell
 cargo build -p explorer-daemon -p explorer-cli
 
@@ -97,10 +100,18 @@ cargo fuzz run tokenizer            # fuzz targets: html, css, url
 ## Status
 
 **Release 0.2.0 — active development, honest work in progress.**
-Wikipedia, lobste.rs, MDN, rust-lang.org render and navigate;
-the JS engine runs real-world scripts under explicit budgets.
-Some walls are measured and documented, not hidden — e.g. JIT-class
-proof-of-work challenges are marked *bounded by design* rather than "fixed".
+The static corpus (Wikipedia, lobste.rs, MDN, HN, weather.gov…) is
+**10/10 rendered and functional** in nightly smoke runs — click,
+scroll, forms, back. Real component-heavy sites are measured
+too: **github.com** paints faithfully with a clean console,
+**shoelace.style** upgrades Lit custom elements and composes
+real shadow roots, **reddit.com** serves its Lit-based feed
+end-to-end, **x.com** renders its logged-out landing and
+survives `await fetch()` over real I/O (suspension/resume of
+the interpreter, not a shim). Walls are measured and named,
+not hidden — e.g. JIT-class proof-of-work challenges are marked
+*bounded by design* rather than "fixed", and each terrain run
+records its evidence in `docs/interface-equipes.md`.
 
 > **⚠ Security notice — no sandbox.** The JS engine and renderer run
 > *in the engine process*, with budgets (time, memory, depth) but
@@ -120,7 +131,7 @@ proof-of-work challenges are marked *bounded by design* rather than "fixed".
 |---|---|
 | [`AGENTS.md`](AGENTS.md) | The working contract — rules, conventions, gates |
 | [`docs/architecture.md`](docs/architecture.md) | Layer and crate map |
-| [`docs/architecture/decisions/`](docs/architecture/decisions/) | Numbered ADRs (ADR-0001…0025) |
+| [`docs/architecture/decisions/`](docs/architecture/decisions/) | Numbered ADRs (ADR-0001…0027) |
 | [`docs/interface-equipes.md`](docs/interface-equipes.md) | The inter-team seam journal — how parallel tracks synchronize |
 | [`CHANGELOG.md`](CHANGELOG.md) | Keep-a-Changelog, every step numbered |
 
