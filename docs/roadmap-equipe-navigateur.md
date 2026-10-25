@@ -6783,6 +6783,22 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Tests `c101_*` (1 — dep statique
   seedée résout `ns:42`).
 
+- [x] **JS-C102. `el.constructor` =
+  ctor CE sur élément upgradé**
+  (`explorer-jscore`) — verrou
+  Shoelace **bout-en-bout** : le
+  host `get("constructor")` court-
+  circuitait vers l'interface
+  (`dom_ctor`) → `this.constructor.
+  elementProperties` LitElement =
+  `undefined` → `.keys()` jette →
+  `ce.failed` → `attachShadow`
+  jamais. Fix : `ce.upgraded`/`defs`
+  prime — `el.constructor` rend le
+  ctor enregistré. **Mesuré
+  terrain** : `sl-button` CDN
+  `sr=SR`. Test `c102_*`.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand
