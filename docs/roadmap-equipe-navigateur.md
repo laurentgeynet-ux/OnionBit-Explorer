@@ -6889,6 +6889,17 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   reliquat repris au drain suivant.
   Test `c103_*`.
 
+- [x] **JS-C106. Borne
+  d'imbrication 512→4096**
+  () —
+  / vs
+  bundles minifiés (caniuse
+   — terrain).
+   protège la
+  pile — la borne reste
+  hostile-only. Test
+  .
+
 - [x] **JS-C104. Virgule finale
   ES2017 en args d'appel**
   (`explorer-jscore::parser`) —

@@ -126,7 +126,7 @@ pub(crate) fn parse_module_in(
 /// segment de pile sur tas quand la pile native s'épuise — la borne
 /// numérique ne coupe que les entrées absurdes. L'[`Engine`] la
 /// relève via [`crate::interp::Engine::set_nest_limit`].
-pub(crate) const DEFAULT_NEST_LIMIT: u32 = 512;
+pub(crate) const DEFAULT_NEST_LIMIT: u32 = 4096;
 
 /// Marge déclenchant la croissance de pile (`maybe_grow`) — en
 /// dessous, la récursion bascule sur un segment tas plutôt que de

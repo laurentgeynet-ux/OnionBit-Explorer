@@ -52,6 +52,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `f(a,,)` restent illégaux.
   Test `trailing_comma_call_args`.
 
+- **JS-C106 — borne
+  d'imbrication 512→4096**
+  () :
+   (parseur) et
+   (interprète)
+  partageaient
+   —
+  les bundles minifiés nichent
+  bien au-delà (
+  @ caniuse bundle.js mesuré
+  terrain). La pile reste
+  protégée par
+   (JS-C41)
+  — la borne ne coupe que
+  l'hostile. Test
+  
+  (600 parenthèses, rejeté à
+  512, vert à 4096).
+
 - **R-111 — `!important` inversé à
   la frontière shadow**
   (`explorer-css`, css-scoping §6 —

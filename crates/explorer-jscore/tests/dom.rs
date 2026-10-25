@@ -5757,3 +5757,18 @@ fn host_focus_dispatch_updates_active_element() {
     e.dom_event_on("blur", a).expect("blur dispatch");
     assert_eq!(evf(&mut e, "document.activeElement.tagName"), "BODY");
 }
+
+/// JS-C106 — `RangeError: expression too deeply nested` sur du
+/// minifié réel (caniuse bundle.js) : les bundles nichent des
+/// chaînes `&&`/`?:`/parenthèses bien au-delà de 512 — la borne
+/// passe à 4096 (la pile reste protégée par `maybe_grow`).
+#[test]
+fn deeply_nested_expression_parses() {
+    let deep = "x".to_string();
+    let open = "(".repeat(600);
+    let close = ")".repeat(open.len());
+    let src = format!("var x = {open}{deep}{close};");
+    let mut e = explorer_jscore::Engine::new();
+    let r = e.eval(&src);
+    assert!(r.is_ok(), "600 parenthèses imbriquées rejetées : {r:?}");
+}
