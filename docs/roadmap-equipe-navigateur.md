@@ -3423,6 +3423,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   spread/assign déprotoise,
   `setPrototypeOf` restaure).
 
+- [x] **JS-C34. Suspension réelle —
+  générateurs lazy + `await` pendante
+  (mur n°1 moteur)** — `function*`
+  produit `ObjKind::GenLive` : `GExec`
+  suspendable (pile de contrôle
+  `Vec<GFrame>` — `Seq`/`While`/`For`/
+  `ForIter`/`Try`), `yield`/`await`
+  hissés en init de statement par
+  `lower_suspend_body`. `next(v)`/
+  `throw`/`return` réels ; `for..of`,
+  spread, `yield*`, boucles+try
+  verts. **`async fn`** : même
+  `GExec` — `await` pendante →
+  réaction `then` boundée au
+  `GenLive` (`BoundNative`, bound=
+  `[gen, outer]`), `resume_await`
+  reprend, `settle_outer` settle la
+  promesse rendue. Fixtures `c34_*`
+  dé-ignorées vertes. Borne :
+  `await`/`yield` en sous-expression
+  paresseuse (`&&`/`?:`/`?.`/`??`)
+  évaluée éager — hoist non porté.
+
 - [x] **CAP-188. `document.evaluate` :
   sous-ensemble `XPath` borné (sonde)** —
   `evaluate(expr, ctx, resolver, type,
