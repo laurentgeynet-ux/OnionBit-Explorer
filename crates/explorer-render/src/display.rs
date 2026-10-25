@@ -832,7 +832,7 @@ fn emit_canvas_bg(
     } else {
         ((viewport_w, viewport_h), (0.0, 0.0))
     };
-    emit_bg_layers(items, &src.style, src.node, images, canvas, area, base);
+    emit_bg_layers(items, src, images, canvas, area, base);
     src.node
 }
 
@@ -1182,19 +1182,45 @@ fn bg_layers(v: &str) -> Vec<&str> {
 )]
 fn emit_bg_layers(
     items: &mut Vec<DisplayItem>,
-    style: &explorer_css::ComputedStyle,
-    node: Option<explorer_dom::NodeId>,
+    bx: &LayoutBox,
     images: &crate::PaintImages,
     rect: Rect,
     area: (f32, f32),
     base: (f32, f32),
 ) {
+    let style = &bx.style;
+    let node = bx.node;
     let Some(v) = style.get("background-image") else {
         return;
     };
     if v.is_empty() || v == "none" || !bg_has_image(v) {
         return;
     }
+    // R-106 — `background-origin` (aire de positionnement) et
+    // `background-clip` (boîte de clip) sont désormais
+    // consommés : les trois boîtes se déduisent du rect
+    // (bordure), de `area`/`base` (padding) et de
+    // `content_rect` (contenu — publique R-99).
+    let content = content_rect(bx);
+    let padding = Rect {
+        x: base.0,
+        y: base.1,
+        width: area.0,
+        height: area.1,
+    };
+    let clip = match style.get("background-clip") {
+        Some("content-box") => content,
+        Some("padding-box") => padding,
+        // `border-box` (défaut), `text` non porté, `border-area`
+        // — repli bordure.
+        _ => rect,
+    };
+    let (area, base) = match style.get("background-origin") {
+        Some("border-box") => ((rect.width, rect.height), (rect.x, rect.y)),
+        Some("content-box") => ((content.width, content.height), (content.x, content.y)),
+        // `padding-box` = défaut — identique à l'aire reçue.
+        _ => (area, base),
+    };
     let repeat = match style.get("background-repeat") {
         Some("no-repeat") => (false, false),
         Some("repeat-x") => (true, false),
@@ -1244,7 +1270,7 @@ fn emit_bg_layers(
                 fs,
             );
             items.push(DisplayItem::BackgroundImage {
-                rect,
+                rect: clip,
                 img,
                 repeat,
                 origin: (base.0 + px, base.1 + py),
@@ -1747,7 +1773,7 @@ fn paint_self(
                 (rect.x + bl, rect.y + bt),
             )
         };
-        emit_bg_layers(items, &bx.style, bx.node, images, rect, area, base);
+        emit_bg_layers(items, bx, images, rect, area, base);
     }
     // Bordures : 4 côtés, épaisseur > 0 et style non `none`.
     // Sémantique de `border_side_w` : la largeur ne compte que

@@ -9,6 +9,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-106 — `background-origin` /
+  `background-clip` consommés**
+  (`explorer-render`, résidu du
+  catalogue — émis par le parse
+  depuis R-73, jamais appliqués) :
+  `emit_bg_layers` calcule les trois
+  boîtes (border = rect, padding =
+  aire reçue, content =
+  `content_rect` R-99) ; `origin`
+  choisit l'aire de positionnement
+  (`border-box`/`padding-box`/
+  `content-box`), `clip` la zone
+  clippée (idem ; `text`/
+  `border-area` non portés —
+  repli bordure). Tests : clip
+  `content-box` et origine
+  `border-box`.
+
 - **R-105 — `light-dark()` résolu à
   la valeur calculée**
   (`explorer-css`, css-color-adjust-1

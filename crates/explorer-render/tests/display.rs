@@ -1688,3 +1688,53 @@ fn radial_circle_et_at_position() {
     );
     assert!(px(39, 10)[0] < 60, "loin noir : {:?}", px(39, 10));
 }
+
+// ── R-106 : background-clip / background-origin consommés ───
+
+#[test]
+fn background_clip_content_box_clipe_au_contenu() {
+    // `background-clip:content-box` : la zone clippée est la
+    // boîte de contenu (border − border-width − padding).
+    let list = bg_div(
+        "border:5px solid #000;padding:4px;\
+         background-image:linear-gradient(red,blue);\
+         background-clip:content-box",
+    );
+    let rect = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { rect, .. } => Some(*rect),
+            _ => None,
+        })
+        .expect("item fond émis");
+    // bg_div : `width:40px` en `content-box` (défaut) →
+    // border box = 40+2·(5+4) = 58 ; le clip `content-box`
+    // attendu = (5+4, 5+4, 40, 20).
+    assert_eq!(
+        (rect.x, rect.y, rect.width, rect.height),
+        (9.0, 9.0, 40.0, 20.0),
+        "clip sur la boîte de contenu"
+    );
+}
+
+#[test]
+fn background_origin_border_box_positionne_a_la_bordure() {
+    // `background-origin:border-box` : l'aire de positionnement
+    // = border box → `background-position:0 0` place l'origine
+    // de la tuile au bord externe (pas au padding box).
+    let list = bg_div(
+        "border:5px solid #000;padding:4px;\
+         background:url(x) no-repeat;\
+         background-origin:border-box;background-position:0 0",
+    );
+    let origin = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { origin, .. } => Some(*origin),
+            _ => None,
+        })
+        .expect("item fond émis");
+    assert_eq!(origin, (0.0, 0.0), "origine au bord externe : {origin:?}");
+}

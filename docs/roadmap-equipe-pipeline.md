@@ -2663,6 +2663,12 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (`color-scheme` calculée ∩ `prefers-color-scheme` env),
   récursion paren-consciente, passe post-`var()`. Test
   `light_dark_suit_le_schema_use`.
+- [x] **R-106. `background-origin`/`background-clip` au paint**
+  (résidu catalogue — émis R-73, ignorés) : `emit_bg_layers`
+  déduit les trois boîtes (border/padding/content via
+  `content_rect` publique R-99) — `origin` choisit l'aire de
+  positionnement, `clip` la zone de clip. `text`/`border-area`
+  non portés. 2 tests.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
