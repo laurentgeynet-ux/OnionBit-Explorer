@@ -4886,9 +4886,13 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     suivent `fZoom`). À re-valider en
     vol humain release (ressenti
     resize).
-  - **`Image`/`HTMLImageElement`
-    manquant** (wikipedia.org) →
-    file JS.
+  - ~~**`Image`/`HTMLImageElement`
+    manquant**~~ → **résolu,
+    JS-C57** : `new Image()`,
+    `new Image(w,h)` + interface
+    `HTMLImageElement` (srcset/
+    sizes CAP-172) — tests
+    wikipedia 22/10.
 
 - [ ] **Écarts terrain — vol humain M-H1
   (22/10)** : premier run humain sur
