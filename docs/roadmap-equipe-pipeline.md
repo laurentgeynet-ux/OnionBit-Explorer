@@ -2680,6 +2680,12 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   MarkerText` shapé au raster via `FontSource` —
   `decimal`, `decimal-leading-zero`, alpha, roman ;
   inconnu → `decimal`. Test ordinals + types.
+- [x] **R-109. `align-items:stretch` réel** (écart terrain
+  github — dispatch journal) : `align-self:auto` hérite
+  `align-items` (§8.3), `normal`→`stretch`, UA `input
+  height`→`min-height` (un `height` UA bloquait la
+  précondition `height:auto`), stretch planché au
+  `min-height` item (§9.8). Test rect 42 + hit-test zone.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

@@ -9,6 +9,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-109 — `align-items:stretch`
+  applique l'étirement cross**
+  (`explorer-layout` + `explorer-css`
+  UA) — mesuré terrain : l'`<input>`
+  github (#hero_user_email) restait
+  256×19,2 dans un wrapper flex de
+  42 px → zone morte
+  `form:clic:ignored`. Deux
+  verrous levés : `align-self:auto`
+  hérite désormais `align-items`
+  (spec §8.3 — `auto` n'est pas un
+  mode) et `align-items:normal`
+  normalisé en `stretch` ; et la
+  feuille UA `input { height:
+  1.2em }` devenue `min-height:
+  1.2em` — `height` reste `auto`,
+  précondition du stretch ; la
+  taille stretchée est planchée au
+  `min-height` de l'item (§9.8).
+  Régression : item étiré à 42 +
+  hit-test dans la zone étendue.
+
 - **R-108 — marqueurs de liste
   textuels** (`explorer-layout` +
   `explorer-render`, résidu du

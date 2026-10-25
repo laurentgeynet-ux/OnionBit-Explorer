@@ -2300,8 +2300,11 @@ input, textarea {
 }
 /* Les dimensions input/textarea vivent en hints
    (cols/rows/size — HTML Rendering) : une règle UA
-   primerait les attributs de présentation. */
-input { height: 1.2em }
+   primerait les attributs de présentation. `min-height`
+   (pas `height`) : un `height` UA comptait comme taille
+   explicite et neutralisait `align-items:stretch` en
+   flex (R-109 — zone morte mesurée sur github). */
+input { min-height: 1.2em }
 select { border: 1px solid #767676; padding: 1px 4px }
 button { border: 1px solid #767676; padding: 1px 6px; background-color: #eee }
 input[type=submit], input[type=button], input[type=reset] {

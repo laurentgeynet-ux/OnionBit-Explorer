@@ -1612,6 +1612,12 @@ fn hit_test_lien_example_com() {
     // padding, paragraphe contenant <a href>. La sonde du vol
     // rapportait `lien:absent` — la boîte <a> doit être
     // hittable (sinon trou PIPE réel).
+    fn find_rect(bx: &LayoutBox, node: NodeId) -> Option<explorer_layout::Rect> {
+        if bx.node == Some(node) {
+            return Some(bx.rect);
+        }
+        bx.children.iter().find_map(|c| find_rect(c, node))
+    }
     let (dom, bx) = laid(
         "<div><h1>Example Domain</h1>\
          <p>This domain is for use in examples.\
@@ -1619,13 +1625,6 @@ fn hit_test_lien_example_com() {
         "body{margin:0} div{width:600px;margin:50px auto;padding:50px}",
     );
     let a = by_tag(&dom, "a");
-    // Le rect du lien dans l'arbre posé.
-    fn find_rect(bx: &LayoutBox, node: NodeId) -> Option<explorer_layout::Rect> {
-        if bx.node == Some(node) {
-            return Some(bx.rect);
-        }
-        bx.children.iter().find_map(|c| find_rect(c, node))
-    }
     let Some(r) = find_rect(&bx, a) else {
         panic!("la boîte <a> n'existe pas — trou réel")
     };
@@ -1641,4 +1640,47 @@ fn hit_test_lien_example_com() {
         }
     });
     assert_eq!(el, Some(a), "hit sur le lien attendu");
+}
+
+fn find_input_h(bx: &LayoutBox, node: NodeId) -> f32 {
+    fn rec(b: &LayoutBox, node: NodeId) -> Option<f32> {
+        if b.node == Some(node) {
+            return Some(b.rect.height);
+        }
+        b.children.iter().find_map(|c| rec(c, node))
+    }
+    rec(bx, node).unwrap_or(-1.0)
+}
+
+#[test]
+fn flex_stretch_input_remplit_wrapper() {
+    // R-109 — motif FormControl github : conteneur flex à
+    // hauteur définie, item `align-self:auto` (= hérite
+    // `align-items`, spec §8.3) et `height:auto` →
+    // `align-items:stretch` étire la boîte à la ligne. Avant :
+    // le `height:1.2em` UA + `mode:"auto"` bloquaient — la
+    // zone basse du wrapper était une zone morte au hit-test.
+    let (dom, bx) = laid(
+        "<div class=f><input></div>",
+        ".f{display:flex;width:256px;height:42px} input{width:256px}",
+    );
+    let input = by_tag(&dom, "input");
+    let h = find_input_h(&bx, input);
+    assert_eq!(h, 42.0, "item étiré à la ligne : h = {h}");
+    // La zone basse du wrapper (y ≈ 35) désigne l'input, pas
+    // le wrapper — c'est ce que le clic github n'atteignait
+    // pas (form:clic:ignored).
+    assert_eq!(
+        explorer_layout::hit_test(&bx, 128.0, 35.0).map(|n| {
+            if dom.element(n).is_ok() {
+                n
+            } else {
+                dom.parent(n).ok().flatten().unwrap_or(n)
+            }
+        }),
+        Some(input),
+        "hit-test dans la zone étendue"
+    );
+    // Un `min-height` parent ne change rien — % indéterminé
+    // reste `auto` (spec) : le test v3 du diag le confirmait.
 }

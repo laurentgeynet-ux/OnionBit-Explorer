@@ -152,7 +152,14 @@ fn item_flex(
         grow: grow.unwrap_or(0.0).max(0.0),
         shrink: shrink.unwrap_or(1.0).max(0.0),
         base,
-        align: st.get("align-self").map(str::to_string),
+        // `align-self:auto` = la valeur calculée **hérite**
+        // l'`align-items` du parent (spec §8.3 — `auto` n'est
+        // pas un mode à part) : filtré ici, le repli
+        // `unwrap_or(&align)` de la passe 2 y retombe.
+        align: st
+            .get("align-self")
+            .filter(|v| v.trim() != "auto")
+            .map(str::to_string),
     }
 }
 
@@ -295,7 +302,15 @@ pub(crate) fn flow_flex_children(
     let main_cb = content_w;
     let gap = gap_px(&st, axis.row, main_cb, fs, ctx);
     let justify = st.get_or("justify-content", "flex-start").to_string();
-    let align = st.get_or("align-items", "stretch").to_string();
+    // `normal` = comportement `stretch` en flex (spec §8.3).
+    let align = {
+        let a = st.get_or("align-items", "stretch");
+        if a.trim() == "normal" {
+            "stretch".to_string()
+        } else {
+            a.to_string()
+        }
+    };
     // Hauteur de conteneur définie : `h_css` — résolue par
     // `layout_block` (%, `box-sizing` déjà appliqués, R-43) ;
     // `None` = indéfinie (taille main de l'axe `column` et
@@ -629,8 +644,13 @@ pub(crate) fn flow_flex_children(
                 let (mt, mb) = cross_margins[k];
                 if mode == "stretch" && !explicit_h {
                     // La margin box remplit la ligne : la
-                    // border box = ligne − marges cross.
-                    c.rect.height = (line_cross - mt - mb).max(0.0);
+                    // border box = ligne − marges cross,
+                    // planchée au `min-height` de l'item
+                    // (§9.8 — la taille stretchée respecte
+                    // les bornes min/max).
+                    let cfs = font_size_px(&c.style, fs, ctx);
+                    let mn = side_px(&c.style, "min-height", h_def.unwrap_or(0.0), cfs, ctx, 0.0);
+                    c.rect.height = (line_cross - mt - mb).max(mn).max(0.0);
                     translate_subtree(c, 0.0, line_dy + mt);
                     continue;
                 }
