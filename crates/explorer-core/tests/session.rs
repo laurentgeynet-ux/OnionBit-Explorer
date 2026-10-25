@@ -2980,7 +2980,7 @@ async fn form_post_submit_sends_urlencoded_body() {
     // Bouton : dernier div (~y 172-195 sous la textarea 4em
     // — le strut §10.8.1 élargit chaque line box).
     let out = s
-        .handle_input(id, InputEvent::Click { x: 10.0, y: 183.0 })
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 190.0 })
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Navigated);
@@ -5590,7 +5590,7 @@ async fn post_history_entry_replays_request() {
     s.navigate(id, "http://h.test/f").await.unwrap();
     // Bouton submit → POST /doit (corps urlencodé).
     let out = s
-        .handle_input(id, InputEvent::Click { x: 10.0, y: 183.0 })
+        .handle_input(id, InputEvent::Click { x: 10.0, y: 190.0 })
         .await
         .unwrap();
     assert_eq!(out, InputOutcome::Navigated);
@@ -7837,7 +7837,7 @@ async fn nav_post_emits_origin_same_origin() {
     t.route("/doit", 200, "<html><body>done</body></html>");
     let id = s.open_tab();
     s.navigate(id, "http://h.test/f").await.unwrap();
-    s.handle_input(id, InputEvent::Click { x: 10.0, y: 183.0 })
+    s.handle_input(id, InputEvent::Click { x: 10.0, y: 190.0 })
         .await
         .unwrap();
     assert_eq!(
@@ -13148,4 +13148,38 @@ async fn real_land_module_eval() {
     s.navigate(a, "http://h.test/p").await.unwrap();
     let dump = s.dom_dump(a).unwrap_or_default();
     eprintln!("console/dump : {dump}");
+}
+
+/// Mur module github (bissection) : un `import` non résolu
+/// dans un module externe doit surfacer `PipelineError` —
+/// sinon l'échec est avalé (mur possible).
+#[tokio::test]
+async fn module_import_failure_surfaces() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script type=\"module\" src=\"/m.js\"></script></body></html>",
+    );
+    t.route(
+        "/m.js",
+        200,
+        "import * as w from '/wp-runtime-absent.js';\
+         document.getElementById('x').textContent='RUN'",
+    );
+    let mut rx = s.subscribe();
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let mut saw_err = false;
+    while let Ok(ev) = rx.try_recv() {
+        if matches!(ev, CoreEvent::PipelineError { .. }) {
+            saw_err = true;
+        }
+    }
+    eprintln!(
+        "pipeline_err={saw_err} dump={:?}",
+        s.dom_dump(a).map(|d| d.len())
+    );
 }

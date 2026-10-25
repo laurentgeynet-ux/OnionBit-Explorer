@@ -7372,6 +7372,7 @@ impl Host for CustomElementsHost {
             "define" => {
                 let n = e.to_js_string(arg(args, 0))?;
                 let ctor = arg(args, 1);
+                tracing::debug!(name = %n, "customElements.define");
                 // Approche spec `SyntaxError`/`NotSupportedError`
                 // via TypeError (pas de DOMException typé ici).
                 if !ce_valid_name(&n) {
