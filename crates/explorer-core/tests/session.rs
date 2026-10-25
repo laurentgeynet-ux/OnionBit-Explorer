@@ -13297,3 +13297,31 @@ async fn govuk_app_real_dom_eval() {
     .await;
     eprintln!("vrai DOM + app : {}", if r.is_err() { "TIMEOUT (wedge reproduit)" } else { "terminé" });
 }
+
+/// Wedge gov.uk — état complet : vraie page + inlines +
+/// modules réels dans l'ordre live (rum-cd, load-analytics,
+/// application). Si l'éval boucle en état-complet, repro.
+#[tokio::test]
+async fn govuk_full_state_eval() {
+    let (mut s, t) = test_session();
+    let page = std::fs::read_to_string("C:/Users/Lou/AppData/Local/Temp/govuk_full.html")
+        .unwrap_or_else(|_| "<html><body><div>x</div></body></html>".into());
+    t.route("/p", 200, Box::leak(page.into_boxed_str()));
+    for (path, file) in [
+        ("/rumcd.js", "rum-custom-data-b9e1806d1da2fa8ef1855d01aa71ba5eb0afc010dd2c4de3672cc7c7a39b0c8c"),
+        ("/load-analytics.js", "load-analytics-d5c92d4ce9f98141170a466427da86ca1ff62f234637bf0776121e6df57b3b67"),
+        ("/app.js", "govuk_app"),
+    ] {
+        let body = std::fs::read_to_string(format!("C:/Users/Lou/AppData/Local/Temp/govuk_{file}.js"))
+            .unwrap_or_else(|_| "document.title='SKIP'".into());
+        t.route(path, 200, Box::leak(body.into_boxed_str()));
+    }
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        s.navigate(a, "http://h.test/p"),
+    )
+    .await;
+    eprintln!("état-complet : {}", if r.is_err() { "TIMEOUT (wedge reproduit)" } else { "terminé" });
+}
