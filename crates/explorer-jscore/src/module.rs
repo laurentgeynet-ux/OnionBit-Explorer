@@ -14,7 +14,7 @@
 
 use crate::ast::{ExportDecl, ImportBind, Pat, Stmt};
 use crate::error::{Error, Result};
-use crate::heap::{Env, EnvCell, EnvRef, JsResult, Object, PropAttrs, Thrown};
+use crate::heap::{Env, EnvCell, EnvRef, JsResult, ObjKind, Object, PropAttrs, Thrown};
 use crate::interp::IMPORT_META;
 use crate::parser;
 use crate::value::Value;
@@ -485,6 +485,31 @@ impl Engine {
         let outer_strict = self.strict;
         self.strict = true; // modules are always strict
         let prev_mod = std::mem::replace(&mut self.current_module, self.modules[idx].spec.clone());
+        // JS-C35 — TLA : un `await` au top-level → le corps
+        // tourne sur `GExec` comme un `async fn` ; la promesse
+        // porte le settlement (rejection → `run_microtasks`
+        // la reporte au drain). Borne documentée : le graphe
+        // d'importeurs n'attend pas — les exports lisent les
+        // bindings lexicalement (vivants par `nsget`).
+        if body.iter().any(crate::interp::lazy::stmt_has_suspend) {
+            let lowered = crate::interp::lazy::lower_suspend_body(&body);
+            let prom = self.new_promise();
+            let gen =
+                crate::interp::lazy::gen_lazy_obj(self, env.clone(), Value::Undefined, lowered);
+            if let Value::Obj(gid) = gen {
+                if let Some(o) = self.heap.obj(gid) {
+                    if let ObjKind::GenLive { exec } = &o.kind {
+                        let exec = exec.clone();
+                        let mut g = exec.borrow_mut();
+                        g.set_outer(prom);
+                        let _ = g.start(self);
+                    }
+                }
+            }
+            self.current_module = prev_mod;
+            self.strict = outer_strict;
+            return Ok(());
+        }
         let r = self.exec_body(&env, Value::Undefined, &body);
         self.current_module = prev_mod;
         self.strict = outer_strict;

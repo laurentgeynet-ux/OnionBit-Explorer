@@ -1850,7 +1850,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests : 18 `tests/csp.rs` +
   14 session (`csp_*`).
 
-- **CAP-170 — `document.readyState` + `readystatechange`**
+-- **JS-C35 — TLA de module**
+  (`explorer-jscore`, suite de
+  JS-C34) : `await` au top-level
+  d'un module — `evaluate_module`
+  détecte `stmt_has_suspend` et
+  fait tourner le corps sur le
+  même `GExec` que les `async fn`
+  (promesse interne boundée).
+  Borne documentée : le graphe
+  d'importeurs n'attend pas — les
+  exports se lisent paresseusement
+  (`nsget` bindings vivants), les
+  entrées feuilles (entry sans
+  importeurs) sont couvertes.
+  Test : `tla_module_awaits_pending`.
+
+ **CAP-170 — `document.readyState` + `readystatechange`**
   (`explorer-jscore`/`explorer-js`/`explorer-core` —
   cap « web réel sécurisé » ; numéro officiel
   attribué à l'intégration) : le cycle de vie

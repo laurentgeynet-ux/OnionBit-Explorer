@@ -226,7 +226,7 @@ fn lower_stmt(s: &Stmt, cx: &mut LowerCx) -> Vec<Stmt> {
 
 /// `true` si le statement contient un suspend en position
 /// non liftée (corps de if/while/for/try…).
-fn stmt_has_suspend(s: &Stmt) -> bool {
+pub(crate) fn stmt_has_suspend(s: &Stmt) -> bool {
     match s {
         Stmt::Expr(e) | Stmt::Throw(e) | Stmt::Return(Some(e)) => has_suspend(e),
         Stmt::Var(ds) | Stmt::Lexical { decls: ds, .. } => {
