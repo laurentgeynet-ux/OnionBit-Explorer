@@ -54,20 +54,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 - **JS-C106 — borne
   d'imbrication 512→4096**
-  () :
-   (parseur) et
-   (interprète)
+  (`explorer-jscore::parser`) :
+  `nest_max` (parseur) et
+  `expr_depth` (interprète)
   partageaient
-   —
+  `DEFAULT_NEST_LIMIT=512` —
   les bundles minifiés nichent
-  bien au-delà (
+  bien au-delà (`RangeError:
+  expression too deeply nested`
   @ caniuse bundle.js mesuré
   terrain). La pile reste
   protégée par
-   (JS-C41)
+  `stacker::maybe_grow` (JS-C41)
   — la borne ne coupe que
   l'hostile. Test
-  
+  `deeply_nested_expression_parses`
   (600 parenthèses, rejeté à
   512, vert à 4096).
 
