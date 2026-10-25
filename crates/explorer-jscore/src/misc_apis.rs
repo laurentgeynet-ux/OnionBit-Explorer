@@ -65,6 +65,12 @@ pub(crate) struct MiscState {
     range_proto: Option<ObjId>,
     tw_proto: Option<ObjId>,
     ni_proto: Option<ObjId>,
+    /// `Animation.prototype` paresseux + registre des
+    /// animations vivantes (CAP-187) — document-local.
+    anim_proto: Option<ObjId>,
+    anims: Vec<Rc<RefCell<AnimData>>>,
+    /// `ViewTransition.prototype` paresseux (CAP-187).
+    vt_proto: Option<ObjId>,
 }
 
 impl MiscState {
@@ -79,6 +85,8 @@ impl MiscState {
             self.range_proto,
             self.tw_proto,
             self.ni_proto,
+            self.anim_proto,
+            self.vt_proto,
         ]
         .into_iter()
         .flatten()
@@ -1935,4 +1943,278 @@ pub(crate) fn shared_worker_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> J
     let tag = e.str_val("SharedWorker");
     e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
     Ok(Value::Obj(o))
+}
+
+// ===== CAP-187 — Web Animations borné : `animate`, —
+
+/// Données d'une `Animation` vivante — machine à états
+/// honnête (pas de compositeur : la timeline n'interpole
+/// pas les styles du miroir — borné, documenté).
+struct AnimData {
+    /// Élément cible (`nodeFor`-résolu à l'appel).
+    node: NodeId,
+    /// `playState` spec.
+    state: &'static str,
+    /// `playbackRate`.
+    rate: f64,
+    /// Promesses `finished`/`ready`.
+    finished: ObjId,
+    ready: ObjId,
+    /// Wrapper `Animation` déjà rendu — `getAnimations`
+    /// rend le même objet (identité spec).
+    wrapper: Option<ObjId>,
+    /// Handlers `onfinish`/`oncancel`.
+    onfinish: Value,
+    oncancel: Value,
+}
+
+struct AnimHost {
+    data: Rc<RefCell<AnimData>>,
+}
+
+/// `Animation.prototype` paresseux.
+fn anim_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.misc.anim_proto {
+        return p;
+    }
+    let p = e.new_object();
+    let tag = e.str_val("Animation");
+    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.misc.anim_proto = Some(p);
+    p
+}
+
+/// Wrapper `Animation` pour une donnée (créé une fois —
+/// `getAnimations` rend le même objet).
+fn anim_wrapper(e: &mut Engine, data: &Rc<RefCell<AnimData>>) -> Value {
+    if let Some(w) = data.borrow().wrapper {
+        return Value::Obj(w);
+    }
+    if e.dom_ctx.is_none() {
+        return Value::Null;
+    }
+    let v = e.new_host_object(Rc::new(AnimHost {
+        data: data.clone(),
+    }));
+    let p = anim_proto(e);
+    if let Value::Obj(id) = v {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = Value::Obj(p);
+        }
+        data.borrow_mut().wrapper = Some(id);
+    }
+    v
+}
+
+/// `el.animate(keyframes, duration|options)` (CAP-187) —
+/// `Animation` machine à états : `playState='running'`,
+/// `ready` résolu, `finished` pendante (résolue par
+/// `finish()` ou annulée par `cancel()` — pas de timeline
+/// réelle, borné).
+pub(crate) fn animate(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some(n) = node_for(e, t) else {
+        return Err(e.type_error("animate: not an Element"));
+    };
+    let _ = args; // keyframes/options — non lus (borné : pas de keyframe parsing)
+    let finished = e.new_promise();
+    let ready = e.new_promise();
+    e.resolve_promise(ready, Value::Undefined);
+    let data = Rc::new(RefCell::new(AnimData {
+        node: n,
+        state: "running",
+        rate: 1.0,
+        finished,
+        ready,
+        wrapper: None,
+        onfinish: Value::Undefined,
+        oncancel: Value::Undefined,
+    }));
+    e.misc.anims.push(data.clone());
+    Ok(anim_wrapper(e, &data))
+}
+
+/// `el.getAnimations()`/`document.getAnimations()`
+/// (CAP-187) — wrappers des animations vivantes (le
+/// filtre élément borne aux animations de ce nœud ;
+/// document → toutes — borné : pas de sous-arbre).
+pub(crate) fn get_animations(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let scope = node_for(e, this);
+    let datas: Vec<Rc<RefCell<AnimData>>> = e
+        .misc
+        .anims
+        .iter()
+        .filter(|d| {
+            let d = d.borrow();
+            d.state != "idle" && scope.is_none_or(|s| d.node == s)
+        })
+        .cloned()
+        .collect();
+    let anims = datas.iter().map(|d| anim_wrapper(e, d)).collect();
+    Ok(e.new_array(anims))
+}
+
+impl Host for AnimHost {
+    fn class_name(&self) -> &'static str {
+        "Animation"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "play"
+                | "pause"
+                | "finish"
+                | "cancel"
+                | "reverse"
+                | "updatePlaybackRate"
+                | "persist"
+                | "commitStyles"
+        )
+    }
+
+    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        let d = self.data.borrow();
+        Ok(Some(match key {
+            "playState" => return Ok(Some(e.str_val(d.state))),
+            "playbackRate" => Value::Num(d.rate),
+            "pending" => Value::Bool(false),
+            "currentTime" | "effect" | "timeline" => Value::Null,
+            "finished" => Value::Obj(d.finished),
+            "ready" => Value::Obj(d.ready),
+            "onfinish" => d.onfinish,
+            "oncancel" => d.oncancel,
+            _ => return Ok(None),
+        }))
+    }
+
+    fn set(&self, e: &mut Engine, _t: Value, key: &str, v: Value) -> JsResult<bool> {
+        match key {
+            "onfinish" => {
+                self.data.borrow_mut().onfinish = v;
+                Ok(true)
+            }
+            "oncancel" => {
+                self.data.borrow_mut().oncancel = v;
+                Ok(true)
+            }
+            "playbackRate" => {
+                self.data.borrow_mut().rate = e.to_number(v).unwrap_or(1.0);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        t: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        match name {
+            "play" => {
+                self.data.borrow_mut().state = "running";
+                Ok(Some(Value::Undefined))
+            }
+            "pause" => {
+                self.data.borrow_mut().state = "paused";
+                Ok(Some(Value::Undefined))
+            }
+            "finish" => {
+                let (pid, onf, w) = {
+                    let mut d = self.data.borrow_mut();
+                    d.state = "finished";
+                    (d.finished, d.onfinish, d.wrapper)
+                };
+                // `finished` résout avec l'objet `Animation`
+                // (spec) — pas la promesse (auto-résolution
+                // → rejet TypeError).
+                e.resolve_promise(pid, w.map_or(Value::Undefined, Value::Obj));
+                if e.is_callable(onf) {
+                    let ev = e.new_object();
+                    e.call_value(onf, t, &[Value::Obj(ev)])?;
+                }
+                Ok(Some(Value::Undefined))
+            }
+            "cancel" => {
+                let (pid, onc) = {
+                    let mut d = self.data.borrow_mut();
+                    d.state = "idle";
+                    (d.finished, d.oncancel)
+                };
+                let m = e.str_val("AbortError: animation canceled");
+                e.reject_promise(pid, m);
+                if e.is_callable(onc) {
+                    let ev = e.new_object();
+                    e.call_value(onc, t, &[Value::Obj(ev)])?;
+                }
+                Ok(Some(Value::Undefined))
+            }
+            "reverse" => {
+                let mut d = self.data.borrow_mut();
+                d.rate = -d.rate;
+                d.state = "running";
+                Ok(Some(Value::Undefined))
+            }
+            "updatePlaybackRate" => {
+                self.data.borrow_mut().rate = e.to_number(arg(args, 0)).unwrap_or(1.0);
+                Ok(Some(Value::Undefined))
+            }
+            // `persist`/`commitStyles` — no-op honnête : pas
+            // de compositeur dans le miroir (borné).
+            "persist" | "commitStyles" => Ok(Some(Value::Undefined)),
+            _ => Ok(None),
+        }
+    }
+}
+
+/// `document.startViewTransition(cb)` (CAP-187) —
+/// `ViewTransition` machine à états honnête : le callback
+/// tourne immédiatement (pas de capture visuelle), les
+/// promesses `updateCallbackDone`/`ready`/`finished`
+/// résolvent — borné : pas de transition réelle.
+pub(crate) fn start_view_transition(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    let ucd = e.new_promise();
+    let ready = e.new_promise();
+    let fin = e.new_promise();
+    let o = e.new_object();
+    e.set_own(o, "updateCallbackDone", Value::Obj(ucd), true);
+    e.set_own(o, "ready", Value::Obj(ready), true);
+    e.set_own(o, "finished", Value::Obj(fin), true);
+    e.add_method(o, "skipTransition", vt_skip);
+    let p = vt_proto(e);
+    if let Some(obj) = e.heap.obj_mut(o) {
+        obj.proto = Value::Obj(p);
+    }
+    if e.is_callable(cb) {
+        e.call_value(cb, Value::Obj(o), &[])?;
+    }
+    e.resolve_promise(ucd, Value::Undefined);
+    e.resolve_promise(ready, Value::Undefined);
+    e.resolve_promise(fin, Value::Obj(o));
+    Ok(Value::Obj(o))
+}
+
+/// `ViewTransition.prototype` paresseux.
+fn vt_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.misc.vt_proto {
+        return p;
+    }
+    let p = e.new_object();
+    let tag = e.str_val("ViewTransition");
+    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.misc.vt_proto = Some(p);
+    p
+}
+
+/// `skipTransition()` — no-op honnête (borné : les
+/// promesses sont déjà résolues côté miroir).
+fn vt_skip(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Undefined)
 }

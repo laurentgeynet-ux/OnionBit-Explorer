@@ -3407,6 +3407,25 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-187. Web Animations borné :
+  `animate`/`getAnimations`/
+  `startViewTransition` (sonde)** —
+  machine à états honnête sans
+  compositeur : `playState`/`play`/
+  `pause`/`finish`/`cancel`/`reverse`,
+  promesses `finished`/`ready`,
+  `onfinish`/`oncancel`, registre vivant
+  `misc.anims` (identité préservée) ;
+  `ViewTransition` `{updateCallbackDone,
+  ready, finished, skipTransition}` —
+  callback immédiat, promesses
+  résolues (borné : pas de transition
+  visuelle). Test jscore
+  `cap187_web_animations_bounded`.
+  Reste mesuré : `evaluate`,
+  `canvas.toDataURL`/`captureStream`
+  (arcs P2/P3).
+
 - [x] **CAP-183. Surfaces honnêtes :
   `createNodeIterator`, `SharedWorker`,
   `CSSStyleSheet`, ctors spec-fidèles

@@ -1765,6 +1765,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-187 — Web Animations borné :
+  `animate`, `getAnimations`,
+  `startViewTransition` (sonde
+  `_census_calls` — 4 des 17 échecs
+  restants)** (`explorer-jscore`) :
+  `el.animate(keyframes, dur|opts)` →
+  `Animation` machine à états honnête :
+  `playState` (`running`/`paused`/
+  `finished`/`idle`), `play()`/
+  `pause()`/`finish()`/`cancel()`/
+  `reverse()`/`updatePlaybackRate()`,
+  `persist()`/`commitStyles` no-op —
+  **pas de compositeur** : la timeline
+  n'interpole pas les styles du miroir
+  (borné documenté). `finished`/`ready`
+  promesses — `finished` résout avec
+  l'objet `Animation` à `finish()`,
+  rejette `AbortError` à `cancel()` ;
+  `onfinish`/`oncancel` dispatchés.
+  `el.getAnimations()`/
+  `document.getAnimations()` — wrappers
+  du registre vivant (`misc.anims`,
+  identité objet préservée ; élément →
+  filtré au nœud, document → toutes —
+  borné : pas de sous-arbre).
+  `document.startViewTransition(cb)` →
+  `ViewTransition` `{updateCallbackDone,
+  ready, finished, skipTransition}` —
+  callback exécuté immédiatement,
+  promesses résolues (borné : pas de
+  transition visuelle). Test jscore
+  `cap187_web_animations_bounded`.
+
 - **CAP-183 — surfaces honnêtes :
   `createNodeIterator`, `SharedWorker`,
   `CSSStyleSheet`, ctors spec-fidèles

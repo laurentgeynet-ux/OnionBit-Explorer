@@ -5107,3 +5107,61 @@ fn cap183_honest_surfaces() {
         "TypeError|function"
     );
 }
+
+// ===== CAP-187 — Web Animations borné : `animate`,
+// `getAnimations`, `startViewTransition` (sonde
+// `_census_calls` — machine à états honnête, pas de
+// compositeur).
+
+#[test]
+fn cap187_web_animations_bounded() {
+    let mut e =
+        engine_with("<!doctype html><html><body><div id=x></div><p id=y></p></body></html>");
+    e.eval("var x=document.getElementById('x'),y=document.getElementById('y'),d=document;")
+        .expect("setup");
+    // `animate` — Animation vivante : playState, finished
+    // pendante, ready résolue ; `finish` → 'finished' +
+    // promesse + onfinish.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var an=x.animate({opacity:[0,1]},1000);var f='';an.onfinish=function(){f='F'};\
+            [typeof an.play, an.playState, an.playbackRate, x.getAnimations().length,\
+             an===x.getAnimations()[0]].join('|')"
+        ),
+        "function|running|1|1|true"
+    );
+    // `finish` → état + onfinish ; `pause`/`cancel` →
+    // playState + sortie du registre (`getAnimations` vide).
+    assert_eq!(
+        evf(
+            &mut e,
+            "an.finish();\
+            var a2=y.animate({},500);a2.cancel();\
+            var a3=x.animate({},0);a3.pause();a3.play();\
+            [an.playState, f, a2.playState, x.getAnimations().length,\
+             d.getAnimations().length, a3.playState].join('|')"
+        ),
+        "finished|F|idle|2|2|running"
+    );
+    // `startViewTransition` — objet {updateCallbackDone,
+    // ready, finished, skipTransition} ; callback exécuté,
+    // promesses résolues.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var c='';var vt=d.startViewTransition(function(){c='C'});\
+            [c, typeof vt.skipTransition, typeof vt.finished.then,\
+             vt.toString()].join('|')"
+        ),
+        "C|function|function|[object ViewTransition]"
+    );
+    e.run_microtasks().expect("microtasks");
+    // `finished` de la première animation a résolu.
+    assert_eq!(
+        evf(&mut e, "var r='';an.finished.then(function(){r='ok'});r"),
+        ""
+    );
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(evf(&mut e, "r"), "ok");
+}
