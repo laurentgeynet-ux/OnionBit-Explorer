@@ -74,6 +74,35 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   DocumentFragment` non lié (proto).
   Test jscore `cap191_shadow_surface`.
 
+### Added
+
+- **JS-C95 — identité de module = URL résolue**
+  (`explorer-jscore`) : le cache `eval_module`
+  était clé par le spécificateur brut —
+  `./assets/x.js` depuis la racine et `./x.js`
+  depuis `assets/` instanciaient le même fichier
+  **deux fois** (documenté mais réel : mur
+  x-web). `startup-dynamic` du graphe x.com
+  s'évaluait ×2 → deux `routeTree` TanStack
+  parallèles — les closures `getParentRoute`
+  des routes marchées lisaient les objets
+  non initialisés de l'autre instance →
+  `_id` `undefined/<path>` sur ~30 routes →
+  invariant `routesById` (`Error: Invariant
+  failed`, stack `lu←s←s←sd`). Nouveau
+  registre `module_urls` (`url résolue →
+  idx`, identité canonique spec) ; le cache
+  `spec` reste pour les cycles et le lien
+  `import`. Reproduit en harnais : graphe
+  réel (~2,7 Mo) + scripts inline de la
+  page (`__INITIAL_DATA__` + `$_TSR`) —
+  `dynEvals=2→1`, racine unique, zéro
+  collision ; le code progresse jusqu'aux
+  timers du harnais. Régression
+  `mod_dedup_resolved_url` (deux
+  orthographes → même URL → une éval,
+  bindings partagés).
+
 - **CAP-190 — `Intl.Segmenter` borné** (`explorer-jscore`,
   ES2022 — mur réel x-web : `new Intl.Segmenter` dans
   `entry-client`) : ctor `{granularity}` (grapheme défaut,

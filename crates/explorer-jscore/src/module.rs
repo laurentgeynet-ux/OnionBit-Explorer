@@ -261,6 +261,18 @@ impl Engine {
         if let Some(&idx) = self.module_specs.get(spec) {
             return Ok(idx);
         }
+        // Identité canonique = l'URL résolue : deux orthographes
+        // du même fichier (`./assets/x.js` depuis la racine,
+        // `./x.js` depuis `assets/`) partagent l'instance — le
+        // spécificateur est aliasé vers elle pour les lookups
+        // `import` aval. Sans ça, le corps s'évalue une fois par
+        // orthographe et le graphe d'objets top-level est
+        // dupliqué (mesuré : routeTree x-web cloné, ids de
+        // routes `undefined/…`, invariant TanStack).
+        if let Some(&idx) = self.module_urls.get(url) {
+            self.module_specs.insert(spec.to_string(), idx);
+            return Ok(idx);
+        }
         if depth > MAX_MODULE_DEPTH {
             return Err(self.type_error("module graph too deep"));
         }
@@ -297,6 +309,7 @@ impl Engine {
             body: prog.body.clone(),
         });
         self.module_specs.insert(spec.to_string(), idx);
+        self.module_urls.insert(url.to_string(), idx);
         self.module_envs.push(env.clone());
 
         // 1. Static export pass — les entrées *locales* sont connues

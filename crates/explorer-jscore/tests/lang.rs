@@ -3128,6 +3128,59 @@ fn mod_import_meta_url_per_module() {
     assert_eq!(global(&mut e, "__u2"), "https://site.com/app/a.png");
 }
 
+#[test]
+fn mod_dedup_resolved_url() {
+    // Identité canonique = l'URL résolue : `./deep/m.js` depuis
+    // l'entrée et `./m.js` depuis `deep/a.js` mènent au même
+    // fichier — le corps ne s'évalue qu'une fois et les deux
+    // importeurs partagent la même instance (live bindings).
+    // Avant : le cache `specifier → module` instanciait une fois
+    // par orthographe → le top-level tournait deux fois → les
+    // objets module-level (routes TanStack x-web) étaient
+    // dupliqués, closures pointant l'arbre non marché →
+    // `undefined/<path>` → invariant du routeur (mur mesuré).
+    let mut e = Engine::new();
+    e.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(UrlLoader(
+        [
+            (
+                "./deep/a.js",
+                "import {n, u} from './m.js'; \
+                 globalThis.__a_n = n; globalThis.__a_u = u;",
+            ),
+            (
+                "./deep/m.js",
+                "globalThis.__evals = (globalThis.__evals || 0) + 1; \
+                 export const n = 7; \
+                 export const u = import.meta.url;",
+            ),
+            // `deep/a.js` l'importe sous l'orthographe `./m.js` —
+            // même URL résolue (`deep/m.js`), même instance.
+            (
+                "./m.js",
+                "globalThis.__evals = (globalThis.__evals || 0) + 1; \
+                 export const n = 7; \
+                 export const u = import.meta.url;",
+            ),
+        ]
+        .iter()
+        .copied()
+        .collect(),
+    ))));
+    e.eval_module(
+        "import {n, u} from './deep/m.js'; \
+         import './deep/a.js'; \
+         globalThis.__n = n; globalThis.__u = u;",
+        "main.js",
+    )
+    .unwrap_or_else(|err| panic!("eval -> {err}"));
+    assert_eq!(global(&mut e, "__evals"), "1");
+    assert_eq!(global(&mut e, "__n"), "7");
+    assert_eq!(global(&mut e, "__a_n"), "7");
+    // Même instance → même `import.meta.url` (l'URL canonique).
+    assert_eq!(global(&mut e, "__u"), "deep/m.js");
+    assert_eq!(global(&mut e, "__a_u"), "deep/m.js");
+}
+
 // -- JS-C44 : import map minimale ---------------------------------
 
 /// Eval `main` comme module après enregistrement de `map_json`

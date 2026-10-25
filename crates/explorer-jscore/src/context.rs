@@ -128,6 +128,10 @@ pub(crate) struct BrowsingContext {
     pub pending_labels: Vec<String>,
     pub modules: Vec<crate::module::Module>,
     pub module_specs: std::collections::HashMap<String, usize>,
+    /// Identité canonique `url résolue → module index` (cf.
+    /// `interp/mod.rs`) — dédup des instanciations entre
+    /// spécificateurs distincts résolvant vers la même URL.
+    pub module_urls: std::collections::HashMap<String, usize>,
     pub module_envs: Vec<EnvRef>,
     pub current_module: String,
     pub import_map: Vec<(String, String)>,
@@ -385,6 +389,7 @@ impl BrowsingContext {
             pending_labels: Vec::new(),
             modules: Vec::new(),
             module_specs: std::collections::HashMap::new(),
+            module_urls: std::collections::HashMap::new(),
             module_envs: Vec::new(),
             current_module: String::new(),
             import_map: Vec::new(),

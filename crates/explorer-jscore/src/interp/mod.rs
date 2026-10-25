@@ -318,6 +318,14 @@ pub struct Engine {
     /// specifier résolvent vers la même instance (et coupent les
     /// cycles à l'instanciation).
     pub(crate) module_specs: std::collections::HashMap<String, usize>,
+    /// Cache `url résolue → module index` — l'identité canonique
+    /// d'un module est l'URL issue de `ModuleLoader::resolve`
+    /// (spec : deux orthographes `./assets/x` et `./x` d'un même
+    /// fichier partagent l'instance ; avant ce registre, chaque
+    /// orthographe instanciait — et évaluait — le corps deux
+    /// fois, ce qui dupliquait les arbres d'objets top-level et
+    /// cassait le routeTree x-web).
+    pub(crate) module_urls: std::collections::HashMap<String, usize>,
     /// Registre des envs référencés par les getters de namespace —
     /// les natives bornées n'emportent que des `Value` (l'index
     /// suffit, l'env vit tant que le module vit).
@@ -718,6 +726,7 @@ impl Engine {
             strict: false,
             modules: Vec::new(),
             module_specs: std::collections::HashMap::new(),
+            module_urls: std::collections::HashMap::new(),
             module_envs: Vec::new(),
             module_loader: None,
             current_module: String::new(),
@@ -876,6 +885,7 @@ impl Engine {
         swap(&mut self.pending_labels, &mut ctx.pending_labels);
         swap(&mut self.modules, &mut ctx.modules);
         swap(&mut self.module_specs, &mut ctx.module_specs);
+        swap(&mut self.module_urls, &mut ctx.module_urls);
         swap(&mut self.module_envs, &mut ctx.module_envs);
         swap(&mut self.current_module, &mut ctx.current_module);
         swap(&mut self.import_map, &mut ctx.import_map);

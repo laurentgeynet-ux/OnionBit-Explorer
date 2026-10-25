@@ -6411,7 +6411,35 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `Invariant failed` = duplicate
   route-id TanStack (`undefined/*` —
   parent root jamais inité, deux objets
-  root distincts — identité à trancher).
+  root distincts — identité tranchée,
+  **JS-C95**).
+
+- [x] **JS-C95. Identité de module =
+  URL résolue** — le cache de
+  `eval_module` était clé par le
+  spécificateur brut : `./assets/x.js`
+  importé depuis la racine et `./x.js`
+  depuis `assets/` instanciaient le
+  même fichier **deux fois** — corps
+  ré-exécuté, arbres top-level
+  dupliqués. Mesuré en terrain x-web :
+  `startup-dynamic` instancié ×2 →
+  deux `routeTree` TanStack parallèles
+  → les closures `getParentRoute`
+  lisaient l'arbre non marché →
+  `_id` `undefined/<path>` (~30
+  routes) → invariant `routesById`
+  (`Invariant failed`, stack
+  `lu←s←s←sd`). Fix : registre
+  `module_urls` `url résolue → idx`
+  (canonique, spec), le cache `spec`
+  conservé pour les cycles. Reproduit
+  en local : graphe réel + scripts
+  inline `[5]`/`[6]` de la page —
+  `dynEvals=2→1`, `hAtLp===Q===sdarg`,
+  zéro collision — le mur franchit
+  jusqu'au `setTimeout` du harnais.
+  Régression `mod_dedup_resolved_url`.
 
 - [x] **CAP-191. Shadow DOM tranche 1 :
   surface sans composition** — `attachShadow`
