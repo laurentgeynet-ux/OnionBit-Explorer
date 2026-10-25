@@ -60,6 +60,10 @@ pub(crate) struct MiscState {
     /// Wrapper `Selection` déjà rendu — spec : `getSelection`
     /// retourne **le même objet** à chaque appel.
     sel_wrapper: Option<ObjId>,
+    /// `Range.prototype` / `TreeWalker.prototype` paresseux
+    /// (CAP-182).
+    range_proto: Option<ObjId>,
+    tw_proto: Option<ObjId>,
 }
 
 impl MiscState {
@@ -67,9 +71,15 @@ impl MiscState {
     /// `Host::trace` couvre listeners/wrappers) + payloads
     /// en file + ranges de la sélection (wrappers de nœuds).
     pub(crate) fn root_ids(&self, ids: &mut Vec<ObjId>) {
-        for p in [self.bc_proto, self.notif_proto, self.sel_proto]
-            .into_iter()
-            .flatten()
+        for p in [
+            self.bc_proto,
+            self.notif_proto,
+            self.sel_proto,
+            self.range_proto,
+            self.tw_proto,
+        ]
+        .into_iter()
+        .flatten()
         {
             ids.push(p);
         }
@@ -455,8 +465,8 @@ fn notif_noop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 
 /// Un `Range` de la sélection — `(node, offset)` → `(node,
 /// offset)` dans l'arbre miroir.
-#[derive(Clone)]
-struct SelRange {
+#[derive(Clone, Copy)]
+pub(crate) struct SelRange {
     /// Conteneur de début.
     start_node: NodeId,
     /// Offset de début (enfants du conteneur).
@@ -471,7 +481,7 @@ struct SelRange {
 struct SelData {
     /// Ranges — spec : `rangeCount` ≤ 1 sauf Firefox
     /// multi-range (le miroir borne à 1 : `addRange` remplace).
-    ranges: Vec<SelRange>,
+    ranges: Vec<Rc<RefCell<SelRange>>>,
 }
 
 /// Host `Selection` — partage `SelData` (singleton).
@@ -551,33 +561,6 @@ fn sel_range_text(dom: &crate::dom_host::DomRef, r: &SelRange) -> String {
     d.text_content(r.start_node)
 }
 
-/// Objet `Range` rendu par `getRangeAt` — props spec +
-/// `cloneRange`/`detach` (no-op spec)/`toString`/`contains…`
-/// minimaux ; mutation complète hors portée (documenté).
-fn sel_range_value(
-    e: &mut Engine,
-    dom: &crate::dom_host::DomRef,
-    cache: &crate::dom_host::NodeCache,
-    r: &SelRange,
-) -> Value {
-    let o = e.new_object();
-    let sc = node_value(e, dom, cache, r.start_node);
-    e.set_own(o, "startContainer", sc, true);
-    e.set_own(o, "startOffset", Value::Num(f64::from(r.start_off)), true);
-    let ec = node_value(e, dom, cache, r.end_node);
-    e.set_own(o, "endContainer", ec, true);
-    e.set_own(o, "endOffset", Value::Num(f64::from(r.end_off)), true);
-    let collapsed = r.start_node == r.end_node && r.start_off == r.end_off;
-    e.set_own(o, "collapsed", Value::Bool(collapsed), true);
-    let common = node_value(e, dom, cache, r.start_node);
-    e.set_own(o, "commonAncestorContainer", common, true);
-    let text = e.str_val(sel_range_text(dom, r));
-    e.set_own(o, "toString", Value::Undefined, false);
-    // `toString()` via méthode bound — `Value` texte stocké.
-    e.set_own(o, "__text", text, false);
-    Value::Obj(o)
-}
-
 impl Host for SelectionHost {
     fn class_name(&self) -> &'static str {
         "Selection"
@@ -591,16 +574,15 @@ impl Host for SelectionHost {
         let d = self.data.borrow();
         Ok(Some(match key {
             "rangeCount" => Value::Num(d.ranges.len() as f64),
-            "isCollapsed" => Value::Bool(
-                d.ranges
-                    .first()
-                    .is_none_or(|r| r.start_node == r.end_node && r.start_off == r.end_off),
-            ),
+            "isCollapsed" => Value::Bool(d.ranges.first().is_none_or(|r| {
+                let r = r.borrow();
+                r.start_node == r.end_node && r.start_off == r.end_off
+            })),
             "type" => {
                 return Ok(Some(e.str_val(if d.ranges.is_empty() {
                     "None"
-                } else if d.ranges[0].start_node == d.ranges[0].end_node
-                    && d.ranges[0].start_off == d.ranges[0].end_off
+                } else if d.ranges[0].borrow().start_node == d.ranges[0].borrow().end_node
+                    && d.ranges[0].borrow().start_off == d.ranges[0].borrow().end_off
                 {
                     "Caret"
                 } else {
@@ -611,12 +593,22 @@ impl Host for SelectionHost {
                 let r = d.ranges.first();
                 return Ok(Some(match (key, r) {
                     (_, None) => Value::Null,
-                    ("anchorNode", Some(r)) => node_value(e, &self.dom, &self.cache, r.start_node),
-                    (_, Some(r)) => node_value(e, &self.dom, &self.cache, r.end_node),
+                    ("anchorNode", Some(r)) => {
+                        let n = r.borrow().start_node;
+                        node_value(e, &self.dom, &self.cache, n)
+                    }
+                    (_, Some(r)) => {
+                        let n = r.borrow().end_node;
+                        node_value(e, &self.dom, &self.cache, n)
+                    }
                 }));
             }
-            "anchorOffset" => Value::Num(f64::from(d.ranges.first().map_or(0, |r| r.start_off))),
-            "focusOffset" => Value::Num(f64::from(d.ranges.first().map_or(0, |r| r.end_off))),
+            "anchorOffset" => Value::Num(f64::from(
+                d.ranges.first().map_or(0, |r| r.borrow().start_off),
+            )),
+            "focusOffset" => Value::Num(f64::from(
+                d.ranges.first().map_or(0, |r| r.borrow().end_off),
+            )),
             _ => return Ok(None),
         }))
     }
@@ -634,7 +626,7 @@ impl Host for SelectionHost {
                 let text = d
                     .ranges
                     .iter()
-                    .map(|r| sel_range_text(&self.dom, r))
+                    .map(|r| sel_range_text(&self.dom, &r.borrow()))
                     .collect::<String>();
                 Ok(Some(e.str_val(text)))
             }
@@ -646,19 +638,19 @@ impl Host for SelectionHost {
                     // — TypeError honnête ici.
                     return Err(e.type_error("Selection.getRangeAt: index out of bounds"));
                 };
-                Ok(Some(sel_range_value(e, &self.dom, &self.cache, r)))
+                Ok(Some(range_shared(e, r.clone())))
             }
             "selectAllChildren" => {
                 let Some(node) = node_for(e, arg(args, 0)) else {
                     return Err(e.type_error("Selection.selectAllChildren: not a Node"));
                 };
                 let count = self.dom.borrow().child_nodes(node).len() as u32;
-                self.data.borrow_mut().ranges = vec![SelRange {
+                self.data.borrow_mut().ranges = vec![Rc::new(RefCell::new(SelRange {
                     start_node: node,
                     start_off: 0,
                     end_node: node,
                     end_off: count,
-                }];
+                }))];
                 Ok(Some(Value::Undefined))
             }
             "collapse" | "collapseToStart" | "collapseToEnd" | "extend" => {
@@ -667,6 +659,7 @@ impl Host for SelectionHost {
                     node_for(e, arg(args, 0))
                 } else {
                     d.ranges.first().map(|r| {
+                        let r = r.borrow();
                         if name == "collapseToStart" {
                             r.start_node
                         } else {
@@ -678,6 +671,7 @@ impl Host for SelectionHost {
                     e.to_number(arg(args, 1)).unwrap_or(0.0) as u32
                 } else {
                     d.ranges.first().map_or(0, |r| {
+                        let r = r.borrow();
                         if name == "collapseToStart" {
                             r.start_off
                         } else {
@@ -690,35 +684,53 @@ impl Host for SelectionHost {
                 if name == "extend" {
                     let mut dd = self.data.borrow_mut();
                     if let (Some(n), Some(r)) = (node, dd.ranges.first_mut()) {
+                        let mut r = r.borrow_mut();
                         r.end_node = n;
                         r.end_off = off;
                     }
                 } else if let Some(n) = node {
-                    self.data.borrow_mut().ranges = vec![SelRange {
+                    self.data.borrow_mut().ranges = vec![Rc::new(RefCell::new(SelRange {
                         start_node: n,
                         start_off: off,
                         end_node: n,
                         end_off: off,
-                    }];
+                    }))];
                 }
                 Ok(Some(Value::Undefined))
             }
             "addRange" => {
                 let r = arg(args, 0);
+                // Vrai `Range` host (CAP-182) → bornes lues en
+                // direct via downcast ; sinon chemin props
+                // (snapshot `getRangeAt`/`cloneRange` historique).
                 let (sn, so, en, eo) = if let Value::Obj(id) = r {
-                    let sn = e
-                        .get_prop(id, "startContainer")
-                        .and_then(|v| node_for(e, v));
-                    let en = e.get_prop(id, "endContainer").and_then(|v| node_for(e, v));
-                    let so = e
-                        .get_prop(id, "startOffset")
-                        .and_then(|v| e.to_number(v).ok())
-                        .unwrap_or(0.0) as u32;
-                    let eo = e
-                        .get_prop(id, "endOffset")
-                        .and_then(|v| e.to_number(v).ok())
-                        .unwrap_or(0.0) as u32;
-                    (sn, so, en, eo)
+                    let shared = e.host_of(id).and_then(|h| {
+                        h.as_any()
+                            .downcast_ref::<RangeHost>()
+                            .map(|rh| *rh.data.borrow())
+                    });
+                    if let Some(rd) = shared {
+                        (
+                            Some(rd.start_node),
+                            rd.start_off,
+                            Some(rd.end_node),
+                            rd.end_off,
+                        )
+                    } else {
+                        let sn = e
+                            .get_prop(id, "startContainer")
+                            .and_then(|v| node_for(e, v));
+                        let en = e.get_prop(id, "endContainer").and_then(|v| node_for(e, v));
+                        let so = e
+                            .get_prop(id, "startOffset")
+                            .and_then(|v| e.to_number(v).ok())
+                            .unwrap_or(0.0) as u32;
+                        let eo = e
+                            .get_prop(id, "endOffset")
+                            .and_then(|v| e.to_number(v).ok())
+                            .unwrap_or(0.0) as u32;
+                        (sn, so, en, eo)
+                    }
                 } else {
                     (None, 0, None, 0)
                 };
@@ -726,12 +738,12 @@ impl Host for SelectionHost {
                     return Err(e.type_error("Selection.addRange: not a Range"));
                 };
                 // Miroir : un seul range (comportement Chrome).
-                self.data.borrow_mut().ranges = vec![SelRange {
+                self.data.borrow_mut().ranges = vec![Rc::new(RefCell::new(SelRange {
                     start_node: sn,
                     start_off: so,
                     end_node: en,
                     end_off: eo,
-                }];
+                }))];
                 Ok(Some(Value::Undefined))
             }
             "removeRange" | "removeAllRanges" | "empty" => {
@@ -746,12 +758,12 @@ impl Host for SelectionHost {
                 let (Some(sn), Some(en)) = (sn, en) else {
                     return Err(e.type_error("Selection.setBaseAndExtent: not a Node"));
                 };
-                self.data.borrow_mut().ranges = vec![SelRange {
+                self.data.borrow_mut().ranges = vec![Rc::new(RefCell::new(SelRange {
                     start_node: sn,
                     start_off: so,
                     end_node: en,
                     end_off: eo,
-                }];
+                }))];
                 Ok(Some(Value::Undefined))
             }
             "containsNode" => {
@@ -762,6 +774,7 @@ impl Host for SelectionHost {
                 };
                 let d = self.data.borrow();
                 let hit = d.ranges.iter().any(|r| {
+                    let r = r.borrow();
                     if r.start_node == n || r.end_node == n {
                         return true;
                     }
@@ -782,6 +795,7 @@ impl Host for SelectionHost {
                 // (approximation documentée).
                 let ranges = self.data.borrow().ranges.clone();
                 for r in ranges {
+                    let r = r.borrow();
                     if r.start_node == r.end_node {
                         let kids = self.dom.borrow().child_nodes(r.start_node);
                         for &k in kids
@@ -917,4 +931,666 @@ pub(crate) fn install_misc(e: &mut Engine) {
 /// `args[i]` ou `Undefined` (même convention que `xhr::arg`).
 fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).copied().unwrap_or(Value::Undefined)
+}
+
+// ===== CAP-182 — Range / TreeWalker / execCommand (édition) —
+
+/// Host `Range` — frontières mutables (start/end sur des nœuds
+/// miroir). `Selection.addRange` lit `startContainer`/`endContainer`/
+/// `startOffset`/`endOffset` — exposés ici → intégration directe.
+struct RangeHost {
+    data: Rc<RefCell<SelRange>>,
+    dom: crate::dom_host::DomRef,
+    cache: crate::dom_host::NodeCache,
+}
+
+/// `(parent, index)` d'un nœud parmi les enfants de son parent.
+fn node_index(dom: &crate::dom_host::DomRef, n: NodeId) -> Option<(NodeId, u32)> {
+    let d = dom.borrow();
+    let p = d.parent(n)?;
+    let i = d.child_nodes(p).iter().position(|&c| c == n)? as u32;
+    Some((p, i))
+}
+
+/// Ancêtre commun de deux nœuds — montée depuis `a` jusqu'à
+/// contenir `b` (document-order).
+fn common_ancestor(dom: &crate::dom_host::DomRef, a: NodeId, b: NodeId) -> NodeId {
+    let d = dom.borrow();
+    let mut anc = a;
+    loop {
+        if d.contains(anc, b) {
+            return anc;
+        }
+        match d.parent(anc) {
+            Some(p) => anc = p,
+            None => return anc,
+        }
+    }
+}
+
+/// Enfants top-level de l'ancêtre commun couverts par le range
+/// (borné : même-conteneur = tranche `[start_off..end_off)` ;
+/// multi-niveaux = enfants de l'ancêtre entre la branche de
+/// début et celle de fin — les descendants plus profonds
+/// partent avec leur parent).
+fn range_covered_top(dom: &crate::dom_host::DomRef, r: &SelRange) -> Vec<NodeId> {
+    let d = dom.borrow();
+    if r.start_node == r.end_node {
+        let kids = d.child_nodes(r.start_node);
+        return kids
+            .iter()
+            .skip(r.start_off as usize)
+            .take(r.end_off.saturating_sub(r.start_off) as usize)
+            .copied()
+            .collect();
+    }
+    let anc = common_ancestor(dom, r.start_node, r.end_node);
+    let kids = d.child_nodes(anc);
+    let branch = |mut n: NodeId| {
+        while d.parent(n).is_some_and(|p| p != anc) {
+            n = d.parent(n).unwrap_or(n);
+        }
+        n
+    };
+    let si = kids
+        .iter()
+        .position(|&k| k == branch(r.start_node))
+        .unwrap_or(0);
+    let ei = kids
+        .iter()
+        .position(|&k| k == branch(r.end_node))
+        .unwrap_or_else(|| kids.len().saturating_sub(1));
+    if kids.is_empty() {
+        return Vec::new();
+    }
+    kids[si.min(kids.len() - 1)..=ei.min(kids.len() - 1)].to_vec()
+}
+
+/// Suppression des contenus couverts : texte → sous-chaîne
+/// retirée ; sinon les nœuds couverts sont détachés.
+fn delete_range_contents(dom: &crate::dom_host::DomRef, r: &SelRange) {
+    let (covered, is_text) = {
+        let d = dom.borrow();
+        (
+            range_covered_top(dom, r),
+            r.start_node == r.end_node
+                && matches!(
+                    d.nodes[r.start_node as usize].kind,
+                    crate::dom::NodeKind::Text
+                ),
+        )
+    };
+    let mut d = dom.borrow_mut();
+    if is_text {
+        let t = d.text_content(r.start_node);
+        let kept: String = t
+            .chars()
+            .take(r.start_off as usize)
+            .chain(t.chars().skip(r.end_off as usize))
+            .collect();
+        d.set_text(r.start_node, &kept);
+        return;
+    }
+    for n in covered {
+        d.detach(n);
+    }
+}
+
+/// `Range.prototype` paresseux (une fois par engine).
+fn range_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.misc.range_proto {
+        return p;
+    }
+    let p = e.new_object();
+    let tag = e.str_val("Range");
+    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.misc.range_proto = Some(p);
+    p
+}
+
+/// Objet `Range` vivant (frontières mutables) — utilisé par
+/// `new Range()`/`document.createRange()` et `cloneRange`.
+pub(crate) fn range_value(e: &mut Engine, r: SelRange) -> Value {
+    range_shared(e, Rc::new(RefCell::new(r)))
+}
+
+/// `Range` vivant sur une donnée **partagée** — `getRangeAt`
+/// retourne le même contenu que le range ajouté (mutations
+/// visibles dans la `Selection`, spec).
+fn range_shared(e: &mut Engine, data: Rc<RefCell<SelRange>>) -> Value {
+    let Some((dom, cache)) = e.dom_ctx.clone() else {
+        return Value::Null;
+    };
+    let v = e.new_host_object(Rc::new(RangeHost { data, dom, cache }));
+    let p = range_proto(e);
+    if let Value::Obj(id) = v {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = Value::Obj(p);
+        }
+    }
+    v
+}
+
+/// `new Range()` — spec-constructible (CAP-182) : frontières
+/// `(document, 0)`/`(document, 0)`. Sans document → `TypeError`.
+pub(crate) fn range_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let Some((dom, _cache)) = e.dom_ctx.clone() else {
+        return Err(e.type_error("Range: no document"));
+    };
+    let root = dom.borrow().root;
+    Ok(range_value(
+        e,
+        SelRange {
+            start_node: root,
+            start_off: 0,
+            end_node: root,
+            end_off: 0,
+        },
+    ))
+}
+
+impl Host for RangeHost {
+    fn class_name(&self) -> &'static str {
+        "Range"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "setStart"
+                | "setEnd"
+                | "setStartBefore"
+                | "setStartAfter"
+                | "setEndBefore"
+                | "setEndAfter"
+                | "selectNode"
+                | "selectNodeContents"
+                | "collapse"
+                | "cloneContents"
+                | "extractContents"
+                | "deleteContents"
+                | "insertNode"
+                | "cloneRange"
+                | "detach"
+                | "toString"
+                | "getBoundingClientRect"
+                | "getClientRects"
+        )
+    }
+
+    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        let d = self.data.borrow();
+        Ok(Some(match key {
+            "startContainer" => node_value(e, &self.dom, &self.cache, d.start_node),
+            "endContainer" => node_value(e, &self.dom, &self.cache, d.end_node),
+            "startOffset" => Value::Num(f64::from(d.start_off)),
+            "endOffset" => Value::Num(f64::from(d.end_off)),
+            "collapsed" => Value::Bool(d.start_node == d.end_node && d.start_off == d.end_off),
+            "commonAncestorContainer" => {
+                let anc = common_ancestor(&self.dom, d.start_node, d.end_node);
+                node_value(e, &self.dom, &self.cache, anc)
+            }
+            _ => return Ok(None),
+        }))
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _t: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        match name {
+            "setStart" | "setEnd" => {
+                let Some(n) = node_for(e, arg(args, 0)) else {
+                    return Err(e.type_error("Range.set*: not a Node"));
+                };
+                let off = e.to_number(arg(args, 1)).unwrap_or(0.0).max(0.0) as u32;
+                let mut d = self.data.borrow_mut();
+                if name == "setStart" {
+                    d.start_node = n;
+                    d.start_off = off;
+                    // Spec : un début posé au-delà de la fin la
+                    // rabat dessus (borné : même-conteneur seul —
+                    // l'ordre inter-nœuds exige
+                    // `compareDocumentPosition`, non porté).
+                    if n == d.end_node && off > d.end_off {
+                        d.end_off = off;
+                    }
+                } else {
+                    d.end_node = n;
+                    d.end_off = off;
+                    if n == d.start_node && off < d.start_off {
+                        d.start_off = off;
+                    }
+                }
+                Ok(Some(Value::Undefined))
+            }
+            "setStartBefore" | "setStartAfter" | "setEndBefore" | "setEndAfter" => {
+                let Some(n) = node_for(e, arg(args, 0)) else {
+                    return Err(e.type_error("Range.set*: not a Node"));
+                };
+                let Some((p, i)) = node_index(&self.dom, n) else {
+                    return Err(crate::heap::Thrown(crate::dom_host::dom_ex_pub(
+                        e,
+                        "InvalidNodeTypeError",
+                        "node has no parent",
+                    )));
+                };
+                let off = if name.ends_with("After") { i + 1 } else { i };
+                let mut d = self.data.borrow_mut();
+                if name.starts_with("setStart") {
+                    d.start_node = p;
+                    d.start_off = off;
+                    if p == d.end_node && off > d.end_off {
+                        d.end_off = off;
+                    }
+                } else {
+                    d.end_node = p;
+                    d.end_off = off;
+                    if p == d.start_node && off < d.start_off {
+                        d.start_off = off;
+                    }
+                }
+                Ok(Some(Value::Undefined))
+            }
+            "selectNode" | "selectNodeContents" => {
+                let Some(n) = node_for(e, arg(args, 0)) else {
+                    return Err(e.type_error("Range.select*: not a Node"));
+                };
+                if name == "selectNode" {
+                    let Some((p, i)) = node_index(&self.dom, n) else {
+                        return Err(crate::heap::Thrown(crate::dom_host::dom_ex_pub(
+                            e,
+                            "InvalidNodeTypeError",
+                            "node has no parent",
+                        )));
+                    };
+                    let mut d = self.data.borrow_mut();
+                    d.start_node = p;
+                    d.start_off = i;
+                    d.end_node = p;
+                    d.end_off = i + 1;
+                } else {
+                    let count = self.dom.borrow().child_nodes(n).len() as u32;
+                    let mut d = self.data.borrow_mut();
+                    d.start_node = n;
+                    d.start_off = 0;
+                    d.end_node = n;
+                    d.end_off = count;
+                }
+                Ok(Some(Value::Undefined))
+            }
+            "collapse" => {
+                let to_start = e.to_boolean(arg(args, 0));
+                let mut d = self.data.borrow_mut();
+                if to_start {
+                    d.end_node = d.start_node;
+                    d.end_off = d.start_off;
+                } else {
+                    d.start_node = d.end_node;
+                    d.start_off = d.end_off;
+                }
+                Ok(Some(Value::Undefined))
+            }
+
+            "cloneContents" | "extractContents" => {
+                let r = *self.data.borrow();
+                let covered = range_covered_top(&self.dom, &r);
+                let frag = {
+                    let mut d = self.dom.borrow_mut();
+                    let frag = d.create_fragment();
+                    if r.start_node == r.end_node
+                        && matches!(
+                            d.nodes[r.start_node as usize].kind,
+                            crate::dom::NodeKind::Text
+                        )
+                    {
+                        let t = d.text_content(r.start_node);
+                        let sub: String = t
+                            .chars()
+                            .skip(r.start_off as usize)
+                            .take(r.end_off.saturating_sub(r.start_off) as usize)
+                            .collect();
+                        let tn = d.create_text(&sub);
+                        d.insert_before(frag, tn, None);
+                    } else {
+                        for &n in &covered {
+                            let c = d.clone_node(n, true);
+                            d.insert_before(frag, c, None);
+                        }
+                    }
+                    frag
+                };
+                if name == "extractContents" {
+                    delete_range_contents(&self.dom, &r);
+                }
+                Ok(Some(node_value(e, &self.dom, &self.cache, frag)))
+            }
+            "deleteContents" => {
+                let r = *self.data.borrow();
+                delete_range_contents(&self.dom, &r);
+                Ok(Some(Value::Undefined))
+            }
+            "insertNode" => {
+                let Some(n) = node_for(e, arg(args, 0)) else {
+                    return Err(e.type_error("Range.insertNode: not a Node"));
+                };
+                let r = *self.data.borrow();
+                let mut d = self.dom.borrow_mut();
+                let ref_n = d
+                    .child_nodes(r.start_node)
+                    .get(r.start_off as usize)
+                    .copied();
+                d.insert_before(r.start_node, n, ref_n);
+                Ok(Some(Value::Undefined))
+            }
+            "cloneRange" => Ok(Some(range_value(e, *self.data.borrow()))),
+            "detach" => Ok(Some(Value::Undefined)),
+            "toString" => {
+                let text = sel_range_text(&self.dom, &self.data.borrow());
+                Ok(Some(e.str_val(text)))
+            }
+            // Borné : rect = celui de l'ancêtre commun (la
+            // géométrie par sous-nœud couvert n'est pas
+            // agrégée côté map i#19 — documenté).
+            "getBoundingClientRect" | "getClientRects" => {
+                let anc = {
+                    let d = self.data.borrow();
+                    common_ancestor(&self.dom, d.start_node, d.end_node)
+                };
+                let rect = crate::dom_host::gbrect_shared(e, &self.dom, anc);
+                if name == "getBoundingClientRect" {
+                    Ok(Some(rect))
+                } else {
+                    Ok(Some(e.new_array(vec![rect])))
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
+// ===== TreeWalker (CAP-182) — traversée filtrée du miroir.
+
+/// Données `TreeWalker` partagées.
+struct TwData {
+    root: NodeId,
+    /// Masque `NodeFilter.SHOW_*`.
+    what: u32,
+    /// Callback `filter` JS (`Undefined`/`Null` = absent).
+    filter: Value,
+    /// `currentNode` spec.
+    cur: NodeId,
+}
+
+struct TreeWalkerHost {
+    data: Rc<RefCell<TwData>>,
+    dom: crate::dom_host::DomRef,
+    cache: crate::dom_host::NodeCache,
+}
+
+/// Masque `SHOW_*` d'un nœud miroir.
+fn tw_show_bit(d: &crate::dom::Dom, n: NodeId) -> u32 {
+    match d.nodes[n as usize].kind {
+        crate::dom::NodeKind::Text => 0x4,
+        crate::dom::NodeKind::Fragment => 0x400,
+        crate::dom::NodeKind::Element => {
+            let t = &d.nodes[n as usize].tag;
+            if t == "#document" {
+                0x100
+            } else if t == "#comment" {
+                0x80
+            } else {
+                0x1
+            }
+        }
+    }
+}
+
+/// Verdict 0=accept / 1=skip / 2=reject — masque `SHOW_*`
+/// d'abord, callback ensuite (`FILTER_ACCEPT`=1 retourne
+/// `true`-like dans les scripts réels : on accepte tout
+/// verdict truthy≠2/3 — borné, documenté).
+fn tw_accept(e: &mut Engine, tw: &TreeWalkerHost, n: NodeId, what: u32, filter: Value) -> u8 {
+    if tw_show_bit(&tw.dom.borrow(), n) & what == 0 {
+        return 1;
+    }
+    match filter {
+        Value::Undefined | Value::Null => 0,
+        _ => {
+            let nv = node_value(e, &tw.dom, &tw.cache, n);
+            match e
+                .call_value(filter, Value::Undefined, &[nv])
+                .ok()
+                .and_then(|v| e.to_number(v).ok())
+            {
+                Some(r) if (r - 2.0).abs() < f64::EPSILON => 2,
+                Some(r) if (r - 3.0).abs() < f64::EPSILON => 1,
+                Some(r) if r != 0.0 => 0,
+                _ => 1,
+            }
+        }
+    }
+}
+
+/// Frère suivant de `n`, ou — remontée — frère suivant
+/// d'un ancêtre, borné à `root` (exclue — le walker ne
+/// sort jamais de son arbre).
+fn tw_step_out(dom: &crate::dom_host::DomRef, mut n: NodeId, root: NodeId) -> Option<NodeId> {
+    while n != root {
+        let d = dom.borrow();
+        let p = d.parent(n)?;
+        let kids = d.child_nodes(p);
+        if let Some(&s) = kids
+            .iter()
+            .position(|&c| c == n)
+            .and_then(|i| kids.get(i + 1))
+        {
+            return Some(s);
+        }
+        n = p;
+    }
+    None
+}
+
+/// Prochain nœud accepté en ordre document borné à `root`
+/// (skip → descend quand même ; reject → saute le sous-arbre).
+fn tw_next(e: &mut Engine, tw: &TreeWalkerHost, from: NodeId) -> Option<NodeId> {
+    let (root, what, filter) = {
+        let d = tw.data.borrow();
+        (d.root, d.what, d.filter)
+    };
+    let mut n = tw
+        .dom
+        .borrow()
+        .child_nodes(from)
+        .into_iter()
+        .next()
+        .or_else(|| tw_step_out(&tw.dom, from, root))?;
+    loop {
+        match tw_accept(e, tw, n, what, filter) {
+            0 => return Some(n),
+            1 => {
+                n = tw
+                    .dom
+                    .borrow()
+                    .child_nodes(n)
+                    .into_iter()
+                    .next()
+                    .or_else(|| tw_step_out(&tw.dom, n, root))?;
+            }
+            _ => {
+                n = tw_step_out(&tw.dom, n, root)?;
+            }
+        }
+    }
+}
+
+/// `TreeWalker.prototype` paresseux.
+fn tw_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.misc.tw_proto {
+        return p;
+    }
+    let p = e.new_object();
+    let tag = e.str_val("TreeWalker");
+    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.misc.tw_proto = Some(p);
+    p
+}
+
+/// `document.createTreeWalker(root, whatToShow?, filter?)` —
+/// `new TreeWalker` reste non-constructible (spec).
+pub(crate) fn create_treewalker(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((dom, cache)) = e.dom_ctx.clone() else {
+        return Err(e.type_error("createTreeWalker: no document"));
+    };
+    let root = node_for(e, arg(args, 0)).unwrap_or_else(|| dom.borrow().root);
+    let what = e.to_number(arg(args, 1)).unwrap_or(f64::from(u32::MAX)) as u32;
+    let filter = arg(args, 2);
+    let v = e.new_host_object(Rc::new(TreeWalkerHost {
+        data: Rc::new(RefCell::new(TwData {
+            root,
+            what,
+            filter,
+            cur: root,
+        })),
+        dom,
+        cache,
+    }));
+    let p = tw_proto(e);
+    if let Value::Obj(id) = v {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = Value::Obj(p);
+        }
+    }
+    Ok(v)
+}
+
+impl Host for TreeWalkerHost {
+    fn class_name(&self) -> &'static str {
+        "TreeWalker"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "nextNode"
+                | "previousNode"
+                | "firstChild"
+                | "lastChild"
+                | "nextSibling"
+                | "previousSibling"
+                | "parentNode"
+        )
+    }
+
+    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        let d = self.data.borrow();
+        Ok(Some(match key {
+            "root" => node_value(e, &self.dom, &self.cache, d.root),
+            "whatToShow" => Value::Num(f64::from(d.what)),
+            "filter" => d.filter,
+            "currentNode" => node_value(e, &self.dom, &self.cache, d.cur),
+            _ => return Ok(None),
+        }))
+    }
+
+    fn set(&self, e: &mut Engine, _t: Value, key: &str, v: Value) -> JsResult<bool> {
+        if key == "currentNode" {
+            if let Some(n) = node_for(e, v) {
+                self.data.borrow_mut().cur = n;
+            }
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _t: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        let _ = args;
+        let found = match name {
+            "nextNode" => {
+                let cur = self.data.borrow().cur;
+                tw_next(e, self, cur)
+            }
+            "firstChild" => {
+                let root = self.data.borrow().root;
+                tw_next(e, self, root)
+            }
+            // Borné CAP-182 : navigation inverse/fratrie non
+            // portée — `null` honnête plutôt que parcours faux.
+            _ => return Ok(Some(Value::Null)),
+        };
+        match found {
+            Some(n) => {
+                self.data.borrow_mut().cur = n;
+                Ok(Some(node_value(e, &self.dom, &self.cache, n)))
+            }
+            None => Ok(Some(Value::Null)),
+        }
+    }
+}
+
+/// `document.execCommand(cmd, ui?, value?)` (CAP-182 —
+/// hérité mais omniprésent : `copy`/`cut` via le hook
+/// presse-papiers CAP-181 sur le texte de `Selection`,
+/// `selectAll` pose un range `body`-entier ; le reste →
+/// `false` honnête — spec : commande inconnue = `false`).
+pub(crate) fn exec_command(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let cmd = e.to_js_string(arg(args, 0))?;
+    match cmd.as_str() {
+        "copy" | "cut" => {
+            let Some(hook) = e.hooks.clipboard_write.clone() else {
+                return Ok(Value::Bool(false));
+            };
+            let text = {
+                let Some(d) = &e.misc.sel else {
+                    return Ok(Value::Bool(false));
+                };
+                let Some((dom, _c)) = e.dom_ctx.clone() else {
+                    return Ok(Value::Bool(false));
+                };
+                d.borrow()
+                    .ranges
+                    .iter()
+                    .map(|r| sel_range_text(&dom, &r.borrow()))
+                    .collect::<String>()
+            };
+            Ok(Value::Bool(hook(text).is_ok()))
+        }
+        "selectAll" => {
+            let Some((dom, _c)) = e.dom_ctx.clone() else {
+                return Ok(Value::Bool(false));
+            };
+            let d = sel_data(e);
+            let (body, count) = {
+                let dm = dom.borrow();
+                let b = dm.body();
+                (b, dm.child_nodes(b).len() as u32)
+            };
+            d.borrow_mut().ranges = vec![Rc::new(RefCell::new(SelRange {
+                start_node: body,
+                start_off: 0,
+                end_node: body,
+                end_off: count,
+            }))];
+            Ok(Value::Bool(true))
+        }
+        _ => Ok(Value::Bool(false)),
+    }
 }

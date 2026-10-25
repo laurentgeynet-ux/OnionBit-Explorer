@@ -3407,6 +3407,25 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-182. Arc édition : `Range`
+  vivant + `TreeWalker` + `execCommand`
+  (sonde)** — `new Range`/`createRange`
+  constructibles (host à bornes mutables :
+  `setStart*`, `selectNode*`, `clone`/
+  `extract`/`deleteContents`, `insertNode`,
+  `toString`, rect = ancêtre commun borné) ;
+  `SelData.ranges` → `Rc<RefCell<>>`
+  partagé (`getRangeAt` vivant,
+  `addRange` downcast). `createTreeWalker`
+  — successeur document-order borné root
+  (`tw_step_out` oncles) + `NodeFilter`
+  `SHOW_*`/`FILTER_*`. `execCommand` borné :
+  `copy`/`cut`→hook clipboard, `selectAll`→
+  range body, sinon `false`. Bornes :
+  identité `getRangeAt` par appel,
+  navigation inverse/fratrie → `null`.
+  Test jscore `cap182_editing_arc`.
+
 - [x] **CAP-181. `navigator.clipboard`
   par hook embedder (sonde)** —
   `writeText`/`readText` via

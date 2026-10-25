@@ -1780,7 +1780,6 @@ impl Engine {
             "CSSRule",
             "StyleSheet",
             "CSSStyleSheet",
-            "Range",
             "XMLSerializer",
             "AbortSignal",
             "DOMException",
@@ -1805,6 +1804,31 @@ impl Engine {
             self.set_own(fid, "prototype", Value::Obj(p), false);
         }
         self.set_own(g, "DOMParser", f, false);
+        // `Range` — constructible spec (CAP-182, arc édition) :
+        // `new Range()` → frontières `(document,0)` mutables,
+        // `Selection.addRange` le consomme directement.
+        let f = self.native_fn("Range", crate::misc_apis::range_ctor);
+        if let Value::Obj(fid) = f {
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "Range", f, false);
+        // `NodeFilter` — constantes `SHOW_*`/`FILTER_*` lues
+        // par `createTreeWalker(root, NodeFilter.SHOW_…)`.
+        let nf = self.new_object();
+        for (k, v) in [
+            ("SHOW_ELEMENT", 1.0),
+            ("SHOW_TEXT", 4.0),
+            ("SHOW_COMMENT", 128.0),
+            ("SHOW_DOCUMENT", 256.0),
+            ("SHOW_ALL", f64::from(u32::MAX)),
+            ("FILTER_ACCEPT", 1.0),
+            ("FILTER_REJECT", 2.0),
+            ("FILTER_SKIP", 3.0),
+        ] {
+            self.set_own(nf, k, Value::Num(v), true);
+        }
+        self.set_own(g, "NodeFilter", Value::Obj(nf), false);
         // `Element.prototype` porte `matches`/`closest` en
         // *valeurs* : les shims lisent la référence de méthode
         // (`o = Element.prototype.matches || i.msMatchesSelector`
@@ -2959,6 +2983,15 @@ impl Host for DocumentHost {
                 e.set_own(o, "offset", Value::Num(0.0), true);
                 Ok(Some(Value::Obj(o)))
             }
+            // `createRange`/`createTreeWalker`/`execCommand`
+            // (CAP-182, arc édition) — Range vivant (bornes
+            // mutables), TreeWalker DFS filtré (borné :
+            // navigation inverse non portée), execCommand
+            // `copy`/`cut`→hook clipboard/`selectAll`→range
+            // body (le reste → `false` honnête).
+            "createRange" => Ok(Some(crate::misc_apis::range_ctor(e, Value::Undefined, args)?)),
+            "createTreeWalker" => Ok(Some(crate::misc_apis::create_treewalker(e, Value::Undefined, args)?)),
+            "execCommand" => Ok(Some(crate::misc_apis::exec_command(e, Value::Undefined, args)?)),
             "adoptNode" => {
                 let Some(src) = node_for(e, arg(args, 0)) else {
                     return Err(e.type_error("adoptNode: nœud requis"));
@@ -3251,6 +3284,9 @@ const DOC_METHODS: &[&str] = &[
     "adoptNode",
     "importNode",
     "exitFullscreen",
+    "createRange",
+    "createTreeWalker",
+    "execCommand",
     "elementFromPoint",
     "elementsFromPoint",
     "caretPositionFromPoint",
@@ -3517,7 +3553,7 @@ fn is_dialog(dom: &DomRef, node: NodeId) -> bool {
 
 /// DOMException-like `{name, message}` — les erreurs DOM
 /// standard hors idb (`InvalidStateError` de `showModal`…).
-fn dom_ex(e: &mut Engine, name: &str, msg: &str) -> Value {
+pub(crate) fn dom_ex_pub(e: &mut Engine, name: &str, msg: &str) -> Value {
     let o = e.new_object();
     let n = e.str_val(name);
     e.set_own(o, "name", n, true);
@@ -5335,14 +5371,14 @@ impl Host for NodeHost {
             // publiée (issue #19, JS-8 — borné : union des
             // boîtes du nœud ≈ border-box ; `None` → zero-rect,
             // comportement historique du stub).
-            "getBoundingClientRect" => Ok(Some(gbrect_value(e, &self.dom, node))),
+            "getBoundingClientRect" => Ok(Some(gbrect_shared(e, &self.dom, node))),
             // `getClientRects` (CAP-180) — même table que
             // `gBCR` ; la map publie l'**union** des boîtes du
             // nœud → la liste spec multi-fragments s'aplatit
             // à `[union]` (borné, documenté). Absent → `[]`.
             "getClientRects" => {
                 let rects = if element_geom_rect(&self.dom, node).is_some() {
-                    vec![gbrect_value(e, &self.dom, node)]
+                    vec![gbrect_shared(e, &self.dom, node)]
                 } else {
                     Vec::new()
                 };
@@ -5386,7 +5422,7 @@ impl Host for NodeHost {
                 match name {
                     "showModal" | "show" => {
                         if self.dom.borrow().has_attr(node, "open") {
-                            return Err(crate::heap::Thrown(dom_ex(
+                            return Err(crate::heap::Thrown(dom_ex_pub(
                                 e,
                                 "InvalidStateError",
                                 "dialog is already open",
@@ -5451,7 +5487,7 @@ impl Host for NodeHost {
             // `defaultPrevented`).
             "showPopover" | "hidePopover" | "togglePopover" => {
                 if !self.dom.borrow().has_attr(node, "popover") {
-                    return Err(crate::heap::Thrown(dom_ex(
+                    return Err(crate::heap::Thrown(dom_ex_pub(
                         e,
                         "InvalidStateError",
                         "popover attribute required",
@@ -5459,7 +5495,7 @@ impl Host for NodeHost {
                 }
                 let open = e.hooks.popover_open.contains(&node);
                 if matches!(name, "showPopover") == open && name != "togglePopover" {
-                    return Err(crate::heap::Thrown(dom_ex(
+                    return Err(crate::heap::Thrown(dom_ex_pub(
                         e,
                         "InvalidStateError",
                         "popover state invalid",
@@ -5619,7 +5655,7 @@ fn point_candidate_paths(dom: &DomRef, x: f64, y: f64) -> Vec<Vec<(String, u32)>
 /// `width`/`height`. Absent de la table → zero-rect
 /// (comportement historique du stub — un nœud détaché ou une
 /// divergence miroir/session dégrade, ne plante pas).
-fn gbrect_value(e: &mut Engine, dom: &DomRef, node: NodeId) -> Value {
+pub(crate) fn gbrect_shared(e: &mut Engine, dom: &DomRef, node: NodeId) -> Value {
     let (x, y, w, h) = element_geom_rect(dom, node).unwrap_or_default();
     let r = e.new_object();
     for (k, v) in [
@@ -7817,7 +7853,7 @@ fn element_gbrect(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Valu
     let Some((node, dom, _)) = element_receiver(e, this) else {
         return Err(e.type_error("getBoundingClientRect: receiver is not an Element"));
     };
-    Ok(gbrect_value(e, &dom, node))
+    Ok(gbrect_shared(e, &dom, node))
 }
 
 /// `el.attachShadow(init)` — stub spec-minimal (issue #25,
