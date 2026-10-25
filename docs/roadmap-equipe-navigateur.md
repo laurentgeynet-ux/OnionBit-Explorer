@@ -6654,6 +6654,63 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Régression `c97_offset_parent_
   top_left`.
 
+- [x] **JS-C98. Complétude de surface
+  — census des globaux web (147 →
+  ~12 trous réels)** — recensement
+  `typeof` des globaux ES/web sur
+  moteur + DOM installé : 147
+  absences mesurées, ramenées aux
+  seules **absences honnêtes**
+  (valeurs `NaN`/`undefined`,
+  APIs injectées par la session —
+  timers/fetch/storage — niches
+  volontairement absentes). Livré :
+  ~70 stubs « illegal constructor »
+  (Web Animations, Performance,
+  ServiceWorker, WebRTC, File System
+  Access, XPath…) + ctors événement
+  (`ProgressEvent`, `PageTransitionEvent`,
+  `BeforeUnloadEvent`, `FormDataEvent`,
+  `MediaQueryListEvent`,
+  `NotificationEvent`) + ctors réels
+  bornés (`Option`, `DOMPoint`,
+  `DOMMatrix` math 2D complète,
+  `ImageData`, `Path2D` enregistreur,
+  `OffscreenCanvas` ctx enregistré,
+  `FontFace`, `createImageBitmap`) +
+  props/méthodes window (`status`,
+  `opener`, `frameElement`, `external`,
+  `isSecureContext`, `crossOriginIsolated`,
+  `origin`, `visualViewport`,
+  `scheduler`, `cookieStore`,
+  `stop`/`print`/`find`, `reportError`,
+  pickers → `SecurityError`,
+  `WebAssembly` honnête,
+  `trustedTypes` passthrough) +
+  navigator (`mediaDevices` rejets
+  `NotFoundError`, `userActivation`,
+  `permissions.query → 'denied'`) +
+  `speechSynthesis` jar vide +
+  `document.{has,request}StorageAccess`.
+  Régressions `c98_*` (9 tests).
+  la garde `--marketing-header-fixed-top`
+  lisait `a.offsetTop` (CAP-196
+  servi pour `position`). Livré :
+  `ElementGeom.positioned` (computed
+  `position` ≠ `static`, publié à la
+  collecte `collect_geometry`), la
+  marche `offsetParent` côté miroir —
+  plus proche ancêtre positionné ou
+  `td`/`th`/`table`/`body`, `null`
+  pour `fixed`/racine/sans boîte
+  (spec CSSOM) ; `offsetTop`/
+  `offsetLeft` = `rect − parent.rect`
+  en coords **document** (insensible
+  au scroll, union ≙ border box) ;
+  `fixed` → `rect` viewport.
+  Régression `c97_offset_parent_
+  top_left`.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

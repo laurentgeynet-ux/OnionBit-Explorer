@@ -9,6 +9,38 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C98 — complétude de surface
+  (census)** (`explorer-jscore`) :
+  recensement `typeof` des globaux
+  web/ES — 147 absences mesurées
+  ramenées aux seules honnêtes
+  (valeurs, APIs injectées session).
+  ~70 stubs « illegal constructor »
+  (Web Animations, Performance,
+  ServiceWorker, WebRTC, File System
+  Access, XPath…), ctors événement
+  (`ProgressEvent`, `PageTransitionEvent`,
+  `BeforeUnloadEvent`, `FormDataEvent`,
+  `MediaQueryListEvent`,
+  `NotificationEvent`), ctors réels
+  bornés (`Option`, `DOMPoint`,
+  `DOMMatrix` math 2D, `ImageData`,
+  `Path2D`, `OffscreenCanvas`,
+  `FontFace`, `createImageBitmap`),
+  props window (`status`, `opener`,
+  `frameElement`, `external`,
+  `isSecureContext`, `crossOriginIsolated`,
+  `origin`, `visualViewport`,
+  `scheduler`, `cookieStore`,
+  `reportError`, pickers →
+  `SecurityError`, `WebAssembly`
+  honnête, `trustedTypes`
+  passthrough), navigator
+  (`mediaDevices`, `userActivation`,
+  `permissions`), `speechSynthesis`,
+  `document.{has,request}StorageAccess`.
+  Tests `c98_*` (9).
+
 - **JS-C96 — `await` hors lowering :
   toutes les positions couvertes**
   (`explorer-jscore`) : le mur x.com

@@ -2186,6 +2186,327 @@ impl Engine {
             self.set_own(g, k, Value::Num(0.0), false);
         }
 
+        // -- JS-C98 — complétude de surface (census) ----------
+        // Les globaux web restants : stubs « illegal
+        // constructor » (même convention que la famille
+        // HTML*Element — feature-detect, `instanceof`, props
+        // de proto) pour les APIs dont l'absence tuait un
+        // ReferenceError au premier `typeof`/accès direct.
+        for name in [
+            "HTMLSummaryElement",
+            "SVGSVGElement",
+            "Selection",
+            "FileList",
+            "MediaQueryList",
+            "CustomElementRegistry",
+            "MessagePort",
+            "IntersectionObserverEntry",
+            "ResizeObserverEntry",
+            "DOMStringList",
+            "CSSRuleList",
+            "StyleSheetList",
+            "FontFaceSet",
+            "Animation",
+            "KeyframeEffect",
+            "DocumentTimeline",
+            "PerformanceEntry",
+            "PerformanceMark",
+            "PerformanceMeasure",
+            "PerformanceNavigationTiming",
+            "PerformanceResourceTiming",
+            "PerformancePaintTiming",
+            "PerformanceLongTaskTiming",
+            "PerformanceObserver",
+            "ReportingObserver",
+            "VideoFrame",
+            "IdleDetector",
+            "WakeLock",
+            "ImageBitmap",
+            "AudioContext",
+            "OfflineAudioContext",
+            "MediaStream",
+            "MediaRecorder",
+            "MediaSource",
+            "SourceBuffer",
+            "RTCPeerConnection",
+            "Geolocation",
+            "PushManager",
+            "ServiceWorker",
+            "ServiceWorkerContainer",
+            "ServiceWorkerRegistration",
+            "BarcodeDetector",
+            "EyeDropper",
+            "LaunchQueue",
+            "CookieStore",
+            "FileSystemHandle",
+            "Highlight",
+            "EditContext",
+            "Sanitizer",
+            "XPathEvaluator",
+            "XPathExpression",
+            "Navigation",
+            "VisualViewport",
+            "Performance",
+            "CSSFontFaceRule",
+            "CredentialsContainer",
+            "Credential",
+            "PublicKeyCredential",
+            "CanvasRenderingContext2D",
+            "WebGLRenderingContext",
+            "MediaEncryptedEvent",
+        ] {
+            let f = self.native_fn(name, illegal_ctor);
+            if let Value::Obj(fid) = f {
+                let p = self.new_object();
+                self.set_own(fid, "prototype", Value::Obj(p), false);
+            }
+            self.set_own(g, name, f, false);
+        }
+        // `XPathResult` — stub + constantes `*_TYPE` lues en
+        // argument de `document.evaluate(…, type, …)` (CAP-188).
+        let xr_f = self.native_fn("XPathResult", illegal_ctor);
+        if let Value::Obj(fid) = xr_f {
+            for (k, v) in [
+                ("ANY_TYPE", 0),
+                ("NUMBER_TYPE", 1),
+                ("STRING_TYPE", 2),
+                ("BOOLEAN_TYPE", 3),
+                ("UNORDERED_NODE_ITERATOR_TYPE", 4),
+                ("ORDERED_NODE_ITERATOR_TYPE", 5),
+                ("UNORDERED_NODE_SNAPSHOT_TYPE", 6),
+                ("ORDERED_NODE_SNAPSHOT_TYPE", 7),
+                ("ANY_UNORDERED_NODE_TYPE", 8),
+                ("FIRST_ORDERED_NODE_TYPE", 9),
+            ] {
+                self.set_own(fid, k, Value::Num(f64::from(v)), false);
+            }
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "XPathResult", xr_f, false);
+        // Interfaces événement complémentaires — rail
+        // `event_ctor` générique (init copié, proto hérité de
+        // `Event.prototype` — CAP-178).
+        for name in [
+            "ProgressEvent",
+            "PageTransitionEvent",
+            "BeforeUnloadEvent",
+            "FormDataEvent",
+            "MediaQueryListEvent",
+            "NotificationEvent",
+        ] {
+            let f = self.native_fn(name, event_ctor);
+            if let Value::Obj(fid) = f {
+                let p = Value::Obj(self.new_object());
+                if let Value::Obj(pid) = p {
+                    if let Some(o) = self.heap.obj_mut(pid) {
+                        o.proto = event_proto;
+                    }
+                }
+                self.set_own(fid, "prototype", p, false);
+            }
+            self.set_own(g, name, f, false);
+        }
+        // `new Option(text?, value?, defaultSelected?, selected?)`
+        // — constructeur historique des `<option>` (form libs :
+        // `new Option('x', v)` alias `createElement`).
+        let opt_f = self.native_fn("Option", option_ctor);
+        if let Value::Obj(fid) = opt_f {
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "Option", opt_f, false);
+        // `DOMPoint`/`DOMMatrix` — math 2D réelle bornée
+        // (transforms lues par les scripts canvas/layout :
+        // `multiply`/`invert`/`transformPoint`/`matrix(...)`).
+        for (name, f2) in [
+            ("DOMPoint", dompoint_ctor as crate::heap::NativeFn),
+            ("DOMMatrix", dommatrix_ctor),
+        ] {
+            let f = self.native_fn(name, f2);
+            if let Value::Obj(fid) = f {
+                let p = self.new_object();
+                self.set_own(fid, "prototype", Value::Obj(p), false);
+            }
+            self.set_own(g, name, f, false);
+        }
+        // `ImageData` — `{width, height, data:Uint8ClampedArray}`
+        // spec (ctor 2 signatures : `(w,h)` / `(u8c,w,h?)`).
+        let id_f = self.native_fn("ImageData", imagedata_ctor);
+        if let Value::Obj(fid) = id_f {
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "ImageData", id_f, false);
+        // `Path2D` — enregistreur d'ops borné (les ctx `fill`/
+        // `stroke` le consommeront quand le raster vivra —
+        // aujourd'hui : stockage + détection).
+        let p2d_f = self.native_fn("Path2D", path2d_ctor);
+        if let Value::Obj(fid) = p2d_f {
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "Path2D", p2d_f, false);
+        // `OffscreenCanvas` — `<canvas>` détaché du miroir :
+        // `getContext('2d')` enregistre via `Ctx2dHost` (même
+        // mécanique que l'élément, JS-C28).
+        let oc_f = self.native_fn("OffscreenCanvas", offscreen_canvas_ctor);
+        if let Value::Obj(fid) = oc_f {
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "OffscreenCanvas", oc_f, false);
+        // `FontFace` — `{family, status:'unloaded', load() →
+        // Promise résolue self}` (le chargement de fontes réel
+        // est un chantier session — le feature-detect des
+        // loaders webfont passe).
+        let ff_f = self.native_fn("FontFace", fontface_ctor);
+        if let Value::Obj(fid) = ff_f {
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "FontFace", ff_f, false);
+        // `createImageBitmap` → promesse résolue
+        // `{width,height,close()}` (ImageBitmap-like).
+        self.add_method(g, "createImageBitmap", create_image_bitmap);
+        // `stop`/`print` no-ops honnêtes ; `find` → `false`
+        // spec (jamais de sélection — CAP-178).
+        self.add_method(g, "stop", win_noop);
+        self.add_method(g, "print", win_noop);
+        self.add_method(g, "find", win_find);
+        // `show*FilePicker`/`showDirectoryPicker` — geste
+        // utilisateur jamais présent ici → rejet `SecurityError`
+        // (même réponse que Chrome hors geste).
+        self.add_method(g, "showOpenFilePicker", picker_reject);
+        self.add_method(g, "showSaveFilePicker", picker_reject);
+        self.add_method(g, "showDirectoryPicker", picker_reject);
+        // Props window — legacy (`status`/`opener`/`external`)
+        // et état de contexte lu par les guards modernes.
+        let empty = self.str_val("");
+        self.set_own(g, "status", empty, true);
+        self.set_own(g, "opener", Value::Null, true);
+        self.set_own(g, "frameElement", Value::Null, true);
+        let ext = self.new_object();
+        self.set_own(g, "external", Value::Obj(ext), true);
+        self.set_own(g, "isSecureContext", Value::Bool(true), false);
+        self.set_own(g, "crossOriginIsolated", Value::Bool(false), false);
+        // `origin` ≙ `location.origin` — lu à l'install (la nav
+        // met `location` à jour côté hooks ; l'embedder peut
+        // écraser la prop ensuite).
+        let origin = self
+            .get_prop(g, "location")
+            .and_then(|l| match l {
+                Value::Obj(id) => self.get_prop(id, "origin"),
+                _ => None,
+            })
+            .unwrap_or(Value::Null);
+        self.set_own(g, "origin", origin, false);
+        // `visualViewport` — métrique figée à l'install
+        // (mobile-focused libs la lisent).
+        let (vw, vh) = self.hooks.viewport;
+        let vv = self.new_object();
+        for (k, v) in [
+            ("width", f64::from(vw)),
+            ("height", f64::from(vh)),
+            ("scale", 1.0),
+            ("offsetLeft", 0.0),
+            ("offsetTop", 0.0),
+            ("pageLeft", 0.0),
+            ("pageTop", 0.0),
+        ] {
+            self.set_own(vv, k, Value::Num(v), true);
+        }
+        self.set_own(vv, "onresize", Value::Null, true);
+        self.set_own(vv, "onscroll", Value::Null, true);
+        self.set_own(g, "visualViewport", Value::Obj(vv), false);
+        // `scheduler` — `scheduler.yield()` → promesse résolue
+        // (file microtâche existante ; `postTask` absent).
+        let sch = self.new_object();
+        let y = self.native_fn("yield", scheduler_yield);
+        self.set_own(sch, "yield", y, true);
+        self.set_own(g, "scheduler", Value::Obj(sch), false);
+        // `cookieStore` — jar vide honnête (get→null,
+        // getAll→[], set/delete→resolve) : les guards
+        // `cookieStore && …` des loaders passent.
+        let cs = self.new_object();
+        for (k, f2) in [
+            ("get", cookie_get as crate::heap::NativeFn),
+            ("getAll", cookie_get_all),
+            ("set", cookie_void),
+            ("delete", cookie_void),
+        ] {
+            let m = self.native_fn(k, f2);
+            self.set_own(cs, k, m, true);
+        }
+        self.set_own(g, "cookieStore", Value::Obj(cs), false);
+        // `WebAssembly` — namespace honnête : les binaires wasm
+        // sont hors périmètre moteur ; `validate` → `false` (un
+        // octet inconnu est « invalide ») et les compiles
+        // rejettent — les bundles gardent leur repli JS.
+        let wasm = self.new_object();
+        self.add_method(wasm, "validate", wasm_false);
+        self.add_method(wasm, "compile", wasm_reject);
+        self.add_method(wasm, "instantiate", wasm_reject);
+        self.add_method(wasm, "compileStreaming", wasm_reject);
+        self.add_method(wasm, "instantiateStreaming", wasm_reject);
+        for n in [
+            "Module",
+            "Instance",
+            "Memory",
+            "Table",
+            "Global",
+            "CompileError",
+            "LinkError",
+            "RuntimeError",
+            "Tag",
+            "Exception",
+        ] {
+            let f = self.native_fn(n, illegal_ctor);
+            if let Value::Obj(fid) = f {
+                let p = self.new_object();
+                self.set_own(fid, "prototype", Value::Obj(p), false);
+            }
+            self.set_own(wasm, n, f, false);
+        }
+        self.set_own(g, "WebAssembly", Value::Obj(wasm), false);
+        // `trustedTypes` — politique « passthrough » honnête
+        // (pas d'application TT moteur ; les bundles qui
+        // enregistrent une `default` policy obtiennent l'API).
+        let tt = self.new_object();
+        self.add_method(tt, "createPolicy", tt_create_policy);
+        self.set_own(g, "trustedTypes", Value::Obj(tt), false);
+        // `speechSynthesis` — global `window` spec (jar vide :
+        // `getVoices()` → `[]`, speak/cancel no-op — aucune
+        // voix embarquée).
+        let sp = self.new_object();
+        self.add_method(sp, "getVoices", speech_voices);
+        self.add_method(sp, "speak", win_noop);
+        self.add_method(sp, "cancel", win_noop);
+        self.add_method(sp, "pause", win_noop);
+        self.add_method(sp, "resume", win_noop);
+        for (k, v) in [("paused", false), ("pending", false), ("speaking", false)] {
+            self.set_own(sp, k, Value::Bool(v), true);
+        }
+        self.set_own(g, "speechSynthesis", Value::Obj(sp), false);
+        // navigator : `mediaDevices` (rejets `NotFoundError` —
+        // aucun périphérique capturable), `userActivation`,
+        // `speechSynthesis` (jar vide), `permissions` (query →
+        // `{state:'denied'}` — rien n'est accordé).
+        if let Some(Value::Obj(nid)) = self.get_prop(g, "navigator") {
+            let md = self.new_object();
+            self.add_method(md, "getUserMedia", md_reject);
+            self.add_method(md, "getDisplayMedia", md_reject);
+            self.add_method(md, "enumerateDevices", md_empty_list);
+            self.set_own(nid, "mediaDevices", Value::Obj(md), true);
+            let ua = self.new_object();
+            self.set_own(ua, "hasBeenActive", Value::Bool(false), true);
+            self.set_own(ua, "isActive", Value::Bool(false), true);
+            self.set_own(nid, "userActivation", Value::Obj(ua), true);
+            let perm = self.new_object();
+            self.add_method(perm, "query", perm_query);
+            self.set_own(nid, "permissions", Value::Obj(perm), true);
+        }
+
         // `autofocus` (CAP-162 — spec « autofocus processing »,
         // borné) : le premier élément `[autofocus]` focalisable
         // reçoit le focus à l'install — `document.activeElement`
@@ -3226,6 +3547,19 @@ impl Host for DocumentHost {
                 Value::Undefined,
                 args,
             )?)),
+            // Storage Access API (JS-C98) — premier parti :
+            // `hasStorageAccess` → `true`, `requestStorageAccess`
+            // → résolu (aucune restriction tiers ici).
+            "hasStorageAccess" => {
+                let id = e.new_promise();
+                e.resolve_promise(id, Value::Bool(true));
+                Ok(Some(Value::Obj(id)))
+            }
+            "requestStorageAccess" => {
+                let id = e.new_promise();
+                e.resolve_promise(id, Value::Undefined);
+                Ok(Some(Value::Obj(id)))
+            }
             "adoptNode" => {
                 let Some(src) = node_for(e, arg(args, 0)) else {
                     return Err(e.type_error("adoptNode: nœud requis"));
@@ -3529,6 +3863,8 @@ const DOC_METHODS: &[&str] = &[
     "getAnimations",
     "startViewTransition",
     "evaluate",
+    "hasStorageAccess",
+    "requestStorageAccess",
     "elementFromPoint",
     "elementsFromPoint",
     "caretPositionFromPoint",
@@ -9868,4 +10204,771 @@ fn fd_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let items: Vec<Value> = pairs.into_iter().map(|(_, v)| v).collect();
     let proto = e.protos.usp_iter;
     Ok(crate::collections::iter_obj(e, items, proto))
+}
+
+// ------------------------------------------------------------------
+// JS-C98 — complétude de surface (census) — helpers
+// ------------------------------------------------------------------
+
+/// `new Option(text?, value?, defaultSelected?, selected?)` —
+/// `<option>` historique : `createElement` + `text`/`value`/
+/// `selected` (spec `Option()` — form libs, jQuery).
+fn option_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((dom, cache)) = e.dom_ctx.clone() else {
+        return Err(e.type_error("Option: no document"));
+    };
+    let n = dom.borrow_mut().create_element("option");
+    if let Some(v) = args.first().filter(|v| !matches!(v, Value::Undefined)) {
+        let s = e.to_js_string(*v)?;
+        dom.borrow_mut().set_attr(n, "label", &s);
+        dom.borrow_mut().set_text(n, &s);
+    }
+    if let Some(v) = args.get(1).filter(|v| !matches!(v, Value::Undefined)) {
+        let s = e.to_js_string(*v)?;
+        dom.borrow_mut().set_attr(n, "value", &s);
+    }
+    // `defaultSelected`/`selected` posent tous deux l'attribut
+    // `selected` (la distinction IDL/attr est hors miroir).
+    for v in args.iter().skip(2).take(2) {
+        if e.to_boolean(*v) {
+            dom.borrow_mut().set_attr(n, "selected", "");
+            break;
+        }
+    }
+    Ok(node_value(e, &dom, &cache, n))
+}
+
+/// `new DOMPoint(x?, y?, z?, w?)` — `{x,y,z,w}` +
+/// `matrixTransform(m)` (spec — borné affine 2D, w préservé).
+fn dompoint_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let mut nums = [0.0f64; 4];
+    for (i, slot) in nums.iter_mut().enumerate() {
+        if let Some(v) = args.get(i).filter(|v| !matches!(v, Value::Undefined)) {
+            *slot = e.to_number(*v)?;
+        }
+    }
+    let o = e.new_object();
+    for (k, v) in [
+        ("x", nums[0]),
+        ("y", nums[1]),
+        ("z", nums[2]),
+        (
+            "w",
+            if nums[3] == 0.0 && args.len() < 4 {
+                1.0
+            } else {
+                nums[3]
+            },
+        ),
+    ] {
+        e.set_own(o, k, Value::Num(v), true);
+    }
+    let mt = e.native_fn("matrixTransform", dompoint_transform);
+    e.set_own(o, "matrixTransform", mt, true);
+    Ok(Value::Obj(o))
+}
+
+/// `point.matrixTransform(m)` — `(a*x + c*y + e, b*x + d*y +
+/// f)` ; champs `a`..`f` lus sur l'objet (`DOMMatrix` ou
+/// littéral `{a,b,c,d,e,f}` — identité par défaut).
+fn dompoint_transform(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(pid) = this else {
+        return Err(e.type_error("matrixTransform: this requis"));
+    };
+    let m = matrix_of(e, arg(args, 0));
+    let xv = e.get_prop(pid, "x").unwrap_or(Value::Num(0.0));
+    let yv = e.get_prop(pid, "y").unwrap_or(Value::Num(0.0));
+    let zv = e.get_prop(pid, "z").unwrap_or(Value::Num(0.0));
+    let wv = e.get_prop(pid, "w").unwrap_or(Value::Num(1.0));
+    let (x, y, z, w) = (
+        e.to_number(xv)?,
+        e.to_number(yv)?,
+        e.to_number(zv)?,
+        e.to_number(wv)?,
+    );
+    let o = e.new_object();
+    for (k, v) in [
+        ("x", m[0] * x + m[2] * y + m[4]),
+        ("y", m[1] * x + m[3] * y + m[5]),
+        ("z", z),
+        ("w", w),
+    ] {
+        e.set_own(o, k, Value::Num(v), true);
+    }
+    let mt = e.native_fn("matrixTransform", dompoint_transform);
+    e.set_own(o, "matrixTransform", mt, true);
+    Ok(Value::Obj(o))
+}
+
+/// Lit les 6 composantes affines `a`..`f` d'un objet —
+/// identité si absent/non-objet.
+fn matrix_of(e: &mut Engine, v: Value) -> [f64; 6] {
+    let Value::Obj(id) = v else {
+        return [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    };
+    let mut m = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    for (i, k) in ["a", "b", "c", "d", "e", "f"].iter().enumerate() {
+        if let Some(Value::Num(n)) = e.get_prop(id, k) {
+            m[i] = n;
+        }
+    }
+    m
+}
+
+/// `matrix(a,b,c,d,e,f)` / `matrix3d(m1,…,m16)` / `none` →
+/// `[a,b,c,d,e,f]` (identité si non reconnu).
+fn matrix_parse_str(s: &str) -> [f64; 6] {
+    let t = s.trim();
+    if t.eq_ignore_ascii_case("none") {
+        return [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    }
+    let Some(inner) = t
+        .strip_prefix("matrix3d(")
+        .or_else(|| t.strip_prefix("matrix("))
+        .and_then(|r| r.strip_suffix(')'))
+    else {
+        return [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    };
+    let v: Vec<f64> = inner
+        .split(',')
+        .filter_map(|p| p.trim().parse::<f64>().ok())
+        .collect();
+    if v.len() >= 16 {
+        [v[0], v[1], v[4], v[5], v[12], v[13]]
+    } else if v.len() >= 6 {
+        [v[0], v[1], v[2], v[3], v[4], v[5]]
+    } else {
+        [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+    }
+}
+
+/// `m1 * m2` (composition affine — `multiply` spec).
+fn matrix_mul(m1: [f64; 6], m2: [f64; 6]) -> [f64; 6] {
+    [
+        m1[0] * m2[0] + m1[2] * m2[1],
+        m1[1] * m2[0] + m1[3] * m2[1],
+        m1[0] * m2[2] + m1[2] * m2[3],
+        m1[1] * m2[2] + m1[3] * m2[3],
+        m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
+        m1[1] * m2[4] + m1[3] * m2[5] + m1[5],
+    ]
+}
+
+/// `true` si `m` est l'identité (comparaison exacte — la
+/// matrice n'est construite identité que par `new DOMMatrix()`
+/// ou une composition d'identités).
+fn matrix_is_ident(m: [f64; 6]) -> bool {
+    m.iter()
+        .zip([1.0f64, 0.0, 0.0, 1.0, 0.0, 0.0].iter())
+        .all(|(a, b)| a.to_bits() == b.to_bits())
+}
+
+/// Inverse affine — `None` si non inversible.
+fn matrix_inv(m: [f64; 6]) -> Option<[f64; 6]> {
+    let det = m[0] * m[3] - m[1] * m[2];
+    if det.abs() < 1e-20 {
+        return None;
+    }
+    Some([
+        m[3] / det,
+        -m[1] / det,
+        -m[2] / det,
+        m[0] / det,
+        (m[2] * m[5] - m[3] * m[4]) / det,
+        (m[1] * m[4] - m[0] * m[5]) / det,
+    ])
+}
+
+/// Construit l'objet `DOMMatrix` JS à partir de `[a..f]` —
+/// champs 2D (`a`..`f`, `is2D`, `isIdentity`) + alias 3D
+/// (`m11`/`m12`/`m21`/`m22`/`m41`/`m42`, diagonale unité) +
+/// méthodes `translate`/`scale`/`rotate`/`multiply` (copie),
+/// `*Self` (mutation), `inverse`, `transformPoint`,
+/// `toString`.
+fn matrix_obj(e: &mut Engine, m: [f64; 6]) -> Value {
+    let o = e.new_object();
+    for (k, v) in [
+        ("a", m[0]),
+        ("b", m[1]),
+        ("c", m[2]),
+        ("d", m[3]),
+        ("e", m[4]),
+        ("f", m[5]),
+        ("m11", m[0]),
+        ("m12", m[1]),
+        ("m21", m[2]),
+        ("m22", m[3]),
+        ("m41", m[4]),
+        ("m42", m[5]),
+        ("m13", 0.0),
+        ("m14", 0.0),
+        ("m23", 0.0),
+        ("m24", 0.0),
+        ("m31", 0.0),
+        ("m32", 0.0),
+        ("m33", 1.0),
+        ("m34", 0.0),
+        ("m43", 0.0),
+        ("m44", 1.0),
+    ] {
+        e.set_own(o, k, Value::Num(v), true);
+    }
+    let ident = matrix_is_ident(m);
+    e.set_own(o, "is2D", Value::Bool(true), true);
+    e.set_own(o, "isIdentity", Value::Bool(ident), true);
+    for (k, f) in [
+        ("translate", dommatrix_translate as crate::heap::NativeFn),
+        ("scale", dommatrix_scale),
+        ("rotate", dommatrix_rotate),
+        ("multiply", dommatrix_multiply),
+        ("multiplySelf", dommatrix_multiply_self),
+        ("translateSelf", dommatrix_translate_self),
+        ("scaleSelf", dommatrix_scale_self),
+        ("rotateSelf", dommatrix_rotate_self),
+        ("invertSelf", dommatrix_invert_self),
+        ("inverse", dommatrix_inverse),
+        ("transformPoint", dommatrix_transform_point),
+        ("toString", dommatrix_to_string),
+        ("toJSON", dommatrix_to_json),
+    ] {
+        let mf = e.native_fn(k, f);
+        e.set_own(o, k, mf, true);
+    }
+    Value::Obj(o)
+}
+
+/// `new DOMMatrix(init?)` — `matrix(...)`/`matrix3d(...)`/`none`
+/// string, copie d'un objet `{a..f}`, ou identité.
+fn dommatrix_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let m = match args.first() {
+        Some(Value::Str(s)) => matrix_parse_str(&e.heap.string(*s).unwrap_or_default()),
+        Some(v @ Value::Obj(_)) => matrix_of(e, *v),
+        _ => [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+    };
+    Ok(matrix_obj(e, m))
+}
+
+fn dommatrix_translate(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let m = matrix_of(e, this);
+    let (x, y) = (e.to_number(arg(args, 0))?, e.to_number(arg(args, 1))?);
+    Ok(matrix_obj(e, matrix_mul(m, [1.0, 0.0, 0.0, 1.0, x, y])))
+}
+
+fn dommatrix_scale(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let m = matrix_of(e, this);
+    let sx = e.to_number(arg(args, 0))?;
+    let sy = match args.get(1) {
+        Some(v) if !matches!(v, Value::Undefined) => e.to_number(*v)?,
+        _ => sx,
+    };
+    Ok(matrix_obj(e, matrix_mul(m, [sx, 0.0, 0.0, sy, 0.0, 0.0])))
+}
+
+fn dommatrix_rotate(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let m = matrix_of(e, this);
+    let rad = e.to_number(arg(args, 0))?.to_radians();
+    let (c, s) = (rad.cos(), rad.sin());
+    Ok(matrix_obj(e, matrix_mul(m, [c, s, -s, c, 0.0, 0.0])))
+}
+
+fn dommatrix_multiply(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let m = matrix_mul(matrix_of(e, this), matrix_of(e, arg(args, 0)));
+    Ok(matrix_obj(e, m))
+}
+
+fn dommatrix_inverse(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let m = matrix_of(e, this);
+    Ok(matrix_obj(e, matrix_inv(m).unwrap_or(m)))
+}
+
+/// Mutation `this` — les `*Self` réécrivent `a`..`f` + alias
+/// `m11`/`m12`/`m21`/`m22`/`m41`/`m42` et `isIdentity`.
+fn matrix_write_self(e: &mut Engine, this: Value, m: [f64; 6]) {
+    let Value::Obj(id) = this else {
+        return;
+    };
+    for (i, k) in ["a", "b", "c", "d", "e", "f"].iter().enumerate() {
+        e.set_own(id, k, Value::Num(m[i]), true);
+    }
+    for (k, v) in [
+        ("m11", m[0]),
+        ("m12", m[1]),
+        ("m21", m[2]),
+        ("m22", m[3]),
+        ("m41", m[4]),
+        ("m42", m[5]),
+    ] {
+        e.set_own(id, k, Value::Num(v), true);
+    }
+    let ident = matrix_is_ident(m);
+    e.set_own(id, "isIdentity", Value::Bool(ident), true);
+}
+
+fn dommatrix_multiply_self(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let m = matrix_mul(matrix_of(e, this), matrix_of(e, arg(args, 0)));
+    matrix_write_self(e, this, m);
+    Ok(this)
+}
+
+fn dommatrix_translate_self(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (x, y) = (e.to_number(arg(args, 0))?, e.to_number(arg(args, 1))?);
+    let m = matrix_mul(matrix_of(e, this), [1.0, 0.0, 0.0, 1.0, x, y]);
+    matrix_write_self(e, this, m);
+    Ok(this)
+}
+
+fn dommatrix_scale_self(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let sx = e.to_number(arg(args, 0))?;
+    let sy = match args.get(1) {
+        Some(v) if !matches!(v, Value::Undefined) => e.to_number(*v)?,
+        _ => sx,
+    };
+    let m = matrix_mul(matrix_of(e, this), [sx, 0.0, 0.0, sy, 0.0, 0.0]);
+    matrix_write_self(e, this, m);
+    Ok(this)
+}
+
+fn dommatrix_rotate_self(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let rad = e.to_number(arg(args, 0))?.to_radians();
+    let (c, s) = (rad.cos(), rad.sin());
+    let m = matrix_mul(matrix_of(e, this), [c, s, -s, c, 0.0, 0.0]);
+    matrix_write_self(e, this, m);
+    Ok(this)
+}
+
+fn dommatrix_invert_self(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let m = matrix_of(e, this);
+    matrix_write_self(e, this, matrix_inv(m).unwrap_or(m));
+    Ok(this)
+}
+
+/// Point `{x,y,z,w,matrixTransform}` — partagé `DOMPoint`/
+/// `transformPoint`.
+fn dompoint_obj(e: &mut Engine, x: f64, y: f64, z: f64, w: f64) -> Value {
+    let o = e.new_object();
+    for (k, v) in [("x", x), ("y", y), ("z", z), ("w", w)] {
+        e.set_own(o, k, Value::Num(v), true);
+    }
+    let mt = e.native_fn("matrixTransform", dompoint_transform);
+    e.set_own(o, "matrixTransform", mt, true);
+    Value::Obj(o)
+}
+
+/// `m.transformPoint(p)` — point `{x,y,z,w}` transformé par la
+/// matrice `this` (affine 2D : `z`/`w` préservés).
+fn dommatrix_transform_point(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let m = matrix_of(e, this);
+    let (x, y, z, w) = match arg(args, 0) {
+        Value::Obj(pid) => {
+            let xv = e.get_prop(pid, "x").unwrap_or(Value::Num(0.0));
+            let yv = e.get_prop(pid, "y").unwrap_or(Value::Num(0.0));
+            let zv = e.get_prop(pid, "z").unwrap_or(Value::Num(0.0));
+            let wv = e.get_prop(pid, "w").unwrap_or(Value::Num(1.0));
+            (
+                e.to_number(xv)?,
+                e.to_number(yv)?,
+                e.to_number(zv)?,
+                e.to_number(wv)?,
+            )
+        }
+        _ => (0.0, 0.0, 0.0, 1.0),
+    };
+    Ok(dompoint_obj(
+        e,
+        m[0] * x + m[2] * y + m[4],
+        m[1] * x + m[3] * y + m[5],
+        z,
+        w,
+    ))
+}
+
+fn dommatrix_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let m = matrix_of(e, this);
+    Ok(e.str_val(format!(
+        "matrix({}, {}, {}, {}, {}, {})",
+        m[0], m[1], m[2], m[3], m[4], m[5]
+    )))
+}
+
+fn dommatrix_to_json(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Ok(Value::Null);
+    };
+    let o = e.new_object();
+    for k in [
+        "a",
+        "b",
+        "c",
+        "d",
+        "e",
+        "f",
+        "m11",
+        "m12",
+        "m13",
+        "m14",
+        "m21",
+        "m22",
+        "m23",
+        "m24",
+        "m31",
+        "m32",
+        "m33",
+        "m34",
+        "m41",
+        "m42",
+        "m43",
+        "m44",
+        "is2D",
+        "isIdentity",
+    ] {
+        if let Some(v) = e.get_prop(id, k) {
+            e.set_own(o, k, v, true);
+        }
+    }
+    Ok(Value::Obj(o))
+}
+
+/// `new ImageData(w,h)` / `new ImageData(u8c, w, h?)` —
+/// `{width,height,data:Uint8ClampedArray}` (spec — `data` de
+/// longueur `w*h*4` ou erreur).
+fn imagedata_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (w, h, data) = match args.first() {
+        Some(&v @ Value::Obj(_)) if crate::typed_array::bytes_of_value(e, v).is_some() => {
+            let w = e.to_number(arg(args, 1))? as usize;
+            let h = match args.get(2) {
+                Some(v) if !matches!(v, Value::Undefined) => e.to_number(*v)? as usize,
+                _ => {
+                    let len = crate::typed_array::bytes_of_value(e, v).map_or(0, |b| b.len());
+                    if w == 0 || len % (w * 4) != 0 {
+                        return Err(e.type_error("ImageData: data size mismatch"));
+                    }
+                    len / (w * 4)
+                }
+            };
+            (w, h, v)
+        }
+        _ => {
+            let (w, h) = (
+                e.to_number(arg(args, 0))? as usize,
+                e.to_number(arg(args, 1))? as usize,
+            );
+            let buf = crate::typed_array::new_array_buffer(
+                e,
+                vec![0; w.saturating_mul(h).saturating_mul(4)],
+            );
+            let Value::Obj(bid) = buf else {
+                return Err(e.type_error("ImageData: buffer"));
+            };
+            (
+                w,
+                h,
+                crate::typed_array::new_ta(e, crate::heap::TaKind::U8C, bid, 0, w * h * 4),
+            )
+        }
+    };
+    if w == 0 && h == 0 {
+        return Err(e.type_error("ImageData: width/height requis"));
+    }
+    let o = e.new_object();
+    e.set_own(o, "width", Value::Num(w as f64), true);
+    e.set_own(o, "height", Value::Num(h as f64), true);
+    e.set_own(o, "data", data, true);
+    Ok(Value::Obj(o))
+}
+
+/// `Path2D` — enregistreur d'ops borné : méthodes spec
+/// (`moveTo`/`lineTo`/`arc`/`rect`/`closePath`…) accumulées
+/// dans une file interne (stockage seul — le raster la
+/// consommera quand les ctx canvas peindront).
+struct Path2dHost {
+    ops: std::cell::RefCell<Vec<String>>,
+}
+
+impl Path2dHost {
+    const METHODS: &[&str] = &[
+        "addPath",
+        "moveTo",
+        "lineTo",
+        "arc",
+        "arcTo",
+        "ellipse",
+        "rect",
+        "roundRect",
+        "quadraticCurveTo",
+        "bezierCurveTo",
+        "closePath",
+    ];
+}
+
+impl crate::heap::Host for Path2dHost {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _this: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        if !Self::METHODS.contains(&name) {
+            return Ok(None);
+        }
+        let mut s = String::from(name);
+        s.push('(');
+        for (i, a) in args.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            if let Ok(n) = e.to_number(*a) {
+                s.push_str(&n.to_string());
+            }
+        }
+        s.push(')');
+        self.ops.borrow_mut().push(s);
+        Ok(Some(Value::Undefined))
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        Self::METHODS.contains(&name)
+    }
+
+    fn class_name(&self) -> &'static str {
+        "Path2D"
+    }
+}
+
+/// `new Path2D(path?)` — enregistreur (l'argument `path`/
+/// string SVG `d` est acceptée et stockée telle quelle).
+fn path2d_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ops = std::cell::RefCell::new(Vec::new());
+    if let Some(Value::Str(s)) = args.first() {
+        let d = e.heap.string(*s).unwrap_or_default();
+        ops.borrow_mut().push(format!("d({d})"));
+    }
+    Ok(e.new_host_object(Rc::new(Path2dHost { ops })))
+}
+
+/// `new OffscreenCanvas(w, h)` — `<canvas>` détaché du miroir
+/// dont `getContext('2d')` enregistre (`Ctx2dHost`, JS-C28) ;
+/// `transferToImageBitmap` rend `{width,height,close()}`.
+fn offscreen_canvas_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((dom, cache)) = e.dom_ctx.clone() else {
+        return Err(e.type_error("OffscreenCanvas: no document"));
+    };
+    let (w, h) = (e.to_number(arg(args, 0))?, e.to_number(arg(args, 1))?);
+    let n = dom.borrow_mut().create_element("canvas");
+    {
+        let mut d = dom.borrow_mut();
+        d.set_attr(n, "width", &w.to_string());
+        d.set_attr(n, "height", &h.to_string());
+    }
+    let ctx = e.new_host_object(Rc::new(Ctx2dHost {
+        dom: dom.clone(),
+        cache: cache.clone(),
+        node: n,
+    }));
+    dom.borrow_mut().set_canvas_ctx(n, ctx);
+    let o = e.new_object();
+    e.set_own(o, "width", Value::Num(w), true);
+    e.set_own(o, "height", Value::Num(h), true);
+    let g = e.bound_native("getContext", offcanvas_getctx, vec![ctx]);
+    e.set_own(o, "getContext", g, true);
+    let tb = e.native_fn("transferToImageBitmap", offcanvas_bitmap);
+    e.set_own(o, "transferToImageBitmap", tb, true);
+    Ok(Value::Obj(o))
+}
+
+/// `offscreen.getContext('2d')` — le `Ctx2dHost` lié (bound
+/// `[ctx]`), `null` pour les autres modes.
+fn offcanvas_getctx(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let ctx = arg(args, 0);
+    let kind = e.to_js_string(arg(args, 1))?;
+    Ok(if kind == "2d" { ctx } else { Value::Null })
+}
+
+/// `offscreen.transferToImageBitmap()` — `{width,height,close}`
+/// (image enregistrée — le raster est hors périmètre).
+fn offcanvas_bitmap(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("transferToImageBitmap: this requis"));
+    };
+    let (w, h) = (
+        e.get_prop(id, "width").unwrap_or(Value::Num(0.0)),
+        e.get_prop(id, "height").unwrap_or(Value::Num(0.0)),
+    );
+    let o = e.new_object();
+    e.set_own(o, "width", w, true);
+    e.set_own(o, "height", h, true);
+    let c = e.native_fn("close", win_noop);
+    e.set_own(o, "close", c, true);
+    Ok(Value::Obj(o))
+}
+
+/// `new FontFace(family, source?, descriptors?)` —
+/// `{family, status:'unloaded', load() → Promise(self)}`
+/// (le fetch de fontes réel est un chantier session).
+fn fontface_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let o = e.new_object();
+    let family = e.to_js_string(arg(args, 0))?;
+    let famv = e.str_val(family);
+    e.set_own(o, "family", famv, true);
+    let st = e.str_val("unloaded");
+    e.set_own(o, "status", st, true);
+    let l = e.native_fn("load", fontface_load);
+    e.set_own(o, "load", l, true);
+    Ok(Value::Obj(o))
+}
+
+/// `fontface.load()` — promesse résolue `this` (aucune fonte
+/// distante n'est chargée — la promesse existe pour les
+/// loaders qui enchaînent `document.fonts.add(f)`).
+fn fontface_load(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = e.new_promise();
+    e.resolve_promise(id, this);
+    Ok(Value::Obj(id))
+}
+
+/// `createImageBitmap(image, sx?, sy?, sw?, sh?)` — promesse
+/// résolue `{width,height,close()}` (l'image réelle n'est
+/// pas décodée ici — forme spec honnête).
+fn create_image_bitmap(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let w = e.to_number(arg(args, 3)).unwrap_or(0.0);
+    let h = e.to_number(arg(args, 4)).unwrap_or(0.0);
+    let o = e.new_object();
+    e.set_own(o, "width", Value::Num(w), true);
+    e.set_own(o, "height", Value::Num(h), true);
+    let c = e.native_fn("close", win_noop);
+    e.set_own(o, "close", c, true);
+    let id = e.new_promise();
+    e.resolve_promise(id, Value::Obj(o));
+    Ok(Value::Obj(id))
+}
+/// `window.find(str)` → `false` honnête (jamais de
+/// sélection de texte ici — CAP-178).
+fn win_find(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(false))
+}
+
+/// No-op window (`stop`/`print`/`close` d'`ImageBitmap`…).
+fn win_noop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Undefined)
+}
+
+/// `show*FilePicker` — `SecurityError` rejeté : le geste
+/// utilisateur n'existe jamais ici (même réponse que Chrome
+/// hors geste — feature-detect ok, appel honnête).
+fn picker_reject(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = e.new_promise();
+    let msg = e.str_val("SecurityError: user gesture required");
+    e.reject_promise(id, msg);
+    Ok(Value::Obj(id))
+}
+
+/// `mediaDevices.getUserMedia`/`getDisplayMedia` — rejet
+/// `NotFoundError` (aucun périphérique — spec quand rien
+/// n'est capturable).
+fn md_reject(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = e.new_promise();
+    let msg = e.str_val("NotFoundError: no capture device");
+    e.reject_promise(id, msg);
+    Ok(Value::Obj(id))
+}
+
+/// `mediaDevices.enumerateDevices()` → `[]` résolu.
+fn md_empty_list(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = e.new_promise();
+    let empty = e.new_array(Vec::new());
+    e.resolve_promise(id, empty);
+    Ok(Value::Obj(id))
+}
+
+/// `speechSynthesis.getVoices()` → `[]` (aucune voix embarquée).
+fn speech_voices(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(e.new_array(Vec::new()))
+}
+
+/// `permissions.query({name})` → `{state:'denied'}` résolu
+/// (rien n'est accordé — les sites basculent sur le repli).
+fn perm_query(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let o = e.new_object();
+    let st = e.str_val("denied");
+    e.set_own(o, "state", st, true);
+    e.set_own(o, "onchange", Value::Null, true);
+    let id = e.new_promise();
+    e.resolve_promise(id, Value::Obj(o));
+    Ok(Value::Obj(id))
+}
+
+/// `scheduler.yield()` — promesse résolue (file microtâche).
+fn scheduler_yield(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = e.new_promise();
+    e.resolve_promise(id, Value::Undefined);
+    Ok(Value::Obj(id))
+}
+
+/// `cookieStore.get(name)` → `null` résolu (jar vide).
+fn cookie_get(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = e.new_promise();
+    e.resolve_promise(id, Value::Null);
+    Ok(Value::Obj(id))
+}
+
+/// `cookieStore.getAll()` → `[]` résolu.
+fn cookie_get_all(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = e.new_promise();
+    let empty = e.new_array(Vec::new());
+    e.resolve_promise(id, empty);
+    Ok(Value::Obj(id))
+}
+
+/// `cookieStore.set/delete` → `undefined` résolu (no-op jar).
+fn cookie_void(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = e.new_promise();
+    e.resolve_promise(id, Value::Undefined);
+    Ok(Value::Obj(id))
+}
+
+/// `WebAssembly.validate(bytes)` → `false` honnête (un octet
+/// inconnu est invalide pour ce moteur).
+fn wasm_false(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(false))
+}
+
+/// `WebAssembly.compile*`/`instantiate*` — rejet
+/// `CompileError` (wasm hors périmètre moteur — le repli JS
+/// des bundles s'applique).
+fn wasm_reject(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let id = e.new_promise();
+    let msg = e.str_val("CompileError: WebAssembly unsupported");
+    e.reject_promise(id, msg);
+    Ok(Value::Obj(id))
+}
+
+/// `trustedTypes.createPolicy(name, rules)` — politique
+/// passthrough : `createHTML`/`createScript`/`createScriptURL`
+/// rendent la valeur telle quelle (pas d'application TT
+/// moteur — les bundles enregistrent leur `default` policy).
+fn tt_create_policy(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let o = e.new_object();
+    let name = e.to_js_string(arg(args, 0))?;
+    let namev = e.str_val(name);
+    e.set_own(o, "name", namev, true);
+    for k in [
+        "createHTML",
+        "createScript",
+        "createScriptURL",
+        "createHTMLBinding",
+    ] {
+        let f = e.native_fn(k, tt_passthrough);
+        e.set_own(o, k, f, true);
+    }
+    Ok(Value::Obj(o))
+}
+
+/// `policy.createX(v)` — passthrough string.
+fn tt_passthrough(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_js_string(arg(args, 0))?;
+    Ok(e.str_val(s))
 }
