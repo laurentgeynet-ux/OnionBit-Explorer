@@ -71,6 +71,8 @@ pub(crate) struct MiscState {
     anims: Vec<Rc<RefCell<AnimData>>>,
     /// `ViewTransition.prototype` paresseux (CAP-187).
     vt_proto: Option<ObjId>,
+    /// `XPathResult.prototype` paresseux (CAP-188).
+    xr_proto: Option<ObjId>,
 }
 
 impl MiscState {
@@ -87,6 +89,7 @@ impl MiscState {
             self.ni_proto,
             self.anim_proto,
             self.vt_proto,
+            self.xr_proto,
         ]
         .into_iter()
         .flatten()
@@ -1993,9 +1996,7 @@ fn anim_wrapper(e: &mut Engine, data: &Rc<RefCell<AnimData>>) -> Value {
     if e.dom_ctx.is_none() {
         return Value::Null;
     }
-    let v = e.new_host_object(Rc::new(AnimHost {
-        data: data.clone(),
-    }));
+    let v = e.new_host_object(Rc::new(AnimHost { data: data.clone() }));
     let p = anim_proto(e);
     if let Value::Obj(id) = v {
         if let Some(o) = e.heap.obj_mut(id) {
@@ -2217,4 +2218,337 @@ fn vt_proto(e: &mut Engine) -> ObjId {
 /// promesses sont déjà résolues côté miroir).
 fn vt_skip(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Undefined)
+}
+
+// ===== CAP-188 — `document.evaluate` : sous-ensemble XPath —
+
+/// Host `XPathResult` — liste matérialisée à l'évaluation
+/// (borné : snapshot même pour les types itérateurs —
+/// documenté ; `iterateNext`/`snapshotItem` indexés).
+struct XrHost {
+    nodes: Vec<NodeId>,
+    /// `XPathResult` type code (1 nombre, 2 chaîne, 3 bool,
+    /// 4/5 itérateurs, 7 snapshot, 9 premier).
+    ty: f64,
+    idx: RefCell<usize>,
+    /// Scalaires calculés à l'évaluation.
+    num: f64,
+    text: String,
+    flag: bool,
+    dom: crate::dom_host::DomRef,
+    cache: crate::dom_host::NodeCache,
+}
+
+/// Un pas `XPath` borné.
+#[derive(Clone)]
+enum Step {
+    /// Nom d'élément (ou `*`).
+    Tag(String),
+    /// `text()` — nœuds texte enfants.
+    Text,
+    /// `node()` — tout type.
+    Any,
+    /// `.` contexte, `..` parent.
+    SelfNode,
+    /// `..` parent.
+    Parent,
+}
+
+/// Pas parsé : nom + prédicats `[@a]`, `[@a='v']`, `[n]`.
+struct ParsedStep {
+    step: Step,
+    pred_attr: Option<String>,
+    pred_val: Option<String>,
+    pred_nth: Option<usize>,
+}
+
+/// Parse d'un pas — `None` sur syntaxe non portée
+/// (honnête : `TypeError` remonté).
+fn parse_step(raw: &str) -> Option<ParsedStep> {
+    let (name, preds) = raw.find('[').map_or((raw, ""), |i| (&raw[..i], &raw[i..]));
+    let step = match name {
+        "*" => Step::Tag("*".into()),
+        "text()" => Step::Text,
+        "node()" => Step::Any,
+        "." => Step::SelfNode,
+        ".." => Step::Parent,
+        _ => Step::Tag(name.to_ascii_lowercase()),
+    };
+    let mut s = ParsedStep {
+        step,
+        pred_attr: None,
+        pred_val: None,
+        pred_nth: None,
+    };
+    let mut rest = preds;
+    while rest.starts_with('[') {
+        let end = rest.find(']')?;
+        let p = rest[1..end].trim();
+        if let Some(a) = p.strip_prefix('@') {
+            if let Some((k, v)) = a.split_once('=') {
+                s.pred_attr = Some(k.trim().into());
+                s.pred_val = Some(v.trim().trim_matches('\'').trim_matches('"').into());
+            } else {
+                s.pred_attr = Some(a.trim().into());
+            }
+        } else if let Ok(n) = p.parse::<usize>() {
+            s.pred_nth = Some(n.max(1));
+        } else {
+            return None;
+        }
+        rest = &rest[end + 1..];
+    }
+    if !rest.is_empty() {
+        return None;
+    }
+    Some(s)
+}
+
+/// `true` si le nœud passe le pas (nom + prédicat attr).
+fn xp_match(d: &crate::dom::Dom, n: NodeId, ps: &ParsedStep) -> bool {
+    let node = &d.nodes[n as usize];
+    let ok = match &ps.step {
+        Step::Tag(t) => t == "*" || (node.kind == crate::dom::NodeKind::Element && node.tag == *t),
+        Step::Text => node.kind == crate::dom::NodeKind::Text,
+        Step::Any | Step::SelfNode | Step::Parent => true,
+    };
+    if !ok {
+        return false;
+    }
+    if let Some(a) = &ps.pred_attr {
+        let Some(v) = d.attr(n, a) else {
+            return false;
+        };
+        if let Some(want) = &ps.pred_val {
+            if v != want {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Tous les descendants en ordre document.
+fn xp_descendants(d: &crate::dom::Dom, n: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let mut stack = d.child_nodes(n);
+    stack.reverse();
+    while let Some(c) = stack.pop() {
+        out.push(c);
+        let mut kids = d.child_nodes(c);
+        kids.reverse();
+        stack.extend(kids);
+    }
+    out
+}
+
+/// Un niveau de pas — `desc` = `//` (descendants du set
+/// courant), sinon enfants directs.
+fn xp_apply(d: &crate::dom::Dom, set: &[NodeId], ps: &ParsedStep, desc: bool) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    for &n in set {
+        match ps.step {
+            Step::SelfNode => out.push(n),
+            Step::Parent => {
+                if let Some(p) = d.parent(n) {
+                    out.push(p);
+                }
+            }
+            _ => {
+                if desc {
+                    for m in xp_descendants(d, n) {
+                        if xp_match(d, m, ps) {
+                            out.push(m);
+                        }
+                    }
+                } else {
+                    for m in d.child_nodes(n) {
+                        if xp_match(d, m, ps) {
+                            out.push(m);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(k) = ps.pred_nth {
+        // Borné : n-ième de l'ensemble global (spec : n-ième
+        // par parent — documenté).
+        out = out
+            .into_iter()
+            .nth(k.saturating_sub(1))
+            .into_iter()
+            .collect();
+    }
+    out
+}
+
+/// `document.evaluate(expr, ctx, resolver, type, result)`
+/// (CAP-188) — sous-ensemble `//tag`, `/tag`, `.//`,
+/// `.`/`..`, `text()`/`node()`, `[@a]`, `[@a='v']`, `[n]`,
+/// `id('x')`, `count(...)` — syntaxe non portée →
+/// `TypeError` honnête (spec `InvalidExpressionError` —
+/// borné). Types 1/2/3 scalaires + 4/5/7/9 listes.
+pub(crate) fn xpath_evaluate(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let _ = this;
+    let Some((dom, cache)) = e.dom_ctx.clone() else {
+        return Err(e.type_error("evaluate: no document"));
+    };
+    let expr = e.to_js_string(arg(args, 0))?;
+    let ctx = node_for(e, arg(args, 1)).unwrap_or_else(|| dom.borrow().root);
+    let ty = e.to_number(arg(args, 3)).unwrap_or(9.0);
+    let mut nodes: Vec<NodeId> = Vec::new();
+    let path = expr.trim().to_string();
+    let count = path
+        .strip_prefix("count(")
+        .and_then(|p| p.strip_suffix(')'))
+        .map(str::to_string);
+    let path = count.as_deref().unwrap_or(&path).to_string();
+    {
+        let d = dom.borrow();
+        if let Some(id) = path
+            .strip_prefix("id(")
+            .and_then(|p| p.strip_suffix(')'))
+            .map(|s| s.trim().trim_matches('\'').trim_matches('"'))
+        {
+            if let Some(n) = d.by_id(id) {
+                nodes.push(n);
+            }
+        } else {
+            let mut set = vec![ctx];
+            let mut rest = path.as_str();
+            while !rest.is_empty() {
+                // `.`/`..` préfixe — `self`/`parent::node()`.
+                if let Some(r) = rest.strip_prefix("..") {
+                    set = xp_apply(
+                        &d,
+                        &set,
+                        &ParsedStep {
+                            step: Step::Parent,
+                            pred_attr: None,
+                            pred_val: None,
+                            pred_nth: None,
+                        },
+                        false,
+                    );
+                    rest = r;
+                    continue;
+                }
+                if let Some(r) = rest.strip_prefix('.') {
+                    rest = r;
+                    continue;
+                }
+                let (step_raw, desc, next) = if let Some(r) = rest.strip_prefix("//") {
+                    let i = r.find('/').unwrap_or(r.len());
+                    (&r[..i], true, &r[i..])
+                } else if let Some(r) = rest.strip_prefix('/') {
+                    let i = r.find('/').unwrap_or(r.len());
+                    (&r[..i], false, &r[i..])
+                } else {
+                    (rest, false, "")
+                };
+                if step_raw.is_empty() {
+                    return Err(e.type_error("evaluate: unsupported XPath"));
+                }
+                let Some(ps) = parse_step(step_raw) else {
+                    return Err(e.type_error("evaluate: unsupported XPath"));
+                };
+                set = xp_apply(&d, &set, &ps, desc);
+                rest = next;
+            }
+            nodes = set;
+        }
+    }
+    let flag = !nodes.is_empty();
+    let num = nodes.len() as f64;
+    let text = nodes
+        .first()
+        .map_or_else(String::new, |&n| dom.borrow().text_content(n));
+    let v = e.new_host_object(Rc::new(XrHost {
+        nodes,
+        ty,
+        idx: RefCell::new(0),
+        num,
+        text,
+        flag,
+        dom,
+        cache,
+    }));
+    let p = xr_proto(e);
+    if let Value::Obj(id) = v {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = Value::Obj(p);
+        }
+    }
+    Ok(v)
+}
+
+/// `XPathResult.prototype` paresseux.
+fn xr_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.misc.xr_proto {
+        return p;
+    }
+    let p = e.new_object();
+    let tag = e.str_val("XPathResult");
+    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.misc.xr_proto = Some(p);
+    p
+}
+
+impl Host for XrHost {
+    fn class_name(&self) -> &'static str {
+        "XPathResult"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(name, "iterateNext" | "snapshotItem")
+    }
+
+    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        Ok(Some(match key {
+            "resultType" => Value::Num(self.ty),
+            "numberValue" => Value::Num(self.num),
+            "stringValue" => return Ok(Some(e.str_val(self.text.clone()))),
+            "booleanValue" => Value::Bool(self.flag),
+            "snapshotLength" => Value::Num(self.nodes.len() as f64),
+            "singleNodeValue" => self
+                .nodes
+                .first()
+                .map_or(Value::Null, |&n| node_value(e, &self.dom, &self.cache, n)),
+            "invalidIteratorState" => Value::Bool(false),
+            _ => return Ok(None),
+        }))
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _t: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        match name {
+            "iterateNext" => {
+                let mut i = self.idx.borrow_mut();
+                let Some(&n) = self.nodes.get(*i) else {
+                    return Ok(Some(Value::Null));
+                };
+                *i += 1;
+                Ok(Some(node_value(e, &self.dom, &self.cache, n)))
+            }
+            "snapshotItem" => {
+                let i = e.to_number(arg(args, 0)).unwrap_or(0.0) as usize;
+                let v = self
+                    .nodes
+                    .get(i)
+                    .map_or(Value::Null, |&n| node_value(e, &self.dom, &self.cache, n));
+                Ok(Some(v))
+            }
+            _ => Ok(None),
+        }
+    }
 }

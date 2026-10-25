@@ -5165,3 +5165,65 @@ fn cap187_web_animations_bounded() {
     e.run_microtasks().expect("microtasks");
     assert_eq!(evf(&mut e, "r"), "ok");
 }
+
+// ===== CAP-188 — `document.evaluate` : sous-ensemble XPath —
+
+#[test]
+fn cap188_xpath_subset() {
+    let mut e = engine_with(
+        "<!doctype html><html><body><div id=x><p class=a>hello</p><p class=a>world</p>\
+         <span id=s>t</span></div><p class=b>out</p></body></html>",
+    );
+    e.eval("var d=document;").expect("setup");
+    // `//tag` descendant : 3 `<p>` dans le document.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var r=d.evaluate('//p',d,null,7,null);\
+            [r.resultType, r.snapshotLength, r.snapshotItem(0).textContent,\
+             r.snapshotItem(2).className].join('|')"
+        ),
+        "7|3|hello|b"
+    );
+    // `[@a='v']` filtre + `[n]` position + `.//` relatif.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var x=d.getElementById('x');\
+            var r2=d.evaluate('.//p[@class=\"a\"]',x,null,9,null);\
+            var r3=d.evaluate('//p[2]',d,null,9,null);\
+            [r2.singleNodeValue.textContent, r3.singleNodeValue.textContent].join('|')"
+        ),
+        "hello|world"
+    );
+    // `text()` + `id('…')` + `count(…)` + `booleanValue`.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var r4=d.evaluate('//p[@class=\"a\"]/text()',d,null,7,null);\
+            var r5=d.evaluate(\"id('s')\",d,null,9,null);\
+            var r6=d.evaluate(\"count(//p)\",d,null,1,null);\
+            var r7=d.evaluate('//nonexistent',d,null,3,null);\
+            [r4.snapshotLength, r4.snapshotItem(0).nodeValue,\
+             r5.singleNodeValue.id, r6.numberValue, r7.booleanValue].join('|')"
+        ),
+        "2|hello|s|3|false"
+    );
+    // Itérateur (type 4) — `iterateNext` ordre document.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var it=d.evaluate('//p',d,null,4,null);var s='';var n;\
+            while((n=it.iterateNext())!==null){s+=n.textContent[0]}s"
+        ),
+        "hwo"
+    );
+    // Syntaxe non portée → TypeError honnête.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var t='';try{d.evaluate('//p[position()=1]',d,null,7,null)}catch(v){t=v.name}t"
+        ),
+        "TypeError"
+    );
+}

@@ -3407,6 +3407,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-188. `document.evaluate` :
+  sous-ensemble `XPath` borné (sonde)** —
+  `evaluate(expr, ctx, resolver, type,
+  result)` → `XPathResult` — chemins
+  `//tag`, `/tag`, `.//`, `.`/`..`,
+  `[@a]`/`[@a='v']`/`[n]`, `id('x')`,
+  `count(...)` — syntaxe non portée →
+  `TypeError` honnête. Types scalaires
+  1/2/3 + listes 4/5/7/9 (`iterateNext`,
+  `snapshotItem`, `singleNodeValue`) —
+  liste matérialisée (borné : pas
+  d'itérateur live). Réparation :
+  extractions `spawn_dyn_script_src`/
+  `drain_net_done`/`deliver_dyn_done`
+  + `eval_module_graph` par ref
+  (`net.rs` >100 lignes post
+  CAP-169/186/JS-C94). Test jscore
+  `cap188_xpath_subset`. **La file
+  jscore mesurée est épuisée** —
+  reste : `canvas.toDataURL`/
+  `captureStream` (pont raster session),
+  artefacts spec-corrects.
+
 - [x] **CAP-187. Web Animations borné :
   `animate`/`getAnimations`/
   `startViewTransition` (sonde)** —
