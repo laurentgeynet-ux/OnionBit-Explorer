@@ -122,6 +122,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   rect viewport. Test
   `c97_offset_parent_top_left`.
 
+### Fixed
+
+- **JS-C98 — régression
+  `PerformanceObserver` github**
+  (`explorer-jscore`) : le stub «
+  illegal ctor » rendait
+  `new PerformanceObserver(cb)` —
+  légal en navigateur — fatale à
+  `environment.js` (avant : global
+  absent, garde `typeof` sautée —
+  vol mesuré `a99206a`). Fix :
+  `PerformanceObserver`/
+  `ReportingObserver` constructibles
+  — impl bornée headless (callback
+  enregistré, `observe`/`disconnect`/
+  `takeRecords` honnêtes, jamais
+  tirés, `supportedEntryTypes →
+  []`) ; `MediaEncryptedEvent`
+  déplacé sur le rail `event_ctor`
+  ; `XPathEvaluator` devient
+  constructible (`evaluate` rail
+  CAP-188). Test
+  `c98_observers_constructible`.
+
 ### Added
 
 - **ADR-0027 — délégation DRM : onglet

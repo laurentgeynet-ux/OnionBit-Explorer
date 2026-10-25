@@ -361,3 +361,38 @@ fn c98_window_surface() {
         "object,number,1"
     );
 }
+
+/// Régression mesurée github (vol 2026-11-10) —
+/// `PerformanceObserver`/`ReportingObserver` sont légalement
+/// constructibles : le stub « illegal ctor » tuait
+/// `environment.js` (`new PerformanceObserver(cb)` throw où
+/// la garde `typeof` sautait proprement avant C98).
+#[test]
+fn c98_observers_constructible() {
+    // `new PerformanceObserver(cb)` — ne jette pas.
+    assert_eq!(
+        ev("var o=new PerformanceObserver(function(){}); [typeof o,typeof o.observe,typeof o.disconnect,typeof o.takeRecords].join(',')"),
+        "object,function,function,function"
+    );
+    // `observe`/`disconnect`/`takeRecords` — bornés honnêtes.
+    assert_eq!(
+        ev("var o=new PerformanceObserver(function(){}); o.observe({entryTypes:['measure']}); o.takeRecords().length"),
+        "0"
+    );
+    // `new ReportingObserver(cb)` — même forme.
+    assert_eq!(
+        ev("var o=new ReportingObserver(function(){}); [typeof o,o.takeRecords().length].join(',')"),
+        "object,0"
+    );
+    // Ctor sans callback → TypeError (spec).
+    assert_eq!(ev("try{new PerformanceObserver();}catch(e){'T'}"), "T");
+    // `supportedEntryTypes` — `[]` honnête.
+    assert_eq!(ev("PerformanceObserver.supportedEntryTypes.length"), "0");
+    // `XPathEvaluator` — `new` + `evaluate` réel (CAP-188).
+    assert_eq!(
+        ev("var xe=new XPathEvaluator(); [typeof xe.evaluate, typeof xe.evaluate('//div',document)].join(',')"),
+        "function,object"
+    );
+    // `MediaEncryptedEvent` — rail Event (init copié).
+    assert_eq!(ev("new MediaEncryptedEvent('encrypted').type"), "encrypted");
+}

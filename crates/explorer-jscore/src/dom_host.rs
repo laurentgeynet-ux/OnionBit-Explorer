@@ -2216,8 +2216,6 @@ impl Engine {
             "PerformanceResourceTiming",
             "PerformancePaintTiming",
             "PerformanceLongTaskTiming",
-            "PerformanceObserver",
-            "ReportingObserver",
             "VideoFrame",
             "IdleDetector",
             "WakeLock",
@@ -2242,7 +2240,6 @@ impl Engine {
             "Highlight",
             "EditContext",
             "Sanitizer",
-            "XPathEvaluator",
             "XPathExpression",
             "Navigation",
             "VisualViewport",
@@ -2253,7 +2250,6 @@ impl Engine {
             "PublicKeyCredential",
             "CanvasRenderingContext2D",
             "WebGLRenderingContext",
-            "MediaEncryptedEvent",
         ] {
             let f = self.native_fn(name, illegal_ctor);
             if let Value::Obj(fid) = f {
@@ -2294,6 +2290,7 @@ impl Engine {
             "FormDataEvent",
             "MediaQueryListEvent",
             "NotificationEvent",
+            "MediaEncryptedEvent",
         ] {
             let f = self.native_fn(name, event_ctor);
             if let Value::Obj(fid) = f {
@@ -2356,6 +2353,40 @@ impl Engine {
             self.set_own(fid, "prototype", Value::Obj(p), false);
         }
         self.set_own(g, "OffscreenCanvas", oc_f, false);
+        // `PerformanceObserver`/`ReportingObserver` — ctors
+        // **légalement constructibles** (régression mesurée :
+        // github `environment.js` meurt sur le throw du stub
+        // où la garde `typeof` sautait proprement avant C98) —
+        // impl bornée headless : callback enregistré,
+        // `observe`/`disconnect`/`takeRecords` honnêtes,
+        // jamais tirés (aucune entrée produite).
+        for (name, f2) in [
+            (
+                "PerformanceObserver",
+                perf_observer_ctor as crate::heap::NativeFn,
+            ),
+            ("ReportingObserver", reporting_observer_ctor),
+        ] {
+            let f = self.native_fn(name, f2);
+            if let Value::Obj(fid) = f {
+                let p = self.new_object();
+                self.set_own(fid, "prototype", Value::Obj(p), false);
+                // `supportedEntryTypes` — `[]` honnête (aucune
+                // entrée produite → aucun type supporté ; les
+                // gardes `.includes('x')` sautent proprement).
+                let arr = self.new_array(Vec::new());
+                self.set_own(fid, "supportedEntryTypes", arr, false);
+            }
+            self.set_own(g, name, f, false);
+        }
+        // `XPathEvaluator` — `new` + `evaluate` (rail
+        // `xpath_evaluate` existant — CAP-188).
+        let xe = self.native_fn("XPathEvaluator", xpath_evaluator_ctor);
+        if let Value::Obj(fid) = xe {
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "XPathEvaluator", xe, false);
         // `FontFace` — `{family, status:'unloaded', load() →
         // Promise résolue self}` (le chargement de fontes réel
         // est un chantier session — le feature-detect des
@@ -10971,4 +11002,66 @@ fn tt_create_policy(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
 fn tt_passthrough(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let s = e.to_js_string(arg(args, 0))?;
     Ok(e.str_val(s))
+}
+
+/// `new PerformanceObserver(cb)` / `new ReportingObserver(cb)`
+/// — impl bornée headless : le callback est enregistré mais
+/// jamais tiré (aucune entrée produite ici) ; `observe`/
+/// `disconnect`/`takeRecords` honnêtes. Régression mesurée :
+/// le stub « illegal ctor » tuait `environment.js` de github
+/// (le `new` est légal dans un navigateur).
+fn perf_observer_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    if !matches!(cb, Value::Obj(_)) {
+        return Err(e.type_error("PerformanceObserver: callback requis"));
+    }
+    let o = e.new_object();
+    e.set_own(o, "cb", cb, false);
+    for (k, f) in [
+        ("observe", observer_noop as crate::heap::NativeFn),
+        ("disconnect", observer_noop),
+        ("takeRecords", observer_empty),
+    ] {
+        let m = e.native_fn(k, f);
+        e.set_own(o, k, m, true);
+    }
+    Ok(Value::Obj(o))
+}
+
+/// `new ReportingObserver(cb)` — même forme bornée.
+fn reporting_observer_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    if !matches!(cb, Value::Obj(_)) {
+        return Err(e.type_error("ReportingObserver: callback requis"));
+    }
+    let o = e.new_object();
+    e.set_own(o, "cb", cb, false);
+    for (k, f) in [
+        ("observe", observer_noop as crate::heap::NativeFn),
+        ("disconnect", observer_noop),
+        ("takeRecords", observer_empty),
+    ] {
+        let m = e.native_fn(k, f);
+        e.set_own(o, k, m, true);
+    }
+    Ok(Value::Obj(o))
+}
+
+/// `observer.observe(opts)`/`disconnect()` — no-op honnête.
+fn observer_noop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Undefined)
+}
+
+/// `observer.takeRecords()` → `[]` (aucune entrée produite).
+fn observer_empty(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(e.new_array(Vec::new()))
+}
+
+/// `new XPathEvaluator()` — `{evaluate}` (rail
+/// `xpath_evaluate` existant — CAP-188).
+fn xpath_evaluator_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let o = e.new_object();
+    let ev = e.native_fn("evaluate", crate::misc_apis::xpath_evaluate);
+    e.set_own(o, "evaluate", ev, true);
+    Ok(Value::Obj(o))
 }
