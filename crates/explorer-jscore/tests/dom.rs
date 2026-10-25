@@ -5739,3 +5739,21 @@ fn c97_offset_parent_top_left() {
         "true,true,112,40,8,0"
     );
 }
+
+/// Ecart form github (vol 11/10) : focus/blur dispatches
+/// par l hote (trusted, chemin session) doivent synchroniser
+/// dom.focused — document.activeElement suit le focus reel,
+/// pas le stale precedent.
+#[test]
+fn host_focus_dispatch_updates_active_element() {
+    let dom = Rc::new(RefCell::new(Dom::from_html(
+        "<body><input id=a><input id=b><button id=x>ok</button></body>",
+    )));
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    let a = dom.borrow().by_id("a").expect("a present");
+    e.dom_event_on("focus", a).expect("focus dispatch");
+    assert_eq!(evf(&mut e, "document.activeElement.id"), "a");
+    e.dom_event_on("blur", a).expect("blur dispatch");
+    assert_eq!(evf(&mut e, "document.activeElement.tagName"), "BODY");
+}

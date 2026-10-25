@@ -2658,6 +2658,17 @@ impl Engine {
             trusted: true,
         };
         let state = make_event_state(ty, node, flags, props);
+        // Synchro miroir : un `focus`/`blur` dispatché par
+        // l'hôte (input réel → `set_focus` → chemin — trusted)
+        // met à jour `dom.focused` — `document.activeElement`
+        // suit le focus réel, pas seulement `el.focus()` ni
+        // les `dispatchEvent` synthétiques (écart form github
+        // mesuré : `button.flash-close` stale).
+        match ty {
+            "focus" => dom.borrow_mut().focused.set(Some(node)),
+            "blur" => dom.borrow_mut().focused.set(None),
+            _ => {}
+        }
         self.propagate_event(&dom, &cache, &state)?;
         // Event dispatch is a job boundary — drain queued reactions.
         self.run_microtasks()?;
