@@ -5328,3 +5328,57 @@ fn cap191_shadow_surface() {
         "1"
     );
 }
+
+// ===== CAP-194 — `AbortSignal` réel : statics
+// `abort`/`timeout`/`any`, proto (`aborted`, `reason`,
+// `throwIfAborted`, `onabort`, `addEventListener`), ctor
+// Illegal spec (mur mesuré : `AbortSignal is not defined`,
+// bootstrap x-web).
+
+#[test]
+fn cap194_abort_signal_surface() {
+    let mut e = engine_with("<p>x</p>");
+    // Statics + proto existent ; ctor Illegal (spec).
+    assert_eq!(
+        evf(
+            &mut e,
+            "typeof AbortSignal+'/'+typeof AbortSignal.timeout+'/'\
+            +typeof AbortSignal.abort+'/'+typeof AbortSignal.any+'/'\
+            +(function(){try{new AbortSignal();return 'ctor'}catch(x){return 'illegal'}})()"
+        ),
+        "function/function/function/function/illegal"
+    );
+    // `abort(r)` → aborted+reason ; `throwIfAborted` jette reason.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var s=AbortSignal.abort('R');\
+            s.aborted+'/'+s.reason+'/'\
+            +(function(){try{s.throwIfAborted();return 'x'}catch(v){return v}})()"
+        ),
+        "true/R/R"
+    );
+    // `AbortController` → signal réel ; `abort` tire
+    // onabort + listeners `abort` dans l'ordre.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var c=new AbortController(),log='';\
+            c.signal.addEventListener('abort',function(){log+='L'});\
+            c.signal.onabort=function(){log+='O'};c.abort('Z');\
+            c.signal.aborted+'/'+c.signal.reason+'/'+log"
+        ),
+        "true/Z/OL"
+    );
+    // `any` : une source déjà abortée propage sa reason ;
+    // `timeout` arme un abort différé.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var a=AbortSignal.any([AbortSignal.abort('A')]);\
+            a.aborted+'/'+a.reason+'/'\
+            +typeof AbortSignal.timeout(0).then"
+        ),
+        "true/A/undefined"
+    );
+}

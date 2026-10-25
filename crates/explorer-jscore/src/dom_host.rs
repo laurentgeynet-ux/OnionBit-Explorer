@@ -1811,7 +1811,6 @@ impl Engine {
             "MutationRecord",
             "IdleDeadline",
             "XMLSerializer",
-            "AbortSignal",
             "DOMException",
             // dev.to : `instanceOf(Window)` (prop-types react-dates)
             // — détection seule, jamais construit.
@@ -2053,7 +2052,37 @@ impl Engine {
             self.set_own(fid, "prototype", Value::Obj(p), false);
         }
         self.set_own(g, "XMLSerializer", xs_f, false);
-        // `AbortController` minimal : `signal.aborted` + `abort()`.
+        // `AbortSignal` (CAP-194) — surface spec bornée : le
+        // ctor reste `Illegal` (spec — `new AbortSignal()`
+        // jette), mais les statics `abort`/`timeout`/`any`
+        // et le proto (`aborted`, `reason`, `throwIfAborted`,
+        // `onabort`, `addEventListener('abort')`) existent —
+        // le routeur TanStack de x-web arme `AbortSignal`
+        // avant toute navigation (mesuré : ReferenceError).
+        let sig_proto = self.new_object();
+        {
+            let m = self.native_fn("throwIfAborted", signal_throw_if_aborted);
+            self.set_own(sig_proto, "throwIfAborted", m, true);
+            let m = self.native_fn("addEventListener", signal_add_listener);
+            self.set_own(sig_proto, "addEventListener", m, true);
+            let m = self.native_fn("removeEventListener", signal_remove_listener);
+            self.set_own(sig_proto, "removeEventListener", m, true);
+            let tag = self.str_val("AbortSignal");
+            self.set_own(sig_proto, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        }
+        let as_f = self.native_fn("AbortSignal", illegal_ctor);
+        if let Value::Obj(fid) = as_f {
+            let m = self.native_fn("abort", signal_static_abort);
+            self.set_own(fid, "abort", m, true);
+            let m = self.native_fn("timeout", signal_static_timeout);
+            self.set_own(fid, "timeout", m, true);
+            let m = self.native_fn("any", signal_static_any);
+            self.set_own(fid, "any", m, true);
+            self.set_own(fid, "prototype", Value::Obj(sig_proto), false);
+        }
+        self.set_own(g, "AbortSignal", as_f, false);
+        // `AbortController` minimal : `signal` réel +
+        // `abort()` bascule `aborted`/`reason` + listeners.
         let ac_f = self.native_fn("AbortController", abort_controller_ctor);
         if let Value::Obj(fid) = ac_f {
             let p = self.new_object();
@@ -8051,25 +8080,215 @@ fn event_init(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Undefined)
 }
 
-/// `new AbortController()` — `{signal: {aborted:false}}` minimal ;
-/// `abort()` (sur le prototype) bascule `signal.aborted`.
+/// `new AbortController()` — `{signal}` = vrai
+/// `AbortSignal` (CAP-194) ; `abort()` bascule
+/// `aborted`/`reason` et tire `onabort` + listeners.
 fn abort_controller_ctor(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let sig = e.new_object();
-    e.set_own(sig, "aborted", Value::Bool(false), true);
-    e.set_own(sig, "onabort", Value::Null, true);
-    e.set_prop_value(this, "signal", Value::Obj(sig))?;
+    let sig = new_signal(e);
+    e.set_prop_value(this, "signal", sig)?;
     Ok(Value::Undefined)
 }
 
-/// `controller.abort()` — `signal.aborted = true`, `onabort` appelé.
-fn abort_signal_abort(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+/// `controller.abort(reason?)` — `signal.aborted = true`,
+/// `reason` posée (défaut `AbortError`), `onabort` +
+/// listeners `abort` tirés dans l'ordre.
+fn abort_signal_abort(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let sig = e.get_prop_value(this, "signal")?;
-    e.set_prop_value(sig, "aborted", Value::Bool(true))?;
-    let cb = e.get_prop_value(sig, "onabort")?;
-    if e.is_callable(cb) {
-        e.call_value(cb, sig, &[])?;
+    signal_fire(e, sig, arg(args, 0))
+}
+
+/// `AbortSignal.prototype` (résolution dynamique —
+/// `ctor` a posé `prototype` sur la fonction globale).
+fn signal_proto_of(e: &mut Engine) -> Value {
+    e.get_prop(e.global, "AbortSignal")
+        .and_then(|c| match c {
+            Value::Obj(cid) => e.get_prop(cid, "prototype"),
+            _ => None,
+        })
+        .unwrap_or(Value::Obj(e.protos.object))
+}
+
+/// Signal neuf : `aborted:false`, `reason:undefined`,
+/// `onabort:null`, `__ls` = listeners `abort` en file.
+fn new_signal(e: &mut Engine) -> Value {
+    let id = e.new_object();
+    e.set_own(id, "aborted", Value::Bool(false), true);
+    e.set_own(id, "reason", Value::Undefined, true);
+    e.set_own(id, "onabort", Value::Null, true);
+    // `__ls` = objet plain `{length,0,1…}` — les éléments
+    // des `Array` vivent dans un stockage séparé des props.
+    let ls = e.new_object();
+    e.set_own(ls, "length", Value::Num(0.0), false);
+    e.set_own(id, "__ls", Value::Obj(ls), false);
+    if let Value::Obj(proto) = signal_proto_of(e) {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = Value::Obj(proto);
+        }
+    }
+    Value::Obj(id)
+}
+
+/// `AbortError` borné (pas de `DOMException` matérialisée —
+/// `error_value` ordinaire nommé comme spec).
+fn abort_reason(e: &mut Engine, name: &str) -> Value {
+    e.error_value(e.protos.error, name, "signal is aborted without reason")
+}
+
+/// `signal.aborted = true` + `reason` + `onabort` +
+/// listeners `abort` (spec « signal abort » : chaque
+/// listener appelé avec `this` = le signal).
+fn signal_fire(e: &mut Engine, sig: Value, reason: Value) -> JsResult<Value> {
+    if let Value::Obj(sid) = sig {
+        if matches!(e.get_prop(sid, "aborted"), Some(Value::Bool(true))) {
+            return Ok(Value::Undefined);
+        }
+        let r = if matches!(reason, Value::Undefined) {
+            abort_reason(e, "AbortError")
+        } else {
+            reason
+        };
+        e.set_prop_value(sig, "aborted", Value::Bool(true))?;
+        e.set_prop_value(sig, "reason", r)?;
+        let cb = e.get_prop_value(sig, "onabort")?;
+        if e.is_callable(cb) {
+            e.call_value(cb, sig, &[])?;
+        }
+        let ls = match e.get_prop(sid, "__ls") {
+            Some(Value::Obj(l)) => {
+                let len = match e.get_prop(l, "length") {
+                    Some(Value::Num(n)) => n as usize,
+                    _ => 0,
+                };
+                (0..len)
+                    .filter_map(|i| e.get_prop(l, &i.to_string()))
+                    .collect::<Vec<_>>()
+            }
+            _ => Vec::new(),
+        };
+        for cb in ls {
+            if e.is_callable(cb) {
+                e.call_value(cb, sig, &[])?;
+            }
+        }
     }
     Ok(Value::Undefined)
+}
+
+/// `signal.throwIfAborted()` — jette `reason` si aborted.
+fn signal_throw_if_aborted(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(sid) = this {
+        if matches!(e.get_prop(sid, "aborted"), Some(Value::Bool(true))) {
+            let r = e.get_prop(sid, "reason").unwrap_or(Value::Undefined);
+            return Err(crate::heap::Thrown(r));
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `signal.addEventListener('abort', cb)` — file `__ls`.
+fn signal_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(sid) = this else {
+        return Ok(Value::Undefined);
+    };
+    if e.to_js_string(arg(args, 0))? != "abort" {
+        return Ok(Value::Undefined);
+    }
+    if let Some(Value::Obj(l)) = e.get_prop(sid, "__ls") {
+        let cb = arg(args, 1);
+        let len = match e.get_prop(l, "length") {
+            Some(Value::Num(n)) => n as usize,
+            _ => 0,
+        };
+        e.set_own(l, &len.to_string(), cb, true);
+        e.set_own(l, "length", Value::Num((len + 1) as f64), true);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `signal.removeEventListener('abort', cb)` — retire de `__ls`.
+fn signal_remove_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(sid) = this else {
+        return Ok(Value::Undefined);
+    };
+    if e.to_js_string(arg(args, 0))? != "abort" {
+        return Ok(Value::Undefined);
+    }
+    let cb = arg(args, 1);
+    if let Some(Value::Obj(l)) = e.get_prop(sid, "__ls") {
+        let len = match e.get_prop(l, "length") {
+            Some(Value::Num(n)) => n as usize,
+            _ => 0,
+        };
+        for i in 0..len {
+            if let Some(v) = e.get_prop(l, &i.to_string()) {
+                if v == cb {
+                    e.set_own(l, &i.to_string(), Value::Undefined, true);
+                }
+            }
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `AbortSignal.abort(reason?)` — signal pré-aborté.
+fn signal_static_abort(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let sig = new_signal(e);
+    signal_fire(e, sig, arg(args, 0))?;
+    Ok(sig)
+}
+
+/// `AbortSignal.timeout(ms)` — abort après `ms` via la
+/// file de timers (raison `TimeoutError`).
+fn signal_static_timeout(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let sig = new_signal(e);
+    let ms = match arg(args, 0) {
+        Value::Num(n) => n.max(0.0) as u64,
+        _ => 0,
+    };
+    let cb = e.bound_native("abort", signal_timeout_fire, vec![sig]);
+    e.timers.schedule(cb, ms, false, Vec::new());
+    Ok(sig)
+}
+
+/// Callback différé de `AbortSignal.timeout`.
+fn signal_timeout_fire(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let r = abort_reason(e, "TimeoutError");
+    signal_fire(e, arg(args, 0), r)
+}
+
+/// `AbortSignal.any([s1,s2…])` — aborté dès qu'une source
+/// l'est (reason reprise) ; écoute posée sur chaque source.
+fn signal_static_any(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let out = new_signal(e);
+    for src in e.iter_values(arg(args, 0))? {
+        if let Value::Obj(sid) = src {
+            if matches!(e.get_prop(sid, "aborted"), Some(Value::Bool(true))) {
+                let r = e.get_prop(sid, "reason").unwrap_or(Value::Undefined);
+                signal_fire(e, out, r)?;
+                return Ok(out);
+            }
+            if let Some(Value::Obj(l)) = e.get_prop(sid, "__ls") {
+                let cb = e.bound_native("abort", signal_any_fire, vec![out]);
+                let len = match e.get_prop(l, "length") {
+                    Some(Value::Num(n)) => n as usize,
+                    _ => 0,
+                };
+                e.set_own(l, &len.to_string(), cb, true);
+                e.set_own(l, "length", Value::Num((len + 1) as f64), true);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Listener de `AbortSignal.any` — la source abortée
+/// propage sa `reason` au signal combiné.
+fn signal_any_fire(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let r = match this {
+        Value::Obj(sid) => e.get_prop(sid, "reason").unwrap_or(Value::Undefined),
+        _ => Value::Undefined,
+    };
+    signal_fire(e, arg(args, 0), r)
 }
 
 /// `CSS.escape(s)` — algorithme « serialize an identifier »

@@ -59,7 +59,13 @@ impl TimerQueue {
         }
     }
 
-    fn schedule(&mut self, cb: Value, delay_ms: u64, interval: bool, cb_args: Vec<Value>) -> u64 {
+    pub(crate) fn schedule(
+        &mut self,
+        cb: Value,
+        delay_ms: u64,
+        interval: bool,
+        cb_args: Vec<Value>,
+    ) -> u64 {
         self.next_id += 1;
         let id = self.next_id;
         self.timers.push(Timer {

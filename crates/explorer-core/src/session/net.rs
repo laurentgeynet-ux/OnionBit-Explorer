@@ -720,7 +720,7 @@ impl Session {
                 }
             }
             (Some(_), _) => {
-                self.spawn_dyn_script_src(tab, d, &req_page, &req_base, doc_policy, &csp);
+                self.spawn_dyn_script_src(tab, d, &req_page, &req_base, doc_policy, &csp)
             }
             // Ni `src` ni texte — balise inerte, rien à livrer.
             (None, None) => {}

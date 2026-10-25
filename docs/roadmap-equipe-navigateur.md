@@ -6396,6 +6396,23 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   (socket TCP réelle — handshake,
   echo, pong constaté, close 2 sens).
 
+- [x] **CAP-194. `AbortSignal` réel
+  borné (sonde x.com)** — `AbortSignal
+  is not defined` au bootstrap : le nom
+  existait en `illegal_ctor` sans
+  surface. Statics `abort`/`timeout`/
+  `any` + proto `aborted`/`reason`/
+  `throwIfAborted`/`onabort`/`addEvent
+  Listener` + ctor Illegal spec ;
+  `AbortController.abort` bascule
+  `aborted`/`reason` + listeners.
+  Test `cap194_abort_signal_surface`.
+  Mur suivant mesuré offline :
+  `Invariant failed` = duplicate
+  route-id TanStack (`undefined/*` —
+  parent root jamais inité, deux objets
+  root distincts — identité à trancher).
+
 - [x] **CAP-191. Shadow DOM tranche 1 :
   surface sans composition** — `attachShadow`
   spec-fidèle (`NotSupportedError` au

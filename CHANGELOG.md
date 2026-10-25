@@ -31,6 +31,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   and_patchable` +
   `custom_elements_registry`.
 
+- **CAP-194 — `AbortSignal` réel borné**
+  (`explorer-jscore`, sonde x-web : `AbortSignal is
+  not defined` au bootstrap TanStack) : le nom
+  existait en `illegal_ctor` sans surface — ctor
+  toujours Illegal (spec) mais statics
+  `abort(reason)`/`timeout(ms)` (file `timers`,
+  raison `TimeoutError`)/`any(signals)` + proto
+  `aborted`/`reason`/`throwIfAborted`/`onabort`/
+  `addEventListener('abort')`/`removeEventListener`
+  (`__ls` objet `{length,i…}` — les `Array` ont un
+  stockage éléments séparé des props).
+  `AbortController` câblé sur le vrai signal :
+  `abort(reason?)` bascule `aborted`/`reason` +
+  `onabort` + listeners dans l'ordre. Borné :
+  `TimeoutError`/`AbortError` = `error_value`
+  nommés (pas de `DOMException` matérialisée).
+  Tests : `cap194_abort_signal_surface` (dom.rs) +
+  `abort_signal_surface` (sonde scratch).
+
 - **CAP-191 — Shadow DOM tranche 1 :
   surface API sans composition**
   (`explorer-jscore`) : l'arc `attachShadow`
@@ -54,8 +73,6 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (4), `shadowrootmode` (5), `instanceof
   DocumentFragment` non lié (proto).
   Test jscore `cap191_shadow_surface`.
-
-### Added
 
 - **CAP-190 — `Intl.Segmenter` borné** (`explorer-jscore`,
   ES2022 — mur réel x-web : `new Intl.Segmenter` dans
