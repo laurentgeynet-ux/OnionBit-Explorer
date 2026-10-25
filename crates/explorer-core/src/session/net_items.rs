@@ -256,6 +256,50 @@ pub(crate) fn download_meta(headers: &[(String, String)]) -> Option<DownloadMeta
     None
 }
 
+/// `true` si la réponse top-level est un **document image**
+/// (politique navigateurs — l'« image document ») :
+/// `Content-Type: image/*`, pas de `Content-Disposition:
+/// attachment`, pas de `<a download>` (CAP-148 — le hint
+/// force le download même sur type affichable). Rendue en
+/// page synthétique `<img>` plutôt qu'en téléchargement —
+/// un clic de lien-image navigue alors comme attendu
+/// (écart terrain stallman mesuré : `lien:clic-sans-nav`
+/// était une offre de download invisible).
+fn image_document_eligible(headers: &[(String, String)], req: &Request) -> bool {
+    if req.download_hint.is_some() {
+        return false;
+    }
+    let get = |name: &str| {
+        headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    };
+    let attached = get("content-disposition")
+        .unwrap_or_default()
+        .split(';')
+        .next()
+        .is_some_and(|d| d.trim().eq_ignore_ascii_case("attachment"));
+    let mime = get("content-type")
+        .unwrap_or_default()
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
+    !attached && mime.starts_with("image/")
+}
+
+/// Échappement minimal pour un nom inséré dans du HTML
+/// synthétique (attribut `alt` + `<title>`) — l'URL elle-
+/// même est déjà normalisée par le type `Url`.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 /// Méta de téléchargement de la réponse : en-têtes
 /// d'abord (étape 70), puis `<a download>` forcé
 /// (CAP-148 — le hint est posé au dispatch lien, la garde
@@ -366,6 +410,7 @@ impl NavJob {
     /// est livré à `paint`. Aucun `&mut Session` ne
     /// traverse l'`await` : le verrou hôte reste libre
     /// pendant tout le téléchargement (étape 53d).
+    #[allow(clippy::too_many_lines)] // flux séquentiel — chaque phase est documentée in situ
     pub(crate) async fn run<F>(&mut self, mut paint: F) -> Result<NavOutcome, CoreError>
     where
         F: for<'a> FnMut(&'a Dom) -> PaintFut<'a>,
@@ -406,6 +451,13 @@ impl NavJob {
             .iter()
             .filter(|(n, _)| n.eq_ignore_ascii_case("refresh"))
             .find_map(|(_, v)| parse_refresh_content(v));
+        // Document image (`image/*` non attaché, pas de
+        // `<a download>`) : page synthétique `<img>` rendue
+        // comme les navigateurs — avant la classification
+        // download qui l'enfermait en offre invisible.
+        if image_document_eligible(&resp.headers, &self.req) {
+            return self.buffer_image_document(resp, resolved).await;
+        }
         // Corps non affichable (étape 70) ou `<a download>`
         // (CAP-148) : bufferisé avec borne et progression —
         // jamais décodé en mojibake.
@@ -554,6 +606,66 @@ impl NavJob {
                 body,
             },
         )))
+    }
+
+    /// Document image top-level (« image document » des
+    /// navigateurs) : le corps est bufferisé avec la même
+    /// borne qu'un download — un blob hostile géant se
+    /// borne pareil — puis une page synthétique
+    /// `<img src="url">` est commise : le pipeline `<img>`
+    /// existant re-fetch/décode/rend (un mime `image/*`
+    /// indécodable retombe sur le texte `alt`, dégradation
+    /// maison). Titre = segment final de l'URL, comme les
+    /// navigateurs.
+    async fn buffer_image_document(
+        &mut self,
+        mut resp: StreamedResponse,
+        resolved: Url,
+    ) -> Result<NavOutcome, CoreError> {
+        let mut n = 0usize;
+        while let Some(chunk) = resp.body.recv().await {
+            let bytes = chunk.map_err(|e| CoreError::Fetch(e.to_string()))?;
+            n += bytes.len();
+            if n > self.max_download_bytes {
+                return Err(CoreError::Fetch("image hors bornes".to_string()));
+            }
+        }
+        let name = resolved
+            .path()
+            .rsplit('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("image");
+        let name = html_escape(name);
+        let html = format!(
+            "<!doctype html><html><head><title>{name}</title></head>\
+             <body style=\"margin:0\"><img src=\"{resolved}\" alt=\"{name}\"></body></html>"
+        );
+        let mut tb = scripted_tree_builder(self.scripting);
+        tb.push(&html);
+        tb.finish();
+        let dom = tb.into_dom();
+        let title = extract_title(&dom);
+        let csp = collect_response_csp(&resp.headers, &dom);
+        let done = NavDone {
+            url: resolved,
+            dom,
+            html,
+            title,
+            referrer_policy: None,
+            base_url: None,
+            base_target: None,
+            refresh: None,
+            csp,
+            clear_cookies: wants_clear_cookies(&resp.headers),
+        };
+        let tail = NavTail {
+            epoch: self.epoch,
+            push: self.push,
+            prev_title: self.prev_title.take(),
+            req: self.req.clone(),
+        };
+        Ok(NavOutcome::Document(Box::new(done), Box::new(tail)))
     }
 
     /// `about:blank` (étape 88) : le document vide canonique
@@ -851,10 +963,19 @@ impl SubJob {
                 }
                 SubTag::Script(slot) => {
                     let item = &self.scripts[slot_items[slot]];
-                    if item.src.as_ref().is_none_or(|u| {
+                    let sec_ok = item.src.as_ref().is_none_or(|u| {
                         subresp_security_allows(&self.url, u, FetchDest::Script, &resp)
-                    }) && sri_allows(item.integrity.as_deref(), &resp.body)
-                    {
+                    });
+                    let sri_ok = sri_allows(item.integrity.as_deref(), &resp.body);
+                    tracing::debug!(
+                        tab = self.tab,
+                        src = ?item.src.as_ref().map(Url::as_str),
+                        module = item.module,
+                        sec_ok,
+                        sri_ok,
+                        "sous-ressource script"
+                    );
+                    if sec_ok && sri_ok {
                         // Étape 53b : charset déclaré
                         // (classique) → BOM → UTF-8.
                         let text = decode_subresource(&resp.body, item.charset.as_deref());
@@ -1182,6 +1303,16 @@ impl SubJob {
     /// la file d'exécution du commit — `async` en ordre
     /// d'arrivée puis post-parse en ordre document.
     pub(crate) async fn prefetch_modules(&mut self) {
+        tracing::debug!(
+            tab = self.tab,
+            async_mods = self.async_mods.len(),
+            post_modules = self
+                .scripts
+                .iter()
+                .filter(|i| i.exec == ScriptExec::Post && i.module)
+                .count(),
+            "prefetch modules"
+        );
         let mut entries: Vec<(String, Url, String)> = Vec::new();
         for (u, src) in std::mem::take(&mut self.async_mods) {
             entries.push((u.as_str(), u, src));
@@ -1221,6 +1352,7 @@ impl SubJob {
                 &mut graph,
             )
             .await;
+            tracing::debug!(tab = self.tab, name = %name, sources = graph.sources.len(), "module prefetché");
             let me = ModEval { name, graph };
             if n < async_n {
                 self.arrival_evals.push(me);
@@ -1652,6 +1784,7 @@ pub(crate) fn sub_jobs(
     }
     for item in scripts {
         if let (Some(u), Some(slot)) = (&item.src, item.slot) {
+            tracing::debug!(src = %u, module = item.module, "script émis");
             jobs.push_back((
                 SubTag::Script(slot),
                 sub_request(base, u, FetchDest::Script, page_policy, item.crossorigin),

@@ -126,6 +126,7 @@ pub(crate) fn to_canvas_op(rec: &CanvasOpRecord) -> CanvasOp {
 /// Couverture brute d'un item de dessin (avant transform/
 /// clip) — même géométrie que `item_bounds` côté PIPE,
 /// pour le filtre viewport de `repaint` (étape 55g).
+#[allow(clippy::cast_precision_loss)] // longueurs de texte → f32 (miroir `item_bounds` R-108)
 pub(crate) fn display_item_bounds(item: &DisplayItem) -> Option<Rect> {
     match item {
         DisplayItem::FillRect { rect, .. }
@@ -140,6 +141,19 @@ pub(crate) fn display_item_bounds(item: &DisplayItem) -> Option<Rect> {
             y: origin.1 - run.metrics.ascent,
             width: run.advance,
             height: run.metrics.ascent - run.metrics.descent,
+        }),
+        // R-108 — mêmes bornes approchées que `item_bounds`
+        // (0.6em/char, 1.2em au-dessus de la baseline).
+        DisplayItem::MarkerText {
+            origin,
+            text,
+            size_px,
+            ..
+        } => Some(Rect {
+            x: origin.0,
+            y: origin.1 - size_px * 1.2,
+            width: text.chars().count() as f32 * size_px * 0.6,
+            height: size_px * 1.2,
         }),
         DisplayItem::PushClip(_)
         | DisplayItem::PopClip

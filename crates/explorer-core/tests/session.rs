@@ -13022,3 +13022,108 @@ async fn journal_attach_shadow_rejoue_en_place() {
         "enfant de l'ombre absent : {dump}"
     );
 }
+
+/// Terrain stallman — `<a href="…jpg"><img>` : le clic
+/// résolvait bien le lien mais la nav vers le `.jpg`
+/// classait `NavOutcome::Download` → offre de
+/// téléchargement invisible, url inchangée (écart
+/// `lien:clic-sans-nav` du vol PIPE). Politique
+/// navigateurs : un document `image/*` top-level se rend
+/// en page synthétique `<img>` (« image document ») —
+/// le clic commit alors une page, pas un download.
+/// `Content-Disposition: attachment` et `<a download>`
+/// gardent la voie download (CAP-148).
+#[tokio::test]
+async fn click_image_link_commits_image_document() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <a href=\"/pic.jpg\"><img src=\"/x.png\" \
+         width=\"200\" height=\"200\"></a></body></html>",
+    );
+    t.route_bin("/pic.jpg", 200, b"\xff\xd8\xff\xe0FAKEJPEG".to_vec());
+    if let Ok(mut h) = t.resp_headers.lock() {
+        h.insert(
+            "/pic.jpg".to_string(),
+            vec![("content-type".to_string(), "image/jpeg".to_string())],
+        );
+    }
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let out = s
+        .handle_input(id, InputEvent::Click { x: 5.0, y: 5.0 })
+        .await
+        .unwrap();
+    assert_eq!(out, InputOutcome::Navigated);
+    // Commit document (pas offre de download) : l'URL du
+    // `.jpg` est l'URL de l'onglet, le titre est le nom de
+    // fichier, le DOM synthétique porte l'<img>.
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/pic.jpg"));
+    assert!(s.pending_downloads(id).is_empty());
+    // Le DOM synthétique porte l'<img src="/pic.jpg"> et le
+    // titre est le nom de fichier (politique navigateurs).
+    let dump = s.dom_dump(id).unwrap();
+    assert!(dump.contains("<img"), "document image attendu : {dump}");
+    assert!(dump.contains("pic.jpg"));
+}
+
+/// Mur hydratation github (vol réel 10/11) : `<script type="module" src>`
+/// externe fetché → évalué → `customElements.define` doit survivre —
+/// vérifie que la chaîne bout-en-bout livre le code au moteur.
+#[tokio::test]
+async fn external_module_script_defines_custom_element() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script type=\"module\" src=\"/m.js\"></script></body></html>",
+    );
+    t.route(
+        "/m.js",
+        200,
+        "class C extends HTMLElement { connectedCallback(){\
+         document.getElementById('x').textContent='CE-OK' } }\
+         customElements.define('x-a', C);\
+         document.getElementById('x').setAttribute('data-ce','defined');",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let dump = s.dom_dump(a).unwrap_or_default();
+    assert!(
+        dump.contains("data-ce=\"defined\""),
+        "module externe non évalué : {dump}"
+    );
+}
+
+/// Bissection github (vol 10/11) — le tag réel est
+/// `<script type="module" src="…" crossorigin defer>` :
+/// la combinaison CORS-mode + defer est le suspect — le
+/// test précédent (module externe nu) passe.
+#[tokio::test]
+async fn external_module_crossorigin_defer_evals() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script type=\"module\" src=\"/m.js\" crossorigin defer></script></body></html>",
+    );
+    t.route(
+        "/m.js",
+        200,
+        "document.getElementById('x').setAttribute('data-ce','defined');",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let dump = s.dom_dump(a).unwrap_or_default();
+    assert!(
+        dump.contains("data-ce=\"defined\""),
+        "module crossorigin+defer non évalué : {dump}"
+    );
+}
