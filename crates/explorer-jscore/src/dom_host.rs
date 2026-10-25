@@ -3031,6 +3031,16 @@ impl Host for DocumentHost {
                 Value::Undefined,
                 args,
             )?)),
+            "getAnimations" => Ok(Some(crate::misc_apis::get_animations(
+                e,
+                Value::Undefined,
+                args,
+            )?)),
+            "startViewTransition" => Ok(Some(crate::misc_apis::start_view_transition(
+                e,
+                Value::Undefined,
+                args,
+            )?)),
             "adoptNode" => {
                 let Some(src) = node_for(e, arg(args, 0)) else {
                     return Err(e.type_error("adoptNode: nœud requis"));
@@ -3327,6 +3337,8 @@ const DOC_METHODS: &[&str] = &[
     "createTreeWalker",
     "createNodeIterator",
     "execCommand",
+    "getAnimations",
+    "startViewTransition",
     "elementFromPoint",
     "elementsFromPoint",
     "caretPositionFromPoint",
@@ -3395,6 +3407,8 @@ const NODE_METHODS: &[&str] = &[
     "matches",
     "getBoundingClientRect",
     "getClientRects",
+    "animate",
+    "getAnimations",
     "scrollIntoView",
     "scrollIntoViewIfNeeded",
     "attachShadow",
@@ -4844,7 +4858,7 @@ impl Host for NodeHost {
     fn invoke(
         &self,
         e: &mut Engine,
-        _this: Value,
+        this: Value,
         name: &str,
         args: &[Value],
     ) -> JsResult<Option<Value>> {
@@ -5411,6 +5425,11 @@ impl Host for NodeHost {
             // publiée (issue #19, JS-8 — borné : union des
             // boîtes du nœud ≈ border-box ; `None` → zero-rect,
             // comportement historique du stub).
+            // `animate`/`getAnimations` (CAP-187) — machine à
+            // états honnête (pas de compositeur : state
+            // play/pause/finish/cancel, promesses — borné).
+            "animate" => Ok(Some(crate::misc_apis::animate(e, this, args)?)),
+            "getAnimations" => Ok(Some(crate::misc_apis::get_animations(e, this, args)?)),
             "getBoundingClientRect" => Ok(Some(gbrect_shared(e, &self.dom, node))),
             // `getClientRects` (CAP-180) — même table que
             // `gBCR` ; la map publie l'**union** des boîtes du
