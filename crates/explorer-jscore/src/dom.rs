@@ -2749,8 +2749,9 @@ impl Dom {
             return false;
         };
         let mut cur = self.parent(node);
+        let mut seen = std::collections::HashSet::new();
         while let Some(a) = cur {
-            if a == bound {
+            if a == bound || !seen.insert(a) {
                 break;
             }
             if self.node_matches(a, &simple, scope) && self.ancestor_matches(bound, a, rest, scope)
@@ -2769,7 +2770,14 @@ impl Dom {
             .rev()
             .copied()
             .collect();
+        // Dédup : un arbre dégénéré (cycle d'enfants — arène
+        // host-content) ne peut pas faire tourner la pile
+        // sans fin (wedge gov.uk : tout walk borne sa visite).
+        let mut seen = std::collections::HashSet::new();
         while let Some(c) = stack.pop() {
+            if !seen.insert(c) {
+                continue;
+            }
             if self.node_matches(c, sel, scope) {
                 out.push(c);
             }
@@ -2791,7 +2799,11 @@ impl Dom {
             .rev()
             .copied()
             .collect();
+        let mut seen = std::collections::HashSet::new();
         while let Some(c) = stack.pop() {
+            if !seen.insert(c) {
+                continue;
+            }
             if set.contains(&c) {
                 out.push(c);
             }
