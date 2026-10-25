@@ -1507,3 +1507,58 @@ fn hit_test_input_height_pourcent_parent_auto() {
         "la boîte input doit couvrir la zone peinte"
     );
 }
+
+// ── R-102 : hit-test filtre visibility:hidden/collapse ─────
+
+#[test]
+fn hit_test_visibility_hidden_non_ciblable() {
+    // Élément caché : pas de cible (§11.2) ; le descendant
+    // explicitement `visible` reste ciblable (la valeur
+    // calculée porte l'héritage/la surcharge).
+    let (dom, bx) = laid(
+        "<div id=v style=\"visibility:hidden\">\
+         <a id=h href=\"#\">x</a>\
+         <a id=k href=\"#\" style=\"visibility:visible\">y</a>\
+         </div>",
+        "body{margin:0} #v{height:40px} a{display:block;height:15px}",
+    );
+    let (h, k) = (by_tag(&dom, "a"), {
+        let mut found = None;
+        let mut q = vec![dom.document()];
+        while let Some(n) = q.pop() {
+            if dom.attribute(n, "id").ok().flatten().as_deref() == Some("k") {
+                found = Some(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+        found.expect("a#k")
+    });
+    let _ = h;
+    // (a#h) et son parent #v sont cachés → remonte à body/html.
+    let hit_hidden = explorer_layout::hit_test(&bx, 5.0, 5.0);
+    assert_ne!(hit_hidden, Some(h), "élément hidden non ciblable");
+    let div = {
+        let mut q = vec![dom.document()];
+        let mut f = None;
+        while let Some(n) = q.pop() {
+            if dom.attribute(n, "id").ok().flatten().as_deref() == Some("v") {
+                f = Some(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+        f.expect("#v")
+    };
+    assert_ne!(hit_hidden, Some(div), "parent hidden non ciblable");
+    // Descendant `visibility:visible` explicite → ciblable —
+    // le hit remonte le nœud **texte** (contrat : parent = `a`).
+    let hit_k = explorer_layout::hit_test(&bx, 5.0, 20.0);
+    assert_eq!(
+        hit_k.and_then(|n| dom.parent(n).ok().flatten()),
+        Some(k),
+        "descendant visible reste atteint sous un parent caché"
+    );
+}

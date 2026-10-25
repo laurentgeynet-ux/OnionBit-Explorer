@@ -64,6 +64,15 @@ fn contains(r: Rect, x: f32, y: f32) -> bool {
 /// du parent reste hit-testable (R-19). Les fragments de
 /// lignes en-ligne ne sont pas descendus — parité avec la
 /// version historique : l'élément inline porteur gagne.
+/// `visibility: hidden|collapse` (style **calculé** — l'héritage
+/// est déjà résolu : un descendant explicitement `visible` se
+/// relit visible et reste ciblable, §11.2 — R-102). Un élément
+/// caché n'est jamais la cible ; on descend quand même dans ses
+/// enfants.
+fn hidden(bx: &LayoutBox) -> bool {
+    matches!(bx.style.get("visibility"), Some("hidden" | "collapse"))
+}
+
 #[must_use]
 pub fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
     if !contains(paint_bounds(bx), x, y) {
@@ -73,6 +82,9 @@ pub fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
         if let Some(n) = explorer_common::deep(|| hit_test(child, x, y)) {
             return Some(n);
         }
+    }
+    if hidden(bx) {
+        return None;
     }
     contains(bx.rect, x, y).then_some(bx.node).flatten()
 }
@@ -112,6 +124,9 @@ fn hit_test_delta(bx: &LayoutBox, x: f32, y_vp: f32, delta: f32) -> Option<NodeI
         if let Some(n) = explorer_common::deep(|| hit_test_delta(child, x, y_vp, d)) {
             return Some(n);
         }
+    }
+    if hidden(bx) {
+        return None;
     }
     contains(bx.rect, x, y).then_some(bx.node).flatten()
 }

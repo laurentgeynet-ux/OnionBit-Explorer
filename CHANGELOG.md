@@ -9,6 +9,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-102 — hit-test filtre
+  `visibility:hidden`/`collapse`**
+  (`explorer-layout`, §11.2) : un
+  élément caché n'est plus jamais
+  la cible d'un hit ; la descente
+  continue (un descendant
+  `visible` explicite reste
+  ciblable — la valeur calculée
+  porte l'héritage). Test
+  `hit_test_visibility_hidden_non
+  _ciblable`.
+
 - **R-101 — contrôle vide : jambe
   NBSP pour la hauteur `auto`**
   (`explorer-layout`, bug terrain —

@@ -2638,6 +2638,13 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `1.2em` UA. Régressions `hit_test_input_*` ×4 (wrapper
   Codex, absolu `inset:0`, `height:100%` parent défini et
   indéfini). À re-mesurer terrain au prochain vol Wikipedia.
+- [x] **R-102. Hit-test filtre `visibility:hidden`/`collapse`**
+  (résidu R-49, catalogue file résiduelle) — **livré** :
+  `hit_test`/`hit_test_scrolled` ne retournent plus la boîte
+  d'un élément caché (style **calculé** — l'héritage est
+  résolu : un descendant `visible` explicite reste ciblable,
+  §11.2). Régression
+  `hit_test_visibility_hidden_non_ciblable`.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
