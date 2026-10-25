@@ -159,3 +159,46 @@ pas une page du moteur.**
 - Aucun code modifié par cette ADR ;
   `forbid(unsafe_code)` et la règle pur Rust
   inchangés.
+
+## Amendement 2026-10-25 — plugin retenu (136a)
+
+Contrainte technique découverte à l'évaluation :
+**les flux DRM ne sont pas capturables**. Une vidéo
+protégée (Widevine L1, PlayReady matériel) sort par
+des surfaces protégées que les API de capture
+(`Windows.Graphics.Capture`) restituent en noir — un
+plugin qui rend la webview « offscreen → texture
+Flutter » afficherait du noir exactement sur le
+contenu visé. Seul un **HWND natif** composé par le
+système rend le contenu protégé.
+
+Matrice pesée :
+
+| Plugin | Licence | Rendu | DRM | Verdict |
+|---|---|---|---|---|
+| `webview_windows` 0.4.0 | BSD-3 | offscreen WGC → texture | noir (surfaces protégées) | écarté |
+| `flutter_inappwebview` 6.1.5 | Apache-2 | embed, API lourde fédérée | incertain | écarté (poids) |
+| `desktop_webview_window` | — | fenêtre top-level séparée | rendu OK | écarté (casse le chrome) |
+| **`webview_win_floating` 3.0.3** | **BSD-3** | **HWND natif overlay** | **rendu OK** | **retenu** |
+
+`webview_win_floating` pose la WebView2 en HWND
+au-dessus de la fenêtre Flutter (pas de capture) :
+le contenu protégé s'affiche, la vidéo est fluide,
+`userDataFolder`/`profileName` configurables
+(sessions séparées du profil Explorer, §5),
+délégués de navigation complets (pageStarted /
+pageFinished / urlChange / titre / historique).
+Limites assumées et documentées par l'upstream :
+aucun widget Flutter ne peut se composer **au-
+dessus** de la zone webview ni route poussée
+par-dessus — le chrome Explorer vit hors de cette
+zone, `setVisibility` couvre l'occlusion (onglet
+inactif, panneaux). Mode standalone (`WinWebView*`)
+retenu — pas de dépendance `webview_flutter`.
+Équivalent Linux proposé par le plugin
+(webkit2gtk) hors périmètre — L3 seulement
+(§Extensions multi-OS inchangé).
+
+PoC : `app/lib/poc_delegated.dart` (cible `main`
+séparée, aucun wiring) — `flutter build windows`
+vert, nuget/WebView2 SDK auto-téléchargés.

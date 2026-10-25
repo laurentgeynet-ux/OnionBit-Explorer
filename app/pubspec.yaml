@@ -38,6 +38,15 @@ dependencies:
   ffi: ^2.2.0
   video_player: ^2.14.1
   fvp: ^0.39.1
+  # Onglet délégué WebView2 pour domaines DRM (étape 136, ADR-0027) —
+  # HWND natif au-dessus de la fenêtre : le contenu protégé (Widevine
+  # L1/PlayReady) se rend, contrairement aux plugins par capture de
+  # texture. Licence BSD-3-Clause. Mode standalone Windows
+  # (`WinWebView*`) — pas de dépendance `webview_flutter`.
+  webview_win_floating: ^3.0.3
+  # Types partagés du plugin (JavaScriptMode, params de création)
+  # — non ré-exportés par webview_win_floating.
+  webview_flutter_platform_interface: ^2.13.0
 
 dev_dependencies:
   flutter_test:

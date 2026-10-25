@@ -694,24 +694,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   et ADR-0001 intacts ; aucun code
   modifié. Roadmap : Étape 136 garée.
 
-- **Étape 136 ouverte — piste agent
-  « media »** (`app/`, ADR-0027) :
-  déclencheur « usage réel » tiré
-  par décision lead — le chantier
-  de l'onglet délégué WebView2 pour
-  domaines DRM démarre. Sous-étapes
-  retranscrites dans la roadmap
-  NAVIGATEUR (136a–h) et détaillées
-  dans la roadmap personnelle
-  `docs/roadmap-media.md` : choix
-  plugin + licence, allowlist en
-  config, `BrowserTab.kind`
-  engine|delegated, surface
-  `DelegatedWebView`, resync
-  navigation, indicateur chrome,
-  repli hors-Windows. Chantier
-  `app/` pur — aucun crate, aucune
-  couture PIPELINE.
+- **136a — plugin WebView2 retenu :
+  `webview_win_floating`** (`app/`,
+  étape 136 NAV, ADR-0027) :
+  constat structurant — les flux
+  DRM ne sont **pas capturables**
+  (surfaces protégées → noir sous
+  `Windows.Graphics.Capture`) :
+  les plugins « offscreen →
+  texture » (`webview_windows`,
+  BSD-3) sont écartés d'office ;
+  `webview_win_floating` pose un
+  **HWND WebView2 natif**
+  au-dessus de la fenêtre — le
+  contenu protégé se rend.
+  Licence BSD-3 vérifiée, mode
+  standalone `WinWebView*`,
+  `userDataFolder`/`profileName`
+  configurables (sessions hors
+  profil Explorer), limites
+  upstream assumées (rien au-
+  dessus de la zone). PoC
+  `lib/poc_delegated.dart` +
+  widget `DelegatedWebView` —
+  `flutter build windows` vert.
 
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)

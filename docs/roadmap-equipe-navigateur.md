@@ -4750,8 +4750,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
 - [~] **Étape 136. Onglet délégué
   WebView2 pour domaines DRM
   (ADR-0027) — ouverte 2026-10-25,
-  piste agent « media »** :
-  bascule de
+  piste agent « media »** : bascule de
   l'onglet Flutter sur une
   WebView2 native Windows pour
   une allowlist de domaines DRM
@@ -4766,18 +4765,25 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   couture PIPE ; la seam
   `MediaSurface` (étape 71)
   reste la voie du non-DRM.
-  Détail des sous-étapes dans la
-  roadmap personnelle
-  `docs/roadmap-media.md` :
-  - [ ] 136a — choix plugin +
-    licence (spike embed PoC)
+  Sous-étapes :
+  - [x] **136a — plugin retenu :
+    `webview_win_floating`
+    (BSD-3, HWND natif)** —
+    constat : les flux DRM ne
+    sont pas capturables → les
+    plugins texture
+    (`webview_windows`) rendent
+    noir ; HWND overlay requis.
+    Amendement ADR-0027 + PoC
+    `lib/poc_delegated.dart`
+    (build windows vert).
   - [ ] 136b — allowlist DRM en
     config (§4.13), matcher host
     + sous-domaines
-  - [ ] 136c — point de décision :
-    `BrowserTab.kind` = engine |
-    delegated, interception
-    navigate avant REST et FFI
+  - [ ] 136c — `BrowserTab.kind`
+    = engine|delegated,
+    interception navigate avant
+    REST et FFI
   - [ ] 136d — surface
     `DelegatedWebView` +
     user-data-folder dédié
