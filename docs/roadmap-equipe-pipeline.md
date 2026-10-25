@@ -2732,9 +2732,61 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
 | `FontProvider`/`FontSource` port | impl `fontdb` en infra core | ✅ (ADR-0009) |
 | `build_box_tree_*`/`build_display_list_*` | `explorer-core` | ✅ — variants sized/imaged |
 | hit-test / path `(tag,index)` | `explorer-core` dispatch events | ✅ |
-| `DisplayItem` + dirty rects | transport FFI (NAV-55) | R-7 à faire |
-| op-list canvas → `DisplayItem::Image` | `explorer-jscore` canvas (JS-C28) | R-11 à faire ↔ NAV |
+| `DisplayItem` + dirty rects | transport FFI (NAV-55) | ✅ — livré R-7 (`changed_rects`), raffiné R-37/R-61/R-76 |
+| op-list canvas → `DisplayItem::Image` | `explorer-jscore` canvas (JS-C28) | ✅ — livré R-11, consommé (`CanvasTable`) |
 
 Règle : les API publiques des crates PIPELINE sont le contrat —
 extensions additives de préférence ; toute casse de signature
 existante = entrée dans `docs/interface-equipes.md` avant code.
+
+## File résiduelle (vérifiée 2026-10-25)
+
+Toutes les étapes R-1 → R-97 sont livrées. La file se nourrit
+désormais des demandes journal et du triage terrain — état
+vérifié au code de chaque reliquat (audit consigné dans
+`interface-equipes.md`, même date) :
+
+**Demandes ouvertes :**
+
+- **`:valid` / `:invalid` / `:user-invalid`** — seule extension
+  « proposée » non soldée. Parsés (`DynamicPseudo`) mais jamais
+  évalués : la session appelle `compute_tree` avec `state =
+  |_| false` et aucun modèle de validité §4.10.21.2 n'existe
+  (`required`, `type=email|url`, `pattern`, `min|max`,
+  `minlength|maxlength`, `step`). `:user-invalid` n'est pas
+  parsé. Livrable PIPE : évaluation de la contrainte de
+  validité d'un élément (`Dom` + règles spec) exposée pour le
+  callback `state` — le filage session est la couture NAV.
+- **`searchInput` Wikipedia — boîte vs surface peinte** :
+  dispatché 2026-10-22, pas de fix dédié. R-90 (rects des
+  inlines nichés + atomes `inline-flex`/`-grid`/`-table`) a
+  traité la famille du motif `.cdx-text-input` — **à
+  re-mesurer au prochain shot terrain avant de promouvoir**.
+- **Exposer `explorer_html::entities`** (`lookup_named` pub ou
+  `decode_str`) — demande résiduelle NAV (miroir jscore),
+  non bloquante ; `lookup_named` est encore `pub(crate)`,
+  jscore duplique `map_numeric`.
+- **Promouvoir `content_rect` public** (`explorer-render`) —
+  NAV le réplique en privé dans `session/composite.rs` pour
+  le composite d'iframes ; promotion additif trivial, adoption
+  NAV annoncée.
+
+**Résidus fonctionnels documentés (à promouvoir en R-xx sur
+trigger site réel) :**
+
+- `display:contents` — repli `Block` ; flatten des enfants
+  comme items flex/grid et UA sur `<slot>` non portés.
+- `radial-`/`conic-gradient` — parsés, non peints.
+- `background` shorthand multi-couches : première couche
+  seulement (borne R-94) ; `background-origin`/`-clip` émis
+  au parse, non consommés au paint. (Le multi-couches de
+  `background-image` longhand est, lui, peint — R-73.)
+- `light-dark()` — non implémenté (R-59 hors scope v1).
+- Marqueurs textuels (`decimal`, alpha, roman) — non peints,
+  la display list ne shape pas ; `list-style-position:
+  inside` peint la puce sans décaler le texte.
+- Hit-test sans filtre `visibility:hidden` — éléments cachés
+  ciblables (inertes si `pointer-events:none`).
+- Shadow DOM : `::part`/`exportparts` imbriqués, `!important`
+  inversé à la frontière, aplatissement de slots nichés —
+  bornes R-96/R-97.
