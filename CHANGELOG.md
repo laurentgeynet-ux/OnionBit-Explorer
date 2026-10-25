@@ -9,6 +9,60 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **Étape 137a — ciblage
+  `relayout_subtree` par les ops du
+  journal** (`explorer-core`) : fin du
+  reflow complet post-rejeu — les
+  cibles réelles des ops
+  (`key_node` → `NodeId`) sont
+  collectées au rejeu ; `journal_cover`
+  calcule leur ancêtre commun le plus
+  profond ; `try_incr_payload` pose
+  `relayout_subtree` dessus
+  (`old_dom_opt` = DOM détaché du
+  journal in-place, même DOM
+  ancien/nouveau) — repli
+  `relayout_dom_payload` si la voie
+  ciblée refuse. `out.incremental`
+  mesuré. 7/7 tests journal.
+
+- **Étape 138 — piles élargies +
+  capture de crash** (`explorer-daemon`)
+  : `#[tokio::main]` →
+  `tokio::runtime::Builder::new_multi_thread()
+  .thread_stack_size(32 Mio)` — workers
+  **et** pool `spawn_blocking` (le thread
+  moteur jscore portait déjà 32 Mio,
+  JS-C41 ; les threads tokio restaient
+  au défaut — le seul écart de pile
+  restant pour un overflow sur la surface
+  non-`stacker` : drops récursifs,
+  sérialisation miroir, sélecteurs).
+  Fix candidat + diagnostic de la mort
+  silencieuse x.com. **WER LocalDumps**
+  armé sous `HKCU` (`DumpFolder=C:\
+  CrashDumps`, `DumpType=2`) — tout crash
+  futur laisse un `.dmp`, SEH in-code
+  écarté. Vol d'assaut : ~36 inputs +
+  15 min soutenus sur le profil fatal,
+  vivant.
+
+- **Sonde `POST /api/tabs/{id}/eval`**
+  (`explorer-core`/`explorer-api`) :
+  évaluation JS à la demande dans le
+  contexte top-level de l'onglet — même
+  contrat de détachement que la pompe
+  (`take_js_engine` → `spawn_blocking`
+  → `commit_js_pump`, drain borné +
+  miroir synchronisé, applies drainés).
+  Réponse `{ ok, value|error, jobs }`,
+  `409` pompe en vol. Outil
+  d'attribution live (bissection
+  hydratation github : les `define()`
+  `type=module` n'ont jamais tourné —
+  mur nommé). Test
+  `eval_shared_evalue_drain_et_tolere`.
+
 - **Étape 137b — op de couture
   `DomMutation::AttachShadow`**
   (`explorer-jscore`/`explorer-js`/

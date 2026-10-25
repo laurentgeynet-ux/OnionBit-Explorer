@@ -596,10 +596,15 @@ pub(crate) fn apply_payload(
     // remplacement — il a besoin de l'ancien DOM et de
     // l'ancien arbre, tous deux dans la payload.
     let incremental = job.relayout
-        && job
-            .dirty
-            .as_deref()
-            .is_some_and(|path| try_incr_payload(p, ctx, &new_dom, path, &job.canvas_ops));
+        && job.dirty.as_deref().is_some_and(|path| {
+            let (Some(t_old), Some(t_new)) = (
+                p.dom.as_ref().and_then(|d| dom_path_node(d, path)),
+                dom_path_node(&new_dom, path),
+            ) else {
+                return false;
+            };
+            try_incr_payload(p, ctx, None, &new_dom, t_old, t_new, &job.canvas_ops)
+        });
     out.incremental = incremental;
     // Les op-lists `<canvas>` survivent au re-parse : le
     // miroir les conserve (bitmap cumulative) — la table est
@@ -927,13 +932,13 @@ fn journal_attach_shadow(
     host: u64,
     root: u64,
     open: bool,
-) -> Result<(), JournalReject> {
+) -> Result<explorer_dom::NodeId, JournalReject> {
     let h = key_node(p, host)?;
     let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
     let r = dom.create_fragment().map_err(|_| JournalReject::Dom)?;
     dom.attach_shadow_root(h, r, open);
     p.keymap.insert(root, r);
-    Ok(())
+    Ok(h)
 }
 
 /// Applique un journal de mutations **en place** sur le DOM
@@ -959,6 +964,9 @@ fn apply_journal(
     if p.keymap.is_empty() && !journal.ops.is_empty() {
         return Err(JournalReject::NoBaseline);
     }
+    // Étape 137a — cibles réelles des ops pour le relayout
+    // incrémental ciblé (le journal remplace `job.dirty`).
+    let mut touched = Vec::new();
     for op in &journal.ops {
         match op {
             explorer_js::DomMutation::Remove { key } => {
@@ -975,6 +983,7 @@ fn apply_journal(
                         stack.extend(dom.children(f).unwrap_or_default());
                     }
                 }
+                touched.push(dom.parent(id).ok().flatten().unwrap_or(id));
                 dom.remove(id).map_err(|_| JournalReject::Dom)?;
                 p.keymap.retain(|_, v| !gone.contains(v));
             }
@@ -986,10 +995,12 @@ fn apply_journal(
                     None => dom.remove_attribute(id, name).map(|_| ()),
                 }
                 .map_err(|_| JournalReject::Dom)?;
+                touched.push(id);
             }
             explorer_js::DomMutation::SetText { key, text } => {
                 let id = key_node(p, *key)?;
                 let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
+                touched.push(dom.parent(id).ok().flatten().unwrap_or(id));
                 dom.set_text(id, text).map_err(|_| JournalReject::Dom)?;
             }
             // Étape 137b — `attachShadow` programmatique : le
@@ -999,7 +1010,7 @@ fn apply_journal(
             // l'ombre résolvent (API `Dom::attach_shadow_root`
             // PIPE livrée R-96 — consommation pure).
             explorer_js::DomMutation::AttachShadow { host, root, open } => {
-                journal_attach_shadow(p, *host, *root, *open)?;
+                touched.push(journal_attach_shadow(p, *host, *root, *open)?);
             }
             explorer_js::DomMutation::Insert {
                 parent,
@@ -1042,6 +1053,7 @@ fn apply_journal(
                 for (e, m) in created_all.into_iter().zip(ids.iter().copied()) {
                     p.keymap.insert(m, e);
                 }
+                touched.push(par);
             }
         }
     }
@@ -1061,16 +1073,66 @@ fn apply_journal(
         out.title = Some(new_title);
     }
     if job.relayout {
-        let dom = p.dom.take().ok_or(JournalReject::NoDom)?;
-        if relayout_dom_payload(p, ctx, &dom, &job.canvas_ops).is_err() {
-            p.dom = Some(dom);
-            return Err(JournalReject::Dom);
-        }
-        p.dom = Some(dom);
-        out.repainted = true;
+        journal_relayout(p, ctx, job, &touched, &mut out)?;
     }
     out.cost = t0.elapsed();
     Ok(out)
+}
+
+/// Relayout post-rejeu journal (137a) : incrémental ciblé
+/// sur l'ancêtre commun des ops — `relayout_subtree` au
+/// lieu du reflow complet, repli `relayout_dom_payload` si
+/// la voie ciblée refuse.
+fn journal_relayout(
+    p: &mut PaintPayload,
+    ctx: &ApplyCtx,
+    job: &PendingApply,
+    touched: &[explorer_dom::NodeId],
+    out: &mut ApplyOutcome,
+) -> Result<(), JournalReject> {
+    let dom = p.dom.take().ok_or(JournalReject::NoDom)?;
+    let incremental = journal_cover(&dom, touched)
+        .is_some_and(|t| try_incr_payload(p, ctx, Some(&dom), &dom, t, t, &job.canvas_ops));
+    if !incremental && relayout_dom_payload(p, ctx, &dom, &job.canvas_ops).is_err() {
+        p.dom = Some(dom);
+        return Err(JournalReject::Dom);
+    }
+    out.incremental = incremental;
+    p.dom = Some(dom);
+    out.repainted = true;
+    Ok(())
+}
+
+/// Ancêtre commun le plus profond des cibles d'ops journal
+/// (137a — la zone à re-poser). `None` = vide (pas de cible
+/// → le repli `relayout_dom_payload` tourne comme avant).
+fn journal_cover(dom: &Dom, touched: &[explorer_dom::NodeId]) -> Option<explorer_dom::NodeId> {
+    let mut seen = std::collections::HashSet::new();
+    let mut it = touched.iter().copied().filter(|n| seen.insert(*n));
+    let first = it.next()?;
+    let mut chain = Vec::new();
+    let mut cur = first;
+    loop {
+        chain.push(cur);
+        match dom.parent(cur).ok().flatten() {
+            Some(par) => cur = par,
+            None => break,
+        }
+    }
+    // `chain` = nœud → racine ; `allowed` = le plus petit
+    // indice atteint — l'ancêtre le plus profond commun.
+    let mut allowed = chain.len();
+    for n in it {
+        let mut cur = n;
+        loop {
+            if let Some(pos) = chain.iter().position(|&c| c == cur) {
+                allowed = allowed.min(pos);
+                break;
+            }
+            cur = dom.parent(cur).ok().flatten()?;
+        }
+    }
+    chain.get(allowed).copied()
 }
 
 /// `try_sync_incremental` sur payload — mêmes gardes que
@@ -1079,25 +1141,22 @@ fn apply_journal(
 fn try_incr_payload(
     p: &mut PaintPayload,
     ctx: &ApplyCtx,
+    old_dom_opt: Option<&Dom>,
     new_dom: &Dom,
-    path: &[(String, u32)],
+    target_old: explorer_dom::NodeId,
+    target_new: explorer_dom::NodeId,
     canvas_ops: &CanvasOpsTable,
 ) -> bool {
-    // Phase 1 — résolution de la cible sous emprunts
-    // immuables (DOM + arbre présents, cible dans les deux
-    // DOM, racine posable).
-    let target_old = {
-        let (Some(old_dom), true) = (p.dom.as_ref(), p.tree.is_some()) else {
-            return false;
-        };
-        let Some(t) = dom_path_node(old_dom, path) else {
-            return false;
-        };
-        t
-    };
-    let Some(target_new) = dom_path_node(new_dom, path) else {
+    // Phase 1 — cible résolue par l'appelant (chemin DOM ou
+    // `NodeId` d'op journal — 137a : les ops rejouées portent
+    // déjà leur cible réelle). `old_dom_opt` = DOM détaché du
+    // journal in-place (même DOM ancien/nouveau) ; `None` =
+    // chemin re-parse (l'ancien vit dans `p.dom`). L'emprunt
+    // de `p.dom` n'est pris qu'en Phase 2 — disjoint de
+    // `p.tree`, jamais à travers un `&mut p`.
+    if (p.dom.is_none() && old_dom_opt.is_none()) || p.tree.is_none() {
         return false;
-    };
+    }
     let Some(root_el) = new_dom.document_element() else {
         return false;
     };
@@ -1156,21 +1215,28 @@ fn try_incr_payload(
     // succès comme repli : les entrées déjà chaudes restent
     // utiles à la passe suivante.
     let doc_h = {
-        let (Some(old_dom), Some(tree)) = (p.dom.as_ref(), p.tree.as_mut()) else {
-            restitute_font_cache(p, &block);
-            return false;
+        // Emprunts disjoints : `p.dom` (immuable, pour le
+        // remap) cohabite avec `p.tree` (mutable) — jamais un
+        // `&mut p` complet tant que `old_dom` vit.
+        let res = match (old_dom_opt.or(p.dom.as_ref()), p.tree.as_mut()) {
+            (Some(old_dom), Some(tree)) => {
+                if remap_box_nodes(old_dom, new_dom, tree, target_old, target_new)
+                    && relayout_subtree(tree, new_dom, &styles, &sizes, target_new, &block)
+                        == Relayout::Done
+                {
+                    Some(tree.rect.height.max(scrollable_overflow_bottom(tree)))
+                } else {
+                    None
+                }
+            }
+            _ => None,
         };
-        if !remap_box_nodes(old_dom, new_dom, tree, target_old, target_new) {
-            restitute_font_cache(p, &block);
-            return false;
+        restitute_font_cache(p, &block);
+        match res {
+            Some(h) => h,
+            None => return false,
         }
-        if relayout_subtree(tree, new_dom, &styles, &sizes, target_new, &block) != Relayout::Done {
-            restitute_font_cache(p, &block);
-            return false;
-        }
-        tree.rect.height.max(scrollable_overflow_bottom(tree))
     };
-    restitute_font_cache(p, &block);
     p.doc_h = doc_h;
     p.images.svgs = svgs;
     p.images.canvases = canvas_table_from_ops(canvas_ops, new_dom);

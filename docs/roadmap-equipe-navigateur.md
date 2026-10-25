@@ -4785,7 +4785,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   § Ouverture de l'ADR) : le journal
   est le chemin nominal depuis
   l'étape 111 ; ce qui reste :
-  - [ ] **137a — ciblage relayout par
+  - [x] **137a — ciblage relayout par
     les ops** : `apply_journal` paie
     encore `relayout_dom_payload`
     complet alors que les ops portent
