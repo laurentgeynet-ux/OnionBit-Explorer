@@ -316,7 +316,10 @@ impl Engine {
                         let ns = self.module_ns_object(idx);
                         self.resolve_promise(p.promise, ns);
                     }
-                    Err(Thrown(t)) => self.reject_promise(p.promise, t),
+                    Err(Thrown(t)) => {
+                        tracing::debug!(spec = %p.spec, error = ?t, "import() chunk en échec");
+                        self.reject_promise(p.promise, t)
+                    }
                 }
             }
             Err(msg) => {
