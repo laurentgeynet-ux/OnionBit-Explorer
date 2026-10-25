@@ -4973,3 +4973,67 @@ fn cap182_editing_arc() {
         "1|true|0|1|function"
     );
 }
+
+// ===== CAP-183 — surfaces honnêtes : `createNodeIterator`,
+// `SharedWorker` gate, `CSSStyleSheet` constructible borné,
+// ctors illegal-ctor spec (`TreeWalker`/`MutationRecord`/
+// `IdleDeadline`/`NodeIterator` → TypeError, pas ReferenceError).
+
+#[test]
+fn cap183_honest_surfaces() {
+    let mut e = engine_with(
+        "<!doctype html><html><body><div id=x><p id=a>hello</p><p id=b>world</p></div></body></html>",
+    );
+    e.eval(
+        "var x=document.getElementById('x'),a=document.getElementById('a'),\
+            b=document.getElementById('b'),d=document;",
+    )
+    .expect("setup");
+    // NodeIterator — document-order : premier nextNode = root
+    // si accepté ; previousNode recule ; detach no-op.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var ni=d.createNodeIterator(document.body, NodeFilter.SHOW_ELEMENT);\
+            [ni.nextNode().tagName, ni.nextNode().id, ni.nextNode().id,\
+             ni.nextNode()===null, ni.previousNode().id].join('|')"
+        ),
+        "BODY|x|a|false|a"
+    );
+    // Illegal-ctor spec : interfaces définies → TypeError au
+    // new (fidelity — pas ReferenceError).
+    assert_eq!(
+        evf(
+            &mut e,
+            "var s='';try{new TreeWalker()}catch(v){s+='T'}try{new NodeIterator()}catch(v){s+='N'}\
+            try{new MutationRecord()}catch(v){s+='M'}try{new IdleDeadline()}catch(v){s+='I'}\
+            [s, typeof TreeWalker, typeof NodeIterator].join('|')"
+        ),
+        "TNMI|function|function"
+    );
+    // `new CSSStyleSheet()` — constructible borné : surface
+    // `{cssRules, insertRule, deleteRule, replace, replaceSync}`
+    // (règles stockées, cascade = chantier session).
+    assert_eq!(
+        evf(
+            &mut e,
+            "var sh=new CSSStyleSheet();\
+            var i=sh.insertRule('div{color:red}');sh.insertRule('p{}');sh.deleteRule(1);\
+            sh.replaceSync('a{}');\
+            [typeof sh.insertRule, i, sh.cssRules.length, sh.type, sh.disabled,\
+             sh.toString(), typeof sh.replace].join('|')"
+        ),
+        "function|0|0|text/css|false|[object CSSStyleSheet]|function"
+    );
+    // `new SharedWorker` — ctor défini → TypeError gate
+    // honnête sans loader (comme `Worker`) ; avec factory →
+    // `{port}` (testé côté harness worker).
+    assert_eq!(
+        evf(
+            &mut e,
+            "var t='';try{new SharedWorker('w.js')}catch(v){t=v.name}\
+            [t, typeof SharedWorker].join('|')"
+        ),
+        "TypeError|function"
+    );
+}

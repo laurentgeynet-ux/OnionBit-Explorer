@@ -212,7 +212,7 @@ impl Engine {
     /// un `TypeError` honnête — `typeof Worker` reste `"function"`
     /// pour la détection de feature.
     pub(crate) fn install_worker_ctor(&mut self) {
-        let v = self.native_fn("Worker", worker_ctor);
+        let v = self.native_fn("Worker", worker_ctor_pub);
         let g = self.global;
         self.set_own(g, "Worker", v, false);
     }
@@ -492,7 +492,7 @@ impl Engine {
 /// `new Worker(spec)` — fetch synchrone de la source via la
 /// fabrique (même approximation que le `ModuleLoader`), spawn
 /// d'un `Engine` dédié sur son thread, pool borné.
-fn worker_ctor(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn worker_ctor_pub(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
     let spec = e.to_js_string(arg(args, 0))?;
     if spec.is_empty() {
         return Err(e.type_error("Worker: empty script URL"));
