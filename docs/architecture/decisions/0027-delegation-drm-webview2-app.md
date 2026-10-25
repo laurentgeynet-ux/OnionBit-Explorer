@@ -1,7 +1,8 @@
 # ADR-0027 — Sites DRM : délégation à une WebView2 au niveau `app/`
 
-Statut : Proposée — stratégie actée, implémentation
-**garée par déclencheur** (même méthode qu'ADR-0026).
+Statut : **Acceptée — livrée (étape 136a–h,
+2026-10-25)** — stratégie actée, implémentée `app/`
+(plugin nommé § Amendement).
 Complète ADR-0024 (lecture média : responsabilité
 d'hôte) qui nommait le DRM « hors portée
 structurellement » : celle-ci fixe *quoi faire quand

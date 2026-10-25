@@ -816,6 +816,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   son propre échec DRM, jamais de
   faux succès. 1 test.
 
+- **136h — étape 136 livrée, ADR-0027
+  « Acceptée »** (`app/`, étape 136
+  NAV) : la chaîne complète tient —
+  allowlist config → `TabKind` →
+  `DelegatedWebView` persistante →
+  resync navigation → badge chrome
+  → repli honnête. Gate :
+  `flutter analyze` propre,
+  `flutter test` suite complète
+  51/51, `flutter build windows`
+  vert. Vérité terrain restante :
+  la lecture DRM réelle (compte
+  Netflix/myCANAL…) se mesure en
+  vol d'acceptation — le chemin
+  logiciel est câblé de bout en
+  bout.
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des

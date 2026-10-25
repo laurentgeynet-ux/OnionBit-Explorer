@@ -4747,9 +4747,9 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   avec les métadonnées de
   document). 8 tests session.
 
-- [~] **Étape 136. Onglet délégué
+- [x] **Étape 136. Onglet délégué
   WebView2 pour domaines DRM
-  (ADR-0027) — ouverte 2026-10-25,
+  (ADR-0027) — livrée 2026-10-25,
   piste agent « media »** : bascule de
   l'onglet Flutter sur une
   WebView2 native Windows pour
@@ -4824,9 +4824,13 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     matchée sans WebView2 →
     moteur normal, échec DRM du
     site. 1 test.
-  - [ ] 136h — tests allowlist +
-    modèle onglet, gate Flutter,
-    doc.
+  - [x] **136h — gate + doc** :
+    10 tests (allowlist 6,
+    contrôleur 4) ; `flutter
+    analyze` + `flutter test`
+    suite complète verte (51) +
+    `flutter build windows` vert ;
+    ADR-0027 « Acceptée — livrée ».
   Hors périmètre de l'étape :
   MSE/EME moteur — murs nommés
   ADR-0024/0027.
