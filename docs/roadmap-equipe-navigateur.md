@@ -4747,10 +4747,11 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   avec les métadonnées de
   document). 8 tests session.
 
-- [ ] **Étape 136. Onglet délégué
+- [~] **Étape 136. Onglet délégué
   WebView2 pour domaines DRM
-  (ADR-0027) — garée, déclencheur
-  usage réel** : bascule de
+  (ADR-0027) — ouverte 2026-10-25,
+  piste agent « media »** :
+  bascule de
   l'onglet Flutter sur une
   WebView2 native Windows pour
   une allowlist de domaines DRM
@@ -4765,16 +4766,32 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   couture PIPE ; la seam
   `MediaSurface` (étape 71)
   reste la voie du non-DRM.
-  Contenu à l'ouverture :
-  allowlist en config (§4.13),
-  modèle d'onglet délégué sur
-  `BrowserTab`, resync des
-  events de navigation WebView2
-  (titre/URL/historique),
-  indicateur chrome de
-  délégation, repli honnête
-  hors-Windows (site non lu),
-  licence du plugin vérifiée.
+  Détail des sous-étapes dans la
+  roadmap personnelle
+  `docs/roadmap-media.md` :
+  - [ ] 136a — choix plugin +
+    licence (spike embed PoC)
+  - [ ] 136b — allowlist DRM en
+    config (§4.13), matcher host
+    + sous-domaines
+  - [ ] 136c — point de décision :
+    `BrowserTab.kind` = engine |
+    delegated, interception
+    navigate avant REST et FFI
+  - [ ] 136d — surface
+    `DelegatedWebView` +
+    user-data-folder dédié
+  - [ ] 136e — resync events
+    navigation (URL/titre/
+    historique) + routage
+    back/forward/reload
+  - [ ] 136f — indicateur chrome
+    de délégation
+  - [ ] 136g — repli honnête
+    hors-Windows (site non lu)
+  - [ ] 136h — tests allowlist +
+    modèle onglet, gate Flutter,
+    doc.
   Hors périmètre de l'étape :
   MSE/EME moteur — murs nommés
   ADR-0024/0027.
